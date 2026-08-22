@@ -37,10 +37,19 @@ import org.slf4j.LoggerFactory;
  * token mint — so the connector reports it as a re-consent item rather than retrying. Nothing here
  * attempts to widen a grant.
  *
- * <p><b>Wire shape is {@code NEEDS_VERIFICATION}.</b> Field names follow NAVER's published
- * channel-product resource and have not been observed live from this repository. Every field is
- * nullable; an absent one becomes {@code UNAVAILABLE} coverage, never a fabricated value. This resource
- * carries no buyer field and none is projected.
+ * <p><b>Wire shape is live-observed (2026-08-22, demo org, 69 listings over 2 pages).</b> Present on
+ * every listing: channel product number, name, {@code salePrice}, {@code statusType},
+ * {@code wholeCategoryName}, {@code modifiedDate}; on about two thirds: {@code brandName},
+ * {@code manufacturerName}. <b>Absent from every listing this endpoint returned:</b>
+ * {@code storeKeepingUrl}, {@code optionCombinations}, {@code detailContent} and
+ * {@code sellerManagementCode} — mapped here, and simply not sent by the LIST resource, so a
+ * per-product read is what would carry them. Every field is nullable; an absent one becomes
+ * {@code UNAVAILABLE} coverage, never a fabricated value. This resource carries no buyer field and
+ * none is projected.
+ *
+ * <p><b>No changed-since contract.</b> The request body is a page and a size. NAVER's search resource
+ * publishes period filters this connector does not send and has never observed, so recurrence is a
+ * full catalogue re-read per cycle rather than an incremental claim — see {@link #FIRST_PAGE}.
  */
 public class NaverProductsClient {
 
@@ -53,6 +62,26 @@ public class NaverProductsClient {
 
     /** One page. NAVER's product search pages by index; the caller advances the page number. */
     public static final int PAGE_SIZE = 50;
+
+    /**
+     * NAVER's product search pages from 1 — and the page a finished sweep hands back, which is the
+     * whole recurrence contract of this data type.
+     *
+     * <p>The runtime persists {@code nextCursorValue} verbatim, so returning {@code page + 1} at the
+     * END of a sweep would park the cursor one past the catalogue and every later cycle would ask for
+     * an empty page and see nothing again: a scheduled PRODUCT sync that can never observe a price
+     * change, a rename, or a suspension on a product it has already read once. Measured before this
+     * existed — NAVER's stored cursor was {@code 3} against a 2-page catalogue and Cafe24's was
+     * {@code 144} against 144 listings, both permanently blind.
+     *
+     * <p>So the sweep restarts. {@code /products/search} takes only a page and a size — no
+     * changed-since parameter is used here, and inventing one from an unverified filter would be a
+     * capability claim this repository has not observed — and 69 listings over 2 pages is small
+     * enough that re-reading the whole catalogue every cycle is both cheap and the honest contract.
+     * {@code ProductKnowledgeWriter} resolves each listing by {@code (channel, external id)} and
+     * upserts, so a re-read is idempotent: it refreshes what changed and touches nothing else.
+     */
+    static final String FIRST_PAGE = "1";
 
     private final NaverHttpClient http;
     private final Clock clock;
@@ -110,9 +139,12 @@ public class NaverProductsClient {
             }
         }
         boolean hasMore = contents.size() >= PAGE_SIZE;
+        // Mid-sweep: the next page, so a rate-limited or failed run resumes instead of restarting.
+        // End of sweep: back to page 1, so the NEXT cycle re-observes the catalogue (see FIRST_PAGE).
+        String nextCursor = hasMore ? Integer.toString(page + 1) : FIRST_PAGE;
         log.info("네이버 상품 수집: origins={} listings={} page={} hasMore={}",
                 contents.size(), records.size(), page, hasMore);
-        return FetchPage.of(DataType.PRODUCT, records, Integer.toString(page + 1), hasMore,
+        return FetchPage.of(DataType.PRODUCT, records, nextCursor, hasMore,
                 NaverApiConnector.KIND);
     }
 
@@ -212,12 +244,12 @@ public class NaverProductsClient {
 
     private static int parsePage(String cursorValue) {
         if (cursorValue == null || cursorValue.isBlank()) {
-            return 1; // NAVER's product search pages from 1.
+            return Integer.parseInt(FIRST_PAGE);
         }
         try {
-            return Math.max(Integer.parseInt(cursorValue.strip()), 1);
+            return Math.max(Integer.parseInt(cursorValue.strip()), Integer.parseInt(FIRST_PAGE));
         } catch (NumberFormatException e) {
-            return 1;
+            return Integer.parseInt(FIRST_PAGE);
         }
     }
 

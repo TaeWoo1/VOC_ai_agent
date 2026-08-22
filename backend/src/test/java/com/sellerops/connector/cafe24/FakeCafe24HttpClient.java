@@ -76,6 +76,19 @@ final class FakeCafe24HttpClient implements Cafe24HttpClient {
                 + "\"payment_amount\":\"" + paymentAmount + "\"}";
     }
 
+    /** A 200 products page: {@code {"products":[ ...product objects... ]}}. */
+    static Response productsOk(String... productObjects) {
+        return new Response(200, "{\"products\":[" + String.join(",", productObjects) + "]}", Map.of());
+    }
+
+    /** One product object literal with the identity + price fields the mapper reads. */
+    static String product(long productNo, String name, String price) {
+        return "{\"product_no\":" + productNo + ",\"product_code\":\"P" + productNo + "\","
+                + "\"product_name\":\"" + name + "\",\"price\":\"" + price + "\","
+                + "\"selling\":\"T\",\"display\":\"T\","
+                + "\"updated_date\":\"2026-06-20T09:00:00+09:00\"}";
+    }
+
     /** A 200 boards page: {@code {"boards":[ ...board objects... ]}}. */
     static Response boardsOk(String... boardObjects) {
         return new Response(200, "{\"boards\":[" + String.join(",", boardObjects) + "]}", Map.of());

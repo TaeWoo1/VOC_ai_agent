@@ -74,6 +74,14 @@ class Cafe24ApiConnectorTest {
                 new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), CLOCK);
     }
 
+    /** The same connector with the product client a mall that granted {@code mall.read_product} has. */
+    private Cafe24ApiConnector connectorWithProducts() {
+        return new Cafe24ApiConnector(
+                new Cafe24Authorizer(new Cafe24TokenClient(http), vault, APP_CLIENT_ID, APP_CLIENT_SECRET),
+                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http),
+                new Cafe24ProductsClient(http), CLOCK);
+    }
+
     private CredentialVault vaultWithKey(String masterKeyBase64) {
         return new CredentialVault(credentials, new ObjectMapper(), masterKeyBase64, "local-test-1");
     }
@@ -781,5 +789,51 @@ class Cafe24ApiConnectorTest {
     @SuppressWarnings("unchecked")
     private static List<CanonicalInquiry> inquiries(FetchPage page) {
         return (List<CanonicalInquiry>) page.records();
+    }
+
+    // --- PRODUCT recurrence ---
+
+    /**
+     * The catalogue sweep must END pointing at the START of the catalogue.
+     *
+     * <p>The runtime persists {@code nextCursorValue} verbatim, so an offset left at the end of the
+     * catalogue is where a scheduled PRODUCT sync goes to die: every later cycle asks for an empty page
+     * and no price change, rename or suspension on a listing already read is ever observed again.
+     * Measured on the demo org before this — the stored Cafe24 PRODUCT cursor was {@code 144} against
+     * 144 listings. Re-reading is idempotent ({@code ProductKnowledgeWriter} resolves by (channel,
+     * external id) and upserts), so restarting is the whole recurrence contract.
+     */
+    @Test
+    void aFinishedCatalogueSweepResetsTheOffsetSoTheNextCycleReObservesIt() {
+        storeCafe24Credential();
+        Cafe24ApiConnector productConnector = connectorWithProducts();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("at-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.productsOk(
+                FakeCafe24HttpClient.product(101, "전선몰딩 1호", "12900.00")));
+
+        FetchPage page = productConnector.fetch(request(DataType.PRODUCT, "40"));
+
+        assertThat(page.hasMore()).isFalse();
+        assertThat(page.nextCursorValue())
+                .as("a short page ends the sweep at the catalogue's start, never past its end")
+                .isEqualTo("0");
+    }
+
+    /** Mid-sweep the offset still advances, so a rate-limited run resumes instead of starting over. */
+    @Test
+    void aFullCataloguePageStillAdvancesTheOffset() {
+        storeCafe24Credential();
+        Cafe24ApiConnector productConnector = connectorWithProducts();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("at-1", "old-refresh-token"));
+        String[] rows = new String[Cafe24ProductsClient.PAGE_LIMIT];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = FakeCafe24HttpClient.product(200 + i, "상품 " + i, "1000.00");
+        }
+        http.enqueue(FakeCafe24HttpClient.productsOk(rows));
+
+        FetchPage page = productConnector.fetch(request(DataType.PRODUCT, "0"));
+
+        assertThat(page.hasMore()).isTrue();
+        assertThat(page.nextCursorValue()).isEqualTo(Integer.toString(Cafe24ProductsClient.PAGE_LIMIT));
     }
 }

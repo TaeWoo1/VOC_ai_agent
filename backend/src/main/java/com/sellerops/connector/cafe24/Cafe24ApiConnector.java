@@ -285,7 +285,13 @@ public class Cafe24ApiConnector implements PullConnector {
      *
      * <p>The cursor is the plain next offset — the catalogue has no window and no natural key order to
      * resume from, so an integer is the honest cursor rather than an opaque wrapper implying more state
-     * than exists. A short page ends the sweep.
+     * than exists. A short page ends the sweep, <b>and resets the offset to 0</b>: the runtime persists
+     * this value, so leaving it at the end of the catalogue would make every later cycle ask for an
+     * empty page and never re-observe a price, a rename or a suspension on a listing it already read.
+     * Measured before this: the demo org's stored Cafe24 PRODUCT cursor was {@code 144} against 144
+     * listings, permanently blind. Re-reading is idempotent — {@code ProductKnowledgeWriter} resolves by
+     * (channel, external id) and upserts — so the sweep restarting is the whole recurrence contract.
+     * Mid-sweep the offset still advances, so a rate-limited run resumes rather than starting over.
      *
      * <p>An {@code insufficient_scope} failure is NOT swallowed: the mall has not granted product access
      * and the seller has to re-consent, which is a decision to surface rather than a condition to retry.
@@ -306,7 +312,7 @@ public class Cafe24ApiConnector implements PullConnector {
                 }
             }
             boolean hasMore = rows.size() >= Cafe24ProductsClient.PAGE_LIMIT;
-            int next = offset + rows.size();
+            int next = hasMore ? offset + rows.size() : 0;
             log.info("카페24 상품 수집: fetched={} mapped={} offset={} hasMore={}",
                     rows.size(), records.size(), offset, hasMore);
             return FetchPage.of(DataType.PRODUCT, records, Integer.toString(next), hasMore, KIND);

@@ -24,6 +24,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The officially recommended two-call order collection flow (commerce-api FAQ #9,
@@ -96,6 +98,20 @@ public class NaverOrdersClient {
     /** Hard cap on the sanitized diagnostic appended to an HTTP-error message. */
     private static final int MAX_ERROR_DETAIL = 200;
 
+    /**
+     * How far behind "now" the ROUTINE lane may be before it is restarted instead of resumed.
+     *
+     * <p>Fourteen days is the recency span this repository already means by "recent operational
+     * acquisition" — the Cafe24 order lookback, the Cafe24 routine board window, and the operator's own
+     * current-window order proof all use it. Below it, a lag is an outage the routine lane should walk
+     * off contiguously (that IS freshness recovery, and the contiguous walk is what re-observes a status
+     * change on an older order). Above it, the lag is a historical backlog, and paying for it with the
+     * freshness of every run is the defect this constant exists to stop.
+     */
+    static final Duration ROUTINE_MAX_LAG = Duration.ofDays(14);
+
+    private static final Logger log = LoggerFactory.getLogger(NaverOrdersClient.class);
+
     private final NaverHttpClient http;
     private final Clock clock;
     private final String baseUrl;
@@ -118,6 +134,7 @@ public class NaverOrdersClient {
     public FetchPage fetchOrderSummaryPage(String accessToken, String cursorValue) {
         Instant now = clock.instant();
         NaverOrdersCursor cursor = parseCursor(cursorValue, now);
+        cursor = withRoutineFreshnessFloor(cursor, now);
         if (cursor.isCaughtUp(now)) {
             // Caught up to "now": nothing to query until time passes.
             return FetchPage.of(DataType.ORDER_SUMMARY, List.of(), serialize(cursor), false,
@@ -491,6 +508,26 @@ public class NaverOrdersClient {
                     row++));
         }
         return out;
+    }
+
+    /**
+     * Keep the routine lane on recent time: resume it when it is merely behind, restart it when it is
+     * carrying a historical backlog.
+     *
+     * <p>A backfill cursor is returned untouched — its window is an operator's approved scope, and
+     * "behind now" is what it is FOR. See {@link NaverOrdersCursor#routineRestart} for why a routine
+     * cursor is ever discarded; the skipped span is not silently dropped, it is named here so an
+     * operator can decide whether to recover it with a bounded backfill.
+     */
+    private NaverOrdersCursor withRoutineFreshnessFloor(NaverOrdersCursor cursor, Instant now) {
+        if (!cursor.routineLagExceeds(now, ROUTINE_MAX_LAG)) {
+            return cursor;
+        }
+        long lagDays = Duration.between(cursor.windowFromInstant(), now).toDays();
+        log.warn("네이버 주문 routine 커서가 {}일 뒤처져 최근 {}일 구간에서 재시작합니다."
+                        + " 그 이전 구간은 자동 복구하지 않으며 별도 backfill 대상입니다.",
+                lagDays, ROUTINE_MAX_LAG.toDays());
+        return NaverOrdersCursor.routineRestart(now, KST, ROUTINE_MAX_LAG);
     }
 
     // --- plumbing ---

@@ -181,6 +181,116 @@ class NaverOrdersClientTest {
         assertThat(only.orderCount()).isEqualTo(1);
     }
 
+    // --- routine lane freshness (the schedule's contract) ---
+
+    /**
+     * The defect a NAVER ORDER schedule would have shipped with.
+     *
+     * <p>The demo org's routine cursor sat at 2026-06-14 for ten weeks while its schedule was paused.
+     * Resuming it means walking 24h at a time from there — 69 consecutive windows before the first
+     * recent order is seen, and a daily total written for every date passed on the way. Both are the
+     * wrong lane: routine's job is what is new, and recovering ten weeks of history is an operator's
+     * bounded backfill, approved as its own run.
+     */
+    @Test
+    void aRoutineCursorTenWeeksBehindRestartsAtTheRecentHorizonInsteadOfWalkingHistory() {
+        String stale = "{\"windowFrom\":\"2026-04-01T13:00:00.000+09:00\","
+                + "\"windowTo\":\"2026-04-01T13:00:00.000+09:00\",\"moreFrom\":null,"
+                + "\"moreSequence\":null,\"dayTotals\":{\"2026-04-01\":{\"orders\":3,\"amount\":9000}}}";
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+
+        FetchPage page = client.fetchOrderSummaryPage(TOKEN, stale);
+
+        String query = http.sent.get(0).uri().getQuery();
+        // NOW is 2026-06-12 15:00 KST; the horizon is 14 days back, aligned to the KST start of day so
+        // every date this cursor emits is one it covered in full.
+        assertThat(query).contains("lastChangedFrom=2026-05-29T00:00:00.000+09:00");
+        assertThat(query).doesNotContain("2026-04");
+        // The restart is a restart, not a resume: the abandoned window's carried totals go with it.
+        assertThat(page.nextCursorValue()).doesNotContain("2026-04-01");
+        assertThat(page.hasMore()).as("it still has to walk forward to now").isTrue();
+    }
+
+    /**
+     * The other half of the same rule. A lag inside the horizon is an outage, and walking it off
+     * contiguously IS freshness recovery — it is also the only way a status change on an older order
+     * gets re-observed, so the overlap must survive.
+     */
+    @Test
+    void aRoutineCursorInsideTheRecencyHorizonIsResumedContiguouslyNotRestarted() {
+        String recent = "{\"windowFrom\":\"2026-06-10T15:00:00.000+09:00\","
+                + "\"windowTo\":\"2026-06-10T15:00:00.000+09:00\",\"moreFrom\":null,"
+                + "\"moreSequence\":null,\"dayTotals\":{}}";
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+
+        client.fetchOrderSummaryPage(TOKEN, recent);
+
+        assertThat(http.sent.get(0).uri().getQuery())
+                .contains("lastChangedFrom=2026-06-10T15:00:00.000+09:00");
+    }
+
+    /**
+     * A restarted routine cursor starts cold, so the two-day carry would have it emit totals for the
+     * days BEFORE its own start — counting only the orders that happened to change inside the window.
+     * Ingestion overwrites daily totals by (channel, date), so that lands as a complete-looking
+     * undercount over whatever was already stored.
+     */
+    @Test
+    void aRestartedRoutineCursorWritesNoDailyTotalBeforeItsOwnStartDate() {
+        String stale = "{\"windowFrom\":\"2026-04-01T13:00:00.000+09:00\","
+                + "\"windowTo\":\"2026-04-01T13:00:00.000+09:00\",\"moreFrom\":null,"
+                + "\"moreSequence\":null,\"dayTotals\":{}}";
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null,
+                lcsItem("PO-IN", "O-1", "2026-05-29T09:00:00.000+09:00"),
+                lcsItem("PO-BEFORE", "O-2", "2026-05-27T09:00:00.000+09:00"))));
+        http.enqueue(FakeNaverHttpClient.ok(detailBody(
+                detailItem("PO-IN", 12000L), detailItem("PO-BEFORE", 34000L))));
+
+        FetchPage page = client.fetchOrderSummaryPage(TOKEN, stale);
+
+        assertThat(page.records()).hasSize(1);
+        assertThat(((CanonicalOrderSummary) page.records().get(0)).summaryDate())
+                .isEqualTo(LocalDate.of(2026, 5, 29));
+    }
+
+    /**
+     * A backfill cursor is an operator's approved range, and being far behind "now" is what it is FOR.
+     * Restarting it would silently change what was approved.
+     */
+    @Test
+    void anOperatorsBoundedWindowIsNeverRestartedNoMatterHowFarBackItReaches() {
+        String seed = client.boundedWindowSeed(LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 2));
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+
+        client.fetchOrderSummaryPage(TOKEN, seed);
+
+        assertThat(http.sent.get(0).uri().getQuery())
+                .contains("lastChangedFrom=2026-04-01T00:00:00.000+09:00");
+    }
+
+    /**
+     * The restart replaces the routine lane's place; it must not acquire an END. A routine cursor that
+     * stopped at a fixed instant would stop collecting the moment it reached it.
+     */
+    @Test
+    void aRestartedRoutineCursorKeepsWalkingToNowAndNeverStopsAtAFixedEnd() {
+        String stale = "{\"windowFrom\":\"2026-04-01T13:00:00.000+09:00\","
+                + "\"windowTo\":\"2026-04-01T13:00:00.000+09:00\",\"moreFrom\":null,"
+                + "\"moreSequence\":null,\"dayTotals\":{}}";
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+        FetchPage page = client.fetchOrderSummaryPage(TOKEN, stale);
+
+        assertThat(page.nextCursorValue()).contains("\"toExclusive\":null");
+
+        // Walk it to the end of the horizon and it is still hungry rather than settled.
+        String cursor = page.nextCursorValue();
+        for (int window = 0; window < 14; window++) {
+            http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+            cursor = client.fetchOrderSummaryPage(TOKEN, cursor).nextCursorValue();
+        }
+        assertThat(cursor).contains("2026-06-12T15:00:00.000+09:00"); // caught up to NOW
+    }
+
     @Test
     void twoCallFlowMapsToDailySummariesGroupedByKstPaymentDate() {
         http.enqueue(FakeNaverHttpClient.ok(lcsBody(null,

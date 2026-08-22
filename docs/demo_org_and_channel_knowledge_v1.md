@@ -333,16 +333,184 @@ cursor가 2026-06-14에 그대로 있으므로 그 계획은 지금도 온전히
 NAVER schedule **여전히 0개 enabled**(운영자 pause 유지, `paused_reason` NULL). PRODUCT schedule
 미생성. Cafe24 3종은 §6a routine으로 계속 돈다.
 
+## 4d. NAVER routine semantics 감사 (2026-08-22) — 마켓플레이스 접촉 0회
+
+라이브 증명은 **한 번 읽는 것**을 증명했다. schedule은 **계속 읽는 것**이고, 그 둘은 같은 계약이
+아니다. 이 절은 schedule을 켜기 전에 코드에서 확인한 것과, 확인 결과 고친 것을 기록한다.
+schedule은 **아직 만들지 않았다**.
+
+### 불변식
+
+| # | 불변식 |
+|---|---|
+| 1 | routine = 현재/최근 운영 취득 |
+| 2 | historical recovery = bounded backfill |
+| 3 | routine이 historical backlog 때문에 freshness를 잃지 않는다 |
+| 4 | source 상태 변경 재관측에 필요한 overlap은 유지된다 |
+| 5 | primary와 backfill progress는 독립이다 |
+| 6 | 기존 history는 자동으로 소급 복구되지 않는다 |
+
+### ORDER — 발견한 것
+
+primary cursor는 `2026-06-14T13:49:51.595+09:00`에서 멈춰 있고, 최근 14일 proof는 `backfill`
+lane에서만 수행됐다(§4c). **지금 schedule을 켰다면 routine은 그 커서를 그대로 재개했다.**
+
+측정 가능한 결과: `isCaughtUp(now)`가 거짓이므로 창은 2026-06-14에서 열리고, `hasMore`는 "now에
+닿을 때까지" 참이므로 **한 번의 run이 24시간 창 69개를 연속으로 걷는다**. 그 사이 지나가는 모든
+날짜에 일별 합계가 기록된다. 불변식 3과 6이 동시에 깨진다 — 오늘 들어온 주문을 보려면 10주를
+먼저 지나가야 하고, 아무도 승인하지 않은 소급 복구가 부수효과로 일어난다.
+
+### ORDER — 고친 것
+
+`NaverOrdersClient#ROUTINE_MAX_LAG = 14일`. routine cursor의 `windowFrom`이 그보다 뒤처지면
+**재개하지 않고 최근 14일 지점에서 재시작**한다(`NaverOrdersCursor#routineRestart`).
+
+- **14일**은 이 저장소가 이미 "최근 운영 구간"으로 쓰는 값이다 — Cafe24 주문 lookback,
+  Cafe24 routine board window, 그리고 §4c의 운영자 창까지 같은 값이다.
+- 재시작 지점은 **KST 자정에 정렬**한다. 하루 중간에서 열린 창은 그 날짜를 일부만 세고,
+  ingestion은 (channel, date)로 **덮어쓰므로** 완전한 합계가 부분 합계로 교체된다.
+- 같은 시작 날짜가 **emission floor**가 된다. 2일 carry가 그 앞으로 넘어가지 못하게 한다 —
+  §4c의 bounded run이 쓴 것과 정확히 같은 장치다.
+- **14일 이내의 지연은 그대로 이어서 따라잡는다.** 그 연속성이 이미 수집한 주문의 상태 변화를
+  다시 보는 유일한 방법이므로(불변식 4), 여기서 잘라내면 안 된다.
+- backfill cursor는 **절대 재시작하지 않는다.** 운영자가 승인한 범위이고, "now보다 뒤처져 있음"이
+  그 lane의 정상 상태다(불변식 5).
+- 건너뛴 구간은 조용히 사라지지 않는다 — run 로그가 며칠을 건너뛰었는지 WARN으로 남기고, 복구는
+  운영자의 bounded backfill로 넘긴다(불변식 2·6).
+
+lane 구분은 추측이 아니라 커서 자체가 말한다: `bounds.toExclusive`가 있으면 backfill, 없으면
+routine이다.
+
+### PRODUCT — 발견한 것
+
+**같은 결함이 두 채널에 있었다.** 커서는 페이지 번호이고, sweep이 끝난 뒤 돌려주는 값이
+`page + 1`이었다. 런타임은 그 값을 그대로 저장한다.
+
+| 채널 | 저장된 커서 | 카탈로그 | 결과 |
+|---|---|---|---|
+| NAVER | `3` | 2페이지(69 리스팅) | 다음 주기는 3페이지를 요청 → 0건 |
+| CAFE24 | `144` | 144 리스팅 | 다음 주기는 offset 144를 요청 → 0건 |
+
+즉 **한 번 읽은 상품의 가격·판매상태·상품명 변경을 다시는 관측할 수 없는 구조**였다. schedule이
+없어서 드러나지 않았을 뿐이다.
+
+### PRODUCT — 고친 것
+
+sweep이 끝나면 커서는 **카탈로그의 시작**을 가리킨다(NAVER `1`, Cafe24 offset `0`). sweep 중간에는
+그대로 전진하므로 rate-limit으로 끊긴 run은 재개한다.
+
+전체 재관측을 고른 이유: `/external/v1/products/search`의 요청 바디는 **page와 size뿐**이다. NAVER가
+문서에 기간 필터를 두고 있지만 이 커넥터는 보내지 않았고 관측한 적도 없다 — 관측하지 않은 필터를
+"changed-since 계약"이라 부르는 것이 바로 이 저장소가 금지하는 종류의 주장이다. 69 리스팅 2페이지는
+매 주기 전부 다시 읽어도 요청 2건이다. `ProductKnowledgeWriter`는 (channel, external id)로 해석해
+upsert하므로 재읽기는 idempotent다.
+
+### 테스트로 고정한 것
+
+| 계약 | 테스트 |
+|---|---|
+| ORDER schedule이 2026-06 primary history를 재개하지 않음 | `NaverOrdersClientTest#aRoutineCursorTenWeeksBehindRestartsAtTheRecentHorizonInsteadOfWalkingHistory` |
+| 14일 이내 지연은 이어서 따라잡음 (overlap 유지) | `…#aRoutineCursorInsideTheRecencyHorizonIsResumedContiguouslyNotRestarted` |
+| 재시작이 자기 시작일 이전 날짜를 쓰지 않음 | `…#aRestartedRoutineCursorWritesNoDailyTotalBeforeItsOwnStartDate` |
+| 운영자 bounded 창은 절대 재시작되지 않음 | `…#anOperatorsBoundedWindowIsNeverRestartedNoMatterHowFarBackItReaches` |
+| 재시작된 routine이 고정 종료점을 얻지 않음 | `…#aRestartedRoutineCursorKeepsWalkingToNowAndNeverStopsAtAFixedEnd` |
+| PRODUCT sweep 종료가 1페이지로 되돌아감 | `NaverProductsClientTest#aFinishedSweepRestartsAtPageOneSoTheNextCycleReObservesTheCatalogue` |
+| 끝을 지나 멈춘 커서가 스스로 회복 | `…#aCursorLeftPastTheEndOfTheCatalogueHealsInsteadOfStayingBlind` |
+| 목록에 없는 필드는 없는 채로 도착 (URL·옵션·상세·판매자코드) | `…#fieldsTheListResourceDoesNotSendArriveAbsentRatherThanInvented` |
+| Cafe24도 같은 계약 | `Cafe24ApiConnectorTest#aFinishedCatalogueSweepResetsTheOffsetSoTheNextCycleReObservesIt` |
+| 2주기가 기존 리스팅을 제자리 갱신 | `ProductRecurrenceContractTest#aSecondCycleUpdatesTheSameListingRatherThanCreatingAnother` |
+| **합성 DERIVED 8개가 operational truth로 승격되지 않음** | `…#aListingAbsentFromTheReadKeepsItsOwnProvenance` |
+| REAL provenance 유지 | `…#reObservationKeepsDataOrigin` |
+| **WRITE 0 — 도달 가능한 NAVER 엔드포인트 전부가 read** | `NaverReadOnlyFenceTest` (3개) |
+
+`NaverReadOnlyFenceTest`는 "POST 금지"가 아니라 **엔드포인트 목록 자체**를 잠근다. 토큰 발급과 주문
+상세 조회는 둘 다 POST이고 둘 다 read이므로 "POST 금지"는 틀린 울타리다. Agent 쪽
+`OperatorToolRegistry`의 WRITE-tool 부재와 대칭이다.
+
+### schedule을 켤 수 있는가
+
+**켤 수 있다.** 다만 아직 만들지 않았다 — 생성은 별도 결정이다.
+
+| lane | 권장 주기 | 주기당 요청 | 첫 run의 예외 |
+|---|---|---|---|
+| ORDER_SUMMARY | **60분** (Cafe24 3종과 동일) | 창 1개 + 상세 배치 | 재시작으로 15개 창 ≈ 20–30초, 1회뿐 |
+| PRODUCT | **1440분(1일)** | 2건 (2페이지) | 커서 `3` 자해 회복에 빈 페이지 1건 |
+
+주기 하한은 15분(`CollectControlService#MIN_INTERVAL_MINUTES`), 상한은 없다. 빈 run은 `SUCCESS`로
+기록되므로 조용한 시간대가 실패 streak를 만들지 않는다. NAVER pacer는 요청 간 최소 1초를 유지한다.
+
+## 4e. NAVER REVIEW refresh 준비 (2026-08-22) — 마켓플레이스 접촉 0회
+
+**공식 API를 새로 만들지 않는다.** NAVER는 판매자용 리뷰 API를 제공하지 않고(`naver-cap-review-no-api`),
+기존 경로는 이미 라이브 증명돼 있다 — `NAVER / REVIEW = EXPORT · LIVE_PROVEN · SELLER_REPEATED`
+(`AcquisitionPathRegistry`, 2026-07-25/26 라이브 증명:
+`docs/action-window-runtime/naver-initial-review-import-live-proof-record.md`).
+
+### baseline (2026-08-22 측정)
+
+| | |
+|---|---|
+| NAVER REAL 리뷰 | **3,858건** (2025-06-17 ~ **2026-07-15**) |
+| NAVER DEMO_SEED | 22건 (기본 read에서 제외됨) |
+| `review_import_plan` | **0건** — 이 배포에는 계획이 없다. refresh는 첫 계획을 만드는 것부터다 |
+
+### 회귀 — 마켓플레이스 접촉 없이 확인한 것
+
+| 확인 | 결과 |
+|---|---|
+| 실행 중인 백엔드에서 기간 미리보기 | `GET /api/imports/reviews/plans/range-preview` — 시작월 `2026-07` → `2026-07-01 ~ 2026-08-22`, **세그먼트 2**; `2026-08` → 세그먼트 1 |
+| collector 오프라인 스위트 | **9,150 통과 / 150 skip** (import 스테이지 머신·scope gate·ingest handoff·locate·guidance 포함) |
+| frontend | **2,236 통과** (`GuidedImportCard`, `ReviewImportPage`, `useGuidedImport`, `importRuntime` 포함) |
+| backend | **2,653 통과 / 22 skip** (`reviewimport` 패키지 전체 포함) |
+| 계정 상태 | NAVER `bdccb7a7` = **CONNECTED**, 가이드형 채널 목록(`GUIDED_CHANNEL_CODES`)에 포함 |
+| 파서 계약 | `.xlsx`/`.csv`, dedup 키는 NAVER의 **`리뷰글번호`** → `external_id`. 구간이 겹쳐도 중복 저장되지 않는다 |
+
+즉 **코드 쪽에서 막힌 것은 없다.** 남은 것은 전부 셀러의 화면 행위다.
+
+### 셀러가 실제로 해야 하는 것 — 최소 단계
+
+전제(운영자): 로컬 helper를 **포그라운드로** 띄운다(페어링은 TTY를 요구한다) — `NAVER_REVIEW_URL`
+설정 필요, `import/naver` carrier.
+
+1. SellerOps **리뷰 → 과거 리뷰 가져오기**(`/connect/review-history`)에서 **시작 월 `2026-07`** 선택.
+   → 화면이 `2026-07-01 ~ 2026-08-22`, **2회 내보내기**라고 알려준다. 이것이 SellerOps 안에서 하는
+   **유일한 결정**이다.
+2. 카드의 CTA를 누르면 판매자 센터 리뷰 관리 창이 열린다. 거기서 셀러가 **직접**:
+   시작일 → 종료일 → 조회 → **엑셀 내보내기** → NAVER의 **확인**.
+   SellerOps는 강조하고 관찰만 한다 — 클릭·입력·전송 0.
+3. 조회를 누른 뒤 SellerOps가 **화면에서 날짜를 되읽어** 요구 구간과 대조한다. 어긋나면
+   `SCOPE_BLOCKED` — 내보내기 컨트롤을 아예 찾지 않는다. 셀러가 날짜를 고치면 다시 확인한다.
+4. 다운로드가 감지되면 검증(OOXML magic-byte) 후 자동 ingest되고, 창 안의 패널이 **다음 달**을
+   제안한다. 2번 반복하면 끝난다.
+
+**시작 월을 `2026-07`로 잡는 이유**: 저장된 최신 리뷰가 2026-07-15이므로 7월은 절반만 들어와 있다.
+7월을 다시 가져와도 `리뷰글번호` dedup이 중복을 막는다 — 겹치게 잡는 쪽이 안전하다.
+
+### 이 경로가 바꾸지 않는 것
+
+- 리뷰 `reply_state`는 여전히 **UNKNOWN**이다. 내보내기 파일이 답변 여부를 담지 않기 때문이며,
+  "답변 안 함"이 아니라 "알 수 없음"이다(`naver-status-review-reply-unknown`).
+- NAVER INQUIRY는 **UNSUPPORTED** 유지.
+- 리뷰는 자동 수집 주기 대상이 아니다 — `SELLER_REPEATED`이고, 셀러가 실행할 때만 들어온다.
+
 ## 5. 아직 라이브 경계 너머에 있는 것
 
 이 문서가 기록하는 작업에서 **마켓플레이스 접촉은 0회**였다. 남은 것은 전부 셀러/운영자의 행위가
 필요하다 — `docs/sellerops_live_approval_contract.md`.
 
-1. **Cafe24 read 1회** — credential이 열린다는 것은 증명됐다. refresh token이 아직 유효한지는
-   실제 호출만이 답한다. (승인 필요한 마켓 액션)
-2. **Cafe24 재동의** — `mall.read_product`. 이제 요청 스코프가 고쳐졌으므로 이 한 번이면 된다.
-3. **NAVER credential 재입력** — 키 재료 소실. 애플리케이션 ID/시크릿을 다시 입력해야 한다.
-4. **Coupang 최초 연결** — credential 행이 없다. 발급 walk는 라이브 증명됨(2026-08-12).
+**끝난 것** (2026-08-22, §4a·§4c):
 
-이 넷이 끝나기 전에는 12칸 중 어느 것도 "canonical Demo Org에서 현재 연결로 fresh proof"를 갖지
-못한다. 그것이 이 문서가 어떤 capability 상태도 옮기지 않는 이유다.
+1. ~~Cafe24 read 1회~~ — 완료. `mall.read_product` 재동의도 완료.
+2. ~~NAVER credential 재입력~~ — 완료. 연결 검증 → PRODUCT → 최근 14일 주문까지 라이브 증명.
+
+**남은 것** — 전부 셀러/운영자의 행위가 필요하다:
+
+1. **NAVER REVIEW refresh** — §4e. 셀러가 판매자 센터에서 2회 내보내기. 코드 쪽 준비는 끝났다.
+2. **Coupang 최초 연결** — credential 행이 없다. 발급 walk는 라이브 증명됨(2026-08-12).
+3. **NAVER 70일 ORDER historical backfill** — 지금 데모의 blocker가 아니다. primary cursor가
+   2026-06-14에 그대로 있으므로 언제든 bounded lane으로 가능하다(§4d).
+4. **상품 enrichment (URL·옵션·상세)** — NAVER와 Cafe24 **양쪽 모두** 목록 리소스가 담지 않는다는 것이
+   확인됐다. Coupang 연결 후 cross-channel 패키지로 묶는다. 지금은 기록만 유지한다.
+
+Coupang이 붙기 전에는 12칸 전부가 "canonical Demo Org에서 현재 연결로 fresh proof"를 갖지 못한다.
+그것이 이 문서가 어떤 capability 상태도 옮기지 않는 이유다.

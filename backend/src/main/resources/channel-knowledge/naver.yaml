@@ -315,3 +315,41 @@ entries:
     source: SELLEROPS_EVIDENCE
     sourceRef: com.sellerops.order.ChannelOrderIngestionService (V32)
     verifiedAt: "2026-08-22"
+
+  - id: naver-workflow-order-routine-window
+    topic: WORKFLOW
+    kind: FACT
+    title: 자동 주문 수집은 최근 구간만 따라갑니다
+    summary: >-
+      NAVER 주문 자동 수집은 '새로 바뀐 것'을 따라가는 경로입니다. 오래 멈춰 있었더라도
+      최근 14일 지점에서 다시 시작하고, 그보다 앞선 구간은 저절로 복구되지 않습니다.
+    body: >-
+      NAVER 주문 조회는 변경 시각 기준 24시간 창을 이어 붙여 읽습니다. 자동 수집이 오래 멈춰
+      있었다면 멈춘 지점부터 하루씩 전부 걸어오게 되는데, 그러면 오늘 들어온 주문을 보기까지
+      과거를 다 지나가야 합니다. 그래서 뒤처짐이 14일을 넘으면 자동 수집은 최근 14일 지점에서
+      다시 시작합니다. 건너뛴 구간이 필요하면 운영자가 기간을 지정해 별도로 가져오며, 그 작업은
+      자동 수집의 진행 위치를 바꾸지 않습니다. 14일 이내의 지연은 그대로 이어서 따라잡습니다 —
+      그 이어짐이 이미 수집한 주문의 상태 변화를 다시 보는 유일한 방법이기 때문입니다.
+    capabilities: [ORDER_SUMMARY]
+    tags: [주문, 자동수집, 최신성, 기간, 백필]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.naver.NaverOrdersClient#ROUTINE_MAX_LAG
+    verifiedAt: "2026-08-22"
+
+  - id: naver-workflow-product-recurrence
+    topic: WORKFLOW
+    kind: FACT
+    title: 상품은 매 주기 전체 목록을 다시 읽습니다
+    summary: >-
+      NAVER 상품 조회에는 '바뀐 것만' 가져오는 방식이 없습니다. 그래서 SellerOps는 매 주기
+      전체 상품 목록을 다시 읽고, 같은 상품이면 덮어쓰지 않고 갱신합니다.
+    body: >-
+      상품 조회는 페이지 번호로만 넘깁니다. 전체를 한 번 읽고 나면 다음 주기는 다시 첫 페이지부터
+      읽으므로, 가격이나 판매 상태나 상품명이 바뀌면 다음 주기에 반영됩니다. 상품은
+      (채널, 채널상품번호)로 식별하므로 다시 읽어도 상품이 늘어나지 않습니다. 반대로 이번 조회에
+      없던 상품은 건드리지 않습니다 — 목록에 없다는 것이 삭제되었다는 뜻은 아니기 때문입니다.
+    capabilities: [PRODUCT]
+    tags: [상품, 자동수집, 주기, 갱신]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.naver.NaverProductsClient#FIRST_PAGE
+    verifiedAt: "2026-08-22"

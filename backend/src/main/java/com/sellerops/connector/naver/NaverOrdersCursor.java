@@ -45,15 +45,15 @@ import java.util.TreeMap;
  * {@link #advanced} promotes them to {@code dedupeIds}, which the next window
  * skips — bounded (boundary-exact timestamps only), so the cursor stays small.
  *
- * <p><b>{@code bounds}</b> — present only on an operator's bounded window (a
- * {@code backfill}-lane run), absent (null) on the routine stream, where it changes
- * nothing. A routine cursor walks 24h at a time until it reaches "now" and has no
- * other end; a bounded run needs one, or an operator asking for two recent weeks gets
- * a walk from wherever the cursor happened to be stuck. It also pins the emission
- * floor to the operator's own start date: without that, the {@link #DAY_TOTAL_RETENTION_DAYS}
- * carry lets the first window emit totals for the two days BEFORE the requested range,
- * counting only the orders that happened to change inside it — and ingestion overwrites
- * daily totals by (channel, date), so a partial recount would replace a complete one.
+ * <p><b>{@code bounds}</b> — the range this cursor may write, and how far it may walk.
+ * An operator's bounded window (a {@code backfill}-lane run) carries both ends: without an
+ * end instant, an operator asking for two recent weeks gets a walk from wherever the cursor
+ * happened to be stuck. A routine cursor carries only the floor, and only after a
+ * {@link #routineRestart}; it walks 24h at a time until it reaches "now" and has no other end.
+ * The floor is what pins emission to the run's own start date: without it, the
+ * {@link #DAY_TOTAL_RETENTION_DAYS} carry lets the first window emit totals for the two days
+ * BEFORE the range, counting only the orders that happened to change inside it — and ingestion
+ * overwrites daily totals by (channel, date), so a partial recount would replace a complete one.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 record NaverOrdersCursor(
@@ -67,11 +67,17 @@ record NaverOrdersCursor(
         Bounds bounds) {
 
     /**
-     * An operator's explicit window. {@code from} is the first KST calendar date whose
-     * daily total this run may write; {@code toExclusive} is the instant the walk stops at.
+     * What a cursor may write, and how far it may walk.
+     *
+     * <p>{@code from} is the first KST calendar date whose daily total this cursor may write — the
+     * emission floor, and the reason both lanes need this record. {@code toExclusive} is the instant
+     * the walk stops at, and it is <b>null on the routine lane</b>: routine has no end, it walks to
+     * "now" forever. So a non-null {@code toExclusive} is exactly the operator's bounded backfill, and
+     * {@link NaverOrdersCursor#isRoutine()} reads it that way rather than guessing from the dates.
      *
      * @param from        inclusive KST calendar date — the emission floor
-     * @param toExclusive ISO instant (this cursor's wire format) the walk never passes
+     * @param toExclusive ISO instant (this cursor's wire format) the walk never passes, or null for
+     *                    the routine lane, which stops only at "now"
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Bounds(String from, String toExclusive) {
@@ -153,6 +159,35 @@ record NaverOrdersCursor(
                 Map.of(), List.of(), List.of(), new Bounds(startDate.toString(), iso(toExclusive, zone)));
     }
 
+    /**
+     * The routine lane, restarted at a bounded recent horizon, discarding the backlog behind it.
+     *
+     * <p><b>Why a routine cursor is ever thrown away.</b> This cursor resumes where it left off, which
+     * is right when "where it left off" is an hour ago and wrong when it is ten weeks ago. The demo
+     * org's NAVER primary cursor sat at 2026-06-14 for 70 days while its schedule was paused; enabling
+     * that schedule would have made the next routine run walk 69 consecutive 24h windows before it
+     * reached today, and write a daily total for every date it passed. Both halves of that are the
+     * wrong lane: routine exists to notice what is new, and historical recovery is an operator's
+     * bounded backfill, approved as its own run. Cafe24's board lanes were corrected the same way
+     * ({@code Cafe24ApiConnector#ROUTINE_WINDOW_DAYS}) — this is the same rule against NAVER's actual
+     * cursor semantics, where windows are ≤24h and must stay contiguous.
+     *
+     * <p>The restart is aligned to the KST start of day so every date this cursor emits is one it
+     * covered in full — a window opening mid-day would count only part of that date and overwrite a
+     * complete stored total with it. The same start date becomes the emission floor, which is what
+     * keeps the {@link #DAY_TOTAL_RETENTION_DAYS} carry from reaching back past it.
+     *
+     * <p>Not a gap-free guarantee, and it does not pretend to be: the skipped span is left for an
+     * operator's backfill, and the caller says so out loud.
+     */
+    static NaverOrdersCursor routineRestart(Instant now, ZoneId zone, Duration maxLag) {
+        LocalDate startDate = now.minus(maxLag).atZone(zone).toLocalDate();
+        Instant from = startDate.atStartOfDay(zone).toInstant();
+        return new NaverOrdersCursor(
+                iso(from, zone), iso(windowEnd(from, now), zone), null, null,
+                Map.of(), List.of(), List.of(), new Bounds(startDate.toString(), null));
+    }
+
     /** First-ever cursor: one backfill window ending now. */
     static NaverOrdersCursor initial(Instant now, ZoneId zone) {
         Instant from = now.minus(INITIAL_BACKFILL);
@@ -211,11 +246,29 @@ record NaverOrdersCursor(
 
     /** How far this cursor may read: "now", or the operator's end bound when it is nearer. */
     private Instant limit(Instant now) {
-        if (bounds == null) {
-            return now;
+        if (bounds == null || bounds.toExclusive() == null) {
+            return now; // routine: no end but "now".
         }
         Instant end = bounds.toInstant();
         return end.isBefore(now) ? end : now;
+    }
+
+    /**
+     * Whether this cursor belongs to the <b>routine</b> lane — the one whose job is what is new.
+     * An operator's bounded backfill is the only cursor that carries an end instant.
+     */
+    boolean isRoutine() {
+        return bounds == null || bounds.toExclusive() == null;
+    }
+
+    /**
+     * Whether the routine lane has fallen further behind than routine collection is allowed to be.
+     *
+     * <p>Only routine can answer yes: a backfill cursor is an operator's approved range and being
+     * "behind now" is its normal condition, not a fault.
+     */
+    boolean routineLagExceeds(Instant now, Duration maxLag) {
+        return isRoutine() && windowFromInstant().isBefore(now.minus(maxLag));
     }
 
     Instant windowFromInstant() {
@@ -241,7 +294,8 @@ record NaverOrdersCursor(
         if (bounds == null) {
             return carried;
         }
-        // A bounded run never writes a daily total for a date outside the range it was asked for.
+        // A cursor with a floor never writes a daily total for a date before it — an operator's
+        // bounded run, or a routine lane restarted at a recent horizon.
         // The two-day carry is there so a routine window's partial recount converges; for a window
         // that starts cold at an operator's date it would instead emit the two preceding days
         // counting only the orders that changed inside the range — and ingestion overwrites by
