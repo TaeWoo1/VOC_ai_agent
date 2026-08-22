@@ -156,6 +156,51 @@ class CoupangCredentialReplaceTest {
         assertThat(schedules.findById(paused.getId()).orElseThrow().isEnabled()).isFalse();
     }
 
+    /**
+     * The replace path used to die on the one credential a replace exists for. Capturing the old value
+     * for rollback threw when the row could not be opened at all — a key this runtime no longer holds —
+     * so a seller whose credential was unopenable had no way to put a working one in its place.
+     *
+     * <p>There is nothing to roll back to here: the rollback protects a credential that works, and this
+     * one never will. So the new value stays, and the result says FAILED honestly rather than claiming
+     * a restore that did not happen.
+     */
+    @Test
+    void anUnopenableOldCredentialDoesNotBlockTheReplace() {
+        SellerAccount acc = coupangAccount();
+        storeOld(acc);
+        // The row is now sealed under a key this vault no longer has — the state the demo org's NAVER
+        // credential was in for 51 consecutive failed runs.
+        CredentialVault otherKey = new CredentialVault(credentials, new ObjectMapper(), randomKeyBase64(), "local-test-1");
+        CollectControlService withOtherKey = new CollectControlService(sellerAccounts, channels, schedules, null,
+                null, null, new ConnectorRegistry(List.of(verifier)), null, otherKey, null, null, null, null);
+
+        verifier.outcome = VerifyOutcome.success();
+        CredentialReplaceResultView result = withOtherKey.replaceCredential(org, acc.getId(), newRequest(), actor);
+
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        // The new credential is on file and opens under the key that sealed it.
+        assertThat(otherKey.open(org, acc.getId()).secrets().get("access_key")).isEqualTo("AK-NEW");
+    }
+
+    @Test
+    void anUnopenableOldCredentialKeepsTheNewValueEvenWhenVerificationFails() {
+        SellerAccount acc = coupangAccount();
+        storeOld(acc);
+        CredentialVault otherKey = new CredentialVault(credentials, new ObjectMapper(), randomKeyBase64(), "local-test-1");
+        CollectControlService withOtherKey = new CollectControlService(sellerAccounts, channels, schedules, null,
+                null, null, new ConnectorRegistry(List.of(verifier)), null, otherKey, null, null, null, null);
+
+        verifier.outcome = VerifyOutcome.failed(VerifyOutcome.REASON_INVALID_CREDENTIAL);
+        CredentialReplaceResultView result = withOtherKey.replaceCredential(org, acc.getId(), newRequest(), actor);
+
+        assertThat(result.status()).isEqualTo("FAILED");
+        assertThat(result.reasonCode()).isEqualTo(VerifyOutcome.REASON_INVALID_CREDENTIAL);
+        // Restoring the unopenable blob would destroy the seller's only attempt at a working credential
+        // in order to preserve a row that has never worked.
+        assertThat(otherKey.open(org, acc.getId()).secrets().get("access_key")).isEqualTo("AK-NEW");
+    }
+
     @Test
     void noExistingCredentialIsSafeFailureNotAStore() {
         SellerAccount acc = coupangAccount(); // no credential on file

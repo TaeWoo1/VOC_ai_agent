@@ -1661,4 +1661,12 @@ export interface CredentialDiagnosisView {
    * down, and reporting that as "no permissions" would call a working connection broken.
    */
   grantedScopes?: string[] | null;
+  /**
+   * Whether the SELLER can fix this. Decided by the backend (`CredentialKeyStatus.sellerActionable`)
+   * so the answer exists in one place: the UI used to re-derive it from the status code, which is a
+   * duplicate rule to keep in step in exactly the case where being wrong sends a seller to a
+   * marketplace for a server-side problem. Optional for back-compat; absent ⇒ treat as server-side
+   * (asking nothing of the seller is the safe default when we do not know).
+   */
+  sellerActionable?: boolean;
 }

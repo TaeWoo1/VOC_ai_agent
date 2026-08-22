@@ -8,6 +8,8 @@ import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.cafe24.Cafe24OAuthException;
 import com.sellerops.connector.naver.NaverApiConnector;
+import com.sellerops.credential.CredentialKeyStatus;
+import com.sellerops.credential.CredentialUnavailableException;
 import com.sellerops.connector.coupang.CoupangApiConnector;
 import com.sellerops.connector.coupang.CoupangLiveApprovalRequiredException;
 import com.sellerops.selfpilot.SellerAccountReauthService;
@@ -571,9 +573,20 @@ public class SyncRunExecutor {
 
     /**
      * The sanitized reason when {@code e} is an unambiguous authentication verdict, else null.
-     * Recognised: {@link ConnectorAuthException} (Coupang 401 / NAVER token refusal) and a Cafe24
+     * Recognised: {@link ConnectorAuthException} (Coupang 401 / NAVER token refusal), a Cafe24
      * {@code invalid_grant} on refresh (the stored refresh token was revoked; the authorizer has already
-     * retried once against a possibly-rotated token before letting it out).
+     * retried once against a possibly-rotated token before letting it out), and a stored credential
+     * SellerOps itself cannot open when re-entry is the fix.
+     *
+     * <p>That last case was missing, and it is the one that hid the longest. A credential sealed under
+     * a key this runtime no longer holds fails before a single byte leaves for the channel, so no
+     * channel ever says 401 — the run just tightened {@code consecutive_failures} while the hub kept
+     * showing 연결됨. The demo org's NAVER account failed that way 51 times in a row without ever
+     * becoming a task anyone could see.
+     *
+     * <p>Only a {@link CredentialKeyStatus#sellerActionable()} verdict routes here. A server-side key
+     * problem is deliberately NOT an auth failure: pausing schedules and telling a seller to reconnect
+     * would be asking them to fix a config file they cannot see, and reconnecting would not fix it.
      */
     static String classifyAuthFailure(Exception e) {
         if (e instanceof ConnectorAuthException auth) {
@@ -582,6 +595,9 @@ public class SyncRunExecutor {
         if (e instanceof Cafe24OAuthException oauth
                 && oauth.kind() == Cafe24OAuthException.Kind.INVALID_GRANT) {
             return "카페24 인증이 더 이상 유효하지 않습니다 (REFRESH_TOKEN_REVOKED). 채널을 다시 연결해 주세요.";
+        }
+        if (e instanceof CredentialUnavailableException vault && vault.status().sellerActionable()) {
+            return "저장된 연결 정보를 열 수 없습니다. 채널 연결에서 연결 정보를 다시 입력해 주세요.";
         }
         return null;
     }

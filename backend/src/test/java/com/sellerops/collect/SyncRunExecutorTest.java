@@ -19,6 +19,8 @@ import com.sellerops.connector.naver.NaverOrdersClient;
 import com.sellerops.connector.naver.NaverTokenClient;
 import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.credential.ConnectorCredentialRepository;
+import com.sellerops.credential.CredentialKeyStatus;
+import com.sellerops.credential.CredentialUnavailableException;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.inquiry.InquiryRepository;
@@ -805,6 +807,58 @@ class SyncRunExecutorTest {
                         new com.fasterxml.jackson.databind.ObjectMapper())))
                 .contains("REFRESH_TOKEN_REVOKED");
         assertThat(SyncRunExecutor.classifyAuthFailure(new RuntimeException("boom"))).isNull();
+    }
+
+    /**
+     * The gap that hid the longest. A credential sealed under a key this runtime no longer holds fails
+     * inside the vault, before a byte leaves for the channel — so no channel ever answers 401 and the
+     * run looked like ordinary flakiness. The demo org's NAVER account failed exactly this way 51 times
+     * in a row while the channel hub still read 연결됨.
+     */
+    @Test
+    void aCredentialSellerOpsCannotOpenIsAnAuthFailureWhenReEntryIsTheFix() {
+        assertThat(SyncRunExecutor.classifyAuthFailure(new CredentialUnavailableException(
+                CredentialKeyStatus.KEY_UNVERIFIABLE, "local-dev-1", "열 수 없습니다")))
+                .contains("연결 정보를 다시 입력");
+        assertThat(SyncRunExecutor.classifyAuthFailure(new CredentialUnavailableException(
+                CredentialKeyStatus.INVALID_CREDENTIAL, "self-pilot-1", "손상")))
+                .contains("연결 정보를 다시 입력");
+    }
+
+    /**
+     * And the other direction, which matters just as much: a key the SERVER is missing must not pause
+     * the seller's schedules or send them to a marketplace. Reconnecting cannot fix a config file.
+     */
+    @Test
+    void aServerSideKeyProblemIsNotAnAuthFailure() {
+        for (CredentialKeyStatus status : new CredentialKeyStatus[]{
+                CredentialKeyStatus.NO_KEY_CONFIGURED,
+                CredentialKeyStatus.KEY_NOT_AVAILABLE,
+                CredentialKeyStatus.KEY_MISMATCH}) {
+            assertThat(SyncRunExecutor.classifyAuthFailure(
+                    new CredentialUnavailableException(status, "local-dev-1", "키 문제")))
+                    .as("%s must not read as an auth failure", status)
+                    .isNull();
+        }
+    }
+
+    @Test
+    void anUnopenableCredentialBecomesAReconnectTaskInsteadOfASilentFailureStreak() {
+        SellerAccount acc = account("NAVER");
+        com.sellerops.sync.SyncSchedule enabled = enabledSchedule(acc, DataType.ORDER_SUMMARY);
+        SyncRunExecutor exec = executorThrowing(new CredentialUnavailableException(
+                CredentialKeyStatus.KEY_UNVERIFIABLE, "local-dev-1", "자격 증명을 열 수 없습니다"));
+
+        SyncJob job = exec.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "SCHEDULED");
+
+        assertThat(job.getStatus()).isEqualTo("FAILED");
+        // The seller-visible facts: the account asks to be reconnected, and the schedule stops burning
+        // ticks on a credential that cannot work — with a reason, so a reconnect can resume it.
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.RECONNECT_REQUIRED);
+        com.sellerops.sync.SyncSchedule after = schedules.findById(enabled.getId()).orElseThrow();
+        assertThat(after.isEnabled()).isFalse();
+        assertThat(after.getPausedReason()).isNotNull();
     }
 
     @Test

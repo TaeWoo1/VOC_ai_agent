@@ -1,5 +1,6 @@
 package com.sellerops.credential;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 
 /**
@@ -41,5 +42,17 @@ public record CredentialDiagnosis(
 
     public boolean openable() {
         return status == CredentialKeyStatus.OK;
+    }
+
+    /**
+     * Whether the seller can fix this — see {@link CredentialKeyStatus#sellerActionable()}.
+     *
+     * <p>Serialized deliberately: the UI used to re-derive this from the status code, so "whose
+     * problem is it" was decided in two places and could drift apart in exactly the situation where
+     * being wrong costs a seller a wasted trip to a marketplace. It is decided once, in the enum.
+     */
+    @JsonProperty("sellerActionable")
+    public boolean sellerActionable() {
+        return status.sellerActionable();
     }
 }

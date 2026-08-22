@@ -257,8 +257,13 @@ public class CredentialVault {
             } catch (IllegalStateException e) {
                 return diagnosis(CredentialKeyStatus.KEY_UNVERIFIABLE, rowKeyId, null, availableFp,
                         row.getLastRotatedAt(), row.getTokenExpiresAt(),
-                        "이 자격 증명은 키 지문이 기록되기 전에 저장되어, 키가 틀린 것인지 값이 손상된 것인지 "
-                                + "구분할 수 없습니다. 다른 마스터 키를 key-ring 에 등록해 보거나, 채널을 다시 연결해 주세요.");
+                        // Seller-facing: this is the one server-side-looking status that a seller CAN
+                        // resolve, because re-entering reseals the row under the active key. So it must
+                        // say the action, not the mechanism — a sentence about master keys and key rings
+                        // reads as "not my problem" to the only person who can fix it. The operator
+                        // detail is still on the record: keyId, the available fingerprint, and the run's
+                        // own error message all name the key.
+                        "저장된 연결 정보를 열지 못했습니다. 채널 연결에서 연결 정보를 다시 입력하면 해결됩니다.");
             }
         }
         return diagnosis(CredentialKeyStatus.OK, rowKeyId, sealed, availableFp,

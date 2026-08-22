@@ -31,6 +31,7 @@ import com.sellerops.credential.CredentialIntakeValidator;
 import com.sellerops.credential.CredentialIntakeValidator.ValidatedCredential;
 import com.sellerops.credential.CredentialMetadata;
 import com.sellerops.credential.CredentialTemplates;
+import com.sellerops.credential.CredentialUnavailableException;
 import com.sellerops.credential.CredentialTemplates.CredentialTemplate;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.credential.DecryptedCredential;
@@ -470,7 +471,18 @@ public class CollectControlService {
         ValidatedCredential valid = CredentialIntakeValidator.validate(template, request);
 
         // 4. Capture the OLD credential IN MEMORY only — never logged, persisted elsewhere, or returned.
-        DecryptedCredential old = vault.open(orgId, sellerAccountId);
+        //    A credential that CANNOT be opened is exactly the case a replace is for, so it must not stop
+        //    one: before this, a row sealed under a lost key threw here and the seller had no way to put a
+        //    working credential in its place. There is simply nothing to roll back to — the rollback
+        //    protects a credential that works, and this one does not. `old == null` therefore means
+        //    "keep whatever we end up with", and the failure path below says so rather than pretending a
+        //    restore happened.
+        DecryptedCredential old;
+        try {
+            old = vault.open(orgId, sellerAccountId);
+        } catch (CredentialUnavailableException unopenable) {
+            old = null;
+        }
 
         // 5. Store the NEW secrets + expiry (atomic in-place upsert; stamps last_rotated_at).
         vault.store(orgId, sellerAccountId, valid.connectorClass(), valid.authType(),
@@ -484,6 +496,11 @@ public class CollectControlService {
         try {
             outcome = verifyStored(orgId, sellerAccountId, channel.getCode());
         } catch (RuntimeException e) {
+            if (old == null) {
+                return new CredentialReplaceResultView(sellerAccountId, REPLACE_STATUS_FAILED, REPLACE_REASON_ERROR,
+                        "연결 정보 확인 중 오류가 발생했습니다. 입력한 정보는 저장되었으니 잠시 후 연결 확인을 다시 해 주세요.",
+                        request.tokenExpiresAt());
+            }
             restoreCredential(orgId, sellerAccountId, old, actorUserId);
             return new CredentialReplaceResultView(sellerAccountId, REPLACE_STATUS_FAILED, REPLACE_REASON_ERROR,
                     "연결 정보 교체 중 오류가 발생했습니다. 기존 연결 정보를 유지합니다.", old.tokenExpiresAt());
@@ -511,11 +528,18 @@ public class CollectControlService {
 
         // 7b. Verification FAILED → RESTORE the captured OLD credential (secrets + its exact expiry). The
         //     existing credential is not destroyed; account / orders / cursors were never touched.
-        restoreCredential(orgId, sellerAccountId, old, actorUserId);
+        //     Nothing to restore when the old credential could not be opened: putting an unopenable blob
+        //     back would destroy the seller's only attempt at a working one to preserve a row that has
+        //     never worked. The new value stays and the result still reports FAILED.
         String reasonCode = outcome != null ? outcome.reasonCode() : REPLACE_REASON_VERIFY_UNSUPPORTED;
         String message = outcome != null
                 ? failureMessage(outcome.reasonCode())
                 : "이 채널의 연결 확인은 아직 제공되지 않습니다.";
+        if (old == null) {
+            return new CredentialReplaceResultView(sellerAccountId, REPLACE_STATUS_FAILED, reasonCode,
+                    message, request.tokenExpiresAt());
+        }
+        restoreCredential(orgId, sellerAccountId, old, actorUserId);
         return new CredentialReplaceResultView(sellerAccountId, REPLACE_STATUS_FAILED, reasonCode,
                 message, old.tokenExpiresAt());
     }
@@ -601,8 +625,18 @@ public class CollectControlService {
         //    verified test records the credential test success (NAVER only; a no-op for others), and a
         //    clearly-invalid credential recalls the account for reconnect. Transient failures never move
         //    the status.
-        VerifyOutcome outcome = verifier.verifyConnection(
-                new VerifyContext(orgId, sellerAccountId, channel.getCode()));
+        // 5a. A credential SellerOps itself cannot open never reaches the channel. Letting that throw made
+        //     the connect screen show a transient provider error for a condition no retry can clear — the
+        //     seller either loops or is told the wrong thing. Classify it by WHO can fix it and answer.
+        VerifyOutcome outcome;
+        try {
+            outcome = verifier.verifyConnection(new VerifyContext(orgId, sellerAccountId, channel.getCode()));
+        } catch (CredentialUnavailableException unopenable) {
+            String reason = unopenable.status().sellerActionable()
+                    ? VerifyOutcome.REASON_INVALID_CREDENTIAL
+                    : VerifyOutcome.REASON_CREDENTIAL_UNREADABLE;
+            outcome = VerifyOutcome.failed(reason);
+        }
         if (outcome.status() == VerifyOutcome.Status.SUCCESS) {
             // Each lifecycle is guarded to its own channel and no-ops for the others, so calling both
             // is safe — the account's channel decides which one records the PREPARING transition.
@@ -647,6 +681,9 @@ public class CollectControlService {
         }
         if (VerifyOutcome.REASON_ORDER_ACCESS_DENIED.equals(reasonCode)) {
             return "주문 API 접근이 거부되었습니다. 애플리케이션의 주문 API 그룹 권한과 API 호출 IP 등록을 확인해 주세요.";
+        }
+        if (VerifyOutcome.REASON_CREDENTIAL_UNREADABLE.equals(reasonCode)) {
+            return "SellerOps가 저장된 연결 정보를 열지 못했습니다. 서버 설정 문제이며, 다시 연결해도 해결되지 않습니다. 담당자에게 문의해 주세요.";
         }
         // PROVIDER_UNAVAILABLE and any unknown code → generic safe failure.
         return "채널 API 연결 확인에 실패했습니다.";

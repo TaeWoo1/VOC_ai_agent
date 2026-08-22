@@ -47,7 +47,25 @@ public enum CredentialKeyStatus {
 
     /**
      * The right key is present and demonstrably correct, and decryption still failed — the stored
-     * envelope is damaged. The only status that actually requires re-entering the credential.
+     * envelope is damaged. Nothing but re-entering the credential can fix it (as with
+     * {@link #KEY_UNVERIFIABLE}, whose cause cannot be narrowed); every other status is a key
+     * question, not a credential one.
      */
-    INVALID_CREDENTIAL
+    INVALID_CREDENTIAL;
+
+    /**
+     * Whether the seller is the one who can fix this — the single place that answer is decided.
+     *
+     * <p>Getting it wrong is expensive in both directions. Telling a seller to reconnect for a
+     * server-side key problem spends their time on something that cannot work: the demo org's Cafe24
+     * credential was fixed by naming a key in a config file, and a reconnect prompt would have sent
+     * the seller to a marketplace for nothing. Telling them to wait for an operator when their own
+     * credential is the problem leaves the connection dead and nobody looking at it.
+     *
+     * <p>{@link #KEY_UNVERIFIABLE} counts as the seller's: the cause genuinely cannot be narrowed,
+     * and re-entering the credential reseals it under the active key, which resolves it either way.
+     */
+    public boolean sellerActionable() {
+        return this == KEY_UNVERIFIABLE || this == INVALID_CREDENTIAL;
+    }
 }

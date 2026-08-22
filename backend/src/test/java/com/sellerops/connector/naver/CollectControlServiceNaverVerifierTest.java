@@ -93,10 +93,16 @@ class CollectControlServiceNaverVerifierTest {
     @BeforeEach
     void setUp() {
         vault = new CredentialVault(credentials, new ObjectMapper(), randomKeyBase64(), "local-test-1");
+        service = serviceWithVault(vault);
+    }
+
+    /** The same wiring against a chosen vault — so a test can present a credential this runtime's key
+     *  cannot open without disturbing the shared fixture. */
+    private CollectControlService serviceWithVault(CredentialVault withVault) {
         NaverApiConnector naver = new NaverApiConnector(
                 new NaverTokenClient(http, clock, "https://fake.naver.test"),
                 new NaverOrdersClient(http, clock, "https://fake.naver.test", 100),
-                vault);
+                withVault);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(naver));
         IngestionService ingestion =
                 new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
@@ -104,12 +110,10 @@ class CollectControlServiceNaverVerifierTest {
                 new com.sellerops.order.ChannelOrderIngestionService(channelOrders, channelOrderStatusEvents, txManager);
         SyncRunExecutor executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
-        NaverConnectionLifecycle naverLifecycle = new NaverConnectionLifecycle(
-                sellerAccounts, channels, txManager);
-        service = new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
-                connectionStatus, capabilities, registry, executor, vault,
+        return new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
+                connectionStatus, capabilities, registry, executor, withVault,
                 new com.sellerops.selleraccount.AccountSessionSlotService(accountSlotRepo),
-                naverLifecycle,
+                new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
                 new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
                         sellerAccounts, channels, txManager),
                 new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels));
@@ -184,6 +188,32 @@ class CollectControlServiceNaverVerifierTest {
         assertThat(result.reasonCode()).isEqualTo("INVALID_CREDENTIAL");
         assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
                 .isEqualTo(ChannelStatus.RECONNECT_REQUIRED);
+    }
+
+    /**
+     * A credential SellerOps cannot open never reaches NAVER, so nothing about NAVER failed. Before
+     * this the vault threw straight out of the test and the connect screen showed a transient provider
+     * error — an invitation to retry a thing that could not work. The classification splits by who can
+     * fix it: an unverifiable seal is the seller's to replace, a key this server lacks is not.
+     */
+    @Test
+    void aCredentialThatCannotBeOpenedFailsWithoutContactingNaver() {
+        SellerAccount acc = naverAccount(ChannelStatus.PENDING);
+        vault.store(org, acc.getId(), "API", "OAUTH2",
+                Map.of("client_id", "test-client-id", "client_secret", clientSecret), null, null, null);
+        // The same row, now sealed under a key this deployment does not hold.
+        CollectControlService otherKey = serviceWithVault(
+                new CredentialVault(credentials, new ObjectMapper(), randomKeyBase64(), "self-pilot-1"));
+
+        ConnectionTestResultView result = otherKey.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("FAILED");
+        assertThat(result.reasonCode()).isEqualTo("CREDENTIAL_UNREADABLE");
+        assertThat(result.message()).contains("서버 설정 문제");
+        // NAVER was never called, and a server-side key problem must not recall the seller.
+        assertThat(http.sent).isEmpty();
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.PENDING);
     }
 
     @Test

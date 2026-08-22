@@ -47,6 +47,18 @@ public record VerifyOutcome(Status status, String reasonCode) {
      */
     public static final String REASON_ORDER_ACCESS_DENIED = "ORDER_ACCESS_DENIED";
 
+    /**
+     * SellerOps could not open the stored credential, and the cause is on SellerOps' side — a key this
+     * deployment does not hold. The channel was never contacted, so nothing about it failed.
+     *
+     * <p>It exists because the alternatives all say something untrue. {@code INVALID_CREDENTIAL} blames
+     * a credential that may be perfectly good; {@code PROVIDER_UNAVAILABLE} and
+     * {@code TEMPORARY_PROVIDER_ERROR} blame a channel that was never called. Before this, the test
+     * simply threw and the connect screen showed a transient-looking error the seller could retry
+     * forever without ever being told the retry could not work.
+     */
+    public static final String REASON_CREDENTIAL_UNREADABLE = "CREDENTIAL_UNREADABLE";
+
     public VerifyOutcome {
         Objects.requireNonNull(status, "status");
     }

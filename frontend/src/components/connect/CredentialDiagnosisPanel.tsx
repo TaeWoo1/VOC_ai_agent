@@ -40,11 +40,10 @@ export function CredentialDiagnosisPanel({ accountId }: { accountId: string }) {
 
   // Whose problem it is. Getting this wrong in either direction is costly: telling a seller to
   // reconnect for a server fault wastes their time and fixes nothing, and telling them to wait for an
-  // operator when their token really has expired leaves the connection dead.
-  const serverSide =
-    diagnosis.status === "NO_KEY_CONFIGURED" ||
-    diagnosis.status === "KEY_NOT_AVAILABLE" ||
-    diagnosis.status === "KEY_MISMATCH";
+  // operator when their token really has expired leaves the connection dead. The backend decides it
+  // (`CredentialKeyStatus.sellerActionable`) so the same rule cannot drift between the two ends; an
+  // older backend that omits the field is read as server-side, which asks nothing of the seller.
+  const serverSide = diagnosis.sellerActionable !== true;
 
   return (
     <div

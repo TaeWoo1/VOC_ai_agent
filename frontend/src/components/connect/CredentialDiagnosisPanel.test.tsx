@@ -18,7 +18,7 @@ vi.mock("../../lib/apiClient", () => ({
   getToken: () => null,
 }));
 
-function diagnosis(status: string, remedy: string | null) {
+function diagnosis(status: string, remedy: string | null, sellerActionable = false) {
   return {
     status,
     keyId: "local-dev-1",
@@ -28,6 +28,9 @@ function diagnosis(status: string, remedy: string | null) {
     lastRotatedAt: null,
     tokenExpiresAt: null,
     remedy,
+    // The backend owns this verdict now (`CredentialKeyStatus.sellerActionable`); the panel renders it
+    // rather than re-deriving it from the status code.
+    sellerActionable,
   };
 }
 
@@ -55,15 +58,29 @@ describe("CredentialDiagnosisPanel", () => {
     },
   );
 
-  it("INVALID_CREDENTIAL is the one that really does ask the seller to act", async () => {
-    getCredentialDiagnosis.mockResolvedValueOnce(
-      diagnosis("INVALID_CREDENTIAL", "자격 증명을 다시 입력해 주세요."),
-    );
+  it.each(["INVALID_CREDENTIAL", "KEY_UNVERIFIABLE"])(
+    "%s is the kind that really does ask the seller to act",
+    async (status) => {
+      getCredentialDiagnosis.mockResolvedValueOnce(
+        diagnosis(status, "자격 증명을 다시 입력해 주세요.", true),
+      );
+
+      render(<CredentialDiagnosisPanel accountId="a1" />);
+
+      expect(await screen.findByText("자격 증명을 다시 확인해야 합니다")).toBeInTheDocument();
+      expect(screen.queryByText(/다시 연결해도 해결되지 않습니다/)).not.toBeInTheDocument();
+    },
+  );
+
+  it("a backend that does not send the verdict is read as server-side — it asks the seller for nothing", async () => {
+    // Absent is not false-for-the-seller: when we cannot tell whose problem it is, sending someone to a
+    // marketplace is the expensive guess. `sellerActionable` omitted entirely (older backend).
+    const { sellerActionable: _omitted, ...withoutVerdict } = diagnosis("KEY_UNVERIFIABLE", "확인이 필요합니다.");
+    getCredentialDiagnosis.mockResolvedValueOnce(withoutVerdict);
 
     render(<CredentialDiagnosisPanel accountId="a1" />);
 
-    expect(await screen.findByText("자격 증명을 다시 확인해야 합니다")).toBeInTheDocument();
-    expect(screen.queryByText(/다시 연결해도 해결되지 않습니다/)).not.toBeInTheDocument();
+    expect(await screen.findByText("SellerOps 서버 설정 문제입니다")).toBeInTheDocument();
   });
 
   it("stays silent when the diagnosis itself cannot be read", async () => {
