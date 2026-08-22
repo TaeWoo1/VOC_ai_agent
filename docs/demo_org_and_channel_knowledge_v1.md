@@ -1043,3 +1043,130 @@ Coupang은 canonical Demo Org에서 처음으로 **REAL 데이터를 갖게 됐�
 backlog 유지, 이번 흐름에서 확장하지 않음: **광고 IP drift 자가검증**(§5e ①) · **Coupang 오류 문구가
 NAVER 어휘를 쓰는 문제**(§5e ②) · sync run 요청 계측(§4f).
 
+
+### 5g. Coupang **PRODUCT** read-only live proof manifest (준비) — 마켓플레이스 호출 **전 정지**
+
+**상태: 준비됨. 실행하지 않았다.** 아래는 전부 코드·DB에서 확인한 사실이며, 이 절을 쓰는 동안
+Coupang에 나간 요청은 **0회**다.
+
+| 필드 | 값 |
+|---|---|
+| channel | `COUPANG` (`346a8e09…`, `supports_product = t`) |
+| org / account | canonical Demo Org · 기존 `3e2ddaaa…` **재사용** (새 account 만들지 않음) |
+| DataType | **`PRODUCT` 하나.** ORDER_SUMMARY / INQUIRY / REVIEW는 이 run에서 호출하지 않는다 |
+| operation | 카탈로그 1회 읽기 (`POST /api/seller-accounts/{id}/sync {"dataType":"PRODUCT"}`, trigger `MANUAL`) |
+| mode | **`READ_ONLY`** |
+| SellerOps의 라이브 액션 | **서명된 GET만.** 목록 `GET …/marketplace/seller-products?vendorId&maxPerPage=10[&nextToken]`, 상세 `GET …/seller-products/{sellerProductId}` |
+| WRITE | **0 — 구조적으로.** `CoupangSellerProductsClient`에는 GET 외의 메서드가 없고, per-run `…_LIVE_APPROVAL_ID`는 무장돼 있지 않으며 WRITE gate는 standing grant를 절대 받지 않는다 |
+| 백엔드 interlock | `CoupangLiveCallGuard.ensureLiveReadAllowed` — 주문·문의와 **같은 choke point**, standing READ grant(§6a)로 이미 열려 있다 |
+| 기존 schedule | ORDER_SUMMARY / INQUIRY 60분 routine은 **계속 running**. 이 proof는 건드리지 않는다 |
+| PRODUCT schedule | **만들지 않는다 — 코드가 이미 그렇다.** `SelfPilotReconciler.ROUTINE_TYPES = (REVIEW, INQUIRY, ORDER_SUMMARY)`; PRODUCT는 없으므로 CONNECTED 상태여도 자동 생성되지 않는다. recurrence semantics는 이 proof 뒤에 정한다 |
+| 되돌릴 수 없는 것 | 없음. 읽기뿐이고, 재실행은 멱등이다 |
+
+#### 요청 볼륨 — 이 proof의 **유일한 실질 위험**
+
+한 상품마다 **상세 호출이 1회** 붙는다(목록은 identity·상태만 주고, 옵션 축 —
+`vendorItemId` · 옵션명 · 옵션가 · 셀러 SKU — 은 상세에만 있다). 따라서 카탈로그 N개에 대해
+
+> 요청 수 ≈ **⌈N/10⌉ (목록) + N (상세)**
+
+이고, 상품 수 상한은 **없다**(`MAX_PAGES = 10,000`은 페이지 한도이지 상품 한도가 아니다). 429는
+페이지 단위로 잡혀 커서를 그대로 두고 멈춘다. **카탈로그 크기를 지금은 모른다** — 그것이 이 proof가
+측정하려는 값 중 하나이므로, 실행 전에 알 방법이 없다.
+
+#### 측정 대상 — 요청하신 항목과 **현재 코드가 실제로 볼 수 있는 것**
+
+| 요청 항목 | 코드가 읽는가 | 저장 위치 | 이번 proof로 측정 가능? |
+|---|---|---|---|
+| 실제 product/listing 수 | — | `channel_products` | ✅ |
+| `sellerProductId` | ✅ 목록 | `channel_products.external_product_id` | ✅ |
+| `vendorItemId` (옵션ID) | ✅ 상세 `items[]` | `product_variants.external_variant_id` | ✅ |
+| `productId` (노출상품ID) | ❌ 읽지 않음 | — | ❌ |
+| 상품명 | ✅ `sellerProductName` | `channel_products.channel_product_name` | ✅ |
+| 판매가 | ✅ `items[].salePrice` | `channel_price` · `product_variants.price` | ✅ |
+| 판매상태 | ✅ `statusName` | `selling_status` (**정규화 후**) | ⚠ 원문 토큰은 저장되지 않는다 |
+| option / variant | ✅ `items[].itemName` | `product_variants.option_name` | ✅ |
+| seller SKU | ✅ `items[].externalVendorSku` | `product_variants.sku` · `products.sku` | ✅ |
+| category | ✅ `displayCategoryCode` (**코드만, 이름 아님**) | fact `taxonomy:category` | ✅ |
+| brand | ✅ | fact `taxonomy:brand` | ✅ |
+| manufacturer | ❌ "이 리소스에 없음"이라고 **단정** | — | ❌ |
+| description / contents | ❌ "별도 리소스"라고 **단정** | — | ❌ |
+| structured attributes / specs | ✅ `items[].attributes[]` | fact `spec:*` | ✅ |
+| URL 제공 여부 | ❌ "seller API가 제공하지 않음"이라고 **단정** | — | ❌ |
+| 채널이 말하는 최종수정시각 | ❌ `null` 고정 | — | ❌ |
+
+**"매퍼가 읽는 필드가 아니라 실제 응답의 채움 비율"은 현재 코드로 절반만 답할 수 있다.** 위 표의
+❌ 다섯 줄은 매퍼가 필드를 아예 만들지 않으므로 DB에도 로그에도 흔적이 남지 않는다. 그리고 그중
+셋(manufacturer · description · URL)은 **한 번도 실물 응답과 대조된 적 없는 부정 단정** —
+§5b에서 텍스트 체크리스트를 틀리게 만든 것과 정확히 같은 종류의 주장이다.
+
+> **열려 있는 결정 하나.** 이 proof의 핵심이 wire shape 최초 관측이라면, 응답 본문의 **키 이름과
+> 키별 채움 개수만**(값은 절대 아님) 1회 기록하는 관측자가 필요하다. 사니타이즈 규칙과 헬퍼는 이미
+> 있다 — `CoupangResponseDiagnostics`("object KEY-NAME sets … Object keys are API schema, not data")의
+> `fieldNames`/`shapeDiagnostic`을 성공 응답에도 쓰는, 플래그로 감싼 10줄 남짓. 키 이름은 플랫폼
+> 지식이지 셀러 데이터가 아니다. **승인 없이 넣지 않았다.** 넣지 않고 실행해도 proof는 성립하며,
+> 그 경우 위 ❌ 다섯 줄은 "측정하지 못했다"로 남는다.
+
+#### 사전 측정한 baseline (2026-08-23, DB)
+
+| | 값 |
+|---|---|
+| Coupang `channel_products` | **3 — 전부 `DEMO_SEED` · `DERIVED:INGEST`** (외부 id는 시드 패턴 7자, 비숫자) |
+| org 전체 `product_variants` | **0** (채널 불문) |
+| `COUPANG:%` source를 가진 `product_facts` | **0** |
+| Coupang REAL 문의 | 2건 → **REAL product 2개** 생성됨, `sku` = 11자리 숫자 = `sellerProductId` |
+| `reviews.source_option_id`가 채워진 행 | **org 전체 0** (Coupang REAL 리뷰는 애초에 0) |
+
+#### provenance 계약 — 무엇이 보장되고, 무엇이 보장되지 않는가
+
+- **REAL로 임의 승격 없음.** writer는 기존 행의 `data_origin`을 **건드리지 않는다**. 게다가 기존
+  Coupang 3건의 외부 id는 시드 패턴이라 실제 `sellerProductId`(숫자)와 **충돌할 수 없다** → 3건은
+  `DEMO_SEED`로 그대로 남을 것으로 예측한다.
+- **역방향 위험도 같이 본다.** 만약 REAL 리스팅이 `DEMO_SEED` product에 붙으면 writer는 승격하지
+  않으므로 **실제 데이터가 기본 조회에서 가려진다**. 예측은 "발생하지 않음"이고, 확인 대상이다.
+- **placeholder 생성 없음.** `sellerProductId`가 없는 행은 `continue`로 건너뛴다. 상세 호출이 실패한
+  상품은 identity만으로 기록되고 옵션 축은 그냥 비어 있다 — 합성하지 않는다.
+- **`product_variants` / `product_facts`에는 `data_origin` 컬럼이 아예 없다.** 이 둘의 provenance는
+  `source = 'COUPANG:SELLER_PRODUCTS:v1'` + `observed_at`이 전부이고, `realDataOnly` 필터는 이 두
+  테이블에 걸리지 않는다. 사실이므로 적어 둔다.
+- `observed_at`은 **읽은 시각**, `source_updated_at`은 채널이 말하지 않으므로 `null`. 후자를 전자로
+  대체하지 않는다.
+
+#### 정당한 reconciliation과, 예측되는 identity 분열
+
+문의로 만들어진 REAL product 2개의 `sku`는 `sellerProductId`다. 카탈로그 행의 `sku`는
+**첫 옵션의 `externalVendorSku`가 있으면 그것**, 없으면 `sellerProductId`다. 따라서
+
+- `externalVendorSku`가 **없다** → 카탈로그 sku = `sellerProductId` → **기존 REAL product에 붙는다.**
+  실제 외부 식별자가 일치하는 정당한 reconciliation이다.
+- `externalVendorSku`가 **있다** → 새 product가 생기고, 문의가 붙어 있는 product는 따로 남는다 →
+  **한 리스팅이 두 product로 갈라진다.**
+
+두 번째가 이 proof에서 드러날 수 있는 실제 결함이다. **미리 고치지 않는다** — 어느 쪽인지 모르는
+상태에서 고치는 것은 §5b가 경고한 그 행동이다. 측정하고, 그 결과로 결정한다.
+
+#### order ↔ product — 지금은 **연결할 정보가 없다** (PRODUCT proof로도 안 생긴다)
+
+양쪽이 다 비어 있다: `channel_orders`에는 상품 컬럼이 **하나도 없고**(product_id · sku ·
+vendorItemId 전부 부재), Coupang 주문 매퍼의 `OrderItem` 레코드는 `orderPrice` **하나만** 읽는다.
+이미 수집된 주문 50건의 원문은 남아 있지 않으므로 소급 연결도 불가능하다. 이 proof는 조인의
+**상품 쪽 절반**(`vendorItemId` → `product_variants`)만 실재하게 만든다. 나머지 절반은 별도
+결정이며 **이번 범위가 아니다.**
+
+#### live read 성공 후 — 추가 마켓플레이스 호출 **0회**로 검증할 것
+
+1. `channel_products`: 건수 · `data_origin` · `source_kind` · `observed_at`/`first_seen_at`/`last_seen_at`
+2. `product_variants`: 건수 · `vendorItemId` 유일성 · 옵션명/SKU/가격 채움 비율
+3. `product_facts`: 네임스페이스별(`taxonomy:*` · `spec:*` · `desc:*`) 건수 · `source` · `confidence`
+4. `products`: 신규 생성 vs 재사용 · `data_origin` · 문의 product 2개가 리스팅을 얻었는지
+5. 기존 `DEMO_SEED` 3건이 **그대로 3건 DEMO_SEED**인지 (승격 0)
+6. 문의 linkage: Coupang REAL 문의 2건의 `product_id`가 이번에 만들어진 product 집합 안에 있는지
+7. `GET /api/products/{id}/knowledge` — facet별 coverage(IDENTITY · LISTING · PRICE · VARIANT ·
+   TAXONOMY · DESCRIPTION · SPEC · SIGNALS), `/facts`, `/signals`
+8. Agent `get_product_knowledge` · `get_product_signals` 가시성 (읽기 전용 도구)
+9. synthetic exclusion이 여전히 유효한지 (기본 조회에 DEMO_SEED 리스팅이 안 나오는지)
+10. WRITE 0 · 새 schedule 0 · ORDER_SUMMARY/INQUIRY schedule 무변경 · 401/403/429/WARN/ERROR
+
+#### 정지
+
+여기서 멈춘다. 실제 Coupang PRODUCT 호출에는 **새로운 단회 승인**이 필요하다.
