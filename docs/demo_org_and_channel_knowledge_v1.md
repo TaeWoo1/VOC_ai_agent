@@ -730,24 +730,58 @@ fixture는 **합성**이다. 실제 export의 헤더 행(컬럼명은 개인정�
 | frontend | **2,237** 통과 |
 | 새 fence가 수정 전 코드에서 실패함 | **확인** — A는 5개, B는 파서 계약 전체 |
 
-## 5. 아직 라이브 경계 너머에 있는 것
+## 4i. NAVER Demo Spine — 종료 판정 (2026-08-23)
 
-이 문서가 기록하는 작업에서 **마켓플레이스 접촉은 0회**였다. 남은 것은 전부 셀러/운영자의 행위가
-필요하다 — `docs/sellerops_live_approval_contract.md`.
+**현재 계약 기준 COMPLETE로 닫는다** (product-owner 결정, 2026-08-23).
 
-**끝난 것** (2026-08-22, §4a·§4c):
+| 축 | 상태 |
+|---|---|
+| 연결 | `CONNECTED` — credential이 active key로 봉인, 호출 IP·주문 권한 확인 (§4c ①) |
+| PRODUCT | 69 리스팅 라이브, 필드 범위 관측 완료, **routine 1440분 running** (§4c ② · §4f) |
+| ORDER_SUMMARY | 최근 창 라이브, **routine 60분 running**, restart/floor/lane 독립 전부 테스트로 고정 (§4c ③ · §4d · §4f) |
+| REVIEW | REAL **4,340** / 최신 **2026-08-22**, 2구간 COVERED, attribution 100% (§4g) |
+| INQUIRY | **UNSUPPORTED 유지** — 계약 변경 없음 |
 
-1. ~~Cafe24 read 1회~~ — 완료. `mall.read_product` 재동의도 완료.
-2. ~~NAVER credential 재입력~~ — 완료. 연결 검증 → PRODUCT → 최근 14일 주문까지 라이브 증명.
+### 열려 있는 단 하나 — regression checkpoint, blocker 아님
 
-**남은 것** — 전부 셀러/운영자의 행위가 필요하다:
+§4g의 completion blocker 2개는 §4h에서 고쳐졌고 회귀는 green이다. 다만 **수정 후 guided path를
+마켓플레이스에 대고 다시 돌린 적은 없다** — 데모 org의 계획이 이미 `COMPLETED`라 오늘 돌릴 구간이
+없기 때문이다.
 
-1. **NAVER REVIEW refresh** — §4e. 셀러가 판매자 센터에서 2회 내보내기. 코드 쪽 준비는 끝났다.
-2. **Coupang 최초 연결** — credential 행이 없다. 발급 walk는 라이브 증명됨(2026-08-12).
-3. **NAVER 70일 ORDER historical backfill** — 지금 데모의 blocker가 아니다. primary cursor가
-   2026-06-14에 그대로 있으므로 언제든 bounded lane으로 가능하다(§4d).
-4. **상품 enrichment (URL·옵션·상세)** — NAVER와 Cafe24 **양쪽 모두** 목록 리소스가 담지 않는다는 것이
-   확인됐다. Coupang 연결 후 cross-channel 패키지로 묶는다. 지금은 기록만 유지한다.
+> **REVIEW guided acquisition post-fix marketplace re-proof = 다음 실제 refresh(2026-09 구간)에서
+> 수행하는 regression checkpoint.** 현재 blocker가 **아니다**. Spine 종료를 막지 않으며, 새 작업을
+> 열지도 않는다. 9월 구간을 가져올 때 그 실행이 곧 재증명이고, 그때 확인할 것은 §4h가 고친 두 계약뿐이다
+> — 패널이 export/consent 단계까지 유지되는가, download가 감지되어 자동 ingest까지 가는가.
+
+### NAVER에서 추가 개발하지 않는다 (backlog 유지)
+
+2026-08-23 결정. 아래 넷은 **기록만 유지**하고 착수하지 않는다.
+
+| # | 항목 | 어디에 기록돼 있나 |
+|---|---|---|
+| 1 | **70일 ORDER historical backfill** | §4d — primary cursor가 2026-06-14에 온전하므로 bounded lane으로 언제든 가능 |
+| 2 | **Product enrichment** (URL·옵션·상세) | §4c ② — NAVER·Cafe24 **양쪽** 목록 리소스가 담지 않음. Coupang 연결 후 cross-channel 패키지 |
+| 3 | **REVIEW segmentation UX** (한 번에 되는 크기면 한 구간) | §4g — 셀러 행동 횟수 문제이지 완주 문제가 아니다 |
+| 4 | **connection UI polish / 발견성** | §4g — `/connect/review-history` 진입점이 문장 속 ghost 링크 |
+
+3·4는 **Connection/Acquisition UX Polish backlog**다. 셋 다 불편이지, 경로가 막히는 문제가 아니다 —
+그 구분이 §4h가 무엇만 고쳤는지를 설명한다.
+
+## 5. 다음 — Coupang
+
+이 문서가 기록하는 작업에서 **마켓플레이스 접촉은** 라이브 증명 구간(§4c·§4f·§4g)을 빼면 **0회**였다.
+
+**끝난 것** (2026-08-22 ~ 08-23):
+
+1. ~~Cafe24 read 1회 + `mall.read_product` 재동의~~ — 완료 (§4a).
+2. ~~NAVER credential 재입력~~ — 완료. 연결 → PRODUCT → 최근 14일 주문 라이브 증명 (§4c).
+3. ~~NAVER routine schedule~~ — ORDER 60분 · PRODUCT 1440분 running (§4f).
+4. ~~NAVER REVIEW refresh~~ — REAL 4,340 / 최신 2026-08-22 (§4g), completion hardening 완료 (§4h).
+
+**남은 것** — 셀러/운영자의 행위가 필요하다:
+
+1. **Coupang 최초 연결** — credential 행이 없다. 발급 walk는 라이브 증명됨(2026-08-12).
+   3채널 canonical Demo Org의 마지막 칸이고, **지금의 목표다**.
 
 Coupang이 붙기 전에는 12칸 전부가 "canonical Demo Org에서 현재 연결로 fresh proof"를 갖지 못한다.
 그것이 이 문서가 어떤 capability 상태도 옮기지 않는 이유다.
