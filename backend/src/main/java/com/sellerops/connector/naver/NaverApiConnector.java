@@ -101,15 +101,21 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
                 CONNECTOR_CLASS,
                 Set.of(DataType.ORDER_SUMMARY, DataType.PRODUCT),
                 Map.of(DataType.ORDER_SUMMARY, "CONFIRMED",
-                        // Implemented and offline-verified; the wire shape has not been observed live
-                        // from this repository, and the seller's application must hold the product API
-                        // permission (a seller grant, never worked around).
-                        DataType.PRODUCT, "NEEDS_VERIFICATION"),
+                        // Live-verified 2026-08-22 on the canonical demo org: 69 listings over 2 pages,
+                        // 0 errors. The seller's application must still hold the product API permission
+                        // (a seller grant, never worked around).
+                        DataType.PRODUCT, "CONFIRMED"),
                 "Slice 1b: ORDER_SUMMARY via the official two-call flow"
-                        + " (last-changed-statuses → product-orders/query). PRODUCT reads the seller's"
-                        + " own channel-product catalogue (identity, listing name, url, price, status,"
-                        + " brand/manufacturer, category, option combinations) for the Product Knowledge"
-                        + " layer — read-only, page-indexed, NEEDS_VERIFICATION."
+                        + " (last-changed-statuses → product-orders/query); an operator can also read a"
+                        + " bounded date window on its own cursor lane. PRODUCT reads the seller's own"
+                        + " channel-product catalogue for the Product Knowledge layer — read-only,"
+                        + " page-indexed, CONFIRMED (live 2026-08-22)."
+                        + " What the search resource ACTUALLY returned, live: identity, listing name,"
+                        + " sale price, selling status and last-modified on every row; brand and"
+                        + " manufacturer on about two thirds; category on every row."
+                        + " It returned NO store URL, NO option combinations and NO detail content —"
+                        + " the mapper reads all three and they arrived empty, so those need a separate"
+                        + " per-product read, not a wider page of this one."
                         + " REVIEW has no official API; INQUIRY/SALES deferred.");
     }
 

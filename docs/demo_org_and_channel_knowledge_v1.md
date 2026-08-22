@@ -272,6 +272,67 @@ canonical Demo Org의 **NAVER `ORDER_SUMMARY` schedule만** 임시 pause했다 �
   (`docs/sellerops_local_to_pilot_connectivity_decision.md` §3). 값은 `backend/.env.local`의
   `SELLEROPS_CONNECTOR_NAVER_ADVERTISED_EGRESS_IPS`에만 있다 — **git·정본 문서·메모리에 기록하지 않는다.**
 
+## 4c. NAVER 라이브 검증 (2026-08-22) — ① 연결 · ② PRODUCT · ③ 최근 14일 주문
+
+승인된 매니페스트 1건, 세 단계, **요청 21건 · 401/403/429 0 · WARN/ERROR 0 · WRITE 0**.
+행 단위 기록은 `docs/evidence/INDEX.md` §1.
+
+### ① 연결 검증
+
+요청 3건(verify 토큰 · probe 토큰 · 주문접근 probe GET). `RECONNECT_REQUIRED` → **`PREPARING`**.
+test 단독으로는 CONNECTED가 되지 않는다 — 자격 증명이 맞다는 것과 주문이 실제로 흐른다는 것은
+별개의 사실이고, 두 번째는 ③이 증명한다.
+
+### ② PRODUCT — 목록 리소스가 실제로 돌려주는 것
+
+69 리스팅, 2페이지, 1.6초, 오류 0.
+
+| 필드 | 커버리지 |
+|---|---|
+| 채널상품번호 · 이름 · 판매가 · 통화 · 판매상태 · 최종수정일 · 카테고리 | **69/69** |
+| 브랜드 · 제조사 | **44/69** |
+| **상품 URL · 옵션조합 · 상세설명 · 판매자관리코드** | **0/69** |
+
+매퍼는 네 가지를 **전부 읽는다**(`storeKeepingUrl`·`optionCombinations`·`detailContent`·
+`sellerManagementCode`). 비어서 온 것이다 — 매핑 누락이 아니라 **목록 리소스의 범위**다. 커넥터
+설명이 "url · option combinations"를 읽는다고 말하고 있었으므로 관측에 맞춰 고쳤다. 이걸 얻으려면
+목록 페이지를 넓히는 게 아니라 **상품별 별도 read**가 필요하다.
+
+판매자관리코드가 0건이라 SKU는 채널상품번호로 채워진다. 이 계정에서 그렇다는 관측이며 규칙이 아니다.
+
+**Reconcile — 기존 DERIVED 47개.** 리뷰 export ingest가 만든 파생 리스팅 47개는 이름이 빈 값이었다.
+
+- **39개가 제자리에서 승격** — 같은 `external_product_id` 행이 `DERIVED:INGEST` →
+  `NAVER:PRODUCT_API:v1`이 되고 빈 이름이 실제 상품명으로 채워짐
+- **사라진 행 0**
+- 남은 **8개는 전부 합성**(`MLD-*` · `SKU-000*` · `SKU-SYN-*`) — 실제 NAVER 상품번호는 **전부** 매칭됐다
+- 신규 리스팅 30개, 신규 상품 30개, **전원 실제 상품명**
+- **기존 상품의 이름·SKU·provenance 변경 0건, 삭제 0건**
+
+**가짜 상품 0건.** 이름이 숫자뿐인 상품은 저장소에 6건 있고 전부 오늘 14:40–14:41의 Cafe24
+placeholder(170·91·94)다 — 이 run은 **한 건도 만들지 않았다.** §4a의 귀속 계약대로 리뷰는 카탈로그를
+통해서만 연결되고, resolve-or-create는 여전히 금지다.
+
+### ③ ORDER_SUMMARY — bounded 최근 창
+
+`2026-08-09 ~ 2026-08-22`, 24시간 창 14개, 요청 16건(창 14 + 주문이 있던 두 창의 상세 조회 2), 15.3초.
+
+- **27건 주문** — 2026-08-21 13건 170,900원 · **2026-08-22 14건 117,400원(당일)**
+- 나머지 12개 창은 0건. 이 창들도 실제로 조회됐다 — 데이터가 없었을 뿐이다
+- **primary cursor `2026-06-14T13:49:51.595+09:00` 불변** (`updated_at`도 2026-06-14 그대로)
+- `backfill` lane에 **이번 run만** 기록: `bounds{from:2026-08-09, toExclusive:2026-08-22T21:34:52.803+09:00}`
+- **기존 43일치 일별 합계는 43행 전부 바이트 동일** — 추가된 건 2행뿐이고, `updated_at`조차 변하지 않았다
+- **2026-08-09 이전 날짜는 한 건도 기록되지 않았다** (emission floor)
+- 계정 `PREPARING` → **`CONNECTED`** — 수집된 주문이 2-signal 게이트의 나머지 절반이다
+
+**70일 historical recovery는 이 매니페스트에서 제외**했고, 별도 backfill 계획으로 둔다. primary
+cursor가 2026-06-14에 그대로 있으므로 그 계획은 지금도 온전히 가능하다.
+
+### 끝난 뒤의 상태
+
+NAVER schedule **여전히 0개 enabled**(운영자 pause 유지, `paused_reason` NULL). PRODUCT schedule
+미생성. Cafe24 3종은 §6a routine으로 계속 돈다.
+
 ## 5. 아직 라이브 경계 너머에 있는 것
 
 이 문서가 기록하는 작업에서 **마켓플레이스 접촉은 0회**였다. 남은 것은 전부 셀러/운영자의 행위가

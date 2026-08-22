@@ -83,19 +83,22 @@ entries:
   - id: naver-cap-product
     topic: CAPABILITY
     kind: FACT
-    title: 상품 조회는 구현되어 있으나 아직 라이브로 관측된 적이 없습니다
+    title: 상품 조회는 동작하지만 목록에 URL·옵션·상세설명은 오지 않습니다
     summary: >-
-      NaverProductsClient가 /external/v1/products/search로 채널상품 단위(이름·URL·가격·판매상태·
-      브랜드/제조사·카테고리·옵션조합)를 읽습니다. 상태는 NEEDS_VERIFICATION입니다.
+      /external/v1/products/search가 채널상품 단위로 이름·판매가·판매상태·최종수정일·카테고리를
+      전부, 브랜드·제조사를 약 2/3에 담아 돌려줍니다. 상품 URL·옵션조합·상세설명은 이 목록
+      리소스에 담기지 않습니다 — 없는 게 아니라 이 호출로는 오지 않습니다.
     body: >-
-      판매자 애플리케이션에 상품 API 권한이 필요하며, 그 권한 부여는 판매자의 행동입니다.
-      SellerOps는 우회하지 않습니다. wire shape이 한 번도 관측되지 않았으므로 이 경로가 실제로
-      동작한다고 말하지 않습니다 — 구현되어 있다는 것과 검증되었다는 것은 다릅니다.
+      2026-08-22 라이브 관측(69개 리스팅·2페이지·오류 0). 판매자 애플리케이션에 상품 API 권한이
+      필요하며, 그 권한 부여는 판매자의 행동입니다. SellerOps는 우회하지 않습니다.
+      URL·옵션·상세설명이 필요하면 상품별 별도 read가 필요하고, 목록 페이지를 넓혀서는 얻을 수
+      없습니다. 판매자관리코드(sellerManagementCode)도 이 계정에서는 한 건도 오지 않아 SKU는
+      채널상품번호로 채워집니다.
     capabilities: [PRODUCT]
-    tags: [상품, 카탈로그, 권한, 검증필요]
-    source: SELLEROPS_EVIDENCE
-    sourceRef: docs/multi-channel-connector-roadmap.md §4.1 (NAVER/PRODUCT)
-    verifiedAt: "2026-08-21"
+    tags: [상품, 카탈로그, 권한, 필드범위]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/evidence/INDEX.md (2026-08-22 NAVER PRODUCT one-shot READ)
+    verifiedAt: "2026-08-22"
 
   # ---------------------------------------------------------------- CONNECTION
   - id: naver-conn-credentials
