@@ -439,6 +439,90 @@ upsert하므로 재읽기는 idempotent다.
 주기 하한은 15분(`CollectControlService#MIN_INTERVAL_MINUTES`), 상한은 없다. 빈 run은 `SUCCESS`로
 기록되므로 조용한 시간대가 실패 streak를 만들지 않는다. NAVER pacer는 요청 간 최소 1초를 유지한다.
 
+## 4f. NAVER routine schedule 최초 활성화 (2026-08-22) — 첫 cycle이 찾아낸 것
+
+§4d는 코드를 읽고 고쳤다. 이 절은 **실제로 켰을 때 무슨 일이 일어났는지**를 기록한다. 일어난 일의
+절반은 계획대로였고, 나머지 절반은 아무도 몰랐던 결함이었다.
+
+### 활성화
+
+| lane | 주기 | 상태 |
+|---|---|---|
+| NAVER ORDER_SUMMARY | 60분 | enabled |
+| NAVER PRODUCT | 1440분 | enabled |
+| Cafe24 3종 | 60분 | **손대지 않음** |
+| NAVER REVIEW / INQUIRY | — | **만들지 않음** |
+
+근거는 §6a Self-Pilot Runtime v1의 **standing READ grant**다(2026-08-18 product-owner 결정) — 라이브
+승인 계약의 단일 사용 manifest는 사람이 앉아 있는 guided run을 위한 것이고, 소유 org의 routine READ
+schedule은 그 결정이 이미 연 경로다. Cafe24 3종이 그 아래에서 돌고 있었다.
+
+### ORDER 첫 automatic cycle — 계획대로 된 부분
+
+```
+23:01:55 WARN 네이버 주문 routine 커서가 69일 뒤처져 최근 14일 구간에서 재시작합니다.
+              그 이전 구간은 자동 복구하지 않으며 별도 backfill 대상입니다.
+```
+
+- stale primary(`2026-06-14`)를 **재개하지 않았다**. horizon `2026-08-08`에서 시작
+- 커서에 `bounds{from:"2026-08-08", toExclusive:null}` — floor는 있고 끝은 없다(routine의 모양)
+- **2026-06-14 ~ 2026-08-07 구간 일별 합계 기록 0건** — 자동 소급 복구 없음
+- `backfill` lane(`from:2026-08-09`) **완전히 불변** — lane 독립 확인
+- 실제로 들어온 것: 2026-08-22가 14건 → **19건 / 124,400원**, `channel_orders` 27 → 32.
+  21:35 이후 실제로 발생한 주문 5건이다
+
+### ORDER 첫 automatic cycle — 계획대로 되지 않은 부분
+
+**run이 끝나지 않았다.** 5분 21초 동안 초당 1건씩 약 **320회**의 라이브 요청을 냈고, 멈추지 않았다면
+executor의 10,000 페이지 가드까지 갔을 것이다. 관측 즉시 schedule을 끄고 백엔드를 정지시켰다.
+
+원인은 한 줄로 말할 수 있다 — **커서가 적을 수 없는 정밀도로 시간을 비교하고 있었다.**
+
+| | |
+|---|---|
+| 커서 wire format | `yyyy-MM-dd'T'HH:mm:ss.SSSXXX` — 밀리초 **3자리**(NAVER 주문 조회의 요구 형식) |
+| 프로덕션 시계 | `Clock.systemUTC()` — 이 JVM에서 **마이크로초** |
+| 결과 | 커서에 들어간 instant는 잘려서 나오고, 잘린 값은 자기가 만들어진 `now`보다 **영원히 이전**이다 |
+| `isCaughtUp` | 정확히 그 두 값을 비교한다 ⇒ 절대 참이 되지 않음 ⇒ `hasMore` 절대 거짓이 되지 않음 |
+
+**새 결함이 아니다.** 이 org의 마지막 "성공한" NAVER 주문 수집 — 2026-06-14 — 은
+**13분 30초 동안 돌고 0행을 반환한 뒤 `SUCCESS`로 기록**됐다. 같은 spin이다. 보이지 않았던 이유는
+그 뒤 51회의 credential 실패가 routine을 69일 뒤에 묶어 뒀기 때문이다. 69일 뒤처진 커서는 `now`에
+가까워질 일이 없고, 가까워지지 않으면 마이크로초 나머지는 아무 일도 하지 않는다.
+**routine에 최근 horizon을 준 것이 그것을 도착하게 만들었다.**
+
+파일의 43개 테스트가 전부 놓친 이유도 하나다: **모든 테스트 시계가 정확한 밀리초였다.** 정확한
+밀리초는 왕복해도 값이 변하지 않는다.
+
+### 고친 것 (`7d9203e2`)
+
+시계를 **커서가 표현할 수 있는 해상도로 읽는다**(`NaverOrdersCursor#atWireResolution`, 한 곳). 허용
+오차가 아니라 같은 값끼리의 비교로 만든 것이다. 회귀 울타리는 **프로덕션이 실제로 가진 마이크로초
+정밀도의 시계**를 쓰는 테스트 2개이고, 둘 다 수정 전 코드에서 **실패함을 확인**했다.
+
+### 재활성화 후 — 증명
+
+| 확인 | 결과 |
+|---|---|
+| ORDER cycle이 **종료**하는가 | **1.12초 SUCCESS** (이전: 무한) |
+| PRODUCT 첫 cycle | stale cursor `3` → 빈 페이지 1건 → **`1`로 자가 복구**, 0.15초 |
+| PRODUCT **다음 cycle이 기존 catalog를 재관측**하는가 | **69 리스팅 전부**, 1.4초, 실패 0 |
+| REAL listing 중복 | **0** — 재관측 후 listing 77행 **바이트 동일** |
+| **합성 DERIVED 8개 승격** | **없음** — `DERIVED:INGEST` 그대로(REAL 5 · DEMO_SEED 3) |
+| product 행 | 252 **바이트 동일**, 생성·삭제 0 |
+| REAL provenance | 유지 |
+| **WRITE** | **0** — 도달 가능한 NAVER 엔드포인트 4개가 전부 read이고 테스트로 잠겨 있다 |
+| `next_run_at` | ORDER `2026-08-23 00:13`(+60분) · PRODUCT `2026-08-23 23:14`(+1440분) |
+| Cafe24 | 3종 전부 불변(60분, `paused_reason` NULL) |
+
+schedule 2개는 **enabled 상태로 계속 돈다.**
+
+### 남는 정직한 항목
+
+0행을 반환하며 13분 30초 도는 run이 `SUCCESS`로 기록됐다는 사실 자체는 아직 고치지 않았다. 결함은
+사라졌지만, **비슷한 폭주를 run 기록만 보고 알아차릴 방법은 여전히 없다**(job에 요청 수나 페이지 수가
+남지 않는다). 별도 항목으로 남긴다.
+
 ## 4e. NAVER REVIEW refresh 준비 (2026-08-22) — 마켓플레이스 접촉 0회
 
 **공식 API를 새로 만들지 않는다.** NAVER는 판매자용 리뷰 API를 제공하지 않고(`naver-cap-review-no-api`),
