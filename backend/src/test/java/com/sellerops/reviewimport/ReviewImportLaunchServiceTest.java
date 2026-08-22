@@ -25,6 +25,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -47,8 +48,12 @@ class ReviewImportLaunchServiceTest {
     private final ChannelRepository channels = mock(ChannelRepository.class);
     private final AccountSessionSlotService accountSlots = mock(AccountSessionSlotService.class);
 
+    /** The real fence over the same mocks — the identity chain is part of what these tests exercise. */
+    private final ReviewImportIdentityFence fence =
+            new ReviewImportIdentityFence(launches, plans, segments, sellerAccounts, channels);
+
     private final ReviewImportLaunchService service = new ReviewImportLaunchService(
-            launches, plans, segments, planService, runService, sellerAccounts, channels, accountSlots);
+            launches, plans, segments, planService, runService, sellerAccounts, channels, accountSlots, fence);
 
     /**
      * A second instance with "today" pinned to 2026-07-26 KST, for the seller's range selection.
@@ -57,7 +62,7 @@ class ReviewImportLaunchServiceTest {
      * meaning tomorrow.
      */
     private final ReviewImportLaunchService dated = new ReviewImportLaunchService(
-            launches, plans, segments, planService, runService, sellerAccounts, channels, accountSlots,
+            launches, plans, segments, planService, runService, sellerAccounts, channels, accountSlots, fence,
             Clock.fixed(Instant.parse("2026-07-26T01:00:00Z"), ReviewImportLaunchService.KST));
 
     private final UUID orgId = UUID.randomUUID();
@@ -102,6 +107,28 @@ class ReviewImportLaunchServiceTest {
         s.setExecutionState(exec);
         s.setCoverageState(cov);
         return s;
+    }
+
+    private Channel channel() {
+        Channel c = new Channel();
+        c.setId(channelId);
+        c.setCode("NAVER");
+        return c;
+    }
+
+    /**
+     * The identity chain resolving normally — this org owns the account, the account is on the ticket's
+     * channel, and the segment's plan is this org's. {@link ReviewImportIdentityFence} re-proves every one
+     * of those on each ticket, so a test about anything else still needs them to resolve. Individual tests
+     * re-stub what they are actually about (a superseded segment, a foreign org, a broken binding).
+     */
+    @BeforeEach
+    void identityChainResolves() {
+        when(sellerAccounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account()));
+        when(channels.findById(channelId)).thenReturn(Optional.of(channel()));
+        when(segments.findByIdAndOrgId(segId, orgId))
+                .thenReturn(Optional.of(segment(SegmentExecutionState.PENDING, SegmentCoverageState.UNVERIFIED)));
+        when(plans.findByIdAndOrgId(planId, orgId)).thenReturn(Optional.of(plan()));
     }
 
     private ReviewImportLaunch ticket(ReviewImportLaunchKind kind, ReviewImportLaunchStatus status) {

@@ -88,9 +88,31 @@ require_env_file() {
   for name in SELLEROPS_BASE_URL SELLEROPS_EMAIL SELLEROPS_PASSWORD; do
     [ -n "${!name:-}" ] || { echo "FAIL-CLOSED: $name is not set in $ENV_FILE." >&2; exit 2; }
   done
-  case "$SELLEROPS_EMAIL" in
-    demo@sellerops.ai) echo "REFUSED: SELLEROPS_EMAIL is the demo org — the self-pilot agent must run as the self-pilot org (runbook trap 6)." >&2; exit 2 ;;
-  esac
+  # NO email check here, deliberately. This used to refuse demo@sellerops.ai as a stand-in for "the agent
+  # must be in the same org as the browser" (runbook trap 6, 2026-07-26). It was a proxy, and it inverted:
+  # by 2026-08-22 that address owned the canonical Demo Org and was its ONLY login, so the guard refused the
+  # one org the work was about while permitting every other mismatch it had never heard of. An address is
+  # not an authorization fact — it is not what the server checks and the person it constrains can change it.
+  # The invariant it stood for is enforced server-side, on identity the server established, by
+  # com.sellerops.reviewimport.ReviewImportIdentityFence. This script's job is to make a mismatch LEGIBLE.
+  agent_org_line
+}
+
+# Sign in with the configured credentials and say which org the SERVER says they are — a diagnostic, never
+# an authorization. A wrong org here is not refused by this script; it is refused by the backend when the
+# run reaches it, and this line is what makes that refusal take seconds to understand instead of an hour.
+# Sanitized: an opaque org-id prefix, never the email, never the password, never a token.
+agent_org_line() {
+  local body org
+  body="$(curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$SELLEROPS_EMAIL\",\"password\":\"$SELLEROPS_PASSWORD\"}" \
+    "$SELLEROPS_BASE_URL/api/auth/login" 2>/dev/null || true)"
+  org="$(printf '%s' "$body" | sed -n 's/.*"orgId"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{8\}\).*/\1/p')"
+  if [ -z "$org" ]; then
+    log warn agent_org_unresolved "hint=the backend did not authenticate these credentials; the run will fail closed at the server"
+  else
+    log info agent_org "org=${org} (prefix; must match the org signed in to SellerOps in the browser)"
+  fi
 }
 
 # The carrier → exact command. Adding a carrier here is the ONLY place a new routine command lives.

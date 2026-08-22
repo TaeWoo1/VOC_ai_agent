@@ -350,7 +350,18 @@ plan and the ticket in the seeded demo org while the agent had been started with
 credentials. The server answered `404 가져오기 요청을 찾을 수 없습니다` — deliberately the same answer as a
 spent or non-existent ref, so a caller cannot probe the ref space — and the host refused fail-closed.
 
-**Not a product defect; an environment trap, now recorded in the runbook as trap 6.** What it did prove: the
+**Not a product defect; an environment trap, recorded in the runbook as trap 6.**
+
+> **SUPERSEDED 2026-08-22.** Trap 6's mitigation was a *proxy*: the agent supervisor refused to start as
+> `demo@sellerops.ai`. It named one address rather than the invariant, and it inverted — by 2026-08-22 that
+> address owned the canonical Demo Org and was its only login, so the guard refused the org the work was
+> about while permitting every other mismatch. The proxy is gone. The invariant is now enforced where
+> identity is actually established, by `com.sellerops.reviewimport.ReviewImportIdentityFence`: caller org =
+> plan org = segment org = seller account org = ticket org, proven from the authenticated principal and the
+> stored rows, never from a client-supplied orgId, with mismatch / unresolvable / spent all failing closed.
+> The observation below stands as the live evidence of the failure mode; the mitigation named here does not.
+
+What it did prove: the
 refusal is legible (the card surfaced a failure rather than hanging), and the unspent ticket was handed back.
 Restarting the agent with the operator's own org was the whole fix; nothing was rebuilt and the plan survived.
 

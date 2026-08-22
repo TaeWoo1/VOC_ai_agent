@@ -62,8 +62,11 @@ class ReviewImportRunServiceTest {
         when(attempts.nextAttemptNo(segId)).thenReturn(1);
         ReviewImportPlan plan = new ReviewImportPlan();
         plan.setId(planId);
+        plan.setOrgId(orgId);
         plan.setChannelId(channelId);
-        when(plans.findById(planId)).thenReturn(Optional.of(plan));
+        // Org-scoped: the ingest writes into this plan's channel, so resolving it unscoped would let a
+        // segment reach another org's plan. See ReviewImportIdentityFence.
+        when(plans.findByIdAndOrgId(planId, orgId)).thenReturn(Optional.of(plan));
     }
 
     private IngestResult ingest(String status, int newRows, int dup, int failed, String err) {

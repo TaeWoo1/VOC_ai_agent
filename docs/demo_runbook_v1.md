@@ -24,8 +24,13 @@ collection → routine operation, done by the seller themself) changes only thes
   set stays NAVER / Coupang / Cafe24 and no seller account is seeded.
 - **Agent required.** 첫 수집 (NAVER review import), guided reply and `[쿠팡에서 보기]` need the local
   agent (`collector`) paired over the bridge (`npm run dev:bridge` on the FE, agent on `47615`). Start the
-  agent with `SELLEROPS_EMAIL/SELLEROPS_PASSWORD` of the **self-pilot org** — its defaults are the demo
-  account, and an agent in another org fails three steps later (`naver-import-cta-live-runbook.md` trap 6).
+  agent with `SELLEROPS_EMAIL/SELLEROPS_PASSWORD` of **the same org that is signed in to SellerOps in the
+  browser** — an agent in another org fails three steps later. **Superseded 2026-08-22:** the rule is no
+  longer "not the demo account" (`trap 6`, a proxy that inverted once the canonical Demo Org's only login
+  became that address). It is the canonical org identity invariant, enforced server-side by
+  `ReviewImportIdentityFence` — caller org = plan org = segment org = seller account org = ticket org, with
+  the email address playing no part. The supervisor prints the org prefix it authenticated as so a mismatch
+  is legible immediately.
   One agent hosts one carrier; the import carrier is
   `--action-window-initial-review-import --i-understand-this-opens-live-naver`.
 - **Marketplace WRITE is forbidden until the product owner's explicit in-turn approval.** Import,

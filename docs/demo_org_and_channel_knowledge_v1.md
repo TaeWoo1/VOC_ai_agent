@@ -517,11 +517,20 @@ executor의 10,000 페이지 가드까지 갔을 것이다. 관측 즉시 schedu
 
 schedule 2개는 **enabled 상태로 계속 돈다.**
 
-### 남는 정직한 항목
+### 후속 운영 hardening (별도 항목, 이번 작업에서 하지 않음)
 
-0행을 반환하며 13분 30초 도는 run이 `SUCCESS`로 기록됐다는 사실 자체는 아직 고치지 않았다. 결함은
-사라졌지만, **비슷한 폭주를 run 기록만 보고 알아차릴 방법은 여전히 없다**(job에 요청 수나 페이지 수가
-남지 않는다). 별도 항목으로 남긴다.
+결함은 사라졌지만 **그것을 run 기록만 보고 알아차릴 방법은 여전히 없다.** 2026-06-14의 13분 30초·0행
+run이 `SUCCESS`로 남은 이유가 그거다 — `sync_jobs`에는 행 수만 있고, 그 행들을 얻는 데 몇 번의 라이브
+요청이 들었는지는 어디에도 없다. 다음 두 가지를 후속 항목으로 둔다.
+
+1. **run 계측** — `sync_jobs`에 `request_count` · `page_count` · `duration` · `termination_reason`
+   (`CAUGHT_UP` / `PAGE_GUARD` / `RATE_LIMITED` / `ERROR` / `BUDGET_EXHAUSTED`). 종료 이유가 기록되면
+   "정상 종료"와 "가드에 걸려 멈춤"이 같은 `SUCCESS`로 보이지 않는다.
+2. **bounded request budget** — run당 라이브 요청 상한을 커넥터/데이터타입이 스스로 계산해 걸고
+   (예: ORDER routine은 `lag ÷ 24h + 여유`), 초과하면 `BUDGET_EXHAUSTED`로 **멈춘다**. 지금의
+   `MAX_PAGES = 10,000`은 커넥터와 무관한 값이라 라이브 마켓플레이스 호출의 상한으로는 너무 크다.
+
+이번 REVIEW refresh를 이것 때문에 지연시키지 않는다(2026-08-22 결정).
 
 ## 4e. NAVER REVIEW refresh 준비 (2026-08-22) — 마켓플레이스 접촉 0회
 

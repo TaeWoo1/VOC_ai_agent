@@ -59,6 +59,8 @@ public class ReviewImportLaunchService {
     private final SellerAccountRepository sellerAccounts;
     private final ChannelRepository channels;
     private final AccountSessionSlotService accountSlots;
+    /** The canonical org identity fence — every ticket, plan and account this service touches goes through it. */
+    private final ReviewImportIdentityFence fence;
     private final Clock clock;
 
     /**
@@ -83,9 +85,10 @@ public class ReviewImportLaunchService {
                                     ReviewImportRunService runService,
                                     SellerAccountRepository sellerAccounts,
                                     ChannelRepository channels,
-                                    AccountSessionSlotService accountSlots) {
+                                    AccountSessionSlotService accountSlots,
+                                    ReviewImportIdentityFence fence) {
         this(launches, plans, segments, planService, runService, sellerAccounts, channels, accountSlots,
-                Clock.system(KST));
+                fence, Clock.system(KST));
     }
 
     /** Test seam: an explicit {@link Clock} pins the "today" a selected period ends on. */
@@ -97,6 +100,7 @@ public class ReviewImportLaunchService {
                              SellerAccountRepository sellerAccounts,
                              ChannelRepository channels,
                              AccountSessionSlotService accountSlots,
+                             ReviewImportIdentityFence fence,
                              Clock clock) {
         this.launches = launches;
         this.plans = plans;
@@ -106,6 +110,7 @@ public class ReviewImportLaunchService {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.accountSlots = accountSlots;
+        this.fence = fence;
         this.clock = clock;
     }
 
@@ -117,8 +122,7 @@ public class ReviewImportLaunchService {
      */
     @Transactional
     public ReviewImportLaunch mintDiscovery(UUID orgId, UUID sellerAccountId) {
-        SellerAccount account = sellerAccounts.findByIdAndOrgId(sellerAccountId, orgId)
-                .orElseThrow(() -> ApiException.notFound("연동할 채널 계정을 찾을 수 없습니다."));
+        SellerAccount account = fence.bindAccount(orgId, sellerAccountId);
 
         Optional<ReviewImportLaunch> open = launches.findByOrgIdAndSellerAccountIdAndKindAndStatus(
                 orgId, sellerAccountId, ReviewImportLaunchKind.DISCOVERY, ReviewImportLaunchStatus.ISSUED);
@@ -157,8 +161,9 @@ public class ReviewImportLaunchService {
         if (segment.getExecutionState() == SegmentExecutionState.ACTIVE) {
             throw ApiException.conflict("이미 진행 중인 구간입니다.");
         }
-        ReviewImportPlan plan = plans.findByIdAndOrgId(segment.getPlanId(), orgId)
-                .orElseThrow(() -> ApiException.notFound("가져오기 계획을 찾을 수 없습니다."));
+        // Not just "the plan is this org's": the fence also proves the plan's seller account is, and that
+        // the account is on the plan's channel. A ticket is minted from those three fields.
+        ReviewImportPlan plan = fence.bindSegmentPlan(orgId, segment).plan();
 
         Optional<ReviewImportLaunch> open =
                 launches.findBySegmentIdAndStatus(segmentId, ReviewImportLaunchStatus.ISSUED);
@@ -183,9 +188,12 @@ public class ReviewImportLaunchService {
      */
     @Transactional
     public LaunchScope resolveScope(UUID orgId, String launchRef) {
-        ReviewImportLaunch ticket = requireOpen(orgId, launchRef);
-        Channel channel = channels.findById(ticket.getChannelId())
-                .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
+        // The fence resolves the ticket AND everything it names, all proven to be this caller's org. Before
+        // it, the segment below was read with an unscoped findById — the one link in this chain that was
+        // never checked, on the endpoint the local agent calls.
+        ReviewImportIdentityFence.BoundLaunch bound = fence.bindOpenTicket(orgId, launchRef);
+        ReviewImportLaunch ticket = bound.ticket();
+        Channel channel = bound.channel();
         // The Action Window contract's channelCode is a lowercase semantic code (`naver`), while the
         // channel table stores the display-side code (`NAVER`).
         String channelCode = channel.getCode().toLowerCase(java.util.Locale.ROOT);
@@ -197,8 +205,7 @@ public class ReviewImportLaunchService {
         if (ticket.getKind() == ReviewImportLaunchKind.DISCOVERY) {
             return new LaunchScope(ReviewImportLaunchKind.DISCOVERY, channelCode, accountSlot, null, null);
         }
-        ReviewImportSegment segment = segments.findById(ticket.getSegmentId())
-                .orElseThrow(() -> ApiException.notFound("구간을 찾을 수 없습니다."));
+        ReviewImportSegment segment = bound.segment();
         return new LaunchScope(ReviewImportLaunchKind.SEGMENT, channelCode, accountSlot,
                 segment.getSegmentStart(), segment.getSegmentEnd());
     }
@@ -255,8 +262,7 @@ public class ReviewImportLaunchService {
      */
     @Transactional(readOnly = true)
     public RangeSelection previewSelection(UUID orgId, UUID sellerAccountId, String startMonth) {
-        sellerAccounts.findByIdAndOrgId(sellerAccountId, orgId)
-                .orElseThrow(() -> ApiException.notFound("연동할 채널 계정을 찾을 수 없습니다."));
+        fence.bindAccount(orgId, sellerAccountId);
         return selectionFor(startMonth);
     }
 
@@ -432,22 +438,18 @@ public class ReviewImportLaunchService {
                 .reduce((earlier, later) -> later);
     }
 
+    /**
+     * Resolve a ref for this caller with the whole identity chain proven — caller org, ticket org, segment
+     * org, plan org, seller account org, and the ticket's own account/channel/plan bindings.
+     * {@link ReviewImportIdentityFence} owns every one of those checks so there is one place to read them.
+     */
     private ReviewImportLaunch requireTicket(UUID orgId, String launchRef) {
-        ReviewImportLaunch ticket = launches.findByLaunchRef(launchRef)
-                .orElseThrow(() -> ApiException.notFound("가져오기 요청을 찾을 수 없습니다."));
-        if (!ticket.getOrgId().equals(orgId)) {
-            // Same message as a miss: a caller must not be able to tell "wrong org" from "no such ref".
-            throw ApiException.notFound("가져오기 요청을 찾을 수 없습니다.");
-        }
-        return ticket;
+        return fence.bindTicket(orgId, launchRef).ticket();
     }
 
+    /** As {@link #requireTicket}, and the ticket must still be spendable. */
     private ReviewImportLaunch requireOpen(UUID orgId, String launchRef) {
-        ReviewImportLaunch ticket = requireTicket(orgId, launchRef);
-        if (!ticket.isOpen()) {
-            throw ApiException.conflict("이미 사용된 가져오기 요청입니다. 다시 시작해 주세요.");
-        }
-        return ticket;
+        return fence.bindOpenTicket(orgId, launchRef).ticket();
     }
 
     private void consume(ReviewImportLaunch ticket) {

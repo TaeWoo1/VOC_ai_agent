@@ -87,7 +87,10 @@ public class ReviewImportRunService {
         if (!scopeConfirmed) {
             throw ApiException.badRequest("내보내기 범위가 이 구간과 일치하는지 먼저 확인해 주세요.");
         }
-        ReviewImportPlan plan = plans.findById(segment.getPlanId())
+        // Org-scoped, and it has to be: the ingest below writes into THIS plan's channel. An unscoped
+        // findById here would have let an org-scoped segment resolve a plan belonging to another org and
+        // land the seller's exported reviews on that org's channel. See ReviewImportIdentityFence.
+        ReviewImportPlan plan = plans.findByIdAndOrgId(segment.getPlanId(), orgId)
                 .orElseThrow(() -> ApiException.notFound("가져오기 계획을 찾을 수 없습니다."));
 
         ReviewImportSegmentAttempt attempt = new ReviewImportSegmentAttempt();
