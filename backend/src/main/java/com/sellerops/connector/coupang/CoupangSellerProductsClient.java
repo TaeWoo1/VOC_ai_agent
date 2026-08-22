@@ -2,6 +2,7 @@ package com.sellerops.connector.coupang;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
@@ -31,16 +32,24 @@ import org.slf4j.LoggerFactory;
  * axis — {@code vendorItemId}, option name, per-option price and the vendor's own SKU — lives only on
  * the detail resource. That option axis is precisely what {@code reviews.source_option_id} (V37) has
  * been storing since 2026-08 with nothing to resolve it against, so a list-only read would leave the
- * one field Coupang uniquely provides unusable. The page is small ({@link #MAX_PER_PAGE}) so the detail
- * fan-out stays bounded and a rate-limit surfaces as a page-level retry rather than a half-written page.
+ * one field Coupang uniquely provides unusable.
+ *
+ * <p><b>The catalogue walk is bounded by requests, not by page size.</b> One detail call per product
+ * means a crawl costs {@code N + ceil(N/pageSize)} requests, and a page size chosen small to keep that
+ * number down only spreads the same fan-out over more pages — it never bounds it. So the page size is
+ * now the official maximum ({@link #MAX_PER_PAGE}) and the actual bound is
+ * {@link #DEFAULT_REQUEST_BUDGET}: a walk that would exceed it stops with
+ * {@link CoupangProductBudgetExhaustedException} rather than continuing, and the spend rides in
+ * {@link CoupangProductCursor} so the ceiling covers the whole walk instead of one page of it.
  *
  * <p><b>Auth and the live guard.</b> Every request is HMAC-signed per call ({@link CoupangSigner}) and
  * passes {@link CoupangLiveCallGuard} — the same choke point every other Coupang read passes, so a real
  * gateway host without an armed approval fails closed here before any socket.
  *
- * <p><b>Wire shape is {@code NEEDS_VERIFICATION}.</b> Field names follow Coupang's published
- * seller-product resource and have not been observed live from this repository. Every field is nullable;
- * an absent one produces no fact and therefore {@code UNAVAILABLE} coverage, never a fabricated value.
+ * <p><b>Wire shape.</b> Field names follow Coupang's published seller-product resource. Every field is
+ * nullable; an absent one produces no fact and therefore {@code UNAVAILABLE} coverage, never a
+ * fabricated value. What the mapper does NOT read it also cannot report, which is why
+ * {@link CoupangWireShapeObserver} exists — off by default, and recording key names and counts only.
  * No buyer field exists on these resources and none is projected.
  */
 public class CoupangSellerProductsClient {
@@ -53,11 +62,17 @@ public class CoupangSellerProductsClient {
     /** The provenance stamp every row this client produces carries. */
     public static final String SOURCE = "COUPANG:SELLER_PRODUCTS:v1";
 
+    /** Coupang's documented maximum for this endpoint. */
+    public static final int MAX_PER_PAGE = 100;
+
     /**
-     * Small deliberately. Each listed product costs one detail call, so the page size IS the fan-out;
-     * a large page would turn one throttle into a lost page of work.
+     * Marketplace requests one catalogue walk may spend, list and detail calls alike.
+     *
+     * <p>Not a general collection budget and deliberately not built as one: it is a number this one
+     * read obeys, because this one read is the only path in the product whose cost scales with the
+     * size of a seller's catalogue and has no other bound.
      */
-    public static final int MAX_PER_PAGE = 10;
+    public static final int DEFAULT_REQUEST_BUDGET = 250;
 
     private final CoupangHttpClient http;
     private final CoupangSigner signer;
@@ -66,15 +81,26 @@ public class CoupangSellerProductsClient {
     private final String baseUrl;
     private final String liveApprovalId;
     private final String standingReadGrantId;
+    private final int requestBudget;
+    private final boolean observeWireShape;
 
     public CoupangSellerProductsClient(CoupangHttpClient http, CoupangSigner signer, Clock clock,
                                        String baseUrl, String liveApprovalId, String standingReadGrantId) {
+        this(http, signer, clock, baseUrl, liveApprovalId, standingReadGrantId,
+                DEFAULT_REQUEST_BUDGET, false);
+    }
+
+    public CoupangSellerProductsClient(CoupangHttpClient http, CoupangSigner signer, Clock clock,
+                                       String baseUrl, String liveApprovalId, String standingReadGrantId,
+                                       int requestBudget, boolean observeWireShape) {
         this.http = http;
         this.signer = signer;
         this.clock = clock;
         this.baseUrl = baseUrl;
         this.liveApprovalId = liveApprovalId;
         this.standingReadGrantId = standingReadGrantId;
+        this.requestBudget = requestBudget;
+        this.observeWireShape = observeWireShape;
     }
 
     /**
@@ -83,11 +109,23 @@ public class CoupangSellerProductsClient {
      * <p>A detail call that fails does NOT fail the page: the product is still emitted with the identity
      * and status the list stated, and its option facet simply stays unavailable. Losing a whole page
      * because one product's detail 500'd would be a worse answer than a partial one that says so.
+     *
+     * <p>The budget is checked <b>before</b> the page, against its worst case (one list call plus one
+     * detail per listed product). A page is therefore never half-read: either the walk can afford the
+     * whole page or it stops and says so.
      */
     public FetchPage fetchProductPage(String accessKey, String secretKey, String vendorId,
                                       String cursorValue) {
-        String nextToken = cursorValue == null || cursorValue.isBlank() ? null : cursorValue.strip();
-        ListEnvelope envelope = list(accessKey, secretKey, vendorId, nextToken);
+        CoupangProductCursor cursor = CoupangProductCursor.parse(cursorValue);
+        int spent = cursor.spent();
+        if (spent > requestBudget - (1 + MAX_PER_PAGE)) {
+            throw new CoupangProductBudgetExhaustedException(spent, requestBudget);
+        }
+
+        CoupangWireShapeObserver observer = observeWireShape ? new CoupangWireShapeObserver() : null;
+        String nextToken = cursor.nextToken();
+        ListEnvelope envelope = list(accessKey, secretKey, vendorId, nextToken, observer);
+        spent++;
 
         List<CanonicalProduct> records = new ArrayList<>();
         int sourceRow = 1;
@@ -98,25 +136,39 @@ public class CoupangSellerProductsClient {
             }
             ProductDetail detail = null;
             try {
-                detail = detail(accessKey, secretKey, vendorId, row.sellerProductId());
+                detail = detail(accessKey, secretKey, vendorId, row.sellerProductId(), observer);
             } catch (CoupangRateLimitedException throttled) {
                 throw throttled; // The page is retried whole; a partial page would look complete.
             } catch (RuntimeException e) {
                 log.warn("Coupang seller-product detail unavailable: cause={}", e.getClass().getSimpleName());
+            } finally {
+                // Charged whether or not it answered: the request left this machine either way, and a
+                // budget that only counts successes is not a bound on what we did to the marketplace.
+                spent++;
             }
             records.add(toCanonical(row, detail, sourceRow++, now));
         }
         boolean hasMore = envelope.nextToken() != null && !envelope.nextToken().isBlank();
-        log.info("쿠팡 상품 수집: listed={} mapped={} hasMore={}", envelope.rows().size(), records.size(), hasMore);
-        return FetchPage.of(DataType.PRODUCT, records, envelope.nextToken(), hasMore,
+        log.info("쿠팡 상품 수집: listed={} mapped={} hasMore={} requests={} budget={}/{}",
+                envelope.rows().size(), records.size(), hasMore, spent - cursor.spent(),
+                spent, requestBudget);
+        if (observer != null && !observer.isEmpty()) {
+            // Aggregated schema only — key names, kinds and counts. Never a value; see the observer.
+            for (String line : observer.summaryLines()) {
+                log.info("쿠팡 상품 wire-shape {}", line);
+            }
+        }
+        return FetchPage.of(DataType.PRODUCT, records,
+                CoupangProductCursor.serialize(envelope.nextToken(), spent), hasMore,
                 CoupangApiConnector.KIND);
     }
 
-    private ListEnvelope list(String accessKey, String secretKey, String vendorId, String nextToken) {
+    private ListEnvelope list(String accessKey, String secretKey, String vendorId, String nextToken,
+                              CoupangWireShapeObserver observer) {
         Map<String, String> params = new LinkedHashMap<>();
         params.put("vendorId", vendorId);
         params.put("maxPerPage", Integer.toString(MAX_PER_PAGE));
-        if (nextToken != null) {
+        if (nextToken != null && !nextToken.isBlank()) {
             params.put("nextToken", nextToken);
         }
         String query = encode(params);
@@ -129,14 +181,19 @@ public class CoupangSellerProductsClient {
                     "쿠팡 상품 목록 조회에 실패했습니다 (HTTP " + response.statusCode() + ").");
         }
         try {
-            ListResponse parsed = mapper.readValue(response.body(), ListResponse.class);
+            JsonNode root = mapper.readTree(response.body());
+            if (observer != null) {
+                observer.observe("list", root);
+            }
+            ListResponse parsed = mapper.treeToValue(root, ListResponse.class);
             return new ListEnvelope(parsed.data() == null ? List.of() : parsed.data(), parsed.nextToken());
         } catch (Exception e) {
             throw new IllegalStateException("쿠팡 상품 목록 응답을 해석할 수 없습니다.");
         }
     }
 
-    private ProductDetail detail(String accessKey, String secretKey, String vendorId, Long sellerProductId) {
+    private ProductDetail detail(String accessKey, String secretKey, String vendorId, Long sellerProductId,
+                                 CoupangWireShapeObserver observer) {
         String path = LIST_PATH + "/" + sellerProductId;
         CoupangHttpClient.Response response = signedGet(path, "", accessKey, secretKey, vendorId);
         if (response.statusCode() == 429) {
@@ -147,7 +204,11 @@ public class CoupangSellerProductsClient {
                     "쿠팡 상품 상세 조회에 실패했습니다 (HTTP " + response.statusCode() + ").");
         }
         try {
-            return mapper.readValue(response.body(), DetailResponse.class).data();
+            JsonNode root = mapper.readTree(response.body());
+            if (observer != null) {
+                observer.observe("detail", root);
+            }
+            return mapper.treeToValue(root, DetailResponse.class).data();
         } catch (Exception e) {
             throw new IllegalStateException("쿠팡 상품 상세 응답을 해석할 수 없습니다.");
         }

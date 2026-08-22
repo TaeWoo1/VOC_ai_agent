@@ -2,6 +2,7 @@ package com.sellerops.connector.coupang;
 
 import com.sellerops.credential.CredentialVault;
 import java.time.Clock;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -78,12 +79,24 @@ public class CoupangConnectorConfiguration {
             @Value("${sellerops.connector.coupang.base-url:https://api-gateway.coupang.com}") String baseUrl,
             @Value("${sellerops.connector.coupang.live-approval-id:}") String liveApprovalId,
             @Value("${sellerops.self-pilot.enabled:false}") boolean selfPilotEnabled,
-            @Value("${sellerops.self-pilot.read-grant-id:}") String standingReadGrantId) {
+            @Value("${sellerops.self-pilot.read-grant-id:}") String standingReadGrantId,
+            @Value("${sellerops.connector.coupang.product-wire-shape:false}") boolean observeWireShape) {
         // Same base URL and same live-call interlock as the order and inquiry clients. The catalogue is
         // a READ, so the standing READ grant covers it exactly as it covers the other two — and with the
         // runtime off it arms nothing, per effectiveReadGrant.
+        //
+        // The wire-shape observer is off unless a deployment turns it on for a specific observation. It
+        // records key names and counts, never a value (CoupangWireShapeObserver) — but instrumentation
+        // that stays armed by default is instrumentation nobody decided to run.
+        if (observeWireShape) {
+            LoggerFactory.getLogger(CoupangConnectorConfiguration.class)
+                    .warn("Coupang 상품 wire-shape 관측이 켜져 있습니다 (키 이름·개수만 기록).");
+        }
         return new CoupangSellerProductsClient(http, signer, Clock.systemUTC(), baseUrl, liveApprovalId,
-                effectiveReadGrant(selfPilotEnabled, standingReadGrantId));
+                effectiveReadGrant(selfPilotEnabled, standingReadGrantId),
+                // The ceiling is not configurable. A bound a deployment can raise from a properties
+                // file is not a bound; raising it should be a change someone reviews.
+                CoupangSellerProductsClient.DEFAULT_REQUEST_BUDGET, observeWireShape);
     }
 
     @Bean

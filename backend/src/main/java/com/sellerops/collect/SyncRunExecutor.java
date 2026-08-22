@@ -12,6 +12,7 @@ import com.sellerops.credential.CredentialKeyStatus;
 import com.sellerops.credential.CredentialUnavailableException;
 import com.sellerops.connector.coupang.CoupangApiConnector;
 import com.sellerops.connector.coupang.CoupangLiveApprovalRequiredException;
+import com.sellerops.connector.coupang.CoupangProductBudgetExhaustedException;
 import com.sellerops.selfpilot.SellerAccountReauthService;
 import com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle;
 import com.sellerops.connector.naver.onboarding.NaverConnectionLifecycle;
@@ -405,7 +406,11 @@ public class SyncRunExecutor {
             // accumulated counts so the run is PARTIAL (not a zero-row FAILED).
             errored = true;
             if (firstError == null) {
-                firstError = "수집 실패: " + e.getMessage();
+                // A budget stop is a decision this run made, not a channel that failed. It keeps its own
+                // wording (BUDGET_EXHAUSTED) so the operator reads "we stopped" rather than "Coupang broke".
+                firstError = e instanceof CoupangProductBudgetExhaustedException
+                        ? e.getMessage()
+                        : "수집 실패: " + e.getMessage();
             }
             // Self-Pilot Runtime v1: two failures are NOT connectivity and must not read as one.
             //  - an unambiguous auth verdict → the account needs the seller (RECONNECT_REQUIRED task);
