@@ -106,10 +106,16 @@ export function Cafe24Tutorial() {
     };
   }, [state.phase, state.accountId, state.verifyNonce]);
 
-  // 4) Auto-run the read-only first order sync when entering first_sync. Same phase-gated pattern
-  //    (no persistent ref) so StrictMode's remount cannot strand the step on the busy state.
+  // 4) The read-only first order sync — ONLY after the seller presses for it.
+  //
+  //    This used to fire the moment verification passed, from a phase effect with no button behind
+  //    it. That is a real READ against the seller's mall, and on 2026-08-22 it ran seconds after
+  //    consent while the operator had been asked to stop at "연결됨" — an instruction nothing on
+  //    screen made it possible to follow. Gating on `syncRequested` keeps the phase-gated,
+  //    ref-free shape (StrictMode's remount still cannot strand `busy`) while making the press the
+  //    only thing that starts a marketplace call.
   useEffect(() => {
-    if (state.phase !== "first_sync" || !state.accountId) {
+    if (state.phase !== "first_sync" || !state.syncRequested || !state.accountId) {
       return;
     }
     let cancelled = false;
@@ -137,7 +143,7 @@ export function Cafe24Tutorial() {
     return () => {
       cancelled = true;
     };
-  }, [state.phase, state.accountId]);
+  }, [state.phase, state.accountId, state.syncRequested]);
 
   function submitMall(event: FormEvent) {
     event.preventDefault();
@@ -307,9 +313,35 @@ export function Cafe24Tutorial() {
         ) : null}
 
         {state.phase === "first_sync" ? (
-          <p className="text-base text-muted">
-            {busy ? "주문 요약을 읽어오는 중입니다…" : "동기화 결과를 확인하고 있습니다…"}
-          </p>
+          state.syncRequested ? (
+            <p className="text-base text-muted" role="status" aria-live="polite">
+              {busy ? "주문 요약을 읽어오는 중입니다…" : "동기화 결과를 확인하고 있습니다…"}
+            </p>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-base text-ink">
+                주문 요약을 한 번만 읽어옵니다. 카페24에 아무것도 쓰지 않습니다.
+              </p>
+              <div className="flex justify-end gap-2">
+                {/* Skipping still finishes the wizard: consent already connected the channel, and
+                    making completion depend on a live read would make "나중에" mean "포기". */}
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => dispatch({ type: "SYNC_SKIPPED" })}
+                >
+                  나중에 하기
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => dispatch({ type: "SYNC_START" })}
+                >
+                  첫 수집 실행
+                </button>
+              </div>
+            </div>
+          )
         ) : null}
 
         {state.phase === "done" ? (

@@ -1,0 +1,1 @@
+[{"dataType": "REVIEW", "enabled": true, "intervalMinutes": 60}, {"dataType": "INQUIRY", "enabled": true, "intervalMinutes": 60}, {"dataType": "ORDER_SUMMARY", "enabled": true, "intervalMinutes": 60}]

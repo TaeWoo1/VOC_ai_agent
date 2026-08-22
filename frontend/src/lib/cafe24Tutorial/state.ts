@@ -37,6 +37,18 @@ export interface TutorialState {
   verifyRetryable: boolean;
   /** Bumped to re-fire the verify effect for an in-place retry (never persisted). */
   verifyNonce: number;
+  /**
+   * Whether the seller has explicitly asked for the first collection.
+   *
+   * The first sync is a real READ against the seller's Cafe24 mall, and it used to fire from a phase
+   * effect the moment verification passed — no button, no press, nothing to decline. On 2026-08-22
+   * that produced a live marketplace read seconds after consent, while the operator had been told to
+   * stop at "연결됨"; there was no way to comply, because there was nothing to not-press.
+   *
+   * Never persisted: a resumed wizard comes back with this false, so returning to the tab cannot
+   * re-fire a collection either.
+   */
+  syncRequested: boolean;
 }
 
 export const INITIAL_STATE: TutorialState = {
@@ -46,6 +58,7 @@ export const INITIAL_STATE: TutorialState = {
   failure: null,
   verifyRetryable: false,
   verifyNonce: 0,
+  syncRequested: false,
 };
 
 /** Ordered steps for the progress rail (the failure state is not a step). */
@@ -70,6 +83,8 @@ export type TutorialEvent =
   | { type: "VERIFY_RETRYABLE" }
   | { type: "VERIFY_RETRY" }
   | { type: "VERIFY_FAILED"; failure: TutorialFailure }
+  | { type: "SYNC_START" }
+  | { type: "SYNC_SKIPPED" }
   | { type: "SYNC_RESULT"; ok: boolean }
   | { type: "RETRY" }
   | { type: "RESTORE"; state: TutorialState };
@@ -113,7 +128,7 @@ export function tutorialReducer(prev: TutorialState, event: TutorialEvent): Tuto
     }
     case "VERIFIED":
       return prev.phase === "verify"
-        ? { ...prev, phase: "first_sync", failure: null, verifyRetryable: false }
+        ? { ...prev, phase: "first_sync", failure: null, verifyRetryable: false, syncRequested: false }
         : prev;
     case "VERIFY_RETRYABLE":
       return prev.phase === "verify" ? { ...prev, verifyRetryable: true } : prev;
@@ -127,13 +142,21 @@ export function tutorialReducer(prev: TutorialState, event: TutorialEvent): Tuto
       return prev.phase === "verify"
         ? { ...prev, phase: "failed", failure: event.failure }
         : prev;
+    case "SYNC_START":
+      // The only path to a marketplace read in this wizard. Guarded on the phase so a stale press
+      // cannot start one from anywhere else.
+      return prev.phase === "first_sync" ? { ...prev, syncRequested: true } : prev;
+    case "SYNC_SKIPPED":
+      // Connecting and collecting are separate decisions. A seller who has consented is connected;
+      // making the wizard unfinishable without a live read would have turned "skip" into "abandon".
+      return prev.phase === "first_sync" ? { ...prev, phase: "done", failure: null } : prev;
     case "SYNC_RESULT":
       if (prev.phase !== "first_sync") {
         return prev;
       }
       return event.ok
-        ? { ...prev, phase: "done", failure: null }
-        : { ...prev, phase: "failed", failure: "first_sync_failed" };
+        ? { ...prev, phase: "done", failure: null, syncRequested: false }
+        : { ...prev, phase: "failed", failure: "first_sync_failed", syncRequested: false };
     case "RETRY":
       return retryTarget(prev);
     case "RESTORE":
@@ -147,7 +170,8 @@ export function tutorialReducer(prev: TutorialState, event: TutorialEvent): Tuto
 function retryTarget(prev: TutorialState): TutorialState {
   switch (prev.failure) {
     case "first_sync_failed":
-      return { ...prev, phase: "first_sync", failure: null };
+      // Retry returns to the step, NOT to a running sync — the retry needs its own press.
+      return { ...prev, phase: "first_sync", failure: null, syncRequested: false };
     case "board_mapping":
     case "reconnect_required":
     case "scope_insufficient":
@@ -240,7 +264,7 @@ export const PHASE_COPY: Record<TutorialPhase, { title: string; body: string }> 
   },
   first_sync: {
     title: "첫 동기화",
-    body: "주문 요약을 읽기 전용으로 한 번 동기화해 연결을 확인합니다.",
+    body: "연결은 완료되었습니다. 아래를 누르면 주문 요약을 읽기 전용으로 한 번 가져와 연결을 확인합니다. 나중에 하셔도 됩니다.",
   },
   done: {
     title: "연결 완료",
@@ -323,6 +347,8 @@ export function loadTutorialState(): TutorialState | null {
       failure: parsed.failure ?? null,
       verifyRetryable: false,
       verifyNonce: 0,
+      // Deliberately not restored: returning to the tab must not re-fire a marketplace read.
+      syncRequested: false,
     };
   } catch {
     return null;

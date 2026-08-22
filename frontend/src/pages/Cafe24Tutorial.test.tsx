@@ -108,11 +108,19 @@ describe("Cafe24Tutorial step chain", () => {
 });
 
 describe("Cafe24Tutorial callback resume", () => {
-  it("auto-verifies, first-syncs, and shows real feature results on success", async () => {
+  it("auto-verifies, then waits for the seller to ask for the first collection", async () => {
     vi.mocked(api.getCafe24Capability).mockResolvedValue(verifiedView());
     vi.mocked(api.manualSync).mockResolvedValue(syncRun({ status: "SUCCESS" }));
 
     renderAt(`${ROUTE}?status=connected&accountId=acc-1`);
+
+    // The first sync is a real READ against the seller's mall. Verification passing is not consent
+    // to perform one — it used to be, and on 2026-08-22 that fired a live collection seconds after
+    // the OAuth callback, with no button anywhere to decline.
+    const collect = await screen.findByRole("button", { name: "첫 수집 실행" });
+    expect(api.manualSync).not.toHaveBeenCalled();
+
+    await userEvent.click(collect);
 
     expect(await screen.findByText("연결 완료")).toBeInTheDocument();
     expect(await screen.findByText("주문 조회")).toBeInTheDocument();
@@ -148,7 +156,19 @@ describe("Cafe24Tutorial callback resume", () => {
     vi.mocked(api.getCafe24Capability).mockResolvedValue(verifiedView());
     vi.mocked(api.manualSync).mockResolvedValue(syncRun({ status: "FAILED" }));
     renderAt(`${ROUTE}?status=connected&accountId=acc-1`);
+    await userEvent.click(await screen.findByRole("button", { name: "첫 수집 실행" }));
     expect(await screen.findByText(/첫 동기화에 실패/)).toBeInTheDocument();
+  });
+
+  it("skipping the first collection still finishes the connection", async () => {
+    vi.mocked(api.getCafe24Capability).mockResolvedValue(verifiedView());
+    renderAt(`${ROUTE}?status=connected&accountId=acc-1`);
+
+    await userEvent.click(await screen.findByRole("button", { name: "나중에 하기" }));
+
+    // Consent already connected the channel; completion must not depend on a live read.
+    expect(await screen.findByText("연결 완료")).toBeInTheDocument();
+    expect(api.manualSync).not.toHaveBeenCalled();
   });
 
   it("keeps a transient provider error retryable on the verify step", async () => {
@@ -171,6 +191,7 @@ describe("Cafe24Tutorial callback resume", () => {
 
     renderAt(`${ROUTE}?status=connected&accountId=acc-1`);
     await userEvent.click(await screen.findByRole("button", { name: "다시 검증" }));
+    await userEvent.click(await screen.findByRole("button", { name: "첫 수집 실행" }));
 
     // Advances to completion — did NOT drop back to the mall-entry step.
     expect(await screen.findByText("연결 완료")).toBeInTheDocument();

@@ -159,6 +159,7 @@ describe("resume persistence", () => {
       failure: null,
       verifyRetryable: true,
       verifyNonce: 3,
+      syncRequested: true,
     };
     saveTutorialState(state);
     const raw = sessionStorage.getItem("cafe24_tutorial_v1") ?? "";
@@ -178,5 +179,68 @@ describe("resume persistence", () => {
   it("rejects a corrupt/unknown phase", () => {
     sessionStorage.setItem("cafe24_tutorial_v1", JSON.stringify({ phase: "bogus" }));
     expect(loadTutorialState()).toBeNull();
+  });
+});
+
+/**
+ * The first sync is a real READ against the seller's mall. It used to fire from a phase effect the
+ * moment verification passed — no button, nothing to decline — and on 2026-08-22 that produced a
+ * live marketplace read seconds after consent, while the operator had been asked to stop at
+ * "연결됨". There was no way to comply, because there was nothing to not-press.
+ */
+describe("first sync needs an explicit press", () => {
+  const verified: TutorialState = {
+    ...INITIAL_STATE,
+    phase: "verify",
+    mallId: "mystore",
+    accountId: "acc-1",
+  };
+
+  it("arriving at first_sync does not request a collection", () => {
+    const next = tutorialReducer(verified, { type: "VERIFIED" });
+
+    expect(next.phase).toBe("first_sync");
+    expect(next.syncRequested).toBe(false);
+  });
+
+  it("only SYNC_START requests it, and only from first_sync", () => {
+    const atSync = tutorialReducer(verified, { type: "VERIFIED" });
+
+    expect(tutorialReducer(atSync, { type: "SYNC_START" }).syncRequested).toBe(true);
+    // A stale press from any earlier step must not start a marketplace call.
+    expect(tutorialReducer(verified, { type: "SYNC_START" }).syncRequested).toBe(false);
+  });
+
+  it("skipping still completes the wizard", () => {
+    const atSync = tutorialReducer(verified, { type: "VERIFIED" });
+
+    const skipped = tutorialReducer(atSync, { type: "SYNC_SKIPPED" });
+
+    // Consent already connected the channel. Making completion depend on a live read would turn
+    // "나중에" into "포기".
+    expect(skipped.phase).toBe("done");
+    expect(skipped.failure).toBeNull();
+  });
+
+  it("a retry after a failed sync needs its own press", () => {
+    const failed = tutorialReducer(
+      tutorialReducer(tutorialReducer(verified, { type: "VERIFIED" }), { type: "SYNC_START" }),
+      { type: "SYNC_RESULT", ok: false },
+    );
+    expect(failed.phase).toBe("failed");
+
+    const retried = tutorialReducer(failed, { type: "RETRY" });
+
+    expect(retried.phase).toBe("first_sync");
+    expect(retried.syncRequested).toBe(false);
+  });
+
+  it("resuming the wizard never re-fires a collection", () => {
+    saveTutorialState({ ...verified, phase: "first_sync", syncRequested: true });
+
+    const restored = loadTutorialState();
+
+    expect(restored?.phase).toBe("first_sync");
+    expect(restored?.syncRequested).toBe(false);
   });
 });

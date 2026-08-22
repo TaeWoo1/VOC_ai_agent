@@ -547,6 +547,41 @@ verbatim; §1.5 ("single-use") is superseded **only** for the READ grant above, 
 
 ---
 
+## 6b. A live proof must first ask what is already scheduled (2026-08-22)
+
+**What happened.** A Cafe24 re-consent on the canonical Demo Org produced four live marketplace reads
+within a minute, while the operator had been asked to stop before any collection. Nothing was bypassed
+and nothing was a violation: three of the four were routine scheduled READs, authorized by §6a; the
+account's schedules had been auth-paused, the reconnect resumed them by design, and the collect tick ran
+them. The fourth was a `MANUAL` run the connection wizard fired from a phase effect with no button
+behind it — a real read the seller was never offered the chance to decline.
+
+**Why the existing preflights did not catch it.** They check
+`SELLEROPS_COLLECT_SCHEDULER_ENABLED` **in their own shell**. That is not the running backend's answer:
+the backend is started separately, usually from a `.env.local` the preflight never reads, so a preflight
+can pass while the deployment it is vouching for has the scheduler armed. And they check a global flag,
+never the target account's own schedule rows — which is where "auth-paused, will resume on reconnect"
+lives.
+
+**Required before any live proof, in addition to §2's manifest.**
+
+1. **Ask the backend, per account** — `tools/live-proof/schedule-guard.sh report <accountId>` lists the
+   account's schedules with `enabled` and `nextRunAt`, and exits non-zero when any is enabled. A
+   preflight that ignores a non-zero exit here is choosing to.
+2. **Pause explicitly, and record it** — `… pause <accountId>` disables every enabled schedule and
+   records what it disabled. `… restore <accountId>` re-enables exactly that set and nothing else, so a
+   type an operator had turned off for their own reasons stays off.
+3. **A manifest naming a data type whose schedule is enabled is not a controlled run.** Either pause it
+   or say in the manifest that routine collection is running concurrently and that the counts the proof
+   records are therefore not attributable to the approved run alone.
+
+**A reconnect is a trigger, not a neutral act.** Restoring credentials resumes auth-paused schedules by
+design (`SellerAccountReauthService`), and the Self-Pilot reconciler creates enabled schedules for newly
+CONNECTED accounts. Both are correct §6a behaviour; both mean "the seller reconnected" is a moment when
+collection starts, and any plan that says "reconnect, then stop" has to disarm them first.
+
+---
+
 ## 7. Applied: NAVER API-center calibration — TWO phases, TWO manifests
 
 API-center selector calibration is split into two phases whose **tools differ**, so each has its own
