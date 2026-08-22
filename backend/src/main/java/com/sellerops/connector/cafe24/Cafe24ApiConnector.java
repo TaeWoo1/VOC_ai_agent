@@ -422,6 +422,14 @@ public class Cafe24ApiConnector implements PullConnector {
                         replyStatusStored.get(CommunityReplyStatus.IN_PROGRESS),
                         replyStatusStored.get(CommunityReplyStatus.ANSWERED),
                         replyStatusStored.get(CommunityReplyStatus.UNKNOWN));
+            } else {
+                // An empty page still says what it ASKED for. Without this a zero-row routine run
+                // logged nothing at all and was indistinguishable from a run that never happened —
+                // which is exactly the shape of a healthy routine lane on a quiet board, so the normal
+                // case was the unobservable one. Proving the 2026-08-22 window had to fall back to
+                // reading the persisted cursor. Counts and dates only; no article ever reaches a log.
+                log.info("카페24 게시판 수집: board={} 창=[{} ~ {}] offset={} 수신=0 (해당 구간에 새 글 없음)",
+                        boardNo, cursor.windowStart(), cursor.windowEnd(), cursor.offset());
             }
             boolean hasMore = rows.size() == request.limit();
             // A finished ROUTINE sweep rewinds to the start of a freshly-computed window rather than
