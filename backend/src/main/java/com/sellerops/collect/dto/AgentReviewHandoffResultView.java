@@ -11,6 +11,11 @@ package com.sellerops.collect.dto;
  * know whether the operator paged to the end of the list. A false value means reviews were stored and the
  * list was not covered, which is a valid outcome and a different one from success.
  *
+ * <p>{@code failed} covers two different things and deliberately does not distinguish them here: a row the
+ * ingestion spine could not write, and a row whose 노출상품ID matched no listing this org holds. Both mean
+ * "handed over and not stored", which is what the operator's next action turns on; which of the two it was is
+ * in the server log, by reason name and count.
+ *
  * <p>Carries no review text, no product ids, and no row identities — the surface that asks "did the import
  * work" does not need to be handed the reviews back to answer it.
  */

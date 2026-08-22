@@ -52,12 +52,84 @@ class CoupangSellerProductsClientTest {
         return "{\"code\":200,\"nextToken\":" + token + ",\"data\":[" + rows + "]}";
     }
 
+    /** A detail that also states the 노출상품ID, which the real resource does on every product. */
+    private static String detailBodyWithDisplayId(long displayProductId, long vendorItemId) {
+        return detailBody(vendorItemId, null)
+                .replace("\"data\":{", "\"data\":{\"productId\":" + displayProductId + ",");
+    }
+
+    /** A list row that states the 노출상품ID — the fallback stream, used when a detail call failed. */
+    private static String listBodyWithDisplayId(long sellerProductId, long displayProductId) {
+        return listBody(null, sellerProductId)
+                .replace("\"sellerProductId\":" + sellerProductId,
+                        "\"sellerProductId\":" + sellerProductId + ",\"productId\":" + displayProductId);
+    }
+
     private static String detailBody(long vendorItemId, String vendorSku) {
         return "{\"code\":200,\"data\":{\"sellerProductName\":\"이름\",\"brand\":\"브랜드\",\"items\":["
                 + "{\"vendorItemId\":" + vendorItemId + ",\"itemName\":\"옵션\","
                 + "\"externalVendorSku\":" + (vendorSku == null ? "null" : "\"" + vendorSku + "\"")
                 + ",\"salePrice\":12900,\"attributes\":[{\"attributeTypeName\":\"길이\","
                 + "\"attributeValueName\":\"2m\"}]}]}}";
+    }
+
+    // ──────────────────────────────────── the three identifiers stay three
+
+    @Test
+    void readsTheDisplayProductIdFromTheDetailWithoutDisturbingTheOtherTwo() {
+        http.enqueue(ok(listBody(null, 111L)));
+        http.enqueue(ok(detailBodyWithDisplayId(6473457702L, 9001L)));
+
+        FetchPage page = client(250, false).fetchProductPage("ak", "sk", "V1", null);
+        CanonicalProduct product = (CanonicalProduct) page.records().get(0);
+
+        // 노출상품ID — new, and its own field.
+        assertThat(product.externalDisplayProductId()).isEqualTo("6473457702");
+        // 등록상품ID — still the listing key and, absent a seller SKU, still the SKU. Unchanged.
+        assertThat(product.externalProductId()).isEqualTo("111");
+        assertThat(product.sku()).isEqualTo("111");
+        // 옵션ID — still the variant axis. Unchanged.
+        assertThat(product.variants()).singleElement()
+                .satisfies(v -> assertThat(v.externalVariantId()).isEqualTo("9001"));
+    }
+
+    @Test
+    void theSellersOwnSkuStillWinsOverTheRegistrationIdWhenTheDisplayIdIsPresent() {
+        http.enqueue(ok(listBody(null, 111L)));
+        http.enqueue(ok(detailBodyWithDisplayId(6473457702L, 9001L)
+                .replace("\"externalVendorSku\":null", "\"externalVendorSku\":\"MLD-777\"")));
+
+        CanonicalProduct product = (CanonicalProduct) client(250, false)
+                .fetchProductPage("ak", "sk", "V1", null).records().get(0);
+
+        // The rule that decided the 2026-08-23 identity question is untouched by the new field.
+        assertThat(product.sku()).isEqualTo("MLD-777");
+        assertThat(product.externalDisplayProductId()).isEqualTo("6473457702");
+    }
+
+    @Test
+    void fallsBackToTheListRowsDisplayIdWhenTheDetailCallFailed() {
+        http.enqueue(ok(listBodyWithDisplayId(111L, 6473457702L)));
+        http.enqueue(new CoupangHttpClient.Response(500, "{}", Map.of()));
+
+        CanonicalProduct product = (CanonicalProduct) client(250, false)
+                .fetchProductPage("ak", "sk", "V1", null).records().get(0);
+
+        assertThat(product.externalDisplayProductId()).isEqualTo("6473457702");
+        assertThat(product.variants()).isEmpty();
+    }
+
+    @Test
+    void aDetailThatStatesNoDisplayIdIsNullAndNeverTheRegistrationId() {
+        http.enqueue(ok(listBody(null, 111L)));
+        http.enqueue(ok(detailBody(9001L, null)));
+
+        CanonicalProduct product = (CanonicalProduct) client(250, false)
+                .fetchProductPage("ak", "sk", "V1", null).records().get(0);
+
+        // Null, not "111". A 등록상품ID standing in for a 노출상품ID would let a review naming one match a
+        // listing keyed by the other — silently, on data that looks correct.
+        assertThat(product.externalDisplayProductId()).isNull();
     }
 
     // ─────────────────────────────────────────────── pagination

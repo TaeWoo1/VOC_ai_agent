@@ -11,6 +11,10 @@ import com.sellerops.ingest.IngestOutcome;
 import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.ingest.canonical.CanonicalReview;
+import com.sellerops.product.ChannelProduct;
+import com.sellerops.product.ChannelProductRepository;
+import com.sellerops.product.Product;
+import com.sellerops.product.ProductRepository;
 import com.sellerops.review.ReviewReplyState;
 import com.sellerops.selleraccount.AccountSessionSlot;
 import com.sellerops.selleraccount.AccountSessionSlotRepository;
@@ -45,6 +49,14 @@ import org.springframework.stereotype.Service;
  * canonical record has none, and the reviews table has no column for one. Three layers, none of which is a
  * filter — a filter is a thing that can be forgotten.
  *
+ * <p><b>The review names its product with an id this service does not pass on.</b> Coupang's 상품평 screen
+ * prints 노출상품ID, which is neither the 등록상품ID the catalogue is keyed by nor the 옵션ID a variant
+ * carries. Sent through as a SKU it matched nothing and the ingestion spine built a second product
+ * beside the real one — up to one per listing. So the display id is used here as a LOOKUP KEY into the
+ * listings this org has actually read, and what travels on is the SKU of the product that listing
+ * already belongs to. Nothing the agent sends is trusted as a canonical identity, and this path can no
+ * longer create a product at all: an unresolved review is a counted failure, never a new row.
+ *
  * <p><b>Reply state is UNKNOWN, permanently.</b> Coupang gives sellers no way to answer a 상품평, so there is no
  * channel statement to preserve and none is fabricated. A review that cannot be replied to is not "unanswered".
  */
@@ -58,6 +70,16 @@ public class AgentReviewHandoffService {
     static final String REASON_UNSUPPORTED_CHANNEL = "UNSUPPORTED_CHANNEL";
     static final String REASON_BAD_DATE = "UNPARSEABLE_REVIEW_DATE";
     static final String REASON_BODY_DISAGREES = "BODY_TEXTLESS_DISAGREEMENT";
+    /**
+     * A row whose 노출상품ID matches no listing this org has read. Counted as a failure and reported;
+     * the rest of the batch still stores.
+     *
+     * <p>It is NOT a batch refusal, unlike an unparseable date. A bad date means the agent and this
+     * record disagree about what was on the screen; an unknown display id is an ordinary state of the
+     * world — a catalogue not yet read, or a listing the seller has since removed — and refusing a whole
+     * live sitting for it would throw away every page the operator turned by hand.
+     */
+    static final String REASON_UNRESOLVED_PRODUCT = "UNRESOLVED_DISPLAY_PRODUCT_ID";
 
     /** The one channel this path serves. Widening it is a decision, not a configuration. */
     static final String SUPPORTED_CHANNEL = CoupangApiConnector.CHANNEL_CODE;
@@ -68,19 +90,34 @@ public class AgentReviewHandoffService {
     private final IngestionService ingestion;
     private final SyncJobRepository syncJobs;
     private final IngestFollowUp followUp;
+    private final ChannelProductRepository channelProducts;
+    private final ProductRepository products;
 
     public AgentReviewHandoffService(AccountSessionSlotRepository slots,
                                      SellerAccountRepository accounts,
                                      ChannelRepository channels,
                                      IngestionService ingestion,
                                      SyncJobRepository syncJobs,
-                                     IngestFollowUp followUp) {
+                                     IngestFollowUp followUp,
+                                     ChannelProductRepository channelProducts,
+                                     ProductRepository products) {
         this.slots = slots;
         this.accounts = accounts;
         this.channels = channels;
         this.ingestion = ingestion;
         this.syncJobs = syncJobs;
         this.followUp = followUp;
+        this.channelProducts = channelProducts;
+        this.products = products;
+    }
+
+    /**
+     * A mapped batch: the rows that resolved to a product this org already holds, and how many did not.
+     *
+     * <p>The two travel together because the caller must report a received count that covers both — a
+     * handoff of 24 reviews that stored 22 and could not place 2 must not report 22 received.
+     */
+    private record MappedBatch(List<CanonicalReview> rows, int unresolved) {
     }
 
     /**
@@ -108,7 +145,8 @@ public class AgentReviewHandoffService {
                     "이 채널은 화면 기반 상품평 수집을 지원하지 않습니다. (" + REASON_UNSUPPORTED_CHANNEL + ")");
         }
 
-        List<CanonicalReview> rows = mapRows(request.reviews());
+        MappedBatch batch = mapRows(orgId, channel.getId(), request.reviews());
+        List<CanonicalReview> rows = batch.rows();
         // **Stamped BEFORE the write, and that is the whole point.** The import's start is what the review
         // list uses to decide which rows arrived in it (`created_at >= startedAt`). Stamping it afterwards
         // put every freshly-written review a few milliseconds BEFORE its own import, so a handoff that had
@@ -122,28 +160,42 @@ public class AgentReviewHandoffService {
         // memory (audit defect C) and never produced an analysis row (defect B). Best-effort inside.
         followUp.afterReviewIngest(orgId, channel.getId(), outcome.insertedIds());
 
-        SyncJob record = recordImport(orgId, channel.getId(), sellerAccountId, request, rows.size(), outcome,
-                startedAt);
+        // Received is what the operator's sitting handed over, not what happened to be placeable — a row
+        // this org could not resolve was still read off the screen and must be visible in the count.
+        int received = request.reviews().size();
+        int failed = outcome.failed() + batch.unresolved();
+        SyncJob record = recordImport(orgId, channel.getId(), sellerAccountId, request, received, failed,
+                outcome, startedAt);
         // Counts and enums only. The bodies are in hand at this point, which is exactly why they are not here.
-        log.info("Coupang review handoff: received={} stored={} skipped={} failed={} complete={} stopReason={}",
-                rows.size(), outcome.success(), outcome.skipped(), outcome.failed(),
+        log.info("Coupang review handoff: received={} stored={} skipped={} failed={} unresolved={} "
+                        + "complete={} stopReason={}",
+                received, outcome.success(), outcome.skipped(), failed, batch.unresolved(),
                 request.complete(), request.stopReason());
 
-        return new AgentReviewHandoffResultView(rows.size(), outcome.success(), outcome.skipped(),
-                outcome.failed(), request.complete(),
+        return new AgentReviewHandoffResultView(received, outcome.success(), outcome.skipped(),
+                failed, request.complete(),
                 record == null ? null : record.getId().toString());
     }
 
     /**
-     * One acquired row → the canonical record. {@code externalId} is null because the channel publishes none;
-     * {@code sku} is Coupang's 노출상품ID, which is the catalog identity the seller sees on the screen.
+     * One acquired row → the canonical record.
+     *
+     * <p>{@code externalId} is null because the channel publishes none. {@code sku} is <b>not</b> the id the
+     * agent sent: the agent sends 노출상품ID, which this database keys nothing by, and passing it through as a
+     * SKU is what made the ingestion spine create a parallel product for every listing. It is used to FIND the
+     * listing instead, and the SKU that travels on belongs to the product that listing is already part of —
+     * a value read out of this database, never one the caller supplied.
+     *
+     * <p>A row whose display id matches no listing is dropped from the batch and counted. It is not rounded up
+     * into a new product, and it is not silent.
      *
      * <p>The date is stored as UTC start-of-day for the calendar date the screen printed. That keeps the date
      * part of the content hash byte-identical to what the agent read, and lands on the same calendar day in
      * KST — a review dated 2026-08-11 in WING reads 2026-08-11 to the seller.
      */
-    private List<CanonicalReview> mapRows(List<AgentReviewHandoffRequest.Review> rows) {
+    private MappedBatch mapRows(UUID orgId, UUID channelId, List<AgentReviewHandoffRequest.Review> rows) {
         List<CanonicalReview> out = new ArrayList<>(rows.size());
+        int unresolved = 0;
         for (int i = 0; i < rows.size(); i++) {
             AgentReviewHandoffRequest.Review row = rows.get(i);
             // The flag and the body must agree. A textless review with text, or a written review with no
@@ -154,9 +206,14 @@ public class AgentReviewHandoffService {
                         "상품평 본문과 '본문 없음' 표시가 서로 맞지 않습니다. (" + REASON_BODY_DISAGREES + ")");
             }
             Instant receivedAt = parseDate(row.writtenOn());
+            String sku = catalogSkuFor(orgId, channelId, row.productId());
+            if (sku == null) {
+                unresolved++;
+                continue;
+            }
             out.add(new CanonicalReview(
                     row.productName(),
-                    row.productId(),
+                    sku,
                     row.rating(),
                     row.body(),
                     receivedAt,
@@ -169,7 +226,43 @@ public class AgentReviewHandoffService {
                     row.mediaCount(),
                     row.textless()));
         }
-        return out;
+        if (unresolved > 0) {
+            // Counts only, and the reason by name. The display ids themselves are the seller's catalogue
+            // identifiers and there is nothing a log line does with them that a count does not.
+            log.warn("Coupang review handoff: {} row(s) named a 노출상품ID this org holds no listing for ({})",
+                    unresolved, REASON_UNRESOLVED_PRODUCT);
+        }
+        return new MappedBatch(out, unresolved);
+    }
+
+    /**
+     * 노출상품ID → the SKU of the product that listing belongs to, or null when this org holds no such listing.
+     *
+     * <p>Three fail-closed steps, and none of them creates anything. The listing lookup is org-scoped and
+     * passes through the {@code RealDataOnly} filter, so a synthetic listing cannot answer for a real review.
+     * A listing whose product has since gone, or a product with no SKU to identify it by, is treated the same
+     * as no listing at all: this method exists to hand the ingestion spine a key that means exactly one
+     * product, and "probably that one" is not that.
+     */
+    private String catalogSkuFor(UUID orgId, UUID channelId, String displayProductId) {
+        if (displayProductId == null || displayProductId.isBlank()) {
+            return null;
+        }
+        ChannelProduct listing = channelProducts
+                .findByOrgIdAndChannelIdAndExternalDisplayProductId(orgId, channelId, displayProductId)
+                .orElse(null);
+        if (listing == null) {
+            return null;
+        }
+        // findAllByOrgIdAndIdIn, deliberately, and NOT findById: a Hibernate filter does not touch a
+        // findById, so the id-lookup would hand back a synthetic product the listing lookup had just
+        // refused to return. Same filter on both sides, or the fence has a door in it.
+        Product product = products.findAllByOrgIdAndIdIn(orgId, List.of(listing.getProductId()))
+                .stream().findFirst().orElse(null);
+        if (product == null || product.getSku() == null || product.getSku().isBlank()) {
+            return null;
+        }
+        return product.getSku();
     }
 
     private Instant parseDate(String writtenOn) {
@@ -190,8 +283,8 @@ public class AgentReviewHandoffService {
      * the same reasoning the credential handoff applies to its post-store verification.
      */
     private SyncJob recordImport(UUID orgId, UUID channelId, UUID sellerAccountId,
-                                 AgentReviewHandoffRequest request, int received, IngestOutcome outcome,
-                                 Instant startedAt) {
+                                 AgentReviewHandoffRequest request, int received, int failed,
+                                 IngestOutcome outcome, Instant startedAt) {
         try {
             SyncJob job = new SyncJob();
             job.setOrgId(orgId);
@@ -207,10 +300,10 @@ public class AgentReviewHandoffService {
             job.setTotalRows(received);
             job.setSuccessRows(outcome.success());
             job.setSkippedRows(outcome.skipped());
-            job.setFailedRows(outcome.failed());
+            job.setFailedRows(failed);
             // PARTIAL, not SUCCESS, when the walk did not cover the list: the row is the operator's evidence,
             // and it must not read as a completed import of a list that was never reached the end of.
-            job.setStatus(outcome.failed() > 0 || !request.complete() ? "PARTIAL" : "SUCCESS");
+            job.setStatus(failed > 0 || !request.complete() ? "PARTIAL" : "SUCCESS");
             job.setErrorMessage(request.complete() ? null : request.stopReason());
             return syncJobs.save(job);
         } catch (RuntimeException e) {

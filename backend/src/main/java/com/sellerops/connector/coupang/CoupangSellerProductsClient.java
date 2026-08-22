@@ -276,7 +276,25 @@ public class CoupangSellerProductsClient {
                 // instant — "we do not know when it changed" is not "it changed just now".
                 null,
                 SOURCE,
-                sourceRow);
+                sourceRow,
+                // 노출상품ID — the DETAIL wins because it is the per-product resource; the list row is
+                // the fallback for a walk whose detail call failed. Null when neither states one, which
+                // leaves the review path unable to resolve rather than resolving to a guess.
+                displayProductId(row, detail));
+    }
+
+    /**
+     * The 노출상품ID, preferring the per-product detail over the list row.
+     *
+     * <p>Never falls back to {@code sellerProductId}. A 등록상품ID standing in for a 노출상품ID would let a
+     * review naming one match a listing keyed by the other, which is the exact confusion this identifier
+     * was added to end — and it would do it silently, on data that looks correct.
+     */
+    private static String displayProductId(ListRow row, ProductDetail detail) {
+        if (detail != null && detail.productId() != null) {
+            return Long.toString(detail.productId());
+        }
+        return row.productId() == null ? null : Long.toString(row.productId());
     }
 
     private CoupangHttpClient.Response signedGet(String path, String query, String accessKey,
@@ -320,6 +338,13 @@ public class CoupangSellerProductsClient {
     /** One catalogue row. Every field nullable — an absent one becomes UNAVAILABLE, never a default. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record ListRow(@JsonProperty("sellerProductId") Long sellerProductId,
+                   /**
+                    * 노출상품ID. Read from BOTH streams because which one carries it was never
+                    * measured — the 2026-08-23 observation counted 68 occurrences, and this catalogue
+                    * has 68 products AND one 68-row list page, so the count cannot tell them apart.
+                    * Absent here simply yields null and the detail answers.
+                    */
+                   @JsonProperty("productId") Long productId,
                    @JsonProperty("sellerProductName") String sellerProductName,
                    @JsonProperty("statusName") String statusName,
                    @JsonProperty("brand") String brand,
@@ -331,7 +356,8 @@ public class CoupangSellerProductsClient {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record ProductDetail(@JsonProperty("sellerProductName") String sellerProductName,
+    record ProductDetail(@JsonProperty("productId") Long productId,
+                         @JsonProperty("sellerProductName") String sellerProductName,
                          @JsonProperty("brand") String brand,
                          @JsonProperty("items") List<DetailItem> items) {
     }

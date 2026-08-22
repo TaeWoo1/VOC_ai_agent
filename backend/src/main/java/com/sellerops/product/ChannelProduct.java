@@ -64,6 +64,22 @@ public class ChannelProduct extends BaseEntity {
     @Column(name = "external_product_id")
     private String externalProductId;
 
+    /**
+     * The channel-published DISPLAY id for this listing, when the channel publishes one separate from
+     * {@link #externalProductId} — Coupang's 노출상품ID ({@code productId}), which is neither the
+     * 등록상품ID this row is keyed by nor the 옵션ID a variant carries.
+     *
+     * <p>It is an ALIAS, never an identity: nothing resolves a listing by it during a catalogue read,
+     * and it is never defaulted from {@code externalProductId}. What it is for is the other direction —
+     * a surface that only speaks the display id (the WING 상품평 screen) can find the listing, and
+     * through it the one canonical product, instead of minting a parallel one.
+     *
+     * <p>Null is the honest value for a channel that publishes no such id, and for a listing read
+     * before this column existed.
+     */
+    @Column(name = "external_display_product_id")
+    private String externalDisplayProductId;
+
     @Column(name = "channel_price")
     private BigDecimal channelPrice;
 

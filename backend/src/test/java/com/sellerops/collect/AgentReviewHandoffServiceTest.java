@@ -20,6 +20,10 @@ import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import com.sellerops.order.OrderDailySummaryRepository;
+import com.sellerops.common.DataOrigin;
+import com.sellerops.product.ChannelProduct;
+import com.sellerops.product.ChannelProductRepository;
+import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductService;
 import com.sellerops.review.Review;
@@ -76,10 +80,19 @@ class AgentReviewHandoffServiceTest {
     @Autowired SyncJobRepository syncJobs;
     @Autowired AccountSessionSlotRepository slotRepo;
     @Autowired ItemAnalysisRepository analyses;
+    @Autowired ChannelProductRepository channelProducts;
 
     private static final String BODY_A = "배송도 빠르고 포장도 꼼꼼해서 아주 만족합니다";
     private static final String BODY_SHORT = "좋아요";
+    /**
+     * The 노출상품ID — what the WING 상품평 screen prints and the ONLY product identifier the agent sends.
+     * It is deliberately NOT the value the catalogue is keyed by; that is {@link #SELLER_PRODUCT_ID}, and
+     * keeping them different here is what makes these tests able to fail if the two are ever conflated
+     * again.
+     */
     private static final String PRODUCT = "15411270785";
+    /** The 등록상품ID — the catalogue's listing key and the product SKU. A different id space entirely. */
+    private static final String SELLER_PRODUCT_ID = "78123456789";
     private static final String OPTION = "81234567890";
 
     private AgentReviewHandoffService service;
@@ -95,7 +108,8 @@ class AgentReviewHandoffServiceTest {
         // gates, not about the analysis stack. IngestFollowUpTest covers the follow-up itself.
         service = new AgentReviewHandoffService(slotRepo, sellerAccounts, channels, ingestion, syncJobs,
                 new IngestFollowUp(new ItemAnalysisService(inquiries, reviews, analyses,
-                        new RuleBasedInboxItemAnalyzer()), null, null));
+                        new RuleBasedInboxItemAnalyzer()), null, null),
+                channelProducts, products);
     }
 
     /* ───────────────────────────── fixtures ───────────────────────────── */
@@ -118,7 +132,36 @@ class AgentReviewHandoffServiceTest {
         acc.setChannelId(ch.getId());
         acc.setConnectionStatus(ChannelStatus.PENDING);
         acc.setFileUpload(false);
-        return sellerAccounts.save(acc);
+        SellerAccount saved = sellerAccounts.save(acc);
+        seedCatalog(ownerOrg, ch.getId());
+        return saved;
+    }
+
+    /**
+     * The catalogue a PRODUCT read would have left: ONE product keyed by 등록상품ID, and one listing that
+     * also carries the 노출상품ID as its display alias.
+     *
+     * <p>Every review test now needs this, and that is the point of the change being tested: before it, a
+     * handoff could store reviews against a product that had never been read from the channel — by making
+     * one up. Now the catalogue is a precondition, so a test that forgets it fails loudly rather than
+     * quietly minting a second product.
+     */
+    private Product seedCatalog(UUID ownerOrg, UUID channelId) {
+        Product p = new Product();
+        p.setOrgId(ownerOrg);
+        p.setName("무선 이어폰");
+        p.setSku(SELLER_PRODUCT_ID);
+        p.setStatus("ACTIVE");
+        products.save(p);
+
+        ChannelProduct listing = new ChannelProduct();
+        listing.setOrgId(ownerOrg);
+        listing.setChannelId(channelId);
+        listing.setProductId(p.getId());
+        listing.setExternalProductId(SELLER_PRODUCT_ID);
+        listing.setExternalDisplayProductId(PRODUCT);
+        channelProducts.save(listing);
+        return p;
     }
 
     private String slotFor(SellerAccount acc) {
@@ -437,5 +480,133 @@ class AgentReviewHandoffServiceTest {
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining(AgentReviewHandoffService.REASON_BAD_DATE);
         assertThat(reviews.findAll()).isEmpty();
+    }
+
+    /* ─────────────────── identity: the 노출상품ID is a lookup key, never a SKU ─────────────────── */
+
+    /**
+     * The property the whole change exists for.
+     *
+     * <p>The agent sends 노출상품ID. The catalogue is keyed by 등록상품ID. The review must land on the
+     * product the catalogue already holds — and the count of products must not move, which is the part a
+     * "did it store" assertion cannot see.
+     */
+    @Test
+    void resolves_the_review_onto_the_catalogue_product_the_display_id_points_at() {
+        SellerAccount acc = account(org, "COUPANG");
+        long productsBefore = products.count();
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        // Not one more product than the catalogue read left. This is the number that used to grow.
+        assertThat(products.count()).isEqualTo(productsBefore);
+
+        UUID catalogueProduct = products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId();
+        assertThat(reviews.findAll().get(0).getProductId()).isEqualTo(catalogueProduct);
+        // And emphatically NOT a product named after the display id.
+        assertThat(products.findByOrgIdAndSku(org, PRODUCT)).isEmpty();
+    }
+
+    /**
+     * A display id this org holds no listing for is a counted failure — not a new product, and not a
+     * silent drop. The rest of the batch still stores, because an unknown listing is an ordinary state of
+     * the world and the operator turned those pages by hand.
+     */
+    @Test
+    void a_display_id_with_no_listing_fails_the_row_and_creates_nothing() {
+        SellerAccount acc = account(org, "COUPANG");
+        long productsBefore = products.count();
+        AgentReviewHandoffRequest.Review stranger = new AgentReviewHandoffRequest.Review(
+                "2026-08-11", 4, "다른 상품 후기", "99999999999", OPTION, "모르는 상품", 0, false);
+
+        AgentReviewHandoffResultView result = service.handOff(org, request(slotFor(acc), true,
+                List.of(review(BODY_A, 5, "2026-08-11"), stranger)));
+
+        assertThat(result.received()).isEqualTo(2);
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(products.count()).isEqualTo(productsBefore);
+        assertThat(products.findByOrgIdAndSku(org, "99999999999")).isEmpty();
+        assertThat(reviews.findAll()).hasSize(1);
+    }
+
+    /** An unplaceable row makes the import record PARTIAL, so the operator's history says so. */
+    @Test
+    void an_unresolved_row_makes_the_import_partial_even_on_a_completed_walk() {
+        SellerAccount acc = account(org, "COUPANG");
+        AgentReviewHandoffRequest.Review stranger = new AgentReviewHandoffRequest.Review(
+                "2026-08-11", 4, "다른 상품 후기", "99999999999", OPTION, null, 0, false);
+
+        service.handOff(org, request(slotFor(acc), true,
+                List.of(review(BODY_A, 5, "2026-08-11"), stranger)));
+
+        SyncJob job = syncJobs.findAll().get(0);
+        assertThat(job.getStatus()).isEqualTo("PARTIAL");
+        assertThat(job.getTotalRows()).isEqualTo(2);
+        assertThat(job.getSuccessRows()).isEqualTo(1);
+        assertThat(job.getFailedRows()).isEqualTo(1);
+    }
+
+    /**
+     * A synthetic listing does not answer for a real review.
+     *
+     * <p>Seeded rows carry the display id the seller's screen would print, which is exactly how a demo
+     * org's manufactured catalogue could quietly adopt live reviews. The {@code RealDataOnly} filter is
+     * the mechanism; this test is the statement that the mechanism is load-bearing here.
+     */
+    @Test
+    void a_demo_seed_listing_never_adopts_a_real_review() {
+        SellerAccount acc = account(org, "COUPANG");
+        // Take the real catalogue out of the way, then leave only a synthetic listing wearing the same
+        // display id. Before the filter mattered, this is the row that would have answered.
+        ChannelProduct real = channelProducts
+                .findByOrgIdAndChannelIdAndExternalDisplayProductId(org, acc.getChannelId(), PRODUCT)
+                .orElseThrow();
+        real.setExternalDisplayProductId(null);
+        channelProducts.save(real);
+
+        Product seeded = new Product();
+        seeded.setOrgId(org);
+        seeded.setName("데모 이어폰");
+        seeded.setSku("DEMO-SKU-1");
+        seeded.setStatus("ACTIVE");
+        seeded.setDataOrigin(DataOrigin.DEMO_SEED);
+        products.save(seeded);
+        ChannelProduct synthetic = new ChannelProduct();
+        synthetic.setOrgId(org);
+        synthetic.setChannelId(acc.getChannelId());
+        synthetic.setProductId(seeded.getId());
+        synthetic.setExternalProductId("DEMO-LISTING-1");
+        synthetic.setExternalDisplayProductId(PRODUCT);
+        synthetic.setDataOrigin(DataOrigin.DEMO_SEED);
+        channelProducts.save(synthetic);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(reviews.findAll()).isEmpty();
+    }
+
+    /** Another org's listing carrying the same display id is not this org's product. */
+    @Test
+    void a_listing_in_another_org_does_not_answer() {
+        SellerAccount acc = account(org, "COUPANG");
+        UUID otherOrg = UUID.randomUUID();
+        ChannelProduct mine = channelProducts
+                .findByOrgIdAndChannelIdAndExternalDisplayProductId(org, acc.getChannelId(), PRODUCT)
+                .orElseThrow();
+        mine.setOrgId(otherOrg);
+        channelProducts.save(mine);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
     }
 }

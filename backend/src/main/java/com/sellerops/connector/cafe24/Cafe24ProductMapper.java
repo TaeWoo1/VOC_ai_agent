@@ -70,7 +70,10 @@ public final class Cafe24ProductMapper {
                 readAt,
                 sourceUpdated,
                 SOURCE,
-                sourceRow);
+                sourceRow,
+                // Cafe24's admin product resource publishes one product number, which is already the
+                // listing key. No separate display id exists to record.
+                null);
     }
 
     private static void put(Map<String, String> into, String key, String value) {

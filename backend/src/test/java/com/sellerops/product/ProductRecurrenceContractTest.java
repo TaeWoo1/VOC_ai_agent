@@ -124,14 +124,59 @@ class ProductRecurrenceContractTest {
                 .allSatisfy(p -> assertThat(p.getDataOrigin()).isEqualTo(DataOrigin.REAL));
     }
 
+    // ─────────────────────────── the display alias across cycles
+
+    @Test
+    @DisplayName("the display id is stored on the listing and survives a second cycle unchanged")
+    void theDisplayIdIsStoredAndReObservedInPlace() {
+        CanonicalProduct first = withDisplayId(
+                catalogueRow("111", "전선몰딩", "12900", "SALE", Instant.now()), "6473457702");
+        writer.write(org, channelId, List.of(first));
+
+        CanonicalProduct second = withDisplayId(
+                catalogueRow("111", "전선몰딩 2m", "13900", "SALE", Instant.now()), "6473457702");
+        writer.write(org, channelId, List.of(second));
+
+        assertThat(listingsOnChannel()).hasSize(1);
+        ChannelProduct listing = listings.findByChannelIdAndExternalProductId(channelId, "111").orElseThrow();
+        assertThat(listing.getExternalDisplayProductId()).isEqualTo("6473457702");
+        // The listing is still keyed by 등록상품ID. The alias did not become the identity.
+        assertThat(listing.getExternalProductId()).isEqualTo("111");
+        assertThat(products.findAll().stream().filter(p -> org.equals(p.getOrgId())).count())
+                .as("carrying an alias must not split the product the listing already had")
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("a later read that states no display id does not erase the one already stored")
+    void anAbsentDisplayIdLeavesTheStoredAliasAlone() {
+        writer.write(org, channelId, List.of(withDisplayId(
+                catalogueRow("111", "전선몰딩", "12900", "SALE", Instant.now()), "6473457702")));
+
+        // The shape of a cycle whose detail call failed: identity and status, no alias.
+        writer.write(org, channelId,
+                List.of(catalogueRow("111", "전선몰딩", "12900", "SALE", Instant.now())));
+
+        assertThat(listings.findByChannelIdAndExternalProductId(channelId, "111").orElseThrow()
+                .getExternalDisplayProductId()).isEqualTo("6473457702");
+    }
+
     // ───────────────────────────────────────────────────────────── helpers
+
+    /** The same catalogue row, now also stating the channel's display id. */
+    private static CanonicalProduct withDisplayId(CanonicalProduct row, String displayId) {
+        return new CanonicalProduct(row.externalProductId(), row.name(), row.sku(), row.productUrl(),
+                row.price(), row.currency(), row.rawSellingStatus(), row.brand(), row.manufacturer(),
+                row.category(), row.description(), row.attributes(), row.variants(), row.observedAt(),
+                row.sourceUpdatedAt(), row.sourceKind(), row.sourceRow(), displayId);
+    }
 
     private CanonicalProduct catalogueRow(String externalId, String name, String price,
                                           String status, Instant observedAt) {
         return new CanonicalProduct(
                 externalId, name, externalId, null, new BigDecimal(price), "KRW", status,
                 null, null, "생활/건강", null, Map.of(), List.of(),
-                observedAt, Instant.parse("2026-07-01T00:00:00Z"), NAVER_SOURCE, 1);
+                observedAt, Instant.parse("2026-07-01T00:00:00Z"), NAVER_SOURCE, 1, null);
     }
 
     private List<ChannelProduct> listingsOnChannel() {

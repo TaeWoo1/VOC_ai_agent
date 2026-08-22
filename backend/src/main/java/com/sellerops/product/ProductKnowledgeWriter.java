@@ -143,6 +143,13 @@ public class ProductKnowledgeWriter {
         if (isPresent(row.rawSellingStatus())) {
             listing.setSellingStatus(SellingStatus.normalize(row.rawSellingStatus()).name());
         }
+        // The channel's DISPLAY id, under the same present-overwrites/absent-preserves rule as the
+        // rest: a walk whose detail call failed must not erase an alias an earlier, complete read
+        // stored. It is written only, never read back to decide identity — this row is still keyed by
+        // externalProductId, and nothing here resolves by the display id.
+        if (isPresent(row.externalDisplayProductId())) {
+            listing.setExternalDisplayProductId(trim(row.externalDisplayProductId(), 120));
+        }
         listing.setSourceKind(row.sourceKind());
         listing.setObservedAt(observed);
         listing.setSourceUpdatedAt(row.sourceUpdatedAt());

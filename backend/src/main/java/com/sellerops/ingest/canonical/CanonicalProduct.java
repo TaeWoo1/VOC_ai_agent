@@ -55,7 +55,19 @@ public record CanonicalProduct(
          */
         Instant sourceUpdatedAt,
         String sourceKind,
-        int sourceRow) {
+        int sourceRow,
+        /**
+         * The channel-published DISPLAY id for this listing, when the channel publishes one separate
+         * from {@code externalProductId} — Coupang's 노출상품ID ({@code productId}).
+         *
+         * <p>Last in the component list, and that is not cosmetic: appending it forced every existing
+         * construction site to be revisited by the compiler rather than silently absorbing a shifted
+         * String argument, which is the failure mode a record of eleven Strings actually has.
+         *
+         * <p>Null for a channel that publishes no such id. It is never derived from
+         * {@code externalProductId} — they are different identifiers.
+         */
+        String externalDisplayProductId) {
 
     public CanonicalProduct {
         attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
@@ -73,6 +85,7 @@ public record CanonicalProduct(
                                             Instant observedAt, Instant sourceUpdatedAt,
                                             String sourceKind, int sourceRow) {
         return new CanonicalProduct(externalProductId, name, sku, null, null, null, null, null, null,
-                null, null, Map.of(), List.of(), observedAt, sourceUpdatedAt, sourceKind, sourceRow);
+                null, null, Map.of(), List.of(), observedAt, sourceUpdatedAt, sourceKind, sourceRow,
+                null);
     }
 }

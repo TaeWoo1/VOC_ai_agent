@@ -130,7 +130,7 @@ class ProductKnowledgeCoverageTest {
                 "SALE", null, null, null, null, Map.of(), List.of(),
                 // OBSERVED 200 days ago — that is what makes it stale. The channel's own
                 // last-changed time is irrelevant to freshness and is deliberately absent here.
-                Instant.now().minus(200, ChronoUnit.DAYS), null, "NAVER:PRODUCT_API:v1", 1);
+                Instant.now().minus(200, ChronoUnit.DAYS), null, "NAVER:PRODUCT_API:v1", 1, null);
         writer.write(org, channelId, List.of(old));
         Product product = products.findByOrgIdAndSku(org, "SELLER-CODE-1").orElseThrow();
 
@@ -261,7 +261,7 @@ class ProductKnowledgeCoverageTest {
                 "SELLING", null, null, null, null, Map.of("상품무게", "1.00"), List.of(),
                 Instant.now(),                              // read: now
                 Instant.parse("2014-09-17T01:34:38Z"),      // channel says: untouched since 2014
-                "CAFE24:PRODUCT_API:v2", 1);
+                "CAFE24:PRODUCT_API:v2", 1, null);
 
         writer.write(org, channelId, List.of(oldProductFreshlyRead));
 
@@ -280,7 +280,7 @@ class ProductKnowledgeCoverageTest {
         Instant sourceChanged = Instant.parse("2014-09-17T01:34:38Z");
         writer.write(org, channelId, List.of(new CanonicalProduct(
                 "187", "오래된 상품", "187", null, null, null, "SELLING", null, null, null, null,
-                Map.of(), List.of(), Instant.now(), sourceChanged, "CAFE24:PRODUCT_API:v2", 1)));
+                Map.of(), List.of(), Instant.now(), sourceChanged, "CAFE24:PRODUCT_API:v2", 1, null)));
 
         ChannelProduct listing = listings.findByChannelIdAndExternalProductId(channelId, "187").orElseThrow();
 
@@ -303,7 +303,7 @@ class ProductKnowledgeCoverageTest {
                 // Read on 08-20; the channel says the listing itself last changed on 07-01. Freshness
                 // follows the first, never the second.
                 Instant.parse("2026-08-20T02:00:00Z"), Instant.parse("2026-07-01T00:00:00Z"),
-                "NAVER:PRODUCT_API:v1", 1);
+                "NAVER:PRODUCT_API:v1", 1, null);
     }
 
     private static KnowledgeCoverageView facet(ProductKnowledgeView view, ProductKnowledgeFacet facet) {

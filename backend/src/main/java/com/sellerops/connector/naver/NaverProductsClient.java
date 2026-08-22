@@ -201,7 +201,12 @@ public class NaverProductsClient {
                     now,
                     sourceUpdatedAt(listing),
                     SOURCE,
-                    row++));
+                    row++,
+                    // NAVER publishes a channel product number distinct from the origin product, but
+                    // this list resource is already keyed by the one this connector reads. Naming a
+                    // second id here would assert a distinction this response has not been measured to
+                    // draw — null until a wire observation says otherwise.
+                    null));
         }
         return out;
     }
