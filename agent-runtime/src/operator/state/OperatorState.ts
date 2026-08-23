@@ -37,6 +37,15 @@ export type EvidenceKind =
   | "REVIEW_ISSUE"
   /* How many of ONE issue's review rows belong to ONE product — the only product-scoped issue fact. */
   | "ISSUE_EVIDENCE"
+  /**
+   * How many NEGATIVE REVIEWS one product has, and when they arrived.
+   *
+   * <b>Its own kind because it counts a different thing.</b> `ISSUE_EVIDENCE` counts opinion units an
+   * extractor tied to a repeated problem; this counts whole reviews the ingest marked negative. Giving
+   * them one kind would let a sentence about 부정 리뷰 rest on issue rows and vice versa — the rename
+   * `group/ReviewEvidenceSense.ts` exists to refuse.
+   */
+  | "NEGATIVE_REVIEW"
   | "REVIEW"
   | "INQUIRY"
   | "PAST_REPLY"

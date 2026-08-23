@@ -17,6 +17,7 @@ import type {
   AgentJudgeView,
   AgentPlanView,
   CustomerMemorySearch,
+  DashboardSummary,
   InboxSummary,
   ProductFact,
   ProductKnowledge,
@@ -117,8 +118,11 @@ export interface OperatorSpringClient {
   listRepeatedInquiries(referenceDate?: string, windowDays?: number): Promise<RepeatedInquiry[]>;
   /** Stored item analyses for this org — the FAQ / 상세페이지 후보 tallies read from their source. */
   listItemAnalyses(): Promise<unknown[]>;
-  /** The dashboard rollup, whose `topProductIssues` is the product aggregation the FE lost in A1–A7. */
-  getDashboardSummary(): Promise<{ topProductIssues?: unknown[] }>;
+  /**
+   * The dashboard rollup. `topProductIssues` is the org's negative reviews grouped by canonical
+   * product — the one read that answers "어느 상품에 부정 리뷰가" without being told which product.
+   */
+  getDashboardSummary(): Promise<DashboardSummary>;
   /** One inquiry's operational context — metadata, product link and past-response summary. No body. */
   getInquiryThreadContext(workItemId: string): Promise<InquiryThreadContext>;
 

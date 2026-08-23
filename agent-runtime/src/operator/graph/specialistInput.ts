@@ -53,6 +53,15 @@ export interface SpecialistInput {
    * proven something product-scoped and complete, a later one with a weaker, bounded read of the same
    * thing has nothing to add, and adding it anyway prints two answers to one question (C3).
    */
+  /**
+   * The planner's own restatement of the goal.
+   *
+   * <b>A fallback, never the authority.</b> `goalText` is what the seller wrote; this is what the
+   * planner wrote about it. Where the two could disagree about the MEANING of the answer — which
+   * review evidence a question is asking for, `group/ReviewEvidenceSense.ts` — the seller's sentence
+   * wins and this is read only when there is no sentence to read.
+   */
+  readonly plannerGoal?: string;
   readonly priorEvidence?: readonly EvidenceRef[];
   readonly referenceDate?: string;
   readonly goalText?: string;

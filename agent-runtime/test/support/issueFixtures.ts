@@ -123,8 +123,15 @@ export function historyFor(_id: string): IssueTransition[] {
 
 export function evidenceSummaryFor(issue: ReviewIssueSummary): IssueEvidenceSummary {
   const total = issue.evidenceCount;
+  // One product owns every row here, so its span IS the issue's — by arithmetic, not by assumption.
   const byProduct = issue.dominantProductId
-    ? [{ productId: issue.dominantProductId, productName: issue.dominantProductName, evidenceCount: total }]
+    ? [{
+      productId: issue.dominantProductId,
+      productName: issue.dominantProductName,
+      evidenceCount: total,
+      firstOccurredOn: issue.firstEvidenceOn,
+      lastOccurredOn: issue.lastEvidenceOn,
+    }]
     : [];
   const unattributed = issue.dominantProductId ? 0 : total;
   return {

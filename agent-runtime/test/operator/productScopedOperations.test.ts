@@ -359,8 +359,10 @@ describe("C4 — the number in a product sentence is the product's", () => {
       evidence: {
         totalEvidence: 9,
         byProduct: [
-          { productId: MOLDING.id, productName: "몰딩 화이트 10m", evidenceCount: 7 },
-          { productId: CUP_BIN.id, productName: "판도리 일체형 종이컵 수거함", evidenceCount: 2 },
+          { productId: MOLDING.id, productName: "몰딩 화이트 10m", evidenceCount: 7,
+            firstOccurredOn: "2026-06-01", lastOccurredOn: "2026-07-22" },
+          { productId: CUP_BIN.id, productName: "판도리 일체형 종이컵 수거함", evidenceCount: 2,
+            firstOccurredOn: "2026-06-04", lastOccurredOn: "2026-06-09" },
         ],
         unattributedEvidence: 0,
         ratingDistribution: { rating1: 9, rating2: 0, rating3: 0, rating4: 0, rating5: 0, unrated: 0 },
@@ -452,7 +454,8 @@ describe("C4 — the number in a product sentence is the product's", () => {
         summary: summaryOf(r),
         evidence: {
           totalEvidence: r.total,
-          byProduct: [{ productId: CUP_BIN.id, productName: "판도리 일체형 종이컵 수거함", evidenceCount: r.mine }],
+          byProduct: [{ productId: CUP_BIN.id, productName: "판도리 일체형 종이컵 수거함",
+            evidenceCount: r.mine, firstOccurredOn: "2026-06-01", lastOccurredOn: "2026-07-22" }],
           unattributedEvidence: 0,
           ratingDistribution: { rating1: r.total, rating2: 0, rating3: 0, rating4: 0, rating5: 0, unrated: 0 },
           firstEvidenceOn: "2026-06-01", lastEvidenceOn: "2026-07-22",

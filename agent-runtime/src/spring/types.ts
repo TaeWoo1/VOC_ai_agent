@@ -341,11 +341,19 @@ export interface IssueContext {
   readonly history: IssueTransition[];
 }
 
-/** All-time evidence count for one product behind an issue (mirror of IssueProductEvidenceView). */
+/**
+ * All-time evidence count for one product behind an issue (mirror of IssueProductEvidenceView).
+ *
+ * `firstOccurredOn`/`lastOccurredOn` are THIS product's rows' own dates. The issue's span lives on
+ * {@link IssueEvidenceSummary} and is a different fact — see the DTO's javadoc, and
+ * `group/ProductGrouping.ts`, which is what stops one being read as the other.
+ */
 export interface IssueProductEvidence {
   readonly productId: string;
   readonly productName: string | null;
   readonly evidenceCount: number;
+  readonly firstOccurredOn: string | null;
+  readonly lastOccurredOn: string | null;
 }
 
 /** Per-star evidence counts plus an unrated bucket; sums to totalEvidence. */
@@ -370,6 +378,30 @@ export interface IssueEvidenceSummary {
   readonly ratingDistribution: IssueRatingDistribution;
   readonly firstEvidenceOn: string | null;
   readonly lastEvidenceOn: string | null;
+}
+
+/**
+ * One product's negative-review roll-up on the dashboard (mirror of TopProductIssue).
+ *
+ * <b>Not review-issue evidence.</b> `count` is negative REVIEWS — whole reviews the ingest marked
+ * negative. {@link IssueProductEvidence.evidenceCount} is opinion units an extractor tied to a
+ * repeated problem. Two different corpora, two different questions; `group/ReviewEvidenceSense.ts`
+ * is where the runtime keeps them from being renamed into each other.
+ */
+export interface DashboardProductIssue {
+  readonly productId: string;
+  readonly productName: string | null;
+  readonly issueLabel: string;
+  readonly count: number;
+  readonly firstNegativeOn: string | null;
+  readonly lastNegativeOn: string | null;
+}
+
+/** GET /api/dashboard/summary — only the parts the Operator reads. */
+export interface DashboardSummary {
+  readonly topProductIssues?: DashboardProductIssue[];
+  /** The org's own negative-review total — the denominator the top-5 roll-up is a slice of. */
+  readonly cards?: { readonly negativeReviews?: number };
 }
 
 /** GET /{id}/trend returns a bare {@link ReviewIssueSummary} (severity + change + concentration). */

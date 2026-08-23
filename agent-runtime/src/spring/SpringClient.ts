@@ -17,6 +17,7 @@ import type {
   AgentJudgeView,
   AgentPlanView,
   CustomerMemorySearch,
+  DashboardSummary,
   InboxSummary,
   ProductSignals,
   ProductSummary,
@@ -350,8 +351,8 @@ export class HttpSpringClient
     return this.request<unknown[]>("GET", `/api/item-analysis`);
   }
 
-  async getDashboardSummary(): Promise<{ topProductIssues?: unknown[] }> {
-    return this.request<{ topProductIssues?: unknown[] }>("GET", `/api/dashboard/summary`);
+  async getDashboardSummary(): Promise<DashboardSummary> {
+    return this.request<DashboardSummary>("GET", `/api/dashboard/summary`);
   }
 
   async searchChannelKnowledge(params: {

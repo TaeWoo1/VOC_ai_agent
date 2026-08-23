@@ -65,7 +65,15 @@ function projectChange(c: IssueChangeInfo): IssueChangeInfo {
 }
 
 function projectProductEvidence(p: IssueProductEvidence): IssueProductEvidence {
-  return { productId: p.productId, productName: p.productName, evidenceCount: p.evidenceCount };
+  return {
+    productId: p.productId,
+    productName: p.productName,
+    evidenceCount: p.evidenceCount,
+    // This product's own span, carried through: the projection copies fields, it does not decide
+    // which ones a consumer may know about.
+    firstOccurredOn: p.firstOccurredOn,
+    lastOccurredOn: p.lastOccurredOn,
+  };
 }
 
 function projectRatingDistribution(d: IssueRatingDistribution): IssueRatingDistribution {

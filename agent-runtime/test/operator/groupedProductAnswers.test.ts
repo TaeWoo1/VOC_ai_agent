@@ -32,7 +32,7 @@ import {
   ANALYSES, CABLE, INBOX, KNOWLEDGE, MEMORY, MOLDING, REPEATS, coveredSignals, unlinkedSignals,
 } from "../support/operatorFixtures";
 import {
-  GROUPED_INQUIRY_PLAN, GROUPED_NO_PERIOD_PLAN, RECORDED_PLANS,
+  GROUPED_INQUIRY_PLAN, GROUPED_NO_PERIOD_PLAN, RECORDED_PLANS, REPEATED_REVIEW_AXIS_PLAN,
 } from "../support/recordedPlans";
 import type { OperatorAnswer } from "../../src/operator/state/OperatorState";
 import type { InvestigationPlan, ResolvedEntity } from "../../src/operator/plan/InvestigationPlan";
@@ -42,7 +42,10 @@ import type { IssueSlice } from "../../src/operator/group/ProductGrouping";
 import {
   GROUPING_CAPABILITIES, groupingLimitSentence, groupingSupportOf, reachableToolNames,
 } from "../../src/operator/tools/ToolReachability";
-import type { IssueEvidenceSummary, ReviewIssueSummary } from "../../src/spring/types";
+import type {
+  DashboardSummary, IssueEvidenceSummary, ReviewIssueSummary,
+} from "../../src/spring/types";
+import { senseOf } from "../../src/operator/group/ReviewEvidenceSense";
 
 const GROUPED_GOAL = "상품별로 리뷰 문제가 있는 상품을 알려줘";
 const Q2 = "최근 부정적인 리뷰가 있는 상품을 알려줘.";
@@ -51,6 +54,7 @@ const Q5 = "답변이 필요한 문의를 우선순위대로 정리하고 답변
 const NAMED_PRODUCT =
   "판도리 일체형 종이컵 수거함 상품의 리뷰와 문의를 같이 보고 고객 불만이나 반복 이슈가 있는지 알려줘.";
 const GROUPED_INQUIRY_GOAL = "상품별 미답변 문의를 알려줘";
+const REPEATED_AXIS = "최근 반복적으로 리뷰 문제가 나온 상품은?";
 const UNNAMED_PRODUCT = "상품에 문제 있어?";
 
 /* ─────────────────────────────── the fixture: three issues, four products ───────────────────────── */
@@ -72,15 +76,30 @@ const SOLO_ONLY = makeIssue("aaaa0000-0000-0000-0000-0000000000a3", {
   firstEvidenceOn: "2026-05-01", lastEvidenceOn: "2026-05-20",
 });
 
+interface Row {
+  productId: string;
+  productName: string | null;
+  evidenceCount: number;
+  /** THIS product's span. Absent ⇒ the read could not date these rows, and the row stays undated. */
+  firstOccurredOn?: string;
+  lastOccurredOn?: string;
+}
+
 function summary(
-  rows: readonly { productId: string; productName: string | null; evidenceCount: number }[],
+  rows: readonly Row[],
   issue: ReviewIssueSummary,
   unattributed = 0,
 ): IssueEvidenceSummary {
   const total = rows.reduce((s, r) => s + r.evidenceCount, 0) + unattributed;
   return {
     totalEvidence: total,
-    byProduct: [...rows],
+    byProduct: rows.map((r) => ({
+      productId: r.productId,
+      productName: r.productName,
+      evidenceCount: r.evidenceCount,
+      firstOccurredOn: r.firstOccurredOn ?? null,
+      lastOccurredOn: r.lastOccurredOn ?? null,
+    })),
     unattributedEvidence: unattributed,
     ratingDistribution: { rating1: total, rating2: 0, rating3: 0, rating4: 0, rating5: 0, unrated: 0 },
     firstEvidenceOn: issue.firstEvidenceOn,
@@ -93,26 +112,53 @@ function issueClient(): FakeIssueSpringClient {
   const client = new FakeIssueSpringClient();
   client.put({
     summary: SHARED,
+    // Three products inside ONE issue, each with its own span — and no product's span is the
+    // issue's (2025-08-29..2026-06-16 starts before any of them). That is what makes "the row was
+    // dated from its own rows" checkable rather than merely stated.
     evidence: summary([
-      { productId: MOLDING.id, productName: MOLDING.name, evidenceCount: 7 },
-      { productId: CABLE.id, productName: CABLE.name, evidenceCount: 7 },
-      { productId: NAMELESS_ID, productName: null, evidenceCount: 1 },
+      { productId: MOLDING.id, productName: MOLDING.name, evidenceCount: 7,
+        firstOccurredOn: "2025-09-02", lastOccurredOn: "2026-06-16" },
+      { productId: CABLE.id, productName: CABLE.name, evidenceCount: 7,
+        firstOccurredOn: "2025-09-05", lastOccurredOn: "2026-01-10" },
+      { productId: NAMELESS_ID, productName: null, evidenceCount: 1,
+        firstOccurredOn: "2026-03-03", lastOccurredOn: "2026-03-03" },
     ], SHARED),
   });
   client.put({
     summary: MOLDING_ONLY,
     evidence: summary([
-      { productId: MOLDING.id, productName: MOLDING.name, evidenceCount: 4 },
+      { productId: MOLDING.id, productName: MOLDING.name, evidenceCount: 4,
+        firstOccurredOn: "2026-01-01", lastOccurredOn: "2026-02-01" },
     ], MOLDING_ONLY),
   });
   client.put({
     summary: SOLO_ONLY,
     evidence: summary([
-      { productId: SOLO_PRODUCT.id, productName: SOLO_PRODUCT.name, evidenceCount: 2 },
+      { productId: SOLO_PRODUCT.id, productName: SOLO_PRODUCT.name, evidenceCount: 2,
+        firstOccurredOn: "2026-05-01", lastOccurredOn: "2026-05-20" },
     ], SOLO_ONLY),
   });
   return client;
 }
+
+/**
+ * The negative-review roll-up, as the dashboard returns it.
+ *
+ * <b>The numbers deliberately do not match the issue split.</b> 전선몰딩 has 11 rows of issue
+ * evidence in the fixture above and 12 negative reviews here; if a test ever sees 11 under the word
+ * "부정 리뷰" or 12 under "리뷰 문제 근거", the two senses have been renamed into each other.
+ */
+const NEGATIVE_ROLLUP: DashboardSummary = {
+  cards: { negativeReviews: 31 },
+  topProductIssues: [
+    { productId: MOLDING.id, productName: MOLDING.name, issueLabel: "부정 리뷰", count: 12,
+      firstNegativeOn: "2026-02-11", lastNegativeOn: "2026-08-02" },
+    { productId: CABLE.id, productName: CABLE.name, issueLabel: "부정 리뷰", count: 5,
+      firstNegativeOn: "2026-01-05", lastNegativeOn: "2026-06-30" },
+    { productId: NAMELESS_ID, productName: null, issueLabel: "부정 리뷰", count: 4,
+      firstNegativeOn: "2026-03-01", lastNegativeOn: "2026-07-07" },
+  ],
+};
 
 function build(seed: Partial<FakeOperatorSeed> = {}) {
   const operator = new FakeOperatorSpringClient({
@@ -123,10 +169,12 @@ function build(seed: Partial<FakeOperatorSeed> = {}) {
     customerMemory: MEMORY,
     repeats: REPEATS,
     itemAnalyses: ANALYSES,
+    dashboard: NEGATIVE_ROLLUP,
     plansByGoal: {
       ...RECORDED_PLANS,
       [GROUPED_GOAL]: GROUPED_NO_PERIOD_PLAN,
       [GROUPED_INQUIRY_GOAL]: GROUPED_INQUIRY_PLAN,
+      [REPEATED_AXIS]: REPEATED_REVIEW_AXIS_PLAN,
     },
     ...seed,
   });
@@ -237,7 +285,7 @@ describe("a grouped row carries one product's own number", () => {
     expect(grouped.rows[0]!.count).toBe(5);
   });
 
-  it("dates a row only when EVERY slice behind its count was exclusive", () => {
+  it("dates a row only when EVERY slice behind its count could be dated", () => {
     const dated = groupByProduct([
       slice({ productId: "p-a", count: 2, events: { from: "2026-05-01", to: "2026-05-20" } }),
       slice({ productId: "p-a", count: 1, issueId: "i-2", events: { from: "2026-06-01", to: "2026-06-02" } }),
@@ -430,28 +478,146 @@ describe("a count is not a priority order", () => {
 
 /* ──────────────────────────────── 6. the temporal contract ─────────────────────────────────── */
 
-describe("a period question does not get dates the evidence cannot prove", () => {
-  it("withholds an undated grouped row and keeps the one that could be dated", async () => {
+describe("a period question is answered by the rows' own dates, or not at all", () => {
+  it("a product row on the issue axis now carries the span of ITS OWN evidence", async () => {
     const { runtime } = build();
-    const answer = done(await runtime.run("g-13", { text: Q2 }));
+    const answer = done(await runtime.run("g-13", { text: REPEATED_AXIS }));
     const grouped = answer.findings.filter((f) => f.statement.includes("리뷰 문제 근거가"));
-    // 판도리 조립형: every slice behind its 2 came from an issue whose evidence is exclusively its
-    // own, so its dates are proven and the row survives a "최근" question.
+    // 전선몰딩's 11 rows come from two issues — 7 from one shared with two other products. Until the
+    // backend carried per-product dates this row could not be dated at all and a "최근" question
+    // withheld it; its span is now its own rows' (2025-09-02..2026-06-16), so it answers.
+    expect(grouped.some((f) => f.statement.startsWith(MOLDING.name))).toBe(true);
     expect(grouped.map((f) => f.statement).join(" ")).toContain(SOLO_PRODUCT.name);
-    // 전선몰딩: 11 rows, 7 of them from an issue shared with two other products. Undated, so withheld
-    // — a seller is told the axis exists and that this row could not be dated, not given a date.
+    const molding = answer.evidence.find(
+      (e) => e.kind === "ISSUE_EVIDENCE" && e.locator.productId === MOLDING.id,
+    );
+    expect(molding!.events).toEqual({ from: "2025-09-02", to: "2026-06-16" });
+    // And the seller can SEE when, in the sentence: a row dated ten months ago and one dated this
+    // month are both "datable", and only the date tells them apart under a "최근" question.
+    expect(grouped.find((f) => f.statement.startsWith(MOLDING.name))!.statement)
+      .toContain("가장 최근 근거 2026-06-16");
+    // And it is NOT the issue's span, which starts 2025-08-29 — the borrowing this whole axis refuses.
+    expect(molding!.events!.from).not.toBe("2025-08-29");
+  });
+
+  it("a row the read could not date is still withheld, and the answer says so", async () => {
+    // One issue comes back with no dates on its splits. Nothing infers them; the row that depends on
+    // that issue loses its span and a period question cannot rest on it.
+    const issue = issueClient();
+    issue.put({
+      summary: SHARED,
+      evidence: summary([
+        { productId: MOLDING.id, productName: MOLDING.name, evidenceCount: 7 },
+        { productId: CABLE.id, productName: CABLE.name, evidenceCount: 7 },
+        { productId: NAMELESS_ID, productName: null, evidenceCount: 1 },
+      ], SHARED),
+    });
+    const operator = new FakeOperatorSpringClient({
+      inbox: INBOX, products: [MOLDING, CABLE], knowledge: KNOWLEDGE, customerMemory: MEMORY,
+      repeats: REPEATS, itemAnalyses: ANALYSES, dashboard: NEGATIVE_ROLLUP,
+      signals: { [MOLDING.id]: coveredSignals(), [CABLE.id]: unlinkedSignals() },
+      plansByGoal: { ...RECORDED_PLANS, [REPEATED_AXIS]: REPEATED_REVIEW_AXIS_PLAN },
+    });
+    const runtime = new OperatorAgentRuntime({
+      operator, inquiry: new FakeSpringClient(twoInquiries()), issue,
+    });
+    const answer = done(await runtime.run("g-13b", { text: REPEATED_AXIS }));
+
+    // 전선몰딩 now has 11 rows of which 7 are undated → the whole row is undated → withheld.
+    const grouped = answer.findings.filter((f) => f.statement.includes("리뷰 문제 근거가"));
     expect(grouped.some((f) => f.statement.startsWith(MOLDING.name))).toBe(false);
-    expect(answer.note ?? "").toContain("언제 일어난 일인지");
-    // And the seller is told that the axis was built and could not be dated — not left to infer it
-    // from a shorter list. This sentence is the one the next package has to make unnecessary.
+    // 케이블타이's only rows are the undated ones, so it goes too. 판도리 조립형 keeps its own dates.
+    expect(grouped.map((f) => f.statement).join(" ")).toContain(SOLO_PRODUCT.name);
     const scan = answer.findings.find((f) => f.statement.includes("나눴습니다"));
     expect(scan!.statement).toContain("언제 발생했는지 확인할 수 없어");
   });
 
   it("and the org brief that CAN be dated still answers", async () => {
     const { runtime } = build();
-    const answer = done(await runtime.run("g-14", { text: Q2 }));
+    const answer = done(await runtime.run("g-14", { text: REPEATED_AXIS }));
     expect(answer.findings.some((f) => f.statement.includes("리뷰 근거가")), "nothing regressed")
       .toBe(true);
+  });
+});
+
+/* ─────────────────────────── 6. two review evidences, never each other ──────────────────────── */
+
+describe("부정 리뷰 and 리뷰 문제 근거 are different questions with different answers", () => {
+  it("reads the seller's sentence, not the planner's paraphrase, to choose", () => {
+    expect(senseOf(Q2)).toBe("NEGATIVE_REVIEW");
+    expect(senseOf(REPEATED_AXIS)).toBe("ISSUE_EVIDENCE");
+    expect(senseOf(GROUPED_GOAL)).toBe("ISSUE_EVIDENCE");
+    // A sentence naming both families is the issue question: the narrower, better-evidenced claim,
+    // and its noun is true either way.
+    expect(senseOf("부정적인 리뷰가 반복되는 상품이 있어?")).toBe("ISSUE_EVIDENCE");
+    // A paraphrase cannot flip it while the seller's own words are there.
+    expect(senseOf(Q2, "부정적 리뷰 이슈를 알고 싶다")).toBe("NEGATIVE_REVIEW");
+    // With nothing from the seller, the planner's restatement is all there is.
+    expect(senseOf("", "부정적인 리뷰가 있는 상품을 알고 싶다")).toBe("NEGATIVE_REVIEW");
+  });
+
+  it("answers Q2 with negative reviews per product, dated by those reviews", async () => {
+    const { runtime, operator, issue } = build();
+    const answer = done(await runtime.run("g-15", { text: Q2 }));
+
+    const negatives = answer.findings.filter((f) => f.statement.includes("부정 리뷰가"));
+    expect(negatives.map((f) => f.statement)).toEqual([
+      `${MOLDING.name}에 부정 리뷰가 12건 있습니다 (가장 최근 2026-08-02, 처음 2026-02-11).`,
+      `${CABLE.name}에 부정 리뷰가 5건 있습니다 (가장 최근 2026-06-30, 처음 2026-01-05).`,
+    ]);
+    // Dated by the reviews counted in that row, so a "최근" question rests on them and they survive.
+    const row = answer.evidence.find(
+      (e) => e.kind === "NEGATIVE_REVIEW" && e.locator.productId === MOLDING.id,
+    );
+    expect(row!.events).toEqual({ from: "2026-02-11", to: "2026-08-02" });
+    expect(operator.calls.dashboard).toBe(1);
+    // And the OTHER read is not bought: the answer is about negative reviews, so eight evidence
+    // summaries would be eight calls producing a number this answer must not use.
+    expect(issue.reads.evidenceSummary).toBe(0);
+  });
+
+  it("never states the issue-evidence number under the negative-review noun, or the reverse", async () => {
+    const { runtime } = build();
+    const negative = done(await runtime.run("g-16", { text: Q2 }));
+    const repeated = done(await runtime.run("g-17", { text: REPEATED_AXIS }));
+
+    const negativeRows = negative.findings.filter((f) => f.statement.includes("부정 리뷰가"));
+    const issueRows = repeated.findings.filter((f) => f.statement.includes("리뷰 문제 근거가"));
+    // 전선몰딩 is in both answers with two different numbers, and neither wears the other's noun.
+    expect(negativeRows.some((f) => f.statement.includes("12건"))).toBe(true);
+    expect(negativeRows.some((f) => f.statement.includes("11건"))).toBe(false);
+    expect(issueRows.some((f) => f.statement.includes("11건"))).toBe(true);
+    expect(issueRows.some((f) => f.statement.includes("12건"))).toBe(false);
+    // The evidence kinds are separate too, so the gate and the judge see two facts, not one.
+    expect(negative.evidence.some((e) => e.kind === "ISSUE_EVIDENCE")).toBe(false);
+    expect(repeated.evidence.some((e) => e.kind === "NEGATIVE_REVIEW")).toBe(false);
+  });
+
+  it("says what the top-five roll-up does not cover, including the products it cannot name", async () => {
+    const { runtime } = build();
+    const answer = done(await runtime.run("g-18", { text: Q2 }));
+    const scan = answer.findings.find((f) => f.claimsCoverageLimit)!;
+    expect(scan.statement).toContain("부정 리뷰 31건 가운데");
+    expect(scan.statement).toContain("상위 2개 상품의 17건");
+    expect(scan.statement).toContain("전체 순위가 아닙니다");
+    expect(scan.statement).toContain("1개 상품의 4건은 이름 없이");
+    expect(scan.statement).toContain("반복 리뷰 문제의 근거 건수와는 다른 집계");
+  });
+
+  it("keys rows by canonical id, so the roll-up's names are labels and never identity", async () => {
+    const { runtime } = build();
+    const answer = done(await runtime.run("g-19", { text: Q2 }));
+    const rows = answer.evidence.filter(
+      (e) => e.kind === "NEGATIVE_REVIEW" && e.locator.productId != null,
+    );
+    expect(rows.map((e) => e.locator.productId)).toEqual([MOLDING.id, CABLE.id]);
+    // The nameless product is not among them and is not given its id to read.
+    expect(answer.findings.map((f) => f.statement).join(" ")).not.toContain(NAMELESS_ID);
+  });
+
+  it("calls no resolver on either sense — the ids come out of the evidence (C5)", async () => {
+    const { runtime, operator } = build();
+    done(await runtime.run("g-20", { text: Q2 }));
+    expect(operator.calls.products).toBe(0);
   });
 });

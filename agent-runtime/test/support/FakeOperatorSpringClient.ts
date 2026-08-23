@@ -16,6 +16,7 @@ import type {
   AgentJudgeView,
   AgentPlanView,
   CustomerMemorySearch,
+  DashboardSummary,
   InboxSummary,
   ProductFact,
   ProductKnowledge,
@@ -56,7 +57,7 @@ export interface FakeOperatorSeed {
   readonly customerMemory?: CustomerMemorySearch;
   readonly repeats?: RepeatedInquiry[];
   readonly itemAnalyses?: unknown[];
-  readonly dashboard?: { topProductIssues?: unknown[] };
+  readonly dashboard?: DashboardSummary;
   /** Product Knowledge by product id — identity, listings, variants, facts and per-facet coverage. */
   readonly knowledge?: Record<string, ProductKnowledge>;
   readonly inquiryContext?: InquiryThreadContext;
@@ -252,7 +253,7 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     return this.seed.itemAnalyses ?? [];
   }
 
-  async getDashboardSummary(): Promise<{ topProductIssues?: unknown[] }> {
+  async getDashboardSummary(): Promise<DashboardSummary> {
     this.calls.dashboard += 1;
     return this.seed.dashboard ?? { topProductIssues: [] };
   }

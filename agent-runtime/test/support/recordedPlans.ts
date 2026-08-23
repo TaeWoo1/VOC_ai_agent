@@ -722,3 +722,36 @@ export const REPAIRED_PLANS: Record<string, AgentPlanView> = {
   "교환 가능한가요?": POLICY_QUESTION_REPAIRED_PLAN,
   "이거 교환돼요?": POLICY_QUESTION_REPAIRED_PLAN,
 };
+
+/**
+ * The OTHER review question on the same axis — "최근 반복적으로 리뷰 문제가 나온 상품은?".
+ *
+ * <b>Authored, and its job is to be confusable with the canonical Q2 and not be confused with it.</b>
+ * Same axis, same specialist, same period word; a different corpus. This sentence must reach the issue
+ * evidence split (opinion units tied to a repeated problem) and never the negative-review roll-up,
+ * while Q2 must do the opposite — `group/ReviewEvidenceSense.ts`, Product Review Signals v1 §5.
+ */
+export const REPEATED_REVIEW_AXIS_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "최근 반복적으로 리뷰 문제가 나온 상품을 알고 싶다",
+  unresolvedEntities: [{ kind: "PERIOD", mention: "최근" }],
+  informationNeeds: [
+    { id: "n1", question: "어느 상품에서 리뷰 문제가 반복되고 있는가", kind: "REVIEW_SIGNAL",
+      why: "반복 여부와 귀속이 함께 필요하다", required: true },
+  ],
+  specialists: ["REVIEW_OPS"],
+  tools: [],
+  retrievalOrder: ["n1"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 12,
+  stopWhenEnough: null,
+  clarificationNeeded: false,
+  clarificationReason: null,
+  rationale: "반복 리뷰 문제를 상품 축으로 본다",
+  providerVersion: AUTHORED,
+};

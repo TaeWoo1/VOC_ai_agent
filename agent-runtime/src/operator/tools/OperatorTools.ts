@@ -176,7 +176,10 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
 
     read(tool(async () => deps.operator.getDashboardSummary(), {
       name: OPERATOR_TOOL.GET_DASHBOARD_PRODUCT_ISSUES,
-      description: "상품별 이슈 집계(상위) — 어느 상품에 문제가 몰려 있는지. 필요한 정보: REPEAT_PATTERN.",
+      description:
+        "상품별 부정 리뷰 수(전체 기간, 부정 리뷰가 많은 상위 5개 상품). 각 행은 canonical 상품 id와 "
+        + "그 상품 부정 리뷰의 첫/마지막 날짜를 함께 준다. 반복 리뷰 문제의 '근거 건수'와는 다른 집계다 "
+        + "— 이것은 리뷰 자체의 수다. 필요한 정보: REVIEW_SIGNAL.",
       schema: z.object({}),
     })),
 

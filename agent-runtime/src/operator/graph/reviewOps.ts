@@ -19,6 +19,8 @@ import { attemptTool } from "../failure/SpecialistOutcome";
 import { eventRange, temporalDemandOf } from "../scope/EvidenceTime";
 import type { GroupedProducts, IssueSlice } from "../group/ProductGrouping";
 import { groupByProduct, namedRows } from "../group/ProductGrouping";
+import { senseDeclaration, senseOf } from "../group/ReviewEvidenceSense";
+import type { DashboardSummary } from "../../spring/types";
 import { log } from "../../log";
 
 /** The need kinds this specialist answers. */
@@ -126,16 +128,26 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
   // the answer is ranked by a product's own number. No resolver is involved: the ids come out of the
   // evidence (C5). The org brief below still runs on the same list, so nothing that used to be said
   // stops being said.
-  const grouped = input.grouping === "PRODUCT"
+  //
+  // <b>And WHICH product question it is decides which evidence answers it.</b> "리뷰 문제가 많은
+  // 상품" is the issue split below; "부정적인 리뷰가 있는 상품" is the negative-review roll-up, a
+  // different corpus with a different noun (`group/ReviewEvidenceSense.ts`). Neither is renamed into
+  // the other, and only the chosen one is bought — the other would cost reads to produce a number
+  // the answer must not use.
+  const sense = senseOf(input.goalText ?? "", input.plannerGoal);
+  const grouped = input.grouping === "PRODUCT" && sense === "ISSUE_EVIDENCE"
     ? await groupAcrossProducts(input, issues)
     : null;
+  const negatives = input.grouping === "PRODUCT" && sense === "NEGATIVE_REVIEW"
+    ? await groupNegativeReviews(input)
+    : null;
 
-  const findings: Finding[] = [...(grouped?.findings ?? [])];
-  const refs: EvidenceRef[] = [...(grouped?.evidence ?? [])];
+  const findings: Finding[] = [...(grouped?.findings ?? []), ...(negatives?.findings ?? [])];
+  const refs: EvidenceRef[] = [...(grouped?.evidence ?? []), ...(negatives?.evidence ?? [])];
   // One read serves every REVIEW_SIGNAL need the plan declared — the issue list is the same list for
   // all of them, and paying for it once per need would spend budget on identical rows.
   const needId = input.needs[0]!.id;
-  const cited: string[] = [...(grouped?.cited ?? [])];
+  const cited: string[] = [...(grouped?.cited ?? []), ...(negatives?.cited ?? [])];
   for (const issue of issues.slice(0, DEFAULT_LIMIT)) {
     const ref = evidence.add({
       kind: "REVIEW_ISSUE",
@@ -178,12 +190,12 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
   const note = noteOf(issues, grouped);
   log("review_ops", {
     issues: issues.length, surfaced: findings.length, needs: input.needs.length,
-    grouping: input.grouping, groupedProducts: grouped?.rows ?? 0,
+    grouping: input.grouping, sense, groupedProducts: (grouped?.rows ?? 0) + (negatives?.rows ?? 0),
     scanned: grouped?.checked ?? 0, terminal: "OK",
   });
   return {
     specialist: "REVIEW_OPS",
-    failures: grouped?.failures ?? [],
+    failures: [...(grouped?.failures ?? []), ...(negatives?.failures ?? [])],
     terminal: "OK" as const,
     findings,
     evidence: refs,
@@ -274,11 +286,6 @@ async function groupAcrossProducts(
     const summary = attempt.value;
     scannedEvidence += summary.totalEvidence;
     unattributed += summary.unattributedEvidence;
-    // <b>The one case where an issue's dates ARE a product's.</b> All of this issue's evidence belongs
-    // to this one product, so its span is that product's span — proven, not borrowed. Any other shape
-    // and the slice stays undated, which is what stops another product's recent review from proving
-    // this one's "최근".
-    const exclusive = summary.byProduct.length === 1 && summary.unattributedEvidence === 0;
     for (const row of summary.byProduct) {
       slices.push({
         issueId: issue.id,
@@ -287,7 +294,13 @@ async function groupAcrossProducts(
         productName: row.productName,
         count: row.evidenceCount,
         issueTotal: summary.totalEvidence,
-        events: exclusive ? eventRange(summary.firstEvidenceOn, summary.lastEvidenceOn) : null,
+        // <b>This product's own dates, and nothing else's.</b> Until 2026-08-24 the read carried only
+        // the ISSUE's span, so a slice could be dated only when its issue belonged to one product
+        // alone — every other row went undated and a "최근" question withheld all of them (live: nine
+        // of nine). The backend now returns the min/max `occurred_on` of the rows in THIS
+        // (issue, product) pair, so the same rule holds with far fewer casualties: the dates are
+        // proven, never borrowed, and `summary.firstEvidenceOn` is still not consulted here.
+        events: eventRange(row.firstOccurredOn, row.lastOccurredOn),
       });
     }
   }
@@ -312,6 +325,21 @@ async function groupAcrossProducts(
     });
     refs.push(ref);
     cited.push(ref.evidenceId);
+    // What the row can add beside its own number, in one aside rather than a queue of brackets.
+    const aside: string[] = [];
+    if (row.topIssueTitle) {
+      aside.push(`가장 많은 것은 "${row.topIssueTitle}" ${row.topIssueCount}건`);
+      if (row.issueIds.length > 1) {
+        aside.push(`확인한 문제 ${row.issueIds.length}건 합계`);
+      }
+    }
+    // <b>The date belongs in the sentence, not only in the evidence.</b> The gate is satisfied by a
+    // row that CAN be dated, and a seller reading a "최근" answer still cannot tell a product whose
+    // last evidence is this month from one whose last is ten months old — live 2026-08-24, one of
+    // the five products' only evidence was from 2025-11-01 and the sentence said nothing.
+    if (row.events?.to) {
+      aside.push(`가장 최근 근거 ${row.events.to}`);
+    }
     findings.push({
       findingId: `f-${ref.evidenceId}`,
       specialist: "REVIEW_OPS",
@@ -319,8 +347,7 @@ async function groupAcrossProducts(
       // extractor tied to a repeated problem. Renaming them would answer a question about negative
       // reviews with a number that counts something else.
       statement: `${row.label}에 리뷰 문제 근거가 ${row.count}건 기록돼 있습니다`
-        + (row.topIssueTitle ? ` (가장 많은 것은 "${row.topIssueTitle}" ${row.topIssueCount}건`
-          + `${row.issueIds.length > 1 ? `, 확인한 문제 ${row.issueIds.length}건 합계` : ""})` : "")
+        + (aside.length > 0 ? ` (${aside.join(", ")})` : "")
         + ".",
       evidenceIds: [ref.evidenceId],
       confidence: "NEEDS_REVIEW",
@@ -381,6 +408,155 @@ async function groupAcrossProducts(
       ? `상품별 집계는 열려 있는 반복 리뷰 문제 ${issues.length}건 중 ${checked}건만 확인한 결과입니다.`
       : null,
   };
+}
+
+/**
+ * The product axis, the other sense: which products have negative reviews.
+ *
+ * <b>One read, and it is already grouped.</b> The dashboard roll-up counts reviews the ingest marked
+ * negative, grouped by canonical product id, top five, all time — the same aggregation the home
+ * screen shows, reached through the same service. Nothing is recomputed here and no new definition of
+ * "부정" is introduced; what this function does is refuse to say more than those rows prove.
+ *
+ * <b>Every row is dated by its own reviews.</b> `firstNegativeOn`/`lastNegativeOn` are the receipt
+ * dates of exactly the reviews counted in `count`, so a "최근" question rests on the rows themselves.
+ * A row that somehow arrives undated is stated without dates and withheld by the gate for a period
+ * question — the same fate as an undated issue split, for the same reason.
+ *
+ * <b>Top five is a coverage limit, and it is disclosed.</b> The org's own negative total is on the
+ * same response, so the answer can say how much of it these rows account for instead of reading as
+ * the whole picture.
+ */
+async function groupNegativeReviews(input: SpecialistInput): Promise<GroupedAnswer> {
+  const { registry, budget, evidence, allowedTools } = input;
+  const needId = input.needs[0]!.id;
+  const declaration = senseDeclaration("NEGATIVE_REVIEW");
+  if (!budget.spend("tool")) {
+    return emptyGrouped("부정 리뷰를 상품별로 읽기 전에 예산이 끝났습니다.");
+  }
+  // The tool NAME is written literally, not read off the declaration: `toolReachability.test.ts`
+  // proves the capability matrix against the `registry.invoke` sites it can see in this source, and a
+  // capability reachable only through an indirection is one that test cannot check.
+  const attempt = await attemptTool(
+    { specialist: "REVIEW_OPS", tool: OPERATOR_TOOL.GET_DASHBOARD_PRODUCT_ISSUES, needId },
+    () => registry.invoke<DashboardSummary>(
+      OPERATOR_TOOL.GET_DASHBOARD_PRODUCT_ISSUES, {}, allowedTools,
+    ),
+  );
+  if (!attempt.ok) {
+    return { ...emptyGrouped("부정 리뷰의 상품별 집계를 읽지 못했습니다."), failures: [attempt.failure] };
+  }
+
+  const rows = attempt.value.topProductIssues ?? [];
+  const orgNegative = attempt.value.cards?.negativeReviews ?? null;
+  const findings: Finding[] = [];
+  const refs: EvidenceRef[] = [];
+  const cited: string[] = [];
+  let stated = 0;
+  let statedCount = 0;
+  let unnamed = 0;
+  let unnamedCount = 0;
+
+  for (const row of rows) {
+    if (!row.productId || row.count <= 0) {
+      continue;
+    }
+    // The catalogue holds no name for some ids the reviews point at. A row without a name is counted
+    // in the coverage sentence and never given the id to read — the C1 rule, unchanged.
+    if (!row.productName) {
+      unnamed += 1;
+      unnamedCount += row.count;
+      continue;
+    }
+    const ref = evidence.add({
+      kind: declaration.evidenceKind,
+      sourceTool: OPERATOR_TOOL.GET_DASHBOARD_PRODUCT_ISSUES,
+      args: { productId: row.productId },
+      locator: { productId: row.productId, productName: row.productName, count: row.count,
+        label: declaration.noun },
+      // The reviews' own receipt dates. Never the read's — that is `asOf`, which the builder stamps.
+      events: eventRange(row.firstNegativeOn, row.lastNegativeOn),
+      coverage: "COVERED",
+      provenance: "dashboard/top-product-issues:negative-reviews",
+    });
+    refs.push(ref);
+    cited.push(ref.evidenceId);
+    stated += 1;
+    statedCount += row.count;
+    findings.push({
+      findingId: `f-${ref.evidenceId}`,
+      specialist: "REVIEW_OPS",
+      // <b>"부정 리뷰", and only for these rows.</b> The number counts whole reviews; the issue split's
+      // number counts opinion units. The two nouns are declared in `REVIEW_SENSES` precisely so this
+      // sentence cannot drift into the other one's word.
+      statement: `${row.productName}에 ${declaration.noun}가 ${row.count}건 있습니다`
+        + (row.lastNegativeOn
+          ? ` (가장 최근 ${row.lastNegativeOn}${row.firstNegativeOn && row.firstNegativeOn !== row.lastNegativeOn
+            ? `, 처음 ${row.firstNegativeOn}` : ""})`
+          : "")
+        + ".",
+      evidenceIds: [ref.evidenceId],
+      confidence: "NEEDS_REVIEW",
+      verdict: null,
+      surfaceLink: `/products/${row.productId}`,
+      needId,
+    });
+  }
+
+  const scanRef = evidence.add({
+    kind: declaration.evidenceKind,
+    sourceTool: OPERATOR_TOOL.GET_DASHBOARD_PRODUCT_ISSUES,
+    args: { products: rows.length, orgNegative },
+    locator: { count: stated, label: "상품별 부정 리뷰 집계" },
+    coverage: "COVERED",
+    provenance: "dashboard/top-product-issues:coverage",
+  });
+  refs.push(scanRef);
+  findings.push({
+    findingId: `f-${scanRef.evidenceId}`,
+    specialist: "REVIEW_OPS",
+    statement: negativeScanSentence(orgNegative, statedCount, stated, unnamed, unnamedCount),
+    evidenceIds: [scanRef.evidenceId],
+    confidence: "NEEDS_REVIEW",
+    verdict: null,
+    surfaceLink: null,
+    claimsCoverageLimit: true,
+    needId,
+  });
+
+  log("review_ops_grouped", {
+    dimension: "PRODUCT", sense: "NEGATIVE_REVIEW", rows: rows.length, stated, unnamed,
+    orgNegative, dated: refs.filter((r) => r.events != null).length,
+  });
+  return {
+    findings, evidence: refs, cited, failures: [], checked: rows.length, rows: stated,
+    note: null,
+  };
+}
+
+/** What the negative-review roll-up covers, said in the answer rather than left to be assumed. */
+function negativeScanSentence(
+  orgNegative: number | null, statedCount: number, stated: number,
+  unnamed: number, unnamedCount: number,
+): string {
+  // Top five, all time, and the org total is the denominator that makes that a fact rather than a
+  // hedge. Without it "상위 5개" is a number the seller cannot place.
+  const head = orgNegative != null
+    ? `부정 리뷰 ${orgNegative}건 가운데 상품이 연결된 상위 ${stated}개 상품의 ${statedCount}건을 `
+      + "상품별로 나눴습니다. 상위 5개 상품까지만 집계되므로 전체 순위가 아닙니다."
+    : `부정 리뷰가 많은 상위 ${stated}개 상품의 ${statedCount}건을 상품별로 나눴습니다. `
+      + "상위 5개 상품까지만 집계되므로 전체 순위가 아닙니다.";
+  const tail = unnamed > 0
+    ? ` 상품명을 확인할 수 없는 ${unnamed}개 상품의 ${unnamedCount}건은 이름 없이 남겨 두었습니다.`
+    : "";
+  // The other review evidence exists and is a different number; saying so is what stops the seller
+  // reading this count as "리뷰 문제 근거" or the other way round.
+  return `${head}${tail} 이 수치는 반복 리뷰 문제의 근거 건수와는 다른 집계입니다.`;
+}
+
+/** A grouped answer that produced nothing, carrying the reason. */
+function emptyGrouped(note: string): GroupedAnswer {
+  return { findings: [], evidence: [], cited: [], failures: [], checked: 0, rows: 0, note };
 }
 
 /** What the grouped scan saw and did not see, in one sentence the seller can act on. */

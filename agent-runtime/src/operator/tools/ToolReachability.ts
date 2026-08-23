@@ -130,6 +130,18 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     requires: ["PRODUCT_GROUPING", "ISSUE_ID"],
   },
 
+  {
+    // <b>The other review evidence, on the same axis.</b> The dashboard roll-up groups the org's
+    // NEGATIVE REVIEWS by canonical product — a different corpus from the issue evidence above, and
+    // the only read that answers "어느 상품에 부정 리뷰가" without being told a product first. It sat
+    // in the catalogue unreachable until 2026-08-24, and its DTO carried no product id until the same
+    // day, so nothing could have used it honestly even if something had called it.
+    specialist: "REVIEW_OPS",
+    tool: OPERATOR_TOOL.GET_DASHBOARD_PRODUCT_ISSUES,
+    needKinds: ["REVIEW_SIGNAL"],
+    requires: ["PRODUCT_GROUPING"],
+  },
+
   // ── InquiryOps — the queue, the repeats, and what was answered before.
   {
     specialist: "INQUIRY_OPS",
@@ -253,11 +265,18 @@ export const GROUPING_CAPABILITIES: readonly GroupingCapability[] = [
     needKind: "REVIEW_SIGNAL",
     dimension: "PRODUCT",
     support: "SUPPORTED",
-    via: [OPERATOR_TOOL.SEARCH_REVIEW_ISSUES, OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY],
-    // `IssueEvidenceSummaryView.byProduct` is a per-product tally of the issue's OWN evidence rows,
-    // carrying the canonical product id. It is the only read in the system that attributes review
-    // evidence to products without being told which product to look for.
-    why: "review-issues/{id}/evidence-summary:byProduct[productId,evidenceCount]",
+    via: [
+      OPERATOR_TOOL.SEARCH_REVIEW_ISSUES,
+      OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY,
+      OPERATOR_TOOL.GET_DASHBOARD_PRODUCT_ISSUES,
+    ],
+    // TWO grouped reads, and they answer two different questions — `group/ReviewEvidenceSense.ts`
+    // holds the pair apart and `REVIEW_SENSES` is the machine-readable half of this sentence:
+    //  · evidence-summary:byProduct[productId,evidenceCount,firstOccurredOn,lastOccurredOn] — the
+    //    issue evidence a product owns, dated by its own rows;
+    //  · dashboard:topProductIssues[productId,count,firstNegativeOn,lastNegativeOn] — that product's
+    //    negative reviews, top 5, dated by their own receipt dates.
+    why: "evidence-summary:byProduct (issue evidence) + dashboard:topProductIssues (negative reviews)",
   },
   {
     needKind: "INQUIRY_VOLUME",

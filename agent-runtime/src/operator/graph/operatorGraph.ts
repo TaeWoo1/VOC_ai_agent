@@ -300,6 +300,8 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       // worked this out for itself would be a second place deciding what "상품별" means.
       grouping: groupingOf(plan, state.goalText),
       periodNamed: periodNamedIn(plan, resolved),
+      // The planner's restatement of the goal, used only where the seller's own text is missing.
+      plannerGoal: plan.userGoal,
       // What the run has already PROVEN, not what it might. A specialist reads this the same way it
       // reads `resolved`: to avoid re-buying a fact the run already holds. It is evidence refs only —
       // ids, counts and closed labels — so nothing a specialist could not already mint itself.

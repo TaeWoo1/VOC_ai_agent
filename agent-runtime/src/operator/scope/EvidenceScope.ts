@@ -118,6 +118,9 @@ const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
   PRODUCT_SIGNAL: "COUNT",
   REVIEW_ISSUE: "ISSUE_SIGNAL",
   ISSUE_EVIDENCE: "ISSUE_EVIDENCE",
+  // A tally of one product's negative reviews. A COUNT in shape — its product-scoping is carried on
+  // the entity axis (the locator's `productId`), which is where scope belongs.
+  NEGATIVE_REVIEW: "COUNT",
   REPEATED_INQUIRY: "LIST",
   CUSTOMER_MEMORY: "LIST",
   REVIEW: "DETAIL",

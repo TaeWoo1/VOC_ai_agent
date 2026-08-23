@@ -28,8 +28,9 @@ import type { Planner, PlanInput } from "../../src/operator/plan/LlmInvestigatio
 import { LlmInvestigationPlanner, PlannerUnavailableError } from "../../src/operator/plan/LlmInvestigationPlanner";
 import { OPERATOR_TOOL, buildOperatorTools, toolCatalogueFor } from "../../src/operator/tools/OperatorTools";
 import {
-  TOOL_CAPABILITIES, reachableToolNames, toolsFor, unreachableToolNames,
+  GROUPING_CAPABILITIES, TOOL_CAPABILITIES, reachableToolNames, toolsFor, unreachableToolNames,
 } from "../../src/operator/tools/ToolReachability";
+import { REVIEW_SENSES } from "../../src/operator/group/ReviewEvidenceSense";
 import type { SpecialistName } from "../../src/operator/state/OperatorState";
 import { FakeOperatorSpringClient } from "../support/FakeOperatorSpringClient";
 import type { FakeOperatorSeed } from "../support/FakeOperatorSpringClient";
@@ -158,8 +159,10 @@ function issuesAttributedToCupBin() {
     evidence: {
       totalEvidence: 9,
       byProduct: [
-        { productId: MOLDING.id, productName: "몰딩 화이트 10m", evidenceCount: 7 },
-        { productId: CUP_BIN.id, productName: "판도리 일체형 종이컵 수거함", evidenceCount: 2 },
+        { productId: MOLDING.id, productName: "몰딩 화이트 10m", evidenceCount: 7,
+          firstOccurredOn: "2026-06-01", lastOccurredOn: "2026-07-22" },
+        { productId: CUP_BIN.id, productName: "판도리 일체형 종이컵 수거함", evidenceCount: 2,
+          firstOccurredOn: "2026-06-04", lastOccurredOn: "2026-06-09" },
       ],
       unattributedEvidence: 0,
       ratingDistribution: { rating1: 9, rating2: 0, rating3: 0, rating4: 0, rating5: 0, unrated: 0 },
@@ -228,12 +231,12 @@ describe("the planner is only shown tools something can run", () => {
   it("names the dead tools it does NOT advertise, rather than hiding the gap", () => {
     const all = catalogue().map((t) => t.tool.name);
     const dead = unreachableToolNames(all);
-    // The eleven found live, minus the two that have since been connected: the evidence summary (A5)
-    // and the queue list (Grouped Product Answers v1 — a count is not a priority order).
+    // The eleven found live, minus the three that have since been connected: the evidence summary
+    // (A5), the queue list (Grouped Product Answers v1 — a count is not a priority order) and the
+    // dashboard roll-up (Product Review Signals v1 — negative reviews by canonical product).
     expect(dead.sort()).toEqual([
       OPERATOR_TOOL.GET_CHANNEL_CAPABILITY,
       OPERATOR_TOOL.GET_CONNECTION_GUIDANCE,
-      OPERATOR_TOOL.GET_DASHBOARD_PRODUCT_ISSUES,
       OPERATOR_TOOL.GET_INQUIRY_CONTEXT,
       OPERATOR_TOOL.GET_INQUIRY_DETAIL,
       OPERATOR_TOOL.GET_ISSUE_TREND,
@@ -260,6 +263,30 @@ describe("the planner is only shown tools something can run", () => {
     for (const row of TOOL_CAPABILITIES) {
       expect(row.needKinds.length, `${row.tool} serves a need`).toBeGreaterThan(0);
       expect(row.requires.length, `${row.tool} declares a precondition`).toBeGreaterThan(0);
+    }
+  });
+
+  it("the two review senses share no read, no evidence kind and no noun", () => {
+    // Product Review Signals v1 §3. Two grouped answers about reviews exist and they count different
+    // things; the structural guarantee that neither can be renamed into the other is that no field
+    // they are stated with is shared. A third sense added later inherits this check by existing.
+    expect(REVIEW_SENSES.length).toBeGreaterThan(1);
+    for (const field of ["tool", "evidenceKind", "noun", "counts"] as const) {
+      const values = REVIEW_SENSES.map((d) => d[field]);
+      expect(new Set(values).size, `${field} is unique per sense`).toBe(values.length);
+    }
+    // And each sense's read is one the planner is actually shown — a sense reached by nothing would
+    // be a promise, which is the defect this whole file exists for.
+    for (const declaration of REVIEW_SENSES) {
+      expect(reachableToolNames(), `${declaration.sense} is reachable`).toContain(declaration.tool);
+    }
+    // The grouping matrix names both, so the REVIEW_SIGNAL × PRODUCT row is not describing half of
+    // what it supports.
+    const review = GROUPING_CAPABILITIES.find(
+      (c) => c.needKind === "REVIEW_SIGNAL" && c.dimension === "PRODUCT",
+    )!;
+    for (const declaration of REVIEW_SENSES) {
+      expect(review.via).toContain(declaration.tool);
     }
   });
 });
