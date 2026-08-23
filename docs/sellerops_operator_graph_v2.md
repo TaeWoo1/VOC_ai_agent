@@ -655,6 +655,8 @@ CI는 **계약·검증·발산의 구조**를 고정할 뿐 **일반화를 증�
 8. WRITE 0 · credential plane 미접촉 재확인
 9. §9의 RUBRIC 측정치 보고(층 3이 포함된 경우)
 
+**실행 기록 (2026-08-23).** 이 계획의 첫 실측이 `docs/agent_real_validation_v1.md`에 있다 — REAL 3채널 데이터 위 6개 셀러 질문, planner OFF 6/6 `FAILED`(결정론 fallback 부재 확인) → planner ON 6/6 `DONE`, **plan divergence 실재**. 동시에 §18.2의 실패 조건 중 **"근거 없는 상품 사실 단정이 답변에 도달"이 실제로 발생**했다(Q4). 그 결과가 `Agent Evidence Scope Integrity v1`의 착수 근거다.
+
 ---
 
 ## 19. requirement → implementation → test → live proof traceability
