@@ -1571,3 +1571,77 @@ run `d329ff9e` · MANUAL · **SUCCESS 68/68/0/0** · 24.7초 ·
 
 C-2는 옵션ID를 **1차 키로 쓰지 않는다** — 노출상품ID가 고른 후보 2개 사이에서만 쓴다. 그래도
 채택 여부는 결정 사항이라 여기서 정하지 않았다.
+
+---
+
+### 5k. Coupang REVIEW Action Window 단회 acquisition (2026-08-23 13:44 KST) — 수집 완주, **저장 절반**
+
+승인 `apr-c2rev0823a1` · 실행 `rv-0823-c2-01` · 커밋 `5d4ba7cb` · phase `COUPANG_WING_REVIEW_ACQUISITION` ·
+mode `READ_ONLY` · **marketplace action 0**. run-level 승인은 판매자가 `SellerOps 확인` 탭에서 직접
+눌렀다(`run_grant GRANTED`). 페이지는 세 번 다 판매자가 넘겼다.
+
+#### 걷기
+
+| 페이지 | 행 | 신규 | 이미 본 것 | 판정 |
+|---|---|---|---|---|
+| 1 | 10 | 9 | 1 | `IN_PROGRESS` |
+| 2 | 10 | 9 | 1 | `IN_PROGRESS` |
+| 3 | 4 | 4 | 0 | **`FINAL_PAGE_REACHED`** |
+
+`pages=3 rows=24 collected=22 textless=18 expandable=0 complete=true` ·
+드롭 0(날짜·별점·상품ID 전부 판독). **완주는 pager를 읽어서 판정했다** — `pages=3 at=3 next=true/false`.
+별점만 리뷰 **18/22(82%)** 로, 2026-08-15 관측(86%)과 같은 성격의 목록이다.
+
+#### handoff — `received=22 stored=11 skipped=0 failed=11`
+
+| 결과 | 건수 | 뜻 |
+|---|---|---|
+| **저장** | **11** | 기존 REAL 카탈로그 **product 3개**에 붙었다 |
+| 중복 | 0 | 빈 상태에서 시작했으므로 |
+| **미해결** | **11** | **`UNRESOLVED` 10** (이 org에 그 노출상품ID의 리스팅이 없음) + **`AMBIGUOUS` 1** (모호 그룹 적중, 옵션ID로도 안 갈림) |
+
+#### 이번 sitting이 증명한 것
+
+**노출상품ID → 리스팅 → canonical product 경로가 실제 화면 데이터로 작동한다.** 22건 중 11건이
+카탈로그 product에 정확히 붙었고, **신규 product는 0건**이다(org 308 = REAL 300 + DEMO_SEED 8,
+실행 전과 동일). 리뷰가 자기 product를 만드는 일은 이제 구조적으로 불가능하고, 그것이 라이브에서
+확인됐다.
+
+| 검증 | 결과 |
+|---|---|
+| REAL product attribution | 11건 → REAL product **3개** (6 / 3 / 2) |
+| 신규 placeholder·product·listing·variant | **0** |
+| synthetic 제외 | DEMO_SEED 상품평 **22건 불변**, REAL 11건만 신규 |
+| import 기록 | `PARTIAL 22/11/0/11` · `SELLER_CENTER_READ` · `AGENT_HANDOFF` · `ACTION_WINDOW` — 미해결이 화면에 남는다 |
+| CustomerMemory | **11건 신규** |
+| item-analysis (ReviewOps) | **11건 신규** (POSITIVE 9 · NEGATIVE 2) |
+| ReviewIssues | 신규 evidence **0** — 이벤트는 발행됐고 반복 이슈 임계에 걸린 것이 없다(11건 중 7건이 별점만) |
+| WRITE / routine / ERROR | **0** · INQUIRY·ORDER_SUMMARY 60분 유지 · **0** |
+| 재수집 멱등 | **미검증** — 화면을 한 번 더 읽어야 나온다 |
+
+**이것이 Coupang 상품평이 downstream까지 도달한 첫 사례다.** 2026-08-15에 저장된 22건은
+`IngestFollowUp`(2026-08-21)보다 앞서 있어 셋 중 어느 것도 받지 못했다.
+
+#### 남은 것 — **커버리지이지 identity가 아니다**
+
+미해결 10건은 이 org이 **리스팅을 갖고 있지 않은** 노출상품ID를 가리켰다. 11건이 제대로 붙었다는
+사실이 식별자 공간이 맞다는 증거이므로, 이것은 매핑 실패가 아니라 **카탈로그가 상품평이 달린 상품
+전부를 담고 있지 않다**는 뜻이다.
+
+**원인은 아직 측정되지 않았고, 추측하지 않는다.** 후보는 판매중지·삭제된 상품이
+`seller-products` 목록에 나오지 않는 경우 등이며, 어느 쪽인지는 이 저장소의 데이터로 판정할 수
+없다(실패한 행의 노출상품ID는 어디에도 저장되지 않는다 — 그것이 sanitization 계약이다).
+
+모호 그룹은 **5개 중 1개가 실제로 적중했고 tie-break는 실패했다.** 후보 두 product 중 어느 쪽도 그
+옵션ID를 갖고 있지 않았거나 화면에 옵션ID가 없었던 경우이고, 계약 6번대로 fail-closed 했다.
+**옵션ID tie-break가 성공하는 사례는 아직 라이브에서 관측되지 않았다.**
+
+#### 이번에 고친 것 / 관측만 한 것
+
+- **고침(`e1d2971c`)** — 배치 경고가 미해결 11건을 전부 "리스팅 없음"이라고 적었다. 하나는
+  모호였다. 두 사유는 반대되는 뜻이라(덮지 못함 / 두 번 덮음) 따로 센다.
+- **관측만** — 걷기의 exit code가 **0**이다. 절반이 저장되지 않았는데도 그렇다. 코드가 기술하는
+  것은 *걷기*(완주했고 handoff가 200을 받았다)이지 *배치*가 아니며, 요약 한 줄과 `sync_jobs`의
+  `PARTIAL`은 정확하다. 이번 흐름에서 고치지 않는다.
+- **관측만** — 창을 닫으면 읽은 상품평이 handoff 전에 사라지는 구멍(§5i)은 이번에도 그대로다.
+  이번 sitting에서는 발생하지 않았다.
