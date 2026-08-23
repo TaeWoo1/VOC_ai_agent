@@ -572,3 +572,121 @@ specialist 예외 **소멸** — 이제 `specialistOutcomes`가 항상 terminal�
 | A1 · A3 | CLOSED (§9) |
 | A4 · A5 · A6 · B · C · D | backlog 유지 |
 | **신규** — `INBOX_COUNT`에 관측 시각 부재로 인한 temporal false negative | backlog (§10.4) |
+
+---
+
+## 11. Agent Temporal Evidence Semantics v1 — §10.4 관측 수정 (2026-08-23)
+
+> §3·§4의 baseline 숫자는 이 절로도 바뀌지 않는다.
+
+### 11.1 무엇이 틀렸나
+
+§9의 temporal 축에는 **시간이 한 종류뿐이었다.** `EvidenceRef.observedOn` 하나가 "언제 봤는가"와
+"언제 일어났는가"를 동시에 의미했고, 축은 그 필드가 비었는지만 물었다. 그래서 §10.3의 두 라이브 run이
+갈렸다 — 같은 문장, 같은 데이터, planner가 "오늘"을 `PERIOD`로 선언했는지에 따라 **참인 총계가 나오거나
+근거 없음이 나왔다**.
+
+**날짜를 찍는 것은 해결이 아니다.** 받은편지함 count에 오늘 날짜를 찍으면 두 run 모두 답은 하지만,
+"현재 미답변 69건"이 "오늘 들어온 문의 69건"이 된다. false negative를 **거짓 주장으로** 바꾸는 거래다.
+
+### 11.2 무엇을 바꿨나
+
+새 tool 0 · planner 프롬프트 0 · 기간 기본값 0 · C1 미수정 · dead tool routing 0.
+
+**① evidence가 두 개의 시간을 따로 갖는다** — `agent-runtime/src/operator/scope/EvidenceTime.ts`.
+
+| 필드 | 의미 | 언제 있는가 |
+|---|---|---|
+| `asOf` | **SellerOps가 언제 봤는가.** 신선도, 그 이상 아무것도 | 모든 live read — 읽는 행위는 언제나 시각을 갖는다 |
+| `events` | **밑의 행이 언제 일어났는가** (`from`~`to`, 한쪽만 알아도 range) | 출처가 말할 수 있을 때만. `null` = 모름, 결코 "지금"이 아님 |
+
+`EvidenceBuilder`가 `asOf`는 항상 채우고 `events`는 **절대 채우지 않는다** — 호출부가 데이터에서
+읽어 넘길 때만 생긴다. 질의 window에서도 만들지 않는다: 30일을 물었다는 사실은 어떤 행도 그 안에
+있었음을 증명하지 않는다.
+
+**② need가 둘 중 하나를 요구한다** — 판정은 **planner가 이미 보내는 need `kind`**에서 나온다.
+
+| demand | need kind | 무엇으로 충족되는가 |
+|---|---|---|
+| `NONE` | 기간을 말하지 않은 모든 need | 시간을 묻지 않았다 |
+| `CURRENT_STATE` | `INQUIRY_VOLUME` · `PRODUCT_FACT` · `PRODUCT_LISTING` · `PRODUCT_VARIANT` · `POLICY` | 신선한 관측(`asOf`) |
+| `PERIOD_EVENTS` | `REPEAT_PATTERN` · `REVIEW_SIGNAL` · `CUSTOMER_HISTORY` · `ORDER_HISTORY` | **`events` 필수.** `asOf`는 대체하지 못한다 |
+
+한국어 산문을 읽지 않으므로 **planner가 같은 질문을 다르게 써도 답이 움직이지 않는다.**
+
+**③ 장치는 둘이고, 둘은 다른 것을 본다.** scope gate는 **need가 무엇을 물었는지**를, rule judge는
+**문장이 무엇을 주장하는지**를 읽는다. 후자가 없으면 "현재 미답변 69건"과 "오늘 들어온 문의 69건"을
+구분할 수 없다 — 둘은 같은 근거를 인용하고 하나만 증명된다. 기간어 + 발생어가 함께 있는 문장이 행의
+날짜를 모르는 근거에만 기대면 `unsafeAssertion`("관측 시점을 발생 기간의 근거로 사용")이다. plan이
+`CURRENT_STATE`라고 했어도 거절된다.
+
+**④ `INBOX_COUNT`는 현재 상태의 snapshot으로 명시됐다** — 이름과 달리 "오늘 들어온 문의"가 아니다.
+문장도 「**현재** 답변이 필요한 문의가 N건 있습니다」로 바뀌었다. "현재"는 예의가 아니라 근거가
+증명하는 범위다.
+
+**⑤ observability** — `operator_plan`이 `periodNamed`를 남긴다. **어느 기간인지가 아니라 기간을
+말했는지만** — mention은 판매자 자신의 문장이다. 이 boolean 하나가 없어서 §10.4의 갈림을 로그로
+진단할 수 없었다.
+
+### 11.3 회귀 (offline)
+
+`agent-runtime/test/operator/temporalEvidenceSemantics.test.ts` — **21 tests.** red test는 §10.3의
+divergence를 재현한다: 같은 goal, `PERIOD` mention만 다른 두 plan. 옛 규칙으로 되돌리면 **5건이 빨개진다**
+(확인함). 요청된 세 가지 회귀는 모두 포함됐다 — 현재 backlog 허용 / 기간 주장 거부 / `PERIOD` need +
+관측 시각만 = `TEMPORAL_UNPROVEN`.
+
+agent-runtime 전체 **300 passed · 23 skipped · 0 failed** (이전 278 → +21 신규, +1 judge).
+
+### 11.4 라이브 재실행 — Q1 ×2, Q5 ×2
+
+마켓 접촉 0 · WRITE 0 · 모든 `nextAction` = `READ`.
+
+**Q1 「오늘 내가 먼저 확인해야 할 게 뭐야?」 — planner가 실제로 갈렸고, 답은 갈리지 않았다.**
+
+| | run g | run h |
+|---|---|---|
+| `periodNamed` (plan 로그) | **`true`** | **`false`** |
+| needs | 2 | 2 |
+| findings | **4** | **4** |
+| 문장 | 「현재 답변이 필요한 문의가 69건 있습니다」 + 리뷰 이슈 3건 | **동일** |
+| evidence | `INBOX_COUNT` ×1 + `REVIEW_ISSUE` ×3 | 동일 |
+| scope 거절 | 0 | 0 |
+
+**이것이 이번 package의 증명이다.** 수정 전 규칙이었다면 run g의 `INBOX_COUNT`는 `TEMPORAL_UNPROVEN`으로
+거절돼 "69건"이 사라졌을 것이다. 두 축이 모두 라이브에서 발화했고 둘 다 참을 통과시켰다:
+`INQUIRY_VOLUME` → `CURRENT_STATE` → `asOf=2026-08-23` 통과, `REVIEW_SIGNAL` → `PERIOD_EVENTS` →
+`events` 보유 통과.
+
+**두 시간이 라이브에서 실제로 다르다** — 리뷰 이슈 evidence는 `asOf=2026-08-23`이면서
+`events=2025-08-29~2026-06-16`이다. 즉 "지금 확인했고, 일어난 것은 작년부터"가 한 행에 구분돼 있다.
+
+**Q5 「답변이 필요한 문의를 우선순위대로 정리하고 답변 초안을 만들어줘.」**
+
+| | run g | run h |
+|---|---|---|
+| plan | LLM · needs 5 · `INQUIRY_OPS` | LLM · needs 7 · `INQUIRY_OPS`+`PRODUCT_OPS` |
+| findings | **1** — 「현재 답변이 필요한 문의가 69건 있습니다」 | **1** — 동일 |
+| specialist terminal | `INQUIRY_OPS` `PARTIAL` | `INQUIRY_OPS` `PARTIAL` · `PRODUCT_OPS` `OK` |
+| skipped tool | `search_customer_memory` ×3 `ANCHOR_UNAVAILABLE` | ×2 동일 |
+| 백엔드 `/api/customer-memory/search` | **0건** | **0건** |
+| 초안 lane 한계 문장 | 있음 | 있음 |
+| WRITE | 0 | 0 |
+
+§10.3의 run d는 findings 0이었다. **두 run 모두 참인 총계를 말한다.**
+
+### 11.5 이번 회차에서 새로 관측된 것 (수정하지 않음)
+
+- **compose의 dedupe 메시지가 부정확하다.** 같은 문장 2건이 중복 제거될 때 「근거가 확인되지 않아 1건은
+  답에서 제외했습니다」라고 말한다. 실제 이유는 중복이고 근거는 있었다. baseline부터 있던 C급 문구
+  결함이며 temporal과 무관해 손대지 않았다.
+- **`asOf`는 신선도를 증명하지만 staleness 정책은 없다.** 오래된 관측도 `CURRENT_STATE`를 통과한다.
+  임계값을 넣는 것은 기간 기본값을 발명하는 것이므로 하지 않았다.
+
+### 11.6 판정
+
+| 결함 | 상태 |
+|---|---|
+| **§10.4 신규** — `INBOX_COUNT` 관측 시각 부재로 인한 temporal false negative / planner 표현에 따른 답 갈림 | **CLOSED** — 라이브 4회(그중 실제 `periodNamed` 갈림 1쌍) + 회귀 21건 |
+| A1 · A2 · A3 | CLOSED (§9 · §10) |
+| A4 · A5 · A6 · B · C · D | backlog 유지 |
+| **신규** — compose dedupe 문구 · staleness 정책 부재 | backlog (§11.5) |
