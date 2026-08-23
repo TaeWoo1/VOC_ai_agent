@@ -113,6 +113,9 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       // ever chose (found reading the seam for A5 — the lines are `name: 설명`, never a bare name).
       toolNames,
       limits: deps.budget.limits(),
+      // A repair is a second model call and is charged like the first (A8). Refused budget ⇒ no
+      // repair, and the rejection stands as a failed run rather than as a quiet smaller answer.
+      chargeLlmCall: () => deps.budget.spend("llm"),
       ...(state.plan ? { priorContext: progressLine(state) } : {}),
     });
     log("operator_plan_node", {
@@ -153,7 +156,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // find nothing behind every report sentence and silently delete the report.
     const seenEvidence: EvidenceRef[] = [...state.evidence];
     for (const specialist of ordered) {
-      const outcome = await runSpecialist(specialist, plan, state, resolved, findingsSoFar);
+      const outcome = await runSpecialist(specialist, plan, state, resolved, findingsSoFar, seenEvidence);
       seenEvidence.push(...outcome.result.evidence);
       // The gate runs against the entities known AT THIS POINT, which includes whatever this specialist
       // just resolved — PRODUCT_OPS must be allowed to cite the product it resolved on the same pass.
@@ -271,6 +274,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     state: OperatorState,
     resolved: readonly import("../plan/InvestigationPlan").ResolvedEntity[],
     findingsSoFar: readonly Finding[],
+    priorEvidence: readonly EvidenceRef[],
   ): Promise<{
     result: SpecialistResult;
     needStates: NeedState[];
@@ -284,6 +288,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       evidence,
       allowedTools: dedupe([...plan.candidateTools, ...toolsFor(specialist)]),
       resolved,
+      // What the run has already PROVEN, not what it might. A specialist reads this the same way it
+      // reads `resolved`: to avoid re-buying a fact the run already holds. It is evidence refs only —
+      // ids, counts and closed labels — so nothing a specialist could not already mint itself.
+      priorEvidence,
       goalText: state.goalText,
       ...(deps.referenceDate ? { referenceDate: deps.referenceDate } : {}),
     };
@@ -441,7 +449,13 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
 
     const coverage: SignalCoverage[] = state.results.flatMap((r) => [...r.coverage]);
     const notes = state.results.map((r) => r.note).filter((n): n is string => Boolean(n));
-    const dropped = state.findings.length - presentable.length;
+    // <b>Only what was withheld for lack of evidence is reported as withheld.</b> `presentable` also
+    // collapses duplicate statements, and counting those as dropped told the seller that five true
+    // sentences had failed a check they never took (live 2026-08-24). A repeated sentence is one fact
+    // said once — no information is lost and nothing needs saying about it.
+    const dropped = state.findings.filter(
+      (f) => f.evidenceIds.length === 0 || f.confidence === "UNSUPPORTED",
+    ).length;
     if (dropped > 0) {
       notes.push(`근거가 확인되지 않아 ${dropped}건은 답에서 제외했습니다.`);
     }

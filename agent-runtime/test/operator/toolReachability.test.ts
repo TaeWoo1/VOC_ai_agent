@@ -39,7 +39,7 @@ import { twoInquiries } from "../support/fixtures";
 import { ISSUE_HIGH_QUIET, ISSUE_NORMAL_CONCENTRATED, fourIssues, makeIssue } from "../support/issueFixtures";
 import {
   ANALYSES, CABLE, CUP_BIN, INBOX, KNOWLEDGE, MEMORY, MOLDING, REPEATS,
-  coveredSignals, cupBinKnowledge, cupBinSignals, unlinkedSignals,
+  coveredSignals, cupBinKnowledge, cupBinSignals, cupBinSignalsUnlinked, unlinkedSignals,
 } from "../support/operatorFixtures";
 import { RECORDED_PLANS, TODAY_PLAN } from "../support/recordedPlans";
 import type { OperatorAnswer } from "../../src/operator/state/OperatorState";
@@ -118,6 +118,28 @@ function done(result: OperatorRunResult): OperatorAnswer {
     throw new Error(`expected DONE, got FAILED: ${result.failureCode} — ${result.reason}`);
   }
   return result.answer;
+}
+
+/** The signals map with one cup-bin variant swapped in — `build`'s seed replaces the map wholesale. */
+function signalsWith(cupBin: ReturnType<typeof cupBinSignals>) {
+  return { [MOLDING.id]: coveredSignals(), [CABLE.id]: unlinkedSignals(), [CUP_BIN.id]: cupBin };
+}
+
+/** The same variant seeded on BOTH reads — ProductOps sees signals through `get_product_knowledge`. */
+function seedFor(cupBin: ReturnType<typeof cupBinSignals>) {
+  return {
+    signals: signalsWith(cupBin),
+    knowledge: { ...KNOWLEDGE, [CUP_BIN.id]: cupBinKnowledge(cupBin) },
+  };
+}
+
+/** The product's own issue index, naming the issue whose evidence the issue-store also splits. */
+function cupBinWithConcentratedIssue() {
+  return cupBinSignals([makeIssue(ISSUE_NORMAL_CONCENTRATED, {
+    severity: "NORMAL", aspect: "뚜껑", problem: "이탈", evidenceCount: 9,
+    dominantProductId: MOLDING.id, dominantProductName: "몰딩 화이트 10m",
+    lastEvidenceOn: "2026-07-22",
+  })]);
 }
 
 /** The issue list, with one issue whose evidence includes the cup bin but whose dominant product is not. */
@@ -246,7 +268,9 @@ describe("the planner is only shown tools something can run", () => {
 
 describe("a resolved product reaches its own review evidence", () => {
   it("attributes an issue's rows to the product, and quotes the product's own count", async () => {
-    const { runtime, issues } = build({}, issuesAttributedToCupBin());
+    const { runtime, issues } = build(
+      seedFor(cupBinWithConcentratedIssue()), issuesAttributedToCupBin(),
+    );
     const answer = done(await runtime.run("t-attributed", { text: GOAL }));
 
     expect(issues.reads.evidenceSummary).toBeGreaterThan(0);
@@ -265,7 +289,9 @@ describe("a resolved product reaches its own review evidence", () => {
   });
 
   it("never turns another product's org-wide issue into a sentence about this one", async () => {
-    const { runtime } = build({}, issuesAttributedToCupBin());
+    const { runtime } = build(
+      seedFor(cupBinWithConcentratedIssue()), issuesAttributedToCupBin(),
+    );
     const answer = done(await runtime.run("t-no-org", { text: GOAL }));
 
     const stated = answer.findings.filter((f) => !f.claimsCoverageLimit)
@@ -277,21 +303,52 @@ describe("a resolved product reaches its own review evidence", () => {
     expect(rows.some((e) => e.locator.issueId === ISSUE_HIGH_QUIET)).toBe(false);
   });
 
-  it("states a measured zero when the product has no rows in any live issue", async () => {
+  it("states a measured zero from the product's own index, and buys no org sweep to do it", async () => {
     const { runtime, issues } = build();
     const answer = done(await runtime.run("t-zero", { text: GOAL }));
 
-    // The whole point of connecting the tool: the run OPENED every live issue and found none of them
-    // held this product's rows. That is an answer; the org-scope refusal it replaced was silence.
-    expect(issues.reads.evidenceSummary).toBe(4);
-    const zero = answer.findings.filter((f) => f.statement.includes("귀속된") && f.statement.includes("없습니다"));
+    // The product's issue index is empty and every issue-evidence row in the org is attributed, so the
+    // zero is MEASURED. ProductOps says so from a read it already made; ReviewOps' bounded org sweep
+    // could only produce a hedged version of the same sentence, so it is not bought at all (C3).
+    expect(issues.reads.evidenceSummary).toBe(0);
+    const zero = answer.findings.filter((f) => f.statement.includes("반복 문제로 기록된 리뷰 근거는 없습니다"));
     expect(zero).toHaveLength(1);
-    expect(zero[0]!.claimsCoverageLimit).toBe(true);
-    expect(zero[0]!.statement).toContain("4건을 모두 확인");
+    expect(zero[0]!.specialist).toBe("PRODUCT_OPS");
+    // NOT a coverage-limit claim: it is a positive fact about the data and must face the same scope
+    // gate every other claim does.
+    expect(zero[0]!.claimsCoverageLimit).toBeUndefined();
+    expect(zero[0]!.statement).not.toContain("확인하지 않았습니다");
     const ref = answer.evidence.find((e) => e.evidenceId === zero[0]!.evidenceIds[0]);
     expect(ref!.kind).toBe("ISSUE_EVIDENCE");
     expect(ref!.locator.productId).toBe(CUP_BIN.id);
     expect(ref!.locator.count).toBe(0);
+    expect(ref!.coverage).toBe("COVERED");
+  });
+
+  it("keeps the complete answer when a bounded sweep would have overwritten it", async () => {
+    // C3, end to end. Both specialists answer the same REVIEW_SIGNAL need; the one that ran second used
+    // to win. Now the need carries the outcome that knows more.
+    const { runtime } = build();
+    const answer = done(await runtime.run("t-merge", { text: GOAL }));
+
+    const review = answer.needs.find((n) => n.evidenceIds.length > 0
+      && answer.evidence.some((e) => e.evidenceId === n.evidenceIds[0] && e.kind === "ISSUE_EVIDENCE"));
+    expect(review?.status).toBe("SATISFIED");
+    expect(answer.note ?? "").not.toContain("나머지는 확인하지 않았습니다");
+  });
+
+  it("falls back to the org sweep only when the product's own index cannot answer", async () => {
+    // `UNCERTAIN_PRODUCT_UNLINKED`: rows exist that belong to no product, so an empty product index
+    // proves nothing. This is the one case ReviewOps' sweep is the only path — and it reads.
+    const { runtime, issues } = build(seedFor(cupBinSignalsUnlinked()));
+    const answer = done(await runtime.run("t-fallback", { text: GOAL }));
+
+    expect(issues.reads.evidenceSummary).toBe(4);
+    const zero = answer.findings.filter((f) => f.statement.includes("귀속된") && f.statement.includes("없습니다"));
+    expect(zero).toHaveLength(1);
+    expect(zero[0]!.specialist).toBe("REVIEW_OPS");
+    expect(zero[0]!.claimsCoverageLimit).toBe(true);
+    expect(zero[0]!.statement).toContain("4건을 모두 확인");
   });
 
   it("never says \"모두 확인했다\" about a sweep that stopped at the cap", async () => {
@@ -303,7 +360,7 @@ describe("a resolved product reaches its own review evidence", () => {
         severity: "NORMAL", aspect: "배송", problem: `지연${i}`,
       })),
     );
-    const { runtime } = build({}, many);
+    const { runtime } = build(seedFor(cupBinSignalsUnlinked()), many);
     const answer = done(await runtime.run("t-capped", { text: GOAL }));
 
     const zero = answer.findings.find((f) => f.statement.includes("귀속된 리뷰 근거는 없습니다"))!;
@@ -316,7 +373,9 @@ describe("a resolved product reaches its own review evidence", () => {
   it("does not lend the issue's dates to one product's slice of it", async () => {
     // The summary's first/last span the whole issue. A product's count borrowing them would let another
     // product's recent review prove this product's "최근" — the A1 failure wearing temporal clothes.
-    const { runtime } = build({}, issuesAttributedToCupBin());
+    const { runtime } = build(
+      seedFor(cupBinWithConcentratedIssue()), issuesAttributedToCupBin(),
+    );
     const answer = done(await runtime.run("t-dates", { text: GOAL }));
     const rows = answer.evidence.filter((e) => e.kind === "ISSUE_EVIDENCE");
     expect(rows.length).toBeGreaterThan(0);

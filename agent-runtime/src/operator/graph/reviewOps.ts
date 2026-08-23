@@ -50,6 +50,29 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
   if (input.needs.length === 0) {
     return pending("리뷰 신호는 이번 조사 계획에 포함되지 않았습니다.");
   }
+  // <b>Do not re-buy what the run already proved, and never re-say it in weaker words.</b> When
+  // ProductOps has resolved the product it also read that product's OWN issue list — selected by the
+  // backend from the product's evidence rows, so complete rather than capped. This specialist's product
+  // path is the same question answered from the org side with a bounded sweep: it costs up to six reads
+  // and can only produce a smaller, hedged version of a sentence the run already holds. Measured live
+  // 2026-08-23 on the canonical Q4: the seller was told "심각한 6건을 확인했지만 … 나머지는 확인하지
+  // 않았습니다" while the run held a complete, COVERED zero (defects C3/C4). The precedence is by
+  // EVIDENCE, not by specialist name — nothing is skipped unless the proof is actually there.
+  const resolvedProduct = input.resolved.find((e) => e.kind === "PRODUCT");
+  if (resolvedProduct && alreadyAttributed(input.priorEvidence, resolvedProduct.id)) {
+    log("review_ops", { needs: input.needs.length, scope: "PRODUCT", terminal: "OK", skipped: "ALREADY_ATTRIBUTED" });
+    return {
+      specialist: "REVIEW_OPS",
+      failures: [],
+      terminal: "OK" as const,
+      findings: [],
+      evidence: [],
+      coverage: [],
+      // PENDING, deliberately: this specialist settled nothing, and the merge in `plan/needOutcome.ts`
+      // is what keeps the stronger outcome. Claiming a status here would be claiming a read.
+      needStates: input.needs.map((n) => ({ id: n.id, status: "PENDING" as const, evidenceIds: [] })),
+    };
+  }
   if (!budget.spend("tool")) {
     return pending("반복 문제를 읽기 전에 예산이 끝났습니다.");
   }
@@ -143,6 +166,10 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
       id: n.id,
       status: cited.length > 0 ? ("SATISFIED" as const) : ("UNSATISFIABLE" as const),
       evidenceIds: cited,
+      coverage: "COVERED" as const,
+      // The org list is read whole; only the BRIEF is capped, and what is cited is what was said.
+      complete: issues.length <= DEFAULT_LIMIT,
+      settledBy: "REVIEW_OPS" as const,
       ...(cited.length === 0 ? { reason: "지금 확인이 필요한 반복 리뷰 문제가 없습니다." } : {}),
     })),
     ...(issues.length === 0 ? { note: "지금 확인이 필요한 반복 리뷰 문제는 없습니다." } : {}),
@@ -291,6 +318,11 @@ async function attributeToProduct(
       id: n.id,
       status: cited.length > 0 ? ("SATISFIED" as const) : ("UNSATISFIABLE" as const),
       evidenceIds: cited,
+      coverage: "COVERED" as const,
+      // <b>The axis that stops this sweep speaking over a complete read.</b> Six of nineteen is not a
+      // verdict on nineteen, and the merge needs to be able to see that without reading the sentence.
+      complete: checked >= issues.length,
+      settledBy: "REVIEW_OPS" as const,
       ...(cited.length === 0
         ? {
             reason: checked >= issues.length
@@ -301,4 +333,19 @@ async function attributeToProduct(
     })),
     ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
   };
+}
+
+/**
+ * Does the run already hold a product-scoped issue answer for this product?
+ *
+ * Reads the evidence, not the specialist list: a run where ProductOps was dispatched but could not
+ * resolve, or ran out of budget before its issue reads, has proven nothing — and this specialist is
+ * then the only path there is.
+ */
+function alreadyAttributed(
+  priorEvidence: readonly EvidenceRef[] | undefined, productId: string,
+): boolean {
+  return (priorEvidence ?? []).some(
+    (e) => e.kind === "ISSUE_EVIDENCE" && e.locator.productId === productId,
+  );
 }

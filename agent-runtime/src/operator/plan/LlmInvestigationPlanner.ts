@@ -23,8 +23,10 @@ import type { GoalRequest } from "../../goal/parseGoal";
 import type { AgentPlanView } from "../../spring/types";
 import type { InvestigationPlan, RiskClass } from "./InvestigationPlan";
 import type { SpecialistName } from "../state/OperatorState";
-import { validatePlan, PlanRejectedError } from "./PlanValidator";
+import { validatePlan, PlanRejectedError, REPLANNABLE_REJECTIONS } from "./PlanValidator";
+import type { PlanRejection } from "./PlanValidator";
 import { scopeToken, withOperationalDefaults } from "../defaults/OperationalDefaults";
+import { productResolvingSpecialists } from "../tools/ToolReachability";
 import type { PlanLimits } from "./PlanValidator";
 import { log } from "../../log";
 
@@ -56,6 +58,16 @@ export interface PlanInput {
   readonly toolNames?: readonly string[];
   readonly limits: PlanLimits;
   readonly priorContext?: string;
+  /**
+   * Permission to spend one more model call on a repair, from whoever owns the budget.
+   *
+   * <b>A repair is a real model call and must be charged like one.</b> The graph charges the FIRST
+   * plan before calling this class; a second request made inside it would otherwise be invisible to
+   * `OperatorBudget`, and a bounded loop whose bound cannot see half its own spend is not bounded.
+   * Returning `false` means "no budget" and the rejection stands — which is the fail-closed direction.
+   * Absent ⇒ one repair is allowed uncharged, which is the shape a unit test wants.
+   */
+  readonly chargeLlmCall?: () => boolean;
 }
 
 /** Why no plan exists. Every value ends the run; none of them selects an alternative planner. */
@@ -126,7 +138,63 @@ export class LlmInvestigationPlanner implements Planner {
       throw new PlannerUnavailableError(failure, "the planner produced no plan");
     }
 
-    const raw = toPlan(view, goalText);
+    const first = this.settle(toPlan(view, goalText), goalText, input);
+    if (first.ok) {
+      return first.plan;
+    }
+
+    // ── The bounded repair. Exactly one, and only for a rejection a re-plan can actually fix.
+    //
+    // <b>What is sent back is the RULE, not a plan.</b> The planner is told which contract its plan
+    // broke and which capability would satisfy it; it decides what to do about that. Naming the
+    // specialist here is naming a capability the catalogue already advertises — it is not composing a
+    // plan, and nothing on this side edits the answer that comes back. The alternative, adding the
+    // specialist ourselves, is the deterministic second planner invariant I2 exists to forbid (A8).
+    if (!REPLANNABLE_REJECTIONS.includes(first.rejection)) {
+      throw first.error;
+    }
+    if (input.chargeLlmCall && !input.chargeLlmCall()) {
+      log("operator_plan_repair", { rejection: first.rejection, attempted: false, reason: "BUDGET" });
+      throw first.error;
+    }
+    log("operator_plan_repair", { rejection: first.rejection, attempted: true });
+
+    let repaired: AgentPlanView;
+    try {
+      repaired = await this.backend.planGoal({
+        goalText,
+        toolCatalogue: [...input.catalogue],
+        priorContext: repairContext(first.rejection, input.priorContext),
+      });
+    } catch {
+      throw new PlannerUnavailableError("TRANSPORT", "the planner capability could not be reached");
+    }
+    if (!repaired.available) {
+      throw new PlannerUnavailableError(
+        repaired.providerVersion ? "OFF_SCHEMA" : "CAPABILITY_OFF",
+        "the planner produced no plan",
+      );
+    }
+    const second = this.settle(toPlan(repaired, goalText), goalText, input);
+    if (second.ok) {
+      log("operator_plan_repair", { rejection: first.rejection, attempted: true, repaired: true });
+      return second.plan;
+    }
+    // Twice is the bound. A third request would be the same question with the same input, and a loop
+    // that keeps asking is how a bounded planner becomes an unbounded bill.
+    log("operator_plan_repair", {
+      rejection: first.rejection, attempted: true, repaired: false, again: second.rejection,
+    });
+    throw second.error;
+  }
+
+  /**
+   * Audit, validate and log one candidate plan — the part that runs identically for a first attempt
+   * and for a repair, so the two cannot drift into different contracts.
+   */
+  private settle(raw: InvestigationPlan, goalText: string, input: PlanInput):
+    | { ok: true; plan: InvestigationPlan }
+    | { ok: false; rejection: PlanRejection; error: PlannerUnavailableError } {
     try {
       // The capability audit runs BEFORE validation, and the order is load-bearing: V8 strips every
       // specialist from a plan that asks a question, so a clarification the contracts already answer
@@ -150,21 +218,45 @@ export class LlmInvestigationPlanner implements Planner {
         periodNamed: validated.entities.unresolved.some((e) => e.kind === "PERIOD"),
         // Whether the model asked, and whether the audit let the question through. The gap between the
         // two is exactly the A4 defect, and without both numbers it is invisible in a log.
-        modelAskedToClarify: view.clarificationNeeded === true,
+        modelAskedToClarify: raw.clarificationNeeded,
         clarifies: validated.clarificationNeeded,
         scopes: validated.appliedDefaults
           .map((d) => `${d.source}:${scopeToken(d.scope)}`)
           .join(","),
       });
-      return validated;
+      return { ok: true, plan: validated };
     } catch (err) {
       if (err instanceof PlanRejectedError) {
         log("operator_plan", { plannerKind: "LLM", modelAnswered: true, reason: err.rejection });
-        throw new PlannerUnavailableError("PLAN_REJECTED", "the plan did not satisfy the contract", err.rejection);
+        return {
+          ok: false,
+          rejection: err.rejection,
+          error: new PlannerUnavailableError(
+            "PLAN_REJECTED", "the plan did not satisfy the contract", err.rejection,
+          ),
+        };
       }
       throw err;
     }
   }
+}
+
+/**
+ * What the planner is told when its plan was refused.
+ *
+ * <b>Closed vocabulary, same payload floor as everything else at this seam.</b> A rejection name, the
+ * rule in one sentence, and the capability that would satisfy it — no seller row, no id, no mention,
+ * no evidence. The earlier progress line (present on a re-plan) is kept alongside it, because a repair
+ * that forgets what has already been satisfied re-plans work the run has done.
+ */
+function repairContext(rejection: PlanRejection, prior: string | undefined): string {
+  const rule = rejection === "PRODUCT_UNRESOLVABLE"
+    ? `plan-invalid: PRODUCT_UNRESOLVABLE. The goal names a product and the plan left it unresolved `
+      + `while dispatching none of ${productResolvingSpecialists().join("/")} — the only specialists `
+      + "that can resolve a product name into a product. A plan whose needs are about a product must "
+      + "dispatch one of them. Do not supply a product id: resolution is a tool's job."
+    : `plan-invalid: ${rejection}.`;
+  return prior ? `${prior} | ${rule}` : rule;
 }
 
 /**

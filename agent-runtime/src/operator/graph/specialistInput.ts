@@ -14,6 +14,7 @@ import type { EvidenceBuilder } from "../state/evidence";
 import type { OperatorToolRegistry } from "../tools/OperatorToolRegistry";
 import type { OperatorBudget } from "../budget/OperatorBudget";
 import type { InformationNeed, ResolvedEntity } from "../plan/InvestigationPlan";
+import type { EvidenceRef } from "../state/OperatorState";
 
 export interface SpecialistInput {
   readonly registry: OperatorToolRegistry;
@@ -26,6 +27,16 @@ export interface SpecialistInput {
   readonly mentions: readonly string[];
   /** Entities already resolved this run, so a second pass does not re-resolve and re-charge. */
   readonly resolved: readonly ResolvedEntity[];
+  /**
+   * Evidence the run already holds, from earlier specialists and earlier passes.
+   *
+   * <b>The same idea as {@link resolved}, one level up: do not re-buy a fact the run has.</b> It is
+   * refs only — ids, counts, closed labels, coverage — so a specialist reading it learns nothing it
+   * could not have minted itself. What it is FOR is precedence: when an earlier specialist has already
+   * proven something product-scoped and complete, a later one with a weaker, bounded read of the same
+   * thing has nothing to add, and adding it anyway prints two answers to one question (C3).
+   */
+  readonly priorEvidence?: readonly EvidenceRef[];
   readonly referenceDate?: string;
   readonly goalText?: string;
 }

@@ -81,6 +81,17 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     needKinds: ["PRODUCT_FACT"],
     requires: ["RESOLVED_PRODUCT"],
   },
+  {
+    // <b>The same tool as ReviewOps', reached from the other side.</b> ProductOps already holds the
+    // definitive product-scoped issue LIST — the backend selects it from `review_issue_evidence` rows
+    // belonging to this product — but every count on those rows is the issue's ORG total. Quoting one
+    // in a sentence about the product is defect C4. This row is what lets the product's own number be
+    // read instead, and it is the same read, so no new capability enters the system.
+    specialist: "PRODUCT_OPS",
+    tool: OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY,
+    needKinds: ["REVIEW_SIGNAL"],
+    requires: ["RESOLVED_PRODUCT", "ISSUE_ID"],
+  },
 
   // ── ReviewOps — which repeated problems are live, and whose they are.
   {
@@ -145,4 +156,23 @@ export function toolsFor(specialist: SpecialistName): readonly string[] {
 export function unreachableToolNames(catalogue: readonly string[]): string[] {
   const reachable = new Set<string>(reachableToolNames());
   return catalogue.filter((name) => !reachable.has(name));
+}
+
+/**
+ * The specialists that can turn a product MENTION into a resolved product.
+ *
+ * <b>Derived from the preconditions, never listed.</b> A tool that REQUIRES a mention is by definition
+ * the one that consumes a name and produces an id; anything else requires the id it would have made.
+ * So this set follows from the table, and a future specialist that owns such a tool joins it by being
+ * added there rather than by anyone remembering to update a second list.
+ *
+ * Read by {@link validatePlan}: a plan that names a product and dispatches none of these has no path
+ * to the id every product-scoped read needs (A8). The validator REFUSES such a plan — it does not add
+ * the specialist, because a validator that completes a plan is the deterministic second planner
+ * invariant I2 forbids.
+ */
+export function productResolvingSpecialists(): SpecialistName[] {
+  return [...new Set(
+    TOOL_CAPABILITIES.filter((c) => c.requires.includes("PRODUCT_MENTION")).map((c) => c.specialist),
+  )];
 }

@@ -570,3 +570,68 @@ export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "판도리 일체형 종이컵 수거함 상품의 리뷰와 문의를 같이 보고 고객 불만이나 반복 이슈가 있는지 알려줘.":
     HUMAN_PRODUCT_NAME_PLAN,
 };
+
+/* ───────────────────── Repaired plans — the A8 second answer (2026-08-23) ───────────────────── */
+
+/**
+ * What the planner returns after being told the plan could not reach the product it named.
+ *
+ * <b>Same needs, same order, one specialist added — by the MODEL.</b> `PRODUCT_COMPLAINT_ORGWIDE_PLAN`
+ * is a real plan that named 전선몰딩 and dispatched only the org-wide specialists; the validator refuses
+ * it (V9) and the planner is asked again with the rule, not with a plan. This is the answer to that
+ * second question. Nothing on the client side edits a plan — if the model returns the same one twice
+ * the run FAILS, which is what `repairedPlansByGoal` being absent replays.
+ */
+export const PRODUCT_COMPLAINT_REPAIRED_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "전선몰딩 상품의 리뷰와 문의를 함께 검토해 고객 불만이 있는지 판단하기",
+  unresolvedEntities: [{ kind: "PRODUCT", mention: "전선몰딩 상품" }],
+  informationNeeds: [
+    { id: "n1", question: "‘전선몰딩 상품’이 정확히 어떤 상품(들)을 가리키는가?",
+      kind: "PRODUCT_LISTING", why: "대상 상품을 특정해야 리뷰와 문의 데이터를 정확히 조회할 수 있다.", required: true },
+    { id: "n2", question: "해당 상품의 최근 리뷰에서 반복되는 불만/이슈는 무엇이며 심각도는 어느 정도인가?",
+      kind: "REVIEW_SIGNAL", why: "리뷰의 반복 이슈와 근거 규모를 통해 불만 존재 여부를 판단할 수 있다.", required: true },
+    { id: "n3", question: "해당 상품에 대해 반복적으로 제기되는 고객 문의 주제는 무엇인가?",
+      kind: "REPEAT_PATTERN", why: "반복되는 문의는 제품 이해나 품질 문제로 인한 불만 신호일 수 있다.", required: false },
+  ],
+  specialists: ["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS"],
+  tools: ["resolve_product", "search_review_issues", "get_review_issue_evidence_summary", "list_repeated_inquiries"],
+  retrievalOrder: ["n1", "n2", "n3"],
+  retrievalParallel: ["n2", "n3"],
+  retrievalStopWhen: "리뷰 이슈와 반복 문의 모두에서 불만 신호가 없거나, 명확한 불만 신호가 한쪽에서라도 확인되면 중단",
+  evidenceRequirements: [
+    { needId: "n1", minEvidence: 1, acceptableKinds: ["PRODUCT_LISTING"] },
+    { needId: "n2", minEvidence: 1, acceptableKinds: ["REVIEW_SIGNAL"] },
+    { needId: "n3", minEvidence: 1, acceptableKinds: ["REPEAT_PATTERN"] },
+  ],
+  riskClass: "ROUTINE",
+  maxIterations: 2,
+  maxToolCalls: 8,
+  stopWhenEnough: "반복 리뷰 이슈 또는 반복 문의 중 하나라도 불만 신호가 확인되면 충분하다.",
+  clarificationNeeded: false,
+  clarificationReason: null,
+  rationale: "상품을 먼저 특정한 뒤 리뷰 반복 이슈와 문의 반복 패턴을 확인하면 불만 존재 여부를 빠르게 판단할 수 있다.",
+  providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-24 live repair",
+};
+
+/**
+ * The policy question, repaired.
+ *
+ * The original names 전선몰딩 and dispatches only INQUIRY_OPS — and its own `CUSTOMER_HISTORY` need is
+ * anchored on a resolved product, so under that plan the need could only ever be reported unanswerable.
+ * A8 is not a purity rule here: the plan was already unable to do what it declared.
+ */
+export const POLICY_QUESTION_REPAIRED_PLAN: AgentPlanView = {
+  ...POLICY_QUESTION_PLAN,
+  specialists: ["PRODUCT_OPS", "INQUIRY_OPS"],
+  tools: ["resolve_product", "search_customer_memory"],
+  providerVersion: AUTHORED,
+};
+
+/** The repaired answers, keyed the same way. Seeded only by suites that exercise the repair. */
+export const REPAIRED_PLANS: Record<string, AgentPlanView> = {
+  "전선몰딩 상품의 리뷰와 문의를 같이 보고 불만이 있는지 알려줘": PRODUCT_COMPLAINT_REPAIRED_PLAN,
+  "교환 가능한가요?": POLICY_QUESTION_REPAIRED_PLAN,
+  "이거 교환돼요?": POLICY_QUESTION_REPAIRED_PLAN,
+};

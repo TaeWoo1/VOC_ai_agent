@@ -14,6 +14,7 @@
  */
 import type { SpecialistName } from "../state/OperatorState";
 import type { AppliedDefault } from "../defaults/OperationalDefaults";
+import type { AttentionCoverage } from "../../spring/types";
 
 /** What kind of thing a mention refers to. Closed — an unknown kind is dropped by the validator. */
 export type EntityKind = "PRODUCT" | "CHANNEL" | "ORDER" | "INQUIRY" | "ISSUE" | "PERIOD";
@@ -73,6 +74,21 @@ export interface NeedState {
   readonly evidenceIds: readonly string[];
   /** Present on UNSATISFIABLE: why this could not be answered, in the seller's language. */
   readonly reason?: string;
+  /**
+   * How well the source behind this outcome could see the scope the need asked about.
+   *
+   * <b>The axis that decides whether "없습니다" survives.</b> A zero read under `COVERED` is a measured
+   * zero and answers the question; the same zero under any `UNCERTAIN_*` value is a blind spot wearing
+   * the same shape. Absent means the specialist could not say, which ranks between the two.
+   */
+  readonly coverage?: AttentionCoverage;
+  /**
+   * False when the read behind this outcome was bounded — a capped sweep, a truncated list, a partial
+   * page. A complete read of a small set beats a capped read of a big one, whatever either found.
+   */
+  readonly complete?: boolean;
+  /** Which specialist settled it. Provenance for the merge and for a trace; never shown to a seller. */
+  readonly settledBy?: SpecialistName;
 }
 
 /**

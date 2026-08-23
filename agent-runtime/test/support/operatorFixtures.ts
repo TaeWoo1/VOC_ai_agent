@@ -224,22 +224,50 @@ export function unknownProduct(): ProductKnowledge {
  * one issue is given here because the assertion under test is WHICH product an issue is attributed to
  * and WHAT the answer calls it, and evidence that does not exist cannot carry either.
  */
-export function cupBinSignals(): ProductSignals {
+/**
+ * The live product's signals: seven reviews, one inquiry, and NO issue evidence at all.
+ *
+ * <b>The default is the demo org's actual shape, and the empty issue list is the point.</b> The
+ * backend selects this list from `review_issue_evidence` rows belonging to this product, so an empty
+ * one under `COVERED` is a measured zero and not a blind spot — the case a product question most often
+ * lands on, and the one that used to produce silence. Pass issues in to exercise the attributed path;
+ * pass ONLY ids the issue-store fake also holds, or the two fakes describe different orgs.
+ */
+export function cupBinSignals(issues: ReviewIssueSummary[] = []): ProductSignals {
+  const issueEvidence = issues.reduce((sum, i) => sum + i.evidenceCount, 0);
   return {
     productId: CUP_BIN.id,
     productName: CUP_BIN.name,
     sku: CUP_BIN.sku,
     referenceDate: "2026-08-23",
-    issues: [issue({ id: "issue-cup-lid", title: "뚜껑 이탈", aspect: "뚜껑", problem: "이탈",
-      evidenceCount: 2, firstEvidenceOn: "2026-08-01", lastEvidenceOn: "2026-08-19" })],
+    issues,
     recommendedActions: [],
-    volume: { reviews: 7, inquiries: 1, unansweredInquiries: 1, issueEvidence: 2 },
+    volume: { reviews: 7, inquiries: 1, unansweredInquiries: 0, issueEvidence },
     linkedChannels: ["COUPANG"],
     coverage: [
-      { signal: "REVIEW_ISSUE", coverage: "COVERED", linked: 2, unlinked: 0, provenance: "issue-memory/RULE_BASED" },
+      { signal: "REVIEW_ISSUE", coverage: "COVERED", linked: issueEvidence, unlinked: 0,
+        provenance: "issue-memory/RULE_BASED" },
       { signal: "REVIEW", coverage: "COVERED", linked: 7, unlinked: 0, provenance: "review-store/INGEST:canonical" },
       { signal: "INQUIRY", coverage: "COVERED", linked: 1, unlinked: 0, provenance: "inquiry-store/INGEST:canonical" },
     ],
+  };
+}
+
+/**
+ * The same product, on an org whose issue evidence is NOT all attributed.
+ *
+ * <b>The one case where the product's own issue index cannot answer.</b> `UNCERTAIN_PRODUCT_UNLINKED`
+ * means rows exist that belong to no product, so an empty list for this product proves nothing and
+ * ProductOps correctly says nothing. That is when ReviewOps' bounded org sweep is the only path there
+ * is — and the case its "read six of nineteen" honesty rules exist for.
+ */
+export function cupBinSignalsUnlinked(): ProductSignals {
+  const base = cupBinSignals();
+  return {
+    ...base,
+    coverage: base.coverage.map((c) => c.signal === "REVIEW_ISSUE"
+      ? { ...c, coverage: "UNCERTAIN_PRODUCT_UNLINKED" as const, linked: 0, unlinked: 12 }
+      : c),
   };
 }
 
@@ -249,7 +277,7 @@ export function cupBinSignals(): ProductSignals {
  * `name` is the SKU number, exactly as a Coupang-derived catalogue stores it; the human name lives in
  * `listings[0].listingName`. That asymmetry is the whole point of the fixture.
  */
-export function cupBinKnowledge(): ProductKnowledge {
+export function cupBinKnowledge(signals: ProductSignals = cupBinSignals()): ProductKnowledge {
   return {
     productId: CUP_BIN.id,
     name: CUP_BIN.name,
@@ -265,7 +293,7 @@ export function cupBinKnowledge(): ProductKnowledge {
     ],
     variants: [],
     facts: [],
-    signals: cupBinSignals(),
+    signals,
     knowledgeCoverage: [
       { facet: "IDENTITY", coverage: "AVAILABLE", known: 2, newestObservedAt: null, provenance: "products" },
       { facet: "LISTING", coverage: "AVAILABLE", known: 1, newestObservedAt: "2026-08-22T02:00:00Z",

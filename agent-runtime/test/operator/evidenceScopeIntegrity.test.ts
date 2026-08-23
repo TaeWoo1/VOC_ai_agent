@@ -22,7 +22,7 @@ import { fourIssues } from "../support/issueFixtures";
 import {
   ANALYSES, CABLE, INBOX, KNOWLEDGE, MEMORY, MOLDING, REPEATS, coveredSignals, unlinkedSignals,
 } from "../support/operatorFixtures";
-import { RECORDED_PLANS } from "../support/recordedPlans";
+import { RECORDED_PLANS, REPAIRED_PLANS } from "../support/recordedPlans";
 import type { OperatorAnswer, EvidenceRef } from "../../src/operator/state/OperatorState";
 import type { InvestigationPlan, InformationNeed } from "../../src/operator/plan/InvestigationPlan";
 import {
@@ -48,6 +48,35 @@ function build() {
   });
 }
 
+/**
+ * The same run, against an org that does NOT hold the product the seller named.
+ *
+ * <b>Why the red case needs its own org now.</b> `PRODUCT_COMPLAINT_ORGWIDE_PLAN` dispatches no
+ * product specialist, and since A8 the validator refuses such a plan outright — so the planner is asked
+ * again and returns one that DOES resolve. That is the right outcome, and it means the org-evidence
+ * failure can no longer be reached through a missing specialist. It is still reachable the way it will
+ * actually happen in production: the specialist runs, the name matches nothing, and the org-wide reads
+ * come back anyway. Everything this suite asserts is about what happens NEXT, and none of it moves.
+ */
+function buildWithoutTheProduct() {
+  const operator = new FakeOperatorSpringClient({
+    inbox: INBOX,
+    products: [CABLE],
+    signals: { [CABLE.id]: unlinkedSignals() },
+    knowledge: KNOWLEDGE,
+    customerMemory: MEMORY,
+    repeats: REPEATS,
+    itemAnalyses: ANALYSES,
+    plansByGoal: RECORDED_PLANS,
+    repairedPlansByGoal: REPAIRED_PLANS,
+  });
+  return new OperatorAgentRuntime({
+    operator,
+    inquiry: new FakeSpringClient(twoInquiries()),
+    issue: new FakeIssueSpringClient(fourIssues()),
+  });
+}
+
 function done(result: OperatorRunResult): OperatorAnswer {
   if (result.status !== "DONE") {
     throw new Error(`expected DONE, got FAILED: ${result.failureCode} — ${result.reason}`);
@@ -62,7 +91,7 @@ const LIST_GOAL = "오늘 뭐부터 봐야 해? 목록으로";
 
 describe("Q4 regression — a product question is never answered with the org's evidence", () => {
   it("says nothing about the named product when nothing resolved it", async () => {
-    const answer = done(await build().run("q4-red", { text: COMPLAINT_GOAL }));
+    const answer = done(await buildWithoutTheProduct().run("q4-red", { text: COMPLAINT_GOAL }));
 
     // Before the contract: four SUPPORTED findings, three of them HIGH-severity issues belonging to
     // other products and one an org-wide inbox count, all presented as this product's.
@@ -71,14 +100,14 @@ describe("Q4 regression — a product question is never answered with the org's 
   });
 
   it("leaves both product-scoped needs unsatisfied rather than satisfied by the wrong rows", async () => {
-    const answer = done(await build().run("q4-needs", { text: COMPLAINT_GOAL }));
+    const answer = done(await buildWithoutTheProduct().run("q4-needs", { text: COMPLAINT_GOAL }));
     for (const need of answer.needs) {
       expect(need.status).not.toBe("SATISFIED");
     }
   });
 
   it("tells the seller WHY, instead of falling silent", async () => {
-    const answer = done(await build().run("q4-note", { text: COMPLAINT_GOAL }));
+    const answer = done(await buildWithoutTheProduct().run("q4-note", { text: COMPLAINT_GOAL }));
     // The seller's own words for the product, and the reason in plain Korean. A run that withheld
     // everything and said nothing would read as "확인했고 문제 없습니다" — the false calm.
     expect(answer.note ?? "").toContain("전선몰딩");
@@ -86,12 +115,12 @@ describe("Q4 regression — a product question is never answered with the org's 
   });
 
   it("never presents another product's issue id as this product's next action", async () => {
-    const answer = done(await build().run("q4-actions", { text: COMPLAINT_GOAL }));
+    const answer = done(await buildWithoutTheProduct().run("q4-actions", { text: COMPLAINT_GOAL }));
     expect(answer.nextActions.filter((a) => a.surfaceLink.startsWith("/memory/"))).toHaveLength(0);
   });
 
   it("still reads nothing but READ tools and asserts no WRITE", async () => {
-    const answer = done(await build().run("q4-write", { text: COMPLAINT_GOAL }));
+    const answer = done(await buildWithoutTheProduct().run("q4-write", { text: COMPLAINT_GOAL }));
     expect(answer.nextActions.every((a) => a.actionClass !== "WRITE")).toBe(true);
   });
 });

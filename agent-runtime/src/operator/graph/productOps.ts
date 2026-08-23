@@ -20,8 +20,11 @@ import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorSt
 import type { NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import { eventRange } from "../scope/EvidenceTime";
+import { attemptTool } from "../failure/SpecialistOutcome";
+import type { ToolFailure } from "../failure/SpecialistOutcome";
 import type { SpecialistInput } from "./specialistInput";
 import type {
+  IssueEvidenceSummary,
   KnowledgeCoverageRow,
   ProductFact,
   ProductKnowledge,
@@ -30,6 +33,19 @@ import type {
   SignalCoverage,
 } from "../../spring/types";
 import { log } from "../../log";
+
+/**
+ * How many of a product's live issues get their split read, and how many are then stated.
+ *
+ * <b>Two numbers because ranking and stating are different jobs.</b> The backend returns this product's
+ * issues ordered by severity and then by the ISSUE's org-wide evidence count — which is not this
+ * product's importance. Live 2026-08-24 on a real product that had 15 live issues, the top five by that
+ * order were 7·4·2·1·1 of the product's own rows, while its two largest problems (16 rows and 8) fell
+ * outside the cut entirely. Ranking a product's answer by another scope's number is defect C4 one level
+ * up, so the splits are read first and the STATEMENTS are ranked by the product's own count.
+ */
+const ISSUE_READ_LIMIT = 8;
+const ISSUE_STATE_LIMIT = 5;
 
 /** The surfaces on which a whole name matched. Two candidates on one of these are indistinguishable. */
 const EXACT_SURFACES: readonly ProductMatchSurface[] = [
@@ -56,6 +72,11 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
   const notes: string[] = [];
   const needStates: NeedState[] = [];
   const knowledge: Record<string, ProductKnowledge> = {};
+  // Per-read isolation, same contract as InquiryOps and ReviewOps (A2): one unreadable issue summary
+  // costs that issue's number and nothing else.
+  const failures: ToolFailure[] = [];
+  /** One settled outcome per signal need kind — see the note at the call site. */
+  const answered = new Map<string, NeedState>();
 
   // ── 1. Resolve. The planner could not: it has no id and is refused if it invents one.
   const already = input.resolved.find((e) => e.kind === "PRODUCT");
@@ -282,19 +303,37 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
       continue;
     }
 
-    // REVIEW_SIGNAL / INQUIRY_VOLUME for a resolved product — the v1 behaviour, kept intact.
+    // REVIEW_SIGNAL / INQUIRY_VOLUME for a resolved product.
+    //
+    // <b>Split, where v1 answered both from one function.</b> A REVIEW_SIGNAL need was being handed an
+    // unanswered-inquiry finding and an INQUIRY_VOLUME need a list of review issues, because the two
+    // shared a code path — so `needId` pointed at whichever need happened to run first and the answer
+    // card attributed each sentence to the wrong question.
     const view = await loadKnowledge();
     if (!view) {
       needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
       continue;
     }
-    const cited = signalFindings(view, productId, productName, need.id, evidence, refs, findings);
-    needStates.push({
-      id: need.id,
-      status: cited.length > 0 ? "SATISFIED" : "UNSATISFIABLE",
-      evidenceIds: cited,
-      ...(cited.length === 0 ? { reason: "이 상품에 기록된 신호가 없습니다." } : {}),
-    });
+    //
+    // <b>One read serves every need of its kind.</b> A plan may declare two REVIEW_SIGNAL needs; the
+    // product's issue index is the same index for both, and reading it twice buys the same rows at
+    // twice the budget and then prints each sentence twice for `compose` to dedupe. Live 2026-08-24 a
+    // three-need plan spent twelve tool calls where seven would do, and the five deduped sentences
+    // were then reported to the seller as "근거가 확인되지 않아 제외했습니다" — which they were not.
+    // The later need cites the SAME evidence, which is what makes it satisfied by the same fact.
+    const settled = answered.get(need.kind);
+    if (settled) {
+      needStates.push({ ...settled, id: need.id });
+      continue;
+    }
+    const state = need.kind === "INQUIRY_VOLUME"
+      ? inquiryVolumeFinding(view, productId, productName, need.id, evidence, refs, findings)
+      : await reviewSignalFindings(
+          { registry, budget, evidence, allowedTools, refs, findings, failures, notes },
+        view, productId, productName, need.id,
+      );
+    answered.set(need.kind, state);
+    needStates.push(state);
   }
 
   const view = cache.view;
@@ -342,39 +381,106 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
     coverage: view?.signals.coverage ?? [],
     resolvedEntities,
     needStates,
+    failures,
     knowledge,
     knowledgeCoverage: view?.knowledgeCoverage ?? [],
     ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
   };
 }
 
-/** Signals for a resolved product — issues and unanswered volume, unchanged from v1 in substance. */
-function signalFindings(
+/** What the two signal readers below share — the registry seam plus the buffers they append to. */
+interface SignalReaderDeps {
+  readonly registry: SpecialistInput["registry"];
+  readonly budget: SpecialistInput["budget"];
+  readonly evidence: SpecialistInput["evidence"];
+  readonly allowedTools: readonly string[];
+  readonly refs: EvidenceRef[];
+  readonly findings: Finding[];
+  readonly failures: ToolFailure[];
+  readonly notes: string[];
+}
+
+/**
+ * The product's review-issue signal — and, for the first time, the product's OWN number.
+ *
+ * <b>Why a second read for a count we appear to already have.</b> The backend selects this issue list
+ * from `review_issue_evidence` rows that belong to THIS product, so membership in the list is
+ * product-scoped and trustworthy. Every count on the rows is not: `ReviewIssueView.evidenceCount` is
+ * the issue's org-wide total, and until 2026-08-23 it was read back to the seller as though it were
+ * theirs — "판도리…에서 '접착 탈락' 신호가 근거 69건으로 기록돼 있습니다" when the product's share of
+ * those 69 was two (defect C4). `get_review_issue_evidence_summary` is the only read that splits an
+ * issue by product; it is now reachable from here (`tools/ToolReachability.ts`), and it is the same
+ * call ReviewOps makes, not a new capability.
+ *
+ * <b>Both numbers appear, and they are labelled.</b> The product's count is the claim; the issue's
+ * total is context in the same sentence, so the smaller number can never be read as the larger one.
+ *
+ * <b>Zero is an answer when the source could see the whole scope.</b> `COVERED` on the REVIEW_ISSUE
+ * signal means every issue-evidence row in this org is attributed to some product, so a product with
+ * none genuinely has none. Saying so is the "clean signal" a seller asked for; saying it under any
+ * `UNCERTAIN_*` value would be the false calm this graph exists to prevent, and there it stays silent
+ * and lets the uncertain-coverage finding speak instead.
+ */
+async function reviewSignalFindings(
+  deps: SignalReaderDeps,
   view: ProductKnowledge, productId: string, productName: string, needId: string,
-  evidence: SpecialistInput["evidence"], refs: EvidenceRef[], findings: Finding[],
-): string[] {
-  const cited: string[] = [];
+): Promise<NeedState> {
+  const { evidence, refs, findings } = deps;
   const issueCoverage = view.signals.coverage.find((c: SignalCoverage) => c.signal === "REVIEW_ISSUE");
-  for (const issue of view.signals.issues.slice(0, 5)) {
+  const coverage = issueCoverage?.coverage ?? "COVERED";
+  const considered = view.signals.issues.slice(0, ISSUE_READ_LIMIT);
+  const cited: string[] = [];
+
+  // ── 1. Read each split, then rank by what the product actually holds.
+  const rows: Array<{ issue: typeof considered[number]; share: { count: number; total: number } | null }> = [];
+  for (const issue of considered) {
+    rows.push({ issue, share: await productShareOf(deps, issue.id, productId, needId) });
+  }
+  const ranked = [...rows]
+    // A row whose split could not be read keeps the backend's place rather than being promoted or
+    // dropped: an unknown count is not a small one, and it is not a large one either.
+    .sort((a, b) => (b.share?.count ?? -1) - (a.share?.count ?? -1))
+    .slice(0, ISSUE_STATE_LIMIT);
+
+  // ── 2. Say them.
+  for (const { issue, share } of ranked) {
+    if (share && share.count <= 0) {
+      // The list says this product has rows behind this issue and the split says it does not. They
+      // read the same table, so this is a race, not a fact — and a disagreement is never a sentence.
+      continue;
+    }
+    const known = share != null;
     const ref = evidence.add({
-      kind: "REVIEW_ISSUE",
-      sourceTool: OPERATOR_TOOL.GET_PRODUCT_KNOWLEDGE,
-      args: { productId },
+      kind: known ? "ISSUE_EVIDENCE" : "REVIEW_ISSUE",
+      sourceTool: known ? OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY : OPERATOR_TOOL.GET_PRODUCT_KNOWLEDGE,
+      args: known ? { issueId: issue.id } : { productId },
       locator: {
-        issueId: issue.id, productId, productName, count: issue.evidenceCount,
+        issueId: issue.id, productId, productName,
+        count: known ? share!.count : issue.evidenceCount,
         label: issue.title, severity: issue.severity,
       },
-      events: eventRange(issue.firstEvidenceOn, issue.lastEvidenceOn),
-      coverage: issueCoverage?.coverage ?? "COVERED",
-      provenance: issueCoverage?.provenance ?? `issue-memory/${issue.extractorKind}`,
+      // <b>No event range on the product's own slice.</b> The issue's first/last dates span every
+      // product in it; lending them here would let another product's recent review prove this
+      // product's "최근". The whole-issue row keeps its dates, because that is what it is about.
+      ...(known ? {} : { events: eventRange(issue.firstEvidenceOn, issue.lastEvidenceOn) }),
+      coverage,
+      provenance: known
+        ? `issue-memory/${issue.extractorKind}:evidence-summary`
+        : issueCoverage?.provenance ?? `issue-memory/${issue.extractorKind}`,
     });
     refs.push(ref);
     cited.push(ref.evidenceId);
+    // The change labels belong to the ISSUE, not to this product's share of it — they are computed
+    // org-wide by `IssueChangeRules` — so they sit inside the clause that quotes the issue's total.
+    const change = issue.change.labelsKo.length > 0 ? `, ${issue.change.labelsKo.join(", ")}` : "";
     findings.push({
       findingId: `f-${ref.evidenceId}`,
       specialist: "PRODUCT_OPS",
-      statement: `${productName}에서 "${issue.title}" 신호가 근거 ${issue.evidenceCount}건으로 기록돼 있습니다`
-        + `${issue.change.labelsKo.length > 0 ? ` (${issue.change.labelsKo.join(", ")})` : ""}.`,
+      statement: known
+        ? `${productName}에 "${issue.title}" 문제로 기록된 리뷰 근거가 ${share!.count}건 있습니다`
+          + ` (이 문제 전체 ${share!.total}건 중${change}).`
+        : `${productName}은(는) "${issue.title}" 문제에 리뷰 근거가 연결돼 있습니다`
+          + ` (이 문제 전체 ${issue.evidenceCount}건${change} — 이 상품 몫은 확인하지 못했습니다).`,
       evidenceIds: [ref.evidenceId],
       confidence: "NEEDS_REVIEW",
       verdict: null,
@@ -382,35 +488,134 @@ function signalFindings(
       needId,
     });
   }
-  if (view.signals.volume.unansweredInquiries > 0) {
-    const inquiryCoverage = view.signals.coverage.find((c: SignalCoverage) => c.signal === "INQUIRY");
+
+  if (cited.length > 0) {
+    const total = view.signals.issues.length;
+    const complete = considered.length >= total && ranked.length >= rows.length;
+    if (!complete) {
+      // A bounded read that reports as complete is invented certainty, wherever the bound sits.
+      // <b>Two bounds, said separately, because they are different limits.</b> How many issues were
+      // OPENED and how many were STATED are not the same number, and one sentence covering both would
+      // claim the ranking was over the whole list when it was over what was read.
+      deps.notes.push(`${productName}에 기록된 반복 리뷰 문제 ${total}건 가운데 `
+        + `${considered.length}건을 확인해 근거가 많은 ${cited.length}건을 정리했습니다.`);
+    }
+    return {
+      id: needId, status: "SATISFIED", evidenceIds: cited, coverage,
+      complete, settledBy: "PRODUCT_OPS",
+    };
+  }
+  if (view.signals.issues.length === 0 && coverage === "COVERED") {
+    // The measured zero. Not flagged as a coverage limit: it is a positive fact about the data, so it
+    // must face the same scope gate every other claim does — and a period question, whose evidence
+    // would have to be dated, correctly withholds it.
     const ref = evidence.add({
-      kind: "INQUIRY",
+      kind: "ISSUE_EVIDENCE",
       sourceTool: OPERATOR_TOOL.GET_PRODUCT_KNOWLEDGE,
-      args: { productId },
-      locator: {
-        productId, productName,
-        count: view.signals.volume.unansweredInquiries, label: "미답변 문의",
-      },
-      // Same snapshot semantics as the org-wide inbox count: a queue depth now, no arrival span.
+      args: { productId, signal: "REVIEW_ISSUE" },
+      locator: { productId, productName, count: 0, label: "이 상품에 귀속된 리뷰 이슈 근거" },
       asOf: view.signals.referenceDate,
-      coverage: inquiryCoverage?.coverage ?? "COVERED",
-      provenance: inquiryCoverage?.provenance ?? "inquiry-store/INGEST:canonical",
+      coverage: "COVERED",
+      provenance: issueCoverage?.provenance ?? "issue-memory/RULE_BASED",
     });
     refs.push(ref);
-    cited.push(ref.evidenceId);
     findings.push({
       findingId: `f-${ref.evidenceId}`,
       specialist: "PRODUCT_OPS",
-      statement: `${productName}에 답변이 필요한 문의가 ${view.signals.volume.unansweredInquiries}건 있습니다.`,
+      statement: `${productName}에 반복 문제로 기록된 리뷰 근거는 없습니다`
+        + " (리뷰 근거가 모두 상품에 연결돼 있어 확인 가능한 결과입니다).",
       evidenceIds: [ref.evidenceId],
       confidence: "NEEDS_REVIEW",
       verdict: null,
-      surfaceLink: "/inquiries?state=NEEDS_REPLY",
+      surfaceLink: null,
       needId,
     });
+    return {
+      id: needId, status: "SATISFIED", evidenceIds: [ref.evidenceId],
+      coverage: "COVERED", complete: true, settledBy: "PRODUCT_OPS",
+    };
   }
-  return cited;
+  return {
+    id: needId, status: "UNSATISFIABLE", evidenceIds: [], coverage, complete: false,
+    settledBy: "PRODUCT_OPS",
+    reason: coverage === "COVERED"
+      ? "이 상품에 기록된 리뷰 문제 근거를 확인하지 못했습니다."
+      : "이 상품에 연결되지 않은 리뷰 근거가 있어 판단할 수 없습니다.",
+  };
+}
+
+/** One issue's share for one product, or `null` when the split could not be read. */
+async function productShareOf(
+  deps: SignalReaderDeps, issueId: string, productId: string, needId: string,
+): Promise<{ count: number; total: number } | null> {
+  if (!deps.budget.spend("tool")) {
+    return null;
+  }
+  const attempt = await attemptTool(
+    { specialist: "PRODUCT_OPS", tool: OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY, needId },
+    () => deps.registry.invoke<IssueEvidenceSummary>(
+      OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY, { issueId }, deps.allowedTools,
+    ),
+  );
+  if (!attempt.ok) {
+    deps.failures.push(attempt.failure);
+    return null;
+  }
+  const row = attempt.value.byProduct.find((p) => p.productId === productId);
+  return { count: row?.evidenceCount ?? 0, total: attempt.value.totalEvidence };
+}
+
+/**
+ * The product's unanswered-inquiry depth — and its zero.
+ *
+ * <b>A product-scoped count the run already had and never said when it was zero.</b> The backend
+ * counts UNANSWERED rows for THIS product, so an empty queue under `COVERED` is a measured zero and
+ * answers "문의는 어떤가" directly. Saying nothing left the org-wide inbox total (which the scope gate
+ * correctly refuses for a product need) as the only inquiry sentence in reach, so a seller asking
+ * about one product's inquiries got either someone else's number or silence.
+ */
+function inquiryVolumeFinding(
+  view: ProductKnowledge, productId: string, productName: string, needId: string,
+  evidence: SpecialistInput["evidence"], refs: EvidenceRef[], findings: Finding[],
+): NeedState {
+  const inquiryCoverage = view.signals.coverage.find((c: SignalCoverage) => c.signal === "INQUIRY");
+  const coverage = inquiryCoverage?.coverage ?? "COVERED";
+  const unanswered = view.signals.volume.unansweredInquiries;
+  if (unanswered === 0 && coverage !== "COVERED") {
+    return {
+      id: needId, status: "UNSATISFIABLE", evidenceIds: [], coverage, complete: false,
+      settledBy: "PRODUCT_OPS",
+      reason: "이 상품에 연결되지 않은 문의가 있어 문의량을 판단할 수 없습니다.",
+    };
+  }
+  const ref = evidence.add({
+    kind: "INQUIRY",
+    sourceTool: OPERATOR_TOOL.GET_PRODUCT_KNOWLEDGE,
+    args: { productId },
+    locator: { productId, productName, count: unanswered, label: "미답변 문의" },
+    // Same snapshot semantics as the org-wide inbox count: a queue depth now, no arrival span.
+    asOf: view.signals.referenceDate,
+    coverage,
+    provenance: inquiryCoverage?.provenance ?? "inquiry-store/INGEST:canonical",
+  });
+  refs.push(ref);
+  findings.push({
+    findingId: `f-${ref.evidenceId}`,
+    specialist: "PRODUCT_OPS",
+    statement: unanswered > 0
+      ? `${productName}에 답변이 필요한 문의가 ${unanswered}건 있습니다.`
+      : `${productName}에 답변이 필요한 문의는 없습니다`
+        + ` (이 상품에 연결된 문의 ${view.signals.volume.inquiries}건 기준).`,
+    evidenceIds: [ref.evidenceId],
+    confidence: "NEEDS_REVIEW",
+    verdict: null,
+    surfaceLink: unanswered > 0 ? "/inquiries?state=NEEDS_REPLY" : null,
+    needId,
+  });
+  return {
+    id: needId, status: "SATISFIED", evidenceIds: [ref.evidenceId],
+    coverage, complete: true, settledBy: "PRODUCT_OPS",
+  };
 }
 
 /**

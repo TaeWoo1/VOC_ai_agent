@@ -77,6 +77,16 @@ export interface FakeOperatorSeed {
    * which is exactly why this seam is here and not there.
    */
   readonly plansByGoal?: Record<string, AgentPlanView>;
+  /**
+   * Plans keyed by goal text, returned only when the request carries a repair context.
+   *
+   * <b>The A8 seam, faked at the transport and nowhere else.</b> When the validator refuses a plan for
+   * a rule a re-plan can fix, the planner asks again with the rule in `priorContext`; a real model then
+   * returns a different plan. Seeding this is how a suite replays that second answer. Absent ⇒ the same
+   * plan comes back, which is how a suite replays a model that does NOT fix it — and the run then fails,
+   * because two is the bound.
+   */
+  readonly repairedPlansByGoal?: Record<string, AgentPlanView>;
   /** When absent, the client has NO judgeFinding method at all. */
   readonly judge?: AgentJudgeView;
 }
@@ -109,6 +119,11 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
         this.planGoals.push(request.goalText);
         if (request.priorContext) {
           this.planPriorContexts.push(request.priorContext);
+        }
+        const isRepair = (request.priorContext ?? "").includes("plan-invalid:");
+        const repaired = isRepair ? seed.repairedPlansByGoal?.[request.goalText] : undefined;
+        if (repaired) {
+          return repaired;
         }
         const recorded = seed.plansByGoal?.[request.goalText];
         if (recorded) {

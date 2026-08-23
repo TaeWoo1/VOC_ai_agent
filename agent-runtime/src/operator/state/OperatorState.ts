@@ -17,6 +17,7 @@ import type { AgentGoal } from "../../goal/parseGoal";
 import type { SpecialistTerminal, ToolFailure } from "../failure/SpecialistOutcome";
 import type { AttentionCoverage, KnowledgeCoverageRow, ProductKnowledge, SignalCoverage } from "../../spring/types";
 import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
+import { mergeNeedState } from "../plan/needOutcome";
 import type { EventRange } from "../scope/EvidenceTime";
 
 /**
@@ -290,22 +291,21 @@ export const OperatorStateAnnotation = Annotation.Root({
   goal: Annotation<AgentGoal | null>({ reducer: (_p, n) => n, default: () => null }),
   goalText: Annotation<string>({ reducer: (_p, n) => n, default: () => "" }),
   plan: Annotation<InvestigationPlan | null>({ reducer: (_p, n) => n, default: () => null }),
-  // Needs MERGE by id: a re-plan may add needs, and a second pass may satisfy one the first left open.
-  // Replacing the channel wholesale would lose the first pass's answers on every re-plan.
+  // Needs MERGE by id, and the merge is by STRENGTH: a re-plan may add needs, a second pass may satisfy
+  // one the first left open, and two specialists routinely answer the same need on one pass. Replacing
+  // the channel wholesale would lose the first pass's answers on every re-plan; keeping the last write
+  // loses the better answer whenever a weaker specialist happens to run second.
   //
-  // <b>A resolved need never regresses to PENDING.</b> Found live 2026-08-21: a second pass that ran out
-  // of tool budget wrote PENDING over a need the FIRST pass had already answered UNSATISFIABLE, so the
-  // answer reported "확인하지 못한 항목" for something it had in fact determined and stated. A later
-  // pass may only move a need FORWARD — that is what makes a merge different from a last-write-wins.
+  // <b>A resolved need never regresses to PENDING, and a complete covered answer is never overwritten
+  // by a bounded one.</b> The first was found live 2026-08-21 (a budget-exhausted second pass wrote
+  // PENDING over a need the first pass had determined); the second live 2026-08-23, when a six-of-
+  // nineteen org sweep replaced a product-scoped measured zero. Both are the same bug — a later write
+  // that knows less — and `plan/needOutcome.ts` is the one rule that settles it.
   needs: Annotation<NeedState[]>({
     reducer: (prev, next) => {
       const byId = new Map(prev.map((n) => [n.id, n]));
       for (const state of next) {
-        const existing = byId.get(state.id);
-        if (existing && existing.status !== "PENDING" && state.status === "PENDING") {
-          continue;
-        }
-        byId.set(state.id, state);
+        byId.set(state.id, mergeNeedState(byId.get(state.id), state));
       }
       return [...byId.values()];
     },

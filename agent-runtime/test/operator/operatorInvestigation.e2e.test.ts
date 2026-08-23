@@ -25,7 +25,7 @@ import { fourIssues } from "../support/issueFixtures";
 import {
   ANALYSES, CABLE, INBOX, KNOWLEDGE, MEMORY, MOLDING, REPEATS, coveredSignals, unlinkedSignals,
 } from "../support/operatorFixtures";
-import { RECORDED_PLANS } from "../support/recordedPlans";
+import { RECORDED_PLANS, REPAIRED_PLANS } from "../support/recordedPlans";
 import type { OperatorAnswer } from "../../src/operator/state/OperatorState";
 
 function build(seedOverrides: Partial<FakeOperatorSeed> = {}) {
@@ -38,6 +38,7 @@ function build(seedOverrides: Partial<FakeOperatorSeed> = {}) {
     repeats: REPEATS,
     itemAnalyses: ANALYSES,
     plansByGoal: RECORDED_PLANS,
+    repairedPlansByGoal: REPAIRED_PLANS,
     ...seedOverrides,
   });
   return {

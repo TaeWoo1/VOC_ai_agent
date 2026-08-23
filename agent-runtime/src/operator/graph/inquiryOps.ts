@@ -50,6 +50,17 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
 
   for (const need of input.needs) {
     if (need.kind === "INQUIRY_VOLUME") {
+      // <b>The org inbox cannot answer a product question, and the run may already hold one that
+      // can.</b> `get_today_inbox` returns the whole org's unanswered depth; for a need about a
+      // resolved product the scope gate refuses it (ORG_EVIDENCE_FOR_PRODUCT_NEED) and always will.
+      // When ProductOps has already read this product's own unanswered count, spending a tool call to
+      // produce a row that will be thrown away — and a withholding note beside an answer that was in
+      // fact given — is worse than not reading. Same precedence rule as ReviewOps', by evidence.
+      const product = input.resolved.find((e) => e.kind === "PRODUCT");
+      if (product && hasProductInquiryCount(input.priorEvidence, product.id)) {
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
       if (!budget.spend("tool")) {
         needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
         continue;
@@ -321,4 +332,13 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     // many needs asked for it. Three copies of a true sentence read as three findings.
     ...(notes.length > 0 ? { note: [...new Set(notes)].join(" ") } : {}),
   };
+}
+
+/** Whether the run already holds THIS product's own unanswered-inquiry count. */
+function hasProductInquiryCount(
+  priorEvidence: readonly EvidenceRef[] | undefined, productId: string,
+): boolean {
+  return (priorEvidence ?? []).some(
+    (e) => e.kind === "INQUIRY" && e.locator.productId === productId,
+  );
 }
