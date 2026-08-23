@@ -687,11 +687,12 @@ class AgentReviewHandoffServiceTest {
     }
 
     /**
-     * The option exists — on a product the display id did not name. It must not reach across and claim
-     * the review, which is what a catalogue-wide lookup by option id would have done.
+     * The option exists on a product the display id did not name — <b>and it answers</b>, which is the whole
+     * of the 2026-08-23 reversal. The display id is an alias that Coupang may move; the option id is not.
+     * Refusing here was refusing the more reliable of the two identifiers in favour of the less.
      */
     @Test
-    void an_option_id_owned_outside_the_candidate_set_never_answers() {
+    void an_option_id_owned_by_a_product_the_display_id_did_not_name_now_answers() {
         SellerAccount acc = account(org, "COUPANG");
         twinProduct(acc, "78123456790");   // makes the display id ambiguous, owns no option
 
@@ -706,9 +707,8 @@ class AgentReviewHandoffServiceTest {
         AgentReviewHandoffResultView result =
                 service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
 
-        assertThat(result.stored()).isZero();
-        assertThat(result.failed()).isEqualTo(1);
-        assertThat(reviews.findAll()).isEmpty();
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isEqualTo(outsider.getId());
     }
 
     /**
@@ -761,27 +761,26 @@ class AgentReviewHandoffServiceTest {
     }
 
     /**
-     * **The coverage diagnosis is a question, not a second resolver.**
+     * **The case the whole reversal was for.** The 상품평 prints the 노출상품ID it was written under; Coupang
+     * has since moved it, so no listing carries it any more. The 옵션ID has not moved, and it places the
+     * review on the product that was always its own — with no product created to hold it.
      *
-     * <p>It asks whether the org already holds the product an unplaced 상품평 names, and it asks by 옵션ID —
-     * catalogue-wide, which the resolver may never do. So the one thing that must be true is that knowing the
-     * answer changes nothing: a review whose 노출상품ID names no listing stays refused even when its 옵션ID is
-     * sitting in the catalogue under some other product.
+     * <p>This is 10 of the 23 rows read on 2026-08-23, in one assertion.
      */
     @Test
-    void an_option_the_catalogue_knows_does_not_place_a_review_whose_display_id_names_no_listing() {
+    void a_historical_display_id_still_resolves_through_the_option_id() {
         SellerAccount acc = account(org, "COUPANG");
         UUID mine = products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId();
         variant(mine, acc.getChannelId(), OPTION);
-        AgentReviewHandoffRequest.Review strayDisplayId = new AgentReviewHandoffRequest.Review(
+        AgentReviewHandoffRequest.Review writtenUnderTheOldAlias = new AgentReviewHandoffRequest.Review(
                 "2026-08-11", 5, BODY_A, "999999999", OPTION, "무선 이어폰", 0, false);
 
         AgentReviewHandoffResultView result =
-                service.handOff(org, request(slotFor(acc), true, List.of(strayDisplayId)));
+                service.handOff(org, request(slotFor(acc), true, List.of(writtenUnderTheOldAlias)));
 
-        assertThat(result.stored()).isZero();
-        assertThat(result.failed()).isEqualTo(1);
-        assertThat(reviews.findAll()).isEmpty();
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        assertThat(reviews.findAll().get(0).getProductId()).isEqualTo(mine);
         assertThat(products.findAll().stream().filter(p -> org.equals(p.getOrgId()))).hasSize(1);
     }
 
@@ -799,6 +798,147 @@ class AgentReviewHandoffServiceTest {
                 .containsExactly(OPTION);
         assertThat(productVariants.findKnownExternalVariantIds(UUID.randomUUID(), List.of(OPTION)))
                 .isEmpty();
+    }
+
+    /** Both ids current and agreeing. The option answers first, and the answer is the same product. */
+    @Test
+    void a_current_display_id_and_a_current_option_id_resolve_to_the_one_product() {
+        SellerAccount acc = account(org, "COUPANG");
+        UUID mine = products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId();
+        variant(mine, acc.getChannelId(), OPTION);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isEqualTo(mine);
+    }
+
+    /** No 옵션ID on the screen at all. The 노출상품ID is still a working key and still answers. */
+    @Test
+    void a_review_with_no_option_id_falls_back_to_the_display_id() {
+        SellerAccount acc = account(org, "COUPANG");
+        AgentReviewHandoffRequest.Review noOption = new AgentReviewHandoffRequest.Review(
+                "2026-08-11", 5, BODY_A, PRODUCT, null, "무선 이어폰", 0, false);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(noOption)));
+
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(reviews.findAll().get(0).getProductId())
+                .isEqualTo(products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId());
+    }
+
+    /**
+     * An 옵션ID this catalogue has never read — an option since removed, or a review older than the read.
+     * Zero matches is not a refusal; it is the display id's turn.
+     */
+    @Test
+    void an_option_id_the_catalogue_does_not_hold_falls_back_to_the_display_id() {
+        SellerAccount acc = account(org, "COUPANG");   // catalogue has the listing, no variants at all
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+    }
+
+    /**
+     * The same option id on another CHANNEL is a different option. Coupang's 옵션ID is unique inside Coupang,
+     * not across marketplaces, so the lookup carries the channel and a NAVER variant can never answer a
+     * Coupang 상품평.
+     *
+     * <p>Finer than channel is not available to test: neither {@code product_variants} nor
+     * {@code channel_products} carries a seller-account column, so two Coupang accounts in one org share this
+     * lookup. That is a schema limit, recorded rather than asserted away.
+     */
+    @Test
+    void the_same_option_id_on_another_channel_never_answers() {
+        SellerAccount acc = account(org, "COUPANG");
+        Channel naver = new Channel();
+        naver.setCode("NAVER");
+        naver.setNameKo("NAVER");
+        naver.setStatus(ChannelStatus.AVAILABLE);
+        naver.setSortOrder(1);
+        channels.save(naver);
+        UUID mine = products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId();
+        variant(mine, naver.getId(), OPTION);   // the option lives on the OTHER channel
+        // Break the Coupang display id so ONLY the option could place this row.
+        ChannelProduct listing = channelProducts
+                .findAllByOrgIdAndChannelIdAndExternalDisplayProductId(org, acc.getChannelId(), PRODUCT).get(0);
+        listing.setExternalDisplayProductId("111111111");
+        channelProducts.save(listing);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(reviews.findAll()).isEmpty();
+    }
+
+    /** Another org's variant carrying the same option id is not this org's product. */
+    @Test
+    void the_same_option_id_in_another_org_never_answers() {
+        SellerAccount acc = account(org, "COUPANG");
+        UUID mine = products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId();
+        variant(mine, acc.getChannelId(), OPTION);
+        ProductVariant theirs = productVariants.findByOrgIdAndProductId(org, mine).get(0);
+        theirs.setOrgId(UUID.randomUUID());
+        productVariants.save(theirs);
+        ChannelProduct listing = channelProducts
+                .findAllByOrgIdAndChannelIdAndExternalDisplayProductId(org, acc.getChannelId(), PRODUCT).get(0);
+        listing.setExternalDisplayProductId("111111111");
+        channelProducts.save(listing);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+    }
+
+    /**
+     * One option id, two variant rows. That is a broken invariant in OUR catalogue, not an ambiguous world,
+     * and resolving through either would pick a product by row order. Refused.
+     */
+    @Test
+    void one_option_id_held_twice_fails_closed_rather_than_choosing() {
+        SellerAccount acc = account(org, "COUPANG");
+        UUID mine = products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId();
+        Product other = twinProduct(acc, "78123456790");
+        variant(mine, acc.getChannelId(), OPTION);
+        variant(other.getId(), acc.getChannelId(), OPTION);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(reviews.findAll()).isEmpty();
+    }
+
+    /**
+     * A second sitting stores nothing through the OPTION path either. The content hash is built on the
+     * resolved product, so this is the same idempotence proof as the tie-break one — for the path that now
+     * carries most of the rows.
+     */
+    @Test
+    void a_repeated_acquisition_through_the_option_id_stores_nothing_the_second_time() {
+        SellerAccount acc = account(org, "COUPANG");
+        UUID mine = products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId();
+        variant(mine, acc.getChannelId(), OPTION);
+        AgentReviewHandoffRequest.Review oldAlias = new AgentReviewHandoffRequest.Review(
+                "2026-08-11", 5, BODY_A, "999999999", OPTION, "무선 이어폰", 0, false);
+
+        service.handOff(org, request(slotFor(acc), true, List.of(oldAlias)));
+        AgentReviewHandoffResultView again =
+                service.handOff(org, request(slotFor(acc), true, List.of(oldAlias)));
+
+        assertThat(again.stored()).isZero();
+        assertThat(again.skipped()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
     }
 
     /** Another org's listing carrying the same display id is not this org's product. */
