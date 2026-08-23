@@ -301,6 +301,34 @@ specialist 이름이 아니라 **증거**이므로, 앞선 specialist가 증명�
 
 **시간 축은 역할을 보지 않는다.** 역할은 *무엇에 관한 주장인가*를 통제하고, 시간은 identity가 아니다.
 
+### 2.11 「어느 상품이?」는 상품으로 답한다 — Grouping Dimension (2026-08-24 추가)
+
+범주 언급은 **축**을 말한다. `GroupingDimension = NONE | PRODUCT`는 run당 한 번 정해지고
+(`group/ProductGrouping.ts`), specialist는 그것을 **받는다**. §2.10의 어휘를 그대로 쓴다 — 저장소의
+범주 표는 여전히 하나다.
+
+- **축이 서는 두 경우**: planner가 PRODUCT CATEGORY mention을 선언했거나, 셀러의 문장에서 핵어가 축
+  조사(별/이/가/을/를/은/는/도/들)를 달고 있을 때. 속격 「상품의」·처격 「상품에」는 축이 아니다.
+- **INSTANCE는 축을 취소한다.** 이름을 말했거나 해결된 상품이 있으면 `NONE`이다 — 한 상품에 대한 질문을
+  다른 상품들의 목록으로 답하는 것은 A1이다.
+- **축은 scope가 아니다.** run은 org scope로 남고 **답만** 상품별로 묶인다. grouped row의 상품 id는
+  `state.entities`에 들어가지 않는다.
+- **범주는 여전히 resolver로 가지 않는다**(C5). 상품 id는 근거 행에서 나온다.
+
+**행의 수는 그 행의 수다.** 상품별 count는 `evidence-summary:byProduct`의 그 상품 몫이고, 이슈의 총계도
+org 총계도 아니다(C4). 순위도 그 수로 매긴다. (issue, product) 쌍은 한 번만 센다.
+
+**기간은 증명되거나 없다.** 한 이슈의 근거가 전부 한 상품의 것이고 미귀속이 0일 때만 그 이슈의 기간이 그
+상품의 기간이다. 그 외에는 `events: null`이고, 기간을 묻는 질문에서는 scope gate가 그 행을 보류하며 —
+**답은 보류했다는 사실과 이유를 말한다.**
+
+**할 수 없는 축은 근사하지 않고 선언한다.** `GROUPING_CAPABILITIES`가 (need × dimension)을 구조로
+declare한다: `REVIEW_SIGNAL`은 SUPPORTED, `INQUIRY_VOLUME`은 `NO_GROUPED_READ`(행에 상품이 없다),
+`REPEAT_PATTERN`은 `NO_PRODUCT_ATTRIBUTION`(모델에 상품이 없다). 「못 한다」의 두 종류를 구분하는 것이
+다음 package가 무엇을 고쳐야 하는지를 말해 준다.
+
+---
+
 ---
 
 ## 3. Dashboard 레인과 Agent 레인은 다른 물건이다
