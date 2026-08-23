@@ -318,14 +318,34 @@ specialist 이름이 아니라 **증거**이므로, 앞선 specialist가 증명�
 **행의 수는 그 행의 수다.** 상품별 count는 `evidence-summary:byProduct`의 그 상품 몫이고, 이슈의 총계도
 org 총계도 아니다(C4). 순위도 그 수로 매긴다. (issue, product) 쌍은 한 번만 센다.
 
-**기간은 증명되거나 없다.** 한 이슈의 근거가 전부 한 상품의 것이고 미귀속이 0일 때만 그 이슈의 기간이 그
-상품의 기간이다. 그 외에는 `events: null`이고, 기간을 묻는 질문에서는 scope gate가 그 행을 보류하며 —
-**답은 보류했다는 사실과 이유를 말한다.**
+**기간은 증명되거나 없다.** 상품 행의 기간은 `evidence-summary:byProduct`의
+`firstOccurredOn`/`lastOccurredOn` — 그 `(issue, product)` 쌍의 근거 행에서만 계산된 것이다(2026-08-24,
+§2.12). 이슈의 span은 모든 상품의 합집합이므로 한 상품 행에 빌려주지 않는다. read가 날짜를 주지 못하면
+`events: null`이고, 기간을 묻는 질문에서는 scope gate가 그 행을 보류하며 — **답은 보류했다는 사실과
+이유를 말한다.**
 
 **할 수 없는 축은 근사하지 않고 선언한다.** `GROUPING_CAPABILITIES`가 (need × dimension)을 구조로
 declare한다: `REVIEW_SIGNAL`은 SUPPORTED, `INQUIRY_VOLUME`은 `NO_GROUPED_READ`(행에 상품이 없다),
 `REPEAT_PATTERN`은 `NO_PRODUCT_ATTRIBUTION`(모델에 상품이 없다). 「못 한다」의 두 종류를 구분하는 것이
 다음 package가 무엇을 고쳐야 하는지를 말해 준다.
+
+### 2.12 리뷰 증거는 두 가지이고, 서로가 아니다 (2026-08-24 추가)
+
+상품 축 위에 리뷰 질문이 둘 있다. **「부정적인 리뷰가 있는 상품」**과 **「리뷰 문제가 반복되는 상품」**은
+인접하지만 같은 corpus가 아니다 — 리뷰 1건이 근거 2건을 만들 수도, 0건을 만들 수도 있다.
+
+| sense | read | evidence kind | 명사 | 세는 것 |
+|---|---|---|---|---|
+| `NEGATIVE_REVIEW` | `get_dashboard_product_issues` | `NEGATIVE_REVIEW` | **부정 리뷰** | `is_negative` 리뷰 전체 건 |
+| `ISSUE_EVIDENCE` | `get_review_issue_evidence_summary` | `ISSUE_EVIDENCE` | **리뷰 문제 근거** | 반복 문제에 묶인 의견 단위 |
+
+- **네 필드가 sense마다 전부 다르다**(`group/ReviewEvidenceSense.ts`의 `REVIEW_SENSES`), 구조 테스트가
+  그것을 확인한다. 한쪽 숫자가 다른 쪽 이름을 입는 일은 코드로 막힌다.
+- **고르는 것은 셀러의 문장**이다. 닫힌 어휘 두 벌, 기본값은 `ISSUE_EVIDENCE`, 둘 다 나오면 이슈가
+  이긴다. planner의 재진술은 셀러 문장이 없을 때만 읽는다 — 재진술의 단어가 답의 의미를 바꾸면 안 된다.
+- **고른 쪽만 산다.** 다른 sense의 read는 호출되지 않는다.
+- 부정 리뷰 rollup은 **상위 5개**이고 그 한계는 org 총계와 함께 답에 진술된다. 두 rollup 모두
+  canonical `productId`로 식별되며, 이름은 label일 뿐 identity가 아니다.
 
 ---
 

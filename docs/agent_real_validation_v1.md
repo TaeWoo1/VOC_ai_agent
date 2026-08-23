@@ -1696,3 +1696,177 @@ need에 주면 `GRANULARITY_MISMATCH`, `INQUIRY` 행이면 통과.
 | B1 (INQUIRY_VOLUME · REPEAT_PATTERN) | **선언된 한계** — 근사하지 않고 어느 종류의 부재인지 말한다 |
 | A1 · A2 · A4 · A5 · A8 · A9 · C1 · C3 · C4 · C5 · temporal | CLOSED 유지 (회귀 + 라이브로 확인) |
 | 상품별 기간 증명 · cross-channel · A6 · B2 · C2 · D1~D3 | backlog 유지 |
+
+---
+
+## 18. Product Review Signals v1 — B1의 나머지 절반 (2026-08-24)
+
+§17이 상품 축을 만들었고, 두 가지가 남아 있었다. **하나는 날짜였다** — 상품별 근거에 자기 날짜가 없어
+「최근」을 묻는 질문에서 9개 상품 행이 전부 보류됐다. **다른 하나는 의미였다** — 「부정적인 리뷰가 있는
+상품」을 물었는데 답은 「반복 리뷰 문제의 근거」였다. 인접하지만 같은 것이 아니고, 이름을 바꿔 부르는
+것은 답이 아니다. 이 package는 두 가지를 각각 고친다.
+
+### 18.1 상품별 근거의 시간 — `IssueProductEvidenceView`
+
+`review_issue_evidence.occurred_on`은 처음부터 있었고 DTO만 그것을 버렸다. 이제 각 행이
+`(productId, productName, evidenceCount, firstOccurredOn, lastOccurredOn)`을 싣는다.
+
+- **그 `(issue, product)` 쌍의 행에서만 계산한다.** 같은 루프, 같은 rows — issue의 `firstEvidenceOn`은
+  이 계산에 들어오지 않는다. 이슈의 span은 모든 상품의 합집합이고, 그것을 한 상품 행에 빌려주면 다른
+  상품의 최근 리뷰가 이 상품의 「최근」을 증명하게 된다. C4를 시간 축에서 되풀이하는 것이다.
+- **runtime은 이 range를 `EvidenceTime.events`에 그대로 싣는다.** query window도 `asOf`도 events가
+  되지 않는다 (`scope/EvidenceTime.ts`의 두 시간).
+- §17의 "exclusive issue" 규칙(이슈 근거가 한 상품의 것일 때만 날짜를 준다)은 **사라진다** — 필요 없어
+  졌기 때문이고, 규칙이 느슨해져서가 아니다. 날짜는 여전히 증명되거나 없거나이며, read가 날짜를 주지
+  못하면 그 행은 지금도 보류된다(회귀로 고정, §18.6 R1).
+
+백엔드 회귀 2개: 「상품 행은 자기 근거의 span을 갖고 이슈의 것을 갖지 않는다」(p·q·미귀속 4행으로 이슈
+span과 어느 상품의 span도 같지 않게 구성) · 「상품이 하나뿐이고 미귀속이 0이면 산술적으로 같다」.
+
+### 18.2 대시보드 rollup의 canonical identity — `TopProductIssue`
+
+`buildTopProductIssues`는 **처음부터 `reviews.product_id`로 group by** 하고 있었고, DTO 경계에서 그
+id를 버려 이름만 남겼다. 데모 org에는 한 이름이 **4개 상품**에 붙어 있으므로(§13.3) 이름을 키로 쓰는
+소비자는 서로 다른 상품을 한 행으로 합친다. 그래서:
+
+- `productId`(canonical) 추가 — **집계 알고리즘은 그대로**. 같은 corpus, 같은 `isNegative` 술어, 같은
+  group by, 같은 정렬, 같은 상위 5개.
+- `productName`은 **nullable**. 이전에는 카탈로그에 없는 id를 `"-"`로 표기했다 — 아무도 행동할 수 없는
+  label이다. null은 「이 id의 이름을 갖고 있지 않다」는 사실 그대로다.
+- `firstNegativeOn` / `lastNegativeOn` 추가 — **여기서 세어진 바로 그 리뷰들의 접수일** min/max. 리뷰
+  날짜 → 달력 날짜 변환은 `ReviewIssueExtractionService.occurredOn`과 같은 규칙(UTC)이라 두 집계가 같은
+  리뷰를 같은 날로 센다.
+- 합성 데이터는 들어오지 않는다: `Review`/`Product` 모두 `realDataOnly` Hibernate 필터가 자동 적용되는
+  엔티티이고 rollup은 일반 read를 쓴다.
+
+FE는 같은 행을 계속 그리되 key가 이름에서 `productId`로 바뀌고, 이름이 없으면 「이름을 확인할 수 없는
+상품」으로 표기한다.
+
+### 18.3 의미 분리 — `group/ReviewEvidenceSense.ts`
+
+| sense | read | evidence kind | 명사 | 세는 것 |
+|---|---|---|---|---|
+| `NEGATIVE_REVIEW` | `get_dashboard_product_issues` | `NEGATIVE_REVIEW` | **부정 리뷰** | `is_negative` 리뷰 **전체 건** |
+| `ISSUE_EVIDENCE` | `get_review_issue_evidence_summary` | `ISSUE_EVIDENCE` | **리뷰 문제 근거** | 반복 문제에 묶인 **의견 단위** |
+
+- 네 필드(도구·kind·명사·정의)가 sense마다 **전부 달라야 한다**는 것이 구조 테스트다. 하나라도 공유되면
+  한쪽 숫자가 다른 쪽 이름을 입을 수 있다. 리뷰 1건이 근거 2건을 만들거나 0건을 만들 수 있으므로 두 수는
+  자릿수부터 다르다 — 라이브에서 전선몰딩은 **부정 리뷰 3건 / 리뷰 문제 근거 48건**이다.
+- **선택은 셀러의 문장이 한다.** 닫힌 어휘 두 벌(`ISSUE_WORDS` 먼저, 그다음 `NEGATIVE_WORDS`), 기본값은
+  `ISSUE_EVIDENCE` — 즉 §17이 하던 그대로. planner의 재진술은 셀러 문장이 없을 때만 읽는다: 「부정적인
+  리뷰가 있는 상품」이 「부정적 리뷰 **이슈**」로 재진술되면 셀러가 쓰지 않은 단어로 답의 의미가 뒤집힌다.
+- 둘 다 나오면(「부정적인 리뷰가 반복되는 상품」) 이슈 쪽이 이긴다 — 더 좁고 근거가 더 강한 주장이며,
+  그 명사(「리뷰 문제 근거」)는 어느 쪽 의도였든 참이다.
+- **고른 쪽만 산다.** Q2는 evidence-summary를 8회 열지 않는다(라이브 `scanned: 0`) — 답이 써서는 안 되는
+  숫자를 만드는 데 예산을 쓰지 않는다.
+
+### 18.4 capability matrix
+
+`get_dashboard_product_issues`가 dead tool 목록에서 나온다 — REVIEW_OPS × `REVIEW_SIGNAL` ×
+`PRODUCT_GROUPING`. `REVIEW_SIGNAL × PRODUCT` grouping 행의 `via`는 이제 세 read를 이름으로 싣고, 구조
+테스트가 「두 sense의 도구가 모두 `via`에 있고 모두 reachable하다」를 확인한다. advertise = reachable
+(A5) 유지.
+
+### 18.5 coverage — 상위 5개는 한계이고, 한계는 말해진다
+
+`cards.negativeReviews`가 같은 응답에 있으므로 분모가 있다: 「부정 리뷰 22건 가운데 상품이 연결된 상위
+5개 상품의 12건을 상품별로 나눴습니다. 상위 5개 상품까지만 집계되므로 전체 순위가 아닙니다. 이 수치는
+반복 리뷰 문제의 근거 건수와는 다른 집계입니다.」 마지막 문장이 §18.3의 표를 셀러의 언어로 옮긴 것이다.
+이름 없는 상품이 있으면 「N개 상품의 M건은 이름 없이 남겨 두었습니다」가 붙는다(라이브에서는 0).
+
+### 18.6 회귀와 red 증명
+
+`tsc` clean · agent-runtime **462 passed / 23 skipped / 0 failed**(operator 313) · backend **2,738
+tests / 0 failures** · frontend **162 files / 2,246 tests**.
+
+red 14개, 전부 의도한 테스트를 정확히 깨뜨렸고 매 red run에서 기존 방벽(A1·A9/C5·A8·Operational
+Defaults)은 green:
+
+| # | 깨뜨린 것 | 무너진 테스트 |
+|---|---|---|
+| R1 | slice를 **이슈** span으로 날짜 부여 | 상품 행이 자기 span을 갖는다 · 날짜 없는 행 보류 |
+| R2 | sense를 항상 ISSUE_EVIDENCE로 | Q2 5개 (부정 리뷰 답 전체) |
+| R3 | sense를 항상 NEGATIVE_REVIEW로 | 이슈 축 6개 (§5 회귀 포함) |
+| R4 | 두 sense가 명사를 공유 | 구조 분리 + 숫자 교차 2개 |
+| R5 | 두 sense가 evidence kind를 공유 | 구조 분리 + 3개 |
+| R6 | 부정 행이 canonical id 대신 이름만 | id 키 2개 |
+| R7 | 상품 행을 **org 총계**로 진술 | 상품 자기 수 2개 |
+| R8 | coverage 문장 삭제 | 상위 5개 고지 |
+| R9 | 이름 없는 상품에 id를 이름으로 | 5개 (C1) |
+| R10 | 부정 행을 **읽은 날**로 날짜 부여 | 행의 events |
+| R11 | 대시보드 read를 matrix에서 제거 | reachability 4 + 답 5 |
+| R12 | (backend) 상품 span을 이슈 날짜로 | `eachProductRowCarriesTheSpanOfItsOwnEvidence…` |
+| R13 | (backend) 부정 리뷰를 `LocalDate.now()`로 | ExportToReportChain 2개 |
+| R14 | (backend) canonical id를 **이름에서** 생성 | ExportToReportChain 2개 |
+
+### 18.7 라이브 — REAL Demo Org (2026-08-24, 마켓 접촉 0, WRITE 0)
+
+**Q2 「최근 부정적인 리뷰가 있는 상품을 알려줘.」 — 3회, 같은 답:**
+
+> 선바로 일체형 전선몰딩…에 **부정 리뷰가 3건** 있습니다 (가장 최근 2026-07-23, 처음 2026-03-03).
+> 원터치 디스펜서 종이컵 수거기… **3건** (2025-11-01 → 2026-03-06) · 나누리산업 종이컵보관함… **3건**
+> (2025-07-29 → 2025-09-06) · 종이컵보관함 수거함 디스펜서 컵 홀더 **2건** (2026-06-12 → 2026-07-30) ·
+> 판도리 조립형 종이컵 수거함 **1건** (2026-08-05).
+> 부정 리뷰 **22건** 가운데 상품이 연결된 상위 5개 상품의 **12건**을 상품별로 나눴습니다. 상위 5개
+> 상품까지만 집계되므로 전체 순위가 아닙니다. **이 수치는 반복 리뷰 문제의 근거 건수와는 다른 집계입니다.**
+
+evidence kind는 `NEGATIVE_REVIEW` 5행 + coverage 1행, 전부 canonical id를 싣고 **5/5가 dated**
+(`review_ops_grouped … sense:NEGATIVE_REVIEW rows:5 stated:5 unnamed:0 orgNegative:22 dated:5`).
+`resolve_product` **0회**(로그 전체 0), evidence-summary **0회**.
+
+**「최근 반복적으로 리뷰 문제가 나온 상품은?」 — 2회, 같은 답 (§5 회귀):**
+
+> 선바로 일체형 전선몰딩…에 **리뷰 문제 근거가 48건** 기록돼 있습니다 (가장 많은 것은 "접착 부족" 16건,
+> 확인한 문제 8건 합계, **가장 최근 근거 2026-08-19**) · 나누리샵 커플미니 **7건** (2026-06-07) ·
+> 종이컵보관함 **2건** (2026-06-04) · 5종 **1건** (2026-02-25) · 4000매 **1건** (2025-11-01).
+> 열려 있는 반복 리뷰 문제 19건 가운데 근거가 많은 8건(전체 근거 85건 중 71건)을 확인해 상품 9개로
+> 나눴습니다. …상품명을 확인할 수 없는 3개 상품의 11건은 이름 없이 남겨 두었습니다.
+
+**§17에서 9개 행 전부가 보류되던 자리다.** 이제 각 행이 자기 근거의 span을 갖는다 — 전선몰딩
+2025-06-18→2026-08-19, 커플미니 2025-08-29→2026-06-07, … 어느 것도 서로의 것이 아니고 이슈의 것도
+아니다. evidence kind는 `ISSUE_EVIDENCE`만, `NEGATIVE_REVIEW`는 **하나도 없다**. 반대로 Q2에는
+`ISSUE_EVIDENCE`가 하나도 없다 — 두 문장이 서로 다른 증거를 탄다는 것이 라이브에서 관측된다.
+
+라이브 중 발견해 고친 것 하나: 상품 행이 **dated**여서 gate를 통과했지만 문장에는 날짜가 없었다.
+4000매 상품의 유일한 근거는 2025-11-01(10개월 전)인데 「최근」 질문의 답에 그대로 놓였다. 행 문장에
+`가장 최근 근거`를 넣고 회귀로 고정했다.
+
+### 18.8 v4 → v5 (Q1~Q6, 동일 문장, 각 2회)
+
+| Q | v4 | v5 | 판정 |
+|---|---|---|---|
+| Q1 | finding 6/3 (대기 순서·30일 초과) | 동일 (2/2) | 유지 |
+| **Q2** | 이슈 3건 + **상품 축 보류 진술** | **상품 5개 · 각자의 부정 리뷰 수 · 각자의 기간 · coverage 22/12** (3/3 동일) | **개선 — B1 종결** |
+| Q3 | 「상품별로 나눌 수 없습니다」 | 동일 (2/2) | 유지 |
+| Q4 | 상품 해결 · 측정된 0 | 동일 (2/2) | 유지 |
+| Q5 | 69건 + 대기열 68건 · 30일 초과 | 동일 (2/2) | 유지 |
+| Q6 | finding 6 | 동일 (2/2) | 유지 |
+
+| rubric | v4 | v5 |
+|---|---|---|
+| grouped products returned | 기간 없는 질문 5개 / 기간 질문 0 | **기간 질문에도 5개** (두 sense 모두) |
+| product event ranges | 0 (전부 보류) | **10/10** (부정 5 + 이슈 5, 전부 행 자기 것) |
+| 두 evidence 분리 | 하나의 축, 하나의 명사 | **kind·명사·도구 3중 분리, 라이브 교차 0** |
+| temporal rejection | 9행 보류 | 보류 0 — 그러나 **날짜 없는 read면 지금도 보류**(R1·R10) |
+| unsupported claims | 0 | **0** |
+| clarification stop | 0/12 | **0/12** |
+| WRITE | 0/12 | **0/12** (`nextActions` 전부 READ, registry WRITE 0) |
+
+### 18.9 남은 것
+
+- **상위 5개 밖의 상품**은 부정 리뷰 축에서 보이지 않는다. 22건 중 12건만 상품별로 나뉜다 — 고지되지만
+  한계다. 「상품별 부정 리뷰 전체 순위」는 아직 없는 read다.
+- **부정 리뷰의 기간 필터**는 없다. 행은 전체 기간의 min/max를 싣고, 「지난 30일의 부정 리뷰」는 이
+  read로 답할 수 없다.
+- **cross-channel** 6/6 그대로 — 근거 행에 채널이 없다(`channelCode`는 오늘도 항상 null).
+- **반복 문의의 상품 축**(D2)과 **미답변 69 vs 홈 20**(§17.8, product-owner 결정)은 변함없다.
+
+### 18.10 판정
+
+| 결함 | 상태 |
+|---|---|
+| **B1** — 상품 질문을 org 숫자로 답함 | **CLOSED** — 두 sense 모두 상품·자기 수·자기 기간으로 답한다 |
+| 상품별 기간 증명 | **CLOSED (REVIEW_SIGNAL)** — 근거 행이 자기 span을 싣는다 |
+| 부정 리뷰 ↔ 리뷰 문제 근거 혼동 | **구조로 차단** — 도구·kind·명사가 모두 분리, 라이브 교차 0 |
+| A1 · A2 · A4 · A5 · A8 · A9 · C1 · C3 · C4 · C5 · temporal · Grouped Product Answers | CLOSED 유지 |
+| 상위 5개 밖 · 기간 필터 · cross-channel · A6 · B2 · C2 · D1~D3 | backlog 유지 |
