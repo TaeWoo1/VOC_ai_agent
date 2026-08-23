@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface ProductVariantRepository extends JpaRepository<ProductVariant, UUID> {
 
@@ -23,6 +25,20 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
      */
     List<ProductVariant> findByOrgIdAndProductIdInAndExternalVariantId(
             UUID orgId, Collection<UUID> productIds, String externalVariantId);
+
+    /**
+     * Which of these channel option ids this org holds a variant for — <b>the ids back, and nothing else</b>.
+     *
+     * <p>Diagnosis only. It answers one question about coverage: "does the catalogue already contain the
+     * product this unplaced 상품평 names, under some other 노출상품ID?" It deliberately returns
+     * {@code String}s rather than variants, so it cannot hand anyone a product and therefore cannot be
+     * used to resolve a review — the sibling finder above stays the only path an 옵션ID may take toward a
+     * product, and only inside a candidate set a 노출상품ID already chose.
+     */
+    @Query("select v.externalVariantId from ProductVariant v "
+            + "where v.orgId = :orgId and v.externalVariantId in :externalVariantIds")
+    List<String> findKnownExternalVariantIds(@Param("orgId") UUID orgId,
+                                             @Param("externalVariantIds") Collection<String> externalVariantIds);
 
     long countByOrgId(UUID orgId);
 }

@@ -760,6 +760,47 @@ class AgentReviewHandoffServiceTest {
         productVariants.save(v);
     }
 
+    /**
+     * **The coverage diagnosis is a question, not a second resolver.**
+     *
+     * <p>It asks whether the org already holds the product an unplaced 상품평 names, and it asks by 옵션ID —
+     * catalogue-wide, which the resolver may never do. So the one thing that must be true is that knowing the
+     * answer changes nothing: a review whose 노출상품ID names no listing stays refused even when its 옵션ID is
+     * sitting in the catalogue under some other product.
+     */
+    @Test
+    void an_option_the_catalogue_knows_does_not_place_a_review_whose_display_id_names_no_listing() {
+        SellerAccount acc = account(org, "COUPANG");
+        UUID mine = products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId();
+        variant(mine, acc.getChannelId(), OPTION);
+        AgentReviewHandoffRequest.Review strayDisplayId = new AgentReviewHandoffRequest.Review(
+                "2026-08-11", 5, BODY_A, "999999999", OPTION, "무선 이어폰", 0, false);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(strayDisplayId)));
+
+        assertThat(result.stored()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(reviews.findAll()).isEmpty();
+        assertThat(products.findAll().stream().filter(p -> org.equals(p.getOrgId()))).hasSize(1);
+    }
+
+    /**
+     * The diagnosis finder answers with ids and only for the org that asked — it cannot hand anyone a
+     * product, which is what keeps it out of resolution.
+     */
+    @Test
+    void the_coverage_finder_returns_only_this_orgs_known_option_ids() {
+        SellerAccount acc = account(org, "COUPANG");
+        UUID mine = products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId();
+        variant(mine, acc.getChannelId(), OPTION);
+
+        assertThat(productVariants.findKnownExternalVariantIds(org, List.of(OPTION, "89999999999")))
+                .containsExactly(OPTION);
+        assertThat(productVariants.findKnownExternalVariantIds(UUID.randomUUID(), List.of(OPTION)))
+                .isEmpty();
+    }
+
     /** Another org's listing carrying the same display id is not this org's product. */
     @Test
     void a_listing_in_another_org_does_not_answer() {

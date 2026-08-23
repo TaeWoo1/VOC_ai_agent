@@ -29,7 +29,9 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -137,6 +139,15 @@ public class AgentReviewHandoffService {
     }
 
     /**
+     * One row a listing did not claim, held for the length of one batch and never stored.
+     *
+     * <p>Ambiguous rows are deliberately NOT here: their product IS in the catalogue — twice — which is a
+     * different question from the one the coverage diagnosis asks.
+     */
+    private record Unplaced(String displayProductId, String vendorItemId) {
+    }
+
+    /**
      * What one row's product lookup came to: a SKU, or the named reason it has none.
      *
      * <p>The reason travels rather than being logged where it is discovered, so the batch reports one
@@ -227,6 +238,7 @@ public class AgentReviewHandoffService {
      */
     private MappedBatch mapRows(UUID orgId, UUID channelId, List<AgentReviewHandoffRequest.Review> rows) {
         List<CanonicalReview> out = new ArrayList<>(rows.size());
+        List<Unplaced> unplaced = new ArrayList<>();
         int unresolved = 0;
         int ambiguous = 0;
         for (int i = 0; i < rows.size(); i++) {
@@ -244,6 +256,8 @@ public class AgentReviewHandoffService {
                 unresolved++;
                 if (REASON_AMBIGUOUS_PRODUCT.equals(resolution.failureReason())) {
                     ambiguous++;
+                } else {
+                    unplaced.add(new Unplaced(row.productId(), row.vendorItemId()));
                 }
                 continue;
             }
@@ -275,7 +289,60 @@ public class AgentReviewHandoffService {
                     unresolved, unresolved - ambiguous, REASON_UNRESOLVED_PRODUCT,
                     ambiguous, REASON_AMBIGUOUS_PRODUCT);
         }
+        if (!unplaced.isEmpty()) {
+            logCoverageDiagnosis(orgId, unplaced);
+        }
         return new MappedBatch(out, unresolved);
+    }
+
+    /**
+     * Why the catalogue did not cover these rows — <b>as counts, and only for the rows no listing claimed</b>.
+     *
+     * <p>The live sitting of 2026-08-23 placed 11 of 22 상품평 and refused 10 for want of a listing, and the
+     * evidence needed to say WHY does not survive the run: the failed rows are not stored, by design. This
+     * asks the one question that separates the two explanations without keeping anything — whether the org
+     * already holds the product under a different 노출상품ID, which its 옵션ID would prove.
+     *
+     * <ul>
+     *   <li>{@code optionInCatalogue > 0} — the product IS here and only its exposure alias is missing. That
+     *       is a collection defect on our side, not a channel limitation.</li>
+     *   <li>{@code optionInCatalogue = 0} — neither the exposure id nor the option id is in the catalogue, so
+     *       the product was never read. Whether it CAN be read is the next question and not one this log
+     *       answers.</li>
+     * </ul>
+     *
+     * <p>Counts only, never an id — the same contract the line above it keeps. And it runs strictly after
+     * resolution has already failed: nothing it computes can travel back into what gets stored.
+     */
+    private void logCoverageDiagnosis(UUID orgId, List<Unplaced> unplaced) {
+        Set<String> optionIds = new LinkedHashSet<>();
+        Set<String> displayIds = new LinkedHashSet<>();
+        int noOption = 0;
+        for (Unplaced row : unplaced) {
+            if (row.displayProductId() != null && !row.displayProductId().isBlank()) {
+                displayIds.add(row.displayProductId());
+            }
+            if (row.vendorItemId() == null || row.vendorItemId().isBlank()) {
+                noOption++;
+            } else {
+                optionIds.add(row.vendorItemId());
+            }
+        }
+        Set<String> known = optionIds.isEmpty()
+                ? Set.of()
+                : Set.copyOf(variants.findKnownExternalVariantIds(orgId, optionIds));
+        int inCatalogue = 0;
+        for (Unplaced row : unplaced) {
+            if (row.vendorItemId() != null && known.contains(row.vendorItemId())) {
+                inCatalogue++;
+            }
+        }
+        log.warn("Coupang review coverage diagnosis: rows={} distinctDisplayIds={} distinctOptionIds={} "
+                        + "optionInCatalogue={} optionNotInCatalogue={} noOptionOnScreen={} — a nonzero "
+                        + "optionInCatalogue means the catalogue already holds the product and only its "
+                        + "노출상품ID alias is missing; zero means the product was never read at all.",
+                unplaced.size(), displayIds.size(), optionIds.size(),
+                inCatalogue, unplaced.size() - inCatalogue - noOption, noOption);
     }
 
     /**
