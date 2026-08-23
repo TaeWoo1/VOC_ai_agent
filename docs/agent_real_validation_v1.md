@@ -347,3 +347,115 @@ mention에서 단서를 얻는다"고 적혀 있으나 **topic은 실제로 전�
 
 이 baseline은 **고정**이다. A1/A3에 대한 수정은 `Agent Evidence Scope Integrity v1`으로 진행하며 그 결과는
 §9로 append한다 — 위 §3·§4의 숫자는 수정하지 않는다. A2는 그 다음 package다.
+
+---
+
+## 9. Agent Evidence Scope Integrity v1 — A1/A3 수정 결과 (2026-08-23)
+
+> §3·§4의 baseline 숫자는 이 절로 바뀌지 않는다. 여기 있는 것은 **같은 질문을 같은 문장으로 다시 물었을
+> 때의 결과**다.
+
+### 9.1 무엇을 바꿨나
+
+한 가지 계약만 추가했다 — **need가 요구한 범위와 evidence가 증명하는 범위가 다르면 finding을 만들지 않고
+need를 SATISFIED로 기록하지 않는다.** 새 tool 0 · 새 retrieval 0 · planner 프롬프트 변경 0 · 기간 기본값
+0 · dead tool routing 변경 0 · A2 미수정 · UI 변경 0.
+
+구현: `agent-runtime/src/operator/scope/EvidenceScope.ts` (계약) ·
+`operatorGraph.applyScopeGate` (run의 finding 집합이 조립되는 단일 지점) ·
+`RuleEvidenceJudge` (같은 검사를 독립적인 safety floor로).
+
+**검증 축 4개**
+
+| 축 | 규칙 | mismatch 코드 |
+|---|---|---|
+| entity | ORG / PRODUCT / ITEM | `NO_RESOLVED_PRODUCT` · `ORG_EVIDENCE_FOR_PRODUCT_NEED` · `PRODUCT_MISMATCH` |
+| channel | 셀러가 채널을 지목했을 때만 | `CHANNEL_MISMATCH` · `CHANNEL_UNPROVEN` |
+| temporal | 셀러가 기간을 지목했을 때, 자기 날짜 없는 총계는 그 기간을 증명하지 못한다 | `TEMPORAL_UNPROVEN` |
+| granularity | COUNT / LIST / DETAIL / ISSUE_SIGNAL / GAP | `GRANULARITY_MISMATCH` |
+
+**불변식**
+
+1. PRODUCT-scoped need는 resolved canonical product가 없으면 SATISFIED가 될 수 없다 — **product-scoped
+   evidence조차 통과하지 못한다.** 어느 상품을 말한 것인지 확정되지 않았으면 대조할 기준이 없고, "우리가
+   읽은 유일한 상품"이 "당신이 물은 상품"으로 조용히 바뀌는 경로가 바로 그것이다.
+2. product-scoped need는 org-wide evidence로 만족되지 않는다. **`locator.productId` 부재는 "모르는 상품"이
+   아니라 "org 전체"로 읽는다** — Q4의 이슈 3행이 한 상품의 주장이 된 경로가 정확히 그 반대 해석이었다.
+3. 다른 product / 다른 channel의 evidence는 붙지 않는다.
+4. count evidence는 item/detail/list need를 자동으로 만족시키지 못한다. 판정 근거는 **planner 자신이
+   내보내던 `evidenceRequirements.acceptableKinds`** — v2 이후 계속 전송돼 왔으나 런타임에서 아무도 읽지
+   않던 필드다. 선언이 없으면 need kind의 floor만 적용된다(선언 없음을 추측으로 메우지 않는다).
+5. compatibility를 통과한 evidence만 남긴 뒤에 finding이 run에 조립된다. 강등이 아니라 **미조립**이다.
+6. rule judge에도 같은 검사가 들어가되, judge는 floor다. graph gate와 judge는 서로 독립이며 어느 쪽도
+   유일한 검사가 되지 않는다. `claimsCoverageLimit` finding은 양쪽 모두에서 면제된다 — "데이터가 없어
+   판단할 수 없습니다"는 부재가 곧 근거이고, 그것까지 지우면 false calm만 남는다.
+
+mismatch 시: unsupported finding 생성 금지 · 다른 evidence가 없으면 need는 `UNSATISFIABLE`(사유 포함) ·
+최종 답에 근거 범위 제한을 정직하게 표시.
+
+### 9.2 회귀 (offline)
+
+`agent-runtime/test/operator/evidenceScopeIntegrity.test.ts` — **24 tests**.
+canonical red test는 **2026-08-23 라이브 모델이 실제로 낸 Q4 plan을 그대로 재생**한다
+(`PRODUCT_COMPLAINT_ORGWIDE_PLAN`: PRODUCT 멘션 있음 · `PRODUCT_OPS` 미배치). planner가 같은 실수를
+계속해도 계약이 버티는지가 판정 기준이다. Q1 shape는 `INBOX_LIST_NEEDS_ROWS_PLAN`(planner의
+`acceptableKinds` 선언 포함)으로 고정했다.
+
+agent-runtime 전체 **260 passed · 23 skipped · 0 failed**.
+
+### 9.3 라이브 재실행 (같은 prompt, 각 2회)
+
+REAL Demo Org · 마켓 접촉 0 · WRITE 0.
+
+**Q4 — 「판도리 일체형 종이컵 수거함 …」** (2회 모두 동일)
+
+| 항목 | 결과 |
+|---|---|
+| planner | LLM · specialists `PRODUCT_OPS`+`REVIEW_OPS`+`INQUIRY_OPS` (1회차는 1회 re-plan 포함) |
+| resolved entities | **없음** — `resolve_product`가 "판도리 일체형 종이컵 수거함"을 찾지 못함 (canonical `products.name`이 SKU `15223228019`이라서 — baseline C1) |
+| tools | `resolve_product` → `search_review_issues` → `get_today_inbox` |
+| evidence scopes | 4건(재실행 1회차는 re-plan 포함 8건) — `REVIEW_ISSUE` ×3 전부 **ORG**(productId 없음), `INBOX_COUNT` ×1 **ORG** |
+| **rejected evidence** | **전건 거절** — `NO_RESOLVED_PRODUCT` |
+| findings | **0** |
+| needs | 2건 모두 `UNSATISFIABLE`, 사유: 「판도리 일체형 종이컵 수거함」에 해당하는 상품을 찾지 못해, 상품 단위로 확인할 수 있는 근거가 없습니다. |
+| final answer | 위 사유 + "…에 해당하는 상품을 찾지 못했습니다" |
+| unsupported claims | **0** |
+| nextActions | **0** — 다른 상품의 `/memory/{issueId}` 링크 3개가 사라졌다 |
+| WRITE | **0** |
+
+**baseline 대비:** HIGH 이슈 3건의 잘못된 상품 귀속 **소멸**. org 전체 미답변 69건을 이 상품의 문의로
+말하던 문장 **소멸**. 대신 "상품을 찾지 못했다"는 정직한 진술. DB 진실(리뷰 8 · 부정 0 · issue evidence
+0 · 문의 1건 답변완료) 중 현재 tool이 증명할 수 있는 것은 아무것도 없었고, **그래서 아무 주장도 하지
+않았다.** 이것이 의도한 결과다.
+
+**Q1 — 「오늘 내가 먼저 확인해야 할 게 뭐야?」** (2회)
+
+| 항목 | 1회차 | 2회차 |
+|---|---|---|
+| specialists | `INQUIRY_OPS`+`REVIEW_OPS`+`REPORT_OPS` | `INQUIRY_OPS`+`REVIEW_OPS` |
+| needs | 3 (2 SATISFIED / 1 UNSATISFIABLE) | 2 (2 SATISFIED) |
+| rejected evidence | **0** | **0** |
+| findings | 6 | 4 |
+| WRITE | 0 | 0 |
+
+**과차단 없음이 확인됐다** — 상품·채널·기간을 지목하지 않은 org 질문은 전과 동일하게 답한다.
+
+### 9.4 A3에 대한 정직한 한계
+
+**두 번의 Q1 재실행 모두 baseline의 mismatch 형태를 재현하지 않았다.** planner가 이번에는 "가장 오래된
+미답변 문의는 무엇인가? (첫 페이지 목록)"라는 need를 만들지 않았다(계획 변동). 따라서 **granularity 축이
+라이브에서 발화한 적은 아직 없다.** A3의 폐쇄 근거는 결정론적 회귀(§9.2)이며, 라이브 확인은 planner가
+같은 형태의 need를 다시 낼 때 이루어진다. 이것을 "라이브에서 증명됐다"고 적지 않는다.
+
+### 9.5 판정
+
+| 결함 | 상태 |
+|---|---|
+| **A1** — 상품 미해결 상태에서 org-scope 증거로 상품 질문에 단정 | **CLOSED** — 라이브 2회 + 회귀 24건 |
+| **A3** — need 질문과 evidence kind 불일치를 SATISFIED로 기록 | **CLOSED (회귀 기준)** — 라이브 재현 미발생, §9.4 |
+| A2 — anchor 없는 `search_customer_memory` crash | **미수정, 다음 package** |
+| A4·A5·A6 · B · C · D | backlog 유지 |
+
+부수적으로 확인된 것, 수정하지 않음: Q4의 상품 미해결 원인은 **C1**(`products.name`이 SKU 숫자)이다.
+사람이 읽는 이름은 `channel_products.channel_product_name`에만 있고 `resolve_product`는 그것을 보지
+않는다. 지금은 정직한 "찾지 못했습니다"로 끝나며, 이름 해석을 넓히는 것은 별도 결정이다.

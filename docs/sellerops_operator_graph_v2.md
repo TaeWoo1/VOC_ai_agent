@@ -60,6 +60,31 @@ v2는 네 가지를 못 박는다: **계획은 반드시 LLM이 세운다(못 �
 | **I3** | **Evidence.** 상품 사실·정책·고객 이슈·인과관계를 확인 가능한 근거 없이 단정하지 않는다. **상품 knowledge에도 provenance와 coverage가 있다.** | v1의 traceability 검사 유지 + `productFactProvenance.test.ts` — 모든 `ProductFact`는 `source` + `observedAt`을 갖고, 갖지 못한 값은 저장되지도 인용되지도 않는다. Judge에 `UNVERIFIED_PRODUCT_FACT` 규칙 추가(§11). |
 | **I4** | **No external write.** v2는 investigate / reason / recommend / prepare 까지만. **WRITE tool 0개.** credential·trusted seller interaction privileged plane 비노출. | `operatorToolRegistry.test.ts`(v1, 그대로) + `OperatorToolRegistry` 생성자 거부 + `privilegedPlaneFence.test.ts`(신규) — Operator tool 이름 표에 credential/Action Window/guided-submission 계열 심볼이 **하나도** 나타나지 않는다. |
 
+### 2.1 I1·I3의 강제 장치 — Evidence Scope Integrity (2026-08-23 추가)
+
+I1과 I3은 2026-08-23 라이브에서 **동시에 뚫렸다.** 셀러가 이름으로 지목한 상품에 대해 다른 상품의 HIGH
+이슈 3건이 경고 없이 답에 도달했고, 위 표의 어떤 장치도 빨개지지 않았다. 이유는 하나다 — 모든 층이
+**"이 finding에 근거가 붙어 있는가"**를 물었고 답이 예였기 때문이다. 붙어 있던 것이 다른 것의 근거였다.
+기록: `docs/agent_real_validation_v1.md` §3 Q4.
+
+그래서 질문을 바꾼다: **근거가 증명하는 범위가 need가 물은 범위와 같은가.**
+
+| 축 | 규칙 |
+|---|---|
+| entity | ORG / PRODUCT / ITEM. **PRODUCT need는 resolved canonical product 없이는 어떤 근거로도 만족되지 않는다** — product-scoped 근거로도 안 된다. `locator.productId` 부재는 "모르는 상품"이 아니라 **org 전체**다 |
+| channel | 셀러가 채널을 지목했을 때만. 어느 채널인지 말하지 못하는 근거는 그 채널을 증명하지 못한다 |
+| temporal | 셀러가 기간을 지목했을 때, 자기 날짜가 없는 총계는 그 기간을 증명하지 못한다 |
+| granularity | COUNT / LIST / DETAIL / ISSUE_SIGNAL / GAP. count는 목록·개별 건 need를 자동으로 만족시키지 못한다. 판정은 planner 자신의 `evidenceRequirements.acceptableKinds` — v2가 계속 보내면서 아무도 읽지 않던 필드 |
+
+**강제 장치.** `src/operator/scope/EvidenceScope.ts`(계약) · `operatorGraph.applyScopeGate`(run의 finding
+집합이 조립되는 단일 지점 — 강등이 아니라 **미조립**) · `RuleEvidenceJudge`(같은 검사를 독립 floor로;
+graph gate와 judge 중 어느 쪽도 유일한 검사가 되지 않는다) · `evidenceScopeIntegrity.test.ts` 24건, red
+test는 **그 잘못된 답을 만든 라이브 plan을 그대로 재생**한다. `claimsCoverageLimit` finding은 양쪽 모두
+면제 — 부재가 곧 근거이고, 그것까지 지우면 false calm만 남는다.
+
+**이 장치가 할 수 없는 것:** 새 근거를 가져오는 것. 오직 보류만 할 수 있고, 보류할 때는 어느 범위를
+증명하지 못했는지 답에 적는다.
+
 **I2의 정확한 범위** — 삭제 대상은 **자유 문장에 대한 결정론적 해석**이다. 닫힌 enum `intent`를
 검증하는 것(버튼이 보내는 값)은 해석이 아니라 **계약 검증**이며 §3의 Dashboard 레인에 속한다. 이
 구분을 흐리면 "버튼도 지웠다" 또는 "keyword 표를 intent 검증이라 부르고 남겼다" 둘 중 하나가 된다.
