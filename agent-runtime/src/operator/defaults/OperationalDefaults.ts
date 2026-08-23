@@ -164,7 +164,9 @@ const CAPABILITY_DEFAULTS: Partial<Record<NeedKind, CapabilityContract>> = {
   POLICY: {
     // There is no policy store, and that is a complete answer rather than a missing scope: the run says
     // so (`inquiryOps` POLICY branch). A need that will be answered honestly is not a need to ask about.
-    tool: OPERATOR_TOOL.GET_INQUIRY_CONTEXT,
+    // Names the store rather than a tool, because no tool serves this need — the previous label here
+    // was `get_inquiry_thread_context`, which nothing invokes (A5).
+    tool: "policy-store",
     contract: "policy-store:UNAVAILABLE",
     scope: { kind: "SNAPSHOT_NOW" },
   },

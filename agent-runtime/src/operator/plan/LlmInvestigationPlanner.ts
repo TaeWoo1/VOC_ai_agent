@@ -43,7 +43,17 @@ export interface Planner {
 
 export interface PlanInput {
   readonly request: GoalRequest;
+  /** What the MODEL is shown: one `name: 설명` line per tool. */
   readonly catalogue: readonly string[];
+  /**
+   * What the VALIDATOR checks a plan's tool choice against: bare tool names.
+   *
+   * Separate from {@link catalogue} because the two are different shapes and conflating them was a
+   * silent bug — V2 filtered `candidateTools` against the description lines, so every tool a planner
+   * chose was dropped from every plan and `allowedTools` was only ever the specialist's own list.
+   * Optional so a caller with nothing to check against keeps the old behaviour explicitly.
+   */
+  readonly toolNames?: readonly string[];
   readonly limits: PlanLimits;
   readonly priorContext?: string;
 }
@@ -123,7 +133,10 @@ export class LlmInvestigationPlanner implements Planner {
       // has to be resolved while the plan still knows what it was going to do. After the audit, every
       // need carries the scope it will actually be pursued under.
       const audited = withOperationalDefaults(raw, goalText);
-      const validated = validatePlan(audited, { catalogue: input.catalogue, limits: input.limits });
+      const validated = validatePlan(audited, {
+        catalogue: input.toolNames ?? input.catalogue,
+        limits: input.limits,
+      });
       log("operator_plan", {
         plannerKind: "LLM",
         modelAnswered: true,

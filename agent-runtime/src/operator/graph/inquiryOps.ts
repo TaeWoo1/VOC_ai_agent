@@ -27,6 +27,9 @@ import { REPEAT_WINDOW_DAYS } from "../defaults/OperationalDefaults";
 import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { log } from "../../log";
 
+/** Where the POLICY answer comes from — a store that does not exist, named honestly. Not a tool. */
+const POLICY_STORE = "policy-store";
+
 /** The need kinds this specialist answers. */
 export const INQUIRY_NEEDS = ["INQUIRY_VOLUME", "CUSTOMER_HISTORY", "REPEAT_PATTERN", "POLICY"] as const;
 
@@ -275,7 +278,10 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     // policy from anecdote, which is the exact failure invariant I3 forbids.
     const ref = evidence.add({
       kind: "PRODUCT_KNOWLEDGE_GAP",
-      sourceTool: OPERATOR_TOOL.GET_INQUIRY_CONTEXT,
+      // <b>Not a tool name.</b> No tool produced this row and none could: the absence of a policy store
+      // is the fact. It used to be stamped `get_inquiry_thread_context`, a tool nothing in the runtime
+      // has ever invoked, which made a dead capability look like a read that had happened (A5).
+      sourceTool: POLICY_STORE,
       args: { need: need.id },
       locator: { facet: "POLICY", label: "정책" },
       coverage: "COVERED",

@@ -45,10 +45,11 @@ export type EntityScope = "ORG" | "PRODUCT" | "ITEM";
  *
  * `ISSUE_SIGNAL` is its own value rather than a `COUNT`: an issue row carries a severity and a
  * signature as well as a tally, so it answers a "반복되는 문제가 있는가" need that a bare count does
- * not — and it does NOT answer a "그 근거가 이 상품의 것인가" need, which is what `ISSUE_EVIDENCE`
- * would be if any reachable tool produced it today. None does (`get_issue_evidence_summary` exists in
- * the catalogue and no specialist invokes it — `docs/agent_real_validation_v1.md` §5 P4), so the value
- * is named here and never emitted. Naming it is the point: the gap is visible instead of implied.
+ * not — and it does NOT answer a "그 근거가 이 상품의 것인가" need. That second question is
+ * `ISSUE_EVIDENCE`, and it was named here before anything could produce it: the tool that answers it
+ * sat in the catalogue with no caller for as long as the gap existed (`docs/agent_real_validation_v1.md`
+ * §5 P4). Since A5 (2026-08-23) `ReviewOps` reaches `get_review_issue_evidence_summary` for a resolved
+ * product and the value is emitted — the vocabulary did not change, the reachability did.
  */
 export type Granularity = "COUNT" | "LIST" | "DETAIL" | "ISSUE_SIGNAL" | "ISSUE_EVIDENCE" | "GAP";
 
@@ -115,6 +116,7 @@ const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
   INBOX_COUNT: "COUNT",
   PRODUCT_SIGNAL: "COUNT",
   REVIEW_ISSUE: "ISSUE_SIGNAL",
+  ISSUE_EVIDENCE: "ISSUE_EVIDENCE",
   REPEATED_INQUIRY: "LIST",
   CUSTOMER_MEMORY: "LIST",
   REVIEW: "DETAIL",

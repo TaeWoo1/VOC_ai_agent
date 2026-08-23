@@ -10,10 +10,9 @@
  * Two independent checks, because either alone could be satisfied while the property was false: the
  * FUNCTION registers no evidence, and the GRAPH gives it no tools to register any with.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runReportOps } from "../../src/operator/graph/reportOpsNode";
+import { TOOL_CAPABILITIES, toolsFor } from "../../src/operator/tools/ToolReachability";
 import type { Finding } from "../../src/operator/state/OperatorState";
 
 const UPSTREAM: Finding[] = [
@@ -64,10 +63,11 @@ describe("ReportOps composes without sourcing", () => {
     expect(result.needStates[0]!.status).toBe("UNSATISFIABLE");
   });
 
-  it("the graph gives REPORT_OPS an empty tool allow-list", () => {
-    // The structural half. Even if the function above were changed to call a tool, the plan's
-    // authorization for this specialist is empty, and the registry refuses anything outside it.
-    const graph = readFileSync(join(__dirname, "../../src/operator/graph/operatorGraph.ts"), "utf8");
-    expect(graph).toMatch(/REPORT_OPS:\s*\[\]/);
+  it("REPORT_OPS has no tool capability at all", () => {
+    // The structural half, now read off the capability matrix rather than off a literal in the graph:
+    // even if the function above were changed to call a tool, no row authorizes REPORT_OPS to use one
+    // and the registry refuses anything outside the allow-list.
+    expect(toolsFor("REPORT_OPS")).toEqual([]);
+    expect(TOOL_CAPABILITIES.filter((c) => c.specialist === "REPORT_OPS")).toEqual([]);
   });
 });

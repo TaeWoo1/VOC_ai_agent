@@ -49,6 +49,7 @@ import type { Planner } from "../plan/LlmInvestigationPlanner";
 import type { OperatorToolRegistry } from "../tools/OperatorToolRegistry";
 import { OPERATOR_TOOL, toolCatalogueFor } from "../tools/OperatorTools";
 import type { ClassifiedTool } from "../tools/OperatorTools";
+import { reachableToolNames, toolsFor } from "../tools/ToolReachability";
 import type { OperatorBudget } from "../budget/OperatorBudget";
 import { runProductOps, PRODUCT_NEEDS } from "./productOps";
 import { runReviewOps, REVIEW_NEEDS } from "./reviewOps";
@@ -67,35 +68,10 @@ export interface OperatorGraphDeps {
 }
 
 /**
- * The tools each specialist's own work needs, whatever the plan named.
- *
- * <b>A specialist's tool needs are a property of the specialist, not of the plan.</b> The plan chooses
- * WHICH specialists run; it does not get to half-equip one. Found live 2026-08-21 the first time a real
- * model planned: it answered `tools: ["get_today_inbox"]` — a reasonable-looking choice — and both
- * INQUIRY_OPS and REPORT_OPS then died on `ToolNotInPlanError` reaching for the rest of their own work,
- * turning two good runs into "조회에 실패했습니다".
- *
- * The fence does not weaken: the registry is READ-only end to end, an unknown name still throws, and a
- * tool that no dispatched specialist needs and no planner chose still cannot be called.
+ * A specialist's own tools come from the capability matrix — see `tools/ToolReachability.ts`, which is
+ * also what decides which tools the planner is shown at all. Keeping both readings in one table is the
+ * point: a tool a specialist can run is a tool the planner may choose, and nothing else is.
  */
-const SPECIALIST_TOOLS: Record<SpecialistName, readonly string[]> = {
-  PRODUCT_OPS: [
-    OPERATOR_TOOL.RESOLVE_PRODUCT,
-    OPERATOR_TOOL.GET_PRODUCT_KNOWLEDGE,
-    OPERATOR_TOOL.SEARCH_PRODUCT_FACTS,
-    OPERATOR_TOOL.GET_PRODUCT_SIGNALS,
-  ],
-  REVIEW_OPS: [OPERATOR_TOOL.SEARCH_REVIEW_ISSUES],
-  INQUIRY_OPS: [
-    OPERATOR_TOOL.GET_TODAY_INBOX,
-    OPERATOR_TOOL.LIST_REPEATED_INQUIRIES,
-    OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
-    OPERATOR_TOOL.GET_INQUIRY_CONTEXT,
-  ],
-  // Deliberately empty. ReportOps composes other specialists' findings and reads nothing of its own —
-  // an empty allow-list is that rule made unbreakable rather than merely documented.
-  REPORT_OPS: [],
-};
 
 /**
  * The words that mean "write it for me".
@@ -107,7 +83,13 @@ const SPECIALIST_TOOLS: Record<SpecialistName, readonly string[]> = {
 const DRAFT_WORDS = ["초안", "답변 작성", "답장 작성", "답변을 작성", "써줘", "작성해줘"] as const;
 
 export function buildOperatorGraph(deps: OperatorGraphDeps) {
-  const catalogue = toolCatalogueFor(deps.tools);
+  // <b>Only what something can actually run.</b> A tool with no caller is not advertised: a planner
+  // shown eleven dead names spends model budget choosing them, and a plan that names one reads, to a
+  // human, like a capability the product has (`tools/ToolReachability.ts`).
+  const reachable = new Set(reachableToolNames());
+  const advertised = deps.tools.filter((t) => reachable.has(t.tool.name));
+  const catalogue = toolCatalogueFor(advertised);
+  const toolNames = advertised.map((t) => t.tool.name);
   // One builder per graph build, so evidence ids are unique within a run and stable across its passes.
   // It also carries the run's as-of date, so every ref records WHEN it was read — which is not, and can
   // never become, a claim about when the underlying rows happened (`scope/EvidenceTime.ts`).
@@ -126,6 +108,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     const plan = await deps.planner.plan({
       request: { text: state.goalText, referenceDate: deps.referenceDate },
       catalogue,
+      // The NAMES, separately from the catalogue lines. The validator matches a plan's tool choice
+      // against this; matching it against the description lines silently dropped every tool a planner
+      // ever chose (found reading the seam for A5 — the lines are `name: 설명`, never a bare name).
+      toolNames,
       limits: deps.budget.limits(),
       ...(state.plan ? { priorContext: progressLine(state) } : {}),
     });
@@ -296,7 +282,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       registry: deps.registry,
       budget: deps.budget,
       evidence,
-      allowedTools: dedupe([...plan.candidateTools, ...SPECIALIST_TOOLS[specialist]]),
+      allowedTools: dedupe([...plan.candidateTools, ...toolsFor(specialist)]),
       resolved,
       goalText: state.goalText,
       ...(deps.referenceDate ? { referenceDate: deps.referenceDate } : {}),
