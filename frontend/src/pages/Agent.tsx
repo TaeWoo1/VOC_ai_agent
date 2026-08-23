@@ -343,7 +343,8 @@ function OperatorAnswerCard({ answer }: { answer: OperatorAnswer }) {
                     <li key={id} className="text-xs text-muted">
                       근거 {ref.evidenceId} · {ref.locator.label ?? ref.kind}
                       {ref.locator.count != null ? ` ${ref.locator.count}건` : ""}
-                      {ref.observedOn ? ` · ${ref.observedOn}` : ""}
+                      {ref.events ? ` · ${ref.events.from ?? "?"}~${ref.events.to ?? "?"} 발생` : ""}
+                      {ref.asOf ? ` · ${ref.asOf} 확인` : ""}
                       {ref.coverage !== "COVERED" ? " · 판단 불가 구간" : ""}
                       {" · "}
                       {ref.provenance}

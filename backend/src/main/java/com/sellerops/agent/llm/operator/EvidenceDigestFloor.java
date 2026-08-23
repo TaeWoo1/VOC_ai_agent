@@ -12,7 +12,7 @@ package com.sellerops.agent.llm.operator;
  *
  * <p><b>The shape.</b> Every line must be {@code key=value} pairs separated by spaces, where a value
  * carries no whitespace. That admits {@code e1 kind=REVIEW_ISSUE severity=HIGH count=12
- * coverage=COVERED observedOn=2026-08-14} and rejects anything with a sentence in it — a Korean
+ * coverage=COVERED asOf=2026-08-14} and rejects anything with a sentence in it — a Korean
  * particle, a comma-space, a quoted phrase, a masked quote. It is deliberately cruder than a
  * PII detector: a detector answers "does this contain personal data", which is unknowable, and this
  * answers "is this metadata", which is checkable.

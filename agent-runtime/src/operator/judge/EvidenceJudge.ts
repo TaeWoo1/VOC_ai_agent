@@ -17,6 +17,7 @@
 import type { EvidenceRef, Finding, JudgeVerdict } from "../state/OperatorState";
 import type { NeedScope } from "../scope/EvidenceScope";
 import { checkEvidence } from "../scope/EvidenceScope";
+import { assertsEventOccurrence, hasEventTime } from "../scope/EvidenceTime";
 import { digestFor } from "../state/evidence";
 import type { AgentJudgeView } from "../../spring/types";
 import { log } from "../../log";
@@ -80,7 +81,6 @@ export class RuleEvidenceJudge implements EvidenceJudge {
   /** Past tense counts too: "늘었습니다" is the same claim as "늘고 있습니다", made about last week. */
   private static readonly TREND = ["늘고", "늘었", "증가", "반복", "악화", "줄고", "줄었", "감소"];
   private static readonly BLAME = ["고객 잘못", "사용자 과실", "고객이 잘못"];
-  private static readonly PERIOD = ["이번 주", "금주", "이번주"];
 
   async judge(
     finding: Finding,
@@ -119,9 +119,13 @@ export class RuleEvidenceJudge implements EvidenceJudge {
         reasons.push("근거 대비 과일반화");
       }
     }
-    if (RuleEvidenceJudge.PERIOD.some((k) => statement.includes(k))
-        && usable.every((e) => e.observedOn == null)) {
-      reasons.push("기간 미표기 총계를 기간 주장으로 사용");
+    // <b>The claim-side half of the temporal contract.</b> The scope gate reads what the NEED asked;
+    // this reads what the sentence SAYS, which is the only place a state claim and an event claim can
+    // be told apart — "현재 미답변 69건" and "오늘 들어온 문의 69건" cite the same snapshot and only one
+    // of them is provable. A run whose evidence has no event dates may not assert that anything
+    // happened in a period, whatever the plan declared. See `scope/EvidenceTime.ts`.
+    if (assertsEventOccurrence(statement) && !usable.some((e) => hasEventTime(e.events))) {
+      reasons.push("관측 시점을 발생 기간의 근거로 사용");
     }
 
     return {

@@ -22,6 +22,7 @@ import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import type { SpecialistInput } from "./specialistInput";
 import type { CustomerMemorySearch, InboxSummary, RepeatedInquiry } from "../../spring/types";
 import { attemptTool, skippedTool, terminalOf } from "../failure/SpecialistOutcome";
+import { eventOn, eventRange } from "../scope/EvidenceTime";
 import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { log } from "../../log";
 
@@ -65,6 +66,12 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
         sourceTool: OPERATOR_TOOL.GET_TODAY_INBOX,
         args: {},
         locator: { count: inbox.unansweredInquiries, label: "미답변 문의" },
+        // <b>A snapshot of the CURRENT state, not a period's intake.</b> `unansweredInquiries` is the
+        // depth of the queue at the moment of the read: the rows in it may have arrived this morning or
+        // last year, and this read cannot tell which. So it gets an observation time (the builder's,
+        // automatically) and NO event range — which is what stops it from ever answering "오늘 몇 건
+        // 들어왔어". See `scope/EvidenceTime.ts`.
+        events: null,
         // The org-wide unanswered count is a server-side total with no attribution question, so its
         // coverage is genuinely COVERED — unlike anything product- or account-scoped.
         coverage: "COVERED",
@@ -77,7 +84,9 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
           specialist: "INQUIRY_OPS",
           // The server's uncapped number — the SAME one the home screen prints. A report that
           // recounted it off a page printed ≤50 under the same label; that is the defect this pins.
-          statement: `답변이 필요한 문의가 ${inbox.unansweredInquiries}건 있습니다.`,
+          // "현재" is load-bearing, not politeness: the evidence proves a queue depth now, and a
+          // sentence without it invites the reader to hear an intake for today.
+          statement: `현재 답변이 필요한 문의가 ${inbox.unansweredInquiries}건 있습니다.`,
           evidenceIds: [ref.evidenceId],
           confidence: "NEEDS_REVIEW",
           verdict: null,
@@ -119,7 +128,9 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
           sourceTool: OPERATOR_TOOL.LIST_REPEATED_INQUIRIES,
           args: { referenceDate: input.referenceDate ?? null },
           locator: { count: repeat.occurrences, label: repeat.labelKo },
-          observedOn: repeat.lastSeenOn,
+          // The rows' OWN span, from the data. Not the 30-day window the query asked for: asking for a
+          // window never proves a row fell inside it.
+          events: eventRange(repeat.firstSeenOn, repeat.lastSeenOn),
           coverage: "COVERED",
           provenance: `customer-memory/${repeat.axis}`,
         });
@@ -212,7 +223,7 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
             ...(hit.channelCode ? { channelCode: hit.channelCode } : {}),
             label: hit.signatureKey ?? hit.topic ?? "과거 사례",
           },
-          observedOn: hit.occurredOn,
+          events: eventOn(hit.occurredOn),
           coverage: recall.coverage.coverage,
           provenance: `${recall.coverage.provenance}/${hit.retrieverKind}:${hit.retrieverVersion}`,
         });

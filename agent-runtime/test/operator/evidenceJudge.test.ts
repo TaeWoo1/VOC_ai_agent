@@ -22,7 +22,8 @@ function ref(overrides: Partial<EvidenceRef> = {}): EvidenceRef {
     sourceTool: "search_review_issues",
     sourceCall: "abc12345",
     locator: { count: 12, label: "접착 탈락", severity: "HIGH" },
-    observedOn: "2026-08-14",
+    asOf: "2026-08-14",
+    events: { from: "2026-08-01", to: "2026-08-14" },
     coverage: "COVERED",
     provenance: "issue-memory/RULE_BASED",
     ...overrides,
@@ -84,13 +85,25 @@ describe("RuleEvidenceJudge", () => {
     expect(thick.unsafeAssertion).toBe(false);
   });
 
-  it("refuses '이번 주' over evidence that carries no date", async () => {
+  it("refuses an intake claim over a snapshot that cannot say when anything arrived", async () => {
     const verdict = await judge.judge(
-      finding("이번 주 미답변 문의는 3,208건입니다."),
-      [ref({ kind: "INBOX_COUNT", observedOn: null, locator: { count: 3208 } })],
+      // The snapshot HAS an observation time — it is fresh, and that is exactly the trap: freshness is
+      // not recency of the rows. `events: null` is the source saying it cannot date them.
+      finding("이번 주 들어온 문의는 3,208건입니다."),
+      [ref({ kind: "INBOX_COUNT", asOf: "2026-08-23", events: null, locator: { count: 3208 } })],
     );
 
-    expect(verdict.unsafeReason).toContain("기간");
+    expect(verdict.unsafeReason).toContain("발생 기간");
+  });
+
+  it("but allows the same snapshot to state the CURRENT queue", async () => {
+    const verdict = await judge.judge(
+      finding("현재 답변이 필요한 문의가 3,208건 있습니다."),
+      [ref({ kind: "INBOX_COUNT", asOf: "2026-08-23", events: null, locator: { count: 3208 } })],
+    );
+
+    expect(verdict.unsafeAssertion, "a queue depth is what a snapshot proves").toBe(false);
+    expect(verdict.hasEvidence).toBe(true);
   });
 
   it("KNOWN LIMIT: a -어서 causal sentence passes the rule judge", async () => {

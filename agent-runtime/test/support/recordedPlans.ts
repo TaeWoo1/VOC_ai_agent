@@ -379,6 +379,21 @@ export const PRIORITIZE_AND_DRAFT_PLAN: AgentPlanView = {
   providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-23 live",
 };
 
+/**
+ * The same goal, planned with a period named — the live divergence, isolated.
+ *
+ * <b>Both live runs of Q5 on 2026-08-23 used the same sentence and got different plans</b>: one named
+ * no entity, the other named "오늘" as a `PERIOD`. That single difference decided whether the seller was
+ * told their unanswered total or told it could not be proven (`docs/agent_real_validation_v1.md`
+ * §10.4). This entry is {@link PRIORITIZE_AND_DRAFT_PLAN} with exactly that one difference added, so a
+ * test can run the pair and hold the answer steady across it. The needs are the recorded plan's; only
+ * the mention is the variant.
+ */
+export const PRIORITIZE_WITH_PERIOD_PLAN: AgentPlanView = {
+  ...PRIORITIZE_AND_DRAFT_PLAN,
+  unresolvedEntities: [{ kind: "PERIOD", mention: "오늘" }],
+};
+
 /** The goal → plan table the recorded-plan suites seed the transport fake with. */
 export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "폭이 몇 mm인가요?": SPEC_QUESTION_PLAN,

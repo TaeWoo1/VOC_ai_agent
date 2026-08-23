@@ -15,6 +15,7 @@ import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import type { SpecialistInput } from "./specialistInput";
 import type { ReviewIssueSummary } from "../../spring/types";
 import { attemptTool } from "../failure/SpecialistOutcome";
+import { eventRange } from "../scope/EvidenceTime";
 import { log } from "../../log";
 
 /** The need kinds this specialist answers. */
@@ -80,7 +81,7 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
         ...(issue.dominantProductId ? { productId: issue.dominantProductId } : {}),
         ...(issue.dominantProductName ? { productName: issue.dominantProductName } : {}),
       },
-      observedOn: issue.lastEvidenceOn,
+      events: eventRange(issue.firstEvidenceOn, issue.lastEvidenceOn),
       coverage: "COVERED",
       provenance: `issue-memory/${issue.extractorKind}`,
     });

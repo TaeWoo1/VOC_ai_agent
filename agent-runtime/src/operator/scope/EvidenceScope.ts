@@ -16,7 +16,9 @@
  *  1. <b>entity</b> — ORG / PRODUCT / ITEM. Org-wide evidence cannot answer a product question.
  *  2. <b>channel</b> — when the seller named one, evidence that cannot say which channel it came from
  *     has not proven it came from that one.
- *  3. <b>temporal</b> — when the seller named a period, an undated total has not proven the period.
+ *  3. <b>temporal</b> — a question about how things STAND is answered by a fresh observation; a
+ *     question about what HAPPENED in a period is answered only by rows with their own dates. The two
+ *     are different facts and `EvidenceTime.ts` keeps them apart.
  *  4. <b>granularity</b> — COUNT / LIST / DETAIL / ISSUE_SIGNAL / GAP. A count is not a list.
  *
  * <b>What it deliberately is NOT.</b> Not a retrieval feature: it adds no tool, reads nothing, and
@@ -32,6 +34,8 @@
  */
 import type { EvidenceKind, EvidenceRef } from "../state/OperatorState";
 import type { InformationNeed, InvestigationPlan, ResolvedEntity } from "../plan/InvestigationPlan";
+import type { EventRange, TemporalDemand } from "./EvidenceTime";
+import { hasEventTime, temporalDemandOf } from "./EvidenceTime";
 
 /** What a claim is ABOUT. A closed set; the three levels a seller's question can sit at. */
 export type EntityScope = "ORG" | "PRODUCT" | "ITEM";
@@ -63,8 +67,10 @@ export type ScopeMismatch =
   | "CHANNEL_MISMATCH"
   /** The need names a channel; this evidence cannot say which channel it is from. Invariant 3. */
   | "CHANNEL_UNPROVEN"
-  /** The need names a period; this evidence carries no date of its own. Temporal axis. */
+  /** The need is about events in a period; this evidence cannot say when its rows happened. */
   | "TEMPORAL_UNPROVEN"
+  /** The need is about the current state; this evidence cannot say when it was read. */
+  | "OBSERVATION_TIME_UNKNOWN"
   /** A count offered for a list/detail need, and the like. Invariant 4. */
   | "GRANULARITY_MISMATCH";
 
@@ -74,8 +80,13 @@ export interface NeedScope {
   /** Every product this run actually resolved. Empty with `entity: "PRODUCT"` ⇒ invariant 1 bites. */
   readonly productIds: readonly string[];
   readonly channelCode: string | null;
-  /** True when the plan named a period, so undated evidence cannot answer this need. */
-  readonly periodNamed: boolean;
+  /**
+   * What this need requires of time — nothing, a fresh observation, or real event dates.
+   *
+   * Derived from the need's KIND plus whether the seller named a period, so the verdict does not move
+   * when the planner rephrases the same question. See {@link temporalDemandOf}.
+   */
+  readonly temporal: TemporalDemand;
   /**
    * The shapes of evidence that would answer this need.
    *
@@ -163,7 +174,8 @@ export function evidenceScopeOf(ref: EvidenceRef): {
   productId: string | null;
   channelCode: string | null;
   granularity: Granularity;
-  observedOn: string | null;
+  asOf: string | null;
+  events: EventRange | null;
 } {
   const loc = ref.locator;
   const productId = loc.productId ?? null;
@@ -174,7 +186,8 @@ export function evidenceScopeOf(ref: EvidenceRef): {
     productId,
     channelCode: loc.channelCode ?? null,
     granularity: granularityOf(ref.kind),
-    observedOn: ref.observedOn,
+    asOf: ref.asOf,
+    events: ref.events,
   };
 }
 
@@ -212,8 +225,10 @@ export function needScopeOf(
     entity,
     productIds: resolved.filter((r) => r.kind === "PRODUCT").map((r) => r.id),
     channelCode: channelMention ? normalizeChannel(channelMention) : null,
-    periodNamed: mentions.some((m) => m.kind === "PERIOD")
-      || resolved.some((r) => r.kind === "PERIOD"),
+    temporal: temporalDemandOf(
+      need.kind,
+      mentions.some((m) => m.kind === "PERIOD") || resolved.some((r) => r.kind === "PERIOD"),
+    ),
     granularities: fromPlan.length > 0 ? fromPlan : KIND_FLOOR[need.kind] ?? [],
   };
 }
@@ -221,16 +236,27 @@ export function needScopeOf(
 /**
  * The run's scope with no need attached — for a finding whose `needId` nothing set.
  *
- * The entity, channel and temporal axes still apply, because they are properties of what the SELLER
- * asked; only the granularity axis goes quiet, because granularity is a property of the need and there
- * is no need to read it from. An unattributed finding is therefore still unable to answer a product
- * question with an org total, which is the failure that matters.
+ * The entity and channel axes still apply, because they are properties of what the SELLER asked. The
+ * granularity axis goes quiet, because granularity is a property of the need. The temporal axis falls
+ * back to `CURRENT_STATE`: without a need there is no honest way to tell whether the seller asked how
+ * things stand or what happened, and guessing `PERIOD_EVENTS` would withhold true state facts on the
+ * strength of a coin flip. The claim-side rule in the judge is what catches an event claim here —
+ * {@link assertsEventOccurrence} reads the sentence, which is the one thing this function cannot.
+ *
+ * An unattributed finding is therefore still unable to answer a product question with an org total,
+ * which is the failure that matters.
  */
 export function planScopeOf(plan: InvestigationPlan, resolved: readonly ResolvedEntity[]): NeedScope {
   const anyNeed: InformationNeed = {
     id: "", question: "", kind: "REVIEW_SIGNAL", why: "", required: false,
   };
-  return { ...needScopeOf(plan, anyNeed, resolved), needId: "", granularities: [] };
+  const scope = needScopeOf(plan, anyNeed, resolved);
+  return {
+    ...scope,
+    needId: "",
+    granularities: [],
+    temporal: scope.temporal === "NONE" ? "NONE" : "CURRENT_STATE",
+  };
 }
 
 /**
@@ -275,7 +301,13 @@ export function checkEvidence(need: NeedScope, ref: EvidenceRef): ScopeMismatch 
     if (ev.channelCode.toUpperCase() !== need.channelCode) return "CHANNEL_MISMATCH";
   }
 
-  if (need.periodNamed && ev.observedOn == null) {
+  // The temporal axis. `CURRENT_STATE` asks only that we know WHEN we looked; `PERIOD_EVENTS` asks
+  // that the rows themselves are dated, and an observation time never stands in for that — a count read
+  // today proves nothing about when the things in it arrived.
+  if (need.temporal === "CURRENT_STATE" && ev.asOf == null) {
+    return "OBSERVATION_TIME_UNKNOWN";
+  }
+  if (need.temporal === "PERIOD_EVENTS" && !hasEventTime(ev.events)) {
     return "TEMPORAL_UNPROVEN";
   }
 
@@ -318,7 +350,9 @@ export function reasonSentence(reason: ScopeMismatch, subject?: string): string 
     case "CHANNEL_UNPROVEN":
       return `어느 채널의 기록인지 확인할 수 없어 ${named}의 근거로는 쓸 수 없습니다.`;
     case "TEMPORAL_UNPROVEN":
-      return `기간이 표시되지 않은 총계여서 ${named}이 물은 기간의 근거로는 쓸 수 없습니다.`;
+      return `언제 일어난 일인지 확인할 수 없는 근거여서 ${named}이 물은 기간의 근거로는 쓸 수 없습니다.`;
+    case "OBSERVATION_TIME_UNKNOWN":
+      return `언제 확인한 값인지 알 수 없어 ${named}의 현재 상태를 말할 근거로는 쓸 수 없습니다.`;
     case "GRANULARITY_MISMATCH":
       return `${named}이 필요로 하는 형태의 근거가 아니어서 사용하지 않았습니다.`;
   }

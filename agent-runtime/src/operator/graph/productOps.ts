@@ -19,6 +19,7 @@
 import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorState";
 import type { NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
+import { eventRange } from "../scope/EvidenceTime";
 import type { SpecialistInput } from "./specialistInput";
 import type {
   KnowledgeCoverageRow,
@@ -162,7 +163,8 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
             productId, productName, factKey: fact.factKey, factSource: fact.source,
             label: `${fact.value}${fact.unit ? " " + fact.unit : ""}`,
           },
-          observedOn: dateOnly(fact.observedAt),
+          // When the fact was captured — an observation, not an event. A spec does not "happen".
+          asOf: dateOnly(fact.observedAt),
           coverage: "COVERED",
           provenance: `product-fact/${fact.source}:${fact.confidence}`,
         });
@@ -235,7 +237,7 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
             ...(variant?.optionName ? { label: variant.optionName } : {}),
             ...(variant?.externalVariantId ? { variantId: variant.externalVariantId } : {}),
           },
-          observedOn: dateOnly((listing ?? variant)!.observedAt),
+          asOf: dateOnly((listing ?? variant)!.observedAt),
           coverage: "COVERED",
           provenance: `product-knowledge/${(listing ?? variant)!.source ?? "UNKNOWN"}`,
         });
@@ -291,7 +293,8 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
         count: uncertain.reduce((sum, c) => sum + c.unlinked, 0),
         label: uncertain.map((c) => c.signal).join("|"),
       },
-      observedOn: view.signals.referenceDate,
+      // The snapshot's own as-of date. A coverage gap is a state, so it needs no event range.
+      asOf: view.signals.referenceDate,
       coverage: uncertain[0]!.coverage,
       provenance: uncertain[0]!.provenance,
     });
@@ -343,7 +346,7 @@ function signalFindings(
         issueId: issue.id, productId, productName, count: issue.evidenceCount,
         label: issue.title, severity: issue.severity,
       },
-      observedOn: issue.lastEvidenceOn,
+      events: eventRange(issue.firstEvidenceOn, issue.lastEvidenceOn),
       coverage: issueCoverage?.coverage ?? "COVERED",
       provenance: issueCoverage?.provenance ?? `issue-memory/${issue.extractorKind}`,
     });
@@ -371,7 +374,8 @@ function signalFindings(
         productId, productName,
         count: view.signals.volume.unansweredInquiries, label: "미답변 문의",
       },
-      observedOn: view.signals.referenceDate,
+      // Same snapshot semantics as the org-wide inbox count: a queue depth now, no arrival span.
+      asOf: view.signals.referenceDate,
       coverage: inquiryCoverage?.coverage ?? "COVERED",
       provenance: inquiryCoverage?.provenance ?? "inquiry-store/INGEST:canonical",
     });

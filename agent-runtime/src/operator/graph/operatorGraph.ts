@@ -108,7 +108,9 @@ const DRAFT_WORDS = ["초안", "답변 작성", "답장 작성", "답변을 작�
 export function buildOperatorGraph(deps: OperatorGraphDeps) {
   const catalogue = toolCatalogueFor(deps.tools);
   // One builder per graph build, so evidence ids are unique within a run and stable across its passes.
-  const evidence = new EvidenceBuilder();
+  // It also carries the run's as-of date, so every ref records WHEN it was read — which is not, and can
+  // never become, a claim about when the underlying rows happened (`scope/EvidenceTime.ts`).
+  const evidence = new EvidenceBuilder(deps.referenceDate);
 
   async function interpretGoal(state: OperatorState): Promise<Partial<OperatorState>> {
     if (!deps.budget.beginIteration()) {

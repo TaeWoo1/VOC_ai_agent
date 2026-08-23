@@ -159,7 +159,7 @@ describe("product knowledge as evidence", () => {
     for (const ref of factEvidence) {
       expect(ref.locator.factKey, "a product fact must name which key it is").toBeTruthy();
       expect(ref.locator.factSource, "a product fact must name who stated it").toBeTruthy();
-      expect(ref.observedOn, "a product fact must carry when it was observed").toBeTruthy();
+      expect(ref.asOf, "a product fact must carry when it was observed").toBeTruthy();
     }
   });
 

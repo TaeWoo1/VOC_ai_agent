@@ -259,7 +259,10 @@ export interface EvidenceRef {
     label?: string;
     severity?: string;
   };
-  observedOn: string | null;
+  /** When SellerOps read it. Freshness — never a claim that the rows are from that date. */
+  asOf: string | null;
+  /** When the underlying rows happened, when the source can say. Null = unknown, never "now". */
+  events: { from: string | null; to: string | null } | null;
   coverage: AttentionCoverage;
   provenance: string;
 }

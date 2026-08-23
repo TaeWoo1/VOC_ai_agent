@@ -17,6 +17,7 @@ import type { AgentGoal } from "../../goal/parseGoal";
 import type { SpecialistTerminal, ToolFailure } from "../failure/SpecialistOutcome";
 import type { AttentionCoverage, KnowledgeCoverageRow, ProductKnowledge, SignalCoverage } from "../../spring/types";
 import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
+import type { EventRange } from "../scope/EvidenceTime";
 
 /**
  * What a tool is allowed to do.
@@ -60,8 +61,21 @@ export interface EvidenceRef {
   readonly sourceTool: string;
   readonly sourceCall: string;
   readonly locator: EvidenceLocator;
-  /** The DATA's own date (ISO date-only), not when we looked. Null when the source has none. */
-  readonly observedOn: string | null;
+  /**
+   * When SellerOps READ this (ISO date-only). Proves freshness, and nothing else.
+   *
+   * <b>It is not the data's own date.</b> Keeping the two apart is the whole of
+   * `scope/EvidenceTime.ts`: an inbox count read today says nothing about when the inquiries in it
+   * arrived, and letting this field stand in for that is how "현재 미답변 69건" becomes
+   * "오늘 들어온 문의 69건".
+   */
+  readonly asOf: string | null;
+  /**
+   * When the underlying rows actually happened. `null` when the source cannot say — never "now".
+   *
+   * Only evidence carrying this may support a claim about a period.
+   */
+  readonly events: EventRange | null;
   /**
    * Whether the source that produced this evidence could answer for the scope at all. Carried on the
    * evidence rather than beside it, because the judge reads one finding's evidence and must be able

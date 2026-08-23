@@ -10,6 +10,8 @@
 import { createHash } from "node:crypto";
 import type { EvidenceKind, EvidenceLocator, EvidenceRef } from "./OperatorState";
 import type { AttentionCoverage } from "../../spring/types";
+import type { EventRange } from "../scope/EvidenceTime";
+import { eventRangeToken, observationDate } from "../scope/EvidenceTime";
 
 /**
  * A stable digest of the arguments a tool was called with.
@@ -24,17 +26,33 @@ export function callDigest(toolName: string, args: Record<string, unknown>): str
   return createHash("sha256").update(`${toolName}:${canonical}`).digest("hex").slice(0, 8);
 }
 
-/** Mints run-scoped evidence ids (`e1`, `e2`, …) and holds the refs a run has accumulated. */
+/**
+ * Mints run-scoped evidence ids (`e1`, `e2`, …) and holds the refs a run has accumulated.
+ *
+ * <b>Every ref gets an observation time and no ref gets an event time by default.</b> A read always
+ * happened at a time, so `asOf` is knowable for all of them and the builder fills it in; when the rows
+ * happened is a property of the SOURCE, so `events` stays null until a call site can name it from the
+ * data. The asymmetry is the point — see `scope/EvidenceTime.ts`.
+ */
 export class EvidenceBuilder {
   private next = 1;
   private readonly refs: EvidenceRef[] = [];
+  private readonly observedAt: string;
+
+  /** @param referenceDate the run's as-of date; the day of the read when the request named none. */
+  constructor(referenceDate?: string | null) {
+    this.observedAt = observationDate(referenceDate);
+  }
 
   add(input: {
     kind: EvidenceKind;
     sourceTool: string;
     args: Record<string, unknown>;
     locator: EvidenceLocator;
-    observedOn?: string | null;
+    /** Override the run's observation date — for a stored snapshot that carries its own as-of. */
+    asOf?: string | null;
+    /** The rows' own span. Pass it ONLY from the data; never from the request or the clock. */
+    events?: EventRange | null;
     coverage?: AttentionCoverage;
     provenance: string;
   }): EvidenceRef {
@@ -44,7 +62,8 @@ export class EvidenceBuilder {
       sourceTool: input.sourceTool,
       sourceCall: callDigest(input.sourceTool, input.args),
       locator: input.locator,
-      observedOn: input.observedOn ?? null,
+      asOf: input.asOf === undefined ? this.observedAt : input.asOf,
+      events: input.events ?? null,
       // Default COVERED only where a source genuinely has no coverage question (a server-side count of
       // the whole org). Anything product- or account-scoped must pass its real verdict.
       coverage: input.coverage ?? "COVERED",
@@ -78,7 +97,9 @@ function digestLine(ref: EvidenceRef): string {
   if (l.count != null) parts.push(`count=${Math.trunc(l.count)}`);
   if (l.channelCode) parts.push(`channel=${token(l.channelCode)}`);
   if (l.productName) parts.push(`product=${token(l.productName)}`);
-  if (ref.observedOn) parts.push(`observedOn=${token(ref.observedOn)}`);
+  if (ref.asOf) parts.push(`asOf=${token(ref.asOf)}`);
+  // The two times reach the judge under two names, so a model cannot read freshness as recency either.
+  if (ref.events) parts.push(`events=${token(eventRangeToken(ref.events))}`);
   parts.push(`source=${token(ref.sourceTool)}`);
   return parts.join(" ");
 }

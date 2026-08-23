@@ -125,6 +125,10 @@ export class LlmInvestigationPlanner implements Planner {
         needs: validated.informationNeeds.length,
         specialists: validated.specialistTargets.length,
         tools: validated.candidateTools.length,
+        // WHETHER a period was named, never WHICH — the mention is the seller's own words. This one
+        // boolean is what made the 2026-08-23 divergence diagnosable: two runs of one sentence took
+        // different temporal paths and no log said which had named a period.
+        periodNamed: validated.entities.unresolved.some((e) => e.kind === "PERIOD"),
       });
       return validated;
     } catch (err) {

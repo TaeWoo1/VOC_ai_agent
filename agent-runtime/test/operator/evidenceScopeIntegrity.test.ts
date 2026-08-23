@@ -130,7 +130,8 @@ function ref(overrides: Partial<EvidenceRef> = {}): EvidenceRef {
     sourceTool: "search_review_issues",
     sourceCall: "abcd1234",
     locator: { issueId: "i-1", count: 15, label: "배송 파손", severity: "HIGH" },
-    observedOn: "2026-06-16",
+    asOf: "2026-06-16",
+    events: { from: "2026-06-01", to: "2026-06-16" },
     coverage: "COVERED",
     provenance: "issue-memory/RULE_BASED",
     ...overrides,
@@ -225,13 +226,14 @@ describe("temporal axis", () => {
     NEED, [],
   );
 
-  it("an undated total does not answer a question about a period", () => {
-    expect(checkEvidence(dated(), ref({ kind: "INBOX_COUNT", observedOn: null, locator: { count: 69 } })))
-      .toBe("TEMPORAL_UNPROVEN");
+  it("a snapshot does not answer a question about events in a period", () => {
+    expect(checkEvidence(dated(), ref({
+      kind: "INBOX_COUNT", asOf: "2026-08-23", events: null, locator: { count: 69 },
+    }))).toBe("TEMPORAL_UNPROVEN");
   });
 
-  it("evidence carrying its own date passes the axis", () => {
-    expect(checkEvidence(dated(), ref({ observedOn: "2026-08-20" }))).toBeNull();
+  it("evidence whose rows carry their own dates passes the axis", () => {
+    expect(checkEvidence(dated(), ref({ events: { from: "2026-08-01", to: "2026-08-20" } }))).toBeNull();
   });
 });
 

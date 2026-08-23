@@ -100,7 +100,7 @@ const FINDING = {
 };
 const EVIDENCE = [{
   evidenceId: "e1", kind: "REVIEW_ISSUE" as const, sourceTool: "search_review_issues",
-  sourceCall: "aa11", locator: { count: 12 }, observedOn: "2026-08-14",
+  sourceCall: "aa11", locator: { count: 12 }, asOf: "2026-08-14", events: null,
   coverage: "COVERED" as const, provenance: "issue-memory/RULE_BASED",
 }];
 
