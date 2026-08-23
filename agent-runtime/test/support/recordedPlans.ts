@@ -335,6 +335,50 @@ export const INBOX_LIST_NEEDS_ROWS_PLAN: AgentPlanView = {
   providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-23 live (evidenceRequirements 명시)",
 };
 
+/**
+ * The plan whose run returned `DONE` with nothing in it.
+ *
+ * <b>gpt-5-2025-08-07, 2026-08-23, live against the canonical Demo Org.</b> The seller asked for their
+ * unanswered inquiries to be prioritised and drafted. The model planned eight needs across PRODUCT_OPS
+ * and INQUIRY_OPS — a reasonable decomposition. INQUIRY_OPS read the inbox, read the repeats, and then
+ * reached `search_customer_memory` with no anchor of any kind; the backend correctly answered `400
+ * 조회 기준이 필요합니다`, and the exception discarded the two reads that had already worked. The run
+ * ended `DONE`, findings 0. Record: `docs/agent_real_validation_v1.md` §3 Q5.
+ *
+ * Trimmed to the three needs that carry the mechanism (volume → repeats → history, in the live order);
+ * the product and draft needs are represented by the PRODUCT_OPS target and the goal text. The plan is
+ * otherwise the model's own: the fix must hold with a planner that still asks for customer history on a
+ * goal that names no product, because that is a reasonable thing to ask for.
+ */
+export const PRIORITIZE_AND_DRAFT_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "답변이 필요한 문의를 우선순위대로 정리하고 답변 초안을 만들고 싶다",
+  unresolvedEntities: [],
+  informationNeeds: [
+    { id: "n1", question: "오늘 기준 미답변 문의가 몇 건인지와 처리 범위를 파악한다.",
+      kind: "INQUIRY_VOLUME", why: "규모를 먼저 안다", required: true },
+    { id: "n2", question: "최근 기간에 반복되는 문의 주제가 무엇인지 확인한다.",
+      kind: "REPEAT_PATTERN", why: "반복은 우선순위를 바꾼다", required: false },
+    { id: "n3", question: "각 문의와 유사한 과거 사례 및 승인된 답변 문안을 조회한다.",
+      kind: "CUSTOMER_HISTORY", why: "초안은 과거 대응을 따른다", required: true },
+  ],
+  specialists: ["PRODUCT_OPS", "INQUIRY_OPS"],
+  tools: [],
+  retrievalOrder: ["n1", "n2", "n3"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 8,
+  stopWhenEnough: null,
+  clarificationNeeded: false,
+  clarificationReason: null,
+  rationale: "대기열을 파악하고 과거 대응을 참고해 우선순위를 정한다",
+  providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-23 live",
+};
+
 /** The goal → plan table the recorded-plan suites seed the transport fake with. */
 export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "폭이 몇 mm인가요?": SPEC_QUESTION_PLAN,
@@ -352,4 +396,5 @@ export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "상품에 문제 있어?": CLARIFY_PLAN,
   "전선몰딩 상품의 리뷰와 문의를 같이 보고 불만이 있는지 알려줘": PRODUCT_COMPLAINT_ORGWIDE_PLAN,
   "오늘 뭐부터 봐야 해? 목록으로": INBOX_LIST_NEEDS_ROWS_PLAN,
+  "답변이 필요한 문의를 우선순위대로 정리하고 답변 초안을 만들어줘": PRIORITIZE_AND_DRAFT_PLAN,
 };

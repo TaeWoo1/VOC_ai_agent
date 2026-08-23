@@ -28,9 +28,12 @@ import type {
   InquiryThreadContext,
   OperatorSpringClient,
 } from "../../src/spring/OperatorSpringClient";
+import { SpringApiError } from "../../src/spring/SpringClient";
 
 export interface FakeOperatorSeed {
   readonly inbox?: InboxSummary;
+  /** Make the inbox read fail with this HTTP status, to exercise specialist failure semantics. */
+  readonly inboxErrorStatus?: number;
   readonly products?: ProductSummary[];
   readonly signals?: Record<string, ProductSignals>;
   readonly customerMemory?: CustomerMemorySearch;
@@ -114,6 +117,12 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
 
   async getInbox(): Promise<InboxSummary> {
     this.calls.inbox += 1;
+    // Seeded 5xx: the only way to reproduce "the read that would have answered you failed" without
+    // asking a real backend to break. Status class only — no body, because the real error carries none.
+    if (this.seed.inboxErrorStatus) {
+      throw new SpringApiError(this.seed.inboxErrorStatus, `HTTP_${this.seed.inboxErrorStatus}`,
+        "backend request failed (GET /api/inquiries/inbox)");
+    }
     return this.seed.inbox ?? { items: [], total: 0, unansweredInquiries: 0 };
   }
 
@@ -150,8 +159,15 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     return found;
   }
 
-  async searchCustomerMemory(_params: CustomerMemorySearchParams): Promise<CustomerMemorySearch> {
+  async searchCustomerMemory(params: CustomerMemorySearchParams): Promise<CustomerMemorySearch> {
     this.calls.memory += 1;
+    // <b>The fake enforces the real endpoint's precondition.</b> `/api/customer-memory/search` refuses
+    // a call with no inquiryId / signatureKey / topic / productId — deliberately, because without an
+    // anchor a "past cases" lookup is a whole-org trawl. A fake that answered anyway would have made
+    // the Q5 crash unreproducible in CI, which is exactly how it reached a live seller.
+    if (!params.inquiryId && !params.signatureKey && !params.topic && !params.productId) {
+      throw new SpringApiError(400, "HTTP_400", "backend request failed (GET /api/customer-memory/search)");
+    }
     return (
       this.seed.customerMemory ?? {
         cueSignatureKey: null,

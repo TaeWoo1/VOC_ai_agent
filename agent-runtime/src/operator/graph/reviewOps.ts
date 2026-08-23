@@ -14,6 +14,7 @@ import type { NeedState } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import type { SpecialistInput } from "./specialistInput";
 import type { ReviewIssueSummary } from "../../spring/types";
+import { attemptTool } from "../failure/SpecialistOutcome";
 import { log } from "../../log";
 
 /** The need kinds this specialist answers. */
@@ -41,11 +42,24 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
     return pending("반복 문제를 읽기 전에 예산이 끝났습니다.");
   }
 
-  const issues = await registry.invoke<ReviewIssueSummary[]>(
-    OPERATOR_TOOL.SEARCH_REVIEW_ISSUES,
-    { ...(input.referenceDate ? { referenceDate: input.referenceDate } : {}) },
-    allowedTools,
+  // The one read this specialist makes, isolated the same way InquiryOps' are: a failing issue-memory
+  // call loses this specialist's contribution and nothing else, and it says so instead of throwing.
+  const attempt = await attemptTool(
+    { specialist: "REVIEW_OPS", tool: OPERATOR_TOOL.SEARCH_REVIEW_ISSUES, needId: input.needs[0]?.id },
+    () => registry.invoke<ReviewIssueSummary[]>(
+      OPERATOR_TOOL.SEARCH_REVIEW_ISSUES,
+      { ...(input.referenceDate ? { referenceDate: input.referenceDate } : {}) },
+      allowedTools,
+    ),
   );
+  if (!attempt.ok) {
+    return {
+      ...pending("반복 문제를 읽지 못했습니다."),
+      failures: [attempt.failure],
+      terminal: "FAILED",
+    };
+  }
+  const issues = attempt.value;
 
   const findings: Finding[] = [];
   const refs: EvidenceRef[] = [];
@@ -88,9 +102,13 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
     });
   }
 
-  log("review_ops", { issues: issues.length, surfaced: findings.length, needs: input.needs.length });
+  log("review_ops", {
+    issues: issues.length, surfaced: findings.length, needs: input.needs.length, terminal: "OK",
+  });
   return {
     specialist: "REVIEW_OPS",
+    failures: [],
+    terminal: "OK" as const,
     findings,
     evidence: refs,
     coverage: [],

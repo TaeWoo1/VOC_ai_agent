@@ -32,12 +32,15 @@ import type {
   OperatorState,
   OperatorStopReason,
   SpecialistName,
+  SpecialistOutcomeView,
   SpecialistResult,
 } from "../state/OperatorState";
 import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 import { mentionsOf, needsInOrder } from "../plan/InvestigationPlan";
 import type { NeedScope, RejectedEvidence } from "../scope/EvidenceScope";
 import { needScopeOf, partitionEvidence, planScopeOf, reasonSentence } from "../scope/EvidenceScope";
+import type { SpecialistTerminal, ToolFailure } from "../failure/SpecialistOutcome";
+import { classifyToolError, failureSentence, terminalOf } from "../failure/SpecialistOutcome";
 import { EvidenceBuilder } from "../state/evidence";
 import { confidenceOf } from "../judge/EvidenceJudge";
 import type { EvidenceJudge } from "../judge/EvidenceJudge";
@@ -93,6 +96,15 @@ const SPECIALIST_TOOLS: Record<SpecialistName, readonly string[]> = {
   REPORT_OPS: [],
 };
 
+/**
+ * The words that mean "write it for me".
+ *
+ * Tiny and deliberately not clever: it decides only whether one honest sentence about the lane's limit
+ * appears. It is not consulted for routing, for tool choice or for status — `goalRoutingFence` guards
+ * the place where free text IS interpreted (`parseGoal`), and this is not that place.
+ */
+const DRAFT_WORDS = ["초안", "답변 작성", "답장 작성", "답변을 작성", "써줘", "작성해줘"] as const;
+
 export function buildOperatorGraph(deps: OperatorGraphDeps) {
   const catalogue = toolCatalogueFor(deps.tools);
   // One builder per graph build, so evidence ids are unique within a run and stable across its passes.
@@ -146,6 +158,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // because it composes what the others produced.
     const ordered = orderSpecialists(plan.specialistTargets);
     const scopeRejections: RejectedEvidence[] = [];
+    const specialistFailures: ToolFailure[] = [];
     // Every ref the run has minted so far, not just this specialist's. REPORT_OPS cites the OTHERS'
     // evidence and registers none of its own, so a gate that could only see one specialist's refs would
     // find nothing behind every report sentence and silently delete the report.
@@ -158,6 +171,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       const known = [...resolved, ...outcome.resolvedEntities];
       const gated = applyScopeGate(plan, known, outcome.result, outcome.needStates, seenEvidence);
       scopeRejections.push(...gated.rejected);
+      specialistFailures.push(...(outcome.result.failures ?? []));
       results.push({ ...outcome.result, findings: gated.findings });
       needStates.push(...gated.needStates);
       resolved.push(...outcome.resolvedEntities);
@@ -174,6 +188,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       entities: resolved,
       knowledge,
       scopeRejections: [...state.scopeRejections, ...scopeRejections],
+      specialistFailures,
       trail: [`dispatched:${ordered.join("+")}`],
     };
   }
@@ -321,15 +336,35 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
         }
       }
     } catch (err) {
-      // One specialist failing must not fail the run — but it must not vanish either. The note is what
-      // reaches the answer, so the seller learns that a part of the picture is missing.
-      log("operator_specialist_failed", { specialist });
+      // The BACKSTOP, not the mechanism. InquiryOps and ReviewOps isolate their own reads and never
+      // reach here; a specialist that still throws lands as one structured failure rather than a name.
+      //
+      // <b>Only the error's SHAPE is read.</b> `classifyToolError` looks at `status` and `name`; the
+      // message is never touched, because a backend error message is the field most likely to quote
+      // what was sent.
+      const classified = classifyToolError(err);
+      const failure: ToolFailure = {
+        specialist,
+        // The throwing tool is unknown at this level — a specialist that wants its tool named isolates
+        // its own calls, which is exactly what this catch existing as a backstop is meant to encourage.
+        tool: "unspecified",
+        ...classified,
+      };
+      log("operator_specialist_failed", {
+        specialist,
+        tool: failure.tool,
+        category: failure.category,
+        statusCategory: failure.statusCategory,
+        recoverable: failure.recoverable,
+      });
       return {
         result: {
           specialist,
           findings: [],
           evidence: [],
           coverage: [],
+          failures: [failure],
+          terminal: "FAILED" as const,
           note: `${specialist} 조회에 실패해 이 부분은 답에 포함되지 않았습니다.`,
         },
         needStates: [],
@@ -455,6 +490,31 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       notes.push(`확인하지 못한 항목: ${unanswered.map((n) => n.question).join(" / ")}.`);
     }
 
+    // How each specialist ended. Derived here rather than trusted from the result, so a specialist that
+    // reports nothing still gets a truthful terminal instead of an implied success.
+    const outcomes: SpecialistOutcomeView[] = state.results.map((r) => {
+      const failures = [...(r.failures ?? [])];
+      const terminal: SpecialistTerminal = r.terminal
+        ?? terminalOf({ succeeded: r.evidence.length, failures });
+      return { specialist: r.specialist, terminal, failures };
+    });
+    // Every distinct failure reason, said once. The seller learns that a part of the picture is missing
+    // and WHY — the anchor sentence in particular is a fact about their data, not an apology.
+    for (const sentence of new Set(state.specialistFailures.map(failureSentence))) {
+      notes.push(sentence);
+    }
+    // <b>The lane's own ceiling, said plainly.</b> The Operator catalogue is READ-only by construction
+    // (`OperatorToolRegistry` refuses to register anything else), so a goal that asks for a reply to be
+    // WRITTEN cannot be completed here however the plan is shaped — the draft lane is the inquiry
+    // subgraph, reached by its own intent. This is a capability NOTICE and never a route: it selects no
+    // tool, no specialist and no status, and the same shape of keyword check already decides what the
+    // rule judge refuses to say. Without it a seller who asked for drafts reads an answer that silently
+    // dropped half the request.
+    if (DRAFT_WORDS.some((w) => state.goalText.includes(w))) {
+      notes.push("답변 초안 작성은 이 대화 창구에서 하지 않습니다 — 조회만 가능합니다."
+        + " 초안은 문의 화면의 답변 준비에서 만들 수 있습니다.");
+    }
+
     const answer: OperatorAnswer = {
       goalEcho: state.goalText,
       plannerKind: "LLM",
@@ -468,6 +528,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
         Object.values(state.knowledge).flatMap((k) => k.knowledgeCoverage),
       ),
       nextActions: nextActionsFor(ordered),
+      specialistOutcomes: outcomes,
       clarification: plan?.clarificationNeeded ? (plan.clarificationReason ?? plan.userGoal) : null,
       budget,
       // Deduped: two passes over the same unresolvable product produce the same sentence twice,
@@ -479,6 +540,8 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       evidence: state.evidence.length,
       stopReason: budget.stopReason,
       unansweredNeeds: unanswered.length,
+      specialistsFailed: outcomes.filter((o) => o.terminal === "FAILED").length,
+      specialistsPartial: outcomes.filter((o) => o.terminal === "PARTIAL").length,
     });
     return { answer, trail: ["composed"] };
   }

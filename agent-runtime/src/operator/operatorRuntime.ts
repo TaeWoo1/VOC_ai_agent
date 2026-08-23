@@ -26,6 +26,7 @@ import type { EvidenceJudge } from "./judge/EvidenceJudge";
 import { OperatorBudget, OPERATOR_BUDGET_V1 } from "./budget/OperatorBudget";
 import type { OperatorBudgetLimits } from "./budget/OperatorBudget";
 import type { OperatorAnswer, OperatorFailureCode, OperatorState } from "./state/OperatorState";
+import { failureSentence } from "./failure/SpecialistOutcome";
 import { threadConfig } from "../checkpoint/CheckpointContract";
 import type { GoalRequest } from "../goal/parseGoal";
 import type { OperatorSpringClient } from "../spring/OperatorSpringClient";
@@ -119,10 +120,37 @@ export class OperatorAgentRuntime {
         trail: final.trail ?? [],
       };
     }
+    // <b>A run that produced nothing because its reads FAILED does not end DONE.</b> Live 2026-08-23 a
+    // seller asked for their inquiries to be prioritised, INQUIRY_OPS died on one anchorless call, and
+    // the run returned `DONE` with zero findings — indistinguishable, on screen, from "확인했고 아무것도
+    // 없었다". An empty run whose specialists all worked is still DONE, because that is the true
+    // statement about a quiet inbox; only a failed read turns silence into a failure.
+    //
+    // <b>A deliberate skip is not a failure of the system.</b> `ANCHOR_UNAVAILABLE` means the run knew
+    // a read could not be made and said so — a fact about the seller's question, not a broken read. A
+    // run that only skipped still ends DONE, with its reason on the card. Everything else — a 4xx, a
+    // 5xx, a dropped connection, a refused tool — is a read that SHOULD have answered and did not.
+    const hardFailures = final.answer.specialistOutcomes
+      .flatMap((o) => o.failures)
+      .filter((f) => f.category !== "ANCHOR_UNAVAILABLE");
+    if (final.answer.findings.length === 0 && hardFailures.length > 0) {
+      log("operator_run_failed", {
+        failureCode: "EVIDENCE_UNAVAILABLE",
+        failedSpecialists: [...new Set(hardFailures.map((f) => f.specialist))].join(","),
+        categories: [...new Set(hardFailures.map((f) => f.category))].sort().join(","),
+      });
+      return {
+        status: "FAILED",
+        failureCode: "EVIDENCE_UNAVAILABLE",
+        reason: failureSentence(hardFailures[0]!),
+        trail: final.trail ?? [],
+      };
+    }
     log("operator_run_done", {
       findings: final.answer.findings.length,
       evidence: final.answer.evidence.length,
       stopReason: final.answer.budget.stopReason,
+      specialistsFailed: final.answer.specialistOutcomes.filter((o) => o.terminal === "FAILED").length,
     });
     return { status: "DONE", answer: final.answer, trail: final.trail ?? [] };
   }

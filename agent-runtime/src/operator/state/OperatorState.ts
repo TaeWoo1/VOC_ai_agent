@@ -14,6 +14,7 @@
  */
 import { Annotation } from "@langchain/langgraph";
 import type { AgentGoal } from "../../goal/parseGoal";
+import type { SpecialistTerminal, ToolFailure } from "../failure/SpecialistOutcome";
 import type { AttentionCoverage, KnowledgeCoverageRow, ProductKnowledge, SignalCoverage } from "../../spring/types";
 import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 
@@ -185,7 +186,17 @@ export type OperatorStopReason =
 export type OperatorFailureCode =
   | "PLANNER_UNAVAILABLE"
   | "PLANNER_CAPABILITY_OFF"
-  | "PLAN_INVALID";
+  | "PLAN_INVALID"
+  /**
+   * The plan was made and the reads were attempted, and none of them came back with anything the run
+   * could say.
+   *
+   * <b>Added because `DONE` with zero findings was being used for two different things.</b> "I looked
+   * and your data is quiet" and "the reads that would have answered you failed" are opposite facts, and
+   * a seller cannot tell them apart from an empty answer card. This code is only ever returned when a
+   * specialist actually FAILED — an empty-but-healthy run stays `DONE`, because it is one.
+   */
+  | "EVIDENCE_UNAVAILABLE";
 
 /** What a specialist returns: findings, the evidence behind them, and any coverage limits it hit. */
 export interface SpecialistResult {
@@ -194,6 +205,23 @@ export interface SpecialistResult {
   readonly evidence: readonly EvidenceRef[];
   readonly coverage: readonly SignalCoverage[];
   readonly note?: string;
+  /**
+   * Reads that did not produce evidence, and why. Closed vocabulary; never a value or a message.
+   *
+   * <b>Optional so that a specialist which cannot fail partially does not have to say so</b> — the
+   * graph derives {@link terminal} when a specialist reports neither field, which keeps ReportOps
+   * (no tools at all) and the existing suites unchanged.
+   */
+  readonly failures?: readonly ToolFailure[];
+  /** OK / PARTIAL / FAILED, when the specialist knows its own. Derived by the graph otherwise. */
+  readonly terminal?: SpecialistTerminal;
+}
+
+/** One specialist's terminal state as the answer reports it. */
+export interface SpecialistOutcomeView {
+  readonly specialist: SpecialistName;
+  readonly terminal: SpecialistTerminal;
+  readonly failures: readonly ToolFailure[];
 }
 
 /** The Operator's terminal answer. Sanitized by construction — every field above is. */
@@ -220,6 +248,14 @@ export interface OperatorAnswer {
   /** Present when the plan asked a question back instead of answering. */
   readonly clarification: string | null;
   readonly budget: BudgetReport;
+  /**
+   * How each dispatched specialist ended, and what it could not read.
+   *
+   * <b>Present even when everything worked</b>, because "no failures" is only informative if the field
+   * would have shown them. A run that hides a specialist's exception behind a normal-looking answer is
+   * the Q5 defect; this is where that stops being possible.
+   */
+  readonly specialistOutcomes: readonly SpecialistOutcomeView[];
   /** What was NOT seen — a truncated read, a skipped specialist, an uncertain source. Never silent. */
   readonly note?: string;
 }
@@ -289,6 +325,10 @@ export const OperatorStateAnnotation = Annotation.Root({
    * `compose` reads this to add the withholding note. Ids and closed-vocabulary reasons only.
    */
   scopeRejections: Annotation<import("../scope/EvidenceScope").RejectedEvidence[]>({
+    reducer: (p, n) => [...p, ...n], default: () => [],
+  }),
+  /** Every read that did not produce evidence this run, across every specialist and every pass. */
+  specialistFailures: Annotation<ToolFailure[]>({
     reducer: (p, n) => [...p, ...n], default: () => [],
   }),
   answer: Annotation<OperatorAnswer | null>({ reducer: (_p, n) => n, default: () => null }),

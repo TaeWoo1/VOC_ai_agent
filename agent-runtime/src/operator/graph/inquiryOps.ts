@@ -21,6 +21,8 @@ import type { NeedState } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import type { SpecialistInput } from "./specialistInput";
 import type { CustomerMemorySearch, InboxSummary, RepeatedInquiry } from "../../spring/types";
+import { attemptTool, skippedTool, terminalOf } from "../failure/SpecialistOutcome";
+import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { log } from "../../log";
 
 /** The need kinds this specialist answers. */
@@ -36,6 +38,10 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
   const refs: EvidenceRef[] = [];
   const notes: string[] = [];
   const needStates: NeedState[] = [];
+  // Isolation state. `succeeded` counts reads that came back — including ones that came back empty,
+  // because an empty answer from a working source is a fact, not a failure.
+  const failures: ToolFailure[] = [];
+  let succeeded = 0;
 
   for (const need of input.needs) {
     if (need.kind === "INQUIRY_VOLUME") {
@@ -43,7 +49,17 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
         needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
         continue;
       }
-      const inbox = await registry.invoke<InboxSummary>(OPERATOR_TOOL.GET_TODAY_INBOX, {}, allowedTools);
+      const attempt = await attemptTool(
+        { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.GET_TODAY_INBOX, needId: need.id },
+        () => registry.invoke<InboxSummary>(OPERATOR_TOOL.GET_TODAY_INBOX, {}, allowedTools),
+      );
+      if (!attempt.ok) {
+        failures.push(attempt.failure);
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      succeeded += 1;
+      const inbox = attempt.value;
       const ref = evidence.add({
         kind: "INBOX_COUNT",
         sourceTool: OPERATOR_TOOL.GET_TODAY_INBOX,
@@ -81,11 +97,21 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
         needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
         continue;
       }
-      const repeats = await registry.invoke<RepeatedInquiry[]>(
-        OPERATOR_TOOL.LIST_REPEATED_INQUIRIES,
-        { ...(input.referenceDate ? { referenceDate: input.referenceDate } : {}) },
-        allowedTools,
+      const attempt = await attemptTool(
+        { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.LIST_REPEATED_INQUIRIES, needId: need.id },
+        () => registry.invoke<RepeatedInquiry[]>(
+          OPERATOR_TOOL.LIST_REPEATED_INQUIRIES,
+          { ...(input.referenceDate ? { referenceDate: input.referenceDate } : {}) },
+          allowedTools,
+        ),
       );
+      if (!attempt.ok) {
+        failures.push(attempt.failure);
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      succeeded += 1;
+      const repeats = attempt.value;
       const cited: string[] = [];
       for (const repeat of repeats.slice(0, 3)) {
         const ref = evidence.add({
@@ -128,25 +154,58 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     }
 
     if (need.kind === "CUSTOMER_HISTORY") {
+      // <b>The anchor is checked BEFORE the call, and its absence is a reason rather than a 400.</b>
+      // `/api/customer-memory/search` requires one of inquiryId / signatureKey / topic / productId and
+      // refuses the rest — correctly: without an anchor the "past cases" lookup is a whole-org trawl,
+      // which is a different and much wider read than the one this need asked for. Live 2026-08-23 this
+      // specialist asked anyway, with `{limit: 5}`, and the backend's correct refusal took the whole
+      // specialist down with it (`docs/agent_real_validation_v1.md` §3 Q5).
+      //
+      // A resolved product is the only anchor reachable here today. The seller's own words are NOT an
+      // anchor: a customer sentence is never a query string, which is why the endpoint has no free-text
+      // parameter. So when there is no product, this need is not served and SAYS it is not served.
+      const product = input.resolved.find((e) => e.kind === "PRODUCT");
+      if (!product) {
+        failures.push(skippedTool({
+          specialist: "INQUIRY_OPS",
+          tool: OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
+          needId: need.id,
+        }));
+        needStates.push({
+          id: need.id,
+          status: "UNSATISFIABLE",
+          evidenceIds: [],
+          reason: "과거 대응 사례는 대상 상품이나 문의를 먼저 특정해야 찾을 수 있습니다.",
+        });
+        continue;
+      }
+      // Charged only now: the budget pays for calls that happen. Live 2026-08-23 the re-run spent three
+      // tool charges on three needs whose call was correctly skipped, which is a run buying nothing.
       if (!budget.spend("tool")) {
         needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
         continue;
       }
-      // The cue comes from a resolved product when there is one, and from the plan's own topic mention
-      // otherwise. A customer sentence is never a query string — that is the contract the backend's
-      // search endpoint enforces by not having a free-text parameter at all.
-      const product = input.resolved.find((e) => e.kind === "PRODUCT");
-      const recall = await registry.invoke<CustomerMemorySearch>(
-        OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
-        { ...(product ? { productId: product.id } : {}), limit: 5 },
-        allowedTools,
+      const attempt = await attemptTool(
+        { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY, needId: need.id },
+        () => registry.invoke<CustomerMemorySearch>(
+          OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
+          { productId: product.id, limit: 5 },
+          allowedTools,
+        ),
       );
+      if (!attempt.ok) {
+        failures.push(attempt.failure);
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      succeeded += 1;
+      const recall = attempt.value;
       const cited: string[] = [];
       for (const hit of recall.hits.slice(0, 3)) {
         const ref = evidence.add({
           kind: "CUSTOMER_MEMORY",
           sourceTool: OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
-          args: { productId: product?.id ?? null },
+          args: { productId: product.id },
           locator: {
             ...(hit.productId ? { productId: hit.productId } : {}),
             ...(hit.productName ? { productName: hit.productName } : {}),
@@ -219,13 +278,18 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     });
   }
 
-  log("inquiry_ops", { needs: input.needs.length, findings: findings.length });
+  const terminal = terminalOf({ succeeded, failures });
+  log("inquiry_ops", {
+    needs: input.needs.length, findings: findings.length, succeeded, failed: failures.length, terminal,
+  });
   return {
     specialist: "INQUIRY_OPS",
     findings,
     evidence: refs,
     coverage: [],
     needStates,
+    failures,
+    terminal,
     ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
   };
 }
