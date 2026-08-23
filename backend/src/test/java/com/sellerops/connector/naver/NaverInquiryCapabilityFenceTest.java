@@ -1,0 +1,115 @@
+package com.sellerops.connector.naver;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.sellerops.connector.ConnectorCapabilities;
+import com.sellerops.connector.DataType;
+import com.sellerops.connector.FetchRequest;
+import com.sellerops.connector.UnsupportedDataTypeException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.UUID;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+/**
+ * What the NAVER connector says it can do, and why the word it uses matters.
+ *
+ * <p>{@code SelfPilotReconciler} creates a 60-minute routine schedule for every routine data type a
+ * connected account's connector <b>advertises</b>. So "advertise INQUIRY" is not a documentation act —
+ * it is, five minutes later, a standing marketplace call. This test pins the two-step fence that keeps
+ * those apart: no inquiry client ⇒ no advertisement at all; a wired but unproven client ⇒ advertised
+ * as {@code NEEDS_VERIFICATION}, reachable for an operator's approved run and refused by the
+ * reconciler.
+ */
+class NaverInquiryCapabilityFenceTest {
+
+    private static final String BASE_URL = "https://fake.naver.test";
+    private static final Clock CLOCK =
+            Clock.fixed(Instant.parse("2026-08-24T03:00:00Z"), ZoneOffset.UTC);
+
+    private final FakeNaverHttpClient http = new FakeNaverHttpClient();
+
+    private NaverApiConnector connector(NaverInquiryCollector inquiries) {
+        return new NaverApiConnector(
+                new NaverTokenClient(http, CLOCK, BASE_URL),
+                new NaverOrdersClient(http, CLOCK, BASE_URL, 100),
+                new NaverProductsClient(http, CLOCK, BASE_URL),
+                inquiries,
+                null);
+    }
+
+    private NaverInquiryCollector wired() {
+        return new NaverInquiryCollector(new NaverProductQnaClient(http, BASE_URL),
+                new NaverCustomerInquiriesClient(http, BASE_URL), CLOCK);
+    }
+
+    @Test
+    @DisplayName("no inquiry source wired: INQUIRY is not offered, rather than offered-and-failing")
+    void anUnwiredCapabilityIsNotAdvertised() {
+        ConnectorCapabilities capabilities = connector(null).capabilities("NAVER");
+
+        assertThat(capabilities.supports(DataType.INQUIRY)).isFalse();
+        assertThat(capabilities.verificationStatus()).doesNotContainKey(DataType.INQUIRY);
+    }
+
+    @Test
+    @DisplayName("a collector with neither source wired advertises nothing either")
+    void anEmptyCollectorIsTheSameAsNoCollector() {
+        ConnectorCapabilities capabilities =
+                connector(new NaverInquiryCollector(null, null, CLOCK)).capabilities("NAVER");
+
+        assertThat(capabilities.supports(DataType.INQUIRY)).isFalse();
+    }
+
+    @Test
+    @DisplayName("wired but unproven: advertised as NEEDS_VERIFICATION, never as CONFIRMED")
+    void aWiredButUnprovenCapabilitySaysSo() {
+        ConnectorCapabilities capabilities = connector(wired()).capabilities("NAVER");
+
+        assertThat(capabilities.supports(DataType.INQUIRY)).isTrue();
+        // The word is the fence: SelfPilotReconciler creates automatic schedules only for CONFIRMED.
+        // Promotion is a live proof, not an edit to this line.
+        assertThat(capabilities.verificationStatus().get(DataType.INQUIRY))
+                .isEqualTo("NEEDS_VERIFICATION");
+        // The proven ones are untouched by this package.
+        assertThat(capabilities.verificationStatus().get(DataType.ORDER_SUMMARY)).isEqualTo("CONFIRMED");
+        assertThat(capabilities.verificationStatus().get(DataType.PRODUCT)).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    @DisplayName("an unwired INQUIRY fetch is refused before any HTTP and before the vault is opened")
+    void anUnwiredInquiryFetchIsRefusedWithZeroHttp() {
+        assertThatThrownBy(() -> connector(null).fetch(new FetchRequest(
+                UUID.randomUUID(), UUID.randomUUID(), "NAVER", DataType.INQUIRY, null, 50)))
+                .isInstanceOf(UnsupportedDataTypeException.class);
+
+        assertThat(http.sent).isEmpty();
+    }
+
+    @Test
+    @DisplayName("the capability note names TWO inquiry resources and says TalkTalk is not one of them")
+    void theNoteDistinguishesTheResourcesItActuallyHas() {
+        String notes = connector(wired()).capabilities("NAVER").notes();
+
+        assertThat(notes).contains("/v1/contents/qnas").contains("/v1/pay-user/inquiries");
+        // "NAVER 문의 = UNSUPPORTED" was the claim this package corrects; "NAVER TalkTalk has no
+        // Commerce API" is the part of it that was true and stays.
+        assertThat(notes).contains("TalkTalk");
+    }
+
+    @Test
+    @DisplayName("an operator's bounded INQUIRY window is seedable only when a source is wired")
+    void boundedSeedingFollowsTheSameFence() {
+        java.time.LocalDate from = java.time.LocalDate.parse("2026-08-01");
+        java.time.LocalDate to = java.time.LocalDate.parse("2026-08-24");
+
+        assertThat(connector(null).backfillCursor(DataType.INQUIRY, from, to)).isEmpty();
+        assertThat(connector(wired()).backfillCursor(DataType.INQUIRY, from, to)).isPresent();
+        // An inverted or half-specified window is refused on both lanes, as before.
+        assertThat(connector(wired()).backfillCursor(DataType.INQUIRY, to, from)).isEmpty();
+        assertThat(connector(wired()).backfillCursor(DataType.INQUIRY, null, to)).isEmpty();
+    }
+}

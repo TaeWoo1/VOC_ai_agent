@@ -35,6 +35,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -56,6 +57,35 @@ class SelfPilotReconcilerTest {
     private Channel gmarket;
 
     /** A stand-in for a real (dedicated) connector: Cafe24 shape — REVIEW/INQUIRY/ORDER_SUMMARY. */
+    /**
+     * A real connector that can REACH a data type but has never had it live-verified — the shape of a
+     * capability the day it is written, before an approved run proves it.
+     */
+    private static PullConnector unverified(String code, DataType type) {
+        return new PullConnector() {
+            @Override
+            public String kind() {
+                return "REAL_" + code;
+            }
+
+            @Override
+            public Set<String> dedicatedChannels() {
+                return Set.of(code);
+            }
+
+            @Override
+            public ConnectorCapabilities capabilities(String channelCode) {
+                return new ConnectorCapabilities("API", Set.of(type),
+                        java.util.Map.of(type, "NEEDS_VERIFICATION"), null);
+            }
+
+            @Override
+            public FetchPage fetch(FetchRequest request) {
+                throw new UnsupportedOperationException();
+            }
+        };
+    }
+
     private static PullConnector dedicated(String code, DataType... types) {
         return new PullConnector() {
             @Override
@@ -70,7 +100,14 @@ class SelfPilotReconcilerTest {
 
             @Override
             public ConnectorCapabilities capabilities(String channelCode) {
-                return new ConnectorCapabilities("API", Set.of(types), java.util.Map.of(), null);
+                // CONFIRMED, because these fixtures are about a LIVE-PROVEN capability's schedule.
+                // The unproven case has its own test below — it must not be the accidental default
+                // here, or the fence that guards it would be doing the work in every fixture.
+                java.util.Map<DataType, String> proven = new java.util.LinkedHashMap<>();
+                for (DataType type : types) {
+                    proven.put(type, "CONFIRMED");
+                }
+                return new ConnectorCapabilities("API", Set.of(types), proven, null);
             }
 
             @Override
@@ -368,5 +405,21 @@ class SelfPilotReconcilerTest {
     @SuppressWarnings("unused")
     private static List<SyncSchedule> none() {
         return new ArrayList<>();
+    }
+
+    @Test
+    @DisplayName("a capability that has never been live-verified gets no automatic routine schedule")
+    void anUnverifiedCapabilityIsReachableButNotAutomatic() {
+        when(accounts.findAllByOrgId(org)).thenReturn(List.of(account(cafe24, ChannelStatus.CONNECTED, false)));
+        SelfPilotReconciler r = reconciler(props(true, false),
+                unverified("CAFE24", DataType.INQUIRY), new MockApiConnector());
+
+        SelfPilotReconciler.TickReport report = r.tick(Instant.parse("2026-08-18T03:00:00Z"));
+
+        // Adding a data type to a connector must not be the same edit as starting a 60-minute
+        // marketplace loop. Before this fence it was: the reconciler creates a schedule for whatever a
+        // connector advertises, five minutes after the connector learns to advertise it.
+        assertThat(report.schedulesCreated()).isZero();
+        verify(schedules, never()).save(any());
     }
 }

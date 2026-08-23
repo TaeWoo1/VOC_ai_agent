@@ -93,6 +93,31 @@ public class Inquiry extends BaseEntity {
     private String contentHash;
 
     /**
+     * Which resource of the channel produced this row — see {@link InquirySourceSubtype}.
+     *
+     * <p>Null on every row whose channel has exactly one inquiry resource, and on every row ingested
+     * before the column existed. It is never inferred: a subtype is written by the mapper that made
+     * the call, because that is the only place that knows which call it was.
+     */
+    @Column(name = "source_subtype", length = 32)
+    private String sourceSubtype;
+
+    /**
+     * The answer the seller already published on the platform, when the source carries it.
+     *
+     * <p>Null for every source whose API returns only an answered flag, and for every row collected
+     * before this column existed. It is the difference between "이 문의는 처리됐다" and "이 문의에
+     * 무엇이라고 답했다": a reply draft written without the second one can propose an answer the seller
+     * already gave. Never fabricated from the flag.
+     */
+    @Column(name = "answer_body", columnDefinition = "text")
+    private String answerBody;
+
+    /** When the source says that answer was registered. Null when the source states none. */
+    @Column(name = "answered_at")
+    private Instant answeredAt;
+
+    /**
      * Cafe24 board-6 비밀글(secret) flag, preserved for the exposure boundary. {@code true} =
      * private inquiry (kept in the work queue but excluded from dashboards / general VOC
      * analysis); {@code false} = public. {@code null} on legacy / non-Cafe24 (ESM, file-upload)

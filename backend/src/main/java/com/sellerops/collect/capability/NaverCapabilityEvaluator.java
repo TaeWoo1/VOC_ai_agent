@@ -26,8 +26,15 @@ import java.util.UUID;
  *       is {@code GUIDED_CONFIRMATION} (NAVER has no review API — reviews arrive only through the
  *       operator-confirmed Action Window export), {@code REVIEW_REPLY} is {@code NOT_ENABLED}
  *       (no automatic send; submission unverified), and {@code INQUIRY_READ} is
- *       {@code INTEGRATION_PENDING} (not integrated for NAVER). They render as informational labels,
- *       so the order connection is never mixed with the review/inquiry surfaces.</li>
+ *       {@code INTEGRATION_PENDING}. They render as informational labels, so the order connection is
+ *       never mixed with the review/inquiry surfaces.
+ *       <p><b>{@code INQUIRY_READ} was corrected on 2026-08-24, and only halfway.</b> "NAVER has no
+ *       inquiry integration" was wrong as a statement about the CHANNEL — NAVER publishes two official
+ *       inquiry READ resources and both are now implemented
+ *       ({@code docs/naver_inquiry_api_audit_v1.md}). It stays {@code INTEGRATION_PENDING} here
+ *       because the seller-facing word must track what has been PROVEN on this seller's account, and
+ *       neither resource has been read live yet ({@code NEEDS_VERIFICATION} in the connector's
+ *       capability table). A live proof promotes it; nothing else may.</li>
  * </ul>
  */
 public final class NaverCapabilityEvaluator {

@@ -73,10 +73,51 @@ public class NaverConnectorConfiguration {
         return new NaverProductsClient(http, Clock.systemUTC(), baseUrl);
     }
 
+    /**
+     * 상품 문의 (GET /v1/contents/qnas) — its own flag, default off.
+     *
+     * <p>Per-source flags are not fussiness. They are what lets a live proof measure ONE resource:
+     * with only this one on, a bounded run makes 상품 문의 calls and nothing else, so a 403, a page
+     * count and an attribution rate all belong to a single endpoint. They are also the fence — the
+     * bean's absence is what keeps {@code NaverApiConnector} from advertising INQUIRY at all.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.naver.inquiry.product-qna.enabled",
+            havingValue = "true")
+    NaverProductQnaClient naverProductQnaClient(
+            NaverHttpClient http,
+            @Value("${sellerops.connector.naver.base-url:https://api.commerce.naver.com}") String baseUrl) {
+        return new NaverProductQnaClient(http, baseUrl);
+    }
+
+    /** 고객 문의 (GET /v1/pay-user/inquiries) — its own flag, default off. */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.naver.inquiry.customer.enabled",
+            havingValue = "true")
+    NaverCustomerInquiriesClient naverCustomerInquiriesClient(
+            NaverHttpClient http,
+            @Value("${sellerops.connector.naver.base-url:https://api.commerce.naver.com}") String baseUrl) {
+        return new NaverCustomerInquiriesClient(http, baseUrl);
+    }
+
+    /**
+     * The lane driver. Always present when the NAVER connector is; it reports
+     * {@code hasAnySource() == false} when neither source flag is on, and the connector then does not
+     * advertise INQUIRY — so a deployment with both flags off behaves exactly as it did before.
+     */
+    @Bean
+    NaverInquiryCollector naverInquiryCollector(
+            org.springframework.beans.factory.ObjectProvider<NaverProductQnaClient> qnaClient,
+            org.springframework.beans.factory.ObjectProvider<NaverCustomerInquiriesClient> customerClient) {
+        return new NaverInquiryCollector(
+                qnaClient.getIfAvailable(), customerClient.getIfAvailable(), Clock.systemUTC());
+    }
+
     @Bean
     NaverApiConnector naverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
                                         NaverProductsClient productsClient,
+                                        NaverInquiryCollector inquiryCollector,
                                         CredentialVault vault) {
-        return new NaverApiConnector(tokenClient, ordersClient, productsClient, vault);
+        return new NaverApiConnector(tokenClient, ordersClient, productsClient, inquiryCollector, vault);
     }
 }

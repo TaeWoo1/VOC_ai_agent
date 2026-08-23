@@ -5,6 +5,7 @@ import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.community.CommunityReplyStatus;
 import com.sellerops.community.CommunitySourceKind;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
+import com.sellerops.ingest.canonical.ChannelProductRef;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import com.sellerops.ingest.canonical.CanonicalReview;
@@ -16,6 +17,8 @@ import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import com.sellerops.order.OrderDailySummary;
 import com.sellerops.order.OrderDailySummaryRepository;
+import com.sellerops.product.ChannelProduct;
+import com.sellerops.product.ChannelProductRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductService;
 import com.sellerops.review.Review;
@@ -28,6 +31,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -66,10 +70,19 @@ public class IngestionService {
      */
     private final InquiryWorkItemWriter workItemWriter;
 
+    /**
+     * The listing catalogue, used ONLY by the identifier-attribution lane (see
+     * {@link ChannelProductRef}). Null when a caller wires the legacy constructor — and a null here
+     * fails closed: a row that asks to be attributed by channel identifier is then left unattributed
+     * rather than dropped into the name path that creates products.
+     */
+    private final ChannelProductRepository channelProducts;
+
+    @Autowired
     public IngestionService(ReviewRepository reviews, InquiryRepository inquiries,
                             OrderDailySummaryRepository orderSummaries, ProductService productService,
                             Cafe24CommunityArticleRepository communityArticles, ChannelRepository channels,
-                            InquiryWorkItemWriter workItemWriter) {
+                            InquiryWorkItemWriter workItemWriter, ChannelProductRepository channelProducts) {
         this.reviews = reviews;
         this.inquiries = inquiries;
         this.orderSummaries = orderSummaries;
@@ -77,6 +90,16 @@ public class IngestionService {
         this.communityArticles = communityArticles;
         this.channels = channels;
         this.workItemWriter = workItemWriter;
+        this.channelProducts = channelProducts;
+    }
+
+    /** Legacy wiring: no listing catalogue, so identifier attribution resolves to nothing. */
+    public IngestionService(ReviewRepository reviews, InquiryRepository inquiries,
+                            OrderDailySummaryRepository orderSummaries, ProductService productService,
+                            Cafe24CommunityArticleRepository communityArticles, ChannelRepository channels,
+                            InquiryWorkItemWriter workItemWriter) {
+        this(reviews, inquiries, orderSummaries, productService, communityArticles, channels,
+                workItemWriter, null);
     }
 
     public IngestOutcome ingestReviews(UUID orgId, UUID channelId, List<CanonicalReview> rows) {
@@ -174,10 +197,10 @@ public class IngestionService {
         Set<String> seen = new HashSet<>();
         for (CanonicalInquiry row : rows) {
             try {
-                Product product = productService.resolveOrCreate(orgId, row.productName(), row.sku());
+                UUID productId = attributeProduct(orgId, channelId, row);
                 boolean hasExternal = isPresent(row.externalId());
                 String hash = hasExternal ? null
-                        : ContentHash.of(channelId.toString(), product.getId().toString(),
+                        : ContentHash.of(channelId.toString(), String.valueOf(productId),
                         datePart(row.receivedAt()), row.body());
                 String token = hasExternal ? "ext:" + row.externalId() : "hash:" + hash;
 
@@ -230,7 +253,8 @@ public class IngestionService {
                 entity.setOrgId(orgId);
                 entity.setChannelId(channelId);
                 entity.setSellerAccountId(sellerAccountId);
-                entity.setProductId(product.getId());
+                entity.setProductId(productId);
+                entity.setSourceSubtype(row.sourceSubtype());
                 // Buyer PII (row.author()) is intentionally NOT persisted.
                 applyInquirySource(entity, row);
                 entity.setReceivedAt(row.receivedAt() != null ? row.receivedAt() : Instant.now());
@@ -255,6 +279,38 @@ public class IngestionService {
     }
 
     /**
+     * Which product this inquiry is about — or nothing, when nothing proves it.
+     *
+     * <p><b>Two lanes, and the row chooses.</b> A row carrying a {@link ChannelProductRef} is
+     * attributed by the channel's own identifier against {@code channel_products}, exactly, or not at
+     * all: no name fallback, no placeholder listing, no {@code (미지정 상품)} bucket. A row without one
+     * keeps the legacy name/SKU resolve-or-create that every existing source already used.
+     *
+     * <p>The identifier lane exists because NAVER's inquiry resources name their product with a NUMBER
+     * and the canonical Demo Org contains products that share a name. Resolving those by name would
+     * merge two sellers' products into one answer; creating one would invent a listing the seller does
+     * not have. An unattributed inquiry is a smaller, truer thing than either.
+     *
+     * <p>Org-scoped on purpose: the listing key {@code (channel, external_product_id)} is unique
+     * globally, but tenancy is asserted rather than assumed, and the {@code realDataOnly} filter keeps
+     * a synthetic listing from naming a real product.
+     */
+    private UUID attributeProduct(UUID orgId, UUID channelId, CanonicalInquiry row) {
+        ChannelProductRef ref = row.productRef();
+        if (ref == null) {
+            return productService.resolveOrCreate(orgId, row.productName(), row.sku()).getId();
+        }
+        if (!ref.hasIdentifier() || channelProducts == null) {
+            return null;
+        }
+        return channelProducts
+                .findByChannelIdAndExternalProductId(channelId, ref.externalProductId())
+                .filter(listing -> listing.getOrgId() == null || orgId.equals(listing.getOrgId()))
+                .map(ChannelProduct::getProductId)
+                .orElse(null);
+    }
+
+    /**
      * Write the source-driven mutable fields of an inquiry (used by both insert and update).
      * Buyer PII is never set. Status is <b>monotonic</b>: an inquiry already {@code ANSWERED}
      * is never downgraded to {@code UNANSWERED} by a later re-collection (mirrors the review
@@ -269,6 +325,15 @@ public class IngestionService {
         // that would leave status=ANSWERED with a lower raw token does not occur in practice.
         entity.setInformStatus(row.informStatus());
         entity.setSecret(row.isSecret());
+        // The platform's own answer, when the source carries one. Only ever written FROM the source:
+        // a row that stops carrying an answer is a source that does not publish answer bodies, not a
+        // seller who deleted one, so an existing stored answer is never cleared by a null.
+        if (row.answerBody() != null) {
+            entity.setAnswerBody(row.answerBody());
+        }
+        if (row.answeredAt() != null) {
+            entity.setAnsweredAt(row.answeredAt());
+        }
         if (!"ANSWERED".equals(entity.getStatus())) {
             entity.setStatus(row.status());
         }
@@ -281,7 +346,9 @@ public class IngestionService {
                 && java.util.Objects.equals(existing.getBody(), row.body())
                 && java.util.Objects.equals(existing.getStatus(), nextStatus)
                 && java.util.Objects.equals(existing.getInformStatus(), row.informStatus())
-                && java.util.Objects.equals(existing.getSecret(), row.isSecret());
+                && java.util.Objects.equals(existing.getSecret(), row.isSecret())
+                && (row.answerBody() == null
+                        || java.util.Objects.equals(existing.getAnswerBody(), row.answerBody()));
     }
 
     public IngestOutcome ingestOrderSummaries(UUID orgId, UUID channelId, List<CanonicalOrderSummary> rows) {

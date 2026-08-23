@@ -245,6 +245,26 @@ sellerops:
       # environment/secret manager per deployment, and an empty value fails safe (the
       # tutorial shows generic guidance, never a fabricated IP).
       advertised-egress-ips: ${SELLEROPS_CONNECTOR_NAVER_ADVERTISED_EGRESS_IPS:}
+      inquiry:
+        # NAVER publishes TWO official inquiry READ resources, and each gets its own
+        # flag. Both off by default: with both off the connector does not advertise
+        # INQUIRY at all, and behaviour is byte-identical to before the lane existed.
+        #
+        # Per-source flags are the fence AND the measuring instrument. The self-pilot
+        # reconciler creates a 60-minute routine schedule for every routine data type a
+        # connected account's connector advertises, so "advertise INQUIRY" is a standing
+        # marketplace call five minutes later — see the NEEDS_VERIFICATION gate in
+        # NaverApiConnector. And with exactly one flag on, an approved bounded run makes
+        # calls to exactly one endpoint, which is how a live proof measures one source.
+        #
+        # NAVER TalkTalk has no Commerce API and has no flag here; it is a coverage
+        # limitation, not a switch. docs/naver_inquiry_api_audit_v1.md
+        product-qna:
+          # GET /v1/contents/qnas — 상품 문의 (스마트스토어 Q&A)
+          enabled: ${SELLEROPS_CONNECTOR_NAVER_INQUIRY_PRODUCT_QNA_ENABLED:false}
+        customer:
+          # GET /v1/pay-user/inquiries — 고객 문의 (네이버페이)
+          enabled: ${SELLEROPS_CONNECTOR_NAVER_INQUIRY_CUSTOMER_ENABLED:false}
     coupang:
       # Coupang WING Open API order connector. Off by default — beans absent,
       # COUPANG keeps resolving to the mock connector and runtime is byte-identical.

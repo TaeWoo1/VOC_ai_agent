@@ -32,14 +32,31 @@ class NaverReadOnlyFenceTest {
 
     private static final Path NAVER_MAIN = Paths.get("src/main/java/com/sellerops/connector/naver");
 
-    /** Every NAVER Commerce API path this package may reach. All four are reads. */
+    /** Every NAVER Commerce API path this package may reach. All six are reads. */
     private static final Set<String> ALLOWED_ENDPOINTS = Set.of(
             "/external/v1/oauth2/token",                                            // credential proof
             "/external/v1/pay-order/seller/product-orders/last-changed-statuses",   // changed orders
             "/external/v1/pay-order/seller/product-orders/query",                   // order detail (read)
-            "/external/v1/products/search");                                        // catalogue read
+            "/external/v1/products/search",                                         // catalogue read
+            "/external/v1/contents/qnas",                                           // 상품 문의 (read)
+            "/external/v1/pay-user/inquiries");                                     // 고객 문의 (read)
 
-    /** Anything under these NAVER API groups mutates the seller's store; none may appear. */
+    /**
+     * Anything under these NAVER API groups mutates the seller's store; none may appear.
+     *
+     * <p><b>These are PATHS, deliberately.</b> The marker used to be the bare word {@code answer},
+     * standing in for the two answer-registration endpoints
+     * ({@code PUT /v1/contents/qnas/{questionId}} · {@code POST /v1/pay-merchant/inquiries/{n}/answer}).
+     * That proxy broke the moment the connector started READING an existing answer: 고객 문의 returns
+     * {@code answerContent} on a GET, and preserving what the seller already replied is the opposite of
+     * writing a reply. So the fence names the write paths themselves — including the whole
+     * {@code pay-merchant} group, which exists only to answer — and a read field named after an answer
+     * no longer reads as one.
+     *
+     * <p>Note the shape of the qnas pair: the READ is {@code /external/v1/contents/qnas} exactly, and
+     * every write under it carries a path segment after it. {@code qnas/} therefore catches the write
+     * and cannot catch the read.
+     */
     private static final List<String> WRITE_MARKERS = List.of(
             "/external/v1/products/origin-products",
             "/external/v2/products",
@@ -47,7 +64,9 @@ class NaverReadOnlyFenceTest {
             "product-orders/claim",
             "/reviews/",
             "/questions/",
-            "answer");
+            "/external/v1/pay-merchant",
+            "qnas/",
+            "/answer");
 
     @Test
     @DisplayName("every NAVER endpoint the connector can reach is on the read allowlist")

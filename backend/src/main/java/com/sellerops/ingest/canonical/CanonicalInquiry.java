@@ -21,7 +21,20 @@ import java.time.Instant;
  *
  * <p>{@code isSecret} carries a source-provided private-post flag (Cafe24 board-6
  * 비밀글). {@code null} = the source does not classify secrecy (ESM / file upload) —
- * treated as visible everywhere. The Cafe24 connector sets it fail-closed.
+ * treated as visible everywhere. The Cafe24 connector sets it fail-closed. A source whose
+ * API publishes no such field leaves it {@code null} — 없는 필드를 추측하지 않는다.
+ *
+ * <p>{@code sourceSubtype} names WHICH resource of a channel produced this row (see
+ * {@link com.sellerops.inquiry.InquirySourceSubtype}); {@code null} for a channel that has only
+ * one inquiry resource.
+ *
+ * <p>{@code productRef} is the channel's own product identifier, and its presence is an
+ * instruction — see {@link ChannelProductRef}. {@code null} keeps the legacy name/SKU
+ * resolve-or-create path unchanged for every source that already used it.
+ *
+ * <p>{@code answerBody}/{@code answeredAt} carry the answer the seller ALREADY published on the
+ * platform, for the sources that return it. Null when the source states only a flag — never
+ * synthesized from {@code status}.
  */
 public record CanonicalInquiry(
         String productName,
@@ -34,7 +47,11 @@ public record CanonicalInquiry(
         int sourceRow,
         String title,
         String informStatus,
-        Boolean isSecret) {
+        Boolean isSecret,
+        String sourceSubtype,
+        ChannelProductRef productRef,
+        String answerBody,
+        Instant answeredAt) {
 
     /**
      * Back-compat constructor for sources that do not classify secrecy (ESM, file
@@ -44,6 +61,17 @@ public record CanonicalInquiry(
                             String status, Instant receivedAt, String externalId, int sourceRow,
                             String title, String informStatus) {
         this(productName, sku, author, body, status, receivedAt, externalId, sourceRow,
-                title, informStatus, null);
+                title, informStatus, null, null, null, null, null);
+    }
+
+    /**
+     * Back-compat constructor for a source that classifies secrecy but has only one inquiry
+     * resource and resolves products by name/SKU (Cafe24).
+     */
+    public CanonicalInquiry(String productName, String sku, String author, String body,
+                            String status, Instant receivedAt, String externalId, int sourceRow,
+                            String title, String informStatus, Boolean isSecret) {
+        this(productName, sku, author, body, status, receivedAt, externalId, sourceRow,
+                title, informStatus, isSecret, null, null, null, null);
     }
 }

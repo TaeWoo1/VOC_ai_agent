@@ -5,6 +5,7 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
 import com.sellerops.common.ApiException;
 import com.sellerops.connector.ConnectorRegistry;
+import com.sellerops.connector.ConnectorCapabilities;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.organization.Organization;
@@ -62,6 +63,16 @@ public class SelfPilotReconciler {
     static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /** The routine data types; PRODUCT / SALES have no operating surface and are never auto-scheduled. */
     static final List<DataType> ROUTINE_TYPES = List.of(DataType.REVIEW, DataType.INQUIRY, DataType.ORDER_SUMMARY);
+
+    /**
+     * The only verification status that may become an automatic routine schedule.
+     *
+     * <p>Every capability this reconciler creates a schedule for today already carries it
+     * (Cafe24 ORDER/REVIEW/INQUIRY, Coupang ORDER/INQUIRY, NAVER ORDER), so this fence changes no
+     * current behaviour. What it changes is the future: a connector gains a data type by being
+     * written, and gains a routine by being proven, and those are no longer the same edit.
+     */
+    static final String VERIFIED = "CONFIRMED";
 
     /** What one tick did — counts only, for the log line and the tests. */
     public record TickReport(int schedulesCreated, int triageClassified, int triageSkippedBudget) {
@@ -158,7 +169,19 @@ public class SelfPilotReconciler {
                 continue;
             }
             for (DataType type : ROUTINE_TYPES) {
-                if (!connector.capabilities(code).supports(type)) {
+                ConnectorCapabilities capabilities = connector.capabilities(code);
+                if (!capabilities.supports(type)) {
+                    continue;
+                }
+                if (!VERIFIED.equals(capabilities.verificationStatus().get(type))) {
+                    // Advertised is reachable; automatic is PROVEN. A capability a connector can reach
+                    // but has never been live-verified is available to an operator's approved run and
+                    // must not start a 60-minute marketplace loop by itself — which is exactly what
+                    // adding a data type to a connector used to do, five minutes after the edit.
+                    //
+                    // A no-op for every capability auto-scheduled today: all of them are CONFIRMED.
+                    log.debug("Skipping automatic {} schedule for {} — verification status {}",
+                            type, code, capabilities.verificationStatus().get(type));
                     continue;
                 }
                 if (schedules.findByOrgIdAndSellerAccountIdAndDataType(orgId, account.getId(), type.name()).isPresent()) {

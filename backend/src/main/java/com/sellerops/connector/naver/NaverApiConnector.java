@@ -12,6 +12,8 @@ import com.sellerops.connector.VerifyOutcome;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.credential.DecryptedCredential;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -54,14 +56,31 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
     private final NaverTokenClient tokenClient;
     private final NaverOrdersClient ordersClient;
     private final NaverProductsClient productsClient;
+    /**
+     * The two-source INQUIRY driver, or null when no inquiry source is wired.
+     *
+     * <p>Null is the default and it is load-bearing: with no collector this connector does not
+     * ADVERTISE {@code INQUIRY}, and {@code SelfPilotReconciler} only creates routine schedules for
+     * capabilities a connector advertises. A capability whose client is absent is a capability this
+     * connector does not have.
+     */
+    private final NaverInquiryCollector inquiryCollector;
     private final CredentialVault vault;
 
     public NaverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
-                             NaverProductsClient productsClient, CredentialVault vault) {
+                             NaverProductsClient productsClient, NaverInquiryCollector inquiryCollector,
+                             CredentialVault vault) {
         this.tokenClient = tokenClient;
         this.ordersClient = ordersClient;
         this.productsClient = productsClient;
+        this.inquiryCollector = inquiryCollector;
         this.vault = vault;
+    }
+
+    /** Order + product wiring with no inquiry source — the shape before this package. */
+    public NaverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
+                             NaverProductsClient productsClient, CredentialVault vault) {
+        this(tokenClient, ordersClient, productsClient, null, vault);
     }
 
     /**
@@ -74,7 +93,7 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
      */
     public NaverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
                              CredentialVault vault) {
-        this(tokenClient, ordersClient, null, vault);
+        this(tokenClient, ordersClient, null, null, vault);
     }
 
     @Override
@@ -87,9 +106,14 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
         return Set.of(CHANNEL_CODE);
     }
 
+    /** True when at least one NAVER inquiry source is wired and therefore actually reachable. */
+    private boolean inquiryReachable() {
+        return inquiryCollector != null && inquiryCollector.hasAnySource();
+    }
+
     @Override
     public ConnectorCapabilities capabilities(String channelCode) {
-        if (productsClient == null) {
+        if (productsClient == null && !inquiryReachable()) {
             return new ConnectorCapabilities(
                     CONNECTOR_CLASS,
                     Set.of(DataType.ORDER_SUMMARY),
@@ -97,14 +121,29 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
                     "Slice 1b: ORDER_SUMMARY via the official two-call flow. No product client wired,"
                             + " so PRODUCT is not offered rather than offered-and-failing.");
         }
+        Set<DataType> supported = new LinkedHashSet<>();
+        Map<DataType, String> status = new LinkedHashMap<>();
+        supported.add(DataType.ORDER_SUMMARY);
+        status.put(DataType.ORDER_SUMMARY, "CONFIRMED");
+        if (productsClient != null) {
+            supported.add(DataType.PRODUCT);
+            // Live-verified 2026-08-22 on the canonical demo org: 69 listings over 2 pages, 0 errors.
+            // The seller's application must still hold the product API permission (a seller grant,
+            // never worked around).
+            status.put(DataType.PRODUCT, "CONFIRMED");
+        }
+        if (inquiryReachable()) {
+            supported.add(DataType.INQUIRY);
+            // NEEDS_VERIFICATION until a live read proves it, and that word does work here: the
+            // self-pilot reconciler creates routine schedules only for CONFIRMED capabilities, so an
+            // unproven inquiry capability is reachable for an operator's bounded run and cannot start
+            // collecting on its own. Promotion to CONFIRMED is a live proof, not an edit.
+            status.put(DataType.INQUIRY, "NEEDS_VERIFICATION");
+        }
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,
-                Set.of(DataType.ORDER_SUMMARY, DataType.PRODUCT),
-                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED",
-                        // Live-verified 2026-08-22 on the canonical demo org: 69 listings over 2 pages,
-                        // 0 errors. The seller's application must still hold the product API permission
-                        // (a seller grant, never worked around).
-                        DataType.PRODUCT, "CONFIRMED"),
+                Set.copyOf(supported),
+                Map.copyOf(status),
                 "Slice 1b: ORDER_SUMMARY via the official two-call flow"
                         + " (last-changed-statuses → product-orders/query); an operator can also read a"
                         + " bounded date window on its own cursor lane. PRODUCT reads the seller's own"
@@ -116,7 +155,11 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
                         + " It returned NO store URL, NO option combinations and NO detail content —"
                         + " the mapper reads all three and they arrived empty, so those need a separate"
                         + " per-product read, not a wider page of this one."
-                        + " REVIEW has no official API; INQUIRY/SALES deferred.");
+                        + " INQUIRY is TWO official read resources, not one — 상품 문의"
+                        + " (/v1/contents/qnas) and 고객 문의 (/v1/pay-user/inquiries) — each behind its"
+                        + " own flag and each carrying its own source subtype; NAVER TalkTalk has no"
+                        + " Commerce API and is not attempted."
+                        + " REVIEW has no official API; SALES deferred.");
     }
 
     /**
@@ -133,8 +176,13 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
      */
     @Override
     public Optional<String> backfillCursor(DataType dataType, LocalDate startDate, LocalDate endDate) {
-        if (dataType != DataType.ORDER_SUMMARY || startDate == null || endDate == null
-                || endDate.isBefore(startDate)) {
+        if (startDate == null || endDate == null || endDate.isBefore(startDate)) {
+            return Optional.empty();
+        }
+        if (dataType == DataType.INQUIRY && inquiryReachable()) {
+            return Optional.of(inquiryCollector.boundedWindowSeed(startDate, endDate));
+        }
+        if (dataType != DataType.ORDER_SUMMARY) {
             return Optional.empty();
         }
         return Optional.of(ordersClient.boundedWindowSeed(startDate, endDate));
@@ -144,7 +192,8 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
     public FetchPage fetch(FetchRequest request) {
         boolean routable = CHANNEL_CODE.equals(request.channelCode())
                 && (request.dataType() == DataType.ORDER_SUMMARY
-                    || (request.dataType() == DataType.PRODUCT && productsClient != null));
+                    || (request.dataType() == DataType.PRODUCT && productsClient != null)
+                    || (request.dataType() == DataType.INQUIRY && inquiryReachable()));
         if (!routable) {
             throw new UnsupportedDataTypeException(request.channelCode(), request.dataType());
         }
@@ -162,6 +211,9 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
             String accessToken = tokenClient.accessToken(clientId, clientSecret);
             if (request.dataType() == DataType.PRODUCT) {
                 return productsClient.fetchProductPage(accessToken, request.cursorValue());
+            }
+            if (request.dataType() == DataType.INQUIRY) {
+                return inquiryCollector.fetchInquiryPage(accessToken, request.cursorValue());
             }
             return ordersClient.fetchOrderSummaryPage(accessToken, request.cursorValue());
         } catch (NaverRateLimitedException e) {
