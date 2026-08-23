@@ -1824,3 +1824,66 @@ INQUIRY·ORDER_SUMMARY 60분 routine 유지.** `sync_jobs`에 `PARTIAL 23/1/11/1
 `external_display_product_id`가 **단일값**인 것이 유일한 남은 원인이다. 이것을 alias **이력**으로
 넓힐지, 옵션ID를 1차 키로 승격할지, 아니면 현 상태를 known limitation으로 두고 Demo Spine을 닫을지는
 **제품 결정**이며 이번 흐름에서 시작하지 않았다. resolver는 건드리지 않았다.
+
+---
+
+### 5o. Coupang REVIEW resolver 계약 변경 — **옵션ID 1차 · 23/23 attribution · 멱등 재증명** (2026-08-23 15:51·15:57 KST)
+
+§5n의 라이브 증거에 따른 **제품 결정**: 노출상품ID(mutable alias)가 아니라 **옵션ID(immutable option
+key)로 먼저 resolve한다.** 커밋 `b1c1158c` · 승인 `apr-4e9153e618d6` · 실행 `wt-ac598769ec70` ·
+`READ_ONLY` · marketplace action 0.
+
+#### 바뀐 계약
+
+1. **옵션ID가 1차** — org + channel scope. 정확히 1 variant면 그 canonical product로 resolve.
+2. **0건이면 노출상품ID resolver로 fallback** (카탈로그보다 오래된 리뷰, 사라진 옵션 — 정상 상태다).
+3. **2건 이상이면 `AMBIGUOUS_OPTION_ID`로 fail-closed** — 이건 세상의 모호함이 아니라 **우리 카탈로그의
+   깨진 invariant**다. 행 순서로 product를 고르지 않는다.
+4. 노출상품ID는 **identity로 승격하지 않았고** alias-history 테이블도 만들지 않았다.
+5. resolution이 끝난 뒤에만 content-hash를 계산한다(불변).
+
+**보고된 제약 — scope는 org + channel이 한계다.** `product_variants`에도 `channel_products`에도
+seller-account 컬럼이 없다. 한 org에 쿠팡 계정이 둘이면 이 lookup을 공유한다. 스키마 사실이므로 코드와
+테스트에 적어 두었고, 교차 검증은 **다른 채널 / 다른 org 거부**로 고정했다. 계정 단위로 좁히는 것은
+스키마 변경이며 이 흐름에서 하지 않았다.
+
+회귀 backend **2,726 green**(신규 7). 계약이 뒤집힌 테스트 2개는 함께 뒤집었다 — 직전 턴에 "옵션ID가
+stray 노출상품ID를 대신 붙이지 못한다"를 고정했던 테스트가 이제 **붙는다**를 고정한다.
+
+#### sitting 1 — `received=23 stored=14 skipped=9 **failed=0 unresolved=0**`
+
+걷기 `3페이지·25행·23건·complete=true`. **미해결 0건** — 붙지 못하던 10건도, 모호했던 1건도 전부
+옵션ID로 붙었다. attribution이 product **3개 → 11개**로 퍼졌다. `sync_jobs`가 처음으로
+**`SUCCESS 23/14/9/0`**을 기록했다.
+
+#### sitting 2 — `received=23 **stored=0 skipped=23 failed=0**`
+
+같은 3페이지 재독. **새 계약 아래의 멱등이 증명됐다.** 변한 것은 `sync_jobs` 한 줄
+(`SUCCESS 23/0/23/0`)뿐이고 다른 지표는 **한 자리도 움직이지 않았다** — REAL 상품평 26 · attribution ·
+products 308 · 리스팅 71 · 옵션 405 · item-analysis 4,424 · CustomerMemory 7,757 · ReviewIssues 19 ·
+synthetic 22. **신규 product·listing·variant 0 · WRITE 0 · ERROR 0 · routine 유지 · PRODUCT schedule 0.**
+
+#### ⚠ 남은 결함 — **재귀속된 3건이 중복으로 남았다** (미해결, 지시 대기)
+
+REAL 상품평이 **26**인데 화면에는 **23**건뿐이다.
+
+| 등록일 | 별점 | 옵션 | 옛 귀속 | 새 귀속 |
+|---|---|---|---|---|
+| 2026-07-29 | 2 | `88377435992` | `14442591208` | **`14632159502`** |
+| 2026-08-09 | 4 | `88377435992` | `14442591208` | **`14632159502`** |
+| 2026-08-15 | 5 | `88377435992` | `14442591208` | **`14632159502`** |
+
+**dedupe 결함이 아니라 계약 변경 자체의 결과다.** content hash에 resolve된 product id가 들어가므로
+**resolution 규칙이 바뀌면 기존에 저장된 행의 해시가 무효**가 된다. 이 3건은 새 해시로 다시 저장됐고,
+옛 행은 옛 product에 남았다. 그 3건분의 item-analysis·CustomerMemory도 한 벌씩 더 생겼다.
+
+**새 귀속이 맞다** — 옵션 `88377435992`는 카탈로그상 `14632159502`의 것이고, 옛 귀속은 이동해 버린
+노출상품ID가 만든 오답이다. 즉 이 3건은 **틀린 자리에 있다가 제자리를 찾았고**, 남은 것은 치워지지 않은
+옛 행이다.
+
+**임의로 지우지 않았다.** 선택지는 (a) 옛 행 3건 삭제 · (b) 옛 행의 `product_id`만 옮기고 중복 해소 ·
+(c) known limitation으로 기록. **제품 결정이며 미결이다. 이것이 남아 있는 한 Demo Spine을 `COMPLETE`로
+닫지 않는다.**
+
+**일반화된 교훈**: resolution 규칙을 바꾸면 그 규칙이 들어간 dedupe 키가 전부 무효가 된다. 다음에
+resolver를 바꿀 때는 **재귀속 마이그레이션이 계약 변경의 일부**여야 한다.
