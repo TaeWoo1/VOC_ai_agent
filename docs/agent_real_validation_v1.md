@@ -1111,3 +1111,200 @@ red case가 없어 만들지 않았다(다음 후보).
 | 신규 — A8 계획이 resolver 없이 상품을 지목 | backlog (§14.7) |
 | 신규 — C4 상품 문장이 이슈 총계를 인용 | backlog (§14.7) |
 | A6 · B1 · B2 · C2 · C3 · D | backlog 유지 |
+
+---
+
+## 15. Agent Product-Scoped Operations v1 — A8 · C3 · C4 수정과 v2 재측정 (2026-08-24)
+
+**범위.** 셀러가 상품을 지목한 운영 질문에서 상품 해결 → 상품 범위 근거 조회 → specialist 결과 병합 →
+최종 답까지를 하나의 capability로 닫는다. 닫혀 있던 계약(A1·A2·A4·Temporal·C1·A5)은 유지한다.
+회귀 green 후 **Q1~Q6 동일 prompt 전부**를 REAL Demo Org에서 재실행하고 v1과 비교한다.
+
+### 15.1 A8 — 지목한 상품에 닿지 못하는 계획은 유효한 계획이 아니다
+
+미해결 `PRODUCT` 언급이 있는데 **그 상품을 해결할 수 있는 specialist를 하나도 배치하지 않은 계획**은
+`PRODUCT_UNRESOLVABLE`로 **거절**한다(V9). A1의 entity 축은 해결된 상품 위에 서 있으므로, 그런 계획은
+자기 안의 모든 상품 need가 거절될 것을 이미 결정한 계획이다.
+
+**validator도 runtime도 specialist를 추가하지 않는다.** 거절 사유와 그 사유를 만족시킬 capability
+이름만 `priorContext`로 돌려보내고, **다시 계획하는 것은 planner다**. 추가는 곧 결정론적 두 번째
+planner이고 그것은 I2가 금지한다.
+
+- **누가 해결할 수 있는가는 capability matrix에서 파생된다** — `requires: ["PRODUCT_MENTION"]`인 도구를
+  가진 specialist. 목록을 두 곳에 적지 않는다.
+- **repair는 정확히 1회**, 그리고 **budget에 과금된다**(`chargeLlmCall`). 예산이 거절하면 repair는 없고
+  거절이 그대로 선다. 같은 계획을 두 번 내놓는 planner는 run을 실패시킨다.
+- **repair로 돌려보내는 문자열은 닫힌 어휘뿐이다** — 거절 이름, 규칙 한 문장, specialist 이름. 셀러 행도
+  id도 언급도 근거도 없다(회귀로 고정).
+- 되물음(clarification)·거부(REFUSE) 계획에는 발동하지 않는다. 둘 다 애초에 specialist를 돌리지 않는다.
+
+**라이브 증명(2026-08-24).** 같은 문장 4회 중 **3회가 repair를 탔고 3회 모두 `repaired: true`**,
+**4회 전부** `PRODUCT_OPS`에 도달해 같은 답을 냈다. v1에서 이 문장은 10회 중 4회가 상품에 닿지 못했다.
+
+### 15.2 C3 — need는 더 많이 아는 결과를 지킨다
+
+need 결과는 **강도**로 병합한다(`plan/needOutcome.ts`): **status → coverage → completeness**, 동률이면
+**먼저 쓴 쪽**이 남는다. 마지막 writer가 이기는 규칙을 제거한 것이고, 뒤집은 것이 아니다.
+
+- `SATISFIED` > `UNSATISFIABLE` > `PENDING`
+- `COVERED` > (미보고) > `UNCERTAIN_*` — 미보고가 가운데인 것은 의도다. coverage를 보고하지 않은
+  specialist는 전부 봤다고 주장한 것도, 사각지대를 인정한 것도 아니다.
+- 완전한 read > 경계 지어진 read. 완전성을 말하지 않으면 경계 지어진 쪽으로 취급한다.
+
+**어떤 경우에도 status를 올리지 않는다.** 승자는 언제나 입력 둘 중 하나다 — 읽지 않았음이 "문제 없음"이
+되는 경로는 규칙 안에 존재하지 않는다.
+
+**읽기 단계에도 같은 원칙을 적용했다.** 런타임이 이미 **증명한** 사실은 다시 사지 않는다.
+
+| 상황 | 이전 | 지금 |
+|---|---|---|
+| `PRODUCT_OPS`가 이 상품의 `ISSUE_EVIDENCE`를 이미 만들었다 | `REVIEW_OPS`가 org 이슈를 훑어 최대 6건을 다시 읽고 약한 문장을 덧붙였다 | `REVIEW_OPS`는 읽지 않고 `PENDING`을 반환한다 — 병합이 강한 쪽을 지킨다 |
+| `PRODUCT_OPS`가 이 상품의 미답변 수를 이미 읽었다 | `INQUIRY_OPS`가 org 인박스를 읽고, A1이 그 행을 거절하고, 답에는 보류 문구가 붙었다 | org 인박스를 읽지 않는다 |
+
+**specialist 이름이 아니라 증거로 판단한다** — `PRODUCT_OPS`가 배치됐지만 해결에 실패했거나 예산이
+끊겼으면 증명이 없고, 그때는 `REVIEW_OPS`의 org 훑기가 **유일한 경로**로 남아 그대로 돈다.
+
+### 15.3 C4 — 상품에 대한 문장의 숫자는 그 상품의 것이다
+
+`ProductSignalsService.issuesFor`는 **이 상품의** 이슈를 고르지만 각 행이 싣고 오는 `evidenceCount`는
+**이슈의 org 전체 총계**다. `PRODUCT_OPS`는 이제 A5에서 연결된 같은 read(`get_review_issue_evidence_summary`)로
+**분할**을 읽고, 두 숫자를 한 문장 안에 범위를 밝혀 함께 놓는다. 새 도구도 새 백엔드 계약도 없다.
+
+읽지 못하면 상품 수를 말하지 않는다 — 「…에 리뷰 근거가 연결돼 있습니다 (이 문제 전체 N건 — 이 상품
+몫은 확인하지 못했습니다)」. 이슈의 추세 라벨(`IssueChangeRules`)도 org 산출물이므로 **이슈 총계를
+말하는 절 안에** 둔다.
+
+**같은 오류가 한 층 위에도 있었고 같이 고쳤다.** 백엔드는 상품의 이슈를 **severity → 이슈의 org 총계**로
+정렬한다. 그것은 이 상품의 중요도가 아니다. 라이브(2026-08-24) 실제 상품에서 상위 5건은 이 상품 근거
+**7·4·2·1·1**건이었고, 정작 이 상품의 가장 큰 두 문제(**16건**, **8건**)는 잘려 나갔다. 이제 분할을 먼저
+읽고(최대 8건) **상품 자기 수로 정렬해** 5건을 말하며, **두 경계를 각각** 밝힌다.
+
+> 선바로 일체형 전선몰딩…에 "접착 부족" 문제로 기록된 리뷰 근거가 **16건** 있습니다 (이 문제 전체 18건 중).
+> … "접착 탈락" **8건** (전체 19건 중) · "배송 파손" **7건** (전체 15건 중) · "배송 누락" **4건** (4건 중)
+> · "배송 지연" **4건** (6건 중).
+> *note*: …기록된 반복 리뷰 문제 15건 가운데 **8건을 확인해 근거가 많은 5건을 정리했습니다.**
+
+**DB 대조** — `review_issue_evidence` × `product_id='0811fead…'`: 접착 부족 16/18 · 접착 탈락 8/19 ·
+배송 파손 7/15 · 배송 누락 4/4 · 배송 지연 4/6. **다섯 문장 모두 정확히 일치한다.** baseline이라면 각각
+18·19·15·4·6으로 말했을 것이다.
+
+### 15.4 상품 범위 실행 감사 — 세 질문, 두 개의 답, 하나의 한계
+
+기존 READ 도구만으로, 해결된 상품이 있을 때:
+
+| 셀러가 묻는 것 | 상품 범위로 증명 가능한가 | 경로 | 이번에 한 일 |
+|---|---|---|---|
+| 리뷰 반복 문제 | **가능** | `get_product_knowledge.signals.issues`(백엔드가 이 상품의 근거 행에서 고른 **완전한** 목록) + `get_review_issue_evidence_summary`(분할) | 연결 + 상품 수 정렬 + **측정된 0** 진술 |
+| 현재 문의 상태 | **가능** | `get_product_knowledge.signals.volume.unansweredInquiries` (`countByOrgIdAndProductIdAndStatus`) | **측정된 0**을 말하게 함. org 인박스는 읽지 않음 |
+| 반복 문의 | **불가능** | `RepeatedInquiry`에 `productId`가 **없다** — axis/key/label/occurrences/window뿐 | **한계로 남긴다.** 새 retrieval을 만들지 않음 |
+
+**"문제 없음"은 실제 covered read가 있을 때만 말한다.** `REVIEW_ISSUE` coverage가 `COVERED`(org에 귀속
+불가 행이 0)일 때만 「반복 문제로 기록된 리뷰 근거는 없습니다」가 나온다. `UNCERTAIN_*`이면 침묵하고
+기존 coverage 문장이 말한다. 그리고 이 측정된 0에는 `claimsCoverageLimit`를 **붙이지 않았다** — 그것은
+데이터에 대한 **긍정적 사실**이고, 다른 모든 주장과 같은 scope 게이트를 통과해야 한다(기간 질문이면
+날짜 없는 근거이므로 정당하게 보류된다).
+
+### 15.5 이 변경 자신의 작업에서 라이브가 찾아낸 두 가지
+
+1. **같은 분할을 need 수만큼 샀다.** 같은 kind의 need가 둘이면 상품 이슈 색인을 두 번 읽었다 — 라이브에서
+   도구 호출 12회, 그리고 중복 문장 5건. 이제 **kind당 한 번** 읽고, 뒤 need는 **같은 근거를 인용해**
+   함께 만족된다(10회로 감소).
+2. **중복 제거를 "근거 없음"으로 보고했다.** `근거가 확인되지 않아 5건은 답에서 제외했습니다` — 그 5건은
+   참인 문장이었고 통과하지 않은 검사에 실패했다고 셀러에게 말한 셈이다. 이제 이 수는 **근거가 없거나
+   `UNSUPPORTED`인 finding만** 센다. 같은 문장이 두 번 나온 것은 잃은 정보가 아니므로 말할 것이 없다.
+
+### 15.6 회귀와 red 증명
+
+새 suite `test/operator/productScopedOperations.test.ts` (30건) + 기존 suite 갱신.
+전체 **374 passed · 23 skipped · 0 failed**, `tsc --noEmit` clean, backend·frontend 변경 0.
+
+| 되돌린 것 | red |
+|---|---|
+| V9(A8) 제거 | **6** |
+| needs reducer를 last-writer-wins로 복원 | **2** |
+| 상품 문장에 이슈 총계를 인용 | **4** |
+| `REVIEW_OPS` 선행 증거 우선순위 제거 | **4** |
+| repair 과금 제거 | **1** |
+| 상품 미답변 0의 진술 철회 | **3** |
+| 상품 need에 org 인박스 재도입 | **2** |
+| kind당 1회 재사용 제거 | **1** |
+| 제외 건수 계산식 복원 | **1** |
+| 이슈 총계 순서로 정렬 | **1** |
+| 절단 사실 미고지 | **1** |
+
+fence(A1 scope gate · A2 isolation · temporal · Operational Defaults · REPORT_OPS 빈 allow-list ·
+READ-only)는 모든 red run에서 초록이었다.
+
+**기록된 계획.** A8 repair의 두 번째 답은 **라이브 모델이 실제로 낸 계획을 그대로** 넣었다
+(`PRODUCT_COMPLAINT_REPAIRED_PLAN`, gpt-5, 2026-08-24). `POLICY_QUESTION_REPAIRED_PLAN`은 AUTHORED로
+남는다 — 같은 규칙을 받은 라이브 모델은 그 문장에 대해 **되물음**을 냈고, 그 시나리오의 원본 계획도
+AUTHORED이기 때문이다.
+
+### 15.7 3-Channel REAL Agent Validation v2 — Q1~Q6 재실행 (2026-08-24)
+
+REAL Demo Org · 마켓 접촉 0 · **WRITE 0**. v1(§3)과 같은 문장.
+
+| # | v1 | v2 | 무엇이 바뀌었나 |
+|---|---|---|---|
+| **Q1** | `DONE` · finding 4 · 같은 도구 2회 호출로 중복 증거 | `DONE` · tool 2 · finding 4 · 중복 없음 | 변화 없음(§9~§13에서 이미 닫힘). 69는 DB와 일치 |
+| **Q2** | `DONE` **되물음** · finding 0 | `DONE` · tool 1 · finding 3 (SUPPORTED) | 되물음이 사라졌다(A4). **상품은 여전히 못 짚는다 — B1** |
+| **Q3** | `DONE` **되물음** · finding 0 | `DONE` · tool 1 · finding 0 · 「반복 문의 없음(최근 28일)」 | 되물음이 사라지고 **정직한 0**이 됐다. 상품 축은 여전히 없다 |
+| **Q4** | `DONE` · **틀린 답** — 다른 상품의 HIGH 이슈 3건을 이 상품 것으로 | `DONE` · tool 3 · 상품 해결 · **측정된 0** 진술 · rejected 0 | **planner 변동과 무관하게** 상품에 도달. 근거 0을 근거 있는 문장으로 |
+| **Q5** | `DONE` · **내용 0** — 인자 없는 호출이 400으로 죽음 | `DONE` · tool 3 · finding 4 · 초안 lane 한계 고지 | A2/A4로 이미 개선. **run별 편차 있음 — A9(15.8)** |
+| **Q6** | `DONE` **되물음** · finding 0 | `DONE` · tool 3 · finding 6 · REPORT_OPS 합성 | 되물음이 사라졌다. 채널 구분은 여전히 없다 |
+
+**rubric — v1 → v2** (`PASS`/`◐`/`FAIL`, `—` = 주장 0건)
+
+| # | 항목 | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 |
+|---|---|---|---|---|---|---|---|
+| 1 | planner correctness | ◐→◐ | FAIL→**PASS** | FAIL→**PASS** | **FAIL→PASS** | ◐→◐ | ◐→**PASS** |
+| 2 | retrieval/tool correctness | ◐→**PASS** | FAIL→**PASS** | FAIL→**PASS** | FAIL→**PASS** | FAIL→**PASS** | FAIL→**PASS** |
+| 3 | product-centered reasoning | ◐→◐ | FAIL→FAIL | FAIL→FAIL | **FAIL→PASS** | FAIL→FAIL | FAIL→FAIL |
+| 4 | cross-channel reasoning | FAIL | FAIL | FAIL | FAIL | FAIL | FAIL |
+| 5 | evidence grounding | PASS | —→**PASS** | — | **FAIL→PASS** | —→**PASS** | —→**PASS** |
+| 6 | freshness/provenance | FAIL→**PASS** | —→**PASS** | — | **PASS** | —→◐ | —→**PASS** |
+| 7 | unsupported-claim avoidance | PASS | PASS | PASS | **FAIL→PASS** | ◐→**PASS** | PASS |
+| 8 | actionable usefulness | ◐ | FAIL→◐ | FAIL→◐ | **FAIL→PASS** | FAIL→◐ | FAIL→◐ |
+
+**실제 셀러 가치가 생긴 부분.** 상품을 이름으로 물으면 **그 상품의 숫자로 답한다** — 없으면 없다고,
+있으면 몇 건인지, 이 문제 전체 중 얼마인지, 그리고 무엇을 확인하지 않았는지까지. Q4는 v1의 유일한
+「틀린 답」이었고 이제 근거와 함께 옳다. C4 상품에서는 **셀러가 오늘 손대야 할 문제 2건(16·8건)**이
+드러났는데, baseline은 그 자리에 1건짜리 이슈를 올려놓고 있었다.
+
+**여전히 FAIL인 것.**
+- **cross-channel (6/6)** — 어느 답도 채널을 구분하지 않는다. 「69건은 전부 Cafe24」는 여전히 없다.
+- **product-centered — Q2·Q3·Q5** — 「어느 **상품**이」를 묻는데 org 축으로 답한다. `search_review_issues`
+  에 상품 파라미터가 없고(**B1**), `RepeatedInquiry`에 상품 축이 없다(15.4). 상품 없이 해결된다고
+  말하지 않는 것은 정직하지만, 질문에 답한 것은 아니다.
+
+### 15.8 새 관측
+
+- **A9(신규) — entity 축이 범주 명사를 item으로 읽는다.** Q5에서 planner가
+  `INQUIRY: "미답변 문의"`를 entity로 선언했고, `needScopeOf`는 계획 안에 `INQUIRY` 언급이 있으면 **모든
+  need를 ITEM 범위로** 읽는다. 그 결과 n1(「미답변 규모는?」)의 정답인 org 카운트 69가
+  `ORG_EVIDENCE_FOR_PRODUCT_NEED`로 거절되고 finding 0으로 끝난 run이 있었다(같은 문장 재실행에서는
+  선언하지 않아 정상 답). 「미답변 문의」는 id가 존재할 수 없는 **범주**이지 item이 아니다. A1의 entity
+  의미론을 건드리는 수정이라 이번 범위 밖.
+- **C5(신규) — 언급 추출이 범주 명사를 함께 가져간다.** 「…전선몰드 **상품**의 리뷰」에서 mention이
+  `"…전선몰드 상품"`으로 잡혀 카탈로그와 매칭되지 않아 해결에 실패한 run이 있었다. 「…」로 감싸면
+  해결된다. C1(리스팅 이름 매칭)의 이웃 문제이고, resolver 쪽이 아니라 **추출** 쪽이다.
+- **B1 · A6 · B2 · C2 · D1~D3 그대로.** 새 retrieval도 필터도 만들지 않았다.
+- **여전히 dead인 10개**는 §14.2 그대로이며 planner에게 광고되지 않는다.
+
+### 15.9 판정
+
+| 결함 | 상태 |
+|---|---|
+| **A8** — 계획이 resolver 없이 상품을 지목 | **CLOSED** — 구조적 거절 + 경계 지어진 planner repair |
+| **C3** — need 결과 last-writer-wins | **CLOSED** — 강도 병합, 읽기 단계 우선순위 포함 |
+| **C4** — 상품 문장이 이슈 총계를 인용 | **CLOSED** — 분할 인용 + 상품 수 정렬 + 경계 고지 |
+| 신규 — kind당 중복 읽기 / 중복 제거를 "근거 없음"으로 보고 | **CLOSED**(같은 package) |
+| A1 · A2 · A3 · A4 · A5 · C1 · temporal | CLOSED 유지 (§9~§14, 회귀로 확인) |
+| 신규 — **A9** entity 축이 범주 명사를 item으로 | backlog · **다음 최고 레버리지** |
+| 신규 — **C5** 언급 추출이 범주 명사를 포함 | backlog |
+| A6 · B1 · B2 · C2 · D1~D3 | backlog 유지 |
+
+**다음 최고 레버리지 blocker 하나: A9.** 이유는 그것이 **가장 넓은 축**이기 때문이다. entity 축은 계획
+전체에 걸리므로, planner가 범주 명사 하나를 entity로 선언하면 **그 run의 모든 org 근거가 통째로**
+거절된다 — Q5에서 실제로 그렇게 됐다. B1(상품 필터)은 Q2·Q3를 개선하지만 그 두 질문만 개선하고,
+A9는 상품을 말하지 않은 모든 질문의 정답률을 흔든다.
