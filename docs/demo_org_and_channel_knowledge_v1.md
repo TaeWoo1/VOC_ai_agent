@@ -1691,3 +1691,72 @@ resolve가 같은 답을 냈다 — 후자가 이번에 새로 증명된 부분�
 
 미해결 10/22 — 이 org이 리스팅을 갖고 있지 않은 노출상품ID — 를 **Coupang Demo Spine의 blocker로
 볼지**가 다음 판단이다. 원인 조사는 이번 흐름에서 시작하지 않았다.
+
+---
+
+### 5m. Coupang Review Catalog Coverage Diagnosis — **오프라인 감사 + 라이브 진단 manifest** (2026-08-23)
+
+미해결 10건의 원인을 **분류**하기 위한 조사다. 수정이 목적이 아니고, 이미 증명된 것(identifier
+resolution · ambiguous fail-closed · dedupe/idempotency · product 생성 금지 · downstream ·
+synthetic 제외)은 건드리지 않는다.
+
+#### 오프라인 감사 — marketplace 접촉 0
+
+| # | 질문 | 답 | 근거 |
+|---|---|---|---|
+| 1 | 목록이 **어떤 상태**의 상품을 반환하도록 구현돼 있나 | **상태 조건을 아예 보내지 않는다.** 쿼리는 `vendorId` · `maxPerPage=100` · `nextToken` 뿐 | `CoupangSellerProductsClient#list` |
+| 2 | pagination / filter 때문에 누락될 수 있었나 | **아니다.** `$.nextToken` **nonNull=0** → 단일 페이지 완주, `listed=68` · `requests=69/250` | 2026-08-23 03:00 wire-shape · 수집 로그 |
+| 3 | 매퍼가 응답 행을 버리는 조건이 있나 | **하나뿐이고 발동하지 않았다.** `sellerProductId == null`이면 skip인데 **68/68 nonNull**, 그리고 `listed=68 mapped=68` | 같은 로그 |
+| 4 | 리뷰의 노출상품ID와 카탈로그의 productId에 타입/정규화 차이가 있나 | **없다.** 양쪽 다 구분자 없는 10진 문자열(`Long.toString` ↔ 화면 텍스트의 `\d{3,}`)이고, 같은 화면의 11건이 정확히 붙은 것이 그 증거 | `displayProductId()` · `parseProductIds()` · 라이브 11/22 |
+
+**즉 우리 쪽 수집 경로에서 행이 사라진 흔적은 없다.** 68은 그 호출이 돌려준 전부이고, 전부 저장됐다.
+
+그런데 **이 저장소는 그 68이 무슨 상태인지 말하지 못한다** — `statusName`은 68/68 응답에 있으나
+`SellingStatus.normalize`가 쿠팡 한글 어휘를 모르는 채 **68/68 `UNKNOWN`**으로 접었다(기존 backlog).
+카탈로그에 판매중지 상품이 이미 들어 있는지조차 알 수 없으므로, 이 backlog는 이제 이 진단의
+경로 위에 있다.
+
+#### 오프라인으로는 결론이 나지 않는다 — 그리고 그 이유가 계약이다
+
+가르는 데 필요한 유일한 데이터는 **미해결 10건의 노출상품ID·옵션ID**인데, 실패한 행은 어디에도
+저장되지 않는다(`sync_jobs`도 카운트만 남긴다 — `PARTIAL 22/0/11/11`). 주문·문의에도 외부 상품
+식별자 컬럼이 없어(order-product linkage 부재) 우회 관측도 불가능하다. **A/B/C 중 무엇인지는 화면을
+한 번 더 읽어야만 나온다.**
+
+#### 이번에 심은 진단 (`9aefadd4`) — 질문이지 두 번째 resolver가 아니다
+
+미해결(UNRESOLVED) 행에 한해, 배치 끝에서 **카운트만** 한 줄 남긴다:
+`rows · distinctDisplayIds · distinctOptionIds · optionInCatalogue · optionNotInCatalogue ·
+noOptionOnScreen`. 묻는 것은 하나다 — **그 상품을 이 org이 이미 다른 노출상품ID로 들고 있는가.**
+
+- `optionInCatalogue > 0` ⇒ 상품은 여기 있고 **노출 alias만 없다** ⇒ **B (우리 쪽 결함)**
+- `optionInCatalogue = 0` ⇒ 노출상품ID도 옵션ID도 카탈로그에 없다 ⇒ 그 상품은 **읽힌 적이 없다** ⇒ A 또는 C
+
+fence: finder는 **id만** 돌려주므로 product를 건네줄 수 없고, resolution이 **실패한 뒤에만** 돌며,
+회귀 하나가 그 성질을 고정한다 — 노출상품ID가 리스팅을 못 찾은 리뷰는 그 옵션ID가 카탈로그에 있어도
+**계속 거부된다.** id는 절대 기록하지 않는다. backend 2,719 tests green.
+
+#### 준비된 라이브 진단 manifest — **미실행**
+
+| 항목 | 값 |
+|---|---|
+| 채널 / 계정 | COUPANG / canonical Demo Org 기존 계정 (`WING_DEFAULT_ACCOUNT_BINDING`) |
+| surface / operation | Coupang WING 상품평 / `COUPANG_WING_REVIEW_ACQUISITION` |
+| mode | **`READ_ONLY`** — WRITE 0, 쿠팡 화면에서 클릭·입력·전송 없음 |
+| 커밋 | **`9aefadd4`** (`WALKTHROUGH_GIT_COMMIT`, clean tree 필수) |
+| 범위 | **같은 3페이지**, 판매자가 직접 넘김 |
+| marketplace API 요청 | **0** — 화면 읽기이며 서명 호출이 아니다 |
+| 기대 저장 | **0건** (dedupe가 11건을 다시 걸러내고 11건은 계속 fail-closed) |
+| 얻는 것 | 위 진단 한 줄 |
+| 유지 | ORDER_SUMMARY · INQUIRY 60분 routine |
+
+**같은 자리에서 공짜로 얻는 두 번째 관측(D2):** 판매자가 WING **상품 조회/관리** 화면의 **총 등록상품
+수**를 한 번 눈으로 확인한다. 자동화 없음. `68`이면 우리가 읽은 것이 등록 카탈로그 전부이므로 누락된
+상품은 **등록 목록에 없는 것**(A 또는 C)이고, `68`보다 크면 **B**다.
+
+#### 아직 답이 없는, 저장소로 답할 수 없는 것
+
+- 쿠팡 `seller-products` 목록이 **기본으로 어떤 상태를 반환하는지**, 상태 필터 파라미터가 있는지 —
+  **external research 필요**(이 저장소에 관측도 문서도 없다).
+- 옵션ID로 등록상품을 되찾는 공식 엔드포인트의 존재 여부 — 동일하게 **external research 필요**.
+  없는 엔드포인트를 가정하지 않는다.
