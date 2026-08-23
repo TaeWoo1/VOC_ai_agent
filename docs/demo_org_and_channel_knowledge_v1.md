@@ -1645,3 +1645,49 @@ mode `READ_ONLY` · **marketplace action 0**. run-level 승인은 판매자가 `
   `PARTIAL`은 정확하다. 이번 흐름에서 고치지 않는다.
 - **관측만** — 창을 닫으면 읽은 상품평이 handoff 전에 사라지는 구멍(§5i)은 이번에도 그대로다.
   이번 sitting에서는 발생하지 않았다.
+
+---
+
+### 5l. Coupang REVIEW 재수집 — **dedupe/idempotency `CONFIRMED`** (2026-08-23 14:02 KST)
+
+같은 세션 · 같은 범위 재시도. 승인 `apr-c2rev0823a1` · 실행 `rv-0823-c2-02` · 커밋 `83f59046` ·
+`READ_ONLY` · marketplace action 0. 판매자가 run-grant를 다시 눌렀고 세 페이지를 다시 넘겼다.
+
+걷기는 첫 sitting과 **행 단위로 같았다**: `pages=3 rows=24 collected=22 textless=18 complete=true
+FINAL_PAGE_REACHED`, 드롭 0. 화면이 바뀌지 않았다는 뜻이므로, 아래 결과는 dedupe만을 재는 값이다.
+
+#### handoff — `received=22 stored=0 skipped=11 failed=11`
+
+| 기대 | 실측 | |
+|---|---|---|
+| 기존 resolved 11건 = duplicate | **skipped 11 / stored 0** | ✅ |
+| `UNRESOLVED` 10 + `AMBIGUOUS` 1 계속 fail-closed | **정확히 10 + 1** (수정된 로그가 둘을 나눠 셌다) | ✅ |
+
+#### 전 / 후 — **모든 지표가 한 자리도 움직이지 않았다**
+
+| 지표 | 전 | 후 |
+|---|---|---|
+| Coupang REAL 상품평 | 11 | **11** |
+| product attribution | 6 / 3 / 2 | **6 / 3 / 2** |
+| products (org) | 308 | **308** |
+| Coupang 리스팅 | 71 | **71** |
+| Coupang 옵션 | 405 | **405** |
+| item-analysis (REVIEW) | 4,409 | **4,409** |
+| CustomerMemory | 7,742 | **7,742** |
+| ReviewIssues | 19 | **19** |
+| synthetic 상품평 | 22 | **22** |
+
+`sync_jobs`에는 `PARTIAL 22/0/11/11`이 한 줄 더 남았다 — 재수집도 완주하지 못한 배치이므로
+`PARTIAL`이 맞다. **WRITE 0 · ORDER_SUMMARY·INQUIRY 60분 routine 무변경 · ERROR 0.**
+
+#### 판정
+
+**Coupang REVIEW의 dedupe/idempotency는 `CONFIRMED`다.** 리뷰 번호가 없는 채널에서 content hash가
+동일 목록을 두 번 읽어도 한 건도 늘리지 않고, **resolve된 product id가 hash에 들어가는데도** 두 번의
+resolve가 같은 답을 냈다 — 후자가 이번에 새로 증명된 부분이다. 미해결 11건은 두 번 다 같은 이유로
+같은 수만큼 거부됐고, 그 과정에서 product·listing·variant를 **하나도 만들지 않았다.**
+
+#### 다음 결정 사항 (조사하지 않음)
+
+미해결 10/22 — 이 org이 리스팅을 갖고 있지 않은 노출상품ID — 를 **Coupang Demo Spine의 blocker로
+볼지**가 다음 판단이다. 원인 조사는 이번 흐름에서 시작하지 않았다.
