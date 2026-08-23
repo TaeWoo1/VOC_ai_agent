@@ -181,6 +181,43 @@ need `kind`**에서 나온다 — 한국어 산문 해석이 아니라. 그래�
 
 ---
 
+### 2.5 셀러가 읽는 이름 — Human Product Name Resolution (2026-08-23 추가)
+
+**셀러는 자기 상품을 자기 상품 이름으로 부를 수 있어야 한다.** 2026-08-23 라이브에서 셀러가 자기 쿠팡
+리스팅 제목("판도리 일체형 종이컵 수거함")을 그대로 쳤고 run은 2회 모두 "상품을 찾지 못했습니다"로
+끝났다. `products.name`이 `15223228019` — SKU 숫자였고, 사람이 읽는 이름은
+`channel_products.channel_product_name`에만 있었다. 기록: `docs/agent_real_validation_v1.md` §13.
+
+**리스팅 제목은 canonical product의 alias다.** 리스팅을 찾고, 그 리스팅이 **이미 연결돼 있는** canonical
+product를 돌려준다. 생성 0 · 병합 0 · 리스팅이 상품 자리에 오지 않는다.
+
+| 순위 | surface |
+|---|---|
+| 0 | `SKU_EXACT` |
+| 1 | `CANONICAL_NAME_EXACT` |
+| 2 | **`CHANNEL_PRODUCT_NAME_EXACT`** |
+| 3 | `CANONICAL_NAME_PARTIAL` (유일한 비정확 surface) |
+
+**alias는 완전 일치만 한다.** normalize는 화면에서 보이지 않는 차이만 지운다(NFC · trim · lowercase ·
+연속 공백) — 정의는 `ProductNameKey` 하나뿐이다. 유사도 점수도, 모델 추측도 없다: 데모 org에는
+「선바로 2p」와 「선바로 4p」처럼 한 글자 차이의 별개 상품이 실재한다.
+
+**exact surface의 동점은 해결 불가이며 해결하지 않는다.** 후보마다 `matchedOn`이 실려 오므로 "후보가
+여럿"과 "**똑같이 좋은** 후보가 여럿"이 구별된다. 동점이면 run은 고르지 않고 무엇이 있으면 정해지는지를
+말한다(SKU·채널). 부분 일치의 동점은 다른 상황이라 기존대로 진행하고 어느 쪽인지 밝힌다.
+
+**범위는 org × REAL, 두 겹.** 두 read 모두 org-scoped이고 자동 활성 `realDataOnly` 필터가 양쪽에서
+seeded row를 제외한다 — 합성 리스팅이 실제 상품의 이름이 될 수 없다.
+
+**§2.1을 넓히지 않는다.** 이름이 쉬워졌다고 말할 수 있는 것이 넓어지지 않는다. 상품이 해결돼도
+org-scope 증거는 여전히 상품 need를 만족시키지 못한다 — 라이브에서 거절 사유가
+`NO_RESOLVED_PRODUCT`에서 `ORG_EVIDENCE_FOR_PRODUCT_NEED`로 바뀌었을 뿐 거절 건수는 4/4로 같다.
+
+**강제 장치.** `ProductQueryService` · `ProductNameKey` · `ProductMatchSurface` ·
+`ProductAliasResolutionTest` 10건 · `humanProductNameResolution.test.ts` 9건 (fence 3건은 대조군).
+
+---
+
 ---
 
 ## 3. Dashboard 레인과 Agent 레인은 다른 물건이다

@@ -823,3 +823,138 @@ baseline은 셋 다 tool 0 · findings 0 · 되묻음이었다.
 | A1 · A2 · A3 · §10.4 temporal | CLOSED (§9 · §10 · §11) |
 | A5 · A6 · B · C · D | backlog 유지 |
 | 신규 — Q2 상품 귀속(B1 하위) | backlog (§12.8) |
+
+---
+
+## 13. Human Product Name Resolution v1 — C1 수정 (2026-08-23)
+
+> §3·§4의 baseline 숫자는 이 절로도 바뀌지 않는다.
+
+### 13.1 무엇이 틀렸나
+
+§9.3에서 A1을 닫은 뒤 Q4는 **정직하게 틀렸다**: "「판도리 일체형 종이컵 수거함」에 해당하는 상품을 찾지
+못했습니다." 2회 모두 같았다. 그런데 그 상품은 **존재하고**, REAL 리뷰 7건과 REAL 문의 1건을 갖고 있으며,
+셀러가 자기 쿠팡 리스팅에서 읽는 이름이 정확히 그 문장이었다.
+
+`products.name`이 **`15223228019`** — 즉 SKU 숫자였고, `resolve_product`는 그 필드만 읽었다.
+사람이 읽는 이름은 `channel_products.channel_product_name`에만 있었다.
+
+**셀러가 자기 상품을 자기 상품 이름으로 부르지 못하는 상태**였다.
+
+### 13.2 무엇을 바꿨나
+
+`channel_products.channel_product_name`을 **canonical product resolution alias**로 쓴다.
+
+| 순위 | surface | 규칙 |
+|---|---|---|
+| 0 | `SKU_EXACT` | `products.sku` 완전 일치 |
+| 1 | `CANONICAL_NAME_EXACT` | `products.name` 완전 일치 |
+| 2 | **`CHANNEL_PRODUCT_NAME_EXACT`** | **리스팅 제목 완전 일치 → 그 리스팅이 이미 연결된 canonical product** |
+| 3 | `CANONICAL_NAME_PARTIAL` | `products.name` 부분 일치 (유일한 비정확 surface) |
+
+**alias는 완전 일치만 한다.** normalize는 화면에서 보이지 않는 차이만 지운다 — NFC · trim · lowercase ·
+연속 공백 축약, 4단계. 이는 `ContentHash.normalize`가 이미 쓰는 규칙과 같은 것이며, 하나의 정의로
+`ProductNameKey`에 모았다. **유사도 점수도, 모델 추측도, 상품 병합도 없다** — 데모 org에는
+「선바로 2p」와 「선바로 4p」처럼 한 글자 차이의 별개 상품이 실제로 있고, 그 둘을 구분하지 못하는 해석기는
+답이 아니라 사고다.
+
+**리스팅을 찾고, 그 리스팅이 이미 붙어 있는 canonical product를 돌려준다.** 생성 0, 병합 0
+(`resolvingCreatesNothing` 회귀).
+
+**범위는 org × REAL, 두 겹으로.** 두 read 모두 org-scoped이고, 자동 활성화된 `realDataOnly` 필터가
+양쪽에서 seeded row를 제외한다 — 합성 리스팅이 실제 상품의 이름이 될 수 없고, 다른 테넌트의 리스팅에는
+닿지 않는다.
+
+### 13.3 같은 이름이 여러 상품에 붙어 있을 때 — 임의 선택 금지
+
+**exact surface에서의 동점은 해결 불가이며, 해결하지 않는다.** 후보 목록에 각 행이 어느 surface에서
+맞았는지(`matchedOn`)가 실려 오므로, "후보가 여럿"과 "**똑같이 좋은** 후보가 여럿"이 구별된다. 정확한 SKU
+하나 + 부분 일치 셋은 해결된 것이고, 같은 제목의 리스팅 둘은 해결되지 않은 것이다.
+
+동점이면 run은 고르지 않고 **무엇이 있으면 정해지는지**를 말한다:
+「"스노우 누리젠"이라는 이름으로 등록된 상품이 4개 있어 어느 쪽을 말씀하시는지 정하지 못했습니다.
+상품코드(SKU)나 채널을 함께 알려주세요.」
+
+**부분 일치의 동점은 다른 상황이라 그대로 둔다.** 셀러가 조각을 말했으므로 그중 하나가 정말 그 상품일 수
+있다 — run은 진행하고 어느 쪽을 택했는지 밝힌다(기존 동작).
+
+> **범위를 넓힌 판단, 명시.** 요구는 alias 동점에 대한 것이었으나, 같은 규칙을 `CANONICAL_NAME_EXACT`
+> 동점에도 적용했다. 데모 org에서 「스노우 누리젠」은 **canonical name이 4개 상품에 그대로 중복**돼 있고
+> (라이브 확인), 이전에는 그 4개 중 첫 번째를 조용히 골랐다. 같은 증거·같은 실패 형태이므로 같은 규칙을
+> 적용했다. 되돌리려면 `EXACT_SURFACES`에서 `CANONICAL_NAME_EXACT`를 빼면 된다.
+
+### 13.4 답이 부르는 이름
+
+alias로 맞았을 때는 **그 리스팅 제목이 답의 상품 이름**이 된다(`matchedName`). 셀러가 상품 제목을 쳤는데
+`15223228019`를 읽어주는 것은 그 셀러의 상품에 대한 답이 아니다. SKU 숫자는 카탈로그에 남는다.
+
+### 13.5 회귀 (백엔드 10 · agent-runtime 9)
+
+**red 증명.**
+
+| 되돌린 것 | 빨개지는 테스트 |
+|---|---|
+| alias surface 제거 (백엔드) | **10건 중 5건** |
+| alias surface 제거 (agent-runtime fake) | **9건 중 3건** |
+| 동점 거부 + 사람 이름 label 제거 | **9건 중 2건** |
+
+**세 fence는 양쪽 모두 초록으로 남는다** — 타 org alias, DEMO_SEED alias, 없는 이름. 기능을 끄면 통과하는
+테스트이므로 대조군이며, 규칙이 "찾기를 넓히는 스위치"가 아니라는 증거다.
+
+전체: 백엔드 **2736 passed · 0 failed**, agent-runtime **329 passed · 23 skipped · 0 failed**.
+
+### 13.6 라이브 재실행 (REAL Demo Org · 마켓 접촉 0 · WRITE 0)
+
+**resolve 확인 (`GET /api/products?q=…`)**
+
+```
+q=판도리 일체형 종이컵 수거함
+→ 1건 · CHANNEL_PRODUCT_NAME_EXACT · id 800d396a… · name "15223228019"
+       · matchedName "판도리 일체형 종이컵 수거함"
+```
+
+**Q4 — 「판도리 일체형 종이컵 수거함 상품의 리뷰와 문의를 같이 보고 …」 (2회, 결과 동일)**
+
+| 항목 | 결과 |
+|---|---|
+| planner | LLM · `PRODUCT_OPS`+`REVIEW_OPS`+`INQUIRY_OPS` · needs 3 |
+| **resolved entity** | **`800d396a-eecb-4b78-b227-18c36db080b5` — 2회 동일** (`product_ops resolved:true, ambiguous:false`) |
+| tool 호출 | 5 / 5 |
+| evidence | `REVIEW_ISSUE` ×3 (ORG) · `INBOX_COUNT` ×1 (ORG) |
+| **rejected** | **4건 전부 — 사유가 `NO_RESOLVED_PRODUCT`에서 `ORG_EVIDENCE_FOR_PRODUCT_NEED`로 바뀌었다** |
+| findings | 0 |
+| unsupported claims | **0** |
+| nextActions | 0 |
+| WRITE | **0** — 모든 도구 READ |
+
+**baseline 대비.** §3 Q4는 다른 상품의 HIGH 이슈 3건을 이 상품의 것으로 단정했다. §9.3은 상품을 찾지
+못했다. 지금은 **상품을 찾고, 그 상품으로는 말할 수 있는 것이 없다는 것을 안다.**
+
+**상품 단위 진실 대조** (`/api/products/{id}/knowledge`): 리뷰 7 · 문의 1(미답변 0) · **이슈 0** ·
+issue evidence 0 · 리스팅 `COUPANG "판도리 일체형 종이컵 수거함"` · 모든 신호 coverage `COVERED`.
+**즉 "불만 신호 없음"이 정답이고, run은 아무것도 주장하지 않았다.**
+
+**동점 거부 (라이브 확인, 1회)** — 「스노우 누리젠 상품의 리뷰와 문의를 …」
+→ `PRODUCT_OPS` 진입, 4개 동점, **선택 없음**, note에 SKU/채널 요청. findings 0 · WRITE 0.
+(같은 run의 2회차 re-plan은 mention을 「스노우 누리젠 상품」으로 바꿔 내보내 "찾지 못했습니다"로 끝났다 —
+bounded re-plan의 정상 동작이며 두 문장 모두 각자의 pass에 대해 참이다.)
+
+### 13.7 이번 회차에서 새로 관측된 것 (수정하지 않음)
+
+- **C3(신규) — 상품을 읽고 "신호 없음"을 확인했는데 그 문장이 셀러에게 도달하지 않는다.** `PRODUCT_OPS`는
+  need를 `UNSATISFIABLE / "이 상품에 기록된 신호가 없습니다."`로 적지만, 뒤이어 도는 `REVIEW_OPS`가
+  같은 need를 `UNSATISFIABLE / "…전체 집계뿐이라…"`로 덮는다(need reducer는 UNSATISFIABLE→UNSATISFIABLE
+  덮어쓰기를 허용한다). 결과적으로 답은 **"org 집계만 봤다"**고 말하지만 실제로는 **coverage `COVERED`로
+  상품을 읽고 깨끗했다.** 사실보다 약한 진술이며, 이번 package 범위 밖이다.
+- **B1은 그대로다** — `search_review_issues`에 상품 파라미터가 없어 REVIEW_OPS는 계속 org 전체를 읽고,
+  A1 게이트가 계속 거절한다. C1이 닫혀도 이 경로는 변하지 않는다.
+- §11.5 · §12.8의 backlog는 그대로 열려 있다.
+
+### 13.8 판정
+
+| 결함 | 상태 |
+|---|---|
+| **C1** — 사람이 읽는 상품명으로 canonical product가 해결되지 않음 | **CLOSED** — 라이브 2회 동일 resolve + 회귀 19건 |
+| A1 · A2 · A3 · A4 · §10.4 temporal | CLOSED (§9~§12) |
+| A5 · A6 · B · C2 · D | backlog 유지 |
+| 신규 — C3 상품 read 결과가 뒤 specialist에 덮임 | backlog (§13.7) |
