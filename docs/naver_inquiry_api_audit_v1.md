@@ -154,3 +154,126 @@ CONNECTED 계정에 대해 **커넥터가 지원한다고 말하는** 타입의 
 | 문의 API 그룹 권한을 이 애플리케이션이 가졌는가 | **라이브 1회로만 확인 가능** (403이면 판매자 행동, 우회 없음) |
 | 두 source를 한 schedule로 묶을지 | **PART 2** — failure isolation을 라이브에서 보고 결정 |
 | TalkTalk | **커머스 API 미지원 유지** — coverage limitation |
+
+---
+
+## 6. 구현 — 무엇이 만들어졌고, 무엇이 켜져 있지 않은가
+
+*2026-08-24, 마켓플레이스 호출 0회. 아래는 전부 offline 회귀로 증명된 것이다.*
+
+| 만든 것 | 무엇 |
+|---|---|
+| `NaverProductQnaClient` | `GET /external/v1/contents/qnas` — page 1-based, size 100(리소스 상한), 종료는 `last`→`totalPages` 순 |
+| `NaverCustomerInquiriesClient` | `GET /external/v1/pay-user/inquiries` — page 1-based, size 200(리소스 상한), `yyyy-MM-dd` |
+| `NaverInquiryCursor` | 두 source가 각자의 lane을 갖는 하나의 cursor. routine / bounded 구분 |
+| `NaverInquiryCollector` | 한 run이 한 source를 끝까지 쓸고 다른 source로 넘어간다. 배선되지 않은 source는 **호출되지 않는다** |
+| `InquirySourceSubtype` | `NAVER_PRODUCT_QNA` · `NAVER_CUSTOMER_INQUIRY` (닫힌 어휘, `inquiries.source_subtype`) |
+| `ChannelProductRef` | "이 행은 채널 식별자로만 귀속한다"는 선언. 있으면 이름 경로가 **도달 불가**가 된다 |
+| `inquiries.answer_body` / `answered_at` | 판매자가 플랫폼에 이미 남긴 답변. 채널 중립, 없는 source는 NULL |
+| `SelfPilotReconciler` fence | 자동 routine schedule은 **`CONFIRMED` capability에만** 생긴다 |
+
+**켜져 있지 않은 것:** `sellerops.connector.naver.inquiry.product-qna.enabled` ·
+`…inquiry.customer.enabled` 둘 다 **기본 `false`**. 둘 다 꺼져 있으면 커넥터는 INQUIRY를 **광고조차
+하지 않고**, 런타임 동작은 이 package 이전과 바이트 단위로 같다.
+
+### 6.1 회귀
+
+backend **2,779 tests · 0 failures · 0 errors** (이전 2,738 → **+41**). 새 테스트가 고정하는 것:
+
+| 무엇 | 어디 |
+|---|---|
+| 두 리소스의 요청 파라미터가 공식 계약 그대로 | `NaverInquirySourcesTest` (15) |
+| 없는 필드는 주장하지 않는다 (비밀글·raw token·answer 시각·제목) | 같은 곳 |
+| `customerId`/`customerName`이 canonical row 어디에도 없다 | 같은 곳 |
+| 두 식별자 공간이 namespace로 갈라져 있다 | 같은 곳 |
+| 첫 창은 14일(기존 `ROUTINE_MAX_LAG`), 다음 창은 직전 끝에서 열린다 | `NaverInquiryRecurrenceTest` (10) |
+| 뒤처진 routine cursor는 backlog를 걷지 않고 재시작한다 | 같은 곳 |
+| 완주한 sweep은 커서를 끝 너머에 주차하지 않는다 (PRODUCT 결함) | 같은 곳 |
+| 한 source만 배선하면 다른 source는 **0회** 호출된다 | 같은 곳 |
+| 배선 없으면 INQUIRY를 광고하지 않고, 배선되면 `NEEDS_VERIFICATION` | `NaverInquiryCapabilityFenceTest` (6) |
+| 미검증 capability는 자동 schedule을 얻지 못한다 | `SelfPilotReconcilerTest` |
+| 식별자 귀속: 정확 일치 또는 무귀속. **상품 생성 0** | `IdentifierProductAttributionTest` (9) |
+| 이름이 같은 두 리스팅이 합쳐지지 않는다 | 같은 곳 |
+| 이름/SKU 경로는 기존 source에 대해 **불변** | 같은 곳 |
+
+read-only fence(`NaverReadOnlyFenceTest`)는 **더 정밀해졌다**: 마커가 명사 `answer`에서
+**write 경로**(`/external/v1/pay-merchant`, `qnas/`, `/answer`)로 바뀌었다. 명사 마커는 GET 응답의
+`answerContent`를 읽는 것과 답변을 등록하는 것을 구별하지 못했다.
+
+## 7. 라이브 read manifest (준비) — **실행하지 않았다**
+
+**상태: 준비됨. 마켓플레이스 호출 0회.** 아래는 전부 코드·로컬 DB에서 확인한 사실이다.
+
+### 7.0 먼저 — 지금은 실행할 수 없다 (판매자 행동 필요)
+
+canonical Demo Org의 NAVER 계정은 **`RECONNECT_REQUIRED`**다.
+
+| 사실 | 값 |
+|---|---|
+| 계정 상태 | `RECONNECT_REQUIRED` (`seller_accounts`, 2026-08-24 조회) |
+| 마지막 성공 | `ORDER_SUMMARY` SUCCESS 2026-08-23 14:17 KST |
+| 그다음 | `ORDER_SUMMARY` **FAILED** 2026-08-23 15:18 KST — `CREDENTIAL_REJECTED` |
+| 지금 schedule | `ORDER_SUMMARY` 60분 · `PRODUCT` 1440분 — **둘 다 auth-paused** |
+
+**자격 증명 재연결은 판매자의 행동이다.** 우회하지 않고, 대신 호출하지 않는다. 재연결 전에는 두
+문의 endpoint 어느 쪽도 200을 줄 수 없으므로, 이 manifest는 **재연결 이후에** 유효하다.
+
+부수 효과로 확인된 것: 계정이 `CONNECTED`가 아니므로 self-pilot reconciler는 어떤 schedule도 만들지
+않는다. §4의 fence와 **독립적으로** 지금은 자동 호출이 불가능하다.
+
+### 7.1 baseline — 이 proof가 움직여야 할 숫자
+
+| 값 | 지금 |
+|---|---|
+| NAVER 채널의 `inquiries` 행 | **8건 — 전부 `DEMO_SEED`** (합성). 기본 읽기에서 `RealDataOnly`가 제외한다 |
+| NAVER **REAL** 문의 | **0건** |
+| `source_subtype`을 가진 행 | 0 (컬럼이 방금 생겼다) |
+| NAVER `channel_products` | **77 리스팅** — 상품 귀속이 맞을 수 있는 후보의 전부 |
+
+합성 8건은 **REAL 결과에 섞이지 않는다.** proof의 성공 기준은 "REAL 문의가 0에서 N이 되는가"이지
+"문의가 8에서 8+N이 되는가"가 아니다.
+
+### 7.2 manifest — run A · 상품 문의만
+
+| 필드 | 값 |
+|---|---|
+| channel | `NAVER` (`9e53507e…`) |
+| org / account | canonical Demo Org · 기존 계정 **재사용** (새 계정 만들지 않음) |
+| DataType | **`INQUIRY` 하나.** ORDER_SUMMARY / PRODUCT / REVIEW는 이 run에서 호출하지 않는다 |
+| source | **상품 문의 1개.** `…inquiry.product-qna.enabled=true`, `…inquiry.customer.enabled=false` |
+| operation | 경계 있는 1회 읽기 (`POST /api/seller-accounts/{id}/sync {"dataType":"INQUIRY"}`, trigger `MANUAL`) |
+| 기간 | 운영자가 고르는 bounded window (routine lane 아님) — cursor `bounded=true`, 재계산·확장 없음 |
+| mode | **`READ_ONLY`** |
+| SellerOps의 라이브 액션 | **GET 하나뿐**: `GET /external/v1/contents/qnas?fromDate&toDate&page&size=100` (+ 토큰 mint 1회) |
+| WRITE | **0 — 구조적으로.** 두 client에 GET 외의 메서드가 없고, `NaverHttpClient`에 put/delete/patch가 없으며, `NaverReadOnlyFenceTest`가 답변 등록 경로 3종을 이름으로 거부한다 |
+| 요청 볼륨 | **⌈N/100⌉ + 1.** 상세 조회가 **없다** — 목록 리소스가 질문·답변·상품번호를 전부 준다 (Coupang PRODUCT proof의 N+⌈N/10⌉과 다른 점) |
+| 기존 schedule | 재연결로 되살아난 `ORDER_SUMMARY`/`PRODUCT` routine은 **건드리지 않는다** |
+| INQUIRY schedule | **만들지 않는다 — 코드가 이미 그렇다.** capability가 `NEEDS_VERIFICATION`이라 reconciler가 건너뛴다 (§4) |
+| 되돌릴 수 없는 것 | 없음. 읽기뿐이고 재실행은 `external_id` 멱등이다 |
+
+### 7.3 manifest — run B · 고객 문의만
+
+run A와 동일하되 **플래그가 반대**다 (`product-qna=false`, `customer=true`), endpoint는
+`GET /external/v1/pay-user/inquiries?startSearchDate&endSearchDate&page&size=200`,
+요청 볼륨은 **⌈N/200⌉ + 1**.
+
+두 run을 나누는 이유는 하나다: **한 endpoint의 403·페이지 수·귀속률이 다른 endpoint의 것과 섞이지
+않게** 하기 위해서다. 어느 쪽이 실패해도 다른 쪽의 결과는 그대로 읽힌다.
+
+### 7.4 이 proof가 실제로 답하는 질문 (지금은 답할 수 없는 것들)
+
+1. **`contents.productId`가 채널상품번호인가 원상품번호인가** — 77개 리스팅에 대한 일치율이 답이다.
+   일치 0이면 원상품번호이며, 그때는 이름으로 메우지 않고 **관측을 기록하고 멈춘다**.
+2. **`content.productNo`도 같은 질문** — 그리고 `productNo`가 실제로 내려오기는 하는지(선택 필드).
+3. **`/v1/pay-user/inquiries`가 판매자 토큰으로 판매자 수신 문의를 주는가** — 문서 설명문이
+   "구매회원 본인 계정"이라고 쓰여 있어 단정할 수 없다. 아니면 `NEEDS_VERIFICATION`에서 올라가지 않는다.
+4. **애플리케이션이 문의 API 그룹 권한을 갖고 있는가** — 403이면 판매자 행동이며 우회하지 않는다.
+5. **REAL 문의가 실제로 존재하는가** — 0건도 결과다. `ZERO`와 `NOT_SUPPORTED`는 같은 뜻이 아니고,
+   그 구분이 PART 3의 전제다.
+
+### 7.5 승인
+
+`docs/sellerops_live_approval_contract.md`. 이 run은 **READ_ONLY**이고 WRITE 승인을 요구하지 않는다.
+채널/계정/범위가 바뀌거나 코드·브랜치가 바뀌면 승인은 `REVOKED`이며 다시 받는다.
+
+**여기서 멈춘다.** 위 두 run 중 어느 것도 실행하지 않았다.

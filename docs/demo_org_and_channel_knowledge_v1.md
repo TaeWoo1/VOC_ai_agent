@@ -451,7 +451,7 @@ upsert하므로 재읽기는 idempotent다.
 | NAVER ORDER_SUMMARY | 60분 | enabled |
 | NAVER PRODUCT | 1440분 | enabled |
 | Cafe24 3종 | 60분 | **손대지 않음** |
-| NAVER REVIEW / INQUIRY | — | **만들지 않음** |
+| NAVER REVIEW / INQUIRY | — | **만들지 않음** (INQUIRY는 2026-08-24 구현 후에도 `NEEDS_VERIFICATION`이라 reconciler가 만들지 않는다 — 광고는 도달 가능성이고 자동 반복은 증명이다) |
 
 근거는 §6a Self-Pilot Runtime v1의 **standing READ grant**다(2026-08-18 product-owner 결정) — 라이브
 승인 계약의 단일 사용 manifest는 사람이 앉아 있는 guided run을 위한 것이고, 소유 org의 routine READ
@@ -583,7 +583,10 @@ run이 `SUCCESS`로 남은 이유가 그거다 — `sync_jobs`에는 행 수만 
 
 - 리뷰 `reply_state`는 여전히 **UNKNOWN**이다. 내보내기 파일이 답변 여부를 담지 않기 때문이며,
   "답변 안 함"이 아니라 "알 수 없음"이다(`naver-status-review-reply-unknown`).
-- NAVER INQUIRY는 **UNSUPPORTED** 유지.
+- NAVER INQUIRY는 **이 경로(리뷰 export)와 무관**하다. ~~UNSUPPORTED 유지~~ — **2026-08-24 정정**:
+  NAVER 커머스 API에는 문의 READ endpoint가 **둘** 있다(상품 문의 `GET /v1/contents/qnas`, 고객 문의
+  `GET /v1/pay-user/inquiries`). 통째로 UNSUPPORTED라고 적은 것은 공식 계약과 맞지 않았다 —
+  `docs/naver_inquiry_api_audit_v1.md`. TalkTalk만 커머스 API 미지원으로 남는다.
 - 리뷰는 자동 수집 주기 대상이 아니다 — `SELLER_REPEATED`이고, 셀러가 실행할 때만 들어온다.
 
 ## 4g. NAVER REVIEW refresh 라이브 실행 (2026-08-23) — 데이터는 들어왔고, 경로는 아직 완주 못 한다
@@ -740,7 +743,7 @@ fixture는 **합성**이다. 실제 export의 헤더 행(컬럼명은 개인정�
 | PRODUCT | 69 리스팅 라이브, 필드 범위 관측 완료, **routine 1440분 running** (§4c ② · §4f) |
 | ORDER_SUMMARY | 최근 창 라이브, **routine 60분 running**, restart/floor/lane 독립 전부 테스트로 고정 (§4c ③ · §4d · §4f) |
 | REVIEW | REAL **4,340** / 최신 **2026-08-22**, 2구간 COVERED, attribution 100% (§4g) |
-| INQUIRY | **UNSUPPORTED 유지** — 계약 변경 없음 |
+| INQUIRY | ~~**UNSUPPORTED 유지**~~ → **2026-08-24 정정: 공식 READ endpoint가 둘 있다.** 상품 문의(`/v1/contents/qnas`) · 고객 문의(`/v1/pay-user/inquiries`) 각각 `NEEDS_VERIFICATION`(구현 완료, 라이브 미검증), TalkTalk만 **커머스 API 미지원**. 근거: `docs/naver_inquiry_api_audit_v1.md` |
 
 ### 열려 있는 단 하나 — regression checkpoint, blocker 아님
 
