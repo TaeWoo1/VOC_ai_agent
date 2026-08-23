@@ -36,7 +36,8 @@ import type {
   SpecialistResult,
 } from "../state/OperatorState";
 import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
-import { mentionsOf, needsInOrder } from "../plan/InvestigationPlan";
+import { needsInOrder } from "../plan/InvestigationPlan";
+import { instanceMentionsOf, isInstance } from "../plan/EntityRole";
 import type { NeedScope, RejectedEvidence } from "../scope/EvidenceScope";
 import { needScopeOf, partitionEvidence, planScopeOf, reasonSentence } from "../scope/EvidenceScope";
 import { basisSentence } from "../defaults/OperationalDefaults";
@@ -301,7 +302,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
           const result = await runProductOps({
             ...shared,
             needs: needsInOrder(plan, PRODUCT_NEEDS),
-            mentions: mentionsOf(plan, "PRODUCT"),
+            mentions: instanceMentionsOf(plan, "PRODUCT"),
           });
           return {
             result,
@@ -592,7 +593,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
  * IS no label, and the only honest way to name the thing is the way they named it.
  */
 function productMentionOf(plan: InvestigationPlan): string | undefined {
-  return plan.entities.unresolved.find((e) => e.kind === "PRODUCT")?.mention
+  // An INSTANCE only: a category mention never put the run into product scope, so it can never be the
+  // reason a row was withheld, and quoting it back ("「상품」에 해당하는 상품을 찾지 못해…") would name
+  // a thing the seller never asked about.
+  return plan.entities.unresolved.find((e) => e.kind === "PRODUCT" && isInstance(e))?.mention
     ?? plan.entities.resolved.find((e) => e.kind === "PRODUCT")?.mention;
 }
 

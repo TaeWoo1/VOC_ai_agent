@@ -36,6 +36,7 @@
  * `EvidenceRef`.
  */
 import type { InformationNeed, InvestigationPlan, NeedKind } from "../plan/InvestigationPlan";
+import { namesInstance } from "../plan/EntityRole";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
 
 /**
@@ -228,8 +229,9 @@ export function isServable(plan: InvestigationPlan, need: InformationNeed): bool
   // need can be pursued.
   if (resolveScope(plan, need).source === "NONE") return false;
   if (NEEDS_PRODUCT_ANCHOR.includes(need.kind)) {
-    const anchored = plan.entities.unresolved.some((e) => e.kind === "PRODUCT" || e.kind === "INQUIRY")
-      || plan.entities.resolved.some((e) => e.kind === "PRODUCT" || e.kind === "INQUIRY");
+    // An anchor is one thing to look AT. A category mention names none — "문의 관련 정보" says which
+    // kind of row to read, not which row — so it cannot make a need servable (`plan/EntityRole.ts`).
+    const anchored = namesInstance(plan, ["PRODUCT", "INQUIRY"]);
     if (!anchored) return false;
   }
   return true;

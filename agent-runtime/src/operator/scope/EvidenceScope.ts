@@ -36,6 +36,7 @@ import type { EvidenceKind, EvidenceRef } from "../state/OperatorState";
 import type { InformationNeed, InvestigationPlan, ResolvedEntity } from "../plan/InvestigationPlan";
 import type { EventRange, TemporalDemand } from "./EvidenceTime";
 import { hasEventTime, temporalDemandOf } from "./EvidenceTime";
+import { isInstance } from "../plan/EntityRole";
 
 /** What a claim is ABOUT. A closed set; the three levels a seller's question can sit at. */
 export type EntityScope = "ORG" | "PRODUCT" | "ITEM";
@@ -209,13 +210,19 @@ export function needScopeOf(
   resolved: readonly ResolvedEntity[],
 ): NeedScope {
   const mentions = plan.entities.unresolved;
-  const namesProduct = mentions.some((m) => m.kind === "PRODUCT")
+  // <b>Only an INSTANCE narrows.</b> A category mention is a kind of thing, not one of them: "미답변
+  // 문의" cannot be resolved to an inquiry by any tool, and reading it as one is what made a run refuse
+  // its own correct org-wide count and answer nothing (A9 — `plan/EntityRole.ts`). Note that the
+  // narrowing does NOT wait for resolution: an unresolved instance still puts the need in product scope
+  // and is then answered by nothing, which is invariant 1 and stays exactly as it was.
+  const named = mentions.filter(isInstance);
+  const namesProduct = named.some((m) => m.kind === "PRODUCT")
     || resolved.some((r) => r.kind === "PRODUCT");
-  const namesItem = mentions.some((m) => m.kind === "INQUIRY" || m.kind === "ORDER")
+  const namesItem = named.some((m) => m.kind === "INQUIRY" || m.kind === "ORDER")
     || resolved.some((r) => r.kind === "INQUIRY" || r.kind === "ORDER");
   const entity: EntityScope = namesProduct ? "PRODUCT" : namesItem ? "ITEM" : "ORG";
 
-  const channelMention = mentions.find((m) => m.kind === "CHANNEL")?.mention
+  const channelMention = named.find((m) => m.kind === "CHANNEL")?.mention
     ?? resolved.find((r) => r.kind === "CHANNEL")?.label
     ?? null;
 
@@ -229,6 +236,10 @@ export function needScopeOf(
     channelCode: channelMention ? normalizeChannel(channelMention) : null,
     temporal: temporalDemandOf(
       need.kind,
+      // Every PERIOD mention, whatever its role. The role gates the ENTITY axis — which thing a claim
+      // is about — and time is not an identity: "최근" names no period instance and still means the
+      // seller asked about a span. A4's `resolveScope` reads PERIOD the same way, and the two must not
+      // disagree about whether a period was named.
       mentions.some((m) => m.kind === "PERIOD") || resolved.some((r) => r.kind === "PERIOD"),
     ),
     granularities: fromPlan.length > 0 ? fromPlan : KIND_FLOOR[need.kind] ?? [],

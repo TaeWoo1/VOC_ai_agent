@@ -20,6 +20,7 @@ import type {
 } from "./InvestigationPlan";
 import type { SpecialistName } from "../state/OperatorState";
 import { productResolvingSpecialists } from "../tools/ToolReachability";
+import { namesInstance } from "./EntityRole";
 
 const ALL_SPECIALISTS: readonly SpecialistName[] =
   ["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS", "REPORT_OPS"];
@@ -116,8 +117,12 @@ export function validatePlan(plan: InvestigationPlan, deps: PlanValidatorDeps): 
   // invariant 1), so a plan that leaves a product mention with no resolver has already decided that
   // every product-scoped need in it will be refused. Better to say so here, while the planner can
   // still be asked again, than to run four reads whose every row the gate will throw away.
+  //
+  // <b>An INSTANCE, not any product word.</b> "상품별 최근 문제를 알려줘" names no product to reach, and
+  // demanding PRODUCT_OPS for it would make this rule a deterministic planner for a question that never
+  // needed one (`plan/EntityRole.ts`).
   const resolvers = productResolvingSpecialists();
-  const namesProduct = plan.entities.unresolved.some((e) => e.kind === "PRODUCT");
+  const namesProduct = namesInstance(plan, ["PRODUCT"], []);
   if (namesProduct && !specialists.some((s) => resolvers.includes(s))) {
     throw new PlanRejectedError(
       "PRODUCT_UNRESOLVABLE",

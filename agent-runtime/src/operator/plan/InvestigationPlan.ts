@@ -15,6 +15,7 @@
 import type { SpecialistName } from "../state/OperatorState";
 import type { AppliedDefault } from "../defaults/OperationalDefaults";
 import type { AttentionCoverage } from "../../spring/types";
+import type { EntityRole } from "./EntityRole";
 
 /** What kind of thing a mention refers to. Closed — an unknown kind is dropped by the validator. */
 export type EntityKind = "PRODUCT" | "CHANNEL" | "ORDER" | "INQUIRY" | "ISSUE" | "PERIOD";
@@ -23,9 +24,24 @@ export type EntityKind = "PRODUCT" | "CHANNEL" | "ORDER" | "INQUIRY" | "ISSUE" |
 export interface EntityMention {
   readonly kind: EntityKind;
   readonly mention: string;
+  /**
+   * Whether those words name one thing or a kind of thing.
+   *
+   * <b>Runtime-computed, never model-supplied</b>, and required so that no mention can enter a plan
+   * with the question unanswered. Assigned once at the wire boundary by
+   * {@link import("./EntityRole").mentionOf}; the validator, the capability audit and the scope gate
+   * all read this field rather than re-reading the string. A CATEGORY mention narrows nothing and is
+   * handed to no resolver — see `plan/EntityRole.ts` for why the burden of proof sits on that value.
+   */
+  readonly role: EntityRole;
 }
 
-/** A mention a TOOL resolved to a real row. Only the run can produce one. */
+/**
+ * A mention a TOOL resolved to a real row. Only the run can produce one.
+ *
+ * It carries no {@link EntityRole}: a row exists, so it is an instance by construction. That is also
+ * why {@link import("./EntityRole").namesInstance} counts every resolved entity unconditionally.
+ */
 export interface ResolvedEntity {
   readonly kind: EntityKind;
   readonly mention: string;
@@ -155,11 +171,6 @@ export interface InvestigationPlan {
    * clarification the model asked for actually reaches the seller.
    */
   readonly appliedDefaults: readonly AppliedDefault[];
-}
-
-/** The mentions of one kind a plan is still trying to resolve — the input a specialist resolves from. */
-export function mentionsOf(plan: InvestigationPlan, kind: EntityKind): string[] {
-  return plan.entities.unresolved.filter((e) => e.kind === kind).map((e) => e.mention);
 }
 
 /** The needs assigned to one specialist, in the strategy's order. */

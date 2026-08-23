@@ -42,6 +42,7 @@ import {
 } from "../support/recordedPlans";
 import type { OperatorAnswer } from "../../src/operator/state/OperatorState";
 import type { AgentPlanView } from "../../src/spring/types";
+import { mentionOf } from "../../src/operator/plan/EntityRole";
 
 const COMPLAINT_GOAL = "전선몰딩 상품의 리뷰와 문의를 같이 보고 불만이 있는지 알려줘";
 const CUP_BIN_GOAL = "판도리 일체형 종이컵 수거함 상품의 리뷰와 문의를 같이 보고 고객 불만이나 반복 이슈가 있는지 알려줘.";
@@ -58,7 +59,7 @@ const TWO_SIGNAL_PLAN: AgentPlanView = {
   available: true,
   supported: true,
   userGoal: "이 상품의 반복 불만과 그 심각도를 알고 싶다",
-  unresolvedEntities: [{ kind: "PRODUCT", mention: "판도리 일체형 종이컵 수거함" }],
+  unresolvedEntities: [mentionOf("PRODUCT", "판도리 일체형 종이컵 수거함")],
   informationNeeds: [
     { id: "n1", question: "반복되는 불만이 있는가", kind: "REVIEW_SIGNAL", why: "", required: true },
     { id: "n2", question: "그 심각도는 어떤가", kind: "REVIEW_SIGNAL", why: "", required: true },
@@ -121,7 +122,7 @@ function plan(overrides: Partial<InvestigationPlan> = {}): InvestigationPlan {
   return {
     supported: true,
     userGoal: "이 상품 어때",
-    entities: { resolved: [], unresolved: [{ kind: "PRODUCT", mention: "전선몰딩" }] },
+    entities: { resolved: [], unresolved: [mentionOf("PRODUCT", "전선몰딩")] },
     informationNeeds: [
       { id: "n1", question: "이 상품에 불만이 있는가", kind: "REVIEW_SIGNAL", why: "", required: true },
     ],

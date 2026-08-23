@@ -27,7 +27,10 @@ import {
 } from "../support/operatorFixtures";
 import { RECORDED_PLANS } from "../support/recordedPlans";
 import type { OperatorAnswer } from "../../src/operator/state/OperatorState";
-import type { InformationNeed, InvestigationPlan, NeedKind } from "../../src/operator/plan/InvestigationPlan";
+import type {
+  EntityMention, InformationNeed, InvestigationPlan, NeedKind,
+} from "../../src/operator/plan/InvestigationPlan";
+import { mentionOf } from "../../src/operator/plan/EntityRole";
 import {
   REPEAT_WINDOW_DAYS, basisSentence, clarificationStands, isServable, resolveScope,
   scopeToken, withOperationalDefaults,
@@ -160,7 +163,7 @@ describe("a clarification the contracts cannot answer still reaches the seller",
   });
 
   it("the same product need IS servable once the seller named one", () => {
-    const plan = planOf([need("n1", "PRODUCT_FACT")], [{ kind: "PRODUCT", mention: "전선몰딩" }]);
+    const plan = planOf([need("n1", "PRODUCT_FACT")], [mentionOf("PRODUCT", "전선몰딩")]);
     expect(isServable(plan, plan.informationNeeds[0]!)).toBe(true);
   });
 
@@ -202,14 +205,14 @@ describe("a default query window is a retrieval scope, never an evidence date", 
   it("a period the seller never wrote is not quoted back at them", () => {
     // Live 2026-08-23: a planner emitted the PERIOD mention "분석 기간 미지정" — its own note about a
     // gap — and the answer attributed the phrase to the seller.
-    const plan = planOf([need("n1", "REPEAT_PATTERN")], [{ kind: "PERIOD", mention: "분석 기간 미지정" }]);
+    const plan = planOf([need("n1", "REPEAT_PATTERN")], [mentionOf("PERIOD", "분석 기간 미지정")]);
     const invented = withOperationalDefaults(plan, "반복해서 비슷한 문의가 들어오는 상품이 있어?");
     expect(invented.appliedDefaults[0]!.userNamed).toBeNull();
     expect(basisSentence(invented.appliedDefaults[0]!)).toBe(
       `반복 문의는 최근 ${REPEAT_WINDOW_DAYS}일 기준으로 확인했습니다.`);
 
     const theirs = withOperationalDefaults(
-      planOf([need("n1", "REPEAT_PATTERN")], [{ kind: "PERIOD", mention: "최근" }]),
+      planOf([need("n1", "REPEAT_PATTERN")], [mentionOf("PERIOD", "최근")]),
       "최근 반복 문의 알려줘");
     expect(theirs.appliedDefaults[0]!.userNamed).toBe("최근");
     expect(basisSentence(theirs.appliedDefaults[0]!)).toContain("「최근」");
@@ -229,7 +232,7 @@ function need(id: string, kind: NeedKind): InformationNeed {
 
 function planOf(
   needs: InformationNeed[],
-  unresolved: { kind: "PRODUCT" | "PERIOD"; mention: string }[] = [],
+  unresolved: EntityMention[] = [],
 ): InvestigationPlan {
   return {
     supported: true, userGoal: "g",

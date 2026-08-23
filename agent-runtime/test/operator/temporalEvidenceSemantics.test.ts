@@ -38,6 +38,7 @@ import {
 } from "../../src/operator/scope/EvidenceTime";
 import { RuleEvidenceJudge } from "../../src/operator/judge/EvidenceJudge";
 import { EvidenceBuilder, digestFor } from "../../src/operator/state/evidence";
+import { mentionOf } from "../../src/operator/plan/EntityRole";
 
 const Q5 = "답변이 필요한 문의를 우선순위대로 정리하고 답변 초안을 만들어줘";
 const Q1 = "오늘 뭐부터 봐야 해?";
@@ -90,7 +91,7 @@ describe("the live divergence — one planner word must not decide whether a tru
   it("Q1 is stable across the same difference", async () => {
     const plain = done(await build({ [Q1]: TODAY_PLAN }).run("t-q1", { text: Q1 }));
     const dated = done(await build({
-      [Q1]: { ...TODAY_PLAN, unresolvedEntities: [{ kind: "PERIOD", mention: "오늘" }] },
+      [Q1]: { ...TODAY_PLAN, unresolvedEntities: [mentionOf("PERIOD", "오늘")] },
     }).run("t-q1-period", { text: Q1 }));
 
     const state = (a: OperatorAnswer) => a.findings.filter((f) => f.statement.includes("답변이 필요한 문의"));
@@ -101,7 +102,7 @@ describe("the live divergence — one planner word must not decide whether a tru
     // The over-blocking check that matters: repeats DO carry event dates, so naming a period must not
     // silence them either. A gate that only ever withholds is not evidence that it withholds correctly.
     const answer = done(await build({
-      [Q1]: { ...TODAY_PLAN, unresolvedEntities: [{ kind: "PERIOD", mention: "오늘" }] },
+      [Q1]: { ...TODAY_PLAN, unresolvedEntities: [mentionOf("PERIOD", "오늘")] },
     }).run("t-q1-repeats", { text: Q1 }));
     expect(answer.findings.some((f) => f.statement.includes("반복"))).toBe(true);
   });
@@ -167,7 +168,7 @@ function ref(overrides: Partial<EvidenceRef> = {}): EvidenceRef {
 function plan(): InvestigationPlan {
   return {
     supported: true, userGoal: "g",
-    entities: { resolved: [], unresolved: [{ kind: "PERIOD", mention: "오늘" }] },
+    entities: { resolved: [], unresolved: [mentionOf("PERIOD", "오늘")] },
     informationNeeds: [], specialistTargets: [], candidateTools: [],
     retrievalStrategy: { order: [], parallelizable: [], stopWhen: null },
     evidenceRequirements: [], riskClass: "ROUTINE",

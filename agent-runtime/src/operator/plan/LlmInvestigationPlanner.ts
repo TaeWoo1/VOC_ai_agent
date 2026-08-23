@@ -27,6 +27,7 @@ import { validatePlan, PlanRejectedError, REPLANNABLE_REJECTIONS } from "./PlanV
 import type { PlanRejection } from "./PlanValidator";
 import { scopeToken, withOperationalDefaults } from "../defaults/OperationalDefaults";
 import { productResolvingSpecialists } from "../tools/ToolReachability";
+import { mentionOf } from "./EntityRole";
 import type { PlanLimits } from "./PlanValidator";
 import { log } from "../../log";
 
@@ -216,6 +217,11 @@ export class LlmInvestigationPlanner implements Planner {
         // boolean is what made the 2026-08-23 divergence diagnosable: two runs of one sentence took
         // different temporal paths and no log said which had named a period.
         periodNamed: validated.entities.unresolved.some((e) => e.kind === "PERIOD"),
+        // WHICH KINDS were named and whether each was read as one thing or a kind of thing — the pair
+        // that decides the entity axis for the whole run. Closed vocabulary on both sides: never the
+        // mention itself, which is the seller's own words. Without it, A9 was invisible in a log — two
+        // runs of one sentence scoped differently and nothing said why.
+        entityRoles: validated.entities.unresolved.map((e) => `${e.kind}:${e.role}`).join(","),
         // Whether the model asked, and whether the audit let the question through. The gap between the
         // two is exactly the A4 defect, and without both numbers it is invisible in a log.
         modelAskedToClarify: raw.clarificationNeeded,
@@ -278,7 +284,9 @@ function toPlan(view: AgentPlanView, goalText: string): InvestigationPlan {
       resolved: [],
       unresolved: (view.unresolvedEntities ?? [])
         .filter((e) => e && typeof e.mention === "string" && e.mention.trim().length > 0)
-        .map((e) => ({ kind: normalizeEntityKind(e.kind), mention: e.mention.trim() })),
+        // <b>The one place a mention's role is decided.</b> Computed, never read off the wire: the
+        // model has no field for it and could not be trusted with one — see `plan/EntityRole.ts`.
+        .map((e) => mentionOf(normalizeEntityKind(e.kind), e.mention.trim())),
     },
     informationNeeds: (view.informationNeeds ?? []).map((n, index) => ({
       id: n.id && n.id.trim().length > 0 ? n.id.trim() : `n${index + 1}`,

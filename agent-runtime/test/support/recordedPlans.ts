@@ -395,6 +395,28 @@ export const PRIORITIZE_WITH_PERIOD_PLAN: AgentPlanView = {
 };
 
 /**
+ * The same goal again, planned with a CATEGORY declared as an entity — the A9 live defect, isolated.
+ *
+ * <b>gpt-5-2025-08-07, 2026-08-24, live against the canonical Demo Org.</b> Sampled six times on one
+ * sentence, the planner declared an `INQUIRY` entity in four: twice "오늘 처리해야 할 문의" and once
+ * "답변이 필요한 문의" (the fourth run named a PERIOD only). Nothing else about those plans differed
+ * from the runs that named nothing, and that one line decided the whole run: the entity axis is a
+ * property of the PLAN (`scope/EvidenceScope.needScopeOf`), so every need became ITEM-scoped, the
+ * org-wide inbox count the run had just read correctly was refused as org evidence for an item
+ * question, and the seller was told nothing about 69 unanswered inquiries.
+ *
+ * <b>The mention is not wrong — the reading of it was.</b> "답변이 필요한 문의" is a category of
+ * inquiries; there is no id it could ever resolve to. Kept exactly as the model wrote it, inflection
+ * included, because the fix has to hold for a planner that will keep writing it this way — a table of
+ * bare nouns would classify neither of the two phrases it actually produced.
+ */
+export const PRIORITIZE_WITH_CATEGORY_PLAN: AgentPlanView = {
+  ...PRIORITIZE_AND_DRAFT_PLAN,
+  unresolvedEntities: [{ kind: "INQUIRY", mention: "답변이 필요한 문의" }],
+  providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-24 live",
+};
+
+/**
  * The three plans that answered a question with a question.
  *
  * <b>Reconstructed from the recorded runs, not byte-for-byte.</b> `docs/agent_real_validation_v1.md` §3

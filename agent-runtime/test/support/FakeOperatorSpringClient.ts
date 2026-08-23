@@ -92,6 +92,9 @@ export interface FakeOperatorSeed {
 }
 
 export class FakeOperatorSpringClient implements OperatorSpringClient {
+  /** Every query `resolve_product` was called with, in order. See {@link searchProducts}. */
+  readonly productQueries: string[] = [];
+
   readonly calls = {
     inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
     plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0,
@@ -172,6 +175,10 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
    */
   async searchProducts(query: string, limit?: number): Promise<ProductSummary[]> {
     this.calls.products += 1;
+    // <b>What was searched FOR, not just how often.</b> C5 is a defect about the query itself: a run
+    // that spends a resolve call on the word "상품" is looking for a product by that name, and a
+    // counter alone cannot tell that apart from a legitimate lookup.
+    this.productQueries.push(query);
     const key = (raw: string | null | undefined): string =>
       (raw ?? "").normalize("NFC").trim().toLowerCase().replace(/\s+/g, " ");
     const needle = key(query);

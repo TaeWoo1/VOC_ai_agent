@@ -29,6 +29,7 @@ import {
   checkEvidence, evidenceScopeOf, granularityOf, needScopeOf, partitionEvidence,
 } from "../../src/operator/scope/EvidenceScope";
 import { RuleEvidenceJudge } from "../../src/operator/judge/EvidenceJudge";
+import { mentionOf } from "../../src/operator/plan/EntityRole";
 
 function build() {
   const operator = new FakeOperatorSpringClient({
@@ -195,7 +196,7 @@ const NEED: InformationNeed = {
 describe("entity axis", () => {
   it("invariant 1 — a product need with no resolved product cannot be satisfied by anything", () => {
     const scope = needScopeOf(
-      plan({ entities: { resolved: [], unresolved: [{ kind: "PRODUCT", mention: "전선몰딩" }] } }),
+      plan({ entities: { resolved: [], unresolved: [mentionOf("PRODUCT", "전선몰딩")] } }),
       NEED, [],
     );
     // Even PRODUCT-scoped evidence fails: nothing established which product the seller meant, so
@@ -207,7 +208,7 @@ describe("entity axis", () => {
 
   it("invariant 2 — org-wide evidence never narrows to a product by being cited next to one", () => {
     const scope = needScopeOf(
-      plan({ entities: { resolved: [], unresolved: [{ kind: "PRODUCT", mention: "전선몰딩" }] } }),
+      plan({ entities: { resolved: [], unresolved: [mentionOf("PRODUCT", "전선몰딩")] } }),
       NEED,
       [{ kind: "PRODUCT", mention: "전선몰딩", id: "p-molding", label: "전선몰딩 1호", resolvedBy: "resolve_product" }],
     );
@@ -216,7 +217,7 @@ describe("entity axis", () => {
 
   it("invariant 3 — a different product's evidence is named as a different product's", () => {
     const scope = needScopeOf(
-      plan({ entities: { resolved: [], unresolved: [{ kind: "PRODUCT", mention: "전선몰딩" }] } }),
+      plan({ entities: { resolved: [], unresolved: [mentionOf("PRODUCT", "전선몰딩")] } }),
       NEED,
       [{ kind: "PRODUCT", mention: "전선몰딩", id: "p-molding", label: "전선몰딩 1호", resolvedBy: "resolve_product" }],
     );
@@ -232,7 +233,7 @@ describe("entity axis", () => {
 
 describe("channel axis", () => {
   const scoped = () => needScopeOf(
-    plan({ entities: { resolved: [], unresolved: [{ kind: "CHANNEL", mention: "쿠팡" }] } }),
+    plan({ entities: { resolved: [], unresolved: [mentionOf("CHANNEL", "쿠팡")] } }),
     NEED, [],
   );
 
@@ -252,7 +253,7 @@ describe("channel axis", () => {
 
 describe("temporal axis", () => {
   const dated = () => needScopeOf(
-    plan({ entities: { resolved: [], unresolved: [{ kind: "PERIOD", mention: "최근 30일" }] } }),
+    plan({ entities: { resolved: [], unresolved: [mentionOf("PERIOD", "최근 30일")] } }),
     NEED, [],
   );
 
@@ -301,7 +302,7 @@ describe("granularity axis", () => {
 describe("invariant 5 — compatibility is checked before a finding is assembled", () => {
   it("partition keeps the reason, so nothing is dropped without one", () => {
     const scope = needScopeOf(
-      plan({ entities: { resolved: [], unresolved: [{ kind: "PRODUCT", mention: "전선몰딩" }] } }),
+      plan({ entities: { resolved: [], unresolved: [mentionOf("PRODUCT", "전선몰딩")] } }),
       NEED,
       [{ kind: "PRODUCT", mention: "전선몰딩", id: "p-molding", label: "L", resolvedBy: "resolve_product" }],
     );
@@ -323,7 +324,7 @@ describe("invariant 6 — the rule judge carries the same floor, independently",
     needId: "n1",
   };
   const productScope = () => needScopeOf(
-    plan({ entities: { resolved: [], unresolved: [{ kind: "PRODUCT", mention: "전선몰딩" }] } }),
+    plan({ entities: { resolved: [], unresolved: [mentionOf("PRODUCT", "전선몰딩")] } }),
     NEED,
     [{ kind: "PRODUCT", mention: "전선몰딩", id: "p-molding", label: "L", resolvedBy: "resolve_product" }],
   );
