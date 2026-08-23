@@ -277,3 +277,50 @@ run A와 동일하되 **플래그가 반대**다 (`product-qna=false`, `customer
 채널/계정/범위가 바뀌거나 코드·브랜치가 바뀌면 승인은 `REVOKED`이며 다시 받는다.
 
 **여기서 멈춘다.** 위 두 run 중 어느 것도 실행하지 않았다.
+
+### 7.6 Run A 사전 상태 (2026-08-24, 마켓플레이스 호출 0회)
+
+| 확인 | 값 | 방법 |
+|---|---|---|
+| NAVER seller account | **1개** — 기존 `bdccb7a7…` 재사용. 새로 만들지 않음 | DB |
+| 계정 상태 | `RECONNECT_REQUIRED` | DB |
+| **credential sealed / open** | **`status: OK`** — `sealedKeyFingerprint` == `availableKeyFingerprint` == `IWLweMSEqoTt…`, `keyId` == `activeKeyId` == `self-pilot-1`, `sellerActionable: false` | `GET /api/seller-accounts/{id}/credential-diagnosis` (채널 호출 없음) |
+| ⇒ 진단 | **금고 문제가 아니다.** 저장된 자격 증명은 활성 키로 열린다. NAVER가 거부한 것은 `client_id`/`client_secret` 자체다 (2026-08-23 15:18 `CREDENTIAL_REJECTED`) | 위 두 줄 |
+| INQUIRY schedule | **0** — capability가 `NEEDS_VERIFICATION`이라 reconciler가 만들지 않는다 | DB |
+| ORDER_SUMMARY / PRODUCT schedule | **운영자 pause로 전환 완료** (`enabled=false`, `paused_reason=null`, `next_run_at=null`) | `PUT …/schedule` |
+| 두 source 플래그 | **둘 다 미무장** — `backend/.env.local`에 `…NAVER_INQUIRY…` 항목 없음 | grep |
+
+#### 재연결이 두 schedule을 되살린다 — 그래서 먼저 껐다
+
+`SellerAccountReauthService.onReconnected`는 `paused_reason`이 있는 schedule을
+`enabled=true, next_run_at=now`로 **되살린다**. 즉 재연결 직후 `ORDER_SUMMARY`(60분) ·
+`PRODUCT`(1440분) routine이 즉시 뜨고, 그 요청과 로그가 Run A의 것과 섞인다.
+
+경합에 기대지 않고 **재연결 전에** 둘을 운영자 pause로 바꿨다. 두 행은 `paused_reason`
+하나만 다르고 둘 다 `enabled=false`이며, `onReconnected`는 이유가 있는 행만 되살린다 —
+그 성질은 javadoc 문장이었고 이제 `SellerAccountReauthServiceTest`가 고정한다.
+
+**복원 기준선** (proof 후 되돌릴 값 — auth 사고 이전 상태):
+
+| data type | cadence | enabled |
+|---|---|---|
+| `ORDER_SUMMARY` | INTERVAL 60분 | `true` |
+| `PRODUCT` | INTERVAL 1440분 | `true` |
+
+#### Run B 사전 조건 — privacy fence, offline 증명 완료
+
+`NaverInquiryPrivacyFenceTest` (6 tests). 고객 문의는 이 저장소에서 **처음으로 구매자 이름을
+주는 리소스**이므로, 규칙이 "받은 적이 없어서 지켜진다"에서 "구조로 지켜진다"로 바뀌어야 했다.
+나갈 수 있는 문 네 개를 각각 막고 고정했다:
+
+| 문 | 고정된 것 |
+|---|---|
+| projection record | `CustomerInquiry`에 `customerId`·`customerName`·`orderId`·`productOrderIdList` **선언 자체가 없다** |
+| canonical row | 실제 PII를 담은 전체 응답을 파싱해도 row 전체 렌더링에 이름·구매자ID·주문번호가 **없다** |
+| 로그 | naver 패키지의 모든 `log.*` 인자에서 count 식(`…​.size()`)을 지운 뒤, body·content·row 전달이 **0건** |
+| 예외 메시지 | 파싱 실패·HTTP 500 모두 상태코드만 말하고 응답 본문을 싣지 않는다 |
+
+로그 fence는 단어 `rows`를 금지하지 않는다 — count를 먼저 지우고 본다. `rows={}`는 **몇 개인지**이고
+규칙은 **무엇인지**에 대한 것이다.
+
+**Run B는 실행하지 않는다.** Run A 결과 보고 후 별도로 판단한다.
