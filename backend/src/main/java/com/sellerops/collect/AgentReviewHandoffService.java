@@ -137,6 +137,22 @@ public class AgentReviewHandoffService {
     }
 
     /**
+     * What one row's product lookup came to: a SKU, or the named reason it has none.
+     *
+     * <p>The reason travels rather than being logged where it is discovered, so the batch reports one
+     * accurate line instead of one line per row — and so the two failure reasons can be counted apart.
+     */
+    private record Resolution(String sku, String failureReason) {
+        static Resolution resolved(String sku) {
+            return new Resolution(sku, null);
+        }
+
+        static Resolution failed(String reason) {
+            return new Resolution(null, reason);
+        }
+    }
+
+    /**
      * Store an acquisition's reviews. Fail-closed order: slot → org → account → channel guard → supported
      * channel → map every row → ingest. A request that fails any gate has stored nothing.
      *
@@ -212,6 +228,7 @@ public class AgentReviewHandoffService {
     private MappedBatch mapRows(UUID orgId, UUID channelId, List<AgentReviewHandoffRequest.Review> rows) {
         List<CanonicalReview> out = new ArrayList<>(rows.size());
         int unresolved = 0;
+        int ambiguous = 0;
         for (int i = 0; i < rows.size(); i++) {
             AgentReviewHandoffRequest.Review row = rows.get(i);
             // The flag and the body must agree. A textless review with text, or a written review with no
@@ -222,11 +239,15 @@ public class AgentReviewHandoffService {
                         "상품평 본문과 '본문 없음' 표시가 서로 맞지 않습니다. (" + REASON_BODY_DISAGREES + ")");
             }
             Instant receivedAt = parseDate(row.writtenOn());
-            String sku = catalogSkuFor(orgId, channelId, row.productId(), row.vendorItemId());
-            if (sku == null) {
+            Resolution resolution = catalogSkuFor(orgId, channelId, row.productId(), row.vendorItemId());
+            if (resolution.sku() == null) {
                 unresolved++;
+                if (REASON_AMBIGUOUS_PRODUCT.equals(resolution.failureReason())) {
+                    ambiguous++;
+                }
                 continue;
             }
+            String sku = resolution.sku();
             out.add(new CanonicalReview(
                     row.productName(),
                     sku,
@@ -243,10 +264,16 @@ public class AgentReviewHandoffService {
                     row.textless()));
         }
         if (unresolved > 0) {
-            // Counts only, and the reason by name. The display ids themselves are the seller's catalogue
-            // identifiers and there is nothing a log line does with them that a count does not.
-            log.warn("Coupang review handoff: {} row(s) named a 노출상품ID this org holds no listing for ({})",
-                    unresolved, REASON_UNRESOLVED_PRODUCT);
+            // The two reasons are counted apart because they mean opposite things to whoever reads this. A
+            // display id with no listing is a catalogue that does not cover the review; an ambiguous one is a
+            // catalogue that covers it twice. The first live sitting logged 11 rows under the first sentence
+            // when one of them was the second, which is the kind of small untruth that sends someone looking
+            // in the wrong place. Counts and reason names only — never the ids themselves.
+            log.warn("Coupang review handoff: {} row(s) unplaced — {} named a 노출상품ID this org holds no "
+                            + "listing for ({}), {} matched more than one product and the 옵션ID did not "
+                            + "choose exactly one ({})",
+                    unresolved, unresolved - ambiguous, REASON_UNRESOLVED_PRODUCT,
+                    ambiguous, REASON_AMBIGUOUS_PRODUCT);
         }
         return new MappedBatch(out, unresolved);
     }
@@ -275,14 +302,14 @@ public class AgentReviewHandoffService {
      * <p>Nothing here creates a product, a listing, or a variant. Every path returns either a SKU this
      * database already holds or null.
      */
-    private String catalogSkuFor(UUID orgId, UUID channelId, String displayProductId, String vendorItemId) {
+    private Resolution catalogSkuFor(UUID orgId, UUID channelId, String displayProductId, String vendorItemId) {
         if (displayProductId == null || displayProductId.isBlank()) {
-            return null;
+            return Resolution.failed(REASON_UNRESOLVED_PRODUCT);
         }
         List<ChannelProduct> listings = channelProducts
                 .findAllByOrgIdAndChannelIdAndExternalDisplayProductId(orgId, channelId, displayProductId);
         if (listings.isEmpty()) {
-            return null;
+            return Resolution.failed(REASON_UNRESOLVED_PRODUCT);
         }
         List<UUID> candidates = listings.stream().map(ChannelProduct::getProductId).distinct().toList();
 
@@ -293,20 +320,20 @@ public class AgentReviewHandoffService {
         } else {
             chosen = tieBreakByOption(orgId, candidates, vendorItemId);
             if (chosen == null) {
-                log.warn("Coupang review handoff: a 노출상품ID maps to {} products and the 옵션ID did not "
-                        + "choose exactly one ({})", candidates.size(), REASON_AMBIGUOUS_PRODUCT);
-                return null;
+                return Resolution.failed(REASON_AMBIGUOUS_PRODUCT);
             }
         }
 
         Product product = products.findAllByOrgIdAndIdIn(orgId, List.of(chosen))
                 .stream().findFirst().orElse(null);
         if (product == null || product.getSku() == null || product.getSku().isBlank()) {
-            return null;
+            return Resolution.failed(REASON_UNRESOLVED_PRODUCT);
         }
         // The round trip: the spine will resolve this SKU back to a product, and it must be this one.
         UUID roundTrip = products.findByOrgIdAndSku(orgId, product.getSku()).map(Product::getId).orElse(null);
-        return chosen.equals(roundTrip) ? product.getSku() : null;
+        return chosen.equals(roundTrip)
+                ? Resolution.resolved(product.getSku())
+                : Resolution.failed(REASON_UNRESOLVED_PRODUCT);
     }
 
     /**
