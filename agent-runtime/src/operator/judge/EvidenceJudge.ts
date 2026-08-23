@@ -15,6 +15,8 @@
  * the same rule `draftKindLabel` follows for drafts.
  */
 import type { EvidenceRef, Finding, JudgeVerdict } from "../state/OperatorState";
+import type { NeedScope } from "../scope/EvidenceScope";
+import { checkEvidence } from "../scope/EvidenceScope";
 import { digestFor } from "../state/evidence";
 import type { AgentJudgeView } from "../../spring/types";
 import { log } from "../../log";
@@ -31,7 +33,12 @@ export interface EvidenceJudge {
    * null` on findings nothing was ever going to judge.
    */
   readonly usesModel: boolean;
-  judge(finding: Finding, evidence: readonly EvidenceRef[]): Promise<JudgeVerdict>;
+  /**
+   * @param scope the evidence-scope contract for the need this finding answers, when the caller knows
+   *     it. Optional so that every existing caller and test still compiles — but when it IS passed,
+   *     scope-incompatible citations stop supporting the sentence. See `EvidenceScope.ts`.
+   */
+  judge(finding: Finding, evidence: readonly EvidenceRef[], scope?: NeedScope): Promise<JudgeVerdict>;
 }
 
 /** The backend call this judge needs. Structural, so any client that has it fits. */
@@ -75,14 +82,25 @@ export class RuleEvidenceJudge implements EvidenceJudge {
   private static readonly BLAME = ["고객 잘못", "사용자 과실", "고객이 잘못"];
   private static readonly PERIOD = ["이번 주", "금주", "이번주"];
 
-  async judge(finding: Finding, evidence: readonly EvidenceRef[]): Promise<JudgeVerdict> {
+  async judge(
+    finding: Finding,
+    evidence: readonly EvidenceRef[],
+    scope?: NeedScope,
+  ): Promise<JudgeVerdict> {
     const cited = evidence.filter((e) => finding.evidenceIds.includes(e.evidenceId));
     // Evidence from a source that could not answer for the scope does NOT support a claim. This is the
     // whole point of carrying coverage on the ref: an empty count under UNCERTAIN_PRODUCT_UNLINKED is a
     // blind spot, and a judge that counted it would approve "문제 없습니다" on the strength of it.
     // A finding whose claim IS the blind spot is supported BY the uncertain evidence, not undermined by
     // it. Everything else is judged only on evidence whose source could actually answer.
-    const usable = finding.claimsCoverageLimit ? cited : cited.filter((e) => e.coverage === "COVERED");
+    // Evidence whose SCOPE does not match the need's does not support the claim either — the same
+    // shape of rule as the coverage filter above, and the safety floor under the graph's own gate
+    // (`operatorGraph.applyScopeGate`). Two independent checks, deliberately: a finding that reached
+    // this judge past the gate must still not be approved on evidence about something else.
+    const inScope = scope && !finding.claimsCoverageLimit
+      ? cited.filter((e) => checkEvidence(scope, e) === null)
+      : cited;
+    const usable = finding.claimsCoverageLimit ? inScope : inScope.filter((e) => e.coverage === "COVERED");
     const statement = finding.statement;
 
     const reasons: string[] = [];
@@ -154,8 +172,12 @@ export class SpringEvidenceJudge implements EvidenceJudge {
     return !this.capabilityOff && typeof this.backend.judgeFinding === "function";
   }
 
-  async judge(finding: Finding, evidence: readonly EvidenceRef[]): Promise<JudgeVerdict> {
-    const rule = await this.fallback.judge(finding, evidence);
+  async judge(
+    finding: Finding,
+    evidence: readonly EvidenceRef[],
+    scope?: NeedScope,
+  ): Promise<JudgeVerdict> {
+    const rule = await this.fallback.judge(finding, evidence, scope);
     // `usesModel` gates the BUDGET; this gates the CALL. Both must read the learned state, or the run
     // stops paying for round-trips it nevertheless keeps making.
     if (!this.usesModel || !this.backend.judgeFinding) {

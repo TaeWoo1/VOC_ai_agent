@@ -25,6 +25,7 @@ import { END, START, StateGraph } from "@langchain/langgraph";
 import { OperatorStateAnnotation } from "../state/OperatorState";
 import type {
   AnsweredNeed,
+  EvidenceRef,
   Finding,
   NextAction,
   OperatorAnswer,
@@ -33,8 +34,10 @@ import type {
   SpecialistName,
   SpecialistResult,
 } from "../state/OperatorState";
-import type { InvestigationPlan, NeedState } from "../plan/InvestigationPlan";
+import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 import { mentionsOf, needsInOrder } from "../plan/InvestigationPlan";
+import type { NeedScope, RejectedEvidence } from "../scope/EvidenceScope";
+import { needScopeOf, partitionEvidence, planScopeOf, reasonSentence } from "../scope/EvidenceScope";
 import { EvidenceBuilder } from "../state/evidence";
 import { confidenceOf } from "../judge/EvidenceJudge";
 import type { EvidenceJudge } from "../judge/EvidenceJudge";
@@ -142,12 +145,23 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // resolved product is available to the specialists that can use one, and REPORT_OPS runs last
     // because it composes what the others produced.
     const ordered = orderSpecialists(plan.specialistTargets);
+    const scopeRejections: RejectedEvidence[] = [];
+    // Every ref the run has minted so far, not just this specialist's. REPORT_OPS cites the OTHERS'
+    // evidence and registers none of its own, so a gate that could only see one specialist's refs would
+    // find nothing behind every report sentence and silently delete the report.
+    const seenEvidence: EvidenceRef[] = [...state.evidence];
     for (const specialist of ordered) {
       const outcome = await runSpecialist(specialist, plan, state, resolved, findingsSoFar);
-      results.push(outcome.result);
-      needStates.push(...outcome.needStates);
+      seenEvidence.push(...outcome.result.evidence);
+      // The gate runs against the entities known AT THIS POINT, which includes whatever this specialist
+      // just resolved — PRODUCT_OPS must be allowed to cite the product it resolved on the same pass.
+      const known = [...resolved, ...outcome.resolvedEntities];
+      const gated = applyScopeGate(plan, known, outcome.result, outcome.needStates, seenEvidence);
+      scopeRejections.push(...gated.rejected);
+      results.push({ ...outcome.result, findings: gated.findings });
+      needStates.push(...gated.needStates);
       resolved.push(...outcome.resolvedEntities);
-      findingsSoFar.push(...outcome.result.findings);
+      findingsSoFar.push(...gated.findings);
       knowledge = { ...knowledge, ...outcome.knowledge };
       knowledgeCoverage = [...knowledgeCoverage, ...outcome.knowledgeCoverage];
     }
@@ -159,8 +173,92 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       needs: needStates,
       entities: resolved,
       knowledge,
+      scopeRejections: [...state.scopeRejections, ...scopeRejections],
       trail: [`dispatched:${ordered.join("+")}`],
     };
+  }
+
+  /**
+   * Evidence scope integrity, applied where a run's finding set is actually assembled.
+   *
+   * <b>Here rather than inside each specialist, and that is the point.</b> A rule enforced in four
+   * places is four rules; the fifth specialist would arrive without it. This is the single seam every
+   * specialist's output crosses, so a finding that fails the check never becomes part of the run at
+   * all — it is not demoted, not shown as "확인 필요", and not left for the judge to catch. The judge
+   * gets the same check as a floor underneath this one (`RuleEvidenceJudge`), which is belt and braces
+   * on purpose: the two are independent, and neither is allowed to be the only one.
+   *
+   * A finding whose claim IS the coverage limit is exempt, for the same reason the judge exempts it —
+   * "이 상품에 연결된 데이터가 없습니다" is supported BY the absence, and withholding it would delete
+   * the honest answer and leave the false calm.
+   */
+  function applyScopeGate(
+    plan: InvestigationPlan,
+    known: readonly ResolvedEntity[],
+    result: SpecialistResult,
+    states: readonly NeedState[],
+    seenEvidence: readonly EvidenceRef[],
+  ): { findings: Finding[]; needStates: NeedState[]; rejected: RejectedEvidence[] } {
+    const scopes = new Map<string, NeedScope>();
+    const scopeFor = (needId: string | undefined): NeedScope => {
+      if (!needId) return planScopeOf(plan, known);
+      const cached = scopes.get(needId);
+      if (cached) return cached;
+      const need = plan.informationNeeds.find((n) => n.id === needId);
+      const scope = need ? needScopeOf(plan, need, known) : planScopeOf(plan, known);
+      scopes.set(needId, scope);
+      return scope;
+    };
+    const refOf = new Map(seenEvidence.map((e) => [e.evidenceId, e]));
+    const rejected: RejectedEvidence[] = [];
+
+    const findings: Finding[] = [];
+    for (const finding of result.findings) {
+      if (finding.claimsCoverageLimit) {
+        findings.push(finding);
+        continue;
+      }
+      const cited = finding.evidenceIds.map((id) => refOf.get(id)).filter((e): e is EvidenceRef => !!e);
+      const { accepted, rejected: bad } = partitionEvidence(scopeFor(finding.needId), cited);
+      rejected.push(...bad);
+      // Nothing left to stand on: the sentence is not said. A finding stripped to zero citations would
+      // be dropped by `compose` anyway — dropping it here is what makes that a contract instead of a
+      // coincidence of ordering.
+      if (accepted.length === 0) continue;
+      findings.push({ ...finding, evidenceIds: accepted.map((e) => e.evidenceId) });
+    }
+
+    const needStates: NeedState[] = [];
+    for (const state of states) {
+      if (state.status !== "SATISFIED") {
+        needStates.push(state);
+        continue;
+      }
+      const cited = state.evidenceIds.map((id) => refOf.get(id)).filter((e): e is EvidenceRef => !!e);
+      const { accepted, rejected: bad } = partitionEvidence(scopeFor(state.id), cited);
+      if (accepted.length > 0) {
+        needStates.push({ ...state, evidenceIds: accepted.map((e) => e.evidenceId) });
+        continue;
+      }
+      // Invariant 1: a need whose every citation failed the check is NOT satisfied, and says why in
+      // the seller's language rather than falling silent.
+      const reason = bad[0]?.reason;
+      needStates.push({
+        id: state.id,
+        status: "UNSATISFIABLE",
+        evidenceIds: [],
+        ...(reason ? { reason: reasonSentence(reason, productMentionOf(plan)) } : {}),
+      });
+    }
+
+    if (rejected.length > 0) {
+      log("operator_scope_gate", {
+        rejected: rejected.length,
+        reasons: [...new Set(rejected.map((r) => r.reason))].sort().join(","),
+        findingsKept: findings.length,
+      });
+    }
+    return { findings, needStates, rejected };
   }
 
   async function runSpecialist(
@@ -256,7 +354,15 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
         judged.push(finding);
         continue;
       }
-      const verdict = await deps.judge.judge(finding, state.evidence);
+      // The judge gets the same scope contract the dispatch gate applied. Passing it is what makes
+      // the floor real: without it the rule judge would approve a sentence on evidence about another
+      // product, which is precisely the verdict Q4 got.
+      const scope = state.plan
+        ? (finding.needId
+            ? scopeForNeed(state.plan, finding.needId, state.entities)
+            : planScopeOf(state.plan, state.entities))
+        : undefined;
+      const verdict = await deps.judge.judge(finding, state.evidence, scope);
       judged.push({ ...finding, verdict, confidence: confidenceOf(verdict) });
     }
     log("operator_judge_node", {
@@ -315,6 +421,15 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     if (dropped > 0) {
       notes.push(`근거가 확인되지 않아 ${dropped}건은 답에서 제외했습니다.`);
     }
+    // Withheld for SCOPE, said separately from withheld for absence — they are different facts and a
+    // seller acts on them differently. "근거가 없다" means look elsewhere; "범위가 다르다" means this
+    // question cannot be answered with what SellerOps can currently read, which is the sentence Q4
+    // should have produced instead of three issues belonging to other products.
+    if (state.scopeRejections.length > 0) {
+      const reasons = [...new Set(state.scopeRejections.map((r) => r.reason))];
+      const subject = plan ? productMentionOf(plan) : undefined;
+      notes.push(...reasons.map((r) => reasonSentence(r, subject)));
+    }
 
     const stopReason: OperatorStopReason = !plan || !plan.supported
       ? "NO_PLAN"
@@ -355,7 +470,9 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       nextActions: nextActionsFor(ordered),
       clarification: plan?.clarificationNeeded ? (plan.clarificationReason ?? plan.userGoal) : null,
       budget,
-      ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+      // Deduped: two passes over the same unresolvable product produce the same sentence twice,
+      // and a note that repeats itself reads as two separate problems.
+      ...(notes.length > 0 ? { note: [...new Set(notes)].join(" ") } : {}),
     };
     log("operator_compose", {
       findings: ordered.length,
@@ -391,6 +508,27 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
 }
 
 /** PRODUCT_OPS first (it resolves entities others use), REPORT_OPS last (it composes their findings). */
+/**
+ * The product the seller named, as they wrote it — for the withholding sentence.
+ *
+ * The seller's own words, never a resolved label: when the gate fires because nothing resolved, there
+ * IS no label, and the only honest way to name the thing is the way they named it.
+ */
+function productMentionOf(plan: InvestigationPlan): string | undefined {
+  return plan.entities.unresolved.find((e) => e.kind === "PRODUCT")?.mention
+    ?? plan.entities.resolved.find((e) => e.kind === "PRODUCT")?.mention;
+}
+
+/** One need's scope, or the run's scope when the plan no longer carries that need. */
+function scopeForNeed(
+  plan: InvestigationPlan,
+  needId: string,
+  resolved: readonly ResolvedEntity[],
+): NeedScope {
+  const need = plan.informationNeeds.find((n) => n.id === needId);
+  return need ? needScopeOf(plan, need, resolved) : planScopeOf(plan, resolved);
+}
+
 function orderSpecialists(targets: readonly SpecialistName[]): SpecialistName[] {
   const rankOf = (s: SpecialistName): number =>
     s === "PRODUCT_OPS" ? 0 : s === "REPORT_OPS" ? 2 : 1;

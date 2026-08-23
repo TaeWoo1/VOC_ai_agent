@@ -280,6 +280,17 @@ export const OperatorStateAnnotation = Annotation.Root({
   // finding's evidence ids stay resolvable after the loop goes round again.
   evidence: Annotation<EvidenceRef[]>({ reducer: (p, n) => [...p, ...n], default: () => [] }),
   findings: Annotation<Finding[]>({ reducer: (_p, n) => n, default: () => [] }),
+  /**
+   * Citations the evidence-scope gate refused, and why.
+   *
+   * <b>Carried in state rather than counted in place, because the answer has to be able to SAY it.</b>
+   * A run that quietly drops three findings for scope reasons and returns two looks exactly like a run
+   * that only ever found two — which is the shape of dishonesty this whole graph is built against.
+   * `compose` reads this to add the withholding note. Ids and closed-vocabulary reasons only.
+   */
+  scopeRejections: Annotation<import("../scope/EvidenceScope").RejectedEvidence[]>({
+    reducer: (p, n) => [...p, ...n], default: () => [],
+  }),
   answer: Annotation<OperatorAnswer | null>({ reducer: (_p, n) => n, default: () => null }),
   trail: Annotation<string[]>({ reducer: (p, n) => [...p, ...n], default: () => [] }),
 });

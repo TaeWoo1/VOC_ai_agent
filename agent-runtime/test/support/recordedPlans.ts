@@ -256,6 +256,85 @@ export const CLARIFY_PLAN: AgentPlanView = {
   providerVersion: AUTHORED,
 };
 
+/**
+ * The plan that produced the wrong answer, recorded verbatim.
+ *
+ * <b>gpt-5-2025-08-07, 2026-08-23, live against the canonical Demo Org.</b> The seller named a product
+ * and asked whether it had complaints. The model planned two product-scoped needs and then dispatched
+ * REVIEW_OPS and INQUIRY_OPS — **not PRODUCT_OPS**, the only specialist that resolves a product. Both
+ * specialists read org-wide, and the run reported three HIGH-severity issues belonging to other
+ * products as this product's. Full record: `docs/agent_real_validation_v1.md` §3 Q4.
+ *
+ * It is kept exactly as the model produced it. The fix is not a better plan — a planner will make this
+ * mistake again — it is that evidence about the whole org can no longer answer a need about one
+ * product. `evidenceScopeIntegrity.test.ts` is that claim, run against this plan.
+ */
+export const PRODUCT_COMPLAINT_ORGWIDE_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "전선몰딩 상품의 리뷰와 문의를 같이 보고 고객 불만이나 반복 이슈가 있는지 알고 싶다",
+  unresolvedEntities: [{ kind: "PRODUCT", mention: "전선몰딩" }],
+  informationNeeds: [
+    { id: "n1", question: "이 상품의 리뷰에서 반복 불만/이슈 신호와 추세가 있는가? 있다면 무엇인가?",
+      kind: "REVIEW_SIGNAL", why: "불만 여부가 질문의 핵심", required: true },
+    { id: "n2", question: "이 상품의 문의에서 반복 질문/불만 패턴과 최근 문의량이 증가하는지 여부는 무엇인가?",
+      kind: "INQUIRY_VOLUME", why: "문의도 불만의 신호다", required: true },
+  ],
+  specialists: ["REVIEW_OPS", "INQUIRY_OPS"],
+  tools: [],
+  retrievalOrder: ["n1", "n2"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 6,
+  stopWhenEnough: null,
+  clarificationNeeded: false,
+  clarificationReason: null,
+  rationale: "리뷰 신호와 문의 패턴을 함께 본다",
+  providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-23 live",
+};
+
+/**
+ * A count offered to a need that asked for a page of rows.
+ *
+ * The Q1 shape, with the planner's own `acceptableKinds` written down. Live on 2026-08-23 the second
+ * need asked "가장 오래된 미답변 문의는 무엇인가? (첫 페이지 목록)" and was marked SATISFIED by an
+ * `INBOX_COUNT` of 69 — a total, not a list, and the same total that answered the first need. The
+ * declaration is what makes that checkable: `acceptableKinds: ["INQUIRY"]` says a row, and a count is
+ * not a row. See `docs/agent_real_validation_v1.md` §3 Q1.
+ */
+export const INBOX_LIST_NEEDS_ROWS_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "오늘 뭐부터 봐야 하는지 알고 싶다",
+  unresolvedEntities: [],
+  informationNeeds: [
+    { id: "n1", question: "오늘 미답변 문의가 얼마나 있는가? (총 건수)", kind: "INQUIRY_VOLUME",
+      why: "규모를 먼저 안다", required: true },
+    { id: "n2", question: "가장 오래된 미답변 문의는 무엇인가? (첫 페이지 목록)", kind: "INQUIRY_VOLUME",
+      why: "무엇부터 손대야 하는지가 질문이다", required: true },
+  ],
+  specialists: ["INQUIRY_OPS"],
+  tools: [],
+  retrievalOrder: ["n1", "n2"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [
+    { needId: "n1", minEvidence: 1, acceptableKinds: ["INBOX_COUNT"] },
+    { needId: "n2", minEvidence: 1, acceptableKinds: ["INQUIRY"] },
+  ],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 4,
+  stopWhenEnough: null,
+  clarificationNeeded: false,
+  clarificationReason: null,
+  rationale: "규모와 첫 페이지를 함께 본다",
+  providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-23 live (evidenceRequirements 명시)",
+};
+
 /** The goal → plan table the recorded-plan suites seed the transport fake with. */
 export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "폭이 몇 mm인가요?": SPEC_QUESTION_PLAN,
@@ -271,4 +350,6 @@ export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "이번 주 대표에게 보고할 내용 정리해줘": REPORT_PLAN,
   "오늘 날씨 어때?": REFUSED_PLAN,
   "상품에 문제 있어?": CLARIFY_PLAN,
+  "전선몰딩 상품의 리뷰와 문의를 같이 보고 불만이 있는지 알려줘": PRODUCT_COMPLAINT_ORGWIDE_PLAN,
+  "오늘 뭐부터 봐야 해? 목록으로": INBOX_LIST_NEEDS_ROWS_PLAN,
 };
