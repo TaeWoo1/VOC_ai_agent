@@ -1760,3 +1760,67 @@ fence: finder는 **id만** 돌려주므로 product를 건네줄 수 없고, reso
   **external research 필요**(이 저장소에 관측도 문서도 없다).
 - 옵션ID로 등록상품을 되찾는 공식 엔드포인트의 존재 여부 — 동일하게 **external research 필요**.
   없는 엔드포인트를 가정하지 않는다.
+
+---
+
+### 5n. Coupang Review Catalog Coverage Diagnosis — **라이브 판정: `displayProductId alias/history mismatch`** (2026-08-23 15:29 KST)
+
+승인 `apr-777879a36c43` · 실행 `wt-01c1ea55f077` · 커밋 `bc080d8f` · `READ_ONLY` · marketplace action 0 ·
+marketplace API 요청 0. 판매자가 run-grant를 누르고 같은 3페이지를 다시 넘겼다.
+
+#### 화면이 이번엔 바뀌었다 — 그리고 그것이 dedupe 결함이 아님을 스스로 증명한다
+
+`pages=3 rows=25 collected=23 textless=19 complete=true FINAL_PAGE_REACHED`, 드롭 0. 지난 두 sitting은
+`rows=24 collected=22`였다. handoff는 **`received=23 stored=1 skipped=11 failed=11`** —
+**기존 11건은 그대로 skip, 미해결 11건은 그대로 거부, 새 1건만 저장.** 그 1건은 **오늘(2026-08-23)
+작성된 상품평**이다. 늘어난 것이 정확히 새로 쓰인 리뷰 하나뿐이므로 원인은 **source content 변경**이고
+dedupe 결함이 아니다.
+
+#### 진단 결과 — 예상과 반대였다
+
+```
+rows=10  distinctDisplayIds=7  distinctOptionIds=7
+optionInCatalogue=10  optionNotInCatalogue=0  noOptionOnScreen=0
+```
+
+**미해결 10건 전부, 그 옵션ID를 이 org이 이미 카탈로그에 들고 있다.** 하나의 예외도 없다.
+
+#### 판정 — 커버리지 문제가 아니다
+
+이것은 단순한 "수집 누락(B)"이 아니라 **`displayProductId alias/history mismatch`**로 따로 분류한다.
+
+- 상품은 **여기 있다.** 그 옵션ID(`vendorItemId`)는 **불변 식별자**이고 10/10이 `product_variants`에 있다.
+- 맞지 않는 것은 **노출상품ID 하나뿐**이다. 상품평 화면이 쓴 노출상품ID와, `seller-products` 상세가
+  오늘 말하는 `productId`가 다르다.
+- 쿠팡 공식 계약상 **`productId`는 merge/split으로 바뀔 수 있다.** 리뷰는 **쓰여질 당시의** 노출상품ID를
+  들고 있고, 카탈로그는 **오늘의** 것을 하나만 들고 있다 — `external_display_product_id`는 단일값이다.
+- 같은 화면의 12건이 정확히 붙었다는 사실과 모순되지 않는다: 노출상품ID가 바뀐 상품과 바뀌지 않은 상품이
+  섞여 있는 화면이다.
+
+**따라서 A(정상 채널 limitation)는 기각된다** — 빠진 상품이 없기 때문이다. **C(별도 acquisition
+surface)도 필요 없다.** 이 화면의 상품평 23건은 **전부 SellerOps가 이미 들고 있는 상품의 것**이다.
+**Coupang Demo Spine은 카탈로그 부족으로 막혀 있지 않다.**
+
+D2(윙 상품 조회/관리 총 등록상품 수 육안 확인)는 **수행하지 않았다.** 옵션ID 10/10이 카탈로그에 있는
+것이 확인된 이상 "우리 68이 등록 카탈로그 전부인가"는 이 판정을 바꾸지 못한다.
+
+#### 전/후 — 새 상품평 1건이 만든 변화 외에는 전부 불변
+
+| 지표 | 전 | 후 |
+|---|---|---|
+| Coupang REAL 상품평 | 11 | **12** (신규 1) |
+| attribution | 6 / 3 / 2 | **7 / 3 / 2** |
+| item-analysis (REVIEW) · CustomerMemory | 4,409 · 7,742 | **4,410 · 7,743** (각 +1) |
+| products (REAL / DEMO_SEED) | 300 / 8 | **300 / 8** |
+| Coupang 리스팅 (REAL / DEMO_SEED) | 68 / 3 | **68 / 3** |
+| Coupang 옵션 | 405 | **405** |
+| ReviewIssues · synthetic 상품평 | 19 · 22 | **19 · 22** |
+
+**신규 product · listing · variant 0 · WRITE 0 · ERROR 0 · PRODUCT schedule 생성 0 ·
+INQUIRY·ORDER_SUMMARY 60분 routine 유지.** `sync_jobs`에 `PARTIAL 23/1/11/11` 한 줄.
+
+#### 다음 결정 (조사하지 않음)
+
+`external_display_product_id`가 **단일값**인 것이 유일한 남은 원인이다. 이것을 alias **이력**으로
+넓힐지, 옵션ID를 1차 키로 승격할지, 아니면 현 상태를 known limitation으로 두고 Demo Spine을 닫을지는
+**제품 결정**이며 이번 흐름에서 시작하지 않았다. resolver는 건드리지 않았다.
