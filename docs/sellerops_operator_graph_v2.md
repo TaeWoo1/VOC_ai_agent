@@ -148,6 +148,39 @@ need `kind`**에서 나온다 — 한국어 산문 해석이 아니라. 그래�
 
 ---
 
+### 2.4 이미 답이 있는 되묻기 — Operational Defaults (2026-08-23 추가)
+
+되묻기는 v2가 의도한 기능이다. **문제는 시스템이 이미 답을 갖고 있는 되묻기였다.** 2026-08-23 라이브
+6건 중 3건이 "기간을 정해달라"로 끝났고 셋 다 tool 0회였다 — `list_repeated_inquiries`에 28일 창이 처음부터
+선언돼 있는데도. 기록: `docs/agent_real_validation_v1.md` §12.
+
+| 우선순위 | 무엇 |
+|---|---|
+| 1 | 판매자가 명시한 범위 |
+| 2 | **capability가 선언한 범위** — trailing 창, 또는 "기간 필터가 없다"는 명시적 선언 |
+| 3 | 둘 다 없을 때만 되묻기 |
+
+**전역 정책을 만들지 않는다.** 28은 그것을 소유한 capability의 것이고, 문장의 숫자는 반환된 행이 echo한
+값에서 온다. 선언이 없는 곳(`ORDER_HISTORY` — 도달 가능한 tool 없음)에서는 되묻기가 그대로 살아남는다.
+
+**규칙:** planner의 `clarificationNeeded`는 **required need 중 어느 것도 수행 불가일 때만** 전달된다.
+수행 불가는 두 가지다 — 선언된 범위가 없거나, plan이 해결하지도 언급하지도 않은 anchor가 필요하거나.
+일부라도 가능하면 run은 그 일을 하고 못 채운 need를 사유와 함께 말한다.
+
+**감사에서 나온 불편한 결과:** 오늘 **어떤 READ tool도 판매자가 쓴 범위를 받지 않는다.**
+`windowDays`는 숫자이고 「최근」을 숫자로 바꾸는 것은 추측이다. 그래서 판매자가 말한 기간은 무엇을
+조회할지가 아니라 **무엇을 말해야 하는지**를 바꾼다 — run은 선언된 기본값으로 진행하고 그 차이를 답에
+표시한다. `ScopeSource`의 `"USER"`는 오늘 도달하지 않으며, 도달하지 않는 값을 이름으로 남기는 것이 그
+공백을 표시하는 방법이다.
+
+**§2.3과 충돌하지 않는다.** 기본 질의 창은 **retrieval scope**이고 `EvidenceTime`은 **evidence time**이다.
+28일을 요청했다는 사실은 어떤 행도 날짜 짓지 않는다 — 기간 주장은 여전히 행 자신의 날짜에만 기댄다.
+
+**강제 장치.** `src/operator/defaults/OperationalDefaults.ts` (감사 표 · `clarificationStands` ·
+`InvestigationPlan.appliedDefaults`) · `operationalDefaults.test.ts` 20건(음성 대조군 포함).
+
+---
+
 ---
 
 ## 3. Dashboard 레인과 Agent 레인은 다른 물건이다

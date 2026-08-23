@@ -690,3 +690,136 @@ agent-runtime 전체 **300 passed · 23 skipped · 0 failed** (이전 278 → +2
 | A1 · A2 · A3 | CLOSED (§9 · §10) |
 | A4 · A5 · A6 · B · C · D | backlog 유지 |
 | **신규** — compose dedupe 문구 · staleness 정책 부재 | backlog (§11.5) |
+
+---
+
+## 12. Agent Operational Defaults v1 — A4 수정 (2026-08-23)
+
+> §3·§4의 baseline 숫자는 이 절로도 바뀌지 않는다.
+
+### 12.1 무엇이 틀렸나
+
+baseline 6건 중 **3건이 질문에 질문으로 답했다.** Q2·Q3·Q6 모두 "기간을 정해달라"고 되물었고, 셋 다
+**tool 0회 · evidence 0 · findings 0**이었다. 그런데 `list_repeated_inquiries`에는 28일 기본 창이 처음부터
+선언돼 있었다. 판매자에게 **백엔드가 곧 스스로 채울 파라미터를 물은 것**이다.
+
+### 12.2 감사 결과 — 각 capability가 이미 선언하고 있는 범위
+
+**여기서 정한 것은 하나도 없다.** 아래는 전부 기존 코드를 읽은 결과다.
+
+| need kind | tool | 선언된 범위 | 어디에 선언돼 있나 |
+|---|---|---|---|
+| `INQUIRY_VOLUME` | `get_today_inbox` | **현재 시점 snapshot** (기간 개념 없음) | `inquiries/inbox:unansweredInquiries` |
+| `REVIEW_SIGNAL` | `search_review_issues` | **기간 필터 없음** — 미해제 이슈 전체를 심각도·최신순으로 | `ReviewIssueQueryService.list(dismissed=false)` |
+| `REPEAT_PATTERN` | `list_repeated_inquiries` | **최근 28일 trailing** | `RepeatedInquiryService.DEFAULT_WINDOW_DAYS` |
+| `CUSTOMER_HISTORY` | `search_customer_memory` | 기간이 아니라 **anchor**로 범위가 정해짐 | `customer-memory/search` (§10 A2) |
+| `PRODUCT_FACT/LISTING/VARIANT` | `get_product_knowledge` · `search_product_facts` | 현재 시점 | `product-knowledge:current` |
+| `POLICY` | — | 저장소 없음 — 그 사실이 완결된 답 | `policy-store:UNAVAILABLE` |
+| **`ORDER_HISTORY`** | **없음** | **선언된 범위 없음** | 도달 가능한 tool이 하나도 없다 |
+
+**`REVIEW_SIGNAL` 행이 이번 감사에서 가장 중요하다.** 「최근 부정적인 리뷰」의 정직한 기본값은 *창*이
+아니라 **현재 열려 있는 이슈 목록**이다. 판매자가 물은 최신성은 질의가 아니라 **행 자신의 날짜**에 있다.
+"기본값이 없으니 물어야 한다"는 틀린 감사 결과였을 것이고, 빈칸을 창으로 채우는 것은 더 나빴을 것이다.
+
+### 12.3 감사에서 나온 불편한 결과 — 우선순위 1이 현재 도달하지 않는다
+
+**어떤 READ tool도 판매자가 쓴 범위를 받지 않는다.** `list_repeated_inquiries`는 `windowDays` — **숫자**를
+받는다. 「최근」이나 「요즘」을 숫자로 바꾸는 것은 누가 하든 추측이다. 그래서 오늘 판매자가 말한 기간은
+**무엇을 조회할지를 바꾸지 못하고, 무엇을 말해야 하는지를 바꾼다.** 범위를 말했는데 capability가 적용할
+수 없으면, run은 선언된 기본값으로 진행하고 **그 차이를 답에 표시한다.**
+`ScopeSource`의 `"USER"` 값은 코드에 남아 있고 오늘 아무도 도달하지 않는다 — 도달할 수 없는 값을
+이름으로 남기는 것이 그 공백을 표시하는 방법이다.
+
+### 12.4 무엇을 바꿨나
+
+새 tool 0 · 새 retrieval 0 · 백엔드 검색 완화 0 · staleness 정책 0 · C1 미수정 · A5 미수정 · UI 0.
+**"최근=28일" 같은 전역 정책은 만들지 않았다.**
+
+**① 우선순위**: 판매자가 말한 범위 → capability가 선언한 범위 → 둘 다 없을 때만 되묻기.
+
+**② 되묻기 규칙** — **시스템이 이미 답을 갖고 있는 되묻기는 되묻기가 아니라 실행되지 않은 run이다.**
+planner의 `clarificationNeeded`는 **required need 중 어느 것도 수행 불가일 때만** 판매자에게 전달된다.
+일부라도 수행 가능하면 run은 그 일을 하고 못 채운 need를 사유와 함께 표시한다. 수행 불가는 두 가지뿐이다
+— 선언된 범위가 없거나(`ORDER_HISTORY`), plan이 해결하지도 언급하지도 않은 anchor가 필요하거나
+(「상품에 문제 있어?」). **둘 다 회귀로 고정돼 있다.**
+
+**③ 순서가 중요하다** — 감사는 `validatePlan` **앞에서** 돈다. V8이 "되묻는 plan은 specialist를 갖지
+않는다"로 specialist를 모두 지우기 때문에, 계약이 이미 답한 되묻기는 plan이 아직 무엇을 하려 했는지
+알고 있을 때 해소돼야 한다.
+
+**④ plan에 구조적으로 남는다** — `appliedDefaults[]`: `needId` · `needKind` · `userNamed`(판매자의 말) ·
+`source`(`USER`/`CAPABILITY`/`NONE`) · `contract`(선언 위치) · `scope`(닫힌 토큰) ·
+`honoursUserScope`. **자유 텍스트 추론이 아니다.** 런타임이 계약에서 계산하며 planner는 이 필드를 갖지
+않는다 — 모델에게 기본값을 물으면 그럴듯한 숫자를 말할 것이기 때문이다.
+
+**⑤ 답에 근거 범위를 표시한다** — 말할 가치가 있는 두 가지만: 판매자가 고르지 않은 trailing 창, 그리고
+판매자가 골랐지만 적용할 수 없었던 기간. 기간을 말하지 않은 질문에 "현재 시점 기준"을 붙이는 것은 소음이다.
+
+**⑥ 숫자는 백엔드 것이다** — 문장의 28은 반환된 행이 echo한 `windowDays`에서 온다. TS 상수는 행이 하나도
+없을 때만 쓰이고, echo와 다르면 `operator_default_drift`를 남긴다. **거울이 이길 수 있으면 아무도 적용하지
+않은 창을 답이 설명하게 된다.**
+
+**⑦ 「최근」을 답할 수 있는 유일한 방법** — 리뷰 이슈 문장에 그 행 자신의 마지막 근거 날짜를 붙였다
+(`(최근 근거 2026-06-16)`). 관측 시각이 아니라 **event time**이다.
+
+**§11과 충돌하지 않는다.** 기본 질의 창은 **retrieval scope**이고 `EvidenceTime`은 **evidence time**이다.
+28일을 요청했다는 사실은 어떤 행도 날짜 짓지 않는다. 기본값 적용이 `asOf`를 움직이지 않고 `events`를
+만들지 않는다는 것이 회귀로 고정돼 있다.
+
+### 12.5 회귀 (offline)
+
+`agent-runtime/test/operator/operationalDefaults.test.ts` — **20 tests.** 되묻기를 그대로 통과시키도록
+되돌리면 **9건이 빨개진다**(확인함). 음성 대조군 — 주문 이력(선언된 범위 없음)과 이름 없는 상품(anchor
+없음) — 은 두 버전 모두에서 초록이다. **모든 되묻기를 지우는 스위치가 아니라 규칙이라는 증거다.**
+
+agent-runtime 전체 **319 passed · 23 skipped · 0 failed**.
+
+### 12.6 라이브 재실행 — Q2 ×2, Q3 ×2, Q6 ×2
+
+마켓 접촉 0 · WRITE 0 · 모든 `nextAction` = `READ` · **되묻기 6/6에서 0회**(baseline 3/3 되묻음).
+plan 로그 기준 모델은 이 12회 중 **7회 되묻기를 요청했고, 감사가 7회 모두 해소**했다.
+
+| | Q2 (e/f) | Q3 (e/f) | Q6 (e/f) |
+|---|---|---|---|
+| clarification | **없음** / 없음 | **없음** / 없음 | **없음** / 없음 |
+| specialists | `REVIEW_OPS` | `INQUIRY_OPS` | `INQUIRY_OPS`+`REVIEW_OPS`+`PRODUCT_OPS`/`REPORT_OPS` |
+| tool 호출 | 1 / 1 | 2 / 1 | 5 / 4 |
+| findings | **3 / 3** | 0 / 0 | **4 / 6** |
+| 적용된 범위 | `SNAPSHOT_NOW` ×2 | `TRAILING_28D` | `SNAPSHOT_NOW` ×2 + `TRAILING_28D` ×2~3 |
+| unsupported claims | 0 | 0 | 0 |
+
+baseline은 셋 다 tool 0 · findings 0 · 되묻음이었다.
+
+**Q3의 findings 0은 정직한 답이고, DB로 확인했다.** 데모 org의 최근 28일 `customer_memory_entries`는
+282건이지만 그중 **`INQUIRY`는 2건**뿐이고(280건은 `REVIEW`), 주제 필터·`기타` 제외·`MIN_OCCURRENCES=2`를
+지나면 **반복 후보가 0**이다. 답은 「반복해서 들어온 문의는 확인되지 않았습니다. **반복 문의는 최근 28일
+기준으로 확인했습니다.**」 — 판매자는 "없음"이 어느 창에서의 없음인지 안다. **A4의 목표는 findings를
+늘리는 것이 아니라 되묻기를 없애는 것이었고, 그것은 달성됐다.**
+
+**Q6은 하나의 기간을 모든 need에 강요하지 않는다.** 미답변은 현재 snapshot, 반복은 28일, 리뷰 이슈는 열린
+목록 — 한 답 안에서 세 범위가 각각의 계약대로 적용되고 각각 표시된다.
+
+### 12.7 이번 회차에서 발견해 같이 고친 것
+
+- **planner가 지어낸 기간을 판매자의 말로 인용하고 있었다.** 라이브에서 planner가 「분석 기간 미지정」을
+  `PERIOD` mention으로 내보냈고, 답이 「분석 기간 미지정」은 …이라고 판매자가 쓴 적 없는 말을 인용했다.
+  이제 **goal 문장에 실제로 있는 mention만 인용한다.** 없으면 근거 범위는 그대로 말하되 인용을 붙이지
+  않는다. 회귀 고정.
+- **같은 문장이 need 수만큼 반복됐다.** 「반복해서 들어온 문의는 확인되지 않았습니다」가 Q6에서 3번 나왔다.
+  read 하나가 그 종류의 need 전부를 답하므로 사실은 하나다. `inquiryOps` 노트 dedupe.
+
+### 12.8 이번 회차에서 새로 관측된 것 (수정하지 않음)
+
+- **Q2는 "상품을 알려줘"에 상품을 대지 못한다.** 이슈 3건 모두 `dominantProductId`가 없어 §9의 scope
+  게이트가 상품 귀속을 정확히 막는다. 답은 이슈와 근거 날짜까지만 말한다 — 이는 **B1**(`search_review_issues`에
+  상품 파라미터 없음)이고 이번 package 범위 밖이다.
+- §11.5의 두 backlog(compose dedupe 문구 · staleness 정책 부재)는 그대로 열려 있다.
+
+### 12.9 판정
+
+| 결함 | 상태 |
+|---|---|
+| **A4** — 시스템이 이미 답을 가진 것을 되묻고 tool 0회로 종료 | **CLOSED** — 라이브 6회 되묻기 0(모델 요청 7회 전부 해소) + 회귀 20건 |
+| A1 · A2 · A3 · §10.4 temporal | CLOSED (§9 · §10 · §11) |
+| A5 · A6 · B · C · D | backlog 유지 |
+| 신규 — Q2 상품 귀속(B1 하위) | backlog (§12.8) |
