@@ -77,6 +77,7 @@ class OperatorCapabilityChainTest {
     @Autowired InquiryRepository inquiries;
     @Autowired ItemAnalysisRepository analyses;
     @Autowired ProductRepository products;
+    @Autowired com.sellerops.product.ChannelProductRepository listings;
     @Autowired ChannelRepository channels;
     @Autowired com.sellerops.inquirysignal.InquirySignatureCacheRepository signatureCache;
     @Autowired CustomerMemoryEntryRepository memory;
@@ -122,7 +123,7 @@ class OperatorCapabilityChainTest {
 
         ReviewIssueQueryService issueQuery = new ReviewIssueQueryService(issues, evidence, stateEvents,
                 new ReviewIssueSnapshotService(evidence), reviews, products);
-        productSignals = new ProductSignalsService(new ProductQueryService(products), issueQuery, evidence,
+        productSignals = new ProductSignalsService(new ProductQueryService(products, listings), issueQuery, evidence,
                 analyses, reviews, inquiries, memory, channels);
         customerMemory = new CustomerMemoryQueryService(memory, new LexicalCustomerMemoryRetriever(memory),
                 workItems, drafts, products, channels);

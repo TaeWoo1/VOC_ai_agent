@@ -7,16 +7,27 @@ import type {
   InboxSummary,
   ProductKnowledge,
   ProductSignals,
-  ProductSummary,
   RepeatedInquiry,
   ReviewIssueSummary,
 } from "../../src/spring/types";
+import type { SeedProduct } from "./FakeOperatorSpringClient";
 
-export const MOLDING: ProductSummary = {
+export const MOLDING: SeedProduct = {
   id: "p-molding", name: "전선몰딩 1호", sku: "SKU-77", status: "ACTIVE",
+  listingNames: ["[패키징] 신개념 일체형 전선몰딩 선바로 2p"],
 };
-export const CABLE: ProductSummary = {
+export const CABLE: SeedProduct = {
   id: "p-cable", name: "케이블타이 2호", sku: "SKU-88", status: "ACTIVE",
+};
+
+/**
+ * A product whose canonical name is its SKU number and whose only readable name is on the listing —
+ * the shape a Coupang/Cafe24-derived catalogue actually has, and the one that made a live seller's
+ * own product unfindable by its own title.
+ */
+export const CUP_BIN: SeedProduct = {
+  id: "p-cup-bin", name: "15223228019", sku: "15223228019", status: "ACTIVE",
+  listingNames: ["판도리 일체형 종이컵 수거함"],
 };
 
 export function issue(overrides: Partial<ReviewIssueSummary> = {}): ReviewIssueSummary {
@@ -202,6 +213,65 @@ export function unknownProduct(): ProductKnowledge {
       { facet: "VARIANT", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
       { facet: "SPEC", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
       { facet: "DESCRIPTION", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+    ],
+  };
+}
+
+/**
+ * Signals for the SKU-named product, so its evidence has a product to be attached to.
+ *
+ * <b>A shape, not a claim.</b> The live row this fixture is modelled on has no issue evidence at all;
+ * one issue is given here because the assertion under test is WHICH product an issue is attributed to
+ * and WHAT the answer calls it, and evidence that does not exist cannot carry either.
+ */
+export function cupBinSignals(): ProductSignals {
+  return {
+    productId: CUP_BIN.id,
+    productName: CUP_BIN.name,
+    sku: CUP_BIN.sku,
+    referenceDate: "2026-08-23",
+    issues: [issue({ id: "issue-cup-lid", title: "뚜껑 이탈", aspect: "뚜껑", problem: "이탈",
+      evidenceCount: 2, firstEvidenceOn: "2026-08-01", lastEvidenceOn: "2026-08-19" })],
+    recommendedActions: [],
+    volume: { reviews: 7, inquiries: 1, unansweredInquiries: 1, issueEvidence: 2 },
+    linkedChannels: ["COUPANG"],
+    coverage: [
+      { signal: "REVIEW_ISSUE", coverage: "COVERED", linked: 2, unlinked: 0, provenance: "issue-memory/RULE_BASED" },
+      { signal: "REVIEW", coverage: "COVERED", linked: 7, unlinked: 0, provenance: "review-store/INGEST:canonical" },
+      { signal: "INQUIRY", coverage: "COVERED", linked: 1, unlinked: 0, provenance: "inquiry-store/INGEST:canonical" },
+    ],
+  };
+}
+
+/**
+ * Product Knowledge for a product whose only readable name is on its listing.
+ *
+ * `name` is the SKU number, exactly as a Coupang-derived catalogue stores it; the human name lives in
+ * `listings[0].listingName`. That asymmetry is the whole point of the fixture.
+ */
+export function cupBinKnowledge(): ProductKnowledge {
+  return {
+    productId: CUP_BIN.id,
+    name: CUP_BIN.name,
+    sku: CUP_BIN.sku,
+    status: "ACTIVE",
+    listings: [
+      {
+        channelCode: "COUPANG", channelNameKo: "쿠팡", channelProductId: "15223228019",
+        listingName: "판도리 일체형 종이컵 수거함", productUrl: null,
+        price: 18900, currency: "KRW", sellingStatus: "SELLING",
+        source: "COUPANG:PRODUCT_API:v1", observedAt: "2026-08-22T02:00:00Z",
+      },
+    ],
+    variants: [],
+    facts: [],
+    signals: cupBinSignals(),
+    knowledgeCoverage: [
+      { facet: "IDENTITY", coverage: "AVAILABLE", known: 2, newestObservedAt: null, provenance: "products" },
+      { facet: "LISTING", coverage: "AVAILABLE", known: 1, newestObservedAt: "2026-08-22T02:00:00Z",
+        provenance: "COUPANG:PRODUCT_API:v1" },
+      { facet: "SPEC", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+      { facet: "SIGNALS", coverage: "AVAILABLE", known: 3, newestObservedAt: null, provenance: "issue-memory/RULE_BASED" },
     ],
   };
 }

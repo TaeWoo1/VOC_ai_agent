@@ -92,7 +92,7 @@ class ProductKnowledgeChainTest {
         promoter = new Cafe24ReviewPromoter(reviews, productService);
         linkBackfill = new ReviewProductLinkBackfill(reviews, articles, listings);
         derivation = new ProductKnowledgeDerivation(products, listings, variants, facts, reviews, inquiries);
-        ProductQueryService query = new ProductQueryService(products);
+        ProductQueryService query = new ProductQueryService(products, listings);
         ReviewIssueQueryService issueQuery = new ReviewIssueQueryService(issues, evidence, stateEvents,
                 new com.sellerops.reviewissue.ReviewIssueSnapshotService(evidence), reviews, products);
         knowledge = new ProductKnowledgeService(query, new ProductSignalsService(query, issueQuery,

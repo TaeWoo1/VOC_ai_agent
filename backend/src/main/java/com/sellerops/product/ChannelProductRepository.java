@@ -30,6 +30,19 @@ public interface ChannelProductRepository extends JpaRepository<ChannelProduct, 
     List<ChannelProduct> findAllByOrgIdAndChannelIdAndExternalDisplayProductId(
             UUID orgId, UUID channelId, String externalDisplayProductId);
 
+    /**
+     * Every listing in one org that carries a title, for resolving a product by the name a human reads.
+     *
+     * <p>The whole org, and matched in memory, because sameness of a product name is defined once — in
+     * {@code ProductNameKey} — and a {@code lower(trim(...))} predicate here would be a second, quietly
+     * different definition. The result is bounded by the seller's own catalogue (294 rows on the demo
+     * org, 2026-08-23); if that stops being small, the fix is an indexed normalized column, not a
+     * looser comparison.
+     *
+     * <p>The {@code realDataOnly} filter applies, so a seeded listing can never name a real product.
+     */
+    List<ChannelProduct> findAllByOrgIdAndChannelProductNameIsNotNull(UUID orgId);
+
     /** Every channel this product is listed on. Org-scoped: a bare product id is not proof of tenancy. */
     List<ChannelProduct> findByOrgIdAndProductId(UUID orgId, UUID productId);
 

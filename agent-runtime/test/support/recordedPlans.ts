@@ -505,6 +505,46 @@ export const ORDER_HISTORY_CLARIFY_PLAN: AgentPlanView = {
   clarificationReason: "어느 기간의 주문을 보시겠습니까?",
 };
 
+/**
+ * The Q4 sentence again, planned the way the live model planned it AFTER A1 landed.
+ *
+ * <b>openai:gpt-5-2025-08-07, 2026-08-23 live, both re-runs identical</b>
+ * (`docs/agent_real_validation_v1.md` §9.3). This time PRODUCT_OPS IS dispatched and
+ * `resolve_product` runs first — and the run still ended "상품을 찾지 못했습니다", because the
+ * seller had typed the title on their own Coupang listing and the resolver only read
+ * `products.name`, which for that product is the number 15223228019 (defect C1).
+ *
+ * The plan is unchanged here for the same reason `PRODUCT_COMPLAINT_ORGWIDE_PLAN` is: the fix must
+ * hold with the planner behaving exactly as it did. What changes is that the resolver can now reach
+ * the product — and that the org-wide issue rows REVIEW_OPS reads still cannot answer for it.
+ */
+export const HUMAN_PRODUCT_NAME_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "판도리 일체형 종이컵 수거함 상품의 리뷰와 문의에서 불만이나 반복 이슈가 있는지 알고 싶다",
+  unresolvedEntities: [{ kind: "PRODUCT", mention: "판도리 일체형 종이컵 수거함" }],
+  informationNeeds: [
+    { id: "n1", question: "이 상품의 리뷰에서 반복 불만/이슈 신호가 있는가?",
+      kind: "REVIEW_SIGNAL", why: "불만 여부가 질문의 핵심", required: true },
+    { id: "n2", question: "이 상품의 문의에서 반복 질문/불만 패턴과 문의량은 어떤가?",
+      kind: "INQUIRY_VOLUME", why: "문의도 불만의 신호다", required: true },
+  ],
+  specialists: ["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS"],
+  tools: ["resolve_product", "get_product_knowledge", "search_review_issues", "get_today_inbox"],
+  retrievalOrder: ["n1", "n2"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 6,
+  stopWhenEnough: null,
+  clarificationNeeded: false,
+  clarificationReason: null,
+  rationale: "상품을 먼저 해결한 뒤 리뷰 신호와 문의 패턴을 함께 본다",
+  providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-23 live",
+};
+
 /** The goal → plan table the recorded-plan suites seed the transport fake with. */
 export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "폭이 몇 mm인가요?": SPEC_QUESTION_PLAN,
@@ -527,4 +567,6 @@ export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "반복해서 비슷한 문의가 들어오는 상품이 있어?": REPEATED_INQUIRIES_CLARIFY_PLAN,
   "최근 판매 운영에서 내가 놓치고 있는 위험이나 개선 포인트가 있어?": OPERATIONS_RISK_CLARIFY_PLAN,
   "지난 주문에서 무슨 일이 있었어?": ORDER_HISTORY_CLARIFY_PLAN,
+  "판도리 일체형 종이컵 수거함 상품의 리뷰와 문의를 같이 보고 고객 불만이나 반복 이슈가 있는지 알려줘.":
+    HUMAN_PRODUCT_NAME_PLAN,
 };

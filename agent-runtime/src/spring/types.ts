@@ -427,12 +427,33 @@ export interface SignalCoverage {
   readonly provenance: string;
 }
 
+/**
+ * Which surface the seller's words matched. Mirror of `ProductMatchSurface`.
+ *
+ * The three `_EXACT` values are what a whole name matched; `CANONICAL_NAME_PARTIAL` is a fragment.
+ * The distinction is load-bearing: two candidates on the same exact surface are equally good and
+ * cannot be told apart, while an exact match beside three partial ones is simply resolved.
+ */
+export type ProductMatchSurface =
+  | "SKU_EXACT"
+  | "CANONICAL_NAME_EXACT"
+  | "CHANNEL_PRODUCT_NAME_EXACT"
+  | "CANONICAL_NAME_PARTIAL"
+  | "CATALOG_HEAD";
+
 /** Mirror of `ProductSummaryView` — identity only; what is happening to it is a separate read. */
 export interface ProductSummary {
   readonly id: string;
   readonly name: string;
   readonly sku: string | null;
   readonly status: string;
+  /** How the query reached this row. `null` for a direct id read, where no query ran. */
+  readonly matchedOn: ProductMatchSurface | null;
+  /**
+   * The channel listing title that matched, when it was an alias — the readable name of a product
+   * whose `name` is a SKU number. `null` on every other surface.
+   */
+  readonly matchedName: string | null;
 }
 
 /** Mirror of `RecommendedActionCountView` — a tally of a stored verdict, not a new one. */

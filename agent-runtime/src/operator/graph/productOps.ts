@@ -25,10 +25,16 @@ import type {
   KnowledgeCoverageRow,
   ProductFact,
   ProductKnowledge,
+  ProductMatchSurface,
   ProductSummary,
   SignalCoverage,
 } from "../../spring/types";
 import { log } from "../../log";
+
+/** The surfaces on which a whole name matched. Two candidates on one of these are indistinguishable. */
+const EXACT_SURFACES: readonly ProductMatchSurface[] = [
+  "SKU_EXACT", "CANONICAL_NAME_EXACT", "CHANNEL_PRODUCT_NAME_EXACT",
+];
 
 /** The need kinds this specialist answers. Anything else belongs to another one. */
 export const PRODUCT_NEEDS = [
@@ -71,10 +77,22 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
         OPERATOR_TOOL.RESOLVE_PRODUCT, { query: mention, limit: 5 }, allowedTools,
       );
       if (candidates.length > 0) {
-        // More than one candidate is REPORTED, not silently resolved: the first of two plausible
-        // products is a coin flip, and a coin flip answered confidently is the worst outcome here.
-        productId = candidates[0]!.id;
-        productName = candidates[0]!.name;
+        const top = candidates[0]!;
+        // <b>A tie on an exact surface is not resolvable, and must not be resolved.</b> The seller
+        // typed a whole name and the catalogue holds it twice — the demo org has ten such titles,
+        // one shared by four separate products. Taking the first is a coin flip, and a coin flip
+        // answered confidently is the worst outcome here. A tie among PARTIAL matches is a different
+        // situation: the seller gave a fragment, so the run proceeds and discloses which it took.
+        const tied = candidates.filter((c) => c.matchedOn === top.matchedOn);
+        if (tied.length > 1 && EXACT_SURFACES.includes(top.matchedOn as ProductMatchSurface)) {
+          return empty(input, `"${mention}"이라는 이름으로 등록된 상품이 ${tied.length}개 있어 어느 쪽을 `
+            + "말씀하시는지 정하지 못했습니다. 상품코드(SKU)나 채널을 함께 알려주세요.");
+        }
+        productId = top.id;
+        // The listing title when that is what matched — a Coupang/Cafe24 catalogue stores a SKU
+        // number in `name`, and reading "15223228019" back at a seller who typed the product's title
+        // is not an answer about their product.
+        productName = top.matchedName ?? top.name;
         ambiguous = candidates.length > 1;
         usedMention = mention;
         resolvedEntities.push({

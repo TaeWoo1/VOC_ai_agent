@@ -51,6 +51,7 @@ import org.springframework.test.context.ActiveProfiles;
 class ProductSignalsCoverageTest {
 
     @Autowired ProductRepository products;
+    @Autowired ChannelProductRepository listings;
     @Autowired ReviewRepository reviews;
     @Autowired InquiryRepository inquiries;
     @Autowired ItemAnalysisRepository analyses;
@@ -72,7 +73,7 @@ class ProductSignalsCoverageTest {
         // report must render issues through the issue memory's own judgements, never its own.
         ReviewIssueQueryService issueQuery = new ReviewIssueQueryService(issues, evidence, stateEvents,
                 new com.sellerops.reviewissue.ReviewIssueSnapshotService(evidence), reviews, products);
-        signals = new ProductSignalsService(new ProductQueryService(products), issueQuery, evidence,
+        signals = new ProductSignalsService(new ProductQueryService(products, listings), issueQuery, evidence,
                 analyses, reviews, inquiries, memory, channels);
     }
 

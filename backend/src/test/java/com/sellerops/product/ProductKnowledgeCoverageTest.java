@@ -72,7 +72,7 @@ class ProductKnowledgeCoverageTest {
     @BeforeEach
     void setUp() {
         channelId = seedChannel();
-        ProductQueryService query = new ProductQueryService(products);
+        ProductQueryService query = new ProductQueryService(products, listings);
         ReviewIssueQueryService issueQuery = new ReviewIssueQueryService(issues, evidence, stateEvents,
                 new com.sellerops.reviewissue.ReviewIssueSnapshotService(evidence), reviews, products);
         ProductSignalsService signals = new ProductSignalsService(query, issueQuery, evidence, analyses,

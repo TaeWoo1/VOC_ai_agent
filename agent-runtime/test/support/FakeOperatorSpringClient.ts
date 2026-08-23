@@ -19,6 +19,7 @@ import type {
   InboxSummary,
   ProductFact,
   ProductKnowledge,
+  ProductMatchSurface,
   ProductSignals,
   ProductSummary,
   RepeatedInquiry,
@@ -30,11 +31,27 @@ import type {
 } from "../../src/spring/OperatorSpringClient";
 import { SpringApiError } from "../../src/spring/SpringClient";
 
+/**
+ * A product as the catalogue holds it, plus the listing titles the channels show for it.
+ *
+ * <b>Not a `ProductSummary`.</b> `matchedOn`/`matchedName` are properties of a QUERY, not of a
+ * product, so they are produced by the resolver below rather than seeded — a fixture that could set
+ * them would let a test assert a match surface no query would ever return.
+ */
+export interface SeedProduct {
+  readonly id: string;
+  readonly name: string;
+  readonly sku: string | null;
+  readonly status: string;
+  /** Channel listing titles, which `resolve_product` also searches — exactly, and only exactly. */
+  readonly listingNames?: readonly string[];
+}
+
 export interface FakeOperatorSeed {
   readonly inbox?: InboxSummary;
   /** Make the inbox read fail with this HTTP status, to exercise specialist failure semantics. */
   readonly inboxErrorStatus?: number;
-  readonly products?: ProductSummary[];
+  readonly products?: SeedProduct[];
   readonly signals?: Record<string, ProductSignals>;
   readonly customerMemory?: CustomerMemorySearch;
   readonly repeats?: RepeatedInquiry[];
@@ -127,27 +144,46 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
   }
 
   /**
-   * Mirrors {@code ProductQueryService.rank}: exact SKU, then exact name, then substring, ties broken by
-   * name. <b>Faithful ranking is the point, not a detail.</b> An earlier version of this fake filtered by
+   * Mirrors `ProductQueryService`: exact SKU, exact canonical name, exact listing title, then a
+   * substring of the canonical name — each carrying the surface it matched on.
+   *
+   * <b>Faithful ranking is the point, not a detail.</b> An earlier version of this fake filtered by
    * substring and returned seed order, which made a test pass while production picked a different
    * product — precisely the failure the live run found, and a fake that cannot express it cannot guard
    * against it. One real product name being a prefix of another is ordinary in a seller's catalog.
+   *
+   * The alias surface is EXACT only, and normalization is the four steps `ProductNameKey` allows.
+   * A fake that matched aliases loosely would green-light a resolver that guessed.
    */
   async searchProducts(query: string, limit?: number): Promise<ProductSummary[]> {
     this.calls.products += 1;
-    const needle = query.trim().toLowerCase();
-    const rank = (p: ProductSummary): number => {
-      const sku = (p.sku ?? "").toLowerCase();
-      const name = p.name.toLowerCase();
-      if (sku.length > 0 && sku === needle) return 0;
-      if (name === needle) return 1;
-      if (name.includes(needle)) return 2;
-      return Number.MAX_SAFE_INTEGER;
+    const key = (raw: string | null | undefined): string =>
+      (raw ?? "").normalize("NFC").trim().toLowerCase().replace(/\s+/g, " ");
+    const needle = key(query);
+    const matched = (p: SeedProduct): { on: ProductMatchSurface; name: string | null } | null => {
+      if (key(p.sku).length > 0 && key(p.sku) === needle) return { on: "SKU_EXACT", name: null };
+      if (key(p.name) === needle) return { on: "CANONICAL_NAME_EXACT", name: null };
+      const alias = (p.listingNames ?? []).find((n) => key(n) === needle);
+      if (alias != null) return { on: "CHANNEL_PRODUCT_NAME_EXACT", name: alias.trim() };
+      if (key(p.name).includes(needle)) return { on: "CANONICAL_NAME_PARTIAL", name: null };
+      return null;
     };
+    const order: ProductMatchSurface[] = [
+      "SKU_EXACT", "CANONICAL_NAME_EXACT", "CHANNEL_PRODUCT_NAME_EXACT", "CANONICAL_NAME_PARTIAL",
+      "CATALOG_HEAD",
+    ];
     return (this.seed.products ?? [])
-      .filter((p) => rank(p) < Number.MAX_SAFE_INTEGER)
-      .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
-      .slice(0, limit ?? 10);
+      .flatMap((p) => {
+        const hit = matched(p);
+        return hit == null ? [] : [{ p, hit }];
+      })
+      .sort((a, b) =>
+        order.indexOf(a.hit.on) - order.indexOf(b.hit.on) || a.p.name.localeCompare(b.p.name))
+      .slice(0, limit ?? 10)
+      .map(({ p, hit }) => ({
+        id: p.id, name: p.name, sku: p.sku, status: p.status,
+        matchedOn: hit.on, matchedName: hit.name,
+      }));
   }
 
   async getProductSignals(productId: string): Promise<ProductSignals> {
