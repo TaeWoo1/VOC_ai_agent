@@ -958,3 +958,156 @@ bounded re-plan의 정상 동작이며 두 문장 모두 각자의 pass에 대�
 | A1 · A2 · A3 · A4 · §10.4 temporal | CLOSED (§9~§12) |
 | A5 · A6 · B · C2 · D | backlog 유지 |
 | 신규 — C3 상품 read 결과가 뒤 specialist에 덮임 | backlog (§13.7) |
+
+---
+
+## 14. Agent Tool Reachability v1 — A5 수정 (2026-08-23)
+
+### 14.1 무엇이 틀렸나
+
+**planner에게 18개를 보여주고, 코드가 부르는 것은 7개였다.** §5 P4가 센 미도달 9개는 그 자체로 두 개
+모자랐다 — `get_product_signals`(`SPECIALIST_TOOLS[PRODUCT_OPS]`에 이름까지 올라 있어 더 살아 보였다)와
+`get_inquiry_thread_context`(POLICY gap evidence의 `sourceTool`로만 등장한다). 실제 미도달은 **18개 중
+11개**다.
+
+그 11개 안에 `get_review_issue_evidence_summary`가 있었고, 그것은 **한 이슈의 리뷰 근거 중 몇 건이 이
+상품의 것인지 말할 수 있는 유일한 read**다(B1이 가리키던 바로 그 도구). 그래서 Q4는 org 전체 이슈 목록을
+읽고, A1 게이트가 전부 거절하고, 셀러에게 아무 말도 하지 못했다.
+
+**그리고 계획의 도구 선택은 어차피 버려지고 있었다.** `PlanValidator`의 V2는 `candidateTools`를 넘겨받은
+catalogue와 대조해 걸러내는데, 런타임이 넘기는 catalogue는 **`name: 설명` 문장 줄**이다. 이름과 문장은
+같을 수 없으므로 **모든 run에서 planner가 고른 도구가 전부 삭제됐다.** 유닛 테스트는 맨 이름을 넣어
+호출하기 때문에 이 사실을 볼 수 없었다. `allowedTools`가 언제나 specialist 자기 목록뿐이었던 이유다.
+
+### 14.2 미도달 11개 감사
+
+| 도구 | 증명하는 need | 소유해야 할 specialist | precondition | 중복인가 | 판단 |
+|---|---|---|---|---|---|
+| **`get_review_issue_evidence_summary`** | `REVIEW_SIGNAL` (상품 귀속) | **REVIEW_OPS** | resolved product + issue id | **아니다** — 이슈 근거를 상품별로 나누는 유일한 read | **연결** |
+| `get_review_issue_trend` | `REVIEW_SIGNAL` | REVIEW_OPS | issue id | **완전 중복** — `IssueTrend = ReviewIssueSummary`이고 목록 행이 이미 severity·change를 싣고 온다 | 연결 안 함 |
+| `get_product_signals` | `REVIEW_SIGNAL`·`INQUIRY_VOLUME` | PRODUCT_OPS | resolved product | **부분집합** — `get_product_knowledge.signals`가 같은 값 + coverage + 지식을 함께 준다 | 연결 안 함 |
+| `search_unanswered_inquiries` | `INQUIRY_VOLUME` (목록) | INQUIRY_OPS | 없음 | 아니다 — 카운트는 있고 **목록이 없다**(A3) | red case 없음 → 다음 후보 1순위 |
+| `get_inquiry_detail` | — | 없음 | work item id | — · **고객 원문을 싣는다**. 도구 설명 자체가 "초안 작성 외에 부르지 말 것"이고 Operator에는 초안 lane이 없다 | **의도적으로 연결 안 함** |
+| `get_inquiry_thread_context` | `CUSTOMER_HISTORY` | INQUIRY_OPS | inquiry id | `search_customer_memory`와 겹침 | red case 없음 |
+| `list_item_analysis` | `REPEAT_PATTERN` | INQUIRY_OPS | 없음 | `list_repeated_inquiries`와 겹침 | red case 없음 |
+| `get_dashboard_product_issues` | `REPEAT_PATTERN` | — | 없음 | org 집계 — **상품 need에는 A1이 거절할 모양** | red case 없음 |
+| `search_channel_knowledge` · `get_channel_capability` · `get_connection_guidance` | `CHANNEL_KNOWLEDGE` | **없음** | 없음 | — · **`CHANNEL_KNOWLEDGE`는 `NeedKind`에 존재하지 않는다.** planner는 이 need를 선언할 수조차 없다 | 새 need kind + 소유 specialist가 필요 → 이번 범위 밖 |
+
+### 14.3 A5를 무엇으로 정의했나
+
+**"9개 전부 호출 가능"이 아니라 "광고된 capability = 실제 실행 경로"다.** 도구는 호출자가 있어야 목록에
+들어온다. 나머지는 등록된 채로, READ인 채로, **planner의 시야 밖에** 남는다.
+
+| 바뀐 것 | 무엇 |
+|---|---|
+| `tools/ToolReachability.ts` (신규) | (specialist, tool, needKinds, precondition) **capability matrix**. 8행 |
+| planner catalogue | matrix가 도달 가능하다고 선언한 도구만 — **18 → 8줄** |
+| `SPECIALIST_TOOLS` | 삭제. `toolsFor(specialist)`가 같은 matrix에서 파생 — 권한과 도달성이 어긋날 수 없다 |
+| `PlanValidator` 입력 | `toolNames`(맨 이름)를 catalogue 문장과 **따로** 받는다. planner의 도구 선택이 처음으로 살아남는다 |
+| `REVIEW_OPS` | resolved product가 있으면 `get_review_issue_evidence_summary` 경로 |
+| `EvidenceKind` | `ISSUE_EVIDENCE` 추가 — granularity 값은 이미 있었고 아무도 만들지 못했다 |
+| 거짓 라벨 2곳 | POLICY gap의 `sourceTool`과 capability contract의 `tool`이 **호출된 적 없는 도구 이름**을 달고 있었다 → `policy-store` |
+
+**planner 프롬프트는 바꾸지 않았다.** 백엔드 프롬프트 0줄. 바뀐 것은 그 프롬프트에 실려 가는 목록의
+내용물이며, 그것이 A5가 요구한 수정 그 자체다. **두 번째 planner도 만들지 않았다** — 런타임이 "도움 될
+것 같아서" 부르는 도구는 하나도 없다.
+
+### 14.4 연결된 경로의 규칙
+
+**org 목록은 후보 목록이지 증거가 아니다.** 상품이 해결돼 있으면 `search_review_issues`의 행은 **어떤
+문장도 되지 못한다.** 문장이 되는 것은 이슈별 근거 집계에서 읽은 **이 상품 몫의 건수**뿐이다.
+
+**이 상품의 수는 이 상품의 수로 말한다.** 「…에 "뚜껑 이탈" 문제로 기록된 리뷰 근거가 2건 있습니다
+(이 문제 전체 9건 중)」 — 두 숫자를 한 문장에 두어 작은 쪽이 큰 쪽으로 읽힐 수 없게 한다.
+
+**이슈의 날짜를 상품의 몫에 빌려주지 않는다.** 집계의 first/last는 **이슈 전체**의 것이다. 그것을 상품
+귀속 건수에 붙이면 다른 상품의 최근 리뷰가 이 상품의 「최근」을 증명하게 된다 — 시간 옷을 입은 A1이다.
+그래서 `events: null`이고, 기간을 물은 need는 이 근거를 **정당하게 보류한다.**
+
+**0도 답이고, 이 경로가 가장 자주 내놓는 답이다.** 열려 있는 이슈를 실제로 열어보고 이 상품의 행이 없다는
+것 — 그것이 근거를 가진 문장이 된다. 침묵과 "볼 수 없었다"는 화면에서 같아 보이고, 여기서 참인 것은
+하나뿐이다.
+
+**단, 훑기는 유한하고 그 사실을 말한다.** 상한은 6건이다. 데모 org에는 열린 이슈가 **19건** 있었고, 첫
+구현은 "6건을 **모두** 확인했지만"이라고 말했다 — **거짓 완결성**이라 잡아 고쳤다. 지금은
+「열려 있는 반복 리뷰 문제 19건 가운데 심각한 6건을 확인했지만 … 나머지는 확인하지 않았습니다.」이고,
+로그에도 `truncated: true`가 남는다.
+
+### 14.5 회귀 (신규 13건)
+
+**red 증명.**
+
+| 되돌린 것 | 빨개지는 테스트 |
+|---|---|
+| product-scoped 경로 제거 | **13건 중 3건** |
+| catalogue 필터 제거(18개 전부 광고) | **13건 중 1건** |
+| validator에 문장 줄을 다시 넘김 | **13건 중 1건** |
+| "모두 확인" 완결성 주장 복원 | **13건 중 1건** |
+
+**fence는 red run에서도 초록으로 남는다** — 상품 미해결 시 product-scoped 도구 미호출, 다른 상품의
+org 이슈가 이 상품의 문장이 되지 않음(A1 게이트가 독립적으로 막는다), REPORT_OPS의 빈 allow-list.
+
+구조 회귀는 **소스를 읽어** 고정한다: matrix의 모든 행에 `registry.invoke` 호출부가 실재하고, 모든
+`registry.invoke` 대상이 matrix에 있고, 어떤 evidence도 도달 불가능한 도구를 `sourceTool`로 달지 않는다.
+
+전체: agent-runtime **342 passed · 23 skipped · 0 failed**. 백엔드·프론트엔드 변경 0.
+
+### 14.6 라이브 (REAL Demo Org · 마켓 접촉 0 · WRITE 0)
+
+**Q4 — 「판도리 일체형 종이컵 수거함 상품의 리뷰와 문의를 같이 보고 …」**
+
+| 항목 | PRODUCT_OPS가 배치된 run | 배치되지 않은 run |
+|---|---|---|
+| resolved entity | `800d396a…` (매번 동일) | 없음 |
+| executed tools | `resolve_product` · `get_product_knowledge` · `search_review_issues` · `get_review_issue_evidence_summary` **×6** · `list_repeated_inquiries` (tool 10) | `search_review_issues` · `list_repeated_inquiries` (tool 2) |
+| evidence scope | `ISSUE_EVIDENCE` (PRODUCT, count 0) [+ `PRODUCT_LISTING`] | `REVIEW_ISSUE` ×3 (ORG) |
+| rejected | 0 (org 행을 애초에 만들지 않는다) | **3건 전부 `NO_RESOLVED_PRODUCT`** |
+| findings | **1–2** | 0 |
+| 답 | 「열려 있는 반복 리뷰 문제 19건 가운데 심각한 6건을 확인했지만, 판도리 일체형 종이컵 수거함에 귀속된 리뷰 근거는 없습니다. 나머지는 확인하지 않았습니다.」 | 없음 |
+| unsupported claims · WRITE | **0 · 0** | 0 · 0 |
+
+**baseline 대비.** §13.6의 같은 질문은 findings 0 · evidence 4건 전부 거절이었다. 지금은 **상품을 열어
+보고, 그 상품에 대해 참인 문장을 말한다.**
+
+**DB 대조.** 열린 이슈 19건 · 이 상품에 귀속된 `review_issue_evidence` **0건** · 귀속 불가(NULL) **0건**.
+즉 6건 훑기의 결론은 19건 전체에서도 참이다 — **답이 진실보다 약하게 말했고, 그 방향이 옳다.**
+
+**Q2 — 「최근 부정적인 리뷰가 있는 상품을 알려줘.」 (2회, 결과 동일)**
+
+`REVIEW_OPS` 단독 · tool 1회 · findings 3 (전부 `SUPPORTED`) · evidence 3 (ORG) · WRITE 0. §12 이후와
+**동일하며 이번 변경의 영향이 없다.** 상품이 해결되지 않았으므로 귀속 경로는 precondition에 막혀 실행되지
+않는다 — 설계대로다. **관찰 결과: dead-tool 연결은 Q2의 상품 단위 결과를 개선하지 않는다.** 개선하려면
+같은 도구를 **org need에서 상품을 이름 짓는 용도**로 쓰는 두 번째 연결이 필요하고, 이번 package에는 그
+red case가 없어 만들지 않았다(다음 후보).
+
+### 14.7 이번 회차에서 새로 관측된 것 (수정하지 않음)
+
+- **A8(신규) — 계획이 상품을 지목해 놓고 그것을 해결할 수 있는 유일한 specialist를 부르지 않는다.**
+  같은 문장 10회 중 **6회만** `PRODUCT_OPS`를 배치했다. 배치되지 않은 run에서는 plan에
+  `unresolvedEntities: [PRODUCT]`가 그대로 있는데 resolver가 없어, A1 게이트가 `NO_RESOLVED_PRODUCT`로
+  전부 거절하고 findings 0으로 끝난다. **오늘 Q4의 실제 병목은 A5가 아니라 이것이다.** 고치려면 "plan이
+  해결되지 않은 PRODUCT를 선언했으면 PRODUCT_OPS를 배치한다"는 규칙이 필요한데, 그것은 planner가 고르지
+  않은 specialist를 런타임이 추가하는 일이므로 **이번 package가 명시적으로 금지한 것**이다. 보고만 한다.
+- **C4(신규) — `PRODUCT_OPS`의 상품별 이슈 문장이 이슈 전체 건수를 인용한다.** `ProductSignalsService`는
+  `issueEvidenceCountsByProduct`로 **이 상품의** 이슈를 고르지만, 각 행은 `issueQuery.issueView(...)`가
+  준 **org 전체 `evidenceCount`**를 싣는다. 그래서 「…에서 "X" 신호가 근거 N건으로 기록돼 있습니다」의 N은
+  상품 몫이 아니라 이슈 총계다. 이번에 연결한 집계가 주는 수가 정확한 쪽이다. 백엔드 계약 변경이 필요해
+  범위 밖.
+- **C3은 그대로다** — `PRODUCT_OPS`의 정직한 "이 상품에 기록된 신호가 없습니다"는 여전히 뒤 specialist에
+  덮인다. 다만 덮는 문장이 org 집계 사유에서 **상품 귀속 사유**로 바뀌어, 덮여도 참인 상태가 됐다.
+- **B1은 그대로다** — `search_review_issues`에 상품 파라미터는 여전히 없다. 이번 변경은 그 목록을 **후보
+  목록으로만** 쓰는 방식으로 우회했을 뿐, 필터를 만들지 않았다.
+- **여전히 dead인 10개**는 14.2의 사유대로 남아 있고, **planner에게 광고되지 않는다.** 다음 연결 후보
+  순서: `search_unanswered_inquiries`(A3) → `get_review_issue_evidence_summary`의 org need 확장(Q2) →
+  channel knowledge 3종(새 `NeedKind` 필요).
+
+### 14.8 판정
+
+| 결함 | 상태 |
+|---|---|
+| **A5** — 광고된 capability와 실제 실행 경로 불일치 | **CLOSED** — 광고 8 = 실행 8, 구조 회귀로 고정 |
+| 신규 — `PlanValidator`가 계획의 도구 선택을 전부 삭제 | **CLOSED**(같은 package) |
+| A1 · A2 · A3 · A4 · C1 · §10.4 temporal | CLOSED (§9~§13) |
+| 신규 — A8 계획이 resolver 없이 상품을 지목 | backlog (§14.7) |
+| 신규 — C4 상품 문장이 이슈 총계를 인용 | backlog (§14.7) |
+| A6 · B1 · B2 · C2 · C3 · D | backlog 유지 |

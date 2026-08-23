@@ -218,6 +218,35 @@ org-scope 증거는 여전히 상품 need를 만족시키지 못한다 — 라�
 
 ---
 
+### 2.6 카탈로그는 할 수 있는 것만 광고한다 — Tool Reachability (2026-08-23 추가)
+
+**planner에게 보이는 도구 = 어떤 specialist가 실제로 실행하는 도구.** 2026-08-23 라이브에서 planner는
+18개를 제시받았고 코드가 부르는 것은 7개였다. 나머지 11개는 계획에 이름이 오르면 사람이 읽기에 제품의
+능력처럼 보였고, 모델은 그중 하나를 고르는 데 예산을 썼다. 기록: `docs/agent_real_validation_v1.md` §14.
+
+**capability matrix가 그 등식을 고정한다** — `(specialist, tool, needKinds, precondition)` 한 표에서
+planner의 카탈로그와 specialist의 allow-list가 **함께** 파생된다. 두 곳에 적으면 두 개의 규칙이 되고,
+어긋난 쪽이 거짓 광고가 된다. 호출자가 없는 도구는 등록된 채 READ인 채로 **planner의 시야 밖**에 남는다.
+
+**precondition은 각주가 아니라 capability의 일부다.** resolved product를 요구하는 도구는 상품 없이
+호출되지 않는다 — 그렇게 얻은 "답"은 아무도 들여다보지 않은 상품에 대한 답이다.
+
+**두 번째 planner는 만들지 않는다.** 런타임이 "도움이 될 것 같아서" 부르는 도구는 없고, planner가 고르지
+않은 specialist를 런타임이 배치하지도 않는다. 도달성은 **광고를 줄여서** 맞추지, 실행을 늘려서 맞추지
+않는다.
+
+**상품 질문에서 org 목록은 후보 목록이지 증거가 아니다.** 상품이 해결돼 있으면 `search_review_issues`의
+행은 어떤 문장도 되지 못하고, 문장이 되는 것은 이슈별 근거 집계에서 읽은 **이 상품 몫의 건수**뿐이다
+(`ISSUE_EVIDENCE`). 이슈 전체의 날짜는 그 몫에 빌려주지 않는다 — 다른 상품의 최근 리뷰가 이 상품의
+「최근」을 증명하게 되는 것은 시간 옷을 입은 §2.1 위반이다. 그리고 훑기는 유한하며, **유한하다는 사실을
+답이 말한다**("19건 가운데 6건을 확인했고 나머지는 확인하지 않았습니다").
+
+**강제 장치.** `tools/ToolReachability.ts` · `toolReachability.test.ts` 13건 — matrix의 모든 행에
+`registry.invoke` 호출부가 실재하고, 모든 호출 대상이 matrix에 있고, 어떤 evidence도 도달 불가능한 도구를
+`sourceTool`로 달지 않는다는 것을 **소스를 읽어** 고정한다.
+
+---
+
 ---
 
 ## 3. Dashboard 레인과 Agent 레인은 다른 물건이다
