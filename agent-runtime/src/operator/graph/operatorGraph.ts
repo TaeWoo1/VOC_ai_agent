@@ -39,6 +39,7 @@ import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/Inves
 import { mentionsOf, needsInOrder } from "../plan/InvestigationPlan";
 import type { NeedScope, RejectedEvidence } from "../scope/EvidenceScope";
 import { needScopeOf, partitionEvidence, planScopeOf, reasonSentence } from "../scope/EvidenceScope";
+import { basisSentence } from "../defaults/OperationalDefaults";
 import type { SpecialistTerminal, ToolFailure } from "../failure/SpecialistOutcome";
 import { classifyToolError, failureSentence, terminalOf } from "../failure/SpecialistOutcome";
 import { EvidenceBuilder } from "../state/evidence";
@@ -458,6 +459,17 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     if (dropped > 0) {
       notes.push(`근거가 확인되지 않아 ${dropped}건은 답에서 제외했습니다.`);
     }
+    // What scope the answer actually rests on, when it is not the obvious one. A seller who asked about
+    // "반복 문의" and was answered on a 28-day window has been given a number whose meaning depends on
+    // that window, and a seller who said "최근" and got an unfiltered list needs to know that too.
+    // Only needs the run actually pursued contribute — a PENDING need was never scoped by anything.
+    const pursued = new Set(state.needs.filter((n) => n.status !== "PENDING").map((n) => n.id));
+    const bases = (plan?.appliedDefaults ?? [])
+      .filter((d) => pursued.has(d.needId))
+      .map(basisSentence)
+      .filter((line): line is string => line != null);
+    notes.push(...new Set(bases));
+
     // Withheld for SCOPE, said separately from withheld for absence — they are different facts and a
     // seller acts on them differently. "근거가 없다" means look elsewhere; "범위가 다르다" means this
     // question cannot be answered with what SellerOps can currently read, which is the sentence Q4

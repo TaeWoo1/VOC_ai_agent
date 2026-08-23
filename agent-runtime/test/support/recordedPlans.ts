@@ -394,6 +394,117 @@ export const PRIORITIZE_WITH_PERIOD_PLAN: AgentPlanView = {
   unresolvedEntities: [{ kind: "PERIOD", mention: "오늘" }],
 };
 
+/**
+ * The three plans that answered a question with a question.
+ *
+ * <b>Reconstructed from the recorded runs, not byte-for-byte.</b> `docs/agent_real_validation_v1.md` §3
+ * records each run's needs and its clarification text; the specialist lists here are the ones those
+ * needs imply. What matters for the regression is exact in all three: `clarificationNeeded: true`, the
+ * need KINDS, and whether a period was named — those are what the capability audit reads.
+ *
+ * All three asked the seller for a period. All three had one available: `list_repeated_inquiries`
+ * declares a 28-day window, and the issue list declares that it has no period at all. Zero tools ran.
+ */
+export const NEGATIVE_REVIEWS_CLARIFY_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "최근 부정적인 리뷰가 있는 상품을 알고 싶다",
+  unresolvedEntities: [{ kind: "PERIOD", mention: "최근" }],
+  informationNeeds: [
+    { id: "n1", question: "현재 감지된 부정적 리뷰 관련 이슈와 그 심각도/추세", kind: "REVIEW_SIGNAL",
+      why: "부정 신호를 먼저 본다", required: true },
+    { id: "n2", question: "각 부정적 이슈의 근거가 어느 상품에 얼마나 귀속되며, 최근 기간의 증거가 있는가",
+      kind: "REVIEW_SIGNAL", why: "상품을 지목하려면 귀속이 필요하다", required: true },
+  ],
+  specialists: ["REVIEW_OPS"],
+  tools: [],
+  retrievalOrder: ["n1", "n2"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 6,
+  stopWhenEnough: null,
+  clarificationNeeded: true,
+  clarificationReason: "'최근'의 기간(예: 7/14/30일), '부정적 리뷰'의 기준, 출력 범위와 채널 범위가 정해지지 않았습니다.",
+  rationale: "부정 리뷰 신호를 상품 단위로 본다",
+  providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-23 live (재구성)",
+};
+
+export const REPEATED_INQUIRIES_CLARIFY_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "반복해서 비슷한 문의가 들어오는 상품을 알고 싶다",
+  unresolvedEntities: [],
+  informationNeeds: [
+    { id: "n1", question: "최근 지정 기간 내에 반복 문의 패턴이 감지된 상품", kind: "REPEAT_PATTERN",
+      why: "반복은 개별 응대보다 우선한다", required: true },
+  ],
+  specialists: ["INQUIRY_OPS"],
+  tools: [],
+  retrievalOrder: ["n1"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 4,
+  stopWhenEnough: null,
+  clarificationNeeded: true,
+  clarificationReason: "분석 기간이 지정되지 않았습니다. 어떤 기간(예: 지난 7일/30일/분기)을 기준으로 볼지 확인이 필요합니다.",
+  rationale: "반복 문의 패턴을 본다",
+  providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-23 live (재구성)",
+};
+
+export const OPERATIONS_RISK_CLARIFY_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "최근 판매 운영에서 놓치고 있는 위험이나 개선 포인트를 알고 싶다",
+  unresolvedEntities: [{ kind: "PERIOD", mention: "최근" }],
+  informationNeeds: [
+    { id: "n1", question: "미답변 백로그가 얼마나 쌓여 있는가", kind: "INQUIRY_VOLUME",
+      why: "가장 먼저 새는 곳", required: true },
+    { id: "n2", question: "리뷰 반복 신고의 심각도와 추세", kind: "REVIEW_SIGNAL",
+      why: "심각한 문제를 놓치지 않기 위해", required: true },
+    { id: "n3", question: "상품별 이슈 집중도", kind: "REPEAT_PATTERN",
+      why: "어디에 몰려 있는지", required: false },
+    { id: "n4", question: "반복 질문 후보", kind: "REPEAT_PATTERN", why: "FAQ 보완 후보", required: false },
+    { id: "n5", question: "저장된 분석의 상세페이지/FAQ 보완 제안", kind: "REPEAT_PATTERN",
+      why: "실행 가능한 개선", required: false },
+  ],
+  specialists: ["INQUIRY_OPS", "REVIEW_OPS", "REPORT_OPS"],
+  tools: [],
+  retrievalOrder: ["n1", "n2", "n3", "n4", "n5"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 8,
+  stopWhenEnough: null,
+  clarificationNeeded: true,
+  clarificationReason: "'최근'의 기간 범위(예: 7일/14일/30일)와 점검 범위(모든 채널 vs 특정 채널)가 불명확합니다.",
+  rationale: "운영 전반의 위험 신호를 모아 본다",
+  providerVersion: "openai:gpt-5-2025-08-07 · 2026-08-23 live (재구성)",
+};
+
+/**
+ * A clarification that must SURVIVE the audit — no capability reaches an order read.
+ *
+ * The negative control matters as much as the red test: an audit that cleared every clarification would
+ * be a switch that turns the feature off, not a rule.
+ */
+export const ORDER_HISTORY_CLARIFY_PLAN: AgentPlanView = {
+  ...REPEATED_INQUIRIES_CLARIFY_PLAN,
+  userGoal: "지난 주문에서 무슨 일이 있었는지 알고 싶다",
+  informationNeeds: [
+    { id: "n1", question: "어느 기간의 주문 이력을 볼 것인가", kind: "ORDER_HISTORY",
+      why: "대상 기간이 없다", required: true },
+  ],
+  clarificationReason: "어느 기간의 주문을 보시겠습니까?",
+};
+
 /** The goal → plan table the recorded-plan suites seed the transport fake with. */
 export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "폭이 몇 mm인가요?": SPEC_QUESTION_PLAN,
@@ -412,4 +523,8 @@ export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "전선몰딩 상품의 리뷰와 문의를 같이 보고 불만이 있는지 알려줘": PRODUCT_COMPLAINT_ORGWIDE_PLAN,
   "오늘 뭐부터 봐야 해? 목록으로": INBOX_LIST_NEEDS_ROWS_PLAN,
   "답변이 필요한 문의를 우선순위대로 정리하고 답변 초안을 만들어줘": PRIORITIZE_AND_DRAFT_PLAN,
+  "최근 부정적인 리뷰가 있는 상품을 알려줘.": NEGATIVE_REVIEWS_CLARIFY_PLAN,
+  "반복해서 비슷한 문의가 들어오는 상품이 있어?": REPEATED_INQUIRIES_CLARIFY_PLAN,
+  "최근 판매 운영에서 내가 놓치고 있는 위험이나 개선 포인트가 있어?": OPERATIONS_RISK_CLARIFY_PLAN,
+  "지난 주문에서 무슨 일이 있었어?": ORDER_HISTORY_CLARIFY_PLAN,
 };

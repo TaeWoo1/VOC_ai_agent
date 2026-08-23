@@ -13,6 +13,7 @@
  * read it, find nothing, and the Operator would report calm about a product that was never looked at.
  */
 import type { SpecialistName } from "../state/OperatorState";
+import type { AppliedDefault } from "../defaults/OperationalDefaults";
 
 /** What kind of thing a mention refers to. Closed — an unknown kind is dropped by the validator. */
 export type EntityKind = "PRODUCT" | "CHANNEL" | "ORDER" | "INQUIRY" | "ISSUE" | "PERIOD";
@@ -129,6 +130,15 @@ export interface InvestigationPlan {
   readonly rationale: string | null;
   /** Which model produced this plan. Never a hardcoded label — the `draftKindLabel` rule. */
   readonly plannerVersion: string;
+  /**
+   * How each need's scope was settled — the seller's words, a capability contract, or nothing.
+   *
+   * <b>Runtime-computed, never model-supplied.</b> The planner has no field for this and must not: a
+   * model asked to name a default would name a plausible number. It is filled from the capability audit
+   * in `defaults/OperationalDefaults.ts` after validation, which is also what decides whether a
+   * clarification the model asked for actually reaches the seller.
+   */
+  readonly appliedDefaults: readonly AppliedDefault[];
 }
 
 /** The mentions of one kind a plan is still trying to resolve — the input a specialist resolves from. */

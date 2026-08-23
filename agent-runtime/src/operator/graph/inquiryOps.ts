@@ -23,6 +23,7 @@ import type { SpecialistInput } from "./specialistInput";
 import type { CustomerMemorySearch, InboxSummary, RepeatedInquiry } from "../../spring/types";
 import { attemptTool, skippedTool, terminalOf } from "../failure/SpecialistOutcome";
 import { eventOn, eventRange } from "../scope/EvidenceTime";
+import { REPEAT_WINDOW_DAYS } from "../defaults/OperationalDefaults";
 import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { log } from "../../log";
 
@@ -121,6 +122,15 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
       }
       succeeded += 1;
       const repeats = attempt.value;
+      // The window this run was actually answered on comes from the ROWS, not from our mirror of the
+      // backend constant. A mismatch means the contract moved and `OperationalDefaults` is now describing
+      // a window nobody applied — worth a log line, never worth silently preferring our own number.
+      const echoed = repeats.find((r) => r.windowDays > 0)?.windowDays;
+      if (echoed != null && echoed !== REPEAT_WINDOW_DAYS) {
+        log("operator_default_drift", {
+          tool: OPERATOR_TOOL.LIST_REPEATED_INQUIRIES, declared: REPEAT_WINDOW_DAYS, applied: echoed,
+        });
+      }
       const cited: string[] = [];
       for (const repeat of repeats.slice(0, 3)) {
         const ref = evidence.add({
@@ -301,6 +311,8 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     needStates,
     failures,
     terminal,
-    ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+    // Deduped: one read serves every need of its kind, so "반복 문의는 없었습니다" is one fact however
+    // many needs asked for it. Three copies of a true sentence read as three findings.
+    ...(notes.length > 0 ? { note: [...new Set(notes)].join(" ") } : {}),
   };
 }

@@ -93,7 +93,11 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
     findings.push({
       findingId: `f-${ref.evidenceId}`,
       specialist: "REVIEW_OPS",
-      statement: `"${issue.title}"에 대한 리뷰 근거가 ${issue.evidenceCount}건 기록돼 있습니다${change}.`
+      // The issue list is not filtered by period, so "최근" can only be answered by showing WHEN the
+      // evidence is from. The date is the row's own last evidence date — event time, never the read time.
+      statement: `"${issue.title}"에 대한 리뷰 근거가 ${issue.evidenceCount}건 기록돼 있습니다${change}`
+        + (issue.lastEvidenceOn ? ` (최근 근거 ${issue.lastEvidenceOn})` : "")
+        + "."
         + (issue.dominantProductName ? ` 주로 ${issue.dominantProductName}입니다.` : ""),
       evidenceIds: [ref.evidenceId],
       confidence: "NEEDS_REVIEW",

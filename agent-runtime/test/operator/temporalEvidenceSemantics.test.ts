@@ -173,6 +173,7 @@ function plan(): InvestigationPlan {
     evidenceRequirements: [], riskClass: "ROUTINE",
     stoppingCriteria: { maxIterations: 1, maxToolCalls: 4, enough: null },
     clarificationNeeded: false, clarificationReason: null, rationale: null, plannerVersion: "test",
+    appliedDefaults: [],
   };
 }
 

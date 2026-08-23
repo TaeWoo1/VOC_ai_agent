@@ -24,6 +24,7 @@ import type { AgentPlanView } from "../../spring/types";
 import type { InvestigationPlan, RiskClass } from "./InvestigationPlan";
 import type { SpecialistName } from "../state/OperatorState";
 import { validatePlan, PlanRejectedError } from "./PlanValidator";
+import { scopeToken, withOperationalDefaults } from "../defaults/OperationalDefaults";
 import type { PlanLimits } from "./PlanValidator";
 import { log } from "../../log";
 
@@ -117,7 +118,12 @@ export class LlmInvestigationPlanner implements Planner {
 
     const raw = toPlan(view, goalText);
     try {
-      const validated = validatePlan(raw, { catalogue: input.catalogue, limits: input.limits });
+      // The capability audit runs BEFORE validation, and the order is load-bearing: V8 strips every
+      // specialist from a plan that asks a question, so a clarification the contracts already answer
+      // has to be resolved while the plan still knows what it was going to do. After the audit, every
+      // need carries the scope it will actually be pursued under.
+      const audited = withOperationalDefaults(raw, goalText);
+      const validated = validatePlan(audited, { catalogue: input.catalogue, limits: input.limits });
       log("operator_plan", {
         plannerKind: "LLM",
         modelAnswered: true,
@@ -129,6 +135,13 @@ export class LlmInvestigationPlanner implements Planner {
         // boolean is what made the 2026-08-23 divergence diagnosable: two runs of one sentence took
         // different temporal paths and no log said which had named a period.
         periodNamed: validated.entities.unresolved.some((e) => e.kind === "PERIOD"),
+        // Whether the model asked, and whether the audit let the question through. The gap between the
+        // two is exactly the A4 defect, and without both numbers it is invisible in a log.
+        modelAskedToClarify: view.clarificationNeeded === true,
+        clarifies: validated.clarificationNeeded,
+        scopes: validated.appliedDefaults
+          .map((d) => `${d.source}:${scopeToken(d.scope)}`)
+          .join(","),
       });
       return validated;
     } catch (err) {
@@ -187,8 +200,12 @@ function toPlan(view: AgentPlanView, goalText: string): InvestigationPlan {
       maxToolCalls: view.maxToolCalls ?? 0,
       enough: view.stopWhenEnough ?? null,
     },
+    // The model's own flag, kept verbatim here. `withOperationalDefaults` decides whether it survives
+    // the capability audit — this function must not, because it has not seen the contracts yet.
     clarificationNeeded: view.clarificationNeeded === true,
     clarificationReason: view.clarificationReason ?? null,
+    // Empty until the capability audit fills it. A model-supplied value would be a guessed default.
+    appliedDefaults: [],
     rationale: view.rationale ?? null,
     plannerVersion: view.providerVersion ?? "agent-plan/unknown",
   };

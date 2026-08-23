@@ -154,6 +154,7 @@ function plan(overrides: Partial<InvestigationPlan> = {}): InvestigationPlan {
     clarificationReason: null,
     rationale: null,
     plannerVersion: "test",
+    appliedDefaults: [],
     ...overrides,
   };
 }
