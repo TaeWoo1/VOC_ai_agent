@@ -272,11 +272,11 @@ export function ReportsV2() {
           <ul className="space-y-1">
             {productIssues.map((row) => (
               <li
-                key={`${row.productName}-${row.issueLabel}`}
+                key={`${row.productId}-${row.issueLabel}`}
                 className="flex items-baseline justify-between gap-3 break-keep py-1 leading-relaxed"
               >
                 <span className="text-ink">
-                  {row.productName} — {row.issueLabel}
+                  {row.productName ?? "이름을 확인할 수 없는 상품"} — {row.issueLabel}
                 </span>
                 <span className="shrink-0 tabular-nums text-muted">{row.count}건</span>
               </li>

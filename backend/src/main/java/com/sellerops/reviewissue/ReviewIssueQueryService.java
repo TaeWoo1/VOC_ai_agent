@@ -155,7 +155,8 @@ public class ReviewIssueQueryService {
 
     /**
      * A quote-free roll-up of an issue's evidence: total, per-product split (attributed only,
-     * largest first; unattributed reported separately), the rating distribution, and the span.
+     * largest first, each with ITS OWN span; unattributed reported separately), the rating
+     * distribution, and the issue's span.
      *
      * <p>All-time, so it needs no reference date. Reviews are loaded to read their star rating only
      * — never a body — and the result carries no review id, no quote, and no buyer identity, so this
@@ -174,7 +175,14 @@ public class ReviewIssueQueryService {
 
         // Per-product tally (insertion order preserved, then sorted largest-first) and per-rating
         // tally, both over the same evidence rows so they each sum to totalEvidence.
+        //
+        // The per-product SPAN is accumulated in the same pass and from the same rows, so a product's
+        // first/last date can only ever be one of its own evidence dates. The issue's span
+        // (issue.getFirstEvidenceOn()) is deliberately not consulted here: it is the union over every
+        // product, and lending it to a row would let another product's recent review date this one.
         Map<UUID, Long> perProduct = new LinkedHashMap<>();
+        Map<UUID, LocalDate> firstOn = new LinkedHashMap<>();
+        Map<UUID, LocalDate> lastOn = new LinkedHashMap<>();
         long unattributed = 0L;
         long[] ratingBuckets = new long[6]; // index 1..5 = stars; index 0 = unrated
         for (ReviewIssueEvidence row : rows) {
@@ -183,6 +191,9 @@ public class ReviewIssueQueryService {
                 unattributed++;
             } else {
                 perProduct.merge(productId, 1L, Long::sum);
+                LocalDate on = row.getOccurredOn();
+                firstOn.merge(productId, on, (a, b) -> a.isBefore(b) ? a : b);
+                lastOn.merge(productId, on, (a, b) -> a.isAfter(b) ? a : b);
             }
             Review review = reviewsById.get(row.getReviewId());
             Integer rating = review == null ? null : review.getRating();
@@ -191,7 +202,7 @@ public class ReviewIssueQueryService {
 
         List<IssueProductEvidenceView> byProduct = perProduct.entrySet().stream()
                 .map(e -> new IssueProductEvidenceView(e.getKey(), productNames.get(e.getKey()),
-                        e.getValue()))
+                        e.getValue(), firstOn.get(e.getKey()), lastOn.get(e.getKey())))
                 .sorted(Comparator.comparingLong(IssueProductEvidenceView::evidenceCount).reversed()
                         .thenComparing(v -> v.productId().toString()))
                 .toList();

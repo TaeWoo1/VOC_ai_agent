@@ -15,7 +15,9 @@ import com.sellerops.review.ReviewRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -98,19 +100,53 @@ public class DashboardService {
         return items;
     }
 
+    /**
+     * The negative-review roll-up, unchanged in what it counts.
+     *
+     * <p>Same corpus (every review this org holds that the read filters admit), same predicate
+     * ({@link Review#isNegative()}), same grouping key (the canonical {@code product_id}), same
+     * order and same top-5 cap as before. What is added is what the rows already knew and the DTO
+     * dropped: the canonical id, and the span of the very rows being counted.
+     *
+     * <p>Reviews with no product link are excluded rather than grouped under a null key — a gap in
+     * product mapping is not a product, the same rule {@code ProductEvidenceCount} states for issue
+     * evidence.
+     */
     private List<TopProductIssue> buildTopProductIssues(UUID orgId) {
         Map<UUID, String> productNames = products.findAllByOrgId(orgId).stream()
                 .collect(Collectors.toMap(Product::getId, Product::getName, (a, b) -> a));
-        Map<UUID, Long> negativeByProduct = reviews.findAllByOrgId(orgId).stream()
+        Map<UUID, List<Review>> negativeByProduct = reviews.findAllByOrgId(orgId).stream()
                 .filter(Review::isNegative)
                 .filter(r -> r.getProductId() != null)
-                .collect(Collectors.groupingBy(Review::getProductId, Collectors.counting()));
+                .collect(Collectors.groupingBy(Review::getProductId));
 
         return negativeByProduct.entrySet().stream()
-                .sorted(Map.Entry.<UUID, Long>comparingByValue().reversed())
+                .sorted(Comparator.<Map.Entry<UUID, List<Review>>>comparingInt(
+                        e -> e.getValue().size()).reversed())
                 .limit(5)
                 .map(e -> new TopProductIssue(
-                        productNames.getOrDefault(e.getKey(), "-"), "부정 리뷰", e.getValue()))
+                        e.getKey(),
+                        // Null, not "-": the catalogue either holds a name for this id or it does not.
+                        productNames.get(e.getKey()),
+                        "부정 리뷰",
+                        e.getValue().size(),
+                        e.getValue().stream().map(DashboardService::receivedOn)
+                                .min(Comparator.naturalOrder()).orElse(null),
+                        e.getValue().stream().map(DashboardService::receivedOn)
+                                .max(Comparator.naturalOrder()).orElse(null)))
                 .toList();
+    }
+
+    /**
+     * The calendar date a review was received.
+     *
+     * <p>UTC, because that is the zone the ingest wrote the value in — {@code DateParse
+     * .instantAtStartOfDay} pins the channel's calendar date to UTC midnight, so reading it back in
+     * UTC recovers that exact date and reading it in another zone would shift some rows by a day.
+     * Same rule as {@code ReviewIssueExtractionService.occurredOn}, so the negative roll-up and the
+     * issue evidence date the same review identically.
+     */
+    private static LocalDate receivedOn(Review review) {
+        return review.getReceivedAt().atOffset(ZoneOffset.UTC).toLocalDate();
     }
 }

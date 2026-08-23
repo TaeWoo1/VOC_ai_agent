@@ -532,6 +532,59 @@ class ReviewIssueMemoryTest {
         assertThat(summary.lastEvidenceOn()).isEqualTo(REF);
     }
 
+    /**
+     * <b>A product row is dated by its own evidence, never by the issue's.</b> The issue here spans
+     * four days; {@code p}'s two rows are the newest two and {@code q}'s single row is three days
+     * older, and the unattributed row is older still. Handing the issue's span down would make
+     * {@code q} look as recent as {@code p} — which is how "최근 부정적인 리뷰가 있는 상품" would be
+     * answered with a product whose last review is months old.
+     */
+    @Test
+    void eachProductRowCarriesTheSpanOfItsOwnEvidenceAndNotTheIssues() {
+        UUID p = UUID.randomUUID();
+        UUID q = UUID.randomUUID();
+        extraction.extract(reviewRated("배송이 늦었어요 1", REF, p, 1));
+        extraction.extract(reviewRated("배송이 늦었어요 2", REF.minusDays(1), p, 2));
+        extraction.extract(reviewRated("배송이 늦었어요 3", REF.minusDays(2), q, 1));
+        extraction.extract(reviewRated("배송이 늦었어요 4", REF.minusDays(3), null, 5));
+        ReviewIssue issue = issueByKey("배송:지연");
+
+        var summary = queries.evidenceSummary(org, issue.getId());
+        var first = summary.byProduct().get(0);
+        var second = summary.byProduct().get(1);
+
+        assertThat(first.productId()).isEqualTo(p);
+        assertThat(first.firstOccurredOn()).isEqualTo(REF.minusDays(1));
+        assertThat(first.lastOccurredOn()).isEqualTo(REF);
+
+        assertThat(second.productId()).isEqualTo(q);
+        assertThat(second.firstOccurredOn()).isEqualTo(REF.minusDays(2));
+        assertThat(second.lastOccurredOn()).isEqualTo(REF.minusDays(2));
+
+        // The issue is wider than either product, and the unattributed row is inside it and in
+        // neither. So no product row equals the issue's span — the borrowing this test forbids.
+        assertThat(summary.firstEvidenceOn()).isEqualTo(REF.minusDays(3));
+        assertThat(summary.byProduct()).noneMatch(
+                v -> v.firstOccurredOn().equals(summary.firstEvidenceOn()));
+    }
+
+    /** One product, no unattributed rows: the issue's span IS that product's, by arithmetic. */
+    @Test
+    void aSoleProductsSpanEqualsTheIssuesBecauseItOwnsEveryRow() {
+        UUID p = UUID.randomUUID();
+        extraction.extract(reviewRated("배송이 늦었어요 1", REF, p, 1));
+        extraction.extract(reviewRated("배송이 늦었어요 2", REF.minusDays(4), p, 2));
+        ReviewIssue issue = issueByKey("배송:지연");
+
+        var summary = queries.evidenceSummary(org, issue.getId());
+
+        assertThat(summary.unattributedEvidence()).isZero();
+        assertThat(summary.byProduct()).singleElement().satisfies(v -> {
+            assertThat(v.firstOccurredOn()).isEqualTo(summary.firstEvidenceOn());
+            assertThat(v.lastOccurredOn()).isEqualTo(summary.lastEvidenceOn());
+        });
+    }
+
     /** {@code trend} (issueView) carries the same signal as the corresponding list entry. */
     @Test
     void issueViewCarriesTheSameSignalAsTheListEntry() {

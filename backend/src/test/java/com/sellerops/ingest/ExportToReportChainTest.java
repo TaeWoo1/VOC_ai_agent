@@ -37,6 +37,7 @@ import com.sellerops.selleraccount.SellerAccountRepository;
 import com.sellerops.sync.SyncJobRepository;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.apache.poi.ss.usermodel.Row;
@@ -190,9 +191,12 @@ class ExportToReportChainTest {
         DashboardSummaryResponse summary = dashboard.summary(org);
         assertThat(summary.cards().negativeReviews()).isEqualTo(2);
         assertThat(summary.todoItems()).contains("부정 리뷰 2건을 확인하세요.");
+        // Identity, label, count and the rows' OWN span — the id is the product row the reviews were
+        // linked to, and the dates are the two negatives' receipt dates, not the read's.
         assertThat(summary.topProductIssues())
                 .singleElement()
-                .isEqualTo(new TopProductIssue(PRODUCT_MOLDING, "부정 리뷰", 2L));
+                .isEqualTo(new TopProductIssue(productIdBySku(SKU_MOLDING), PRODUCT_MOLDING,
+                        "부정 리뷰", 2L, LocalDate.of(2026, 1, 2), LocalDate.of(2026, 1, 3)));
     }
 
     @Test
@@ -229,7 +233,8 @@ class ExportToReportChainTest {
         ingest();
         assertThat(dashboard.summary(org).topProductIssues())
                 .singleElement()
-                .isEqualTo(new TopProductIssue(PRODUCT_MOLDING, "부정 리뷰", 2L));
+                .isEqualTo(new TopProductIssue(productIdBySku(SKU_MOLDING), PRODUCT_MOLDING,
+                        "부정 리뷰", 2L, LocalDate.of(2026, 1, 2), LocalDate.of(2026, 1, 3)));
         UUID cableProductId = productIdBySku(SKU_CABLE);
 
         // A later export: three NEW negatives on the 케이블 SKU, carrying a DIFFERENT 상품명
@@ -258,8 +263,19 @@ class ExportToReportChainTest {
         DashboardSummaryResponse summary = dashboard.summary(org);
         assertThat(summary.cards().negativeReviews()).isEqualTo(5);
         assertThat(summary.topProductIssues()).containsExactly(
-                new TopProductIssue(PRODUCT_CABLE, "부정 리뷰", 3L),
-                new TopProductIssue(PRODUCT_MOLDING, "부정 리뷰", 2L));
+                new TopProductIssue(cableProductId, PRODUCT_CABLE, "부정 리뷰", 3L,
+                        LocalDate.of(2026, 1, 5), LocalDate.of(2026, 1, 7)),
+                new TopProductIssue(productIdBySku(SKU_MOLDING), PRODUCT_MOLDING, "부정 리뷰", 2L,
+                        LocalDate.of(2026, 1, 2), LocalDate.of(2026, 1, 3)));
+
+        // <b>The rename is why the id has to be carried.</b> The 케이블 row is reported under its
+        // ORIGINAL name while three of its five reviews arrived under a different one; a consumer
+        // grouping these rows by name would have had two products here, and grouping the demo org's
+        // four same-named products by name would have had one. The id is the same product row the
+        // catalogue holds, so neither happens.
+        assertThat(summary.topProductIssues().get(0).productId()).isEqualTo(cableProductId);
+        assertThat(summary.topProductIssues()).extracting(TopProductIssue::productId)
+                .doesNotHaveDuplicates();
     }
 
     private IngestResult ingest() throws Exception {

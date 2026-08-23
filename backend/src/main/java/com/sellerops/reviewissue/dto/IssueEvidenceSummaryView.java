@@ -14,10 +14,13 @@ import java.util.List;
  * never needs them and this shape cannot carry them.
  *
  * @param totalEvidence all-time evidence unit count for the issue
- * @param byProduct attributed products largest-first; {@code unattributed} is reported separately
- *     rather than folded in, so a gap in product mapping can never masquerade as a product
+ * @param byProduct attributed products largest-first, each carrying the span of its OWN evidence
+ *     rows; {@code unattributed} is reported separately rather than folded in, so a gap in product
+ *     mapping can never masquerade as a product
  * @param unattributedEvidence evidence units whose review had no product mapping
  * @param ratingDistribution per-star counts (plus unrated); sums to {@code totalEvidence}
+ * @param firstEvidenceOn the ISSUE's span, over every product. A product row's own span lives on
+ *     that row ({@link IssueProductEvidenceView}) and is never taken from here.
  */
 public record IssueEvidenceSummaryView(long totalEvidence, List<IssueProductEvidenceView> byProduct,
                                        long unattributedEvidence,

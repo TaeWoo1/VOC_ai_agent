@@ -198,9 +198,15 @@ export interface DashboardCards {
 }
 
 export interface TopProductIssue {
-  productName: string;
+  /** Canonical product id — the identity. Two products may share a name; they never share this. */
+  productId: string;
+  /** The catalogue's name, or null when it holds none. Never a placeholder. */
+  productName: string | null;
   issueLabel: string;
   count: number;
+  /** The span of the negative reviews counted here — their own receipt dates, not the read's. */
+  firstNegativeOn: string | null;
+  lastNegativeOn: string | null;
 }
 
 export interface FeedItem {
