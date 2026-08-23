@@ -1743,7 +1743,7 @@ fence: finder는 **id만** 돌려주므로 product를 건네줄 수 없고, reso
 | 채널 / 계정 | COUPANG / canonical Demo Org 기존 계정 (`WING_DEFAULT_ACCOUNT_BINDING`) |
 | surface / operation | Coupang WING 상품평 / `COUPANG_WING_REVIEW_ACQUISITION` |
 | mode | **`READ_ONLY`** — WRITE 0, 쿠팡 화면에서 클릭·입력·전송 없음 |
-| 커밋 | **`9aefadd4`** (`WALKTHROUGH_GIT_COMMIT`, clean tree 필수) |
+| 커밋 | `WALKTHROUGH_GIT_COMMIT` = **실행 직전 HEAD의 short SHA**, clean tree 필수 (`verifyRepoIdentity`가 HEAD와 대조한다). 진단 코드 자체는 `9aefadd4` |
 | 범위 | **같은 3페이지**, 판매자가 직접 넘김 |
 | marketplace API 요청 | **0** — 화면 읽기이며 서명 호출이 아니다 |
 | 기대 저장 | **0건** (dedupe가 11건을 다시 걸러내고 11건은 계속 fail-closed) |
