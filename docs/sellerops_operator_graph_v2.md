@@ -85,6 +85,27 @@ test는 **그 잘못된 답을 만든 라이브 plan을 그대로 재생**한다
 **이 장치가 할 수 없는 것:** 새 근거를 가져오는 것. 오직 보류만 할 수 있고, 보류할 때는 어느 범위를
 증명하지 못했는지 답에 적는다.
 
+### 2.2 실패의 의미 — Specialist Failure Semantics (2026-08-23 추가)
+
+I3은 "근거 없이 단정하지 않는다"를 말하지만, **근거를 못 얻은 것과 데이터가 조용한 것을 구분하라고는
+말하지 않았다.** 2026-08-23 라이브에서 그 둘이 같은 화면이 됐다: `INQUIRY_OPS`가 anchor 없는
+`search_customer_memory` 호출로 400을 받아 예외가 나면서 **이미 성공한 두 read까지 함께 사라졌고**, run은
+`DONE` + findings 0으로 끝났다. 기록: `docs/agent_real_validation_v1.md` §3 Q5 · §10.
+
+| 규칙 | 내용 |
+|---|---|
+| tool 격리 | 실패한 read는 자기 evidence만 잃는다. 이미 성공한 read는 남고, 아직 안 한 read는 계속 실행된다. **선언된 의존**만 후속 단계를 멈출 수 있다 |
+| precondition | 백엔드가 거절할 호출은 **하지 않는다**. 백엔드를 느슨하게 만들지 않는다 — anchor 없는 customer-memory 검색은 org 전체 훑기이고, 400이 정답이다 |
+| specialist terminal | `OK` / **`PARTIAL`** / `FAILED`. PARTIAL의 부재가 Q5를 성공처럼 보이게 했다 |
+| run terminal | findings 0 + **의도적 skip이 아닌 실패**가 있으면 `FAILED`/`EVIDENCE_UNAVAILABLE`. read가 성공하고 비어 있었다면 `DONE` — 조용한 받은편지함은 참인 답이다 |
+| failure는 데이터 | `specialist · tool · category · statusCategory · recoverable`. **HTTP 숫자가 아니라 등급이고, 예외의 `message`는 읽지도 남기지도 않는다** |
+
+**강제 장치.** `src/operator/failure/SpecialistOutcome.ts` · `inquiryOps`/`reviewOps`의 read별 격리 ·
+`operatorRuntime`의 terminal 판정 · `specialistFailureSemantics.test.ts` 18건(red test는 그 답을 만든
+라이브 plan을 재생하고, fake가 백엔드와 같은 precondition을 강제한다).
+
+**이 장치도 새 근거를 만들지 못한다.** 할 수 있는 것은 잃지 않는 것과, 잃었을 때 그것을 말하는 것뿐이다.
+
 **I2의 정확한 범위** — 삭제 대상은 **자유 문장에 대한 결정론적 해석**이다. 닫힌 enum `intent`를
 검증하는 것(버튼이 보내는 값)은 해석이 아니라 **계약 검증**이며 §3의 Dashboard 레인에 속한다. 이
 구분을 흐리면 "버튼도 지웠다" 또는 "keyword 표를 intent 검증이라 부르고 남겼다" 둘 중 하나가 된다.

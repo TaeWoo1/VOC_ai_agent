@@ -459,3 +459,116 @@ REAL Demo Org · 마켓 접촉 0 · WRITE 0.
 부수적으로 확인된 것, 수정하지 않음: Q4의 상품 미해결 원인은 **C1**(`products.name`이 SKU 숫자)이다.
 사람이 읽는 이름은 `channel_products.channel_product_name`에만 있고 `resolve_product`는 그것을 보지
 않는다. 지금은 정직한 "찾지 못했습니다"로 끝나며, 이름 해석을 넓히는 것은 별도 결정이다.
+
+---
+
+## 10. Agent Specialist Failure Semantics v1 — A2 수정 결과 (2026-08-23)
+
+> §3·§4의 baseline 숫자는 이 절로도 바뀌지 않는다.
+
+### 10.1 무엇을 바꿨나
+
+세 가지가 각각 틀렸으므로 각각 고쳤다. 새 retrieval tool 0 · 새 capability 0 · **백엔드 완화 0** ·
+C1 미수정 · 기간 기본값 0 · dead tool routing 0 · planner 프롬프트 0 · UI 0.
+
+**① tool 실행 격리** — `agent-runtime/src/operator/failure/SpecialistOutcome.ts`.
+`attemptTool()`은 예외를 던지지 않고 결과를 돌려준다. 실패는 **닫힌 어휘의 행**이다:
+
+| 필드 | 값 |
+|---|---|
+| `specialist` · `tool` · `needId` | 무엇이 무엇을 하다 실패했는가 |
+| `category` | `ANCHOR_UNAVAILABLE` · `BAD_REQUEST` · `NOT_FOUND` · `UNAUTHORIZED` · `RATE_LIMITED` · `UPSTREAM_ERROR` · `TRANSPORT` · `TOOL_NOT_ALLOWED` · `BUDGET` · `UNKNOWN` |
+| `statusCategory` | `NONE` · `CLIENT_4XX` · `AUTH` · `SERVER_5XX` · `TRANSPORT` — **숫자가 아니라 등급** |
+| `recoverable` | 같은 호출이 나중에 성공할 수 있는가 (5xx·transport·429 = 예, 4xx·anchor·tool refusal = 아니오) |
+
+분류는 예외의 **형태만** 읽는다(`status`, `name`). **`message`는 읽지도 기록하지도 않는다** — 백엔드
+오류 메시지는 보낸 것을 되뱉을 가능성이 가장 큰 필드다. 적용: `INQUIRY_OPS`의 네 갈래 전부,
+`REVIEW_OPS`의 단일 read. `PRODUCT_OPS`는 `resolve_product → 나머지`라는 **선언된 의존**을 이미 자체
+처리하므로 그대로 두고, graph의 catch가 backstop으로 같은 구조화 행을 남긴다.
+
+**② anchor 없는 `search_customer_memory`는 호출하지 않는다** — 응답에서 배우지 않고 **호출 전에**
+확인한다. 백엔드 `CustomerMemoryController.search`는 그대로 엄격하다(anchor 없는 전역 검색 여전히 400).
+도달 가능한 anchor는 오늘 기준 **resolved product 하나뿐**이며, 셀러의 문장은 anchor가 아니다 — 고객
+문장은 질의어가 될 수 없고, 그래서 그 엔드포인트에는 자유텍스트 파라미터가 없다. 없으면 need는
+`UNSATISFIABLE` + 사유, 실패는 `ANCHOR_UNAVAILABLE`로 기록된다. **예산은 실제로 일어난 호출에만
+청구한다**(라이브에서 하지 않은 호출 3건을 청구하던 것을 같이 고쳤다).
+
+**③ failure semantics**
+
+| 상황 | specialist | run |
+|---|---|---|
+| 실패 0 | `OK` | — |
+| 일부 성공 + 일부 실패 | **`PARTIAL`** — 성공 evidence/finding 유지, 실패 사유 노출 | — |
+| 성공 0 + 실패 있음 | `FAILED` | — |
+| findings 0 **+ ANCHOR_UNAVAILABLE 아닌 실패 존재** | — | **`FAILED` / `EVIDENCE_UNAVAILABLE`** |
+| findings 0 + 의도적 skip만 | — | `DONE` (사유는 답에 표시) |
+
+**의도적 skip은 시스템 실패가 아니다.** "조회할 수 없다는 것을 알고 말했다"와 "답했어야 할 조회가
+실패했다"는 반대 사실이고, 빈 답 카드로는 구분되지 않는다. 읽기가 **성공하고 비어 있던** run은 여전히
+`DONE`이다 — 조용한 받은편지함은 참인 답이기 때문이다.
+
+**④ observability** — `operator_specialist_failed`가 이름만이 아니라
+`specialist · tool · category · statusCategory · recoverable`를 남긴다. `inquiry_ops`는
+`succeeded · failed · terminal`을, `operator_compose`는 `specialistsFailed · specialistsPartial`을 남긴다.
+**raw payload · credential · 고객 문장 · HTTP 숫자 · id는 로그에 없다.**
+
+**⑤ 초안 capability 한계 표시** — Operator 카탈로그는 구조적으로 READ 전용이므로 이 레인에서 답변
+초안은 만들 수 없다(초안은 `intent` 레인의 `INQUIRY_DRAFT` 서브그래프 소관). 그 사실을 최종 답에 한
+문장으로 적는다. 이것은 **capability 고지이지 routing이 아니다** — plan·tool·specialist·status 어느 것도
+선택하지 않으며, 자유문장 해석을 금지하는 fence의 대상(`parseGoal`)이 아니다. **초안 capability 자체는
+만들지 않았다.**
+
+### 10.2 회귀 (offline)
+
+`agent-runtime/test/operator/specialistFailureSemantics.test.ts` — **18 tests**.
+red test는 **2026-08-23 라이브 plan(`PRIORITIZE_AND_DRAFT_PLAN`)을 재생**하고,
+`FakeOperatorSpringClient`가 **실제 백엔드와 같은 precondition을 강제**한다(anchor 없으면 400). 즉 이
+suite는 옛 코드에서 라이브와 **같은 이유로** 빨개진다 — double에게 실패하라고 시켜서가 아니다.
+
+agent-runtime 전체 **278 passed · 23 skipped · 0 failed**.
+
+### 10.3 라이브 재실행 — 같은 prompt 2회
+
+「답변이 필요한 문의를 우선순위대로 정리하고 답변 초안을 만들어줘.」 · 마켓 접촉 0 · WRITE 0.
+
+| 항목 | run c | run d |
+|---|---|---|
+| plan | LLM · needs 5 · `INQUIRY_OPS` | LLM · needs 4 · `INQUIRY_OPS` |
+| tool 실행 | `get_today_inbox` ×2 **성공** | `get_today_inbox` ×1 **성공** |
+| **skipped tool** | `search_customer_memory` ×3 — `ANCHOR_UNAVAILABLE` | `search_customer_memory` ×3 — `ANCHOR_UNAVAILABLE` |
+| tool failures | 0 (hard) | 0 (hard) |
+| **preserved evidence** | `INBOX_COUNT` ×2 | `INBOX_COUNT` ×1 |
+| specialist terminal | **`PARTIAL`** | **`PARTIAL`** |
+| run terminal | `DONE` | `DONE` |
+| findings | 1 — "답변이 필요한 문의가 69건 있습니다." | 0 |
+| needs | 2 `SATISFIED` / 3 `UNSATISFIABLE`+사유 | 4 `UNSATISFIABLE`+사유 |
+| unsupported claims | 0 | 0 |
+| WRITE | 0 | 0 |
+| budget toolCalls | 2 | 1 |
+
+**백엔드 `/api/customer-memory/search` 요청 0건** — 400이 발생한 것이 아니라 애초에 부르지 않았다.
+
+두 run 모두 최종 답에 세 문장이 함께 나온다: 과거 사례는 대상을 특정해야 찾을 수 있다는 사실 · 초안은
+이 창구에서 만들지 않는다는 lane 한계 · (run c) 근거 미확인 1건 제외.
+
+**baseline 대비:** 성공한 read가 예외에 딸려 사라지는 일 **소멸**. `DONE`+findings 0에 숨어 있던
+specialist 예외 **소멸** — 이제 `specialistOutcomes`가 항상 terminal을 보고한다. 요청의 절반(초안)이
+조용히 누락되던 것도 **명시**된다.
+
+### 10.4 이번 회차에서 새로 관측된 것 (수정하지 않음)
+
+**run d에서 §9의 temporal 축이 라이브에서 처음 발화했다.** planner가 "오늘"을 `PERIOD`로 선언했고,
+`INBOX_COUNT`는 `observedOn`이 `null`이라 `TEMPORAL_UNPROVEN`으로 거절돼 finding이 0이 됐다. 계약대로
+동작한 것이지만, **미답변 총계는 실제로 "지금" 값이므로 참인 문장이 보류된 false negative**다. 원인은
+`get_today_inbox` evidence에 자기 시각이 찍히지 않는 것이고, 고치는 방법은 기간 기본값을 만드는 것이
+아니라 그 evidence에 관측 시각을 기록하는 것이다. **이번 package 범위 밖이라 손대지 않고 기록만 한다.**
+같은 질문이 run c에서는 finding 1건을 냈다 — 즉 plan 변동에 따라 답이 갈린다.
+
+### 10.5 판정
+
+| 결함 | 상태 |
+|---|---|
+| **A2** — anchor 없는 호출로 `INQUIRY_OPS` 전체 소실 + `DONE`/0 | **CLOSED** — 라이브 2회 + 회귀 18건 |
+| A1 · A3 | CLOSED (§9) |
+| A4 · A5 · A6 · B · C · D | backlog 유지 |
+| **신규** — `INBOX_COUNT`에 관측 시각 부재로 인한 temporal false negative | backlog (§10.4) |
