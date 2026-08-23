@@ -1887,3 +1887,66 @@ REAL 상품평이 **26**인데 화면에는 **23**건뿐이다.
 
 **일반화된 교훈**: resolution 규칙을 바꾸면 그 규칙이 들어간 dedupe 키가 전부 무효가 된다. 다음에
 resolver를 바꿀 때는 **재귀속 마이그레이션이 계약 변경의 일부**여야 한다.
+
+---
+
+### 5p. 재귀속 repair — **bounded cleanup 완료 · Coupang REVEIW 23/23** (2026-08-23 16:0x KST)
+
+§5o가 남긴 stale row 3건을 제품 결정 (a)에 따라 정리했다. **marketplace 접촉 0 · 화면 재독 0**
+— 옵션ID-first resolver의 라이브 멱등은 이미 `stored=0 skipped=23 failed=0`으로 증명돼 있다.
+
+#### 삭제 전에 3쌍을 증명했다 — 조건 미달이면 트랜잭션이 스스로 멈추게 했다
+
+repair는 하나의 트랜잭션 안에서 **여섯 개의 단정을 먼저 통과**해야 지워지도록 썼고,
+어느 하나라도 어긋나면 `raise exception`으로 전부 롤백된다. fuzzy matching은 없다 — 전부 명시적 id다.
+
+| # | 단정 | 결과 |
+|---|---|---|
+| 1 | 각 stale row에 **같은 등록일·별점·옵션ID·본문 md5·미디어 수**를 가진 correct twin이 있다 | 3/3 |
+| 2 | correct row는 **정확한 옵션ID resolution**이다 (`product_variants`가 그 product를 가리킨다) | 3/3 |
+| 3 | stale row는 옵션ID resolution이 **아니다** | 0/3 |
+| 4 | stale row를 가리키는 FK 참조가 **어디에도 없다** (review_triage·reply 7종·issue evidence·locate 등 **15개 테이블 전수**) | 0 |
+| 5 | correct row 쪽에 item-analysis·CustomerMemory가 **이미 있다** | 3 · 3 |
+| 6 | 삭제 행 수가 정확히 3·3·3이고, correct row 3건은 그대로다 | ✔ |
+
+증거 요약: 옵션 `88377435992`는 org+COUPANG 안에서 **variant 정확히 1건** → product `14632159502`.
+옛 귀속 product `14442591208`은 그 옵션을 **0건** 갖고 있고, 대신 노출상품ID alias **`116467399`**을
+들고 있다 — §5k의 첫 sitting이 `14442591208 | 116467399 | 3`으로 기록한 바로 그 3건이다. 즉 옛 귀속은
+**이동해 버린 노출상품ID가 만든 오답**임이 문서로도 대조된다.
+
+지운 행은 CSV로 백업했다(세션 scratchpad, 저장소 밖).
+
+#### 결과
+
+| 검증 | 결과 |
+|---|---|
+| Coupang REAL 상품평 | **26 → 23** — 화면 23건과 1:1 |
+| attribution | **23/23** (product 10개) |
+| 중복 source review | **0** |
+| stale downstream | item-analysis **−3** · CustomerMemory **−3** (4,424→4,421 · 7,757→7,754) |
+| correct downstream | **유지** |
+| orphan | review_issue_evidence · unknown_units · item-analysis · CustomerMemory **전부 0** |
+| ReviewIssues 정합성 | issue **19** · evidence **85** · 증거 0개인 issue **0** |
+| product · listing · variant | **308 · 71 · 405 불변** |
+| synthetic | 상품평 22 · 리스팅 3 · product 8 **불변** |
+| marketplace WRITE | **0** |
+
+#### 일반 원칙 (이번에 값을 치르고 배운 것)
+
+> **resolver semantics가 바뀌고 dedupe identity가 resolved entity에 의존한다면,
+> re-attribution migration/repair는 그 변경 패키지의 일부다.**
+
+content hash에 resolve된 product id가 들어가는 한, resolution 규칙을 바꾸는 순간 **기존에 저장된 모든
+행의 해시가 무효**가 된다. 다음 수집이 그것들을 새 해시로 다시 저장하고, 옛 행은 옛 귀속에 남는다.
+계약을 바꾸는 PR은 그 재귀속까지 함께 들고 와야 한다.
+
+#### 판정 — **Coupang Demo Spine = `COMPLETE`**
+
+PRODUCT · ORDER_SUMMARY · INQUIRY · REVIEW 네 capability가 canonical Demo Org의 실계정 실데이터로
+라이브 증명됐고, REVIEW는 **23/23 attribution · 멱등 · 신규 product 생성 0 · WRITE 0**으로 닫힌다.
+**여기서 Coupang connector를 더 확장하지 않는다.** 다음은 Cafe24 + NAVER + Coupang의 REAL 데이터를
+대상으로 한 **Agent 제품 검증**이다.
+
+backlog 유지(이번 흐름에서 손대지 않음): `statusName` 68/68 `UNKNOWN` · DEMO_SEED `/knowledge`
+500-instead-of-404 · 광고 IP drift · sync request instrumentation · UI polish ·
+CLI 창 닫힘 silent-loss · 걷기 exit code 0 · `external_display_product_id` 단일값(alias history 미도입).
