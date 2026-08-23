@@ -128,6 +128,7 @@ const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
   PRODUCT_LISTING: "DETAIL",
   PRODUCT_VARIANT: "DETAIL",
   PRODUCT_KNOWLEDGE_GAP: "GAP",
+  GROUPING_GAP: "GAP",
 };
 
 /**
@@ -234,16 +235,29 @@ export function needScopeOf(
     entity,
     productIds: resolved.filter((r) => r.kind === "PRODUCT").map((r) => r.id),
     channelCode: channelMention ? normalizeChannel(channelMention) : null,
-    temporal: temporalDemandOf(
-      need.kind,
-      // Every PERIOD mention, whatever its role. The role gates the ENTITY axis — which thing a claim
-      // is about — and time is not an identity: "최근" names no period instance and still means the
-      // seller asked about a span. A4's `resolveScope` reads PERIOD the same way, and the two must not
-      // disagree about whether a period was named.
-      mentions.some((m) => m.kind === "PERIOD") || resolved.some((r) => r.kind === "PERIOD"),
-    ),
+    temporal: temporalDemandOf(need.kind, periodNamedIn(plan, resolved)),
     granularities: fromPlan.length > 0 ? fromPlan : KIND_FLOOR[need.kind] ?? [],
   };
+}
+
+/**
+ * Did the seller name a period at all?
+ *
+ * <b>Every PERIOD mention counts, whatever its role.</b> The role gates the ENTITY axis — which thing a
+ * claim is about — and time is not an identity: "최근" names no period instance and still means the
+ * seller asked about a span. A4's `resolveScope` reads PERIOD the same way, and the two must not
+ * disagree about whether a period was named.
+ *
+ * Exported because a specialist has to be able to say what it could NOT date. It is the same question
+ * the gate asks, asked once — a specialist deciding for itself whether a period was named would be a
+ * second reading of the same plan.
+ */
+export function periodNamedIn(
+  plan: InvestigationPlan,
+  resolved: readonly ResolvedEntity[] = plan.entities.resolved,
+): boolean {
+  return plan.entities.unresolved.some((m) => m.kind === "PERIOD")
+    || resolved.some((r) => r.kind === "PERIOD");
 }
 
 /**

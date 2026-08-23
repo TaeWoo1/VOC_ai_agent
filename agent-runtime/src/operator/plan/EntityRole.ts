@@ -119,7 +119,7 @@ const BARE = new Set(BARE_PREDICATES);
  *     deliberately does not branch on it (see {@link CATEGORY_HEADS}).
  */
 export function entityRoleOf(kind: EntityKind, mention: string): EntityRole {
-  const tokens = mention.trim().toLowerCase().split(/[\s,·/]+/).filter((t) => t.length > 0);
+  const tokens = tokensOf(mention);
   if (tokens.length === 0) {
     return "INSTANCE";
   }
@@ -179,6 +179,65 @@ export function namesInstance(
 ): boolean {
   return plan.entities.unresolved.some((e) => kinds.includes(e.kind) && isInstance(e))
     || resolved.some((r) => kinds.includes(r.kind));
+}
+
+/**
+ * The particles that make a head noun the ANSWER the seller is asking for, rather than a word
+ * qualifying something they already named.
+ *
+ * <b>This is the whole difference between "상품별 문제" and "판도리 종이컵 수거함 상품의 문제".</b> The
+ * same head noun appears in both; in the first it names the axis, in the second it hangs off a product
+ * the seller has already identified. Korean marks that difference with the particle, so the particle is
+ * what is read — and the genitive 의 and the locative 에 are deliberately absent, which is why
+ * "상품에 문제 있어?" still asks which product rather than answering about all of them.
+ */
+const AXIS_PARTICLES: readonly string[] = ["별", "별로", "이", "가", "을", "를", "은", "는", "도", "들"];
+
+/**
+ * Does this text contain a word naming the KIND {@code kind} — "상품", "문의", "리뷰"?
+ *
+ * <b>Per-kind here, pooled in {@link entityRoleOf}, and the difference is deliberate.</b> The role
+ * question is "did the seller name one thing or a kind of thing", and the planner's `kind` field was
+ * wrong in both live defects, so it is not trusted there. This question is "WHICH axis" — the kind IS
+ * the answer, so it must be asked per kind. Same table either way: there is exactly one.
+ */
+export function namesCategoryHead(kind: EntityKind, text: string): boolean {
+  const heads = new Set<string>(CATEGORY_HEADS[kind]);
+  for (const token of tokensOf(text)) {
+    const words = splitCompound(token) ?? splitCompound(stripSuffix(token));
+    if (words?.some((w) => heads.has(w))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Does the seller's own sentence ask for the {@code kind} axis — "상품별", "…있는 상품을"?
+ *
+ * Stricter than {@link namesCategoryHead} by exactly one thing: the head must wear an
+ * {@link AXIS_PARTICLES axis particle}. A bare head, a genitive or a locative is not an axis request,
+ * and the failure direction is toward NOT grouping — an answer that groups when nobody asked has
+ * changed the question.
+ */
+export function asksForAxis(kind: EntityKind, text: string): boolean {
+  const heads = CATEGORY_HEADS[kind];
+  for (const token of tokensOf(text)) {
+    for (const head of heads) {
+      if (!token.startsWith(head) || token.length === head.length) {
+        continue;
+      }
+      if (AXIS_PARTICLES.includes(token.slice(head.length))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** The tokens of a phrase, lowercased. One tokenizer, so a mention and a goal are read the same way. */
+function tokensOf(text: string): string[] {
+  return text.trim().toLowerCase().split(/[\s,·/]+/).filter((t) => t.length > 0);
 }
 
 /**

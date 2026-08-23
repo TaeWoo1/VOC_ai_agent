@@ -593,6 +593,71 @@ export const RECORDED_PLANS: Record<string, AgentPlanView> = {
     HUMAN_PRODUCT_NAME_PLAN,
 };
 
+/**
+ * A product-axis question with no period in it — the grouped path with nothing else in the way.
+ *
+ * <b>Authored, and marked as such.</b> Every live sample of the canonical Q2 carries a `PERIOD`
+ * mention ("최근", 3/3 on 2026-08-24), which correctly puts the run under `PERIOD_EVENTS` and withholds
+ * every grouped row whose dates cannot be proven. That is the honest outcome and it is asserted
+ * separately; this plan is what the SAME machinery does when the seller did not ask about a period, so
+ * the grouping itself can be tested without the temporal axis deciding the result.
+ */
+export const GROUPED_NO_PERIOD_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "상품별로 리뷰 문제가 있는 상품을 알고 싶다",
+  unresolvedEntities: [{ kind: "PRODUCT", mention: "상품별" }],
+  informationNeeds: [
+    { id: "n1", question: "어느 상품에 리뷰 문제 근거가 몰려 있는가", kind: "REVIEW_SIGNAL",
+      why: "상품을 지목하려면 귀속이 필요하다", required: true },
+  ],
+  specialists: ["REVIEW_OPS"],
+  tools: [],
+  retrievalOrder: ["n1"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 12,
+  stopWhenEnough: null,
+  clarificationNeeded: false,
+  clarificationReason: null,
+  rationale: "상품 축으로 리뷰 문제를 본다",
+  providerVersion: AUTHORED,
+};
+
+/**
+ * The product axis asked of a need that cannot produce it — "상품별 미답변 문의를 알려줘".
+ *
+ * Authored: no live sample of this sentence exists yet. It is the shape the grouping matrix has to
+ * answer honestly, and the honest answer is that the queue rows carry no product.
+ */
+export const GROUPED_INQUIRY_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "상품별 미답변 문의를 알고 싶다",
+  unresolvedEntities: [{ kind: "PRODUCT", mention: "상품별" }],
+  informationNeeds: [
+    { id: "n1", question: "상품별 미답변 문의가 얼마나 있는가", kind: "INQUIRY_VOLUME",
+      why: "어느 상품이 밀려 있는지가 질문이다", required: true },
+  ],
+  specialists: ["INQUIRY_OPS"],
+  tools: [],
+  retrievalOrder: ["n1"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 6,
+  stopWhenEnough: null,
+  clarificationNeeded: false,
+  clarificationReason: null,
+  rationale: "상품 축으로 미답변 문의를 본다",
+  providerVersion: AUTHORED,
+};
+
 /* ───────────────────── Repaired plans — the A8 second answer (2026-08-23) ───────────────────── */
 
 /**

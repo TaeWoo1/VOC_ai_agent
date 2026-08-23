@@ -43,7 +43,17 @@ export type ToolPrecondition =
   /** A product this run RESOLVED. Never a mention, never a planner-supplied id. */
   | "RESOLVED_PRODUCT"
   /** An issue id from a list this run already read. */
-  | "ISSUE_ID";
+  | "ISSUE_ID"
+  /**
+   * The run is answering on the product axis (`group/ProductGrouping.ts`).
+   *
+   * <b>Not a weaker form of `RESOLVED_PRODUCT` — a different question.</b> The attribution path asks
+   * "how many of this issue's rows are THIS product's" and needs the product first. The grouped path
+   * asks "whose rows are these" and needs no product at all: it learns every id from the answer. Both
+   * are the same read; declaring them as one row with the weaker precondition would say a product-scoped
+   * claim can be made without a product, which is A1.
+   */
+  | "PRODUCT_GROUPING";
 
 export interface ToolCapability {
   readonly specialist: SpecialistName;
@@ -109,10 +119,31 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     requires: ["RESOLVED_PRODUCT", "ISSUE_ID"],
   },
 
+  {
+    // <b>The same read again, from the axis side.</b> With no product resolved this call cannot be
+    // "which of these are mine" — it is "whose are these", and its answer names every product behind
+    // the issue. That is what makes a product-axis answer possible without a resolver, which is the
+    // property C5 requires: the word "상품" is never looked up.
+    specialist: "REVIEW_OPS",
+    tool: OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY,
+    needKinds: ["REVIEW_SIGNAL"],
+    requires: ["PRODUCT_GROUPING", "ISSUE_ID"],
+  },
+
   // ── InquiryOps — the queue, the repeats, and what was answered before.
   {
     specialist: "INQUIRY_OPS",
     tool: OPERATOR_TOOL.GET_TODAY_INBOX,
+    needKinds: ["INQUIRY_VOLUME"],
+    requires: ["NONE"],
+  },
+  {
+    // <b>The list behind the count.</b> `get_today_inbox` answers "how many"; a seller who asked for a
+    // priority order needs "which ones, and how long have they waited". The rows carry a work-item id
+    // and a receipt time and no customer text — the queue endpoint is sanitized by construction — so
+    // the order is the rows' own dates rather than a ranking this runtime invented.
+    specialist: "INQUIRY_OPS",
+    tool: OPERATOR_TOOL.SEARCH_UNANSWERED_INQUIRIES,
     needKinds: ["INQUIRY_VOLUME"],
     requires: ["NONE"],
   },
@@ -149,7 +180,12 @@ export function reachableToolNames(): string[] {
  * nothing of its own, which an empty allow-list makes unbreakable rather than merely documented.
  */
 export function toolsFor(specialist: SpecialistName): readonly string[] {
-  return TOOL_CAPABILITIES.filter((c) => c.specialist === specialist).map((c) => c.tool);
+  // Deduped: one tool may have two rows because it has two execution PATHS with different
+  // preconditions (`get_review_issue_evidence_summary`, attribution and grouping). Two paths are still
+  // one authorization — the allow-list answers "may this name be called", not "why".
+  return [...new Set(
+    TOOL_CAPABILITIES.filter((c) => c.specialist === specialist).map((c) => c.tool),
+  )];
 }
 
 /** Catalogue names with no execution path — what must NOT be advertised. */
@@ -175,4 +211,104 @@ export function productResolvingSpecialists(): SpecialistName[] {
   return [...new Set(
     TOOL_CAPABILITIES.filter((c) => c.requires.includes("PRODUCT_MENTION")).map((c) => c.specialist),
   )];
+}
+
+/* ─────────────────────────── The grouping axis (Grouped Product Answers v1) ─────────────────────── */
+
+/**
+ * Whether a need can be answered along a grouping dimension, and when not, WHY not.
+ *
+ * <b>Closed vocabulary, because the two "no"s are different facts and the seller deserves the right
+ * one.</b> "이 데이터에는 상품 연결이 없다" is a statement about the model; "상품 연결은 있지만 그것을
+ * 묶어 주는 조회가 없다" is a statement about the reads. Collapsing them into "할 수 없습니다" would hide
+ * which one a future package has to fix.
+ */
+export type GroupingSupport =
+  /** A read exists that returns this need's evidence already attributed per product. */
+  | "SUPPORTED"
+  /** The rows behind this need carry no product link at all — nothing could group them. */
+  | "NO_PRODUCT_ATTRIBUTION"
+  /** The rows ARE attributed, but no read returns them grouped, and building one is new retrieval. */
+  | "NO_GROUPED_READ";
+
+export interface GroupingCapability {
+  readonly needKind: NeedKind;
+  readonly dimension: "PRODUCT";
+  readonly support: GroupingSupport;
+  /** The reads that produce the grouped evidence. Empty when nothing does. */
+  readonly via: readonly OperatorToolName[];
+  /** Where the verdict comes from, precise enough to re-check. Never a summary of it. */
+  readonly why: string;
+}
+
+/**
+ * The grouping matrix — one row per (need kind × dimension) the runtime may be asked for.
+ *
+ * <b>Every row is an audit finding about code that exists, not a plan.</b> A need kind with no row is
+ * not grouped, and {@link groupingSupportOf} says so rather than guessing; the runtime never invents a
+ * dimension for a need the matrix does not name.
+ */
+export const GROUPING_CAPABILITIES: readonly GroupingCapability[] = [
+  {
+    needKind: "REVIEW_SIGNAL",
+    dimension: "PRODUCT",
+    support: "SUPPORTED",
+    via: [OPERATOR_TOOL.SEARCH_REVIEW_ISSUES, OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY],
+    // `IssueEvidenceSummaryView.byProduct` is a per-product tally of the issue's OWN evidence rows,
+    // carrying the canonical product id. It is the only read in the system that attributes review
+    // evidence to products without being told which product to look for.
+    why: "review-issues/{id}/evidence-summary:byProduct[productId,evidenceCount]",
+  },
+  {
+    needKind: "INQUIRY_VOLUME",
+    dimension: "PRODUCT",
+    support: "NO_GROUPED_READ",
+    via: [],
+    // `Inquiry.productId` exists and the backend counts by it — but only for ONE product at a time
+    // (`ProductSignalsView.volume.unansweredInquiries`), which needs the product named first. The queue
+    // page (`InquiryQueueItem`) carries workItem / channel / phase / status / title / receivedAt and no
+    // product at all, so the rows a grouped answer would have to group cannot be grouped.
+    why: "inquiry/queue/dto/InquiryQueueItem: no productId; product counts are per-product only",
+  },
+  {
+    needKind: "REPEAT_PATTERN",
+    dimension: "PRODUCT",
+    support: "NO_PRODUCT_ATTRIBUTION",
+    via: [],
+    // `RepeatedInquiryView` is an axis/key tally with no product field anywhere in it. A repeat is a
+    // cluster of inquiries by signature, and the cluster never carried the product.
+    why: "customer-memory/RepeatedInquiryView: axis,key,occurrences — no productId",
+  },
+];
+
+/**
+ * Can this need be answered along this dimension?
+ *
+ * An undeclared pair is `NO_GROUPED_READ`: nothing groups what nobody declared, and the honest failure
+ * for a missing declaration is the same as for a missing read.
+ */
+export function groupingSupportOf(needKind: NeedKind, dimension: "PRODUCT"): GroupingSupport {
+  return GROUPING_CAPABILITIES.find((c) => c.needKind === needKind && c.dimension === dimension)
+    ?.support ?? "NO_GROUPED_READ";
+}
+
+/**
+ * The seller-facing sentence for an unavailable axis. Closed vocabulary in, plain Korean out.
+ *
+ * `hasRows` exists because "아래 수치는 전체 기준입니다" is a promise about numbers that follow, and a
+ * read that came back empty has none — live 2026-08-24, Q3 said exactly that with nothing below it.
+ */
+export function groupingLimitSentence(
+  needKind: NeedKind, support: GroupingSupport, hasRows = true,
+): string | null {
+  if (support === "SUPPORTED") {
+    return null;
+  }
+  const subject = needKind === "REPEAT_PATTERN" ? "반복 문의 기록"
+    : needKind === "INQUIRY_VOLUME" ? "미답변 문의 목록"
+      : "이 정보";
+  const cause = support === "NO_PRODUCT_ATTRIBUTION"
+    ? `${subject}에는 상품 정보가 없어 상품별로 나눌 수 없습니다.`
+    : `${subject}은 상품별로 모아 볼 수 있는 조회가 아직 없어 상품별로 나누지 못했습니다.`;
+  return `${cause} ${hasRows ? "아래 수치는 전체 기준입니다." : "상품별로는 지금 답할 수 없습니다."}`;
 }

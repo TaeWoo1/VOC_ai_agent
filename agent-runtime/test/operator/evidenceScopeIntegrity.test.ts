@@ -28,6 +28,7 @@ import type { InvestigationPlan, InformationNeed } from "../../src/operator/plan
 import {
   checkEvidence, evidenceScopeOf, granularityOf, needScopeOf, partitionEvidence,
 } from "../../src/operator/scope/EvidenceScope";
+import type { NeedScope } from "../../src/operator/scope/EvidenceScope";
 import { RuleEvidenceJudge } from "../../src/operator/judge/EvidenceJudge";
 import { mentionOf } from "../../src/operator/plan/EntityRole";
 
@@ -129,13 +130,35 @@ describe("Q4 regression — a product question is never answered with the org's 
 // --------------------------------------------------------------------------- Q1 granularity
 
 describe("Q1 regression — a count does not answer a need that asked for rows", () => {
-  it("satisfies the count need and refuses the list need on the same evidence", async () => {
+  it("answers the list need with rows, and never with the count", async () => {
     const answer = done(await build().run("q1-red", { text: LIST_GOAL }));
     const byId = new Map(answer.needs.map((n) => [n.id, n]));
+    const kinds = new Map(answer.evidence.map((e) => [e.evidenceId, e.kind]));
     // n1 asked for a total and a total is what it got.
     expect(byId.get("n1")?.status).toBe("SATISFIED");
-    // n2 asked for the first page of rows. The same 69 was offered to it live, and marked SATISFIED.
-    expect(byId.get("n2")?.status).not.toBe("SATISFIED");
+    // <b>n2 asked for the first page of rows.</b> Live 2026-08-23 the same 69 was offered to it and
+    // marked SATISFIED — a count answering a list question, which the granularity axis then refused
+    // (the original red case, still asserted below). Since Grouped Product Answers v1 the queue read
+    // exists, so the need is answered — by ROWS. The axis is unchanged; what changed is that there is
+    // finally something of the right shape to accept.
+    const n2 = byId.get("n2")!;
+    expect(n2.evidenceIds.length).toBeGreaterThan(0);
+    for (const id of n2.evidenceIds) {
+      expect(kinds.get(id), "the list need rests on rows, never on the org count").toBe("INQUIRY");
+    }
+  });
+
+  it("still refuses the count for the list need when only the count was read", async () => {
+    // The red case as a unit, so it survives whatever the queue read can or cannot do: an INBOX_COUNT
+    // offered to a need whose plan declared it wants `INQUIRY` rows is a granularity mismatch.
+    const listNeed: NeedScope = {
+      needId: "n2", entity: "ORG", productIds: [], channelCode: null, temporal: "NONE",
+      granularities: ["DETAIL"],
+    };
+    expect(checkEvidence(listNeed, ref({ kind: "INBOX_COUNT", locator: { count: 69 } })))
+      .toBe("GRANULARITY_MISMATCH");
+    expect(checkEvidence(listNeed, ref({ kind: "INQUIRY", locator: { workItemId: "w-1" } })))
+      .toBeNull();
   });
 
   it("every surviving finding cites only evidence of an acceptable shape", async () => {

@@ -20,15 +20,27 @@ import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorSt
 import type { NeedState } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import type { SpecialistInput } from "./specialistInput";
-import type { CustomerMemorySearch, InboxSummary, RepeatedInquiry } from "../../spring/types";
+import type {
+  CustomerMemorySearch, InboxSummary, InquiryQueueResponse, RepeatedInquiry,
+} from "../../spring/types";
 import { attemptTool, skippedTool, terminalOf } from "../failure/SpecialistOutcome";
-import { eventOn, eventRange } from "../scope/EvidenceTime";
+import { eventOn, eventRange, observationDate } from "../scope/EvidenceTime";
+import { groupingLimitSentence, groupingSupportOf } from "../tools/ToolReachability";
 import { REPEAT_WINDOW_DAYS } from "../defaults/OperationalDefaults";
 import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { log } from "../../log";
 
 /** Where the POLICY answer comes from — a store that does not exist, named honestly. Not a tool. */
 const POLICY_STORE = "policy-store";
+
+/**
+ * How much of the queue one read takes, and what counts as having waited.
+ *
+ * The page cap is the endpoint's own maximum; asking for it means a demo-sized queue comes back whole
+ * and says so, and a large one comes back truncated and says that instead.
+ */
+const QUEUE_PAGE = 100;
+const WAITING_DAYS = 30;
 
 /** The need kinds this specialist answers. */
 export const INQUIRY_NEEDS = ["INQUIRY_VOLUME", "CUSTOMER_HISTORY", "REPEAT_PATTERN", "POLICY"] as const;
@@ -47,6 +59,10 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
   // because an empty answer from a working source is a fact, not a failure.
   const failures: ToolFailure[] = [];
   let succeeded = 0;
+  // One queue read per RUN, not per need. A plan may declare two INQUIRY_VOLUME needs — "총 몇 건" and
+  // "첫 페이지 목록" are a real decomposition and the live planner writes it — and they are answered by
+  // the same page. Reading it twice would buy the same rows twice and print the same sentence twice.
+  const queue: { read: QueueRead | null } = { read: null };
 
   for (const need of input.needs) {
     if (need.kind === "INQUIRY_VOLUME") {
@@ -108,10 +124,63 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
           surfaceLink: "/inquiries?state=NEEDS_REPLY",
           needId: need.id,
         });
-        needStates.push({ id: need.id, status: "SATISFIED", evidenceIds: [ref.evidenceId] });
       } else {
         notes.push("답변이 필요한 문의는 없습니다.");
-        needStates.push({ id: need.id, status: "SATISFIED", evidenceIds: [ref.evidenceId] });
+      }
+
+      // <b>A count is not a priority order.</b> "우선순위대로 정리해줘" asked which ones to do first, and
+      // the total answers a different question. The queue page carries a work-item id and a receipt
+      // time per row — and no customer text, by the endpoint's own construction — so the run can order
+      // by how long each has waited, which is a basis the rows themselves prove. Anything else would be
+      // a ranking this runtime invented (§4 of the package: no arbitrary ranking).
+      const first = queue.read == null;
+      const queued = queue.read ?? (queue.read = await readQueue(input, need.id, inbox.unansweredInquiries));
+      if (first) {
+        refs.push(...queued.evidence);
+        findings.push(...queued.findings);
+        notes.push(...queued.notes);
+        failures.push(...queued.failures);
+        if (queued.evidence.length > 0) {
+          succeeded += 1;
+        }
+      }
+      // Settled by everything that answered it — the count and, when it ran, the queue behind it. A
+      // need state that named only the count would leave the priority sentences citing evidence the
+      // need does not admit to resting on.
+      needStates.push({
+        id: need.id,
+        status: "SATISFIED",
+        evidenceIds: [ref.evidenceId, ...queued.evidence.map((e) => e.evidenceId)],
+      });
+
+      // The axis, when one was asked for. `Inquiry.productId` exists and the backend counts by it —
+      // but only for a product already named, and the queue row carries no product at all. So the
+      // limit is stated instead of being worked around, and the total is labelled as a total.
+      if (input.grouping === "PRODUCT") {
+        const limit = groupingLimitSentence(need.kind, groupingSupportOf(need.kind, "PRODUCT"));
+        if (limit) {
+          const gap = evidence.add({
+            kind: "GROUPING_GAP",
+            sourceTool: OPERATOR_TOOL.SEARCH_UNANSWERED_INQUIRIES,
+            args: { grouping: "PRODUCT" },
+            locator: { count: inbox.unansweredInquiries, label: "상품별 미답변 문의" },
+            events: null,
+            coverage: "COVERED",
+            provenance: "inquiry-queue/OPEN:no-product-axis",
+          });
+          refs.push(gap);
+          findings.push({
+            findingId: `f-${gap.evidenceId}`,
+            specialist: "INQUIRY_OPS",
+            statement: limit,
+            evidenceIds: [gap.evidenceId],
+            confidence: "NEEDS_REVIEW",
+            verdict: null,
+            surfaceLink: null,
+            claimsCoverageLimit: true,
+            needId: need.id,
+          });
+        }
       }
       continue;
     }
@@ -178,6 +247,37 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
       }
       if (repeats.length === 0) {
         notes.push("반복해서 들어온 문의는 확인되지 않았습니다.");
+      }
+      // <b>"최근 28일 반복 0건" is an ORG answer, and the seller asked about products.</b> A repeat row
+      // is a cluster of inquiries by signature and carries no product anywhere in it, so the axis
+      // cannot be produced — from this read or any other. Saying so is the difference between "이
+      // 상품들에는 반복이 없습니다" (a claim about products, unproven) and "상품별로는 나눌 수
+      // 없습니다" (the truth). Live 2026-08-23·24: Q3 answered the first shape twice.
+      if (input.grouping === "PRODUCT") {
+        const limit = groupingLimitSentence(
+          need.kind, groupingSupportOf(need.kind, "PRODUCT"), repeats.length > 0,
+        );
+        const gap = evidence.add({
+          kind: "GROUPING_GAP",
+          sourceTool: OPERATOR_TOOL.LIST_REPEATED_INQUIRIES,
+          args: { grouping: "PRODUCT" },
+          locator: { count: repeats.length, label: "상품별 반복 문의" },
+          events: null,
+          coverage: "COVERED",
+          provenance: "customer-memory/repeats:no-product-axis",
+        });
+        refs.push(gap);
+        findings.push({
+          findingId: `f-${gap.evidenceId}`,
+          specialist: "INQUIRY_OPS",
+          statement: limit ?? "",
+          evidenceIds: [gap.evidenceId],
+          confidence: "NEEDS_REVIEW",
+          verdict: null,
+          surfaceLink: null,
+          claimsCoverageLimit: true,
+          needId: need.id,
+        });
       }
       needStates.push({
         id: need.id,
@@ -332,6 +432,123 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     // many needs asked for it. Three copies of a true sentence read as three findings.
     ...(notes.length > 0 ? { note: [...new Set(notes)].join(" ") } : {}),
   };
+}
+
+/**
+ * The queue behind the count: how many are waiting, and which has waited longest.
+ *
+ * <b>Nothing the customer wrote leaves this function.</b> `InquiryQueueItem.title` is the seller-visible
+ * subject line and is deliberately never read here — the run needs the receipt time and the work-item
+ * id, and reading a subject would put customer words into an answer that has no lane for them.
+ *
+ * <b>The two totals are different reads and are labelled as such.</b> `get_today_inbox` counts rows with
+ * status UNANSWERED; this page lists rows in phase OPEN. Live 2026-08-24 on the demo org they were 69
+ * and 68. Presenting either as "the" number would make one of them wrong, so both are named with what
+ * they counted, and the gap is disclosed rather than reconciled by this runtime.
+ */
+interface QueueRead {
+  readonly findings: Finding[];
+  readonly evidence: EvidenceRef[];
+  readonly notes: string[];
+  readonly failures: ToolFailure[];
+}
+
+async function readQueue(
+  input: SpecialistInput, needId: string, countedUnanswered: number,
+): Promise<QueueRead> {
+  const { registry, budget, evidence, allowedTools } = input;
+  const empty = { findings: [] as Finding[], evidence: [] as EvidenceRef[], notes: [] as string[],
+    failures: [] as ToolFailure[] };
+  // A product-scoped run has no use for the org queue — the gate would refuse every row of it, and a
+  // call whose result is known to be unusable is a call not worth making (the C3 precedence rule).
+  if (input.resolved.some((e) => e.kind === "PRODUCT")) {
+    return empty;
+  }
+  if (!budget.spend("tool")) {
+    return empty;
+  }
+  const attempt = await attemptTool(
+    { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.SEARCH_UNANSWERED_INQUIRIES, needId },
+    () => registry.invoke<InquiryQueueResponse>(
+      OPERATOR_TOOL.SEARCH_UNANSWERED_INQUIRIES, { page: 0, size: QUEUE_PAGE }, allowedTools,
+    ),
+  );
+  if (!attempt.ok) {
+    return { ...empty, failures: [attempt.failure] };
+  }
+  const page = attempt.value;
+  const rows = [...page.content].sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
+  if (rows.length === 0) {
+    return empty;
+  }
+  const oldest = rows[0]!;
+  const oldestOn = oldest.receivedAt.slice(0, 10);
+  const today = observationDate(input.referenceDate);
+  const waiting = rows.filter((r) => daysBetween(r.receivedAt.slice(0, 10), today) >= WAITING_DAYS).length;
+  const complete = rows.length >= page.totalElements;
+
+  const pageRef = evidence.add({
+    kind: "INQUIRY",
+    sourceTool: OPERATOR_TOOL.SEARCH_UNANSWERED_INQUIRIES,
+    args: { page: 0, size: QUEUE_PAGE },
+    locator: { count: page.totalElements, label: "답변 대기 문의" },
+    // The rows' OWN receipt dates — the queue is the one inquiry read that can date what is in it.
+    events: eventRange(oldestOn, rows[rows.length - 1]!.receivedAt.slice(0, 10)),
+    coverage: "COVERED",
+    provenance: "inquiry-queue/OPEN",
+  });
+  const oldestRef = evidence.add({
+    kind: "INQUIRY",
+    sourceTool: OPERATOR_TOOL.SEARCH_UNANSWERED_INQUIRIES,
+    args: { workItemId: oldest.workItemId },
+    locator: { workItemId: oldest.workItemId, label: "가장 오래 기다린 문의" },
+    events: eventOn(oldestOn),
+    coverage: "COVERED",
+    provenance: "inquiry-queue/OPEN:oldest",
+  });
+
+  const findings: Finding[] = [{
+    findingId: `f-${pageRef.evidenceId}`,
+    specialist: "INQUIRY_OPS",
+    // "먼저 볼 순서" is the receipt order, and the sentence says so: the basis is the rows' dates, not
+    // an importance this runtime has no way to judge.
+    statement: `답변 대기열에서 ${page.totalElements}건을 확인했고, 접수 순서대로 보면 `
+      + `${oldestOn}에 접수된 건이 가장 오래 기다렸습니다`
+      + (complete ? "" : ` (${rows.length}건까지만 확인)`) + ".",
+    evidenceIds: [pageRef.evidenceId, oldestRef.evidenceId],
+    confidence: "NEEDS_REVIEW",
+    verdict: null,
+    surfaceLink: "/inquiries?state=NEEDS_REPLY",
+    needId,
+  }];
+  if (waiting > 0) {
+    findings.push({
+      findingId: `f-${pageRef.evidenceId}-aging`,
+      specialist: "INQUIRY_OPS",
+      statement: `그중 ${waiting}건은 접수된 지 ${WAITING_DAYS}일이 넘었습니다.`,
+      evidenceIds: [pageRef.evidenceId],
+      confidence: "NEEDS_REVIEW",
+      verdict: null,
+      surfaceLink: "/inquiries?state=NEEDS_REPLY",
+      needId,
+    });
+  }
+  const notes: string[] = [];
+  if (countedUnanswered !== page.totalElements) {
+    notes.push(`미답변 집계(${countedUnanswered}건)와 답변 대기열 목록(${page.totalElements}건)은 `
+      + "세는 대상이 서로 완전히 같지는 않습니다.");
+  }
+  log("inquiry_queue", {
+    total: page.totalElements, read: rows.length, complete, waiting,
+    matchesCount: countedUnanswered === page.totalElements,
+  });
+  return { findings, evidence: [pageRef, oldestRef], notes, failures: [] };
+}
+
+/** Whole days between two ISO dates. Dates only — no clock, no zone, nothing to drift. */
+function daysBetween(from: string, to: string): number {
+  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
+  return Number.isNaN(ms) ? 0 : Math.floor(ms / 86_400_000);
 }
 
 /** Whether the run already holds THIS product's own unanswered-inquiry count. */

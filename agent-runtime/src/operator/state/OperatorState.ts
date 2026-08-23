@@ -49,7 +49,16 @@ export type EvidenceKind =
   | "PRODUCT_FACT"
   | "PRODUCT_LISTING"
   | "PRODUCT_VARIANT"
-  | "PRODUCT_KNOWLEDGE_GAP";
+  | "PRODUCT_KNOWLEDGE_GAP"
+  /**
+   * An axis the data cannot be cut along — "반복 문의에는 상품 정보가 없다".
+   *
+   * <b>Its own kind because it is its own fact.</b> A grouped answer that quietly stopped grouping
+   * would read as "these are the totals"; this row is what a sentence about the MISSING axis rests on,
+   * and giving it the kind of the rows it could not group ("REPEATED_INQUIRY") would put an undated,
+   * countless row into a channel whose every member knows when it was seen.
+   */
+  | "GROUPING_GAP";
 
 /**
  * Where a claim came from. Ids, labels, counts and dates — never a body, never a quote.

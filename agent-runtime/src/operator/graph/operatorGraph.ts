@@ -38,8 +38,11 @@ import type {
 import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 import { needsInOrder } from "../plan/InvestigationPlan";
 import { instanceMentionsOf, isInstance } from "../plan/EntityRole";
+import { groupingOf } from "../group/ProductGrouping";
 import type { NeedScope, RejectedEvidence } from "../scope/EvidenceScope";
-import { needScopeOf, partitionEvidence, planScopeOf, reasonSentence } from "../scope/EvidenceScope";
+import {
+  needScopeOf, partitionEvidence, periodNamedIn, planScopeOf, reasonSentence,
+} from "../scope/EvidenceScope";
 import { basisSentence } from "../defaults/OperationalDefaults";
 import type { SpecialistTerminal, ToolFailure } from "../failure/SpecialistOutcome";
 import { classifyToolError, failureSentence, terminalOf } from "../failure/SpecialistOutcome";
@@ -124,6 +127,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       needs: plan.informationNeeds.length,
       specialists: plan.specialistTargets.length,
       replan: state.plan != null,
+      // Which axis the answer will be grouped along. A closed value, never the words behind it — an
+      // operator reading a trace must be able to see that a "어느 상품" question was read as one.
+      grouping: groupingOf(plan, state.goalText),
+      periodNamed: periodNamedIn(plan),
     });
     return {
       plan,
@@ -289,6 +296,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       evidence,
       allowedTools: dedupe([...plan.candidateTools, ...toolsFor(specialist)]),
       resolved,
+      // Decided once for the whole run, from the plan and the seller's own sentence. A specialist that
+      // worked this out for itself would be a second place deciding what "상품별" means.
+      grouping: groupingOf(plan, state.goalText),
+      periodNamed: periodNamedIn(plan, resolved),
       // What the run has already PROVEN, not what it might. A specialist reads this the same way it
       // reads `resolved`: to avoid re-buying a fact the run already holds. It is evidence refs only —
       // ids, counts and closed labels — so nothing a specialist could not already mint itself.

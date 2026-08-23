@@ -16,7 +16,9 @@ import type { SpecialistInput } from "./specialistInput";
 import type { IssueEvidenceSummary, ReviewIssueSummary } from "../../spring/types";
 import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { attemptTool } from "../failure/SpecialistOutcome";
-import { eventRange } from "../scope/EvidenceTime";
+import { eventRange, temporalDemandOf } from "../scope/EvidenceTime";
+import type { GroupedProducts, IssueSlice } from "../group/ProductGrouping";
+import { groupByProduct, namedRows } from "../group/ProductGrouping";
 import { log } from "../../log";
 
 /** The need kinds this specialist answers. */
@@ -38,6 +40,17 @@ const DEFAULT_LIMIT = 3;
  * same, and a truncated sweep says so rather than reading as complete.
  */
 const ATTRIBUTION_LIMIT = 6;
+
+/**
+ * How many issues a GROUPED answer opens, and how many products it then states.
+ *
+ * <b>Scanned largest-first, and the difference is measured.</b> The demo org holds 19 live issues over
+ * 85 evidence rows; the eight largest carry 71 of them (84%), the eight most severe carry 44 (52%).
+ * Reading the biggest first buys the most attribution per call — and the number that is DISCLOSED is
+ * the coverage, not the rank, so a bounded scan can never read as a complete ranking.
+ */
+const GROUP_SCAN_LIMIT = 8;
+const GROUP_STATE_LIMIT = 5;
 
 export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsResult> {
   const { registry, budget, evidence, allowedTools } = input;
@@ -107,12 +120,22 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
     return attributeToProduct(input, issues, product);
   }
 
-  const findings: Finding[] = [];
-  const refs: EvidenceRef[] = [];
+  // <b>The seller asked WHICH products.</b> The issue list answers "which problems" and cannot be made
+  // to answer the other question by being read more carefully — every count on it is the issue's,
+  // across the whole org. The grouped path opens the biggest issues and reads whose rows they are, so
+  // the answer is ranked by a product's own number. No resolver is involved: the ids come out of the
+  // evidence (C5). The org brief below still runs on the same list, so nothing that used to be said
+  // stops being said.
+  const grouped = input.grouping === "PRODUCT"
+    ? await groupAcrossProducts(input, issues)
+    : null;
+
+  const findings: Finding[] = [...(grouped?.findings ?? [])];
+  const refs: EvidenceRef[] = [...(grouped?.evidence ?? [])];
   // One read serves every REVIEW_SIGNAL need the plan declared — the issue list is the same list for
   // all of them, and paying for it once per need would spend budget on identical rows.
   const needId = input.needs[0]!.id;
-  const cited: string[] = [];
+  const cited: string[] = [...(grouped?.cited ?? [])];
   for (const issue of issues.slice(0, DEFAULT_LIMIT)) {
     const ref = evidence.add({
       kind: "REVIEW_ISSUE",
@@ -152,12 +175,15 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
     });
   }
 
+  const note = noteOf(issues, grouped);
   log("review_ops", {
-    issues: issues.length, surfaced: findings.length, needs: input.needs.length, terminal: "OK",
+    issues: issues.length, surfaced: findings.length, needs: input.needs.length,
+    grouping: input.grouping, groupedProducts: grouped?.rows ?? 0,
+    scanned: grouped?.checked ?? 0, terminal: "OK",
   });
   return {
     specialist: "REVIEW_OPS",
-    failures: [],
+    failures: grouped?.failures ?? [],
     terminal: "OK" as const,
     findings,
     evidence: refs,
@@ -167,13 +193,223 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
       status: cited.length > 0 ? ("SATISFIED" as const) : ("UNSATISFIABLE" as const),
       evidenceIds: cited,
       coverage: "COVERED" as const,
-      // The org list is read whole; only the BRIEF is capped, and what is cited is what was said.
-      complete: issues.length <= DEFAULT_LIMIT,
+      // The org list is read whole; only the BRIEF is capped, and what is cited is what was said. A
+      // grouped answer is complete only when its scan reached every issue — six of nineteen is not a
+      // ranking of nineteen, and the merge must be able to see that without reading the sentence.
+      complete: grouped ? grouped.checked >= issues.length : issues.length <= DEFAULT_LIMIT,
       settledBy: "REVIEW_OPS" as const,
       ...(cited.length === 0 ? { reason: "지금 확인이 필요한 반복 리뷰 문제가 없습니다." } : {}),
     })),
-    ...(issues.length === 0 ? { note: "지금 확인이 필요한 반복 리뷰 문제는 없습니다." } : {}),
+    ...(note ? { note } : {}),
   };
+}
+
+/** The note this specialist adds: what the grouped scan left unread, or that there is nothing to read. */
+function noteOf(issues: readonly ReviewIssueSummary[], grouped: GroupedAnswer | null): string | null {
+  if (issues.length === 0) {
+    return "지금 확인이 필요한 반복 리뷰 문제는 없습니다.";
+  }
+  return grouped?.note ?? null;
+}
+
+/** What the grouped path hands back to the org brief that keeps running beside it. */
+interface GroupedAnswer {
+  readonly findings: readonly Finding[];
+  readonly evidence: readonly EvidenceRef[];
+  readonly cited: readonly string[];
+  readonly failures: readonly ToolFailure[];
+  readonly checked: number;
+  readonly rows: number;
+  readonly note: string | null;
+}
+
+/**
+ * The product axis: whose rows are these?
+ *
+ * <b>Every number stated here is one product's own.</b> The issue's total is never a product's, the
+ * org's total is never a product's, and the rank is by the product's count rather than by the order the
+ * issue list happened to come in — the same rule as `attributeToProduct`, applied to a run that has no
+ * product to attribute TO (C4).
+ *
+ * <b>What is disclosed, in the answer and not only in a log:</b> how many issues were opened out of how
+ * many exist, how much of the org's evidence that reached, how many products the catalogue could not
+ * name, and how many rows belong to no product at all. A bounded scan that says none of this reads as a
+ * complete ranking, which is the failure this whole file argues against in its other paths.
+ */
+async function groupAcrossProducts(
+  input: SpecialistInput,
+  issues: readonly ReviewIssueSummary[],
+): Promise<GroupedAnswer> {
+  const { registry, budget, evidence, allowedTools } = input;
+  const needId = input.needs[0]!.id;
+  const findings: Finding[] = [];
+  const refs: EvidenceRef[] = [];
+  const cited: string[] = [];
+  const failures: ToolFailure[] = [];
+  const slices: IssueSlice[] = [];
+  // Largest first — see GROUP_SCAN_LIMIT. `evidenceCount` is the issue's org-wide total, which is the
+  // right thing to sort a SCAN by and the wrong thing to state about a product.
+  const candidates = [...issues].sort((a, b) => b.evidenceCount - a.evidenceCount);
+  const considered = candidates.slice(0, GROUP_SCAN_LIMIT);
+  const totalEvidence = issues.reduce((sum, i) => sum + i.evidenceCount, 0);
+  let checked = 0;
+  let scannedEvidence = 0;
+  let unattributed = 0;
+
+  for (const issue of considered) {
+    if (!budget.spend("tool")) {
+      break;
+    }
+    const attempt = await attemptTool(
+      { specialist: "REVIEW_OPS", tool: OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY, needId },
+      () => registry.invoke<IssueEvidenceSummary>(
+        OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY, { issueId: issue.id }, allowedTools,
+      ),
+    );
+    if (!attempt.ok) {
+      failures.push(attempt.failure);
+      continue;
+    }
+    checked += 1;
+    const summary = attempt.value;
+    scannedEvidence += summary.totalEvidence;
+    unattributed += summary.unattributedEvidence;
+    // <b>The one case where an issue's dates ARE a product's.</b> All of this issue's evidence belongs
+    // to this one product, so its span is that product's span — proven, not borrowed. Any other shape
+    // and the slice stays undated, which is what stops another product's recent review from proving
+    // this one's "최근".
+    const exclusive = summary.byProduct.length === 1 && summary.unattributedEvidence === 0;
+    for (const row of summary.byProduct) {
+      slices.push({
+        issueId: issue.id,
+        issueTitle: issue.title,
+        productId: row.productId,
+        productName: row.productName,
+        count: row.evidenceCount,
+        issueTotal: summary.totalEvidence,
+        events: exclusive ? eventRange(summary.firstEvidenceOn, summary.lastEvidenceOn) : null,
+      });
+    }
+  }
+
+  const grouped = groupByProduct(slices, unattributed);
+  for (const row of namedRows(grouped).slice(0, GROUP_STATE_LIMIT)) {
+    const ref = evidence.add({
+      kind: "ISSUE_EVIDENCE",
+      sourceTool: OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY,
+      args: { productId: row.productId, issues: row.issueIds.length },
+      locator: {
+        productId: row.productId,
+        productName: row.label,
+        count: row.count,
+        label: row.topIssueTitle ?? "리뷰 문제 근거",
+      },
+      // Present only when every slice behind this count was exclusive. Absent is the normal case, and
+      // a period question then withholds this row rather than dating it from another product's rows.
+      events: row.events,
+      coverage: "COVERED",
+      provenance: "issue-memory/evidence-summary:by-product",
+    });
+    refs.push(ref);
+    cited.push(ref.evidenceId);
+    findings.push({
+      findingId: `f-${ref.evidenceId}`,
+      specialist: "REVIEW_OPS",
+      // <b>"리뷰 문제 근거", not "부정 리뷰".</b> These rows are review-issue evidence: reviews that an
+      // extractor tied to a repeated problem. Renaming them would answer a question about negative
+      // reviews with a number that counts something else.
+      statement: `${row.label}에 리뷰 문제 근거가 ${row.count}건 기록돼 있습니다`
+        + (row.topIssueTitle ? ` (가장 많은 것은 "${row.topIssueTitle}" ${row.topIssueCount}건`
+          + `${row.issueIds.length > 1 ? `, 확인한 문제 ${row.issueIds.length}건 합계` : ""})` : "")
+        + ".",
+      evidenceIds: [ref.evidenceId],
+      confidence: "NEEDS_REVIEW",
+      verdict: null,
+      surfaceLink: `/products/${row.productId}`,
+      needId,
+    });
+  }
+
+  // The scan itself, as evidence and as a sentence. Without it a top-five list of eleven products over
+  // eight of nineteen issues would read as "these are the products with review problems".
+  const scanRef = evidence.add({
+    kind: "ISSUE_EVIDENCE",
+    sourceTool: OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY,
+    args: { issuesChecked: checked, issuesOpen: issues.length, evidenceScanned: scannedEvidence },
+    locator: {
+      count: grouped.rows.length,
+      label: "상품별로 확인한 리뷰 문제 근거",
+    },
+    coverage: "COVERED",
+    provenance: "issue-memory/evidence-summary:grouped-scan",
+  });
+  refs.push(scanRef);
+  findings.push({
+    findingId: `f-${scanRef.evidenceId}`,
+    specialist: "REVIEW_OPS",
+    statement: scanSentence(
+      issues.length, checked, totalEvidence, scannedEvidence, grouped,
+      // How many of the rows this answer just built cannot be shown for the question that was asked.
+      // The gate withholds them either way (`TEMPORAL_UNPROVEN`); what would otherwise be missing is
+      // the seller being told that the axis EXISTS and that dating it is what failed.
+      temporalDemandOf(input.needs[0]!.kind, input.periodNamed) === "PERIOD_EVENTS"
+        ? grouped.rows.filter((r) => r.events == null).length
+        : 0,
+    ),
+    evidenceIds: [scanRef.evidenceId],
+    confidence: "NEEDS_REVIEW",
+    verdict: null,
+    surfaceLink: null,
+    // It is a statement about what this answer could and could not see — the coverage claim itself.
+    claimsCoverageLimit: true,
+    needId,
+  });
+
+  log("review_ops_grouped", {
+    dimension: "PRODUCT", issues: issues.length, checked,
+    products: grouped.rows.length, unnamed: grouped.unnamed.products, unattributed,
+    dated: grouped.rows.filter((r) => r.events != null).length,
+  });
+  return {
+    findings,
+    evidence: refs,
+    cited,
+    failures,
+    checked,
+    rows: grouped.rows.length,
+    note: checked < issues.length
+      ? `상품별 집계는 열려 있는 반복 리뷰 문제 ${issues.length}건 중 ${checked}건만 확인한 결과입니다.`
+      : null,
+  };
+}
+
+/** What the grouped scan saw and did not see, in one sentence the seller can act on. */
+function scanSentence(
+  open: number, checked: number, totalEvidence: number, scannedEvidence: number,
+  grouped: GroupedProducts, undatable: number,
+): string {
+  const head = checked >= open
+    ? `열려 있는 반복 리뷰 문제 ${open}건을 모두 확인해 상품 ${grouped.rows.length}개로 나눴습니다.`
+    : `열려 있는 반복 리뷰 문제 ${open}건 가운데 근거가 많은 ${checked}건`
+      + `(전체 근거 ${totalEvidence}건 중 ${scannedEvidence}건)을 확인해 상품 ${grouped.rows.length}개로 `
+      + "나눴습니다. 나머지는 확인하지 않았으므로 전체 순위가 아닙니다.";
+  const tail: string[] = [];
+  if (grouped.unnamed.products > 0) {
+    tail.push(`상품명을 확인할 수 없는 ${grouped.unnamed.products}개 상품의 ${grouped.unnamed.count}건은 `
+      + "이름 없이 남겨 두었습니다.");
+  }
+  if (grouped.unattributed > 0) {
+    tail.push(`어느 상품에도 연결되지 않은 근거가 ${grouped.unattributed}건 있습니다.`);
+  }
+  if (undatable > 0) {
+    // <b>The honest shape of today's limit.</b> The per-product split carries counts and no dates, so
+    // for a question about a period there is nothing to prove WHEN those rows happened — except where
+    // an issue's evidence belongs to one product alone. Borrowing the issue's span would let another
+    // product's recent review date this one's rows, so the rows are withheld and this says so.
+    tail.push(`이 가운데 ${undatable}개 상품은 근거가 언제 발생했는지 확인할 수 없어, `
+      + "기간을 묻는 이 질문의 답으로는 상품별 수치를 제시하지 않았습니다.");
+  }
+  return [head, ...tail].join(" ");
 }
 
 /**

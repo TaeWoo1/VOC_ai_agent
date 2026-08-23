@@ -334,8 +334,13 @@ describe("one meaning of 'the seller named something', shared", () => {
 
   it("the vocabulary lives in exactly one file, and is not exported for copying", async () => {
     const module = await import("../../src/operator/plan/EntityRole");
-    expect(Object.keys(module).sort())
-      .toEqual(["entityRoleOf", "instanceMentionsOf", "isInstance", "mentionOf", "namesInstance"]);
+    expect(Object.keys(module).sort()).toEqual([
+      // The role questions, and — since Grouped Product Answers v1 — the axis questions, which read the
+      // SAME table. `group/ProductGrouping.ts` decides what to do with the answer; every category word
+      // in the repository is still here.
+      "asksForAxis", "entityRoleOf", "instanceMentionsOf", "isInstance", "mentionOf",
+      "namesCategoryHead", "namesInstance",
+    ].sort());
 
     for (const file of sources(join(__dirname, "../../src"))) {
       if (file.endsWith("EntityRole.ts")) continue;

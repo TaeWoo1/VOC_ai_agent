@@ -15,6 +15,7 @@ import type { OperatorToolRegistry } from "../tools/OperatorToolRegistry";
 import type { OperatorBudget } from "../budget/OperatorBudget";
 import type { InformationNeed, ResolvedEntity } from "../plan/InvestigationPlan";
 import type { EvidenceRef } from "../state/OperatorState";
+import type { GroupingDimension } from "../group/ProductGrouping";
 
 export interface SpecialistInput {
   readonly registry: OperatorToolRegistry;
@@ -27,6 +28,22 @@ export interface SpecialistInput {
   readonly mentions: readonly string[];
   /** Entities already resolved this run, so a second pass does not re-resolve and re-charge. */
   readonly resolved: readonly ResolvedEntity[];
+  /**
+   * The axis this answer is grouped along — a property of the RUN, decided once in
+   * `group/ProductGrouping.ts` and passed here so no specialist re-derives it from the sentence.
+   *
+   * It is not a scope. `PRODUCT` means the seller asked WHICH products, and the run stays org-scoped
+   * while the ANSWER is grouped; a run about one product has `NONE` whatever words the goal contains.
+   */
+  readonly grouping: GroupingDimension;
+  /**
+   * Whether the seller named a period — the one half of the temporal demand a specialist cannot see.
+   *
+   * <b>Passed, not derived.</b> A specialist needs it only to SAY what it could not date; the gate
+   * still decides what is withheld (`scope/EvidenceScope.checkEvidence`), and the two read the same
+   * flag from the same place.
+   */
+  readonly periodNamed: boolean;
   /**
    * Evidence the run already holds, from earlier specialists and earlier passes.
    *

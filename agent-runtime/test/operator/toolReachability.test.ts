@@ -228,7 +228,8 @@ describe("the planner is only shown tools something can run", () => {
   it("names the dead tools it does NOT advertise, rather than hiding the gap", () => {
     const all = catalogue().map((t) => t.tool.name);
     const dead = unreachableToolNames(all);
-    // The eleven found live, minus the one this package connected.
+    // The eleven found live, minus the two that have since been connected: the evidence summary (A5)
+    // and the queue list (Grouped Product Answers v1 — a count is not a priority order).
     expect(dead.sort()).toEqual([
       OPERATOR_TOOL.GET_CHANNEL_CAPABILITY,
       OPERATOR_TOOL.GET_CONNECTION_GUIDANCE,
@@ -239,7 +240,6 @@ describe("the planner is only shown tools something can run", () => {
       OPERATOR_TOOL.GET_PRODUCT_SIGNALS,
       OPERATOR_TOOL.LIST_ITEM_ANALYSIS,
       OPERATOR_TOOL.SEARCH_CHANNEL_KNOWLEDGE,
-      OPERATOR_TOOL.SEARCH_UNANSWERED_INQUIRIES,
     ].sort());
     expect(reachableToolNames()).toContain(OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY);
   });
