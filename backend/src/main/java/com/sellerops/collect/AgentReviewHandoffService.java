@@ -15,6 +15,8 @@ import com.sellerops.product.ChannelProduct;
 import com.sellerops.product.ChannelProductRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
+import com.sellerops.product.ProductVariant;
+import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.review.ReviewReplyState;
 import com.sellerops.selleraccount.AccountSessionSlot;
 import com.sellerops.selleraccount.AccountSessionSlotRepository;
@@ -103,6 +105,7 @@ public class AgentReviewHandoffService {
     private final IngestFollowUp followUp;
     private final ChannelProductRepository channelProducts;
     private final ProductRepository products;
+    private final ProductVariantRepository variants;
 
     public AgentReviewHandoffService(AccountSessionSlotRepository slots,
                                      SellerAccountRepository accounts,
@@ -111,7 +114,8 @@ public class AgentReviewHandoffService {
                                      SyncJobRepository syncJobs,
                                      IngestFollowUp followUp,
                                      ChannelProductRepository channelProducts,
-                                     ProductRepository products) {
+                                     ProductRepository products,
+                                     ProductVariantRepository variants) {
         this.slots = slots;
         this.accounts = accounts;
         this.channels = channels;
@@ -120,6 +124,7 @@ public class AgentReviewHandoffService {
         this.followUp = followUp;
         this.channelProducts = channelProducts;
         this.products = products;
+        this.variants = variants;
     }
 
     /**
@@ -217,7 +222,7 @@ public class AgentReviewHandoffService {
                         "상품평 본문과 '본문 없음' 표시가 서로 맞지 않습니다. (" + REASON_BODY_DISAGREES + ")");
             }
             Instant receivedAt = parseDate(row.writtenOn());
-            String sku = catalogSkuFor(orgId, channelId, row.productId());
+            String sku = catalogSkuFor(orgId, channelId, row.productId(), row.vendorItemId());
             if (sku == null) {
                 unresolved++;
                 continue;
@@ -247,15 +252,30 @@ public class AgentReviewHandoffService {
     }
 
     /**
-     * 노출상품ID → the SKU of the product that listing belongs to, or null when this org holds no such listing.
+     * 노출상품ID (+ 옵션ID when the screen printed one) → the SKU of the ONE product it names, or null.
      *
-     * <p>Four fail-closed steps, and none of them creates anything. The listing lookup is org-scoped and
-     * passes through the {@code RealDataOnly} filter, so a synthetic listing cannot answer for a real review.
-     * A listing whose product has since gone, or a product with no SKU to identify it by, is treated the same
-     * as no listing at all: this method exists to hand the ingestion spine a key that means exactly one
-     * product, and "probably that one" is not that.
+     * <p>The contract, in order, and every step fails closed:
+     *
+     * <ol>
+     *   <li>the display id selects candidate listings — org-scoped, {@code RealDataOnly}-filtered;</li>
+     *   <li>one candidate product ⇒ resolved;</li>
+     *   <li>several listings for the SAME product ⇒ still one answer, resolved;</li>
+     *   <li>several DIFFERENT products ⇒ the 옵션ID breaks the tie, and only <b>inside</b> that candidate
+     *       set — never as a lookup key over the catalogue, which would be a wider contract than the one
+     *       the display id defines;</li>
+     *   <li>exactly one variant match ⇒ resolved; zero, several, or no 옵션ID at all ⇒ refused;</li>
+     *   <li>and the SKU that leaves here must resolve back to the very product chosen, or nothing does.</li>
+     * </ol>
+     *
+     * <p>The last step is what keeps a wrong id out of the dedup hash. The ingestion spine keys a review on
+     * the product it resolves the SKU to, so handing over a SKU that means a different product would write a
+     * hash nothing can correct afterwards — the review would be un-findable and would re-store on the next
+     * sweep. Cheap to check, and the only way this method can be wrong is if it is not.
+     *
+     * <p>Nothing here creates a product, a listing, or a variant. Every path returns either a SKU this
+     * database already holds or null.
      */
-    private String catalogSkuFor(UUID orgId, UUID channelId, String displayProductId) {
+    private String catalogSkuFor(UUID orgId, UUID channelId, String displayProductId, String vendorItemId) {
         if (displayProductId == null || displayProductId.isBlank()) {
             return null;
         }
@@ -264,25 +284,47 @@ public class AgentReviewHandoffService {
         if (listings.isEmpty()) {
             return null;
         }
-        // Several listings behind one exposure page are fine as long as they are the SAME product — that
-        // is one product listed twice, and the review belongs to it either way. Two products is a
-        // question this row cannot answer, and a guess would be indistinguishable from a fact afterwards.
         List<UUID> candidates = listings.stream().map(ChannelProduct::getProductId).distinct().toList();
-        if (candidates.size() > 1) {
-            log.warn("Coupang review handoff: a 노출상품ID maps to {} products ({})",
-                    candidates.size(), REASON_AMBIGUOUS_PRODUCT);
-            return null;
+
+        UUID chosen;
+        if (candidates.size() == 1) {
+            // One product, however many listings sit in front of it.
+            chosen = candidates.get(0);
+        } else {
+            chosen = tieBreakByOption(orgId, candidates, vendorItemId);
+            if (chosen == null) {
+                log.warn("Coupang review handoff: a 노출상품ID maps to {} products and the 옵션ID did not "
+                        + "choose exactly one ({})", candidates.size(), REASON_AMBIGUOUS_PRODUCT);
+                return null;
+            }
         }
-        ChannelProduct listing = listings.get(0);
-        // findAllByOrgIdAndIdIn, deliberately, and NOT findById: a Hibernate filter does not touch a
-        // findById, so the id-lookup would hand back a synthetic product the listing lookup had just
-        // refused to return. Same filter on both sides, or the fence has a door in it.
-        Product product = products.findAllByOrgIdAndIdIn(orgId, List.of(listing.getProductId()))
+
+        Product product = products.findAllByOrgIdAndIdIn(orgId, List.of(chosen))
                 .stream().findFirst().orElse(null);
         if (product == null || product.getSku() == null || product.getSku().isBlank()) {
             return null;
         }
-        return product.getSku();
+        // The round trip: the spine will resolve this SKU back to a product, and it must be this one.
+        UUID roundTrip = products.findByOrgIdAndSku(orgId, product.getSku()).map(Product::getId).orElse(null);
+        return chosen.equals(roundTrip) ? product.getSku() : null;
+    }
+
+    /**
+     * The 옵션ID chooses between the candidates, or nobody does.
+     *
+     * <p>The variant lookup names the candidate products, so a matching option on some other product in the
+     * catalogue cannot answer. Exactly one candidate must own the option: zero means the screen and the
+     * catalogue disagree, and more than one means the option is not the discriminator here — in both cases
+     * the honest answer is that this review's product is unknown.
+     */
+    private UUID tieBreakByOption(UUID orgId, List<UUID> candidates, String vendorItemId) {
+        if (vendorItemId == null || vendorItemId.isBlank()) {
+            return null;
+        }
+        List<UUID> owners = variants
+                .findByOrgIdAndProductIdInAndExternalVariantId(orgId, candidates, vendorItemId)
+                .stream().map(ProductVariant::getProductId).distinct().toList();
+        return owners.size() == 1 ? owners.get(0) : null;
     }
 
     private Instant parseDate(String writtenOn) {

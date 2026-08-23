@@ -25,6 +25,8 @@ import com.sellerops.product.ChannelProduct;
 import com.sellerops.product.ChannelProductRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
+import com.sellerops.product.ProductVariant;
+import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.product.ProductService;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewReplyState;
@@ -81,6 +83,7 @@ class AgentReviewHandoffServiceTest {
     @Autowired AccountSessionSlotRepository slotRepo;
     @Autowired ItemAnalysisRepository analyses;
     @Autowired ChannelProductRepository channelProducts;
+    @Autowired ProductVariantRepository productVariants;
 
     private static final String BODY_A = "배송도 빠르고 포장도 꼼꼼해서 아주 만족합니다";
     private static final String BODY_SHORT = "좋아요";
@@ -109,7 +112,7 @@ class AgentReviewHandoffServiceTest {
         service = new AgentReviewHandoffService(slotRepo, sellerAccounts, channels, ingestion, syncJobs,
                 new IngestFollowUp(new ItemAnalysisService(inquiries, reviews, analyses,
                         new RuleBasedInboxItemAnalyzer()), null, null),
-                channelProducts, products);
+                channelProducts, products, productVariants);
     }
 
     /* ───────────────────────────── fixtures ───────────────────────────── */
@@ -600,19 +603,8 @@ class AgentReviewHandoffServiceTest {
     @Test
     void a_display_id_shared_by_two_products_is_refused_rather_than_guessed() {
         SellerAccount acc = account(org, "COUPANG");
-        Product other = new Product();
-        other.setOrgId(org);
-        other.setName("무선 이어폰 (재등록)");
-        other.setSku("78123456790");
-        other.setStatus("ACTIVE");
-        products.save(other);
-        ChannelProduct second = new ChannelProduct();
-        second.setOrgId(org);
-        second.setChannelId(acc.getChannelId());
-        second.setProductId(other.getId());
-        second.setExternalProductId("78123456790");
-        second.setExternalDisplayProductId(PRODUCT);   // the SAME exposure page
-        channelProducts.save(second);
+        // Neither candidate has the option stored, so the tie-break has nothing to work with either.
+        twinProduct(acc, "78123456790");
 
         AgentReviewHandoffResultView result =
                 service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
@@ -641,6 +633,131 @@ class AgentReviewHandoffServiceTest {
 
         assertThat(result.stored()).isEqualTo(1);
         assertThat(reviews.findAll().get(0).getProductId()).isEqualTo(product);
+    }
+
+    /* ───────────── the 옵션ID breaks a tie, and only inside the candidate set ───────────── */
+
+    /**
+     * Two products behind one exposure page, and the 옵션ID says which. This is the case the live
+     * catalogue produced five of, and the only one where the option id is consulted at all.
+     */
+    @Test
+    void the_option_id_chooses_between_two_products_behind_one_exposure_page() {
+        SellerAccount acc = account(org, "COUPANG");
+        Product other = twinProduct(acc, "78123456790");
+        // The option the review names belongs to the SECOND product, not the first.
+        variant(other.getId(), acc.getChannelId(), OPTION);
+        variant(products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId(),
+                acc.getChannelId(), "81111111111");
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isEqualTo(other.getId());
+    }
+
+    /** An option id no candidate owns decides nothing. Refused, not assigned to the first candidate. */
+    @Test
+    void an_option_id_no_candidate_owns_is_refused() {
+        SellerAccount acc = account(org, "COUPANG");
+        Product other = twinProduct(acc, "78123456790");
+        variant(other.getId(), acc.getChannelId(), "89999999999");
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+    }
+
+    /** The screen printed no 옵션ID. Nothing breaks the tie, so nothing is chosen. */
+    @Test
+    void an_ambiguous_display_id_with_no_option_id_at_all_is_refused() {
+        SellerAccount acc = account(org, "COUPANG");
+        twinProduct(acc, "78123456790");
+        AgentReviewHandoffRequest.Review noOption = new AgentReviewHandoffRequest.Review(
+                "2026-08-11", 5, BODY_A, PRODUCT, null, "무선 이어폰", 0, false);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(noOption)));
+
+        assertThat(result.stored()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+    }
+
+    /**
+     * The option exists — on a product the display id did not name. It must not reach across and claim
+     * the review, which is what a catalogue-wide lookup by option id would have done.
+     */
+    @Test
+    void an_option_id_owned_outside_the_candidate_set_never_answers() {
+        SellerAccount acc = account(org, "COUPANG");
+        twinProduct(acc, "78123456790");   // makes the display id ambiguous, owns no option
+
+        Product outsider = new Product();
+        outsider.setOrgId(org);
+        outsider.setName("전혀 다른 상품");
+        outsider.setSku("70000000001");
+        outsider.setStatus("ACTIVE");
+        products.save(outsider);
+        variant(outsider.getId(), acc.getChannelId(), OPTION);   // the very option the review names
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(reviews.findAll()).isEmpty();
+    }
+
+    /**
+     * A second sitting over the same list stores nothing — including through the tie-break, where the
+     * resolved product is what the content hash is built on. If the tie-break were unstable the same
+     * review would hash differently and re-store, which is the failure this pins.
+     */
+    @Test
+    void a_repeated_acquisition_through_the_tie_break_stores_nothing_the_second_time() {
+        SellerAccount acc = account(org, "COUPANG");
+        Product other = twinProduct(acc, "78123456790");
+        variant(other.getId(), acc.getChannelId(), OPTION);
+
+        service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+        AgentReviewHandoffResultView again =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(again.stored()).isZero();
+        assertThat(again.skipped()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
+    }
+
+    /** A second listing on the same exposure page, pointing at a NEW product. */
+    private Product twinProduct(SellerAccount acc, String sellerProductId) {
+        Product other = new Product();
+        other.setOrgId(org);
+        other.setName("무선 이어폰 (재등록)");
+        other.setSku(sellerProductId);
+        other.setStatus("ACTIVE");
+        products.save(other);
+        ChannelProduct second = new ChannelProduct();
+        second.setOrgId(org);
+        second.setChannelId(acc.getChannelId());
+        second.setProductId(other.getId());
+        second.setExternalProductId(sellerProductId);
+        second.setExternalDisplayProductId(PRODUCT);
+        channelProducts.save(second);
+        return other;
+    }
+
+    private void variant(UUID productId, UUID channelId, String externalVariantId) {
+        ProductVariant v = new ProductVariant();
+        v.setOrgId(org);
+        v.setProductId(productId);
+        v.setChannelId(channelId);
+        v.setExternalVariantId(externalVariantId);
+        v.setSource("COUPANG:SELLER_PRODUCTS:v1");
+        v.setObservedAt(java.time.Instant.now());
+        productVariants.save(v);
     }
 
     /** Another org's listing carrying the same display id is not this org's product. */
