@@ -451,7 +451,7 @@ upsert하므로 재읽기는 idempotent다.
 | NAVER ORDER_SUMMARY | 60분 | enabled |
 | NAVER PRODUCT | 1440분 | enabled |
 | Cafe24 3종 | 60분 | **손대지 않음** |
-| NAVER REVIEW / INQUIRY | — | **만들지 않음** (INQUIRY는 2026-08-24 구현 후에도 `NEEDS_VERIFICATION`이라 reconciler가 만들지 않는다 — 광고는 도달 가능성이고 자동 반복은 증명이다) |
+| NAVER REVIEW / INQUIRY | — | **만들지 않음.** REVIEW는 API가 없다. INQUIRY는 두 source가 라이브로 `CONFIRMED`가 됐지만(2026-08-24) **routine은 `BLOCKED_EXTERNAL`** — 첫 routine 시도가 토큰 발급에서 `CREDENTIAL_REJECTED`로 막혔다. 두 source 플래그는 OFF, schedule은 **운영자 disable**(`paused_reason=null` ⇒ 재연결로도 되살아나지 않는다). 광고는 도달 가능성이고 자동 반복은 증명이며, **여기서는 후자가 아직 없다** |
 
 근거는 §6a Self-Pilot Runtime v1의 **standing READ grant**다(2026-08-18 product-owner 결정) — 라이브
 승인 계약의 단일 사용 manifest는 사람이 앉아 있는 guided run을 위한 것이고, 소유 org의 routine READ
@@ -743,7 +743,7 @@ fixture는 **합성**이다. 실제 export의 헤더 행(컬럼명은 개인정�
 | PRODUCT | 69 리스팅 라이브, 필드 범위 관측 완료, **routine 1440분 running** (§4c ② · §4f) |
 | ORDER_SUMMARY | 최근 창 라이브, **routine 60분 running**, restart/floor/lane 독립 전부 테스트로 고정 (§4c ③ · §4d · §4f) |
 | REVIEW | REAL **4,340** / 최신 **2026-08-22**, 2구간 COVERED, attribution 100% (§4g) |
-| INQUIRY | ~~**UNSUPPORTED 유지**~~ → **2026-08-24 정정 + 라이브 확인.** 공식 READ endpoint가 둘 있고 그중 **상품 문의는 실제로 동작한다**: bounded 1회, 요청 2회, **REAL 13건**, `productId`가 채널상품번호임이 **13/13 일치로 증명**, canonical product 6개 귀속, 신규 product 0 ⇒ **`CONFIRMED`**. **고객 문의도 동일하게 확인**: bounded 1회 + 동일 창 재독(`5 received / 0 inserted / 5 skipped`, **멱등 실측**), REAL 5건, `productNo`도 채널상품번호(5/5 일치), 그리고 **판매자 토큰으로 판매자 수신 문의가 내려온다**(5/5가 자기 리스팅 + 5/5에 자기 답변) ⇒ **`CONFIRMED`**. `customerId`/`customerName`은 실제로 내려왔고 **저장 0 · 로그 0**. TalkTalk만 **커머스 API 미지원**. 근거: `docs/naver_inquiry_api_audit_v1.md` §8·§9 |
+| INQUIRY | ~~**UNSUPPORTED 유지**~~ → **2026-08-24 정정 + 라이브 확인.** 공식 READ endpoint가 둘 있고 그중 **상품 문의는 실제로 동작한다**: bounded 1회, 요청 2회, **REAL 13건**, `productId`가 채널상품번호임이 **13/13 일치로 증명**, canonical product 6개 귀속, 신규 product 0 ⇒ **`CONFIRMED`**. **고객 문의도 동일하게 확인**: bounded 1회 + 동일 창 재독(`5 received / 0 inserted / 5 skipped`, **멱등 실측**), REAL 5건, `productNo`도 채널상품번호(5/5 일치), 그리고 **판매자 토큰으로 판매자 수신 문의가 내려온다**(5/5가 자기 리스팅 + 5/5에 자기 답변) ⇒ **`CONFIRMED`**. `customerId`/`customerName`은 실제로 내려왔고 **저장 0 · 로그 0**. TalkTalk만 **커머스 API 미지원**. **단, routine 최신성은 별개다 (2026-08-24)**: 첫 routine 시도가 문의 endpoint에 닿기 전 토큰 발급에서 `CREDENTIAL_REJECTED`로 막혀 **`BLOCKED_EXTERNAL`** — 원인 미확정(인증/자격/IP 환경), 금고·시계는 배제됨. 관측 커버리지는 **상품 문의 2026-06-02~08-19 · 고객 문의 2026-06-09~08-12**뿐이다. **"가져올 수 있다"와 "지금 최신이다"를 섞지 말 것** — "NAVER INQUIRY 미지원"도 "현재 NAVER 문의 0건"도 사실이 아니다. 근거: `docs/naver_inquiry_api_audit_v1.md` §8·§9·§12·§13·§14 |
 
 ### 열려 있는 단 하나 — regression checkpoint, blocker 아님
 

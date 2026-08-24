@@ -640,3 +640,64 @@ verification 상태를 **리소스별로** 옮겼다. 런타임은 DataType당 �
 | REAL 문의 | **18** (상품 13 · 고객 5), 손실 0 |
 
 L2·L3은 실행하지 않았다.
+
+---
+
+## 13. 안전 종료 (2026-08-24 15:31) — 아무것도 저절로 깨어나지 않는 상태
+
+원인은 확정하지 않는다. 확정할 수 있는 것은 **지금 무엇이 자동으로 돌 수 있는가**뿐이고, 답은 **아무것도**다.
+
+### 13.1 실행한 정리
+
+| 조치 | 방법 | 결과 |
+|---|---|---|
+| 두 source 플래그 | `.env.local` 주석 처리 + 재기동 | **둘 다 OFF** ⇒ 커넥터가 `INQUIRY`를 **광고하지 않는다** ⇒ reconciler가 다시 만들 수 없다 |
+| `INQUIRY` schedule | `PUT …/schedule {enabled:false}` — 운영자 경로 그대로 | `enabled=false`, **`paused_reason=null`** |
+| `ORDER_SUMMARY` / `PRODUCT` | 이미 운영자 pause | `enabled=false`, `paused_reason=null` |
+| collect scheduler | 운영자 기준값 `true`로 복원 | NAVER는 세 schedule 모두 disabled라 호출 0. Cafe24/Coupang routine은 이 proof 이전의 자기 기준값으로 돌아간다 |
+
+**`paused_reason=null`이 핵심이다.** `SellerAccountReauthService.onReconnected`는 **이유가 있는** schedule만 되살린다. L1 실패가 남긴 system pause(재연결 시 자동 재개)를 **운영자 disable로 바꿔** 놓았으므로, 판매자가 자격 증명을 다시 넣어 계정이 `CONNECTED`가 되어도 NAVER 문의 수집은 **저절로 시작되지 않는다**. 다시 켜는 것은 사람의 결정이다.
+
+### 13.2 검증
+
+| 확인 | 값 |
+|---|---|
+| 커넥터 capability `INQUIRY` | `supported=false` |
+| NAVER schedule 3개 | 전부 `enabled=false`, `paused_reason=null`, `next_run_at=null` |
+| REAL 문의 | **18** (상품 13 · 고객 5) — 삭제 0 |
+| products / inquiry work items | **320 / 3,338** — 불변 |
+| WRITE | **0** |
+
+### 13.3 인증 환경 복구 후 복원할 값 (기준값 보존)
+
+| schedule | 복원할 값 |
+|---|---|
+| NAVER `ORDER_SUMMARY` | **60분, enabled** |
+| NAVER `PRODUCT` | **1440분, enabled** |
+| NAVER `INQUIRY` | **사람의 결정** — PART 2 recurrence가 증명되기 전에는 자동으로 켜지지 않는다 |
+
+### 13.4 다음 진단 (네이버 API 센터 접근이 가능할 때만)
+
+비교할 네 가지: 실제 outbound IPv4 · 등록된 API 호출 IPv4 · `GNCP-GW-Trace-ID` · 네이버 원본 오류 코드(민감 payload 제외).
+현재 outbound IP가 이전과 달라졌지만 **IP 원인으로 단정하지 않는다** — 네이버의 IP mismatch 대표 응답은 `GW.IP_NOT_ALLOWED`이고, 관측된 것은 그것이 아니다.
+그때까지 **자격 증명 재입력 반복 금지 · 추측성 커넥터 수정 금지.**
+
+## 14. NAVER INQUIRY 상태 — 한 줄로 쓰지 않는다
+
+| 축 | 상태 | 근거 |
+|---|---|---|
+| **`NAVER_PRODUCT_QNA` source** | **`CONFIRMED`** | §8 — 13/13, `productId` 100% 일치 |
+| **`NAVER_CUSTOMER_INQUIRY` source** | **`CONFIRMED`** | §9 — 5/5, `productNo` 100% 일치, 재독 멱등 |
+| **TalkTalk** | **`UNSUPPORTED`** | 커머스 API에 endpoint 자체가 없음 |
+| **INQUIRY routine recurrence** | **`BLOCKED_EXTERNAL`** | §12 — 토큰/자격/IP 환경 문제. **라이브 recurrence 미증명** |
+| **미답변 경로** | **`DATA_UNPROVEN`** | 관측된 18건이 전부 답변 완료. 미답변 행을 만들거나 마켓플레이스에 write해서 만들지 않는다 |
+| **관측 커버리지** | **2026-06-02 ~ 2026-08-19** (상품 문의) · **2026-06-09 ~ 2026-08-12** (고객 문의) | 실제로 읽은 범위. 그 밖은 주장하지 않는다 |
+
+**두 문장을 절대 섞지 않는다.** "네이버 문의를 가져올 수 있다"는 증명됐다. "지금 네이버 문의가 최신이다"는 증명되지 않았다.
+
+**금지된 표현**: "NAVER INQUIRY 미지원" · "현재 NAVER 문의 0건".
+**가능한 표현** (evidence가 실제로 그럴 때만): "NAVER 문의 데이터는 수집된 이력이 있지만, 현재 자동 수집은 인증 환경 문제로 최신 상태를 확인하지 못했습니다."
+
+### 14.1 여기서 드러난 화면 결함 (다음 package에서 다룬다)
+
+플래그를 내리자 커넥터 capability가 `INQUIRY supported=false`가 됐다. 배포 배선 사실로는 참이지만, 화면은 그것을 **"네이버 문의 미지원"**으로 읽는다 — 방금 라이브로 반증된 문장이다. **"채널이 제공하지 않는다"와 "이 배포가 지금 연결하지 않았다"가 한 단어를 공유하고 있다.** 커넥터를 지금 고치지 않고, coverage 어휘를 만드는 Cross-Channel Operational Reasoning v1에서 다룬다.
