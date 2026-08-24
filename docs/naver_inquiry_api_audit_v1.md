@@ -506,3 +506,137 @@ verification 상태를 **리소스별로** 옮겼다. 런타임은 DataType당 �
 
 두 source가 모두 `CONFIRMED`가 된 지금, 플래그를 켜면 `CONNECTED` 계정에 60분 INQUIRY routine이
 **자동 생성된다**. 그것이 PART 2의 결정이며, 그때까지 두 플래그는 내려져 있다.
+
+---
+
+## 10. Routine recurrence 감사 (PART 2, 2026-08-24) — 마켓플레이스 접촉 0회
+
+여기까지는 **코드만 읽어서** 판정한 것이다. 라이브 결과는 §11부터.
+
+### 10.1 두 lane의 실행 계약
+
+| 축 | 실제 동작 | 근거 |
+|---|---|---|
+| **execution order** | `activeSource()`가 고른 **한 lane의 한 페이지**가 곧 한 번의 `fetch`. 저장된 `active`를 우선 존중하고, 그 lane이 끝났으면 남은 lane으로 넘어간다. 아무 상태도 없으면 상품 문의부터. | `NaverInquiryCursor.activeSource` |
+| **independent cursor** | 한 커서 문자열 안에 **lane별 독립 필드**(`qna`, `customer` — 각자 `from`/`to`/`page`/`done`). `withQna`/`withCustomer`는 자기 lane만 쓴다. 다른 lane의 페이지 번호를 건드리는 경로가 없다. | `NaverInquiryCursor` |
+| **cursor commit timing** | **행을 저장한 뒤에만** 커서를 advance·persist 한다. 실패한 페이지의 위치는 기록되지 않는다. | `SyncRunExecutor:396-400` |
+| **retry** | lane 안의 자동 재시도는 **없다**. 429는 예외로 올라와 커서를 **바꾸지 않은 채** `FetchPage.rateLimited`로 바뀌고, executor는 즉시 페이징을 멈추고 `next_retry_at`만 남긴다. | `NaverApiConnector:219-222` |
+| **request/page budget** | run당 `MAX_PAGES=10_000` guard. 한도에 닿으면 조용한 성공이 아니라 **에러로 끝난다**. lane별 종료는 리소스 자신의 `last`/`totalPages`. 페이지 크기는 각 리소스의 공표 상한(100 / 200). | `SyncRunExecutor:376, 422-428` |
+| **overlap** | 다음 창의 시작 = 이전 창의 끝. 네이버가 상품 문의에 대해 직접 안내하는 방식 그대로이고, 발명한 여유값은 없다. 경계에서 재전달되는 행은 `questionId`/`inquiryNo` upsert로 흡수된다. | `resumeFrom`/`resumeDate` |
+| **routine vs bounded** | 다른 **커서 행**이다. bounded seed는 `cursor_key='backfill'`, routine은 `'primary'`. 그래서 Run A/B의 승인 창은 routine lane의 출발점을 재정의하지 않았다 — 감사 시점에 `INQUIRY/primary` 행은 **존재하지 않는다**. | `SyncRunExecutor:352` |
+
+### 10.2 canonical failure cases
+
+| 경우 | advance하는 커서 | 다음 run이 다시 읽는 것 | 성공한 source가 history를 다시 걷는가 |
+|---|---|---|---|
+| **A 성공 / B 실패** | A lane만 (`done=true`로 persist). B의 실패 페이지는 기록되지 않음 | B의 같은 페이지부터. A는 `done`이라 **호출 0회** | **아니오** |
+| **A 실패 / B 미시도** | 없음 | A의 page 1부터. B는 손대지 않았으므로 잃은 진행이 없음 | **아니오** |
+| **A 비어 있음 / B 성공** | 둘 다 | 두 lane 모두 끝났으므로 다음 사이클이 창을 재계산 | **아니오** |
+| **둘 다 성공** | 둘 다 | 경계를 공유하는 새 창 | **아니오** |
+
+`hasMore`는 행 수가 아니라 **커서**에서 나온다(`!next.bothDone(...)`). 그래서 상품 문의가 0행인 날에도 고객 문의는 같은 run 안에서 반드시 읽힌다 — 이것을 행 수로 판정했다면 조용한 하루가 다른 source를 통째로 건너뛰게 만들었을 것이다.
+
+**whole-run status**: 한 source의 실패는 `errored`를 세우고, 이미 들어온 행이 있으면 `PARTIAL`, 없으면 `FAILED`. 성공한 source의 카운트는 지워지지 않는다.
+
+### 10.3 이번 package에서 고친 것 — 조용히 건너뛴 구간
+
+`routineLag()`는 **상품 문의 lane만** 읽고 있었다. 고객 문의만 배선된 배포(=source별 proof가 만드는 바로 그 형상)에서는 `resumeDate`가 창을 천장으로 clamp 하므로 **동작은 안전했지만**, 건너뛴 구간을 아무도 말하지 않았다. clamp가 문제가 아니라 침묵이 문제다 — "건너뛴 구간은 운영자의 bounded backfill 대상"이라는 문장은 운영자가 그 구간이 생겼다는 걸 볼 수 있을 때만 참이다.
+
+두 lane을 다 보고 **더 뒤처진 쪽**을 보고하도록 고쳤다. 관측 전용이며 어떤 창도 이 함수 때문에 움직이지 않는다. 새 scheduler 구조는 만들지 않았다.
+
+회귀 4건 추가 (`NaverInquiryRecurrenceTest`): A성공/B실패 후 재개 · A 첫 페이지 실패 · A 비어 있음 hand-over · 어느 lane이든 stale이면 이름을 남긴다.
+
+---
+
+## 11. 라이브 manifest — routine recurrence (준비, **실행하지 않았다**)
+
+### 11.1 사전 상태 (2026-08-24, 마켓플레이스 호출 0회)
+
+| 확인 | 값 | 방법 |
+|---|---|---|
+| NAVER seller account | **1개** — 기존 `bdccb7a7…` 재사용 | DB |
+| 계정 상태 | **`CONNECTED`** | DB |
+| INQUIRY schedule | **0** | DB |
+| `ORDER_SUMMARY` / `PRODUCT` | **운영자 pause 완료** (`enabled=false`, `paused_reason=null`, `next_run_at=null`). 복원 기준값: 60분 enabled / 1440분 enabled | `PUT …/schedule` |
+| 두 source 플래그 | **둘 다 미무장** (`.env.local`에서 주석 처리) | grep |
+| `INQUIRY/primary` 커서 | **없음** — Run A/B는 `backfill` 커서 행만 썼다. routine lane은 아직 한 번도 돈 적이 없다 | DB |
+| REAL 문의 | **18** (상품 13 · 고객 5), 전부 `ANSWERED`, 귀속 18/18 | DB |
+| 회귀 | **2,796 / 0 failures / 0 errors** (신규 4건 = §10.3) | `./gradlew test` |
+
+### 11.2 manifest
+
+| 필드 | 값 |
+|---|---|
+| channel / org / account | `NAVER` · canonical Demo Org · 기존 계정 재사용 |
+| DataType | **`INQUIRY` 하나.** `ORDER_SUMMARY`/`PRODUCT`는 운영자 pause 상태로 이 proof 동안 호출 0 |
+| mode | **`READ_ONLY`** |
+| 라이브 액션 | **GET 두 종류뿐** — `GET /external/v1/contents/qnas`, `GET /external/v1/pay-user/inquiries` (+ 토큰 mint) |
+| WRITE | **0 — 구조적으로.** 두 client에 GET 외 메서드 없음, `NaverHttpClient`에 put/delete/patch 없음, `NaverReadOnlyFenceTest`가 답변 등록 경로를 이름으로 거부 |
+
+**세 번의 읽기, 이 순서로:**
+
+| # | 무엇 | 어떻게 격리하는가 | 예상 요청 |
+|---|---|---|---|
+| **L1** | 상품 문의 직접 재독 — Run A와 **같은** bounded window `2026-06-01~2026-08-24` | 기존 스위치 `sellerops.collect.scheduler-enabled=false`로 **스케줄 실행만** 끈 채 기동. 새 bypass도 새 maintenance API도 만들지 않는다. 무장은 `product-qna` 하나 | `⌈13/100⌉+1 = 2` |
+| **L2** | **첫 routine run** — 두 source 모두 | 두 플래그 ON + 스케줄러 ON으로 재기동 ⇒ reconciler가 `INQUIRY` 60분 schedule 1개 생성, 스케줄러가 집행. 이번엔 자동 생성을 막지 않는다 | lane당 `⌈N/size⌉`, 14일 창 |
+| **L3** | **즉시 recurrence** — 같은 routine 커서 위에서 한 번 더 | 운영자의 "지금 가져오기"와 같은 경로(`POST …/sync {"dataType":"INQUIRY"}`, backfill seed 없음 ⇒ `primary` 커서). 60분을 기다리는 대신 **같은 코드·같은 커서**를 쓴다 | L2와 같은 자릿수여야 한다. history를 다시 걷는 모양이면 **FAIL** |
+
+**L2의 창은 발명하지 않는다**: routine lane의 첫 창은 `NaverOrdersClient.ROUTINE_MAX_LAG`(14일) — 이 저장소가 이미 이 채널에서 "최근"이라고 부르는 값이다. 그 구간은 Run A/B가 이미 넣은 행들과 겹치므로, **겹치는 행이 0건 insert 되는 것**이 곧 recurrence 증명이다.
+
+**되돌릴 수 없는 것**: 없다. 읽기뿐이고 재실행은 `external_id` 멱등이다. proof 후 `ORDER_SUMMARY`/`PRODUCT`는 위 기준값으로 복원한다.
+
+### 11.3 승인
+
+`docs/sellerops_live_approval_contract.md`. **READ_ONLY**이며 WRITE 승인을 요구하지 않는다.
+채널/계정/범위·코드·브랜치가 바뀌면 승인은 `REVOKED`.
+
+**여기서 멈춘다.** L1·L2·L3 중 어느 것도 실행하지 않았다.
+
+---
+
+## 12. L1 실행 결과 (2026-08-24 15:15) — **BLOCKED: 자격 증명이 하루를 넘기지 못한다**
+
+승인 `Seated and ready.` (2026-08-24). L1을 실행했고 **토큰 발급에서 멈췄다.**
+
+| 측정 | 값 |
+|---|---|
+| run | `592c3c02…` · `INQUIRY` · `MANUAL` · **`FAILED`** · 0.30s |
+| 문의 endpoint 요청 | **0** — `contents/qnas`에 도달하지 못했다. 토큰 mint가 먼저 거절당했다 |
+| 오류 | `CREDENTIAL_REJECTED` |
+| 저장된 행 변화 | **0** — REAL 문의 18건 그대로 |
+| WRITE | **0** |
+| 계정 | `CONNECTED` → **`RECONNECT_REQUIRED`** |
+
+### 12.1 금고가 아니다 — 두 번째로 같은 진단
+
+`GET …/credential-diagnosis`(채널 호출 없음): `status: OK`,
+`sealedKeyFingerprint == availableKeyFingerprint == IWLweMSEqoTt…`, `keyId == activeKeyId == self-pilot-1`.
+**봉인한 키로 열린다.** 거절한 것은 네이버이고, 거절당한 것은 `client_id`/`client_secret` 자체다.
+
+시계도 아니다. 실패 직후 hikari가 28초 **역행**을 기록했지만, 시계가 ±2초로 재동기된 뒤 다시
+`test-connection`을 한 번 던져도 같은 `INVALID_CREDENTIAL`이 나왔다. 전자서명 timestamp 문제였다면
+여기서 통과했어야 한다.
+
+### 12.2 이것은 오늘 처음이 아니다 — 같은 모양이 이틀 연속
+
+| 날짜 | 마지막 성공 | 첫 실패 |
+|---|---|---|
+| 2026-08-23 | 14:17 `ORDER_SUMMARY` | **15:18** `CREDENTIAL_REJECTED` |
+| 2026-08-24 | 13:36 `ORDER_SUMMARY`·`PRODUCT` (운영자 재입력 후) | **15:15** `CREDENTIAL_REJECTED` |
+
+**이것이 PART 2가 답해야 할 질문에 직접 닿는다.** 60분 routine은 자격 증명이 하루를 버틴다는
+가정 위에 서 있다. 이틀 연속 같은 창에서 죽는 자격 증명 위에서는 "recurrence가 안전하다"를
+증명할 수 없다 — 증명되는 것은 재인증 경로뿐이다. 원인은 네이버 쪽 정보 없이 이 저장소에서
+판정할 수 없다: **external-research / 판매자 행동 필요**로 분류한다.
+
+### 12.3 지금 상태 — 멈춘 자리
+
+| | |
+|---|---|
+| `INQUIRY` schedule | **1개, 60분** — reconciler가 15:15:26에 만들었다 (`schedulesCreated=1`, 중복 0). 인증 실패로 **system pause**(`paused_reason` 있음) ⇒ 재연결하면 **자동 재개**된다 |
+| `ORDER_SUMMARY` / `PRODUCT` | **운영자 pause 유지**(`paused_reason=null`) ⇒ 재연결해도 **되살아나지 않는다**. 첫 routine proof의 attribution은 여전히 깨끗하다 |
+| collect scheduler | **꺼져 있다**(L1 격리용). 따라서 재연결만으로는 아무 run도 뜨지 않는다 — 다시 켜는 시점은 내가 고른다 |
+| 플래그 | `product-qna=true`, `customer=false` |
+| REAL 문의 | **18** (상품 13 · 고객 5), 손실 0 |
+
+L2·L3은 실행하지 않았다.

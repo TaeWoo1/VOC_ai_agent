@@ -1,6 +1,7 @@
 package com.sellerops.connector.naver;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
@@ -187,6 +188,94 @@ class NaverInquiryRecurrenceTest {
 
         assertThat(http.sent).hasSize(1);
         assertThat(http.sent.get(0).uri().toString()).contains("/pay-user/inquiries");
+    }
+
+    @Test
+    @DisplayName("A finished, B failed: the next run resumes B only and never re-walks A")
+    void aFailedSourceDoesNotUndoTheFinishedOnesProgress() {
+        // The canonical partial-run shape. The 상품 문의 lane completes and its position is persisted
+        // by the executor after the page lands; the 고객 문의 page then fails. The failing page's
+        // cursor is NOT written (SyncRunExecutor advances only after a page is persisted), so what
+        // survives on disk is "qna done, customer at page 1" — and that is what run 2 must obey.
+        NaverInquiryCollector collector = both();
+        http.enqueue(FakeNaverHttpClient.ok(qnaPage(true)));
+        String afterQna = collector.fetchInquiryPage(TOKEN, null).nextCursorValue();
+        http.enqueueNetworkFailure();
+        assertThatThrownBy(() -> collector.fetchInquiryPage(TOKEN, afterQna))
+                .isInstanceOf(IllegalStateException.class);
+        int requestsBeforeRetry = http.sent.size();
+
+        http.enqueue(FakeNaverHttpClient.ok(customerPage(true)));
+        FetchPage retry = collector.fetchInquiryPage(TOKEN, afterQna);
+
+        // Exactly one new request, and it is the customer resource. The rows 상품 문의 already
+        // delivered are not re-requested because another resource was unavailable.
+        assertThat(http.sent).hasSize(requestsBeforeRetry + 1);
+        assertThat(http.sent.get(http.sent.size() - 1).uri().toString()).contains("pay-user/inquiries");
+        assertThat(retry.hasMore()).isFalse();
+    }
+
+    @Test
+    @DisplayName("A failed on its first page: B is not attempted, and neither position moves")
+    void aFirstPageFailureLeavesBothLanesWhereTheyWere() {
+        NaverInquiryCollector collector = both();
+        http.enqueueNetworkFailure();
+
+        assertThatThrownBy(() -> collector.fetchInquiryPage(TOKEN, null))
+                .isInstanceOf(IllegalStateException.class);
+
+        // One attempt, on the QNA resource. The customer lane is untouched — a run stops at the first
+        // failing page rather than spending more requests on a channel that just failed.
+        assertThat(http.sent).hasSize(1);
+        assertThat(http.sent.get(0).uri().toString()).contains("contents/qnas");
+    }
+
+    @Test
+    @DisplayName("A empty is not A broken: an empty source hands over instead of ending the run")
+    void anEmptySourceStillHandsOverToTheOther() {
+        NaverInquiryCollector collector = both();
+        http.enqueue(FakeNaverHttpClient.ok("{\"last\":true,\"contents\":[]}"));
+
+        FetchPage empty = collector.fetchInquiryPage(TOKEN, null);
+
+        // hasMore is read from the CURSOR (is the other lane outstanding?), never from the row count —
+        // otherwise a quiet 상품 문의 day would silently skip 고객 문의 for that whole run.
+        assertThat(empty.records()).isEmpty();
+        assertThat(empty.hasMore()).isTrue();
+
+        http.enqueue(FakeNaverHttpClient.ok(customerPage(true)));
+        FetchPage second = collector.fetchInquiryPage(TOKEN, empty.nextCursorValue());
+        assertThat(second.records()).hasSize(1);
+        assertThat(second.hasMore()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a stale cursor is named even when only the customer lane is wired")
+    void theSkippedSpanIsNamedForEitherLane() {
+        // Both lanes ~71 days behind the 14-day ceiling: the restart warning must fire whichever lane
+        // a deployment happens to have wired. It used to read the 상품 문의 lane only, so a
+        // customer-only deployment clamped the window correctly and said nothing about it.
+        String customerOnlyStale = "{\"customer\":{\"from\":\"2026-05-01\",\"to\":\"2026-06-14\","
+                + "\"page\":1,\"done\":true},\"active\":\"CUSTOMER_INQUIRY\",\"bounded\":false}";
+        assertThat(NaverInquiryCursor.routineLag(readCursor(customerOnlyStale), NOW)).isNotNull();
+
+        String customerOnlyFresh = "{\"customer\":{\"from\":\"2026-08-20\",\"to\":\"2026-08-23\","
+                + "\"page\":1,\"done\":true},\"active\":\"CUSTOMER_INQUIRY\",\"bounded\":false}";
+        assertThat(NaverInquiryCursor.routineLag(readCursor(customerOnlyFresh), NOW)).isNull();
+
+        // An operator's bounded window is never "behind" — being behind now is what it is for.
+        String bounded = "{\"customer\":{\"from\":\"2026-05-01\",\"to\":\"2026-06-14\","
+                + "\"page\":1,\"done\":false},\"active\":\"CUSTOMER_INQUIRY\",\"bounded\":true}";
+        assertThat(NaverInquiryCursor.routineLag(readCursor(bounded), NOW)).isNull();
+    }
+
+    private static NaverInquiryCursor readCursor(String json) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(json, NaverInquiryCursor.class);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Test

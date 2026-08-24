@@ -155,15 +155,47 @@ public record NaverInquiryCursor(Lane qna, Lane customer, String active, boolean
         return instant.atZone(KST).toOffsetDateTime().format(QNA_DATETIME);
     }
 
-    /** How far behind the routine lane has fallen, for the restart warning. Null when it has not. */
+    /**
+     * How far behind the routine cursor has fallen, for the restart warning. Null when it has not.
+     *
+     * <p><b>Both lanes are inspected, and the answer is the worse of the two.</b> This used to read
+     * only the 상품 문의 lane, which was silently wrong for exactly the configuration a per-source
+     * proof creates: with only 고객 문의 wired, {@link #resumeDate} still clamps the window to the
+     * ceiling, so the span was skipped — but nothing said so. The clamp was safe; the silence was the
+     * defect, because "the skipped span is an operator's bounded backfill" is only true if an operator
+     * can see that a span was skipped. Observability only — no window moves because of this method.
+     */
     static Duration routineLag(NaverInquiryCursor stored, Instant now) {
-        if (stored == null || stored.bounded() || stored.qna() == null || stored.qna().to() == null) {
+        if (stored == null || stored.bounded()) {
             return null;
         }
+        Duration qnaLag = laneLag(stored.qna(), now, NaverInquiryCursor::parseQnaEnd);
+        Duration customerLag = laneLag(stored.customer(), now, NaverInquiryCursor::parseCustomerEnd);
+        Duration worst = qnaLag == null ? customerLag
+                : (customerLag == null || qnaLag.compareTo(customerLag) >= 0 ? qnaLag : customerLag);
+        return worst != null && worst.compareTo(NaverOrdersClient.ROUTINE_MAX_LAG) > 0 ? worst : null;
+    }
+
+    private static Duration laneLag(Lane lane, Instant now, java.util.function.Function<String, Instant> parse) {
+        if (lane == null || lane.to() == null) {
+            return null;
+        }
+        Instant previousEnd = parse.apply(lane.to());
+        return previousEnd == null ? null : Duration.between(previousEnd, now);
+    }
+
+    private static Instant parseQnaEnd(String value) {
         try {
-            Instant previousEnd = OffsetDateTime.parse(stored.qna().to(), QNA_DATETIME).toInstant();
-            Duration lag = Duration.between(previousEnd, now);
-            return lag.compareTo(NaverOrdersClient.ROUTINE_MAX_LAG) > 0 ? lag : null;
+            return OffsetDateTime.parse(value, QNA_DATETIME).toInstant();
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
+    /** The 고객 문의 lane's end is a DATE; its span closes at the end of that day, KST. */
+    private static Instant parseCustomerEnd(String value) {
+        try {
+            return LocalDate.parse(value).plusDays(1).atStartOfDay(KST).toInstant();
         } catch (DateTimeParseException e) {
             return null;
         }
