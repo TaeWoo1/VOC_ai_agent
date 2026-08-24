@@ -324,3 +324,79 @@ run A와 동일하되 **플래그가 반대**다 (`product-qna=false`, `customer
 규칙은 **무엇인지**에 대한 것이다.
 
 **Run B는 실행하지 않는다.** Run A 결과 보고 후 별도로 판단한다.
+
+---
+
+## 8. Run A 라이브 결과 (2026-08-24) — 상품 문의는 **된다**, 그리고 `productId`는 채널상품번호였다
+
+**canonical Demo Org · 기존 계정 `bdccb7a7…` 재사용 · `NAVER_PRODUCT_QNA` 단독 무장 ·
+`READ_ONLY` · WRITE 0.** 고객 문의 플래그는 무장되지 않았으므로 `/pay-user/inquiries`는
+**호출될 수 없었다**.
+
+| 축 | 값 |
+|---|---|
+| run | `468960bb…` · `MANUAL` · `NAVER_API` · **`SUCCESS`** · 04:13:03→04:13:04 UTC (**1.35초**) |
+| 창 | 2026-06-01 ~ 2026-08-24 (bounded, 운영자 범위 · routine lane 불변) |
+| **요청 수** | **2회** — 토큰 발급 1 + `GET /external/v1/contents/qnas` 1. 페이지 `1/1`, `last=true` |
+| received / mapped / inserted / skipped / failed | **13 / 13 / 13 / 0 / 0** |
+| `questionId` uniqueness | **13행 = 13개 고유 external id** (namespace `naver-qna:`) |
+| createDate 범위 | **2026-06-02 ~ 2026-08-19** |
+| answered / unanswered | **13 / 0** — 전부 답변 완료. 답변 본문도 **13/13** 보존 |
+| **열린 작업 항목** | **0** — answered는 history이지 셀러의 할 일이 아니다 |
+| `source_subtype` | **13/13 `NAVER_PRODUCT_QNA`** |
+| provenance | **13/13 `REAL`** |
+| **productId coverage** | **13/13** — 모든 행이 상품번호를 들고 왔다 |
+| **exact external-id match rate** | **13/13 = 100%** (`channel_products.external_product_id`, NAVER 리스팅 77개 대상) |
+| canonical product attribution | **canonical product 6개**에 붙었다 |
+| **unmapped productId** | **0** |
+| 401 / 403 / 429 / WARN / ERROR | **0 / 0 / 0 / 0 / 0** |
+| 생성된 상품 | **0** — `products` 320 → 320 |
+| 합성 행 | **불변** — NAVER `DEMO_SEED` 8건 그대로, REAL 결과와 섞이지 않음 |
+| INQUIRY schedule | **0** (run 전·중·후) |
+| 계정 상태 | `PREPARING` **불변** — `ORDER_SUMMARY`만 CONNECTED 전이를 일으킨다 |
+
+### 8.1 답이 나온 것 — `contents.productId`는 **채널상품번호**다
+
+§1이 남겨 둔 질문의 답이다. 공식 문서는 어느 상품번호인지 말하지 않았고, 이 저장소는 리스팅을
+**채널상품번호**로 키를 잡는다. 정확 일치를 시도했더니 **13/13이 붙었다** — 원상품번호였다면
+일치는 0이었을 것이다. 추론이 아니라 관측이다.
+
+붙은 리스팅(상품번호 → 건수): `6473457702` 6 · `9782702719` 2 · `9810503967` 2 ·
+`557622761` 1 · `6355372669` 1 · `9809699005` 1.
+
+이름 fallback도 placeholder 생성도 **한 번도 필요하지 않았다**. 필요했더라도 코드가 그것을 하지
+않았을 것이고, 그때의 답은 무귀속이었다.
+
+### 8.2 답이 나오지 않은 것
+
+- **고객 문의는 여전히 미검증이다.** 호출되지 않았다.
+- **13건이 전부 answered였다** — 미답변 문의가 unanswered queue에 들어가는 경로는 이 run이
+  증명하지 못했다(열린 작업 항목 0이 정답인 상황이었다).
+- **재수집 멱등은 아직 관측되지 않았다.** 같은 창을 한 번 더 읽으면 `stored=0 / skipped=13`이
+  나와야 하고, 그것이 routine을 논하기 전의 가장 싼 다음 증명이다(요청 2회).
+- **이 창 밖은 모른다.** 2026-06-01 이전 상품 문의는 읽지 않았다.
+
+### 8.3 capability 갱신 — 관측된 범위만
+
+verification 상태를 **리소스별로** 옮겼다. 런타임은 DataType당 단어 하나를 갖는데 NAVER는
+문의 리소스가 둘이므로, 접는 방향이 보수적이어야 한다:
+
+> **배선된 모든 source가 라이브로 증명됐을 때만 `CONFIRMED`.**
+
+한 source만 증명된 채 다른 source가 배선돼 있으면 그 타입의 run은 둘 다 호출하므로, 타입은
+증명되지 않은 것이다. proof를 source 하나만 무장해서 돌리는 이유도 같다 — "이 endpoint는
+된다"가 endpoint에 대한 문장이지 혼합물에 대한 문장이 아니게 만든다.
+
+| source | 상태 | 근거 |
+|---|---|---|
+| `NAVER_PRODUCT_QNA` | **`CONFIRMED`** | 이 run |
+| `NAVER_CUSTOMER_INQUIRY` | `NEEDS_VERIFICATION` | 호출된 적 없음 |
+| NAVER TalkTalk | 커머스 API **미지원** | 변화 없음 |
+
+### 8.4 run 후 상태 — 무장 해제하고 원복했다
+
+`CONFIRMED`가 된 capability는 계정이 `CONNECTED`가 되는 순간 **60분 INQUIRY routine을 자동
+생성한다**. 그것은 PART 2의 결정이지 Run A의 부산물이면 안 되므로 **상품 문의 플래그를 다시
+내렸다** — INQUIRY는 지금 광고되지 않는다(`supported=false`). 수집된 REAL 13건은 그대로 남는다.
+
+`ORDER_SUMMARY` 60분 · `PRODUCT` 1440분은 **사고 이전 상태(enabled)로 복원**했다.

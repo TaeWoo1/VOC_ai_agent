@@ -743,7 +743,7 @@ fixture는 **합성**이다. 실제 export의 헤더 행(컬럼명은 개인정�
 | PRODUCT | 69 리스팅 라이브, 필드 범위 관측 완료, **routine 1440분 running** (§4c ② · §4f) |
 | ORDER_SUMMARY | 최근 창 라이브, **routine 60분 running**, restart/floor/lane 독립 전부 테스트로 고정 (§4c ③ · §4d · §4f) |
 | REVIEW | REAL **4,340** / 최신 **2026-08-22**, 2구간 COVERED, attribution 100% (§4g) |
-| INQUIRY | ~~**UNSUPPORTED 유지**~~ → **2026-08-24 정정: 공식 READ endpoint가 둘 있다.** 상품 문의(`/v1/contents/qnas`) · 고객 문의(`/v1/pay-user/inquiries`) 각각 `NEEDS_VERIFICATION`(구현 완료, 라이브 미검증), TalkTalk만 **커머스 API 미지원**. 근거: `docs/naver_inquiry_api_audit_v1.md` |
+| INQUIRY | ~~**UNSUPPORTED 유지**~~ → **2026-08-24 정정 + 라이브 확인.** 공식 READ endpoint가 둘 있고 그중 **상품 문의는 실제로 동작한다**: bounded 1회, 요청 2회, **REAL 13건**, `productId`가 채널상품번호임이 **13/13 일치로 증명**, canonical product 6개 귀속, 신규 product 0 ⇒ **`CONFIRMED`**. 고객 문의(`/v1/pay-user/inquiries`)는 호출 0회 ⇒ `NEEDS_VERIFICATION`. TalkTalk만 **커머스 API 미지원**. 근거: `docs/naver_inquiry_api_audit_v1.md` §8 |
 
 ### 열려 있는 단 하나 — regression checkpoint, blocker 아님
 

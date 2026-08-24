@@ -65,8 +65,10 @@ class NaverInquiryCapabilityFenceTest {
     }
 
     @Test
-    @DisplayName("wired but unproven: advertised as NEEDS_VERIFICATION, never as CONFIRMED")
-    void aWiredButUnprovenCapabilitySaysSo() {
+    @DisplayName("one proven resource beside one unproven one is a data type that is not proven")
+    void theFoldAcrossTwoResourcesIsTheConservativeOne() {
+        // 상품 문의 was live-proven 2026-08-24; 고객 문의 has never been called. A run of DataType
+        // INQUIRY with both wired would call both, so the type-level word must be the unproven one.
         ConnectorCapabilities capabilities = connector(wired()).capabilities("NAVER");
 
         assertThat(capabilities.supports(DataType.INQUIRY)).isTrue();
@@ -77,6 +79,29 @@ class NaverInquiryCapabilityFenceTest {
         // The proven ones are untouched by this package.
         assertThat(capabilities.verificationStatus().get(DataType.ORDER_SUMMARY)).isEqualTo("CONFIRMED");
         assertThat(capabilities.verificationStatus().get(DataType.PRODUCT)).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    @DisplayName("with only the proven resource wired, the type is CONFIRMED — that is what a proof buys")
+    void aSoleProvenResourceCarriesTheTypesWord() {
+        NaverInquiryCollector qnaOnly = new NaverInquiryCollector(
+                new NaverProductQnaClient(http, BASE_URL), null, CLOCK);
+
+        ConnectorCapabilities capabilities = connector(qnaOnly).capabilities("NAVER");
+
+        assertThat(capabilities.verificationStatus().get(DataType.INQUIRY)).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    @DisplayName("with only the unproven resource wired, it is not")
+    void aSoleUnprovenResourceCannotBorrowTheOthersProof() {
+        NaverInquiryCollector customerOnly = new NaverInquiryCollector(
+                null, new NaverCustomerInquiriesClient(http, BASE_URL), CLOCK);
+
+        ConnectorCapabilities capabilities = connector(customerOnly).capabilities("NAVER");
+
+        assertThat(capabilities.verificationStatus().get(DataType.INQUIRY))
+                .isEqualTo("NEEDS_VERIFICATION");
     }
 
     @Test

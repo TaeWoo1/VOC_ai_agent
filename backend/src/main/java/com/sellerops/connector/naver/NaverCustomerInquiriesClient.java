@@ -55,6 +55,13 @@ public class NaverCustomerInquiriesClient {
 
     public static final String SOURCE = "NAVER:CUSTOMER_INQUIRY_API:v1";
 
+    /**
+     * Never read live. The official description says this resource returns the inquiries accumulated
+     * on "네이버페이 구매회원으로 등록된 본인 계정", which cannot be resolved from the document into
+     * "the inquiries this SELLER received" — only a call answers it.
+     */
+    public static final String VERIFICATION_STATUS = "NEEDS_VERIFICATION";
+
     /** The resource's documented range is 10~200 per page; the ceiling keeps the call count down. */
     static final int PAGE_SIZE = 200;
 

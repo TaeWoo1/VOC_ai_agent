@@ -45,6 +45,25 @@ public class NaverInquiryCollector {
         return qnaClient != null || customerClient != null;
     }
 
+    /**
+     * What this connector may honestly say about {@code INQUIRY} as a whole.
+     *
+     * <p>The runtime has one verification word per DATA TYPE and NAVER has two inquiry RESOURCES, so
+     * the two have to be folded — and the fold has to be the conservative one. {@code CONFIRMED} only
+     * when every wired source has been proven live; one proven source beside one unproven source is a
+     * type that has not been proven, because a run of that type would call both.
+     *
+     * <p>That is also why a proof is run with a single source armed: it makes the sentence
+     * "this endpoint works" a fact about an endpoint rather than about a mixture.
+     */
+    public String verificationStatus() {
+        boolean allProven =
+                (qnaClient == null || "CONFIRMED".equals(NaverProductQnaClient.VERIFICATION_STATUS))
+                && (customerClient == null
+                        || "CONFIRMED".equals(NaverCustomerInquiriesClient.VERIFICATION_STATUS));
+        return allProven ? "CONFIRMED" : "NEEDS_VERIFICATION";
+    }
+
     /** One page of whichever source is currently outstanding. */
     public FetchPage fetchInquiryPage(String accessToken, String cursorValue) {
         boolean qnaEnabled = qnaClient != null;

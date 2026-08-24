@@ -134,11 +134,11 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
         }
         if (inquiryReachable()) {
             supported.add(DataType.INQUIRY);
-            // NEEDS_VERIFICATION until a live read proves it, and that word does work here: the
-            // self-pilot reconciler creates routine schedules only for CONFIRMED capabilities, so an
-            // unproven inquiry capability is reachable for an operator's bounded run and cannot start
-            // collecting on its own. Promotion to CONFIRMED is a live proof, not an edit.
-            status.put(DataType.INQUIRY, "NEEDS_VERIFICATION");
+            // The word does work here: the self-pilot reconciler creates routine schedules only for
+            // CONFIRMED capabilities, so an unproven inquiry capability is reachable for an operator's
+            // bounded run and cannot start collecting on its own. Promotion is a live proof, not an
+            // edit — and it is per RESOURCE, folded conservatively, because NAVER has two of them.
+            status.put(DataType.INQUIRY, inquiryCollector.verificationStatus());
         }
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,

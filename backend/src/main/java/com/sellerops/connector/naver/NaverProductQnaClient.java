@@ -62,6 +62,16 @@ public class NaverProductQnaClient {
     /** The provenance stamp for rows this client produces. */
     public static final String SOURCE = "NAVER:PRODUCT_QNA_API:v1";
 
+    /**
+     * Live-proven on the canonical Demo Org, 2026-08-24: one bounded window (2026-06-01~08-24), one
+     * page, 13 questions, 0 errors, and every row carried a product number that resolved.
+     *
+     * <p>The word is here, on the client, because it is a fact about THIS resource and not about the
+     * data type. NAVER's other inquiry resource is a different endpoint with a different contract and
+     * its own status; folding them into one type-level word would let one proof speak for two.
+     */
+    public static final String VERIFICATION_STATUS = "CONFIRMED";
+
     /** The resource's documented maximum: 페이지당 최대 100건. */
     static final int PAGE_SIZE = 100;
 
