@@ -297,7 +297,7 @@ outcome 어휘는 닫혀 있다: `OK` · `NOT_FOUND` · `NOT_CAPABLE` · `UNAUTH
 | 선언된 capability는 **디스크의 vendored 문서를 가리킨다** | `aDeclaredLookupIsBackedByADocument` |
 | Agent WRITE 0 | `operatorToolRegistry.test.ts` (agent-runtime, 무변경) |
 
-회귀: backend **3,028 / 0 failures / 22 skipped** · frontend **167 files / 2,288 tests** · `tsc` clean ·
+회귀: backend **3,030 / 0 failures / 22 skipped** · frontend **167 files / 2,288 tests** · `tsc` clean ·
 agent-runtime **488 passed / 23 skipped, 무변경**.
 
 ---

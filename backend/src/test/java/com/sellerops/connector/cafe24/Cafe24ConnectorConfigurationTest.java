@@ -10,6 +10,10 @@ import com.sellerops.connector.coupang.CoupangConnectorConfiguration;
 import com.sellerops.connector.naver.NaverApiConnector;
 import com.sellerops.connector.naver.NaverConnectorConfiguration;
 import com.sellerops.credential.CredentialVault;
+import com.sellerops.order.fact.ExactOrderLookupCapability;
+import com.sellerops.order.fact.ExactOrderReader;
+import com.sellerops.order.fact.ExactOrderReaders;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
@@ -68,6 +72,34 @@ class Cafe24ConnectorConfigurationTest {
                     assertThat(ctx).hasSingleBean(Cafe24ApiConnector.class);
                     assertThat(ctx).hasSingleBean(Cafe24TokenClient.class);
                     assertThat(ctx.getBean(Cafe24HttpClient.class)).isInstanceOf(JdkCafe24HttpClient.class);
+                });
+    }
+
+    @Test
+    void theExactOrderReaderExistsExactlyWhenTheConnectorDoes() {
+        runner().withPropertyValues("sellerops.connector.cafe24.enabled=true")
+                .run(ctx -> {
+                    assertThat(ctx).hasSingleBean(Cafe24ExactOrderReader.class);
+                    // The registry refuses a reader for a channel that declares no vendored contract,
+                    // so constructing it here is itself the assertion that the two agree.
+                    assertThat(new ExactOrderReaders(List.of(ctx.getBean(Cafe24ExactOrderReader.class)))
+                            .forChannel("CAFE24")).isPresent();
+                });
+        runner().run(ctx -> assertThat(ctx).doesNotHaveBean(Cafe24ExactOrderReader.class));
+    }
+
+    @Test
+    void everyDeclaredExactLookupHasAReader() {
+        // The other half of the check ExactOrderReaders' constructor cannot make: a declaration with
+        // no reader would advertise a lookup that silently never happens.
+        runner().withPropertyValues("sellerops.connector.cafe24.enabled=true")
+                .run(ctx -> {
+                    for (String channel : ExactOrderLookupCapability.declaredChannels()) {
+                        assertThat(ctx.getBeanProvider(ExactOrderReader.class).stream()
+                                .anyMatch(reader -> reader.channelCode().equals(channel)))
+                                .as("%s declares an exact lookup and must have a reader", channel)
+                                .isTrue();
+                    }
                 });
     }
 
