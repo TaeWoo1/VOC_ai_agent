@@ -64,11 +64,25 @@ public class AgentDraftService {
      */
     public Optional<AgentDraftResponseParser.ParsedDraft> draft(
             UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge) {
+        return draft(orgId, title, details, knowledge, null);
+    }
+
+    /**
+     * The grounded form, plus the one sentence that says what is known about the order.
+     *
+     * <p>{@code orderState} is a product constant — a confirmed state or the reason there is none —
+     * and never an order id. It is passed because a drafter that is told nothing about the order
+     * infers it may reason about one from the customer's message, which is how "곧 발송됩니다"
+     * appears in a reply written from no order data at all.
+     */
+    public Optional<AgentDraftResponseParser.ParsedDraft> draft(
+            UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
+            String orderState) {
         if (!properties.isEnabledFor(orgId)) {
             return Optional.empty();
         }
         AgentDraftGenerator.Result result =
-                generator().generate(new AgentDraftGenerator.Input(title, details, knowledge));
+                generator().generate(new AgentDraftGenerator.Input(title, details, knowledge, orderState));
         log.info("agent_draft orgId={} drafted={} grounded={} reason={}",
                 orgId, result.draft().isPresent(), knowledge == null ? 0 : knowledge.size(), result.reason());
         return result.draft();

@@ -47,6 +47,21 @@ export function SettingsHome() {
         </Panel>
 
         <Panel
+          title="운영 정책 / 답변 기준"
+          description="배송·취소·교환·증빙처럼 상품과 무관한 질문에 답할 때 쓰는 기준입니다."
+          action={
+            <BtnLink to="/settings/policies" size="sm" variant="outline">
+              기준 관리
+            </BtnLink>
+          }
+        >
+          <p className="break-keep leading-relaxed text-muted">
+            여기에 적힌 내용만 답변의 근거로 쓰입니다. 적혀 있지 않은 조건이나 기간은 만들어 쓰지
+            않으므로, 자주 묻는 것부터 적어 두시면 그만큼 답변에 근거가 생깁니다.
+          </p>
+        </Panel>
+
+        <Panel
           title="연결 알림"
           description="연결이 끊기거나 확인이 필요할 때 알려드립니다."
           action={

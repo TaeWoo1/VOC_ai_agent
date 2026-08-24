@@ -1,6 +1,7 @@
 package com.sellerops.ingest;
 
 import com.sellerops.customermemory.CustomerMemoryIndexer;
+import com.sellerops.inquiry.memory.InquiryAnswerMemoryImporter;
 import com.sellerops.itemanalysis.ItemAnalysisService;
 import com.sellerops.reviewimport.ReviewSegmentIngestedEvent;
 import java.time.LocalDate;
@@ -9,6 +10,7 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
@@ -62,12 +64,21 @@ public class IngestFollowUp {
     private final ItemAnalysisService itemAnalysis;
     private final CustomerMemoryIndexer customerMemory;
     private final ApplicationEventPublisher events;
+    private final InquiryAnswerMemoryImporter answerMemory;
 
+    @Autowired
     public IngestFollowUp(ItemAnalysisService itemAnalysis, CustomerMemoryIndexer customerMemory,
-                          ApplicationEventPublisher events) {
+                          ApplicationEventPublisher events, InquiryAnswerMemoryImporter answerMemory) {
         this.itemAnalysis = itemAnalysis;
         this.customerMemory = customerMemory;
         this.events = events;
+        this.answerMemory = answerMemory;
+    }
+
+    /** Wiring for tests that exercise the analysis path only, matching the two existing nullables. */
+    public IngestFollowUp(ItemAnalysisService itemAnalysis, CustomerMemoryIndexer customerMemory,
+                          ApplicationEventPublisher events) {
+        this(itemAnalysis, customerMemory, events, null);
     }
 
     /**
@@ -101,6 +112,31 @@ public class IngestFollowUp {
         }
         analyze(orgId, INQUIRY, insertedIds);
         indexInquiries(orgId, insertedIds);
+        importAnswers(orgId);
+    }
+
+    /**
+     * Bring any collected seller answer into Answer Memory.
+     *
+     * <p>Org-wide rather than over {@code insertedIds}, because the row that matters is often not a
+     * new one: an inquiry collected yesterday as UNANSWERED and re-collected today with the seller's
+     * answer attached is an UPDATE, and an import that looked only at inserts would never see the
+     * answer at all. The scan is bounded by the rows that carry an answer body and the write is
+     * idempotent, so running it after every inquiry ingest costs one query and changes nothing when
+     * nothing changed.
+     */
+    private void importAnswers(UUID orgId) {
+        if (answerMemory == null) {
+            return;
+        }
+        try {
+            int written = answerMemory.importCollectedAnswers(orgId);
+            if (written > 0) {
+                log.info("ingest follow-up: 과거 답변 기억 갱신 org={} 건수={}", orgId, written);
+            }
+        } catch (Exception e) {
+            log.warn("ingest follow-up: answer-memory import failed org={}: {}", orgId, e.toString());
+        }
     }
 
     private void analyze(UUID orgId, String sourceType, List<UUID> insertedIds) {

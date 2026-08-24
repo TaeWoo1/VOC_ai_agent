@@ -1,4 +1,4 @@
-package com.sellerops.product.library;
+package com.sellerops.knowledge;
 
 import java.util.ArrayList;
 import java.util.List;

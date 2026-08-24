@@ -1,4 +1,4 @@
-package com.sellerops.product.library;
+package com.sellerops.knowledge;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

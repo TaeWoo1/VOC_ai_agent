@@ -91,7 +91,7 @@ class AgentDraftPayloadFloorTest {
     @DisplayName("an empty library is stated to the model, not omitted — silence would read as \"not relevant\"")
     void anEmptyLibraryIsStatedRatherThanOmitted(AgentDraftGenerator.Vendor vendor) {
         assertThat(generator(vendor).requestBody(new AgentDraftGenerator.Input("질문", "본문")))
-                .contains("판매자가 등록한 상품 지식")
+                .contains("판매자가 등록한 근거")
                 .contains("(없음)");
     }
 

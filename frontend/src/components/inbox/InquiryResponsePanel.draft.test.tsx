@@ -78,7 +78,7 @@ function generated(over: Record<string, unknown> = {}) {
     knowledgeNote: "판매자가 등록한 상품 지식을 근거로 썼습니다.",
     productId: "p1",
     evidence: [
-      { kind: "PRODUCT_KNOWLEDGE", title: "사용법", locator: "product-knowledge/USAGE:데모 운영자", sourceId: "s", chunkId: "c" },
+      { kind: "PRODUCT_KNOWLEDGE", scopeLabel: "상품 정보", title: "사용법", locator: "product-knowledge/USAGE:데모 운영자", sourceId: "s", chunkId: "c" },
     ],
     quotaMessage: null,
     ...over,
@@ -186,5 +186,33 @@ describe("InquiryResponsePanel — the generated draft", () => {
     // the publish result would be telling the seller after the reply had already gone.
     expect(await screen.findByText(/이미 답변이 달렸는지 지금은 확인할 수 없습니다/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /답변 보내기/ })).toBeInTheDocument();
+  });
+
+  it("groups the citations by where they came from — a wrong reply is fixed in one place, not three", async () => {
+    // A spec is corrected in 상품 지식, a shipping promise in 운영 정책, and a past answer is neither.
+    // Rendering them as one undifferentiated list tells a seller that something is wrong and not
+    // where to go and change it.
+    generateInquiryDraft.mockResolvedValue(
+      generated({
+        knowledgeNote: "판매자가 등록한 상품 정보·운영 정책을 근거로 썼습니다.",
+        evidence: [
+          { kind: "PRODUCT_KNOWLEDGE", scopeLabel: "상품 정보", title: "사용법", locator: "product-knowledge/USAGE:데모 운영자", sourceId: "s1", chunkId: "c1" },
+          { kind: "ORG_POLICY", scopeLabel: "운영 정책", title: "교환 및 반품 안내", locator: "org-policy/EXCHANGE_REFUND_POLICY:데모 운영자#v2", sourceId: "s2", chunkId: "c2" },
+          { kind: "ANSWER_MEMORY", scopeLabel: "과거 답변", title: "채널에 등록된 답변", locator: "answer-memory/IMPORTED_SELLER_ANSWER:NAVER", sourceId: "s3", chunkId: null },
+        ],
+      }),
+    );
+    const user = userEvent.setup();
+    render(<InquiryResponsePanel workItemId="w1" />);
+
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+
+    expect(await screen.findByText("상품 정보")).toBeInTheDocument();
+    expect(screen.getByText("운영 정책")).toBeInTheDocument();
+    expect(screen.getByText("과거 답변")).toBeInTheDocument();
+    expect(screen.getByText("교환 및 반품 안내")).toBeInTheDocument();
+    // The transport-shaped storage vocabulary stays out of the seller's view.
+    expect(screen.queryByText("ORG_POLICY")).not.toBeInTheDocument();
+    expect(screen.queryByText("ANSWER_MEMORY")).not.toBeInTheDocument();
   });
 });

@@ -8,6 +8,7 @@ import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.publish.dto.PublishStatusView;
+import com.sellerops.inquiry.memory.InquiryAnswerMemoryHook;
 import com.sellerops.inquiry.reply.InquiryReplyDraft;
 import com.sellerops.inquiry.reply.InquiryReplyDraftRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
@@ -53,13 +54,16 @@ public class InquiryPublishService {
     private final InquiryTargetStateReader targetState;
     private final InquiryReplyCapabilityRegistry capabilities;
     private final ChannelRepository channels;
+    private final InquiryAnswerMemoryHook answerMemory;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public InquiryPublishService(InquiryWorkItemRepository workItems, InquiryReplyDraftRepository drafts,
                                  InquiryRepository inquiries, InquiryApprovalRepository approvals,
                                  InquiryExecutionRepository executions, InquiryVerificationRepository verifications,
                                  InquiryWorkItemAuditRepository audits, InquiryPublishBindingWriter binding,
                                  ChannelReplyAdapterRegistry adapters, InquiryTargetStateReader targetState,
-                                 InquiryReplyCapabilityRegistry capabilities, ChannelRepository channels) {
+                                 InquiryReplyCapabilityRegistry capabilities, ChannelRepository channels,
+                                 InquiryAnswerMemoryHook answerMemory) {
         this.workItems = workItems;
         this.drafts = drafts;
         this.inquiries = inquiries;
@@ -72,6 +76,21 @@ public class InquiryPublishService {
         this.targetState = targetState;
         this.capabilities = capabilities;
         this.channels = channels;
+        this.answerMemory = answerMemory;
+    }
+
+    /**
+     * Wiring for tests that exercise publish alone. Answer memory is an effect of publishing, not a
+     * participant in it: nothing here reads it back, so its absence cannot change an outcome.
+     */
+    public InquiryPublishService(InquiryWorkItemRepository workItems, InquiryReplyDraftRepository drafts,
+                                 InquiryRepository inquiries, InquiryApprovalRepository approvals,
+                                 InquiryExecutionRepository executions, InquiryVerificationRepository verifications,
+                                 InquiryWorkItemAuditRepository audits, InquiryPublishBindingWriter binding,
+                                 ChannelReplyAdapterRegistry adapters, InquiryTargetStateReader targetState,
+                                 InquiryReplyCapabilityRegistry capabilities, ChannelRepository channels) {
+        this(workItems, drafts, inquiries, approvals, executions, verifications, audits, binding,
+                adapters, targetState, capabilities, channels, null);
     }
 
     /** Confirm the exact draft version, bind immutably, create the intent, and (if a channel adapter exists) dispatch. */
@@ -114,6 +133,11 @@ public class InquiryPublishService {
                             workItem.getSellerAccountId(), workItem.getChannelId(),
                             target.getExternalId(), target.getSourceSubtype()),
                     commandId, "SELLER:" + sellerUserId);
+            // The approval is the seller stating what this company says. Recorded AFTER the binding,
+            // so a refused approval never leaves a memory of an answer nobody approved.
+            if (answerMemory != null) {
+                answerMemory.rememberApproved(target, head, sellerUserId);
+            }
             workItem = loadWorkItem(orgId, workItemId); // reload with ACTION_PENDING phase
         }
 
@@ -370,12 +394,51 @@ public class InquiryPublishService {
         if (verified) {
             execution.setStatus(InquiryExecutionStatus.COMPLETED);
             setPhase(workItem, InquiryWorkItemPhase.COMPLETED);
+            // Only here. A dispatch whose delivery is unknown is not a sent answer, and remembering
+            // it as one would put text the customer may never have received into the precedent the
+            // next draft is written from.
+            rememberVerified(workItem);
         }
         executions.save(execution);
         audit(workItem.getOrgId(), workItem.getId(),
                 "verify:" + workItem.getId() + ":" + execution.getVerifyAttempts(),
                 InquiryWorkItemEvent.VERIFICATION_RECORDED, from,
                 verified ? InquiryWorkItemPhase.COMPLETED : from);
+    }
+
+    /**
+     * Record the verified answer, from the approval that produced it.
+     *
+     * <p>Reads the approved version rather than the head draft: the head may have moved on since the
+     * send, and what the customer received is what was approved.
+     */
+    private void rememberVerified(InquiryWorkItem workItem) {
+        if (answerMemory == null) {
+            return;
+        }
+        approvals.findByWorkItemId(workItem.getId()).ifPresent(approval ->
+                drafts.findByWorkItemIdAndVersion(workItem.getId(), approval.getApprovedDraftVersion())
+                        .ifPresent(sent -> inquiries.findById(workItem.getInquiryId())
+                                .ifPresent(inquiry -> answerMemory.rememberVerified(
+                                        inquiry, sent, approverUserId(approval)))));
+    }
+
+    /**
+     * The user id inside an approver marker like {@code SELLER:<uuid>}, or null.
+     *
+     * <p>The column is a free-form actor string because approvals can come from actors that are not
+     * users; this reads the one shape that is a user and does not guess at the rest.
+     */
+    private static UUID approverUserId(InquiryApproval approval) {
+        String approver = approval.getApprover();
+        if (approver == null || !approver.startsWith("SELLER:")) {
+            return null;
+        }
+        try {
+            return UUID.fromString(approver.substring("SELLER:".length()));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private static InquiryWorkItemPhase fromPhase(InquiryExecutionStatus status) {

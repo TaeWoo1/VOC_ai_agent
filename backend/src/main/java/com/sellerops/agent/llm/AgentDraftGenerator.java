@@ -92,10 +92,14 @@ public class AgentDraftGenerator {
      * <p>Empty when no product resolved, no library exists, or nothing matched. Empty is a real state
      * the prompt is told about, not a silent absence.
      */
-    public record Input(String title, String details, List<Passage> knowledge) {
+    public record Input(String title, String details, List<Passage> knowledge, String orderState) {
 
         public Input(String title, String details) {
-            this(title, details, List.of());
+            this(title, details, List.of(), null);
+        }
+
+        public Input(String title, String details, List<Passage> knowledge) {
+            this(title, details, knowledge, null);
         }
 
         public Input {
@@ -104,12 +108,22 @@ public class AgentDraftGenerator {
     }
 
     /**
-     * One piece of seller-authored product knowledge, as it goes to the model: a heading and the
-     * text. No id, no product id, no author, no timestamp, no score — the model does not need them
-     * and the floor test asserts they are absent. The citation is reassembled from the retrieval
-     * result on the way back, where the ids never left the backend.
+     * One piece of seller-authored evidence, as it goes to the model: which KIND of evidence it is,
+     * a heading, and the text. No id, no product id, no author, no timestamp, no score — the model
+     * does not need them and the floor test asserts they are absent. The citation is reassembled
+     * from the retrieval result on the way back, where the ids never left the backend.
+     *
+     * <p>{@code scopeLabel} is one of a closed set of constants ("상품 정보", "운영 정책", "과거 답변")
+     * and carries nothing about this seller or this customer. It is on the wire because the model has
+     * to be told that a shipping policy is not a product specification: a drafter that reads all
+     * evidence as one undifferentiated block will answer a spec question out of a return policy.
      */
-    public record Passage(String heading, String text) {
+    public record Passage(String scopeLabel, String heading, String text) {
+
+        /** Evidence with no scope stated — the shape callers used before there were three lanes. */
+        public Passage(String heading, String text) {
+            this(null, heading, text);
+        }
     }
 
     /**
@@ -188,7 +202,7 @@ public class AgentDraftGenerator {
         ArrayNode messages = root.putArray("messages");
         ObjectNode user = messages.addObject();
         user.put("role", "user");
-        user.put("content", AgentDraftPrompt.user(input.title(), input.details(), input.knowledge()));
+        user.put("content", AgentDraftPrompt.user(input.title(), input.details(), input.knowledge(), input.orderState()));
         if (vendor == Vendor.ANTHROPIC) {
             root.put("max_tokens", maxOutputTokens);
             root.put("system", AgentDraftPrompt.system());

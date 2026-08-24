@@ -158,6 +158,33 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
             + "and a.sourceType = 'INQUIRY' and a.sourceId = q.id)")
     long countUnanalyzedByOrgId(@Param("orgId") UUID orgId);
 
+    /**
+     * Inquiries the CHANNEL says the seller has already answered, with the answer text.
+     *
+     * <p>The corpus behind Answer Memory's imported lane. Bounded by construction: only rows that
+     * carry an answer body, which is only the sources that publish one. Ordered so a re-import walks
+     * them the same way twice.
+     */
+    @Query("select q from Inquiry q where q.orgId = :orgId and q.status = 'ANSWERED'"
+            + " and q.answerBody is not null and q.dataOrigin = com.sellerops.common.DataOrigin.REAL"
+            + " order by q.receivedAt asc, q.id asc")
+    List<Inquiry> findAnsweredWithAnswerBody(@Param("orgId") UUID orgId);
+
+    /**
+     * The org's REAL, operator-visible, still-unanswered inquiries on one channel.
+     *
+     * <p>The corpus the knowledge-coverage audit measures. Excludes what the seller has dismissed as
+     * spam ({@code operational_state}) and everything synthetic, because a coverage number computed
+     * over seeded rows measures the seed.
+     */
+    @Query("select q from Inquiry q where q.orgId = :orgId and q.channelId = :channelId"
+            + " and q.status = 'UNANSWERED'"
+            + " and q.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE"
+            + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL"
+            + " order by q.receivedAt asc, q.id asc")
+    List<Inquiry> findRealUnansweredForCoverage(@Param("orgId") UUID orgId,
+                                                @Param("channelId") UUID channelId);
+
     boolean existsByOrgIdAndChannelIdAndExternalId(UUID orgId, UUID channelId, String externalId);
 
     boolean existsByOrgIdAndChannelIdAndContentHash(UUID orgId, UUID channelId, String contentHash);

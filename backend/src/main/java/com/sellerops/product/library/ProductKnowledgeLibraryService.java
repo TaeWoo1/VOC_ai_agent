@@ -1,6 +1,8 @@
 package com.sellerops.product.library;
 
 import com.sellerops.common.ApiException;
+import com.sellerops.knowledge.KnowledgeRetriever;
+import com.sellerops.knowledge.KnowledgeText;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.library.dto.KnowledgePassage;
@@ -31,36 +33,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProductKnowledgeLibraryService {
 
     /**
-     * How much of the askable question a passage must cover to be offered as grounding.
+     * The thresholds live in {@link KnowledgeRetriever}, not here.
      *
-     * <p>A RANKING floor, and only that. Its denominator is the same for every passage of one search
-     * ({@code Weighing.askableWeight}), so unlike the measure it replaced it cannot admit a passage by
-     * shrinking — a library that knows less about a question no longer scores higher on it.
+     * <p>They used to live in this class, when this was the only corpus anyone searched. It is not:
+     * the seller's operating policy and their past answers are searched by the same scorer, and a
+     * floor that means one thing for a product's notes and another for a shipping policy is a floor
+     * nobody can reason about. Moving them was the point of extracting the retriever.
      */
-    static final double MIN_TOPIC_COVERAGE = 0.4;
-
-    /**
-     * How much of the question's CONTENT words the library must have at all before any passage is
-     * offered.
-     *
-     * <p>The absence gate, and the one that makes "우리는 그 내용을 갖고 있지 않습니다" reachable. It is
-     * measured over content words only — interrogatives and the words for the product we already
-     * resolved are removed first ({@link QueryWords}), which is why a well-formed question no longer
-     * fails it. What remains in the denominator is the part of the question nobody wrote about, which
-     * is exactly what absence means: "방수 되나요?" against a molding library is 0.0.
-     */
-    static final double MIN_ASKABLE_RATIO = 0.35;
-
-    /**
-     * The fewest characters of the question's own words a passage must actually share.
-     *
-     * <p>An absolute floor beside the ratio, because a ratio can be satisfied by one syllable when the
-     * question has one content word — "폭" lands inside 폭넓은, 폭염, 폭우. Two characters is the first
-     * length at which a Korean match is a word rather than a syllable, and it is checked on the
-     * characters left AFTER the product's own name is discounted.
-     */
-    static final int MIN_MATCHED_CHARS = 2;
-
     /** Passages per answer. More than this is not grounding; it is pasting the document back. */
     static final int MAX_PASSAGES = 5;
 
@@ -141,43 +120,27 @@ public class ProductKnowledgeLibraryService {
         // <b>The title is part of the passage for matching.</b> A seller puts the topic in the title
         // ("교환 및 반품 안내") and then never repeats it in the body, so a passage judged on its body
         // alone loses the one word its document is about.
-        Map<UUID, String> searchable = new HashMap<>();
-        for (ProductKnowledgeChunk chunk : corpus) {
-            ProductKnowledgeSource source = byId.get(chunk.getSourceId());
-            if (source != null) {
-                searchable.put(chunk.getId(),
-                        KnowledgeText.normalize(source.getTitle()) + chunk.getNormalized());
-            }
-        }
-        // Rarity is measured over THIS product's corpus, so the weights answer "which part of the
-        // question distinguishes one of these documents from the others". The product's own name is
-        // handed in because it distinguishes none of them and must not be able to admit a passage.
-        KnowledgeText.Weighing weighing =
-                KnowledgeText.weigh(query, List.copyOf(searchable.values()), product.getName());
-
-        // <b>Absence is decided once, for the question, before any passage is looked at.</b> A gate
-        // applied per passage would let the best coincidence through on a question the library does
-        // not cover — which is the failure this whole layer exists to prevent.
-        if (weighing.askableRatio() < MIN_ASKABLE_RATIO) {
-            return new KnowledgeSearchResponse(productId, query, documents.size(), corpus.size(),
-                    List.of());
-        }
-        List<KnowledgePassage> hits = new ArrayList<>();
+        List<KnowledgeRetriever.Candidate<ProductKnowledgeChunk>> candidates = new ArrayList<>();
         for (ProductKnowledgeChunk chunk : corpus) {
             ProductKnowledgeSource source = byId.get(chunk.getSourceId());
             // A chunk whose document the read filter excluded (a seeded note in a real deployment)
             // is skipped rather than quoted with no attribution.
-            if (source == null) {
-                continue;
+            if (source != null) {
+                candidates.add(new KnowledgeRetriever.Candidate<>(chunk,
+                        KnowledgeText.normalize(source.getTitle()) + chunk.getNormalized()));
             }
-            KnowledgeText.Assessment assessment = weighing.assess(searchable.get(chunk.getId()));
-            if (assessment.matchedChars() < MIN_MATCHED_CHARS
-                    || assessment.coverage() < MIN_TOPIC_COVERAGE) {
-                continue;
-            }
+        }
+        // The product's own name is handed in because it distinguishes no passage in its own library
+        // and must not be able to admit one: a question that names the product would otherwise score
+        // against every document that repeats the title.
+        List<KnowledgePassage> hits = new ArrayList<>();
+        for (KnowledgeRetriever.Hit<ProductKnowledgeChunk> hit
+                : KnowledgeRetriever.rank(query, candidates, product.getName())) {
+            ProductKnowledgeChunk chunk = hit.ref();
+            ProductKnowledgeSource source = byId.get(chunk.getSourceId());
             hits.add(new KnowledgePassage(source.getId(), chunk.getId(), source.getSourceType(),
                     source.getTitle(), chunk.getContent(), chunk.getOrdinal(),
-                    round(assessment.coverage()), source.getAuthorName(), source.getSourceUrl(),
+                    round(hit.coverage()), source.getAuthorName(), source.getSourceUrl(),
                     source.getUpdatedAt()));
         }
         hits.sort(Comparator.comparingDouble(KnowledgePassage::score).reversed()

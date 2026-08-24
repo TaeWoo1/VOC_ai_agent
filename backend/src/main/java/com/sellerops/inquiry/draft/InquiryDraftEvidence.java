@@ -1,5 +1,6 @@
 package com.sellerops.inquiry.draft;
 
+import com.sellerops.knowledge.KnowledgeScope;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -74,8 +75,53 @@ public class InquiryDraftEvidence {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
-    /** The only kind this package produces. */
+    /** 판매자가 상품에 대해 쓴 지식. */
     public static final String KIND_PRODUCT_KNOWLEDGE = "PRODUCT_KNOWLEDGE";
+
+    /** 판매자가 회사 단위로 정해 둔 운영 정책. */
+    public static final String KIND_ORG_POLICY = "ORG_POLICY";
+
+    /** 판매자가 실제로 하거나 승인한 과거 답변. */
+    public static final String KIND_ANSWER_MEMORY = "ANSWER_MEMORY";
+
+    /**
+     * The stored kind for a scope.
+     *
+     * <p>The two are separate vocabularies on purpose: {@link KnowledgeScope} is what the product
+     * reasons in and may be renamed, while these strings are already written into rows that must
+     * still read correctly years from now.
+     */
+    public static String kindOf(KnowledgeScope scope) {
+        return switch (scope) {
+            case PRODUCT -> KIND_PRODUCT_KNOWLEDGE;
+            case ORG_OPERATIONS -> KIND_ORG_POLICY;
+            case PAST_ANSWER -> KIND_ANSWER_MEMORY;
+            // Neither is retrievable, so neither can be a citation. Reaching here is a programming
+            // error, not a data state, and it fails loudly rather than storing a plausible wrong kind.
+            case CHANNEL_FACT, ORDER_STATE ->
+                    throw new IllegalArgumentException("not a retrievable scope: " + scope);
+        };
+    }
+
+    /** The scope behind a stored kind, or null when the row predates this build's vocabulary. */
+    public static KnowledgeScope scopeOf(String kind) {
+        if (KIND_PRODUCT_KNOWLEDGE.equals(kind)) {
+            return KnowledgeScope.PRODUCT;
+        }
+        if (KIND_ORG_POLICY.equals(kind)) {
+            return KnowledgeScope.ORG_OPERATIONS;
+        }
+        if (KIND_ANSWER_MEMORY.equals(kind)) {
+            return KnowledgeScope.PAST_ANSWER;
+        }
+        return null;
+    }
+
+    /** The seller-facing group for a stored kind; the raw value when it predates this vocabulary. */
+    public static String scopeLabelOf(String kind) {
+        KnowledgeScope scope = scopeOf(kind);
+        return scope == null ? kind : scope.labelKo();
+    }
 
     @PrePersist
     void onCreate() {

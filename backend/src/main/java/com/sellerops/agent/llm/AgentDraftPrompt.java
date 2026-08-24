@@ -23,7 +23,7 @@ package com.sellerops.agent.llm;
 public final class AgentDraftPrompt {
 
     /** Bump on every wording change. It is stamped into the provenance the run records. */
-    public static final String PROMPT_VERSION = "agent-draft-prompt/v2";
+    public static final String PROMPT_VERSION = "agent-draft-prompt/v3";
 
     /**
      * The closed set of reply categories, in the rule drafter's own order.
@@ -53,8 +53,14 @@ public final class AgentDraftPrompt {
                - 이 초안은 사람이 검토하고 직접 전송합니다. 시스템이 대신 전송하지 않습니다.
                - 확인되지 않은 사실(주문 상태, 재고 수량, 배송 일자, 환불 금액, 정책 조항)을 지어내지 마세요. \
                확인 후 안내하겠다고 쓰세요.
-               - 「판매자가 등록한 상품 지식」이 주어지면 그 내용만 근거로 쓰세요. 거기 없는 사양·수치·기간·\
-               조건은 쓰지 마세요. 지식이 비어 있으면 그것만으로 답을 만들지 말고 확인 후 안내하겠다고 쓰세요.
+               - 「판매자가 등록한 근거」가 주어지면 그 내용만 근거로 쓰세요. 거기 없는 사양·수치·기간·\
+               조건은 쓰지 마세요. 근거가 비어 있으면 그것만으로 답을 만들지 말고 확인 후 안내하겠다고 쓰세요.
+               - 근거는 [상품 정보] [운영 정책] [과거 답변]로 구분되어 있습니다. 상품의 사양은 [상품 정보]에서만, \
+               배송·취소·교환·증빙 같은 회사 규정은 [운영 정책]에서만 가져오세요. [과거 답변]은 이 판매자가 전에 한 \
+               답변이며, 지금 이 고객의 사실이 아닙니다 -- 표현을 맞추는 데 쓰고 사실의 출처로 쓰지 마세요.
+               - 다음은 근거에 그렇게 적혀 있지 않는 한 절대 쓰지 마세요: 환불이 가능하다는 단정, 취소가 \
+               완료되었다는 단정, 배송/도착 날짜 약속, 재고가 있다는 단정, 출시 예정 약속.
+               - 「주문 상태」에 확인된 값이 없으면 이 주문이 어떤 상태인지 쓰지 말고, 확인 후 안내하겠다고 쓰세요.
                - 보상, 할인, 예외 처리를 약속하지 마세요.
                - 고객의 이름, 연락처, 주소를 초안에 넣지 마세요.
                - 2~4문장, 존댓말, 인사와 마무리를 포함합니다.
@@ -86,21 +92,45 @@ public final class AgentDraftPrompt {
      * <p>A null body is rendered as an empty line rather than the string "null": the model would
      * otherwise be answering a question about a literal four-letter word.
      */
-    public static String user(String title, String details, java.util.List<AgentDraftGenerator.Passage> knowledge) {
+    public static String user(String title, String details,
+                              java.util.List<AgentDraftGenerator.Passage> knowledge) {
+        return user(title, details, knowledge, null);
+    }
+
+    /**
+     * The user turn with the order-state line.
+     *
+     * @param orderState the ONE sentence {@code InquiryOrderContextReader} produced — either a
+     *                   confirmed state or the reason there is none. A constant of the product, not
+     *                   of the customer: it names no order and carries no identifier. Null renders
+     *                   the same "(확인된 값 없음)" as an unavailable read, because a caller that
+     *                   forgot to look and a lookup that found nothing must not differ in what the
+     *                   model is allowed to claim.
+     */
+    public static String user(String title, String details,
+                              java.util.List<AgentDraftGenerator.Passage> knowledge, String orderState) {
         StringBuilder sb = new StringBuilder();
         sb.append("제목: ").append(title == null ? "" : title)
                 .append("\n본문:\n").append(details == null ? "" : details);
-        sb.append("\n\n판매자가 등록한 상품 지식:\n");
+        sb.append("\n\n판매자가 등록한 근거:\n");
         if (knowledge == null || knowledge.isEmpty()) {
             // Said out loud rather than omitted. An absent section reads to a model as "not relevant
             // here"; this section reads as "there is nothing, so do not pretend there is".
             sb.append("(없음)");
         } else {
             for (AgentDraftGenerator.Passage passage : knowledge) {
-                sb.append("- [").append(passage.heading() == null ? "" : passage.heading()).append("] ")
+                sb.append("- ");
+                if (passage.scopeLabel() != null && !passage.scopeLabel().isBlank()) {
+                    sb.append('[').append(passage.scopeLabel()).append("] ");
+                }
+                sb.append('[').append(passage.heading() == null ? "" : passage.heading()).append("] ")
                         .append(passage.text() == null ? "" : passage.text()).append('\n');
             }
         }
+        // The order line is always present, and by default says there is nothing. A model that is
+        // never told about order state infers it may reason about it from the customer's message.
+        sb.append("\n주문 상태:\n")
+                .append(orderState == null || orderState.isBlank() ? "(확인된 값 없음)" : orderState);
         return sb.toString().strip();
     }
 

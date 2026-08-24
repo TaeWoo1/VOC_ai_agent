@@ -12,5 +12,14 @@ public interface ProductKnowledgeChunkRepository extends JpaRepository<ProductKn
      */
     List<ProductKnowledgeChunk> findAllByOrgIdAndProductId(UUID orgId, UUID productId);
 
+    /**
+     * Every passage this org has written about any product.
+     *
+     * <p>Not a retrieval corpus — retrieval is always scoped to one product. This is read to build
+     * the seller's own VOCABULARY, which is the fence that keeps customer identifiers out of answer
+     * memory ({@code TopicSignature}).
+     */
+    List<ProductKnowledgeChunk> findAllByOrgId(UUID orgId);
+
     void deleteAllBySourceId(UUID sourceId);
 }

@@ -2,6 +2,8 @@ import axios, { isAxiosError } from "axios";
 import type {
   AgentQuotaStatus,
   KnowledgeSourceRequest,
+  OrgKnowledgeRequest,
+  OrgKnowledgeView,
   KnowledgeSourceView,
   OverviewResponse,
   ProductKnowledgeView,
@@ -1637,6 +1639,37 @@ export const api = {
 
   async deleteProductKnowledgeSource(sourceId: string): Promise<void> {
     await http.delete(`/api/products/knowledge/sources/${encodeURIComponent(sourceId)}`);
+  },
+
+  /**
+   * The company's own operating rules — 배송, 취소, 교환/환불, 증빙, 공통 CS.
+   *
+   * Org-scoped from the token; no org id is ever sent. These are the rules an answer may be
+   * grounded in when the inquiry resolves to no product, which is most of a real backlog.
+   */
+  async listOrgKnowledge(): Promise<OrgKnowledgeView[]> {
+    const { data } = await http.get<OrgKnowledgeView[]>("/api/org-knowledge/sources");
+    return data;
+  },
+
+  async createOrgKnowledge(request: OrgKnowledgeRequest): Promise<OrgKnowledgeView> {
+    const { data } = await http.post<OrgKnowledgeView>("/api/org-knowledge/sources", request);
+    return data;
+  },
+
+  async updateOrgKnowledge(
+    sourceId: string,
+    request: OrgKnowledgeRequest,
+  ): Promise<OrgKnowledgeView> {
+    const { data } = await http.put<OrgKnowledgeView>(
+      `/api/org-knowledge/sources/${encodeURIComponent(sourceId)}`,
+      request,
+    );
+    return data;
+  },
+
+  async deleteOrgKnowledge(sourceId: string): Promise<void> {
+    await http.delete(`/api/org-knowledge/sources/${encodeURIComponent(sourceId)}`);
   },
 
   /** Today's Agent budget for this org. Read-only; asking never spends any of it. */

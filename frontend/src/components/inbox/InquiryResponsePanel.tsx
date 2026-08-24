@@ -581,17 +581,38 @@ function InquiryMeta({
  */
 function DraftEvidence({ evidence }: { evidence: DraftEvidenceView[] }) {
   if (evidence.length === 0) return null;
+  // Grouped by where it came from, in the order the retrieval returned it. A seller who disagrees
+  // with the reply needs to know WHICH thing to go and fix — a wrong spec is fixed in 상품 지식, a
+  // wrong shipping promise in 운영 정책, and neither fix reaches the other. The locator carries the
+  // full provenance and stays where it was; the group heading is what makes the list scannable.
+  const groups: Array<{ label: string; items: DraftEvidenceView[] }> = [];
+  for (const item of evidence) {
+    const label = item.scopeLabel ?? item.kind;
+    const last = groups.length > 0 ? groups[groups.length - 1] : undefined;
+    if (last && last.label === label) last.items.push(item);
+    else groups.push({ label, items: [item] });
+  }
   return (
     <div className="mt-4 border-t border-line pt-3">
       <p className="text-sm font-medium text-ink">근거</p>
-      <ul className="mt-1.5 space-y-1">
-        {evidence.map((item, index) => (
-          <li key={`${item.chunkId ?? item.sourceId ?? "evidence"}-${index}`} className="text-sm text-muted">
-            <span className="break-keep text-ink">{item.title ?? "상품 지식"}</span>
-            {item.locator ? <span className="ml-2 break-all">{item.locator}</span> : null}
-          </li>
+      <div className="mt-1.5 space-y-2">
+        {groups.map((group, groupIndex) => (
+          <div key={`${group.label}-${groupIndex}`}>
+            <p className="text-sm font-medium text-muted">{group.label}</p>
+            <ul className="mt-0.5 space-y-1">
+              {group.items.map((item, index) => (
+                <li
+                  key={`${item.chunkId ?? item.sourceId ?? "evidence"}-${index}`}
+                  className="text-sm text-muted"
+                >
+                  <span className="break-keep text-ink">{item.title ?? group.label}</span>
+                  {item.locator ? <span className="ml-2 break-all">{item.locator}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

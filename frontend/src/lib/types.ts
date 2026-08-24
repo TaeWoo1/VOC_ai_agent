@@ -1275,10 +1275,58 @@ export interface InquiryDetail {
  */
 export interface DraftEvidenceView {
   kind: string;
+  /**
+   * The seller-facing group this citation belongs to — 상품 정보 / 운영 정책 / 과거 답변.
+   *
+   * Sent by the backend rather than derived here from `kind`: `kind` is a storage vocabulary that
+   * may gain a value this build has no label for, and a citation labelled as the wrong kind of
+   * evidence is worse than one labelled with its raw name.
+   */
+  scopeLabel: string | null;
   title: string | null;
   locator: string | null;
   sourceId: string | null;
   chunkId: string | null;
+}
+
+/** The closed set of operating-rule kinds. Mirrors com.sellerops.knowledge.org.OrgKnowledgeType. */
+export type OrgKnowledgeType =
+  | "SHIPPING_POLICY"
+  | "CANCELLATION_POLICY"
+  | "EXCHANGE_REFUND_POLICY"
+  | "PAYMENT_POLICY"
+  | "TAX_INVOICE"
+  | "CASH_RECEIPT"
+  | "GENERAL_CS_FAQ"
+  | "OTHER";
+
+/**
+ * Mirrors com.sellerops.knowledge.org.dto.OrgKnowledgeView — one operating rule the seller wrote.
+ *
+ * `typeLabel` comes from the backend so the screen never has to translate an enum; `version` is
+ * shown because a policy is a thing that changes and a citation recorded last week points at the
+ * revision that was current then.
+ */
+export interface OrgKnowledgeView {
+  id: string;
+  knowledgeType: OrgKnowledgeType;
+  typeLabel: string;
+  title: string;
+  body: string;
+  sourceUrl: string | null;
+  authorName: string | null;
+  version: number;
+  passageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** What the seller submits when writing or revising an operating rule. */
+export interface OrgKnowledgeRequest {
+  knowledgeType: OrgKnowledgeType;
+  title: string;
+  body: string;
+  sourceUrl?: string | null;
 }
 
 /**

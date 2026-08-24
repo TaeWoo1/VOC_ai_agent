@@ -17,14 +17,11 @@ import com.sellerops.inquiry.reply.InquiryReplyDraftService;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
-import com.sellerops.product.OperatorProductName;
-import com.sellerops.product.ProductRepository;
-import com.sellerops.product.library.ProductKnowledgeLibraryService;
-import com.sellerops.product.library.dto.KnowledgePassage;
-import com.sellerops.product.library.dto.KnowledgeSearchResponse;
+import com.sellerops.knowledge.KnowledgeScope;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -51,51 +48,31 @@ import org.springframework.stereotype.Service;
 @Service
 public class InquiryDraftComposer {
 
-    /**
-     * How many passages reach the model.
-     *
-     * <p>Three, not five. The retrieval is already scoped to one product and ranked; passages four
-     * and five are the ones whose {@code topicCoverage} barely cleared the floor, and a drafter given
-     * a weak passage tends to use it. The citation list a seller reads before sending is also three
-     * lines rather than five.
-     */
-    static final int MAX_PASSAGES = 3;
-
-    /**
-     * How much of the question is used as the retrieval query.
-     *
-     * <p>The Cafe24 backlog contains forwarded mail threads running to thousands of characters, where
-     * the actual question is the first line and the rest is quoted history. A whole thread as a query
-     * dilutes every term: the IDF weighting spreads across hundreds of shingles and the topic the
-     * seller was asked about stops being the topic that scores. The title plus the head of the body
-     * is where the question is.
-     */
-    static final int QUERY_CHARS = 400;
+    // How many passages reach the model, and how much of the question is used to find them, are
+    // both decisions of the retrieval and live on InquiryEvidenceRetriever. They used to be here,
+    // when there was one lane and this class WAS the retrieval.
 
     private final InquiryWorkItemRepository workItems;
     private final InquiryRepository inquiries;
     private final InquiryReplyDraftService drafts;
     private final InquiryDraftEvidenceRepository evidence;
-    private final ProductRepository products;
-    private final ProductKnowledgeLibraryService library;
+    private final InquiryEvidenceRetriever retriever;
     private final AgentDraftService model;
     private final AgentQuotaService quota;
     private final InquiryProposalProvider rules;
 
     public InquiryDraftComposer(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                 InquiryReplyDraftService drafts, InquiryDraftEvidenceRepository evidence,
-                                ProductKnowledgeLibraryService library, AgentDraftService model,
-                                AgentQuotaService quota, InquiryProposalProvider rules,
-                                ProductRepository products) {
+                                InquiryEvidenceRetriever retriever, AgentDraftService model,
+                                AgentQuotaService quota, InquiryProposalProvider rules) {
         this.workItems = workItems;
         this.inquiries = inquiries;
         this.drafts = drafts;
         this.evidence = evidence;
-        this.library = library;
+        this.retriever = retriever;
         this.model = model;
         this.quota = quota;
         this.rules = rules;
-        this.products = products;
     }
 
     /**
@@ -119,7 +96,7 @@ public class InquiryDraftComposer {
         String title = MarkupText.toPlainText(inquiry.getTitle());
         String details = MarkupText.toPlainText(inquiry.getBody());
 
-        Retrieved retrieved = retrieve(orgId, inquiry, title, details);
+        InquiryEvidenceRetriever.InquiryEvidence retrieved = retriever.retrieve(orgId, inquiry);
 
         String quotaMessage = null;
         Optional<AgentDraftResponseParser.ParsedDraft> written = Optional.empty();
@@ -127,7 +104,8 @@ public class InquiryDraftComposer {
         if (model.isEnabledFor(orgId)) {
             QuotaDecision decision = quota.consume(orgId, AgentUsageKind.DRAFT, null);
             if (decision.allowed()) {
-                written = model.draft(orgId, title, details, passagesFor(retrieved.passages()));
+                written = model.draft(orgId, title, details, passagesFor(retrieved.passages()),
+                        retrieved.order().messageKo());
             } else {
                 quotaMessage = decision.messageKo();
             }
@@ -138,8 +116,10 @@ public class InquiryDraftComposer {
         // would attach citations to a sentence that was never shown them.
         DraftKnowledgeState state = authorKind == DraftAuthorKind.MODEL
                 ? retrieved.state() : degrade(retrieved.state());
-        List<KnowledgePassage> cited = authorKind == DraftAuthorKind.MODEL
+        List<InquiryEvidenceRetriever.ScopedPassage> cited = authorKind == DraftAuthorKind.MODEL
                 ? retrieved.passages() : List.of();
+        Set<KnowledgeScope> scopes = authorKind == DraftAuthorKind.MODEL
+                ? retrieved.scopes() : Set.of();
 
         String replyTitle = written.map(AgentDraftResponseParser.ParsedDraft::title)
                 .filter(t -> t != null && !t.isBlank())
@@ -155,7 +135,7 @@ public class InquiryDraftComposer {
                         state, retrieved.productId()));
 
         List<DraftEvidenceView> views = recordEvidence(orgId, workItemId, saved.version(), cited);
-        return new GeneratedDraftView(saved, authorKind.name(), state.name(), state.messageKo(),
+        return new GeneratedDraftView(saved, authorKind.name(), state.name(), state.messageKo(scopes),
                 retrieved.productId(), views, quotaMessage);
     }
 
@@ -165,44 +145,9 @@ public class InquiryDraftComposer {
                 .filter(w -> w.getOrgId().equals(orgId))
                 .orElseThrow(() -> ApiException.notFound("문의 작업을 찾을 수 없습니다."));
         return evidence.findAllByWorkItemIdAndDraftVersionOrderByOrdinalAsc(workItemId, version).stream()
-                .map(row -> new DraftEvidenceView(row.getKind(), row.getTitle(), row.getLocator(),
-                        row.getSourceId(), row.getChunkId()))
+                .map(row -> new DraftEvidenceView(row.getKind(), InquiryDraftEvidence.scopeLabelOf(row.getKind()),
+                        row.getTitle(), row.getLocator(), row.getSourceId(), row.getChunkId()))
                 .toList();
-    }
-
-    /**
-     * What the library could offer, and which of the four absences it is.
-     *
-     * <p><b>A resolved product id is not the same as a resolved product.</b> Ingest mints a shared
-     * {@code (미지정 상품)} row for every nameless source row, so most of the Cafe24 backlog carries a
-     * non-null {@code productId} that points at a bucket of unrelated inquiries. Searching its library
-     * would report NO_LIBRARY — "이 상품에 등록된 상품 지식이 없다" — about a product that does not
-     * exist, and inviting the seller to write knowledge for it would be inviting them to write it into
-     * a bucket. {@link OperatorProductName#displayNameOrNull} already knows the three shapes of "no name is
-     * actually known"; this reuses that judgement rather than re-deriving it.
-     */
-    private Retrieved retrieve(UUID orgId, Inquiry inquiry, String title, String details) {
-        UUID productId = inquiry.getProductId();
-        if (productId == null || !namedProduct(orgId, productId)) {
-            return new Retrieved(null, DraftKnowledgeState.NO_PRODUCT, List.of());
-        }
-        String query = query(title, details);
-        KnowledgeSearchResponse found = library.search(orgId, productId, query, MAX_PASSAGES);
-        if (found.documentsSearched() == 0) {
-            return new Retrieved(productId, DraftKnowledgeState.NO_LIBRARY, List.of());
-        }
-        if (found.passages().isEmpty()) {
-            return new Retrieved(productId, DraftKnowledgeState.NO_MATCH, List.of());
-        }
-        return new Retrieved(productId, DraftKnowledgeState.GROUNDED, found.passages());
-    }
-
-    /** Whether this product id points at a real, named product rather than ingest's shared bucket. */
-    private boolean namedProduct(UUID orgId, UUID productId) {
-        return products.findById(productId)
-                .filter(p -> p.getOrgId().equals(orgId))
-                .map(p -> OperatorProductName.displayNameOrNull(p) != null)
-                .orElse(false);
     }
 
     /**
@@ -213,45 +158,40 @@ public class InquiryDraftComposer {
         return state == DraftKnowledgeState.GROUNDED ? DraftKnowledgeState.NO_MATCH : state;
     }
 
-    static String query(String title, String details) {
-        String joined = ((title == null ? "" : title) + " " + (details == null ? "" : details)).strip();
-        return joined.length() > QUERY_CHARS ? joined.substring(0, QUERY_CHARS) : joined;
-    }
-
-    private static List<AgentDraftGenerator.Passage> passagesFor(List<KnowledgePassage> passages) {
+    private static List<AgentDraftGenerator.Passage> passagesFor(
+            List<InquiryEvidenceRetriever.ScopedPassage> passages) {
         return passages.stream()
-                .limit(MAX_PASSAGES)
-                .map(p -> new AgentDraftGenerator.Passage(p.title(), p.content()))
+                .map(p -> new AgentDraftGenerator.Passage(p.scope().labelKo(), p.heading(), p.text()))
                 .toList();
     }
 
+    /**
+     * Record what the drafter was shown, one row per passage, with its scope.
+     *
+     * <p>The scope is stored in {@code kind}, which is a string column precisely so a new kind of
+     * evidence does not need a migration to be recordable. Three kinds exist now; before this package
+     * there was one, and the column already anticipated the rest.
+     */
     private List<DraftEvidenceView> recordEvidence(UUID orgId, UUID workItemId, int version,
-                                                   List<KnowledgePassage> passages) {
+                                                   List<InquiryEvidenceRetriever.ScopedPassage> passages) {
         List<DraftEvidenceView> views = new ArrayList<>(passages.size());
         int ordinal = 0;
-        for (KnowledgePassage passage : passages) {
+        for (InquiryEvidenceRetriever.ScopedPassage passage : passages) {
             InquiryDraftEvidence row = new InquiryDraftEvidence();
             row.setOrgId(orgId);
             row.setWorkItemId(workItemId);
             row.setDraftVersion(version);
             row.setOrdinal(ordinal++);
-            row.setKind(InquiryDraftEvidence.KIND_PRODUCT_KNOWLEDGE);
+            row.setKind(InquiryDraftEvidence.kindOf(passage.scope()));
             row.setSourceId(passage.sourceId());
             row.setChunkId(passage.chunkId());
-            row.setTitle(passage.title());
-            row.setLocator(locator(passage));
+            row.setTitle(passage.heading());
+            row.setLocator(passage.locator());
             evidence.save(row);
-            views.add(new DraftEvidenceView(row.getKind(), row.getTitle(), row.getLocator(),
-                    row.getSourceId(), row.getChunkId()));
+            views.add(new DraftEvidenceView(row.getKind(), passage.scope().labelKo(), row.getTitle(),
+                    row.getLocator(), row.getSourceId(), row.getChunkId()));
         }
         return views;
-    }
-
-    /** {@code product-knowledge/USAGE:데모 운영자} — the same shape the agent runtime cites. */
-    private static String locator(KnowledgePassage passage) {
-        String author = passage.authorName() == null || passage.authorName().isBlank()
-                ? "판매자" : passage.authorName();
-        return "product-knowledge/" + passage.sourceType().name() + ":" + author;
     }
 
     private static String defaultTitle(String inquiryTitle) {
@@ -284,9 +224,5 @@ public class InquiryDraftComposer {
             default -> "문의 주셔서 감사합니다.";
         };
         return opening + "\n문의하신 내용을 확인한 뒤 정확한 안내를 드리겠습니다. 잠시만 기다려 주세요.\n감사합니다.";
-    }
-
-    /** What the retrieval produced: the product it was scoped to, the verdict, and the passages. */
-    private record Retrieved(UUID productId, DraftKnowledgeState state, List<KnowledgePassage> passages) {
     }
 }

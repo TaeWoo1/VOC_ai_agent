@@ -17,9 +17,16 @@ import com.sellerops.inquiry.reply.InquiryReplyDraftService;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import com.sellerops.knowledge.memory.AnswerMemoryRepository;
+import com.sellerops.knowledge.memory.AnswerMemoryService;
+import com.sellerops.knowledge.org.OrgKnowledgeChunkRepository;
+import com.sellerops.knowledge.org.OrgKnowledgeSourceRepository;
+import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
+import com.sellerops.order.ChannelOrderRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.library.KnowledgeSourceType;
+import com.sellerops.product.library.ProductKnowledgeChunkRepository;
 import com.sellerops.product.library.ProductKnowledgeLibraryService;
 import com.sellerops.product.library.dto.KnowledgePassage;
 import com.sellerops.product.library.dto.KnowledgeSearchResponse;
@@ -56,6 +63,11 @@ class InquiryDraftComposerTest {
     @Autowired InquiryReplyDraftRepository draftRows;
     @Autowired InquiryDraftEvidenceRepository evidence;
     @Autowired ProductRepository products;
+    @Autowired OrgKnowledgeSourceRepository orgSources;
+    @Autowired OrgKnowledgeChunkRepository orgChunks;
+    @Autowired ProductKnowledgeChunkRepository productChunks;
+    @Autowired AnswerMemoryRepository memories;
+    @Autowired ChannelOrderRepository channelOrders;
 
     private final UUID org = UUID.randomUUID();
     private final UUID user = UUID.randomUUID();
@@ -125,7 +137,7 @@ class InquiryDraftComposerTest {
         assertThat(view.knowledgeState()).isEqualTo(DraftKnowledgeState.NO_PRODUCT.name());
         assertThat(library.searched).as("no product means there is nothing to search").isFalse();
         assertThat(view.evidence()).isEmpty();
-        assertThat(view.knowledgeNote()).contains("상품과 연결되지 않아");
+        assertThat(view.knowledgeNote()).contains("상품과 연결되지 않았고");
     }
 
     @Test
@@ -206,8 +218,8 @@ class InquiryDraftComposerTest {
     @DisplayName("the retrieval query is bounded — a forwarded mail thread is not the question")
     void queryIsBounded() {
         String thread = "재고 있나요? " + "인용된 지난 대화 ".repeat(200);
-        assertThat(InquiryDraftComposer.query("제목", thread))
-                .hasSize(InquiryDraftComposer.QUERY_CHARS)
+        assertThat(InquiryEvidenceRetriever.query("제목", thread))
+                .hasSize(InquiryEvidenceRetriever.QUERY_CHARS)
                 .startsWith("제목 재고 있나요?");
     }
 
@@ -218,8 +230,14 @@ class InquiryDraftComposerTest {
     }
 
     private InquiryDraftComposer composer(StubLibrary library, StubModel model, AgentQuotaService quota) {
-        return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, library, model,
-                quota, new RuleBasedInquiryProposalProvider(), products);
+        // The real retriever over a stubbed product lane: the org-policy and past-answer lanes run
+        // against genuinely empty stores, which is the state these cases are about.
+        InquiryEvidenceRetriever retriever = new InquiryEvidenceRetriever(products, library,
+                new SellerOperationsKnowledgeService(orgSources, orgChunks),
+                new AnswerMemoryService(memories, orgChunks, productChunks),
+                new InquiryOrderContextReader(channelOrders));
+        return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, retriever, model,
+                quota, new RuleBasedInquiryProposalProvider());
     }
 
     private static KnowledgePassage passage(String title, String content) {
@@ -333,12 +351,18 @@ class InquiryDraftComposerTest {
             return answer == null ? null : "stub-model/v1";
         }
 
+        String sawOrderState;
+
+        // The five-argument form is the one the composer calls; overriding only the four-argument
+        // convenience would leave the real implementation running underneath it.
         @Override
         public Optional<AgentDraftResponseParser.ParsedDraft> draft(
-                UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge) {
+                UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
+                String orderState) {
             sawTitle = title;
             sawDetails = details;
             sawKnowledge.addAll(knowledge);
+            sawOrderState = orderState;
             return Optional.ofNullable(answer);
         }
     }

@@ -17,6 +17,7 @@ import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.inquiry.draft.InquiryDraftEvidenceRepository;
+import com.sellerops.inquiry.draft.InquiryDraftEvidence;
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry;
 import com.sellerops.inquiry.publish.PreSendCheck;
@@ -126,8 +127,9 @@ public class InquiryProposalService {
                 draft == null ? List.of()
                         : draftEvidence.findAllByWorkItemIdAndDraftVersionOrderByOrdinalAsc(
                                 workItemId, draft.version()).stream()
-                        .map(row -> new DraftEvidenceView(row.getKind(), row.getTitle(), row.getLocator(),
-                                row.getSourceId(), row.getChunkId()))
+                        .map(row -> new DraftEvidenceView(row.getKind(),
+                                InquiryDraftEvidence.scopeLabelOf(row.getKind()), row.getTitle(),
+                                row.getLocator(), row.getSourceId(), row.getChunkId()))
                         .toList(),
                 capabilities.capability(channelCode, inquiry.getSourceSubtype()));
     }
