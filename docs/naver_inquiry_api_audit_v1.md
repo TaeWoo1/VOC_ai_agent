@@ -811,3 +811,137 @@ proof 후 운영자 기준값 `true`로 복원.
 채널/계정/범위·코드·브랜치가 바뀌면 승인은 `REVOKED`.
 
 **여기서 멈춘다.** L0·L1·L2·L3 중 어느 것도 실행하지 않았다.
+
+---
+
+## 16. PART 2 라이브 결과 (2026-08-24 20:51–20:55) — **routine recurrence `CONFIRMED`**
+
+승인 `Seated and ready.` — §15.5 manifest, commit `ca7d3e5e`, `READ_ONLY`.
+L0 → L1 → L2 → L3 순서대로 전부 실행했고 **전부 green**이다. **WRITE 0.**
+
+### 16.1 L0 — 인증은 살아 있다
+
+`POST …/test-connection` → **`SUCCESS`**, `reasonCode: null`. 20:51:28.
+
+§12에서 두 번 연속 죽었던 그 자리다. **거절 범주는 기록되지 않았다 — 거절이 없었기 때문이다.**
+계정 `RECONNECT_REQUIRED` → `PREPARING`, 그리고 첫 routine 수집 뒤 `CONNECTED`.
+
+**원인은 여전히 확정하지 않는다.** 성공했다는 이유로 8월 23·24일의 실패를 IP였다고 단정하지
+않는다 — 그때 관측된 것은 `GW.IP_NOT_ALLOWED`가 아니었고, 그 사이에 바뀐 것은 IP만이 아니다.
+확정된 것은 하나뿐이다: **지금 이 환경에서 이 자격 증명은 받아들여진다.**
+
+§15.2의 계측은 이번에는 아무것도 기록할 것이 없었다. 그것이 이 변경의 목적이다 — 다음 거절에
+대비하는 것이지, 이번 성공을 설명하는 것이 아니다.
+
+### 16.2 L1 — 같은 창 재독, **기대값과 한 자리도 다르지 않다**
+
+run `0b7b99e3` · `MANUAL` · **`SUCCESS`** · 0.22s · bounded `2026-06-01~2026-08-24` · `PRODUCT_QNA` 단독 무장.
+
+| 측정 | 기대 | 실측 |
+|---|---|---|
+| received / inserted / skipped / failed | 13 / 0 / 13 / 0 | **13 / 0 / 13 / 0** |
+| `questionId` 중복 | 0 | **0** (13행 = 13 고유 external id) |
+| 정확 귀속 | 13/13 | **13/13** |
+| 신규 product | 0 | **0** (전 org 320 · demo org 308 불변, 19:50 이후 생성 0) |
+| synthetic | 불변 | **8 불변** |
+| 마켓플레이스 요청 | 2 | **목록 1회** (`page=1/1 total=13 last=true`) + 캐시된 토큰 |
+| WRITE | 0 | **0** |
+
+커서: `backfill/qna` `done=true`, **`backfill/customer`는 손대지 않았다**(`done=false`, page 1) —
+고객 문의 플래그가 내려가 있었으므로 그 lane은 실행되지 않았고, 그것이 커서에 정확히 그렇게 남았다.
+`INQUIRY/primary`는 이 시점까지 **존재하지 않는다**.
+
+### 16.3 L2 — **첫 production-like routine run**
+
+두 플래그 ON + collect scheduler ON으로 재기동. reconciler는 **아무것도 만들지 않았다** — 이미 있는
+행은 "운영자의 것"이라 건드리지 않는 계약이고(`SelfPilotReconciler`), 그래서 `INQUIRY` schedule은
+**정확히 1개**로 유지됐다. 활성화는 운영자 경로(`PUT …/schedule`) 한 번.
+
+run `f1fa7b1d` · **`SCHEDULED`** · **`SUCCESS`** · 2.13s · 20:54:17→20:54:19.
+
+| source | 요청/페이지 | received / inserted / skipped / failed | 창 | 종료 판정 |
+|---|---|---|---|---|
+| `PRODUCT_QNA` | 목록 1 · `page=1/1` | 1 / 0 / 1 / 0 | `2026-08-10T20:54:17 ~ 2026-08-24T20:54:17` | `total=1 last=true` |
+| `CUSTOMER_INQUIRY` | 목록 1 · `page=1/1` | 1 / 0 / 1 / 0 | `2026-08-10 ~ 2026-08-24` | `total=1 last=true` |
+| **run 합계** | 토큰 1 + 목록 2 = **3** | **2 / 0 / 2 / 0** | | `SUCCESS` |
+
+**두 source가 한 routine run 안에서 각자의 lane으로 실행된 첫 사례.** §10.1이 코드만 읽고 판정한
+것이 라이브에서 그대로 나왔다: `hasMore`는 행 수가 아니라 커서에서 나오므로, 상품 문의가 1행뿐인
+run에서도 고객 문의가 **반드시** 읽혔다.
+
+| FAIL 조건 | 결과 |
+|---|---|
+| `ROUTINE_MAX_LAG`(14일)보다 과거를 걷는가 | **아니오** — 창은 정확히 `2026-08-10~08-24`, **14일** |
+| 중복 `INQUIRY` schedule | **0** (1행 유지) |
+| backfill / primary 혼선 | **없음** — `primary` 커서가 이때 **처음 생겼고**, `backfill` 커서는 한 글자도 움직이지 않았다 |
+| source 커서 격리 | **유지** — 한 문자열 안에서 두 lane이 각자 `from`/`to`/`page`/`done` |
+
+커서 after: `primary {qna: 08-10T20:54:17→08-24T20:54:17 done, customer: 08-10→08-24 done, bounded:false}`.
+
+### 16.4 L3 — 즉시 recurrence, 같은 커서 위에서
+
+운영자의 "지금 가져오기"와 같은 경로(`POST …/sync {"dataType":"INQUIRY"}`, backfill seed 없음).
+run `89d040d3` · `MANUAL` · **`SUCCESS`** · 1.09s · 20:55:01.
+
+| source | 창 | rows | 페이지 |
+|---|---|---|---|
+| `PRODUCT_QNA` | `2026-08-24T20:54:17.302 ~ 20:55:01.423` | **0** | `page=1/1 last=true` |
+| `CUSTOMER_INQUIRY` | `2026-08-24 ~ 2026-08-24` | **0** | `page=1/0 last=true` |
+| 합계 | | **0 / 0 / 0 / 0** | 토큰 캐시 + 목록 2 = **2 요청** |
+
+**겹침 계약이 라이브로 보인다**: qna lane의 새 `from`이 직전 run의 `to`와 **문자 단위로 같다**
+(`2026-08-24T20:54:17.302+09:00`). 발명한 여유값은 없고, 경계 행이 있었다면 `questionId` upsert가
+흡수했을 것이다.
+
+| 검증 | 결과 |
+|---|---|
+| 중복 canonical row | **0** — 저장 행 수가 움직이지 않았다 |
+| history 전체 재독 | **없음** — 44초짜리 창 하나 |
+| 커서 단조 | **전진만** — qna `08-10 → 08-24T20:54:17 → 20:55:01`, customer `08-10~08-24 → 08-24~08-24` |
+| lane 독립 | **유지** |
+| L2 vs L3 규모 | 목록 **2 : 2** — 같은 자릿수 |
+| WRITE | **0** |
+
+### 16.5 전체 측정
+
+| | |
+|---|---|
+| **NAVER 마켓플레이스 요청 합계 (proof)** | **9** = 토큰 POST 3 (L0 verify 1 · L0 probe용 1 · L2 1) + 주문 접근 probe GET 1 + 문의 목록 GET 5 (L1 1 · L2 2 · L3 2) |
+| 401 / 403 / 429 | **0** |
+| WARN / ERROR | **0** (이 세션 backend 로그 전수) |
+| 저장 행 변화 | **0** — REAL NAVER 문의 **18**(상품 13 · 고객 5) 불변, 전부 정확 귀속, synthetic **8** 불변 |
+| 신규 product · listing | **0** — products 320 · demo org 308 · `channel_products` 300 불변 |
+| `inquiry_work_item` | **3,338** 불변 |
+| WRITE | **0** — 승인/의도/실행/초안 행 **하나도 생성되지 않았다**(유일한 `inquiry_execution`은 2026-08-20자 기존 행) |
+
+### 16.6 미답변 경로 — 여전히 `UNANSWERED_PATH_DATA_UNPROVEN`
+
+REAL NAVER 문의 18건 중 **답변 본문이 없는 것 0건**. L1·L2·L3 어디서도 미답변 행은 나타나지 않았다.
+**미답변을 만들려고 네이버에 write하지 않았다.** 판정 유지.
+
+### 16.7 최종 상태
+
+| | 값 | 근거 |
+|---|---|---|
+| NAVER `INQUIRY` | **60분 enabled** | recurrence green ⇒ §6 의도한 최종값 |
+| NAVER `ORDER_SUMMARY` | **60분 enabled** — 복원 직후 `SUCCESS 10/10/0/0` | §13.3 기준값 |
+| NAVER `PRODUCT` | **1440분 enabled** — 복원 직후 `SUCCESS 69/69/0/0`, **신규 product 0**(멱등) | §13.3 기준값 |
+| 두 source 플래그 | **둘 다 ON**, 주석에 결정 근거 기록 | §6 |
+| collect scheduler | **`true`** (운영자 기준값) | |
+| 다른 채널 routine | **재개 확인** — Cafe24 3 · Coupang 2 전부 enabled, 다른 org의 Cafe24 3건은 2026-08-22 이후 손대지 않음 | `schedule-guard.sh report` |
+| proof 전용 설정 잔여 | **0** — `.env.local`에서 baseline 대비 바뀐 키는 두 문의 플래그뿐이고, 그것이 의도한 최종값이다 | key diff |
+| 계정 | **`CONNECTED`** | |
+| `primary` 커서 | **보존** | |
+
+### 16.8 판정
+
+| 축 | 상태 |
+|---|---|
+| `NAVER_PRODUCT_QNA` source | **`CONFIRMED`** |
+| `NAVER_CUSTOMER_INQUIRY` source | **`CONFIRMED`** |
+| TalkTalk | **`UNSUPPORTED`** (platform — 커머스 API 문의 도메인에 endpoint 없음) |
+| **INQUIRY routine recurrence** | **`CONFIRMED`** ← `BLOCKED_EXTERNAL`에서 승격 |
+| 미답변 경로 | **`DATA_UNPROVEN`** |
+| 문의 답변 WRITE | **`PLATFORM_SUPPORTED_NOT_IMPLEMENTED`** (§15.3) — fence 그대로, 구현 0 |
+
+**PART 2 CLOSED.** 자격 증명/IP 원인 추적은 여기서 종료한다.
