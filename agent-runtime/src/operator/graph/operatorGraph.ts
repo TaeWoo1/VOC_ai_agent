@@ -69,6 +69,14 @@ export interface OperatorGraphDeps {
   readonly judge: EvidenceJudge;
   readonly budget: OperatorBudget;
   readonly referenceDate?: string;
+  /**
+   * This run's identity, forwarded to the backend's daily quota.
+   *
+   * Carried so a run that re-plans three times spends ONE run slot rather than three; without it the
+   * daily run limit would mean a third of the number it is configured with. It is not used to look
+   * anything up and never reaches a prompt.
+   */
+  readonly runId?: string;
 }
 
 /**
@@ -120,6 +128,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       // A repair is a second model call and is charged like the first (A8). Refused budget ⇒ no
       // repair, and the rejection stands as a failed run rather than as a quiet smaller answer.
       chargeLlmCall: () => deps.budget.spend("llm"),
+      ...(deps.runId ? { runId: deps.runId } : {}),
       ...(state.plan ? { priorContext: progressLine(state) } : {}),
     });
     log("operator_plan_node", {

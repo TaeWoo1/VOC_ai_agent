@@ -691,6 +691,8 @@ export interface AgentPlanView {
   readonly maxIterations?: number;
   readonly maxToolCalls?: number;
   readonly stopWhenEnough?: string | null;
+  /** Set only when the org's daily Agent budget is what refused — a different remedy from "off". */
+  readonly quotaMessage?: string | null;
   readonly clarificationNeeded?: boolean;
   readonly clarificationReason?: string | null;
   readonly rationale: string | null;
@@ -713,6 +715,8 @@ export interface AgentJudgeView {
   readonly needsMoreTool: string | null;
   readonly needsMoreReason: string | null;
   readonly providerVersion: string | null;
+  /** Set only when the org's daily Agent budget is what refused — a different remedy from "off". */
+  readonly quotaMessage?: string | null;
 }
 
 /* ─────────────── Cross-Channel Operational Reasoning v1 (2026-08-24) ─────────────── */
@@ -758,4 +762,44 @@ export interface ChannelCoverageRow {
   readonly openRows: number | null;
   /** The newest SOURCE time among the stored rows — never the read time. */
   readonly newestObservedAt: string | null;
+}
+
+/* ─────────────── Product Knowledge Library (Demo Core Experience v1, 2026-08-24) ─────────────── */
+
+/**
+ * What kind of document the seller wrote. Mirror of the backend's `KnowledgeSourceType`.
+ *
+ * <b>The type is part of the citation, not a filing convenience.</b> A POLICY sentence and a USAGE
+ * sentence are both true and are not interchangeable in a customer-facing answer, so a passage that
+ * arrives without its kind cannot be quoted responsibly.
+ */
+export type KnowledgeSourceType = "DESCRIPTION" | "FAQ" | "USAGE" | "POLICY" | "LINK";
+
+/** One retrieved passage of the seller's own writing, with everything needed to attribute it. */
+export interface KnowledgePassage {
+  readonly sourceId: string;
+  readonly chunkId: string;
+  readonly sourceType: KnowledgeSourceType;
+  readonly title: string;
+  readonly content: string;
+  readonly ordinal: number;
+  readonly score: number;
+  readonly authorName: string | null;
+  readonly sourceUrl: string | null;
+  readonly updatedAt: string | null;
+}
+
+/**
+ * A retrieval attempt over ONE product's library.
+ *
+ * <b>`documentsSearched` separates the two absences.</b> Zero documents means the seller has written
+ * nothing about this product; documents with no matching passage means they wrote about something
+ * else. An answer that conflates them reports a gap in the library as a fact about the product.
+ */
+export interface KnowledgeSearchResult {
+  readonly productId: string;
+  readonly query: string;
+  readonly documentsSearched: number;
+  readonly passagesSearched: number;
+  readonly passages: KnowledgePassage[];
 }

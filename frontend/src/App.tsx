@@ -19,7 +19,9 @@ import { ConsentBanner } from "./lib/consent/ConsentBanner";
 import { PRIVACY_PATH, TERMS_PATH } from "./lib/legal";
 
 // v2 app surface
-import { HomeV2 } from "./pages/app/HomeV2";
+import { Overview } from "./pages/app/Overview";
+import { Products } from "./pages/app/Products";
+import { ProductDetail } from "./pages/app/ProductDetail";
 import { Reviews } from "./pages/app/Reviews";
 import { CustomerInbox } from "./pages/app/CustomerInbox";
 import { InboxItemRedirect } from "./pages/app/InboxItemRedirect";
@@ -104,7 +106,11 @@ export function App() {
         }
       >
         {/* 운영 — the workflow surfaces: 홈 / 리뷰 / 문의 / 주문 (docs/product_assembly_ia_v1.md §3) */}
-        <Route path="/" element={<HomeV2 />} />
+        <Route path="/" element={<Overview />} />
+        {/* 상품: the catalogue and everything SellerOps knows about one product — the surface the
+            backend has served since before the v2 shell and the frontend never had. */}
+        <Route path="/products" element={<Products />} />
+        <Route path="/products/:productId" element={<ProductDetail />} />
         {/* 리뷰: one surface over the per-account review records; the account is a switcher, not a
             destination. `/reviews` alone opens the first review-capable account. */}
         <Route path="/reviews" element={<Reviews />} />

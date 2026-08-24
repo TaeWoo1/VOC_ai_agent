@@ -64,6 +64,8 @@ export type NeedKind =
   | "PRODUCT_FACT"
   | "PRODUCT_LISTING"
   | "PRODUCT_VARIANT"
+  /** 판매자가 이 상품에 대해 직접 써 둔 글 — 설명·FAQ·사용법·정책. 채널이 말한 사실과 다른 축이다. */
+  | "PRODUCT_KNOWLEDGE_DOC"
   | "POLICY"
   | "CUSTOMER_HISTORY"
   | "REVIEW_SIGNAL"

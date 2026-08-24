@@ -112,6 +112,17 @@ public class DashboardService {
      * product mapping is not a product, the same rule {@code ProductEvidenceCount} states for issue
      * evidence.
      */
+    /**
+     * Public so the Overview's insights can rest on the SAME roll-up the summary card shows.
+     *
+     * <p>A second implementation of "which product has the most negative reviews" is a second answer,
+     * and the two would diverge the first time either grouping key changed.
+     */
+    @Transactional(readOnly = true)
+    public List<TopProductIssue> topProductIssues(UUID orgId) {
+        return buildTopProductIssues(orgId);
+    }
+
     private List<TopProductIssue> buildTopProductIssues(UUID orgId) {
         Map<UUID, String> productNames = products.findAllByOrgId(orgId).stream()
                 .collect(Collectors.toMap(Product::getId, Product::getName, (a, b) -> a));

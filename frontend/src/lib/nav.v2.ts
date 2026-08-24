@@ -6,8 +6,14 @@
 //
 // The IA is workflow-centric, not channel-centric (product assembly, 2026-08-17 —
 // `docs/product_assembly_ia_v1.md` §3): 운영 answers "오늘 내가 확인하거나 조치할 일은 무엇인가?"
-// as 홈 / 리뷰 / 문의 / 주문, and 연결·설정 is where data comes from. A channel is a filter or a
-// capability inside those screens, never a destination of its own.
+// as 홈 / 상품 / 리뷰 / 문의 / 주문, and 연결·설정 is where data comes from. A channel is a filter or
+// a capability inside those screens, never a destination of its own.
+//
+// 상품 joined 운영 with Demo Core Experience v1 (2026-08-24). It is workflow-centric in the same
+// sense the others are — a product is what a review, an inquiry and an order are ABOUT, and it is
+// where the seller's own product knowledge is written. Its absence was not a decision: the backend
+// has served `/api/products` throughout and no screen ever reached it
+// (`docs/frontend_ux_audit_v1.md` §1).
 //
 // Deliberately absent from the menu: `/agent` (an action offered inside the operations screens,
 // not a destination), `/memory` and `/reports` (kept as routes, reached from 홈 and 설정, out of the
@@ -35,6 +41,7 @@ export const NAV_GROUPS: NavGroup[] = [
     heading: "운영",
     items: [
       { to: "/", label: "홈", short: "홈", icon: "home", end: true },
+      { to: "/products", label: "상품", short: "상품", icon: "product" },
       { to: "/reviews", label: "리뷰", short: "리뷰", icon: "review" },
       { to: "/inquiries", label: "문의", short: "문의", icon: "mail" },
       { to: "/orders", label: "주문", short: "주문", icon: "orders" },

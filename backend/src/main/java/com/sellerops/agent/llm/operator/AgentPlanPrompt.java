@@ -44,8 +44,8 @@ public final class AgentPlanPrompt {
      * order and the divergence test would be measuring nothing.
      */
     public static final String[] NEED_KINDS = {
-        "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "POLICY", "CUSTOMER_HISTORY",
-        "REVIEW_SIGNAL", "INQUIRY_VOLUME", "REPEAT_PATTERN", "ORDER_HISTORY",
+        "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC", "POLICY",
+        "CUSTOMER_HISTORY", "REVIEW_SIGNAL", "INQUIRY_VOLUME", "REPEAT_PATTERN", "ORDER_HISTORY",
     };
 
     /** The closed set of entity kinds a mention may carry. */
@@ -76,6 +76,7 @@ public final class AgentPlanPrompt {
                거부되면 판매자는 답할 수 있었던 절반까지 잃습니다. supported=false 는 목표의 **어느 부분도** \
                지금 도구로 닿을 수 없을 때만 쓰세요.
                - 도구는 꼭 필요한 것만 고르세요. 많이 고를수록 답이 느려지고 나빠집니다.
+               - **PRODUCT_FACT 와 PRODUCT_KNOWLEDGE_DOC 는 출처가 다른 두 가지입니다.** 앞의 것은                채널이 명시한 값(규격·가격·원산지)이고, 뒤의 것은 판매자가 직접 써 둔 글(상품 설명·FAQ·               사용법·교환반품 정책)입니다. "이 상품 어떻게 쓰나요", "고객에게 어떻게 설명하지",                "반품 규정이 뭐였지" 처럼 **판매자가 쓴 문장이 있어야 답할 수 있는 질문**은                PRODUCT_KNOWLEDGE_DOC 입니다. 치수·용량 같은 값 하나를 묻는 질문은 PRODUCT_FACT 입니다.                두 가지가 다 필요하면 need 를 둘 세우세요.
 
                specialist: %s
                informationNeeds[].kind: %s

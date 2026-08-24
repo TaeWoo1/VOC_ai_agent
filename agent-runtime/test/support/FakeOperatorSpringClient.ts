@@ -25,6 +25,7 @@ import type {
   ProductSummary,
   RepeatedInquiry,
   ChannelCoverageRow,
+  KnowledgeSearchResult,
 } from "../../src/spring/types";
 import type {
   CustomerMemorySearchParams,
@@ -65,6 +66,14 @@ export interface FakeOperatorSeed {
   /** Per (channel × data type) coverage rows. Absent ⇒ the client has no such method at all. */
   readonly channelCoverage?: ChannelCoverageRow[];
   /**
+   * The seller's own product-knowledge library, by product id.
+   *
+   * Seeded as a whole search RESULT rather than as documents because the fake is a transport, not a
+   * second retrieval implementation — a scorer here would let a test pass against ranking the backend
+   * does not do. Absent ⇒ the product has no library, which is the honest "아직 아무것도 쓰지 않음".
+   */
+  readonly productKnowledgeSearch?: Record<string, KnowledgeSearchResult>;
+  /**
    * When absent, the client has NO planGoal method at all.
    *
    * <b>In v2 that is no longer a "fallback" case — it is a FAILING one.</b> A seed without a plan is how
@@ -98,10 +107,13 @@ export interface FakeOperatorSeed {
 export class FakeOperatorSpringClient implements OperatorSpringClient {
   /** Every query `resolve_product` was called with, in order. See {@link searchProducts}. */
   readonly productQueries: string[] = [];
+  /** Every knowledge retrieval, so a test can assert WHAT was asked of the library and for which product. */
+  readonly productKnowledgeQueries: Array<{ productId: string; query: string }> = [];
 
   readonly calls = {
     inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
     plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0, channelCoverage: 0,
+    knowledgeSearch: 0,
   };
 
   /** Every digest the judge was sent, so a test can assert what actually left for a vendor. */
@@ -310,6 +322,23 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     // Mirrors the backend's expansion: a bare name matches its namespaced key. A fake that required the
     // full key would let a specialist ship a lookup that silently finds nothing in production.
     return all.filter((f) => factKeys.some((k) => f.factKey === k || f.factKey.endsWith(`:${k}`)));
+  }
+
+  async searchProductKnowledge(
+    productId: string,
+    query: string,
+    limit?: number,
+  ): Promise<KnowledgeSearchResult> {
+    this.calls.knowledgeSearch += 1;
+    this.productKnowledgeQueries.push({ productId, query });
+    const seeded = this.seed.productKnowledgeSearch?.[productId];
+    if (!seeded) {
+      // A product with no library. NOT an error and NOT an empty match: the two are different
+      // absences and the response shape is what keeps them apart.
+      return { productId, query, documentsSearched: 0, passagesSearched: 0, passages: [] };
+    }
+    const cap = limit && limit > 0 ? limit : seeded.passages.length;
+    return { ...seeded, query, passages: seeded.passages.slice(0, cap) };
   }
 
   async getInquiryThreadContext(workItemId: string): Promise<InquiryThreadContext> {

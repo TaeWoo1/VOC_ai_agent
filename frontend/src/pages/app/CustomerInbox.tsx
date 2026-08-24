@@ -4,6 +4,7 @@ import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
+import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { InboxFilterRail } from "../../components/inbox/InboxFilterRail";
 import { InboxList } from "../../components/inbox/InboxList";
 import { InboxDetail } from "../../components/inbox/InboxDetail";
@@ -175,6 +176,17 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
         <PageHead
           title="문의"
           description="답변 필요 → 답변함 순으로 봅니다. 답변은 SellerOps가 보내지 않고, 준비한 답을 채널에서 직접 등록합니다."
+          action={
+            <AgentLaunch
+              context={{
+                surface: "inquiries",
+                // The current filter, as a CODE — the Agent re-reads what it means. Never the count
+                // beside it, which the run has to earn with a tool call.
+                ...(filters.channel ? { channelCode: filters.channel } : {}),
+                goal: "답변이 필요한 문의를 채널별로 정리해 줘",
+              }}
+            />
+          }
           meta={
             unanswered !== null ? (
               <>

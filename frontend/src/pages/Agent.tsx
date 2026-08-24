@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
+import { readAgentContext } from "../lib/agentContext";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { Section } from "../components/Section";
@@ -61,7 +63,19 @@ export function Agent() {
     [accounts.data, channels.data],
   );
 
-  const [command, setCommand] = useState("");
+  /**
+   * The screen the seller came from, as structured context.
+   *
+   * <b>A suggested SENTENCE, never an injected fact.</b> The link carries where they were and, at
+   * most, a question worth asking — no counts, no names, nothing the planner could then state without
+   * a tool call behind it. The evidence contract is unchanged: a run that says "미답변 69건" still had
+   * to read it.
+   *
+   * <b>And it does not send.</b> The sentence lands in the box; the seller presses the button. That is
+   * the same rule the Action Window follows one layer up.
+   */
+  const launchContext = readAgentContext(useLocation().search);
+  const [command, setCommand] = useState(launchContext.goal ?? "");
   const [accountId, setAccountId] = useState("");
   const [run, setRun] = useState<AgentRunView | null>(null);
   /**
@@ -177,7 +191,7 @@ export function Agent() {
             id="agent-command"
             className="w-full rounded-xl border border-line bg-canvas p-3 text-ink"
             rows={2}
-            placeholder="예: 오늘 뭐부터 봐야 해? / 이 상품 폭이 몇 mm예요? / 이번 주 대표 보고 정리해줘"
+            placeholder="예: 오늘 뭐부터 봐야 해? / 이 상품 사용 방법을 고객에게 어떻게 설명하면 돼? / 이번 주 대표 보고 정리해줘"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
             disabled={plannerUnavailable}

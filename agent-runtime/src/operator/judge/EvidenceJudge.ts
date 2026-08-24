@@ -44,7 +44,12 @@ export interface EvidenceJudge {
 
 /** The backend call this judge needs. Structural, so any client that has it fits. */
 export interface JudgeBackend {
-  judgeFinding?(request: { finding: string; evidenceDigest: string }): Promise<AgentJudgeView>;
+  judgeFinding?(request: {
+    finding: string;
+    evidenceDigest: string;
+    /** The run this verdict belongs to — the daily quota's unit, not an identifier it looks up. */
+    runId?: string;
+  }): Promise<AgentJudgeView>;
 }
 
 const RULE_VERSION = "operator-judge-rules/v1";
@@ -160,6 +165,7 @@ export class SpringEvidenceJudge implements EvidenceJudge {
   constructor(
     private readonly backend: JudgeBackend,
     private readonly fallback: EvidenceJudge = new RuleEvidenceJudge(),
+    private readonly runId?: string,
   ) {}
 
   /**
@@ -195,6 +201,7 @@ export class SpringEvidenceJudge implements EvidenceJudge {
       view = await this.backend.judgeFinding({
         finding: finding.statement,
         evidenceDigest: digestFor(cited),
+        ...(this.runId ? { runId: this.runId } : {}),
       });
     } catch {
       // The error is not inspected or logged: a backend error can quote the request.
@@ -205,7 +212,10 @@ export class SpringEvidenceJudge implements EvidenceJudge {
       // `providerVersion` present ⇒ the capability is ON and the model declined this one finding, which
       // says nothing about the next. Absent ⇒ it is off for this org, and every further ask this run
       // would get the same answer, so stop asking.
-      if (!view.providerVersion) {
+      // A quota refusal is the capability being ON and the DAY being over: every further ask this run
+      // gets the same answer, so it stops asking for the same reason "off" does — but the two are not
+      // recorded as the same thing anywhere a seller can see.
+      if (!view.providerVersion || view.quotaMessage) {
         this.capabilityOff = true;
       }
       log("operator_judge", {

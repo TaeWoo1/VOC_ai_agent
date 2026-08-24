@@ -25,7 +25,7 @@ import type {
   ProductSummary,
   RepeatedInquiry,
 } from "./types";
-import type { ChannelCoverageRow } from "./types";
+import type { ChannelCoverageRow, KnowledgeSearchResult } from "./types";
 
 /**
  * One inquiry's context WITHOUT its body.
@@ -113,6 +113,18 @@ export interface OperatorSpringClient {
    * spelling difference into a silent "규격 정보가 없습니다".
    */
   searchProductFacts(productId: string, factKeys: string[]): Promise<ProductFact[]>;
+  /**
+   * The seller's OWN writing about one product, narrowed to what answers a question.
+   *
+   * A different provenance from {@link getProductKnowledge}, and deliberately a different method: one
+   * returns what a channel stated about the product, this returns what a person wrote about it. An
+   * answer is allowed to weigh them differently and cannot if they arrive through the same door.
+   */
+  searchProductKnowledge(
+    productId: string,
+    query: string,
+    limit?: number,
+  ): Promise<KnowledgeSearchResult>;
   /** Precedents for an inquiry (or a closed-vocabulary cue), with the index's coverage verdict. */
   searchCustomerMemory(params: CustomerMemorySearchParams): Promise<CustomerMemorySearch>;
   /** Repeat candidates in a trailing window. */

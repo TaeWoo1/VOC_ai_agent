@@ -134,6 +134,9 @@ const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
   PRODUCT_LISTING: "DETAIL",
   PRODUCT_VARIANT: "DETAIL",
   PRODUCT_KNOWLEDGE_GAP: "GAP",
+  // A quoted passage is a DETAIL: it is one identifiable thing a reader can go and check, which is
+  // exactly what separates grounding from a summary.
+  PRODUCT_KNOWLEDGE_DOC: "DETAIL",
   GROUPING_GAP: "GAP",
 };
 
@@ -154,6 +157,7 @@ const KIND_FLOOR: Record<InformationNeed["kind"], readonly Granularity[]> = {
   PRODUCT_FACT: ["DETAIL", "GAP"],
   PRODUCT_LISTING: ["DETAIL", "GAP"],
   PRODUCT_VARIANT: ["DETAIL", "GAP"],
+  PRODUCT_KNOWLEDGE_DOC: ["DETAIL", "GAP"],
   POLICY: ["DETAIL", "GAP"],
 };
 

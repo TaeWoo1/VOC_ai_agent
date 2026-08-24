@@ -1,6 +1,9 @@
 package com.sellerops.agent.llm;
 
 import com.sellerops.agent.llm.dto.AgentDraftRequest;
+import com.sellerops.agent.quota.AgentQuotaService;
+import com.sellerops.agent.quota.AgentUsageKind;
+import com.sellerops.agent.quota.QuotaDecision;
 import com.sellerops.agent.llm.dto.AgentDraftView;
 import java.util.Optional;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -31,19 +34,26 @@ import com.sellerops.auth.AuthPrincipal;
 public class AgentDraftController {
 
     private final AgentDraftService service;
+    private final AgentQuotaService quota;
 
-    public AgentDraftController(AgentDraftService service) {
+    public AgentDraftController(AgentDraftService service, AgentQuotaService quota) {
         this.service = service;
+        this.quota = quota;
     }
 
     @PostMapping("/inquiry-draft")
     public AgentDraftView draft(@AuthenticationPrincipal AuthPrincipal principal,
                                 @RequestBody AgentDraftRequest request) {
         String version = service.versionFor(principal.orgId());
+        // A draft belongs to no run, so it spends a CALL slot and never a run slot.
+        QuotaDecision decision = quota.consume(principal.orgId(), AgentUsageKind.DRAFT, null);
+        if (!decision.allowed()) {
+            return AgentDraftView.quotaExhausted(version, decision.messageKo());
+        }
         Optional<AgentDraftResponseParser.ParsedDraft> draft =
                 service.draft(principal.orgId(), request.title(), request.details());
         return draft
-                .map(d -> new AgentDraftView(true, d.category(), d.title(), d.comments(), version))
+                .map(d -> new AgentDraftView(true, d.category(), d.title(), d.comments(), version, null))
                 .orElseGet(() -> AgentDraftView.unavailable(version));
     }
 }

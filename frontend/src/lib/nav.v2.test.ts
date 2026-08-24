@@ -13,9 +13,10 @@ describe("nav.v2 — structure", () => {
     expect(NAV_GROUPS.map((group) => group.heading)).toEqual(["운영", "연결·설정"]);
   });
 
-  it("declares the workflow destinations, in order — 홈 / 리뷰 / 문의 / 주문, then 채널 연결 / 설정", () => {
+  it("declares the workflow destinations, in order — 홈 / 상품 / 리뷰 / 문의 / 주문, then 채널 연결 / 설정", () => {
     expect(NAV_ITEMS.map((item) => item.to)).toEqual([
       "/",
+      "/products",
       "/reviews",
       "/inquiries",
       "/orders",
@@ -27,12 +28,20 @@ describe("nav.v2 — structure", () => {
   it("labels every destination in seller language", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "홈",
+      "상품",
       "리뷰",
       "문의",
       "주문",
       "채널 연결",
       "설정",
     ]);
+  });
+
+  it("상품 is reachable from the menu — the backend served it all along and no screen did", () => {
+    // The gap this closes was not a decision: `/api/products` predates the v2 shell, this org holds
+    // 300 real products, and until Demo Core Experience v1 the only thing that could see the
+    // catalogue was the Agent (docs/frontend_ux_audit_v1.md §1).
+    expect(NAV_ITEMS.map((item) => item.to)).toContain("/products");
   });
 
   it("names no channel — a channel is a filter inside a screen, never a destination", () => {

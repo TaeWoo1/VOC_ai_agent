@@ -1,5 +1,8 @@
 package com.sellerops.agent.llm.operator;
 
+import com.sellerops.agent.quota.AgentQuotaService;
+import com.sellerops.agent.quota.AgentUsageKind;
+import com.sellerops.agent.quota.QuotaDecision;
 import com.sellerops.auth.AuthPrincipal;
 import java.util.List;
 import java.util.Optional;
@@ -21,6 +24,12 @@ import org.springframework.web.bind.annotation.RestController;
  * stored. A refusal is a {@code 200} with {@code available=false}, not an error status — "the
  * capability is off for your org" is a normal answer whose caller has a working fallback, and
  * surfacing it as a failure would turn a working run red.
+ *
+ * <p><b>The daily quota is charged here, before the model is reached.</b> This is the only egress, so
+ * it is the only place a ceiling can be honest; charging inside {@code agent-runtime} would leave the
+ * draft seam uncounted and would put the limit on the side of the wire that holds no key. An exhausted
+ * quota returns the SAME refusal shape as a disabled capability, with a reason attached so the screen
+ * can say which of the two happened.
  */
 @RestController
 @RequestMapping("/api/agent")
@@ -28,16 +37,23 @@ public class AgentOperatorController {
 
     private final AgentPlanService planService;
     private final AgentJudgeService judgeService;
+    private final AgentQuotaService quota;
 
-    public AgentOperatorController(AgentPlanService planService, AgentJudgeService judgeService) {
+    public AgentOperatorController(AgentPlanService planService, AgentJudgeService judgeService,
+                                   AgentQuotaService quota) {
         this.planService = planService;
         this.judgeService = judgeService;
+        this.quota = quota;
     }
 
     @PostMapping("/plan")
     public PlanView plan(@AuthenticationPrincipal AuthPrincipal principal,
                          @RequestBody PlanRequest request) {
         String version = planService.versionFor(principal.orgId());
+        QuotaDecision decision = quota.consume(principal.orgId(), AgentUsageKind.PLAN, request.runId());
+        if (!decision.allowed()) {
+            return PlanView.quotaExhausted(version, decision.messageKo());
+        }
         Optional<AgentOperatorResponseParser.ParsedPlan> plan =
                 planService.plan(principal.orgId(), request.goalText(), request.toolCatalogue(),
                         request.priorContext());
@@ -55,7 +71,7 @@ public class AgentOperatorController {
                                         r.acceptableKinds()))
                                 .toList(),
                         p.riskClass(), p.maxIterations(), p.maxToolCalls(), p.stopWhenEnough(),
-                        p.clarificationNeeded(), p.clarificationReason(), p.rationale(), version))
+                        p.clarificationNeeded(), p.clarificationReason(), p.rationale(), version, null))
                 .orElseGet(() -> PlanView.unavailable(version));
     }
 
@@ -63,17 +79,28 @@ public class AgentOperatorController {
     public JudgeView judge(@AuthenticationPrincipal AuthPrincipal principal,
                            @RequestBody JudgeRequest request) {
         String version = judgeService.versionFor(principal.orgId());
+        QuotaDecision decision = quota.consume(principal.orgId(), AgentUsageKind.JUDGE, request.runId());
+        if (!decision.allowed()) {
+            return JudgeView.quotaExhausted(version, decision.messageKo());
+        }
         Optional<AgentOperatorResponseParser.ParsedVerdict> verdict =
                 judgeService.judge(principal.orgId(), request.finding(), request.evidenceDigest());
         return verdict
                 .map(v -> new JudgeView(true, v.hasEvidence(), v.supportingEvidenceIds(),
                         v.unsafeAssertion(), v.unsafeReason(), v.needsMore(), v.needsMoreTool(),
-                        v.needsMoreReason(), version))
+                        v.needsMoreReason(), version, null))
                 .orElseGet(() -> JudgeView.unavailable(version));
     }
 
-    /** The operator's own sentence and the caller's static tool catalogue. Nothing else is accepted. */
-    public record PlanRequest(String goalText, List<String> toolCatalogue, String priorContext) {
+    /**
+     * The operator's own sentence and the caller's static tool catalogue. Nothing else is accepted.
+     *
+     * <p>{@code runId} is the caller's run identity, carried for one purpose: so a run that plans
+     * three times spends ONE run slot of the daily quota instead of three. It is not used to look
+     * anything up, and a null is honest — a call that belongs to no run is counted as a call only.
+     */
+    public record PlanRequest(String goalText, List<String> toolCatalogue, String priorContext,
+                              String runId) {
     }
 
     /** One thing the seller named. There is deliberately NO id field — see AgentPlanPrompt. */
@@ -88,7 +115,7 @@ public class AgentOperatorController {
     }
 
     /** A SellerOps-composed sentence and a closed-vocabulary evidence digest. */
-    public record JudgeRequest(String finding, String evidenceDigest) {
+    public record JudgeRequest(String finding, String evidenceDigest, String runId) {
     }
 
     /**
@@ -102,20 +129,39 @@ public class AgentOperatorController {
                            List<EvidenceRequirementView> evidenceRequirements, String riskClass,
                            int maxIterations, int maxToolCalls, String stopWhenEnough,
                            boolean clarificationNeeded, String clarificationReason, String rationale,
-                           String providerVersion) {
+                           String providerVersion, String quotaMessage) {
 
         static PlanView unavailable(String version) {
             return new PlanView(false, false, null, List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), null, List.of(), null, 0, 0, null, false, null, null, version);
+                    List.of(), List.of(), null, List.of(), null, 0, 0, null, false, null, null, version,
+                    null);
+        }
+
+        /**
+         * Same {@code available=false} the caller already handles, plus the sentence for the seller.
+         *
+         * <p>Deliberately NOT a new status: a run that meets the ceiling must degrade along the path
+         * that is already tested, not down a branch that only exists on the worst day.
+         */
+        static PlanView quotaExhausted(String version, String message) {
+            return new PlanView(false, false, null, List.of(), List.of(), List.of(), List.of(),
+                    List.of(), List.of(), null, List.of(), null, 0, 0, null, false, null, null, version,
+                    message);
         }
     }
 
     public record JudgeView(boolean available, boolean hasEvidence, List<String> supportingEvidenceIds,
                             boolean unsafeAssertion, String unsafeReason, boolean needsMore,
-                            String needsMoreTool, String needsMoreReason, String providerVersion) {
+                            String needsMoreTool, String needsMoreReason, String providerVersion,
+                            String quotaMessage) {
 
         static JudgeView unavailable(String version) {
-            return new JudgeView(false, false, List.of(), false, null, false, null, null, version);
+            return new JudgeView(false, false, List.of(), false, null, false, null, null, version, null);
+        }
+
+        static JudgeView quotaExhausted(String version, String message) {
+            return new JudgeView(false, false, List.of(), false, null, false, null, null, version,
+                    message);
         }
     }
 }

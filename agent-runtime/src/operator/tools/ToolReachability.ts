@@ -83,7 +83,8 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
   {
     specialist: "PRODUCT_OPS",
     tool: OPERATOR_TOOL.RESOLVE_PRODUCT,
-    needKinds: ["PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "REVIEW_SIGNAL", "INQUIRY_VOLUME"],
+    needKinds: ["PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC",
+      "REVIEW_SIGNAL", "INQUIRY_VOLUME"],
     // The one tool that MAKES a product id, so it cannot require one.
     requires: ["PRODUCT_MENTION"],
   },
@@ -97,6 +98,15 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     specialist: "PRODUCT_OPS",
     tool: OPERATOR_TOOL.SEARCH_PRODUCT_FACTS,
     needKinds: ["PRODUCT_FACT"],
+    requires: ["RESOLVED_PRODUCT"],
+  },
+  {
+    // The seller's OWN writing. Deliberately not folded into GET_PRODUCT_KNOWLEDGE's row: that tool
+    // returns what channels stated, this one returns what a person wrote, and a plan that needs one
+    // is not automatically entitled to the other.
+    specialist: "PRODUCT_OPS",
+    tool: OPERATOR_TOOL.SEARCH_PRODUCT_KNOWLEDGE,
+    needKinds: ["PRODUCT_KNOWLEDGE_DOC"],
     requires: ["RESOLVED_PRODUCT"],
   },
   {

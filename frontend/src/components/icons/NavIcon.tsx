@@ -36,6 +36,14 @@ const NAV_ICON_PATHS: Record<string, ReactElement> = {
       <path d="M12 12v9" />
     </>
   ),
+  // 상품: a tag on a listed item — the thing a review, an inquiry and an order are all ABOUT.
+  // Deliberately not a box (that is `orders`, which is about shipments, not the catalogue).
+  product: (
+    <>
+      <path d="M20.5 13.5 13 21a1.4 1.4 0 0 1-2 0l-8-8V4.5A1.5 1.5 0 0 1 4.5 3H13l7.5 7.5a1.4 1.4 0 0 1 0 3z" />
+      <circle cx="7.5" cy="7.5" r="1.2" />
+    </>
+  ),
   issue: (
     <>
       <path d="M12 4 2.5 20h19z" />

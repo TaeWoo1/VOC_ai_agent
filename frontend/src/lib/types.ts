@@ -1676,3 +1676,247 @@ export interface CredentialDiagnosisView {
    */
   sellerActionable?: boolean;
 }
+
+/* ─────────────── Demo Core Experience v1 — Overview Dashboard (2026-08-24) ─────────────── */
+
+/**
+ * Whether one channel's data of one type may be spoken about as CURRENT.
+ *
+ * Mirror of the backend's `ChannelDataState`. The screen never re-derives it: a component that
+ * decided for itself whether a zero was real is a second implementation of the rule, and the first
+ * time the two disagree it does so in front of a seller.
+ */
+export type ChannelDataState =
+  | "OBSERVED_FRESH"
+  | "OBSERVED_FRESHNESS_UNPROVEN"
+  | "ZERO"
+  | "NOT_SUPPORTED"
+  | "NOT_CONNECTED"
+  | "BLOCKED";
+
+export interface MetricPeriod {
+  from: string;
+  to: string;
+  previousFrom: string;
+  previousTo: string;
+  days: number;
+}
+
+/**
+ * One headline number.
+ *
+ * `comparable === false` means no delta may be drawn — 미답변 문의 is today's backlog, not a flow, and
+ * there is no history to compare it against. `excludedChannels`/`freshnessUnproven` are what the
+ * caveat line under the number is built from.
+ */
+export interface MetricKpi {
+  key: string;
+  label: string;
+  value: number;
+  unit: string;
+  previousValue: number | null;
+  deltaPercent: number | null;
+  comparable: boolean;
+  excludedChannels: number;
+  freshnessUnproven: boolean;
+}
+
+export interface MetricPoint {
+  date: string;
+  value: number;
+}
+
+export interface MetricSeries {
+  key: string;
+  label: string;
+  unit: string;
+  points: MetricPoint[];
+}
+
+/** One channel, three data types, three verdicts — never one state for the whole channel. */
+export interface ChannelMetricRow {
+  channelCode: string;
+  channelNameKo: string;
+  orderState: ChannelDataState;
+  revenue: number;
+  orders: number;
+  countedInOrders: boolean;
+  inquiryState: ChannelDataState;
+  inquiries: number;
+  unansweredInquiries: number;
+  countedInInquiries: boolean;
+  reviewState: ChannelDataState;
+  reviews: number;
+  negativeReviews: number;
+  countedInReviews: boolean;
+}
+
+/** A channel left out of a total, with the seller-facing reason the backend chose. */
+export interface MetricExclusion {
+  channelCode: string;
+  channelNameKo: string;
+  dataType: string;
+  state: ChannelDataState;
+  reasonKo: string;
+}
+
+export interface OperationsMetrics {
+  period: MetricPeriod;
+  revenueBasis: string;
+  orderCountBasis: string;
+  kpis: MetricKpi[];
+  series: MetricSeries[];
+  channels: ChannelMetricRow[];
+  exclusions: MetricExclusion[];
+}
+
+/** One derived thing worth looking at. `agentGoal` is a question a human may send, never dispatched. */
+export interface OperationsInsight {
+  key: string;
+  severity: "ATTENTION" | "WATCH" | "INFO";
+  title: string;
+  detail: string | null;
+  to: string;
+  actionLabel: string;
+  agentGoal: string | null;
+}
+
+export interface OverviewResponse {
+  metrics: OperationsMetrics;
+  insights: OperationsInsight[];
+}
+
+/* ─────────────── Demo Core Experience v1 — Product Knowledge library ─────────────── */
+
+export type KnowledgeSourceType = "DESCRIPTION" | "FAQ" | "USAGE" | "POLICY" | "LINK";
+
+export interface KnowledgeSourceView {
+  id: string;
+  productId: string;
+  sourceType: KnowledgeSourceType;
+  title: string;
+  body: string;
+  sourceUrl: string | null;
+  authorName: string | null;
+  /** How many quotable passages this document was split into. Zero ⇒ the Agent can never cite it. */
+  chunks: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeSourceRequest {
+  sourceType: KnowledgeSourceType;
+  title: string;
+  body: string;
+  sourceUrl?: string | null;
+}
+
+export interface AgentQuotaStatus {
+  enabled: boolean;
+  date: string;
+  runsUsed: number;
+  runsLimit: number;
+  llmCallsUsed: number;
+  llmCallsLimit: number;
+}
+
+/* ─────────────── Demo Core Experience v1 — Product surfaces (2026-08-24) ─────────────── */
+
+export type KnowledgeCoverage = "AVAILABLE" | "PARTIAL" | "UNAVAILABLE" | "STALE";
+
+export interface ProductSummaryView {
+  id: string;
+  name: string;
+  sku: string | null;
+  status: string | null;
+  matchedOn: string | null;
+  matchedName: string | null;
+}
+
+export interface ProductListingView {
+  channelCode: string;
+  channelNameKo: string | null;
+  channelProductId: string | null;
+  listingName: string | null;
+  productUrl: string | null;
+  price: number | null;
+  currency: string | null;
+  sellingStatus: string | null;
+  source: string | null;
+  observedAt: string | null;
+  sourceUpdatedAt: string | null;
+}
+
+export interface ProductVariantView {
+  channelCode: string;
+  externalVariantId: string | null;
+  optionName: string | null;
+  sku: string | null;
+  price: number | null;
+  sellingStatus: string | null;
+  source: string | null;
+  observedAt: string | null;
+}
+
+export interface ProductFactView {
+  factKey: string;
+  value: string;
+  unit: string | null;
+  source: string;
+  sourceRef: string | null;
+  observedAt: string | null;
+  confidence: string | null;
+}
+
+/**
+ * Availability, not attribution.
+ *
+ * `UNAVAILABLE` means "we do not hold this" and never "the product does not have this" — the screen
+ * has to keep those two sentences apart for the same reason the backend does.
+ */
+export interface KnowledgeCoverageView {
+  facet: string;
+  coverage: KnowledgeCoverage;
+  known: number;
+  newestObservedAt: string | null;
+  provenance: string | null;
+}
+
+export interface ProductVolumeView {
+  reviews: number;
+  inquiries: number;
+  unansweredInquiries: number;
+  issueEvidence: number;
+}
+
+export interface SignalCoverageView {
+  signal: string;
+  coverage: string;
+  linked: number;
+  unlinked: number;
+  provenance: string | null;
+}
+
+export interface ProductSignalsView {
+  productId: string;
+  productName: string | null;
+  sku: string | null;
+  referenceDate: string | null;
+  issues: ReviewIssueView[];
+  recommendedActions: Array<{ action: string; count: number }>;
+  volume: ProductVolumeView;
+  linkedChannels: string[];
+  coverage: SignalCoverageView[];
+}
+
+export interface ProductKnowledgeView {
+  productId: string;
+  name: string | null;
+  sku: string | null;
+  status: string | null;
+  listings: ProductListingView[];
+  variants: ProductVariantView[];
+  facts: ProductFactView[];
+  signals: ProductSignalsView;
+  knowledgeCoverage: KnowledgeCoverageView[];
+}

@@ -46,6 +46,7 @@ import type {
   ProductFact,
   ProductKnowledge,
   ChannelCoverageRow,
+  KnowledgeSearchResult,
 } from "./types";
 import type { ListReplyWorkParams, ReviewSpringClient } from "./ReviewSpringClient";
 import type { IssueSpringClient, ListReviewIssuesParams } from "./IssueSpringClient";
@@ -391,15 +392,40 @@ export class HttpSpringClient
     return this.request<ChannelCoverageRow[]>("GET", `/api/channels/coverage`);
   }
 
+  /**
+   * The seller's own writing about one product, narrowed to the passages that answer `query`.
+   *
+   * <b>Retrieval is scoped to one product and the backend enforces it.</b> The corpus is small by
+   * construction, which is why there is no index to keep warm and why the same question returns the
+   * same passages on every run — reproducibility an answer's evidence depends on.
+   */
+  async searchProductKnowledge(
+    productId: string,
+    query: string,
+    limit?: number,
+  ): Promise<KnowledgeSearchResult> {
+    const params = new URLSearchParams({ query });
+    if (limit && limit > 0) params.set("limit", String(limit));
+    return this.request<KnowledgeSearchResult>(
+      "GET",
+      `/api/products/${encodeURIComponent(productId)}/knowledge/search?${params.toString()}`,
+    );
+  }
+
   async planGoal(request: {
     goalText: string;
     toolCatalogue: string[];
     priorContext?: string;
+    runId?: string;
   }): Promise<AgentPlanView> {
     return this.request<AgentPlanView>("POST", `/api/agent/plan`, request);
   }
 
-  async judgeFinding(request: { finding: string; evidenceDigest: string }): Promise<AgentJudgeView> {
+  async judgeFinding(request: {
+    finding: string;
+    evidenceDigest: string;
+    runId?: string;
+  }): Promise<AgentJudgeView> {
     return this.request<AgentJudgeView>("POST", `/api/agent/judge`, request);
   }
 

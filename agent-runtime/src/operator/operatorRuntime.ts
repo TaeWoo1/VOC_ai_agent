@@ -91,8 +91,11 @@ export class OperatorAgentRuntime {
       registry,
       tools,
       planner: this.deps.planner ?? new LlmInvestigationPlanner(this.deps.operator),
-      judge: this.deps.judge ?? new SpringEvidenceJudge(this.deps.operator, new RuleEvidenceJudge()),
+      judge: this.deps.judge
+        ?? new SpringEvidenceJudge(this.deps.operator, new RuleEvidenceJudge(), threadId),
       budget,
+      // The thread IS the run on this surface, and it is what the quota counts as one.
+      runId: threadId,
       ...(request.referenceDate ? { referenceDate: request.referenceDate } : {}),
     }).compile();
 
@@ -161,6 +164,8 @@ function failureCodeFor(err: PlannerUnavailableError): OperatorFailureCode {
     case "CAPABILITY_OFF":
     case "NO_ENDPOINT":
       return "PLANNER_CAPABILITY_OFF";
+    case "QUOTA_EXHAUSTED":
+      return "AGENT_QUOTA_EXHAUSTED";
     case "PLAN_REJECTED":
     case "OFF_SCHEMA":
       return "PLAN_INVALID";
@@ -178,6 +183,11 @@ function failureCodeFor(err: PlannerUnavailableError): OperatorFailureCode {
  * message is what makes an outage look like a product limitation.
  */
 function reasonFor(err: PlannerUnavailableError): string {
+  // The backend's own sentence wins when it sent one: it knows WHICH ceiling was met and what the
+  // seller can still do, and paraphrasing it here would put two versions of that promise in the repo.
+  if (err.sellerMessage) {
+    return err.sellerMessage;
+  }
   switch (err.failure) {
     case "CAPABILITY_OFF":
     case "NO_ENDPOINT":

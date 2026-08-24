@@ -7,7 +7,7 @@ import com.sellerops.connector.ConnectorCapability;
 import com.sellerops.connector.ConnectorCapabilityRepository;
 import com.sellerops.coverage.dto.ChannelCoverageRow;
 import com.sellerops.inquiry.InquiryRepository;
-import com.sellerops.order.ChannelOrderRepository;
+import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -71,12 +71,12 @@ public class ChannelCoverageService {
     private final SyncJobRepository syncJobs;
     private final InquiryRepository inquiries;
     private final ReviewRepository reviews;
-    private final ChannelOrderRepository orders;
+    private final OrderDailySummaryRepository orders;
 
     public ChannelCoverageService(ChannelRepository channels, ConnectorCapabilityRepository capabilities,
                                   SellerAccountRepository accounts, SyncScheduleRepository schedules,
                                   SyncJobRepository syncJobs, InquiryRepository inquiries,
-                                  ReviewRepository reviews, ChannelOrderRepository orders) {
+                                  ReviewRepository reviews, OrderDailySummaryRepository orders) {
         this.channels = channels;
         this.capabilities = capabilities;
         this.accounts = accounts;

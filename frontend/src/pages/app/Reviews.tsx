@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useParams, useSearchParams } from "react-r
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
+import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { api } from "../../lib/apiClient";
 import { reviewAccounts, type ReviewAccount } from "../../lib/reviewAccounts";
 import { reviewRecordPath } from "../../lib/reviewRecord";
@@ -92,7 +93,15 @@ export function Reviews() {
   const selected = targets.find((t) => t.account.id === accountId) ?? null;
   return (
     <div className="space-y-5">
-      <PageHead title="리뷰" description={REVIEWS_DESCRIPTION} />
+      <PageHead
+        title="리뷰"
+        description={REVIEWS_DESCRIPTION}
+        action={
+          <AgentLaunch
+            context={{ surface: "reviews", goal: "반복되는 리뷰 문제를 상품별로 정리해 줘" }}
+          />
+        }
+      />
       {/* One account: the record's own heading names it, so a one-chip switcher would only repeat it. */}
       {targets.length > 1 ? <ChannelSwitcher targets={targets} selectedAccountId={accountId} /> : null}
       <ChannelReviews channelName={selected?.label} />

@@ -75,6 +75,10 @@ const DEMAND_OF: Record<NeedKind, TemporalDemand> = {
   PRODUCT_FACT: "CURRENT_STATE",
   PRODUCT_LISTING: "CURRENT_STATE",
   PRODUCT_VARIANT: "CURRENT_STATE",
+  // What the seller wrote about the product is a standing description, not something that happened
+  // on a date. Typing it as PERIOD_EVENTS would make "지난주 사용법 알려줘" demand a passage dated
+  // last week, which no library has.
+  PRODUCT_KNOWLEDGE_DOC: "CURRENT_STATE",
   POLICY: "CURRENT_STATE",
   REPEAT_PATTERN: "PERIOD_EVENTS",
   REVIEW_SIGNAL: "PERIOD_EVENTS",

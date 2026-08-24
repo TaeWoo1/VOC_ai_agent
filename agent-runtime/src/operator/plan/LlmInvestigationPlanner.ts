@@ -59,6 +59,8 @@ export interface PlanInput {
   readonly toolNames?: readonly string[];
   readonly limits: PlanLimits;
   readonly priorContext?: string;
+  /** This run's id, forwarded to the quota so one run costs one run slot however often it re-plans. */
+  readonly runId?: string;
   /**
    * Permission to spend one more model call on a repair, from whoever owns the budget.
    *
@@ -74,6 +76,15 @@ export interface PlanInput {
 /** Why no plan exists. Every value ends the run; none of them selects an alternative planner. */
 export type PlannerFailure =
   | "CAPABILITY_OFF"
+  /**
+   * The org's daily Agent budget is spent.
+   *
+   * Separate from `CAPABILITY_OFF` because the remedies are different and only one of them is the
+   * seller's: "이 기능이 꺼져 있습니다" is an admin action, "오늘 몫을 다 썼습니다" is tomorrow. Both
+   * arrive on the wire as `available=false`, which is exactly why the backend sends a message with the
+   * second one and this failure exists to carry it.
+   */
+  | "QUOTA_EXHAUSTED"
   | "NO_ENDPOINT"
   | "TRANSPORT"
   | "OFF_SCHEMA"
@@ -82,6 +93,14 @@ export type PlannerFailure =
 
 export class PlannerUnavailableError extends Error {
   readonly failure: PlannerFailure;
+  /**
+   * A sentence the backend supplied for the seller, when it had one.
+   *
+   * Only the quota path sets this today. It is a separate field from {@link rejection} because that
+   * one names a validator rule for a developer, and printing a rule name at a seller is how an
+   * internal vocabulary escapes into the product.
+   */
+  sellerMessage?: string;
   /** Set when the validator refused a structurally-invalid plan; names which rule. */
   readonly rejection?: string;
 
@@ -101,6 +120,8 @@ export interface PlanBackend {
     goalText: string;
     toolCatalogue: string[];
     priorContext?: string;
+    /** The run this plan belongs to, so a re-plan does not buy a second daily run slot. */
+    runId?: string;
   }): Promise<AgentPlanView>;
 }
 
@@ -124,6 +145,7 @@ export class LlmInvestigationPlanner implements Planner {
         goalText,
         toolCatalogue: [...input.catalogue],
         ...(input.priorContext ? { priorContext: input.priorContext } : {}),
+        ...(input.runId ? { runId: input.runId } : {}),
       });
     } catch {
       // The error is not inspected or logged: a backend error can quote the request.
@@ -134,9 +156,18 @@ export class LlmInvestigationPlanner implements Planner {
     if (!view.available) {
       // `providerVersion` present ⇒ the capability is ON and the model declined. Absent ⇒ it is off for
       // this org. Both end the run; they are distinguished only so the screen can say which.
-      const failure: PlannerFailure = view.providerVersion ? "OFF_SCHEMA" : "CAPABILITY_OFF";
+      // A quota message is the backend saying WHY it refused. Checked before the version heuristic
+      // because a quota refusal happens with the capability fully on, and would otherwise be reported
+      // as a model that answered off-schema.
+      const failure: PlannerFailure = view.quotaMessage
+        ? "QUOTA_EXHAUSTED"
+        : (view.providerVersion ? "OFF_SCHEMA" : "CAPABILITY_OFF");
       log("operator_plan", { plannerKind: "LLM", modelAnswered: false, reason: failure });
-      throw new PlannerUnavailableError(failure, "the planner produced no plan");
+      const error = new PlannerUnavailableError(failure, "the planner produced no plan");
+      if (view.quotaMessage) {
+        error.sellerMessage = view.quotaMessage;
+      }
+      throw error;
     }
 
     const first = this.settle(toPlan(view, goalText), goalText, input);
@@ -338,7 +369,8 @@ function normalizeEntityKind(kind: string | undefined): import("./InvestigationP
  */
 function normalizeNeedKind(kind: string | undefined): import("./InvestigationPlan").NeedKind {
   const known = [
-    "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "POLICY", "CUSTOMER_HISTORY",
+    "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC", "POLICY",
+    "CUSTOMER_HISTORY",
     "REVIEW_SIGNAL", "INQUIRY_VOLUME", "REPEAT_PATTERN", "ORDER_HISTORY",
   ];
   return (known.includes(kind ?? "") ? kind : "REVIEW_SIGNAL") as import("./InvestigationPlan").NeedKind;

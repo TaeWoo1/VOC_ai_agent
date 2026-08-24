@@ -21,35 +21,16 @@
  * is that rule as a function, and `channelCoverage.test.ts` asserts no sentence here escapes it.
  */
 import type { ChannelCoverageRow, ChannelDataState } from "../../spring/types";
+// One implementation of Korean particle agreement, shared with every other sentence-writing module.
+import { withTopic } from "../../korean";
+
+export { withTopic };
 
 /** A channel's own name for a sentence — never an id, never a code the seller has not seen. */
 function channelLabel(row: ChannelCoverageRow): string {
   return row.channelNameKo ?? row.channelCode;
 }
 
-/**
- * The topic particle a Korean noun takes — 은 after a final consonant, 는 otherwise.
- *
- * <b>Small, and not cosmetic.</b> These sentences are read by sellers, and "쿠팡는" is the kind of
- * seam that makes a generated answer read as generated. Channel names are the only nouns this module
- * inflects, and they come from the catalogue, so the rule is applied where the name is used rather
- * than stored twice in two forms.
- */
-function topicParticle(noun: string): string {
-  const last = noun.trim().slice(-1);
-  const code = last.charCodeAt(0);
-  if (code < 0xac00 || code > 0xd7a3) {
-    // Not a Hangul syllable (a latin channel code, a digit). 는 is the safe default and is what a
-    // reader supplies themselves for a foreign word.
-    return "는";
-  }
-  return (code - 0xac00) % 28 === 0 ? "는" : "은";
-}
-
-/** A noun with its topic particle attached — "쿠팡은", "네이버 스마트스토어는". */
-export function withTopic(noun: string): string {
-  return `${noun}${topicParticle(noun)}`;
-}
 
 const DATA_TYPE_LABEL: Record<string, string> = {
   INQUIRY: "문의",

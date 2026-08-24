@@ -26,6 +26,7 @@ import type { SpecialistInput } from "./specialistInput";
 import type {
   IssueEvidenceSummary,
   KnowledgeCoverageRow,
+  KnowledgeSearchResult,
   ProductFact,
   ProductKnowledge,
   ProductMatchSurface,
@@ -33,6 +34,7 @@ import type {
   SignalCoverage,
 } from "../../spring/types";
 import { log } from "../../log";
+import { withTopic } from "../../korean";
 
 /**
  * How many of a product's live issues get their split read, and how many are then stated.
@@ -54,8 +56,18 @@ const EXACT_SURFACES: readonly ProductMatchSurface[] = [
 
 /** The need kinds this specialist answers. Anything else belongs to another one. */
 export const PRODUCT_NEEDS = [
-  "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "REVIEW_SIGNAL", "INQUIRY_VOLUME",
+  "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC",
+  "REVIEW_SIGNAL", "INQUIRY_VOLUME",
 ] as const;
+
+/**
+ * How many of the seller's own passages one answer may rest on.
+ *
+ * <b>Grounding, not transcription.</b> Three passages is enough to answer a usage or policy question
+ * from more than one place in the library; pasting the whole document back would make the evidence
+ * card unreadable and would let a weak match ride along under a strong one.
+ */
+const KNOWLEDGE_PASSAGE_LIMIT = 3;
 
 export interface ProductOpsResult extends SpecialistResult {
   /** Entities this specialist resolved — the only place a productId can enter the run's state. */
@@ -212,12 +224,100 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
         findings.push({
           findingId: `f-${ref.evidenceId}`,
           specialist: "PRODUCT_OPS",
-          statement: `${productName}의 ${label(fact.factKey)}은(는) ${fact.value}`
+          statement: `${productName}의 ${withTopic(label(fact.factKey))} ${fact.value}`
             + `${fact.unit ? fact.unit : ""}입니다 (출처 ${fact.source}).`,
           evidenceIds: [ref.evidenceId],
           confidence: "NEEDS_REVIEW",
           verdict: null,
           surfaceLink: null,
+          needId: need.id,
+        });
+      }
+      needStates.push({ id: need.id, status: "SATISFIED", evidenceIds: cited });
+      continue;
+    }
+
+    if (need.kind === "PRODUCT_KNOWLEDGE_DOC") {
+      if (!budget.spend("tool")) {
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      // The need's own question is the query. Not the seller's whole sentence: a goal carries the
+      // product name and the pleasantries, and matching a library against "누비아 사용법 좀 알려줘"
+      // scores every passage that happens to contain the product's name.
+      const query = need.question || input.goalText || "";
+      const found = await registry.invoke<KnowledgeSearchResult>(
+        OPERATOR_TOOL.SEARCH_PRODUCT_KNOWLEDGE,
+        { productId, query, limit: KNOWLEDGE_PASSAGE_LIMIT },
+        allowedTools,
+      );
+      if (found.passages.length === 0) {
+        // <b>Two absences, two sentences.</b> Nothing written and nothing matching are different
+        // facts about the LIBRARY, and neither is a fact about the product. Collapsing them is how a
+        // gap in the seller's own notes gets reported back to them as "그런 건 없습니다".
+        const empty = found.documentsSearched === 0;
+        const ref = evidence.add({
+          kind: "PRODUCT_KNOWLEDGE_GAP",
+          sourceTool: OPERATOR_TOOL.SEARCH_PRODUCT_KNOWLEDGE,
+          args: { productId, query },
+          locator: { productId, productName, facet: "KNOWLEDGE_DOC", label: query },
+          coverage: "COVERED",
+          provenance: `product-knowledge-library/${empty ? "EMPTY" : "NO_MATCH"}`,
+        });
+        refs.push(ref);
+        findings.push({
+          findingId: `f-${ref.evidenceId}`,
+          specialist: "PRODUCT_OPS",
+          statement: empty
+            ? `${productName}에 대해 등록된 상품 지식이 아직 없습니다. `
+              + "상품 화면에서 설명·FAQ·사용법을 추가하면 답변에 사용할 수 있습니다."
+            : `${productName}의 등록된 상품 지식(${found.documentsSearched}건)에는 `
+              + "이 질문에 해당하는 내용이 없습니다. (상품에 그런 내용이 없다는 뜻은 아닙니다.)",
+          evidenceIds: [ref.evidenceId],
+          confidence: "NEEDS_REVIEW",
+          verdict: null,
+          surfaceLink: `/products/${productId}`,
+          claimsCoverageLimit: true,
+          needId: need.id,
+        });
+        needStates.push({ id: need.id, status: "UNSATISFIABLE", evidenceIds: [ref.evidenceId],
+          reason: empty ? "등록된 상품 지식이 없습니다." : "등록된 지식에 해당 내용이 없습니다." });
+        continue;
+      }
+      const cited: string[] = [];
+      for (const passage of found.passages) {
+        const ref = evidence.add({
+          kind: "PRODUCT_KNOWLEDGE_DOC",
+          sourceTool: OPERATOR_TOOL.SEARCH_PRODUCT_KNOWLEDGE,
+          args: { productId, query },
+          locator: {
+            productId, productName,
+            facet: passage.sourceType,
+            // The label IS the quotable passage. An evidence row whose label is a title would let a
+            // reader verify that a document exists, which is not what the sentence rested on.
+            label: passage.content,
+            sourceId: passage.sourceId,
+            chunkId: passage.chunkId,
+            title: passage.title,
+          },
+          asOf: dateOnly(passage.updatedAt),
+          coverage: "COVERED",
+          provenance: `product-knowledge-library/${passage.sourceType}`
+            + `${passage.authorName ? `:${passage.authorName}` : ""}`,
+        });
+        refs.push(ref);
+        cited.push(ref.evidenceId);
+        findings.push({
+          findingId: `f-${ref.evidenceId}`,
+          specialist: "PRODUCT_OPS",
+          // The sentence names WHOSE words these are. A grounded answer that reads as SellerOps's own
+          // knowledge invites the seller to trust it further than its source allows.
+          statement: `${productName} — 판매자가 등록한 ${sourceTypeLabel(passage.sourceType)}`
+            + `"${passage.title}"에 이렇게 적혀 있습니다: ${passage.content}`,
+          evidenceIds: [ref.evidenceId],
+          confidence: "NEEDS_REVIEW",
+          verdict: null,
+          surfaceLink: `/products/${productId}`,
           needId: need.id,
         });
       }
@@ -286,7 +386,7 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
           findingId: `f-${ref.evidenceId}`,
           specialist: "PRODUCT_OPS",
           statement: listing
-            ? `${productName}은(는) ${listing.channelCode}에 `
+            ? `${withTopic(productName)} ${listing.channelCode}에 `
               + `${listing.listingName ? `"${listing.listingName}" 으로 ` : ""}등록돼 있습니다`
               + `${listing.price != null ? ` (가격 ${listing.price}${listing.currency ?? ""})` : ""}`
               + `${listing.sellingStatus ? `, 판매상태 ${listing.sellingStatus}` : ""}.`
@@ -479,7 +579,7 @@ async function reviewSignalFindings(
       statement: known
         ? `${productName}에 "${issue.title}" 문제로 기록된 리뷰 근거가 ${share!.count}건 있습니다`
           + ` (이 문제 전체 ${share!.total}건 중${change}).`
-        : `${productName}은(는) "${issue.title}" 문제에 리뷰 근거가 연결돼 있습니다`
+        : `${withTopic(productName)} "${issue.title}" 문제에 리뷰 근거가 연결돼 있습니다`
           + ` (이 문제 전체 ${issue.evidenceCount}건${change} — 이 상품 몫은 확인하지 못했습니다).`,
       evidenceIds: [ref.evidenceId],
       confidence: "NEEDS_REVIEW",
@@ -643,10 +743,45 @@ function coverageOf(view: ProductKnowledge | null, facet: string): KnowledgeCove
   return view?.knowledgeCoverage.find((c) => c.facet === facet);
 }
 
-/** `spec:길이` → `길이`. The namespace is storage detail and has no place in a sentence. */
+/**
+ * The seller's word for a fact key.
+ *
+ * <b>`spec:길이` → `길이` was right; `taxonomy:brand` → `brand` was not.</b> Most keys carry the
+ * channel's own Korean attribute label verbatim, which is exactly what a seller should read back. The
+ * handful SellerOps names ITSELF ({@code FactKeys.TAXONOMY_BRAND} and its siblings) are English
+ * identifiers, and stripping the namespace off one of those left "…의 brand은(는) 선바로입니다" on
+ * screen — measured on a live run, 2026-08-24. Unknown keys keep the old behaviour: the channel's
+ * label is the best word available and inventing a translation for it would be worse.
+ */
+const FACT_KEY_LABEL: Record<string, string> = {
+  brand: "브랜드",
+  manufacturer: "제조사",
+  category: "카테고리",
+  summary: "상세 설명",
+};
+
 function label(factKey: string): string {
   const at = factKey.indexOf(":");
-  return at >= 0 ? factKey.slice(at + 1) : factKey;
+  const name = at >= 0 ? factKey.slice(at + 1) : factKey;
+  return FACT_KEY_LABEL[name] ?? name;
+}
+
+/**
+ * The seller's word for the kind of document a passage came from.
+ *
+ * The English enum is a storage vocabulary; a sentence that says "POLICY 문서" to a seller is a
+ * sentence written for the database. Unknown values fall back to the neutral noun rather than the raw
+ * token, so a new type added server-side degrades to plain Korean instead of leaking an identifier.
+ */
+function sourceTypeLabel(sourceType: string): string {
+  switch (sourceType) {
+    case "DESCRIPTION": return "상품 설명 ";
+    case "FAQ": return "자주 묻는 질문 ";
+    case "USAGE": return "사용법 ";
+    case "POLICY": return "정책 ";
+    case "LINK": return "참고 자료 ";
+    default: return "상품 지식 ";
+  }
 }
 
 function dateOnly(instant: string | null): string | null {

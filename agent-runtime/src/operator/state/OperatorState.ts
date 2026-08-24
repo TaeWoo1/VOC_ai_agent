@@ -60,6 +60,15 @@ export type EvidenceKind =
   | "PRODUCT_VARIANT"
   | "PRODUCT_KNOWLEDGE_GAP"
   /**
+   * A passage of the seller's OWN writing about a product — the Product Knowledge library.
+   *
+   * A separate kind from `PRODUCT_FACT` on purpose: that is what a CHANNEL stated and carries the
+   * channel's name and observation time, this is what a PERSON wrote and carries an author. An answer
+   * grounded in the seller's own words is a different claim from one grounded in a catalogue read,
+   * and a judge that cannot tell them apart cannot weigh either.
+   */
+  | "PRODUCT_KNOWLEDGE_DOC"
+  /**
    * An axis the data cannot be cut along — "반복 문의에는 상품 정보가 없다".
    *
    * <b>Its own kind because it is its own fact.</b> A grouped answer that quietly stopped grouping
@@ -135,6 +144,17 @@ export interface EvidenceLocator {
   readonly variantId?: string;
   /** Which knowledge facet a gap refers to — IDENTITY / LISTING / SPEC / … */
   readonly facet?: string;
+  /**
+   * Product Knowledge library: which document and which passage of it.
+   *
+   * Both, not one. The document id is what a seller opens to check the claim; the passage id is what
+   * makes two runs of the same question demonstrably cite the same sentence, which is the difference
+   * between reproducible evidence and a quote that happens to look familiar.
+   */
+  readonly sourceId?: string;
+  readonly chunkId?: string;
+  /** The document's own title, so a citation can be named without re-reading it. */
+  readonly title?: string;
 }
 
 /** The judge's verdict over one finding. `judgeKind` is provenance — a label is never hardcoded. */
@@ -231,6 +251,14 @@ export type OperatorStopReason =
 export type OperatorFailureCode =
   | "PLANNER_UNAVAILABLE"
   | "PLANNER_CAPABILITY_OFF"
+  /**
+   * The org spent its daily Agent budget.
+   *
+   * <b>Its own code, not a flavour of `PLANNER_CAPABILITY_OFF`.</b> A client showing "이 기능이
+   * 꺼져 있습니다" for a ceiling that resets at midnight sends the seller to an admin who has nothing
+   * to change. The deterministic surfaces are unaffected by this code and a client may say so.
+   */
+  | "AGENT_QUOTA_EXHAUSTED"
   | "PLAN_INVALID"
   /**
    * The plan was made and the reads were attempted, and none of them came back with anything the run

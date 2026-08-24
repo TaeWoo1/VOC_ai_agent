@@ -42,6 +42,7 @@ export const OPERATOR_TOOL = {
   GET_CHANNEL_CAPABILITY: "get_channel_capability",
   GET_CONNECTION_GUIDANCE: "get_connection_guidance",
   GET_CHANNEL_COVERAGE: "get_channel_coverage",
+  SEARCH_PRODUCT_KNOWLEDGE: "search_product_knowledge",
 } as const;
 
 export type OperatorToolName = (typeof OPERATOR_TOOL)[keyof typeof OPERATOR_TOOL];
@@ -195,6 +196,24 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
       schema: z.object({
         productId: z.string().min(1),
         referenceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      }),
+    })),
+
+    read(tool(async ({ productId, query, limit }: { productId: string; query: string; limit?: number }) =>
+      deps.operator.searchProductKnowledge(productId, query, limit), {
+      name: OPERATOR_TOOL.SEARCH_PRODUCT_KNOWLEDGE,
+      description:
+        "판매자가 이 상품에 대해 직접 써 둔 글(상품 설명·FAQ·사용법·정책) 중 질문에 해당하는 대목만. "
+        + "get_product_knowledge 는 '채널이 말한 사실'을 주고, 이 도구는 '판매자가 쓴 문장'을 준다 "
+        + "— 출처가 다르므로 절대 같은 근거로 취급하지 않는다. "
+        + "passages 가 비어 있고 documentsSearched 가 0이면 '판매자가 아직 아무것도 쓰지 않았다'이고, "
+        + "documentsSearched 가 0보다 큰데 비어 있으면 '쓴 글에 그 내용이 없다'이다 — 둘 다 "
+        + "'이 상품에 그런 것이 없다'가 아니다. 여기 없는 내용은 지어내지 말고 없다고 말한다. "
+        + "필요한 정보: PRODUCT_KNOWLEDGE_DOC.",
+      schema: z.object({
+        productId: z.string().min(1),
+        query: z.string().min(1),
+        limit: z.number().int().min(1).max(5).optional(),
       }),
     })),
 

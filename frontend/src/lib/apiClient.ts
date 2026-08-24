@@ -1,5 +1,11 @@
 import axios, { isAxiosError } from "axios";
 import type {
+  AgentQuotaStatus,
+  KnowledgeSourceRequest,
+  KnowledgeSourceView,
+  OverviewResponse,
+  ProductKnowledgeView,
+  ProductSummaryView,
   CredentialDiagnosisView,
   AccountDashboardSummary,
   ArticleListResponse,
@@ -1519,6 +1525,77 @@ export const api = {
     const { data } = await http.get<TriageEventView[]>(
       `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/events`,
     );
+    return data;
+  },
+
+  /* ── Demo Core Experience v1 (2026-08-24) ─────────────────────────────────────────── */
+
+  /**
+   * The whole Overview screen in one read — KPIs, series, channel breakdown, exclusions, insights.
+   *
+   * Strict, and deliberately not mock-backed. A dashboard that silently renders demo numbers when the
+   * backend is unreachable is the one screen where a fallback is indistinguishable from the product
+   * working, and every number here is one a seller would act on.
+   */
+  async getOverviewStrict(days?: number): Promise<OverviewResponse> {
+    const suffix = days && days > 0 ? `?days=${days}` : "";
+    const { data } = await http.get<OverviewResponse>(`/api/dashboard/overview${suffix}`);
+    return data;
+  },
+
+  /** Product candidates for a seller's own words, or the first page when `q` is empty. */
+  async searchProductsStrict(q?: string, limit = 30): Promise<ProductSummaryView[]> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (q && q.trim()) params.set("q", q.trim());
+    const { data } = await http.get<ProductSummaryView[]>(`/api/products?${params.toString()}`);
+    return data;
+  },
+
+  /** Identity, listings, variants, facts, signals — and the coverage rows that qualify all of them. */
+  async getProductKnowledgeStrict(productId: string): Promise<ProductKnowledgeView> {
+    const { data } = await http.get<ProductKnowledgeView>(
+      `/api/products/${encodeURIComponent(productId)}/knowledge`,
+    );
+    return data;
+  },
+
+  /** The seller's own knowledge documents for one product. */
+  async listProductKnowledgeSources(productId: string): Promise<KnowledgeSourceView[]> {
+    const { data } = await http.get<KnowledgeSourceView[]>(
+      `/api/products/${encodeURIComponent(productId)}/knowledge/sources`,
+    );
+    return data;
+  },
+
+  async createProductKnowledgeSource(
+    productId: string,
+    request: KnowledgeSourceRequest,
+  ): Promise<KnowledgeSourceView> {
+    const { data } = await http.post<KnowledgeSourceView>(
+      `/api/products/${encodeURIComponent(productId)}/knowledge/sources`,
+      request,
+    );
+    return data;
+  },
+
+  async updateProductKnowledgeSource(
+    sourceId: string,
+    request: KnowledgeSourceRequest,
+  ): Promise<KnowledgeSourceView> {
+    const { data } = await http.put<KnowledgeSourceView>(
+      `/api/products/knowledge/sources/${encodeURIComponent(sourceId)}`,
+      request,
+    );
+    return data;
+  },
+
+  async deleteProductKnowledgeSource(sourceId: string): Promise<void> {
+    await http.delete(`/api/products/knowledge/sources/${encodeURIComponent(sourceId)}`);
+  },
+
+  /** Today's Agent budget for this org. Read-only; asking never spends any of it. */
+  async getAgentQuotaStrict(): Promise<AgentQuotaStatus> {
+    const { data } = await http.get<AgentQuotaStatus>("/api/agent/quota");
     return data;
   },
 };
