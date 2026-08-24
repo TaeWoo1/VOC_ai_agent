@@ -19,7 +19,7 @@ class PublishCapabilityControllerTest {
         // No adapters registered (the default when execution-enabled is off). channels is
         // unused by registeredChannelCodes(), so a null repository is fine here.
         ChannelReplyAdapterRegistry registry = new ChannelReplyAdapterRegistry(null, List.of());
-        PublishCapabilityController controller = new PublishCapabilityController(registry, false);
+        PublishCapabilityController controller = new PublishCapabilityController(registry, new InquiryReplyCapabilityRegistry(), false);
 
         PublishCapabilityView view = controller.capability();
 
@@ -37,7 +37,7 @@ class PublishCapabilityControllerTest {
     void reportsExecutionEnabledWhenFlagOn() {
         // The config the orchestration client's fail-closed guard must reject.
         ChannelReplyAdapterRegistry registry = new ChannelReplyAdapterRegistry(null, List.of());
-        PublishCapabilityController controller = new PublishCapabilityController(registry, true);
+        PublishCapabilityController controller = new PublishCapabilityController(registry, new InquiryReplyCapabilityRegistry(), true);
 
         PublishCapabilityView view = controller.capability();
 

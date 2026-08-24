@@ -46,6 +46,8 @@ class InquiryProposalServiceTest {
     @Autowired InquiryWorkItemAuditRepository audits;
     @Autowired com.sellerops.inquiry.reply.InquiryReplyDraftRepository drafts;
     @Autowired com.sellerops.channel.ChannelRepository channels;
+    @Autowired com.sellerops.product.ProductRepository products;
+    @Autowired com.sellerops.inquiry.draft.InquiryDraftEvidenceRepository draftEvidence;
     @Autowired PlatformTransactionManager txManager;
 
     private InquiryProposalWriter writer;
@@ -77,8 +79,27 @@ class InquiryProposalServiceTest {
         }
     }
 
+
+    /**
+     * A target-state reader with a fixed answer, built as an override rather than a mock: these
+     * tests have a field named {@code org}, and a fully-qualified {@code org.mockito...} reference
+     * resolves to it. The constructor arguments are unused because {@link
+     * com.sellerops.inquiry.publish.InquiryTargetStateReader#read} is the only method.
+     */
+    private static com.sellerops.inquiry.publish.InquiryTargetStateReader fixedTargetState(
+            com.sellerops.inquiry.publish.PreSendCheck answer) {
+        return new com.sellerops.inquiry.publish.InquiryTargetStateReader(null, null) {
+            @Override
+            public com.sellerops.inquiry.publish.PreSendCheck read(java.util.UUID orgId, java.util.UUID channelId) {
+                return answer;
+            }
+        };
+    }
+
     private InquiryProposalService service(InquiryProposalProvider provider) {
-        return new InquiryProposalService(workItems, proposals, inquiries, provider, writer, drafts, channels);
+        return new InquiryProposalService(workItems, proposals, inquiries, provider, writer, drafts,
+                channels, products, draftEvidence, fixedTargetState(com.sellerops.inquiry.publish.PreSendCheck.unproven(
+                        com.sellerops.inquiry.publish.PreSendCheck.STATE_UNKNOWN)));
     }
 
     private InquiryWorkItem seedOpen(UUID orgId, String title, String body, String author) {

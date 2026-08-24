@@ -17,6 +17,7 @@ const getInquiryPublishCapability = vi.fn();
 const saveInquiryReplyDraft = vi.fn();
 const confirmInquiryPublish = vi.fn();
 const generateInquiryProposal = vi.fn();
+const generateInquiryDraft = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -27,6 +28,7 @@ vi.mock("../../lib/apiClient", () => ({
     verifyInquiryPublish: vi.fn(),
     resumeInquiryPublish: vi.fn(),
     generateInquiryProposal: (id: string) => generateInquiryProposal(id),
+    generateInquiryDraft: (id: string) => generateInquiryDraft(id),
   },
   getToken: () => null,
 }));
@@ -39,6 +41,10 @@ const DRAFT = {
   contentFingerprint: "f".repeat(64),
   fingerprintAlgorithm: "SHA-256",
   createdAt: "2026-08-19T00:00:00Z",
+  authorKind: "MODEL" as const,
+  modelVersion: "test-model/v1",
+  knowledgeState: "GROUNDED" as const,
+  knowledgeNote: "판매자가 등록한 상품 지식을 근거로 썼습니다.",
 };
 
 function detail(over: Record<string, unknown> = {}) {
@@ -58,6 +64,12 @@ function detail(over: Record<string, unknown> = {}) {
     receivedAt: "2026-08-19T00:00:00Z",
     proposal: null,
     draft: DRAFT,
+    productId: "p1",
+    productName: "선바로 일체형 전선몰딩",
+    sourceSubtype: null,
+    answerStateProven: true,
+    answerStateNote: null,
+    draftEvidence: [],
     ...over,
   };
 }
@@ -78,6 +90,17 @@ beforeEach(() => {
     approvedFingerprint: "f".repeat(64),
     providerMessageNo: null,
     resultCode: null,
+    presendStateProven: true,
+    presendNote: null,
+  });
+  generateInquiryDraft.mockResolvedValue({
+    draft: { ...DRAFT, version: 3, contentFingerprint: "b".repeat(64) },
+    authorKind: "MODEL",
+    knowledgeState: "GROUNDED",
+    knowledgeNote: "판매자가 등록한 상품 지식을 근거로 썼습니다.",
+    productId: "p1",
+    evidence: [],
+    quotaMessage: null,
   });
 });
 
@@ -90,8 +113,8 @@ describe("InquiryResponsePanel — the send is offered only when the backend say
     getInquiryPublishCapability.mockResolvedValue({ executionEnabled: false, replyAdapterChannelCodes: [] });
     render(<InquiryResponsePanel workItemId="w1" />);
 
-    await screen.findByText(/답변 초안/);
-    expect(screen.queryByRole("button", { name: /등록하기/ })).not.toBeInTheDocument();
+    await screen.findByText("AI 답변");
+    expect(screen.queryByRole("button", { name: /답변 보내기/ })).not.toBeInTheDocument();
     // …and it says WHY, rather than leaving a silent gap where a control would be.
     expect(screen.getByText(/대신 등록하지 않습니다/)).toBeInTheDocument();
   });
@@ -105,7 +128,7 @@ describe("InquiryResponsePanel — the send is offered only when the backend say
 
     await screen.findByText(/판매자센터에서 직접 답변해 주세요/);
     expect(screen.getByText(/쿠팡 문의는/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /등록하기/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /답변 보내기/ })).not.toBeInTheDocument();
   });
 
   it("fails CLOSED when the capability read did not land — a write is never offered on a guess", async () => {
@@ -113,17 +136,18 @@ describe("InquiryResponsePanel — the send is offered only when the backend say
     render(<InquiryResponsePanel workItemId="w1" />);
 
     await screen.findByText(/확인하지 못했습니다/);
-    expect(screen.queryByRole("button", { name: /등록하기/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /답변 보내기/ })).not.toBeInTheDocument();
   });
 
   it("refuses to send an UNSAVED edit — the fingerprint on screen must be the one that goes", async () => {
     const user = userEvent.setup();
     render(<InquiryResponsePanel workItemId="w1" />);
-    await screen.findByRole("button", { name: /등록하기/ });
+    await screen.findByRole("button", { name: /답변 보내기/ });
 
+    await user.click(screen.getByRole("button", { name: "수정" }));
     await user.type(screen.getByLabelText("내용"), " 추가로 적었습니다");
 
-    expect(screen.queryByRole("button", { name: /등록하기/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /답변 보내기/ })).not.toBeInTheDocument();
     expect(screen.getByText(/편집한 내용을 먼저 저장해 주세요/)).toBeInTheDocument();
   });
 });
@@ -133,7 +157,7 @@ describe("InquiryResponsePanel — the press that writes", () => {
     const user = userEvent.setup();
     render(<InquiryResponsePanel workItemId="w1" />);
 
-    await user.click(await screen.findByRole("button", { name: /쿠팡에 답변 등록하기/ }));
+    await user.click(await screen.findByRole("button", { name: /답변 보내기/ }));
 
     // The first press only opened the confirm block. Nothing has been sent.
     expect(confirmInquiryPublish).not.toHaveBeenCalled();
@@ -158,34 +182,53 @@ describe("InquiryResponsePanel — the press that writes", () => {
     const user = userEvent.setup();
     render(<InquiryResponsePanel workItemId="w1" />);
 
-    await user.click(await screen.findByRole("button", { name: /쿠팡에 답변 등록하기/ }));
+    await user.click(await screen.findByRole("button", { name: /답변 보내기/ }));
     await user.click(screen.getByRole("button", { name: "취소" }));
 
     expect(confirmInquiryPublish).not.toHaveBeenCalled();
     expect(screen.queryByText(/등록 후에는 취소할 수 없습니다/)).not.toBeInTheDocument();
   });
 
-  it("saving a new draft version CLOSES an open confirm — a stale approval cannot be pressed", async () => {
+  it("an open confirm exposes NOTHING that could change what is about to be sent", async () => {
     const user = userEvent.setup();
     render(<InquiryResponsePanel workItemId="w1" />);
 
-    await user.click(await screen.findByRole("button", { name: /쿠팡에 답변 등록하기/ }));
+    await user.click(await screen.findByRole("button", { name: /답변 보내기/ }));
     expect(screen.getByText(/등록 후에는 취소할 수 없습니다/)).toBeInTheDocument();
 
+    // The old layout kept 수정 / 다시 작성 / 초안 저장 live beside an open confirm, so the draft could
+    // move under an approval that was already on screen. Now the confirm block is the only thing
+    // there: the hazard is removed by the layout rather than defended against after the fact.
+    expect(screen.queryByRole("button", { name: "수정" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "다시 작성" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /초안 저장/ })).toBeNull();
+    expect(confirmInquiryPublish).not.toHaveBeenCalled();
+  });
+
+  it("an edit produces a NEW version, and the confirm then restates that new one", async () => {
+    const user = userEvent.setup();
+    render(<InquiryResponsePanel workItemId="w1" />);
+
+    await user.click(await screen.findByRole("button", { name: "수정" }));
+    await user.type(screen.getByLabelText("내용"), " 추가");
     await user.click(screen.getByRole("button", { name: /초안 저장/ }));
 
-    await waitFor(() => expect(screen.queryByText(/등록 후에는 취소할 수 없습니다/)).not.toBeInTheDocument());
-    expect(confirmInquiryPublish).not.toHaveBeenCalled();
+    await waitFor(() => expect(saveInquiryReplyDraft).toHaveBeenCalled());
+    await user.click(await screen.findByRole("button", { name: /답변 보내기/ }));
+    const confirm = within(screen.getByRole("group", { name: "답변 등록 확인" }));
+    // Version 3, not the version 2 the seller was reading before they edited — which is exactly why
+    // an approval bound to version 2's fingerprint can no longer be spent.
+    expect(confirm.getByText(/저장된 버전 3/)).toBeInTheDocument();
   });
 
   it("reports the outcome in the seller's words, and stops offering to send again", async () => {
     const user = userEvent.setup();
     render(<InquiryResponsePanel workItemId="w1" />);
 
-    await user.click(await screen.findByRole("button", { name: /쿠팡에 답변 등록하기/ }));
+    await user.click(await screen.findByRole("button", { name: /답변 보내기/ }));
     await user.click(screen.getByRole("button", { name: /확인, 등록합니다/ }));
 
     await screen.findByText("답변이 등록되었습니다.");
-    expect(screen.queryByRole("button", { name: /등록하기/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /답변 보내기/ })).not.toBeInTheDocument();
   });
 });

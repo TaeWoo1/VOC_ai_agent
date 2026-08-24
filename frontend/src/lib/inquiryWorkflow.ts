@@ -201,3 +201,28 @@ export interface TabResetState {
 export function resetForTab(key: InquiryTabKey): TabResetState {
   return { tab: key, page: 0, selectedId: null, successMessage: null };
 }
+
+/**
+ * How long this inquiry has been waiting, as a person would say it.
+ *
+ * <b>Bucketed, and deliberately so.</b> The Cafe24 backlog contains posts from 2015; the queue was
+ * rendering "4150일 전", which is arithmetic rather than information — nobody acts differently on
+ * 4,150 days than on 4,000. The buckets stop at "1년 넘음" because past a year the only decision left
+ * is whether to answer at all.
+ *
+ * `receivedAt` is the SOURCE time (when the customer wrote it), never a collection time, so this
+ * never turns internal timing into a seller-visible number.
+ */
+export function waitedLabel(receivedAt: string, now: Date = new Date()): string | null {
+  const at = Date.parse(receivedAt);
+  if (Number.isNaN(at)) return null;
+  const hours = Math.floor((now.getTime() - at) / 3_600_000);
+  if (hours < 0) return null;
+  if (hours < 1) return "방금";
+  if (hours < 24) return `${hours}시간째`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}일째`;
+  if (days < 31) return `${Math.floor(days / 7)}주째`;
+  if (days < 365) return `${Math.floor(days / 30)}개월째`;
+  return "1년 넘음";
+}

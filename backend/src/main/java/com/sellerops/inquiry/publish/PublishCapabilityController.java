@@ -1,5 +1,6 @@
 package com.sellerops.inquiry.publish;
 
+import com.sellerops.inquiry.publish.dto.InquiryReplyCapabilityView;
 import com.sellerops.inquiry.publish.dto.PublishCapabilityView;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,13 +24,30 @@ import org.springframework.web.bind.annotation.RestController;
 public class PublishCapabilityController {
 
     private final ChannelReplyAdapterRegistry adapters;
+    private final InquiryReplyCapabilityRegistry audited;
     private final boolean executionEnabled;
 
     public PublishCapabilityController(
-            ChannelReplyAdapterRegistry adapters,
+            ChannelReplyAdapterRegistry adapters, InquiryReplyCapabilityRegistry audited,
             @Value("${sellerops.inquiry.publish.execution-enabled:false}") boolean executionEnabled) {
         this.adapters = adapters;
+        this.audited = audited;
         this.executionEnabled = executionEnabled;
+    }
+
+    /**
+     * The audited transport per channel (and per NAVER source subtype) — what is KNOWN, as opposed to
+     * what is currently WIRED.
+     *
+     * <p>The two differ and the difference matters to a screen. {@code /capability} answers "can this
+     * deployment send right now" (execution flag + registered adapters); this answers "is there a way
+     * to send at all, and how do we know". A channel can be DIRECT_API here and absent there because
+     * the flag is off, and a seller reading only the first would conclude the channel cannot be
+     * answered.
+     */
+    @GetMapping("/transports")
+    public List<InquiryReplyCapabilityView> transports() {
+        return audited.all();
     }
 
     @GetMapping("/capability")

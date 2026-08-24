@@ -30,6 +30,19 @@ public class InquiryPublishBindingWriter {
 
     static final String ACTION_KIND = "POST_INQUIRY_REPLY";
 
+    /**
+     * The destination identity an approval is bound to. A record rather than four parameters so a
+     * caller cannot transpose two UUIDs and bind an approval to the wrong pair silently.
+     *
+     * @param sellerAccountId the account whose credential will make the call
+     * @param channelId       the channel the reply is posted to
+     * @param externalId      the marketplace's handle for the inquiry being answered
+     * @param sourceSubtype   which source resource it came from, or null for a single-source channel
+     */
+    public record ApprovalTarget(UUID sellerAccountId, UUID channelId, String externalId,
+                                 String sourceSubtype) {
+    }
+
     private final InquiryWorkItemRepository workItems;
     private final InquiryApprovalRepository approvals;
     private final InquiryActionIntentRepository intents;
@@ -56,9 +69,16 @@ public class InquiryPublishBindingWriter {
         return sha256Hex(workItemId + ":" + approvedFingerprint);
     }
 
-    /** Bind the approval to {@code approvedDraft} and create the intent + pending execution. */
+    /**
+     * Bind the approval to {@code approvedDraft} and create the intent + pending execution.
+     *
+     * <p>{@code target} is the destination identity as it stands at approval time — the seller
+     * account, channel, marketplace handle and source subtype the seller was shown. It is stored on
+     * the approval so the dispatch can prove none of it moved, rather than re-reading today's values
+     * and finding, tautologically, that they match themselves.
+     */
     public InquiryExecution bind(InquiryWorkItem workItem, InquiryReplyDraft approvedDraft,
-                                 String commandId, String actor) {
+                                 ApprovalTarget target, String commandId, String actor) {
         return tx.execute(status -> {
             UUID workItemId = workItem.getId();
             UUID orgId = workItem.getOrgId();
@@ -71,6 +91,11 @@ public class InquiryPublishBindingWriter {
             approval.setApprovedFingerprint(fingerprint);
             approval.setCommandId(commandId);
             approval.setApprover(actor);
+            approval.setSellerAccountId(target.sellerAccountId());
+            approval.setChannelId(target.channelId());
+            approval.setTargetExternalId(target.externalId());
+            approval.setSourceSubtype(target.sourceSubtype());
+            approval.setActionKind(ACTION_KIND);
             approvals.save(approval);
 
             InquiryActionIntent intent = new InquiryActionIntent();

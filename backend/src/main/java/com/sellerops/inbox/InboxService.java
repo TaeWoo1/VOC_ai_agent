@@ -2,6 +2,7 @@ package com.sellerops.inbox;
 
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
+import com.sellerops.common.MarkupText;
 import com.sellerops.common.PiiMasker;
 import com.sellerops.inbox.dto.FeedItem;
 import com.sellerops.inbox.dto.InboxResponse;
@@ -129,15 +130,23 @@ public class InboxService {
     static final int MASK_WINDOW = 200;
 
     /**
-     * Build the customer-facing snippet: mask obvious PII (phone/email) BEFORE
-     * truncating so a token is never split. The raw body stays untouched in the DB.
+     * Build the customer-facing snippet: reduce markup to the text a person wrote, then mask obvious
+     * PII (phone/email) BEFORE truncating so a token is never split. The raw body stays untouched in
+     * the DB.
+     *
+     * <p><b>Order matters, and it was wrong.</b> The window used to be taken off the raw body, so a
+     * Cafe24 board post whose first 200 characters are {@code <table border="1" style='width:
+     * 1240px…} produced a preview of exactly that — markup, cut mid-attribute. {@link
+     * MarkupText#toSingleLine} now runs first, over its own bounded scan, so the 200-character mask
+     * window and the 60-character preview are both spent on words.
      */
     static String snippet(String body) {
         if (body == null) {
             return "";
         }
-        boolean windowed = body.length() > MASK_WINDOW;
-        String head = windowed ? body.substring(0, MASK_WINDOW) : body;
+        String text = MarkupText.toSingleLine(body);
+        boolean windowed = text.length() > MASK_WINDOW;
+        String head = windowed ? text.substring(0, MASK_WINDOW) : text;
         String masked = PiiMasker.maskText(head).strip();
         if (!windowed && masked.length() <= SNIPPET_LENGTH) {
             return masked;

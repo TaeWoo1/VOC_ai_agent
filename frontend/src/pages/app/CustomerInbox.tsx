@@ -175,7 +175,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
       {inquiriesOnly ? (
         <PageHead
           title="문의"
-          description="답변 필요 → 답변함 순으로 봅니다. 답변은 SellerOps가 보내지 않고, 준비한 답을 채널에서 직접 등록합니다."
+          description="답변 필요 → 답변함 순으로 봅니다. 초안은 AI가 쓰고, 보낼지는 문의마다 직접 확인합니다."
           action={
             <AgentLaunch
               context={{

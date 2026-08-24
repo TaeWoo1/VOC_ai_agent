@@ -2,6 +2,7 @@ package com.sellerops.inquiry.publish;
 
 import com.sellerops.common.ApiException;
 import com.sellerops.inquiry.Inquiry;
+import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.publish.dto.PublishStatusView;
 import com.sellerops.inquiry.reply.InquiryReplyDraft;
@@ -46,12 +47,13 @@ public class InquiryPublishService {
     private final InquiryWorkItemAuditRepository audits;
     private final InquiryPublishBindingWriter binding;
     private final ChannelReplyAdapterRegistry adapters;
+    private final InquiryTargetStateReader targetState;
 
     public InquiryPublishService(InquiryWorkItemRepository workItems, InquiryReplyDraftRepository drafts,
                                  InquiryRepository inquiries, InquiryApprovalRepository approvals,
                                  InquiryExecutionRepository executions, InquiryVerificationRepository verifications,
                                  InquiryWorkItemAuditRepository audits, InquiryPublishBindingWriter binding,
-                                 ChannelReplyAdapterRegistry adapters) {
+                                 ChannelReplyAdapterRegistry adapters, InquiryTargetStateReader targetState) {
         this.workItems = workItems;
         this.drafts = drafts;
         this.inquiries = inquiries;
@@ -61,6 +63,7 @@ public class InquiryPublishService {
         this.audits = audits;
         this.binding = binding;
         this.adapters = adapters;
+        this.targetState = targetState;
     }
 
     /** Confirm the exact draft version, bind immutably, create the intent, and (if a channel adapter exists) dispatch. */
@@ -92,7 +95,17 @@ public class InquiryPublishService {
             if (!head.getContentFingerprint().equals(expectedFingerprint)) {
                 throw ApiException.conflict("초안이 변경되었습니다. 최신 초안을 확인하세요.");
             }
-            binding.bind(workItem, head, commandId, "SELLER:" + sellerUserId);
+            Inquiry target = loadInquiry(orgId, workItem.getInquiryId());
+            if (target.getExternalId() == null || target.getExternalId().isBlank()) {
+                // Nothing to bind an approval TO. Refuse at approval time rather than accepting a
+                // confirmation the dispatch could only fail on.
+                throw ApiException.badRequest("이 문의에는 채널이 알아볼 수 있는 식별자가 없어 답변을 등록할 수 없습니다.");
+            }
+            binding.bind(workItem, head,
+                    new InquiryPublishBindingWriter.ApprovalTarget(
+                            workItem.getSellerAccountId(), workItem.getChannelId(),
+                            target.getExternalId(), target.getSourceSubtype()),
+                    commandId, "SELLER:" + sellerUserId);
             workItem = loadWorkItem(orgId, workItemId); // reload with ACTION_PENDING phase
         }
 
@@ -176,6 +189,26 @@ public class InquiryPublishService {
             return PublishOutcomeCategory.RETRYABLE_FAILURE;
         }
 
+        // The last gate before the only marketplace WRITE in the product: is this still the target
+        // that was approved, and is it still answerable? A contradiction is permanent — re-approving
+        // is the remedy, not retrying — so it fails the execution rather than leaving it pending.
+        PreSendCheck check = revalidate(orgId, workItem, approval, inquiry);
+        if (check.refused()) {
+            execution.setStatus(InquiryExecutionStatus.FAILED);
+            execution.setFailureReason(check.reason());
+            execution.setPresendStateProven(false);
+            execution.setPresendNote(check.reason());
+            executions.save(execution);
+            setPhase(workItem, InquiryWorkItemPhase.FAILED);
+            audit(orgId, workItem.getId(), "presend:" + workItem.getId(),
+                    InquiryWorkItemEvent.EXECUTION_RECORDED,
+                    InquiryWorkItemPhase.ACTION_PENDING, InquiryWorkItemPhase.FAILED);
+            return PublishOutcomeCategory.PERMANENT_FAILURE;
+        }
+        // Not a refusal — a recorded ignorance. See PreSendCheck.
+        execution.setPresendStateProven(check.stateProven());
+        execution.setPresendNote(check.note());
+
         execution.setStatus(InquiryExecutionStatus.DISPATCHING);
         executions.save(execution);
 
@@ -221,6 +254,50 @@ public class InquiryPublishService {
             }
         }
         return transientCategory;
+    }
+
+    /**
+     * Compare the approval against the world as it is now.
+     *
+     * <p>Five identity comparisons and one answerability comparison. The identity side is
+     * deliberately literal — {@link java.util.Objects#equals} on each snapshotted value — because the
+     * point is to catch the case where something moved, and a clever comparison that tolerated a
+     * difference would defeat it. {@code sourceSubtype} is compared as a value including null: a
+     * channel with one source resource legitimately has none, so null must equal null and must not
+     * act as a wildcard that lets a NAVER 상품 문의 approval be spent on a 고객 문의.
+     *
+     * <p>An approval with no snapshot at all (written before V66) cannot be checked, and an
+     * un-checkable approval is refused rather than trusted.
+     */
+    private PreSendCheck revalidate(UUID orgId, InquiryWorkItem workItem, InquiryApproval approval,
+                                    Inquiry inquiry) {
+        if (approval.getTargetExternalId() == null || approval.getChannelId() == null) {
+            return PreSendCheck.refuse(PreSendCheck.NO_TARGET_SNAPSHOT);
+        }
+        if (!java.util.Objects.equals(approval.getSellerAccountId(), workItem.getSellerAccountId())) {
+            return PreSendCheck.refuse(PreSendCheck.ACCOUNT_CHANGED);
+        }
+        if (!java.util.Objects.equals(approval.getChannelId(), workItem.getChannelId())) {
+            return PreSendCheck.refuse(PreSendCheck.CHANNEL_CHANGED);
+        }
+        if (!approval.getTargetExternalId().equals(inquiry.getExternalId())) {
+            return PreSendCheck.refuse(PreSendCheck.TARGET_CHANGED);
+        }
+        if (!java.util.Objects.equals(approval.getSourceSubtype(), inquiry.getSourceSubtype())) {
+            return PreSendCheck.refuse(PreSendCheck.SUBTYPE_CHANGED);
+        }
+        // Already answered — on the marketplace, by anyone. A second answer is not a retry.
+        if (inquiry.getAnsweredAt() != null
+                || (inquiry.getAnswerBody() != null && !inquiry.getAnswerBody().isBlank())) {
+            return PreSendCheck.refuse(PreSendCheck.ALREADY_ANSWERED);
+        }
+        if (inquiry.getOperationalState() != null
+                && inquiry.getOperationalState() != InquiryOperationalState.ACTIVE) {
+            return PreSendCheck.refuse(PreSendCheck.NOT_ANSWERABLE);
+        }
+        // Everything the approval asserted still holds. What remains is whether the answer state we
+        // just read is CURRENT — which is a property of the channel, not of this row.
+        return targetState.read(orgId, workItem.getChannelId());
     }
 
     /** Re-query the channel result and record a verification attempt; COMPLETED only when the adapter confirms. */
@@ -292,7 +369,9 @@ public class InquiryPublishService {
                 approval == null ? null : approval.getApprovedDraftVersion(),
                 approval == null ? null : approval.getApprovedFingerprint(),
                 execution == null ? null : execution.getProviderMessageNo(),
-                execution == null ? null : execution.getResultCode());
+                execution == null ? null : execution.getResultCode(),
+                execution == null ? null : execution.getPresendStateProven(),
+                execution == null ? null : execution.getPresendNote());
     }
 
     private static PublishOutcomeCategory categoryFor(InquiryExecution execution) {

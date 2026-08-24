@@ -32,7 +32,16 @@ export function relativeTime(iso: string | null): string {
   if (diffHr < 24) {
     return `${diffHr}시간 전`;
   }
-  return `${Math.round(diffHr / 24)}일 전`;
+  const diffDay = Math.round(diffHr / 24);
+  if (diffDay < 31) {
+    return `${diffDay}일 전`;
+  }
+  // Past a month, the day count stops being information. The 문의 queue was rendering "4150일 전" on
+  // a Cafe24 backlog reaching back to 2015 — arithmetic no seller acts on differently from 4,000.
+  if (diffDay < 365) {
+    return `${Math.floor(diffDay / 30)}개월 전`;
+  }
+  return "1년 넘음";
 }
 
 export function shortDate(iso: string): string {

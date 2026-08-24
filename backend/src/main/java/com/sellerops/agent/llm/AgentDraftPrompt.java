@@ -23,7 +23,7 @@ package com.sellerops.agent.llm;
 public final class AgentDraftPrompt {
 
     /** Bump on every wording change. It is stamped into the provenance the run records. */
-    public static final String PROMPT_VERSION = "agent-draft-prompt/v1";
+    public static final String PROMPT_VERSION = "agent-draft-prompt/v2";
 
     /**
      * The closed set of reply categories, in the rule drafter's own order.
@@ -53,6 +53,8 @@ public final class AgentDraftPrompt {
                - 이 초안은 사람이 검토하고 직접 전송합니다. 시스템이 대신 전송하지 않습니다.
                - 확인되지 않은 사실(주문 상태, 재고 수량, 배송 일자, 환불 금액, 정책 조항)을 지어내지 마세요. \
                확인 후 안내하겠다고 쓰세요.
+               - 「판매자가 등록한 상품 지식」이 주어지면 그 내용만 근거로 쓰세요. 거기 없는 사양·수치·기간·\
+               조건은 쓰지 마세요. 지식이 비어 있으면 그것만으로 답을 만들지 말고 확인 후 안내하겠다고 쓰세요.
                - 보상, 할인, 예외 처리를 약속하지 마세요.
                - 고객의 이름, 연락처, 주소를 초안에 넣지 마세요.
                - 2~4문장, 존댓말, 인사와 마무리를 포함합니다.
@@ -68,16 +70,42 @@ public final class AgentDraftPrompt {
     /**
      * The user turn — <b>the payload floor</b>.
      *
-     * <p>Exactly two values of the seller's content leave: the inquiry's own {@code title} and
-     * {@code details}. Not the buyer's name, not an order id, not a work-item or inquiry UUID, not
-     * the org, not the channel, not the phase, not a timestamp. {@code AgentDraftPayloadFloorTest}
-     * asserts this on the serialized request bytes rather than on this method's intent, which is the
-     * only way the floor stays true after the next edit.
+     * <p>Exactly three values of the seller's content leave: the inquiry's own {@code title} and
+     * {@code details}, and the seller-authored product knowledge retrieved for this question. Not the
+     * buyer's name, not an order id, not a work-item / inquiry / product / source / chunk UUID, not
+     * the org, not the channel, not the phase, not a timestamp, not a retrieval score.
+     * {@code AgentDraftPayloadFloorTest} asserts this on the serialized request bytes rather than on
+     * this method's intent, which is the only way the floor stays true after the next edit.
+     *
+     * <p><b>Why the floor moved.</b> v1 sent the question and nothing else, so every factual answer
+     * the model could give was invented — which the rules then forbade, leaving "확인 후 안내드리겠습니다"
+     * as the only honest draft. Grounding requires that the grounds be present. The knowledge is the
+     * seller's own writing about their own product; it is a narrower class of content than the
+     * customer text already in {@code details}, and it carries no identifier of any kind.
      *
      * <p>A null body is rendered as an empty line rather than the string "null": the model would
      * otherwise be answering a question about a literal four-letter word.
      */
+    public static String user(String title, String details, java.util.List<AgentDraftGenerator.Passage> knowledge) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("제목: ").append(title == null ? "" : title)
+                .append("\n본문:\n").append(details == null ? "" : details);
+        sb.append("\n\n판매자가 등록한 상품 지식:\n");
+        if (knowledge == null || knowledge.isEmpty()) {
+            // Said out loud rather than omitted. An absent section reads to a model as "not relevant
+            // here"; this section reads as "there is nothing, so do not pretend there is".
+            sb.append("(없음)");
+        } else {
+            for (AgentDraftGenerator.Passage passage : knowledge) {
+                sb.append("- [").append(passage.heading() == null ? "" : passage.heading()).append("] ")
+                        .append(passage.text() == null ? "" : passage.text()).append('\n');
+            }
+        }
+        return sb.toString().strip();
+    }
+
+    /** The two-argument form, kept for callers with no product knowledge to offer. */
     public static String user(String title, String details) {
-        return "제목: " + (title == null ? "" : title) + "\n본문:\n" + (details == null ? "" : details);
+        return user(title, details, java.util.List.of());
     }
 }

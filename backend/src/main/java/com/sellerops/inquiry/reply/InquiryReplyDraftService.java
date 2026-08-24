@@ -1,6 +1,8 @@
 package com.sellerops.inquiry.reply;
 
 import com.sellerops.common.ApiException;
+import com.sellerops.inquiry.draft.DraftAuthorKind;
+import com.sellerops.inquiry.draft.DraftKnowledgeState;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
@@ -40,14 +42,47 @@ public class InquiryReplyDraftService {
         this.drafts = drafts;
     }
 
+    /**
+     * The head version number, or {@code 0} when nothing is saved yet — exactly the {@code
+     * baseVersion} a first save expects. Exposed so a generator can append without racing itself into
+     * a 409 by guessing.
+     */
+    public int currentVersion(UUID workItemId) {
+        return drafts.findTopByWorkItemIdOrderByVersionDesc(workItemId)
+                .map(InquiryReplyDraft::getVersion).orElse(0);
+    }
+
     /** The current draft for a work item (assumes the caller already org-verified it). */
     public ReplyDraftView latestView(UUID workItemId) {
         return drafts.findTopByWorkItemIdOrderByVersionDesc(workItemId)
                 .map(ReplyDraftView::of).orElse(null);
     }
 
+    /**
+     * The provenance stamped onto a saved version.
+     *
+     * <p>A seller edit is always {@link DraftAuthorKind#SELLER} with no model and no knowledge state,
+     * whatever the version before it was: the moment a human changes a word, the draft is theirs and
+     * claiming a model wrote it would be false. Only {@link InquiryDraftComposer} passes anything
+     * else.
+     */
+    public record Provenance(DraftAuthorKind authorKind, String modelVersion,
+                             DraftKnowledgeState knowledgeState, UUID productId) {
+
+        /** What a hand-typed save records. */
+        public static Provenance seller() {
+            return new Provenance(DraftAuthorKind.SELLER, null, null, null);
+        }
+    }
+
     public ReplyDraftView save(UUID orgId, UUID workItemId, UUID sellerUserId,
                                String title, String comments, Integer baseVersion) {
+        return save(orgId, workItemId, sellerUserId, title, comments, baseVersion, Provenance.seller());
+    }
+
+    public ReplyDraftView save(UUID orgId, UUID workItemId, UUID sellerUserId,
+                               String title, String comments, Integer baseVersion,
+                               Provenance provenance) {
         // Org guard BEFORE reading/validating any content.
         InquiryWorkItem workItem = workItems.findById(workItemId)
                 .filter(w -> w.getOrgId().equals(orgId))
@@ -104,6 +139,10 @@ public class InquiryReplyDraftService {
         draft.setContentFingerprint(fingerprint);
         draft.setFingerprintAlgorithm(EsmAnswerValidation.FINGERPRINT_ALGORITHM);
         draft.setCreatedBy("SELLER:" + sellerUserId);
+        draft.setAuthorKind(provenance.authorKind().name());
+        draft.setModelVersion(provenance.modelVersion());
+        draft.setKnowledgeState(provenance.knowledgeState() == null ? null : provenance.knowledgeState().name());
+        draft.setProductId(provenance.productId());
         try {
             return ReplyDraftView.of(drafts.save(draft));
         } catch (DataIntegrityViolationException race) {

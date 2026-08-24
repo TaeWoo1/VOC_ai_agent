@@ -63,6 +63,7 @@ class CoupangInquiryRoutineFlowTest {
     @Autowired InquiryRepository inquiries;
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
+    @Autowired com.sellerops.inquiry.draft.InquiryDraftEvidenceRepository draftEvidence;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired InquiryWorkItemAuditRepository audits;
@@ -199,13 +200,31 @@ class CoupangInquiryRoutineFlowTest {
 
     // --- the routine the seller actually performs ------------------------
 
+
+    /**
+     * A target-state reader with a fixed answer, built as an override rather than a mock: these
+     * tests have a field named {@code org}, and a fully-qualified {@code org.mockito...} reference
+     * resolves to it. The constructor arguments are unused because {@link
+     * com.sellerops.inquiry.publish.InquiryTargetStateReader#read} is the only method.
+     */
+    private static com.sellerops.inquiry.publish.InquiryTargetStateReader fixedTargetState(
+            com.sellerops.inquiry.publish.PreSendCheck answer) {
+        return new com.sellerops.inquiry.publish.InquiryTargetStateReader(null, null) {
+            @Override
+            public com.sellerops.inquiry.publish.PreSendCheck read(java.util.UUID orgId, java.util.UUID channelId) {
+                return answer;
+            }
+        };
+    }
+
     /** The seller-facing chain that runs on a collected work item, wired the way production wires it. */
     private com.sellerops.inquiry.proposal.InquiryProposalService proposalService() {
         return new com.sellerops.inquiry.proposal.InquiryProposalService(
                 workItems, proposals, inquiries,
                 new com.sellerops.inquiry.proposal.RuleBasedInquiryProposalProvider(),
                 new com.sellerops.inquiry.proposal.InquiryProposalWriter(workItems, proposals, audits, txManager),
-                replyDrafts, channels);
+                replyDrafts, channels, products, draftEvidence, fixedTargetState(com.sellerops.inquiry.publish.PreSendCheck.unproven(
+                        com.sellerops.inquiry.publish.PreSendCheck.STATE_UNKNOWN)));
     }
 
     /** A COUPANG catalog row, so the detail read resolves the channel the seller sees. */

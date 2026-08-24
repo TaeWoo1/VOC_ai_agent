@@ -91,13 +91,30 @@ class InquiryPublishServiceTest {
     /** Service WITH the fake adapter registered (a channel adapter is available). */
     private InquiryPublishService withAdapter() {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
-                verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of(adapter)));
+                verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of(adapter)),
+                targetState());
     }
 
     /** Service with NO adapter registered (fail-closed: nothing dispatches). */
     private InquiryPublishService withoutAdapter() {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
-                verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of()));
+                verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of()),
+                targetState());
+    }
+
+    /**
+     * A target-state reader that always reports the state as proven, so these tests exercise the
+     * dispatch decisions rather than the coverage read. The pre-send check's own behaviour — the
+     * refusals, and the unproven-but-allowed path — is covered by {@code InquiryPreSendCheckTest}.
+     * Built as an override rather than a mock so it needs no stubbing imports.
+     */
+    private static InquiryTargetStateReader targetState() {
+        return new InquiryTargetStateReader(null, null) {
+            @Override
+            public PreSendCheck read(java.util.UUID orgId, java.util.UUID channelId) {
+                return PreSendCheck.proven();
+            }
+        };
     }
 
     private static String approvedFingerprint() {

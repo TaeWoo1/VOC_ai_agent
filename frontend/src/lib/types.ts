@@ -1226,6 +1226,67 @@ export interface InquiryDetail {
   proposal: ProposalView | null;
   /** The current (latest) reply draft, present once the seller has saved one. */
   draft: ReplyDraftView | null;
+  /** The canonical product this inquiry is about, when it resolves to one. */
+  productId: string | null;
+  productName: string | null;
+  /** Which source resource it came from (NAVER 상품 문의 vs 고객 문의); null on single-source channels. */
+  sourceSubtype: string | null;
+  /**
+   * Whether SellerOps can currently prove this inquiry is still unanswered on the marketplace.
+   * `false` does not block sending — it is what the seller is told BEFORE they press, so the person
+   * accepting the risk is the person who was told about it. `null` where the question does not arise.
+   */
+  answerStateProven: boolean | null;
+  answerStateNote: string | null;
+  /** What the current draft was grounded in, in the order the drafter was shown them. */
+  draftEvidence: DraftEvidenceView[];
+}
+
+/**
+ * Mirrors com.sellerops.inquiry.draft.dto.DraftEvidenceView — one citation under a generated draft.
+ *
+ * The passage text is deliberately absent: the reply already says the thing, and a citation is a
+ * pointer to the seller's own knowledge document, not a second copy of it.
+ */
+export interface DraftEvidenceView {
+  kind: string;
+  title: string | null;
+  locator: string | null;
+  sourceId: string | null;
+  chunkId: string | null;
+}
+
+/**
+ * Mirrors com.sellerops.inquiry.draft.dto.GeneratedDraftView — the result of generating one draft.
+ *
+ * `authorKind` is `MODEL` only when a model actually wrote it. When the capability is off or the
+ * day's budget is spent the deterministic drafter writes instead and this says `RULE`, because a
+ * seller comparing two drafts must be able to see that one had no model behind it.
+ */
+export interface GeneratedDraftView {
+  draft: ReplyDraftView;
+  authorKind: "MODEL" | "RULE" | "SELLER";
+  knowledgeState: "NO_PRODUCT" | "NO_LIBRARY" | "NO_MATCH" | "GROUNDED";
+  knowledgeNote: string;
+  productId: string | null;
+  evidence: DraftEvidenceView[];
+  quotaMessage: string | null;
+}
+
+/**
+ * Mirrors com.sellerops.inquiry.publish.dto.InquiryReplyCapabilityView — the AUDITED transport.
+ *
+ * Distinct from `PublishCapabilityView`, which answers "can this deployment send right now". This
+ * answers "is there a way to send at all, and how do we know" — a channel can be DIRECT_API here and
+ * absent there because the execution flag is off. `NEEDS_VERIFICATION` is an unfinished audit, not a
+ * vendor limitation, and must never be rendered as "unsupported".
+ */
+export interface InquiryReplyCapabilityView {
+  channelCode: string;
+  sourceSubtype: string | null;
+  transport: "DIRECT_API" | "GUIDED_ACTION" | "UNSUPPORTED" | "NEEDS_VERIFICATION";
+  reasonKo: string;
+  evidence: string;
 }
 
 /**
@@ -1243,6 +1304,13 @@ export interface ReplyDraftView {
   contentFingerprint: string;
   fingerprintAlgorithm: string;
   createdAt: string;
+  /** Who wrote this version. A pre-Draft-v1 row reads as `SELLER`, which is what all of them were. */
+  authorKind: "MODEL" | "RULE" | "SELLER";
+  /** The exact model+prompt version behind a MODEL draft; null for SELLER and RULE. */
+  modelVersion: string | null;
+  knowledgeState: "NO_PRODUCT" | "NO_LIBRARY" | "NO_MATCH" | "GROUNDED" | null;
+  /** That state as the one sentence shown above the draft; null on a seller-typed version. */
+  knowledgeNote: string | null;
 }
 
 /**
@@ -1274,6 +1342,13 @@ export interface PublishStatusView {
   approvedFingerprint: string | null;
   providerMessageNo: string | null;
   resultCode: number | null;
+  /**
+   * What the pre-send re-check could establish at the moment of the send. `false` is not a failure —
+   * it records that the reply went out on the last state SellerOps had seen rather than a fresh one,
+   * which is what makes that fact auditable afterwards. Null until a dispatch has been attempted.
+   */
+  presendStateProven: boolean | null;
+  presendNote: string | null;
 }
 
 // Mirrors com.sellerops.inquiry.proposal.dto.ProposalResult (POST response).

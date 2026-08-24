@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { SectionHeader } from "../../components/ui/SectionHeader";
-import { Metric, MetricGrid } from "../../components/ui/Metric";
+import { Metric, MetricGrid, MetricNote } from "../../components/ui/Metric";
 import { TrendChart } from "../../components/ui/TrendChart";
 import { InsightList } from "../../components/ui/InsightList";
 import { DataTable, Td, Th } from "../../components/ui/DataTable";
@@ -101,6 +101,12 @@ export function Overview() {
               />
             ))}
           </MetricGrid>
+
+          {/* The qualification, once, where the numbers are — not at the foot of the page. */}
+          <MetricNote
+            revenueBasis={data.metrics.revenueBasis}
+            freshness={data.metrics.kpis.some((kpi) => kpi.freshnessUnproven)}
+          />
 
           {data.insights.length > 0 ? (
             <section className="space-y-2">

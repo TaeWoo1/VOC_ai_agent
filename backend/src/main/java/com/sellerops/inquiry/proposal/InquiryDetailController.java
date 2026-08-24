@@ -9,6 +9,10 @@ import com.sellerops.inquiry.publish.dto.PublishStatusView;
 import com.sellerops.inquiry.reply.InquiryReplyDraftService;
 import com.sellerops.inquiry.reply.dto.ReplyDraftRequest;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
+import com.sellerops.inquiry.draft.InquiryDraftComposer;
+import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
+import com.sellerops.inquiry.draft.dto.GeneratedDraftView;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,12 +38,14 @@ public class InquiryDetailController {
     private final InquiryProposalService service;
     private final InquiryReplyDraftService drafts;
     private final InquiryPublishService publish;
+    private final InquiryDraftComposer composer;
 
     public InquiryDetailController(InquiryProposalService service, InquiryReplyDraftService drafts,
-                                   InquiryPublishService publish) {
+                                   InquiryPublishService publish, InquiryDraftComposer composer) {
         this.service = service;
         this.drafts = drafts;
         this.publish = publish;
+        this.composer = composer;
     }
 
     /** Seller-only detail (title + details), org-scoped. */
@@ -68,6 +74,29 @@ public class InquiryDetailController {
                                     @RequestBody ReplyDraftRequest request) {
         return drafts.save(principal.orgId(), workItemId, principal.userId(),
                 request.title(), request.comments(), request.baseVersion());
+    }
+
+    /**
+     * Generate an AI reply draft for a PROPOSED work item, grounded in the seller's own product
+     * knowledge where the inquiry resolves to a product and that product has any.
+     *
+     * <p>It saves one more append-only version, which means a regenerate does not overwrite what the
+     * seller was reading — and, because a new version has a new fingerprint, any approval bound to the
+     * previous one can no longer be spent. It performs no marketplace call and needs no approval; it
+     * is the "prepare" end of the flow, and the send is a separate, explicitly-confirmed endpoint.
+     */
+    @PostMapping("/{workItemId}/draft/generate")
+    public GeneratedDraftView generateDraft(@AuthenticationPrincipal AuthPrincipal principal,
+                                            @PathVariable UUID workItemId) {
+        return composer.generate(principal.orgId(), workItemId, principal.userId());
+    }
+
+    /** The evidence a given draft version was grounded in — readable after the fact, not only at generation. */
+    @GetMapping("/{workItemId}/draft/{version}/evidence")
+    public List<DraftEvidenceView> draftEvidence(@AuthenticationPrincipal AuthPrincipal principal,
+                                                 @PathVariable UUID workItemId,
+                                                 @PathVariable int version) {
+        return composer.evidenceFor(principal.orgId(), workItemId, version);
     }
 
     /**

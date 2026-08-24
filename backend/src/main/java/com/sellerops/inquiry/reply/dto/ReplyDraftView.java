@@ -17,11 +17,30 @@ public record ReplyDraftView(
         String comments,
         String contentFingerprint,
         String fingerprintAlgorithm,
-        Instant createdAt) {
+        Instant createdAt,
+        String authorKind,
+        String modelVersion,
+        String knowledgeState,
+        String knowledgeNote) {
 
     public static ReplyDraftView of(InquiryReplyDraft d) {
+        // A version written before Inquiry Draft v1 has no author_kind. Every one of those was typed
+        // by a person, so it reads as SELLER — stated at the boundary rather than backfilled into the
+        // table, because a value written by a migration cannot be distinguished later from one that
+        // was observed.
+        String authorKind = d.getAuthorKind() == null
+                ? com.sellerops.inquiry.draft.DraftAuthorKind.SELLER.name() : d.getAuthorKind();
+        String note = null;
+        if (d.getKnowledgeState() != null) {
+            try {
+                note = com.sellerops.inquiry.draft.DraftKnowledgeState.valueOf(d.getKnowledgeState()).messageKo();
+            } catch (IllegalArgumentException unknown) {
+                note = null; // a value this build does not know is not a sentence it can write
+            }
+        }
         return new ReplyDraftView(
                 d.getVersion(), d.getAnswerStatus(), d.getTitle(), d.getComments(),
-                d.getContentFingerprint(), d.getFingerprintAlgorithm(), d.getCreatedAt());
+                d.getContentFingerprint(), d.getFingerprintAlgorithm(), d.getCreatedAt(),
+                authorKind, d.getModelVersion(), d.getKnowledgeState(), note);
     }
 }

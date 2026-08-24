@@ -3,6 +3,7 @@ package com.sellerops.inquiry.proposal;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
+import com.sellerops.common.MarkupText;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.proposal.InquiryProposalProvider.Draft;
@@ -15,6 +16,13 @@ import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import com.sellerops.inquiry.draft.InquiryDraftEvidenceRepository;
+import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
+import com.sellerops.inquiry.publish.PreSendCheck;
+import com.sellerops.inquiry.publish.InquiryTargetStateReader;
+import com.sellerops.product.OperatorProductName;
+import com.sellerops.product.ProductRepository;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -54,11 +62,16 @@ public class InquiryProposalService {
     private final InquiryProposalWriter writer;
     private final InquiryReplyDraftRepository drafts;
     private final ChannelRepository channels;
+    private final ProductRepository products;
+    private final InquiryDraftEvidenceRepository draftEvidence;
+    private final InquiryTargetStateReader targetState;
 
     public InquiryProposalService(InquiryWorkItemRepository workItems, InquiryProposalRepository proposals,
                                   InquiryRepository inquiries, InquiryProposalProvider provider,
                                   InquiryProposalWriter writer, InquiryReplyDraftRepository drafts,
-                                  ChannelRepository channels) {
+                                  ChannelRepository channels, ProductRepository products,
+                                  InquiryDraftEvidenceRepository draftEvidence,
+                                  InquiryTargetStateReader targetState) {
         this.workItems = workItems;
         this.proposals = proposals;
         this.inquiries = inquiries;
@@ -66,6 +79,9 @@ public class InquiryProposalService {
         this.writer = writer;
         this.drafts = drafts;
         this.channels = channels;
+        this.products = products;
+        this.draftEvidence = draftEvidence;
+        this.targetState = targetState;
     }
 
     /** Seller-only, org-scoped detail exposing the raw title/details (never author). */
@@ -78,6 +94,7 @@ public class InquiryProposalService {
         // Resolve the channel labels fail-open (null if the catalog row is absent), mirroring the
         // review reply-work read; the raw channelId still travels for callers that key on it.
         Channel channel = channels.findById(workItem.getChannelId()).orElse(null);
+        PreSendCheck answerState = targetState.read(orgId, workItem.getChannelId());
         String channelCode = channel == null ? null : channel.getCode();
         String channelNameKo = channel == null ? null : channel.getNameKo();
         return new InquiryDetail(
@@ -91,11 +108,48 @@ public class InquiryProposalService {
                 workItem.getPhase().name(),
                 inquiry.getStatus(),
                 inquiry.getInformStatus(),
-                inquiry.getTitle(),
-                inquiry.getBody(),
+                MarkupText.toPlainText(inquiry.getTitle()),
+                MarkupText.toPlainText(inquiry.getBody()),
                 inquiry.getReceivedAt(),
                 proposal,
-                draft);
+                draft,
+                inquiry.getProductId(),
+                productName(inquiry.getProductId()),
+                inquiry.getSourceSubtype(),
+                answerState.stateProven(),
+                answerStateNote(answerState),
+                draft == null ? List.of()
+                        : draftEvidence.findAllByWorkItemIdAndDraftVersionOrderByOrdinalAsc(
+                                workItemId, draft.version()).stream()
+                        .map(row -> new DraftEvidenceView(row.getKind(), row.getTitle(), row.getLocator(),
+                                row.getSourceId(), row.getChunkId()))
+                        .toList());
+    }
+
+    /**
+     * The canonical product's own name, or null — never the channel listing title, and never ingest's
+     * shared {@code (미지정 상품)} bucket, which is an artifact rather than a product. The screen says
+     * "상품 미지정" for a null, which is the truth in both cases.
+     */
+    private String productName(UUID productId) {
+        return productId == null ? null
+                : products.findById(productId).map(OperatorProductName::displayNameOrNull).orElse(null);
+    }
+
+    /**
+     * The sentence shown beside the send control when the answer state is stale.
+     *
+     * <p>Only the negative case produces text. "확인했습니다" on a fresh channel is a reassurance the
+     * seller did not ask for and would learn to skip, which is exactly how a warning stops working
+     * on the day it matters.
+     */
+    private static String answerStateNote(PreSendCheck check) {
+        if (check.stateProven()) {
+            return null;
+        }
+        return PreSendCheck.STATE_NOT_FRESH.equals(check.note())
+                ? "이 채널의 문의 수집이 최신이 아니라, 이 문의에 이미 답변이 달렸는지 지금은 확인할 수 없습니다."
+                : "이 채널의 문의 수집 상태를 읽지 못해, 이 문의에 이미 답변이 달렸는지 확인할 수 없습니다.";
     }
 
     /** Generate a proposal and move the work item OPEN &rarr; PROPOSED. */

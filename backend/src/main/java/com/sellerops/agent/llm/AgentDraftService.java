@@ -1,5 +1,6 @@
 package com.sellerops.agent.llm;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -51,11 +52,25 @@ public class AgentDraftService {
      * the backend that holds all of them at once.
      */
     public Optional<AgentDraftResponseParser.ParsedDraft> draft(UUID orgId, String title, String details) {
+        return draft(orgId, title, details, List.of());
+    }
+
+    /**
+     * The grounded form: the same call, plus the seller's own retrieved product knowledge.
+     *
+     * <p>The passage count is logged and the passage TEXT is not — the same rule the title and body
+     * have always been under. Knowing that a run was grounded in two passages is an operational fact;
+     * knowing what they said is the seller's business.
+     */
+    public Optional<AgentDraftResponseParser.ParsedDraft> draft(
+            UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge) {
         if (!properties.isEnabledFor(orgId)) {
             return Optional.empty();
         }
-        AgentDraftGenerator.Result result = generator().generate(new AgentDraftGenerator.Input(title, details));
-        log.info("agent_draft orgId={} drafted={} reason={}", orgId, result.draft().isPresent(), result.reason());
+        AgentDraftGenerator.Result result =
+                generator().generate(new AgentDraftGenerator.Input(title, details, knowledge));
+        log.info("agent_draft orgId={} drafted={} grounded={} reason={}",
+                orgId, result.draft().isPresent(), knowledge == null ? 0 : knowledge.size(), result.reason());
         return result.draft();
     }
 

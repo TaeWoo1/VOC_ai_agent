@@ -12,6 +12,14 @@ import { count, wonShort } from "../../lib/format";
  * <b>A delta is drawn only when the backend says one exists.</b> `comparable` is not a styling hint —
  * 미답변 문의 is today's backlog and there is no history to compare it against, so a component that
  * computed its own arrow would be inventing a trend.
+ *
+ * <b>Why freshness is a mark and not a sentence.</b> The first browser render of this screen put
+ * "최신 여부를 확인하지 못한 채널이 있습니다" — the same sentence, in warning colour — on five of the
+ * six cards, because one silent channel qualifies almost every total. Five copies of one sentence is
+ * not five warnings; it is a wall of orange that outweighs the numbers it qualifies. So the per-card
+ * qualification became {@link FRESHNESS_MARK}, and the sentence is said ONCE, under the row, by
+ * {@link MetricNote}. Nothing was softened: the mark is on the same cards, and the channel table
+ * below still names which channel and which data type.
  */
 export function Metric({
   kpi,
@@ -31,7 +39,15 @@ export function Metric({
       <p className={`mt-1.5 font-bold tabular-nums text-ink ${emphasis ? "text-3xl" : "text-2xl"}`}>
         {value}
         <span className="ml-1 text-base font-semibold text-muted">{kpi.unit}</span>
+        {kpi.freshnessUnproven ? (
+          <span className="ml-0.5 align-super text-sm font-semibold text-warn" aria-hidden="true">
+            {FRESHNESS_MARK}
+          </span>
+        ) : null}
       </p>
+      {kpi.freshnessUnproven ? (
+        <span className="sr-only">최신 여부를 확인하지 못한 채널이 포함된 숫자입니다.</span>
+      ) : null}
       <div className="mt-1.5 min-h-[1.25rem]">
         {kpi.comparable && kpi.deltaPercent !== null ? <Delta percent={kpi.deltaPercent} /> : null}
         {caveat ? <p className="break-keep text-sm text-warn">{caveat}</p> : null}
@@ -59,16 +75,13 @@ export function Metric({
 /**
  * The caveat line — what is NOT in this number.
  *
- * Ordered by severity: a channel missing from the total is a bigger qualification than a channel
- * whose freshness is unproven, and only one line fits. Both are shown as text rather than an icon,
- * because an icon would need a legend nobody reads.
+ * Only the card-specific qualification is drawn here: a channel MISSING from the total, which
+ * differs per number and cannot be said once for the row. An unproven freshness is the same
+ * qualification on nearly every card, so it is carried by {@link FRESHNESS_MARK} + {@link MetricNote}.
  */
 function caveatFor(kpi: MetricKpi): string | null {
   if (kpi.excludedChannels > 0) {
     return `채널 ${kpi.excludedChannels}곳이 이 숫자에 없습니다`;
-  }
-  if (kpi.freshnessUnproven) {
-    return "최신 여부를 확인하지 못한 채널이 있습니다";
   }
   return null;
 }
@@ -89,6 +102,37 @@ function Delta({ percent }: { percent: number }) {
       <span aria-hidden="true">{up ? "▲" : "▼"}</span>
       <span className="ml-1 tabular-nums">{Math.abs(percent)}%</span>
       <span className="ml-1">{up ? "증가" : "감소"} (이전 기간 대비)</span>
+    </p>
+  );
+}
+
+/**
+ * The mark a qualified number wears. A dagger, not a colour alone — colour is not available to every
+ * reader, and {@link MetricNote} beside it is the legend. Screen readers get the sentence instead.
+ */
+export const FRESHNESS_MARK = "\u2020";
+
+/**
+ * The one line that qualifies the whole row — sits directly under the numbers, not at the foot of
+ * the page.
+ *
+ * Revenue is here for the reason the freshness mark is: the three channels do not compute 매출 the
+ * same way (NAVER 상품주문 결제금액 · Coupang 배송건 orderPrice 합 · Cafe24 주문 결제금액), and a
+ * combined total that does not say so is the total lying by omission. That sentence used to live only
+ * in the reference block a thousand pixels below, where a demo viewer never reaches it.
+ */
+export function MetricNote({ revenueBasis, freshness }: { revenueBasis: string; freshness: boolean }) {
+  return (
+    <p className="break-keep text-sm leading-relaxed text-muted">
+      <span className="font-medium text-ink">매출 · </span>
+      {revenueBasis}
+      {freshness ? (
+        <>
+          {" "}
+          <span className="font-semibold text-warn">{FRESHNESS_MARK}</span> 표시는 최신 여부를 확인하지
+          못한 채널이 포함된 숫자입니다 — 어느 채널인지는 아래 채널별 표에 있습니다.
+        </>
+      ) : null}
     </p>
   );
 }

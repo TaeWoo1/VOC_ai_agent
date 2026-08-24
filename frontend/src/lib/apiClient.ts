@@ -43,6 +43,8 @@ import type {
   IngestResult,
   InboxResponse,
   InquiryDetail,
+  GeneratedDraftView,
+  InquiryReplyCapabilityView,
   PublishCapabilityView,
   PublishStatusView,
   ReplyDraftView,
@@ -685,6 +687,29 @@ export const api = {
    */
   async getInquiryPublishCapability(): Promise<PublishCapabilityView> {
     const { data } = await http.get<PublishCapabilityView>(`/api/inquiry-publish/capability`);
+    return data;
+  },
+
+  /**
+   * The audited transport per channel — what is KNOWN, as opposed to what is currently WIRED.
+   *
+   * `NEEDS_VERIFICATION` means nobody has finished reading that vendor's contract. It is not a "no",
+   * and a screen that renders it as one is inventing a limitation.
+   */
+  async getInquiryReplyTransports(): Promise<InquiryReplyCapabilityView[]> {
+    const { data } = await http.get<InquiryReplyCapabilityView[]>(`/api/inquiry-publish/transports`);
+    return data;
+  },
+
+  /**
+   * Generate an AI reply draft, grounded in the seller's own product knowledge where there is any.
+   *
+   * It appends a version rather than replacing one, so a regenerate never overwrites what the seller
+   * was reading — and, because a new version has a new fingerprint, any approval bound to the
+   * previous one can no longer be spent. It reaches no marketplace.
+   */
+  async generateInquiryDraft(workItemId: string): Promise<GeneratedDraftView> {
+    const { data } = await http.post<GeneratedDraftView>(`/api/inquiries/${workItemId}/draft/generate`);
     return data;
   },
 

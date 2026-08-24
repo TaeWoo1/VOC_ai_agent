@@ -13,11 +13,18 @@ import org.junit.jupiter.params.provider.EnumSource;
  *
  * <p>This is the test the whole capability rests on. {@code DraftModelSeam}'s docblock said inquiry
  * title/body "is PII and must not egress until that decision"; the decision was made, and what makes
- * it a bounded one rather than an open door is that exactly two of the seller's values may leave and
- * a machine checks which. A test that read {@code requestBody}'s intent would keep passing the day
+ * it a bounded one rather than an open door is that exactly three of the seller's values may leave
+ * and a machine checks which. A test that read {@code requestBody}'s intent would keep passing the day
  * someone adds the work-item id "for correlation" — so every assertion below is against the string
- * that goes on the wire, built from an {@link AgentDraftGenerator.Input} whose two fields are the
- * only content it is given.
+ * that goes on the wire, built from an {@link AgentDraftGenerator.Input} whose fields are the only
+ * content it is given.
+ *
+ * <p><b>The floor moved once, deliberately, and this is where that is recorded.</b> Inquiry Draft v1
+ * grounds a reply in the seller's own 상품 지식, which cannot be done without sending it. So the floor
+ * is now title + body + retrieved passage text — and the passages arrive stripped of everything that
+ * identifies them: no product id, no source id, no chunk id, no author, no timestamp, no retrieval
+ * score. The citation the seller reads is reassembled on the way back from the retrieval result,
+ * whose ids never left the backend.
  */
 class AgentDraftPayloadFloorTest {
 
@@ -36,7 +43,10 @@ class AgentDraftPayloadFloorTest {
             "20260819-0001",                         // order number
             "PROPOSED",                              // work-item phase
             "CAFE24",                                // channel code
-            "2026-08-19T00:00:00Z");                 // received-at timestamp
+            "2026-08-19T00:00:00Z",                  // received-at timestamp
+            "a1b2c3d4-0000-4000-8000-000000000004",  // knowledge source id
+            "e5f6a7b8-0000-4000-8000-000000000005",  // knowledge chunk id
+            "0.8734");                               // retrieval score
 
     private static AgentDraftGenerator generator(AgentDraftGenerator.Vendor vendor) {
         return new AgentDraftGenerator(
@@ -57,6 +67,32 @@ class AgentDraftPayloadFloorTest {
         for (String forbidden : FORBIDDEN) {
             assertThat(body).as("%s must never reach the vendor", forbidden).doesNotContain(forbidden);
         }
+    }
+
+    @ParameterizedTest
+    @EnumSource(AgentDraftGenerator.Vendor.class)
+    @DisplayName("retrieved product knowledge leaves as heading + text, carrying no identifier of its own")
+    void knowledgeLeavesWithoutItsIdentifiers(AgentDraftGenerator.Vendor vendor) {
+        String body = generator(vendor).requestBody(new AgentDraftGenerator.Input(
+                "사용 방법이 궁금해요", "처음 써봅니다.",
+                List.of(new AgentDraftGenerator.Passage("사용법",
+                        "몰딩 뒷면 테이프를 벗기고 벽면에 눌러 붙입니다."))));
+
+        assertThat(body).as("the seller's own knowledge is what grounds the draft")
+                .contains("사용법")
+                .contains("몰딩 뒷면 테이프를 벗기고 벽면에 눌러 붙입니다.");
+        for (String forbidden : FORBIDDEN) {
+            assertThat(body).as("%s must never reach the vendor", forbidden).doesNotContain(forbidden);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(AgentDraftGenerator.Vendor.class)
+    @DisplayName("an empty library is stated to the model, not omitted — silence would read as \"not relevant\"")
+    void anEmptyLibraryIsStatedRatherThanOmitted(AgentDraftGenerator.Vendor vendor) {
+        assertThat(generator(vendor).requestBody(new AgentDraftGenerator.Input("질문", "본문")))
+                .contains("판매자가 등록한 상품 지식")
+                .contains("(없음)");
     }
 
     @ParameterizedTest

@@ -7,7 +7,7 @@ import {
   detailErrorMessage,
   phaseLabel,
   proposalCategoryLabel,
-  provenanceText,
+  waitedLabel,
 } from "../../lib/inquiryWorkflow";
 import {
   canEditDraft,
@@ -18,17 +18,36 @@ import {
   publishCategoryLabel,
   publishUnavailableReason,
 } from "../../lib/inquiryPublish";
-import type { InquiryDetail, PublishCapabilityView, PublishStatusView } from "../../lib/types";
+import type {
+  DraftEvidenceView,
+  InquiryDetail,
+  PublishCapabilityView,
+  PublishStatusView,
+} from "../../lib/types";
 import { Btn } from "../ui/Btn";
 
 /**
  * The inquiry response workflow, in the inbox detail panel. The engine (`inquiryWorkflow`) is reused
  * unchanged; the publish decisions live in `inquiryPublish`, and this component renders what they say.
  *
- * WHAT THE PROPOSAL PRODUCES, STATED ACCURATELY. The generator returns a `ProposalView` with a
- * `summaryCategory` and its provenance — a suggested RESPONSE TYPE. It carries no reply body, and its
- * `providerKind` is `RULE_BASED`. Calling it an "AI 답변 초안" would describe something the product
- * does not produce, so the panel says what it is: a suggestion for how to respond.
+ * ## What the seller sees, in order (Inquiry Action Flow v1)
+ *
+ * 고객 문의 → AI 답변 → actions. Three blocks, one primary control. The previous layout put a
+ * response-TYPE suggestion, a two-field editor and a send behind four same-weight buttons and three
+ * explanatory paragraphs, so the screen never said what to do next.
+ *
+ * A draft now has a BODY, because `InquiryDraftComposer` writes one — grounded in the seller's own
+ * 상품 지식 when the inquiry resolves to a product that has any. What it was grounded in is shown as
+ * citations; what it could NOT be grounded in is one sentence ABOVE it (`knowledgeNote`), read before
+ * the text it qualifies rather than discovered after. The response-TYPE suggestion still exists (it
+ * is what moves the work item OPEN → PROPOSED) but it is one word in the meta line, not a section:
+ * it was never why the seller opened this item.
+ *
+ * EDITING MAKES IT THEIRS. A save appends a version with a new fingerprint, which is exactly why a
+ * prior approval can no longer be spent on it — the backend binds to the fingerprint, so "이전
+ * 승인은 무효" is a property of the data rather than a rule this component has to remember. The
+ * citations are dropped on that save for the same reason: the sentences are now the seller's, and
+ * attributing them to a knowledge passage that may no longer support them would be a false claim.
  *
  * ## The send, and why it exists here now
  *
@@ -67,6 +86,14 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   const [replyComments, setReplyComments] = useState("");
   /** The second-press gate. Opening the confirm block is not sending; the button inside it is. */
   const [confirming, setConfirming] = useState(false);
+  /** The draft reads as text until the seller chooses to edit; an always-open textarea invites typing. */
+  const [editing, setEditing] = useState(false);
+  /** What the CURRENT draft was grounded in. Refreshed on every generate; cleared by a seller edit. */
+  const [evidence, setEvidence] = useState<DraftEvidenceView[]>([]);
+  /** The one sentence above the draft: what the knowledge library could and could not offer. */
+  const [knowledgeNote, setKnowledgeNote] = useState<string | null>(null);
+  /** Set only when the day's AI budget is what stopped the model. */
+  const [quotaMessage, setQuotaMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,6 +105,8 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       // must come back to it, not to an empty box that would overwrite it on the next save.
       setReplyTitle(next.draft?.title ?? (next.title ? `[답변] ${next.title}` : ""));
       setReplyComments(next.draft?.comments ?? "");
+      setEvidence(next.draftEvidence ?? []);
+      setKnowledgeNote(next.draft?.knowledgeNote ?? null);
     } catch (e) {
       setDetail(null);
       setError(detailErrorMessage(isAxiosError(e) ? e.response?.status : undefined));
@@ -112,6 +141,12 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   const unavailableReason = detail ? publishUnavailableReason(detail, capability) : null;
   const draftDirty = !!draft && (draft.title !== replyTitle || draft.comments !== replyComments);
   const draftEditable = canEditDraft(publishStatus);
+  /**
+   * Whether a draft can be written at all. OPEN items are proposed on the way (see
+   * {@link onGenerateDraft}); anything past PROPOSED is already bound into the reply lifecycle and a
+   * new version would be a draft nobody can send.
+   */
+  const canDraft = !!detail && (canGenerateProposal(detail.phase) || detail.phase === "PROPOSED");
 
   async function onSaveDraft() {
     if (!detail) return;
@@ -129,6 +164,12 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       setDetail((current) => (current ? { ...current, draft: saved } : current));
       setReplyTitle(saved.title);
       setReplyComments(saved.comments);
+      setEditing(false);
+      // The seller rewrote it, so it is no longer the model's sentence and no longer stands on the
+      // model's evidence. Keeping the citations here would attribute the seller's own words to a
+      // knowledge passage that may no longer support them.
+      setEvidence([]);
+      setKnowledgeNote(null);
       // A saved draft is a NEW version with a new fingerprint, so any confirm block that was open is
       // now about content that no longer exists. Close it rather than let a stale approval be pressed.
       setConfirming(false);
@@ -196,20 +237,43 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
     }
   }
 
-  async function onGenerate() {
+  /**
+   * Make an AI reply draft.
+   *
+   * <p>Two calls, in one press. The composer requires a PROPOSED work item — that transition is what
+   * freezes the item into the reply lifecycle — so an OPEN item is proposed first. The seller asked
+   * for a draft, not for a state machine, and making them press twice for two backend preconditions
+   * would be the product leaking its own sequencing.
+   */
+  async function onGenerateDraft() {
+    if (!detail) return;
     setBusy(true);
     setActionError(null);
+    setQuotaMessage(null);
     try {
-      const result = await api.generateInquiryProposal(workItemId);
-      setDetail((current) =>
-        current ? { ...current, phase: result.phase, proposal: result.proposal } : current,
-      );
+      let phase = detail.phase;
+      if (canGenerateProposal(phase)) {
+        const proposed = await api.generateInquiryProposal(workItemId);
+        phase = proposed.phase;
+        setDetail((current) =>
+          current ? { ...current, phase: proposed.phase, proposal: proposed.proposal } : current,
+        );
+      }
+      const generated = await api.generateInquiryDraft(workItemId);
+      setDetail((current) => (current ? { ...current, draft: generated.draft, phase } : current));
+      setReplyTitle(generated.draft.title);
+      setReplyComments(generated.draft.comments);
+      setEvidence(generated.evidence);
+      setKnowledgeNote(generated.knowledgeNote);
+      setQuotaMessage(generated.quotaMessage);
+      setEditing(false);
+      // A new version has a new fingerprint, so an open confirm is about content that no longer
+      // exists. Close it rather than let a stale approval be pressed.
+      setConfirming(false);
     } catch (e) {
       const info = classifyProposeError(isAxiosError(e) ? e.response?.status : undefined);
       setActionError(info.message);
-      if (info.shouldRefresh) {
-        await load();
-      }
+      if (info.shouldRefresh) await load();
     } finally {
       setBusy(false);
     }
@@ -226,156 +290,267 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   }
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h3 className="text-base font-bold text-ink">문의 내용</h3>
+    <div className="space-y-6">
+      {/* 1 — THE CUSTOMER'S QUESTION. First, largest, and never competing with a control. */}
+      <section>
+        <h3 className="text-base font-bold text-ink">고객 문의</h3>
         {detail.title ? (
           <p className="mt-2 break-keep font-semibold text-ink">{detail.title}</p>
         ) : null}
         <p className="mt-1.5 whitespace-pre-wrap break-keep leading-relaxed text-ink">
           {detail.details ?? "본문이 없습니다."}
         </p>
-        <p className="mt-2 text-sm text-muted">{phaseLabel(detail.phase)}</p>
-      </div>
+        <InquiryMeta detail={detail} />
+      </section>
 
-      <div className="rounded-xl border border-line bg-canvas p-5">
-        <h3 className="text-base font-bold text-ink">응답 제안</h3>
-        <p className="mt-1.5 break-keep text-sm leading-relaxed text-muted">
-          어떤 유형으로 답하면 좋을지 제안합니다. 답변 문구는 판매자가 직접 작성하고, 고객에게
-          보내는 것도 판매자가 채널에서 직접 합니다.
-        </p>
+      {/* 2 — THE ANSWER. One section, whatever state it is in. */}
+      <section className="rounded-xl border border-line bg-canvas p-5">
+        <h3 className="text-base font-bold text-ink">AI 답변</h3>
 
-        {detail.proposal ? (
-          <div className="mt-4">
-            <p className="break-keep text-lg font-semibold text-ink">
-              {proposalCategoryLabel(detail.proposal.summaryCategory)}
+        {!draft ? (
+          <>
+            <p className="mt-1.5 break-keep text-sm leading-relaxed text-muted">
+              문의 내용과 등록된 상품 지식을 근거로 초안을 씁니다. 보내는 것은 확인 후 따로 누릅니다.
             </p>
-            <p className="mt-1 text-sm text-muted">{provenanceText(detail.proposal)}</p>
-          </div>
-        ) : canGenerateProposal(detail.phase) ? (
-          <div className="mt-4">
-            <Btn size="sm" onClick={onGenerate} disabled={busy}>
-              {busy ? "만드는 중…" : "응답 제안 만들기"}
-            </Btn>
-          </div>
+            <div className="mt-4">
+              <Btn onClick={onGenerateDraft} disabled={busy || !canDraft}>
+                {busy ? "쓰는 중…" : "AI 답변 초안 만들기"}
+              </Btn>
+            </div>
+            {!canDraft ? (
+              <p className="mt-3 break-keep text-sm text-muted">
+                지금 상태에서는 초안을 만들 수 없습니다. 목록에서 상태를 확인해 주세요.
+              </p>
+            ) : null}
+          </>
         ) : (
-          <p className="mt-4 text-sm text-muted">
-            지금 상태에서는 제안을 만들 수 없습니다. 목록에서 상태를 확인해 주세요.
-          </p>
+          <>
+            {/* The limitation, before the text it qualifies — read first, not discovered after. */}
+            {knowledgeNote ? (
+              <p className="mt-1.5 break-keep text-sm leading-relaxed text-muted">{knowledgeNote}</p>
+            ) : null}
+            {quotaMessage ? (
+              <p className="mt-1.5 break-keep text-sm leading-relaxed text-warn">{quotaMessage}</p>
+            ) : null}
+
+            {editing ? (
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-ink" htmlFor="reply-title">
+                  제목
+                </label>
+                <input
+                  id="reply-title"
+                  className="mt-1 w-full rounded-lg border border-line bg-surface p-2 text-ink"
+                  value={replyTitle}
+                  onChange={(e) => setReplyTitle(e.target.value)}
+                  disabled={busy}
+                />
+                <label className="mt-3 block text-sm font-medium text-ink" htmlFor="reply-comments">
+                  내용
+                </label>
+                <textarea
+                  id="reply-comments"
+                  className="mt-1 w-full rounded-lg border border-line bg-surface p-2 text-ink"
+                  rows={6}
+                  value={replyComments}
+                  onChange={(e) => setReplyComments(e.target.value)}
+                  disabled={busy}
+                />
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Btn size="sm" onClick={onSaveDraft} disabled={busy || !replyComments.trim()}>
+                    {busy ? "저장 중…" : "초안 저장"}
+                  </Btn>
+                  <Btn
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setEditing(false);
+                      setReplyTitle(draft.title);
+                      setReplyComments(draft.comments);
+                    }}
+                    disabled={busy}
+                  >
+                    취소
+                  </Btn>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4">
+                <p className="break-keep font-semibold text-ink">{draft.title}</p>
+                <p className="mt-1.5 whitespace-pre-wrap break-keep leading-relaxed text-ink">
+                  {draft.comments}
+                </p>
+                <DraftEvidence evidence={evidence} />
+              </div>
+            )}
+
+            {/*
+              The send, or the honest reason there is none. `publishUnavailableReason` names WHICH of
+              the three conditions failed, because "이 채널은 판매자센터에서 직접" and "이 환경에서는
+              대신 등록하지 않습니다" are different things for the seller to do about it.
+            */}
+            {publishStatus ? null : (
+              <div className="mt-5 border-t border-line pt-4">
+                {/*
+                  Said BEFORE the press, not recorded after it. On a channel whose collection is stale
+                  SellerOps cannot prove this inquiry is still unanswered, and the person who accepts
+                  that risk has to be the person who was told about it.
+                */}
+                {publishable && detail.answerStateNote ? (
+                  <p className="mb-3 break-keep text-sm leading-relaxed text-warn">
+                    {detail.answerStateNote}
+                  </p>
+                ) : null}
+
+                {!confirming ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {publishable && !draftDirty && !editing ? (
+                      <Btn onClick={() => setConfirming(true)} disabled={busy}>
+                        답변 보내기
+                      </Btn>
+                    ) : null}
+                    {!editing && draftEditable ? (
+                      <Btn size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
+                        수정
+                      </Btn>
+                    ) : null}
+                    {!editing && draftEditable ? (
+                      <Btn size="sm" variant="ghost" onClick={onGenerateDraft} disabled={busy}>
+                        다시 작성
+                      </Btn>
+                    ) : null}
+                  </div>
+                ) : (
+                  /*
+                    The second press. Everything that is about to happen is restated here — where it
+                    goes, which saved version, and that it cannot be taken back — because this is the
+                    only control in SellerOps that writes to a marketplace, and a seller should never
+                    discover afterwards which text was sent.
+                  */
+                  <div
+                    className="rounded-xl border border-line bg-surface p-4"
+                    role="group"
+                    aria-label="답변 등록 확인"
+                  >
+                    <p className="break-keep text-sm font-semibold text-ink">
+                      {detail.channelNameKo ?? "채널"}에 아래 내용을 등록합니다. 등록 후에는 취소할 수
+                      없습니다.
+                    </p>
+                    <p className="mt-2 text-sm text-muted">저장된 버전 {draft.version}</p>
+                    <p className="mt-2 whitespace-pre-wrap break-keep rounded-lg bg-canvas p-3 text-sm leading-relaxed text-ink">
+                      {draft.comments}
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <Btn size="sm" onClick={onConfirmPublish} disabled={busy}>
+                        {busy ? "등록 중…" : "확인, 등록합니다"}
+                      </Btn>
+                      <Btn size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>
+                        취소
+                      </Btn>
+                    </div>
+                  </div>
+                )}
+
+                {!publishable ? (
+                  <p className="mt-3 break-keep text-sm leading-relaxed text-muted">{unavailableReason}</p>
+                ) : draftDirty ? (
+                  // A dirty editor means the fingerprint on screen is not the one that would be sent.
+                  // Said while the editor is open too — that is when the seller can act on it.
+                  <p className="mt-3 text-sm text-muted">
+                    편집한 내용을 먼저 저장해 주세요. 저장된 버전만 등록할 수 있습니다.
+                  </p>
+                ) : null}
+              </div>
+            )}
+
+            {publishStatus ? (
+              <div className="mt-5 rounded-xl border border-line bg-surface p-4">
+                <p className="break-keep text-sm text-ink">{publishCategoryLabel(publishStatus.category)}</p>
+                {publishStatus.approvedDraftVersion !== null ? (
+                  <p className="mt-1 text-sm text-muted">등록한 버전 {publishStatus.approvedDraftVersion}</p>
+                ) : null}
+                {publishStatus.presendStateProven === false ? (
+                  <p className="mt-1 break-keep text-sm text-muted">
+                    보낼 당시 이 채널의 문의 수집이 최신이 아니었습니다.
+                  </p>
+                ) : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {canVerifyPublish(publishStatus) ? (
+                    <Btn size="sm" variant="ghost" onClick={onVerifyPublish} disabled={busy}>
+                      상태 다시 확인
+                    </Btn>
+                  ) : null}
+                  {canResumePublish(publishStatus) ? (
+                    <Btn size="sm" variant="ghost" onClick={onResumePublish} disabled={busy}>
+                      이어서 등록
+                    </Btn>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </>
         )}
 
         {actionError ? <p className="mt-3 text-sm text-bad">{actionError}</p> : null}
-      </div>
+      </section>
+    </div>
+  );
+}
 
-      <div className="rounded-xl border border-line bg-canvas p-5">
-        <h3 className="text-base font-bold text-ink">답변 초안</h3>
-        <p className="mt-1.5 break-keep text-sm leading-relaxed text-muted">
-          답변 문구를 작성해 저장하면, 저장한 그 내용 그대로만 등록됩니다.
-        </p>
+/**
+ * Channel · 상품 · 상태 · 경과 — one line, in the order a seller triages by.
+ *
+ * The response-TYPE suggestion sits here rather than in a section of its own: it is a hint about how
+ * to answer, and it was never why the seller opened this item. 상품 is stated as an absence when there
+ * is none, because "(미지정 상품)" is the reason a draft could not be grounded and hiding it would
+ * make the limitation above the draft look arbitrary.
+ */
+function InquiryMeta({ detail }: { detail: InquiryDetail }) {
+  const waited = waitedLabel(detail.receivedAt);
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+      {detail.channelNameKo ? <span>{detail.channelNameKo}</span> : null}
+      <span aria-hidden="true">·</span>
+      <span>{detail.productName ?? "상품 미지정"}</span>
+      <span aria-hidden="true">·</span>
+      <span>{phaseLabel(detail.phase)}</span>
+      {waited ? (
+        <>
+          <span aria-hidden="true">·</span>
+          <span>{waited}</span>
+        </>
+      ) : null}
+      {detail.proposal ? (
+        <>
+          <span aria-hidden="true">·</span>
+          <span>{proposalCategoryLabel(detail.proposal.summaryCategory)}</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
 
-        <label className="mt-4 block text-sm font-medium text-ink" htmlFor="reply-title">
-          제목
-        </label>
-        <input
-          id="reply-title"
-          className="mt-1 w-full rounded-lg border border-line bg-surface p-2 text-ink"
-          value={replyTitle}
-          onChange={(e) => setReplyTitle(e.target.value)}
-          disabled={!draftEditable || busy}
-        />
-
-        <label className="mt-3 block text-sm font-medium text-ink" htmlFor="reply-comments">
-          내용
-        </label>
-        <textarea
-          id="reply-comments"
-          className="mt-1 w-full rounded-lg border border-line bg-surface p-2 text-ink"
-          rows={5}
-          value={replyComments}
-          onChange={(e) => setReplyComments(e.target.value)}
-          disabled={!draftEditable || busy}
-        />
-
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Btn size="sm" onClick={onSaveDraft} disabled={busy || !draftEditable || !replyComments.trim()}>
-            {busy ? "저장 중…" : draft ? "초안 저장 (새 버전)" : "초안 저장"}
-          </Btn>
-          {draft ? (
-            <span className="text-sm text-muted">
-              저장된 버전 {draft.version}
-              {draftDirty ? " · 편집한 내용은 아직 저장되지 않았습니다" : ""}
-            </span>
-          ) : null}
-        </div>
-
-        {/*
-          The send, or the honest reason there is none. `publishUnavailableReason` names WHICH of the
-          three conditions failed, because "이 채널은 판매자센터에서 직접" and "이 환경에서는 대신
-          등록하지 않습니다" are different things for the seller to do about it.
-        */}
-        {!publishable ? (
-          <p className="mt-4 break-keep text-sm leading-relaxed text-muted">{unavailableReason}</p>
-        ) : !draft ? (
-          <p className="mt-4 text-sm text-muted">먼저 초안을 저장해 주세요. 저장한 내용만 등록할 수 있습니다.</p>
-        ) : draftDirty ? (
-          // A dirty editor means the fingerprint on screen is not the fingerprint that would be sent.
-          // Blocking here is kinder than letting the backend answer 409 after the seller has confirmed.
-          <p className="mt-4 text-sm text-muted">
-            편집한 내용을 먼저 저장해 주세요. 저장된 버전만 등록할 수 있습니다.
-          </p>
-        ) : publishStatus ? null : !confirming ? (
-          <div className="mt-4">
-            <Btn size="sm" onClick={() => setConfirming(true)} disabled={busy}>
-              {detail.channelNameKo ?? "채널"}에 답변 등록하기
-            </Btn>
-          </div>
-        ) : (
-          /*
-            The second press. Everything that is about to happen is restated here — where it goes, which
-            saved version, and that it cannot be taken back — because this is the only control in
-            SellerOps that writes to a marketplace, and a seller should never discover afterwards which
-            text was sent.
-          */
-          <div className="mt-4 rounded-xl border border-line bg-surface p-4" role="group" aria-label="답변 등록 확인">
-            <p className="break-keep text-sm font-semibold text-ink">
-              {detail.channelNameKo ?? "채널"}에 아래 내용을 등록합니다. 등록 후에는 취소할 수 없습니다.
-            </p>
-            <p className="mt-2 text-sm text-muted">저장된 버전 {draft.version}</p>
-            <p className="mt-2 whitespace-pre-wrap break-keep rounded-lg bg-canvas p-3 text-sm leading-relaxed text-ink">
-              {draft.comments}
-            </p>
-            <div className="mt-3 flex gap-2">
-              <Btn size="sm" onClick={onConfirmPublish} disabled={busy}>
-                {busy ? "등록 중…" : "확인, 등록합니다"}
-              </Btn>
-              <Btn size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>
-                취소
-              </Btn>
-            </div>
-          </div>
-        )}
-
-        {publishStatus ? (
-          <div className="mt-4 rounded-xl border border-line bg-surface p-4">
-            <p className="break-keep text-sm text-ink">{publishCategoryLabel(publishStatus.category)}</p>
-            {publishStatus.approvedDraftVersion !== null ? (
-              <p className="mt-1 text-sm text-muted">등록한 버전 {publishStatus.approvedDraftVersion}</p>
-            ) : null}
-            <div className="mt-3 flex flex-wrap gap-2">
-              {canVerifyPublish(publishStatus) ? (
-                <Btn size="sm" variant="ghost" onClick={onVerifyPublish} disabled={busy}>
-                  상태 다시 확인
-                </Btn>
-              ) : null}
-              {canResumePublish(publishStatus) ? (
-                <Btn size="sm" variant="ghost" onClick={onResumePublish} disabled={busy}>
-                  이어서 등록
-                </Btn>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-      </div>
+/**
+ * What the draft was grounded in.
+ *
+ * Titles and provenance, never the passage text: the reply above already says the thing, and a
+ * citation is a pointer back to the seller's own words so the claim can be checked. An empty list
+ * renders nothing at all — an empty "근거" heading would read as a failure rather than as a draft
+ * that never claimed grounding (the sentence above it already said which).
+ */
+function DraftEvidence({ evidence }: { evidence: DraftEvidenceView[] }) {
+  if (evidence.length === 0) return null;
+  return (
+    <div className="mt-4 border-t border-line pt-3">
+      <p className="text-sm font-medium text-ink">근거</p>
+      <ul className="mt-1.5 space-y-1">
+        {evidence.map((item, index) => (
+          <li key={`${item.chunkId ?? item.sourceId ?? "evidence"}-${index}`} className="text-sm text-muted">
+            <span className="break-keep text-ink">{item.title ?? "상품 지식"}</span>
+            {item.locator ? <span className="ml-2 break-all">{item.locator}</span> : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

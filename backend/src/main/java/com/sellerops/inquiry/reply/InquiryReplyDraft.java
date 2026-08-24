@@ -70,6 +70,29 @@ public class InquiryReplyDraft {
     @Column(name = "fingerprint_algorithm", nullable = false, length = 40)
     private String fingerprintAlgorithm;
 
+    /**
+     * Who wrote this version — {@link com.sellerops.inquiry.draft.DraftAuthorKind}. Null on rows
+     * written before Inquiry Draft v1, which were all seller-authored; read as SELLER by the view
+     * rather than backfilled, since a guessed provenance is worse than a dated one.
+     */
+    @Column(name = "author_kind", length = 24)
+    private String authorKind;
+
+    /** The exact model+prompt version behind a MODEL draft; null for SELLER and RULE. */
+    @Column(name = "model_version", length = 120)
+    private String modelVersion;
+
+    /**
+     * What the product-knowledge library could offer this version
+     * ({@link com.sellerops.inquiry.draft.DraftKnowledgeState}). Present on generated versions only.
+     */
+    @Column(name = "knowledge_state", length = 24)
+    private String knowledgeState;
+
+    /** The canonical product this draft was written about, when one resolved. */
+    @Column(name = "product_id")
+    private UUID productId;
+
     /** System/actor tag of who saved this version (e.g. {@code SELLER:<userId>}) — no PII. */
     @Column(name = "created_by", nullable = false, length = 120)
     private String createdBy;

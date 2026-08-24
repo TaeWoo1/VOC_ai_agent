@@ -69,6 +69,19 @@ public class InquiryExecution {
     @Column(name = "verify_attempts", nullable = false)
     private int verifyAttempts;
 
+    /**
+     * Whether the pre-send re-check could prove the target was still answerable — i.e. the channel's
+     * own INQUIRY collection was provably current at the moment of the send. Null until a dispatch
+     * has been attempted. False is not a failure; it is the recorded fact that the send went out on
+     * the last state SellerOps saw rather than on a fresh one ({@link PreSendCheck}).
+     */
+    @Column(name = "presend_state_proven")
+    private Boolean presendStateProven;
+
+    /** Closed-vocabulary reason the state could not be proven ({@link PreSendCheck}); null when it was. */
+    @Column(name = "presend_note", length = 60)
+    private String presendNote;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -77,8 +78,38 @@ public class AgentDraftGenerator {
         return version;
     }
 
-    /** The seller's own inquiry. Exactly the two fields that may leave — see {@link AgentDraftPrompt#user}. */
-    public record Input(String title, String details) {
+    /**
+     * The seller's own inquiry, and — since Inquiry Draft v1 — the seller's own product knowledge.
+     * Exactly the three things that may leave; see {@link AgentDraftPrompt#user}.
+     *
+     * <p>{@code knowledge} is what the seller typed into 상품 지식 for the resolved product, retrieved
+     * for this question. It widens the payload floor deliberately: a draft that must not invent facts
+     * has to be given the facts, and the alternative — retrieving evidence and then not showing it to
+     * the drafter — produces a draft grounded in nothing while carrying citations that suggest
+     * otherwise. It is the seller's own writing, which is a strictly narrower class than the customer
+     * text already in {@code details}.
+     *
+     * <p>Empty when no product resolved, no library exists, or nothing matched. Empty is a real state
+     * the prompt is told about, not a silent absence.
+     */
+    public record Input(String title, String details, List<Passage> knowledge) {
+
+        public Input(String title, String details) {
+            this(title, details, List.of());
+        }
+
+        public Input {
+            knowledge = knowledge == null ? List.of() : List.copyOf(knowledge);
+        }
+    }
+
+    /**
+     * One piece of seller-authored product knowledge, as it goes to the model: a heading and the
+     * text. No id, no product id, no author, no timestamp, no score — the model does not need them
+     * and the floor test asserts they are absent. The citation is reassembled from the retrieval
+     * result on the way back, where the ids never left the backend.
+     */
+    public record Passage(String heading, String text) {
     }
 
     /**
@@ -144,7 +175,8 @@ public class AgentDraftGenerator {
     }
 
     /**
-     * The whole outgoing payload, built from an inquiry title and body and nothing else.
+     * The whole outgoing payload, built from an inquiry title, its body, and the seller's own
+     * retrieved product knowledge — and nothing else.
      *
      * <p>Package-private so {@code AgentDraftPayloadFloorTest} can assert the exact string. A check on
      * what this method <i>meant</i> to send would keep passing after someone added the work-item id
@@ -156,7 +188,7 @@ public class AgentDraftGenerator {
         ArrayNode messages = root.putArray("messages");
         ObjectNode user = messages.addObject();
         user.put("role", "user");
-        user.put("content", AgentDraftPrompt.user(input.title(), input.details()));
+        user.put("content", AgentDraftPrompt.user(input.title(), input.details(), input.knowledge()));
         if (vendor == Vendor.ANTHROPIC) {
             root.put("max_tokens", maxOutputTokens);
             root.put("system", AgentDraftPrompt.system());

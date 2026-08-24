@@ -32,6 +32,11 @@ import org.springframework.transaction.annotation.Transactional;
 @ActiveProfiles("test")
 class InquiryPublishBindingWriterTest {
 
+    /** A fixed approval target — these tests are about atomicity, not about which target it is. */
+    private static final InquiryPublishBindingWriter.ApprovalTarget TARGET =
+            new InquiryPublishBindingWriter.ApprovalTarget(null, java.util.UUID.randomUUID(), "ext-1", null);
+
+
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired InquiryApprovalRepository approvals;
     @Autowired InquiryActionIntentRepository intents;
@@ -61,7 +66,7 @@ class InquiryPublishBindingWriterTest {
 
         final InquiryWorkItem toBind = wi;
         try {
-            assertThatThrownBy(() -> writer.bind(toBind, draft, "cmd1", "SELLER:x"))
+            assertThatThrownBy(() -> writer.bind(toBind, draft, TARGET, "cmd1", "SELLER:x"))
                     .isInstanceOf(RuntimeException.class);
 
             assertThat(approvals.findByWorkItemId(toBind.getId())).isEmpty();

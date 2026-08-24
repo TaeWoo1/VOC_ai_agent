@@ -232,45 +232,41 @@ describe("고객 인박스 — response workflow", () => {
     expect(screen.getByText(/답변 방향을 제안할 수 없습니다/)).toBeInTheDocument();
   });
 
-  it("shows the inquiry body and the response suggestion once a work item resolves", async () => {
+  it("shows the customer's question and offers to draft an answer", async () => {
     getInquiryQueueStrict.mockResolvedValue({
       content: [{ workItemId: "w1", inquiryId: "i1", phase: "OPEN" }],
     });
     renderInbox("/inbox/i1");
-    expect(await screen.findByText("문의 내용")).toBeInTheDocument();
+    expect(await screen.findByText("고객 문의")).toBeInTheDocument();
     expect(screen.getByText("굵은 전선도 들어가나요?")).toBeInTheDocument();
-    expect(screen.getByText("응답 제안")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /초안 만들기/ })).toBeInTheDocument();
   });
 
-  it("never offers to send, and never implies SellerOps will", async () => {
+  it("offers no send on the default posture, and never implies one happens by itself", async () => {
+    // Inquiry Action Flow v1 CAN send — after an explicit approval, on a channel that has a
+    // transport, in a deployment where execution is on. None of those hold here, so the assertion is
+    // no longer "this product never sends" but the sharper one: nothing is offered that was not
+    // earned. A send control appearing under this posture would be the defect.
     getInquiryQueueStrict.mockResolvedValue({
       content: [{ workItemId: "w1", inquiryId: "i1", phase: "OPEN" }],
     });
     renderInbox("/inbox/i1");
-    await screen.findByText("응답 제안");
+    await screen.findByText("고객 문의");
     const text = document.body.textContent ?? "";
-    for (const banned of ["자동 발송", "대신 답변", "즉시 전송", "바로 보내기", "발송하기"]) {
+    for (const banned of ["자동 발송", "대신 답변", "즉시 전송", "바로 보내기"]) {
       expect(text).not.toContain(banned);
     }
-    for (const name of [/발송/, /전송/, /보내기/]) {
-      expect(screen.queryByRole("button", { name })).toBeNull();
-    }
-    // It states plainly who does the sending.
-    expect(screen.getByText(/판매자가 채널에서 직접 합니다/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /답변 보내기/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /확인, 등록합니다/ })).toBeNull();
   });
 
-  it("describes the suggestion as a response type, not as an AI-written draft", async () => {
+  it("says what a draft is for before it is written — reviewed, then sent on purpose", async () => {
     getInquiryQueueStrict.mockResolvedValue({
       content: [{ workItemId: "w1", inquiryId: "i1", phase: "OPEN" }],
     });
     renderInbox("/inbox/i1");
-    await screen.findByText("응답 제안");
-    const text = document.body.textContent ?? "";
-    // The generator returns a response CATEGORY and its provenance — no reply body, and its
-    // provider kind is rule-based. "AI 답변 초안" would name something that is not produced.
-    expect(text).not.toContain("AI 초안");
-    expect(text).not.toContain("AI 답변");
-    expect(screen.getByText(/답변 문구는 판매자가 직접 작성/)).toBeInTheDocument();
+    await screen.findByText("고객 문의");
+    expect(screen.getByText(/보내는 것은 확인 후 따로 누릅니다/)).toBeInTheDocument();
   });
 });
 

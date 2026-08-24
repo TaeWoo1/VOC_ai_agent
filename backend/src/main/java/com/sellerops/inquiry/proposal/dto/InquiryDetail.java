@@ -1,7 +1,9 @@
 package com.sellerops.inquiry.proposal.dto;
 
+import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -21,6 +23,17 @@ import java.util.UUID;
  * reader flag a secret inquiry <b>without</b> ever exposing more of its content; it
  * does not change what this detail returns and never widens the dashboard/analysis
  * exposure boundary (that exclusion lives in the repository/service layer).
+ *
+ * <p>{@code title}/{@code details} are the PLAIN TEXT of the stored body. A Cafe24 board post arrives
+ * as whatever the customer's mail client or the shop editor emitted, and the seller was being shown
+ * {@code <br /> [ Original Message ] <p>…}. The stored row is untouched; the reduction happens here,
+ * on the way out, so the seller and the drafter both read the question a person asked.
+ *
+ * <p>{@code answerStateProven} / {@code answerStateNote} say whether SellerOps can currently prove
+ * this inquiry is still unanswered on the marketplace — see
+ * {@link com.sellerops.inquiry.publish.PreSendCheck}. They are on the DETAIL, not only on the publish
+ * result, because the point of knowing is to know BEFORE pressing send. {@code null} on a channel
+ * with no send path at all, where the question does not arise.
  */
 public record InquiryDetail(
         UUID workItemId,
@@ -37,5 +50,11 @@ public record InquiryDetail(
         String details,
         Instant receivedAt,
         ProposalView proposal,
-        ReplyDraftView draft) {
+        ReplyDraftView draft,
+        UUID productId,
+        String productName,
+        String sourceSubtype,
+        Boolean answerStateProven,
+        String answerStateNote,
+        List<DraftEvidenceView> draftEvidence) {
 }
