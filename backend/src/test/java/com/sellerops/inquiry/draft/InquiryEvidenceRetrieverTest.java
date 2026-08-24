@@ -82,7 +82,7 @@ class InquiryEvidenceRetrieverTest {
         orgKnowledge = new SellerOperationsKnowledgeService(orgSources, orgChunks);
         answerMemory = new AnswerMemoryService(memories, orgChunks, productChunks);
         retriever = new InquiryEvidenceRetriever(products, productKnowledge, orgKnowledge, answerMemory,
-                new InquiryOrderFactReader(channelOrders, channels, FRESH));
+                com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH));
         Organization o = new Organization();
         o.setName("테스트 상점");
         org = organizations.save(o).getId();

@@ -88,7 +88,7 @@ class InquiryKnowledgeCoverageServiceTest {
                 new InquiryEvidenceRetriever(products,
                         new ProductKnowledgeLibraryService(products, productSources, productChunks),
                         orgKnowledge, new AnswerMemoryService(memories, orgChunks, productChunks),
-                        new InquiryOrderFactReader(channelOrders, channels, FRESH)),
+                        com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH)),
                 orgSources, memories, workItems, channelOrders);
         Organization o = new Organization();
         o.setName("테스트 상점");

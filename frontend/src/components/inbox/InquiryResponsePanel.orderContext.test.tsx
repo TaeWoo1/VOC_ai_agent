@@ -112,6 +112,32 @@ describe("운영 정보 card", () => {
     expect(screen.queryByText(/취소되지 않/)).toBeNull();
   });
 
+  it("shows a proven negative only when the channel answered just now", async () => {
+    getInquiryDetailStrict.mockResolvedValue(
+      detail({
+        present: true,
+        state: "OBSERVED_FRESH",
+        summaryKo:
+          "이 주문은 취소되지 않은 것으로 확인됩니다. 결제는 완료되었습니다. 발송은 아직 시작되지 않았습니다.",
+        paymentKo: "결제 완료",
+        fulfillmentKo: "발송 준비 중",
+        cancellationKo: "취소되지 않음",
+        observedKo: "방금 확인한 상태입니다.",
+      }),
+    );
+
+    render(<InquiryResponsePanel workItemId="w1" />);
+    await screen.findByText("운영 정보");
+
+    // "취소되지 않음" reaches this screen only from an exact read the backend just made; the same
+    // value from a stored row is erased before it becomes a view. The screen cannot tell them
+    // apart, which is exactly why the erasure lives in the backend record and not here.
+    expect(screen.getByText("취소되지 않음")).toBeTruthy();
+    expect(screen.getByText("발송 준비 중")).toBeTruthy();
+    expect(screen.getByText("방금 확인한 상태입니다.")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/\d+월 \d+일까지|도착 예정/);
+  });
+
   it("says when the state was last seen instead of implying it is current", async () => {
     getInquiryDetailStrict.mockResolvedValue(
       detail({

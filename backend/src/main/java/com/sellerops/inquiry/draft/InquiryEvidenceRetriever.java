@@ -10,6 +10,7 @@ import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
 import com.sellerops.knowledge.org.dto.OrgKnowledgePassage;
 import com.sellerops.knowledge.org.dto.OrgKnowledgeSearchResponse;
 import com.sellerops.order.fact.OrderFact;
+import com.sellerops.order.fact.OrderFactLookup;
 import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
@@ -124,15 +125,33 @@ public class InquiryEvidenceRetriever {
         }
     }
 
-    /** Gather the evidence for one inquiry. Reaches no channel and spends no model call. */
+    /**
+     * Gather the evidence for one inquiry, for a draft that is about to be written.
+     *
+     * <p>Spends no model call. Reaches a channel at most once, and only for the ORDER lane: a
+     * grounded sentence about an order's state has to be about the state now, so the order fact is
+     * allowed one bounded exact read — see {@link OrderFactLookup}. The three retrieval lanes reach
+     * nothing but this database.
+     */
     public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry) {
         String title = MarkupText.toPlainText(inquiry.getTitle());
         String details = MarkupText.toPlainText(inquiry.getBody());
-        return retrieve(orgId, inquiry, query(title, details));
+        return retrieve(orgId, inquiry, query(title, details), OrderFactLookup.EXACT_ALLOWED);
     }
 
-    /** The same gather, with the query already built — used by the audit that measures coverage. */
+    /**
+     * The same gather, with the query already built — used by the audit that measures coverage.
+     *
+     * <p>Stored facts only. The audit classifies thousands of rows in one pass and none of them is a
+     * seller waiting for an answer; letting it resolve order facts the way a screen does would turn
+     * one coverage report into one marketplace request per bound inquiry.
+     */
     public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry, String query) {
+        return retrieve(orgId, inquiry, query, OrderFactLookup.STORED_ONLY);
+    }
+
+    /** The gather, with the caller stating how far it may go for the order fact. */
+    public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry, String query, OrderFactLookup lookup) {
         UUID productId = namedProductOrNull(orgId, inquiry.getProductId());
 
         List<ScopedPassage> productLane = new ArrayList<>();
@@ -170,7 +189,7 @@ public class InquiryEvidenceRetriever {
         List<ScopedPassage> merged = merge(List.of(productLane, policyLane, memoryLane));
         DraftKnowledgeState state = merged.isEmpty() ? productVerdict : DraftKnowledgeState.GROUNDED;
         return new InquiryEvidence(productId, state, merged,
-                orderFacts.read(orgId, inquiry), remembered.supersededByConflict());
+                orderFacts.read(orgId, inquiry, lookup), remembered.supersededByConflict());
     }
 
     /**

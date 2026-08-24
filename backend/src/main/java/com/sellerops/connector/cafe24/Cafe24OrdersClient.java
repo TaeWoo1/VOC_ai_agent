@@ -10,6 +10,7 @@ import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -31,6 +32,18 @@ public class Cafe24OrdersClient {
 
     static final String ORDERS_PATH = "/api/v2/admin/orders";
     static final String DATE_TYPE = "order_date";
+
+    /**
+     * What an order id may look like before it is allowed to become a URL path segment.
+     *
+     * <p><b>Fail closed on the target.</b> The reference comes from a board article's
+     * {@code order_id}, which the vendored contract constrains only by length (Max 32) — it is not
+     * documented as any particular format, and a mall's own data has been known to carry whatever a
+     * migration put there. A string that is not this shape is refused before any HTTP, because a path
+     * segment built from an unconstrained string is how a lookup becomes a request for something
+     * else entirely.
+     */
+    private static final Pattern ORDER_ID_SHAPE = Pattern.compile("[A-Za-z0-9_-]{1,32}");
 
     /** mall_id becomes a hostname label — reject anything else before any HTTP. */
     private static final Pattern MALL_ID_SHAPE = Pattern.compile("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?");
@@ -80,6 +93,55 @@ public class Cafe24OrdersClient {
         return URI.create("https://" + mallId + ".cafe24api.com" + ORDERS_PATH + "?" + query);
     }
 
+    /**
+     * Read ONE order by its identifier — {@code GET /api/v2/admin/orders/{order_id}}, the contract in
+     * {@code docs/vendor/cafe24-admin-api/get-orders-order-id.md}.
+     *
+     * <p><b>One order, one request, no embeds.</b> {@code buyer} and {@code receivers} — the two
+     * sub-resources that exist to carry a person's name, phone and address — are opt-in on this
+     * endpoint and are not requested, so they never reach the wire. What is parsed out of what does
+     * arrive is {@link Cafe24OrderDetailRow}'s seven fields and nothing else.
+     *
+     * @return the order, or empty when the mall answered that there is no such order
+     * @throws Cafe24RateLimitedException on HTTP 429
+     * @throws Cafe24OrderReadException on any other non-200
+     */
+    public Optional<Cafe24OrderDetailRow> fetchOne(String accessToken, String mallId, String orderId) {
+        URI uri = orderDetailUri(mallId, orderId);
+        Cafe24HttpClient.Response response = http.get(uri, Map.of("Authorization", "Bearer " + accessToken));
+        if (response.statusCode() == 429) {
+            throw Cafe24RateLimitedException.fromResponse(response);
+        }
+        if (response.statusCode() == 404) {
+            return Optional.empty();
+        }
+        if (response.statusCode() != 200) {
+            throw new Cafe24OrderReadException(response.statusCode());
+        }
+        return Optional.ofNullable(parseOne(response.body()));
+    }
+
+    /** The single-order URI. No query at all: no embed, no fields, no date, no page. */
+    static URI orderDetailUri(String mallId, String orderId) {
+        if (mallId == null || !MALL_ID_SHAPE.matcher(mallId).matches()) {
+            throw new IllegalStateException("카페24 mall_id 형식이 올바르지 않습니다.");
+        }
+        if (orderId == null || !ORDER_ID_SHAPE.matcher(orderId).matches()) {
+            throw new IllegalStateException("카페24 주문번호 형식이 올바르지 않습니다.");
+        }
+        return URI.create("https://" + mallId + ".cafe24api.com" + ORDERS_PATH + "/" + orderId);
+    }
+
+    private Cafe24OrderDetailRow parseOne(String body) {
+        try {
+            OrderDetailResponse parsed = mapper.readValue(body, OrderDetailResponse.class);
+            return parsed.order();
+        } catch (Exception e) {
+            // The body stays out of the message — an order response carries buyer data.
+            throw new IllegalStateException("카페24 주문 응답을 해석할 수 없습니다.");
+        }
+    }
+
     private List<Cafe24OrderRow> parse(String body) {
         try {
             OrdersResponse parsed = mapper.readValue(body, OrdersResponse.class);
@@ -92,5 +154,14 @@ public class Cafe24OrdersClient {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record OrdersResponse(@JsonProperty("orders") List<Cafe24OrderRow> orders) {
+    }
+
+    /**
+     * The single-order envelope. Cafe24 returns {@code {"order": {…}}} for the detail read; when it
+     * returns a one-element {@code orders} array instead, {@code order} is absent and the read is
+     * reported as unusable rather than guessed at.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record OrderDetailResponse(@JsonProperty("order") Cafe24OrderDetailRow order) {
     }
 }

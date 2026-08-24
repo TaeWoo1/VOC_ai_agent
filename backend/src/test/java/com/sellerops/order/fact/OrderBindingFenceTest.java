@@ -76,13 +76,31 @@ class OrderBindingFenceTest {
     }
 
     @Test
-    @DisplayName("step 2 of the fact-source priority is declared absent, not improvised")
-    void noChannelClaimsAnExactLookupItCannotMake() {
-        for (String channel : List.of("NAVER", "CAFE24", "COUPANG")) {
+    @DisplayName("every declared exact lookup names a vendored contract that is on disk")
+    void aDeclaredLookupIsBackedByADocument() {
+        assertThat(ExactOrderLookupCapability.declaredChannels())
+                .as("a capability list nobody checks grows by memory; this one grows by transcription")
+                .isNotEmpty();
+        for (String channel : ExactOrderLookupCapability.declaredChannels()) {
+            assertThat(ExactOrderLookupCapability.endpointFor(channel)).isPresent();
+            assertThat(ExactOrderLookupCapability.scopeFor(channel)).isPresent();
+            String doc = ExactOrderLookupCapability.contractDocFor(channel).orElseThrow();
+            assertThat(Path.of("..", doc))
+                    .as("the endpoint string outlives the evidence unless the evidence is checked")
+                    .exists();
+        }
+    }
+
+    @Test
+    @DisplayName("a channel with no vendored contract claims nothing — a date sweep is not a lookup")
+    void anUnvendoredChannelClaimsNothing() {
+        for (String channel : List.of("NAVER", "COUPANG")) {
             assertThat(ExactOrderLookupCapability.isAvailable(channel))
-                    .as("no vendored contract retrieves one order by its id; a date sweep is not a lookup")
+                    .as("NAVER's product-orders read is time-ranged; Coupang has no order-detail doc")
                     .isFalse();
             assertThat(ExactOrderLookupCapability.endpointFor(channel)).isEmpty();
+            assertThat(ExactOrderLookupCapability.describe(channel))
+                    .isEqualTo(ExactOrderLookupCapability.NO_VENDORED_EXACT_LOOKUP);
         }
     }
 

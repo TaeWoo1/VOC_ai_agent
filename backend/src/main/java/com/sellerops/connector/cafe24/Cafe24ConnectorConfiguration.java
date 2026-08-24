@@ -75,6 +75,21 @@ public class Cafe24ConnectorConfiguration {
                 Clock.systemUTC());
     }
 
+    /**
+     * The exact single-order READ, contracted by
+     * {@code docs/vendor/cafe24-admin-api/get-orders-order-id.md} and scoped by the
+     * {@code mall.read_order} grant the ORDER_SUMMARY routine already holds.
+     *
+     * <p>It is a bean here, and not a component, so that it exists exactly when the connector does.
+     * Nothing schedules it: it is reached only when an inquiry that NAMES an order is opened or
+     * drafted — one order, one request, no window.
+     */
+    @Bean
+    Cafe24ExactOrderReader cafe24ExactOrderReader(Cafe24Authorizer authorizer,
+                                                  Cafe24OrdersClient ordersClient) {
+        return new Cafe24ExactOrderReader(authorizer, ordersClient, Clock.systemUTC());
+    }
+
     // Board Discovery (community read) infrastructure — wired behind the same
     // flag, CONFIRMED by a supervised live /boards run. Not part of the
     // DataType/scheduling backbone, so no runtime path reaches these by default.

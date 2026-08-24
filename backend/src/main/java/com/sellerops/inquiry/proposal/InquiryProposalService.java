@@ -10,6 +10,7 @@ import com.sellerops.inquiry.proposal.InquiryProposalProvider.Draft;
 import com.sellerops.inquiry.proposal.InquiryProposalProvider.SellerInquiryContext;
 import com.sellerops.inquiry.draft.InquiryOrderFactReader;
 import com.sellerops.inquiry.proposal.dto.InquiryDetail;
+import com.sellerops.order.fact.OrderFactLookup;
 import com.sellerops.order.fact.dto.OrderContextView;
 import com.sellerops.inquiry.proposal.dto.ProposalResult;
 import com.sellerops.inquiry.proposal.dto.ProposalView;
@@ -140,7 +141,7 @@ public class InquiryProposalService {
                 // The deterministic fast path. "이 주문 상태가 뭐야?" on the detail screen is a join,
                 // not a plan — an LLM planner has nothing to contribute to reading one row and would
                 // add latency, cost, and a chance of paraphrasing it.
-                OrderContextView.of(orderFacts.read(orgId, inquiry)));
+                OrderContextView.of(orderFacts.read(orgId, inquiry, OrderFactLookup.EXACT_ALLOWED)));
     }
 
     /**

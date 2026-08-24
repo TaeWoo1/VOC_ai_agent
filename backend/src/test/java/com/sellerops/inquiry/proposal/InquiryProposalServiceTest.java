@@ -103,7 +103,7 @@ class InquiryProposalServiceTest {
                 channels, products, draftEvidence, fixedTargetState(com.sellerops.inquiry.publish.PreSendCheck.unproven(
                         com.sellerops.inquiry.publish.PreSendCheck.STATE_UNKNOWN)),
                 new com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry(),
-                new com.sellerops.inquiry.draft.InquiryOrderFactReader(channelOrders, channels,
+                com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels,
                         (orgId, code, accountId, rows) ->
                                 com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH));
     }

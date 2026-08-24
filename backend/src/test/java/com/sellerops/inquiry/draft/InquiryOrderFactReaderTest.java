@@ -12,7 +12,11 @@ import com.sellerops.order.ChannelOrder;
 import com.sellerops.order.ChannelOrderRepository;
 import com.sellerops.order.NormalizedOrderStatus;
 import com.sellerops.order.fact.OrderFact;
+import com.sellerops.order.fact.OrderCancellationState;
+import com.sellerops.order.fact.OrderFactProvenance;
 import com.sellerops.order.fact.OrderFactState;
+import com.sellerops.order.fact.OrderFulfillmentState;
+import com.sellerops.order.fact.OrderPaymentState;
 import com.sellerops.order.fact.OrderStoreFreshness;
 import com.sellerops.organization.Organization;
 import com.sellerops.organization.OrganizationRepository;
@@ -94,8 +98,12 @@ class InquiryOrderFactReaderTest {
         OrderFact fact = read(inquiry("PO-1", InquiryOrderBinding.SOURCE_EXACT));
 
         assertThat(fact.state()).isEqualTo(OrderFactState.OBSERVED_FRESH);
-        assertThat(fact.normalized()).isEqualTo(NormalizedOrderStatus.PAID);
-        assertThat(fact.messageKo()).contains("결제가 완료된 것으로 확인됩니다");
+        assertThat(fact.payment()).isEqualTo(OrderPaymentState.PAID);
+        assertThat(fact.provenance()).isEqualTo(OrderFactProvenance.STORED_CANONICAL);
+        assertThat(fact.messageKo()).contains("결제는 완료되었습니다");
+        assertThat(fact.messageKo())
+                .as("payment says nothing about dispatch, and the sentence says so out loud")
+                .contains("발송 상태는 확인되지 않았습니다");
     }
 
     @Test
@@ -131,8 +139,8 @@ class InquiryOrderFactReaderTest {
 
         assertThat(fact.state()).isEqualTo(OrderFactState.ORDER_NOT_FOUND);
         assertThat(fact.messageKo())
-                .as("our reach, not the world — the store covers days and the backlog covers years")
-                .contains("아직 가져오지 않아");
+                .as("neither 'it does not exist' nor 'it was cancelled' — only that we did not find it")
+                .contains("찾지 못해");
     }
 
     @Test
@@ -182,7 +190,8 @@ class InquiryOrderFactReaderTest {
 
         OrderFact fact = read(inquiry("PO-1", InquiryOrderBinding.SOURCE_EXACT));
 
-        assertThat(fact.normalized()).isEqualTo(NormalizedOrderStatus.UNKNOWN);
+        assertThat(fact.payment()).isEqualTo(OrderPaymentState.UNKNOWN);
+        assertThat(fact.fulfillment()).isEqualTo(OrderFulfillmentState.UNKNOWN);
         assertThat(fact.rawStatusCode()).isEqualTo("DELIVERING");
         assertThat(fact.messageKo())
                 .as("Coupang's DELIVERING is in the store and has never been live-confirmed")
@@ -197,7 +206,7 @@ class InquiryOrderFactReaderTest {
 
         OrderFact fact = read(inquiry("PO-1", InquiryOrderBinding.SOURCE_EXACT));
 
-        assertThat(fact.cancelled()).isNull();
+        assertThat(fact.cancellation()).isEqualTo(OrderCancellationState.UNKNOWN);
         assertThat(fact.messageKo()).doesNotContain("취소되지 않");
     }
 
@@ -222,7 +231,8 @@ class InquiryOrderFactReaderTest {
     }
 
     private OrderFact read(Inquiry inquiry, ChannelDataState state) {
-        return new InquiryOrderFactReader(orders, channels, freshness(state)).read(org, inquiry);
+        return com.sellerops.order.fact.StoredOnlyOrderFacts.reader(orders, channels, freshness(state))
+                .read(org, inquiry);
     }
 
     private Inquiry inquiry(String orderRef, InquiryOrderBinding binding) {

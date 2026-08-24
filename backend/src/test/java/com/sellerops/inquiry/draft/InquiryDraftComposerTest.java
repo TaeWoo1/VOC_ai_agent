@@ -249,7 +249,7 @@ class InquiryDraftComposerTest {
         InquiryEvidenceRetriever retriever = new InquiryEvidenceRetriever(products, library,
                 new SellerOperationsKnowledgeService(orgSources, orgChunks),
                 new AnswerMemoryService(memories, orgChunks, productChunks),
-                new InquiryOrderFactReader(channelOrders, channels, FRESH));
+                com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH));
         return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, retriever, model,
                 quota, new RuleBasedInquiryProposalProvider());
     }

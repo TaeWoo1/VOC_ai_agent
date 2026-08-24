@@ -3,6 +3,20 @@
 **날짜:** 2026-08-25 · **브랜치:** `feat/agent-evidence-scope-integrity` ·
 **선행:** `docs/seller_operations_knowledge_and_answer_memory_v1.md` (CLOSED)
 
+> **⚠ 2026-08-25 같은 날 정정 두 건 — `docs/exact_operational_context_v1.md`가 이어받는다.**
+>
+> 1. **§2의 「exact single-order lookup 계약이 3채널 전부 미보유」는 Cafe24에 대해 틀렸다.** 그 문장은
+>    `docs/vendor/`에 대해서는 정확했고 플랫폼에 대해서는 아니었다 — Cafe24는
+>    `GET /api/v2/admin/orders/{order_id}`를 `mall.read_order` 아래 공개한다. 사본:
+>    `docs/vendor/cafe24-admin-api/get-orders-order-id.md`. NAVER·Coupang은 그대로 미보유.
+> 2. **「`cancelled`에 `FALSE`가 없다」는 저장 경로에 한정된다.** 그 근거(저장 코드가 부정을 증명하지
+>    않는다)는 지금도 옳지만, exact READ에서 Cafe24는 `canceled=F`="Not Canceled"를 **적극적으로**
+>    진술한다. fence는 vocabulary에서 **SOURCE**로 옮겼다: `NOT_CANCELLED`는 `EXACT_READ`에서만
+>    살아남고, `STORED_CANONICAL`에서 온 값은 `OrderFact`의 constructor가 `UNKNOWN`으로 지운다.
+>
+> 나머지 계약(exact source binding only · 본문 추출 금지 · projection에 PII 없음 · 집계 freshness로
+> 개별 주문을 말하지 않음)은 전부 그대로다.
+
 문의 답변의 마지막 빈칸을 채운다. 상품 지식·운영 정책·과거 답변은 전부 **누군가 써 둔 것**이고,
 주문 상태는 **아무도 쓰지 않았는데 변하는 것**이다. 이 문서는 그 하나가 어떻게 문의에 붙고, 붙지
 않을 때 무엇이라고 말하는지를 소유한다.

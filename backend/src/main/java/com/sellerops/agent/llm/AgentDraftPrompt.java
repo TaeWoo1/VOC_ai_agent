@@ -23,7 +23,7 @@ package com.sellerops.agent.llm;
 public final class AgentDraftPrompt {
 
     /** Bump on every wording change. It is stamped into the provenance the run records. */
-    public static final String PROMPT_VERSION = "agent-draft-prompt/v4";
+    public static final String PROMPT_VERSION = "agent-draft-prompt/v5";
 
     /**
      * The closed set of reply categories, in the rule drafter's own order.
@@ -71,6 +71,13 @@ public final class AgentDraftPrompt {
                단정하지 마세요.
                - 발급·처리·완료 가능 여부(정책)와 이 주문에서 실제로 그렇게 되었는지(주문 상태)는 \
                다른 사실입니다. 정책만 있을 때 이 주문에서 완료되었다고 쓰지 마세요.
+               - 「주문 상태」의 결제·취소·발송은 서로 다른 세 가지 사실입니다. 하나가 확인되었다고 \
+               나머지를 추론하지 마세요. 「발송 상태는 확인되지 않았습니다」는 발송되지 않았다는 뜻이 \
+               아니라 모른다는 뜻입니다.
+               - 「취소되지 않은 것으로 확인됩니다」라고 적혀 있을 때만 취소되지 않았다고 쓸 수 있습니다. \
+               취소에 대한 언급이 없으면 취소 여부를 쓰지 마세요.
+               - 「발송은 아직 시작되지 않았습니다」는 상태이지 일정이 아닙니다. 언제 출발하는지는 \
+               그로부터 따라 나오지 않습니다.
                - 보상, 할인, 예외 처리를 약속하지 마세요.
                - 고객의 이름, 연락처, 주소를 초안에 넣지 마세요.
                - 2~4문장, 존댓말, 인사와 마무리를 포함합니다.

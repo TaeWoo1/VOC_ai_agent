@@ -3,7 +3,8 @@ package com.sellerops.order.fact;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.sellerops.coverage.ChannelDataState;
-import com.sellerops.order.NormalizedOrderStatus;
+import com.sellerops.order.fact.OrderFactProvenance;
+import com.sellerops.order.fact.OrderPaymentState;
 import com.sellerops.order.fact.dto.OrderContextView;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -31,7 +32,7 @@ class OrderContextViewTest {
 
         assertThat(view.present()).isTrue();
         assertThat(view.paymentKo()).isEqualTo("확인되지 않음");
-        assertThat(view.observedKo()).isEqualTo("이 주문을 아직 가져오지 않았습니다.");
+        assertThat(view.observedKo()).isEqualTo("이 주문을 찾지 못했습니다.");
     }
 
     @Test
@@ -89,8 +90,10 @@ class OrderContextViewTest {
     }
 
     private static OrderFact paid(OrderFactState state, Instant asOf) {
-        return new OrderFact(state, ChannelDataState.OBSERVED_FRESH, "NAVER",
-                NormalizedOrderStatus.PAID, "PAYED", null,
-                Instant.parse("2026-08-21T00:00:00Z"), null, LocalDate.parse("2026-08-21"), asOf);
+        return new OrderFact(state, OrderFactProvenance.STORED_CANONICAL,
+                ChannelDataState.OBSERVED_FRESH, "NAVER",
+                OrderPaymentState.PAID, null, null, "PAYED",
+                Instant.parse("2026-08-21T00:00:00Z"), null, null,
+                LocalDate.parse("2026-08-21"), asOf);
     }
 }
