@@ -8,6 +8,7 @@ import {
   INQUIRY_TABS,
   isProposed,
   PROPOSAL_SUCCESS_GUIDANCE,
+  ageLabel,
   phaseLabel,
   proposalCategoryLabel,
   provenanceText,
@@ -25,6 +26,10 @@ function queueItem(over: Partial<InquiryQueueItem> = {}): InquiryQueueItem {
     inquiryId: "inq-1",
     sellerAccountId: "acc-1",
     channelId: "ch-1",
+    channelCode: "CAFE24",
+    channelNameKo: "카페24",
+    productId: null,
+    productName: null,
     phase: "OPEN",
     status: "UNANSWERED",
     title: "배송 문의",
@@ -92,6 +97,9 @@ describe("queueRowView (sanitized row)", () => {
     expect(view).toEqual({
       workItemId: "wi-1",
       title: "배송 문의",
+      channelLabel: "카페24",
+      productLabel: "상품 미지정",
+      productUnknown: true,
       phaseLabel: "응답 대기",
       statusLabel: "미답변",
       receivedDate: "2026-06-27",
@@ -102,6 +110,32 @@ describe("queueRowView (sanitized row)", () => {
   });
   it("falls back to a placeholder title", () => {
     expect(queueRowView(queueItem({ title: null })).title).toBe("(제목 없음)");
+  });
+  it("names the product when the inquiry resolved to one", () => {
+    const view = queueRowView(queueItem({ productId: "p-1", productName: "로맨틱러브10P(na97)" }));
+    expect(view.productLabel).toBe("로맨틱러브10P(na97)");
+    expect(view.productUnknown).toBe(false);
+  });
+  it("says 상품 미지정 rather than leaving the cell blank", () => {
+    // Most Cafe24 board inquiries carry no product number at all, so this is the ordinary row and
+    // not an error state. A blank cell reads as "still loading" and an operator waits for it.
+    const view = queueRowView(queueItem({ productId: null, productName: null }));
+    expect(view.productLabel).toBe("상품 미지정");
+    expect(view.productUnknown).toBe(true);
+  });
+});
+
+describe("ageLabel", () => {
+  const now = new Date("2026-08-24T00:00:00Z");
+  it("counts whole days waited — the operator's triage axis", () => {
+    expect(ageLabel("2026-08-20T00:00:00Z", now)).toBe("4일 경과");
+    expect(ageLabel("2026-08-24T00:00:00Z", now)).toBe("오늘");
+  });
+  it("does not render a negative age for a clock skew", () => {
+    expect(ageLabel("2026-08-25T00:00:00Z", now)).toBe("오늘");
+  });
+  it("stays silent on an unparseable timestamp rather than printing NaN", () => {
+    expect(ageLabel("not-a-date", now)).toBe("");
   });
 });
 

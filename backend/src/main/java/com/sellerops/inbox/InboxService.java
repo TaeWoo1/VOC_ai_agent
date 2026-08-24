@@ -8,6 +8,7 @@ import com.sellerops.inbox.dto.FeedItem;
 import com.sellerops.inbox.dto.InboxResponse;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
@@ -24,6 +25,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class InboxService {
+
+    /**
+     * What a row says when no canonical product is known.
+     *
+     * <p>It used to be "-", which reads as a missing value in a table of present ones. Most Cafe24
+     * board inquiries genuinely carry no product number, so this is the ordinary case rather than an
+     * error, and naming it plainly is what lets a seller skip past it instead of wondering.
+     */
+    static final String UNATTRIBUTED_LABEL = "상품 미지정";
 
     private final InquiryRepository inquiries;
     private final ReviewRepository reviews;
@@ -90,8 +100,16 @@ public class InboxService {
         var window = PageRequest.of(0, Math.max(1, limit));
         Map<UUID, String> channelNames = channels.findAll().stream()
                 .collect(Collectors.toMap(Channel::getId, Channel::getNameKo, (a, b) -> a));
-        Map<UUID, String> productNames = products.findAllByOrgId(orgId).stream()
-                .collect(Collectors.toMap(Product::getId, Product::getName, (a, b) -> a));
+        // displayNameOrNull, not getName: ingest's shared "(미지정 상품)" bucket is not a product, and a
+        // row that printed its name would tell the seller this inquiry is about a product by that name.
+        // Nulls are dropped here and become UNATTRIBUTED_LABEL below.
+        Map<UUID, String> productNames = new java.util.HashMap<>();
+        for (Product p : products.findAllByOrgId(orgId)) {
+            String display = OperatorProductName.displayNameOrNull(p);
+            if (display != null) {
+                productNames.putIfAbsent(p.getId(), display);
+            }
+        }
 
         List<FeedItem> items = new ArrayList<>();
         for (Inquiry q : wantInquiries ? inquiries.findByOrgIdOrderByReceivedAtDesc(orgId, window) : List.<Inquiry>of()) {
@@ -101,14 +119,14 @@ public class InboxService {
             items.add(new FeedItem(q.getId().toString(), "INQUIRY",
                     q.getChannelId() == null ? null : q.getChannelId().toString(),
                     channelNames.getOrDefault(q.getChannelId(), "기타"),
-                    productNames.getOrDefault(q.getProductId(), "-"),
+                    productNames.getOrDefault(q.getProductId(), UNATTRIBUTED_LABEL),
                     snippet(q.getBody()), null, q.getStatus(), q.getReceivedAt()));
         }
         for (Review r : wantReviews ? reviews.findByOrgIdOrderByReceivedAtDesc(orgId, window) : List.<Review>of()) {
             items.add(new FeedItem(r.getId().toString(), "REVIEW",
                     r.getChannelId() == null ? null : r.getChannelId().toString(),
                     channelNames.getOrDefault(r.getChannelId(), "기타"),
-                    productNames.getOrDefault(r.getProductId(), "-"),
+                    productNames.getOrDefault(r.getProductId(), UNATTRIBUTED_LABEL),
                     snippet(r.getBody()), r.getRating(),
                     r.isNegative() ? "NEGATIVE" : "NORMAL", r.getReceivedAt()));
         }

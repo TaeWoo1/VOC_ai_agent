@@ -467,7 +467,10 @@ class Cafe24ApiConnectorTest {
         assertThat(q.externalId()).isEqualTo("cafe24:b6:a3003"); // native board+article identity
         assertThat(q.title()).isEqualTo("곡면 가능?");
         assertThat(q.body()).isEqualTo("곡면에도 붙나요");
-        assertThat(q.sku()).isEqualTo("88"); // Cafe24 product_no, native only
+        // product_no travels as an exact channel product ref, not as a canonical sku: it identifies a
+        // LISTING, and keying products by it invented one product per unmatched number.
+        assertThat(q.productRef().externalProductId()).isEqualTo("88");
+        assertThat(q.sku()).isNull();
         assertThat(q.status()).isEqualTo("UNANSWERED"); // N → unanswered
         assertThat(q.informStatus()).isEqualTo("N"); // raw reply_status preserved verbatim
         assertThat(q.author()).isNull(); // no buyer PII

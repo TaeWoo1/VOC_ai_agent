@@ -18,6 +18,7 @@ import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.inquiry.draft.InquiryDraftEvidenceRepository;
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
+import com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry;
 import com.sellerops.inquiry.publish.PreSendCheck;
 import com.sellerops.inquiry.publish.InquiryTargetStateReader;
 import com.sellerops.product.OperatorProductName;
@@ -64,6 +65,7 @@ public class InquiryProposalService {
     private final ChannelRepository channels;
     private final ProductRepository products;
     private final InquiryDraftEvidenceRepository draftEvidence;
+    private final InquiryReplyCapabilityRegistry capabilities;
     private final InquiryTargetStateReader targetState;
 
     public InquiryProposalService(InquiryWorkItemRepository workItems, InquiryProposalRepository proposals,
@@ -71,7 +73,8 @@ public class InquiryProposalService {
                                   InquiryProposalWriter writer, InquiryReplyDraftRepository drafts,
                                   ChannelRepository channels, ProductRepository products,
                                   InquiryDraftEvidenceRepository draftEvidence,
-                                  InquiryTargetStateReader targetState) {
+                                  InquiryTargetStateReader targetState,
+                                  InquiryReplyCapabilityRegistry capabilities) {
         this.workItems = workItems;
         this.proposals = proposals;
         this.inquiries = inquiries;
@@ -81,6 +84,7 @@ public class InquiryProposalService {
         this.channels = channels;
         this.products = products;
         this.draftEvidence = draftEvidence;
+        this.capabilities = capabilities;
         this.targetState = targetState;
     }
 
@@ -123,7 +127,8 @@ public class InquiryProposalService {
                                 workItemId, draft.version()).stream()
                         .map(row -> new DraftEvidenceView(row.getKind(), row.getTitle(), row.getLocator(),
                                 row.getSourceId(), row.getChunkId()))
-                        .toList());
+                        .toList(),
+                capabilities.capability(channelCode, inquiry.getSourceSubtype()));
     }
 
     /**

@@ -226,6 +226,11 @@ public class IngestionService {
                             // absence-based reconciliation could be built on top of this path. Recording
                             // it costs one column write; not recording it costs the distinction.
                             existing.setLastSeenAt(Instant.now());
+                            // The row's CONTENT is unchanged, but our catalogue may not be: a listing
+                            // collected since the last read can attribute a row that arrived before it
+                            // existed. This branch already writes, so the repair is free here and
+                            // would otherwise never happen for a backlog that never changes again.
+                            repairAttribution(existing, row, productId);
                             inquiries.save(existing);
                             tally.skip();
                             continue;
@@ -233,6 +238,7 @@ public class IngestionService {
                         boolean becameAnswered = "ANSWERED".equals(row.status())
                                 && !"ANSWERED".equals(existing.getStatus());
                         applyInquirySource(existing, row);
+                        repairAttribution(existing, row, productId);
                         existing.setLastSeenAt(Instant.now());
                         if (becameAnswered && sellerAccountId != null) {
                             // Reflect the platform answer and complete the OPEN work item
@@ -255,6 +261,7 @@ public class IngestionService {
                 entity.setSellerAccountId(sellerAccountId);
                 entity.setProductId(productId);
                 entity.setSourceSubtype(row.sourceSubtype());
+                entity.setSourceProductRef(sourceProductRef(row));
                 // Buyer PII (row.author()) is intentionally NOT persisted.
                 applyInquirySource(entity, row);
                 entity.setReceivedAt(row.receivedAt() != null ? row.receivedAt() : Instant.now());
@@ -276,6 +283,30 @@ public class IngestionService {
             }
         }
         return tally.toOutcome();
+    }
+
+    /** The channel's own product identifier, for sources that declare one. Null for the rest. */
+    private static String sourceProductRef(CanonicalInquiry row) {
+        ChannelProductRef ref = row.productRef();
+        return ref == null ? null : ref.externalProductId();
+    }
+
+    /**
+     * On re-collection, fill an attribution that was missing — and only that.
+     *
+     * <p>A row can be stored unattributed for a reason that later stops being true: the listing was
+     * not in {@code channel_products} when the inquiry arrived, and a catalogue read has since put it
+     * there. Re-reading the inquiry is when that becomes knowable, so this is where the repair
+     * belongs. It never <em>changes</em> an existing attribution: a product id that is already set was
+     * either matched exactly or corrected by hand, and a later read is not evidence against either.
+     * The source ref is always refreshed, because it is a verbatim record of what the source just
+     * said rather than a judgement about it.
+     */
+    private void repairAttribution(Inquiry existing, CanonicalInquiry row, UUID productId) {
+        existing.setSourceProductRef(sourceProductRef(row));
+        if (existing.getProductId() == null && productId != null) {
+            existing.setProductId(productId);
+        }
     }
 
     /**

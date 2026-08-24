@@ -1174,6 +1174,16 @@ export interface InquiryQueueItem {
   inquiryId: string;
   sellerAccountId: string;
   channelId: string;
+  /** Resolved catalog labels for `channelId` — a triage row has to name its shop. */
+  channelCode: string | null;
+  channelNameKo: string | null;
+  /**
+   * The canonical product this inquiry is about. `null` means genuinely unattributed — the ordinary
+   * case for a Cafe24 board article, which usually carries no product number at all — and must render
+   * as "상품 미지정", never as a blank that reads like a value still loading.
+   */
+  productId: string | null;
+  productName: string | null;
   phase: string; // OPEN | PROPOSED | ... (server lifecycle)
   status: string; // UNANSWERED | ANSWERED
   title: string | null;
@@ -1240,6 +1250,12 @@ export interface InquiryDetail {
   answerStateNote: string | null;
   /** What the current draft was grounded in, in the order the drafter was shown them. */
   draftEvidence: DraftEvidenceView[];
+  /**
+   * Whether a reply can be posted to THIS channel and THIS source resource, and why not when it
+   * cannot. The screen shows a limitation only from this — never inferred from a missing button —
+   * and it must keep the channel's limits and SellerOps' own apart when it does.
+   */
+  replyCapability: InquiryReplyCapabilityView | null;
 }
 
 /**

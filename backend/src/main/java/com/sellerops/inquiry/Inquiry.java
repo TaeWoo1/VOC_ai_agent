@@ -103,6 +103,21 @@ public class Inquiry extends BaseEntity {
     private String sourceSubtype;
 
     /**
+     * The channel's own product identifier, verbatim, as the source stated it.
+     *
+     * <p>Not a canonical product id and never used as one: {@code product_id} is the attribution and
+     * this is the evidence for it. Keeping both separates two facts that used to collapse into one.
+     * A row with a ref and no {@code product_id} says "the channel named a listing we do not hold" —
+     * a catalogue gap, repairable by a catalogue read. A row with neither says "the channel named no
+     * listing at all", which on a Cafe24 board-6 article is the ordinary case and nothing to repair.
+     *
+     * <p>Before it existed the two were indistinguishable, because the identifier was spent on
+     * resolve-or-create and then discarded. Null on every row ingested before this column.
+     */
+    @Column(name = "source_product_ref", length = 64)
+    private String sourceProductRef;
+
+    /**
      * The answer the seller already published on the platform, when the source carries it.
      *
      * <p>Null for every source whose API returns only an answered flag, and for every row collected

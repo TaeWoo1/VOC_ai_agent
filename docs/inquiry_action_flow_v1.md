@@ -30,7 +30,18 @@ WRITE tool은 없고, `operatorToolRegistry.test.ts`가 등록 자체를 거부�
 | COUPANG | (단일) | **`DIRECT_API`** | `CoupangInquiryReplyClient` → `POST …/onlineInquiries/{id}/replies` · `CoupangChannelReplyAdapter` — **구현됨, 라이브 미실행** |
 | NAVER | `NAVER_PRODUCT_QNA` | **`PLATFORM_SUPPORTED_NOT_IMPLEMENTED`** | 공식 `PUT /v1/contents/qnas/{questionId}` (llms.txt §문의) · 막는 것은 `NaverReadOnlyFenceTest` — 쓰기 경로 3종(`/pay-merchant`, `qnas/`, `/answer`)을 **이름으로** 거부 |
 | NAVER | `NAVER_CUSTOMER_INQUIRY` | **`PLATFORM_SUPPORTED_NOT_IMPLEMENTED`** | 공식 `POST /v1/pay-merchant/inquiries/{inquiryNo}/answer` · 같은 fence |
-| CAFE24 | (단일) | **`NEEDS_VERIFICATION`** | `Cafe24BoardArticlesClient` 읽기 전용 · **벤더 쓰기 계약 미감사** |
+| GMARKET (ESM+) | (단일) | **`DIRECT_API`** | `EsmAnswerClient` · `EsmChannelReplyAdapter` — **구현됨, 라이브 미실행**. 2026-08-24 추가: 구현된 adapter가 있는데 감사 행이 없었다(누락) |
+| CAFE24 | (단일) | **`NEEDS_VERIFICATION`** | `Cafe24BoardArticlesClient` 읽기 전용 · **벤더 쓰기 계약 미감사** · 현재 연결 scope `mall.read_community,mall.read_order`(쓰기 미포함) |
+
+**2026-08-24 재감사(Inquiry Product Attribution & Action Coverage v1) — 아무 행도 움직이지 않았다.**
+NAVER 두 subtype이 여전히 미구현인 이유는 결정이 아니라 **문서**다: vendored `llms.txt`는 세 답변
+엔드포인트의 method와 path**만** 싣고, 요청 본문·필요 권한·응답 의미를 담은 개별 문서는 저장소에 없으며
+이 환경에서 벤더 호스트에 접근할 수 없었다. **path만 알고 본문을 추측한 adapter는 구현이 아니므로 쓰지
+않았다.** 상세: `docs/inquiry_product_attribution_action_coverage_v1.md` §3.
+
+**adapter 등록과 이 표는 이제 한 사실이다** — `everyRegisteredAdapterHasAnImplementedCapabilityRow`가
+둘의 불일치를 빌드에서 거부한다. 그리고 adapter 해석 자체가 채널이 아니라 **채널 × source subtype**으로
+좁혀졌다(`ChannelReplyAdapter.servesSubtype`, 기본값은 단일 resource 채널만).
 
 세 가지를 구분해서 적는다.
 
@@ -188,6 +199,17 @@ Agent 다섯 화면. 이전 패키지의 `VISUAL_QA_BLOCKED`는 해소됐다.
 18건과 Coupang 4건은 이름 있는 상품에 붙지만 **work item이 없다**(이미 답변됨). 그래서 위 grounded 증명은
 `VERIFY_FIXTURE` provenance에서 수행했고, 증명 뒤 만든 행은 전부 지웠다(§8.4). **이것이 남은 가장 큰 데모
 blocker다** — 경로는 동작하고, 이 조직의 데이터가 거기 닿지 않는다.
+
+> **⚠ 2026-08-24 부분 해소 — `docs/inquiry_product_attribution_action_coverage_v1.md`.** 위 문단의
+> "0건"은 관측으로는 맞았지만 **원인 진단이 반쪽이었다.** ingest가 Cafe24 `product_no`를 canonical
+> `sku`로 넘겨 resolve-or-create 했고, 그 둘은 다른 키 공간이라 어긋나면 **번호로 이름 붙은 상품을
+> 만들어 냈다**(`91`·`94`·`170` — 세 번호 전부 `channel_products`에 실재하는 리스팅이었다). 정확
+> 일치 경로(`ChannelProductRef`)로 바꾸고 backfill 한 뒤 **canonical Demo Org 5건이 실제 상품에
+> 귀속**되고 나머지는 **정직하게 무귀속**이 됐다. 그래서 grounded 증명은 이제 `VERIFY_FIXTURE`가
+> 아니라 **실제 REAL Cafe24 미답변 문의**에서 수행된다(같은 문서 §6).
+>
+> 다만 **상한은 여전히 낮고, 이유가 바뀌었다**: board 6 게시글은 `product_no`를 거의 담지 않는다
+> (`cafe24_community_articles` board 6 **905행 중 0행** 보유). 남은 3,307건은 코드로 귀속되지 않는다.
 
 ### 8.3 승인 바인딩 — 실제 confirm
 

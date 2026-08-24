@@ -40,7 +40,7 @@ export function canPublishReply(
  * send yet" is neither. Returns null when the path IS available.
  */
 export function publishUnavailableReason(
-  detail: Pick<InquiryDetail, "channelCode" | "channelNameKo">,
+  detail: Pick<InquiryDetail, "channelCode" | "channelNameKo" | "replyCapability">,
   capability: PublishCapabilityView | null,
 ): string | null {
   if (canPublishReply(detail, capability)) return null;
@@ -50,6 +50,14 @@ export function publishUnavailableReason(
   }
   if (!capability.executionEnabled) {
     return "이 환경에서는 SellerOps가 답변을 대신 등록하지 않습니다. 아래 초안을 복사해 판매자센터에서 등록해 주세요.";
+  }
+  // The audited answer for THIS channel and THIS source resource, when the server sent one. It says
+  // whose limitation this is, and that is the part a seller acts on: told "네이버는 지원하지 않습니다"
+  // they conclude their channel cannot do it and stop asking, when the endpoint exists and SellerOps
+  // simply has not connected it. The transport NAME is never shown — only what it means for them.
+  const audited = detail.replyCapability?.reasonKo;
+  if (audited) {
+    return `${audited} 아래 초안을 복사해 판매자센터에서 등록해 주세요.`;
   }
   return `${channel} 문의는 판매자센터에서 직접 답변해 주세요. 아래 초안을 복사해 사용하실 수 있습니다.`;
 }

@@ -1,5 +1,6 @@
 package com.sellerops.inquiry.workitem;
 
+import com.sellerops.common.DataOrigin;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import java.util.Optional;
@@ -59,6 +60,16 @@ public class InquiryWorkItemWriter {
      * or rolls back together with the inquiry it belongs to.
      */
     public UUID openConnectorInquiry(Inquiry inquiry, UUID sellerAccountId, Consumer<UUID> postInsert) {
+        // A manufactured inquiry is stored as history and never becomes a seller task. The queue this
+        // opens into is the same queue whose items reach approval and, past that, a marketplace send —
+        // so a DEMO_SEED row that entered it would be a fixture standing in a line that ends at a real
+        // customer's inquiry thread. Refusing at the door is the only place the refusal is structural:
+        // downstream every consumer would have to remember, and one that forgot would not fail loudly.
+        // History is deliberately still written: excluding it from the QUEUE is not the same as
+        // pretending it was never collected, and demo/debug reads still find it.
+        if (inquiry.getDataOrigin() != DataOrigin.REAL) {
+            return saveHistoryInquiry(inquiry, postInsert);
+        }
         return tx.execute(status -> {
             Inquiry savedInquiry = inquiries.save(inquiry);
 

@@ -35,16 +35,21 @@ public class ChannelReplyAdapterRegistry {
     }
 
     /**
-     * The adapter serving the given channel, or empty when none is registered
-     * (unknown channel id, or a channel with no adapter — both fail closed).
+     * The adapter serving the given channel AND source subtype, or empty when none is registered.
+     *
+     * <p>Empty covers every fail-closed case with one answer: an unknown channel id, a channel with no
+     * adapter, live execution disabled, and — the case this signature exists for — an adapter that
+     * serves the channel but not this resource of it. The last one used to be indistinguishable from a
+     * match, because resolution stopped at the channel code.
      */
-    public Optional<ChannelReplyAdapter> resolve(UUID channelId) {
+    public Optional<ChannelReplyAdapter> resolve(UUID channelId, String sourceSubtype) {
         if (channelId == null) {
             return Optional.empty();
         }
         return channels.findById(channelId)
                 .map(Channel::getCode)
-                .map(byCode::get);
+                .map(byCode::get)
+                .filter(adapter -> adapter.servesSubtype(sourceSubtype));
     }
 
     /**

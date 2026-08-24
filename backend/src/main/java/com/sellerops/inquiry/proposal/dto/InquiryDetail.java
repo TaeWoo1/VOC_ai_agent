@@ -2,6 +2,7 @@ package com.sellerops.inquiry.proposal.dto;
 
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
+import com.sellerops.inquiry.publish.dto.InquiryReplyCapabilityView;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -56,5 +57,6 @@ public record InquiryDetail(
         String sourceSubtype,
         Boolean answerStateProven,
         String answerStateNote,
-        List<DraftEvidenceView> draftEvidence) {
+        List<DraftEvidenceView> draftEvidence,
+        InquiryReplyCapabilityView replyCapability) {
 }

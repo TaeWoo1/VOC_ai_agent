@@ -99,7 +99,8 @@ class InquiryProposalServiceTest {
     private InquiryProposalService service(InquiryProposalProvider provider) {
         return new InquiryProposalService(workItems, proposals, inquiries, provider, writer, drafts,
                 channels, products, draftEvidence, fixedTargetState(com.sellerops.inquiry.publish.PreSendCheck.unproven(
-                        com.sellerops.inquiry.publish.PreSendCheck.STATE_UNKNOWN)));
+                        com.sellerops.inquiry.publish.PreSendCheck.STATE_UNKNOWN)),
+                new com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry());
     }
 
     private InquiryWorkItem seedOpen(UUID orgId, String title, String body, String author) {

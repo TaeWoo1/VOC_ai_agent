@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.sellerops.channel.Channel;
+import com.sellerops.inquiry.InquirySourceSubtype;
 import com.sellerops.channel.ChannelRepository;
 import java.util.List;
 import java.util.Optional;
@@ -56,7 +57,43 @@ class ChannelReplyAdapterRegistryTest {
         FakeAdapter esm = new FakeAdapter("GMARKET");
         ChannelReplyAdapterRegistry registry = new ChannelReplyAdapterRegistry(channels, List.of(esm));
 
-        assertThat(registry.resolve(channelId)).containsSame(esm);
+        assertThat(registry.resolve(channelId, null)).containsSame(esm);
+    }
+
+    @Test
+    void anAdapterServesOneResourceOfItsChannelNotTheChannel() {
+        // A channel code is not specific enough to send with. NAVER carries two inquiry resources
+        // whose identifiers do not overlap (questionId vs inquiryNo) and whose answer endpoints are
+        // different calls; an adapter claiming "NAVER" would let an approval granted for one be spent
+        // by an implementation written for the other. The default serves the null subtype only, so a
+        // multi-resource channel cannot be served by accident — it has to be declared.
+        ChannelRepository channels = mock(ChannelRepository.class);
+        UUID channelId = UUID.randomUUID();
+        when(channels.findById(channelId)).thenReturn(Optional.of(channelWithCode("GMARKET")));
+
+        FakeAdapter single = new FakeAdapter("GMARKET");
+        ChannelReplyAdapterRegistry registry = new ChannelReplyAdapterRegistry(channels, List.of(single));
+
+        assertThat(registry.resolve(channelId, null)).containsSame(single);
+        assertThat(registry.resolve(channelId, InquirySourceSubtype.NAVER_PRODUCT_QNA)).isEmpty();
+        assertThat(registry.resolve(channelId, InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY)).isEmpty();
+    }
+
+    @Test
+    void everyRegisteredAdapterHasAnImplementedCapabilityRow() {
+        // Two statements about the same fact — "an adapter exists" and "the capability audit says
+        // DIRECT_API" — and the send path consults both. If they can disagree, the hand-maintained
+        // list silently vetoes a working transport, or blesses one that does not exist. This is the
+        // seam that keeps them one fact.
+        InquiryReplyCapabilityRegistry capabilities = new InquiryReplyCapabilityRegistry();
+        ChannelReplyAdapterRegistry adapters = new ChannelReplyAdapterRegistry(
+                mock(ChannelRepository.class),
+                List.of(new FakeAdapter("GMARKET"), new FakeAdapter("COUPANG")));
+
+        assertThat(adapters.registeredChannelCodes())
+                .allSatisfy(code -> assertThat(capabilities.isImplemented(code, null))
+                        .as("adapter registered for %s but the capability audit does not say DIRECT_API", code)
+                        .isTrue());
     }
 
     @Test
@@ -68,7 +105,7 @@ class ChannelReplyAdapterRegistryTest {
         ChannelReplyAdapterRegistry registry =
                 new ChannelReplyAdapterRegistry(channels, List.of(new FakeAdapter("GMARKET")));
 
-        assertThat(registry.resolve(channelId)).isEmpty();
+        assertThat(registry.resolve(channelId, null)).isEmpty();
     }
 
     @Test
@@ -84,7 +121,7 @@ class ChannelReplyAdapterRegistryTest {
         ChannelReplyAdapterRegistry registry =
                 new ChannelReplyAdapterRegistry(channels, List.of(new FakeAdapter("GMARKET")));
 
-        assertThat(registry.resolve(channelId)).isEmpty();
+        assertThat(registry.resolve(channelId, null)).isEmpty();
     }
 
     @Test
@@ -96,7 +133,7 @@ class ChannelReplyAdapterRegistryTest {
         ChannelReplyAdapterRegistry registry =
                 new ChannelReplyAdapterRegistry(channels, List.of(new FakeAdapter("GMARKET")));
 
-        assertThat(registry.resolve(channelId)).isEmpty();
+        assertThat(registry.resolve(channelId, null)).isEmpty();
     }
 
     @Test
@@ -105,7 +142,7 @@ class ChannelReplyAdapterRegistryTest {
         ChannelReplyAdapterRegistry registry =
                 new ChannelReplyAdapterRegistry(channels, List.of(new FakeAdapter("GMARKET")));
 
-        assertThat(registry.resolve(null)).isEmpty();
+        assertThat(registry.resolve(null, null)).isEmpty();
     }
 
     @Test
@@ -116,6 +153,6 @@ class ChannelReplyAdapterRegistryTest {
 
         ChannelReplyAdapterRegistry registry = new ChannelReplyAdapterRegistry(channels, List.of());
 
-        assertThat(registry.resolve(channelId)).isEmpty();
+        assertThat(registry.resolve(channelId, null)).isEmpty();
     }
 }

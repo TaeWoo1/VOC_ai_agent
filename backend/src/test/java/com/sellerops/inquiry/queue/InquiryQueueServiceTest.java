@@ -2,6 +2,7 @@ package com.sellerops.inquiry.queue;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sellerops.common.DataOrigin;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.queue.dto.InquiryQueueItem;
@@ -30,23 +31,31 @@ class InquiryQueueServiceTest {
 
     @Autowired InquiryRepository inquiries;
     @Autowired InquiryWorkItemRepository workItems;
+    @Autowired com.sellerops.channel.ChannelRepository channels;
+    @Autowired com.sellerops.product.ProductRepository products;
 
     private InquiryQueueService service;
 
     @BeforeEach
     void setUp() {
-        service = new InquiryQueueService(workItems, inquiries);
+        service = new InquiryQueueService(workItems, inquiries, channels, products);
     }
 
     /** Persist an inquiry + a work item in {@code phase}; returns the work item id. */
     private UUID seed(UUID org, UUID sellerAccountId, UUID channelId,
                       InquiryWorkItemPhase phase, String title) {
+        return seed(org, sellerAccountId, channelId, phase, title, DataOrigin.REAL);
+    }
+
+    private UUID seed(UUID org, UUID sellerAccountId, UUID channelId,
+                      InquiryWorkItemPhase phase, String title, DataOrigin origin) {
         Inquiry q = new Inquiry();
         q.setOrgId(org);
         q.setChannelId(channelId);
         q.setTitle(title);
         q.setBody("본문 " + title);
         q.setStatus("UNANSWERED");
+        q.setDataOrigin(origin);
         q.setReceivedAt(Instant.parse("2026-06-27T00:00:00Z"));
         UUID inquiryId = inquiries.save(q).getId();
 
@@ -132,5 +141,39 @@ class InquiryQueueServiceTest {
 
         InquiryQueueResponse secondPage = service.queue(org, InquiryWorkItemPhase.OPEN, 1, 2);
         assertThat(secondPage.content()).hasSize(1);
+    }
+
+    @Test
+    void manufacturedWorkIsNotOperationalWork() {
+        // This queue is where an item is worked from, approved in, and ultimately sent from. A fixture
+        // standing in that line would be a manufactured row in the path of a marketplace write, so it
+        // is excluded here as well as at the writer — the writer's fence only protects rows collected
+        // after it shipped, and these predate it.
+        UUID org = UUID.randomUUID();
+        UUID account = UUID.randomUUID();
+        UUID channel = UUID.randomUUID();
+        seed(org, account, channel, InquiryWorkItemPhase.OPEN, "진짜 문의");
+        seed(org, account, channel, InquiryWorkItemPhase.OPEN, "데모 문의", DataOrigin.DEMO_SEED);
+        seed(org, account, channel, InquiryWorkItemPhase.OPEN, "검증 픽스처", DataOrigin.VERIFY_FIXTURE);
+
+        InquiryQueueResponse page = service.queue(org, InquiryWorkItemPhase.OPEN, 0, 20);
+
+        assertThat(page.content()).extracting(InquiryQueueItem::title).containsExactly("진짜 문의");
+        // The count is narrowed with the rows, not after them: a queue that says 3 while showing 1 is
+        // its own defect, and paging past the first page would have skipped real work.
+        assertThat(page.totalElements()).isEqualTo(1);
+    }
+
+    @Test
+    void excludingManufacturedWorkFromTheQueueDoesNotDeleteItsHistory() {
+        UUID org = UUID.randomUUID();
+        UUID account = UUID.randomUUID();
+        UUID channel = UUID.randomUUID();
+        UUID workItemId = seed(org, account, channel, InquiryWorkItemPhase.OPEN, "데모 문의",
+                DataOrigin.DEMO_SEED);
+
+        assertThat(service.queue(org, InquiryWorkItemPhase.OPEN, 0, 20).content()).isEmpty();
+        // Still on record for debug/history readers. Not operational is not the same as not collected.
+        assertThat(workItems.findById(workItemId)).isPresent();
     }
 }

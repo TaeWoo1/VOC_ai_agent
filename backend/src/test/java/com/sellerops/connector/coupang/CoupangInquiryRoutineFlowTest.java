@@ -224,7 +224,8 @@ class CoupangInquiryRoutineFlowTest {
                 new com.sellerops.inquiry.proposal.RuleBasedInquiryProposalProvider(),
                 new com.sellerops.inquiry.proposal.InquiryProposalWriter(workItems, proposals, audits, txManager),
                 replyDrafts, channels, products, draftEvidence, fixedTargetState(com.sellerops.inquiry.publish.PreSendCheck.unproven(
-                        com.sellerops.inquiry.publish.PreSendCheck.STATE_UNKNOWN)));
+                        com.sellerops.inquiry.publish.PreSendCheck.STATE_UNKNOWN)),
+                new com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry());
     }
 
     /** A COUPANG catalog row, so the detail read resolves the channel the seller sees. */
@@ -278,7 +279,7 @@ class CoupangInquiryRoutineFlowTest {
         // is what makes "SellerOps never submits to Coupang" structural rather than a promise. The
         // seller posts it themselves through the Action Window.
         var registry = new com.sellerops.inquiry.publish.ChannelReplyAdapterRegistry(channels, List.of());
-        assertThat(registry.resolve(coupang)).isEmpty();
+        assertThat(registry.resolve(coupang, null)).isEmpty();
         assertThat(registry.registeredChannelCodes()).doesNotContain("COUPANG");
     }
 

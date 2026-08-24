@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
+import com.sellerops.common.DataOrigin;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.InquiryRepository;
@@ -62,7 +63,7 @@ class InquiryPreSendCheckTest {
     @Autowired ChannelRepository channels;
     @Autowired PlatformTransactionManager txManager;
 
-    private static final String CH_CODE = "PRESEND_CHANNEL";
+    private static final String CH_CODE = "COUPANG";
     private static final String TITLE = "승인 제목";
     private static final String BODY = "승인 내용";
     private static final String EXTERNAL_ID = "onlineInquiry:9001";
@@ -107,10 +108,22 @@ class InquiryPreSendCheckTest {
     @Test
     @DisplayName("the source resource is not the one the approval named — nothing is sent")
     void subtypeChanged() {
-        // Approved as a 상품 문의; the row now claims 고객 문의. Different identifier space, different
-        // endpoint: an approval for one is not an approval for the other.
+        // Approved for the channel's only inquiry resource; the row now claims a named one. Different
+        // identifier space, different endpoint: an approval for one is not an approval for the other,
+        // and null is a value here rather than a wildcard that matches anything.
         assertRefused(PreSendCheck.SUBTYPE_CHANGED, null,
                 q -> q.setSourceSubtype(InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY));
+    }
+
+    @Test
+    @DisplayName("the target is not the seller's own data — nothing is sent")
+    void syntheticTarget() {
+        // The queue already refuses to carry manufactured work, so reaching this line means the row
+        // was reclassified after its approval was granted. The external id of a DEMO_SEED row is
+        // shaped exactly like a real one, and the marketplace would answer whatever that string names
+        // over there — which is why this is a refusal at the last gate rather than a warning.
+        assertRefused(PreSendCheck.SYNTHETIC_TARGET, null,
+                q -> q.setDataOrigin(DataOrigin.DEMO_SEED));
     }
 
     @Test
@@ -217,13 +230,13 @@ class InquiryPreSendCheckTest {
     private InquiryPublishService service(PreSendCheck answer) {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of(adapter)),
-                fixed(answer));
+                fixed(answer), new InquiryReplyCapabilityRegistry(), channels);
     }
 
     private InquiryPublishService serviceWithoutAdapter() {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of()),
-                fixed(PreSendCheck.proven()));
+                fixed(PreSendCheck.proven()), new InquiryReplyCapabilityRegistry(), channels);
     }
 
     private static InquiryTargetStateReader fixed(PreSendCheck answer) {
@@ -247,7 +260,10 @@ class InquiryPreSendCheckTest {
         q.setBody("문의 본문");
         q.setStatus("UNANSWERED");
         q.setExternalId(EXTERNAL_ID);
-        q.setSourceSubtype(InquirySourceSubtype.NAVER_PRODUCT_QNA);
+        // The fixture channel has exactly one inquiry resource, so the seeded subtype is null — the
+        // same shape a Coupang row really has. subtypeChanged() mutates it to a named resource, which
+        // is the mismatch the check exists for.
+        q.setSourceSubtype(null);
         q.setOperationalState(InquiryOperationalState.ACTIVE);
         q.setReceivedAt(Instant.parse("2026-08-20T00:00:00Z"));
         UUID inquiryId = inquiries.save(q).getId();

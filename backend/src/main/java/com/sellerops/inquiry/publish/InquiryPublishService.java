@@ -1,6 +1,9 @@
 package com.sellerops.inquiry.publish;
 
+import com.sellerops.channel.Channel;
+import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
+import com.sellerops.common.DataOrigin;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.InquiryRepository;
@@ -48,12 +51,15 @@ public class InquiryPublishService {
     private final InquiryPublishBindingWriter binding;
     private final ChannelReplyAdapterRegistry adapters;
     private final InquiryTargetStateReader targetState;
+    private final InquiryReplyCapabilityRegistry capabilities;
+    private final ChannelRepository channels;
 
     public InquiryPublishService(InquiryWorkItemRepository workItems, InquiryReplyDraftRepository drafts,
                                  InquiryRepository inquiries, InquiryApprovalRepository approvals,
                                  InquiryExecutionRepository executions, InquiryVerificationRepository verifications,
                                  InquiryWorkItemAuditRepository audits, InquiryPublishBindingWriter binding,
-                                 ChannelReplyAdapterRegistry adapters, InquiryTargetStateReader targetState) {
+                                 ChannelReplyAdapterRegistry adapters, InquiryTargetStateReader targetState,
+                                 InquiryReplyCapabilityRegistry capabilities, ChannelRepository channels) {
         this.workItems = workItems;
         this.drafts = drafts;
         this.inquiries = inquiries;
@@ -64,6 +70,8 @@ public class InquiryPublishService {
         this.binding = binding;
         this.adapters = adapters;
         this.targetState = targetState;
+        this.capabilities = capabilities;
+        this.channels = channels;
     }
 
     /** Confirm the exact draft version, bind immutably, create the intent, and (if a channel adapter exists) dispatch. */
@@ -172,10 +180,6 @@ public class InquiryPublishService {
         if (execution == null || execution.getStatus() != InquiryExecutionStatus.ACTION_PENDING) {
             return null; // nothing pending, or already dispatched — never resend
         }
-        Optional<ChannelReplyAdapter> adapter = adapters.resolve(workItem.getChannelId());
-        if (adapter.isEmpty()) {
-            return null; // fail closed: no reply adapter for this channel — stays ACTION_PENDING
-        }
         Inquiry inquiry = loadInquiry(orgId, workItem.getInquiryId());
         String externalId = inquiry.getExternalId();
         if (externalId == null || externalId.isBlank()) {
@@ -192,6 +196,12 @@ public class InquiryPublishService {
         // The last gate before the only marketplace WRITE in the product: is this still the target
         // that was approved, and is it still answerable? A contradiction is permanent — re-approving
         // is the remedy, not retrying — so it fails the execution rather than leaving it pending.
+        // Revalidation runs BEFORE the adapter is chosen, and the order is the point. A contradiction
+        // between the approval and the row — a moved account, a different source resource — is true
+        // whether or not a transport exists for it. Resolving the adapter first would have let the
+        // most alarming case exit quietly: an inquiry whose subtype changed after approval resolves to
+        // NO adapter, so the dispatch would return "nothing to do" and leave the work item pending
+        // forever, retrying an approval that can never be spent, with nothing recorded about why.
         PreSendCheck check = revalidate(orgId, workItem, approval, inquiry);
         if (check.refused()) {
             execution.setStatus(InquiryExecutionStatus.FAILED);
@@ -205,6 +215,15 @@ public class InquiryPublishService {
                     InquiryWorkItemPhase.ACTION_PENDING, InquiryWorkItemPhase.FAILED);
             return PublishOutcomeCategory.PERMANENT_FAILURE;
         }
+        // Nothing contradicts the approval. Only now does the transport matter: no adapter for this
+        // channel+subtype means live execution is off or none is implemented, and the work item waits
+        // rather than failing — that absence is a deployment fact, not a contradiction.
+        Optional<ChannelReplyAdapter> adapter =
+                adapters.resolve(workItem.getChannelId(), inquiry.getSourceSubtype());
+        if (adapter.isEmpty()) {
+            return null; // fail closed: stays ACTION_PENDING
+        }
+
         // Not a refusal — a recorded ignorance. See PreSendCheck.
         execution.setPresendStateProven(check.stateProven());
         execution.setPresendNote(check.note());
@@ -295,14 +314,32 @@ public class InquiryPublishService {
                 && inquiry.getOperationalState() != InquiryOperationalState.ACTIVE) {
             return PreSendCheck.refuse(PreSendCheck.NOT_ANSWERABLE);
         }
+        // Provenance, checked against the ROW rather than against how it was found. The queue that
+        // produced this work item already excludes synthetic rows, but an approval outlives the read
+        // that created it and this is the last gate before an irreversible write.
+        if (inquiry.getDataOrigin() != DataOrigin.REAL) {
+            return PreSendCheck.refuse(PreSendCheck.SYNTHETIC_TARGET);
+        }
+        // Capability, per exact source subtype. The two NAVER resources have different identifier
+        // spaces and different endpoints, so "NAVER can be answered" is not a sentence this product
+        // is allowed to form — only "this subtype can be".
+        if (!capabilities.isImplemented(channelCode(workItem.getChannelId()), inquiry.getSourceSubtype())) {
+            return PreSendCheck.refuse(PreSendCheck.WRITE_NOT_SUPPORTED);
+        }
         // Everything the approval asserted still holds. What remains is whether the answer state we
         // just read is CURRENT — which is a property of the channel, not of this row.
         return targetState.read(orgId, workItem.getChannelId());
     }
 
+    /** The channel's stable code, or null when the channel row is gone (which reads as unsupported). */
+    private String channelCode(UUID channelId) {
+        return channelId == null ? null
+                : channels.findById(channelId).map(Channel::getCode).orElse(null);
+    }
+
     /** Re-query the channel result and record a verification attempt; COMPLETED only when the adapter confirms. */
     private void runVerify(InquiryWorkItem workItem, Inquiry inquiry, InquiryExecution execution) {
-        Optional<ChannelReplyAdapter> adapter = adapters.resolve(workItem.getChannelId());
+        Optional<ChannelReplyAdapter> adapter = adapters.resolve(workItem.getChannelId(), inquiry.getSourceSubtype());
         if (adapter.isEmpty()) {
             return; // fail closed: no adapter to verify with — leave state unchanged
         }

@@ -7,10 +7,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Board-6 (문의사항) article → {@link CanonicalInquiry} mapping. Proves the identity
- * is Cafe24-native only (board+article dedup key, product_no as sku, no external-
- * market origin), that raw {@code reply_status} is preserved verbatim while canonical
- * status is derived conservatively, that buyer PII is never read, and that timestamps
- * follow the offset-only policy.
+ * is Cafe24-native only (board+article dedup key, product_no as an exact channel product
+ * ref, no external-market origin), that raw {@code reply_status} is preserved verbatim
+ * while canonical status is derived conservatively, that buyer PII is never read, and
+ * that timestamps follow the offset-only policy.
  */
 class Cafe24InquiryArticleMapperTest {
 
@@ -31,8 +31,12 @@ class Cafe24InquiryArticleMapperTest {
         assertThat(q.externalId()).isEqualTo("cafe24:b6:a3003");
         assertThat(q.title()).isEqualTo("곡면 가능?");
         assertThat(q.body()).isEqualTo("곡면에도 붙나요");
-        assertThat(q.sku()).isEqualTo("88"); // Cafe24 product_no, keyed as sku
-        assertThat(q.productName()).isNull(); // sku present → no placeholder name
+        // product_no is the mall's LISTING key and travels as one. Name and sku stay null so the
+        // resolve-or-create path — which invented products named after these numbers — is unreachable.
+        assertThat(q.productRef()).isNotNull();
+        assertThat(q.productRef().externalProductId()).isEqualTo("88");
+        assertThat(q.sku()).isNull();
+        assertThat(q.productName()).isNull();
         assertThat(q.status()).isEqualTo("UNANSWERED"); // N → unanswered
         assertThat(q.informStatus()).isEqualTo("N"); // raw token preserved verbatim
         assertThat(q.receivedAt()).isNotNull(); // offset-bearing → parsed
@@ -53,12 +57,28 @@ class Cafe24InquiryArticleMapperTest {
     }
 
     @Test
-    void missingProductNoFallsBackToTheIngestPlaceholderName() {
+    void anArticleWithNoProductNumberIsUnattributedRatherThanBucketed() {
+        // Nearly every board-6 article is this shape: a general 문의 posted to the board rather than
+        // from a product page. It used to become the shared "(미지정 상품)" row, which reads as an
+        // attribution on every screen while naming nothing. A declared-but-empty ref is the true
+        // statement — "this source attributes by identifier, and this row has none".
         CanonicalInquiry q =
                 Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(5L, "t", "b", null, null, "N"), 1);
 
+        assertThat(q.productRef()).isNotNull();
+        assertThat(q.productRef().hasIdentifier()).isFalse();
         assertThat(q.sku()).isNull();
-        assertThat(q.productName()).isEqualTo("(미지정 상품)");
+        assertThat(q.productName()).isNull();
+    }
+
+    @Test
+    void productNumberZeroIsNotAnIdentity() {
+        // A 0 would otherwise be attributed against listing "0" — or, before this, invent a product
+        // named "0". Cafe24 uses it as "no product" on some board rows.
+        CanonicalInquiry q =
+                Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(6L, "t", "b", 0L, null, "N"), 1);
+
+        assertThat(q.productRef().hasIdentifier()).isFalse();
     }
 
     @Test

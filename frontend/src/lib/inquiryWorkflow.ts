@@ -90,15 +90,43 @@ export function receivedDateLabel(receivedAt: string): string {
 export interface QueueRowView {
   workItemId: string;
   title: string;
+  /** The shop this came from, in the seller's own words. */
+  channelLabel: string;
+  /**
+   * The product the inquiry is about, or the explicit absence of one.
+   *
+   * <p>Never a blank. Most Cafe24 board inquiries carry no product number, so unattributed is the
+   * ordinary case rather than an error — but an empty cell reads as "still loading" and an operator
+   * waits for it. Saying "상품 미지정" says the thing.
+   */
+  productLabel: string;
+  /** True when no canonical product is known — the caller may style it as absent rather than as data. */
+  productUnknown: boolean;
   phaseLabel: string;
   statusLabel: string;
   receivedDate: string;
+}
+
+/** How long this has been waiting, in whole days — the operator's actual triage axis. */
+export function ageLabel(receivedAt: string, now: Date = new Date()): string {
+  const received = new Date(receivedAt);
+  if (Number.isNaN(received.getTime())) {
+    return "";
+  }
+  const days = Math.floor((now.getTime() - received.getTime()) / 86_400_000);
+  if (days <= 0) {
+    return "오늘";
+  }
+  return `${days}일 경과`;
 }
 
 export function queueRowView(item: InquiryQueueItem): QueueRowView {
   return {
     workItemId: item.workItemId,
     title: item.title ?? "(제목 없음)",
+    channelLabel: item.channelNameKo ?? item.channelCode ?? "채널 미상",
+    productLabel: item.productName ?? "상품 미지정",
+    productUnknown: item.productName == null,
     phaseLabel: phaseLabel(item.phase),
     statusLabel: statusLabel(item.status),
     receivedDate: receivedDateLabel(item.receivedAt),

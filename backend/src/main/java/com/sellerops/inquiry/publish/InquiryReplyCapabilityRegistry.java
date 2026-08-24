@@ -56,6 +56,28 @@ public class InquiryReplyCapabilityRegistry {
      * {@code Cafe24BoardArticlesClient}, which has no write method; whether the Admin API exposes a
      * board-comment write that a seller's OAuth scope would carry has not been audited. Rendering that
      * as "unsupported" would be inventing a vendor limitation, which this repository does not do.
+     *
+     * <p><b>Re-audited 2026-08-24 (Inquiry Product Attribution &amp; Action Coverage v1) and nothing
+     * moved.</b> The audit is recorded because a repeated audit that changes no row is a result, not a
+     * skipped step:
+     *
+     * <ul>
+     *   <li><b>NAVER</b> — the two subtypes remain split and remain unimplemented. The vendored index
+     *       ({@code llms.txt} lines 53–55) names the method and path of all three answer endpoints,
+     *       and that is <em>all</em> it names. The per-endpoint pages that would carry the request
+     *       body, the required permission and the response semantics
+     *       ({@code put-v1-contents-qnas-questionId.md},
+     *       {@code post-v1-pay-merchant-inquiries-inquiryNo-answer.md}) are not vendored here and the
+     *       vendor host was not reachable from this environment when they were requested. An adapter
+     *       written against a path with a guessed body is not an implementation, so none was written.
+     *       This is the whole blocker: it is a missing document, not a missing decision.</li>
+     *   <li><b>CAFE24</b> — still unaudited, and now with a second fact beside it. The mall's stored
+     *       grant is {@code mall.read_community,mall.read_order} ({@code Cafe24ProductRow}), so even
+     *       if a board-comment write exists, this connection could not make it without a re-consent.
+     *       That is a fact about the grant, not about the API, and it is deliberately not promoted
+     *       into a claim that Cafe24 cannot be answered.</li>
+     *   <li><b>COUPANG</b> — unchanged: implemented, never live-proven.</li>
+     * </ul>
      */
     private static final List<Row> ROWS = List.of(
             new Row("COUPANG", null, InquiryReplyTransport.DIRECT_API,
@@ -65,15 +87,21 @@ public class InquiryReplyCapabilityRegistry {
                     InquiryReplyTransport.PLATFORM_SUPPORTED_NOT_IMPLEMENTED,
                     "네이버는 상품 문의 답변 등록 API를 제공하지만, SellerOps가 아직 연결하지 않았습니다.",
                     "공식: PUT /v1/contents/qnas/{questionId} (llms.txt §문의) · "
-                            + "미구현: NaverReadOnlyFenceTest가 쓰기 경로 3종을 이름으로 거부"),
+                            + "미구현: NaverReadOnlyFenceTest가 쓰기 경로 3종을 이름으로 거부 · "
+                            + "차단 사유: 요청 본문 계약 문서 미확보(추측 구현 금지)"),
             new Row("NAVER", InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY,
                     InquiryReplyTransport.PLATFORM_SUPPORTED_NOT_IMPLEMENTED,
                     "네이버는 고객 문의 답변 등록 API를 제공하지만, SellerOps가 아직 연결하지 않았습니다.",
                     "공식: POST /v1/pay-merchant/inquiries/{inquiryNo}/answer (llms.txt §문의) · "
-                            + "미구현: NaverReadOnlyFenceTest가 쓰기 경로 3종을 이름으로 거부"),
+                            + "미구현: NaverReadOnlyFenceTest가 쓰기 경로 3종을 이름으로 거부 · "
+                            + "차단 사유: 요청 본문 계약 문서 미확보(추측 구현 금지)"),
+            new Row("GMARKET", null, InquiryReplyTransport.DIRECT_API,
+                    "ESM+(지마켓/옥션) 문의는 구현된 답변 등록 경로로 보낼 수 있습니다.",
+                    "EsmAnswerClient · EsmChannelReplyAdapter (구현됨, 실행 플래그 뒤에서만 등록)"),
             new Row("CAFE24", null, InquiryReplyTransport.NEEDS_VERIFICATION,
                     "카페24 문의 답변 등록 경로는 아직 확인하지 않았습니다. 지원하지 않는다는 뜻은 아닙니다.",
-                    "Cafe24BoardArticlesClient — 읽기 전용 · 벤더 쓰기 계약 미감사"));
+                    "Cafe24BoardArticlesClient — 읽기 전용 · 벤더 쓰기 계약 미감사 · "
+                            + "현재 연결 scope는 mall.read_community,mall.read_order (쓰기 미포함)"));
 
     /**
      * The audited answer for a channel + source subtype.
@@ -96,6 +124,25 @@ public class InquiryReplyCapabilityRegistry {
                 .map(r -> new InquiryReplyCapabilityView(channelCode, sourceSubtype,
                         r.transport().name(), r.reasonKo(), r.evidence()))
                 .orElseGet(() -> unaudited(channelCode, sourceSubtype));
+    }
+
+    /**
+     * Whether SellerOps can actually post a reply to this channel + source subtype <em>today</em>.
+     *
+     * <p>Only {@link InquiryReplyTransport#DIRECT_API} answers true, and the reason is the distinction
+     * this registry exists to keep: {@code PLATFORM_SUPPORTED_NOT_IMPLEMENTED} means the endpoint is
+     * real and we have not connected it, {@code NEEDS_VERIFICATION} means nobody has looked, and
+     * {@code GUIDED_ACTION} means the seller completes the action themselves. All three are honest
+     * descriptions of a channel and none of them is a send this product can perform, so all three
+     * stop a dispatch. {@code UNSUPPORTED} stops it too, for the one case where the channel is the
+     * thing that refuses.
+     *
+     * <p>Resolution is per subtype and never widens: a subtype with no row of its own falls back to
+     * its channel's subtype-less row only if one exists, which for NAVER it deliberately does not.
+     */
+    public boolean isImplemented(String channelCode, String sourceSubtype) {
+        return InquiryReplyTransport.DIRECT_API.name()
+                .equals(capability(channelCode, sourceSubtype).transport());
     }
 
     /** Every audited row, for a capability screen. */

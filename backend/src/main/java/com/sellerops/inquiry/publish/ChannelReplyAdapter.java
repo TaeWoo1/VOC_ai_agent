@@ -25,6 +25,24 @@ public interface ChannelReplyAdapter {
     /** The {@code Channel.code} this adapter serves (e.g. the ESM catalog channel). */
     String channelCode();
 
+    /**
+     * Whether this adapter serves the given {@code source_subtype} — the exact channel RESOURCE the
+     * inquiry came from.
+     *
+     * <p>A channel code is not specific enough to send with. NAVER carries two inquiry resources whose
+     * identifier spaces do not overlap ({@code questionId} for 상품 문의, {@code inquiryNo} for
+     * 고객 문의) and whose answer endpoints are different calls. One adapter claiming "NAVER" would let
+     * an approval granted for one resource be spent by an implementation written for the other, and
+     * the identifier would be accepted by neither — or, worse, be a valid handle for something else.
+     *
+     * <p>The default serves the {@code null} subtype only: a channel with exactly one inquiry
+     * resource. Any adapter for a multi-resource channel must override and name its resource, which
+     * makes the omission impossible to write by accident.
+     */
+    default boolean servesSubtype(String sourceSubtype) {
+        return sourceSubtype == null;
+    }
+
     /** Publish the approved reply; returns a channel-neutral {@link ReplyPublishResult}. */
     ReplyPublishResult publish(ReplyPublishCommand command);
 

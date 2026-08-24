@@ -57,7 +57,7 @@ class InquiryPublishServiceTest {
     @Autowired ChannelRepository channels;
     @Autowired PlatformTransactionManager txManager;
 
-    static final String CH_CODE = "TEST_CHANNEL";
+    static final String CH_CODE = "COUPANG";
     private final UUID org = UUID.randomUUID();
     private final UUID user = UUID.randomUUID();
     private static final String APPROVED_TITLE = "승인 제목";
@@ -92,14 +92,14 @@ class InquiryPublishServiceTest {
     private InquiryPublishService withAdapter() {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of(adapter)),
-                targetState());
+                targetState(), new InquiryReplyCapabilityRegistry(), channels);
     }
 
     /** Service with NO adapter registered (fail-closed: nothing dispatches). */
     private InquiryPublishService withoutAdapter() {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of()),
-                targetState());
+                targetState(), new InquiryReplyCapabilityRegistry(), channels);
     }
 
     /**
@@ -222,17 +222,21 @@ class InquiryPublishServiceTest {
     }
 
     @Test
-    void unsupportedChannelFailsClosedWithoutDispatch() {
-        // A work item on a channel with NO registered adapter — even though an adapter exists for CH_CODE.
+    void unauditedChannelIsRefusedWithAReasonRatherThanLeftPending() {
+        // A work item on a channel SellerOps has never audited a write path for — even though an
+        // adapter exists for CH_CODE. This used to sit at ACTION_PENDING indefinitely, which reads on
+        // every screen as "still working on it" for something that will never send. The capability
+        // answer is permanent until an audit changes it, so it fails with that reason recorded.
         UUID unsupported = seedChannel("UNSUPPORTED_CHANNEL");
         InquiryWorkItem wi = seedProposedWithDraft(org, unsupported);
 
         PublishStatusView v = withAdapter().confirmAndPublish(org, wi.getId(), user, "cmd1", approvedFingerprint());
 
-        assertThat(v.category()).isEqualTo(PublishOutcomeCategory.PENDING);
-        assertThat(adapter.published).isEmpty(); // fail closed: unsupported channel, nothing dispatched
-        assertThat(executions.findByWorkItemId(wi.getId()).orElseThrow().getStatus())
-                .isEqualTo(InquiryExecutionStatus.ACTION_PENDING);
+        assertThat(v.category()).isEqualTo(PublishOutcomeCategory.PERMANENT_FAILURE);
+        assertThat(adapter.published).isEmpty(); // fail closed: nothing dispatched
+        InquiryExecution ex = executions.findByWorkItemId(wi.getId()).orElseThrow();
+        assertThat(ex.getStatus()).isEqualTo(InquiryExecutionStatus.FAILED);
+        assertThat(ex.getFailureReason()).isEqualTo(PreSendCheck.WRITE_NOT_SUPPORTED);
     }
 
     @Test

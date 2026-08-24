@@ -57,6 +57,25 @@ public record PreSendCheck(boolean refused, String reason, boolean stateProven, 
     public static final String ALREADY_ANSWERED = "ALREADY_ANSWERED";
     /** The inquiry is no longer active for this org (dismissed, or gone from the source). */
     public static final String NOT_ANSWERABLE = "NOT_ANSWERABLE";
+    /**
+     * The target is not the seller's own data — a DEMO_SEED or VERIFY_FIXTURE row.
+     *
+     * <p>Such a row has an {@code external_id} shaped exactly like a real one, and the marketplace
+     * would be asked to answer whatever that string happens to name over there. The queue already
+     * refuses to carry synthetic work, so reaching this line means a row was manufactured after its
+     * approval was granted, or an approval predates the queue fence. Either way it is a refusal, not
+     * a warning: the send is the irreversible step and this is the last place before it.
+     */
+    public static final String SYNTHETIC_TARGET = "SYNTHETIC_TARGET";
+    /**
+     * SellerOps has no audited, implemented way to post a reply to this channel + source subtype.
+     *
+     * <p>Distinct from "no adapter registered", which is a deployment fact (execution disabled). This
+     * one is the capability answer: NAVER publishes answer endpoints SellerOps has not connected, and
+     * Cafe24's write contract has never been audited. Both must stop a dispatch, and a seller reading
+     * the outcome should see which of the two it was.
+     */
+    public static final String WRITE_NOT_SUPPORTED = "WRITE_NOT_SUPPORTED";
 
     /** The channel's INQUIRY collection is not currently fresh — the answer state may have moved. */
     public static final String STATE_NOT_FRESH = "STATE_NOT_FRESH";
