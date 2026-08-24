@@ -28,9 +28,16 @@ import org.springframework.stereotype.Component;
 @Component
 public class InquiryReplyCapabilityRegistry {
 
-    /** One audited answer. {@code sourceSubtype} is null for a channel with a single source. */
+    /**
+     * One audited answer. {@code sourceSubtype} is null for a channel with a single source.
+     *
+     * <p>{@code overwrites} records whether this channel's own write REPLACES an answer that is
+     * already there instead of refusing. It is a property of the vendor's contract, read off the
+     * vendored document, and it changes what SellerOps is allowed to do when it cannot prove the
+     * target's current state — see {@link #overwritesExistingAnswer}.
+     */
     public record Row(String channelCode, String sourceSubtype, InquiryReplyTransport transport,
-                      String reasonKo, String evidence) {
+                      boolean overwrites, String reasonKo, String evidence) {
     }
 
     /**
@@ -42,66 +49,97 @@ public class InquiryReplyCapabilityRegistry {
      * time. It has never been exercised against a real marketplace; "implemented" and "live-proven"
      * are different claims and only the first is made here.
      *
-     * <p>Both NAVER subtypes are PLATFORM_SUPPORTED_NOT_IMPLEMENTED. This row said UNSUPPORTED until
-     * 2026-08-24, and that was wrong in the direction that matters: it read as a NAVER limitation when
-     * the refusal is entirely ours. The Commerce API index vendored here
-     * ({@code docs/vendor/naver-commerce-api/llms.txt} §문의) lists an answer endpoint for each of the
-     * two subtypes — {@code PUT /v1/contents/qnas/&#123;questionId&#125;} for 상품 문의 and
-     * {@code POST /v1/pay-merchant/inquiries/&#123;inquiryNo&#125;/answer} for 고객 문의. What blocks the
-     * send is {@code NaverReadOnlyFenceTest}, which refuses {@code /external/v1/pay-merchant},
-     * {@code qnas/} and {@code /answer} by name, so no build of this product can post a NAVER answer.
-     * Implementing them is a later package; nothing here moves toward it.
+     * <p><b>Both NAVER subtypes are DIRECT_API as of Inquiry Workflow Completion v2 (2026-08-24),
+     * and they are two rows because they are two contracts.</b> The official per-endpoint documents
+     * are vendored here — {@code docs/vendor/naver-commerce-api/put-v1-contents-qnas-questionId.md}
+     * and {@code post-v1-pay-merchant-inquiries-inquiryNo-answer.md} — and what they show is exactly
+     * why "a generic NAVER write" would have been a fiction:
      *
-     * <p>CAFE24 is NEEDS_VERIFICATION and that is deliberate. The connector reads board 6 through
-     * {@code Cafe24BoardArticlesClient}, which has no write method; whether the Admin API exposes a
-     * board-comment write that a seller's OAuth scope would carry has not been audited. Rendering that
-     * as "unsupported" would be inventing a vendor limitation, which this repository does not do.
+     * <table>
+     *   <caption>The two answer contracts, side by side</caption>
+     *   <tr><th></th><th>상품 문의</th><th>고객 문의</th></tr>
+     *   <tr><td>call</td><td>{@code PUT /v1/contents/qnas/&#123;questionId&#125;}</td>
+     *       <td>{@code POST /v1/pay-merchant/inquiries/&#123;inquiryNo&#125;/answer}</td></tr>
+     *   <tr><td>body</td><td>{@code commentContent}</td><td>{@code answerComment}</td></tr>
+     *   <tr><td>target</td><td>{@code questionId} (int64)</td><td>{@code inquiryNo} (int64)</td></tr>
+     *   <tr><td>already answered</td><td><b>silently overwrites</b> — the vendor states a second call
+     *       "등록이 아닌 수정으로 동작"</td><td><b>refuses</b> with {@code ERR-NC-101010}</td></tr>
+     *   <tr><td>errors</td><td>plain 400/401/403/404/500</td><td>{@code ERR-NC-1010xx} inside 400</td></tr>
+     * </table>
      *
-     * <p><b>Re-audited 2026-08-24 (Inquiry Product Attribution &amp; Action Coverage v1) and nothing
-     * moved.</b> The audit is recorded because a repeated audit that changes no row is a result, not a
-     * skipped step:
+     * <p>The identifier spaces do not overlap and both are bare int64s, so an approval for one spent
+     * on the other would not fail — it would answer a different customer's question. That is the
+     * reason the subtype is bound into the approval and re-checked before the send, and the reason
+     * each adapter names its own subtype in {@code servesSubtype}.
+     *
+     * <p><b>The connector's read-only fence is untouched.</b> The answer clients live in
+     * {@code inquiry/publish/naver}, not in {@code connector/naver}, so
+     * {@code NaverReadOnlyFenceTest} still holds over the lane that runs on a SCHEDULE with no human
+     * in the turn. The write lane is the one that can never run without one.
+     *
+     * <p>CAFE24 is NEEDS_VERIFICATION and that is deliberate. See the re-audit below.
+     *
+     * <p><b>Re-audited 2026-08-24 (Inquiry Workflow Completion v2).</b>
      *
      * <ul>
-     *   <li><b>NAVER</b> — the two subtypes remain split and remain unimplemented. The vendored index
-     *       ({@code llms.txt} lines 53–55) names the method and path of all three answer endpoints,
-     *       and that is <em>all</em> it names. The per-endpoint pages that would carry the request
-     *       body, the required permission and the response semantics
-     *       ({@code put-v1-contents-qnas-questionId.md},
-     *       {@code post-v1-pay-merchant-inquiries-inquiryNo-answer.md}) are not vendored here and the
-     *       vendor host was not reachable from this environment when they were requested. An adapter
-     *       written against a path with a guessed body is not an implementation, so none was written.
-     *       This is the whole blocker: it is a missing document, not a missing decision.</li>
-     *   <li><b>CAFE24</b> — still unaudited, and now with a second fact beside it. The mall's stored
-     *       grant is {@code mall.read_community,mall.read_order} ({@code Cafe24ProductRow}), so even
-     *       if a board-comment write exists, this connection could not make it without a re-consent.
-     *       That is a fact about the grant, not about the API, and it is deliberately not promoted
-     *       into a claim that Cafe24 cannot be answered.</li>
-     *   <li><b>COUPANG</b> — unchanged: implemented, never live-proven.</li>
+     *   <li><b>NAVER</b> — moved PLATFORM_SUPPORTED_NOT_IMPLEMENTED → DIRECT_API for both subtypes,
+     *       on the strength of the vendored request contracts above and the adapters written against
+     *       them. Implemented is still not live-proven: neither has ever been exercised against a
+     *       real store, and no NAVER answer can leave the process without an armed live-run approval
+     *       id ({@code NaverAnswerLiveGuard}).</li>
+     *   <li><b>CAFE24</b> — the platform side is now CONFIRMED and the SellerOps side is not, which is
+     *       two different facts and the row records the weaker one. Confirmed from the official Admin
+     *       API reference ({@code docs/vendor/cafe24-admin-api/post-boards-articles-comments.md}):
+     *       {@code POST /api/v2/admin/boards/&#123;board_no&#125;/articles/&#123;article_no&#125;/comments}
+     *       exists, takes scope {@code mall.write_community}, and REQUIRES {@code content},
+     *       {@code writer} and {@code password}. Two things block it, and neither is a decision
+     *       waiting to be made:
+     *       <ol>
+     *         <li>A comment is not proven to BE a seller answer on board 6. SellerOps derives
+     *             ANSWERED from the article's {@code reply_status}, and nothing in this repository
+     *             shows that posting a comment moves it — comments are not collected
+     *             ({@code Cafe24ApiConnector#unsupportedScopes} names COMMENTS) and every one of the
+     *             905 collected board-6 articles carries {@code PENDING}. Settling it needs a READ of
+     *             the comments on an article whose status is 처리완료, which is a live marketplace
+     *             call and needs its own approval.</li>
+     *         <li>{@code writer} and {@code password} are required and SellerOps holds neither.
+     *             Hardcoding them is forbidden and inventing them would put a fabricated author on a
+     *             customer-visible reply.</li>
+     *       </ol>
+     *       The connection's own grant is a third, independent fact:
+     *       {@code mall.read_community,mall.read_order,mall.read_product} — read-only, so a write
+     *       would need the seller's re-consent even with everything above settled.</li>
+     *   <li><b>COUPANG · GMARKET</b> — unchanged: implemented, never live-proven.</li>
      * </ul>
      */
     private static final List<Row> ROWS = List.of(
-            new Row("COUPANG", null, InquiryReplyTransport.DIRECT_API,
+            new Row("COUPANG", null, InquiryReplyTransport.DIRECT_API, false,
                     "쿠팡 상품별 고객문의는 공식 답변 API로 등록할 수 있습니다.",
                     "CoupangInquiryReplyClient · CoupangChannelReplyAdapter (구현됨, 라이브 미실행)"),
             new Row("NAVER", InquirySourceSubtype.NAVER_PRODUCT_QNA,
-                    InquiryReplyTransport.PLATFORM_SUPPORTED_NOT_IMPLEMENTED,
-                    "네이버는 상품 문의 답변 등록 API를 제공하지만, SellerOps가 아직 연결하지 않았습니다.",
-                    "공식: PUT /v1/contents/qnas/{questionId} (llms.txt §문의) · "
-                            + "미구현: NaverReadOnlyFenceTest가 쓰기 경로 3종을 이름으로 거부 · "
-                            + "차단 사유: 요청 본문 계약 문서 미확보(추측 구현 금지)"),
+                    InquiryReplyTransport.DIRECT_API, true,
+                    "네이버 상품 문의는 공식 답변 등록 API로 보낼 수 있습니다.",
+                    "공식 계약 사본: put-v1-contents-qnas-questionId.md (body: commentContent) · "
+                            + "NaverProductQnaAnswerClient · NaverProductQnaReplyAdapter "
+                            + "(구현됨, 라이브 미실행) · 같은 questionId 재호출은 덮어쓰기"),
             new Row("NAVER", InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY,
-                    InquiryReplyTransport.PLATFORM_SUPPORTED_NOT_IMPLEMENTED,
-                    "네이버는 고객 문의 답변 등록 API를 제공하지만, SellerOps가 아직 연결하지 않았습니다.",
-                    "공식: POST /v1/pay-merchant/inquiries/{inquiryNo}/answer (llms.txt §문의) · "
-                            + "미구현: NaverReadOnlyFenceTest가 쓰기 경로 3종을 이름으로 거부 · "
-                            + "차단 사유: 요청 본문 계약 문서 미확보(추측 구현 금지)"),
-            new Row("GMARKET", null, InquiryReplyTransport.DIRECT_API,
+                    InquiryReplyTransport.DIRECT_API, false,
+                    "네이버 고객 문의는 공식 답변 등록 API로 보낼 수 있습니다.",
+                    "공식 계약 사본: post-v1-pay-merchant-inquiries-inquiryNo-answer.md "
+                            + "(body: answerComment) · NaverCustomerInquiryAnswerClient · "
+                            + "NaverCustomerInquiryReplyAdapter (구현됨, 라이브 미실행) · "
+                            + "중복 답변은 ERR-NC-101010으로 거부됨"),
+            new Row("GMARKET", null, InquiryReplyTransport.DIRECT_API, false,
                     "ESM+(지마켓/옥션) 문의는 구현된 답변 등록 경로로 보낼 수 있습니다.",
                     "EsmAnswerClient · EsmChannelReplyAdapter (구현됨, 실행 플래그 뒤에서만 등록)"),
-            new Row("CAFE24", null, InquiryReplyTransport.NEEDS_VERIFICATION,
-                    "카페24 문의 답변 등록 경로는 아직 확인하지 않았습니다. 지원하지 않는다는 뜻은 아닙니다.",
-                    "Cafe24BoardArticlesClient — 읽기 전용 · 벤더 쓰기 계약 미감사 · "
-                            + "현재 연결 scope는 mall.read_community,mall.read_order (쓰기 미포함)"));
+            new Row("CAFE24", null, InquiryReplyTransport.NEEDS_VERIFICATION, false,
+                    "카페24 게시판 댓글 등록 API는 확인했지만, 그 댓글이 문의 답변으로 처리되는지는 "
+                            + "아직 확인하지 않았습니다. 지원하지 않는다는 뜻은 아닙니다.",
+                    "플랫폼: POST /api/v2/admin/boards/{board_no}/articles/{article_no}/comments "
+                            + "(scope mall.write_community, 필수 content·writer·password) — 공식 사본 보관 · "
+                            + "미확정: board 6 댓글이 reply_status를 바꾸는지 근거 없음(댓글 미수집, "
+                            + "수집된 905건 전부 PENDING) · writer/password를 SellerOps가 보유하지 않음 · "
+                            + "현재 연결 scope는 mall.read_community,mall.read_order,mall.read_product (쓰기 미포함)"));
 
     /**
      * The audited answer for a channel + source subtype.
@@ -143,6 +181,38 @@ public class InquiryReplyCapabilityRegistry {
     public boolean isImplemented(String channelCode, String sourceSubtype) {
         return InquiryReplyTransport.DIRECT_API.name()
                 .equals(capability(channelCode, sourceSubtype).transport());
+    }
+
+    /**
+     * Whether sending to this channel + subtype would REPLACE an answer that is already there.
+     *
+     * <p>True for exactly one audited row today: NAVER 상품 문의, whose
+     * {@code PUT /v1/contents/qnas/&#123;questionId&#125;} the vendor describes as behaving "등록이
+     * 아닌 수정으로" on a second call. Coupang, ESM+ and NAVER 고객 문의 all refuse a duplicate
+     * instead, the last of them with its own code ({@code ERR-NC-101010}).
+     *
+     * <p>The distinction is not academic. Everywhere else, sending on a stale reading of "still
+     * unanswered" risks a SECOND answer beside the first — visible, embarrassing, recoverable. Here
+     * it risks REPLACING what a person typed in the NAVER console, with nothing left to recover from.
+     * So this is the one case where SellerOps refuses rather than warns when it cannot prove the
+     * target's current state ({@code PreSendCheck#OVERWRITE_WITHOUT_PROOF}).
+     *
+     * <p>A channel nobody audited answers false — but it cannot dispatch at all, so the value never
+     * decides anything on its own.
+     */
+    public boolean overwritesExistingAnswer(String channelCode, String sourceSubtype) {
+        if (channelCode == null) {
+            return false;
+        }
+        return ROWS.stream()
+                .filter(r -> r.channelCode().equals(channelCode)
+                        && Objects.equals(r.sourceSubtype(), sourceSubtype))
+                .findFirst()
+                .or(() -> ROWS.stream()
+                        .filter(r -> r.channelCode().equals(channelCode) && r.sourceSubtype() == null)
+                        .findFirst())
+                .map(Row::overwrites)
+                .orElse(false);
     }
 
     /** Every audited row, for a capability screen. */

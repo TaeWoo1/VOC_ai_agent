@@ -173,6 +173,44 @@ class InquiryPreSendCheckTest {
     }
 
     @Test
+    @DisplayName("덮어쓰는 채널에서는 '확인 불가'가 경고가 아니라 거절이다 — 남의 답변을 지울 수 있으므로")
+    void anUnprovenStateBlocksASendThatWouldOverwrite() {
+        UUID naver = naverChannel();
+        InquiryWorkItem wi = seedOn(naver, "naver-qna:676568657",
+                InquirySourceSubtype.NAVER_PRODUCT_QNA);
+        RecordingAdapter qna = new RecordingAdapter(naverCode(), InquirySourceSubtype.NAVER_PRODUCT_QNA);
+
+        serviceFor(qna, PreSendCheck.unproven(PreSendCheck.STATE_NOT_FRESH))
+                .confirmAndPublish(org, wi.getId(), user, "cmd-overwrite", fingerprint());
+
+        // PUT /v1/contents/qnas/{questionId} replaces rather than refuses. Sending on a stale reading
+        // of "still unanswered" would delete whatever a person typed in the NAVER console.
+        assertThat(qna.published).as("nothing may reach the marketplace").isEmpty();
+        assertThat(executions.findByWorkItemId(wi.getId()).orElseThrow().getFailureReason())
+                .isEqualTo(PreSendCheck.OVERWRITE_WITHOUT_PROOF);
+    }
+
+    @Test
+    @DisplayName("같은 '확인 불가'라도 거절하는 채널에서는 여전히 사람의 판단에 맡긴다")
+    void theSameUnprovenStateStillSendsWhereADuplicateIsRefused() {
+        UUID naver = naverChannel();
+        InquiryWorkItem wi = seedOn(naver, "naver-payinq:322684048",
+                InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY);
+        RecordingAdapter customer =
+                new RecordingAdapter(naverCode(), InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY);
+
+        PublishStatusView view =
+                serviceFor(customer, PreSendCheck.unproven(PreSendCheck.STATE_NOT_FRESH))
+                        .confirmAndPublish(org, wi.getId(), user, "cmd-dupe-safe", fingerprint());
+
+        // 고객 문의 answers a duplicate with ERR-NC-101010. The worst case is a refusal, not a
+        // deletion, so the seller's own approval still decides.
+        assertThat(customer.published).hasSize(1);
+        assertThat(view.presendStateProven()).isFalse();
+        assertThat(view.presendNote()).isEqualTo(PreSendCheck.STATE_NOT_FRESH);
+    }
+
+    @Test
     @DisplayName("an inquiry with no marketplace handle cannot be approved at all")
     void noHandleIsRefusedAtApproval() {
         InquiryWorkItem wi = seed();
@@ -233,6 +271,30 @@ class InquiryPreSendCheckTest {
                 fixed(answer), new InquiryReplyCapabilityRegistry(), channels);
     }
 
+    private static String naverCode() {
+        return "NAVER";
+    }
+
+    private UUID naverChannel() {
+        Channel c = new Channel();
+        c.setCode(naverCode());
+        c.setNameKo("네이버");
+        c.setStatus(ChannelStatus.AVAILABLE);
+        c.setSupportsInquiry(true);
+        c.setSupportsReview(false);
+        c.setSupportsOrder(false);
+        c.setSupportsSales(false);
+        c.setSupportsProduct(false);
+        c.setSortOrder(1);
+        return channels.save(c).getId();
+    }
+
+    private InquiryPublishService serviceFor(ChannelReplyAdapter only, PreSendCheck answer) {
+        return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
+                verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of(only)),
+                fixed(answer), new InquiryReplyCapabilityRegistry(), channels);
+    }
+
     private InquiryPublishService serviceWithoutAdapter() {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of()),
@@ -253,17 +315,21 @@ class InquiryPreSendCheckTest {
     }
 
     private InquiryWorkItem seed() {
+        return seedOn(channelId, EXTERNAL_ID, null);
+    }
+
+    private InquiryWorkItem seedOn(UUID channel, String externalId, String subtype) {
         Inquiry q = new Inquiry();
         q.setOrgId(org);
-        q.setChannelId(channelId);
+        q.setChannelId(channel);
         q.setTitle("문의 제목");
         q.setBody("문의 본문");
         q.setStatus("UNANSWERED");
-        q.setExternalId(EXTERNAL_ID);
-        // The fixture channel has exactly one inquiry resource, so the seeded subtype is null — the
-        // same shape a Coupang row really has. subtypeChanged() mutates it to a named resource, which
-        // is the mismatch the check exists for.
-        q.setSourceSubtype(null);
+        q.setExternalId(externalId);
+        // The default fixture channel has exactly one inquiry resource, so its seeded subtype is null
+        // — the same shape a Coupang row really has. subtypeChanged() mutates it to a named resource,
+        // which is the mismatch the check exists for.
+        q.setSourceSubtype(subtype);
         q.setOperationalState(InquiryOperationalState.ACTIVE);
         q.setReceivedAt(Instant.parse("2026-08-20T00:00:00Z"));
         UUID inquiryId = inquiries.save(q).getId();
@@ -272,7 +338,7 @@ class InquiryPreSendCheckTest {
         wi.setOrgId(org);
         wi.setInquiryId(inquiryId);
         wi.setSellerAccountId(UUID.randomUUID());
-        wi.setChannelId(channelId);
+        wi.setChannelId(channel);
         wi.setPhase(InquiryWorkItemPhase.PROPOSED);
         wi = workItems.save(wi);
 
@@ -293,10 +359,26 @@ class InquiryPreSendCheckTest {
     /** Records every publish so "nothing was sent" is an observation, not an absence of assertion. */
     static final class RecordingAdapter implements ChannelReplyAdapter {
         final List<ReplyPublishCommand> published = new ArrayList<>();
+        private final String code;
+        private final String subtype;
+
+        RecordingAdapter() {
+            this(CH_CODE, null);
+        }
+
+        RecordingAdapter(String code, String subtype) {
+            this.code = code;
+            this.subtype = subtype;
+        }
 
         @Override
         public String channelCode() {
-            return CH_CODE;
+            return code;
+        }
+
+        @Override
+        public boolean servesSubtype(String sourceSubtype) {
+            return java.util.Objects.equals(subtype, sourceSubtype);
         }
 
         @Override

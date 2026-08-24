@@ -2,6 +2,7 @@ package com.sellerops.common;
 
 import io.sentry.Sentry;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +22,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<Map<String, Object>> handleApi(ApiException ex) {
-        return body(ex.getStatus(), ex.getMessage());
+        return body(ex.getStatus(), ex.getCode(), ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -85,11 +86,20 @@ public class GlobalExceptionHandler {
     }
 
     private ResponseEntity<Map<String, Object>> body(HttpStatus status, String message) {
-        return ResponseEntity.status(status).body(Map.of(
-                "timestamp", Instant.now().toString(),
-                "status", status.value(),
-                "error", status.getReasonPhrase(),
-                "message", message == null ? "" : message
-        ));
+        return body(status, null, message);
+    }
+
+    private ResponseEntity<Map<String, Object>> body(HttpStatus status, String code, String message) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("timestamp", Instant.now().toString());
+        payload.put("status", status.value());
+        payload.put("error", status.getReasonPhrase());
+        payload.put("message", message == null ? "" : message);
+        // Only present when the failure has a name the caller is meant to branch on, so no existing
+        // reader sees a new field and no new reader has to guess whether the absence means anything.
+        if (code != null) {
+            payload.put("code", code);
+        }
+        return ResponseEntity.status(status).body(payload);
     }
 }

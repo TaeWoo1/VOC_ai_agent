@@ -13,6 +13,7 @@ import com.sellerops.ingest.map.RowError;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.inquiry.Inquiry;
+import com.sellerops.inquiry.InquiryProductBinding;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import com.sellerops.order.OrderDailySummary;
@@ -260,6 +261,8 @@ public class IngestionService {
                 entity.setChannelId(channelId);
                 entity.setSellerAccountId(sellerAccountId);
                 entity.setProductId(productId);
+                entity.setProductBinding(
+                        productId == null ? null : InquiryProductBinding.SOURCE_EXACT.name());
                 entity.setSourceSubtype(row.sourceSubtype());
                 entity.setSourceProductRef(sourceProductRef(row));
                 // Buyer PII (row.author()) is intentionally NOT persisted.
@@ -301,11 +304,18 @@ public class IngestionService {
      * either matched exactly or corrected by hand, and a later read is not evidence against either.
      * The source ref is always refreshed, because it is a verbatim record of what the source just
      * said rather than a judgement about it.
+     *
+     * <p><b>A person's answer is not overwritten either.</b> A {@code USER_CONFIRMED} binding fails
+     * the null check above and is left exactly where it is, even when the source later supplies an
+     * identifier that resolves elsewhere. That disagreement stays visible — {@code source_product_ref}
+     * sits beside {@code product_id} and says what the channel claimed — rather than being settled by
+     * whichever collection ran last.
      */
     private void repairAttribution(Inquiry existing, CanonicalInquiry row, UUID productId) {
         existing.setSourceProductRef(sourceProductRef(row));
         if (existing.getProductId() == null && productId != null) {
             existing.setProductId(productId);
+            existing.setProductBinding(InquiryProductBinding.SOURCE_EXACT.name());
         }
     }
 

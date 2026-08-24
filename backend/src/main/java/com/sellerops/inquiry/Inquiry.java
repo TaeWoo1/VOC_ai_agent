@@ -118,6 +118,43 @@ public class Inquiry extends BaseEntity {
     private String sourceProductRef;
 
     /**
+     * How {@link #productId} was decided — {@link InquiryProductBinding}, or null when nothing is
+     * bound.
+     *
+     * <p>Kept as a string rather than an enum column so an unrecognized value from a future
+     * migration reads as "not one of the ones I know" instead of blowing up a whole page of the
+     * queue. Read through {@link #productBinding()}.
+     */
+    @Column(name = "product_binding", length = 16)
+    private String productBinding;
+
+    /** When the current binding was made. Null for bindings older than the column. */
+    @Column(name = "product_bound_at")
+    private Instant productBoundAt;
+
+    /**
+     * Who made the current binding, for a {@link InquiryProductBinding#USER_CONFIRMED} one.
+     *
+     * <p>Null for a source match — nobody made it — and the full history of who changed what lives in
+     * {@code inquiry_product_binding_events} rather than here, because this column only ever holds
+     * the latest answer.
+     */
+    @Column(name = "product_bound_by")
+    private UUID productBoundBy;
+
+    /** The current binding kind, or null when the stored value is absent or unrecognized. */
+    public InquiryProductBinding productBinding() {
+        if (productBinding == null) {
+            return null;
+        }
+        try {
+            return InquiryProductBinding.valueOf(productBinding);
+        } catch (IllegalArgumentException unknown) {
+            return null;
+        }
+    }
+
+    /**
      * The answer the seller already published on the platform, when the source carries it.
      *
      * <p>Null for every source whose API returns only an answered flag, and for every row collected

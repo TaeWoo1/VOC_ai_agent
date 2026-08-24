@@ -156,6 +156,25 @@ public record NaverInquiryCursor(Lane qna, Lane customer, String active, boolean
     }
 
     /**
+     * A one-off read window over an explicit span, for a caller that is not sweeping.
+     *
+     * <p>Send-time verification needs to re-read exactly one inquiry, and the resources have no
+     * by-id read: the only way to see whether a specific 문의 now carries an answer is to page the
+     * window it lives in. Exposed here rather than re-formatted at the call site because the two
+     * lanes take different date shapes ({@code 상품 문의} an offset date-time, {@code 고객 문의} a KST
+     * date) and a second copy of that rule would drift from this one without anything failing.
+     *
+     * <p>Reads only — it opens no window a routine sweep would not already open, and it moves no
+     * stored cursor.
+     */
+    public static Lane readWindow(Instant from, Instant to, String source) {
+        return SOURCE_CUSTOMER.equals(source)
+                ? Lane.starting(from.atZone(KST).toLocalDate().toString(),
+                                to.atZone(KST).toLocalDate().toString())
+                : Lane.starting(qnaInstant(from), qnaInstant(to));
+    }
+
+    /**
      * How far behind the routine cursor has fallen, for the restart warning. Null when it has not.
      *
      * <p><b>Both lanes are inspected, and the answer is the worse of the two.</b> This used to read

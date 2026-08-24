@@ -5,6 +5,7 @@ import type {
   KnowledgeSourceView,
   OverviewResponse,
   ProductKnowledgeView,
+  InquiryProductBindingView,
   ProductSummaryView,
   CredentialDiagnosisView,
   AccountDashboardSummary,
@@ -669,6 +670,26 @@ export const api = {
     const { data } = await http.get<InquiryDetail>(`/api/inquiries/${workItemId}`);
     return data;
   },
+  /**
+   * Bind this inquiry to a canonical product the seller picked.
+   *
+   * `override` is required only to replace an attribution the CHANNEL made; without it that case is
+   * a 409 carrying `code: "SOURCE_BINDING_EXISTS"`, which the caller turns into a second question
+   * rather than a silent overwrite. Nothing here proposes a product — the id comes from the seller's
+   * own search.
+   */
+  async bindInquiryProduct(
+    workItemId: string,
+    productId: string,
+    override = false,
+  ): Promise<InquiryProductBindingView> {
+    const { data } = await http.post<InquiryProductBindingView>(
+      `/api/inquiries/${encodeURIComponent(workItemId)}/product`,
+      { productId, override },
+    );
+    return data;
+  },
+
   // Mutating: seller-initiated proposal generation (OPEN → PROPOSED). No mock.
   // The caller classifies 404 (unavailable) / 409 (phase changed) / 503
   // (generation unavailable) from the thrown axios error.

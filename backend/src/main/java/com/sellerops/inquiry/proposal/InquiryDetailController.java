@@ -1,6 +1,9 @@
 package com.sellerops.inquiry.proposal;
 
 import com.sellerops.auth.AuthPrincipal;
+import com.sellerops.inquiry.binding.InquiryProductBindingService;
+import com.sellerops.inquiry.binding.dto.BindProductRequest;
+import com.sellerops.inquiry.binding.dto.InquiryProductBindingView;
 import com.sellerops.inquiry.proposal.dto.InquiryDetail;
 import com.sellerops.inquiry.proposal.dto.ProposalResult;
 import com.sellerops.inquiry.publish.InquiryPublishService;
@@ -12,6 +15,7 @@ import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.draft.InquiryDraftComposer;
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.draft.dto.GeneratedDraftView;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -39,13 +43,39 @@ public class InquiryDetailController {
     private final InquiryReplyDraftService drafts;
     private final InquiryPublishService publish;
     private final InquiryDraftComposer composer;
+    private final InquiryProductBindingService bindings;
 
     public InquiryDetailController(InquiryProposalService service, InquiryReplyDraftService drafts,
-                                   InquiryPublishService publish, InquiryDraftComposer composer) {
+                                   InquiryPublishService publish, InquiryDraftComposer composer,
+                                   InquiryProductBindingService bindings) {
         this.service = service;
         this.drafts = drafts;
         this.publish = publish;
         this.composer = composer;
+        this.bindings = bindings;
+    }
+
+    /** The inquiry's current product attribution and how it was decided. */
+    @GetMapping("/{workItemId}/product")
+    public InquiryProductBindingView productBinding(@AuthenticationPrincipal AuthPrincipal principal,
+                                                    @PathVariable UUID workItemId) {
+        return bindings.current(principal.orgId(), workItemId);
+    }
+
+    /**
+     * Bind this inquiry to a product the seller picked on screen.
+     *
+     * <p>The product id comes from the seller's own search — nothing here proposes, ranks, or infers
+     * one from the inquiry text. Replacing an attribution the CHANNEL made is a 409 carrying {@code
+     * SOURCE_BINDING_EXISTS} unless {@code override} is set, so the second confirmation is the
+     * seller's and not this endpoint's assumption.
+     */
+    @PostMapping("/{workItemId}/product")
+    public InquiryProductBindingView bindProduct(@AuthenticationPrincipal AuthPrincipal principal,
+                                                 @PathVariable UUID workItemId,
+                                                 @Valid @RequestBody BindProductRequest request) {
+        return bindings.bind(principal.orgId(), workItemId, request.productId(), request.override(),
+                principal.userId());
     }
 
     /** Seller-only detail (title + details), org-scoped. */

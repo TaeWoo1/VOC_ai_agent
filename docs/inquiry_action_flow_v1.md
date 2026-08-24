@@ -28,10 +28,16 @@ WRITE tool은 없고, `operatorToolRegistry.test.ts`가 등록 자체를 거부�
 | 채널 | source subtype | transport | 근거 |
 |---|---|---|---|
 | COUPANG | (단일) | **`DIRECT_API`** | `CoupangInquiryReplyClient` → `POST …/onlineInquiries/{id}/replies` · `CoupangChannelReplyAdapter` — **구현됨, 라이브 미실행** |
-| NAVER | `NAVER_PRODUCT_QNA` | **`PLATFORM_SUPPORTED_NOT_IMPLEMENTED`** | 공식 `PUT /v1/contents/qnas/{questionId}` (llms.txt §문의) · 막는 것은 `NaverReadOnlyFenceTest` — 쓰기 경로 3종(`/pay-merchant`, `qnas/`, `/answer`)을 **이름으로** 거부 |
-| NAVER | `NAVER_CUSTOMER_INQUIRY` | **`PLATFORM_SUPPORTED_NOT_IMPLEMENTED`** | 공식 `POST /v1/pay-merchant/inquiries/{inquiryNo}/answer` · 같은 fence |
+| NAVER | `NAVER_PRODUCT_QNA` | **`DIRECT_API`** (2026-08-24 승격) | 공식 계약 사본 `docs/vendor/naver-commerce-api/put-v1-contents-qnas-questionId.md` — `PUT /v1/contents/qnas/{questionId}`, body **`commentContent`** · `NaverProductQnaAnswerClient` · `NaverProductQnaReplyAdapter` — **구현됨, 라이브 미실행** · ⚠ 같은 questionId 재호출은 **덮어쓰기** |
+| NAVER | `NAVER_CUSTOMER_INQUIRY` | **`DIRECT_API`** (2026-08-24 승격) | 공식 계약 사본 `post-v1-pay-merchant-inquiries-inquiryNo-answer.md` — `POST /v1/pay-merchant/inquiries/{inquiryNo}/answer`, body **`answerComment`** · `NaverCustomerInquiryAnswerClient` · `NaverCustomerInquiryReplyAdapter` — **구현됨, 라이브 미실행** · 중복은 `ERR-NC-101010`으로 **거부** |
 | GMARKET (ESM+) | (단일) | **`DIRECT_API`** | `EsmAnswerClient` · `EsmChannelReplyAdapter` — **구현됨, 라이브 미실행**. 2026-08-24 추가: 구현된 adapter가 있는데 감사 행이 없었다(누락) |
-| CAFE24 | (단일) | **`NEEDS_VERIFICATION`** | `Cafe24BoardArticlesClient` 읽기 전용 · **벤더 쓰기 계약 미감사** · 현재 연결 scope `mall.read_community,mall.read_order`(쓰기 미포함) |
+| CAFE24 | (단일) | **`NEEDS_VERIFICATION`** | 플랫폼은 확인됨 — 공식 사본 `docs/vendor/cafe24-admin-api/post-boards-articles-comments.md`: `POST /api/v2/admin/boards/{board_no}/articles/{article_no}/comments`, scope `mall.write_community`, **필수 `content`·`writer`·`password`** · 미확정 ①board 6 댓글이 `reply_status`를 바꾸는지 근거 없음 ②`writer`/`password`를 SellerOps가 보유하지 않음 · 현재 연결 scope `mall.read_community,mall.read_order,mall.read_product`(쓰기 미포함) |
+
+> **⚠ 2026-08-24 갱신 (Inquiry Workflow Completion v2).** NAVER 두 행이 위 표에서 이미 `DIRECT_API`로
+> 승격됐다. 아래 문단은 그 직전 상태의 기록이며, 막고 있던 것이 **결정이 아니라 문서**였다는 진단이
+> 옳았음을 증명한다 — 문서를 확보하자 그날 안에 구현됐다. 두 계약이 실제로 얼마나 다른지(본문 필드 이름,
+> 중복 답변 시 덮어쓰기 vs 거부)와 그로부터 나온 새 전송 직전 규칙은
+> `docs/inquiry_workflow_completion_v2.md` §3–§4.
 
 **2026-08-24 재감사(Inquiry Product Attribution & Action Coverage v1) — 아무 행도 움직이지 않았다.**
 NAVER 두 subtype이 여전히 미구현인 이유는 결정이 아니라 **문서**다: vendored `llms.txt`는 세 답변

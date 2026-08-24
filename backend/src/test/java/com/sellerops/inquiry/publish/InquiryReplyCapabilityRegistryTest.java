@@ -27,22 +27,23 @@ class InquiryReplyCapabilityRegistryTest {
     }
 
     @Test
-    @DisplayName("both NAVER subtypes name the platform's endpoint AND our own fence — never 'unsupported'")
-    void naverIsFencedByUsNotByTheVendor() {
+    @DisplayName("두 NAVER subtype은 서로 다른 계약으로 구현됐고, 그 차이가 근거에 적혀 있다")
+    void naverSubtypesAreImplementedSeparately() {
         for (String subtype : new String[]{
                 InquirySourceSubtype.NAVER_PRODUCT_QNA, InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY}) {
             var view = registry.capability("NAVER", subtype);
-            assertThat(view.transport())
-                    .isEqualTo(InquiryReplyTransport.PLATFORM_SUPPORTED_NOT_IMPLEMENTED.name());
-            // Both halves have to be on the record: the endpoint NAVER publishes, and the fence that
-            // is the actual reason nothing is sent. Either half alone is a misleading answer.
-            assertThat(view.evidence()).contains("NaverReadOnlyFenceTest");
+            assertThat(view.transport()).isEqualTo(InquiryReplyTransport.DIRECT_API.name());
             assertThat(view.sourceSubtype()).isEqualTo(subtype);
+            // Implemented is not live-proven, and the row must not let the two be read as one claim.
+            assertThat(view.evidence()).contains("라이브 미실행");
         }
-        assertThat(registry.capability("NAVER", InquirySourceSubtype.NAVER_PRODUCT_QNA).evidence())
-                .contains("PUT /v1/contents/qnas/{questionId}");
-        assertThat(registry.capability("NAVER", InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY).evidence())
-                .contains("POST /v1/pay-merchant/inquiries/{inquiryNo}/answer");
+        // The two bodies are different field names on different endpoints. A row that did not say so
+        // would make "a generic NAVER write" look like a thing that exists.
+        var qna = registry.capability("NAVER", InquirySourceSubtype.NAVER_PRODUCT_QNA);
+        var customer = registry.capability("NAVER", InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY);
+        assertThat(qna.evidence()).contains("commentContent").contains("덮어쓰기");
+        assertThat(customer.evidence()).contains("answerComment").contains("ERR-NC-101010");
+        assertThat(qna.evidence()).isNotEqualTo(customer.evidence());
     }
 
     @Test

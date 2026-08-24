@@ -30,6 +30,12 @@ import java.util.UUID;
  * {@code <br /> [ Original Message ] <p>…}. The stored row is untouched; the reduction happens here,
  * on the way out, so the seller and the drafter both read the question a person asked.
  *
+ * <p>{@code productBinding} says HOW {@code productId} was decided — {@code SOURCE_EXACT} (the
+ * channel's own identifier matched a listing) or {@code USER_CONFIRMED} (a person picked it on
+ * screen), null when nothing is bound. The screen shows the difference because the two are checkable
+ * in different ways, and because a seller reading a grounded draft deserves to know whether the
+ * product it was grounded in came from the channel or from a colleague.
+ *
  * <p>{@code answerStateProven} / {@code answerStateNote} say whether SellerOps can currently prove
  * this inquiry is still unanswered on the marketplace — see
  * {@link com.sellerops.inquiry.publish.PreSendCheck}. They are on the DETAIL, not only on the publish
@@ -54,6 +60,7 @@ public record InquiryDetail(
         ReplyDraftView draft,
         UUID productId,
         String productName,
+        String productBinding,
         String sourceSubtype,
         Boolean answerStateProven,
         String answerStateNote,

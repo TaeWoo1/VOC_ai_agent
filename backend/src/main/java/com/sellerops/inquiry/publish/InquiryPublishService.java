@@ -328,7 +328,16 @@ public class InquiryPublishService {
         }
         // Everything the approval asserted still holds. What remains is whether the answer state we
         // just read is CURRENT — which is a property of the channel, not of this row.
-        return targetState.read(orgId, workItem.getChannelId());
+        PreSendCheck state = targetState.read(orgId, workItem.getChannelId());
+        // Unproven is normally a warning the human accepts before pressing, not a veto. It is a veto
+        // on a channel whose write REPLACES an existing answer rather than refusing beside it: there,
+        // sending on a stale reading can delete a person's own words instead of duplicating ours.
+        if (!state.stateProven()
+                && capabilities.overwritesExistingAnswer(
+                        channelCode(workItem.getChannelId()), inquiry.getSourceSubtype())) {
+            return PreSendCheck.refuse(PreSendCheck.OVERWRITE_WITHOUT_PROOF);
+        }
+        return state;
     }
 
     /** The channel's stable code, or null when the channel row is gone (which reads as unsupported). */

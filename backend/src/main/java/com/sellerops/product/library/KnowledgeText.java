@@ -1,12 +1,8 @@
 package com.sellerops.product.library;
 
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * Splitting a document into quotable passages, and scoring a passage against a question.
@@ -16,12 +12,19 @@ import java.util.Set;
  * reproducible from the same corpus and the same question, or "근거" is a decoration. Everything here
  * is a static function of its inputs.
  *
- * <p><b>Why character bigrams and not a word index.</b> Korean attaches particles to nouns — 사용법,
- * 사용법을, 사용법은 are one word to a reader and three tokens to any whitespace tokenizer, so a
- * word-boundary match answers "사용법을 알려줘" with nothing. Overlapping 2-character shingles match
- * across the particle without needing a morphological analyzer, a dictionary, or an extension. It is
- * a lexical matcher and it is described as one: it finds passages that share wording, and it does not
- * understand them.
+ * <p><b>Words, matched by prefix, and no morphological analyzer.</b> Korean attaches particles to
+ * nouns — 사용법, 사용법을, 사용법은 are one word to a reader and three tokens to any whitespace
+ * tokenizer — so a query word matches a passage through the longest PREFIX of it the passage
+ * contains. The corpus decides where the stem ends, which needs no dictionary and no extension, and
+ * unlike the 2-character shingles this replaced it cannot match a word by straddling the gap between
+ * two others. It is a lexical matcher and it is described as one: it finds passages that share
+ * wording, and it does not understand them.
+ *
+ * <p><b>Ranking and absence are different questions.</b> {@link Weighing#askableRatio} answers "can
+ * this library speak to this question at all"; {@link Assessment#coverage} answers "which passage
+ * covers it best". Collapsing them into one number is what produced the 2026-08-24 inversion recorded
+ * on {@link QueryWords}, where every answerable question returned nothing and every unanswerable one
+ * returned a citation scored 1.00.
  *
  * <p><b>Why no vector store.</b> Retrieval here is always scoped to ONE product, whose corpus is a
  * handful of documents. At that size an approximate-nearest-neighbour index adds operational surface
@@ -124,179 +127,164 @@ public final class KnowledgeText {
         return sb.toString();
     }
 
-    /** Overlapping 2-character shingles of a normalized string. A 1-character input yields itself. */
-    static Set<String> bigrams(String normalized) {
-        Set<String> grams = new LinkedHashSet<>();
-        if (normalized.isEmpty()) {
-            return grams;
-        }
-        if (normalized.length() == 1) {
-            grams.add(normalized);
-            return grams;
-        }
-        for (int i = 0; i + 2 <= normalized.length(); i++) {
-            grams.add(normalized.substring(i, i + 2));
-        }
-        return grams;
-    }
 
     /**
-     * How much of the QUESTION this passage covers, in [0,1] — unweighted.
+     * How much of {@code word} the text contains, counted from the word's first character.
      *
-     * <p>Asymmetric on purpose. Jaccard would punish a long, correct passage for containing more than
-     * the question asked, which is what a good answer does; the useful measure is "how much of what
-     * was asked appears here". A passage that covers every shingle of the question scores 1 whether
-     * it is two lines or ten.
+     * <p><b>The corpus decides where the stem ends, and a particle decides where it may end.</b>
+     * Korean attaches particles to the tail of a noun — 폭이, 폭은, 폭의 are one word to a reader — so
+     * the part of a query word that can match is a PREFIX of it. Rather than strip a suffix with a
+     * morphological guess, this asks the text how much of the word it has. But a prefix alone is not
+     * enough: 방수 shares its first syllable with 방법, and counting that is how a molding note came
+     * back as evidence about waterproofing. So a PARTIAL match counts only when what was left over is
+     * a particle — 폭+이 counts, 설치+는 counts, 방+수 does not.
      *
-     * <p><b>Kept, but not what retrieval uses.</b> Plain coverage lets the filler of a Korean question
-     * outvote its topic — see {@link #weightsFor}. It remains here because it is the definition the
-     * weighted form specialises, and testing both is how the difference stays visible.
+     * <p>Substring containment, not word-boundary matching, because the passage side is stored without
+     * spacing ({@link #normalize}) and because Korean compounds are written closed — a note about
+     * 재부착 answers a question about 부착, which is a whole-word match.
+     *
+     * @return the length of the longest usable prefix of {@code word} in {@code text}; 0 for none
      */
-    public static double score(String normalizedQuery, String normalizedContent) {
-        Set<String> queryGrams = bigrams(normalizedQuery);
-        if (queryGrams.isEmpty()) {
-            return 0.0;
+    static int prefixMatch(String word, String text) {
+        if (word.isEmpty() || text.isEmpty()) {
+            return 0;
         }
-        Set<String> contentGrams = bigrams(normalizedContent);
-        int hits = 0;
-        for (String gram : queryGrams) {
-            if (contentGrams.contains(gram)) {
-                hits++;
+        for (int length = Math.min(word.length(), text.length()); length >= 1; length--) {
+            if ((length == word.length() || QueryWords.isParticleTail(word.substring(length)))
+                    && text.contains(word.substring(0, length))) {
+                return length;
             }
         }
-        return (double) hits / queryGrams.size();
+        return 0;
     }
 
     /**
      * The question, weighed against what this product's library actually says.
      *
-     * <p><b>One question, two things to measure, and they are not the same.</b> Ranking asks "which
-     * passage best covers the topic"; absence asks "is this question even about something written
-     * here". A single number cannot answer both, and every attempt to make it try failed on a live
-     * read:
+     * <p><b>Two questions, and they are measured in different units on purpose.</b> The failure this
+     * replaced came from making one number answer both "which passage is best" and "is this question
+     * answerable here". The second is a threshold, and a threshold on a ratio moves whenever its
+     * denominator moves. It did move: the denominator was the part of the question the corpus had
+     * words for, so a library that knew LESS about a question produced a HIGHER score for the same
+     * passage, and a question naming the product scored 1.00 against a description answering none
+     * of it.
      *
      * <ul>
-     *   <li><b>Plain coverage ranks by filler.</b> Asked "이 상품 사용 방법을 고객에게 어떻게 설명하면
-     *       되나요", it put the 교환/반품 정책 above the 사용법 note (0.24 vs 0.14) — "상품", "고객"
-     *       and "방법" are in both, and a Korean question is mostly grammar.</li>
-     *   <li><b>Weighting by rarity and dropping the unwritten shingles</b> fixed the ranking and broke
-     *       absence: "이 상품 배터리 충전 시간" scored 0.5 against a cable-molding note, because with
-     *       배터리 and 충전 dropped, all that was left to measure was 상품 and 시간 — and the note
-     *       happens to say "24시간".</li>
-     *   <li><b>Keeping them in the denominator</b> fixed absence and broke recall: a real question
-     *       carries nine or ten shingles of pure grammar, so every honest question also fell under the
-     *       floor.</li>
+     *   <li><b>Absence</b> — {@link Weighing#askableRatio} — is counted in CHARACTERS of the question's
+     *       own content words: how much of what was asked does this library have any words for. No
+     *       rarity weighting, because rarity is a statement about which passage, and absence is a
+     *       statement about the question. "방수 되나요?" against a molding library is 0.0 whether the
+     *       library holds one note or ten.</li>
+     *   <li><b>Ranking</b> — {@link Assessment#coverage} — is rarity-weighted, and divides by what the
+     *       BEST passage of this library manages for each word rather than by the raw question. A
+     *       passage that covers everything reachable scores 1.0; the denominator is identical for
+     *       every passage of one search, so no passage can ever be admitted by shrinking it.</li>
      * </ul>
      *
-     * <p>So both are reported. {@link Weighing#topicCoverage} ranks over the ASKABLE part of the
-     * question — the shingles the library has words for at all — and {@link Weighing#askableRatio}
-     * says how much of the question that part was. A question the library does not cover has a low
-     * askable ratio no matter which passage it is compared to, which is exactly the property absence
-     * detection needs and ranking must not have.
+     * <p><b>What a word is worth for ranking.</b> {@code ln((N + 1) / (df + 0.5))} over this product's
+     * own passages: a word in every passage distinguishes nothing and is worth almost nothing, a word
+     * in one passage is worth the most. Words no passage has are not weighted at all — they have no
+     * passage to be matched in, and their whole contribution is to the absence count above.
      *
-     * <p>Rarity is {@code ln(1 + N/(df + 0.5))} over this product's own passages — ordinary inverse
-     * document frequency, over a corpus small enough to compute exactly. The alternative was a Korean
-     * stopword list: a lexicon to maintain, and wrong for any seller whose products make its "common"
-     * words meaningful.
-     *
-     * <p><b>What this is not.</b> A lexical matcher finds passages that share wording. It does not
-     * understand the question, and a question phrased entirely in words the seller never used will not
-     * reach a passage that answers it. That limit is why the caller names WHICH document it is
-     * quoting instead of absorbing the text into its own voice.
+     * @param query            the customer's question, raw
+     * @param normalizedCorpus every passage's searchable text, {@link #normalize}d
+     * @param productName      this product's name — dropped from the question for the same reason
+     *                         {@code 상품} is, and unknowable from a static list
      */
-    public static Weighing weigh(String normalizedQuery, List<String> normalizedCorpus) {
-        Set<String> queryGrams = bigrams(normalizedQuery);
-        Map<String, Double> weights = new HashMap<>();
-        if (queryGrams.isEmpty() || normalizedCorpus.isEmpty()) {
-            return new Weighing(weights, 0.0, 0.0);
-        }
-        List<Set<String>> corpusGrams = new ArrayList<>(normalizedCorpus.size());
-        for (String text : normalizedCorpus) {
-            corpusGrams.add(bigrams(text));
-        }
-        int total = corpusGrams.size();
+    public static Weighing weigh(String query, List<String> normalizedCorpus, String productName) {
+        String normalizedName = normalize(productName);
+        List<Term> terms = new ArrayList<>();
         double askableWeight = 0.0;
-        double totalWeight = 0.0;
-        for (String gram : queryGrams) {
+        int matchableChars = 0;
+        int reachableChars = 0;
+        int passages = normalizedCorpus.size();
+        for (String word : QueryWords.content(query)) {
+            int nameCover = prefixMatch(word, normalizedName);
+            if (nameCover >= word.length()) {
+                // The question named the product. Retrieval was already scoped to it, so this word
+                // separates nothing — and letting it count is what returned a 1.00 citation for
+                // "선바로 방수 되나요?" from a description that never mentions 방수.
+                continue;
+            }
             int documentFrequency = 0;
-            for (Set<String> grams : corpusGrams) {
-                if (grams.contains(gram)) {
+            int best = 0;
+            for (String text : normalizedCorpus) {
+                int matched = prefixMatch(word, text) - nameCover;
+                if (matched > 0) {
                     documentFrequency++;
+                    best = Math.max(best, matched);
                 }
             }
-            // +0.5 rather than +1, so df=0 stays strictly the heaviest: "nobody wrote this" is the
-            // strongest thing a shingle can say, and it is what the askable ratio is measuring.
-            double weight = Math.log(1.0 + total / (documentFrequency + 0.5));
-            totalWeight += weight;
-            if (documentFrequency > 0) {
-                weights.put(gram, weight);
-                askableWeight += weight;
-            }
+            double weight = Math.log((passages + 1.0) / (documentFrequency + 0.5));
+            matchableChars += word.length() - nameCover;
+            reachableChars += best;
+            askableWeight += weight * best;
+            terms.add(new Term(word, nameCover, best, weight));
         }
-        return new Weighing(weights, askableWeight,
-                totalWeight == 0.0 ? 0.0 : askableWeight / totalWeight);
+        return new Weighing(List.copyOf(terms), askableWeight,
+                matchableChars == 0 ? 0.0 : (double) reachableChars / matchableChars);
     }
 
     /**
-     * The longest run of characters the question and this text share, verbatim.
+     * One content word of a question, and what this product's library has to say about it.
      *
-     * <p><b>The signal a bag of shingles cannot carry: that the seller wrote these words TOGETHER.</b>
-     * "사용방법" shares a four-character run with a note titled 사용 방법; "배터리충전" shares nothing
-     * with a cable-molding library longer than an accidental 시간. Scattered two-character overlaps are
-     * what Korean grammar produces against any text at all, and a run is how they are told apart from a
-     * phrase the seller actually used.
-     *
-     * <p>Quadratic in the two lengths, which is fine and only fine because the corpus is one product's
-     * own documents — the same bound that lets this whole layer skip an index.
+     * @param word      the word, normalized and lower-cased
+     * @param nameCover how much of it the product's own name already explains — never counted as a hit
+     * @param best      the most any one passage matches of it, once the name is discounted; 0 means
+     *                  nobody wrote this word and no passage can earn anything for it
+     * @param weight    its rarity across this product's passages
      */
-    public static int longestSharedRun(String normalizedQuery, String normalizedContent) {
-        if (normalizedQuery.isEmpty() || normalizedContent.isEmpty()) {
-            return 0;
+    record Term(String word, int nameCover, int best, double weight) {
+
+        /** Whether any passage has words for this one at all. */
+        boolean askable() {
+            return best > 0;
         }
-        int[] previous = new int[normalizedContent.length() + 1];
-        int[] current = new int[normalizedContent.length() + 1];
-        int best = 0;
-        for (int i = 1; i <= normalizedQuery.length(); i++) {
-            for (int j = 1; j <= normalizedContent.length(); j++) {
-                current[j] = normalizedQuery.charAt(i - 1) == normalizedContent.charAt(j - 1)
-                        ? previous[j - 1] + 1
-                        : 0;
-                if (current[j] > best) {
-                    best = current[j];
-                }
-            }
-            int[] swap = previous;
-            previous = current;
-            current = swap;
-            java.util.Arrays.fill(current, 0);
-        }
-        return best;
     }
 
     /**
      * One question, weighed.
      *
-     * @param weights       per askable query shingle — the ones this corpus has words for
-     * @param askableWeight their total, the denominator {@link #topicCoverage} divides by
-     * @param askableRatio  how much of the WHOLE question was askable, in [0,1]. The absence signal:
-     *                      low means the question is about something this library does not discuss,
-     *                      and no passage should be offered however well it matches the remainder
+     * @param terms         its content words, in order
+     * @param askableWeight the mass of what the best passages reach — {@link Assessment#coverage}'s
+     *                      denominator, identical for every passage of this search
+     * @param askableRatio  the share of the question's content CHARACTERS this library has any words
+     *                      for, in [0,1]. The absence signal, and the only place the unanswerable part
+     *                      of a question is allowed to count
      */
-    public record Weighing(Map<String, Double> weights, double askableWeight, double askableRatio) {
+    public record Weighing(List<Term> terms, double askableWeight, double askableRatio) {
 
-        /** How much of the askable question this passage covers, in [0,1]. The ranking number. */
-        public double topicCoverage(String normalizedContent) {
-            if (weights.isEmpty() || askableWeight == 0.0) {
-                return 0.0;
+        /** How well one passage answers the reachable part of the question. */
+        public Assessment assess(String normalizedContent) {
+            if (terms.isEmpty() || askableWeight == 0.0) {
+                return new Assessment(0.0, 0);
             }
-            Set<String> contentGrams = bigrams(normalizedContent);
             double hit = 0.0;
-            for (Map.Entry<String, Double> entry : weights.entrySet()) {
-                if (contentGrams.contains(entry.getKey())) {
-                    hit += entry.getValue();
+            int matchedChars = 0;
+            for (Term term : terms) {
+                if (!term.askable()) {
+                    continue;
                 }
+                int matched = Math.min(term.best(),
+                        Math.max(0, prefixMatch(term.word(), normalizedContent) - term.nameCover()));
+                if (matched == 0) {
+                    continue;
+                }
+                matchedChars += matched;
+                hit += term.weight() * matched;
             }
-            return hit / askableWeight;
+            return new Assessment(hit / askableWeight, matchedChars);
         }
+    }
+
+    /**
+     * What one passage is worth to one question.
+     *
+     * @param coverage     the share of the reachable question this passage covers, in [0,1] — ranking
+     * @param matchedChars how many characters of the question's own words it actually shares. An
+     *                     absolute count, so a one-syllable coincidence cannot become a citation just
+     *                     because the rest of the question was thrown away
+     */
+    public record Assessment(double coverage, int matchedChars) {
     }
 }

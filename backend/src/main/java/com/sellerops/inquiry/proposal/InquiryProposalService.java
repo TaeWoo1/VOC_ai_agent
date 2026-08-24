@@ -119,6 +119,7 @@ public class InquiryProposalService {
                 draft,
                 inquiry.getProductId(),
                 productName(inquiry.getProductId()),
+                inquiry.getProductBinding(),
                 inquiry.getSourceSubtype(),
                 answerState.stateProven(),
                 answerStateNote(answerState),

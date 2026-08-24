@@ -1239,6 +1239,15 @@ export interface InquiryDetail {
   /** The canonical product this inquiry is about, when it resolves to one. */
   productId: string | null;
   productName: string | null;
+  /**
+   * HOW `productId` was decided — `"SOURCE_EXACT"` (the channel's own identifier matched a listing)
+   * or `"USER_CONFIRMED"` (a person picked it on screen); `null` when nothing is bound.
+   *
+   * The two are shown differently because they are checkable in different ways, and because a seller
+   * reading a grounded draft deserves to know whether the product it leaned on came from the channel
+   * or from a colleague.
+   */
+  productBinding: string | null;
   /** Which source resource it came from (NAVER 상품 문의 vs 고객 문의); null on single-source channels. */
   sourceSubtype: string | null;
   /**
@@ -2017,4 +2026,20 @@ export interface ProductKnowledgeView {
   facts: ProductFactView[];
   signals: ProductSignalsView;
   knowledgeCoverage: KnowledgeCoverageView[];
+}
+
+/**
+ * An inquiry's product attribution, as the binding endpoint reports it.
+ *
+ * `sourceProductRef` is the channel's own product identifier verbatim. Present with no `productId`
+ * means "the channel named a listing we do not hold" — a catalogue gap, not a question for a person.
+ */
+export interface InquiryProductBindingView {
+  inquiryId: string;
+  productId: string | null;
+  productName: string | null;
+  binding: string | null;
+  boundAt: string | null;
+  boundByName: string | null;
+  sourceProductRef: string | null;
 }

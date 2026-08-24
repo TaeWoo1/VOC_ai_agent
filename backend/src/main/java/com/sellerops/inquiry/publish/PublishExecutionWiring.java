@@ -6,7 +6,16 @@ import com.sellerops.connector.coupang.JdkCoupangHttpClient;
 import com.sellerops.connector.esm.EsmHttpClient;
 import com.sellerops.connector.esm.EsmJwtSigner;
 import com.sellerops.connector.esm.JdkEsmHttpClient;
+import com.sellerops.connector.naver.NaverCustomerInquiriesClient;
+import com.sellerops.connector.naver.NaverProductQnaClient;
+import com.sellerops.connector.naver.NaverTokenClient;
 import com.sellerops.credential.CredentialVault;
+import com.sellerops.inquiry.publish.naver.JdkNaverAnswerHttpClient;
+import com.sellerops.inquiry.publish.naver.NaverAnswerHttpClient;
+import com.sellerops.inquiry.publish.naver.NaverCustomerInquiryAnswerClient;
+import com.sellerops.inquiry.publish.naver.NaverCustomerInquiryReplyAdapter;
+import com.sellerops.inquiry.publish.naver.NaverProductQnaAnswerClient;
+import com.sellerops.inquiry.publish.naver.NaverProductQnaReplyAdapter;
 import java.time.Clock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -14,8 +23,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires the REAL reply transports and registers the {@link ChannelReplyAdapter}s — ESM+
- * and Coupang — ONLY when {@code sellerops.inquiry.publish.execution-enabled=true}. Off by
+ * Wires the REAL reply transports and registers the {@link ChannelReplyAdapter}s — ESM+,
+ * Coupang and NAVER's two inquiry subtypes — ONLY when
+ * {@code sellerops.inquiry.publish.execution-enabled=true}. Off by
  * default no adapter bean exists, so the {@link ChannelReplyAdapterRegistry} resolves empty
  * and the core fails closed — that absence IS the fail-closed default (there is no separate
  * disabled transport). The Coupang adapter additionally requires its own connector flag, so
@@ -32,6 +42,7 @@ public class PublishExecutionWiring {
 
     private final EsmHttpClient http = new JdkEsmHttpClient();
     private final EsmJwtSigner signer = new EsmJwtSigner(Clock.systemUTC());
+    private final NaverAnswerHttpClient naverAnswerHttp = new JdkNaverAnswerHttpClient();
 
     @Bean
     EsmAnswerClient esmAnswerClient(CredentialVault vault,
@@ -97,5 +108,55 @@ public class PublishExecutionWiring {
             CoupangInquiryReplyClient replyClient, CredentialVault vault,
             @Value("${sellerops.connector.coupang.reply-by:}") String replyBy) {
         return new CoupangChannelReplyAdapter(replyClient, vault, replyBy);
+    }
+
+    // ── NAVER. Two adapters, because NAVER has two inquiry resources with two contracts.
+    //
+    // Both are registered only when the publish-execution flag is on AND the NAVER connector is on,
+    // for the same reason the Coupang pair is: a live reply adapter in a deployment whose connector
+    // is switched off is a bean that should not exist. Neither can send to a real host without an
+    // armed live-run approval id (NaverAnswerLiveGuard), which is the flag that stays off.
+
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.naver.enabled", havingValue = "true")
+    NaverProductQnaAnswerClient naverProductQnaAnswerClient(
+            @Value("${sellerops.connector.naver.base-url:https://api.commerce.naver.com}") String baseUrl,
+            @Value("${sellerops.inquiry.publish.naver.live-approval-id:}") String liveApprovalId) {
+        return new NaverProductQnaAnswerClient(naverAnswerHttp, baseUrl, liveApprovalId);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.naver.enabled", havingValue = "true")
+    NaverCustomerInquiryAnswerClient naverCustomerInquiryAnswerClient(
+            @Value("${sellerops.connector.naver.base-url:https://api.commerce.naver.com}") String baseUrl,
+            @Value("${sellerops.inquiry.publish.naver.live-approval-id:}") String liveApprovalId) {
+        return new NaverCustomerInquiryAnswerClient(naverAnswerHttp, baseUrl, liveApprovalId);
+    }
+
+    /**
+     * 상품 문의 — {@code PUT /v1/contents/qnas/&#123;questionId&#125;}.
+     *
+     * <p>The READ client beside it is the collection one: verification is a re-read, and re-reading
+     * through a second implementation would let the two disagree about what "answered" means.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.naver.enabled", havingValue = "true")
+    ChannelReplyAdapter naverProductQnaReplyAdapter(NaverProductQnaAnswerClient answerClient,
+                                                    NaverProductQnaClient readClient,
+                                                    NaverTokenClient tokenClient,
+                                                    CredentialVault vault) {
+        return new NaverProductQnaReplyAdapter(answerClient, readClient, tokenClient, vault,
+                Clock.systemUTC());
+    }
+
+    /** 고객 문의 — {@code POST /v1/pay-merchant/inquiries/&#123;inquiryNo&#125;/answer}. */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.naver.enabled", havingValue = "true")
+    ChannelReplyAdapter naverCustomerInquiryReplyAdapter(NaverCustomerInquiryAnswerClient answerClient,
+                                                         NaverCustomerInquiriesClient readClient,
+                                                         NaverTokenClient tokenClient,
+                                                         CredentialVault vault) {
+        return new NaverCustomerInquiryReplyAdapter(answerClient, readClient, tokenClient, vault,
+                Clock.systemUTC());
     }
 }

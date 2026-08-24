@@ -24,6 +24,8 @@ import type {
   PublishCapabilityView,
   PublishStatusView,
 } from "../../lib/types";
+import { bindingLabel, canBindProduct, productLabel } from "../../lib/inquiryProductBinding";
+import { InquiryProductBinder } from "./InquiryProductBinder";
 import { Btn } from "../ui/Btn";
 
 /**
@@ -94,6 +96,8 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   const [knowledgeNote, setKnowledgeNote] = useState<string | null>(null);
   /** Set only when the day's AI budget is what stopped the model. */
   const [quotaMessage, setQuotaMessage] = useState<string | null>(null);
+  /** Open only while the seller is choosing a product. Never open by default — it is not a step. */
+  const [binding, setBinding] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -300,7 +304,27 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
         <p className="mt-1.5 whitespace-pre-wrap break-keep leading-relaxed text-ink">
           {detail.details ?? "본문이 없습니다."}
         </p>
-        <InquiryMeta detail={detail} />
+        <InquiryMeta
+          detail={detail}
+          onBind={canBindProduct(detail) ? () => setBinding(true) : undefined}
+        />
+        {binding ? (
+          <InquiryProductBinder
+            detail={detail}
+            onCancel={() => setBinding(false)}
+            onBound={(productId, productName) => {
+              setBinding(false);
+              // The bound product is what the next draft will be grounded in, so the panel must show
+              // it immediately — a seller who binds and then presses "AI 답변 초안 만들기" is entitled
+              // to see which product they are about to lean on.
+              setDetail((current) =>
+                current
+                  ? { ...current, productId, productName, productBinding: "USER_CONFIRMED" }
+                  : current,
+              );
+            }}
+          />
+        ) : null}
       </section>
 
       {/* 2 — THE ANSWER. One section, whatever state it is in. */}
@@ -505,13 +529,30 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
  * is none, because "(미지정 상품)" is the reason a draft could not be grounded and hiding it would
  * make the limitation above the draft look arbitrary.
  */
-function InquiryMeta({ detail }: { detail: InquiryDetail }) {
+function InquiryMeta({
+  detail,
+  onBind,
+}: {
+  detail: InquiryDetail;
+  onBind?: () => void;
+}) {
   const waited = waitedLabel(detail.receivedAt);
+  const provenance = bindingLabel(detail);
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
       {detail.channelNameKo ? <span>{detail.channelNameKo}</span> : null}
       <span aria-hidden="true">·</span>
-      <span>{detail.productName ?? "상품 미지정"}</span>
+      <span>{productLabel(detail)}</span>
+      {provenance ? <span className="text-muted">({provenance})</span> : null}
+      {onBind ? (
+        <button
+          type="button"
+          className="rounded px-1 text-sm font-medium text-brand-700 underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          onClick={onBind}
+        >
+          {detail.productId ? "상품 바꾸기" : "상품 지정"}
+        </button>
+      ) : null}
       <span aria-hidden="true">·</span>
       <span>{phaseLabel(detail.phase)}</span>
       {waited ? (

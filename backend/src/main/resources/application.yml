@@ -140,6 +140,17 @@ sellerops:
     # never a default topic, because a default would let a classification gap become a "repeat" a seller
     # is shown (measured: 기타 x 1,777 on real data).
   inquiry:
+    publish:
+      # The seller-confirmed reply send. Off by default and absent from every deployment that has
+      # not deliberately turned it on: with it off NO ChannelReplyAdapter bean is created, the
+      # registry resolves empty, and the publish core fails closed. That absence IS the fence.
+      execution-enabled: ${SELLEROPS_INQUIRY_PUBLISH_EXECUTION_ENABLED:false}
+      naver:
+        # The live-run approval id a NAVER answer must be armed with, per
+        # docs/sellerops_live_approval_contract.md. Blank = no live NAVER answer can leave this
+        # process (NaverAnswerLiveGuard throws before the request is built). An ENVIRONMENT-binding
+        # token, never a credential.
+        live-approval-id: ${SELLEROPS_INQUIRY_PUBLISH_NAVER_LIVE_APPROVAL_ID:}
     signature:
       enabled: ${SELLEROPS_INQUIRY_SIGNATURE_ENABLED:false}
       enabled-org-ids: ${SELLEROPS_INQUIRY_SIGNATURE_ORG_IDS:}

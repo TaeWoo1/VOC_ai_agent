@@ -77,6 +77,21 @@ public record PreSendCheck(boolean refused, String reason, boolean stateProven, 
      */
     public static final String WRITE_NOT_SUPPORTED = "WRITE_NOT_SUPPORTED";
 
+    /**
+     * The target's answer state could not be proven, and this channel's write would OVERWRITE.
+     *
+     * <p>The one place unproven state is a refusal rather than a warning. Everywhere else, sending on
+     * a stale "still unanswered" risks a second answer beside the first: visible, and something a
+     * seller can apologise for. On NAVER 상품 문의 the answer endpoint is an upsert
+     * ({@code PUT /v1/contents/qnas/&#123;questionId&#125;}, "동일 questionId에 다시 호출하면 등록이
+     * 아닌 수정으로 동작"), so the same stale reading risks REPLACING what a person typed in the NAVER
+     * console — and there is nothing left to apologise with.
+     *
+     * <p>Which channels this applies to is not a judgement made here; it is read off the audited
+     * vendor contract ({@code InquiryReplyCapabilityRegistry#overwritesExistingAnswer}).
+     */
+    public static final String OVERWRITE_WITHOUT_PROOF = "OVERWRITE_WITHOUT_PROOF";
+
     /** The channel's INQUIRY collection is not currently fresh — the answer state may have moved. */
     public static final String STATE_NOT_FRESH = "STATE_NOT_FRESH";
     /** No coverage row for this channel's INQUIRY at all — nothing to read the freshness off. */
