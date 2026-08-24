@@ -27,15 +27,32 @@ class InquiryReplyCapabilityRegistryTest {
     }
 
     @Test
-    @DisplayName("both NAVER subtypes are UNSUPPORTED, and the reason is in this repository")
-    void naverIsFencedPerSubtype() {
+    @DisplayName("both NAVER subtypes name the platform's endpoint AND our own fence — never 'unsupported'")
+    void naverIsFencedByUsNotByTheVendor() {
         for (String subtype : new String[]{
                 InquirySourceSubtype.NAVER_PRODUCT_QNA, InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY}) {
             var view = registry.capability("NAVER", subtype);
-            assertThat(view.transport()).isEqualTo(InquiryReplyTransport.UNSUPPORTED.name());
+            assertThat(view.transport())
+                    .isEqualTo(InquiryReplyTransport.PLATFORM_SUPPORTED_NOT_IMPLEMENTED.name());
+            // Both halves have to be on the record: the endpoint NAVER publishes, and the fence that
+            // is the actual reason nothing is sent. Either half alone is a misleading answer.
             assertThat(view.evidence()).contains("NaverReadOnlyFenceTest");
             assertThat(view.sourceSubtype()).isEqualTo(subtype);
         }
+        assertThat(registry.capability("NAVER", InquirySourceSubtype.NAVER_PRODUCT_QNA).evidence())
+                .contains("PUT /v1/contents/qnas/{questionId}");
+        assertThat(registry.capability("NAVER", InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY).evidence())
+                .contains("POST /v1/pay-merchant/inquiries/{inquiryNo}/answer");
+    }
+
+    @Test
+    @DisplayName("no row calls a channel UNSUPPORTED — that value is for a channel-side limitation")
+    void unsupportedIsNotUsedForOurOwnRefusal() {
+        // The regression this guards is the one that actually happened: NAVER's rows said UNSUPPORTED
+        // while NAVER publishes three answer endpoints, so a screen reported our fence as the
+        // vendor's limit. No channel currently in the registry has a channel-side "no".
+        assertThat(registry.all())
+                .noneMatch(r -> InquiryReplyTransport.UNSUPPORTED.name().equals(r.transport()));
     }
 
     @Test

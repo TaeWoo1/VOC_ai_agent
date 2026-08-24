@@ -701,3 +701,113 @@ L2·L3은 실행하지 않았다.
 ### 14.1 여기서 드러난 화면 결함 (다음 package에서 다룬다)
 
 플래그를 내리자 커넥터 capability가 `INQUIRY supported=false`가 됐다. 배포 배선 사실로는 참이지만, 화면은 그것을 **"네이버 문의 미지원"**으로 읽는다 — 방금 라이브로 반증된 문장이다. **"채널이 제공하지 않는다"와 "이 배포가 지금 연결하지 않았다"가 한 단어를 공유하고 있다.** 커넥터를 지금 고치지 않고, coverage 어휘를 만드는 Cross-Channel Operational Reasoning v1에서 다룬다.
+
+---
+
+## 15. PART 2 재개 (2026-08-24 저녁) — 마켓플레이스 접촉 0회
+
+인증 환경이 §12의 승인 환경으로 돌아왔다는 운영자 보고에 따라 §11의 recurrence proof를 재개한다.
+여기까지는 **DB와 코드만 읽었고, 아무 채널도 호출하지 않았다.**
+
+### 15.1 상태 재확인 — 무엇이 지금 저절로 돌 수 있는가
+
+| 확인 | 값 | 어떻게 읽었나 |
+|---|---|---|
+| NAVER seller account | `bdccb7a7…` 1개 (재사용) | DB |
+| 계정 상태 | **`RECONNECT_REQUIRED`** — §12의 L1 실패가 남긴 상태 | DB |
+| credential 금고 | **`OK`** · 봉인 지문 == 활성 지문 · `keyId == activeKeyId == self-pilot-1` | `GET …/credential-diagnosis` (채널 호출 없음) |
+| NAVER schedule 3개 | **전부 `enabled=false`, `paused_reason=null`, `next_run_at=null`** ⇒ 재연결이 되살리지 않는다 | `schedule-guard.sh report` — **running backend에 물어봤다**, 내 셸이 아니라 |
+| 두 source 플래그 | **둘 다 주석 처리(OFF)** ⇒ 커넥터가 `INQUIRY`를 광고하지 않는다 | `.env.local` |
+| `INQUIRY/primary` 커서 | **없음** — routine lane은 아직 한 번도 돌지 않았다. `backfill` 행만 존재 | DB |
+| REAL NAVER 문의 | **18** (상품 13 · 고객 5) · 전부 답변 있음 · synthetic 8 `DEMO_SEED` 불변 | DB |
+| 참조 테이블 | NAVER `INQUIRY` **`supported=true` / `CONFIRMED`** (§9.6이 반영한 값) | DB |
+| 다른 채널 | Cafe24 3개 · Coupang 2개 schedule **enabled** — self-pilot standing grant 하의 평소 동작이며 이 proof의 호출이 아니다 | `schedule-guard.sh report` |
+
+**§13.2의 종료 상태와 한 칸도 다르지 않다.** 지난 20시간 동안 NAVER는 아무것도 호출하지 않았다.
+
+### 15.2 인증 실패가 무엇을 잃고 있었나 — 감사 결과: **잃고 있었다**
+
+§12는 `CREDENTIAL_REJECTED` 하나만 남기고 멈췄고, 그래서 "자격 증명이 틀렸다"와 "이 호출 IP가
+등록돼 있지 않다"를 구별할 수 없었다. 코드를 읽어 보니 그것은 관측의 한계가 아니라 **구현의 한계**였다.
+
+| | 이전 | 지금 |
+|---|---|---|
+| 토큰 endpoint 4xx | 본문을 **읽지 않고** 401·403을 통째로 `CREDENTIAL_REJECTED` | 403이 게이트웨이 코드를 실었으면 그 코드를 읽는다 |
+| `GW.IP_NOT_ALLOWED` | 자격 증명 거절과 구별 불가 ⇒ 계정 `RECONNECT_REQUIRED` ⇒ 판매자에게 **멀쩡한 자격 증명 재입력을 요구** | `AuthCheck.CALL_IP_DENIED` → 기존 상수 `REASON_CALL_ENVIRONMENT_MISMATCH`. 수집 경로에서는 **`ConnectorAuthException`이 아니다** ⇒ 재연결 task를 만들지 않는다 |
+| 주문 endpoint 403 | `CALL_IP_DENIED_CODES`가 **비어 있음** — "구별하는 `GW.*` 문자열을 모르고 추측하지 않는다" | 그 문자열은 **이미 이 저장소 안에 있었다**: `docs/vendor/naver-commerce-api/intro-troubleshooting.md`의 공식 표가 `403 GW.IP_NOT_ALLOWED`를 싣는다 (2026-07-22 vendored). 추측이 아니라 인용이라 채웠다 |
+
+`PERMISSION_DENIED_CODES`는 **계속 비어 있다** — 그 표에 해당 코드가 없다. 규칙은 그대로다:
+**상태 코드만으로 원인을 단정하지 않는다.** 설명되지 않은 403은 여전히 hedge된 `ACCESS_DENIED`다.
+
+읽는 것은 봉투의 `code` 스칼라 **하나뿐**이고, 그것도 모양 검사를 통과할 때만이다
+(`NaverGatewayCode` — 대문자·숫자·`_`·`.`, 48자 이하). 본문·`message`·`traceId`는 이 클래스 밖으로
+나가지 않는다. 자유 텍스트가 `code` 키에 앉아 있으면 코드가 아니라 **null**이다.
+
+대규모 error taxonomy는 만들지 않았다: enum 값 **하나**, 상수 **하나**, 작은 reader **하나**.
+
+### 15.3 NAVER 문의 WRITE capability 표기 정정 — **플랫폼이 거절하는 게 아니다**
+
+Inquiry Action Flow v1이 NAVER 두 subtype을 `UNSUPPORTED`로 적었다. 그 문서 자신이 "이건 벤더 사실이
+아니라 저장소 사실"이라고 각주를 달았지만, **값의 이름이 각주를 이긴다** — 화면과 표에서 그것은
+"네이버가 안 된다"로 읽힌다.
+
+그리고 그 문서가 "별개의 미완 질문"이라고 부른 것의 답은 **이미 저장소 안에 있었다.**
+`docs/vendor/naver-commerce-api/llms.txt` §문의는 답변 endpoint를 **셋** 싣는다:
+
+| | endpoint |
+|---|---|
+| 상품 문의 답변 등록/수정 | `PUT /v1/contents/qnas/{questionId}` |
+| 고객 문의 답변 등록 | `POST /v1/pay-merchant/inquiries/{inquiryNo}/answer` |
+| 고객 문의 답변 수정 | `PUT /v1/pay-merchant/inquiries/{inquiryNo}/answer/{answerContentId}` |
+
+⇒ 새 값 **`PLATFORM_SUPPORTED_NOT_IMPLEMENTED`**. `UNSUPPORTED`는 이제 **채널 쪽 한계**만 뜻하며,
+현재 registry의 어떤 행도 그것을 쓰지 않는다(회귀가 고정). TalkTalk은 계속 platform `UNSUPPORTED` —
+커머스 API 문의 도메인에 endpoint 자체가 없다.
+
+**바뀌지 않은 것**: `NaverReadOnlyFenceTest`는 그대로 서 있고, 어떤 빌드도 네이버 답변을 등록할 수
+없으며, 이 package는 WRITE를 **구현하지 않는다**. 바뀐 것은 *왜* 못 하는가에 대한 기록뿐이다.
+실제 NAVER WRITE 구현은 다음 product package다.
+
+### 15.4 회귀
+
+backend **2,874 / 0 failures / 22 skipped** (신규 8건: gateway code reader 3 · 토큰 endpoint 4 ·
+registry 1). frontend **163 files / 2,256 tests**, `tsc` clean. agent-runtime 미변경.
+
+### 15.5 manifest — L0 인증 확인 → L1 → L2 → L3
+
+§11.2를 이 세션에 맞게 다시 세운다. **아직 실행하지 않았다.**
+
+| 필드 | 값 |
+|---|---|
+| channel / org / account | `NAVER` · canonical Demo Org `7146c50f…` · 기존 계정 `bdccb7a7…` 재사용 |
+| DataType | **`INQUIRY` 하나.** `ORDER_SUMMARY`/`PRODUCT`는 운영자 disable 유지 ⇒ 이 proof 동안 호출 0 |
+| mode | **`READ_ONLY`** |
+| WRITE | **0 — 구조적으로.** 두 문의 client에 GET 외 메서드 없음, `NaverHttpClient`에 put/delete/patch 없음, `NaverReadOnlyFenceTest`가 답변 경로 3종을 이름으로 거부 |
+| 되돌릴 수 없는 것 | **없다.** 읽기뿐이고 재실행은 `external_id` 멱등 |
+
+**격리** (기존 mechanism만, 새 bypass 0): 승인 직후 backend를 `sellerops.collect.scheduler-enabled=false`로
+재기동한다 ⇒ **모든 채널의 정기 수집이 그동안 멈춘다**(Cafe24 3개·Coupang 2개 포함). L2에서만 다시 켠다.
+proof 후 운영자 기준값 `true`로 복원.
+
+| # | 무엇 | 마켓플레이스 요청 |
+|---|---|---|
+| **L0** | 인증 확인 — `test-connection` 1회 | 토큰 mint 1 + 주문 접근 probe GET **최대 1** |
+| **L1** | 상품 문의 직접 재독 (`PRODUCT_QNA` 단독 무장, `2026-06-01~2026-08-24`) | 토큰 1 + 목록 1 = **2** |
+| **L2** | 첫 routine run (두 source, 60분 schedule 1개, 14일 창) | lane당 `⌈N/size⌉` + 토큰 |
+| **L3** | 즉시 recurrence (같은 primary 커서, backfill seed 없음) | L2와 같은 자릿수여야 한다 |
+
+**L0이 §12와 같은 실패를 내면 그 자리에서 멈추고 `BLOCKED_EXTERNAL`로 되돌린다** — 자격 증명을
+재입력하지도, 커넥터를 추측으로 고치지도 않는다. 이번에는 최소한 **어느 쪽 거절인지**는 기록된다(§15.2).
+
+**기대값** (L1): received 13 · inserted 0 · skipped 13 · failed 0 · `questionId` 중복 0 ·
+정확 귀속 13/13 · 신규 product 0 · synthetic 불변 · WRITE 0.
+**어긋나면 실제 값을 기록하고 원인을 조사한다. 데이터를 맞추려고 고치지 않는다.**
+
+**L2 FAIL 조건**: routine이 `ROUTINE_MAX_LAG`(14일)보다 과거를 자동으로 걷기 시작하면 FAIL.
+
+### 15.6 승인
+
+`docs/sellerops_live_approval_contract.md`. **READ_ONLY**이며 WRITE 승인을 요구하지 않는다.
+채널/계정/범위·코드·브랜치가 바뀌면 승인은 `REVOKED`.
+
+**여기서 멈춘다.** L0·L1·L2·L3 중 어느 것도 실행하지 않았다.

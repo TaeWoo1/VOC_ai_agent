@@ -118,6 +118,13 @@ public class NaverTokenClient {
         OK,
         /** Credential/signature rejected (bad salt or 4xx other than 429). */
         INVALID,
+        /**
+         * The gateway refused the CALLER, not the credential — 403 carrying
+         * {@link NaverGatewayCode#IP_NOT_ALLOWED}. Separated from {@link #INVALID} because the two
+         * ask for opposite things: this one is fixed by registering the egress IP in the app's
+         * 'API 호출 IP', and re-entering a perfectly good credential fixes nothing.
+         */
+        CALL_IP_DENIED,
         /** Throttled (HTTP 429) — transient, may succeed if retried. */
         RATE_LIMITED,
         /** Provider 5xx, network error, or an unreadable token body. */
@@ -171,6 +178,11 @@ public class NaverTokenClient {
         if (status >= 500) {
             return AuthCheck.UNAVAILABLE;
         }
+        if (status == 403 && NaverGatewayCode.IP_NOT_ALLOWED.equals(NaverGatewayCode.of(response.body()))) {
+            // The gateway named the cause and it is not the credential. Reading the envelope's code
+            // scalar is the whole of what is read; the body itself never leaves this method.
+            return AuthCheck.CALL_IP_DENIED;
+        }
         // Other 4xx (400/401/403/…) — credential or signature rejected.
         return AuthCheck.INVALID;
     }
@@ -187,6 +199,16 @@ public class NaverTokenClient {
         NaverHttpClient.Response response = http.postForm(tokenUri, form);
         if (response.statusCode() == 429) {
             throw NaverRateLimitedException.fromResponse(response);
+        }
+        if (response.statusCode() == 403
+                && NaverGatewayCode.IP_NOT_ALLOWED.equals(NaverGatewayCode.of(response.body()))) {
+            // NOT an auth verdict. ConnectorAuthException is what turns a run into a
+            // RECONNECT_REQUIRED task, and a caller-IP refusal would send the seller to re-enter a
+            // credential the gateway never objected to. An ordinary failure keeps the account's
+            // connection state and says what the gateway said.
+            throw new IllegalStateException(
+                    "네이버 게이트웨이가 이 호출 환경을 허용하지 않습니다 (" + NaverGatewayCode.IP_NOT_ALLOWED
+                            + "). 애플리케이션에 등록된 'API 호출 IP'를 확인해 주세요.");
         }
         if (response.statusCode() == 401 || response.statusCode() == 403) {
             // The token endpoint refused the client credential itself (not a resource 4xx): the stored

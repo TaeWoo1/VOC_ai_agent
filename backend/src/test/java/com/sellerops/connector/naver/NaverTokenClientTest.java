@@ -93,6 +93,62 @@ class NaverTokenClientTest {
         }
     }
 
+    /**
+     * The fork the 2026-08-24 recurrence proof stopped at with no way to see which side it was on
+     * (`docs/naver_inquiry_api_audit_v1.md` §12): a 403 that names the caller, not the credential.
+     * Re-entering a credential the gateway never objected to fixes nothing, so this may not answer
+     * with the verdict that asks for exactly that.
+     */
+    @Test
+    void verifyReturnsCallIpDeniedWhenTheGatewayNamesTheCallerIp() {
+        http.enqueue(new NaverHttpClient.Response(403,
+                "{\"timestamp\":\"2026-08-24T15:15:00.000+09:00\",\"code\":\"GW.IP_NOT_ALLOWED\","
+                        + "\"message\":\"\\ud638\\ucd9c\\uc774 \\ud5c8\\uc6a9\\ub418\\uc9c0 \\uc54a\\uc740 IP\\uc785\\ub2c8\\ub2e4.\","
+                        + "\"traceId\":\"cr3-000000-aaaaaa^1730711073284^6745261\"}",
+                Map.of()));
+
+        assertThat(client.verify(CLIENT_ID, CLIENT_SECRET))
+                .isEqualTo(NaverTokenClient.AuthCheck.CALL_IP_DENIED);
+    }
+
+    /** Only the documented constant splits the 403. Anything else stays the credential verdict. */
+    @Test
+    void verifyKeepsInvalidWhenA403CarriesSomeOtherCode() {
+        http.enqueue(new NaverHttpClient.Response(403, "{\"code\":\"GW.AUTHN\"}", Map.of()));
+
+        assertThat(client.verify(CLIENT_ID, CLIENT_SECRET))
+                .isEqualTo(NaverTokenClient.AuthCheck.INVALID);
+    }
+
+    /**
+     * A caller-IP refusal must not become {@link com.sellerops.connector.ConnectorAuthException} —
+     * that type is what turns a collection run into a RECONNECT_REQUIRED task, and reconnecting is
+     * not the remedy for an unregistered egress IP.
+     */
+    @Test
+    void mintDoesNotCallACallerIpRefusalAnAuthVerdict() {
+        http.enqueue(new NaverHttpClient.Response(403, "{\"code\":\"GW.IP_NOT_ALLOWED\"}", Map.of()));
+
+        assertThatThrownBy(() -> client.accessToken(CLIENT_ID, CLIENT_SECRET))
+                .isInstanceOf(IllegalStateException.class)
+                .isNotInstanceOf(com.sellerops.connector.ConnectorAuthException.class)
+                .hasMessageContaining("GW.IP_NOT_ALLOWED");
+    }
+
+    /** The unchanged half: a 401, and a 403 the gateway did not explain, are still auth verdicts. */
+    @Test
+    void mintStillReportsAnAuthVerdictForAnUnexplainedRefusal() {
+        for (int status : new int[] {401, 403}) {
+            FakeNaverHttpClient h = new FakeNaverHttpClient();
+            NaverTokenClient c = new NaverTokenClient(h, clock, BASE_URL);
+            h.enqueue(new NaverHttpClient.Response(status, "{}", Map.of()));
+
+            assertThatThrownBy(() -> c.accessToken(CLIENT_ID, CLIENT_SECRET))
+                    .as("HTTP %d without a gateway code", status)
+                    .isInstanceOf(com.sellerops.connector.ConnectorAuthException.class);
+        }
+    }
+
     @Test
     void verifyReturnsRateLimitedOn429() {
         http.enqueue(FakeNaverHttpClient.rateLimited429());

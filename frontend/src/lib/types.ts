@@ -1279,12 +1279,19 @@ export interface GeneratedDraftView {
  * Distinct from `PublishCapabilityView`, which answers "can this deployment send right now". This
  * answers "is there a way to send at all, and how do we know" — a channel can be DIRECT_API here and
  * absent there because the execution flag is off. `NEEDS_VERIFICATION` is an unfinished audit, not a
- * vendor limitation, and must never be rendered as "unsupported".
+ * vendor limitation, and must never be rendered as "unsupported". Neither is
+ * `PLATFORM_SUPPORTED_NOT_IMPLEMENTED`: the channel publishes an answer endpoint and SellerOps has
+ * not connected it, so the sentence a seller reads is about us, not about their channel.
  */
 export interface InquiryReplyCapabilityView {
   channelCode: string;
   sourceSubtype: string | null;
-  transport: "DIRECT_API" | "GUIDED_ACTION" | "UNSUPPORTED" | "NEEDS_VERIFICATION";
+  transport:
+    | "DIRECT_API"
+    | "GUIDED_ACTION"
+    | "PLATFORM_SUPPORTED_NOT_IMPLEMENTED"
+    | "UNSUPPORTED"
+    | "NEEDS_VERIFICATION";
   reasonKo: string;
   evidence: string;
 }

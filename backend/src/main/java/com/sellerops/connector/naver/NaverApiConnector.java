@@ -248,6 +248,9 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
             // Credential accepted — now answer the separate order-access question.
             case OK -> orderAccessOutcome(clientId, clientSecret);
             case INVALID -> VerifyOutcome.failed(VerifyOutcome.REASON_INVALID_CREDENTIAL);
+            // The token endpoint can now answer the call-IP question too. Before, this verdict was
+            // only reachable from the order probe — which never runs when the token itself is refused.
+            case CALL_IP_DENIED -> VerifyOutcome.failed(VerifyOutcome.REASON_CALL_ENVIRONMENT_MISMATCH);
             case RATE_LIMITED -> VerifyOutcome.failed(VerifyOutcome.REASON_TEMPORARY_PROVIDER_ERROR);
             case UNAVAILABLE -> VerifyOutcome.failed(VerifyOutcome.REASON_PROVIDER_UNAVAILABLE);
         };

@@ -28,16 +28,23 @@ WRITE tool은 없고, `operatorToolRegistry.test.ts`가 등록 자체를 거부�
 | 채널 | source subtype | transport | 근거 |
 |---|---|---|---|
 | COUPANG | (단일) | **`DIRECT_API`** | `CoupangInquiryReplyClient` → `POST …/onlineInquiries/{id}/replies` · `CoupangChannelReplyAdapter` — **구현됨, 라이브 미실행** |
-| NAVER | `NAVER_PRODUCT_QNA` | **`UNSUPPORTED`** | `NaverReadOnlyFenceTest` — 쓰기 경로 3종(`/pay-merchant`, `qnas/`, `/answer`)을 **이름으로** 거부 |
-| NAVER | `NAVER_CUSTOMER_INQUIRY` | **`UNSUPPORTED`** | 같은 fence |
+| NAVER | `NAVER_PRODUCT_QNA` | **`PLATFORM_SUPPORTED_NOT_IMPLEMENTED`** | 공식 `PUT /v1/contents/qnas/{questionId}` (llms.txt §문의) · 막는 것은 `NaverReadOnlyFenceTest` — 쓰기 경로 3종(`/pay-merchant`, `qnas/`, `/answer`)을 **이름으로** 거부 |
+| NAVER | `NAVER_CUSTOMER_INQUIRY` | **`PLATFORM_SUPPORTED_NOT_IMPLEMENTED`** | 공식 `POST /v1/pay-merchant/inquiries/{inquiryNo}/answer` · 같은 fence |
 | CAFE24 | (단일) | **`NEEDS_VERIFICATION`** | `Cafe24BoardArticlesClient` 읽기 전용 · **벤더 쓰기 계약 미감사** |
 
 세 가지를 구분해서 적는다.
 
 - **`DIRECT_API`는 이 저장소에 구현된 endpoint가 있을 때만** 쓴다. 벤더 문서를 읽었다는 것만으로는 아니다.
-- **NAVER의 `UNSUPPORTED`는 벤더 사실이 아니라 이 저장소의 사실이다.** 네이버 커머스 API에 답변
-  endpoint가 있는지는 별개의 **미완 질문**이고, NAVER routine READ가 `BLOCKED_EXTERNAL`인 동안에는 답이
-  나와도 닿지 못한다. 그래도 여기서는 fence가 답이다 — 어떤 빌드도 네이버 답변을 등록할 수 없다.
+- **NAVER는 `UNSUPPORTED`가 아니다 — 2026-08-24 정정.** 이 표는 처음에 두 subtype을 `UNSUPPORTED`로
+  적었고, 그 미완 질문("네이버에 답변 endpoint가 있는가")의 답은 **이미 이 저장소 안에 있었다**:
+  `docs/vendor/naver-commerce-api/llms.txt` §문의가 답변 endpoint를 **셋** 싣고 있다 — 상품 문의
+  `PUT /v1/contents/qnas/{questionId}`, 고객 문의 `POST /v1/pay-merchant/inquiries/{inquiryNo}/answer`,
+  그 수정 `PUT …/answer/{answerContentId}`. **거절하는 쪽은 네이버가 아니라 우리다.** 판매자가
+  "네이버는 지원하지 않습니다"를 읽으면 자기 채널이 못 하는 일이라고 결론짓고 묻기를 그만두는데,
+  사실은 SellerOps가 아직 만들지 않은 것이다. 그래서 두 뜻을 값으로 갈랐다 —
+  `PLATFORM_SUPPORTED_NOT_IMPLEMENTED`(플랫폼은 되고 우리가 안 한다) vs `UNSUPPORTED`(채널 쪽 한계,
+  예: TalkTalk). **fence는 그대로 서 있고 이 package는 WRITE를 구현하지 않는다** — 어떤 빌드도 네이버
+  답변을 등록할 수 없다는 문장은 여전히 참이다. 바뀐 것은 *왜* 그런가에 대한 기록뿐이다.
 - **CAFE24의 `NEEDS_VERIFICATION`은 "안 된다"가 아니다.** 감사가 끝나지 않았다는 뜻이고, 화면은 그렇게
   말한다("지원하지 않는다는 뜻은 아닙니다"). 감사가 끝나지 않은 것을 벤더의 한계로 그리는 것이
   이 표가 막으려는 유일한 오류다.

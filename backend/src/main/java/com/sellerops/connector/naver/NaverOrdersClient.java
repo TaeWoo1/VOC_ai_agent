@@ -82,10 +82,17 @@ public class NaverOrdersClient {
     private static final Set<String> PERMISSION_DENIED_CODES = Set.of();
     /**
      * Provider error codes that positively identify an UNREGISTERED-CALL-IP cause.
-     * Intentionally EMPTY for the same reason as {@link #PERMISSION_DENIED_CODES}
-     * — the distinguishing {@code GW.*} string is unknown and never guessed.
+     *
+     * <p>This was empty on the same grounds as {@link #PERMISSION_DENIED_CODES}, and it is no longer
+     * a guess: NAVER's own troubleshooting table gives {@code 403 GW.IP_NOT_ALLOWED} for
+     * "요청 IP가 API G/W 에서 허용한 IP가 아닌경우", and that document is vendored into this repository
+     * (`docs/vendor/naver-commerce-api/intro-troubleshooting.md`, 2026-07-22). The rule the empty set
+     * was protecting — never infer a cause from a status alone — is unchanged: an unrecognized 403 is
+     * still the hedged {@link OrderAccessProbe#ACCESS_DENIED}.
+     *
+     * <p>{@link #PERMISSION_DENIED_CODES} stays empty because that table names no code for it.
      */
-    private static final Set<String> CALL_IP_DENIED_CODES = Set.of();
+    private static final Set<String> CALL_IP_DENIED_CODES = Set.of(NaverGatewayCode.IP_NOT_ALLOWED);
     /** Seller business timezone; Naver timestamps already carry +09:00. */
     static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /**
@@ -232,7 +239,7 @@ public class NaverOrdersClient {
             return OrderAccessProbe.UNAVAILABLE;
         }
         if (status == 403) {
-            String code = errorEnvelopeCode(response.body());
+            String code = NaverGatewayCode.of(response.body());
             if (code != null && PERMISSION_DENIED_CODES.contains(code)) {
                 return OrderAccessProbe.PERMISSION_DENIED;
             }
@@ -245,28 +252,6 @@ public class NaverOrdersClient {
         // already accepted the credential, so a we-side/transient request error here
         // must not be reported as a denial.
         return OrderAccessProbe.UNAVAILABLE;
-    }
-
-    /**
-     * The sanitized envelope {@code code} scalar only (never the body, never PII),
-     * or null when absent/unparseable — mirrors {@link NaverRateLimitedException#classify}.
-     * Used solely to look up a 403 cause in the never-guessed code whitelists.
-     */
-    private String errorEnvelopeCode(String body) {
-        if (body == null || body.isBlank()) {
-            return null;
-        }
-        try {
-            JsonNode root = mapper.readTree(body);
-            JsonNode code = root == null ? null : root.get("code");
-            if (code == null || !code.isValueNode()) {
-                return null;
-            }
-            String value = code.asText();
-            return value.isBlank() ? null : value;
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     /**

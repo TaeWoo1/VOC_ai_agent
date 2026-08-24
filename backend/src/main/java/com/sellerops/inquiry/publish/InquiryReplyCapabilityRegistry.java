@@ -42,11 +42,15 @@ public class InquiryReplyCapabilityRegistry {
      * time. It has never been exercised against a real marketplace; "implemented" and "live-proven"
      * are different claims and only the first is made here.
      *
-     * <p>Both NAVER subtypes are UNSUPPORTED for a reason that lives in this repository rather than at
-     * the vendor: {@code NaverReadOnlyFenceTest} refuses {@code /external/v1/pay-merchant},
-     * {@code qnas/} and {@code /answer} by name, so no build can post a NAVER answer. Whether the
-     * NAVER Commerce API publishes an answer endpoint at all is a separate, unfinished question — and
-     * a moot one while NAVER's own routine READ is {@code BLOCKED_EXTERNAL} (§4.1, 2026-08-24).
+     * <p>Both NAVER subtypes are PLATFORM_SUPPORTED_NOT_IMPLEMENTED. This row said UNSUPPORTED until
+     * 2026-08-24, and that was wrong in the direction that matters: it read as a NAVER limitation when
+     * the refusal is entirely ours. The Commerce API index vendored here
+     * ({@code docs/vendor/naver-commerce-api/llms.txt} §문의) lists an answer endpoint for each of the
+     * two subtypes — {@code PUT /v1/contents/qnas/&#123;questionId&#125;} for 상품 문의 and
+     * {@code POST /v1/pay-merchant/inquiries/&#123;inquiryNo&#125;/answer} for 고객 문의. What blocks the
+     * send is {@code NaverReadOnlyFenceTest}, which refuses {@code /external/v1/pay-merchant},
+     * {@code qnas/} and {@code /answer} by name, so no build of this product can post a NAVER answer.
+     * Implementing them is a later package; nothing here moves toward it.
      *
      * <p>CAFE24 is NEEDS_VERIFICATION and that is deliberate. The connector reads board 6 through
      * {@code Cafe24BoardArticlesClient}, which has no write method; whether the Admin API exposes a
@@ -57,12 +61,16 @@ public class InquiryReplyCapabilityRegistry {
             new Row("COUPANG", null, InquiryReplyTransport.DIRECT_API,
                     "쿠팡 상품별 고객문의는 공식 답변 API로 등록할 수 있습니다.",
                     "CoupangInquiryReplyClient · CoupangChannelReplyAdapter (구현됨, 라이브 미실행)"),
-            new Row("NAVER", InquirySourceSubtype.NAVER_PRODUCT_QNA, InquiryReplyTransport.UNSUPPORTED,
-                    "네이버 상품 문의는 SellerOps에서 답변을 등록하지 않습니다.",
-                    "NaverReadOnlyFenceTest — 쓰기 경로 3종을 이름으로 거부"),
-            new Row("NAVER", InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY, InquiryReplyTransport.UNSUPPORTED,
-                    "네이버 고객 문의는 SellerOps에서 답변을 등록하지 않습니다.",
-                    "NaverReadOnlyFenceTest — 쓰기 경로 3종을 이름으로 거부"),
+            new Row("NAVER", InquirySourceSubtype.NAVER_PRODUCT_QNA,
+                    InquiryReplyTransport.PLATFORM_SUPPORTED_NOT_IMPLEMENTED,
+                    "네이버는 상품 문의 답변 등록 API를 제공하지만, SellerOps가 아직 연결하지 않았습니다.",
+                    "공식: PUT /v1/contents/qnas/{questionId} (llms.txt §문의) · "
+                            + "미구현: NaverReadOnlyFenceTest가 쓰기 경로 3종을 이름으로 거부"),
+            new Row("NAVER", InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY,
+                    InquiryReplyTransport.PLATFORM_SUPPORTED_NOT_IMPLEMENTED,
+                    "네이버는 고객 문의 답변 등록 API를 제공하지만, SellerOps가 아직 연결하지 않았습니다.",
+                    "공식: POST /v1/pay-merchant/inquiries/{inquiryNo}/answer (llms.txt §문의) · "
+                            + "미구현: NaverReadOnlyFenceTest가 쓰기 경로 3종을 이름으로 거부"),
             new Row("CAFE24", null, InquiryReplyTransport.NEEDS_VERIFICATION,
                     "카페24 문의 답변 등록 경로는 아직 확인하지 않았습니다. 지원하지 않는다는 뜻은 아닙니다.",
                     "Cafe24BoardArticlesClient — 읽기 전용 · 벤더 쓰기 계약 미감사"));
