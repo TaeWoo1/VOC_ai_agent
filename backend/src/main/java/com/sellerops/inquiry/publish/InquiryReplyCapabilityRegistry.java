@@ -88,27 +88,53 @@ public class InquiryReplyCapabilityRegistry {
      *       real store, and no NAVER answer can leave the process without an armed live-run approval
      *       id ({@code NaverAnswerLiveGuard}).</li>
      *   <li><b>CAFE24</b> — the platform side is now CONFIRMED and the SellerOps side is not, which is
-     *       two different facts and the row records the weaker one. Confirmed from the official Admin
-     *       API reference ({@code docs/vendor/cafe24-admin-api/post-boards-articles-comments.md}):
-     *       {@code POST /api/v2/admin/boards/&#123;board_no&#125;/articles/&#123;article_no&#125;/comments}
-     *       exists, takes scope {@code mall.write_community}, and REQUIRES {@code content},
-     *       {@code writer} and {@code password}. Two things block it, and neither is a decision
-     *       waiting to be made:
+     *       two different facts and the row records the weaker one.
+     *
+     *       <p><b>Re-retrieved and corrected 2026-08-25 (Inquiry Answer Execution v1).</b> The
+     *       previous audit named ONE candidate write path — the comment POST — and reported that no
+     *       contracted way existed to mark an existing article answered, because
+     *       {@code PUT /articles/&#123;article_no&#125;} does not accept {@code reply_status}. The
+     *       {@code PUT} observation was re-confirmed against both the English and Korean references.
+     *       <b>The inference drawn from it was wrong.</b> The same resource's {@code POST} accepts
+     *       {@code reply_article_no} — "If you want to add an reply to a post, enter the number of
+     *       the post" — and carries {@code reply_status} and {@code reply_user_id} on that same call.
+     *       On a Cafe24 board an ANSWER is itself an ARTICLE ({@code parent_article_no},
+     *       {@code reply_sequence}, {@code reply_depth}), which is why no field in the article
+     *       property list holds an answer's text. Separately, the reference publishes an
+     *       {@code urgentinquiry} resource whose reply
+     *       ({@code GET/POST/PUT /urgentinquiry/&#123;article_no&#125;/reply}) is the ONLY object in
+     *       the whole Admin reference that carries an answer's {@code content}.
+     *
+     *       <p>So there are three candidates, not one, and the reference states which one board 6
+     *       uses for none of them:
+     *       <ul>
+     *         <li><b>A1</b> reply ARTICLE — {@code POST /boards/&#123;board_no&#125;/articles} with
+     *             {@code reply_article_no}; requires {@code writer} + {@code client_ip}.</li>
+     *         <li><b>A2</b> comment — {@code POST /articles/&#123;article_no&#125;/comments};
+     *             requires {@code writer} + {@code password}.</li>
+     *         <li><b>B</b> urgentinquiry reply — {@code POST /urgentinquiry/&#123;article_no&#125;/reply};
+     *             requires {@code user_id}, and needs no writer, password or client_ip.</li>
+     *       </ul>
+     *
+     *       <p>Two things still block all three, and neither is a decision waiting to be made:
      *       <ol>
-     *         <li>A comment is not proven to BE a seller answer on board 6. SellerOps derives
-     *             ANSWERED from the article's {@code reply_status}, and nothing in this repository
-     *             shows that posting a comment moves it — comments are not collected
-     *             ({@code Cafe24ApiConnector#unsupportedScopes} names COMMENTS) and every one of the
-     *             905 collected board-6 articles carries {@code PENDING}. Settling it needs a READ of
-     *             the comments on an article whose status is 처리완료, which is a live marketplace
-     *             call and needs its own approval.</li>
-     *         <li>{@code writer} and {@code password} are required and SellerOps holds neither.
-     *             Hardcoding them is forbidden and inventing them would put a fabricated author on a
-     *             customer-visible reply.</li>
+     *         <li>Which representation this mall's board 6 actually uses is unproven. It is
+     *             answerable by READ alone — 43 board-6 articles in the canonical Demo Org already
+     *             carry {@code reply_status=C}, so the seller's own past answers are on the platform
+     *             to be observed, and no unanswered customer inquiry need be touched. The bounded
+     *             READ manifest is {@code docs/inquiry_answer_execution_v1.md} §7 and it stops in
+     *             front of approval.</li>
+     *         <li>The actor values differ per path and SellerOps holds none of them: the stored
+     *             Cafe24 connection is exactly {@code mall_id} + {@code refresh_token}
+     *             ({@code CredentialTemplates}). Hardcoding them is forbidden and inventing them
+     *             would put a fabricated author on a customer-visible reply. One documented exit
+     *             exists: {@code member_id} equal to {@code mall_id} makes the author render as the
+     *             shop's name rather than a person's.</li>
      *       </ol>
      *       The connection's own grant is a third, independent fact:
-     *       {@code mall.read_community,mall.read_order,mall.read_product} — read-only, so a write
-     *       would need the seller's re-consent even with everything above settled.</li>
+     *       {@code mall.read_community,mall.read_order,mall.read_product} — read-only. And it cannot
+     *       currently be widened even deliberately: {@code Cafe24OnboardingService} throws at
+     *       construction if the configured scope string contains {@code write}.</li>
      *   <li><b>COUPANG · GMARKET</b> — unchanged: implemented, never live-proven.</li>
      * </ul>
      */
@@ -133,13 +159,22 @@ public class InquiryReplyCapabilityRegistry {
                     "ESM+(지마켓/옥션) 문의는 구현된 답변 등록 경로로 보낼 수 있습니다.",
                     "EsmAnswerClient · EsmChannelReplyAdapter (구현됨, 실행 플래그 뒤에서만 등록)"),
             new Row("CAFE24", null, InquiryReplyTransport.NEEDS_VERIFICATION, false,
-                    "카페24 게시판 댓글 등록 API는 확인했지만, 그 댓글이 문의 답변으로 처리되는지는 "
-                            + "아직 확인하지 않았습니다. 지원하지 않는다는 뜻은 아닙니다.",
-                    "플랫폼: POST /api/v2/admin/boards/{board_no}/articles/{article_no}/comments "
-                            + "(scope mall.write_community, 필수 content·writer·password) — 공식 사본 보관 · "
-                            + "미확정: board 6 댓글이 reply_status를 바꾸는지 근거 없음(댓글 미수집, "
-                            + "수집된 905건 전부 PENDING) · writer/password를 SellerOps가 보유하지 않음 · "
-                            + "현재 연결 scope는 mall.read_community,mall.read_order,mall.read_product (쓰기 미포함)"));
+                    "카페24 게시판에 답변을 등록하는 공식 방법은 확인했지만, 이 게시판이 그 중 어떤 "
+                            + "방식을 쓰는지는 아직 확인하지 않았습니다. 지원하지 않는다는 뜻은 아닙니다.",
+                    "플랫폼 후보 3종(공식 사본 보관, 전부 scope mall.write_community) · "
+                            + "A1 답변 글: POST /boards/{board_no}/articles + reply_article_no "
+                            + "(필수 writer·client_ip, 같은 호출에 reply_status·reply_user_id) · "
+                            + "A2 댓글: POST /boards/{board_no}/articles/{article_no}/comments "
+                            + "(필수 content·writer·password) · "
+                            + "B 긴급문의 답변: POST /urgentinquiry/{article_no}/reply "
+                            + "(필수 content·user_id) — 답변 본문을 싣는 유일한 리소스 · "
+                            + "미확정: board 6이 셋 중 무엇을 쓰는지 근거 없음 — READ proof는 설계되어 "
+                            + "승인 대기(docs/inquiry_answer_execution_v1.md §7), 이미 답변된 43건이 "
+                            + "reply_status=C로 저장돼 있어 미답변 문의를 건드리지 않고 관측 가능 · "
+                            + "행위자 값(writer/password/client_ip/user_id)을 SellerOps가 보유하지 않음 "
+                            + "(보관 값은 mall_id·refresh_token 둘뿐) · "
+                            + "현재 연결 scope는 mall.read_community,mall.read_order,mall.read_product "
+                            + "(쓰기 미포함이며 온보딩이 write scope 요청을 기동 시 거부함)"));
 
     /**
      * The audited answer for a channel + source subtype.
