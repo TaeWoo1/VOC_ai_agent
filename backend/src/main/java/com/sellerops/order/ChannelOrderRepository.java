@@ -19,4 +19,10 @@ public interface ChannelOrderRepository extends JpaRepository<ChannelOrder, UUID
 
     List<ChannelOrder> findAllByOrgIdAndChannelIdAndSummaryDate(
             UUID orgId, UUID channelId, LocalDate summaryDate);
+
+    /** Per-channel order counts and the newest summary date — {@code [channelId, count, max(summaryDate)]}. */
+    @org.springframework.data.jpa.repository.Query(
+            "select o.channelId, count(o), max(o.summaryDate) from ChannelOrder o "
+            + "where o.orgId = :orgId group by o.channelId")
+    List<Object[]> countByChannel(@org.springframework.data.repository.query.Param("orgId") UUID orgId);
 }

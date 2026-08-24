@@ -53,7 +53,15 @@ export type ToolPrecondition =
    * are the same read; declaring them as one row with the weaker precondition would say a product-scoped
    * claim can be made without a product, which is A1.
    */
-  | "PRODUCT_GROUPING";
+  | "PRODUCT_GROUPING"
+  /**
+   * The run names one channel, or asks to be split by channel.
+   *
+   * Parallel to {@link "PRODUCT_GROUPING"} on the other axis, and one row rather than two because the
+   * read is the same read: a scoped run filters the coverage list to one channel, a grouped run keeps
+   * all of them, and neither needs anything resolved first — the channel set comes from the answer.
+   */
+  | "CHANNEL_SCOPE_OR_GROUPING";
 
 export interface ToolCapability {
   readonly specialist: SpecialistName;
@@ -142,6 +150,17 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     requires: ["PRODUCT_GROUPING"],
   },
 
+  {
+    // <b>The only read that can say what is NOT there.</b> Review issues are extracted org-wide and
+    // carry no channel, so a channel question about reviews has no answer on that list — every
+    // citation is refused as CHANNEL_UNPROVEN. Coverage rows carry a channel each, which is what makes
+    // "쿠팡 리뷰는 API가 없습니다" and "네이버 리뷰 12건" different sentences instead of two silences.
+    specialist: "REVIEW_OPS",
+    tool: OPERATOR_TOOL.GET_CHANNEL_COVERAGE,
+    needKinds: ["REVIEW_SIGNAL"],
+    requires: ["CHANNEL_SCOPE_OR_GROUPING"],
+  },
+
   // ── InquiryOps — the queue, the repeats, and what was answered before.
   {
     specialist: "INQUIRY_OPS",
@@ -158,6 +177,14 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     tool: OPERATOR_TOOL.SEARCH_UNANSWERED_INQUIRIES,
     needKinds: ["INQUIRY_VOLUME"],
     requires: ["NONE"],
+  },
+  {
+    // The channel half of the inbox question. `get_today_inbox` returns one org-wide number and cannot
+    // be split; this returns one row per channel WITH the reason each row is what it is.
+    specialist: "INQUIRY_OPS",
+    tool: OPERATOR_TOOL.GET_CHANNEL_COVERAGE,
+    needKinds: ["INQUIRY_VOLUME"],
+    requires: ["CHANNEL_SCOPE_OR_GROUPING"],
   },
   {
     specialist: "INQUIRY_OPS",
@@ -241,11 +268,23 @@ export type GroupingSupport =
   /** The rows behind this need carry no product link at all — nothing could group them. */
   | "NO_PRODUCT_ATTRIBUTION"
   /** The rows ARE attributed, but no read returns them grouped, and building one is new retrieval. */
-  | "NO_GROUPED_READ";
+  | "NO_GROUPED_READ"
+  /**
+   * The rows carry no CHANNEL, so they cannot be split along that axis.
+   *
+   * <b>Its own value, and not a synonym for the product one.</b> Cross-Channel Operational Reasoning
+   * v1 gave the runtime a per-channel read — `get_channel_coverage` — so the channel axis is
+   * answerable for whole data types. It is NOT answerable INSIDE a product grouping: the reads that
+   * attribute evidence to a product (`evidence-summary:byProduct`, `dashboard:topProductIssues`)
+   * return a product id and a count and no channel anywhere, and `channel_products` says which
+   * channels a product is LISTED on, which is a different fact from where its reviews came from.
+   * Crossing the two would attribute a count to a channel on the strength of a listing.
+   */
+  | "NO_CHANNEL_ATTRIBUTION";
 
 export interface GroupingCapability {
   readonly needKind: NeedKind;
-  readonly dimension: "PRODUCT";
+  readonly dimension: "PRODUCT" | "CHANNEL" | "PRODUCT_CHANNEL";
   readonly support: GroupingSupport;
   /** The reads that produce the grouped evidence. Empty when nothing does. */
   readonly via: readonly OperatorToolName[];
@@ -298,6 +337,55 @@ export const GROUPING_CAPABILITIES: readonly GroupingCapability[] = [
     // cluster of inquiries by signature, and the cluster never carried the product.
     why: "customer-memory/RepeatedInquiryView: axis,key,occurrences — no productId",
   },
+
+  /* ── The channel axis (Cross-Channel Operational Reasoning v1, 2026-08-24) ── */
+  {
+    needKind: "INQUIRY_VOLUME",
+    dimension: "CHANNEL",
+    support: "SUPPORTED",
+    via: [OPERATOR_TOOL.GET_CHANNEL_COVERAGE],
+    // One row per (channel × data type) carrying the counts AND the reason each count is what it is.
+    // Live 2026-08-24 on the canonical Demo Org the per-channel unanswered figures summed to exactly
+    // the org total the home screen prints (0 + 69 + 0 = 69) — the parts and the whole are one corpus.
+    why: "channel-coverage: rows/openRows per channel; sums to inbox unansweredInquiries",
+  },
+  {
+    needKind: "REVIEW_SIGNAL",
+    dimension: "CHANNEL",
+    support: "SUPPORTED",
+    via: [OPERATOR_TOOL.GET_CHANNEL_COVERAGE],
+    why: "channel-coverage: rows/openRows per channel for REVIEW",
+  },
+  {
+    needKind: "REPEAT_PATTERN",
+    dimension: "CHANNEL",
+    support: "NO_CHANNEL_ATTRIBUTION",
+    via: [],
+    // Same shape as its product row: a repeat is a signature cluster, and the cluster carries neither.
+    why: "customer-memory/RepeatedInquiryView: axis,key,occurrences — no channelCode",
+  },
+  {
+    needKind: "REVIEW_SIGNAL",
+    dimension: "PRODUCT_CHANNEL",
+    support: "NO_CHANNEL_ATTRIBUTION",
+    via: [],
+    // Both axes work; their CROSS does not. `evidence-summary:byProduct` and
+    // `dashboard:topProductIssues` return productId + count and no channel, and a product's listings
+    // (`channel_products`) say where it is SOLD, not where a given review arrived from. Answering
+    // "네이버의 이 상품 리뷰 문제" from a listing would attribute rows to a channel on the strength of
+    // a catalogue join — the C4 mistake with a channel wearing the product's clothes.
+    why: "evidence-summary:byProduct / dashboard:topProductIssues: productId,count — no channelCode",
+  },
+  {
+    needKind: "INQUIRY_VOLUME",
+    dimension: "PRODUCT_CHANNEL",
+    support: "NO_CHANNEL_ATTRIBUTION",
+    via: [],
+    // The queue row DOES carry a channel; what it does not carry is a product (see the PRODUCT row
+    // above). So the cross fails on the product half, and the honest word is the one that names the
+    // axis that is actually missing from the rows a cross would have to group.
+    why: "inquiry/queue/dto/InquiryQueueItem: channel present, productId absent",
+  },
 ];
 
 /**
@@ -306,7 +394,9 @@ export const GROUPING_CAPABILITIES: readonly GroupingCapability[] = [
  * An undeclared pair is `NO_GROUPED_READ`: nothing groups what nobody declared, and the honest failure
  * for a missing declaration is the same as for a missing read.
  */
-export function groupingSupportOf(needKind: NeedKind, dimension: "PRODUCT"): GroupingSupport {
+export function groupingSupportOf(
+  needKind: NeedKind, dimension: "PRODUCT" | "CHANNEL" | "PRODUCT_CHANNEL",
+): GroupingSupport {
   return GROUPING_CAPABILITIES.find((c) => c.needKind === needKind && c.dimension === dimension)
     ?.support ?? "NO_GROUPED_READ";
 }
@@ -325,9 +415,14 @@ export function groupingLimitSentence(
   }
   const subject = needKind === "REPEAT_PATTERN" ? "반복 문의 기록"
     : needKind === "INQUIRY_VOLUME" ? "미답변 문의 목록"
-      : "이 정보";
-  const cause = support === "NO_PRODUCT_ATTRIBUTION"
-    ? `${subject}에는 상품 정보가 없어 상품별로 나눌 수 없습니다.`
-    : `${subject}은 상품별로 모아 볼 수 있는 조회가 아직 없어 상품별로 나누지 못했습니다.`;
+      // Named, because "이 정보" is what a sentence says when it does not know what it is about, and
+      // this one does. Live 2026-08-24 the cross-axis sentence read "이 정보에는 채널 정보가 없어".
+      : needKind === "REVIEW_SIGNAL" ? "리뷰 문제 기록"
+        : "이 정보";
+  const cause = support === "NO_CHANNEL_ATTRIBUTION"
+    ? `${subject}에는 채널 정보가 함께 있지 않아 상품과 채널을 교차해서 나눌 수 없습니다.`
+    : support === "NO_PRODUCT_ATTRIBUTION"
+      ? `${subject}에는 상품 정보가 없어 상품별로 나눌 수 없습니다.`
+      : `${subject}은 상품별로 모아 볼 수 있는 조회가 아직 없어 상품별로 나누지 못했습니다.`;
   return `${cause} ${hasRows ? "아래 수치는 전체 기준입니다." : "상품별로는 지금 답할 수 없습니다."}`;
 }

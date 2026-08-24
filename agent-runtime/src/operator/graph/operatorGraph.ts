@@ -41,7 +41,7 @@ import { instanceMentionsOf, isInstance } from "../plan/EntityRole";
 import { groupingOf } from "../group/ProductGrouping";
 import type { NeedScope, RejectedEvidence } from "../scope/EvidenceScope";
 import {
-  needScopeOf, partitionEvidence, periodNamedIn, planScopeOf, reasonSentence,
+  channelScopeOf, needScopeOf, partitionEvidence, periodNamedIn, planScopeOf, reasonSentence,
 } from "../scope/EvidenceScope";
 import { basisSentence } from "../defaults/OperationalDefaults";
 import type { SpecialistTerminal, ToolFailure } from "../failure/SpecialistOutcome";
@@ -131,6 +131,9 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       // operator reading a trace must be able to see that a "어느 상품" question was read as one.
       grouping: groupingOf(plan, state.goalText),
       periodNamed: periodNamedIn(plan),
+      // `?? "NONE"` because `typeof null === "object"` and the trace printed "<object>",
+      // which reads as a value that could not be logged rather than as "no channel named".
+      channelScope: channelScopeOf(plan) ?? "NONE",
     });
     return {
       plan,
@@ -300,6 +303,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       // worked this out for itself would be a second place deciding what "상품별" means.
       grouping: groupingOf(plan, state.goalText),
       periodNamed: periodNamedIn(plan, resolved),
+      // The single channel this run is about, or null. Decided here for the same reason `grouping` is:
+      // the gate will judge every citation against ONE channel scope, and a specialist that worked out
+      // its own would be free to read the sentence differently than the gate that overrules it.
+      channelScope: channelScopeOf(plan, resolved),
       // The planner's restatement of the goal, used only where the seller's own text is missing.
       plannerGoal: plan.userGoal,
       // What the run has already PROVEN, not what it might. A specialist reads this the same way it

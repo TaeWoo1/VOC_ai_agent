@@ -55,10 +55,31 @@ const SPECIALIST_SOURCES: Partial<Record<SpecialistName, string>> = {
   REPORT_OPS: "reportOpsNode.ts",
 };
 
+/**
+ * A specialist's source, plus every graph-local module it imports.
+ *
+ * <b>A tool a specialist reaches is a tool a specialist invokes.</b> This used to read one file, which
+ * was the same thing while every `registry.invoke` lived in the specialist that made it. It stopped
+ * being the same thing when a read became genuinely shared — channel coverage is a property of the
+ * RUN, and two specialists calling it must not read it twice — and a matrix that could not see through
+ * one import would have reported that shared read as an undeclared capability, i.e. as a bug in the
+ * declaration rather than in the code. Following the import keeps the rule intact: the matrix still
+ * has to name every tool that can actually be called on this specialist's behalf.
+ */
 function sourceOf(specialist: SpecialistName): string {
-  return readFileSync(
-    join(__dirname, "../../src/operator/graph", SPECIALIST_SOURCES[specialist]!), "utf8",
-  );
+  const dir = join(__dirname, "../../src/operator/graph");
+  const entry = readFileSync(join(dir, SPECIALIST_SOURCES[specialist]!), "utf8");
+  const localImports = [...entry.matchAll(/from "\.\/([A-Za-z0-9_]+)"/g)].map((m) => m[1]!);
+  const reached = [...new Set(localImports)]
+    .filter((name) => !Object.values(SPECIALIST_SOURCES).includes(`${name}.ts`))
+    .map((name) => {
+      try {
+        return readFileSync(join(dir, `${name}.ts`), "utf8");
+      } catch {
+        return "";
+      }
+    });
+  return [entry, ...reached].join("\n");
 }
 
 /** The tools one specialist's code actually calls, read off its `registry.invoke` sites. */

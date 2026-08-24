@@ -114,6 +114,9 @@ export interface RejectedEvidence {
  * lying.
  */
 const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
+  // A coverage verdict is a statement about a channel as a whole — the same granularity as any
+  // other org-level count, and never a per-row list.
+  CHANNEL_COVERAGE: "COUNT",
   INBOX_COUNT: "COUNT",
   PRODUCT_SIGNAL: "COUNT",
   REVIEW_ISSUE: "ISSUE_SIGNAL",
@@ -241,6 +244,28 @@ export function needScopeOf(
     temporal: temporalDemandOf(need.kind, periodNamedIn(plan, resolved)),
     granularities: fromPlan.length > 0 ? fromPlan : KIND_FLOOR[need.kind] ?? [],
   };
+}
+
+/**
+ * Which single channel this run is scoped to, or null.
+ *
+ * <b>Exported for the same reason {@link periodNamedIn} is.</b> A specialist has to know which channel
+ * a scoped run is about — to read that channel's coverage and to say what it could not see — and a
+ * specialist re-deriving it from the sentence would be a second reading of the same plan, free to
+ * disagree with the gate that will judge its evidence.
+ *
+ * <b>Only an INSTANCE scopes.</b> "채널별" names the axis, not a channel; reading it as a scope would
+ * narrow a run to a channel called "채널별" and answer nothing.
+ */
+export function channelScopeOf(
+  plan: InvestigationPlan,
+  resolved: readonly ResolvedEntity[] = plan.entities.resolved,
+): string | null {
+  const named = plan.entities.unresolved.filter(isInstance);
+  const mention = named.find((m) => m.kind === "CHANNEL")?.mention
+    ?? resolved.find((r) => r.kind === "CHANNEL")?.label
+    ?? null;
+  return mention ? normalizeChannel(mention) : null;
 }
 
 /**

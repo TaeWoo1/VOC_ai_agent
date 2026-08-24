@@ -24,6 +24,7 @@ import type {
   ProductSignals,
   ProductSummary,
   RepeatedInquiry,
+  ChannelCoverageRow,
 } from "../../src/spring/types";
 import type {
   CustomerMemorySearchParams,
@@ -61,6 +62,8 @@ export interface FakeOperatorSeed {
   /** Product Knowledge by product id — identity, listings, variants, facts and per-facet coverage. */
   readonly knowledge?: Record<string, ProductKnowledge>;
   readonly inquiryContext?: InquiryThreadContext;
+  /** Per (channel × data type) coverage rows. Absent ⇒ the client has no such method at all. */
+  readonly channelCoverage?: ChannelCoverageRow[];
   /**
    * When absent, the client has NO planGoal method at all.
    *
@@ -98,7 +101,7 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
 
   readonly calls = {
     inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
-    plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0,
+    plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0, channelCoverage: 0,
   };
 
   /** Every digest the judge was sent, so a test can assert what actually left for a vendor. */
@@ -116,6 +119,14 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     this.seed = seed;
     // The two seams are attached ONLY when seeded. A client without them is indistinguishable from a
     // backend that predates the endpoint, which is exactly the fallback path worth testing.
+    if (seed.channelCoverage) {
+      // Attached only when seeded, like the two model seams: a client without it is exactly a backend
+      // that predates the endpoint, and a channel question against one must degrade rather than throw.
+      (this as OperatorSpringClient).getChannelCoverage = async () => {
+        this.calls.channelCoverage += 1;
+        return seed.channelCoverage!;
+      };
+    }
     if (seed.plan || seed.plansByGoal) {
       (this as OperatorSpringClient).planGoal = async (request) => {
         this.calls.plan += 1;

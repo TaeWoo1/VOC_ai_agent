@@ -67,7 +67,17 @@ export type EvidenceKind =
    * and giving it the kind of the rows it could not group ("REPEATED_INQUIRY") would put an undated,
    * countless row into a channel whose every member knows when it was seen.
    */
-  | "GROUPING_GAP";
+  | "GROUPING_GAP"
+  /**
+   * What one channel can currently say about one data type — the FRESHNESS axis, as evidence.
+   *
+   * <b>Its own kind because it is the only evidence about what is NOT there.</b> Every other kind is
+   * minted from rows and can therefore only describe what was seen; this one is minted from a channel's
+   * capability, connection, routine state and newest row, and it is what a sentence like "네이버 문의는
+   * 자동 수집이 멈춰 있어 지금이 최신인지 확인하지 못했습니다" rests on. Giving it the kind of the rows
+   * it is about would let a coverage sentence be cited as a count, and a count as a coverage sentence.
+   */
+  | "CHANNEL_COVERAGE";
 
 /**
  * Where a claim came from. Ids, labels, counts and dates — never a body, never a quote.

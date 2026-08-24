@@ -30,13 +30,34 @@ import type { EventRange } from "../scope/EvidenceTime";
 import { eventRange } from "../scope/EvidenceTime";
 
 /**
- * The axis an answer is grouped along.
+ * The axis (or axes) an answer is grouped along.
  *
- * Closed, and `PRODUCT` is the only dimension this package builds. A channel axis is the obvious next
- * one and is deliberately absent: no evidence row the Operator holds carries a channel today, so a
- * `CHANNEL` value would be a dimension nothing could ever fill.
+ * <b>The channel axis arrived when something could fill it.</b> This type read `"NONE" | "PRODUCT"`
+ * with a note saying a `CHANNEL` value would be "a dimension nothing could ever fill" — true while no
+ * evidence row carried a channel. `get_channel_coverage` carries one per row, so the axis now has a
+ * source and is added; `PRODUCT_CHANNEL` is the cross of the two, not a third thing.
+ *
+ * <b>Combining is not the same as choosing.</b> A run may be asked for both axes at once ("채널별
+ * 상품 문제"), and collapsing that to one would silently answer half the question. Use
+ * {@link groupsBy} rather than comparing this value, so a new combination cannot quietly disable an
+ * axis that was already working.
  */
-export type GroupingDimension = "NONE" | "PRODUCT";
+export type GroupingDimension = "NONE" | "PRODUCT" | "CHANNEL" | "PRODUCT_CHANNEL";
+
+/** Whether this dimension includes an axis. The only sanctioned way to read a {@link GroupingDimension}. */
+export function groupsBy(dimension: GroupingDimension, axis: "PRODUCT" | "CHANNEL"): boolean {
+  if (dimension === "PRODUCT_CHANNEL") {
+    return true;
+  }
+  return dimension === axis;
+}
+
+/** Compose two axis verdicts into one dimension. */
+export function combineDimensions(product: boolean, channel: boolean): GroupingDimension {
+  if (product && channel) return "PRODUCT_CHANNEL";
+  if (product) return "PRODUCT";
+  return channel ? "CHANNEL" : "NONE";
+}
 
 /**
  * Which axis this run should answer along.
@@ -53,24 +74,40 @@ export type GroupingDimension = "NONE" | "PRODUCT";
  *     planner's free text; it is reading the only place the word appears.
  */
 export function groupingOf(plan: InvestigationPlan, goalText?: string): GroupingDimension {
-  // A named or resolved product is a scope, not an axis. This check is first and is the safety.
-  if (namesInstance(plan, ["PRODUCT"])) {
-    return "NONE";
-  }
-  const declared = plan.entities.unresolved.some(
-    (e) => e.role === "CATEGORY" && namesCategoryHead("PRODUCT", e.mention),
-  );
-  if (declared) {
-    return "PRODUCT";
-  }
-  return asksForAxis("PRODUCT", plan.userGoal) || asksForAxis("PRODUCT", goalText ?? "")
-    ? "PRODUCT"
-    : "NONE";
+  return combineDimensions(asksFor("PRODUCT", plan, goalText), asksFor("CHANNEL", plan, goalText));
 }
 
-/** Whether a mention of this kind would name the axis. Exposed for the log line and the tests. */
+/**
+ * Does this run ask to be grouped along one axis?
+ *
+ * <b>An instance always cancels its own axis, and only its own.</b> Naming one product is a scope, so
+ * there is nothing to rank; naming one CHANNEL is also a scope — and the scope gate already enforces
+ * it ({@code CHANNEL_MISMATCH}) — but neither cancels the OTHER axis. "네이버에서 어느 상품이
+ * 문제야?" is one channel and every product, and folding the channel instance into the product axis
+ * would answer a different question than the one asked.
+ */
+function asksFor(axis: EntityKind & ("PRODUCT" | "CHANNEL"), plan: InvestigationPlan,
+                 goalText?: string): boolean {
+  if (namesInstance(plan, [axis])) {
+    return false;
+  }
+  const declared = plan.entities.unresolved.some(
+    (e) => e.role === "CATEGORY" && namesCategoryHead(axis, e.mention),
+  );
+  return declared || asksForAxis(axis, plan.userGoal) || asksForAxis(axis, goalText ?? "");
+}
+
+/** Which mention kinds would name this dimension's axes. Exposed for the log line and the tests. */
+export function axisKindsOf(dimension: GroupingDimension): readonly EntityKind[] {
+  const kinds: EntityKind[] = [];
+  if (groupsBy(dimension, "PRODUCT")) kinds.push("PRODUCT");
+  if (groupsBy(dimension, "CHANNEL")) kinds.push("CHANNEL");
+  return kinds;
+}
+
+/** Back-compat for callers that only ever cared about the product axis. */
 export function axisKindOf(dimension: GroupingDimension): EntityKind | null {
-  return dimension === "PRODUCT" ? "PRODUCT" : null;
+  return groupsBy(dimension, "PRODUCT") ? "PRODUCT" : null;
 }
 
 /**

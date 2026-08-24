@@ -41,6 +41,7 @@ export const OPERATOR_TOOL = {
   SEARCH_CHANNEL_KNOWLEDGE: "search_channel_knowledge",
   GET_CHANNEL_CAPABILITY: "get_channel_capability",
   GET_CONNECTION_GUIDANCE: "get_connection_guidance",
+  GET_CHANNEL_COVERAGE: "get_channel_coverage",
 } as const;
 
 export type OperatorToolName = (typeof OPERATOR_TOOL)[keyof typeof OPERATOR_TOOL];
@@ -275,6 +276,22 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         + "OAuth 스코프, 호출 IP 제한, 만료·재동의 규칙. 연결 안내 화면과 같은 사실을 읽는다. "
         + "필요한 정보: CHANNEL_KNOWLEDGE.",
       schema: z.object({ channel: z.enum(["NAVER", "COUPANG", "CAFE24"]) }),
+    })),
+
+    // <b>The read that answers "어느 채널에서?" and refuses "없습니다".</b> Every other tool returns
+    // rows and therefore can only describe what WAS seen; this one returns, per channel and data type,
+    // whether the channel offers it at all, whether this seller is connected, whether routine
+    // collection is actually running, and how old the newest row is. A channel with no account is a
+    // row here, not an omission — an omitted channel is read as a zero by anything that counts what it
+    // was given, and that is precisely the false calm the whole coverage vocabulary exists to prevent.
+    read(tool(async () => deps.operator.getChannelCoverage?.() ?? [], {
+      name: OPERATOR_TOOL.GET_CHANNEL_COVERAGE,
+      description:
+        "채널별로 지금 무엇을 말할 수 있는지 — 그 채널이 이 데이터를 제공하는지, 연결되어 있는지, "
+        + "자동 수집이 실제로 돌고 있는지, 가지고 있는 행이 몇 건이고 가장 최근 것이 언제인지. "
+        + "**'0건'과 '미지원'과 '최신인지 모름'을 구분하는 유일한 도구다** — 채널별로 나눠 답하거나 "
+        + "'없습니다'라고 말하려면 반드시 먼저 읽어야 한다. 필요한 정보: CHANNEL_COVERAGE.",
+      schema: z.object({}),
     })),
   ];
 }

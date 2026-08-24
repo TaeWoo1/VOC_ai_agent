@@ -714,3 +714,48 @@ export interface AgentJudgeView {
   readonly needsMoreReason: string | null;
   readonly providerVersion: string | null;
 }
+
+/* ─────────────── Cross-Channel Operational Reasoning v1 (2026-08-24) ─────────────── */
+
+/**
+ * Whether one channel's data of one type may be spoken about as CURRENT — mirror of the backend's
+ * `com.sellerops.coverage.ChannelDataState`.
+ *
+ * <b>A third axis, and never a merge with the other two.</b> {@link AttentionCoverage} answers "can
+ * these rows be attributed to this scope"; {@link KnowledgeCoverage} answers "do we hold this fact".
+ * Neither can answer "does this channel still tell us what is happening", and the day that question
+ * became unavoidable is on the record: NAVER 문의 was live-proven on two official resources and, hours
+ * later, its first routine run was refused at token issuance. A runtime with one word for "no data"
+ * would have to call that channel either unsupported (disproven) or current (untrue).
+ *
+ * <b>`ZERO` is the scarcest value.</b> It is the only one from which an answer may say "없습니다".
+ */
+export type ChannelDataState =
+  | "OBSERVED_FRESH"
+  | "OBSERVED_FRESHNESS_UNPROVEN"
+  | "ZERO"
+  | "NOT_SUPPORTED"
+  | "NOT_CONNECTED"
+  | "BLOCKED";
+
+/** Mirror of `ChannelCoverageRow` — one channel × one data type, with the facts behind the verdict. */
+export interface ChannelCoverageRow {
+  readonly channelCode: string;
+  readonly channelNameKo: string | null;
+  readonly dataType: string;
+  readonly state: ChannelDataState;
+  /** Whether the CHANNEL offers this type — declared capability, never this deployment's wiring. */
+  readonly supported: boolean;
+  readonly verificationStatus: string | null;
+  readonly connected: boolean;
+  readonly connectionStatus: string | null;
+  readonly routineEnabled: boolean;
+  /** null / "OPERATOR" / "SYSTEM" — who stopped routine collection, when it is stopped. */
+  readonly routinePausedBy: string | null;
+  readonly lastSuccessfulSyncAt: string | null;
+  readonly rows: number;
+  /** Unanswered inquiries / negative reviews. `null` where the type has no such subset. */
+  readonly openRows: number | null;
+  /** The newest SOURCE time among the stored rows — never the read time. */
+  readonly newestObservedAt: string | null;
+}

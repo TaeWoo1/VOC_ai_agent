@@ -67,6 +67,27 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
     @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.productId is null" + ACTIVE)
     long countByOrgIdAndProductIdIsNull(@Param("orgId") UUID orgId);
 
+    /**
+     * Per-channel counts of this org's ACTIVE inquiries — {@code [channelId, total, unanswered]}.
+     *
+     * <b>One read, not one per channel.</b> The caller needs every channel the org actually holds rows
+     * on, including the ones with zero, and a loop of counts would make "we did not ask about this
+     * channel" and "this channel has none" the same absent row. Grouping here returns exactly the
+     * channels that HAVE rows; the caller supplies the zero for the rest from the channel registry, so
+     * the two cases stay distinguishable at the only place that can tell them apart.
+     *
+     * <b>Carries {@link #ACTIVE}</b> — a channel breakdown of "답변이 필요한 문의" must be the same
+     * corpus as the org total beside it, or the parts will not sum to the whole on screen.
+     */
+    @Query("select q.channelId, count(q), sum(case when q.status = 'UNANSWERED' then 1 else 0 end) "
+            + "from Inquiry q where q.orgId = :orgId" + ACTIVE + "group by q.channelId")
+    List<Object[]> countActiveByChannel(@Param("orgId") UUID orgId);
+
+    /** Newest inquiry receipt time per channel — {@code [channelId, max(receivedAt)]}. */
+    @Query("select q.channelId, max(q.receivedAt) from Inquiry q where q.orgId = :orgId"
+            + ACTIVE + "group by q.channelId")
+    List<Object[]> newestReceivedAtByChannel(@Param("orgId") UUID orgId);
+
     /** Ids in one operational state — the projection backfill's reversal candidates. */
     @Query("select q.id from Inquiry q where q.orgId = :orgId and q.operationalState = :state")
     List<UUID> findIdsByOrgIdAndOperationalState(@Param("orgId") UUID orgId,

@@ -15,6 +15,9 @@ import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import type { SpecialistInput } from "./specialistInput";
 import type { IssueEvidenceSummary, ReviewIssueSummary } from "../../spring/types";
 import type { ToolFailure } from "../failure/SpecialistOutcome";
+import { groupsBy } from "../group/ProductGrouping";
+import { groupingLimitSentence, groupingSupportOf } from "../tools/ToolReachability";
+import { channelFindings, readChannelCoverage } from "./channelCoverageStep";
 import { attemptTool } from "../failure/SpecialistOutcome";
 import { eventRange, temporalDemandOf } from "../scope/EvidenceTime";
 import type { GroupedProducts, IssueSlice } from "../group/ProductGrouping";
@@ -92,6 +95,71 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
     return pending("반복 문제를 읽기 전에 예산이 끝났습니다.");
   }
 
+  // <b>A channel question is not an issue question.</b> Review issues are extracted org-wide and no
+  // issue row carries a channel, so a channel-scoped or channel-grouped review question cannot be
+  // answered from that list at all — every citation would be refused as CHANNEL_UNPROVEN, and before
+  // this branch existed the run simply said nothing. Coverage rows answer the question that was
+  // actually asked: which channels this seller has reviews from, how many, and whether "0" means
+  // anything. Read FIRST, so a run that fails the issue read still answers the channel half.
+  if (groupsBy(input.grouping, "CHANNEL") || input.channelScope != null) {
+    const needId = input.needs[0]?.id;
+    if (needId) {
+      const read = await readChannelCoverage(input, "REVIEW_OPS", { read: null }, needId);
+      if (read.evidence.length > 0) {
+        const produced = channelFindings(read, "REVIEW", "REVIEW_OPS", needId, input.channelScope);
+        // Both axes work; their CROSS does not — the product-attributed reads return a product id and
+        // a count and no channel. Saying so is the difference between an answer with a stated gap and
+        // a channel answer standing in for a question about two axes.
+        const cross = groupsBy(input.grouping, "PRODUCT")
+          ? groupingLimitSentence(
+            "REVIEW_SIGNAL", groupingSupportOf("REVIEW_SIGNAL", "PRODUCT_CHANNEL"),
+            produced.rows.length > 0,
+          )
+          : null;
+        const crossGap = cross
+          ? evidence.add({
+            kind: "GROUPING_GAP",
+            sourceTool: OPERATOR_TOOL.GET_CHANNEL_COVERAGE,
+            args: { grouping: "PRODUCT_CHANNEL" },
+            locator: { count: produced.rows.length, label: "상품×채널 리뷰" },
+            events: null,
+            coverage: "COVERED",
+            provenance: "channel-coverage/cross:no-channel-attribution",
+          })
+          : null;
+        return {
+          specialist: "REVIEW_OPS",
+          coverage: [],
+          findings: crossGap && cross
+            ? [...produced.findings, {
+              findingId: `f-${crossGap.evidenceId}`,
+              specialist: "REVIEW_OPS" as const,
+              statement: cross,
+              evidenceIds: [crossGap.evidenceId],
+              confidence: "NEEDS_REVIEW" as const,
+              verdict: null,
+              surfaceLink: null,
+              claimsCoverageLimit: true,
+              needId,
+            }]
+            : produced.findings,
+          evidence: crossGap ? [...read.evidence, crossGap] : read.evidence,
+          ...(produced.rows.length === 0
+            ? { note: "요청한 채널의 리뷰 수집 상태를 확인할 수 없었습니다." } : {}),
+          needStates: input.needs.map((n) => ({
+            id: n.id,
+            status: produced.findings.length > 0 ? ("SATISFIED" as const) : ("PENDING" as const),
+            evidenceIds: read.evidence.map((e) => e.evidenceId),
+          })),
+          failures: read.failures,
+        };
+      }
+      if (read.failures.length > 0) {
+        return { ...pending("채널별 리뷰 수집 상태를 읽지 못했습니다."), failures: read.failures };
+      }
+    }
+  }
+
   // The one read this specialist makes, isolated the same way InquiryOps' are: a failing issue-memory
   // call loses this specialist's contribution and nothing else, and it says so instead of throwing.
   const attempt = await attemptTool(
@@ -135,10 +203,10 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
   // the other, and only the chosen one is bought — the other would cost reads to produce a number
   // the answer must not use.
   const sense = senseOf(input.goalText ?? "", input.plannerGoal);
-  const grouped = input.grouping === "PRODUCT" && sense === "ISSUE_EVIDENCE"
+  const grouped = groupsBy(input.grouping, "PRODUCT") && sense === "ISSUE_EVIDENCE"
     ? await groupAcrossProducts(input, issues)
     : null;
-  const negatives = input.grouping === "PRODUCT" && sense === "NEGATIVE_REVIEW"
+  const negatives = groupsBy(input.grouping, "PRODUCT") && sense === "NEGATIVE_REVIEW"
     ? await groupNegativeReviews(input)
     : null;
 

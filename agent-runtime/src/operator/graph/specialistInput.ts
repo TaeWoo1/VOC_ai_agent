@@ -45,6 +45,15 @@ export interface SpecialistInput {
    */
   readonly periodNamed: boolean;
   /**
+   * The single channel this run is scoped to, or null — decided once, in `scope/EvidenceScope.ts`.
+   *
+   * <b>A scope, never an axis.</b> `channelScope: "NAVER"` means the seller asked about NAVER and the
+   * answer must be about NAVER only; asking for a per-channel BREAKDOWN is
+   * {@link GroupingDimension} carrying `CHANNEL`, and the two are answered by different shapes. A run
+   * can have both — "네이버 상품별" — and neither implies the other.
+   */
+  readonly channelScope: string | null;
+  /**
    * Evidence the run already holds, from earlier specialists and earlier passes.
    *
    * <b>The same idea as {@link resolved}, one level up: do not re-buy a fact the run has.</b> It is

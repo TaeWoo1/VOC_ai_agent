@@ -45,6 +45,7 @@ import type {
   UserIdentity,
   ProductFact,
   ProductKnowledge,
+  ChannelCoverageRow,
 } from "./types";
 import type { ListReplyWorkParams, ReviewSpringClient } from "./ReviewSpringClient";
 import type { IssueSpringClient, ListReviewIssuesParams } from "./IssueSpringClient";
@@ -384,6 +385,10 @@ export class HttpSpringClient
       "GET",
       `/api/channel-knowledge/channels/${encodeURIComponent(channel)}/connection`,
     );
+  }
+
+  async getChannelCoverage(): Promise<ChannelCoverageRow[]> {
+    return this.request<ChannelCoverageRow[]>("GET", `/api/channels/coverage`);
   }
 
   async planGoal(request: {

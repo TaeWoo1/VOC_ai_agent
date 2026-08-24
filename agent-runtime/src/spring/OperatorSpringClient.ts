@@ -25,6 +25,7 @@ import type {
   ProductSummary,
   RepeatedInquiry,
 } from "./types";
+import type { ChannelCoverageRow } from "./types";
 
 /**
  * One inquiry's context WITHOUT its body.
@@ -147,6 +148,16 @@ export interface OperatorSpringClient {
 
   /** What connecting this channel requires, and what to check first when it fails. */
   getConnectionGuidance?(channel: string): Promise<ChannelKnowledgeHit[]>;
+
+  /**
+   * Per (seller-visible channel × data type): what that channel can currently say, and why.
+   *
+   * <b>The read that makes "없습니다" answerable — or refusable.</b> Every other read here returns
+   * rows; this one returns the shape of what is MISSING and the reason for it, which is the half of a
+   * cross-channel answer that rows cannot supply. A channel with no account is a row here, not an
+   * absence, because an omitted channel is counted as a zero by anything that counts what it is given.
+   */
+  getChannelCoverage?(): Promise<ChannelCoverageRow[]>;
 
   /**
    * Ask the backend's planner seam to interpret a goal.

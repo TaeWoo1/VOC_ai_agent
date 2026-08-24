@@ -31,6 +31,24 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     long countByOrgIdAndReceivedAtAfter(UUID orgId, Instant after);
 
     /**
+     * Per-channel counts of this org's reviews — {@code [channelId, total, negative]}.
+     *
+     * Same shape and same reason as {@code InquiryRepository.countActiveByChannel}: one grouped read
+     * returns the channels that HAVE rows, and the caller supplies the zero for the rest from the
+     * registry, so "not asked" and "none" never collapse into one absent row.
+     */
+    @org.springframework.data.jpa.repository.Query(
+            "select r.channelId, count(r), sum(case when r.negative = true then 1 else 0 end) "
+            + "from Review r where r.orgId = :orgId group by r.channelId")
+    List<Object[]> countByChannel(@org.springframework.data.repository.query.Param("orgId") UUID orgId);
+
+    /** Newest review receipt time per channel — {@code [channelId, max(receivedAt)]}. */
+    @org.springframework.data.jpa.repository.Query(
+            "select r.channelId, max(r.receivedAt) from Review r where r.orgId = :orgId group by r.channelId")
+    List<Object[]> newestReceivedAtByChannel(
+            @org.springframework.data.repository.query.Param("orgId") UUID orgId);
+
+    /**
      * One connected channel's reviews, whatever their state — the channel review list.
      *
      * <p>Deliberately unfiltered. Every other paged read here narrows to something the operator must act on

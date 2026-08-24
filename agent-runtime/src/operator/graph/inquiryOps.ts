@@ -26,6 +26,9 @@ import type {
 import { attemptTool, skippedTool, terminalOf } from "../failure/SpecialistOutcome";
 import { eventOn, eventRange, observationDate } from "../scope/EvidenceTime";
 import { groupingLimitSentence, groupingSupportOf } from "../tools/ToolReachability";
+import { groupsBy } from "../group/ProductGrouping";
+import { channelFindings, readChannelCoverage } from "./channelCoverageStep";
+import type { ChannelCoverageCache } from "./channelCoverageStep";
 import { REPEAT_WINDOW_DAYS } from "../defaults/OperationalDefaults";
 import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { log } from "../../log";
@@ -63,8 +66,81 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
   // "첫 페이지 목록" are a real decomposition and the live planner writes it — and they are answered by
   // the same page. Reading it twice would buy the same rows twice and print the same sentence twice.
   const queue: { read: QueueRead | null } = { read: null };
+  // One coverage read per RUN, for the same reason the queue has one: the channels a seller sells on
+  // do not change between two needs, and a second read would mint a second set of rows saying so.
+  const coverage: ChannelCoverageCache = { read: null };
+  let pushedCoverage = false;
 
   for (const need of input.needs) {
+    if (need.kind === "INQUIRY_VOLUME"
+        && (groupsBy(input.grouping, "CHANNEL") || input.channelScope != null)) {
+      // <b>The org total is the wrong shape for this question, and the gate already knows it.</b> A
+      // run that names a channel has every org-wide citation refused as CHANNEL_UNPROVEN — correctly,
+      // and until now with nothing to accept instead, so the answer was a withholding note. Coverage
+      // rows carry `locator.channelCode`, which is the first evidence in this runtime that a claim
+      // about NAVER can be checked as a claim about NAVER.
+      const read = await readChannelCoverage(input, "INQUIRY_OPS", coverage, need.id);
+      failures.push(...read.failures);
+      if (read.evidence.length === 0) {
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      succeeded += 1;
+      // <b>The evidence is the RUN's, not this need's.</b> A plan may declare two volume needs — the
+      // live planner wrote "전체 건수" and "채널별 건수" as separate needs on 2026-08-24 — and both are
+      // answered from one coverage read. Pushing its refs once per need printed all nine rows twice.
+      if (!pushedCoverage) {
+        pushedCoverage = true;
+        refs.push(...read.evidence);
+      }
+      const produced = channelFindings(
+        read, "INQUIRY", "INQUIRY_OPS", need.id, input.channelScope,
+      );
+      findings.push(...produced.findings);
+      if (produced.rows.length === 0) {
+        notes.push("요청한 채널의 문의 수집 상태를 확인할 수 없었습니다.");
+      }
+      // <b>Answering one axis is not answering both.</b> "채널별 상품 문의" asks for a cross, and the
+      // channel half alone would read as the whole answer. The queue row carries a channel and no
+      // product, so the cross fails on the product half — and the run says which half.
+      if (groupsBy(input.grouping, "PRODUCT")) {
+        const cross = groupingLimitSentence(
+          need.kind, groupingSupportOf(need.kind, "PRODUCT_CHANNEL"), produced.rows.length > 0,
+        );
+        if (cross) {
+          const gap = evidence.add({
+            kind: "GROUPING_GAP",
+            sourceTool: OPERATOR_TOOL.GET_CHANNEL_COVERAGE,
+            args: { grouping: "PRODUCT_CHANNEL" },
+            locator: { count: produced.rows.length, label: "상품×채널 문의" },
+            events: null,
+            coverage: "COVERED",
+            provenance: "channel-coverage/cross:no-product-axis",
+          });
+          refs.push(gap);
+          findings.push({
+            findingId: `f-${gap.evidenceId}`,
+            specialist: "INQUIRY_OPS",
+            statement: cross,
+            evidenceIds: [gap.evidenceId],
+            confidence: "NEEDS_REVIEW",
+            verdict: null,
+            surfaceLink: null,
+            claimsCoverageLimit: true,
+            needId: need.id,
+          });
+        }
+      }
+      needStates.push({
+        id: need.id,
+        status: produced.findings.length > 0 ? "SATISFIED" : "PENDING",
+        evidenceIds: read.evidence
+          .filter((e) => produced.rows.some((r) => r.channelCode === e.locator.channelCode))
+          .map((e) => e.evidenceId),
+      });
+      continue;
+    }
+
     if (need.kind === "INQUIRY_VOLUME") {
       // <b>The org inbox cannot answer a product question, and the run may already hold one that
       // can.</b> `get_today_inbox` returns the whole org's unanswered depth; for a need about a
@@ -156,7 +232,7 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
       // The axis, when one was asked for. `Inquiry.productId` exists and the backend counts by it —
       // but only for a product already named, and the queue row carries no product at all. So the
       // limit is stated instead of being worked around, and the total is labelled as a total.
-      if (input.grouping === "PRODUCT") {
+      if (groupsBy(input.grouping, "PRODUCT")) {
         const limit = groupingLimitSentence(need.kind, groupingSupportOf(need.kind, "PRODUCT"));
         if (limit) {
           const gap = evidence.add({
@@ -253,7 +329,7 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
       // cannot be produced — from this read or any other. Saying so is the difference between "이
       // 상품들에는 반복이 없습니다" (a claim about products, unproven) and "상품별로는 나눌 수
       // 없습니다" (the truth). Live 2026-08-23·24: Q3 answered the first shape twice.
-      if (input.grouping === "PRODUCT") {
+      if (groupsBy(input.grouping, "PRODUCT")) {
         const limit = groupingLimitSentence(
           need.kind, groupingSupportOf(need.kind, "PRODUCT"), repeats.length > 0,
         );
