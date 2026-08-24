@@ -5,6 +5,7 @@ import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.community.CommunityReplyStatus;
 import com.sellerops.community.CommunitySourceKind;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
+import com.sellerops.ingest.canonical.ChannelOrderRef;
 import com.sellerops.ingest.canonical.ChannelProductRef;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
@@ -13,6 +14,7 @@ import com.sellerops.ingest.map.RowError;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.inquiry.Inquiry;
+import com.sellerops.inquiry.InquiryOrderBinding;
 import com.sellerops.inquiry.InquiryProductBinding;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
@@ -265,6 +267,7 @@ public class IngestionService {
                         productId == null ? null : InquiryProductBinding.SOURCE_EXACT.name());
                 entity.setSourceSubtype(row.sourceSubtype());
                 entity.setSourceProductRef(sourceProductRef(row));
+                applyOrderRef(entity, row);
                 // Buyer PII (row.author()) is intentionally NOT persisted.
                 applyInquirySource(entity, row);
                 entity.setReceivedAt(row.receivedAt() != null ? row.receivedAt() : Instant.now());
@@ -295,6 +298,28 @@ public class IngestionService {
     }
 
     /**
+     * Record which order the CHANNEL said this inquiry is about — verbatim, or not at all.
+     *
+     * <p><b>Two absences, and only one of them clears anything.</b> A {@code null} ref means the
+     * source declares no order lane (file upload, ESM, NAVER 상품 문의): it says nothing about this
+     * row's order and must not erase what another read established. A {@link ChannelOrderRef#absent()}
+     * means the source HAS the lane and this article carried no order — a positive statement, and the
+     * one that clears a stale binding.
+     *
+     * <p>There is no merge and no precedence here because there is no second lane to lose to — see
+     * {@link InquiryOrderBinding}. What the channel last said is what is stored.
+     */
+    private static void applyOrderRef(Inquiry entity, CanonicalInquiry row) {
+        ChannelOrderRef ref = row.orderRef();
+        if (ref == null) {
+            return;
+        }
+        String reference = ref.preferredRef();
+        entity.setSourceOrderRef(reference);
+        entity.setOrderBinding(reference == null ? null : InquiryOrderBinding.SOURCE_EXACT.name());
+    }
+
+    /**
      * On re-collection, fill an attribution that was missing — and only that.
      *
      * <p>A row can be stored unattributed for a reason that later stops being true: the listing was
@@ -313,6 +338,7 @@ public class IngestionService {
      */
     private void repairAttribution(Inquiry existing, CanonicalInquiry row, UUID productId) {
         existing.setSourceProductRef(sourceProductRef(row));
+        applyOrderRef(existing, row);
         if (existing.getProductId() == null && productId != null) {
             existing.setProductId(productId);
             existing.setProductBinding(InquiryProductBinding.SOURCE_EXACT.name());

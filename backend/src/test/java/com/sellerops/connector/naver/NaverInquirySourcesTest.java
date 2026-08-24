@@ -214,8 +214,10 @@ class NaverInquirySourcesTest {
             // connector here has been offered. It appears in no field of the canonical row.
             assertThat(row.toString()).doesNotContain("홍길동").doesNotContain("buyer-77");
             assertThat(row.author()).isNull();
-            // The order identifiers have no column and are not smuggled into one.
-            assertThat(row.toString()).doesNotContain("2026082112345");
+            // The ORDER identifiers do have a home as of 2026-08-25, and it is one field with one
+            // reader. A single named product order is the exact per-line identity to bind on.
+            assertThat(row.orderRef().productOrderId()).isEqualTo("2026082112345678");
+            assertThat(row.orderRef().preferredRef()).isEqualTo("2026082112345678");
         }
 
         @Test

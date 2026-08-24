@@ -40,6 +40,8 @@ import org.springframework.transaction.annotation.Transactional;
 @ActiveProfiles("test")
 class InquiryProposalServiceTest {
 
+    @Autowired com.sellerops.order.ChannelOrderRepository channelOrders;
+
     @Autowired InquiryRepository inquiries;
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired InquiryProposalRepository proposals;
@@ -100,7 +102,10 @@ class InquiryProposalServiceTest {
         return new InquiryProposalService(workItems, proposals, inquiries, provider, writer, drafts,
                 channels, products, draftEvidence, fixedTargetState(com.sellerops.inquiry.publish.PreSendCheck.unproven(
                         com.sellerops.inquiry.publish.PreSendCheck.STATE_UNKNOWN)),
-                new com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry());
+                new com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry(),
+                new com.sellerops.inquiry.draft.InquiryOrderFactReader(channelOrders, channels,
+                        (orgId, code, accountId, rows) ->
+                                com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH));
     }
 
     private InquiryWorkItem seedOpen(UUID orgId, String title, String body, String author) {

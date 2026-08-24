@@ -132,4 +132,31 @@ class AgentDraftPayloadFloorTest {
                 .contains("effort:low");
         assertThat(version).as("and never the key").doesNotContain("sk-should-never-appear");
     }
+
+    @ParameterizedTest
+    @EnumSource(AgentDraftGenerator.Vendor.class)
+    @DisplayName("the order state leaves as a sentence — never the order identifier")
+    void theOrderStateLeavesWithoutItsIdentifier(AgentDraftGenerator.Vendor vendor) {
+        String body = generator(vendor).requestBody(new AgentDraftGenerator.Input(
+                "주문 취소됐나요", "어제 취소 요청했습니다.", List.of(),
+                "이 주문은 결제가 완료된 것으로 확인됩니다. 발송 여부는 확인되지 않았습니다."));
+
+        assertThat(body).as("what the model may reason from is the STATE")
+                .contains("주문 상태")
+                .contains("결제가 완료된 것으로 확인됩니다");
+        for (String forbidden : FORBIDDEN) {
+            // "20260819-0001" is in that list precisely because this is the request that now has an
+            // order in scope. The reference stays on the inquiry row, where the join needs it.
+            assertThat(body).as("%s must never reach the vendor", forbidden).doesNotContain(forbidden);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(AgentDraftGenerator.Vendor.class)
+    @DisplayName("a caller that never looked and a lookup that found nothing say the same thing")
+    void anAbsentOrderStateIsStatedRatherThanOmitted(AgentDraftGenerator.Vendor vendor) {
+        assertThat(generator(vendor).requestBody(new AgentDraftGenerator.Input("질문", "본문")))
+                .contains("주문 상태")
+                .contains("(확인된 값 없음)");
+    }
 }

@@ -13,7 +13,10 @@ import com.sellerops.knowledge.org.OrgKnowledgeSourceRepository;
 import com.sellerops.knowledge.org.OrgKnowledgeType;
 import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
 import com.sellerops.knowledge.org.dto.OrgKnowledgeRequest;
+import com.sellerops.coverage.ChannelDataState;
 import com.sellerops.order.ChannelOrderRepository;
+import com.sellerops.order.fact.OrderFactState;
+import com.sellerops.order.fact.OrderStoreFreshness;
 import com.sellerops.organization.Organization;
 import com.sellerops.organization.OrganizationRepository;
 import com.sellerops.product.Product;
@@ -46,6 +49,17 @@ import org.springframework.test.context.ActiveProfiles;
 @ActiveProfiles("test")
 class InquiryEvidenceRetrieverTest {
 
+
+    /**
+     * The freshness verdict, supplied directly.
+     *
+     * <p>These tests are about which order a reference resolves to and what may be said about it —
+     * not about whether the capability registry declares ORDER_SUMMARY. {@code OBSERVED_FRESH} keeps
+     * that axis out of the way, so a failure here means the binding is wrong.
+     */
+    private static final OrderStoreFreshness FRESH =
+            (orgId, channelCode, accountId, rows) -> ChannelDataState.OBSERVED_FRESH;
+
     @Autowired ProductRepository products;
     @Autowired ProductKnowledgeSourceRepository productSources;
     @Autowired ProductKnowledgeChunkRepository productChunks;
@@ -53,6 +67,7 @@ class InquiryEvidenceRetrieverTest {
     @Autowired OrgKnowledgeChunkRepository orgChunks;
     @Autowired AnswerMemoryRepository memories;
     @Autowired ChannelOrderRepository channelOrders;
+    @Autowired com.sellerops.channel.ChannelRepository channels;
     @Autowired OrganizationRepository organizations;
 
     private InquiryEvidenceRetriever retriever;
@@ -67,7 +82,7 @@ class InquiryEvidenceRetrieverTest {
         orgKnowledge = new SellerOperationsKnowledgeService(orgSources, orgChunks);
         answerMemory = new AnswerMemoryService(memories, orgChunks, productChunks);
         retriever = new InquiryEvidenceRetriever(products, productKnowledge, orgKnowledge, answerMemory,
-                new InquiryOrderContextReader(channelOrders));
+                new InquiryOrderFactReader(channelOrders, channels, FRESH));
         Organization o = new Organization();
         o.setName("테스트 상점");
         org = organizations.save(o).getId();
@@ -147,15 +162,16 @@ class InquiryEvidenceRetrieverTest {
     }
 
     @Test
-    @DisplayName("order state is never retrieved — it is read, and today it reports why it cannot be")
+    @DisplayName("order state is never retrieved — it is read, and an inquiry naming no order says so")
     void orderStateIsReadAndUnavailable() {
         InquiryEvidenceRetriever.InquiryEvidence found =
                 retriever.retrieve(org, inquiry(null, "제 주문 언제 발송되나요?"));
 
         assertThat(found.order().available()).isFalse();
-        assertThat(found.order().reasonCode())
-                .isEqualTo(InquiryOrderContextReader.CHANNEL_ORDERS_NOT_COLLECTED);
-        assertThat(found.scopes()).doesNotContain(KnowledgeScope.ORDER_STATE);
+        assertThat(found.order().state()).isEqualTo(OrderFactState.NO_ORDER_REFERENCE);
+        assertThat(found.scopes())
+                .as("a read is not a retrieval; ORDER_STATE never appears among the searched scopes")
+                .doesNotContain(KnowledgeScope.ORDER_STATE);
     }
 
     @Test

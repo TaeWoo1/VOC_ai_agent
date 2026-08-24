@@ -65,6 +65,26 @@ public enum InquiryKnowledgeNeed {
      * never an answer. Nothing acts on the result.
      */
     public static InquiryKnowledgeNeed of(String title, String body) {
+        Set<InquiryKnowledgeNeed> axes = axesOf(title, body);
+        if (axes.isEmpty()) {
+            return CURRENTLY_UNANSWERABLE;
+        }
+        return axes.size() > 1 ? MULTI_SOURCE : axes.iterator().next();
+    }
+
+    /**
+     * WHICH axes this question needs — the answer {@link #of} throws away.
+     *
+     * <p><b>This exists because a count built on {@link #MULTI_SOURCE} was wrong by two.</b> The
+     * 2026-08-25 coverage audit reported 31 inquiries needing order context, derived as "6 pure + all
+     * 25 multi". But {@code MULTI_SOURCE} says only that two axes met, not which two, and two of
+     * those 25 combine product and policy with no order in them at all. The true figure is 29. A
+     * collapsed label is fine for a bucket chart and useless as a denominator, so the denominator now
+     * reads the axes.
+     *
+     * <p>Empty means no axis matched, which {@link #of} reports as {@link #CURRENTLY_UNANSWERABLE}.
+     */
+    public static Set<InquiryKnowledgeNeed> axesOf(String title, String body) {
         String text = ((title == null ? "" : title) + " " + (body == null ? "" : body));
         Set<InquiryKnowledgeNeed> needs = EnumSet.noneOf(InquiryKnowledgeNeed.class);
         if (containsAny(text, ORDER_WORDS)) {
@@ -76,10 +96,7 @@ public enum InquiryKnowledgeNeed {
         if (containsAny(text, PRODUCT_WORDS)) {
             needs.add(PRODUCT_KNOWLEDGE_NEEDED);
         }
-        if (needs.isEmpty()) {
-            return CURRENTLY_UNANSWERABLE;
-        }
-        return needs.size() > 1 ? MULTI_SOURCE : needs.iterator().next();
+        return needs;
     }
 
     private static boolean containsAny(String text, String[] words) {

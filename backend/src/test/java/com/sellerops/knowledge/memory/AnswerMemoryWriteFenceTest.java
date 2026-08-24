@@ -89,6 +89,32 @@ class AnswerMemoryWriteFenceTest {
     }
 
     @Test
+    @DisplayName("an order fact cannot become a memory — the two records have no field in common")
+    void anOrderFactIsNotAnAnswer() throws IOException {
+        // PART K, structurally: memory records HOW THE SELLER ANSWERED; the order fact records WHAT
+        // THE ORDER WAS AT THAT MOMENT. A past "오늘 출고 예정입니다." must never come back as this
+        // order's shipping fact, and the way to make that impossible is to give memory nowhere to
+        // put an order.
+        String entity = Files.readString(
+                Paths.get("src/main/java/com/sellerops/knowledge/memory/AnswerMemory.java"));
+        String service = Files.readString(
+                Paths.get("src/main/java/com/sellerops/knowledge/memory/AnswerMemoryService.java"));
+        String hook = Files.readString(Paths.get(
+                "src/main/java/com/sellerops/inquiry/memory/InquiryAnswerMemoryHook.java"));
+        String importer = Files.readString(Paths.get(
+                "src/main/java/com/sellerops/inquiry/memory/InquiryAnswerMemoryImporter.java"));
+
+        for (String code : List.of(entity, service, hook, importer)) {
+            assertThat(code)
+                    .as("a raw order identifier in long-term memory outlives the order it describes")
+                    .doesNotContain("sourceOrderRef")
+                    .doesNotContain("source_order_ref")
+                    .doesNotContain("OrderFact")
+                    .doesNotContain("ChannelOrder");
+        }
+    }
+
+    @Test
     @DisplayName("answer memory never writes a policy — a precedent does not become a rule by itself")
     void memoryNeverWritesAPolicy() throws IOException {
         String service = Files.readString(Paths.get(

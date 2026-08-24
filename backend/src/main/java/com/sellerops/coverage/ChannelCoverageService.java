@@ -8,6 +8,7 @@ import com.sellerops.connector.ConnectorCapabilityRepository;
 import com.sellerops.coverage.dto.ChannelCoverageRow;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.order.OrderDailySummaryRepository;
+import com.sellerops.order.fact.OrderStoreFreshness;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -44,7 +45,7 @@ import org.springframework.transaction.annotation.Transactional;
  * {@link ChannelDataState#OBSERVED_FRESHNESS_UNPROVEN}; it is not what the word "지원" means.
  */
 @Service
-public class ChannelCoverageService {
+public class ChannelCoverageService implements OrderStoreFreshness {
 
     /** The operator-facing types, in the order the screens use. PRODUCT/SALES are background knowledge. */
     static final List<String> DATA_TYPES = List.of("INQUIRY", "REVIEW", "ORDER_SUMMARY");
@@ -138,6 +139,42 @@ public class ChannelCoverageService {
             }
         }
         return out;
+    }
+
+    /**
+     * The freshness verdict for one channel's PER-ORDER store, for one seller connection.
+     *
+     * <p><b>Why this is not the {@code ORDER_SUMMARY} row.</b> They answer different questions and
+     * currently disagree. Cafe24's {@code ORDER_SUMMARY} routine succeeds on schedule and writes a
+     * daily count and a daily amount — an aggregate with no order identity in it — while
+     * {@code channel_orders} holds zero Cafe24 rows. A reader that took the summary row's
+     * {@code OBSERVED_FRESH} as permission to speak about one Cafe24 order would be citing freshness
+     * earned by a number that cannot name a single order.
+     *
+     * <p>So the same derivation runs — support, then connection, then freshness, in that order and
+     * for the same reasons — over the row count of the per-order store instead.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public ChannelDataState perOrderState(UUID orgId, String channelCode, UUID sellerAccountId,
+                                          long rowsHeld) {
+        ConnectorCapability declared = capabilities.findByChannelCode(channelCode).stream()
+                .filter(c -> "ORDER_SUMMARY".equals(c.getDataType()))
+                .findFirst()
+                .orElse(null);
+        Support support = declared == null ? Support.UNDECLARED
+                : (declared.isSupported() ? Support.SUPPORTED : Support.UNSUPPORTED);
+        SellerAccount account = sellerAccountId == null ? null
+                : accounts.findById(sellerAccountId).filter(a -> orgId.equals(a.getOrgId())).orElse(null);
+        boolean connected = account != null && account.getConnectionStatus() == ChannelStatus.CONNECTED;
+        SyncSchedule schedule = account == null ? null
+                : schedules.findByOrgIdAndSellerAccountIdAndDataType(orgId, account.getId(), "ORDER_SUMMARY")
+                        .orElse(null);
+        boolean routineEnabled = schedule != null && schedule.isEnabled();
+        Instant lastSuccess = account == null ? null
+                : lastSuccessfulSync(orgId, account.getChannelId(), "ORDER_SUMMARY");
+        return stateOf(support, connected, account, routineEnabled, lastSuccess, schedule, rowsHeld,
+                Instant.now());
     }
 
     private ChannelCoverageRow row(UUID orgId, Channel channel, SellerAccount account, String dataType,

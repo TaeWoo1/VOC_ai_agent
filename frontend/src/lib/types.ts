@@ -1265,6 +1265,33 @@ export interface InquiryDetail {
    * and it must keep the channel's limits and SellerOps' own apart when it does.
    */
   replyCapability: InquiryReplyCapabilityView | null;
+  /**
+   * The state of the order THIS inquiry names, read deterministically at request time — no model,
+   * no planner, no marketplace call. `present: false` for every inquiry whose source named no order,
+   * which is the ordinary case, and the screen then renders nothing at all rather than an empty card.
+   */
+  orderContext: OrderContextView | null;
+}
+
+/**
+ * Mirrors com.sellerops.order.fact.dto.OrderContextView — the operational context card.
+ *
+ * Three separate state lines, each of which may independently be "확인되지 않음", because payment
+ * does not imply dispatch and no stored status code proves a cancellation did NOT happen. Carries no
+ * order identifier, no amount and no buyer field: it answers "이 주문은 지금 어떤 상태인가" and there
+ * is nowhere in it to put anything else.
+ */
+export interface OrderContextView {
+  /** false = this inquiry names no order. Render nothing; an empty card reads as a claim. */
+  present: boolean;
+  /** The raw state name, for tests and diagnostics. Never rendered to a seller. */
+  state: string | null;
+  summaryKo: string | null;
+  paymentKo: string | null;
+  fulfillmentKo: string | null;
+  cancellationKo: string | null;
+  /** The freshness sentence, or the sentence that says freshness could not be proven. */
+  observedKo: string | null;
 }
 
 /**

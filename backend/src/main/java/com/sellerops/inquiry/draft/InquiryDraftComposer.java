@@ -18,6 +18,7 @@ import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.knowledge.KnowledgeScope;
+import com.sellerops.order.fact.OrderFact;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -134,7 +135,11 @@ public class InquiryDraftComposer {
                         authorKind == DraftAuthorKind.MODEL ? modelVersion : null,
                         state, retrieved.productId()));
 
-        List<DraftEvidenceView> views = recordEvidence(orgId, workItemId, saved.version(), cited);
+        // The order fact is cited on the same terms as a passage: only when the model actually saw
+        // it. A rule draft was shown nothing, so it cites nothing.
+        OrderFact citedOrder = authorKind == DraftAuthorKind.MODEL ? retrieved.order() : null;
+        List<DraftEvidenceView> views =
+                recordEvidence(orgId, workItemId, saved.version(), cited, citedOrder);
         return new GeneratedDraftView(saved, authorKind.name(), state.name(), state.messageKo(scopes),
                 retrieved.productId(), views, quotaMessage);
     }
@@ -173,8 +178,9 @@ public class InquiryDraftComposer {
      * there was one, and the column already anticipated the rest.
      */
     private List<DraftEvidenceView> recordEvidence(UUID orgId, UUID workItemId, int version,
-                                                   List<InquiryEvidenceRetriever.ScopedPassage> passages) {
-        List<DraftEvidenceView> views = new ArrayList<>(passages.size());
+                                                   List<InquiryEvidenceRetriever.ScopedPassage> passages,
+                                                   OrderFact order) {
+        List<DraftEvidenceView> views = new ArrayList<>(passages.size() + 1);
         int ordinal = 0;
         for (InquiryEvidenceRetriever.ScopedPassage passage : passages) {
             InquiryDraftEvidence row = new InquiryDraftEvidence();
@@ -191,7 +197,37 @@ public class InquiryDraftComposer {
             views.add(new DraftEvidenceView(row.getKind(), passage.scope().labelKo(), row.getTitle(),
                     row.getLocator(), row.getSourceId(), row.getChunkId()));
         }
+        // Last, and only when an order was actually resolved. A row for "주문 번호가 없었습니다" would
+        // be a citation of an absence, and the screen already says that in the state sentence.
+        if (order != null && order.available()) {
+            InquiryDraftEvidence row = new InquiryDraftEvidence();
+            row.setOrgId(orgId);
+            row.setWorkItemId(workItemId);
+            row.setDraftVersion(version);
+            row.setOrdinal(ordinal);
+            row.setKind(InquiryDraftEvidence.KIND_ORDER_FACT);
+            // No source/chunk: this evidence points at no document. What it points at is a moment.
+            row.setTitle(KnowledgeScope.ORDER_STATE.labelKo());
+            row.setLocator(orderLocator(order));
+            evidence.save(row);
+            views.add(new DraftEvidenceView(row.getKind(), KnowledgeScope.ORDER_STATE.labelKo(),
+                    row.getTitle(), row.getLocator(), null, null));
+        }
         return views;
+    }
+
+    /**
+     * {@code order-fact/NAVER:OBSERVED_FRESH@2026-08-25} — channel, freshness, and the day it was seen.
+     *
+     * <p>The order identifier is deliberately absent. A locator exists so a person can re-check the
+     * claim, and re-checking an order state means re-reading the channel at a date — which this
+     * says — not looking the number up in a log.
+     */
+    private static String orderLocator(OrderFact order) {
+        String day = order.asOf() == null ? "미상"
+                : order.asOf().atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate().toString();
+        return "order-fact/" + (order.channelCode() == null ? "채널미상" : order.channelCode())
+                + ":" + order.state().name() + "@" + day;
     }
 
     private static String defaultTitle(String inquiryTitle) {

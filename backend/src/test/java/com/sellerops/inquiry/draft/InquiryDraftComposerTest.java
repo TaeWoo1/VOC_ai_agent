@@ -22,7 +22,9 @@ import com.sellerops.knowledge.memory.AnswerMemoryService;
 import com.sellerops.knowledge.org.OrgKnowledgeChunkRepository;
 import com.sellerops.knowledge.org.OrgKnowledgeSourceRepository;
 import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
+import com.sellerops.coverage.ChannelDataState;
 import com.sellerops.order.ChannelOrderRepository;
+import com.sellerops.order.fact.OrderStoreFreshness;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.library.KnowledgeSourceType;
@@ -58,6 +60,17 @@ import org.springframework.test.context.ActiveProfiles;
 @ActiveProfiles("test")
 class InquiryDraftComposerTest {
 
+
+    /**
+     * The freshness verdict, supplied directly.
+     *
+     * <p>These tests are about which order a reference resolves to and what may be said about it —
+     * not about whether the capability registry declares ORDER_SUMMARY. {@code OBSERVED_FRESH} keeps
+     * that axis out of the way, so a failure here means the binding is wrong.
+     */
+    private static final OrderStoreFreshness FRESH =
+            (orgId, channelCode, accountId, rows) -> ChannelDataState.OBSERVED_FRESH;
+
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired InquiryRepository inquiries;
     @Autowired InquiryReplyDraftRepository draftRows;
@@ -68,6 +81,7 @@ class InquiryDraftComposerTest {
     @Autowired ProductKnowledgeChunkRepository productChunks;
     @Autowired AnswerMemoryRepository memories;
     @Autowired ChannelOrderRepository channelOrders;
+    @Autowired com.sellerops.channel.ChannelRepository channels;
 
     private final UUID org = UUID.randomUUID();
     private final UUID user = UUID.randomUUID();
@@ -235,7 +249,7 @@ class InquiryDraftComposerTest {
         InquiryEvidenceRetriever retriever = new InquiryEvidenceRetriever(products, library,
                 new SellerOperationsKnowledgeService(orgSources, orgChunks),
                 new AnswerMemoryService(memories, orgChunks, productChunks),
-                new InquiryOrderContextReader(channelOrders));
+                new InquiryOrderFactReader(channelOrders, channels, FRESH));
         return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, retriever, model,
                 quota, new RuleBasedInquiryProposalProvider());
     }

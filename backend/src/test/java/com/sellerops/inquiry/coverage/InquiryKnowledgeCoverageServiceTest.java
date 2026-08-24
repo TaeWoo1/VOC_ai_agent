@@ -9,7 +9,7 @@ import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.InquiryEvidenceRetriever;
 import com.sellerops.inquiry.draft.InquiryKnowledgeNeed;
-import com.sellerops.inquiry.draft.InquiryOrderContextReader;
+import com.sellerops.inquiry.draft.InquiryOrderFactReader;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.knowledge.memory.AnswerMemoryRepository;
 import com.sellerops.knowledge.memory.AnswerMemoryService;
@@ -18,7 +18,9 @@ import com.sellerops.knowledge.org.OrgKnowledgeSourceRepository;
 import com.sellerops.knowledge.org.OrgKnowledgeType;
 import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
 import com.sellerops.knowledge.org.dto.OrgKnowledgeRequest;
+import com.sellerops.coverage.ChannelDataState;
 import com.sellerops.order.ChannelOrderRepository;
+import com.sellerops.order.fact.OrderStoreFreshness;
 import com.sellerops.organization.Organization;
 import com.sellerops.organization.OrganizationRepository;
 import com.sellerops.product.ProductRepository;
@@ -51,6 +53,17 @@ import org.springframework.test.context.ActiveProfiles;
 @ActiveProfiles("test")
 class InquiryKnowledgeCoverageServiceTest {
 
+
+    /**
+     * The freshness verdict, supplied directly.
+     *
+     * <p>These tests are about which order a reference resolves to and what may be said about it —
+     * not about whether the capability registry declares ORDER_SUMMARY. {@code OBSERVED_FRESH} keeps
+     * that axis out of the way, so a failure here means the binding is wrong.
+     */
+    private static final OrderStoreFreshness FRESH =
+            (orgId, channelCode, accountId, rows) -> ChannelDataState.OBSERVED_FRESH;
+
     @Autowired InquiryRepository inquiries;
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired ChannelRepository channels;
@@ -75,8 +88,8 @@ class InquiryKnowledgeCoverageServiceTest {
                 new InquiryEvidenceRetriever(products,
                         new ProductKnowledgeLibraryService(products, productSources, productChunks),
                         orgKnowledge, new AnswerMemoryService(memories, orgChunks, productChunks),
-                        new InquiryOrderContextReader(channelOrders)),
-                orgSources, memories, workItems);
+                        new InquiryOrderFactReader(channelOrders, channels, FRESH)),
+                orgSources, memories, workItems, channelOrders);
         Organization o = new Organization();
         o.setName("테스트 상점");
         org = organizations.save(o).getId();

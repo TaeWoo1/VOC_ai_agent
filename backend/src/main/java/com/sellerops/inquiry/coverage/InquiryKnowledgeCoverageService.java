@@ -13,9 +13,13 @@ import com.sellerops.inquiry.draft.InquiryKnowledgeNeed;
 import com.sellerops.knowledge.KnowledgeScope;
 import com.sellerops.knowledge.memory.AnswerMemoryRepository;
 import com.sellerops.knowledge.org.OrgKnowledgeSourceRepository;
+import com.sellerops.order.ChannelOrderRepository;
+import com.sellerops.order.fact.ExactOrderLookupCapability;
+import com.sellerops.order.fact.OrderFactState;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,18 +52,21 @@ public class InquiryKnowledgeCoverageService {
     private final OrgKnowledgeSourceRepository orgKnowledge;
     private final AnswerMemoryRepository answerMemories;
     private final InquiryWorkItemRepository workItems;
+    private final ChannelOrderRepository channelOrders;
 
     public InquiryKnowledgeCoverageService(InquiryRepository inquiries, ChannelRepository channels,
                                            InquiryEvidenceRetriever retriever,
                                            OrgKnowledgeSourceRepository orgKnowledge,
                                            AnswerMemoryRepository answerMemories,
-                                           InquiryWorkItemRepository workItems) {
+                                           InquiryWorkItemRepository workItems,
+                                           ChannelOrderRepository channelOrders) {
         this.inquiries = inquiries;
         this.channels = channels;
         this.retriever = retriever;
         this.orgKnowledge = orgKnowledge;
         this.answerMemories = answerMemories;
         this.workItems = workItems;
+        this.channelOrders = channelOrders;
     }
 
     /** What the retrieval managed for one inquiry, judged against what that inquiry needed. */
@@ -78,15 +85,28 @@ public class InquiryKnowledgeCoverageService {
     /**
      * The audit over one channel's real unanswered backlog.
      *
+     * @param byNeed          the collapsed label per inquiry, for a bucket chart
+     * @param byAxis          how many inquiries need EACH axis — the honest denominator. A question
+     *                        needing product and policy counts once in each and never lands in an
+     *                        "order" total it has nothing to do with, which the {@code MULTI_SOURCE}
+     *                        label could not prevent
      * @param missingProduct  needed product knowledge and the inquiry resolves to no named product
      * @param missingPolicy   needed operating policy and no policy passage was found
-     * @param missingOrder    needed order context and the deterministic read has none
+     * @param missingOrder    needed order context and the deterministic read produced no fact
+     * @param byOrderFact     every inquiry's order-fact verdict, whether or not it asked about one.
+     *                        Kept unconditional because "얼마나 많은 문의가 주문을 지목하는가" is a fact
+     *                        about the SOURCE, and filtering it by our own keyword classifier would
+     *                        measure the classifier
      */
     public record CoverageReport(String channelCode, int inquiries,
                                  Map<InquiryKnowledgeNeed, Integer> byNeed,
+                                 Map<InquiryKnowledgeNeed, Integer> byAxis,
                                  Map<CoverageOutcome, Integer> byOutcome,
+                                 Map<OrderFactState, Integer> byOrderFact,
                                  int missingProduct, int missingPolicy, int missingOrder,
-                                 int orgKnowledgeDocuments, int answerMemories) {
+                                 int orderReferencePresent, int orderBoundToStoredFact,
+                                 int orgKnowledgeDocuments, int answerMemories,
+                                 int storedOrders, String exactLookupCapability) {
     }
 
     /**
@@ -101,7 +121,8 @@ public class InquiryKnowledgeCoverageService {
      */
     public record EvidencePreview(InquiryKnowledgeNeed need, String knowledgeState, UUID productId,
                                   List<String> scopes, List<PreviewPassage> passages,
-                                  String orderReason, int supersededMemories) {
+                                  String orderFactState, boolean orderReferencePresent,
+                                  int supersededMemories) {
     }
 
     /** One would-be citation. */
@@ -128,7 +149,8 @@ public class InquiryKnowledgeCoverageService {
                 evidence.passages().stream()
                         .map(p -> new PreviewPassage(p.scope().name(), p.heading(), p.locator(), p.score()))
                         .toList(),
-                evidence.order().reasonCode(),
+                evidence.order().state().name(),
+                inquiry.getSourceOrderRef() != null,
                 evidence.supersededMemories());
     }
 
@@ -145,29 +167,41 @@ public class InquiryKnowledgeCoverageService {
         List<Inquiry> corpus = inquiries.findRealUnansweredForCoverage(orgId, channel.getId());
 
         Map<InquiryKnowledgeNeed, Integer> byNeed = new EnumMap<>(InquiryKnowledgeNeed.class);
+        Map<InquiryKnowledgeNeed, Integer> byAxis = new EnumMap<>(InquiryKnowledgeNeed.class);
         Map<CoverageOutcome, Integer> byOutcome = new EnumMap<>(CoverageOutcome.class);
+        Map<OrderFactState, Integer> byOrderFact = new EnumMap<>(OrderFactState.class);
         int missingProduct = 0;
         int missingPolicy = 0;
         int missingOrder = 0;
+        int referencePresent = 0;
+        int boundToStoredFact = 0;
 
         for (Inquiry inquiry : corpus) {
             String title = MarkupText.toPlainText(inquiry.getTitle());
             String body = MarkupText.toPlainText(inquiry.getBody());
             InquiryKnowledgeNeed need = InquiryKnowledgeNeed.of(title, body);
             byNeed.merge(need, 1, Integer::sum);
+            Set<InquiryKnowledgeNeed> axes = InquiryKnowledgeNeed.axesOf(title, body);
+            axes.forEach(axis -> byAxis.merge(axis, 1, Integer::sum));
 
             InquiryEvidenceRetriever.InquiryEvidence evidence = retriever.retrieve(orgId, inquiry);
             var scopes = evidence.scopes();
-            boolean wantsProduct = need == InquiryKnowledgeNeed.PRODUCT_KNOWLEDGE_NEEDED
-                    || need == InquiryKnowledgeNeed.MULTI_SOURCE;
-            boolean wantsPolicy = need == InquiryKnowledgeNeed.ORG_POLICY_NEEDED
-                    || need == InquiryKnowledgeNeed.MULTI_SOURCE;
-            boolean wantsOrder = need == InquiryKnowledgeNeed.ORDER_CONTEXT_NEEDED
-                    || need == InquiryKnowledgeNeed.MULTI_SOURCE;
+            // The axes, not the collapsed label. Before 2026-08-25 this read MULTI_SOURCE as needing
+            // all three, which put two product+policy questions into the order-context total.
+            boolean wantsProduct = axes.contains(InquiryKnowledgeNeed.PRODUCT_KNOWLEDGE_NEEDED);
+            boolean wantsPolicy = axes.contains(InquiryKnowledgeNeed.ORG_POLICY_NEEDED);
+            boolean wantsOrder = axes.contains(InquiryKnowledgeNeed.ORDER_CONTEXT_NEEDED);
 
             boolean hasProduct = scopes.contains(KnowledgeScope.PRODUCT);
             boolean hasPolicy = scopes.contains(KnowledgeScope.ORG_OPERATIONS);
             boolean hasOrder = evidence.order().available();
+            byOrderFact.merge(evidence.order().state(), 1, Integer::sum);
+            if (inquiry.getSourceOrderRef() != null) {
+                referencePresent++;
+                if (hasOrder) {
+                    boundToStoredFact++;
+                }
+            }
             if (wantsProduct && !hasProduct) {
                 missingProduct++;
             }
@@ -197,14 +231,26 @@ public class InquiryKnowledgeCoverageService {
         }
         for (InquiryKnowledgeNeed need : InquiryKnowledgeNeed.values()) {
             byNeed.putIfAbsent(need, 0);
+            byAxis.putIfAbsent(need, 0);
         }
         for (CoverageOutcome outcome : CoverageOutcome.values()) {
             byOutcome.putIfAbsent(outcome, 0);
         }
-        // What the library HELD while this was measured. Without it a coverage number is unreadable:
-        // "0 grounded" over an empty library and over a full one are different findings.
-        return new CoverageReport(channelCode, corpus.size(), byNeed, byOutcome,
-                missingProduct, missingPolicy, missingOrder,
-                (int) orgKnowledge.countByOrgId(orgId), (int) answerMemories.countByOrgId(orgId));
+        for (OrderFactState state : OrderFactState.values()) {
+            byOrderFact.putIfAbsent(state, 0);
+        }
+        // What the library and the ORDER STORE held while this was measured. Without both, a coverage
+        // number is unreadable: "0 bound" over an empty order store and over a full one are different
+        // findings, and only the second is a defect.
+        long stored = channelOrders.countByChannel(orgId).stream()
+                .filter(row -> channel.getId().equals(row[0]))
+                .mapToLong(row -> ((Number) row[1]).longValue())
+                .sum();
+        return new CoverageReport(channelCode, corpus.size(), byNeed, byAxis, byOutcome, byOrderFact,
+                missingProduct, missingPolicy, missingOrder, referencePresent, boundToStoredFact,
+                (int) orgKnowledge.countByOrgId(orgId), (int) answerMemories.countByOrgId(orgId),
+                (int) stored,
+                ExactOrderLookupCapability.endpointFor(channelCode)
+                        .orElse(ExactOrderLookupCapability.NO_VENDORED_EXACT_LOOKUP));
     }
 }

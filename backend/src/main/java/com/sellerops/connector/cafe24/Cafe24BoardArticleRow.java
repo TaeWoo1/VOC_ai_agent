@@ -17,6 +17,20 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * is tolerated rather than fatal; {@code article_no} is the one field a row cannot
  * be stored without.
  *
+ * <p><b>{@code order_id} (2026-08-25).</b> The board-article response was live-observed to carry an
+ * {@code order_id} key alongside the buyer keys ({@code docs/sellerops_cafe24_review_inquiry_capture.md}
+ * §"PII-bearing keys"). It is projected here for the INQUIRY (board 6) path only — see
+ * {@code Cafe24InquiryArticleMapper} — because "which order is this about" is an operational fact and
+ * the buyer keys beside it are not. {@code writer}, {@code writer_email}, {@code member_id} and
+ * {@code client_ip} remain unprojected, and a field that is not projected cannot be persisted later
+ * by accident.
+ *
+ * <p><b>Whether board-6 articles actually POPULATE it is unobserved.</b> The key's presence in the
+ * response was recorded; a non-empty value on a 문의사항 article was not. A general Q&amp;A board
+ * accepts posts with no order behind them, so the honest expectation is that many are blank — and a
+ * blank one yields {@link com.sellerops.ingest.canonical.ChannelOrderRef#absent()}, which is the
+ * correct answer rather than a failure.
+ *
  * <p><b>{@code secret} (비밀글 flag).</b> Cafe24's Admin board-article {@code secret}
  * is a {@code "T"}(비밀글 / private)/{@code "F"}(공개 / public) string — the platform's
  * standard boolean-like flag convention — and was observed present on the board-article
@@ -35,7 +49,16 @@ public record Cafe24BoardArticleRow(
         @JsonProperty("created_date") String createdDate,
         @JsonProperty("updated_date") String updatedDate,
         @JsonProperty("reply_status") String replyStatus,
-        @JsonProperty("secret") String secret) {
+        @JsonProperty("secret") String secret,
+        @JsonProperty("order_id") String orderId) {
+
+    /** Back-compat for fixtures/tests written before {@code order_id} was projected. */
+    public Cafe24BoardArticleRow(Long articleNo, String title, String content, Long productNo,
+                                 Integer rating, String createdDate, String updatedDate,
+                                 String replyStatus, String secret) {
+        this(articleNo, title, content, productNo, rating, createdDate, updatedDate, replyStatus,
+                secret, null);
+    }
 
     /**
      * Back-compat constructor for callers that do not carry a {@code secret} flag
@@ -45,7 +68,8 @@ public record Cafe24BoardArticleRow(
     public Cafe24BoardArticleRow(Long articleNo, String title, String content, Long productNo,
                                  Integer rating, String createdDate, String updatedDate,
                                  String replyStatus) {
-        this(articleNo, title, content, productNo, rating, createdDate, updatedDate, replyStatus, null);
+        this(articleNo, title, content, productNo, rating, createdDate, updatedDate, replyStatus,
+                null, null);
     }
 
     /**

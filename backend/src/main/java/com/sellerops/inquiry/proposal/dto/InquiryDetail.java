@@ -3,6 +3,7 @@ package com.sellerops.inquiry.proposal.dto;
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.publish.dto.InquiryReplyCapabilityView;
+import com.sellerops.order.fact.dto.OrderContextView;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -36,6 +37,12 @@ import java.util.UUID;
  * in different ways, and because a seller reading a grounded draft deserves to know whether the
  * product it was grounded in came from the channel or from a colleague.
  *
+ * <p>{@code orderContext} is the operational state of the order this inquiry NAMES, read
+ * deterministically from {@code channel_orders} at request time — no model, no planner, no
+ * marketplace call. Its {@code present} flag is false for every inquiry whose source named no order,
+ * which is the ordinary case; the screen renders nothing at all for those rather than an empty card.
+ * It carries no order identifier, no amount, and no buyer field.
+ *
  * <p>{@code answerStateProven} / {@code answerStateNote} say whether SellerOps can currently prove
  * this inquiry is still unanswered on the marketplace — see
  * {@link com.sellerops.inquiry.publish.PreSendCheck}. They are on the DETAIL, not only on the publish
@@ -65,5 +72,6 @@ public record InquiryDetail(
         Boolean answerStateProven,
         String answerStateNote,
         List<DraftEvidenceView> draftEvidence,
-        InquiryReplyCapabilityView replyCapability) {
+        InquiryReplyCapabilityView replyCapability,
+        OrderContextView orderContext) {
 }

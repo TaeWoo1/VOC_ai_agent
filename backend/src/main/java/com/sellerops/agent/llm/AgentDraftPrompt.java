@@ -23,7 +23,7 @@ package com.sellerops.agent.llm;
 public final class AgentDraftPrompt {
 
     /** Bump on every wording change. It is stamped into the provenance the run records. */
-    public static final String PROMPT_VERSION = "agent-draft-prompt/v3";
+    public static final String PROMPT_VERSION = "agent-draft-prompt/v4";
 
     /**
      * The closed set of reply categories, in the rule drafter's own order.
@@ -57,10 +57,20 @@ public final class AgentDraftPrompt {
                조건은 쓰지 마세요. 근거가 비어 있으면 그것만으로 답을 만들지 말고 확인 후 안내하겠다고 쓰세요.
                - 근거는 [상품 정보] [운영 정책] [과거 답변]로 구분되어 있습니다. 상품의 사양은 [상품 정보]에서만, \
                배송·취소·교환·증빙 같은 회사 규정은 [운영 정책]에서만 가져오세요. [과거 답변]은 이 판매자가 전에 한 \
-               답변이며, 지금 이 고객의 사실이 아닙니다 -- 표현을 맞추는 데 쓰고 사실의 출처로 쓰지 마세요.
+               답변이며, 지금 이 고객의 사실이 아닙니다 -- 표현을 맞추는 데 쓰고 사실의 출처로 쓰지 마세요. \
+               특히 [과거 답변]에 있는 "오늘 출고", "내일 도착" 같은 문장은 그때 그 주문의 사정이지 \
+               이 주문의 사정도, 회사의 기준도 아닙니다.
                - 다음은 근거에 그렇게 적혀 있지 않는 한 절대 쓰지 마세요: 환불이 가능하다는 단정, 취소가 \
                완료되었다는 단정, 배송/도착 날짜 약속, 재고가 있다는 단정, 출시 예정 약속.
-               - 「주문 상태」에 확인된 값이 없으면 이 주문이 어떤 상태인지 쓰지 말고, 확인 후 안내하겠다고 쓰세요.
+               - 「주문 상태」는 이 주문에 대해 채널이 말해 준 사실이며, 정책과 다른 종류의 근거입니다. \
+               확인된 값이 없으면 이 주문이 어떤 상태인지 쓰지 말고, 확인 후 안내하겠다고 쓰세요.
+               - 「주문 상태」가 결제 완료라고만 되어 있으면 결제까지만 확인된 것입니다 -- 발송·도착·배송 \
+               중 무엇도 그로부터 따라 나오지 않습니다. [운영 정책]에 평균 발송 기준이 있으면 그 기준은 \
+               일반 안내로 쓸 수 있지만, 이 주문이 언제 출발하거나 도착한다고는 쓰지 마세요.
+               - 「주문 상태」가 확인 시점 기준이라고 적혀 있으면 그 시점을 함께 밝히고, 지금 상태라고 \
+               단정하지 마세요.
+               - 발급·처리·완료 가능 여부(정책)와 이 주문에서 실제로 그렇게 되었는지(주문 상태)는 \
+               다른 사실입니다. 정책만 있을 때 이 주문에서 완료되었다고 쓰지 마세요.
                - 보상, 할인, 예외 처리를 약속하지 마세요.
                - 고객의 이름, 연락처, 주소를 초안에 넣지 마세요.
                - 2~4문장, 존댓말, 인사와 마무리를 포함합니다.
@@ -100,12 +110,14 @@ public final class AgentDraftPrompt {
     /**
      * The user turn with the order-state line.
      *
-     * @param orderState the ONE sentence {@code InquiryOrderContextReader} produced — either a
-     *                   confirmed state or the reason there is none. A constant of the product, not
-     *                   of the customer: it names no order and carries no identifier. Null renders
-     *                   the same "(확인된 값 없음)" as an unavailable read, because a caller that
-     *                   forgot to look and a lookup that found nothing must not differ in what the
-     *                   model is allowed to claim.
+     * @param orderState the ONE sentence {@code InquiryOrderFactReader} produced — either a
+     *                   confirmed state with its observation date, or which of the five reasons says
+     *                   there is none. <b>It names no order and carries no identifier</b>: the order
+     *                   reference stays on the inquiry row where the join needs it and never reaches
+     *                   a model, which is asserted on the serialized bytes by
+     *                   {@code AgentDraftPayloadFloorTest}. Null renders the same "(확인된 값 없음)" as
+     *                   an unavailable read, because a caller that forgot to look and a lookup that
+     *                   found nothing must not differ in what the model is allowed to claim.
      */
     public static String user(String title, String details,
                               java.util.List<AgentDraftGenerator.Passage> knowledge, String orderState) {

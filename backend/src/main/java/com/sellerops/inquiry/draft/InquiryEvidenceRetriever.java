@@ -9,6 +9,7 @@ import com.sellerops.knowledge.memory.dto.AnswerMemorySearchResponse;
 import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
 import com.sellerops.knowledge.org.dto.OrgKnowledgePassage;
 import com.sellerops.knowledge.org.dto.OrgKnowledgeSearchResponse;
+import com.sellerops.order.fact.OrderFact;
 import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
@@ -46,9 +47,9 @@ import org.springframework.stereotype.Component;
  * simply absent for those, and the draft is still grounded.
  *
  * <p><b>Two scopes are read, not searched.</b> {@link KnowledgeScope#ORDER_STATE} comes from
- * {@link InquiryOrderContextReader} — a deterministic read that today reports why it is unavailable —
- * and {@link KnowledgeScope#CHANNEL_FACT} is not consulted here at all: what a platform supports is
- * an operational capability, not something to tell a customer in a reply.
+ * {@link InquiryOrderFactReader} — a deterministic exact join against the order the CHANNEL named,
+ * carrying its own freshness — and {@link KnowledgeScope#CHANNEL_FACT} is not consulted here at all:
+ * what a platform supports is an operational capability, not something to tell a customer in a reply.
  */
 @Component
 public class InquiryEvidenceRetriever {
@@ -75,18 +76,18 @@ public class InquiryEvidenceRetriever {
     private final ProductKnowledgeLibraryService productKnowledge;
     private final SellerOperationsKnowledgeService orgKnowledge;
     private final AnswerMemoryService answerMemory;
-    private final InquiryOrderContextReader orderContext;
+    private final InquiryOrderFactReader orderFacts;
 
     public InquiryEvidenceRetriever(ProductRepository products,
                                     ProductKnowledgeLibraryService productKnowledge,
                                     SellerOperationsKnowledgeService orgKnowledge,
                                     AnswerMemoryService answerMemory,
-                                    InquiryOrderContextReader orderContext) {
+                                    InquiryOrderFactReader orderFacts) {
         this.products = products;
         this.productKnowledge = productKnowledge;
         this.orgKnowledge = orgKnowledge;
         this.answerMemory = answerMemory;
-        this.orderContext = orderContext;
+        this.orderFacts = orderFacts;
     }
 
     /**
@@ -112,7 +113,7 @@ public class InquiryEvidenceRetriever {
      */
     public record InquiryEvidence(UUID productId, DraftKnowledgeState state,
                                   List<ScopedPassage> passages,
-                                  InquiryOrderContextReader.OrderContext order,
+                                  OrderFact order,
                                   int supersededMemories) {
 
         /** The scopes that actually contributed, in the order the passages are in. */
@@ -169,7 +170,7 @@ public class InquiryEvidenceRetriever {
         List<ScopedPassage> merged = merge(List.of(productLane, policyLane, memoryLane));
         DraftKnowledgeState state = merged.isEmpty() ? productVerdict : DraftKnowledgeState.GROUNDED;
         return new InquiryEvidence(productId, state, merged,
-                orderContext.read(orgId, inquiry), remembered.supersededByConflict());
+                orderFacts.read(orgId, inquiry), remembered.supersededByConflict());
     }
 
     /**

@@ -142,6 +142,42 @@ public class Inquiry extends BaseEntity {
     @Column(name = "product_bound_by")
     private UUID productBoundBy;
 
+    /**
+     * The channel's own order identifier for this inquiry, verbatim, as the source stated it.
+     *
+     * <p><b>A reference, not a state.</b> Whether that order is paid, shipped or cancelled changes
+     * without anyone editing this row, so it is not stored here — {@code InquiryOrderFactReader}
+     * reads it from {@code channel_orders} at the moment it is needed. What is stored is the one
+     * thing that does NOT change: which order the customer was asking about.
+     *
+     * <p>Null on every row whose source named no order, which today is every Cafe24 board-6 article
+     * and every NAVER 상품 문의. Never derived from the inquiry body — see {@link InquiryOrderBinding}.
+     */
+    @Column(name = "source_order_ref", length = 120)
+    private String sourceOrderRef;
+
+    /**
+     * How {@link #sourceOrderRef} came to be here — {@link InquiryOrderBinding}, or null.
+     *
+     * <p>A string column for the same reason {@code product_binding} is one: an unrecognized value
+     * from a future migration should read as "not one I know" rather than fail a page of the queue.
+     * Read through {@link #orderBinding()}.
+     */
+    @Column(name = "order_binding", length = 16)
+    private String orderBinding;
+
+    /** The current order binding kind, or null when nothing is bound or the value is unrecognized. */
+    public InquiryOrderBinding orderBinding() {
+        if (orderBinding == null) {
+            return null;
+        }
+        try {
+            return InquiryOrderBinding.valueOf(orderBinding);
+        } catch (IllegalArgumentException unknown) {
+            return null;
+        }
+    }
+
     /** The current binding kind, or null when the stored value is absent or unrecognized. */
     public InquiryProductBinding productBinding() {
         if (productBinding == null) {

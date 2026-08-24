@@ -68,7 +68,7 @@ class NaverInquiryPrivacyFenceTest {
     }
 
     @Test
-    @DisplayName("the buyer fields are not on the projection record at all")
+    @DisplayName("the BUYER fields are not on the projection record at all")
     void whatIsNotProjectedCannotBePersistedLater() throws IOException {
         String source = Files.readString(NAVER_MAIN.resolve("NaverCustomerInquiriesClient.java"));
         String record = source.substring(source.indexOf("record CustomerInquiry("));
@@ -78,8 +78,20 @@ class NaverInquiryPrivacyFenceTest {
         // under the comment that says why it is not.
         assertThat(record).doesNotContain("@JsonProperty(\"customerId\")");
         assertThat(record).doesNotContain("@JsonProperty(\"customerName\")");
-        assertThat(record).doesNotContain("@JsonProperty(\"orderId\")");
-        assertThat(record).doesNotContain("@JsonProperty(\"productOrderIdList\")");
+    }
+
+    @Test
+    @DisplayName("the ORDER fields ARE projected, and taking them did not open the door for the buyer")
+    void theOrderLaneIsNotAWedgeForBuyerIdentity() throws IOException {
+        String source = Files.readString(NAVER_MAIN.resolve("NaverCustomerInquiriesClient.java"));
+        String record = source.substring(source.indexOf("record CustomerInquiry("));
+
+        // 2026-08-25, Operational Fact Binding v1. "이 문의가 어느 주문을 가리키는가" is an operational
+        // fact and "누가 물었는가" is not, and this resource returns both as required fields. The
+        // fence moved for exactly one of them, and this test is what stops the other from following.
+        assertThat(record).contains("@JsonProperty(\"orderId\")");
+        assertThat(record).contains("@JsonProperty(\"productOrderIdList\")");
+        assertThat(record).doesNotContain("customerName").doesNotContain("customerId");
     }
 
     @Test
@@ -93,8 +105,12 @@ class NaverInquiryPrivacyFenceTest {
         // fields someone remembered to check.
         String rendered = row.toString();
         assertThat(rendered).doesNotContain("홍길동").doesNotContain("buyer-77");
-        assertThat(rendered).doesNotContain("2026082112345");
         assertThat(row.author()).isNull();
+        // The order reference IS carried — and only in the field built to hold it. Two product orders
+        // were named, so no single line is "이 주문" and the binding falls back to the payment unit.
+        assertThat(row.orderRef().orderId()).isEqualTo("2026082112345");
+        assertThat(row.orderRef().productOrderId()).isNull();
+        assertThat(row.orderRef().preferredRef()).isEqualTo("2026082112345");
         // What it DOES carry is the operational content, so this is a fence and not an amputation.
         assertThat(row.body()).isEqualTo("언제 오나요?");
         assertThat(row.answerBody()).isEqualTo("내일 출고됩니다.");

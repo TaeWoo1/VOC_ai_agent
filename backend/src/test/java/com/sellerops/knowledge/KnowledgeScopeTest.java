@@ -56,11 +56,27 @@ class KnowledgeScopeTest {
     }
 
     @Test
+    @DisplayName("a read-only scope may be CITED but never RETRIEVED — the two vocabularies differ")
+    void aReadScopeHasACitationKindAndNoRetrievalKind() {
+        // ORDER_FACT became a stored kind on 2026-08-25 and the retrieval fence did not move: the
+        // thing that must not exist is a searchable corpus of stale order states, not the record that
+        // a draft was told one. kindOf() is the retrieval door and it is still shut.
+        assertThat(InquiryDraftEvidence.scopeOf(InquiryDraftEvidence.KIND_ORDER_FACT))
+                .isEqualTo(KnowledgeScope.ORDER_STATE);
+        assertThat(InquiryDraftEvidence.scopeLabelOf(InquiryDraftEvidence.KIND_ORDER_FACT))
+                .isEqualTo(KnowledgeScope.ORDER_STATE.labelKo());
+        assertThatThrownBy(() -> InquiryDraftEvidence.kindOf(KnowledgeScope.ORDER_STATE))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> InquiryDraftEvidence.kindOf(KnowledgeScope.CHANNEL_FACT))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     @DisplayName("an unknown stored kind reads back as unknown rather than as some other scope")
     void anUnknownKindIsNotSilentlyMappedOntoAScope() {
         // Rows outlive builds. A kind this build has never heard of must not be displayed as
         // "상품 정보" — a mislabelled citation is worse than an unlabelled one.
-        assertThat(InquiryDraftEvidence.scopeOf("ORDER_FACT")).isNull();
-        assertThat(InquiryDraftEvidence.scopeLabelOf("ORDER_FACT")).isEqualTo("ORDER_FACT");
+        assertThat(InquiryDraftEvidence.scopeOf("SUPPLIER_QUOTE")).isNull();
+        assertThat(InquiryDraftEvidence.scopeLabelOf("SUPPLIER_QUOTE")).isEqualTo("SUPPLIER_QUOTE");
     }
 }

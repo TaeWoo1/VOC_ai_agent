@@ -35,6 +35,12 @@ import java.time.Instant;
  * <p>{@code answerBody}/{@code answeredAt} carry the answer the seller ALREADY published on the
  * platform, for the sources that return it. Null when the source states only a flag — never
  * synthesized from {@code status}.
+ *
+ * <p>{@code orderRef} is the channel's own ORDER identifier for this inquiry, and its presence is an
+ * instruction in exactly the way {@code productRef} is — see {@link ChannelOrderRef}. {@code null}
+ * means the source declares no order lane at all (file upload, ESM, NAVER 상품 문의); {@link
+ * ChannelOrderRef#absent()} means the source has one and this row carries nothing. Buyer identity is
+ * not carried here under any name.
  */
 public record CanonicalInquiry(
         String productName,
@@ -51,7 +57,17 @@ public record CanonicalInquiry(
         String sourceSubtype,
         ChannelProductRef productRef,
         String answerBody,
-        Instant answeredAt) {
+        Instant answeredAt,
+        ChannelOrderRef orderRef) {
+
+    /** Back-compat: every source that declares no order lane. */
+    public CanonicalInquiry(String productName, String sku, String author, String body,
+                            String status, Instant receivedAt, String externalId, int sourceRow,
+                            String title, String informStatus, Boolean isSecret, String sourceSubtype,
+                            ChannelProductRef productRef, String answerBody, Instant answeredAt) {
+        this(productName, sku, author, body, status, receivedAt, externalId, sourceRow, title,
+                informStatus, isSecret, sourceSubtype, productRef, answerBody, answeredAt, null);
+    }
 
     /**
      * Back-compat constructor for sources that do not classify secrecy (ESM, file
@@ -61,7 +77,7 @@ public record CanonicalInquiry(
                             String status, Instant receivedAt, String externalId, int sourceRow,
                             String title, String informStatus) {
         this(productName, sku, author, body, status, receivedAt, externalId, sourceRow,
-                title, informStatus, null, null, null, null, null);
+                title, informStatus, null, null, null, null, null, null);
     }
 
     /**
@@ -72,6 +88,6 @@ public record CanonicalInquiry(
                             String status, Instant receivedAt, String externalId, int sourceRow,
                             String title, String informStatus, Boolean isSecret) {
         this(productName, sku, author, body, status, receivedAt, externalId, sourceRow,
-                title, informStatus, isSecret, null, null, null, null);
+                title, informStatus, isSecret, null, null, null, null, null);
     }
 }

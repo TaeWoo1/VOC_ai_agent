@@ -21,6 +21,7 @@ import {
 import type {
   DraftEvidenceView,
   InquiryDetail,
+  OrderContextView,
   PublishCapabilityView,
   PublishStatusView,
 } from "../../lib/types";
@@ -325,6 +326,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
             }}
           />
         ) : null}
+        <OperationalContext context={detail.orderContext} />
       </section>
 
       {/* 2 — THE ANSWER. One section, whatever state it is in. */}
@@ -529,6 +531,39 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
  * is none, because "(미지정 상품)" is the reason a draft could not be grounded and hiding it would
  * make the limitation above the draft look arbitrary.
  */
+/**
+ * 운영 정보 — the state of the order this inquiry names.
+ *
+ * <p><b>It renders nothing when the inquiry names no order</b>, which is most of them. An empty card
+ * with three "확인되지 않음" rows would read as "we looked up the order and it has no state", and the
+ * seller would learn to distrust the card everywhere else.
+ *
+ * <p>Three rows rather than one status line, because payment does not imply dispatch — and each row
+ * says "확인되지 않음" on its own rather than borrowing certainty from the row above it.
+ */
+function OperationalContext({ context }: { context: OrderContextView | null }) {
+  if (!context || !context.present) return null;
+  return (
+    <div className="mt-4 rounded-lg border border-line bg-surface-2 px-3.5 py-3">
+      <p className="text-xs font-semibold text-ink-2">운영 정보</p>
+      {context.summaryKo ? (
+        <p className="mt-1.5 break-keep text-sm leading-relaxed text-ink">{context.summaryKo}</p>
+      ) : null}
+      <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+        <dt className="text-ink-3">결제</dt>
+        <dd className="text-ink-2">{context.paymentKo}</dd>
+        <dt className="text-ink-3">배송</dt>
+        <dd className="text-ink-2">{context.fulfillmentKo}</dd>
+        <dt className="text-ink-3">취소</dt>
+        <dd className="text-ink-2">{context.cancellationKo}</dd>
+      </dl>
+      {context.observedKo ? (
+        <p className="mt-2 text-xs text-ink-3">{context.observedKo}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function InquiryMeta({
   detail,
   onBind,

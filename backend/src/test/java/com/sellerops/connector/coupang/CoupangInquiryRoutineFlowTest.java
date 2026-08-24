@@ -59,6 +59,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 @ActiveProfiles("test")
 class CoupangInquiryRoutineFlowTest {
 
+    @Autowired com.sellerops.order.ChannelOrderRepository channelOrders;
+
     @Autowired ReviewRepository reviews;
     @Autowired InquiryRepository inquiries;
     @Autowired OrderDailySummaryRepository orders;
@@ -225,7 +227,10 @@ class CoupangInquiryRoutineFlowTest {
                 new com.sellerops.inquiry.proposal.InquiryProposalWriter(workItems, proposals, audits, txManager),
                 replyDrafts, channels, products, draftEvidence, fixedTargetState(com.sellerops.inquiry.publish.PreSendCheck.unproven(
                         com.sellerops.inquiry.publish.PreSendCheck.STATE_UNKNOWN)),
-                new com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry());
+                new com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry(),
+                new com.sellerops.inquiry.draft.InquiryOrderFactReader(channelOrders, channels,
+                        (orgId, code, accountId, rows) ->
+                                com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH));
     }
 
     /** A COUPANG catalog row, so the detail read resolves the channel the seller sees. */

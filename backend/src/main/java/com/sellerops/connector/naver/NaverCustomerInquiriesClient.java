@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
+import com.sellerops.ingest.canonical.ChannelOrderRef;
 import com.sellerops.ingest.canonical.ChannelProductRef;
 import com.sellerops.inquiry.InquirySourceSubtype;
 import java.net.URI;
@@ -38,9 +39,19 @@ import org.slf4j.LoggerFactory;
  * existing rule ({@code IngestionService}: "Buyer PII is intentionally NOT persisted") holds without
  * an exception for this channel.
  *
- * <p><b>Order identifiers are read and not stored.</b> {@code orderId} / {@code productOrderIdList}
- * have no column on {@code inquiries}, and adding a cross-domain link is not what this package does.
- * Nothing is fabricated in their place.
+ * <p><b>Order identifiers ARE stored, as of 2026-08-25 — and only they.</b> {@code orderId} is a
+ * REQUIRED response field on this resource and {@code productOrderIdList} an optional comma-separated
+ * one, so this is the only inquiry surface in the repository where "which order is this about" is
+ * answered by the channel rather than guessed. They travel as a {@link ChannelOrderRef} and land in
+ * {@code inquiries.source_order_ref}. {@code customerId} and {@code customerName} remain unread: an
+ * order reference is a handle on a transaction, and the whole point of taking one and not the other
+ * is that they are different things.
+ *
+ * <p><b>The list is split, and a multi-line order binds only at the payment unit.</b>
+ * {@code productOrderIdList} is one string with commas in it; a single element is the exact per-line
+ * identity {@code channel_orders} keys on, and two or more mean the customer asked about several
+ * lines at once — for which no single line is "이 주문", so the payment-unit {@code orderId} is what
+ * is stored.
  *
  * <p><b>Product attribution by identifier or not at all</b> — {@code content.productNo}, exactly, the
  * same rule as 상품 문의. {@code productName} is not mapped for the same reason. {@code productNo} is
@@ -173,7 +184,45 @@ public class NaverCustomerInquiriesClient {
                 InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY,
                 ChannelProductRef.of(inquiry.productNo()),
                 answered ? inquiry.answerContent() : null,
-                answered ? parseInstant(inquiry.answerRegistrationDateTime()) : null);
+                answered ? parseInstant(inquiry.answerRegistrationDateTime()) : null,
+                orderRef(inquiry));
+    }
+
+    /**
+     * The order this 고객 문의 hangs off — the per-line identity when it is unambiguous, else the
+     * payment unit.
+     *
+     * <p>Returns {@link ChannelOrderRef#absent()} rather than null when both are missing: this
+     * resource HAS an order lane (the contract marks {@code orderId} 필수), so a row without one is a
+     * positive "this article named no order", not "this source does not do orders".
+     */
+    static ChannelOrderRef orderRef(CustomerInquiry inquiry) {
+        return orderRef(inquiry.orderId(), inquiry.productOrderIdList());
+    }
+
+    /** The same rule, over the two raw response values. Public so the rule itself is testable. */
+    public static ChannelOrderRef orderRef(String orderId, String productOrderIdList) {
+        return ChannelOrderRef.of(orderId, soleProductOrderId(productOrderIdList));
+    }
+
+    /** The one product-order id, or null when there are none or more than one. */
+    private static String soleProductOrderId(String list) {
+        if (list == null || list.isBlank()) {
+            return null;
+        }
+        String[] parts = list.split(",");
+        String only = null;
+        for (String part : parts) {
+            String trimmed = part.strip();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            if (only != null) {
+                return null;
+            }
+            only = trimmed;
+        }
+        return only;
     }
 
     private static Instant parseInstant(String value) {
@@ -199,9 +248,10 @@ public class NaverCustomerInquiriesClient {
     }
 
     /**
-     * The subset of the response this connector reads. {@code customerId}, {@code customerName},
-     * {@code orderId} and {@code productOrderIdList} are absent from this record ON PURPOSE — a field
-     * that is not projected cannot be persisted by accident later.
+     * The subset of the response this connector reads. {@code customerId} and {@code customerName}
+     * are absent from this record ON PURPOSE — a field that is not projected cannot be persisted by
+     * accident later. {@code orderId} / {@code productOrderIdList} ARE projected, and go nowhere
+     * except {@code inquiries.source_order_ref}.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record CustomerInquiry(@JsonProperty("inquiryNo") Long inquiryNo,
@@ -211,6 +261,16 @@ public class NaverCustomerInquiriesClient {
                            @JsonProperty("answerContent") String answerContent,
                            @JsonProperty("answerRegistrationDateTime") String answerRegistrationDateTime,
                            @JsonProperty("answered") Boolean answered,
-                           @JsonProperty("productNo") String productNo) {
+                           @JsonProperty("productNo") String productNo,
+                           @JsonProperty("orderId") String orderId,
+                           @JsonProperty("productOrderIdList") String productOrderIdList) {
+
+        /** Back-compat for fixtures written before the order lane existed. */
+        CustomerInquiry(Long inquiryNo, String title, String inquiryContent,
+                        String inquiryRegistrationDateTime, String answerContent,
+                        String answerRegistrationDateTime, Boolean answered, String productNo) {
+            this(inquiryNo, title, inquiryContent, inquiryRegistrationDateTime, answerContent,
+                    answerRegistrationDateTime, answered, productNo, null, null);
+        }
     }
 }

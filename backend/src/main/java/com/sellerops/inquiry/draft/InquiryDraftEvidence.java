@@ -85,11 +85,28 @@ public class InquiryDraftEvidence {
     public static final String KIND_ANSWER_MEMORY = "ANSWER_MEMORY";
 
     /**
-     * The stored kind for a scope.
+     * 채널이 말해 준 주문의 상태 — <b>검색된 passage가 아니라 그 순간 읽은 사실</b>.
+     *
+     * <p>다른 셋과 근본적으로 다르다. 그 셋은 판매자가 쓴 문서를 가리키고, 나중에 같은
+     * {@code chunk_id}를 다시 열면 초안이 본 그 문장이 그대로 있다. 주문 상태는 그렇지 않다 --
+     * 다음 주에 다시 읽으면 다른 값이고, 그것이 정상이다. 그래서 이 행은 문서를 가리키지 않고
+     * ({@code source_id}/{@code chunk_id}가 null) locator에 <b>언제 확인한 무엇이었는지</b>를 적는다.
+     */
+    public static final String KIND_ORDER_FACT = "ORDER_FACT";
+
+    /**
+     * The stored kind for a RETRIEVED scope.
      *
      * <p>The two are separate vocabularies on purpose: {@link KnowledgeScope} is what the product
      * reasons in and may be renamed, while these strings are already written into rows that must
      * still read correctly years from now.
+     *
+     * <p><b>It still throws for the read-only scopes, and {@link #KIND_ORDER_FACT} does not weaken
+     * that.</b> The fence was never "ORDER_STATE may not be cited"; it was "ORDER_STATE may not be
+     * RETRIEVED" — a corpus of stale copies is the thing that must not exist. An order fact reaches a
+     * draft through {@code InquiryOrderFactReader}, carrying its own observation date, and is recorded
+     * by a caller that names the kind explicitly. There is no path from a search result to this kind,
+     * which is what {@code KnowledgeScopeTest} asserts.
      */
     public static String kindOf(KnowledgeScope scope) {
         return switch (scope) {
@@ -113,6 +130,9 @@ public class InquiryDraftEvidence {
         }
         if (KIND_ANSWER_MEMORY.equals(kind)) {
             return KnowledgeScope.PAST_ANSWER;
+        }
+        if (KIND_ORDER_FACT.equals(kind)) {
+            return KnowledgeScope.ORDER_STATE;
         }
         return null;
     }

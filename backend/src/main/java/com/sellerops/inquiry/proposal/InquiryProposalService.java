@@ -8,7 +8,9 @@ import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.proposal.InquiryProposalProvider.Draft;
 import com.sellerops.inquiry.proposal.InquiryProposalProvider.SellerInquiryContext;
+import com.sellerops.inquiry.draft.InquiryOrderFactReader;
 import com.sellerops.inquiry.proposal.dto.InquiryDetail;
+import com.sellerops.order.fact.dto.OrderContextView;
 import com.sellerops.inquiry.proposal.dto.ProposalResult;
 import com.sellerops.inquiry.proposal.dto.ProposalView;
 import com.sellerops.inquiry.reply.InquiryReplyDraftRepository;
@@ -68,6 +70,7 @@ public class InquiryProposalService {
     private final InquiryDraftEvidenceRepository draftEvidence;
     private final InquiryReplyCapabilityRegistry capabilities;
     private final InquiryTargetStateReader targetState;
+    private final InquiryOrderFactReader orderFacts;
 
     public InquiryProposalService(InquiryWorkItemRepository workItems, InquiryProposalRepository proposals,
                                   InquiryRepository inquiries, InquiryProposalProvider provider,
@@ -75,7 +78,8 @@ public class InquiryProposalService {
                                   ChannelRepository channels, ProductRepository products,
                                   InquiryDraftEvidenceRepository draftEvidence,
                                   InquiryTargetStateReader targetState,
-                                  InquiryReplyCapabilityRegistry capabilities) {
+                                  InquiryReplyCapabilityRegistry capabilities,
+                                  InquiryOrderFactReader orderFacts) {
         this.workItems = workItems;
         this.proposals = proposals;
         this.inquiries = inquiries;
@@ -87,6 +91,7 @@ public class InquiryProposalService {
         this.draftEvidence = draftEvidence;
         this.capabilities = capabilities;
         this.targetState = targetState;
+        this.orderFacts = orderFacts;
     }
 
     /** Seller-only, org-scoped detail exposing the raw title/details (never author). */
@@ -131,7 +136,11 @@ public class InquiryProposalService {
                                 InquiryDraftEvidence.scopeLabelOf(row.getKind()), row.getTitle(),
                                 row.getLocator(), row.getSourceId(), row.getChunkId()))
                         .toList(),
-                capabilities.capability(channelCode, inquiry.getSourceSubtype()));
+                capabilities.capability(channelCode, inquiry.getSourceSubtype()),
+                // The deterministic fast path. "이 주문 상태가 뭐야?" on the detail screen is a join,
+                // not a plan — an LLM planner has nothing to contribute to reading one row and would
+                // add latency, cost, and a chance of paraphrasing it.
+                OrderContextView.of(orderFacts.read(orgId, inquiry)));
     }
 
     /**

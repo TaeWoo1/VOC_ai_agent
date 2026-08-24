@@ -2,6 +2,7 @@ package com.sellerops.connector.cafe24;
 
 import com.sellerops.community.CommunityReplyStatus;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
+import com.sellerops.ingest.canonical.ChannelOrderRef;
 import com.sellerops.ingest.canonical.ChannelProductRef;
 
 /**
@@ -33,6 +34,12 @@ import com.sellerops.ingest.canonical.ChannelProductRef;
  * {@code (channel_id, external_product_id)} exactly or attributes nothing. An article
  * with no {@code product_no} — which on board 6 is nearly all of them — yields
  * {@link ChannelProductRef#absent()}, and unattributed is the true answer for it.
+ *
+ * <p><b>The order is decided by {@code order_id} and by nothing else</b> — the same rule as the
+ * product, for the same reason. Declaring a {@link ChannelOrderRef} tells ingest to bind exactly or
+ * not at all; an article with a blank {@code order_id}, which on board 6 is expected to be most of
+ * them, yields {@link ChannelOrderRef#absent()} and stays unbound. Board 4 (리뷰) never travels this
+ * method and never declares an order lane at all.
  *
  * <p>Raw {@code reply_status} is preserved verbatim as {@code informStatus};
  * canonical {@code status} is derived through the confirmed {@link
@@ -80,7 +87,10 @@ final class Cafe24InquiryArticleMapper {
                 ChannelProductRef.of(productNo),
                 // A board article carries no seller answer body; only the reply_status flag.
                 null,
-                null);
+                null,
+                // The mall's own payment-unit order id. Cafe24 publishes no product-order granularity
+                // on this row, so the reference is the payment unit and the reader treats it as one.
+                ChannelOrderRef.of(row.orderId()));
     }
 
     /** Stable Cafe24-native dedup key preserving the mall's own board+article identity. */
