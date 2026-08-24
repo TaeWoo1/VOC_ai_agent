@@ -57,10 +57,19 @@ public class NaverInquiryCollector {
      * "this endpoint works" a fact about an endpoint rather than about a mixture.
      */
     public String verificationStatus() {
-        boolean allProven =
-                (qnaClient == null || "CONFIRMED".equals(NaverProductQnaClient.VERIFICATION_STATUS))
-                && (customerClient == null
-                        || "CONFIRMED".equals(NaverCustomerInquiriesClient.VERIFICATION_STATUS));
+        return fold(qnaClient == null ? null : NaverProductQnaClient.VERIFICATION_STATUS,
+                customerClient == null ? null : NaverCustomerInquiriesClient.VERIFICATION_STATUS);
+    }
+
+    /**
+     * The fold, separated from the wiring so it stays testable once every real source is proven.
+     *
+     * <p>A {@code null} is a source this connector does not read, and an unread source is not waited
+     * on. Anything else must be {@code CONFIRMED} for the type to be.
+     */
+    static String fold(String qnaStatus, String customerStatus) {
+        boolean allProven = (qnaStatus == null || "CONFIRMED".equals(qnaStatus))
+                && (customerStatus == null || "CONFIRMED".equals(customerStatus));
         return allProven ? "CONFIRMED" : "NEEDS_VERIFICATION";
     }
 

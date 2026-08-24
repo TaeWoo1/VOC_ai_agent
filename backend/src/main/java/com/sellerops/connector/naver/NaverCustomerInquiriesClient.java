@@ -56,11 +56,18 @@ public class NaverCustomerInquiriesClient {
     public static final String SOURCE = "NAVER:CUSTOMER_INQUIRY_API:v1";
 
     /**
-     * Never read live. The official description says this resource returns the inquiries accumulated
-     * on "네이버페이 구매회원으로 등록된 본인 계정", which cannot be resolved from the document into
-     * "the inquiries this SELLER received" — only a call answers it.
+     * Live-proven on the canonical Demo Org, 2026-08-24: one bounded window (2026-06-01~08-24), one
+     * page, 5 inquiries, 0 errors, and an immediate same-range re-read that stored nothing
+     * ({@code 5 received / 0 inserted / 5 skipped}).
+     *
+     * <p><b>What the call settled that the document could not.</b> The official description says this
+     * resource returns the inquiries accumulated on "네이버페이 구매회원으로 등록된 본인 계정", which does
+     * not resolve on paper into "the inquiries this SELLER received". It does in practice: every row
+     * came back carrying a {@code productNo} that resolved to one of THIS seller's own listings, and
+     * every row carried this seller's own published answer. Read with a seller application's token,
+     * this is the seller-side view.
      */
-    public static final String VERIFICATION_STATUS = "NEEDS_VERIFICATION";
+    public static final String VERIFICATION_STATUS = "CONFIRMED";
 
     /** The resource's documented range is 10~200 per page; the ceiling keeps the call count down. */
     static final int PAGE_SIZE = 200;

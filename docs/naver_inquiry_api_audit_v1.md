@@ -400,3 +400,109 @@ verification 상태를 **리소스별로** 옮겼다. 런타임은 DataType당 �
 내렸다** — INQUIRY는 지금 광고되지 않는다(`supported=false`). 수집된 REAL 13건은 그대로 남는다.
 
 `ORDER_SUMMARY` 60분 · `PRODUCT` 1440분은 **사고 이전 상태(enabled)로 복원**했다.
+
+---
+
+## 9. Run B 라이브 결과 (2026-08-24) — 고객 문의도 **된다**, 그리고 그것은 판매자의 화면이다
+
+**canonical Demo Org · 기존 계정 `bdccb7a7…` · `NAVER_CUSTOMER_INQUIRY` 단독 무장 ·
+`READ_ONLY` · WRITE 0.** 상품 문의 플래그는 내려져 있었으므로 `/v1/contents/qnas`는
+**호출될 수 없었다**.
+
+**창은 새로 발명하지 않았다.** 이 리소스의 공식 계약에는 **최대 조회 기간이 명시돼 있지 않다**
+(§2 — 400은 "일자 형식·범위 등"이라고만 한다). 그래서 Run A와 **같은 창**(2026-06-01~08-24)을
+썼다: 이미 승인된 범위이고, 두 source를 나란히 비교할 수 있게 한다.
+
+| 축 | Run B | Run B2 (동일 창 재독) |
+|---|---|---|
+| run | `05872745…` `MANUAL` **`SUCCESS`** (1.32초) | `9063aea8…` `MANUAL` **`SUCCESS`** (0.17초) |
+| **요청 / 페이지** | **2 / 1** (토큰 1 + 목록 1, `page 1/1 last=true`) | **2 / 1** |
+| received / mapped / **inserted** / **skipped** / failed | 5 / 5 / **5** / 0 / 0 | 5 / 5 / **0** / **5** / 0 |
+| 저장된 행 | 5 | **5 — 변화 없음** |
+| `inquiryNo` uniqueness | **5행 = 5 고유** (`naver-payinq:`) | **중복 canonical row 0** |
+| oldest / newest source time | **2026-06-09 / 2026-08-12** | 동일 |
+| answered / unanswered | **5 / 0** | 동일 |
+| `answer_body` / `answered_at` | **5/5 · 5/5** 보존 | 불변 |
+| `source_subtype` | 5/5 `NAVER_CUSTOMER_INQUIRY` | 불변 |
+| provenance | 5/5 `REAL` | 불변 |
+| **product identifier coverage** | **5/5** — `content.productNo`가 실제로 내려온다 | 동일 |
+| **exact product attribution** | **5/5**, canonical product **5개** | 불변 |
+| **unattributed** | **0** | **0** |
+| 401 / 403 / 429 / WARN / ERROR | **0 / 0 / 0 / 0 / 0** | 동일 |
+| 신규 product | **0** (`products` 320 불변) | **0** |
+| 열린 작업 항목 | **0** (전부 answered) · `inquiry_work_item` 3,338 불변 | 불변 |
+| synthetic 행 | **불변** (NAVER `DEMO_SEED` 8) | 불변 |
+| INQUIRY schedule | **0** | **0** |
+| WRITE | **0** | **0** |
+
+### 9.1 문서가 답하지 못한 seller-side semantics — 호출이 답했다
+
+§2가 남긴 질문이다. 공식 설명문은 이 리소스가 "네이버페이 **구매회원으로 등록된 본인 계정**에
+누적된 고객 문의"를 준다고 쓰여 있어, 문서만으로는 "이 **판매자**가 받은 문의"로 해석할 수 없었다.
+
+**실제로는 판매자의 것이다.** 판매자 애플리케이션 토큰으로 호출했더니 5건이 내려왔고,
+**5건 전부가 이 판매자 자신의 리스팅**(`channel_products.external_product_id` 정확 일치)을
+가리켰으며, **5건 전부에 이 판매자가 직접 쓴 답변**이 들어 있었다. 남의 계정 문의가 이 셋을
+동시에 만족할 수는 없다.
+
+붙은 리스팅: `5538599862` · `6473457702` · `6479976384` · `9809699005` · `9809759315` (각 1건).
+그리고 `content.productNo`도 **채널상품번호**다 — 상품 문의의 `productId`와 같은 번호 공간이다.
+
+### 9.2 privacy fence — 라이브 확인
+
+이 리소스는 `customerId`/`customerName`을 **필수 응답 필드로 실제로 보냈다.** 저장된 5행에서:
+
+| 확인 | 결과 |
+|---|---|
+| canonical inquiry row | 구매자 식별자 **0** |
+| DB persisted field | `author` **5/5 `NULL`** — 구매자 이름을 담을 수 있는 유일한 컬럼이 비어 있다 |
+| application log | `customerName`·`customerId`·`orderId`·`productOrderIdList`·`inquiryContent`를 담은 로그 라인 **0** |
+| raw response body logging | **0** — 로그는 건수·페이지·창만 말한다 |
+| exception body | 발생 없음(오류 0). 구조는 `NaverInquiryPrivacyFenceTest`가 고정 |
+
+저장된 것은 운영 내용뿐이다: 제목("배송중 파손건 문의" 등), 본문, 판매자 자신의 답변, 상품 귀속.
+
+### 9.3 하지 않은 측정 — 주문 식별자 매칭
+
+요청된 `knownSellerOrderMatches = X / N`은 **실행하지 않았다.** 이유를 적는다.
+
+그 측정을 하려면 `content.orderId`를 projection record에 선언해야 하는데, 지금 그 필드가
+**선언돼 있지 않다는 것 자체가** §9.2 첫 줄의 구조적 보장이다(`NaverInquiryPrivacyFenceTest` —
+"선언되지 않은 필드는 나중에 한 줄로 저장되기 시작할 수 없다"). 일회성 진단을 위해 상시
+보장을 약화시키는 거래다.
+
+그리고 그 측정이 답하려던 질문에는 **이미 더 강한 답이 있다**: §9.1의 상품 귀속 5/5와 판매자
+자신의 답변 5/5. 주문 매칭은 같은 결론에 대한 더 약한 두 번째 신호였다.
+
+필요해지면(예: 상품 귀속이 0%인 계정) 별도 패키지로 만든다 — 원본 id를 들지 않는 단방향 다이제스트
+비교로.
+
+### 9.4 source별 판정
+
+| source | 판정 | 근거 |
+|---|---|---|
+| `NAVER_PRODUCT_QNA` | **`CONFIRMED`** | Run A — 13/13, `productId` 100% 일치, 신규 product 0 |
+| `NAVER_CUSTOMER_INQUIRY` | **`CONFIRMED`** | Run B + B2 — 5/5, `productNo` 100% 일치, **재수집 멱등 실측**, PII 저장 0 |
+| NAVER TalkTalk | **커머스 API 미지원** | 변화 없음 |
+
+이제 `DataType.INQUIRY`의 fold도 `CONFIRMED`다(배선된 모든 source가 증명됨).
+
+### 9.5 아직 증명되지 않은 것
+
+- **`NAVER_PRODUCT_QNA`의 재수집 멱등** — `DEFERRED`. Run A 뒤 계정이 `CONNECTED`가 되어,
+  재무장하면 `CONFIRMED` 광고가 살아나 routine이 proof의 부산물로 생길 수 있었다. 규칙대로 멈췄다.
+  고객 문의 쪽에서 같은 upsert 경로가 멱등임이 실측됐으므로 **경로 자체는 증명됐고**, 상품 문의
+  고유의 잔여 위험은 그 source의 external id 형식뿐이다.
+- **미답변 문의가 unanswered queue에 들어가는 경로** — 두 run 모두 18건 전부 answered였다.
+- **2026-06-01 이전** — 두 source 모두 읽지 않았다.
+- **routine recurrence** — PART 2에서 두 source를 함께 결정한다.
+
+### 9.6 proof 종료 순서 (지켜진 순서)
+
+1. `CUSTOMER_INQUIRY` 플래그 **OFF** → 재시작
+2. **INQUIRY schedule 0 · `supported=false`(미광고) 확인** · REAL 18건 보존 확인
+3. **그 다음에** source verification 상태를 코드·문서에 반영
+4. `ORDER_SUMMARY` 60분 · `PRODUCT` 1440분 **baseline 복원**
+
+두 source가 모두 `CONFIRMED`가 된 지금, 플래그를 켜면 `CONNECTED` 계정에 60분 INQUIRY routine이
+**자동 생성된다**. 그것이 PART 2의 결정이며, 그때까지 두 플래그는 내려져 있다.

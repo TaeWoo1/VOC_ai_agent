@@ -65,20 +65,37 @@ class NaverInquiryCapabilityFenceTest {
     }
 
     @Test
-    @DisplayName("one proven resource beside one unproven one is a data type that is not proven")
+    @DisplayName("both resources proven: the type carries the word, and only then")
     void theFoldAcrossTwoResourcesIsTheConservativeOne() {
-        // 상품 문의 was live-proven 2026-08-24; 고객 문의 has never been called. A run of DataType
-        // INQUIRY with both wired would call both, so the type-level word must be the unproven one.
+        // Both 상품 문의 and 고객 문의 were live-proven 2026-08-24, each with only its own flag armed.
         ConnectorCapabilities capabilities = connector(wired()).capabilities("NAVER");
 
         assertThat(capabilities.supports(DataType.INQUIRY)).isTrue();
-        // The word is the fence: SelfPilotReconciler creates automatic schedules only for CONFIRMED.
-        // Promotion is a live proof, not an edit to this line.
-        assertThat(capabilities.verificationStatus().get(DataType.INQUIRY))
-                .isEqualTo("NEEDS_VERIFICATION");
-        // The proven ones are untouched by this package.
+        assertThat(capabilities.verificationStatus().get(DataType.INQUIRY)).isEqualTo("CONFIRMED");
+        // The other proven ones are untouched by this package.
         assertThat(capabilities.verificationStatus().get(DataType.ORDER_SUMMARY)).isEqualTo("CONFIRMED");
         assertThat(capabilities.verificationStatus().get(DataType.PRODUCT)).isEqualTo("CONFIRMED");
+    }
+
+    /**
+     * The fold itself, exercised against a source that is NOT proven — the property the two live
+     * proofs were run one-source-at-a-time to preserve.
+     *
+     * <p>Both real sources now read {@code CONFIRMED}, so nothing in production exercises the
+     * unproven branch any more. That is exactly when a fence quietly stops being one: the next
+     * resource added here starts unproven, and this test is what makes the type-level word notice.
+     */
+    @Test
+    @DisplayName("one unproven resource is enough to hold the whole data type back")
+    void anUnprovenResourceHoldsTheTypeBack() {
+        assertThat(NaverInquiryCollector.fold("CONFIRMED", "NEEDS_VERIFICATION"))
+                .isEqualTo("NEEDS_VERIFICATION");
+        assertThat(NaverInquiryCollector.fold("NEEDS_VERIFICATION", "CONFIRMED"))
+                .isEqualTo("NEEDS_VERIFICATION");
+        assertThat(NaverInquiryCollector.fold("CONFIRMED", "CONFIRMED")).isEqualTo("CONFIRMED");
+        // A source that is not wired is not waited on — null means "this connector does not read it".
+        assertThat(NaverInquiryCollector.fold("CONFIRMED", null)).isEqualTo("CONFIRMED");
+        assertThat(NaverInquiryCollector.fold(null, "NEEDS_VERIFICATION")).isEqualTo("NEEDS_VERIFICATION");
     }
 
     @Test
@@ -93,15 +110,14 @@ class NaverInquiryCapabilityFenceTest {
     }
 
     @Test
-    @DisplayName("with only the unproven resource wired, it is not")
-    void aSoleUnprovenResourceCannotBorrowTheOthersProof() {
+    @DisplayName("with only the customer resource wired, it carries its own proof and no other")
+    void aSoleResourceCarriesItsOwnProof() {
         NaverInquiryCollector customerOnly = new NaverInquiryCollector(
                 null, new NaverCustomerInquiriesClient(http, BASE_URL), CLOCK);
 
         ConnectorCapabilities capabilities = connector(customerOnly).capabilities("NAVER");
 
-        assertThat(capabilities.verificationStatus().get(DataType.INQUIRY))
-                .isEqualTo("NEEDS_VERIFICATION");
+        assertThat(capabilities.verificationStatus().get(DataType.INQUIRY)).isEqualTo("CONFIRMED");
     }
 
     @Test
