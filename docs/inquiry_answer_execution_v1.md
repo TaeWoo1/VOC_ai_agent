@@ -820,3 +820,27 @@ handle을 빌려 쓰지 않는다. 그리고 `TARGET_CHANGED`가 있어 다른 �
 
 OAuth 재동의 · `mall.write_community` grant 변경 · `execution-enabled` 활성화 · Cafe24 POST —
 **전부 실행하지 않았다.** 화면에 답변 실행 권한 상태를 보여주는 UI도 아직 없다(API만 존재).
+
+### 28.8 재동의 시도 — **앱 등록에 그 스코프가 없다** (2026-08-25, marketplace WRITE 0)
+
+승인된 라이브 실행에서 재동의를 실제로 시도했고, Cafe24가 **인가 단계에서** 거절했다:
+
+```
+error=invalid_scope
+error_description=The scope added by Cafe24 Developers is invalid. Please try again.
+```
+
+동의 화면이 뜨지도 않았다 — 요청 자체가 authorize endpoint에서 반려된다. 원인은 우리 코드가 아니라
+**등록된 SellerOps Cafe24 앱에 `mall.write_community` 권한이 켜져 있지 않다**는 것이다. 이것은
+Cafe24 개발자센터에서 앱 설정을 바꿔야 하는 **외부 작업**이며, 코드·설정·재시도로 우회할 수 없다.
+
+요청한 scope 문자열은 의도한 그대로였다(`mall.read_community, mall.read_order, mall.read_product,
+mall.write_community`) — 예상 외 scope는 없었다.
+
+**설계된 대로 동작한 것 하나:** 실패한 재동의가 **작동 중인 연결을 건드리지 않았다**. 카페24 계정은
+`CONNECTED` 그대로이고 부여 scope도 read 3종 그대로다(`complete()`의 "a working connection survives a
+failed attempt untouched"). 그러므로 이 실패는 판매자에게 아무것도 잃게 하지 않았다.
+
+남은 전제조건은 하나로 줄었다: **앱 등록에 `mall.write_community` 추가.** 그것이 되면 재동의 →
+grant 확인 → arm → POST 1회 → READ-back 순서로 그대로 이어진다. 대상과 초안은 그대로다
+(`cafe24:b6:a3672` · draft v2 · 지문 `5ad1f302…4f5c`).
