@@ -67,17 +67,26 @@ public class Cafe24ChannelReplyAdapter implements ChannelReplyAdapter {
     private final Cafe24Authorizer authorizer;
     private final Cafe24AnswerExecutionGrant grant;
     private final String clientIp;
+    /**
+     * Which shop of the mall the answer is written into. A deployment states it from an OBSERVED
+     * value — the target article's own {@code shop_no}, read once under approval — and zero means
+     * unstated, which fails closed here rather than defaulting. The contract's default of 1 is the
+     * platform's; adopting it silently would make an unobserved shop look like a decided one.
+     */
+    private final int shopNo;
 
     public Cafe24ChannelReplyAdapter(Cafe24ReplyArticleClient writeClient,
                                      Cafe24BoardArticlesClient readClient,
                                      Cafe24Authorizer authorizer,
                                      Cafe24AnswerExecutionGrant grant,
-                                     String clientIp) {
+                                     String clientIp,
+                                     int shopNo) {
         this.writeClient = writeClient;
         this.readClient = readClient;
         this.authorizer = authorizer;
         this.grant = grant;
         this.clientIp = clientIp == null ? "" : clientIp.strip();
+        this.shopNo = shopNo;
     }
 
     @Override
@@ -98,7 +107,7 @@ public class Cafe24ChannelReplyAdapter implements ChannelReplyAdapter {
         }
         // A deployment fact, not a credential and not the seller's problem. Same reasoning: nothing
         // was sent, so the reply is not burned.
-        if (clientIp.isEmpty()) {
+        if (clientIp.isEmpty() || shopNo <= 0) {
             return ReplyPublishResult.retryableFailure();
         }
         String body = command.body();
@@ -121,8 +130,9 @@ public class Cafe24ChannelReplyAdapter implements ChannelReplyAdapter {
         Cafe24ReplyArticleClient.Outcome outcome;
         try {
             outcome = writeClient.post(auth.accessToken(), auth.mallId(),
-                    new Cafe24ReplyArticleClient.ReplyArticle(target.boardNo(), target.articleNo(),
-                            title.strip(), body, auth.mallId(), auth.mallId(), clientIp));
+                    new Cafe24ReplyArticleClient.ReplyArticle(shopNo, target.boardNo(),
+                            target.articleNo(), title.strip(), body, auth.mallId(), auth.mallId(),
+                            clientIp));
         } catch (Cafe24WriteApprovalRequired unarmed) {
             // An unarmed deployment must look like an unarmed deployment, never like Cafe24 refusing.
             return ReplyPublishResult.retryableFailure();

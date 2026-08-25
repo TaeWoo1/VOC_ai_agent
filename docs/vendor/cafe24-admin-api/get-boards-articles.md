@@ -73,29 +73,104 @@ Two notes recorded verbatim because they are inconsistencies in the reference it
 - **`order_id` is not a list filter.** It is a response property only — an article names its
   order, but articles cannot be found by order.
 
-## POST (create) request body — the envelope this copy was missing
+## POST (create) request body — transcribed from the reference's own request sample
 
-**Corrected 2026-08-25 by a live 400.** The table below lists the parameter NAMES. It does not, and
-did not, say how they are wrapped — and this copy's silence was read as "flat". The first live POST
-sent the eight decided fields at the top level and Cafe24 answered **HTTP 400**, creating nothing.
+**Corrected twice on 2026-08-25, by two live refusals and then by a transcription.**
 
-The Admin API's create/update calls take a `request` envelope (confirmed by the product owner against
-the official reference; the reference page could not be retrieved into this copy, so this note records
-the correction rather than a transcription):
+The parameter table below lists NAMES. It does not say how they are wrapped, and it does not
+separate the PATH parameter from the body — `board_no` sits in the same column as `writer` and
+`title`, marked *Required*. Reading that silence produced two wrong bodies in a row:
+
+| Attempt | Body sent | Result |
+|---|---|---|
+| 1 | the eight decided fields **flat** at the top level | **HTTP 400** — nothing created |
+| 2 | `{"request": {…}}`, a singular object, `board_no` inside it | **HTTP 422** *"An invalid request is entered."* — nothing created |
+
+The reference publishes the answer in its **request sample**, which the earlier transcriptions did
+not carry into this copy. Retrieved 2026-08-25 from the rendered reference page
+(`developers.cafe24.com/docs/en/api/admin/#create-a-board-post`) and **confirmed identical in the
+Korean edition** (`/docs/ko/…`), the sample for `POST /api/v2/admin/boards/5/articles` is:
 
 ```json
 {
-  "shop_no": 1,
-  "request": { "…the parameters below…" }
+    "shop_no": 1,
+    "requests": [
+        {
+            "writer": "John Doe",
+            "title": "subject text1",
+            "content": "contents text1",
+            "client_ip": "127.0.0.1",
+            "reply_article_no": 42,
+            "board_category_no": 1,
+            "product_no": 10,
+            "rating": 5,
+            "order_id": "20170710-0000013",
+            "secret": "T",
+            "created_date": "2018-11-30T12:43:00+09:00",
+            "writer_email": "sample@sample.com",
+            "member_id": "sampleid",
+            "nick_name": "sample nickname",
+            "deleted": "F",
+            "input_channel": "P",
+            "notice": "F",
+            "fixed": "F",
+            "reply": "F",
+            "reply_mail": "N",
+            "reply_user_id": "admin",
+            "reply_status": "C",
+            "category_no": 1,
+            "naverpay_review_id": "naver_id",
+            "attach_file_urls": [ { "name": "…", "url": "…" } ]
+        },
+        { "…a second article…" }
+    ]
 }
 ```
 
-SellerOps sends `{"request": {…}}` and **omits `shop_no`**: it is optional with a documented default
-of 1, and this deployment has no provenance for it — the value appears in no stored article row, no
-response it reads, and no part of the connection. Asserting a shop that was never observed is a worse
-error than letting the platform apply its own default.
+Three facts follow, and each contradicts something this repository sent:
+
+1. **The envelope is `requests`, an ARRAY** — not `request`. The singular `request` object is
+   `PUT`'s envelope (its own sample, same page, uses it). The plural is what
+   *"objects per single API call Limit: **10**"* in the Specification block means: this endpoint
+   creates up to ten articles per call.
+2. **`board_no` does not appear in the body.** It is a PATH parameter and only that. Its *Required*
+   mark in the parameter table is a requirement of the request, satisfied by the URL.
+3. **`reply_status`, `member_id`, `reply_article_no` and `client_ip` are body fields the sample
+   itself carries**, including `"reply_status": "C"` — so none of them is a candidate cause of the
+   422.
+
+`shop_no` is a top-level sibling of `requests`, not a field inside an article. SellerOps sends it
+with the value **observed on the target article itself** by an approved bounded READ, rather than the
+documented default of 1 — the default is the platform's, and adopting it silently would make an
+unobserved shop indistinguishable from a decided one.
+
+### The create response
+
+```json
+{
+    "articles": [
+        { "shop_no": 1, "article_no": 50, "parent_article_no": 40, "board_no": 5, "…": "…" }
+    ]
+}
+```
+
+An array, matching the request's. `Cafe24ReplyArticleClient` reads a created number only when that
+array holds exactly one element.
+
+### `PUT`'s envelope, for contrast
+
+```json
+{ "shop_no": 1, "request": { "title": "…", "content": "…", "…": "…" } }
+```
+
+Singular, and an object. The two envelopes are not interchangeable, which is the whole content of
+the 422.
 
 ## POST (create) request parameters — the complete list
+
+> **This table is not a body schema.** It is the reference's single *Request* table, and it mixes the
+> PATH parameter (`board_no`) with body fields and with the envelope's own `shop_no`. For where each
+> one goes, the request sample above is the authority.
 
 | Name | Required | Constraint | Description (verbatim) |
 |---|:--:|---|---|

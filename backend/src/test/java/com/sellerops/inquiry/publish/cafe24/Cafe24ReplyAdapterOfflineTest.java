@@ -39,6 +39,7 @@ class Cafe24ReplyAdapterOfflineTest {
     /** Records writes and reads; answers reads from a canned board. */
     private static final class StubHttp implements Cafe24HttpClient {
         final List<String> writes = new ArrayList<>();
+        final List<URI> writeUris = new ArrayList<>();
         final List<URI> reads = new ArrayList<>();
         int writeStatus = 201;
         String writeBody = "{\"articles\":[{\"article_no\":901}]}";
@@ -55,6 +56,7 @@ class Cafe24ReplyAdapterOfflineTest {
         @Override
         public Response postJson(URI uri, Map<String, String> h, String body) {
             writes.add(body);
+            writeUris.add(uri);
             if (writeThrows != null) {
                 throw writeThrows;
             }
@@ -98,8 +100,12 @@ class Cafe24ReplyAdapterOfflineTest {
     private static Cafe24ChannelReplyAdapter adapter(StubHttp http, boolean granted, String clientIp) {
         return new Cafe24ChannelReplyAdapter(
                 new Cafe24ReplyArticleClient(http, "approval-for-this-test"),
-                new Cafe24BoardArticlesClient(http), authorizer(), grant(granted), clientIp);
+                new Cafe24BoardArticlesClient(http), authorizer(), grant(granted), clientIp,
+                OBSERVED_SHOP_NO);
     }
+
+    /** The value an approved bounded READ observed on the target article itself — never a default. */
+    private static final int OBSERVED_SHOP_NO = 1;
 
     private static ReplyPublishCommand command(String externalId) {
         return new ReplyPublishCommand(ORG, ACCOUNT, CHANNEL, externalId, Instant.now(),
@@ -129,9 +135,11 @@ class Cafe24ReplyAdapterOfflineTest {
         adapter(http, true, "203.0.113.10").publish(command("cafe24:b6:a246"));
 
         assertThat(http.writes).hasSize(1);
-        assertThat(http.writes.get(0))
-                .contains("\"reply_article_no\":246")
-                .contains("\"board_no\":6");
+        assertThat(http.writes.get(0)).contains("\"reply_article_no\":246");
+        assertThat(http.writeUris.get(0).getPath())
+                .as("board_no는 경로가 나르는 값이다 — 본문이 아니라")
+                .isEqualTo("/api/v2/admin/boards/6/articles");
+        assertThat(http.writes.get(0)).doesNotContain("\"board_no\"");
     }
 
     // ────────────────────────────────────────────────────────────── refusals
@@ -175,7 +183,8 @@ class Cafe24ReplyAdapterOfflineTest {
         StubHttp http = new StubHttp();
         Cafe24ReplyArticleClient unarmed = new Cafe24ReplyArticleClient(http, "");
         assertThatThrownBy(() -> unarmed.post("tok", MALL,
-                new Cafe24ReplyArticleClient.ReplyArticle(6, 246L, "제목", DRAFT, MALL, MALL, "203.0.113.10")))
+                new Cafe24ReplyArticleClient.ReplyArticle(1, 6, 246L, "제목", DRAFT, MALL, MALL,
+                        "203.0.113.10")))
                 .isInstanceOf(Cafe24WriteApprovalRequired.class);
         assertThat(http.writes).isEmpty();
     }
@@ -239,9 +248,11 @@ class Cafe24ReplyAdapterOfflineTest {
     @Test
     @DisplayName("본문은 request 봉투 안에 있고, 밖으로 새는 칸은 없다")
     void theRequestIsWrapped() throws Exception {
-        // The first live POST sent these keys FLAT and Cafe24 answered 400. The Admin API's
-        // create/update calls take a `request` envelope, so a field sitting at the top level is not a
-        // cosmetic difference — it is a field the platform never reads.
+        // Two live refusals came from this one method. Attempt 1 sent the fields FLAT (400).
+        // Attempt 2 wrapped them in a SINGULAR `request` object with `board_no` inside it (422) —
+        // but the singular object is PUT's envelope, and `board_no` is a PATH parameter. The
+        // reference's own request sample, now transcribed into
+        // docs/vendor/cafe24-admin-api/get-boards-articles.md, is `{shop_no, requests:[…]}`.
         StubHttp http = new StubHttp();
         adapter(http, true, "203.0.113.10").publish(command("cafe24:b6:a246"));
         com.fasterxml.jackson.databind.JsonNode root =
@@ -250,19 +261,61 @@ class Cafe24ReplyAdapterOfflineTest {
         List<String> topLevel = new ArrayList<>();
         root.fieldNames().forEachRemaining(topLevel::add);
         assertThat(topLevel)
-                .as("shop_no는 출처가 없어 보내지 않는다 (계약 기본값 1)")
-                .containsExactly("request");
+                .as("top level is the envelope and nothing else")
+                .containsExactlyInAnyOrder("shop_no", "requests");
+        assertThat(root.path("shop_no").asInt())
+                .as("관측된 값이며 계약 기본값 1을 그대로 채택한 것이 아니다")
+                .isEqualTo(OBSERVED_SHOP_NO);
 
-        assertThat(root.path("request").isObject()).isTrue();
+        assertThat(root.path("requests").isArray()).as("복수형 배열 — PUT의 단수 request가 아니다").isTrue();
+        assertThat(root.path("requests")).hasSize(1);
+        assertThat(root.has("request")).as("singular `request` belongs to PUT").isFalse();
+
         List<String> inside = new ArrayList<>();
-        root.path("request").fieldNames().forEachRemaining(inside::add);
+        root.path("requests").get(0).fieldNames().forEachRemaining(inside::add);
         assertThat(inside).containsExactlyInAnyOrder(
-                "board_no", "reply_article_no", "title", "content",
+                "reply_article_no", "title", "content",
                 "writer", "member_id", "client_ip", "reply_status");
+        assertThat(inside).as("board_no는 경로에만 있다 — 본문 필드가 아니다").doesNotContain("board_no");
         for (String leaked : List.of("writer", "title", "content", "client_ip",
                 "reply_article_no", "member_id", "reply_status", "board_no")) {
             assertThat(root.has(leaked)).as(leaked + " must not sit at the top level").isFalse();
         }
+    }
+
+    @Test
+    @DisplayName("두 번 거절당한 두 요청 모양은 회귀로 금지된다 — 평평한 본문도, 단수 request도")
+    void theTwoRefusedShapesCannotComeBack() throws Exception {
+        StubHttp http = new StubHttp();
+        adapter(http, true, "203.0.113.10").publish(command("cafe24:b6:a246"));
+        String sent = http.writes.get(0);
+
+        com.fasterxml.jackson.databind.JsonNode root =
+                new com.fasterxml.jackson.databind.ObjectMapper().readTree(sent);
+        assertThat(root.path("writer").isMissingNode())
+                .as("attempt 1 (HTTP 400): 필드가 최상위에 평평하게 놓였다")
+                .isTrue();
+        assertThat(root.path("content").isMissingNode()).isTrue();
+        assertThat(root.path("request").isMissingNode())
+                .as("attempt 2 (HTTP 422): 단수 request 객체")
+                .isTrue();
+        assertThat(root.path("requests").get(0).path("board_no").isMissingNode())
+                .as("attempt 2 (HTTP 422): 본문 안의 board_no")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("관측되지 않은 상점 번호는 기본값 1로 채워지지 않고 전송을 막는다")
+    void anUnobservedShopStopsTheSend() {
+        StubHttp http = new StubHttp();
+        Cafe24ChannelReplyAdapter unstated = new Cafe24ChannelReplyAdapter(
+                new Cafe24ReplyArticleClient(http, "approval-for-this-test"),
+                new Cafe24BoardArticlesClient(http), authorizer(), grant(true), "203.0.113.10", 0);
+
+        ReplyPublishResult result = unstated.publish(command("cafe24:b6:a246"));
+
+        assertThat(result.kind()).isEqualTo(ReplyPublishResult.Kind.RETRYABLE_FAILURE);
+        assertThat(http.writes).as("한 바이트도 나가지 않는다").isEmpty();
     }
 
     @Test
@@ -278,10 +331,10 @@ class Cafe24ReplyAdapterOfflineTest {
     void aMissingActorValueIsRefusedNotBlanked() {
         Cafe24ReplyArticleClient client = new Cafe24ReplyArticleClient(new StubHttp(), "");
         assertThatThrownBy(() -> client.body(new Cafe24ReplyArticleClient.ReplyArticle(
-                6, 246L, "제목", DRAFT, "", MALL, "203.0.113.10")))
+                1, 6, 246L, "제목", DRAFT, "", MALL, "203.0.113.10")))
                 .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> client.body(new Cafe24ReplyArticleClient.ReplyArticle(
-                6, 0L, "제목", DRAFT, MALL, MALL, "203.0.113.10")))
+                1, 6, 0L, "제목", DRAFT, MALL, MALL, "203.0.113.10")))
                 .isInstanceOf(IllegalStateException.class);
     }
 

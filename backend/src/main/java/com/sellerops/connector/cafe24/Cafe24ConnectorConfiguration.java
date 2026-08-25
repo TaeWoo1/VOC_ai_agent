@@ -186,6 +186,33 @@ public class Cafe24ConnectorConfiguration {
     }
 
     /**
+     * The shop-scope observation — one bounded, read-only LIST call that answers where an article
+     * actually lives. It exists because the create contract's body names {@code shop_no} and this
+     * deployment had no observed value for it; two live POSTs omitted the field rather than assert
+     * one. Gated by the connector flag, its own flag, a configured account and an explicit article
+     * list, and capped at a single request. It writes nothing anywhere.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.shop-scope.enabled",
+            havingValue = "true")
+    Cafe24ShopScopeProbe cafe24ShopScopeProbe(Cafe24HttpClient http) {
+        return new Cafe24ShopScopeProbe(http);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.shop-scope.enabled",
+            havingValue = "true")
+    Cafe24ShopScopeProbeRunner cafe24ShopScopeProbeRunner(
+            Cafe24Authorizer authorizer, Cafe24ShopScopeProbe probe,
+            SellerAccountRepository accounts,
+            @Value("${sellerops.connector.cafe24.diagnostic.shop-scope.account-id:}") String accountId,
+            @Value("${sellerops.connector.cafe24.diagnostic.shop-scope.board-no:6}") int boardNo,
+            @Value("${sellerops.connector.cafe24.diagnostic.shop-scope.article-nos:}") String articleNos) {
+        return new Cafe24ShopScopeProbeRunner(authorizer, probe, accounts, accountId, boardNo,
+                articleNos);
+    }
+
+    /**
      * The offline thread repair — replays the observation a bounded live READ already produced onto
      * exactly the rows it named. <b>It makes no marketplace call</b>, which is why it takes no
      * authorizer and no client. Gated by the connector flag, its own flag, a configured account, a

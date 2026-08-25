@@ -844,3 +844,98 @@ failed attempt untouched"). 그러므로 이 실패는 판매자에게 아무것
 남은 전제조건은 하나로 줄었다: **앱 등록에 `mall.write_community` 추가.** 그것이 되면 재동의 →
 grant 확인 → arm → POST 1회 → READ-back 순서로 그대로 이어진다. 대상과 초안은 그대로다
 (`cafe24:b6:a3672` · draft v2 · 지문 `5ad1f302…4f5c`).
+
+## 29. 요청 계약 재조정 — 422가 말하지 않은 것을 계약이 말했다 (2026-08-25, marketplace WRITE 0)
+
+두 번의 라이브 거절 뒤, **marketplace WRITE 0**으로 요청 모양을 한 번 더 좁혔다. 이 절의 결론은
+값에 대한 추측이 아니라 **공식 reference의 request sample 사본**과 **승인된 exact READ 1회**에서 나온다.
+
+### 29.1 현재 공식 계약을 사본으로 옮겼다 — 그리고 그것이 422를 설명한다
+
+`docs/vendor/cafe24-admin-api/get-boards-articles.md`가 지금까지 담고 있던 것은 reference의 **파라미터
+표**뿐이었다. 그 표는 이름만 나열하며, **경로 파라미터와 본문 필드를 한 열에 섞는다** — `board_no`가
+`writer`·`title`과 같은 칸에 *Required*로 앉아 있다. 그 침묵을 두 번 잘못 읽었다.
+
+reference는 답을 **request sample**에 싣고 있었고, 이번에 그것을 사본으로 옮겼다(영문판에서 취득,
+**국문판과 동일함을 확인**). 세 가지가 따라 나오고, 각각이 우리가 보낸 것과 충돌한다.
+
+| # | 계약 | 우리가 보낸 것 |
+|---|---|---|
+| 1 | 봉투는 **`requests`, 배열** — 최대 10개 생성(Specification의 *objects per single API call Limit: 10*) | attempt 2는 **단수 `request` 객체** (그것은 `PUT`의 봉투다) |
+| 2 | `board_no`는 **경로 전용** — sample의 본문에 없다 | attempt 2는 **본문 안에 `board_no`** |
+| 3 | `reply_status`·`member_id`·`client_ip`·`reply_article_no`는 sample이 **그대로 싣는다** | 동일 — 용의선상에서 빠진다 |
+
+그래서 **422의 가장 좁은 원인은 값이 아니라 구조**다. 400은 봉투를 읽지 못한 것이고, 422는 봉투는
+읽었으나(`request`는 이 플랫폼의 update 봉투로 존재한다) **그 안의 모양이 create 계약이 아니었던 것**이다.
+
+### 29.2 `shop_no`는 이제 추측이 아니라 관측이다
+
+`shop_no`는 계약상 optional이고 기본값 1이다. 그래서 두 번의 POST는 **보내지 않았다** — 출처가 없는 값을
+단언하는 것보다 플랫폼의 기본값이 적용되게 두는 편이 정직했기 때문이다. 다만 생략은 정직할 뿐 **지식이
+아니고**, 잘못된 상점에 쓰인 글은 재시도로 회수되지 않는다.
+
+승인된 **exact READ 1회**(`Cafe24ShopScopeProbe`, `article_no=3672` 정확 필터, GET 1회, WRITE 0,
+DB 변경 0)가 그 값을 대상 글 자신에게서 읽었다:
+
+```
+article=3672  shop_no=1  board_no=6  parent=null  reply_depth=0  reply_status=N
+```
+
+두 가지가 동시에 확정된다 — **대상은 여전히 미답변 ROOT이고 drift가 없다**, 그리고 `shop_no`에 **출처가
+생겼다**. 코드는 이 구분을 유지한다: `sellerops.inquiry.publish.cafe24.shop-no`의 기본값은 **0이고 0은
+전송을 막는다**. 계약의 기본값 1을 조용히 채택하면 **관측되지 않은 상점이 결정된 상점과 구별되지 않는다**.
+
+probe는 구조 필드 **여섯 개만** parse한다 — `article_no`·`shop_no`·`board_no`·`parent_article_no`·
+`reply_depth`·`reply_status`. `title`·`content`·`writer`·`member_id`·`client_ip`는 **선언되지 않으므로**
+고객의 문장도 사람 모양의 값도 이 경로로는 로그에 닿을 수 없다.
+
+### 29.3 교정된 요청 (attempt 3 후보)
+
+```json
+{
+  "shop_no": 1,
+  "requests": [
+    {
+      "reply_article_no": 3672,
+      "title": "<질문 제목 그대로>",
+      "content": "<승인된 초안 v2>",
+      "writer": "<mall_id>",
+      "member_id": "<mall_id>",
+      "client_ip": "<배포 설정값>",
+      "reply_status": "C"
+    }
+  ]
+}
+```
+
+`POST /api/v2/admin/boards/6/articles` — **`board_no`는 경로가 나른다.**
+
+**이번 교정에서 바꾼 것은 구조뿐이다.** `writer`·`member_id`·`title`·`client_ip`·`reply_status`의 값은
+Part D가 관측으로 정한 그대로이며 한 글자도 건드리지 않았다. 한 번에 여러 변수를 바꾸면 다음 응답이
+무엇을 말하는지 알 수 없다.
+
+회귀 3건이 이것을 고정한다 — 최상위 key set(`shop_no`+`requests`)과 배열 안의 key set, **평평한 본문과
+단수 `request`라는 두 금지 fixture**, 그리고 관측되지 않은 `shop_no`가 전송을 막는다는 것.
+
+### 29.4 attempt 2의 감사 공백 — 조용히 메우지 않고 명시적으로 복구했다
+
+시도 2의 결과는 감사 이력에 없었다. `(work_item_id, command_id)` 멱등 키에 시도 2가 시도 1의 id를
+재사용해 삽입이 거부됐기 때문이다(키 스코프는 `3076446c`에서 고쳐졌다). 그 공백이 attempt 3의 이력을
+막게 두지 않되, **과거 시점에 정상 기록된 사건인 것처럼 backfill하지도 않았다.** 한 행을 넣었고, 그 행은
+스스로 사후 복구임을 말한다:
+
+| 필드 | 값 |
+|---|---|
+| `event_type` | `EXECUTION_RECORDED` (새 event 없음) |
+| `actor` | **`SYSTEM:AUDIT_REPAIR`** — 사람도 publish도 아니다 |
+| `command_id` | `audit-repair:attempt2/EXECUTION_FAILED/422/created0/bug=uq-command-id/fixed=3076446c` |
+| `phase_from` → `phase_to` | `ACTION_PENDING` → `FAILED` (실제 투영) |
+| `created_at` | **복구 시각** — 사건 시각으로 되돌리지 않았다 |
+
+이제 이력이 순서대로 읽힌다: 시도 1 실패 → 요청 교정 후 재장전 → 시도 2 실패(사후 복구 기록).
+
+### 29.5 이 절에서 하지 않은 것
+
+**attempt 3(두 번째가 아닌 세 번째 POST)를 실행하지 않았다.** marketplace WRITE 0, 새 endpoint 0,
+새 scope 0, 삭제 0. 실행 arm(`SELLEROPS_INQUIRY_PUBLISH_EXECUTION_ENABLED`)은 이 절의 READ를 위해
+**내려두었고 다시 올리지 않았다** — 다음 승인이 올릴 것이다.

@@ -163,6 +163,11 @@ sellerops:
         # is DEPLOYMENT_CONFIGURED by contract (Cafe24ReplyRequestShape), never discovered at runtime
         # and never copied from an observed past reply.
         client-ip: ${SELLEROPS_INQUIRY_PUBLISH_CAFE24_CLIENT_IP:}
+        # Which shop of the mall the answer is written into. 0 = no send. The contract documents a
+        # default of 1, and that default is the PLATFORM's — this value must come from having OBSERVED
+        # the target article's own `shop_no` (an approved bounded READ), so that an unobserved shop
+        # can never be mistaken for a decided one.
+        shop-no: ${SELLEROPS_INQUIRY_PUBLISH_CAFE24_SHOP_NO:0}
     signature:
       enabled: ${SELLEROPS_INQUIRY_SIGNATURE_ENABLED:false}
       enabled-org-ids: ${SELLEROPS_INQUIRY_SIGNATURE_ORG_IDS:}

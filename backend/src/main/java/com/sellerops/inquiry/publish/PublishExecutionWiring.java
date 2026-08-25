@@ -199,13 +199,20 @@ public class PublishExecutionWiring {
      * it, no observed value may be reused (a past writer's address is not the client making this
      * request), and it is never looked up at runtime. An unconfigured deployment must look
      * unconfigured rather than send a fabricated address.
+     *
+     * <p>{@code shop-no} is the same shape of fact for a different reason. It defaults to 0, which
+     * the adapter refuses, because the value must come from an OBSERVATION of the target article
+     * rather than from the contract's documented default of 1 — a default adopted silently would
+     * make an unobserved shop indistinguishable from a decided one.
      */
     @Bean
     @ConditionalOnProperty(name = "sellerops.connector.cafe24.enabled", havingValue = "true")
     ChannelReplyAdapter cafe24ChannelReplyAdapter(
             Cafe24ReplyArticleClient writeClient, Cafe24BoardArticlesClient readClient,
             Cafe24Authorizer authorizer, Cafe24AnswerExecutionGrant grant,
-            @Value("${sellerops.inquiry.publish.cafe24.client-ip:}") String clientIp) {
-        return new Cafe24ChannelReplyAdapter(writeClient, readClient, authorizer, grant, clientIp);
+            @Value("${sellerops.inquiry.publish.cafe24.client-ip:}") String clientIp,
+            @Value("${sellerops.inquiry.publish.cafe24.shop-no:0}") int shopNo) {
+        return new Cafe24ChannelReplyAdapter(writeClient, readClient, authorizer, grant, clientIp,
+                shopNo);
     }
 }

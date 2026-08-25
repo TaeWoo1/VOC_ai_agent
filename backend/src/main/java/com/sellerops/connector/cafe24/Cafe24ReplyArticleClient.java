@@ -60,14 +60,17 @@ public class Cafe24ReplyArticleClient {
     /**
      * Everything the create request needs, already decided by {@code Cafe24ReplyRequestShape}.
      *
+     * @param shopNo          which shop of the mall the article lives in — <b>observed</b> on the
+     *                        target itself by an approved bounded READ, never defaulted here
+     * @param boardNo         the board, which travels in the PATH only; it is not a body field
      * @param parentArticleNo the QUESTION this answer hangs off — never another answer
      * @param writer          {@code mall_id}; the contract renders the author as the shop's name when
      *                        {@code memberId} equals it, so this is an internal value, not a name
      * @param memberId        {@code mall_id}
      * @param clientIp        the Action Executor's configured egress address; never looked up
      */
-    public record ReplyArticle(int boardNo, long parentArticleNo, String title, String content,
-                               String writer, String memberId, String clientIp) {
+    public record ReplyArticle(int shopNo, int boardNo, long parentArticleNo, String title,
+                               String content, String writer, String memberId, String clientIp) {
     }
 
     /** What the POST did. {@code createdArticleNo} is null when the response did not name one. */
@@ -156,28 +159,35 @@ public class Cafe24ReplyArticleClient {
         if (a.parentArticleNo() <= 0) {
             throw new IllegalStateException("카페24 답변 대상 글 번호가 올바르지 않습니다.");
         }
-        ObjectNode request = mapper.createObjectNode();
-        request.put("board_no", a.boardNo());
-        request.put("reply_article_no", a.parentArticleNo());
-        request.put("title", a.title().strip());
-        request.put("content", a.content());
-        request.put("writer", a.writer().strip());
-        request.put("member_id", a.memberId().strip());
-        request.put("client_ip", a.clientIp().strip());
+        if (a.shopNo() <= 0) {
+            throw new IllegalStateException("카페24 답변 대상 상점 번호가 없습니다.");
+        }
+        ObjectNode article = mapper.createObjectNode();
+        article.put("reply_article_no", a.parentArticleNo());
+        article.put("title", a.title().strip());
+        article.put("content", a.content());
+        article.put("writer", a.writer().strip());
+        article.put("member_id", a.memberId().strip());
+        article.put("client_ip", a.clientIp().strip());
         // Accepted on this same call and the only completion lever the contract offers. Whether it
         // lands on the PARENT is unproven — which is why the caller reads the parent back rather
         // than treating a 2xx as "answered".
-        request.put("reply_status", "C");
-        // The Admin API's create/update envelope. The first live POST sent these eight keys FLAT and
-        // Cafe24 answered 400; the fields themselves were the ones the parameter table names, so the
-        // wrapper is the one thing that changed here.
+        article.put("reply_status", "C");
+        // `board_no` is deliberately ABSENT from the body. It travels in the PATH. The reference's
+        // parameter table marks it Required and mixes path with body in one column; reading that one
+        // line as a body field is what put it here, and the official request sample — which this
+        // repository has now transcribed — carries no `board_no` inside the envelope.
         //
-        // `shop_no` is deliberately ABSENT. It is optional with a documented default of 1, and this
-        // deployment has no provenance for it — the value is projected nowhere in the connection, the
-        // stored article rows, or any response we read. Sending 1 would be asserting a shop we never
-        // observed; letting the platform apply its own default asserts nothing.
+        // The envelope is `requests`, an ARRAY: this endpoint creates up to 10 objects per call, and
+        // the singular `request` object belongs to PUT. Both live POSTs got this wrong in a different
+        // way — flat (400), then a singular object (422).
+        //
+        // `shop_no` is present because it is now OBSERVED. An approved bounded READ of the target
+        // itself returned `shop_no=1`; before that this deployment had no provenance for the value
+        // and omitted it rather than assert a shop it had never seen.
         ObjectNode root = mapper.createObjectNode();
-        root.set("request", request);
+        root.put("shop_no", a.shopNo());
+        root.putArray("requests").add(article);
         try {
             return mapper.writeValueAsString(root);
         } catch (Exception e) {
