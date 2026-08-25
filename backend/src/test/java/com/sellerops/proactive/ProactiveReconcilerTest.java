@@ -236,7 +236,13 @@ class ProactiveReconcilerTest {
         activate(Instant.parse("2026-08-20T00:00:00Z"));
         seedInquiry("UNANSWERED", InquiryOperationalState.ACTIVE, InquiryWorkItemPhase.OPEN, null);
         // The org has spent its day. proactive reserve is 0, so there is nothing held back for it.
-        LocalDate today = now.atZone(KST).toLocalDate();
+        //
+        // Seeded against the REAL Asia/Seoul date, not the injected clock's, because that is the day
+        // AgentQuotaService itself reads — it takes the system clock, and the loop deliberately reuses
+        // its day rather than answering "when did today start" a second time. Keying this off the
+        // injected instant passed for as long as the two happened to agree and failed the first
+        // midnight after, which is the whole reason it is spelled out here.
+        LocalDate today = LocalDate.now(KST);
         for (int i = 0; i < 2; i++) {
             AgentLlmUsage row = new AgentLlmUsage();
             row.setOrgId(org);

@@ -158,6 +158,24 @@ describe("ProactiveCases", () => {
     expect(screen.getByText(/상품 지식 없음/)).toBeInTheDocument();
   });
 
+
+  it("does not repeat 상품 미지정 — the product line already said it", async () => {
+    getProactiveCases.mockResolvedValue({
+      items: [view({ evidenceState: "NO_PRODUCT", evidenceCount: 0, productName: null,
+        knowledgeGap: "이 문의가 어떤 상품에 대한 것인지 연결해 두면, 다음 초안은 상품 지식을 근거로 씁니다." })],
+      total: 1,
+      high: 1,
+    });
+
+    renderSection();
+
+    await screen.findByText("배송 언제 되나요");
+    // Once, as the product line. An evidence label repeating it made the card stutter, and a line a
+    // seller reads twice in a row is a line they stop reading.
+    expect(screen.getAllByText("상품 미지정")).toHaveLength(1);
+    expect(screen.getByText(/다음 초안은 상품 지식을 근거로 씁니다/)).toBeInTheDocument();
+  });
+
   it("says how much it is showing when it is showing less than it has", async () => {
     getProactiveCases.mockResolvedValue({
       items: [view(), view({ id: "case-3", subjectId: "inq-3" })],

@@ -153,3 +153,164 @@ read as instant. No open/action event was manufactured to fill it.
 **LIVE_PARTIAL.** The tick ran through the production path, targeted exactly one org out of 35,
 prepared nothing, wrote nothing, spent nothing, and left every boundary intact. The absence of cards
 is the fence working, not the feature failing — and it is the honest state of this org's data.
+
+---
+---
+
+# Part 2 — positive live proof (2026-08-26)
+
+**Verdict:** **LIVE_GREEN** · marketplace WRITE 0 · seller approval 0 · execution 0 · Answer Memory 0
+
+Part 1 proved the fence held and, honestly, that this org had nothing current to raise. Two
+product-owner corrections landed after it, and then a real customer-side inquiry was written on the
+Cafe24 storefront so the positive path could be observed rather than asserted.
+
+## 1. The two corrections
+
+**Freshness is now a fact about the ORG, not about a deployment.** The bootstrap boundary was an env
+var chosen for one audit; a value someone can retype is a flood someone can re-open. An audit for
+somewhere to persist it came back empty — this repository has no org-settings and no per-org
+feature-flag persistence at all; `organizations` carried a name and nothing else. One nullable column
+on the org (`proactive_baseline_at`, V76) was the smallest honest answer: a settings subsystem for one
+timestamp is more architecture than the value is worth, and a watermark table is not what this needs —
+there is no cursor to advance, no progress to resume, and nothing to reconcile.
+
+**Activation IS the baseline.** The reconciler stamps it once, on the first tick it ever runs for an
+org, and that tick prepares nothing — nothing can have been observed after an instant recorded a
+moment ago. There is nothing for an operator to set and therefore nothing to mistype.
+
+```
+23:58:47  proactive: 활성화 기준 시각을 기록했습니다 org=7146c50f…
+23:58:47  proactive tick org=7146c50f… 재확인=0 준비(문의)=0 준비(리뷰)=0 …
+```
+
+`organizations.proactive_baseline_at = 2026-08-25 23:58:47.752+09` — on **one of 35 orgs**.
+
+**The budget is a day, and one budget.** Per-tick was bounding a moment (ten ticks of three is
+thirty); per-lane was two numbers that happen to add up rather than a budget anyone decided. Now:
+**3 expensive preparations per org per day, inquiries and reviews together**, counted off
+`proactive_case` itself — no second ledger, because that table already records exactly the thing being
+capped — over the **same Asia/Seoul day the Agent quota uses**, read from `AgentQuotaService` rather
+than recomputed so the two gates cannot disagree about when today started. The loop **reads** the
+shared quota and never charges or reserves it (`proactive reserve = 0`); when the org's budget is
+gone, the loop yields to the person. Reconcile passes neither gate — closing finished work is not a
+purchase.
+
+With the lane caps gone, selection is one bounded list across both kinds: priority tier → most
+recently observed → stable id tiebreak. An investigation may **raise** a card's priority (a 2점 review
+turning out to be a repeat issue) and can never lower it.
+
+## 2. Natural ingest — no manual channel read
+
+The inquiry was written by the operator on the Cafe24 storefront and left for the standing routine.
+Collection runs hourly; the sweep at 00:24 picked it up. **No Cafe24 call was made to find it.**
+
+DB-only identification returned **exactly one** row, and every clause was already true of it:
+
+| | |
+|---|---|
+| external id | `cafe24:b6:a3674` — a new article, separate from `a3672`/`a3673` |
+| seller account | the expected Cafe24 connection |
+| origin / state / role / status | `REAL` · `ACTIVE` · `ROOT` · `UNANSWERED` |
+| received (channel) | 2026-08-26 00:13:09+09 — after the baseline |
+| first observed (SellerOps) | 2026-08-26 00:24:26+09 — after the baseline |
+| product / order reference | none / none |
+| size | title 6 chars, body 155 chars (counted, not quoted) |
+
+Review lane: **0** post-baseline candidates → **`NO_FRESH_REVIEW_CANDIDATE`**, unchanged and not
+manufactured.
+
+## 3. One tick
+
+```
+00:25:40  proactive: tick 시작 대상org수=1
+00:25:46  proactive tick org=7146c50f… 재확인=0 준비(문의)=1 준비(리뷰)=0 종료=0 처리됨=0 변화없음=0 실패=0
+```
+
+Six seconds — the model call. One case, from one candidate, out of a daily budget of three.
+
+## 4. What was prepared
+
+| | |
+|---|---|
+| case | `INQUIRY` · `PREPARED` · **`HIGH`** · reason `UNANSWERED_INQUIRY` |
+| prepared action | **`DRAFT_PREPARED`**, draft version 1 |
+| evidence state | `NO_PRODUCT`, 0 passages, 0 `inquiry_draft_evidence` rows |
+| knowledge gap | present — the sentence that says what binding a product would buy |
+| draft authorship | **`MODEL`**, `created_by = SYSTEM:PROACTIVE_AGENT`, model version recorded |
+| draft size | title 8 chars, body 108 chars (counted, not quoted) |
+| product binding | **none created** — the inquiry named no product, so none was invented |
+| source state | `status=UNANSWERED;op=ACTIVE;thread=ROOT;product=-;hash=-` |
+
+**The evidence is honestly empty, and that is the correct outcome.** The question names no product,
+and nothing in the org's operating policy or past answers matched it — so nothing was retrieved,
+nothing was cited, and the card says so rather than implying grounding it does not have.
+
+## 5. The approval boundary held
+
+| | |
+|---|---|
+| work item phase | **`PROPOSED`** — exactly where it must stop |
+| audit trail | `WORK_ITEM_OPENED` (SYSTEM:CONNECTOR_INGEST) → `PROPOSAL_ADDED` (**SYSTEM:PROACTIVE_AGENT**) |
+| `inquiry_approval` | **0** |
+| `inquiry_action_intent` | **0** |
+| `inquiry_execution` | **0** |
+| `answer_memory` | **0** |
+| marketplace WRITE / new channel call | **0 / 0** |
+
+The audit names the machine as the actor. A system-prepared draft that recorded a seller as its author
+would put a person's name on a sentence they have never read.
+
+## 6. UI — the positive path, in a real browser
+
+**문의 `/inquiries`** — the section renders, with one card:
+
+> 먼저 확인 · 문의 · 카페24 자사몰 · 상품 미지정
+> **고객이 답변을 기다리고 있습니다. 오늘 들어온 문의입니다.**
+> 답변 초안 준비됨
+> 이 문의가 어떤 상품에 대한 것인지 연결해 두면, 다음 초안은 상품 지식을 근거로 씁니다.
+> [확인하기]
+
+CTA → `/inquiries/71e64356-…` — the inquiry flow that already existed. **Send/approve controls in the
+section: 0.**
+
+**홈 `/`** — one line and a link, not a second list: *"AI가 먼저 확인한 일 1건 — 그중 1건은 답변
+초안까지 준비돼 있습니다. 보낼지는 직접 확인합니다."*
+
+**Agent `/agent`** — 「이미 확인해 둔 일」 renders **above the prompt**: the case is there before
+anyone asks.
+
+**One copy defect found and fixed.** The card read `상품 미지정 … · 상품 미지정` — the evidence label
+for `NO_PRODUCT` repeated the product line verbatim. A line a seller reads twice in a row is a line
+they stop reading, so the evidence label now says nothing for that state and the knowledge-gap
+sentence carries it alone.
+
+## 7. Telemetry — this event only
+
+`candidate created 1 · prepared 1 · surfaced 1 · opened null · acted null · closed null`
+
+`surfaced_at` was set by this proof's own UI observation, which is what surfacing means — the card was
+rendered on a screen. **`opened` stays null because nothing clicked the CTA**: the observation reads
+the link's target and deliberately does not follow it, since a click would record a seller action no
+seller took. Nothing was manufactured to fill a counter.
+
+**Quota consumed: exactly one `DRAFT` call** on 2026-08-26, against a daily cap of 3 preparations and
+the org's shared Agent budget. No proactive reservation.
+
+## 8. Observed gap, recorded not fixed
+
+`inquiries.content_hash` is **null for all 3,335 real rows** in this org, so the dedupe source state
+carries `hash=-`. The signature still changes on status, operational state, thread role and product
+binding — which covers every case that changes what an investigation would find — but a customer
+*editing the text of their own question* would not currently trigger a re-investigation. Recorded here
+rather than patched, because nothing about this proof required it and the feature is closed.
+
+## 9. Verdict
+
+**LIVE_GREEN.** A real customer inquiry, collected by the standing routine with no channel call of our
+own, became a deterministic candidate, was investigated through the production draft path, produced a
+model-authored draft the seller has not approved, persisted one case, and appeared on three screens —
+with the work item stopped at `PROPOSED` and every write boundary intact.
+
+Feature disarmed after the tick (`enabled=false`, scheduler bean absent on restart).
+backend **3,184 / 0 / 22** · frontend **2,299 / 0**.

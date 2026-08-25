@@ -1,6 +1,6 @@
 # Proactive Operations Agent v1
 
-**Status:** offline 구현 완료 · **bounded live 1-tick 실행됨 (LIVE_PARTIAL, 2026-08-25)** · 기본값 OFF
+**Status:** offline 구현 완료 · **라이브 증명 완료 — LIVE_GREEN (2026-08-26)** · **v1 CLOSED** · 기본값 OFF
 **Date:** 2026-08-25
 **Branch:** `feat/proactive-operations-agent-v1`
 **Marketplace WRITE:** **0** (이 패키지에서 채널 호출은 READ도 없다)
@@ -308,16 +308,25 @@ per-tick 상한은 예산 보호다 — 사전 초안은 판매자 초안과 **�
 | 정책 fabrication 없음 | `ProactiveReviewInvestigatorTest.itFabricatesNoPolicy` |
 | 승인 경계 · 채널 도달 · Answer Memory | `ProactiveSafetyFenceTest` |
 
-**라이브에서 증명됨 (2026-08-25, bounded 1-tick — `docs/evidence/proactive_operations_agent_live_tick_v1.md`):**
+**라이브에서 증명됨 — positive (2026-08-26, `cafe24:b6:a3674` — Part 2):** 운영자가 스토어프론트에 쓴
+실제 문의를 **standing routine이 자연 수집**(대상을 찾기 위한 채널 호출 0)하고, 결정론 후보 → production
+draft path 조사 → **`MODEL` 작성 초안**(`created_by=SYSTEM:PROACTIVE_AGENT`) → `proactive_case` 1건 →
+**세 화면 모두 렌더**까지 갔다. work item은 **`PROPOSED`에서 정지**, `inquiry_approval`·`action_intent`·
+`inquiry_execution`·`answer_memory` **전부 0**, product binding 생성 0, quota 소비 **DRAFT 1회**.
+근거는 정직하게 비어 있고(`NO_PRODUCT`) 카드가 그렇게 말한다.
+
+**라이브에서 증명됨 — negative (2026-08-25, bounded 1-tick — `docs/evidence/proactive_operations_agent_live_tick_v1.md`):**
 production scheduler 경로로 1회 실행 · **대상org수 1/35** · 준비 0건 · `proactive_case` 0행 ·
 marketplace WRITE/READ/새 채널호출 **0/0/0** · **LLM 호출 0** · approval·intent·execution·draft·
 answer_memory·work-item 감사 **전부 0** · 세 화면 모두 렌더링되고 **섹션 자체가 없음**(0건 계약) ·
 telemetry median **null** · `a3672`/`a3673` 각각 **독립적인 두 이유로** 후보 아님(채널 호출 0).
 
 **증명되지 않음 (정직하게):**
-- **positive UI 경로는 라이브로 보지 못했다.** fence 이후 이 org에는 두 lane 모두 현재 업무가 없다
-  (`NO_FRESH_INQUIRY_CANDIDATE` · `NO_FRESH_REVIEW_CANDIDATE`) — 카드를 만들어내지 않았다.
-- Scenario A/B의 positive 경로는 **자동 테스트로** 증명됐고, 실제 org 데이터 위에서의 관측은 아직이다.
+- **리뷰 lane의 positive 경로.** baseline 이후 fresh review candidate가 0이라
+  **`NO_FRESH_REVIEW_CANDIDATE`**로 남는다 — 가짜 리뷰를 만들지 않았다. offline acceptance는 green이고,
+  실제 fresh review가 자연 발생할 때 live evidence를 덧붙인다.
+- **판매자의 실제 행동.** `surfaced`까지가 관측됐고 `opened`/`approved`/`VERIFIED`는 null이다. 관측 세션은
+  CTA의 target을 **읽기만** 하고 따라가지 않았다 — 클릭은 판매자가 하지 않은 행동을 기록하는 일이다.
 - H2 테스트 스키마는 부분 유니크 인덱스를 만들지 않는다. 그래서 그 보증은 **마이그레이션 파일을
   읽는 테스트**로 고정했다 — 실행 증명이 아니라 스키마 증명임을 적어 둔다.
 
@@ -333,16 +342,16 @@ push/email notification · 새 workflow engine · Dashboard 재설계 — **전�
 
 ## 14. 남은 product blocker
 
-1. **positive 라이브 관측이 남았다.** tick은 증명됐지만 카드가 뜨는 화면은 아직이다. 이 org에
-   fence를 통과하는 현재 업무가 생기면(= routine 수집이 새 문의/리뷰를 가져오면) 자연히 관측된다.
-   앞당기려고 경계를 뒤로 미는 것은 backlog를 다시 들이는 것과 같다.
-2. **per-tick 상한이 lane별이라 총량 상한이 아니다.** product-owner 결정은 "proactive max = 3 cases
-   per tick"인데, 지금 표현은 문의 N + 리뷰 M이다. 이번 proof는 2+1로 천장을 3에 맞췄지만, 이것을
-   설정으로 강제하지 못한다는 것이 결함이다.
-3. **일일 AI 예산의 배분은 product-owner 결정이다.** 지금 기본값은 tick당 문의 3건이다. 백그라운드가
+1. **다음 단계는 아키텍처가 아니라 관찰이다.** 실제 pilot에서 `surfaced → opened → edited/approved →
+   VERIFIED`가 실제로 일어나는지를 본다. 이 층을 더 만들 이유는 그 관찰이 나오기 전까지 없다.
+2. **`inquiries.content_hash`가 이 org의 실 문의 3,335행 전부 null이다.** dedupe source state가
+   `hash=-`이므로, 고객이 **질문 본문만 수정한 경우**는 재조사되지 않는다(상태·역할·상품 연결 변화는 전부
+   잡는다). 관측해서 기록만 했고 고치지 않았다.
+3. **리뷰 lane live evidence가 남았다** — fresh review가 자연 발생할 때.
+4. **일일 AI 예산의 배분은 product-owner 결정이다.** 지금 기본값은 tick당 문의 3건이다. 백그라운드가
    하루 예산의 얼마까지 써도 되는지는 코드가 정할 문제가 아니다.
-4. **리뷰는 준비까지만 간다.** 리뷰 답변 WRITE capability가 증명되기 전까지 `RECOMMENDATION_ONLY`가
+5. **리뷰는 준비까지만 간다.** 리뷰 답변 WRITE capability가 증명되기 전까지 `RECOMMENDATION_ONLY`가
    천장이고, 이건 v1의 결함이 아니라 채널 사실이다.
-5. **판매자가 카드를 "안 볼래"라고 말할 방법이 없다.** 의도적이다 — 카드를 직접 치우는 컨트롤은
+6. **판매자가 카드를 "안 볼래"라고 말할 방법이 없다.** 의도적이다 — 카드를 직접 치우는 컨트롤은
    문의 큐와 리뷰 ledger가 모르는 두 번째 dismissal이 된다. 실제로 필요해지면 기존 dismissal을
    확장해야 하고, 그건 product-owner 결정이다.

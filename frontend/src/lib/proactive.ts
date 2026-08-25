@@ -38,8 +38,11 @@ export function evidenceLabel(view: ProactiveCaseView): string | null {
       return "해당하는 근거 없음";
     case "NO_LIBRARY":
       return "상품 지식 없음";
+    // NO_PRODUCT deliberately says nothing here. The card already carries a product line reading
+    // 상품 미지정, and the knowledge-gap sentence below already explains what that costs the draft —
+    // an evidence label repeating the same two words made the card stutter ("상품 미지정 … · 상품
+    // 미지정"), which is how a seller learns to stop reading a line that usually matters.
     case "NO_PRODUCT":
-      return "상품 미지정";
     default:
       return null;
   }
