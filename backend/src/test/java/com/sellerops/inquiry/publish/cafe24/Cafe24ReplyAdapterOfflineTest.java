@@ -34,6 +34,7 @@ class Cafe24ReplyAdapterOfflineTest {
     private static final UUID CHANNEL = UUID.randomUUID();
     private static final String MALL = "demoshop";
     private static final String DRAFT = "안녕하세요, 세금계산서는 발행 가능합니다.";
+    private static final java.time.LocalDate DAY = java.time.LocalDate.of(2026, 8, 25);
 
     /** Records writes and reads; answers reads from a canned board. */
     private static final class StubHttp implements Cafe24HttpClient {
@@ -42,6 +43,8 @@ class Cafe24ReplyAdapterOfflineTest {
         int writeStatus = 201;
         String writeBody = "{\"articles\":[{\"article_no\":901}]}";
         String readBody = "{\"articles\":[]}";
+        final List<String> readBodies = new ArrayList<>();
+        int readCursor;
         RuntimeException writeThrows;
 
         @Override
@@ -61,6 +64,10 @@ class Cafe24ReplyAdapterOfflineTest {
         @Override
         public Response get(URI uri, Map<String, String> h) {
             reads.add(uri);
+            if (!readBodies.isEmpty()) {
+                return new Response(200,
+                        readBodies.get(Math.min(readCursor++, readBodies.size() - 1)), Map.of());
+            }
             return new Response(200, readBody, Map.of());
         }
     }
@@ -274,7 +281,7 @@ class Cafe24ReplyAdapterOfflineTest {
         http.readBody = board(article(246L, null, null, "C", "질문"),
                 article(901L, 246L, 1, null, DRAFT));
         ReplyVerificationResult r = verifying(http).verifyCreated("tok", MALL,
-                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT);
+                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT, DAY);
 
         assertThat(r.kind()).isEqualTo(ReplyVerificationResult.Kind.COMPLETED);
         assertThat(r.observedSignal()).isEqualTo("ANSWERED");
@@ -287,7 +294,7 @@ class Cafe24ReplyAdapterOfflineTest {
         http.readBody = board(article(246L, null, null, "N", "질문"),
                 article(901L, 246L, 1, null, DRAFT));
         ReplyVerificationResult r = verifying(http).verifyCreated("tok", MALL,
-                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT);
+                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT, DAY);
 
         assertThat(r.kind()).isEqualTo(ReplyVerificationResult.Kind.NOT_COMPLETED);
         assertThat(r.observedSignal()).isEqualTo(Cafe24ChannelReplyAdapter.STATUS_UNRESOLVED);
@@ -301,7 +308,7 @@ class Cafe24ReplyAdapterOfflineTest {
         http.readBody = board(article(246L, null, null, "C", "질문"),
                 article(901L, 999L, 1, null, DRAFT));
         assertThat(verifying(http).verifyCreated("tok", MALL,
-                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT).observedSignal())
+                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT, DAY).observedSignal())
                 .isEqualTo("DELIVERY_UNKNOWN");
     }
 
@@ -312,7 +319,7 @@ class Cafe24ReplyAdapterOfflineTest {
         http.readBody = board(article(246L, null, null, "C", "질문"),
                 article(901L, 246L, 1, null, "다른 답변입니다"));
         assertThat(verifying(http).verifyCreated("tok", MALL,
-                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT).observedSignal())
+                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT, DAY).observedSignal())
                 .isEqualTo("DELIVERY_UNKNOWN");
     }
 
@@ -322,7 +329,7 @@ class Cafe24ReplyAdapterOfflineTest {
         StubHttp http = new StubHttp();
         http.readBody = board(article(246L, null, null, "C", "질문"));
         assertThat(verifying(http).verifyCreated("tok", MALL,
-                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT).observedSignal())
+                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT, DAY).observedSignal())
                 .isEqualTo("DELIVERY_UNKNOWN");
     }
 
@@ -333,11 +340,39 @@ class Cafe24ReplyAdapterOfflineTest {
         http.readBody = board(article(246L, null, null, "C", "질문"),
                 article(901L, 246L, 1, null, DRAFT));
         verifying(http).verifyCreated("tok", MALL,
-                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT);
+                new Cafe24ChannelReplyAdapter.Target(6, 246L), 901L, DRAFT, DAY);
 
         assertThat(http.reads).hasSize(1);
         String uri = http.reads.get(0).toString();
         assertThat(uri).contains("246%2C901").doesNotContain("start_date").doesNotContain("end_date");
+    }
+
+    @Test
+    @DisplayName("생성 번호를 못 받으면 그날 하루만 한 번 더 읽는다 — 훑지 않고, 못 찾으면 배송 불명")
+    void withoutACreatedNumberOneBoundedDayIsRead() {
+        StubHttp http = new StubHttp();
+        // First read (the parent, by number), then the same-day page.
+        http.readBodies.add(board(article(246L, null, null, "C", "질문")));
+        http.readBodies.add(board(article(902L, 246L, 1, null, DRAFT)));
+        ReplyVerificationResult r = verifying(http).verifyCreated("tok", MALL,
+                new Cafe24ChannelReplyAdapter.Target(6, 246L), null, DRAFT, DAY);
+
+        assertThat(r.kind()).isEqualTo(ReplyVerificationResult.Kind.COMPLETED);
+        assertThat(http.reads).hasSize(2);
+        assertThat(http.reads.get(1).toString())
+                .contains("start_date=2026-08-25").contains("end_date=2026-08-25")
+                .as("하루, 한 페이지 — 기간 훑기가 아니다").contains("offset=0");
+    }
+
+    @Test
+    @DisplayName("그날 페이지에 남의 답글만 있으면 우리 것으로 착각하지 않는다")
+    void aStrangersReplyOnTheSameQuestionIsNotOurs() {
+        StubHttp http = new StubHttp();
+        http.readBodies.add(board(article(246L, null, null, "C", "질문")));
+        http.readBodies.add(board(article(902L, 246L, 1, null, "다른 사람이 쓴 답글")));
+        assertThat(verifying(http).verifyCreated("tok", MALL,
+                new Cafe24ChannelReplyAdapter.Target(6, 246L), null, DRAFT, DAY).observedSignal())
+                .isEqualTo("DELIVERY_UNKNOWN");
     }
 
     @Test

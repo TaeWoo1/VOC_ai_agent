@@ -13,6 +13,7 @@ import com.sellerops.inquiry.publish.ReplyVerificationCommand;
 import com.sellerops.inquiry.publish.ReplyVerificationResult;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -176,21 +177,26 @@ public class Cafe24ChannelReplyAdapter implements ChannelReplyAdapter {
      * ever sent.
      */
     public ReplyVerificationResult verifyCreated(String accessToken, String mallId, Target target,
-                                                 long createdArticleNo, String approvedBody) {
+                                                 Long createdArticleNo, String approvedBody,
+                                                 LocalDate postedOn) {
         List<Long> ask = new ArrayList<>();
         ask.add(target.articleNo());
-        ask.add(createdArticleNo);
+        if (createdArticleNo != null) {
+            ask.add(createdArticleNo);
+        }
         List<Cafe24BoardArticleRow> rows;
         try {
             rows = readClient.fetchByArticleNumbers(accessToken, mallId, target.boardNo(), ask);
         } catch (RuntimeException e) {
             return ReplyVerificationResult.notCompleted("UNVERIFIABLE");
         }
-        Cafe24BoardArticleRow child = row(rows, createdArticleNo);
         Cafe24BoardArticleRow parent = row(rows, target.articleNo());
+        Cafe24BoardArticleRow child = createdArticleNo == null
+                ? findChildPostedOn(accessToken, mallId, target, approvedBody, postedOn)
+                : row(rows, createdArticleNo);
         // (1) the child exists, (2) its parent is the approved target, (3) it is structurally a reply,
         // (4) its content is the approved draft. Any miss is DELIVERY_UNKNOWN — Case C.
-        if (child == null || parent == null
+        if (child == null || parent == null || child.articleNo() == null
                 || child.parentArticleNo() == null || child.parentArticleNo() != target.articleNo()
                 || !child.isThreadReply()
                 || !normalizedHash(child.content()).equals(normalizedHash(approvedBody))) {
@@ -200,6 +206,38 @@ public class Cafe24ChannelReplyAdapter implements ChannelReplyAdapter {
         return "ANSWERED".equals(signal)
                 ? ReplyVerificationResult.completed(signal)          // Case A
                 : ReplyVerificationResult.notCompleted(STATUS_UNRESOLVED);  // Case B
+    }
+
+    /**
+     * The child, when the create response did not name it — ONE bounded read of the day it was
+     * posted, and nothing more.
+     *
+     * <p>The vendored contract publishes {@code start_date}/{@code end_date} on the LIST and caps
+     * {@code limit} at 100, so a single day of one board is a read the contract describes. It is not a
+     * sweep and it does not page: if the reply is not on that page, this returns null and the outcome
+     * is {@code DELIVERY_UNKNOWN} — an answer we could not find is not an answer we may call sent.
+     *
+     * <p>A candidate must BOTH hang off the approved target AND hash to the approved draft. The first
+     * alone would pick up somebody else's reply on the same question; the second alone would pick up
+     * the same text posted somewhere else on the board.
+     */
+    private Cafe24BoardArticleRow findChildPostedOn(String accessToken, String mallId, Target target,
+                                                    String approvedBody, LocalDate postedOn) {
+        if (postedOn == null) {
+            return null;
+        }
+        List<Cafe24BoardArticleRow> sameDay;
+        try {
+            sameDay = readClient.fetchPage(accessToken, mallId, target.boardNo(), postedOn, postedOn,
+                    100, 0);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        String approved = normalizedHash(approvedBody);
+        return sameDay.stream()
+                .filter(r -> r.parentArticleNo() != null && r.parentArticleNo() == target.articleNo())
+                .filter(r -> normalizedHash(r.content()).equals(approved))
+                .findFirst().orElse(null);
     }
 
     private static Cafe24BoardArticleRow row(List<Cafe24BoardArticleRow> rows, long articleNo) {
