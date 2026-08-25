@@ -939,3 +939,83 @@ Part D가 관측으로 정한 그대로이며 한 글자도 건드리지 않았�
 **attempt 3(두 번째가 아닌 세 번째 POST)를 실행하지 않았다.** marketplace WRITE 0, 새 endpoint 0,
 새 scope 0, 삭제 0. 실행 arm(`SELLEROPS_INQUIRY_PUBLISH_EXECUTION_ENABLED`)은 이 절의 READ를 위해
 **내려두었고 다시 올리지 않았다** — 다음 승인이 올릴 것이다.
+
+## 30. **VERIFIED** — 세 번째 시도가 답변을 게시했고, 읽어서 증명했다 (2026-08-25)
+
+**Cafe24 Answer Execution v1 = CLOSED.** SellerOps가 실제 고객 문의에 **판매자가 승인한 답변을
+marketplace에 게시하고, 게시됐음을 스스로 읽어서 증명한** 첫 사건이다.
+
+### 30.1 무엇이 일어났나
+
+| | |
+|---|---|
+| POST | **정확히 1회** (`POST /api/v2/admin/boards/6/articles`) · 자동 재시도 0 |
+| HTTP | **2xx** — 거절 없음 |
+| 생성된 자식 글 | **3673** (응답이 직접 이름을 말했다) |
+| 검증 READ | **GET 1회** — 부모 3672와 자식 3673을 한 번의 exact 조회로 |
+| 종결 | **Case A — `VERIFIED`** |
+
+교정한 것은 **구조뿐**이었다. `writer`·`member_id`·`title`·`client_ip`·`reply_status`의 값은
+Part D가 관측으로 정한 그대로였고 한 글자도 바꾸지 않았다. 세 번의 시도가 남긴 것:
+
+| 시도 | 요청 모양 | 결과 |
+|---|---|---|
+| 1 | 평평한 본문 | HTTP 400 · 생성 0 |
+| 2 | 단수 `request` 객체 + 본문 `board_no` | HTTP 422 · 생성 0 |
+| 3 | `{"shop_no":1,"requests":[…]}`, `board_no`는 경로 | **2xx · 자식 3673 생성** |
+
+### 30.2 다섯 조건 전부 관측으로 통과했다
+
+2xx는 증거가 아니다. `verifyCreated`가 exact READ 1회로 본 것:
+
+1. 자식 글 **3673 존재**
+2. `child.parent_article_no == 3672` — 승인된 바로 그 질문에 달렸다
+3. 자식의 **thread role == REPLY** (구조적으로 답글)
+4. **정규화 본문 해시 == 승인된 초안 v2** — 우리가 승인한 문장이 그대로 게시됐다
+5. **부모 `reply_status == C`**
+
+### 30.3 그리고 미확정 하나가 확정됐다
+
+**`POST(reply_status=C)`가 부모에 붙는다는 것이 처음으로 관측됐다.** 이 저장소는 그것을 몰라서
+종결 의미를 셋으로 나눴었다 — A `VERIFIED` / B `ANSWER_POSTED_STATUS_UNRESOLVED` / C
+`DELIVERY_UNKNOWN`. B는 이번에 발생하지 않았고, 그 이유는 부모가 실제로 `C`로 관측됐기 때문이다.
+**셋으로 나눈 구조는 그대로 둔다** — 한 번의 관측이 계약의 침묵을 메우지는 않는다.
+
+### 30.4 전송 직전 구조 검증 (`assertContractShape`)
+
+두 번의 되돌릴 수 없는 시도를 모양에 썼기 때문에, 직렬화된 본문을 **보내기 직전에 다시 읽어**
+key 단위로 계약과 대조하는 fence를 넣었다. 거절당한 두 모양은 이름으로 막힌다 — 평평한 본문(400)과
+단수 `request` + 본문 `board_no`(422). **값은 하나도 비교·기록하지 않는다**; 읽는 것은 key 이름뿐이다.
+
+### 30.5 Memory
+
+`EXECUTOR_SENT_VERIFIED` **1건** 생성 — 승인된 v2 본문 그대로, org, 상품 범위 없음(`product_id` null),
+출처와 검증 상태. **raw article 번호·고객 PII·`client_ip`·token·주문 ID는 들어가지 않는다**(`origin_ref`는
+work item id다). AI 초안이 Answer Memory에 들어가지 않는다는 구조 fence는 그대로다.
+
+### 30.6 실측 (예상값이 아니라)
+
+| | |
+|---|---|
+| work item | **`COMPLETED`** — 작업 큐에서 나갔다 |
+| Cafe24 상의 문의 | **답변됨** (부모 `reply_status=C`, 자식 3673 존재 — 둘 다 READ로 관측) |
+| 로컬 `inquiries` 행 | **아직 `UNANSWERED`** — 읽기 모델은 **다음 routine 수집에서 따라잡는다** |
+| 미답변 workload | **무변화** — 위와 같은 이유. 게시 경로는 로컬 투영을 직접 쓰지 않는다 |
+| 중복 답변 | **0** |
+| 총 marketplace WRITE | **1** (시도 3회 중 성공 1회, 생성 1건) |
+
+마지막 행은 결함이 아니라 **한 방향으로만 쓰는 구조의 결과**다: 마켓플레이스가 진실이고, 로컬은
+수집으로 그것을 읽는다. 다만 승인 → 게시 → 화면 사이에 한 수집 주기의 지연이 있다는 사실은 기록해 둔다.
+
+### 30.7 감사 이력
+
+`OPEN → PROPOSED → APPROVED → ACTION_PENDING → FAILED(400) → REARMED(fix=7c9b6532) →
+AUDIT_REPAIR(422) → REARMED(fix=9e84e867) → EXECUTED(`execute:…#3`) → COMPLETED`.
+
+시도 1·2의 기록은 수정하지도 삭제하지도 않았다. `#3`은 attempt 스코프 command id가 실제로 동작함을
+보여준다 — attempt 2가 자기 결과를 적지 못하게 했던 바로 그 결함이다.
+
+### 30.8 여기서 멈춘다
+
+실행 arm은 증명 직후 **내렸다**. 테스트 문의는 **삭제하지 않았다**. board 4, 두 번째 org, historical
+actor 복원, `EXCLUDED_SPAM` 재작업, historical Answer Memory backfill — **아무것도 시작하지 않는다**.

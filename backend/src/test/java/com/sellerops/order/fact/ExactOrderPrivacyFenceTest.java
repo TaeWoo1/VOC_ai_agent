@@ -84,9 +84,15 @@ class ExactOrderPrivacyFenceTest {
             if (!line.contains("member_id")) {
                 continue;
             }
+            // Two lawful shapes, and only two: SETTING the field in the JSON body, and NAMING it in
+            // the pre-send key-set check that refuses a body whose fields are not exactly these.
+            // Anything else — a query parameter above all — is what this fence exists to catch.
             assertThat(line)
-                    .as("member_id may only be a JSON body key on the reply write")
-                    .containsPattern("\\.put\\(\"member_id\"");
+                    .as("member_id may only be a JSON body key, or a name in the shape assertion")
+                    .containsPattern("\\.put\\(\"member_id\"|Set\\.of\\(|\"client_ip\", \"reply_status\"");
+            assertThat(line)
+                    .as("member_id may never take part in building a URI")
+                    .doesNotContain("?").doesNotContain("&").doesNotContain("append");
         }
         // The URI builder is where a search parameter would have to live. It names none.
         int uriBuilder = text.indexOf("static URI uri(");

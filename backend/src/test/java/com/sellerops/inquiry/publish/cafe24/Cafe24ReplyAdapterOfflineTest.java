@@ -305,6 +305,32 @@ class Cafe24ReplyAdapterOfflineTest {
     }
 
     @Test
+    @DisplayName("전송 직전 구조 검증은 거절당한 두 모양을 이름으로 막는다")
+    void thePreSendGuardNamesBothRefusedShapes() {
+        Cafe24ReplyArticleClient client = new Cafe24ReplyArticleClient(new StubHttp(), "");
+
+        // attempt 1 (HTTP 400): flat
+        assertThatThrownBy(() -> client.assertContractShape(
+                "{\"reply_article_no\":3672,\"title\":\"t\",\"content\":\"c\",\"writer\":\"w\","
+                        + "\"member_id\":\"m\",\"client_ip\":\"1.2.3.4\",\"reply_status\":\"C\"}"))
+                .isInstanceOf(IllegalStateException.class);
+
+        // attempt 2 (HTTP 422): singular `request`, board_no inside
+        assertThatThrownBy(() -> client.assertContractShape(
+                "{\"request\":{\"board_no\":6,\"reply_article_no\":3672,\"title\":\"t\","
+                        + "\"content\":\"c\",\"writer\":\"w\",\"member_id\":\"m\","
+                        + "\"client_ip\":\"1.2.3.4\",\"reply_status\":\"C\"}}"))
+                .isInstanceOf(IllegalStateException.class);
+
+        // board_no smuggled back into the corrected envelope
+        assertThatThrownBy(() -> client.assertContractShape(
+                "{\"shop_no\":1,\"requests\":[{\"board_no\":6,\"reply_article_no\":3672,"
+                        + "\"title\":\"t\",\"content\":\"c\",\"writer\":\"w\","
+                        + "\"member_id\":\"m\",\"client_ip\":\"1.2.3.4\",\"reply_status\":\"C\"}]}"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     @DisplayName("관측되지 않은 상점 번호는 기본값 1로 채워지지 않고 전송을 막는다")
     void anUnobservedShopStopsTheSend() {
         StubHttp http = new StubHttp();

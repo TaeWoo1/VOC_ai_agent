@@ -91,6 +91,7 @@ public class Cafe24ReplyArticleClient {
         URI uri = uri(mallId, article.boardNo());
         ensureLiveWriteAllowed(uri);
         String body = body(article);
+        assertContractShape(body);
         Cafe24HttpClient.Response response;
         try {
             response = http.postJson(uri, Map.of("Authorization", "Bearer " + accessToken), body);
@@ -121,6 +122,48 @@ public class Cafe24ReplyArticleClient {
         // diagnostics, not seller or customer data, so it is logged and nothing else is.
         log.warn("카페24 답변 등록 거부: status={} 사유={}", status, refusalReason(response.body()));
         return new Outcome(Outcome.Kind.REJECTED, null, status);
+    }
+
+    /**
+     * The last thing that happens before a byte leaves: the serialized body is read back and its
+     * SHAPE checked against the contract, key by key.
+     *
+     * <p>It exists because two irreversible attempts were spent on shape. A unit test pins the same
+     * thing, but a test proves what the code did when the test ran — this proves what is about to be
+     * sent, on the one call that cannot be taken back. Both refused shapes are named here explicitly
+     * so neither can return through a future edit: the flat body (400) and the singular {@code
+     * request} object with {@code board_no} inside it (422).
+     *
+     * <p>It reads only key names. No value — not the answer's text, not {@code client_ip}, not the
+     * mall handle — is compared, logged or carried into the exception message.
+     */
+    public void assertContractShape(String body) {
+        com.fasterxml.jackson.databind.JsonNode root;
+        try {
+            root = mapper.readTree(body);
+        } catch (Exception e) {
+            throw new IllegalStateException("카페24 답변 요청을 검증할 수 없습니다.");
+        }
+        Set<String> top = new java.util.LinkedHashSet<>();
+        root.fieldNames().forEachRemaining(top::add);
+        if (!top.equals(Set.of("shop_no", "requests"))) {
+            // Covers the flat body of attempt 1 and the singular `request` of attempt 2 at once.
+            throw new IllegalStateException("카페24 답변 요청 봉투가 계약과 다릅니다.");
+        }
+        if (root.path("shop_no").asInt(0) <= 0) {
+            throw new IllegalStateException("카페24 답변 대상 상점 번호가 없습니다.");
+        }
+        com.fasterxml.jackson.databind.JsonNode requests = root.path("requests");
+        if (!requests.isArray() || requests.size() != 1) {
+            throw new IllegalStateException("카페24 답변 요청은 한 건이어야 합니다.");
+        }
+        Set<String> inner = new java.util.LinkedHashSet<>();
+        requests.get(0).fieldNames().forEachRemaining(inner::add);
+        if (!inner.equals(Set.of("reply_article_no", "title", "content", "writer", "member_id",
+                "client_ip", "reply_status"))) {
+            // `board_no` landing in here is the 422 half of the correction.
+            throw new IllegalStateException("카페24 답변 요청 필드 구성이 계약과 다릅니다.");
+        }
     }
 
     /**
