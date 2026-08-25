@@ -241,3 +241,169 @@ R5가 필요한 이유: **부재는 두 가지를 뜻할 수 있고 그 둘은 �
 3. verdict가 확정되면 그 경로 하나만 기존 Inquiry Action Executor에 연결하고,
    §5의 행위자 값과 §6의 grant는 각각 자기 상태(`NEEDS_SELLER_CONFIGURATION` /
    `RECONSENT_REQUIRED`)로 남는다 — **구현 가능과 실행 가능은 계속 두 개의 사실이다**
+
+---
+
+# 2단계 — READ proof 실행 결과 (2026-08-25, 승인 하에)
+
+> **실행됨.** 마켓플레이스 요청 **5회 (상한 7)**, 전부 `GET`. **WRITE 0 · 상품/문의 데이터 mutation 0.**
+> 실행 수단: `Cafe24AnswerSemanticProbe` + `Cafe24AnswerSemanticProbeRunner`, 커넥터 플래그와
+> `sellerops.connector.cafe24.diagnostic.answer-semantics.enabled` **이중 게이트** 뒤의 진단.
+> 스케줄러를 끈 격리 부팅에서 1회 실행했으므로 이 5회 외에 어떤 채널 호출도 발생하지 않았다.
+
+## 10. 실제 요청과 관측
+
+| # | 요청 | 결과 |
+|---|---|---|
+| R1 | `GET /boards/6/articles?article_no=246,281,248&limit=10` | `OK` 200, 3행 |
+| R2 | `GET /boards/6/articles/246/comments` | `OK` 200, **댓글 0** |
+| R3 | `GET /boards/6/articles?start_date=2023-08-24&end_date=2023-08-31&limit=100` | `OK` 200, 2행, **타깃의 자식 1** |
+| R4 | `GET /urgentinquiry/246/reply` | `OK` **200, reply 0** (404 아님) |
+| R5 | `GET /urgentinquiry?start_date=2023-08-24&end_date=2023-08-24&limit=100` | `OK` 200, **0행 — 타깃 부재** |
+
+컨트롤용 댓글 조회 2회는 **쓰지 않았다**: R2가 댓글 0을 돌려준 순간 대조군이 반증할 대상이
+없어졌다. 예산 7 중 5 사용.
+
+### R1 — C / P / N 구조 비교
+
+| article | `reply_status` | `reply` | `reply_user_id` | `reply_sequence` | `reply_depth` | `parent_article_no` | 본문 |
+|---|---|---|---|---|---|---|---|
+| **246 (타깃)** | **`C`** | `F` | **존재** | 2 | 0 | null | MEDIUM |
+| 281 (P 대조) | `P` | `F` | **존재** | 1 | 0 | null | LONG |
+| 248 (N 대조) | `N` | `F` | **부재** | 1 | 0 | null | SHORT |
+
+두 가지가 여기서 정해졌다.
+
+1. **`reply`는 답변 신호가 아니다.** 답변이 완료된 글에서도 `F`다. 필드 설명("whether replied
+   for 1:1 query")이 가리키는 것은 board 6가 아니다. 답변 여부를 말하는 필드는 `reply_status`
+   하나뿐이고, SellerOps가 이미 그것만 쓰고 있었던 것은 **맞았다.**
+2. **`reply_user_id`는 `C`·`P`에 있고 `N`에는 없다.** 이 몰에는 실재하는 운영자 ID가 있으며,
+   그 값은 판매자가 실제로 손댄 글에만 붙는다 — §5의 「운영자 신원이 어디서 오는가」에 대한
+   첫 번째 실물 근거다.
+
+### R3 — 답변은 글이었다 (A1 확정)
+
+```
+article_no=247  parent_article_no=246  reply_depth=1  reply_sequence=1
+reply_status=null  reply_user_id 부재  body=MEDIUM  created=2023-09-08
+```
+
+**관계가 실제 타깃에 묶여 있다** — 창 안에 함께 있었다는 근접성이 아니라 `parent_article_no`가
+246이다. 이것이 판정 규칙이 요구한 결합이다.
+
+부수 관측 하나(결론 아님): 창은 08-24~08-31인데 자식의 `created_date`는 **09-08**이다. 즉
+LIST의 날짜 필터는 **글 자신의 날짜가 아니라 스레드(부모)의 날짜로 걸리는 것으로 보인다.**
+질문을 가져오면 답변이 딸려 온다는 뜻이라 검색에는 유리하지만, 이 문서는 그것을 계약으로
+승격하지 않는다 — 한 번의 관측이다.
+
+### R4·R5 — 긴급문의는 이 문의가 아니다 (B 기각)
+
+R4는 **404가 아니라 200에 reply 0**을 돌려줬다. 그것만으로는 「긴급문의인데 답변이 없다」와
+「애초에 긴급문의가 아니다」를 가를 수 없다 — **그래서 R5가 있었다.** 같은 날 긴급문의 목록은
+**0행**이었고 타깃은 그 안에 없다. 두 번째 관측이 있어야 첫 번째가 뜻을 갖는다.
+
+`article_no`가 두 리소스에서 같은 숫자라는 이유로 같은 문의라고 판정하지 않았고, 실제로
+같지 않았다.
+
+## 11. Semantic verdict
+
+**`STANDARD_BOARD_REPLY_ARTICLE`**
+
+| 후보 | 판정 | 근거 |
+|---|---|---|
+| A1 답변 글 | **성립** | `article 247`의 `parent_article_no == 246`, `reply_depth=1` |
+| A2 댓글 | 기각 | 타깃의 댓글 **0** (대조군이 필요 없는 종류의 0) |
+| B 긴급문의 답변 | 기각 | reply 0 **그리고** 같은 날 긴급문의 목록에 타깃 부재 |
+
+하나만 성립했으므로 `MULTIPLE_REPRESENTATIONS`도 `UNPROVEN`도 아니다.
+
+## 12. 제품 질문에 대한 답
+
+> **"판매자가 board 6 문의에 답변했을 때, 그 답변 본문과 완료 상태를 어떤 API로 다시 확인할 수
+> 있는가?"**
+
+**이미 호출하고 있는 그 엔드포인트로 확인할 수 있다.** 새 endpoint도, 새 scope도, 새 연결도
+필요 없다.
+
+| 무엇 | 어디 |
+|---|---|
+| 답변 **본문** | 자식 글의 `content` — `GET /boards/6/articles`가 이미 돌려주고 있다 |
+| 답변 **완료 상태** | 부모 글의 `reply_status=C` — 이미 읽고 있다 |
+| 답변 **작성자(운영자)** | 부모 글의 `reply_user_id` — **투영하지 않고 있다** |
+| 부모–자식 **관계** | `parent_article_no` · `reply_depth` — **투영하지 않고 있다** |
+
+즉 답변 본문은 **한 번도 우리 손 밖에 있던 적이 없다.** 투영하지 않은 두 필드 때문에 그것이
+답변인 줄 몰랐을 뿐이다.
+
+## 13. 그 대가 — 발견된 결함 (이번 package에서 고치지 않았다)
+
+`parent_article_no`를 읽지 않는다는 것은 **자식 글을 질문과 구별하지 못한다**는 뜻이고,
+board 6의 모든 글을 문의로 수집하는 현재 경로에서 그 결과는 하나뿐이다:
+
+```
+cafe24:b6:a247 | 2023-09-08 | inform_status=(공백) | status=UNANSWERED | REAL | body 492자
+```
+
+**판매자 자신의 답변이 「고객이 답변을 기다리는 문의」로 저장돼 있다.**
+
+DB에서 본 규모(계정 결합 111행 기준):
+
+| | 건수 |
+|---|---|
+| `reply_status='C'` (실제 문의, 답변됨) | 43 |
+| `inform_status` 공백 | **44** |
+| 그 중 **`C` 글 바로 다음 번호**인 것 | **37** |
+
+`parent_article_no`를 저장하지 않으므로 DB만으로는 증명할 수 없다 — 증명된 것은 247→246
+한 건이다. 그러나 자식 글의 `reply_status`가 `null`이라는 R3의 관측과 44개의 공백,
+그 중 37개가 답변된 글의 바로 다음 번호라는 사실은 같은 방향을 가리킨다.
+
+**영향:** 답변 대기 큐가 판매자 자신의 문장으로 부풀어 있고, 그 문장들이 RAG·Answer Memory의
+문의 측 코퍼스에 문의로 앉아 있다. **이것은 이번 승인 범위 밖이므로 고치지 않았고, 다음
+package의 1순위로 보고한다.**
+
+## 14. 아직 `UNPROVEN`인 것
+
+1. **WRITE는 무엇도 증명되지 않았다.** A1이 답변으로 *보인다*는 것과, 우리가 A1으로 쓰면 같은
+   결과가 된다는 것은 다른 문장이다. 특히 `POST`에 `reply_status=C`를 실으면 그것이 **자식 글의
+   상태**가 되는지 **부모 글의 상태**가 되는지 계약도 이번 관측도 말하지 않는다 — 관측된 자식의
+   `reply_status`는 `null`이었다.
+2. 표본은 **한 몰 · 한 게시판 · 한 스레드**다.
+3. R3의 날짜 필터 동작(부모 날짜로 스레드가 딸려 온다)은 **한 번 본 것**이다.
+4. `member_id = mall_id`가 작성자를 상점명으로 렌더링한다는 계약 문구는 **WRITE 없이 확인 불가**.
+5. 이 몰의 실제 운영자 ID **값**은 읽지 않았다 — 존재만 관측했다(`reply_user_id_present`).
+
+## 15. Cafe24 Action Executor에 필요한 행위자 값 (verdict 확정 후)
+
+경로가 A1으로 정해졌으므로 필요한 값도 정해졌다 — **A2의 `password`는 더 이상 필요 없다.**
+
+| 값 | 계약상 | 현재 | 필요한 결정 |
+|---|---|---|---|
+| `writer` | **필수** | 미보유 | 표시 이름을 무엇으로 할지 — `member_id=mall_id`면 **상점명으로 렌더링**되므로 `writer`는 내부 값이 된다 |
+| `client_ip` | **필수** | 미보유 | **product-owner 결정** — 서버 IP를 「작성자 IP」로 보내는 것이 정직한가 |
+| `member_id` | 선택 | **`mall_id` 보유** | 작성자를 지어내지 않는 유일한 문서화된 출구 |
+| `reply_user_id` | 선택 | 미보유(존재는 관측됨) | 과거 답변 글에서 읽어 재사용할지 vs 판매자에게 물을지 — **결정 필요** |
+| `title` | **필수** | — | 답변 글의 제목 규칙 (예: 원문 제목 접두) — **결정 필요** |
+| `password` | 선택 | — | A1에서는 선택이므로 **임의 생성 문제가 사라졌다** |
+
+## 16. write scope / 재동의
+
+변함없다. 부여 scope는 `mall.read_community,mall.read_order,mall.read_product`이고
+`mall.write_community`가 없다. 그리고 `Cafe24OnboardingService`가 write scope 요청을 **기동 시
+거부**하므로, 재동의는 셀러의 동의 이전에 **코드 변경 + product-owner 결정**을 먼저 요구한다.
+이번 package는 그 가드를 건드리지 않았다.
+
+## 17. 다음 WRITE adapter는 single-step인가
+
+**single-step일 가능성이 높고, 아직 확정할 수 없다.**
+
+계약상 `POST /boards/6/articles`는 `reply_article_no` · `content` · `reply_status` · `reply_user_id`를
+**한 호출**에 받는다. 그러므로 §8이 가정했던 「댓글 POST → 상태 PUT」 2단계 문제(부분 성공,
+`PARTIAL / RECONCILIATION_REQUIRED`, 중복 답변 위험)는 **A1에서는 발생하지 않는다** — 애초에
+호출이 하나다.
+
+확정을 막는 것은 §14-1이다: 그 한 호출의 `reply_status`가 **부모**에 붙는지 자식에 붙는지
+모른다. 자식에만 붙는다면 부모를 `C`로 만들 방법이 필요한데 `PUT`은 `reply_status`를 받지
+않으므로, 그 경우 **답변은 보내지되 완료 표시는 불가능**할 수 있다 — single-step이 아니라
+**one-step-and-a-gap**이다. 이것은 WRITE 없이 답할 수 없고, 답이 무엇이냐에 따라 executor의
+성공 판정과 verification 규칙이 통째로 달라진다. **다음 package의 첫 질문이 이것이어야 한다.**

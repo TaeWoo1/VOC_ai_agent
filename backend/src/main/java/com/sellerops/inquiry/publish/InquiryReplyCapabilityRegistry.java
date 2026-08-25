@@ -159,20 +159,22 @@ public class InquiryReplyCapabilityRegistry {
                     "ESM+(지마켓/옥션) 문의는 구현된 답변 등록 경로로 보낼 수 있습니다.",
                     "EsmAnswerClient · EsmChannelReplyAdapter (구현됨, 실행 플래그 뒤에서만 등록)"),
             new Row("CAFE24", null, InquiryReplyTransport.NEEDS_VERIFICATION, false,
-                    "카페24 게시판에 답변을 등록하는 공식 방법은 확인했지만, 이 게시판이 그 중 어떤 "
-                            + "방식을 쓰는지는 아직 확인하지 않았습니다. 지원하지 않는다는 뜻은 아닙니다.",
-                    "플랫폼 후보 3종(공식 사본 보관, 전부 scope mall.write_community) · "
-                            + "A1 답변 글: POST /boards/{board_no}/articles + reply_article_no "
-                            + "(필수 writer·client_ip, 같은 호출에 reply_status·reply_user_id) · "
-                            + "A2 댓글: POST /boards/{board_no}/articles/{article_no}/comments "
-                            + "(필수 content·writer·password) · "
-                            + "B 긴급문의 답변: POST /urgentinquiry/{article_no}/reply "
-                            + "(필수 content·user_id) — 답변 본문을 싣는 유일한 리소스 · "
-                            + "미확정: board 6이 셋 중 무엇을 쓰는지 근거 없음 — READ proof는 설계되어 "
-                            + "승인 대기(docs/inquiry_answer_execution_v1.md §7), 이미 답변된 43건이 "
-                            + "reply_status=C로 저장돼 있어 미답변 문의를 건드리지 않고 관측 가능 · "
-                            + "행위자 값(writer/password/client_ip/user_id)을 SellerOps가 보유하지 않음 "
-                            + "(보관 값은 mall_id·refresh_token 둘뿐) · "
+                    "카페24 문의 게시판이 답변을 어떤 형태로 담는지는 확인했지만, 그 형태로 "
+                            + "보내는 것은 아직 확인하지 않았습니다. 지원하지 않는다는 뜻은 아닙니다.",
+                    "READ로 확정됨(2026-08-25, 승인된 bounded proof, GET 5회): "
+                            + "STANDARD_BOARD_REPLY_ARTICLE — 답변은 질문에 달린 자식 '글'이다 "
+                            + "(article 247의 parent_article_no=246, reply_depth=1). "
+                            + "기각: 댓글 0(A2), 긴급문의 목록에 부재(B). "
+                            + "reply 필드는 답변 신호가 아니다(답변된 글에서도 F) — reply_status만이 신호 · "
+                            + "답변 본문은 이미 우리가 호출하는 GET /boards/{board_no}/articles가 "
+                            + "돌려주고 있다(자식 글의 content). 새 endpoint도 새 scope도 불필요 · "
+                            + "미확정(WRITE): POST /boards/{board_no}/articles + reply_article_no가 "
+                            + "계약상 유일한 후보이나, 그 호출의 reply_status=C가 부모에 붙는지 "
+                            + "자식에 붙는지 계약도 관측도 말하지 않는다(관측된 자식의 reply_status는 "
+                            + "null) — 부모에 붙지 않으면 답변은 보내되 완료 표시는 불가능하다 · "
+                            + "행위자 값 미보유: writer·client_ip 필수(A1에서 password는 불필요), "
+                            + "보관 값은 mall_id·refresh_token 둘뿐. member_id=mall_id이면 작성자가 "
+                            + "상점명으로 렌더링된다는 문서화된 출구가 있다 · "
                             + "현재 연결 scope는 mall.read_community,mall.read_order,mall.read_product "
                             + "(쓰기 미포함이며 온보딩이 write scope 요청을 기동 시 거부함)"));
 

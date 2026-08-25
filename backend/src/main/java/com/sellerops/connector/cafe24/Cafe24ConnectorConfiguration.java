@@ -90,6 +90,36 @@ public class Cafe24ConnectorConfiguration {
         return new Cafe24ExactOrderReader(authorizer, ordersClient, Clock.systemUTC());
     }
 
+    /**
+     * The Cafe24 answer-semantics probe — five (at most seven) read-only requests that decide which
+     * resource holds a seller's answer on this mall's inquiry board. Triple-gated: this whole
+     * configuration needs the connector flag, this bean needs
+     * {@code sellerops.connector.cafe24.diagnostic.answer-semantics.enabled=true}, and even then the
+     * runner is inert until an account id and a target article number are configured. Not wired into
+     * the scheduler or any collection path; it writes nothing anywhere.
+     */
+    @Bean
+    Cafe24AnswerSemanticProbe cafe24AnswerSemanticProbe(Cafe24HttpClient http) {
+        return new Cafe24AnswerSemanticProbe(http);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.answer-semantics.enabled",
+            havingValue = "true")
+    Cafe24AnswerSemanticProbeRunner cafe24AnswerSemanticProbeRunner(
+            Cafe24Authorizer authorizer, Cafe24AnswerSemanticProbe probe,
+            SellerAccountRepository accounts,
+            @Value("${sellerops.connector.cafe24.diagnostic.answer-semantics.account-id:}") String accountId,
+            @Value("${sellerops.connector.cafe24.diagnostic.answer-semantics.board-no:6}") int boardNo,
+            @Value("${sellerops.connector.cafe24.diagnostic.answer-semantics.target-article-no:0}") long target,
+            @Value("${sellerops.connector.cafe24.diagnostic.answer-semantics.processing-control-no:0}") long processing,
+            @Value("${sellerops.connector.cafe24.diagnostic.answer-semantics.unanswered-control-no:0}") long unanswered,
+            @Value("${sellerops.connector.cafe24.diagnostic.answer-semantics.target-date:}") String targetDate,
+            @Value("${sellerops.connector.cafe24.diagnostic.answer-semantics.window-days:7}") int windowDays) {
+        return new Cafe24AnswerSemanticProbeRunner(authorizer, probe, accounts, accountId, boardNo,
+                target, processing, unanswered, targetDate, windowDays);
+    }
+
     // Board Discovery (community read) infrastructure — wired behind the same
     // flag, CONFIRMED by a supervised live /boards run. Not part of the
     // DataType/scheduling backbone, so no runtime path reaches these by default.
