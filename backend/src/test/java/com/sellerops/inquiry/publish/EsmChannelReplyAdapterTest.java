@@ -147,7 +147,7 @@ class EsmChannelReplyAdapterTest {
     @Test
     void verifyIsCompletedOnlyWhenInformStatusIsProcessed() {
         informProbe.status = "처리완료";
-        ReplyVerificationResult r = adapter.verify(new ReplyVerificationCommand(org, seller, channel, "MSG-1", receivedAt));
+        ReplyVerificationResult r = adapter.verify(new ReplyVerificationCommand(org, seller, channel, "MSG-1", receivedAt, null, null));
         assertThat(r.kind()).isEqualTo(ReplyVerificationResult.Kind.COMPLETED);
         assertThat(r.observedSignal()).isEqualTo("처리완료");
     }
@@ -155,7 +155,7 @@ class EsmChannelReplyAdapterTest {
     @Test
     void verifyIsNotCompletedWhenInformStatusIsNotProcessed() {
         informProbe.status = "미처리";
-        ReplyVerificationResult r = adapter.verify(new ReplyVerificationCommand(org, seller, channel, "MSG-1", receivedAt));
+        ReplyVerificationResult r = adapter.verify(new ReplyVerificationCommand(org, seller, channel, "MSG-1", receivedAt, null, null));
         assertThat(r.kind()).isEqualTo(ReplyVerificationResult.Kind.NOT_COMPLETED);
     }
 }

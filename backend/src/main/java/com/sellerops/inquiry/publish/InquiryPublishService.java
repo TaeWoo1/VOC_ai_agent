@@ -377,9 +377,17 @@ public class InquiryPublishService {
         if (adapter.isEmpty()) {
             return; // fail closed: no adapter to verify with — leave state unchanged
         }
+        // The approved text travels with the verification, because on a board channel the only proof
+        // that OUR answer is there is the answer itself. Absent an approval (there always is one by
+        // this point) the adapter simply falls back to whatever state the channel reports.
+        String approvedBody = approvals.findByWorkItemId(workItem.getId())
+                .flatMap(a -> drafts.findByWorkItemIdAndVersion(workItem.getId(), a.getApprovedDraftVersion()))
+                .map(InquiryReplyDraft::getComments)
+                .orElse(null);
         ReplyVerificationResult result = adapter.get().verify(new ReplyVerificationCommand(
                 workItem.getOrgId(), workItem.getSellerAccountId(), workItem.getChannelId(),
-                inquiry.getExternalId(), inquiry.getReceivedAt()));
+                inquiry.getExternalId(), inquiry.getReceivedAt(),
+                approvedBody, execution.getProviderMessageNo()));
         boolean verified = result.kind() == ReplyVerificationResult.Kind.COMPLETED;
 
         InquiryVerification v = new InquiryVerification();

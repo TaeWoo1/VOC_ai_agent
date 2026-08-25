@@ -6,14 +6,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 /**
- * Resolves the {@link ChannelReplyAdapter} for a work item's exact channel. Spring
- * injects every adapter bean; the registry indexes them by {@link
- * ChannelReplyAdapter#channelCode()}.
+ * Resolves the {@link ChannelReplyAdapter} for a work item's exact channel AND source subtype.
+ * Spring injects every adapter bean; the registry groups them by {@link
+ * ChannelReplyAdapter#channelCode()} — <b>grouped, not keyed</b>.
+ *
+ * <p><b>Why a list per code.</b> One channel can have more than one reply adapter, because one
+ * channel can have more than one inquiry resource: NAVER's product Q&amp;A and customer inquiries are
+ * different endpoints with different identifier spaces, and each has its own adapter. Indexing by
+ * code alone made those two collide — and the collision was not a misroute but a refusal to start:
+ * the registry threw {@code Duplicate key NAVER} in its constructor, so the FIRST deployment to set
+ * {@code execution-enabled=true} with both NAVER connectors on would fail to boot entirely. It was
+ * invisible until then because the default leaves the adapter list empty.
  *
  * <p><b>Fail-closed by construction.</b> Live channel adapters are registered only
  * behind the execution flag (e.g. the ESM adapter exists only when {@code
@@ -26,12 +33,13 @@ import org.springframework.stereotype.Component;
 public class ChannelReplyAdapterRegistry {
 
     private final ChannelRepository channels;
-    private final Map<String, ChannelReplyAdapter> byCode;
+    private final Map<String, List<ChannelReplyAdapter>> byCode;
 
     public ChannelReplyAdapterRegistry(ChannelRepository channels, List<ChannelReplyAdapter> adapters) {
         this.channels = channels;
-        this.byCode = adapters.stream()
-                .collect(Collectors.toUnmodifiableMap(ChannelReplyAdapter::channelCode, Function.identity()));
+        this.byCode = adapters.stream().collect(Collectors.groupingBy(
+                ChannelReplyAdapter::channelCode,
+                Collectors.collectingAndThen(Collectors.toList(), List::copyOf)));
     }
 
     /**
@@ -48,8 +56,11 @@ public class ChannelReplyAdapterRegistry {
         }
         return channels.findById(channelId)
                 .map(Channel::getCode)
-                .map(byCode::get)
-                .filter(adapter -> adapter.servesSubtype(sourceSubtype));
+                .map(code -> byCode.getOrDefault(code, List.of()))
+                .stream()
+                .flatMap(List::stream)
+                .filter(adapter -> adapter.servesSubtype(sourceSubtype))
+                .findFirst();
     }
 
     /**

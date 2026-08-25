@@ -10,6 +10,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The ONE write this connector has: {@code POST /api/v2/admin/boards/{board_no}/articles} with
@@ -43,6 +45,8 @@ public class Cafe24ReplyArticleClient {
 
     /** The contract's own ceiling on an article subject. Longer is refused, never truncated. */
     public static final int TITLE_MAX = 256;
+
+    private static final Logger log = LoggerFactory.getLogger(Cafe24ReplyArticleClient.class);
 
     private final Cafe24HttpClient http;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -108,8 +112,29 @@ public class Cafe24ReplyArticleClient {
             // approved draft becomes sendable once the seller re-consents.
             return new Outcome(Outcome.Kind.RETRYABLE, null, status);
         }
-        // 4xx: the mall refused this body. Re-sending it unchanged would be refused again.
+        // 4xx: the mall refused this body. Re-sending it unchanged would be refused again — so the
+        // ONE thing that matters is why, and a refusal whose reason was thrown away costs a second
+        // irreversible attempt to learn. Cafe24's error object names the offending field; it is API
+        // diagnostics, not seller or customer data, so it is logged and nothing else is.
+        log.warn("카페24 답변 등록 거부: status={} 사유={}", status, refusalReason(response.body()));
         return new Outcome(Outcome.Kind.REJECTED, null, status);
+    }
+
+    /**
+     * Cafe24's own words for the refusal — {@code error.code} / {@code error.message}, and nothing
+     * else from the body. A body we cannot parse is reported as unparsable rather than dumped, so a
+     * response that unexpectedly echoed the request can never reach a log through here.
+     */
+    private String refusalReason(String body) {
+        try {
+            var error = mapper.readTree(body == null ? "" : body).path("error");
+            String code = error.path("code").asText("");
+            String message = error.path("message").asText("");
+            String joined = (code + " " + message).strip();
+            return joined.isEmpty() ? "(설명 없음)" : joined;
+        } catch (Exception e) {
+            return "(해석할 수 없는 응답)";
+        }
     }
 
     /**

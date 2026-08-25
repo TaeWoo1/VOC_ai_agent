@@ -42,6 +42,37 @@ class ChannelReplyAdapterRegistryTest {
         }
     }
 
+    /** An adapter that serves exactly one resource of its channel. */
+    private static final class SubtypeAdapter implements ChannelReplyAdapter {
+        private final String code;
+        private final String subtype;
+
+        SubtypeAdapter(String code, String subtype) {
+            this.code = code;
+            this.subtype = subtype;
+        }
+
+        @Override
+        public String channelCode() {
+            return code;
+        }
+
+        @Override
+        public boolean servesSubtype(String sourceSubtype) {
+            return subtype.equals(sourceSubtype);
+        }
+
+        @Override
+        public ReplyPublishResult publish(ReplyPublishCommand command) {
+            return ReplyPublishResult.confirmed("X");
+        }
+
+        @Override
+        public ReplyVerificationResult verify(ReplyVerificationCommand command) {
+            return ReplyVerificationResult.completed("X");
+        }
+    }
+
     private Channel channelWithCode(String code) {
         Channel c = new Channel();
         c.setCode(code);
@@ -94,6 +125,32 @@ class ChannelReplyAdapterRegistryTest {
                 .allSatisfy(code -> assertThat(capabilities.isImplemented(code, null))
                         .as("adapter registered for %s but the capability audit does not say DIRECT_API", code)
                         .isTrue());
+    }
+
+    @Test
+    void twoAdaptersOnOneChannelCoexistAndEachServesItsOwnResource() {
+        // The regression that stopped a live proof: NAVER has TWO reply adapters (product Q&A and
+        // customer inquiries), and the registry used to index by channel code alone. That is not a
+        // misroute — it is `Duplicate key NAVER` thrown in the constructor, so the whole application
+        // refused to start the first time a deployment set execution-enabled=true. The default (no
+        // adapters) hid it completely.
+        ChannelRepository channels = mock(ChannelRepository.class);
+        UUID channelId = UUID.randomUUID();
+        when(channels.findById(channelId)).thenReturn(Optional.of(channelWithCode("NAVER")));
+
+        SubtypeAdapter qna = new SubtypeAdapter("NAVER", InquirySourceSubtype.NAVER_PRODUCT_QNA);
+        SubtypeAdapter customer =
+                new SubtypeAdapter("NAVER", InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY);
+        ChannelReplyAdapterRegistry registry =
+                new ChannelReplyAdapterRegistry(channels, List.of(qna, customer));
+
+        assertThat(registry.resolve(channelId, InquirySourceSubtype.NAVER_PRODUCT_QNA))
+                .containsSame(qna);
+        assertThat(registry.resolve(channelId, InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY))
+                .containsSame(customer);
+        // A resource neither of them serves is still empty — coexisting is not a wildcard.
+        assertThat(registry.resolve(channelId, null)).isEmpty();
+        assertThat(registry.registeredChannelCodes()).containsExactly("NAVER");
     }
 
     @Test

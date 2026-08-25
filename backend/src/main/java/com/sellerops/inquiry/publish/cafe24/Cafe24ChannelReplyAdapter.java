@@ -14,6 +14,7 @@ import com.sellerops.inquiry.publish.ReplyVerificationResult;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -57,6 +58,9 @@ public class Cafe24ChannelReplyAdapter implements ChannelReplyAdapter {
 
     /** The signal recorded when the answer landed but the question is not marked answered. */
     public static final String STATUS_UNRESOLVED = "ANSWER_POSTED_STATUS_UNRESOLVED";
+
+    /** The mall's own day — a board's "today" is the shop's, not the server's. */
+    private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     private final Cafe24ReplyArticleClient writeClient;
     private final Cafe24BoardArticlesClient readClient;
@@ -141,6 +145,9 @@ public class Cafe24ChannelReplyAdapter implements ChannelReplyAdapter {
 
     @Override
     public ReplyVerificationResult verify(ReplyVerificationCommand command) {
+        if (command.approvedBody() != null && !command.approvedBody().isBlank()) {
+            return verifyAgainstApproved(command, command.approvedBody());
+        }
         Target target = Target.parse(command.externalId());
         if (target == null) {
             return ReplyVerificationResult.notCompleted("UNVERIFIABLE");
@@ -166,6 +173,40 @@ public class Cafe24ChannelReplyAdapter implements ChannelReplyAdapter {
             return ReplyVerificationResult.notCompleted("UNVERIFIABLE");
         }
         return ReplyVerificationResult.notCompleted(answeredSignal(parent));
+    }
+
+    /**
+     * The verification the send actually needs: find the child we posted, prove it is ours, and only
+     * then read the parent's state.
+     *
+     * <p>Without the approved text the only honest answer is the weaker one — "what does the board
+     * say about the question". With it, the whole thing can be proven, so it is: a {@code reply_status}
+     * alone would let someone else's answer, or an answer that never arrived, read as ours.
+     */
+    private ReplyVerificationResult verifyAgainstApproved(ReplyVerificationCommand command,
+                                                          String approvedBody) {
+        Target target = Target.parse(command.externalId());
+        if (target == null) {
+            return ReplyVerificationResult.notCompleted("UNVERIFIABLE");
+        }
+        Cafe24Authorizer.Authorized auth;
+        try {
+            auth = authorizer.authorize(command.orgId(), command.sellerAccountId());
+        } catch (RuntimeException e) {
+            return ReplyVerificationResult.notCompleted("UNVERIFIABLE");
+        }
+        // The provider reference is the created article number when the mall named one — and the
+        // target's own number when it did not. The second is not an id to look up; it is the absence
+        // of one, and the bounded same-day read exists for exactly that case.
+        Long created = null;
+        try {
+            long ref = Long.parseLong(command.providerRef() == null ? "" : command.providerRef().strip());
+            created = ref == target.articleNo() ? null : ref;
+        } catch (NumberFormatException ignore) {
+            // no usable number — fall back to the bounded read
+        }
+        return verifyCreated(auth.accessToken(), auth.mallId(), target, created, approvedBody,
+                LocalDate.now(SEOUL));
     }
 
     /**

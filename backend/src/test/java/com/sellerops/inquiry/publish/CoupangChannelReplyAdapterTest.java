@@ -194,13 +194,13 @@ class CoupangChannelReplyAdapterTest {
     void verification_is_COMPLETED_only_when_coupang_itself_lists_it_as_answered() {
         replyClient.answered = true;
         ReplyVerificationResult completed = adapter.verify(
-                new ReplyVerificationCommand(org, seller, channel, EXTERNAL_ID, receivedAt));
+                new ReplyVerificationCommand(org, seller, channel, EXTERNAL_ID, receivedAt, null, null));
         assertThat(completed.kind()).isEqualTo(ReplyVerificationResult.Kind.COMPLETED);
         assertThat(completed.observedSignal()).isEqualTo("ANSWERED");
         assertThat(replyClient.verifiedInquiryId).isEqualTo(BARE_ID);
 
         replyClient.answered = false;
-        assertThat(adapter.verify(new ReplyVerificationCommand(org, seller, channel, EXTERNAL_ID, receivedAt))
+        assertThat(adapter.verify(new ReplyVerificationCommand(org, seller, channel, EXTERNAL_ID, receivedAt, null, null))
                 .kind()).isEqualTo(ReplyVerificationResult.Kind.NOT_COMPLETED);
     }
 
@@ -211,7 +211,7 @@ class CoupangChannelReplyAdapterTest {
         replyClient.verifyFailure = new IllegalStateException("network");
 
         ReplyVerificationResult result = adapter.verify(
-                new ReplyVerificationCommand(org, seller, channel, EXTERNAL_ID, receivedAt));
+                new ReplyVerificationCommand(org, seller, channel, EXTERNAL_ID, receivedAt, null, null));
 
         assertThat(result.kind()).isEqualTo(ReplyVerificationResult.Kind.NOT_COMPLETED);
         assertThat(result.observedSignal()).isEqualTo("UNVERIFIABLE");
@@ -219,7 +219,7 @@ class CoupangChannelReplyAdapterTest {
 
     @Test
     void an_unrecognised_external_id_is_unverifiable_rather_than_completed() {
-        assertThat(adapter.verify(new ReplyVerificationCommand(org, seller, channel, "MSG-1", receivedAt))
+        assertThat(adapter.verify(new ReplyVerificationCommand(org, seller, channel, "MSG-1", receivedAt, null, null))
                 .kind()).isEqualTo(ReplyVerificationResult.Kind.NOT_COMPLETED);
     }
 }
