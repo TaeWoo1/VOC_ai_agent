@@ -38,6 +38,41 @@ public interface InquiryWorkItemRepository extends JpaRepository<InquiryWorkItem
                                                          @Param("phase") InquiryWorkItemPhase phase,
                                                          Pageable pageable);
 
+    /**
+     * The deterministic candidate gate of the Proactive Operations Agent — work the seller has not
+     * started, on a customer question the channel still reports as unanswered.
+     *
+     * <p><b>Every clause is operational truth, and none of it is a model's opinion.</b> That ordering
+     * is the product decision: an LLM never gets to invent "there is work here"; it investigates work
+     * this predicate already established. The clauses, and why each is here rather than assumed:
+     *
+     * <ul>
+     *   <li>{@code phase = OPEN} — the seller has not begun. A PROPOSED item is already being worked.
+     *   <li>{@code dataOrigin = REAL} — the same door {@code InquiryWorkItemWriter} closes at ingest.
+     *       A manufactured row must never reach a surface whose CTA leads to a marketplace send.
+     *   <li>{@code operationalState = ACTIVE} — the seller's spam dismissal and the source's own
+     *       thread structure are both respected, because both are projected onto this column.
+     *   <li>{@code status = 'UNANSWERED'} — the channel's own word, never inferred here.
+     *   <li><b>{@code threadRole} is not REPLY</b> — and this is NOT redundant with ACTIVE. It is a
+     *       second, independent fence, of the kind the queue already keeps two of for
+     *       {@code dataOrigin}. The projector runs at ingest today, so the two agree; if a path ever
+     *       stored a reply article without projecting it, this clause is what stops the seller's own
+     *       answer from being investigated as a customer's question.
+     * </ul>
+     *
+     * <p>Ordered oldest-first so a bounded tick works through a backlog instead of re-reading its
+     * newest rows forever, and totally ordered so a capped run is resumable.
+     */
+    @Query("select w from InquiryWorkItem w where w.orgId = :orgId "
+            + "and w.phase = com.sellerops.inquiry.workitem.InquiryWorkItemPhase.OPEN "
+            + "and exists (select 1 from Inquiry i where i.id = w.inquiryId "
+            + "  and i.dataOrigin = com.sellerops.common.DataOrigin.REAL "
+            + "  and i.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE "
+            + "  and i.status = 'UNANSWERED' "
+            + "  and (i.threadRole is null or i.threadRole = 'ROOT')) "
+            + "order by w.createdAt asc, w.id asc")
+    List<InquiryWorkItem> findProactiveCandidates(@Param("orgId") UUID orgId, Pageable pageable);
+
     boolean existsByInquiryId(UUID inquiryId);
 
     /** The single work item for an inquiry ({@code inquiry_id} is unique), when present. */

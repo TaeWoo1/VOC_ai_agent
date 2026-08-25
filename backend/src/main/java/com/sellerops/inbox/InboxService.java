@@ -157,8 +157,13 @@ public class InboxService {
      * 1240px…} produced a preview of exactly that — markup, cut mid-attribute. {@link
      * MarkupText#toSingleLine} now runs first, over its own bounded scan, so the 200-character mask
      * window and the 60-character preview are both spent on words.
+     *
+     * <p><b>Public because there is exactly one right answer here and it should not be written
+     * twice.</b> The proactive surface shows the same kind of preview of the same rows; a second
+     * implementation would be a second masking rule, and the one that drifted would be the one
+     * nobody noticed until a phone number was on a screen.
      */
-    static String snippet(String body) {
+    public static String snippet(String body) {
         if (body == null) {
             return "";
         }

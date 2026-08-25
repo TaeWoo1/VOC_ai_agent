@@ -8,6 +8,7 @@ import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { InboxFilterRail } from "../../components/inbox/InboxFilterRail";
 import { InboxList } from "../../components/inbox/InboxList";
 import { InboxDetail } from "../../components/inbox/InboxDetail";
+import { ProactiveCases } from "../../components/proactive/ProactiveCases";
 import { api } from "../../lib/apiClient";
 import { analysisKey, buildAnalysisIndex } from "../../lib/inboxView";
 import {
@@ -208,6 +209,11 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
           description="채널에 들어온 문의와 리뷰를 급한 것부터 확인합니다."
         />
       )}
+
+      {/* 「AI가 먼저 확인한 일」 sits ABOVE the queue, and outside its loading branch on purpose: it is
+          the answer to "무엇부터 볼까", and a seller who has to wait for a 500-row feed before seeing it
+          has already started scanning the list themselves. It renders nothing when there is nothing. */}
+      {inquiriesOnly ? <div className="mb-6"><ProactiveCases limit={4} /></div> : null}
 
       {loading ? (
         <p className="text-muted">불러오는 중…</p>

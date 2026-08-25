@@ -170,8 +170,25 @@ public class InquiryProposalService {
                 : "이 채널의 문의 수집 상태를 읽지 못해, 이 문의에 이미 답변이 달렸는지 확인할 수 없습니다.";
     }
 
+    /**
+     * As {@link #propose(UUID, UUID, UUID)}, with the audit actor named rather than derived from a
+     * user id — the seam the Proactive Operations Agent proposes through.
+     *
+     * <p><b>The transition is the same transition.</b> Same OPEN-only gate, same idempotency
+     * precheck, same provider, same atomic write of proposal + phase + {@code PROPOSAL_ADDED} audit.
+     * PROPOSED has never meant "approved" and does not start to now: approval is a separate, explicit,
+     * seller-only act on the existing approval path, and nothing here touches it.
+     */
+    public ProposalResult proposeAs(UUID orgId, UUID workItemId, String actor) {
+        return transition(orgId, workItemId, actor);
+    }
+
     /** Generate a proposal and move the work item OPEN &rarr; PROPOSED. */
     public ProposalResult propose(UUID orgId, UUID workItemId, UUID sellerUserId) {
+        return transition(orgId, workItemId, "SELLER:" + sellerUserId);
+    }
+
+    private ProposalResult transition(UUID orgId, UUID workItemId, String actor) {
         InquiryWorkItem workItem = loadWorkItem(orgId, workItemId);
 
         // Idempotency precheck BEFORE the provider: a prior proposal is an exact replay.
@@ -210,8 +227,7 @@ public class InquiryProposalService {
         proposal.setProviderVersion(draft.providerVersion());
 
         try {
-            InquiryProposal saved = writer.attachProposalAndTransition(
-                    workItem, proposal, "SELLER:" + sellerUserId);
+            InquiryProposal saved = writer.attachProposalAndTransition(workItem, proposal, actor);
             return result(workItem, saved);
         } catch (DataIntegrityViolationException race) {
             // A concurrent caller won the UNIQUE race — resolve to the persisted proposal.

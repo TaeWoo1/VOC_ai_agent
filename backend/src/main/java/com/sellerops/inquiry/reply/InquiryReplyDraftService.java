@@ -80,9 +80,32 @@ public class InquiryReplyDraftService {
         return save(orgId, workItemId, sellerUserId, title, comments, baseVersion, Provenance.seller());
     }
 
+    /**
+     * As {@link #save(UUID, UUID, UUID, String, String, Integer, Provenance)}, but the author is named
+     * rather than derived from a user id.
+     *
+     * <p>Exists because a draft can now be prepared before any human opens the inquiry — the Proactive
+     * Operations Agent writes one with {@code SYSTEM:PROACTIVE_AGENT} as the author. Everything else
+     * about the version is identical: same validation, same normalization, same fingerprint, same
+     * append-only versioning, same PROPOSED-only gate. The author string is the ONLY difference, and
+     * it is the difference that matters — a system-prepared draft that recorded a seller as its author
+     * would put a person's name on a sentence they have never read.
+     */
+    public ReplyDraftView saveAs(UUID orgId, UUID workItemId, String actor,
+                                 String title, String comments, Integer baseVersion,
+                                 Provenance provenance) {
+        return persist(orgId, workItemId, actor, title, comments, baseVersion, provenance);
+    }
+
     public ReplyDraftView save(UUID orgId, UUID workItemId, UUID sellerUserId,
                                String title, String comments, Integer baseVersion,
                                Provenance provenance) {
+        return persist(orgId, workItemId, "SELLER:" + sellerUserId, title, comments, baseVersion, provenance);
+    }
+
+    private ReplyDraftView persist(UUID orgId, UUID workItemId, String actor,
+                                   String title, String comments, Integer baseVersion,
+                                   Provenance provenance) {
         // Org guard BEFORE reading/validating any content.
         InquiryWorkItem workItem = workItems.findById(workItemId)
                 .filter(w -> w.getOrgId().equals(orgId))
@@ -138,7 +161,7 @@ public class InquiryReplyDraftService {
         draft.setComments(normalizedComments);
         draft.setContentFingerprint(fingerprint);
         draft.setFingerprintAlgorithm(EsmAnswerValidation.FINGERPRINT_ALGORITHM);
-        draft.setCreatedBy("SELLER:" + sellerUserId);
+        draft.setCreatedBy(actor);
         draft.setAuthorKind(provenance.authorKind().name());
         draft.setModelVersion(provenance.modelVersion());
         draft.setKnowledgeState(provenance.knowledgeState() == null ? null : provenance.knowledgeState().name());

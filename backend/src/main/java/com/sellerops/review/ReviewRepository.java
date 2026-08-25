@@ -939,4 +939,52 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     Slice<Review> findDismissedReplyWorkByChannel(@Param("orgId") UUID orgId,
                                                   @Param("channelId") UUID channelId,
                                                   Pageable pageable);
+
+    /**
+     * The deterministic candidate gate of the Proactive Operations Agent, review side.
+     *
+     * <p><b>It computes no new judgement.</b> The tier test is {@link #TRIAGE_TIER_RANK}{@code  = 0} —
+     * the SAME expression the operator's own list orders and counts by, which is one of the two
+     * pinned-equal representations of {@link com.sellerops.review.triage.ReviewTriageRules}. A third
+     * copy of "which reviews are 확인 필요" written here would be a third answer, and the first time any
+     * of them changed the proactive surface and the review surface would disagree about the same row.
+     *
+     * <p>The rest is operational state the seller already established: the review's own data origin,
+     * whether it has been answered, and whether the seller set its reply work aside
+     * ({@link #NOT_DISMISSED_PREDICATE}, reused unchanged — a dismissal is a decision, and a proactive
+     * card that re-raised it would be the product arguing with its user).
+     *
+     * <p>Worst rating first, then newest; totally ordered so a bounded tick is deterministic.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId
+              and r.dataOrigin = com.sellerops.common.DataOrigin.REAL
+              and r.replyState <> com.sellerops.review.ReviewReplyState.ANSWERED
+              and
+            """ + TRIAGE_TIER_RANK + """
+                  = 0
+              and
+            """ + NOT_DISMISSED_PREDICATE + """
+            order by r.rating asc, r.receivedAt desc, r.id desc
+            """)
+    List<Review> findProactiveCandidates(@Param("orgId") UUID orgId, Pageable pageable);
+
+    /**
+     * Whether ONE review is still active reply work — the single-row form of
+     * {@link #NOT_DISMISSED_PREDICATE}, reusing the very same predicate string.
+     *
+     * <p>Written as a count over one id rather than as a second copy of the rule. The reply-work
+     * dismissal rule is subtle (a shared event sequence, plus two independent automatic re-entry
+     * paths) and a hand-rolled restatement of it would be wrong the first time any of those three
+     * changed. The proactive reconciler asks this to decide whether a prepared card is still the
+     * seller's business.
+     */
+    @Query("""
+            select count(r) from Review r
+            where r.orgId = :orgId and r.id = :reviewId
+              and
+            """ + NOT_DISMISSED_PREDICATE + """
+            """)
+    long countActiveReplyWork(@Param("orgId") UUID orgId, @Param("reviewId") UUID reviewId);
 }

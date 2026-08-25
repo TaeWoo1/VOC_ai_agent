@@ -6,6 +6,8 @@ import type {
   OrgKnowledgeView,
   KnowledgeSourceView,
   OverviewResponse,
+  ProactiveCaseListResponse,
+  ProactiveSummaryView,
   ProductKnowledgeView,
   InquiryProductBindingView,
   ProductSummaryView,
@@ -1585,6 +1587,27 @@ export const api = {
    * backend is unreachable is the one screen where a fallback is indistinguishable from the product
    * working, and every number here is one a seller would act on.
    */
+  // --- Proactive Operations Agent (「AI가 먼저 확인한 일」) ---
+  // Fail-SOFT by design, and only here: the proactive section is an addition to a screen that
+  // already works. If this read fails the seller still has their full inquiry queue and review list,
+  // so a thrown error would take a working page down to show that an optional section is missing.
+  // Every OTHER read in this workflow stays strict.
+  async getProactiveCases(limit = 20): Promise<ProactiveCaseListResponse> {
+    const { data } = await http.get<ProactiveCaseListResponse>(
+      `/api/proactive/cases?limit=${encodeURIComponent(String(limit))}`,
+    );
+    return data;
+  },
+  async getProactiveSummary(): Promise<ProactiveSummaryView> {
+    const { data } = await http.get<ProactiveSummaryView>("/api/proactive/summary");
+    return data;
+  },
+  // Records the first time a person looked at a prepared case. Fire-and-forget from the UI: a
+  // telemetry write must never stand between a seller and the work they just clicked on.
+  async markProactiveCaseOpened(caseId: string): Promise<void> {
+    await http.post(`/api/proactive/cases/${encodeURIComponent(caseId)}/opened`, {});
+  },
+
   async getOverviewStrict(days?: number): Promise<OverviewResponse> {
     const suffix = days && days > 0 ? `?days=${days}` : "";
     const { data } = await http.get<OverviewResponse>(`/api/dashboard/overview${suffix}`);

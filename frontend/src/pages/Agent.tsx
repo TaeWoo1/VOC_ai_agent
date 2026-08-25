@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { readAgentContext } from "../lib/agentContext";
 import { Link } from "react-router-dom";
+import { ProactiveCases } from "../components/proactive/ProactiveCases";
 import { PageHeader } from "../components/PageHeader";
 import { Section } from "../components/Section";
 import { useApiData } from "../lib/useApiData";
@@ -181,6 +182,10 @@ export function Agent() {
         description="한 줄로 운영 작업을 지시하면 에이전트가 문의·리뷰·이슈를 분류해 사람이 확인할 지점까지 준비합니다."
         meta={caps.data ? <CapabilityMeta store={caps.data.runStore} /> : undefined}
       />
+
+      {/* Before the prompt, not after it. The Agent screen used to answer only what it was asked;
+          work SellerOps has already investigated should not need to be asked for. */}
+      <ProactiveCases limit={4} heading="이미 확인해 둔 일" />
 
       <Section title="무엇을 도와드릴까요?">
         <form onSubmit={submit} className="space-y-3" aria-label="에이전트 명령 입력">

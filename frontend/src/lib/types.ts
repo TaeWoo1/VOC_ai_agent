@@ -2118,3 +2118,48 @@ export interface InquiryProductBindingView {
   boundByName: string | null;
   sourceProductRef: string | null;
 }
+
+/**
+ * One card on 「AI가 먼저 확인한 일」 — work SellerOps investigated before the seller went looking.
+ *
+ * `preparedAction` is the shape of the CTA: `DRAFT_PREPARED` means a reply is written and waiting for
+ * the seller's review and approval (never sent), `RECOMMENDATION_ONLY` means the evidence and a next
+ * action are ready, `NONE` means the investigation could not finish and the card says so rather than
+ * disappearing.
+ */
+export interface ProactiveCaseView {
+  id: string;
+  subjectKind: "INQUIRY" | "REVIEW";
+  subjectId: string;
+  workItemId: string | null;
+  channelId: string | null;
+  channelNameKo: string | null;
+  productId: string | null;
+  productName: string | null;
+  snippet: string;
+  rating: number | null;
+  priority: "HIGH" | "NORMAL";
+  reason: string;
+  reasonNote: string;
+  evidenceState: string | null;
+  evidenceCount: number;
+  knowledgeGap: string | null;
+  preparedAction: "DRAFT_PREPARED" | "RECOMMENDATION_ONLY" | "NONE";
+  draftVersion: number | null;
+  recommendation: string | null;
+  subjectReceivedAt: string | null;
+  preparedAt: string | null;
+}
+
+export interface ProactiveCaseListResponse {
+  items: ProactiveCaseView[];
+  /** Counted server-side, so a short page never implies a short backlog. */
+  total: number;
+  high: number;
+}
+
+export interface ProactiveSummaryView {
+  open: number;
+  high: number;
+  draftsPrepared: number;
+}

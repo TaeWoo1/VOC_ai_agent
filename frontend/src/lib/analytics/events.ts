@@ -14,6 +14,10 @@ export type AuthMethod = (typeof AUTH_METHODS)[number];
 export const ANALYTICS_CHANNELS = ["naver", "coupang", "cafe24"] as const;
 export type AnalyticsChannel = (typeof ANALYTICS_CHANNELS)[number];
 
+/** Which kind of work a proactive case is about — the only prop the proactive events carry. */
+export const PROACTIVE_KINDS = ["inquiry", "review"] as const;
+export type ProactiveKind = (typeof PROACTIVE_KINDS)[number];
+
 export interface AnalyticsEvents {
   sign_up: { method: AuthMethod };
   login: { method: AuthMethod };
@@ -25,6 +29,10 @@ export interface AnalyticsEvents {
   today_inbox_viewed: Record<string, never>;
   review_attention_opened: Record<string, never>;
   inquiry_opened: Record<string, never>;
+  /** The proactive section was rendered with at least one prepared case. */
+  proactive_cases_viewed: Record<string, never>;
+  /** The seller opened one prepared case. `kind` is the subject, never its content. */
+  proactive_case_opened: { kind: ProactiveKind };
 }
 
 export type AnalyticsEventName = keyof AnalyticsEvents;
@@ -41,6 +49,8 @@ const ALLOWED: { [E in AnalyticsEventName]: Record<string, readonly string[]> } 
   today_inbox_viewed: {},
   review_attention_opened: {},
   inquiry_opened: {},
+  proactive_cases_viewed: {},
+  proactive_case_opened: { kind: PROACTIVE_KINDS },
 };
 
 export const ANALYTICS_EVENT_NAMES = Object.keys(ALLOWED) as AnalyticsEventName[];

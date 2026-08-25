@@ -86,6 +86,24 @@ public class InquiryDraftComposer {
      * the queue, and the send path are all unaffected by that exhaustion.
      */
     public GeneratedDraftView generate(UUID orgId, UUID workItemId, UUID sellerUserId) {
+        return compose(orgId, workItemId, "SELLER:" + sellerUserId);
+    }
+
+    /**
+     * As {@link #generate}, with the author named rather than derived from a user id — the seam the
+     * Proactive Operations Agent drafts through, before any human has opened the inquiry.
+     *
+     * <p><b>Nothing else differs.</b> Same retrieval, same three lanes, same quota counter, same
+     * fallback to the deterministic drafter when the budget is spent, same evidence rows, same
+     * knowledge state. The org's daily AI budget is charged here exactly as it is for a seller-initiated
+     * draft, because it is the same call and pretending otherwise would let a background loop spend a
+     * budget the seller cannot see.
+     */
+    public GeneratedDraftView generateAs(UUID orgId, UUID workItemId, String actor) {
+        return compose(orgId, workItemId, actor);
+    }
+
+    private GeneratedDraftView compose(UUID orgId, UUID workItemId, String actor) {
         InquiryWorkItem workItem = workItems.findById(workItemId)
                 .filter(w -> w.getOrgId().equals(orgId))
                 .orElseThrow(() -> ApiException.notFound("문의 작업을 찾을 수 없습니다."));
@@ -130,7 +148,7 @@ public class InquiryDraftComposer {
                 .orElseGet(() -> ruleBody(orgId, inquiry.getId(), title, details));
 
         int base = drafts.currentVersion(workItemId);
-        ReplyDraftView saved = drafts.save(orgId, workItemId, sellerUserId, replyTitle, replyBody, base,
+        ReplyDraftView saved = drafts.saveAs(orgId, workItemId, actor, replyTitle, replyBody, base,
                 new InquiryReplyDraftService.Provenance(authorKind,
                         authorKind == DraftAuthorKind.MODEL ? modelVersion : null,
                         state, retrieved.productId()));

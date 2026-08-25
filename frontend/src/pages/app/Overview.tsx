@@ -9,6 +9,7 @@ import { DataTable, Td, Th } from "../../components/ui/DataTable";
 import { DataStateBadge } from "../../components/ui/DataState";
 import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { Empty } from "../../components/ui/Empty";
+import { ProactiveSummaryBanner } from "../../components/proactive/ProactiveSummaryBanner";
 import { BtnLink } from "../../components/ui/Btn";
 import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
@@ -77,6 +78,10 @@ export function Overview() {
           </div>
         }
       />
+
+      {/* Above the KPIs: the numbers say what the shop DID, this line says what is waiting. It is
+          an entry point, not a second list — the cards themselves live on 문의. */}
+      <ProactiveSummaryBanner />
 
       {loading ? <p className="text-muted">불러오는 중…</p> : null}
 
