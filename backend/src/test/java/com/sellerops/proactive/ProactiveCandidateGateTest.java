@@ -238,7 +238,7 @@ class ProactiveCandidateGateTest {
 
     // ------------------------------------------------------------------ seeding
 
-    /** Fence wide open — these cases are about the operational clauses, not the boundary. */
+    /** Baseline at the epoch — these cases are about the operational clauses, not the baseline. */
     private List<UUID> candidateWorkItems(UUID orgId) {
         return candidateWorkItems(orgId, Instant.EPOCH);
     }

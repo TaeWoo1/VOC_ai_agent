@@ -246,30 +246,36 @@ sellerops:
     # seller goes looking for it. Off by default; with this false the scheduler bean does not exist,
     # no case is ever prepared, and every existing screen behaves exactly as it did.
     #
-    # WHICH ORGS is not decided here: a background loop acts only for the orgs Self-Pilot Runtime v1
-    # already authorises (sellerops.self-pilot.*), which carries the multi-tenant fence for that
-    # question. Both switches must be on.
+    # WHICH ORGS is an INTERSECTION: org-ids below, filtered by the orgs Self-Pilot Runtime v1 allows
+    # a background loop to act for at all (sellerops.self-pilot.*), which carries the multi-tenant
+    # fence for that question. All of enabled / org-ids / self-pilot must be on.
     #
-    # The per-tick caps are budget protection, not throttling for its own sake: an inquiry
-    # investigation spends the org's daily AI budget on the same counter a seller-initiated draft
-    # does, and an uncapped pass over a backlog would spend the day before the seller opened a screen.
+    # The cap is budget protection, not throttling for its own sake: an inquiry investigation spends
+    # the org's daily AI budget on the same counter a seller-initiated draft does, and an uncapped
+    # pass over a backlog would spend the day before the seller ever opened a screen. There is no
+    # reserved slice for the loop — it competes for the same quota and yields when it is gone.
     enabled: ${SELLEROPS_PROACTIVE_ENABLED:false}
-    inquiries-per-tick: ${SELLEROPS_PROACTIVE_INQUIRIES_PER_TICK:3}
-    reviews-per-tick: ${SELLEROPS_PROACTIVE_REVIEWS_PER_TICK:5}
+    # Expensive preparations per org per DAY — inquiries and reviews TOGETHER (product-owner
+    # correction 2026-08-25). Not per tick: a per-tick cap bounds a moment, and ten ticks of three is
+    # thirty. Not per lane either: "3 inquiries and 5 reviews" is not a budget anyone decided.
+    # Counted off proactive_case itself — no second ledger — over the SAME day the Agent quota uses.
+    daily-cap: ${SELLEROPS_PROACTIVE_DAILY_CAP:3}
+    # How many rows each lane's candidate read returns before the two are merged into one selection.
+    # A read bound, not a budget.
+    candidate-scan: ${SELLEROPS_PROACTIVE_CANDIDATE_SCAN:50}
     reconcile-per-tick: ${SELLEROPS_PROACTIVE_RECONCILE_PER_TICK:50}
-    # BOOTSTRAP FENCE — an ISO-8601 instant. Only work SellerOps FIRST OBSERVED at or after it may be
-    # investigated. Blank is fail closed: no boundary, no candidates, ever. There is no default,
-    # because every plausible one is wrong in a way nobody notices until it has happened — "beginning
-    # of time" pours an org's whole imported history onto the screen the day the switch is flipped
-    # (measured on the canonical Demo Org: 22 inquiries, newest 18 months old, oldest from 2014), and
-    # "process start" re-opens that flood on every restart. Reconcile is unaffected and always runs.
-    observed-since: ${SELLEROPS_PROACTIVE_OBSERVED_SINCE:}
     # Which orgs this loop may investigate. Blank is fail closed — never "everybody". Deliberately NOT
     # inherited from self-pilot's scope: the local deployment runs LOCAL_SINGLE_USER ("every org in
     # this database", 35 of them), and a proactive loop that inherited it would have begun preparing
     # work for every one of them on the day it was switched on. The effective set is the INTERSECTION
     # of this list and the orgs self-pilot allows a background loop to act for.
     org-ids: ${SELLEROPS_PROACTIVE_ORG_IDS:}
+    #
+    # There is deliberately NO freshness boundary here any more. It lives on the org
+    # (organizations.proactive_baseline_at), written once by the reconciler on the first tick it runs
+    # for that org: activation IS the baseline. An env var made "when was this org activated" a fact
+    # about a deployment rather than about the org — and a value someone can retype is a flood someone
+    # can re-open.
     interval-ms: ${SELLEROPS_PROACTIVE_INTERVAL_MS:600000}
     initial-delay-ms: ${SELLEROPS_PROACTIVE_INITIAL_DELAY_MS:45000}
   admin:

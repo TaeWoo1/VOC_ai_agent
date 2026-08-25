@@ -65,6 +65,17 @@ public interface ProactiveCaseRepository extends JpaRepository<ProactiveCase, UU
             + "where c.orgId = :orgId and c.actedAt is not null order by c.actedAt desc")
     List<Object[]> actedTimestamps(@Param("orgId") UUID orgId, Pageable pageable);
 
+    /**
+     * How many cases this loop created for an org inside one day — the daily cap's own counter.
+     *
+     * <p>No second ledger: this table already records exactly the thing being capped, so counting it
+     * cannot drift from what actually happened. The window is passed in rather than computed here,
+     * because the day it belongs to is the Agent quota's day (Asia/Seoul) and there must be only one
+     * answer to when today started.
+     */
+    long countByOrgIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+            UUID orgId, java.time.Instant from, java.time.Instant to);
+
     long countByOrgIdAndSurfacedAtIsNotNull(UUID orgId);
 
     long countByOrgIdAndOpenedAtIsNotNull(UUID orgId);

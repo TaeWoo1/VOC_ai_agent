@@ -1,5 +1,6 @@
 package com.sellerops.proactive;
 
+import com.sellerops.agent.quota.AgentQuotaService;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.InquiryRepository;
@@ -11,9 +12,14 @@ import com.sellerops.review.ReviewReplyState;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.review.triage.ReviewTriageTier;
+import com.sellerops.organization.Organization;
+import com.sellerops.organization.OrganizationRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -54,6 +60,8 @@ public class ProactiveCaseReconciler {
     private final ReviewRepository reviews;
     private final ProactiveInquiryInvestigator inquiryInvestigator;
     private final ProactiveReviewInvestigator reviewInvestigator;
+    private final OrganizationRepository organizations;
+    private final AgentQuotaService quota;
     private final Clock clock;
 
     @Autowired
@@ -61,15 +69,17 @@ public class ProactiveCaseReconciler {
                                    InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                    ReviewRepository reviews,
                                    ProactiveInquiryInvestigator inquiryInvestigator,
-                                   ProactiveReviewInvestigator reviewInvestigator) {
+                                   ProactiveReviewInvestigator reviewInvestigator,
+                                   OrganizationRepository organizations, AgentQuotaService quota) {
         this(properties, cases, workItems, inquiries, reviews, inquiryInvestigator, reviewInvestigator,
-                Clock.systemUTC());
+                organizations, quota, Clock.systemUTC());
     }
 
     ProactiveCaseReconciler(ProactiveProperties properties, ProactiveCaseRepository cases,
                             InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                             ReviewRepository reviews, ProactiveInquiryInvestigator inquiryInvestigator,
-                            ProactiveReviewInvestigator reviewInvestigator, Clock clock) {
+                            ProactiveReviewInvestigator reviewInvestigator,
+                            OrganizationRepository organizations, AgentQuotaService quota, Clock clock) {
         this.properties = properties;
         this.cases = cases;
         this.workItems = workItems;
@@ -77,6 +87,8 @@ public class ProactiveCaseReconciler {
         this.reviews = reviews;
         this.inquiryInvestigator = inquiryInvestigator;
         this.reviewInvestigator = reviewInvestigator;
+        this.organizations = organizations;
+        this.quota = quota;
         this.clock = clock;
     }
 
@@ -91,21 +103,74 @@ public class ProactiveCaseReconciler {
 
     public TickReport tick(UUID orgId) {
         Counters counters = new Counters();
-        // Reconcile ALWAYS runs, boundary or not: closing a card whose inquiry was answered overnight
-        // is correct whether or not this org is allowed to prepare new ones.
+        // Reconcile ALWAYS runs, budget or not: closing a card whose inquiry was answered overnight is
+        // correct whether or not this org may prepare new ones, and it calls no model.
         reconcileOpen(orgId, counters);
-        Optional<Instant> since = properties.observedSince();
-        if (since.isEmpty()) {
-            // Fail closed. Without a stated boundary there is no way to tell an org's imported history
-            // from its current work, and guessing wrong pours years of it onto a screen at once.
-            log.info("proactive: 관측 기준 시각이 설정되지 않아 신규 준비를 건너뜁니다 org={}", orgId);
+
+        Optional<Organization> org = organizations.findById(orgId);
+        if (org.isEmpty()) {
             return report(orgId, counters);
         }
-        prepareInquiries(orgId, since.get(), counters);
-        prepareReviews(orgId, since.get(), counters);
+        Instant baseline = activationBaseline(org.get());
+        if (baseline == null) {
+            return report(orgId, counters);
+        }
+
+        int slots = remainingDailySlots(orgId);
+        if (slots <= 0) {
+            return report(orgId, counters);
+        }
+        prepare(orgId, baseline, slots, counters);
         return report(orgId, counters);
     }
 
+    /**
+     * This org's activation baseline — stamped on the first tick that ever runs for it.
+     *
+     * <p><b>Activation IS the baseline.</b> There is nothing for an operator to set, which is the
+     * point: a boundary someone types is a boundary someone can mistype, and the mistake is silent
+     * until an org's whole imported history is on a seller's screen. The first tick writes the instant
+     * and prepares nothing, because at that instant nothing has been observed after it yet.
+     *
+     * <p>Written once and never moved. Forward would hide work; backward would re-open the flood.
+     */
+    private Instant activationBaseline(Organization org) {
+        if (org.getProactiveBaselineAt() != null) {
+            return org.getProactiveBaselineAt();
+        }
+        Instant now = clock.instant();
+        org.setProactiveBaselineAt(now);
+        organizations.save(org);
+        log.info("proactive: 활성화 기준 시각을 기록했습니다 org={} — 이 시각 이전에 관측된 일은 "
+                + "과거 backlog이며 신규 후보가 되지 않습니다", org.getId());
+        return null;   // Nothing can be newer than an instant recorded a moment ago.
+    }
+
+    /**
+     * How many expensive preparations this org may still get today.
+     *
+     * <p><b>Two gates, and both must pass.</b> The first is the product's own daily cap, counted off
+     * the cases this loop actually created today — no second ledger, because {@code proactive_case}
+     * already records exactly the thing being capped. The second is the org's shared Agent quota,
+     * read without charging it: the loop competes for the same budget a seller-initiated draft spends
+     * and yields when it is gone, which is what "proactive reserve = 0" means in code.
+     *
+     * <p>The day is the SAME day the quota uses — Asia/Seoul, taken from {@code AgentQuotaService}
+     * rather than recomputed, so the two gates can never disagree about when today started.
+     */
+    private int remainingDailySlots(UUID orgId) {
+        AgentQuotaService.AgentQuotaStatus status = quota.status(orgId);
+        if (status.enabled() && status.llmCallsUsed() >= status.llmCallsLimit()) {
+            log.info("proactive: 오늘 AI 예산이 소진되어 신규 준비를 건너뜁니다 org={}", orgId);
+            return 0;
+        }
+        ZoneId zone = ZoneId.of("Asia/Seoul");
+        Instant dayStart = status.date().atStartOfDay(zone).toInstant();
+        Instant dayEnd = status.date().plusDays(1).atStartOfDay(zone).toInstant();
+        long preparedToday = cases.countByOrgIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+                orgId, dayStart, dayEnd);
+        return (int) Math.max(0, properties.dailyCap() - preparedToday);
+    }
 
     /**
      * One line per tick, <b>always</b> — including the tick that found nothing.
@@ -240,105 +305,132 @@ public class ProactiveCaseReconciler {
 
     // ------------------------------------------------------------------ prepare
 
-    private void prepareInquiries(UUID orgId, Instant observedSince, Counters counters) {
-        int budget = properties.inquiriesPerTick();
-        if (budget == 0) {
-            return;
+    /**
+     * <b>One selection across both kinds, not two queues with two budgets.</b>
+     *
+     * <p>Each lane's read is bounded and each is already ordered, but they are merged and re-sorted
+     * before anything is investigated: the seller has one morning, and a system that hands them the
+     * top three inquiries AND the top five reviews has not prioritised anything. What comes out is the
+     * N most urgent things this org has, whatever kind they are.
+     *
+     * <p><b>The sort is explainable and the model has no part in it</b> — priority tier, then how
+     * recently SellerOps first saw it, then a stable id tiebreak so a capped run is deterministic and
+     * a re-run picks the same rows. The selection tier is computed from the row alone (an unanswered
+     * inquiry is HIGH because a customer is waiting; a 1점 review is HIGH because it is the worst
+     * rating). An investigation may RAISE a case's stored priority above its selection tier — a 2점
+     * review turns out to be a repeat issue — and can never lower it, so nothing selected as urgent
+     * quietly renders as routine.
+     */
+    private void prepare(UUID orgId, Instant baseline, int slots, Counters counters) {
+        int scan = properties.candidateScan();
+        List<Candidate> candidates = new ArrayList<>();
+        for (InquiryWorkItem workItem : workItems.findProactiveCandidates(
+                orgId, baseline, PageRequest.of(0, scan))) {
+            inquiries.findById(workItem.getInquiryId())
+                    .filter(i -> i.getOrgId().equals(orgId))
+                    .ifPresent(inquiry -> candidates.add(Candidate.inquiry(workItem, inquiry)));
         }
-        // Read more candidates than the budget: the oldest few may already have been investigated
-        // against their current state, and a page sized to the budget would spend every tick
-        // re-reading them and preparing nothing.
-        List<InquiryWorkItem> candidates =
-                workItems.findProactiveCandidates(orgId, observedSince, PageRequest.of(0, budget * 5));
+        for (Review review : reviews.findProactiveCandidates(orgId, baseline, PageRequest.of(0, scan))) {
+            candidates.add(Candidate.review(review));
+        }
+        candidates.sort(Comparator
+                .comparingInt((Candidate c) -> c.selectionPriority().rank())
+                .thenComparing(Candidate::firstObserved, Comparator.reverseOrder())
+                .thenComparing(Candidate::subjectId));
+
         int prepared = 0;
-        for (InquiryWorkItem workItem : candidates) {
-            if (prepared >= budget) {
+        for (Candidate candidate : candidates) {
+            if (prepared >= slots) {
                 return;
             }
-            Optional<Inquiry> found = inquiries.findById(workItem.getInquiryId())
-                    .filter(i -> i.getOrgId().equals(orgId));
-            if (found.isEmpty()) {
-                continue;
-            }
-            Inquiry inquiry = found.get();
-            String state = ProactiveSignature.truncateState(inquiryState(inquiry));
-            String signature = ProactiveSignature.of(orgId, ProactiveSubjectKind.INQUIRY,
-                    inquiry.getId(), state);
-            if (alreadyInvestigated(orgId, ProactiveSubjectKind.INQUIRY, inquiry.getId(), signature)) {
+            String state = ProactiveSignature.truncateState(candidate.sourceState());
+            String signature = ProactiveSignature.of(orgId, candidate.kind(), candidate.subjectId(), state);
+            if (alreadyInvestigated(orgId, candidate.kind(), candidate.subjectId(), signature)) {
                 counters.skippedUnchanged++;
                 continue;
             }
-            supersedeOpen(orgId, ProactiveSubjectKind.INQUIRY, inquiry.getId(), counters);
+            supersedeOpen(orgId, candidate.kind(), candidate.subjectId(), counters);
             try {
-                ProactiveInquiryInvestigator.Investigation found2 =
-                        inquiryInvestigator.investigate(orgId, workItem.getId());
-                ProactiveCase row = base(orgId, ProactiveSubjectKind.INQUIRY, inquiry.getId(), state,
-                        signature, ProactiveReason.UNANSWERED_INQUIRY);
-                row.setWorkItemId(workItem.getId());
-                row.setChannelId(inquiry.getChannelId());
-                row.setProductId(inquiry.getProductId());
-                row.setReasonNote(inquiryNote(inquiry));
-                row.setPreparedAction(found2.action());
-                row.setDraftVersion(found2.draftVersion());
-                row.setEvidenceState(found2.knowledgeState());
-                row.setEvidenceCount(found2.evidenceCount());
-                row.setKnowledgeGap(found2.knowledgeGap());
-                row.setRecommendation(found2.note());
-                save(row);
+                if (candidate.kind() == ProactiveSubjectKind.INQUIRY) {
+                    prepareInquiry(orgId, candidate, state, signature);
+                    counters.preparedInquiries++;
+                } else {
+                    prepareReview(orgId, candidate, state, signature);
+                    counters.preparedReviews++;
+                }
                 prepared++;
-                counters.preparedInquiries++;
             } catch (DataIntegrityViolationException race) {
                 // Another tick (or another node) prepared this subject first. The unique index did its
                 // job; there is nothing to repair.
                 counters.skippedUnchanged++;
             } catch (RuntimeException e) {
                 counters.failed++;
-                log.warn("proactive: 문의 준비 실패 org={} workItem={} 사유={}", orgId, workItem.getId(), e.toString());
+                log.warn("proactive: 준비 실패 org={} 종류={} 사유={}", orgId, candidate.kind(), e.toString());
             }
         }
     }
 
-    private void prepareReviews(UUID orgId, Instant observedSince, Counters counters) {
-        int budget = properties.reviewsPerTick();
-        if (budget == 0) {
-            return;
+    private void prepareInquiry(UUID orgId, Candidate candidate, String state, String signature) {
+        Inquiry inquiry = candidate.inquiryRow();
+        ProactiveInquiryInvestigator.Investigation found =
+                inquiryInvestigator.investigate(orgId, candidate.workItemId());
+        ProactiveCase row = base(orgId, ProactiveSubjectKind.INQUIRY, inquiry.getId(), state, signature,
+                ProactiveReason.UNANSWERED_INQUIRY);
+        row.setWorkItemId(candidate.workItemId());
+        row.setChannelId(inquiry.getChannelId());
+        row.setProductId(inquiry.getProductId());
+        row.setReasonNote(inquiryNote(inquiry));
+        row.setPreparedAction(found.action());
+        row.setDraftVersion(found.draftVersion());
+        row.setEvidenceState(found.knowledgeState());
+        row.setEvidenceCount(found.evidenceCount());
+        row.setKnowledgeGap(found.knowledgeGap());
+        row.setRecommendation(found.note());
+        cases.save(row);
+    }
+
+    private void prepareReview(UUID orgId, Candidate candidate, String state, String signature) {
+        Review review = candidate.reviewRow();
+        ProactiveReviewInvestigator.Investigation found = reviewInvestigator.investigate(orgId, review);
+        ProactiveCase row = base(orgId, ProactiveSubjectKind.REVIEW, review.getId(), state, signature,
+                found.reason());
+        row.setChannelId(review.getChannelId());
+        row.setProductId(review.getProductId());
+        row.setReasonNote(found.reason().noteKo());
+        // A review has no draft to ground, so it has no knowledge state: null here means "this
+        // question does not apply", not "nothing was found".
+        row.setPreparedAction(ProactivePreparedAction.RECOMMENDATION_ONLY);
+        row.setEvidenceCount(found.repeatIssue() == null ? 0 : 1);
+        row.setRecommendation(found.recommendation());
+        cases.save(row);
+    }
+
+    /**
+     * One thing that could be prepared, of either kind, with everything the selection needs and
+     * nothing it does not.
+     *
+     * <p>{@code selectionPriority} is deterministic from the row — no model has run yet, and the
+     * ordering must be reproducible before one does.
+     */
+    private record Candidate(ProactiveSubjectKind kind, UUID subjectId, UUID workItemId,
+                             Instant firstObserved, ProactivePriority selectionPriority,
+                             Inquiry inquiryRow, Review reviewRow) {
+
+        static Candidate inquiry(InquiryWorkItem workItem, Inquiry inquiry) {
+            return new Candidate(ProactiveSubjectKind.INQUIRY, inquiry.getId(), workItem.getId(),
+                    workItem.getCreatedAt(), ProactivePriority.HIGH, inquiry, null);
         }
-        List<Review> candidates =
-                reviews.findProactiveCandidates(orgId, observedSince, PageRequest.of(0, budget * 5));
-        int prepared = 0;
-        for (Review review : candidates) {
-            if (prepared >= budget) {
-                return;
-            }
-            String state = ProactiveSignature.truncateState(reviewState(review));
-            String signature = ProactiveSignature.of(orgId, ProactiveSubjectKind.REVIEW, review.getId(), state);
-            if (alreadyInvestigated(orgId, ProactiveSubjectKind.REVIEW, review.getId(), signature)) {
-                counters.skippedUnchanged++;
-                continue;
-            }
-            supersedeOpen(orgId, ProactiveSubjectKind.REVIEW, review.getId(), counters);
-            try {
-                ProactiveReviewInvestigator.Investigation found =
-                        reviewInvestigator.investigate(orgId, review);
-                ProactiveCase row = base(orgId, ProactiveSubjectKind.REVIEW, review.getId(), state,
-                        signature, found.reason());
-                row.setChannelId(review.getChannelId());
-                row.setProductId(review.getProductId());
-                row.setReasonNote(found.reason().noteKo());
-                // A review has no draft to ground, so it has no knowledge state: null here means
-                // "this question does not apply", not "nothing was found".
-                row.setPreparedAction(ProactivePreparedAction.RECOMMENDATION_ONLY);
-                row.setEvidenceCount(found.repeatIssue() == null ? 0 : 1);
-                row.setRecommendation(found.recommendation());
-                save(row);
-                prepared++;
-                counters.preparedReviews++;
-            } catch (DataIntegrityViolationException race) {
-                counters.skippedUnchanged++;
-            } catch (RuntimeException e) {
-                counters.failed++;
-                log.warn("proactive: 리뷰 준비 실패 org={} review={} 사유={}", orgId, review.getId(), e.toString());
-            }
+
+        static Candidate review(Review review) {
+            ProactivePriority tier = review.getRating() != null
+                    && review.getRating() <= ProactiveReviewInvestigator.SEVERE_RATING_MAX
+                    ? ProactivePriority.HIGH : ProactivePriority.NORMAL;
+            return new Candidate(ProactiveSubjectKind.REVIEW, review.getId(), null,
+                    review.getCreatedAt(), tier, null, review);
+        }
+
+        String sourceState() {
+            return kind == ProactiveSubjectKind.INQUIRY ? inquiryState(inquiryRow) : reviewState(reviewRow);
         }
     }
 

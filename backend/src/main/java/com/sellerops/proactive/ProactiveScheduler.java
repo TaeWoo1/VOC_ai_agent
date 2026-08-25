@@ -25,8 +25,8 @@ import org.springframework.scheduling.annotation.Scheduled;
  * {@code sellerops.proactive.org-ids} names the orgs this loop may investigate; and
  * {@code SELLEROPS_SELF_PILOT_*} decides whether a background loop may act for that org at all,
  * carrying the multi-tenant fence for that question (Self-Pilot Runtime v1). Fail closed on any of
- * them — and the fourth, {@code observed-since}, is checked inside the reconciler because reconcile
- * must still run without it.
+ * them. The org's activation baseline is a fourth gate, but it lives on the org row and is checked
+ * inside the reconciler, because reconcile must still run for an org that has not been activated.
  */
 @Configuration
 @EnableScheduling

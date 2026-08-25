@@ -198,27 +198,24 @@ class ProactiveSafetyFenceTest {
     }
 
     @Test
-    @DisplayName("the bootstrap boundary has no default — an unfenced org prepares nothing")
-    void theBootstrapBoundaryIsRequired() throws IOException {
+    @DisplayName("the activation baseline is on the ORG, has no default, and gates preparation")
+    void theActivationBaselineIsRequired() throws IOException {
+        // It used to be an env var, chosen for one bootstrap audit. A boundary someone can retype is a
+        // flood someone can re-open, and "when was this org activated" is a fact about the org.
         String properties = Files.readString(PACKAGE.resolve("ProactiveProperties.java"));
         assertThat(properties)
-                .as("a defaulted boundary is how an org's whole imported history reaches a screen on "
-                        + "the day the switch is flipped")
-                .contains("${sellerops.proactive.observed-since:}")
-                .contains("Optional<Instant> observedSince()");
-        assertThat(properties)
-                .as("and the org allow-list is fail closed too — blank means nobody, never everybody")
-                .contains("${sellerops.proactive.org-ids:}");
-        assertThat(Files.readString(PACKAGE.resolve("ProactiveScheduler.java")))
-                .as("the named list must be the SOURCE of the target set, not a filter applied after "
-                        + "enumerating every organisation in the database")
-                .contains("properties.orgIds().stream().filter(selfPilot::isEnabledFor)")
-                .doesNotContain("organizations.findAll()");
+                .as("no freshness boundary may return to configuration")
+                .doesNotContain("observed-since")
+                .doesNotContain("OBSERVED_SINCE");
+        assertThat(Files.readString(PACKAGE.resolve("../organization/Organization.java")))
+                .as("the baseline lives on the org")
+                .contains("proactive_baseline_at");
 
         String reconciler = code(PACKAGE.resolve("ProactiveCaseReconciler.java"));
         assertThat(reconciler)
-                .as("absent boundary must stop PREPARATION before any candidate read")
-                .contains("since.isEmpty()");
+                .as("an org with no baseline prepares nothing, and the first tick only stamps it")
+                .contains("if (baseline == null)")
+                .contains("setProactiveBaselineAt");
         // And the candidate reads cannot be called without one: the parameter is not optional.
         for (String repository : List.of(
                 "../inquiry/workitem/InquiryWorkItemRepository.java",
@@ -228,9 +225,46 @@ class ProactiveSafetyFenceTest {
                             repository)
                     .contains("@Param(\"observedSince\") Instant observedSince");
         }
+
+        assertThat(properties)
+                .as("the org allow-list is fail closed too — blank means nobody, never everybody")
+                .contains("${sellerops.proactive.org-ids:}");
+        assertThat(Files.readString(PACKAGE.resolve("ProactiveScheduler.java")))
+                .as("the named list must be the SOURCE of the target set, not a filter applied after "
+                        + "enumerating every organisation in the database")
+                .contains("properties.orgIds().stream().filter(selfPilot::isEnabledFor)")
+                .doesNotContain("organizations.findAll()");
     }
 
-    /** One Java file with its comments removed — the ban is on doing these things, not naming them. */
+    @Test
+    @DisplayName("the daily cap is one budget across both kinds, charged before the model")
+    void theBudgetIsGlobalAndDaily() throws IOException {
+        String properties = Files.readString(PACKAGE.resolve("ProactiveProperties.java"));
+        assertThat(properties)
+                .as("per-lane per-tick caps are two numbers that happen to add up, not a budget")
+                .contains("${sellerops.proactive.daily-cap:3}")
+                .doesNotContain("inquiries-per-tick")
+                .doesNotContain("reviews-per-tick");
+
+        String reconciler = code(PACKAGE.resolve("ProactiveCaseReconciler.java"));
+        assertThat(reconciler)
+                .as("both gates: the product's daily cap AND the org's shared Agent quota")
+                .contains("properties.dailyCap()")
+                .contains("quota.status(orgId)");
+        assertThat(reconciler)
+                .as("the loop reads the quota, never reserves or charges it — proactive reserve is 0")
+                .doesNotContain("quota.consume(");
+        assertThat(reconciler)
+                .as("the day is the quota's own day, not a second answer to when today started")
+                .contains("status.date()");
+        // Reconcile must be reachable before either budget gate.
+        int reconcileCall = reconciler.indexOf("reconcileOpen(orgId, counters)");
+        int slots = reconciler.indexOf("remainingDailySlots(orgId)");
+        assertThat(reconcileCall).isPositive();
+        assertThat(slots).as("closing finished work is not a purchase").isGreaterThan(reconcileCall);
+    }
+
+    /** One Java file with its comments removed    /** One Java file with its comments removed — the ban is on doing these things, not naming them. */
     private static String code(Path source) throws IOException {
         return Files.readString(source)
                 .replaceAll("(?s)/\\*.*?\\*/", " ")
