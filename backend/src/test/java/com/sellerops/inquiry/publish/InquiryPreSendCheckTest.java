@@ -106,6 +106,29 @@ class InquiryPreSendCheckTest {
     }
 
     @Test
+    @DisplayName("a pre-V66 approval names no target — nothing is sent, and it cannot borrow one")
+    void anApprovalWithNoTargetSnapshotIsUnusable() {
+        // A real row in the Demo Org is exactly this shape: an ACTION_PENDING execution bound by an
+        // approval written before the target columns existed. Dispatch reads the external id from the
+        // INQUIRY, not from the approval — so nothing about that read would stop such a row from being
+        // sent. What stops it is here: an approval that cannot prove which handle it agreed to is
+        // refused, rather than inheriting whatever handle its work item happens to point at now.
+        InquiryWorkItem wi = seed();
+        serviceWithoutAdapter().confirmAndPublish(org, wi.getId(), user, "cmd-1", fingerprint());
+
+        InquiryApproval approval = approvals.findByWorkItemId(wi.getId()).orElseThrow();
+        approval.setTargetExternalId(null);   // as the pre-V66 row carries it
+        approvals.save(approval);
+
+        PublishStatusView view = service(PreSendCheck.proven()).resume(org, wi.getId());
+
+        assertThat(adapter.published).as("nothing may reach the marketplace").isEmpty();
+        assertThat(executions.findByWorkItemId(wi.getId()).orElseThrow().getFailureReason())
+                .isEqualTo(PreSendCheck.NO_TARGET_SNAPSHOT);
+        assertThat(view.executionStatus()).isEqualTo(InquiryExecutionStatus.FAILED.name());
+    }
+
+    @Test
     @DisplayName("the source resource is not the one the approval named — nothing is sent")
     void subtypeChanged() {
         // Approved for the channel's only inquiry resource; the row now claims a named one. Different

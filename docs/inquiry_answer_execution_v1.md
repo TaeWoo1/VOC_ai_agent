@@ -743,13 +743,18 @@ undocumented status WRITE 0.
 
 | 항목 | 값 |
 |---|---|
-| version | 1 |
-| authorKind | `MODEL` (backend agent-draft capability) |
-| knowledgeState | `NO_PRODUCT` |
+| version 1 | `MODEL` (backend agent-draft capability), `NO_PRODUCT`, evidence 0 |
+| **version 2 (승인 대상)** | `SELLER` — 기존 사용자 수정 경로 `PUT /draft`(baseVersion=1)로 저장 |
 | evidence / citation | **0** |
-| unsupported claim | 0 — 상품·배송·환불·정책 사실 주장 없음 |
-| `contentFingerprint` | `01ca3911…938e` (`esm-answer-v1`, 승인 바인딩용) |
-| 전송 본문 정규화 해시 | `23c4c31c…3b64` (`Cafe24ChannelReplyAdapter.normalizedHash`, 검증 비교용) |
+| unsupported claim | 0 — 상품·배송·환불·정책 사실 주장 없음, 약속 없음 |
+| `contentFingerprint` (v2) | `5ad1f302…4f5c` (`esm-answer-v1`, 승인 바인딩용) |
+| 전송 본문 정규화 해시 (v2) | `2b344c01…2f3f` (`Cafe24ChannelReplyAdapter.normalizedHash`, 검증 비교용) |
+
+v1은 테스트 문의가 묻지도 않은 주문번호를 먼저 꺼냈다. 공개 답변으로 불필요하므로 최소 문구로 줄였다:
+「안녕하세요, 문의 주셔서 감사합니다. 연동 테스트 메시지 확인했습니다. 감사합니다.」
+
+**v1의 지문은 더 이상 승인에 쓸 수 없다** — 승인은 언제나 HEAD 초안에만 바인딩되고(`confirmAndPublish`),
+지문이 다르면 409다. 새 버전은 append-only이므로 v1이 사라지지도 않는다.
 
 **evidence 0은 이 case에서 정직한 결과다** — 상품 결합이 없고 문의가 질문을 담고 있지 않다. 그러므로 이
 실행은 **RAG end-to-end proof가 아니다**. 증명하는 것은 execution loop 하나다.
@@ -775,8 +780,13 @@ undocumented status WRITE 0.
 연결의 실제 부여 scope는 여전히 read 3종뿐이다.
 
 우발 전송 경로 없음: 어떤 scheduler도 `InquiryPublishService`를 부르지 않는다. Demo Org에 남아 있는
-비종결 execution은 레거시 `cafe24:b6:a284` 하나뿐이고, 그 work item은 이번 대상과 **다른 행**이며 그
-승인 행은 `target_external_id`가 null이라 재사용 불가다.
+비종결 execution은 레거시 `cafe24:b6:a284` 하나뿐이고, 그 work item은 이번 대상과 **다른 행**이다.
+
+그 격리를 코드로 고정했다(`InquiryPreSendCheckTest`). 이 확인은 처음 생각한 것보다 중요했다 —
+**dispatch는 external id를 승인이 아니라 inquiry 행에서 읽는다**. 그러므로 「승인에 target이 없으니
+못 보낸다」는 문장은 그 사실만으로는 성립하지 않는다. 성립시키는 것은 `revalidate`의 첫 줄이다:
+`target_external_id`가 null인 승인은 `NO_TARGET_SNAPSHOT`으로 **거절**되며, 지금 work item이 가리키는
+handle을 빌려 쓰지 않는다. 그리고 `TARGET_CHANGED`가 있어 다른 문의로 옮겨 붙는 것도 불가능하다.
 
 ### 28.5 매니페스트 A — Cafe24 Answer Execution Permission
 
@@ -792,6 +802,7 @@ undocumented status WRITE 0.
 | | |
 |---|---|
 | 대상 | `cafe24:b6:a3672` **정확히 1건** (REAL · ROOT · ACTIVE · 미답변 · 공개글) |
+| 승인 초안 | version 2, 지문 `5ad1f302…4f5c`, 정규화 해시 `2b344c01…2f3f` |
 | 요청 | `POST /api/v2/admin/boards/6/articles`, `reply_article_no=3672` |
 | 본문 필드 | `board_no` · `reply_article_no` · `title`(부모 제목 그대로) · `content`(승인 본문) · `writer`=`member_id`=연결 `mall_id` · `client_ip`(배포 설정) · `reply_status=C` |
 | 보내지 않는 필드 | `reply_user_id` · `secret` · `password` · `order_id` · 고객 필드 · 나머지 전부 |
