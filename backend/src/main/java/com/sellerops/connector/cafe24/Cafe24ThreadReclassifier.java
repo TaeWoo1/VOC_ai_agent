@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Ask the source about rows we already have, and record what it says about their structure.
@@ -35,6 +37,9 @@ import java.util.regex.Pattern;
  * did it, and writing a disposition would put a decision in the ledger that no one made.
  */
 public class Cafe24ThreadReclassifier {
+
+    private static final Logger log = LoggerFactory.getLogger(Cafe24ThreadReclassifier.class);
+    private static final String TAG = "[cafe24-thread-reclassify]";
 
     /** {@code cafe24:b{board}:a{article}} — the key the inquiry rows are already stored under. */
     private static final Pattern EXTERNAL_ID = Pattern.compile("^cafe24:b(\\d+):a(\\d+)$");
@@ -84,6 +89,9 @@ public class Cafe24ThreadReclassifier {
             }
         }
         List<Long> numbers = new ArrayList<>(byArticle.keySet());
+        // Which numbers the source actually answered for. A requested id missing from this set is
+        // UNRESOLVED — never ROOT. Silence is not a classification.
+        java.util.Set<Long> seen = new java.util.LinkedHashSet<>();
         int requests = 0;
         int returned = 0;
         int reclassified = 0;
@@ -109,6 +117,7 @@ public class Cafe24ThreadReclassifier {
                     continue;
                 }
                 returned++;
+                seen.add(article.articleNo());
                 if (article.threadSignalsDisagree()) {
                     disagreements++;
                 }
@@ -119,6 +128,16 @@ public class Cafe24ThreadReclassifier {
                 } else {
                     confirmedRoot++;
                 }
+                // Structure only — the article's own number, its parent's, its position, its state.
+                // No title, no body, no writer, no order, no product: none of those are read here at
+                // all. Per-row rather than aggregate because completeness has to be checkable: a
+                // number the source quietly omits must be visibly absent, not averaged away.
+                log.info("{}   a{} role={} parent={} depth={} seq={} reply_status={} created={}",
+                        TAG, article.articleNo(), role,
+                        article.parentArticleNo() == null ? "-" : "a" + article.parentArticleNo(),
+                        article.replyDepth(), article.replySequence(),
+                        article.replyStatus() == null ? "-" : article.replyStatus(),
+                        article.createdDate());
                 if (dryRun) {
                     continue;
                 }
@@ -131,7 +150,13 @@ public class Cafe24ThreadReclassifier {
                 inquiries.save(stored);
             }
         }
-        return new Outcome(numbers.size(), requests, returned, numbers.size() - returned,
+        List<Long> unresolved = new ArrayList<>(numbers);
+        unresolved.removeAll(seen);
+        if (!unresolved.isEmpty()) {
+            log.info("{} 미응답 {}건: {}", TAG, unresolved.size(),
+                    unresolved.stream().map(n -> "a" + n).toList());
+        }
+        return new Outcome(numbers.size(), requests, returned, unresolved.size(),
                 reclassified, confirmedRoot, disagreements, exhausted);
     }
 

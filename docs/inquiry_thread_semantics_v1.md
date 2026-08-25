@@ -256,3 +256,128 @@ Cafe24 WRITE · OAuth write scope 개방 · actor 값 설정 · adapter 구현 �
 adjacency 기반 자동 수정 · 자식 글의 판매자 귀속 · `EXCLUDED_SPAM` 3,199건 손대기 · board 4(리뷰)
 답글 경로 수정(같은 성격의 결함이 있을 수 있으나 범위 밖 — **관측으로만 보고**) · dashboard 재설계 ·
 20 vs 69 결정 · 새 커넥터 · 새 HITL architecture · Agent invariant 신설.
+
+---
+
+# 실행 기록 — bounded READ observation (2026-08-25, 승인 하 실행)
+
+승인 범위 그대로. **GET 4회 / 상한 6 · WRITE 0 · 관측 단계 데이터 mutation 0 · 두 번째 org 무접촉.**
+
+## 13. 실행 전 immutable snapshot
+
+스택을 **먼저 내린 뒤** 스냅샷을 떴다 — 그래야 대상 집합이 관측 도중 움직이지 않는다.
+68행 · sha256 `3c0e48c9…` · 전부 `ACTIVE`. 내부 대응(문의 id ↔ `article_no` ↔ 운영 상태)은
+scratchpad에만 두고 이 문서에는 **raw article_no 목록도 본문도 싣지 않는다**.
+
+## 14. 요청과 completeness
+
+| 항목 | 값 |
+|---|---|
+| marketplace 요청 | **4회** (상한 6, 예산 소진 없음) |
+| endpoint | `GET /boards/6/articles?article_no={20 ids}&limit=20` — 이것 하나뿐 |
+| requested | **68** |
+| returned | **68** |
+| **NOT_RETURNED / NOT_FOUND** | **0** |
+| thread-signal mismatch | **0** |
+
+68개 요청 id가 응답에 **정확히 1:1로 대응**했다. 누락이 없었으므로 누락 확인용 추가 요청은
+필요하지 않았고, 6회를 넘길 상황도 오지 않았다. (누락이 있었다면 그 행은 `ROOT`가 아니라
+`UNRESOLVED`로 남는다 — 코드가 그렇게 되어 있고 테스트가 그것을 지킨다.)
+
+## 15. 관측 verdict
+
+| | 건수 |
+|---|---|
+| **proven ROOT** | **24** |
+| **proven REPLY** | **44** |
+| mismatch | 0 |
+| unresolved / not returned | 0 |
+
+`reply_depth`: ROOT 24건 전부 `0`, REPLY 43건 `1`, **1건 `2`** — 답글에 달린 답글이다
+(`a176 → a177 → a191`). 부모가 root여야 한다는 조건을 걸지 않은 것이 맞았다.
+
+**추론이었던 것이 관측이 됐다.** `inform_status` 공백 44 = proven REPLY 44, `N` 21 + `P` 3 = proven
+ROOT 24 — **완전 일치**. 다만 이제 이것은 상관관계가 아니라 각 행의 `parent_article_no`로 증명된
+사실이고, 공백을 분류 근거로 쓰지 않았기 때문에 일치가 증거로서 의미를 갖는다.
+
+REPLY 44건의 부모: **43건이 `reply_status=C`(답변완료)**, 1건이 위 depth-2 체인의 중간 답글.
+
+## 16. 증명된 오염과 downstream
+
+| | REPLY(44) | ROOT(24) |
+|---|---|---|
+| `operational_state=ACTIVE` | **44** | 24 |
+| OPEN work item | **42** | 22 |
+| PROPOSED work item | **2** | 2 |
+| inquiry_proposal | **2** | 2 |
+
+**증명된 오염: 44건** — 68건의 미답변 업무 중 **65%**가 고객의 질문이 아니었다.
+그중 **2건에는 AI 초안 proposal이 이미 만들어져 있다**(내용은 출력하지 않는다).
+
+## 17. 유지되는 의미 구분
+
+이번 READ가 확정한 것은 **"이 행은 독립된 고객 문의가 아니다"까지**다.
+**REPLY article ≠ seller-authored answer.** 부모의 43건이 `C`라는 사실은 부모에 대한 사실이지
+자식의 작성자에 대한 증거가 아니며, depth-2 체인은 답글이 고객 쪽에서도 달릴 수 있음을 보여준다.
+⇒ 자식 본문을 `answer_body` · Answer Memory · seller policy로 **승격하지 않는다**.
+
+## 18. Exact repair plan (작성만 — 실행하지 않았다)
+
+**대상: proven REPLY 44건뿐.** ROOT 24 · unresolved 0 · mismatch 0은 **변경 금지**.
+근거는 위 snapshot에 고정된 (문의 id → 관측된 역할·부모) 대응이며, 재실행 시 재관측한다.
+
+**기존 lifecycle을 감사해 재사용한다 — 새 상태를 만들지 않는다.**
+
+| 대상 | 조치 | 왜 이 값인가 |
+|---|---|---|
+| `inquiries.thread_role` | `REPLY` | 출처가 말한 그대로 |
+| `inquiries.thread_parent_external_id` | `cafe24:b6:a{부모}` | 관계 보존 |
+| `inquiries.operational_state` | `EXCLUDED_THREAD_REPLY` (**기존 값, projector 단일 writer**) | 현재 읽기에서만 제외 |
+| `inquiry_work_item.phase` (44건 중 44건) | `OPEN`/`PROPOSED` → **`DISMISSED`** | **이미 있는 terminal phase.** 답변으로 끝난 것이 아니므로 `COMPLETED`가 아니고, 큐를 자연히 벗어나며 행·감사가 전부 보존된다 |
+| `inquiry_work_item.disposition` | **`SPAM`이 아닌 새 값 1개**(예: `NOT_A_CUSTOMER_INQUIRY`) | disposition은 "왜"를 적는 칸이고 현재 값이 `SPAM` 하나뿐이다. 스팸이 아닌 것을 스팸으로 적으면 판매자가 내리지 않은 판단을 원장에 남긴다 |
+| `inquiry_work_item_audit` | `WORK_ITEM_DISMISSED` 1행 · `phase_to=DISMISSED` · actor=시스템 | **이미 있는 event 어휘** |
+| `inquiry_proposal` (2건) | **삭제하지 않는다.** 행 그대로 둔다 | 실행/승인 경로가 `phase == PROPOSED`를 요구한다(`InquiryPublishService:117`, `InquiryReplyDraftService:90`) ⇒ work item이 `DISMISSED`가 되는 순간 **초안 작성도 전송도 거부된다.** 삭제 없는 무효화 |
+| `data_origin`, 본문, 상태, `customer_memory_entries` | **무변경** | 제외는 삭제가 아니다 |
+
+**남은 설계 질문 하나(결정 대기):** 지금까지 `DISMISSED`는 "manifest hash를 가진 승인된 일괄
+dismissal"(판매자 결정)만 도달하는 phase였다. 시스템이 관측으로 그 phase에 쓰려면 (a) disposition을
+새로 하나 늘리고 dismissal batch 없이 쓰거나, (b) 이 복구를 하나의 batch로 기록하거나 둘 중 하나다.
+**(b)를 권한다** — `inquiry_work_item_dismissal_batch`에 이미 `disposition`·`manifest_hash`·
+`item_count`·`approved_by`/`executed_by` 칸이 있어, 44건이 어떤 근거로 한 번에 나갔는지가 원장에
+남고 되돌릴 때 집합이 그대로 있다. 발명이 아니라 기존 테이블의 용도 그대로다.
+
+## 19. Repair 후 재계산할 항목 (예상치 — 실측 아님)
+
+repair는 **Cafe24 REPLY 44건**만 운영에서 빼므로:
+
+| 지표 | 현재 | repair 후 (예상) |
+|---|---|---|
+| Cafe24 REAL root inquiries (계정) | 미분류 111 | ROOT 24 + `C` 43 = 67 + 미조사분 |
+| Cafe24 thread replies (증명) | 0 기록 | **44** |
+| Cafe24 미답변 root (ACTIVE) | 68 | **24** |
+| 답변완료 root | 43 | 43 (무변경) |
+| `P` 상태 | 3 | 3 (전부 ROOT로 확인) |
+| OPEN operational work item (org) | 64 | 64 − 42 = **22** |
+| contaminated proposals | 2 | 2 (행은 남고 실행 불가) |
+| **Inbox 미답변** | 77 | **33** |
+| **Dashboard 미답변**(비밀글 제외) | 28 | 재계산 필요 — 비밀글 필터와 교집합이라 뺄셈으로 나오지 않는다 |
+| **작업 큐 / Agent** | 64 | **22** |
+
+**어떤 숫자에도 맞추지 않았다.** 33도 22도 관측에서 나온 결과이지 목표가 아니며, Dashboard 값은
+코퍼스가 달라 실행 후 실측해야 한다. 20 vs 69 논의는 이 제거 뒤에도 차이가 남을 때만 연다.
+
+## 20. 남은 thread-semantic 불확실성
+
+- **답글의 작성자** — 여전히 미증명이고 이번 READ의 목표가 아니었다.
+- **`EXCLUDED_SPAM` 3,199건** — 무접촉. 같은 비율이면 답글이 다수 섞여 있겠지만 이미 운영 비노출이고
+  승인 범위 밖이다.
+- **답변완료(`C`) 43건 자체가 root인가** — 조사하지 않았다. 운영 큐 질문이 아니었다.
+- **두 번째 org(`데모 테스트`, 미답변 69)** — 무접촉. 별도 계정·별도 승인.
+- **board 4(리뷰)** — 같은 row projection을 쓰므로 같은 성격의 결함이 있을 수 있다. 관측으로만 보고.
+- **날짜 필터가 스레드에 걸리는지** — 이번 읽기는 `article_no` exact filter라 재확인 기회가 없었다.
+
+## 21. WRITE blocker — 변동 없음
+
+`mall.write_community` 미보유 · onboarding write-scope 가드 무변경 · actor 값(`writer`/`member_id`/
+`client_ip`/`title`) 미결정 · `reply_status=C`가 부모에 붙는지 자식에 붙는지 미증명 · adapter 0.
+이번 READ는 WRITE에 대해 아무것도 바꾸지 않았다.
