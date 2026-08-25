@@ -86,7 +86,7 @@ class ExactOrderPrivacyFenceTest {
             }
             assertThat(line)
                     .as("member_id may only be a JSON body key on the reply write")
-                    .contains("node.put(\"member_id\"");
+                    .containsPattern("\\.put\\(\"member_id\"");
         }
         // The URI builder is where a search parameter would have to live. It names none.
         int uriBuilder = text.indexOf("static URI uri(");

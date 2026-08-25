@@ -237,6 +237,35 @@ class Cafe24ReplyAdapterOfflineTest {
     }
 
     @Test
+    @DisplayName("본문은 request 봉투 안에 있고, 밖으로 새는 칸은 없다")
+    void theRequestIsWrapped() throws Exception {
+        // The first live POST sent these keys FLAT and Cafe24 answered 400. The Admin API's
+        // create/update calls take a `request` envelope, so a field sitting at the top level is not a
+        // cosmetic difference — it is a field the platform never reads.
+        StubHttp http = new StubHttp();
+        adapter(http, true, "203.0.113.10").publish(command("cafe24:b6:a246"));
+        com.fasterxml.jackson.databind.JsonNode root =
+                new com.fasterxml.jackson.databind.ObjectMapper().readTree(http.writes.get(0));
+
+        List<String> topLevel = new ArrayList<>();
+        root.fieldNames().forEachRemaining(topLevel::add);
+        assertThat(topLevel)
+                .as("shop_no는 출처가 없어 보내지 않는다 (계약 기본값 1)")
+                .containsExactly("request");
+
+        assertThat(root.path("request").isObject()).isTrue();
+        List<String> inside = new ArrayList<>();
+        root.path("request").fieldNames().forEachRemaining(inside::add);
+        assertThat(inside).containsExactlyInAnyOrder(
+                "board_no", "reply_article_no", "title", "content",
+                "writer", "member_id", "client_ip", "reply_status");
+        for (String leaked : List.of("writer", "title", "content", "client_ip",
+                "reply_article_no", "member_id", "reply_status", "board_no")) {
+            assertThat(root.has(leaked)).as(leaked + " must not sit at the top level").isFalse();
+        }
+    }
+
+    @Test
     @DisplayName("제목은 초안의 라벨이 아니라 질문의 제목이다")
     void theTitleIsTheQuestionsNotTheDrafts() {
         StubHttp http = new StubHttp();

@@ -156,20 +156,30 @@ public class Cafe24ReplyArticleClient {
         if (a.parentArticleNo() <= 0) {
             throw new IllegalStateException("카페24 답변 대상 글 번호가 올바르지 않습니다.");
         }
-        ObjectNode node = mapper.createObjectNode();
-        node.put("board_no", a.boardNo());
-        node.put("reply_article_no", a.parentArticleNo());
-        node.put("title", a.title().strip());
-        node.put("content", a.content());
-        node.put("writer", a.writer().strip());
-        node.put("member_id", a.memberId().strip());
-        node.put("client_ip", a.clientIp().strip());
+        ObjectNode request = mapper.createObjectNode();
+        request.put("board_no", a.boardNo());
+        request.put("reply_article_no", a.parentArticleNo());
+        request.put("title", a.title().strip());
+        request.put("content", a.content());
+        request.put("writer", a.writer().strip());
+        request.put("member_id", a.memberId().strip());
+        request.put("client_ip", a.clientIp().strip());
         // Accepted on this same call and the only completion lever the contract offers. Whether it
         // lands on the PARENT is unproven — which is why the caller reads the parent back rather
         // than treating a 2xx as "answered".
-        node.put("reply_status", "C");
+        request.put("reply_status", "C");
+        // The Admin API's create/update envelope. The first live POST sent these eight keys FLAT and
+        // Cafe24 answered 400; the fields themselves were the ones the parameter table names, so the
+        // wrapper is the one thing that changed here.
+        //
+        // `shop_no` is deliberately ABSENT. It is optional with a documented default of 1, and this
+        // deployment has no provenance for it — the value is projected nowhere in the connection, the
+        // stored article rows, or any response we read. Sending 1 would be asserting a shop we never
+        // observed; letting the platform apply its own default asserts nothing.
+        ObjectNode root = mapper.createObjectNode();
+        root.set("request", request);
         try {
-            return mapper.writeValueAsString(node);
+            return mapper.writeValueAsString(root);
         } catch (Exception e) {
             throw new IllegalStateException("카페24 답변 요청을 만들 수 없습니다.");
         }
