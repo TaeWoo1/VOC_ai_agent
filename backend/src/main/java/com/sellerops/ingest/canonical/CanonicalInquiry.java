@@ -36,6 +36,12 @@ import java.time.Instant;
  * platform, for the sources that return it. Null when the source states only a flag — never
  * synthesized from {@code status}.
  *
+ * <p>{@code threadRole} is the source's own structural role for this row — see {@link
+ * SourceThreadRole}. {@code null} means the source publishes no thread structure and claims nothing.
+ * {@code threadParentExternalId} is the parent's identifier <b>in this source's own external-id
+ * space</b> (the same string the parent row is stored under), so the relation joins without a second
+ * identifier vocabulary and without a second table. It is set only on a {@code REPLY}.
+ *
  * <p>{@code orderRef} is the channel's own ORDER identifier for this inquiry, and its presence is an
  * instruction in exactly the way {@code productRef} is — see {@link ChannelOrderRef}. {@code null}
  * means the source declares no order lane at all (file upload, ESM, NAVER 상품 문의); {@link
@@ -58,7 +64,20 @@ public record CanonicalInquiry(
         ChannelProductRef productRef,
         String answerBody,
         Instant answeredAt,
-        ChannelOrderRef orderRef) {
+        ChannelOrderRef orderRef,
+        SourceThreadRole threadRole,
+        String threadParentExternalId) {
+
+    /** Back-compat: every source that publishes no thread structure. */
+    public CanonicalInquiry(String productName, String sku, String author, String body,
+                            String status, Instant receivedAt, String externalId, int sourceRow,
+                            String title, String informStatus, Boolean isSecret, String sourceSubtype,
+                            ChannelProductRef productRef, String answerBody, Instant answeredAt,
+                            ChannelOrderRef orderRef) {
+        this(productName, sku, author, body, status, receivedAt, externalId, sourceRow, title,
+                informStatus, isSecret, sourceSubtype, productRef, answerBody, answeredAt, orderRef,
+                null, null);
+    }
 
     /** Back-compat: every source that declares no order lane. */
     public CanonicalInquiry(String productName, String sku, String author, String body,
@@ -66,7 +85,8 @@ public record CanonicalInquiry(
                             String title, String informStatus, Boolean isSecret, String sourceSubtype,
                             ChannelProductRef productRef, String answerBody, Instant answeredAt) {
         this(productName, sku, author, body, status, receivedAt, externalId, sourceRow, title,
-                informStatus, isSecret, sourceSubtype, productRef, answerBody, answeredAt, null);
+                informStatus, isSecret, sourceSubtype, productRef, answerBody, answeredAt, null,
+                null, null);
     }
 
     /**
@@ -77,7 +97,7 @@ public record CanonicalInquiry(
                             String status, Instant receivedAt, String externalId, int sourceRow,
                             String title, String informStatus) {
         this(productName, sku, author, body, status, receivedAt, externalId, sourceRow,
-                title, informStatus, null, null, null, null, null, null);
+                title, informStatus, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -88,6 +108,6 @@ public record CanonicalInquiry(
                             String status, Instant receivedAt, String externalId, int sourceRow,
                             String title, String informStatus, Boolean isSecret) {
         this(productName, sku, author, body, status, receivedAt, externalId, sourceRow,
-                title, informStatus, isSecret, null, null, null, null, null);
+                title, informStatus, isSecret, null, null, null, null, null, null, null);
     }
 }

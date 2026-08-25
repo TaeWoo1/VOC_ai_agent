@@ -28,6 +28,21 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
      */
     String ACTIVE = " and q.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE ";
 
+    /**
+     * The rows one seller connection currently shows as work — the exact corpus a bounded source
+     * re-read is allowed to ask about.
+     *
+     * <p>Deliberately narrow: current truth ({@code ACTIVE}), real data, one account, still
+     * unanswered. Nothing here selects by article number, by neighbour, or by date range — the
+     * reclassification asks the source about the rows the SELLER is being shown, and about nothing
+     * else. Ordered by id so a capped run is resumable and a re-run is deterministic.
+     */
+    @Query("select q from Inquiry q where q.orgId = :orgId and q.sellerAccountId = :sellerAccountId "
+            + "and q.status = 'UNANSWERED' and q.dataOrigin = com.sellerops.common.DataOrigin.REAL"
+            + ACTIVE + "order by q.id asc")
+    List<Inquiry> findActiveUnansweredForAccount(@Param("orgId") UUID orgId,
+                                                 @Param("sellerAccountId") UUID sellerAccountId);
+
     /** Newest first, caller-sized — the item-analysis sweep's read. Current truth only. */
     @Query("select q from Inquiry q where q.orgId = :orgId" + ACTIVE + "order by q.receivedAt desc, q.id asc")
     List<Inquiry> findRecentActive(@Param("orgId") UUID orgId, Pageable pageable);

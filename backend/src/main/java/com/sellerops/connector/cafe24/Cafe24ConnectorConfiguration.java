@@ -1,6 +1,8 @@
 package com.sellerops.connector.cafe24;
 
 import com.sellerops.credential.ConnectorCredentialRepository;
+import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import java.time.Clock;
@@ -118,6 +120,36 @@ public class Cafe24ConnectorConfiguration {
             @Value("${sellerops.connector.cafe24.diagnostic.answer-semantics.window-days:7}") int windowDays) {
         return new Cafe24AnswerSemanticProbeRunner(authorizer, probe, accounts, accountId, boardNo,
                 target, processing, unanswered, targetDate, windowDays);
+    }
+
+    /**
+     * The bounded thread reclassification — an exact-id re-read of the rows the seller is currently
+     * shown as unanswered, to record the thread role the connector had been discarding. Gated by the
+     * connector flag, its own flag, a configured account, and a {@code dry-run} that defaults ON.
+     * Nothing schedules it and no HTTP surface reaches it.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.thread-reclassify.enabled",
+            havingValue = "true")
+    Cafe24ThreadReclassifier cafe24ThreadReclassifier(Cafe24BoardArticlesClient articlesClient,
+                                                      InquiryRepository inquiries,
+                                                      InquiryWorkItemWriter workItems) {
+        return new Cafe24ThreadReclassifier(articlesClient, inquiries, workItems);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.thread-reclassify.enabled",
+            havingValue = "true")
+    Cafe24ThreadReclassificationRunner cafe24ThreadReclassificationRunner(
+            Cafe24Authorizer authorizer, Cafe24ThreadReclassifier reclassifier,
+            SellerAccountRepository accounts, InquiryRepository inquiries,
+            @Value("${sellerops.connector.cafe24.diagnostic.thread-reclassify.account-id:}") String accountId,
+            @Value("${sellerops.connector.cafe24.diagnostic.thread-reclassify.board-no:6}") int boardNo,
+            @Value("${sellerops.connector.cafe24.diagnostic.thread-reclassify.batch-size:20}") int batchSize,
+            @Value("${sellerops.connector.cafe24.diagnostic.thread-reclassify.max-requests:6}") int maxRequests,
+            @Value("${sellerops.connector.cafe24.diagnostic.thread-reclassify.dry-run:true}") boolean dryRun) {
+        return new Cafe24ThreadReclassificationRunner(authorizer, reclassifier, accounts, inquiries,
+                accountId, boardNo, batchSize, maxRequests, dryRun);
     }
 
     // Board Discovery (community read) infrastructure — wired behind the same

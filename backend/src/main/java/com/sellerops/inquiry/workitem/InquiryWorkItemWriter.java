@@ -48,6 +48,14 @@ public class InquiryWorkItemWriter {
      * sellerAccountId} (the exact seller connection), and append its opened-audit.
      * Returns the persisted inquiry id.
      */
+    /**
+     * The dismissal ledger row for one inquiry, or null. Read-only, and here rather than at the
+     * repository so that ingestion keeps talking to the one collaborator that owns work items.
+     */
+    public InquiryWorkItem findWorkItem(UUID inquiryId) {
+        return inquiryId == null ? null : workItems.findByInquiryId(inquiryId).orElse(null);
+    }
+
     public UUID openConnectorInquiry(Inquiry inquiry, UUID sellerAccountId) {
         return openConnectorInquiry(inquiry, sellerAccountId, id -> {
         });

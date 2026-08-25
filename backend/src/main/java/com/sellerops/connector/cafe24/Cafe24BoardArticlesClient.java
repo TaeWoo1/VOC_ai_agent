@@ -70,14 +70,64 @@ public class Cafe24BoardArticlesClient {
         return parse(response.body());
     }
 
-    static URI articlesUri(String mallId, int boardNo, LocalDate startDate, LocalDate endDate,
-                           int limit, int offset) {
+    /**
+     * Fetch an EXACT set of articles by number — no window, no offset, no sweep.
+     *
+     * <p>The LIST's {@code article_no} filter accepts a comma-separated set
+     * ({@code docs/vendor/cafe24-admin-api/get-boards-articles.md}), which is what makes a bounded
+     * reclassification of known rows possible without a date crawl: the caller names the rows it
+     * already has and asks the source about those and nothing else. A number the source does not
+     * return is simply absent from the result — absence is not a deletion and this method does not
+     * turn it into one.
+     *
+     * @throws Cafe24RateLimitedException on HTTP 429
+     */
+    public List<Cafe24BoardArticleRow> fetchByArticleNumbers(String accessToken, String mallId,
+                                                             int boardNo, List<Long> articleNos) {
+        if (articleNos == null || articleNos.isEmpty()) {
+            return List.of();
+        }
+        URI uri = articlesByNumberUri(mallId, boardNo, articleNos);
+        Cafe24HttpClient.Response response =
+                http.get(uri, Map.of("Authorization", "Bearer " + accessToken));
+        if (response.statusCode() == 429) {
+            throw Cafe24RateLimitedException.fromResponse(response);
+        }
+        if (response.statusCode() != 200) {
+            throw new IllegalStateException(
+                    "카페24 게시글 조회에 실패했습니다 (HTTP " + response.statusCode() + ").");
+        }
+        return parse(response.body());
+    }
+
+    static URI articlesByNumberUri(String mallId, int boardNo, List<Long> articleNos) {
+        requireShape(mallId, boardNo);
+        for (Long articleNo : articleNos) {
+            if (articleNo == null || articleNo <= 0) {
+                // Fail closed: a bad number would silently widen the read to whatever the platform
+                // does with a malformed filter.
+                throw new IllegalStateException("카페24 article_no 형식이 올바르지 않습니다.");
+            }
+        }
+        String joined = articleNos.stream().map(String::valueOf).collect(Collectors.joining(","));
+        String query = "article_no=" + URLEncoder.encode(joined, StandardCharsets.UTF_8)
+                + "&limit=" + Math.max(articleNos.size(), 1);
+        return URI.create("https://" + mallId + ".cafe24api.com"
+                + ARTICLES_PATH_PREFIX + boardNo + ARTICLES_PATH_SUFFIX + "?" + query);
+    }
+
+    private static void requireShape(String mallId, int boardNo) {
         if (mallId == null || !MALL_ID_SHAPE.matcher(mallId).matches()) {
             throw new IllegalStateException("카페24 mall_id 형식이 올바르지 않습니다.");
         }
         if (boardNo <= 0) {
             throw new IllegalStateException("카페24 board_no 형식이 올바르지 않습니다.");
         }
+    }
+
+    static URI articlesUri(String mallId, int boardNo, LocalDate startDate, LocalDate endDate,
+                           int limit, int offset) {
+        requireShape(mallId, boardNo);
         Map<String, String> params = new LinkedHashMap<>();
         if (startDate != null) {
             params.put("start_date", startDate.toString());

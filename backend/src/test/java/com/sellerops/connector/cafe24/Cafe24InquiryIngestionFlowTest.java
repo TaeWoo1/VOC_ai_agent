@@ -14,6 +14,7 @@ import com.sellerops.ingest.IngestOutcome;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.inquiry.Inquiry;
+import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
@@ -334,8 +335,92 @@ class Cafe24InquiryIngestionFlowTest {
         assertThat(openWorkItems(org)).hasSize(1);
     }
 
+    @Test
+    void replyArticle_isStoredAsHistoryButOpensNoWorkItemAndLeavesCurrentTruth() {
+        // The shape the live proof found: a247 hangs off a246, carries a body, and carries no
+        // reply_status of its own. Before the parent pointer was projected this was stored as a
+        // customer waiting for an answer — and the text it was waiting on was the shop's own.
+        CanonicalInquiry root =
+                Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(246L, "문의 본문", "C"), 1);
+        CanonicalInquiry child = Cafe24InquiryArticleMapper.toCanonicalInquiry(
+                6, replyRow(247L, 246L, "답변 본문"), 2);
+
+        ingestion.ingestInquiries(org, channel, account, List.of(root, child));
+
+        assertThat(inquiries.findByOrgIdAndChannelIdAndExternalId(org, channel, "cafe24:b6:a247"))
+                .as("excluded is not deleted — the row is stored, with its relation")
+                .isPresent()
+                .get()
+                .satisfies(stored -> {
+                    assertThat(stored.getThreadRole()).isEqualTo("REPLY");
+                    assertThat(stored.getThreadParentExternalId()).isEqualTo("cafe24:b6:a246");
+                    assertThat(stored.getOperationalState())
+                            .isEqualTo(InquiryOperationalState.EXCLUDED_THREAD_REPLY);
+                });
+        assertThat(openWorkItems(org))
+                .as("neither row is a seller task: the parent is answered, the child is not a question")
+                .isEmpty();
+        assertThat(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org))
+                .as("current truth holds the question only")
+                .extracting(Inquiry::getExternalId)
+                .containsExactly("cafe24:b6:a246");
+    }
+
+    @Test
+    void replyArticleAnswerBodyIsNeverPromotedOntoTheParent() {
+        CanonicalInquiry root =
+                Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(246L, "문의 본문", "C"), 1);
+        CanonicalInquiry child = Cafe24InquiryArticleMapper.toCanonicalInquiry(
+                6, replyRow(247L, 246L, "답변 본문"), 2);
+
+        ingestion.ingestInquiries(org, channel, account, List.of(root, child));
+
+        assertThat(inquiries.findByOrgIdAndChannelIdAndExternalId(org, channel, "cafe24:b6:a246"))
+                .get()
+                .satisfies(parent -> {
+                    assertThat(parent.getAnswerBody())
+                            .as("the child's text is an answer only if the SHOP wrote it, and that is unproven")
+                            .isNull();
+                    assertThat(parent.getAnsweredAt()).isNull();
+                    assertThat(parent.getStatus())
+                            .as("reply_status=C is what the source proved, and it is still honoured")
+                            .isEqualTo("ANSWERED");
+                });
+    }
+
+    @Test
+    void aRowStoredBeforeTheProjectionExistedIsReclassifiedByAReRead() {
+        // The historical backlog, in miniature: stored with no role, then re-read once the parent
+        // pointer is projected. The upsert must NOTICE that — an unchanged body is not an unchanged row.
+        Inquiry legacy = new Inquiry();
+        legacy.setOrgId(org);
+        legacy.setChannelId(channel);
+        legacy.setSellerAccountId(account);
+        legacy.setTitle("제목");
+        legacy.setBody("답변 본문");
+        legacy.setStatus("UNANSWERED");
+        legacy.setReceivedAt(java.time.Instant.parse("2026-06-20T01:00:00Z"));
+        legacy.setExternalId("cafe24:b6:a247");
+        UUID legacyId = inquiries.save(legacy).getId();
+
+        ingestion.ingestInquiries(org, channel, account, List.of(
+                Cafe24InquiryArticleMapper.toCanonicalInquiry(6, replyRow(247L, 246L, "답변 본문"), 1)));
+
+        assertThat(inquiries.findById(legacyId)).get().satisfies(after -> {
+            assertThat(after.getThreadRole()).isEqualTo("REPLY");
+            assertThat(after.getOperationalState())
+                    .isEqualTo(InquiryOperationalState.EXCLUDED_THREAD_REPLY);
+        });
+    }
+
     private static Cafe24BoardArticleRow row(long articleNo, String content, String reply) {
         return new Cafe24BoardArticleRow(articleNo, "제목", content, 77L, null,
                 "2026-06-20T10:00:00+09:00", null, reply);
+    }
+
+    /** A child article as the platform returns one: a parent pointer, depth 1, no reply_status. */
+    private static Cafe24BoardArticleRow replyRow(long articleNo, long parentNo, String content) {
+        return new Cafe24BoardArticleRow(articleNo, "제목", content, 77L, null,
+                "2026-06-21T10:00:00+09:00", null, null, "F", null, parentNo, 1, 1);
     }
 }

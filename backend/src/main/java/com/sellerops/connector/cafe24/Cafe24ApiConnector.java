@@ -367,6 +367,13 @@ public class Cafe24ApiConnector implements PullConnector {
             int excludedSecret = 0;
             int outOfWindow = 0;
             int missingArticleNo = 0;
+            // Sanitized structural tallies. threadReply counts rows the SOURCE says hang off another
+            // post (parent_article_no / reply_depth) — on the inquiry board those are answers, not
+            // questions. threadDisagreement counts rows whose two thread signals point opposite ways;
+            // it has never been non-zero, and it is logged so that if the response shape ever changes
+            // that shows up as a number instead of being absorbed by a fail-closed OR.
+            int threadReply = 0;
+            int threadDisagreement = 0;
             // Sanitized closed-vocabulary tally of the reply state actually observed on the
             // STORED rows — a count per canonical value, never a raw token / id / title /
             // content. Unrecognized/blank stays UNKNOWN (never inferred). Lets a live-proof
@@ -400,6 +407,12 @@ public class Cafe24ApiConnector implements PullConnector {
                     outOfWindow++;
                     continue;
                 }
+                if (row.isThreadReply()) {
+                    threadReply++;
+                }
+                if (row.threadSignalsDisagree()) {
+                    threadDisagreement++;
+                }
                 replyStatusStored.merge(
                         CommunityReplyStatus.normalize(row.replyStatus()), 1, Integer::sum);
                 records.add(mapper.map(boardNo, row, position));
@@ -421,9 +434,10 @@ public class Cafe24ApiConnector implements PullConnector {
                 // reply_status distribution is over the mapped/emitted rows, in the closed canonical
                 // vocabulary.
                 log.info("카페24 게시판 수집 회계: board={} 수신={} 저장={} 비밀글제외={} 창밖제외={} "
-                                + "식별번호없음제외={} reply_status[PENDING={} IN_PROGRESS={} ANSWERED={} UNKNOWN={}]",
+                                + "식별번호없음제외={} 스레드답글={} 스레드신호불일치={} "
+                                + "reply_status[PENDING={} IN_PROGRESS={} ANSWERED={} UNKNOWN={}]",
                         boardNo, rows.size(), records.size(), excludedSecret, outOfWindow,
-                        missingArticleNo,
+                        missingArticleNo, threadReply, threadDisagreement,
                         replyStatusStored.get(CommunityReplyStatus.PENDING),
                         replyStatusStored.get(CommunityReplyStatus.IN_PROGRESS),
                         replyStatusStored.get(CommunityReplyStatus.ANSWERED),

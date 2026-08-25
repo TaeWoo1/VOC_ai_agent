@@ -17,6 +17,7 @@ import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryOrderBinding;
 import com.sellerops.inquiry.InquiryProductBinding;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.lifecycle.InquiryOperationalStateProjector;
 import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import com.sellerops.order.OrderDailySummary;
 import com.sellerops.order.OrderDailySummaryRepository;
@@ -80,6 +81,17 @@ public class IngestionService {
      * rather than dropped into the name path that creates products.
      */
     private final ChannelProductRepository channelProducts;
+
+    /**
+     * The one writer of {@code inquiries.operational_state}, held directly rather than injected.
+     *
+     * <p>It is a pure function of (row, work item) with no state and no collaborators, and routing it
+     * through the container would mean changing every constructor — including the legacy one — to buy
+     * nothing. What matters for the fence is that this class asks the projector rather than setting
+     * the column, so the single-writer guarantee is unchanged.
+     */
+    private final InquiryOperationalStateProjector operationalState =
+            new InquiryOperationalStateProjector();
 
     @Autowired
     public IngestionService(ReviewRepository reviews, InquiryRepository inquiries,
@@ -234,6 +246,7 @@ public class IngestionService {
                             // existed. This branch already writes, so the repair is free here and
                             // would otherwise never happen for a backlog that never changes again.
                             repairAttribution(existing, row, productId);
+                            applyThreadRole(existing, row);
                             inquiries.save(existing);
                             tally.skip();
                             continue;
@@ -242,6 +255,7 @@ public class IngestionService {
                                 && !"ANSWERED".equals(existing.getStatus());
                         applyInquirySource(existing, row);
                         repairAttribution(existing, row, productId);
+                        applyThreadRole(existing, row);
                         existing.setLastSeenAt(Instant.now());
                         if (becameAnswered && sellerAccountId != null) {
                             // Reflect the platform answer and complete the OPEN work item
@@ -268,6 +282,7 @@ public class IngestionService {
                 entity.setSourceSubtype(row.sourceSubtype());
                 entity.setSourceProductRef(sourceProductRef(row));
                 applyOrderRef(entity, row);
+                applyThreadRole(entity, row);
                 // Buyer PII (row.author()) is intentionally NOT persisted.
                 applyInquirySource(entity, row);
                 entity.setReceivedAt(row.receivedAt() != null ? row.receivedAt() : Instant.now());
@@ -276,9 +291,13 @@ public class IngestionService {
                 entity.setLastSeenAt(Instant.now());
                 // A work item is a seller task: open one only for an actionable
                 // (UNANSWERED) inquiry on an exact connection. Already-answered
-                // inquiries are stored as history without opening a task.
-                boolean openWorkItem =
-                        sellerAccountId != null && "UNANSWERED".equals(entity.getStatus());
+                // inquiries are stored as history without opening a task — and a row the SOURCE says
+                // is a reply inside a thread is not a customer's question at all, so it never becomes
+                // one either. Opening it and excluding it afterwards would leave a task in the ledger
+                // that no one ever has to do.
+                boolean openWorkItem = sellerAccountId != null
+                        && "UNANSWERED".equals(entity.getStatus())
+                        && entity.getOperationalState().isActive();
                 trySave(tally, row.sourceRow(),
                         () -> openWorkItem
                                 ? workItemWriter.openConnectorInquiry(entity, sellerAccountId)
@@ -406,6 +425,41 @@ public class IngestionService {
         }
     }
 
+    /**
+     * Record the structural role the SOURCE just declared, and re-project the consequence.
+     *
+     * <p><b>Null claims nothing.</b> A source that publishes no thread structure (file upload, ESM,
+     * NAVER, Coupang) leaves the stored role exactly where it is; it must not overwrite a role another
+     * read established, and it must not be read as "the source said ROOT".
+     *
+     * <p>The projection runs on every path — insert, update, and the unchanged re-read — because a row
+     * whose content never changes again is precisely the row that would otherwise keep a role it was
+     * given before we knew how to ask. The projector is idempotent, so a re-run writes nothing.
+     */
+    private void applyThreadRole(Inquiry entity, CanonicalInquiry row) {
+        if (row.threadRole() == null) {
+            return;
+        }
+        if (row.threadRole() == entity.threadRole()
+                && java.util.Objects.equals(entity.getThreadParentExternalId(),
+                        row.threadParentExternalId())) {
+            // Already recorded. Returning here keeps the routine sweep's unchanged path free of a
+            // per-row work-item lookup — a hundred rows a page, every run, to learn nothing.
+            return;
+        }
+        entity.setThreadRole(row.threadRole().name());
+        entity.setThreadParentExternalId(row.threadParentExternalId());
+        operationalState.apply(entity, workItemFor(entity));
+    }
+
+    /**
+     * The dismissal ledger for a row that already exists, or null for one being inserted. An
+     * unsaved inquiry has no id and therefore no work item — and cannot have been dismissed.
+     */
+    private com.sellerops.inquiry.workitem.InquiryWorkItem workItemFor(Inquiry entity) {
+        return entity.getId() == null ? null : workItemWriter.findWorkItem(entity.getId());
+    }
+
     /** True when the stored inquiry already matches the re-collected source (a no-op upsert). */
     private boolean sourceUnchanged(Inquiry existing, CanonicalInquiry row) {
         String nextStatus = "ANSWERED".equals(existing.getStatus()) ? "ANSWERED" : row.status();
@@ -415,7 +469,11 @@ public class IngestionService {
                 && java.util.Objects.equals(existing.getInformStatus(), row.informStatus())
                 && java.util.Objects.equals(existing.getSecret(), row.isSecret())
                 && (row.answerBody() == null
-                        || java.util.Objects.equals(existing.getAnswerBody(), row.answerBody()));
+                        || java.util.Objects.equals(existing.getAnswerBody(), row.answerBody()))
+                // A row whose text never changes still CHANGES for us the first time the source's
+                // structural role is read off it. Leaving it out of this comparison is what would let
+                // the historical backlog keep a classification made before the field was projected.
+                && (row.threadRole() == null || row.threadRole() == existing.threadRole());
     }
 
     public IngestOutcome ingestOrderSummaries(UUID orgId, UUID channelId, List<CanonicalOrderSummary> rows) {

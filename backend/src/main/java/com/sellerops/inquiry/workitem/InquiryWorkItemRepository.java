@@ -18,6 +18,13 @@ public interface InquiryWorkItemRepository extends JpaRepository<InquiryWorkItem
     /**
      * The same read, narrowed to work items whose inquiry is the seller's own data.
      *
+     * <p><b>The same corpus every count is taken over.</b> The exists-clause carries the {@code ACTIVE}
+     * gate for the same reason {@code InquiryRepository.ACTIVE} exists: a queue and a number that read
+     * different corpora will disagree, and nobody will be able to say which is right. A spam dismissal
+     * already leaves by its phase, so this changes nothing for that case — it is what keeps a row
+     * excluded on a ground the phase does not encode (a source-declared thread reply) from sitting in
+     * the list while every count around it has stopped counting it.
+     *
      * <p>Written as an explicit join rather than left to the {@code realDataOnly} filter, for two
      * reasons. The filter is declared on {@code Inquiry} and this query's root is the work item, and
      * the service's own inquiry load goes through {@code findAllById}, which no Hibernate filter
@@ -25,7 +32,8 @@ public interface InquiryWorkItemRepository extends JpaRepository<InquiryWorkItem
      * the caller never receives, and a queue that says 12 while showing 9 is its own defect.
      */
     @Query("select w from InquiryWorkItem w where w.orgId = :orgId and w.phase = :phase "
-            + "and exists (select 1 from Inquiry i where i.id = w.inquiryId and i.dataOrigin = 'REAL')")
+            + "and exists (select 1 from Inquiry i where i.id = w.inquiryId and i.dataOrigin = 'REAL' "
+            + "and i.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE)")
     Page<InquiryWorkItem> findOperationalByOrgIdAndPhase(@Param("orgId") UUID orgId,
                                                          @Param("phase") InquiryWorkItemPhase phase,
                                                          Pageable pageable);

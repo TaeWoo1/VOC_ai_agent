@@ -4,6 +4,7 @@ import com.sellerops.community.CommunityReplyStatus;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.ChannelOrderRef;
 import com.sellerops.ingest.canonical.ChannelProductRef;
+import com.sellerops.ingest.canonical.SourceThreadRole;
 
 /**
  * Maps a Cafe24 board-6 (문의사항) article row to a source-agnostic
@@ -41,6 +42,20 @@ import com.sellerops.ingest.canonical.ChannelProductRef;
  * them, yields {@link ChannelOrderRef#absent()} and stays unbound. Board 4 (리뷰) never travels this
  * method and never declares an order lane at all.
  *
+ * <p><b>An answer on this board is itself an article.</b> Cafe24 publishes a seller's answer as a
+ * CHILD article hanging off the question ({@code parent_article_no}), proven by an approved bounded
+ * READ on 2026-08-25 — verdict {@code STANDARD_BOARD_REPLY_ARTICLE},
+ * {@code docs/inquiry_answer_execution_v1.md}. Until that proof this mapper read every board-6 row as
+ * an independent customer inquiry, so the shop's own answers entered the seller's 미답변 queue as
+ * customers still waiting. The row's structural role now travels with it as {@link SourceThreadRole},
+ * and a {@code REPLY} carries the parent's external id so the relation survives without a second
+ * identifier vocabulary.
+ *
+ * <p><b>The role says nothing about who wrote it.</b> A {@code REPLY} is not promoted to the parent's
+ * {@code answerBody}: the child's {@code reply_user_id} was observed absent, and the fields that name
+ * an author carry customer PII and are not projected. "이 글은 새 고객 문의가 아니다"는 증명됐고
+ * "이 글은 판매자가 썼다"는 증명되지 않았다 — 그래서 전자만 쓴다.
+ *
  * <p>Raw {@code reply_status} is preserved verbatim as {@code informStatus};
  * canonical {@code status} is derived through the confirmed {@link
  * CommunityReplyStatus} vocabulary (the single source of truth for the tokens): only
@@ -67,6 +82,7 @@ final class Cafe24InquiryArticleMapper {
         // Fail-closed secrecy: only a positively-public flag ("F"/"false") reads public;
         // "T", null, blank, or any unrecognized value is treated as secret.
         boolean isSecret = !row.isPublicPost();
+        SourceThreadRole role = row.isThreadReply() ? SourceThreadRole.REPLY : SourceThreadRole.ROOT;
         return new CanonicalInquiry(
                 // Name and SKU are no longer how this source finds its product; leaving them null
                 // keeps the resolve-or-create path unreachable from here.
@@ -90,7 +106,13 @@ final class Cafe24InquiryArticleMapper {
                 null,
                 // The mall's own payment-unit order id. Cafe24 publishes no product-order granularity
                 // on this row, so the reference is the payment unit and the reader treats it as one.
-                ChannelOrderRef.of(row.orderId()));
+                ChannelOrderRef.of(row.orderId()),
+                // ROOT or REPLY, decided by the source's own parent pointer and depth — never by
+                // article-number adjacency. A REPLY is not a customer inquiry.
+                role,
+                role == SourceThreadRole.REPLY && row.parentArticleNo() != null
+                        ? externalId(boardNo, row.parentArticleNo())
+                        : null);
     }
 
     /** Stable Cafe24-native dedup key preserving the mall's own board+article identity. */

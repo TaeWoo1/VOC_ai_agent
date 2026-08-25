@@ -2,6 +2,7 @@ package com.sellerops.inquiry.lifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sellerops.ingest.canonical.SourceThreadRole;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
@@ -112,14 +113,49 @@ class InquiryOperationalStateFenceTest {
     }
 
     @Test
-    @DisplayName("the three states mean three different things and only two are reachable")
+    @DisplayName("the four states mean four different things and only three are reachable")
     void theVocabularyIsClosed() {
-        assertThat(InquiryOperationalState.values()).hasSize(3);
+        assertThat(InquiryOperationalState.values()).hasSize(4);
         assertThat(InquiryOperationalState.ACTIVE.isActive()).isTrue();
         assertThat(InquiryOperationalState.EXCLUDED_SPAM.isActive()).isFalse();
+        assertThat(InquiryOperationalState.EXCLUDED_THREAD_REPLY.isActive())
+                .as("a reply inside a thread is not a customer waiting for an answer")
+                .isFalse();
         assertThat(InquiryOperationalState.SOURCE_REMOVED.isActive())
                 .as("if it ever becomes reachable it must already be excluded from current truth")
                 .isFalse();
+    }
+
+    @Test
+    @DisplayName("a thread reply is excluded on the source's ground, not the seller's")
+    void theStructuralExclusionOutranksTheDismissal() {
+        InquiryOperationalStateProjector projector = new InquiryOperationalStateProjector();
+        InquiryWorkItem dismissed = new InquiryWorkItem();
+        dismissed.setPhase(InquiryWorkItemPhase.DISMISSED);
+        dismissed.setDisposition(InquiryWorkItemDisposition.SPAM);
+
+        Inquiry reply = new Inquiry();
+        reply.setOperationalState(InquiryOperationalState.ACTIVE);
+        reply.setThreadRole(SourceThreadRole.REPLY.name());
+
+        assertThat(projector.project(reply, null))
+                .isEqualTo(InquiryOperationalState.EXCLUDED_THREAD_REPLY);
+        assertThat(projector.project(reply, dismissed))
+                .as("the dismissal stays on the work item; the row was never a question to dismiss")
+                .isEqualTo(InquiryOperationalState.EXCLUDED_THREAD_REPLY);
+
+        Inquiry unclassified = new Inquiry();
+        unclassified.setOperationalState(InquiryOperationalState.ACTIVE);
+        assertThat(projector.project(unclassified, null))
+                .as("null role means we never asked — it is not the source saying ROOT")
+                .isEqualTo(InquiryOperationalState.ACTIVE);
+
+        Inquiry root = new Inquiry();
+        root.setOperationalState(InquiryOperationalState.EXCLUDED_THREAD_REPLY);
+        root.setThreadRole(SourceThreadRole.ROOT.name());
+        assertThat(projector.project(root, null))
+                .as("a re-read that says ROOT puts the row back — the projection is symmetric")
+                .isEqualTo(InquiryOperationalState.ACTIVE);
     }
 
     private static List<String> scan(java.util.function.Predicate<String> offends, List<String> allowed)

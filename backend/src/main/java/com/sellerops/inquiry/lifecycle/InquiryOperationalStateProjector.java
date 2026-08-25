@@ -1,5 +1,6 @@
 package com.sellerops.inquiry.lifecycle;
 
+import com.sellerops.ingest.canonical.SourceThreadRole;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
@@ -23,6 +24,13 @@ import org.springframework.stereotype.Component;
  * now, not a one-way transition. So a dismissal reversal needs no undo bookkeeping and no compensating
  * record — re-project the row and it is operationally eligible again. There is no seller-facing
  * un-dismiss control today; when one is built, calling this is the whole of its lifecycle work.
+ *
+ * <p><b>It now reads two ledgers, and they are different kinds of fact.</b> The work item carries the
+ * seller's dismissal; {@code inquiries.thread_role} carries the source's own thread structure, written
+ * by the connector from the platform's {@code parent_article_no}. Both are recorded elsewhere and both
+ * can be re-derived, which is what keeps this a projection with one writer rather than a second
+ * authority. A row whose role is null is <em>unclassified</em>, not root — it stays as operational as
+ * it was, because "we never asked" and "the source said it is a question" are not the same sentence.
  *
  * <p><b>It never produces {@link InquiryOperationalState#SOURCE_REMOVED}</b>, and never clears it
  * either. Spam exclusion and source absence are different claims with different evidence, and this
@@ -54,6 +62,11 @@ public class InquiryOperationalStateProjector {
             // dismissal must not silently overwrite it.
             return current;
         }
+        if (isThreadReply(inquiry)) {
+            // The source structure outranks the dismissal — see the enum's javadoc. The seller's act
+            // is still on the work item, so nothing about it is lost by reporting this first.
+            return InquiryOperationalState.EXCLUDED_THREAD_REPLY;
+        }
         return isDismissedAsSpam(workItem)
                 ? InquiryOperationalState.EXCLUDED_SPAM
                 : InquiryOperationalState.ACTIVE;
@@ -72,6 +85,15 @@ public class InquiryOperationalStateProjector {
         inquiry.setOperationalState(next);
         inquiry.setOperationalStateAt(Instant.now(clock));
         return true;
+    }
+
+    /**
+     * The source's own structural role, and nothing else. An unclassified row ({@code thread_role}
+     * null — every row collected before the projection existed) is NOT a root: it is a row we have
+     * not asked about, and it stays exactly as operational as it was.
+     */
+    private static boolean isThreadReply(Inquiry inquiry) {
+        return inquiry.threadRole() == SourceThreadRole.REPLY;
     }
 
     private static boolean isDismissedAsSpam(InquiryWorkItem workItem) {

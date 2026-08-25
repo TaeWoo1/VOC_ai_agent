@@ -335,7 +335,14 @@ R4는 **404가 아니라 200에 reply 0**을 돌려줬다. 그것만으로는 �
 즉 답변 본문은 **한 번도 우리 손 밖에 있던 적이 없다.** 투영하지 않은 두 필드 때문에 그것이
 답변인 줄 몰랐을 뿐이다.
 
-## 13. 그 대가 — 발견된 결함 (이번 package에서 고치지 않았다)
+## 13. 그 대가 — 발견된 결함 (이 package에서 고치지 않았다; **`docs/inquiry_thread_semantics_v1.md`에서 수정됨**)
+
+> **후속 (2026-08-25).** 신규 수집은 고쳐졌다 — `parent_article_no`를 투영하고 `SourceThreadRole`로
+> root/reply를 가르며, 답글은 work item을 열지 않고 `EXCLUDED_THREAD_REPLY`로 현재 읽기에서 빠진다.
+> 새 요청도 새 scope도 필요 없었다(그 필드는 이미 모든 응답에 있었다). 이미 저장된 historical 행은
+> 역할이 기록된 적이 없어 그렇게 고칠 수 없고, **exact `article_no` bounded re-read**가 승인 대기 중이다.
+> 답글의 **작성자**는 여전히 미증명이므로 자식 본문은 `answer_body`로 승격되지 않는다.
+
 
 `parent_article_no`를 읽지 않는다는 것은 **자식 글을 질문과 구별하지 못한다**는 뜻이고,
 board 6의 모든 글을 문의로 수집하는 현재 경로에서 그 결과는 하나뿐이다:

@@ -157,6 +157,39 @@ public class Inquiry extends BaseEntity {
     private String sourceOrderRef;
 
     /**
+     * The source's own structural role for this row — {@link com.sellerops.ingest.canonical.SourceThreadRole},
+     * or null for a source that publishes no thread structure.
+     *
+     * <p>A string column for the same reason {@code product_binding} is one: an unrecognized value
+     * from a future migration should read as "not one I know" rather than fail a page of the queue.
+     * Read through {@link #threadRole()}.
+     */
+    @Column(name = "thread_role", length = 16)
+    private String threadRole;
+
+    /**
+     * The parent's {@code external_id}, in this source's own identifier space — set only on a REPLY.
+     *
+     * <p>The relation lives here rather than in a table of its own because it is one value pointing
+     * at a key this table already carries, exactly like {@link #sourceOrderRef}. A join table would
+     * add a second place for the same fact to be wrong.
+     */
+    @Column(name = "thread_parent_external_id", length = 200)
+    private String threadParentExternalId;
+
+    /** The source-declared thread role, or null when absent or unrecognized. */
+    public com.sellerops.ingest.canonical.SourceThreadRole threadRole() {
+        if (threadRole == null) {
+            return null;
+        }
+        try {
+            return com.sellerops.ingest.canonical.SourceThreadRole.valueOf(threadRole);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
      * How {@link #sourceOrderRef} came to be here — {@link InquiryOrderBinding}, or null.
      *
      * <p>A string column for the same reason {@code product_binding} is one: an unrecognized value
