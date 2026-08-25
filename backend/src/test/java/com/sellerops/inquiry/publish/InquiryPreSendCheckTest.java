@@ -314,6 +314,29 @@ class InquiryPreSendCheckTest {
     }
 
     @Test
+    @DisplayName("두 번째 시도도 자기 결과를 기록한다 — 감사 키가 시도마다 다르다")
+    void asecondAttemptRecordsItsOwnOutcome() {
+        // Observed live on 2026-08-25: attempt 2 reused attempt 1's audit command id, the unique key
+        // (work_item_id, command_id) rejected the insert, and the second attempt's outcome never
+        // reached the history at all — the execution row said FAILED/422 and the audit said nothing.
+        RejectingAdapter mall = new RejectingAdapter();
+        InquiryWorkItem wi = refusedOnce(mall);
+        InquiryPublishService service = serviceFor(mall, PreSendCheck.proven());
+        service.rearmAfterRequestCorrection(org, wi.getId(), user, "7c9b6532");
+
+        service.resume(org, wi.getId());
+
+        assertThat(mall.posts).as("재장전 뒤의 전송은 정확히 한 번 더").isEqualTo(2);
+        List<InquiryWorkItemAudit> recorded = audits.findByWorkItemIdOrderByCreatedAtAsc(wi.getId())
+                .stream().filter(a -> a.getEventType() == InquiryWorkItemEvent.EXECUTION_RECORDED)
+                .toList();
+        assertThat(recorded).as("시도 1과 시도 2가 각각 한 줄씩").hasSize(2);
+        assertThat(recorded.get(0).getCommandId()).isEqualTo("execute:" + wi.getId());
+        assertThat(recorded.get(1).getCommandId()).isEqualTo("execute:" + wi.getId() + "#2");
+        assertThat(recorded).allMatch(a -> a.getPhaseTo() == InquiryWorkItemPhase.FAILED);
+    }
+
+    @Test
     @DisplayName("채널이 무언가 만들었을 수 있으면 재장전하지 않는다")
     void aProviderReferenceForbidsRearming() {
         RejectingAdapter mall = new RejectingAdapter();

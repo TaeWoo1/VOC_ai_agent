@@ -319,7 +319,7 @@ public class InquiryPublishService {
             execution.setPresendNote(check.reason());
             executions.save(execution);
             setPhase(workItem, InquiryWorkItemPhase.FAILED);
-            audit(orgId, workItem.getId(), "presend:" + workItem.getId(),
+            audit(orgId, workItem.getId(), presendCommandId(workItem),
                     InquiryWorkItemEvent.EXECUTION_RECORDED,
                     InquiryWorkItemPhase.ACTION_PENDING, InquiryWorkItemPhase.FAILED);
             return PublishOutcomeCategory.PERMANENT_FAILURE;
@@ -352,7 +352,7 @@ public class InquiryPublishService {
                 execution.setProviderMessageNo(result.providerRef());
                 executions.save(execution);
                 setPhase(workItem, InquiryWorkItemPhase.EXECUTED);
-                audit(orgId, workItem.getId(), "execute:" + workItem.getId(),
+                audit(orgId, workItem.getId(), executeCommandId(workItem),
                         InquiryWorkItemEvent.EXECUTION_RECORDED,
                         InquiryWorkItemPhase.ACTION_PENDING, InquiryWorkItemPhase.EXECUTED);
                 runVerify(workItem, inquiry, execution);
@@ -363,14 +363,14 @@ public class InquiryPublishService {
                 execution.setResultCode(result.resultCode());
                 executions.save(execution);
                 setPhase(workItem, InquiryWorkItemPhase.FAILED);
-                audit(orgId, workItem.getId(), "execute:" + workItem.getId(),
+                audit(orgId, workItem.getId(), executeCommandId(workItem),
                         InquiryWorkItemEvent.EXECUTION_RECORDED,
                         InquiryWorkItemPhase.ACTION_PENDING, InquiryWorkItemPhase.FAILED);
             }
             case DELIVERY_UNKNOWN -> {
                 execution.setStatus(InquiryExecutionStatus.DELIVERY_UNKNOWN);
                 executions.save(execution);
-                audit(orgId, workItem.getId(), "execute:" + workItem.getId(),
+                audit(orgId, workItem.getId(), executeCommandId(workItem),
                         InquiryWorkItemEvent.EXECUTION_RECORDED,
                         InquiryWorkItemPhase.ACTION_PENDING, InquiryWorkItemPhase.ACTION_PENDING);
                 // Never resend; the caller/frontend must verify first.
@@ -538,6 +538,29 @@ public class InquiryPublishService {
     private static InquiryWorkItemPhase fromPhase(InquiryExecutionStatus status) {
         return status == InquiryExecutionStatus.EXECUTED
                 ? InquiryWorkItemPhase.EXECUTED : InquiryWorkItemPhase.ACTION_PENDING;
+    }
+
+    /**
+     * The audit command id for THIS attempt.
+     *
+     * <p>The audit table is unique on {@code (work_item_id, command_id)} — deliberately, so a replayed
+     * command records once. That key was the whole story until a refused attempt could be re-armed:
+     * attempt 2 reused attempt 1's id, the insert was rejected, and the second attempt's outcome
+     * simply did not appear in the history (observed live, 2026-08-25). Attempt 1 keeps the bare id so
+     * every existing row stays valid; later attempts are suffixed.
+     */
+    private String executeCommandId(InquiryWorkItem workItem) {
+        return attemptSuffixed("execute:" + workItem.getId(), workItem);
+    }
+
+    private String presendCommandId(InquiryWorkItem workItem) {
+        return attemptSuffixed("presend:" + workItem.getId(), workItem);
+    }
+
+    private String attemptSuffixed(String base, InquiryWorkItem workItem) {
+        long attempt = 1 + audits.countByWorkItemIdAndEventType(
+                workItem.getId(), InquiryWorkItemEvent.EXECUTION_REARMED);
+        return attempt == 1 ? base : base + "#" + attempt;
     }
 
     private void setPhase(InquiryWorkItem workItem, InquiryWorkItemPhase phase) {
