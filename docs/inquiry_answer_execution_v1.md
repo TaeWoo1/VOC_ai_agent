@@ -706,3 +706,106 @@ marketplace WRITE 0 · OAuth 재동의 0 · `mall.write_community` 요청 0 · C
 활성화 0 · Agent tool catalogue 변경 0 · 행위자 backfill 0 · 과거 44 답글의 Answer Memory import 0 ·
 두 번째 org 0 · board 4 0 · `EXCLUDED_SPAM` 재작업 0 · bulk reply 0 · 신규 채널 0 ·
 undocumented status WRITE 0.
+
+---
+
+## 28. Live Proof 준비 — 대상 · 초안 · 두 개의 매니페스트 (2026-08-25, marketplace WRITE 0)
+
+§26의 `TEST_INQUIRY_REQUIRED`가 해소됐다. 판매자가 Demo Org storefront에 **자신이 통제하는 테스트 문의
+1건**을 직접 만들었고, 그것을 **standing routine이 평소대로 수집했다** — 이 준비 단계에서 우리가 만든
+수동 marketplace 호출은 **0회**다.
+
+### 28.1 대상 (재검증됨)
+
+| 검사 | 값 |
+|---|---|
+| external identity | `cafe24:b6:a3672` |
+| inquiry id | `ccea5637-374b-4459-882f-c73da295c7a6` |
+| work item | `a492dba2-6729-452c-b552-dd79a5c10a62` |
+| org / 계정 | canonical Demo Org / 기대한 Cafe24 계정 |
+| `data_origin` | `REAL` (synthetic/fixture 아님) |
+| `thread_role` | `ROOT` — **이번 수집이 판정한 값**(기존 ROOT 행은 필드 도입 전이라 null) |
+| `operational_state` / `status` | `ACTIVE` / `UNANSWERED` |
+| `informStatus` | `N`, `answerStateProven=true` |
+| `is_secret` | false (공개글) |
+| 상품 결합 | **없음** — source attribution 부재, 본문이 상품을 지목하지 않음 |
+| 주문 문맥 | `NO_ORDER_REFERENCE` |
+
+상품 결합을 **새로 만들지 않았다**. 자동 fuzzy/LLM 매칭은 이 제품에 존재하지 않고(`USER_CONFIRMED`만),
+판매자가 상품을 지목한 적이 없으므로 결합할 근거가 없다.
+
+### 28.2 초안 (실제 production draft path)
+
+로컬 인증 세션은 제품 자신의 데모 로그인 화면에서 만들었고, **토큰은 페이지 컨텍스트를 떠나지 않는다** —
+모든 호출이 그 세션 안에서 일어났다. 토큰 값은 어디에도(로그·문서·DB) 기록되지 않는다.
+
+`POST /api/inquiries/{workItem}/proposal` (OPEN → PROPOSED) → `POST …/draft/generate`.
+
+| 항목 | 값 |
+|---|---|
+| version | 1 |
+| authorKind | `MODEL` (backend agent-draft capability) |
+| knowledgeState | `NO_PRODUCT` |
+| evidence / citation | **0** |
+| unsupported claim | 0 — 상품·배송·환불·정책 사실 주장 없음 |
+| `contentFingerprint` | `01ca3911…938e` (`esm-answer-v1`, 승인 바인딩용) |
+| 전송 본문 정규화 해시 | `23c4c31c…3b64` (`Cafe24ChannelReplyAdapter.normalizedHash`, 검증 비교용) |
+
+**evidence 0은 이 case에서 정직한 결과다** — 상품 결합이 없고 문의가 질문을 담고 있지 않다. 그러므로 이
+실행은 **RAG end-to-end proof가 아니다**. 증명하는 것은 execution loop 하나다.
+
+### 28.3 배포 설정 (이번 커밋에서 열린 칸)
+
+세 키가 `@Value` 기본값으로만 존재해 운영자가 환경변수로 설정할 방법이 없었다. `application.yml`에
+셋 다 **빈 기본값 그대로** 명시했다 — 동작 변화 0, 설정 가능성만 생겼다.
+
+- `sellerops.inquiry.publish.cafe24.live-approval-id` — 라이브 승인 ID. 공백이면 전송 불가.
+- `sellerops.inquiry.publish.cafe24.client-ip` — **DEPLOYMENT_CONFIGURED**. 공백이면 전송 불가.
+  런타임 외부 IP 조회로 추측하지 않고, 관측된 과거 답변의 IP를 재사용하지 않는다.
+- `sellerops.connector.cafe24.oauth.answer-execution-scopes` — 공백이면 재동의 진입점 자체가 없다.
+
+이번 라이브 proof에 한해 `client-ip`는 **운영자가 명시하는 개발 호스트의 공인 IPv4**다. 이것은 이
+1회 증명을 위한 결정이며 **장기 SaaS actor-IP 구조로 승격하지 않는다**. 향후 backlog: 승인 요청을
+보낸 신뢰 가능한 클라이언트 IP를 캡처하는 경로.
+
+### 28.4 실행 준비 상태 (관측됨, 재시작한 프로세스에서)
+
+`GET /api/inquiry-publish/capability` → `executionEnabled=false`, adapter **0개**.
+`GET /api/inquiry-publish/cafe24/answer-execution` → `available=false`(scope 미설정), `granted=false`.
+연결의 실제 부여 scope는 여전히 read 3종뿐이다.
+
+우발 전송 경로 없음: 어떤 scheduler도 `InquiryPublishService`를 부르지 않는다. Demo Org에 남아 있는
+비종결 execution은 레거시 `cafe24:b6:a284` 하나뿐이고, 그 work item은 이번 대상과 **다른 행**이며 그
+승인 행은 `target_external_id`가 null이라 재사용 불가다.
+
+### 28.5 매니페스트 A — Cafe24 Answer Execution Permission
+
+- 판매자의 **명시적 재동의**. 요청 scope = 현재 read scope + **정확히 `mall.write_community`**
+  (`Cafe24ScopeContract`가 그 형태를 기동 시 검증).
+- 기존 read scope 보존, 연결 유지. 일반 연결 경로는 **여전히 write를 요청하지 않는다**(테스트로 고정).
+- OAuth grant 변경 **있음**. marketplace 콘텐츠 WRITE **0**.
+- 철회: 판매자가 Cafe24에서 앱 권한을 회수하면 다음 exchange/refresh에서 부여 scope가 갱신되고
+  `hasWriteGrant`가 false로 돌아간다 — 전송은 그 즉시 거부된다.
+
+### 28.6 매니페스트 B — Single Test Reply Execution
+
+| | |
+|---|---|
+| 대상 | `cafe24:b6:a3672` **정확히 1건** (REAL · ROOT · ACTIVE · 미답변 · 공개글) |
+| 요청 | `POST /api/v2/admin/boards/6/articles`, `reply_article_no=3672` |
+| 본문 필드 | `board_no` · `reply_article_no` · `title`(부모 제목 그대로) · `content`(승인 본문) · `writer`=`member_id`=연결 `mall_id` · `client_ip`(배포 설정) · `reply_status=C` |
+| 보내지 않는 필드 | `reply_user_id` · `secret` · `password` · `order_id` · 고객 필드 · 나머지 전부 |
+| expected marketplace WRITE | **정확히 1회**. 자동 재시도 **0**(재시도 메서드가 존재하지 않는다) |
+| expected verification GET | **1회**(생성 응답이 번호를 주면) / **2회**(안 주면 부모 1 + 그날 bounded 1페이지 1). broad sweep·paging 없음 |
+| 검증 조건 | 자식 존재 · `parent_article_no == 3672` · 답글 구조 · **정규화 본문 해시 == 승인 초안 해시** · 부모 `reply_status` 관측 |
+| 되돌릴 수 없는 효과 | 공개 테스트 문의에 **고객이 보는 답변 글이 게시된다** |
+| rollback | adapter에 자동 삭제·수정 경로 **없음**. 되돌리려면 판매자가 Cafe24 관리자에서 직접 지운다 |
+| Memory | `VERIFIED`일 때만 `EXECUTOR_SENT_VERIFIED`. Case B/C는 0 |
+
+판매자가 문의 본문에 「테스트 완료 직후 삭제하겠습니다」라고 적었다. **삭제는 검증이 끝난 뒤여야 한다** —
+부모 글이 사라지면 READ-back이 불가능해 Case C가 된다.
+
+### 28.7 이 단계에서 하지 않은 것
+
+OAuth 재동의 · `mall.write_community` grant 변경 · `execution-enabled` 활성화 · Cafe24 POST —
+**전부 실행하지 않았다.** 화면에 답변 실행 권한 상태를 보여주는 UI도 아직 없다(API만 존재).

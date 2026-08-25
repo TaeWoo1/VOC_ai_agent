@@ -151,6 +151,18 @@ sellerops:
         # process (NaverAnswerLiveGuard throws before the request is built). An ENVIRONMENT-binding
         # token, never a credential.
         live-approval-id: ${SELLEROPS_INQUIRY_PUBLISH_NAVER_LIVE_APPROVAL_ID:}
+      cafe24:
+        # The live-run approval id a Cafe24 answer POST must be armed with, per
+        # docs/sellerops_live_approval_contract.md. Blank = no live Cafe24 answer can leave this
+        # process (Cafe24ReplyArticleClient throws Cafe24WriteApprovalRequired before the request is
+        # built). An ENVIRONMENT-binding token, never a credential.
+        live-approval-id: ${SELLEROPS_INQUIRY_PUBLISH_CAFE24_LIVE_APPROVAL_ID:}
+        # The `client_ip` Cafe24 requires on a board POST — the writer's IP, which for a server-posted
+        # answer is THIS deployment's egress address. Blank = no send (the adapter refuses before the
+        # request is built), because a fabricated or looked-up IP would be a claim we cannot make: it
+        # is DEPLOYMENT_CONFIGURED by contract (Cafe24ReplyRequestShape), never discovered at runtime
+        # and never copied from an observed past reply.
+        client-ip: ${SELLEROPS_INQUIRY_PUBLISH_CAFE24_CLIENT_IP:}
     signature:
       enabled: ${SELLEROPS_INQUIRY_SIGNATURE_ENABLED:false}
       enabled-org-ids: ${SELLEROPS_INQUIRY_SIGNATURE_ORG_IDS:}
@@ -335,6 +347,11 @@ sellerops:
         # reconnected would consent to two scopes, the product read would keep returning
         # insufficient_scope, and they would be asked to reconnect a second time to fix it.
         scopes: ${SELLEROPS_CONNECTOR_CAFE24_SCOPES:mall.read_community,mall.read_order,mall.read_product}
+        # The scope set requested ONLY when a seller explicitly turns on 답변 실행 — the read scopes
+        # above plus exactly `mall.write_community`, validated as that shape at startup
+        # (Cafe24ScopeContract). Blank = the reconsent entry point does not exist and every connection
+        # stays read-only; it can never widen `scopes` above, so a write grant cannot happen silently.
+        answer-execution-scopes: ${SELLEROPS_CONNECTOR_CAFE24_ANSWER_EXECUTION_SCOPES:}
         result-redirect-url: ${SELLEROPS_CONNECTOR_CAFE24_RESULT_URL:http://localhost:3000/connect/cafe24/result}
         state-ttl-seconds: ${SELLEROPS_CONNECTOR_CAFE24_STATE_TTL_SECONDS:600}
     esm:
