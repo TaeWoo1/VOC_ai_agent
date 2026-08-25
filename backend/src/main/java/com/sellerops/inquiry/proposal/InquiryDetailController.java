@@ -151,6 +151,25 @@ public class InquiryDetailController {
     }
 
     /**
+     * Re-arm a refused send after the request contract itself was corrected.
+     *
+     * <p>Not a retry endpoint: it sends nothing, refuses unless the provider created nothing, and
+     * writes the refused attempt into the audit before the execution row's fields are cleared. The
+     * send that follows is the ordinary {@code /resume}, with the ordinary approval still bound.
+     */
+    @PostMapping("/{workItemId}/rearm")
+    public PublishStatusView rearm(@AuthenticationPrincipal AuthPrincipal principal,
+                                   @PathVariable UUID workItemId,
+                                   @RequestBody RearmRequest request) {
+        return publish.rearmAfterRequestCorrection(principal.orgId(), workItemId,
+                principal.userId(), request.correctionRef());
+    }
+
+    /** What was corrected — recorded verbatim in the audit, never interpreted. */
+    public record RearmRequest(String correctionRef) {
+    }
+
+    /**
      * Resume/recover an already-bound publish: a retry dispatches only from
      * ACTION_PENDING; an abandoned DISPATCHING is recovered to DELIVERY_UNKNOWN and
      * verified (never resent); EXECUTED/DELIVERY_UNKNOWN verify; COMPLETED/FAILED are

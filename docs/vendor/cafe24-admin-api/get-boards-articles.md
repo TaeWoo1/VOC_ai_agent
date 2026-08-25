@@ -73,6 +73,28 @@ Two notes recorded verbatim because they are inconsistencies in the reference it
 - **`order_id` is not a list filter.** It is a response property only — an article names its
   order, but articles cannot be found by order.
 
+## POST (create) request body — the envelope this copy was missing
+
+**Corrected 2026-08-25 by a live 400.** The table below lists the parameter NAMES. It does not, and
+did not, say how they are wrapped — and this copy's silence was read as "flat". The first live POST
+sent the eight decided fields at the top level and Cafe24 answered **HTTP 400**, creating nothing.
+
+The Admin API's create/update calls take a `request` envelope (confirmed by the product owner against
+the official reference; the reference page could not be retrieved into this copy, so this note records
+the correction rather than a transcription):
+
+```json
+{
+  "shop_no": 1,
+  "request": { "…the parameters below…" }
+}
+```
+
+SellerOps sends `{"request": {…}}` and **omits `shop_no`**: it is optional with a documented default
+of 1, and this deployment has no provenance for it — the value appears in no stored article row, no
+response it reads, and no part of the connection. Asserting a shop that was never observed is a worse
+error than letting the platform apply its own default.
+
 ## POST (create) request parameters — the complete list
 
 | Name | Required | Constraint | Description (verbatim) |

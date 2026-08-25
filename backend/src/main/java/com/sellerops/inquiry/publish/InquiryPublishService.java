@@ -158,6 +158,91 @@ public class InquiryPublishService {
     }
 
     /**
+     * Re-arm a refused attempt after the REQUEST CONTRACT was corrected — the one way out of
+     * {@code FAILED}, and never an automatic one.
+     *
+     * <p><b>What this does not redefine.</b> {@code PERMANENT_FAILURE} still means "resending THIS
+     * body would be refused again". It never meant "this inquiry can never be answered": when the
+     * provider created nothing and the request that was refused has actually been fixed, the only
+     * honest reading is that attempt 1 is over and a corrected attempt 2 may be armed by a person.
+     * Nothing here sends; it restores the projection to {@code ACTION_PENDING} and stops.
+     *
+     * <p><b>The refused attempt is written down before it is overwritten.</b> There is one execution
+     * row per work item, so re-arming it clears the very fields that hold the refusal. The audit
+     * entry goes first and carries them — status, HTTP code, and the fact that no article was
+     * created — together with the correction that justifies the re-arm. If that write fails, nothing
+     * is cleared.
+     *
+     * <p><b>The approval is re-checked, not re-bound.</b> Same org, account, channel, target and
+     * subtype, and the same draft still at HEAD with the same fingerprint. A single difference
+     * refuses: an approval is a statement about a moment, and a corrected request is not permission
+     * to send something else.
+     *
+     * @param correctionRef what was corrected (e.g. a commit) — recorded, never interpreted
+     */
+    public PublishStatusView rearmAfterRequestCorrection(UUID orgId, UUID workItemId,
+                                                        UUID sellerUserId, String correctionRef) {
+        if (correctionRef == null || correctionRef.isBlank()) {
+            throw ApiException.badRequest("무엇을 고쳤는지(correctionRef)가 필요합니다.");
+        }
+        InquiryWorkItem workItem = loadWorkItem(orgId, workItemId);
+        if (workItem.getPhase() != InquiryWorkItemPhase.FAILED) {
+            throw ApiException.conflict("실패한 전송만 다시 준비할 수 있습니다.");
+        }
+        InquiryExecution execution = executions.findByWorkItemId(workItemId)
+                .orElseThrow(() -> ApiException.conflict("다시 준비할 실행 기록이 없습니다."));
+        if (execution.getStatus() != InquiryExecutionStatus.FAILED) {
+            throw ApiException.conflict("실패한 전송만 다시 준비할 수 있습니다.");
+        }
+        // The interlock that makes this safe at all. A provider reference means something may exist
+        // over there, and re-arming would invite a SECOND answer under a customer's question.
+        if (execution.getProviderMessageNo() != null && !execution.getProviderMessageNo().isBlank()) {
+            throw ApiException.conflict("채널에 무언가 생성됐을 수 있어 다시 준비할 수 없습니다.");
+        }
+        InquiryApproval approval = approvals.findByWorkItemId(workItemId)
+                .orElseThrow(() -> ApiException.conflict("승인이 없어 다시 준비할 수 없습니다."));
+        Inquiry inquiry = loadInquiry(orgId, workItem.getInquiryId());
+        PreSendCheck check = revalidate(orgId, workItem, approval, inquiry);
+        if (check.refused()) {
+            throw ApiException.conflict("승인 당시와 달라져 다시 준비할 수 없습니다. (" + check.reason() + ")");
+        }
+        InquiryReplyDraft head = drafts.findTopByWorkItemIdOrderByVersionDesc(workItemId)
+                .orElseThrow(() -> ApiException.conflict("초안이 없습니다."));
+        if (head.getVersion() != approval.getApprovedDraftVersion()
+                || !head.getContentFingerprint().equals(approval.getApprovedFingerprint())) {
+            throw ApiException.conflict("승인된 초안이 더 이상 최신이 아닙니다.");
+        }
+
+        // Written BEFORE the projection is reset — the refused attempt survives the row that held it.
+        audit(orgId, workItemId, rearmCommandId(execution, correctionRef),
+                InquiryWorkItemEvent.EXECUTION_REARMED,
+                InquiryWorkItemPhase.FAILED, InquiryWorkItemPhase.ACTION_PENDING,
+                "SELLER:" + sellerUserId);
+
+        execution.setStatus(InquiryExecutionStatus.ACTION_PENDING);
+        execution.setFailureReason(null);
+        execution.setResultCode(null);
+        execution.setProviderMessageNo(null);
+        execution.setPresendStateProven(null);
+        execution.setPresendNote(null);
+        executions.save(execution);
+        setPhase(workItem, InquiryWorkItemPhase.ACTION_PENDING);
+        return statusView(loadWorkItem(orgId, workItemId), null);
+    }
+
+    /**
+     * The refused attempt, compressed into the audit row's command id — the only free-text field the
+     * audit table has, and enough to read the history in order: what attempt 1 got, that it created
+     * nothing, and what was corrected before attempt 2 was armed.
+     */
+    private static String rearmCommandId(InquiryExecution execution, String correctionRef) {
+        String code = execution.getResultCode() == null ? "-" : String.valueOf(execution.getResultCode());
+        String reason = execution.getFailureReason() == null ? "-" : execution.getFailureReason();
+        String id = "rearm:" + reason + "/" + code + "/created0:fix=" + correctionRef.strip();
+        return id.length() > 120 ? id.substring(0, 120) : id;
+    }
+
+    /**
      * Resume/recover an already-bound publish. A seller retry dispatches ONLY from
      * ACTION_PENDING; an abandoned DISPATCHING is first reclassified to
      * DELIVERY_UNKNOWN (never resend on a crash/timeout); EXECUTED / DELIVERY_UNKNOWN
@@ -462,6 +547,11 @@ public class InquiryPublishService {
 
     private void audit(UUID orgId, UUID workItemId, String commandId, InquiryWorkItemEvent event,
                        InquiryWorkItemPhase from, InquiryWorkItemPhase to) {
+        audit(orgId, workItemId, commandId, event, from, to, "SYSTEM:PUBLISH");
+    }
+
+    private void audit(UUID orgId, UUID workItemId, String commandId, InquiryWorkItemEvent event,
+                       InquiryWorkItemPhase from, InquiryWorkItemPhase to, String actor) {
         InquiryWorkItemAudit a = new InquiryWorkItemAudit();
         a.setOrgId(orgId);
         a.setWorkItemId(workItemId);
@@ -469,7 +559,7 @@ public class InquiryPublishService {
         a.setEventType(event);
         a.setPhaseFrom(from);
         a.setPhaseTo(to);
-        a.setActor("SYSTEM:PUBLISH");
+        a.setActor(actor);
         audits.save(a);
     }
 

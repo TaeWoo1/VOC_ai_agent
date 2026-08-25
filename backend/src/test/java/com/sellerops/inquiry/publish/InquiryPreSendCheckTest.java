@@ -17,6 +17,8 @@ import com.sellerops.inquiry.reply.InquiryReplyDraft;
 import com.sellerops.inquiry.reply.InquiryReplyDraftRepository;
 import com.sellerops.inquiry.reply.ReplyDraftFingerprint;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAudit;
+import com.sellerops.inquiry.workitem.InquiryWorkItemEvent;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
@@ -244,6 +246,111 @@ class InquiryPreSendCheckTest {
                 .hasMessageContaining("식별자");
         assertThat(adapter.published).isEmpty();
         assertThat(approvals.findByWorkItemId(wi.getId())).isEmpty();
+    }
+
+    // ────────────────────────────────────────── re-arm after a corrected request
+
+    /** Refuses the way a mall refuses a malformed body: permanent, with a status, creating nothing. */
+    private static final class RejectingAdapter implements ChannelReplyAdapter {
+        int posts;
+
+        @Override
+        public String channelCode() {
+            return CH_CODE;
+        }
+
+        @Override
+        public ReplyPublishResult publish(ReplyPublishCommand command) {
+            posts++;
+            return ReplyPublishResult.permanentFailure(400);
+        }
+
+        @Override
+        public ReplyVerificationResult verify(ReplyVerificationCommand command) {
+            return ReplyVerificationResult.notCompleted("UNVERIFIABLE");
+        }
+    }
+
+    private InquiryWorkItem refusedOnce(RejectingAdapter mall) {
+        InquiryWorkItem wi = seed();
+        serviceFor(mall, PreSendCheck.proven())
+                .confirmAndPublish(org, wi.getId(), user, "cmd-1", fingerprint());
+        assertThat(mall.posts).isEqualTo(1);
+        assertThat(executions.findByWorkItemId(wi.getId()).orElseThrow().getStatus())
+                .isEqualTo(InquiryExecutionStatus.FAILED);
+        return wi;
+    }
+
+    @Test
+    @DisplayName("요청을 고친 뒤의 재장전은 거절을 지우기 전에 먼저 기록한다")
+    void rearmingWritesTheRefusalDownBeforeClearingIt() {
+        RejectingAdapter mall = new RejectingAdapter();
+        InquiryWorkItem wi = refusedOnce(mall);
+
+        serviceFor(mall, PreSendCheck.proven())
+                .rearmAfterRequestCorrection(org, wi.getId(), user, "7c9b6532");
+
+        // The refused attempt is gone from the row — and present in the audit, which is the point.
+        InquiryExecution execution = executions.findByWorkItemId(wi.getId()).orElseThrow();
+        assertThat(execution.getStatus()).isEqualTo(InquiryExecutionStatus.ACTION_PENDING);
+        assertThat(execution.getResultCode()).isNull();
+        assertThat(execution.getFailureReason()).isNull();
+        assertThat(workItems.findById(wi.getId()).orElseThrow().getPhase())
+                .isEqualTo(InquiryWorkItemPhase.ACTION_PENDING);
+
+        InquiryWorkItemAudit rearm = audits.findAll().stream()
+                .filter(a -> a.getEventType() == InquiryWorkItemEvent.EXECUTION_REARMED)
+                .findFirst().orElseThrow();
+        assertThat(rearm.getPhaseFrom()).isEqualTo(InquiryWorkItemPhase.FAILED);
+        assertThat(rearm.getPhaseTo()).isEqualTo(InquiryWorkItemPhase.ACTION_PENDING);
+        assertThat(rearm.getCommandId()).contains("400").contains("created0").contains("7c9b6532");
+        assertThat(rearm.getActor()).startsWith("SELLER:");
+        // And the first failure's own audit entry is untouched.
+        assertThat(audits.findAll()).anyMatch(a ->
+                a.getEventType() == InquiryWorkItemEvent.EXECUTION_RECORDED
+                        && a.getPhaseTo() == InquiryWorkItemPhase.FAILED);
+        // Re-arming sends nothing.
+        assertThat(mall.posts).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("채널이 무언가 만들었을 수 있으면 재장전하지 않는다")
+    void aProviderReferenceForbidsRearming() {
+        RejectingAdapter mall = new RejectingAdapter();
+        InquiryWorkItem wi = refusedOnce(mall);
+        InquiryExecution execution = executions.findByWorkItemId(wi.getId()).orElseThrow();
+        execution.setProviderMessageNo("901");   // as a partial success would leave it
+        executions.save(execution);
+
+        InquiryPublishService service = serviceFor(mall, PreSendCheck.proven());
+        assertThatThrownBy(() -> service.rearmAfterRequestCorrection(org, wi.getId(), user, "fix"))
+                .hasMessageContaining("생성");
+        assertThat(mall.posts).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("승인 당시와 달라졌으면 재장전하지 않는다")
+    void rearmingRevalidatesTheApproval() {
+        RejectingAdapter mall = new RejectingAdapter();
+        InquiryWorkItem wi = refusedOnce(mall);
+        mutateInquiry(wi, q -> q.setExternalId("onlineInquiry:9999"));
+
+        InquiryPublishService service = serviceFor(mall, PreSendCheck.proven());
+        assertThatThrownBy(() -> service.rearmAfterRequestCorrection(org, wi.getId(), user, "fix"))
+                .hasMessageContaining("달라져");
+        assertThat(workItems.findById(wi.getId()).orElseThrow().getPhase())
+                .isEqualTo(InquiryWorkItemPhase.FAILED);
+    }
+
+    @Test
+    @DisplayName("실패하지 않은 전송은 재장전 대상이 아니다")
+    void onlyAFailedSendCanBeRearmed() {
+        InquiryWorkItem wi = seed();
+        InquiryPublishService service = service(PreSendCheck.proven());
+        service.confirmAndPublish(org, wi.getId(), user, "cmd-1", fingerprint());
+
+        assertThatThrownBy(() -> service.rearmAfterRequestCorrection(org, wi.getId(), user, "fix"))
+                .hasMessageContaining("실패한 전송만");
     }
 
     // ---- helpers ----

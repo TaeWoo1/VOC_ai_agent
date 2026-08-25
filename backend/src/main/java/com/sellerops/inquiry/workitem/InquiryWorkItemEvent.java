@@ -15,6 +15,16 @@ public enum InquiryWorkItemEvent {
     APPROVAL_GRANTED,
     ACTION_INTENT_CREATED,
     EXECUTION_RECORDED,
+    /**
+     * A refused attempt re-armed after the REQUEST ITSELF was corrected — never an automatic retry.
+     *
+     * <p>{@code PERMANENT_FAILURE} means "resending THIS body would be refused again", and that stays
+     * true. It does not mean the work item can never be attempted again: when the provider created
+     * nothing and the request contract was actually fixed, a person may re-arm the projection. The
+     * event carries the refused attempt's own result in its command id, because the execution row is
+     * one per work item and re-arming it overwrites the fields that held it.
+     */
+    EXECUTION_REARMED,
     VERIFICATION_RECORDED,
     WORK_ITEM_DISMISSED
 }
