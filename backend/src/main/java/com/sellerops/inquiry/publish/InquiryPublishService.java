@@ -257,7 +257,8 @@ public class InquiryPublishService {
 
         ReplyPublishResult result = adapter.get().publish(new ReplyPublishCommand(
                 orgId, workItem.getSellerAccountId(), workItem.getChannelId(),
-                externalId, inquiry.getReceivedAt(), approved.getTitle(), approved.getComments()));
+                externalId, inquiry.getReceivedAt(), approved.getTitle(), approved.getComments(),
+                inquiry.getTitle()));
 
         PublishOutcomeCategory transientCategory = null;
         switch (result.kind()) {

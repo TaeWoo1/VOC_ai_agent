@@ -94,7 +94,7 @@ class CoupangChannelReplyAdapterTest {
     }
 
     private ReplyPublishCommand publishCommand(String externalId, String body) {
-        return new ReplyPublishCommand(org, seller, channel, externalId, receivedAt, null, body);
+        return new ReplyPublishCommand(org, seller, channel, externalId, receivedAt, null, body, null);
     }
 
     private ReplyPublishResult publish(String body) {

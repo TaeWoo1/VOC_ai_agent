@@ -61,8 +61,14 @@ public class Cafe24ReplyActorProbe {
      * words; there is no field here that could carry a name, an address or a sentence.
      *
      * <p>The three {@code title*} counters classify a REPLY's subject against its PARENT's:
-     * {@code SameAsParent} (byte-identical after trimming), {@code Prefixed} (the parent's subject
-     * with something in front of it — the shape {@code RE:} / {@code [답변]} produce), {@code Other}.
+     * {@code SameAsParent} (byte-identical after trimming), {@code PrefixedOrTransformed} (the
+     * parent's subject still present inside the child's — the shape {@code RE:} / {@code [답변]}
+     * produce), {@code Other} (no structural relation this can name).
+     *
+     * <p>{@code replyWriterClassAlsoSeenOnParents} is the one cross-side comparison: how many
+     * replies were written under a writer identity that ALSO appears on a question. It is what
+     * separates "the shop answers under its own identity" from "the same field just holds whoever
+     * typed", and it is a count of hash matches — no identity is emitted to reach it.
      */
     public record Report(String outcome, int requests, boolean budgetExhausted,
                          int requested, int returned, int unreturned,
@@ -71,10 +77,12 @@ public class Cafe24ReplyActorProbe {
                          int replyMemberIdEqualsMallId, int replyClientIpPresent,
                          int replyUserIdPresentOnReply, int replyStatusPresentOnReply,
                          int distinctReplyWriterClasses, int distinctReplyMemberIdClasses,
+                         int replyWriterClassAlsoSeenOnParents, int distinctParentWriterClasses,
                          int parentReplyStatusC, int parentReplyStatusP, int parentReplyStatusN,
                          int parentReplyStatusAbsent, int replyUserIdPresentOnParent,
                          int parentWriterPresent, int parentMemberIdEqualsMallId,
-                         int titleSameAsParent, int titlePrefixed, int titleOther, int titleAbsent,
+                         int titleSameAsParent, int titlePrefixedOrTransformed, int titleOther,
+                         int titleAbsent,
                          int maxReplyDepth, int maxReplySequence, int childCreatedNotBeforeParent) {
 
         public boolean ok() {
@@ -148,65 +156,9 @@ public class Cafe24ReplyActorProbe {
     private Report reduce(String mallId, Set<Long> replyIds, Map<Long, Long> parentOf,
                           List<Long> requestedIds, Map<Long, RawArticle> seen,
                           int requests, boolean exhausted) {
-        Set<String> writerClasses = new HashSet<>();
-        Set<String> memberClasses = new HashSet<>();
-        int replies = 0;
-        int writerPresent = 0;
-        int memberPresent = 0;
-        int memberEqualsMall = 0;
-        int clientIpPresent = 0;
-        int replyUserOnReply = 0;
-        int replyStatusOnReply = 0;
-        int sameTitle = 0;
-        int prefixedTitle = 0;
-        int otherTitle = 0;
-        int absentTitle = 0;
-        int maxDepth = 0;
-        int maxSequence = 0;
-        int childNotBeforeParent = 0;
-
-        for (Long id : replyIds) {
-            RawArticle child = seen.get(id);
-            if (child == null) {
-                continue;
-            }
-            replies++;
-            if (present(child.writer())) {
-                writerPresent++;
-                writerClasses.add(sha256(child.writer().strip()));
-            }
-            if (present(child.memberId())) {
-                memberPresent++;
-                memberClasses.add(sha256(child.memberId().strip()));
-                if (child.memberId().strip().equalsIgnoreCase(mallId)) {
-                    memberEqualsMall++;
-                }
-            }
-            if (present(child.clientIp())) {
-                clientIpPresent++;
-            }
-            if (present(child.replyUserId())) {
-                replyUserOnReply++;
-            }
-            if (present(child.replyStatus())) {
-                replyStatusOnReply++;
-            }
-            maxDepth = Math.max(maxDepth, child.replyDepth() == null ? 0 : child.replyDepth());
-            maxSequence = Math.max(maxSequence, child.replySequence() == null ? 0 : child.replySequence());
-
-            RawArticle parent = seen.get(parentOf.get(id));
-            switch (titleRelation(child.title(), parent == null ? null : parent.title())) {
-                case SAME_AS_PARENT -> sameTitle++;
-                case PREFIXED -> prefixedTitle++;
-                case OTHER -> otherTitle++;
-                case ABSENT -> absentTitle++;
-            }
-            if (parent != null && present(child.createdDate()) && present(parent.createdDate())
-                    && child.createdDate().compareTo(parent.createdDate()) >= 0) {
-                childNotBeforeParent++;
-            }
-        }
-
+        // The parent side is reduced FIRST because the reply side asks a question about it: whether a
+        // reply's writer identity is one that also appears on a question.
+        Set<String> parentWriterClasses = new HashSet<>();
         int parents = 0;
         int pC = 0;
         int pP = 0;
@@ -233,9 +185,74 @@ public class Cafe24ReplyActorProbe {
             }
             if (present(parent.writer())) {
                 parentWriterPresent++;
+                parentWriterClasses.add(sha256(parent.writer().strip()));
             }
             if (present(parent.memberId()) && parent.memberId().strip().equalsIgnoreCase(mallId)) {
                 parentMemberEqualsMall++;
+            }
+        }
+
+        Set<String> writerClasses = new HashSet<>();
+        Set<String> memberClasses = new HashSet<>();
+        int writerAlsoOnParents = 0;
+        int replies = 0;
+        int writerPresent = 0;
+        int memberPresent = 0;
+        int memberEqualsMall = 0;
+        int clientIpPresent = 0;
+        int replyUserOnReply = 0;
+        int replyStatusOnReply = 0;
+        int sameTitle = 0;
+        int prefixedTitle = 0;
+        int otherTitle = 0;
+        int absentTitle = 0;
+        int maxDepth = 0;
+        int maxSequence = 0;
+        int childNotBeforeParent = 0;
+
+        for (Long id : replyIds) {
+            RawArticle child = seen.get(id);
+            if (child == null) {
+                continue;
+            }
+            replies++;
+            if (present(child.writer())) {
+                writerPresent++;
+                String writerClass = sha256(child.writer().strip());
+                writerClasses.add(writerClass);
+                if (parentWriterClasses.contains(writerClass)) {
+                    writerAlsoOnParents++;
+                }
+            }
+            if (present(child.memberId())) {
+                memberPresent++;
+                memberClasses.add(sha256(child.memberId().strip()));
+                if (child.memberId().strip().equalsIgnoreCase(mallId)) {
+                    memberEqualsMall++;
+                }
+            }
+            if (present(child.clientIp())) {
+                clientIpPresent++;
+            }
+            if (present(child.replyUserId())) {
+                replyUserOnReply++;
+            }
+            if (present(child.replyStatus())) {
+                replyStatusOnReply++;
+            }
+            maxDepth = Math.max(maxDepth, child.replyDepth() == null ? 0 : child.replyDepth());
+            maxSequence = Math.max(maxSequence, child.replySequence() == null ? 0 : child.replySequence());
+
+            RawArticle parent = seen.get(parentOf.get(id));
+            switch (titleRelation(child.title(), parent == null ? null : parent.title())) {
+                case SAME_AS_PARENT -> sameTitle++;
+                case PREFIXED_OR_TRANSFORMED -> prefixedTitle++;
+                case OTHER -> otherTitle++;
+                case ABSENT -> absentTitle++;
+            }
+            if (parent != null && present(child.createdDate()) && present(parent.createdDate())
+                    && child.createdDate().compareTo(parent.createdDate()) >= 0) {
+                childNotBeforeParent++;
             }
         }
 
@@ -243,17 +260,20 @@ public class Cafe24ReplyActorProbe {
                 requestedIds.size() - seen.size(), replies, parents,
                 writerPresent, memberPresent, memberEqualsMall, clientIpPresent,
                 replyUserOnReply, replyStatusOnReply, writerClasses.size(), memberClasses.size(),
+                writerAlsoOnParents, parentWriterClasses.size(),
                 pC, pP, pN, pAbsent, replyUserOnParent, parentWriterPresent, parentMemberEqualsMall,
                 sameTitle, prefixedTitle, otherTitle, absentTitle,
                 maxDepth, maxSequence, childNotBeforeParent);
     }
 
-    enum TitleRelation { SAME_AS_PARENT, PREFIXED, OTHER, ABSENT }
+    enum TitleRelation { SAME_AS_PARENT, PREFIXED_OR_TRANSFORMED, OTHER, ABSENT }
 
     /**
-     * How a reply's subject relates to its parent's. {@code PREFIXED} is the shape a board produces
-     * when it writes the question's subject after a marker of its own ({@code RE:}, {@code [답변]}):
-     * the child ENDS with the parent's subject and is longer than it.
+     * How a reply's subject relates to its parent's. {@code PREFIXED_OR_TRANSFORMED} is the shape a
+     * board produces when it reuses the question's subject inside one of its own ({@code RE:},
+     * {@code [답변]}, a wrapper on both sides): the parent's subject survives INSIDE the child's.
+     * Deliberately {@code contains} rather than {@code endsWith} — a rule is not being built here,
+     * only a relation counted, and the wider test is the one that cannot silently miss a shape.
      */
     static TitleRelation titleRelation(String childTitle, String parentTitle) {
         if (!present(childTitle) || !present(parentTitle)) {
@@ -264,14 +284,14 @@ public class Cafe24ReplyActorProbe {
         if (child.equals(parent)) {
             return TitleRelation.SAME_AS_PARENT;
         }
-        return child.endsWith(parent) ? TitleRelation.PREFIXED : TitleRelation.OTHER;
+        return child.contains(parent) ? TitleRelation.PREFIXED_OR_TRANSFORMED : TitleRelation.OTHER;
     }
 
     // ---------------------------------------------------------------- plumbing
 
     private static Report failed(String outcome, int requests) {
         return new Report(outcome, requests, false, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 0, 0, 0, 0, 0, 0, 0,
                 0, 0, 0, 0, 0, 0, 0);
     }

@@ -58,6 +58,25 @@ public class Cafe24ConnectController {
                 result.sellerAccountId(), result.connectionStatus(), result.authorizationUrl());
     }
 
+    /**
+     * Ask the seller to additionally grant {@code mall.write_community}, so SellerOps may post an
+     * approved answer for them.
+     *
+     * <p>Separate from {@code /start} on purpose. A seller who never asks for this keeps a read-only
+     * connection forever, and one who abandons the consent screen keeps the connection they had —
+     * nothing here touches the stored credential; only a completed callback does. Refuses with a
+     * seller-readable message when the deployment has not configured the option.
+     */
+    @PostMapping("/answer-execution/start")
+    public Cafe24ConnectStartResponse startAnswerExecution(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @Valid @RequestBody Cafe24ConnectStartRequest request) {
+        StartResult result = onboarding.startAnswerExecutionReconsent(
+                principal.orgId(), principal.userId(), request.mallId());
+        return new Cafe24ConnectStartResponse(
+                result.sellerAccountId(), result.connectionStatus(), result.authorizationUrl());
+    }
+
     @GetMapping("/callback")
     public ResponseEntity<Void> callback(@RequestParam(required = false) String code,
                                          @RequestParam(required = false) String state,

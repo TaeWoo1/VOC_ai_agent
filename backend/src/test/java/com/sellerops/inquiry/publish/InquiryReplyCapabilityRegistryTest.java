@@ -57,11 +57,21 @@ class InquiryReplyCapabilityRegistryTest {
     }
 
     @Test
-    @DisplayName("CAFE24 is NEEDS_VERIFICATION and says out loud that this is not a 'no'")
-    void cafe24IsUnaudited() {
+    @DisplayName("CAFE24 is DIRECT_API, and the row says what a send still needs before it can happen")
+    void cafe24IsImplementedButNotUnconditional() {
+        // It moved on 2026-08-25 after two approved READs — one proving an answer here is a child
+        // article, one proving what a real seller answer carries. Implemented, never live-run, and
+        // unlike every other DIRECT_API row it names preconditions a deployment/seller must satisfy.
         var view = registry.capability("CAFE24", null);
-        assertThat(view.transport()).isEqualTo(InquiryReplyTransport.NEEDS_VERIFICATION.name());
-        assertThat(view.reasonKo()).contains("지원하지 않는다는 뜻은 아닙니다");
+        assertThat(view.transport()).isEqualTo(InquiryReplyTransport.DIRECT_API.name());
+        assertThat(view.reasonKo())
+                .as("a seller must be told the permission is a separate agreement")
+                .contains("동의");
+        assertThat(view.evidence())
+                .contains("라이브 미실행")
+                .contains("mall.write_community")
+                .contains("client_ip")
+                .contains("ANSWER_POSTED_STATUS_UNRESOLVED");
     }
 
     @Test

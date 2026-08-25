@@ -59,11 +59,24 @@ class Cafe24ReplyRequestShapeTest {
     }
 
     @Test
-    @DisplayName("WRITE는 아직 준비되지 않았고, 그 이유는 열거된다")
-    void writeIsNotReadyAndSaysWhy() {
-        assertThat(Cafe24ReplyRequestShape.writeReady()).isFalse();
-        assertThat(Cafe24ReplyRequestShape.blockers()).extracting(Field::name)
-                .contains("writer", "title", "client_ip", "reply_status");
+    @DisplayName("요청 본문의 모든 칸이 출처 규칙을 갖는다 — 그러나 그것이 보낼 수 있다는 뜻은 아니다")
+    void theRequestShapeIsSettledButThatIsNotPermissionToSend() {
+        assertThat(Cafe24ReplyRequestShape.requestShapeSettled()).isTrue();
+        assertThat(Cafe24ReplyRequestShape.blockers()).isEmpty();
+        // The one field a deployment still has to state. It is not a default and not derivable.
+        assertThat(Cafe24ReplyRequestShape.field("client_ip")).isPresent()
+                .get().extracting(Field::sourcing).isEqualTo(Sourcing.DEPLOYMENT_CONFIGURED);
+    }
+
+    @Test
+    @DisplayName("관측이 답한 칸은 관측이 답했다고 적혀 있다 — writer·title·member_id")
+    void theObservedFieldsSayWhereTheirValueComesFrom() {
+        assertThat(Cafe24ReplyRequestShape.field("writer")).isPresent()
+                .get().extracting(Field::sourcing).isEqualTo(Sourcing.CONNECTION);
+        assertThat(Cafe24ReplyRequestShape.field("member_id")).isPresent()
+                .get().extracting(Field::sourcing).isEqualTo(Sourcing.CONNECTION);
+        assertThat(Cafe24ReplyRequestShape.field("title")).isPresent()
+                .get().extracting(Field::sourcing).isEqualTo(Sourcing.HELD);
     }
 
     @Test

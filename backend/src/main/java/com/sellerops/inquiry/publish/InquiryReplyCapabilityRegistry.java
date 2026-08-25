@@ -77,7 +77,15 @@ public class InquiryReplyCapabilityRegistry {
      * {@code NaverReadOnlyFenceTest} still holds over the lane that runs on a SCHEDULE with no human
      * in the turn. The write lane is the one that can never run without one.
      *
-     * <p>CAFE24 is NEEDS_VERIFICATION and that is deliberate. See the re-audit below.
+     * <p><b>CAFE24 moved NEEDS_VERIFICATION → DIRECT_API on 2026-08-25 (Cafe24 Answer Execution v1),
+     * and it took two approved READs to earn it</b> — one that proved WHAT an answer is on this board
+     * (a child article), and one that proved what a real seller answer CARRIES (43 of 44 under the
+     * shop's own member identity, titled exactly as the question, with the answered mark on the
+     * parent). The endpoint is implemented here and has never been exercised against a real mall, so
+     * the row says implemented and not live-proven — and, unlike every other DIRECT_API row, it names
+     * three preconditions that must each be true before a send: the seller's own
+     * {@code mall.write_community} grant, a configured {@code client_ip}, and an armed live-run
+     * approval id. See the re-audit below.
      *
      * <p><b>Re-audited 2026-08-24 (Inquiry Workflow Completion v2).</b>
      *
@@ -87,8 +95,9 @@ public class InquiryReplyCapabilityRegistry {
      *       them. Implemented is still not live-proven: neither has ever been exercised against a
      *       real store, and no NAVER answer can leave the process without an armed live-run approval
      *       id ({@code NaverAnswerLiveGuard}).</li>
-     *   <li><b>CAFE24</b> — the platform side is now CONFIRMED and the SellerOps side is not, which is
-     *       two different facts and the row records the weaker one.
+     *   <li><b>CAFE24</b> — as of 2026-08-25 both sides are audited: the platform's representation is
+     *       CONFIRMED and SellerOps implements it. What remains unproven is not the path but one of
+     *       its effects (below), and three runtime preconditions that are deliberately not defaulted.
      *
      *       <p><b>Re-retrieved and corrected 2026-08-25 (Inquiry Answer Execution v1).</b> The
      *       previous audit named ONE candidate write path — the comment POST — and reported that no
@@ -158,25 +167,23 @@ public class InquiryReplyCapabilityRegistry {
             new Row("GMARKET", null, InquiryReplyTransport.DIRECT_API, false,
                     "ESM+(지마켓/옥션) 문의는 구현된 답변 등록 경로로 보낼 수 있습니다.",
                     "EsmAnswerClient · EsmChannelReplyAdapter (구현됨, 실행 플래그 뒤에서만 등록)"),
-            new Row("CAFE24", null, InquiryReplyTransport.NEEDS_VERIFICATION, false,
-                    "카페24 문의 게시판이 답변을 어떤 형태로 담는지는 확인했지만, 그 형태로 "
-                            + "보내는 것은 아직 확인하지 않았습니다. 지원하지 않는다는 뜻은 아닙니다.",
-                    "READ로 확정됨(2026-08-25, 승인된 bounded proof, GET 5회): "
-                            + "STANDARD_BOARD_REPLY_ARTICLE — 답변은 질문에 달린 자식 '글'이다 "
-                            + "(article 247의 parent_article_no=246, reply_depth=1). "
-                            + "기각: 댓글 0(A2), 긴급문의 목록에 부재(B). "
-                            + "reply 필드는 답변 신호가 아니다(답변된 글에서도 F) — reply_status만이 신호 · "
-                            + "답변 본문은 이미 우리가 호출하는 GET /boards/{board_no}/articles가 "
-                            + "돌려주고 있다(자식 글의 content). 새 endpoint도 새 scope도 불필요 · "
-                            + "미확정(WRITE): POST /boards/{board_no}/articles + reply_article_no가 "
-                            + "계약상 유일한 후보이나, 그 호출의 reply_status=C가 부모에 붙는지 "
-                            + "자식에 붙는지 계약도 관측도 말하지 않는다(관측된 자식의 reply_status는 "
-                            + "null) — 부모에 붙지 않으면 답변은 보내되 완료 표시는 불가능하다 · "
-                            + "행위자 값 미보유: writer·client_ip 필수(A1에서 password는 불필요), "
-                            + "보관 값은 mall_id·refresh_token 둘뿐. member_id=mall_id이면 작성자가 "
-                            + "상점명으로 렌더링된다는 문서화된 출구가 있다 · "
-                            + "현재 연결 scope는 mall.read_community,mall.read_order,mall.read_product "
-                            + "(쓰기 미포함이며 온보딩이 write scope 요청을 기동 시 거부함)"));
+            new Row("CAFE24", null, InquiryReplyTransport.DIRECT_API, false,
+                    "카페24 문의 답변은 구현된 등록 경로로 보낼 수 있습니다. 다만 판매자가 "
+                            + "답변 실행 권한에 별도로 동의해야 하며, 동의 전에는 초안까지만 "
+                            + "가능합니다.",
+                    "공식 계약 사본: get-boards-articles.md (POST + reply_article_no) · "
+                            + "표현은 READ로 확정됨(2026-08-25, 승인된 bounded proof): "
+                            + "STANDARD_BOARD_REPLY_ARTICLE — 답변은 질문에 달린 자식 글이다 · "
+                            + "행위자도 READ로 확정됨(2026-08-25, 요청 4회, 87/87): 기존 답변 "
+                            + "43/44가 member_id=mall_id(계약이 문서화한 상점명 렌더링 조건), "
+                            + "제목은 SAME_AS_PARENT 43/44, reply_status·담당자ID는 부모에만 존재 · "
+                            + "Cafe24ReplyRequestShape · Cafe24ReplyArticleClient · "
+                            + "Cafe24ChannelReplyAdapter (구현됨, 라이브 미실행) · "
+                            + "중복 답변은 덮어쓰지 않고 두 번째 자식 글이 되므로 재전송 금지 · "
+                            + "전송 전 필수 조건 셋: mall.write_community 부여 · client_ip 배포 설정 · "
+                            + "승인된 라이브 실행 ID · 미확정: POST의 reply_status=C가 부모에 붙는지 "
+                            + "자식에 붙는지는 계약도 관측도 말하지 않으며, 붙지 않으면 답변은 "
+                            + "나가되 완료 표시가 되지 않는다(ANSWER_POSTED_STATUS_UNRESOLVED)"));
 
     /**
      * The audited answer for a channel + source subtype.

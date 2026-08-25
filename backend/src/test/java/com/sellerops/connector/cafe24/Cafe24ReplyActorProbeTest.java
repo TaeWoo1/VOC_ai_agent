@@ -100,7 +100,10 @@ class Cafe24ReplyActorProbeTest {
         assertThat(r.parentReplyStatusC()).isEqualTo(1);
         assertThat(r.replyUserIdPresentOnParent()).isEqualTo(1);
         assertThat(r.replyUserIdPresentOnReply()).isZero();
-        assertThat(r.titlePrefixed()).isEqualTo(1);
+        assertThat(r.titlePrefixedOrTransformed()).isEqualTo(1);
+        // The shop's reply carries a writer identity that never appears on a question.
+        assertThat(r.replyWriterClassAlsoSeenOnParents()).isZero();
+        assertThat(r.distinctParentWriterClasses()).isEqualTo(1);
         assertThat(r.maxReplyDepth()).isEqualTo(1);
         assertThat(r.childCreatedNotBeforeParent()).isEqualTo(1);
     }
@@ -125,7 +128,7 @@ class Cafe24ReplyActorProbeTest {
         assertThat(r.distinctReplyWriterClasses()).isEqualTo(1);
         assertThat(r.distinctReplyMemberIdClasses()).isEqualTo(1);
         assertThat(r.replyMemberIdEqualsMallId()).isEqualTo(2);
-        assertThat(r.titlePrefixed()).isEqualTo(2);
+        assertThat(r.titlePrefixedOrTransformed()).isEqualTo(2);
     }
 
     @Test
@@ -215,9 +218,9 @@ class Cafe24ReplyActorProbeTest {
         assertThat(Cafe24ReplyActorProbe.titleRelation("배송 문의", "배송 문의"))
                 .isEqualTo(Cafe24ReplyActorProbe.TitleRelation.SAME_AS_PARENT);
         assertThat(Cafe24ReplyActorProbe.titleRelation("RE: 배송 문의", "배송 문의"))
-                .isEqualTo(Cafe24ReplyActorProbe.TitleRelation.PREFIXED);
+                .isEqualTo(Cafe24ReplyActorProbe.TitleRelation.PREFIXED_OR_TRANSFORMED);
         assertThat(Cafe24ReplyActorProbe.titleRelation("[답변] 배송 문의", "배송 문의"))
-                .isEqualTo(Cafe24ReplyActorProbe.TitleRelation.PREFIXED);
+                .isEqualTo(Cafe24ReplyActorProbe.TitleRelation.PREFIXED_OR_TRANSFORMED);
         assertThat(Cafe24ReplyActorProbe.titleRelation("안녕하세요", "배송 문의"))
                 .isEqualTo(Cafe24ReplyActorProbe.TitleRelation.OTHER);
         assertThat(Cafe24ReplyActorProbe.titleRelation("RE: 배송 문의", null))

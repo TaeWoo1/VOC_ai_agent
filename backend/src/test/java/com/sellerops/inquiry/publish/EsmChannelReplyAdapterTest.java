@@ -46,7 +46,7 @@ class EsmChannelReplyAdapterTest {
     }
 
     private ReplyPublishCommand publishCommand(String body) {
-        return new ReplyPublishCommand(org, seller, channel, "MSG-1", receivedAt, "제목", body);
+        return new ReplyPublishCommand(org, seller, channel, "MSG-1", receivedAt, "제목", body, null);
     }
 
     // ---- fakes ----

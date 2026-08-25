@@ -86,19 +86,22 @@ public class Cafe24ReplyActorProbeRunner implements ApplicationRunner {
         log.info("{} 요청={}회 예산소진={} 조회대상={} 응답={} 미응답={}",
                 TAG, r.requests(), r.budgetExhausted(), r.requested(), r.returned(), r.unreturned());
         log.info("{} 답글={}건 · writer={} · 회원식별자={} · 상점식별자와동일={} · 작성IP={} "
-                        + "· 담당자ID={} · 답변상태={} · writer종류={} · 회원식별자종류={}",
+                        + "· 담당자ID={} · 답변상태={} · writer종류={} · 회원식별자종류={} "
+                        + "· writer가 질문에도 등장={} · 질문 writer종류={}",
                 TAG, r.replies(), r.replyWriterPresent(), r.replyMemberIdPresent(),
                 r.replyMemberIdEqualsMallId(), r.replyClientIpPresent(), r.replyUserIdPresentOnReply(),
                 r.replyStatusPresentOnReply(), r.distinctReplyWriterClasses(),
-                r.distinctReplyMemberIdClasses());
+                r.distinctReplyMemberIdClasses(), r.replyWriterClassAlsoSeenOnParents(),
+                r.distinctParentWriterClasses());
         log.info("{} 부모={}건 · 답변상태 C={} P={} N={} 없음={} · 담당자ID={} "
                         + "· writer={} · 상점식별자와동일={}",
                 TAG, r.parents(), r.parentReplyStatusC(), r.parentReplyStatusP(),
                 r.parentReplyStatusN(), r.parentReplyStatusAbsent(), r.replyUserIdPresentOnParent(),
                 r.parentWriterPresent(), r.parentMemberIdEqualsMallId());
-        log.info("{} 제목관계 동일={} 접두={} 기타={} 없음={} · 답글깊이최대={} 답글순번최대={} "
+        log.info("{} 제목관계 동일={} 접두·변형={} 기타={} 없음={} · 답글깊이최대={} 답글순번최대={} "
                         + "· 자식이 부모보다 늦음={}",
-                TAG, r.titleSameAsParent(), r.titlePrefixed(), r.titleOther(), r.titleAbsent(),
+                TAG, r.titleSameAsParent(), r.titlePrefixedOrTransformed(), r.titleOther(),
+                r.titleAbsent(),
                 r.maxReplyDepth(), r.maxReplySequence(), r.childCreatedNotBeforeParent());
     }
 

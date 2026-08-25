@@ -493,7 +493,7 @@ writer 종류 수 · 부모의 `reply_status` C/P/N 분포 · 제목 관계 3분
 
 관측과 WRITE semantics를 섞지 않는다.
 
-### Approval Manifest — 실행 대기
+### Approval Manifest — **실행됨 (2026-08-25, 승인 하에)**
 
 | 항목 | 값 |
 |---|---|
@@ -508,6 +508,71 @@ writer 종류 수 · 부모의 `reply_status` C/P/N 분포 · 제목 관계 3분
 | DB 변경 | **0** |
 | 미답변 고객 문의 접촉 | **0** (대상은 답변이 달린 스레드뿐) |
 | 되돌리기 | 해당 없음(읽기) |
+
+## 19-A. Part A 관측 결과 (승인 하에 실행, 요청 4회)
+
+| 항목 | 값 |
+|---|---|
+| 실제 요청 | **4회** (상한 6, 예산 소진 없음) |
+| 완전성 | requested **87** / returned **87** / **미해결 0** |
+| marketplace WRITE · DB mutation | **0 · 0** (전후 inquiries 111 · REPLY 44 · 미답변 25 · `answer_body` 0 불변) |
+| 다른 Cafe24 호출 / 토큰 갱신 | **0 / 0** |
+
+### 답변은 상점의 정체로 올라가 있었다
+
+| 관측 | REPLY 44 |
+|---|---|
+| 회원식별자 존재 | **44 / 44** |
+| **회원식별자 == `mall_id`** | **43 / 44** |
+| `writer` 존재 | 44 / 44 |
+| `writer` 동일성 종류 | **2** |
+| `writer`가 **질문 쪽에도 등장** | **44 / 44** (질문 writer 종류 31) |
+| 작성 IP 존재 | 44 / 44 |
+| 담당자ID 존재 | **0 / 44** |
+| `reply_status` 존재 | **0 / 44** (전부 null) |
+
+43건은 계약이 문서화한 조건 — *`member_id`가 `mall_id`와 같으면 작성자가 **상점명**으로 렌더링된다* —
+을 실제로 만족한다. 그리고 **1건은 상점의 정체가 아니고**, 그 `writer` 동일성 클래스는 어떤 질문의
+writer와 같다. 즉 그 한 건은 판매자의 답변이 아니라 **고객이 스레드에 이어 쓴 글**일 가능성이 높다.
+
+**이것은 `THREAD_REPLY_UNKNOWN_ACTOR`를 뒤집지 않는다.** 관측은 수만 남기고 **어느 행인지 지목하지
+않으며**, 이 package는 행위자 backfill·`answer_body` 승격·Answer Memory import를 금지한다. 실제로 셋
+다 **0**이다. 남은 것은 「43은 상점 정체로 올라갔다」는 **집계 사실** 하나다.
+
+### 답변 상태와 담당자는 부모에만 있다
+
+| 부모 44 | 값 |
+|---|---|
+| `reply_status` | **C 43 · P 0 · N 0 · 없음 1** |
+| 담당자ID 존재 | **43 / 44** |
+| 회원식별자 == `mall_id` | 1 |
+
+「없음 1」과 「43/44」의 그 1건은 **부모 자신이 답글인 depth-2** 경우다(답글에는 상태가 없다는 위
+관측과 정확히 일치한다).
+
+최종 형태는 **부모 = `C` · 자식 = null**이다. 다시 명시한다 — 이것은 **관측된 최종 상태이지
+`POST(reply_status=C)`의 side effect 증명이 아니다.** verification의 **기대 형태** 근거로만 쓴다.
+
+### 제목 규칙은 결정적이다
+
+**SAME_AS_PARENT 43 · PREFIXED_OR_TRANSFORMED 1 · OTHER 0 · 판정불가 0.** 그 1건 역시 같은 depth-2
+행이다. 답변 글의 제목은 **질문의 제목 그대로**다.
+
+### `client_ip`는 READ로 보인다 — 그러나 재사용하지 않는다
+
+44/44 존재하므로 `NOT_OBSERVABLE_BY_READ`가 아니다. 그래도 값을 **재사용하지 않는다**: 과거 작성자의
+IP는 새 요청을 보내는 클라이언트가 아니다. 이 필드는 관측이 아니라 **Action Executor의 network
+configuration**이 답해야 한다.
+
+### 구조
+
+답글 깊이 최대 **2** · 답글 순번 최대 **2** · 자식이 부모보다 늦음 **44/44**.
+
+### PII
+
+`writer`·회원식별자·IP·제목 원문은 `observe()` 밖으로 나가지 않는다. 남는 것은 존재 플래그, sha-256
+동일성 **클래스**(비교만 하고 출력하지 않음), 제목 관계 3분류뿐이며, `Report`의 record component
+타입을 테스트가 강제한다. 로그·보고서·DB **어디에도 원문 값이 없다**.
 
 ## 20. Part K — 운영 미답변 KPI 일관성 (실행됨, 호출 0)
 
@@ -533,3 +598,111 @@ product-owner 결정: **비밀글도 판매자가 처리해야 하는 업무이�
 
 marketplace READ 0 · WRITE 0 · OAuth 변경 0 · `mall.write_community` 요청 0 · adapter 0 ·
 reconsent 0 · Agent tool 변경 0. 행위자 추론 0, 과거 답변의 Answer Memory import 0.
+
+## 22. Part D — 요청 필드 결정 (관측 뒤)
+
+| 필드 | 결정 | 근거 |
+|---|---|---|
+| `member_id` | **`mall_id`를 보낸다** | 계약이 문서화한 렌더링 규칙 + 이 판매자의 기존 답변 **43/44**가 실제로 그 조건 |
+| `writer` | **`mall_id`를 보낸다** | 지어낸 사람 이름이 아니고, 위 규칙 때문에 **고객이 보는 이름이 되지도 않는다**. 기존 답변의 writer 값을 복사하지는 않는다 |
+| `title` | **질문 제목 그대로** | 관측 SAME_AS_PARENT **43/44**(예외 1건은 depth-2). 256자 초과·부재는 **자르지 않고 거절** |
+| `client_ip` | **배포 설정** | 관측되지만(44/44) **재사용하지 않는다** — 과거 작성자의 IP는 새 요청의 클라이언트가 아니다. 런타임 조회 0, 미설정이면 전송 0 |
+| `reply_status` | **`C`를 보낸다** | 계약이 같은 호출에서 받는 **유일한** 완료 표시 수단. **효과는 미증명** ⇒ 전송 성공 ≠ 완료 |
+| `reply_user_id` | **보내지 않는다** | 필수 아님 + 의미 미증명. 관측상 자식에 **0/44** — 실으면 플랫폼 자신이 만들지 않는 형태가 된다 |
+| `secret` | **보내지 않는다** | 기본값을 고르는 것이 곧 **고객 노출 결정**이다 |
+
+「member_id만 주면 writer가 자동 해결된다」고 **관측만으로 결론내리지 않았다** — 계약의 문서화된
+렌더링 규칙과 관측이 **둘 다** 같은 말을 하기 때문에 결정했고, `writer`는 여전히 **필수 칸이라
+채운다**. 그 값이 `mall_id`인 것은 우리가 가진 사실이지 사람 이름이 아니다.
+
+## 23. Part E — 답변 실행 권한 재동의 구조 (구현됨, 실제 재동의 0)
+
+기존 가드는 **삭제하지 않았다.** 옮겼다 — `Cafe24ScopeContract`가 **연결 스코프**를 여전히 기동
+시점에 검사하고 write가 있으면 던진다. 바뀐 것은 **두 번째 집합**이 생겼다는 것이다.
+
+| | 연결 (`READ`) | 답변 실행 (`ANSWER_EXECUTION`) |
+|---|---|---|
+| 언제 | 모든 판매자, 「카페24 연결」 | 판매자가 켤 때만 |
+| 스코프 | 읽기 전용 (write 금지, 기동 시 검사) | 연결 스코프 **+ `mall.write_community` 정확히 하나** |
+| 진입점 | `POST /api/connect/cafe24/start` | `POST /api/connect/cafe24/answer-execution/start` |
+| 기본값 | 있음 | **없음(공백)** — 설정 안 하면 기능 자체가 없다 |
+
+**왜 넓히지 않고 쪼갰나.** 하나의 스코프 문자열을 넓히면, 답변 실행을 원한 적 없는 판매자의 다음
+재연결이 조용히 write를 요구하게 된다 — 가드가 막으려던 바로 그 escalation이다. 두 집합은 서로를
+오염시킬 수 없고, 답변 실행 집합은 **연결 집합 + 그 한 개**임이 검증되므로 무관한 권한의 문도 되지
+않는다. 그리고 write scope 때문에 **기동이 실패하지 않는다** — 원하면 다른 property를 설정한다.
+
+- 기존 read 기능은 write 미동의 상태에서 그대로 동작한다(같은 credential, 같은 routine).
+- write grant 없으면 **초안까지** 가능하고 전송만 막힌다(`Cafe24AnswerExecutionGrant`).
+- `GET /api/inquiry-publish/cafe24/answer-execution` → `{available, granted}`로 [답변 보내기]가
+  「권한이 필요합니다」를 말할 수 있다. 두 boolean뿐이며 계정 id·몰 id·스코프 문자열은 나가지 않는다.
+- 부여 여부는 **몰이 실제로 준 것**에서 읽는다(`granted_scopes` — 토큰 교환·갱신마다 이미 기록 중).
+  설정 파일이 아니라서 어긋날 수가 없다.
+- **실제 Demo Org 재동의는 실행하지 않았다.** 현재 부여: `mall.read_community,mall.read_order,mall.read_product`.
+
+## 24. Part F/G/H/I — adapter · 단일 전송 · 검증 · 종결 의미
+
+`Cafe24ChannelReplyAdapter`는 기존 Inquiry Action Executor의 `ChannelReplyAdapter` seam에 붙는다 —
+**새 HITL 구조 0**, Agent tool catalogue **변경 0**.
+
+**한 번의 POST, 그리고 절대 두 번은 아니다.** 재시도 메서드가 없다. 타임아웃·5xx는
+`DELIVERY_UNKNOWN`이며 「실패했으니 다시」가 아니다 — 답변 글이 이미 생성됐을 수 있고, 두 번째 POST는
+재시도가 아니라 **고객 질문 아래 두 번째 답변**이다. 401/403·429는 아무것도 보내지 못한 것이므로
+승인이 소진되지 않는다.
+
+**전송 전 거절되는 것들** (각각 회귀 테스트): 대상이 카페24 게시판 글이 아님 · write grant 없음 ·
+`client_ip` 미설정 · 제목 부재/초과 · 라이브 승인 ID 미장전. 전부 **요청 0건**이다.
+
+**검증은 2xx로 끝나지 않는다.** POST 응답의 created `article_no`는 계약이 형태를 명시하지 않으므로
+**있으면 쓰고 없으면 null**이다 — 받지 못한 id를 받은 척하지 않는다. 재확인은 정확히 두 번호
+(`parent`,`child`)의 exact READ **1회**이며 날짜 훑기가 없다. 조건 넷: 자식 존재 · `parent_article_no`
+== 승인된 대상 · 구조적으로 답글 · **본문 정규화 해시 == 승인 초안 해시**(공백만 정규화, 낱말 차이는
+다른 답변). 그 다음 **부모의 상태를 관측**한다.
+
+| | 관측 | 결과 |
+|---|---|---|
+| **A** | 자식 검증 + 부모 `C` | `VERIFIED` |
+| **B** | 자식 검증 + 부모 `N`/`P` | **`ANSWER_POSTED_STATUS_UNRESOLVED`** — 답변은 나갔고 완료 표시만 미확정. 재전송 아님, 추가 undocumented WRITE 아님 |
+| **C** | 자식 부재·불일치 | `DELIVERY_UNKNOWN` |
+
+Case B는 방어적 분기가 아니라 **실제 가능성**이다: 계약은 `reply_status`를 create에서 받지만 그것이
+**부모**를 표시하는지 말하지 않고, 승인된 관측도 답하지 못했다(자식은 전부 null, 부모는 43/44가 `C` —
+최종 상태이지 side effect 증명이 아니다).
+
+## 25. Part J — Memory
+
+**Case B는 Answer Memory를 쓰지 않는다.** `rememberVerified`는 publish core의 `if (verified)` 분기
+**한 곳**에서만 호출되고 Case B는 `NOT_COMPLETED`다(구조 테스트로 고정).
+
+보수적 판정이고, 되돌릴 수 있는 판정이다. Case B에서 자식 글은 해시까지 일치한 채 고객 스레드에
+올라가 있으므로 「고객이 볼 수 있다」는 최소 조건은 충족된다. 충족되지 않는 것은
+`EXECUTOR_SENT_VERIFIED`가 실제로 담고 있는 계약 — **이 제품이 완료로 검증한 전송** — 이다. 라이브에서
+한 번도 일어난 적 없는 상태를 위해 두 번째 memory writer를 만드는 것은 가설로 선례 경로를 설계하는
+일이다. `DELIVERY_UNKNOWN`은 물론 0.
+
+## 26. Part M/N — **`TEST_INQUIRY_REQUIRED`**
+
+오프라인 조건은 닫혔다. 남은 것은 **동의·설정·대상** 셋이고, 그중 대상이 없다.
+
+| 전송 전 필요한 것 | 상태 |
+|---|---|
+| `mall.write_community` 부여 | **없음** — 판매자 재동의 필요 |
+| `answer-execution-scopes` 배포 설정 | **미설정**(기본 공백) |
+| `client_ip` 배포 설정 | **미설정** ⇒ 전송 0 |
+| 라이브 실행 승인 ID | **미장전** ⇒ 실제 호스트에 1바이트도 안 나감 |
+| 안전한 대상 문의 | **없음** |
+
+현재 미답변 25건은 **전부 실제 고객의 문의**다. 그중 하나를 proof 대상으로 고르지 않는다 — 첫 라이브
+WRITE의 위험을 답을 기다리는 사람에게 지우는 일이기 때문이다. 판매자가 Demo Org storefront에 **답변
+테스트용 문의를 직접 하나 작성**하면 그 exact `article_no`로 manifest를 쓴다.
+
+manifest에 들어갈 항목은 이미 정해져 있다: 판매자 동의 · 대상 · 초안 미리보기 · 근거 · POST endpoint ·
+**예상 WRITE 정확히 1** · verification GET 수 · 되돌릴 수 없는 효과(고객에게 보이는 글이며 이 adapter는
+삭제하지 않는다) · rollback 가능 여부 · Memory 효과. **비워 둔 칸은 대상 하나뿐이다.**
+
+## 27. 이 단계에서 하지 않은 것
+
+marketplace WRITE 0 · OAuth 재동의 0 · `mall.write_community` 요청 0 · Cafe24 POST 0 · 실행 플래그
+활성화 0 · Agent tool catalogue 변경 0 · 행위자 backfill 0 · 과거 44 답글의 Answer Memory import 0 ·
+두 번째 org 0 · board 4 0 · `EXCLUDED_SPAM` 재작업 0 · bulk reply 0 · 신규 채널 0 ·
+undocumented status WRITE 0.

@@ -72,7 +72,7 @@ public class Cafe24OnboardingService {
     private final String clientId;
     private final String clientSecret;
     private final String redirectUri;
-    private final String scopes;
+    private final Cafe24ScopeContract scopeContract;
     private final long stateTtlSeconds;
     /**
      * Optional (Self-Pilot v1): invoked with {@code (orgId, sellerAccountId)} after a completion that
@@ -90,7 +90,8 @@ public class Cafe24OnboardingService {
                                    Cafe24OAuthStateRepository states, CredentialVault vault,
                                    Cafe24OAuthClient oauthClient, PlatformTransactionManager txManager,
                                    Clock clock, String clientId, String clientSecret,
-                                   String redirectUri, String scopes, long stateTtlSeconds) {
+                                   String redirectUri, Cafe24ScopeContract scopeContract,
+                                   long stateTtlSeconds) {
         this.accounts = accounts;
         this.channels = channels;
         this.states = states;
@@ -101,14 +102,13 @@ public class Cafe24OnboardingService {
         this.clientId = clientId;
         this.clientSecret = clientSecret;
         this.redirectUri = redirectUri;
-        this.scopes = scopes;
+        this.scopeContract = scopeContract;
         this.stateTtlSeconds = stateTtlSeconds;
-        // Fail closed at construction if a write scope was configured — this flow is
-        // read-only by contract and must never request community-write permission.
-        if (scopes == null || scopes.isBlank() || scopes.toLowerCase(Locale.ROOT).contains("write")) {
-            throw new IllegalStateException(
-                    "카페24 OAuth 스코프는 읽기 전용이어야 합니다 (write 스코프 금지).");
-        }
+        // The read-only guard did not move — it lives in Cafe24ScopeContract now, still evaluated at
+        // construction, still for the scope string every connection asks for. What changed is that a
+        // deployment wanting answer execution configures a SECOND, separately validated set instead
+        // of widening this one, so turning the option on can no longer make an ordinary reconnect ask
+        // for write.
     }
 
     /**
@@ -117,6 +117,26 @@ public class Cafe24OnboardingService {
      * caller sends the seller's browser to.
      */
     public StartResult start(UUID orgId, UUID userId, String mallId) {
+        return start(orgId, userId, mallId, scopeContract.readScopes());
+    }
+
+    /**
+     * Start the <b>answer-execution reconsent</b> — the same flow, asking additionally for
+     * {@code mall.write_community}, and only ever because a seller asked for it.
+     *
+     * <p>It is a separate method rather than a parameter on {@link #start} so that no caller can
+     * widen a connection by passing a flag it did not think about. A deployment that has not
+     * configured the option refuses here; the seller's existing read connection is untouched either
+     * way, and remains untouched if they abandon the consent screen.
+     */
+    public StartResult startAnswerExecutionReconsent(UUID orgId, UUID userId, String mallId) {
+        if (!scopeContract.answerExecutionAvailable()) {
+            throw ApiException.badRequest("카페24 답변 실행 권한 요청이 아직 준비되지 않았습니다.");
+        }
+        return start(orgId, userId, mallId, scopeContract.answerExecutionScopes());
+    }
+
+    private StartResult start(UUID orgId, UUID userId, String mallId, String requestedScopes) {
         if (!Cafe24OAuthClient.isValidMallId(mallId)) {
             throw ApiException.badRequest("카페24 mall_id 형식이 올바르지 않습니다.");
         }
@@ -172,7 +192,8 @@ public class Cafe24OnboardingService {
             states.save(state);
 
             // The RAW state leaves only in the authorization URL — never persisted.
-            String url = oauthClient.authorizationUrl(mallId, clientId, redirectUri, scopes, rawState);
+            String url = oauthClient.authorizationUrl(mallId, clientId, redirectUri, requestedScopes,
+                    rawState);
             return new StartResult(saved.getId(), url, saved.getConnectionStatus());
         });
     }

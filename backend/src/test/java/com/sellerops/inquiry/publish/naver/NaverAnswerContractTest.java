@@ -109,7 +109,7 @@ class NaverAnswerContractTest {
 
     private static ReplyPublishCommand command(String externalId) {
         return new ReplyPublishCommand(ORG, SELLER, CHANNEL, externalId, RECEIVED, null,
-                "안녕하세요, 문의 주신 내용 안내드립니다.");
+                "안녕하세요, 문의 주신 내용 안내드립니다.", null);
     }
 
     // ── The bodies. These are the two field names, and they are not interchangeable.

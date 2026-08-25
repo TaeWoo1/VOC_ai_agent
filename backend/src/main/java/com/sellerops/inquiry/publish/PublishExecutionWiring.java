@@ -3,6 +3,10 @@ package com.sellerops.inquiry.publish;
 import com.sellerops.connector.coupang.CoupangInquiryReplyClient;
 import com.sellerops.connector.coupang.CoupangSigner;
 import com.sellerops.connector.coupang.JdkCoupangHttpClient;
+import com.sellerops.connector.cafe24.Cafe24Authorizer;
+import com.sellerops.connector.cafe24.Cafe24BoardArticlesClient;
+import com.sellerops.connector.cafe24.Cafe24HttpClient;
+import com.sellerops.connector.cafe24.Cafe24ReplyArticleClient;
 import com.sellerops.connector.esm.EsmHttpClient;
 import com.sellerops.connector.esm.EsmJwtSigner;
 import com.sellerops.connector.esm.JdkEsmHttpClient;
@@ -10,6 +14,8 @@ import com.sellerops.connector.naver.NaverCustomerInquiriesClient;
 import com.sellerops.connector.naver.NaverProductQnaClient;
 import com.sellerops.connector.naver.NaverTokenClient;
 import com.sellerops.credential.CredentialVault;
+import com.sellerops.inquiry.publish.cafe24.Cafe24AnswerExecutionGrant;
+import com.sellerops.inquiry.publish.cafe24.Cafe24ChannelReplyAdapter;
 import com.sellerops.inquiry.publish.naver.JdkNaverAnswerHttpClient;
 import com.sellerops.inquiry.publish.naver.NaverAnswerHttpClient;
 import com.sellerops.inquiry.publish.naver.NaverCustomerInquiryAnswerClient;
@@ -158,5 +164,48 @@ public class PublishExecutionWiring {
                                                          CredentialVault vault) {
         return new NaverCustomerInquiryReplyAdapter(answerClient, readClient, tokenClient, vault,
                 Clock.systemUTC());
+    }
+
+    // ── Cafe24. An answer here is an ARTICLE hanging off the question, so the write is a POST to
+    // the same boards resource the collector reads — proven STANDARD_BOARD_REPLY_ARTICLE by an
+    // approved bounded READ, and shaped by Cafe24ReplyRequestShape.
+    //
+    // Three independent things must all be true before a byte leaves: this flag, the Cafe24
+    // connector flag, and — at runtime, per seller — a recorded mall.write_community grant. The
+    // adapter also refuses without a configured client_ip, and the transport refuses any real host
+    // without an armed live-run approval id. None of those has a default that says yes.
+
+    /**
+     * The Cafe24 reply-article write client — its own object, not the collection client.
+     *
+     * <p>{@code live-approval-id} is the environment-binding token from
+     * {@code docs/sellerops_live_approval_contract.md}. Blank (the default) means every non-offline
+     * host is refused before the request is built, which is what keeps an offline-implemented adapter
+     * from becoming a live one by someone flipping two flags.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.enabled", havingValue = "true")
+    Cafe24ReplyArticleClient cafe24ReplyArticleClient(
+            Cafe24HttpClient http,
+            @Value("${sellerops.inquiry.publish.cafe24.live-approval-id:}") String liveApprovalId) {
+        return new Cafe24ReplyArticleClient(http, liveApprovalId);
+    }
+
+    /**
+     * The Cafe24 channel reply adapter.
+     *
+     * <p>{@code client-ip} is the Action Executor's egress address and defaults to blank. Blank means
+     * the adapter refuses to publish: the contract marks the field REQUIRED, SellerOps does not hold
+     * it, no observed value may be reused (a past writer's address is not the client making this
+     * request), and it is never looked up at runtime. An unconfigured deployment must look
+     * unconfigured rather than send a fabricated address.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.enabled", havingValue = "true")
+    ChannelReplyAdapter cafe24ChannelReplyAdapter(
+            Cafe24ReplyArticleClient writeClient, Cafe24BoardArticlesClient readClient,
+            Cafe24Authorizer authorizer, Cafe24AnswerExecutionGrant grant,
+            @Value("${sellerops.inquiry.publish.cafe24.client-ip:}") String clientIp) {
+        return new Cafe24ChannelReplyAdapter(writeClient, readClient, authorizer, grant, clientIp);
     }
 }

@@ -46,11 +46,15 @@ public class Cafe24OnboardingConfiguration {
             // surfaced to the seller as a re-consent item, never worked around. New connections
             // consent to all three at once.
             @Value("${sellerops.connector.cafe24.oauth.scopes:mall.read_community,mall.read_order,mall.read_product}") String scopes,
+            // The answer-execution option. Blank by DEFAULT and deliberately so: a deployment that
+            // says nothing gets a read-only Cafe24, exactly as before. Setting it does not widen any
+            // existing connection — it only makes the seller-initiated reconsent reachable.
+            @Value("${sellerops.connector.cafe24.oauth.answer-execution-scopes:}") String answerExecutionScopes,
             @Value("${sellerops.connector.cafe24.oauth.state-ttl-seconds:600}") long stateTtlSeconds,
             ObjectProvider<SellerAccountReauthService> reauth) {
         Cafe24OnboardingService service = new Cafe24OnboardingService(accounts, channels, states, vault,
-                oauthClient, txManager, Clock.systemUTC(), clientId, clientSecret, redirectUri, scopes,
-                stateTtlSeconds);
+                oauthClient, txManager, Clock.systemUTC(), clientId, clientSecret, redirectUri,
+                new Cafe24ScopeContract(scopes, answerExecutionScopes), stateTtlSeconds);
         // Self-Pilot v1: a completed (re)consent resumes auth-paused schedules and closes the alert.
         // Optional so the hermetic connector-configuration tests (no JPA graph) still start the context.
         SellerAccountReauthService hook = reauth.getIfAvailable();

@@ -83,7 +83,8 @@ class Cafe24OnboardingServiceTest {
     private Cafe24OnboardingService build(String scopes) {
         return new Cafe24OnboardingService(accounts, channels, states, vault,
                 new Cafe24OAuthClient(http), txManager, CLOCK,
-                "the-client-id", "the-client-secret", REDIRECT, scopes, 600);
+                "the-client-id", "the-client-secret", REDIRECT,
+                new Cafe24ScopeContract(scopes, null), 600);
     }
 
     /** Start the flow and return the RAW state token, extracted from the consent URL. */
@@ -329,6 +330,39 @@ class Cafe24OnboardingServiceTest {
         assertThatThrownBy(() -> build("mall.read_community,mall.write_community"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("읽기 전용");
+    }
+
+    @Test
+    void answerExecutionIsUnavailableUntilADeploymentConfiguresIt() {
+        // The default. A deployment that says nothing gets a read-only Cafe24, and the reconsent
+        // refuses rather than quietly asking for the read scopes under a write-sounding name.
+        assertThatThrownBy(() -> service.startAnswerExecutionReconsent(org, user, "samplemall"))
+                .hasMessageContaining("준비되지 않았습니다");
+    }
+
+    @Test
+    void theAnswerExecutionScopeSetIsTheReadSetPlusExactlyOneScope() {
+        assertThatThrownBy(() -> new Cafe24ScopeContract("mall.read_community",
+                "mall.read_community,mall.write_community,mall.write_order"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("mall.write_community");
+        assertThatThrownBy(() -> new Cafe24ScopeContract("mall.read_community", "mall.write_community"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void theReconsentAsksForWriteAndOrdinaryConnectStillDoesNot() {
+        Cafe24OnboardingService widened = new Cafe24OnboardingService(accounts, channels, states, vault,
+                new Cafe24OAuthClient(http), txManager, CLOCK,
+                "the-client-id", "the-client-secret", REDIRECT,
+                new Cafe24ScopeContract("mall.read_community",
+                        "mall.read_community,mall.write_community"), 600);
+
+        assertThat(widened.start(org, user, "samplemall").authorizationUrl())
+                .as("연결은 그대로 읽기 전용이다")
+                .doesNotContain("write");
+        assertThat(widened.startAnswerExecutionReconsent(org, user, "samplemall").authorizationUrl())
+                .contains("mall.write_community");
     }
 
     @Test

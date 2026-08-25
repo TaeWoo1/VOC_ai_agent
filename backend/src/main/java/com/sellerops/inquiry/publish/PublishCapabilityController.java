@@ -1,10 +1,19 @@
 package com.sellerops.inquiry.publish;
 
+import com.sellerops.auth.AuthPrincipal;
+import com.sellerops.channel.Channel;
+import com.sellerops.channel.ChannelRepository;
+import com.sellerops.connector.cafe24.Cafe24ApiConnector;
+import com.sellerops.inquiry.publish.cafe24.Cafe24AnswerExecutionGrant;
+import com.sellerops.inquiry.publish.dto.Cafe24AnswerExecutionView;
 import com.sellerops.inquiry.publish.dto.InquiryReplyCapabilityView;
 import com.sellerops.inquiry.publish.dto.PublishCapabilityView;
+import com.sellerops.selleraccount.SellerAccount;
+import com.sellerops.selleraccount.SellerAccountRepository;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,14 +34,45 @@ public class PublishCapabilityController {
 
     private final ChannelReplyAdapterRegistry adapters;
     private final InquiryReplyCapabilityRegistry audited;
+    private final Cafe24AnswerExecutionGrant cafe24Grant;
+    private final SellerAccountRepository accounts;
+    private final ChannelRepository channels;
     private final boolean executionEnabled;
+    private final boolean cafe24AnswerExecutionAvailable;
 
     public PublishCapabilityController(
             ChannelReplyAdapterRegistry adapters, InquiryReplyCapabilityRegistry audited,
-            @Value("${sellerops.inquiry.publish.execution-enabled:false}") boolean executionEnabled) {
+            Cafe24AnswerExecutionGrant cafe24Grant, SellerAccountRepository accounts,
+            ChannelRepository channels,
+            @Value("${sellerops.inquiry.publish.execution-enabled:false}") boolean executionEnabled,
+            @Value("${sellerops.connector.cafe24.oauth.answer-execution-scopes:}") String cafe24AnswerScopes) {
         this.adapters = adapters;
         this.audited = audited;
+        this.cafe24Grant = cafe24Grant;
+        this.accounts = accounts;
+        this.channels = channels;
         this.executionEnabled = executionEnabled;
+        this.cafe24AnswerExecutionAvailable = cafe24AnswerScopes != null && !cafe24AnswerScopes.isBlank();
+    }
+
+    /**
+     * Whether this seller has agreed to let SellerOps post a Cafe24 answer.
+     *
+     * <p>Org-scoped and boolean-only. It exists so [답변 보내기] can say "권한이 필요합니다" instead of
+     * offering a send that the adapter would refuse — a refused send after a confirmation reads to a
+     * seller as a broken product, and it burns their attention on something they could have been
+     * asked for up front.
+     */
+    @GetMapping("/cafe24/answer-execution")
+    public Cafe24AnswerExecutionView cafe24AnswerExecution(
+            @AuthenticationPrincipal AuthPrincipal principal) {
+        boolean granted = channels.findByCode(Cafe24ApiConnector.CHANNEL_CODE)
+                .flatMap(channel -> accounts.findFirstByOrgIdAndChannelIdAndFileUploadOrderByCreatedAtAsc(
+                        principal.orgId(), channel.getId(), false))
+                .map(SellerAccount::getId)
+                .map(id -> cafe24Grant.hasWriteGrant(principal.orgId(), id))
+                .orElse(false);
+        return new Cafe24AnswerExecutionView(cafe24AnswerExecutionAvailable, granted);
     }
 
     /**

@@ -29,6 +29,7 @@ class ExactOrderPrivacyFenceTest {
             Paths.get("src/main/java/com/sellerops/connector/cafe24");
     private static final Path FACT = Paths.get("src/main/java/com/sellerops/order/fact");
     private static final String ACTOR_PROBE = "Cafe24ReplyActorProbe.java";
+    private static final String REPLY_WRITE = "Cafe24ReplyArticleClient.java";
 
     @Test
     @DisplayName("no customer-search parameter is ever sent to a channel")
@@ -37,8 +38,9 @@ class ExactOrderPrivacyFenceTest {
                 "buyer_cellphone", "buyer_phone", "buyer_email", "member_id", "member_email",
                 "name_furigana");
         for (Path source : javaFiles(CONNECTOR)) {
-            if (source.getFileName().toString().equals(ACTOR_PROBE)) {
-                continue;   // one named exception, checked harder just below
+            String name = source.getFileName().toString();
+            if (name.equals(ACTOR_PROBE) || name.equals(REPLY_WRITE)) {
+                continue;   // two named exceptions, each checked harder just below
             }
             String text = code(source);
             for (String parameter : forbidden) {
@@ -62,6 +64,43 @@ class ExactOrderPrivacyFenceTest {
      * that file must be a response binding, on a line that declares it as one. A request parameter
      * would sit on a line with no {@code @JsonProperty} and fail.
      */
+    /**
+     * The other file that names {@code member_id} — and it SENDS it, which is why the check here is
+     * about what the value can be rather than about direction.
+     *
+     * <p>{@link com.sellerops.connector.cafe24.Cafe24ReplyArticleClient} puts a member id in a reply
+     * article's body because the contract documents exactly one way to make an answer render under
+     * the shop's name instead of a person's: the field must equal the mall's own {@code mall_id}. So
+     * the value is the seller's own shop identifier, never a customer's — and it is a BODY key, never
+     * a query parameter, which is the shape that would search a mall for a person. Both halves are
+     * asserted: no forbidden name may appear in URI construction, and the member id may only be set
+     * from a JSON body key.
+     */
+    @Test
+    @DisplayName("the file that sends member_id sends the shop's own id, in a body, never in a query")
+    void theReplyWriteSendsTheShopsIdInABody() throws IOException {
+        String text = code(CONNECTOR.resolve(REPLY_WRITE));
+        for (String line : text.split("\\R")) {
+            if (!line.contains("member_id")) {
+                continue;
+            }
+            assertThat(line)
+                    .as("member_id may only be a JSON body key on the reply write")
+                    .contains("node.put(\"member_id\"");
+        }
+        // The URI builder is where a search parameter would have to live. It names none.
+        int uriBuilder = text.indexOf("static URI uri(");
+        assertThat(uriBuilder).isPositive();
+        // Just that method: the next method along uses a ternary, and a "?" from it would be read as
+        // a query string that is not there.
+        int endOfMethod = text.indexOf("\n    }", uriBuilder);
+        assertThat(endOfMethod).isGreaterThan(uriBuilder);
+        assertThat(text.substring(uriBuilder, endOfMethod))
+                .as("the write addresses a board by number and builds no query string at all")
+                .doesNotContain("member_id")
+                .doesNotContain("?");
+    }
+
     @Test
     @DisplayName("the one file that reads member_id only ever binds it from a response")
     void theActorProbeBindsItNeverSendsIt() throws IOException {

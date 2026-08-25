@@ -51,6 +51,11 @@ public final class Cafe24ReplyRequestShape {
         CONNECTION,
         /** The contract documents a specific value or rule that decides it. */
         CONTRACT_DOCUMENTED,
+        /**
+         * A deployment has to state it explicitly — it is not readable off a page and not derivable
+         * at runtime. Unset is not a default; the adapter refuses to send.
+         */
+        DEPLOYMENT_CONFIGURED,
         /** Not decidable from the contract; the reply-actor observation is what answers it. */
         UNRESOLVED_NEEDS_OBSERVATION,
         /** Not a fact anyone can read off a page — someone has to decide and configure it. */
@@ -95,27 +100,32 @@ public final class Cafe24ReplyRequestShape {
                             + "여기에 답글(REPLY) 행의 번호가 들어가면 고객의 질문이 아닌 글에 답하게 된다."),
             new Field("content", Requirement.REQUIRED, Sourcing.HELD,
                     "사람이 승인한 초안 본문. 승인 해시에 묶인 값 외에는 보내지 않는다."),
-            new Field("writer", Requirement.REQUIRED, Sourcing.UNRESOLVED_NEEDS_OBSERVATION,
-                    "고객에게 보이는 작성자 이름. 보관 값에 없고 '관리자'·'판매자' 같은 문자열을 "
-                            + "지어내는 것은 금지 — 이 판매자의 기존 답변이 실제로 무엇을 담고 있는지 "
-                            + "관측한 뒤에 정한다."),
-            new Field("title", Requirement.REQUIRED, Sourcing.UNRESOLVED_NEEDS_OBSERVATION,
-                    "답변 글의 제목. 계약은 규칙을 말하지 않는다. 기존 답변에서 결정적인 패턴"
-                            + "(부모 제목과 동일 / 접두)이 관측되면 그 규칙을 재사용하고, "
-                            + "아니면 고객 제목을 변형하는 규칙을 새로 만들지 않는다."),
-            new Field("client_ip", Requirement.REQUIRED, Sourcing.PRODUCT_OWNER_DECISION,
-                    "계약상 '작성자의 IP'. 판매자나 브라우저 IP를 흉내내지 않는다. 이 값이 요청을 "
-                            + "실제로 보낸 클라이언트의 IP라면 Action Executor의 설정된 egress IP이며, "
-                            + "런타임 외부 조회로 추측하지 않고 네트워크 구성에서 명시적으로 관리한다."),
-            new Field("member_id", Requirement.OPTIONAL_USED, Sourcing.CONTRACT_DOCUMENTED,
+            new Field("writer", Requirement.REQUIRED, Sourcing.CONNECTION,
+                    "연결이 이미 들고 있는 mall_id를 보낸다. 지어낸 사람 이름이 아니고, 계약이 "
+                            + "member_id=mall_id일 때 작성자를 상점명으로 렌더링한다고 보장하므로 "
+                            + "고객이 보는 이름이 되지도 않는다 — 관측(43/44가 상점 정체)이 그 "
+                            + "렌더링과 양립한다. 기존 답변의 writer 값을 복사하지는 않는다."),
+            new Field("title", Requirement.REQUIRED, Sourcing.HELD,
+                    "질문 글의 제목 그대로. 관측이 결정적이다 — SAME_AS_PARENT 43 · 변형 1(그 1건은 "
+                            + "답글에 달린 답글) · OTHER 0. 고객 제목을 가공하는 규칙은 만들지 않고, "
+                            + "제목이 없거나 256자를 넘으면 자르지 않고 fail-close 한다."),
+            new Field("client_ip", Requirement.REQUIRED, Sourcing.DEPLOYMENT_CONFIGURED,
+                    "계약상 '작성자의 IP'. 기존 답변에서 관측되지만(44/44) 그 값을 재사용하지 "
+                            + "않는다 — 과거 작성자의 IP는 새 요청을 보내는 클라이언트가 아니다. "
+                            + "Action Executor의 egress IP를 배포 설정으로 명시하며, 런타임 외부 "
+                            + "조회로 추측하지 않는다. 미설정이면 전송하지 않는다."),
+            new Field("member_id", Requirement.OPTIONAL_USED, Sourcing.CONNECTION,
                     "계약이 명시한 유일한 출구 — member_id가 mall_id와 같으면 작성자가 사람 이름이 "
-                            + "아니라 상점명으로 렌더링된다. 보관된 연결이 이미 mall_id를 들고 있으므로 "
-                            + "새로 받을 값이 없다. 기존 답변 관측이 이를 지지할 때만 사용한다."),
-            new Field("reply_status", Requirement.OPTIONAL_USED, Sourcing.UNRESOLVED_NEEDS_OBSERVATION,
-                    "이 호출의 reply_status=C가 부모에 붙는지 자식에 붙는지 계약도 관측도 아직 "
-                            + "말하지 않는다. 부모에 붙지 않으면 답변은 나가되 완료 표시는 되지 않는다."),
+                            + "아니라 상점명으로 렌더링된다. 관측에서 이 판매자의 기존 답변 43/44가 "
+                            + "실제로 그 조건을 만족한다. 연결이 이미 mall_id를 들고 있다."),
+            new Field("reply_status", Requirement.OPTIONAL_USED, Sourcing.HELD,
+                    "C를 보낸다 — 계약이 같은 호출에서 받는 유일한 완료 표시 수단이다. 다만 그것이 "
+                            + "부모에 붙는지 자식에 붙는지는 여전히 미증명이며(관측된 자식은 전부 "
+                            + "null, 부모는 43/44가 C), 따라서 전송 성공은 완료 표시를 뜻하지 "
+                            + "않는다 — 부모 상태는 read-back으로 관측하고 다르면 Case B로 남긴다."),
             new Field("reply_user_id", Requirement.NOT_USED, Sourcing.NONE,
-                    "필수가 아니며 의미가 증명되지 않았다. 과거 값이 있다는 이유로 복사하지 않는다."),
+                    "필수가 아니며 의미가 증명되지 않았다. 관측상 자식에는 0/44로 아예 없고 부모에만 "
+                            + "43/44 있다 — 자식에 실으면 플랫폼 자신이 만들지 않는 형태가 된다."),
             new Field("secret", Requirement.NOT_USED, Sourcing.PRODUCT_OWNER_DECISION,
                     "비밀글에 대한 답변이 비밀이어야 하는지는 계약이 정하지 않는다. 기본값을 "
                             + "고르는 것이 곧 고객 노출 결정이므로 여기서 정하지 않는다."),
@@ -165,13 +175,19 @@ public final class Cafe24ReplyRequestShape {
     }
 
     /**
-     * Whether the create request can be assembled from proven values alone.
+     * Whether every field of the create request now has a rule saying where its value comes from.
      *
-     * <p>Deliberately derived rather than declared: it becomes true when the rows above stop saying
-     * {@code UNRESOLVED_NEEDS_OBSERVATION} / {@code PRODUCT_OWNER_DECISION}, which is a change
-     * someone has to make with evidence in hand, and never by flipping a boolean.
+     * <p><b>This is not a statement that a reply can be sent.</b> It is about the BODY only. A send
+     * additionally needs a write grant the seller has to consent to, a configured
+     * {@code client_ip} ({@link Sourcing#DEPLOYMENT_CONFIGURED} means a deployment states it, not
+     * that one has), an approved draft, and a target this repository can name — all of which are
+     * runtime facts checked elsewhere and none of which this class can see.
+     *
+     * <p>Deliberately derived rather than declared: it became true when the rows above stopped
+     * saying {@code UNRESOLVED_NEEDS_OBSERVATION} / {@code PRODUCT_OWNER_DECISION}, which took an
+     * approved observation, and never a flipped boolean.
      */
-    public static boolean writeReady() {
+    public static boolean requestShapeSettled() {
         return blockers().isEmpty();
     }
 }
