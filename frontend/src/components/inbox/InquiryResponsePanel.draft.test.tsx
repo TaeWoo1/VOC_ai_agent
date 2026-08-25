@@ -112,15 +112,22 @@ describe("InquiryResponsePanel — the generated draft", () => {
     expect(await screen.findByText("테이프를 벗기고 벽면에 붙이시면 됩니다.")).toBeInTheDocument();
   });
 
-  it("shows what the draft stood on, with the seller's own document named", async () => {
+  it("summarises what the draft stood on, and names the seller's own document once opened", async () => {
     const user = userEvent.setup();
     render(<InquiryResponsePanel workItemId="w1" />);
 
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
 
-    expect(await screen.findByText("근거")).toBeInTheDocument();
+    // Closed, the seller sees HOW MANY sources and of what kind — the thing they decide from.
+    const disclosure = await screen.findByText(/AI가 확인한 내용/);
+    expect(disclosure).toHaveTextContent("상품 정보 1개");
+
+    // Opened, each source is named. The retrieval's own address for the passage
+    // (「product-knowledge/USAGE:데모 운영자」) is gone from the screen entirely: it identifies a
+    // chunk, and no seller acts on a chunk id.
+    await user.click(disclosure);
     expect(screen.getByText("사용법")).toBeInTheDocument();
-    expect(screen.getByText("product-knowledge/USAGE:데모 운영자")).toBeInTheDocument();
+    expect(screen.queryByText(/product-knowledge\/USAGE/)).toBeNull();
   });
 
   it("states the limitation when the library could not answer — and cites nothing", async () => {

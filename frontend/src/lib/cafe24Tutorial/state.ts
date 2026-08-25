@@ -251,7 +251,7 @@ export const PHASE_COPY: Record<TutorialPhase, { title: string; body: string }> 
     body: "쇼핑몰 주소를 그대로 붙여넣으셔도 됩니다. 어느 쇼핑몰인지 확인해 드립니다.",
   },
   permissions: {
-    title: "요청 권한 안내",
+    title: "권한 안내",
     body: "카페24에는 읽기 전용 권한만 요청합니다. 주문·문의·리뷰를 읽어오며, 글쓰기/답변 권한은 요청하지 않습니다.",
   },
   consent: {
@@ -259,12 +259,12 @@ export const PHASE_COPY: Record<TutorialPhase, { title: string; body: string }> 
     body: "카페24 공식 동의 화면으로 이동합니다. 동의를 마치면 이 화면으로 돌아옵니다.",
   },
   verify: {
-    title: "연결 검증",
-    body: "자격 증명과 쇼핑몰 식별, 게시판 매핑을 읽기 전용으로 검증하고 있습니다.",
+    title: "연결 확인",
+    body: "연결이 제대로 됐는지 확인하고 있습니다. 자료를 읽기만 하며 아무것도 바꾸지 않습니다.",
   },
   first_sync: {
-    title: "첫 동기화",
-    body: "연결은 완료되었습니다. 아래를 누르면 주문 요약을 읽기 전용으로 한 번 가져와 연결을 확인합니다. 나중에 하셔도 됩니다.",
+    title: "자료 가져오기",
+    body: "연결됐습니다. 아래를 누르면 주문 내역을 한 번 가져와 잘 들어오는지 확인합니다. 나중에 하셔도 됩니다.",
   },
   done: {
     title: "연결 완료",
@@ -281,25 +281,25 @@ export const STEP_LABELS: Record<TutorialPhase, string> = {
   mall_confirm: "쇼핑몰 확인",
   permissions: "권한 안내",
   consent: "카페24 동의",
-  verify: "연결 검증",
-  first_sync: "첫 동기화",
+  verify: "연결 확인",
+  first_sync: "자료 가져오기",
   done: "완료",
   failed: "오류",
 };
 
 export const FAILURE_COPY: Record<TutorialFailure, string> = {
   invalid_request:
-    "요청이 만료되었거나 리디렉션 정보가 일치하지 않습니다. 처음부터 다시 연결해 주세요.",
+    "연결 요청이 만료됐습니다. 처음부터 다시 연결해 주세요.",
   reconnect_required:
     "연결 정보를 확인하지 못했습니다. 카페24 동의를 다시 진행해 연결을 갱신해 주세요.",
   scope_insufficient:
-    "연결은 되었지만 주문·문의·리뷰를 읽을 권한(스코프)이 부족합니다. 카페24 앱의 읽기 권한 설정을 확인한 뒤 다시 검증해 주세요.",
+    "연결은 됐지만 주문·문의·리뷰를 읽을 권한이 부족합니다. 카페24에서 읽기 권한을 켠 뒤 다시 확인해 주세요.",
   credential_decrypt:
     "저장된 연결 정보를 확인하지 못했습니다. 카페24 동의를 다시 진행해 주세요.",
   board_mapping:
-    "게시판(구매후기/문의사항) 매핑을 확인하지 못했습니다. 잠시 후 다시 검증해 주세요.",
-  first_sync_failed: "첫 동기화에 실패했습니다. 잠시 후 다시 시도해 주세요.",
-  verify_unavailable: "연결 검증을 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+    "구매후기·문의사항 게시판을 찾지 못했습니다. 잠시 후 다시 확인해 주세요.",
+  first_sync_failed: "자료를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+  verify_unavailable: "지금은 연결을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.",
   start_failed: "카페24 연결 시작에 실패했습니다. 잠시 후 다시 시도해 주세요.",
 };
 

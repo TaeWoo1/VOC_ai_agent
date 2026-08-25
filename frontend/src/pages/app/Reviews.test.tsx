@@ -139,8 +139,8 @@ describe("리뷰 — the workflow surface", () => {
     expect(within(nav).getByRole("link", { current: "page" })).toHaveTextContent("쿠팡");
     expect(screen.getByRole("heading", { level: 1, name: "리뷰" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { level: 2, name: "쿠팡" })).toBeInTheDocument();
-    // The workflow sentence: order first, and what AI 확인 필요 is.
-    expect(screen.getByText(/확인 필요 → 지켜보기 → 참고/)).toBeInTheDocument();
+    // One line, and it answers what the screen is — the tier chips below state the ordering.
+    expect(screen.getByText("확인이 필요한 리뷰부터 봅니다.")).toBeInTheDocument();
   });
 
   it("keeps the tier filter and drops the review selection when switching channel", async () => {

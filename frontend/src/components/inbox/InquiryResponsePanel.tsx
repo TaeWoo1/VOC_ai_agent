@@ -335,13 +335,22 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
 
   return (
     <div className="space-y-6">
-      {/* 1 — THE CUSTOMER'S QUESTION. First, largest, and never competing with a control. */}
+      {/*
+        1 — THE CUSTOMER'S QUESTION. First, largest, and never competing with a control.
+
+        The label steps DOWN and the question steps UP (Executive-friendly UX Redesign v1). 「고객
+        문의」 used to be the bold 17px line and the customer's actual sentence was set at body size
+        under it, so the largest words on the most important screen in the product were the ones the
+        seller already knew.
+      */}
       <section>
-        <h3 className="text-base font-bold text-ink">고객 문의</h3>
+        <h3 className="text-sm font-semibold text-muted">고객 문의</h3>
         {detail.title ? (
-          <p className="mt-2 break-keep font-semibold text-ink">{plainText(detail.title)}</p>
+          <p className="mt-1.5 break-keep text-lg font-bold leading-snug text-ink">
+            {plainText(detail.title)}
+          </p>
         ) : null}
-        <p className="mt-1.5 whitespace-pre-wrap break-keep leading-relaxed text-ink">
+        <p className="mt-2 whitespace-pre-wrap break-keep text-lg leading-relaxed text-ink">
           {plainText(detail.details) || "본문이 없습니다."}
         </p>
         <InquiryMeta
@@ -370,7 +379,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
 
       {/* 2 — THE ANSWER. One section, whatever state it is in. */}
       <section className="rounded-xl border border-line bg-canvas p-5">
-        <h3 className="text-base font-bold text-ink">AI 답변</h3>
+        <h3 className="text-sm font-semibold text-muted">AI가 준비한 답변</h3>
 
         {!draft ? (
           <>
@@ -390,9 +399,18 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
           </>
         ) : (
           <>
-            {/* The limitation, before the text it qualifies — read first, not discovered after. */}
+            {/*
+              The limitation, before the text it qualifies — read first, not discovered after.
+
+              It is a GAP, not a footnote (Executive-friendly UX Redesign v1). This sentence is the
+              product's best property — it says what SellerOps does not know — and it was rendered in
+              the same small grey as every other aside on the screen, so it read as boilerplate. What
+              it actually is, is the one thing the seller can go and fix.
+            */}
             {knowledgeNote ? (
-              <p className="mt-1.5 break-keep text-sm leading-relaxed text-muted">{knowledgeNote}</p>
+              <p className="mt-2 break-keep rounded-lg border-l-4 border-warn/50 bg-warn/5 px-3 py-2 text-base leading-relaxed text-ink">
+                {knowledgeNote}
+              </p>
             ) : null}
             {quotaMessage ? (
               <p className="mt-1.5 break-keep text-sm leading-relaxed text-warn">{quotaMessage}</p>
@@ -440,9 +458,9 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                 </div>
               </div>
             ) : (
-              <div className="mt-4">
+              <div className="mt-4 rounded-xl border border-line bg-surface p-4">
                 <p className="break-keep font-semibold text-ink">{draft.title}</p>
-                <p className="mt-1.5 whitespace-pre-wrap break-keep leading-relaxed text-ink">
+                <p className="mt-1.5 whitespace-pre-wrap break-keep text-lg leading-relaxed text-ink">
                   {draft.comments}
                 </p>
                 <DraftEvidence evidence={evidence} />
@@ -468,34 +486,45 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                 ) : null}
 
                 {!confirming ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {publishable && !draftDirty && !editing ? (
-                      <Btn onClick={() => setConfirming(true)} disabled={busy}>
-                        답변 보내기
-                      </Btn>
-                    ) : null}
+                  /*
+                    ONE PRIMARY, THEN THE REST (Executive-friendly UX Redesign v1).
+
+                    These four controls used to sit in one wrapping row at the same small size, so
+                    「답변 보내기」 — the only irreversible action in the product — and 「다시 작성」
+                    were the same object to a reader scanning it. The action the seller came here to
+                    take is now alone on its line at full size; 수정 and 다시 작성 are text under it.
+
+                    Which control IS the primary still depends on the channel, not on this component's
+                    preference: where SellerOps cannot register the answer itself, copying is the
+                    action and it takes the emphasis 답변 보내기 would have had.
+                  */
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {publishable && !draftDirty && !editing ? (
+                        <Btn onClick={() => setConfirming(true)} disabled={busy}>
+                          답변 보내기
+                        </Btn>
+                      ) : null}
+                      {draft && !editing && !draftDirty ? (
+                        <Btn
+                          size={publishable ? "sm" : "md"}
+                          variant={publishable ? "outline" : "solid"}
+                          onClick={onCopyDraft}
+                          disabled={busy}
+                        >
+                          {copied ? "복사했습니다" : "초안 복사"}
+                        </Btn>
+                      ) : null}
+                    </div>
                     {!editing && draftEditable ? (
-                      <Btn size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
-                        수정
-                      </Btn>
-                    ) : null}
-                    {!editing && draftEditable ? (
-                      <Btn size="sm" variant="ghost" onClick={onGenerateDraft} disabled={busy}>
-                        다시 작성
-                      </Btn>
-                    ) : null}
-                    {/* Where SellerOps cannot register the answer itself, copying IS the action — so
-                        it takes the emphasis 답변 보내기 would have had, and steps down to secondary
-                        beside a real send. */}
-                    {draft && !editing && !draftDirty ? (
-                      <Btn
-                        size="sm"
-                        variant={publishable ? "outline" : "solid"}
-                        onClick={onCopyDraft}
-                        disabled={busy}
-                      >
-                        {copied ? "복사했습니다" : "초안 복사"}
-                      </Btn>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Btn size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
+                          수정
+                        </Btn>
+                        <Btn size="sm" variant="ghost" onClick={onGenerateDraft} disabled={busy}>
+                          다시 작성
+                        </Btn>
+                      </div>
                     ) : null}
                   </div>
                 ) : (
@@ -545,7 +574,11 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                 ) : null}
 
                 {!publishable ? (
-                  <p className="mt-3 break-keep text-sm leading-relaxed text-muted">{unavailableReason}</p>
+                  /* The sentence that tells the seller what finishing this looks like. It was the
+                     smallest text on the screen while being the only instruction on it. */
+                  <p className="mt-3 break-keep text-base leading-relaxed text-muted">
+                    {unavailableReason}
+                  </p>
                 ) : draftDirty ? (
                   // A dirty editor means the fingerprint on screen is not the one that would be sent.
                   // Said while the editor is open too — that is when the seller can act on it.
@@ -643,6 +676,10 @@ function InquiryMeta({
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
       {detail.channelNameKo ? <span>{detail.channelNameKo}</span> : null}
+      {/* 「상품 미지정」 STAYS (Executive-friendly UX Redesign v1 — considered and rejected). Hiding
+          the absence and offering only the control that fixes it reads cleaner and is less honest:
+          the missing product is WHY a draft could not be grounded, and the gap line that explains
+          that in full does not exist until a draft has been generated. */}
       <span aria-hidden="true">·</span>
       <span>{productLabel(detail)}</span>
       {provenance ? <span className="text-muted">({provenance})</span> : null}
@@ -683,8 +720,7 @@ function DraftEvidence({ evidence }: { evidence: DraftEvidenceView[] }) {
   if (evidence.length === 0) return null;
   // Grouped by where it came from, in the order the retrieval returned it. A seller who disagrees
   // with the reply needs to know WHICH thing to go and fix — a wrong spec is fixed in 상품 지식, a
-  // wrong shipping promise in 운영 정책, and neither fix reaches the other. The locator carries the
-  // full provenance and stays where it was; the group heading is what makes the list scannable.
+  // wrong shipping promise in 운영 정책, and neither fix reaches the other.
   const groups: Array<{ label: string; items: DraftEvidenceView[] }> = [];
   for (const item of evidence) {
     const label = item.scopeLabel ?? item.kind;
@@ -692,10 +728,24 @@ function DraftEvidence({ evidence }: { evidence: DraftEvidenceView[] }) {
     if (last && last.label === label) last.items.push(item);
     else groups.push({ label, items: [item] });
   }
+  // 「상품 정보 2개 · 과거 답변 1개」 — the summary a seller decides from, closed.
+  const summary = groups.map((group) => `${group.label} ${group.items.length}개`).join(" · ");
   return (
-    <div className="mt-4 border-t border-line pt-3">
-      <p className="text-sm font-medium text-ink">근거</p>
-      <div className="mt-1.5 space-y-2">
+    /*
+      CLOSED BY DEFAULT (Executive-friendly UX Redesign v1, §7 progressive disclosure).
+
+      This list used to be permanently open under every draft, and each line carried `item.locator` —
+      the retrieval's own address for the passage, a technical string beside a Korean title. A seller
+      deciding whether to send an answer needs to know HOW MANY sources it stands on and of what kind;
+      the addresses matter only to someone who has already decided to go and check, and they can open
+      it. The locator is gone from the screen entirely: it identified a chunk, and no seller acts on a
+      chunk id.
+    */
+    <details className="mt-4 border-t border-line pt-3">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg text-sm font-semibold text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
+        AI가 확인한 내용{summary ? ` · ${summary}` : ""}
+      </summary>
+      <div className="mt-2 space-y-2">
         {groups.map((group, groupIndex) => (
           <div key={`${group.label}-${groupIndex}`}>
             <p className="text-sm font-medium text-muted">{group.label}</p>
@@ -703,16 +753,15 @@ function DraftEvidence({ evidence }: { evidence: DraftEvidenceView[] }) {
               {group.items.map((item, index) => (
                 <li
                   key={`${item.chunkId ?? item.sourceId ?? "evidence"}-${index}`}
-                  className="text-sm text-muted"
+                  className="break-keep text-sm text-ink"
                 >
-                  <span className="break-keep text-ink">{item.title ?? group.label}</span>
-                  {item.locator ? <span className="ml-2 break-all">{item.locator}</span> : null}
+                  {item.title ?? group.label}
                 </li>
               ))}
             </ul>
           </div>
         ))}
       </div>
-    </div>
+    </details>
   );
 }

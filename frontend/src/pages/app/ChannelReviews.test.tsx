@@ -166,7 +166,7 @@ describe("reply work on the 리뷰 screen (A6)", () => {
     renderPage("/reviews/acc-1?review=r1");
 
     // The workflow sentence says the screen prepares replies here — and that posting stays with the seller.
-    expect(await screen.findByText(/여기서 답변을 준비합니다/)).toBeInTheDocument();
+    expect(await screen.findByText(/올리는 일은 판매자센터에서 직접 합니다/)).toBeInTheDocument();
     const reply = await screen.findByRole("region", { name: "답변" });
     expect(within(reply).getByRole("button", { name: "대응 필요" })).toBeInTheDocument();
     // Undecided and no work yet: the preparation panel stays off (it would open a read for nothing).

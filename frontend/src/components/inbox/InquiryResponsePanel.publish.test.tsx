@@ -113,7 +113,7 @@ describe("InquiryResponsePanel — the send is offered only when the backend say
     getInquiryPublishCapability.mockResolvedValue({ executionEnabled: false, replyAdapterChannelCodes: [] });
     render(<InquiryResponsePanel workItemId="w1" />);
 
-    await screen.findByText("AI 답변");
+    await screen.findByText("AI가 준비한 답변");
     expect(screen.queryByRole("button", { name: /답변 보내기/ })).not.toBeInTheDocument();
     // …and it says WHY, rather than leaving a silent gap where a control would be.
     expect(screen.getByText(/대신 등록하지 않습니다/)).toBeInTheDocument();

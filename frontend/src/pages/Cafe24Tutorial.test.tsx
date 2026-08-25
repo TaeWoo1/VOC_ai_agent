@@ -148,7 +148,7 @@ describe("Cafe24Tutorial callback resume", () => {
       }),
     );
     renderAt(`${ROUTE}?status=connected&accountId=acc-1`);
-    expect(await screen.findByText(/게시판.*매핑/)).toBeInTheDocument();
+    expect(await screen.findByText(/구매후기·문의사항 게시판/)).toBeInTheDocument();
     expect(api.manualSync).not.toHaveBeenCalled();
   });
 
@@ -157,7 +157,7 @@ describe("Cafe24Tutorial callback resume", () => {
     vi.mocked(api.manualSync).mockResolvedValue(syncRun({ status: "FAILED" }));
     renderAt(`${ROUTE}?status=connected&accountId=acc-1`);
     await userEvent.click(await screen.findByRole("button", { name: "첫 수집 실행" }));
-    expect(await screen.findByText(/첫 동기화에 실패/)).toBeInTheDocument();
+    expect(await screen.findByText(/자료를 가져오지 못했습니다/)).toBeInTheDocument();
   });
 
   it("skipping the first collection still finishes the connection", async () => {
@@ -207,7 +207,7 @@ describe("Cafe24Tutorial refresh recovery", () => {
       JSON.stringify({ phase: "permissions", mallId: "mystore", accountId: null, failure: null }),
     );
     renderAt(ROUTE);
-    expect(await screen.findByText("요청 권한 안내")).toBeInTheDocument();
+    expect(await screen.findByText("권한 안내")).toBeInTheDocument();
     expect(screen.getByText("mystore")).toBeInTheDocument();
   });
 });

@@ -111,15 +111,31 @@ function ChannelRow({
           <p className="break-keep font-semibold text-ink">{channel.nameKo}</p>
           <StatePill state={state} loading={statusLoading && !!account} />
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <Chip>{support.primaryLabel}</Chip>
-          {support.chips.map((chip) => (
-            <Chip key={chip}>{chip}</Chip>
-          ))}
-        </div>
-        {support.uploadQualifier ? (
-          <p className="mt-2 break-keep text-sm text-muted">{support.uploadQualifier}</p>
-        ) : null}
+        {/*
+          SUPPORT COPY IS FOR CHOOSING, NOT FOR LIVING WITH (Executive-friendly UX Redesign v1).
+
+          「자동 수집 지원: 문의·주문」 · 「엑셀 업로드 지원」 · 「리뷰·문의·주문 양식은 채널별 확인
+          필요」 answer 「이 채널을 붙이면 무엇을 받나」 — a real question, and the only question, for a
+          channel that is not connected yet. On a connected row they are three pills and a caveat
+          about a decision the seller already made, printed on every channel, every visit.
+
+          Nothing is reworded and nothing is dropped from the unconnected case: the wording rules in
+          `channelSupport.ts` are untouched and the same copy renders wherever a seller still has the
+          choice to make.
+        */}
+        {account ? null : (
+          <>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <Chip>{support.primaryLabel}</Chip>
+              {support.chips.map((chip) => (
+                <Chip key={chip}>{chip}</Chip>
+              ))}
+            </div>
+            {support.uploadQualifier ? (
+              <p className="mt-2 break-keep text-sm text-muted">{support.uploadQualifier}</p>
+            ) : null}
+          </>
+        )}
         <p className="mt-2 text-sm text-muted">
           {lastCollected ? `마지막 수집 ${relativeTime(lastCollected)}` : "수집 이력 없음"}
         </p>

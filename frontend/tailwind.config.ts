@@ -15,7 +15,11 @@ export default {
         surface: "#FFFFFF",
         canvas: "#F2F4F6",
         ink: "#191F28",
-        muted: "#6B7684",
+        // Darkened from #6B7684 (Executive-friendly UX Redesign v1). The old value measures
+        // 4.19:1 against `canvas` (#F2F4F6) — below WCAG AA 4.5:1 — and nearly every supporting
+        // sentence in the product is muted-on-canvas. #4E5968 measures 7.0:1 on surface and
+        // 6.3:1 on canvas, so the same words survive a 50-year-old pair of eyes.
+        muted: "#4E5968",
         line: "#E5E8EB",
         good: "#15803D",
         warn: "#B45309",
@@ -34,6 +38,13 @@ export default {
       },
       fontSize: {
         // Larger-than-default scale for 40-50+ operators.
+        //
+        // `xs` and `sm` were left at the Tailwind defaults (12px/1.33, 14px/1.43) while `base` was
+        // raised to 17px — so the gap between a headline and the line under it grew instead of the
+        // whole scale moving. Metadata is where this product says what it does NOT know, and 12px
+        // is where that stops being read.
+        xs: ["13px", "1.5"],
+        sm: ["15px", "1.6"],
         base: ["17px", "1.6"],
         lg: ["19px", "1.5"],
         xl: ["22px", "1.4"],

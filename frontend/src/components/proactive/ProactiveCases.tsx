@@ -4,13 +4,7 @@ import { Chip } from "../ui/Chip";
 import { BtnLink } from "../ui/Btn";
 import { api } from "../../lib/apiClient";
 import { analytics } from "../../lib/analytics";
-import {
-  PREPARED_ACTION_LABEL,
-  PRIORITY_LABEL,
-  analyticsKind,
-  caseTarget,
-  evidenceLabel,
-} from "../../lib/proactive";
+import { analyticsKind, caseTarget, preparedBadge } from "../../lib/proactive";
 import type { ProactiveCaseView } from "../../lib/types";
 import { previewText } from "../../lib/plainText";
 
@@ -95,49 +89,45 @@ function ProactiveCard({
   view: ProactiveCaseView;
   onOpen: (view: ProactiveCaseView) => void;
 }) {
-  const evidence = evidenceLabel(view);
-  // One line, in the order a seller reads it: what it is, what SellerOps did, what that was built on.
-  const status = [view.reasonNote, PREPARED_ACTION_LABEL[view.preparedAction], evidence]
-    .filter(Boolean)
-    .join(" · ");
+  const badge = preparedBadge(view);
+  // Why it is here, in ONE line. The card used to stack up to four grey sentences of equal weight —
+  // reasonNote, prepared action, evidence count, knowledge gap, recommendation — under a headline,
+  // and a reader with 50-year-old eyes does not survive four. What SellerOps did is now the badge;
+  // what the evidence was and what is missing are on the screen where the seller acts on them.
+  const why = [view.reasonNote, view.recommendation].filter(Boolean).join(" · ") || null;
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border border-line bg-surface px-4 py-3.5">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border border-line bg-surface px-5 py-4">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Chip tone={view.priority === "HIGH" ? "accent" : "neutral"}>
-            {PRIORITY_LABEL[view.priority]}
-          </Chip>
+          <Chip tone={badge.tone}>{badge.label}</Chip>
+          {/* Channel and kind — the only metadata on the card. 상품 is deliberately absent: this
+              org's backlog is largely unattributed, so the line read 「… · 상품 미지정」 on card after
+              card, and a fact that is the same everywhere is not a fact the seller reads. */}
           <span className="break-keep text-sm text-muted">
+            {view.channelNameKo ? `${view.channelNameKo} ` : ""}
             {view.subjectKind === "INQUIRY" ? "문의" : "리뷰"}
-            {view.channelNameKo ? ` · ${view.channelNameKo}` : ""}
             {view.rating != null ? ` · ${view.rating}점` : ""}
-            {` · ${view.productName ?? "상품 미지정"}`}
           </span>
         </div>
 
         {/* The row the seller recognises the work by. Masked server-side, never the buyer. */}
-        <p className="mt-1.5 break-keep font-semibold leading-snug text-ink">
+        <p className="mt-2 break-keep text-lg font-semibold leading-snug text-ink">
           {previewText(view.snippet)}
         </p>
 
-        {/* Why it is here NOW, and how far SellerOps got — one line, because three stacked sentences
-            of the same weight is how a card stops being read. */}
-        <p className="mt-1 break-keep text-sm leading-relaxed text-muted">{status}</p>
-        {view.recommendation ? (
-          <p className="mt-0.5 break-keep text-sm leading-relaxed text-muted">
-            {view.recommendation}
-          </p>
+        {why ? (
+          <p className="mt-1 break-keep text-base leading-relaxed text-muted">{why}</p>
         ) : null}
-        {/* The gap, when there is one — a sentence, not a box. A tinted panel inside a card read as a
-            warning about the card itself. */}
+        {/* The gap, when there is one. It survives the trim because it is the only line on the card
+            that names something the SELLER can go and fix — everything else describes what already
+            happened. */}
         {view.knowledgeGap ? (
-          <p className="mt-0.5 break-keep text-sm leading-relaxed text-muted">{view.knowledgeGap}</p>
+          <p className="mt-1 break-keep text-base leading-relaxed text-muted">{view.knowledgeGap}</p>
         ) : null}
       </div>
 
-      {/* The single most important control on this section, at the emphasis that says so. It used to
-          be an outline button — the quietest thing on a screen whose whole point was to be acted on. */}
-      <BtnLink to={caseTarget(view)} size="sm" onClick={() => onOpen(view)} className="shrink-0">
+      {/* The single most important control on this section, at the emphasis that says so. */}
+      <BtnLink to={caseTarget(view)} onClick={() => onOpen(view)} className="shrink-0">
         확인하기
       </BtnLink>
     </div>

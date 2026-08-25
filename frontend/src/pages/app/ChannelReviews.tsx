@@ -303,28 +303,38 @@ export function ChannelReviews({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="break-keep text-lg font-semibold text-ink">{channelName ?? word}</h2>
-          <p className="mt-1 break-keep text-sm leading-relaxed text-muted">
-            {capability === null
-              ? `확인할 ${josa(word, "을", "를")} 고르는 곳입니다.`
-              : capability.replySupported
-                ? `확인할 ${josa(word, "을", "를")} 고르고, 답변이 필요한 ${josa(word, "은", "는")} 여기서 답변을 준비합니다. 올리는 일은 판매자센터 화면에서 직접 합니다.`
-                : `이 채널에서는 SellerOps가 답변을 작성하지 않습니다. 확인할 ${josa(word, "을", "를")} 고르는 곳입니다.`}
-          </p>
+          {/*
+            ONE LINE OF CONTEXT, NOT THREE CHIPS AND A PARAGRAPH (Executive-friendly UX Redesign v1).
+
+            This block used to be a two-line sentence explaining what the screen is for — which the
+            page heading above it already says — followed by a row of three chips. Between the h1 and
+            the first review there were seven stacked blocks, roughly 610px at 1440×900, so a seller
+            arriving here scrolled before seeing a single customer's words.
+
+            The record's size and its collection state still have to be visible: the size is what
+            tells a seller the list is a slice, and 「수집 기록 없음」 is a claim about what SellerOps
+            can and cannot see. They are one quiet line instead of three pills.
+          */}
           {page ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {/*
-                The RECORD's size, not the filtered page's. `page.total` narrows with a tier filter
-                while `newCount` and the tier chips stay channel-wide by design. Which slice is on
-                screen is the range label's job, under the list.
-              */}
-              <Chip>총 {recordTotal(page)}개</Chip>
-              {page.newCount > 0 ? <Chip tone="accent">새로 들어온 {page.newCount}개</Chip> : null}
-              {page.lastImportAt ? (
-                <Chip>마지막 수집 {formatDateTime(page.lastImportAt)}</Chip>
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted">
+              <span className="tabular-nums">{`총 ${recordTotal(page)}개`}</span>
+              {page.newCount > 0 ? (
+                <span className="font-semibold tabular-nums text-brand-700">
+                  {`새로 들어온 ${page.newCount}개`}
+                </span>
+              ) : null}
+              <span>
+                {page.lastImportAt ? `마지막 수집 ${formatDateTime(page.lastImportAt)}` : "수집 기록 없음"}
+              </span>
+              {/* WHO WRITES THE ANSWER stays on the screen, in one clause instead of two sentences.
+                  It is a capability fact, not decoration: on a channel with no proven reply write,
+                  a seller must not be able to read this list as somewhere answers go out from. */}
+              {capability === null ? null : capability.replySupported ? (
+                <span>답변은 여기서 준비하고, 올리는 일은 판매자센터에서 직접 합니다</span>
               ) : (
-                <Chip>수집 기록 없음</Chip>
+                <span>이 채널에서는 SellerOps가 답변을 작성하지 않습니다</span>
               )}
-            </div>
+            </p>
           ) : null}
         </div>
         <BtnLink to={`/connect/channels/${accountId}`} variant="outline" size="sm">
@@ -445,7 +455,17 @@ export function ChannelReviews({
           }
         />
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+        <div
+          /* No dead pane (Executive-friendly UX Redesign v1). With nothing chosen, 상세 held a panel
+             heading and two grey sentences explaining that a panel would appear — a fifth of the
+             screen spent describing the screen. The list takes the width until there is something to
+             put in the other column. */
+          className={
+            selectedId
+              ? "grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]"
+              : "grid gap-6"
+          }
+        >
           <Panel title="목록" description={shownRangeLabel(page)}>
             <ul className="divide-y divide-line">
               {(page?.items ?? []).map((item) => (
@@ -524,7 +544,8 @@ export function ChannelReviews({
             ) : null}
           </Panel>
 
-          <Panel title="상세" description={selectedId ? undefined : `왼쪽에서 ${josa(word, "을", "를")} 선택하세요`}>
+          {selectedId ? (
+          <Panel title="상세">
             {detailError ? (
               <p className="text-muted">{josa(word, "을", "를")} 불러오지 못했습니다.</p>
             ) : detail ? (
@@ -543,12 +564,11 @@ export function ChannelReviews({
                 running={locate.reviewId === detail.id && locate.starting}
                 unavailable={locate.reviewId === detail.id ? locate.unavailable : null}
               />
-            ) : selectedId ? (
-              <p className="text-muted">불러오는 중…</p>
             ) : (
-              <p className="text-muted">선택한 {word}의 전체 내용이 여기에 표시됩니다.</p>
+              <p className="text-muted">불러오는 중…</p>
             )}
           </Panel>
+          ) : null}
         </div>
       )}
       {/*
@@ -929,8 +949,8 @@ function TriageReason({ note }: { note: ReviewTriageNote }) {
 function TriageSummary({ page, word }: { page: ChannelReviewPageView; word: string }) {
   const { needsAttention, repeatedCategories } = page.triageSummary;
   return (
-    <div className="rounded-xl border border-line bg-canvas px-4 py-3 text-sm leading-relaxed">
-      <p className="text-ink">
+    <div className="rounded-xl border border-line bg-canvas px-4 py-3 leading-relaxed">
+      <p className="text-base font-semibold text-ink">
         {needsAttention > 0 ? (
           <>
             지금 확인이 필요한 {word} <b>{needsAttention}건</b>
@@ -942,11 +962,13 @@ function TriageSummary({ page, word }: { page: ChannelReviewPageView; word: stri
       </p>
       {repeatedCategories.length > 0 ? (
         <>
-          <p className="mt-1 text-muted">
+          <p className="mt-1 text-sm text-muted">
             반복되는 분류 ·{" "}
             {repeatedCategories.map((c) => `${c.category} ${c.count}건`).join(" · ")}
           </p>
-          <p className="mt-1 text-muted">{TRIAGE_TAG_DISCLOSURE}</p>
+          {/* The caveat stays — it says the categories are a keyword guess — but it is not the same
+              size as the count it qualifies. */}
+          <p className="mt-1 text-sm text-muted">{TRIAGE_TAG_DISCLOSURE}</p>
         </>
       ) : null}
     </div>

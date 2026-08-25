@@ -91,7 +91,7 @@ async function ask(view: AgentRunView) {
   renderWithRouter(<Agent />);
   await screen.findByRole("heading", { level: 1 });
   await userEvent.type(screen.getByRole("textbox"), "오늘 뭐부터 봐야 해?");
-  await userEvent.click(screen.getByRole("button", { name: /실행|보내기|요청/ }));
+  await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
   // The card's own heading — "운영 판단" also appears as the run's domain label above it.
   await waitFor(() =>
     expect(screen.getByRole("heading", { level: 3, name: "운영 판단" })).toBeInTheDocument(),
@@ -237,7 +237,7 @@ describe("planner unavailable — the Agent lane stops, the Dashboard lane does 
     renderWithRouter(<Agent />);
     await screen.findByRole("heading", { level: 1 });
     await userEvent.type(screen.getByRole("textbox"), "오늘 뭐부터 봐야 해?");
-    await userEvent.click(screen.getByRole("button", { name: /실행/ }));
+    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
     await waitFor(() => expect(screen.getByText("처리하지 못함")).toBeInTheDocument());
   }
 

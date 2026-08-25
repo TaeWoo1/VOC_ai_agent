@@ -170,13 +170,22 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
   );
   // Resolved against everything loaded, not the filtered view, so a shared link still opens.
   const selection = resolveSelection(all, itemRef);
+  // What the collapsed 필터 control says when it is closed. Only non-default choices are named — a
+  // summary reading 「전체 · 전체 기간 · 전체」 would be three words telling the seller nothing.
+  const filterSummary = [
+    filters.state === "ALL" ? null : stateOptions.find((o) => o.value === filters.state)?.label,
+    filters.channel,
+    filters.period === DEFAULT_FILTERS.period ? null : "기간 지정",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <>
       {inquiriesOnly ? (
         <PageHead
           title="문의"
-          description="답변 필요 → 답변함 순으로 봅니다. 초안은 AI가 쓰고, 보낼지는 문의마다 직접 확인합니다."
+          description="답변이 필요한 문의부터 봅니다. 보낼지는 직접 확인합니다."
           action={
             <AgentLaunch
               context={{
@@ -234,68 +243,92 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
           action={<BtnLink to="/connect">채널 연결하기</BtnLink>}
         />
       ) : (
-        /* The detail pane is the widest column, not the narrowest: 문의 상세 is where the question,
-           the evidence and the draft have to be readable together (Demo UX Polish v1). The filter
-           rail keeps only what a rail needs. */
-        <div className="grid gap-5 lg:grid-cols-[168px_minmax(0,0.85fr)_minmax(0,1.15fr)]">
-          <div className="lg:sticky lg:top-4 lg:self-start">
-            <InboxFilterRail
-              items={all}
-              filters={filters}
-              onChange={setFilters}
-              showType={!inquiriesOnly}
-              stateOptions={stateOptions}
-            />
-          </div>
+        /*
+          TWO SHAPES, NOT ONE (Executive-friendly UX Redesign v1).
 
+          The screen used to be three columns at every moment — 168px of filters, the list, the
+          detail — so the work a seller had actually chosen to do lived in the narrowest third while
+          eleven filter chips held the position the eye reaches first. Worse, with nothing selected
+          that third was a paragraph reading 「왼쪽 목록에서 항목을 고르면…」: forty per cent of the
+          screen spent explaining the screen.
+
+          Now the layout answers one question at a time. Nothing chosen → the list is the page.
+          A row chosen → the list steps back to a 340px rail and 고객 문의 + AI 답변 take everything
+          else, which is the only way §6 「이 둘이 가장 크게」 is true at 1440px.
+        */
+        <div
+          className={
+            selection.kind === "NONE"
+              ? ""
+              : "grid gap-5 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]"
+          }
+        >
           {/* On narrow screens the chosen row replaces the list, so only one pane competes. */}
-          <div
-            className={`overflow-hidden rounded-2xl border border-line bg-surface ${
-              selection.kind === "FOUND" ? "hidden lg:block" : ""
-            }`}
-          >
-            {visible.length === 0 ? (
-              <p className="px-4 py-10 text-center text-muted">
-                선택한 조건에 해당하는 항목이 없습니다.
-              </p>
-            ) : (
-              <InboxList
-                items={visible}
-                analyses={analysisIndex}
-                selectedId={selection.kind === "FOUND" ? selection.item.id : null}
-                basePath={basePath}
-                search={search}
-                showType={!inquiriesOnly}
-              />
-            )}
+          <div className={selection.kind === "FOUND" ? "hidden space-y-3 lg:block" : "space-y-3"}>
+            {/* Filters are a tool, not the work. They open when a seller goes looking for them, and
+                they stay reachable with a row open — a filter you can only get to by closing the
+                thing you are working on is a filter the seller stops using. */}
+            <details>
+              <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-semibold text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
+                필터
+                {filterSummary ? <span className="font-normal">· {filterSummary}</span> : null}
+              </summary>
+              <div className="mt-3 rounded-2xl border border-line bg-surface p-4">
+                <InboxFilterRail
+                  items={all}
+                  filters={filters}
+                  onChange={setFilters}
+                  showType={!inquiriesOnly}
+                  stateOptions={stateOptions}
+                />
+              </div>
+            </details>
+
+            <div
+              className={`overflow-hidden rounded-2xl border border-line bg-surface ${
+                selection.kind === "FOUND" ? "lg:max-h-[calc(100vh-13rem)] lg:overflow-y-auto" : ""
+              }`}
+            >
+              {visible.length === 0 ? (
+                <p className="px-4 py-10 text-center text-muted">
+                  선택한 조건에 해당하는 항목이 없습니다.
+                </p>
+              ) : (
+                <InboxList
+                  items={visible}
+                  selectedId={selection.kind === "FOUND" ? selection.item.id : null}
+                  basePath={basePath}
+                  search={search}
+                  showType={!inquiriesOnly}
+                />
+              )}
+            </div>
           </div>
 
-          <div className="rounded-2xl border border-line bg-surface p-5 lg:sticky lg:top-4 lg:self-start">
-            {selection.kind === "FOUND" ? (
-              <InboxDetail
-                item={selection.item}
-                analysis={analysisIndex.get(
-                  analysisKey(selection.item.type, selection.item.id),
-                )}
-                workItemId={
-                  selection.item.type === "INQUIRY"
-                    ? workItems.get(selection.item.id) ?? null
-                    : null
-                }
-              />
-            ) : selection.kind === "MISSING" ? (
-              <div>
-                <p className="break-keep font-semibold text-ink">항목을 찾을 수 없습니다</p>
-                <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
-                  목록에서 다시 선택해 주세요. 자료가 다시 정리되면서 항목이 바뀌었을 수 있습니다.
-                </p>
-              </div>
-            ) : (
-              <p className="break-keep text-sm leading-relaxed text-muted">
-                왼쪽 목록에서 항목을 고르면 내용과 처리 상태가 여기에 표시됩니다.
-              </p>
-            )}
-          </div>
+          {selection.kind === "NONE" ? null : (
+            <div className="rounded-2xl border border-line bg-surface p-6">
+              {selection.kind === "FOUND" ? (
+                <InboxDetail
+                  item={selection.item}
+                  analysis={analysisIndex.get(
+                    analysisKey(selection.item.type, selection.item.id),
+                  )}
+                  workItemId={
+                    selection.item.type === "INQUIRY"
+                      ? workItems.get(selection.item.id) ?? null
+                      : null
+                  }
+                />
+              ) : (
+                <div>
+                  <p className="break-keep font-semibold text-ink">항목을 찾을 수 없습니다</p>
+                  <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
+                    목록에서 다시 선택해 주세요. 자료가 다시 정리되면서 항목이 바뀌었을 수 있습니다.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </>

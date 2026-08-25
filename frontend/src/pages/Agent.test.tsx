@@ -155,7 +155,7 @@ describe("운영 에이전트 page", () => {
     agentMock.startRun.mockResolvedValue(INQUIRY_AWAITING);
     renderWithRouter(<Agent />);
     await userEvent.type(screen.getByLabelText("확인할 내용"), "미답변 문의 처리해줘");
-    await userEvent.click(screen.getByRole("button", { name: "실행" }));
+    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
 
     const group = await screen.findByRole("group", { name: "문의 답변 승인" });
     expect(group).toBeInTheDocument();
@@ -170,7 +170,7 @@ describe("운영 에이전트 page", () => {
     agentMock.resumeRun.mockResolvedValue(INQUIRY_DONE);
     renderWithRouter(<Agent />);
     await userEvent.type(screen.getByLabelText("확인할 내용"), "미답변 문의");
-    await userEvent.click(screen.getByRole("button", { name: "실행" }));
+    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
     await screen.findByRole("group", { name: "문의 답변 승인" });
     await userEvent.click(screen.getByRole("button", { name: "승인 (기록)" }));
 
@@ -185,7 +185,7 @@ describe("운영 에이전트 page", () => {
     agentMock.startRun.mockResolvedValue(ISSUE_DONE);
     renderWithRouter(<Agent />);
     await userEvent.type(screen.getByLabelText("확인할 내용"), "지금 먼저 확인할 운영 이슈는 뭐야");
-    await userEvent.click(screen.getByRole("button", { name: "실행" }));
+    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
 
     expect(await screen.findByRole("group", { name: "운영 이슈 브리핑" })).toBeInTheDocument();
     expect(screen.getByText("포장 파손")).toBeInTheDocument();
@@ -202,14 +202,14 @@ describe("운영 에이전트 page", () => {
     agentMock.startRun.mockResolvedValueOnce(runA).mockResolvedValueOnce(runB);
     renderWithRouter(<Agent />);
     await userEvent.type(screen.getByLabelText("확인할 내용"), "미답변 문의");
-    await userEvent.click(screen.getByRole("button", { name: "실행" }));
+    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
     const editor = (await screen.findByLabelText("답변 초안")) as HTMLTextAreaElement;
     // Operator edits run A's draft but does NOT approve.
     await userEvent.clear(editor);
     await userEvent.type(editor, "운영자가 A를 수정함");
     // A second command produces a different AWAITING inquiry run.
     await userEvent.type(screen.getByLabelText("확인할 내용"), " 다시");
-    await userEvent.click(screen.getByRole("button", { name: "실행" }));
+    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
     // The editor must show run B's fresh draft, not the stale edit from run A.
     const editor2 = (await screen.findByLabelText("답변 초안")) as HTMLTextAreaElement;
     expect(editor2.value).toBe("다른 초안 내용입니다.");
@@ -219,7 +219,7 @@ describe("운영 에이전트 page", () => {
   it("draft: 초안 생성 shows the draft + channel/status/secret and the not-sent line, with no send/approve control", async () => {
     agentMock.startRun.mockResolvedValue(DRAFT_PREPARED);
     renderWithRouter(<Agent />);
-    await userEvent.click(await screen.findByRole("button", { name: "초안 생성" }));
+    await userEvent.click(await screen.findByRole("button", { name: "미답변 문의로 답변 초안 만들어 보기" }));
 
     const group = await screen.findByRole("group", { name: "문의 답변 초안" });
     expect(group).toBeInTheDocument();
@@ -243,7 +243,7 @@ describe("운영 에이전트 page", () => {
   it("draft: 초안 다시 만들기 warns before overwriting a locally edited draft, then regenerates on 계속", async () => {
     agentMock.startRun.mockResolvedValue(DRAFT_PREPARED);
     renderWithRouter(<Agent />);
-    await userEvent.click(await screen.findByRole("button", { name: "초안 생성" }));
+    await userEvent.click(await screen.findByRole("button", { name: "미답변 문의로 답변 초안 만들어 보기" }));
     const editor = (await screen.findByLabelText("답변 초안")) as HTMLTextAreaElement;
     await userEvent.type(editor, " 추가 편집");
 
@@ -284,7 +284,7 @@ describe("운영 에이전트 page", () => {
       },
     });
     renderWithRouter(<Agent />);
-    await userEvent.click(await screen.findByRole("button", { name: "초안 생성" }));
+    await userEvent.click(await screen.findByRole("button", { name: "미답변 문의로 답변 초안 만들어 보기" }));
     expect(await screen.findByText("지금 초안을 만들 미답변 문의가 없습니다.")).toBeInTheDocument();
     expect(screen.queryByLabelText("답변 초안")).toBeNull();
   });
@@ -293,7 +293,7 @@ describe("운영 에이전트 page", () => {
     agentMock.startRun.mockRejectedValue(new AgentRuntimeError(400, "MISSING_ACCOUNT_SCOPE"));
     renderWithRouter(<Agent />);
     await userEvent.type(screen.getByLabelText("확인할 내용"), "리뷰 답변 준비해줘");
-    await userEvent.click(screen.getByRole("button", { name: "실행" }));
+    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("판매 계정을 선택");
   });
 });

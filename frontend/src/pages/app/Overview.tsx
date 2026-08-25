@@ -2,14 +2,14 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { SectionHeader } from "../../components/ui/SectionHeader";
-import { Metric, MetricGrid, MetricNote } from "../../components/ui/Metric";
+import { Metric, MetricLine, MetricRowOfThree } from "../../components/ui/Metric";
 import { TrendChart } from "../../components/ui/TrendChart";
 import { InsightList } from "../../components/ui/InsightList";
 import { DataTable, Td, Th } from "../../components/ui/DataTable";
 import { DataStateBadge } from "../../components/ui/DataState";
 import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { Empty } from "../../components/ui/Empty";
-import { ProactiveSummaryBanner } from "../../components/proactive/ProactiveSummaryBanner";
+import { ProactiveCases } from "../../components/proactive/ProactiveCases";
 import { BtnLink } from "../../components/ui/Btn";
 import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
@@ -30,9 +30,21 @@ import type { ChannelMetricRow, MetricSeries, OverviewResponse } from "../../lib
  * real, and what to call each state are all settled server-side. A component that re-derived any of
  * that would be a second implementation of the rule that keeps "네이버 문의 0건" off this page.
  *
- * <b>One PRIMARY, then SUPPORTING, then REFERENCE</b> (`docs/frontend_ux_audit_v1.md` R1): the six
- * KPIs answer the screen, the three charts and the channel table explain them, and the definitions
- * sit at the bottom where they can be read once.
+ * <b>Two areas, then reference</b> (Executive-friendly UX Redesign v1). The screen used to open with
+ * six KPI cards of identical size — 매출·주문·문의·미답변 문의·리뷰·부정 리뷰 — and a 40~50대 대표
+ * reading it had no entry point, so they started at the top-left and read across. Worse, 「문의 2」 sat
+ * beside 「미답변 문의 26」 at the same weight, which reads as a contradiction rather than as two
+ * different questions.
+ *
+ * So the row was split by what the number IS. Three of them are work that is waiting — 주문,
+ * 미답변 문의, 부정 리뷰 — and they are the only large type on the screen. The other three are what the
+ * shop did, and they are one quiet line under it ({@link MetricLine}). Nothing was dropped and nothing
+ * was recomputed; the same six `kpis` arrive from the same call.
+ *
+ * <b>「AI가 먼저 확인한 일」 shows the work, not a count of it.</b> The home used to carry a one-line
+ * banner saying 1건 exists, which made the seller press before learning anything. The cards themselves
+ * are short enough now (one line of what, one line of what SellerOps did) to belong on the first
+ * screen, and 문의 still owns the full list.
  */
 const RANGES = [7, 14, 30] as const;
 
@@ -53,6 +65,19 @@ export function Overview() {
     }
     return byKey;
   }, [data]);
+
+  /**
+   * Split by what the number is, not by what it measures.
+   *
+   * WAITING_KEYS is an ORDER as much as a filter — 주문 · 미답변 문의 · 부정 리뷰, the sequence a
+   * seller triages in. Anything the backend sends that is not named there falls into the quiet line,
+   * so a new KPI appears as context rather than silently claiming the largest type on the screen.
+   */
+  const kpis = data?.metrics.kpis ?? [];
+  const waiting = WAITING_KEYS.map((key) => kpis.find((kpi) => kpi.key === key)).filter(
+    (kpi): kpi is (typeof kpis)[number] => !!kpi,
+  );
+  const context = kpis.filter((kpi) => !WAITING_KEYS.includes(kpi.key));
 
   return (
     <div className="space-y-8">
@@ -79,10 +104,6 @@ export function Overview() {
         }
       />
 
-      {/* Above the KPIs: the numbers say what the shop DID, this line says what is waiting. It is
-          an entry point, not a second list — the cards themselves live on 문의. */}
-      <ProactiveSummaryBanner />
-
       {loading ? <p className="text-muted">불러오는 중…</p> : null}
 
       {!loading && (error || !data) ? (
@@ -95,21 +116,24 @@ export function Overview() {
 
       {data ? (
         <>
-          {/* PRIMARY — the six numbers the screen exists to answer. */}
-          <MetricGrid>
-            {data.metrics.kpis.map((kpi) => (
-              <Metric
-                key={kpi.key}
-                kpi={kpi}
-                emphasis={kpi.key === "unansweredInquiries"}
-                onClick={KPI_ROUTE[kpi.key] ? () => navigate(KPI_ROUTE[kpi.key]!) : undefined}
-              />
-            ))}
-          </MetricGrid>
+          {/* ① 오늘 상태 — the three numbers that are work waiting, and nothing else at this size. */}
+          <section className="space-y-3" aria-label="오늘 상태">
+            <MetricRowOfThree>
+              {waiting.map((kpi) => (
+                <Metric
+                  key={kpi.key}
+                  kpi={kpi}
+                  size="lg"
+                  emphasis={kpi.key === "unansweredInquiries"}
+                  onClick={KPI_ROUTE[kpi.key] ? () => navigate(KPI_ROUTE[kpi.key]!) : undefined}
+                />
+              ))}
+            </MetricRowOfThree>
+            <MetricLine kpis={context} />
+          </section>
 
-          {/* The legend for the mark on the cards. The definitions themselves are in 「이 숫자에
-              대하여」 at the foot — printing them here too was the same paragraph twice. */}
-          <MetricNote freshness={data.metrics.kpis.some((kpi) => kpi.freshnessUnproven)} />
+          {/* ② AI가 먼저 확인한 일 — the second and last area above the reference material. */}
+          <ProactiveCases limit={3} />
 
           {data.insights.length > 0 ? (
             <section className="space-y-2">
@@ -187,6 +211,9 @@ export function Overview() {
     </div>
   );
 }
+
+/** The three numbers that are work waiting, in the order a seller triages them. */
+const WAITING_KEYS: readonly string[] = ["orders", "unansweredInquiries", "negativeReviews"];
 
 /** Which screen owns each number, so a metric can be opened rather than merely read. */
 const KPI_ROUTE: Record<string, string | undefined> = {

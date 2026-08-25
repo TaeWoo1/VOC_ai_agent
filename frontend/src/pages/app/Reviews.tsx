@@ -113,8 +113,15 @@ export function Reviews() {
  * The workflow sentence: what this screen is for and in what order. 확인 필요 is the rules tier;
  * AI 확인 필요 is the pilot's additive suggestion (rules own the tier — `docs/workstreams/review_ai_triage_demo.md`).
  */
-export const REVIEWS_DESCRIPTION =
-  "확인 필요 → 지켜보기 → 참고 순으로 봅니다. 확인 필요는 별점과 본문 유무로 정하고, AI 확인 필요는 AI가 더한 제안입니다.";
+/**
+ * One line, and it answers 「이 화면은 무엇인가」 (Executive-friendly UX Redesign v1).
+ *
+ * It used to also explain HOW the ordering is computed — 「확인 필요는 별점과 본문 유무로 정하고, AI
+ * 확인 필요는 AI가 더한 제안입니다」 — which is a rule the tier chips below already state by existing,
+ * and it wrapped onto two lines above a screen that already had six stacked blocks before its first
+ * review.
+ */
+export const REVIEWS_DESCRIPTION = "확인이 필요한 리뷰부터 봅니다.";
 
 /** One chip per review-capable account; rendered only when there are several. */
 function ChannelSwitcher({

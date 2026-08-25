@@ -45,13 +45,16 @@ export function InboxDetail({
 
   return (
     <article aria-label="선택한 항목" className="space-y-5">
+      {/* Status is a WORD on one line, not a row of pills (Executive-friendly UX Redesign v1). Three
+          chips at the top of the pane were the first thing the eye landed on, above the question the
+          seller opened this row to read. */}
       <header>
-        <div className="flex flex-wrap items-center gap-2">
-          <Chip>{TYPE_LABEL[item.type]}</Chip>
-          {needsReply(item) ? <Chip tone="accent">답변 필요</Chip> : null}
-          {needsCheck(item) ? <Chip tone="accent">확인 필요</Chip> : null}
-          <span className="text-sm text-muted">{relativeTime(item.receivedAt)}</span>
-        </div>
+        <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+          <span>{TYPE_LABEL[item.type]}</span>
+          {needsReply(item) ? <span className="font-semibold text-warn">답변 필요</span> : null}
+          {needsCheck(item) ? <span className="font-semibold text-bad">확인 필요</span> : null}
+          <span>{relativeTime(item.receivedAt)}</span>
+        </p>
         {panelOwnsTheQuestion ? null : (
           <>
             <h2 className="mt-3 break-keep text-lg font-bold leading-snug text-ink">{heading}</h2>
@@ -81,21 +84,23 @@ export function InboxDetail({
 
       {workItemId ? <InquiryResponsePanel workItemId={workItemId} /> : null}
 
-      {/* Classification is a hint about the row, not a finding — so it sits after the work, in one
-          line of chips rather than a section that competes with 고객 문의 and AI 답변 above it. */}
+      {/* Classification is a hint about the row, not a finding — and it is not why the seller opened
+          it. Closed by default: three chips, a summary sentence and a disclaimer were four lines of
+          the same grey competing with 고객 문의 and the draft above them. */}
       {analysis ? (
-        <section className="border-t border-line pt-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm text-muted">자동 분류</span>
-            <Chip>{analysis.category}</Chip>
+        <details className="border-t border-line pt-4">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg text-sm font-semibold text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
+            자동 분류 · {analysis.category}
+          </summary>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             {urgency ? <Chip>긴급도 {urgency.label}</Chip> : null}
             {sentiment ? <Chip>{sentiment.label}</Chip> : null}
           </div>
           <p className="mt-2 break-keep text-sm leading-relaxed text-muted">{analysis.summary}</p>
           {/* Seller language, not the analyzer's name and version: the fact that matters is that this
               is an automatic keyword classification that may be wrong. */}
-          <p className="mt-1 text-xs text-muted">키워드로 자동 분류한 것이라 정확하지 않을 수 있습니다.</p>
-        </section>
+          <p className="mt-1 text-sm text-muted">키워드로 자동 분류한 것이라 정확하지 않을 수 있습니다.</p>
+        </details>
       ) : null}
 
       {!workItemId && item.type === "INQUIRY" ? (

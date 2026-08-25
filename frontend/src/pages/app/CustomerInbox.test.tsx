@@ -95,12 +95,14 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("고객 인박스 — three panes", () => {
-  it("renders the filter rail, the list and the detail pane", async () => {
+describe("고객 인박스 — the list is the screen until a row is chosen", () => {
+  it("renders the list and the filters, and NO placeholder pane", async () => {
     renderInbox();
     expect(await screen.findByLabelText("인박스 필터")).toBeInTheDocument();
     expect(screen.getByLabelText("고객 문의·리뷰 목록")).toBeInTheDocument();
-    expect(screen.getByText(/왼쪽 목록에서 항목을 고르면/)).toBeInTheDocument();
+    // With nothing chosen there is no third pane. It used to hold 「왼쪽 목록에서 항목을 고르면 …」 —
+    // forty per cent of a 1440px screen spent explaining the screen instead of showing the work.
+    expect(screen.queryByText(/왼쪽 목록에서 항목을 고르면/)).toBeNull();
   });
 
   it("orders the list worst-first", async () => {

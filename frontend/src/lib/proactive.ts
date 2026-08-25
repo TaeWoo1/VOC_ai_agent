@@ -9,43 +9,23 @@ import type { ProactiveCaseView } from "./types";
  * customer, and the seller has not approved it yet.
  */
 
-export const PREPARED_ACTION_LABEL: Record<ProactiveCaseView["preparedAction"], string> = {
-  DRAFT_PREPARED: "답변 초안 준비됨",
-  RECOMMENDATION_ONLY: "확인할 내용 정리됨",
-  NONE: "준비 중단됨",
-};
-
-export const PRIORITY_LABEL: Record<ProactiveCaseView["priority"], string> = {
-  HIGH: "먼저 확인",
-  NORMAL: "확인 권장",
-};
-
 /**
- * What the evidence line says.
+ * The one badge a card wears — what SellerOps DID, in the seller's words, with the tone that means it.
  *
- * `GROUNDED` is the only state that claims a source, and it says how many passages rather than which
- * — the passages themselves are on the draft screen, cited beside the text they produced. The other
- * three name the gap, because each is a different thing for the seller to do about it.
+ * The card used to wear the PRIORITY (「먼저 확인」/「확인 권장」) and then say what was prepared three
+ * lines down in grey, beside an evidence count and a knowledge gap. Priority is SellerOps's ranking of
+ * its own list; what the seller decides from is whether an answer is ready to look at. So the badge
+ * became the prepared action, priority became the sort order it always was, and the evidence count
+ * moved to the draft screen where the passages themselves are (Executive-friendly UX Redesign v1).
+ *
+ * `attention` and `accent` are not decoration: 파랑 means SellerOps prepared something, 주황 means the
+ * seller has to look. Both carry the word, never the colour alone.
  */
-export function evidenceLabel(view: ProactiveCaseView): string | null {
-  if (view.subjectKind === "REVIEW") {
-    return view.evidenceCount > 0 ? "반복 문제 확인됨" : null;
+export function preparedBadge(view: ProactiveCaseView): { label: string; tone: "accent" | "attention" } {
+  if (view.preparedAction === "DRAFT_PREPARED") {
+    return { label: "답변 준비됨", tone: "accent" };
   }
-  switch (view.evidenceState) {
-    case "GROUNDED":
-      return `근거 ${view.evidenceCount}건 사용`;
-    case "NO_MATCH":
-      return "해당하는 근거 없음";
-    case "NO_LIBRARY":
-      return "상품 지식 없음";
-    // NO_PRODUCT deliberately says nothing here. The card already carries a product line reading
-    // 상품 미지정, and the knowledge-gap sentence below already explains what that costs the draft —
-    // an evidence label repeating the same two words made the card stutter ("상품 미지정 … · 상품
-    // 미지정"), which is how a seller learns to stop reading a line that usually matters.
-    case "NO_PRODUCT":
-    default:
-      return null;
-  }
+  return { label: "확인 필요", tone: "attention" };
 }
 
 /**

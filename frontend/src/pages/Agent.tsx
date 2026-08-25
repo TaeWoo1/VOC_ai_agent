@@ -177,9 +177,12 @@ export function Agent() {
 
   return (
     <div className="space-y-6">
+      {/* One sentence, and it is about what the seller gets — not about how the run is structured.
+          「한 줄로 운영 작업을 지시하면 에이전트가 문의·리뷰·이슈를 분류해 사람이 확인할 지점까지
+          준비합니다」 is a description of an execution graph (Executive-friendly UX Redesign v1). */}
       <PageHeader
         title="운영 에이전트"
-        description="한 줄로 운영 작업을 지시하면 에이전트가 문의·리뷰·이슈를 분류해 사람이 확인할 지점까지 준비합니다."
+        description="물어보면 대신 확인하고 정리해 드립니다."
         meta={caps.data ? <CapabilityMeta /> : undefined}
       />
 
@@ -204,36 +207,43 @@ export function Agent() {
             disabled={plannerUnavailable}
             aria-describedby={plannerUnavailable ? "agent-planner-off" : undefined}
           />
-          <div className="flex flex-wrap items-end gap-3">
-            <div>
-              <label htmlFor="agent-account" className="block text-sm font-medium text-ink">
-                판매 계정 <span className="text-muted">(리뷰 답변에 필요)</span>
-              </label>
-              <select
-                id="agent-account"
-                className="mt-1 rounded-xl border border-line bg-canvas p-2 text-ink"
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-              >
-                <option value="">선택 안 함</option>
-                {selectableAccounts.map(({ account, label }) => (
-                  <option key={account.id} value={account.id}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={busy || !command.trim() || plannerUnavailable}
-            >
-              {busy ? "실행 중…" : "실행"}
-            </button>
-          </div>
+          {/* Examples sit between the box and the button, where a seller who does not know what to
+              type reads them — not under the account picker two controls further down. */}
           {caps.data ? (
             <ExampleChips onPick={setCommand} onRunIntent={runIntent} busy={busy} />
           ) : null}
+
+          {/* The button is alone on its line. The 판매 계정 select used to sit beside it at the same
+              weight while mattering to one kind of request out of many, and a labelled dropdown next
+              to the only submit control reads as a required field. */}
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={busy || !command.trim() || plannerUnavailable}
+          >
+            {busy ? "확인 중…" : "물어보기"}
+          </button>
+          <details>
+            <summary className="inline-flex cursor-pointer list-none items-center rounded-lg text-sm font-semibold text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
+              판매 계정 선택 (리뷰 답변을 준비할 때만 필요)
+            </summary>
+            <label htmlFor="agent-account" className="sr-only">
+              판매 계정
+            </label>
+            <select
+              id="agent-account"
+              className="mt-2 rounded-xl border border-line bg-canvas p-2 text-ink"
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+            >
+              <option value="">선택 안 함</option>
+              {selectableAccounts.map(({ account, label }) => (
+                <option key={account.id} value={account.id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </details>
           {plannerUnavailable ? (
             /*
               Not an error banner: a capability being off is a configuration state, not a failure of the
@@ -254,16 +264,31 @@ export function Agent() {
         </form>
       </Section>
 
-      <Section title="문의 답변 초안">
-        <p className="text-sm text-muted">
-          미답변 문의를 하나 골라 답변 <b>초안</b>을 만들어 보여드립니다. 무엇이 초안을 썼는지는 결과 카드의
-          &quot;생성 방식&quot;에 그대로 표시됩니다. 초안은 검토·편집용이며, SellerOps가 채널로 대신 전송하지
-          않습니다 <span className="text-good">(외부 발송 없음)</span>.
-        </p>
-        <button type="button" className="btn-primary mt-3" disabled={busy} onClick={prepareDraft}>
-          {busy ? "생성 중…" : "초안 생성"}
+      {/*
+        FOLDED INTO THE ONE THING THIS SCREEN DOES (Executive-friendly UX Redesign v1).
+
+        This was a second `Section` with its own paragraph and its own `btn-primary`, so the Agent
+        screen presented two equally-loud workflows and the seller had to work out which box was the
+        one they wanted. Nothing was removed: the same `prepareDraft` runs from a secondary control
+        under the prompt, and 문의 — which owns the reply lifecycle — is where a seller goes to answer
+        a specific customer.
+      */}
+      <div className="-mt-2 space-y-1.5">
+        <button
+          type="button"
+          className="btn-ghost text-sm"
+          disabled={busy}
+          onClick={prepareDraft}
+        >
+          {busy ? "준비 중…" : "미답변 문의로 답변 초안 만들어 보기"}
         </button>
-      </Section>
+        {/* The guarantee travels with the control it qualifies. The paragraph this replaced also
+            explained where the generation method is recorded and that the draft is for review —
+            both of which the result card itself states, in place, when a draft exists. */}
+        <p className="text-sm text-muted">
+          초안만 만듭니다 <span className="text-good">(외부 발송 없음)</span>.
+        </p>
+      </div>
 
       {error ? (
         <div role="alert" className="card border-bad/40 text-bad">

@@ -69,10 +69,10 @@ describe("ProactiveCases", () => {
     renderSection();
 
     expect(await screen.findByText("배송 언제 되나요")).toBeInTheDocument();
+    // Why now, in one line. What SellerOps DID is the badge — the seller decides from whether an
+    // answer is ready to look at, not from where the case sits in SellerOps's own ranking.
     expect(screen.getByText(/3일째 기다리고 있습니다/)).toBeInTheDocument();
-    // One status line, in reading order: why now · what SellerOps did · what it was built on.
-    expect(screen.getByText(/3일째 기다리고 있습니다.*답변 초안 준비됨.*근거 2건 사용/)).toBeInTheDocument();
-    expect(screen.getByText("먼저 확인")).toBeInTheDocument();
+    expect(screen.getByText("답변 준비됨")).toBeInTheDocument();
   });
 
   it("renders nothing at all when nothing is prepared — no empty state to read past", async () => {
@@ -133,7 +133,10 @@ describe("ProactiveCases", () => {
 
     renderSection();
 
-    expect(await screen.findByText(/확인할 내용 정리됨.*반복 문제 확인됨/)).toBeInTheDocument();
+    expect(await screen.findByText("확인 필요")).toBeInTheDocument();
+    expect(
+      screen.getByText(/같은 문제가 이 상품에서 반복되고 있습니다.*포장 파손/),
+    ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "확인하기" })).toHaveAttribute("href", "/reviews");
     expect(screen.queryByRole("button", { name: /전송|보내기|답변 보내기/ })).toBeNull();
   });
@@ -154,11 +157,10 @@ describe("ProactiveCases", () => {
     renderSection();
 
     expect(await screen.findByText(/상품 정보를 한 번 적어 두세요/)).toBeInTheDocument();
-    expect(screen.getByText(/상품 지식 없음/)).toBeInTheDocument();
   });
 
 
-  it("does not repeat 상품 미지정 — the product line already said it", async () => {
+  it("never says 상품 미지정 — a line that is the same on every card is not a line", async () => {
     getProactiveCases.mockResolvedValue({
       items: [view({ evidenceState: "NO_PRODUCT", evidenceCount: 0, productName: null,
         knowledgeGap: "이 문의가 어떤 상품에 대한 것인지 연결해 두면, 다음 초안은 상품 지식을 근거로 씁니다." })],
@@ -169,10 +171,11 @@ describe("ProactiveCases", () => {
     renderSection();
 
     await screen.findByText("배송 언제 되나요");
-    // Once, as the product line. An evidence label repeating it made the card stutter, and a line a
-    // seller reads twice in a row is a line they stop reading.
+    // Zero. This org's backlog is largely unattributed, so the card's metadata line read 「… · 상품
+    // 미지정」 on card after card — a fact that is the same everywhere is not a fact the seller reads.
+    // What the missing product COSTS is still said, once, as the knowledge gap below.
     const occurrences = (document.body.textContent ?? "").split("상품 미지정").length - 1;
-    expect(occurrences).toBe(1);
+    expect(occurrences).toBe(0);
     expect(screen.getByText(/다음 초안은 상품 지식을 근거로 씁니다/)).toBeInTheDocument();
   });
 

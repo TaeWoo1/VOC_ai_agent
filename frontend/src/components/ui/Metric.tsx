@@ -13,49 +13,53 @@ import { count, wonShort } from "../../lib/format";
  * 미답변 문의 is today's backlog and there is no history to compare it against, so a component that
  * computed its own arrow would be inventing a trend.
  *
- * <b>Why freshness is a mark and not a sentence.</b> The first browser render of this screen put
- * "최신 여부를 확인하지 못한 채널이 있습니다" — the same sentence, in warning colour — on five of the
- * six cards, because one silent channel qualifies almost every total. Five copies of one sentence is
- * not five warnings; it is a wall of orange that outweighs the numbers it qualifies. So the per-card
- * qualification became {@link FRESHNESS_MARK}, and the sentence is said ONCE, under the row, by
- * {@link MetricNote}. Nothing was softened: the mark is on the same cards, and the channel table
- * below still names which channel and which data type.
+ * <b>Why the freshness mark became a word</b> (Executive-friendly UX Redesign v1). It used to be a
+ * dagger with a legend line under the row: `†` plus 「† 표시는 최신 여부를 확인하지 못한 채널이
+ * 포함된 숫자입니다」. A typographic dagger is a device an academic reader decodes and a 50-year-old
+ * 판매회사 대표 does not — and the legend cost a whole line of the first screen to explain a symbol.
+ * The qualification now sits ON the card it qualifies, in four words, and the legend is gone. Nothing
+ * was softened: the same cards carry it, and the channel table below still names which channel.
  */
 export function Metric({
   kpi,
   emphasis = false,
+  size = "md",
   onClick,
 }: {
   kpi: MetricKpi;
   /** The one number this screen is about. At most one per screen. */
   emphasis?: boolean;
+  /** `lg` — 오늘 상태. The three numbers the home screen exists to answer, read from across a desk. */
+  size?: "md" | "lg";
   onClick?: () => void;
 }) {
   const value = kpi.unit === "원" ? wonShort(kpi.value) : count(kpi.value);
   const caveat = caveatFor(kpi);
+  const big = size === "lg";
   const body = (
     <>
-      <p className="text-sm font-medium text-muted">{kpi.label}</p>
-      <p className={`mt-1.5 font-bold tabular-nums text-ink ${emphasis ? "text-3xl" : "text-2xl"}`}>
+      <p className={`font-medium text-muted ${big ? "text-base" : "text-sm"}`}>{kpi.label}</p>
+      <p
+        className={`mt-1.5 font-bold tabular-nums text-ink ${
+          big ? "text-4xl" : emphasis ? "text-3xl" : "text-2xl"
+        }`}
+      >
         {value}
-        <span className="ml-1 text-base font-semibold text-muted">{kpi.unit}</span>
-        {kpi.freshnessUnproven ? (
-          <span className="ml-0.5 align-super text-sm font-semibold text-warn" aria-hidden="true">
-            {FRESHNESS_MARK}
-          </span>
-        ) : null}
+        <span className={`ml-1 font-semibold text-muted ${big ? "text-lg" : "text-base"}`}>
+          {kpi.unit}
+        </span>
       </p>
-      {kpi.freshnessUnproven ? (
-        <span className="sr-only">최신 여부를 확인하지 못한 채널이 포함된 숫자입니다.</span>
-      ) : null}
-      <div className="mt-1.5 min-h-[1.25rem]">
+      <div className={big ? "mt-2 min-h-[1.5rem]" : "mt-1.5 min-h-[1.25rem]"}>
         {kpi.comparable && kpi.deltaPercent !== null ? <Delta percent={kpi.deltaPercent} /> : null}
         {caveat ? <p className="break-keep text-sm text-warn">{caveat}</p> : null}
+        {kpi.freshnessUnproven ? (
+          <p className="break-keep text-sm text-warn">최신 수집 확인 안 됨</p>
+        ) : null}
       </div>
     </>
   );
 
-  const shell = `rounded-2xl border p-5 text-left ${
+  const shell = `rounded-2xl border ${big ? "p-6" : "p-5"} text-left ${
     emphasis ? "border-brand/30 bg-brand-50/40" : "border-line bg-surface"
   }`;
   if (!onClick) {
@@ -76,8 +80,7 @@ export function Metric({
  * The caveat line — what is NOT in this number.
  *
  * Only the card-specific qualification is drawn here: a channel MISSING from the total, which
- * differs per number and cannot be said once for the row. An unproven freshness is the same
- * qualification on nearly every card, so it is carried by {@link FRESHNESS_MARK} + {@link MetricNote}.
+ * differs per number.
  */
 function caveatFor(kpi: MetricKpi): string | null {
   if (kpi.excludedChannels > 0) {
@@ -115,39 +118,25 @@ function Delta({ percent }: { percent: number }) {
 }
 
 /**
- * The mark a qualified number wears. A dagger, not a colour alone — colour is not available to every
- * reader, and {@link MetricNote} beside it is the legend. Screen readers get the sentence instead.
- */
-export const FRESHNESS_MARK = "\u2020";
-
-/**
- * The one line that qualifies the whole row — sits directly under the numbers, not at the foot of
- * the page.
+ * The numbers that are context, not work — one quiet line, never six more cards.
  *
- * Revenue is here for the reason the freshness mark is: the three channels do not compute 매출 the
- * same way (NAVER 상품주문 결제금액 · Coupang 배송건 orderPrice 합 · Cafe24 주문 결제금액), and a
- * combined total that does not say so is the total lying by omission. That sentence used to live only
- * in the reference block a thousand pixels below, where a demo viewer never reaches it.
+ * 매출·문의·리뷰 are what the shop DID; 주문·미답변 문의·확인할 리뷰 are what is waiting. Both used to
+ * be cards of the same size in the same row, which is why the home screen answered nothing first and
+ * why 「문의 2」 sat beside 「미답변 문의 26」 looking like a contradiction.
  */
-/**
- * The legend for the mark on the cards — and nothing else (Demo UX Polish v1).
- *
- * <b>What it stopped saying.</b> It used to open with the full 매출 basis sentence, which 「이 숫자에
- * 대하여」 at the foot of the same page prints verbatim. Two paragraphs of identical small grey text,
- * one of them directly under the numbers, is how a seller learns that the text under the numbers is
- * not worth reading. The definition belongs in the reference block; what has to be here is the one
- * thing that cannot be read anywhere else — what the mark ON THIS CARD means.
- *
- * With no marked card it renders nothing at all rather than a legend for a symbol nobody can see.
- */
-export function MetricNote({ freshness }: { freshness: boolean }) {
-  if (!freshness) {
-    return null;
-  }
+export function MetricLine({ kpis }: { kpis: MetricKpi[] }) {
+  if (kpis.length === 0) return null;
   return (
-    <p className="break-keep text-sm leading-relaxed text-muted">
-      <span className="font-semibold text-warn">{FRESHNESS_MARK}</span> 표시는 최신 여부를 확인하지 못한
-      채널이 포함된 숫자입니다 — 어느 채널인지는 아래 채널별 표에 있습니다.
+    <p className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-base text-muted">
+      {kpis.map((kpi) => (
+        <span key={kpi.key} className="break-keep">
+          {kpi.label}{" "}
+          <span className="font-semibold tabular-nums text-ink">
+            {kpi.unit === "원" ? wonShort(kpi.value) : count(kpi.value)}
+          </span>
+          {kpi.unit}
+        </span>
+      ))}
     </p>
   );
 }
@@ -155,4 +144,9 @@ export function MetricNote({ freshness }: { freshness: boolean }) {
 /** A responsive row of metrics. Two up on phones, six across on a desktop. */
 export function MetricGrid({ children }: { children: ReactNode }) {
   return <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">{children}</div>;
+}
+
+/** 오늘 상태 — exactly three, equal width, nothing else in the row. */
+export function MetricRowOfThree({ children }: { children: ReactNode }) {
+  return <div className="grid gap-4 sm:grid-cols-3">{children}</div>;
 }
