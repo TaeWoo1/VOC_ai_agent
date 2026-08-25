@@ -28,6 +28,7 @@ class ExactOrderPrivacyFenceTest {
     private static final Path CONNECTOR =
             Paths.get("src/main/java/com/sellerops/connector/cafe24");
     private static final Path FACT = Paths.get("src/main/java/com/sellerops/order/fact");
+    private static final String ACTOR_PROBE = "Cafe24ReplyActorProbe.java";
 
     @Test
     @DisplayName("no customer-search parameter is ever sent to a channel")
@@ -36,6 +37,9 @@ class ExactOrderPrivacyFenceTest {
                 "buyer_cellphone", "buyer_phone", "buyer_email", "member_id", "member_email",
                 "name_furigana");
         for (Path source : javaFiles(CONNECTOR)) {
+            if (source.getFileName().toString().equals(ACTOR_PROBE)) {
+                continue;   // one named exception, checked harder just below
+            }
             String text = code(source);
             for (String parameter : forbidden) {
                 assertThat(text)
@@ -44,6 +48,42 @@ class ExactOrderPrivacyFenceTest {
                                 source.getFileName(), parameter)
                         .doesNotContain(parameter);
             }
+        }
+    }
+
+    /**
+     * The one file that names {@code member_id}, and the reason it is allowed to.
+     *
+     * <p>{@link com.sellerops.connector.cafe24.Cafe24ReplyActorProbe} exists to answer whether the
+     * answers this seller already posted were written under the shop's identity, and the contract
+     * makes that exactly one question: is the article's {@code member_id} the {@code mall_id}? It has
+     * to read the field to compare it. What the fence is actually about is <b>sending</b> such a name
+     * — searching a channel for a person — and that is what stays banned here: every occurrence in
+     * that file must be a response binding, on a line that declares it as one. A request parameter
+     * would sit on a line with no {@code @JsonProperty} and fail.
+     */
+    @Test
+    @DisplayName("the one file that reads member_id only ever binds it from a response")
+    void theActorProbeBindsItNeverSendsIt() throws IOException {
+        List<String> forbidden = List.of("buyer_name", "receiver_name", "receiver_address",
+                "buyer_cellphone", "buyer_phone", "buyer_email", "member_id", "member_email",
+                "name_furigana");
+        String text = code(CONNECTOR.resolve(ACTOR_PROBE));
+        for (String line : text.split("\\R")) {
+            for (String parameter : forbidden) {
+                if (line.contains(parameter)) {
+                    assertThat(line)
+                            .as("%s may be read off a response, never put on the wire", parameter)
+                            .contains("@JsonProperty(\"" + parameter + "\")");
+                }
+            }
+        }
+        // And the values it reads are reduced before they can leave: the report is counts.
+        for (var component : com.sellerops.connector.cafe24.Cafe24ReplyActorProbe.Report.class
+                .getRecordComponents()) {
+            assertThat(component.getName().toLowerCase())
+                    .doesNotContain("name").doesNotContain("email").doesNotContain("phone")
+                    .doesNotContain("address").doesNotContain("content");
         }
     }
 

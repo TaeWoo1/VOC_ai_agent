@@ -51,11 +51,14 @@ public class DashboardService {
         Instant since = Instant.now().minus(Duration.ofHours(24));
         LocalDate today = LocalDate.now();
 
-        // Secret (비밀글) inquiries are worked in the queue but excluded from dashboard
-        // aggregates; a null flag (non-Cafe24 / legacy) counts as non-secret. Inquiries the seller
-        // dismissed (disposition SPAM) are excluded too — the repository carries that predicate, so
-        // 홈, Today Inbox, the report and the Operator all count the same corpus.
-        long unanswered = inquiries.countByOrgIdAndStatusExcludingSecret(orgId, "UNANSWERED");
+        // 미답변 문의 counts the seller's WORKLOAD, so a 비밀글 counts: it is an inquiry someone has
+        // to answer, and being secret says who may READ it, not whether it is work. This card used to
+        // subtract them and published the result under the same name the overview KPI uses for the
+        // whole corpus — two numbers, one label, and no way for a seller to tell which was wrong.
+        // Inquiries the seller dismissed and rows excluded as source thread replies are still out:
+        // the repository's ACTIVE predicate carries that, so 홈, Today Inbox, the report and the
+        // Operator all count the same corpus.
+        long unanswered = inquiries.countByOrgIdAndStatus(orgId, "UNANSWERED");
         long negative = reviews.countByOrgIdAndNegativeTrue(orgId);
 
         int todayOrders = 0;
@@ -68,7 +71,8 @@ public class DashboardService {
         DashboardCards cards = new DashboardCards(
                 todayOrders,
                 todaySales,
-                inquiries.countByOrgIdAndReceivedAtAfterExcludingSecret(orgId, since),
+                // Same reason as 미답변 above: a 비밀글 that arrived today is work that arrived today.
+                inquiries.countByOrgIdAndReceivedAtAfter(orgId, since),
                 unanswered,
                 reviews.countByOrgIdAndReceivedAtAfter(orgId, since),
                 negative,

@@ -414,3 +414,122 @@ package의 1순위로 보고한다.**
 않으므로, 그 경우 **답변은 보내지되 완료 표시는 불가능**할 수 있다 — single-step이 아니라
 **one-step-and-a-gap**이다. 이것은 WRITE 없이 답할 수 없고, 답이 무엇이냐에 따라 executor의
 성공 판정과 verification 규칙이 통째로 달라진다. **다음 package의 첫 질문이 이것이어야 한다.**
+
+---
+
+# 3단계 — Cafe24 Answer Execution v1 (2026-08-25, 진행 중)
+
+Thread Semantics Recovery v1이 CLOSED된 뒤 시작한 package. 목표는 **grounded draft → Human
+Approval → reply article WRITE → READ-back Verification → `EXECUTOR_SENT_VERIFIED` Memory**이고,
+그 앞에 §17이 지목한 질문 — **행위자 값과 `reply_status`의 부착 지점** — 을 먼저 닫는다.
+
+이 절은 **marketplace 호출 0** 상태에서 할 수 있는 만큼을 기록한다. 라이브 관측(§19)은 manifest만
+작성했고 실행하지 않았다.
+
+## 18. 요청 필드 감사 — 계약만으로 끝나는 부분 (`Cafe24ReplyRequestShape`)
+
+§15의 표를 코드로 옮겼다. 문서가 아니라 코드에 두는 이유는 하나다: adapter가 읽을 값과 감사가
+말하는 값이 서로 다른 파일에 있으면 언젠가 갈라진다. 출처는 `docs/vendor/cafe24-admin-api/
+get-boards-articles.md` **하나뿐이고**, 테스트가 그 파일의 존재와 해당 endpoint 문자열을 확인한다.
+
+**분류는 세 가지다** — `REQUIRED`(계약이 필수라고 적은 것) · `OPTIONAL_USED`(받고, 우리가 보낼
+이유가 있는 것) · `NOT_USED`(받지만 보내지 않기로 한 것). 그리고 각 필드에 **어디서 값이 오는가**
+(`Sourcing`)를 따로 붙였다. 이 둘이 분리되어 있어야 「필수인데 값이 없다」가 표현된다.
+
+| 필드 | 계약 | 소싱 | 상태 |
+|---|---|---|---|
+| `board_no` | REQUIRED | 보유 | 대상 행이 들고 있다 |
+| `content` | REQUIRED | 보유 | 사람이 승인한 초안, 해시에 묶인 값 |
+| `reply_article_no` | OPTIONAL_USED | 보유 | **이 필드가 글을 답변으로 만든다** — 승인된 부모의 번호 |
+| `writer` | REQUIRED | **미해결 · 관측 필요** | 고객에게 보이는 이름. 지어내기 금지 |
+| `title` | REQUIRED | **미해결 · 관측 필요** | 계약에 규칙 없음 |
+| `client_ip` | REQUIRED | **product-owner 결정** | 「작성자의 IP」 — 흉내내지 않는다 |
+| `member_id` | OPTIONAL_USED | **계약이 문서화** | `mall_id`와 같으면 작성자가 **상점명**으로 렌더링 |
+| `reply_status` | OPTIONAL_USED | **미해결 · 관측 필요** | 부모/자식 어디에 붙는지 미증명 |
+| `reply_user_id` | NOT_USED | — | 필수 아님 + 의미 미증명 ⇒ 과거 값이 있다고 복사하지 않는다 |
+| `secret` | NOT_USED | product-owner 결정 | 기본값을 고르는 것이 곧 **고객 노출 결정**이다 |
+| `password` | NOT_USED | — | A1에서는 선택(댓글 POST에서만 필수) |
+| 나머지 17개 | NOT_USED | — | shop_no · created_date · writer_email · nick_name · notice · fixed · deleted · reply · reply_mail · rating · sales_channel · input_channel · board_category_no · product_no · category_no · order_id · naverpay_review_id · attach_file_urls |
+
+`writeReady()`는 **선언이 아니라 파생**이다 — 위 표에 `UNRESOLVED_NEEDS_OBSERVATION` /
+`PRODUCT_OWNER_DECISION`이 하나라도 남아 있으면 false다. boolean을 뒤집어서 켤 수 있는 스위치는
+없고, 증거를 들고 행을 고쳐야만 바뀐다. 현재 blocker는 **`writer` · `title` · `client_ip` ·
+`reply_status`** 넷이다.
+
+## 19. Part A — 기존 판매자 답변의 행위자 관측 (manifest 작성, **미실행**)
+
+계약이 답할 수 없는 것은 하나뿐이다: **이 판매자가 이미 쓴 답변이 실제로 무엇을 담고 있는가.**
+그건 읽으면 알 수 있고, 읽을 대상은 이미 우리 DB가 증명해 두었다.
+
+### 대상 — 새로 찾지 않는다
+
+`Cafe24ThreadRepair`가 기록한 **`thread_role='REPLY'` 44행**과 각 행이 지목한
+**`thread_parent_external_id` 44개**. 둘의 합집합은 **87개 article**(한 건은 답글의 답글이라 부모가
+답글 집합 안에 있다 — depth 2). 이 번호들은 승인된 이전 READ의 산출물이고, 관측은 그 밖의 어떤
+번호도 만들지 않는다. 부모를 지목하지 못하는 행은 **추정하지 않고 건너뛴다**.
+
+窓도 없고 이웃 스캔도 없다: `article_no` 콤마 필터만 쓴다(계약이 공표한 형태).
+
+### 나가는 것과 나가지 않는 것
+
+`Cafe24ReplyActorProbe`는 SellerOps에서 **유일하게 Cafe24 article의 사람 필드를 실체화하는
+곳**이다 — `writer` · `member_id` · `client_ip` · `title`. 질문이 문자 그대로 "실제 답변이 이 중
+무엇을 담고 있는가"이기 때문이고, 그래서 그 필드들은 다른 어디에도 없다. 값은 `observe()` 안에서
+**존재 플래그 · 동일성 클래스(sha-256, 비교만 하고 출력 안 함) · 세 가지 제목 관계**로 접히고,
+public `Report`는 **수와 플래그뿐**이다 — 테스트가 record component 타입으로 강제한다.
+`content`는 아예 파싱 필드가 없다.
+
+로그로 나가는 것: 요청 수 · 응답/미응답 수 · 각 필드 존재 건수 · `member_id == mall_id` 건수 ·
+writer 종류 수 · 부모의 `reply_status` C/P/N 분포 · 제목 관계 3분류 · `reply_depth` 최대값.
+
+### 이 관측이 증명하지 못하는 것 (미리 적는다)
+
+1. **`POST`의 `reply_status=C`가 부모를 `C`로 바꾸는지** — 기존 답변이 전부 「부모=C, 자식=null」로
+   보여도 그것은 **WRITE의 side effect가 아니라 최종 상태**다. 관측은 *verification의 기대 상태*
+   근거일 뿐, POST 한 번으로 그렇게 된다는 증명이 아니다.
+2. **Cafe24 UI가 내부적으로 POST 외의 write를 하는지** — READ로는 알 수 없다.
+3. `client_ip`가 응답에 **없을 수도 있다**. 없으면 그 사실 자체가 결과이고
+   (`replyClientIpPresent=0`), 그때 `client_ip`는 관측이 아니라 **네트워크 구성 결정**으로 남는다.
+
+관측과 WRITE semantics를 섞지 않는다.
+
+### Approval Manifest — 실행 대기
+
+| 항목 | 값 |
+|---|---|
+| 채널 / 계정 | CAFE24 · 데모 제조사 org의 API 계정 1개 |
+| surface | `GET /api/v2/admin/boards/6/articles?article_no=…` (LIST, 콤마 필터) |
+| operation | READ 전용 관측 |
+| mode | **READ** |
+| scope | `mall.read_community` (이미 보유, 변경 없음) |
+| 대상 | 증명된 REPLY 44 + 그 부모 44 = **distinct 87 article** |
+| 요청 수 | batch 25 ⇒ **4회**, 하드 상한 **6회** |
+| WRITE | **0** — probe에 `postForm` 경로가 없고, 스텁이 호출되면 테스트가 실패한다 |
+| DB 변경 | **0** |
+| 미답변 고객 문의 접촉 | **0** (대상은 답변이 달린 스레드뿐) |
+| 되돌리기 | 해당 없음(읽기) |
+
+## 20. Part K — 운영 미답변 KPI 일관성 (실행됨, 호출 0)
+
+product-owner 결정: **비밀글도 판매자가 처리해야 하는 업무이므로 canonical unanswered에 포함한다.
+비밀 여부는 privacy/display 문제이지 workload 제외 조건이 아니다.**
+
+고친 것은 이름이 같은데 코퍼스가 다른 두 숫자다. 홈 카드(`/api/dashboard/summary`)는 비밀글을
+빼고 세고, overview KPI·Inbox·리포트·Operator는 빼지 않았다 — 그리고 **둘 다 「미답변 문의」라고
+적혀 있었다**. 판매자가 어느 쪽이 틀렸는지 알 방법이 없었다.
+
+- `DashboardService.summary`의 `unanswered`가 `countByOrgIdAndStatus`(비밀글 포함)를 읽는다.
+- 같은 이유로 24시간 신규 문의 카드도 포함 기준으로 바꿨다 — **오늘 들어온 비밀글은 오늘 들어온
+  업무다.** (결정문은 미답변만 명시했으나 근거가 동일해 함께 옮겼고, 여기에 적어 둔다.)
+- `countByOrgIdAndStatusExcludingSecret` · `countByOrgIdAndReceivedAtAfterExcludingSecret`는
+  **삭제했다.** 남겨 두면 같은 이름으로 다시 집계될 두 번째 코퍼스가 코드에 남는다.
+- 비밀 content 자체는 그대로 org 경계 안에 있고, 일반 분석(item analysis) 제외도 그대로다 — 그건
+  다른 질문이고 자기 술어를 유지한다.
+
+실측(데모 제조사 org, REAL·ACTIVE·UNANSWERED): 전체 **25** · 비밀글 제외 **10** · 차이 **15 =
+비밀글 15**. 이 수정으로 홈 카드는 10 → **25**가 되어 overview·Inbox와 같은 수를 말한다.
+
+## 21. 이번 절에서 하지 않은 것
+
+marketplace READ 0 · WRITE 0 · OAuth 변경 0 · `mall.write_community` 요청 0 · adapter 0 ·
+reconsent 0 · Agent tool 변경 0. 행위자 추론 0, 과거 답변의 Answer Memory import 0.

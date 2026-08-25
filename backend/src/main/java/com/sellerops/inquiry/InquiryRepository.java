@@ -43,6 +43,24 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
     List<Inquiry> findActiveUnansweredForAccount(@Param("orgId") UUID orgId,
                                                  @Param("sellerAccountId") UUID sellerAccountId);
 
+    /**
+     * The rows one connection has already been PROVEN to be source thread replies — the exact,
+     * closed set the Cafe24 reply-actor observation is allowed to ask the source about.
+     *
+     * <p>Deliberately not a search. It returns what a previous approved READ established and this
+     * repository recorded ({@code thread_role = 'REPLY'}, with the parent it named); the observation
+     * derives its article numbers from these rows and their parents and asks about nothing else. No
+     * date window, no neighbour scan, no discovery. Ordered by id so a capped run is deterministic.
+     *
+     * <p>{@code EXCLUDED_THREAD_REPLY} rows are the whole point here, so this read cannot carry the
+     * {@code ACTIVE} gate — it is a historical/audit read in the sense the class javadoc describes.
+     */
+    @Query("select q from Inquiry q where q.orgId = :orgId and q.sellerAccountId = :sellerAccountId "
+            + "and q.threadRole = 'REPLY' and q.dataOrigin = com.sellerops.common.DataOrigin.REAL "
+            + "order by q.id asc")
+    List<Inquiry> findProvenThreadRepliesForAccount(@Param("orgId") UUID orgId,
+                                                    @Param("sellerAccountId") UUID sellerAccountId);
+
     /** Newest first, caller-sized — the item-analysis sweep's read. Current truth only. */
     @Query("select q from Inquiry q where q.orgId = :orgId" + ACTIVE + "order by q.receivedAt desc, q.id asc")
     List<Inquiry> findRecentActive(@Param("orgId") UUID orgId, Pageable pageable);
@@ -145,18 +163,13 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
                                                   @Param("productIds") java.util.Collection<UUID> productIds);
 
 
-    /**
-     * Dashboard counts that exclude secret (비밀글) inquiries. A null {@code is_secret}
-     * (non-Cafe24 / legacy) is treated as non-secret, so existing behavior is preserved.
-     */
-    @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.status = :status "
-            + "and (q.secret is null or q.secret = false)" + ACTIVE)
-    long countByOrgIdAndStatusExcludingSecret(@Param("orgId") UUID orgId, @Param("status") String status);
-
-    @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.receivedAt > :after "
-            + "and (q.secret is null or q.secret = false)" + ACTIVE)
-    long countByOrgIdAndReceivedAtAfterExcludingSecret(@Param("orgId") UUID orgId,
-                                                       @Param("after") Instant after);
+    // The two secret-excluding dashboard counts that used to live here are gone (Cafe24 Answer
+    // Execution v1). They existed only to feed the home cards, and what they fed those cards was a
+    // second, smaller corpus published under the same words — 미답변 문의 — that the overview KPI uses
+    // for the whole one. 비밀 여부 decides who may READ an inquiry, not whether answering it is work,
+    // so the workload counts no longer subtract it and there is no longer a query here that would.
+    // Secret content itself is still fenced by the org boundary and still excluded from general
+    // analysis, which is a different question and keeps its own predicate below.
 
     /**
      * Inquiries for this org that have no item_analyses row yet (bounded by {@code pageable}).

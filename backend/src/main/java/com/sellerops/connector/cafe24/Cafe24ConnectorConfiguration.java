@@ -158,6 +158,34 @@ public class Cafe24ConnectorConfiguration {
     }
 
     /**
+     * The reply-actor observation — a bounded, read-only look at seller answers this mall already
+     * has, to decide what a SellerOps-written reply would have to carry in {@code writer},
+     * {@code member_id}, {@code client_ip} and {@code title}. Triple-gated (connector flag, its own
+     * flag, a configured account) and capped in requests. It writes nothing anywhere; its targets are
+     * rows a previous approved READ already proved, not a search.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.reply-actor.enabled",
+            havingValue = "true")
+    Cafe24ReplyActorProbe cafe24ReplyActorProbe(Cafe24HttpClient http) {
+        return new Cafe24ReplyActorProbe(http);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.reply-actor.enabled",
+            havingValue = "true")
+    Cafe24ReplyActorProbeRunner cafe24ReplyActorProbeRunner(
+            Cafe24Authorizer authorizer, Cafe24ReplyActorProbe probe,
+            SellerAccountRepository accounts, InquiryRepository inquiries,
+            @Value("${sellerops.connector.cafe24.diagnostic.reply-actor.account-id:}") String accountId,
+            @Value("${sellerops.connector.cafe24.diagnostic.reply-actor.board-no:6}") int boardNo,
+            @Value("${sellerops.connector.cafe24.diagnostic.reply-actor.batch-size:25}") int batchSize,
+            @Value("${sellerops.connector.cafe24.diagnostic.reply-actor.max-requests:6}") int maxRequests) {
+        return new Cafe24ReplyActorProbeRunner(authorizer, probe, accounts, inquiries, accountId,
+                boardNo, batchSize, maxRequests);
+    }
+
+    /**
      * The offline thread repair — replays the observation a bounded live READ already produced onto
      * exactly the rows it named. <b>It makes no marketplace call</b>, which is why it takes no
      * authorizer and no client. Gated by the connector flag, its own flag, a configured account, a

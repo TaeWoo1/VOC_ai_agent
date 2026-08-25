@@ -138,9 +138,9 @@ class InquiryOperationalTruthTest {
 
         dismissAsSpam("spam-batch-1", spamWorkItemIds());
 
-        // The headline number, from both services that publish it. 홈 reads the secret-aware count and
-        // Today Inbox / the weekly report / the Operator's inbox tool read the plain one — they have to
-        // land on the same corpus or the same words print two numbers.
+        // The headline number, from both services that publish it. Since Cafe24 Answer Execution v1
+        // they read the SAME count: 홈 used to subtract 비밀글 and Today Inbox / the weekly report /
+        // the Operator's inbox tool did not, so the same words printed two numbers.
         assertThat(dashboard.summary(org).cards().unansweredInquiries())
                 .as("홈")
                 .isEqualTo(1);
