@@ -381,3 +381,115 @@ repair는 **Cafe24 REPLY 44건**만 운영에서 빼므로:
 `mall.write_community` 미보유 · onboarding write-scope 가드 무변경 · actor 값(`writer`/`member_id`/
 `client_ip`/`title`) 미결정 · `reply_status=C`가 부모에 붙는지 자식에 붙는지 미증명 · adapter 0.
 이번 READ는 WRITE에 대해 아무것도 바꾸지 않았다.
+
+---
+
+# Repair 실행 기록 (2026-08-25, marketplace 호출 0)
+
+§18의 계획을 실행했다. 아래는 계획과 다르게 간 곳, 그리고 실측값이다.
+
+## 22. 기존 dismissal ledger를 재사용하지 **않은** 이유
+
+계획은 44건을 하나의 `inquiry_work_item_dismissal_batch`로 기록하는 쪽을 권했다. 그 코드를 실제로
+감사한 결과 **그 경로는 이 집합을 정직하게 표현할 수 없고, 애초에 실행하지도 못한다**:
+
+| 감사한 것 | 계약 | 이번 repair와의 충돌 |
+|---|---|---|
+| `DismissalManifest.validated` | `approved=true` · `approved_by` · `approved_at` 필수 | 사람이 승인한 판단이 아니다. 채우면 **없던 승인을 기록**하게 된다 |
+| `InquiryWorkItemDismissalService.categorize` | `ELIGIBLE`은 `phase == OPEN`만 | 44건 중 **2건이 `PROPOSED`** ⇒ all-or-nothing이 통째로 409 |
+| `dismissOne` | 감사행 `phase_from = OPEN` 하드코딩 | 그 2건에 대해 **일어나지 않은 전이**를 기록 |
+| `manifestHash` | 승인 메타데이터를 멱등 키에 포함 | ledger의 의미 자체가 "이 승인이 이 id들을 덮었다" |
+| 진입점 | OWNER 인증 HTTP admin 라우트뿐 | 시스템 호출 seam이 없다 |
+
+⇒ **batch는 쓰지 않는다.** `inquiry_work_item_dismissal_batch` 행 수는 7 → 7로 변하지 않았다.
+
+## 23. 대신 만든 최소 recovery provenance
+
+새 테이블 0 · 새 phase 0 · 새 event 0. **새로 만든 단어는 disposition 하나뿐이다.**
+
+| 자리 | 값 | 이유 |
+|---|---|---|
+| phase | 기존 `DISMISSED` | terminal이고 `COMPLETED`가 아니다 — 답한 것이 아니다 |
+| disposition | **`SOURCE_THREAD_REPLY`** (신규) | 판매자의 판단(`SPAM`)과 데이터 정정을 영원히 구분한다 |
+| event | 기존 `WORK_ITEM_DISMISSED` | 전이 자체는 dismissal이 맞다 |
+| `phase_from` | 실제 phase (`OPEN` 42 · `PROPOSED` 2) | 반올림하면 없던 일을 적는 것이다 |
+| actor | `SYSTEM:THREAD_RECLASSIFICATION` | 운영자도 판매자도 아니다 |
+| `dismissal_batch_id` | **null** | 승인 봉투가 없다. 가리키면 거짓이 된다 |
+
+`InquiryWorkItemDisposition.sellerDecision()`이 `SPAM`에만 참이고 `DismissalManifest`가 그
+술어를 요구하므로, **이 값은 승인 매니페스트를 통해 들어올 수 없다**(구조 테스트로 고정).
+이름이 `THREAD_REPLY_SOURCE_RECLASSIFICATION`이 아닌 이유는 저장 칸이 `varchar(32)`이기 때문이다 —
+이름은 절차가 아니라 사실을 가리킨다.
+
+## 24. 실행: 관측 manifest만 재생, 요청 0회
+
+repair는 **marketplace를 호출하지 않는다** (client도 authorizer도 토큰도 그 경로에 없다).
+승인된 READ가 남긴 44개의 `(article_no, parent_article_no)`를 파일로 고정하고
+(sha256 `3c718ae7…`), 그 해시가 맞을 때만 적용한다. 격리 부팅 로그에 Cafe24 호출·토큰 갱신 **0건**.
+
+- dry-run: 매니페스트 44 · 조회됨 44 · **드리프트 0** · 기록 예정 44 — DB 변경 0으로 검증
+- 적용: **역할기록 44 · 현재읽기제외 44 · 업무종결 44 · 감사 44 · 드리프트 0 · 중단 없음**
+
+드리프트는 하나만 있어도 전부 중단한다(테스트로 고정). 판매자가 스팸으로 내린 행, 그 사이 답변된 행,
+다른 계정의 행은 전부 드리프트로 취급되어 **조용히 덮어쓰지 않는다**.
+
+## 25. 실측 (예상치 아님)
+
+| 지표 | 전 | 후 |
+|---|---|---|
+| Cafe24 계정 REAL 행 | 111 | **111** (삭제 0) |
+| `thread_role=REPLY` | 0 | **44** |
+| `operational_state=EXCLUDED_THREAD_REPLY` | 0 | **44** |
+| 미답변 ACTIVE (계정) | 68 | **24** |
+| ACTIVE 미답변의 `inform_status` | 공백 44 · `N` 21 · `P` 3 | **`N` 21 · `P` 3** (공백 0) |
+| work item `OPEN` | 64 | **22** |
+| work item `PROPOSED` | 4 | **2** |
+| work item `DISMISSED / SOURCE_THREAD_REPLY` | 0 | **44** |
+| `WORK_ITEM_DISMISSED` 감사행 | 3,199 | **3,243** (+44) |
+| dismissal batch | 7 | **7** (거짓 승인 0) |
+| `inquiry_proposal` 행 | 5 | **5** (삭제 0, 2건이 실행 불가로) |
+| 답변 본문 보유 행(Answer Memory 코퍼스) | 18 | **18** |
+| REPLY 행 중 `answer_body` 보유 | — | **0** |
+
+제품 화면 (HTTP 실측):
+
+| 화면 | 전 | 후 |
+|---|---|---|
+| **작업 큐 / Agent** `GET /api/inquiries` | 64 | **22** |
+| **Inbox** `GET /api/inbox` | 69 | **25** |
+| **홈 overview KPI** `GET /api/dashboard/overview` | 69 | **25** |
+| **summary 카드** `GET /api/dashboard/summary` (비밀글 제외) | 20 | **10** |
+
+## 26. 20 vs 69 — thread 오염이 아니었다
+
+두 숫자는 같은 org의 **서로 다른 두 코퍼스**였다: overview KPI는 채널별 합계라 비밀글을 포함하고
+(`countActiveByChannel`), summary 카드는 비밀글을 뺀다(`countByOrgIdAndStatusExcludingSecret`).
+thread 오염 44건을 제거한 뒤에도 차이는 **25 vs 10**으로 남아 있고, 남은 간격 15는 정확히 비밀글
+15건이다. 즉 **차이의 원인은 처음부터 비밀글 필터였고 스레드 오염이 아니었다.**
+
+이것은 **product-owner decision**으로 남긴다 — 「미답변 문의」가 비밀글을 포함하는 수인가 아닌가.
+이번 package에서 정하지 않았다.
+
+## 27. downstream 오염 0 증명
+
+- 작업 큐·Inbox·Dashboard·Coverage·ItemAnalysis·CustomerMemory는 모두 `operational_state = ACTIVE`
+  게이트를 지나므로 44건이 어느 경로로도 남지 않는다(테스트로 고정).
+- **초안·승인·전송**: `InquiryProposalService`는 `OPEN`, `InquiryReplyDraftService`와
+  `InquiryPublishService`는 `PROPOSED`를 요구한다. 44건은 `DISMISSED`이므로 셋 다 거부한다.
+- **오염된 proposal 2건**: 행은 그대로 있고 조회·이력은 살아 있으며 실행만 불가능하다. 삭제 0.
+- **Answer Memory**: REPLY 행 중 `answer_body`를 가진 것은 0이고, import 코퍼스
+  (`findAnsweredWithAnswerBody`)는 18로 변하지 않았다. 답글 본문은 승격되지 않았다.
+- **provenance**: `data_origin`은 손대지 않았다. synthetic 8건은 이번에도 REAL로 바뀌지 않았다.
+
+## 28. 신규 수집 regression
+
+`ROOT → Inquiry + work item` / `REPLY → EXCLUDED_THREAD_REPLY + work item 0` /
+**depth 2 답글의 답글도 독립 문의가 아니다**(라이브에서 실제로 관측된 `a176 → a177 → a191` 모양) /
+`thread_role`을 처음 관측하면 sourceUnchanged 행도 재분류 / 신호 불일치는 REPLY fail-close +
+관측 가능한 카운터. 전부 테스트로 고정. 회귀 **3,072 / 0 / 22**.
+
+## 29. 이번에도 하지 않은 것
+
+Cafe24 WRITE adapter · `mall.write_community` · actor 설정 · 답글 작성자 추론 · `answer_body` 백필 ·
+Answer Memory import · 두 번째 org · board 4 · `EXCLUDED_SPAM` 3,199 재분류 · 20 vs 69 결정.
+**marketplace READ 0 · WRITE 0.**

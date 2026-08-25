@@ -111,13 +111,19 @@ public record DismissalManifest(
         return this;
     }
 
-    /** The disposition as the closed enum, or {@code null} if unrecognized/unsupported. */
+    /**
+     * The disposition as the closed enum, or {@code null} if unrecognized, unsupported, or not a
+     * seller decision. System-only dispositions never resolve here.
+     */
     public InquiryWorkItemDisposition resolvedDisposition() {
         if (disposition == null) {
             return null;
         }
         for (InquiryWorkItemDisposition d : InquiryWorkItemDisposition.values()) {
-            if (d.name().equals(disposition)) {
+            // A manifest is an approval envelope: it may only carry a disposition that records a
+            // decision a human actually made. A data correction is not one, so it is unreachable
+            // from here even after it is added to the enum.
+            if (d.sellerDecision() && d.name().equals(disposition)) {
                 return d;
             }
         }

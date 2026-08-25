@@ -413,6 +413,35 @@ class Cafe24InquiryIngestionFlowTest {
         });
     }
 
+    @Test
+    void aReplyToAReplyIsAlsoNotACustomerQuestion() {
+        // The live re-read found one of these — a176 → a177 → a191, depth 2. Had the rule required a
+        // reply's parent to be a root, this row would have come back into the queue as a question.
+        CanonicalInquiry root =
+                Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(176L, "문의 본문", "C"), 1);
+        CanonicalInquiry child = Cafe24InquiryArticleMapper.toCanonicalInquiry(
+                6, replyRow(177L, 176L, "답글 본문"), 2);
+        CanonicalInquiry grandchild = Cafe24InquiryArticleMapper.toCanonicalInquiry(
+                6, nestedReplyRow(191L, 177L, "답글의 답글 본문"), 3);
+
+        ingestion.ingestInquiries(org, channel, account, List.of(root, child, grandchild));
+
+        assertThat(inquiries.findByOrgIdAndChannelIdAndExternalId(org, channel, "cafe24:b6:a191"))
+                .get()
+                .satisfies(stored -> {
+                    assertThat(stored.getThreadRole()).isEqualTo("REPLY");
+                    assertThat(stored.getThreadParentExternalId())
+                            .as("the parent is the reply it hangs off, not the root of the thread")
+                            .isEqualTo("cafe24:b6:a177");
+                    assertThat(stored.getOperationalState())
+                            .isEqualTo(InquiryOperationalState.EXCLUDED_THREAD_REPLY);
+                });
+        assertThat(openWorkItems(org)).isEmpty();
+        assertThat(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org))
+                .extracting(Inquiry::getExternalId)
+                .containsExactly("cafe24:b6:a176");
+    }
+
     private static Cafe24BoardArticleRow row(long articleNo, String content, String reply) {
         return new Cafe24BoardArticleRow(articleNo, "제목", content, 77L, null,
                 "2026-06-20T10:00:00+09:00", null, reply);
@@ -422,5 +451,11 @@ class Cafe24InquiryIngestionFlowTest {
     private static Cafe24BoardArticleRow replyRow(long articleNo, long parentNo, String content) {
         return new Cafe24BoardArticleRow(articleNo, "제목", content, 77L, null,
                 "2026-06-21T10:00:00+09:00", null, null, "F", null, parentNo, 1, 1);
+    }
+
+    /** A reply hanging off another reply — depth 2, the deepest the live re-read observed. */
+    private static Cafe24BoardArticleRow nestedReplyRow(long articleNo, long parentNo, String content) {
+        return new Cafe24BoardArticleRow(articleNo, "제목", content, 77L, null,
+                "2026-06-22T10:00:00+09:00", null, null, "F", null, parentNo, 2, 1);
     }
 }

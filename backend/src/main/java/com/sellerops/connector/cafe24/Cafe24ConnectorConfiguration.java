@@ -1,7 +1,11 @@
 package com.sellerops.connector.cafe24;
 
 import com.sellerops.credential.ConnectorCredentialRepository;
+import com.sellerops.channel.ChannelRepository;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.lifecycle.InquiryOperationalStateProjector;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -10,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
 
 /**
  * Wires the Cafe24 connector strictly behind the feature flag. With
@@ -150,6 +155,38 @@ public class Cafe24ConnectorConfiguration {
             @Value("${sellerops.connector.cafe24.diagnostic.thread-reclassify.dry-run:true}") boolean dryRun) {
         return new Cafe24ThreadReclassificationRunner(authorizer, reclassifier, accounts, inquiries,
                 accountId, boardNo, batchSize, maxRequests, dryRun);
+    }
+
+    /**
+     * The offline thread repair — replays the observation a bounded live READ already produced onto
+     * exactly the rows it named. <b>It makes no marketplace call</b>, which is why it takes no
+     * authorizer and no client. Gated by the connector flag, its own flag, a configured account, a
+     * manifest whose hash matches, and a {@code dry-run} that defaults ON.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.thread-repair.enabled",
+            havingValue = "true")
+    Cafe24ThreadRepair cafe24ThreadRepair(InquiryRepository inquiries,
+                                          InquiryWorkItemRepository workItems,
+                                          InquiryWorkItemAuditRepository audits,
+                                          ChannelRepository channels,
+                                          InquiryOperationalStateProjector projector,
+                                          PlatformTransactionManager txManager) {
+        return new Cafe24ThreadRepair(inquiries, workItems, audits, channels, projector, txManager);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.thread-repair.enabled",
+            havingValue = "true")
+    Cafe24ThreadRepairRunner cafe24ThreadRepairRunner(
+            Cafe24ThreadRepair repair, SellerAccountRepository accounts,
+            @Value("${sellerops.connector.cafe24.diagnostic.thread-repair.account-id:}") String accountId,
+            @Value("${sellerops.connector.cafe24.diagnostic.thread-repair.board-no:6}") int boardNo,
+            @Value("${sellerops.connector.cafe24.diagnostic.thread-repair.manifest:}") String manifest,
+            @Value("${sellerops.connector.cafe24.diagnostic.thread-repair.expected-hash:}") String expectedHash,
+            @Value("${sellerops.connector.cafe24.diagnostic.thread-repair.dry-run:true}") boolean dryRun) {
+        return new Cafe24ThreadRepairRunner(repair, accounts, accountId, boardNo, manifest,
+                expectedHash, dryRun);
     }
 
     // Board Discovery (community read) infrastructure — wired behind the same

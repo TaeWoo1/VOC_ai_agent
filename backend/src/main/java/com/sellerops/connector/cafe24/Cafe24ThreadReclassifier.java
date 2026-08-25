@@ -32,9 +32,13 @@ import org.slf4j.LoggerFactory;
  *
  * <p><b>Excluded is not deleted, here too.</b> A row reclassified to {@code REPLY} keeps its body, its
  * status, its work item, its audit trail and its customer-memory entry. It leaves the queue because
- * every current read — the queue included — is gated on {@code operational_state = ACTIVE}. The OPEN
- * work item is deliberately left standing rather than closed: the seller never dismissed it and never
- * did it, and writing a disposition would put a decision in the ledger that no one made.
+ * every current read — the queue included — is gated on {@code operational_state = ACTIVE}.
+ *
+ * <p><b>It writes the source fact and stops there.</b> Closing the work item that was opened over a
+ * row that was never a question belongs to {@link Cafe24ThreadRepair}, which has a disposition that
+ * can say so without claiming the seller decided anything. Leaving it standing here is safe rather
+ * than merely tolerable: the queue reads through the same {@code ACTIVE} gate, so an item behind an
+ * excluded row is already unreachable.
  */
 public class Cafe24ThreadReclassifier {
 
