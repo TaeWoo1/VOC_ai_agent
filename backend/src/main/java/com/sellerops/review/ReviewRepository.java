@@ -954,13 +954,23 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      * ({@link #NOT_DISMISSED_PREDICATE}, reused unchanged — a dismissal is a decision, and a proactive
      * card that re-raised it would be the product arguing with its user).
      *
-     * <p>Worst rating first, then newest; totally ordered so a bounded tick is deterministic.
+     * <p><b>{@code observedSince} is the bootstrap fence</b>, and it does the same job here as its twin
+     * on {@code InquiryWorkItemRepository}: the clauses above say whether a review is worth attention,
+     * none of them says whether it is current. Switching this feature on for an org that has ever
+     * imported review history would otherwise surface years of it at once as new work — this org held
+     * 16 such rows, none of them from the last 30 days. The fence is the review row's own
+     * {@code created_at}, the moment SellerOps first held it.
+     *
+     * <p>Worst rating first, then newest; totally ordered so a bounded tick is deterministic. Rating
+     * leads rather than recency because a 1점 is a stronger claim on the seller's morning than a day,
+     * and the fence above has already removed everything that is not current.
      */
     @Query("""
             select r from Review r
             where r.orgId = :orgId
               and r.dataOrigin = com.sellerops.common.DataOrigin.REAL
               and r.replyState <> com.sellerops.review.ReviewReplyState.ANSWERED
+              and r.createdAt >= :observedSince
               and
             """ + TRIAGE_TIER_RANK + """
                   = 0
@@ -968,7 +978,9 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             """ + NOT_DISMISSED_PREDICATE + """
             order by r.rating asc, r.receivedAt desc, r.id desc
             """)
-    List<Review> findProactiveCandidates(@Param("orgId") UUID orgId, Pageable pageable);
+    List<Review> findProactiveCandidates(@Param("orgId") UUID orgId,
+                                         @Param("observedSince") Instant observedSince,
+                                         Pageable pageable);
 
     /**
      * Whether ONE review is still active reply work — the single-row form of

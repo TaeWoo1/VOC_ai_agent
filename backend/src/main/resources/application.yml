@@ -257,6 +257,19 @@ sellerops:
     inquiries-per-tick: ${SELLEROPS_PROACTIVE_INQUIRIES_PER_TICK:3}
     reviews-per-tick: ${SELLEROPS_PROACTIVE_REVIEWS_PER_TICK:5}
     reconcile-per-tick: ${SELLEROPS_PROACTIVE_RECONCILE_PER_TICK:50}
+    # BOOTSTRAP FENCE — an ISO-8601 instant. Only work SellerOps FIRST OBSERVED at or after it may be
+    # investigated. Blank is fail closed: no boundary, no candidates, ever. There is no default,
+    # because every plausible one is wrong in a way nobody notices until it has happened — "beginning
+    # of time" pours an org's whole imported history onto the screen the day the switch is flipped
+    # (measured on the canonical Demo Org: 22 inquiries, newest 18 months old, oldest from 2014), and
+    # "process start" re-opens that flood on every restart. Reconcile is unaffected and always runs.
+    observed-since: ${SELLEROPS_PROACTIVE_OBSERVED_SINCE:}
+    # Which orgs this loop may investigate. Blank is fail closed — never "everybody". Deliberately NOT
+    # inherited from self-pilot's scope: the local deployment runs LOCAL_SINGLE_USER ("every org in
+    # this database", 35 of them), and a proactive loop that inherited it would have begun preparing
+    # work for every one of them on the day it was switched on. The effective set is the INTERSECTION
+    # of this list and the orgs self-pilot allows a background loop to act for.
+    org-ids: ${SELLEROPS_PROACTIVE_ORG_IDS:}
     interval-ms: ${SELLEROPS_PROACTIVE_INTERVAL_MS:600000}
     initial-delay-ms: ${SELLEROPS_PROACTIVE_INITIAL_DELAY_MS:45000}
   admin:

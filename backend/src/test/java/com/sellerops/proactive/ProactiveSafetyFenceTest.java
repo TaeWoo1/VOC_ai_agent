@@ -197,6 +197,39 @@ class ProactiveSafetyFenceTest {
         }
     }
 
+    @Test
+    @DisplayName("the bootstrap boundary has no default — an unfenced org prepares nothing")
+    void theBootstrapBoundaryIsRequired() throws IOException {
+        String properties = Files.readString(PACKAGE.resolve("ProactiveProperties.java"));
+        assertThat(properties)
+                .as("a defaulted boundary is how an org's whole imported history reaches a screen on "
+                        + "the day the switch is flipped")
+                .contains("${sellerops.proactive.observed-since:}")
+                .contains("Optional<Instant> observedSince()");
+        assertThat(properties)
+                .as("and the org allow-list is fail closed too — blank means nobody, never everybody")
+                .contains("${sellerops.proactive.org-ids:}");
+        assertThat(Files.readString(PACKAGE.resolve("ProactiveScheduler.java")))
+                .as("the named list must be the SOURCE of the target set, not a filter applied after "
+                        + "enumerating every organisation in the database")
+                .contains("properties.orgIds().stream().filter(selfPilot::isEnabledFor)")
+                .doesNotContain("organizations.findAll()");
+
+        String reconciler = code(PACKAGE.resolve("ProactiveCaseReconciler.java"));
+        assertThat(reconciler)
+                .as("absent boundary must stop PREPARATION before any candidate read")
+                .contains("since.isEmpty()");
+        // And the candidate reads cannot be called without one: the parameter is not optional.
+        for (String repository : List.of(
+                "../inquiry/workitem/InquiryWorkItemRepository.java",
+                "../review/ReviewRepository.java")) {
+            assertThat(Files.readString(PACKAGE.resolve(repository)))
+                    .as("%s: the gate takes the boundary as an argument, so it cannot be forgotten",
+                            repository)
+                    .contains("@Param(\"observedSince\") Instant observedSince");
+        }
+    }
+
     /** One Java file with its comments removed — the ban is on doing these things, not naming them. */
     private static String code(Path source) throws IOException {
         return Files.readString(source)

@@ -1,6 +1,6 @@
 # Proactive Operations Agent v1
 
-**Status:** offline 구현 완료 · 라이브 미실행 · 기본값 OFF
+**Status:** offline 구현 완료 · **bounded live 1-tick 실행됨 (LIVE_PARTIAL, 2026-08-25)** · 기본값 OFF
 **Date:** 2026-08-25
 **Branch:** `feat/proactive-operations-agent-v1`
 **Marketplace WRITE:** **0** (이 패키지에서 채널 호출은 READ도 없다)
@@ -98,6 +98,61 @@ tier 판정은 **`TRIAGE_TIER_RANK = 0`** — 운영자 목록이 정렬·집계
 
 **ORDER-only proactive case는 v1에서 제외** — 주문에는 기다리는 고객도 답 없는 질문도 없다.
 `ProactiveSubjectKind`에 값이 둘뿐이고, 구조 테스트가 그 사실을 고정한다.
+
+---
+
+## 3-A. Bootstrap fence — live enable 직전 감사가 RED을 냈다
+
+**후보 게이트의 모든 절은 「이 일이 실재하는가」를 물었고, 「이 일이 지금의 일인가」를 묻는 절이
+하나도 없었다.** canonical Demo Org 실측:
+
+| lane | fence 없음 | 가장 오래된 것 | 가장 최근 것 | 30일 내 |
+|---|---|---|---|---|
+| INQUIRY | **22** | 2014-10-28 | 2025-02-19 | **0** |
+| REVIEW | **16** | 2020-10-10 | 2026-07-02 | **0** |
+
+22건 전부 **2026-08-22 단일 backfill**로 들어왔고, 정렬은 `created_at ASC`(오래된 것 우선)였다.
+첫 tick은 예산 전부를 org에서 가장 오래된 행에 쓰고 「고객이 4,300일째 기다립니다」를 띄웠을 것이다.
+
+**source-state fingerprint dedupe는 이것을 막지 못한다.** 그것은 "같은 상태를 두 번 분석하지 않는다"의
+보장이지, "그 상태를 애초에 분석해야 했는가"의 보장이 아니다.
+
+### fence — lane당 절 하나, 필수 설정값 하나. 새 테이블 0, 새 subsystem 0.
+
+`sellerops.proactive.observed-since`(ISO-8601 instant, **공백 = fail closed**)와
+`inquiry_work_item.created_at` / `reviews.created_at`. 정렬은 **newest-observed first**로 뒤집었다.
+
+세 후보를 **측정해서** 기각했다:
+
+| 컬럼 | 기각 이유 |
+|---|---|
+| `updated_at` · `last_seen_at` | routine 수집이 매 sweep마다 건드린다 — 이 org의 **3,334행 중 3,266행**이 insert보다 새 touch를 갖는다. 전 corpus를 매시간 fresh로 부른다 |
+| `received_at` 단독 | enable **이후** 실행된 backfill이 같은 backlog를 다른 문으로 붓는다 |
+| 어떤 기본값이든 | 「태초부터」는 홍수 그 자체, 「프로세스 시작」은 재시작마다 홍수 재개, 「지금을 어딘가 기억」은 만들지 않기로 한 watermark subsystem |
+
+**reconcile은 fence 대상이 아니다** — 간밤에 답변된 카드를 닫는 것은 신규 준비 허용 여부와 무관하다.
+
+### 감사가 두 번째 fence를 강제했다
+
+로컬 배포는 self-pilot `LOCAL_SINGLE_USER` = **이 DB의 모든 org, 35개**. 그 범위를 상속했다면
+켜는 날 35개 org 전부에 대해 준비를 시작했을 것이다. 그래서 대상은 **교집합**이다:
+`sellerops.proactive.org-ids`(공백 = 아무도 없음)를 self-pilot이 허용하는 org로 거른다.
+**이름 있는 목록이 출발점이고**, DB 전체를 열거한 뒤 거르는 방식이 아니다 — 후자는 아래로 내려가다
+필터 하나를 잊으면 남의 상점에 대해 도는 루프가 된다.
+
+### fence 이후
+
+| lane | 전 | 후 (경계 `2026-08-23T00:00:00Z`) |
+|---|---|---|
+| INQUIRY | 22 | **0** |
+| REVIEW | 16 | **0** |
+
+경계는 **「모든 bulk import 이후」**로 잡았다. 이 org의 import는 2026-06-17(리뷰 3,700) ·
+2026-07-06(문의 3,201) · 2026-08-22(문의 68·리뷰 130) · **2026-08-23(리뷰 505)**. 마지막 것이
+중요하다 — 초안에서 쓰려던 rolling 72시간 창은 리뷰 1건을 들여보냈는데, **그 리뷰가 08-23 bulk
+import의 일부**였다. 시간 단위 창은 import와 arrival을 구별하지 못하고, import 뒤에 놓인 경계는 한다.
+
+**라이브 결과 · 남은 것은 §12와 `docs/evidence/proactive_operations_agent_live_tick_v1.md`.**
 
 ---
 
@@ -253,10 +308,16 @@ per-tick 상한은 예산 보호다 — 사전 초안은 판매자 초안과 **�
 | 정책 fabrication 없음 | `ProactiveReviewInvestigatorTest.itFabricatesNoPolicy` |
 | 승인 경계 · 채널 도달 · Answer Memory | `ProactiveSafetyFenceTest` |
 
+**라이브에서 증명됨 (2026-08-25, bounded 1-tick — `docs/evidence/proactive_operations_agent_live_tick_v1.md`):**
+production scheduler 경로로 1회 실행 · **대상org수 1/35** · 준비 0건 · `proactive_case` 0행 ·
+marketplace WRITE/READ/새 채널호출 **0/0/0** · **LLM 호출 0** · approval·intent·execution·draft·
+answer_memory·work-item 감사 **전부 0** · 세 화면 모두 렌더링되고 **섹션 자체가 없음**(0건 계약) ·
+telemetry median **null** · `a3672`/`a3673` 각각 **독립적인 두 이유로** 후보 아님(채널 호출 0).
+
 **증명되지 않음 (정직하게):**
-- **라이브로 한 번도 돌지 않았다.** 기본값 OFF이고 `docs/evidence/INDEX.md`에 행이 없다 — 라이브
-  실행이 없으므로 행이 없는 것이 옳다.
-- Scenario A/B는 **자동 테스트로** 증명됐고, 실제 org에서 화면까지 도는 end-to-end 관측은 아직이다.
+- **positive UI 경로는 라이브로 보지 못했다.** fence 이후 이 org에는 두 lane 모두 현재 업무가 없다
+  (`NO_FRESH_INQUIRY_CANDIDATE` · `NO_FRESH_REVIEW_CANDIDATE`) — 카드를 만들어내지 않았다.
+- Scenario A/B의 positive 경로는 **자동 테스트로** 증명됐고, 실제 org 데이터 위에서의 관측은 아직이다.
 - H2 테스트 스키마는 부분 유니크 인덱스를 만들지 않는다. 그래서 그 보증은 **마이그레이션 파일을
   읽는 테스트**로 고정했다 — 실행 증명이 아니라 스키마 증명임을 적어 둔다.
 
@@ -272,13 +333,16 @@ push/email notification · 새 workflow engine · Dashboard 재설계 — **전�
 
 ## 14. 남은 product blocker
 
-1. **라이브 1회 관측이 남았다.** `SELLEROPS_PROACTIVE_ENABLED=true` + self-pilot org 범위로 실제
-   Demo Org에서 한 tick을 돌려 카드가 화면에 뜨는 것까지 봐야 한다. (marketplace WRITE는 여전히 0이므로
-   승인 계약의 대상이 아니다 — 채널 호출 자체가 없다.)
-2. **일일 AI 예산의 배분은 product-owner 결정이다.** 지금 기본값은 tick당 문의 3건이다. 백그라운드가
+1. **positive 라이브 관측이 남았다.** tick은 증명됐지만 카드가 뜨는 화면은 아직이다. 이 org에
+   fence를 통과하는 현재 업무가 생기면(= routine 수집이 새 문의/리뷰를 가져오면) 자연히 관측된다.
+   앞당기려고 경계를 뒤로 미는 것은 backlog를 다시 들이는 것과 같다.
+2. **per-tick 상한이 lane별이라 총량 상한이 아니다.** product-owner 결정은 "proactive max = 3 cases
+   per tick"인데, 지금 표현은 문의 N + 리뷰 M이다. 이번 proof는 2+1로 천장을 3에 맞췄지만, 이것을
+   설정으로 강제하지 못한다는 것이 결함이다.
+3. **일일 AI 예산의 배분은 product-owner 결정이다.** 지금 기본값은 tick당 문의 3건이다. 백그라운드가
    하루 예산의 얼마까지 써도 되는지는 코드가 정할 문제가 아니다.
-3. **리뷰는 준비까지만 간다.** 리뷰 답변 WRITE capability가 증명되기 전까지 `RECOMMENDATION_ONLY`가
+4. **리뷰는 준비까지만 간다.** 리뷰 답변 WRITE capability가 증명되기 전까지 `RECOMMENDATION_ONLY`가
    천장이고, 이건 v1의 결함이 아니라 채널 사실이다.
-4. **판매자가 카드를 "안 볼래"라고 말할 방법이 없다.** 의도적이다 — 카드를 직접 치우는 컨트롤은
+5. **판매자가 카드를 "안 볼래"라고 말할 방법이 없다.** 의도적이다 — 카드를 직접 치우는 컨트롤은
    문의 큐와 리뷰 ledger가 모르는 두 번째 dismissal이 된다. 실제로 필요해지면 기존 dismissal을
    확장해야 하고, 그건 product-owner 결정이다.

@@ -76,7 +76,7 @@ class ProactiveReconcilerTest {
             }
         };
         reconciler = new ProactiveCaseReconciler(
-                new ProactiveProperties(true, 5, 5, 50), cases, workItems, inquiries, reviews,
+                new ProactiveProperties(true, 5, 5, 50, Instant.EPOCH), cases, workItems, inquiries, reviews,
                 inquiryStub, reviewStub,
                 Clock.fixed(Instant.parse("2026-08-25T00:00:00Z"), ZoneOffset.UTC));
     }
@@ -228,7 +228,7 @@ class ProactiveReconcilerTest {
                     "문의 " + i);
         }
         ProactiveCaseReconciler bounded = new ProactiveCaseReconciler(
-                new ProactiveProperties(true, 3, 0, 50), cases, workItems, inquiries, reviews,
+                new ProactiveProperties(true, 3, 0, 50, Instant.EPOCH), cases, workItems, inquiries, reviews,
                 new ProactiveInquiryInvestigator(null, null) {
                     @Override
                     public Investigation investigate(UUID orgId, UUID workItemId) {
@@ -244,6 +244,55 @@ class ProactiveReconcilerTest {
         assertThat(bounded.tick(org).preparedInquiries()).isEqualTo(2);
         assertThat(bounded.tick(org).preparedInquiries()).isZero();
         assertThat(open()).hasSize(8);
+    }
+
+
+    @Test
+    @DisplayName("with no stated boundary nothing is ever prepared — but reconcile still runs")
+    void noBoundaryMeansNoPreparation() {
+        seedInquiry("UNANSWERED", InquiryOperationalState.ACTIVE, InquiryWorkItemPhase.OPEN, null);
+        ProactiveCaseReconciler failClosed = new ProactiveCaseReconciler(
+                new ProactiveProperties(true, 5, 5, 50, (Instant) null), cases, workItems, inquiries, reviews,
+                new ProactiveInquiryInvestigator(null, null) {
+                    @Override
+                    public Investigation investigate(UUID orgId, UUID workItemId) {
+                        throw new AssertionError("an unfenced org must never reach an investigation");
+                    }
+                },
+                new ProactiveReviewInvestigator(null, null) {
+                    @Override
+                    public Investigation investigate(UUID orgId, Review review) {
+                        throw new AssertionError("an unfenced org must never reach an investigation");
+                    }
+                },
+                Clock.fixed(Instant.parse("2026-08-25T00:00:00Z"), ZoneOffset.UTC));
+
+        ProactiveCaseReconciler.TickReport report = failClosed.tick(org);
+
+        assertThat(report.preparedInquiries()).isZero();
+        assertThat(report.preparedReviews()).isZero();
+        assertThat(cases.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("reconcile is never fenced — a card whose work is done must close, boundary or not")
+    void reconcileRunsWithoutABoundary() {
+        UUID workItem = seedInquiry("UNANSWERED", InquiryOperationalState.ACTIVE,
+                InquiryWorkItemPhase.OPEN, null);
+        reconciler.tick(org);   // fence open: one card exists
+        assertThat(open()).hasSize(1);
+
+        Inquiry answered = inquiries.findById(inquiryIdOf(workItem)).orElseThrow();
+        answered.setStatus("ANSWERED");
+        inquiries.save(answered);
+
+        // Now with NO boundary at all. Preparation is off; closing a finished card is not optional.
+        new ProactiveCaseReconciler(
+                new ProactiveProperties(true, 5, 5, 50, (Instant) null), cases, workItems, inquiries, reviews,
+                new ProactiveInquiryInvestigator(null, null), new ProactiveReviewInvestigator(null, null),
+                Clock.fixed(Instant.parse("2026-08-25T00:00:00Z"), ZoneOffset.UTC)).tick(org);
+
+        assertThat(open()).isEmpty();
     }
 
     // ------------------------------------------------------------------ helpers

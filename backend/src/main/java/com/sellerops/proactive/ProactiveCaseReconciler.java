@@ -91,15 +91,37 @@ public class ProactiveCaseReconciler {
 
     public TickReport tick(UUID orgId) {
         Counters counters = new Counters();
+        // Reconcile ALWAYS runs, boundary or not: closing a card whose inquiry was answered overnight
+        // is correct whether or not this org is allowed to prepare new ones.
         reconcileOpen(orgId, counters);
-        prepareInquiries(orgId, counters);
-        prepareReviews(orgId, counters);
-        TickReport report = counters.report();
-        if (report.preparedInquiries() + report.preparedReviews() + report.closed() + report.acted() > 0) {
-            log.info("proactive tick org={} 준비(문의)={} 준비(리뷰)={} 종료={} 처리됨={} 변화없음={} 실패={}",
-                    orgId, report.preparedInquiries(), report.preparedReviews(), report.closed(),
-                    report.acted(), report.skippedUnchanged(), report.failed());
+        Optional<Instant> since = properties.observedSince();
+        if (since.isEmpty()) {
+            // Fail closed. Without a stated boundary there is no way to tell an org's imported history
+            // from its current work, and guessing wrong pours years of it onto a screen at once.
+            log.info("proactive: 관측 기준 시각이 설정되지 않아 신규 준비를 건너뜁니다 org={}", orgId);
+            return report(orgId, counters);
         }
+        prepareInquiries(orgId, since.get(), counters);
+        prepareReviews(orgId, since.get(), counters);
+        return report(orgId, counters);
+    }
+
+
+    /**
+     * One line per tick, <b>always</b> — including the tick that found nothing.
+     *
+     * <p>It used to log only when something happened, which is the version of this that cannot be
+     * trusted: "the loop is running and there is nothing to do" and "the loop is not running" looked
+     * identical in the log, and the second is the failure an operator actually needs to see. One line
+     * per org per interval is nothing; silence that means two different things is expensive.
+     *
+     * <p>Counts and one org id. No subject id, no title, no content.
+     */
+    private TickReport report(UUID orgId, Counters counters) {
+        TickReport report = counters.report();
+        log.info("proactive tick org={} 재확인={} 준비(문의)={} 준비(리뷰)={} 종료={} 처리됨={} 변화없음={} 실패={}",
+                orgId, report.reconciled(), report.preparedInquiries(), report.preparedReviews(),
+                report.closed(), report.acted(), report.skippedUnchanged(), report.failed());
         return report;
     }
 
@@ -218,7 +240,7 @@ public class ProactiveCaseReconciler {
 
     // ------------------------------------------------------------------ prepare
 
-    private void prepareInquiries(UUID orgId, Counters counters) {
+    private void prepareInquiries(UUID orgId, Instant observedSince, Counters counters) {
         int budget = properties.inquiriesPerTick();
         if (budget == 0) {
             return;
@@ -227,7 +249,7 @@ public class ProactiveCaseReconciler {
         // against their current state, and a page sized to the budget would spend every tick
         // re-reading them and preparing nothing.
         List<InquiryWorkItem> candidates =
-                workItems.findProactiveCandidates(orgId, PageRequest.of(0, budget * 5));
+                workItems.findProactiveCandidates(orgId, observedSince, PageRequest.of(0, budget * 5));
         int prepared = 0;
         for (InquiryWorkItem workItem : candidates) {
             if (prepared >= budget) {
@@ -276,12 +298,13 @@ public class ProactiveCaseReconciler {
         }
     }
 
-    private void prepareReviews(UUID orgId, Counters counters) {
+    private void prepareReviews(UUID orgId, Instant observedSince, Counters counters) {
         int budget = properties.reviewsPerTick();
         if (budget == 0) {
             return;
         }
-        List<Review> candidates = reviews.findProactiveCandidates(orgId, PageRequest.of(0, budget * 5));
+        List<Review> candidates =
+                reviews.findProactiveCandidates(orgId, observedSince, PageRequest.of(0, budget * 5));
         int prepared = 0;
         for (Review review : candidates) {
             if (prepared >= budget) {

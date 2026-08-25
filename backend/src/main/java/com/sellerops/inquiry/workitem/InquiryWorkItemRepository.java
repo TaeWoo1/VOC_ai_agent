@@ -1,5 +1,6 @@
 package com.sellerops.inquiry.workitem;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -60,18 +61,36 @@ public interface InquiryWorkItemRepository extends JpaRepository<InquiryWorkItem
      *       answer from being investigated as a customer's question.
      * </ul>
      *
-     * <p>Ordered oldest-first so a bounded tick works through a backlog instead of re-reading its
-     * newest rows forever, and totally ordered so a capped run is resumable.
+     * <p><b>{@code observedSince} is the bootstrap fence, and it is not optional.</b> Every clause
+     * above is about whether the work is real; none of them is about whether it is <i>today's</i>. On
+     * the day this feature is switched on, an org's whole historical backlog satisfies all of them at
+     * once — this org's did: 22 items, every one of them received between 2014 and early 2025, all
+     * first observed in a single backfill. Preparing those would not be a proactive product, it would
+     * be a machine telling a seller that a customer has been waiting since 2014.
+     *
+     * <p>The fence is the work item's own {@code created_at} — the moment SellerOps FIRST saw this as
+     * work, which is an immutable fact about observation. Deliberately not {@code updated_at} or
+     * {@code last_seen_at}: routine collection touches those on every sweep (3,266 of this org's 3,334
+     * rows carry a touch newer than their insert), so either would call the entire corpus fresh every
+     * hour. And deliberately not the source's {@code received_at} alone, which would let a historical
+     * backfill run after enable pour the same backlog in through the other door.
+     *
+     * <p><b>Ordered newest-observed first</b>, which is the other half of the same correction. It used
+     * to be oldest-first — reasonable for draining a queue, and exactly wrong here: a capped tick
+     * would spend its budget on the least current work in the org.
      */
     @Query("select w from InquiryWorkItem w where w.orgId = :orgId "
             + "and w.phase = com.sellerops.inquiry.workitem.InquiryWorkItemPhase.OPEN "
+            + "and w.createdAt >= :observedSince "
             + "and exists (select 1 from Inquiry i where i.id = w.inquiryId "
             + "  and i.dataOrigin = com.sellerops.common.DataOrigin.REAL "
             + "  and i.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE "
             + "  and i.status = 'UNANSWERED' "
             + "  and (i.threadRole is null or i.threadRole = 'ROOT')) "
-            + "order by w.createdAt asc, w.id asc")
-    List<InquiryWorkItem> findProactiveCandidates(@Param("orgId") UUID orgId, Pageable pageable);
+            + "order by w.createdAt desc, w.id asc")
+    List<InquiryWorkItem> findProactiveCandidates(@Param("orgId") UUID orgId,
+                                                  @Param("observedSince") Instant observedSince,
+                                                  Pageable pageable);
 
     boolean existsByInquiryId(UUID inquiryId);
 

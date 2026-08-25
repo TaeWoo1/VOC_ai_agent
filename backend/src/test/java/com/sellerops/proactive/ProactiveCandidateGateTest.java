@@ -44,6 +44,7 @@ class ProactiveCandidateGateTest {
     @Autowired InquiryRepository inquiries;
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired ReviewRepository reviews;
+    @Autowired org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager entityManager;
 
     private UUID org;
     private UUID otherOrg;
@@ -182,15 +183,77 @@ class ProactiveCandidateGateTest {
         assertThat(candidateReviews(org)).containsExactly(mine);
     }
 
+
+    // ------------------------------------------------------------------ the bootstrap fence
+
+    @Test
+    @DisplayName("the day the switch is flipped, an org's imported history is not today's work")
+    void theBootstrapFenceHoldsBackTheBacklog() {
+        // What the canonical Demo Org actually looked like: every eligible item real, unanswered, and
+        // first observed in one historical backfill days before anyone enabled this feature.
+        for (int i = 0; i < 5; i++) {
+            seedInquiry(org, "UNANSWERED", InquiryOperationalState.ACTIVE, "ROOT",
+                    DataOrigin.REAL, InquiryWorkItemPhase.OPEN);
+        }
+        assertThat(candidateWorkItems(org)).as("every clause about REALNESS passes").hasSize(5);
+
+        // A boundary after the backfill selects none of them. Nothing about the rows changed; what
+        // changed is the question being asked — "is this work" versus "is this work SellerOps' to
+        // raise now".
+        assertThat(candidateWorkItems(org, Instant.now().plusSeconds(60))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("the same fence holds for imported review history")
+    void theBootstrapFenceHoldsBackReviewHistory() {
+        seedReview(org, 1, "포장이 찢어져 있었습니다", ReviewReplyState.UNKNOWN);
+        seedReview(org, 2, "생각보다 얇습니다", ReviewReplyState.UNKNOWN);
+
+        assertThat(candidateReviews(org)).hasSize(2);
+        assertThat(candidateReviews(org, Instant.now().plusSeconds(60))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a capped tick spends its budget on the most recently observed work, not the oldest")
+    void theOrderingIsNewestObservedFirst() {
+        UUID older = seedInquiry(org, "UNANSWERED", InquiryOperationalState.ACTIVE, "ROOT",
+                DataOrigin.REAL, InquiryWorkItemPhase.OPEN);
+        UUID newer = seedInquiry(org, "UNANSWERED", InquiryOperationalState.ACTIVE, "ROOT",
+                DataOrigin.REAL, InquiryWorkItemPhase.OPEN);
+        // Persisted in order, so the second row's created_at is the later one. The ordering used to be
+        // oldest-first, which meant a bounded tick would reliably investigate an org's stalest rows.
+        touchCreatedAt(older, Instant.parse("2026-08-01T00:00:00Z"));
+        touchCreatedAt(newer, Instant.parse("2026-08-20T00:00:00Z"));
+
+        assertThat(candidateWorkItems(org)).containsExactly(newer, older);
+    }
+
+    /** Rewrite a work item's observation time — the column is not settable through the entity. */
+    private void touchCreatedAt(UUID workItemId, Instant at) {
+        entityManager.getEntityManager()
+                .createQuery("update InquiryWorkItem w set w.createdAt = :at where w.id = :id")
+                .setParameter("at", at).setParameter("id", workItemId).executeUpdate();
+        entityManager.clear();
+    }
+
     // ------------------------------------------------------------------ seeding
 
+    /** Fence wide open — these cases are about the operational clauses, not the boundary. */
     private List<UUID> candidateWorkItems(UUID orgId) {
-        return workItems.findProactiveCandidates(orgId, PageRequest.of(0, 50)).stream()
+        return candidateWorkItems(orgId, Instant.EPOCH);
+    }
+
+    private List<UUID> candidateWorkItems(UUID orgId, Instant observedSince) {
+        return workItems.findProactiveCandidates(orgId, observedSince, PageRequest.of(0, 50)).stream()
                 .map(InquiryWorkItem::getId).toList();
     }
 
     private List<UUID> candidateReviews(UUID orgId) {
-        return reviews.findProactiveCandidates(orgId, PageRequest.of(0, 50)).stream()
+        return candidateReviews(orgId, Instant.EPOCH);
+    }
+
+    private List<UUID> candidateReviews(UUID orgId, Instant observedSince) {
+        return reviews.findProactiveCandidates(orgId, observedSince, PageRequest.of(0, 50)).stream()
                 .map(Review::getId).toList();
     }
 
