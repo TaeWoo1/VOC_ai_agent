@@ -97,11 +97,19 @@ function Delta({ percent }: { percent: number }) {
     return <p className="text-sm text-muted">이전 기간과 같음</p>;
   }
   const up = percent > 0;
+  // 「(이전 기간 대비)」 wrapped every card onto a second line and said the same five words six times
+  // across one row. What it compares against is stated ONCE, and exactly, in 「이 숫자에 대하여」 —
+  // with both date ranges. The screen reader still hears the full sentence (Demo UX Polish v1).
   return (
     <p className="text-sm text-muted">
-      <span aria-hidden="true">{up ? "▲" : "▼"}</span>
-      <span className="ml-1 tabular-nums">{Math.abs(percent)}%</span>
-      <span className="ml-1">{up ? "증가" : "감소"} (이전 기간 대비)</span>
+      <span aria-hidden="true">
+        {up ? "▲" : "▼"}
+        <span className="ml-1 tabular-nums">{Math.abs(percent)}%</span>
+        <span className="ml-1">{up ? "증가" : "감소"}</span>
+      </span>
+      <span className="sr-only">
+        이전 기간 대비 {Math.abs(percent)}% {up ? "증가" : "감소"}
+      </span>
     </p>
   );
 }
@@ -121,18 +129,25 @@ export const FRESHNESS_MARK = "\u2020";
  * combined total that does not say so is the total lying by omission. That sentence used to live only
  * in the reference block a thousand pixels below, where a demo viewer never reaches it.
  */
-export function MetricNote({ revenueBasis, freshness }: { revenueBasis: string; freshness: boolean }) {
+/**
+ * The legend for the mark on the cards — and nothing else (Demo UX Polish v1).
+ *
+ * <b>What it stopped saying.</b> It used to open with the full 매출 basis sentence, which 「이 숫자에
+ * 대하여」 at the foot of the same page prints verbatim. Two paragraphs of identical small grey text,
+ * one of them directly under the numbers, is how a seller learns that the text under the numbers is
+ * not worth reading. The definition belongs in the reference block; what has to be here is the one
+ * thing that cannot be read anywhere else — what the mark ON THIS CARD means.
+ *
+ * With no marked card it renders nothing at all rather than a legend for a symbol nobody can see.
+ */
+export function MetricNote({ freshness }: { freshness: boolean }) {
+  if (!freshness) {
+    return null;
+  }
   return (
     <p className="break-keep text-sm leading-relaxed text-muted">
-      <span className="font-medium text-ink">매출 · </span>
-      {revenueBasis}
-      {freshness ? (
-        <>
-          {" "}
-          <span className="font-semibold text-warn">{FRESHNESS_MARK}</span> 표시는 최신 여부를 확인하지
-          못한 채널이 포함된 숫자입니다 — 어느 채널인지는 아래 채널별 표에 있습니다.
-        </>
-      ) : null}
+      <span className="font-semibold text-warn">{FRESHNESS_MARK}</span> 표시는 최신 여부를 확인하지 못한
+      채널이 포함된 숫자입니다 — 어느 채널인지는 아래 채널별 표에 있습니다.
     </p>
   );
 }

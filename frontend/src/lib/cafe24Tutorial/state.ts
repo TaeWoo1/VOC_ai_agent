@@ -248,7 +248,7 @@ export const PHASE_COPY: Record<TutorialPhase, { title: string; body: string }> 
   },
   mall_confirm: {
     title: "쇼핑몰 확인",
-    body: "쇼핑몰 주소 또는 Mall ID를 입력하면 정규화된 Mall ID를 확인시켜 드립니다.",
+    body: "쇼핑몰 주소를 그대로 붙여넣으셔도 됩니다. 어느 쇼핑몰인지 확인해 드립니다.",
   },
   permissions: {
     title: "요청 권한 안내",

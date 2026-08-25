@@ -120,7 +120,20 @@ document is not on this path and nothing here links to it, it does not carry cur
 첫 화면은 운영 Dashboard, 상품 화면과 Product Knowledge/RAG는 데모 필수, Agent는 어디서든, 그리고
 Agent reasoning graph는 여전히 **WRITE 0**(marketplace WRITE는 승인 뒤 별도 Action Executor). 기존
 canonical technical 문서를 덮어쓰지 않고 그 위에서 **화면과 경험의 순서**만 정한다. 매출 semantics는
-채널마다 다르며 그 감사 결과가 §4.1에 있다. UX 감사와 재설계 원칙: `docs/frontend_ux_audit_v1.md`.
+채널마다 다르며 그 감사 결과가 §4.1에 있다. UX 감사와 재설계 원칙: `docs/frontend_ux_audit_v1.md` ·
+**`docs/demo_ux_polish_v1.md`** (Demo UX Polish v1 — 기능 추가 0, `frontend/` 전용. 실제 Demo Org로
+16개 화면을 렌더 기준 감사한 뒤 P0/P1만 고쳤다: 채널이 보낸 **원본 HTML/엔티티가 문의·리뷰 본문에
+그대로 노출**되던 것을 표시 단계에서만 벗기고(`lib/plainText.ts` — 저장된 행 무변경, 태그는 해석하지
+않고 제거), 목록 행과 상세 헤드라인을 **상품명이 아니라 고객이 쓴 문장**으로 바꿨으며(이 org의
+카페24 백로그는 대부분 미연결이라 26행이 전부 「상품 미지정」이었다), **프로액티브 [확인하기]로
+도착한 문의가 첫 화면 밖으로 밀리던 것**을 섹션 미렌더 + 3-pane 비율 조정으로 닫았다. 화면이 시키던
+「초안을 복사해 등록하세요」에 대응하는 **[초안 복사]**를 붙였고 — **저장된 버전만** 복사하며
+클립보드가 없으면 성공했다고 말하지 않는다 — raw enum 노출(`ACTIVE`·`SUSPENDED`·`22,500KRW`·매핑
+없는 phase 통과)과 에이전트 화면의 배포 배지를 없앴다. 새 색·새 컴포넌트·새 프레임워크 0, backend
+무변경, 마켓플레이스 호출 0 · DB 변경 0 ⇒ evidence 행 없음. **고치지 않고 보고한 것**: 합성 행이
+`data_origin='REAL'`로 저장돼 리뷰·상품 화면에 섞여 보이는 것(historical cleanup 금지), 상품 목록
+상단의 숫자 이름(정렬 = product-owner 결정), 그리고 **연결 전 첫 화면은 이 org에서 관찰 불가**
+— 세 채널이 이미 연결돼 있다; 다만 미연결 시 카페24 7단계 튜토리얼로 가는 경로는 코드에서 확인했다).
 
 **Demo org / channel knowledge:** `docs/demo_org_and_channel_knowledge_v1.md` owns the canonical Demo
 Org's **provenance contract** (`REAL` / `DEMO_SEED` / `VERIFY_FIXTURE`, default reads exclude synthetic),

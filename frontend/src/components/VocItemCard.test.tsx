@@ -136,9 +136,12 @@ function renderCard(over: Partial<Omit<OperatorVocItem, NaverInvariant>> = {}) {
 }
 
 function renderItem(voc: OperatorVocItem) {
+  // The card is a div; the LIST is the caller's, exactly as 내 답변 작업 / 제외한 리뷰 render it.
   render(
     <ul>
-      <VocItemCard item={voc} accountId="acct-1" />
+      <li>
+        <VocItemCard item={voc} accountId="acct-1" />
+      </li>
     </ul>,
   );
   return screen.getByRole("listitem");

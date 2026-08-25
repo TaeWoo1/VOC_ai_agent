@@ -180,23 +180,25 @@ export function Agent() {
       <PageHeader
         title="운영 에이전트"
         description="한 줄로 운영 작업을 지시하면 에이전트가 문의·리뷰·이슈를 분류해 사람이 확인할 지점까지 준비합니다."
-        meta={caps.data ? <CapabilityMeta store={caps.data.runStore} /> : undefined}
+        meta={caps.data ? <CapabilityMeta /> : undefined}
       />
 
       {/* Before the prompt, not after it. The Agent screen used to answer only what it was asked;
           work SellerOps has already investigated should not need to be asked for. */}
       <ProactiveCases limit={4} heading="이미 확인해 둔 일" />
 
-      <Section title="무엇을 도와드릴까요?">
+      <Section title="무엇을 확인해볼까요?">
         <form onSubmit={submit} className="space-y-3" aria-label="에이전트 명령 입력">
-          <label htmlFor="agent-command" className="block text-sm font-medium text-ink">
-            명령
+          {/* The heading above already asks the question; a second 「명령」 label under it was the
+              same field named twice, in the harsher of the two words. */}
+          <label htmlFor="agent-command" className="sr-only">
+            확인할 내용
           </label>
           <textarea
             id="agent-command"
             className="w-full rounded-xl border border-line bg-canvas p-3 text-ink"
             rows={2}
-            placeholder="예: 오늘 뭐부터 봐야 해? / 이 상품 사용 방법을 고객에게 어떻게 설명하면 돼? / 이번 주 대표 보고 정리해줘"
+            placeholder="예: 오늘 뭐부터 봐야 해?"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
             disabled={plannerUnavailable}
@@ -493,17 +495,20 @@ function InvestigationPlanList({ needs }: { needs: OperatorAnswer["needs"] }) {
   );
 }
 
-function CapabilityMeta({ store }: { store: { durable: boolean; multiInstanceSafe: boolean } }) {
+/**
+ * The one thing a seller needs to know before typing: nothing here reaches a customer.
+ *
+ * <b>What was removed (Demo UX Polish v1).</b> The run store used to be announced beside it —
+ * 「저장: 재시작 복원 · 단일 인스턴스」 — which is a deployment fact about a Node process, in the
+ * header of a screen a seller opens to ask about their inquiries. It never changed a decision they
+ * could make. The safety line stays, without its engineering parenthetical: 「fail-closed」 is the
+ * name of the mechanism, not the promise, and the promise is the part the seller is owed.
+ */
+function CapabilityMeta() {
   return (
-    <>
-      <span className="rounded-full bg-good/10 px-2 py-0.5 text-xs font-medium text-good">
-        외부 발송 없음 (fail-closed)
-      </span>
-      <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-muted">
-        저장: {store.durable ? "재시작 복원" : "메모리"}
-        {store.multiInstanceSafe ? "" : " · 단일 인스턴스"}
-      </span>
-    </>
+    <span className="rounded-full bg-good/10 px-2 py-0.5 text-xs font-medium text-good">
+      고객에게 대신 보내지 않습니다
+    </span>
   );
 }
 

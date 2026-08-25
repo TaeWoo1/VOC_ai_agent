@@ -1,8 +1,9 @@
 import { Link } from "react-router-dom";
 import type { FeedItem, ItemAnalysis } from "../../lib/types";
 import { analysisKey } from "../../lib/inboxView";
-import { TYPE_LABEL, itemTitle, needsCheck, needsReply } from "../../lib/inboxWorkspace";
+import { TYPE_LABEL, needsCheck, needsReply } from "../../lib/inboxWorkspace";
 import { relativeTime } from "../../lib/format";
+import { previewText } from "../../lib/plainText";
 
 /** The one status word a row is allowed to carry, or null when the data states nothing. */
 function statusLabel(item: FeedItem): { text: string; cls: string } | null {
@@ -78,17 +79,27 @@ export function InboxList({
                 </span>
               </div>
 
-              <p className="mt-2 break-keep font-semibold text-ink">{itemTitle(item)}</p>
-              <p className="mt-1 line-clamp-2 break-keep text-sm leading-relaxed text-muted">
-                {item.snippet}
+              {/* THE CUSTOMER'S WORDS ARE THE ROW (Demo UX Polish v1). The bold line used to be
+                  `itemTitle`, which falls back to the product name — and this org's Cafe24 backlog
+                  is largely unattributed, so twenty-six consecutive rows were headed 「상품 미지정」
+                  and the only thing that told them apart was the grey line underneath. The product
+                  is real metadata; it is not what a seller recognises a question by. */}
+              <p className="mt-2 line-clamp-2 break-keep font-semibold leading-snug text-ink">
+                {previewText(item.snippet) || (item.type === "INQUIRY" ? "문의" : "리뷰")}
               </p>
 
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-muted">
                 <span>{item.channelNameKo}</span>
                 {analysis ? (
                   <>
                     <span aria-hidden="true">·</span>
                     <span>{analysis.category}</span>
+                  </>
+                ) : null}
+                {item.productName ? (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="break-keep">{item.productName}</span>
                   </>
                 ) : null}
               </div>

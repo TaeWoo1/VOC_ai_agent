@@ -212,8 +212,12 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
 
       {/* 「AI가 먼저 확인한 일」 sits ABOVE the queue, and outside its loading branch on purpose: it is
           the answer to "무엇부터 볼까", and a seller who has to wait for a 500-row feed before seeing it
-          has already started scanning the list themselves. It renders nothing when there is nothing. */}
-      {inquiriesOnly ? <div className="mb-6"><ProactiveCases limit={4} /></div> : null}
+          has already started scanning the list themselves. It renders nothing when there is nothing.
+
+          It is also not rendered once a row is open (Demo UX Polish v1). Its whole job is to answer
+          "무엇부터 볼까"; a seller who followed its own 확인하기 link is already inside the answer, and
+          leaving the section above them pushed the inquiry they just chose off the first screen. */}
+      {inquiriesOnly && !itemRef ? <div className="mb-5"><ProactiveCases limit={4} /></div> : null}
 
       {loading ? (
         <p className="text-muted">불러오는 중…</p>
@@ -230,7 +234,10 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
           action={<BtnLink to="/connect">채널 연결하기</BtnLink>}
         />
       ) : (
-        <div className="grid gap-5 lg:grid-cols-[200px_minmax(0,1fr)_400px]">
+        /* The detail pane is the widest column, not the narrowest: 문의 상세 is where the question,
+           the evidence and the draft have to be readable together (Demo UX Polish v1). The filter
+           rail keeps only what a rail needs. */
+        <div className="grid gap-5 lg:grid-cols-[168px_minmax(0,0.85fr)_minmax(0,1.15fr)]">
           <div className="lg:sticky lg:top-4 lg:self-start">
             <InboxFilterRail
               items={all}

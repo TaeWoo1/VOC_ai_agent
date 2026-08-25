@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { SectionHeader } from "../ui/SectionHeader";
 import { Chip } from "../ui/Chip";
+import { BtnLink } from "../ui/Btn";
 import { api } from "../../lib/apiClient";
 import { analytics } from "../../lib/analytics";
 import {
@@ -12,6 +12,7 @@ import {
   evidenceLabel,
 } from "../../lib/proactive";
 import type { ProactiveCaseView } from "../../lib/types";
+import { previewText } from "../../lib/plainText";
 
 /**
  * 「AI가 먼저 확인한 일」 — the one thing on this screen the seller did not ask for.
@@ -68,16 +69,15 @@ export function ProactiveCases({ limit = 5, heading = "AI가 먼저 확인한 �
   }
 
   return (
-    <section className="space-y-3" aria-label={heading}>
+    <section className="space-y-2" aria-label={heading}>
+      {/* No standing explanation under the heading. 「직접 찾지 않아도 되도록 미리 확인해 뒀습니다」 said
+          the same thing the heading says, on every visit, above the only work that matters here. The
+          hint now carries information or it is not there. */}
       <SectionHeader
         title={heading}
-        hint={
-          total > cases.length
-            ? `직접 찾지 않아도 되도록 미리 확인해 뒀습니다. 전체 ${total}건 중 ${cases.length}건`
-            : "직접 찾지 않아도 되도록 미리 확인해 뒀습니다."
-        }
+        hint={total > cases.length ? `전체 ${total}건 중 ${cases.length}건` : undefined}
       />
-      <ul className="grid gap-3 md:grid-cols-2">
+      <ul className="space-y-2">
         {cases.map((view) => (
           <li key={view.id}>
             <ProactiveCard view={view} onOpen={open} />
@@ -96,50 +96,50 @@ function ProactiveCard({
   onOpen: (view: ProactiveCaseView) => void;
 }) {
   const evidence = evidenceLabel(view);
+  // One line, in the order a seller reads it: what it is, what SellerOps did, what that was built on.
+  const status = [view.reasonNote, PREPARED_ACTION_LABEL[view.preparedAction], evidence]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <div className="flex h-full flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip tone={view.priority === "HIGH" ? "accent" : "neutral"}>
-          {PRIORITY_LABEL[view.priority]}
-        </Chip>
-        <span className="text-sm text-muted">
-          {view.subjectKind === "INQUIRY" ? "문의" : "리뷰"}
-          {view.channelNameKo ? ` · ${view.channelNameKo}` : ""}
-          {view.rating != null ? ` · ${view.rating}점` : ""}
-        </span>
-      </div>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border border-line bg-surface px-4 py-3.5">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Chip tone={view.priority === "HIGH" ? "accent" : "neutral"}>
+            {PRIORITY_LABEL[view.priority]}
+          </Chip>
+          <span className="break-keep text-sm text-muted">
+            {view.subjectKind === "INQUIRY" ? "문의" : "리뷰"}
+            {view.channelNameKo ? ` · ${view.channelNameKo}` : ""}
+            {view.rating != null ? ` · ${view.rating}점` : ""}
+            {` · ${view.productName ?? "상품 미지정"}`}
+          </span>
+        </div>
 
-      {/* The row the seller recognises the work by. Masked server-side, never the buyer. */}
-      <p className="break-keep font-semibold leading-snug text-ink">{view.snippet}</p>
-      <p className="break-keep text-sm text-muted">{view.productName ?? "상품 미지정"}</p>
-
-      {/* Why it is here NOW — the sentence this whole feature exists to be able to write. */}
-      <p className="break-keep text-sm leading-relaxed text-ink">{view.reasonNote}</p>
-      {view.recommendation ? (
-        <p className="break-keep text-sm leading-relaxed text-muted">{view.recommendation}</p>
-      ) : null}
-
-      <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
-        <span className="font-medium text-ink">{PREPARED_ACTION_LABEL[view.preparedAction]}</span>
-        {evidence ? <span>· {evidence}</span> : null}
-      </div>
-
-      {/* The gap, when there is one — with the sentence that says what closing it would buy. */}
-      {view.knowledgeGap ? (
-        <p className="break-keep rounded-xl bg-canvas px-3 py-2 text-sm leading-relaxed text-muted">
-          {view.knowledgeGap}
+        {/* The row the seller recognises the work by. Masked server-side, never the buyer. */}
+        <p className="mt-1.5 break-keep font-semibold leading-snug text-ink">
+          {previewText(view.snippet)}
         </p>
-      ) : null}
 
-      <div className="mt-auto pt-1">
-        <Link
-          to={caseTarget(view)}
-          onClick={() => onOpen(view)}
-          className="inline-flex min-h-[36px] items-center justify-center rounded-xl border border-line px-3 py-1.5 text-sm font-semibold text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
-        >
-          확인하기
-        </Link>
+        {/* Why it is here NOW, and how far SellerOps got — one line, because three stacked sentences
+            of the same weight is how a card stops being read. */}
+        <p className="mt-1 break-keep text-sm leading-relaxed text-muted">{status}</p>
+        {view.recommendation ? (
+          <p className="mt-0.5 break-keep text-sm leading-relaxed text-muted">
+            {view.recommendation}
+          </p>
+        ) : null}
+        {/* The gap, when there is one — a sentence, not a box. A tinted panel inside a card read as a
+            warning about the card itself. */}
+        {view.knowledgeGap ? (
+          <p className="mt-0.5 break-keep text-sm leading-relaxed text-muted">{view.knowledgeGap}</p>
+        ) : null}
       </div>
+
+      {/* The single most important control on this section, at the emphasis that says so. It used to
+          be an outline button — the quietest thing on a screen whose whole point was to be acted on. */}
+      <BtnLink to={caseTarget(view)} size="sm" onClick={() => onOpen(view)} className="shrink-0">
+        확인하기
+      </BtnLink>
     </div>
   );
 }

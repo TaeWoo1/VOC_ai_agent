@@ -53,7 +53,7 @@ export function Cafe24Connect() {
           동의를 마치면 자동으로 연결됩니다.
         </p>
         <p className="mt-1 text-base text-muted">
-          카페24 자사몰 관리자에서 앱 연동(OAuth)으로 연결합니다.
+          카페24 자사몰 관리자에서 앱 연동 동의로 연결합니다.
         </p>
       </div>
 

@@ -10,6 +10,7 @@ import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
 import { count } from "../../lib/format";
 import type { KnowledgeCoverageView, ProductKnowledgeView } from "../../lib/types";
+import { priceLabel, sellingStatusLabel } from "../../lib/productVocabulary";
 
 /**
  * 상품 상세 — Product Intelligence.
@@ -51,7 +52,7 @@ export function ProductDetail() {
     <div className="space-y-8">
       <PageHead
         title={data.name ?? "이름을 확인하지 못한 상품"}
-        description={[data.sku ? `상품코드 ${data.sku}` : null, data.status]
+        description={[data.sku ? `상품코드 ${data.sku}` : null]
           .filter(Boolean)
           .join(" · ")}
         action={
@@ -121,9 +122,9 @@ export function ProductDetail() {
                   )}
                 </Td>
                 <Td numeric muted={listing.price == null}>
-                  {listing.price == null ? "—" : `${count(listing.price)}${listing.currency ?? ""}`}
+                  {listing.price == null ? "—" : priceLabel(count(listing.price), listing.currency)}
                 </Td>
-                <Td muted>{listing.sellingStatus ?? "—"}</Td>
+                <Td muted>{sellingStatusLabel(listing.sellingStatus)}</Td>
               </tr>
             ))}
           </DataTable>

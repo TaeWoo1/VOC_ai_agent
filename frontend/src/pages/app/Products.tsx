@@ -18,6 +18,9 @@ import type { ProductSummaryView } from "../../lib/types";
  * <b>Search is server-side and debounced, because the catalogue is not small.</b> Filtering a page of
  * thirty in the browser would answer a search over the thirty that happened to load.
  */
+/** How many rows one look at the catalogue shows. Search is how a seller reaches the rest. */
+const PAGE_SIZE = 50;
+
 export function Products() {
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<ProductSummaryView[] | null>(null);
@@ -28,7 +31,7 @@ export function Products() {
     setError(false);
     const timer = setTimeout(() => {
       void api
-        .searchProductsStrict(query, 50)
+        .searchProductsStrict(query, PAGE_SIZE)
         .then((list) => active && setRows(list))
         .catch(() => active && setError(true));
     }, query ? 250 : 0);
@@ -57,6 +60,13 @@ export function Products() {
         />
       </label>
 
+      {rows && rows.length > 0 ? (
+        <p className="text-sm text-muted">
+          {query ? `찾은 상품 ${rows.length}개` : `상품 ${rows.length}개`}
+          {rows.length >= PAGE_SIZE ? " · 더 있으면 이름이나 상품코드로 찾아보세요" : ""}
+        </p>
+      ) : null}
+
       {error ? (
         <Empty
           title="상품 목록을 불러오지 못했습니다"
@@ -77,12 +87,11 @@ export function Products() {
         />
       ) : (
         <DataTable
-          caption="상품 이름, 상품코드, 판매 상태"
+          caption="상품 이름과 상품코드"
           head={
             <>
               <Th>상품</Th>
               <Th>상품코드</Th>
-              <Th>상태</Th>
             </>
           }
         >
@@ -103,7 +112,6 @@ export function Products() {
                 ) : null}
               </Td>
               <Td muted>{row.sku ?? "—"}</Td>
-              <Td muted>{row.status ?? "—"}</Td>
             </tr>
           ))}
         </DataTable>

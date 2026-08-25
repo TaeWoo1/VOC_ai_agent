@@ -5,15 +5,7 @@ import { sentimentChip, urgencyChip } from "../../lib/inboxView";
 import { relativeTime } from "../../lib/format";
 import { Chip } from "../ui/Chip";
 import { InquiryResponsePanel } from "./InquiryResponsePanel";
-
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-xs text-muted">{label}</dt>
-      <dd className="mt-0.5 break-keep font-medium text-ink">{value}</dd>
-    </div>
-  );
-}
+import { plainText, previewText } from "../../lib/plainText";
 
 /**
  * Detail panel for one inbox row.
@@ -26,6 +18,13 @@ function Meta({ label, value }: { label: string; value: string }) {
  * The response workflow renders only when a work item resolves for this inquiry. When it does not
  * — a review, or an inquiry outside the queue — nothing about drafting appears at all, rather than
  * a disabled control.
+ *
+ * <b>The heading is not the product (Demo UX Polish v1).</b> `itemTitle` falls back to the product
+ * name, and this org's Cafe24 backlog is largely unattributed — so the pane's largest text used to
+ * read 「상품 미지정」 on inquiry after inquiry while the customer's actual question sat far below it.
+ * An inquiry is now headed by what the customer wrote, and when the response panel renders (which
+ * opens with 고객 문의 and its own context line) this header carries no heading at all rather than
+ * saying the same thing twice one block apart.
  */
 export function InboxDetail({
   item,
@@ -38,9 +37,14 @@ export function InboxDetail({
 }) {
   const urgency = analysis ? urgencyChip(analysis.urgency) : null;
   const sentiment = analysis ? sentimentChip(analysis.sentiment) : null;
+  // The panel owns 고객 문의 — title, body, channel, product and the 상품 지정 control — whenever it
+  // renders. Repeating any of it above would be the same fact twice on one screen.
+  const panelOwnsTheQuestion = !!workItemId && item.type === "INQUIRY";
+  const heading =
+    item.type === "INQUIRY" ? previewText(item.snippet) || "문의" : itemTitle(item);
 
   return (
-    <article aria-label="선택한 항목" className="space-y-6">
+    <article aria-label="선택한 항목" className="space-y-5">
       <header>
         <div className="flex flex-wrap items-center gap-2">
           <Chip>{TYPE_LABEL[item.type]}</Chip>
@@ -48,61 +52,65 @@ export function InboxDetail({
           {needsCheck(item) ? <Chip tone="accent">확인 필요</Chip> : null}
           <span className="text-sm text-muted">{relativeTime(item.receivedAt)}</span>
         </div>
-        <h2 className="mt-3 break-keep text-xl font-bold text-ink">{itemTitle(item)}</h2>
+        {panelOwnsTheQuestion ? null : (
+          <>
+            <h2 className="mt-3 break-keep text-lg font-bold leading-snug text-ink">{heading}</h2>
+            <p className="mt-1.5 break-keep text-sm text-muted">
+              {item.channelNameKo}
+              {item.productName ? ` · ${item.productName}` : ""}
+              {item.rating != null ? ` · 별점 ${item.rating}` : ""}
+            </p>
+          </>
+        )}
       </header>
-
-      <dl className="grid grid-cols-2 gap-4">
-        <Meta label="채널" value={item.channelNameKo} />
-        <Meta label="상품" value={item.productName || "상품명 미상"} />
-        {item.rating != null ? <Meta label="별점" value={String(item.rating)} /> : null}
-      </dl>
 
       {/* The text itself. A review only ever has the feed's snippet; an inquiry gets its full body from
           the response panel below WHEN a work item resolves — otherwise the snippet is all there is,
           and a detail pane that named the product but never showed the question was a real gap (A7).
           Either way it is labelled 발췌, not 원문. */}
-      {item.type === "REVIEW" || !workItemId ? (
+      {panelOwnsTheQuestion ? null : (
         <section>
-          <h3 className="text-base font-bold text-ink">{item.type === "REVIEW" ? "리뷰 발췌" : "문의 발췌"}</h3>
-          <p className="mt-2 whitespace-pre-wrap break-keep leading-relaxed text-ink">
-            {item.snippet}
+          <h3 className="text-sm font-semibold text-muted">
+            {item.type === "REVIEW" ? "리뷰 발췌" : "문의 발췌"}
+          </h3>
+          <p className="mt-1.5 whitespace-pre-wrap break-keep leading-relaxed text-ink">
+            {plainText(item.snippet)}
           </p>
         </section>
-      ) : null}
+      )}
 
+      {workItemId ? <InquiryResponsePanel workItemId={workItemId} /> : null}
+
+      {/* Classification is a hint about the row, not a finding — so it sits after the work, in one
+          line of chips rather than a section that competes with 고객 문의 and AI 답변 above it. */}
       {analysis ? (
-        <section>
-          <h3 className="text-base font-bold text-ink">분류</h3>
-          <p className="mt-2 break-keep leading-relaxed text-muted">{analysis.summary}</p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+        <section className="border-t border-line pt-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-muted">자동 분류</span>
             <Chip>{analysis.category}</Chip>
             {urgency ? <Chip>긴급도 {urgency.label}</Chip> : null}
             {sentiment ? <Chip>{sentiment.label}</Chip> : null}
           </div>
+          <p className="mt-2 break-keep text-sm leading-relaxed text-muted">{analysis.summary}</p>
           {/* Seller language, not the analyzer's name and version: the fact that matters is that this
               is an automatic keyword classification that may be wrong. */}
-          <p className="mt-2 text-xs text-muted">키워드로 자동 분류한 것이라 정확하지 않을 수 있습니다.</p>
+          <p className="mt-1 text-xs text-muted">키워드로 자동 분류한 것이라 정확하지 않을 수 있습니다.</p>
         </section>
       ) : null}
 
-      {workItemId ? (
-        <InquiryResponsePanel workItemId={workItemId} />
-      ) : item.type === "INQUIRY" ? (
+      {!workItemId && item.type === "INQUIRY" ? (
         <p className="break-keep text-sm leading-relaxed text-muted">
           이 문의에는 SellerOps가 답변 방향을 제안할 수 없습니다. 답변은 해당 채널의 판매자센터에서
           직접 작성합니다.
         </p>
       ) : null}
 
-      <footer className="border-t border-line pt-5">
-        <p className="break-keep text-sm leading-relaxed text-muted">
-          같은 문제가 반복되는지는 고객운영 메모리에서 확인할 수 있습니다.
-        </p>
+      <footer className="border-t border-line pt-4">
         <Link
           to="/memory"
-          className="mt-2 inline-flex rounded-lg text-sm font-semibold text-brand-700 transition hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+          className="inline-flex rounded-lg text-sm font-semibold text-brand-700 transition hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
         >
-          고객운영 메모리 열기
+          같은 문제가 반복되는지 보기
         </Link>
       </footer>
     </article>

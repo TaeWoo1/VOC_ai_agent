@@ -70,8 +70,8 @@ describe("ProactiveCases", () => {
 
     expect(await screen.findByText("배송 언제 되나요")).toBeInTheDocument();
     expect(screen.getByText(/3일째 기다리고 있습니다/)).toBeInTheDocument();
-    expect(screen.getByText("답변 초안 준비됨")).toBeInTheDocument();
-    expect(screen.getByText(/근거 2건 사용/)).toBeInTheDocument();
+    // One status line, in reading order: why now · what SellerOps did · what it was built on.
+    expect(screen.getByText(/3일째 기다리고 있습니다.*답변 초안 준비됨.*근거 2건 사용/)).toBeInTheDocument();
     expect(screen.getByText("먼저 확인")).toBeInTheDocument();
   });
 
@@ -133,8 +133,7 @@ describe("ProactiveCases", () => {
 
     renderSection();
 
-    expect(await screen.findByText("확인할 내용 정리됨")).toBeInTheDocument();
-    expect(screen.getByText(/반복 문제 확인됨/)).toBeInTheDocument();
+    expect(await screen.findByText(/확인할 내용 정리됨.*반복 문제 확인됨/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "확인하기" })).toHaveAttribute("href", "/reviews");
     expect(screen.queryByRole("button", { name: /전송|보내기|답변 보내기/ })).toBeNull();
   });
@@ -172,7 +171,8 @@ describe("ProactiveCases", () => {
     await screen.findByText("배송 언제 되나요");
     // Once, as the product line. An evidence label repeating it made the card stutter, and a line a
     // seller reads twice in a row is a line they stop reading.
-    expect(screen.getAllByText("상품 미지정")).toHaveLength(1);
+    const occurrences = (document.body.textContent ?? "").split("상품 미지정").length - 1;
+    expect(occurrences).toBe(1);
     expect(screen.getByText(/다음 초안은 상품 지식을 근거로 씁니다/)).toBeInTheDocument();
   });
 

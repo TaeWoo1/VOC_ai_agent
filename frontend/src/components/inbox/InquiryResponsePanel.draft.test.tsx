@@ -216,3 +216,60 @@ describe("InquiryResponsePanel — the generated draft", () => {
     expect(screen.queryByText("ANSWER_MEMORY")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * 초안 복사 — the control the screen's own instruction asked for.
+ *
+ * Where SellerOps cannot register the reply itself, the panel tells the seller to copy the draft and
+ * paste it into the marketplace. It offered no way to do it. What matters about the control that
+ * closes that gap is WHICH text it can reach: the saved version, never the editor buffer — the same
+ * rule the review lane enforces, for the same reason.
+ */
+describe("InquiryResponsePanel — 초안 복사", () => {
+  it("copies the saved draft, and says so", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    // After `setup()`, never before: user-event installs its own clipboard stub on the document's
+    // window, so a stub written first is the one that gets replaced.
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<InquiryResponsePanel workItemId="w1" />);
+
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+    const copy = await screen.findByRole("button", { name: "초안 복사" });
+    await user.click(copy);
+
+    expect(writeText).toHaveBeenCalledWith(
+      "[답변] 사용 방법\n\n테이프를 벗기고 벽면에 붙이시면 됩니다.",
+    );
+    expect(await screen.findByRole("button", { name: "복사했습니다" })).toBeInTheDocument();
+  });
+
+  it("is not offered while the editor is open — an unsaved keystroke is not a draft", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn() },
+      configurable: true,
+    });
+    render(<InquiryResponsePanel workItemId="w1" />);
+
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+    await screen.findByRole("button", { name: "초안 복사" });
+    await user.click(screen.getByRole("button", { name: "수정" }));
+
+    expect(screen.queryByRole("button", { name: "초안 복사" })).toBeNull();
+  });
+
+  it("reveals the text instead of claiming a copy when the origin has no clipboard", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+    render(<InquiryResponsePanel workItemId="w1" />);
+
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+    await user.click(await screen.findByRole("button", { name: "초안 복사" }));
+
+    expect(screen.queryByRole("button", { name: "복사했습니다" })).toBeNull();
+    expect(await screen.findByLabelText("복사할 초안")).toHaveValue(
+      "[답변] 사용 방법\n\n테이프를 벗기고 벽면에 붙이시면 됩니다.",
+    );
+  });
+});

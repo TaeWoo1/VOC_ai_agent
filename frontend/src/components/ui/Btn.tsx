@@ -56,6 +56,7 @@ export function BtnLink({
   size = "md",
   className,
   ariaLabel,
+  onClick,
   children,
 }: {
   to: string;
@@ -68,10 +69,17 @@ export function BtnLink({
    * screen reader's link list. It must CONTAIN the visible label (WCAG 2.5.3), so prefix, never replace.
    */
   ariaLabel?: string;
+  /** Side effect that must happen as the seller leaves — telemetry, never navigation of its own. */
+  onClick?: () => void;
   children: ReactNode;
 }) {
   return (
-    <Link to={to} className={classes(variant, size, className)} aria-label={ariaLabel}>
+    <Link
+      to={to}
+      className={classes(variant, size, className)}
+      aria-label={ariaLabel}
+      onClick={onClick}
+    >
       {children}
     </Link>
   );

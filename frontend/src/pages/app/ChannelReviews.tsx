@@ -35,6 +35,7 @@ import {
 } from "../../lib/actionWindow/locate/useReviewLocate";
 import { ReplyWorkControls } from "../../components/ReplyWorkControls";
 import { MyReplyWork } from "../../components/MyReplyWork";
+import { plainText, previewText } from "../../lib/plainText";
 
 /**
  * **상품평** — the seller's own record of what buyers wrote on a connected channel.
@@ -469,7 +470,9 @@ export function ChannelReviews({
                       className={`mt-1 block break-keep text-base ${item.textless ? "text-muted" : "text-ink"}`}
                     >
                       {/* A textless review is what the buyer chose, not something we failed to show. */}
-                      {item.textless ? `별점만 남긴 ${word}` : (item.preview ?? "표시할 수 있는 본문이 없습니다")}
+                      {item.textless
+                        ? `별점만 남긴 ${word}`
+                        : (previewText(item.preview) || "표시할 수 있는 본문이 없습니다")}
                     </span>
                     <TriageReason note={item.triage} />
                     <span className="mt-1 block truncate text-sm text-muted">
@@ -630,7 +633,9 @@ function ReviewDetail({
         </p>
       ) : (
         <p className="whitespace-pre-wrap break-keep leading-relaxed text-ink">
-          {detail.body ?? "표시할 수 있는 본문이 없습니다"}
+          {/* NAVER sends review bodies as HTML, so a customer's quotation mark reached this pane as
+              `&ldquo;`. Presentation only — the stored row is untouched (Demo UX Polish v1). */}
+          {plainText(detail.body) || "표시할 수 있는 본문이 없습니다"}
         </p>
       )}
       {detail.bodyRedacted ? (

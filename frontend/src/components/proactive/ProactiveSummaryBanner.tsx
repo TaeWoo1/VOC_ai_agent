@@ -38,7 +38,10 @@ export function ProactiveSummaryBanner() {
   return (
     <Link
       to="/inquiries"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-5 py-4 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+      /* The one thing on 홈 the seller did not ask for, at the emphasis that says so. It used to be
+         border-line on bg-surface — visually identical to every other panel on the page, which put
+         the screen's only prepared work at the same weight as its furniture. */
+      className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand/30 bg-brand-50 px-5 py-4 transition hover:border-brand/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
     >
       <div className="min-w-0">
         <p className="break-keep font-semibold text-ink">
@@ -50,7 +53,9 @@ export function ProactiveSummaryBanner() {
             : "확인이 필요한 이유와 근거를 미리 정리해 뒀습니다."}
         </p>
       </div>
-      <span className="shrink-0 text-sm font-semibold text-brand-700">확인하러 가기 →</span>
+      <span className="inline-flex min-h-[36px] shrink-0 items-center justify-center rounded-xl bg-brand-700 px-3 py-1.5 text-sm font-semibold text-white">
+        확인하러 가기
+      </span>
     </Link>
   );
 }

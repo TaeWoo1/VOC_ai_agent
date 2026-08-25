@@ -1,4 +1,5 @@
 import type { OperatorVocItem } from "../lib/types";
+import { previewText as plainPreview } from "../lib/plainText";
 import {
   categoryChip,
   previewText,
@@ -43,7 +44,10 @@ export function VocItemCard({
   const reported = reportedSubmissionLabel(item.hasReportedSubmission);
 
   return (
-    <li className="flex flex-col gap-2 py-3">
+    /* A div, not an li: every caller already wraps this in its own <li> with its own padding, so
+       the card's own <li> made a list item inside a list item — invalid HTML, and a real DOM-nesting
+       warning in the console on the 리뷰 screen (Demo UX Polish v1). */
+    <div className="flex flex-col gap-2">
       {/* Subject line. The visually-redundant prefix is sr-only so the placeholder
           ("상품명 미상") is not announced as a bare, context-free string. */}
       <p
@@ -91,7 +95,7 @@ export function VocItemCard({
         </div>
       </div>
       <p className={`text-sm ${preview.isPlaceholder ? "text-muted italic" : "text-ink"}`}>
-        {preview.text}
+        {preview.isPlaceholder ? preview.text : plainPreview(preview.text)}
       </p>
       {/* Only for a row that can actually carry a decision. A null actionRef is a
           capability limit (a Cafe24 community article has no triage anchor), so the row
@@ -111,6 +115,6 @@ export function VocItemCard({
           onOutcomeRecorded={onOutcomeRecorded}
         />
       ) : null}
-    </li>
+    </div>
   );
 }

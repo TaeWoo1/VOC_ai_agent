@@ -107,11 +107,9 @@ export function Overview() {
             ))}
           </MetricGrid>
 
-          {/* The qualification, once, where the numbers are — not at the foot of the page. */}
-          <MetricNote
-            revenueBasis={data.metrics.revenueBasis}
-            freshness={data.metrics.kpis.some((kpi) => kpi.freshnessUnproven)}
-          />
+          {/* The legend for the mark on the cards. The definitions themselves are in 「이 숫자에
+              대하여」 at the foot — printing them here too was the same paragraph twice. */}
+          <MetricNote freshness={data.metrics.kpis.some((kpi) => kpi.freshnessUnproven)} />
 
           {data.insights.length > 0 ? (
             <section className="space-y-2">

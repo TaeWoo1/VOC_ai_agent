@@ -5,8 +5,6 @@ import {
   canGenerateProposal,
   classifyProposeError,
   detailErrorMessage,
-  phaseLabel,
-  proposalCategoryLabel,
   waitedLabel,
 } from "../../lib/inquiryWorkflow";
 import {
@@ -27,7 +25,9 @@ import type {
 } from "../../lib/types";
 import { bindingLabel, canBindProduct, productLabel } from "../../lib/inquiryProductBinding";
 import { InquiryProductBinder } from "./InquiryProductBinder";
+import { copyText } from "../../lib/clipboard";
 import { Btn } from "../ui/Btn";
+import { plainText } from "../../lib/plainText";
 
 /**
  * The inquiry response workflow, in the inbox detail panel. The engine (`inquiryWorkflow`) is reused
@@ -89,6 +89,15 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   const [replyComments, setReplyComments] = useState("");
   /** The second-press gate. Opening the confirm block is not sending; the button inside it is. */
   const [confirming, setConfirming] = useState(false);
+  /**
+   * The 초안 복사 result, and the fallback when there is no clipboard to copy with.
+   *
+   * `manualCopy` holds the SAVED text to reveal on a non-secure origin, because `copyText` cannot
+   * pretend on one — the same rule the review lane follows. Claiming a copy that did not happen is
+   * how a seller pastes an empty clipboard into a customer's inquiry and never learns why.
+   */
+  const [copied, setCopied] = useState(false);
+  const [manualCopy, setManualCopy] = useState<string | null>(null);
   /** The draft reads as text until the seller chooses to edit; an always-open textarea invites typing. */
   const [editing, setEditing] = useState(false);
   /** What the CURRENT draft was grounded in. Refreshed on every generate; cleared by a seller edit. */
@@ -284,6 +293,36 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
     }
   }
 
+  /**
+   * Copy the SAVED draft, never the editor buffer.
+   *
+   * The screen already told the seller to 「아래 초안을 복사해 판매자센터에서 등록해 주세요」 while
+   * offering no way to do it (Demo UX Polish v1) — an instruction pointing at a control that was not
+   * there. What it copies is `detail.draft`, the version the server holds, and the button is not
+   * offered while the editor is open or dirty: the text on screen would then be one the seller has
+   * not saved, and pasting an unsaved keystroke into a public reply is the exact failure the reply
+   * lifecycle is built to prevent.
+   */
+  async function onCopyDraft() {
+    if (!draft || draftDirty || editing) {
+      return;
+    }
+    const text = [draft.title, draft.comments].filter(Boolean).join("\n\n");
+    setActionError(null);
+    const result = await copyText(text);
+    if (result.ok) {
+      setCopied(true);
+      setManualCopy(null);
+      return;
+    }
+    setCopied(false);
+    if (result.reason === "UNAVAILABLE") {
+      setManualCopy(text);
+      return;
+    }
+    setActionError("복사하지 못했습니다. 다시 시도해 주세요.");
+  }
+
   if (loading) {
     return <p className="text-base text-muted">문의 내용을 불러오는 중…</p>;
   }
@@ -300,10 +339,10 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       <section>
         <h3 className="text-base font-bold text-ink">고객 문의</h3>
         {detail.title ? (
-          <p className="mt-2 break-keep font-semibold text-ink">{detail.title}</p>
+          <p className="mt-2 break-keep font-semibold text-ink">{plainText(detail.title)}</p>
         ) : null}
         <p className="mt-1.5 whitespace-pre-wrap break-keep leading-relaxed text-ink">
-          {detail.details ?? "본문이 없습니다."}
+          {plainText(detail.details) || "본문이 없습니다."}
         </p>
         <InquiryMeta
           detail={detail}
@@ -445,6 +484,19 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                         다시 작성
                       </Btn>
                     ) : null}
+                    {/* Where SellerOps cannot register the answer itself, copying IS the action — so
+                        it takes the emphasis 답변 보내기 would have had, and steps down to secondary
+                        beside a real send. */}
+                    {draft && !editing && !draftDirty ? (
+                      <Btn
+                        size="sm"
+                        variant={publishable ? "outline" : "solid"}
+                        onClick={onCopyDraft}
+                        disabled={busy}
+                      >
+                        {copied ? "복사했습니다" : "초안 복사"}
+                      </Btn>
+                    ) : null}
                   </div>
                 ) : (
                   /*
@@ -476,6 +528,21 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                     </div>
                   </div>
                 )}
+
+                {manualCopy !== null ? (
+                  <div className="mt-3">
+                    <p className="break-keep text-sm leading-relaxed text-muted">
+                      이 주소에서는 자동 복사를 쓸 수 없습니다. 아래 내용을 직접 복사해 주세요.
+                    </p>
+                    <textarea
+                      readOnly
+                      aria-label="복사할 초안"
+                      className="mt-2 w-full rounded-xl border border-line bg-canvas p-3 text-sm text-ink"
+                      rows={5}
+                      value={manualCopy}
+                    />
+                  </div>
+                ) : null}
 
                 {!publishable ? (
                   <p className="mt-3 break-keep text-sm leading-relaxed text-muted">{unavailableReason}</p>
@@ -588,20 +655,18 @@ function InquiryMeta({
           {detail.productId ? "상품 바꾸기" : "상품 지정"}
         </button>
       ) : null}
-      <span aria-hidden="true">·</span>
-      <span>{phaseLabel(detail.phase)}</span>
       {waited ? (
         <>
           <span aria-hidden="true">·</span>
           <span>{waited}</span>
         </>
       ) : null}
-      {detail.proposal ? (
-        <>
-          <span aria-hidden="true">·</span>
-          <span>{proposalCategoryLabel(detail.proposal.summaryCategory)}</span>
-        </>
-      ) : null}
+      {/* The workflow phase and the proposal's own category used to sit here too, so this one line
+          read 「카페24 자사몰 · 상품 미지정 · 상품 지정 · 제안 생성됨 · 1시간째 · 일반 응답」. Neither told
+          the seller anything they could act on: what state the work is in is what the 답변 block
+          below RENDERS, and 「일반 응답」 is the classifier talking to itself. `phaseLabel` also
+          passes unmapped phases through verbatim, so a completed item put a raw APPROVED /
+          COMPLETED on screen — removing its only render site removes that leak (Demo UX Polish v1). */}
     </div>
   );
 }

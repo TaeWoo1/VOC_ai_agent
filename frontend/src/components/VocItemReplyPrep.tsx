@@ -9,6 +9,7 @@ import {
   type ReplyRuntime,
 } from "../lib/actionWindow/reply/replyRuntime";
 import { useReplyRuntime } from "../lib/actionWindow/reply/useReplyRuntime";
+import { plainText } from "../lib/plainText";
 
 // NO module-level runtime. The hook resolves null in any shipped build without a bridge, and that
 // null is the point: before it, this panel fell back to the SIMULATED runtime everywhere, minting a
@@ -476,7 +477,11 @@ export function VocItemReplyPrep({
       <div className="flex flex-col gap-1">
         <p className="text-sm font-semibold text-muted">고객 리뷰</p>
         <p className="whitespace-pre-wrap text-sm text-ink">
-          {prep.redactedBody ?? <span className="italic text-muted">내용 없음</span>}
+          {prep.redactedBody ? (
+            plainText(prep.redactedBody)
+          ) : (
+            <span className="italic text-muted">내용 없음</span>
+          )}
         </p>
         {prep.bodyRedacted ? (
           // Said out loud rather than left as a mystery: the operator is about to send this

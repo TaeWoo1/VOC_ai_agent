@@ -49,7 +49,7 @@ export function publishUnavailableReason(
     return "답변 등록이 가능한지 확인하지 못했습니다. 답변은 판매자센터에서 직접 등록해 주세요.";
   }
   if (!capability.executionEnabled) {
-    return "이 환경에서는 SellerOps가 답변을 대신 등록하지 않습니다. 아래 초안을 복사해 판매자센터에서 등록해 주세요.";
+    return "이 환경에서는 SellerOps가 답변을 대신 등록하지 않습니다. [초안 복사]로 옮겨 판매자센터에 등록해 주세요.";
   }
   // The audited answer for THIS channel and THIS source resource, when the server sent one. It says
   // whose limitation this is, and that is the part a seller acts on: told "네이버는 지원하지 않습니다"
@@ -57,9 +57,9 @@ export function publishUnavailableReason(
   // simply has not connected it. The transport NAME is never shown — only what it means for them.
   const audited = detail.replyCapability?.reasonKo;
   if (audited) {
-    return `${audited} 아래 초안을 복사해 판매자센터에서 등록해 주세요.`;
+    return `${audited} [초안 복사]로 옮겨 판매자센터에 등록해 주세요.`;
   }
-  return `${channel} 문의는 판매자센터에서 직접 답변해 주세요. 아래 초안을 복사해 사용하실 수 있습니다.`;
+  return `${channel} 문의는 판매자센터에서 직접 답변해 주세요. [초안 복사]로 옮겨 쓰실 수 있습니다.`;
 }
 
 /** Whether a draft version may still be edited — once an approval is bound, the content is frozen. */

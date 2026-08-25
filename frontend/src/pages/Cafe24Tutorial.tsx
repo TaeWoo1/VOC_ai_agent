@@ -234,8 +234,8 @@ export function Cafe24Tutorial() {
               <p className="font-semibold text-ink">Mall ID 찾는 방법</p>
               <p className="mt-1">
                 카페24 자사몰 주소 <span className="font-mono">mystore.cafe24.com</span> 에서 앞부분
-                <span className="font-mono"> mystore</span> 가 Mall ID입니다. 전체 주소를 붙여넣어도
-                자동으로 정규화됩니다.
+                <span className="font-mono"> mystore</span> 가 Mall ID입니다. 주소 전체를 붙여넣으셔도
+                알아서 앞부분만 씁니다.
               </p>
             </div>
             {mallError ? (
