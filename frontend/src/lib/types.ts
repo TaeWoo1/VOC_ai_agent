@@ -2024,6 +2024,10 @@ export interface KnowledgeSourceView {
   updatedAt: string;
   /** Optional until a channel-derived document exists in any org — today that is none. */
   authoredOrigin?: KnowledgeAuthorship;
+  /** The one 규격 this document is about. Null/absent means 전체 상품 공통 — not "unknown". */
+  variantId?: string | null;
+  /** That variant's option name, for display only. The binding is the id. */
+  variantName?: string | null;
 }
 
 export interface KnowledgeSourceRequest {
@@ -2031,6 +2035,8 @@ export interface KnowledgeSourceRequest {
   title: string;
   body: string;
   sourceUrl?: string | null;
+  /** One of THIS product's stored variants, or null/absent for 전체 상품 공통. */
+  variantId?: string | null;
 }
 
 export interface AgentQuotaStatus {
@@ -2070,6 +2076,8 @@ export interface ProductListingView {
 }
 
 export interface ProductVariantView {
+  /** SellerOps's own row id — what a 규격-scoped knowledge document binds to. */
+  id: string;
   channelCode: string;
   externalVariantId: string | null;
   optionName: string | null;

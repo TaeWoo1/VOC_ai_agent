@@ -21,6 +21,7 @@ import com.sellerops.order.fact.OrderFact;
 import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.product.detail.ProductDetailEnrichmentTrigger;
 import com.sellerops.product.detail.image.ProductDetailImageKnowledge;
+import com.sellerops.product.library.KnowledgeVariantScope;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -166,13 +167,21 @@ public class InquiryDraftComposer {
         String details = MarkupText.toPlainText(inquiry.getBody());
 
         String detailFailure = enrichDetailIfNeeded(orgId, inquiry);
-        InquiryEvidenceRetriever.InquiryEvidence retrieved = retriever.retrieve(orgId, inquiry);
 
-        // Computed ONCE and used twice: it decides the caution line the drafter reads and, with the
-        // library's verdict, whether there is a basis to draft at all. Two computations of the same
-        // classification would be two chances for the screen and the prompt to disagree.
-        SpecApplicability.Applicability applicability =
-                SpecApplicability.of(title, details, optionNamesFor(orgId, retrieved.productId()));
+        // Computed ONCE and used three times: it decides which 규격's knowledge may be retrieved at
+        // all, the caution line the drafter reads, and — with the library's verdict — whether there
+        // is a basis to draft. Two computations of the same classification would be two chances for
+        // the screen and the prompt to disagree.
+        //
+        // It runs BEFORE the retrieval rather than after it, which is the 2026-08-27 change: a
+        // document written about 2호 is not weak evidence about a customer who said 3호, and a filter
+        // applied to the results would already have let it take one of the four slots.
+        UUID productId = retriever.resolveProductId(orgId, inquiry);
+        SpecApplicability.Verdict verdict =
+                SpecApplicability.classify(title, details, optionsFor(orgId, productId));
+        SpecApplicability.Applicability applicability = verdict.applicability();
+        InquiryEvidenceRetriever.InquiryEvidence retrieved =
+                retriever.retrieve(orgId, inquiry, KnowledgeVariantScope.of(verdict.variantId()));
         AnswerBasisState basis = AnswerBasisState.of(retrieved.state(), applicability);
         if (!basis.mayGenerate()) {
             // No model call and no saved version. Nothing here is a refusal to help — the seller
@@ -181,7 +190,7 @@ public class InquiryDraftComposer {
             // Unless the 상세페이지 read is what failed. Then this verdict rests on a library we
             // could not finish filling, and 「답변 기준이 필요합니다」 would send the seller off to
             // write knowledge that may already be sitting on their own listing.
-            return noBasis(retrieved, basis, detailFailure != null ? detailFailure
+            return noBasis(retrieved, basis, verdict, detailFailure != null ? detailFailure
                     : inFlight(orgId, inquiry) ? DETAIL_READ_PENDING : null);
         }
 
@@ -198,7 +207,8 @@ public class InquiryDraftComposer {
             if (decision.allowed()) {
                 written = model.draft(orgId, title, details, passagesFor(retrieved.passages()),
                         retrieved.order().messageKo(),
-                        applicability.messageKo(retrieved.figuresUnaided()));
+                        applicability.messageKo(retrieved.figuresUnaided(),
+                                retrieved.variantSpecific()));
                 if (written.isEmpty()) {
                     unavailable = MODEL_FAILED;
                 }
@@ -211,7 +221,7 @@ public class InquiryDraftComposer {
             // is a promise with no author. The BASIS is reported as it was actually computed — this
             // question IS grounded, and overwriting that with NO_ANSWER_BASIS would be a second
             // false statement laid on top of the first — and the operational reason travels beside it.
-            return noBasis(retrieved, basis, unavailable);
+            return noBasis(retrieved, basis, verdict, unavailable);
         }
 
         AgentDraftResponseParser.ParsedDraft parsed = written.get();
@@ -228,7 +238,8 @@ public class InquiryDraftComposer {
                 retrieved.passages(), retrieved.order());
         return new GeneratedDraftView(saved, DraftAuthorKind.MODEL.name(), retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
-                basis.actionKo(retrieved.state()), retrieved.productId(), views, null);
+                basis.actionKo(retrieved.state(), verdict.topicWord(), applicability),
+                retrieved.productId(), views, null);
     }
 
     /**
@@ -238,11 +249,13 @@ public class InquiryDraftComposer {
      * work item's version counter does not advance on a non-event.
      */
     private static GeneratedDraftView noBasis(InquiryEvidenceRetriever.InquiryEvidence retrieved,
-                                              AnswerBasisState basis, String unavailableMessage) {
+                                              AnswerBasisState basis,
+                                              SpecApplicability.Verdict verdict,
+                                              String unavailableMessage) {
         return new GeneratedDraftView(null, null, retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
-                basis.actionKo(retrieved.state()), retrieved.productId(), List.of(),
-                unavailableMessage);
+                basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability()),
+                retrieved.productId(), List.of(), unavailableMessage);
     }
 
     /**
@@ -281,12 +294,12 @@ public class InquiryDraftComposer {
         }
     }
 
-    /** Every {@code option_name} recorded for the bound product; empty when there are no variants. */
-    private List<String> optionNamesFor(UUID orgId, UUID productId) {
+    /** Every option recorded for the bound product; empty when there are no variants. */
+    private List<SpecApplicability.Option> optionsFor(UUID orgId, UUID productId) {
         return productId == null ? List.of()
                 : variants.findByOrgIdAndProductId(orgId, productId).stream()
-                        .map(com.sellerops.product.ProductVariant::getOptionName)
-                        .filter(name -> name != null && !name.isBlank())
+                        .filter(v -> v.getOptionName() != null && !v.getOptionName().isBlank())
+                        .map(v -> new SpecApplicability.Option(v.getId(), v.getOptionName()))
                         .toList();
     }
 

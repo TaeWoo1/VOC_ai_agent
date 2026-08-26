@@ -5,6 +5,8 @@ import com.sellerops.knowledge.KnowledgeRetriever;
 import com.sellerops.knowledge.KnowledgeText;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
+import com.sellerops.product.ProductVariant;
+import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.product.library.dto.KnowledgePassage;
 import com.sellerops.product.library.dto.KnowledgeSearchResponse;
 import com.sellerops.product.library.dto.KnowledgeSourceRequest;
@@ -46,14 +48,17 @@ public class ProductKnowledgeLibraryService {
     private final ProductRepository products;
     private final ProductKnowledgeSourceRepository sources;
     private final ProductKnowledgeChunkRepository chunks;
+    private final ProductVariantRepository variants;
     private final ProductKnowledgeIndexer indexer;
 
     public ProductKnowledgeLibraryService(ProductRepository products,
                                           ProductKnowledgeSourceRepository sources,
-                                          ProductKnowledgeChunkRepository chunks) {
+                                          ProductKnowledgeChunkRepository chunks,
+                                          ProductVariantRepository variants) {
         this.products = products;
         this.sources = sources;
         this.chunks = chunks;
+        this.variants = variants;
         this.indexer = new ProductKnowledgeIndexer(chunks);
     }
 
@@ -64,8 +69,10 @@ public class ProductKnowledgeLibraryService {
         for (ProductKnowledgeChunk chunk : chunks.findAllByOrgIdAndProductId(orgId, productId)) {
             chunkCounts.merge(chunk.getSourceId(), 1, Integer::sum);
         }
+        Map<UUID, String> variantNames = variantNames(orgId, productId);
         return sources.findAllByOrgIdAndProductIdOrderByCreatedAtAsc(orgId, productId).stream()
-                .map(source -> view(source, chunkCounts.getOrDefault(source.getId(), 0)))
+                .map(source -> view(source, chunkCounts.getOrDefault(source.getId(), 0),
+                        variantNames.get(source.getVariantId())))
                 .toList();
     }
 
@@ -78,20 +85,21 @@ public class ProductKnowledgeLibraryService {
         source.setProductId(productId);
         source.setAuthorUserId(authorUserId);
         source.setAuthorName(authorName);
-        apply(source, request);
+        apply(source, request, orgId, productId);
         ProductKnowledgeSource saved = sources.save(source);
         int count = reindex(saved);
-        return view(saved, count);
+        return view(saved, count, variantNames(orgId, productId).get(saved.getVariantId()));
     }
 
     @Transactional
     public KnowledgeSourceView update(UUID orgId, UUID sourceId, KnowledgeSourceRequest request) {
         ProductKnowledgeSource source = sources.findByIdAndOrgId(sourceId, orgId)
                 .orElseThrow(() -> ApiException.notFound("지식 문서를 찾을 수 없습니다."));
-        apply(source, request);
+        apply(source, request, orgId, source.getProductId());
         ProductKnowledgeSource saved = sources.save(source);
         int count = reindex(saved);
-        return view(saved, count);
+        return view(saved, count,
+                variantNames(orgId, saved.getProductId()).get(saved.getVariantId()));
     }
 
     @Transactional
@@ -111,13 +119,29 @@ public class ProductKnowledgeLibraryService {
      */
     @Transactional(readOnly = true)
     public KnowledgeSearchResponse search(UUID orgId, UUID productId, String query, int limit) {
+        return search(orgId, productId, query, limit, KnowledgeVariantScope.unresolved());
+    }
+
+    /**
+     * The same search, restricted to the 규격 the caller has resolved.
+     *
+     * <p>The restriction is applied to the DOCUMENT SET before ranking, not to the results after it.
+     * Filtering afterwards would let another 규격's document occupy one of the five slots and then
+     * vanish, so a question with a perfectly good product-level answer could come back empty.
+     */
+    @Transactional(readOnly = true)
+    public KnowledgeSearchResponse search(UUID orgId, UUID productId, String query, int limit,
+                                          KnowledgeVariantScope scope) {
         Product product = requireProduct(orgId, productId);
         List<ProductKnowledgeSource> documents =
-                sources.findAllByOrgIdAndProductIdOrderByCreatedAtAsc(orgId, productId);
+                sources.findAllByOrgIdAndProductIdOrderByCreatedAtAsc(orgId, productId).stream()
+                        .filter(d -> scope.admits(d.getVariantId()))
+                        .toList();
         List<ProductKnowledgeChunk> corpus = chunks.findAllByOrgIdAndProductId(orgId, productId);
 
         Map<UUID, ProductKnowledgeSource> byId = new HashMap<>();
         documents.forEach(d -> byId.put(d.getId(), d));
+        Map<UUID, String> variantNames = variantNames(orgId, productId);
 
         // <b>The title is part of the passage for matching.</b> A seller puts the topic in the title
         // ("교환 및 반품 안내") and then never repeats it in the body, so a passage judged on its body
@@ -144,7 +168,7 @@ public class ProductKnowledgeLibraryService {
                     source.getTitle(), chunk.getContent(), chunk.getOrdinal(),
                     round(hit.coverage()), source.getAuthorName(), source.getSourceUrl(),
                     source.getUpdatedAt(),
-                    source.getAuthoredOrigin()));
+                    source.getAuthoredOrigin(), variantNames.get(source.getVariantId())));
         }
         hits.sort(Comparator.comparingDouble(KnowledgePassage::score).reversed()
                 // Ties resolve by document order, not by whatever the map iterated — an answer that
@@ -161,7 +185,9 @@ public class ProductKnowledgeLibraryService {
         return indexer.index(source);
     }
 
-    private void apply(ProductKnowledgeSource source, KnowledgeSourceRequest request) {
+    private void apply(ProductKnowledgeSource source, KnowledgeSourceRequest request, UUID orgId,
+                       UUID productId) {
+        source.setVariantId(resolveVariant(orgId, productId, request.variantId()));
         source.setSourceType(request.sourceType());
         source.setTitle(request.title().strip());
         source.setBody(request.body().strip());
@@ -170,17 +196,45 @@ public class ProductKnowledgeLibraryService {
         source.setSourceUrl(url);
     }
 
+    /**
+     * The 규격 this document is about — or null, which is 전체 상품 공통.
+     *
+     * <p>A variant that belongs to another product or another org is a 400, not a silent null. The
+     * two failures look identical to the caller and are opposite to the seller: one means "you asked
+     * for a scope we could not honour" and the other would quietly widen their statement about one
+     * 규격 into a statement about all of them.
+     */
+    private UUID resolveVariant(UUID orgId, UUID productId, UUID variantId) {
+        if (variantId == null) {
+            return null;
+        }
+        ProductVariant variant = variants.findById(variantId)
+                .filter(v -> orgId.equals(v.getOrgId()) && productId.equals(v.getProductId()))
+                .orElseThrow(() -> ApiException.badRequest("이 상품의 규격이 아닙니다."));
+        return variant.getId();
+    }
+
+    /** Option names by variant id, for display and for the drafter's caution line. */
+    private Map<UUID, String> variantNames(UUID orgId, UUID productId) {
+        Map<UUID, String> names = new HashMap<>();
+        for (ProductVariant variant : variants.findByOrgIdAndProductId(orgId, productId)) {
+            names.put(variant.getId(), variant.getOptionName());
+        }
+        return names;
+    }
+
     private Product requireProduct(UUID orgId, UUID productId) {
         return products.findById(productId)
                 .filter(p -> orgId.equals(p.getOrgId()))
                 .orElseThrow(() -> ApiException.notFound("상품을 찾을 수 없습니다."));
     }
 
-    private static KnowledgeSourceView view(ProductKnowledgeSource source, int chunkCount) {
+    private static KnowledgeSourceView view(ProductKnowledgeSource source, int chunkCount,
+                                            String variantName) {
         return new KnowledgeSourceView(source.getId(), source.getProductId(), source.getSourceType(),
                 source.getTitle(), source.getBody(), source.getSourceUrl(), source.getAuthorName(),
                 chunkCount, source.getCreatedAt(), source.getUpdatedAt(),
-                source.getAuthoredOrigin());
+                source.getAuthoredOrigin(), source.getVariantId(), variantName);
     }
 
     /** Two decimals — a score is a diagnostic, and full float noise reads as false precision. */

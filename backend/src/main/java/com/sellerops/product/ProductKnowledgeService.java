@@ -112,6 +112,7 @@ public class ProductKnowledgeService {
         List<ProductVariantView> variantViews = variantRows.stream()
                 .sorted(Comparator.comparing(v -> v.getExternalVariantId() == null ? "" : v.getExternalVariantId()))
                 .map(v -> new ProductVariantView(
+                        v.getId(),
                         codeOf(channelsById, v.getChannelId()),
                         v.getExternalVariantId(),
                         v.getOptionName(),

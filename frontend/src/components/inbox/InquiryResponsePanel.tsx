@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { isAxiosError } from "axios";
+import { AnswerBasisQuickAdd } from "./AnswerBasisQuickAdd";
 import { api } from "../../lib/apiClient";
 import {
   canGenerateProposal,
@@ -120,7 +121,9 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
    * the library could offer, and this says what the seller should do next. A generate that produces
    * nothing must not look like a generate that failed.
    */
-  const [noBasis, setNoBasis] = useState<{ note: string; action: string | null } | null>(null);
+  const [noBasis, setNoBasis] = useState<
+    { note: string; action: string | null; productId: string | null } | null
+  >(null);
   /** Open only while the seller is choosing a product. Never open by default — it is not a step. */
   const [binding, setBinding] = useState(false);
 
@@ -306,7 +309,11 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
         setNoBasis(
           generated.unavailableMessage
             ? null
-            : { note: generated.answerBasisNote, action: generated.answerBasisAction },
+            : {
+                note: generated.answerBasisNote,
+                action: generated.answerBasisAction,
+                productId: generated.productId,
+              },
         );
         setEditing(true);
         return;
@@ -499,6 +506,22 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                 <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
                   근거가 없는 답변은 만들지 않습니다. 아래에 직접 작성하실 수 있습니다.
                 </p>
+                {/*
+                  THE WAY OUT, on the screen that named the gap.
+
+                  Saying what is missing and offering nothing to do about it is where this state
+                  stopped until 2026-08-27: the seller read 「답변 기준이 필요합니다」, and the next
+                  identical question read it again. It appears only with a product to attach the
+                  sentence to — with none, the line above already says that binding a product is the
+                  first thing to fix, and a knowledge box with nowhere to save would be worse than
+                  no box.
+                */}
+                {noBasis.productId ? (
+                  <AnswerBasisQuickAdd
+                    productId={noBasis.productId}
+                    onSaved={onGenerateDraft}
+                  />
+                ) : null}
               </div>
             ) : null}
 

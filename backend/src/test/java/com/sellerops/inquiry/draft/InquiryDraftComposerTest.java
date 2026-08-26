@@ -566,7 +566,7 @@ class InquiryDraftComposerTest {
         boolean searched;
 
         private StubLibrary(int documentsSearched, List<KnowledgePassage> passages) {
-            super(null, null, null);
+            super(null, null, null, null);
             this.documentsSearched = documentsSearched;
             this.passages = passages;
         }
@@ -579,9 +579,14 @@ class InquiryDraftComposerTest {
             return new StubLibrary(documentsSearched, List.of());
         }
 
+        /** The 규격 scope the composer resolved before it asked. Recorded, never honoured here. */
+        com.sellerops.product.library.KnowledgeVariantScope sawScope;
+
         @Override
-        public KnowledgeSearchResponse search(UUID orgId, UUID productId, String query, int limit) {
+        public KnowledgeSearchResponse search(UUID orgId, UUID productId, String query, int limit,
+                                              com.sellerops.product.library.KnowledgeVariantScope scope) {
             searched = true;
+            sawScope = scope;
             return new KnowledgeSearchResponse(productId, query, documentsSearched,
                     documentsSearched, passages);
         }

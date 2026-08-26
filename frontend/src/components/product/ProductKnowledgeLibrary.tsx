@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import { Btn } from "../ui/Btn";
 import { Empty } from "../ui/Empty";
 import { api } from "../../lib/apiClient";
-import type { KnowledgeSourceType, KnowledgeSourceView } from "../../lib/types";
+import type {
+  KnowledgeSourceType,
+  KnowledgeSourceView,
+  ProductVariantView,
+} from "../../lib/types";
 
 /**
  * 상품 지식 — what the SELLER wrote about this product.
@@ -84,6 +88,7 @@ export function ProductKnowledgeLibrary({ productId }: { productId: string }) {
                     </p>
                     <p className="mt-1 break-keep text-sm text-muted">{preview(source.body)}</p>
                     <p className="mt-1 text-sm text-muted">
+                      {source.variantId ? `${source.variantName ?? "특정 규격"} 전용 · ` : ""}
                       {source.authorName ? `${source.authorName} · ` : ""}
                       {source.updatedAt.slice(0, 10)} · 인용 단위 {source.chunks}개
                       {source.chunks === 0 ? " (AI가 인용할 수 없습니다)" : ""}
@@ -148,8 +153,21 @@ function KnowledgeEditor({
   const [title, setTitle] = useState(source?.title ?? "");
   const [body, setBody] = useState(source?.body ?? "");
   const [sourceUrl, setSourceUrl] = useState(source?.sourceUrl ?? "");
+  const [variantId, setVariantId] = useState(source?.variantId ?? "");
+  const [variants, setVariants] = useState<ProductVariantView[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .getProductKnowledgeStrict(productId)
+      .then((view) => active && setVariants(view.variants.filter((v) => v.optionName)))
+      .catch(() => active && setVariants([]));
+    return () => {
+      active = false;
+    };
+  }, [productId]);
 
   const submit = async () => {
     setSaving(true);
@@ -160,6 +178,7 @@ function KnowledgeEditor({
         title: title.trim(),
         body: body.trim(),
         sourceUrl: sourceUrl.trim() || null,
+        variantId: variantId || null,
       };
       if (source) {
         await api.updateProductKnowledgeSource(source.id, request);
@@ -217,6 +236,32 @@ function KnowledgeEditor({
           />
         </label>
       </div>
+
+      {/*
+        적용 범위 — the second axis, and the only one a customer can be wrong about.
+
+        Shown even when the product has no stored variants, because its absence is informative: a
+        listing with one 규격 has one honest answer, and hiding the control would leave a seller
+        wondering where per-규격 knowledge goes.
+      */}
+      <label className="block">
+        <span className="text-sm font-medium text-ink">적용 범위</span>
+        <select
+          value={variantId}
+          onChange={(e) => setVariantId(e.target.value)}
+          className="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-base focus:border-brand focus:outline-none"
+        >
+          <option value="">전체 상품 공통</option>
+          {variants.map((variant) => (
+            <option key={variant.id} value={variant.id}>
+              {variant.optionName}
+            </option>
+          ))}
+        </select>
+        <span className="mt-1 block break-keep text-sm text-muted">
+          규격에 따라 답이 달라지는 내용이면 규격을 골라 주세요. 다른 규격의 문의에는 사용하지 않습니다.
+        </span>
+      </label>
 
       <label className="block">
         <span className="text-sm font-medium text-ink">내용</span>

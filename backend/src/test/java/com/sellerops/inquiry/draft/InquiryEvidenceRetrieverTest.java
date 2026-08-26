@@ -61,6 +61,7 @@ class InquiryEvidenceRetrieverTest {
             (orgId, channelCode, accountId, rows) -> ChannelDataState.OBSERVED_FRESH;
 
     @Autowired ProductRepository products;
+    @Autowired com.sellerops.product.ProductVariantRepository productVariants;
     @Autowired ProductKnowledgeSourceRepository productSources;
     @Autowired ProductKnowledgeChunkRepository productChunks;
     @Autowired OrgKnowledgeSourceRepository orgSources;
@@ -78,7 +79,8 @@ class InquiryEvidenceRetrieverTest {
 
     @BeforeEach
     void setUp() {
-        productKnowledge = new ProductKnowledgeLibraryService(products, productSources, productChunks);
+        productKnowledge = new ProductKnowledgeLibraryService(products, productSources, productChunks,
+                productVariants);
         orgKnowledge = new SellerOperationsKnowledgeService(orgSources, orgChunks);
         answerMemory = new AnswerMemoryService(memories, orgChunks, productChunks);
         retriever = new InquiryEvidenceRetriever(products, productKnowledge, orgKnowledge, answerMemory,

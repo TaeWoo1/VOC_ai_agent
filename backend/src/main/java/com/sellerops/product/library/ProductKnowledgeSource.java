@@ -58,6 +58,21 @@ public class ProductKnowledgeSource extends BaseEntity {
     @Column(name = "channel_source_ref", length = 200)
     private String channelSourceRef;
 
+    /**
+     * The one 규격 this document is about, or null for the whole listing.
+     *
+     * <p><b>Null means 전체 상품 공통, not "unknown".</b> Every row written before 2026-08-27 is
+     * product-level and stays so; a scope that could be absent-because-nobody-said would make the two
+     * indistinguishable, and the drafter has to be able to tell "true for every option" from "true
+     * for this one".
+     *
+     * <p>It points at a {@code product_variants} row the CHANNEL stated. There is no free-text
+     * variant name here on purpose: a seller typing 「2호」 into a box would create a second naming
+     * space that nothing can reconcile with the option list the customer actually chose from.
+     */
+    @Column(name = "variant_id")
+    private UUID variantId;
+
     @Column(nullable = false, length = 200)
     private String title;
 

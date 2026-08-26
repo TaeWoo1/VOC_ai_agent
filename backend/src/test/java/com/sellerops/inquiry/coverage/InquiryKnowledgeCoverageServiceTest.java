@@ -77,6 +77,8 @@ class InquiryKnowledgeCoverageServiceTest {
     @Autowired OrganizationRepository organizations;
 
     private InquiryKnowledgeCoverageService coverage;
+    @Autowired com.sellerops.product.ProductVariantRepository productVariants;
+
     private SellerOperationsKnowledgeService orgKnowledge;
     private UUID org;
     private String channelCode;
@@ -86,7 +88,8 @@ class InquiryKnowledgeCoverageServiceTest {
         orgKnowledge = new SellerOperationsKnowledgeService(orgSources, orgChunks);
         coverage = new InquiryKnowledgeCoverageService(inquiries, channels,
                 new InquiryEvidenceRetriever(products,
-                        new ProductKnowledgeLibraryService(products, productSources, productChunks),
+                        new ProductKnowledgeLibraryService(products, productSources, productChunks,
+                                productVariants),
                         orgKnowledge, new AnswerMemoryService(memories, orgChunks, productChunks),
                         com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH)),
                 orgSources, memories, workItems, channelOrders);

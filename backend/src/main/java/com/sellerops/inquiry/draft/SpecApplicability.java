@@ -2,6 +2,7 @@ package com.sellerops.inquiry.draft;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 /**
  * Whether a retrieved specification may be stated as a fact about THIS customer's item.
@@ -97,6 +98,35 @@ public enum SpecApplicability {
          * @param figuresUnaided false when at least one cited passage came from an image
          */
         public String messageKo(boolean figuresUnaided) {
+            return messageKo(figuresUnaided, false);
+        }
+
+        /**
+         * The line, escalated again when some of the evidence is scoped to ONE 규격.
+         *
+         * <p>A different claim from the one this enum makes on its own. {@link #VARIANT_UNRESOLVED}
+         * says «we do not know which option the customer has»; this says «one of these sentences was
+         * written about a particular option», and the two are independent — a question can be
+         * unresolved with only product-level evidence, or fully resolved with per-규격 evidence that
+         * is exactly right. Only their combination is dangerous, and only that combination adds a
+         * sentence.
+         *
+         * <p>It carries no option NAME, for the same reason the rest of this line does not: the
+         * payload floor sends the model facts about the question, never more of the catalogue.
+         *
+         * @param evidenceIsVariantSpecific true when at least one cited passage came from a document
+         *                                  bound to a single 규격
+         */
+        public String messageKo(boolean figuresUnaided, boolean evidenceIsVariantSpecific) {
+            String base = baseMessageKo(figuresUnaided);
+            if (!evidenceIsVariantSpecific || this == VARIANT_NAMED) {
+                return base;
+            }
+            return base + " 근거 중 일부는 특정 규격에만 해당하는 내용이므로, 그 수치를 이 고객의 "
+                    + "규격에 대한 사실로 쓰지 말고 어떤 규격인지 되물으세요.";
+        }
+
+        private String baseMessageKo(boolean figuresUnaided) {
             if (figuresUnaided) {
                 return messageKo();
             }
@@ -114,11 +144,22 @@ public enum SpecApplicability {
      * {@link InquiryKnowledgeNeed}'s: that one asks "does this need product knowledge at all", which
      * 사용법 and 세척 also do while being the same for every option.
      */
-    private static final String[] VARIANT_SENSITIVE_WORDS = {
-        "몇 가닥", "가닥", "몇 개", "몇개", "몇 mm", "몇mm", "몇 cm", "몇cm", "몇 미터", "몇m",
-        "사이즈", "규격", "치수", "크기", "길이", "폭", "너비", "두께", "지름", "직경", "용량",
-        "색상", "컬러", "무게", "중량", "호환", "맞나요", "들어가나요", "들어갑니까", "가능한가요",
-        "옵션", "모델", "종류",
+    private static final String[] TOPIC_WORDS = {
+        "가닥", "사이즈", "규격", "치수", "크기", "길이", "폭", "너비", "두께", "지름", "직경",
+        "용량", "색상", "컬러", "무게", "중량", "호환", "옵션", "모델", "종류",
+    };
+
+    /**
+     * The same sensitivity, expressed as a phrasing rather than as the name of a property.
+     *
+     * <p>Split out of the one list on 2026-08-27, with no word added or removed: the union is still
+     * what decides {@link Applicability}. The partition exists because a seller being told what to
+     * write needs the NOUN — 「'가닥' 관련 내용이 없습니다」 — and 「'맞나요' 관련 내용이 없습니다」 is
+     * not a sentence anyone can act on. Reporting is the only thing that reads the two halves apart.
+     */
+    private static final String[] PHRASING_WORDS = {
+        "몇 가닥", "몇 개", "몇개", "몇 mm", "몇mm", "몇 cm", "몇cm", "몇 미터", "몇m",
+        "맞나요", "들어가나요", "들어갑니까", "가능한가요",
     };
 
     /** Option names shorter than this match too much of any sentence to be evidence of anything. */
@@ -133,12 +174,42 @@ public enum SpecApplicability {
      *                    product has no variant rows, which is the normal state outside Coupang
      */
     public static Applicability of(String title, String body, List<String> optionNames) {
+        return classify(title, body, optionNames == null ? List.of()
+                : optionNames.stream().map(name -> new Option(null, name)).toList()).applicability();
+    }
+
+    /**
+     * One of this product's purchasable options, as the CHANNEL stated it.
+     *
+     * <p>The id travels because a match has to be usable: knowing that the customer said 「2호」 is
+     * only actionable if the thing they named can be pointed at in {@code product_variants}. It is
+     * nullable for the name-only caller above, which asks a narrower question.
+     */
+    public record Option(UUID id, String name) {
+    }
+
+    /**
+     * The verdict, plus the two facts the caller needs in order to act on it.
+     *
+     * @param variantId the option the customer named, when {@link Applicability#VARIANT_NAMED} and
+     *                  the caller supplied ids; null otherwise
+     * @param topicWord the property this question is about, quoted from the question itself — null
+     *                  when the question named none. It is a REPORTING field: it decides no verdict,
+     *                  filters no evidence, and reaches no model.
+     */
+    public record Verdict(Applicability applicability, UUID variantId, String topicWord) {
+    }
+
+    /** As {@link #of}, with the options identified, so the matched one can be named. */
+    public static Verdict classify(String title, String body, List<Option> options) {
         String text = normalize((title == null ? "" : title) + " " + (body == null ? "" : body));
-        if (!containsAny(text, VARIANT_SENSITIVE_WORDS)) {
-            return Applicability.NOT_VARIANT_SENSITIVE;
+        String topic = firstPresent(text, TOPIC_WORDS);
+        if (topic == null && !containsAny(text, PHRASING_WORDS)) {
+            return new Verdict(Applicability.NOT_VARIANT_SENSITIVE, null, null);
         }
-        return namesAKnownOption(text, optionNames)
-                ? Applicability.VARIANT_NAMED : Applicability.VARIANT_UNRESOLVED;
+        Option named = namedOption(text, options);
+        return named == null ? new Verdict(Applicability.VARIANT_UNRESOLVED, null, topic)
+                : new Verdict(Applicability.VARIANT_NAMED, named.id(), topic);
     }
 
     /**
@@ -149,15 +220,15 @@ public enum SpecApplicability {
      * appear for the option to count as named — one shared word ("화이트") is a coincidence, the whole
      * set is a choice.
      */
-    private static boolean namesAKnownOption(String normalizedText, List<String> optionNames) {
-        if (optionNames == null) {
-            return false;
+    private static Option namedOption(String normalizedText, List<Option> options) {
+        if (options == null) {
+            return null;
         }
-        for (String option : optionNames) {
-            if (option == null || option.isBlank()) {
+        for (Option option : options) {
+            if (option == null || option.name() == null || option.name().isBlank()) {
                 continue;
             }
-            String[] tokens = normalize(option).split("[\\s/,:·|()\\[\\]]+");
+            String[] tokens = normalize(option.name()).split("[\\s/,:·|()\\[\\]]+");
             boolean any = false;
             boolean all = true;
             for (String token : tokens) {
@@ -171,10 +242,10 @@ public enum SpecApplicability {
                 }
             }
             if (any && all) {
-                return true;
+                return option;
             }
         }
-        return false;
+        return null;
     }
 
     private static String normalize(String text) {
@@ -182,11 +253,16 @@ public enum SpecApplicability {
     }
 
     private static boolean containsAny(String text, String[] words) {
+        return firstPresent(text, words) != null;
+    }
+
+    /** The first of these words the question contains, in declaration order. Null when none. */
+    private static String firstPresent(String text, String[] words) {
         for (String word : words) {
             if (text.contains(word)) {
-                return true;
+                return word;
             }
         }
-        return false;
+        return null;
     }
 }

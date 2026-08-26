@@ -1,6 +1,10 @@
 # Image Product Knowledge v1 — 설계, 그리고 그 아래에 깔린 것
 
-> **상태: `TEXT_LANE_WIRED`(기본값 OFF) · `IMAGE_LANE_BUILT` · **`STAGE_1_LIVE_PROVEN`**(2026-08-27).**
+> **상태: `TECHNICAL_LIVE_PROOF_COMPLETE` · production rollout **`DEFERRED`**(2026-08-27, product-owner).**
+> 기술 증명은 끝났고 **배포는 하지 않는다** — 현재 대상에서 usable fact 0 · quota 연동 없음 · 기본값 OFF ·
+> 판매자가 직접 답변 기준을 쓰는 loop(`docs/knowledge_gap_resolution_v1.md`)가 더 우선. receipt·variants·
+> 기존 증명은 되돌리지 않으며 **추가 vision 호출은 0**이다. 아래 lane 상태는 그대로 유효하다:
+> `TEXT_LANE_WIRED`(기본값 OFF) · `IMAGE_LANE_BUILT` · `STAGE_1_LIVE_PROVEN`.
 > Stage 1이 **실행됐다**(§11): 26장 · 모델 호출 26 · 실비 $0.104. 추출은 됐고(triple 48) **채택은 0**이며
 > 판매자 화면은 변하지 않았다 — 라벨 공간이 다르고, 무엇보다 **찾던 사실이 그 페이지에도 없다**.
 > 「읽었다」와 「말해도 된다」의 분리가 관측으로 확인된 것이 이 실행의 결과다.

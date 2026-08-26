@@ -15,6 +15,7 @@ import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.library.KnowledgeAuthorship;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
+import com.sellerops.product.library.KnowledgeVariantScope;
 import com.sellerops.product.library.ProductKnowledgeLibraryService;
 import com.sellerops.product.library.dto.KnowledgePassage;
 import com.sellerops.product.library.dto.KnowledgeSearchResponse;
@@ -119,16 +120,28 @@ public class InquiryEvidenceRetriever {
      */
     public record ScopedPassage(KnowledgeScope scope, String heading, String text, UUID sourceId,
                                 UUID chunkId, String locator, double score,
-                                KnowledgeAuthorship authoredOrigin) {
+                                KnowledgeAuthorship authoredOrigin, String variantName) {
 
         /**
          * The shape every lane but the product one uses. A policy and a past answer are written by a
-         * person at this company, which is what the default says — there is no picture behind either.
+         * person at this company, which is what the default says — there is no picture behind either
+         * — and neither is written about one 규격, which is what the null says.
          */
         public ScopedPassage(KnowledgeScope scope, String heading, String text, UUID sourceId,
                              UUID chunkId, String locator, double score) {
             this(scope, heading, text, sourceId, chunkId, locator, score,
-                    KnowledgeAuthorship.SELLER_ENTERED_KNOWLEDGE);
+                    KnowledgeAuthorship.SELLER_ENTERED_KNOWLEDGE, null);
+        }
+
+        public ScopedPassage(KnowledgeScope scope, String heading, String text, UUID sourceId,
+                             UUID chunkId, String locator, double score,
+                             KnowledgeAuthorship authoredOrigin) {
+            this(scope, heading, text, sourceId, chunkId, locator, score, authoredOrigin, null);
+        }
+
+        /** Whether this sentence was written about ONE 규격 rather than the whole listing. */
+        public boolean variantSpecific() {
+            return variantName != null;
         }
 
         /** May a figure in this passage close a sentence on its own? False for the image lane. */
@@ -172,6 +185,16 @@ public class InquiryEvidenceRetriever {
             return passages.stream().filter(p -> p.scope().current())
                     .allMatch(ScopedPassage::figuresUnaided);
         }
+
+        /**
+         * Is any of this evidence written about one 규격 in particular?
+         *
+         * <p>True as soon as ONE passage is, for the reason {@link #figuresUnaided()} gives: the
+         * drafter reads them together and cannot be told which bullet the caution applies to.
+         */
+        public boolean variantSpecific() {
+            return passages.stream().anyMatch(ScopedPassage::variantSpecific);
+        }
     }
 
     /**
@@ -183,9 +206,25 @@ public class InquiryEvidenceRetriever {
      * nothing but this database.
      */
     public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry) {
+        return retrieve(orgId, inquiry, KnowledgeVariantScope.unresolved());
+    }
+
+    /** The same gather, restricted to the 규격 the caller resolved from the customer's own words. */
+    public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry, KnowledgeVariantScope scope) {
         String title = MarkupText.toPlainText(inquiry.getTitle());
         String details = MarkupText.toPlainText(inquiry.getBody());
-        return retrieve(orgId, inquiry, query(title, details), OrderFactLookup.EXACT_ALLOWED);
+        return retrieve(orgId, inquiry, query(title, details), OrderFactLookup.EXACT_ALLOWED, scope);
+    }
+
+    /**
+     * The canonical product this inquiry resolves to, or null.
+     *
+     * <p>Exposed because the 규격 has to be resolved BEFORE the retrieval it scopes, and resolving a
+     * 규격 means reading this product's options. A caller that guessed the product id from
+     * {@code inquiry.getProductId()} would skip the shared-bucket check this applies.
+     */
+    public UUID resolveProductId(UUID orgId, Inquiry inquiry) {
+        return inquiry == null ? null : namedProductOrNull(orgId, inquiry.getProductId());
     }
 
     /**
@@ -201,19 +240,27 @@ public class InquiryEvidenceRetriever {
 
     /** The gather, with the caller stating how far it may go for the order fact. */
     public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry, String query, OrderFactLookup lookup) {
+        return retrieve(orgId, inquiry, query, lookup, KnowledgeVariantScope.unresolved());
+    }
+
+    /** The gather, with both the order-fact reach and the 규격 scope stated by the caller. */
+    public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry, String query, OrderFactLookup lookup,
+                                    KnowledgeVariantScope scope) {
         UUID productId = namedProductOrNull(orgId, inquiry.getProductId());
 
         List<ScopedPassage> productLane = new ArrayList<>();
         DraftKnowledgeState productVerdict = DraftKnowledgeState.NO_PRODUCT;
         if (productId != null) {
-            KnowledgeSearchResponse found = productKnowledge.search(orgId, productId, query, MAX_PASSAGES);
+            KnowledgeSearchResponse found =
+                    productKnowledge.search(orgId, productId, query, MAX_PASSAGES, scope);
             productVerdict = found.documentsSearched() == 0 ? DraftKnowledgeState.NO_LIBRARY
                     : found.passages().isEmpty() ? DraftKnowledgeState.NO_MATCH
                     : DraftKnowledgeState.GROUNDED;
             for (KnowledgePassage passage : found.passages()) {
                 productLane.add(new ScopedPassage(KnowledgeScope.PRODUCT, passage.title(),
                         passage.content(), passage.sourceId(), passage.chunkId(),
-                        locator(passage), passage.score(), passage.authoredOrigin()));
+                        locator(passage), passage.score(), passage.authoredOrigin(),
+                        passage.variantName()));
             }
         }
 
