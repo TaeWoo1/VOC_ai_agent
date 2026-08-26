@@ -1,0 +1,56 @@
+package com.sellerops.connector.naver;
+
+import com.sellerops.credential.CredentialVault;
+import com.sellerops.credential.DecryptedCredential;
+import com.sellerops.product.detail.ProductDetailSource;
+import java.util.UUID;
+
+/**
+ * NAVER's 상세페이지 read, in the shape the enrichment trigger can hold.
+ *
+ * <p>Thin on purpose: it opens the credential and mints a token exactly the way
+ * {@code NaverProductQnaReplyAdapter} does, then delegates to {@link NaverChannelProductClient},
+ * which is the class that cannot express a catalogue walk. Nothing about staleness, triggers or
+ * budgets lives here — those belong to the caller, so that "how many reads happened" stays
+ * answerable at the call site.
+ */
+public class NaverProductDetailSource implements ProductDetailSource {
+
+    private final NaverTokenClient tokens;
+    private final NaverChannelProductClient detail;
+    private final CredentialVault vault;
+
+    public NaverProductDetailSource(NaverTokenClient tokens, NaverChannelProductClient detail,
+                                    CredentialVault vault) {
+        this.tokens = tokens;
+        this.detail = detail;
+        this.vault = vault;
+    }
+
+    @Override
+    public String channelCode() {
+        return "NAVER";
+    }
+
+    @Override
+    public String sourceKind() {
+        return NaverProductsClient.SOURCE;
+    }
+
+    @Override
+    public NaverProductDetail read(UUID orgId, UUID sellerAccountId, String externalProductId) {
+        long channelProductNo;
+        try {
+            channelProductNo = Long.parseLong(externalProductId.strip());
+        } catch (RuntimeException e) {
+            // channel_products.external_product_id IS the channelProductNo for NAVER. A row that is
+            // not a number is a row from somewhere else, and guessing an id is how a bounded read
+            // becomes a read of someone else's listing.
+            throw new IllegalStateException("네이버 상품 번호 형식이 올바르지 않습니다.");
+        }
+        DecryptedCredential credential = vault.open(orgId, sellerAccountId);
+        String token = tokens.accessToken(credential.secrets().get("client_id"),
+                credential.secrets().get("client_secret"));
+        return detail.fetch(token, channelProductNo);
+    }
+}

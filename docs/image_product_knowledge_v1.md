@@ -1,13 +1,27 @@
-# Image Product Knowledge v1 — 설계만, 구현 0
+# Image Product Knowledge v1 — 설계, 그리고 그 아래에 깔린 것
 
-> **상태: `DESIGN_ONLY` · `AWAITING_PRODUCT_OWNER_DECISION`(2026-08-26).** 이 문서를 무효화할 수 있었던
-> 단 하나의 값싼 관측 — 옵션 이름 READ 1회 — 을 썼고, **무효화되지 않았다**(§9-1). 그래서 남은 질문은
-> 기술이 아니라 **§5의 payload floor 결정**이다. 이 문서는 코드 한 줄에도 대응하지 않는다. product-owner 지시대로
-> `IMAGE_ONLY_GAP` verdict 뒤 **OCR/vision을 바로 구현하지 않고** 최소 설계를 적어 두고 멈춘 것이다.
-> 여기 적힌 어떤 항목도 승인이 아니며, 착수는 별도 결정이다.
+> **상태: `TEXT_LANE_WIRED` · `IMAGE_LANE_UNBUILT` · 비용 전제 `UNVERIFIED`(2026-08-26).**
+> product-owner가 §4의 payload floor를 **승인**했고(판매자 상세 이미지를 모델에 보낼 수 있다), 착수 순서를
+> **텍스트 우선**으로 정했다. 그래서 이 턴에 실제로 지어진 것은 이미지 lane이 **아니라** 그것이 서 있어야 할
+> 바닥이다:
 >
-> **금지 사항이 설계의 일부다:** 대규모 OCR pipeline · vector DB · generic document ingestion —
-> 셋 다 이 설계의 범위 밖이고, 아래 구조는 셋 중 무엇도 필요로 하지 않도록 짜여 있다.
+> 1. **텍스트 lane이 production에 연결됐다.** 감사 결과 `ProductDetailEnrichment`는 `main`에서 **caller 0**이었고
+>    DB에도 채널 유래 지식 문서가 **0**이었다 — 즉 이미지 lane은 **한 번도 돈 적 없는** 텍스트 lane 위에 설계되고
+>    있었다. `ProductDetailEnrichmentTrigger`가 세 조건(actionable inquiry · exact attribution · 지식 없음/오래됨)
+>    전부일 때만 상품 **하나**를 읽는다. sweep 없음, 스케줄러 없음, 실패는 초안을 죽이지 않는다.
+> 2. **detail 이미지 주소가 처음으로 투영된다** — `detailContent`의 `<img src>`만. `NaverProductDetail.imageUrls()`는
+>    **listing gallery**(대표+옵션 이미지)이고 grounding source로 **금지**이며, 그 분리는 구조 테스트로 고정했다.
+> 3. **SSRF-safe CDN fetch 계약**(`ImageFetchPolicy`) — https 전용 · 문서에서 뽑은 URL만 · 인증 헤더 0 ·
+>    리다이렉트마다 **재검증** · content-type 화이트리스트 · 개별/총 바이트 상한 · 사설·링크로컬·메타데이터 주소 거부.
+>    범용 URL fetcher로 노출되지 않는다(경계 테스트).
+> 4. **Stage 0 census 실행됨**(§9-1) — **모델 호출 0**.
+>
+> **이미지 lane 자체는 여전히 0줄이다.** `AI_EXTRACTED_FROM_SELLER_IMAGE`는 생산자 0이고 그 사실이 테스트로
+> 고정돼 있다. 다만 그 authorship이 선언만 하고 아무도 적용하지 않던 규칙
+> (`carriesExactFiguresUnaided()`)은 **이제 production에서 적용된다** — §9-2.
+>
+> **금지 사항은 그대로 설계의 일부다:** 대규모 OCR pipeline · vector DB · generic document ingestion ·
+> catalog-wide sweep.
 
 ## 1. 이 설계가 존재하는 이유 — 측정된 하나의 사실
 
@@ -137,17 +151,57 @@ failure isolation.) 재시도는 상한을 갖고, 상한 초과는 「미조회
   그 1회를 쓰는 편이 거의 확실히 싸다. — **권고: 착수 결정 전에 그 1회를 먼저 승인받을 것.**
 - 나머지 305개 상품의 근거 결핍(§1).
 
-## 9. 착수 전 체크리스트 (전부 미완)
+## 9. 착수 전 체크리스트
 
 1. [x] **옵션 이름 READ 1회 — 완료(2026-08-26, `apr-nv-option-13250364547-r1`). verdict는 바뀌지
    않았다.** `options=20 axes=2 spec_bearing=20 capacity_bearing=0` — 규격은 옵션 라벨에 이름으로
-   있지만 수용 가닥수는 20개 전수에서 관계어 **0건**이다(`docs/answer_applicability_v1.md` §8-1).
-   ⇒ `VARIANT_LABEL_ONLY`, **`IMAGE_ONLY_GAP` CONFIRMED**, 이 문서는 종료되지 않고 **살아 있다**.
-   부수 소득 하나: `SpecApplicability.VARIANT_NAMED`가 NAVER에서 구조적으로 도달 가능함이 확인됐으므로
-   §6의 「규격 라벨 없는 수치는 저장 거절」은 실행 가능한 규칙이다 — 추출된 사실이 붙을 **정확한
-   variant가 채널에 존재한다**.
-2. [ ] 판매자 상세 이미지를 모델에 보내도 되는가 — **product-owner 결정**(§5)
-3. [ ] org 고유 이미지 해시 수 측정 (추출 0회로 가능, §4)
-4. [ ] 상품 1개 파일럿: 상한 12장으로 이 질문의 답이 잡히는가 + 실측 토큰
-5. [ ] 세 번째 LLM capability 격리 테스트 설계
-6. [ ] `theImageAuthorshipIsDeclaredAndUnused()`를 끄는 커밋 = 이 lane의 공개 선언
+   있지만 수용 가닥수는 20개 전수에서 관계어 **0건**(`docs/answer_applicability_v1.md` §8-1).
+   ⇒ `VARIANT_LABEL_ONLY`, **`IMAGE_ONLY_GAP` CONFIRMED**. 부수 소득: `SpecApplicability.VARIANT_NAMED`가
+   NAVER에서 구조적으로 도달 가능 — 추출된 사실이 붙을 **정확한 variant가 채널에 존재한다**.
+2. [x] **판매자 상세 이미지를 모델에 보내도 되는가 — product-owner 승인됨(2026-08-26).** provenance는
+   `AI_EXTRACTED_FROM_SELLER_IMAGE`로 **분리 유지**되며 `SELLER_ENTERED_KNOWLEDGE`·
+   `SELLER_AUTHORED_CHANNEL_CONTENT`와 동일 취급 금지. 출처는 판매자, **추출은 AI**다.
+3. [x] **고유 이미지 해시 수 측정 — 실행됨, 그러나 질문에 답하지 못했다.** §9-1.
+4. [ ] 상품 1개 파일럿: 상한 12장으로 이 질문의 답이 잡히는가 + 실측 토큰 — **모델 호출이므로 별도 승인**
+5. [x] **세 번째(실제로는 여섯 번째) LLM capability 격리 설계** — `AgentDraftBoundaryTest`의
+   `CAPABILITIES`/`TRANSPORT_HOLDERS`/`flags` 세 목록에 한 줄씩. 형태는 §5 그대로.
+6. [ ] `theImageAuthorshipIsDeclaredAndUnused()`를 끄는 커밋 = 이 lane의 공개 선언 — **아직 초록**
+
+### 9-1. Stage 0 census — 측정됐고, 전제는 확인되지 않았다
+
+승인 `apr-nv-image-census-13250364547-r1`(마켓플레이스 GET **1** · CDN GET **26/상한 26** · WRITE 0 ·
+DB 변경 0 · **모델 호출 0**):
+
+```
+shape=IMAGE_REFERENCES_ONLY text_chars=104 images=26 listing_gallery=10
+img_tags=26 fetchable=26 duplicate_urls=0 inline_data=0 insecure_or_other=0
+CENSUS  image_requests=26 fetched_ok=26 unique_sha256=26 duplicate_fetches=0 reuse_ratio=1.00
+BYTES   total=3,828,342  min=24,992  max=784,899  mean=147,243
+DIMENSIONS readable=26/26 distinct_sizes=22 most_common=860x559×4
+OUTCOMES {OK=26}
+```
+
+**상품 하나 안에서 바이트 중복은 0이다.** 26장이 26개의 서로 다른 그림이고, 재사용은 없다.
+
+**그리고 그것은 §4가 물은 질문이 아니다.** §4의 비용 논증은 **상품 간** 재사용이다 — 같은 배송안내 띠가
+308개 상품에 붙어 있으면 분모가 상품 수가 아니라 고유 그림 수가 된다는 것. 이 census는 상품 **하나**를
+읽었으므로 그 비율을 **측정할 수 없다**. 측정하려면 카탈로그 전체를 읽어야 하고, **그것이 정확히 이
+lane이 금지한 구조다.** 그러므로:
+
+- **비용 전제는 `UNVERIFIED`로 남는다.** 「무너지면 착수하지 않는 것이 옳다」는 §4의 기준은 아직 판정
+  불가이며, 이것을 「측정했다」로 적는 것은 사실이 아니다.
+- 알게 된 것: 이 상품의 실측 상한은 **3.65MB / 26장**이고, 평균 **144KB**, 최대 **766KB**, 거의 전부가
+  **860px 폭**이다. 상품 1개 파일럿의 전송량은 이제 추정이 아니라 **관측값**이다.
+- 남은 선택지는 셋이고 전부 product-owner 결정이다: (a) 표본 N개 상품으로 재사용률을 재는 **별도 승인**,
+  (b) 재사용 가정을 **버리고** 상품당 비용으로 착수 판단, (c) 착수 보류.
+
+### 9-2. 이미지 lane이 없는데 그 안전 규칙은 이미 산다
+
+`KnowledgeAuthorship.carriesExactFiguresUnaided()`는 이미지 유래 문장이 수치를 **단독으로 단정할 수
+없다**고 선언해 두고 **호출자가 0**이었다 — 규칙을 적는 enum이 아니라 주석이었다. 이제
+`InquiryEvidenceRetriever`가 passage마다 authorship을 들고 다니고, 현재 근거 중 **하나라도** 그림에서
+온 것이면 드래프터가 읽는 **규격 적용 범위 줄이 격상된다**(그 enum 자신의 docblock이 지정한 처방:
+「variant-unresolved spec이 이미 받는 것과 같은 처방」). 새 seam 0 · payload floor 변화 0 —
+그 줄은 여전히 옵션 이름을 싣지 않는다.
+
+**생산자가 생기기 전에 게이트가 먼저 서 있다.** 추출 lane이 켜지는 날 이 규칙은 이미 돌고 있다.

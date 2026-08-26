@@ -11,7 +11,6 @@ import com.sellerops.agent.quota.QuotaDecision;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.dto.GeneratedDraftView;
-import com.sellerops.inquiry.proposal.RuleBasedInquiryProposalProvider;
 import com.sellerops.inquiry.reply.InquiryReplyDraftRepository;
 import com.sellerops.inquiry.reply.InquiryReplyDraftService;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
@@ -246,43 +245,81 @@ class InquiryDraftComposerTest {
     }
 
     @Test
-    @DisplayName("no model ran — the draft is RULE, is never called GROUNDED, and cites nothing")
-    void ruleFallbackClaimsNoGrounding() {
+    @DisplayName("no model ran — nothing is written, and no promise is made on the seller's behalf")
+    void noModelMeansNoDraft() {
+        // This replaced the deterministic fallback on 2026-08-26. That drafter wrote 「확인한 뒤
+        // 정확한 안내를 드리겠습니다」 — a commitment SellerOps made in the seller's voice with no
+        // evidence and no author. An empty box the seller fills in is the honest version.
         UUID productId = seedProduct();
         InquiryWorkItem wi = seedProposed(productId);
         StubLibrary library = StubLibrary.returning(passage("사용법", "테이프를 벗기고 붙입니다."));
 
         GeneratedDraftView view = composer(library, StubModel.disabled()).generate(org, wi.getId(), user);
 
-        assertThat(view.authorKind()).isEqualTo(DraftAuthorKind.RULE.name());
-        assertThat(view.knowledgeState())
-                .as("passages existed, but nothing that wrote this draft ever saw them")
-                .isEqualTo(DraftKnowledgeState.NO_MATCH.name());
+        assertThat(view.draft()).isNull();
+        assertThat(view.authorKind()).isNull();
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.NO_ANSWER_BASIS.name());
         assertThat(view.evidence()).isEmpty();
-        assertThat(view.draft().comments()).isNotBlank();
+        assertThat(draftRows.countByWorkItemId(wi.getId()))
+                .as("a version nobody composed must not exist for an approval to bind to").isZero();
     }
 
     @Test
-    @DisplayName("the day's AI budget is spent — a draft is still written, and the reason is said")
-    void quotaExhaustedStillProducesADraft() {
-        InquiryWorkItem wi = seedProposed(null);
+    @DisplayName("the day's AI budget is spent — nothing is written, and the reason is said")
+    void quotaExhaustedWritesNothingAndSaysWhy() {
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedProposed(productId);
 
-        GeneratedDraftView view = composer(StubLibrary.empty(0), StubModel.writing("제목", "본문"),
-                exhaustedQuota()).generate(org, wi.getId(), user);
+        GeneratedDraftView view = composer(StubLibrary.returning(passage("사용법", "붙입니다.")),
+                StubModel.writing("제목", "본문"), exhaustedQuota()).generate(org, wi.getId(), user);
 
-        assertThat(view.authorKind()).isEqualTo(DraftAuthorKind.RULE.name());
+        assertThat(view.draft()).isNull();
         assertThat(view.quotaMessage()).contains("오늘");
-        assertThat(view.draft().comments()).isNotBlank();
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.NO_ANSWER_BASIS.name());
+    }
+
+    @Test
+    @DisplayName("NO_ANSWER_BASIS: no evidence means no model call at all, and 「답변 기준이 필요합니다」")
+    void noAnswerBasisSpendsNothing() {
+        InquiryWorkItem wi = seedProposed(null);
+        StubModel model = StubModel.writing("제목", "본문");
+
+        GeneratedDraftView view = composer(StubLibrary.empty(0), model).generate(org, wi.getId(), user);
+
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.NO_ANSWER_BASIS.name());
+        assertThat(view.answerBasisNote()).isEqualTo("답변 기준이 필요합니다.");
+        assertThat(view.answerBasisAction()).as("what the seller can do about it")
+                .contains("어떤 상품");
+        assertThat(model.sawTitle).as("the model is not asked to write a reply with no basis").isNull();
+        assertThat(view.draft()).isNull();
+    }
+
+    @Test
+    @DisplayName("NEEDS_CLARIFICATION: evidence exists, the 규격 does not — a draft IS written")
+    void needsClarificationStillDrafts() {
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedAsking(productId, "문의", "전선이 몇 가닥까지 들어가나요?");
+        StubModel model = StubModel.writing("[답변] 문의", "사용하실 규격을 알려주시면 정확히 안내드리겠습니다.");
+
+        GeneratedDraftView view = composer(
+                StubLibrary.returning(passage("자주 묻는 질문", "3~4가닥이 들어갑니다.")), model)
+                .generate(org, wi.getId(), user);
+
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.NEEDS_CLARIFICATION.name());
+        assertThat(view.draft()).as("asking for the missing fact IS the reply").isNotNull();
+        assertThat(view.answerBasisAction()).isNull();
     }
 
     @Test
     @DisplayName("a regenerate appends a version, so an approval bound to the previous one is stale")
     void regenerateAppendsAndInvalidates() {
-        InquiryWorkItem wi = seedProposed(null);
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedProposed(productId);
+        StubLibrary library = StubLibrary.returning(passage("사용법", "테이프를 벗기고 붙입니다."));
 
-        GeneratedDraftView first = composer(StubLibrary.empty(0), StubModel.writing("첫 제목", "첫 본문"))
+        GeneratedDraftView first = composer(library, StubModel.writing("첫 제목", "첫 본문"))
                 .generate(org, wi.getId(), user);
-        GeneratedDraftView next = composer(StubLibrary.empty(0), StubModel.writing("둘째 제목", "둘째 본문"))
+        GeneratedDraftView next = composer(library, StubModel.writing("둘째 제목", "둘째 본문"))
                 .generate(org, wi.getId(), user);
 
         assertThat(next.draft().version()).isEqualTo(first.draft().version() + 1);
@@ -292,10 +329,12 @@ class InquiryDraftComposerTest {
     @Test
     @DisplayName("the question reaches the model as text — the stored body may be a mail thread in markup")
     void markupNeverReachesTheDrafter() {
-        InquiryWorkItem wi = seedProposed(null);
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedProposed(productId);
         StubModel model = StubModel.writing("제목", "본문");
 
-        composer(StubLibrary.empty(0), model).generate(org, wi.getId(), user);
+        composer(StubLibrary.returning(passage("사용법", "붙입니다.")), model)
+                .generate(org, wi.getId(), user);
 
         assertThat(model.sawTitle).isEqualTo("사용 방법이 궁금합니다");
         assertThat(model.sawDetails).doesNotContain("<p>").doesNotContain("&nbsp;");
@@ -324,8 +363,13 @@ class InquiryDraftComposerTest {
                 new AnswerMemoryService(memories, orgChunks, productChunks),
                 com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH));
         return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, retriever, model,
-                quota, new RuleBasedInquiryProposalProvider(), variants,
-                new DraftEvidenceSnippets(productChunks, orgChunks, memories));
+                quota, variants, new DraftEvidenceSnippets(productChunks, orgChunks, memories),
+                // The 상세페이지 trigger, switched off: these cases are about what the draft path
+                // does with knowledge it already has, and a disabled trigger returns before it
+                // touches a repository — which is also the assertion that the draft path works
+                // identically in a deployment that never turns the lane on.
+                new com.sellerops.product.detail.ProductDetailEnrichmentTrigger(
+                        null, null, null, null, List.of(), false));
     }
 
     /** A passage whose chunk really exists, for the paths that go back to the source to read it. */

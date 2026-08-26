@@ -76,6 +76,9 @@ function generated(over: Record<string, unknown> = {}) {
     authorKind: "MODEL",
     knowledgeState: "GROUNDED",
     knowledgeNote: "판매자가 등록한 상품 지식을 근거로 썼습니다.",
+    answerBasis: "GROUNDED",
+    answerBasisNote: "판매자가 등록한 근거를 사용해 썼습니다.",
+    answerBasisAction: null,
     productId: "p1",
     evidence: [
       { kind: "PRODUCT_KNOWLEDGE", scopeLabel: "상품 정보", title: "사용법", locator: "product-knowledge/USAGE:데모 운영자", sourceId: "s", chunkId: "c", snippet: "몰딩 뒷면 테이프를 벗기고 벽면에 눌러 붙입니다." },
@@ -172,11 +175,15 @@ describe("InquiryResponsePanel — the generated draft", () => {
     expect(screen.queryByText("근거")).toBeNull();
   });
 
-  it("says when the day's AI budget wrote the fallback instead of the model", async () => {
+  it("says when the day's AI budget stopped the model — and writes nothing in its place", async () => {
     generateInquiryDraft.mockResolvedValue(generated({
-      authorKind: "RULE",
+      draft: null,
+      authorKind: null,
       knowledgeState: "NO_PRODUCT",
       knowledgeNote: "이 문의는 아직 상품과 연결되지 않아, 상품 지식을 근거로 쓰지 못했습니다.",
+      answerBasis: "NO_ANSWER_BASIS",
+      answerBasisNote: "답변 기준이 필요합니다.",
+      answerBasisAction: "이 문의가 어떤 상품에 대한 것인지 연결하면 근거를 찾을 수 있습니다.",
       evidence: [],
       quotaMessage: "오늘 사용할 수 있는 AI 처리량을 모두 썼습니다. 내일 다시 사용할 수 있고, 화면의 숫자와 목록은 그대로 이용할 수 있습니다.",
     }));
@@ -186,6 +193,60 @@ describe("InquiryResponsePanel — the generated draft", () => {
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
 
     expect(await screen.findByText(/오늘 사용할 수 있는 AI 처리량/)).toBeInTheDocument();
+  });
+
+  /*
+    NO_ANSWER_BASIS — the state where SellerOps writes nothing (product-owner, 2026-08-26).
+
+    The old behaviour put 「확인한 뒤 정확한 안내를 드리겠습니다」 in the box whenever grounding
+    failed. It looked finished, it was a commitment made in the seller's voice, and nothing had
+    authorised it. What replaces it is a headline that says which basis is missing, an editor left
+    open, and no sentence for the customer.
+  */
+  it("no basis: says 「답변 기준이 필요합니다」, names the gap, and produces no reply text", async () => {
+    generateInquiryDraft.mockResolvedValue(generated({
+      draft: null,
+      authorKind: null,
+      knowledgeState: "NO_LIBRARY",
+      knowledgeNote: "이 상품에 등록된 지식이 없고, 운영 정책·과거 답변에도 해당 내용이 없어 문의 내용만 보고 쓴 초안입니다.",
+      answerBasis: "NO_ANSWER_BASIS",
+      answerBasisNote: "답변 기준이 필요합니다.",
+      answerBasisAction: "이 상품에 등록된 지식이 없습니다. 상품 지식을 등록하면 근거가 생깁니다.",
+      evidence: [],
+    }));
+    const user = userEvent.setup();
+    render(<InquiryResponsePanel workItemId="w1" />);
+
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+
+    expect(await screen.findByText("답변 기준이 필요합니다.")).toBeInTheDocument();
+    expect(screen.getByText(/상품 지식을 등록하면 근거가 생깁니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/안내드리겠습니다/))
+      .toBeNull();
+    expect(screen.queryByText(/담당자/)).toBeNull();
+  });
+
+  it("no basis: whatever the seller had already typed is left alone", async () => {
+    generateInquiryDraft.mockResolvedValue(generated({
+      draft: null,
+      authorKind: null,
+      knowledgeState: "NO_MATCH",
+      knowledgeNote: "해당하는 내용이 없습니다.",
+      answerBasis: "NO_ANSWER_BASIS",
+      answerBasisNote: "답변 기준이 필요합니다.",
+      answerBasisAction: null,
+      evidence: [],
+    }));
+    const user = userEvent.setup();
+    render(<InquiryResponsePanel workItemId="w1" />);
+
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+    await screen.findByText("답변 기준이 필요합니다.");
+
+    // The editor is open and the seller can write — a declined generate must not clear their box.
+    const box = screen.getByLabelText(/^내용$/);
+    await user.type(box, "규격을 알려주시면");
+    expect(box).toHaveValue("규격을 알려주시면");
   });
 
   it("names the product and the channel the answer is about, and how long it has waited", async () => {

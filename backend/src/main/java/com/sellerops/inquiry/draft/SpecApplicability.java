@@ -79,6 +79,32 @@ public enum SpecApplicability {
                         "이 질문은 규격·옵션에 따라 답이 달라질 수 있으며, 고객이 문의에서 규격을 밝혔습니다.";
             };
         }
+
+        /**
+         * The same line, escalated when a figure in the evidence was read out of a picture.
+         *
+         * <p><b>This is where {@link com.sellerops.product.library.KnowledgeAuthorship
+         * #carriesExactFiguresUnaided()} is enforced.</b> That method states the one operational
+         * consequence of the image lane and had no caller — an enum that declares a rule nobody
+         * applies is a comment. Its own docblock names the treatment: an extracted figure "needs the
+         * same treatment a variant-unresolved spec already gets", so it gets exactly that, through
+         * the seam that already exists rather than a second one.
+         *
+         * <p>It does not suppress the passage. The seller's page is still their page, and hiding
+         * their own content would be a different kind of lie. What changes is whether a number in it
+         * may close a sentence or has to be confirmed.
+         *
+         * @param figuresUnaided false when at least one cited passage came from an image
+         */
+        public String messageKo(boolean figuresUnaided) {
+            if (figuresUnaided) {
+                return messageKo();
+            }
+            return "근거 중 일부는 상품 상세페이지 이미지에서 읽은 내용이라 수치가 확정된 사실이 "
+                    + "아닙니다. 수치를 이 고객의 상품에 대한 확정된 사실로 단정하지 말고, 필요하면 "
+                    + "규격을 되물으세요."
+                    + (this == VARIANT_UNRESOLVED ? " 어떤 규격인지도 확정되지 않았습니다." : "");
+        }
     }
 
     /**

@@ -12,7 +12,6 @@ import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.draft.dto.GeneratedDraftView;
-import com.sellerops.inquiry.proposal.InquiryProposalProvider;
 import com.sellerops.inquiry.reply.InquiryReplyDraftService;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
@@ -20,6 +19,7 @@ import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.knowledge.KnowledgeScope;
 import com.sellerops.order.fact.OrderFact;
 import com.sellerops.product.ProductVariantRepository;
+import com.sellerops.product.detail.ProductDetailEnrichmentTrigger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -43,9 +43,23 @@ import org.springframework.stereotype.Service;
  * only the first kind of evidence. The agent runtime keeps the same separation
  * ({@code PRODUCT_KNOWLEDGE_DOC} vs {@code PRODUCT_FACT}).
  *
- * <p><b>It writes a draft and nothing else.</b> No approval, no intent, no execution, no marketplace
- * call. The result is one more append-only version on the work item — the same object a seller who
- * typed it by hand would have produced, distinguishable only by the provenance stamped on it.
+ * <p><b>It writes a draft and nothing else.</b> No approval, no intent, no execution. The result is
+ * one more append-only version on the work item — the same object a seller who typed it by hand would
+ * have produced, distinguishable only by the provenance stamped on it.
+ *
+ * <p><b>One bounded marketplace READ can happen here, and it is new.</b> Before writing, this asks
+ * {@link ProductDetailEnrichmentTrigger} whether the bound product's 상세페이지 has ever been read;
+ * if not, one listing is read and indexed. That is the "actionable inquiry + exact attribution +
+ * missing knowledge" trigger, and it is the only reason a draft touches a channel besides the order
+ * fact. It cannot fail the draft: every outcome of that call is swallowed and reported.
+ *
+ * <p><b>When there is no basis, nothing is written</b> (product-owner, 2026-08-26).
+ * {@link AnswerBasisState#NO_ANSWER_BASIS} means no current evidence applies, and in that state no
+ * model is called and no version is saved. The deterministic drafter that used to fill the gap is
+ * gone with it: its output was 「확인한 뒤 정확한 안내를 드리겠습니다」 — a promise SellerOps made on
+ * the seller's behalf with nothing behind it, in exactly the state where nothing is behind it. A
+ * seller-approved fallback belongs to Organization Answer Style, which does not exist yet, and until
+ * it does the honest screen is one that says what is missing.
  */
 @Service
 public class InquiryDraftComposer {
@@ -61,15 +75,16 @@ public class InquiryDraftComposer {
     private final InquiryEvidenceRetriever retriever;
     private final AgentDraftService model;
     private final AgentQuotaService quota;
-    private final InquiryProposalProvider rules;
     private final ProductVariantRepository variants;
     private final DraftEvidenceSnippets snippets;
+    private final ProductDetailEnrichmentTrigger detail;
 
     public InquiryDraftComposer(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                 InquiryReplyDraftService drafts, InquiryDraftEvidenceRepository evidence,
                                 InquiryEvidenceRetriever retriever, AgentDraftService model,
-                                AgentQuotaService quota, InquiryProposalProvider rules,
-                                ProductVariantRepository variants, DraftEvidenceSnippets snippets) {
+                                AgentQuotaService quota, ProductVariantRepository variants,
+                                DraftEvidenceSnippets snippets,
+                                ProductDetailEnrichmentTrigger detail) {
         this.workItems = workItems;
         this.inquiries = inquiries;
         this.drafts = drafts;
@@ -77,9 +92,9 @@ public class InquiryDraftComposer {
         this.retriever = retriever;
         this.model = model;
         this.quota = quota;
-        this.rules = rules;
         this.variants = variants;
         this.snippets = snippets;
+        this.detail = detail;
     }
 
     /**
@@ -121,7 +136,20 @@ public class InquiryDraftComposer {
         String title = MarkupText.toPlainText(inquiry.getTitle());
         String details = MarkupText.toPlainText(inquiry.getBody());
 
+        enrichDetailIfNeeded(orgId, inquiry);
         InquiryEvidenceRetriever.InquiryEvidence retrieved = retriever.retrieve(orgId, inquiry);
+
+        // Computed ONCE and used twice: it decides the caution line the drafter reads and, with the
+        // library's verdict, whether there is a basis to draft at all. Two computations of the same
+        // classification would be two chances for the screen and the prompt to disagree.
+        SpecApplicability.Applicability applicability =
+                SpecApplicability.of(title, details, optionNamesFor(orgId, retrieved.productId()));
+        AnswerBasisState basis = AnswerBasisState.of(retrieved.state(), applicability);
+        if (!basis.mayGenerate()) {
+            // No model call and no saved version. Nothing here is a refusal to help — the seller
+            // writes their own reply on the same screen — it is a refusal to manufacture one.
+            return noBasis(retrieved, basis, null);
+        }
 
         String quotaMessage = null;
         Optional<AgentDraftResponseParser.ParsedDraft> written = Optional.empty();
@@ -131,64 +159,76 @@ public class InquiryDraftComposer {
             if (decision.allowed()) {
                 written = model.draft(orgId, title, details, passagesFor(retrieved.passages()),
                         retrieved.order().messageKo(),
-                        specScope(orgId, retrieved.productId(), title, details));
+                        applicability.messageKo(retrieved.figuresUnaided()));
             } else {
                 quotaMessage = decision.messageKo();
             }
         }
+        if (written.isEmpty()) {
+            // The budget was spent, the capability is off, or the vendor refused. Whatever the cause,
+            // nothing wrote this reply — and a template that says 「확인 후 안내드리겠습니다」 in its
+            // place is a promise with no author. The reason is reported instead.
+            return noBasis(retrieved, AnswerBasisState.NO_ANSWER_BASIS, quotaMessage);
+        }
 
-        DraftAuthorKind authorKind = written.isPresent() ? DraftAuthorKind.MODEL : DraftAuthorKind.RULE;
-        // A rule draft is not grounded in anything, whatever the retrieval found — saying otherwise
-        // would attach citations to a sentence that was never shown them.
-        DraftKnowledgeState state = authorKind == DraftAuthorKind.MODEL
-                ? retrieved.state() : degrade(retrieved.state());
-        List<InquiryEvidenceRetriever.ScopedPassage> cited = authorKind == DraftAuthorKind.MODEL
-                ? retrieved.passages() : List.of();
-        Set<KnowledgeScope> scopes = authorKind == DraftAuthorKind.MODEL
-                ? retrieved.scopes() : Set.of();
-
-        String replyTitle = written.map(AgentDraftResponseParser.ParsedDraft::title)
-                .filter(t -> t != null && !t.isBlank())
-                .orElseGet(() -> defaultTitle(title));
-        String replyBody = written.map(AgentDraftResponseParser.ParsedDraft::comments)
-                .filter(c -> c != null && !c.isBlank())
-                .orElseGet(() -> ruleBody(orgId, inquiry.getId(), title, details));
+        AgentDraftResponseParser.ParsedDraft parsed = written.get();
+        String replyTitle = parsed.title() == null || parsed.title().isBlank()
+                ? defaultTitle(title) : parsed.title();
+        String replyBody = parsed.comments();
 
         int base = drafts.currentVersion(workItemId);
         ReplyDraftView saved = drafts.saveAs(orgId, workItemId, actor, replyTitle, replyBody, base,
-                new InquiryReplyDraftService.Provenance(authorKind,
-                        authorKind == DraftAuthorKind.MODEL ? modelVersion : null,
-                        state, retrieved.productId()));
+                new InquiryReplyDraftService.Provenance(DraftAuthorKind.MODEL, modelVersion,
+                        retrieved.state(), retrieved.productId()));
 
-        // The order fact is cited on the same terms as a passage: only when the model actually saw
-        // it. A rule draft was shown nothing, so it cites nothing.
-        OrderFact citedOrder = authorKind == DraftAuthorKind.MODEL ? retrieved.order() : null;
-        List<DraftEvidenceView> views =
-                recordEvidence(orgId, workItemId, saved.version(), cited, citedOrder);
-        return new GeneratedDraftView(saved, authorKind.name(), state.name(), state.messageKo(scopes),
-                retrieved.productId(), views, quotaMessage);
+        List<DraftEvidenceView> views = recordEvidence(orgId, workItemId, saved.version(),
+                retrieved.passages(), retrieved.order());
+        return new GeneratedDraftView(saved, DraftAuthorKind.MODEL.name(), retrieved.state().name(),
+                retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
+                basis.actionKo(retrieved.state()), retrieved.productId(), views, null);
     }
 
     /**
-     * Whether a retrieved figure may be stated as this customer's fact — the line the drafter reads.
+     * The view for a draft that was not written, and why.
      *
-     * <p><b>Grounded is not the same as applicable.</b> On 2026-08-26 a live NAVER reply answered
-     * 「몇 가닥까지 들어가나요?」 with the seller's own FAQ figure, verbatim and correctly cited, for a
-     * listing that sells several 규격. Nothing in the retrieval was wrong; what was missing was any
-     * statement that the question's answer moves with the option chosen. This computes that statement.
-     *
-     * <p>The options come from {@code product_variants}, which today is written by the Coupang listing
-     * feed alone — so for most products the list is empty and the verdict is
-     * {@code VARIANT_UNRESOLVED}, which is the honest reading: we cannot tell which 규격 this is, so
-     * the reply must ask. An unbound product is the same case for the same reason.
+     * <p>No version is saved, so a later approval cannot bind to something nobody composed, and the
+     * work item's version counter does not advance on a non-event.
      */
-    private String specScope(UUID orgId, UUID productId, String title, String details) {
-        List<String> optionNames = productId == null ? List.of()
+    private static GeneratedDraftView noBasis(InquiryEvidenceRetriever.InquiryEvidence retrieved,
+                                              AnswerBasisState basis, String quotaMessage) {
+        return new GeneratedDraftView(null, null, retrieved.state().name(),
+                retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
+                basis.actionKo(retrieved.state()), retrieved.productId(), List.of(), quotaMessage);
+    }
+
+    /**
+     * One bounded 상세페이지 read, when this inquiry names a product exactly and that product's
+     * detail has never been read (or is 30 days old).
+     *
+     * <p><b>Every failure is swallowed here on purpose.</b> The seller asked for a draft, not for a
+     * channel read, and a NAVER outage must not become an error on their screen. The trigger already
+     * reports its own outcome; this catch exists for the repository lookups around it.
+     */
+    private void enrichDetailIfNeeded(UUID orgId, Inquiry inquiry) {
+        if (inquiry.getProductId() == null || inquiry.productBinding() == null) {
+            // No attribution, or an attribution nothing stated — there is no listing to read.
+            return;
+        }
+        try {
+            detail.enrichIfNeeded(orgId, inquiry.getProductId());
+        } catch (RuntimeException ignored) {
+            // Deliberately silent: the trigger logs its own outcomes, and a second log line here
+            // would say the same thing with less information.
+        }
+    }
+
+    /** Every {@code option_name} recorded for the bound product; empty when there are no variants. */
+    private List<String> optionNamesFor(UUID orgId, UUID productId) {
+        return productId == null ? List.of()
                 : variants.findByOrgIdAndProductId(orgId, productId).stream()
                         .map(com.sellerops.product.ProductVariant::getOptionName)
                         .filter(name -> name != null && !name.isBlank())
                         .toList();
-        return SpecApplicability.of(title, details, optionNames).messageKo();
     }
 
     /** The evidence for one draft version, for a reader that did not just generate it. */
@@ -198,14 +238,6 @@ public class InquiryDraftComposer {
                 .orElseThrow(() -> ApiException.notFound("문의 작업을 찾을 수 없습니다."));
         return snippets.viewsOf(
                 evidence.findAllByWorkItemIdAndDraftVersionOrderByOrdinalAsc(workItemId, version));
-    }
-
-    /**
-     * The state to report when the model never ran. GROUNDED becomes NO_MATCH: passages existed, but
-     * nothing that wrote this draft ever saw them, and the seller must not read a citation into it.
-     */
-    private static DraftKnowledgeState degrade(DraftKnowledgeState state) {
-        return state == DraftKnowledgeState.GROUNDED ? DraftKnowledgeState.NO_MATCH : state;
     }
 
     private static List<AgentDraftGenerator.Passage> passagesFor(
@@ -283,31 +315,5 @@ public class InquiryDraftComposer {
         String base = inquiryTitle == null || inquiryTitle.isBlank() ? "문의" : inquiryTitle.strip();
         String prefixed = "[답변] " + base;
         return prefixed.length() > 100 ? prefixed.substring(0, 100) : prefixed;
-    }
-
-    /**
-     * The deterministic body, used when no model wrote one.
-     *
-     * <p>It commits to nothing. The rule provider knows what the question is ABOUT, not what the
-     * answer is, so the text says the seller will check and reply — which is true, and is what the
-     * seller then edits. Inventing a shipping date here would be the same defect as inventing one in
-     * the model, minus the excuse.
-     */
-    private String ruleBody(UUID orgId, UUID inquiryId, String title, String details) {
-        // Only title/details drive the categorisation (RuleBasedInquiryProposalProvider reads nothing
-        // else); the ids travel because the record carries them, not because this path uses them.
-        String category = rules.propose(new InquiryProposalProvider.SellerInquiryContext(
-                orgId, inquiryId, title, details, null, null)).summaryCategory();
-        String opening = switch (category) {
-            case "delivery_status_reply" -> "배송 관련 문의 주셔서 감사합니다.";
-            case "exchange_return_reply" -> "교환·반품 문의 주셔서 감사합니다.";
-            case "stock_availability_reply", "stock_restock_reply" -> "재고 문의 주셔서 감사합니다.";
-            case "product_info_reply" -> "상품 문의 주셔서 감사합니다.";
-            case "installation_guidance_reply" -> "설치 관련 문의 주셔서 감사합니다.";
-            case "pricing_reply" -> "가격 문의 주셔서 감사합니다.";
-            case "quality_issue_reply" -> "불편을 드려 죄송합니다. 문의 주셔서 감사합니다.";
-            default -> "문의 주셔서 감사합니다.";
-        };
-        return opening + "\n문의하신 내용을 확인한 뒤 정확한 안내를 드리겠습니다. 잠시만 기다려 주세요.\n감사합니다.";
     }
 }

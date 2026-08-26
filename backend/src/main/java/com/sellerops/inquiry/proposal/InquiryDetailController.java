@@ -112,8 +112,16 @@ public class InquiryDetailController {
      *
      * <p>It saves one more append-only version, which means a regenerate does not overwrite what the
      * seller was reading — and, because a new version has a new fingerprint, any approval bound to the
-     * previous one can no longer be spent. It performs no marketplace call and needs no approval; it
-     * is the "prepare" end of the flow, and the send is a separate, explicitly-confirmed endpoint.
+     * previous one can no longer be spent. It is the "prepare" end of the flow; the send is a
+     * separate, explicitly-confirmed endpoint.
+     *
+     * <p><b>It performs no marketplace WRITE, and up to two bounded READs.</b> One is the order fact
+     * for an inquiry whose channel named an order; the other, since 2026-08-26, is this product's
+     * 상세페이지, read once when it has never been read. Both are per-inquiry, both are gated before
+     * the request, and neither can fail the draft.
+     *
+     * <p><b>It may write nothing.</b> When no current evidence applies, the response carries a null
+     * draft and the state that says which basis is missing — see {@code AnswerBasisState}.
      */
     @PostMapping("/{workItemId}/draft/generate")
     public GeneratedDraftView generateDraft(@AuthenticationPrincipal AuthPrincipal principal,

@@ -137,6 +137,38 @@ public class NaverConnectorConfiguration {
                 accountId, channelProductNo);
     }
 
+    /**
+     * Stage 0 of Image Product Knowledge v1 — the image census. Approval-gated, inert by default,
+     * wired into no collection path, and it contains no model call at all.
+     * See {@link NaverDetailImageCensusRunner}.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.naver.diagnostic.detail-image-census.enabled",
+            havingValue = "true")
+    NaverDetailImageCensusRunner naverDetailImageCensusRunner(
+            NaverTokenClient tokenClient, NaverChannelProductClient detailClient,
+            com.sellerops.selleraccount.SellerAccountRepository accounts,
+            CredentialVault vault,
+            @Value("${sellerops.connector.naver.diagnostic.detail-image-census.account-id:}") String accountId,
+            @Value("${sellerops.connector.naver.diagnostic.detail-image-census.channel-product-no:0}") long channelProductNo) {
+        return new NaverDetailImageCensusRunner(tokenClient, detailClient, accounts, vault,
+                new com.sellerops.product.detail.image.DetailImageFetcher(), accountId, channelProductNo);
+    }
+
+    /**
+     * The 상세페이지 read, as the enrichment trigger can hold it.
+     *
+     * <p>Unconditional within the NAVER connector, unlike the probe runner beside it: this is the
+     * production path the 2026-08-26 audit found missing, not a diagnostic. What bounds it is the
+     * trigger's three conditions, not a flag on the bean.
+     */
+    @Bean
+    com.sellerops.product.detail.ProductDetailSource naverProductDetailSource(
+            NaverTokenClient tokenClient, NaverChannelProductClient detailClient,
+            CredentialVault vault) {
+        return new NaverProductDetailSource(tokenClient, detailClient, vault);
+    }
+
     @Bean
     NaverApiConnector naverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
                                         NaverProductsClient productsClient,

@@ -12,6 +12,7 @@ import com.sellerops.knowledge.org.dto.OrgKnowledgeSearchResponse;
 import com.sellerops.order.fact.OrderFact;
 import com.sellerops.order.fact.OrderFactLookup;
 import com.sellerops.product.OperatorProductName;
+import com.sellerops.product.library.KnowledgeAuthorship;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.library.ProductKnowledgeLibraryService;
@@ -117,7 +118,23 @@ public class InquiryEvidenceRetriever {
      * other.
      */
     public record ScopedPassage(KnowledgeScope scope, String heading, String text, UUID sourceId,
-                                UUID chunkId, String locator, double score) {
+                                UUID chunkId, String locator, double score,
+                                KnowledgeAuthorship authoredOrigin) {
+
+        /**
+         * The shape every lane but the product one uses. A policy and a past answer are written by a
+         * person at this company, which is what the default says — there is no picture behind either.
+         */
+        public ScopedPassage(KnowledgeScope scope, String heading, String text, UUID sourceId,
+                             UUID chunkId, String locator, double score) {
+            this(scope, heading, text, sourceId, chunkId, locator, score,
+                    KnowledgeAuthorship.SELLER_ENTERED_KNOWLEDGE);
+        }
+
+        /** May a figure in this passage close a sentence on its own? False for the image lane. */
+        public boolean figuresUnaided() {
+            return authoredOrigin == null || authoredOrigin.carriesExactFiguresUnaided();
+        }
     }
 
     /**
@@ -139,6 +156,21 @@ public class InquiryEvidenceRetriever {
             Set<KnowledgeScope> used = new LinkedHashSet<>();
             passages.forEach(p -> used.add(p.scope()));
             return used;
+        }
+
+        /**
+         * May the figures in this evidence close a sentence unaided?
+         *
+         * <p>False as soon as ONE current passage came out of a picture — not a majority, not the
+         * top-scoring one. The drafter is shown all of them at once and cannot be told "trust the
+         * numbers in the second bullet but not the third", so the caution applies to the set.
+         *
+         * <p>Only CURRENT passages are considered. A past answer is already barred from being a
+         * source of fact, so its authorship changes nothing here.
+         */
+        public boolean figuresUnaided() {
+            return passages.stream().filter(p -> p.scope().current())
+                    .allMatch(ScopedPassage::figuresUnaided);
         }
     }
 
@@ -181,7 +213,7 @@ public class InquiryEvidenceRetriever {
             for (KnowledgePassage passage : found.passages()) {
                 productLane.add(new ScopedPassage(KnowledgeScope.PRODUCT, passage.title(),
                         passage.content(), passage.sourceId(), passage.chunkId(),
-                        locator(passage), passage.score()));
+                        locator(passage), passage.score(), passage.authoredOrigin()));
             }
         }
 

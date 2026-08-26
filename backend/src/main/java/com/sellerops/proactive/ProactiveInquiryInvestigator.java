@@ -88,7 +88,12 @@ public class ProactiveInquiryInvestigator {
 
         DraftKnowledgeState state = parse(written.knowledgeState());
         return new Investigation(
-                ProactivePreparedAction.DRAFT_PREPARED,
+                // A draft that was never written is not a prepared draft. Since 2026-08-26 the
+                // composer declines to compose when no current evidence applies, and reporting
+                // DRAFT_PREPARED for that would put a 「초안 준비됨」 card in front of a seller with
+                // nothing behind it — the exact overstatement this lane exists to avoid.
+                written.draft() == null ? ProactivePreparedAction.NONE
+                        : ProactivePreparedAction.DRAFT_PREPARED,
                 written.draft() == null ? null : written.draft().version(),
                 written.knowledgeState(),
                 written.evidence() == null ? 0 : written.evidence().size(),

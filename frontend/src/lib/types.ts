@@ -1367,17 +1367,26 @@ export interface OrgKnowledgeRequest {
 }
 
 /**
- * Mirrors com.sellerops.inquiry.draft.dto.GeneratedDraftView — the result of generating one draft.
+ * Mirrors com.sellerops.inquiry.draft.dto.GeneratedDraftView — the result of ASKING for a draft.
  *
- * `authorKind` is `MODEL` only when a model actually wrote it. When the capability is off or the
- * day's budget is spent the deterministic drafter writes instead and this says `RULE`, because a
- * seller comparing two drafts must be able to see that one had no model behind it.
+ * `draft` is null when none was written, and that is a real answer rather than a failure. Since
+ * 2026-08-26 SellerOps composes a reply only when current evidence applies to the question; in
+ * `NO_ANSWER_BASIS` it says 「답변 기준이 필요합니다」 and the seller writes their own. The
+ * deterministic drafter that used to fill the box is gone with it — its output promised the customer
+ * a follow-up in the seller's voice with nothing behind it.
+ *
+ * `answerBasis` is the projection of `knowledgeState` and the spec applicability, and it is what the
+ * screen keys on. `knowledgeState` stays because it names WHICH basis is missing, which is the part
+ * a seller can act on.
  */
 export interface GeneratedDraftView {
-  draft: ReplyDraftView;
-  authorKind: "MODEL" | "RULE" | "SELLER";
+  draft: ReplyDraftView | null;
+  authorKind: "MODEL" | "RULE" | "SELLER" | null;
   knowledgeState: "NO_PRODUCT" | "NO_LIBRARY" | "NO_MATCH" | "GROUNDED";
   knowledgeNote: string;
+  answerBasis: "GROUNDED" | "NEEDS_CLARIFICATION" | "NO_ANSWER_BASIS";
+  answerBasisNote: string;
+  answerBasisAction: string | null;
   productId: string | null;
   evidence: DraftEvidenceView[];
   quotaMessage: string | null;

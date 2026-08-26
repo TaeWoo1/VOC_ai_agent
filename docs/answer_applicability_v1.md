@@ -221,3 +221,37 @@ manufacturer · category · brand), 판매자 작성 문서 **3**(USAGE · FAQ �
 한 번 **빨간불로 멈췄다**: 실제 egress와 이 배포가 선언한 NAVER advertised egress가 **서로 다른 네트워크**였고,
 그 상태에서는 요청 0회로 STOP했다. product-owner가 등록 상태를 확인한 뒤 **실행 환경의 선언만** 실제와 맞게
 정정했다(새 IP 등록 없음, 실제 IP는 repo·docs에 커밋하지 않는 원칙 유지).
+
+---
+
+## 9. 답변 근거 상태 — `GROUNDED` / `NEEDS_CLARIFICATION` / `NO_ANSWER_BASIS` (2026-08-26)
+
+§8이 「닫지 않았다」고 적어 둔 것 중 하나가 여기서 닫혔다. **새 classifier는 없다** — 세 상태는
+이미 있던 두 enum의 **순수 함수**다(`AnswerBasisState.of(DraftKnowledgeState, Applicability)`,
+입력 2개, 텍스트 미열람, 모델 호출 0, 단어 목록 0):
+
+| 라이브러리 판정 | 규격 적용 범위 | 답변 근거 상태 |
+|---|---|---|
+| `GROUNDED` 아님 | 무엇이든 | **`NO_ANSWER_BASIS`** |
+| `GROUNDED` | `VARIANT_UNRESOLVED` | **`NEEDS_CLARIFICATION`** |
+| `GROUNDED` | `NOT_VARIANT_SENSITIVE` · `VARIANT_NAMED` | **`GROUNDED`** |
+
+부재가 모든 것을 이긴다. 근거가 없는데 되묻는 초안은 여전히 근거 없는 답변이고, 과거 답변만으로는
+애초에 `DraftKnowledgeState.GROUNDED`에 닿지 못하므로 여기서 다시 판단하지 않는다.
+
+**`NO_ANSWER_BASIS`에서는 모델을 호출하지 않고 초안도 저장하지 않는다**(product-owner 결정).
+화면은 **「답변 기준이 필요합니다.」**와 무엇이 빠졌는지 한 줄을 보이고, 편집기는 열려 있으며,
+판매자가 직접 쓴다. 승인이 묶일 버전이 만들어지지 않는다.
+
+**그 결과 결정론적 fallback drafter가 사라졌다.** 그것이 쓰던 문장은
+「문의하신 내용을 확인한 뒤 정확한 안내를 드리겠습니다」였다 — 근거 0으로, 판매자의 목소리로, 아무도
+승인하지 않은 약속. Organization Answer Style v1이 판매자가 승인한 문장을 줄 때까지 임의의 promise
+template은 만들지 않는다(그 금지는 `AnswerBasisStateTest`가 문자열로 고정한다). 따라서 **모델이 쓰지
+않으면 초안도 없다** — capability off · 일일 예산 소진 · 벤더 거절 모두 같은 결말이고, 이유는
+`quotaMessage`로 따로 말한다. `DraftAuthorKind.RULE`은 기존 행을 위해 남지만 **더 이상 생산되지 않는다**.
+
+`NEEDS_CLARIFICATION`은 반대로 **진짜 답변**이다. 근거는 있고 고객만 아는 사실 하나가 비었을 뿐이므로,
+그 하나를 묻는 것이 답변 전체다 — 없는 정책도 없는 수치도 덧붙이지 않는다.
+
+**Proactive에도 같은 규율이 적용된다:** 초안이 없으면 `ProactivePreparedAction.DRAFT_PREPARED`가 아니라
+`NONE`이다. 준비되지 않은 것을 「준비됨」으로 세는 카드는 이 lane이 피하려던 바로 그 과장이다.

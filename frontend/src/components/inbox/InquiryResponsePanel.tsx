@@ -108,6 +108,14 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   const [knowledgeNote, setKnowledgeNote] = useState<string | null>(null);
   /** Set only when the day's AI budget is what stopped the model. */
   const [quotaMessage, setQuotaMessage] = useState<string | null>(null);
+  /**
+   * Why no draft was written, when none was.
+   *
+   * Held separately from `knowledgeNote` because they answer different questions: the note says what
+   * the library could offer, and this says what the seller should do next. A generate that produces
+   * nothing must not look like a generate that failed.
+   */
+  const [noBasis, setNoBasis] = useState<{ note: string; action: string | null } | null>(null);
   /** Open only while the seller is choosing a product. Never open by default — it is not a step. */
   const [binding, setBinding] = useState(false);
 
@@ -123,6 +131,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       setReplyComments(next.draft?.comments ?? "");
       setEvidence(next.draftEvidence ?? []);
       setKnowledgeNote(next.draft?.knowledgeNote ?? null);
+      setNoBasis(null);
     } catch (e) {
       setDetail(null);
       setError(detailErrorMessage(isAxiosError(e) ? e.response?.status : undefined));
@@ -281,12 +290,22 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
         );
       }
       const generated = await api.generateInquiryDraft(workItemId);
-      setDetail((current) => (current ? { ...current, draft: generated.draft, phase } : current));
-      setReplyTitle(generated.draft.title);
-      setReplyComments(generated.draft.comments);
       setEvidence(generated.evidence);
       setKnowledgeNote(generated.knowledgeNote);
       setQuotaMessage(generated.quotaMessage);
+      if (!generated.draft) {
+        // Nothing was composed, on purpose. Leave whatever the seller had typed exactly as it is —
+        // clearing their box because the AI declined would be the worst of both behaviours — and
+        // say which basis is missing so the sentence is actionable rather than an apology.
+        setNoBasis({ note: generated.answerBasisNote, action: generated.answerBasisAction });
+        setEditing(true);
+        return;
+      }
+      setNoBasis(null);
+      const written = generated.draft;
+      setDetail((current) => (current ? { ...current, draft: written, phase } : current));
+      setReplyTitle(written.title);
+      setReplyComments(written.comments);
       setEditing(false);
       // A new version has a new fingerprint, so an open confirm is about content that no longer
       // exists. Close it rather than let a stale approval be pressed.
@@ -392,7 +411,12 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       <section className="rounded-xl border border-line bg-canvas p-4">
         <h3 className="text-sm font-semibold text-muted">AI가 준비한 답변</h3>
 
-        {!draft ? (
+        {/*
+          Three states, not two. There was no draft and there was a draft; a generate that
+          DECLINED to write one is a third, and folding it into the first would put the seller back
+          in front of the same button with no answer to what they just pressed.
+        */}
+        {!draft && !noBasis ? (
           <>
             <p className="mt-1.5 break-keep text-sm leading-relaxed text-muted">
               문의 내용과 등록된 상품 지식을 근거로 초안을 씁니다. 보내는 것은 확인 후 따로 누릅니다.
@@ -427,7 +451,32 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
               <p className="mt-1.5 break-keep text-sm leading-relaxed text-warn">{quotaMessage}</p>
             ) : null}
 
-            {editing ? (
+            {/*
+              NO BASIS — the state where SellerOps writes nothing (product-owner, 2026-08-26).
+
+              It gets a headline, not a grey aside, because it is the answer to what the seller just
+              pressed. The old behaviour put 「확인한 뒤 정확한 안내를 드리겠습니다」 in the box, which
+              read as a finished draft and was a promise nobody had authorised. The box below stays
+              open and empty and the seller writes the reply; the second line says what would make
+              the next one grounded.
+            */}
+            {noBasis ? (
+              <div className="mt-3 rounded-xl border border-warn/40 bg-warn/5 p-4">
+                <p className="break-keep text-lg font-semibold leading-relaxed text-ink">
+                  {noBasis.note}
+                </p>
+                {noBasis.action ? (
+                  <p className="mt-1.5 break-keep text-base leading-relaxed text-ink">
+                    {noBasis.action}
+                  </p>
+                ) : null}
+                <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
+                  근거가 없는 답변은 만들지 않습니다. 아래에 직접 작성하실 수 있습니다.
+                </p>
+              </div>
+            ) : null}
+
+            {editing || !draft ? (
               <div className="mt-4">
                 <label className="block text-sm font-medium text-ink" htmlFor="reply-title">
                   제목
@@ -454,18 +503,20 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                   <Btn size="sm" onClick={onSaveDraft} disabled={busy || !replyComments.trim()}>
                     {busy ? "저장 중…" : "초안 저장"}
                   </Btn>
-                  <Btn
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setEditing(false);
-                      setReplyTitle(draft.title);
-                      setReplyComments(draft.comments);
-                    }}
-                    disabled={busy}
-                  >
-                    취소
-                  </Btn>
+                  {draft ? (
+                    <Btn
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setEditing(false);
+                        setReplyTitle(draft.title);
+                        setReplyComments(draft.comments);
+                      }}
+                      disabled={busy}
+                    >
+                      취소
+                    </Btn>
+                  ) : null}
                 </div>
               </div>
             ) : (
@@ -533,7 +584,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                   </p>
                 ) : null}
 
-                {!confirming ? (
+                {!confirming || !draft ? (
                   /*
                     ONE PRIMARY, THEN THE REST (Executive-friendly UX Redesign v1).
 
