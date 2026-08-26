@@ -92,14 +92,19 @@ public class AgentDraftGenerator {
      * <p>Empty when no product resolved, no library exists, or nothing matched. Empty is a real state
      * the prompt is told about, not a silent absence.
      */
-    public record Input(String title, String details, List<Passage> knowledge, String orderState) {
+    public record Input(String title, String details, List<Passage> knowledge, String orderState,
+                        String specScope) {
 
         public Input(String title, String details) {
-            this(title, details, List.of(), null);
+            this(title, details, List.of(), null, null);
         }
 
         public Input(String title, String details, List<Passage> knowledge) {
-            this(title, details, knowledge, null);
+            this(title, details, knowledge, null, null);
+        }
+
+        public Input(String title, String details, List<Passage> knowledge, String orderState) {
+            this(title, details, knowledge, orderState, null);
         }
 
         public Input {
@@ -202,7 +207,8 @@ public class AgentDraftGenerator {
         ArrayNode messages = root.putArray("messages");
         ObjectNode user = messages.addObject();
         user.put("role", "user");
-        user.put("content", AgentDraftPrompt.user(input.title(), input.details(), input.knowledge(), input.orderState()));
+        user.put("content", AgentDraftPrompt.user(input.title(), input.details(), input.knowledge(), input.orderState(),
+                        input.specScope()));
         if (vendor == Vendor.ANTHROPIC) {
             root.put("max_tokens", maxOutputTokens);
             root.put("system", AgentDraftPrompt.system());

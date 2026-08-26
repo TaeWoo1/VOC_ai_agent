@@ -76,9 +76,11 @@ class InquiryDraftComposerTest {
     @Autowired InquiryReplyDraftRepository draftRows;
     @Autowired InquiryDraftEvidenceRepository evidence;
     @Autowired ProductRepository products;
+    @Autowired com.sellerops.product.ProductVariantRepository variants;
     @Autowired OrgKnowledgeSourceRepository orgSources;
     @Autowired OrgKnowledgeChunkRepository orgChunks;
     @Autowired ProductKnowledgeChunkRepository productChunks;
+    @Autowired com.sellerops.product.library.ProductKnowledgeSourceRepository productSources;
     @Autowired AnswerMemoryRepository memories;
     @Autowired ChannelOrderRepository channelOrders;
     @Autowired com.sellerops.channel.ChannelRepository channels;
@@ -114,6 +116,77 @@ class InquiryDraftComposerTest {
                 });
         assertThat(evidence.findAllByWorkItemIdAndDraftVersionOrderByOrdinalAsc(
                 wi.getId(), view.draft().version())).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("a citation carries the sentence the drafter was shown, not only its title")
+    void citationsCarryACheckableExcerpt() {
+        // The 2026-08-26 defect: the source's TITLE is about 접착, the passage that grounded the
+        // reply is about 가닥 수, and a seller reading only the title cannot check the answer.
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedAsking(productId, "문의", "전선이 몇 가닥까지 들어가나요?");
+        String faq = "Q. 떼었다가 다시 붙일 수 있나요?\nA. 기본 양면테이프는 1회용입니다.\n"
+                + "Q. 몇 가닥까지 들어가나요?\nA. 일반 가전 전선 기준으로 3~4가닥이 여유 있게 들어갑니다.";
+        GeneratedDraftView view = composer(StubLibrary.returning(passage("자주 묻는 질문 - 접착과 재부착", faq)),
+                StubModel.writing("[답변] 문의", "확인해 안내드리겠습니다.")).generate(org, wi.getId(), user);
+
+        assertThat(view.evidence()).singleElement().satisfies(e -> {
+            assertThat(e.title()).isEqualTo("자주 묻는 질문 - 접착과 재부착");
+            assertThat(e.snippet()).as("the excerpt is what makes the title checkable")
+                    .contains("3~4가닥")
+                    .doesNotContain("\n");
+        });
+    }
+
+    @Test
+    @DisplayName("a citation read back later carries the same excerpt, resolved from the source")
+    void citationsReadBackCarryTheirExcerpt() {
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedAsking(productId, "문의", "전선이 몇 가닥까지 들어가나요?");
+        // A real stored chunk, because the read path resolves the excerpt from the source rather
+        // than from anything the citation row holds.
+        KnowledgePassage stored = seedChunk(productId, "자주 묻는 질문", "A. 3~4가닥이 여유 있게 들어갑니다.");
+        GeneratedDraftView view = composer(StubLibrary.returning(stored),
+                StubModel.writing("[답변] 문의", "확인해 안내드리겠습니다.")).generate(org, wi.getId(), user);
+
+        // The generate path holds the passage text; the read path has to go and get it. Both must
+        // put the same thing in front of the seller, or the citation changes when the page reloads.
+        assertThat(composer(StubLibrary.empty(0), StubModel.disabled())
+                .evidenceFor(org, wi.getId(), view.draft().version()))
+                .singleElement()
+                .satisfies(e -> assertThat(e.snippet()).contains("3~4가닥"));
+    }
+
+    @Test
+    @DisplayName("a variant-dependent question arrives at the model with its 규격 unresolved")
+    void variantDependentQuestionsCarryTheirApplicability() {
+        // The 2026-08-26 NAVER live case, end to end: the FAQ passage genuinely answers the question,
+        // and the drafter is nonetheless told that the figure is not settled for this customer.
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedAsking(productId, "문의", "전선이 몇 가닥까지 들어가나요?");
+        StubLibrary library = StubLibrary.returning(passage("자주 묻는 질문",
+                "Q. 몇 가닥까지 들어가나요? A. 일반 가전 전선 기준으로 3~4가닥이 여유 있게 들어갑니다."));
+        StubModel model = StubModel.writing("[답변] 문의", "확인해 안내드리겠습니다.");
+
+        composer(library, model).generate(org, wi.getId(), user);
+
+        assertThat(model.sawKnowledge).as("the evidence is still retrieved and still shown").hasSize(1);
+        assertThat(model.sawSpecScope).isEqualTo(
+                SpecApplicability.Applicability.VARIANT_UNRESOLVED.messageKo());
+    }
+
+    @Test
+    @DisplayName("a question whose answer cannot move with the option carries no extra caution")
+    void invariantQuestionsCarryNoApplicabilityCaution() {
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedAsking(productId, "문의", "벽지에도 붙는지 궁금합니다.");
+        StubModel model = StubModel.writing("[답변] 문의", "실크벽지에는 붙습니다.");
+
+        composer(StubLibrary.returning(passage("자주 묻는 질문", "실크벽지에는 붙습니다.")), model)
+                .generate(org, wi.getId(), user);
+
+        assertThat(model.sawSpecScope).isEqualTo(
+                SpecApplicability.Applicability.NOT_VARIANT_SENSITIVE.messageKo());
     }
 
     @Test
@@ -251,7 +324,34 @@ class InquiryDraftComposerTest {
                 new AnswerMemoryService(memories, orgChunks, productChunks),
                 com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH));
         return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, retriever, model,
-                quota, new RuleBasedInquiryProposalProvider());
+                quota, new RuleBasedInquiryProposalProvider(), variants,
+                new DraftEvidenceSnippets(productChunks, orgChunks, memories));
+    }
+
+    /** A passage whose chunk really exists, for the paths that go back to the source to read it. */
+    private KnowledgePassage seedChunk(UUID productId, String title, String content) {
+        com.sellerops.product.library.ProductKnowledgeSource source =
+                new com.sellerops.product.library.ProductKnowledgeSource();
+        source.setOrgId(org);
+        source.setProductId(productId);
+        source.setSourceType(KnowledgeSourceType.FAQ);
+        source.setTitle(title);
+        source.setBody(content);
+        source.setAuthorName("데모 운영자");
+        UUID sourceId = productSources.save(source).getId();
+
+        com.sellerops.product.library.ProductKnowledgeChunk chunk =
+                new com.sellerops.product.library.ProductKnowledgeChunk();
+        chunk.setOrgId(org);
+        chunk.setProductId(productId);
+        chunk.setSourceId(sourceId);
+        chunk.setOrdinal(0);
+        chunk.setContent(content);
+        chunk.setNormalized(content);
+        UUID chunkId = productChunks.save(chunk).getId();
+
+        return new KnowledgePassage(sourceId, chunkId, KnowledgeSourceType.FAQ, title, content, 0,
+                0.82, "데모 운영자", null, Instant.parse("2026-08-24T00:00:00Z"));
     }
 
     private static KnowledgePassage passage(String title, String content) {
@@ -266,6 +366,27 @@ class InquiryDraftComposerTest {
         p.setSku("SKU-" + UUID.randomUUID());
         p.setStatus("ACTIVE");
         return products.save(p).getId();
+    }
+
+    /** As {@link #seedProposed}, with the customer's own words — what the applicability reads. */
+    private InquiryWorkItem seedAsking(UUID productId, String title, String body) {
+        Inquiry q = new Inquiry();
+        q.setOrgId(org);
+        q.setChannelId(UUID.randomUUID());
+        q.setTitle(title);
+        q.setBody(body);
+        q.setStatus("UNANSWERED");
+        q.setProductId(productId);
+        q.setReceivedAt(Instant.parse("2026-08-22T00:00:00Z"));
+        UUID inquiryId = inquiries.save(q).getId();
+
+        InquiryWorkItem wi = new InquiryWorkItem();
+        wi.setOrgId(org);
+        wi.setInquiryId(inquiryId);
+        wi.setSellerAccountId(UUID.randomUUID());
+        wi.setChannelId(q.getChannelId());
+        wi.setPhase(InquiryWorkItemPhase.PROPOSED);
+        return workItems.save(wi);
     }
 
     private InquiryWorkItem seedProposed(UUID productId) {
@@ -366,17 +487,20 @@ class InquiryDraftComposerTest {
         }
 
         String sawOrderState;
+        String sawSpecScope;
 
-        // The five-argument form is the one the composer calls; overriding only the four-argument
-        // convenience would leave the real implementation running underneath it.
+        // The SIX-argument form is the one the composer calls; overriding a shorter convenience
+        // would leave the real implementation running underneath it — which is exactly what broke
+        // when the spec-applicability argument was added, and is why the override is the widest one.
         @Override
         public Optional<AgentDraftResponseParser.ParsedDraft> draft(
                 UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
-                String orderState) {
+                String orderState, String specScope) {
             sawTitle = title;
             sawDetails = details;
             sawKnowledge.addAll(knowledge);
             sawOrderState = orderState;
+            sawSpecScope = specScope;
             return Optional.ofNullable(answer);
         }
     }

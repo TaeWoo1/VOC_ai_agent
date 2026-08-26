@@ -50,6 +50,9 @@ class InquiryProposalServiceTest {
     @Autowired com.sellerops.channel.ChannelRepository channels;
     @Autowired com.sellerops.product.ProductRepository products;
     @Autowired com.sellerops.inquiry.draft.InquiryDraftEvidenceRepository draftEvidence;
+    @Autowired com.sellerops.product.library.ProductKnowledgeChunkRepository productChunks;
+    @Autowired com.sellerops.knowledge.org.OrgKnowledgeChunkRepository orgChunks;
+    @Autowired com.sellerops.knowledge.memory.AnswerMemoryRepository memories;
     @Autowired PlatformTransactionManager txManager;
 
     private InquiryProposalWriter writer;
@@ -105,7 +108,8 @@ class InquiryProposalServiceTest {
                 new com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry(),
                 com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels,
                         (orgId, code, accountId, rows) ->
-                                com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH));
+                                com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH),
+                new com.sellerops.inquiry.draft.DraftEvidenceSnippets(productChunks, orgChunks, memories));
     }
 
     private InquiryWorkItem seedOpen(UUID orgId, String title, String body, String author) {

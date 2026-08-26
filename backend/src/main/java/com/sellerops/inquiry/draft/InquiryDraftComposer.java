@@ -19,6 +19,7 @@ import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.knowledge.KnowledgeScope;
 import com.sellerops.order.fact.OrderFact;
+import com.sellerops.product.ProductVariantRepository;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -61,11 +62,14 @@ public class InquiryDraftComposer {
     private final AgentDraftService model;
     private final AgentQuotaService quota;
     private final InquiryProposalProvider rules;
+    private final ProductVariantRepository variants;
+    private final DraftEvidenceSnippets snippets;
 
     public InquiryDraftComposer(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                 InquiryReplyDraftService drafts, InquiryDraftEvidenceRepository evidence,
                                 InquiryEvidenceRetriever retriever, AgentDraftService model,
-                                AgentQuotaService quota, InquiryProposalProvider rules) {
+                                AgentQuotaService quota, InquiryProposalProvider rules,
+                                ProductVariantRepository variants, DraftEvidenceSnippets snippets) {
         this.workItems = workItems;
         this.inquiries = inquiries;
         this.drafts = drafts;
@@ -74,6 +78,8 @@ public class InquiryDraftComposer {
         this.model = model;
         this.quota = quota;
         this.rules = rules;
+        this.variants = variants;
+        this.snippets = snippets;
     }
 
     /**
@@ -124,7 +130,8 @@ public class InquiryDraftComposer {
             QuotaDecision decision = quota.consume(orgId, AgentUsageKind.DRAFT, null);
             if (decision.allowed()) {
                 written = model.draft(orgId, title, details, passagesFor(retrieved.passages()),
-                        retrieved.order().messageKo());
+                        retrieved.order().messageKo(),
+                        specScope(orgId, retrieved.productId(), title, details));
             } else {
                 quotaMessage = decision.messageKo();
             }
@@ -162,15 +169,35 @@ public class InquiryDraftComposer {
                 retrieved.productId(), views, quotaMessage);
     }
 
+    /**
+     * Whether a retrieved figure may be stated as this customer's fact — the line the drafter reads.
+     *
+     * <p><b>Grounded is not the same as applicable.</b> On 2026-08-26 a live NAVER reply answered
+     * 「몇 가닥까지 들어가나요?」 with the seller's own FAQ figure, verbatim and correctly cited, for a
+     * listing that sells several 규격. Nothing in the retrieval was wrong; what was missing was any
+     * statement that the question's answer moves with the option chosen. This computes that statement.
+     *
+     * <p>The options come from {@code product_variants}, which today is written by the Coupang listing
+     * feed alone — so for most products the list is empty and the verdict is
+     * {@code VARIANT_UNRESOLVED}, which is the honest reading: we cannot tell which 규격 this is, so
+     * the reply must ask. An unbound product is the same case for the same reason.
+     */
+    private String specScope(UUID orgId, UUID productId, String title, String details) {
+        List<String> optionNames = productId == null ? List.of()
+                : variants.findByOrgIdAndProductId(orgId, productId).stream()
+                        .map(com.sellerops.product.ProductVariant::getOptionName)
+                        .filter(name -> name != null && !name.isBlank())
+                        .toList();
+        return SpecApplicability.of(title, details, optionNames).messageKo();
+    }
+
     /** The evidence for one draft version, for a reader that did not just generate it. */
     public List<DraftEvidenceView> evidenceFor(UUID orgId, UUID workItemId, int version) {
         workItems.findById(workItemId)
                 .filter(w -> w.getOrgId().equals(orgId))
                 .orElseThrow(() -> ApiException.notFound("문의 작업을 찾을 수 없습니다."));
-        return evidence.findAllByWorkItemIdAndDraftVersionOrderByOrdinalAsc(workItemId, version).stream()
-                .map(row -> new DraftEvidenceView(row.getKind(), InquiryDraftEvidence.scopeLabelOf(row.getKind()),
-                        row.getTitle(), row.getLocator(), row.getSourceId(), row.getChunkId()))
-                .toList();
+        return snippets.viewsOf(
+                evidence.findAllByWorkItemIdAndDraftVersionOrderByOrdinalAsc(workItemId, version));
     }
 
     /**
@@ -212,8 +239,11 @@ public class InquiryDraftComposer {
             row.setTitle(passage.heading());
             row.setLocator(passage.locator());
             evidence.save(row);
+            // The excerpt comes from the passage the drafter was ACTUALLY shown, not from a
+            // re-read: at generation the two are the same text, and this one cannot go stale.
             views.add(new DraftEvidenceView(row.getKind(), passage.scope().labelKo(), row.getTitle(),
-                    row.getLocator(), row.getSourceId(), row.getChunkId()));
+                    row.getLocator(), row.getSourceId(), row.getChunkId(),
+                    DraftEvidenceView.snippetOf(passage.text())));
         }
         // Last, and only when an order was actually resolved. A row for "주문 번호가 없었습니다" would
         // be a citation of an absence, and the screen already says that in the state sentence.
@@ -228,8 +258,9 @@ public class InquiryDraftComposer {
             row.setTitle(KnowledgeScope.ORDER_STATE.labelKo());
             row.setLocator(orderLocator(order));
             evidence.save(row);
+            // No excerpt: an order fact points at a moment, not a document.
             views.add(new DraftEvidenceView(row.getKind(), KnowledgeScope.ORDER_STATE.labelKo(),
-                    row.getTitle(), row.getLocator(), null, null));
+                    row.getTitle(), row.getLocator(), null, null, null));
         }
         return views;
     }

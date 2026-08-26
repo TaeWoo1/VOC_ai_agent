@@ -1,3 +1,5 @@
+import { elapsedSince } from "./elapsed";
+
 export function won(amount: number): string {
   return `₩${amount.toLocaleString("ko-KR")}`;
 }
@@ -16,35 +18,33 @@ export function count(n: number): string {
   return n.toLocaleString("ko-KR");
 }
 
+/**
+ * When something happened, as a person would say it — 「17분 전」.
+ *
+ * The rung comes from {@link elapsedSince}, shared with `waitedLabel`, so a list row and the pane
+ * beside it never disagree about the same timestamp. Only the wording is this function's own.
+ */
 export function relativeTime(iso: string | null): string {
-  if (!iso) {
+  const elapsed = elapsedSince(iso);
+  if (!elapsed) {
     return "-";
   }
-  const then = new Date(iso).getTime();
-  // FLOOR, not round (Executive Readiness Fix v1). `waitedLabel` floors the same `receivedAt`, so a
-  // 13h40m-old inquiry rendered 「14시간 전」 on its list row and 「13시간째」 in the pane beside it —
-  // one fact, two numbers, on one screen. Flooring also never over-states how long something waited.
-  const diffMin = Math.floor((Date.now() - then) / 60000);
-  if (diffMin < 1) {
-    return "방금 전";
+  switch (elapsed.unit) {
+    case "just":
+      return "방금 전";
+    case "minute":
+      return `${elapsed.value}분 전`;
+    case "hour":
+      return `${elapsed.value}시간 전`;
+    case "day":
+      return `${elapsed.value}일 전`;
+    case "week":
+      return `${elapsed.value}주 전`;
+    case "month":
+      return `${elapsed.value}개월 전`;
+    default:
+      return "1년 넘음";
   }
-  if (diffMin < 60) {
-    return `${diffMin}분 전`;
-  }
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) {
-    return `${diffHr}시간 전`;
-  }
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 31) {
-    return `${diffDay}일 전`;
-  }
-  // Past a month, the day count stops being information. The 문의 queue was rendering "4150일 전" on
-  // a Cafe24 backlog reaching back to 2015 — arithmetic no seller acts on differently from 4,000.
-  if (diffDay < 365) {
-    return `${Math.floor(diffDay / 30)}개월 전`;
-  }
-  return "1년 넘음";
 }
 
 export function shortDate(iso: string): string {

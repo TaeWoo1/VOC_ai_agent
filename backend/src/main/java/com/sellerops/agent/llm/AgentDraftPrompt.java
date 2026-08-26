@@ -23,7 +23,7 @@ package com.sellerops.agent.llm;
 public final class AgentDraftPrompt {
 
     /** Bump on every wording change. It is stamped into the provenance the run records. */
-    public static final String PROMPT_VERSION = "agent-draft-prompt/v5";
+    public static final String PROMPT_VERSION = "agent-draft-prompt/v6";
 
     /**
      * The closed set of reply categories, in the rule drafter's own order.
@@ -78,6 +78,11 @@ public final class AgentDraftPrompt {
                취소에 대한 언급이 없으면 취소 여부를 쓰지 마세요.
                - 「발송은 아직 시작되지 않았습니다」는 상태이지 일정이 아닙니다. 언제 출발하는지는 \
                그로부터 따라 나오지 않습니다.
+               - 「규격 적용 범위」는 이 질문의 답이 규격·옵션에 따라 달라질 수 있는지, 그리고 어떤 \
+               규격인지 확정되었는지를 말해 줍니다. 확정되지 않았다고 적혀 있으면, 근거에 수치나 사양이 \
+               있더라도 그것을 이 고객의 상품에 대한 확정된 사실로 단정하지 마세요. 규격에 따라 달라질 수 \
+               있음을 밝히고 어떤 규격을 쓰실지 되물으세요. 근거의 수치는 일반적인 기준으로만 언급할 수 \
+               있습니다.
                - 보상, 할인, 예외 처리를 약속하지 마세요.
                - 고객의 이름, 연락처, 주소를 초안에 넣지 마세요.
                - 2~4문장, 존댓말, 인사와 마무리를 포함합니다.
@@ -128,6 +133,24 @@ public final class AgentDraftPrompt {
      */
     public static String user(String title, String details,
                               java.util.List<AgentDraftGenerator.Passage> knowledge, String orderState) {
+        return user(title, details, knowledge, orderState, null);
+    }
+
+    /**
+     * The user turn with the spec-applicability line.
+     *
+     * @param specScope the ONE sentence {@link com.sellerops.inquiry.draft.SpecApplicability} produced
+     *                  — whether this question's answer can move with the 규격·옵션 chosen, and whether
+     *                  one is determined. <b>It names no option and carries no identifier</b>: it is a
+     *                  fact about the question, not more of the seller's catalogue, which is what keeps
+     *                  the payload floor where {@code AgentDraftPayloadFloorTest} asserts it. Null
+     *                  renders the same "(해당 없음)" as a question that cannot vary, because a caller
+     *                  that did not classify and a question that classified as invariant must not
+     *                  differ in what the model may claim.
+     */
+    public static String user(String title, String details,
+                              java.util.List<AgentDraftGenerator.Passage> knowledge, String orderState,
+                              String specScope) {
         StringBuilder sb = new StringBuilder();
         sb.append("제목: ").append(title == null ? "" : title)
                 .append("\n본문:\n").append(details == null ? "" : details);
@@ -150,6 +173,10 @@ public final class AgentDraftPrompt {
         // never told about order state infers it may reason about it from the customer's message.
         sb.append("\n주문 상태:\n")
                 .append(orderState == null || orderState.isBlank() ? "(확인된 값 없음)" : orderState);
+        // Always present, for the same reason the order line is: a model never told that an answer
+        // can vary by option reads every retrieved figure as a settled fact about this listing.
+        sb.append("\n\n규격 적용 범위:\n")
+                .append(specScope == null || specScope.isBlank() ? "(해당 없음)" : specScope);
         return sb.toString().strip();
     }
 

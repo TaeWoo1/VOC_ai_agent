@@ -66,6 +66,9 @@ class CoupangInquiryRoutineFlowTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired com.sellerops.inquiry.draft.InquiryDraftEvidenceRepository draftEvidence;
+    @Autowired com.sellerops.product.library.ProductKnowledgeChunkRepository productChunks;
+    @Autowired com.sellerops.knowledge.org.OrgKnowledgeChunkRepository orgChunks;
+    @Autowired com.sellerops.knowledge.memory.AnswerMemoryRepository memories;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired InquiryWorkItemAuditRepository audits;
@@ -230,7 +233,8 @@ class CoupangInquiryRoutineFlowTest {
                 new com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry(),
                 com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels,
                         (orgId, code, accountId, rows) ->
-                                com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH));
+                                com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH),
+                new com.sellerops.inquiry.draft.DraftEvidenceSnippets(productChunks, orgChunks, memories));
     }
 
     /** A COUPANG catalog row, so the detail read resolves the channel the seller sees. */

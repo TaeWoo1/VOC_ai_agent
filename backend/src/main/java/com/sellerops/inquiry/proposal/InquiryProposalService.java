@@ -72,6 +72,7 @@ public class InquiryProposalService {
     private final InquiryReplyCapabilityRegistry capabilities;
     private final InquiryTargetStateReader targetState;
     private final InquiryOrderFactReader orderFacts;
+    private final com.sellerops.inquiry.draft.DraftEvidenceSnippets snippets;
 
     public InquiryProposalService(InquiryWorkItemRepository workItems, InquiryProposalRepository proposals,
                                   InquiryRepository inquiries, InquiryProposalProvider provider,
@@ -80,7 +81,8 @@ public class InquiryProposalService {
                                   InquiryDraftEvidenceRepository draftEvidence,
                                   InquiryTargetStateReader targetState,
                                   InquiryReplyCapabilityRegistry capabilities,
-                                  InquiryOrderFactReader orderFacts) {
+                                  InquiryOrderFactReader orderFacts,
+                                  com.sellerops.inquiry.draft.DraftEvidenceSnippets snippets) {
         this.workItems = workItems;
         this.proposals = proposals;
         this.inquiries = inquiries;
@@ -93,6 +95,7 @@ public class InquiryProposalService {
         this.capabilities = capabilities;
         this.targetState = targetState;
         this.orderFacts = orderFacts;
+        this.snippets = snippets;
     }
 
     /** Seller-only, org-scoped detail exposing the raw title/details (never author). */
@@ -130,13 +133,9 @@ public class InquiryProposalService {
                 inquiry.getSourceSubtype(),
                 answerState.stateProven(),
                 answerStateNote(answerState),
-                draft == null ? List.of()
-                        : draftEvidence.findAllByWorkItemIdAndDraftVersionOrderByOrdinalAsc(
-                                workItemId, draft.version()).stream()
-                        .map(row -> new DraftEvidenceView(row.getKind(),
-                                InquiryDraftEvidence.scopeLabelOf(row.getKind()), row.getTitle(),
-                                row.getLocator(), row.getSourceId(), row.getChunkId()))
-                        .toList(),
+                draft == null ? List.<DraftEvidenceView>of()
+                        : snippets.viewsOf(draftEvidence.findAllByWorkItemIdAndDraftVersionOrderByOrdinalAsc(
+                                workItemId, draft.version())),
                 capabilities.capability(channelCode, inquiry.getSourceSubtype()),
                 // The deterministic fast path. "이 주문 상태가 뭐야?" on the detail screen is a join,
                 // not a plan — an LLM planner has nothing to contribute to reading one row and would

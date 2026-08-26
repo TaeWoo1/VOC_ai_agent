@@ -683,7 +683,7 @@ function OperationalContext({ context }: { context: OrderContextView | null }) {
   if (!context || !context.present) return null;
   return (
     <div className="mt-4 rounded-lg border border-line bg-surface-2 px-3.5 py-3">
-      <p className="text-xs font-semibold text-ink-2">운영 정보</p>
+      <p className="text-sm font-semibold text-ink-2">운영 정보</p>
       {context.summaryKo ? (
         <p className="mt-1.5 break-keep text-sm leading-relaxed text-ink">{context.summaryKo}</p>
       ) : null}
@@ -696,7 +696,7 @@ function OperationalContext({ context }: { context: OrderContextView | null }) {
         <dd className="text-ink-2">{context.cancellationKo}</dd>
       </dl>
       {context.observedKo ? (
-        <p className="mt-2 text-xs text-ink-3">{context.observedKo}</p>
+        <p className="mt-2 text-sm text-ink-3">{context.observedKo}</p>
       ) : null}
     </div>
   );
@@ -766,37 +766,58 @@ function DraftEvidence({ evidence }: { evidence: DraftEvidenceView[] }) {
     if (last && last.label === label) last.items.push(item);
     else groups.push({ label, items: [item] });
   }
-  // 「상품 정보 2개 · 과거 답변 1개」 — the summary a seller decides from, closed.
+  const [lead, ...rest] = evidence;
+  const leadLabel = lead.scopeLabel ?? lead.kind;
+  // 「상품 정보 2개 · 과거 답변 1개」 — the summary the fold is decided from.
   const summary = groups.map((group) => `${group.label} ${group.items.length}개`).join(" · ");
   return (
     /*
-      CLOSED BY DEFAULT (Executive-friendly UX Redesign v1, §7 progressive disclosure).
+      THE FIRST CITATION IS OPEN; THE REST FOLD (2026-08-26).
 
-      This list used to be permanently open under every draft, and each line carried `item.locator` —
-      the retrieval's own address for the passage, a technical string beside a Korean title. A seller
-      deciding whether to send an answer needs to know HOW MANY sources it stands on and of what kind;
-      the addresses matter only to someone who has already decided to go and check, and they can open
-      it. The locator is gone from the screen entirely: it identified a chunk, and no seller acts on a
+      Executive-friendly UX Redesign v1 closed this list entirely, on the reasoning that a seller
+      needs to know HOW MANY sources an answer stands on and can open it to see which. The NAVER live
+      case showed what that costs. The reply answered 「전선이 몇 가닥까지 들어가나요?」 and the one
+      citation read 「AI가 확인한 내용 · 상품 정보 1개」 — closed. Behind it was a source titled
+      「자주 묻는 질문 - 접착과 재부착」, whose text contained that exact question and its answer. Neither
+      the count nor the title could tell the seller whether the draft had any basis, and checking cost
+      a click they had no reason to spend.
+
+      So a grounded draft shows its lead citation in full — kind, title, excerpt — and everything
+      after it folds. Opening all of them would be the other failure: four passages of quoted
+      knowledge under every draft is noise, and the excerpt is the thing worth one card, not four.
+
+      The locator stays off the screen entirely: it identified a chunk, and no seller acts on a
       chunk id.
     */
-    <Disclosure className="mt-4 border-t border-line pt-3" label={`AI가 확인한 내용${summary ? ` · ${summary}` : ""}`}>
-      <div className="mt-2 space-y-2">
-        {groups.map((group, groupIndex) => (
-          <div key={`${group.label}-${groupIndex}`}>
-            <p className="text-sm font-medium text-muted">{group.label}</p>
-            <ul className="mt-0.5 space-y-1">
-              {group.items.map((item, index) => (
-                <li
-                  key={`${item.chunkId ?? item.sourceId ?? "evidence"}-${index}`}
-                  className="break-keep text-sm text-ink"
-                >
-                  {item.title ?? group.label}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+    <div className="mt-4 border-t border-line pt-3">
+      <p className="text-sm font-medium text-muted">AI가 확인한 내용</p>
+      <div className="mt-1.5 rounded-lg bg-canvas px-3 py-2.5">
+        <p className="text-sm text-muted">{leadLabel}</p>
+        <p className="mt-0.5 break-keep font-medium text-ink">{lead.title ?? leadLabel}</p>
+        {lead.snippet ? (
+          <p className="mt-1 break-keep text-sm leading-relaxed text-ink">{lead.snippet}</p>
+        ) : null}
       </div>
-    </Disclosure>
+      {rest.length > 0 ? (
+        <Disclosure className="mt-2" label={`나머지 근거 ${rest.length}개 · ${summary}`}>
+          <div className="mt-2 space-y-2">
+            {rest.map((item, index) => (
+              <div
+                key={`${item.chunkId ?? item.sourceId ?? "evidence"}-${index}`}
+                className="rounded-lg bg-canvas px-3 py-2.5"
+              >
+                <p className="text-sm text-muted">{item.scopeLabel ?? item.kind}</p>
+                <p className="mt-0.5 break-keep font-medium text-ink">
+                  {item.title ?? item.scopeLabel ?? item.kind}
+                </p>
+                {item.snippet ? (
+                  <p className="mt-1 break-keep text-sm leading-relaxed text-ink">{item.snippet}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </Disclosure>
+      ) : null}
+    </div>
   );
 }

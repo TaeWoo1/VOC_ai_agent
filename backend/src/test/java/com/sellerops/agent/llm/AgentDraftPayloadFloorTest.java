@@ -103,6 +103,23 @@ class AgentDraftPayloadFloorTest {
                 .doesNotContain("sk-should-never-appear");
     }
 
+    @ParameterizedTest
+    @EnumSource(AgentDraftGenerator.Vendor.class)
+    @DisplayName("the spec-applicability line states a fact about the question, never an option name")
+    void theSpecScopeLineCarriesNoCatalogue(AgentDraftGenerator.Vendor vendor) {
+        // Added with Answer Applicability v1. The line exists so a retrieved figure is not asserted
+        // as settled — which is a property of the question, so the seller's option table has no
+        // reason to leave and does not.
+        String body = generator(vendor).requestBody(new AgentDraftGenerator.Input(
+                "질문", "본문", List.of(), null,
+                com.sellerops.inquiry.draft.SpecApplicability.Applicability.VARIANT_UNRESOLVED.messageKo()));
+
+        assertThat(body).contains("규격 적용 범위").contains("확정되지 않았습니다");
+        assertThat(body).as("no option name, no variant id, no sku")
+                .doesNotContain("중형 25mm")
+                .doesNotContain("f9c0b3a1-0000-4000-8000-000000000006");
+    }
+
     @Test
     @DisplayName("a null body becomes an empty line, never the string \"null\"")
     void nullDetailsDoNotBecomeTheWordNull() {

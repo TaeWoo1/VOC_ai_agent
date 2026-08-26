@@ -78,11 +78,27 @@ public class AgentDraftService {
     public Optional<AgentDraftResponseParser.ParsedDraft> draft(
             UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
             String orderState) {
+        return draft(orgId, title, details, knowledge, orderState, null);
+    }
+
+    /**
+     * The grounded form, plus the one sentence that says whether a retrieved figure may be closed with.
+     *
+     * <p>{@code specScope} is a product constant from
+     * {@link com.sellerops.inquiry.draft.SpecApplicability} — whether this question's answer can move
+     * with the 규격·옵션 chosen and whether one is determined — and it never names an option. It is
+     * passed for the reason {@code orderState} is: a drafter told only that a passage matched will
+     * state that passage's number as this customer's fact, which is how a product-level FAQ figure
+     * became an answer about a listing that sells several 규격.
+     */
+    public Optional<AgentDraftResponseParser.ParsedDraft> draft(
+            UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
+            String orderState, String specScope) {
         if (!properties.isEnabledFor(orgId)) {
             return Optional.empty();
         }
-        AgentDraftGenerator.Result result =
-                generator().generate(new AgentDraftGenerator.Input(title, details, knowledge, orderState));
+        AgentDraftGenerator.Result result = generator()
+                .generate(new AgentDraftGenerator.Input(title, details, knowledge, orderState, specScope));
         log.info("agent_draft orgId={} drafted={} grounded={} reason={}",
                 orgId, result.draft().isPresent(), knowledge == null ? 0 : knowledge.size(), result.reason());
         return result.draft();

@@ -78,7 +78,7 @@ function generated(over: Record<string, unknown> = {}) {
     knowledgeNote: "판매자가 등록한 상품 지식을 근거로 썼습니다.",
     productId: "p1",
     evidence: [
-      { kind: "PRODUCT_KNOWLEDGE", scopeLabel: "상품 정보", title: "사용법", locator: "product-knowledge/USAGE:데모 운영자", sourceId: "s", chunkId: "c" },
+      { kind: "PRODUCT_KNOWLEDGE", scopeLabel: "상품 정보", title: "사용법", locator: "product-knowledge/USAGE:데모 운영자", sourceId: "s", chunkId: "c", snippet: "몰딩 뒷면 테이프를 벗기고 벽면에 눌러 붙입니다." },
     ],
     quotaMessage: null,
     ...over,
@@ -112,22 +112,48 @@ describe("InquiryResponsePanel — the generated draft", () => {
     expect(await screen.findByText("테이프를 벗기고 벽면에 붙이시면 됩니다.")).toBeInTheDocument();
   });
 
-  it("summarises what the draft stood on, and names the seller's own document once opened", async () => {
+  it("shows the lead citation's kind, title AND excerpt without a click", async () => {
     const user = userEvent.setup();
     render(<InquiryResponsePanel workItemId="w1" />);
 
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
 
-    // Closed, the seller sees HOW MANY sources and of what kind — the thing they decide from.
-    const disclosure = await screen.findByText(/AI가 확인한 내용/);
-    expect(disclosure).toHaveTextContent("상품 정보 1개");
-
-    // Opened, each source is named. The retrieval's own address for the passage
-    // (「product-knowledge/USAGE:데모 운영자」) is gone from the screen entirely: it identifies a
-    // chunk, and no seller acts on a chunk id.
-    await user.click(disclosure);
+    // The excerpt is the point. A closed 「상품 정보 1개」 told the seller a source existed and
+    // nothing about whether it answered the question — which is how a reply about 전선 가닥 수 came
+    // to stand, invisibly, on a document titled 「자주 묻는 질문 - 접착과 재부착」.
+    expect(await screen.findByText("AI가 확인한 내용")).toBeInTheDocument();
+    expect(screen.getByText("상품 정보")).toBeInTheDocument();
     expect(screen.getByText("사용법")).toBeInTheDocument();
+    expect(screen.getByText("몰딩 뒷면 테이프를 벗기고 벽면에 눌러 붙입니다.")).toBeInTheDocument();
+
+    // The retrieval's own address for the passage identifies a chunk, and no seller acts on a chunk
+    // id. It is not on the screen open or closed.
     expect(screen.queryByText(/product-knowledge\/USAGE/)).toBeNull();
+  });
+
+  it("folds everything after the lead citation, so four passages are not four cards", async () => {
+    generateInquiryDraft.mockResolvedValue(generated({
+      evidence: [
+        { kind: "PRODUCT_KNOWLEDGE", scopeLabel: "상품 정보", title: "사용법", locator: "l1", sourceId: "s1", chunkId: "c1", snippet: "테이프를 벗기고 붙입니다." },
+        { kind: "ORG_POLICY", scopeLabel: "운영 정책", title: "교환 및 반품", locator: "l2", sourceId: "s2", chunkId: "c2", snippet: "수령 후 7일 이내 교환이 가능합니다." },
+      ],
+    }));
+    const user = userEvent.setup();
+    render(<InquiryResponsePanel workItemId="w1" />);
+
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+
+    expect(await screen.findByText("테이프를 벗기고 붙입니다.")).toBeInTheDocument();
+    // `<details>` keeps its closed content in the DOM, so the assertion is on the fold's own state
+    // rather than on presence — jsdom renders no `display`, and a presence check would pass either way.
+    const more = screen.getByText(/나머지 근거 1개/);
+    const fold = more.closest("details");
+    expect(fold).not.toBeNull();
+    expect(fold).not.toHaveAttribute("open");
+
+    await user.click(more);
+    expect(fold).toHaveAttribute("open");
+    expect(screen.getByText("수령 후 7일 이내 교환이 가능합니다.")).toBeInTheDocument();
   });
 
   it("states the limitation when the library could not answer — and cites nothing", async () => {

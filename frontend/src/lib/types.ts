@@ -1297,8 +1297,11 @@ export interface OrderContextView {
 /**
  * Mirrors com.sellerops.inquiry.draft.dto.DraftEvidenceView — one citation under a generated draft.
  *
- * The passage text is deliberately absent: the reply already says the thing, and a citation is a
- * pointer to the seller's own knowledge document, not a second copy of it.
+ * This used to say the passage text was deliberately absent, because "the reply already says the
+ * thing". The 2026-08-26 live case disproved it: a reply about 전선 가닥 수 stood on a source titled
+ * 「자주 묻는 질문 - 접착과 재부착」, and the seller had a title about adhesive next to an answer about
+ * wire counts with no way to see that the document contained exactly that Q&A. A title is a pointer;
+ * `snippet` is what makes it a check.
  */
 export interface DraftEvidenceView {
   kind: string;
@@ -1314,6 +1317,13 @@ export interface DraftEvidenceView {
   locator: string | null;
   sourceId: string | null;
   chunkId: string | null;
+  /**
+   * A short excerpt of the passage the drafter was actually shown — never the whole document.
+   *
+   * Null for an `ORDER_FACT` citation (it points at a moment, not a document) and for a source the
+   * seller has since deleted, where the row is still a true record of what the draft stood on.
+   */
+  snippet: string | null;
 }
 
 /** The closed set of operating-rule kinds. Mirrors com.sellerops.knowledge.org.OrgKnowledgeType. */

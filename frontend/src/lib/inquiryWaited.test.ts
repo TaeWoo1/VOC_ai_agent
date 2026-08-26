@@ -12,7 +12,10 @@ const NOW = new Date("2026-08-24T12:00:00Z");
 describe("waitedLabel", () => {
   it("counts hours while it is still today's problem", () => {
     expect(waitedLabel("2026-08-24T09:00:00Z", NOW)).toBe("3시간째");
-    expect(waitedLabel("2026-08-24T11:40:00Z", NOW)).toBe("방금");
+    // 20 minutes is 「20분째」, not 「방금」. It used to be the latter: waitedLabel had no minute
+    // rung, so the same inquiry read 「20분 전」 on its list row and 「방금」 in the pane beside it.
+    expect(waitedLabel("2026-08-24T11:40:00Z", NOW)).toBe("20분째");
+    expect(waitedLabel("2026-08-24T11:59:30Z", NOW)).toBe("방금");
   });
 
   it("counts days, then weeks, then months", () => {

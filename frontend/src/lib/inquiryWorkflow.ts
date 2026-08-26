@@ -1,4 +1,5 @@
 import type { InquiryQueueItem, ProposalView } from "./types";
+import { elapsedSince } from "./elapsed";
 
 // Pure view-model for the seller inquiry workflow. No React, no network — just the
 // display mapping + error classification the /inquiries page relies on, so the
@@ -242,15 +243,23 @@ export function resetForTab(key: InquiryTabKey): TabResetState {
  * never turns internal timing into a seller-visible number.
  */
 export function waitedLabel(receivedAt: string, now: Date = new Date()): string | null {
-  const at = Date.parse(receivedAt);
-  if (Number.isNaN(at)) return null;
-  const hours = Math.floor((now.getTime() - at) / 3_600_000);
-  if (hours < 0) return null;
-  if (hours < 1) return "방금";
-  if (hours < 24) return `${hours}시간째`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}일째`;
-  if (days < 31) return `${Math.floor(days / 7)}주째`;
-  if (days < 365) return `${Math.floor(days / 30)}개월째`;
-  return "1년 넘음";
+  const elapsed = elapsedSince(receivedAt, now);
+  if (!elapsed) return null;
+  switch (elapsed.unit) {
+    // Under a minute is the only rung with no number: 「0분째」 is not a thing a person says.
+    case "just":
+      return "방금";
+    case "minute":
+      return `${elapsed.value}분째`;
+    case "hour":
+      return `${elapsed.value}시간째`;
+    case "day":
+      return `${elapsed.value}일째`;
+    case "week":
+      return `${elapsed.value}주째`;
+    case "month":
+      return `${elapsed.value}개월째`;
+    default:
+      return "1년 넘음";
+  }
 }
