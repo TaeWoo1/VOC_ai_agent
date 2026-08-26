@@ -286,7 +286,7 @@ function KnowledgeEditor({
           {/* Said plainly: SellerOps does not fetch it. Automatic acquisition is an approved action,
               never a side effect of saving a note. */}
           <span className="mt-1 block text-sm text-muted">
-            주소는 출처로만 남습니다. SellerOps가 이 주소를 열어 내용을 가져오지는 않습니다.
+            주소는 출처로만 남습니다. reviewnary가 이 주소를 열어 내용을 가져오지는 않습니다.
           </span>
         </label>
       ) : null}

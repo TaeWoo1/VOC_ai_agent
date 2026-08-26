@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { PageHead } from "../../components/ui/PageHead";
 import { Panel } from "../../components/ui/Panel";
-import { Btn } from "../../components/ui/Btn";
+import { Btn, BtnLink } from "../../components/ui/Btn";
 import { api } from "../../lib/apiClient";
 import { backendMessage } from "../../components/connect/channelShared";
 import type {
@@ -119,7 +119,7 @@ export function AnswerStyle() {
     <>
       <PageHead
         title="AI 답변 스타일"
-        description="AI가 답변 초안을 쓸 때의 말투와 표현을 정합니다. 답변의 내용은 등록된 답변 기준에서만 나옵니다."
+        description="문의 답변의 말투와 표현 방식을 설정합니다. 상품 정보나 정책 등 사실 자체는 바뀌지 않습니다."
       />
 
       {loadError ? (
@@ -291,6 +291,27 @@ export function AnswerStyle() {
                 {saving ? "저장 중…" : "저장"}
               </Btn>
             </div>
+
+            {/*
+              Where the OTHER half lives (Core Daily Loop UX Integration v1 §7).
+
+              This screen decides how a reply is worded; what it may say comes from the 답변 기준, and
+              a settings page that never names its own counterpart reads like a developer switch
+              somebody left behind. Two links, no explanation beyond the sentence that separates them.
+            */}
+            <Panel
+              title="답변의 내용은 어디서 오나요"
+              description="말투는 여기서, 내용은 등록된 답변 기준에서 정해집니다."
+            >
+              <div className="flex flex-wrap gap-2">
+                <BtnLink to="/settings/policies" size="sm" variant="outline">
+                  운영 정책 관리
+                </BtnLink>
+                <BtnLink to="/products" size="sm" variant="outline">
+                  상품별 답변 기준
+                </BtnLink>
+              </div>
+            </Panel>
           </div>
 
           <Panel title="이렇게 보입니다" description="예시 문의로 만든 표시용 화면입니다.">

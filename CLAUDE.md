@@ -205,7 +205,43 @@ primary — 유일한 비가역 컨트롤을 보낼 텍스트 옆에 두지 않�
 올린 진짜 게시글) **열린 케이스가 그것 하나뿐**이라 제외하면 「AI가 먼저 확인한 일」이 사라진다 —
 새 classifier를 만들지 말라는 지시대로 만들지 않았고 **product-owner 결정**으로 올린다. 상품 화면·
 온보딩·합성 데이터 cleanup은 지시대로 무변경. 171 파일 / 2,321 테스트 / 실패 0, 마켓플레이스 호출 0 ·
-DB 변경 0 ⇒ evidence 행 없음).
+DB 변경 0 ⇒ evidence 행 없음) ·
+**`docs/core_daily_loop_ux_v1.md`** (Core Daily Loop UX Integration v1 — 새 기능 **0**. 이미 구현된
+층들(문의 work item · 상품/주문 근거 · Product Knowledge · Knowledge Gap · 세 answer state ·
+Organization Answer Style · Human Approval)을 **판매자 하루 하나의 loop**로 잇고 데모를 막는 gap만
+닫는다. **`style/v3`은 identity가 아니었다** — `v3`은 그 org의 저장 카운터라 서로 다른 회사가 같은
+문자열을 찍고, 바꿨다 되돌린 회사가 같은 프로필을 `v5`로 찍었다 ⇒ `AnswerStyleProfile.digest()`(정규화
+프로필의 SHA-256 12자리)로 **`style/v3@8f1c0a2b4d6e`**; 같은 말투는 같게·다른 말투는 다르게 찍히고
+필드는 라벨·구분자로 나뉘어 텍스트를 옮겨 붙여도 충돌하지 않는다. **프로필 없음 = `style/default`**
+(digest 없음 — 설정한 적 없는 회사와 기본값을 저장한 회사는 다른 사실이다). digest는 **snapshot이
+아니다**: 판매자 문장은 단방향으로만 들어가 고객·판매자 문장의 두 번째 사본이 생기지 않는다. 필요한
+schema는 **한 줄**(V81 `model_version` 120→200) — 측정된 stamp가 115자이고 더 긴 벤더 모델 id에서
+넘치며, **넘치는 provenance의 수리는 자르는 것이 아니다**. **`SELLER_APPROVED_FALLBACK`은 AI 초안이
+아니다** — `author_kind`를 읽는 production 코드는 **없고**(docs only), 술어 `<> 'SELLER'`가 모델이 쓰지
+않은 문장을 「AI 초안 그대로 승인」에 넣고 있었다(채택률을 **올리는 쪽으로** 틀리는 오류) ⇒ `= 'MODEL'`,
+유예는 분자·분모 어디에도 없이 `approved_deferral`로 따로 센다. **제품명은 reviewnary** — 내부
+이름(패키지·env·클래스·DB·connector id)은 **하나도** 바꾸지 않고 화면 문자열 **50곳/31파일**만 옮겼다;
+남긴 **150곳/39파일**(연결·온보딩·Action Window·도우미)은 브랜드가 아니라 **사실** 때문이다 —
+「SellerOps 도우미」는 판매자가 자기 컴퓨터에서 찾아야 하는 프로그램의 이름이고 이 저장소는 설치된
+애플리케이션이 무엇으로 보이는지 확인할 수 없다(다음 패키지가 관측 후 함께 옮긴다). `productName.test.ts`가
+예외 밖 노출 0과 예외의 **개수**를 고정한다. **본체는 세 answer state다** — 백엔드는 오래전부터 셋을
+갖고 있었고 화면은 하나만 그렸다: `GROUNDED`가 실패와 **같은 주황 경고 띠**로 발표됐고,
+`NEEDS_CLARIFICATION`은 **아무 데도 그려지지 않아**(`answerBasisAction`이 null, `answerBasisNote`는 렌더
+site 없음) 판매자가 「규격을 알려주시면」이라는 **되묻는 초안**을 *답이 짧게 나온 것*으로 읽고 보냈다 ⇒
+`AnswerStateCard` 하나가 세 모양을 그리고 **문장은 백엔드의 것**이며 화면은 테두리·순서·컨트롤만 정한다;
+**good은 GROUNDED 하나뿐**(되묻기는 정확한 답변이면서 여전히 눈을 요구한다), 대비 실측 ink 13.98 ·
+muted 6.00 · good 5.97. **reload에서는 상태를 주장하지 않는다** — 저장된 행은 「어떤 지식이 있었나」를
+들 뿐 「고객이 규격을 밝혔나」를 들지 않으므로 되묻는 초안을 GROUNDED로 표시하는 것은 이 화면이 막으려는
+자신 있는 오답이다(남은 한계). knowledge gap loop는 끝이 침묵이었다 ⇒ 「저장했습니다 · 다시 만들었습니다」
+**두 사실만** 말하고 결과는 카드가 말하며, 저장한 문장이 사는 곳으로 가는 최소 경로가 열린다. §11 중복
+제거: 같은 사실을 세 번 말하던 knowledge note는 카드가 있는 동안 렌더하지 않고(그 긴 형태는 **이 화면에
+없는 인용**을 가리켰다), 테마에 없어 CSS가 생성되지 않던 색 토큰 3종 교체, Agent 근거 줄에서 내부
+evidence id와 provenance 문자열 제거. **bounded model proof 2회**(합성 fixture · 마켓플레이스 0 · DB 0):
+사실은 그대로고 인사·길이·말투만 움직였다. **Demo Org 감사는 읽기 전용**이고 숫자는 서로 모순이 아니다
+(KPI 30 = 채널표 합) — 다만 **틀린 seller-facing 숫자 둘을 고치지 않고 보고**한다: KPI가 합성 행 8건을
+세어 22→30(`countByStatus`에 `data_origin` 없음 · 숫자 변경은 product-owner 결정), 그리고 채널에서 이미
+답변된 `PROPOSED` 1건이 작업 큐에 남음(전송 CTA는 꺼져 있고 다음 수집에서 self-heal). 마켓플레이스 호출
+**0** · 마켓플레이스 WRITE **0** · DB 변경 **0**).
 
 **Demo org / channel knowledge:** `docs/demo_org_and_channel_knowledge_v1.md` owns the canonical Demo
 Org's **provenance contract** (`REAL` / `DEMO_SEED` / `VERIFY_FIXTURE`, default reads exclude synthetic),

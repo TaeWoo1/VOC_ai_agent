@@ -26,7 +26,7 @@ export class RootErrorBoundary extends Component<{ children: ReactNode }, { fail
     return (
       <div className="flex min-h-full items-center justify-center bg-surface px-4 py-16" role="alert">
         <div className="w-full max-w-md text-center">
-          <p className="text-2xl font-extrabold tracking-tight text-brand-700">SellerOps</p>
+          <p className="text-2xl font-extrabold tracking-tight text-brand-700">reviewnary</p>
           <h1 className="mt-4 text-xl font-bold text-ink">화면을 표시하지 못했어요</h1>
           <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
             일시적인 문제일 수 있습니다. 새로고침하면 대부분 해결됩니다. 채널 연결과 수집 설정은 그대로 남아 있습니다.

@@ -93,11 +93,11 @@ class AnswerStyleServiceTest {
         assertThat(profile.requiredPhrases()).containsExactly("정성껏 준비하겠습니다");
         assertThat(profile.forbiddenPhrases()).containsExactly("죄송하지만");
         assertThat(profile.hasUnknownFallback()).isTrue();
-        assertThat(profile.identity()).isEqualTo("style/v1");
+        assertThat(profile.identity()).startsWith("style/v1@");
 
         service.save(org, form(AnswerTone.POLITE, AnswerLength.NORMAL, EmojiPolicy.NONE,
                 null, null, null, List.of(), List.of(), null), user);
-        assertThat(service.profileFor(org).identity()).isEqualTo("style/v2");
+        assertThat(service.profileFor(org).identity()).startsWith("style/v2@");
         assertThat(rows.count()).as("one row per org, always").isEqualTo(1);
     }
 

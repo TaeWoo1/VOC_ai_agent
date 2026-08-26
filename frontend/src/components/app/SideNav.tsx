@@ -22,7 +22,7 @@ export function SideNav() {
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface md:flex">
       <div className="px-5 pb-2 pt-6">
-        <p className="text-lg font-bold tracking-tight text-ink">SellerOps</p>
+        <p className="text-lg font-bold tracking-tight text-ink">reviewnary</p>
         <p className="mt-1 truncate text-sm text-muted">{user?.orgName ?? "내 스토어"}</p>
       </div>
 

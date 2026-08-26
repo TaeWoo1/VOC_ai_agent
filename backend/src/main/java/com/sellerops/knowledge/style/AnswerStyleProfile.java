@@ -1,5 +1,8 @@
 package com.sellerops.knowledge.style;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
 
 /**
@@ -63,9 +66,71 @@ public record AnswerStyleProfile(AnswerTone tone, AnswerLength length, EmojiPoli
         return value == null || value.isBlank();
     }
 
-    /** {@code style/v3} — what a draft's provenance records, so wording is reproducible later. */
+    /**
+     * {@code style/v3@8f1c0a2b4d6e} — what a draft's provenance records.
+     *
+     * <p><b>The counter alone was not an identity.</b> {@code version} is this org's own save
+     * counter, so two companies at v3 stamped the same string while wording replies differently, and
+     * an org that changed a setting and changed it back read as v5 against a v3 draft that was
+     * written by the identical profile. A reader asking "which wording produced this" got an answer
+     * that was only meaningful inside one org's history.
+     *
+     * <p>The digest fixes both: it is a function of the PROFILE, so equal wording stamps equal, and
+     * different wording stamps different — across orgs and across time. The counter stays in front
+     * of it because it is what the settings screen and the audit trail count in, and losing the
+     * ordering would trade one missing fact for another.
+     *
+     * <p><b>No profile at all is {@code style/default}</b>, with no digest — an org that never set a
+     * style and an org that saved the defaults are different facts, and only the second one has a
+     * save to be reproduced. The defaults themselves are a shipped constant that needs no fingerprint
+     * to be looked up.
+     */
     public String identity() {
-        return version <= 0 ? "style/default" : "style/v" + version;
+        return version <= 0 ? "style/default" : "style/v" + version + "@" + digest();
+    }
+
+    /**
+     * A deterministic fingerprint of this wording. 12 hex characters of SHA-256.
+     *
+     * <p><b>It is a digest, not a snapshot.</b> The seller's greeting and the company's phrase lists
+     * are one-way — nothing here stores their text a second time, which is the property that keeps a
+     * reproducible audit from becoming a second copy of the customer's and the seller's words. What
+     * it can answer is the question an audit actually asks: were these two drafts written under the
+     * same style, and is that style still the one configured today.
+     *
+     * <p>The canonical form is field-labelled and separator-delimited rather than concatenated, so a
+     * greeting ending where a closing begins cannot collide with the two swapped. Lists keep their
+     * ORDER — the seller chose it, and the model is shown it in that order.
+     */
+    public String digest() {
+        StringBuilder canonical = new StringBuilder();
+        canonical.append("t=").append(tone.name()).append('\n')
+                .append("l=").append(length.name()).append('\n')
+                .append("e=").append(emoji.name()).append('\n')
+                .append("g=").append(norm(greeting)).append('\n')
+                .append("c=").append(norm(closing)).append('\n')
+                .append("a=").append(norm(customerAddress)).append('\n')
+                .append("r=").append(String.join("\u001f", requiredPhrases)).append('\n')
+                .append("f=").append(String.join("\u001f", forbiddenPhrases)).append('\n')
+                // The fallback is part of the identity even though it renders no prompt section: it
+                // is the exact text a SELLER_APPROVED_FALLBACK draft was saved from, and a draft
+                // whose source sentence has since changed must not read as reproducible.
+                .append("u=").append(norm(unknownFallback));
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.toString().getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(12);
+            for (int i = 0; i < 6; i++) {
+                hex.append(String.format("%02x", hash[i]));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private static String norm(String value) {
+        return value == null ? "" : value;
     }
 
     /** The seller's own approved sentence for "we do not know yet", or null. */

@@ -27,10 +27,12 @@ import type {
 } from "../../lib/types";
 import { bindingLabel, canBindProduct, productLabel } from "../../lib/inquiryProductBinding";
 import { InquiryProductBinder } from "./InquiryProductBinder";
+import { answerStateIsGood, answerStateOf, type AnswerStateView } from "../../lib/answerState";
 import { copyText } from "../../lib/clipboard";
 import { Btn } from "../ui/Btn";
 import { Disclosure } from "../ui/Disclosure";
 import { plainText } from "../../lib/plainText";
+import { Link } from "react-router-dom";
 
 /**
  * The inquiry response workflow, in the inbox detail panel. The engine (`inquiryWorkflow`) is reused
@@ -108,6 +110,14 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   /** The one sentence above the draft: what the knowledge library could and could not offer. */
   const [knowledgeNote, setKnowledgeNote] = useState<string | null>(null);
   /**
+   * Whether that sentence is the good-news one.
+   *
+   * Held as a boolean rather than read off the draft row, because the two places it comes from — a
+   * reload and a generate — carry it in different shapes, and a sentence rendered as a caution when
+   * it says the question COULD be answered is the defect this replaces.
+   */
+  const [knowledgeGrounded, setKnowledgeGrounded] = useState(false);
+  /**
    * Set when the MACHINERY is why there is no draft — budget spent, capability off, vendor silent,
    * or a 상세페이지 read that failed. Never a statement about the seller's knowledge, and it wins
    * over the no-basis card when both could apply: not having finished looking is not the same as
@@ -121,9 +131,17 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
    * the library could offer, and this says what the seller should do next. A generate that produces
    * nothing must not look like a generate that failed.
    */
-  const [noBasis, setNoBasis] = useState<
-    { note: string; action: string | null; productId: string | null } | null
-  >(null);
+  const [answerState, setAnswerState] = useState<AnswerStateView | null>(null);
+  /**
+   * Set for one render pass after the seller saves an answer basis from this screen.
+   *
+   * The knowledge round trip used to end in silence: the box closed, a draft was regenerated, and
+   * the seller was left asking whether their sentence had been saved at all — especially when the
+   * regenerated draft landed on the SAME state, which is the ordinary outcome of adding knowledge
+   * that does not happen to cover this question. It says what was saved and what was re-run, and
+   * claims nothing about the result: the card underneath is where the result is.
+   */
+  const [basisSaved, setBasisSaved] = useState(false);
   /** Open only while the seller is choosing a product. Never open by default — it is not a step. */
   const [binding, setBinding] = useState(false);
 
@@ -139,7 +157,13 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       setReplyComments(next.draft?.comments ?? "");
       setEvidence(next.draftEvidence ?? []);
       setKnowledgeNote(next.draft?.knowledgeNote ?? null);
-      setNoBasis(null);
+      setKnowledgeGrounded(next.draft?.knowledgeState === "GROUNDED");
+      // A reload cannot re-derive which of the three states produced a stored draft: the row keeps
+      // WHICH knowledge was available (`knowledgeState`), not whether the customer had settled their
+      // 규격. Rather than guess GROUNDED for a draft that was a clarification question, the card is
+      // simply not claimed on a reload — the stored `knowledgeNote` still says what was used.
+      setAnswerState(null);
+      setBasisSaved(false);
       setUnavailable(null);
     } catch (e) {
       setDetail(null);
@@ -209,6 +233,10 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       // knowledge passage that may no longer support them.
       setEvidence([]);
       setKnowledgeNote(null);
+      // The sentences are the seller's now. A state card that said "답변에 필요한 정보를 확인했습니다"
+      // over text the model never saw would attribute their words to our evidence.
+      setAnswerState(null);
+      setBasisSaved(false);
       // A saved draft is a NEW version with a new fingerprint, so any confirm block that was open is
       // now about content that no longer exists. Close it rather than let a stale approval be pressed.
       setConfirming(false);
@@ -289,6 +317,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
     setBusy(true);
     setActionError(null);
     setUnavailable(null);
+    setBasisSaved(false);
     try {
       let phase = detail.phase;
       if (canGenerateProposal(phase)) {
@@ -301,28 +330,22 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       const generated = await api.generateInquiryDraft(workItemId);
       setEvidence(generated.evidence);
       setKnowledgeNote(generated.knowledgeNote);
+      setKnowledgeGrounded(generated.knowledgeState === "GROUNDED");
       setUnavailable(generated.unavailableMessage);
-      // Which basis is missing, if any — computed once and applied whether or not something was
-      // written. A draft can now exist WITH no answer basis: the company's own pre-approved sentence
-      // for 「확인 후 안내드리겠습니다」 (AI 답변 스타일). That is a deferral, not an answer, so the
-      // seller must still see what is missing and still be able to add it.
-      const missingBasis =
-        generated.unavailableMessage || generated.answerBasis !== "NO_ANSWER_BASIS"
-          ? null
-          : {
-              note: generated.answerBasisNote,
-              action: generated.answerBasisAction,
-              productId: generated.productId,
-            };
+      // Which of the three states this generate landed in — computed once and applied whether or not
+      // something was written. A draft can exist WITH no answer basis: the company's own pre-approved
+      // sentence for 「확인 후 안내드리겠습니다」 (AI 답변 스타일). That is a deferral, not an answer,
+      // so the seller must still see what is missing and still be able to add it.
+      const state = answerStateOf(generated);
       if (!generated.draft) {
         // Nothing was composed, on purpose. Leave whatever the seller had typed exactly as it is —
         // clearing their box because the AI declined would be the worst of both behaviours — and
         // say which basis is missing so the sentence is actionable rather than an apology.
-        setNoBasis(missingBasis);
+        setAnswerState(state);
         setEditing(true);
         return;
       }
-      setNoBasis(missingBasis);
+      setAnswerState(state);
       setUnavailable(null);
       const written = generated.draft;
       setDetail((current) => (current ? { ...current, draft: written, phase } : current));
@@ -339,6 +362,18 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * The seller wrote the missing answer basis, here, and the screen re-asks with it.
+   *
+   * Saving is not answering, so this says only what it did. Whether the new sentence covers THIS
+   * question is the regenerated state card's answer, and it is perfectly ordinary for it to still be
+   * 「답변 기준이 필요합니다」 — knowledge that does not apply is not a failure to save.
+   */
+  async function onBasisSaved() {
+    await onGenerateDraft();
+    setBasisSaved(true);
   }
 
   /**
@@ -438,7 +473,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
           DECLINED to write one is a third, and folding it into the first would put the seller back
           in front of the same button with no answer to what they just pressed.
         */}
-        {!draft && !noBasis && !unavailable ? (
+        {!draft && !answerState && !unavailable ? (
           <>
             <p className="mt-1.5 break-keep text-sm leading-relaxed text-muted">
               문의 내용과 등록된 상품 지식을 근거로 초안을 씁니다. 보내는 것은 확인 후 따로 누릅니다.
@@ -457,20 +492,41 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
         ) : (
           <>
             {/*
-              The limitation, before the text it qualifies — read first, not discovered after.
+              2 — WHAT THE AI DECIDED, before the text it decided it about.
 
-              It is a GAP, not a footnote (Executive-friendly UX Redesign v1). This sentence is the
-              product's best property — it says what SellerOps does not know — and it was rendered in
-              the same small grey as every other aside on the screen, so it read as boilerplate. What
-              it actually is, is the one thing the seller can go and fix.
+              The three states are the point of this screen (Core Daily Loop UX Integration v1 §5).
+              Until 2026-08-27 only one of them had a card: GROUNDED was rendered as the same orange
+              caution strip a failure got, and NEEDS_CLARIFICATION — where the draft is a question
+              back to the customer — appeared nowhere, so a seller read a polite request for the
+              규격 as an answer that had come out short.
             */}
-            {knowledgeNote ? (
-              <p className="mt-2 break-keep rounded-lg border-l-4 border-warn/50 bg-warn/5 px-3 py-2 text-base leading-relaxed text-ink">
+            <AnswerStateCard
+              state={answerState}
+              justSaved={basisSaved}
+              onSavedBasis={onBasisSaved}
+            />
+
+            {/*
+              What the library could and could not offer — and ONLY when the card above is absent.
+
+              Three reasons it is not repeated under the card (§11). On GROUNDED and
+              NEEDS_CLARIFICATION it says the same thing the card just said. On NO_ANSWER_BASIS its
+              longer form — 「아래 과거 답변은 참고용이며」 — points at citations that are not on this
+              screen: a state with no answer basis records no evidence rows, so there is no 아래 to
+              look at. What survives is the reload case, where nothing computed a state this session
+              and the stored sentence is the only thing that can speak.
+            */}
+            {knowledgeNote && !answerState ? (
+              <p
+                className={`mt-2 break-keep rounded-lg border-l-4 px-3 py-2 text-base leading-relaxed text-ink ${
+                  knowledgeGrounded ? "border-line bg-canvas" : "border-warn/50 bg-warn/5"
+                }`}
+              >
                 {knowledgeNote}
               </p>
             ) : null}
             {/*
-              THE MACHINERY DID NOT RUN — a different card from the one below, on purpose.
+              THE MACHINERY DID NOT RUN — a different card from the one above, on purpose.
 
               「답변 기준이 필요합니다」 sends the seller off to write product knowledge. A vendor
               timeout on a fully grounded question sent them there too, until 2026-08-27, and the
@@ -485,47 +541,6 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                 <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
                   아래에 직접 작성하실 수 있습니다.
                 </p>
-              </div>
-            ) : null}
-
-            {/*
-              NO BASIS — the state where SellerOps writes nothing (product-owner, 2026-08-26).
-
-              It gets a headline, not a grey aside, because it is the answer to what the seller just
-              pressed. The old behaviour put 「확인한 뒤 정확한 안내를 드리겠습니다」 in the box, which
-              read as a finished draft and was a promise nobody had authorised. The box below stays
-              open and empty and the seller writes the reply; the second line says what would make
-              the next one grounded.
-            */}
-            {noBasis ? (
-              <div className="mt-3 rounded-xl border border-warn/40 bg-warn/5 p-4">
-                <p className="break-keep text-lg font-semibold leading-relaxed text-ink">
-                  {noBasis.note}
-                </p>
-                {noBasis.action ? (
-                  <p className="mt-1.5 break-keep text-base leading-relaxed text-ink">
-                    {noBasis.action}
-                  </p>
-                ) : null}
-                <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
-                  근거가 없는 답변은 만들지 않습니다. 아래에 직접 작성하실 수 있습니다.
-                </p>
-                {/*
-                  THE WAY OUT, on the screen that named the gap.
-
-                  Saying what is missing and offering nothing to do about it is where this state
-                  stopped until 2026-08-27: the seller read 「답변 기준이 필요합니다」, and the next
-                  identical question read it again. It appears only with a product to attach the
-                  sentence to — with none, the line above already says that binding a product is the
-                  first thing to fix, and a knowledge box with nowhere to save would be worse than
-                  no box.
-                */}
-                {noBasis.productId ? (
-                  <AnswerBasisQuickAdd
-                    productId={noBasis.productId}
-                    onSaved={onGenerateDraft}
-                  />
-                ) : null}
               </div>
             ) : null}
 
@@ -669,9 +684,16 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                         <Btn size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
                           수정
                         </Btn>
-                        <Btn size="sm" variant="ghost" onClick={onGenerateDraft} disabled={busy}>
-                          다시 작성
-                        </Btn>
+                        {/* 다시 작성 is gated on the SAME condition as the first generate. It was not,
+                            so an inquiry already answered on the channel — and any item past PROPOSED,
+                            which the composer refuses — still offered the button, and pressing it
+                            produced an error where the seller had been promised a draft. 수정 stays:
+                            their own text is theirs to change whatever the channel did. */}
+                        {canDraft ? (
+                          <Btn size="sm" variant="ghost" onClick={onGenerateDraft} disabled={busy}>
+                            다시 작성
+                          </Btn>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -772,6 +794,90 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
 }
 
 /**
+ * <b>What the AI decided about this question</b> — one card, three shapes.
+ *
+ * <p>Position 2 of the five the seller reads (Core Daily Loop UX Integration v1 §4): the customer's
+ * question, then this, then the evidence and the draft, then the one thing to press. It is rendered
+ * ONLY for a generate that happened in this session — a reload cannot tell a clarification draft
+ * from a grounded one, and guessing would be the kind of confident wrong label this screen exists to
+ * avoid.
+ *
+ * <p><b>GROUNDED is the only good-news shape.</b> NEEDS_CLARIFICATION is a real and correct reply,
+ * and it still wants the seller's eye before it goes out: the customer is about to be asked a
+ * question rather than answered, and a seller who skims past that sends a question they could have
+ * answered themselves. NO_ANSWER_BASIS keeps the way out that was added to it — the box that writes
+ * the missing sentence without leaving this screen.
+ *
+ * <p>The sentences are the backend's, in every shape. This component chooses the border, the order,
+ * and which controls belong under which state.
+ */
+function AnswerStateCard({
+  state,
+  justSaved,
+  onSavedBasis,
+}: {
+  state: AnswerStateView | null;
+  justSaved: boolean;
+  onSavedBasis: () => void | Promise<void>;
+}) {
+  if (!state) return null;
+  const good = answerStateIsGood(state.basis);
+  const noBasis = state.basis === "NO_ANSWER_BASIS";
+  return (
+    <div
+      data-testid="answer-state"
+      data-basis={state.basis}
+      className={`mt-3 rounded-xl border p-4 ${
+        good ? "border-good/40 bg-good/5" : "border-warn/40 bg-warn/5"
+      }`}
+    >
+      {/* Said once, at the top, and only on the pass right after a save. It reports the two things
+          that happened and neither more nor less — the state below is the result. */}
+      {justSaved ? (
+        <p className="mb-2 break-keep text-sm font-medium leading-relaxed text-good">
+          답변 기준을 저장했습니다. 저장한 내용으로 답변을 다시 만들었습니다.
+        </p>
+      ) : null}
+      <p className="break-keep text-lg font-semibold leading-relaxed text-ink">{state.note}</p>
+      {state.action ? (
+        <p className="mt-1.5 break-keep text-base leading-relaxed text-ink">{state.action}</p>
+      ) : null}
+      {noBasis ? (
+        <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
+          근거가 없는 답변은 만들지 않습니다. 아래에 직접 작성하실 수 있습니다.
+        </p>
+      ) : null}
+      {/*
+        THE WAY OUT, on the screen that named the gap.
+
+        Saying what is missing and offering nothing to do about it is where this state stopped until
+        2026-08-27: the seller read 「답변 기준이 필요합니다」, and the next identical question read it
+        again. It appears only with a product to attach the sentence to — with none, the line above
+        already says that binding a product is the first thing to fix, and a knowledge box with
+        nowhere to save would be worse than no box.
+      */}
+      {noBasis && state.productId ? (
+        <AnswerBasisQuickAdd productId={state.productId} onSaved={onSavedBasis} />
+      ) : null}
+      {/*
+        Where the sentence they just wrote now lives (§12). Offered after a save rather than always:
+        it is the answer to "그래서 어디에 저장된 거지", and on a grounded draft nobody asked.
+      */}
+      {justSaved && state.productId ? (
+        <p className="mt-3">
+          <Link
+            className="rounded text-sm font-medium text-brand-700 underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            to={`/products/${state.productId}`}
+          >
+            이 상품에 등록된 답변 기준 보기
+          </Link>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Channel · 상품 · 상태 · 경과 — one line, in the order a seller triages by.
  *
  * The response-TYPE suggestion sits here rather than in a section of its own: it is a hint about how
@@ -792,21 +898,21 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
 function OperationalContext({ context }: { context: OrderContextView | null }) {
   if (!context || !context.present) return null;
   return (
-    <div className="mt-4 rounded-lg border border-line bg-surface-2 px-3.5 py-3">
-      <p className="text-sm font-semibold text-ink-2">운영 정보</p>
+    <div className="mt-4 rounded-lg border border-line bg-canvas px-3.5 py-3">
+      <p className="text-sm font-semibold text-ink">운영 정보</p>
       {context.summaryKo ? (
         <p className="mt-1.5 break-keep text-sm leading-relaxed text-ink">{context.summaryKo}</p>
       ) : null}
       <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-        <dt className="text-ink-3">결제</dt>
-        <dd className="text-ink-2">{context.paymentKo}</dd>
-        <dt className="text-ink-3">배송</dt>
-        <dd className="text-ink-2">{context.fulfillmentKo}</dd>
-        <dt className="text-ink-3">취소</dt>
-        <dd className="text-ink-2">{context.cancellationKo}</dd>
+        <dt className="text-muted">결제</dt>
+        <dd className="text-ink">{context.paymentKo}</dd>
+        <dt className="text-muted">배송</dt>
+        <dd className="text-ink">{context.fulfillmentKo}</dd>
+        <dt className="text-muted">취소</dt>
+        <dd className="text-ink">{context.cancellationKo}</dd>
       </dl>
       {context.observedKo ? (
-        <p className="mt-2 text-sm text-ink-3">{context.observedKo}</p>
+        <p className="mt-2 text-sm text-muted">{context.observedKo}</p>
       ) : null}
     </div>
   );

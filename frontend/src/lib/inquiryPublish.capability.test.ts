@@ -19,7 +19,7 @@ function audited(over: Partial<InquiryReplyCapabilityView>): InquiryReplyCapabil
     channelCode: "NAVER",
     sourceSubtype: null,
     transport: "PLATFORM_SUPPORTED_NOT_IMPLEMENTED",
-    reasonKo: "네이버는 상품 문의 답변 등록 API를 제공하지만, SellerOps가 아직 연결하지 않았습니다.",
+    reasonKo: "네이버는 상품 문의 답변 등록 API를 제공하지만, reviewnary가 아직 연결하지 않았습니다.",
     evidence: "공식: PUT /v1/contents/qnas/{questionId}",
     ...over,
   };
@@ -43,7 +43,7 @@ describe("publishUnavailableReason", () => {
       detail({ replyCapability: audited({ sourceSubtype: "NAVER_PRODUCT_QNA" }) }),
       capability(),
     );
-    expect(reason).toContain("SellerOps가 아직 연결하지 않았습니다");
+    expect(reason).toContain("reviewnary가 아직 연결하지 않았습니다");
     // The transport name is an internal vocabulary; a seller reads what it means for them.
     expect(reason).not.toContain("PLATFORM_SUPPORTED_NOT_IMPLEMENTED");
   });

@@ -207,7 +207,7 @@ export function MyReplyWork({
               {/* Two facts, always paired: the operator reported it, and SellerOps did not verify it.
                   Never "완료" — a public reply has no read-back oracle. */}
               <p className="mb-3 mt-1 text-sm text-muted">
-                답변했다고 기록한 리뷰예요. SellerOps는 채널에 실제로 등록됐는지 확인하지 않습니다
+                답변했다고 기록한 리뷰예요. reviewnary는 채널에 실제로 등록됐는지 확인하지 않습니다
                 (확인 안 함).
               </p>
               <ul className="divide-y divide-line">

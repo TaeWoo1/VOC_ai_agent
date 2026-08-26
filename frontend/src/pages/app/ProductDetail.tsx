@@ -168,7 +168,7 @@ export function ProductDetail() {
           ))}
         </ul>
         <p className="break-keep text-sm text-muted">
-          "갖고 있지 않음"은 SellerOps가 그 정보를 보유하고 있지 않다는 뜻이며, 상품에 그런 정보가
+          "갖고 있지 않음"은 reviewnary가 그 정보를 보유하고 있지 않다는 뜻이며, 상품에 그런 정보가
           없다는 뜻이 아닙니다.
         </p>
       </section>

@@ -61,7 +61,7 @@ export function attentionUncertaintyCopy(
       return {
         headline: "이 채널의 리뷰 확인 상태는 아직 지원하지 않아요.",
         detail:
-          "이 채널의 리뷰는 수집되더라도 아직 '확인할 일'로 분석하지 않습니다. 비어 있는 것은 확인이 끝났다는 뜻이 아니라, SellerOps가 아직 판단하지 않는다는 뜻입니다.",
+          "이 채널의 리뷰는 수집되더라도 아직 '확인할 일'로 분석하지 않습니다. 비어 있는 것은 확인이 끝났다는 뜻이 아니라, reviewnary가 아직 판단하지 않는다는 뜻입니다.",
       };
     default:
       return null; // COVERED — an empty list here honestly means nothing needs a look.

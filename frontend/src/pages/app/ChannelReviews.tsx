@@ -334,7 +334,7 @@ export function ChannelReviews({
               {capability === null ? null : capability.replySupported ? (
                 <span>답변은 여기서 준비하고, 올리는 일은 판매자센터에서 직접 합니다</span>
               ) : (
-                <span>이 채널에서는 SellerOps가 답변을 작성하지 않습니다</span>
+                <span>이 채널에서는 reviewnary가 답변을 작성하지 않습니다</span>
               )}
             </p>
           ) : null}
@@ -792,7 +792,7 @@ function ReviewDetail({
       </div>
       ) : (
         <p className="border-t border-line pt-4 text-sm leading-relaxed text-muted">
-          이 채널의 {josa(word, "은", "는")} SellerOps에서 원문 화면으로 바로 이동할 수 없습니다. 판매자센터에서 직접 확인해 주세요.
+          이 채널의 {josa(word, "은", "는")} reviewnary에서 원문 화면으로 바로 이동할 수 없습니다. 판매자센터에서 직접 확인해 주세요.
         </p>
       )}
     </div>

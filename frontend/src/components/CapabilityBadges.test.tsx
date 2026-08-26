@@ -103,7 +103,7 @@ describe("수집 가능 데이터 — the acquisition axis", () => {
     expect(screen.queryByText("리뷰")).toBeNull();
   });
 
-  it("never prints 미지원 for a data type SellerOps actually collects", async () => {
+  it("never prints 미지원 for a data type reviewnary actually collects", async () => {
     getChannelCapabilityOverview.mockResolvedValue(COUPANG);
     renderBadges();
     await screen.findByText("수집 경로 확인됨 · Action Window");

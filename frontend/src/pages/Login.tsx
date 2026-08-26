@@ -22,7 +22,7 @@ export const SOCIAL_NOTICE: Record<string, { title: string; body: string }> = {
   },
   email_missing: {
     title: "이메일 정보를 받지 못했어요",
-    body: "소셜 계정에서 이메일 제공에 동의해야 SellerOps 계정을 만들 수 있습니다. 동의 후 다시 시도하거나 이메일로 가입해 주세요.",
+    body: "소셜 계정에서 이메일 제공에 동의해야 reviewnary 계정을 만들 수 있습니다. 동의 후 다시 시도하거나 이메일로 가입해 주세요.",
   },
   failed: {
     title: "소셜 로그인이 완료되지 않았어요",

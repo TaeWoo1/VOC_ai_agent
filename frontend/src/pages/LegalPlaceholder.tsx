@@ -12,7 +12,7 @@ export function LegalPlaceholder({ kind }: { kind: "terms" | "privacy" }) {
   const other = kind === "terms" ? { to: PRIVACY_PATH, label: "개인정보처리방침" } : { to: TERMS_PATH, label: "이용약관" };
   return (
     <div className="mx-auto max-w-2xl px-5 py-16 md:px-8">
-      <p className="text-sm font-semibold uppercase tracking-wide text-brand-700">SellerOps</p>
+      <p className="text-sm font-semibold uppercase tracking-wide text-brand-700">reviewnary</p>
       <h1 className="mt-2 text-3xl font-bold text-ink">{title}</h1>
       <div className="mt-6 rounded-xl border border-line bg-canvas px-5 py-4" role="status">
         <p className="text-base font-semibold text-ink">이 문서는 아직 확정되지 않았습니다</p>

@@ -214,7 +214,7 @@ describe("고객운영 메모리 — lifecycle actions", () => {
     expect(screen.queryByRole("button", { name: /해결/ })).toBeNull();
   });
 
-  it("offers no action where the next move belongs to SellerOps", async () => {
+  it("offers no action where the next move belongs to reviewnary", async () => {
     getReviewIssueDetailStrict.mockResolvedValue({ ...DETAIL, issue: IMPROVED });
     renderMemory("/memory/issue-2");
     const detail = await screen.findByLabelText("선택한 이슈");

@@ -130,7 +130,7 @@ describe("what the operator can do next", () => {
     expect(actions.some((a) => a.includes("해결"))).toBe(false);
   });
 
-  it("explains what SellerOps is doing when there is nothing for the operator to do", () => {
+  it("explains what reviewnary is doing when there is nothing for the operator to do", () => {
     expect(waitingNoteKo("OBSERVING")).toContain("근거가 모이지 않았");
     expect(waitingNoteKo("VERIFYING")).toContain("지켜보고 있어요");
     expect(waitingNoteKo("NEEDS_REVIEW")).toBeNull();

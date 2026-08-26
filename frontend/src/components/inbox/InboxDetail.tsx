@@ -110,7 +110,7 @@ export function InboxDetail({
 
       {!workItemId && item.type === "INQUIRY" ? (
         <p className="break-keep text-sm leading-relaxed text-muted">
-          이 문의에는 SellerOps가 답변 방향을 제안할 수 없습니다. 답변은 해당 채널의 판매자센터에서
+          이 문의에는 reviewnary가 답변 방향을 제안할 수 없습니다. 답변은 해당 채널의 판매자센터에서
           직접 작성합니다.
         </p>
       ) : null}

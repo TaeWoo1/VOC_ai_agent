@@ -625,7 +625,7 @@ export function VocItemReplyPrep({
           <p className="text-sm font-semibold text-ink">네이버에서 직접 답변하기</p>
           <p className="text-sm text-muted">
             복사한 답변을 네이버 판매자센터 답변란에 붙여넣고 <strong className="font-semibold">직접</strong>{" "}
-            답변해 주세요. SellerOps가 대신 하지 않으며, 답변 여부도 확인하지 않습니다.
+            답변해 주세요. reviewnary가 대신 하지 않으며, 답변 여부도 확인하지 않습니다.
           </p>
           {/* The overclaim this slice removes. Without a runtime nothing opens the seller center,
               nothing finds the row, nothing watches the post — so the panel must not imply it does.
@@ -700,7 +700,7 @@ export function VocItemReplyPrep({
               ? "채널에 직접 답변한 것으로 기록했어요."
               : "답변하지 않은 것으로 기록했어요."}
           </p>
-          <p className="text-sm text-muted">SellerOps는 답변 여부를 확인하지 않습니다(확인 안 함).</p>
+          <p className="text-sm text-muted">reviewnary는 답변 여부를 확인하지 않습니다(확인 안 함).</p>
         </div>
       ) : null}
 

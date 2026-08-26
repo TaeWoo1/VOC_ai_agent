@@ -167,7 +167,7 @@ describe("landing content — the file-import route keeps its confirmed name", (
 });
 
 describe("landing content — sending stays with the seller", () => {
-  it("states that SellerOps does not send on the seller's behalf", () => {
+  it("states that reviewnary does not send on the seller's behalf", () => {
     expect(ALL_COPY).toContain("보내지 않습니다");
     expect(content.GUIDE.notItems).toContain("판매자를 대신해 고객에게 답변을 보내는 도구");
   });

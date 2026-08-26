@@ -694,7 +694,7 @@ describe("VocItemReplyPrep — guided submission (v1.6)", () => {
       expect(screen.getByText("채널에 직접 답변한 것으로 기록했어요.")).toBeInTheDocument(),
     );
     expect(
-      screen.getByText("SellerOps는 답변 여부를 확인하지 않습니다(확인 안 함)."),
+      screen.getByText("reviewnary는 답변 여부를 확인하지 않습니다(확인 안 함)."),
     ).toBeInTheDocument();
   });
 

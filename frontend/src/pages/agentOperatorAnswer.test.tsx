@@ -110,9 +110,13 @@ describe("운영 판단 — the Operator answer", () => {
     await ask(run(answer()));
 
     expect(screen.getByText("답변이 필요한 문의가 3208건 있습니다.")).toBeInTheDocument();
-    // The evidence line is what makes the number checkable rather than merely printed.
-    expect(screen.getByText(/근거 e1 · 미답변 문의 3208건/)).toBeInTheDocument();
-    expect(screen.getByText(/inbox\/SERVER:unansweredInquiries/)).toBeInTheDocument();
+    // The evidence line is what makes the number checkable rather than merely printed. What it may
+    // NOT contain is the machine's own vocabulary (Core Daily Loop UX Integration v1 §4): the
+    // internal evidence id and the provenance string 「inbox/SERVER:unansweredInquiries」 named a call,
+    // not a thing the seller can go and look at.
+    expect(screen.getByText(/미답변 문의 3208건/)).toBeInTheDocument();
+    expect(screen.queryByText(/inbox\/SERVER:unansweredInquiries/)).toBeNull();
+    expect(screen.queryByText(/근거 e1/)).toBeNull();
   });
 
   it("labels a NEEDS_REVIEW finding as something to check, and says why", async () => {
@@ -181,7 +185,7 @@ describe("운영 판단 — the Operator answer", () => {
     })));
 
     expect(screen.getByText("아직 갖고 있지 않은 상품 정보가 있습니다.")).toBeInTheDocument();
-    expect(screen.getByText(/규격·스펙: SellerOps가 이 정보를 갖고 있지 않습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/규격·스펙: reviewnary가 이 정보를 갖고 있지 않습니다/)).toBeInTheDocument();
     expect(screen.getByText(/상품에 그 값이 없다는 뜻은 아닙니다/)).toBeInTheDocument();
   });
 

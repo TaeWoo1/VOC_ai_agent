@@ -180,7 +180,7 @@ export function IssueDetailPanel({
               <li key={`${event.at}-${event.toState}`} className="text-sm text-muted">
                 <span className="font-medium text-ink">{event.toStateLabelKo}</span>
                 {" · "}
-                {event.actor === "OPERATOR" ? "운영자" : "SellerOps"}
+                {event.actor === "OPERATOR" ? "운영자" : "reviewnary"}
                 {" · "}
                 {event.at.slice(0, 10)}
                 {event.note ? <span className="block break-keep">{event.note}</span> : null}

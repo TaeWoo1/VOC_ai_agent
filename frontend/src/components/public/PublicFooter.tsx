@@ -13,7 +13,7 @@ export function PublicFooter() {
     <footer className="border-t border-line bg-surface">
       <div className="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-10 md:flex-row md:items-center md:justify-between md:px-8">
         <div>
-          <p className="text-base font-bold text-ink">SellerOps</p>
+          <p className="text-base font-bold text-ink">reviewnary</p>
           <p className="mt-1 text-sm text-muted">
             온라인 판매자와 중소기업을 위한 AI 고객운영 도구
           </p>

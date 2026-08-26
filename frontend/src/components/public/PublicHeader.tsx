@@ -21,7 +21,7 @@ export function PublicHeader() {
           to={PRODUCT_PATH}
           className="rounded-lg text-lg font-bold tracking-tight text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
         >
-          SellerOps
+          reviewnary
         </Link>
 
         <nav aria-label="공개 페이지" className="flex items-center gap-2 sm:gap-3">

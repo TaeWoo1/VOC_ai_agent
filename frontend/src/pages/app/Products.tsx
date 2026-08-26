@@ -45,7 +45,7 @@ export function Products() {
     <div className="space-y-6">
       <PageHead
         title="상품"
-        description="판매 중인 상품과 그 상품에 대해 SellerOps가 아는 것을 봅니다."
+        description="판매 중인 상품과 그 상품에 대해 reviewnary가 아는 것을 봅니다."
         action={<AgentLaunch context={{ surface: "products" }} />}
       />
 

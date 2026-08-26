@@ -71,7 +71,7 @@ export function publishUnavailableReason(
     return "답변 등록이 가능한지 확인하지 못했습니다. 답변은 판매자센터에서 직접 등록해 주세요.";
   }
   if (!capability.executionEnabled) {
-    return "이 환경에서는 SellerOps가 답변을 대신 등록하지 않습니다. [초안 복사]로 옮겨 판매자센터에 등록해 주세요.";
+    return "이 환경에서는 reviewnary가 답변을 대신 등록하지 않습니다. [초안 복사]로 옮겨 판매자센터에 등록해 주세요.";
   }
   // The audited answer for THIS channel and THIS source resource, when the server sent one. It says
   // whose limitation this is, and that is the part a seller acts on: told "네이버는 지원하지 않습니다"

@@ -25,7 +25,7 @@ export function AuthCard({
             to={PRODUCT_PATH}
             className="inline-block rounded text-3xl font-extrabold tracking-tight text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
           >
-            SellerOps
+            reviewnary
           </Link>
           <h1 className="mt-4 text-2xl font-bold text-ink">{title}</h1>
           {subtitle ? <p className="mt-2 text-base text-muted">{subtitle}</p> : null}

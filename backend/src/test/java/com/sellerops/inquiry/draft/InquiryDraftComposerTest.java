@@ -360,7 +360,13 @@ class InquiryDraftComposerTest {
 
         assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.NEEDS_CLARIFICATION.name());
         assertThat(view.draft()).as("asking for the missing fact IS the reply").isNotNull();
-        assertThat(view.answerBasisAction()).isNull();
+        // It now names what is missing (Core Daily Loop UX Integration v1 §5-B). It used to be null,
+        // and the screen therefore rendered nothing at all for this state — a seller read a polite
+        // request for the 규격 as an answer that had come out short. What the line may contain is
+        // still only the missing fact: no policy, no figure, no promise.
+        assertThat(view.answerBasisAction())
+                .isEqualTo("고객이 어떤 규격·옵션인지 밝히지 않았습니다. 아래 초안은 그 내용을 되묻습니다.");
+        assertThat(view.answerBasisNote()).isEqualTo("정확한 답변을 위해 고객에게 확인할 내용이 있습니다.");
     }
 
     @Test

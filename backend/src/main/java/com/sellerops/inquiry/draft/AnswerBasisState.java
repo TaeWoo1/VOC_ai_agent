@@ -63,15 +63,14 @@ public enum AnswerBasisState {
     /** The sentence shown above the draft area. States what is missing; promises nothing. */
     public String messageKo() {
         return switch (this) {
-            case GROUNDED -> "판매자가 등록한 근거를 사용해 썼습니다.";
-            case NEEDS_CLARIFICATION -> "근거는 있으나 이 고객의 규격·옵션이 확정되지 않아, "
-                    + "확인이 필요한 내용을 되묻는 초안입니다.";
+            case GROUNDED -> "답변에 필요한 정보를 확인했습니다.";
+            case NEEDS_CLARIFICATION -> "정확한 답변을 위해 고객에게 확인할 내용이 있습니다.";
             case NO_ANSWER_BASIS -> "답변 기준이 필요합니다.";
         };
     }
 
     /**
-     * What the seller can do about {@link #NO_ANSWER_BASIS}, in one line — or null for the others.
+     * What is missing, in one line, for the two states where something is — or null for GROUNDED.
      *
      * <p>Deliberately not a fallback sentence for the customer. Until Organization Answer Style v1
      * gives this seller an approved template of their own, SellerOps does not compose a reply it has
@@ -96,6 +95,13 @@ public enum AnswerBasisState {
      */
     public String actionKo(DraftKnowledgeState knowledge, String topicWord,
                            SpecApplicability.Applicability applicability) {
+        if (this == NEEDS_CLARIFICATION) {
+            // What is missing, and nothing else. The customer has not said which 규격 they mean, so
+            // the reply asks — and this line exists so the seller reads that BEFORE the draft and does
+            // not mistake a question for an incomplete answer. It states no policy and no figure,
+            // which is the same rule the draft itself is under in this state.
+            return "고객이 어떤 규격·옵션인지 밝히지 않았습니다. 아래 초안은 그 내용을 되묻습니다.";
+        }
         if (this != NO_ANSWER_BASIS || knowledge == null) {
             return null;
         }

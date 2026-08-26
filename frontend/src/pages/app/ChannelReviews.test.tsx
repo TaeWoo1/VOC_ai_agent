@@ -213,7 +213,7 @@ describe("reply work on the 리뷰 screen (A6)", () => {
 
   it("Coupang: no decision, no preparation, no 내 답변 작업 — the channel has no reply flow", async () => {
     renderPage("/reviews/acc-1?review=r1");
-    await screen.findByText(/SellerOps가 답변을 작성하지 않습니다/);
+    await screen.findByText(/reviewnary가 답변을 작성하지 않습니다/);
     await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요. 다음에도 구매할게요.");
     expect(screen.queryByRole("region", { name: "답변" })).toBeNull();
     expect(screen.queryByRole("button", { name: "대응 필요" })).toBeNull();
@@ -324,7 +324,7 @@ describe("the channel review record", () => {
 });
 
 describe("a review the buyer rated without writing", () => {
-  it("says what it is, rather than implying SellerOps lost the text", async () => {
+  it("says what it is, rather than implying reviewnary lost the text", async () => {
     getChannelReviewsStrict.mockResolvedValue({
       ...PAGE,
       items: [{ ...PAGE.items[0]!, preview: null, textless: true }],

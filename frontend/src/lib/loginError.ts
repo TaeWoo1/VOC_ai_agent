@@ -28,8 +28,8 @@ export interface LoginFailure {
 }
 
 const CREDENTIALS = "이메일 또는 비밀번호를 확인해 주세요.";
-const UNREACHABLE = "SellerOps 서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.";
-const SERVER = "SellerOps 서버에 문제가 생겼어요. 잠시 후 다시 시도해 주세요.";
+const UNREACHABLE = "reviewnary 서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.";
+const SERVER = "reviewnary 서버에 문제가 생겼어요. 잠시 후 다시 시도해 주세요.";
 
 /** The HTTP status an error carries, or null when nothing answered. Shape-based: axios is not imported here. */
 function statusOf(error: unknown): number | null {

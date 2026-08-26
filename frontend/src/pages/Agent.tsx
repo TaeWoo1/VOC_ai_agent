@@ -389,14 +389,21 @@ function OperatorAnswerCard({ answer }: { answer: OperatorAnswer }) {
                   const ref = evidenceById.get(id);
                   if (!ref) return null;
                   return (
+                    /*
+                      What was checked, in the seller's words (Core Daily Loop UX Integration v1 §4).
+
+                      This line used to open with the internal evidence id and close with the raw
+                      provenance string — 「근거 e1 · … · inbox/SERVER:unansweredInquiries」. Neither is
+                      something a seller acts on, and the second is the name of a call. `kind` was the
+                      fallback label and is a storage enum for the same reason. What survives is what
+                      was read, how much of it, when, and whether any of it could not be judged.
+                    */
                     <li key={id} className="text-xs text-muted">
-                      근거 {ref.evidenceId} · {ref.locator.label ?? ref.kind}
+                      {ref.locator.label ?? "확인한 자료"}
                       {ref.locator.count != null ? ` ${ref.locator.count}건` : ""}
                       {ref.events ? ` · ${ref.events.from ?? "?"}~${ref.events.to ?? "?"} 발생` : ""}
                       {ref.asOf ? ` · ${ref.asOf} 확인` : ""}
                       {ref.coverage !== "COVERED" ? " · 판단 불가 구간" : ""}
-                      {" · "}
-                      {ref.provenance}
                     </li>
                   );
                 })}
@@ -442,7 +449,7 @@ function OperatorAnswerCard({ answer }: { answer: OperatorAnswer }) {
                 {FACET_LABEL[c.facet] ?? c.facet}:{" "}
                 {c.coverage === "STALE"
                   ? `마지막으로 확인한 지 오래됐습니다${c.newestObservedAt ? ` (${c.newestObservedAt.slice(0, 10)})` : ""}.`
-                  : "SellerOps가 이 정보를 갖고 있지 않습니다. 상품에 그 값이 없다는 뜻은 아닙니다."}
+                  : "reviewnary가 이 정보를 갖고 있지 않습니다. 상품에 그 값이 없다는 뜻은 아닙니다."}
               </li>
             ))}
           </ul>
@@ -847,7 +854,7 @@ function InquiryDraftPreparationCard({
         초안만 생성되었습니다. {channel}에는 아직 전송되지 않았습니다.
       </p>
       <p className="mt-1 text-xs text-muted">
-        SellerOps가 대신 전송하지 않습니다. 검토 후 채널에 직접 붙여넣어 답변하세요.
+        reviewnary가 대신 전송하지 않습니다. 검토 후 채널에 직접 붙여넣어 답변하세요.
       </p>
 
       {confirmRegen ? (

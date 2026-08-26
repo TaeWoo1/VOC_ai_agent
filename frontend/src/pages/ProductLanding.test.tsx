@@ -33,7 +33,7 @@ describe("ProductLanding — narrative structure", () => {
     expect(headings).toHaveLength(1);
     expect(headings[0].textContent).toBe(HERO.titleLines.join(""));
     // The product is not named in the opening headline — the reader is.
-    expect(headings[0].textContent).not.toContain("SellerOps");
+    expect(headings[0].textContent).not.toContain("reviewnary");
   });
 
   it("gives each section a single second-level heading", () => {
@@ -124,7 +124,7 @@ describe("ProductLanding — page metadata", () => {
   it("sets the title and description while mounted, and restores them on unmount", () => {
     const beforeTitle = document.title;
     const { unmount } = renderPage();
-    expect(document.title).toContain("SellerOps");
+    expect(document.title).toContain("reviewnary");
     expect(
       document.querySelector<HTMLMetaElement>('meta[name="description"]')?.content,
     ).toContain("문의와 리뷰");

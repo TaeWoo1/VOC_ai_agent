@@ -159,11 +159,19 @@ describe("InquiryResponsePanel — the generated draft", () => {
     expect(screen.getByText("수령 후 7일 이내 교환이 가능합니다.")).toBeInTheDocument();
   });
 
+  // The fixture used to say `knowledgeState: NO_MATCH` with `answerBasis: GROUNDED` and an author of
+  // MODEL — a shape the backend has not produced since 2026-08-26, when a question with no current
+  // evidence stopped reaching the model at all. The state that DOES pair a stored draft with a
+  // non-grounded library is the company's own approved deferral, and the limitation must still be
+  // stated over it: a seller reading that sentence is reading the reason it is a deferral.
   it("states the limitation when the library could not answer — and cites nothing", async () => {
     generateInquiryDraft.mockResolvedValue(generated({
-      authorKind: "MODEL",
+      authorKind: "SELLER_APPROVED_FALLBACK",
       knowledgeState: "NO_MATCH",
       knowledgeNote: "등록된 상품 지식에 이 질문에 해당하는 내용이 없어, 문의 내용만 보고 쓴 초안입니다.",
+      answerBasis: "NO_ANSWER_BASIS",
+      answerBasisNote: "답변 기준이 필요합니다.",
+      answerBasisAction: "등록된 상품 지식·운영 정책에 이 질문에 해당하는 내용이 없습니다.",
       evidence: [],
     }));
     const user = userEvent.setup();
@@ -171,7 +179,14 @@ describe("InquiryResponsePanel — the generated draft", () => {
 
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
 
-    expect(await screen.findByText(/해당하는 내용이 없어/)).toBeInTheDocument();
+    // The limitation is stated by the state card, once. It used to be stated by the card AND by a
+    // second sentence underneath repeating it (Core Daily Loop UX Integration v1 §11), and in this
+    // state the longer form of that sentence — 「아래 과거 답변은 참고용이며」 — pointed at citations
+    // that a no-basis generate never records.
+    const card = await screen.findByTestId("answer-state");
+    expect(card).toHaveTextContent("답변 기준이 필요합니다.");
+    expect(card).toHaveTextContent("해당하는 내용이 없습니다");
+    expect(screen.queryByText(/해당하는 내용이 없어/)).toBeNull();
     expect(screen.queryByText("근거")).toBeNull();
   });
 

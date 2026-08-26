@@ -18,7 +18,7 @@ Status: **offline audit + measurement contract** (2026-08-26). 선행: `docs/pro
 | surfaced | `proactive_case.surfaced_at` | `ProactiveCaseService.list` — 카드가 실제로 렌더된 순간 |
 | opened | `proactive_case.opened_at` | `POST /api/proactive/cases/{id}/opened` — [확인하기] 클릭에서만 |
 | 준비된 초안 | `proactive_case.prepared_action='DRAFT_PREPARED'` + `draft_version` | investigator |
-| 초안 저자 | `inquiry_reply_draft.author_kind` (`MODEL`/`RULE`/`SELLER`) + `content_fingerprint` | append-only, 버전마다 한 행 |
+| 초안 저자 | `inquiry_reply_draft.author_kind` (`MODEL`/`RULE`/`SELLER`/`SELLER_APPROVED_FALLBACK`) + `content_fingerprint` | append-only, 버전마다 한 행 |
 | 판매자 수정 | 같은 work item의 **다음 버전**이 `author_kind='SELLER'` | `PUT /draft` |
 | 승인 | `inquiry_approval(approved_draft_version, approved_fingerprint, approver, created_at)` | work item당 유니크 1행 |
 | 전송 시도 | `inquiry_execution(status, created_at)` | `InquiryPublishService` |
@@ -68,11 +68,13 @@ AI 초안을 **그대로 승인**했는지 **고쳐서 승인**했는지는 승�
 
 ```sql
 select count(*) filter (where c.prepared_action = 'DRAFT_PREPARED')                    as drafts_prepared,
-       count(*) filter (where a.id is not null and ad.author_kind <> 'SELLER')         as approved_unchanged,
+       count(*) filter (where a.id is not null and ad.author_kind = 'MODEL')           as approved_unchanged,
        count(*) filter (where a.id is not null and ad.author_kind = 'SELLER'
                           and ad.content_fingerprint <> pd.content_fingerprint)        as approved_edited,
        count(*) filter (where a.id is not null and ad.author_kind = 'SELLER'
                           and ad.content_fingerprint = pd.content_fingerprint)         as approved_same_text,
+       count(*) filter (where a.id is not null
+                          and ad.author_kind = 'SELLER_APPROVED_FALLBACK')             as approved_deferral,
        count(*) filter (where c.status = 'PREPARED' and a.id is null)                  as pending,
        count(*) filter (where c.status = 'CLOSED'  and a.id is null)                   as abandoned
 from proactive_case c
@@ -85,7 +87,7 @@ where c.subject_kind = 'INQUIRY';
 
 세 가지가 서로 다른 사실이고 합치면 거짓말이 된다:
 
-- **`approved_unchanged`** — 승인된 버전을 모델(또는 rule fallback)이 썼다. AI 초안이 그대로 나갔다.
+- **`approved_unchanged`** — 승인된 버전을 **모델이** 썼다. AI 초안이 그대로 나갔다.
 - **`approved_edited`** — 판매자가 다음 버전을 저장했고 지문이 달라졌다. 초안은 출발점이었다.
 - **`approved_same_text`** — 판매자 버전인데 지문이 초안과 같다. 다시 저장했을 뿐 내용은 그대로다.
   **`approved_unchanged`에 합산하지 않는다** — 채택률을 높이는 쪽으로 반올림하는 일이기 때문이다.
@@ -93,6 +95,31 @@ where c.subject_kind = 'INQUIRY';
   않은 것이다. 포기는 케이스가 **닫혔는데** 승인이 없는 경우로만 센다.
 
 `author_kind`가 null인 옛 행은 `SELLER`로 읽는다(Inquiry Draft v1 이전 행 — 전부 사람이 썼다).
+
+#### `SELLER_APPROVED_FALLBACK`은 AI 초안이 아니다 (2026-08-27 정정)
+
+Organization Answer Style v1이 author kind를 하나 늘렸다. `NO_ANSWER_BASIS`에서 판매자가 등록해 둔
+「답을 모를 때 사용할 문구」가 있으면 그 문장이 **한 글자도 바뀌지 않고** 초안 버전으로 저장된다 —
+**모델 호출 0**이고, 문장은 판매자 자신의 것이다.
+
+원래 술어는 `author_kind <> 'SELLER'`였고, 그 조건은 이 행을 **`approved_unchanged`로 셌다**. 그러면
+「AI가 쓴 답변을 판매자가 그대로 승인했다」는 숫자에 **AI가 쓰지 않은 문장**이 들어간다 — 그리고 그것은
+채택률을 올리는 쪽으로 틀리는 종류의 오류다. 지금 술어는 `= 'MODEL'`이다.
+
+- **분자에서 제외** — `approved_unchanged`·`approved_edited` 어디에도 넣지 않는다.
+- **분모에서도 제외** — 「AI 초안 채택률」의 분모는 *모델이 쓴 초안*이고, 유예 문구는 그 모집단이
+  아니다. `drafts_prepared`는 `prepared_action='DRAFT_PREPARED'`를 세므로 이 행이 준비된 케이스는
+  분모에 남는데, 그 자리는 **`approved_deferral`**이 받는다: 준비는 됐고 채택 대상은 아니었다.
+- **별도로 센다** — `approved_deferral`은 실패도 성공도 아니다. 「답할 근거가 없어서 회사가 정해 둔
+  문장으로 유예했다」는 사실이고, 파일럿에서 그 빈도는 *지식이 얼마나 비어 있는가*의 지표이지
+  *AI가 얼마나 쓸모 있는가*의 지표가 아니다.
+
+`RULE`도 같은 이유로 `approved_unchanged`에서 빠진다 — 결정론적 fallback drafter는 2026-08-26에
+생산자가 사라졌으므로 새 행은 생기지 않지만, 옛 행이 모델 채택률에 섞이면 그 역시 같은 방향의 거짓말이다.
+
+**코드 변경 0.** 이 지표들은 전부 문서의 SQL이고, production 코드에서 `author_kind`를 읽어 채택률을
+계산하는 곳은 감사 결과 **없다**(`InquiryReplyDraftService`가 쓰고, `ReplyDraftView`가 그대로 실어
+보낼 뿐이다).
 
 ### C. speed
 

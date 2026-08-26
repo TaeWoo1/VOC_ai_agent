@@ -7,6 +7,7 @@
  * that named the gap — and about what saving does NOT do, which is send anything.
  */
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InquiryResponsePanel } from "./InquiryResponsePanel";
@@ -106,7 +107,11 @@ afterEach(() => vi.clearAllMocks());
 describe("InquiryResponsePanel — the missing answer basis", () => {
   it("A — NO_ANSWER_BASIS shows what is missing AND the way to supply it", async () => {
     const user = userEvent.setup();
-    render(<InquiryResponsePanel workItemId="w1" />);
+    render(
+      <MemoryRouter>
+        <InquiryResponsePanel workItemId="w1" />
+      </MemoryRouter>,
+    );
 
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
 
@@ -123,7 +128,11 @@ describe("InquiryResponsePanel — the missing answer basis", () => {
       answerBasisAction: "이 문의가 어떤 상품에 대한 것인지 연결하면 근거를 찾을 수 있습니다.",
     });
     const user = userEvent.setup();
-    render(<InquiryResponsePanel workItemId="w1" />);
+    render(
+      <MemoryRouter>
+        <InquiryResponsePanel workItemId="w1" />
+      </MemoryRouter>,
+    );
 
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
 
@@ -133,7 +142,11 @@ describe("InquiryResponsePanel — the missing answer basis", () => {
 
   it("saves the seller's sentence against the chosen 규격 and asks for the draft again", async () => {
     const user = userEvent.setup();
-    render(<InquiryResponsePanel workItemId="w1" />);
+    render(
+      <MemoryRouter>
+        <InquiryResponsePanel workItemId="w1" />
+      </MemoryRouter>,
+    );
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
     await user.click(await screen.findByRole("button", { name: "답변 기준 추가" }));
 
@@ -160,7 +173,11 @@ describe("InquiryResponsePanel — the missing answer basis", () => {
 
   it("전체 상품 공통 is the default, and it is sent as a null rather than as a guess", async () => {
     const user = userEvent.setup();
-    render(<InquiryResponsePanel workItemId="w1" />);
+    render(
+      <MemoryRouter>
+        <InquiryResponsePanel workItemId="w1" />
+      </MemoryRouter>,
+    );
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
     await user.click(await screen.findByRole("button", { name: "답변 기준 추가" }));
 

@@ -1,6 +1,8 @@
 package com.sellerops.inquiry.draft;
 
+import static org.assertj.core.api.Assertions.as;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.InstanceOfAssertFactories.STRING;
 
 import com.sellerops.agent.llm.AgentDraftGenerator;
 import com.sellerops.agent.llm.AgentDraftResponseParser;
@@ -223,7 +225,7 @@ class AnswerStyleDraftTest {
         assertThat(view.answerBasisAction()).isNotNull();
         assertThat(view.evidence()).as("nothing was cited, because nothing applied").isEmpty();
         assertThat(draftRows.findTopByWorkItemIdOrderByVersionDesc(work))
-                .get().extracting(d -> d.getModelVersion()).isEqualTo("style/v1");
+                .get().extracting(d -> d.getModelVersion(), as(STRING)).startsWith("style/v1@");
     }
 
     // ---------------------------------------------------------------- H

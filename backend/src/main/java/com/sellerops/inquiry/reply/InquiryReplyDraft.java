@@ -78,8 +78,15 @@ public class InquiryReplyDraft {
     @Column(name = "author_kind", length = 24)
     private String authorKind;
 
-    /** The exact model+prompt version behind a MODEL draft; null for SELLER and RULE. */
-    @Column(name = "model_version", length = 120)
+    /**
+     * The exact model+prompt version behind a MODEL draft; null for SELLER and RULE.
+     *
+     * <p>Since Organization Answer Style v1 it also carries which wording produced the version —
+     * {@code …+style/v3@8f1c0a2b4d6e}, a counter and a digest of the profile. 200 rather than 120
+     * because the measured stamp reaches ~115 on the shipped configuration and past 120 on a longer
+     * vendor model id, and the repair for an overflowing provenance string must never be to cut it.
+     */
+    @Column(name = "model_version", length = 200)
     private String modelVersion;
 
     /**
