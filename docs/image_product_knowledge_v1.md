@@ -1,6 +1,12 @@
 # Image Product Knowledge v1 — 설계, 그리고 그 아래에 깔린 것
 
-> **상태: `TEXT_LANE_WIRED` · `IMAGE_LANE_UNBUILT` · 비용 전제 `UNVERIFIED`(2026-08-26).**
+> **상태: `TEXT_LANE_WIRED`(기본값 OFF) · `IMAGE_LANE_UNBUILT` · `STAGE_1_PREPARED`(2026-08-27).**
+> Stage 1 준비는 **§10**이 소유한다 — 트리거 기본값 OFF, 답변 근거와 운영 상태의 분리, 규격 지속성,
+> 26장 전수 방침, 멀티모달 벤더 감사, Stage 1 매니페스트 초안. **vision model 호출은 여전히 0이다.**
+> 상품 간 재사용 측정은 **하지 않기로 결정**됐다(§9-1의 (b)) — v1의 경제성은 실제 문의가 가리킨
+> 상품 하나의 비용으로 판단한다.
+>
+> **아래는 2026-08-26 시점의 기록이다.**
 > product-owner가 §4의 payload floor를 **승인**했고(판매자 상세 이미지를 모델에 보낼 수 있다), 착수 순서를
 > **텍스트 우선**으로 정했다. 그래서 이 턴에 실제로 지어진 것은 이미지 lane이 **아니라** 그것이 서 있어야 할
 > 바닥이다:
@@ -175,13 +181,21 @@ DB 변경 0 · **모델 호출 0**):
 ```
 shape=IMAGE_REFERENCES_ONLY text_chars=104 images=26 listing_gallery=10
 img_tags=26 fetchable=26 duplicate_urls=0 inline_data=0 insecure_or_other=0
-CENSUS  image_requests=26 fetched_ok=26 unique_sha256=26 duplicate_fetches=0 reuse_ratio=1.00
+CENSUS  image_requests=26 fetched_ok=26 unique_sha256=26 duplicate_fetches=0
+        unique_ratio=1.00 dedupe_hit_ratio=0.00 cross_product_reuse=UNMEASURED
 BYTES   total=3,828,342  min=24,992  max=784,899  mean=147,243
 DIMENSIONS readable=26/26 distinct_sizes=22 most_common=860x559×4
 OUTCOMES {OK=26}
 ```
 
 **상품 하나 안에서 바이트 중복은 0이다.** 26장이 26개의 서로 다른 그림이고, 재사용은 없다.
+
+> **이름 정정(2026-08-27, product-owner).** 최초 텔레메트리는 이 값을 `reuse_ratio`라고 불렀는데,
+> 실제로 계산한 것은 unique/fetched였다 — **재사용률이 아니라 고유율**이고, 두 이름은 정반대 방향을
+> 가리킨다. 「reuse 1.00」은 「전부 재사용됐다」로 읽히지만 관측된 사실은 **재사용이 0**이라는 것이다.
+> 그래서 지금은 두 값을 각각 적는다: `unique_ratio=1.00`(내려받은 것 중 서로 다른 것의 비율)과
+> `dedupe_hit_ratio=0.00`(바이트 캐시가 이 상품 **안에서** 막았을 요청의 비율). 두 값 모두
+> `scope=WITHIN_PRODUCT`이며, 이 lane의 비용 전제인 **상품 간** 재사용은 `UNMEASURED`로 적힌다.
 
 **그리고 그것은 §4가 물은 질문이 아니다.** §4의 비용 논증은 **상품 간** 재사용이다 — 같은 배송안내 띠가
 308개 상품에 붙어 있으면 분모가 상품 수가 아니라 고유 그림 수가 된다는 것. 이 census는 상품 **하나**를
@@ -192,8 +206,14 @@ lane이 금지한 구조다.** 그러므로:
   불가이며, 이것을 「측정했다」로 적는 것은 사실이 아니다.
 - 알게 된 것: 이 상품의 실측 상한은 **3.65MB / 26장**이고, 평균 **144KB**, 최대 **766KB**, 거의 전부가
   **860px 폭**이다. 상품 1개 파일럿의 전송량은 이제 추정이 아니라 **관측값**이다.
-- 남은 선택지는 셋이고 전부 product-owner 결정이다: (a) 표본 N개 상품으로 재사용률을 재는 **별도 승인**,
-  (b) 재사용 가정을 **버리고** 상품당 비용으로 착수 판단, (c) 착수 보류.
+- 남은 선택지는 셋이었다: (a) 표본 N개 상품으로 재사용률을 재는 별도 승인, (b) 재사용 가정을 버리고
+  상품당 비용으로 착수 판단, (c) 착수 보류.
+
+**결정: (b)** (product-owner, 2026-08-27). 카탈로그 census도, 표본 N개 enrichment도 하지 않는다.
+v1의 경제성은 **실제로 들어온 actionable inquiry가 가리킨 그 상품 하나**의 비용으로 판단하며,
+cross-product cache table은 만들지 않는다. 파일럿을 쓰다 보면 여러 상품의 해시가 자연히 쌓이고,
+cross-product cache는 **그때 다시 평가한다** — 지금 그것을 재려면 이 lane이 금지한 구조를 한 번
+만들어야 하고, 만들고 나서 「역시 필요 없다」로 끝나는 편이 훨씬 비싸다.
 
 ### 9-2. 이미지 lane이 없는데 그 안전 규칙은 이미 산다
 
@@ -205,3 +225,178 @@ lane이 금지한 구조다.** 그러므로:
 그 줄은 여전히 옵션 이름을 싣지 않는다.
 
 **생산자가 생기기 전에 게이트가 먼저 서 있다.** 추출 lane이 켜지는 날 이 규칙은 이미 돌고 있다.
+
+---
+
+## 10. Stage 1 준비 — 벤더를 감사했고, 모델은 아직 부르지 않았다
+
+*(2026-08-27, product-owner 지시 §0–§15. **vision live call = 0**.)*
+
+### 10-1. 트리거 기본값 OFF
+
+`sellerops.product.detail.enrichment.enabled`의 기본값이 `true` → **`false`**. 라이브에서 한 번도
+돌지 않은 capability가 「클래스가 머지됐다」는 이유로 판매자 채널을 읽기 시작하면 안 된다. 평범한
+`bootRun`은 상세페이지 READ를 **0회** 만든다. 켜는 것은 승인된 bounded live proof 한 번뿐이고,
+Demo/Pilot 기본값을 올리는 것은 그 증명 **뒤에 오는 별개의 결정**이다.
+
+읽기 기본값은 소스에서 검증한다(`ProductDetailEnrichmentTriggerTest.defaultIsOff`) — 프로퍼티를
+세팅하는 Spring 컨텍스트로 기본값을 증명할 수는 없다. 그 컨텍스트는 정확히 반대 명제를 증명한다.
+
+### 10-2. 「근거가 없다」와 「돌지 않았다」를 나눴다
+
+`AnswerBasisState`는 **증거**에 대한 진술이다. 다음은 전부 **기계**에 대한 진술이며 서로 다른 칸이다:
+
+| 상황 | 예전 화면 | 지금 |
+|---|---|---|
+| 근거 있음 + 벤더 무응답 | 「답변 기준이 필요합니다」 | 「답변 초안을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.」 |
+| 근거 있음 + 일일 예산 소진 | 「답변 기준이 필요합니다」 | 「오늘 사용할 수 있는 AI 처리량을 모두 썼습니다…」 |
+| capability OFF | 「답변 기준이 필요합니다」 | 「AI 답변 초안 기능이 켜져 있지 않습니다.」 |
+| 상세페이지 READ 실패 | 「답변 기준이 필요합니다」 | 「상품 상세 정보를 확인하지 못했습니다.」 |
+| 검색이 **끝났고** 쓸 근거가 0 | 「답변 기준이 필요합니다」 | 그대로 — **여기서만** 그 문장이 나온다 |
+
+**새 enum은 만들지 않았다.** 기존 seam 감사 결과 두 개면 충분했다: `ProductDetailEnrichmentTrigger.
+Outcome`(이미 `READ_FAILED`를 갖고 있다)과 `GeneratedDraftView`의 메시지 칸 — 이름만
+`quotaMessage` → **`unavailableMessage`**로 정직해졌다(이제 예산 말고도 세 가지를 싣는다).
+`AnswerBasisState`는 두 enum의 순수 함수 그대로이고 값도 셋 그대로다.
+
+화면 규칙은 **우선순위 하나**다: `unavailableMessage`가 있으면 그것이 카드가 되고
+「답변 기준이 필요합니다」는 **렌더되지 않는다**. 특히 상세페이지 READ가 실패했을 때 그렇다 —
+**끝까지 보지 못한 것과 보고 나서 없는 것은 다른 주장**이고, 전자에서 판매자를 「상품 지식을
+등록하세요」로 보내면 이미 자기 상세페이지에 써 둔 것을 한 번 더 쓰게 만든다.
+
+`PENDING`(「상품 상세 정보를 확인 중입니다.」)은 **오늘 생산자가 없다**. enrichment는 동기이고
+이미지 lane은 존재하지 않으므로 draft 시점에 in-flight 상태가 될 수 없다. 그래서 만들지 않았다 —
+`carriesExactFiguresUnaided()`가 그랬듯 **enforcement 0인 상태 값**을 미리 두지 않는다. 이미지 lane이
+비동기로 붙는 날 §10-4의 receipt가 그 생산자다.
+
+### 10-3. 변수 지속성 전제 — 그림 페이지도 규격은 저장한다
+
+대상 상품의 실측: **API 옵션 조합 20 / 저장된 `product_variants` 0**. 즉 답이 규격에 따라 달라지는
+바로 그 상품에서 `SpecApplicability.VARIANT_NAMED`가 도달 불가였다.
+
+코드는 이미 옳았다 — `ProductDetailEnrichment.writeOptions()`가 shape 판정 **앞에** 있어서
+`IMAGE_REFERENCES_ONLY`여도 규격은 기록된다. 없던 것은 **그 순서를 고정하는 테스트**였고
+(`ProductDetailEnrichmentTest`), 그것이 이 클래스의 **첫 단위 테스트**다. 「그림이면 할 일이 없으니
+일찍 반환하자」는 한 줄짜리 리팩터가 규격을 조용히 데려간다.
+
+옵션 식별자는 채널이 준 것을 **그대로** 쓴다(합성 id 금지 — 매 읽기마다 새 identity를 받는 variant는
+없는 variant보다 나쁘다). variant write는 **로컬 DB mutation이지 marketplace WRITE가 아니며**,
+Stage 1 매니페스트에 예상 로컬 변경으로 **명시**한다.
+
+### 10-4. 영구 처리 영수증 — 기존 seam으로는 표현할 수 없다 (구현 0)
+
+요구: 재기동 뒤에 같은 이미지를 다시 모델에 넣지 않는다. **특히 결과가 0이었을 때** — 분석했고
+쓸 fact가 없었거나 전부 안전 규칙에 걸린 경우에도 「했다」를 기억해야 한다.
+
+기존 seam 감사 결과 **안전하게 표현 불가**:
+
+- `ProductKnowledgeSource`로 표현하려면 본문이 빈 문서를 저장해야 한다(`body`는 NOT NULL). 청크가 0이라
+  검색에는 안 걸리지만, **`countByOrgIdAndProductId`가 세는 「등록된 지식 N건」을 부풀린다** — 판매자
+  화면이 없는 지식을 있다고 말하게 된다. 이미지당 한 행이면 상품 하나에 26건이 더해진다.
+- `SyncCursor`/`ChannelDataState`는 (계정, DataType) 단위 수집 커서다. 이미지 단위를 담을 자리가 없다.
+- 트리거의 in-memory attempt memory(6h)는 재기동에서 사라지고, 애초에 「요청했다」이지 「모델에
+  넣었다」가 아니다.
+
+⇒ **최소 persistence contract만 보고하고 테이블은 만들지 않았다**(지시 §4). 필요한 최소:
+
+```
+product_detail_image_receipt
+  org_id, product_id, image_sha256(bytes),     -- identity는 URL이 아니라 바이트
+  processed_at, model_version, outcome,        -- ACCEPTED / NO_USABLE_FACT / REFUSED_BY_SAFETY / FETCH_FAILED
+  facts_accepted, facts_refused
+  unique(org_id, image_sha256)                 -- 상품 간 dedupe가 아니라 재처리 방지
+```
+
+`unique(org_id, image_sha256)`는 **cross-product cache가 아니다** — 저장하는 것은 추출 결과가 아니라
+「이 바이트는 이미 처리했다」는 사실이고, 상품 간 재사용 판단은 §9-1의 결정 (b)대로 하지 않는다.
+이 테이블이 없으면 §14-G(재기동 후 동일 해시 재모델링 방지)는 **테스트할 수 없고**, 그래서 그 항목은
+receipt와 함께 보류다.
+
+### 10-5. 26장 — 임의 상한 없음
+
+기존 제안 「12/26」은 **승인되지 않았다**. 어떤 그림에 규격 사실이 있는지는 semantic inspection 전에
+알 수 없고, 앞 12장·큰 12장·파일명 12장은 전부 **근거 없는 절단**이다. spec-bearing image를 절대
+누락하지 않는 결정론적 pre-filter가 **없으므로 26장 전부**가 first proof의 기준이다.
+`ImageFetchPolicy.MAX_IMAGES_PER_PRODUCT`는 이미 26이다.
+
+### 10-6. 멀티모달 벤더 감사 — 추측하지 않은 것과, 확인된 것
+
+**설정된 모델은 `gpt-5-2025-08-07`**(`sellerops.agent.draft.model` 기본값, vendor `OPENAI`,
+`/v1/chat/completions`). 여섯 capability 전부 같은 기본값을 쓴다.
+
+벤더 문서에서 확인한 사실:
+
+| 항목 | 값 | 출처 |
+|---|---|---|
+| gpt-5 텍스트 가격 | 입력 **$1.25 / 1M**, 출력 **$10.00 / 1M** | 벤더 pricing 페이지 |
+| gpt-5 이미지 토큰화 | **타일 기반** — base **70** + 타일당 **140** | 벤더 vision 가이드 |
+| 요청당 최대 이미지 | 1,500 | 같은 문서 |
+| 요청당 최대 페이로드 | 512 MB | 같은 문서 |
+| 지원 포맷 | PNG · JPEG · WEBP · 비애니메이션 GIF | 같은 문서 |
+
+**그리고 감사가 실제로 찾아낸 것:** 벤더 문서의 이미지 토큰화 표에서 **`gpt-5`에는 deprecation 표시가
+붙어 있다** — 「Deprecated and scheduled for shutdown」. 패치 기반 sizing 표(멀티플라이어 1.2)에는
+`gpt-5.5`·`gpt-5.6-*`만 있고 `gpt-5`는 **의도적으로 제외**돼 있다. 이것은 이 lane만의 문제가 아니라
+**여섯 capability 전부의 기본 모델**이 종료 예정 스냅샷이라는 뜻이며, Stage 1을 그 모델에 고정하는
+것은 좋은 생각이 아니다 ⇒ **product-owner 결정 항목**(모델 갱신은 이 패키지의 범위가 아니다).
+
+비용 계산의 **근거**(추정이 아니라 위 표의 산식):
+
+- 관측된 최빈 크기 860×559 → 2048 안에 들어가므로 축소 없음 → 짧은 변을 768로 → 1182×768 →
+  512 타일 3×2 = **6타일** → `70 + 6×140` = **910 토큰/장**.
+- 세로로 긴 상세 이미지(예: 860×3000)는 2048로 축소된 뒤 768 정규화 → 768×2679 → 2×6 = **12타일** →
+  **1,750 토큰/장**.
+- 26장이면 **약 23,700 ~ 45,500 입력 토큰 = $0.03 ~ $0.06**. 출력은 닫힌 JSON이라 작지만
+  gpt-5에서는 **추론 토큰이 출력에 포함**되므로 `max_output_tokens`(4,000) 기준 최악이
+  26×4,000 = 104,000 → **$1.04**. 즉 상품 하나의 현실적 상한은 **$1 남짓**.
+- **정확한 합계는 아직 낼 수 없다.** census는 크기 22종의 **집계만** 남겼고 장별 치수는 로그에 없다
+  (설계상 그렇다). Stage 1이 장별 치수를 남기면 그때 실측으로 대체한다.
+
+**지연 시간은 측정하지 않았다** — 모델을 부르지 않았으므로 UNMEASURED다. 추측하지 않는다. 다만
+26장 순차 호출이 판매자의 HTTP 요청 위에 있을 수 없다는 것은 이미 확실하므로, 이미지 lane은
+**비동기**여야 하고 그래서 §10-2의 `PENDING`이 그때 생산자를 갖는다.
+
+### 10-7. one-image-per-call 유지 — 권고
+
+벤더는 요청당 1,500장을 허용한다. 그래도 **한 장씩** 부른다:
+
+1. **payload floor가 호출 단위로 증명 가능하다.** 「이미지 1장 + 상수 프롬프트, 그 외 0」은
+   직렬화된 바이트로 검사할 수 있는 문장이다.
+2. **provenance가 구조적이다.** 모델이 출처를 잘못 말할 방법이 없다 — 한 장만 봤기 때문이다.
+   `imageOrdinal`을 모델이 **자기 신고**하게 만드는 순간, 그것은 검증할 수 없는 주장이 된다.
+3. **실패 격리**가 장 단위로 유지된다.
+4. **아끼는 것이 없다.** 묶어서 아끼는 것은 상수 프롬프트 반복분뿐이고(장당 수백 토큰), 이미지
+   토큰 910~1,750 앞에서 무의미하다 — 26장 기준 **$0.005 수준**. 그 돈으로 provenance 보장을
+   파는 거래다.
+
+### 10-8. 추출 범위 — 안정적인 Product/Variant 규격만
+
+이미지에서 **발견해도 이번 corpus에 넣지 않는다**: 배송 일정 · 재고 · 사은품 · 프로모션 ·
+교환/반품 정책 · 연락처 · 판매자 운영정보. 이것들은 장기 Operational Knowledge scope이고
+(`docs/operational_knowledge_direction_v1.md`) 지금은 deferred다. free-form OCR dump 금지,
+닫힌 추출 `{specLabel, attribute, value}` 유지.
+
+### 10-9. Stage 1 승인 매니페스트 (초안 — 아직 요청하지 않았다)
+
+```
+approvalId       : (미발급)
+channel/product  : NAVER · 채널상품번호 13250364547
+mode             : READ + 신규 LLM capability(vision)
+marketplace GET  : 최대 1 (상세 재조회)
+CDN GET          : 최대 26
+분석 대상 이미지  : 26 (임의 절단 없음)
+모델             : (product-owner 결정 — 현재 기본값 gpt-5-2025-08-07은 종료 예정)
+이미지 모델 호출  : 최대 26 (one image per call)
+payload          : 이미지 1장 + 상수 프롬프트. 상품명·옵션·문의·과거답변·정책·판매자 식별자 0
+페이로드 추정     : 3.65MB 업링크 / 23.7k~45.5k 입력 토큰 / 출력 상한 104k 토큰
+비용 추정 근거    : 위 §10-6 산식(벤더 문서 실측 단가·타일 산식). 상품당 상한 ≈ $1
+지연              : UNMEASURED — 이 실행이 최초 측정
+로컬 DB 변경      : product_variants 최대 20(신규) · image receipt 26행 · 채택된 image-derived
+                   ProductKnowledgeSource 0~1 · 0건/거부 결과도 receipt에 기록
+marketplace WRITE : 0
+재시도            : 0
+feature flags     : sellerops.product.detail.enrichment.enabled=true (이 실행 한정)
+                   + 신규 vision capability 플래그 (기본 OFF)
+rollback/disarm   : 두 플래그를 끄면 즉시 원상 — 코드 경로가 플래그 뒤에만 있다.
+                   receipt/variant 행은 남지만 판매자 화면 의미는 변하지 않는다.
+```

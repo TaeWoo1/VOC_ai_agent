@@ -1378,6 +1378,12 @@ export interface OrgKnowledgeRequest {
  * `answerBasis` is the projection of `knowledgeState` and the spec applicability, and it is what the
  * screen keys on. `knowledgeState` stays because it names WHICH basis is missing, which is the part
  * a seller can act on.
+ *
+ * `unavailableMessage` answers a DIFFERENT question — did the machinery run — and it takes
+ * precedence on screen (product-owner, 2026-08-27). A spent budget, a capability that is off, a
+ * vendor that did not answer and a 상세페이지 read that failed all leave `draft` null without
+ * proving anything about the seller's knowledge, so 「답변 기준이 필요합니다」 must not be shown
+ * when this is set.
  */
 export interface GeneratedDraftView {
   draft: ReplyDraftView | null;
@@ -1389,7 +1395,7 @@ export interface GeneratedDraftView {
   answerBasisAction: string | null;
   productId: string | null;
   evidence: DraftEvidenceView[];
-  quotaMessage: string | null;
+  unavailableMessage: string | null;
 }
 
 /**

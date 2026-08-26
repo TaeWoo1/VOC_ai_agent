@@ -178,11 +178,16 @@ public class NaverDetailImageCensusRunner implements ApplicationRunner {
         int duplicates = okCount - unique.size();
         int mostRepeated = perHash.values().stream().mapToInt(Integer::intValue).max().orElse(0);
 
-        log.info("{} CENSUS marketplace_requests=1 image_requests={} fetched_ok={} unique_sha256={} "
-                        + "duplicate_fetches={} most_repeated_hash={} reuse_ratio={}",
+        // Two ratios, because one number was answering a question nobody asked. `unique_ratio` is
+        // unique/fetched — how much of what we downloaded was distinct. `dedupe_hit_ratio` is its
+        // complement: the share of fetches a byte-content cache would have served WITHIN this one
+        // product. Neither is cross-product reuse, which is what the lane's cost premise rests on
+        // and which a single-product census structurally cannot measure (product-owner, 2026-08-27).
+        log.info("{} CENSUS scope=WITHIN_PRODUCT marketplace_requests=1 image_requests={} "
+                        + "fetched_ok={} unique_sha256={} duplicate_fetches={} most_repeated_hash={} "
+                        + "unique_ratio={} dedupe_hit_ratio={} cross_product_reuse=UNMEASURED",
                 TAG, fetched.size(), okCount, unique.size(), duplicates, mostRepeated,
-                okCount == 0 ? "n/a" : String.format(java.util.Locale.ROOT, "%.2f",
-                        unique.size() / (double) okCount));
+                ratio(unique.size(), okCount), ratio(duplicates, okCount));
         log.info("{} BYTES total={} min={} max={} mean={}", TAG, totalBytes,
                 okCount == 0 ? 0 : minBytes, maxBytes,
                 okCount == 0 ? 0 : totalBytes / okCount);
@@ -197,5 +202,11 @@ public class NaverDetailImageCensusRunner implements ApplicationRunner {
                         + "db_writes=0 marketplace_writes=0",
                 TAG, refs.imgTags(), refs.fetchable(),
                 outcomes.getOrDefault(FetchedImage.Outcome.BUDGET_EXHAUSTED, 0));
+    }
+
+    /** {@code n/a} when nothing was fetched — a ratio over zero is not zero, it is undefined. */
+    private static String ratio(int part, int whole) {
+        return whole == 0 ? "n/a"
+                : String.format(java.util.Locale.ROOT, "%.2f", part / (double) whole);
     }
 }

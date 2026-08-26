@@ -98,7 +98,7 @@ public class ProactiveInquiryInvestigator {
                 written.knowledgeState(),
                 written.evidence() == null ? 0 : written.evidence().size(),
                 gapFor(state),
-                written.quotaMessage());
+                written.unavailableMessage());
     }
 
     /**

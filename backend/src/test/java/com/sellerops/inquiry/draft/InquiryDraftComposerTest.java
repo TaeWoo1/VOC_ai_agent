@@ -258,10 +258,62 @@ class InquiryDraftComposerTest {
 
         assertThat(view.draft()).isNull();
         assertThat(view.authorKind()).isNull();
-        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.NO_ANSWER_BASIS.name());
+        // GROUNDED, not NO_ANSWER_BASIS: the library answered this question perfectly well and the
+        // switch is what is off. Saying otherwise sends the seller to fix something that is not
+        // broken (product-owner, 2026-08-27).
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.GROUNDED.name());
+        assertThat(view.unavailableMessage()).isEqualTo(InquiryDraftComposer.CAPABILITY_OFF);
         assertThat(view.evidence()).isEmpty();
         assertThat(draftRows.countByWorkItemId(wi.getId()))
                 .as("a version nobody composed must not exist for an approval to bind to").isZero();
+    }
+
+    @Test
+    @DisplayName("grounded + the vendor did not answer — that is NOT a missing answer basis")
+    void vendorFailureIsNotAMissingBasis() {
+        // The defect this pins, in one sentence: a timeout used to be reported as NO_ANSWER_BASIS,
+        // so a seller with a complete library was told 「답변 기준이 필요합니다」 and sent off to
+        // write knowledge they had already written. The evidence verdict and the machinery's
+        // verdict are different sentences and must not be able to overwrite each other.
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedProposed(productId);
+        StubLibrary library = StubLibrary.returning(passage("사용법", "테이프를 벗기고 붙입니다."));
+
+        GeneratedDraftView view =
+                composer(library, StubModel.refusing()).generate(org, wi.getId(), user);
+
+        assertThat(view.draft()).isNull();
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.GROUNDED.name());
+        assertThat(view.unavailableMessage()).isEqualTo(InquiryDraftComposer.MODEL_FAILED);
+        assertThat(view.unavailableMessage()).doesNotContain("답변 기준");
+    }
+
+    @Test
+    @DisplayName("the 상세페이지 read failed — we did not finish looking, so we do not say there is nothing")
+    void detailReadFailureIsNotAMissingBasis() {
+        InquiryWorkItem wi = seedBound();
+        StubModel model = StubModel.writing("제목", "본문");
+
+        GeneratedDraftView view = composer(StubLibrary.empty(0), model, allowingQuota(),
+                failingTrigger()).generate(org, wi.getId(), user);
+
+        assertThat(view.draft()).isNull();
+        assertThat(view.unavailableMessage()).isEqualTo(InquiryDraftComposer.DETAIL_READ_FAILED);
+        assertThat(model.sawTitle).as("no basis was established, so no model call was made").isNull();
+    }
+
+    @Test
+    @DisplayName("the 상세페이지 read succeeded and found nothing — THAT is a missing answer basis")
+    void settledAbsenceStillReportsNoBasis() {
+        InquiryWorkItem wi = seedBound();
+
+        GeneratedDraftView view = composer(StubLibrary.empty(0), StubModel.writing("제목", "본문"))
+                .generate(org, wi.getId(), user);
+
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.NO_ANSWER_BASIS.name());
+        assertThat(view.answerBasisNote()).isEqualTo("답변 기준이 필요합니다.");
+        assertThat(view.unavailableMessage()).as("nothing failed — the library is simply empty")
+                .isNull();
     }
 
     @Test
@@ -274,8 +326,9 @@ class InquiryDraftComposerTest {
                 StubModel.writing("제목", "본문"), exhaustedQuota()).generate(org, wi.getId(), user);
 
         assertThat(view.draft()).isNull();
-        assertThat(view.quotaMessage()).contains("오늘");
-        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.NO_ANSWER_BASIS.name());
+        assertThat(view.unavailableMessage()).contains("오늘");
+        // The budget stopped it, not the evidence — and tomorrow the same question is answerable.
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.GROUNDED.name());
     }
 
     @Test
@@ -356,6 +409,18 @@ class InquiryDraftComposerTest {
     }
 
     private InquiryDraftComposer composer(StubLibrary library, StubModel model, AgentQuotaService quota) {
+        // The 상세페이지 trigger, switched off: a disabled trigger returns before it touches a
+        // repository, which is also the assertion that the draft path behaves identically in a
+        // deployment that never turns the lane on — the default one since 2026-08-27.
+        return composer(library, model, quota,
+                new com.sellerops.product.detail.ProductDetailEnrichmentTrigger(
+                        null, null, null, null, List.of(), false));
+    }
+
+    private InquiryDraftComposer composer(StubLibrary library, StubModel model,
+                                          AgentQuotaService quota,
+                                          com.sellerops.product.detail.ProductDetailEnrichmentTrigger
+                                                  trigger) {
         // The real retriever over a stubbed product lane: the org-policy and past-answer lanes run
         // against genuinely empty stores, which is the state these cases are about.
         InquiryEvidenceRetriever retriever = new InquiryEvidenceRetriever(products, library,
@@ -364,12 +429,7 @@ class InquiryDraftComposerTest {
                 com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH));
         return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, retriever, model,
                 quota, variants, new DraftEvidenceSnippets(productChunks, orgChunks, memories),
-                // The 상세페이지 trigger, switched off: these cases are about what the draft path
-                // does with knowledge it already has, and a disabled trigger returns before it
-                // touches a repository — which is also the assertion that the draft path works
-                // identically in a deployment that never turns the lane on.
-                new com.sellerops.product.detail.ProductDetailEnrichmentTrigger(
-                        null, null, null, null, List.of(), false));
+                trigger);
     }
 
     /** A passage whose chunk really exists, for the paths that go back to the source to read it. */
@@ -453,6 +513,27 @@ class InquiryDraftComposerTest {
         return workItems.save(wi);
     }
 
+    /** A trigger whose one channel read failed. Nothing else about the draft path changes. */
+    private static com.sellerops.product.detail.ProductDetailEnrichmentTrigger failingTrigger() {
+        return new com.sellerops.product.detail.ProductDetailEnrichmentTrigger(
+                null, null, null, null, List.of(), true) {
+            @Override
+            public Result enrichIfNeeded(UUID orgId, UUID productId) {
+                return new Result(Outcome.READ_FAILED, null);
+            }
+        };
+    }
+
+    /** An inquiry bound to a product by the source — the only shape that reaches the trigger. */
+    private InquiryWorkItem seedBound() {
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedProposed(productId);
+        Inquiry q = inquiries.findById(wi.getInquiryId()).orElseThrow();
+        q.setProductBinding(com.sellerops.inquiry.InquiryProductBinding.SOURCE_EXACT.name());
+        inquiries.save(q);
+        return wi;
+    }
+
     /** Always allows. The quota's own arithmetic is {@code AgentQuotaServiceTest}'s subject. */
     private static AgentQuotaService allowingQuota() {
         return new AgentQuotaService(null, null) {
@@ -503,31 +584,45 @@ class InquiryDraftComposerTest {
     /** A model that either writes a fixed draft or is off, recording exactly what it was shown. */
     static final class StubModel extends AgentDraftService {
         private final AgentDraftResponseParser.ParsedDraft answer;
+        /**
+         * Separate from {@code answer != null} since 2026-08-27, because the two failures it used to
+         * conflate are now two different sentences on the seller's screen: a capability that is off,
+         * and a capability that ran and came back with nothing.
+         */
+        private final boolean enabled;
         final List<AgentDraftGenerator.Passage> sawKnowledge = new ArrayList<>();
         String sawTitle;
         String sawDetails;
 
-        private StubModel(AgentDraftResponseParser.ParsedDraft answer) {
+        private StubModel(AgentDraftResponseParser.ParsedDraft answer, boolean enabled) {
             super(null, null);
             this.answer = answer;
+            this.enabled = enabled;
         }
 
         static StubModel writing(String title, String comments) {
-            return new StubModel(new AgentDraftResponseParser.ParsedDraft("general_reply", title, comments));
+            return new StubModel(
+                    new AgentDraftResponseParser.ParsedDraft("general_reply", title, comments), true);
         }
 
+        /** The switch is off. No call is attempted. */
         static StubModel disabled() {
-            return new StubModel(null);
+            return new StubModel(null, false);
+        }
+
+        /** The switch is on, the call was made, and the vendor gave nothing back. */
+        static StubModel refusing() {
+            return new StubModel(null, true);
         }
 
         @Override
         public boolean isEnabledFor(UUID orgId) {
-            return answer != null;
+            return enabled;
         }
 
         @Override
         public String versionFor(UUID orgId) {
-            return answer == null ? null : "stub-model/v1";
+            return enabled ? "stub-model/v1" : null;
         }
 
         String sawOrderState;

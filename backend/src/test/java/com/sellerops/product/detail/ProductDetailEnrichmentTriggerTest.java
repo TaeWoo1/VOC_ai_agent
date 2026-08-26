@@ -193,6 +193,19 @@ class ProductDetailEnrichmentTriggerTest {
     }
 
     @Test
+    @DisplayName("the default is OFF — an ordinary boot reads no seller's 상세페이지")
+    void defaultIsOff() throws Exception {
+        // Read off the source rather than through a Spring context, because what is protected here
+        // is the DEFAULT — the value a deployment gets by saying nothing — and a context that sets
+        // the property proves the opposite of the thing in question. This capability has never run
+        // live; merging a class must not be what starts calling a seller's channel.
+        String source = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "src/main/java/com/sellerops/product/detail/ProductDetailEnrichmentTrigger.java"));
+        assertThat(source).contains("${sellerops.product.detail.enrichment.enabled:false}");
+        assertThat(source).doesNotContain("enrichment.enabled:true");
+    }
+
+    @Test
     @DisplayName("there is no catalogue path — the trigger takes one product id and nothing else")
     void thereIsNoSweep() {
         assertThat(ProductDetailEnrichmentTrigger.class.getDeclaredMethods())

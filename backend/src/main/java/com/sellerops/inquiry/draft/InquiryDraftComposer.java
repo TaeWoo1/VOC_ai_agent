@@ -53,6 +53,14 @@ import org.springframework.stereotype.Service;
  * missing knowledge" trigger, and it is the only reason a draft touches a channel besides the order
  * fact. It cannot fail the draft: every outcome of that call is swallowed and reported.
  *
+ * <p><b>"No basis" and "did not run" are different answers</b> (product-owner, 2026-08-27).
+ * {@link AnswerBasisState} is a statement about EVIDENCE. A spent budget, a capability that is off,
+ * a vendor that did not answer, and a 상세페이지 read that failed are statements about the MACHINERY,
+ * and reporting them as {@code NO_ANSWER_BASIS} told a seller to go write knowledge they already
+ * had. They travel in {@code unavailableMessage} instead — and when a detail read failed, the basis
+ * verdict is still reported but must not be the sentence on screen: we did not finish looking, so
+ * "there is nothing to find" is not ours to say.
+ *
  * <p><b>When there is no basis, nothing is written</b> (product-owner, 2026-08-26).
  * {@link AnswerBasisState#NO_ANSWER_BASIS} means no current evidence applies, and in that state no
  * model is called and no version is saved. The deterministic drafter that used to fill the gap is
@@ -79,6 +87,16 @@ public class InquiryDraftComposer {
     private final DraftEvidenceSnippets snippets;
     private final ProductDetailEnrichmentTrigger detail;
 
+    /**
+     * The three operational sentences, and one rule covering all of them: <b>none of them says
+     * anything about the seller's knowledge.</b> Each names what did not run and what to do next,
+     * and none of them is 「답변 기준이 필요합니다」 — that sentence belongs to
+     * {@link AnswerBasisState#NO_ANSWER_BASIS} alone.
+     */
+    static final String CAPABILITY_OFF = "AI 답변 초안 기능이 켜져 있지 않습니다.";
+    static final String MODEL_FAILED = "답변 초안을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+    static final String DETAIL_READ_FAILED = "상품 상세 정보를 확인하지 못했습니다.";
+
     public InquiryDraftComposer(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                 InquiryReplyDraftService drafts, InquiryDraftEvidenceRepository evidence,
                                 InquiryEvidenceRetriever retriever, AgentDraftService model,
@@ -102,9 +120,9 @@ public class InquiryDraftComposer {
      *
      * <p>Charged against the org's daily AI budget before the model is reached, on the same counter
      * every other draft spends — a regenerate is a call, not a free retry. An exhausted budget does
-     * not fail the request: the deterministic drafter writes instead, the version is stamped
-     * {@link DraftAuthorKind#RULE}, and the seller is told why in {@code quotaMessage}. The dashboard,
-     * the queue, and the send path are all unaffected by that exhaustion.
+     * not fail the request and does not produce a substitute reply: nothing is written, and the
+     * seller is told that the budget — not their knowledge library — is what stopped it
+     * ({@code unavailableMessage}). The dashboard, the queue and the send path are unaffected.
      */
     public GeneratedDraftView generate(UUID orgId, UUID workItemId, UUID sellerUserId) {
         return compose(orgId, workItemId, "SELLER:" + sellerUserId);
@@ -115,8 +133,7 @@ public class InquiryDraftComposer {
      * Proactive Operations Agent drafts through, before any human has opened the inquiry.
      *
      * <p><b>Nothing else differs.</b> Same retrieval, same three lanes, same quota counter, same
-     * fallback to the deterministic drafter when the budget is spent, same evidence rows, same
-     * knowledge state. The org's daily AI budget is charged here exactly as it is for a seller-initiated
+     * evidence rows, same knowledge state. The org's daily AI budget is charged here exactly as it is for a seller-initiated
      * draft, because it is the same call and pretending otherwise would let a background loop spend a
      * budget the seller cannot see.
      */
@@ -136,7 +153,7 @@ public class InquiryDraftComposer {
         String title = MarkupText.toPlainText(inquiry.getTitle());
         String details = MarkupText.toPlainText(inquiry.getBody());
 
-        enrichDetailIfNeeded(orgId, inquiry);
+        String detailFailure = enrichDetailIfNeeded(orgId, inquiry);
         InquiryEvidenceRetriever.InquiryEvidence retrieved = retriever.retrieve(orgId, inquiry);
 
         // Computed ONCE and used twice: it decides the caution line the drafter reads and, with the
@@ -148,27 +165,40 @@ public class InquiryDraftComposer {
         if (!basis.mayGenerate()) {
             // No model call and no saved version. Nothing here is a refusal to help — the seller
             // writes their own reply on the same screen — it is a refusal to manufacture one.
-            return noBasis(retrieved, basis, null);
+            //
+            // Unless the 상세페이지 read is what failed. Then this verdict rests on a library we
+            // could not finish filling, and 「답변 기준이 필요합니다」 would send the seller off to
+            // write knowledge that may already be sitting on their own listing.
+            return noBasis(retrieved, basis, detailFailure);
         }
 
-        String quotaMessage = null;
+        // Each branch names its own reason, because the three are not interchangeable to the person
+        // reading the screen: a budget comes back tomorrow, a switch is an operator's job, and a
+        // vendor that did not answer is worth pressing the button again for.
+        String unavailable = null;
         Optional<AgentDraftResponseParser.ParsedDraft> written = Optional.empty();
         String modelVersion = model.versionFor(orgId);
-        if (model.isEnabledFor(orgId)) {
+        if (!model.isEnabledFor(orgId)) {
+            unavailable = CAPABILITY_OFF;
+        } else {
             QuotaDecision decision = quota.consume(orgId, AgentUsageKind.DRAFT, null);
             if (decision.allowed()) {
                 written = model.draft(orgId, title, details, passagesFor(retrieved.passages()),
                         retrieved.order().messageKo(),
                         applicability.messageKo(retrieved.figuresUnaided()));
+                if (written.isEmpty()) {
+                    unavailable = MODEL_FAILED;
+                }
             } else {
-                quotaMessage = decision.messageKo();
+                unavailable = decision.messageKo();
             }
         }
         if (written.isEmpty()) {
-            // The budget was spent, the capability is off, or the vendor refused. Whatever the cause,
-            // nothing wrote this reply — and a template that says 「확인 후 안내드리겠습니다」 in its
-            // place is a promise with no author. The reason is reported instead.
-            return noBasis(retrieved, AnswerBasisState.NO_ANSWER_BASIS, quotaMessage);
+            // Nothing wrote this reply, and a template saying 「확인 후 안내드리겠습니다」 in its place
+            // is a promise with no author. The BASIS is reported as it was actually computed — this
+            // question IS grounded, and overwriting that with NO_ANSWER_BASIS would be a second
+            // false statement laid on top of the first — and the operational reason travels beside it.
+            return noBasis(retrieved, basis, unavailable);
         }
 
         AgentDraftResponseParser.ParsedDraft parsed = written.get();
@@ -195,10 +225,11 @@ public class InquiryDraftComposer {
      * work item's version counter does not advance on a non-event.
      */
     private static GeneratedDraftView noBasis(InquiryEvidenceRetriever.InquiryEvidence retrieved,
-                                              AnswerBasisState basis, String quotaMessage) {
+                                              AnswerBasisState basis, String unavailableMessage) {
         return new GeneratedDraftView(null, null, retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
-                basis.actionKo(retrieved.state()), retrieved.productId(), List.of(), quotaMessage);
+                basis.actionKo(retrieved.state()), retrieved.productId(), List.of(),
+                unavailableMessage);
     }
 
     /**
@@ -209,16 +240,19 @@ public class InquiryDraftComposer {
      * channel read, and a NAVER outage must not become an error on their screen. The trigger already
      * reports its own outcome; this catch exists for the repository lookups around it.
      */
-    private void enrichDetailIfNeeded(UUID orgId, Inquiry inquiry) {
+    private String enrichDetailIfNeeded(UUID orgId, Inquiry inquiry) {
         if (inquiry.getProductId() == null || inquiry.productBinding() == null) {
             // No attribution, or an attribution nothing stated — there is no listing to read.
-            return;
+            return null;
         }
         try {
-            detail.enrichIfNeeded(orgId, inquiry.getProductId());
+            return detail.enrichIfNeeded(orgId, inquiry.getProductId()).outcome()
+                    == ProductDetailEnrichmentTrigger.Outcome.READ_FAILED ? DETAIL_READ_FAILED : null;
         } catch (RuntimeException ignored) {
-            // Deliberately silent: the trigger logs its own outcomes, and a second log line here
-            // would say the same thing with less information.
+            // Deliberately silent about the CAUSE — the trigger logs its own outcomes and a second
+            // line here would say the same thing with less information — but not about the FACT: a
+            // lookup that threw is a lookup that did not finish, exactly like a channel that refused.
+            return DETAIL_READ_FAILED;
         }
     }
 

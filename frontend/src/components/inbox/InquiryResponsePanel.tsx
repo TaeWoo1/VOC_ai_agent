@@ -106,8 +106,13 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   const [evidence, setEvidence] = useState<DraftEvidenceView[]>([]);
   /** The one sentence above the draft: what the knowledge library could and could not offer. */
   const [knowledgeNote, setKnowledgeNote] = useState<string | null>(null);
-  /** Set only when the day's AI budget is what stopped the model. */
-  const [quotaMessage, setQuotaMessage] = useState<string | null>(null);
+  /**
+   * Set when the MACHINERY is why there is no draft — budget spent, capability off, vendor silent,
+   * or a 상세페이지 read that failed. Never a statement about the seller's knowledge, and it wins
+   * over the no-basis card when both could apply: not having finished looking is not the same as
+   * having looked and found nothing.
+   */
+  const [unavailable, setUnavailable] = useState<string | null>(null);
   /**
    * Why no draft was written, when none was.
    *
@@ -132,6 +137,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       setEvidence(next.draftEvidence ?? []);
       setKnowledgeNote(next.draft?.knowledgeNote ?? null);
       setNoBasis(null);
+      setUnavailable(null);
     } catch (e) {
       setDetail(null);
       setError(detailErrorMessage(isAxiosError(e) ? e.response?.status : undefined));
@@ -279,7 +285,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
     if (!detail) return;
     setBusy(true);
     setActionError(null);
-    setQuotaMessage(null);
+    setUnavailable(null);
     try {
       let phase = detail.phase;
       if (canGenerateProposal(phase)) {
@@ -292,16 +298,21 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       const generated = await api.generateInquiryDraft(workItemId);
       setEvidence(generated.evidence);
       setKnowledgeNote(generated.knowledgeNote);
-      setQuotaMessage(generated.quotaMessage);
+      setUnavailable(generated.unavailableMessage);
       if (!generated.draft) {
         // Nothing was composed, on purpose. Leave whatever the seller had typed exactly as it is —
         // clearing their box because the AI declined would be the worst of both behaviours — and
         // say which basis is missing so the sentence is actionable rather than an apology.
-        setNoBasis({ note: generated.answerBasisNote, action: generated.answerBasisAction });
+        setNoBasis(
+          generated.unavailableMessage
+            ? null
+            : { note: generated.answerBasisNote, action: generated.answerBasisAction },
+        );
         setEditing(true);
         return;
       }
       setNoBasis(null);
+      setUnavailable(null);
       const written = generated.draft;
       setDetail((current) => (current ? { ...current, draft: written, phase } : current));
       setReplyTitle(written.title);
@@ -416,7 +427,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
           DECLINED to write one is a third, and folding it into the first would put the seller back
           in front of the same button with no answer to what they just pressed.
         */}
-        {!draft && !noBasis ? (
+        {!draft && !noBasis && !unavailable ? (
           <>
             <p className="mt-1.5 break-keep text-sm leading-relaxed text-muted">
               문의 내용과 등록된 상품 지식을 근거로 초안을 씁니다. 보내는 것은 확인 후 따로 누릅니다.
@@ -447,8 +458,23 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                 {knowledgeNote}
               </p>
             ) : null}
-            {quotaMessage ? (
-              <p className="mt-1.5 break-keep text-sm leading-relaxed text-warn">{quotaMessage}</p>
+            {/*
+              THE MACHINERY DID NOT RUN — a different card from the one below, on purpose.
+
+              「답변 기준이 필요합니다」 sends the seller off to write product knowledge. A vendor
+              timeout on a fully grounded question sent them there too, until 2026-08-27, and the
+              knowledge they were told to add already existed. This card says what did not run and
+              leaves their library alone.
+            */}
+            {unavailable ? (
+              <div className="mt-3 rounded-xl border border-warn/40 bg-warn/5 p-4">
+                <p className="break-keep text-lg font-semibold leading-relaxed text-ink">
+                  {unavailable}
+                </p>
+                <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
+                  아래에 직접 작성하실 수 있습니다.
+                </p>
+              </div>
             ) : null}
 
             {/*

@@ -83,7 +83,7 @@ function generated(over: Record<string, unknown> = {}) {
     evidence: [
       { kind: "PRODUCT_KNOWLEDGE", scopeLabel: "상품 정보", title: "사용법", locator: "product-knowledge/USAGE:데모 운영자", sourceId: "s", chunkId: "c", snippet: "몰딩 뒷면 테이프를 벗기고 벽면에 눌러 붙입니다." },
     ],
-    quotaMessage: null,
+    unavailableMessage: null,
     ...over,
   };
 }
@@ -179,13 +179,13 @@ describe("InquiryResponsePanel — the generated draft", () => {
     generateInquiryDraft.mockResolvedValue(generated({
       draft: null,
       authorKind: null,
-      knowledgeState: "NO_PRODUCT",
-      knowledgeNote: "이 문의는 아직 상품과 연결되지 않아, 상품 지식을 근거로 쓰지 못했습니다.",
-      answerBasis: "NO_ANSWER_BASIS",
-      answerBasisNote: "답변 기준이 필요합니다.",
-      answerBasisAction: "이 문의가 어떤 상품에 대한 것인지 연결하면 근거를 찾을 수 있습니다.",
+      knowledgeState: "GROUNDED",
+      knowledgeNote: "판매자가 등록한 상품 정보를 근거로 썼습니다.",
+      answerBasis: "GROUNDED",
+      answerBasisNote: "판매자가 등록한 근거를 사용해 썼습니다.",
+      answerBasisAction: null,
       evidence: [],
-      quotaMessage: "오늘 사용할 수 있는 AI 처리량을 모두 썼습니다. 내일 다시 사용할 수 있고, 화면의 숫자와 목록은 그대로 이용할 수 있습니다.",
+      unavailableMessage: "오늘 사용할 수 있는 AI 처리량을 모두 썼습니다. 내일 다시 사용할 수 있고, 화면의 숫자와 목록은 그대로 이용할 수 있습니다.",
     }));
     const user = userEvent.setup();
     render(<InquiryResponsePanel workItemId="w1" />);
@@ -193,6 +193,60 @@ describe("InquiryResponsePanel — the generated draft", () => {
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
 
     expect(await screen.findByText(/오늘 사용할 수 있는 AI 처리량/)).toBeInTheDocument();
+    expect(screen.queryByText("답변 기준이 필요합니다.")).toBeNull();
+  });
+
+  /*
+    THE MACHINERY DID NOT RUN — and the seller's library is not what is wrong.
+
+    Until 2026-08-27 a vendor that did not answer, and a 상세페이지 read that failed, both surfaced
+    as 「답변 기준이 필요합니다」. That sentence sends a seller off to write product knowledge; for a
+    fully grounded question they would have written it twice and still had no draft.
+  */
+  it("operational failure: names what did not run, and never 「답변 기준이 필요합니다」", async () => {
+    generateInquiryDraft.mockResolvedValue(generated({
+      draft: null,
+      authorKind: null,
+      knowledgeState: "GROUNDED",
+      knowledgeNote: "판매자가 등록한 상품 정보를 근거로 썼습니다.",
+      answerBasis: "GROUNDED",
+      answerBasisNote: "판매자가 등록한 근거를 사용해 썼습니다.",
+      answerBasisAction: null,
+      evidence: [],
+      unavailableMessage: "답변 초안을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    }));
+    const user = userEvent.setup();
+    render(<InquiryResponsePanel workItemId="w1" />);
+
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+
+    expect(await screen.findByText(/답변 초안을 생성하지 못했습니다/)).toBeInTheDocument();
+    expect(screen.queryByText("답변 기준이 필요합니다.")).toBeNull();
+    expect(screen.queryByText(/근거가 없는 답변은 만들지 않습니다/)).toBeNull();
+    // The box stays open: whichever way the machinery failed, the seller can still write the reply.
+    expect(screen.getByLabelText("내용")).toBeInTheDocument();
+  });
+
+  it("a failed 상세페이지 read is reported as a read, not as a missing basis", async () => {
+    generateInquiryDraft.mockResolvedValue(generated({
+      draft: null,
+      authorKind: null,
+      knowledgeState: "NO_LIBRARY",
+      knowledgeNote: "이 상품에 등록된 지식이 없고, 운영 정책·과거 답변에도 해당 내용이 없어 문의 내용만 보고 쓴 초안입니다.",
+      answerBasis: "NO_ANSWER_BASIS",
+      answerBasisNote: "답변 기준이 필요합니다.",
+      answerBasisAction: "이 상품에 등록된 지식이 없습니다. 상품 지식을 등록하면 근거가 생깁니다.",
+      evidence: [],
+      unavailableMessage: "상품 상세 정보를 확인하지 못했습니다.",
+    }));
+    const user = userEvent.setup();
+    render(<InquiryResponsePanel workItemId="w1" />);
+
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+
+    expect(await screen.findByText("상품 상세 정보를 확인하지 못했습니다.")).toBeInTheDocument();
+    // We did not finish looking. "There is nothing to find" is not ours to say yet.
+    expect(screen.queryByText("답변 기준이 필요합니다.")).toBeNull();
   });
 
   /*

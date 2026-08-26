@@ -100,7 +100,7 @@ beforeEach(() => {
     knowledgeNote: "판매자가 등록한 상품 지식을 근거로 썼습니다.",
     productId: "p1",
     evidence: [],
-    quotaMessage: null,
+    unavailableMessage: null,
   });
 });
 

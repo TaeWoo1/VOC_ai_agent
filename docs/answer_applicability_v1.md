@@ -248,7 +248,39 @@ manufacturer · category · brand), 판매자 작성 문서 **3**(USAGE · FAQ �
 승인하지 않은 약속. Organization Answer Style v1이 판매자가 승인한 문장을 줄 때까지 임의의 promise
 template은 만들지 않는다(그 금지는 `AnswerBasisStateTest`가 문자열로 고정한다). 따라서 **모델이 쓰지
 않으면 초안도 없다** — capability off · 일일 예산 소진 · 벤더 거절 모두 같은 결말이고, 이유는
-`quotaMessage`로 따로 말한다. `DraftAuthorKind.RULE`은 기존 행을 위해 남지만 **더 이상 생산되지 않는다**.
+`unavailableMessage`로 따로 말한다. `DraftAuthorKind.RULE`은 기존 행을 위해 남지만 **더 이상
+생산되지 않는다**.
+
+### 9-1. 근거 상태와 운영 상태는 다른 질문이다 (2026-08-27)
+
+위 문단에는 결함이 있었고 실제로 구현돼 있었다: 「모델이 쓰지 않으면 초안도 없다」를 지키면서
+**보고까지 `NO_ANSWER_BASIS`로** 했다. 그래서 근거가 완벽한 질문에서 벤더가 응답하지 않았을 때
+화면은 「답변 기준이 필요합니다」라고 말했다 — 판매자는 이미 등록해 둔 상품 지식을 **한 번 더**
+등록하러 갔을 것이다.
+
+`AnswerBasisState`는 **증거**에 대한 진술이다. 다음은 **기계**에 대한 진술이고 다른 칸으로 간다:
+
+| 상황 | 문장 |
+|---|---|
+| 근거 있음 + 벤더 무응답 | 「답변 초안을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.」 |
+| 근거 있음 + 예산 소진 | 「오늘 사용할 수 있는 AI 처리량을 모두 썼습니다…」 |
+| capability OFF | 「AI 답변 초안 기능이 켜져 있지 않습니다.」 |
+| 상세페이지 READ 실패 | 「상품 상세 정보를 확인하지 못했습니다.」 |
+| 검색이 **끝났고** 쓸 근거 0 | 「답변 기준이 필요합니다.」 — **여기서만** |
+
+**새 enum은 만들지 않았다.** 기존 `ProductDetailEnrichmentTrigger.Outcome`(이미 `READ_FAILED`를
+갖고 있었다)과 `GeneratedDraftView`의 메시지 칸으로 충분했고, 그 칸의 이름만
+`quotaMessage` → **`unavailableMessage`**로 정직해졌다. `AnswerBasisState`는 입력 2개짜리 순수
+함수 그대로이며 값도 셋 그대로다.
+
+화면 규칙은 **우선순위 하나**다: `unavailableMessage`가 있으면 그것이 카드가 되고
+「답변 기준이 필요합니다」는 렌더되지 않는다. 특히 상세페이지 READ 실패에서 그렇다 —
+**끝까지 보지 못한 것과, 보고 나서 없는 것은 다른 주장이다.**
+
+「상품 상세 정보를 확인 중입니다.」(PENDING)는 **오늘 생산자가 없다**. enrichment는 동기이고 이미지
+lane은 존재하지 않으므로 draft 시점에 in-flight일 수 없다 — enforcement 0인 상태 값을 미리 두지
+않는다는 같은 규율로 만들지 않았고, 이미지 lane이 비동기로 붙는 날 그 receipt가 생산자가 된다
+(`docs/image_product_knowledge_v1.md` §10-2 · §10-4).
 
 `NEEDS_CLARIFICATION`은 반대로 **진짜 답변**이다. 근거는 있고 고객만 아는 사실 하나가 비었을 뿐이므로,
 그 하나를 묻는 것이 답변 전체다 — 없는 정책도 없는 수치도 덧붙이지 않는다.

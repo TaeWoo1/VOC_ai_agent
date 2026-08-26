@@ -36,6 +36,12 @@ import org.springframework.stereotype.Component;
  * sweep, no background whole-catalogue pass and no scheduler entry; the only thing that can cause a
  * read is a seller (or the proactive preparer) actually needing an answer about that one product.
  *
+ * <p><b>Off by default</b> (product-owner, 2026-08-27). This capability has been unit-tested and
+ * never run live, and an ordinary {@code bootRun} must not begin making 상세페이지 reads against a
+ * seller's channel because a class was merged. {@code sellerops.product.detail.enrichment.enabled}
+ * is turned on for a bounded, approved live proof only; raising the Demo/Pilot default is a separate
+ * decision that comes after that proof rather than with it.
+ *
  * <p><b>It never throws at its caller.</b> A draft must be produced whether or not a channel
  * answered — a 403, a rate limit, a missing credential and a rebuilt listing all end as an
  * {@link Outcome}, logged, with the draft path continuing on whatever knowledge already existed.
@@ -85,7 +91,7 @@ public class ProductDetailEnrichmentTrigger {
                                           ChannelRepository channels,
                                           SellerAccountRepository accounts,
                                           List<ProductDetailSource> sources,
-                                          @Value("${sellerops.product.detail.enrichment.enabled:true}")
+                                          @Value("${sellerops.product.detail.enrichment.enabled:false}")
                                           boolean enabled) {
         this(enrichment, listings, channels, accounts, sources, Clock.systemUTC(), enabled);
     }
