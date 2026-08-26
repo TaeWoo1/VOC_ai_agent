@@ -392,17 +392,21 @@ thread repair(68→24)를 받지 않아 `REPLY` 44건이 아직 고객 문의로
 이유는 하나다: 이 org의 숫자를 canonical 숫자로 착각하면 「미답변 69건」이라는 틀린 보고가 나오고,
 실제로 이 세션의 첫 집계가 두 org를 합쳐 **94**를 냈다. **canonical Demo Org는 `7146c50f` 하나다.**
 
-## 10. NAVER 상세 grounding — `DEFERRED_UNTIL_APPROVED_DEV_NETWORK`
+## 10. NAVER 상세 grounding — `RESOLVED` (2026-08-26)
 
-`BLOCKED`가 아니다. 막힌 것이 아니라 **미룬 것**이고, 미룬 이유는 기술이 아니라 결정이다.
+이 절은 `DEFERRED_UNTIL_APPROVED_DEV_NETWORK`였다. **해소됐다.**
 
-product-owner는 **현재 네트워크의 IP를 NAVER 애플리케이션에 등록하지 않기로 했다**. NAVER 관련
-live READ는 기존에 개발하던 **승인된 네트워크/IP 환경으로 복귀한 뒤에만** 진행한다.
+product-owner가 승인된 개발 네트워크로 복귀했고, 그 자리에서 preflight를 다시 돌렸다 — 그리고
+**한 번 빨간불로 멈췄다**: 실제 egress와 이 배포가 선언한 NAVER advertised egress가 서로 다른
+네트워크였다. 새 IP를 등록하는 방향은 금지돼 있었으므로 **요청 0회로 STOP**하고, 두 갈래(승인된 망이
+아니다 / 선언이 낡았다)를 스스로 판정하지 않고 보고했다. product-owner가 등록 상태를 확인해 후자로
+확정한 뒤, **실행 환경의 선언만** 실제와 맞게 정정하고(새 등록 0, 실제 IP 무커밋) 새 승인
+`apr-nv-detail-13250364547-r2`를 **정확히 1회** 사용했다.
 
-**현재 환경에서 NAVER marketplace call = 0.** 금지: 토큰 발급 시도 · detail READ · egress 설정 변경 ·
-기존 매니페스트 실행. `apr-nv-detail-13250364547`을 포함한 이전 승인은 **재사용하지 않는다**.
+verdict는 **`IMAGE_ONLY_GAP`**이고 근거·한계·반증 조건은 `docs/answer_applicability_v1.md` §8이
+소유한다. 후속은 OCR 구현이 아니라 설계 하나 — `docs/image_product_knowledge_v1.md`.
 
-복귀가 명시된 뒤에야, 그 시점에 ① 현재 egress가 승인된 개발 환경인지 확인하고 ② token preflight를
-하고 ③ code/branch/environment 변화를 확인한 다음, **새 bounded approval manifest를 작성**한다.
-임의의 approval id를 만들어 실행하지 않는다. 그때의 대상과 관측 항목은
-`docs/answer_applicability_v1.md` §8에 그대로 남아 있다.
+**여기서 남길 교훈은 IP가 아니다.** preflight가 비교한 것은 「실제 egress」와 「이 배포가 그렇다고
+말한 값」이었고, 둘이 어긋났을 때 **어느 쪽이 낡았는지는 저장소가 답할 수 없었다** — 실제 IP를
+커밋하지 않는 원칙 때문에 비교 대상의 역사가 없기 때문이다. 그 침묵은 옳게 작동했다: 판정하지 않고
+멈췄고, 사람이 채널의 등록 화면을 읽고 나서야 움직였다.

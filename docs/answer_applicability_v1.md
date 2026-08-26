@@ -152,12 +152,39 @@ NAVER에서는 오늘 언제나 참이다.
   이미지 이해가 정당화되는 것은 **`IMAGE_REFERENCES_ONLY` 하나뿐**이다. `MIXED`는 텍스트 경로가
   있으므로 그것부터 쓴다.
 
-**라이브 증명 `DEFERRED_UNTIL_APPROVED_DEV_NETWORK`** (2026-08-26 product-owner: 현재 네트워크의 IP를 NAVER 애플리케이션에 등록하지 않고, 기존 승인된 개발 네트워크로 복귀한 뒤에만 진행한다. 현재 환경에서 NAVER marketplace call = 0, 토큰 발급 시도 포함. 자세한 것은 `docs/cafe24_comment_answer_observation_v1.md` §10).
+**라이브 증명 `LIVE_VERIFIED` — verdict `IMAGE_ONLY_GAP`** (2026-08-26, `apr-nv-detail-13250364547-r2`,
+마켓플레이스 요청 **1회** · WRITE 0 · 저장 0).
 
-**경위.** `apr-nv-detail-13250364547`(1회 READ)은 승인받았으나 **실행되지
-못했다** — 게이트웨이가 이 머신의 호출 IP를 거부했다(`GW.IP_NOT_ALLOWED`, 토큰 발급 단계에서
-실패, **마켓플레이스 요청 0회**). 따라서 이 org의 상세페이지가 텍스트인지 이미지인지는
-**아직 측정되지 않았고**, 이 커밋의 어떤 문장도 그것을 안다고 주장하지 않는다. NAVER 애플리케이션에
-현재 egress IP를 등록하는 것은 **운영자의 조치**이며 (CLAUDE.md가 egress 설정 변경을 금지한다),
-등록 이후에야 §6의 verdict(TEXT_GROUNDABLE / STRUCTURED_GROUNDABLE / IMAGE_ONLY_GAP / UNKNOWN)를
-말할 수 있다.
+**측정.** `GET /external/v2/products/channel-products/13250364547` 한 번으로
+`shape=IMAGE_REFERENCES_ONLY` · `text_chars=104` · detailContent **이미지 26** · listing 이미지 10 ·
+**옵션 20, 그중 id 보유 20** · `needs_image_understanding=true` · `variant_named_reachable=true`.
+
+**이 측정이 실제로 닫은 것과 닫지 못한 것은 다르다.**
+
+- **닫혔다 — `TEXT_GROUNDABLE` 기각.** 상세 본문의 텍스트는 104자다. 20개 규격 각각의 수용 가닥수를
+  담을 수 있는 분량이 아니다. 상세 **텍스트** 경로에는 이 질문의 답이 없다.
+- **닫히지 않았다 — 옵션 *이름*의 내용.** 옵션은 20개가 있고 전부 id를 들고 있어 **구조적으로 읽을 수
+  있다**. 그러나 프로브는 설계상 판매자가 쓴 글자를 하나도 밖으로 내보내지 않는다(`DetailContentShape`는
+  enum 하나와 정수 셋이 되고 옵션은 개수와 존재 플래그가 된다) — 그래서 **이름이 규격 라벨인지 규격 +
+  스펙인지는 관측되지 않았다**. 이것은 결함이 아니라 그 바닥의 값이다: 판매자를 보호하는 sanitization이
+  같은 이유로 A(`STRUCTURED_GROUNDABLE`)와 C(`IMAGE_ONLY_GAP`)의 판별을 1회 예산 안에서 불가능하게 만든다.
+  **가르는 비용은 정확히 READ 1회**이며, 그것은 새 승인을 요구한다.
+
+**판정 `IMAGE_ONLY_GAP`** — 근거 둘: 위 측정(상세 텍스트 경로 닫힘, 그림 26장), 그리고 **판매자 자신의
+진술**(규격별 수용 가능한 전선 개수는 상품 상세페이지 **이미지**에 있다, product-owner 2026-08-26).
+추론으로 메운 칸은 없고, 반증 가능한 형태로 적는다 — 옵션 이름이 그 수치를 들고 있다면 이 판정은 A로
+바뀌며, 그것을 확인하는 방법은 위에 적힌 READ 1회다.
+
+**그래서 이 org의 오늘 상태.** 상품 `8722bf9c`에는 variant **0**, product_fact **3**(전부 taxonomy —
+manufacturer · category · brand), 판매자 작성 문서 **3**(USAGE · FAQ · POLICY). 「전선이 몇 가닥까지
+들어가나요?」의 답이 될 **현재 사실 근거는 이 저장소 안에 존재하지 않으며**, 초안이 인용했던 문장은
+규격을 구분하지 않는 상품 단위 FAQ였다(§1). 즉 이 사건의 최종 원인은 검색도 모델도 아니라
+**근거가 그림 안에 있었다**는 것이다.
+
+**다음 단계는 OCR 구현이 아니라 설계다** — `docs/image_product_knowledge_v1.md`(설계만, 구현 0).
+
+**경위.** 같은 승인의 1차 시도 `apr-nv-detail-13250364547`는 게이트웨이가 이 머신의 호출 IP를 거부해
+(`GW.IP_NOT_ALLOWED`, 토큰 발급 단계, **마켓플레이스 요청 0회**) 실행되지 못했다. 이번 실행 전 preflight도
+한 번 **빨간불로 멈췄다**: 실제 egress와 이 배포가 선언한 NAVER advertised egress가 **서로 다른 네트워크**였고,
+그 상태에서는 요청 0회로 STOP했다. product-owner가 등록 상태를 확인한 뒤 **실행 환경의 선언만** 실제와 맞게
+정정했다(새 IP 등록 없음, 실제 IP는 repo·docs에 커밋하지 않는 원칙 유지).
