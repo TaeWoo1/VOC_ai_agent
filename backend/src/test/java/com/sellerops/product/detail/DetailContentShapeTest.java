@@ -128,11 +128,12 @@ class DetailContentShapeTest {
         }
 
         @Test
-        @DisplayName("the image lane exists in the vocabulary and has no producer")
-        void theImageAuthorshipIsDeclaredAndUnused() throws Exception {
-            // AI_EXTRACTED_FROM_SELLER_IMAGE is spelled so its absence is assertable — the same
-            // technique FactConfidence.INFERRED uses. The day something produces it, this fails and
-            // says so out loud.
+        @DisplayName("the image lane has exactly one producer — flipping this test opened it")
+        void theImageAuthorshipHasOneProducer() throws Exception {
+            // AI_EXTRACTED_FROM_SELLER_IMAGE was spelled so its ABSENCE was assertable, and this
+            // test said so out loud on 2026-08-27 when the lane opened. It now counts to one rather
+            // than zero, which keeps the same property in a different place: a provenance two paths
+            // can stamp is a provenance that means two things.
             Path main = Path.of("src/main/java/com/sellerops");
             long producers;
             try (var files = Files.walk(main)) {
@@ -150,8 +151,8 @@ class DetailContentShapeTest {
                         .count();
             }
             assertThat(producers)
-                    .as("no main-source file may assign the image authorship until one is built")
-                    .isZero();
+                    .as("only the publication path may stamp a sentence as read off a picture")
+                    .isEqualTo(1);
         }
     }
 }

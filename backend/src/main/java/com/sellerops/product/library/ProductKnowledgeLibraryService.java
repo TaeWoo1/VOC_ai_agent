@@ -46,6 +46,7 @@ public class ProductKnowledgeLibraryService {
     private final ProductRepository products;
     private final ProductKnowledgeSourceRepository sources;
     private final ProductKnowledgeChunkRepository chunks;
+    private final ProductKnowledgeIndexer indexer;
 
     public ProductKnowledgeLibraryService(ProductRepository products,
                                           ProductKnowledgeSourceRepository sources,
@@ -53,6 +54,7 @@ public class ProductKnowledgeLibraryService {
         this.products = products;
         this.sources = sources;
         this.chunks = chunks;
+        this.indexer = new ProductKnowledgeIndexer(chunks);
     }
 
     @Transactional(readOnly = true)
@@ -154,23 +156,9 @@ public class ProductKnowledgeLibraryService {
                 hits.size() > cap ? List.copyOf(hits.subList(0, cap)) : List.copyOf(hits));
     }
 
-    /** Rebuild one document's passages. Old passages go first, so a shortened document shrinks. */
+    /** Rebuild one document's passages, through the collaborator every writer shares. */
     private int reindex(ProductKnowledgeSource source) {
-        chunks.deleteAllBySourceId(source.getId());
-        List<String> parts = KnowledgeText.chunk(source.getBody());
-        List<ProductKnowledgeChunk> rows = new ArrayList<>(parts.size());
-        for (int i = 0; i < parts.size(); i++) {
-            ProductKnowledgeChunk chunk = new ProductKnowledgeChunk();
-            chunk.setOrgId(source.getOrgId());
-            chunk.setProductId(source.getProductId());
-            chunk.setSourceId(source.getId());
-            chunk.setOrdinal(i + 1);
-            chunk.setContent(parts.get(i));
-            chunk.setNormalized(KnowledgeText.normalize(parts.get(i)));
-            rows.add(chunk);
-        }
-        chunks.saveAll(rows);
-        return rows.size();
+        return indexer.index(source);
     }
 
     private void apply(ProductKnowledgeSource source, KnowledgeSourceRequest request) {

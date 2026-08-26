@@ -13,6 +13,7 @@ import com.sellerops.connector.naver.NaverProductDetail;
 import com.sellerops.ingest.canonical.CanonicalProduct;
 import com.sellerops.ingest.canonical.CanonicalProductVariant;
 import com.sellerops.product.ProductKnowledgeWriter;
+import com.sellerops.product.library.ProductKnowledgeIndexer;
 import com.sellerops.product.library.ProductKnowledgeSource;
 import com.sellerops.product.library.ProductKnowledgeSourceRepository;
 import java.time.Instant;
@@ -45,6 +46,7 @@ class ProductDetailEnrichmentTest {
 
     private ProductKnowledgeSourceRepository sources;
     private ProductKnowledgeWriter catalogue;
+    private ProductKnowledgeIndexer indexer;
     private ProductDetailEnrichment enrichment;
 
     @BeforeEach
@@ -55,7 +57,10 @@ class ProductDetailEnrichmentTest {
                 .thenReturn(List.of());
         when(catalogue.write(any(), any(), anyList()))
                 .thenReturn(new ProductKnowledgeWriter.WriteResult(List.of(productId), 0, 20, 0));
-        enrichment = new ProductDetailEnrichment(sources, catalogue);
+        indexer = mock(ProductKnowledgeIndexer.class);
+        when(sources.save(any(ProductKnowledgeSource.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        enrichment = new ProductDetailEnrichment(sources, catalogue, indexer);
     }
 
     @Test
@@ -118,6 +123,18 @@ class ProductDetailEnrichmentTest {
         assertThat(saved.getValue().getTitle()).isEqualTo("상품 상세페이지");
         assertThat(saved.getValue().getAuthorName()).as("no machine belongs in a column naming people")
                 .isNull();
+        // Retrieval reads chunks, never sources. Before 2026-08-27 this call was missing and the
+        // outcome said TEXT_INDEXED over a document no question could reach.
+        verify(indexer).index(any(ProductKnowledgeSource.class));
+    }
+
+    @Test
+    @DisplayName("a page of pictures indexes nothing — there is no empty document to find")
+    void imageOnlyPageIndexesNothing() {
+        enrichment.apply(org, channelId, productId, "13250364547", "NAVER:PRODUCT_API:v1",
+                imageOnlyDetail(20), Instant.now());
+
+        verify(indexer, never()).index(any(ProductKnowledgeSource.class));
     }
 
     /** 26 pictures and 104 characters — the shape the 2026-08-26 probe measured on this listing. */

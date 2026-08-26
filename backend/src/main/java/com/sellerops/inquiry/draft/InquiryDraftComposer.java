@@ -20,6 +20,7 @@ import com.sellerops.knowledge.KnowledgeScope;
 import com.sellerops.order.fact.OrderFact;
 import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.product.detail.ProductDetailEnrichmentTrigger;
+import com.sellerops.product.detail.image.ProductDetailImageKnowledge;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -86,6 +87,7 @@ public class InquiryDraftComposer {
     private final ProductVariantRepository variants;
     private final DraftEvidenceSnippets snippets;
     private final ProductDetailEnrichmentTrigger detail;
+    private final ProductDetailImageKnowledge images;
 
     /**
      * The three operational sentences, and one rule covering all of them: <b>none of them says
@@ -96,13 +98,22 @@ public class InquiryDraftComposer {
     static final String CAPABILITY_OFF = "AI 답변 초안 기능이 켜져 있지 않습니다.";
     static final String MODEL_FAILED = "답변 초안을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.";
     static final String DETAIL_READ_FAILED = "상품 상세 정보를 확인하지 못했습니다.";
+    /**
+     * The third answer, and the first one with a producer.
+     *
+     * <p>Before the image lane existed there was no moment at which SellerOps was part-way through
+     * learning something about a product — so this sentence would have been a state nobody sets, and
+     * it was deliberately not written. A picture whose reading is in flight is that moment.
+     */
+    static final String DETAIL_READ_PENDING = "상품 상세 정보를 확인 중입니다.";
 
     public InquiryDraftComposer(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                 InquiryReplyDraftService drafts, InquiryDraftEvidenceRepository evidence,
                                 InquiryEvidenceRetriever retriever, AgentDraftService model,
                                 AgentQuotaService quota, ProductVariantRepository variants,
                                 DraftEvidenceSnippets snippets,
-                                ProductDetailEnrichmentTrigger detail) {
+                                ProductDetailEnrichmentTrigger detail,
+                                ProductDetailImageKnowledge images) {
         this.workItems = workItems;
         this.inquiries = inquiries;
         this.drafts = drafts;
@@ -113,6 +124,7 @@ public class InquiryDraftComposer {
         this.variants = variants;
         this.snippets = snippets;
         this.detail = detail;
+        this.images = images;
     }
 
     /**
@@ -169,7 +181,8 @@ public class InquiryDraftComposer {
             // Unless the 상세페이지 read is what failed. Then this verdict rests on a library we
             // could not finish filling, and 「답변 기준이 필요합니다」 would send the seller off to
             // write knowledge that may already be sitting on their own listing.
-            return noBasis(retrieved, basis, detailFailure);
+            return noBasis(retrieved, basis, detailFailure != null ? detailFailure
+                    : inFlight(orgId, inquiry) ? DETAIL_READ_PENDING : null);
         }
 
         // Each branch names its own reason, because the three are not interchangeable to the person
@@ -253,6 +266,18 @@ public class InquiryDraftComposer {
             // line here would say the same thing with less information — but not about the FACT: a
             // lookup that threw is a lookup that did not finish, exactly like a channel that refused.
             return DETAIL_READ_FAILED;
+        }
+    }
+
+    /**
+     * Whether this product's pictures are being read right now. Swallows everything: a draft must not
+     * fail because a progress query did.
+     */
+    private boolean inFlight(UUID orgId, com.sellerops.inquiry.Inquiry inquiry) {
+        try {
+            return images != null && images.inFlight(orgId, inquiry.getProductId());
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 

@@ -47,7 +47,13 @@ class AgentDraftBoundaryTest {
             // receives two closed-vocabulary labels. Heaviest of the four exposures, so it gets the same
             // one-door treatment rather than riding on the draft capability's door.
             new String[] {"InquirySignalGenerator", "LlmInquirySignatureClassifier.java",
-                    "InquirySignalGenerator.java"});
+                    "InquirySignalGenerator.java"},
+            // The fifth generator (Image Product Knowledge v1, 2026-08-27) and the heaviest exposure
+            // yet: the payload is not a sentence SellerOps composed but the seller's own picture,
+            // whose contents nobody has read before it leaves. Same one-door treatment, its own flag,
+            // its own key, and — uniquely — its own model.
+            new String[] {"ImageFactExtractionGenerator", "ImageFactExtractionService.java",
+                    "ImageFactExtractionGenerator.java"});
 
     /**
      * The classes allowed to name {@code AgentLlmTransport} beside a {@code .post(} call: the three
@@ -56,7 +62,7 @@ class AgentDraftBoundaryTest {
      */
     private static final List<String> TRANSPORT_HOLDERS = List.of(
             "AgentDraftGenerator.java", "AgentPlanGenerator.java", "AgentJudgeGenerator.java",
-            "InquirySignalGenerator.java",
+            "InquirySignalGenerator.java", "ImageFactExtractionGenerator.java",
             "JdkAgentLlmTransport.java", "AgentLlmConfiguration.java");
 
     @Test
@@ -107,7 +113,8 @@ class AgentDraftBoundaryTest {
                 new String[] {"sellerops.agent.plan.", "AgentPlanProperties.java"},
                 new String[] {"sellerops.agent.judge.", "AgentJudgeProperties.java"},
                 new String[] {"sellerops.triage.ai-pilot", "AiTriagePilotProperties.java"},
-                new String[] {"sellerops.inquiry.signature.", "InquirySignalProperties.java"});
+                new String[] {"sellerops.inquiry.signature.", "InquirySignalProperties.java"},
+                new String[] {"sellerops.product.image-knowledge.", "ImageKnowledgeProperties.java"});
         try (Stream<Path> walk = Files.walk(MAIN)) {
             for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
                 String name = source.getFileName().toString();

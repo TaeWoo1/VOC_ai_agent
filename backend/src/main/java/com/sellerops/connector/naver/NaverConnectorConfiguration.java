@@ -156,6 +156,31 @@ public class NaverConnectorConfiguration {
     }
 
     /**
+     * Stage 1 of Image Product Knowledge v1 — the first run that calls a vision model.
+     *
+     * <p>Approval-gated and inert by default, like the two diagnostics above it, and unlike them its
+     * flag turns on a PAID vendor call. The image capability has its own separate flag and key on top
+     * of this one, so a deployment that switches this on without configuring that capability makes
+     * marketplace and CDN reads and no model call — which is the safe direction.
+     * See {@link NaverImageKnowledgeProofRunner}.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.naver.diagnostic.image-knowledge.enabled",
+            havingValue = "true")
+    NaverImageKnowledgeProofRunner naverImageKnowledgeProofRunner(
+            NaverTokenClient tokenClient, NaverChannelProductClient detailClient,
+            com.sellerops.selleraccount.SellerAccountRepository accounts,
+            com.sellerops.product.ChannelProductRepository listings,
+            CredentialVault vault,
+            com.sellerops.product.detail.ProductDetailEnrichment enrichment,
+            com.sellerops.product.detail.image.ProductDetailImageKnowledge images,
+            @Value("${sellerops.connector.naver.diagnostic.image-knowledge.account-id:}") String accountId,
+            @Value("${sellerops.connector.naver.diagnostic.image-knowledge.channel-product-no:0}") long channelProductNo) {
+        return new NaverImageKnowledgeProofRunner(tokenClient, detailClient, accounts, listings, vault,
+                enrichment, images, accountId, channelProductNo);
+    }
+
+    /**
      * The 상세페이지 read, as the enrichment trigger can hold it.
      *
      * <p>Unconditional within the NAVER connector, unlike the probe runner beside it: this is the

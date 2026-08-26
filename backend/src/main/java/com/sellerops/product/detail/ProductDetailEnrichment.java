@@ -7,6 +7,7 @@ import com.sellerops.product.ProductKnowledgeWriter;
 import com.sellerops.product.library.KnowledgeAuthorship;
 import com.sellerops.product.library.KnowledgeSourceType;
 import com.sellerops.product.library.ProductKnowledgeSource;
+import com.sellerops.product.library.ProductKnowledgeIndexer;
 import com.sellerops.product.library.ProductKnowledgeSourceRepository;
 import java.time.Duration;
 import java.time.Instant;
@@ -64,11 +65,14 @@ public class ProductDetailEnrichment {
 
     private final ProductKnowledgeSourceRepository sources;
     private final ProductKnowledgeWriter catalogue;
+    private final ProductKnowledgeIndexer indexer;
 
     public ProductDetailEnrichment(ProductKnowledgeSourceRepository sources,
-                                   ProductKnowledgeWriter catalogue) {
+                                   ProductKnowledgeWriter catalogue,
+                                   ProductKnowledgeIndexer indexer) {
         this.sources = sources;
         this.catalogue = catalogue;
+        this.indexer = indexer;
     }
 
     /** Why an enrichment ended the way it did. A closed set, so a caller can report without prose. */
@@ -170,7 +174,10 @@ public class ProductDetailEnrichment {
         source.setBody(body);
         // authorName stays null on purpose: nobody at this company typed this, and filling the field
         // with a channel name would put a machine in a column that names people.
-        sources.save(source);
+        ProductKnowledgeSource saved = sources.save(source);
+        // AND the passages. Retrieval reads chunks, never sources — without this the outcome said
+        // TEXT_INDEXED while the document was unreachable by every question a seller could ask.
+        indexer.index(saved);
     }
 
     private Optional<ProductKnowledgeSource> existingDocument(UUID orgId, UUID productId) {

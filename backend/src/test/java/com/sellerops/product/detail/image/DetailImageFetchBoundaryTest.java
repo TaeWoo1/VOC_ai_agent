@@ -27,6 +27,11 @@ class DetailImageFetchBoundaryTest {
     /** The classes allowed to construct the fetcher. One, today: the Stage 0 census. */
     private static final List<String> ALLOWED_HOLDERS = List.of(
             "NaverConnectorConfiguration.java", "NaverDetailImageCensusRunner.java",
+            // The image-knowledge lane, added 2026-08-27. It constructs the fetcher rather than
+            // taking it as a bean on purpose: a container-wide DetailImageFetcher bean would make
+            // credential-free arbitrary-URL egress available to every class in this backend, which
+            // is precisely what this test exists to prevent. Two named holders, both bounded.
+            "ProductDetailImageKnowledge.java",
             "DetailImageFetcher.java");
 
     private static String executable(Path source) throws IOException {
@@ -86,8 +91,12 @@ class DetailImageFetchBoundaryTest {
     }
 
     @Test
-    @DisplayName("the image authorship still has no producer — this package did not start the lane")
-    void theImageLaneIsStillUnbuilt() throws IOException {
+    @DisplayName("the image authorship has exactly ONE producer, and it is the publication path")
+    void theImageLaneHasOneProducer() throws IOException {
+        // THIS TEST IS THE LANE'S SWITCH. Until 2026-08-27 it asserted zero producers, and flipping
+        // it was the deliberate, reviewable act of declaring the lane open. It stays as a count of
+        // one so the authorship cannot quietly acquire a second writer: a provenance that two paths
+        // can stamp is a provenance that means two different things.
         List<String> producers = new ArrayList<>();
         try (Stream<Path> walk = Files.walk(MAIN)) {
             for (Path source : walk.filter(f -> f.toString().endsWith(".java")).toList()) {
@@ -100,7 +109,7 @@ class DetailImageFetchBoundaryTest {
             }
         }
         assertThat(producers)
-                .as("Stage 0 measures pictures; nothing here turns one into a sentence")
-                .isEmpty();
+                .as("only the publication path may stamp a sentence as read off a picture")
+                .containsExactly("ProductDetailImageKnowledge.java");
     }
 }

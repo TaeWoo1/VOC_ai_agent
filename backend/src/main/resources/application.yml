@@ -181,6 +181,34 @@ sellerops:
       reasoning-effort: ${SELLEROPS_INQUIRY_SIGNATURE_REASONING_EFFORT:low}
       max-text-chars: ${SELLEROPS_INQUIRY_SIGNATURE_MAX_TEXT_CHARS:2000}
       max-batch-per-call: ${SELLEROPS_INQUIRY_SIGNATURE_MAX_BATCH:200}
+  # ── Image Product Knowledge v1 (2026-08-27): the SIXTH LLM capability ────────────────────────
+  #
+  # Its own switch, its own key and — uniquely — its own MODEL. Every other capability here defaults
+  # to gpt-5-2025-08-07, which the vendor's own documentation marks deprecated and scheduled for
+  # shutdown; migrating all six is a separate decision, and inheriting a shutdown-scheduled snapshot
+  # into a brand new lane would have been the worst of both.
+  #
+  # This is the heaviest exposure of the six: the payload is the SELLER'S OWN PICTURE, and nobody has
+  # read it before it leaves. What the floor test can still guarantee is that nothing goes WITH it —
+  # no product title, no option list, no customer question, no identifier.
+  #
+  # max-output-tokens is 1,200 rather than the 4,000 the others use, and reasoning-effort is `none`:
+  # the answer is a bounded list of triples, the budget is shared with reasoning on this model, and
+  # 4,000 would put a 26-image run over its approved cost ceiling for nothing.
+  product:
+    image-knowledge:
+      enabled: ${SELLEROPS_IMAGE_KNOWLEDGE_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_IMAGE_KNOWLEDGE_ORG_IDS:}
+      vendor: ${SELLEROPS_IMAGE_KNOWLEDGE_VENDOR:OPENAI}
+      model: ${SELLEROPS_IMAGE_KNOWLEDGE_MODEL:gpt-5.6-terra}
+      api-key: ${SELLEROPS_IMAGE_KNOWLEDGE_API_KEY:}
+      max-output-tokens: ${SELLEROPS_IMAGE_KNOWLEDGE_MAX_OUTPUT_TOKENS:1200}
+      reasoning-effort: ${SELLEROPS_IMAGE_KNOWLEDGE_REASONING_EFFORT:none}
+    detail:
+      enrichment:
+        # The 상세페이지 text lane. OFF by default (2026-08-27): a capability that has never run live
+        # must not start reading a seller's channel because a class was merged.
+        enabled: ${SELLEROPS_PRODUCT_DETAIL_ENRICHMENT_ENABLED:false}
   customermemory:
     retriever:
       # Retrieval strategy behind the CustomerMemoryRetriever port. `lexical` is the only implementation:

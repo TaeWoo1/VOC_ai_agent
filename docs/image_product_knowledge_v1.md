@@ -1,6 +1,9 @@
 # Image Product Knowledge v1 — 설계, 그리고 그 아래에 깔린 것
 
-> **상태: `TEXT_LANE_WIRED`(기본값 OFF) · `IMAGE_LANE_UNBUILT` · `STAGE_1_PREPARED`(2026-08-27).**
+> **상태: `TEXT_LANE_WIRED`(기본값 OFF) · `IMAGE_LANE_BUILT` · **`STAGE_1_LIVE_PROVEN`**(2026-08-27).**
+> Stage 1이 **실행됐다**(§11): 26장 · 모델 호출 26 · 실비 $0.104. 추출은 됐고(triple 48) **채택은 0**이며
+> 판매자 화면은 변하지 않았다 — 라벨 공간이 다르고, 무엇보다 **찾던 사실이 그 페이지에도 없다**.
+> 「읽었다」와 「말해도 된다」의 분리가 관측으로 확인된 것이 이 실행의 결과다.
 > Stage 1 준비는 **§10**이 소유한다 — 트리거 기본값 OFF, 답변 근거와 운영 상태의 분리, 규격 지속성,
 > 26장 전수 방침, 멀티모달 벤더 감사, Stage 1 매니페스트 초안. **vision model 호출은 여전히 0이다.**
 > 상품 간 재사용 측정은 **하지 않기로 결정**됐다(§9-1의 (b)) — v1의 경제성은 실제 문의가 가리킨
@@ -400,3 +403,77 @@ feature flags     : sellerops.product.detail.enrichment.enabled=true (이 실행
 rollback/disarm   : 두 플래그를 끄면 즉시 원상 — 코드 경로가 플래그 뒤에만 있다.
                    receipt/variant 행은 남지만 판매자 화면 의미는 변하지 않는다.
 ```
+
+
+---
+
+## 11. Stage 1 라이브 증명 — 그림은 읽혔고, 답은 거기 없었다
+
+*(2026-08-27 · 승인 `apr-nv-image-knowledge-13250364547-r1` · 실행됨)*
+
+```
+start   channel_product_no=13250364547 marketplace_budget=1 image_budget=26 model_budget=26
+        extractor=image-fact/v1+image-fact-prompt/v1+schema/v1+openai:gpt-5.6-terra
+                 +detail:high+out1200+effort:none
+VARIANTS enrichment=IMAGE_ONLY options_written=20 images_on_page=10
+        shape=IMAGE_REFERENCES_ONLY text_chars=104 images=26 img_tags=26 fetchable=26
+RUN     outcome=READ marketplace_requests=1 images_considered=26 images_fetched=26
+        model_calls=26 reused_receipts=0 failed_images=3
+FACTS   images_with_facts=7 zero_fact_images=16 accepted=0 unresolved=48 refused=0
+        published_documents=0
+USAGE   prompt_tokens=34,200 completion_tokens=2,977
+```
+
+실비 **약 $0.104**(입력 34,200×$2/1M + 출력 2,977×$12/1M). 이론상 상한 $0.556, 승인 한도 $0.75.
+
+### 11-1. 무엇이 됐는가
+
+**추출은 됐다.** 26장 중 7장에서 **48개 triple**을 닫힌 스키마로 받았고, 16장은 정직하게 `facts=[]`
+(대부분의 상세 이미지는 규격을 적지 않는다 — 예상된 답이다), 3장은 실패(`MODEL_FAILED` 1 ·
+`OFF_SCHEMA` 2). 규격 지속성도 됐다: `IMAGE_REFERENCES_ONLY` 페이지에서 **옵션 20건이 저장**됐다
+(실행 전 0건).
+
+### 11-2. 그리고 **0건이 채택됐다** — 이유는 둘이고, 둘 다 설계가 예상한 거절이다
+
+**(1) 라벨 공간이 다르다.** 이미지가 쓰는 규격 이름과 채널이 들고 있는 옵션 이름이 같은 문자열이
+아니다(자릿수 마스킹):
+
+| 이미지의 `specLabel` | 저장된 `option_name` |
+|---|---|
+| `#호` · `WOOD` · `BLACK` · `GRAY` · `WHITE` | `그레이 / #호(##개)` · `블랙 / #호(##개)` · `우드 / #호(##개)` · `화이트 / #호(##개)` |
+
+축 토큰으로 쪼개도 `#호` ≠ `#호(##개)`(포장 수량이 붙어 있다)이고, `WOOD` ≠ `우드`(영문 대 국문).
+**16개 라벨 전부 exact match 0.** `(##개)`를 떼거나 `WOOD`를 `우드`로 옮기는 것은 인코딩 차이 보정이
+아니라 **다른 문자열로 바꾸는 것**이고, 그것이 바로 이 lane이 금지한 추측이다 ⇒ 48건 전부
+`UNRESOLVED`, 발행 0, 판매자 화면 변화 0.
+
+**(2) 애초에 그 사실이 적혀 있지 않다.** 48개 triple 중 **가닥/심선/코어/수용 관련 attribute는 0건**이다.
+상세페이지가 적어 둔 것은 `A 외경 너비`·`B 외경 높이`·`C 내경 너비`·`D 내경 높이`·재질·원산지·
+포장 수량이다. **「전선이 몇 가닥 들어가는가」는 이 페이지에도 없다** — 내경 치수에서 **추론**해야
+나오는 값이고, 그 추론이 바로 2026-08-26 사건의 원형이다.
+
+### 11-3. §14 성공 기준 판정
+
+| # | 기준 | 판정 |
+|---|---|---|
+| 1 | 이미지에서 capacity 관련 사실을 찾았는가 | **아니다** — 0/48 |
+| 2 | specLabel이 structured variant와 exact match 되는가 | **아니다** — 0/16 |
+| 3 | variant별 capacity relation이 결정론적으로 구성되는가 | **해당 없음** — 재료가 없다 |
+| 4 | 숫자만 보고 규격/가닥을 추론하지 않았는가 | **그렇다** — 채택 0 · 발행 0 |
+| 5 | 규격 미지정 문의가 `NEEDS_CLARIFICATION`이 되는가 | 변화 없음(기존 동작 유지). 새 근거가 0이므로 이번 실행이 바꾼 것이 없다 |
+| 6 | exact variant일 때만 GROUNDED 가능한가 | **라이브로는 증명 불가** — 채택된 근거가 0이라 보여줄 대상이 없다. 규칙 자체는 단위 테스트로만 증명됨 |
+
+**기준 4는 이 실행의 가장 중요한 결과다.** 파이프라인 전체가 돌았고, 48개의 그럴듯한 사실을 손에
+쥐었고, **하나도 판매자 화면에 내보내지 않았다.** 「읽었다」와 「말해도 된다」가 실제로 분리돼 있다는
+것이 관측으로 확인됐다.
+
+### 11-4. 남은 것은 product-owner 결정 둘
+
+1. **축 분해를 허용할 것인가.** NAVER 옵션 이름은 채널이 문서화한 `색상 / 규격(수량)` 형식이다. 이것을
+   **선언적·결정론적으로 파싱**해 축 값(`그레이`, `#호`, `##개`)을 얻는 것은 fuzzy match가 아니라
+   **채널 포맷 파싱**이다. 다만 그것은 새 규칙이고, 만들지 말라는 지시가 있는 영역과 맞닿아 있으므로
+   **product-owner 결정**으로 올린다. 영문/국문 색상 대응(`WOOD`↔`우드`)은 **별개이며 더 위험하다** —
+   그것은 사전이고, 사전은 ontology의 시작이다.
+2. **이 lane을 이 상품에 대해 계속할 것인가.** (2)의 발견은 축 분해로 해결되지 않는다. 답이 페이지에
+   없으므로, 이 상품의 이 질문에 대해서는 **판매자가 지식을 쓰는 것 외에 방법이 없다** —
+   `NO_ANSWER_BASIS`의 「답변 기준이 필요합니다」가 정확히 그 상황을 말하고 있었다.

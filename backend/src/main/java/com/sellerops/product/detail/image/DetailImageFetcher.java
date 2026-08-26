@@ -73,52 +73,83 @@ public class DetailImageFetcher {
         return List.copyOf(out);
     }
 
+    /**
+     * One picture WITH its bytes, for the one caller that has to send them somewhere.
+     *
+     * <p>Separate from {@link #fetchAll} rather than a flag on it, so that the census path — and any
+     * future counting path — cannot accidentally start holding image content. The default is still
+     * "hash it and drop it"; retaining is something a caller has to ask for by name.
+     *
+     * <p>The bytes are bounded by {@link ImageFetchPolicy#MAX_BYTES_PER_IMAGE} exactly as before,
+     * enforced while streaming, and they are never logged, stored, or returned to anything but the
+     * extraction generator.
+     */
+    public Loaded loadOne(String url, int ordinal) {
+        return fetchOne(url, ordinal, true);
+    }
+
+    /** A picture and its content, held only for as long as one model call takes. */
+    public record Loaded(FetchedImage meta, byte[] bytes) {
+
+        public boolean ok() {
+            return meta.ok() && bytes != null && bytes.length > 0;
+        }
+    }
+
     /** One picture, one policy check per hop. */
     FetchedImage fetchOne(String url, int ordinal) {
+        return fetchOne(url, ordinal, false).meta();
+    }
+
+    private Loaded fetchOne(String url, int ordinal, boolean retain) {
         String target = url;
         for (int hop = 0; hop <= ImageFetchPolicy.MAX_REDIRECTS; hop++) {
             ImageFetchPolicy.Resolved resolved = ImageFetchPolicy.check(target, resolver);
             if (!resolved.allowed()) {
-                return FetchedImage.failed(ordinal, refusalOf(resolved.verdict()));
+                return dropped(ordinal, refusalOf(resolved.verdict()));
             }
             HttpResponse<InputStream> response;
             try {
                 response = client.send(request(target), HttpResponse.BodyHandlers.ofInputStream());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return FetchedImage.failed(ordinal, FetchedImage.Outcome.TRANSPORT_FAILED);
+                return dropped(ordinal, FetchedImage.Outcome.TRANSPORT_FAILED);
             } catch (Exception e) {
                 // The type never travels either: a TLS or DNS message can name the host.
-                return FetchedImage.failed(ordinal, FetchedImage.Outcome.TRANSPORT_FAILED);
+                return dropped(ordinal, FetchedImage.Outcome.TRANSPORT_FAILED);
             }
             int status = response.statusCode();
             if (status >= 300 && status < 400) {
                 String location = response.headers().firstValue("location").orElse(null);
                 if (location == null || location.isBlank()) {
-                    return FetchedImage.failed(ordinal, FetchedImage.Outcome.HTTP_ERROR);
+                    return dropped(ordinal, FetchedImage.Outcome.HTTP_ERROR);
                 }
                 // Resolved against the CURRENT target so a relative Location works, then re-checked
                 // from scratch at the top of the loop. This is the hop where an SSRF gets in.
                 try {
                     target = URI.create(target).resolve(location.strip()).toString();
                 } catch (RuntimeException e) {
-                    return FetchedImage.failed(ordinal, FetchedImage.Outcome.REFUSED_HOST);
+                    return dropped(ordinal, FetchedImage.Outcome.REFUSED_HOST);
                 }
                 closeQuietly(response.body());
                 continue;
             }
             if (status != 200) {
                 closeQuietly(response.body());
-                return FetchedImage.failed(ordinal, FetchedImage.Outcome.HTTP_ERROR);
+                return dropped(ordinal, FetchedImage.Outcome.HTTP_ERROR);
             }
             String contentType = response.headers().firstValue("content-type").orElse(null);
             if (!ImageFetchPolicy.isImageContentType(contentType)) {
                 closeQuietly(response.body());
-                return FetchedImage.failed(ordinal, FetchedImage.Outcome.NOT_AN_IMAGE);
+                return dropped(ordinal, FetchedImage.Outcome.NOT_AN_IMAGE);
             }
-            return read(response.body(), ordinal, contentType);
+            return read(response.body(), ordinal, contentType, retain);
         }
-        return FetchedImage.failed(ordinal, FetchedImage.Outcome.TOO_MANY_REDIRECTS);
+        return dropped(ordinal, FetchedImage.Outcome.TOO_MANY_REDIRECTS);
+    }
+
+    private static Loaded dropped(int ordinal, FetchedImage.Outcome outcome) {
+        return new Loaded(FetchedImage.failed(ordinal, outcome), null);
     }
 
     /**
@@ -130,20 +161,25 @@ public class DetailImageFetcher {
      * {@link Header#PREFIX} bytes are retained, for the dimension read; everything else is hashed and
      * discarded.
      */
-    private FetchedImage read(InputStream body, int ordinal, String contentType) {
+    private Loaded read(InputStream body, int ordinal, String contentType, boolean retain) {
         try (InputStream in = body) {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] head = new byte[Header.PREFIX];
             int headFilled = 0;
+            // Only allocated when a caller asked for the content. The counting path never grows one.
+            java.io.ByteArrayOutputStream retained = retain ? new java.io.ByteArrayOutputStream() : null;
             byte[] buffer = new byte[8192];
             long total = 0;
             int read;
             while ((read = in.read(buffer)) != -1) {
                 total += read;
                 if (total > ImageFetchPolicy.MAX_BYTES_PER_IMAGE) {
-                    return FetchedImage.failed(ordinal, FetchedImage.Outcome.TOO_LARGE);
+                    return dropped(ordinal, FetchedImage.Outcome.TOO_LARGE);
                 }
                 digest.update(buffer, 0, read);
+                if (retained != null) {
+                    retained.write(buffer, 0, read);
+                }
                 if (headFilled < head.length) {
                     int copy = Math.min(read, head.length - headFilled);
                     System.arraycopy(buffer, 0, head, headFilled, copy);
@@ -152,11 +188,12 @@ public class DetailImageFetcher {
             }
             byte[] prefix = headFilled == head.length ? head : java.util.Arrays.copyOf(head, headFilled);
             ImageDimensions.Size size = ImageDimensions.of(prefix);
-            return new FetchedImage(ordinal, FetchedImage.Outcome.OK,
+            FetchedImage meta = new FetchedImage(ordinal, FetchedImage.Outcome.OK,
                     HexFormat.of().formatHex(digest.digest()), (int) total, normalizeType(contentType),
                     size == null ? 0 : size.width(), size == null ? 0 : size.height());
+            return new Loaded(meta, retained == null ? null : retained.toByteArray());
         } catch (Exception e) {
-            return FetchedImage.failed(ordinal, FetchedImage.Outcome.TRANSPORT_FAILED);
+            return dropped(ordinal, FetchedImage.Outcome.TRANSPORT_FAILED);
         }
     }
 

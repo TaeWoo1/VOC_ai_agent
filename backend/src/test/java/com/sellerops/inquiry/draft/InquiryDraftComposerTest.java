@@ -408,6 +408,12 @@ class InquiryDraftComposerTest {
         return composer(library, model, allowingQuota());
     }
 
+    /**
+     * The image lane, absent. These cases are about the draft path; a null progress query means
+     * "no picture is being read", which is the state every deployment is in until the lane is on.
+     */
+    private com.sellerops.product.detail.image.ProductDetailImageKnowledge imageKnowledge;
+
     private InquiryDraftComposer composer(StubLibrary library, StubModel model, AgentQuotaService quota) {
         // The 상세페이지 trigger, switched off: a disabled trigger returns before it touches a
         // repository, which is also the assertion that the draft path behaves identically in a
@@ -429,7 +435,7 @@ class InquiryDraftComposerTest {
                 com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH));
         return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, retriever, model,
                 quota, variants, new DraftEvidenceSnippets(productChunks, orgChunks, memories),
-                trigger);
+                trigger, imageKnowledge);
     }
 
     /** A passage whose chunk really exists, for the paths that go back to the source to read it. */
