@@ -300,4 +300,92 @@ class Cafe24CommentAnswerTest {
                     .isInstanceOf(IllegalStateException.class);
         }
     }
+
+    @Nested
+    @DisplayName("the historical run — an exact named set, no window")
+    class HistoricalReconciliation {
+
+        private final FakeCafe24HttpClient http = new FakeCafe24HttpClient();
+        private final Cafe24InquiryAnswerObserver observer = new Cafe24InquiryAnswerObserver(
+                new Cafe24BoardArticlesClient(http), new Cafe24BoardCommentsClient(http));
+
+        private static Cafe24HttpClient.Response ok(String body) {
+            return new Cafe24HttpClient.Response(200, body, java.util.Map.of());
+        }
+
+        @Test
+        @DisplayName("discovery names the articles and asks for comments only — no dates, one request")
+        void discoveryIsOneRequestOverTheNamedSet() {
+            // The window form cannot express this at all: the contract caps a call at one year and
+            // this backlog spans eleven, so a date crawl would cost twelve discovery requests.
+            http.enqueue(ok("""
+                    {"articles":[{"article_no":80}]}"""));
+            http.enqueue(ok("""
+                    {"comments":[{"comment_no":7,"article_no":80,
+                      "created_date":"2026-08-26T14:56:24+09:00","member_id":"sunbaro"}]}"""));
+
+            Map<Long, Instant> answered =
+                    observer.observeExact("tok", "sunbaro", 6, List.of(19L, 25L, 80L, 97L));
+
+            assertThat(answered).containsOnlyKeys(80L);
+            assertThat(http.sent).as("1 discovery + 1 read for the only commented article").hasSize(2);
+            String query = http.sent.get(0).uri().getQuery();
+            assertThat(query).contains("comment=T").contains("19,25,80,97");
+            assertThat(query).as("an eleven-year backlog is not reachable by a date window")
+                    .doesNotContain("start_date").doesNotContain("end_date");
+        }
+
+        @Test
+        @DisplayName("more articles than the approval covers is a refusal, never the first 25")
+        void overTheApprovedCapItRefuses() {
+            List<Long> tooMany = java.util.stream.LongStream
+                    .rangeClosed(1, Cafe24InquiryAnswerObserver.MAX_EXACT_COMMENT_READS + 1)
+                    .boxed().toList();
+
+            assertThatThrownBy(() -> observer.observeExact("tok", "sunbaro", 6, tooMany))
+                    .as("a run that quietly did the first 25 would report a 'true' unanswered "
+                            + "count computed from a set nobody approved")
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(http.sent).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a customer's comment on a historical row still answers nothing")
+        void aCustomerCommentIsStillNotAnAnswer() {
+            http.enqueue(ok("""
+                    {"articles":[{"article_no":80}]}"""));
+            http.enqueue(ok("""
+                    {"comments":[{"comment_no":7,"article_no":80,
+                      "created_date":"2026-08-26T14:56:24+09:00","member_id":"buyer01"}]}"""));
+
+            assertThat(observer.observeExact("tok", "sunbaro", 6, List.of(80L))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("nothing named → not one request")
+        void anEmptySetCostsNothing() {
+            assertThat(observer.observeExact("tok", "sunbaro", 6, List.of())).isEmpty();
+            assertThat(http.sent).isEmpty();
+        }
+
+        @Test
+        @DisplayName("if the two filters do not combine, the failure is a superset — never a wrong answer")
+        void anIgnoredCommentFilterCostsBudgetNotCorrectness() {
+            // A server that ignores `comment` returns every named article. The lane then spends its
+            // comment budget instead of saving it, and still answers correctly.
+            http.enqueue(ok("""
+                    {"articles":[{"article_no":19},{"article_no":25},{"article_no":80}]}"""));
+            http.enqueue(ok("{\"comments\":[]}"));
+            http.enqueue(ok("{\"comments\":[]}"));
+            http.enqueue(ok("""
+                    {"comments":[{"comment_no":7,"article_no":80,
+                      "created_date":"2026-08-26T14:56:24+09:00","member_id":"sunbaro"}]}"""));
+
+            Map<Long, Instant> answered =
+                    observer.observeExact("tok", "sunbaro", 6, List.of(19L, 25L, 80L));
+
+            assertThat(answered).containsOnlyKeys(80L);
+            assertThat(http.sent).hasSize(4);
+        }
+    }
 }

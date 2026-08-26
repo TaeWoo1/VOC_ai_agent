@@ -9,6 +9,7 @@ import {
 } from "../../lib/inquiryWorkflow";
 import {
   canEditDraft,
+  answeredElsewhere,
   canPublishReply,
   canResumePublish,
   canVerifyPublish,
@@ -161,7 +162,12 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
    * {@link onGenerateDraft}); anything past PROPOSED is already bound into the reply lifecycle and a
    * new version would be a draft nobody can send.
    */
-  const canDraft = !!detail && (canGenerateProposal(detail.phase) || detail.phase === "PROPOSED");
+  const canDraft =
+    !!detail
+    // Already answered on the channel — a new draft version here would be a reply nobody needs,
+    // written for a customer who is no longer waiting.
+    && !answeredElsewhere(detail)
+    && (canGenerateProposal(detail.phase) || detail.phase === "PROPOSED");
 
   async function onSaveDraft() {
     if (!detail) return;

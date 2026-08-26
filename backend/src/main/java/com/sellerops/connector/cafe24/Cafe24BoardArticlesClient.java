@@ -135,6 +135,49 @@ public class Cafe24BoardArticlesClient {
                 .toList();
     }
 
+    /**
+     * Which of an EXACT set of articles have comments — one request, no window, no offset.
+     *
+     * <p>The historical shape of {@link #fetchCommentedArticleNumbers}. A backlog that spans eleven
+     * years cannot be reached by the windowed form at all: the contract caps a call at "one year per
+     * call", so a date crawl over 2014–2025 costs twelve discovery requests before a single comment is
+     * read. Naming the rows we already hold costs one, and asks about nothing else.
+     *
+     * <p>The LIST publishes {@code article_no} (comma-separated) and {@code comment} side by side and
+     * declares no exclusion between them. <b>If they turn out not to combine, this fails safe:</b> a
+     * server that ignores {@code comment} returns the SUPERSET — every named article — and the caller
+     * spends its comment budget instead of saving it. It cannot return less than the truth, and the
+     * caller reconciles requested against returned rather than trusting the count.
+     *
+     * @throws Cafe24RateLimitedException on HTTP 429
+     */
+    public List<Long> fetchCommentedArticleNumbers(String accessToken, String mallId, int boardNo,
+                                                   List<Long> articleNos) {
+        if (articleNos == null || articleNos.isEmpty()) {
+            return List.of();
+        }
+        URI uri = commentedArticlesByNumberUri(mallId, boardNo, articleNos);
+        Cafe24HttpClient.Response response =
+                http.get(uri, Map.of("Authorization", "Bearer " + accessToken));
+        if (response.statusCode() == 429) {
+            throw Cafe24RateLimitedException.fromResponse(response);
+        }
+        if (response.statusCode() != 200) {
+            throw new IllegalStateException(
+                    "카페24 게시글 조회에 실패했습니다 (HTTP " + response.statusCode() + ").");
+        }
+        return parse(response.body()).stream()
+                .map(Cafe24BoardArticleRow::articleNo)
+                .filter(no -> no != null && no > 0)
+                .toList();
+    }
+
+    static URI commentedArticlesByNumberUri(String mallId, int boardNo, List<Long> articleNos) {
+        // Deliberately built from the exact-set URI so the two paths cannot drift in how they encode
+        // an article list; this one only adds the documented filter.
+        return URI.create(articlesByNumberUri(mallId, boardNo, articleNos) + "&comment=T");
+    }
+
     static URI commentedArticlesUri(String mallId, int boardNo, LocalDate startDate,
                                     LocalDate endDate, int limit) {
         requireShape(mallId, boardNo);

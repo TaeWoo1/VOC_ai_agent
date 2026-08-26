@@ -152,7 +152,9 @@ NAVER에서는 오늘 언제나 참이다.
   이미지 이해가 정당화되는 것은 **`IMAGE_REFERENCES_ONLY` 하나뿐**이다. `MIXED`는 텍스트 경로가
   있으므로 그것부터 쓴다.
 
-**라이브 증명 PENDING.** `apr-nv-detail-13250364547`(1회 READ)은 승인받았으나 **실행되지
+**라이브 증명 `DEFERRED_UNTIL_APPROVED_DEV_NETWORK`** (2026-08-26 product-owner: 현재 네트워크의 IP를 NAVER 애플리케이션에 등록하지 않고, 기존 승인된 개발 네트워크로 복귀한 뒤에만 진행한다. 현재 환경에서 NAVER marketplace call = 0, 토큰 발급 시도 포함. 자세한 것은 `docs/cafe24_comment_answer_observation_v1.md` §10).
+
+**경위.** `apr-nv-detail-13250364547`(1회 READ)은 승인받았으나 **실행되지
 못했다** — 게이트웨이가 이 머신의 호출 IP를 거부했다(`GW.IP_NOT_ALLOWED`, 토큰 발급 단계에서
 실패, **마켓플레이스 요청 0회**). 따라서 이 org의 상세페이지가 텍스트인지 이미지인지는
 **아직 측정되지 않았고**, 이 커밋의 어떤 문장도 그것을 안다고 주장하지 않는다. NAVER 애플리케이션에

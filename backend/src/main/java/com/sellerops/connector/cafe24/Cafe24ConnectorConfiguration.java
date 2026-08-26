@@ -146,6 +146,42 @@ public class Cafe24ConnectorConfiguration {
     }
 
     /**
+     * The historical comment reconciliation — approval {@code apr-c24-hist-comments}.
+     *
+     * <p>The routine sweep's window is a fortnight and this backlog is eleven years old, so these
+     * rows would never be re-read. Bounded to {@code 1 + candidates} requests, READ only, and inert
+     * unless explicitly enabled.
+     *
+     * <p><b>Both beans carry the flag, not just the runner.</b> This one reaches the inquiry store and
+     * the work-item writer, which the connector slice contexts do not provide — an unconditional bean
+     * would make every one of them fail to start for a reconciliation they never run.
+     */
+    @Bean
+    @ConditionalOnProperty(
+            name = "sellerops.connector.cafe24.reconcile.historical-comments.enabled",
+            havingValue = "true")
+    Cafe24HistoricalCommentReconciler cafe24HistoricalCommentReconciler(
+            Cafe24InquiryAnswerObserver observer,
+            com.sellerops.inquiry.InquiryRepository inquiries,
+            com.sellerops.inquiry.workitem.InquiryWorkItemWriter workItemWriter) {
+        return new Cafe24HistoricalCommentReconciler(observer, inquiries, workItemWriter);
+    }
+
+    @Bean
+    @ConditionalOnProperty(
+            name = "sellerops.connector.cafe24.reconcile.historical-comments.enabled",
+            havingValue = "true")
+    Cafe24HistoricalCommentRunner cafe24HistoricalCommentRunner(
+            Cafe24Authorizer authorizer, Cafe24HistoricalCommentReconciler reconciler,
+            SellerAccountRepository accounts, com.sellerops.inquiry.InquiryRepository inquiries,
+            com.sellerops.channel.ChannelRepository channels,
+            @Value("${sellerops.connector.cafe24.reconcile.historical-comments.account-id:}") String accountId,
+            @Value("${sellerops.connector.cafe24.reconcile.historical-comments.board-no:6}") int boardNo) {
+        return new Cafe24HistoricalCommentRunner(authorizer, reconciler, accounts, inquiries,
+                channels, accountId, boardNo);
+    }
+
+    /**
      * The bounded thread reclassification — an exact-id re-read of the rows the seller is currently
      * shown as unanswered, to record the thread role the connector had been discarding. Gated by the
      * connector flag, its own flag, a configured account, and a {@code dry-run} that defaults ON.

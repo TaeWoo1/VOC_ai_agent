@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { publishUnavailableReason } from "./inquiryPublish";
+import { canPublishReply, publishUnavailableReason } from "./inquiryPublish";
 import type { InquiryDetail, InquiryReplyCapabilityView, PublishCapabilityView } from "./types";
 
 /**
@@ -25,11 +25,14 @@ function audited(over: Partial<InquiryReplyCapabilityView>): InquiryReplyCapabil
   };
 }
 
-function detail(over: Partial<InquiryDetail> = {}): Pick<InquiryDetail, "channelCode" | "channelNameKo" | "replyCapability"> {
+function detail(
+  over: Partial<InquiryDetail> = {},
+): Pick<InquiryDetail, "channelCode" | "channelNameKo" | "replyCapability" | "status"> {
   return {
     channelCode: "NAVER",
     channelNameKo: "네이버",
     replyCapability: null,
+    status: "UNANSWERED",
     ...over,
   };
 }
@@ -88,5 +91,36 @@ describe("publishUnavailableReason", () => {
       capability({ executionEnabled: false }),
     );
     expect(reason).toContain("이 환경에서는");
+  });
+});
+
+/** A deployment that CAN send on Cafe24 — so the refusal below is about the answer, not the channel. */
+function sendable(): PublishCapabilityView {
+  return capability({ replyAdapterChannelCodes: ["GMARKET", "CAFE24"] });
+}
+
+describe("already answered on the channel", () => {
+  it("is not publishable, whatever the channel can do", () => {
+    // The seller answered in the Cafe24 admin UI; our comment lane read it and the work item has not
+    // settled yet. No capability makes a second answer to the same customer correct.
+    expect(canPublishReply(detail({ channelCode: "CAFE24", status: "ANSWERED" }), sendable())).toBe(
+      false,
+    );
+  });
+
+  it("says the customer was already answered, not that the channel is unsupported", () => {
+    const reason = publishUnavailableReason(
+      detail({ channelCode: "CAFE24", status: "ANSWERED" }),
+      sendable(),
+    );
+    expect(reason).toContain("이미 답변된 문의입니다");
+    // Sending them to the seller center would be work that no longer exists.
+    expect(reason).not.toContain("판매자센터에서 직접 답변");
+  });
+
+  it("still publishes normally when the source has not been answered", () => {
+    expect(canPublishReply(detail({ channelCode: "CAFE24", status: "UNANSWERED" }), sendable())).toBe(
+      true,
+    );
   });
 });

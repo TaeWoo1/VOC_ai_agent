@@ -247,23 +247,23 @@ public class IngestionService {
                             // would otherwise never happen for a backlog that never changes again.
                             repairAttribution(existing, row, productId);
                             applyThreadRole(existing, row);
-                            inquiries.save(existing);
+                            // Same reasoning as the attribution repair above: the CONTENT is
+                            // unchanged, but a work item left mid-workflow on an already-answered row
+                            // is a lifecycle the source has already settled. This branch writes
+                            // anyway, so the reconcile is free here — and for a backlog row that
+                            // never changes again, this is the only place it could ever happen.
+                            reconcileAnsweredElsewhere(existing, sellerAccountId);
                             tally.skip();
                             continue;
                         }
-                        boolean becameAnswered = "ANSWERED".equals(row.status())
-                                && !"ANSWERED".equals(existing.getStatus());
                         applyInquirySource(existing, row);
                         repairAttribution(existing, row, productId);
                         applyThreadRole(existing, row);
                         existing.setLastSeenAt(Instant.now());
-                        if (becameAnswered && sellerAccountId != null) {
-                            // Reflect the platform answer and complete the OPEN work item
-                            // (absent/OPEN only) atomically — never reopen, never reply.
-                            workItemWriter.reconcileConnectorAnswered(existing);
-                        } else {
-                            inquiries.save(existing);
-                        }
+                        // Answered NOW, not "answered as of this sweep". The transition-only form
+                        // could never close a row that turned ANSWERED while its work item sat in
+                        // PROPOSED, because that row's next sweep is no longer a transition.
+                        reconcileAnsweredElsewhere(existing, sellerAccountId);
                         tally.update();
                         continue;
                     }
@@ -438,6 +438,22 @@ public class IngestionService {
      * whose content never changes again is precisely the row that would otherwise keep a role it was
      * given before we knew how to ask. The projector is idempotent, so a re-run writes nothing.
      */
+    /**
+     * Save the row, and — when the source says it is answered — let the work item settle with it.
+     *
+     * <p>One place, so the two branches above cannot disagree about what "answered" does. Without a
+     * seller account there is no connection to attribute the observation to, so the row is simply
+     * saved: an answer we cannot say we observed through a connection is not one we act on.
+     */
+    private void reconcileAnsweredElsewhere(Inquiry entity, UUID sellerAccountId) {
+        if ("ANSWERED".equals(entity.getStatus()) && sellerAccountId != null) {
+            // Completes an absent/OPEN/PROPOSED work item atomically — never reopens, never replies.
+            workItemWriter.reconcileConnectorAnswered(entity);
+            return;
+        }
+        inquiries.save(entity);
+    }
+
     private void applyThreadRole(Inquiry entity, CanonicalInquiry row) {
         if (row.threadRole() == null) {
             return;

@@ -24,12 +24,28 @@ import type { InquiryDetail, PublishCapabilityView, PublishOutcomeCategory, Publ
  * marketplace write on a guess is the one thing this surface must never do.
  */
 export function canPublishReply(
-  detail: Pick<InquiryDetail, "channelCode">,
+  detail: Pick<InquiryDetail, "channelCode" | "status">,
   capability: PublishCapabilityView | null,
 ): boolean {
+  // Already answered on the marketplace, by anyone. The backend refuses this at the last gate before
+  // the write (ALREADY_ANSWERED), so offering the button here would walk the seller through approval
+  // only to fail — and if a stale AI draft is sitting there, it invites them to answer a customer
+  // twice. Checked first because no capability makes a second answer correct.
+  if (answeredElsewhere(detail)) return false;
   if (!capability || !capability.executionEnabled) return false;
   const code = detail.channelCode;
   return !!code && capability.replyAdapterChannelCodes.includes(code);
+}
+
+/**
+ * Whether the SOURCE says this customer has already been answered.
+ *
+ * <p>The work item can still be OPEN or PROPOSED when this is true: a seller answering in the Cafe24
+ * admin UI leaves a comment that our routine sweep now reads, and the item only settles on the next
+ * collection. The screen must not keep asking for work the customer no longer needs.
+ */
+export function answeredElsewhere(detail: Pick<InquiryDetail, "status">): boolean {
+  return detail.status === "ANSWERED";
 }
 
 /**
@@ -40,10 +56,16 @@ export function canPublishReply(
  * send yet" is neither. Returns null when the path IS available.
  */
 export function publishUnavailableReason(
-  detail: Pick<InquiryDetail, "channelCode" | "channelNameKo" | "replyCapability">,
+  detail: Pick<InquiryDetail, "channelCode" | "channelNameKo" | "replyCapability" | "status">,
   capability: PublishCapabilityView | null,
 ): string | null {
   if (canPublishReply(detail, capability)) return null;
+  // First, because it is about the customer rather than about us. Telling someone "이 채널은
+  // 판매자센터에서 답변해 주세요" about a question that has already been answered sends them to do
+  // work that no longer exists.
+  if (answeredElsewhere(detail)) {
+    return "이미 답변된 문의입니다. 판매자님이 채널에서 직접 답변하신 내용이 확인되었습니다.";
+  }
   const channel = detail.channelNameKo ?? "이 채널";
   if (!capability) {
     return "답변 등록이 가능한지 확인하지 못했습니다. 답변은 판매자센터에서 직접 등록해 주세요.";

@@ -105,17 +105,39 @@ public class InquiryWorkItemWriter {
     }
 
     /**
-     * Reconcile an <b>existing</b> connector inquiry that the source now reports answered,
-     * atomically: save the inquiry (the caller has already set {@code status = ANSWERED})
-     * and, <b>only if its work item is absent or still OPEN</b>, transition OPEN→COMPLETED
-     * plus a {@code VERIFICATION_RECORDED} audit. Terminal or mid-workflow phases
-     * (PROPOSED…DISMISSED/COMPLETED/FAILED) are never touched — so an operator's in-flight
-     * reply or dismissal is never overridden and a work item is never reopened. No reply is
-     * ever posted to the platform.
+     * Phases an externally-observed answer may close. <b>Everything else is left alone.</b>
      *
-     * <p>Idempotent: the audit is keyed {@code connector-reconcile:<workItemId>} (unique per
-     * work item), so replaying the same answered state records no second transition. Mirrors
-     * {@code EsmInquiryReconciler.reconcileAnswered} for the connector actor.
+     * <p>{@code OPEN} is nobody's work in progress. {@code PROPOSED} holds an AI draft and nothing
+     * else — no seller approval, no intent, no execution — so when the source itself says the customer
+     * has been answered, that source truth outranks a draft nobody has agreed to send (product-owner,
+     * 2026-08-26). From {@code APPROVED} onward a person has committed to something, and
+     * {@code ACTION_PENDING} / {@code EXECUTED} are mid-flight against the channel: closing those from
+     * a connector observation would race our own send and could discard a verification that is about
+     * to arrive. They keep the execution lifecycle they already have.
+     */
+    private static final java.util.Set<InquiryWorkItemPhase> ANSWERED_ELSEWHERE_CLOSES =
+            java.util.EnumSet.of(InquiryWorkItemPhase.OPEN, InquiryWorkItemPhase.PROPOSED);
+
+    /**
+     * Reconcile an <b>existing</b> connector inquiry that the source reports answered, atomically:
+     * save the inquiry (the caller has already set {@code status = ANSWERED}) and, <b>only if its
+     * work item is absent or in {@link #ANSWERED_ELSEWHERE_CLOSES}</b>, transition it to COMPLETED
+     * plus a {@code VERIFICATION_RECORDED} audit carrying the ACTUAL phase it came from. A work item
+     * is never reopened, and no reply is ever posted to the platform.
+     *
+     * <p><b>Answered elsewhere, in the vocabulary that already exists.</b> There is no new phase, no
+     * new event and no new disposition here: the customer was answered and the source proves it, which
+     * is what {@code COMPLETED} + {@code VERIFICATION_RECORDED} has always meant on this path. The
+     * only change is which phases are eligible. ({@code ANSWERED_ELSEWHERE} exists as a
+     * {@code ProactiveCloseReason} for the proactive CASE, which closes independently — the two agree
+     * without either owning the other.)
+     *
+     * <p><b>It is idempotent and therefore self-healing.</b> The caller may hand over a row that was
+     * already {@code ANSWERED} before this sweep, not only one that just became so — which is how the
+     * stale item that motivated this gets closed at all, since a row that turned ANSWERED while its
+     * work item sat in PROPOSED would otherwise never be revisited. The audit is keyed
+     * {@code connector-reconcile:<workItemId>} (unique per work item), so a replay records no second
+     * transition. Mirrors {@code EsmInquiryReconciler.reconcileAnswered} for the connector actor.
      */
     public UUID reconcileConnectorAnswered(Inquiry inquiry) {
         return tx.execute(status -> {
@@ -125,9 +147,10 @@ public class InquiryWorkItemWriter {
                 return saved.getId();   // history only — nothing to complete
             }
             InquiryWorkItem workItem = wiOpt.get();
-            if (workItem.getPhase() != InquiryWorkItemPhase.OPEN) {
-                return saved.getId();   // terminal or mid-workflow — never touched
+            if (!ANSWERED_ELSEWHERE_CLOSES.contains(workItem.getPhase())) {
+                return saved.getId();   // terminal, approved, or mid-flight — never touched
             }
+            InquiryWorkItemPhase from = workItem.getPhase();
             workItem.setPhase(InquiryWorkItemPhase.COMPLETED);
             workItems.save(workItem);
 
@@ -138,7 +161,8 @@ public class InquiryWorkItemWriter {
                 audit.setWorkItemId(workItem.getId());
                 audit.setCommandId(commandId);
                 audit.setEventType(InquiryWorkItemEvent.VERIFICATION_RECORDED);
-                audit.setPhaseFrom(InquiryWorkItemPhase.OPEN);
+                // The phase it actually came from, not the phase this path used to assume.
+                audit.setPhaseFrom(from);
                 audit.setPhaseTo(InquiryWorkItemPhase.COMPLETED);
                 audit.setActor(CONNECTOR_ACTOR);
                 audits.save(audit);

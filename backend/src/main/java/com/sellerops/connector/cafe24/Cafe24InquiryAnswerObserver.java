@@ -49,6 +49,16 @@ public class Cafe24InquiryAnswerObserver {
     /** How many rows the one discovery request asks for. The platform's own maximum is 100. */
     static final int DISCOVERY_LIMIT = 100;
 
+    /**
+     * The comment-read ceiling for a historical run over an EXACT named set.
+     *
+     * <p>Higher than {@link #MAX_COMMENT_READS} because the two are bounded by different things. The
+     * routine cap protects a sweep page whose candidate count nobody chose; a historical run names
+     * every article in its approval manifest, so its ceiling is the manifest's, and exceeding it is a
+     * refusal rather than a truncation.
+     */
+    static final int MAX_EXACT_COMMENT_READS = 25;
+
     private final Cafe24BoardArticlesClient articles;
     private final Cafe24BoardCommentsClient comments;
 
@@ -87,7 +97,43 @@ public class Cafe24InquiryAnswerObserver {
             log.info("카페24 댓글 후보 조회가 상한에 도달: board={} 상한={} — 이 창의 일부만 확인됨",
                     boardNo, DISCOVERY_LIMIT);
         }
+        return read(accessToken, mallId, boardNo, candidates, commented, MAX_COMMENT_READS);
+    }
 
+    /**
+     * The same observation over an EXACT named set of articles, with no date window.
+     *
+     * <p><b>Why a second entry point rather than a wider window.</b> The routine form asks "which
+     * articles in the last fortnight have comments?"; this one asks "which of THESE 25 have comments?"
+     * The distinction is the whole bound: a historical backlog spanning eleven years cannot be reached
+     * by a windowed discovery in one request (the contract caps a call at one year), and widening the
+     * routine path to do it would put an eleven-year question on the sweep's critical path forever.
+     *
+     * <p>Requests: <b>1 + (candidates that have comments)</b>, ceiling
+     * {@code 1 + }{@link #MAX_EXACT_COMMENT_READS}. Over-cap is a refusal, not a silent truncation —
+     * a bounded run that quietly read fewer rows than its manifest named would report a "true"
+     * unanswered count computed from a partial read.
+     *
+     * @throws IllegalArgumentException when more articles are named than the ceiling allows
+     */
+    public Map<Long, Instant> observeExact(String accessToken, String mallId, int boardNo,
+                                           List<Long> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return Map.of();
+        }
+        if (candidates.size() > MAX_EXACT_COMMENT_READS) {
+            throw new IllegalArgumentException("승인된 상한을 초과하는 대상 수입니다 ("
+                    + candidates.size() + " > " + MAX_EXACT_COMMENT_READS + ").");
+        }
+        List<Long> commented =
+                articles.fetchCommentedArticleNumbers(accessToken, mallId, boardNo, candidates);
+        return read(accessToken, mallId, boardNo, new HashSet<>(candidates), commented,
+                MAX_EXACT_COMMENT_READS);
+    }
+
+    /** The shared read: intersect, cap, fetch comments, and accept only proven shop authorship. */
+    private Map<Long, Instant> read(String accessToken, String mallId, int boardNo,
+                                    Set<Long> candidates, List<Long> commented, int maxReads) {
         // Order-stable intersection: only articles we were going to store as unanswered.
         List<Long> targets = new ArrayList<>();
         Set<Long> taken = new HashSet<>();
@@ -97,9 +143,9 @@ public class Cafe24InquiryAnswerObserver {
             }
         }
         int capped = 0;
-        if (targets.size() > MAX_COMMENT_READS) {
-            capped = targets.size() - MAX_COMMENT_READS;
-            targets = targets.subList(0, MAX_COMMENT_READS);
+        if (targets.size() > maxReads) {
+            capped = targets.size() - maxReads;
+            targets = targets.subList(0, maxReads);
         }
 
         Map<Long, Instant> answered = new LinkedHashMap<>();

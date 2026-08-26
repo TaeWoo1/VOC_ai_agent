@@ -154,7 +154,7 @@ final class Cafe24InquiryArticleMapper {
     }
 
     /** Stable Cafe24-native dedup key preserving the mall's own board+article identity. */
-    static String externalId(int boardNo, long articleNo) {
+    public static String externalId(int boardNo, long articleNo) {
         return "cafe24:b" + boardNo + ":a" + articleNo;
     }
 

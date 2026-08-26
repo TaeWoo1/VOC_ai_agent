@@ -388,14 +388,64 @@ class Cafe24InquiryIngestionFlowTest {
     void inProgressInquiryP_opensOneOpenWorkItemStillActionable() {
         // 'P' (처리중) is still actionable → UNANSWERED → opens a work item (channel-neutral,
         // mirroring ESM 처리중 → UNANSWERED).
+        //
+        // FAIL-CLOSED ON A CONTRACT THAT CONTRADICTS ITSELF (product-owner, 2026-08-26). The vendored
+        // reference defines 'P' twice and differently: the property table says 처리중 (in progress),
+        // while the LIST-filter table says 「P: Answer」 — and 'C', which the property table defines as
+        // 처리완료, does not appear as a filter value at all. We follow the property table, because the
+        // two possible mistakes are not symmetric: reading P as unanswered leaves a seller's answered
+        // inquiry in the queue, which they can see and correct, while reading it as answered hides an
+        // UNANSWERED customer question from the person who owes them a reply. Only deterministic
+        // answer evidence — a proven shop comment, or a reply article — may move this row.
         CanonicalInquiry inProgress =
                 Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(284L, "처리중 문의", "P"), 1);
         IngestOutcome out = ingestion.ingestInquiries(org, channel, account, List.of(inProgress));
 
         assertThat(out.success()).isEqualTo(1);
         assertThat(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0).getStatus())
+                .as("'P' alone never answers an inquiry")
                 .isEqualTo("UNANSWERED");
         assertThat(openWorkItems(org)).hasSize(1);
+    }
+
+    @Test
+    void aProposedWorkItemIsClosedWhenTheSourceItselfSaysTheCustomerWasAnswered() {
+        // The stale state measured on 2026-08-26: the seller answered on Cafe24, the comment lane saw
+        // it, and the work item stayed PROPOSED because a proactive draft had been attached. PROPOSED
+        // holds an AI draft and nothing else — no approval, no intent, no execution — so external
+        // source truth outranks a draft nobody agreed to send (product-owner).
+        fetchAndIngestWithComment(3690L, "N", "buyer01");
+        InquiryWorkItem item = openWorkItems(org).get(0);
+        item.setPhase(InquiryWorkItemPhase.PROPOSED);
+        workItems.save(item);
+
+        fetchAndIngestWithComment(3690L, "N", "samplemall");
+
+        assertThat(workItems.findById(item.getId()).orElseThrow().getPhase())
+                .isEqualTo(InquiryWorkItemPhase.COMPLETED);
+    }
+
+    @Test
+    void aWorkItemTheSellerHasCommittedTo_isNeverClosedByAnObservation() {
+        // From APPROVED onward a person has committed to something, and ACTION_PENDING / EXECUTED are
+        // mid-flight against the channel: closing those from an observation would race our own send
+        // and could discard a verification that is about to arrive.
+        for (InquiryWorkItemPhase phase : List.of(InquiryWorkItemPhase.APPROVED,
+                InquiryWorkItemPhase.ACTION_PENDING, InquiryWorkItemPhase.EXECUTED)) {
+            long articleNo = 3700L + phase.ordinal();
+            fetchAndIngestWithComment(articleNo, "N", "buyer01");
+            InquiryWorkItem item = openWorkItems(org).stream()
+                    .filter(w -> w.getPhase() == InquiryWorkItemPhase.OPEN)
+                    .reduce((a, b) -> b).orElseThrow();
+            item.setPhase(phase);
+            workItems.save(item);
+
+            fetchAndIngestWithComment(articleNo, "N", "samplemall");
+
+            assertThat(workItems.findById(item.getId()).orElseThrow().getPhase())
+                    .as("%s belongs to the execution lifecycle, not to an observation", phase)
+                    .isEqualTo(phase);
+        }
     }
 
     @Test
