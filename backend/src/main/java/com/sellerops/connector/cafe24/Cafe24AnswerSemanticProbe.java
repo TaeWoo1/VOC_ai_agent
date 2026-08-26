@@ -64,7 +64,7 @@ public class Cafe24AnswerSemanticProbe {
                                                        int boardNo, long articleNo) {
         URI uri = URI.create(base(mallId) + "/api/v2/admin/boards/" + boardNo + "/articles/"
                 + positive(articleNo) + "/comments");
-        return get(uri, accessToken, this::parseComments);
+        return get(uri, accessToken, body -> parseComments(body, mallId));
     }
 
     // ---------------------------------------------------------------- R3
@@ -185,14 +185,30 @@ public class Cafe24AnswerSemanticProbe {
         return List.copyOf(out);
     }
 
-    private List<CommentStructure> parseComments(String body) throws Exception {
+    private List<CommentStructure> parseComments(String body, String mallId) throws Exception {
         CommentsEnvelope envelope = mapper.readValue(body, CommentsEnvelope.class);
         List<CommentStructure> out = new ArrayList<>();
         for (RawComment raw : envelope.comments() == null ? List.<RawComment>of() : envelope.comments()) {
             out.add(new CommentStructure(raw.commentNo(), raw.articleNo(), raw.parentCommentNo(),
-                    raw.createdDate(), bucket(raw.content())));
+                    raw.createdDate(), bucket(raw.content()), isMall(raw.memberId(), mallId)));
         }
         return List.copyOf(out);
+    }
+
+    /**
+     * Is this comment's {@code member_id} the SHOP's own id?
+     *
+     * <p>The one question a comment lane has to answer that the reply-article lane could not: a board
+     * comment may be written by a customer or by the manager, and the reference says so in the same
+     * sentence. {@code member_id == mall_id} is not a new inference — it is the condition Cafe24's own
+     * contract documents for 상점명 rendering, and it was measured on this org's existing answers
+     * (43/44) at the 2026-08-25 actor probe. Comparing it here yields a BOOLEAN; the id itself has no
+     * field on any public record in this file and never leaves the method.
+     */
+    static boolean isMall(String memberId, String mallId) {
+        return memberId != null && mallId != null
+                && memberId.strip().equalsIgnoreCase(mallId.strip())
+                && !memberId.isBlank();
     }
 
     private List<UrgentReplyStructure> parseUrgentReplies(String body) throws Exception {
@@ -263,6 +279,7 @@ public class Cafe24AnswerSemanticProbe {
                               @JsonProperty("article_no") Long articleNo,
                               @JsonProperty("parent_comment_no") Long parentCommentNo,
                               @JsonProperty("created_date") String createdDate,
+                              @JsonProperty("member_id") String memberId,
                               @JsonProperty("content") String content) {
     }
 
@@ -302,8 +319,12 @@ public class Cafe24AnswerSemanticProbe {
                                    String titleBucket, String bodyBucket) {
     }
 
+    /**
+     * One comment's structure. {@code memberIsMall} is the ONLY actor signal, and it is a boolean:
+     * the raw {@code member_id} is materialized in a private record and compared, never emitted.
+     */
     public record CommentStructure(Long commentNo, Long articleNo, Long parentCommentNo,
-                                   String createdDate, String bodyBucket) {
+                                   String createdDate, String bodyBucket, boolean memberIsMall) {
     }
 
     public record UrgentReplyStructure(Long articleNo, String status, boolean userIdPresent,

@@ -12,10 +12,12 @@ import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import com.sellerops.ingest.canonical.CanonicalProduct;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -124,16 +126,31 @@ public class Cafe24ApiConnector implements PullConnector {
     private final Cafe24OrdersClient ordersClient;
     private final Cafe24BoardArticlesClient articlesClient;
     private final Cafe24ProductsClient productsClient;
+    /**
+     * The comment lane. Null in a deployment or a test that does not wire it — the INQUIRY sweep then
+     * behaves exactly as it did before 2026-08-26, which is the honest fallback: fewer signals, never
+     * a guessed one.
+     */
+    private final Cafe24InquiryAnswerObserver answerObserver;
     private final Clock clock;
 
     public Cafe24ApiConnector(Cafe24Authorizer authorizer,
                               Cafe24OrdersClient ordersClient, Cafe24BoardArticlesClient articlesClient,
-                              Cafe24ProductsClient productsClient, Clock clock) {
+                              Cafe24ProductsClient productsClient,
+                              Cafe24InquiryAnswerObserver answerObserver, Clock clock) {
         this.authorizer = authorizer;
         this.ordersClient = ordersClient;
         this.articlesClient = articlesClient;
         this.productsClient = productsClient;
+        this.answerObserver = answerObserver;
         this.clock = clock;
+    }
+
+    /** Wiring without the comment lane — the shape every caller had before it existed. */
+    public Cafe24ApiConnector(Cafe24Authorizer authorizer,
+                              Cafe24OrdersClient ordersClient, Cafe24BoardArticlesClient articlesClient,
+                              Cafe24ProductsClient productsClient, Clock clock) {
+        this(authorizer, ordersClient, articlesClient, productsClient, null, clock);
     }
 
     /**
@@ -264,7 +281,10 @@ public class Cafe24ApiConnector implements PullConnector {
      * never reach the mapper, storage, or any log.
      */
     private FetchPage fetchReviewArticles(FetchRequest request) {
-        return fetchArticlePage(request, Cafe24BoardArticleMapper::toCanonical, true);
+        return fetchArticlePage(request,
+                (boardNo, row, sourceRow, ignoredCommentAnswer) ->
+                        Cafe24BoardArticleMapper.toCanonical(boardNo, row, sourceRow),
+                true);
     }
 
     /**
@@ -277,7 +297,7 @@ public class Cafe24ApiConnector implements PullConnector {
      * gate is scoped to the review path only.
      */
     private FetchPage fetchInquiries(FetchRequest request) {
-        return fetchArticlePage(request, Cafe24InquiryArticleMapper::toCanonicalInquiry, false);
+        return fetchArticlePage(request, Cafe24InquiryArticleMapper::toCanonicalInquiry, false, true);
     }
 
     /**
@@ -350,6 +370,16 @@ public class Cafe24ApiConnector implements PullConnector {
      */
     private FetchPage fetchArticlePage(FetchRequest request, ArticleRecordMapper mapper,
                                        boolean excludeSecret) {
+        return fetchArticlePage(request, mapper, excludeSecret, false);
+    }
+
+    /**
+     * @param observeCommentAnswers INQUIRY only — consult the comment lane for the articles this page
+     *     would otherwise store as 미답변. The review board has no answer semantics and never spends
+     *     a request here.
+     */
+    private FetchPage fetchArticlePage(FetchRequest request, ArticleRecordMapper mapper,
+                                       boolean excludeSecret, boolean observeCommentAnswers) {
         int boardNo = primaryBoard(request.dataType());
         LocalDate today = LocalDate.now(clock.withZone(KST));
         Cafe24ArticleCursor cursor = routineOrBackfill(
@@ -363,6 +393,10 @@ public class Cafe24ApiConnector implements PullConnector {
                     cursor.windowStart(), cursor.windowEnd(), request.limit(), cursor.offset());
 
             List<Object> records = new ArrayList<>();
+            // Rows that survived every exclusion, held until the comment lane has had its say. The
+            // mapping used to happen inside the loop; it happens after it now because whether an
+            // article is 미답변 is no longer decided by that article alone.
+            List<KeptRow> kept = new ArrayList<>();
             int position = 0;
             int excludedSecret = 0;
             int outOfWindow = 0;
@@ -415,7 +449,29 @@ public class Cafe24ApiConnector implements PullConnector {
                 }
                 replyStatusStored.merge(
                         CommunityReplyStatus.normalize(row.replyStatus()), 1, Integer::sum);
-                records.add(mapper.map(boardNo, row, position));
+                kept.add(new KeptRow(row, position));
+            }
+
+            // A shop answer that lives in a COMMENT — the representation the article's own fields do
+            // not carry. Candidates are only the rows this page would store as 미답변: an article the
+            // source already calls answered needs no second opinion, and a thread REPLY is not a
+            // question anyone is waiting on.
+            Map<Long, Instant> commentAnswered = Map.of();
+            if (observeCommentAnswers && answerObserver != null) {
+                Set<Long> candidates = new LinkedHashSet<>();
+                for (KeptRow k : kept) {
+                    boolean alreadyAnswered = CommunityReplyStatus.normalize(k.row().replyStatus())
+                            == CommunityReplyStatus.ANSWERED;
+                    if (!alreadyAnswered && !k.row().isThreadReply()) {
+                        candidates.add(k.row().articleNo());
+                    }
+                }
+                commentAnswered = answerObserver.observe(auth.accessToken(), auth.mallId(), boardNo,
+                        cursor.windowStart(), cursor.windowEnd(), candidates);
+            }
+            for (KeptRow k : kept) {
+                records.add(mapper.map(boardNo, k.row(), k.position(),
+                        commentAnswered.get(k.row().articleNo())));
             }
             if (excludedSecret > 0) {
                 // Sanitized metric only — a count, never an article id/title/content/writer.
@@ -526,10 +582,19 @@ public class Cafe24ApiConnector implements PullConnector {
         return !created.isBefore(windowStart) && !created.isAfter(windowEnd);
     }
 
-    /** Maps one board-article row to its canonical record (community article or inquiry). */
+    /**
+     * Maps one board-article row to its canonical record (community article or inquiry).
+     *
+     * <p>{@code commentAnsweredAt} is non-null only when the comment lane PROVED the shop answered
+     * this article there; the review mapper ignores it, because board 4 has no answer semantics.
+     */
     @FunctionalInterface
     private interface ArticleRecordMapper {
-        Object map(int boardNo, Cafe24BoardArticleRow row, int sourceRow);
+        Object map(int boardNo, Cafe24BoardArticleRow row, int sourceRow, Instant commentAnsweredAt);
+    }
+
+    /** One row that passed every exclusion, with the page position it will be reported under. */
+    private record KeptRow(Cafe24BoardArticleRow row, int position) {
     }
 
     /**

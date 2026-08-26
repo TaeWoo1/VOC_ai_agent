@@ -31,6 +31,22 @@ class ExactOrderPrivacyFenceTest {
     private static final String ACTOR_PROBE = "Cafe24ReplyActorProbe.java";
     private static final String REPLY_WRITE = "Cafe24ReplyArticleClient.java";
 
+    /**
+     * The files allowed to NAME {@code member_id}, and the single reason all three share.
+     *
+     * <p>Cafe24 documents exactly one way to tell whether a board post or comment was written under
+     * the shop's identity: {@code member_id == mall_id}. Answering that requires reading the field.
+     * What this fence is about is <b>sending</b> such a name — searching a mall for a person — so the
+     * permission granted here is narrow and checked harder below: in these files every occurrence
+     * must be a RESPONSE binding, and none of them may build a URI with it.
+     *
+     * <p>{@code Cafe24AnswerSemanticProbe} and {@code Cafe24BoardCommentsClient} joined the list on
+     * 2026-08-26, when an approved bounded READ found that a Cafe24 shop answer can live in a COMMENT
+     * whose only actor signal is that id ({@code docs/cafe24_comment_answer_observation_v1.md}).
+     */
+    private static final List<String> RESPONSE_BINDERS = List.of(
+            ACTOR_PROBE, "Cafe24AnswerSemanticProbe.java", "Cafe24BoardCommentsClient.java");
+
     @Test
     @DisplayName("no customer-search parameter is ever sent to a channel")
     void nothingSearchesForACustomer() throws IOException {
@@ -39,8 +55,8 @@ class ExactOrderPrivacyFenceTest {
                 "name_furigana");
         for (Path source : javaFiles(CONNECTOR)) {
             String name = source.getFileName().toString();
-            if (name.equals(ACTOR_PROBE) || name.equals(REPLY_WRITE)) {
-                continue;   // two named exceptions, each checked harder just below
+            if (RESPONSE_BINDERS.contains(name) || name.equals(REPLY_WRITE)) {
+                continue;   // named exceptions, each checked harder just below
             }
             String text = code(source);
             for (String parameter : forbidden) {
@@ -108,21 +124,25 @@ class ExactOrderPrivacyFenceTest {
     }
 
     @Test
-    @DisplayName("the one file that reads member_id only ever binds it from a response")
+    @DisplayName("the files that read member_id only ever bind it from a response")
     void theActorProbeBindsItNeverSendsIt() throws IOException {
         List<String> forbidden = List.of("buyer_name", "receiver_name", "receiver_address",
                 "buyer_cellphone", "buyer_phone", "buyer_email", "member_id", "member_email",
                 "name_furigana");
-        String text = code(CONNECTOR.resolve(ACTOR_PROBE));
-        for (String line : text.split("\\R")) {
-            for (String parameter : forbidden) {
-                if (line.contains(parameter)) {
-                    assertThat(line)
-                            .as("%s may be read off a response, never put on the wire", parameter)
-                            .contains("@JsonProperty(\"" + parameter + "\")");
+        for (String file : RESPONSE_BINDERS) {
+            String source = code(CONNECTOR.resolve(file));
+            for (String line : source.split("\\R")) {
+                for (String parameter : forbidden) {
+                    if (line.contains(parameter)) {
+                        assertThat(line)
+                                .as("%s: %s may be read off a response, never put on the wire",
+                                        file, parameter)
+                                .contains("@JsonProperty(\"" + parameter + "\")");
+                    }
                 }
             }
         }
+        String text = code(CONNECTOR.resolve(ACTOR_PROBE));
         // And the values it reads are reduced before they can leave: the report is counts.
         for (var component : com.sellerops.connector.cafe24.Cafe24ReplyActorProbe.Report.class
                 .getRecordComponents()) {

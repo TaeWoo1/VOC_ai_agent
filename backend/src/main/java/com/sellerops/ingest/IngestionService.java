@@ -407,8 +407,10 @@ public class IngestionService {
         entity.setTitle(row.title());
         entity.setBody(row.body());
         // informStatus records the latest raw source token verbatim; canonical status is
-        // monotonic below. On Cafe24 reply_status only progresses (N→P→C), so a downgrade
-        // that would leave status=ANSWERED with a lower raw token does not occur in practice.
+        // monotonic below. On Cafe24 the two can legitimately disagree: a shop answer written as a
+        // board COMMENT leaves reply_status at N while the inquiry is genuinely ANSWERED
+        // (Cafe24InquiryAnswerObserver, verdict STANDARD_BOARD_COMMENT, 2026-08-26). The raw token
+        // keeps saying what the channel said; only the canonical status carries the conclusion.
         entity.setInformStatus(row.informStatus());
         entity.setSecret(row.isSecret());
         // The platform's own answer, when the source carries one. Only ever written FROM the source:

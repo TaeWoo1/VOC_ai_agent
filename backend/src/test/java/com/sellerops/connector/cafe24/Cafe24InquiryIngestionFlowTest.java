@@ -77,6 +77,7 @@ class Cafe24InquiryIngestionFlowTest {
     private CredentialVault vault;
     private IngestionService ingestion;
     private Cafe24ApiConnector connector;
+    private Cafe24ApiConnector commentAwareConnector;
 
     @BeforeEach
     void setUp() {
@@ -92,6 +93,81 @@ class Cafe24InquiryIngestionFlowTest {
         connector = new Cafe24ApiConnector(
                 new Cafe24Authorizer(new Cafe24TokenClient(http), vault, "app-client-id", "app-client-secret"),
                 new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), Clock.systemUTC());
+        // The same connector WITH the comment lane. Kept as a second instance so every existing test
+        // keeps proving the shape a deployment without the lane has — fewer signals, never a guessed one.
+        commentAwareConnector = new Cafe24ApiConnector(
+                new Cafe24Authorizer(new Cafe24TokenClient(http), vault, "app-client-id", "app-client-secret"),
+                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), null,
+                new Cafe24InquiryAnswerObserver(new Cafe24BoardArticlesClient(http),
+                        new Cafe24BoardCommentsClient(http)),
+                Clock.systemUTC());
+    }
+
+    /**
+     * One board-6 page through the COMMENT-AWARE connector, then ingest.
+     *
+     * <p>Three responses in order: the article page, the {@code comment=T} discovery, and the target's
+     * comments. {@code commenterMemberId} decides the whole outcome — {@code "samplemall"} is the shop
+     * ({@code member_id == mall_id}), anything else is a customer.
+     */
+    private IngestOutcome fetchAndIngestWithComment(long articleNo, String reply,
+                                                    String commenterMemberId) {
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(articleNo, "제목", "본문", 77L, null,
+                        "2026-06-20T10:00:00+09:00", reply)));
+        http.enqueue(new Cafe24HttpClient.Response(200,
+                "{\"articles\":[{\"article_no\":" + articleNo + "}]}", Map.of()));
+        http.enqueue(new Cafe24HttpClient.Response(200,
+                "{\"comments\":[{\"comment_no\":39,\"article_no\":" + articleNo + ","
+                        + "\"created_date\":\"2026-06-21T14:56:24+09:00\","
+                        + "\"member_id\":\"" + commenterMemberId + "\"}]}", Map.of()));
+        String cursor = Cafe24ArticleCursor.window(6, START, END).encode();
+        FetchPage page = commentAwareConnector.fetch(
+                new FetchRequest(org, account, "CAFE24", DataType.INQUIRY, cursor, 3));
+        @SuppressWarnings("unchecked")
+        List<CanonicalInquiry> records = (List<CanonicalInquiry>) page.records();
+        return ingestion.ingestInquiries(org, channel, account, records);
+    }
+
+    @Test
+    void aShopCommentAnswersTheInquiryAndCompletesTheWorkItem() {
+        // The measured 2026-08-26 shape: the article says N, the shop answered in a comment.
+        fetchAndIngestWithComment(3674L, "N", "samplemall");
+
+        Inquiry stored = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0);
+        assertThat(stored.getStatus()).isEqualTo("ANSWERED");
+        assertThat(stored.getInformStatus())
+                .as("the channel's reply_status is still N, and we still record what it said")
+                .isEqualTo("N");
+        assertThat(stored.getAnsweredAt()).isNotNull();
+        assertThat(stored.getAnswerBody()).as("the fact, not the shop's words").isNull();
+        assertThat(openWorkItems(org)).isEmpty();
+    }
+
+    @Test
+    void aCustomerCommentLeavesTheInquiryWaiting() {
+        fetchAndIngestWithComment(3675L, "N", "buyer01");
+
+        Inquiry stored = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0);
+        assertThat(stored.getStatus()).isEqualTo("UNANSWERED");
+        assertThat(stored.getAnsweredAt()).isNull();
+        assertThat(openWorkItems(org))
+                .as("someone commented; nobody answered — the seller still owes a reply").hasSize(1);
+    }
+
+    @Test
+    void aShopCommentOnAnAlreadyOpenInquiryCompletesItOnTheNextSweep() {
+        fetchAndIngest(3676L, "본문", "N", "F");
+        UUID workItemId = openWorkItems(org).get(0).getId();
+
+        IngestOutcome second = fetchAndIngestWithComment(3676L, "N", "samplemall");
+
+        assertThat(second.insertedIds()).as("update in place, never a duplicate row").isEmpty();
+        assertThat(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org)).hasSize(1);
+        assertThat(openWorkItems(org)).isEmpty();
+        assertThat(workItems.findById(workItemId)).get()
+                .extracting(InquiryWorkItem::getPhase).isEqualTo(InquiryWorkItemPhase.COMPLETED);
     }
 
     /** Fetch one board-6 page through the connector, then ingest for (org, account). */

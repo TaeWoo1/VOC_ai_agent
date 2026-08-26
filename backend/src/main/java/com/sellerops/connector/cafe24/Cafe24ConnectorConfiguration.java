@@ -54,6 +54,23 @@ public class Cafe24ConnectorConfiguration {
         return new Cafe24BoardArticlesClient(http);
     }
 
+    @Bean
+    Cafe24BoardCommentsClient cafe24BoardCommentsClient(Cafe24HttpClient http) {
+        return new Cafe24BoardCommentsClient(http);
+    }
+
+    /**
+     * The comment lane of the INQUIRY sweep — the second place a Cafe24 shop answer can live
+     * ({@code apr-c24-a3674-obs}, verdict {@code STANDARD_BOARD_COMMENT}). Both of its clients are
+     * {@code mall.read_community} reads the connector already holds, so this adds no scope and no
+     * re-consent.
+     */
+    @Bean
+    Cafe24InquiryAnswerObserver cafe24InquiryAnswerObserver(Cafe24BoardArticlesClient articlesClient,
+                                                            Cafe24BoardCommentsClient commentsClient) {
+        return new Cafe24InquiryAnswerObserver(articlesClient, commentsClient);
+    }
+
     /**
      * The shared refresh + single-use rotation write-back seam. One instance is
      * injected into both the connector and the diagnostic runner so they use the
@@ -76,10 +93,11 @@ public class Cafe24ConnectorConfiguration {
     @Bean
     Cafe24ApiConnector cafe24ApiConnector(
             Cafe24Authorizer authorizer, Cafe24OrdersClient ordersClient,
-            Cafe24BoardArticlesClient articlesClient, Cafe24ProductsClient productsClient) {
+            Cafe24BoardArticlesClient articlesClient, Cafe24ProductsClient productsClient,
+            Cafe24InquiryAnswerObserver answerObserver) {
         // System UTC clock; the connector applies the explicit KST zone for date math.
         return new Cafe24ApiConnector(authorizer, ordersClient, articlesClient, productsClient,
-                Clock.systemUTC());
+                answerObserver, Clock.systemUTC());
     }
 
     /**

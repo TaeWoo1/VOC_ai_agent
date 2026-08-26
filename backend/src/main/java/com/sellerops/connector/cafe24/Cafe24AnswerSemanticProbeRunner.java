@@ -176,6 +176,8 @@ public class Cafe24AnswerSemanticProbeRunner implements ApplicationRunner {
         // Controls for the comment lane — spent only when a comment actually exists on the target,
         // because until then there is nothing for a control to disprove.
         boolean commentsOnTarget = r2.ok() && !r2.value().isEmpty();
+        long mallCommentsOnTarget = !r2.ok() ? 0
+                : r2.value().stream().filter(CommentStructure::memberIsMall).count();
         boolean commentsOnUnansweredControl = false;
         boolean commentsOnProcessingControl = false;
         if (commentsOnTarget) {
@@ -192,12 +194,18 @@ public class Cafe24AnswerSemanticProbeRunner implements ApplicationRunner {
         }
 
         boolean a1 = !children.isEmpty();
-        boolean a2 = commentsOnTarget && !commentsOnUnansweredControl;
+        // A2 is claimed by ACTOR, not by presence. A comment on the target proves a comment exists;
+        // only member_id == mall_id proves the SHOP wrote it, and a board comment may equally be a
+        // customer's ("comments added by a shopping mall customer or manager" — the reference's own
+        // sentence). The two control reads below stay in the record as observations; they are no
+        // longer what the verdict rests on, because a proxy for authorship is not authorship.
+        boolean a2 = mallCommentsOnTarget > 0;
         boolean b = r4.ok() && !r4.value().isEmpty() && identityConfirmed;
 
-        log.info("{} evidence A1_reply_article={} A2_comment={} (target={} n_control={} "
-                        + "p_control={}) B_urgent_reply={} (reply_present={} identity_confirmed={})",
-                TAG, a1, a2, commentsOnTarget, commentsOnUnansweredControl,
+        log.info("{} evidence A1_reply_article={} A2_comment={} (target_comments={} "
+                        + "target_mall_comments={} n_control={} p_control={}) B_urgent_reply={} "
+                        + "(reply_present={} identity_confirmed={})",
+                TAG, a1, a2, commentsOnTarget, mallCommentsOnTarget, commentsOnUnansweredControl,
                 commentsOnProcessingControl, b, r4.ok() && !r4.value().isEmpty(), identityConfirmed);
         log.info("{} VERDICT={} requests_used={}", TAG, verdict(a1, a2, b), requests);
     }
@@ -272,9 +280,10 @@ public class Cafe24AnswerSemanticProbeRunner implements ApplicationRunner {
             return;
         }
         for (CommentStructure row : result.value()) {
-            log.info("{} {} comment_no={} on_article={} parent_comment={} body={} created={}",
+            log.info("{} {} comment_no={} on_article={} parent_comment={} body={} created={} "
+                            + "member_is_mall={}",
                     TAG, label, row.commentNo(), row.articleNo(), row.parentCommentNo(),
-                    row.bodyBucket(), row.createdDate());
+                    row.bodyBucket(), row.createdDate(), row.memberIsMall());
         }
     }
 }

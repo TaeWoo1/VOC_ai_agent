@@ -56,13 +56,20 @@ import com.sellerops.ingest.canonical.SourceThreadRole;
  * an author carry customer PII and are not projected. "이 글은 새 고객 문의가 아니다"는 증명됐고
  * "이 글은 판매자가 썼다"는 증명되지 않았다 — 그래서 전자만 쓴다.
  *
+ * <p><b>And an answer can also be a COMMENT.</b> A second approved bounded READ on 2026-08-26
+ * ({@code apr-c24-a3674-obs}) found a shop answer that produced no child article and left
+ * {@code reply_status} at {@code N} — verdict {@code STANDARD_BOARD_COMMENT}. So {@code reply_status}
+ * is not "the answered flag"; it is one representation's flag, and a board-6 article can be answered
+ * with that flag untouched. {@link Cafe24InquiryAnswerObserver} supplies the second signal, and only
+ * when {@code member_id == mall_id} proves the SHOP wrote the comment — the authorship proof the
+ * reply-article lane never had.
+ *
  * <p>Raw {@code reply_status} is preserved verbatim as {@code informStatus};
- * canonical {@code status} is derived through the confirmed {@link
- * CommunityReplyStatus} vocabulary (the single source of truth for the tokens): only
- * a recognized <em>answered</em> token yields {@code ANSWERED}, while the confirmed
- * unanswered {@code N} and any token not yet observed live both stay {@code
- * UNANSWERED}, so the inquiry conservatively enters the OPEN queue. Timestamps parse
- * only when offset-bearing; a timezone-less value stays unknown.
+ * canonical {@code status} is {@code ANSWERED} when either the confirmed {@link
+ * CommunityReplyStatus} <em>answered</em> token is present <em>or</em> a proven shop comment was
+ * observed. The confirmed unanswered {@code N} and any token not yet observed live otherwise stay
+ * {@code UNANSWERED}, so an inquiry with neither signal conservatively enters the OPEN queue.
+ * Timestamps parse only when offset-bearing; a timezone-less value stays unknown.
  */
 final class Cafe24InquiryArticleMapper {
 
@@ -75,6 +82,31 @@ final class Cafe24InquiryArticleMapper {
      * {@code sourceRow} is the 1-based position in the fetched page.
      */
     static CanonicalInquiry toCanonicalInquiry(int boardNo, Cafe24BoardArticleRow row, int sourceRow) {
+        return toCanonicalInquiry(boardNo, row, sourceRow, null);
+    }
+
+    /**
+     * As above, plus the answer this article does not carry.
+     *
+     * <p><b>{@code commentAnsweredAt} is a PROVEN shop comment and nothing weaker.</b>
+     * {@link Cafe24InquiryAnswerObserver} passes an instant only when a comment on this article had
+     * {@code member_id == mall_id} and a parseable timestamp; an unknown author yields null and this
+     * method then behaves exactly as it did before the comment lane existed. So the widened status is
+     * never an inference over comment PRESENCE — "someone commented" and "the shop answered" are
+     * different claims and only the second one is allowed to close a customer's question.
+     *
+     * <p><b>{@code informStatus} still records what the CHANNEL said</b> — {@code N} for a
+     * comment-answered article, because that is genuinely what {@code reply_status} reads. The pair
+     * (raw {@code N}, canonical {@code ANSWERED}) is not a contradiction; it is the observation that
+     * Cafe24 has more than one answer representation and only one of them moves that flag.
+     *
+     * <p><b>The comment's TEXT is not taken.</b> {@code answerBody} stays null, as it already does
+     * for a reply-article answer: the fix asked for is "stop calling an answered question 미답변",
+     * and storing the shop's words would be a second, separate claim with its own downstream (Answer
+     * Memory). What is stored is the fact and its time.
+     */
+    static CanonicalInquiry toCanonicalInquiry(int boardNo, Cafe24BoardArticleRow row, int sourceRow,
+                                               java.time.Instant commentAnsweredAt) {
         // Cafe24 uses 0 as "no product" on some board rows; only a positive number is an identity.
         String productNo = row.productNo() == null || row.productNo() <= 0
                 ? null : Long.toString(row.productNo());
@@ -83,6 +115,11 @@ final class Cafe24InquiryArticleMapper {
         // "T", null, blank, or any unrecognized value is treated as secret.
         boolean isSecret = !row.isPublicPost();
         SourceThreadRole role = row.isThreadReply() ? SourceThreadRole.REPLY : SourceThreadRole.ROOT;
+        // A thread REPLY is not a question waiting for an answer, so a comment on one cannot mark
+        // anything answered. Belt and braces: the observer already excludes replies from candidates.
+        java.time.Instant answeredByComment =
+                role == SourceThreadRole.ROOT ? commentAnsweredAt : null;
+        String status = answeredByComment != null ? "ANSWERED" : toCanonicalStatus(informStatus);
         return new CanonicalInquiry(
                 // Name and SKU are no longer how this source finds its product; leaving them null
                 // keeps the resolve-or-create path unreachable from here.
@@ -91,7 +128,7 @@ final class Cafe24InquiryArticleMapper {
                 // Buyer PII is never read (not projected) and never persisted.
                 null,
                 row.content(),
-                toCanonicalStatus(informStatus),
+                status,
                 Cafe24BoardArticleMapper.parseOffsetInstant(row.createdDate()),
                 externalId(boardNo, row.articleNo()),
                 sourceRow,
@@ -101,9 +138,10 @@ final class Cafe24InquiryArticleMapper {
                 // Board 6 is the mall's only inquiry surface SellerOps collects.
                 null,
                 ChannelProductRef.of(productNo),
-                // A board article carries no seller answer body; only the reply_status flag.
+                // A board article carries no seller answer body; only the reply_status flag — and a
+                // comment's text is deliberately not taken as one (see above).
                 null,
-                null,
+                answeredByComment,
                 // The mall's own payment-unit order id. Cafe24 publishes no product-order granularity
                 // on this row, so the reference is the payment unit and the reader treats it as one.
                 ChannelOrderRef.of(row.orderId()),

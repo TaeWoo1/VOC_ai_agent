@@ -105,7 +105,36 @@ class Cafe24AnswerSemanticProbeTest {
         CommentStructure row = result.value().get(0);
         assertThat(row.commentNo()).isEqualTo(11L);
         assertThat(row.bodyBucket()).isEqualTo("SHORT");
+        assertThat(row.memberIsMall()).as("the shop's own id — the actor signal, as a boolean").isTrue();
         assertThat(row.toString()).doesNotContain("관리자").doesNotContain("확인 후");
+    }
+
+    @Test
+    @DisplayName("a customer's comment is not the shop's — the actor flag is the only thing that says so")
+    void aCustomerCommentIsNotTheShop() {
+        http.enqueue(ok("""
+                {"comments":[{"comment_no":12,"article_no":246,"parent_comment_no":0,
+                  "created_date":"2023-08-25T09:00:00+09:00","content":"저도 궁금합니다",
+                  "writer":"김구매","member_id":"buyer01"}]}"""));
+
+        ProbeResult<List<CommentStructure>> result = probe.comments("tok", "samplemall", 6, 246L);
+
+        CommentStructure row = result.value().get(0);
+        assertThat(row.memberIsMall()).isFalse();
+        assertThat(row.toString()).doesNotContain("buyer01").doesNotContain("김구매");
+    }
+
+    @Test
+    @DisplayName("the actor test is identity, and an absent id is never the shop")
+    void theActorTestIsIdentity() {
+        assertThat(Cafe24AnswerSemanticProbe.isMall("samplemall", "samplemall")).isTrue();
+        assertThat(Cafe24AnswerSemanticProbe.isMall(" SampleMall ", "samplemall"))
+                .as("the platform renders the id; whitespace and case are not a different shop").isTrue();
+        assertThat(Cafe24AnswerSemanticProbe.isMall("buyer01", "samplemall")).isFalse();
+        assertThat(Cafe24AnswerSemanticProbe.isMall(null, "samplemall"))
+                .as("a comment with no member id is an UNKNOWN actor, never the shop").isFalse();
+        assertThat(Cafe24AnswerSemanticProbe.isMall("", "samplemall")).isFalse();
+        assertThat(Cafe24AnswerSemanticProbe.isMall("samplemall", null)).isFalse();
     }
 
     @Test
@@ -185,12 +214,32 @@ class Cafe24AnswerSemanticProbeTest {
                     "src/main/java/com/sellerops/connector/cafe24/" + file));
             String code = stripComments(source);
             assertThat(code).doesNotContain("postForm").doesNotContain("http.post");
-            for (String forbidden : new String[] {"writer_name", "\"writer\"", "member_id",
+            for (String forbidden : new String[] {"writer_name", "\"writer\"",
                     "buyer_name", "writer_email", "client_ip", "\"keyword\""}) {
                 assertThat(code).as("%s must not name %s", file, forbidden)
                         .doesNotContain(forbidden);
             }
         }
+    }
+
+    @Test
+    @DisplayName("member_id is read in exactly one private place, and cannot leave as a value")
+    void theMemberIdIsComparedNeverEmitted() throws Exception {
+        String runner = stripComments(Files.readString(Path.of(
+                "src/main/java/com/sellerops/connector/cafe24/Cafe24AnswerSemanticProbeRunner.java")));
+        assertThat(runner)
+                .as("the runner is what logs; it must not be able to name the id at all")
+                .doesNotContain("member_id").doesNotContain("memberId");
+
+        String probeCode = stripComments(Files.readString(Path.of(
+                "src/main/java/com/sellerops/connector/cafe24/Cafe24AnswerSemanticProbe.java")));
+        assertThat(probeCode.split("member_id", -1).length - 1)
+                .as("one wire binding — RawComment's, and nothing else").isEqualTo(1);
+        int structureAt = probeCode.indexOf("public record CommentStructure");
+        assertThat(structureAt).isPositive();
+        assertThat(probeCode.substring(structureAt, probeCode.indexOf('}', structureAt)))
+                .as("the public projection carries the ANSWER (a boolean), never the id")
+                .doesNotContain("memberId").contains("boolean memberIsMall");
     }
 
     private static String stripComments(String source) {

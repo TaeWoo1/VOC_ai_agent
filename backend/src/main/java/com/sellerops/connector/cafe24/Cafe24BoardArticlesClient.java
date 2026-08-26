@@ -100,6 +100,62 @@ public class Cafe24BoardArticlesClient {
         return parse(response.body());
     }
 
+    /**
+     * Which articles in this window HAVE comments — one request, so the comment lane never fans out
+     * over a whole board.
+     *
+     * <p>The LIST publishes a {@code comment} ({@code T}/{@code F}) filter
+     * ({@code docs/vendor/cafe24-admin-api/get-boards-articles.md}). Asking it first turns "read the
+     * comments of every article we hold as unanswered" — which on a backfill page is up to 100
+     * requests — into "read the comments of the articles that have any", which on the demo org is
+     * one. The returned numbers are article identities the caller already knows how to key; nothing
+     * else is projected.
+     *
+     * <p>A full page is reported by the caller rather than silently truncated: a bounded read that
+     * quietly stopped would look exactly like a board where nobody comments.
+     *
+     * @throws Cafe24RateLimitedException on HTTP 429
+     */
+    public List<Long> fetchCommentedArticleNumbers(String accessToken, String mallId, int boardNo,
+                                                   LocalDate startDate, LocalDate endDate,
+                                                   int limit) {
+        URI uri = commentedArticlesUri(mallId, boardNo, startDate, endDate, limit);
+        Cafe24HttpClient.Response response =
+                http.get(uri, Map.of("Authorization", "Bearer " + accessToken));
+        if (response.statusCode() == 429) {
+            throw Cafe24RateLimitedException.fromResponse(response);
+        }
+        if (response.statusCode() != 200) {
+            throw new IllegalStateException(
+                    "카페24 게시글 조회에 실패했습니다 (HTTP " + response.statusCode() + ").");
+        }
+        return parse(response.body()).stream()
+                .map(Cafe24BoardArticleRow::articleNo)
+                .filter(no -> no != null && no > 0)
+                .toList();
+    }
+
+    static URI commentedArticlesUri(String mallId, int boardNo, LocalDate startDate,
+                                    LocalDate endDate, int limit) {
+        requireShape(mallId, boardNo);
+        Map<String, String> params = new LinkedHashMap<>();
+        if (startDate != null) {
+            params.put("start_date", startDate.toString());
+        }
+        if (endDate != null) {
+            params.put("end_date", endDate.toString());
+        }
+        // The documented filter, and the only thing that separates this call from the ordinary sweep.
+        params.put("comment", "T");
+        params.put("limit", Integer.toString(limit));
+        String query = params.entrySet().stream()
+                .map(e -> URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8)
+                        + "=" + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
+                .collect(Collectors.joining("&"));
+        return URI.create("https://" + mallId + ".cafe24api.com"
+                + ARTICLES_PATH_PREFIX + boardNo + ARTICLES_PATH_SUFFIX + "?" + query);
+    }
+
     static URI articlesByNumberUri(String mallId, int boardNo, List<Long> articleNos) {
         requireShape(mallId, boardNo);
         for (Long articleNo : articleNos) {
