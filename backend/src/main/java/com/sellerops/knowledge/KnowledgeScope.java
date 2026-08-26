@@ -21,6 +21,15 @@ package com.sellerops.knowledge;
  * draft would cite it. {@code KnowledgeScopeTest} asserts that absence structurally rather than
  * trusting this paragraph.
  *
+ * <p><b>One of the five is HISTORICAL, and that is a different claim from the other four.</b>
+ * {@link #PAST_ANSWER} records that the seller once sent a sentence — {@link #current()} is false for
+ * it and true for everything else. A sent answer is not a correct answer: it may have been written
+ * under a policy that has since changed, about a product whose spec has since moved, or in a hurry.
+ * The other four describe what is true NOW, each from a source that is corrected when it goes wrong.
+ * So when a past answer and current evidence disagree about a fact, current evidence wins — and that
+ * is enforced where the evidence is assembled ({@code InquiryEvidenceRetriever}), not by asking a
+ * model to remember it (product-owner, 2026-08-26).
+ *
  * <p><b>And platform knowledge is never seller policy.</b> {@link #CHANNEL_FACT} is what NAVER,
  * Coupang or Cafe24 do; {@link #ORG_OPERATIONS} is what this seller does. "이 채널은 판매자 답변
  * API가 없다" and "저희는 교환을 7일 안에 받습니다" are both true and neither substitutes for the
@@ -48,6 +57,18 @@ public enum KnowledgeScope {
 
     KnowledgeScope(boolean retrievable) {
         this.retrievable = retrievable;
+    }
+
+    /**
+     * Whether this scope describes what is true NOW, as opposed to what was once said.
+     *
+     * <p>False for {@link #PAST_ANSWER} alone. The distinction exists so that "we have evidence" and
+     * "we have a record of an answer" cannot be counted as the same thing: a draft whose only source
+     * is a past answer has no current basis for the facts it would state, however well that answer
+     * was written.
+     */
+    public boolean current() {
+        return this != PAST_ANSWER;
     }
 
     /**

@@ -187,6 +187,122 @@ class InquiryEvidenceRetrieverTest {
                 .isEqualTo(retriever.retrieve(org, q).passages());
     }
 
+    @Test
+    @DisplayName("a past answer ALONE does not make a draft grounded")
+    void aPastAnswerAloneIsNotGrounding() {
+        // The product-owner's 2026-08-26 rule, at the only place it can be enforced. Before this,
+        // a memory-only match told the seller 「판매자가 등록한 과거 답변을 근거로 썼습니다」 over a
+        // draft that had no current source for any fact in it. EXECUTOR_SENT_VERIFIED proves the
+        // sentence reached the marketplace; it proves nothing about whether it was right, and the
+        // policy it was written under may no longer exist.
+        answerMemory.remember(new AnswerMemoryService.RememberCommand(
+                org, "inquiry-answer:2", AnswerMemoryStrength.EXECUTOR_SENT_VERIFIED,
+                "교환 신청 기간", null, "교환은 수령 후 30일 이내에 신청해 주시면 도와드리겠습니다.",
+                null, "NAVER", null, "exchange_return_reply", null, null, null, null, null,
+                DataOrigin.REAL));
+
+        InquiryEvidenceRetriever.InquiryEvidence found =
+                retriever.retrieve(org, inquiry(null, "교환 신청 기간이 어떻게 되나요?"));
+
+        assertThat(found.scopes()).containsExactly(KnowledgeScope.PAST_ANSWER);
+        assertThat(found.state())
+                .as("retrieved something, but nothing that says what is true now")
+                .isNotEqualTo(DraftKnowledgeState.GROUNDED);
+        assertThat(found.state().grounded()).isFalse();
+    }
+
+    @Test
+    @DisplayName("and the sentence the seller reads says so, instead of claiming there was nothing")
+    void theMessageStaysTrueWhenOnlyAPastAnswerMatched() {
+        answerMemory.remember(new AnswerMemoryService.RememberCommand(
+                org, "inquiry-answer:3", AnswerMemoryStrength.EXECUTOR_SENT_VERIFIED,
+                "교환 신청 기간", null, "교환은 수령 후 30일 이내에 신청해 주시면 도와드리겠습니다.",
+                null, "NAVER", null, "exchange_return_reply", null, null, null, null, null,
+                DataOrigin.REAL));
+
+        InquiryEvidenceRetriever.InquiryEvidence found =
+                retriever.retrieve(org, inquiry(null, "교환 신청 기간이 어떻게 되나요?"));
+        String message = found.state().messageKo(found.scopes());
+
+        // The base sentence for these states ends 「과거 답변에도 해당 내용이 없어」 — which is false
+        // here, with that very answer printed underneath it.
+        assertThat(message).doesNotContain("과거 답변에도 해당 내용이 없어");
+        assertThat(message).contains("과거 답변").contains("확인이 필요합니다");
+    }
+
+    @Test
+    @DisplayName("a past answer never takes more than one slot, and never the first one")
+    void theHistoricalLaneIsCappedAndComesLast() {
+        policy(OrgKnowledgeType.EXCHANGE_REFUND_POLICY, "교환 및 반품 안내",
+                "교환은 수령 후 7일 이내에 신청하실 수 있습니다.");
+        for (int i = 0; i < 3; i++) {
+            answerMemory.remember(new AnswerMemoryService.RememberCommand(
+                    org, "inquiry-answer:cap-" + i, AnswerMemoryStrength.EXECUTOR_SENT_VERIFIED,
+                    "교환 신청 기간", null, "교환은 수령 후 7일 이내에 신청해 주시면 도와드리겠습니다.",
+                    null, "NAVER", null, "exchange_return_reply", null, null, null, null, null,
+                    DataOrigin.REAL));
+        }
+
+        var passages = retriever.retrieve(org, inquiry(null, "교환 신청 기간이 어떻게 되나요?")).passages();
+
+        assertThat(passages).filteredOn(p -> p.scope() == KnowledgeScope.PAST_ANSWER)
+                .hasSizeLessThanOrEqualTo(InquiryEvidenceRetriever.MAX_HISTORICAL_PASSAGES);
+        int firstHistorical = indexOfFirst(passages, false);
+        int lastCurrent = indexOfLast(passages, true);
+        assertThat(firstHistorical).as("a past answer never precedes current evidence")
+                .isGreaterThan(lastCurrent);
+    }
+
+    @Test
+    @DisplayName("when current evidence fills the window, the past answer is what gets dropped")
+    void aFullWindowOfCurrentEvidenceLeavesNoRoomForAPastAnswer() {
+        UUID productId = product("선바로 일체형 전선몰딩");
+        // Four separate product documents, each of which can speak to the question on its own.
+        String[][] docs = {
+                {"몰딩 교환 시 주의사항", "몰딩 교환은 재부착 시 접착력이 약해지므로 교환 전 벽면 상태를 확인해 주세요."},
+                {"몰딩 교환 접수 방법", "몰딩 교환 접수는 주문번호와 사진을 함께 보내주시면 진행됩니다."},
+                {"몰딩 교환 불가 사유", "몰딩 교환은 절단하거나 시공을 마친 제품에 대해서는 어렵습니다."},
+                {"몰딩 교환 배송", "몰딩 교환 배송은 회수와 재발송이 함께 진행됩니다."}};
+        for (String[] doc : docs) {
+            productKnowledge.create(org, productId, new KnowledgeSourceRequest(
+                    KnowledgeSourceType.USAGE, doc[0], doc[1], null), UUID.randomUUID(), "데모 운영자");
+        }
+        answerMemory.remember(new AnswerMemoryService.RememberCommand(
+                org, "inquiry-answer:crowded", AnswerMemoryStrength.EXECUTOR_SENT_VERIFIED,
+                "몰딩 교환", null, "몰딩 교환은 언제든 도와드리겠습니다.",
+                productId, "NAVER", null, "exchange_return_reply", null, null, null, null, null,
+                DataOrigin.REAL));
+
+        var passages = retriever.retrieve(org, inquiry(productId, "몰딩 교환은 어떻게 하나요?", "")).passages();
+
+        assertThat(passages).hasSize(InquiryEvidenceRetriever.MAX_PASSAGES);
+        assertThat(passages).filteredOn(p -> p.scope() == KnowledgeScope.PAST_ANSWER)
+                .as("four current passages already speak to this; a fifth source proving something "
+                        + "was once sent adds nothing the draft needs")
+                .isEmpty();
+    }
+
+    private static int indexOfFirst(
+            java.util.List<InquiryEvidenceRetriever.ScopedPassage> passages, boolean current) {
+        for (int i = 0; i < passages.size(); i++) {
+            if (passages.get(i).scope().current() == current) {
+                return i;
+            }
+        }
+        return Integer.MAX_VALUE;
+    }
+
+    private static int indexOfLast(
+            java.util.List<InquiryEvidenceRetriever.ScopedPassage> passages, boolean current) {
+        int found = -1;
+        for (int i = 0; i < passages.size(); i++) {
+            if (passages.get(i).scope().current() == current) {
+                found = i;
+            }
+        }
+        return found;
+    }
+
     private void policy(OrgKnowledgeType type, String title, String body) {
         orgKnowledge.create(org, new OrgKnowledgeRequest(type, title, body, null),
                 UUID.randomUUID(), "데모 운영자");

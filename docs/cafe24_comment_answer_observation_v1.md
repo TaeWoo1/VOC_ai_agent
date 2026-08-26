@@ -188,3 +188,132 @@ observer 미주입(구 배선) → 이 lane이 없던 때와 **정확히 같은 
 - **`writer`/`password`는 여전히 미보유.** 이 문서는 READ만 다룬다. 댓글 **쓰기**
   (`POST .../comments`)의 capability는 `docs/inquiry_action_flow_v1.md`에서
   `NEEDS_VERIFICATION` 그대로다.
+
+---
+
+## 8. Historical reconciliation — 설계와 **승인 매니페스트** (미실행)
+
+§7이 적어 둔 한계 — routine 창(14일)은 과거 백로그에 닿지 않는다 — 를 닫기 위한 계획이다.
+**아직 실행하지 않았다.** 아래 매니페스트가 승인되기 전에는 어떤 요청도 나가지 않는다.
+
+### 8.1 무엇을 확인하려는 것인가
+
+마켓플레이스 호출 **0회**로 한 DB 감사 결과(2026-08-26):
+
+| 항목 | 값 |
+|---|---|
+| Demo Org(`7146c50f`) Cafe24 · `ACTIVE` + `UNANSWERED` | **25** |
+| (참고) 같은 org의 전 채널 합계 | 34 = Cafe24 25 · Coupang 5 · NAVER 4 |
+| board | **전부 board 6** |
+| `thread_role` | **25건 전부 null** — 08-25 repair가 `REPLY` 44건을 `EXCLUDED_THREAD_REPLY`로 옮겼고, 남은 ROOT는 명시적으로 표기되지 않았다 |
+| `answer_body` / `answered_at` | **25건 전부 부재** — 답변 표현을 하나도 관측한 적이 없다는 뜻이다 |
+| `inform_status` | `N` 21 · **`P` 3** · null 1 |
+| 비밀글 | 15 (product-owner 결정으로 workload에 포함) |
+| `last_seen_at` | **25건 전부 `2026-08-22 14:41`** — 과거 백필이 남긴 값이고, 이후 routine sweep은 이 행들을 **한 번도 다시 보지 않았다** |
+| 작성 연도 | 2014–2025 (2016년이 10건으로 최다) |
+| work item phase | `OPEN` 22 · `PROPOSED` 2 · `ACTION_PENDING` 1 |
+
+25건 전부 `answered_at`이 비어 있다는 것은 「25건 전부 미답변」의 증거가 **아니다**. 우리는 이
+행들에 대해 답변 표현을 **한 번도 조회한 적이 없다** — a3674 하나로 이미 확인했듯, 판매자가 관리자
+화면에서 답한 흔적은 `reply_status`에 남지 않는다. 이 실행이 답하려는 질문은 정확히 하나다:
+**「25건이 정말 미답변 25건인가?」**
+
+### 8.2 요청 예산 — 왜 25×N이 아니라 1+N인가
+
+기존 두 메서드가 이미 필요한 것을 절반씩 들고 있다: `fetchByArticleNumbers`는 **정확한 집합**을
+(`article_no` 콤마 구분, 08-25 repair에서 증명됨), `fetchCommentedArticleNumbers`는 **댓글 필터**를
+(`comment=T`) 쓴다. 계약의 LIST 파라미터 표는 둘을 **나란히** 싣고 서로 배타라고 적지 않는다
+(`docs/vendor/cafe24-admin-api/get-boards-articles.md`). 그래서 발견은 한 번이다:
+
+```
+GET /boards/6/articles?article_no=<25개>&comment=T&limit=25   ← 1회
+GET /boards/6/articles/{article_no}/comments                  ← 발견된 후보당 1회
+```
+
+**실패 모드가 안전한 쪽으로 기운다.** 두 필터가 결합되지 않고 `comment`가 무시되면 응답은
+**상위집합**(25건 전부)이 되고, 우리는 최대 25번의 댓글 조회를 하게 된다 — 예산을 아끼지 못할 뿐
+**틀린 답을 얻지는 않는다**. 반대 방향의 실패(조용히 잘려 「댓글 없음」으로 보이는 것)는 발생할 수
+없다: 요청한 `article_no`와 돌아온 집합을 대조해 로그에 적는다.
+
+`start_date`/`end_date`는 **보내지 않는다**. 계약이 「1회 호출당 조회 기간 1년 초과 불가」라고 적고
+있는데 이 백로그는 11년에 걸쳐 있으므로, 날짜 창으로 접근하면 최소 12회의 발견 요청이 된다.
+정확한 집합을 이름으로 부르는 쪽이 더 적고 더 정확하다.
+
+### 8.3 승인 매니페스트 — `apr-c24-hist-comments`
+
+| 항목 | 값 |
+|---|---|
+| approvalId | `apr-c24-hist-comments` |
+| channel / account | Cafe24 · `78da0eb3` (org `7146c50f`) |
+| surface | Admin API — `mall.read_community` (**기존 스코프, 재동의 없음**) |
+| board(s) | **6 하나** |
+| operation | board comment 관측 (historical reconciliation) |
+| **mode** | **`READ`** |
+| 대상 | **정확히 25개 `article_no`**: `19,25,72,77,78,80,81,82,85,86,89,90,97,113,160,194,208,213,218,230,248,250,280,281,284` — 이 목록 밖의 글은 요청 자체가 표현할 수 없다 |
+| date/window | **없음**(정확한 집합으로 지정) |
+| discovery requests | **1** |
+| max comments GET | **25** (후보 1건당 1회, 상한) |
+| **absolute max requests** | **26** |
+| 자동 재시도 | **0** |
+| allowed actions | `GET` **둘뿐** — 위 두 경로. `POST`/`PUT`/`DELETE` 없음 |
+| **WRITE** | **0** |
+| 저장되는 데이터 | 증명된 판매자 댓글이 있는 부모에 한해 `inquiries.status='ANSWERED'` + `answered_at`(**댓글 자신의 시각**). 그 외 **아무것도 쓰지 않는다** |
+| 저장되지 **않는** 것 | `answer_body` · 댓글 본문 · 댓글 id · 작성자명 · `member_id` · 고객 댓글의 존재 여부 · 새 문의 행 |
+| PII / body logging | **없음** — 로그는 개수뿐(`후보 / 댓글보유 / 조회 / 판매자답변확인 / 작성자불명 / 시각해석불가`) |
+| `inform_status` | **건드리지 않는다** — 채널이 말한 것과 우리가 내린 결론은 다른 칸이다 |
+
+### 8.4 정확성 규칙 (실행 시)
+
+- 판매자 댓글(`member_id == mall_id`) → 부모 `ANSWERED`.
+- **고객 댓글 → `UNANSWERED` 유지.** 고객이 자기 문의에 댓글을 다는 것은 답변이 아니다.
+- **작성자 불명(`member_id` 공백/부재) → `UNANSWERED` 유지.** 추정하지 않는다.
+- 자식 **답변 글** 계약은 **무변경** — 이 실행은 그 경로를 건드리지 않는다.
+- **댓글은 문의 행이 되지 않는다.** canonical record를 하나도 만들지 않는다.
+- `answer_body` **미저장** — 「답변했다」와 「이렇게 답했다」는 다른 주장이다.
+- 진행 중인 판매자 작업은 취소되지 않는다: `reconcileConnectorAnswered`는 `OPEN`만 닫으므로
+  `PROPOSED` 2건 · `ACTION_PENDING` 1건은 phase 그대로 남는다(§8.6).
+
+### 8.5 감사만으로 드러난 것 — **계약 모순 하나** (고치지 않았다)
+
+25건 중 **3건의 `inform_status`가 `P`**다. 같은 vendored 계약이 `P`를 두 번, **다르게** 정의한다:
+
+- 속성 표: `P` = **처리중**(in progress)
+- LIST 필터 표: **「`N: Unanswered`, `P: Answer`」** — 그리고 속성 표에 있는 `C`는 필터 값으로
+  **아예 등장하지 않는다**(이 모순은 계약 사본에 이미 verbatim으로 적혀 있다).
+
+코드(`CommunityReplyStatus`)는 속성 표를 따라 `P → IN_PROGRESS → UNANSWERED`로 **fail-closed** 매핑한다.
+필터 표를 따랐다면 이 3건은 답변완료다. 어느 쪽이 맞는지는 **이 저장소가 답할 수 없고**, 추측으로
+매핑을 바꾸는 것은 「판매자가 답한 문의를 미답변으로 둔다」를 「답하지 않은 문의를 답변완료로
+숨긴다」로 바꾸는 것뿐이다 — 두 번째가 더 나쁘다. **그대로 두고 보고한다.** §8의 실행은 이 질문을
+우회한다: 그 3건에 판매자 댓글이 있으면 `P`와 무관하게 `ANSWERED`가 되고, 없으면 `P`는 미해결로
+남는다.
+
+### 8.6 감사만으로 드러난 것 — **stale work 정확히 1건** (고치지 않았다)
+
+`inquiries.status`가 `ANSWERED`인데 work item이 아직 살아 있는 행은 이 org 전체에서 **하나**다 —
+`cafe24:b6:a3674`, `PROPOSED`. 실측 노출:
+
+| 화면 | 게이트 | 이 1건이 보이는가 |
+|---|---|---|
+| 작업 큐 `?phase=OPEN` | `i.status` 게이트 **없음** | 아니오 (`OPEN` 22건은 전부 진짜 미답변 — `OPEN`은 자동으로 닫히므로) |
+| 작업 큐 `?phase=PROPOSED` | `i.status` 게이트 **없음** | **예** (3건 중 1건이 이미 답변됨) |
+| 문의 목록(Inbox) | `status`로 분류 | 아니오 — **「답변함」**으로 간다 |
+| 홈 KPI · 채널표 · 요약 | `status = 'UNANSWERED'` | 아니오 |
+| Agent tools | `phase=OPEN`만 요청 | 아니오 |
+| 프로액티브 후보 | `i.status='UNANSWERED'` **있음** | 아니오 |
+| 문의 상세 패널 | **phase만** 본다 | **예** — 초안·전송 흐름이 그대로 보인다 |
+
+**전송은 막힌다.** `InquiryPublishService`의 전송 직전 검사에 `ALREADY_ANSWERED`가 있고
+(`answered_at != null || answer_body 존재`), 이 lane이 **`answered_at`을 쓰기 때문에** 이 행은
+거기서 거절된다. 중복 답변은 **불가능하다**.
+
+다만 그 게이트는 `status`가 아니라 **두 필드**를 본다. 오늘 `ANSWERED`이면서 두 필드가 모두 빈 행이
+**103건** 있고(Cafe24 89 · Coupang 9 · NAVER 5), 그 중 살아 있는 work item을 가진 것은 **0건**이라
+실제 노출은 **없다**. 이것은 잠재적 구멍이지 현재의 결함이 아니며, 이 패키지의 comment lane은
+자기 표현에 대해서는 그 구멍을 **닫았다**(`answered_at`을 쓰므로).
+
+**제안(구현하지 않음).** 작업 큐 쿼리에 `i.status='UNANSWERED'`를 더하는 것은 **추천하지 않는다** —
+우리 자신의 전송이 성공해 `ANSWERED`가 된 `EXECUTED` 항목이 검증 전에 화면에서 사라진다. 대신
+**상세 패널이 이미 내려받고 있는 `detail.status`를 읽어**, 이미 답변된 대상에는 「이 문의는 이미
+답변되었습니다」를 보이고 전송 CTA를 비활성화하는 편이 맞다. 숨기는 것이 아니라 말해 주는 것이고,
+새 phase도 새 event도 필요 없다. **product-owner 결정 사항이다.**

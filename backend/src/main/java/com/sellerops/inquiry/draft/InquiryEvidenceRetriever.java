@@ -37,11 +37,28 @@ import org.springframework.stereotype.Component;
  * redesign closed on 2026-08-24. So every lane runs, every lane is scored by the same scorer, and the
  * merge is by score.
  *
- * <p><b>With one structural exception: each lane that produced anything keeps its best passage.</b> A
- * mixed question — "이 상품 반품하려면 어떻게 하나요?" — needs the product AND the policy, and a pure
- * top-N by score answers it with whichever lane is wordier. Reserving one slot per lane is not a
- * priority claim; it is the statement that a lane which can speak to the question should be heard
- * once before another lane is heard twice.
+ * <p><b>With one structural exception: each CURRENT lane that produced anything keeps its best
+ * passage.</b> A mixed question — "이 상품 반품하려면 어떻게 하나요?" — needs the product AND the
+ * policy, and a pure top-N by score answers it with whichever lane is wordier. Reserving one slot per
+ * lane is not a priority claim; it is the statement that a lane which can speak to the question should
+ * be heard once before another lane is heard twice. Product and policy remain exact peers under it.
+ *
+ * <p><b>The one precedence that IS declared: current evidence outranks a past answer</b>
+ * (product-owner, 2026-08-26). {@link KnowledgeScope#current()} splits the lanes in two, and the split
+ * is not about relevance — it is about what the two kinds of passage claim. The product's notes and
+ * the company's policy say what is true now, and each is corrected when it goes wrong. A past answer
+ * says only that this sentence was once sent; {@code EXECUTOR_SENT_VERIFIED} proves it reached the
+ * marketplace, not that it was right. It may have been written under a policy that has since changed.
+ * So the historical lane gets <b>no reserved slot, at most one passage, and last position</b>, and —
+ * the part that actually matters — a past answer <b>alone</b> never makes a draft
+ * {@link DraftKnowledgeState#GROUNDED}. Before this, a memory-only match told the seller
+ * 「판매자가 등록한 과거 답변을 근거로 썼습니다」 over a draft with no current basis for a single fact
+ * in it.
+ *
+ * <p>This is NOT the lane ranking the 2026-08-24 redesign closed. That one would have decided in
+ * advance that a product beats a policy; this one leaves those two equal and separates «what is true»
+ * from «what was said». Nothing here suppresses a past answer — it is still retrieved, still shown,
+ * and still the right thing to imitate for tone. It just stops being an authority on a current fact.
  *
  * <p><b>A missing product does not end the search.</b> Most of the Cafe24 backlog resolves to no
  * product, and the questions in it — 세금계산서, 현금영수증, 배송 — are org-level. The product lane is
@@ -186,27 +203,44 @@ public class InquiryEvidenceRetriever {
                     passage.answerBody(), passage.memoryId(), null, locator(passage), passage.score()));
         }
 
-        List<ScopedPassage> merged = merge(List.of(productLane, policyLane, memoryLane));
-        DraftKnowledgeState state = merged.isEmpty() ? productVerdict : DraftKnowledgeState.GROUNDED;
+        List<ScopedPassage> merged = merge(List.of(productLane, policyLane), memoryLane);
+        // GROUNDED is a claim about the FACTS the draft may state, so it is earned by current
+        // evidence only. A memory-only match leaves the product lane's own verdict standing: the
+        // seller is told there is no current basis, and the past answer is still in front of them.
+        boolean groundedInCurrent = merged.stream().anyMatch(p -> p.scope().current());
+        DraftKnowledgeState state =
+                groundedInCurrent ? DraftKnowledgeState.GROUNDED : productVerdict;
         return new InquiryEvidence(productId, state, merged,
                 orderFacts.read(orgId, inquiry, lookup), remembered.supersededByConflict());
     }
 
+    /** At most this many passages of the window may be a past answer. */
+    static final int MAX_HISTORICAL_PASSAGES = 1;
+
     /**
-     * One slot for each lane that found something, then the rest by score.
+     * One slot for each CURRENT lane that found something, then the rest by score, then — only if
+     * the window is not already full — a single past answer.
      *
-     * <p>The fill is a plain score comparison across lanes — no per-scope bonus, no per-scope penalty.
-     * The tie-break is the scope's declaration order and then the heading, which is a determinism
-     * device and not a preference: two passages that score identically must come back in the same
-     * order on every run, or the same question cites different evidence twice.
+     * <p>Within the current lanes the fill is a plain score comparison — no per-scope bonus, no
+     * per-scope penalty. The tie-break is the scope's declaration order and then the heading, which
+     * is a determinism device and not a preference: two passages that score identically must come
+     * back in the same order on every run, or the same question cites different evidence twice.
+     *
+     * <p>The historical lane is outside that competition rather than losing it. It cannot reserve a
+     * slot, cannot take more than {@link #MAX_HISTORICAL_PASSAGES}, and cannot displace a current
+     * passage — because the question it answers ("what did we say last time?") is not the question a
+     * factual claim needs answered ("what is true?"). It is dropped first when the window is full,
+     * which is the correct thing to drop: if four current passages already speak to the question,
+     * the draft does not need a fifth source that only proves something was once sent.
      */
-    private static List<ScopedPassage> merge(List<List<ScopedPassage>> lanes) {
+    private static List<ScopedPassage> merge(List<List<ScopedPassage>> currentLanes,
+                                             List<ScopedPassage> historicalLane) {
         Comparator<ScopedPassage> byScore = Comparator.comparingDouble(ScopedPassage::score).reversed()
                 .thenComparing(p -> p.scope().ordinal())
                 .thenComparing(ScopedPassage::heading, Comparator.nullsLast(Comparator.naturalOrder()));
         List<ScopedPassage> reserved = new ArrayList<>();
         List<ScopedPassage> rest = new ArrayList<>();
-        for (List<ScopedPassage> lane : lanes) {
+        for (List<ScopedPassage> lane : currentLanes) {
             if (lane.isEmpty()) {
                 continue;
             }
@@ -219,7 +253,13 @@ public class InquiryEvidenceRetriever {
         rest.sort(byScore);
         List<ScopedPassage> out = new ArrayList<>(reserved);
         out.addAll(rest);
-        return out.size() > MAX_PASSAGES ? List.copyOf(out.subList(0, MAX_PASSAGES)) : List.copyOf(out);
+        if (out.size() > MAX_PASSAGES) {
+            return List.copyOf(out.subList(0, MAX_PASSAGES));
+        }
+        historicalLane.stream().sorted(byScore).limit(MAX_HISTORICAL_PASSAGES)
+                .filter(p -> out.size() < MAX_PASSAGES)
+                .forEach(out::add);
+        return List.copyOf(out);
     }
 
     /** Whether this product id points at a real, named product rather than ingest's shared bucket. */

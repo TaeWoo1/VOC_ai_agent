@@ -22,6 +22,12 @@ import java.util.stream.Collectors;
  * claims have a source. Collapsing them would let "we know nothing about this product" and "we know
  * things, none of them about this" read the same to the person about to send the reply.
  *
+ * <p><b>{@link #GROUNDED} is earned by CURRENT evidence only</b> (product-owner, 2026-08-26). A past
+ * answer that matched — and nothing else — leaves the product lane's verdict standing, because
+ * {@code EXECUTOR_SENT_VERIFIED} proves a sentence reached the marketplace and proves nothing about
+ * whether it was right. Calling that draft grounded told the seller 「판매자가 등록한 과거 답변을
+ * 근거로 썼습니다」 over a reply with no current source for a single fact in it.
+ *
  * <p>None of them is a licence to invent. A draft on the first three states is written from the
  * question alone and says so.
  */
@@ -60,8 +66,18 @@ public enum DraftKnowledgeState {
      * reached the drafter, so this sentence cannot claim a source the draft never saw.
      */
     public String messageKo(Set<KnowledgeScope> scopes) {
-        if (this != GROUNDED || scopes == null || scopes.isEmpty()) {
+        if (scopes == null || scopes.isEmpty()) {
             return messageKo();
+        }
+        if (this != GROUNDED) {
+            // Not grounded, yet something was retrieved — so a past answer matched and no current
+            // source did. The base sentences say 「과거 답변에도 해당 내용이 없어」, which would now be
+            // false, and the seller is about to read that past answer sitting right below it. Say
+            // what is actually true: there is no current basis, and the old answer is a reference
+            // whose continued correctness nobody has checked.
+            return scopes.stream().noneMatch(scope -> !scope.current()) ? messageKo()
+                    : "현재 상품 지식·운영 정책에는 이 질문에 해당하는 내용이 없습니다. "
+                            + "아래 과거 답변은 참고용이며, 그때의 안내가 지금도 맞는지 확인이 필요합니다.";
         }
         String named = scopes.stream().map(KnowledgeScope::labelKo).collect(Collectors.joining("·"));
         return "판매자가 등록한 " + named + objectParticle(named) + " 근거로 썼습니다.";
