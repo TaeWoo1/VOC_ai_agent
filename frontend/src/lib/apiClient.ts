@@ -1,6 +1,8 @@
 import axios, { isAxiosError } from "axios";
 import type {
   AgentQuotaStatus,
+  AnswerStyleRequest,
+  AnswerStyleView,
   KnowledgeSourceRequest,
   OrgKnowledgeRequest,
   OrgKnowledgeView,
@@ -1693,6 +1695,23 @@ export const api = {
 
   async deleteOrgKnowledge(sourceId: string): Promise<void> {
     await http.delete(`/api/org-knowledge/sources/${encodeURIComponent(sourceId)}`);
+  },
+
+  /**
+   * AI 답변 스타일 — read the org's wording profile, or the shipped defaults when it has none.
+   *
+   * Org-scoped from the token; no org id is ever sent, and there is no list route because there is
+   * nothing to list.
+   */
+  async getAnswerStyle(): Promise<AnswerStyleView> {
+    const { data } = await http.get<AnswerStyleView>("/api/answer-style");
+    return data;
+  },
+
+  /** Save the whole form. The backend refuses a style that reaches for a fact, and says which. */
+  async saveAnswerStyle(request: AnswerStyleRequest): Promise<AnswerStyleView> {
+    const { data } = await http.put<AnswerStyleView>("/api/answer-style", request);
+    return data;
   },
 
   /** Today's Agent budget for this org. Read-only; asking never spends any of it. */

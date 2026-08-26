@@ -160,11 +160,12 @@ class AnswerStyleSafetyFloorTest {
     }
 
     @Test
-    @DisplayName("it is not wired to a production prompt yet, and that is deliberate")
-    void nothingComposesAPromptFromThisYet() throws Exception {
-        // Manual Answer Style v1 (table/CRUD/UI/composition) is a separate package. Until it lands,
-        // no main-source file outside this one may reference the floor — so "declared but unused"
-        // stays a checkable claim rather than a comment someone has to trust.
+    @DisplayName("it refuses, it does not rewrite — and the caller that enforces it is named elsewhere")
+    void theFloorIsAPureFunction() throws Exception {
+        // Until Organization Answer Style v1 this asserted ZERO production referrers, which was the
+        // honest thing to say about a class written a package ahead of its caller. The caller exists
+        // now (AnswerStyleService, at write time), and the assertion that it is the ONLY one lives in
+        // AnswerStyleFenceTest — beside the other absences that package has to keep true.
         var main = java.nio.file.Path.of("src/main/java/com/sellerops");
         long referrers;
         try (var files = java.nio.file.Files.walk(main)) {
@@ -172,13 +173,18 @@ class AnswerStyleSafetyFloorTest {
                     .filter(f -> !f.getFileName().toString().equals("AnswerStyleSafetyFloor.java"))
                     .filter(f -> {
                         try {
-                            return java.nio.file.Files.readString(f).contains("AnswerStyleSafetyFloor");
+                            // Comments stripped: a docblock that MENTIONS the floor is not a caller.
+                            return java.nio.file.Files.readString(f)
+                                    .replaceAll("(?s)/\\*.*?\\*/", "")
+                                    .replaceAll("(?m)//.*$", "")
+                                    .contains("AnswerStyleSafetyFloor");
                         } catch (Exception e) {
                             return false;
                         }
                     })
                     .count();
         }
-        assertThat(referrers).isZero();
+        assertThat(referrers).as("one door, so a refusal always reaches the person who typed it")
+                .isEqualTo(1);
     }
 }

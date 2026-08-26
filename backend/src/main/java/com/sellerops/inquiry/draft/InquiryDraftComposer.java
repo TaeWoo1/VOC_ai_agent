@@ -17,6 +17,9 @@ import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.knowledge.KnowledgeScope;
+import com.sellerops.knowledge.style.AnswerStyleInstruction;
+import com.sellerops.knowledge.style.AnswerStyleProfile;
+import com.sellerops.knowledge.style.AnswerStyleService;
 import com.sellerops.order.fact.OrderFact;
 import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.product.detail.ProductDetailEnrichmentTrigger;
@@ -89,6 +92,7 @@ public class InquiryDraftComposer {
     private final DraftEvidenceSnippets snippets;
     private final ProductDetailEnrichmentTrigger detail;
     private final ProductDetailImageKnowledge images;
+    private final AnswerStyleService styles;
 
     /**
      * The three operational sentences, and one rule covering all of them: <b>none of them says
@@ -107,6 +111,15 @@ public class InquiryDraftComposer {
      * it was deliberately not written. A picture whose reading is in flight is that moment.
      */
     static final String DETAIL_READ_PENDING = "상품 상세 정보를 확인 중입니다.";
+    /**
+     * The fifth, and the only one caused by the company's own setting.
+     *
+     * <p>A generated reply that carries a phrase this company has banned is REFUSED, not edited.
+     * Deleting the words out of the sentence would leave a reply whose meaning nobody chose, and
+     * saving it anyway would make 「사용하지 않을 표현」 a preference rather than a rule.
+     */
+    static final String STYLE_FORBIDDEN_PHRASE = "사용하지 않기로 한 표현이 들어가 초안을 저장하지 "
+            + "않았습니다. 다시 생성해 보시거나, 설정에서 그 표현을 확인해 주세요.";
 
     public InquiryDraftComposer(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                 InquiryReplyDraftService drafts, InquiryDraftEvidenceRepository evidence,
@@ -114,7 +127,7 @@ public class InquiryDraftComposer {
                                 AgentQuotaService quota, ProductVariantRepository variants,
                                 DraftEvidenceSnippets snippets,
                                 ProductDetailEnrichmentTrigger detail,
-                                ProductDetailImageKnowledge images) {
+                                ProductDetailImageKnowledge images, AnswerStyleService styles) {
         this.workItems = workItems;
         this.inquiries = inquiries;
         this.drafts = drafts;
@@ -126,6 +139,7 @@ public class InquiryDraftComposer {
         this.snippets = snippets;
         this.detail = detail;
         this.images = images;
+        this.styles = styles;
     }
 
     /**
@@ -183,6 +197,11 @@ public class InquiryDraftComposer {
         InquiryEvidenceRetriever.InquiryEvidence retrieved =
                 retriever.retrieve(orgId, inquiry, KnowledgeVariantScope.of(verdict.variantId()));
         AnswerBasisState basis = AnswerBasisState.of(retrieved.state(), applicability);
+        // The org's wording, read ONCE per draft. Everything downstream — the prompt section, the
+        // forbidden-phrase check, the fallback, the provenance stamp — reads this same snapshot, so
+        // a save that lands mid-compose cannot produce a draft written under one style and recorded
+        // under another.
+        AnswerStyleProfile style = styleFor(orgId);
         if (!basis.mayGenerate()) {
             // No model call and no saved version. Nothing here is a refusal to help — the seller
             // writes their own reply on the same screen — it is a refusal to manufacture one.
@@ -190,8 +209,19 @@ public class InquiryDraftComposer {
             // Unless the 상세페이지 read is what failed. Then this verdict rests on a library we
             // could not finish filling, and 「답변 기준이 필요합니다」 would send the seller off to
             // write knowledge that may already be sitting on their own listing.
-            return noBasis(retrieved, basis, verdict, detailFailure != null ? detailFailure
-                    : inFlight(orgId, inquiry) ? DETAIL_READ_PENDING : null);
+            String operational = detailFailure != null ? detailFailure
+                    : inFlight(orgId, inquiry) ? DETAIL_READ_PENDING : null;
+            // The seller's own approved sentence, verbatim, and only here.
+            //
+            // It is allowed ONLY when the retrieval actually settled with no usable evidence. If the
+            // machinery did not finish (a 상세페이지 read that failed, pictures still being read) we
+            // do not know there is no basis, and answering "확인 후 안내드리겠습니다" to a question we
+            // may be seconds from being able to answer is the deferral this product deleted.
+            if (operational == null && style.hasUnknownFallback()) {
+                return approvedFallback(orgId, workItemId, actor, title, retrieved, basis, verdict,
+                        style);
+            }
+            return noBasis(retrieved, basis, verdict, operational);
         }
 
         // Each branch names its own reason, because the three are not interchangeable to the person
@@ -208,9 +238,16 @@ public class InquiryDraftComposer {
                 written = model.draft(orgId, title, details, passagesFor(retrieved.passages()),
                         retrieved.order().messageKo(),
                         applicability.messageKo(retrieved.figuresUnaided(),
-                                retrieved.variantSpecific()));
+                                retrieved.variantSpecific()),
+                        AnswerStyleInstruction.of(style));
                 if (written.isEmpty()) {
                     unavailable = MODEL_FAILED;
+                } else if (!AnswerStyleInstruction
+                        .forbiddenPresentIn(written.get().comments(), style).isEmpty()) {
+                    // The prompt asked; this checks. A style line is a request to a model, and a
+                    // rule the company set is not satisfied by having asked politely.
+                    written = Optional.empty();
+                    unavailable = STYLE_FORBIDDEN_PHRASE;
                 }
             } else {
                 unavailable = decision.messageKo();
@@ -231,8 +268,8 @@ public class InquiryDraftComposer {
 
         int base = drafts.currentVersion(workItemId);
         ReplyDraftView saved = drafts.saveAs(orgId, workItemId, actor, replyTitle, replyBody, base,
-                new InquiryReplyDraftService.Provenance(DraftAuthorKind.MODEL, modelVersion,
-                        retrieved.state(), retrieved.productId()));
+                new InquiryReplyDraftService.Provenance(DraftAuthorKind.MODEL,
+                        stamped(modelVersion, style), retrieved.state(), retrieved.productId()));
 
         List<DraftEvidenceView> views = recordEvidence(orgId, workItemId, saved.version(),
                 retrieved.passages(), retrieved.order());
@@ -240,6 +277,64 @@ public class InquiryDraftComposer {
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), applicability),
                 retrieved.productId(), views, null);
+    }
+
+    /**
+     * The org's answer style, or the shipped default. Never fails a draft.
+     *
+     * <p>A settings lookup that threw would otherwise decide whether a seller gets a reply, and the
+     * honest degradation is the wording this product had before the setting existed — not silence.
+     */
+    private AnswerStyleProfile styleFor(UUID orgId) {
+        try {
+            return styles == null ? AnswerStyleProfile.defaults() : styles.profileFor(orgId);
+        } catch (RuntimeException e) {
+            return AnswerStyleProfile.defaults();
+        }
+    }
+
+    /**
+     * {@code agent-draft/v1+…+style/v3} — which wording produced this version.
+     *
+     * <p>Appended to the model version rather than given a column of its own, because the question a
+     * reader asks months later is one question: "what wrote this". A prompt snapshot would answer it
+     * too, and would also store the customer's message a second time.
+     */
+    private static String stamped(String modelVersion, AnswerStyleProfile style) {
+        String identity = style == null ? AnswerStyleProfile.defaults().identity() : style.identity();
+        return modelVersion == null ? identity : modelVersion + "+" + identity;
+    }
+
+    /**
+     * The seller's own approved sentence, saved as a draft version, with no model call.
+     *
+     * <p><b>Verbatim.</b> No greeting is prepended, no closing appended, no tone applied — the rest
+     * of the style profile is about how a model should word an answer, and this is not an answer. It
+     * is the company's own way of saying "we will check and come back", which is exactly why it is
+     * allowed to appear where a generated deferral is not.
+     *
+     * <p>The basis verdict is unchanged: this is still {@code NO_ANSWER_BASIS}, the screen still says
+     * what is missing, and the seller can still add the knowledge that would produce a real answer.
+     * A draft that defers is not a draft that answers, and the two must not look the same.
+     */
+    private GeneratedDraftView approvedFallback(UUID orgId, UUID workItemId, String actor,
+                                                String inquiryTitle,
+                                                InquiryEvidenceRetriever.InquiryEvidence retrieved,
+                                                AnswerBasisState basis,
+                                                SpecApplicability.Verdict verdict,
+                                                AnswerStyleProfile style) {
+        int base = drafts.currentVersion(workItemId);
+        ReplyDraftView saved = drafts.saveAs(orgId, workItemId, actor, defaultTitle(inquiryTitle),
+                style.unknownFallback(), base,
+                new InquiryReplyDraftService.Provenance(DraftAuthorKind.SELLER_APPROVED_FALLBACK,
+                        style.identity(), retrieved.state(), retrieved.productId()));
+        // No evidence rows: nothing was cited, because nothing applied. A citation of an absence is
+        // the one kind of evidence this product does not record.
+        return new GeneratedDraftView(saved, DraftAuthorKind.SELLER_APPROVED_FALLBACK.name(),
+                retrieved.state().name(), retrieved.state().messageKo(retrieved.scopes()),
+                basis.name(), basis.messageKo(),
+                basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability()),
+                retrieved.productId(), List.of(), null);
     }
 
     /**

@@ -94,13 +94,32 @@ public class AgentDraftService {
     public Optional<AgentDraftResponseParser.ParsedDraft> draft(
             UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
             String orderState, String specScope) {
+        return draft(orgId, title, details, knowledge, orderState, specScope, null);
+    }
+
+    /**
+     * The grounded form, plus this organization's own wording preferences.
+     *
+     * <p>{@code style} is already prompt text — {@code AnswerStyleInstruction} turned the profile
+     * into our sentences plus the seller's strings as quoted data. It arrives rendered rather than as
+     * a profile so that this package, which is the LLM boundary, keeps knowing nothing about the
+     * style domain: the door checks what leaves, not what it means.
+     *
+     * <p><b>Style never reaches the system turn.</b> That is the whole shape of the defence — a
+     * seller-typed string placed among the fixed rules would let one company edit the safety rules
+     * that write every other company's drafts, and no phrase check recovers from that.
+     */
+    public Optional<AgentDraftResponseParser.ParsedDraft> draft(
+            UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
+            String orderState, String specScope, String style) {
         if (!properties.isEnabledFor(orgId)) {
             return Optional.empty();
         }
-        AgentDraftGenerator.Result result = generator()
-                .generate(new AgentDraftGenerator.Input(title, details, knowledge, orderState, specScope));
-        log.info("agent_draft orgId={} drafted={} grounded={} reason={}",
-                orgId, result.draft().isPresent(), knowledge == null ? 0 : knowledge.size(), result.reason());
+        AgentDraftGenerator.Result result = generator().generate(new AgentDraftGenerator.Input(
+                title, details, knowledge, orderState, specScope, style));
+        log.info("agent_draft orgId={} drafted={} grounded={} styled={} reason={}",
+                orgId, result.draft().isPresent(), knowledge == null ? 0 : knowledge.size(),
+                style != null && !style.isBlank(), result.reason());
         return result.draft();
     }
 

@@ -1387,7 +1387,7 @@ export interface OrgKnowledgeRequest {
  */
 export interface GeneratedDraftView {
   draft: ReplyDraftView | null;
-  authorKind: "MODEL" | "RULE" | "SELLER" | null;
+  authorKind: "MODEL" | "RULE" | "SELLER" | "SELLER_APPROVED_FALLBACK" | null;
   knowledgeState: "NO_PRODUCT" | "NO_LIBRARY" | "NO_MATCH" | "GROUNDED";
   knowledgeNote: string;
   answerBasis: "GROUNDED" | "NEEDS_CLARIFICATION" | "NO_ANSWER_BASIS";
@@ -1437,7 +1437,7 @@ export interface ReplyDraftView {
   fingerprintAlgorithm: string;
   createdAt: string;
   /** Who wrote this version. A pre-Draft-v1 row reads as `SELLER`, which is what all of them were. */
-  authorKind: "MODEL" | "RULE" | "SELLER";
+  authorKind: "MODEL" | "RULE" | "SELLER" | "SELLER_APPROVED_FALLBACK";
   /** The exact model+prompt version behind a MODEL draft; null for SELLER and RULE. */
   modelVersion: string | null;
   knowledgeState: "NO_PRODUCT" | "NO_LIBRARY" | "NO_MATCH" | "GROUNDED" | null;
@@ -2210,4 +2210,48 @@ export interface ProactiveSummaryView {
   open: number;
   high: number;
   draftsPrepared: number;
+}
+
+/** 답변 말투 — three values, and the seller never sees the constant. */
+export type AnswerTone = "POLITE" | "FRIENDLY" | "CONCISE";
+
+/** 답변 길이. Stated as sentences, never as a character budget. */
+export type AnswerLength = "SHORT" | "NORMAL" | "DETAILED";
+
+/** 이모지. There is deliberately no 「많이」. */
+export type EmojiPolicy = "NONE" | "LIMITED";
+
+/**
+ * AI 답변 스타일 — how this company words a reply.
+ *
+ * `configured` is the honest half: an org with no saved profile reads back the shipped defaults, and
+ * the screen must say so rather than imply somebody chose them. `version` is what a generated draft
+ * records in its provenance, so a reply sent last month stays readable against the wording it was
+ * written under.
+ */
+export interface AnswerStyleView {
+  tone: AnswerTone;
+  lengthPreference: AnswerLength;
+  emojiPolicy: EmojiPolicy;
+  greeting: string | null;
+  closing: string | null;
+  customerAddress: string | null;
+  requiredPhrases: string[];
+  forbiddenPhrases: string[];
+  unknownFallbackTemplate: string | null;
+  configured: boolean;
+  version: number;
+}
+
+/** The whole form. A save is a replacement, never a merge — an emptied box means emptied. */
+export interface AnswerStyleRequest {
+  tone: AnswerTone;
+  lengthPreference: AnswerLength;
+  emojiPolicy: EmojiPolicy;
+  greeting: string | null;
+  closing: string | null;
+  customerAddress: string | null;
+  requiredPhrases: string[];
+  forbiddenPhrases: string[];
+  unknownFallbackTemplate: string | null;
 }

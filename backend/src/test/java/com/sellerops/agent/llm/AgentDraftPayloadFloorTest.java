@@ -170,6 +170,66 @@ class AgentDraftPayloadFloorTest {
 
     @ParameterizedTest
     @EnumSource(AgentDraftGenerator.Vendor.class)
+    @DisplayName("the answer style leaves as instructions and quoted phrases — never as an identifier")
+    void theStyleSectionCarriesOnlyWording(AgentDraftGenerator.Vendor vendor) {
+        // Organization Answer Style v1 moved the floor a second time, and by one class of content:
+        // this org's own wording settings. They name no customer, no order, no product and no id.
+        String style = com.sellerops.knowledge.style.AnswerStyleInstruction.of(
+                new com.sellerops.knowledge.style.AnswerStyleProfile(
+                        com.sellerops.knowledge.style.AnswerTone.FRIENDLY,
+                        com.sellerops.knowledge.style.AnswerLength.SHORT,
+                        com.sellerops.knowledge.style.EmojiPolicy.NONE,
+                        "안녕하세요. 선바로입니다.", "감사합니다.", "고객님",
+                        List.of("잘 부탁드립니다"), List.of("죄송하지만"), null, 2));
+        String body = generator(vendor).requestBody(new AgentDraftGenerator.Input(
+                "질문", "본문", List.of(), null, null, style));
+
+        assertThat(body).contains("답변 스타일").contains("고객님").contains("잘 부탁드립니다");
+        for (String forbidden : FORBIDDEN) {
+            assertThat(body).as("%s must never reach the vendor", forbidden).doesNotContain(forbidden);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(AgentDraftGenerator.Vendor.class)
+    @DisplayName("C — two styles over the same question send the SAME facts and differ only in wording")
+    void aStyleChangeMovesNoFact(AgentDraftGenerator.Vendor vendor) {
+        List<AgentDraftGenerator.Passage> knowledge = List.of(
+                new AgentDraftGenerator.Passage("상품 정보", "부착 방법",
+                        "몰딩 뒷면 테이프를 벗기고 벽면에 눌러 붙입니다."));
+        String order = "이 주문은 결제가 완료된 것으로 확인됩니다.";
+        String spec = com.sellerops.inquiry.draft.SpecApplicability.Applicability
+                .VARIANT_UNRESOLVED.messageKo();
+        String style = com.sellerops.knowledge.style.AnswerStyleInstruction.of(
+                new com.sellerops.knowledge.style.AnswerStyleProfile(
+                        com.sellerops.knowledge.style.AnswerTone.CONCISE,
+                        com.sellerops.knowledge.style.AnswerLength.DETAILED,
+                        com.sellerops.knowledge.style.EmojiPolicy.LIMITED,
+                        null, null, "고객님", List.of(), List.of(), null, 4));
+
+        // The factual half of the user turn is IDENTICAL, and the style is strictly appended to it.
+        // A style that could move a figure, a passage or an order state would not be a style; it
+        // would be a second source of facts with no evidence behind it.
+        String plainTurn = AgentDraftPrompt.user("질문", "본문", knowledge, order, spec, null);
+        String styledTurn = AgentDraftPrompt.user("질문", "본문", knowledge, order, spec, style);
+        assertThat(styledTurn).startsWith(plainTurn);
+        assertThat(plainTurn).doesNotContain("답변 스타일");
+
+        // And on the wire: the system turn is a constant, so two styles differ only by that suffix.
+        String plain = generator(vendor).requestBody(
+                new AgentDraftGenerator.Input("질문", "본문", knowledge, order, spec, null));
+        String styled = generator(vendor).requestBody(
+                new AgentDraftGenerator.Input("질문", "본문", knowledge, order, spec, style));
+        for (String fact : List.of("몰딩 뒷면 테이프", "결제가 완료된 것으로 확인됩니다", "확정되지 않았습니다")) {
+            assertThat(plain).contains(fact);
+            assertThat(styled).contains(fact);
+        }
+        assertThat(styled).contains("고객님");
+        assertThat(plain).doesNotContain("고객님");
+    }
+
+    @ParameterizedTest
+    @EnumSource(AgentDraftGenerator.Vendor.class)
     @DisplayName("a caller that never looked and a lookup that found nothing say the same thing")
     void anAbsentOrderStateIsStatedRatherThanOmitted(AgentDraftGenerator.Vendor vendor) {
         assertThat(generator(vendor).requestBody(new AgentDraftGenerator.Input("질문", "본문")))

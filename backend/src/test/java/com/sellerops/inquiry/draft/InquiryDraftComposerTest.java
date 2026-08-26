@@ -435,7 +435,7 @@ class InquiryDraftComposerTest {
                 com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH));
         return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, retriever, model,
                 quota, variants, new DraftEvidenceSnippets(productChunks, orgChunks, memories),
-                trigger, imageKnowledge);
+                trigger, imageKnowledge, null);
     }
 
     /** A passage whose chunk really exists, for the paths that go back to the source to read it. */
@@ -639,13 +639,16 @@ class InquiryDraftComposerTest {
         String sawOrderState;
         String sawSpecScope;
 
-        // The SIX-argument form is the one the composer calls; overriding a shorter convenience
-        // would leave the real implementation running underneath it — which is exactly what broke
-        // when the spec-applicability argument was added, and is why the override is the widest one.
+        String sawStyle;
+
+        // The WIDEST form is the one the composer calls; overriding a shorter convenience would leave
+        // the real implementation running underneath it — which is exactly what broke when the
+        // spec-applicability argument was added, and again when the style argument was.
         @Override
         public Optional<AgentDraftResponseParser.ParsedDraft> draft(
                 UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
-                String orderState, String specScope) {
+                String orderState, String specScope, String style) {
+            sawStyle = style;
             sawTitle = title;
             sawDetails = details;
             sawKnowledge.addAll(knowledge);

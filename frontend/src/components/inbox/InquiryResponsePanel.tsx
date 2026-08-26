@@ -302,23 +302,27 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       setEvidence(generated.evidence);
       setKnowledgeNote(generated.knowledgeNote);
       setUnavailable(generated.unavailableMessage);
+      // Which basis is missing, if any — computed once and applied whether or not something was
+      // written. A draft can now exist WITH no answer basis: the company's own pre-approved sentence
+      // for 「확인 후 안내드리겠습니다」 (AI 답변 스타일). That is a deferral, not an answer, so the
+      // seller must still see what is missing and still be able to add it.
+      const missingBasis =
+        generated.unavailableMessage || generated.answerBasis !== "NO_ANSWER_BASIS"
+          ? null
+          : {
+              note: generated.answerBasisNote,
+              action: generated.answerBasisAction,
+              productId: generated.productId,
+            };
       if (!generated.draft) {
         // Nothing was composed, on purpose. Leave whatever the seller had typed exactly as it is —
         // clearing their box because the AI declined would be the worst of both behaviours — and
         // say which basis is missing so the sentence is actionable rather than an apology.
-        setNoBasis(
-          generated.unavailableMessage
-            ? null
-            : {
-                note: generated.answerBasisNote,
-                action: generated.answerBasisAction,
-                productId: generated.productId,
-              },
-        );
+        setNoBasis(missingBasis);
         setEditing(true);
         return;
       }
-      setNoBasis(null);
+      setNoBasis(missingBasis);
       setUnavailable(null);
       const written = generated.draft;
       setDetail((current) => (current ? { ...current, draft: written, phase } : current));

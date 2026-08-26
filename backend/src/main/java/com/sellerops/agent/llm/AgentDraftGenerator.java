@@ -91,20 +91,31 @@ public class AgentDraftGenerator {
      *
      * <p>Empty when no product resolved, no library exists, or nothing matched. Empty is a real state
      * the prompt is told about, not a silent absence.
+     *
+     * <p><b>{@code style} is the fourth and last thing that may leave</b> (Organization Answer Style
+     * v1): the org's own wording preferences, rendered into prompt text by
+     * {@code AnswerStyleInstruction} — never the seller's raw setting concatenated into a system
+     * turn. It names no customer, no order, no product and no identifier, and it is the only field
+     * here whose absence is rendered as nothing at all.
      */
     public record Input(String title, String details, List<Passage> knowledge, String orderState,
-                        String specScope) {
+                        String specScope, String style) {
 
         public Input(String title, String details) {
-            this(title, details, List.of(), null, null);
+            this(title, details, List.of(), null, null, null);
         }
 
         public Input(String title, String details, List<Passage> knowledge) {
-            this(title, details, knowledge, null, null);
+            this(title, details, knowledge, null, null, null);
         }
 
         public Input(String title, String details, List<Passage> knowledge, String orderState) {
-            this(title, details, knowledge, orderState, null);
+            this(title, details, knowledge, orderState, null, null);
+        }
+
+        public Input(String title, String details, List<Passage> knowledge, String orderState,
+                     String specScope) {
+            this(title, details, knowledge, orderState, specScope, null);
         }
 
         public Input {
@@ -207,8 +218,8 @@ public class AgentDraftGenerator {
         ArrayNode messages = root.putArray("messages");
         ObjectNode user = messages.addObject();
         user.put("role", "user");
-        user.put("content", AgentDraftPrompt.user(input.title(), input.details(), input.knowledge(), input.orderState(),
-                        input.specScope()));
+        user.put("content", AgentDraftPrompt.user(input.title(), input.details(), input.knowledge(),
+                input.orderState(), input.specScope(), input.style()));
         if (vendor == Vendor.ANTHROPIC) {
             root.put("max_tokens", maxOutputTokens);
             root.put("system", AgentDraftPrompt.system());

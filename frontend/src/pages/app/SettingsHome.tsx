@@ -62,6 +62,22 @@ export function SettingsHome() {
         </Panel>
 
         <Panel
+          title="AI 답변 스타일"
+          description="AI가 답변 초안을 쓸 때의 말투와 표현입니다."
+          action={
+            <BtnLink to="/settings/style" size="sm" variant="outline">
+              스타일 설정
+            </BtnLink>
+          }
+        >
+          <p className="break-keep leading-relaxed text-muted">
+            말투와 길이, 첫 인사와 끝 인사, 고객 호칭을 정하실 수 있습니다. 답변에 들어갈 내용은 여기서
+            바뀌지 않습니다 — 무엇을 안내할지는 등록된 답변 기준이 정하고, 이 설정은 그것을 어떻게
+            말할지만 정합니다.
+          </p>
+        </Panel>
+
+        <Panel
           title="연결 알림"
           description="연결이 끊기거나 확인이 필요할 때 알려드립니다."
           action={
