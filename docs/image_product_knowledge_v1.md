@@ -1,6 +1,8 @@
 # Image Product Knowledge v1 — 설계만, 구현 0
 
-> **상태: `DESIGN_ONLY`.** 이 문서는 코드 한 줄에도 대응하지 않는다. 2026-08-26 product-owner 지시대로
+> **상태: `DESIGN_ONLY` · `AWAITING_PRODUCT_OWNER_DECISION`(2026-08-26).** 이 문서를 무효화할 수 있었던
+> 단 하나의 값싼 관측 — 옵션 이름 READ 1회 — 을 썼고, **무효화되지 않았다**(§9-1). 그래서 남은 질문은
+> 기술이 아니라 **§5의 payload floor 결정**이다. 이 문서는 코드 한 줄에도 대응하지 않는다. product-owner 지시대로
 > `IMAGE_ONLY_GAP` verdict 뒤 **OCR/vision을 바로 구현하지 않고** 최소 설계를 적어 두고 멈춘 것이다.
 > 여기 적힌 어떤 항목도 승인이 아니며, 착수는 별도 결정이다.
 >
@@ -137,7 +139,13 @@ failure isolation.) 재시도는 상한을 갖고, 상한 초과는 「미조회
 
 ## 9. 착수 전 체크리스트 (전부 미완)
 
-1. [ ] 옵션 이름 READ 1회 — verdict가 `STRUCTURED_GROUNDABLE`로 바뀌는지 (바뀌면 여기서 종료)
+1. [x] **옵션 이름 READ 1회 — 완료(2026-08-26, `apr-nv-option-13250364547-r1`). verdict는 바뀌지
+   않았다.** `options=20 axes=2 spec_bearing=20 capacity_bearing=0` — 규격은 옵션 라벨에 이름으로
+   있지만 수용 가닥수는 20개 전수에서 관계어 **0건**이다(`docs/answer_applicability_v1.md` §8-1).
+   ⇒ `VARIANT_LABEL_ONLY`, **`IMAGE_ONLY_GAP` CONFIRMED**, 이 문서는 종료되지 않고 **살아 있다**.
+   부수 소득 하나: `SpecApplicability.VARIANT_NAMED`가 NAVER에서 구조적으로 도달 가능함이 확인됐으므로
+   §6의 「규격 라벨 없는 수치는 저장 거절」은 실행 가능한 규칙이다 — 추출된 사실이 붙을 **정확한
+   variant가 채널에 존재한다**.
 2. [ ] 판매자 상세 이미지를 모델에 보내도 되는가 — **product-owner 결정**(§5)
 3. [ ] org 고유 이미지 해시 수 측정 (추출 0회로 가능, §4)
 4. [ ] 상품 1개 파일럿: 상한 12장으로 이 질문의 답이 잡히는가 + 실측 토큰

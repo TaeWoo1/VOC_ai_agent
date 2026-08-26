@@ -31,11 +31,22 @@ import org.springframework.boot.ApplicationRunner;
  * nothing unless an account id and a channel product number are configured. It is not wired into the
  * scheduler or any collection path, and it writes nothing — not to the marketplace, not to the store.
  *
- * <p><b>Nothing the seller wrote leaves this class.</b> The page becomes a
- * {@link DetailContentShape.Measurement} — an enum and three integers — and the options become a
- * COUNT and a presence flag. Not one character of the detail page, not one image URL, and not one
- * option label is logged. That is enough to decide the acquisition path, and not enough to reproduce
- * the listing.
+ * <p><b>Nothing the seller wrote leaves this class — with one measured exception.</b> The page
+ * becomes a {@link DetailContentShape.Measurement}: an enum and three integers. Not one character of
+ * the detail page and not one image URL is logged.
+ *
+ * <p>Option LABELS are the exception, and they are the reason for the second read (approval
+ * {@code apr-nv-option-13250364547-r1}, 2026-08-26). The first read closed the text path and left one
+ * branch open: whether the 규격-specific answer the seller says exists is already sitting in the
+ * structured option data. A count cannot answer that — only the labels can. So they are inspected in
+ * memory and reported through {@link OptionSemantics}, which emits counts plus <b>digit-masked</b>
+ * patterns: {@code 16x10mm} becomes {@code ##x##mm}. That keeps the words that decide the verdict —
+ * a label reading {@code #~#가닥} is a capacity relation, one reading {@code ##x##mm} is a size — and
+ * drops the values, so the catalogue still cannot be reproduced from this log.
+ *
+ * <p><b>A number in a label is not a capacity.</b> {@code 16x10mm} is a 규격, not "16 strands".
+ * {@link OptionSemantics} therefore requires an explicit relation WORD before it will call anything
+ * capacity-bearing; digits alone never qualify.
  */
 public class NaverProductDetailProbeRunner implements ApplicationRunner {
 
@@ -137,6 +148,7 @@ public class NaverProductDetailProbeRunner implements ApplicationRunner {
         log.info("{} {} listing_images={} options={} options_with_id={} name_present={}",
                 TAG, DetailContentShape.describe(measurement), images, options, optionsWithIdentity,
                 detail.name() != null && !detail.name().isBlank());
+        log.info("{} {}", TAG, OptionSemantics.describe(detail.options()));
         log.info("{} VERDICT shape={} text_is_enough={} needs_image_understanding={} "
                         + "variant_named_reachable={} requests_used=1",
                 TAG, measurement.shape(), measurement.textIsEnough(),
