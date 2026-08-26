@@ -34,7 +34,13 @@ class ProductFactConfidenceTest {
                 if (name.equals("FactConfidence.java")) {
                     continue; // the declaration itself
                 }
-                String code = Files.readString(source);
+                // Comments are stripped first: this fence is about a PRODUCER, and a javadoc that
+                // cites INFERRED as the example of a declared-but-unproduced class is the fence
+                // being explained, not broken. Stripping makes the check narrower, not weaker —
+                // the constant in real code still fails.
+                String code = Files.readString(source)
+                        .replaceAll("(?s)/\\*.*?\\*/", "")
+                        .replaceAll("(?m)//.*$", "");
                 if (code.contains("FactConfidence.INFERRED")) {
                     offenders.add(name);
                 }

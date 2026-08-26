@@ -114,6 +114,30 @@ public class NaverConnectorConfiguration {
     }
 
     @Bean
+    NaverChannelProductClient naverChannelProductClient(
+            NaverHttpClient http,
+            @Value("${sellerops.connector.naver.base-url:https://api.commerce.naver.com}") String baseUrl) {
+        return new NaverChannelProductClient(http, baseUrl);
+    }
+
+    /**
+     * The single-request 상세페이지 shape probe — approval-gated, inert by default, wired into no
+     * collection path. See {@link NaverProductDetailProbeRunner}.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.naver.diagnostic.product-detail.enabled",
+            havingValue = "true")
+    NaverProductDetailProbeRunner naverProductDetailProbeRunner(
+            NaverTokenClient tokenClient, NaverChannelProductClient detailClient,
+            com.sellerops.selleraccount.SellerAccountRepository accounts,
+            com.sellerops.credential.CredentialVault vault,
+            @Value("${sellerops.connector.naver.diagnostic.product-detail.account-id:}") String accountId,
+            @Value("${sellerops.connector.naver.diagnostic.product-detail.channel-product-no:0}") long channelProductNo) {
+        return new NaverProductDetailProbeRunner(tokenClient, detailClient, accounts, vault,
+                accountId, channelProductNo);
+    }
+
+    @Bean
     NaverApiConnector naverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
                                         NaverProductsClient productsClient,
                                         NaverInquiryCollector inquiryCollector,

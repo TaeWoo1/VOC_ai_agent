@@ -141,7 +141,8 @@ public class ProductKnowledgeLibraryService {
             hits.add(new KnowledgePassage(source.getId(), chunk.getId(), source.getSourceType(),
                     source.getTitle(), chunk.getContent(), chunk.getOrdinal(),
                     round(hit.coverage()), source.getAuthorName(), source.getSourceUrl(),
-                    source.getUpdatedAt()));
+                    source.getUpdatedAt(),
+                    source.getAuthoredOrigin()));
         }
         hits.sort(Comparator.comparingDouble(KnowledgePassage::score).reversed()
                 // Ties resolve by document order, not by whatever the map iterated — an answer that
@@ -190,7 +191,8 @@ public class ProductKnowledgeLibraryService {
     private static KnowledgeSourceView view(ProductKnowledgeSource source, int chunkCount) {
         return new KnowledgeSourceView(source.getId(), source.getProductId(), source.getSourceType(),
                 source.getTitle(), source.getBody(), source.getSourceUrl(), source.getAuthorName(),
-                chunkCount, source.getCreatedAt(), source.getUpdatedAt());
+                chunkCount, source.getCreatedAt(), source.getUpdatedAt(),
+                source.getAuthoredOrigin());
     }
 
     /** Two decimals — a score is a diagnostic, and full float noise reads as false precision. */

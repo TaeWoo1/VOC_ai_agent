@@ -1982,6 +1982,19 @@ export interface OverviewResponse {
 
 export type KnowledgeSourceType = "DESCRIPTION" | "FAQ" | "USAGE" | "POLICY" | "LINK";
 
+/**
+ * How a knowledge document came to exist — a different axis from what KIND of document it is.
+ *
+ * Two of the three read the same on screen (「상품 상세페이지」): what the seller typed on their own
+ * listing and what a model read off a picture on it share a source, and the seller does not need our
+ * vocabulary for the difference. The distinction exists so the DRAFT can weigh them differently, not
+ * so the UI can label them differently.
+ */
+export type KnowledgeAuthorship =
+  | "SELLER_ENTERED_KNOWLEDGE"
+  | "SELLER_AUTHORED_CHANNEL_CONTENT"
+  | "AI_EXTRACTED_FROM_SELLER_IMAGE";
+
 export interface KnowledgeSourceView {
   id: string;
   productId: string;
@@ -1994,6 +2007,8 @@ export interface KnowledgeSourceView {
   chunks: number;
   createdAt: string;
   updatedAt: string;
+  /** Optional until a channel-derived document exists in any org — today that is none. */
+  authoredOrigin?: KnowledgeAuthorship;
 }
 
 export interface KnowledgeSourceRequest {

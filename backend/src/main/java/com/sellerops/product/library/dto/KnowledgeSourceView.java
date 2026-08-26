@@ -1,5 +1,6 @@
 package com.sellerops.product.library.dto;
 
+import com.sellerops.product.library.KnowledgeAuthorship;
 import com.sellerops.product.library.KnowledgeSourceType;
 import java.time.Instant;
 import java.util.UUID;
@@ -14,5 +15,6 @@ import java.util.UUID;
 public record KnowledgeSourceView(UUID id, UUID productId, KnowledgeSourceType sourceType,
                                   String title, String body, String sourceUrl,
                                   String authorName, int chunks,
-                                  Instant createdAt, Instant updatedAt) {
+                                  Instant createdAt, Instant updatedAt,
+                                  KnowledgeAuthorship authoredOrigin) {
 }

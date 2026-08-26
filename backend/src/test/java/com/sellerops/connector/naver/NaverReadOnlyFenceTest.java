@@ -39,7 +39,8 @@ class NaverReadOnlyFenceTest {
             "/external/v1/pay-order/seller/product-orders/query",                   // order detail (read)
             "/external/v1/products/search",                                         // catalogue read
             "/external/v1/contents/qnas",                                           // 상품 문의 (read)
-            "/external/v1/pay-user/inquiries");                                     // 고객 문의 (read)
+            "/external/v1/pay-user/inquiries",                                      // 고객 문의 (read)
+            "/external/v2/products/channel-products/");                             // 상품 상세 (read)
 
     /**
      * Anything under these NAVER API groups mutates the seller's store; none may appear.
@@ -56,10 +57,21 @@ class NaverReadOnlyFenceTest {
      * <p>Note the shape of the qnas pair: the READ is {@code /external/v1/contents/qnas} exactly, and
      * every write under it carries a path segment after it. {@code qnas/} therefore catches the write
      * and cannot catch the read.
+     *
+     * <p><b>{@code /external/v2/products} is not a write GROUP, and naming it as one stopped working
+     * on 2026-08-26.</b> That group's registration endpoint is the bare path
+     * ({@code POST /external/v2/products}) while {@code GET /external/v2/products/channel-products/&#123;n&#125;}
+     * under the same prefix is the single-listing READ that carries {@code detailContent} — the field
+     * the LIST resource does not send. A prefix marker cannot separate them because the write path is
+     * a PREFIX of the read path, which is the reverse of the qnas shape. So the group is replaced by
+     * the two write paths that really are writes, the bare registration literal gets its own exact
+     * assertion below, and the rest of the separation is carried by the verb: the NAVER HTTP seam has
+     * no {@code put} and no {@code delete}, which the third test asserts.
      */
     private static final List<String> WRITE_MARKERS = List.of(
             "/external/v1/products/origin-products",
-            "/external/v2/products",
+            "/external/v2/products/origin-products",
+            "/external/v2/standard-group-products",
             "product-orders/dispatch",
             "product-orders/claim",
             "/reviews/",
@@ -102,6 +114,19 @@ class NaverReadOnlyFenceTest {
         assertThat(offenders)
                 .as("registering, dispatching, answering or replying is not this lane's work")
                 .isEmpty();
+    }
+
+    @Test
+    @DisplayName("the v2 registration path — a prefix of a legitimate read — is named exactly")
+    void theBareRegistrationPathIsNeverSpelled() throws IOException {
+        for (Path source : javaSources()) {
+            String code = Files.readString(source);
+            assertThat(code)
+                    .as("%s: POST /external/v2/products registers a product; only the longer "
+                            + "channel-products READ under that prefix is allowed",
+                            source.getFileName())
+                    .doesNotContain("\"/external/v2/products\"");
+        }
     }
 
     /**

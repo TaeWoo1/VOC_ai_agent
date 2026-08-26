@@ -41,6 +41,23 @@ public class ProductKnowledgeSource extends BaseEntity {
     @Column(name = "source_type", nullable = false, length = 24)
     private KnowledgeSourceType sourceType;
 
+    /**
+     * How this document came to exist — typed, read off the seller's own listing, or extracted from
+     * an image on it. Defaults to the only kind that existed before 2026-08-26, so an unset value is
+     * never a silent "unknown provenance".
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "authored_origin", nullable = false, length = 40)
+    private KnowledgeAuthorship authoredOrigin = KnowledgeAuthorship.SELLER_ENTERED_KNOWLEDGE;
+
+    /**
+     * The listing this was read from, for channel-derived documents only — {@code NAVER:13250364547}.
+     * Null for typed knowledge, which has no external identity. It is what makes a re-read an update
+     * instead of a second copy of the same detail page.
+     */
+    @Column(name = "channel_source_ref", length = 200)
+    private String channelSourceRef;
+
     @Column(nullable = false, length = 200)
     private String title;
 

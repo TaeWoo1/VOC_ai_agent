@@ -122,3 +122,40 @@ NAVER에서는 오늘 언제나 참이다.
 1년 넘음, 모든 칸에서 floor. **숫자와 단위는 한 곳에서 정하고, 말투만 각자 고른다** — 목록은 언제
 왔는지를 말하고(「17분 전」) 작업 창은 얼마나 기다렸는지를 말한다(「17분째」). 한 사실에 대한 두 문장은
 괜찮고, 두 숫자는 괜찮지 않다.
+
+---
+
+## 8. Product Grounding Groundwork (2026-08-26) — 착수, 라이브 증명 **PENDING**
+
+§5가 「판매자 FAQ가 규격을 구분하지 않는다」를 한계로 적었지만, 감사해 보니 그보다 앞선 결함이
+있었다. **판매자는 답을 적어 두었고, 우리가 그 페이지를 읽지 않고 있었다.**
+
+- **원인은 이미지가 아니라 endpoint 선택이었다.** 카탈로그 sweep이 부르는
+  `POST /v1/products/search`(LIST)는 `detailContent`·`optionCombinations`·`storeKeepingUrl`을
+  **보내지 않는다**. `NaverProductsClient`는 그 셋을 매핑해 두고도 한 번도 받은 적이 없다
+  (NAVER 발 description fact 0 · variant 0, 같은 코드가 다른 두 채널에서는 12와 405를 만든다).
+  단건 리소스 `GET /external/v2/products/channel-products/{channelProductNo}`는 보낸다 —
+  응답 스키마에서 `originProduct.detailContent`는 **필수**다. 계약은 사본으로 고정했다:
+  `docs/vendor/naver-commerce-api/get-v2-products-channel-products-channelProductNo.md`.
+- **키는 이미 우리가 들고 있다.** `channel_products.external_product_id`가 곧 `channelProductNo`이므로
+  새 식별자 어휘도, id 발견 단계도 없다.
+- **작성자 축은 문서 종류 축과 다르다.** `KnowledgeAuthorship`(V77의 `authored_origin`)은
+  `KnowledgeSourceType`과 직교한다: 판매자가 우리 화면에 입력한 것 ·
+  판매자가 자기 채널 상세페이지에 쓴 것 · **이미지에서 AI가 뽑아낸 것**. 셋째 값은 **선언만 되어
+  있고 생산자가 없으며**, 없다는 사실 자체가 테스트로 고정돼 있다(`FactConfidence.INFERRED`와 같은 기법).
+  판매자 화면에서 앞의 둘은 「상품 상세페이지」로 같게 보이지만 저장은 구분한다.
+- **전체 카탈로그 sweep은 만들지 않는다.** `ProductDetailEnrichment`는 상품 하나만 받고,
+  세 트리거(신규/변경 · 상품이 확정된 실무 문의 · 상세 지식 부재/노후)는 **동등**하며 어느 것도
+  두 번째 상품을 읽을 이유가 되지 않는다. 상세 텍스트의 사본은 **하나**다(지식 라이브러리에만;
+  `desc:summary` fact로 이중 저장하지 않는다). 옵션만 기존 `ProductKnowledgeWriter`로 간다.
+- **그림을 읽을지는 측정한 뒤에 정한다.** `DetailContentShape`가 페이지를 다섯으로 분류하고,
+  이미지 이해가 정당화되는 것은 **`IMAGE_REFERENCES_ONLY` 하나뿐**이다. `MIXED`는 텍스트 경로가
+  있으므로 그것부터 쓴다.
+
+**라이브 증명 PENDING.** `apr-nv-detail-13250364547`(1회 READ)은 승인받았으나 **실행되지
+못했다** — 게이트웨이가 이 머신의 호출 IP를 거부했다(`GW.IP_NOT_ALLOWED`, 토큰 발급 단계에서
+실패, **마켓플레이스 요청 0회**). 따라서 이 org의 상세페이지가 텍스트인지 이미지인지는
+**아직 측정되지 않았고**, 이 커밋의 어떤 문장도 그것을 안다고 주장하지 않는다. NAVER 애플리케이션에
+현재 egress IP를 등록하는 것은 **운영자의 조치**이며 (CLAUDE.md가 egress 설정 변경을 금지한다),
+등록 이후에야 §6의 verdict(TEXT_GROUNDABLE / STRUCTURED_GROUNDABLE / IMAGE_ONLY_GAP / UNKNOWN)를
+말할 수 있다.
