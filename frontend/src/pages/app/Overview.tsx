@@ -4,12 +4,12 @@ import { PageHead } from "../../components/ui/PageHead";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { Metric, MetricLine, MetricRowOfThree } from "../../components/ui/Metric";
 import { TrendChart } from "../../components/ui/TrendChart";
-import { InsightList } from "../../components/ui/InsightList";
 import { DataTable, Td, Th } from "../../components/ui/DataTable";
 import { DataStateBadge } from "../../components/ui/DataState";
 import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { Empty } from "../../components/ui/Empty";
-import { ProactiveCases } from "../../components/proactive/ProactiveCases";
+import { AgentBriefing } from "../../components/home/AgentBriefing";
+import { CommandInput } from "../../components/home/CommandInput";
 import { BtnLink } from "../../components/ui/Btn";
 import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
@@ -30,21 +30,20 @@ import type { ChannelMetricRow, MetricKpi, MetricSeries, OverviewResponse } from
  * real, and what to call each state are all settled server-side. A component that re-derived any of
  * that would be a second implementation of the rule that keeps "네이버 문의 0건" off this page.
  *
- * <b>Two areas, then reference</b> (Executive-friendly UX Redesign v1). The screen used to open with
- * six KPI cards of identical size — 매출·주문·문의·미답변 문의·리뷰·부정 리뷰 — and a 40~50대 대표
- * reading it had no entry point, so they started at the top-left and read across. Worse, 「문의 2」 sat
- * beside 「미답변 문의 26」 at the same weight, which reads as a contradiction rather than as two
- * different questions.
+ * <b>Briefing first, numbers second</b> (Agent Command Center v1 §3). The screen used to open with
+ * the numbers — three large, three quiet — and leave the seller to work out which of them was a
+ * problem. It opens with a sentence now, and with the actual work under it: prepared drafts, what the
+ * loop checked ahead of time, and the findings. The numbers did not move or change; they moved DOWN,
+ * under a heading that says what they are.
  *
- * So the row was split by what the number IS. Three of them are work that is waiting — 주문,
- * 미답변 문의, 부정 리뷰 — and they are the only large type on the screen. The other three are what the
- * shop did, and they are one quiet line under it ({@link MetricLine}). Nothing was dropped and nothing
- * was recomputed; the same six `kpis` arrive from the same call.
+ * <b>The order is 브리핑 → 숫자 → 물어보기 → 참고.</b> Each is a different question — what to do, how
+ * much, ask something, where it came from — and the first one is the only one a seller has to read.
  *
- * <b>「AI가 먼저 확인한 일」 shows the work, not a count of it.</b> The home used to carry a one-line
- * banner saying 1건 exists, which made the seller press before learning anything. The cards themselves
- * are short enough now (one line of what, one line of what SellerOps did) to belong on the first
- * screen, and 문의 still owns the full list.
+ * <b>「답변이 필요한 문의」 is back on this screen, on purpose.</b> A previous package dropped it
+ * because the same 26 appeared three times at the same weight and read as three problems. It appears
+ * twice now and the two are not the same statement: the briefing row is a task with somewhere to go,
+ * and the 숫자 card is the size of it. A command center that never mentions the largest thing waiting
+ * is not one.
  */
 const RANGES = [7, 14, 30] as const;
 
@@ -87,31 +86,24 @@ export function Overview() {
    * 채널별 table's 현재 미답변 column. A reader who meets 26 three times on one screen counts three
    * problems. It is dropped from THIS screen only; 문의 still carries it as its own header count.
    */
-  const insights = (data?.insights ?? []).filter((i) => i.key !== "INQUIRY_BACKLOG");
+  const insights = data?.insights ?? [];
+
+  /**
+   * The one number the command box may state, taken from the KPI the seller is looking at.
+   *
+   * A second read of "how much is waiting" is a second chance to contradict the card six inches
+   * above it, so there is only one — {@code unansweredInquiries}, which since this package counts
+   * REAL rows only.
+   */
+  const unansweredNow =
+    kpis.find((kpi) => kpi.key === "unansweredInquiries")?.value ?? null;
 
   return (
     <div className="space-y-8">
       <PageHead
-        title="운영 현황"
-        description="연결된 채널의 매출·주문·문의·리뷰를 한 화면에서 봅니다."
+        title="오늘의 운영"
+        description="지금 확인할 일을 먼저 정리해 두었습니다. 숫자와 추이는 그 아래에 있습니다."
         action={<AgentLaunch context={{ surface: "overview" }} />}
-        meta={
-          <div className="flex gap-1" role="group" aria-label="기간 선택">
-            {RANGES.map((range) => (
-              <button
-                key={range}
-                type="button"
-                onClick={() => setDays(range)}
-                aria-pressed={days === range}
-                className={`min-h-[36px] rounded-lg px-3 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 ${
-                  days === range ? "bg-brand-700 text-white" : "bg-canvas text-muted hover:text-ink"
-                }`}
-              >
-                최근 {range}일
-              </button>
-            ))}
-          </div>
-        }
       />
 
       {loading ? <p className="text-muted">불러오는 중…</p> : null}
@@ -126,8 +118,38 @@ export function Overview() {
 
       {data ? (
         <>
-          {/* ① 오늘 상태 — the three numbers that are work waiting, and nothing else at this size. */}
+          {/* ① 브리핑 — the sentence, then the work it counts. This is the first hierarchy now
+              (Agent Command Center v1 §3): a seller who reads one thing on this page reads this. */}
+          <AgentBriefing insights={insights} />
+
+          {/* ② 숫자 — context for the briefing, not the entry point. The three waiting numbers keep
+              their size because they are still the only ones that mean work, but they no longer open
+              the screen: a grid of six is a thing to interpret, and the briefing above already did. */}
           <section className="space-y-3" aria-label="오늘 상태">
+            {/* The window control belongs to the numbers it changes. It used to sit in the page
+                header — above the briefing — where it was the first filled button on the screen and
+                the seller's eye landed on a filter for a section 900px below it. */}
+            <SectionHeader
+              title="숫자"
+              hint={`매출·주문·문의·리뷰는 최근 ${data.metrics.period.days}일 기준입니다.`}
+              action={
+                <div className="flex gap-1" role="group" aria-label="기간 선택">
+                  {RANGES.map((range) => (
+                    <button
+                      key={range}
+                      type="button"
+                      onClick={() => setDays(range)}
+                      aria-pressed={days === range}
+                      className={`min-h-[36px] rounded-lg px-3 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 ${
+                        days === range ? "bg-brand-700 text-white" : "bg-canvas text-muted hover:text-ink"
+                      }`}
+                    >
+                      최근 {range}일
+                    </button>
+                  ))}
+                </div>
+              }
+            />
             <MetricRowOfThree>
               {waiting.map((kpi) => (
                 <Metric
@@ -142,15 +164,8 @@ export function Overview() {
             <MetricLine kpis={context} />
           </section>
 
-          {/* ② AI가 먼저 확인한 일 — the second and last area above the reference material. */}
-          <ProactiveCases limit={3} />
-
-          {insights.length > 0 ? (
-            <section className="space-y-2">
-              <SectionHeader title="지금 눈여겨볼 것" hint="운영 데이터에서 바로 확인된 것만 보여줍니다." />
-              <InsightList insights={insights} />
-            </section>
-          ) : null}
+          {/* ③ 무엇을 도와드릴까요 — the one input, under the numbers it can put on screen. */}
+          <CommandInput unansweredCount={unansweredNow} />
 
           {/* SUPPORTING — the shape behind each number. */}
           <section className="space-y-4">

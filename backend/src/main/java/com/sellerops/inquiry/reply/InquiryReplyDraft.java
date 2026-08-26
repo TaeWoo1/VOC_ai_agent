@@ -96,6 +96,21 @@ public class InquiryReplyDraft {
     @Column(name = "knowledge_state", length = 24)
     private String knowledgeState;
 
+    /**
+     * What this version WAS, at the moment it was written
+     * ({@link com.sellerops.inquiry.draft.AnswerBasisState}).
+     *
+     * <p>Not derivable from {@link #knowledgeState} alone: the same library verdict yields
+     * {@code GROUNDED} or {@code NEEDS_CLARIFICATION} depending on whether the customer settled their
+     * 규격, and that is a fact about the QUESTION which this table does not otherwise hold. Without it
+     * a reload could show a reply that asks the customer something as though it answered them.
+     *
+     * <p>Null on every version written before 2026-08-27, and never backfilled — a state invented by
+     * a migration cannot afterwards be told apart from one that was observed.
+     */
+    @Column(name = "answer_basis", length = 24)
+    private String answerBasis;
+
     /** The canonical product this draft was written about, when one resolved. */
     @Column(name = "product_id")
     private UUID productId;

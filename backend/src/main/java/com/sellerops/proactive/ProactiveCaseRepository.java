@@ -1,5 +1,6 @@
 package com.sellerops.proactive;
 
+import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -15,6 +16,40 @@ import org.springframework.data.repository.query.Param;
  * method on this interface takes a subject without also taking an org.
  */
 public interface ProactiveCaseRepository extends JpaRepository<ProactiveCase, UUID> {
+
+    /**
+     * <b>Only cases whose underlying work is still waiting</b> (Agent Command Center v1 §1-C).
+     *
+     * <p>A proactive case is an annotation on operational truth, never a second copy of it — the
+     * status column is derived by the reconciler and nothing else may write it. So when the work it
+     * annotates finishes, the honest fix is not to close the case from a read path; it is to stop
+     * RECOMMENDING it. This predicate is that, and it is why it lives in the query rather than in a
+     * cleanup job: both open cases in the canonical Demo Org point at finished work (one at an
+     * inquiry the seller answered in the Cafe24 console, one at a COMPLETED work item) and the
+     * reconciler has not run because the loop is off.
+     *
+     * <p>Two independent conditions, and a case has to pass both:
+     * <ul>
+     *   <li>an INQUIRY subject must still be REAL, ACTIVE and UNANSWERED — the same corpus
+     *       {@code InquiryRepository.countUnansweredOperational} counts;</li>
+     *   <li>a bound work item must still be in a phase that is waiting for the seller. Every other
+     *       phase is either terminal or inside the execution lane, where a home card would be
+     *       inviting the seller to redo a decision they already made.</li>
+     * </ul>
+     *
+     * <p>A REVIEW subject is unconstrained here: review cases are recommendations only, they open no
+     * work item, and there is no "answered" fact on a review to read.
+     */
+    String STILL_WAITING = """
+            and (c.subjectKind <> com.sellerops.proactive.ProactiveSubjectKind.INQUIRY
+                 or exists (select 1 from Inquiry i where i.id = c.subjectId and i.orgId = c.orgId
+                            and i.status = 'UNANSWERED'
+                            and i.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE
+                            and i.dataOrigin = com.sellerops.common.DataOrigin.REAL))
+            and (c.workItemId is null
+                 or exists (select 1 from InquiryWorkItem w where w.id = c.workItemId
+                            and w.phase in :waitingPhases))
+            """;
 
     /** The exact investigation, if it has already been done against this source state. */
     Optional<ProactiveCase> findByOrgIdAndSubjectKindAndSubjectIdAndSignature(
@@ -34,10 +69,27 @@ public interface ProactiveCaseRepository extends JpaRepository<ProactiveCase, UU
      * bounded page is stable.
      */
     @Query("select c from ProactiveCase c where c.orgId = :orgId and c.status = :status "
+            + STILL_WAITING
             + "order by c.priority asc, c.createdAt desc, c.id asc")
     List<ProactiveCase> findOpen(@Param("orgId") UUID orgId,
                                  @Param("status") ProactiveCaseStatus status,
+                                 @Param("waitingPhases") java.util.Collection<InquiryWorkItemPhase> waitingPhases,
                                  Pageable pageable);
+
+    /** How many open cases still point at work that is waiting — the same predicate as {@link #findOpen}. */
+    @Query("select count(c) from ProactiveCase c where c.orgId = :orgId and c.status = :status "
+            + STILL_WAITING)
+    long countStillWaiting(@Param("orgId") UUID orgId,
+                           @Param("status") ProactiveCaseStatus status,
+                           @Param("waitingPhases") java.util.Collection<InquiryWorkItemPhase> waitingPhases);
+
+    /** The same, for one priority — the home summary's 「급한 것」. */
+    @Query("select count(c) from ProactiveCase c where c.orgId = :orgId and c.status = :status "
+            + "and c.priority = :priority " + STILL_WAITING)
+    long countStillWaitingByPriority(@Param("orgId") UUID orgId,
+                                     @Param("status") ProactiveCaseStatus status,
+                                     @Param("priority") ProactivePriority priority,
+                                     @Param("waitingPhases") java.util.Collection<InquiryWorkItemPhase> waitingPhases);
 
     /** Every open case for the reconciler to re-derive. Bounded by the caller. */
     @Query("select c from ProactiveCase c where c.orgId = :orgId and c.status = :status "

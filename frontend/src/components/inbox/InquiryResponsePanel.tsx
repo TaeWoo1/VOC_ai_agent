@@ -24,6 +24,7 @@ import type {
   OrderContextView,
   PublishCapabilityView,
   PublishStatusView,
+  ReplyDraftView,
 } from "../../lib/types";
 import { bindingLabel, canBindProduct, productLabel } from "../../lib/inquiryProductBinding";
 import { InquiryProductBinder } from "./InquiryProductBinder";
@@ -158,11 +159,11 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       setEvidence(next.draftEvidence ?? []);
       setKnowledgeNote(next.draft?.knowledgeNote ?? null);
       setKnowledgeGrounded(next.draft?.knowledgeState === "GROUNDED");
-      // A reload cannot re-derive which of the three states produced a stored draft: the row keeps
-      // WHICH knowledge was available (`knowledgeState`), not whether the customer had settled their
-      // 규격. Rather than guess GROUNDED for a draft that was a clarification question, the card is
-      // simply not claimed on a reload — the stored `knowledgeNote` still says what was used.
-      setAnswerState(null);
+      // The state is READ, never re-derived (Agent Command Center v1 §2). It was computed on the
+      // generate and stored on the version, because `knowledgeState` alone cannot tell a grounded
+      // answer from a clarification question — both are GROUNDED there. A version written before the
+      // column carries null, and null claims nothing: no card, exactly as before.
+      setAnswerState(storedAnswerState(next.draft ?? null, next.productId ?? null));
       setBasisSaved(false);
       setUnavailable(null);
     } catch (e) {
@@ -811,6 +812,31 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
  * <p>The sentences are the backend's, in every shape. This component chooses the border, the order,
  * and which controls belong under which state.
  */
+/**
+ * The state a SAVED version was written in, or null when the row does not record one.
+ *
+ * <b>Read, not re-derived.</b> Re-running the projection on a reload would need the customer's
+ * message and the 규격 verdict, neither of which the row holds; guessing GROUNDED for a draft that
+ * was a question is precisely the confident wrong answer this card exists to prevent. A version from
+ * before the column simply produces no card — the same screen the seller saw yesterday.
+ *
+ * The product id comes from the DETAIL, not from the draft: a saved version records which product
+ * the retrieval was scoped to, but the errand to add knowledge belongs to the product this inquiry
+ * is bound to now.
+ */
+function storedAnswerState(
+  draft: ReplyDraftView | null,
+  productId: string | null,
+): AnswerStateView | null {
+  if (!draft?.answerBasis || !draft.answerBasisNote) return null;
+  return {
+    basis: draft.answerBasis,
+    note: draft.answerBasisNote,
+    action: draft.answerBasisAction,
+    productId,
+  };
+}
+
 function AnswerStateCard({
   state,
   justSaved,

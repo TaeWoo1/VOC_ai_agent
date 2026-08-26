@@ -83,6 +83,38 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
     @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.status = :status" + ACTIVE)
     long countByOrgIdAndStatus(@Param("orgId") UUID orgId, @Param("status") String status);
 
+    /**
+     * <b>답변이 필요한 문의 — the number that says the seller owes work.</b>
+     *
+     * <p>ONE definition, read by 홈 and by 문의, so the two screens cannot disagree about how much
+     * is waiting. {@link #countByOrgIdAndStatus} is the general status count and stays exactly what
+     * it is; this is the operational one, and it is narrower on purpose.
+     *
+     * <p><b>REAL only, and stated rather than inherited.</b> The {@code realDataOnly} filter is
+     * disabled on a demo deployment ({@code sellerops.seed.demo-content}) — deliberately, so a demo
+     * shows its demo dashboard — and this org's 6 DEMO_SEED + 2 VERIFY_FIXTURE unanswered rows were
+     * therefore counted into a KPI a seller reads as an obligation. A manufactured row may appear in
+     * a chart of what the shop did; it may never appear in a number that says work is owed. That is
+     * the same rule {@code InquiryQueueService} already applies to the queue this work is done from,
+     * and {@code InquiryWorkItemWriter} to the rows it opens.
+     */
+    @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.status = 'UNANSWERED'"
+            + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE)
+    long countUnansweredOperational(@Param("orgId") UUID orgId);
+
+    /**
+     * The same count, per channel — {@code [channelId, unanswered]}, only channels that have any.
+     *
+     * <p>The caller supplies the zero for a channel with no row, because "we did not ask about this
+     * channel" and "this channel has none" are different facts and only the channel registry can
+     * tell them apart.
+     */
+    @Query("select q.channelId, count(q) from Inquiry q where q.orgId = :orgId"
+            + " and q.status = 'UNANSWERED'"
+            + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE
+            + "group by q.channelId")
+    List<Object[]> countUnansweredOperationalByChannel(@Param("orgId") UUID orgId);
+
     /** Inquiries linked to one product. Org-scoped in the query — {@code product_id} is a bare FK. */
     @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.productId = :productId" + ACTIVE)
     long countByOrgIdAndProductId(@Param("orgId") UUID orgId, @Param("productId") UUID productId);

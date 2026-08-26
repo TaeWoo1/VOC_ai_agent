@@ -243,6 +243,62 @@ evidence id와 provenance 문자열 제거. **bounded model proof 2회**(합성 
 답변된 `PROPOSED` 1건이 작업 큐에 남음(전송 CTA는 꺼져 있고 다음 수집에서 self-heal). 마켓플레이스 호출
 **0** · 마켓플레이스 WRITE **0** · DB 변경 **0**).
 
+**`docs/agent_command_center_v1.md`** (Agent Command Center v1 — 제품 방향 수정: reviewnary는
+Dashboard-first + Agent assistant가 아니라 **Agent-first + structured operational workspace**,
+정확히는 **chat-first, object-backed**. Chat은 의도를 나르고 일은 그 일을 이미 소유한 구조화된 UI가
+보여준다. 직전 패키지가 **고치지 않고 보고했던 숫자 둘을 닫았다**: (1) 홈 미답변 KPI가 합성 8건을
+세어 22→30이던 것 — 행은 버그가 아니었다(`sellerops.seed.demo-content`는 데모가 데모 대시보드를
+보여주라는 뜻이고 그 스위치는 그대로다), 틀린 것은 그 스위치가 **어느 숫자에 닿아도 되는가**였다:
+합성 행은 가게가 한 일의 차트에 나올 수 있어도 **판매자가 답변을 빚졌다고 말하는 숫자**에는 나올 수
+없다 — 이 규칙은 이미 `InquiryWorkItemWriter`와 `InquiryQueueService`에 두 번 있었고
+(「Operational means REAL」) 여기서 정의 하나(`countUnansweredOperational`)를 얻어 홈과 문의가 같은
+문장을 말한다; coverage **상태**는 여전히 저장된 전 행을 세므로(합성만 있는 채널의 수집 판정이 뒤집히지
+않는다) 좁아진 것은 「기다리는 수」 한쪽뿐이다. (2) 채널에서 이미 답변된 `PROPOSED` 1건 —
+`stillWaiting`은 **`OPEN`/`PROPOSED`에서만** 떨어뜨린다(`COMPLETED`·`EXECUTED`의 문의는 정의상
+답변돼 있어 무조건 술어는 바로 그 탭을 비운다); 쓰지 않고 `reconcileConnectorAnswered`가 계속 소유한다.
+(3) 프로액티브 케이스 둘이 **둘 다 끝난 일**을 가리키던 것은 `STILL_WAITING` 술어(subject는 REAL·ACTIVE·
+UNANSWERED, work item은 `AWAITING_SELLER`)로 **쿼리 단계에서 추천에서만** 빠진다 — status는 여전히
+reconciler만 쓰고 cleanup 아키텍처는 0. 그 결과 「AI가 먼저 확인한 일」이 Demo Org에서 **비었고**,
+채우려면 실제 고객 문의에 모델을 부르는 tick이 필요하므로 **product-owner 결정**으로 올린다.
+**세 answer state가 reload를 넘긴다** — 감사 결과 가장 가까운 seam은 `inquiry_reply_draft`였고 필요한
+것은 **칸 하나**(V82 `answer_basis`, nullable, backfill 0, append-only 유지): `knowledge_state`로는
+파생 불가하다(GROUNDED와 NEEDS_CLARIFICATION은 둘 다 `knowledge_state=GROUNDED`이고 가르는 것은
+**고객이 규격을 밝혔는가**라는 질문에 대한 사실이라 이 표에 없다). 마이그레이션 이전 버전은 **아무것도
+주장하지 않는다**; reload의 action 줄은 고객의 명사를 인용하지 않는 **일반 문장**이다(그 단어는 저장돼
+있지 않고 되살리려면 고객 메시지를 다시 읽어야 한다). `NO_ANSWER_BASIS`는 초안을 쓰지 않으므로 찍을 행이
+없다 — 재계산은 **모델 0회**라 버튼으로 남긴다. **홈 IA는 브리핑 → 숫자 → 물어보기 → 참고**이고 대시보드
+데이터는 버리지 않고 **제목 아래로 내려갔다**; 기간 버튼은 페이지 헤더(화면 첫 채워진 버튼, 900px 아래
+섹션의 필터)에서 「숫자」 헤더로 옮겼다. 인사말은 **산술**이다 — 아래 렌더된 객체 수의 결정론적 함수이고
+이 화면에서 **모델은 호출되지 않는다**(AI 예산이 떨어져도 대시보드는 돈다); 0은 「0개 있습니다」가 아니라
+자기 문장을 갖는다. 브리핑 카드 프레임워크는 **새로 만들지 않았다** — 준비된 초안은 work queue rows,
+「AI가 먼저 확인한 일」은 기존 섹션, findings는 `InsightList` 그대로이고 `ProactiveCases`는 prop 하나
+(`onLoaded`)만 얻어 인사말이 **재조회가 아니라 렌더된 것**을 센다. **command box는 planner가 아니라
+palette다** — 이것은 취향이 아니라 계약이다(`sellerops_operator_graph_v2.md`: Agent run의 계획은 LLM
+planner가 세우거나 run이 실패하며 결정론 keyword planner는 fallback으로도 없다): 인식된 문장은 **이미
+있는 workspace object**로 해석되고(도구를 고르지 않고 근거를 주장하지 않으며 보여주는 객체에서 읽지
+않은 사실을 말하지 않는다), 인식되지 않은 문장은 `/agent`로 **그대로** 넘어가 planner가 계획하거나 오늘과
+똑같이 실패한다. 매칭은 명사 + 「보여/알려/목록…」을 함께 요구할 만큼 **좁고**(「3호 몰딩 문의가 몇
+건이야」는 넘어간다) 칩이 지원 집합을 보이게 한다. 결과는 **산문이 아니라 객체**이고 문의 객체의 숫자는
+홈의 KPI를 내려받는다(두 번 읽으면 6인치 위 카드와 어긋날 기회가 두 번이다); 리뷰는 고객 기억 화면의
+`IssueList`를 **그대로** 쓴다. context seam(§8)은 **이미 있었다** — `agentContext`가
+`{goal, productId, channelCode, surface}`를 나르고 5개 화면이 제공하므로 새 계약 0. 승인 경계 무변경:
+`CommandInput`에 write 호출이 없고 「답변 보내줘」는 `confirmInquiryPublish`를 부르지 않고 Agent로 간다.
+`docs/reviewnary_design.md`가 타이포·간격·표면·CTA·상태색·브리핑·객체 카드·근거 공개·빈/로딩/오류·접근성·
+반응형을 적되 **토큰 마이그레이션·새 팔레트·새 서체·컴포넌트 라이브러리 0**. 시각 QA는 실제 브라우저
+(Playwright 1440×900@2×): 홈·명령 결과·스타일 설정은 **라이브 Demo Org 읽기 전용**, 문의 세 상태는
+**합성 fixture**(라이브 렌더는 실제 고객 문의에 초안을 생성하는 일이다) — 7화면 전부 **AA 위반 0**(틴트
+위 합성 계산) · 가로 스크롤 0 · 콘솔 오류 0 · locator 노출 0. V82는 커넥터·스케줄러·프로액티브·초안을
+끈 채 실제 로컬 DB에 적용(8ms, 기동 6.03초, 채널·모델 참조 0, ERROR/WARN 0, 기존 초안 11/11 null).
+**마켓플레이스 호출 0 · 마켓플레이스 WRITE 0 · 모델 호출 0 · DB 행 변경 0** ⇒ evidence 행 없음.
+**고치지 않고 보고한 것**: 빈 프로액티브 섹션, `NO_ANSWER_BASIS` reload, `totalElements`가 읽기 필터를
+따라오지 않는 것(기존 성질), window 지표의 데모 행 포함(스위치의 의미이므로 product-owner 결정),
+스타일 설정 저장 버튼 fold 아래, 그리고 Agent 자유문장 lane 자체는 agent-runtime 미기동으로 미실행).
+
+**Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
+`frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
+Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의
+기록이고 새 디자인 시스템이 아니다**; 여기 없는 색·서체·컴포넌트 라이브러리는 이 문서가 허가하지 않는다.
+
 **Demo org / channel knowledge:** `docs/demo_org_and_channel_knowledge_v1.md` owns the canonical Demo
 Org's **provenance contract** (`REAL` / `DEMO_SEED` / `VERIFY_FIXTURE`, default reads exclude synthetic),
 the **vault key diagnosis contract** (a credential is opened with the key that sealed IT; `KEY_MISMATCH`

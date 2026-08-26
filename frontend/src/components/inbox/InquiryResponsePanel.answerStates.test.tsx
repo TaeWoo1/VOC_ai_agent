@@ -290,7 +290,30 @@ describe("the three answer states", () => {
     expect(screen.queryByText("답변 기준이 필요합니다.")).toBeNull();
   });
 
-  it("a reload claims no state — the stored row cannot tell a clarification from an answer", async () => {
+  it("D — a reload states what the version WAS, read from the row rather than re-derived", async () => {
+    // The clarification case is the one that mattered: `knowledgeState` is GROUNDED here too, so a
+    // screen that re-derived the state would call a question back to the customer an answer.
+    getInquiryDetailStrict.mockResolvedValue(
+      detail({
+        phase: "PROPOSED",
+        draft: draftRow({
+          answerBasis: "NEEDS_CLARIFICATION",
+          answerBasisNote: "정확한 답변을 위해 고객에게 확인할 내용이 있습니다.",
+          answerBasisAction: null,
+        }),
+        draftEvidence: GROUNDED.evidence,
+      }),
+    );
+    open();
+
+    expect(await screen.findByText(/사용하실 규격을 알려주시면/)).toBeInTheDocument();
+    const card = screen.getByTestId("answer-state");
+    expect(card).toHaveAttribute("data-basis", "NEEDS_CLARIFICATION");
+    expect(card.className).toContain("warn");
+    expect(card.className).not.toContain("good");
+  });
+
+  it("D — a version written before the column claims nothing, exactly as before", async () => {
     getInquiryDetailStrict.mockResolvedValue(
       detail({ phase: "PROPOSED", draft: draftRow(), draftEvidence: GROUNDED.evidence }),
     );

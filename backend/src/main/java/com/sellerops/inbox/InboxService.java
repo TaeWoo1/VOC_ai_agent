@@ -68,7 +68,11 @@ public class InboxService {
         // Counted, not derived from the capped rows: the number is the same however few rows a page
         // asked for. Seller-dismissed inquiries are not counted — the repository carries that predicate
         // (see InquiryRepository.ACTIVE), so this is the same corpus 홈 and the report count.
-        long unanswered = inquiries.countByOrgIdAndStatus(orgId, "UNANSWERED");
+        //
+        // The operational count, which is REAL only: a number that says the seller owes work must not
+        // include rows the product manufactured about itself. 홈 reads the same method, so the two
+        // screens state one number (Agent Command Center v1 §1-A).
+        long unanswered = inquiries.countUnansweredOperational(orgId);
         return new InboxResponse(items, items.size(), unanswered);
     }
 

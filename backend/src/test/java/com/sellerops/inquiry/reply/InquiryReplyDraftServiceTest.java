@@ -270,4 +270,56 @@ class InquiryReplyDraftServiceTest {
                 d.getContentFingerprint(), d.getFingerprintAlgorithm());
         assertThat(allFields).doesNotContain("token").doesNotContain("author").doesNotContain("messageNo");
     }
+
+    /**
+     * <b>What this version WAS survives the reload</b> (Agent Command Center v1 §2, regression D).
+     *
+     * <p>A reply that ASKS the customer for their 규격 is a correct answer and it looked, on a second
+     * visit, exactly like an answer that had come out short — because the state was computed on every
+     * generate and stored nowhere. It is stamped now, on the version, at write time.
+     *
+     * <p>The three assertions are the whole contract: it comes back, it is not re-derived from the
+     * knowledge state (which is {@code GROUNDED} in both of the first two cases and cannot tell them
+     * apart), and a version written before the column existed claims nothing.
+     */
+    @Test
+    void theAnswerBasisIsStampedOnTheVersionAndReadBack() {
+        InquiryWorkItem wi = seedProposed(org);
+
+        ReplyDraftView asked = service.saveAs(org, wi.getId(), "SYSTEM:TEST",
+                "규격 확인 부탁드립니다", "몇 호 몰딩인지 알려주시면 정확히 안내드리겠습니다.", 0,
+                new InquiryReplyDraftService.Provenance(
+                        com.sellerops.inquiry.draft.DraftAuthorKind.MODEL, "m/1",
+                        com.sellerops.inquiry.draft.DraftKnowledgeState.GROUNDED, null,
+                        com.sellerops.inquiry.draft.AnswerBasisState.NEEDS_CLARIFICATION));
+
+        assertThat(asked.answerBasis()).isEqualTo("NEEDS_CLARIFICATION");
+        assertThat(asked.answerBasisNote()).isEqualTo("정확한 답변을 위해 고객에게 확인할 내용이 있습니다.");
+        assertThat(asked.knowledgeState()).isEqualTo("GROUNDED");
+        assertThat(service.latestView(wi.getId()).answerBasis()).isEqualTo("NEEDS_CLARIFICATION");
+
+        ReplyDraftView answered = service.saveAs(org, wi.getId(), "SYSTEM:TEST",
+                "색상 안내", "화이트와 아이보리 두 가지입니다.", 1,
+                new InquiryReplyDraftService.Provenance(
+                        com.sellerops.inquiry.draft.DraftAuthorKind.MODEL, "m/1",
+                        com.sellerops.inquiry.draft.DraftKnowledgeState.GROUNDED, null,
+                        com.sellerops.inquiry.draft.AnswerBasisState.GROUNDED));
+
+        // Same knowledge state, different answer state. Only the stamp can tell these apart.
+        assertThat(answered.answerBasis()).isEqualTo("GROUNDED");
+        assertThat(answered.answerBasisNote()).isEqualTo("답변에 필요한 정보를 확인했습니다.");
+        assertThat(answered.answerBasisAction()).isNull();
+    }
+
+    @Test
+    void aVersionWrittenBeforeTheColumnClaimsNoState() {
+        InquiryWorkItem wi = seedProposed(org);
+
+        // A seller edit records no basis, which is the same shape every pre-migration row has.
+        ReplyDraftView typed = service.save(org, wi.getId(), user, "제목", "내용", 0);
+
+        assertThat(typed.answerBasis()).isNull();
+        assertThat(typed.answerBasisNote()).isNull();
+        assertThat(typed.answerBasisAction()).isNull();
+    }
 }

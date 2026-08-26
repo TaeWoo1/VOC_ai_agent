@@ -1443,6 +1443,17 @@ export interface ReplyDraftView {
   knowledgeState: "NO_PRODUCT" | "NO_LIBRARY" | "NO_MATCH" | "GROUNDED" | null;
   /** That state as the one sentence shown above the draft; null on a seller-typed version. */
   knowledgeNote: string | null;
+  /**
+   * What this version WAS when it was written.
+   *
+   * Not derivable from `knowledgeState`: the same library verdict yields `GROUNDED` or
+   * `NEEDS_CLARIFICATION` depending on whether the customer had settled their 규격. Null on every
+   * version written before 2026-08-27 and on seller-typed versions — "not recorded" is a different
+   * statement from any of the three states, and the screen says nothing rather than guessing.
+   */
+  answerBasis: "GROUNDED" | "NEEDS_CLARIFICATION" | "NO_ANSWER_BASIS" | null;
+  answerBasisNote: string | null;
+  answerBasisAction: string | null;
 }
 
 /**

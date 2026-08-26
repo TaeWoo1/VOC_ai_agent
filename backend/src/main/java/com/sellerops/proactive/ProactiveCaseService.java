@@ -7,6 +7,7 @@ import com.sellerops.common.MarkupText;
 import com.sellerops.inbox.InboxService;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.proactive.dto.ProactiveCaseListResponse;
 import com.sellerops.proactive.dto.ProactiveCaseView;
 import com.sellerops.proactive.dto.ProactiveSummaryView;
@@ -81,7 +82,7 @@ public class ProactiveCaseService {
     public ProactiveCaseListResponse list(UUID orgId, int limit) {
         int size = Math.max(1, Math.min(MAX_LIMIT, limit));
         List<ProactiveCase> open = cases.findOpen(orgId, ProactiveCaseStatus.PREPARED,
-                PageRequest.of(0, size));
+                InquiryWorkItemPhase.AWAITING_SELLER, PageRequest.of(0, size));
 
         Map<UUID, Inquiry> inquiryById = inquiries.findAllById(idsOf(open, ProactiveSubjectKind.INQUIRY))
                 .stream().filter(i -> i.getOrgId().equals(orgId))
@@ -119,19 +120,23 @@ public class ProactiveCaseService {
         views.sort(Comparator.comparingInt((ProactiveCaseView v) -> ProactivePriority.valueOf(v.priority()).rank())
                 .thenComparing(ProactiveCaseView::preparedAt, Comparator.reverseOrder()));
 
+        // The totals count the same corpus the page was drawn from. A screen that said 「전체 2건 중
+        // 0건」 would be announcing work it is refusing to show.
         return new ProactiveCaseListResponse(views,
-                cases.countByOrgIdAndStatus(orgId, ProactiveCaseStatus.PREPARED),
-                cases.countByOrgIdAndStatusAndPriority(orgId, ProactiveCaseStatus.PREPARED,
-                        ProactivePriority.HIGH));
+                cases.countStillWaiting(orgId, ProactiveCaseStatus.PREPARED,
+                        InquiryWorkItemPhase.AWAITING_SELLER),
+                cases.countStillWaitingByPriority(orgId, ProactiveCaseStatus.PREPARED,
+                        ProactivePriority.HIGH, InquiryWorkItemPhase.AWAITING_SELLER));
     }
 
     /** The home screen's entry point: counts, never a second copy of the list. */
     @Transactional(readOnly = true)
     public ProactiveSummaryView summary(UUID orgId) {
         return new ProactiveSummaryView(
-                cases.countByOrgIdAndStatus(orgId, ProactiveCaseStatus.PREPARED),
-                cases.countByOrgIdAndStatusAndPriority(orgId, ProactiveCaseStatus.PREPARED,
-                        ProactivePriority.HIGH),
+                cases.countStillWaiting(orgId, ProactiveCaseStatus.PREPARED,
+                        InquiryWorkItemPhase.AWAITING_SELLER),
+                cases.countStillWaitingByPriority(orgId, ProactiveCaseStatus.PREPARED,
+                        ProactivePriority.HIGH, InquiryWorkItemPhase.AWAITING_SELLER),
                 cases.countByOrgIdAndPreparedAction(orgId, ProactivePreparedAction.DRAFT_PREPARED));
     }
 

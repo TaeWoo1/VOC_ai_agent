@@ -23,9 +23,18 @@ import { previewText } from "../../lib/plainText";
  * <b>A failure here never takes the page down.</b> The read is deliberately the only fail-soft one in
  * the inquiry workflow — the queue behind it is still strict.
  */
-export function ProactiveCases({ limit = 5, heading = "AI가 먼저 확인한 일" }: {
+export function ProactiveCases({ limit = 5, heading = "AI가 먼저 확인한 일", onLoaded }: {
   limit?: number;
   heading?: string;
+  /**
+   * How many cards this section ended up with — 0 included, and 0 on a failure.
+   *
+   * <b>Reported rather than counted twice.</b> The home briefing opens with a sentence that counts
+   * what is on the screen below it, and a second read to find that number could disagree with the
+   * one that was actually rendered. The section still owns its own fetch, its own telemetry and its
+   * own fail-soft behaviour; it just says how many it drew.
+   */
+  onLoaded?: (count: number) => void;
 }) {
   const [cases, setCases] = useState<ProactiveCaseView[]>([]);
   const [total, setTotal] = useState(0);
@@ -38,19 +47,21 @@ export function ProactiveCases({ limit = 5, heading = "AI가 먼저 확인한 �
         if (!live) return;
         setCases(response.items);
         setTotal(response.total);
+        onLoaded?.(response.items.length);
         if (response.items.length > 0) analytics.track("proactive_cases_viewed");
       } catch {
         // Fail-soft: the section simply is not there.
         if (live) {
           setCases([]);
           setTotal(0);
+          onLoaded?.(0);
         }
       }
     })();
     return () => {
       live = false;
     };
-  }, [limit]);
+  }, [limit, onLoaded]);
 
   const open = useCallback((view: ProactiveCaseView) => {
     analytics.track("proactive_case_opened", { kind: analyticsKind(view) });

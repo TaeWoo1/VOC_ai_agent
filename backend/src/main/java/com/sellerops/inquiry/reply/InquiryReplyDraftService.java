@@ -67,11 +67,12 @@ public class InquiryReplyDraftService {
      * else.
      */
     public record Provenance(DraftAuthorKind authorKind, String modelVersion,
-                             DraftKnowledgeState knowledgeState, UUID productId) {
+                             DraftKnowledgeState knowledgeState, UUID productId,
+                             com.sellerops.inquiry.draft.AnswerBasisState answerBasis) {
 
         /** What a hand-typed save records. */
         public static Provenance seller() {
-            return new Provenance(DraftAuthorKind.SELLER, null, null, null);
+            return new Provenance(DraftAuthorKind.SELLER, null, null, null, null);
         }
     }
 
@@ -165,6 +166,7 @@ public class InquiryReplyDraftService {
         draft.setAuthorKind(provenance.authorKind().name());
         draft.setModelVersion(provenance.modelVersion());
         draft.setKnowledgeState(provenance.knowledgeState() == null ? null : provenance.knowledgeState().name());
+        draft.setAnswerBasis(provenance.answerBasis() == null ? null : provenance.answerBasis().name());
         draft.setProductId(provenance.productId());
         try {
             return ReplyDraftView.of(drafts.save(draft));

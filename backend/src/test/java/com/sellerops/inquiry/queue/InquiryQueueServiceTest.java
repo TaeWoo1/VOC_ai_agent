@@ -13,6 +13,7 @@ import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -175,5 +176,42 @@ class InquiryQueueServiceTest {
         assertThat(service.queue(org, InquiryWorkItemPhase.OPEN, 0, 20).content()).isEmpty();
         // Still on record for debug/history readers. Not operational is not the same as not collected.
         assertThat(workItems.findById(workItemId)).isPresent();
+    }
+
+    @Test
+    @DisplayName("§1-B — an OPEN item whose inquiry the channel already answered is not a task")
+    void answeredInquiryLeavesTheActionableQueue() {
+        UUID org = UUID.randomUUID();
+        UUID account = UUID.randomUUID();
+        UUID channel = UUID.randomUUID();
+        UUID stale = seed(org, account, channel, InquiryWorkItemPhase.PROPOSED, "이미 답변함");
+        UUID waiting = seed(org, account, channel, InquiryWorkItemPhase.PROPOSED, "아직 답변 안 함");
+        // The seller replied in the marketplace console; our sweep has not run since.
+        Inquiry answered = inquiries.findAll().stream()
+                .filter(q -> "이미 답변함".equals(q.getTitle())).findFirst().orElseThrow();
+        answered.setStatus("ANSWERED");
+        inquiries.save(answered);
+
+        InquiryQueueResponse page = service.queue(org, InquiryWorkItemPhase.PROPOSED, 0, 20);
+
+        assertThat(page.content()).extracting(InquiryQueueItem::workItemId).containsExactly(waiting);
+        assertThat(stale).isNotNull();
+    }
+
+    @Test
+    @DisplayName("a COMPLETED item's inquiry is answered BY DEFINITION — that tab is not emptied")
+    void completedWorkKeepsItsAnsweredInquiry() {
+        UUID org = UUID.randomUUID();
+        UUID account = UUID.randomUUID();
+        UUID channel = UUID.randomUUID();
+        UUID done = seed(org, account, channel, InquiryWorkItemPhase.COMPLETED, "답변 완료");
+        Inquiry answered = inquiries.findAll().stream()
+                .filter(q -> "답변 완료".equals(q.getTitle())).findFirst().orElseThrow();
+        answered.setStatus("ANSWERED");
+        inquiries.save(answered);
+
+        InquiryQueueResponse page = service.queue(org, InquiryWorkItemPhase.COMPLETED, 0, 20);
+
+        assertThat(page.content()).extracting(InquiryQueueItem::workItemId).containsExactly(done);
     }
 }

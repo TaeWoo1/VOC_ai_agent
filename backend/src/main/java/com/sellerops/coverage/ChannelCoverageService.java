@@ -114,7 +114,21 @@ public class ChannelCoverageService implements OrderStoreFreshness {
 
         Map<String, Map<UUID, long[]>> counts = new HashMap<>();
         Map<String, Map<UUID, Instant>> newest = new HashMap<>();
-        counts.put("INQUIRY", pairs(inquiries.countActiveByChannel(orgId)));
+        // [stored, unanswered] per channel. The two halves answer different questions and are read
+        // from different queries on purpose (Agent Command Center v1 §1-A): "how many rows do we
+        // hold" decides the freshness verdict and must see everything this org holds, while
+        // "how many are waiting" is an operational obligation and is REAL only. Overwriting the
+        // second half here rather than narrowing countActiveByChannel keeps a channel whose only
+        // rows are seeded from flipping its collection state.
+        Map<UUID, long[]> inquiryCounts = pairs(inquiries.countActiveByChannel(orgId));
+        Map<UUID, Long> waiting = new HashMap<>();
+        for (Object[] row : inquiries.countUnansweredOperationalByChannel(orgId)) {
+            waiting.put((UUID) row[0], ((Number) row[1]).longValue());
+        }
+        for (Map.Entry<UUID, long[]> entry : inquiryCounts.entrySet()) {
+            entry.getValue()[1] = waiting.getOrDefault(entry.getKey(), 0L);
+        }
+        counts.put("INQUIRY", inquiryCounts);
         newest.put("INQUIRY", instants(inquiries.newestReceivedAtByChannel(orgId)));
         counts.put("REVIEW", pairs(reviews.countByChannel(orgId)));
         newest.put("REVIEW", instants(reviews.newestReceivedAtByChannel(orgId)));

@@ -269,7 +269,8 @@ public class InquiryDraftComposer {
         int base = drafts.currentVersion(workItemId);
         ReplyDraftView saved = drafts.saveAs(orgId, workItemId, actor, replyTitle, replyBody, base,
                 new InquiryReplyDraftService.Provenance(DraftAuthorKind.MODEL,
-                        stamped(modelVersion, style), retrieved.state(), retrieved.productId()));
+                        stamped(modelVersion, style), retrieved.state(), retrieved.productId(),
+                        basis));
 
         List<DraftEvidenceView> views = recordEvidence(orgId, workItemId, saved.version(),
                 retrieved.passages(), retrieved.order());
@@ -327,7 +328,7 @@ public class InquiryDraftComposer {
         ReplyDraftView saved = drafts.saveAs(orgId, workItemId, actor, defaultTitle(inquiryTitle),
                 style.unknownFallback(), base,
                 new InquiryReplyDraftService.Provenance(DraftAuthorKind.SELLER_APPROVED_FALLBACK,
-                        style.identity(), retrieved.state(), retrieved.productId()));
+                        style.identity(), retrieved.state(), retrieved.productId(), basis));
         // No evidence rows: nothing was cited, because nothing applied. A citation of an absence is
         // the one kind of evidence this product does not record.
         return new GeneratedDraftView(saved, DraftAuthorKind.SELLER_APPROVED_FALLBACK.name(),
