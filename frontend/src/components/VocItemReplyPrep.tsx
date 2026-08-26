@@ -573,7 +573,7 @@ export function VocItemReplyPrep({
             aria-disabled={!canCopy || working}
             onClick={() => void copy()}
             className={`rounded-lg px-2.5 py-1 text-sm font-semibold ${
-              canCopy && !working ? "bg-brand text-white" : "bg-canvas text-muted opacity-40"
+              canCopy && !working ? "bg-brand-700 text-white" : "bg-canvas text-muted opacity-40"
             }`}
           >
             복사

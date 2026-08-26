@@ -324,7 +324,9 @@ export function ChannelReviews({
                 </span>
               ) : null}
               <span>
-                {page.lastImportAt ? `마지막 수집 ${formatDateTime(page.lastImportAt)}` : "수집 기록 없음"}
+                {page.lastImportAt
+                  ? `마지막 수집 ${formatDateTime(page.lastImportAt)}`
+                  : "마지막 수집 시각 기록 없음"}
               </span>
               {/* WHO WRITES THE ANSWER stays on the screen, in one clause instead of two sentences.
                   It is a capability fact, not decoration: on a channel with no proven reply write,
@@ -354,9 +356,26 @@ export function ChannelReviews({
         page and not the current filter, so pressing a tier never changes the numbers describing the
         others — otherwise choosing 확인 필요 would zero the chips that lead back out of it.
       */}
-      {page ? <TriageSummary page={page} word={word} /> : null}
+      {page ? (
+        <TriageSummary
+          page={page}
+          word={word}
+          showOnlyAttention={
+            tier === "NEEDS_ATTENTION"
+              ? null
+              : () => {
+                  setTier("NEEDS_ATTENTION");
+                  setPageIndex(0);
+                }
+          }
+        />
+      ) : null}
 
+      {/* NAME THE CONTROL (Executive Readiness Fix v1). Sort and filter were two unlabelled rows of
+          chips with one solid chip each, and a reader with no explanation saw 「파란 버튼이 두 개다 —
+          어느 쪽이 지금 상태인지 구분이 안 된다」. Each row now says what it is. */}
       <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-muted">정렬</span>
         {(
           [
             ["attention", "확인 필요순"],
@@ -390,6 +409,7 @@ export function ChannelReviews({
         workflow's: 확인 필요 → 지켜보기 → 참고, then 전체 — what to look at first comes first.
       */}
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="분류 필터">
+        <span className="text-sm font-semibold text-muted">보기</span>
         {TRIAGE_TIERS.map((value) => (
           <Btn
             key={value}
@@ -946,7 +966,23 @@ function TriageReason({ note }: { note: ReviewTriageNote }) {
  * Every number here describes the CHANNEL, never the page and never the active filter — so the chips
  * keep pointing at the parts of the record the operator is not currently looking at.
  */
-function TriageSummary({ page, word }: { page: ChannelReviewPageView; word: string }) {
+function TriageSummary({
+  page,
+  word,
+  showOnlyAttention,
+}: {
+  page: ChannelReviewPageView;
+  word: string;
+  /**
+   * Narrows the list to 확인 필요, or null when it already is.
+   *
+   * <b>Why the headline needed a control</b> (Executive Readiness Fix v1). It announced
+   * 「지금 확인이 필요한 리뷰 18건」 directly above a list headed 「총 4340개」, and the two numbers had
+   * no visible relationship — a reader concluded 「말과 화면이 어긋난다」. The count is not a new
+   * metric and the list default did not change; the sentence simply now leads somewhere.
+   */
+  showOnlyAttention?: (() => void) | null;
+}) {
   const { needsAttention, repeatedCategories } = page.triageSummary;
   return (
     <div className="rounded-xl border border-line bg-canvas px-4 py-3 leading-relaxed">
@@ -960,6 +996,15 @@ function TriageSummary({ page, word }: { page: ChannelReviewPageView; word: stri
         )}
         {page.newCount > 0 ? <span className="text-muted"> · 새로 들어온 {page.newCount}건</span> : null}
       </p>
+      {needsAttention > 0 && showOnlyAttention ? (
+        <div className="mt-2">
+          {/* Solid: it is the action the sentence above it recommends. As an outline button it was
+              the faintest control on a screen whose loudest chip was 「전체 4340」. */}
+          <Btn size="sm" onClick={showOnlyAttention}>
+            {`이 ${needsAttention}건만 보기`}
+          </Btn>
+        </div>
+      ) : null}
       {repeatedCategories.length > 0 ? (
         <>
           <p className="mt-1 text-sm text-muted">

@@ -21,8 +21,17 @@ export default {
         // 6.3:1 on canvas, so the same words survive a 50-year-old pair of eyes.
         muted: "#4E5968",
         line: "#E5E8EB",
-        good: "#15803D",
-        warn: "#B45309",
+        // Darkened from #15803D for the same reason `warn` was (Executive Readiness Fix v1): the
+        // green words in this product sit on a `good/10` tint — 「연결됨」, 「최신」, 「외부 발송 없음」
+        // — and there the old value measured 4.0:1 against a canvas card, under AA. #12662F measures
+        // 7.1:1 on surface and 5.6:1 on its own tint over canvas.
+        good: "#12662F",
+        // Darkened from #B45309 (Executive Readiness Fix v1). The old value is fine as text on a
+        // plain surface (5.0:1) but the product's attention words sit on a `warn/10` tint — the
+        // 「확인 필요」 chip, the connection signal — and there it measured 4.39:1, under AA. It was
+        // the badge introduced by the previous package that failed. #92400E measures 7.1:1 on
+        // surface, 6.4:1 on canvas and 6.2:1 on its own tint, so one token closes every case.
+        warn: "#92400E",
         bad: "#DC2626",
       },
       fontFamily: {

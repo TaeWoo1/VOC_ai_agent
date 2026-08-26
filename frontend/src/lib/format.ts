@@ -21,18 +21,21 @@ export function relativeTime(iso: string | null): string {
     return "-";
   }
   const then = new Date(iso).getTime();
-  const diffMin = Math.round((Date.now() - then) / 60000);
+  // FLOOR, not round (Executive Readiness Fix v1). `waitedLabel` floors the same `receivedAt`, so a
+  // 13h40m-old inquiry rendered 「14시간 전」 on its list row and 「13시간째」 in the pane beside it —
+  // one fact, two numbers, on one screen. Flooring also never over-states how long something waited.
+  const diffMin = Math.floor((Date.now() - then) / 60000);
   if (diffMin < 1) {
     return "방금 전";
   }
   if (diffMin < 60) {
     return `${diffMin}분 전`;
   }
-  const diffHr = Math.round(diffMin / 60);
+  const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) {
     return `${diffHr}시간 전`;
   }
-  const diffDay = Math.round(diffHr / 24);
+  const diffDay = Math.floor(diffHr / 24);
   if (diffDay < 31) {
     return `${diffDay}일 전`;
   }
@@ -73,7 +76,7 @@ export function untilTime(iso: string | null): string {
   if (diffMin < 60) {
     return `${diffMin}분 후`;
   }
-  const diffHr = Math.round(diffMin / 60);
+  const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) {
     return `${diffHr}시간 후`;
   }

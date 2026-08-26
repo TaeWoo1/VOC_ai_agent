@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { ProactiveCases } from "../components/proactive/ProactiveCases";
 import { PageHeader } from "../components/PageHeader";
 import { Section } from "../components/Section";
+import { Disclosure } from "../components/ui/Disclosure";
 import { useApiData } from "../lib/useApiData";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/apiClient";
@@ -188,7 +189,9 @@ export function Agent() {
 
       {/* Before the prompt, not after it. The Agent screen used to answer only what it was asked;
           work SellerOps has already investigated should not need to be asked for. */}
-      <ProactiveCases limit={4} heading="이미 확인해 둔 일" />
+      {/* The same cards under the same name as everywhere else (Executive Readiness Fix v1). Calling
+          them 「이미 확인해 둔 일」 here and 「AI가 먼저 확인한 일」 on 홈 made one thing look like two. */}
+      <ProactiveCases limit={4} />
 
       <Section title="무엇을 확인해볼까요?">
         <form onSubmit={submit} className="space-y-3" aria-label="에이전트 명령 입력">
@@ -223,10 +226,10 @@ export function Agent() {
           >
             {busy ? "확인 중…" : "물어보기"}
           </button>
-          <details>
-            <summary className="inline-flex cursor-pointer list-none items-center rounded-lg text-sm font-semibold text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
-              판매 계정 선택 (리뷰 답변을 준비할 때만 필요)
-            </summary>
+          {/* A collapsed control needs a marker, or it reads as a label with nothing behind it —
+              which is exactly how a reader with no explanation read this one (Executive Readiness
+              Fix v1): 「고를 것이 화면에 없다」. */}
+          <Disclosure label="판매 계정 선택 (리뷰 답변을 준비할 때만 필요)" summaryClassName="px-0">
             <label htmlFor="agent-account" className="sr-only">
               판매 계정
             </label>
@@ -243,7 +246,7 @@ export function Agent() {
                 </option>
               ))}
             </select>
-          </details>
+          </Disclosure>
           {plannerUnavailable ? (
             /*
               Not an error banner: a capability being off is a configuration state, not a failure of the

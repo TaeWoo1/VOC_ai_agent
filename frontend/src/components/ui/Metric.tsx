@@ -38,7 +38,27 @@ export function Metric({
   const big = size === "lg";
   const body = (
     <>
-      <p className={`font-medium text-muted ${big ? "text-base" : "text-sm"}`}>{kpi.label}</p>
+      {/* A card that navigates says so (Executive Readiness Fix v1). These have been `<button>`s
+          since the redesign, but nothing on them looked pressable — a reader asked where to go to
+          work through the 26 and concluded 「26이라는 큰 숫자는 눌러지게 안 생겼다」, then went
+          hunting in the sidebar. The chevron is the affordance; the hover tint was not one. */}
+      <p
+        className={`flex items-center gap-1 font-medium text-muted ${big ? "text-base" : "text-sm"}`}
+      >
+        {kpi.label}
+        {onClick ? (
+          <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4 shrink-0">
+            <path
+              d="M7.5 4.5 13 10l-5.5 5.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : null}
+      </p>
       <p
         className={`mt-1.5 font-bold tabular-nums text-ink ${
           big ? "text-4xl" : emphasis ? "text-3xl" : "text-2xl"
@@ -105,7 +125,12 @@ function Delta({ percent }: { percent: number }) {
   // with both date ranges. The screen reader still hears the full sentence (Demo UX Polish v1).
   return (
     <p className="text-sm text-muted">
+      {/* 「이전 기간 대비」 is back on the card (Executive Readiness Fix v1). It was dropped when six
+          KPIs printed it six times and wrapped every one of them; three cards remain and only one
+          ever carries a delta, so it costs one line once — and a bare 「▲397% 증가」 left a reader
+          asking 「무엇 대비인지 없다」. */}
       <span aria-hidden="true">
+        이전 기간 대비{" "}
         {up ? "▲" : "▼"}
         <span className="ml-1 tabular-nums">{Math.abs(percent)}%</span>
         <span className="ml-1">{up ? "증가" : "감소"}</span>

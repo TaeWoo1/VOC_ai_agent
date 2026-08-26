@@ -27,6 +27,7 @@ import { bindingLabel, canBindProduct, productLabel } from "../../lib/inquiryPro
 import { InquiryProductBinder } from "./InquiryProductBinder";
 import { copyText } from "../../lib/clipboard";
 import { Btn } from "../ui/Btn";
+import { Disclosure } from "../ui/Disclosure";
 import { plainText } from "../../lib/plainText";
 
 /**
@@ -334,7 +335,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/*
         1 — THE CUSTOMER'S QUESTION. First, largest, and never competing with a control.
 
@@ -344,9 +345,13 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
         seller already knew.
       */}
       <section>
-        <h3 className="text-sm font-semibold text-muted">고객 문의</h3>
+        {/* The 「고객 문의」 label is gone (Executive Readiness Fix v1). It cost a line at the very top
+            of the pane to name something the reader had just clicked out of a list titled 문의, and
+            the block below is unambiguous once the answer beneath it is labelled 「AI가 준비한 답변」.
+            The section keeps its accessible name. */}
+        <h3 className="sr-only">고객 문의</h3>
         {detail.title ? (
-          <p className="mt-1.5 break-keep text-lg font-bold leading-snug text-ink">
+          <p className="break-keep text-lg font-bold leading-snug text-ink">
             {plainText(detail.title)}
           </p>
         ) : null}
@@ -378,7 +383,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       </section>
 
       {/* 2 — THE ANSWER. One section, whatever state it is in. */}
-      <section className="rounded-xl border border-line bg-canvas p-5">
+      <section className="rounded-xl border border-line bg-canvas p-4">
         <h3 className="text-sm font-semibold text-muted">AI가 준비한 답변</h3>
 
         {!draft ? (
@@ -458,8 +463,45 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                 </div>
               </div>
             ) : (
-              <div className="mt-4 rounded-xl border border-line bg-surface p-4">
-                <p className="break-keep font-semibold text-ink">{draft.title}</p>
+              <div className="mt-3 rounded-xl border border-line bg-surface p-4">
+                {/*
+                  THE COPY BUTTON SITS WITH THE TEXT IT COPIES (Executive Readiness Fix v1).
+
+                  It used to be below the draft, after the evidence fold — measured at y=901 with the
+                  fold at 900, and 181px below it at 125% zoom. Pinning it to the bottom of the pane
+                  was tried and was worse: a 199px bar covered the draft and the gap note it was
+                  supposed to accompany. A block's own copy control belongs in the block's header,
+                  where it is visible exactly when the thing it copies is, at any zoom and for any
+                  length of question.
+
+                  Only when copying IS the action. Where SellerOps can register the answer itself,
+                  「답변 보내기」 is the primary and it stays below with its confirm step — the one
+                  irreversible control in the product does not move next to the text it would send.
+                */}
+                <div className="flex items-start justify-between gap-3">
+                  <p className="min-w-0 break-keep font-semibold text-ink">{draft.title}</p>
+                  {!publishable && !draftDirty ? (
+                    /*
+                      THE GUARANTEE TRAVELS WITH THE BUTTON (Executive Readiness Fix v1).
+
+                      「이 환경에서는 SellerOps가 답변을 대신 등록하지 않습니다」 lives at the bottom of
+                      the section, and at 125% zoom it is the FIRST thing to leave the screen — so a
+                      reader enlarging the type, which is exactly what a 50-year-old operator does,
+                      was left pressing a button on a customer's inquiry with no visible promise about
+                      where the text goes. A reader called that a trust accident, not a crop. The full
+                      sentence still stands below; this is the short form, attached to the control.
+
+                      Only where copying is all that happens. On a channel SellerOps can post to, this
+                      would be a false promise, and 「답변 보내기」 owns that path with its own confirm.
+                    */
+                    <div className="shrink-0 text-right">
+                      <Btn onClick={onCopyDraft} disabled={busy}>
+                        {copied ? "복사했습니다" : "초안 복사"}
+                      </Btn>
+                      <p className="mt-1 break-keep text-sm text-good">고객에게 나가지 않습니다</p>
+                    </div>
+                  ) : null}
+                </div>
                 <p className="mt-1.5 whitespace-pre-wrap break-keep text-lg leading-relaxed text-ink">
                   {draft.comments}
                 </p>
@@ -505,13 +547,9 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                           답변 보내기
                         </Btn>
                       ) : null}
-                      {draft && !editing && !draftDirty ? (
-                        <Btn
-                          size={publishable ? "sm" : "md"}
-                          variant={publishable ? "outline" : "solid"}
-                          onClick={onCopyDraft}
-                          disabled={busy}
-                        >
+                      {/* Not repeated here when it is the primary — it is in the draft's own header. */}
+                      {publishable && draft && !editing && !draftDirty ? (
+                        <Btn size="sm" variant="outline" onClick={onCopyDraft} disabled={busy}>
                           {copied ? "복사했습니다" : "초안 복사"}
                         </Btn>
                       ) : null}
@@ -741,10 +779,7 @@ function DraftEvidence({ evidence }: { evidence: DraftEvidenceView[] }) {
       it. The locator is gone from the screen entirely: it identified a chunk, and no seller acts on a
       chunk id.
     */
-    <details className="mt-4 border-t border-line pt-3">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg text-sm font-semibold text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
-        AI가 확인한 내용{summary ? ` · ${summary}` : ""}
-      </summary>
+    <Disclosure className="mt-4 border-t border-line pt-3" label={`AI가 확인한 내용${summary ? ` · ${summary}` : ""}`}>
       <div className="mt-2 space-y-2">
         {groups.map((group, groupIndex) => (
           <div key={`${group.label}-${groupIndex}`}>
@@ -762,6 +797,6 @@ function DraftEvidence({ evidence }: { evidence: DraftEvidenceView[] }) {
           </div>
         ))}
       </div>
-    </details>
+    </Disclosure>
   );
 }

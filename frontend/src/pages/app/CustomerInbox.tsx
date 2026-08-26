@@ -5,6 +5,7 @@ import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
 import { AgentLaunch } from "../../components/ui/AgentLaunch";
+import { Disclosure } from "../../components/ui/Disclosure";
 import { InboxFilterRail } from "../../components/inbox/InboxFilterRail";
 import { InboxList } from "../../components/inbox/InboxList";
 import { InboxDetail } from "../../components/inbox/InboxDetail";
@@ -183,9 +184,19 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
   return (
     <>
       {inquiriesOnly ? (
+        /*
+          THE HEADER SHRINKS WHEN A ROW IS OPEN (Executive Readiness Fix v1).
+
+          The detail route was wearing the list route's whole header — title, 「답변이 필요한 문의부터
+          봅니다」, and 「지금 답변이 필요한 문의 26건」 — about 200px above a pane whose primary control
+          then landed at y=901 with the fold at 900. A reader shown this screen said 「이 화면에는 버튼이
+          하나도 없다」 and stopped. Once a row is chosen the seller has already answered 「무엇부터
+          볼까」; restating it costs the answer its own screen.
+        */
         <PageHead
           title="문의"
-          description="답변이 필요한 문의부터 봅니다. 보낼지는 직접 확인합니다."
+          compact={!!itemRef}
+          description={itemRef ? undefined : "답변이 필요한 문의부터 봅니다. 보낼지는 직접 확인합니다."}
           action={
             <AgentLaunch
               context={{
@@ -198,7 +209,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
             />
           }
           meta={
-            unanswered !== null ? (
+            itemRef ? undefined : unanswered !== null ? (
               <>
                 <span className="text-sm font-semibold text-ink">
                   지금 답변이 필요한 문의 <span className="tabular-nums">{unanswered}</span>건
@@ -268,11 +279,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
             {/* Filters are a tool, not the work. They open when a seller goes looking for them, and
                 they stay reachable with a row open — a filter you can only get to by closing the
                 thing you are working on is a filter the seller stops using. */}
-            <details>
-              <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-semibold text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
-                필터
-                {filterSummary ? <span className="font-normal">· {filterSummary}</span> : null}
-              </summary>
+            <Disclosure label="필터" note={filterSummary ? ` · ${filterSummary}` : undefined}>
               <div className="mt-3 rounded-2xl border border-line bg-surface p-4">
                 <InboxFilterRail
                   items={all}
@@ -282,7 +289,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
                   stateOptions={stateOptions}
                 />
               </div>
-            </details>
+            </Disclosure>
 
             <div
               className={`overflow-hidden rounded-2xl border border-line bg-surface ${
@@ -306,7 +313,12 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
           </div>
 
           {selection.kind === "NONE" ? null : (
-            <div className="rounded-2xl border border-line bg-surface p-6">
+            /*
+              Its own scroller, so the pane's primary control can be pinned to the bottom of it
+              rather than to the bottom of a document whose height depends on how much the customer
+              wrote. A short question and a long one now behave the same way.
+            */
+            <div className="rounded-2xl border border-line bg-surface p-4 lg:max-h-[calc(100vh-9.5rem)] lg:overflow-y-auto">
               {selection.kind === "FOUND" ? (
                 <InboxDetail
                   item={selection.item}

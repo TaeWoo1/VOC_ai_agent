@@ -7,7 +7,7 @@
  * qualifies, a citation appears only when the draft actually stood on one, and a draft that no model
  * wrote never wears a model's evidence.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InquiryResponsePanel } from "./InquiryResponsePanel";
@@ -233,6 +233,26 @@ describe("InquiryResponsePanel — the generated draft", () => {
  * rule the review lane enforces, for the same reason.
  */
 describe("InquiryResponsePanel — 초안 복사", () => {
+  it("sits inside the draft card, once — it was one pixel below the fold under it", async () => {
+    // Measured at 1440x900 the control landed at y=901 with the fold at 900, and 181px below it at
+    // 125% zoom, so a reader shown the screen said 「이 화면에는 버튼이 하나도 없다」. A block's own
+    // copy control belongs in the block's header, where it is visible whenever the draft is.
+    const user = userEvent.setup();
+    render(<InquiryResponsePanel workItemId="w1" />);
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+
+    const copy = await screen.findByRole("button", { name: "초안 복사" });
+    // Exactly one — it is not also repeated under the evidence fold.
+    expect(screen.getAllByRole("button", { name: "초안 복사" })).toHaveLength(1);
+    // In the same card as the draft's own title and body.
+    const card = copy.closest("div.rounded-xl");
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByText("[답변] 사용 방법")).toBeInTheDocument();
+    expect(
+      within(card as HTMLElement).getByText("테이프를 벗기고 벽면에 붙이시면 됩니다."),
+    ).toBeInTheDocument();
+  });
+
   it("copies the saved draft, and says so", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     // After `setup()`, never before: user-event installs its own clipboard stub on the document's

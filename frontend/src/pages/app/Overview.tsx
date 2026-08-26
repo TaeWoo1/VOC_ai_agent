@@ -15,7 +15,7 @@ import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
 import { count, wonShort } from "../../lib/format";
 import { analytics } from "../../lib/analytics";
-import type { ChannelMetricRow, MetricSeries, OverviewResponse } from "../../lib/types";
+import type { ChannelMetricRow, MetricKpi, MetricSeries, OverviewResponse } from "../../lib/types";
 
 /**
  * 홈 — the operations dashboard.
@@ -73,11 +73,21 @@ export function Overview() {
    * seller triages in. Anything the backend sends that is not named there falls into the quiet line,
    * so a new KPI appears as context rather than silently claiming the largest type on the screen.
    */
-  const kpis = data?.metrics.kpis ?? [];
+  // The window the SERVER reported, not the button that was pressed — they are the same today and
+  // the label must follow the data if that ever stops being true.
+  const periodDays = data?.metrics.period.days ?? 0;
+  const kpis = (data?.metrics.kpis ?? []).map((kpi) => withPeriodLabel(kpi, periodDays));
   const waiting = WAITING_KEYS.map((key) => kpis.find((kpi) => kpi.key === key)).filter(
     (kpi): kpi is (typeof kpis)[number] => !!kpi,
   );
   const context = kpis.filter((kpi) => !WAITING_KEYS.includes(kpi.key));
+  /**
+   * The backlog insight is the 현재 미답변 문의 card, in a sentence, two sections lower — same
+   * source (`unansweredNow`), same number, and its 「카페24 자사몰 26건이 가장 많습니다」 is the
+   * 채널별 table's 현재 미답변 column. A reader who meets 26 three times on one screen counts three
+   * problems. It is dropped from THIS screen only; 문의 still carries it as its own header count.
+   */
+  const insights = (data?.insights ?? []).filter((i) => i.key !== "INQUIRY_BACKLOG");
 
   return (
     <div className="space-y-8">
@@ -135,10 +145,10 @@ export function Overview() {
           {/* ② AI가 먼저 확인한 일 — the second and last area above the reference material. */}
           <ProactiveCases limit={3} />
 
-          {data.insights.length > 0 ? (
+          {insights.length > 0 ? (
             <section className="space-y-2">
               <SectionHeader title="지금 눈여겨볼 것" hint="운영 데이터에서 바로 확인된 것만 보여줍니다." />
-              <InsightList insights={data.insights} />
+              <InsightList insights={insights} />
             </section>
           ) : null}
 
@@ -146,19 +156,19 @@ export function Overview() {
           <section className="space-y-4">
             <SectionHeader title="추이" hint={`최근 ${data.metrics.period.days}일, 하루 단위`} />
             <div className="grid gap-4 lg:grid-cols-3">
-              <ChartCard title="매출 / 주문">
+              <ChartCard title="매출·주문">
                 <TrendChart
                   primary={series.get("revenue") ?? EMPTY_SERIES}
                   secondary={series.get("orders")}
                 />
               </ChartCard>
-              <ChartCard title="문의 / 미답변">
+              <ChartCard title="문의">
                 <TrendChart
                   primary={series.get("inquiries") ?? EMPTY_SERIES}
                   secondary={series.get("unansweredInquiries")}
                 />
               </ChartCard>
-              <ChartCard title="리뷰 / 부정 리뷰">
+              <ChartCard title="리뷰">
                 <TrendChart
                   primary={series.get("reviews") ?? EMPTY_SERIES}
                   secondary={series.get("negativeReviews")}
@@ -170,9 +180,9 @@ export function Overview() {
           <section className="space-y-3">
             <SectionHeader
               title="채널별"
-              hint="각 채널이 지금 무엇을 말할 수 있는지도 함께 표시합니다."
+              hint={`매출·주문·문의·리뷰는 최근 ${data.metrics.period.days}일, 「현재 미답변」은 기간과 무관한 지금 수치입니다.`}
             />
-            <ChannelBreakdown rows={data.metrics.channels} />
+            <ChannelBreakdown rows={data.metrics.channels} days={data.metrics.period.days} />
           </section>
 
           {/* REFERENCE — read once, then ignored. Not a card, and last. */}
@@ -215,6 +225,33 @@ export function Overview() {
 /** The three numbers that are work waiting, in the order a seller triages them. */
 const WAITING_KEYS: readonly string[] = ["orders", "unansweredInquiries", "negativeReviews"];
 
+/**
+ * Say WHICH numbers each number is (Executive Readiness Fix v1).
+ *
+ * <b>The screen was arithmetically right and read as a contradiction.</b> A reader shown these
+ * screens with no explanation said 「미답변 문의 26건 옆에 문의 2건이 있다. 답을 해야 할 게 26개인데
+ * 들어온 건 2개라는 게 말이 안 된다」 and 「부정 리뷰 0건이라고 크게 써 놓고 아래에서 3건을 세고 있다」.
+ * Both numbers were correct. What the screen never said is that they count different things:
+ * `OperationsMetricsService` computes 매출·주문·문의·리뷰·부정 리뷰 over the selected window, and
+ * 미답변 문의 through `unansweredNow(...)` — everything still open, with no window at all.
+ *
+ * <b>The distinction is derived, not listed.</b> The backend already marks it: a point-in-time
+ * number has no previous period to compare against, so it arrives with `comparable: false` and
+ * `previousValue: null`. Reading the prefix off that means a KPI added later is labelled correctly
+ * without anyone remembering to edit a list here.
+ *
+ * Only the noun is overridden by key, and only where the backend's own word is ambiguous once it
+ * sits beside another: 「문의」 next to 「미답변 문의」 reads as the same quantity twice.
+ */
+const NOUN_OVERRIDE: Record<string, string> = { inquiries: "신규 문의" };
+
+export function withPeriodLabel(kpi: MetricKpi, days: number): MetricKpi {
+  const noun = NOUN_OVERRIDE[kpi.key] ?? kpi.label;
+  // `days` is 0 only before the first response, when no KPI is rendered anyway.
+  const label = kpi.comparable && days > 0 ? `최근 ${days}일 ${noun}` : `현재 ${noun}`;
+  return { ...kpi, label };
+}
+
 /** Which screen owns each number, so a metric can be opened rather than merely read. */
 const KPI_ROUTE: Record<string, string | undefined> = {
   revenue: "/orders",
@@ -248,7 +285,7 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
  * <b>A channel that cannot report shows a dash, never a zero.</b> That is the whole reason the state
  * travels with the number: `—` reads as "we do not know", and `0` reads as "there were none".
  */
-function ChannelBreakdown({ rows }: { rows: ChannelMetricRow[] }) {
+function ChannelBreakdown({ rows, days }: { rows: ChannelMetricRow[]; days: number }) {
   if (rows.length === 0) {
     return (
       <Empty
@@ -260,13 +297,18 @@ function ChannelBreakdown({ rows }: { rows: ChannelMetricRow[] }) {
   }
   return (
     <DataTable
-      caption="채널별 매출·주문·문의·리뷰와 각 항목의 수집 상태"
+      caption={`채널별 매출·주문·문의·리뷰(최근 ${days}일)와 현재 미답변 건수, 각 항목의 수집 상태`}
       head={
         <>
           <Th>채널</Th>
           <Th numeric>매출</Th>
           <Th numeric>주문</Th>
-          <Th numeric>문의 / 미답변</Th>
+          {/* TWO COLUMNS, NOT ONE CELL (Executive Readiness Fix v1). 「문의 / 미답변」 put a window
+              count and a point-in-time count on either side of one slash, so 카페24 rendered
+              「2 / 26」 — a subset larger than its own set. They are different questions and now
+              they are different columns. */}
+          <Th numeric>문의</Th>
+          <Th numeric>현재 미답변</Th>
           <Th numeric>리뷰 / 부정</Th>
           <Th>수집 상태</Th>
         </>
@@ -284,7 +326,10 @@ function ChannelBreakdown({ rows }: { rows: ChannelMetricRow[] }) {
             {row.countedInOrders ? count(row.orders) : "—"}
           </Td>
           <Td numeric muted={!row.countedInInquiries}>
-            {row.countedInInquiries ? `${count(row.inquiries)} / ${count(row.unansweredInquiries)}` : "—"}
+            {row.countedInInquiries ? count(row.inquiries) : "—"}
+          </Td>
+          <Td numeric muted={!row.countedInInquiries}>
+            {row.countedInInquiries ? count(row.unansweredInquiries) : "—"}
           </Td>
           <Td numeric muted={!row.countedInReviews}>
             {row.countedInReviews ? `${count(row.reviews)} / ${count(row.negativeReviews)}` : "—"}

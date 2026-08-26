@@ -154,7 +154,33 @@ accent)은 이 제품에 맞지 않아 **채택하지 않았으며** 채택한 �
 `sm` 14/1.43 → 15/1.6, `xs` 12 → 13px. 새 서체·새 팔레트·새 컴포넌트 라이브러리 **0**, backend 무변경,
 마켓플레이스 호출 0 · DB 변경 0 ⇒ evidence 행 없음. **고치지 않고 보고한 것**: 합성 행의
 `data_origin='REAL'`, 상품 화면이 「이 상품에서 무엇이 반복되나」에 답하려면 **새 metric**이 필요하다는
-것, 그리고 연결 전 첫 화면은 이 org에서 여전히 관찰 불가).
+것, 그리고 연결 전 첫 화면은 이 org에서 여전히 관찰 불가) ·
+**`docs/executive_readiness_fix_v1.md`** (Executive Readiness Fix v1 — Adversarial UX Review v1(구현자가
+자기 작업을 공격적으로 재검수한 pass: 구현 배경을 주지 않은 fresh reviewer 3인이 스크린샷만 보고
+읽었고, 그들이 말한 것은 DOM 측정으로 대조해 **오독 1건은 폐기**했다)이 낸 `NOT_EXECUTIVE_READY`의
+**데모 blocker만** 닫은 `frontend/` 전용 패키지. 기능 추가 0, backend 무변경. **감사 먼저 —
+세 「모순」은 값이 아니라 라벨의 문제였다**: 매출·주문·문의·리뷰는 window 집계이고 **미답변 문의는
+`unansweredNow`로 기간이 없으며**, 인사이트의 부정 리뷰·반복 문제는 **전체 기간**이다. 그래서 backend
+숫자는 하나도 바꾸지 않고 표시층만 고쳤고, 구분은 열거가 아니라 **`comparable`에서 파생**한다(나중에
+추가될 KPI도 목록 수정 없이 맞게 표시된다) — `최근 7일 주문` · **`현재 미답변 문의`** ·
+`최근 7일 신규 문의`, 채널표의 `2 / 26` 한 칸은 **「문의」·「현재 미답변」 두 열**로 쪼갰고, 홈의
+`INQUIRY_BACKLOG` 행은 바로 위 카드와 같은 소스·같은 숫자라 **홈에서만** 뺐다(문의 화면은 계속 들고
+있다). **문의 상세의 fold**: 「초안 복사」가 y=901·fold 900이었고 125%에서 181px 아래였다 — sticky로
+고정해 봤으나 **199px 막대가 초안 본문을 덮어 철회**했고, 채택한 것은 복사 컨트롤을 **초안 카드
+헤더**로 옮기는 것이다(등록 가능한 채널에서는 「답변 보내기」가 여전히 아래에서 확인 단계와 함께
+primary — 유일한 비가역 컨트롤을 보낼 텍스트 옆에 두지 않는다). 100%에서 질문·근거·초안·CTA 전부
+보이고, **125%에서는 초안 본문 첫 줄까지** — 나머지는 콘텐츠 길이의 문제라 정직하게 남겼다. **대비는
+실측으로 AA green**(7 route 전 텍스트 노드 위반 0): `.btn-primary` 3.71→5.41(58곳, Agent 주 CTA와
+온보딩 전부 — 직전 패키지는 `Btn` 프리미티브만 고쳤다), `warn` 4.39→6.20, `good` 4.00→5.55 — 둘 다
+평범한 표면에서는 통과하고 **자기 tint 위에서만** 떨어졌다. 어포던스는 `Disclosure`(그려진 셰브론),
+클릭 가능한 KPI의 셰브론, disabled primary의 중립화. 리뷰는 「정렬」·「보기」 라벨과 「이 18건만 보기」,
+「수집 기록 없음」→「마지막 수집 시각 기록 없음」. 「연결 확인 3」의 알림은 **실재하므로**(REPEATED_FAILURE
+3건) 죽이지 않고 **「연결 문제 3건」**으로 이름을 붙였다. **하지 않고 보고한 것**: 데모 hero의
+「연동 테스트」는 `proactive_case`에 provenance 열이 없고 그 문의의 `data_origin`이 **`REAL`**이며(운영자가
+올린 진짜 게시글) **열린 케이스가 그것 하나뿐**이라 제외하면 「AI가 먼저 확인한 일」이 사라진다 —
+새 classifier를 만들지 말라는 지시대로 만들지 않았고 **product-owner 결정**으로 올린다. 상품 화면·
+온보딩·합성 데이터 cleanup은 지시대로 무변경. 171 파일 / 2,321 테스트 / 실패 0, 마켓플레이스 호출 0 ·
+DB 변경 0 ⇒ evidence 행 없음).
 
 **Demo org / channel knowledge:** `docs/demo_org_and_channel_knowledge_v1.md` owns the canonical Demo
 Org's **provenance contract** (`REAL` / `DEMO_SEED` / `VERIFY_FIXTURE`, default reads exclude synthetic),
