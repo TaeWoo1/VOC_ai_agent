@@ -78,6 +78,14 @@ export interface InquiryDetail {
   readonly receivedAt: string;
   readonly proposal: ProposalView | null;
   readonly draft: ReplyDraftView | null;
+  /**
+   * The product this inquiry is bound to, when the backend has one — mirrors `InquiryDetail.productId`
+   * / `productName` / `productBinding` (`SOURCE_EXACT` | `USER_CONFIRMED`). Absent (`null`/undefined)
+   * when unbound. Ids and a catalogue name only: safe to carry into an entity and a locator.
+   */
+  readonly productId?: string | null;
+  readonly productName?: string | null;
+  readonly productBinding?: string | null;
 }
 
 /** PUT /api/inquiries/{id}/draft request. */

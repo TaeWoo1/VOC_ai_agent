@@ -16,6 +16,13 @@ export interface AgentContext {
   readonly goal?: string;
   /** The canonical product the seller was looking at. An id only — the Agent re-reads it. */
   readonly productId?: string;
+  /**
+   * The inquiry WORK ITEM the seller was looking at. An id only — the runtime re-reads it with the
+   * same org-scoped call the inquiry screen makes, or drops it. Named for what it is: the work-item
+   * id is the only exact handle the runtime has for one inquiry; the inquiry's own id comes back from
+   * that read.
+   */
+  readonly workItemId?: string;
   /** The channel filter that was active, as a channel CODE. */
   readonly channelCode?: string;
   /** Which screen this came from, for the Agent's own framing. A closed set of route names. */
@@ -27,6 +34,7 @@ export function agentHref(context: AgentContext = {}): string {
   const params = new URLSearchParams();
   if (context.goal) params.set("goal", context.goal);
   if (context.productId) params.set("productId", context.productId);
+  if (context.workItemId) params.set("workItemId", context.workItemId);
   if (context.channelCode) params.set("channel", context.channelCode);
   if (context.surface) params.set("from", context.surface);
   const query = params.toString();
@@ -39,6 +47,7 @@ export function readAgentContext(search: string): AgentContext {
   const context: AgentContext = {
     ...(params.get("goal") ? { goal: params.get("goal")! } : {}),
     ...(params.get("productId") ? { productId: params.get("productId")! } : {}),
+    ...(params.get("workItemId") ? { workItemId: params.get("workItemId")! } : {}),
     ...(params.get("channel") ? { channelCode: params.get("channel")! } : {}),
     ...(params.get("from") ? { surface: params.get("from")! } : {}),
   };

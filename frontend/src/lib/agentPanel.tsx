@@ -106,6 +106,7 @@ export function useAgentSurface(surface: AgentSurface | null): void {
   const setSurface = panel?.setSurface;
   const label = surface?.label ?? null;
   const productId = surface?.productId ?? null;
+  const workItemId = surface?.workItemId ?? null;
   const channelCode = surface?.channelCode ?? null;
   const route = surface?.surface ?? null;
   const goal = surface?.goal ?? null;
@@ -119,9 +120,10 @@ export function useAgentSurface(surface: AgentSurface | null): void {
       label,
       surface: route,
       ...(productId ? { productId } : {}),
+      ...(workItemId ? { workItemId } : {}),
       ...(channelCode ? { channelCode } : {}),
       ...(goal ? { goal } : {}),
     });
     return () => setSurface(null);
-  }, [setSurface, label, route, productId, channelCode, goal]);
+  }, [setSurface, label, route, productId, workItemId, channelCode, goal]);
 }

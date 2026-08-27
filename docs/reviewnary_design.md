@@ -216,7 +216,8 @@ The workspace is primary; the Agent attaches to it like a colleague who can see 
 | < 1440px | **overlay** on the right edge, no backdrop — the list the seller was reading stays visible to its left. Full width below `md`. |
 | Header | `✳︎ AI 담당자` + the page's registered surface label (「이 상품 · 선바로 몰딩」, 「문의 목록」, 「주문 · 최근 7일」). It follows the route; it never claims a page the seller has left. |
 | Box | a two-line input. A launcher **lands** its sentence in it and the seller sends; the home command box **runs** its sentence because the seller already pressed send there. |
-| Context | structured (`productId` / `channelCode` / `surface`) on the request, verified by the runtime with a read. **Never appended to the sentence.** |
+| Context | structured (`productId` / `workItemId` / `channelCode` / `surface`) on the request, verified by the runtime with one org-scoped read each. **Never appended to the sentence.** A launcher may say 「이 문의」 only while it holds the row's work-item id; until then it offers the list goal (Contextual Agent Contract Completion v1). |
+| Planner context | what the screen fixed is told to the planner as closed words (`(INQUIRY)` / `(PRODUCT)` fixed) through the run-state seam — never an id, a channel, a name or a customer word. |
 | Result | the same `OperatorAnswerView` the `/agent` page renders: findings as statements with their evidence lines, the products it cites as rows with 「확인하기」, next actions as links. No planner id, no model name, no provenance string in the panel. |
 | Waiting | 「확인하는 중 · N초」 — a measured clock, never a bar. |
 | Failure | a real state: 「이 요청은 계획을 세우지 못했습니다」 + the runtime's reason. Never an empty success. |

@@ -77,6 +77,15 @@ export interface OperatorGraphDeps {
    * anything up and never reaches a prompt.
    */
   readonly runId?: string;
+  /**
+   * The run's evidence builder, when the caller minted evidence BEFORE the graph ran.
+   *
+   * The runtime resolves the screen's context hint (`OperatorAgentRuntime.contextEntities`) with a
+   * read that already answered what the inquiry is — channel, state, bound product. Minting that ref
+   * from the same builder keeps evidence ids unique across the run; a second builder would hand two
+   * refs the id `e1`. Defaults to a fresh builder, which is every non-contextual run.
+   */
+  readonly evidence?: EvidenceBuilder;
 }
 
 /**
@@ -105,7 +114,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
   // One builder per graph build, so evidence ids are unique within a run and stable across its passes.
   // It also carries the run's as-of date, so every ref records WHEN it was read — which is not, and can
   // never become, a claim about when the underlying rows happened (`scope/EvidenceTime.ts`).
-  const evidence = new EvidenceBuilder(deps.referenceDate);
+  const evidence = deps.evidence ?? new EvidenceBuilder(deps.referenceDate);
 
   async function interpretGoal(state: OperatorState): Promise<Partial<OperatorState>> {
     if (!deps.budget.beginIteration()) {
@@ -117,6 +126,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     }
     // Throws PlannerUnavailableError. Deliberately NOT caught here: the runtime turns it into a FAILED
     // run, and catching it in the graph would be the first step toward answering anyway.
+    const planStarted = Date.now();
     const plan = await deps.planner.plan({
       request: { text: state.goalText, referenceDate: deps.referenceDate },
       catalogue,
@@ -129,8 +139,13 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       // repair, and the rejection stands as a failed run rather than as a quiet smaller answer.
       chargeLlmCall: () => deps.budget.spend("llm"),
       ...(deps.runId ? { runId: deps.runId } : {}),
-      ...(state.plan ? { priorContext: progressLine(state) } : {}),
+      // Run state the planner cannot see from the sentence: on a re-plan, which needs are settled;
+      // on ANY plan, which entities the screen already fixed. Both travel through the one closed-
+      // vocabulary seam the planner has for run state — never an id, never a label, never a customer
+      // word (see `contextLine`).
+      ...(priorContextFor(state) ? { priorContext: priorContextFor(state) } : {}),
     });
+    log("operator_stage", { stage: "plan", ms: Date.now() - planStarted, replan: state.plan != null });
     log("operator_plan_node", {
       supported: plan.supported,
       needs: plan.informationNeeds.length,
@@ -175,8 +190,11 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // evidence and registers none of its own, so a gate that could only see one specialist's refs would
     // find nothing behind every report sentence and silently delete the report.
     const seenEvidence: EvidenceRef[] = [...state.evidence];
+    const dispatchStarted = Date.now();
     for (const specialist of ordered) {
+      const specialistStarted = Date.now();
       const outcome = await runSpecialist(specialist, plan, state, resolved, findingsSoFar, seenEvidence);
+      log("operator_stage", { stage: `specialist:${specialist}`, ms: Date.now() - specialistStarted });
       seenEvidence.push(...outcome.result.evidence);
       // The gate runs against the entities known AT THIS POINT, which includes whatever this specialist
       // just resolved — PRODUCT_OPS must be allowed to cite the product it resolved on the same pass.
@@ -191,6 +209,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       knowledge = { ...knowledge, ...outcome.knowledge };
       knowledgeCoverage = [...knowledgeCoverage, ...outcome.knowledgeCoverage];
     }
+    log("operator_stage", { stage: "dispatch", ms: Date.now() - dispatchStarted, specialists: ordered.length });
 
     return {
       results: [...state.results, ...results],
@@ -403,6 +422,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
   }
 
   async function judge(state: OperatorState): Promise<Partial<OperatorState>> {
+    const judgeStarted = Date.now();
     const judged: Finding[] = [];
     for (const finding of state.findings) {
       if (finding.verdict) {
@@ -427,6 +447,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       const verdict = await deps.judge.judge(finding, state.evidence, scope);
       judged.push({ ...finding, verdict, confidence: confidenceOf(verdict) });
     }
+    log("operator_stage", { stage: "judge", ms: Date.now() - judgeStarted, judged: judged.length });
     log("operator_judge_node", {
       judged: judged.length,
       supported: judged.filter((f) => f.confidence === "SUPPORTED").length,
@@ -654,6 +675,42 @@ function orderSpecialists(targets: readonly SpecialistName[]): SpecialistName[] 
  */
 function progressLine(state: OperatorState): string {
   return state.needs.map((n) => `${n.id}=${n.status}`).join(" ");
+}
+
+/**
+ * What the screen already fixed, said to the planner in closed words.
+ *
+ * <b>Why the planner has to be told.</b> Live 2026-08-27, 「이 문의를 조사해 줘」 sent from an inquiry's
+ * own screen carried a verified INQUIRY entity into the run — and the planner, reading only the
+ * sentence, answered 「어떤 문의인지 알려 주세요」. Correct from where it stood: a demonstrative with
+ * nothing behind it IS unclear. The product case never hit this because every product launcher writes
+ * the product's NAME into the sentence; an inquiry has no name a seller would type.
+ *
+ * <b>What travels, and what does not.</b> The entity KIND and the fact that it is fixed. Not the id
+ * (the planner mints none and must not see any), not the channel, not the product's name, not a word
+ * of the customer's — the planner plans; the specialists read. The sentence is fixed text chosen here,
+ * so the payload floor of the plan request is unchanged in kind: closed vocabulary about run state.
+ */
+function contextLine(entities: readonly ResolvedEntity[]): string {
+  const parts: string[] = [];
+  if (entities.some((e) => e.kind === "INQUIRY")) {
+    parts.push("대상 확정: 판매자가 지금 열어 둔 문의 하나가 이미 특정돼 있습니다(INQUIRY). "
+      + "어떤 문의인지 되묻지 말고, 그 문의 하나를 조사하는 계획을 세우세요.");
+  }
+  if (entities.some((e) => e.kind === "PRODUCT")) {
+    parts.push("대상 확정: 판매자가 보고 있는 상품 하나가 이미 특정돼 있습니다(PRODUCT). "
+      + "어떤 상품인지 되묻지 마세요.");
+  }
+  return parts.join(" ");
+}
+
+/** Progress (re-plan) and fixed context (any plan), or nothing. */
+function priorContextFor(state: OperatorState): string | undefined {
+  const lines = [
+    state.plan ? progressLine(state) : "",
+    contextLine(state.entities ?? []),
+  ].filter((l) => l.length > 0);
+  return lines.length > 0 ? lines.join("\n") : undefined;
 }
 
 function answeredNeeds(state: OperatorState): AnsweredNeed[] {

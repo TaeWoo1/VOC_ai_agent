@@ -38,6 +38,22 @@ function ProductPage() {
   return <AgentLaunch context={{ surface: "product", productId: "p-1", goal: "선바로 몰딩 상품을 분석해 줘" }} label="이 상품 분석하기" />;
 }
 
+function InquiryPage({ workItemId }: { workItemId?: string }) {
+  const focused = workItemId != null;
+  useAgentSurface({
+    surface: "inquiries",
+    label: focused ? "이 문의" : "문의 목록",
+    ...(focused ? { workItemId } : {}),
+    goal: focused ? "이 문의를 조사해 줘" : "답변이 필요한 문의를 채널별로 정리해 줘",
+  });
+  return (
+    <AgentLaunch
+      context={{ surface: "inquiries", ...(focused ? { workItemId } : {}), goal: focused ? "이 문의를 조사해 줘" : "답변이 필요한 문의를 채널별로 정리해 줘" }}
+      label={focused ? "이 문의 조사하기" : "문의 정리하기"}
+    />
+  );
+}
+
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <MemoryRouter>
@@ -80,6 +96,28 @@ describe("contextual Agent panel", () => {
     expect(screen.getByRole("link", { name: "확인하기" })).toHaveAttribute("href", "/products/p-1");
     // The panel never prints a planner or model id.
     expect(screen.queryByText(/openai:model-x/)).toBeNull();
+  });
+
+  it("TC-CTX-INQ-01 — sends the inquiry work item as a structured hint, never inside the sentence", async () => {
+    vi.mocked(agentRuntime.startRun).mockResolvedValue(ANSWER);
+    render(<Shell><InquiryPage workItemId="w-1" /></Shell>);
+    await userEvent.click(screen.getByRole("button", { name: "이 문의 조사하기" }));
+    expect(screen.getByTestId("agent-panel-context")).toHaveTextContent("이 문의");
+    await userEvent.click(await screen.findByRole("button", { name: "확인 요청" }));
+    await waitFor(() => expect(agentRuntime.startRun).toHaveBeenCalledTimes(1));
+    const request = vi.mocked(agentRuntime.startRun).mock.calls[0]![0];
+    expect(request.workItemId).toBe("w-1");
+    expect(request.productId).toBeUndefined();
+    expect(request.goalText).toBe("이 문의를 조사해 줘");
+    expect(request.goalText).not.toContain("w-1");
+  });
+
+  it("without a work item the launcher does not promise 「이 문의」 — it offers the list goal", async () => {
+    render(<Shell><InquiryPage /></Shell>);
+    expect(screen.queryByRole("button", { name: "이 문의 조사하기" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "문의 정리하기" }));
+    expect(screen.getByTestId("agent-panel-context")).toHaveTextContent("문의 목록");
+    expect(screen.getByLabelText("무엇을 확인해 드릴까요?")).toHaveValue("답변이 필요한 문의를 채널별로 정리해 줘");
   });
 
   it("closes with the close control and with Escape", async () => {

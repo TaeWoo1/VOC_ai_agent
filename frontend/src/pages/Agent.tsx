@@ -149,6 +149,7 @@ export function Agent() {
         // a product page had to name the product again in the sentence — and did, which is why the
         // gap was invisible. The id is a hint the runtime verifies, never an injected fact.
         ...(launchContext.productId ? { productId: launchContext.productId } : {}),
+        ...(launchContext.workItemId ? { workItemId: launchContext.workItemId } : {}),
       });
       setRun(view);
     } catch (err) {
@@ -302,7 +303,7 @@ export function Agent() {
               stage this screen has no way to know it reached. */}
           {busy ? (
             <p className="break-keep text-sm text-muted" role="status">
-              문의·리뷰·주문을 확인하고 있습니다. 보통 20초쯤 걸립니다 · {elapsed}초 경과
+              문의·리뷰·주문을 확인하고 있습니다. 조사에 잠시 시간이 걸릴 수 있습니다 · {elapsed}초 경과
             </p>
           ) : null}
           {/* A collapsed control needs a marker, or it reads as a label with nothing behind it —

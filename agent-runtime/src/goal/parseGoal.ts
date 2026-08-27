@@ -68,6 +68,16 @@ export interface GoalRequest {
    * Unused by every other domain. A caller that omits it gets exactly today's behaviour.
    */
   readonly productId?: string;
+  /**
+   * The inquiry WORK ITEM the seller was looking at when they asked — the same kind of scope hint as
+   * {@link productId}, and held to the same rule: worth nothing until one org-scoped read confirms it.
+   *
+   * <b>Why the work-item id and not the inquiry id.</b> The only exact READ the runtime owns for one
+   * inquiry is `GET /api/inquiries/{workItemId}`; the inquiry's own id comes back FROM that read and is
+   * what anchors customer-memory. A field named `inquiryId` that actually carried a work-item id is
+   * the kind of mislabelled identity this contract exists to refuse.
+   */
+  readonly workItemId?: string;
 }
 
 export class UnrecognizedGoalError extends Error {

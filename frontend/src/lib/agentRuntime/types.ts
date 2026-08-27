@@ -214,6 +214,8 @@ export interface StartRunRequest {
    * that 「이 상품만 봐줘」 works without the seller re-describing the product they are looking at.
    */
   productId?: string;
+  /** The inquiry work item the seller was standing on — the same kind of hint, verified the same way. */
+  workItemId?: string;
   referenceDate?: string;
   size?: number;
 }

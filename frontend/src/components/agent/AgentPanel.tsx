@@ -118,6 +118,7 @@ function AgentPanelBody({ canPin }: { canPin: boolean }) {
           goalText: goal,
           // A structured hint the runtime verifies with an org-scoped read — never a fact, never text.
           ...(context.productId ? { productId: context.productId } : {}),
+          ...(context.workItemId ? { workItemId: context.workItemId } : {}),
         });
         setRun(view);
       } catch (err) {
@@ -155,6 +156,7 @@ function AgentPanelBody({ canPin }: { canPin: boolean }) {
 
   const context: AgentContext = {
     ...(surface?.productId ? { productId: surface.productId } : {}),
+    ...(surface?.workItemId ? { workItemId: surface.workItemId } : {}),
     ...(surface?.channelCode ? { channelCode: surface.channelCode } : {}),
     ...(surface?.surface ? { surface: surface.surface } : {}),
   };

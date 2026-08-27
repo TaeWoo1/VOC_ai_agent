@@ -17,6 +17,7 @@
 import { ToolRegistry } from "../../tools/ToolRegistry";
 import type { ActionClass } from "../state/OperatorState";
 import type { ClassifiedTool } from "./OperatorTools";
+import { log } from "../../log";
 
 export class WriteToolRefusedError extends Error {
   constructor(name: string) {
@@ -82,6 +83,16 @@ export class OperatorToolRegistry {
       throw new ToolNotInPlanError(name);
     }
     // Unknown names raise UnknownToolError from the inner registry — fail closed, never a silent no-op.
-    return this.registry.invoke<T>(name, args);
+    // Timed here because this is the one choke point every specialist's read passes through: the
+    // latency breakdown (`operator_stage` + this line) is assembled from the existing log, not a tracer.
+    const started = Date.now();
+    try {
+      const value = await this.registry.invoke<T>(name, args);
+      log("operator_tool_call", { tool: name, ms: Date.now() - started, ok: true });
+      return value;
+    } catch (err) {
+      log("operator_tool_call", { tool: name, ms: Date.now() - started, ok: false });
+      throw err;
+    }
   }
 }

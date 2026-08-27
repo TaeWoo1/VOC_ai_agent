@@ -557,6 +557,27 @@ panel 닫힘/열림 · AA 위반 0 · 모델 호출 3 · 마켓플레이스 0). 
 override로 넣어 띄웠고 product-owner 결정으로 올린다. 고치지 않고 보고한 것: 리뷰 반복 문제 → 목록 필터
 (endpoint가 `tier`만 받음), `AgentContext`에 문의 id 없음, 플래너 문장의 raw enum).
 
+**`docs/contextual_agent_contract_completion_v1.md`** (Contextual Agent Contract Completion v1 — UI package가
+아니다: 「현재 화면의 정확한 operational object를 Agent가 실제로 이해한다」는 계약을 닫는다. **문의 context gap은 copy
+bug가 아니라 contract bug였다** — `AgentContext`/`StartRunRequest`에 문의 식별자가 없어 「이 문의 조사하기」가 org
+queue를 조사했다. product의 기존 패턴(`productId` hint → org-scoped READ 1회 → `ResolvedEntity`)을 **한 종류 넓혀**
+`workItemId`를 붙였다(**inquiryId가 아니다** — 런타임이 문의 하나에 대해 가진 exact READ는 `GET /api/inquiries/{workItemId}`뿐이고
+inquiryId는 그 읽기에서 나온다; 이름이 실체와 다른 식별자는 이 계약이 거부하는 종류의 결함이다). 검증 READ가 답한
+것(채널·상태·수신일·bound product)은 **런타임이 미리 mint한 evidence ref 하나**(ids·closed state·날짜만)로 그래프에 들어가고
+고객 본문은 그 호출과 함께 버려진다 — `InquiryOps`는 detail을 **다시 읽지 않고**(그 tool은 초안 전용) 그 ref를 인용하며,
+customer-memory는 product 대신 **inquiryId로 anchor**하고 org queue·inbox 읽기는 C3 규칙으로 **건너뛴다**. 다른 org의
+id는 404 → 무음 drop(cross-org lookup이 존재할 endpoint가 없다). **라이브 첫 run이 진짜 결함을 드러냈다**: 문의는 특정됐는데
+planner가 문장만 읽고 「어떤 문의인지」 되물었다 — product는 launcher가 상품 **이름**을 문장에 써서 한 번도 겪지 않은
+일이다 ⇒ 기존 run-state seam(`priorContext`, closed vocabulary)으로 **「(INQUIRY) 특정됨」만** 전달한다(id·채널·이름·고객
+단어 0, backend 프롬프트 무변경). 두 번째 run에서 답은 이 문의 하나에 대한 것이었고 queue 총계 0·raw token 0·WRITE 0.
+launcher는 **work-item id를 쥐고 있을 때만 「이 문의」**를 약속한다(없으면 목록 goal). **enum 노출은 모델이 아니라 우리
+것이었다** — `productOps`의 결정론 문장이 listing row의 토큰을 그대로 조립했다 ⇒ `channelNameKo`·`14,500원`·판매상태 closed
+map(모르는 토큰은 절을 **생략**, 추측 0), 프롬프트 뒤 regex 0. **지연은 planner가 전부다**: 실측 plan 33.4s / tools 0.08s /
+judge 0.01s / total 33.5s — 병렬화할 것이 없고 후보는 planner 자체(모델·프롬프트 길이)라 이 패키지에서 손대지 않는다;
+측정은 새 tracer가 아니라 기존 log에 `operator_stage`·`operator_tool_call` 두 이벤트다. 진행 문구 「보통 20초쯤」은 실측 분포
+없이 단정한 것이라 「잠시 시간이 걸릴 수 있습니다」로. backend 무변경 · 마이그레이션 0 · 마켓플레이스 호출 0 · WRITE 0 ·
+모델 호출 2(첫 run이 결함을 드러냈고 두 번째가 증명) ⇒ evidence 행 없음).
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

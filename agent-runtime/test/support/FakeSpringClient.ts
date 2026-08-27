@@ -49,6 +49,9 @@ export interface SeedInquiry {
   readonly channelCode?: string | null; // resolved catalog label; defaults null
   readonly channelNameKo?: string | null; // resolved catalog label; defaults null
   readonly isSecret?: boolean | null; // Cafe24 비밀글 flag; defaults null (unclassified)
+  readonly productId?: string | null; // bound product, mirrors InquiryDetail.productId; defaults null
+  readonly productName?: string | null;
+  readonly productBinding?: string | null; // SOURCE_EXACT | USER_CONFIRMED
 }
 
 interface ItemState {
@@ -148,6 +151,9 @@ export class FakeSpringClient implements SpringClient {
       receivedAt: it.seed.receivedAt,
       proposal: null,
       draft: it.drafts.length ? it.drafts[it.drafts.length - 1]! : null,
+      productId: it.seed.productId ?? null,
+      productName: it.seed.productName ?? null,
+      productBinding: it.seed.productBinding ?? null,
     };
   }
 

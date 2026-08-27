@@ -32,6 +32,7 @@ import type { ChannelCoverageCache } from "./channelCoverageStep";
 import { REPEAT_WINDOW_DAYS } from "../defaults/OperationalDefaults";
 import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { log } from "../../log";
+import type { ResolvedEntity } from "../plan/InvestigationPlan";
 
 /** Where the POLICY answer comes from — a store that does not exist, named honestly. Not a tool. */
 const POLICY_STORE = "policy-store";
@@ -70,6 +71,10 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
   // do not change between two needs, and a second read would mint a second set of rows saying so.
   const coverage: ChannelCoverageCache = { read: null };
   let pushedCoverage = false;
+  // The one inquiry this run was opened on, when the screen said which (Contextual Agent Contract
+  // Completion v1). Resolved by the runtime with one org-scoped read; the ref it minted is the only
+  // evidence about this inquiry the specialist will ever cite — see {@link focusedInquiry}.
+  const focus = focusedInquiry(input);
 
   for (const need of input.needs) {
     if (need.kind === "INQUIRY_VOLUME"
@@ -142,6 +147,18 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     }
 
     if (need.kind === "INQUIRY_VOLUME") {
+      // <b>A run about ONE inquiry has no use for the org's queue depth.</b> The gate would refuse
+      // every row of it (ORG evidence for an ITEM need), so the read is not made and the need says
+      // why — the same C3 rule as the product case below, one entity kind over.
+      if (focus) {
+        needStates.push({
+          id: need.id,
+          status: "UNSATISFIABLE",
+          evidenceIds: [],
+          reason: "이 문의 하나를 조사하는 중이라 전체 대기열 집계는 읽지 않았습니다.",
+        });
+        continue;
+      }
       // <b>The org inbox cannot answer a product question, and the run may already hold one that
       // can.</b> `get_today_inbox` returns the whole org's unanswered depth; for a need about a
       // resolved product the scope gate refuses it (ORG_EVIDENCE_FOR_PRODUCT_NEED) and always will.
@@ -375,8 +392,12 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
       // A resolved product is the only anchor reachable here today. The seller's own words are NOT an
       // anchor: a customer sentence is never a query string, which is why the endpoint has no free-text
       // parameter. So when there is no product, this need is not served and SAYS it is not served.
+      // <b>The inquiry itself is the exact anchor when the run has one.</b> `inquiryId` is what the
+      // endpoint documents for "cases like this one"; a product is the wider net and is used only when
+      // no inquiry was named. The id came out of the runtime's verified read, never from the URL.
+      const focusInquiryId = focus?.ref.locator.inquiryId ?? null;
       const product = input.resolved.find((e) => e.kind === "PRODUCT");
-      if (!product) {
+      if (!focusInquiryId && !product) {
         failures.push(skippedTool({
           specialist: "INQUIRY_OPS",
           tool: OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
@@ -400,7 +421,7 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
         { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY, needId: need.id },
         () => registry.invoke<CustomerMemorySearch>(
           OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
-          { productId: product.id, limit: 5 },
+          focusInquiryId ? { inquiryId: focusInquiryId, limit: 5 } : { productId: product!.id, limit: 5 },
           allowedTools,
         ),
       );
@@ -416,8 +437,9 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
         const ref = evidence.add({
           kind: "CUSTOMER_MEMORY",
           sourceTool: OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
-          args: { productId: product.id },
+          args: focusInquiryId ? { inquiryId: focusInquiryId } : { productId: product!.id },
           locator: {
+            ...(focusInquiryId ? { inquiryId: focusInquiryId, workItemId: focus!.entity.id } : {}),
             ...(hit.productId ? { productId: hit.productId } : {}),
             ...(hit.productName ? { productName: hit.productName } : {}),
             ...(hit.channelCode ? { channelCode: hit.channelCode } : {}),
@@ -492,6 +514,27 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     });
   }
 
+  // <b>What the run may say about the inquiry it was opened on — from the runtime's ref, no read.</b>
+  // Attached to the specialist's first answerable need: the ref is the run's, and a finding has to
+  // rest on a need in the plan. Counted as a successful read because the read that produced the ref
+  // succeeded — before this node, in the runtime.
+  if (focus) {
+    const at = needStates.findIndex((n) => n.status === "SATISFIED" || n.status === "PENDING");
+    const hostAt = at >= 0 ? at : needStates.length > 0 ? 0 : -1;
+    if (hostAt >= 0) {
+      const host = needStates[hostAt]!;
+      findings.push(...focusFindings(focus, host.id));
+      needStates[hostAt] = {
+        ...host,
+        status: host.status === "PENDING" ? "SATISFIED" : host.status,
+        evidenceIds: host.evidenceIds.includes(focus.ref.evidenceId)
+          ? host.evidenceIds
+          : [...host.evidenceIds, focus.ref.evidenceId],
+      };
+      succeeded += 1;
+    }
+  }
+
   const terminal = terminalOf({ succeeded, failures });
   log("inquiry_ops", {
     needs: input.needs.length, findings: findings.length, succeeded, failed: failures.length, terminal,
@@ -537,7 +580,7 @@ async function readQueue(
     failures: [] as ToolFailure[] };
   // A product-scoped run has no use for the org queue — the gate would refuse every row of it, and a
   // call whose result is known to be unusable is a call not worth making (the C3 precedence rule).
-  if (input.resolved.some((e) => e.kind === "PRODUCT")) {
+  if (input.resolved.some((e) => e.kind === "PRODUCT" || e.kind === "INQUIRY")) {
     return empty;
   }
   if (!budget.spend("tool")) {
@@ -634,4 +677,80 @@ function hasProductInquiryCount(
   return (priorEvidence ?? []).some(
     (e) => e.kind === "INQUIRY" && e.locator.productId === productId,
   );
+}
+
+/** The inquiry this run was opened on, with the ref the runtime minted for it — or null. */
+interface FocusedInquiry {
+  readonly entity: ResolvedEntity;
+  readonly ref: EvidenceRef;
+}
+
+/**
+ * The resolved INQUIRY entity paired with its context ref.
+ *
+ * <b>Both or neither.</b> An INQUIRY entity without a ref would be one the planner named and no tool
+ * resolved — impossible today (the planner mints no ids, V6) — and a ref without the entity would be a
+ * second pass re-citing the first. Pairing them here is what keeps "the seller is standing on this
+ * inquiry" a single fact with a single source.
+ */
+function focusedInquiry(input: SpecialistInput): FocusedInquiry | null {
+  const entity = input.resolved.find((e) => e.kind === "INQUIRY");
+  if (!entity) return null;
+  const ref = (input.priorEvidence ?? []).find(
+    (e) => e.kind === "INQUIRY" && e.locator.workItemId === entity.id
+      && e.provenance === "inquiry-detail/context",
+  );
+  return ref ? { entity, ref } : null;
+}
+
+/** Closed backend vocabulary → seller words. Unknown values produce NO clause rather than a token. */
+const ANSWER_STATUS_SENTENCE: Record<string, string> = {
+  UNANSWERED: "아직 답변되지 않았습니다",
+  ANSWERED: "채널에서 이미 답변됐습니다",
+};
+const WORK_PHASE_SENTENCE: Record<string, string> = {
+  OPEN: "초안은 아직 없습니다",
+  PROPOSED: "AI 초안이 준비돼 있습니다",
+  APPROVED: "답변이 승인돼 전송을 기다립니다",
+  ACTION_PENDING: "답변 전송이 진행 중입니다",
+  EXECUTED: "답변이 전송됐습니다",
+  COMPLETED: "답변이 전송됐습니다",
+};
+
+/**
+ * What one contextual run says about its inquiry: channel, receipt date, work state, bound product.
+ *
+ * Every clause is a scalar from the ref's locator. The customer's title and body are not here and
+ * cannot be — the locator has no field for them (`EvidenceLocator`).
+ */
+function focusFindings(focus: FocusedInquiry, needId: string): Finding[] {
+  const loc = focus.ref.locator;
+  const receivedOn = focus.ref.events?.from ?? null;
+  const status = loc.status ? ANSWER_STATUS_SENTENCE[loc.status] : undefined;
+  const phase = loc.phase ? WORK_PHASE_SENTENCE[loc.phase] : undefined;
+  const state = [status, phase].filter(Boolean).join(", ");
+  const findings: Finding[] = [{
+    findingId: `f-${focus.ref.evidenceId}`,
+    specialist: "INQUIRY_OPS",
+    statement: `이 문의는 ${focus.entity.label}로${receivedOn ? ` ${receivedOn}에` : ""} 접수됐고`
+      + (state ? `, ${state}.` : "."),
+    evidenceIds: [focus.ref.evidenceId],
+    confidence: "NEEDS_REVIEW",
+    verdict: null,
+    surfaceLink: `/inquiries/${loc.inquiryId ?? loc.workItemId}`,
+    needId,
+  }];
+  if (loc.productId && loc.productName) {
+    findings.push({
+      findingId: `f-${focus.ref.evidenceId}-product`,
+      specialist: "INQUIRY_OPS",
+      statement: `이 문의에 연결된 상품은 "${loc.productName}"입니다.`,
+      evidenceIds: [focus.ref.evidenceId],
+      confidence: "NEEDS_REVIEW",
+      verdict: null,
+      surfaceLink: `/products/${loc.productId}`,
+      needId,
+    });
+  }
+  return findings;
 }

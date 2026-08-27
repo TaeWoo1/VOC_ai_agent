@@ -141,6 +141,40 @@ export const DIFFERENCE_QUESTION_PLAN: AgentPlanView = {
   providerVersion: AUTHORED,
 };
 
+/**
+ * The contextual goal — the seller is standing on one inquiry and names nothing else.
+ *
+ * The planner writes the demonstrative as an entity (an INSTANCE by construction, `plan/EntityRole.ts`)
+ * and asks for past cases and the queue. It holds no id: the id arrives as a request hint and is
+ * verified by the runtime, which is the whole subject of `currentInquiryContext.test.ts`.
+ */
+export const THIS_INQUIRY_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "지금 보고 있는 문의를 조사하고 싶다",
+  unresolvedEntities: [{ kind: "INQUIRY", mention: "이 문의" }],
+  informationNeeds: [
+    { id: "n1", question: "같은 유형의 과거 대응이 있었는가", kind: "CUSTOMER_HISTORY",
+      why: "과거에 답한 방식이 있으면 그대로 쓸 수 있다", required: true },
+    { id: "n2", question: "답변이 필요한 문의가 몇 건인가", kind: "INQUIRY_VOLUME",
+      why: "이 문의가 대기열에서 어디쯤인지", required: false },
+  ],
+  specialists: ["INQUIRY_OPS"],
+  tools: ["search_customer_memory", "get_today_inbox", "search_unanswered_inquiries"],
+  retrievalOrder: ["n1", "n2"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [{ needId: "n1", minEvidence: 1, acceptableKinds: ["CUSTOMER_MEMORY", "INQUIRY"] }],
+  riskClass: "ROUTINE",
+  maxIterations: 1,
+  maxToolCalls: 6,
+  stopWhenEnough: "과거 사례를 확인하면 충분",
+  clarificationNeeded: false,
+  clarificationReason: null,
+  rationale: "하나의 문의는 과거 사례와 현재 상태로 조사한다",
+  providerVersion: AUTHORED,
+};
+
 /** The triage goal — volume and repeats, no product. */
 export const TODAY_PLAN: AgentPlanView = {
   available: true,
@@ -577,6 +611,7 @@ export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "전에 산 것과 색이 달라요": DIFFERENCE_QUESTION_PLAN,
   "지난번에 산 거랑 색깔이 다른데요": DIFFERENCE_QUESTION_PLAN,
   "오늘 뭐부터 봐야 해?": TODAY_PLAN,
+  "이 문의를 조사해 줘": THIS_INQUIRY_PLAN,
   "지금 제일 급한 게 뭐야?": TODAY_PLAN,
   "전선몰딩 상품 요즘 문제 있어?": PRODUCT_HEALTH_PLAN,
   "이번 주 대표에게 보고할 내용 정리해줘": REPORT_PLAN,

@@ -34,6 +34,7 @@ import type {
   SignalCoverage,
 } from "../../spring/types";
 import { log } from "../../log";
+import { channelLabel, moneyLabel, sellingStatusLabel } from "../sellerVocabulary";
 import { withTopic } from "../../korean";
 
 /**
@@ -100,6 +101,11 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
 
   if (!productId) {
     if (input.mentions.length === 0) {
+      // A run opened on one inquiry that names no product: the honest sentence is about the
+      // inquiry's binding, not a request to type a SKU the seller never had in mind (live 2026-08-27).
+      if (input.resolved.some((e) => e.kind === "INQUIRY")) {
+        return empty(input, "이 문의에 연결된 상품이 없어 상품 정보는 확인하지 않았습니다.");
+      }
       return empty(input, "어떤 상품을 묻는지 확인하지 못했습니다. 상품명이나 SKU를 함께 알려주세요.");
     }
     for (const mention of input.mentions) {
@@ -386,12 +392,12 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
           findingId: `f-${ref.evidenceId}`,
           specialist: "PRODUCT_OPS",
           statement: listing
-            ? `${withTopic(productName)} ${listing.channelCode}에 `
+            ? `${withTopic(productName)} ${channelLabel(listing)}에 `
               + `${listing.listingName ? `"${listing.listingName}" 으로 ` : ""}등록돼 있습니다`
-              + `${listing.price != null ? ` (가격 ${listing.price}${listing.currency ?? ""})` : ""}`
-              + `${listing.sellingStatus ? `, 판매상태 ${listing.sellingStatus}` : ""}.`
+              + `${listing.price != null ? ` (가격 ${moneyLabel(listing.price, listing.currency)})` : ""}`
+              + `${sellingStatusLabel(listing.sellingStatus) ? `, ${sellingStatusLabel(listing.sellingStatus)}` : ""}.`
             : `${productName}에 옵션 "${variant!.optionName ?? variant!.externalVariantId}"이(가) `
-              + `${variant!.channelCode}에 있습니다.`,
+              + `${channelLabel(variant!)}에 있습니다.`,
           evidenceIds: [ref.evidenceId],
           confidence: "NEEDS_REVIEW",
           verdict: null,

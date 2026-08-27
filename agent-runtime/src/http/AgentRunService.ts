@@ -195,6 +195,7 @@ export class AgentRunService {
       text: input.goalText,
       accountId: input.accountId,
       productId: input.productId,
+      workItemId: input.workItemId,
       referenceDate: input.referenceDate,
       page: input.page,
       size: input.size,
@@ -235,7 +236,14 @@ export class AgentRunService {
     log("http_start", { domain, hasThreadId: input.threadId != null, hasAccount: request.accountId != null });
     const rt = this.runtimes(bundle, stores);
 
-    if (domain === "OPERATOR") return this.operatorView(threadId, await rt.operator.run(threadId, request));
+    if (domain === "OPERATOR") {
+      // Wall clock of the whole run as the HTTP caller sees it — the "total" row of the latency
+      // breakdown; the stages inside it log themselves (`operator_stage`, `operator_tool_call`).
+      const started = Date.now();
+      const result = await rt.operator.run(threadId, request);
+      log("operator_stage", { stage: "total", ms: Date.now() - started, status: result.status });
+      return this.operatorView(threadId, result);
+    }
     if (domain === "INQUIRY") return this.inquiryView(threadId, await rt.inquiry.start(threadId, request));
     if (domain === "INQUIRY_DRAFT") return this.draftView(threadId, await rt.inquiryDraft.run(threadId, request));
     if (domain === "REVIEW") return this.reviewView(threadId, await rt.review.start(threadId, request));

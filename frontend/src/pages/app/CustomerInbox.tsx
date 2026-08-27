@@ -72,11 +72,23 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
   const [searchParams, setSearchParams] = useSearchParams();
   const rawState = searchParams.get("state");
   const rawChannel = searchParams.get("channel");
+  /**
+   * THE AGENT IS TOLD WHICH INQUIRY, OR IT IS NOT TOLD 「이 문의」 (Contextual Agent Contract Completion v1).
+   *
+   * The route carries the inquiry id; the runtime's only exact read for one inquiry takes the WORK
+   * ITEM id, which the queue read below joins client-side. Until that join has an entry for this row
+   * — while it loads, or for a row the queue no longer holds — the launcher does not promise an
+   * investigation of "this inquiry" it cannot scope: it offers the list goal instead. A label that
+   * says 「이 문의」 over a run that reads the org queue is the defect this package closes.
+   */
+  const focusWorkItemId = itemRef ? workItems.get(itemRef) : undefined;
+  const focused = focusWorkItemId != null;
   useAgentSurface({
     surface: "inquiries",
-    label: itemRef ? "이 문의" : "문의 목록",
+    label: focused ? "이 문의" : "문의 목록",
+    ...(focused ? { workItemId: focusWorkItemId } : {}),
     ...(rawChannel ? { channelCode: rawChannel } : {}),
-    goal: itemRef ? "이 문의를 조사해 줘" : "답변이 필요한 문의를 채널별로 정리해 줘",
+    goal: focused ? "이 문의를 조사해 줘" : "답변이 필요한 문의를 채널별로 정리해 줘",
   });
   const state = (stateOptions.find((option) => option.value === rawState)?.value ?? "ALL") as StateFilter;
   const [period, setPeriod] = useState<InboxFilters["period"]>(DEFAULT_FILTERS.period);
@@ -212,10 +224,11 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
             <AgentLaunch
               context={{
                 surface: "inquiries",
+                ...(focused ? { workItemId: focusWorkItemId } : {}),
                 ...(filters.channel ? { channelCode: filters.channel } : {}),
-                goal: itemRef ? "이 문의를 조사해 줘" : "답변이 필요한 문의를 채널별로 정리해 줘",
+                goal: focused ? "이 문의를 조사해 줘" : "답변이 필요한 문의를 채널별로 정리해 줘",
               }}
-              label={itemRef ? "이 문의 조사하기" : "문의 정리하기"}
+              label={focused ? "이 문의 조사하기" : "문의 정리하기"}
             />
           }
           meta={

@@ -138,6 +138,13 @@ export interface EvidenceLocator {
   readonly count?: number;
   readonly label?: string;
   readonly severity?: string;
+  /**
+   * One inquiry's operational state — the work-item phase (`OPEN`/`PROPOSED`/…) and the channel
+   * answer status (`UNANSWERED`/`ANSWERED`). Closed backend vocabulary, never text; carried so a
+   * contextual run can SAY what state the inquiry it was opened on is in without a second read.
+   */
+  readonly phase?: string;
+  readonly status?: string;
   /** Product-fact evidence: which key, and the source that stated it. Never free prose. */
   readonly factKey?: string;
   readonly factSource?: string;

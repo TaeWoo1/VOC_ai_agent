@@ -25,6 +25,9 @@ import { RuleEvidenceJudge, SpringEvidenceJudge } from "./judge/EvidenceJudge";
 import type { EvidenceJudge } from "./judge/EvidenceJudge";
 import { OperatorBudget, OPERATOR_BUDGET_V1 } from "./budget/OperatorBudget";
 import type { ResolvedEntity } from "./plan/InvestigationPlan";
+import { EvidenceBuilder } from "./state/evidence";
+import type { EvidenceRef } from "./state/OperatorState";
+import { eventOn } from "./scope/EvidenceTime";
 import type { OperatorBudgetLimits } from "./budget/OperatorBudget";
 import type { OperatorAnswer, OperatorFailureCode, OperatorState } from "./state/OperatorState";
 import { failureSentence } from "./failure/SpecialistOutcome";
@@ -87,10 +90,12 @@ export class OperatorAgentRuntime {
     // mid-run surprise.
     const registry = new OperatorToolRegistry(tools);
     const budget = new OperatorBudget(this.deps.limits ?? OPERATOR_BUDGET_V1, this.deps.now);
+    const evidence = new EvidenceBuilder(request.referenceDate);
 
     const graph = buildOperatorGraph({
       registry,
       tools,
+      evidence,
       planner: this.deps.planner ?? new LlmInvestigationPlanner(this.deps.operator),
       judge: this.deps.judge
         ?? new SpringEvidenceJudge(this.deps.operator, new RuleEvidenceJudge(), threadId),
@@ -101,11 +106,15 @@ export class OperatorAgentRuntime {
     }).compile();
 
     const goalText = request.text ?? request.intent ?? "";
-    const entities = await this.contextEntities(request, budget);
+    const context = await this.contextEntities(request, budget, evidence);
     let final: OperatorState;
     try {
       final = (await graph.invoke(
-        { goalText, ...(entities.length > 0 ? { entities } : {}) },
+        {
+          goalText,
+          ...(context.entities.length > 0 ? { entities: context.entities } : {}),
+          ...(context.evidence.length > 0 ? { evidence: context.evidence } : {}),
+        },
         threadConfig(threadId),
       )) as OperatorState;
     } catch (err) {
@@ -182,27 +191,88 @@ export class OperatorAgentRuntime {
   private async contextEntities(
     request: GoalRequest,
     budget: OperatorBudget,
-  ): Promise<ResolvedEntity[]> {
+    evidence: EvidenceBuilder,
+  ): Promise<{ entities: ResolvedEntity[]; evidence: EvidenceRef[] }> {
+    const entities: ResolvedEntity[] = [];
+    const refs: EvidenceRef[] = [];
     const productId = request.productId;
-    if (!productId || !budget.spend("tool")) {
-      return [];
+    if (productId && budget.spend("tool")) {
+      try {
+        const signals = await this.deps.operator.getProductSignals(productId);
+        log("operator_context_product_resolved", { resolved: true });
+        entities.push({
+          kind: "PRODUCT",
+          // The seller did not type a name — they were standing on the product. The canonical name is
+          // the mention, so a finding that quotes what was asked about quotes the catalogue, not a URL.
+          mention: signals.productName,
+          id: signals.productId,
+          label: signals.productName,
+          resolvedBy: OPERATOR_TOOL.GET_PRODUCT_SIGNALS,
+        });
+      } catch {
+        log("operator_context_product_resolved", { resolved: false });
+      }
     }
-    try {
-      const signals = await this.deps.operator.getProductSignals(productId);
-      log("operator_context_product_resolved", { resolved: true });
-      return [{
-        kind: "PRODUCT",
-        // The seller did not type a name — they were standing on the product. The canonical name is
-        // the mention, so a finding that quotes what was asked about quotes the catalogue, not a URL.
-        mention: signals.productName,
-        id: signals.productId,
-        label: signals.productName,
-        resolvedBy: OPERATOR_TOOL.GET_PRODUCT_SIGNALS,
-      }];
-    } catch {
-      log("operator_context_product_resolved", { resolved: false });
-      return [];
+    const workItemId = request.workItemId;
+    if (workItemId && budget.spend("tool")) {
+      // <b>The same read the inquiry screen makes, through the same org-scoped bearer.</b> Another
+      // org's work item, a deleted one, a mistyped one: the backend answers 404 for all three and the
+      // hint is dropped — there is no cross-org lookup because there is no endpoint that could do one.
+      try {
+        const detail = await this.deps.inquiry.getInquiryDetail(workItemId);
+        const channel = detail.channelNameKo ?? detail.channelCode ?? null;
+        entities.push({
+          kind: "INQUIRY",
+          // A demonstrative, by construction an INSTANCE (`plan/EntityRole.ts`): the seller pointed
+          // at one thing. The label names the channel, never the customer's title.
+          mention: "이 문의",
+          id: detail.workItemId,
+          label: channel ? `${channel} 문의` : "문의",
+          resolvedBy: OPERATOR_TOOL.GET_INQUIRY_DETAIL,
+        });
+        const bound = detail.productId && detail.productName
+          ? { productId: detail.productId, productName: detail.productName }
+          : null;
+        if (bound && !entities.some((e) => e.kind === "PRODUCT")) {
+          // The inquiry's own binding is a fact the backend already decided (`SOURCE_EXACT` or
+          // `USER_CONFIRMED`); carrying it forward is what lets ProductOps skip a resolve-by-name for a
+          // product this inquiry is about. Charged nothing extra: it came out of the read above.
+          entities.push({
+            kind: "PRODUCT",
+            mention: bound.productName,
+            id: bound.productId,
+            label: bound.productName,
+            resolvedBy: OPERATOR_TOOL.GET_INQUIRY_DETAIL,
+          });
+        }
+        // <b>Everything a specialist may SAY about this inquiry is minted here, from scalars.</b> The
+        // detail carries the customer's text; the ref carries ids, the channel code, the closed work
+        // state and the receipt date — and the text is dropped with this stack frame. InquiryOps cites
+        // this ref instead of reading the detail again (`get_inquiry_thread_context` is a draft-only
+        // tool by its own description, and a second read would buy the same row twice).
+        refs.push(evidence.add({
+          kind: "INQUIRY",
+          sourceTool: OPERATOR_TOOL.GET_INQUIRY_DETAIL,
+          args: { workItemId },
+          locator: {
+            workItemId: detail.workItemId,
+            inquiryId: detail.inquiryId,
+            ...(detail.channelCode ? { channelCode: detail.channelCode } : {}),
+            ...(bound ? bound : {}),
+            phase: detail.phase,
+            status: detail.status,
+            label: channel ? `${channel} 문의` : "이 문의",
+          },
+          events: eventOn(detail.receivedAt.slice(0, 10)),
+          coverage: "COVERED",
+          provenance: "inquiry-detail/context",
+        }));
+        log("operator_context_inquiry_resolved", { resolved: true, bound: bound != null });
+      } catch {
+        log("operator_context_inquiry_resolved", { resolved: false });
+      }
     }
+    return { entities, evidence: refs };
   }
 }
 

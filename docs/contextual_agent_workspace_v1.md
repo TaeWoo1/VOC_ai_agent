@@ -86,8 +86,9 @@ Viewports: horizontal scroll 0 everywhere; panel overlay below 1440 (main 1134/9
 Reported, not fixed: the review 「반복되는 문제」 counts are not a list filter — the record endpoint takes
 `tier` only and the row carries no category, so a filter would be client-side over one page (a fake
 count); `AgentContext` has no inquiry id, so 「이 문의 조사하기」 sends the surface, not the row (runtime
-contract change, out of scope); the planner's sentences can contain raw enums (`COUPANG`, `UNKNOWN`,
-`14500KRW`) — model output, not ours; `/reviews` posts one behaviour-telemetry row on load (pre-existing).
+contract change, out of scope — **closed by `docs/contextual_agent_contract_completion_v1.md`**); the
+planner's sentences can contain raw enums (`COUPANG`, `UNKNOWN`, `14500KRW`) — **re-audited there: they
+were ours, deterministic, and are mapped**; `/reviews` posts one behaviour-telemetry row on load (pre-existing).
 
 ## 7. Counts
 

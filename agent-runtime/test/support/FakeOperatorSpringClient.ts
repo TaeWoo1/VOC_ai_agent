@@ -142,6 +142,7 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     if (seed.plan || seed.plansByGoal) {
       (this as OperatorSpringClient).planGoal = async (request) => {
         this.calls.plan += 1;
+        this.lastPlanInput = request;
         this.planCatalogues.push([...request.toolCatalogue]);
         this.planGoals.push(request.goalText);
         if (request.priorContext) {
@@ -241,8 +242,14 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     return found;
   }
 
+  /** The last plan request as the backend would have seen it — what the planner was TOLD. */
+  lastPlanInput: { goalText: string; toolCatalogue: string[]; priorContext?: string; runId?: string } | null = null;
+  /** The anchor the last customer-memory search was made with — what a test asserts, not the count. */
+  lastMemoryParams: CustomerMemorySearchParams | null = null;
+
   async searchCustomerMemory(params: CustomerMemorySearchParams): Promise<CustomerMemorySearch> {
     this.calls.memory += 1;
+    this.lastMemoryParams = params;
     // <b>The fake enforces the real endpoint's precondition.</b> `/api/customer-memory/search` refuses
     // a call with no inquiryId / signatureKey / topic / productId — deliberately, because without an
     // anchor a "past cases" lookup is a whole-org trawl. A fake that answered anyway would have made
