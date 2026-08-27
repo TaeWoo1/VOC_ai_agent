@@ -15,6 +15,8 @@ import type {
 } from "../../lib/types";
 import { Btn, BtnLink } from "../ui/Btn";
 import { Chip } from "../ui/Chip";
+import { Status, type StatusTone } from "../ui/Status";
+import { Disclosure } from "../ui/Disclosure";
 import { Empty } from "../ui/Empty";
 
 /**
@@ -104,86 +106,65 @@ function ChannelRow({
     }
   }
 
+  // ONE primary action per row (docs/reviewnary_design.md §7 채널 연결): the state decides what it is.
+  // The record link is a text link; the health detail folds.
+  const detailLines = [failing ? "최근 수집에서 오류가 있었습니다. 연결 관리에서 확인해 주세요." : null].filter(
+    (line): line is string => !!line,
+  );
+
   return (
-    <li className="flex flex-wrap items-start justify-between gap-4 px-5 py-5">
+    <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <p className="break-keep font-semibold text-ink">{channel.nameKo}</p>
+          <p className="break-keep text-base font-semibold text-ink">{channel.nameKo}</p>
           <StatePill state={state} loading={statusLoading && !!account} />
+          {expiryFlagged && expiry ? (
+            <span className="flex items-center gap-1.5" data-testid="channel-expiry">
+              <ExpiryChip state={expiry.state} />
+              <span className="text-xs font-semibold text-warn">만료 예정·조치 필요</span>
+            </span>
+          ) : null}
         </div>
-        {/*
-          SUPPORT COPY IS FOR CHOOSING, NOT FOR LIVING WITH (Executive-friendly UX Redesign v1).
-
-          「자동 수집 지원: 문의·주문」 · 「엑셀 업로드 지원」 · 「리뷰·문의·주문 양식은 채널별 확인
-          필요」 answer 「이 채널을 붙이면 무엇을 받나」 — a real question, and the only question, for a
-          channel that is not connected yet. On a connected row they are three pills and a caveat
-          about a decision the seller already made, printed on every channel, every visit.
-
-          Nothing is reworded and nothing is dropped from the unconnected case: the wording rules in
-          `channelSupport.ts` are untouched and the same copy renders wherever a seller still has the
-          choice to make.
-        */}
-        {account ? null : (
-          <>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted">
+          {account ? null : (
+            <>
               <Chip>{support.primaryLabel}</Chip>
               {support.chips.map((chip) => (
                 <Chip key={chip}>{chip}</Chip>
               ))}
+            </>
+          )}
+          <span>{lastCollected ? `마지막 수집 ${relativeTime(lastCollected)}` : "수집 이력 없음"}</span>
+          {showReviewEntry && account ? (
+            <BtnLink
+              to={reviewRecordPath(account.id)}
+              size="sm"
+              variant="ghost"
+              className="!min-h-0 !px-1 !py-0 text-sm !font-semibold text-brand-700"
+              ariaLabel={`${channel.nameKo} ${reviewEntryLabel(reviewCount, channel.code)}`}
+            >
+              {reviewEntryLabel(reviewCount, channel.code)}
+            </BtnLink>
+          ) : null}
+        </div>
+        {account ? null : support.uploadQualifier ? (
+          <p className="mt-1 break-keep text-sm text-muted">{support.uploadQualifier}</p>
+        ) : null}
+        {detailLines.length > 0 ? (
+          <Disclosure label="자세히" className="mt-0.5" summaryClassName="px-0 text-xs">
+            <div className="mt-1 space-y-1">
+              {detailLines.map((line) => (
+                <p key={line} className="break-keep text-sm text-warn">{line}</p>
+              ))}
             </div>
-            {support.uploadQualifier ? (
-              <p className="mt-2 break-keep text-sm text-muted">{support.uploadQualifier}</p>
-            ) : null}
-          </>
-        )}
-        <p className="mt-2 text-sm text-muted">
-          {lastCollected ? `마지막 수집 ${relativeTime(lastCollected)}` : "수집 이력 없음"}
-        </p>
-        {failing ? (
-          <p className="mt-1 break-keep text-sm font-medium text-warn">
-            최근 수집에서 오류가 있었습니다. 연결 관리에서 확인해 주세요.
-          </p>
-        ) : null}
-        {expiryFlagged && expiry ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="channel-expiry">
-            <ExpiryChip state={expiry.state} />
-            <span className="break-keep text-sm font-medium text-warn">만료 예정·조치 필요</span>
-          </div>
-        ) : null}
-        {offerRenewal && account ? (
-          <Btn
-            size="sm"
-            variant="outline"
-            className="mt-2"
-            onClick={() => navigate(`/connect/coupang/renew/${account.id}`)}
-          >
-            {RENEW_CTA_LABEL}
-          </Btn>
+          </Disclosure>
         ) : null}
       </div>
-      {/*
-        Two actions at most, and they wrap rather than compete: on a narrow screen the row's text
-        column takes the full width and these fall underneath it, still at full size. Nothing here
-        collapses into an overflow menu — an entry point a seller has already failed to find twice
-        does not get hidden behind another press.
-
-        The 상품평 entry is the loud one on a healthy row, because the record is where the seller is
-        going and the connection is only how it got there. When collection is failing that ordering
-        inverts: the row is asking to be repaired, and a bright button pointing away from the repair
-        would be the wrong invitation.
-      */}
-      <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">
-        {showReviewEntry && account ? (
-          <BtnLink
-            to={reviewRecordPath(account.id)}
-            size="sm"
-            variant={failing ? "outline" : "solid"}
-            // On screen the row's heading says which channel this is; in a screen reader's link list
-            // it does not, and a page of rows would offer several links differing only by a number.
-            ariaLabel={`${channel.nameKo} ${reviewEntryLabel(reviewCount, channel.code)}`}
-          >
-            {reviewEntryLabel(reviewCount, channel.code)}
-          </BtnLink>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {offerRenewal && account ? (
+          <Btn size="sm" variant="outline" onClick={() => navigate(`/connect/coupang/renew/${account.id}`)}>
+            {RENEW_CTA_LABEL}
+          </Btn>
         ) : null}
         <Btn
           size="sm"
@@ -201,21 +182,12 @@ function ChannelRow({
 /** The state chip. While the account's health is still loading it says so rather than guessing 연결됨. */
 function StatePill({ state, loading }: { state: ConnectionState; loading: boolean }) {
   if (loading) {
-    return (
-      <span className="rounded-full bg-canvas px-2.5 py-0.5 text-xs font-semibold text-muted">
-        상태 확인 중
-      </span>
-    );
+    return <Status tone="neutral">상태 확인 중</Status>;
   }
-  const tone = {
-    good: "bg-good/10 text-good",
-    muted: "bg-canvas text-muted",
-    warn: "bg-warn/10 text-warn",
-    bad: "bg-bad/10 text-bad",
-  }[state.tone];
+  const tone: StatusTone = state.tone === "muted" ? "neutral" : state.tone;
   return (
-    <span data-testid="connection-state" className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${tone}`}>
-      {state.label}
+    <span data-testid="connection-state">
+      <Status tone={tone}>{state.label}</Status>
     </span>
   );
 }
@@ -243,7 +215,7 @@ export function ChannelList({
   channelsError?: boolean;
 }) {
   if (channelsLoading && channels.length === 0) {
-    return <p className="text-muted">불러오는 중…</p>;
+    return <p className="px-4 py-3 text-sm text-muted">불러오는 중…</p>;
   }
   if (channels.length === 0) {
     return channelsError ? (
@@ -256,7 +228,7 @@ export function ChannelList({
     );
   }
   return (
-    <ul aria-label="채널 목록" className="-mx-5 divide-y divide-line">
+    <ul aria-label="채널 목록" className="divide-y divide-line/70">
       {channels.map((channel) => {
         const account = selectChannelAccount(accounts, channel.id);
         return (

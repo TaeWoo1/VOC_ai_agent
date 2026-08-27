@@ -55,6 +55,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
   const [items, setItems] = useState<FeedItem[] | null>(null);
   const [analyses, setAnalyses] = useState<ItemAnalysis[]>([]);
   const [workItems, setWorkItems] = useState<Map<string, string>>(new Map());
+  const [phases, setPhases] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const { search } = useLocation();
@@ -127,12 +128,16 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
         api.getInquiryQueueStrict({ phase: "PROPOSED", page: 0, size: 100 }),
       ]);
       const map = new Map<string, string>();
+      const phaseMap = new Map<string, string>();
       for (const entry of [...open.content, ...proposed.content]) {
         map.set(entry.inquiryId, entry.workItemId);
+        phaseMap.set(entry.inquiryId, entry.phase);
       }
       setWorkItems(map);
+      setPhases(phaseMap);
     } catch {
       setWorkItems(new Map());
+      setPhases(new Map());
     }
   }, []);
 
@@ -196,38 +201,29 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
         <PageHead
           title="문의"
           compact={!!itemRef}
-          description={itemRef ? undefined : "답변이 필요한 문의부터 봅니다. 보낼지는 직접 확인합니다."}
           action={
             <AgentLaunch
               context={{
                 surface: "inquiries",
-                // The current filter, as a CODE — the Agent re-reads what it means. Never the count
-                // beside it, which the run has to earn with a tool call.
                 ...(filters.channel ? { channelCode: filters.channel } : {}),
-                goal: "답변이 필요한 문의를 채널별로 정리해 줘",
+                goal: itemRef ? "이 문의를 조사해 줘" : "답변이 필요한 문의를 채널별로 정리해 줘",
               }}
+              label={itemRef ? "이 문의 조사하기" : "문의 정리하기"}
             />
           }
           meta={
             itemRef ? undefined : unanswered !== null ? (
               <>
-                <span className="text-sm font-semibold text-ink">
-                  지금 답변이 필요한 문의 <span className="tabular-nums">{unanswered}</span>건
+                <span className="text-sm text-muted">
+                  지금 답변이 필요한 문의 <span className="font-semibold tabular-nums text-ink">{unanswered}</span>건
                 </span>
-                {capped ? (
-                  <span className="break-keep text-sm text-muted">
-                    목록은 최근 500건까지 표시됩니다.
-                  </span>
-                ) : null}
+                {capped ? <span className="break-keep text-sm text-muted">목록은 최근 500건까지 표시됩니다.</span> : null}
               </>
             ) : undefined
           }
         />
       ) : (
-        <PageHead
-          title="고객 인박스"
-          description="채널에 들어온 문의와 리뷰를 급한 것부터 확인합니다."
-        />
+        <PageHead title="고객 인박스" />
       )}
 
       {/* 「AI가 먼저 확인한 일」 sits ABOVE the queue, and outside its loading branch on purpose: it is
@@ -280,7 +276,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
                 they stay reachable with a row open — a filter you can only get to by closing the
                 thing you are working on is a filter the seller stops using. */}
             <Disclosure label="필터" note={filterSummary ? ` · ${filterSummary}` : undefined}>
-              <div className="mt-3 rounded-2xl border border-line bg-surface p-4">
+              <div className="mt-2 rounded-2xl border border-line bg-surface p-4">
                 <InboxFilterRail
                   items={all}
                   filters={filters}
@@ -293,11 +289,11 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
 
             <div
               className={`overflow-hidden rounded-2xl border border-line bg-surface ${
-                selection.kind === "FOUND" ? "lg:max-h-[calc(100vh-13rem)] lg:overflow-y-auto" : ""
+                selection.kind === "FOUND" ? "lg:max-h-[calc(100vh-11rem)] lg:overflow-y-auto" : ""
               }`}
             >
               {visible.length === 0 ? (
-                <p className="px-4 py-10 text-center text-muted">
+                <p className="px-4 py-8 text-center text-sm text-muted">
                   선택한 조건에 해당하는 항목이 없습니다.
                 </p>
               ) : (
@@ -307,6 +303,8 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
                   basePath={basePath}
                   search={search}
                   showType={!inquiriesOnly}
+                  phases={phases}
+                  dense={selection.kind === "FOUND"}
                 />
               )}
             </div>
@@ -318,7 +316,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
               rather than to the bottom of a document whose height depends on how much the customer
               wrote. A short question and a long one now behave the same way.
             */
-            <div className="rounded-2xl border border-line bg-surface p-4 lg:max-h-[calc(100vh-9.5rem)] lg:overflow-y-auto">
+            <div className="rounded-2xl border border-line bg-surface p-5 lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto">
               {selection.kind === "FOUND" ? (
                 <InboxDetail
                   item={selection.item}

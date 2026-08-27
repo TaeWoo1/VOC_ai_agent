@@ -36,7 +36,7 @@ export function TrendBars({ points }: { points: SalesTrendPoint[] }) {
         <div key={i} className="flex flex-1 flex-col items-center justify-end gap-2">
           <span className="text-sm text-muted">{wonShort(p.salesAmount)}</span>
           <div
-            className="w-full rounded-t-lg bg-brand/80"
+            className="w-full rounded-t-md bg-brand-700/80"
             style={{ height: `${Math.max(6, (p.salesAmount / max) * 120)}px` }}
           />
           <span className="text-sm text-muted">{shortDate(p.date)}</span>

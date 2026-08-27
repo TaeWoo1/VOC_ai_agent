@@ -19,7 +19,7 @@ export function SectionHeader({
   return (
     <div className="flex flex-wrap items-end justify-between gap-2 border-b border-line pb-2">
       <div className="min-w-0">
-        <h2 className="break-keep text-lg font-bold text-ink">{title}</h2>
+        <h2 className="break-keep text-base font-semibold text-ink">{title}</h2>
         {hint ? <p className="mt-0.5 break-keep text-sm text-muted">{hint}</p> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}

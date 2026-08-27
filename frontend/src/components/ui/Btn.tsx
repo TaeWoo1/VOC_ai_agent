@@ -18,18 +18,19 @@ export type BtnSize = "md" | "sm";
 
 const VARIANT: Record<BtnVariant, string> = {
   solid: "bg-brand-700 text-white hover:bg-brand-800 disabled:opacity-50",
-  outline: "border border-line text-ink hover:bg-canvas disabled:opacity-50",
+  outline: "border border-line bg-surface text-ink hover:bg-canvas disabled:opacity-50",
   ghost: "text-muted hover:text-ink hover:bg-canvas disabled:opacity-50",
 };
 
 const SIZE: Record<BtnSize, string> = {
   // 44px minimum touch target at `md`; `sm` is for dense desktop toolbars only.
-  md: "min-h-[44px] px-5 py-2.5 text-base",
+  // §10: primary 40px on desktop, 36px for dense toolbars. (44px on touch surfaces is the tab bar's job.)
+  md: "min-h-[40px] px-4 py-2 text-base",
   sm: "min-h-[36px] px-3 py-1.5 text-sm",
 };
 
 const BASE =
-  "inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2";
+  "inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2";
 
 function classes(variant: BtnVariant, size: BtnSize, className?: string): string {
   return [BASE, VARIANT[variant], SIZE[size], className].filter(Boolean).join(" ");

@@ -16,12 +16,12 @@ export function Panel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-line bg-surface p-6">
+    <section className="rounded-2xl border border-line bg-surface p-5">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="break-keep text-lg font-bold text-ink">{title}</h2>
+          <h2 className="break-keep text-base font-semibold text-ink">{title}</h2>
           {description ? (
-            <p className="mt-1 break-keep text-base text-muted">{description}</p>
+            <p className="mt-1 break-keep text-sm text-muted">{description}</p>
           ) : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}

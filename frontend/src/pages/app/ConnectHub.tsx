@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageHead } from "../../components/ui/PageHead";
-import { Panel } from "../../components/ui/Panel";
+import { Section, ListBox } from "../../components/ui/Section";
+import { Disclosure } from "../../components/ui/Disclosure";
 import { BtnLink } from "../../components/ui/Btn";
 import { ChannelList } from "../../components/connect/ChannelList";
 import { HomeReviewOpsCard } from "../../components/actionWindow/HomeReviewOpsCard";
@@ -153,85 +154,74 @@ export function ConnectHub() {
 
   return (
     <>
-      <PageHead
-        title="채널 연결"
-        description="판매 채널을 연결하고, 자료 가져오기 상태를 한곳에서 관리합니다."
-      />
+      <PageHead title="채널 연결" />
 
       {openCount > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-warn/10 px-4 py-3">
-          <span className="font-semibold text-warn">확인이 필요한 연결 알림 {openCount}건</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warn/30 bg-warn/5 px-4 py-2.5">
+          <span className="text-sm font-semibold text-warn">확인이 필요한 연결 알림 {openCount}건</span>
           <BtnLink to="/settings/alerts" size="sm" variant="outline">
             확인하기
           </BtnLink>
         </div>
       ) : null}
 
-      {notice ? (
-        <div className="rounded-xl bg-brand-50 px-4 py-3 text-brand-700">{notice}</div>
-      ) : null}
+      {notice ? <div className="rounded-xl bg-brand-50 px-4 py-2.5 text-sm text-brand-700">{notice}</div> : null}
 
       {accountsError ? (
-        <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
-          연결 상태를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
-        </div>
+        <div className="rounded-xl bg-bad/10 px-4 py-2.5 text-sm text-bad">연결 상태를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>
       ) : null}
 
-      <Panel
-        title="채널"
-        description="네이버 스마트스토어, 쿠팡, 카페24를 연결할 수 있습니다. 채널마다 가능한 연결 방식이 다르며, 지금 가능한 범위만 표시합니다."
-      >
-        <ChannelList
-          channels={channels}
-          accounts={accounts}
-          health={health}
-          statusLoading={accountsLoading}
-          reviewCounts={reviewCounts}
-          onNotice={setNotice}
-          channelsLoading={channelsLoading}
-          channelsError={channelsError}
-        />
-      </Panel>
+      <Section title="채널">
+        <ListBox>
+          <ChannelList
+            channels={channels}
+            accounts={accounts}
+            health={health}
+            statusLoading={accountsLoading}
+            reviewCounts={reviewCounts}
+            onNotice={setNotice}
+            channelsLoading={channelsLoading}
+            channelsError={channelsError}
+          />
+        </ListBox>
+      </Section>
 
-      <Panel
+      <Section
         title="정기 자료 가져오기"
-        description="연결이 어려운 채널은 정해진 주기에 자료를 넘겨주시면 이어서 정리합니다."
+        hint="연결이 어려운 채널은 정해진 주기에 자료를 넘겨주시면 이어서 정리합니다"
         action={
           <BtnLink to="/connect/upload" size="sm" variant="outline">
             자료 넘기기
           </BtnLink>
         }
       >
-        <ol className="space-y-2">
-          {[
-            "가져올 자료를 고릅니다.",
-            "형식과 기간이 맞는지 먼저 확인합니다.",
-            "중복을 걸러내고 채널이 달라도 같은 형태로 정리합니다.",
-            "리뷰·문의 화면과 리포트에 반영됩니다.",
-          ].map((step, index) => (
-            <li key={step} className="flex gap-3 break-keep leading-relaxed text-muted">
-              <span
-                aria-hidden="true"
-                className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line text-xs font-bold tabular-nums text-brand-700"
-              >
-                {index + 1}
-              </span>
-              {step}
-            </li>
-          ))}
-        </ol>
-        <p className="mt-4 break-keep text-sm text-muted">
-          이전 기간의 리뷰는{" "}
-          <BtnLink to="/connect/review-history" size="sm" variant="ghost">
-            과거 리뷰 가져오기
-          </BtnLink>
-          에서 구간별로 채울 수 있습니다.
-        </p>
-      </Panel>
+        <Disclosure label="어떻게 진행되나요">
+          <ol className="mt-2 space-y-1.5 text-sm text-muted">
+            {[
+              "가져올 자료를 고릅니다.",
+              "형식과 기간이 맞는지 먼저 확인합니다.",
+              "중복을 걸러내고 채널이 달라도 같은 형태로 정리합니다.",
+              "리뷰·문의 화면과 리포트에 반영됩니다.",
+            ].map((step, index) => (
+              <li key={step} className="flex gap-2 break-keep">
+                <span className="tabular-nums text-brand-700">{index + 1}.</span>
+                {step}
+              </li>
+            ))}
+          </ol>
+          <p className="mt-2 break-keep text-sm text-muted">
+            이전 기간의 리뷰는{" "}
+            <BtnLink to="/connect/review-history" size="sm" variant="ghost">
+              과거 리뷰 가져오기
+            </BtnLink>
+            에서 구간별로 채울 수 있습니다.
+          </p>
+        </Disclosure>
+      </Section>
 
-      <Panel
+      <Section
         title="리뷰 수집 실행"
-        description="판매자센터에서 리뷰 파일을 내려받는 작업의 실행 상태와 수집 이력입니다. 사람이 확인해야 하는 지점에서만 멈추고 알려드립니다. 가져온 리뷰를 읽고 답변하는 일은 리뷰 화면에서 합니다."
+        hint="판매자센터에서 리뷰 파일을 내려받는 작업의 상태와 이력"
         action={
           <BtnLink to="/connect/imports" size="sm" variant="outline">
             작업대 열기
@@ -239,7 +229,7 @@ export function ConnectHub() {
         }
       >
         <HomeReviewOpsCard run={liveRun} />
-      </Panel>
+      </Section>
     </>
   );
 }

@@ -51,9 +51,12 @@ export function AppShellV2() {
           <main
             id="main-content"
             tabIndex={-1}
-            className="flex-1 overflow-y-auto px-4 pb-28 pt-6 outline-none md:px-8 md:pb-10"
+            className="flex-1 overflow-y-auto px-4 pb-28 pt-5 outline-none md:px-8 md:pb-10 md:pt-6"
           >
-            <div className="mx-auto max-w-6xl space-y-6">
+            {/* Left-aligned content column, 1120px (docs/reviewnary_design.md §2): a work surface reads
+                from the top-left, and a centred column on a wide monitor floats the page away from the
+                navigation that names it. */}
+            <div className="max-w-content space-y-6">
               {AGENT_PROJECTION_ENABLED && <ProjectionView />}
               <Outlet />
             </div>

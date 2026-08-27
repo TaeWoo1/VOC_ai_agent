@@ -1,128 +1,87 @@
 import { PageHead } from "../../components/ui/PageHead";
-import { Panel } from "../../components/ui/Panel";
+import { ListBox } from "../../components/ui/Section";
+import { ObjectRow } from "../../components/ui/ObjectRow";
 import { Btn, BtnLink } from "../../components/ui/Btn";
 import { useAuth } from "../../lib/auth";
 
 /**
- * 설정 — workspace, alerts, and the account action.
+ * 설정 — a grouped list, not a card wall (docs/reviewnary_design.md §7).
  *
- * Deliberately small. Every row here is either a fact already in the session or a link to a screen
- * that exists; there are no toggles, because a switch that flips nothing is a promise the product
- * does not keep. New settings arrive when the capability behind them does.
+ * Every row is a fact already in the session or a link to a screen that exists; there are no
+ * toggles, because a switch that flips nothing is a promise the product does not keep. The difference
+ * between AI 답변 스타일 and 운영 정책 is said in one line each: Knowledge decides WHAT is answered,
+ * Style decides HOW.
  */
 export function SettingsHome() {
   const { user, logout } = useAuth();
   const onDemoData = import.meta.env.VITE_USE_MOCKS === "true";
 
   return (
-    <>
-      <PageHead title="설정" description="워크스페이스와 연결 알림을 관리합니다." />
+    <div className="space-y-6">
+      <PageHead title="설정" />
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Panel title="워크스페이스">
-          <dl className="space-y-3">
-            <div>
-              <dt className="text-sm text-muted">스토어</dt>
-              <dd className="mt-0.5 break-keep font-medium text-ink">
-                {user?.orgName ?? "내 스토어"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted">사용 중인 계정</dt>
-              <dd className="mt-0.5 break-keep font-medium text-ink">{user?.name ?? "운영자"}</dd>
-            </div>
-            {user?.email ? (
-              <div>
-                <dt className="text-sm text-muted">이메일</dt>
-                <dd className="mt-0.5 break-all font-medium text-ink">{user.email}</dd>
-              </div>
-            ) : null}
-            <div>
-              <dt className="text-sm text-muted">표시 중인 자료</dt>
-              <dd className="mt-0.5 break-keep font-medium text-ink">
-                {onDemoData ? "데모 데이터" : "연결된 자료"}
-              </dd>
-            </div>
-          </dl>
-        </Panel>
+      <ListBox ariaLabel="워크스페이스">
+        <dl className="grid gap-x-8 gap-y-3 px-4 py-4 sm:grid-cols-2">
+          <Fact label="스토어" value={user?.orgName ?? "내 스토어"} />
+          <Fact label="사용 중인 계정" value={user?.name ?? "운영자"} />
+          {user?.email ? <Fact label="이메일" value={user.email} /> : null}
+          <Fact label="표시 중인 자료" value={onDemoData ? "데모 데이터" : "연결된 자료"} />
+        </dl>
+      </ListBox>
 
-        <Panel
-          title="운영 정책 / 답변 기준"
-          description="배송·취소·교환·증빙처럼 상품과 무관한 질문에 답할 때 쓰는 기준입니다."
-          action={
-            <BtnLink to="/settings/policies" size="sm" variant="outline">
-              기준 관리
-            </BtnLink>
-          }
-        >
-          <p className="break-keep leading-relaxed text-muted">
-            여기에 적힌 내용만 답변의 근거로 쓰입니다. 적혀 있지 않은 조건이나 기간은 만들어 쓰지
-            않으므로, 자주 묻는 것부터 적어 두시면 그만큼 답변에 근거가 생깁니다.
-          </p>
-        </Panel>
+      <ListBox ariaLabel="AI 답변과 운영 정책">
+        <ul className="divide-y divide-line/70">
+          <li>
+            <ObjectRow
+              name="운영 정책 / 답변 기준"
+              facets={<span className="break-keep">무엇을 안내할지 — 배송·취소·교환·증빙처럼 상품과 무관한 답변의 근거</span>}
+              action={<BtnLink to="/settings/policies" size="sm" variant="outline">기준 관리</BtnLink>}
+            />
+          </li>
+          <li>
+            <ObjectRow
+              name="AI 답변 스타일"
+              facets={<span className="break-keep">어떻게 말할지 — 말투·길이·인사·호칭. 답변 내용은 바꾸지 않습니다</span>}
+              action={<BtnLink to="/settings/style" size="sm" variant="outline">스타일 설정</BtnLink>}
+            />
+          </li>
+          <li>
+            <ObjectRow
+              name="연결 알림"
+              facets={<span className="break-keep">연결이 끊기거나 확인이 필요할 때. 표시가 없다고 모든 연결이 정상은 아닙니다</span>}
+              action={<BtnLink to="/settings/alerts" size="sm" variant="outline">알림 보기</BtnLink>}
+            />
+          </li>
+        </ul>
+      </ListBox>
 
-        <Panel
-          title="AI 답변 스타일"
-          description="AI가 답변 초안을 쓸 때의 말투와 표현입니다."
-          action={
-            <BtnLink to="/settings/style" size="sm" variant="outline">
-              스타일 설정
-            </BtnLink>
-          }
-        >
-          <p className="break-keep leading-relaxed text-muted">
-            말투와 길이, 첫 인사와 끝 인사, 고객 호칭을 정하실 수 있습니다. 답변에 들어갈 내용은 여기서
-            바뀌지 않습니다 — 무엇을 안내할지는 등록된 답변 기준이 정하고, 이 설정은 그것을 어떻게
-            말할지만 정합니다.
-          </p>
-        </Panel>
+      <ListBox ariaLabel="더 보기">
+        <ul className="divide-y divide-line/70">
+          <li>
+            <ObjectRow name="고객운영 메모리" facets="반복되는 고객 문제와 그 근거" action={<BtnLink to="/memory" size="sm" variant="outline">열기</BtnLink>} />
+          </li>
+          <li>
+            <ObjectRow name="리포트" facets="수집된 자료로 만든 기간 요약" action={<BtnLink to="/reports" size="sm" variant="outline">열기</BtnLink>} />
+          </li>
+        </ul>
+      </ListBox>
 
-        <Panel
-          title="연결 알림"
-          description="연결이 끊기거나 확인이 필요할 때 알려드립니다."
-          action={
-            <BtnLink to="/settings/alerts" size="sm" variant="outline">
-              알림 보기
-            </BtnLink>
-          }
-        >
-          <p className="break-keep leading-relaxed text-muted">
-            확인이 필요한 알림이 있을 때만 상단에 표시됩니다. 표시가 없다고 해서 모든 연결이
-            정상이라는 뜻은 아니므로, 목록에서 직접 확인하실 수 있습니다.
-          </p>
-        </Panel>
+      <ListBox ariaLabel="계정">
+        <ObjectRow
+          name="계정"
+          facets="이 브라우저에서 로그아웃합니다. 수집된 자료는 그대로 남습니다."
+          action={<Btn variant="outline" size="sm" onClick={logout}>로그아웃</Btn>}
+        />
+      </ListBox>
+    </div>
+  );
+}
 
-        <Panel
-          title="더 보기"
-          description="주 메뉴에 두지 않은 화면입니다. 홈의 신호 카드에서도 열립니다."
-        >
-          <ul className="space-y-2">
-            <li>
-              <BtnLink to="/memory" size="sm" variant="outline">
-                고객운영 메모리
-              </BtnLink>
-              <span className="ml-3 break-keep text-sm text-muted">반복되는 고객 문제와 그 근거</span>
-            </li>
-            <li>
-              <BtnLink to="/reports" size="sm" variant="outline">
-                리포트
-              </BtnLink>
-              <span className="ml-3 break-keep text-sm text-muted">수집된 자료로 만든 기간 요약</span>
-            </li>
-          </ul>
-        </Panel>
-
-        <Panel title="계정">
-          <p className="break-keep leading-relaxed text-muted">
-            이 브라우저에서 로그아웃합니다. 수집된 자료는 그대로 남습니다.
-          </p>
-          <div className="mt-4">
-            <Btn variant="outline" size="sm" onClick={logout}>
-              로그아웃
-            </Btn>
-          </div>
-        </Panel>
-      </div>
-    </>
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-sm text-muted">{label}</dt>
+      <dd className="mt-0.5 break-all font-medium text-ink">{value}</dd>
+    </div>
   );
 }

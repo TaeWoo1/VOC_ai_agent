@@ -3,22 +3,20 @@ import type { MetricKpi } from "../../lib/types";
 import { count, wonShort } from "../../lib/format";
 
 /**
- * One headline number, sized to be read first.
+ * One number, sized to be read second (docs/reviewnary_design.md §6, §7).
  *
- * <b>Three layers of type, in a fixed order: label, number, caveat.</b> The audit's first finding was
- * that every card on every screen carried the same weight, so nothing was answered first. A metric is
- * the one element allowed to be loud, and it earns that by being a single number a seller acts on.
+ * <b>Compact by default.</b> The home used to open with three large cards, each with its own orange
+ * caveat sentence; the redesign puts the work first and the numbers under it as one row of compact
+ * metrics — label over number, a delta when the backend says one exists, and the qualification as a
+ * short line only where it differs per number.
  *
- * <b>A delta is drawn only when the backend says one exists.</b> `comparable` is not a styling hint —
- * 미답변 문의 is today's backlog and there is no history to compare it against, so a component that
- * computed its own arrow would be inventing a trend.
+ * <b>A delta is drawn only when the backend says one exists.</b> `comparable` is not a styling hint:
+ * 미답변 문의 is today's backlog with no history, and a component computing its own arrow would be
+ * inventing a trend.
  *
- * <b>Why the freshness mark became a word</b> (Executive-friendly UX Redesign v1). It used to be a
- * dagger with a legend line under the row: `†` plus 「† 표시는 최신 여부를 확인하지 못한 채널이
- * 포함된 숫자입니다」. A typographic dagger is a device an academic reader decodes and a 50-year-old
- * 판매회사 대표 does not — and the legend cost a whole line of the first screen to explain a symbol.
- * The qualification now sits ON the card it qualifies, in four words, and the legend is gone. Nothing
- * was softened: the same cards carry it, and the channel table below still names which channel.
+ * <b>Why the freshness mark is a word, and now said once.</b> 「최신 수집 확인 안 됨」 used to print on
+ * every card that carried it; the row now says it in one shared line (`MetricRow`'s `note`) and the
+ * per-card line remains only for the channel-missing caveat, which differs per number.
  */
 export function Metric({
   kpi,
@@ -26,77 +24,49 @@ export function Metric({
   size = "md",
   onClick,
   beforeFirstConnection = false,
+  showFreshness = true,
 }: {
   kpi: MetricKpi;
   /** The one number this screen is about. At most one per screen. */
   emphasis?: boolean;
-  /** `lg` — 오늘 상태. The three numbers the home screen exists to answer, read from across a desk. */
   size?: "md" | "lg";
   onClick?: () => void;
   /**
-   * **The seller has not connected a channel yet** (Pilot Readiness Gate v1 §4).
-   *
-   * A missing channel is a warning when there is a working total for it to be missing FROM: one of
-   * four channels stopped collecting and the number under the seller's eye is quietly short. Before
-   * the first connection there is no such total — every channel is missing, by definition, and the
-   * seller was told so in the sentence at the top of the page. Rendered in `warn` on a two-minute-old
-   * account it reads as three faults, which is the screen inventing an outage on its first showing.
-   *
-   * It is not hidden: the same fact is said, in the plainer form the seller can act on, in `muted`.
+   * The seller has not connected a channel yet (Pilot Readiness Gate v1 §4): the qualification is the
+   * plainer fact, in `muted`, never three warn sentences on a two-minute-old account.
    */
   beforeFirstConnection?: boolean;
+  /** False when the row above already says it once for every card. */
+  showFreshness?: boolean;
 }) {
   const value = kpi.unit === "원" ? wonShort(kpi.value) : count(kpi.value);
   const caveat = beforeFirstConnection ? "아직 연결된 채널이 없습니다" : caveatFor(kpi);
   const big = size === "lg";
   const body = (
     <>
-      {/* A card that navigates says so (Executive Readiness Fix v1). These have been `<button>`s
-          since the redesign, but nothing on them looked pressable — a reader asked where to go to
-          work through the 26 and concluded 「26이라는 큰 숫자는 눌러지게 안 생겼다」, then went
-          hunting in the sidebar. The chevron is the affordance; the hover tint was not one. */}
-      <p
-        className={`flex items-center gap-1 font-medium text-muted ${big ? "text-base" : "text-sm"}`}
-      >
+      <p className="flex items-center gap-1 text-sm font-medium text-muted">
         {kpi.label}
         {onClick ? (
-          <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4 shrink-0">
-            <path
-              d="M7.5 4.5 13 10l-5.5 5.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+          <svg viewBox="0 0 20 20" aria-hidden="true" className="h-3.5 w-3.5 shrink-0">
+            <path d="M7.5 4.5 13 10l-5.5 5.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         ) : null}
       </p>
-      <p
-        className={`mt-1.5 font-bold tabular-nums text-ink ${
-          big ? "text-4xl" : emphasis ? "text-3xl" : "text-2xl"
-        }`}
-      >
+      <p className={`mt-1 font-bold tabular-nums text-ink ${big ? "text-3xl" : "text-2xl"}`}>
         {value}
-        <span className={`ml-1 font-semibold text-muted ${big ? "text-lg" : "text-base"}`}>
-          {kpi.unit}
-        </span>
+        <span className="ml-1 text-sm font-semibold text-muted">{kpi.unit}</span>
       </p>
-      <div className={big ? "mt-2 min-h-[1.5rem]" : "mt-1.5 min-h-[1.25rem]"}>
-        {kpi.comparable && kpi.deltaPercent !== null ? <Delta percent={kpi.deltaPercent} /> : null}
-        {caveat ? (
-          <p className={`break-keep text-sm ${beforeFirstConnection ? "text-muted" : "text-warn"}`}>
-            {caveat}
-          </p>
-        ) : null}
-        {kpi.freshnessUnproven ? (
-          <p className="break-keep text-sm text-warn">최신 수집 확인 안 됨</p>
-        ) : null}
-      </div>
+      {kpi.comparable && kpi.deltaPercent !== null ? <Delta percent={kpi.deltaPercent} /> : null}
+      {caveat ? (
+        <p className={`mt-1 break-keep text-xs ${beforeFirstConnection ? "text-muted" : "text-warn"}`}>{caveat}</p>
+      ) : null}
+      {showFreshness && kpi.freshnessUnproven ? (
+        <p className="mt-1 break-keep text-xs text-warn">최신 수집 확인 안 됨</p>
+      ) : null}
     </>
   );
 
-  const shell = `rounded-2xl border ${big ? "p-6" : "p-5"} text-left ${
+  const shell = `rounded-2xl border px-4 py-3 text-left ${
     emphasis ? "border-brand/30 bg-brand-50/40" : "border-line bg-surface"
   }`;
   if (!onClick) {
@@ -113,12 +83,7 @@ export function Metric({
   );
 }
 
-/**
- * The caveat line — what is NOT in this number.
- *
- * Only the card-specific qualification is drawn here: a channel MISSING from the total, which
- * differs per number.
- */
+/** The caveat line — a channel MISSING from this total, which differs per number. */
 function caveatFor(kpi: MetricKpi): string | null {
   if (kpi.excludedChannels > 0) {
     return `채널 ${kpi.excludedChannels}곳이 이 숫자에 없습니다`;
@@ -126,31 +91,18 @@ function caveatFor(kpi: MetricKpi): string | null {
   return null;
 }
 
-/**
- * Direction and magnitude — never a judgement.
- *
- * More inquiries is not "bad" and more negative reviews is not "good", and a component cannot know
- * which. The arrow says what changed; the seller decides what it means.
- */
+/** Direction and magnitude — never a judgement. */
 function Delta({ percent }: { percent: number }) {
   if (percent === 0) {
-    return <p className="text-sm text-muted">이전 기간과 같음</p>;
+    return <p className="mt-1 text-xs text-muted">이전 기간과 같음</p>;
   }
   const up = percent > 0;
-  // 「(이전 기간 대비)」 wrapped every card onto a second line and said the same five words six times
-  // across one row. What it compares against is stated ONCE, and exactly, in 「이 숫자에 대하여」 —
-  // with both date ranges. The screen reader still hears the full sentence (Demo UX Polish v1).
   return (
-    <p className="text-sm text-muted">
-      {/* 「이전 기간 대비」 is back on the card (Executive Readiness Fix v1). It was dropped when six
-          KPIs printed it six times and wrapped every one of them; three cards remain and only one
-          ever carries a delta, so it costs one line once — and a bare 「▲397% 증가」 left a reader
-          asking 「무엇 대비인지 없다」. */}
+    <p className="mt-1 text-xs text-muted">
       <span aria-hidden="true">
-        이전 기간 대비{" "}
         {up ? "▲" : "▼"}
-        <span className="ml-1 tabular-nums">{Math.abs(percent)}%</span>
-        <span className="ml-1">{up ? "증가" : "감소"}</span>
+        <span className="ml-0.5 tabular-nums">{Math.abs(percent)}%</span>
+        <span className="ml-1">이전 기간 대비</span>
       </span>
       <span className="sr-only">
         이전 기간 대비 {Math.abs(percent)}% {up ? "증가" : "감소"}
@@ -159,17 +111,11 @@ function Delta({ percent }: { percent: number }) {
   );
 }
 
-/**
- * The numbers that are context, not work — one quiet line, never six more cards.
- *
- * 매출·문의·리뷰 are what the shop DID; 주문·미답변 문의·확인할 리뷰 are what is waiting. Both used to
- * be cards of the same size in the same row, which is why the home screen answered nothing first and
- * why 「문의 2」 sat beside 「미답변 문의 26」 looking like a contradiction.
- */
+/** The numbers that are context, not work — one quiet line. */
 export function MetricLine({ kpis }: { kpis: MetricKpi[] }) {
   if (kpis.length === 0) return null;
   return (
-    <p className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-base text-muted">
+    <p className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm text-muted">
       {kpis.map((kpi) => (
         <span key={kpi.key} className="break-keep">
           {kpi.label}{" "}
@@ -183,12 +129,12 @@ export function MetricLine({ kpis }: { kpis: MetricKpi[] }) {
   );
 }
 
-/** A responsive row of metrics. Two up on phones, six across on a desktop. */
+/** A responsive row of compact metrics: two up on phones, up to four across on a desktop. */
 export function MetricGrid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">{children}</div>;
+  return <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{children}</div>;
 }
 
-/** 오늘 상태 — exactly three, equal width, nothing else in the row. */
+/** Exactly three, equal width. */
 export function MetricRowOfThree({ children }: { children: ReactNode }) {
-  return <div className="grid gap-4 sm:grid-cols-3">{children}</div>;
+  return <div className="grid gap-3 sm:grid-cols-3">{children}</div>;
 }

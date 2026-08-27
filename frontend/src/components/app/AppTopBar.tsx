@@ -2,19 +2,15 @@ import { useAuth } from "../../lib/auth";
 import { ConnectionSignal } from "./ConnectionSignal";
 
 /**
- * Thin utility bar. It deliberately carries no page title — each page owns its own `<h1>` via
- * `PageHead`, so the title sits with the content it names instead of in shared chrome.
- *
- * On mobile the side nav is hidden, so the workspace name appears here instead.
+ * Mobile-only utility bar. On desktop there is no top bar at all (docs/reviewnary_design.md §7): the
+ * page title starts the page, and the connection status lives in the sidebar's status area. Below
+ * `md` the sidebar is hidden, so the workspace name and that status appear here instead.
  */
 export function AppTopBar() {
   const { user } = useAuth();
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface px-4 md:px-8">
-      <p className="min-w-0 truncate text-base font-bold text-ink md:hidden">
-        {user?.orgName ?? "내 스토어"}
-      </p>
-      <div className="hidden md:block" />
+    <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface px-4 md:hidden">
+      <p className="min-w-0 truncate text-base font-bold text-ink">{user?.orgName ?? "내 스토어"}</p>
       <ConnectionSignal />
     </header>
   );

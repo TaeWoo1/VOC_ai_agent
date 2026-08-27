@@ -60,14 +60,15 @@ export function ProductDetail() {
             context={{
               productId,
               surface: "product",
-              goal: `${data.name ?? ""} 상품에 대해 알려 줘`,
+              goal: `${data.name ?? ""} 상품에서 반복되는 문제와 미답변 문의를 분석해 줘`,
             }}
+            label="이 상품 분석하기"
           />
         }
       />
 
       {/* PRIMARY — what is happening to this product. */}
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="이 상품의 신호">
         <Figure label="리뷰" value={volume.reviews} />
         <Figure label="문의" value={volume.inquiries} />
         <Figure label="미답변 문의" value={volume.unansweredInquiries} emphasis />
@@ -220,7 +221,7 @@ function CoverageChip({ row }: { row: KnowledgeCoverageView }) {
 function Figure({ label, value, emphasis }: { label: string; value: number; emphasis?: boolean }) {
   return (
     <div
-      className={`rounded-2xl border p-5 ${
+      className={`rounded-2xl border px-4 py-3 ${
         emphasis ? "border-brand/30 bg-brand-50/40" : "border-line bg-surface"
       }`}
     >

@@ -510,6 +510,38 @@ P1은 그 호스트에서 compose 1회 실행·`VITE_AGENT_RUNTIME_URL` 설정·
 **「모든 채널에서 직접 전송이 안 됨」은 P0로 올리지 않는다**. backend 3,450 tests · frontend 190 files/2,441 tests ·
 실패 0. 마켓플레이스 호출 **0** · WRITE **0** · 모델 **0** · 마이그레이션 **0** ⇒ evidence 행 없음).
 
+**`docs/reviewnary_design.md` v2 = Reviewnary Product UI Redesign v1** (2026-08-27, `frontend/` 전용 · backend
+API contract · domain semantics · Agent safety · Human Approval · routes **무변경**). 기존 IA/레이아웃을 정답으로
+두지 않고 제품 정체성(**AI 판매운영 담당자 · Agent-first · chat-first · object-backed**)에 맞게 clean-sheet로 다시
+설계했다. 먼저 실제 Demo Org 8화면을 스크린샷으로 감사한 뒤 design 문서를 「코드의 기록」에서 **「앞으로 만들 UI의
+source of truth」**로 올렸다(타입 스케일 base 16 · 사이드바 232 · 콘텐츠 1120 · 간격 6단계 · 반지름 8/10/12 ·
+surface 3단계 · GOOD/WARN/BAD/INFO · 화면별 5초 질문). 공통 primitive는 필요해진 만큼만 추출했다 — `Status` ·
+`WorkItem` · `ObjectRow` · `Section`/`ListBox` · compact `Metric` · `AgentCommand`(=`CommandInput`) ·
+context-label `AgentLaunch` — generic framework 0. **글로벌 셸**: 데스크톱 상단 바 제거(페이지 제목이 페이지를
+연다), 「연결 문제 N건」은 모든 화면의 가장 강한 시각 요소였던 warn pill에서 **사이드바 하단의 secondary 상태 줄**로,
+「AI에게 묻기」는 화면마다 **객체를 이름으로 부르는 라벨**(「이 상품 분석하기」·「이 문의 조사하기」·「문의에서도
+반복되는지 확인」)로. **홈**: 브리핑 문장 → 명령 상자 → 먼저 볼 일(초안·AI가 먼저 확인한 일·눈여겨볼 것이 한
+컨테이너의 행) → compact 숫자(freshness 경고는 카드마다가 아니라 **한 줄**) → 추이(2:1) → 채널별 → 「이 숫자에
+대하여」는 disclosure. **상품**: SKU 표 폐기 → 이름 · `채널 · 문의 · 리뷰 · 답변 기준` facet · 열기, 상품당 signals +
+knowledge source **fail-soft 2회 읽기**(≤20행), 정렬은 미답변→문제 근거→리뷰 순의 **표현 규칙**이고 「(미지정 상품)」은
+항상 마지막(`lib/productRows.ts`; backend 무변경). **리뷰**: 「확인 필요 N건 + 이 N건만 보기」와 **반복되는 문제**가
+목록 위에, 행은 `상태 단어 · ★ · 문장 · 상품`이고 분류 내부는 xs. **문의**: 행의 첫 단어가 work state(`초안 준비됨`은
+queue phase에서, `답변 필요`·`답변함`은 feed에서), **1년 넘은 답변 필요 문의는 자기 divider 아래 muted**로(최근 답변
+필요 → 오래된 답변 필요 → 나머지; divider는 heading이 아니다), rail은 상품명을 뺀다. **주문**: 필터 최상단 →
+숫자 4 → 추이 1 → 채널별 매출 표(막대) — 「운영 인사이트」 카드는 데이터가 말하므로 삭제. **채널 연결**: 행마다
+primary 1개(상태가 정한다), 리뷰 기록은 텍스트 링크, 오류 상세는 disclosure. **설정**: 카드 벽 → 그룹 리스트,
+Knowledge=무엇을 / Style=어떻게 한 줄씩. 텍스트 감소는 실측 — 홈 설명문 12문장→4, 채널 17→1, 설정 14→2, 주문
+4→0(시각 QA 스크립트가 `[다요]\.` 문장 수를 센다). **Browser-first 2회 iteration**: 1차 critique로 리뷰 별점 중복 ·
+문의 정렬(오래된 답변 필요가 최근 답변함 아래로 밀리던 것) · rail 3줄 wrap · 상품 0 facet 소음 · `AI 확인 필요` chip
+크기 · 리뷰 수집 카드 h2를 고쳤고, 2차에서 7 route **텍스트 노드 AA 위반 0**(틴트 위 합성 실측; 유일한 위반은
+장식 「·」 글리프였고 그려진 점으로 교체) · 가로 스크롤 0 · 콘솔 오류 0 · off-host 요청 0. 테스트 계약 변경 **1건**을
+정직하게 적는다: `ChannelList.reviewEntry.test`의 「리뷰 기록 링크가 healthy 행의 solid CTA」는 새 계약(행당 primary 1)과
+충돌해 **새 계약으로 다시 썼다**(링크·카운트·미숨김 보장은 유지). 193 files / 2,455 tests / 실패 0.
+**마켓플레이스 호출 0 · WRITE 0 · 모델 호출 0 · DB 변경 0 · 마이그레이션 0** ⇒ evidence 행 없음. **고치지 않고
+보고한 것**: 상품 이름이 숫자 코드인 행(데이터 사실), 데모 org의 NAVER 미답변 1건이 work item 없이 「답변 방향을
+제안할 수 없습니다」로 뜨는 것(백엔드 큐 범위), `/agent` 화면 자체는 셸만 새것이고 내부 구성은 무변경, 그리고
+before/after 스크린샷은 실제 고객 문장을 담아 저장소 밖(scratchpad)에 둔다.
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

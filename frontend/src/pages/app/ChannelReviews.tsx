@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { analytics } from "../../lib/analytics";
 import { useParams, useSearchParams } from "react-router-dom";
 import { channelDataTypeLabel } from "../../lib/channelVocabulary";
-import { Panel } from "../../components/ui/Panel";
+import { Section, ListBox } from "../../components/ui/Section";
+import { Status, type StatusTone } from "../../components/ui/Status";
+import { Disclosure } from "../../components/ui/Disclosure";
 import { Empty } from "../../components/ui/Empty";
 import { Chip } from "../../components/ui/Chip";
 import { Btn, BtnLink } from "../../components/ui/Btn";
@@ -23,7 +25,6 @@ import {
   TRIAGE_FEEDBACK_LABEL,
   TRIAGE_TAG_DISCLOSURE,
   TRIAGE_TIERS,
-  TRIAGE_TIER_CLASS,
   TRIAGE_TIER_LABEL,
 } from "../../lib/reviewTriage";
 import type { ActionWindowRunView } from "../../../../contracts/action-window/v2/index";
@@ -300,37 +301,19 @@ export function ChannelReviews({
         The record's own heading — which channel, how big, how fresh. The screen's h1 ("리뷰") and the
         workflow sentence live on the 리뷰 surface above; this row is what one account adds to it.
       */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="break-keep text-lg font-semibold text-ink">{channelName ?? word}</h2>
-          {/*
-            ONE LINE OF CONTEXT, NOT THREE CHIPS AND A PARAGRAPH (Executive-friendly UX Redesign v1).
-
-            This block used to be a two-line sentence explaining what the screen is for — which the
-            page heading above it already says — followed by a row of three chips. Between the h1 and
-            the first review there were seven stacked blocks, roughly 610px at 1440×900, so a seller
-            arriving here scrolled before seeing a single customer's words.
-
-            The record's size and its collection state still have to be visible: the size is what
-            tells a seller the list is a slice, and 「수집 기록 없음」 is a claim about what SellerOps
-            can and cannot see. They are one quiet line instead of three pills.
-          */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <h2 className="break-keep text-base font-semibold text-ink">{channelName ?? word}</h2>
           {page ? (
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted">
+            <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted">
               <span className="tabular-nums">{`총 ${recordTotal(page)}개`}</span>
               {page.newCount > 0 ? (
-                <span className="font-semibold tabular-nums text-brand-700">
-                  {`새로 들어온 ${page.newCount}개`}
-                </span>
+                <span className="font-semibold tabular-nums text-brand-700">{`새로 들어온 ${page.newCount}개`}</span>
               ) : null}
               <span>
-                {page.lastImportAt
-                  ? `마지막 수집 ${formatDateTime(page.lastImportAt)}`
-                  : "마지막 수집 시각 기록 없음"}
+                {page.lastImportAt ? `마지막 수집 ${formatDateTime(page.lastImportAt)}` : "마지막 수집 시각 기록 없음"}
               </span>
-              {/* WHO WRITES THE ANSWER stays on the screen, in one clause instead of two sentences.
-                  It is a capability fact, not decoration: on a channel with no proven reply write,
-                  a seller must not be able to read this list as somewhere answers go out from. */}
+              {/* WHO WRITES THE ANSWER: a capability fact, not decoration. */}
               {capability === null ? null : capability.replySupported ? (
                 <span>답변은 여기서 준비하고, 올리는 일은 판매자센터에서 직접 합니다</span>
               ) : (
@@ -339,7 +322,7 @@ export function ChannelReviews({
             </p>
           ) : null}
         </div>
-        <BtnLink to={`/connect/channels/${accountId}`} variant="outline" size="sm">
+        <BtnLink to={`/connect/channels/${accountId}`} variant="ghost" size="sm">
           채널 설정
         </BtnLink>
       </div>
@@ -374,67 +357,62 @@ export function ChannelReviews({
       {/* NAME THE CONTROL (Executive Readiness Fix v1). Sort and filter were two unlabelled rows of
           chips with one solid chip each, and a reader with no explanation saw 「파란 버튼이 두 개다 —
           어느 쪽이 지금 상태인지 구분이 안 된다」. Each row now says what it is. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold text-muted">정렬</span>
-        {(
-          [
-            ["attention", "확인 필요순"],
-            ["newest", "최신순"],
-            ["lowest", "낮은 평점순"],
-          ] as const
-        ).map(([value, label]) => (
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        {/* The tier filter is separate from the sort and survives a sort change. Order is the
+            workflow's: 확인 필요 → 지켜보기 → 참고, then 전체 — what to look at first comes first. */}
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="분류 필터">
+          <span className="sr-only">보기</span>
+          {TRIAGE_TIERS.map((value) => (
+            <Btn
+              key={value}
+              variant={tier === value ? "solid" : "outline"}
+              size="sm"
+              aria-pressed={tier === value}
+              onClick={() => {
+                setTier(value);
+                setPageIndex(0);
+              }}
+            >
+              {TRIAGE_TIER_LABEL[value]} {page ? tierCount(page, value) : 0}
+            </Btn>
+          ))}
           <Btn
-            key={value}
-            variant={sort === value ? "solid" : "outline"}
+            variant={tier === null ? "solid" : "outline"}
             size="sm"
-            aria-pressed={sort === value}
+            aria-pressed={tier === null}
             onClick={() => {
-              setSort(value);
-              setPageIndex(0);
-              setSelectedId(null);
-            }}
-          >
-            {label}
-          </Btn>
-        ))}
-      </div>
-
-      {/*
-        The tier filter is separate from the sort and survives a sort change — an operator who
-        narrowed to 확인 필요 and then asked for 최신순 wants the newest of those.
-      */}
-      {/*
-        The tier filter is separate from the sort and survives a sort change — an operator who
-        narrowed to 확인 필요 and then asked for 최신순 wants the newest of those. Order is the
-        workflow's: 확인 필요 → 지켜보기 → 참고, then 전체 — what to look at first comes first.
-      */}
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="분류 필터">
-        <span className="text-sm font-semibold text-muted">보기</span>
-        {TRIAGE_TIERS.map((value) => (
-          <Btn
-            key={value}
-            variant={tier === value ? "solid" : "outline"}
-            size="sm"
-            aria-pressed={tier === value}
-            onClick={() => {
-              setTier(value);
+              setTier(null);
               setPageIndex(0);
             }}
           >
-            {TRIAGE_TIER_LABEL[value]} {page ? tierCount(page, value) : 0}
+            전체 {page ? recordTotal(page) : 0}
           </Btn>
-        ))}
-        <Btn
-          variant={tier === null ? "solid" : "outline"}
-          size="sm"
-          aria-pressed={tier === null}
-          onClick={() => {
-            setTier(null);
-            setPageIndex(0);
-          }}
-        >
-          전체 {page ? recordTotal(page) : 0}
-        </Btn>
+        </div>
+        <div className="flex items-center gap-0.5 rounded-lg bg-canvas p-0.5" role="group" aria-label="정렬">
+          {(
+            [
+              ["attention", "확인 필요순"],
+              ["newest", "최신순"],
+              ["lowest", "낮은 평점순"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={sort === value}
+              onClick={() => {
+                setSort(value);
+                setPageIndex(0);
+                setSelectedId(null);
+              }}
+              className={`min-h-[32px] rounded-md px-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 ${
+                sort === value ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loadError ? (
@@ -486,38 +464,44 @@ export function ChannelReviews({
               : "grid gap-6"
           }
         >
-          <Panel title="목록" description={shownRangeLabel(page)}>
-            <ul className="divide-y divide-line">
+          <Section title="목록" hint={shownRangeLabel(page)}>
+            <ListBox>
+            <ul className="divide-y divide-line/70">
               {(page?.items ?? []).map((item) => (
                 <li key={item.id}>
                   <button
                     type="button"
                     onClick={() => setSelectedId(item.id)}
                     aria-current={selectedId === item.id ? "true" : undefined}
-                    className={`w-full rounded-lg px-2 py-3 text-left transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 ${
-                      selectedId === item.id ? "bg-canvas" : ""
+                    className={`block w-full px-4 py-3 text-left transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700 ${
+                      selectedId === item.id ? "bg-brand-50/70" : ""
                     }`}
                   >
-                    <span className="flex flex-wrap items-center gap-2">
+                    {/* Issue-first row (docs/reviewnary_design.md §7): the tier word, the stars, the date;
+                        then the sentence; then the product. The classification internals fold. */}
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <TriageTierChip tier={item.triage.tier} />
                       {item.aiMark ? <AiMarkChip /> : null}
-                      <span className="font-semibold text-ink">{ratingLabel(item.rating)}</span>
+                      <span className="text-sm font-semibold tabular-nums text-ink">{ratingLabel(item.rating)}</span>
                       <span className="text-sm text-muted">{item.writtenOn ?? "날짜 없음"}</span>
                       {item.isNew ? <Chip tone="accent">새 {word}</Chip> : null}
                       {item.mediaCount > 0 ? <Chip>사진·영상 {item.mediaCount}</Chip> : null}
                     </span>
                     <span
-                      className={`mt-1 block break-keep text-base ${item.textless ? "text-muted" : "text-ink"}`}
+                      className={`mt-0.5 block break-keep text-base font-semibold leading-snug ${item.textless ? "font-normal text-muted" : "text-ink"}`}
                     >
                       {/* A textless review is what the buyer chose, not something we failed to show. */}
                       {item.textless
                         ? `별점만 남긴 ${word}`
                         : (previewText(item.preview) || "표시할 수 있는 본문이 없습니다")}
                     </span>
-                    <TriageReason note={item.triage} />
-                    <span className="mt-1 block truncate text-sm text-muted">
+                    <span className="mt-0.5 block truncate text-sm text-muted">
                       {item.productName ?? item.productId ?? "상품 정보 없음"}
                     </span>
+                    {item.triage.recommendedAction ? (
+                      <span className="mt-0.5 block break-keep text-sm text-ink">{item.triage.recommendedAction}</span>
+                    ) : null}
+                    <span className="mt-0.5 block text-xs text-muted">{item.triage.reason}</span>
                   </button>
                 </li>
               ))}
@@ -529,7 +513,7 @@ export function ChannelReviews({
               reach the other two. The buttons move the window; the label says which window is open.
             */}
             {totalPages > 1 ? (
-              <nav className="mt-4 flex items-center justify-between gap-3" aria-label={`${word} 목록 페이지`}>
+              <nav className="flex items-center justify-between gap-3 border-t border-line px-4 py-3" aria-label={`${word} 목록 페이지`}>
                 <Btn
                   size="sm"
                   variant="outline"
@@ -562,10 +546,12 @@ export function ChannelReviews({
                 </Btn>
               </nav>
             ) : null}
-          </Panel>
+            </ListBox>
+          </Section>
 
           {selectedId ? (
-          <Panel title="상세">
+          <Section title="상세">
+            <div className="rounded-2xl border border-line bg-surface p-4">
             {detailError ? (
               <p className="text-muted">{josa(word, "을", "를")} 불러오지 못했습니다.</p>
             ) : detail ? (
@@ -587,7 +573,8 @@ export function ChannelReviews({
             ) : (
               <p className="text-muted">불러오는 중…</p>
             )}
-          </Panel>
+            </div>
+          </Section>
           ) : null}
         </div>
       )}
@@ -803,7 +790,7 @@ function ReviewDetail({
 function AiMarkChip() {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${AI_TRIAGE_MARK_CLASS}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${AI_TRIAGE_MARK_CLASS}`}
       title={AI_TRIAGE_DISCLOSURE}
     >
       {AI_TRIAGE_MARK_LABEL}
@@ -932,13 +919,17 @@ function TriageFeedbackControls({
  * a status claim, and widening it to give 확인 필요 its colour would remove that fence for every
  * other surface.
  */
+const TIER_TONE: Record<ReviewTriageTier, StatusTone> = {
+  NEEDS_ATTENTION: "warn",
+  WATCH: "neutral",
+  FYI: "neutral",
+};
+
 function TriageTierChip({ tier }: { tier: ReviewTriageTier }) {
   return (
-    <span
-      className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${TRIAGE_TIER_CLASS[tier]}`}
-    >
+    <Status tone={TIER_TONE[tier]} variant="word">
       {TRIAGE_TIER_LABEL[tier]}
-    </span>
+    </Status>
   );
 }
 
@@ -985,36 +976,39 @@ function TriageSummary({
 }) {
   const { needsAttention, repeatedCategories } = page.triageSummary;
   return (
-    <div className="rounded-xl border border-line bg-canvas px-4 py-3 leading-relaxed">
-      <p className="text-base font-semibold text-ink">
-        {needsAttention > 0 ? (
-          <>
-            지금 확인이 필요한 {word} <b>{needsAttention}건</b>
-          </>
-        ) : (
-          `지금 확인이 필요한 ${josa(word, "은", "는")} 없습니다`
-        )}
-        {page.newCount > 0 ? <span className="text-muted"> · 새로 들어온 {page.newCount}건</span> : null}
-      </p>
-      {needsAttention > 0 && showOnlyAttention ? (
-        <div className="mt-2">
-          {/* Solid: it is the action the sentence above it recommends. As an outline button it was
-              the faintest control on a screen whose loudest chip was 「전체 4340」. */}
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3">
+        <p className="text-base font-semibold text-ink">
+          {needsAttention > 0 ? (
+            <>
+              지금 확인이 필요한 {word} <b className="tabular-nums">{needsAttention}건</b>
+            </>
+          ) : (
+            `지금 확인이 필요한 ${josa(word, "은", "는")} 없습니다`
+          )}
+          {page.newCount > 0 ? <span className="text-sm font-normal text-muted"> · 새로 들어온 {page.newCount}건</span> : null}
+        </p>
+        {needsAttention > 0 && showOnlyAttention ? (
           <Btn size="sm" onClick={showOnlyAttention}>
             {`이 ${needsAttention}건만 보기`}
           </Btn>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
       {repeatedCategories.length > 0 ? (
-        <>
-          <p className="mt-1 text-sm text-muted">
-            반복되는 분류 ·{" "}
-            {repeatedCategories.map((c) => `${c.category} ${c.count}건`).join(" · ")}
-          </p>
-          {/* The caveat stays — it says the categories are a keyword guess — but it is not the same
-              size as the count it qualifies. */}
-          <p className="mt-1 text-sm text-muted">{TRIAGE_TAG_DISCLOSURE}</p>
-        </>
+        <div className="rounded-2xl border border-line bg-surface px-4 py-3">
+          <p className="text-sm font-semibold text-muted">반복되는 문제</p>
+          <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+            {repeatedCategories.map((c) => (
+              <li key={c.category} className="text-base font-medium tabular-nums text-ink">
+                {`${c.category} ${c.count}건`}
+              </li>
+            ))}
+          </ul>
+          {/* The caveat stays — the categories are a keyword guess — folded, not the same size as the count. */}
+          <Disclosure label="분류 기준" className="mt-1" summaryClassName="px-0 text-xs">
+            <p className="mt-1 break-keep text-xs text-muted">{TRIAGE_TAG_DISCLOSURE}</p>
+          </Disclosure>
+        </div>
       ) : null}
     </div>
   );

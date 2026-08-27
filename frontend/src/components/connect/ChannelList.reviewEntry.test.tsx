@@ -143,12 +143,14 @@ describe("ChannelList — the 상품평 entry", () => {
     );
   });
 
-  it("is the row's loud action while the connection is healthy", () => {
+  it("is a text link beside the row's facts — one primary control per row, and it is the state's", () => {
     renderList({ reviewCounts: new Map([["acc-cp", 22]]) });
-    // `solid` — the record is where a connected seller is going; 연결 관리 is how it got there.
-    expect(screen.getByRole("link", { name: "쿠팡 상품평 22개 보기" }).className).toContain(
-      "bg-brand-700",
-    );
+    // Reviewnary Product UI Redesign v1 (docs/reviewnary_design.md §7 채널 연결): a row carries ONE
+    // primary action, decided by the connection state. The record's way in stays, with its count,
+    // as a link — never solid, never hidden.
+    const link = screen.getByRole("link", { name: "쿠팡 상품평 22개 보기" });
+    expect(link.className).not.toContain("bg-brand-700");
+    expect(screen.getByRole("button", { name: "연결 관리" })).toBeInTheDocument();
   });
 
   it("steps back when collection is failing, without going away", () => {
@@ -167,11 +169,9 @@ describe("ChannelList — the 상품평 entry", () => {
   it("wraps on a narrow row instead of hiding at a breakpoint", () => {
     renderList({ reviewCounts: new Map([["acc-cp", 22]]) });
     const link = screen.getByRole("link", { name: "쿠팡 상품평 22개 보기" });
-    const actions = link.parentElement!;
-    // Both actions sit in one wrapping group: at a narrow width they fall under the row's text
+    // The entry sits in the row's wrapping facet line: at a narrow width it falls under the name
     // rather than being clipped or pushed off the edge.
-    expect(actions.className).toContain("flex-wrap");
-    expect(actions).toContainElement(screen.getByRole("button", { name: "연결 관리" }));
+    expect(link.parentElement!.className).toContain("flex-wrap");
     // Nothing in the chain from the entry up to the row is display-toggled by viewport width —
     // the one failure this unit exists to prevent is a way in that is present but unseen.
     for (let node: HTMLElement | null = link; node; node = node.parentElement) {

@@ -15,16 +15,16 @@
 
 @layer components {
   .card {
-    @apply bg-surface rounded-2xl shadow-card border border-line/60 p-6;
+    @apply bg-surface rounded-2xl border border-line p-5;
   }
   /* `bg-brand-700`, not `bg-brand` — white on #3182F6 measures 3.71:1 and misses AA. The `Btn`
      primitive was moved to brand-700 in the previous package; this legacy class was not, and it is
      still the primary CTA on the Agent screen and on every guided-connection / tutorial screen
      (58 call sites). Executive Readiness Fix v1. */
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-xl bg-brand-700 px-5 py-3 text-lg font-semibold text-white transition hover:bg-brand-800 disabled:bg-canvas disabled:text-muted;
+    @apply inline-flex min-h-[44px] items-center justify-center rounded-lg bg-brand-700 px-5 py-2.5 text-base font-semibold text-white transition hover:bg-brand-800 disabled:bg-canvas disabled:text-muted;
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center rounded-xl border border-line px-4 py-2.5 font-medium text-ink transition hover:bg-canvas;
+    @apply inline-flex min-h-[40px] items-center justify-center rounded-lg border border-line bg-surface px-4 py-2 font-medium text-ink transition hover:bg-canvas;
   }
 }

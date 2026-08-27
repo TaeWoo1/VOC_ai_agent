@@ -58,17 +58,28 @@ export default {
         // raised to 17px — so the gap between a headline and the line under it grew instead of the
         // whole scale moving. Metadata is where this product says what it does NOT know, and 12px
         // is where that stops being read.
+        // Reviewnary Product UI Redesign v1 (docs/reviewnary_design.md §1). `base` 16 is the floor for
+        // 40-50대 eyes; the steps above it are tighter than before so a page title no longer competes
+        // with the briefing sentence, and metadata (`sm`) is still a size that is read.
         xs: ["13px", "1.5"],
         sm: ["15px", "1.6"],
-        base: ["17px", "1.6"],
-        lg: ["19px", "1.5"],
-        xl: ["22px", "1.4"],
-        "2xl": ["28px", "1.3"],
-        "3xl": ["34px", "1.2"],
+        base: ["16px", "1.6"],
+        lg: ["18px", "1.5"],
+        xl: ["22px", "1.35"],
+        "2xl": ["26px", "1.25"],
+        "3xl": ["32px", "1.2"],
       },
+      // §4: 8px controls (Tailwind `lg`), 10px rows, 12px cards. The 16/20px of the previous shell read
+      // as a consumer app; an operations workspace has edges.
       borderRadius: {
-        xl: "16px",
-        "2xl": "20px",
+        xl: "10px",
+        "2xl": "12px",
+      },
+      width: {
+        sidebar: "232px",
+      },
+      maxWidth: {
+        content: "1120px",
       },
       boxShadow: {
         card: "0 1px 3px rgba(0,0,0,0.04), 0 6px 16px rgba(0,0,0,0.04)",

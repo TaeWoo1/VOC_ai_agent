@@ -11,6 +11,7 @@ import type {
   ProactiveCaseListResponse,
   ProactiveSummaryView,
   ProductKnowledgeView,
+  ProductSignalsView,
   InquiryProductBindingView,
   ProductSummaryView,
   CredentialDiagnosisView,
@@ -1645,6 +1646,14 @@ export const api = {
     const params = new URLSearchParams({ limit: String(limit) });
     if (q && q.trim()) params.set("q", q.trim());
     const { data } = await http.get<ProductSummaryView[]>(`/api/products?${params.toString()}`);
+    return data;
+  },
+
+  /** One product's signals and coverage verdicts — the light read a list row needs. */
+  async getProductSignalsStrict(productId: string): Promise<ProductSignalsView> {
+    const { data } = await http.get<ProductSignalsView>(
+      `/api/products/${encodeURIComponent(productId)}/signals`,
+    );
     return data;
   },
 

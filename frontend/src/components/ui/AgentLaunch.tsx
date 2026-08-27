@@ -3,31 +3,34 @@ import type { AgentContext } from "../../lib/agentContext";
 import { agentHref } from "../../lib/agentContext";
 
 /**
- * The one way into the Agent, offered from every operations screen.
+ * The Agent, entered from the context that owns the object (docs/reviewnary_design.md §6, §8).
  *
- * <b>`nav.v2.ts` already said this was the design</b> — "an action offered inside the operations
- * screens, not a destination" — and then no screen offered it, so `/agent` was reachable only by
- * typing the URL. This component is the missing half.
+ * <b>The label names the object in view.</b> A generic 「AI에게 묻기」 in the top-right of every page was
+ * the product's only Agent affordance, and it said the same thing on a product, an inquiry and a
+ * settings screen. Now the screen chooses: 「이 상품 분석하기」, 「이 문의 조사하기」, 「문의에서도
+ * 반복되는지 확인」. The default label stays for the surfaces that have no single object.
  *
- * <b>It navigates; it does not ask.</b> The suggested sentence arrives in the Agent's input box and
- * the seller sends it. Nothing here starts a run, so nothing here can spend the org's daily budget by
- * being clicked on the way past.
+ * <b>It navigates; it does not ask.</b> The sentence arrives in the Agent's input and the seller sends
+ * it. Nothing here starts a run.
  */
 export function AgentLaunch({
   context,
   label = "AI에게 묻기",
   className,
+  size = "sm",
 }: {
   context?: AgentContext;
   label?: string;
   className?: string;
+  size?: "sm" | "md";
 }) {
+  const sizing = size === "md" ? "min-h-[40px] px-4 text-base" : "min-h-[36px] px-3 text-sm";
   return (
     <Link
       to={agentHref(context)}
-      className={`inline-flex min-h-[36px] items-center gap-2 rounded-xl border border-line px-3 py-1.5 text-sm font-semibold text-ink transition hover:border-brand/40 hover:bg-brand-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 ${className ?? ""}`}
+      className={`inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface font-semibold text-ink transition hover:border-brand/40 hover:bg-brand-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 ${sizing} ${className ?? ""}`}
     >
-      <span aria-hidden="true">✳︎</span>
+      <span aria-hidden="true" className="text-brand-700">✳︎</span>
       {label}
     </Link>
   );

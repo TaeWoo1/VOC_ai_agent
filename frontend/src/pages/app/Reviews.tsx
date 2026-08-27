@@ -11,18 +11,12 @@ import type { ChannelResponse, SellerAccountResponse } from "../../lib/types";
 import { ChannelReviews } from "./ChannelReviews";
 
 /**
- * 리뷰 — the workflow surface for reviews (`docs/product_assembly_ia_v1.md` §3).
+ * 리뷰 — the workflow surface for reviews (`docs/product_assembly_ia_v1.md` §3), issue-first
+ * (docs/reviewnary_design.md §7).
  *
- * The data behind it is per account: each connected channel keeps its own review record, with its
- * own capability (AI 확인 필요 suggestion, locate-on-marketplace, reply flow) that the record page
- * reads from the server. This page does not re-implement any of that. It answers one question the
- * record page cannot — "which channel's reviews?" — with a switcher over the org's review-capable
- * accounts, and then renders the record for the chosen one. A channel is a filter here, never a
- * destination: adding a channel adds a chip, not a screen.
- *
- * `/reviews` with no account opens the first account in product order (NAVER, Coupang, Cafe24).
- * `/reviews/:accountId` is the record itself; the pre-assembly `/connect/channels/:accountId/reviews`
- * redirects here.
+ * The data behind it is per account; this page answers only "which channel's reviews?" with a
+ * segmented switcher and renders the record for the chosen one. A channel is a filter, never a
+ * destination. `/reviews` with no account opens the first account in product order.
  */
 export function Reviews() {
   const { accountId } = useParams();
@@ -57,7 +51,7 @@ export function Reviews() {
     return (
       <>
         <PageHead title="리뷰" />
-        <p className="text-muted">불러오는 중…</p>
+        <p className="text-sm text-muted">불러오는 중…</p>
       </>
     );
   }
@@ -76,7 +70,7 @@ export function Reviews() {
   if (targets.length === 0) {
     return (
       <>
-        <PageHead title="리뷰" description="연결된 채널에서 수집한 리뷰를 확인이 필요한 것부터 봅니다." />
+        <PageHead title="리뷰" />
         <Empty
           title="리뷰를 볼 채널이 아직 없습니다"
           body="네이버 스마트스토어, 쿠팡, 카페24 중 하나를 연결하면 그 채널의 리뷰가 여기에 모입니다."
@@ -86,7 +80,6 @@ export function Reviews() {
     );
   }
   if (!accountId) {
-    // Carry `?tier=` / `?review=` through so a filtered deep link without an account still lands filtered.
     return <Navigate to={`${reviewRecordPath(targets[0].account.id)}${search}`} replace />;
   }
 
@@ -95,51 +88,33 @@ export function Reviews() {
     <div className="space-y-5">
       <PageHead
         title="리뷰"
-        description={REVIEWS_DESCRIPTION}
+        meta={<span className="text-sm text-muted">{REVIEWS_DESCRIPTION}</span>}
         action={
-          <AgentLaunch
-            context={{ surface: "reviews", goal: "반복되는 리뷰 문제를 상품별로 정리해 줘" }}
-          />
+          <>
+            {targets.length > 1 ? <ChannelSwitcher targets={targets} selectedAccountId={accountId} /> : null}
+            <AgentLaunch
+              context={{ surface: "reviews", goal: "반복되는 리뷰 문제가 문의에서도 반복되는지 확인해 줘" }}
+              label="문의에서도 반복되는지 확인"
+            />
+          </>
         }
       />
-      {/* One account: the record's own heading names it, so a one-chip switcher would only repeat it. */}
-      {targets.length > 1 ? <ChannelSwitcher targets={targets} selectedAccountId={accountId} /> : null}
       <ChannelReviews channelName={selected?.label} />
     </div>
   );
 }
 
-/**
- * The workflow sentence: what this screen is for and in what order. 확인 필요 is the rules tier;
- * AI 확인 필요 is the pilot's additive suggestion (rules own the tier — `docs/workstreams/review_ai_triage_demo.md`).
- */
-/**
- * One line, and it answers 「이 화면은 무엇인가」 (Executive-friendly UX Redesign v1).
- *
- * It used to also explain HOW the ordering is computed — 「확인 필요는 별점과 본문 유무로 정하고, AI
- * 확인 필요는 AI가 더한 제안입니다」 — which is a rule the tier chips below already state by existing,
- * and it wrapped onto two lines above a screen that already had six stacked blocks before its first
- * review.
- */
+/** One line, and it answers 「이 화면은 무엇인가」. */
 export const REVIEWS_DESCRIPTION = "확인이 필요한 리뷰부터 봅니다.";
 
-/** One chip per review-capable account; rendered only when there are several. */
-function ChannelSwitcher({
-  targets,
-  selectedAccountId,
-}: {
-  targets: readonly ReviewAccount[];
-  selectedAccountId: string;
-}) {
-  // Switching channel keeps the filter (`?tier=`) and drops the selection (`?review=` names a
-  // review of the account being left) — so no stale param crosses over.
+/** One segment per review-capable account; rendered only when there are several. */
+function ChannelSwitcher({ targets, selectedAccountId }: { targets: readonly ReviewAccount[]; selectedAccountId: string }) {
   const [searchParams] = useSearchParams();
   const carried = new URLSearchParams(searchParams);
   carried.delete("review");
   const search = carried.toString() ? `?${carried.toString()}` : "";
   return (
-    <nav aria-label="리뷰 채널" className="flex flex-wrap items-center gap-2">
-      <span className="text-sm font-semibold text-muted">채널</span>
+    <nav aria-label="리뷰 채널" className="flex items-center gap-0.5 rounded-lg bg-canvas p-0.5">
       {targets.map(({ account, label }) => {
         const active = account.id === selectedAccountId;
         return (
@@ -147,8 +122,8 @@ function ChannelSwitcher({
             key={account.id}
             to={`${reviewRecordPath(account.id)}${search}`}
             aria-current={active ? "page" : undefined}
-            className={`min-h-[36px] rounded-lg px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 ${
-              active ? "bg-brand-50 text-brand-700" : "text-muted hover:bg-canvas hover:text-ink"
+            className={`min-h-[32px] whitespace-nowrap rounded-md px-2.5 py-1 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 ${
+              active ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink"
             }`}
           >
             {label}

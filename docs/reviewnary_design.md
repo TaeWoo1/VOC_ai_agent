@@ -1,239 +1,234 @@
-# reviewnary Design Contract v1
+# reviewnary Design Contract v2
 
-**Status:** 2026-08-27 · Agent Command Center v1 §10 · `frontend/` only · **not a token migration**
+**Status:** 2026-08-27 · Reviewnary Product UI Redesign v1 · `frontend/` only · **source of truth for new UI**
 
-This is a written record of the design decisions this product has already made, so the next screen
-does not re-decide them. It describes what is **in the code today** (`frontend/tailwind.config.ts`,
-`src/components/ui/`) plus the rules the last three UX packages arrived at. Nothing here is
-aspirational; a rule that the code does not follow is marked as such.
+v1 of this document was a record of what the code already did. v2 is the other thing: the contract the
+code is built to. Where the code and this document disagree, the code is wrong.
 
-**It is not a design system rewrite.** No new palette, no new type family, no new component library,
-no token renaming. The rules below are constraints on new work.
+Product identity it serves: **reviewnary is an AI 판매운영 담당자** — it looks first, investigates,
+decides what to prepare, prepares it, asks when it must, and executes only behind a human approval.
+The UI is **Agent-first, chat-first, object-backed**: a sentence carries intent, and the work is shown
+by the structured surface that already owns it. Never chat-only; never dashboard-plus-a-button.
 
 ---
 
-## 0. Who this is for
+## 0. Who reads it, and the pass mark
 
-A **40–50대 non-technical owner of a small manufacturing/selling company**, on a desktop browser,
-often at 110–125% zoom, glancing at the screen between other work.
+A **40–50대 non-technical owner** of a small selling/manufacturing company, desktop browser, often
+110–125% zoom, glancing between other work.
 
-The pass mark, unchanged since Executive-friendly UX Redesign v1: **in 30 seconds, can they see
-what the situation is, what the problem is, what the AI did, and what they should press?**
+Every screen must answer its one question **in five seconds, without reading a paragraph**:
 
-Two consequences that outrank every other rule in this document:
+| Screen | Question |
+|---|---|
+| 홈 | 오늘 무엇을 해야 하지? |
+| 상품 | 어떤 상품에 문제가 있지? |
+| 리뷰 | 어떤 리뷰를 봐야 하지? |
+| 문의 | 어떤 문의부터 처리하지? |
+| 주문 | 지금 판매 상황은 어떻지? |
+| 채널 연결 | 어디 연결에 문제가 있지? |
+| 설정 | 어디서 무엇을 바꾸지? |
 
-1. **A number that means an obligation must be true.** A count that includes rows the product
-   manufactured about itself is not a design problem, it is a lie with good kerning.
-2. **A screen may not require reading to be understood.** Weight, size and order carry the meaning
-   first; sentences confirm it.
+Two rules that outrank the rest of this document:
+
+1. **A number that means an obligation must be true.** Visual simplification is never semantic
+   simplification — synthetic/REAL, freshness, answer basis, approval, evidence, and channel capability
+   keep their exact meaning in the simplest rendering.
+2. **Structure carries meaning first; sentences confirm it.** If a sentence can be replaced by a label,
+   a state, an object or an ordering, it is.
 
 ---
 
 ## 1. Typography
 
-One family: **Pretendard**, falling back to the platform Korean sans stack. No second face, no
-monospace in product UI (a chunk address in a monospace box is exactly the thing this product
-removed from the inquiry screen).
+One family: **Pretendard** → platform Korean sans. No monospace in product UI.
 
-The scale is already raised for older eyes. Do not add a step below `xs`.
+| Token | Size / line | Weight | Used for |
+|---|---|---|---|
+| `3xl` | 32 / 1.2 | 700 | one hero number, rarely |
+| `2xl` | 26 / 1.25 | 700 | **the Agent briefing sentence** |
+| `xl` | 22 / 1.35 | 700 | page title (`h1`) |
+| `lg` | 18 / 1.5 | 600 | the customer's sentence, the draft, an object's name in detail |
+| `base` | 16 / 1.6 | 400 | body, list rows, buttons |
+| `sm` | 15 / 1.6 | 400 | metadata that is still read |
+| `xs` | 13 / 1.5 | 500 | chips, table captions — **never a sentence that carries a fact** |
 
-| Token | Size / line-height | Used for |
-|---|---|---|
-| `3xl` | 34 / 1.2 | a single hero number, rarely |
-| `2xl` | 28 / 1.3 | **the briefing sentence**, page titles |
-| `xl` | 22 / 1.4 | section titles that carry a count |
-| `lg` | 19 / 1.5 | the customer's question, the draft, a state card's headline |
-| `base` | 17 / 1.6 | body, list rows, buttons |
-| `sm` | 15 / 1.6 | supporting sentences, metadata that is still read |
-| `xs` | 13 / 1.5 | badges, table captions — **never** a sentence that carries a fact |
-
-**Korean line breaking:** every element holding a Korean sentence carries `break-keep`. Korean
-breaks mid-word without it and the result is unreadable at a glance.
-
----
-
-## 2. Spacing rhythm
-
-Tailwind's 4px scale, used at four levels and no more:
-
-- `gap-1 / gap-2` (4–8px) — inside a row: chip to label, icon to text
-- `space-y-3` (12px) — inside a card
-- `space-y-5` (20px) — between the groups of one section
-- `space-y-8` (32px) — between sections of a page
-
-A page is `space-y-8`; a section is `space-y-2`/`space-y-3`; a card is `p-4`/`p-5`. Anything else
-is a decision that has to justify itself.
+- Numbers are `tabular-nums`, weight 600. A count beside a label is `text-ink`; its unit is `text-muted`.
+- Section titles are **short and functional** (`base`, 600): 「먼저 볼 일」, 「숫자」, 「채널」 — never a
+  sentence.
+- `break-keep` on every element that holds Korean.
+- **Tiny helper copy is not a layer.** A `sm`/`muted` sentence may exist only when removing it stops a
+  seller from acting. 「운영 데이터에서 바로 확인된 것만 보여줍니다」 is the kind of sentence that fails
+  that test: structure already says it.
 
 ---
 
-## 3. Content width and layout
+## 2. Layout
 
-- The app shell owns the max width; a page does not set its own.
-- Two-pane work surfaces are `[fixed list | flexible detail]` (문의 uses `340px | rest`), and the
-  **list column scrolls inside itself** — a work screen whose document is 11,000px tall is a screen
-  nobody reaches the bottom of.
-- Grids are `lg:grid-cols-3` at most. Four equal cards read as wallpaper.
-- Wide content (tables, code, diagrams) scrolls inside its own container. The page body never
-  scrolls horizontally.
+| Thing | Value |
+|---|---|
+| Sidebar | **232px**, `surface`, 1px `line` on the right; hidden below `md` |
+| Main padding | 32px horizontal, 24px top (desktop) |
+| Content width | **1120px** max, left-aligned inside the main column |
+| Two-pane work surface | `[340px list \| flexible detail]`, the list column scrolls inside itself |
+| Grid maximum | 4 compact metrics or 3 cards across; never 6 equal cards |
+
+Breakpoints: default (mobile) · `sm` 640 · `md` 768 (sidebar appears) · `lg` 1024 (two-pane) · `xl` 1280.
+No custom breakpoints. The page body never scrolls horizontally; wide tables scroll inside their own
+container.
 
 ---
 
-## 4. Surface hierarchy
+## 3. Spacing scale
 
-Three surfaces, and their meanings are fixed:
+4 · 8 · 12 · 16 · 24 · 32. Six steps and no others.
+
+- inside a row: 4–8px
+- between rows of a list: 0 (a 1px rule separates them); row padding 12px × 16px
+- inside a card / between a section title and its body: 12px
+- between sections of a page: **24px**
+- between the page header and the first section: 24px
+
+A page is `space-y-6`. Anything larger than 32px is empty space that has to justify itself.
+
+---
+
+## 4. Surfaces, borders, radius
 
 | Token | Value | Means |
 |---|---|---|
-| `canvas` | `#F2F4F6` | the page behind everything; also a quiet inline chip |
-| `surface` | `#FFFFFF` | a card — something with its own edges and its own subject |
-| `line` | `#E5E8EB` | the edge of a card, the rule between rows |
+| `canvas` | `#F2F4F6` | the page ground; also an inset panel inside a card |
+| `surface` | `#FFFFFF` | a card or a list container — something with its own edge |
+| `line` | `#E5E8EB` | card edge, row rule |
 
-**A card is a promise that its contents belong together.** A list of five findings is five *rows*
-inside one card, not five cards — five equally-weighted cards is the layout failure the UX audit
-named by name.
-
-Radius: `xl` (16px) for rows and inputs, `2xl` (20px) for cards. Shadow: `shadow-card` only, and
-only where a card floats above content (a drawer, a popover). Flat cards on canvas need no shadow.
-
----
-
-## 5. CTA hierarchy
-
-**One primary control per screen region, and it owns its own line.**
-
-| Level | Shape | Rule |
-|---|---|---|
-| Primary | `Btn variant="solid"` (brand fill, white text) | at most one per region; the irreversible one sits next to a confirmation step, never next to the text it would send |
-| Secondary | `Btn variant="outline"` | as many as needed, all the same weight |
-| Tertiary | `Btn variant="ghost"` / a plain link | reference, navigation, "see all" |
-
-Rules learned the hard way:
-
-- **A repeated CTA is no CTA.** Three rows each carrying 「AI에게 묻기」 is zero calls to action.
-- **A disabled primary is neutralised**, not brand-coloured — a blue button that does nothing reads
-  as broken, not as unavailable.
-- **Hover on a solid primary darkens** (`brand-700` → `brand-800`), never lightens. Lightening walks
-  the fill toward the white text: `brand-600` under white measures **4.49:1**, under AA, on the most
-  pressed control in the product and in the exact state a cursor is in while the label is being read.
-  `brand-800` (`#1550B5`) measures 7.38:1. Measured in a real browser, composited, 2026-08-27.
-- Minimum control height **36px**; a primary button **44px**.
+- **Level 0** canvas → **Level 1** surface card (1px line) → **Level 2** canvas inset inside a card. Never
+  a card inside a card; never a shadow on a resting card. Shadow (`shadow-card`) only on things that
+  float (drawer, popover).
+- Radius: **8px** controls and inputs, **10px** rows and chips' container, **12px** cards. Nothing rounder
+  in the app surface. Chips are `rounded-full`.
+- A list is **one bordered container with rows**, never N bordered cards. Five findings are five rows.
 
 ---
 
-## 6. State colours
+## 5. Colour
 
-Colour is **never the only carrier**. Every state that has a colour also has a word.
+Accent `brand-700` `#1B64DA` is spent on **actions and the active nav item** and nowhere else. No brand
+fills on cards, no gradients, no glow, no glass.
 
-| Token | Value | Means | Measured contrast |
+| Tone | Text | Tint | Means |
 |---|---|---|---|
-| `good` | `#12662F` | this is settled / grounded | 7.1:1 on surface, 5.6:1 on its own tint |
-| `warn` | `#92400E` | read this before acting | 7.1:1 on surface, 6.2:1 on its own tint |
-| `bad` | `#DC2626` | this failed / this is negative | reserved for failure and negative reviews |
-| `muted` | `#4E5968` | supporting text | 7.0:1 on surface, 6.3:1 on canvas |
-| `ink` | `#191F28` | any sentence that carries a fact | — |
+| `GOOD` | `good` `#12662F` | `good/10` | settled, grounded, connected — a **proven** state only |
+| `WARN` | `warn` `#92400E` | `warn/10` | look at this before acting |
+| `BAD` | `bad` `#DC2626` | `bad/10` | failed, negative, disconnected |
+| `INFO` | `brand-700` | `brand-50` | reviewnary prepared something |
+| neutral | `muted` `#4E5968` | `canvas` | reference |
 
-**`good` is narrow on purpose.** On the inquiry screen it means `GROUNDED` and nothing else: a
-clarification question is a correct reply that still needs the seller's eye, so it is `warn`.
-
-Tints are `/5` for a card background and `/10` for a chip. A coloured word must be checked **on its
-own tint**, which is where every one of this product's contrast failures has been found.
-
-**A ramp value that passes on white does not carry to a tint.** `brand-700` measures 5.41:1 on surface
-and only **4.16:1** on `bg-brand/15` — still under AA, on the active step of the first screen a Cafe24
-seller ever sees. The fix is the next value down the ramp (`brand-800`), not a note that it is close.
-Measured in a real browser, composited, 2026-08-27.
+- Colour is never the only carrier: every coloured state has a word.
+- A coloured word is checked **on its own tint**, and in **hover**, in a real browser. `brand-700` on
+  `brand/15` measures 4.16:1 — use `brand-800` there. Solid primaries hover **darker** (`brand-800`).
+- `warn` is not a default. A qualification that applies to everything (before the first connection) is
+  `muted`; a global count in the chrome is a **secondary** status, not the loudest thing on every page.
 
 ---
 
-## 7. The Agent briefing
+## 6. Components (the primitives)
 
-The home screen opens with one sentence and then the work it counts.
+Extracted because the redesign needed them on more than one screen. They live in
+`src/components/ui/`. There is no generic design framework beyond these.
 
-- **The sentence is arithmetic.** It counts the objects rendered under it. No model is called to
-  produce it, and the dashboard keeps working when the day's AI budget is gone.
-- **It speaks like a person, not a log.** 「오늘 먼저 확인하면 좋은 일이 3개 있습니다」 — never
-  「3개의 proactive case를 탐지했습니다」, never an enum, never a count of our own rows.
-- **Zero gets its own sentence.** 「지금 먼저 확인할 일은 없습니다」, not 「0개 있습니다」.
-- **Agentic-ness is behaviour, not decoration.** It looked first, it says why, it produced the
-  object, it has the next action ready. No gradient, no glow, no neon, no chat bubbles.
-
----
-
-## 8. Structured object cards
-
-An operational object on a briefing or a command result carries **four things and no fifth**:
-
-1. one sentence of what it is, in the seller's words
-2. the minimum context for why it is here
-3. a deterministic count or status
-4. one primary action
-
-No Agent prose, no explanation of how it was found, no internal identifier. If a fact needs a
-paragraph, it belongs on the screen that owns it.
+| Primitive | What it is | Rule |
+|---|---|---|
+| `PageHead` | `h1` (xl) + optional count/meta + one action slot | **no description paragraph by default**; a screen explains itself by its first section |
+| `Section` | `h2` (base, 600) with optional count and action, then children | not a card; the body decides whether it is a list container |
+| `Metric` (`compact`) | label (sm) over number (2xl) + optional delta / caveat | a row of compact metrics is context, never the first thing on a screen |
+| `Status` | chip with tone + word | the only way a state is coloured |
+| `WorkItem` | a row: state → primary sentence → meta line → time, optional action | the shape of every queue (inquiries, prepared drafts, proactive cases) |
+| `ObjectRow` | name → facet line → one action | the shape of every object list (products, channels, settings entries) |
+| `AgentCommand` | input + suggestion chips + object result | the chat entry; a palette over existing objects, hands unknown sentences to the Agent |
+| `AgentAction` | ghost button with the ✳︎ mark and a **context-specific label** | 「이 상품 분석하기」, 「이 문의 조사하기」 — never a generic 「AI에게 묻기」 alone |
+| `Empty` | title + one sentence + one action | never 「데이터 없음」 |
+| `Disclosure` | drawn chevron + label | the only way to fold |
 
 ---
 
-## 9. Evidence disclosure
+## 7. Hierarchy rules per surface
 
-Progressive, and the order is fixed: **conclusion → first evidence open → the rest collapsed.**
+**Global shell.** Sidebar: wordmark, workspace name, two groups of nav, and at the bottom a
+**secondary** connection-health line (「연결 문제 3건」 as a small warn word with a dot, not a pill in
+the top-right of every page). No desktop top bar — the page title starts the page. No floating AI
+button: the Agent is entered from the home command box and from `AgentAction` in the context that
+owns the object.
 
-- The first citation shows source, title and excerpt. The rest collapse behind a one-line summary.
-- The excerpt is the sentence the drafter actually read.
-- **Chunk addresses, locators, evidence ids, provenance strings and model names never render.**
-- A collapsed section uses `Disclosure`, which draws a chevron. An affordance that is only a
-  cursor change is not an affordance.
+**홈.** Briefing sentence (2xl) → command box → **먼저 볼 일** (prepared drafts · AI가 먼저 확인한 일 ·
+findings, all as `WorkItem` rows in one container) → **숫자** (compact metric row with the window
+control; one shared freshness line, not one per card) → **추이** (one wide chart, others behind the
+number they belong to) → 채널별 table → 「이 숫자에 대하여」 as a disclosure. The sentence is arithmetic
+over the rows rendered under it. Zero gets its own sentence.
 
----
+**상품.** An object list, not a SKU table: name → `채널 · 문의 N · 리뷰 N · 답변 기준 N · 미답변 N` →
+[열기]. Ordered by what needs attention (unanswered, then issue evidence, then reviews), so an
+unattributed placeholder never leads. The SKU is inside the detail, not the row.
 
-## 10. Empty · loading · error
+**리뷰.** 「왜 이 리뷰를 봐야 하는가」 first: the record's 확인 필요 count with its one action, then
+**반복되는 문제** (category · count → filter), then the list where each row is `★ n · sentence ·
+product` with the tier as a `Status` word. AI-classification internals (keyword cluster, same-class
+count, explanation) are one folded line per row.
 
-| State | Rule |
-|---|---|
-| Empty | Say what would appear here and offer the one action that would make it appear. Never 「데이터 없음」. |
-| Nothing to report | Render **nothing**. A section that announces its own absence costs a glance on every visit. |
-| Loading | One line of text (`불러오는 중…`). No skeleton that shifts layout when it resolves. |
-| Long wait | Elapsed seconds, measured. A blocking call this product cannot observe the inside of gets 「보통 20초쯤 걸립니다 · N초 경과」 — never a bar, never a stage list, which would animate something nobody measured. |
-| Dependency down | Say what stopped, say what still works, and **disable the control it broke** rather than letting the seller discover it by pressing. The notice goes ABOVE that control. It may not make a claim about anything else that could be broken. |
-| Error | Say what could not be read and what still works. Never a status code, never a stack. |
-| Unknown | `—`, never `0`. A dash reads as "we do not know"; a zero reads as "there were none". |
+**문의.** Work-state first: `초안 준비됨 · 답변 필요 · 답변함` as the row's first word, then the
+customer's sentence, then product/channel, then time. Rows older than a year sit under their own quiet
+divider in `muted` so a 2014 backlog never has the weight of this morning's question. A chosen row
+opens `[340px | detail]`; the detail is question → answer state card → draft → CTA on its own line.
 
----
+**주문.** Filters (period + channel) at the top at full weight; four compact metrics (주문 · 매출 ·
+일평균 · 최다 채널); one trend chart; the channel share as a table with bars. No 「운영 인사이트」
+card: the data says it.
 
-## 11. Accessibility
+**채널 연결.** Three rows, each `name · Status word · last collection`, **one** primary action per
+row, and the health detail (error text, expiry) folded. The review-record link is a text link.
 
-- **AA on every text node**, measured, including on tints **and including hover**. Every contrast
-  failure this product has had was on a coloured background or in a non-resting state; none was ever
-  found by reading the palette.
-- Visible focus everywhere: `focus-visible:ring-2 ring-brand-700`. Focus rings are never removed.
-- Every icon-only control has an accessible name; every colour-coded state has an `sr-only` word.
-- `aria-label` on each page section that a screen reader would otherwise meet unnamed.
-- Controls are keyboard reachable in reading order; a card whose whole row is a link has exactly
-  one tab stop.
-
----
-
-## 12. Responsive
-
-- Desktop-first is the honest description of this product, but nothing may break below it.
-- Breakpoints: default (mobile), `sm`, `lg`. No custom breakpoints.
-- Two-pane surfaces collapse to a single column below `lg`; the list is the default view and a
-  selection opens the detail.
-- Relative units for anything that holds text; fixed px only for a list column's width.
+**설정.** A grouped list: 워크스페이스 · AI 답변 스타일 · 운영 정책 · 연결 알림 · 더 보기 · 계정 — each
+a row with a one-line meaning and one action. No card wall.
 
 ---
 
-## 13. What this document does not authorise
+## 8. The Agent
 
-- A new colour, a new font, a new component library, or a renamed token.
-- Landing-page patterns inside the operations UI (oversized hero, animated gradient, marquee).
-- A generic card framework. The components in `src/components/ui/` are the framework.
-- Any visual that implies the product did something it did not do — an "AI가 분석 중" animation
-  where no model runs, a progress bar with no measurable progress, a green check for an action that
-  was only saved locally.
+- **Observe → Investigate → Decide → Prepare → Ask → Execute** has to be legible: 「AI가 먼저 확인한 일」
+  is *observe/investigate*, a prepared draft is *prepare*, the answer-state card and the approval CTA are
+  *ask*, and the send behind the confirmation step is *execute*. Each is a structured object, not prose.
+- The briefing sentence counts rendered objects; no model is called to write it.
+- An Agent answer is rendered as the objects it cites, with links into the surfaces that own them.
+- Every operations surface offers `AgentAction` with a label that names the object in view; the home
+  command box is the free-text entry. The Agent's tool catalogue is READ-only; nothing here sends.
 
-## 14. Reference patterns
+---
 
-External component galleries (21st.dev and similar) may be **read for patterns** — command input,
-list/table, status chip, drawer, card. What is copied is the pattern, never the dependency and
-never the styling: this product's tokens, spacing and copy rules win in every case. No component
-library was added by this package.
+## 9. Evidence, empty, loading, error
+
+- Evidence: conclusion → first citation open (source · title · excerpt) → the rest folded. Locators,
+  chunk ids, provenance strings, model names never render.
+- Empty: what would appear here + the one action that makes it appear.
+- Nothing to report: render **nothing**.
+- Loading: one line (`불러오는 중…`), no layout-shifting skeleton.
+- Long wait: measured elapsed seconds, never a bar.
+- Dependency down: say what stopped, disable the control it broke, put the notice ABOVE it.
+- Unknown: `—`, never `0`.
+
+---
+
+## 10. Accessibility
+
+- AA (4.5:1) on every text node, measured composited, including tints and hover.
+- Visible focus everywhere (`focus-visible:ring-2 ring-brand-700`); never removed.
+- Every icon-only control has a name; every coloured state has a word; `aria-label` on each page region.
+- Minimum control height 36px; primary 40px; 44px on touch surfaces.
+- One `h1` per screen; sections are `h2`.
+
+---
+
+## 11. What this document does not authorise
+
+- A new palette, a new font, a component library, landing-page patterns inside the app.
+- A visual that claims work that did not happen (a progress bar nobody measured, an 「AI 분석 중」
+  animation with no model running, a green check for a local save).
+- A card framework. The primitives in §6 are the framework.
