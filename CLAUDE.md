@@ -578,6 +578,17 @@ judge 0.01s / total 33.5s — 병렬화할 것이 없고 후보는 planner 자�
 없이 단정한 것이라 「잠시 시간이 걸릴 수 있습니다」로. backend 무변경 · 마이그레이션 0 · 마켓플레이스 호출 0 · WRITE 0 ·
 모델 호출 2(첫 run이 결함을 드러냈고 두 번째가 증명) ⇒ evidence 행 없음).
 
+**`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
+compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은
+`deploy/pilot/`: compose overlay(`ports: !reset []`로 raw port 공개 0, `restart: unless-stopped`, JVM heap 고정, Cafe24
+callback/result URL과 runtime URL을 `PILOT_PUBLIC_HOST`에서 파생) · Caddy edge(자동 TLS, same-origin 라우팅 `/api`→backend ·
+`/agent-runtime`→runtime · 나머지→SPA — 프론트가 이미 same-origin `/api/*`를 부르고 runtime URL이 build arg라 **코드 변경 0**) ·
+`pilot.env.example`(이름만) · `host-bootstrap.sh` · `deploy.sh`(pull→env 검증→build→up(Flyway)→health→smoke) · `smoke.sh`
+(credential 0·WRITE 0) · `egress-check.sh`(host·container outbound == advertised) · `backup.sh`/`restore.sh`(pg_dump -Fc,
+env secret 미포함). 권장: EC2 t3.medium + EIP + A 레코드, 공개 포트 80/443만, SSH는 SSM 우선. Cafe24 callback은 기존
+`/api/connect/cafe24/callback`에 stable host를 앞세울 뿐이고 Demo Org 토큰은 건드리지 않는다. **billable 리소스 생성 0** —
+region·domain·Cafe24 app·NAVER IP 등록·SSH 자세·off-host 백업은 product-owner 입력).
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

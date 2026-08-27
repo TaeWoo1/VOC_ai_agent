@@ -1,0 +1,43 @@
+# Edge for the pilot host — one public origin, TLS issued and renewed by Caddy (ACME, HTTP-01 on :80).
+# Routes are the same-origin contract the frontend already has: /api/* to the backend (which is also
+# where Cafe24 redirects: /api/connect/cafe24/callback), /agent-runtime/* to the runtime with the
+# prefix stripped, everything else to the SPA. Nothing here holds a secret; the host name and the
+# ACME contact come from the environment.
+{
+	email {$PILOT_ACME_EMAIL}
+}
+
+{$PILOT_PUBLIC_HOST} {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Edge health for the compose healthcheck — proxied to the backend so "edge up" means "backend up".
+	handle /health {
+		reverse_proxy backend:8080
+	}
+
+	handle /agent-runtime/* {
+		uri strip_prefix /agent-runtime
+		reverse_proxy agent-runtime:8787
+	}
+
+	handle /api/* {
+		reverse_proxy backend:8080
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+}
+
+# Plain-HTTP requests are redirected to HTTPS by Caddy automatically; the :80 listener also answers
+# ACME HTTP-01 challenges. The compose healthcheck hits http://127.0.0.1/health inside the container:
+http://127.0.0.1 {
+	handle /health {
+		reverse_proxy backend:8080
+	}
+}

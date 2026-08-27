@@ -1,0 +1,78 @@
+# Pilot host overlay — Pilot Host Provisioning v1.
+#
+#   docker compose --env-file /etc/sellerops/pilot.env \
+#     -f docker-compose.yml -f deploy/pilot/docker-compose.pilot.yml up -d --build
+#
+# What this changes against the root compose, and nothing else:
+#   * NO service publishes a raw port. `!reset []` (compose ≥ 2.24) removes the root file's
+#     5432 / 8080 / 8787 / 5173 host bindings; the only public listener is the edge on 80/443.
+#   * one edge (Caddy) terminates TLS for PILOT_PUBLIC_HOST and routes same-origin:
+#       /agent-runtime/*  → agent-runtime:8787 (prefix stripped)
+#       /api/*, /health   → backend:8080          (the Cafe24 callback is /api/connect/cafe24/callback)
+#       everything else   → frontend:80 (nginx, SPA)
+#     Same origin means no CORS at all in the browser, and VITE_AGENT_RUNTIME_URL is an absolute
+#     https URL on that host so the build-time CSP names no other origin.
+#   * restart: unless-stopped everywhere — with the Docker service enabled, a host reboot brings the
+#     stack back without an operator.
+#   * the JVM gets an explicit heap ceiling so the backend cannot grow into Postgres on a 4 GB host.
+#   * Postgres data stays on the named volume `sellerops_pgdata` (root file) — `docker compose down`
+#     without `-v` keeps it; deploy/pilot/backup.sh is the copy that survives the volume.
+services:
+  postgres:
+    ports: !reset []
+    restart: unless-stopped
+    # Small host: cap shared buffers explicitly rather than trusting the image default.
+    command: ["postgres", "-c", "shared_buffers=256MB", "-c", "max_connections=60"]
+
+  backend:
+    ports: !reset []
+    restart: unless-stopped
+    environment:
+      JAVA_TOOL_OPTIONS: ${SELLEROPS_JAVA_TOOL_OPTIONS:--Xms256m -Xmx1024m -XX:+UseSerialGC -XX:MaxMetaspaceSize=256m}
+      SELLEROPS_CORS_ORIGIN: https://${PILOT_PUBLIC_HOST:?PILOT_PUBLIC_HOST is required}
+      SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI: ${SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI:-https://${PILOT_PUBLIC_HOST}/api/connect/cafe24/callback}
+      SELLEROPS_CONNECTOR_CAFE24_RESULT_URL: ${SELLEROPS_CONNECTOR_CAFE24_RESULT_URL:-https://${PILOT_PUBLIC_HOST}/connect/cafe24/result}
+
+  agent-runtime:
+    ports: !reset []
+    restart: unless-stopped
+    environment:
+      AGENT_RUNTIME_CORS_ORIGINS: https://${PILOT_PUBLIC_HOST}
+
+  frontend:
+    ports: !reset []
+    restart: unless-stopped
+    build:
+      args:
+        # Same origin as the page — the edge routes the prefix. Absolute so the CSP's connect-src
+        # derives the site's own origin and nothing else (frontend/src/lib/security/csp.ts).
+        VITE_AGENT_RUNTIME_URL: https://${PILOT_PUBLIC_HOST}/agent-runtime
+        VITE_API_BASE_URL: ""
+        VITE_SELLEROPS_ENV: pilot
+
+  edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PILOT_PUBLIC_HOST: ${PILOT_PUBLIC_HOST}
+      PILOT_ACME_EMAIL: ${PILOT_ACME_EMAIL:?PILOT_ACME_EMAIL is required for certificate issuance}
+    volumes:
+      - ./deploy/pilot/Caddyfile:/etc/caddy/Caddyfile:ro
+      - sellerops_caddy_data:/data
+      - sellerops_caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+      - agent-runtime
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  sellerops_caddy_data:
+  sellerops_caddy_config:

@@ -122,6 +122,8 @@ frontend/dist/
 frontend/.vite/
 # Local stack env (compose reads root .env; keep .env.example tracked)
 .env.sellerops
+# Pilot host secret file lives in /etc/sellerops; a copy under the repo must never be tracked
+deploy/pilot/pilot.env
 docker-compose.override.yml
 # Operator-provided data dumps / upload fixtures at repo root (never commit).
 # Scoped to root so test resources under src/test/** stay trackable.

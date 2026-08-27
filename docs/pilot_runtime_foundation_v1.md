@@ -231,6 +231,9 @@ Repository-verifiable state, nothing provisioned here and no cloud resource crea
 | Cafe24 public HTTPS callback | **missing as a deployment.** The endpoint exists and is live-proven; what does not exist is a stable public hostname in front of it (§0-B). |
 | backend / frontend / agent-runtime topology | **exists as compose** (§11); no host is provisioned to run it. |
 
+**Provisioning preparation lives in `docs/pilot_host_provisioning_v1.md`** (overlay, edge, env
+template, deploy/smoke/backup scripts; no resource created yet).
+
 **Minimum topology** — one 24-hour host with a fixed public IPv4 and one DNS name with TLS,
 running the four compose services, plus a Postgres volume that survives a redeploy. **Operator
 steps** — provision the host; point the DNS name at it; terminate TLS; register that name's
