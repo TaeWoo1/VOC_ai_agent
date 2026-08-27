@@ -9,6 +9,7 @@ import { reviewAccounts, type ReviewAccount } from "../../lib/reviewAccounts";
 import { reviewRecordPath } from "../../lib/reviewRecord";
 import type { ChannelResponse, SellerAccountResponse } from "../../lib/types";
 import { ChannelReviews } from "./ChannelReviews";
+import { useAgentSurface } from "../../lib/agentPanel";
 
 /**
  * 리뷰 — the workflow surface for reviews (`docs/product_assembly_ia_v1.md` §3), issue-first
@@ -46,6 +47,12 @@ export function Reviews() {
   }, []);
 
   const targets = reviewAccounts(accounts, channels);
+  const selectedTarget = accountId ? targets.find((t) => t.account.id === accountId) ?? null : null;
+  useAgentSurface({
+    surface: "reviews",
+    label: selectedTarget ? `리뷰 · ${selectedTarget.label}` : "리뷰",
+    goal: "반복되는 리뷰 문제가 문의에서도 반복되는지 확인해 줘",
+  });
 
   if (loading) {
     return (

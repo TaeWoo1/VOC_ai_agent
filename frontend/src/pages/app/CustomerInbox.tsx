@@ -24,6 +24,7 @@ import {
   type StateFilter,
 } from "../../lib/inboxWorkspace";
 import type { FeedItem, ItemAnalysis } from "../../lib/types";
+import { useAgentSurface } from "../../lib/agentPanel";
 
 /**
  * 문의 (`/inquiries`, scope="INQUIRY") — inquiries from every connected channel, reply-needed first.
@@ -71,6 +72,12 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
   const [searchParams, setSearchParams] = useSearchParams();
   const rawState = searchParams.get("state");
   const rawChannel = searchParams.get("channel");
+  useAgentSurface({
+    surface: "inquiries",
+    label: itemRef ? "이 문의" : "문의 목록",
+    ...(rawChannel ? { channelCode: rawChannel } : {}),
+    goal: itemRef ? "이 문의를 조사해 줘" : "답변이 필요한 문의를 채널별로 정리해 줘",
+  });
   const state = (stateOptions.find((option) => option.value === rawState)?.value ?? "ALL") as StateFilter;
   const [period, setPeriod] = useState<InboxFilters["period"]>(DEFAULT_FILTERS.period);
   const filters: InboxFilters = useMemo(

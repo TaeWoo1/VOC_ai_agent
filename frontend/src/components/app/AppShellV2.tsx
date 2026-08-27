@@ -7,6 +7,8 @@ import { MoreDrawer } from "./MoreDrawer";
 import { DemoRibbon } from "../DemoRibbon";
 import { AgentDock } from "../bridge/AgentDock";
 import { ProjectionView } from "../bridge/ProjectionView";
+import { AgentPanelProvider } from "../../lib/agentPanel";
+import { AgentPanelDock } from "../agent/AgentPanel";
 
 // Opt-in guided-connection infrastructure surfaces. Absent from the default app; they mount only
 // when explicitly enabled and do not participate in navigation. Carried over from the previous
@@ -32,6 +34,7 @@ export function AppShellV2() {
   }, [location.pathname]);
 
   return (
+    <AgentPanelProvider>
     <div className="flex h-full flex-col">
       {/* Without this, a keyboard user tabs through all seven nav destinations and the sign-out
           button before reaching page content — on every screen. Hidden until focused. */}
@@ -62,6 +65,8 @@ export function AppShellV2() {
             </div>
           </main>
         </div>
+        {/* The contextual Agent: closed by default, overlay below 1440px, pinnable beside the page above it. */}
+        <AgentPanelDock />
       </div>
 
       <MobileBottomNav onMore={() => setMoreOpen(true)} />
@@ -73,5 +78,6 @@ export function AppShellV2() {
         </div>
       )}
     </div>
+    </AgentPanelProvider>
   );
 }

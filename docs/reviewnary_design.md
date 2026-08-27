@@ -1,6 +1,6 @@
 # reviewnary Design Contract v2
 
-**Status:** 2026-08-27 · Reviewnary Product UI Redesign v1 · `frontend/` only · **source of truth for new UI**
+**Status:** 2026-08-27 · Reviewnary Product UI Redesign v1 + **Contextual Agent Workspace & Interactive UX QA v1** (§8-A, §8-B) · `frontend/` only · **source of truth for new UI**
 
 v1 of this document was a record of what the code already did. v2 is the other thing: the contract the
 code is built to. Where the code and this document disagree, the code is wrong.
@@ -145,7 +145,9 @@ Extracted because the redesign needed them on more than one screen. They live in
 | `WorkItem` | a row: state → primary sentence → meta line → time, optional action | the shape of every queue (inquiries, prepared drafts, proactive cases) |
 | `ObjectRow` | name → facet line → one action | the shape of every object list (products, channels, settings entries) |
 | `AgentCommand` | input + suggestion chips + object result | the chat entry; a palette over existing objects, hands unknown sentences to the Agent |
-| `AgentAction` | ghost button with the ✳︎ mark and a **context-specific label** | 「이 상품 분석하기」, 「이 문의 조사하기」 — never a generic 「AI에게 묻기」 alone |
+| `AgentLaunch` | ghost button with the ✳︎ mark and a **context-specific label** | 「이 상품 분석하기」, 「이 문의 조사하기」 — opens the contextual panel (§8-A); never a generic 「AI에게 묻기」 alone |
+| `AgentPanel` | the 400px contextual panel: header (surface label) → box → answer objects → footer | one per app, closed by default; docked ≥1440, overlay below |
+| `TrendChart` | SVG time series with tooltip, legend toggle, keyboard, optional drill-down | §8-B; no click affordance without a backend-honoured drill-down |
 | `Empty` | title + one sentence + one action | never 「데이터 없음」 |
 | `Disclosure` | drawn chevron + label | the only way to fold |
 
@@ -200,6 +202,40 @@ a row with a one-line meaning and one action. No card wall.
 - An Agent answer is rendered as the objects it cites, with links into the surfaces that own them.
 - Every operations surface offers `AgentAction` with a label that names the object in view; the home
   command box is the free-text entry. The Agent's tool catalogue is READ-only; nothing here sends.
+
+### 8-A. The contextual Agent panel
+
+The workspace is primary; the Agent attaches to it like a colleague who can see the same screen.
+
+| Rule | Value |
+|---|---|
+| Default | **closed**. Nothing opens it but a press. |
+| Entry | one launcher per operations page, in the page header, labelled with the object in view (`AgentLaunch`) — never a floating bubble, never two launchers on one screen. The home has no launcher: its command box is the entry. |
+| Width | **400px**, one width. No resize handle. |
+| ≥ 1440px | **docked** beside the page (in the flow; the page keeps its own scroll and shrinks). The seller may unpin it to an overlay; the choice is remembered per browser. |
+| < 1440px | **overlay** on the right edge, no backdrop — the list the seller was reading stays visible to its left. Full width below `md`. |
+| Header | `✳︎ AI 담당자` + the page's registered surface label (「이 상품 · 선바로 몰딩」, 「문의 목록」, 「주문 · 최근 7일」). It follows the route; it never claims a page the seller has left. |
+| Box | a two-line input. A launcher **lands** its sentence in it and the seller sends; the home command box **runs** its sentence because the seller already pressed send there. |
+| Context | structured (`productId` / `channelCode` / `surface`) on the request, verified by the runtime with a read. **Never appended to the sentence.** |
+| Result | the same `OperatorAnswerView` the `/agent` page renders: findings as statements with their evidence lines, the products it cites as rows with 「확인하기」, next actions as links. No planner id, no model name, no provenance string in the panel. |
+| Waiting | 「확인하는 중 · N초」 — a measured clock, never a bar. |
+| Failure | a real state: 「이 요청은 계획을 세우지 못했습니다」 + the runtime's reason. Never an empty success. |
+| Sending | a sentence that asks to send gets the approval boundary printed under the box **before** the wait: 「보내는 일은 AI 담당자가 하지 않습니다 …」. The panel imports nothing that can publish, approve or resume (structural test). |
+| Dependency down | notice **above** the box, controls disabled, no run started to learn what the page already knows. |
+| Keyboard | Esc closes; the box is focused on open; Enter sends, Shift+Enter breaks a line. |
+| Full page | `/agent` remains (footer link) for long investigations and the checkpoint lanes; the panel is the everyday entry. |
+
+### 8-B. Interactive analytics
+
+A chart is an operational control or it is decoration; this product ships only the first kind.
+
+- **Hover and keyboard show exact values.** Every point is a band; the nearest band's date and each visible series' exact value render in one tooltip (`₩574,990`, `30건`), and ←/→ on the focused chart reach the same index with the same tooltip and an `aria-live` sentence. The sr-only table stays as the verification path.
+- **The legend toggles.** Each series is a button with `aria-pressed`; the last visible series cannot be hidden.
+- **Units decide the scale.** Same unit ⇒ one shared scale (「of which」 never looks larger than its whole). Different units (매출 · 주문) ⇒ each on its own scale **and the caption names both maxima**.
+- **A click does something or is not offered.** Bands get a pointer cursor, a 「눌러서 이 날 보기」 line and Enter only when the surface can honour a single-day view (`/orders?date=`). Inquiry and review series have no day filter, so their points are inert and the card links to the screen instead. No hover affordance for a click the backend cannot answer.
+- **Cross-filter: the URL is the state.** `주문` reads `?days=`, `?channel=`, `?date=`; the range control, the channel select, the channel-table rows and the chart bands all write to it; KPI, chart and table read one response per filter. A drilled-in day labels its figures with the day and keeps the chart on the window with the day highlighted (a one-point line is not a trend). The home's window control drives the same `days` into its own request and into its links.
+- **Sparse date ticks** (first, last, up to three between) so a 30-day line has a calendar.
+- **Interaction states**: hover (canvas tint), focus (`ring-2 ring-brand-700`), pressed (`aria-pressed` + surface/shadow), disabled (opacity 50, no pointer), loading (one line). Every clickable row and band is reachable by keyboard.
 
 ---
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Section } from "../../components/ui/Section";
 import { Metric, MetricGrid, MetricLine } from "../../components/ui/Metric";
 import { TrendChart } from "../../components/ui/TrendChart";
@@ -10,6 +10,7 @@ import { Empty } from "../../components/ui/Empty";
 import { AgentBriefing } from "../../components/home/AgentBriefing";
 import { hasAnyConnectedChannel } from "../../lib/firstConnectionState";
 import { CommandInput } from "../../components/home/CommandInput";
+import { useAgentSurface } from "../../lib/agentPanel";
 import { BtnLink } from "../../components/ui/Btn";
 import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
@@ -39,6 +40,7 @@ export function Overview() {
   const [days, setDays] = useState<number>(7);
   const { data, loading, error } = useApiData<OverviewResponse>(() => api.getOverviewStrict(days), [days]);
   const navigate = useNavigate();
+  useAgentSurface({ surface: "home", label: "오늘의 운영" });
 
   useMemo(() => analytics.track("today_inbox_viewed"), []);
 
@@ -130,17 +132,25 @@ export function Overview() {
             <MetricLine kpis={context.filter((kpi) => kpi.key !== "revenue")} />
           </Section>
 
-          <Section title="추이" hint={`최근 ${data.metrics.period.days}일, 하루 단위`}>
+          <Section title="추이" hint={`최근 ${data.metrics.period.days}일, 하루 단위 · 점을 누르면 그 날의 주문을 봅니다`}>
             <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-              <ChartCard title="매출 · 주문">
-                <TrendChart primary={series.get("revenue") ?? EMPTY_SERIES} secondary={series.get("orders")} />
+              {/* A day on the sales chart is a day the orders screen can show (`?date=`); the inquiry and
+                  review lists have no day filter, so those cards link to their screen and their points
+                  offer no click (§8-B: no affordance the backend cannot honour). */}
+              <ChartCard title="매출 · 주문" to={`/orders?days=${days}`} linkLabel="주문 화면">
+                <TrendChart
+                  primary={series.get("revenue") ?? EMPTY_SERIES}
+                  secondary={series.get("orders")}
+                  label="매출과 주문"
+                  onSelectDate={(date) => navigate(`/orders?days=${days}&date=${date}`)}
+                />
               </ChartCard>
               <div className="grid gap-3">
-                <ChartCard title="문의" compact>
-                  <TrendChart primary={series.get("inquiries") ?? EMPTY_SERIES} secondary={series.get("unansweredInquiries")} />
+                <ChartCard title="문의" to="/inquiries" linkLabel="문의 화면" compact>
+                  <TrendChart primary={series.get("inquiries") ?? EMPTY_SERIES} secondary={series.get("unansweredInquiries")} label="문의" height={120} />
                 </ChartCard>
-                <ChartCard title="리뷰" compact>
-                  <TrendChart primary={series.get("reviews") ?? EMPTY_SERIES} secondary={series.get("negativeReviews")} />
+                <ChartCard title="리뷰" to="/reviews" linkLabel="리뷰 화면" compact>
+                  <TrendChart primary={series.get("reviews") ?? EMPTY_SERIES} secondary={series.get("negativeReviews")} label="리뷰" height={120} />
                 </ChartCard>
               </div>
             </div>
@@ -213,10 +223,15 @@ const DATA_TYPE_KO: Record<string, string> = { ORDER_SUMMARY: "주문", INQUIRY:
 
 const EMPTY_SERIES: MetricSeries = { key: "none", label: "", unit: "건", points: [] };
 
-function ChartCard({ title, children, compact = false }: { title: string; children: React.ReactNode; compact?: boolean }) {
+function ChartCard({ title, to, linkLabel, children, compact = false }: { title: string; to: string; linkLabel: string; children: React.ReactNode; compact?: boolean }) {
   return (
     <div className={`rounded-2xl border border-line bg-surface ${compact ? "p-3" : "p-4"}`}>
-      <h3 className="mb-2 text-sm font-semibold text-ink">{title}</h3>
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">{title}</h3>
+        <Link to={to} className="text-xs font-semibold text-brand-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
+          {linkLabel}
+        </Link>
+      </div>
       {children}
     </div>
   );

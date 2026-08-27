@@ -4,6 +4,7 @@ import { Btn } from "../ui/Btn";
 import { IssueList } from "../memory/IssueList";
 import { api } from "../../lib/apiClient";
 import { agentHref } from "../../lib/agentContext";
+import { useAgentPanel } from "../../lib/agentPanel";
 import {
   COMMAND_INTENTS,
   INTENT_HEADING,
@@ -32,6 +33,7 @@ export function CommandInput({ unansweredCount }: { unansweredCount: number | nu
   const [text, setText] = useState("");
   const [intent, setIntent] = useState<CommandIntentKey | null>(null);
   const navigate = useNavigate();
+  const panel = useAgentPanel();
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -40,6 +42,12 @@ export function CommandInput({ unansweredCount }: { unansweredCount: number | nu
     const matched = matchCommandIntent(asked);
     if (matched) {
       setIntent(matched);
+      return;
+    }
+    // The seller pressed send on this sentence, so the panel runs it — beside the home, not instead of
+    // it (Contextual Agent Workspace v1 §2). Without a panel (bare render) it is the /agent route.
+    if (panel) {
+      panel.openPanel({ goal: asked, surface: "home" }, { autorun: true });
       return;
     }
     navigate(agentHref({ goal: asked, surface: "home" }));

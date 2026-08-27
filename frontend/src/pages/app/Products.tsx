@@ -10,6 +10,7 @@ import { api } from "../../lib/apiClient";
 import { count } from "../../lib/format";
 import type { ProductSummaryView } from "../../lib/types";
 import { orderProductRows, productChannelLabel, type ProductRowFacts } from "../../lib/productRows";
+import { useAgentSurface } from "../../lib/agentPanel";
 
 /**
  * 상품 — an object list, not a SKU table (docs/reviewnary_design.md §7).
@@ -28,6 +29,7 @@ import { orderProductRows, productChannelLabel, type ProductRowFacts } from "../
 const PAGE_SIZE = 20;
 
 export function Products() {
+  useAgentSurface({ surface: "products", label: "상품 목록", goal: "최근에 문제가 반복되는 상품이 있는지 찾아 줘" });
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<ProductSummaryView[] | null>(null);
   const [facts, setFacts] = useState<Map<string, ProductRowFacts>>(new Map());
@@ -59,7 +61,7 @@ export function Products() {
       <PageHead
         title="상품"
         meta={rows && rows.length > 0 ? <span className="text-sm text-muted">{query ? `찾은 상품 ${rows.length}개` : `${rows.length}개`}</span> : undefined}
-        action={<AgentLaunch context={{ surface: "products" }} label="문제 있는 상품 찾기" />}
+        action={<AgentLaunch context={{ surface: "products", goal: "최근에 문제가 반복되는 상품이 있는지 찾아 줘" }} label="문제 있는 상품 찾기" />}
       />
 
       <label className="block">
@@ -96,7 +98,7 @@ export function Products() {
                 <li key={row.id}>
                   <ObjectRow
                     to={`/products/${row.id}`}
-                    name={row.name}
+                    name={productNameNode(row.name)}
                     status={
                       f && f.unanswered > 0 ? (
                         <Status tone="warn">미답변 {f.unanswered}</Status>
@@ -182,4 +184,21 @@ async function loadFacts(list: ProductSummaryView[], commit: (next: Map<string, 
     else next.set(list[i].id, null as unknown as ProductRowFacts);
   });
   commit(next);
+}
+
+/**
+ * A catalogue whose product NAME is a bare number (a channel product id used as the title). It is the
+ * real name and is not replaced; it is set in tabular figures with a muted 「코드」 mark so a column of
+ * such rows reads as product objects rather than as a list of ids that lost their names.
+ */
+function productNameNode(name: string): React.ReactNode {
+  if (/^\d{2,}$/.test(name.trim())) {
+    return (
+      <span className="inline-flex items-baseline gap-1.5">
+        <span className="text-xs font-medium text-muted">코드</span>
+        <span className="tabular-nums">{name}</span>
+      </span>
+    );
+  }
+  return name;
 }

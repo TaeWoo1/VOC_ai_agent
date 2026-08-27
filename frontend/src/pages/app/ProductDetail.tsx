@@ -11,6 +11,7 @@ import { api } from "../../lib/apiClient";
 import { count } from "../../lib/format";
 import type { KnowledgeCoverageView, ProductKnowledgeView } from "../../lib/types";
 import { priceLabel, sellingStatusLabel } from "../../lib/productVocabulary";
+import { useAgentSurface } from "../../lib/agentPanel";
 
 /**
  * 상품 상세 — Product Intelligence.
@@ -32,6 +33,17 @@ export function ProductDetail() {
   const { data, loading, error } = useApiData<ProductKnowledgeView>(
     () => api.getProductKnowledgeStrict(productId),
     [productId],
+  );
+  // What the panel says it is looking at — the catalogue name, never customer text.
+  useAgentSurface(
+    data
+      ? {
+          surface: "product",
+          productId,
+          label: `이 상품 · ${data.name ?? "이름을 확인하지 못한 상품"}`,
+          goal: `${data.name ?? ""} 상품에서 반복되는 문제와 미답변 문의를 분석해 줘`,
+        }
+      : null,
   );
 
   if (loading) {

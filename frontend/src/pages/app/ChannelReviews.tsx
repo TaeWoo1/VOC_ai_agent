@@ -360,33 +360,29 @@ export function ChannelReviews({
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         {/* The tier filter is separate from the sort and survives a sort change. Order is the
             workflow's: 확인 필요 → 지켜보기 → 참고, then 전체 — what to look at first comes first. */}
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="분류 필터">
+        <div className="flex flex-wrap items-center gap-0.5 rounded-lg bg-canvas p-0.5" role="group" aria-label="분류 필터">
           <span className="sr-only">보기</span>
           {TRIAGE_TIERS.map((value) => (
-            <Btn
+            <SegmentBtn
               key={value}
-              variant={tier === value ? "solid" : "outline"}
-              size="sm"
-              aria-pressed={tier === value}
+              pressed={tier === value}
               onClick={() => {
                 setTier(value);
                 setPageIndex(0);
               }}
             >
               {TRIAGE_TIER_LABEL[value]} {page ? tierCount(page, value) : 0}
-            </Btn>
+            </SegmentBtn>
           ))}
-          <Btn
-            variant={tier === null ? "solid" : "outline"}
-            size="sm"
-            aria-pressed={tier === null}
+          <SegmentBtn
+            pressed={tier === null}
             onClick={() => {
               setTier(null);
               setPageIndex(0);
             }}
           >
             전체 {page ? recordTotal(page) : 0}
-          </Btn>
+          </SegmentBtn>
         </div>
         <div className="flex items-center gap-0.5 rounded-lg bg-canvas p-0.5" role="group" aria-label="정렬">
           {(
@@ -1047,4 +1043,20 @@ function formatDateTime(iso: string): string {
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
+}
+
+/** One segment of a segmented control — the same shape the sort control and the home window control use. */
+function SegmentBtn({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={`min-h-[36px] rounded-md px-3 text-sm font-semibold tabular-nums transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 ${
+        pressed ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink"
+      }`}
+    >
+      {children}
+    </button>
+  );
 }

@@ -542,6 +542,21 @@ Knowledge=무엇을 / Style=어떻게 한 줄씩. 텍스트 감소는 실측 —
 제안할 수 없습니다」로 뜨는 것(백엔드 큐 범위), `/agent` 화면 자체는 셸만 새것이고 내부 구성은 무변경, 그리고
 before/after 스크린샷은 실제 고객 문장을 담아 저장소 밖(scratchpad)에 둔다.
 
+**`docs/contextual_agent_workspace_v1.md`** (Contextual Agent Workspace & Interactive UX QA v1 — `frontend/`
+전용 · backend API contract · domain semantics · Agent safety · Human Approval · routes **무변경**. Agent가
+모든 운영 화면에 **우측 contextual panel**(400px · 기본 닫힘 · ≥1440 docked / 미만 overlay · 페이지 헤더의
+객체 이름 launcher 하나)로 붙고, 홈은 inline command를 유지하되 인식되지 않은 문장을 panel로 넘겨 실행한다.
+page context는 `useAgentSurface`가 **구조화된 필드**로 등록하고 요청에는 `productId` hint로만 실리며 문장에
+끼워 넣지 않는다; 답변 렌더는 `/agent`와 panel이 **하나의 `OperatorAnswerView`**를 공유한다. 「보내줘」는
+승인 경계 문장을 대기 전에 보이고 panel 모듈은 publish/approve/resume를 이름으로 **import 0**(구조 테스트).
+차트는 `TrendChart` 하나로 hover/키보드 tooltip · legend toggle · 단위별 축 · 날짜 tick · **백엔드가 답할 수
+있을 때만** 클릭 affordance(`/orders?days=&channel=&date=`가 필터이고 KPI·차트·표는 한 응답을 읽는다; 문의·
+리뷰 점은 inert). **QA는 이 커밋에서 재기동한 세 프로세스에 대해 Playwright로 두 번** 돌렸고(TC 27개 · 4 viewport ·
+panel 닫힘/열림 · AA 위반 0 · 모델 호출 3 · 마켓플레이스 0). **P0 발견**: HEAD backend가 운영자의
+`.env.local`(Cafe24 켜짐 · HTTPS callback 없음)로 **기동 거부** — QA는 해석 불가 `.invalid` 호스트를 QA 한정
+override로 넣어 띄웠고 product-owner 결정으로 올린다. 고치지 않고 보고한 것: 리뷰 반복 문제 → 목록 필터
+(endpoint가 `tier`만 받음), `AgentContext`에 문의 id 없음, 플래너 문장의 raw enum).
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의
