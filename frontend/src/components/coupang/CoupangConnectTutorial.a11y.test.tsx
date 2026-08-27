@@ -3,7 +3,7 @@
 // the agent-driven WING issuance walkthrough states. The tutorial is CONTROLLED and offline (no api); the
 // walkthrough renders from a fixture run view with the bridge (useBridge) mocked inert.
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { renderWithRouter as render, screen, within } from "../../test/renderWithRouter";
 import { expectNoAxeViolations } from "../../test/axe";
 import type { CoupangState } from "../../lib/coupangTutorial";
 import type { ConnectionStatusView, CredentialTemplateView } from "../../lib/types";

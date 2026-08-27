@@ -347,6 +347,72 @@ primary CTA의 **hover**가 `bg-brand-600` 흰 글씨 **4.49:1**로 AA를 백분
 그리고 자유문장 lane은 여전히 **agent-runtime 별도 기동**이 필요하다는 것. **마켓플레이스 호출 0 ·
 마켓플레이스 WRITE 0 · DB 행 변경 0 · 마이그레이션 0 · 모델 호출 1** ⇒ evidence 행 없음).
 
+**`docs/disconnected_channel_onboarding_v1.md`** (Disconnected Channel Onboarding Live Walkthrough v1 —
+「연결했습니다」에서 「reviewnary가 내 판매 운영을 이해하기 시작했습니다」까지. `frontend/` 전용 · backend
+무변경 · 마켓플레이스 호출 **0** · 모델 호출 **0** · 마이그레이션 **0**. **감사 결과 기계는 이미 다
+있었고 그 위에 서 있는 것이 없었다** — `ChannelCoverageRow`가 채널×데이터타입별로 `state`·`rows`·
+`openRows`를 이미 들고 있고 `ChannelDataState`는 §7이 요구한 구분(`ZERO` ≠ `OBSERVED_FRESHNESS_UNPROVEN`
+≠ `BLOCKED` ≠ `NOT_SUPPORTED` ≠ `NOT_CONNECTED`)을 몇 달 전에 자기 docblock에 적어 두었는데,
+`GET /api/channels/coverage`는 **프론트 소비자가 0**이었다. 그래서 새 백엔드·새 enum·새 엔드포인트
+**0**. 세 채널의 완료 화면은 전부 같은 모양으로 끝나고 있었다 — 연결 상태 + 마지막 성공 수집, 그리고
+primary CTA가 `/orders`·`/settings/channels`·`/settings/review-import`, 즉 **우리 배관에 대한 사실 넷과
+가게에 대한 사실 0개**, 그리고 방금 가게를 연결한 판매자를 연결할 것들의 목록으로 돌려보냄. **상태가
+문장을 정하고 실행이 숫자를 정한다**(`lib/firstSourceSummary.ts`): 숫자는 절대 `rows`에서 오지 않고
+(그것은 시드 행을 포함하며 「가져왔습니다」 아래의 숫자는 시드를 담을 수 **없어야** 한다) 종료된
+`SyncRunView.successRows`에서 온다. 동사는 **관측이 고쳤다** — 처음에 쓴 「확인했습니다」는 채널이 무엇을
+**가지고 있는가**에 대한 주장이라, 실제 Demo Org 쿠팡 연결에 대해 렌더하니 문의 2건을 보유한 org에
+**「문의 0건을 확인했습니다」**를 찍었다(`successRows`는 *이번 실행*이 가져온 수이고 재방문에서는 다른
+숫자다) ⇒ 「가져왔습니다」는 두 읽기에서 모두 참이고, 0을 가져온 실행은 자기 줄을 가져 「문의가
+없습니다」로 승격되지 **않는다**(그 문장은 `ZERO`만 말할 수 있다). 두 숫자를 **더하지 않는다**. 카드는
+세 여정 모두의 끝이 되고 유일한 primary는 **「오늘 할 일 확인하기」 → `/`**이며 — 브리핑과 명령 상자가
+이미 거기 산다(§9에 새 화면 0) — 채널을 부르지도 실행을 시작하지도 않는다(「완료」가 아직 일어나는 일의
+이름이 되면 안 된다). **이 패키지의 본체는 disconnected 홈이다**: 가입 2분 된 판매자가 0건 셋과 전부 0인
+7행 표 셋 위에서 「지금 먼저 확인할 일은 없습니다」를 읽고 있었다 — **산술적으로 맞고 운영적으로
+거짓**이며, 할 일은 하나 있고 그것이 전부인데 화면에 없었다. 앞선 두 패키지가 「연결 전 첫 화면은 이
+org에서 관찰 불가」로 적어 둔 바로 그것이 **전용 disconnected org를 만들자마자 관찰됐다**. 이제 연결이
+하나도 없는 동안 인사말은 **세는 것을 멈추고**(네 번째 그룹도 플래그도 아니다 — 첫 연결 전에는 기다리는
+일의 수가 아직 사실이 아니라 읽기의 부재다) 「판매 채널을 연결하면 시작할 수 있습니다」와 버튼 하나를
+말하며, 연결이 하나 생기면 **저절로** 사라진다. 실패한 읽기는 `null`이지 `false`가 **아니다** — 멀쩡히
+연결된 판매자에게 연결이 없다고 말하는 것은 이 화면이 장애를 발명하는 일이고 판매자가 확인할 수 없는
+유일한 오류다. CTA y=**266**, 900과 1152×720(125% 등가) **둘 다 fold 위**. **§11**: `/agent`는
+`/capabilities`를 mount에 부르고 그 답을 **버리고 있었다** — 런타임이 죽어도 상자는 활성이고 판매자는
+치고 누르고 기다린 뒤 실패를 읽었다 ⇒ 이유는 상자 **위**에 렌더되고(처음엔 입력과 계정 선택 **아래**에
+붙어 죽은 컨트롤을 먼저 만났다) 컨트롤은 비활성이며 페이지가 이미 아는 것을 알아내려고 run을 시작하지
+않는다; 문구는 **「채널 연결과는 관계없는 문제입니다」**이지 「채널 연결에는 문제가 없습니다」가 아니다
+(연결이 하나도 없는 org에서 그 문장은 거짓이고, 이 알림은 판매자의 채널에 대해 의견을 가질 자격이
+없다). **§12**: 플래너 호출은 **블로킹 HTTP 한 번**이고 `trail`은 답과 **함께** 오며 응답 전에는 thread
+id가 없어 `getRun` 폴링도 불가 ⇒ 단계별 진행은 **새 프로토콜**(id-first start 또는 SSE)이 필요하므로
+만들지 않고 보고한다; 프로토콜 없이 실은 것은 사실 하나 — 「보통 20초쯤 걸립니다 · N초 경과」(측정된
+시계이고 막대나 단계 목록은 아무도 재지 않은 것의 애니메이션이다). **대비**: 온보딩 경로의 첫 화면에서
+둘 발견 — 카페24 튜토리얼 **활성** 단계 칩 `text-brand` on `bg-brand/15` **2.85:1**, 쿠팡 스테퍼 배지
+`bg-brand` + 흰 글씨 **3.71:1**. 카페24에 `brand-700`을 먼저 넣었더니 그 틴트 위에서 **4.16:1**로
+여전히 미달 — **색은 흰 배경이 아니라 그것이 놓이는 표면에서 확인해야 한다**(⇒ `brand-800`). **§1**:
+전용 disconnected org는 제품 자신의 `POST /api/auth/signup`으로 만들었다(`AuthService.signup`은 계정 0의
+Organization을 만들고 `MockDataSeeder`는 `organizations.count()==0`에서만 돈다) — 실측 신규 org
+accounts/inquiries/reviews **0/0/0**, canonical Demo Org **4/3,355/4,551 무변경**, 가짜 marketplace 성공
+state **0**, 폼에 비밀번호 입력 **0**(가입 응답의 JWT를 주입). **§13 helper naming — 브랜드 불일치가
+아니었다**: 실제 실행 파일·번들·인스톨러가 **없고**(`npx tsx collector/src/cli/local-agent.ts`), OS가
+보여주는 것은 launchd 사용자 에이전트 **`ai.sellerops.local-agent`** 하나이며 Dock 아이콘도 창도 없다.
+즉 화면은 판매자가 **구할 수도 설치할 수도 실행할 수도 없는** 프로그램의 이름을 부르고 방법은 말하지
+않는다 — 「SellerOps 도우미」→「reviewnary 도우미」 rename은 그 지시를 똑같이 따를 수 없게 두면서 지원
+담당자가 grep할 launchd label과 일치하는 유일한 문자열만 지운다 ⇒ **이름 붙일 것이 생기기 전에는 rename
+하지 않는다**(이번 패키지 rename **0**, 마이그레이션 순서만 기록). **§10**: agent-runtime에는 lifecycle
+owner가 **있다** — `docker-compose.yml`의 서비스(`depends_on: backend healthy`, frontend가 그것에
+의존)라 `docker compose up`이 넷을 함께 띄운다; 8787을 따로 띄우는 것은 **우리 로컬 dev 경로의 성질**이지
+패키징의 성질이 아니므로 packaging architecture **0**. **§14 PRIMARY = 카페24**(판매자가 낼 것이 mall
+id 하나 · 로컬 도우미 **불필요** · 인가 전체가 **철회 가능한 동의** — NAVER는 스토어당 앱 1개에 삭제
+불가라 되돌릴 수 없는 쪽이 가장 크고 쿠팡은 키 발급 + 호출 IP 등록이다). **라이브 walkthrough는 실행하지
+않았고 막은 것은 승인이 아니다** — §1의 「기존 seller account와 충돌 0」을 지키려면 어느 mall을 쓸지가
+정해져야 하는데, 쓸 수 있는 카페24 mall은 canonical Demo Org에 이미 연결된 그것뿐이고 같은 (app, mall)에
+대한 두 번째 OAuth 승인이 기존 refresh token을 살려 두는지는 **이 저장소에서 증명할 수 없는 벤더
+동작**이다; 틀리면 모든 문의 lane `LIVE_VERIFIED` 증명이 서 있는 그 연결이 끊긴다 ⇒ **product-owner
+결정**으로 올리고 bounded manifest는 §9에 미리 써 두었다. 브라우저 walkthrough 8화면(1440×900@2×,
+off-host 요청 **0** — 리스너로 단언), AA 텍스트 노드 위반 **0**, 가로 스크롤 0. **고치지 않고 보고한
+것**: disconnected 홈의 0 벽(숨기는 것은 Home redesign), 새 org에서 경고색으로 렌더되는 「채널 3곳이 이
+숫자에 없습니다」, 연결 문구에 남은 「SellerOps」, `/settings/channels` 레거시 홉, NAVER·쿠팡이 도우미
+경로를 기본으로 제시하는 것, 단계별 플래너 진행에 필요한 새 프로토콜, 그리고 **NAVER 완료 화면은
+라이브 렌더 없음**(연결된 계정에서 `/connect/naver`는 NAVER 연결 테스트를 부른다) ⇒ evidence 행 없음).
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

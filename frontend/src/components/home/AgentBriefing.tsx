@@ -4,7 +4,15 @@ import { SectionHeader } from "../ui/SectionHeader";
 import { InsightList } from "../ui/InsightList";
 import { ProactiveCases } from "../proactive/ProactiveCases";
 import { api } from "../../lib/apiClient";
-import { briefingHeadline, briefingInsights, briefingSubline, preparedTitle } from "../../lib/briefing";
+import { BtnLink } from "../ui/Btn";
+import {
+  briefingHeadline,
+  briefingInsights,
+  briefingSubline,
+  DISCONNECTED_HEADLINE,
+  DISCONNECTED_SUBLINE,
+  preparedTitle,
+} from "../../lib/briefing";
 import { previewText } from "../../lib/plainText";
 import type { InquiryQueueItem, OperationsInsight } from "../../lib/types";
 
@@ -43,6 +51,14 @@ export function AgentBriefing({
   const [preparedReady, setPreparedReady] = useState(false);
   const [proactive, setProactive] = useState(0);
   const [proactiveReady, setProactiveReady] = useState(false);
+  /**
+   * Does this org have a channel at all?
+   *
+   * <p>`null` = we do not know, and that is the state a failed read lands in — never `false`. Telling
+   * a seller with three working connections that they have none would be this screen inventing an
+   * outage, and it is the one error here that a seller could not check.
+   */
+  const [connected, setConnected] = useState<boolean | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -63,6 +79,21 @@ export function AgentBriefing({
     };
   }, []);
 
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const accounts = await api.getSellerAccountsStrict();
+        if (live) setConnected(accounts.some((a) => a.connectionStatus === "CONNECTED"));
+      } catch {
+        if (live) setConnected(null);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
   const onProactive = useCallback((count: number) => {
     setProactive(count);
     setProactiveReady(true);
@@ -70,6 +101,9 @@ export function AgentBriefing({
 
   const findings = briefingInsights(insights);
   const total = prepared.length + proactive + findings.length;
+  // Before the first connection, a count of waiting work is not a fact yet — it is the absence of a
+  // reading. So the greeting stops counting and says the one thing that is true.
+  const onboarding = connected === false;
   // The greeting waits for both reads. A sentence that says 1 and then says 3 a moment later is a
   // sentence the seller learns not to read.
   const ready = preparedReady && proactiveReady;
@@ -78,10 +112,18 @@ export function AgentBriefing({
     <section className="space-y-5" aria-label="오늘의 브리핑">
       <div>
         <p className="break-keep text-2xl font-bold leading-snug text-ink" aria-live="polite">
-          {ready ? briefingHeadline(total) : " "}
+          {onboarding ? DISCONNECTED_HEADLINE : ready ? briefingHeadline(total) : " "}
         </p>
-        {ready && briefingSubline(total) ? (
+        {onboarding ? (
+          <p className="mt-1 break-keep text-base text-muted">{DISCONNECTED_SUBLINE}</p>
+        ) : ready && briefingSubline(total) ? (
           <p className="mt-1 break-keep text-base text-muted">{briefingSubline(total)}</p>
+        ) : null}
+        {onboarding ? (
+          /* The only action on a screen that has nothing else to do, at the weight that says so. */
+          <div className="mt-4">
+            <BtnLink to="/connect">채널 연결하기</BtnLink>
+          </div>
         ) : null}
       </div>
 

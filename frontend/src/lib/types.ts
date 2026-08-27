@@ -488,6 +488,38 @@ export interface SyncRunView {
   finishedAt: string | null;
 }
 
+/**
+ * What one channel can currently say about one data type — the backend's `/api/channels/coverage` row.
+ *
+ * <b>`state` is the whole point.</b> ZERO is a measured absence and the only one that may be spoken as
+ * 「없습니다」; every other value means we do not know, and the onboarding summary must say so in
+ * different words (`docs/coverage` — `ChannelDataState`). `rows` is deliberately NOT used to print a
+ * seller-facing count: it counts everything this org holds, seeded rows included, and a number in a
+ * first-collection summary is a claim about what the CHANNEL just handed over.
+ */
+export interface ChannelCoverageRowView {
+  channelCode: string;
+  channelNameKo: string;
+  dataType: string; // INQUIRY | REVIEW | ORDER_SUMMARY
+  state:
+    | "OBSERVED_FRESH"
+    | "OBSERVED_FRESHNESS_UNPROVEN"
+    | "ZERO"
+    | "NOT_SUPPORTED"
+    | "NOT_CONNECTED"
+    | "BLOCKED";
+  supported: boolean;
+  verificationStatus: string | null;
+  connected: boolean;
+  connectionStatus: string | null;
+  routineEnabled: boolean;
+  routinePausedBy: string | null;
+  lastSuccessfulSyncAt: string | null;
+  rows: number;
+  openRows: number | null;
+  newestObservedAt: string | null;
+}
+
 export interface SyncRunFilters {
   sellerAccountId?: string;
   channelId?: string;

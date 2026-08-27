@@ -138,6 +138,11 @@ clarification question is a correct reply that still needs the seller's eye, so 
 Tints are `/5` for a card background and `/10` for a chip. A coloured word must be checked **on its
 own tint**, which is where every one of this product's contrast failures has been found.
 
+**A ramp value that passes on white does not carry to a tint.** `brand-700` measures 5.41:1 on surface
+and only **4.16:1** on `bg-brand/15` — still under AA, on the active step of the first screen a Cafe24
+seller ever sees. The fix is the next value down the ramp (`brand-800`), not a note that it is close.
+Measured in a real browser, composited, 2026-08-27.
+
 ---
 
 ## 7. The Agent briefing
@@ -187,6 +192,8 @@ Progressive, and the order is fixed: **conclusion → first evidence open → th
 | Empty | Say what would appear here and offer the one action that would make it appear. Never 「데이터 없음」. |
 | Nothing to report | Render **nothing**. A section that announces its own absence costs a glance on every visit. |
 | Loading | One line of text (`불러오는 중…`). No skeleton that shifts layout when it resolves. |
+| Long wait | Elapsed seconds, measured. A blocking call this product cannot observe the inside of gets 「보통 20초쯤 걸립니다 · N초 경과」 — never a bar, never a stage list, which would animate something nobody measured. |
+| Dependency down | Say what stopped, say what still works, and **disable the control it broke** rather than letting the seller discover it by pressing. The notice goes ABOVE that control. It may not make a claim about anything else that could be broken. |
 | Error | Say what could not be read and what still works. Never a status code, never a stack. |
 | Unknown | `—`, never `0`. A dash reads as "we do not know"; a zero reads as "there were none". |
 

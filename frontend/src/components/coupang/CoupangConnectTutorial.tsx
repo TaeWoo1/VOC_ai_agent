@@ -5,6 +5,7 @@ import { SecureCredentialForm } from "../guidedConnection/SecureCredentialForm";
 import { AdvertisedCallIpPanel } from "../guidedConnection/AdvertisedCallIpPanel";
 import { Spinner } from "../ui/Spinner";
 import { CoupangExpiryPanel } from "./CoupangExpiryPanel";
+import { FirstSourceSummary } from "../connect/FirstSourceSummary";
 import {
   COUPANG_TUTORIAL_COPY as C,
   recoveryCopy,
@@ -24,6 +25,9 @@ import {
  */
 export interface CoupangConnectTutorialProps {
   state: CoupangState;
+  /** The seller account this journey created, once it exists — the only source of a first-collection
+   *  count on the completion screen. `null` before the first credential submit. */
+  accountId?: string | null;
   template: CredentialTemplateView | null;
   busy: boolean;
   /** Which part of a credential submit is in flight (`submitting` phase): saving the key, or verifying it
@@ -59,6 +63,7 @@ const SYNC_SLOW_AFTER_MS = 3 * 60_000;
 
 export function CoupangConnectTutorial({
   state,
+  accountId = null,
   template,
   busy,
   submitStage = null,
@@ -114,6 +119,7 @@ export function CoupangConnectTutorial({
         {phase === "connected" && (
           <Connected
             connectionStatus={connectionStatus}
+            accountId={accountId}
             onGoToOrders={onGoToOrders}
             onViewChannelRuns={onViewChannelRuns}
             onRenew={onRenew}
@@ -153,10 +159,13 @@ function StepIndicator({ steps }: { steps: ReturnType<typeof stepModel> }) {
               aria-hidden="true"
               className={[
                 "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+                // White on `brand` (#3182F6) measures 3.71:1. The badge is aria-hidden and the label
+                // sits beside it, but for a step still to come it carries the step NUMBER — and a
+                // number nobody can read is not decoration. `brand-700` is 5.41:1.
                 s.state === "done"
-                  ? "bg-brand text-white"
+                  ? "bg-brand-700 text-white"
                   : s.state === "current"
-                    ? "bg-brand text-white"
+                    ? "bg-brand-700 text-white"
                     : "bg-canvas text-muted",
               ].join(" ")}
             >
@@ -408,6 +417,7 @@ function SyncError({ busy, onRetry }: { busy: boolean; onRetry: () => void }) {
  *  two Operations entry points (orders, and the channel's connection/collection history with the run). */
 function Connected({
   connectionStatus,
+  accountId,
   onGoToOrders,
   onViewChannelRuns,
   onRenew,
@@ -415,6 +425,7 @@ function Connected({
   busy,
 }: {
   connectionStatus: ConnectionStatusView | null;
+  accountId: string | null;
   onGoToOrders: () => void;
   onViewChannelRuns: () => void;
   onRenew?: () => void;
@@ -427,6 +438,15 @@ function Connected({
         <p className="font-semibold text-ink">{C.connectedTitle}</p>
         <p className="mt-1 text-sm text-muted break-keep">{C.connectedBody}</p>
       </div>
+
+      {/* What this connection brought in, and the way to the work. 「주문 화면으로」 was the primary
+          control here: it sent a seller who had just connected their shop to one table, before
+          anything had told them what SellerOps now knows.
+
+          It sits directly under the completion banner, above the key-expiry and health panels: those
+          answer questions about the connection, and the seller's question is about their shop.
+          Measured below the fold at y=748 when it shipped third (2026-08-27). */}
+      <FirstSourceSummary channelCode="COUPANG" channelNameKo="쿠팡" accountId={accountId} />
 
       {/* Credential-expiry: the date (or the operator-confirm path when UNKNOWN) + the renewal CTA from
           WARN_14. Rendered only when the backend supplies the expiry sub-view. */}
@@ -453,7 +473,7 @@ function Connected({
       )}
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn-primary" onClick={onGoToOrders}>
+        <button type="button" className="btn-ghost" onClick={onGoToOrders}>
           {C.goToOrders}
         </button>
         <button type="button" className="btn-ghost" onClick={onViewChannelRuns}>

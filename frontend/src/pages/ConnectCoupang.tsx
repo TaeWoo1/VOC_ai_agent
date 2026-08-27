@@ -587,6 +587,7 @@ export function ConnectCoupang() {
           ) : (
             <CoupangConnectTutorial
               state={state}
+              accountId={accountId}
               template={template}
               busy={busy}
               submitStage={submitStage}

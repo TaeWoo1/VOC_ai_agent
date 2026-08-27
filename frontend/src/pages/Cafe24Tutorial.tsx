@@ -17,6 +17,7 @@ import {
   tutorialReducer,
   type TutorialPhase,
 } from "../lib/cafe24Tutorial/state";
+import { FirstSourceSummary } from "../components/connect/FirstSourceSummary";
 import type { Cafe24CapabilityFeatureView } from "../lib/types";
 
 /**
@@ -346,10 +347,17 @@ export function Cafe24Tutorial() {
 
         {state.phase === "done" ? (
           <div className="space-y-4">
+            {/* What came in, what did not, and the way to the work — before the capability table,
+                which answers a different question (what this channel will be able to do). */}
+            <FirstSourceSummary
+              channelCode="CAFE24"
+              channelNameKo="카페24"
+              accountId={state.accountId}
+            />
             <CompletionFeatures accountId={state.accountId} />
             <div className="flex justify-end">
-              <button type="button" className="btn-primary" onClick={finish}>
-                채널 화면으로
+              <button type="button" className="btn-ghost" onClick={finish}>
+                채널 연결 화면으로
               </button>
             </div>
           </div>
@@ -382,8 +390,12 @@ function ProgressRail({ current }: { current: TutorialPhase }) {
       {STEP_ORDER.map((phase, index) => {
         const done = activeIndex > index && current !== "failed";
         const active = current === phase;
+        // `text-brand` on its own tint measures 2.85:1 — the ACTIVE step of the first screen a
+        // Cafe24 seller ever sees, and the one word on the rail that tells them where they are
+        // (measured in a real browser, composited, 2026-08-27). `brand-700` only reaches 4.16:1 ON THIS TINT — a
+        // colour must be checked on the surface it lands on, not on white. `brand-800` clears it.
         const tone = active
-          ? "bg-brand/15 text-brand"
+          ? "bg-brand/15 text-brand-800"
           : done
             ? "bg-good/10 text-good"
             : "bg-line/10 text-muted";

@@ -38,6 +38,22 @@ export function briefingSubline(count: number): string | null {
 }
 
 /**
+ * <b>The disconnected morning — the one case where 「확인할 일은 없습니다」 is a lie.</b>
+ *
+ * <p>Disconnected Channel Onboarding Live Walkthrough v1 §17. A seller who signed up two minutes ago
+ * has nothing waiting because nothing has been read yet, and the arithmetic greeting told them so:
+ * 「지금 먼저 확인할 일은 없습니다」 over six zeros and three empty tables. There IS something to do,
+ * it is the only thing, and it was not on the screen.
+ *
+ * <p>This is not a fourth briefing group. It REPLACES the greeting while the org has no connected
+ * channel, because a count of waiting work is not a fact yet — and it goes away by itself the moment
+ * one connection exists, with no flag and nothing to turn off.
+ */
+export const DISCONNECTED_HEADLINE = "판매 채널을 연결하면 시작할 수 있습니다.";
+export const DISCONNECTED_SUBLINE =
+    "채널을 연결하면 주문·문의·리뷰를 대신 확인하고, 먼저 봐야 할 일을 여기에 정리해 두겠습니다.";
+
+/**
  * Which insights belong in the briefing at all.
  *
  * <p>{@code INFO} rows are context, not work — they describe the shape of the numbers rather than

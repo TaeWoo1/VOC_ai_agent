@@ -5,6 +5,7 @@ import type {
 } from "../../lib/types";
 import { relativeTime } from "../../lib/format";
 import { ConnectionCapabilityPanel } from "./ConnectionCapabilityPanel";
+import { FirstSourceSummary } from "../connect/FirstSourceSummary";
 import { AdvertisedCallIpPanel } from "./AdvertisedCallIpPanel";
 import { NaverIssuanceTutorial } from "./NaverIssuanceTutorial";
 import { NaverIssuanceModeChoice } from "./NaverIssuanceModeChoice";
@@ -43,6 +44,9 @@ import { SecureCredentialForm } from "./SecureCredentialForm";
  */
 export interface GuidedConnectionWizardProps {
   state: GuidedConnectionState;
+  /** The seller account this journey created, once it exists — the only source of a first-collection
+   *  count on the completion screen. `null` before the first credential submit. */
+  accountId?: string | null;
   template: CredentialTemplateView | null;
   busy: boolean;
   /** Real connection health, read after completion so the seller sees the state + last success time
@@ -135,6 +139,7 @@ function FirstSyncProgress({
 
 export function GuidedConnectionWizard({
   state,
+  accountId = null,
   template,
   busy,
   connectionStatus,
@@ -404,6 +409,10 @@ export function GuidedConnectionWizard({
             <p className="rounded-lg bg-good/10 px-4 py-3 text-sm text-ink break-keep" role="status">
               {CALL_IP_COPY.readyConfirmed}
             </p>
+            {/* What this connection actually brought in, and the way to the work. It sits above the
+                capability panel because 「무엇을 가져왔는지」 is the seller's question and 「무엇을 할 수
+                있는지」 is ours. */}
+            <FirstSourceSummary channelCode="NAVER" channelNameKo="네이버" accountId={accountId} />
             {capability && <ConnectionCapabilityPanel capability={capability} />}
             <ConnectionSummary status={connectionStatus} />
             <ReviewSetupCard

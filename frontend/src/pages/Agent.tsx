@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { readAgentContext } from "../lib/agentContext";
 import { Link } from "react-router-dom";
@@ -6,6 +6,7 @@ import { ProactiveCases } from "../components/proactive/ProactiveCases";
 import { PageHeader } from "../components/PageHeader";
 import { Section } from "../components/Section";
 import { Disclosure } from "../components/ui/Disclosure";
+import { Btn, BtnLink } from "../components/ui/Btn";
 import { useApiData } from "../lib/useApiData";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/apiClient";
@@ -90,8 +91,45 @@ export function Agent() {
    * seller is not invited to type a second sentence that is guaranteed to fail the same way.
    */
   const plannerUnavailable = run?.status === "FAILED" && run.failureCode === "PLANNER_CAPABILITY_OFF";
+
+  /**
+   * The runtime itself did not answer.
+   *
+   * <b>Known at mount, and it used to be discarded.</b> `/capabilities` is the first thing this page
+   * asks for, so a runtime that is not running is a fact this screen holds before the seller types a
+   * word — and the screen then let them type it, press, wait, and read a failure. A box that cannot
+   * work must say so while it is still empty.
+   *
+   * <b>It is not a channel problem, and it must not read as one.</b> A seller whose 카페24 connection
+   * is healthy would otherwise learn, from this screen, that something about their shop broke. The
+   * rest of the product — 문의, 리뷰, 주문, and the home 물어보기 shortcuts — is untouched by this and
+   * the copy says so.
+   */
+  const runtimeUnavailable = caps.error && !caps.loading;
+  const askDisabled = plannerUnavailable || runtimeUnavailable;
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Seconds this request has been in flight.
+   *
+   * <b>Elapsed time, not progress</b> (Disconnected Channel Onboarding Live Walkthrough v1 §12). The
+   * planner call is one blocking HTTP request — the trail arrives WITH the answer — so this screen
+   * holds no intermediate state to draw, and a bar or a stage list would be an animation of something
+   * nobody measured. A live clock is a fact, and it is the fact that separates 「생각하는 중」 from
+   * 「멈춘 것 같다」 during a 22-second wait (measured, 2026-08-27).
+   */
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!busy) {
+      setElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
 
   // Advisory label only — the backend re-derives the authoritative approver from the JWT principal,
   // so this is never the security identity. The fallback is unreachable behind the auth-gated route.
@@ -201,6 +239,31 @@ export function Agent() {
 
       <Section title="무엇을 확인해볼까요?">
         <form onSubmit={submit} className="space-y-3" aria-label="에이전트 명령 입력">
+          {runtimeUnavailable ? (
+            /*
+              ABOVE the box it disables. It shipped below the input and the account picker, so the
+              seller met a dead control first and the reason for it third.
+
+              And it does NOT say 「채널 연결에는 문제가 없습니다」. On an org with nothing connected
+              that sentence is false, and this notice is not entitled to an opinion about the
+              seller's channels — only about the fact that this failure is not one of them.
+            */
+            <div id="agent-runtime-off" className="rounded-xl border border-warn/40 bg-warn/5 p-3" role="status">
+              <p className="text-base font-semibold text-ink">AI 도우미를 시작하지 못했습니다.</p>
+              <p className="mt-1 break-keep text-sm text-muted">
+                채널 연결과는 관계없는 문제입니다. 문의·리뷰·주문 화면은 그대로 사용할 수 있고, 홈의
+                「무엇을 도와드릴까요?」에서 미답변 문의와 리뷰 문제도 계속 확인할 수 있습니다.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <BtnLink to="/" size="sm" variant="outline">
+                  홈으로 가기
+                </BtnLink>
+                <Btn size="sm" variant="ghost" onClick={() => window.location.reload()}>
+                  다시 시도
+                </Btn>
+              </div>
+            </div>
+          ) : null}
           {/* The heading above already asks the question; a second 「명령」 label under it was the
               same field named twice, in the harsher of the two words. */}
           <label htmlFor="agent-command" className="sr-only">
@@ -213,8 +276,10 @@ export function Agent() {
             placeholder="예: 오늘 뭐부터 봐야 해?"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
-            disabled={plannerUnavailable}
-            aria-describedby={plannerUnavailable ? "agent-planner-off" : undefined}
+            disabled={askDisabled}
+            aria-describedby={
+              runtimeUnavailable ? "agent-runtime-off" : plannerUnavailable ? "agent-planner-off" : undefined
+            }
           />
           {/* Examples sit between the box and the button, where a seller who does not know what to
               type reads them — not under the account picker two controls further down. */}
@@ -228,10 +293,18 @@ export function Agent() {
           <button
             type="submit"
             className="btn-primary"
-            disabled={busy || !command.trim() || plannerUnavailable}
+            disabled={busy || !command.trim() || askDisabled}
           >
             {busy ? "확인 중…" : "물어보기"}
           </button>
+          {/* What a seller cannot tell from a spinner: whether anything is still happening. The
+              number is measured, and the sentence says the shape of the work without claiming a
+              stage this screen has no way to know it reached. */}
+          {busy ? (
+            <p className="break-keep text-sm text-muted" role="status">
+              문의·리뷰·주문을 확인하고 있습니다. 보통 20초쯤 걸립니다 · {elapsed}초 경과
+            </p>
+          ) : null}
           {/* A collapsed control needs a marker, or it reads as a label with nothing behind it —
               which is exactly how a reader with no explanation read this one (Executive Readiness
               Fix v1): 「고를 것이 화면에 없다」. */}
@@ -286,7 +359,7 @@ export function Agent() {
         <button
           type="button"
           className="btn-ghost text-sm"
-          disabled={busy}
+          disabled={busy || runtimeUnavailable}
           onClick={prepareDraft}
         >
           {busy ? "준비 중…" : "미답변 문의로 답변 초안 만들어 보기"}

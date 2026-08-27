@@ -560,6 +560,7 @@ export function ConnectNaver() {
           )}
           <GuidedConnectionWizard
             state={state}
+            accountId={accountId}
             template={template}
             busy={busy}
             connectionStatus={connectionStatus}

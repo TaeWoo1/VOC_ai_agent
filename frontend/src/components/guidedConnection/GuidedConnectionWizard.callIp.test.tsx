@@ -5,7 +5,8 @@
 // connection must positively close the IP loop — reaching completion means the test's order-access probe
 // passed, which requires the call IP to be registered and allowed.
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
+import { renderWithRouter as render, screen } from "../../test/renderWithRouter";
 import { GuidedConnectionWizard, type GuidedConnectionWizardProps } from "./GuidedConnectionWizard";
 import { actorFor, CALL_IP_COPY, NAVER_LIKE_TEMPLATE } from "../../lib/guidedConnection";
 import type { GuidedConnectionState, GuidedFailureReason, GuidedPhase } from "../../lib/guidedConnection";

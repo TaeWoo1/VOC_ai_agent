@@ -3,8 +3,7 @@
 // step and emits sanitized events. Logic (which phase follows which) is covered by state.test.ts.
 // The order connection is Local-Agent-free — there are NO agent/renderer/NAVER-login phases to render.
 import { describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
-import { screen, userEvent } from "../../test/renderWithRouter";
+import { renderWithRouter as render, screen, userEvent } from "../../test/renderWithRouter";
 import { expectNoAxeViolations } from "../../test/axe";
 import { GuidedConnectionWizard, type GuidedConnectionWizardProps } from "./GuidedConnectionWizard";
 import { actorFor, DISCONNECT_GUARDRAIL_COPY, NAVER_LIKE_TEMPLATE, REVIEW_SETUP_COPY } from "../../lib/guidedConnection";

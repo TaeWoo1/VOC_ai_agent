@@ -88,6 +88,7 @@ import type {
   ReviewImportSegmentView,
   ReviewOpsLoopSummary,
   SyncJobView,
+  ChannelCoverageRowView,
   SyncRunFilters,
   SyncRunView,
   UploadType,
@@ -573,6 +574,17 @@ export const api = {
       return null;
     }
     const { data } = await http.post<ConnectorAlertView>(`/api/connector-alerts/${id}/acknowledge`);
+    return data;
+  },
+  /**
+   * What each seller-visible channel can currently say, per data type.
+   *
+   * <p>Strict: this read decides whether a screen may write 「문의가 없습니다」, and a silent mock
+   * behind that sentence is the false calm the coverage enum exists to refuse. Org-scoped from the
+   * JWT server-side; there is no parameter to get wrong.
+   */
+  async getChannelCoverageStrict(): Promise<ChannelCoverageRowView[]> {
+    const { data } = await http.get<ChannelCoverageRowView[]>("/api/channels/coverage");
     return data;
   },
   async getSyncRunsStrict(filters: SyncRunFilters = {}): Promise<SyncRunView[]> {
