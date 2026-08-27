@@ -112,6 +112,10 @@ Rules learned the hard way:
 - **A repeated CTA is no CTA.** Three rows each carrying 「AI에게 묻기」 is zero calls to action.
 - **A disabled primary is neutralised**, not brand-coloured — a blue button that does nothing reads
   as broken, not as unavailable.
+- **Hover on a solid primary darkens** (`brand-700` → `brand-800`), never lightens. Lightening walks
+  the fill toward the white text: `brand-600` under white measures **4.49:1**, under AA, on the most
+  pressed control in the product and in the exact state a cursor is in while the label is being read.
+  `brand-800` (`#1550B5`) measures 7.38:1. Measured in a real browser, composited, 2026-08-27.
 - Minimum control height **36px**; a primary button **44px**.
 
 ---
@@ -190,8 +194,9 @@ Progressive, and the order is fixed: **conclusion → first evidence open → th
 
 ## 11. Accessibility
 
-- **AA on every text node**, measured, including on tints. The last three packages each found a
-  failure that only appeared on a coloured background.
+- **AA on every text node**, measured, including on tints **and including hover**. Every contrast
+  failure this product has had was on a coloured background or in a non-resting state; none was ever
+  found by reading the palette.
 - Visible focus everywhere: `focus-visible:ring-2 ring-brand-700`. Focus rings are never removed.
 - Every icon-only control has an accessible name; every colour-coded state has an `sr-only` word.
 - `aria-label` on each page section that a screen reader would otherwise meet unnamed.

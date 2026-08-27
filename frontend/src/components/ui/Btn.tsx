@@ -7,13 +7,17 @@ import { Link } from "react-router-dom";
  * `solid` is `bg-brand-700`, not `bg-brand`: white text on #3182F6 measures 3.71:1 and misses AA,
  * while #1B64DA measures 5.41:1. The accent is spent on actions and nowhere else, so this is the
  * only place the strong brand value appears in the app surface.
+ *
+ * <b>Hover darkens.</b> It used to lighten to `brand-600`, and white on #2272EB measures 4.49:1 —
+ * under AA on the most-pressed control in the product, in the state the seller's cursor is in while
+ * they read it. Measured in a real browser, composited, on 2026-08-27. `brand-800` is 7.38:1.
  */
 
 export type BtnVariant = "solid" | "outline" | "ghost";
 export type BtnSize = "md" | "sm";
 
 const VARIANT: Record<BtnVariant, string> = {
-  solid: "bg-brand-700 text-white hover:bg-brand-600 disabled:opacity-50",
+  solid: "bg-brand-700 text-white hover:bg-brand-800 disabled:opacity-50",
   outline: "border border-line text-ink hover:bg-canvas disabled:opacity-50",
   ghost: "text-muted hover:text-ink hover:bg-canvas disabled:opacity-50",
 };

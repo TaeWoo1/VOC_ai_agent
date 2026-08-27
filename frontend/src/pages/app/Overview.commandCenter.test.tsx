@@ -60,6 +60,7 @@ function overview(): OverviewResponse {
       series: [],
       channels: [],
       exclusions: [],
+      exampleDataIncluded: false,
     },
     insights: [
       {
@@ -108,6 +109,23 @@ describe("home — the Agent goes first", () => {
     expect(headline.compareDocumentPosition(numbers) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("§1-A — the greeting and the command box open the screen, above the work and the numbers", async () => {
+    const { container } = renderHome();
+
+    const headline = await screen.findByText("오늘 먼저 확인하면 좋은 일이 2개 있습니다.");
+    const command = container.querySelector("#home-command")!;
+    const prepared = container.querySelector('[aria-label="준비된 답변 초안"]')!;
+    const numbers = container.querySelector('[aria-label="오늘 상태"]')!;
+
+    // The defect this closes: the input shipped BELOW the six-figure grid, which put the one control
+    // a chat-first product is named for off the first screen at 125%.
+    const after = (a: Element, b: Element) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(after(headline, command)).toBe(true);
+    expect(after(command, prepared)).toBe(true);
+    expect(after(prepared, numbers)).toBe(true);
+  });
+
   it("E — it counts what is on the screen, in seller language", async () => {
     renderHome();
 
@@ -154,6 +172,32 @@ describe("home — the command box answers with objects", () => {
         "/inquiries/i1",
       ),
     );
+  });
+
+  it("§2/§14-D — nothing to flag means no section and no invented work", async () => {
+    renderHome();
+    await screen.findByText("오늘 먼저 확인하면 좋은 일이 2개 있습니다.");
+
+    // Zero open cases is a correct state and gets no large empty panel announcing itself. The
+    // greeting counts what is rendered — 1 prepared + 0 + 1 finding — so an absent section is
+    // absent from the number too, and nothing anywhere manufactures a case to fill the space.
+    expect(screen.queryByLabelText("AI가 먼저 확인한 일")).toBeNull();
+    expect(screen.queryByText(/확인 중|분석 중|준비 중/)).toBeNull();
+  });
+
+  it("§14-E — a recognised command reaches no planner and leaves the page", async () => {
+    const user = userEvent.setup();
+    renderHome();
+    await screen.findByText("오늘 먼저 확인하면 좋은 일이 2개 있습니다.");
+
+    await user.type(screen.getByLabelText("무엇을 도와드릴까요?"), "미답변 문의 보여줘");
+    await user.click(screen.getByRole("button", { name: "물어보기" }));
+
+    // Deterministic navigation over objects that already exist: no run is started, no model is
+    // called, and the seller does not leave the screen they asked from. The `/agent` handover is
+    // what an UNRECOGNISED sentence gets, and only that.
+    await screen.findByText("답변이 필요한 문의");
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("G — 「답변 보내줘」 sends nothing; it reaches the Agent", async () => {

@@ -24,8 +24,21 @@ import type { InquiryQueueItem, OperationsInsight } from "../../lib/types";
  * <p><b>No new card framework</b> (§4). Prepared work is rows; 「AI가 먼저 확인한 일」 is the section
  * that already existed; findings are {@link InsightList}, unchanged. What is new is the order and the
  * one sentence on top.
+ *
+ * <p><b>The input sits inside the briefing, between the sentence and the work</b> (Chat-first Agent
+ * Shell Completion v1 §1). It shipped one section lower, under the numbers, which put the one control
+ * a chat-first product is named for below the fold at 125%. It is a slot rather than a child of this
+ * file because the greeting is arithmetic over what this component renders, and the input is not one
+ * of the things it counts.
  */
-export function AgentBriefing({ insights }: { insights: OperationsInsight[] }) {
+export function AgentBriefing({
+  insights,
+  commandSlot,
+}: {
+  insights: OperationsInsight[];
+  /** Rendered between the greeting and the work. Counted by neither. */
+  commandSlot?: React.ReactNode;
+}) {
   const [prepared, setPrepared] = useState<InquiryQueueItem[]>([]);
   const [preparedReady, setPreparedReady] = useState(false);
   const [proactive, setProactive] = useState(0);
@@ -71,6 +84,8 @@ export function AgentBriefing({ insights }: { insights: OperationsInsight[] }) {
           <p className="mt-1 break-keep text-base text-muted">{briefingSubline(total)}</p>
         ) : null}
       </div>
+
+      {commandSlot}
 
       {prepared.length > 0 ? (
         <section className="space-y-2" aria-label="준비된 답변 초안">

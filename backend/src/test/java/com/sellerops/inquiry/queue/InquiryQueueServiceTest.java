@@ -199,6 +199,35 @@ class InquiryQueueServiceTest {
     }
 
     @Test
+    @DisplayName("§4 — the rows and the pagination total are taken over the SAME predicate")
+    void totalElementsFollowsEveryPredicateTheRowsFollow() {
+        UUID org = UUID.randomUUID();
+        UUID account = UUID.randomUUID();
+        UUID channel = UUID.randomUUID();
+        seed(org, account, channel, InquiryWorkItemPhase.OPEN, "아직 답변 안 함");
+        seed(org, account, channel, InquiryWorkItemPhase.OPEN, "채널에서 이미 답변됨");
+        seed(org, account, channel, InquiryWorkItemPhase.OPEN, "합성 데이터");
+
+        Inquiry answered = inquiries.findAll().stream()
+                .filter(q -> "채널에서 이미 답변됨".equals(q.getTitle())).findFirst().orElseThrow();
+        answered.setStatus("ANSWERED");
+        inquiries.save(answered);
+        Inquiry manufactured = inquiries.findAll().stream()
+                .filter(q -> "합성 데이터".equals(q.getTitle())).findFirst().orElseThrow();
+        manufactured.setDataOrigin(DataOrigin.DEMO_SEED);
+        inquiries.save(manufactured);
+
+        InquiryQueueResponse page = service.queue(org, InquiryWorkItemPhase.OPEN, 0, 20);
+
+        // The defect this closes: a queue that renders one row and paginates three. Both narrowings
+        // — manufactured data and answered-elsewhere — have to be visible to the counter, which is
+        // only true while they are clauses of the query rather than filters over its result.
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.totalElements()).isEqualTo(1);
+        assertThat(page.totalPages()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("a COMPLETED item's inquiry is answered BY DEFINITION — that tab is not emptied")
     void completedWorkKeepsItsAnsweredInquiry() {
         UUID org = UUID.randomUUID();

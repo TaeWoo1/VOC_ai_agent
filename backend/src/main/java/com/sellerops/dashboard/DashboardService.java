@@ -130,7 +130,19 @@ public class DashboardService {
     private List<TopProductIssue> buildTopProductIssues(UUID orgId) {
         Map<UUID, String> productNames = products.findAllByOrgId(orgId).stream()
                 .collect(Collectors.toMap(Product::getId, Product::getName, (a, b) -> a));
+        /*
+         * REAL only (Chat-first Agent Shell Completion v1 §3-C).
+         *
+         * This list becomes 「{상품} 부정 리뷰 N건」 — a sentence the home briefing states as a fact
+         * about the seller's shop, with a date range attached. N is a count of review ROWS, so a
+         * seeded row lands inside it, and on this deployment eleven of them do. The rule the previous
+         * package wrote for the unanswered count is the same rule here: a manufactured row may appear
+         * in a chart of what the shop did, never in a number that tells the seller they have a
+         * problem. The dashboard's other reads are untouched — this narrows one insight's corpus, not
+         * the review screens or the issue extractor's evidence.
+         */
         Map<UUID, List<Review>> negativeByProduct = reviews.findAllByOrgId(orgId).stream()
+                .filter(r -> r.getDataOrigin() == com.sellerops.common.DataOrigin.REAL)
                 .filter(Review::isNegative)
                 .filter(r -> r.getProductId() != null)
                 .collect(Collectors.groupingBy(Review::getProductId));

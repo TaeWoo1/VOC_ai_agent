@@ -105,9 +105,33 @@ public class OperationsMetricsService {
             coverageRows.put(key(row.channelCode(), row.dataType()), row);
         }
 
-        boolean synthetic = SyntheticDataVisibility.syntheticVisible();
-        Window current = read(orgId, from, to, synthetic);
-        Window previous = read(orgId, previousFrom, previousTo, synthetic);
+        /*
+         * REAL first, always — and say so on the one occasion it is not (Chat-first Agent Shell
+         * Completion v1 §3).
+         *
+         * These six numbers are how a seller decides whether their week went well, so the default
+         * corpus is the seller's own data and nothing the product manufactured about itself. That is
+         * rule A, and on this deployment it is the whole story: the seeded rows sit outside every
+         * window the screen offers, so the figures do not move.
+         *
+         * Rule B is the branch below, and it exists so that A is safe to apply unconditionally. A
+         * deployment whose ONLY content is seeded — a demo with no collection behind it — would
+         * otherwise render six honest zeros and a flat chart, which is not what
+         * {@code sellerops.seed.demo-content} was turned on to produce. So when the real window is
+         * empty and a synthetic one is not, the synthetic one is shown WITH A LABEL the screen has to
+         * render. Mixing the two silently is the one thing neither rule allows.
+         */
+        Window current = read(orgId, from, to, false);
+        Window previous = read(orgId, previousFrom, previousTo, false);
+        boolean exampleDataIncluded = false;
+        if (SyntheticDataVisibility.syntheticVisible() && !current.hasRows()) {
+            Window syntheticCurrent = read(orgId, from, to, true);
+            if (fallBackToExampleData(true, current.hasRows(), syntheticCurrent.hasRows())) {
+                current = syntheticCurrent;
+                previous = read(orgId, previousFrom, previousTo, true);
+                exampleDataIncluded = true;
+            }
+        }
 
         List<ChannelMetricRow> channelRows = new ArrayList<>();
         List<MetricExclusion> exclusions = new ArrayList<>();
@@ -181,7 +205,27 @@ public class OperationsMetricsService {
 
         return new OperationsMetricsResponse(
                 new MetricPeriod(from, to, previousFrom, previousTo, window),
-                REVENUE_BASIS, ORDER_COUNT_BASIS, kpis, series, channelRows, exclusions);
+                REVENUE_BASIS, ORDER_COUNT_BASIS, kpis, series, channelRows, exclusions,
+                exampleDataIncluded);
+    }
+
+    /**
+     * Whether these figures may be computed over manufactured rows — rule A, and the one case where
+     * rule B applies (Chat-first Agent Shell Completion v1 §3).
+     *
+     * <p>Three conditions, all required, and the order they are written in is the order they matter:
+     * the deployment must have deliberately seeded demo content; the seller's OWN data must have
+     * produced nothing at all for this window; and the seeded corpus must actually have something to
+     * show. Anything else is rule A — the seller's data, alone, whether or not seeded rows exist
+     * beside it.
+     *
+     * <p>There is no branch that MIXES them. That is the point of the rule: a figure is either the
+     * seller's or it is labelled, and a total that is 90% real is the one shape a label cannot
+     * describe honestly.
+     */
+    static boolean fallBackToExampleData(boolean syntheticVisible, boolean realWindowHasRows,
+                                         boolean syntheticWindowHasRows) {
+        return syntheticVisible && !realWindowHasRows && syntheticWindowHasRows;
     }
 
     /**
@@ -330,6 +374,18 @@ public class OperationsMetricsService {
         final Map<UUID, long[]> orders = new HashMap<>();      // [count, amount]
         final Map<UUID, long[]> inquiries = new HashMap<>();   // [received, unanswered]
         final Map<UUID, long[]> reviews = new HashMap<>();     // [received, negative]
+
+        /**
+         * Whether this window found anything at all.
+         *
+         * <p>Presence of ROWS, not a non-zero total: a window holding one order of ￦0 has data and
+         * must not be replaced by a seeded one. The three maps only get a key when a query returned a
+         * row for that channel, so this is false exactly when the reads came back with nothing.
+         */
+        boolean hasRows() {
+            return !orders.isEmpty() || !inquiries.isEmpty() || !reviews.isEmpty();
+        }
+
         final Map<LocalDate, Long> dailyOrders = new HashMap<>();
         final Map<LocalDate, Long> dailyRevenue = new HashMap<>();
         final Map<LocalDate, Long> dailyInquiries = new HashMap<>();

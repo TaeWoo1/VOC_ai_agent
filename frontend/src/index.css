@@ -22,7 +22,7 @@
      still the primary CTA on the Agent screen and on every guided-connection / tutorial screen
      (58 call sites). Executive Readiness Fix v1. */
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-xl bg-brand-700 px-5 py-3 text-lg font-semibold text-white transition hover:bg-brand-600 disabled:bg-canvas disabled:text-muted;
+    @apply inline-flex items-center justify-center rounded-xl bg-brand-700 px-5 py-3 text-lg font-semibold text-white transition hover:bg-brand-800 disabled:bg-canvas disabled:text-muted;
   }
   .btn-ghost {
     @apply inline-flex items-center justify-center rounded-xl border border-line px-4 py-2.5 font-medium text-ink transition hover:bg-canvas;

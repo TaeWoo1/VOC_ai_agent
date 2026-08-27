@@ -1986,6 +1986,13 @@ export interface OperationsMetrics {
   series: MetricSeries[];
   channels: ChannelMetricRow[];
   exclusions: MetricExclusion[];
+  /**
+   * Whether these figures were computed over rows the product manufactured about itself.
+   *
+   * True only on a seeded deployment whose real window held nothing at all — never on a mix. The
+   * screen must render it: a seller looking at a revenue figure is entitled to know whose it is.
+   */
+  exampleDataIncluded: boolean;
 }
 
 /** One derived thing worth looking at. `agentGoal` is a question a human may send, never dispatched. */

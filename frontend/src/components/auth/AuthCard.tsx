@@ -41,6 +41,6 @@ export const authField =
   "w-full rounded-xl border border-line bg-white px-4 py-3 text-base text-ink placeholder:text-muted/70 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20";
 export const authLabel = "mb-1.5 block text-sm font-semibold text-ink";
 export const authPrimaryButton =
-  "inline-flex w-full items-center justify-center rounded-xl bg-brand-700 px-5 py-3 text-base font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2";
+  "inline-flex w-full items-center justify-center rounded-xl bg-brand-700 px-5 py-3 text-base font-semibold text-white transition hover:bg-brand-800 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2";
 export const authLink =
   "rounded font-medium text-brand-700 transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2";

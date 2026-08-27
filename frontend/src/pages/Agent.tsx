@@ -11,6 +11,7 @@ import { useAuth } from "../lib/auth";
 import { api } from "../lib/apiClient";
 import { productAccounts } from "../lib/productAccounts";
 import { agentRuntime, AgentRuntimeError } from "../lib/agentRuntime/agentClient";
+import { answerObjects, answerObjectHref } from "../lib/answerObjects";
 import type {
   AgentRunView,
   OperatorAnswer,
@@ -105,6 +106,11 @@ export function Agent() {
       const view = await agentRuntime.startRun({
         goalText: command.trim(),
         ...(accountId ? { accountId } : {}),
+        // The screen the seller came from, carried into the run (Chat-first Agent Shell Completion
+        // v1 §9). Until this package the id reached the URL and died here, so 「이 상품만 봐줘」 from
+        // a product page had to name the product again in the sentence — and did, which is why the
+        // gap was invisible. The id is a hint the runtime verifies, never an injected fact.
+        ...(launchContext.productId ? { productId: launchContext.productId } : {}),
       });
       setRun(view);
     } catch (err) {
@@ -333,6 +339,10 @@ function OperatorAnswerCard({ answer }: { answer: OperatorAnswer }) {
   const missingKnowledge = (answer.knowledgeCoverage ?? []).filter(
     (c) => c.facet !== "SIGNALS" && (c.coverage === "UNAVAILABLE" || c.coverage === "STALE"),
   );
+  // What the answer is ABOUT, as things the seller can open (§8). Read off the evidence that is
+  // already on this card — no second request, no derived number, and nothing when the answer was
+  // org-wide, because then there is no object to offer.
+  const objects = answerObjects(answer.evidence);
 
   return (
     <section className="mt-4 rounded-lg border border-line bg-surface p-4">
@@ -421,6 +431,45 @@ function OperatorAnswerCard({ answer }: { answer: OperatorAnswer }) {
           ))}
         </ul>
       )}
+
+      {objects.length > 0 ? (
+        <div className="mt-4">
+          {/*
+            The objects, under the sentences that named them (Chat-first Agent Shell Completion v1 §8).
+
+            <b>The heading counts; it does not narrate.</b> 「상품 2개」 is what is rendered below it,
+            the same arithmetic rule the home briefing follows — and the findings above already said
+            what is wrong, so this does not say it again (§11).
+          */}
+          <h4 className="text-sm font-semibold text-ink">
+            이 답변이 가리키는 상품 {objects.length}개
+          </h4>
+          <ul className="mt-2 space-y-2">
+            {objects.map((object) => (
+              <li
+                key={object.productId}
+                className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded border border-line bg-bg px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="break-keep font-medium text-ink">
+                    {/* An id with a link is still openable; 「-」 is not. */}
+                    {object.productName ?? "이름을 확인하지 못한 상품"}
+                  </p>
+                  {object.facts.length > 0 ? (
+                    <p className="mt-0.5 break-keep text-xs text-muted">{object.facts.join(" · ")}</p>
+                  ) : null}
+                </div>
+                <Link
+                  to={answerObjectHref(object)}
+                  className="shrink-0 rounded-full border border-line px-3 py-1 text-sm font-medium text-ink hover:bg-surface"
+                >
+                  확인하기
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {uncertain.length > 0 ? (
         <div className="mt-4 rounded border border-warn/40 bg-warn/5 p-3">

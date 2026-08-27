@@ -31,10 +31,22 @@ public interface InquiryWorkItemRepository extends JpaRepository<InquiryWorkItem
      * the service's own inquiry load goes through {@code findAllById}, which no Hibernate filter
      * touches. Filtering after the page is fetched would also make {@code totalElements} count rows
      * the caller never receives, and a queue that says 12 while showing 9 is its own defect.
+     *
+     * <p><b>The answered-elsewhere clause lives here for exactly that reason.</b> It shipped one
+     * package ago as a Java filter over the fetched page — correct rows, and a total that still
+     * counted the rows it had just dropped. The predicate has not changed: in {@code OPEN} and
+     * {@code PROPOSED}, and only there, an inquiry the channel already reports as {@code ANSWERED}
+     * is not work. {@code COMPLETED} and {@code EXECUTED} carry answered inquiries by definition, so
+     * a clause that ignored the phase would empty exactly the tabs that are supposed to be full.
+     * Nothing is written: {@code reconcileConnectorAnswered} still owns closing these on the next
+     * collection; this only stops the row being offered, and counted, as a task in the meantime.
      */
     @Query("select w from InquiryWorkItem w where w.orgId = :orgId and w.phase = :phase "
             + "and exists (select 1 from Inquiry i where i.id = w.inquiryId and i.dataOrigin = 'REAL' "
-            + "and i.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE)")
+            + "and i.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE "
+            + "and (w.phase not in (com.sellerops.inquiry.workitem.InquiryWorkItemPhase.OPEN, "
+            + "com.sellerops.inquiry.workitem.InquiryWorkItemPhase.PROPOSED) "
+            + "or i.status <> 'ANSWERED'))")
     Page<InquiryWorkItem> findOperationalByOrgIdAndPhase(@Param("orgId") UUID orgId,
                                                          @Param("phase") InquiryWorkItemPhase phase,
                                                          Pageable pageable);

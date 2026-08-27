@@ -150,7 +150,7 @@ export function IssueDetailPanel({
                           {to ? (
                             <Link
                               to={to}
-                              className="ml-auto rounded font-semibold text-brand-700 transition hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+                              className="ml-auto rounded font-semibold text-brand-700 transition hover:text-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
                             >
                               인박스에서 보기
                             </Link>

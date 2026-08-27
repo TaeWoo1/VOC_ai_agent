@@ -106,6 +106,36 @@ beforeEach(() => {
 });
 
 describe("운영 판단 — the Operator answer", () => {
+  it("§8 — an answer about products comes back as products, with somewhere to press", async () => {
+    await ask(run(answer({
+      findings: [{
+        findingId: "f1", specialist: "PRODUCT_OPS",
+        statement: "반복되는 문제가 있는 상품이 2개 있습니다.",
+        evidenceIds: ["e1", "e2"], confidence: "SUPPORTED", verdict: null, surfaceLink: null,
+      }],
+      evidence: [
+        { evidenceId: "e1", kind: "REVIEW_ISSUE", sourceTool: "t", sourceCall: "c",
+          locator: { productId: "p1", productName: "전선몰딩", label: "반복되는 리뷰 문제", count: 3 },
+          asOf: "2026-08-27", events: null, coverage: "COVERED", provenance: "p" },
+        { evidenceId: "e2", kind: "REVIEW_ISSUE", sourceTool: "t", sourceCall: "c",
+          locator: { productId: "p2", productName: "케이블타이", label: "반복되는 리뷰 문제", count: 1 },
+          asOf: "2026-08-27", events: null, coverage: "COVERED", provenance: "p" },
+      ],
+    })));
+
+    expect(screen.getByText("이 답변이 가리키는 상품 2개")).toBeInTheDocument();
+    expect(screen.getByText("전선몰딩")).toBeInTheDocument();
+    expect(screen.getByText("반복되는 리뷰 문제 3건")).toBeInTheDocument();
+    const links = screen.getAllByRole("link", { name: "확인하기" });
+    expect(links.map((l) => l.getAttribute("href"))).toEqual(["/products/p1", "/products/p2"]);
+  });
+
+  it("§8 — an org-wide answer offers no product object rather than an empty one", async () => {
+    await ask(run(answer()));
+
+    expect(screen.queryByText(/이 답변이 가리키는 상품/)).toBeNull();
+  });
+
   it("shows a statement together with the evidence it rests on", async () => {
     await ask(run(answer()));
 

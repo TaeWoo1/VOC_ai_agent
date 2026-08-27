@@ -21,6 +21,8 @@ vi.mock("../lib/auth", () => ({
 import { Agent } from "./Agent";
 import { AgentRuntimeError } from "../lib/agentRuntime/agentClient";
 import { renderWithRouter, screen, waitFor } from "../test/renderWithRouter";
+import { render } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { api } from "../lib/apiClient";
 import type { AgentRunView, CapabilitiesView } from "../lib/agentRuntime/types";
@@ -143,6 +145,35 @@ describe("운영 에이전트 page", () => {
     agentMock.startRun.mockReset();
     agentMock.resumeRun.mockReset();
     vi.spyOn(api, "getSellerAccountsStrict").mockResolvedValue([]);
+  });
+
+  it("§9 — the product the seller was standing on is sent with the run", async () => {
+    agentMock.startRun.mockResolvedValue(INQUIRY_AWAITING);
+    render(
+      <MemoryRouter initialEntries={["/agent?productId=p-77&from=product&goal=%EC%9D%B4%20%EC%83%81%ED%92%88%EB%A7%8C%20%EB%B4%90%EC%A4%98"]}>
+        <Agent />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
+
+    // The sentence has no product name in it. Until this package that made the run unanswerable, and
+    // the only reason nobody noticed is that every launch link also writes the name into the goal.
+    await waitFor(() => expect(agentMock.startRun).toHaveBeenCalled());
+    expect(agentMock.startRun.mock.calls[0]![0]).toMatchObject({
+      goalText: "이 상품만 봐줘",
+      productId: "p-77",
+    });
+  });
+
+  it("§9 — a run started from a screen with no entity sends no scope hint", async () => {
+    agentMock.startRun.mockResolvedValue(INQUIRY_AWAITING);
+    renderWithRouter(<Agent />);
+    await userEvent.type(screen.getByLabelText("확인할 내용"), "오늘 뭐부터 봐야 해?");
+    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
+
+    await waitFor(() => expect(agentMock.startRun).toHaveBeenCalled());
+    expect(agentMock.startRun.mock.calls[0]![0]).not.toHaveProperty("productId");
   });
 
   it("renders the command form and the fail-closed capability badge", async () => {

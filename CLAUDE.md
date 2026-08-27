@@ -294,6 +294,59 @@ planner가 세우거나 run이 실패하며 결정론 keyword planner는 fallbac
 따라오지 않는 것(기존 성질), window 지표의 데모 행 포함(스위치의 의미이므로 product-owner 결정),
 스타일 설정 저장 버튼 fold 아래, 그리고 Agent 자유문장 lane 자체는 agent-runtime 미기동으로 미실행).
 
+**`docs/chat_first_agent_shell_v1.md`** (Chat-first Agent Shell Completion v1 — Agent Command Center
+v1이 정한 모양을 마감하고, **처음으로 실제 문장 하나를 끝까지 통과시켰다**. 스키마 변경 **0**.
+**홈 위계**: 명령 입력이 여섯 칸 숫자 그리드 **아래** y≈1,010에 있었다 — 1440×900에서 fold 110px 아래,
+125%에서 290px 아래. chat-first 제품의 chat 진입점이 스크롤해야 보이면 그것은 chat-first가 아니다 ⇒
+**브리핑 → 물어보기 → 준비된 일 → 숫자 → 참고**이고 입력은 `AgentBriefing`의 **슬롯**이다(인사말은
+자기가 그리는 객체 수의 산술이고 입력은 그 객체가 아니다). 실측 briefing 180 · command **239** ·
+숫자 760, 900/720 fold **둘 다 위**. 입력은 **작다** — 뷰포트만 한 빈 텍스트 상자는 브리핑과 일 양쪽의
+나쁜 버전이다. **합성 데이터 계약**: window 지표가
+`(:syntheticVisible = true or data_origin='REAL')`로 계산되고 있었다 ⇒ 규칙에 이름을 붙였다
+(`fallBackToExampleData`) — **A** 판매자 지표는 판매자 행으로, **B** 데모 콘텐츠를 켠 배포에서 실제
+window가 **완전히 비었을 때만** 시드 corpus를 쓰고 그때는 `exampleDataIncluded`가 화면에 라벨을 강제한다,
+그리고 **섞는 분기는 없다**(90%가 진짜인 합계는 라벨이 정직하게 설명할 수 없는 유일한 모양이다). B는 A를
+무조건 적용해도 안전하게 만드는 장치다. 이 배포에서는 시드 행이 7/14/30일 창 **밖**이라 숫자가 하나도
+움직이지 않았다 — 오늘 데이터에 대한 사실이지 규칙을 안 적는 이유가 아니다. **§3-C가 실제로 물었다**:
+홈 브리핑의 「{상품} 부정 리뷰 N건」은 리뷰 **행** 수여서, 고치기 전 1·2위가 **바닥용 평면 몰딩 4건**과
+**선바로 광폭 케이블 몰딩 4건** — **둘 다 DEMO_SEED 100%**였다. 즉 화면이 만들어 낸 상품을 만들어 낸
+리뷰로 판매자의 최악 상품이라고 날짜 범위까지 붙여 부르고 있었다 ⇒ 필터 한 줄, 리뷰 화면·이슈 추출기·
+근거는 무변경. 「반복되는 리뷰 문제 19건」은 **이슈** 수이고 19건 전부 REAL 근거를 하나 이상 가져 참이라
+**고치지 않고 보고**한다(그중 1건은 근거가 8 REAL + 11 DEMO_SEED로 섞여 있다). **`totalElements`**:
+answered-elsewhere 술어가 직전 패키지에서 fetch된 페이지 위 Java 필터였다 — 행은 맞고 total은 방금
+버린 행을 세고 있었다 ⇒ 술어를 그대로 쿼리로 옮겼고(`OPEN`/`PROPOSED`에서만; `COMPLETED`·`EXECUTED`는
+정의상 답변된 문의를 들어 무조건 술어는 그 탭을 비운다) 남은 Java 필터는 null 가드뿐이다. **명령
+팔레트는 그대로**이고 recognised 문장은 `navigate` **0회**·run **0**(§14-E). **자유문장 lane 감사 —
+빠진 protocol 없음**: `OperatorAnswer`가 이미 `findings[].surfaceLink`·`evidence[].locator`
+(`productId`/`productName`/`label`/`count`)·`nextActions[].surfaceLink`를 들고 있다. **실제 gap은
+프론트에 하나**였다(§9). **bounded free-text proof LIVE**: 「최근에 반복해서 문제가 생기는 상품이
+있어?」를 홈 명령 상자에 쳐서 `/agent`로 넘긴 뒤 실행 — 플래너 **LLM 1회**, tool **10회**(전부 READ,
+전부 로컬 보유 행), findings 10 전부 `SUPPORTED`, `stopReason: COMPLETE`, **마켓플레이스 호출 0 ·
+DB 쓰기 0**(주문·문의·리뷰 구성이 전후 바이트 동일), 스케줄러·프로액티브·self-pilot·커넥터 전부 OFF.
+답변은 묻지도 않았는데 자기 한계를 밝혔다 — 「…나머지는 확인하지 않았으므로 전체 순위가 아닙니다」.
+**object-backed result**: `lib/answerObjects.ts`가 답변 **자신의 근거**를 상품별로 묶어
+「이 답변이 가리키는 상품 N개」 + 사실 + `/products/{id}` 「확인하기」를 그린다 — 파생 0, **두 카운트를
+더하지 않는다**(「리뷰 3」과 「문의 2」는 사실 둘이고 「관련 5건」은 아무도 읽지 않은 셋째다), org 범위
+답변은 빈 객체가 아니라 **객체 없음**. 새 Agent Object Protocol·새 컴포넌트 0. **§9 gap은 진짜였고
+닫혔다**: `agentContext`가 `productId`를 URL까지 날랐지만 `Agent.tsx`가 `goalText`만 보내
+**id가 요청 경계에서 죽고 있었다** — 안 보인 이유는 링크를 주는 화면들이 제안 문장에 상품 **이름**을
+같이 써서 플래너가 이름으로 풀었기 때문이고, 판매자가 낸 비용은 resolve 호출과 **이미 보고 있는 상품을
+계속 설명해야 하는 의무**였다(「이 상품만 봐줘」는 작동할 수 없었다). 최소 계약만: `StartRunRequest.
+productId` → zod → `GoalRequest.productId` → `OperatorAgentRuntime.contextEntities`가 **org 범위 READ
+1회**로 검증해 기존 `entities` 상태에 **검증된** `ResolvedEntity`로 심는다(`productOps`가 이미 읽는
+`already?.id` 자리). **hint는 fact가 아니다** — URL의 id는 행의 존재도, 이 org의 것인지도, 이름도
+증명하지 않으므로 읽기 한 번이 셋을 한꺼번에 답하고, 그래서 하류의 `EvidenceScope` 불변식은 묻던 질문을
+그대로 묻는다; 호출은 예산에 청구되고 실패는 **침묵**이다. **접근성 — 실측으로 하나 찾아 고쳤다**:
+primary CTA의 **hover**가 `bg-brand-600` 흰 글씨 **4.49:1**로 AA를 백분의 일 차이로 놓치고 있었다 —
+제품에서 가장 많이 눌리는 컨트롤이고, 커서가 올라가 있는 그 상태가 바로 라벨을 읽는 상태다 ⇒ **hover는
+밝아지지 않고 어두워진다**(`brand-800` `#1550B5`, **7.38:1**); 기존 brand 램프에 토큰 **하나**, 호출부
+5곳. 홈 전 텍스트 노드 AA 위반 **0**(틴트 위 합성), 가로 스크롤 0, 콘솔 오류 0. **고치지 않고 보고한
+것**: 레거시 Action Window·리뷰 임포트 18곳의 `bg-brand`(**3.71:1**, hover가 아니라 평상시 — 토큰
+마이그레이션은 이 패키지 금지), 플래너 22초 동안 화면은 「확인하는 중…」뿐, `NO_ANSWER_BASIS` reload,
+상품 목록 첫 행이 「(미지정 상품)」이라 그 화면의 Agent 링크 문장도 그렇게 읽히는 것, 섞인 근거 이슈 1건,
+그리고 자유문장 lane은 여전히 **agent-runtime 별도 기동**이 필요하다는 것. **마켓플레이스 호출 0 ·
+마켓플레이스 WRITE 0 · DB 행 변경 0 · 마이그레이션 0 · 모델 호출 1** ⇒ evidence 행 없음).
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

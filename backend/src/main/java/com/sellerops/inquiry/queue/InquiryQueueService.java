@@ -43,6 +43,14 @@ import org.springframework.stereotype.Service;
  *
  * <p>This is not a history fence. Debug, audit and dismissal-review paths read inquiries directly and
  * still see everything they saw before; only the actionable queue is narrowed.
+ *
+ * <p><b>Every narrowing predicate is in the query, not here.</b> Both the REAL/ACTIVE gate and the
+ * answered-elsewhere gate are clauses of {@code findOperationalByOrgIdAndPhase}, so the page's
+ * {@code totalElements} is a count of the rows this method returns. A predicate applied to the
+ * fetched page instead would produce a queue that shows 9 and paginates 12 — which is what the
+ * answered-elsewhere rule did for one package, and what Chat-first Agent Shell Completion v1 §4
+ * closed. The one remaining Java filter below is a null guard, not a narrowing: it drops a row whose
+ * inquiry disappeared between the two statements rather than rendering it blank.
  */
 @Service
 public class InquiryQueueService {
@@ -91,7 +99,6 @@ public class InquiryQueueService {
                 // A work item whose inquiry is not operational is dropped, not rendered blank: a row
                 // with a null status and no title would still be a clickable task.
                 .filter(w -> byId.containsKey(w.getInquiryId()))
-                .filter(w -> stillWaiting(w.getPhase(), byId.get(w.getInquiryId())))
                 .map(w -> toItem(w, byId.get(w.getInquiryId()), channelsById, productNames))
                 .toList();
 
@@ -106,26 +113,6 @@ public class InquiryQueueService {
      */
     private static boolean isOperational(Inquiry inquiry) {
         return inquiry != null && inquiry.getDataOrigin() == DataOrigin.REAL;
-    }
-
-    /**
-     * Whether this row is still work, as opposed to work the source says is finished.
-     *
-     * <p><b>Only the two phases where the two facts contradict each other.</b> {@code OPEN} and
-     * {@code PROPOSED} mean nobody has answered yet; an inquiry that reads {@code ANSWERED} in the
-     * same breath is a row whose channel moved on without us — the seller replied in the marketplace
-     * console, and our next sweep has not run. {@code COMPLETED} and {@code EXECUTED} items carry
-     * answered inquiries by definition, so a predicate that ignored the phase would empty exactly the
-     * tabs that are supposed to be full.
-     *
-     * <p>Nothing is written. {@code reconcileConnectorAnswered} still owns closing these on the next
-     * collection; this only stops the row being offered as a task in the meantime.
-     */
-    static boolean stillWaiting(InquiryWorkItemPhase phase, Inquiry inquiry) {
-        if (phase != InquiryWorkItemPhase.OPEN && phase != InquiryWorkItemPhase.PROPOSED) {
-            return true;
-        }
-        return !"ANSWERED".equals(inquiry.getStatus());
     }
 
     private static InquiryQueueItem toItem(InquiryWorkItem workItem, Inquiry inquiry,

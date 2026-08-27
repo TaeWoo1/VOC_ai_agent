@@ -11,6 +11,12 @@ export default {
           50: "#EAF2FE",
           600: "#2272EB",
           700: "#1B64DA",
+          // The HOVER value for a solid primary, and it is darker than the resting one on purpose.
+          // `brand-600` was the hover, and white on #2272EB measures 4.49:1 — under AA by a hundredth,
+          // on the most-pressed control in the product. A hover that lightens a solid button has to
+          // walk toward the text colour; darkening walks away from it, so the state that invites the
+          // press is also the readable one. #1550B5 measures 7.38:1 against white.
+          800: "#1550B5",
         },
         surface: "#FFFFFF",
         canvas: "#F2F4F6",

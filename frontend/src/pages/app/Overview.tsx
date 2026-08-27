@@ -36,8 +36,15 @@ import type { ChannelMetricRow, MetricKpi, MetricSeries, OverviewResponse } from
  * loop checked ahead of time, and the findings. The numbers did not move or change; they moved DOWN,
  * under a heading that says what they are.
  *
- * <b>The order is 브리핑 → 숫자 → 물어보기 → 참고.</b> Each is a different question — what to do, how
- * much, ask something, where it came from — and the first one is the only one a seller has to read.
+ * <b>The order is 브리핑 → 물어보기 → 준비된 일 → 숫자 → 참고</b> (Chat-first Agent Shell Completion
+ * v1 §1). It shipped as 브리핑 → 숫자 → 물어보기, and that order said something the product does not
+ * mean: the one control this product is named for sat under a six-figure grid, 900px down, and at
+ * 125% a seller never saw it without scrolling. The greeting and the input are now the first screen,
+ * together, and the numbers are context underneath the work rather than the way in.
+ *
+ * <b>The input is small on purpose.</b> A chat-first product is not a product whose home page is a
+ * chat window: the briefing above it and the work below it are what the seller came for, and an empty
+ * text box the size of the viewport would be a worse version of both.
  *
  * <b>「답변이 필요한 문의」 is back on this screen, on purpose.</b> A previous package dropped it
  * because the same 26 appeared three times at the same weight and read as three problems. It appears
@@ -118,9 +125,14 @@ export function Overview() {
 
       {data ? (
         <>
-          {/* ① 브리핑 — the sentence, then the work it counts. This is the first hierarchy now
-              (Agent Command Center v1 §3): a seller who reads one thing on this page reads this. */}
-          <AgentBriefing insights={insights} />
+          {/* ① 브리핑 — the sentence, the one input, then the work the sentence counts. This is the
+              first hierarchy (Agent Command Center v1 §3, Chat-first Agent Shell Completion v1 §1):
+              a seller who reads one thing on this page reads this, and a seller who does one thing
+              on this page can do it without scrolling. */}
+          <AgentBriefing
+            insights={insights}
+            commandSlot={<CommandInput unansweredCount={unansweredNow} />}
+          />
 
           {/* ② 숫자 — context for the briefing, not the entry point. The three waiting numbers keep
               their size because they are still the only ones that mean work, but they no longer open
@@ -131,7 +143,16 @@ export function Overview() {
                 the seller's eye landed on a filter for a section 900px below it. */}
             <SectionHeader
               title="숫자"
-              hint={`매출·주문·문의·리뷰는 최근 ${data.metrics.period.days}일 기준입니다.`}
+              /* WHOSE numbers, when it is not obvious (Chat-first Agent Shell Completion v1 §3).
+                 The backend counts the seller's own rows and nothing else; the single case where it
+                 cannot — a seeded deployment with no real data at all in the window — arrives with
+                 `exampleDataIncluded` and has to say so here. Silence would be the seller reading a
+                 revenue figure their shop did not earn. */
+              hint={`매출·주문·문의·리뷰는 최근 ${data.metrics.period.days}일 기준입니다.${
+                data.metrics.exampleDataIncluded
+                  ? " 이 기간에는 실제 데이터가 없어 예시 데이터를 함께 보여드립니다."
+                  : ""
+              }`}
               action={
                 <div className="flex gap-1" role="group" aria-label="기간 선택">
                   {RANGES.map((range) => (
@@ -163,9 +184,6 @@ export function Overview() {
             </MetricRowOfThree>
             <MetricLine kpis={context} />
           </section>
-
-          {/* ③ 무엇을 도와드릴까요 — the one input, under the numbers it can put on screen. */}
-          <CommandInput unansweredCount={unansweredNow} />
 
           {/* SUPPORTING — the shape behind each number. */}
           <section className="space-y-4">

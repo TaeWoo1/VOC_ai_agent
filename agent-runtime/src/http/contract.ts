@@ -57,6 +57,9 @@ export const StartRunRequestSchema = z
     goalText: z.string().min(1).max(2000).optional(),
     intent: z.string().min(1).max(120).optional(),
     accountId: z.string().min(1).max(200).optional(),
+    // The screen the seller asked from, as an id. Verified by an org-scoped read before it means
+    // anything — see `GoalRequest.productId`.
+    productId: z.string().min(1).max(200).optional(),
     referenceDate: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, "referenceDate must be YYYY-MM-DD")

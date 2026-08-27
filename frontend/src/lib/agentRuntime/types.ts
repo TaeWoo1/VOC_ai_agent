@@ -206,6 +206,14 @@ export interface StartRunRequest {
   goalText?: string;
   intent?: string;
   accountId?: string;
+  /**
+   * The product the seller was standing on when they asked — a scope HINT, not a fact.
+   *
+   * The runtime verifies it with an org-scoped read before it means anything, so this can only save
+   * the run a resolution step; it can never make the Agent state something it did not read. Sent so
+   * that 「이 상품만 봐줘」 works without the seller re-describing the product they are looking at.
+   */
+  productId?: string;
   referenceDate?: string;
   size?: number;
 }

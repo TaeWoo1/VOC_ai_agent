@@ -57,6 +57,17 @@ export interface GoalRequest {
   readonly size?: number;
   readonly accountId?: string;
   readonly referenceDate?: string;
+  /**
+   * The product the seller was looking at when they asked — a SCOPE HINT, never an asserted fact.
+   *
+   * It carries an id and nothing else, and the id is worth nothing until an org-scoped read confirms
+   * it: {@link OperatorAgentRuntime} spends one tool call to turn it into a verified entity, or drops
+   * it. Nothing downstream can tell a hinted entity from one the run resolved by name, because both
+   * arrive the same way — through a backend read that could only have returned this org's rows.
+   *
+   * Unused by every other domain. A caller that omits it gets exactly today's behaviour.
+   */
+  readonly productId?: string;
 }
 
 export class UnrecognizedGoalError extends Error {

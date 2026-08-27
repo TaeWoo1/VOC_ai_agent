@@ -18,12 +18,13 @@
  */
 import { buildOperatorGraph } from "./graph/operatorGraph";
 import { OperatorToolRegistry } from "./tools/OperatorToolRegistry";
-import { buildOperatorTools } from "./tools/OperatorTools";
+import { buildOperatorTools, OPERATOR_TOOL } from "./tools/OperatorTools";
 import { LlmInvestigationPlanner, PlannerUnavailableError } from "./plan/LlmInvestigationPlanner";
 import type { Planner } from "./plan/LlmInvestigationPlanner";
 import { RuleEvidenceJudge, SpringEvidenceJudge } from "./judge/EvidenceJudge";
 import type { EvidenceJudge } from "./judge/EvidenceJudge";
 import { OperatorBudget, OPERATOR_BUDGET_V1 } from "./budget/OperatorBudget";
+import type { ResolvedEntity } from "./plan/InvestigationPlan";
 import type { OperatorBudgetLimits } from "./budget/OperatorBudget";
 import type { OperatorAnswer, OperatorFailureCode, OperatorState } from "./state/OperatorState";
 import { failureSentence } from "./failure/SpecialistOutcome";
@@ -100,9 +101,13 @@ export class OperatorAgentRuntime {
     }).compile();
 
     const goalText = request.text ?? request.intent ?? "";
+    const entities = await this.contextEntities(request, budget);
     let final: OperatorState;
     try {
-      final = (await graph.invoke({ goalText }, threadConfig(threadId))) as OperatorState;
+      final = (await graph.invoke(
+        { goalText, ...(entities.length > 0 ? { entities } : {}) },
+        threadConfig(threadId),
+      )) as OperatorState;
     } catch (err) {
       if (err instanceof PlannerUnavailableError) {
         const failureCode = failureCodeFor(err);
@@ -156,6 +161,48 @@ export class OperatorAgentRuntime {
       specialistsFailed: final.answer.specialistOutcomes.filter((o) => o.terminal === "FAILED").length,
     });
     return { status: "DONE", answer: final.answer, trail: final.trail ?? [] };
+  }
+
+  /**
+   * Turn the screen's scope hint into a VERIFIED entity, or into nothing.
+   *
+   * <b>Why a read and not an assignment.</b> A product id arriving from a URL proves nothing: not that
+   * the row exists, not that it belongs to this org, and not what it is called. One org-scoped backend
+   * read answers all three at once — it returns this org's rows or it returns none — so the entity
+   * that reaches the graph was resolved exactly the way a named one is, and every scope invariant
+   * downstream ({@code EvidenceScope}) can keep asking the same question it always asked.
+   *
+   * <b>It costs one tool call and it is charged.</b> A hint that skipped the budget would let a
+   * contextual run do strictly more work than the seller's own sentence bought.
+   *
+   * <b>A failure is silence, not an error.</b> A stale bookmark, a deleted product, another org's id:
+   * the run proceeds exactly as it does today, and the planner resolves the product by name if the
+   * sentence named one. The hint can only save a step, never change an answer.
+   */
+  private async contextEntities(
+    request: GoalRequest,
+    budget: OperatorBudget,
+  ): Promise<ResolvedEntity[]> {
+    const productId = request.productId;
+    if (!productId || !budget.spend("tool")) {
+      return [];
+    }
+    try {
+      const signals = await this.deps.operator.getProductSignals(productId);
+      log("operator_context_product_resolved", { resolved: true });
+      return [{
+        kind: "PRODUCT",
+        // The seller did not type a name — they were standing on the product. The canonical name is
+        // the mention, so a finding that quotes what was asked about quotes the catalogue, not a URL.
+        mention: signals.productName,
+        id: signals.productId,
+        label: signals.productName,
+        resolvedBy: OPERATOR_TOOL.GET_PRODUCT_SIGNALS,
+      }];
+    } catch {
+      log("operator_context_product_resolved", { resolved: false });
+      return [];
+    }
   }
 }
 

@@ -118,7 +118,7 @@ export function InboxDetail({
       <footer className="border-t border-line pt-4">
         <Link
           to="/memory"
-          className="inline-flex rounded-lg text-sm font-semibold text-brand-700 transition hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+          className="inline-flex rounded-lg text-sm font-semibold text-brand-700 transition hover:text-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
         >
           같은 문제가 반복되는지 보기
         </Link>

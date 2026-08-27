@@ -194,6 +194,7 @@ export class AgentRunService {
       intent: input.intent,
       text: input.goalText,
       accountId: input.accountId,
+      productId: input.productId,
       referenceDate: input.referenceDate,
       page: input.page,
       size: input.size,
