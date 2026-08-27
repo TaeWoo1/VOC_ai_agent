@@ -4,6 +4,13 @@
 marketplace calls **0** · marketplace WRITE **0** · model calls **0** · migrations **0** ·
 backend source changes **0**
 
+> **Correction (2026-08-27, Pilot Runtime Foundation v1 §0-A):** the "Inquiry workflow (send) =
+> BLOCKED / 전송 lane 없음" finding below **was wrong**. It cited this repository's capability
+> registry docblock without re-deriving state at the current commit, and missed two live-verified
+> sends that landed after that docblock was written. The corrected per-channel audit is in
+> `docs/pilot_runtime_foundation_v1.md` §0-A; the two rows here are struck through in place rather
+> than deleted, because a report that quietly loses its own error is the same failure again.
+>
 > **What this is.** Not a feature package. The question is one question — *can a first external
 > seller start this product alone?* — asked against the code that exists, and answered with a
 > verdict per surface. Where the answer was "no, and the fix is which control the screen leads
@@ -273,7 +280,7 @@ approval, which this manifest never carries.
 | source truth | **READY** | `ChannelDataState` + terminal `successRows`; ZERO ≠ UNPROVEN ≠ BLOCKED ≠ NOT_SUPPORTED holds on screen |
 | Home briefing | **READY** | arithmetic, no model call, disconnected state measured and correct (§4) |
 | Inquiry workflow (draft) | **READY** | draft → evidence → 초안 복사 works with no marketplace WRITE |
-| Inquiry workflow (send) | **BLOCKED** | Cafe24 answer execution is implemented but `TEST_INQUIRY_REQUIRED`, needs the seller's separate write re-consent, a configured `client_ip`, and an approved live run |
+| Inquiry workflow (send) | ~~**BLOCKED**~~ → **CORRECTED, see below** | this row was wrong — see `docs/pilot_runtime_foundation_v1.md` §0-A |
 | Knowledge gap flow | **READY** | V79 applied; save → reindex → retrieve → regenerate |
 | Answer Style | **READY** | V80 applied; absent row is the normal state and answers with shipped defaults |
 | Human Approval | **READY_WITH_OPERATOR** | the boundary is intact and enforced; it currently gates an execution lane that is itself blocked |
@@ -292,9 +299,12 @@ approval, which this manifest never carries.
    master key, and `.env.example` names none of it. §6-1 is the procedure; it has never been run.
 4. **Routine collection is off by default and is a per-seller env edit + restart.** Without step 4
    of §6-1 the product collects once and then stops.
-5. **The pilot has no send lane.** Answering a customer means the seller copies the draft into
-   their own channel. That is honest and it works — but if the pilot's success criterion includes
-   sending, it is blocked (`TEST_INQUIRY_REQUIRED`, write re-consent, `client_ip`, live approval).
+5. ~~**The pilot has no send lane.**~~ **This item was wrong and is withdrawn.** Two channels have
+   a live-verified send: Cafe24 (`VERIFIED`, 2026-08-25, `b0bfb022`) and NAVER 상품 문의
+   (`LIVE_VERIFIED`, 2026-08-26, `692c5a78`). What is true is that execution is **configured off**
+   by default and each send needs its channel's armed approval id — a configuration state, not an
+   absent capability. Corrected and re-audited per channel in
+   `docs/pilot_runtime_foundation_v1.md` §0-A.
 
 Everything else found in this package was either fixed (§3, §4, §5) or is P1/P2 and is in §10.
 

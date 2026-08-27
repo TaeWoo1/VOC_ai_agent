@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useDemoEntry } from "../hooks/useDemoEntry";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/apiClient";
@@ -57,10 +58,23 @@ export function Login() {
       alive = false;
     };
   }, []);
-  // The demo account is pre-filled ONLY on the demo entry. A real seller (Self-Pilot first-run) starts from an
-  // empty form — a product whose login form arrives filled with someone else's account is not a product.
-  const [email, setEmail] = useState(fromDemoEntry ? "demo@sellerops.ai" : "");
-  const [password, setPassword] = useState(fromDemoEntry ? "demo1234" : "");
+  // **Whether this deployment has a demo account at all** (Pilot Runtime Foundation v1 §2). The
+  // fixture login is created only by a boot that was told to seed it, so a deployment that was not
+  // must not prefill a form with it. `null` (still asking) counts as no.
+  const demoEntryEnabled = useDemoEntry();
+  const demoEntry = fromDemoEntry && demoEntryEnabled === true;
+  // The demo account is pre-filled ONLY on the demo entry OF A DEMO DEPLOYMENT. A real seller
+  // (Self-Pilot first-run) starts from an empty form — a product whose login form arrives filled
+  // with someone else's account is not a product.
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  // The answer arrives after the first render, so the prefill is applied when it does — and only
+  // into a form the seller has not begun typing into.
+  useEffect(() => {
+    if (!demoEntry) return;
+    setEmail((v) => (v === "" ? "demo@sellerops.ai" : v));
+    setPassword((v) => (v === "" ? "demo1234" : v));
+  }, [demoEntry]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -115,7 +129,8 @@ export function Login() {
         <AuthNotice title={socialNotice.title}>{socialNotice.body}</AuthNotice>
       ) : null}
 
-      {fromDemoEntry ? (
+      {/* The notice says the form is prefilled, so it may only appear where it actually is. */}
+      {demoEntry ? (
         <AuthNotice title="데모 계정으로 둘러보는 중입니다">
           계정 정보가 미리 입력되어 있습니다. 화면에 보이는 내용은 실제 판매 데이터가 아닙니다.
         </AuthNotice>

@@ -37,7 +37,11 @@ class MockDataSeederTest {
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     private MockDataSeeder seeder(boolean enabled, boolean seedDemoContent) {
-        return new MockDataSeeder(enabled, seedDemoContent, organizations, users,
+        return seeder(enabled, true, seedDemoContent);
+    }
+
+    private MockDataSeeder seeder(boolean enabled, boolean catalogue, boolean seedDemoContent) {
+        return new MockDataSeeder(enabled, catalogue, seedDemoContent, organizations, users,
                 channels, sellerAccounts, products, inquiries, reviews,
                 orderSummaries, passwordEncoder);
     }
@@ -109,14 +113,58 @@ class MockDataSeederTest {
         }
     }
 
+    /**
+     * <b>A — the pilot default creates no account anybody can log into</b> (Pilot Runtime Foundation
+     * v1 §15-A). The fixture user's password is written down in this repository, so a deployment
+     * that did not ask for the fixture must not have it. The channel catalogue is the exception and
+     * it is not a fixture: it is product reference data, and without it 채널 연결 has nothing to
+     * offer.
+     */
     @Test
-    void masterDisabled_seedsNothing() {
+    void fixtureDisabled_seedsTheChannelCatalogueAndNoAccount() {
         seeder(false, true).run(null);
 
         assertThat(organizations.count()).isZero();
-        assertThat(channels.count()).isZero();
+        assertThat(users.count()).isZero();
+        assertThat(sellerAccounts.count()).isZero();
         assertThat(reviews.count()).isZero();
         assertThat(inquiries.count()).isZero();
+
+        // Product reference data, not a fixture.
+        assertThat(channels.count()).isGreaterThan(0);
+    }
+
+    /** The catalogue has its own switch, so a deployment that owns the table can say so. */
+    @Test
+    void catalogueCanBeSuppressedIndependently() {
+        seeder(false, false, false).run(null);
+        assertThat(channels.count()).isZero();
+    }
+
+    /** The catalogue is written once: a second boot must not produce a second copy. */
+    @Test
+    void catalogueIsIdempotentAcrossBoots() {
+        seeder(false, false).run(null);
+        long first = channels.count();
+        seeder(false, false).run(null);
+        assertThat(channels.count()).isEqualTo(first);
+    }
+
+    /**
+     * <b>B — the fixture still works, unchanged</b> (§15-B). The demo deployment attaches its
+     * accounts to the catalogue rows that already exist rather than seeding a second catalogue.
+     */
+    @Test
+    void fixtureEnabledAfterCatalogueExists_reusesTheCatalogue() {
+        seeder(false, false).run(null);
+        long catalogue = channels.count();
+
+        seeder(true, false).run(null);
+
+        assertThat(channels.count()).isEqualTo(catalogue);
+        assertThat(organizations.count()).isEqualTo(1);
+        assertThat(users.count()).isGreaterThan(0);
+        assertThat(sellerAccounts.count()).isGreaterThan(0);
     }
 
     @Test

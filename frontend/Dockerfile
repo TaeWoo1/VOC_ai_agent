@@ -5,8 +5,14 @@ RUN npm install
 COPY . .
 ARG VITE_API_BASE_URL=http://localhost:8080
 ARG VITE_USE_MOCKS=false
+# The browser's URL for the agent runtime. It is baked into the bundle, so on any host that is
+# not the seller's own machine it MUST be set: the code default is http://127.0.0.1:8787, which
+# on a remote pilot host points the seller's browser at the seller's own computer and makes the
+# /agent lane fail as "AI 도우미를 시작하지 못했습니다" for everybody (Pilot Runtime Foundation v1 §11).
+ARG VITE_AGENT_RUNTIME_URL=http://127.0.0.1:8787
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 ENV VITE_USE_MOCKS=$VITE_USE_MOCKS
+ENV VITE_AGENT_RUNTIME_URL=$VITE_AGENT_RUNTIME_URL
 # Service Readiness v1 (docs/service_readiness_v1.md §5): all optional; absent = that vendor is OFF and the CSP
 # does not name it. SELLEROPS_RELEASE = Sentry release (git SHA when the build has .git).
 ARG VITE_SENTRY_DSN=

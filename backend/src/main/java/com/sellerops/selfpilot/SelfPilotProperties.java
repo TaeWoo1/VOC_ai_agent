@@ -48,9 +48,22 @@ public class SelfPilotProperties {
      *       loopback database ({@code SPRING_DATASOURCE_URL} host localhost / 127.0.0.1 / ::1) — on any other
      *       host the backend refuses to start with this scope, so it can never be switched on against a
      *       shared database by accident.</li>
+     *   <li>{@code CONNECTED_SELLERS} — every org that owns a <b>CONNECTED, non-file-upload seller
+     *       account</b> (Pilot Runtime Foundation v1 §6). The multi-tenant pilot posture, and it needs no
+     *       loopback fence because it is not "every org" — it is every org that <em>asked</em>. A seller
+     *       account becomes CONNECTED only by that seller completing an OAuth consent or entering a
+     *       credential, and connecting a channel is the instruction to collect it: routine acquisition is
+     *       an ordinary Seller Operations capability, not an AI feature, and it must not depend on an
+     *       operator copying a UUID into an env file and restarting the backend after every signup.
+     *       An org with no connected account is not a target, so an empty database still acts for nobody.</li>
      * </ul>
+     *
+     * <p><b>None of these scopes turn on the Proactive Agent.</b> That runtime carries its own
+     * {@code sellerops.proactive.enabled} plus its own explicit org list, and the intersection with this
+     * scope only ever narrows it. Keeping a seller's data fresh and having an agent prepare work are two
+     * decisions, and this one is not the other.
      */
-    public enum Scope { ALLOW_LIST, LOCAL_SINGLE_USER }
+    public enum Scope { ALLOW_LIST, LOCAL_SINGLE_USER, CONNECTED_SELLERS }
 
     private final boolean enabled;
     private final Scope scope;
@@ -108,7 +121,8 @@ public class SelfPilotProperties {
             return Scope.valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new IllegalStateException(
-                    "SELLEROPS_SELF_PILOT_SCOPE must be ALLOW_LIST or LOCAL_SINGLE_USER; refusing to start.");
+                    "SELLEROPS_SELF_PILOT_SCOPE must be ALLOW_LIST, LOCAL_SINGLE_USER or CONNECTED_SELLERS; "
+                    + "refusing to start.");
         }
     }
 
@@ -151,12 +165,19 @@ public class SelfPilotProperties {
         if (!enabled || orgId == null) {
             return false;
         }
-        return scope == Scope.LOCAL_SINGLE_USER || orgIds.contains(orgId);
+        // CONNECTED_SELLERS answers "may the runtime act for this org at all"; WHICH orgs those are is
+        // read from the database by the reconciler, because the answer is a row, not a config value.
+        return scope == Scope.LOCAL_SINGLE_USER || scope == Scope.CONNECTED_SELLERS || orgIds.contains(orgId);
     }
 
     /** True when the runtime acts for every org in this database (LOCAL_SINGLE_USER). */
     public boolean actsForAllOrgs() {
         return enabled && scope == Scope.LOCAL_SINGLE_USER;
+    }
+
+    /** True when the targets are read from the seller accounts that are actually connected. */
+    public boolean actsForConnectedSellers() {
+        return enabled && scope == Scope.CONNECTED_SELLERS;
     }
 
     public List<UUID> orgIds() {

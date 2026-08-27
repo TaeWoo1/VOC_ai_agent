@@ -99,6 +99,9 @@ class ReviewTriageConcurrencyTest {
         registry.add("spring.datasource.url", () ->
                 "jdbc:h2:mem:sellerops_review_triage_concurrency;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1");
         registry.add("sellerops.seed.enabled", () -> "false");
+        // The catalogue is separate from the fixture since Pilot Runtime Foundation v1 §2; this
+        // class owns the channels table, so it suppresses that too.
+        registry.add("sellerops.seed.channel-catalogue", () -> "false");
     }
 
     /** Stress only — the deterministic tests above it are what prove the behaviour. */

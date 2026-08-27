@@ -253,6 +253,10 @@ sellerops:
     # ALLOW_LIST (default): only org-ids below. LOCAL_SINGLE_USER: every org in THIS backend's database —
     # the one-seller local deployment, where a person who signs up in the browser is picked up with no env
     # edit. LOCAL_SINGLE_USER refuses to boot unless SPRING_DATASOURCE_URL points at localhost/127.0.0.1.
+    # CONNECTED_SELLERS (the pilot posture, Pilot Runtime Foundation v1 §6): every org that owns a
+    # CONNECTED, non-file-upload seller account — the orgs that ASKED, read from the database, so a new
+    # seller's routine collection does not wait on an env edit and a restart. Needs no loopback fence
+    # because it is not "every org"; an org with no connected account is not a target.
     scope: ${SELLEROPS_SELF_PILOT_SCOPE:ALLOW_LIST}
     # Comma-separated org UUIDs the runtime acts for under ALLOW_LIST. Empty ⇒ acts for nobody.
     org-ids: ${SELLEROPS_SELF_PILOT_ORG_IDS:}
@@ -550,12 +554,29 @@ sellerops:
     frontend-origin: ${SELLEROPS_WALKTHROUGH_FRONTEND_ORIGIN:http://localhost:5173}
     backend-origin: ${SELLEROPS_WALKTHROUGH_BACKEND_ORIGIN:http://127.0.0.1:18090}
   seed:
-    enabled: true
-    # Demo content (products/reviews/inquiries/order-summaries) is opt-in and OFF
-    # by default so a real DB shows an honest empty inbox/orders. Baseline org +
-    # login user + channels still seed under `enabled`. Set true on a clean DB for
-    # the full demo.
+    # The DEMO ORGANISATION fixture — 데모 제조사, its login user and two seller accounts.
+    # OFF by default since Pilot Runtime Foundation v1: the user it creates has a password
+    # written down in this repository, so a boot that creates it hands a working login to
+    # anybody who has read the source. Nothing about the fixture changed — set this true on a
+    # clean DB and it seeds exactly as it always did.
+    #
+    # The 13-channel CATALOGUE is NOT gated by this — see `channel-catalogue` below.
+    enabled: ${SELLEROPS_SEED_ENABLED:false}
+    # The 13-channel catalogue: product reference data, not a fixture. Default ON and idempotent
+    # (written only into an empty table), because without it the 채널 연결 screen has nothing to
+    # offer — on a pilot deployment as much as a dev one. Its own switch so a test that must own
+    # the channels table can say so; "no demo data" and "no reference data" are different requests.
+    channel-catalogue: ${SELLEROPS_SEED_CHANNEL_CATALOGUE:true}
+    # Demo content (products/reviews/inquiries/order-summaries) is opt-in and OFF by default so
+    # a real DB shows an honest empty inbox/orders. Nested inside the demo organisation above —
+    # with `enabled` false this can never seed anything.
     demo-content: ${SELLEROPS_SEED_DEMO_CONTENT:false}
+    # Whether this deployment exposes the demo entry at all (the login screen's 「데모 화면 보기」
+    # shortcut, which prefills the fixture account). Read by the frontend from a public config
+    # endpoint, so a pilot/production deployment never renders a way into an account it did not
+    # create. Defaults to whatever `enabled` says: a deployment that seeds the fixture is the one
+    # that has an account for the shortcut to open.
+    demo-entry: ${SELLEROPS_SEED_DEMO_ENTRY:${SELLEROPS_SEED_ENABLED:false}}
   analysis:
     item:
       # Per-item inbox analysis (inquiries + reviews). The shipped analyzer is

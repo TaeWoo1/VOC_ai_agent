@@ -280,6 +280,18 @@ export const api = {
     return data;
   },
 
+  /**
+   * Whether this deployment exposes the demo entry at all (Pilot Runtime Foundation v1 §2).
+   * One boolean, never an account. Under mocks there is no backend to ask and no fixture to open.
+   */
+  async demoEntryConfig(): Promise<{ enabled: boolean }> {
+    if (USE_MOCKS) {
+      return { enabled: false };
+    }
+    const { data } = await http.get<{ enabled: boolean }>("/api/auth/demo/config");
+    return data;
+  },
+
   // ── Password reset (docs/service_readiness_v1.md §2-2, §6). `config` decides whether the entry exists at all.
   async passwordResetConfig(): Promise<PasswordResetConfigView> {
     if (USE_MOCKS) {

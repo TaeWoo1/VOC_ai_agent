@@ -115,6 +115,12 @@ public class SelfPilotReconciler {
             return organizations == null ? List.of()
                     : organizations.findAll().stream().map(Organization::getId).toList();
         }
+        // CONNECTED_SELLERS: the database already knows who asked. An org appears here because a seller
+        // in it finished a connection, and disappears when the last one stops being CONNECTED — no env
+        // edit, no restart, and no second list to keep in step with the first.
+        if (props.actsForConnectedSellers()) {
+            return accounts.findOrgIdsWithConnectedApiAccount();
+        }
         return props.orgIds();
     }
 

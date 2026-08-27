@@ -13,6 +13,22 @@ public interface SellerAccountRepository extends JpaRepository<SellerAccount, UU
     List<SellerAccount> findAllByOrgId(UUID orgId);
 
     /**
+     * <b>Which organisations have asked us to collect for them</b> — Pilot Runtime Foundation v1 §6.
+     *
+     * <p>A seller account reaches {@code CONNECTED} only by the seller completing an OAuth consent or
+     * entering a credential, so this list is not a guess about who wants routine collection: it is
+     * the record of who asked. It is the source of truth the recurring-acquisition scope reads,
+     * instead of an operator copying an org UUID into an environment file after every signup.
+     *
+     * <p>File-upload accounts are excluded here because they have no marketplace to poll — the same
+     * exclusion the reconciler applies per account, applied once more at the org level so an org whose
+     * only account is a file drop never becomes a target at all.
+     */
+    @Query("select distinct a.orgId from SellerAccount a "
+            + "where a.connectionStatus = com.sellerops.channel.ChannelStatus.CONNECTED and a.fileUpload = false")
+    List<UUID> findOrgIdsWithConnectedApiAccount();
+
+    /**
      * Load a seller-account row under a {@code PESSIMISTIC_WRITE} lock (SELECT … FOR UPDATE) — the
      * serialization point for the NAVER connection lifecycle. Concurrent test / order-sync events for
      * one account take the lock one at a time, so the PENDING → PREPARING → CONNECTED transition is

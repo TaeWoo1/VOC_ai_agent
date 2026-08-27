@@ -6,6 +6,12 @@ import { ProductLanding } from "./ProductLanding";
 import { CLOSING, FAQ, HERO, SECTION_ORDER } from "../lib/public/landingContent";
 import { expectNoAxeViolations } from "../test/axe";
 
+// The demo CTA now asks the backend whether this deployment HAS a demo account to open
+// (Pilot Runtime Foundation v1 §2). These tests are about the landing page's CTAs, so they
+// render it as a demo deployment; the "no fixture ⇒ no entry" half is pinned in
+// `demoEntryFence.test.tsx`.
+vi.mock("../hooks/useDemoEntry", () => ({ useDemoEntry: () => true }));
+
 const FORM_URL = "https://forms.example.test/diagnosis";
 
 function renderPage() {

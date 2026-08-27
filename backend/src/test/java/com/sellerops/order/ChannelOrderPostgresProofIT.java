@@ -75,6 +75,9 @@ class ChannelOrderPostgresProofIT {
         // Clean DB — no demo channels/org, so the proof seeds exactly the parent rows it needs
         // (the real Postgres schema enforces the org/account/channel foreign keys H2 did not).
         registry.add("sellerops.seed.enabled", () -> "false");
+        // The catalogue is separate from the fixture since Pilot Runtime Foundation v1 §2; this
+        // class owns the channels table, so it suppresses that too.
+        registry.add("sellerops.seed.channel-catalogue", () -> "false");
     }
 
     @Autowired ChannelOrderRepository orders;

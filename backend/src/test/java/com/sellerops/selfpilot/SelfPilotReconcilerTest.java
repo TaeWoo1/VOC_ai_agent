@@ -402,6 +402,72 @@ class SelfPilotReconcilerTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    // ── CONNECTED_SELLERS scope (Pilot Runtime Foundation v1 §6) ──
+
+    private static SelfPilotProperties connectedSellers(String db) {
+        return new SelfPilotProperties(true, "CONNECTED_SELLERS", "", "", 60, false, 20, 50, db);
+    }
+
+    /**
+     * <b>D/E — a newly connected seller is a routine-collection target, with no env edit and no
+     * restart</b> (§15-D, §15-E). The targets are read from the seller accounts that are actually
+     * connected, so the list changes the moment a seller finishes a connection.
+     */
+    @Test
+    void connectedSellersReadsItsTargetsFromTheConnectedAccounts() {
+        UUID other = UUID.randomUUID();
+        when(accounts.findOrgIdsWithConnectedApiAccount()).thenReturn(List.of(org, other));
+        when(accounts.findAllByOrgId(org)).thenReturn(List.of(account(cafe24, ChannelStatus.CONNECTED, false)));
+        when(accounts.findAllByOrgId(other)).thenReturn(List.of(account(coupang, ChannelStatus.CONNECTED, false)));
+        SelfPilotReconciler r = reconciler(connectedSellers(REMOTE_DB),
+                dedicated("CAFE24", DataType.REVIEW), dedicated("COUPANG", DataType.INQUIRY));
+
+        assertThat(r.targetOrgIds()).containsExactlyInAnyOrder(org, other);
+        assertThat(r.tick(Instant.now()).schedulesCreated()).isEqualTo(2);
+        // No org list is consulted at all — the allow-list is empty and both orgs are still targets.
+        assertThat(connectedSellers(REMOTE_DB).orgIds()).isEmpty();
+    }
+
+    /** An org that has connected nothing is not a target — "every org that asked", never "every org". */
+    @Test
+    void connectedSellersActsForNobodyWhenNothingIsConnected() {
+        when(accounts.findOrgIdsWithConnectedApiAccount()).thenReturn(List.of());
+        SelfPilotReconciler r = reconciler(connectedSellers(REMOTE_DB), dedicated("CAFE24", DataType.REVIEW));
+
+        assertThat(r.targetOrgIds()).isEmpty();
+        assertThat(r.tick(Instant.now()).schedulesCreated()).isZero();
+    }
+
+    /**
+     * The loopback fence is LOCAL_SINGLE_USER's, and it is not this scope's: CONNECTED_SELLERS is
+     * multi-tenant BY CONSTRUCTION — an org is a target because a seller in it connected a channel,
+     * which is that seller's instruction to collect it.
+     */
+    @Test
+    void connectedSellersBootsAgainstARemoteDatabase() {
+        assertThat(connectedSellers(REMOTE_DB).actsForConnectedSellers()).isTrue();
+        assertThat(connectedSellers(REMOTE_DB).actsForAllOrgs()).isFalse();
+        assertThat(new SelfPilotProperties(false, "CONNECTED_SELLERS", "", "", 60, false, 20, 50, REMOTE_DB)
+                .actsForConnectedSellers()).isFalse();
+    }
+
+    /**
+     * <b>G — one org's failure does not stop the others</b> (§15-G). The per-org boundary already
+     * existed; this pins it against the scope that makes the org list long.
+     */
+    @Test
+    void oneOrgFailingDoesNotStopTheRest() {
+        UUID broken = UUID.randomUUID();
+        when(accounts.findOrgIdsWithConnectedApiAccount()).thenReturn(List.of(broken, org));
+        when(accounts.findAllByOrgId(broken)).thenThrow(new RuntimeException("boom"));
+        when(accounts.findAllByOrgId(org)).thenReturn(List.of(account(cafe24, ChannelStatus.CONNECTED, false)));
+        SelfPilotReconciler r = reconciler(connectedSellers(REMOTE_DB), dedicated("CAFE24", DataType.REVIEW));
+
+        assertThat(r.tick(Instant.now()).schedulesCreated()).isEqualTo(1);
+    }
+
+    private static final String REMOTE_DB = "jdbc:postgresql://db.internal.example:5432/sellerops";
+
     @SuppressWarnings("unused")
     private static List<SyncSchedule> none() {
         return new ArrayList<>();

@@ -31,29 +31,35 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Seeds demo data on an empty database, in two groups:
+ * Seeds an empty database, in <b>three</b> groups whose defaults are not the same — because two of
+ * them are product reference data and a demo fixture, and only one of them may exist on a machine a
+ * real seller can reach.
  *
  * <ul>
- *   <li><b>Baseline</b> (always, when {@code sellerops.seed.enabled=true}, default
- *       true): the demo org + login user + 13-channel catalog + seller accounts.
- *       Required so the dev app is usable (login) and uploads have channels to map
- *       to.</li>
- *   <li><b>Demo content</b> (opt-in, only when {@code sellerops.seed.demo-content
- *       =true}, default false): sample products/reviews/inquiries/order-summaries.
- *       OFF by default so a real/default DB shows an honest empty inbox and orders
- *       dashboard instead of fake operational rows.</li>
+ *   <li><b>Channel catalogue</b> (ALWAYS, idempotent): the 13-channel catalogue. This is product
+ *       reference data, not a fixture — it is the only producer of {@code channels} rows in the
+ *       repository, so a deployment without it has an empty 채널 연결 screen and nothing a seller can
+ *       connect. It is written only when the table is empty and never rewritten.</li>
+ *   <li><b>Demo organisation</b> (opt-in, {@code sellerops.seed.enabled}, <b>default false</b> since
+ *       Pilot Runtime Foundation v1): the 데모 제조사 organisation, its login user and two seller
+ *       accounts. This is the group that must not exist on a pilot or production deployment: the user
+ *       it creates has a password that is written down in this repository, so any boot that creates it
+ *       hands a working login to anybody who has read the source. Nothing about the fixture changed —
+ *       set {@code SELLEROPS_SEED_ENABLED=true} and it seeds exactly as it always did.</li>
+ *   <li><b>Demo content</b> (opt-in, {@code sellerops.seed.demo-content}, default false, and nested
+ *       inside the demo organisation): sample products/reviews/inquiries/order-summaries.</li>
  * </ul>
  *
- * Idempotent: runs only when no organizations exist, so demo content seeds only on
- * a clean DB — enable {@code sellerops.seed.demo-content} before the first startup
- * of an empty database to get the full demo. Existing rows are never deleted here.
+ * <p>The demo organisation seeds only when no organisation exists at all, so it can never appear
+ * beside a real seller's org. Existing rows are never deleted here.
  *
- * Demo login — email: demo@sellerops.ai  password: demo1234
+ * <p>Demo login (fixture deployments only) — email: demo@sellerops.ai  password: demo1234
  */
 @Component
 public class MockDataSeeder implements ApplicationRunner {
 
     private final boolean enabled;
+    private final boolean seedChannelCatalogue;
     private final boolean seedDemoContent;
     private final OrganizationRepository organizations;
     private final UserRepository users;
@@ -66,7 +72,8 @@ public class MockDataSeeder implements ApplicationRunner {
     private final PasswordEncoder passwordEncoder;
 
     public MockDataSeeder(
-            @Value("${sellerops.seed.enabled:true}") boolean enabled,
+            @Value("${sellerops.seed.enabled:false}") boolean enabled,
+            @Value("${sellerops.seed.channel-catalogue:true}") boolean seedChannelCatalogue,
             @Value("${sellerops.seed.demo-content:false}") boolean seedDemoContent,
             OrganizationRepository organizations, UserRepository users,
             ChannelRepository channels, SellerAccountRepository sellerAccounts,
@@ -74,6 +81,7 @@ public class MockDataSeeder implements ApplicationRunner {
             ReviewRepository reviews, OrderDailySummaryRepository orderSummaries,
             PasswordEncoder passwordEncoder) {
         this.enabled = enabled;
+        this.seedChannelCatalogue = seedChannelCatalogue;
         this.seedDemoContent = seedDemoContent;
         this.organizations = organizations;
         this.users = users;
@@ -89,6 +97,10 @@ public class MockDataSeeder implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        // Product reference data first, and unconditionally: without a channel catalogue there is no
+        // 채널 연결 screen to stand on, and that is true of a pilot deployment as much as a dev one.
+        List<Channel> catalogue = ensureChannelCatalogue();
+
         if (!enabled || organizations.count() > 0) {
             return;
         }
@@ -105,9 +117,8 @@ public class MockDataSeeder implements ApplicationRunner {
         user.setRole("OWNER");
         users.save(user);
 
-        List<Channel> catalog = seedChannels();
-        Channel coupang = catalog.get(0);
-        Channel naver = catalog.get(1);
+        Channel coupang = byCode(catalogue, "COUPANG");
+        Channel naver = byCode(catalogue, "NAVER");
 
         seedAccount(org.getId(), coupang, Instant.now().minus(Duration.ofHours(1)));
         seedAccount(org.getId(), naver, Instant.now().minus(Duration.ofHours(3)));
@@ -121,6 +132,25 @@ public class MockDataSeeder implements ApplicationRunner {
             seedInquiries(org.getId(), productList, List.of(coupang, naver));
             seedOrderSummaries(org.getId(), List.of(coupang, naver));
         }
+    }
+
+    /**
+     * The channel catalogue, written once. Returning the persisted rows rather than the freshly built
+     * ones matters: on a restart the catalogue already exists, and the demo fixture below has to
+     * attach its accounts to THOSE rows, not to a second copy.
+     */
+    private List<Channel> ensureChannelCatalogue() {
+        if (!seedChannelCatalogue || channels.count() > 0) {
+            return channels.findAll();
+        }
+        return seedChannels();
+    }
+
+    /** The catalogue row for a code. Absent ⇒ the catalogue is not what this class wrote. */
+    private Channel byCode(List<Channel> catalogue, String code) {
+        return catalogue.stream().filter(c -> code.equals(c.getCode())).findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "channel catalogue is missing " + code + "; refusing to seed the demo organisation"));
     }
 
     private List<Channel> seedChannels() {

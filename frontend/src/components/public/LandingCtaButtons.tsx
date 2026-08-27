@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useDemoEntry } from "../../hooks/useDemoEntry";
 import { CTA_DEMO_LABEL, CTA_DIAGNOSIS_LABEL, DEMO_ENTRY_PATH, diagnosisFormUrl } from "../../lib/public/publicCta";
 
 /**
@@ -12,6 +13,8 @@ import { CTA_DEMO_LABEL, CTA_DIAGNOSIS_LABEL, DEMO_ENTRY_PATH, diagnosisFormUrl 
  */
 export function LandingCtaButtons({ onAccent = false }: { onAccent?: boolean }) {
   const formUrl = diagnosisFormUrl();
+  // Same fence as the header: no fixture, no demo entry (Pilot Runtime Foundation v1 §2).
+  const demoEntry = useDemoEntry() === true;
 
   const base =
     "inline-flex min-h-[52px] items-center justify-center rounded-xl px-6 py-3.5 text-lg font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
@@ -26,6 +29,8 @@ export function LandingCtaButtons({ onAccent = false }: { onAccent?: boolean }) 
     : "border border-line text-ink hover:bg-canvas";
 
   if (!formUrl) {
+    // Neither CTA is available — the band renders nothing rather than a dead primary button.
+    if (!demoEntry) return null;
     return (
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Link to={DEMO_ENTRY_PATH} className={`${base} ${ring} ${primary}`}>
@@ -46,9 +51,11 @@ export function LandingCtaButtons({ onAccent = false }: { onAccent?: boolean }) 
         {CTA_DIAGNOSIS_LABEL}
         <span className="sr-only"> (새 창에서 열림)</span>
       </a>
-      <Link to={DEMO_ENTRY_PATH} className={`${base} ${ring} ${secondary}`}>
-        {CTA_DEMO_LABEL}
-      </Link>
+      {demoEntry ? (
+        <Link to={DEMO_ENTRY_PATH} className={`${base} ${ring} ${secondary}`}>
+          {CTA_DEMO_LABEL}
+        </Link>
+      ) : null}
     </div>
   );
 }

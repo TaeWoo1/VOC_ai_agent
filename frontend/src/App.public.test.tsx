@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
+
+// A demo deployment, so the demo entry exists at all (Pilot Runtime Foundation v1 §2). The
+// opposite case — a pilot deployment where the shortcut and the prefill are both absent — is
+// pinned in `components/public/demoEntryFence.test.tsx`.
+vi.mock("./hooks/useDemoEntry", () => ({ useDemoEntry: () => true }));
 
 // Public-surface routing. The point of this file is the boundary itself: a visitor with no token
 // must reach the product page, and must NOT reach any app route.

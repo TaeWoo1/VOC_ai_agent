@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useDemoEntry } from "../../hooks/useDemoEntry";
 import { CTA_DEMO_LABEL, CTA_DIAGNOSIS_LABEL, DEMO_ENTRY_PATH, PRODUCT_PATH, diagnosisFormUrl } from "../../lib/public/publicCta";
 
 /**
@@ -13,6 +14,10 @@ import { CTA_DEMO_LABEL, CTA_DIAGNOSIS_LABEL, DEMO_ENTRY_PATH, PRODUCT_PATH, dia
  */
 export function PublicHeader() {
   const formUrl = diagnosisFormUrl();
+  // A deployment with no demo fixture has no demo to show (Pilot Runtime Foundation v1 §2). Fails
+  // closed while the answer is outstanding, so a pilot never flashes an entry into an account that
+  // does not exist.
+  const demoEntry = useDemoEntry() === true;
 
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur">
@@ -41,14 +46,14 @@ export function PublicHeader() {
               {CTA_DIAGNOSIS_LABEL}
               <span className="sr-only"> (새 창에서 열림)</span>
             </a>
-          ) : (
+          ) : demoEntry ? (
             <Link
               to={DEMO_ENTRY_PATH}
               className="inline-flex items-center justify-center rounded-xl bg-brand-700 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
             >
               {CTA_DEMO_LABEL}
             </Link>
-          )}
+          ) : null}
         </nav>
       </div>
     </header>

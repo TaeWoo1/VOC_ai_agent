@@ -56,6 +56,9 @@ class SellerAccountUniquenessPostgresProofIT {
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.jpa.hibernate.ddl-auto", () -> "none");
         registry.add("sellerops.seed.enabled", () -> "false");
+        // The catalogue is separate from the fixture since Pilot Runtime Foundation v1 §2; this
+        // class owns the channels table, so it suppresses that too.
+        registry.add("sellerops.seed.channel-catalogue", () -> "false");
     }
 
     @Autowired SellerAccountRepository accounts;
