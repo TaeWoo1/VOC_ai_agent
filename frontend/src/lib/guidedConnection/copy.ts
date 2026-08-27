@@ -39,7 +39,7 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
   },
   application_issuance_guided: {
     title: "화면 안내로 발급",
-    body: "내 PC의 SellerOps 도우미가 NAVER 커머스 API 센터를 전용 창으로 열고, 눌러야 할 위치를 단계별로 표시해 드립니다. 실제 로그인·클릭·발급은 고객님이 그 창에서 직접 진행하고, SellerOps는 화면을 대신 조작하거나 시크릿을 대신 읽지 않습니다. 언제든 '텍스트로 직접 진행하기'로 바꿀 수 있습니다.",
+    body: "내 PC의 SellerOps 도우미가 NAVER 커머스 API 센터를 전용 창으로 열고, 눌러야 할 위치를 단계별로 표시해 드립니다. 실제 로그인·클릭·발급은 고객님이 그 창에서 직접 진행하고, SellerOps는 화면을 대신 조작하거나 시크릿을 대신 읽지 않습니다. 도우미를 실행해 두지 않으셨다면 '직접 진행하기'로 끝까지 진행할 수 있습니다.",
   },
   credential_issued: {
     title: "발급 완료 확인",

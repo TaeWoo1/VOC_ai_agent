@@ -30,7 +30,7 @@ import { classifyAgentEnv, type AgentEnvStatus, type GuidedEvent } from "../../l
  *
  * The bridge lives INSIDE this component, which mounts only in `application_issuance_guided`. Credential entry,
  * the connection test, the first sync, and the saved/existing paths never see it. A seller with no helper — or
- * who declines pairing — is never blocked: a persistent "텍스트로 직접 진행하기" button (and, when the agent
+ * who declines pairing — is never blocked: a persistent "직접 진행하기" button (and, when the agent
  * cannot guide, an explicit affordance) dispatches `APPLICATION_ISSUANCE_MODE {mode:"text"}` back to the static
  * checklist. Issuance can always be completed with text alone.
  *
@@ -212,23 +212,36 @@ export function NaverIssuanceGuidedWalkthrough({
     dispatch({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
   };
 
-  // GUIDED-FIRST start screen: one CTA begins the walk. No guided/text choice — text is a failure-only
-  // fallback surfaced later. The dedicated NAVER window / pairing only starts on this explicit action.
+  // **The start screen offers the path that works on this machine first** (Pilot Readiness Gate v1 §3).
+  //
+  // It used to offer exactly one control — 네이버 연결 안내 시작 — which begins pairing with the local
+  // 도우미. Measured 2026-08-27 on a seller with no helper: the press led to 「SellerOps 도우미가
+  // 필요합니다 · 도우미를 실행한 뒤 다시 시도해 주세요」, an instruction to run a program that has no
+  // installable artifact today, with the way out (텍스트로 직접 진행하기) rendered as the smallest
+  // control on the screen, BELOW a 다시 찾기 for the thing that cannot be found.
+  //
+  // Nothing about the guided walk changed — it is the same event, the same host, the same walk, and a
+  // seller whose helper IS running still reaches it in one press. What changed is which of the two is
+  // presented as the ordinary way: today that is the manual path, and a screen that leads with the other
+  // one is telling the seller something about their own machine that is not true.
   if (!started) {
     return (
       <div className="space-y-3" aria-label="네이버 연결 안내 시작">
         <p className="text-sm text-ink break-keep">네이버 API 센터에서 연결 정보를 확인하도록 안내해 드릴게요.</p>
         <p className="text-sm text-muted break-keep">
-          시작하면 전용 NAVER 창이 열립니다. 로그인·클릭·복사는 직접 하시면 되고, SellerOps는 어디를 봐야
-          하는지 화면으로 안내만 합니다 — 값·클립보드·화면을 읽지 않습니다.
+          직접 진행하시면 무엇을 어디서 확인하는지 순서대로 알려 드립니다. 내 PC에 SellerOps 도우미를
+          실행해 두셨다면, 도우미가 전용 NAVER 창을 열어 눌러야 할 위치를 표시하는 화면 안내도 쓸 수 있어요.
         </p>
+        <button type="button" className="btn-primary block w-full" onClick={toText} disabled={busy}>
+          직접 진행하기
+        </button>
         <button
           type="button"
-          className="btn-primary block w-full"
+          className="btn-ghost block w-full"
           onClick={() => setStarted(true)}
           disabled={busy}
         >
-          네이버 연결 안내 시작
+          화면 안내로 진행하기 (도우미 필요)
         </button>
       </div>
     );
@@ -246,6 +259,16 @@ export function NaverIssuanceGuidedWalkthrough({
         </p>
         <AdvertisedCallIpPanel ips={advertisedEgressIps} />
       </section>
+
+      {/* **The way forward goes ABOVE the thing that stopped** (`docs/reviewnary_design.md` §10 · Pilot
+          Readiness Gate v1 §3). When guidance cannot run, the seller's next control is the manual path —
+          not a retry for a helper they may have no way to obtain. It was previously the last and smallest
+          control on the screen, under 다시 찾기. It is the same `toText` as the start gate's primary. */}
+      {offerTextFallback && (
+        <button type="button" className="btn-primary block w-full" onClick={toText} disabled={busy}>
+          직접 진행하기
+        </button>
+      )}
 
       {/* Pairing (guided path only). AgentPairingPanel self-hides when paired or on an incompatible version. */}
       {!paired && (
@@ -281,13 +304,6 @@ export function NaverIssuanceGuidedWalkthrough({
         </p>
       )}
 
-      {/* Text is a FALLBACK, shown ONLY when guidance cannot run (can't pair / host refused / agent
-          unreachable) or the walk ended without completing. On the healthy paired path it never appears. */}
-      {offerTextFallback && (
-        <button type="button" className="btn-ghost text-sm" onClick={toText} disabled={busy}>
-          텍스트로 직접 진행하기
-        </button>
-      )}
 
       {/* Paired but no run yet: the agent is connected; the guidance run is starting. */}
       {paired && !effectiveRun && !cannotGuide && (

@@ -313,7 +313,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
 
   it("guided is the default: a HEALTHY run shows NO text button (text is failure-only, not co-equal)", () => {
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "직접 진행하기" })).toBeNull();
   });
 
   it("agent incompatible (pairing won't help) → the text flow directly, with NO error notice and NO extra click", async () => {
@@ -325,7 +325,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     expect(screen.queryByText(/화면 안내를 사용할 수 없어요/)).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByTestId("agent-pairing")).toBeNull();
-    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "직접 진행하기" })).toBeNull();
     // Completing it hands off to credential entry.
     await userEvent.click(screen.getByRole("button", { name: "발급을 완료했어요" }));
     expect(onIssued).toHaveBeenCalledTimes(1);
@@ -345,7 +345,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     expect(screen.getByRole("status")).toHaveTextContent("도우미를 찾고 있어요");
     expect(screen.getByTestId("spinner")).toBeInTheDocument();
     expect(screen.queryByText(/찾지 못했어요/)).toBeNull();
-    expect(screen.getByRole("button", { name: "텍스트로 직접 진행하기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "직접 진행하기" })).toBeInTheDocument();
   });
 
   it("helper running but not paired → the pairing action (not an error) plus the text flow one click away", () => {
@@ -353,7 +353,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={null} onCommand={vi.fn()} />);
     expect(screen.getByTestId("agent-pairing")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "도우미 연결하기" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "텍스트로 직접 진행하기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "직접 진행하기" })).toBeInTheDocument();
   });
 
   it("never renders a selector, url, secret, or account id (sanitized copy keys/codes only)", () => {
@@ -382,14 +382,19 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
   });
 
   describe("guided-first start gate", () => {
-    it("shows a single start CTA plus an 'already have the key' skip, and does NOT pair/attach until started", () => {
+    it("offers both paths plus the 'already have the key' skip, and pairs/attaches for none of them", () => {
       const host = fakeHost();
       render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
-      expect(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeInTheDocument();
+      // Pilot Readiness Gate v1 §3: the checklist is reachable without first pressing a CTA that
+      // promises 「전용 쿠팡 윙 창이 열립니다」 on a machine where nothing will open.
+      expect(screen.getByRole("button", { name: "직접 진행하기" }).className).toContain("btn-primary");
+      expect(
+        screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" }).className,
+      ).toContain("btn-ghost");
       expect(screen.getByRole("button", { name: "이미 키가 있어요" })).toBeInTheDocument();
+      // Unchanged: nothing pairs and nothing attaches until the seller chooses the guided walk.
       expect(screen.queryByTestId("agent-pairing")).toBeNull();
       expect(host.ensureCalls()).toBe(0);
-      expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
     });
 
     it("the 'already have the key' skip fires onIssued and never attaches the host", async () => {
@@ -422,7 +427,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
         setSearch("?issuance=resume");
         const host = fakeHost();
         render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
-        expect(screen.queryByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeNull();
         expect(screen.queryByRole("button", { name: "이미 키가 있어요" })).toBeNull();
       });
 
@@ -430,7 +435,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
         setSearch("");
         const host = fakeHost();
         render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
-        expect(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeInTheDocument();
       });
 
       it("**a seller who already had a key is not told they issued one**", () => {
@@ -469,13 +474,13 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
         setSearch("?issuance=start&resume=1");
         const host = fakeHost();
         render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
-        expect(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeInTheDocument();
       });
     });
   });
 
   describe("live host wiring (no run prop → the shared issuance host)", () => {
-    const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })));
+    const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })));
 
     it("does NOT attach (START_RUN 0) before the agent is paired", () => {
       h.bridge = { phase: "unpaired", maybeNeedsLocalNetworkAccess: false } as BridgeState;
@@ -507,7 +512,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
       // After start: paired, no run yet → the preparing line (spinner, neutral), with the text flow one click away.
       expect(screen.getByText("도우미가 연결됐어요. 쿠팡 윙 안내를 준비하고 있어요.")).toBeInTheDocument();
       expect(screen.getByTestId("spinner")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "텍스트로 직접 진행하기" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "직접 진행하기" })).toBeInTheDocument();
       act(() => host.publish(issuanceRun()));
       // A healthy barrier shows the WING-resident status (not a step-by-step timeline / 다음).
       expect(screen.getByText("쿠팡(윙) 창에서 화면 안내를 따라 진행하세요")).toBeInTheDocument();
@@ -523,7 +528,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
       render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
       start();
       act(() => host.publish(issuanceRun()));
-      expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "직접 진행하기" })).toBeNull();
     });
   });
 });
@@ -536,7 +541,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
  */
 describe("CoupangIssuanceGuidedWalkthrough — the credential handoff", () => {
   /** The seller's own 시작 press — the walk does not host a run until they ask for one. */
-  const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })));
+  const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })));
 
   const asking = () =>
     issuanceRun({

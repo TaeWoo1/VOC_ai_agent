@@ -413,6 +413,46 @@ off-host 요청 **0** — 리스너로 단언), AA 텍스트 노드 위반 **0**
 경로를 기본으로 제시하는 것, 단계별 플래너 진행에 필요한 새 프로토콜, 그리고 **NAVER 완료 화면은
 라이브 렌더 없음**(연결된 계정에서 `/connect/naver`는 NAVER 연결 테스트를 부른다) ⇒ evidence 행 없음).
 
+**`docs/pilot_readiness_gate_v1.md`** (Pilot Readiness Gate v1 — feature package가 아니라 질문 하나다:
+**첫 외부 판매자가 혼자 시작할 수 있는가.** product-owner 결정으로 **별도 Cafe24 mall이 없으므로** Demo Org의
+연결은 **보존**되고 재-OAuth·재연결은 하지 않는다 ⇒ Disconnected Channel Onboarding v1은
+**OFFLINE/UX_PROOF = PASS · FRESH_ACCOUNT_LIVE_PROOF = `UNPROVEN_BY_NO_SAFE_TEST_ACCOUNT`**로 정직하게
+닫고, **첫 실제 판매자의 첫 연결이 production live onboarding proof**가 된다(§7이 그 재사용 가능한
+manifest — 계정·mall id·credential·IP 값은 저장소에 넣지 않는다). **P0 다섯**: (1) 빈 DB로 뜨는 배포가
+`demo@sellerops.ai`/`demo1234`를 **항상** 만들고 로그인 헤더의 「데모 화면 보기」가 그 값을 채워 넣는데
+`sellerops.seed.enabled`에 **env placeholder가 없어 끌 수 없다**(한 줄 변경이지만 production boot이 무엇을
+만드느냐는 product-owner 결정이라 **보고만** 한다); (2) `self-pilot.enabled` 기본 false ⇒ reconciler bean이
+없어 **첫 수집 이후 다시 수집되지 않는다**(판매자마다 org UUID를 env에 넣고 재시작해야 하므로
+`READY_WITH_OPERATOR`); (3) `docker compose up`은 네 프로세스를 올리지만 커넥터 셋 전부 기본 off·vault는
+키 없이 fail-closed·`.env.example`에 그 이름이 **하나도 없어** 채널을 연결할 수 없다; (4) 고정 공인 IPv4와
+고정 HTTPS Cafe24 callback이 **미프로비저닝**; (5) 전송 lane은 `TEST_INQUIRY_REQUIRED`라 답변은 판매자가
+초안을 복사해 채널에 올린다. **최종 verdict `NOT_PILOT_READY`**. **고친 것은 `frontend/` 첫 사용 경험뿐이고
+backend 소스 0 · 마이그레이션 0**: **§3 helper 감사 — 세 채널 모두 도우미는 필수가 아니다**(NAVER는
+text로 발급이 끝나고 Coupang은 `guidanceImpossible`이 체크리스트로 자동 낙하하며 Cafe24는 아예 무관) ⇒
+`PILOT_BLOCKER`가 아니라 **어느 쪽을 먼저 내미느냐**가 결함이었다. 라이브 측정: `/connect/naver`의 유일한
+컨트롤을 누르면 「**내 PC의 SellerOps 도우미를 찾지 못했어요. 도우미를 실행한 뒤 다시 시도해 주세요**」 —
+이 저장소에 설치 가능한 아티팩트가 **없는** 프로그램을 실행하라는 지시이고, 빠져나갈 길은 찾을 수 없는
+것을 **다시 찾기** 아래의 가장 작은 컨트롤이었다(막다른 길은 아니다: 세 번 눌러 credential 입력에 닿는데
+그중 하나는 1분 전에 답한 질문이다). 세 gate 전부 **표시만** 바꿔 도우미 없는 경로가 `btn-primary`가 되고
+가이드는 `(도우미 필요)` 라벨의 ghost가 된다 — reducer event·bridge·host·walk·커넥터/auth 아키텍처
+**무변경**이고 도우미를 켜 둔 판매자는 여전히 한 번 눌러 같은 walk에 닿는다; 안내가 불가능할 때 **나아갈
+길이 멈춘 것보다 위에** 그려진다(`reviewnary_design.md` §10). **한 동작에 이름 하나** — 모든 gate와
+fallback에서 「직접 진행하기」이고 옛 라벨을 부르던 문장도 함께 고쳤다(화면에 없는 버튼을 가리키는 문장이
+이 패키지가 시작된 결함이다). 테스트는 존재가 아니라 **class**를 고정한다 — 존재는 한 번도 퇴행하지 않았고
+prominence가 결함 전부다. **§4 연결 전 경고색**: 홈 KPI 셋이 전부 `text-warn`으로 「채널 3곳이 이 숫자에
+없습니다」였다 — 빠졌다고 말하려면 빠질 **총합**이 있어야 하고 첫 연결 전에는 없다(정의상 전부 빠져 있고
+맨 위 문장이 이미 그렇게 말한다); 가입 2분 된 계정에서 그것은 화면이 **장애를 발명하는** 일이다 ⇒ 숨기지
+않고 더 평범한 사실을 muted로 말한다(**「아직 연결된 채널이 없습니다」**). 신호는 두 번째 조회가 아니라
+`hasAnyConnectedChannel(metrics.channels)`로 **파생**하고(6인치 아래 표와 어긋날 기회를 만들지 않는다),
+**`NOT_SUPPORTED`는 연결 없음으로 세지 않는다**(리뷰 수집 경로가 없는 연결된 NAVER는 여전히 연결된
+NAVER다). **§5**: PRIMARY(카페24) 경로의 `/settings/channels` 레거시 홉 4곳 → `/connect`, 그리고 그 경로에
+**「SellerOps」 문구는 없다** — NAVER·쿠팡에 남은 것은 전부 도우미 lane이고 §3이 그것을 primary에서
+치웠으므로 이름은 그대로 둔다(가리키는 대상이 이름을 유지하는데 지시만 바꾸는 것이 더 나쁜 결함이다).
+**§6 agent-runtime은 lifecycle owner가 있다** — `docker compose up --build`가 넷을 올리고 판매자가 8787을
+따로 띄울 일은 없다(`PILOT_BLOCKER` 아님); 없던 것은 launcher가 아니라 **배포 설정**이라 운영자용 실행
+절차를 §6-1에 이름만으로 고정했다(값·키·IP는 저장소에 넣지 않는다). 라이브 마켓플레이스 실행 **0** ·
+WRITE **0** · 모델 **0** · DB 변경 **0** · 마이그레이션 **0** ⇒ evidence 행 없음).
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

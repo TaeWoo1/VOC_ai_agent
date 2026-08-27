@@ -30,7 +30,7 @@ import { isIssuanceResumeReturn } from "../../lib/coupangTutorial";
  * FALLBACK, entered only when the walk is known to be impossible on this machine (no helper, pairing will not
  * fix it, or the paired helper cannot host the walk — an older helper, or one holding a different carrier) —
  * with no error, because that is an ordinary way to issue the key, not a failure. While the walk is being
- * prepared a "텍스트로 직접 진행하기" affordance is one click away, and an "이미 키가 있어요" skip on the start
+ * prepared a "직접 진행하기" affordance is one click away, and an "이미 키가 있어요" skip on the start
  * gate jumps straight to credential entry. Issuance can always be completed with text alone.
  *
  * ## Never a credential, never a scripted page
@@ -323,24 +323,39 @@ export function CoupangIssuanceGuidedWalkthrough({
     );
   }
 
-  // GUIDED-FIRST start screen: one CTA begins the walk, plus a skip for a seller who already issued the key.
+  // **The start screen offers the path that works on this machine first** (Pilot Readiness Gate v1 §3).
+  //
+  // The gate used to lead with 쿠팡 연결 안내 시작 and promise 「전용 쿠팡 윙 창이 열립니다」. Measured
+  // 2026-08-27 on a seller with no helper: nothing opened — the walkthrough correctly fell through to the
+  // 11-step checklist with no error (`guidanceImpossible`), which is a good landing after a sentence that
+  // was not true. The checklist is now reachable without pressing a promise first.
+  //
+  // Nothing about the guided walk changed. Which of the two is the ordinary way did.
   if (!started) {
     return (
       <div className="space-y-3" aria-label="쿠팡 연결 안내 시작">
         <p className="text-sm text-ink break-keep">
-          쿠팡 윙에서 Open API 키를 발급하도록 화면으로 안내해 드릴게요.
+          쿠팡 윙에서 Open API 키를 발급하는 순서를 안내해 드릴게요.
         </p>
         <p className="text-sm text-muted break-keep">
-          시작하면 전용 쿠팡 윙 창이 열립니다. 로그인·클릭·발급은 직접 하시면 되고, SellerOps는 어디를 봐야
-          하는지 화면으로 안내만 합니다 — 값·클립보드·화면을 읽지 않습니다.
+          직접 진행하시면 무엇을 어디서 누르는지 순서대로 알려 드립니다. 내 PC에 SellerOps 도우미를 실행해
+          두셨다면, 도우미가 전용 쿠팡 윙 창을 열어 눌러야 할 위치를 표시하는 화면 안내도 쓸 수 있어요.
         </p>
         <button
           type="button"
           className="btn-primary block w-full"
+          onClick={() => setTextMode(true)}
+          disabled={busy}
+        >
+          직접 진행하기
+        </button>
+        <button
+          type="button"
+          className="btn-ghost block w-full"
           onClick={() => setStarted(true)}
           disabled={busy}
         >
-          쿠팡 연결 안내 시작
+          화면 안내로 진행하기 (도우미 필요)
         </button>
         <button type="button" className="btn-ghost block w-full text-sm" onClick={onIssued} disabled={busy}>
           이미 키가 있어요
@@ -431,7 +446,7 @@ export function CoupangIssuanceGuidedWalkthrough({
           run is on screen (the walk is then really running). */}
       {offerTextFallback && (
         <button type="button" className="btn-ghost text-sm" onClick={toText} disabled={busy}>
-          텍스트로 직접 진행하기
+          직접 진행하기
         </button>
       )}
 

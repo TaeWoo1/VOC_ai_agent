@@ -32,7 +32,7 @@ beforeEach(() => {
 
 async function start(onIssued = vi.fn()) {
   render(<CoupangIssuanceGuidedWalkthrough onIssued={onIssued} advertisedEgressIps={[]} />);
-  await userEvent.click(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" }));
+  await userEvent.click(screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" }));
   return onIssued;
 }
 

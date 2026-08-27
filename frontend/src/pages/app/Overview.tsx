@@ -9,6 +9,7 @@ import { DataStateBadge } from "../../components/ui/DataState";
 import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { Empty } from "../../components/ui/Empty";
 import { AgentBriefing } from "../../components/home/AgentBriefing";
+import { hasAnyConnectedChannel } from "../../lib/firstConnectionState";
 import { CommandInput } from "../../components/home/CommandInput";
 import { BtnLink } from "../../components/ui/Btn";
 import { useApiData } from "../../lib/useApiData";
@@ -179,6 +180,7 @@ export function Overview() {
                   size="lg"
                   emphasis={kpi.key === "unansweredInquiries"}
                   onClick={KPI_ROUTE[kpi.key] ? () => navigate(KPI_ROUTE[kpi.key]!) : undefined}
+                  beforeFirstConnection={!hasAnyConnectedChannel(data.metrics.channels)}
                 />
               ))}
             </MetricRowOfThree>

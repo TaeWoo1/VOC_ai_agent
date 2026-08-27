@@ -66,7 +66,7 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
 
   it("application_issuance → mode fork; guided choice dispatches APPLICATION_ISSUANCE_MODE{guided}", async () => {
     const { props } = renderWizard(stateAt("application_issuance"));
-    await userEvent.click(screen.getByRole("button", { name: "화면을 보며 안내받기" }));
+    await userEvent.click(screen.getByRole("button", { name: "화면을 보며 안내받기 (도우미 필요)" }));
     expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
   });
 
@@ -82,11 +82,15 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     expect(props.dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_COMPLETE" });
   });
 
-  it("application_issuance_guided → renders the guided walkthrough START gate (guided is the default; no co-equal text)", () => {
+  it("application_issuance_guided → the START gate leads with the path that needs no helper", () => {
     renderWizard(stateAt("application_issuance_guided"));
-    expect(screen.getByRole("button", { name: "네이버 연결 안내 시작" })).toBeInTheDocument();
-    // Text is a failure-only fallback, never an upfront co-equal choice.
-    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+    // Pilot Readiness Gate v1 §3 inverted this. The gate used to offer the guided walk alone, which
+    // on a machine with no 도우미 — every machine, today — ends at 「도우미를 실행한 뒤 다시 시도해
+    // 주세요」. Both paths are now on the gate and the manual one is the filled control.
+    const manual = screen.getByRole("button", { name: "직접 진행하기" });
+    const guided = screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" });
+    expect(manual.className).toContain("btn-primary");
+    expect(guided.className).toContain("btn-ghost");
     expect(screen.queryByRole("button", { name: "화면을 보며 확인" })).toBeNull();
   });
 

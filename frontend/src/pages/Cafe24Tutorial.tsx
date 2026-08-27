@@ -188,7 +188,7 @@ export function Cafe24Tutorial() {
 
   function finish() {
     clearTutorialState();
-    navigate("/settings/channels");
+    navigate("/connect");
   }
 
   const copy = PHASE_COPY[state.phase];
@@ -369,7 +369,7 @@ export function Cafe24Tutorial() {
               {state.failure ? FAILURE_COPY[state.failure] : "다시 시도해 주세요."}
             </div>
             <div className="flex items-center justify-between gap-3">
-              <Link to="/settings/channels" className="btn-ghost">
+              <Link to="/connect" className="btn-ghost">
                 채널 연결로 돌아가기
               </Link>
               <button type="button" className="btn-primary" onClick={retry}>

@@ -13,7 +13,7 @@ describe("NaverIssuanceModeChoice", () => {
   it("guided choice dispatches APPLICATION_ISSUANCE_MODE{mode:'guided'} (the Action Window)", async () => {
     const dispatch = vi.fn();
     render(<NaverIssuanceModeChoice dispatch={dispatch} />);
-    await userEvent.click(screen.getByRole("button", { name: "화면을 보며 안내받기" }));
+    await userEvent.click(screen.getByRole("button", { name: "화면을 보며 안내받기 (도우미 필요)" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
   });
 
@@ -40,7 +40,7 @@ describe("NaverIssuanceModeChoice", () => {
     render(<NaverIssuanceModeChoice dispatch={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
     await userEvent.click(screen.getByRole("button", { name: "화면 안내로 다시 보기" }));
-    expect(screen.getByRole("button", { name: "화면을 보며 안내받기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "화면을 보며 안내받기 (도우미 필요)" })).toBeInTheDocument();
   });
 
   it("has no accessibility violations (fork and text views)", async () => {

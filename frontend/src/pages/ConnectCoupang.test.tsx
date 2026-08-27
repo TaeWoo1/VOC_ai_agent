@@ -167,7 +167,7 @@ describe("ConnectCoupang tutorial", () => {
   it("a fresh seller lands on the WING issuance walkthrough FIRST (not the credential prereqs)", async () => {
     renderPage();
     // The agent-driven issuance start gate — before any credential entry, and creating no account.
-    expect(await screen.findByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "이미 키가 있어요" })).toBeInTheDocument();
     expect(screen.queryByTestId("coupang-prereqs")).toBeNull();
     expect(h.createApiChannelAccount).not.toHaveBeenCalled();
@@ -285,7 +285,7 @@ describe("ConnectCoupang tutorial", () => {
     renderPage();
     expect(await screen.findByTestId("coupang-connected")).toBeInTheDocument();
     // Already-issued seller: the WING issuance walkthrough is skipped entirely (never shown).
-    expect(screen.queryByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeNull();
   });
 
   it("refresh recovery: credential on file but PENDING → recovery screen (re-verify / re-enter)", async () => {
@@ -294,7 +294,7 @@ describe("ConnectCoupang tutorial", () => {
     renderPage();
     expect(await screen.findByTestId("coupang-connect-error")).toBeInTheDocument();
     // Already-issued (credential on file): issuance is skipped — the recovery screen shows directly.
-    expect(screen.queryByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeNull();
     // Re-verify uses the stored credential — no secret re-entry required, no account re-create.
     expect(screen.getByRole("button", { name: "연결 다시 확인" })).toBeInTheDocument();
     expect(h.createApiChannelAccount).not.toHaveBeenCalled();
@@ -501,7 +501,7 @@ describe("ConnectCoupang — walkthrough environment binding (VITE_WALKTHROUGH_M
       RUN.slice(0, 8),
     );
     // Gate opened → a fresh seller's journey (WING issuance start) renders; no account bootstrapped by loading.
-    expect(await screen.findByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeInTheDocument();
     // The handshake sent the run id from the TAB'S URL (not the /context echo) + this tab's origin.
     expect(h.walkthroughHandshake).toHaveBeenCalledWith(
       expect.objectContaining({ walkthroughRunId: RUN, origin: window.location.origin }),
@@ -517,7 +517,7 @@ describe("ConnectCoupang — walkthrough environment binding (VITE_WALKTHROUGH_M
     h.getWalkthroughContext.mockResolvedValue(walkthroughContext());
     renderPage();
     expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeNull();
     expect(h.walkthroughHandshake).not.toHaveBeenCalled();
     expect(h.createApiChannelAccount).not.toHaveBeenCalled();
   });
@@ -543,7 +543,7 @@ describe("ConnectCoupang — walkthrough environment binding (VITE_WALKTHROUGH_M
     h.walkthroughHandshake.mockResolvedValue({ runMatched: false, originMatched: true, timestamp: "t" });
     renderPage();
     expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeNull();
   });
 
   it("context endpoint unreachable → MISMATCH (never a silent proceed); banner still renders", async () => {
@@ -557,7 +557,7 @@ describe("ConnectCoupang — walkthrough environment binding (VITE_WALKTHROUGH_M
   it("non-walkthrough mode → NO banner, NO gate; the page renders exactly as before", async () => {
     // No VITE_WALKTHROUGH_MODE stub → the gate opens immediately and the /context path is never touched.
     renderPage();
-    expect(await screen.findByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeInTheDocument();
     expect(screen.queryByRole("note", { name: "Disposable COUPANG Walkthrough" })).toBeNull();
     expect(h.getWalkthroughContext).not.toHaveBeenCalled();
     expect(h.walkthroughHandshake).not.toHaveBeenCalled();

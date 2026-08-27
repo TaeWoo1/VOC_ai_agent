@@ -25,6 +25,7 @@ export function Metric({
   emphasis = false,
   size = "md",
   onClick,
+  beforeFirstConnection = false,
 }: {
   kpi: MetricKpi;
   /** The one number this screen is about. At most one per screen. */
@@ -32,9 +33,21 @@ export function Metric({
   /** `lg` — 오늘 상태. The three numbers the home screen exists to answer, read from across a desk. */
   size?: "md" | "lg";
   onClick?: () => void;
+  /**
+   * **The seller has not connected a channel yet** (Pilot Readiness Gate v1 §4).
+   *
+   * A missing channel is a warning when there is a working total for it to be missing FROM: one of
+   * four channels stopped collecting and the number under the seller's eye is quietly short. Before
+   * the first connection there is no such total — every channel is missing, by definition, and the
+   * seller was told so in the sentence at the top of the page. Rendered in `warn` on a two-minute-old
+   * account it reads as three faults, which is the screen inventing an outage on its first showing.
+   *
+   * It is not hidden: the same fact is said, in the plainer form the seller can act on, in `muted`.
+   */
+  beforeFirstConnection?: boolean;
 }) {
   const value = kpi.unit === "원" ? wonShort(kpi.value) : count(kpi.value);
-  const caveat = caveatFor(kpi);
+  const caveat = beforeFirstConnection ? "아직 연결된 채널이 없습니다" : caveatFor(kpi);
   const big = size === "lg";
   const body = (
     <>
@@ -71,7 +84,11 @@ export function Metric({
       </p>
       <div className={big ? "mt-2 min-h-[1.5rem]" : "mt-1.5 min-h-[1.25rem]"}>
         {kpi.comparable && kpi.deltaPercent !== null ? <Delta percent={kpi.deltaPercent} /> : null}
-        {caveat ? <p className="break-keep text-sm text-warn">{caveat}</p> : null}
+        {caveat ? (
+          <p className={`break-keep text-sm ${beforeFirstConnection ? "text-muted" : "text-warn"}`}>
+            {caveat}
+          </p>
+        ) : null}
         {kpi.freshnessUnproven ? (
           <p className="break-keep text-sm text-warn">최신 수집 확인 안 됨</p>
         ) : null}

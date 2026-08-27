@@ -204,7 +204,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
 
   it("guided is the default: a HEALTHY run shows NO text button (text is failure-only, not co-equal)", () => {
     render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "직접 진행하기" })).toBeNull();
   });
 
   it("agent incompatible (pairing won't help) → the text FALLBACK appears and dispatches mode:'text'", async () => {
@@ -212,7 +212,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     const dispatch = vi.fn();
     render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} run={null} onCommand={vi.fn()} />);
     expect(screen.getByText("화면 안내를 사용할 수 없어요. 텍스트로 진행해 주세요.")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "직접 진행하기" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
   });
 
@@ -220,7 +220,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     h.bridge = { phase: "unreachable", maybeNeedsLocalNetworkAccess: false } as BridgeState;
     render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={null} onCommand={vi.fn()} />);
     expect(screen.getByTestId("agent-pairing")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "텍스트로 직접 진행하기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "직접 진행하기" })).toBeInTheDocument();
   });
 
   it("agent not paired (handshake in progress) → the pairing panel is shown, NO text button yet", () => {
@@ -228,7 +228,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={null} onCommand={vi.fn()} />);
     expect(screen.getByTestId("agent-pairing")).toBeInTheDocument();
     // Plain unpaired is not a failure — no co-equal text button.
-    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "직접 진행하기" })).toBeNull();
   });
 
   it("never renders a selector, url, secret, or account id (sanitized copy keys/codes only)", () => {
@@ -252,24 +252,29 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
   describe("guided-first start gate", () => {
     it("the start gate has no accessibility violations", async () => {
       const { container } = render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} />);
-      expect(screen.getByRole("button", { name: "네이버 연결 안내 시작" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })).toBeInTheDocument();
       await expectNoAxeViolations(container);
     });
 
-    it("shows a single start CTA and does NOT pair/attach until the seller starts", () => {
+    it("offers both paths and pairs/attaches for neither until the seller starts", () => {
       const host = fakeHost();
       render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
-      expect(screen.getByRole("button", { name: "네이버 연결 안내 시작" })).toBeInTheDocument();
-      // No pairing panel and no host attach before the CTA — and no guided/text co-equal choice.
+      // Pilot Readiness Gate v1 §3: the manual path is on the gate and it is the filled control.
+      // The guided CTA is unchanged and one press away for a seller running the 도우미.
+      expect(screen.getByRole("button", { name: "직접 진행하기" }).className).toContain("btn-primary");
+      expect(
+        screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" }).className,
+      ).toContain("btn-ghost");
+      // The property this test was written for is untouched: nothing pairs, nothing attaches, and no
+      // bridge is opened until the seller chooses the guided walk.
       expect(screen.queryByTestId("agent-pairing")).toBeNull();
       expect(host.ensureCalls()).toBe(0);
-      expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
     });
   });
 
   describe("live host wiring (no run prop → the shared issuance host)", () => {
     // Guided-first: the live host only begins after the seller clicks the start CTA.
-    const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "네이버 연결 안내 시작" })));
+    const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" })));
 
     it("does NOT attach (START_RUN 0) before the agent is paired", () => {
       h.bridge = { phase: "unpaired", maybeNeedsLocalNetworkAccess: false } as BridgeState;
@@ -400,7 +405,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
       start();
       act(() => host.publish(issuanceRun()));
-      expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "직접 진행하기" })).toBeNull();
     });
   });
 });
@@ -418,7 +423,7 @@ describe("NaverIssuanceGuidedWalkthrough — an ENDED walk is never a dead end (
           onCommand={vi.fn()}
         />,
       );
-      const fallback = screen.getByRole("button", { name: "텍스트로 직접 진행하기" });
+      const fallback = screen.getByRole("button", { name: "직접 진행하기" });
       expect(fallback).toBeInTheDocument();
       await userEvent.click(fallback);
       expect(dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
@@ -435,6 +440,6 @@ describe("NaverIssuanceGuidedWalkthrough — an ENDED walk is never a dead end (
       />,
     );
     expect(screen.getByRole("button", { name: "연결 정보 입력하기" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "직접 진행하기" })).toBeNull();
   });
 });

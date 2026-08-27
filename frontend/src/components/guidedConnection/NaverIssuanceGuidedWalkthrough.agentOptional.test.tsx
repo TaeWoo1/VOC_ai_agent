@@ -38,7 +38,7 @@ beforeEach(() => {
 
 async function start(dispatch = vi.fn()) {
   render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} advertisedEgressIps={[]} />);
-  await userEvent.click(screen.getByRole("button", { name: "네이버 연결 안내 시작" }));
+  await userEvent.click(screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" }));
   return dispatch;
 }
 
@@ -50,14 +50,14 @@ describe("NaverIssuanceGuidedWalkthrough — agent not running (optional, with a
     expect(screen.getByText(/도우미를 찾지 못했어요/)).toBeInTheDocument();
     expect(screen.getByTestId("agent-pairing-retry")).toBeInTheDocument();
     // Separate text-only path — the agent is never a hard requirement.
-    expect(screen.getByRole("button", { name: "텍스트로 직접 진행하기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "직접 진행하기" })).toBeInTheDocument();
     // The paired-only host notices must NOT appear before pairing.
     expect(screen.queryByRole("status", { name: /^AGENT_ENV_/ })).toBeNull();
   });
 
   it("the text path advances the journey to the static checklist without the agent", async () => {
     const dispatch = await start();
-    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "직접 진행하기" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
   });
 

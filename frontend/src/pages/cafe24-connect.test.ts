@@ -50,7 +50,7 @@ describe("Cafe24ConnectResult page contract", () => {
 
   it("offers a return path to the channel connection area", () => {
     // Product Shell slice moved the channels page under /settings/*.
-    expect(resultSource).toContain('to="/settings/channels"');
+    expect(resultSource).toContain('to="/connect"');
     expect(resultSource).toContain('to="/connect/cafe24"');
   });
 

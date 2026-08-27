@@ -33,7 +33,7 @@ beforeEach(() => {
 
 async function start() {
   render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} advertisedEgressIps={[]} />);
-  await userEvent.click(screen.getByRole("button", { name: "네이버 연결 안내 시작" }));
+  await userEvent.click(screen.getByRole("button", { name: "화면 안내로 진행하기 (도우미 필요)" }));
 }
 
 describe("NaverIssuanceGuidedWalkthrough — live host refusal is guided distinctly", () => {

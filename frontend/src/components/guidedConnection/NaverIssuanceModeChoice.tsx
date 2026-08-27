@@ -48,25 +48,27 @@ export function NaverIssuanceModeChoice({
   return (
     <div className="space-y-3" aria-label="발급 진행 방식 선택">
       <p className="text-muted">발급을 어떻게 진행할지 선택해 주세요.</p>
+      {/* The order is the point (Pilot Readiness Gate v1 §3): the path that needs nothing installed is the
+          primary. The guided event is unchanged — a seller running the 도우미 still reaches it in one press. */}
       <button
         type="button"
         className="btn-primary block w-full"
-        onClick={() => dispatch({ type: "APPLICATION_ISSUANCE_MODE", mode: "guided" })}
-        disabled={busy}
-      >
-        화면을 보며 안내받기
-      </button>
-      <button
-        type="button"
-        className="btn-ghost block w-full"
         onClick={() => setShowText(true)}
         disabled={busy}
       >
         텍스트로 직접 진행하기
       </button>
+      <button
+        type="button"
+        className="btn-ghost block w-full"
+        onClick={() => dispatch({ type: "APPLICATION_ISSUANCE_MODE", mode: "guided" })}
+        disabled={busy}
+      >
+        화면을 보며 안내받기 (도우미 필요)
+      </button>
       <p className="text-xs text-muted">
-        화면 안내는 내 PC의 SellerOps 도우미가 NAVER API 센터 창을 열어 눌러야 할 위치를 표시합니다. 도우미가
-        없거나 연결이 안 되면 텍스트 안내로 진행할 수 있어요.
+        화면 안내는 내 PC의 SellerOps 도우미가 NAVER API 센터 창을 열어 눌러야 할 위치를 표시합니다. 도우미를
+        실행해 두지 않았다면 텍스트 안내로 끝까지 진행할 수 있어요.
       </p>
     </div>
   );
