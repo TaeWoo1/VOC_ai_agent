@@ -13,6 +13,7 @@ import { api } from "../lib/apiClient";
 import { productAccounts } from "../lib/productAccounts";
 import { agentRuntime } from "../lib/agentRuntime/agentClient";
 import { OperatorAnswerView } from "../components/agent/OperatorAnswerView";
+import { ConversationWorkspace } from "../components/conversation/ConversationWorkspace";
 import { explainAgentError as explain } from "../lib/agentRuntime/explain";
 import type {
   AgentRunView,
@@ -232,10 +233,14 @@ export function Agent() {
         meta={caps.data ? <CapabilityMeta /> : undefined}
       />
 
-      {/* Before the prompt, not after it. The Agent screen used to answer only what it was asked;
-          work SellerOps has already investigated should not need to be asked for. */}
-      {/* The same cards under the same name as everywhere else (Executive Readiness Fix v1). Calling
-          them 「이미 확인해 둔 일」 here and 「AI가 먼저 확인한 일」 on 홈 made one thing look like two. */}
+      {/* The conversation — the same one as the home and the panel — full width (Agentic Operating
+          Workspace v2 §3-D). Renders nothing outside the app shell's provider. */}
+      <ConversationWorkspace surface="home" />
+
+      {/* The Dashboard-lane capabilities (button lanes) and the single-run lane they came with, folded.
+          They never go through the planner, which is why they stay reachable when planning is off. */}
+      <Disclosure label="정해진 작업" summaryClassName="px-0">
+      <div className="mt-3 space-y-6">
       <ProactiveCases limit={4} />
 
       <Section title="무엇을 확인해볼까요?">
@@ -385,6 +390,8 @@ export function Agent() {
       {run ? (
         <RunView key={run.threadId} run={run} busy={busy} onDecide={decide} onRegenerate={prepareDraft} />
       ) : null}
+      </div>
+      </Disclosure>
     </div>
   );
 }

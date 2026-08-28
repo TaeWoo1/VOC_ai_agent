@@ -29,7 +29,7 @@ import { useAgentSurface } from "../../lib/agentPanel";
 const PAGE_SIZE = 20;
 
 export function Products() {
-  useAgentSurface({ surface: "products", label: "상품 목록", goal: "최근에 문제가 반복되는 상품이 있는지 찾아 줘" });
+  useAgentSurface({ surface: "products", label: "상품 목록" });
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<ProductSummaryView[] | null>(null);
   const [facts, setFacts] = useState<Map<string, ProductRowFacts>>(new Map());
@@ -61,7 +61,7 @@ export function Products() {
       <PageHead
         title="상품"
         meta={rows && rows.length > 0 ? <span className="text-sm text-muted">{query ? `찾은 상품 ${rows.length}개` : `${rows.length}개`}</span> : undefined}
-        action={<AgentLaunch context={{ surface: "products", goal: "최근에 문제가 반복되는 상품이 있는지 찾아 줘" }} label="문제 있는 상품 찾기" />}
+        action={<AgentLaunch context={{ surface: "products" }} label="상품에 대해 물어보기" />}
       />
 
       <label className="block">

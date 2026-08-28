@@ -47,7 +47,9 @@ public record ChannelReviewDetailView(
         AiTriageMarkView aiMark,
         LocateTarget locateTarget,
         /** The reply work this review can carry, or null when the channel has no reply flow (capability §1). */
-        ReplyWork replyWork) {
+        ReplyWork replyWork,
+        /** {@code MARKETPLACE} | {@code NONE} — see {@code RecentReviewItemView.executableIdentity}. */
+        String executableIdentity) {
 
     /** The address (client-opaque, round-tripped to the reply endpoints) and state of one review's reply work. */
     public record ReplyWork(

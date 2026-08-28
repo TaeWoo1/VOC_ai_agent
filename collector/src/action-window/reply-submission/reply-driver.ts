@@ -6,10 +6,14 @@
  * reply post produces no artifact and has no read-back oracle. The Runtime locates and highlights the
  * reply composer READ-ONLY, observes the seller's own submit, and stops.
  *
- * INVARIANT (enforced by source-guard tests on the live driver): no implementation may type into the
- * composer or click submit. The seller does both; the driver only arms observation and reacts.
+ * INVARIANT (enforced by source-guard tests): no implementation may click submit, press a key, or dispatch an
+ * event — the seller submits. Since 2026-08-28 (product-owner decision) ONE thing may be typed: the approved
+ * draft, into the one composer the seller opened, through `reply-composer-fill.ts` and nowhere else, and only
+ * after the row, the review id and the composer each resolved to exactly one. A driver that cannot fill leaves
+ * {@link ReplySubmitProbeDriver.fillComposer} unimplemented and the run reaches the barrier unfilled.
  */
 import type { LocateComposerResult, LocateRowResult, SurfaceProbeResult } from "./reply-engine";
+import type { ComposerFillResult } from "./reply-composer-fill";
 
 export interface ReplySubmitProbeDriver {
   /** Open/verify the reply surface precondition. */
@@ -32,6 +36,13 @@ export interface ReplySubmitProbeDriver {
   locateComposer(): Promise<LocateComposerResult>;
   /** Spotlight the composer (never intercepts input). */
   highlight(): Promise<void>;
+  /**
+   * OPTIONAL (2026-08-28): set the approved draft into the highlighted composer, gated by
+   * `composerFillDecision` — exact row match + exact review-id match + exactly one composer. Any ambiguity ⇒
+   * `{filled:false, reason:"AMBIGUOUS"}` and nothing typed; the engine then fails closed as TARGET_AMBIGUOUS.
+   * Never submits. Absent ⇒ the run goes to the barrier unfilled, as before.
+   */
+  fillComposer?(): Promise<ComposerFillResult>;
   /** Begin observing for the seller's own submit action. */
   armObserve(): Promise<void>;
   /** Resolve true once the seller (not the Runtime) submitted; false on timeout. Observation only. */
@@ -47,6 +58,8 @@ export interface SyntheticReplyOptions {
   locateRow?: LocateRowResult;
   /** GUIDED: the RE-VALIDATED row result returned by highlightRow (defaults to `locateRow`; differ to simulate drift). */
   revalidateRow?: LocateRowResult;
+  /** What `fillComposer` answers. Absent ⇒ the method is not offered (a driver that cannot fill). */
+  fill?: ComposerFillResult;
 }
 
 /**
@@ -58,6 +71,9 @@ export class SyntheticReplySubmitDriver implements ReplySubmitProbeDriver {
   private readonly locateResult: LocateComposerResult;
   private readonly locateRowResult: LocateRowResult;
   private readonly revalidateRowResult: LocateRowResult;
+  private readonly fillResult: ComposerFillResult | null;
+  /** TEST-facing: how many times a fill was attempted. */
+  fills = 0;
   private submitResolve: ((observed: boolean) => void) | null = null;
   private pendingSubmit: boolean | null = null;
   private rowOpenResolve: ((observed: boolean) => void) | null = null;
@@ -68,7 +84,17 @@ export class SyntheticReplySubmitDriver implements ReplySubmitProbeDriver {
     this.locateResult = opts.locate ?? { count: 1, sig: "a1b2c3d4e5f60718" };
     this.locateRowResult = opts.locateRow ?? { count: 1, sig: "b2c3d4e5f6071829" };
     this.revalidateRowResult = opts.revalidateRow ?? this.locateRowResult;
+    this.fillResult = opts.fill ?? null;
+    if (this.fillResult) {
+      // Offered only when configured, so a driver "that cannot fill" really has no such method.
+      this.fillComposer = async () => {
+        this.fills += 1;
+        return this.fillResult!;
+      };
+    }
   }
+
+  fillComposer?: () => Promise<ComposerFillResult>;
 
   prepareSurface(): Promise<SurfaceProbeResult> {
     return Promise.resolve(this.surface);

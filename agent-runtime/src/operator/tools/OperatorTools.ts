@@ -20,6 +20,11 @@ import type { ActionClass } from "../state/OperatorState";
 import type { OperatorSpringClient } from "../../spring/OperatorSpringClient";
 import type { SpringClient } from "../../spring/SpringClient";
 import type { IssueSpringClient } from "../../spring/IssueSpringClient";
+import type {
+  ChannelCapabilityOverview, ChannelCoverageRow, DashboardOverview, InquiryReplyTransportRow, OrderSummaryResponse,
+  PublishCapabilityView, RecentReviewsResponse, ReviewChannelCapabilityView, SellerAccountSummary,
+} from "../../spring/types";
+import { listInquiryWorkload, WORKLOAD_DETAIL_CAP } from "./inquiryWorkload";
 
 /** Tool names, as one closed table. A plan naming anything else is refused before it runs. */
 export const OPERATOR_TOOL = {
@@ -43,7 +48,54 @@ export const OPERATOR_TOOL = {
   GET_CONNECTION_GUIDANCE: "get_connection_guidance",
   GET_CHANNEL_COVERAGE: "get_channel_coverage",
   SEARCH_PRODUCT_KNOWLEDGE: "search_product_knowledge",
+  /* Agentic Operating Workspace v2 (2026-08-27). READ, like everything above. */
+  LIST_RECENT_REVIEWS: "list_recent_reviews",
+  GET_SALES_TREND: "get_sales_trend",
+  LIST_INQUIRY_WORKLOAD: "list_inquiry_workload",
+  /* Channel-capability completion (2026-08-28). READ: four existing capability reads, one answer. */
+  GET_CHANNEL_EXECUTION_CAPABILITY: "get_channel_execution_capability",
 } as const;
+
+/**
+ * What `get_channel_execution_capability` answers: the SOURCES the pure resolver
+ * (`capability/ChannelCapability.ts`) reads. The verdict is computed by the caller, which also holds
+ * the one input a tool cannot read — whether a local agent is paired — so the same read serves both
+ * the review rows path and the conversation's execution routing.
+ */
+export interface ChannelCapabilityRead {
+  readonly channelCode: string;
+  readonly overview: ChannelCapabilityOverview | null;
+  readonly transports: InquiryReplyTransportRow[] | null;
+  readonly publish: PublishCapabilityView | null;
+  readonly reviewChannel: ReviewChannelCapabilityView | null;
+  /** The API-mode seller account this channel's capability was read for, when one exists. */
+  readonly accountId: string | null;
+}
+
+/** What `list_recent_reviews` answers: the backend's rows + coverage, plus the accounts a human step would need. */
+export interface RecentReviewsRead extends RecentReviewsResponse {
+  /**
+   * Seller accounts per channel code — resolved ONLY when a coverage row says freshness is in doubt,
+   * because that is the only case an answer needs an account id (to name the one-press collection or
+   * the manual route). Two extra READs, bought when they can matter and not otherwise.
+   */
+  readonly accounts: ReadonlyArray<{ channelCode: string; accountId: string; fileUpload: boolean }>;
+}
+
+/** What `get_sales_trend` answers: the org overview for N days and, when a channel was named, its own trend. */
+export interface SalesTrendRead {
+  readonly days: number;
+  readonly overview: DashboardOverview;
+  readonly channel: { channelCode: string; channelId: string; summary: OrderSummaryResponse } | null;
+}
+
+function freshnessInDoubt(rows: readonly ChannelCoverageRow[]): boolean {
+  return rows.some((r) => r.dataType === "REVIEW"
+    && (r.state === "OBSERVED_FRESHNESS_UNPROVEN" || r.state === "ZERO"
+      // A connected channel with no API pull (NAVER export, Coupang WING read) is current only for
+      // the window its last seller-run step covered — the rows path decides, and needs the account.
+      || (r.state === "NOT_SUPPORTED" && r.connected)));
+}
 
 export type OperatorToolName = (typeof OPERATOR_TOOL)[keyof typeof OPERATOR_TOOL];
 
@@ -145,7 +197,7 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
       }),
     })),
 
-    read(tool(async (args: { inquiryId?: string; signatureKey?: string; topic?: string; limit?: number }) =>
+    read(tool(async (args: { inquiryId?: string; signatureKey?: string; topic?: string; productId?: string; limit?: number }) =>
       deps.operator.searchCustomerMemory(args), {
       name: OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
       description:
@@ -155,6 +207,9 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         inquiryId: z.string().min(1).optional(),
         signatureKey: z.string().min(1).optional(),
         topic: z.string().min(1).optional(),
+        // The anchor the endpoint has always accepted and this schema never admitted — zod stripped it
+        // and the backend's correct refusal of an anchorless search followed (Agentic Operating Workspace v2).
+        productId: z.string().min(1).optional(),
         limit: z.number().int().min(1).max(10).optional(),
       }),
     })),
@@ -303,6 +358,114 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
     // collection is actually running, and how old the newest row is. A channel with no account is a
     // row here, not an omission — an omitted channel is read as a zero by anything that counts what it
     // was given, and that is precisely the false calm the whole coverage vocabulary exists to prevent.
+    // ---- Agentic Operating Workspace v2 ------------------------------------------------------
+    read(tool(async ({ from, to, negativeOnly, channel, productId, size }:
+      { from?: string; to?: string; negativeOnly?: boolean; channel?: string; productId?: string; size?: number }) => {
+      const response = await deps.operator.listRecentReviews({ from, to, negativeOnly, channel, productId, size });
+      let accounts: RecentReviewsRead["accounts"] = [];
+      if (freshnessInDoubt(response.coverage ?? [])) {
+        const [channels, sellerAccounts] = await Promise.all([
+          deps.operator.listChannels(), deps.inquiry.listSellerAccounts(),
+        ]);
+        const codeOf = new Map(channels.map((c) => [c.id, c.code]));
+        accounts = sellerAccounts
+          .map((a: SellerAccountSummary) => ({ channelCode: codeOf.get(a.channelId) ?? "", accountId: a.id, fileUpload: a.fileUpload }))
+          .filter((a) => a.channelCode.length > 0);
+      }
+      return { ...response, accounts } satisfies RecentReviewsRead;
+    }, {
+      name: OPERATOR_TOOL.LIST_RECENT_REVIEWS,
+      description:
+        "기간 안에 들어온 리뷰 행 목록 + 채널별 리뷰 수집 최신성. '새 리뷰 / 오늘 리뷰 / 낮은 평점 리뷰' 류 "
+        + "질문의 유일한 출처. 리뷰 원문은 sanitized preview 이며, 채널별로 지금이 최신인지 아닌지를 "
+        + "같이 준다. 필요한 정보: REVIEW_SIGNAL.",
+      schema: z.object({
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        negativeOnly: z.boolean().optional(),
+        channel: z.enum(["NAVER", "COUPANG", "CAFE24"]).optional(),
+        productId: z.string().min(1).optional(),
+        size: z.number().int().min(1).max(50).optional(),
+      }),
+    })),
+
+    read(tool(async ({ days, channel, from, to }: { days: number; channel?: string; from?: string; to?: string }) => {
+      const overview = await deps.operator.getDashboardOverview(days);
+      if (!channel) {
+        return { days, overview, channel: null } satisfies SalesTrendRead;
+      }
+      const channels = await deps.operator.listChannels();
+      const row = channels.find((c) => c.code.toUpperCase() === channel.toUpperCase());
+      if (!row) {
+        return { days, overview, channel: null } satisfies SalesTrendRead;
+      }
+      const summary = await deps.operator.getOrdersSummary({
+        from: from ?? overview.metrics.period.from, to: to ?? overview.metrics.period.to, channelId: row.id,
+      });
+      return { days, overview, channel: { channelCode: row.code, channelId: row.id, summary } } satisfies SalesTrendRead;
+    }, {
+      name: OPERATOR_TOOL.GET_SALES_TREND,
+      description:
+        "주문·매출 흐름 — 기간 합계, 직전 같은 기간 대비 변화, 채널별 매출·주문, 일별 추이. 채널을 지정하면 "
+        + "그 채널만의 추이를 같이 준다. 매출 산정 기준과 제외된 채널이 함께 온다. 필요한 정보: ORDER_HISTORY.",
+      schema: z.object({
+        days: z.union([z.literal(7), z.literal(14), z.literal(30)]),
+        channel: z.enum(["NAVER", "COUPANG", "CAFE24"]).optional(),
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      }),
+    })),
+
+    read(tool(async ({ productIds, workItemIds, topic, maxDetailReads }:
+      { productIds?: string[]; workItemIds?: string[]; topic?: string; maxDetailReads?: number }) =>
+      listInquiryWorkload(deps.inquiry, {
+        productIds, workItemIds, maxDetailReads,
+        topic: (topic ?? null) as Parameters<typeof listInquiryWorkload>[1]["topic"],
+      }), {
+      name: OPERATOR_TOOL.LIST_INQUIRY_WORKLOAD,
+      description:
+        "답변이 필요한 문의를 상태별로 분류한 목록 — 초안 준비됨 / 규격 되물음 필요 / 답변 기준 없음 / 미답변. "
+        + "기존 대기열 페이지 두 장과 상한 " + String(WORKLOAD_DETAIL_CAP) + "건의 상세 조회로 만든다. "
+        + "상품 id 나 주제(배송·교환반품·규격·사용법)로 좁힐 수 있다. 필요한 정보: INQUIRY_VOLUME.",
+      schema: z.object({
+        productIds: z.array(z.string().min(1)).max(50).optional(),
+        workItemIds: z.array(z.string().min(1)).max(50).optional(),
+        topic: z.enum(["SHIPPING", "EXCHANGE_RETURN", "PRODUCT_SPEC", "USAGE", "OTHER"]).optional(),
+        maxDetailReads: z.number().int().min(0).max(WORKLOAD_DETAIL_CAP).optional(),
+      }),
+    })),
+
+    // <b>What this channel can DO, from the registries.</b> Four reads that already exist, returned as
+    // sources for a pure resolver: how a data type is acquired (overview), whether an inquiry reply can
+    // be posted and how (transports + the deployment's wiring), whether a review reply can be executed
+    // and how (the review channel block). Every source is nullable — a backend predating one of them
+    // is a fact the resolver degrades on, never an exception. Nothing here writes, mints or starts.
+    read(tool(async ({ channel }: { channel: string }) => {
+      const code = channel.toUpperCase();
+      const [overview, transports, publish, channels, accounts] = await Promise.all([
+        deps.operator.getChannelCapabilityOverview?.(code).catch(() => null) ?? Promise.resolve(null),
+        deps.operator.listInquiryReplyTransports?.().catch(() => null) ?? Promise.resolve(null),
+        deps.inquiry.getPublishCapability().catch(() => null),
+        deps.operator.listChannels().catch(() => []),
+        deps.inquiry.listSellerAccounts().catch(() => []),
+      ]);
+      const channelId = channels.find((c) => c.code.toUpperCase() === code)?.id ?? null;
+      // The API-mode account is the one a review reply would be executed through; a file-upload
+      // account has no channel to execute on, which is exactly what the resolver must not be told.
+      const account = channelId ? accounts.find((a: SellerAccountSummary) => a.channelId === channelId && !a.fileUpload) ?? null : null;
+      const reviewChannel = account
+        ? await (deps.operator.getReviewChannelCapability?.(account.id).catch(() => null) ?? Promise.resolve(null))
+        : null;
+      return { channelCode: code, overview, transports, publish, reviewChannel, accountId: account?.id ?? null } satisfies ChannelCapabilityRead;
+    }, {
+      name: OPERATOR_TOOL.GET_CHANNEL_EXECUTION_CAPABILITY,
+      description:
+        "이 채널에서 실제로 무엇이 되는지 — 리뷰·문의가 자동으로 새로 가져와지는지 아니면 판매자의 한 단계가 "
+        + "필요한지, 문의 답변을 채널로 보낼 수 있는지(출처 종류별), 리뷰 답글을 채널로 보낼 수 있는지. "
+        + "런타임이 실행 경로를 정할 때 읽는 사실이며 판매자 데이터는 없다. 필요한 정보: REVIEW_SIGNAL, INQUIRY_VOLUME.",
+      schema: z.object({ channel: z.enum(["NAVER", "COUPANG", "CAFE24"]) }),
+    })),
+
     read(tool(async () => deps.operator.getChannelCoverage?.() ?? [], {
       name: OPERATOR_TOOL.GET_CHANNEL_COVERAGE,
       description:

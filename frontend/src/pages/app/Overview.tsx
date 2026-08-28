@@ -7,10 +7,9 @@ import { DataTable, Td, Th } from "../../components/ui/DataTable";
 import { DataStateBadge } from "../../components/ui/DataState";
 import { Disclosure } from "../../components/ui/Disclosure";
 import { Empty } from "../../components/ui/Empty";
-import { AgentBriefing } from "../../components/home/AgentBriefing";
 import { hasAnyConnectedChannel } from "../../lib/firstConnectionState";
-import { CommandInput } from "../../components/home/CommandInput";
 import { useAgentSurface } from "../../lib/agentPanel";
+import { PageHead } from "../../components/ui/PageHead";
 import { BtnLink } from "../../components/ui/Btn";
 import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
@@ -19,7 +18,8 @@ import { analytics } from "../../lib/analytics";
 import type { ChannelMetricRow, MetricKpi, MetricSeries, OverviewResponse } from "../../lib/types";
 
 /**
- * 홈 — the Agent Command Center (docs/reviewnary_design.md §7).
+ * 운영 숫자 (`/overview`) — the dashboard the home links to as 「자세한 숫자 보기」 (Agentic Operating
+ * Workspace v2 §3-C). The home itself is the conversation now; nothing about these numbers moved.
  *
  * <b>Order: 브리핑 → 물어보기 → 먼저 볼 일 → 숫자 → 추이 → 채널별 → 이 숫자에 대하여.</b> The sentence and
  * the command box are the first screen; the work rows are the second; the numbers are context under
@@ -40,7 +40,7 @@ export function Overview() {
   const [days, setDays] = useState<number>(7);
   const { data, loading, error } = useApiData<OverviewResponse>(() => api.getOverviewStrict(days), [days]);
   const navigate = useNavigate();
-  useAgentSurface({ surface: "home", label: "오늘의 운영" });
+  useAgentSurface({ surface: "overview", label: "운영 숫자" });
 
   useMemo(() => analytics.track("today_inbox_viewed"), []);
 
@@ -56,14 +56,12 @@ export function Overview() {
     (kpi): kpi is (typeof kpis)[number] => !!kpi,
   );
   const context = kpis.filter((kpi) => !WAITING_KEYS.includes(kpi.key));
-  const insights = data?.insights ?? [];
-  const unansweredNow = kpis.find((kpi) => kpi.key === "unansweredInquiries")?.value ?? null;
   const anyFreshnessUnproven = waiting.some((kpi) => kpi.freshnessUnproven);
   const beforeFirstConnection = data ? !hasAnyConnectedChannel(data.metrics.channels) : false;
 
   return (
     <div className="space-y-6">
-      <h1 className="sr-only">오늘의 운영</h1>
+      <PageHead title="운영 숫자" meta={<span className="text-sm text-muted">홈의 숫자를 기간·추이·채널별로 자세히 봅니다</span>} />
 
       {loading ? <p className="text-sm text-muted">불러오는 중…</p> : null}
 
@@ -77,8 +75,6 @@ export function Overview() {
 
       {data ? (
         <>
-          <AgentBriefing insights={insights} commandSlot={<CommandInput unansweredCount={unansweredNow} />} />
-
           <Section
             title="숫자"
             ariaLabel="오늘 상태"

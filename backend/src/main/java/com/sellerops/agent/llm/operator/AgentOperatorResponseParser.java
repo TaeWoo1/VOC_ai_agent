@@ -111,7 +111,61 @@ public final class AgentOperatorResponseParser {
                 optionalText(node, "stopWhenEnough", MAX_REASON),
                 node.path("clarificationNeeded").asBoolean(false),
                 optionalText(node, "clarificationReason", MAX_REASON),
-                optionalText(node, "rationale", MAX_REASON)));
+                optionalText(node, "rationale", MAX_REASON),
+                closedOr(node, "requestedAction", AgentPlanPrompt.REQUESTED_ACTIONS, "NONE"),
+                closedOr(node, "tone", AgentPlanPrompt.TONES, null),
+                filters(node.get("filters")),
+                target(node.get("target"))));
+    }
+
+    /**
+     * The v3 sections — {@code requestedAction}, {@code tone}, {@code filters}, {@code target}.
+     *
+     * <p><b>Absent is the default, and an unknown token is the default too — never a refusal.</b> A
+     * v2 model answer, or a v3 answer that invents a period, still yields a plan whose reading part is
+     * intact; what it loses is only the refinement. Refusing the whole plan over a filter token would
+     * make a conversation fail on the one field that matters least to its correctness. The closed sets
+     * live on {@link AgentPlanPrompt} so the words the model is offered and the words accepted back are
+     * one list.
+     */
+    private static String closedOr(JsonNode node, String field, String[] allowed, String fallback) {
+        if (node == null) {
+            return fallback;
+        }
+        String value = optionalText(node, field, MAX_TOOL_NAME);
+        if (value == null) {
+            return fallback;
+        }
+        for (String candidate : allowed) {
+            if (candidate.equals(value)) {
+                return candidate;
+            }
+        }
+        return fallback;
+    }
+
+    private static PlanFilters filters(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return PlanFilters.none();
+        }
+        return new PlanFilters(
+                closedOr(node, "period", AgentPlanPrompt.PERIODS, null),
+                closedOr(node, "rating", AgentPlanPrompt.RATINGS, null),
+                closedOr(node, "channel", AgentPlanPrompt.CHANNELS, null),
+                closedOr(node, "scope", AgentPlanPrompt.SCOPES, null),
+                closedOr(node, "topic", AgentPlanPrompt.TOPICS, null));
+    }
+
+    private static PlanTarget target(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return PlanTarget.none();
+        }
+        String selector = closedOr(node, "selector", AgentPlanPrompt.TARGET_SELECTORS, "NONE");
+        JsonNode index = node.get("index");
+        // An index only means something for NTH, and only as a positive ordinal; anything else is
+        // "no index", which the runtime treats as "ask which one".
+        Integer ordinal = index != null && index.isInt() && index.asInt() > 0 ? index.asInt() : null;
+        return new PlanTarget(selector, "NTH".equals(selector) ? ordinal : null);
     }
 
     /** Needs; a wrong-typed array is a refusal, a missing one is empty. Blank ids/questions dropped. */
@@ -292,7 +346,25 @@ public final class AgentOperatorResponseParser {
                              List<String> retrievalParallel, String retrievalStopWhen,
                              List<ParsedEvidenceRequirement> evidenceRequirements, String riskClass,
                              int maxIterations, int maxToolCalls, String stopWhenEnough,
-                             boolean clarificationNeeded, String clarificationReason, String rationale) {
+                             boolean clarificationNeeded, String clarificationReason, String rationale,
+                             String requestedAction, String tone, PlanFilters filters, PlanTarget target) {
+    }
+
+    /**
+     * How the sentence narrows what is read — closed tokens only. {@code scope=WORKING_SET} means
+     * "over what the previous turn produced"; the runtime, not this parser, knows what that was.
+     */
+    public record PlanFilters(String period, String rating, String channel, String scope, String topic) {
+        public static PlanFilters none() {
+            return new PlanFilters(null, null, null, null, null);
+        }
+    }
+
+    /** Which member of the working set the seller meant. {@code index} is set only for {@code NTH}. */
+    public record PlanTarget(String selector, Integer index) {
+        public static PlanTarget none() {
+            return new PlanTarget("NONE", null);
+        }
     }
 
     /** One thing the seller named, in their own words. There is deliberately no id field. */

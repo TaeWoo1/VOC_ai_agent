@@ -24,8 +24,17 @@ import type {
   ProductSignals,
   ProductSummary,
   RepeatedInquiry,
+  ChannelCapabilityOverview,
   ChannelCoverageRow,
+  ChannelSummary,
+  DashboardOverview,
+  InquiryReplyTransportRow,
   KnowledgeSearchResult,
+  ReviewChannelCapabilityView,
+  OrderSummaryParams,
+  OrderSummaryResponse,
+  RecentReviewsParams,
+  RecentReviewsResponse,
 } from "../../src/spring/types";
 import type {
   CustomerMemorySearchParams,
@@ -102,6 +111,23 @@ export interface FakeOperatorSeed {
   readonly repairedPlansByGoal?: Record<string, AgentPlanView>;
   /** When absent, the client has NO judgeFinding method at all. */
   readonly judge?: AgentJudgeView;
+  /* ── Agentic Operating Workspace v2 ── */
+  /**
+   * `GET /api/reviews/recent` answers keyed by `${negativeOnly}:${channel ?? "ALL"}`; `"*"` is the
+   * fallback for any key. The fake is a transport: it does not filter rows itself, so a test asserts
+   * exactly what the backend would have returned for that request and nothing this fake invented.
+   */
+  readonly recentReviews?: Record<string, RecentReviewsResponse>;
+  readonly overviewByDays?: Record<number, DashboardOverview>;
+  readonly ordersSummary?: OrderSummaryResponse;
+  readonly channels?: ChannelSummary[];
+  /* ── Channel-capability completion (2026-08-28). Each attached only when seeded, like the model seams. ── */
+  /** `GET /api/channels/{code}/capabilities/overview` by channel code. */
+  readonly channelOverviews?: Record<string, ChannelCapabilityOverview>;
+  /** `GET /api/inquiry-publish/transports`. */
+  readonly inquiryReplyTransports?: InquiryReplyTransportRow[];
+  /** The `channel` block of `GET /api/seller-accounts/{accountId}/channel-reviews`, by account id. */
+  readonly reviewChannelCapabilities?: Record<string, ReviewChannelCapabilityView>;
 }
 
 export class FakeOperatorSpringClient implements OperatorSpringClient {
@@ -113,8 +139,13 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
   readonly calls = {
     inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
     plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0, channelCoverage: 0,
-    knowledgeSearch: 0,
+    knowledgeSearch: 0, recentReviews: 0, overview: 0, ordersSummary: 0, channels: 0,
+    channelOverview: 0, transports: 0, reviewChannelCapability: 0,
   };
+  /** Every recent-reviews request, so a test can assert the window and filters the read was made with. */
+  readonly recentReviewParams: RecentReviewsParams[] = [];
+  readonly overviewDays: number[] = [];
+  readonly ordersSummaryParams: OrderSummaryParams[] = [];
 
   /** Every digest the judge was sent, so a test can assert what actually left for a vendor. */
   readonly judgeDigests: string[] = [];
@@ -137,6 +168,28 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
       (this as OperatorSpringClient).getChannelCoverage = async () => {
         this.calls.channelCoverage += 1;
         return seed.channelCoverage!;
+      };
+    }
+    if (seed.channelOverviews) {
+      (this as OperatorSpringClient).getChannelCapabilityOverview = async (code) => {
+        this.calls.channelOverview += 1;
+        const found = seed.channelOverviews![code.toUpperCase()];
+        if (!found) throw new SpringApiError(404, "HTTP_404", "backend request failed (GET /capabilities/overview)");
+        return found;
+      };
+    }
+    if (seed.inquiryReplyTransports) {
+      (this as OperatorSpringClient).listInquiryReplyTransports = async () => {
+        this.calls.transports += 1;
+        return [...seed.inquiryReplyTransports!];
+      };
+    }
+    if (seed.reviewChannelCapabilities) {
+      (this as OperatorSpringClient).getReviewChannelCapability = async (accountId) => {
+        this.calls.reviewChannelCapability += 1;
+        const found = seed.reviewChannelCapabilities![accountId];
+        if (!found) throw new SpringApiError(404, "HTTP_404", "backend request failed (GET /channel-reviews)");
+        return found;
       };
     }
     if (seed.plan || seed.plansByGoal) {
@@ -346,6 +399,52 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     }
     const cap = limit && limit > 0 ? limit : seeded.passages.length;
     return { ...seeded, query, passages: seeded.passages.slice(0, cap) };
+  }
+
+  async listRecentReviews(params: RecentReviewsParams): Promise<RecentReviewsResponse> {
+    this.calls.recentReviews += 1;
+    this.recentReviewParams.push(params);
+    const table = this.seed.recentReviews ?? {};
+    const key = `${params.negativeOnly ?? false}:${params.channel ?? "ALL"}`;
+    const found = table[key] ?? table["*"];
+    if (!found) {
+      throw new SpringApiError(404, "HTTP_404", "backend request failed (GET /api/reviews/recent)");
+    }
+    return {
+      ...found,
+      from: params.from ?? found.from,
+      to: params.to ?? found.to,
+      negativeOnly: params.negativeOnly ?? found.negativeOnly,
+      items: found.items.slice(0, params.size ?? found.items.length),
+    };
+  }
+
+  async getDashboardOverview(days: number): Promise<DashboardOverview> {
+    this.calls.overview += 1;
+    this.overviewDays.push(days);
+    const found = this.seed.overviewByDays?.[days];
+    if (!found) {
+      throw new SpringApiError(404, "HTTP_404", "backend request failed (GET /api/dashboard/overview)");
+    }
+    return found;
+  }
+
+  async getOrdersSummary(params: OrderSummaryParams): Promise<OrderSummaryResponse> {
+    this.calls.ordersSummary += 1;
+    this.ordersSummaryParams.push(params);
+    if (!this.seed.ordersSummary) {
+      throw new SpringApiError(404, "HTTP_404", "backend request failed (GET /api/orders/summary)");
+    }
+    return this.seed.ordersSummary;
+  }
+
+  async listChannels(): Promise<ChannelSummary[]> {
+    this.calls.channels += 1;
+    return this.seed.channels ?? [
+      { id: "chan-naver", code: "NAVER", nameKo: "네이버" },
+      { id: "chan-coupang", code: "COUPANG", nameKo: "쿠팡" },
+      { id: "chan-cafe24", code: "CAFE24", nameKo: "카페24" },
+    ];
   }
 
   async getInquiryThreadContext(workItemId: string): Promise<InquiryThreadContext> {

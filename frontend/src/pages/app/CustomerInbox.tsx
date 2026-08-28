@@ -88,7 +88,6 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
     label: focused ? "이 문의" : "문의 목록",
     ...(focused ? { workItemId: focusWorkItemId } : {}),
     ...(rawChannel ? { channelCode: rawChannel } : {}),
-    goal: focused ? "이 문의를 조사해 줘" : "답변이 필요한 문의를 채널별로 정리해 줘",
   });
   const state = (stateOptions.find((option) => option.value === rawState)?.value ?? "ALL") as StateFilter;
   const [period, setPeriod] = useState<InboxFilters["period"]>(DEFAULT_FILTERS.period);
@@ -226,9 +225,8 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
                 surface: "inquiries",
                 ...(focused ? { workItemId: focusWorkItemId } : {}),
                 ...(filters.channel ? { channelCode: filters.channel } : {}),
-                goal: focused ? "이 문의를 조사해 줘" : "답변이 필요한 문의를 채널별로 정리해 줘",
               }}
-              label={focused ? "이 문의 조사하기" : "문의 정리하기"}
+              label={focused ? "이 문의에 대해 물어보기" : "문의에 대해 물어보기"}
             />
           }
           meta={

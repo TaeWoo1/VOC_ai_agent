@@ -14,11 +14,27 @@ export interface InquiryQueueItem {
   readonly inquiryId: string;
   readonly sellerAccountId: string;
   readonly channelId: string;
+  /** Resolved catalogue labels and the bound product, when the backend has them (v2 queue row). */
+  readonly channelCode?: string | null;
+  readonly channelNameKo?: string | null;
+  readonly productId?: string | null;
+  readonly productName?: string | null;
   readonly phase: string;
   readonly status: string;
   readonly title: string;
   readonly receivedAt: string;
+  /** NAVER: `NAVER_PRODUCT_QNA` | `NAVER_CUSTOMER_INQUIRY`; null for a channel with one source (Lane A, 2026-08-28). */
+  readonly sourceSubtype?: string | null;
+  /** Backend-decided from stored acquisition provenance — never from the channel label or an id prefix. */
+  readonly executableIdentity?: ExecutableIdentity;
 }
+
+/**
+ * Whether an object can be acted on at the marketplace (`MARKETPLACE`) or is a record with no
+ * trusted provider binding (`NONE` — a manual CSV/xlsx upload, ESM Excel, a user-typed external id).
+ * Decided by the backend from provenance; the runtime only reads it. Absent ⇒ read as `NONE`.
+ */
+export type ExecutableIdentity = "MARKETPLACE" | "NONE";
 
 /** GET /api/inquiries page envelope. */
 export interface InquiryQueueResponse {
@@ -86,6 +102,8 @@ export interface InquiryDetail {
   readonly productId?: string | null;
   readonly productName?: string | null;
   readonly productBinding?: string | null;
+  readonly sourceSubtype?: string | null;
+  readonly executableIdentity?: ExecutableIdentity;
 }
 
 /** PUT /api/inquiries/{id}/draft request. */
@@ -104,6 +122,10 @@ export interface ReplyDraftView {
   readonly contentFingerprint: string;
   readonly fingerprintAlgorithm: string;
   readonly createdAt: string;
+  /** V82 `answer_basis` — GROUNDED / NEEDS_CLARIFICATION, or null for a version older than the column. */
+  readonly answerBasis?: string | null;
+  readonly answerBasisNote?: string | null;
+  readonly answerBasisAction?: string | null;
 }
 
 /** POST /api/inquiries/{id}/confirm-publish request. */
@@ -705,6 +727,17 @@ export interface AgentPlanView {
   readonly clarificationReason?: string | null;
   readonly rationale: string | null;
   readonly providerVersion: string | null;
+  /* ── Plan schema v3 (Agentic Operating Workspace v2). Every field optional; unknown values ⇒ default. */
+  readonly requestedAction?: string | null;
+  readonly tone?: string | null;
+  readonly filters?: {
+    period?: string | null;
+    rating?: string | null;
+    channel?: string | null;
+    scope?: string | null;
+    topic?: string | null;
+  } | null;
+  readonly target?: { selector?: string | null; index?: number | null } | null;
 }
 
 /**
@@ -810,4 +843,229 @@ export interface KnowledgeSearchResult {
   readonly documentsSearched: number;
   readonly passagesSearched: number;
   readonly passages: KnowledgePassage[];
+}
+
+/* ─────────────── Agentic Operating Workspace v2 (2026-08-27) — conversation-lane reads ─────────────── */
+
+/** One row of GET /api/reviews/recent. `preview` is the backend's sanitized preview, or null when textless. */
+export interface RecentReviewItem {
+  readonly id: string;
+  readonly sellerAccountId: string;
+  readonly channelCode: string;
+  readonly channelNameKo: string | null;
+  readonly writtenOn: string | null;
+  readonly rating: number | null;
+  readonly negative: boolean;
+  readonly preview: string | null;
+  readonly productId: string | null;
+  readonly productName: string | null;
+  readonly replyState: string | null;
+  readonly executableIdentity?: ExecutableIdentity;
+}
+
+/** GET /api/reviews/recent — rows in a window plus the REVIEW coverage rows of the visible channels. */
+export interface RecentReviewsResponse {
+  readonly from: string;
+  readonly to: string;
+  readonly negativeOnly: boolean;
+  readonly total: number;
+  readonly items: RecentReviewItem[];
+  readonly coverage: ChannelCoverageRow[];
+}
+
+export interface RecentReviewsParams {
+  readonly from?: string;
+  readonly to?: string;
+  readonly negativeOnly?: boolean;
+  readonly channel?: string;
+  readonly productId?: string;
+  readonly size?: number;
+}
+
+/** Mirrors of the dashboard overview DTOs (`com.sellerops.dashboard.metrics.dto`). */
+export interface MetricPeriod {
+  readonly from: string;
+  readonly to: string;
+  readonly previousFrom: string;
+  readonly previousTo: string;
+  readonly days: number;
+}
+export interface MetricKpi {
+  readonly key: string;
+  readonly label: string;
+  readonly value: number;
+  readonly unit: string;
+  readonly previousValue: number | null;
+  readonly deltaPercent: number | null;
+  readonly comparable: boolean;
+  readonly excludedChannels: number;
+  readonly freshnessUnproven: boolean;
+}
+export interface MetricPoint { readonly date: string; readonly value: number }
+export interface MetricSeries {
+  readonly key: string;
+  readonly label: string;
+  readonly unit: string;
+  readonly points: MetricPoint[];
+}
+export interface ChannelMetricRow {
+  readonly channelCode: string;
+  readonly channelNameKo: string;
+  readonly orderState: ChannelDataState;
+  readonly revenue: number;
+  readonly orders: number;
+  readonly countedInOrders: boolean;
+  readonly inquiryState: ChannelDataState;
+  readonly inquiries: number;
+  readonly unansweredInquiries: number;
+  readonly countedInInquiries: boolean;
+  readonly reviewState: ChannelDataState;
+  readonly reviews: number;
+  readonly negativeReviews: number;
+  readonly countedInReviews: boolean;
+}
+export interface MetricExclusion {
+  readonly channelCode: string;
+  readonly channelNameKo: string;
+  readonly dataType: string;
+  readonly state: ChannelDataState;
+  readonly reasonKo: string;
+}
+export interface OperationsMetrics {
+  readonly period: MetricPeriod;
+  readonly revenueBasis: string;
+  readonly orderCountBasis: string;
+  readonly kpis: MetricKpi[];
+  readonly series: MetricSeries[];
+  readonly channels: ChannelMetricRow[];
+  readonly exclusions: MetricExclusion[];
+  readonly exampleDataIncluded: boolean;
+}
+/** GET /api/dashboard/overview?days=N. Insights are not read by the runtime. */
+export interface DashboardOverview {
+  readonly metrics: OperationsMetrics;
+  readonly insights?: unknown[];
+}
+
+/** GET /api/orders/summary?from&to&channelId (mirror of `OrderSummaryResponse`). */
+export interface OrderSummaryResponse {
+  readonly totalOrders7d: number;
+  readonly totalSales7d: number;
+  readonly trend: Array<{ date: string; orderCount: number; salesAmount: number }>;
+  readonly channelShare: Array<{ channelNameKo: string; salesAmount: number; percent: number }>;
+}
+export interface OrderSummaryParams {
+  readonly from?: string;
+  readonly to?: string;
+  readonly channelId?: string;
+}
+
+/** GET /api/channels — the catalogue row (id ↔ code is the only pair the runtime reads). */
+export interface ChannelSummary {
+  readonly id: string;
+  readonly code: string;
+  readonly nameKo: string;
+  readonly status?: string | null;
+}
+
+/** GET /api/seller-accounts (mirror of `SellerAccountResponse`). No credential travels here. */
+export interface SellerAccountSummary {
+  readonly id: string;
+  readonly channelId: string;
+  readonly channelNameKo: string | null;
+  readonly alias: string | null;
+  readonly connectionStatus: string | null;
+  readonly lastSyncedAt: string | null;
+  readonly fileUpload: boolean;
+}
+
+/** GET /api/sync-runs (mirror of `SyncRunView`, the fields the resume check reads). */
+export interface SyncRunSummary {
+  readonly id: string;
+  readonly sellerAccountId: string | null;
+  readonly channelId: string | null;
+  readonly dataType: string | null;
+  /** File uploads carry the data type here and leave `dataType`/`sellerAccountId` null. */
+  readonly uploadType?: string | null;
+  readonly trigger: string | null;
+  readonly status: string;
+  readonly successRows: number;
+  readonly startedAt: string | null;
+  readonly finishedAt: string | null;
+}
+export interface SyncRunParams {
+  readonly sellerAccountId?: string;
+  readonly channelId?: string;
+  readonly dataType?: string;
+  readonly status?: string;
+}
+
+/** POST /api/inquiries/{id}/draft/generate (mirror of `GeneratedDraftView`). `draft` null is a real answer. */
+export interface GeneratedDraftView {
+  readonly draft: ReplyDraftView | null;
+  readonly authorKind: string | null;
+  readonly knowledgeState: string | null;
+  readonly knowledgeNote: string | null;
+  readonly answerBasis: string | null;
+  readonly answerBasisNote: string | null;
+  readonly answerBasisAction: string | null;
+  readonly productId: string | null;
+  readonly evidence: unknown[];
+  readonly unavailableMessage: string | null;
+}
+
+/* ─────────────── Channel capability sources (Agentic Operating Workspace v2 — channel-capability completion, 2026-08-28) ─────────────── */
+
+/**
+ * Mirror of `ChannelCapabilityOverview` (`GET /api/channels/{code}/capabilities/overview`).
+ *
+ * `dataTypes[].supported` is the PULL connector's answer; `acquisitionPaths` is the additive axis
+ * (`AcquisitionPathRegistry`) for a type that reaches SellerOps some other way. Read together: a type
+ * can be `supported=false` and still be collected — the Coupang 상품평 case.
+ */
+export interface ChannelCapabilityOverview {
+  readonly channelCode: string;
+  readonly channelNameKo: string | null;
+  readonly connectorClass: string | null;
+  readonly autoCollectSupported: boolean;
+  readonly dataTypes: ReadonlyArray<{
+    readonly dataType: string;
+    readonly label: string | null;
+    readonly supported: boolean;
+    readonly verificationStatus: string | null;
+    /** `method` ∈ API | ACTION_WINDOW | EXPORT | MANUAL; `recurrence` ∈ SCHEDULED | SELLER_REPEATED | ONE_OFF. */
+    readonly acquisitionPaths: ReadonlyArray<{ readonly method: string; readonly verificationStatus: string; readonly recurrence: string }>;
+  }>;
+  readonly unsupportedScopes: ReadonlyArray<{ readonly code: string; readonly label: string }>;
+}
+
+/** Mirror of `InquiryReplyCapabilityView` (`GET /api/inquiry-publish/transports`) — the audited transport per (channel, subtype). */
+export interface InquiryReplyTransportRow {
+  readonly channelCode: string;
+  /** null for a channel with a single source. */
+  readonly sourceSubtype: string | null;
+  /** DIRECT_API | GUIDED_ACTION | PLATFORM_SUPPORTED_NOT_IMPLEMENTED | UNSUPPORTED | NEEDS_VERIFICATION */
+  readonly transport: string;
+  readonly reasonKo: string | null;
+  readonly evidence: string | null;
+}
+
+/**
+ * Mirror of `ReviewChannelCapabilityView` — served inside `GET /api/seller-accounts/{accountId}/channel-reviews`
+ * as `channel`. `executionKind` (Lane A, 2026-08-28) is the closed execution capability for a review reply
+ * on this channel; absent on a backend predating it ⇒ read as NOT_SUPPORTED (fail closed).
+ */
+export interface ReviewChannelCapabilityView {
+  readonly channelCode: string;
+  readonly aiTriage: boolean;
+  readonly originalLocate: string;
+  readonly replySupported: boolean;
+  readonly executionKind?: "API_EXECUTION" | "GUIDED_BROWSER_EXECUTION" | "NOT_SUPPORTED";
+  /** Closed reason when `executionKind` is NOT_SUPPORTED (e.g. `EXECUTION_DISABLED`). */
+  readonly executionReason?: string | null;
+}
+
+/** POST /api/seller-accounts/{accountId}/sync request. `dataType` ∈ REVIEW | INQUIRY | ORDER_SUMMARY | PRODUCT. */
+export interface ManualSyncRequest {
+  readonly dataType: "REVIEW" | "INQUIRY" | "ORDER_SUMMARY" | "PRODUCT";
 }

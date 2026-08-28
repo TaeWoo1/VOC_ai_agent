@@ -41,7 +41,6 @@ export function ProductDetail() {
           surface: "product",
           productId,
           label: `이 상품 · ${data.name ?? "이름을 확인하지 못한 상품"}`,
-          goal: `${data.name ?? ""} 상품에서 반복되는 문제와 미답변 문의를 분석해 줘`,
         }
       : null,
   );
@@ -69,12 +68,8 @@ export function ProductDetail() {
           .join(" · ")}
         action={
           <AgentLaunch
-            context={{
-              productId,
-              surface: "product",
-              goal: `${data.name ?? ""} 상품에서 반복되는 문제와 미답변 문의를 분석해 줘`,
-            }}
-            label="이 상품 분석하기"
+            context={{ productId, surface: "product" }}
+            label="이 상품에 대해 물어보기"
           />
         }
       />

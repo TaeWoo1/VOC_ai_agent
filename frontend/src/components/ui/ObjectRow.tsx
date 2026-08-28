@@ -16,6 +16,7 @@ export function ObjectRow({
   action,
   to,
   ariaLabel,
+  onClick,
 }: {
   name: ReactNode;
   facets?: ReactNode;
@@ -24,6 +25,7 @@ export function ObjectRow({
   action?: ReactNode;
   to?: string;
   ariaLabel?: string;
+  onClick?: () => void;
 }) {
   const body = (
     <>
@@ -45,6 +47,7 @@ export function ObjectRow({
       <Link
         to={to}
         aria-label={ariaLabel}
+        onClick={onClick}
         className={`${shell} transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700`}
       >
         {body}

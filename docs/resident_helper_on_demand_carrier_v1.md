@@ -246,3 +246,19 @@ Zero marketplace clicks, types, submissions or key issuances on either walk; one
   "window still open, no tab" case. A seller who closes the
   SellerOps tab but keeps WING open keeps the window that long; closing WING releases immediately.
 - The guided walk still needs the seller to log in to WING themselves, and every WING control is theirs.
+
+## v1.3 — 2026-08-28: `acquire/coupang` and `reply/naver` become resident on-demand carriers
+
+Agentic Operating Workspace v2 (`docs/agentic_operating_workspace_v2.md` §12–§13) starts both from a conversation
+artifact, so the paired helper must be able to serve them without a seated CLI:
+
+- **`acquire/coupang`** — the WING 상품평 read (`REVIEW_ACQUISITION` intent, single-use `acquisitionRef` minted by
+  `POST /api/seller-accounts/{id}/review-acquisition-runs`), the seller turning pages, one bounded handoff. The seated
+  CLI path is untouched.
+- **`reply/naver`** — `REPLY_SUBMISSION` with a single-use `submissionRef`; the helper spends the ref at the backend for
+  the target hint + approved draft, opens the review-management surface lazily, and the guided-fill driver
+  (`reply-submission/guided-fill-reply-driver.ts`) may place the draft only into the one composer of the one matched
+  row. The submit is the seller's click (structural guard: no submit token anywhere; `.fill(` only in
+  `reply-composer-fill.ts`). **This reverses v1.2's deliberate "reply is not resident" and the driver's no-typing
+  rule — a product-owner decision recorded on 2026-08-28.** `COMPOSER_FILLED` ≠ posted: the seller may edit before
+  submitting, so only `SELLER_SUBMISSION_OBSERVED` / a later read-back is recorded, never a "sent as approved" memory.

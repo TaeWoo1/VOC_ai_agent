@@ -98,6 +98,33 @@ export class ReplySubmissionEndpoint implements AwCarrierEndpoint {
     return this.runId;
   }
 
+  /**
+   * 2026-08-28: re-announce a NEW run identity to every attached socket. The resident `reply`/`naver` host
+   * mints one run per `submissionRef` (the ref arrives in START_RUN, after the endpoint exists), exactly as
+   * the import host does per segment. Idempotent per socket; announces nothing while paused.
+   */
+  armRun(runId: string, channelCode?: string): void {
+    this.runId = runId;
+    if (channelCode !== undefined) this.channelCode = channelCode;
+    log("aw_reply_run_armed", { clients: this.sockets.size, announced: this.announcing });
+    if (!this.announcing) return;
+    for (const ws of this.sockets) {
+      const announcement: ReplyAwSessionAnnouncement = {
+        carrier: AW_CARRIER_REPLY,
+        type: "aw_session",
+        transportVersion: ACTION_WINDOW_TRANSPORT_VERSION,
+        runId: this.runId,
+        channelCode: this.channelCode,
+      };
+      this.sendRaw(ws, JSON.stringify(announcement));
+    }
+  }
+
+  /** Publish an already-validated client frame to the runtime listeners (the host's START_RUN replay). */
+  replayClientFrame(frame: AwClientFrame): void {
+    for (const listener of [...this.listeners]) listener(frame);
+  }
+
   onClientDisconnected(ws: WebSocket): void {
     this.sockets.delete(ws);
   }

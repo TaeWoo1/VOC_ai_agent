@@ -29,7 +29,7 @@
  * (`createAgentBridge` throws when both are configured), so this reports a fact about the agent, not
  * a menu to choose from.
  */
-export const AW_CARRIER_KINDS = ["export", "reply", "import", "issuance", "locate", "renewal"] as const;
+export const AW_CARRIER_KINDS = ["export", "reply", "import", "issuance", "locate", "renewal", "acquire"] as const;
 
 export type AwCarrierKind = (typeof AW_CARRIER_KINDS)[number];
 
@@ -116,6 +116,26 @@ export const AW_CARRIER_LOCATE = "locate";
  * <p>Unannotated for the same reason as {@link AW_CARRIER_EXPORT}.
  */
 export const AW_CARRIER_RENEWAL = "renewal";
+
+/**
+ * The v2 **review-ACQUISITION** carrier — reading a seller's Coupang WING 상품평 list, one page at a time, into
+ * SellerOps, from a conversation or a screen rather than from a seated CLI.
+ *
+ * <p>It speaks v2 envelopes like the other five, so version alone cannot separate them, and it is its OWN
+ * kind rather than a second channel of `locate` or `import` for reasons that are about what the agent DOES:
+ * a locate reads one page and rings one row, storing nothing; an import downloads a FILE the seller exported;
+ * an acquisition reads the rows on the page the seller brought up — text included — and hands them to the
+ * backend in ONE bounded POST at the end (`SELLER_CENTER_READ`). A tab expecting a locate that attached to an
+ * acquisition would sit dormant through a run that stores reviews; the reverse would ring nothing and store
+ * nothing. Both are the mis-attach this field exists to make impossible.
+ *
+ * <p>Like the seated CLI it wraps: **the seller turns every page** (the pager is a marketplace control, and
+ * `CLAUDE.md` forbids hidden or chained platform clicks); the runtime reads, counts, and hands off. It never
+ * clicks, types, submits, or navigates on WING after the one screened landing.
+ *
+ * <p>Unannotated for the same reason as {@link AW_CARRIER_EXPORT}.
+ */
+export const AW_CARRIER_ACQUIRE = "acquire";
 
 
 /**

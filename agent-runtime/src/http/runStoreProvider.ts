@@ -28,6 +28,10 @@ import { FileIssueRunStore, InMemoryIssueRunStore } from "../checkpoint/IssueRun
 import type { IssueRunStore } from "../checkpoint/IssueRunStore";
 import { SpringIssueRunStore, SpringReviewRunStore, SpringRunStore } from "./springStores";
 import { HttpAgentRunStateClient } from "../spring/AgentRunStateClient";
+import {
+  FileConversationStore, MemoryConversationStore, SpringConversationStore,
+} from "../conversation/ConversationStore";
+import type { ConversationStore } from "../conversation/ConversationStore";
 import type { AgentRunStateClient } from "../spring/AgentRunStateClient";
 import type { RuntimeConfig } from "./config";
 
@@ -46,6 +50,8 @@ export interface RunStores {
   readonly inquiry: RunStore;
   readonly review: ReviewRunStore;
   readonly issue: IssueRunStore;
+  /** Conversations (Agentic Operating Workspace v2) — same kind selection, same tenant scoping. */
+  readonly conversations: ConversationStore;
 }
 
 /** Context a request carries for store resolution: the token (spring) and the org scope (file/memory). */
@@ -90,6 +96,7 @@ export class RunStoreProvider {
         inquiry: new SpringRunStore(client),
         review: new SpringReviewRunStore(client),
         issue: new SpringIssueRunStore(client),
+        conversations: new SpringConversationStore(client),
       };
     }
     return this.storesForScope(ctx.scope);
@@ -109,6 +116,7 @@ export class RunStoreProvider {
         inquiry: new InMemoryRunStore(),
         review: new InMemoryReviewRunStore(),
         issue: new InMemoryIssueRunStore(),
+        conversations: new MemoryConversationStore(),
       };
     }
     const dir = join(this.config.runStoreDir, scope);
@@ -116,6 +124,7 @@ export class RunStoreProvider {
       inquiry: new FileRunStore(join(dir, "inquiry")),
       review: new FileReviewRunStore(join(dir, "review")),
       issue: new FileIssueRunStore(join(dir, "issue")),
+      conversations: new FileConversationStore(join(dir, "conversations")),
     };
   }
 }

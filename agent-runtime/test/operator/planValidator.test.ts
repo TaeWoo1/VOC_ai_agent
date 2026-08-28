@@ -141,3 +141,23 @@ describe("V7/V8 — refusal and clarification are answers, not errors", () => {
     expect(validated.specialistTargets).toEqual([]);
   });
 });
+
+describe("V11 — a navigation-only plan is not refused for having nothing to find out", () => {
+  it("OPEN_WORKSPACE with no needs and no specialist validates to an empty dispatch", async () => {
+    const { validatePlan } = await import("../../src/operator/plan/PlanValidator");
+    const plan = validatePlan(
+      {
+        supported: true, userGoal: "문의 화면 열어줘",
+        entities: { resolved: [], unresolved: [] }, informationNeeds: [], specialistTargets: [],
+        candidateTools: [], retrievalStrategy: { order: [], parallelizable: [], stopWhen: null },
+        evidenceRequirements: [], riskClass: "ROUTINE",
+        stoppingCriteria: { maxIterations: 1, maxToolCalls: 0, enough: null },
+        clarificationNeeded: false, clarificationReason: null, rationale: null,
+        plannerVersion: "agent-plan-prompt/v3", appliedDefaults: [], requestedAction: "OPEN_WORKSPACE",
+      } as never,
+      { catalogue: [], limits: { maxIterations: 4, maxToolCalls: 12 } as never },
+    );
+    expect(plan.specialistTargets).toEqual([]);
+    expect(plan.requestedAction).toBe("OPEN_WORKSPACE");
+  });
+});

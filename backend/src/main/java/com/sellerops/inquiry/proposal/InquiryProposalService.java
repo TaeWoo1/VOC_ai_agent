@@ -73,7 +73,9 @@ public class InquiryProposalService {
     private final InquiryTargetStateReader targetState;
     private final InquiryOrderFactReader orderFacts;
     private final com.sellerops.inquiry.draft.DraftEvidenceSnippets snippets;
+    private final com.sellerops.identity.ExecutableIdentityResolver identity;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public InquiryProposalService(InquiryWorkItemRepository workItems, InquiryProposalRepository proposals,
                                   InquiryRepository inquiries, InquiryProposalProvider provider,
                                   InquiryProposalWriter writer, InquiryReplyDraftRepository drafts,
@@ -82,7 +84,9 @@ public class InquiryProposalService {
                                   InquiryTargetStateReader targetState,
                                   InquiryReplyCapabilityRegistry capabilities,
                                   InquiryOrderFactReader orderFacts,
-                                  com.sellerops.inquiry.draft.DraftEvidenceSnippets snippets) {
+                                  com.sellerops.inquiry.draft.DraftEvidenceSnippets snippets,
+                                  com.sellerops.identity.ExecutableIdentityResolver identity) {
+        this.identity = identity;
         this.workItems = workItems;
         this.proposals = proposals;
         this.inquiries = inquiries;
@@ -96,6 +100,21 @@ public class InquiryProposalService {
         this.targetState = targetState;
         this.orderFacts = orderFacts;
         this.snippets = snippets;
+    }
+
+    /** Without a resolver every detail reads {@code NONE} — the fail-closed identity. Test wiring. */
+    public InquiryProposalService(InquiryWorkItemRepository workItems, InquiryProposalRepository proposals,
+                                  InquiryRepository inquiries, InquiryProposalProvider provider,
+                                  InquiryProposalWriter writer, InquiryReplyDraftRepository drafts,
+                                  ChannelRepository channels, ProductRepository products,
+                                  InquiryDraftEvidenceRepository draftEvidence,
+                                  InquiryTargetStateReader targetState,
+                                  InquiryReplyCapabilityRegistry capabilities,
+                                  InquiryOrderFactReader orderFacts,
+                                  com.sellerops.inquiry.draft.DraftEvidenceSnippets snippets) {
+        this(workItems, proposals, inquiries, provider, writer, drafts, channels, products, draftEvidence,
+                targetState, capabilities, orderFacts, snippets,
+                com.sellerops.identity.ExecutableIdentityResolver.unresolved());
     }
 
     /** Seller-only, org-scoped detail exposing the raw title/details (never author). */
@@ -131,6 +150,7 @@ public class InquiryProposalService {
                 productName(inquiry.getProductId()),
                 inquiry.getProductBinding(),
                 inquiry.getSourceSubtype(),
+                identity.forInquiry(inquiry).name(),
                 answerState.stateProven(),
                 answerStateNote(answerState),
                 draft == null ? List.<DraftEvidenceView>of()

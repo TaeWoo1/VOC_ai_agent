@@ -13,6 +13,7 @@ import com.sellerops.inquiry.reply.InquiryReplyDraftService;
 import com.sellerops.inquiry.reply.dto.ReplyDraftRequest;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.draft.InquiryDraftComposer;
+import com.sellerops.inquiry.draft.ToneHint;
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.draft.dto.GeneratedDraftView;
 import jakarta.validation.Valid;
@@ -125,8 +126,17 @@ public class InquiryDetailController {
      */
     @PostMapping("/{workItemId}/draft/generate")
     public GeneratedDraftView generateDraft(@AuthenticationPrincipal AuthPrincipal principal,
-                                            @PathVariable UUID workItemId) {
-        return composer.generate(principal.orgId(), workItemId, principal.userId());
+                                            @PathVariable UUID workItemId,
+                                            @RequestBody(required = false) GenerateDraftRequest request) {
+        return composer.generate(principal.orgId(), workItemId, principal.userId(),
+                request == null ? null : request.tone());
+    }
+
+    /**
+     * The optional body of a regenerate: a one-turn wording hint from the conversation. Absent body
+     * and absent field mean exactly what the endpoint meant before it had a body.
+     */
+    public record GenerateDraftRequest(ToneHint tone) {
     }
 
     /** The evidence a given draft version was grounded in — readable after the fact, not only at generation. */

@@ -53,6 +53,13 @@ import { ReviewLocateEngine } from "../action-window/coupang-review/review-locat
 import { ReviewLocateSession } from "../action-window/coupang-review/review-locate-session";
 import { ReviewLocateEndpoint } from "../bridge/review-locate-endpoint";
 import { fetchReviewLocateTarget } from "../action-window/coupang-review/review-locate-target-client";
+import { LazyReviewAcquisitionDriver } from "../action-window/coupang-review/lazy-review-acquisition-driver";
+import { ReviewAcquisitionEngine } from "../action-window/coupang-review/review-acquisition-engine";
+import { ReviewAcquisitionRunSession } from "../action-window/coupang-review/review-acquisition-run-session";
+import { ReviewAcquisitionEndpoint } from "../bridge/review-acquisition-endpoint";
+import { fetchReviewAcquisitionTarget, type ReviewAcquisitionTarget } from "../action-window/coupang-review/review-acquisition-target-client";
+import { postCoupangReviewHandoff, type ReviewHandoffRequest, type ReviewHandoffResponse } from "../action-window/coupang-review/review-handoff-client";
+import { screenCredentialBackendOrigin } from "../credential/backend-origin";
 import type { ReviewLocateTarget } from "../action-window/coupang-review/review-locate";
 import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
 import { LazyNaverIssuanceDriver } from "../action-window/api-issuance/lazy-naver-issuance-driver";
@@ -67,7 +74,7 @@ import { LazyCoupangRenewalDriver } from "../action-window/coupang-renewal/lazy-
 import { ApiIssuanceEndpoint } from "../bridge/api-issuance-endpoint";
 import { OnDemandCarrierHost, type ActivatedCarrier } from "../bridge/on-demand-carrier-host";
 import type { AwAttachRequest } from "../bridge/aw-carrier";
-import { AW_CARRIER_IMPORT, AW_CARRIER_ISSUANCE, AW_CARRIER_LOCATE, AW_CARRIER_RENEWAL } from "../../../contracts/action-window/aw-carrier-kind";
+import { AW_CARRIER_ACQUIRE, AW_CARRIER_IMPORT, AW_CARRIER_ISSUANCE, AW_CARRIER_LOCATE, AW_CARRIER_RENEWAL } from "../../../contracts/action-window/aw-carrier-kind";
 import { verifyRepoIdentity } from "./repo-identity";
 import { screenWingUrl, WING_DEFAULT_URL } from "./coupang-wing-classifier";
 import { screenApiCenterUrl } from "./observe-api-center";
@@ -86,6 +93,17 @@ import type { ImportProbeDriver } from "../action-window/initial-import/import-d
 import type { ResolvedLaunchScope } from "../action-window/initial-import/import-host";
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
 import { fetchLaunchScope, login, reportSessionReadiness } from "../upload";
+import { AW_CARRIER_REPLY } from "../../../contracts/action-window/aw-carrier-kind";
+import { ReplySubmissionEndpoint } from "../bridge/reply-submission-endpoint";
+import { ResidentReplyCarrier } from "../action-window/reply-submission/resident-reply-carrier";
+import { GuidedFillReplyDriver } from "../action-window/reply-submission/guided-fill-reply-driver";
+import { NaverReplySubmitProbeDriver } from "../action-window/reply-submission/naver-reply-driver";
+import type { ReplyPageLike } from "../action-window/reply-submission/naver-reply-driver";
+import type { ComposerFillPageLike } from "../action-window/reply-submission/reply-composer-fill";
+import { fetchReplySubmissionTarget } from "../action-window/reply-submission/reply-submission-target-client";
+import type { ReplySubmissionTarget } from "../action-window/reply-submission/reply-submission-target-client";
+import { reportReplyExecutionObservation } from "../action-window/reply-submission/reply-execution-observer-client";
+import type { ReplyExecutionObservation } from "../action-window/reply-submission/reply-execution-observer-client";
 import { accountScopedProfileDirFor, launchNaverContext } from "../profile";
 import type { BrowserContext, Page } from "playwright";
 import { decideSurfacePresentation } from "../naver/surface-presentation";
@@ -1122,6 +1140,162 @@ export function activateCoupangReviewLocate(
   };
 }
 
+/** The live acquisition carrier: its lazy driver, the binding spend, the ONE handoff, and the window teardown. */
+export interface CoupangReviewAcquisitionLiveCarrier {
+  runId: string;
+  channelCode: string;
+  createDriver: () => LazyReviewAcquisitionDriver;
+  /** Spend the run's opaque binding for the account slot it collects under. One backend call, every refusal `null`. */
+  resolveTarget: (acquisitionRef: string) => Promise<ReviewAcquisitionTarget | null>;
+  /** The ONE bounded POST of everything the walk read. */
+  handoff: (request: ReviewHandoffRequest) => Promise<ReviewHandoffResponse>;
+  closeSurface: () => Promise<void>;
+  isSurfaceOpen: () => boolean;
+}
+
+/**
+ * **The REAL Coupang review-acquisition carrier, assembled for the resident helper** (product-owner decision,
+ * 2026-08-28: the WING 상품평 read is startable from a screen or a conversation, not only from the seated CLI).
+ *
+ * Structurally {@link buildCoupangReviewLocateLiveConfig} with one more backend seam: the handoff. Both the
+ * binding spend and the handoff run under the agent's OWN SellerOps session (fetched lazily on the first
+ * START_RUN, never at activation), and the backend origin is screened BEFORE anything is read — the same
+ * screen the seated CLI and the credential handoff apply, for the same reason: a stale environment value must
+ * not be able to send a page of what customers wrote to an arbitrary host. A refused origin makes every
+ * binding unresolvable, which ends the run before a page is read.
+ *
+ * The window lands on WING's front door and no deeper (no 상품평 deep link has ever been observed); the seller
+ * reaches 상품평 목록 themselves and turns every page. The reader clicks nothing, types nothing, submits
+ * nothing, and never presses the pager.
+ */
+export function buildCoupangReviewAcquisitionLiveConfig(): CoupangReviewAcquisitionLiveCarrier {
+  const cfg = loadConfig();
+  let walkContext: BrowserContext | null = null;
+  let navigated = false;
+  const driver = new LazyReviewAcquisitionDriver({
+    open: async () => {
+      if (!walkContext) {
+        const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel, { followWindow: true });
+        launched.once("close", () => {
+          walkContext = null;
+        });
+        walkContext = launched;
+      }
+      const context = walkContext;
+      const page = (context.pages()[0] ?? (await context.newPage())) as Page;
+      const screened = screenWingUrl(COUPANG_WING_LOCATE_LANDING_URL);
+      if (navigated) {
+        log("aw_coupang_acquire_landing_skipped", { reason: "ALREADY_NAVIGATED_ONCE" });
+      } else if (screened.ok) {
+        navigated = true;
+        log("aw_coupang_acquire_landing", { urlCategory: screened.urlCategory });
+        await page.goto(COUPANG_WING_LOCATE_LANDING_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+      } else {
+        log("aw_coupang_acquire_landing_refused", { reason: screened.reason }, "warn");
+      }
+      page.once("close", () => {
+        if (context.pages().length > 0) return;
+        log("aw_coupang_acquire_surface_closed", {});
+        driver.markClosed();
+      });
+      return { context, page };
+    },
+    raiseSurface: async () => {
+      const pages = walkContext?.pages() ?? [];
+      const page = pages.length > 0 ? pages[pages.length - 1] : undefined;
+      if (!page) return false;
+      await page.bringToFront().catch(() => undefined);
+      return raiseWindowOf(page);
+    },
+  });
+  // Screened once, here: the origin decides whether this carrier can hand anything over at all.
+  const backend = screenCredentialBackendOrigin(cfg.baseUrl);
+  if (!backend.ok) log("aw_coupang_acquire_backend_refused", { reason: backend.reason }, "warn");
+  const origin = backend.ok ? backend.origin : null;
+  let token: string | null = null;
+  const session = async (): Promise<string | null> => {
+    if (origin === null) return null;
+    try {
+      if (!token) token = await login(origin, cfg.email, cfg.password);
+      return token;
+    } catch {
+      token = null;
+      log("aw_coupang_acquire_target_refused", { reason: "NO_SESSION" });
+      return null;
+    }
+  };
+  return {
+    runId: `run_${randomBytes(6).toString("hex")}`,
+    channelCode: "coupang",
+    createDriver: () => driver,
+    resolveTarget: async (acquisitionRef: string) => {
+      const t = await session();
+      if (t === null || origin === null) return null;
+      const target = await fetchReviewAcquisitionTarget(origin, t, acquisitionRef);
+      if (!target) token = null;
+      return target;
+    },
+    handoff: async (request: ReviewHandoffRequest) => {
+      const t = await session();
+      if (t === null || origin === null) {
+        return { ok: false, received: request.reviews.length, stored: 0, skipped: 0, failed: 0, reason: "NO_SESSION" };
+      }
+      return postCoupangReviewHandoff(origin, t, request);
+    },
+    closeSurface: async () => {
+      const ctx = walkContext;
+      walkContext = null;
+      driver.retire();
+      await ctx?.close().catch(() => undefined);
+    },
+    isSurfaceOpen: () => driver.isOpen(),
+  };
+}
+
+/**
+ * **The Coupang 상품평 read, brought up on demand by the resident helper.**
+ *
+ * The `acquire`/`coupang` sibling of {@link activateCoupangReviewLocate}. Before it, the read existed and was
+ * live-proven (`COUPANG_WING_REVIEW_ACQUISITION`, 2026-08-15) but ONLY the seated CLI hosted it, behind an
+ * approval manifest and a run grant pressed in a CLI-owned tab — so a seller asked from a conversation to
+ * check their Coupang reviews had no way to. The product path's authorization is the seller's own START_RUN
+ * from a SellerOps surface (the same posture every other resident carrier runs in — `docs/sellerops_live_approval_contract.md`
+ * §3); the per-page press replaces the CLI's per-page confirm tab, and the seller still turns every page.
+ */
+export function activateCoupangReviewAcquisition(
+  request: AwAttachRequest,
+  deps: { buildCarrier?: () => CoupangReviewAcquisitionLiveCarrier } = {},
+): ActivatedCarrier | null {
+  if (request.carrier !== AW_CARRIER_ACQUIRE || request.channelCode !== "coupang") return null;
+  const live = (deps.buildCarrier ?? buildCoupangReviewAcquisitionLiveConfig)();
+  const { runId, channelCode } = live;
+  const endpoint = new ReviewAcquisitionEndpoint({ runId, channelCode });
+  const engine = new ReviewAcquisitionEngine({ runId, channelCode });
+  const session = new ReviewAcquisitionRunSession(engine, live.createDriver(), endpoint.transport, {
+    resolveTarget: live.resolveTarget,
+    handoff: live.handoff,
+    channelCode: "COUPANG",
+  });
+  session.attach();
+  log("aw_coupang_review_acquisition_run_hosted", { onDemand: true });
+  let disposed = false;
+  return {
+    endpoint,
+    isSettled: () => {
+      if (!engine.isStarted()) return true;
+      const status = engine.view().status;
+      return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
+    },
+    isSurfaceOpen: () => live.isSurfaceOpen(),
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      endpoint.close();
+      await live.closeSurface();
+    },
+  };
+}
+
 /**
  * Where the resident IMPORT carrier's dedicated window lands — the NAVER seller center's review-management
  * page, the surface every guided review flow starts from.
@@ -1137,6 +1311,126 @@ export function activateCoupangReviewLocate(
  * wrong-page run (that doc's own "If a route changes" note).
  */
 export const NAVER_REVIEW_MANAGEMENT_LANDING_URL = "https://sell.smartstore.naver.com/#/review/search";
+
+export interface NaverReplyLiveCarrier {
+  runId: string;
+  channelCode: string;
+  resolveTarget: (submissionRef: string) => Promise<ReplySubmissionTarget | null>;
+  createDriver: (target: ReplySubmissionTarget) => GuidedFillReplyDriver;
+  observe: (target: ReplySubmissionTarget, state: ReplyExecutionObservation) => Promise<boolean>;
+  closeSurface: () => Promise<void>;
+  isSurfaceOpen: () => boolean;
+}
+
+/**
+ * The live `reply/naver` carrier: the review-management surface opens lazily on the run's first step, the
+ * single-use `submissionRef` is spent at the backend for the target hint + approved draft, and the guided-fill
+ * driver may place that draft only into the one composer of the one matched row. The submit stays the seller's.
+ */
+export function buildNaverReplyLiveConfig(): NaverReplyLiveCarrier {
+  const cfg = loadConfig();
+  let walkContext: BrowserContext | null = null;
+  let driver: GuidedFillReplyDriver | null = null;
+  const backend = screenCredentialBackendOrigin(cfg.baseUrl);
+  if (!backend.ok) log("aw_naver_reply_backend_refused", { reason: backend.reason }, "warn");
+  const origin = backend.ok ? backend.origin : null;
+  let token: string | null = null;
+  const session = async (): Promise<string | null> => {
+    if (origin === null) return null;
+    try {
+      if (!token) token = await login(origin, cfg.email, cfg.password);
+      return token;
+    } catch {
+      token = null;
+      log("aw_naver_reply_target_refused", { reason: "NO_SESSION" });
+      return null;
+    }
+  };
+  return {
+    runId: `run_${randomBytes(6).toString("hex")}`,
+    channelCode: "naver",
+    resolveTarget: async (submissionRef: string) => {
+      const t = await session();
+      if (t === null || origin === null) return null;
+      const target = await fetchReplySubmissionTarget(origin, t, submissionRef);
+      if (!target) token = null;
+      return target;
+    },
+    createDriver: (target: ReplySubmissionTarget) => {
+      driver = new GuidedFillReplyDriver({
+        draftBody: target.draftBody,
+        open: async () => {
+          if (!walkContext) {
+            const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel, { followWindow: true });
+            launched.once("close", () => {
+              walkContext = null;
+            });
+            walkContext = launched;
+          }
+          const context = walkContext;
+          const page = (context.pages()[0] ?? (await context.newPage())) as Page;
+          log("aw_naver_reply_landing", {});
+          await page.goto(NAVER_REVIEW_MANAGEMENT_LANDING_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+          const inner = new NaverReplySubmitProbeDriver(page as unknown as ReplyPageLike, {
+            hint: target.hint, asOfDate: target.asOfDate, locateMode: "match",
+          });
+          return { inner, page: page as unknown as ComposerFillPageLike };
+        },
+      });
+      return driver;
+    },
+    observe: async (target, state) => {
+      const t = await session();
+      if (t === null || origin === null) return false;
+      return reportReplyExecutionObservation(origin, t, {
+        accountId: target.accountId, actionRef: target.actionRef, submissionRef: "", commandId: randomBytes(8).toString("hex"), state,
+      });
+    },
+    closeSurface: async () => {
+      const ctx = walkContext;
+      walkContext = null;
+      await driver?.cleanup().catch(() => undefined);
+      await ctx?.close().catch(() => undefined);
+    },
+    isSurfaceOpen: () => driver?.isOpen() ?? false,
+  };
+}
+
+/** `reply/naver` — a conversation's 「네이버에서 답변하기」 lands here; the CLI's seated path is untouched. */
+export function activateNaverReplySubmission(
+  request: AwAttachRequest,
+  deps: { buildCarrier?: () => NaverReplyLiveCarrier } = {},
+): ActivatedCarrier | null {
+  if (request.carrier !== AW_CARRIER_REPLY || request.channelCode !== "naver") return null;
+  const live = (deps.buildCarrier ?? buildNaverReplyLiveConfig)();
+  const { runId, channelCode } = live;
+  const endpoint = new ReplySubmissionEndpoint({ runId, channelCode });
+  const carrier = new ResidentReplyCarrier({
+    runId, channelCode, transport: endpoint.transport,
+    resolveTarget: live.resolveTarget, createDriver: live.createDriver, observe: live.observe,
+  });
+  carrier.attach();
+  log("aw_naver_reply_run_armed", { onDemand: true });
+  let disposed = false;
+  return {
+    endpoint,
+    isSettled: () => {
+      const status = carrier.status();
+      if (status === null) return !carrier.isStarted();
+      return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED" || status === "OPERATOR_REPORTED";
+    },
+    isSurfaceOpen: () => live.isSurfaceOpen(),
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      carrier.dispose();
+      endpoint.close();
+      await live.closeSurface();
+    },
+  };
+}
+
+
 
 /**
  * **The NAVER initial-review-import segment, brought up on demand by the resident helper.**
@@ -1222,6 +1516,8 @@ export const RESIDENT_CARRIER_ACTIVATORS: readonly ((request: AwAttachRequest) =
   (request) => activateCoupangRenewalWalk(request),
   (request) => activateCoupangReviewLocate(request),
   (request) => activateNaverReviewImport(request),
+  (request) => activateCoupangReviewAcquisition(request),
+  (request) => activateNaverReplySubmission(request),
 ];
 
 /** The names of what {@link RESIDENT_CARRIER_ACTIVATORS} can serve — for the boot line only. */
@@ -1231,6 +1527,8 @@ export const RESIDENT_ON_DEMAND_CARRIERS: readonly string[] = [
   "renewal/coupang",
   "locate/coupang",
   "import/naver",
+  "acquire/coupang",
+  "reply/naver",
 ];
 
 /** Try each resident walk in turn; `null` when none of them serves this (carrier, channel) pair. */

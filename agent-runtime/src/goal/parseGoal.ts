@@ -52,6 +52,11 @@ export interface AgentGoal {
 
 export interface GoalRequest {
   readonly intent?: string;
+  /**
+   * The conversation this goal continues (Agentic Operating Workspace v2): the previous working set
+   * and a closed-vocabulary line for the planner. Absent on every non-conversational run.
+   */
+  readonly conversation?: import("../operator/state/OperatorState").ConversationRunContext;
   readonly text?: string;
   readonly page?: number;
   readonly size?: number;

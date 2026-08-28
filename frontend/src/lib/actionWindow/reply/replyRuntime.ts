@@ -43,6 +43,18 @@ export interface ReplyRuntime {
    * created the runtime, so unmounting releases it.
    */
   dispose(): void;
+  /**
+   * OPTIONAL: observe the sanitized v2 events of the hosted run (type + stepId only — never a payload
+   * value), so a surface can show WHICH stage the guided post reached. The simulated runtime has no
+   * event stream and omits it; a consumer treats absence as "no stage words", never as failure.
+   */
+  observe?(listener: (signal: ReplySignal) => void): () => void;
+}
+
+/** One sanitized event of a guided reply run: its type and, when it names a step, that step's id. */
+export interface ReplySignal {
+  type: string;
+  stepId: string | null;
 }
 
 /** A handle over one guided run: the runId, and the two terminal-driving reports. */
@@ -395,6 +407,14 @@ export function createBridgeReplyRuntime(
           // listeners attached, with nothing ever arriving to clear either.
           settle(() => reject(e instanceof Error ? e : new Error(String(e))));
         }
+      });
+    },
+    observe(listener) {
+      if (disposed) return () => undefined;
+      return transport.subscribe((event) => {
+        if (event.runId !== runId) return;
+        const stepId = (event.payload as { stepId?: unknown } | undefined)?.stepId;
+        listener({ type: event.type, stepId: typeof stepId === "string" ? stepId : null });
       });
     },
     dispose() {

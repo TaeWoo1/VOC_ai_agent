@@ -578,6 +578,20 @@ judge 0.01s / total 33.5s — 병렬화할 것이 없고 후보는 planner 자�
 없이 단정한 것이라 「잠시 시간이 걸릴 수 있습니다」로. backend 무변경 · 마이그레이션 0 · 마켓플레이스 호출 0 · WRITE 0 ·
 모델 호출 2(첫 run이 결함을 드러냈고 두 번째가 증명) ⇒ evidence 행 없음).
 
+**`docs/agentic_operating_workspace_v2.md`** (Reviewnary Agentic Operating Workspace v2 — 주 상호작용이 AI 운영
+담당자와의 **대화**가 된다: 자연어 goal → LLM planner → 채널별 **capability reasoning**(acquisition AUTOMATIC/
+GUIDED_HUMAN_ACTION/UNSUPPORTED × execution API/GUIDED_BROWSER/NOT_SUPPORTED, 기존 capability 읽기에서 파생 · 새
+registry 0) → freshness 판정(capability ≠ freshness: AUTOMATIC+stale은 agent가 `manualSync`로 스스로 새로 읽고,
+GUIDED+stale만 채널당 하나의 `HUMAN_ACTION_REQUIRED`) → 인간 단계 완료를 SyncJob seam에서 감지해 **원래 요청을
+resume** → 닫힌 artifact 어휘 17종(LLM HTML 0) → working-set follow-up → `APPROVAL`/`GUIDED_EXECUTION`/정직한
+NOT_SUPPORTED. **executableIdentity는 라벨·prefix가 아니라 acquisition provenance**에서 온다(`ExecutableIdentityResolver`,
+V83; 임의 CSV는 `NONE`). Cafe24 리뷰 댓글 API 실행(`review/publish/cafe24`, V84, 비밀번호는 감사 결과 A — 댓글당
+임시값, 저장 0, 기본 OFF)과 NAVER guided reply의 composer fill(`reply-composer-fill.ts`만 `.fill(` 허용, submit은
+판매자의 클릭, `COMPOSER_FILLED ≠ posted`), Coupang guided acquisition `acquire/coupang` carrier(V85 mint)는 전부
+**IMPLEMENTED · LOCAL_PROVEN · LIVE_UNPROVEN**(안전한 라이브 대상이 없어 WRITE를 강제하지 않았다). 홈 `/`은 대화,
+Overview는 `/overview`, panel은 같은 thread. A–L 증명·free-language QA·browser QA(1440/1366/1152, AA 0)·§15–§23
+보고. **마켓플레이스 호출 0 · WRITE 0 · 자동 submit 0** ⇒ evidence 행 없음. 동반: `docs/cafe24_review_comment_execution_v1.md`).
+
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은
 `deploy/pilot/`: compose overlay(`ports: !reset []`로 raw port 공개 0, `restart: unless-stopped`, JVM heap 고정, Cafe24

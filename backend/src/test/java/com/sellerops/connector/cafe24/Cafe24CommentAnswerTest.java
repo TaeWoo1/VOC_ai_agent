@@ -284,8 +284,10 @@ class Cafe24CommentAnswerTest {
             String row = Files.readString(Path.of(
                     "src/main/java/com/sellerops/connector/cafe24/Cafe24BoardCommentRow.java"))
                     .replaceAll("(?s)/\\*.*?\\*/", "");
-            assertThat(row).doesNotContain("memberId").doesNotContain("member_id")
-                    .doesNotContain("content").doesNotContain("writer");
+            // `contentHash` (2026-08-28, review comment verification) is a one-way digest, not the text: the
+            // record may carry the hash and still never the content itself.
+            assertThat(row).doesNotContain("memberId").doesNotContain("member_id").doesNotContain("writer");
+            assertThat(row.replaceAll("contentHash", "")).doesNotContain("content");
         }
 
         @Test

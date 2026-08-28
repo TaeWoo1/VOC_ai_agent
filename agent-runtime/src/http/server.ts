@@ -10,6 +10,10 @@
  *   POST /api/agent-runs                          start a run (bearer required)
  *   POST /api/agent-runs/{threadId}/resume        resume at a checkpoint (bearer required)
  *   GET  /api/agent-runs/{threadId}               read a run's sanitized status (bearer required)
+ *   POST /api/conversations                       start a conversation (bearer required)
+ *   GET  /api/conversations?limit=                list the caller's conversations (bearer required)
+ *   GET  /api/conversations/{id}                  read one conversation (bearer required)
+ *   POST /api/conversations/{id}/turns            one turn; SSE when `Accept: text/event-stream` (bearer required)
  *
  * Auth: the operator's JWT is forwarded verbatim as `Authorization: Bearer <token>`. This service
  * NEVER validates or mints tokens (it holds no signing key); a missing token is a 401 here, and an
@@ -27,6 +31,9 @@ import type { HealthView } from "./contract";
 import { SERVICE_VERSION } from "./config";
 import type { RuntimeConfig } from "./config";
 import type { AgentRunService } from "./AgentRunService";
+import type { ConversationService } from "../conversation/ConversationService";
+import { CONVERSATION_ID, StartTurnRequestSchema } from "../conversation/contract";
+import type { ProgressEvent } from "../conversation/contract";
 
 const MAX_BODY_BYTES = 128 * 1024;
 const READINESS_TIMEOUT_MS = 2000;
@@ -39,12 +46,63 @@ export interface ReadinessResult {
 /** Injectable server dependencies. The default readiness probe pings the backend's public /health. */
 export interface ServerDeps {
   readonly readinessProbe?: () => Promise<ReadinessResult>;
+  /** The conversation lane. Absent ⇒ its routes answer 503, so a deployment without it fails loudly. */
+  readonly conversations?: ConversationService;
 }
 
 interface HandlerContext {
   readonly service: AgentRunService;
   readonly config: RuntimeConfig;
   readonly readinessProbe: () => Promise<ReadinessResult>;
+  readonly conversations: ConversationService | null;
+}
+
+const SSE_HEARTBEAT_MS = 10_000;
+
+/** Streams stage events, then the turn (or an error), as server-sent events. Headers go out at once. */
+async function streamTurn(
+  res: ServerResponse,
+  run: (progress: (e: ProgressEvent) => void) => Promise<unknown>,
+): Promise<void> {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+  const send = (event: string, data: unknown): void => {
+    if (res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) res.write(": ping\n\n");
+  }, SSE_HEARTBEAT_MS);
+  heartbeat.unref();
+  try {
+    const turn = await run((e) => send(e.type, e));
+    send("turn", { type: "turn", turn });
+  } catch (err) {
+    const httpErr = toHttpError(err);
+    log("http_error", { status: httpErr.status, code: httpErr.code, method: "POST", path: "/api/conversations/turns" });
+    send("error", { type: "error", code: httpErr.code, message: httpErr.message });
+  } finally {
+    clearInterval(heartbeat);
+    res.end();
+  }
+}
+
+function requireConversations(ctx: HandlerContext): ConversationService {
+  if (!ctx.conversations) {
+    throw new HttpError(503, "CONVERSATIONS_UNAVAILABLE", "the conversation lane is not configured");
+  }
+  return ctx.conversations;
+}
+
+function conversationId(segment: string): string {
+  const id = safeDecode(segment);
+  if (!CONVERSATION_ID.test(id)) throw new HttpError(400, "INVALID_PATH", "invalid conversation id");
+  return id;
 }
 
 /** Best-effort backend reachability: a short-timeout GET of the backend's public /health. */
@@ -197,6 +255,45 @@ async function route(ctx: HandlerContext, req: IncomingMessage, res: ServerRespo
     return;
   }
 
+  // ── Conversations (Agentic Operating Workspace v2)
+  if (path === "/api/conversations" && method === "POST") {
+    const token = requireBearer(req);
+    const view = await requireConversations(ctx).create(token);
+    sendJson(res, 201, { conversationId: view.conversationId, createdAt: view.createdAt });
+    return;
+  }
+  if (path === "/api/conversations" && method === "GET") {
+    const token = requireBearer(req);
+    const limit = Number(url.searchParams.get("limit") ?? "20");
+    const rows = await requireConversations(ctx).list(token, Number.isFinite(limit) ? limit : 20);
+    sendJson(res, 200, rows);
+    return;
+  }
+  const turnMatch = path.match(/^\/api\/conversations\/([^/]+)\/turns$/);
+  if (method === "POST" && turnMatch) {
+    const token = requireBearer(req);
+    const id = conversationId(turnMatch[1]!);
+    const service = requireConversations(ctx);
+    const parsed = StartTurnRequestSchema.safeParse(await readJsonBody(req));
+    if (!parsed.success) throw new HttpError(400, "INVALID_REQUEST", "invalid turn request");
+    const accept = String(req.headers.accept ?? "");
+    if (accept.includes("text/event-stream")) {
+      await streamTurn(res, (progress) => service.turn(token, id, parsed.data, progress));
+      return;
+    }
+    const turn = await service.turn(token, id, parsed.data, () => undefined);
+    sendJson(res, 200, turn);
+    return;
+  }
+  const convMatch = path.match(/^\/api\/conversations\/([^/]+)$/);
+  if (method === "GET" && convMatch) {
+    const token = requireBearer(req);
+    const id = conversationId(convMatch[1]!);
+    const view = await requireConversations(ctx).get(token, id);
+    sendJson(res, 200, view);
+    return;
+  }
+
   throw new HttpError(404, "NOT_FOUND", "no such route");
 }
 
@@ -205,6 +302,7 @@ export function createHttpServer(service: AgentRunService, config: RuntimeConfig
     service,
     config,
     readinessProbe: deps.readinessProbe ?? defaultReadinessProbe(config),
+    conversations: deps.conversations ?? null,
   };
   return createServer((req, res) => {
     applyCors(req, res, config);

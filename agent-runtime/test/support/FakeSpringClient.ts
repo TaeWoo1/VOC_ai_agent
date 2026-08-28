@@ -18,6 +18,12 @@ import type { SpringClient, ListInquiriesParams } from "../../src/spring/SpringC
 import { SpringApiError } from "../../src/spring/SpringClient";
 import type {
   ConfirmPublishRequest,
+  ExecutableIdentity,
+  GeneratedDraftView,
+  ManualSyncRequest,
+  SellerAccountSummary,
+  SyncRunParams,
+  SyncRunSummary,
   InquiryDetail,
   InquiryQueueItem,
   InquiryQueueResponse,
@@ -52,6 +58,25 @@ export interface SeedInquiry {
   readonly productId?: string | null; // bound product, mirrors InquiryDetail.productId; defaults null
   readonly productName?: string | null;
   readonly productBinding?: string | null; // SOURCE_EXACT | USER_CONFIRMED
+  /** NAVER subtype; null/absent for a single-source channel. */
+  readonly sourceSubtype?: string | null;
+  /**
+   * What the backend decided from provenance (Lane A). Defaults to MARKETPLACE for a connector-written
+   * row; a test seeds NONE to model a file-imported record with the same channel label.
+   */
+  readonly executableIdentity?: ExecutableIdentity;
+  /**
+   * What `generateDraftFor` answers for this item (Agentic Operating Workspace v2). Absent ⇒ a
+   * GROUNDED draft is written. `answerBasis: "NO_ANSWER_BASIS"` ⇒ no draft is saved, as live.
+   */
+  readonly draftGeneration?: Partial<GeneratedDraftView> & { readonly comments?: string };
+}
+
+/** One recorded backend call — method name plus the ids it was made with. Never content. */
+export interface RecordedCall {
+  readonly method: string;
+  readonly workItemId?: string;
+  readonly tone?: string | null;
 }
 
 interface ItemState {
@@ -74,7 +99,22 @@ export class FakeSpringClient implements SpringClient {
   /** Standing invariant: the runtime must never cause an external send. */
   externalSendAttempts = 0;
   /** Call counters for idempotency assertions. */
-  readonly calls = { list: 0, detail: 0, propose: 0, saveDraft: 0, confirmPublish: 0 };
+  readonly calls = { list: 0, detail: 0, propose: 0, saveDraft: 0, confirmPublish: 0, generate: 0,
+    sellerAccounts: 0, syncRuns: 0 };
+  /** EVERY method call, in order — how a conversation test proves the lane made only READs + PREPARE. */
+  readonly methodCalls: RecordedCall[] = [];
+  /** Seeded connected accounts (`GET /api/seller-accounts`). */
+  sellerAccounts: SellerAccountSummary[] = [];
+  /** Seeded collection runs (`GET /api/sync-runs`). A test appends one to "finish" a human step. */
+  syncRuns: SyncRunSummary[] = [];
+  /**
+   * What `POST /api/seller-accounts/{id}/sync` does (`CollectControlService.manualSync`). Default: a
+   * SUCCESS run with 2 rows, recorded in `syncRuns`. A test sets a status to make the backend refuse
+   * (409 single-flight, 429 rate budget, 503 connector off) or a `runStatus` to finish FAILED/RUNNING.
+   */
+  manualSyncBehavior: { errorStatus?: number; runStatus?: string; successRows?: number; onCall?: () => void } = {};
+  /** Every manual sync the lane asked for — account + data type only. */
+  readonly manualSyncCalls: Array<{ accountId: string; dataType: string }> = [];
 
   /**
    * When true, models a backend with live execution ENABLED and a channel adapter
@@ -84,6 +124,8 @@ export class FakeSpringClient implements SpringClient {
    * enables. It also documents the M3 truth — no-send is a backend-config property.
    */
   private readonly dispatchAdapterEnabled: boolean;
+  /** When set, `getPublishCapability` answers this instead of the dispatch-flag derivation. */
+  publishCapability: PublishCapabilityView | null = null;
 
   constructor(seeds: readonly SeedInquiry[] = [], opts: { dispatchAdapterEnabled?: boolean } = {}) {
     this.dispatchAdapterEnabled = opts.dispatchAdapterEnabled ?? false;
@@ -101,6 +143,7 @@ export class FakeSpringClient implements SpringClient {
   }
 
   async getPublishCapability(): Promise<PublishCapabilityView> {
+    if (this.publishCapability) return this.publishCapability;
     // Ties to the same flag as dispatch: an execution-enabled backend reports a
     // registered adapter, which the runtime's fail-closed startup check rejects.
     return this.dispatchAdapterEnabled
@@ -116,6 +159,7 @@ export class FakeSpringClient implements SpringClient {
 
   async listInquiries(params: ListInquiriesParams): Promise<InquiryQueueResponse> {
     this.calls.list += 1;
+    this.methodCalls.push({ method: "listInquiries" });
     const phase = params.phase ?? "OPEN";
     const all: InquiryQueueItem[] = [...this.items.values()]
       .filter((it) => it.phase === phase)
@@ -124,16 +168,23 @@ export class FakeSpringClient implements SpringClient {
         inquiryId: it.seed.inquiryId,
         sellerAccountId: it.seed.sellerAccountId,
         channelId: it.seed.channelId,
+        channelCode: it.seed.channelCode ?? null,
+        channelNameKo: it.seed.channelNameKo ?? null,
+        productId: it.seed.productId ?? null,
+        productName: it.seed.productName ?? null,
         phase: it.phase,
         status: it.status,
         title: it.seed.title,
         receivedAt: it.seed.receivedAt,
+        sourceSubtype: it.seed.sourceSubtype ?? null,
+        executableIdentity: it.seed.executableIdentity ?? "MARKETPLACE",
       }));
     return { content: all, page: params.page ?? 0, size: params.size ?? 20, totalElements: all.length, totalPages: 1 };
   }
 
   async getInquiryDetail(workItemId: string): Promise<InquiryDetail> {
     this.calls.detail += 1;
+    this.methodCalls.push({ method: "getInquiryDetail", workItemId });
     const it = this.require(workItemId);
     return {
       workItemId: it.seed.workItemId,
@@ -154,11 +205,14 @@ export class FakeSpringClient implements SpringClient {
       productId: it.seed.productId ?? null,
       productName: it.seed.productName ?? null,
       productBinding: it.seed.productBinding ?? null,
+      sourceSubtype: it.seed.sourceSubtype ?? null,
+      executableIdentity: it.seed.executableIdentity ?? "MARKETPLACE",
     };
   }
 
   async proposeInquiry(workItemId: string): Promise<ProposalResult> {
     this.calls.propose += 1;
+    this.methodCalls.push({ method: "proposeInquiry", workItemId });
     const it = this.require(workItemId);
     // Idempotency precheck mirrors the real InquiryProposalService: an existing proposal
     // is a replay (returned as-is regardless of the item's current phase); a fresh propose
@@ -191,6 +245,7 @@ export class FakeSpringClient implements SpringClient {
 
   async saveDraft(workItemId: string, request: ReplyDraftRequest): Promise<ReplyDraftView> {
     this.calls.saveDraft += 1;
+    this.methodCalls.push({ method: "saveDraft", workItemId });
     const it = this.require(workItemId);
     if (it.phase !== "PROPOSED") {
       throw new SpringApiError(409, "CONFLICT", "PROPOSED 상태에서만 초안을 저장할 수 있습니다.");
@@ -224,6 +279,7 @@ export class FakeSpringClient implements SpringClient {
 
   async confirmPublish(workItemId: string, request: ConfirmPublishRequest): Promise<PublishStatusView> {
     this.calls.confirmPublish += 1;
+    this.methodCalls.push({ method: "confirmPublish", workItemId });
     if (!request.commandId) throw new SpringApiError(400, "BAD_REQUEST", "commandId가 필요합니다.");
     if (!request.expectedFingerprint) throw new SpringApiError(400, "BAD_REQUEST", "expectedFingerprint가 필요합니다.");
     const it = this.require(workItemId);
@@ -293,6 +349,92 @@ export class FakeSpringClient implements SpringClient {
     // UNIQUE (workItemId, commandId): no duplicate audit rows on replay.
     if (this.audit.some((a) => a.workItemId === workItemId && a.commandId === commandId)) return;
     this.audit.push({ workItemId, commandId, event, phaseFrom, phaseTo, actor });
+  }
+
+  // ─────────────── Agentic Operating Workspace v2 ───────────────
+
+  async listSellerAccounts(): Promise<SellerAccountSummary[]> {
+    this.calls.sellerAccounts += 1;
+    this.methodCalls.push({ method: "listSellerAccounts" });
+    return [...this.sellerAccounts];
+  }
+
+  async manualSync(accountId: string, request: ManualSyncRequest): Promise<SyncRunSummary> {
+    this.methodCalls.push({ method: "manualSync" });
+    this.manualSyncCalls.push({ accountId, dataType: request.dataType });
+    const b = this.manualSyncBehavior;
+    if (b.errorStatus) throw new SpringApiError(b.errorStatus, `HTTP_${b.errorStatus}`, "backend request failed (POST /sync)");
+    b.onCall?.();
+    const account = this.sellerAccounts.find((a) => a.id === accountId);
+    const run: SyncRunSummary = {
+      id: `manual-${this.manualSyncCalls.length}`, sellerAccountId: accountId, channelId: account?.channelId ?? null,
+      dataType: request.dataType, trigger: "MANUAL", status: b.runStatus ?? "SUCCESS", successRows: b.successRows ?? 2,
+      startedAt: "2099-01-01T00:00:00Z", finishedAt: (b.runStatus ?? "SUCCESS") === "RUNNING" ? null : "2099-01-01T00:00:30Z",
+    };
+    this.syncRuns.push(run);
+    return run;
+  }
+
+  async listSyncRuns(params: SyncRunParams): Promise<SyncRunSummary[]> {
+    this.calls.syncRuns += 1;
+    this.methodCalls.push({ method: "listSyncRuns" });
+    return this.syncRuns.filter((r) =>
+      (!params.sellerAccountId || r.sellerAccountId === params.sellerAccountId)
+      && (!params.dataType || r.dataType === params.dataType)
+      && (!params.status || r.status === params.status));
+  }
+
+  /**
+   * Mirrors `POST /api/inquiries/{id}/draft/generate`: moves an OPEN item to PROPOSED (the backend's
+   * `proposeAs` path), saves one append-only MODEL version, and reports the basis. The tone changes
+   * the identity stamp and nothing about what is recorded as fact — the facts are the backend's.
+   */
+  async generateDraftFor(
+    workItemId: string,
+    tone: "SOFTER" | "MORE_FORMAL" | "SHORTER" | null,
+  ): Promise<GeneratedDraftView> {
+    this.calls.generate += 1;
+    this.methodCalls.push({ method: "generateDraftFor", workItemId, tone });
+    const it = this.require(workItemId);
+    const seeded = it.seed.draftGeneration ?? {};
+    const basis = seeded.answerBasis ?? "GROUNDED";
+    const unavailable = seeded.unavailableMessage ?? null;
+    let draft: ReplyDraftView | null = null;
+    if (!unavailable && basis !== "NO_ANSWER_BASIS") {
+      if (it.phase === "OPEN") {
+        it.phase = "PROPOSED";
+        it.proposalCategory = it.proposalCategory ?? "general_reply";
+      }
+      const head = it.drafts.length ? it.drafts[it.drafts.length - 1]! : null;
+      const comments = seeded.comments ?? "안녕하세요. 문의 주신 내용 확인했습니다.";
+      draft = {
+        version: (head?.version ?? 0) + 1,
+        answerStatus: 0,
+        title: it.seed.title,
+        comments,
+        // The stamp is the backend's `model_version+style/…` idea in miniature: the tone is part of the
+        // identity, so a softer draft is a different version with a different fingerprint.
+        contentFingerprint: fingerprint(it.seed.title, `${comments}|${tone ?? "default"}`),
+        fingerprintAlgorithm: "sha256-16",
+        createdAt: it.seed.receivedAt,
+        answerBasis: basis,
+        answerBasisNote: seeded.answerBasisNote ?? null,
+        answerBasisAction: seeded.answerBasisAction ?? null,
+      };
+      it.drafts.push(draft);
+    }
+    return {
+      draft,
+      authorKind: draft ? (seeded.authorKind ?? "MODEL") : null,
+      knowledgeState: seeded.knowledgeState ?? (basis === "NO_ANSWER_BASIS" ? "NO_KNOWLEDGE" : "GROUNDED"),
+      knowledgeNote: seeded.knowledgeNote ?? null,
+      answerBasis: unavailable ? null : basis,
+      answerBasisNote: seeded.answerBasisNote ?? (basis === "NO_ANSWER_BASIS" ? "답변 기준이 필요합니다." : null),
+      answerBasisAction: seeded.answerBasisAction ?? null,
+      productId: it.seed.productId ?? null,
+      evidence: [],
+      unavailableMessage: unavailable,
+    };
   }
 
   // Test helpers.

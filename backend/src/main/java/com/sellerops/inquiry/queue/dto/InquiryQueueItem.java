@@ -29,5 +29,9 @@ public record InquiryQueueItem(
         String phase,
         String status,
         String title,
-        Instant receivedAt) {
+        Instant receivedAt,
+        /** Which resource of the channel produced the row ({@code InquirySourceSubtype} name), or null. */
+        String sourceSubtype,
+        /** {@code MARKETPLACE} | {@code NONE} — see {@code InquiryDetail.executableIdentity}. */
+        String executableIdentity) {
 }

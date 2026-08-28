@@ -23,7 +23,11 @@ import { productResolvingSpecialists } from "../tools/ToolReachability";
 import { namesInstance } from "./EntityRole";
 
 const ALL_SPECIALISTS: readonly SpecialistName[] =
-  ["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS", "REPORT_OPS"];
+  ["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS", "ORDER_OPS", "REPORT_OPS"];
+
+/** v3: the actions a plan may request. Anything else becomes NONE — a default, never a rejection. */
+const REQUESTED_ACTIONS: readonly string[] =
+  ["NONE", "PREPARE_INQUIRY_DRAFT", "REQUEST_SEND_APPROVAL", "OPEN_WORKSPACE", "LIST_ACTIONS", "EXPLAIN_CAPABILITY"];
 
 /** Why a plan was refused. Surfaced to the run, never to a vendor. */
 export type PlanRejection =
@@ -94,12 +98,27 @@ export function validatePlan(plan: InvestigationPlan, deps: PlanValidatorDeps): 
     throw new PlanRejectedError("EMPTY_GOAL", "plan restated no goal");
   }
 
+  // V10 (v3) — `requestedAction` is a closed set; an unknown value is NONE. Never a rejection: the
+  // action axis is additive to a plan that already stands, and refusing a plan over it would fail a
+  // read the seller asked for because of a word the model chose for the second half.
+  if (!REQUESTED_ACTIONS.includes(plan.requestedAction ?? "NONE")) {
+    plan = { ...plan, requestedAction: "NONE" };
+  }
+
   // V7 — a refusal is an answer. It is passed through unchanged so the run can say so honestly.
   if (!plan.supported || plan.riskClass === "REFUSE") {
     return { ...plan, supported: false, specialistTargets: [], candidateTools: [] };
   }
   // V8 — a clarification runs no specialist. The answer is the question.
   if (plan.clarificationNeeded) {
+    return { ...plan, specialistTargets: [], candidateTools: [] };
+  }
+
+  // V11 (v3) — a navigation-only plan runs no specialist either. 「문의 화면 열어줘」 asks for a screen,
+  // not for facts; refusing it for having nothing to find out would send the seller to a failure card
+  // for the one request that needs no investigation at all.
+  const explainOrOpen = (plan.requestedAction ?? "NONE") === "OPEN_WORKSPACE" || (plan.requestedAction ?? "NONE") === "EXPLAIN_CAPABILITY";
+  if (explainOrOpen && plan.informationNeeds.filter((n) => isUsableNeed(n)).length === 0) {
     return { ...plan, specialistTargets: [], candidateTools: [] };
   }
 

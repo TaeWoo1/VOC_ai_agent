@@ -155,7 +155,7 @@ describe("browser launch reachability", () => {
     const calls = [...cli.matchAll(/launchNaverContext\(/g)].map((m) => m.index!);
     expect(calls.length).toBeGreaterThanOrEqual(1);
 
-    // SIX gated builders now. The property is unchanged and still the point — every launch is inside a builder
+    // EIGHT gated builders now (acquire/coupang and reply/naver joined on 2026-08-28). The property is unchanged and still the point — every launch is inside a builder
     // that a gate stands in front of, so none is reachable by booting the agent alone. Widening this to
     // "anywhere" would retire the guard, not update it; naming each new builder keeps it a list of doors.
     //
@@ -177,6 +177,8 @@ describe("browser launch reachability", () => {
       ["export function buildNaverIssuanceLiveConfig", "\nexport function activateNaverGuidedWalk"],
       ["export function buildCoupangRenewalLiveConfig", "\nexport function activateCoupangRenewalWalk"],
       ["export function buildCoupangReviewLocateLiveConfig", "\nexport function activateCoupangReviewLocate"],
+      ["export function buildCoupangReviewAcquisitionLiveConfig", "\nexport function activateCoupangReviewAcquisition"],
+      ["export function buildNaverReplyLiveConfig", "\nexport function activateNaverReplySubmission"],
     ].map(([from, to]) => {
       const start = cli.indexOf(from!);
       const end = cli.indexOf(to!, start);

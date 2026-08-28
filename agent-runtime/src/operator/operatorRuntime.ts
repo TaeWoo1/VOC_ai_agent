@@ -17,6 +17,9 @@
  * runtime's draft.
  */
 import { buildOperatorGraph } from "./graph/operatorGraph";
+import type { ProgressSink } from "./graph/operatorGraph";
+import type { InvestigationPlan } from "./plan/InvestigationPlan";
+import type { Artifact } from "../conversation/contract";
 import { OperatorToolRegistry } from "./tools/OperatorToolRegistry";
 import { buildOperatorTools, OPERATOR_TOOL } from "./tools/OperatorTools";
 import { LlmInvestigationPlanner, PlannerUnavailableError } from "./plan/LlmInvestigationPlanner";
@@ -54,10 +57,24 @@ export interface OperatorRuntimeDeps {
   readonly limits?: OperatorBudgetLimits;
   /** Injectable clock, so a budget deadline is deterministic in tests. */
   readonly now?: () => number;
+  /** Stage sink for the conversation lane. Absent ⇒ stages are logged only, exactly as before. */
+  readonly progress?: ProgressSink;
+  /** The conversation lane's bounded refresh seam. Absent on every non-conversational run. */
+  readonly refresher?: import("./graph/reviewRefresh").ReviewRefresher;
 }
 
 export type OperatorRunResult =
-  | { readonly status: "DONE"; readonly answer: OperatorAnswer; readonly trail: string[] }
+  | {
+      readonly status: "DONE";
+      readonly answer: OperatorAnswer;
+      readonly trail: string[];
+      /** The plan the run executed — its v3 axis (requestedAction / target / filters) is what a conversation acts on. */
+      readonly plan: InvestigationPlan | null;
+      /** Structured objects the specialists composed. Live-only; the conversation lane bounds and persists them. */
+      readonly artifacts: readonly Artifact[];
+      /** Entities tools resolved this run — what a conversation anchors the next turn on. */
+      readonly entities: readonly ResolvedEntity[];
+    }
   | {
       readonly status: "FAILED";
       readonly failureCode: OperatorFailureCode;
@@ -103,6 +120,8 @@ export class OperatorAgentRuntime {
       // The thread IS the run on this surface, and it is what the quota counts as one.
       runId: threadId,
       ...(request.referenceDate ? { referenceDate: request.referenceDate } : {}),
+      ...(this.deps.progress ? { progress: this.deps.progress } : {}),
+      ...(this.deps.refresher ? { refresher: this.deps.refresher } : {}),
     }).compile();
 
     const goalText = request.text ?? request.intent ?? "";
@@ -114,6 +133,7 @@ export class OperatorAgentRuntime {
           goalText,
           ...(context.entities.length > 0 ? { entities: context.entities } : {}),
           ...(context.evidence.length > 0 ? { evidence: context.evidence } : {}),
+          ...(request.conversation ? { conversation: request.conversation } : {}),
         },
         threadConfig(threadId),
       )) as OperatorState;
@@ -169,7 +189,10 @@ export class OperatorAgentRuntime {
       stopReason: final.answer.budget.stopReason,
       specialistsFailed: final.answer.specialistOutcomes.filter((o) => o.terminal === "FAILED").length,
     });
-    return { status: "DONE", answer: final.answer, trail: final.trail ?? [] };
+    return {
+      status: "DONE", answer: final.answer, trail: final.trail ?? [],
+      plan: final.plan ?? null, artifacts: final.artifacts ?? [], entities: final.entities ?? [],
+    };
   }
 
   /**

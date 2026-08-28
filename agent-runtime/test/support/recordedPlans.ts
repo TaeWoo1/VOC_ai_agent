@@ -790,3 +790,154 @@ export const REPEATED_REVIEW_AXIS_PLAN: AgentPlanView = {
   rationale: "반복 리뷰 문제를 상품 축으로 본다",
   providerVersion: AUTHORED,
 };
+
+/* ───────────── Plan schema v3 — the conversation lane (Agentic Operating Workspace v2) ───────────── */
+
+/**
+ * v3 plans for the conversation suites. <b>All AUTHORED to the v3 wire schema</b> (`agent-plan-prompt/v3`
+ * is the backend lane's; no live recording exists yet), replayed at the transport seam like every
+ * other entry. What they pin is the CONTRACT between planner tokens and runtime behaviour: a
+ * `filters.period`, a `scope=WORKING_SET`, a `requestedAction`, a `target` — never a sentence.
+ */
+const V3 = "AUTHORED v3 (pending live recording)";
+
+function reviewRowsPlan(goal: string, filters: AgentPlanView["filters"], extra: Partial<AgentPlanView> = {}): AgentPlanView {
+  return {
+    available: true, supported: true, userGoal: goal, unresolvedEntities: [],
+    informationNeeds: [{ id: "n1", question: "기간 안에 들어온 리뷰는 무엇인가", kind: "REVIEW_SIGNAL",
+      why: "리뷰 행 자체가 질문이다", required: true }],
+    specialists: ["REVIEW_OPS"], tools: ["list_recent_reviews"], retrievalOrder: ["n1"], retrievalParallel: [],
+    retrievalStopWhen: null, evidenceRequirements: [{ needId: "n1", minEvidence: 1, acceptableKinds: ["REVIEW_LIST"] }],
+    riskClass: "ROUTINE", maxIterations: 1, maxToolCalls: 6, stopWhenEnough: null, clarificationNeeded: false,
+    clarificationReason: null, rationale: "리뷰 행 목록을 본다", providerVersion: V3,
+    requestedAction: "NONE", tone: null, filters, target: { selector: "NONE", index: null }, ...extra,
+  };
+}
+
+function inquiryRowsPlan(goal: string, filters: AgentPlanView["filters"], extra: Partial<AgentPlanView> = {}): AgentPlanView {
+  return {
+    available: true, supported: true, userGoal: goal, unresolvedEntities: [],
+    informationNeeds: [{ id: "n1", question: "답변이 필요한 문의는 무엇인가", kind: "INQUIRY_VOLUME",
+      why: "처리할 문의 목록이 질문이다", required: true }],
+    specialists: ["INQUIRY_OPS"], tools: ["list_inquiry_workload"], retrievalOrder: ["n1"], retrievalParallel: [],
+    retrievalStopWhen: null, evidenceRequirements: [], riskClass: "ROUTINE", maxIterations: 1, maxToolCalls: 12,
+    stopWhenEnough: null, clarificationNeeded: false, clarificationReason: null, rationale: "문의 목록을 본다",
+    providerVersion: V3, requestedAction: "NONE", tone: null, filters, target: { selector: "NONE", index: null }, ...extra,
+  };
+}
+
+export const NEW_REVIEWS_TODAY_PLAN = reviewRowsPlan("오늘 새로 달린 리뷰를 보고 싶다",
+  { period: "TODAY", rating: null, channel: null, scope: null, topic: null });
+export const LOW_RATING_FOLLOWUP_PLAN = reviewRowsPlan("방금 본 리뷰 중 안 좋은 것만 보고 싶다",
+  { period: null, rating: "LOW", channel: null, scope: "WORKING_SET", topic: null });
+export const GROUP_BY_PRODUCT_FOLLOWUP_PLAN = reviewRowsPlan("방금 본 리뷰를 상품별로 묶고 싶다",
+  { period: null, rating: null, channel: null, scope: "WORKING_SET", topic: null },
+  { unresolvedEntities: [{ kind: "PRODUCT", mention: "상품별" }] });
+export const CROSS_DOMAIN_INQUIRIES_PLAN = inquiryRowsPlan("방금 본 리뷰의 상품에 대해 문의에서도 비슷한 얘기가 있는지 알고 싶다",
+  { period: null, rating: null, channel: null, scope: "WORKING_SET", topic: null },
+  { tools: ["list_inquiry_workload", "search_customer_memory"] });
+export const TODAY_INQUIRIES_PLAN = inquiryRowsPlan("오늘 내가 답해야 할 문의를 정리하고 싶다",
+  { period: "TODAY", rating: null, channel: null, scope: null, topic: null });
+export const SHIPPING_FIRST_PLAN = inquiryRowsPlan("방금 본 문의 중 배송 관련부터 보고 싶다",
+  { period: null, rating: null, channel: null, scope: "WORKING_SET", topic: "SHIPPING" });
+export const PREPARE_FIRST_DRAFT_PLAN = inquiryRowsPlan("방금 본 문의 중 첫 번째 것의 답변을 준비하고 싶다",
+  { period: null, rating: null, channel: null, scope: "WORKING_SET", topic: null },
+  { requestedAction: "PREPARE_INQUIRY_DRAFT", target: { selector: "FIRST", index: null } });
+export const SOFTER_DRAFT_PLAN = inquiryRowsPlan("방금 준비한 초안을 조금 더 부드럽게 다시 쓰고 싶다",
+  { period: null, rating: null, channel: null, scope: "WORKING_SET", topic: null },
+  { requestedAction: "PREPARE_INQUIRY_DRAFT", tone: "SOFTER", target: { selector: "THIS", index: null } });
+export const SEND_APPROVAL_PLAN = inquiryRowsPlan("준비된 초안을 보내고 싶다",
+  { period: null, rating: null, channel: null, scope: "WORKING_SET", topic: null },
+  { requestedAction: "REQUEST_SEND_APPROVAL", target: { selector: "THIS", index: null } });
+export const SALES_DROP_PLAN: AgentPlanView = {
+  available: true, supported: true, userGoal: "지난주보다 매출이 왜 떨어졌는지 알고 싶다",
+  unresolvedEntities: [{ kind: "PERIOD", mention: "지난주" }],
+  informationNeeds: [{ id: "n1", question: "지난주 대비 이번 주 매출·주문은 어떻게 변했는가", kind: "ORDER_HISTORY",
+    why: "변화의 크기가 먼저다", required: true }],
+  specialists: ["ORDER_OPS"], tools: ["get_sales_trend"], retrievalOrder: ["n1"], retrievalParallel: [],
+  retrievalStopWhen: null, evidenceRequirements: [{ needId: "n1", minEvidence: 1, acceptableKinds: ["ORDER_SUMMARY"] }],
+  riskClass: "ROUTINE", maxIterations: 1, maxToolCalls: 4, stopWhenEnough: null, clarificationNeeded: false,
+  clarificationReason: null, rationale: "매출 흐름은 주문 이력으로 답한다", providerVersion: V3,
+  requestedAction: "NONE", tone: null,
+  filters: { period: "LAST_WEEK", rating: null, channel: null, scope: null, topic: null },
+  target: { selector: "NONE", index: null },
+};
+export const CAFE24_ONLY_FOLLOWUP_PLAN: AgentPlanView = {
+  ...SALES_DROP_PLAN, userGoal: "방금 본 매출 흐름을 카페24만 보고 싶다", unresolvedEntities: [],
+  filters: { period: null, rating: null, channel: "CAFE24", scope: "WORKING_SET", topic: null },
+};
+export const OPEN_INQUIRIES_WORKSPACE_PLAN = inquiryRowsPlan("문의 화면을 열고 싶다",
+  { period: null, rating: null, channel: null, scope: null, topic: null },
+  { requestedAction: "OPEN_WORKSPACE", tools: [], informationNeeds: [{ id: "n1", question: "문의 화면", kind: "INQUIRY_VOLUME",
+    why: "화면을 연다", required: false }] });
+export const UNSUPPORTED_SENTENCE_PLAN: AgentPlanView = {
+  ...REFUSED_PLAN, userGoal: "점심 메뉴를 추천받고 싶다", rationale: "판매 운영과 관련이 없는 요청입니다.",
+  providerVersion: V3, requestedAction: "NONE", tone: null,
+  filters: { period: null, rating: null, channel: null, scope: null, topic: null }, target: { selector: "NONE", index: null },
+};
+
+/** The goal → v3 plan table the conversation suites seed the transport fake with. */
+export const CONVERSATION_PLANS: Record<string, AgentPlanView> = {
+  "오늘 새로 달린 리뷰 보여줘": NEW_REVIEWS_TODAY_PLAN,
+  "안 좋은 것만 봐줘": LOW_RATING_FOLLOWUP_PLAN,
+  "상품별로 묶어줘": GROUP_BY_PRODUCT_FOLLOWUP_PLAN,
+  "문의에서도 비슷한 얘기 있어?": CROSS_DOMAIN_INQUIRIES_PLAN,
+  "오늘 내가 답해야 할 문의 정리해줘": TODAY_INQUIRIES_PLAN,
+  "배송 관련부터": SHIPPING_FIRST_PLAN,
+  "첫 번째 거 답변 준비해줘": PREPARE_FIRST_DRAFT_PLAN,
+  "조금 더 부드럽게 써줘": SOFTER_DRAFT_PLAN,
+  "좋아 보내자": SEND_APPROVAL_PLAN,
+  "지난주보다 왜 매출이 떨어졌어?": SALES_DROP_PLAN,
+  "카페24만 봐봐": CAFE24_ONLY_FOLLOWUP_PLAN,
+  "요즘 문제 생기는 상품 있어?": PRODUCT_HEALTH_PLAN,
+  "문의 화면 열어줘": OPEN_INQUIRIES_WORKSPACE_PLAN,
+  "점심 메뉴 추천해줘": UNSUPPORTED_SENTENCE_PLAN,
+};
+
+/* ───────────── Live-QA follow-ups (R1–R6) ───────────── */
+
+export const LAST7_REVIEWS_PLAN = reviewRowsPlan("지난 7일 동안 들어온 상품평을 보고 싶다",
+  { period: "LAST_7_DAYS", rating: null, channel: null, scope: null, topic: null });
+/** 「첫 번째 거 자세히 봐줘」 over a PRODUCTS set — an ordinal, no product name anywhere. */
+export const FIRST_PRODUCT_DETAIL_PLAN: AgentPlanView = {
+  available: true, supported: true, userGoal: "방금 본 상품 중 첫 번째 것을 자세히 보고 싶다", unresolvedEntities: [],
+  informationNeeds: [
+    { id: "n1", question: "이 상품에 기록된 반복 리뷰 문제가 있는가", kind: "REVIEW_SIGNAL", why: "상품 상태의 핵심", required: true },
+    { id: "n2", question: "이 상품에 미답변 문의가 있는가", kind: "INQUIRY_VOLUME", why: "응대 지연도 상품 문제다", required: false },
+  ],
+  specialists: ["REVIEW_OPS", "INQUIRY_OPS"], tools: [], retrievalOrder: ["n1", "n2"], retrievalParallel: [],
+  retrievalStopWhen: null, evidenceRequirements: [], riskClass: "ROUTINE", maxIterations: 1, maxToolCalls: 8,
+  stopWhenEnough: null, clarificationNeeded: false, clarificationReason: null, rationale: "지목된 상품 하나를 본다",
+  providerVersion: V3, requestedAction: "NONE", tone: null,
+  filters: { period: null, rating: null, channel: null, scope: "WORKING_SET", topic: null },
+  target: { selector: "FIRST", index: null },
+};
+export const LIST_ACTIONS_PLAN: AgentPlanView = {
+  available: true, supported: true, userGoal: "오늘 내가 해야 할 일을 정리하고 싶다", unresolvedEntities: [],
+  informationNeeds: [
+    { id: "n1", question: "답변이 필요한 문의는 무엇인가", kind: "INQUIRY_VOLUME", why: "할 일의 첫 줄", required: true },
+    { id: "n2", question: "오늘 들어온 낮은 평점 리뷰가 있는가", kind: "REVIEW_SIGNAL", why: "확인할 리뷰", required: false },
+  ],
+  specialists: ["INQUIRY_OPS", "REVIEW_OPS"], tools: ["list_inquiry_workload", "list_recent_reviews"],
+  retrievalOrder: ["n1", "n2"], retrievalParallel: [], retrievalStopWhen: null, evidenceRequirements: [],
+  riskClass: "ROUTINE", maxIterations: 1, maxToolCalls: 12, stopWhenEnough: null, clarificationNeeded: false,
+  clarificationReason: null, rationale: "할 일은 문의와 리뷰에서 나온다", providerVersion: V3,
+  requestedAction: "LIST_ACTIONS", tone: null,
+  filters: { period: "TODAY", rating: null, channel: null, scope: null, topic: null }, target: { selector: "NONE", index: null },
+};
+Object.assign(CONVERSATION_PLANS, {
+  "지난 7일 동안 들어온 상품평 좀 보여봐": LAST7_REVIEWS_PLAN,
+  "그중 안 좋은 것만 봐줘": LOW_RATING_FOLLOWUP_PLAN,
+  "문의에서도 같은 문제가 있는지 봐줘": CROSS_DOMAIN_INQUIRIES_PLAN,
+  "첫 번째 거 자세히 봐줘": FIRST_PRODUCT_DETAIL_PLAN,
+  "내가 해야 할 일 정리해줘": LIST_ACTIONS_PLAN,
+});
+/** R7: planned as a follow-up although it names a new period. */
+export const LAST7_AS_FOLLOWUP_PLAN: AgentPlanView = {
+  ...LAST7_REVIEWS_PLAN, userGoal: "방금 본 것에 이어 지난 7일 리뷰도 보고 싶다",
+  filters: { period: "LAST_7_DAYS", rating: null, channel: null, scope: "WORKING_SET", topic: null },
+};
+Object.assign(CONVERSATION_PLANS, {
+  "지난 7일 것도 보여줘": LAST7_AS_FOLLOWUP_PLAN,
+  "배송 얘기부터 처리하자": SHIPPING_FIRST_PLAN,
+});

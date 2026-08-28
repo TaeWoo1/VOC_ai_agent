@@ -21,6 +21,8 @@ command shape stays valid).
 | `INITIAL_REVIEW_IMPORT_DISCOVERY` | find the historical range the marketplace currently allows | `COMPLETED` |
 | `INITIAL_REVIEW_IMPORT_SEGMENT` | guide ONE planned monthly segment to a downloaded, ingested file | `COMPLETED` |
 | `API_ISSUANCE_GUIDANCE` | guide the seller through issuing/reusing a NAVER Commerce API application at the API center | `COMPLETED` |
+| `REVIEW_LOCATE` | ring ONE stored review on the Coupang 상품평 page the seller brought up (binds a `locateRef`) | `COMPLETED` |
+| `REVIEW_ACQUISITION` | read the Coupang WING 상품평 list the seller pages through, one bounded handoff at the end (binds an `acquisitionRef`; 2026-08-28) | `COMPLETED` |
 
 Both import intents are read-only export choreography — the seller clicks every marketplace
 control — so they need no new status. Discovery is separate because the **first** command has no
@@ -34,9 +36,22 @@ Application ID / Secret. Its `COMPLETED` terminal means the **issuance guidance 
 credential was stored or a connection made (the seller copies the credential into SellerOps's own masked
 form as a separate, later step). It binds to no approved marketplace work, so it carries no ref.
 
+`REVIEW_ACQUISITION` (2026-08-28, product-owner decision) makes the live-proven Coupang WING 상품평 read
+startable from a SellerOps screen or a conversation instead of only from the seated CLI. The product
+contract is unchanged in kind: reviewnary prepares the exact WING window; the seller brings the 상품평 list
+up and **turns every page themselves** (several clicks are fine — the pager is a marketplace control); at each
+page the seller confirms (`REQUEST_STEP_RECHECK` = "read this page") and the runtime reads the rows in front of
+them; `SWITCH_TO_MANUAL` at that barrier means "end the walk here"; when the pager shows its last page, or the
+seller ends early, everything read goes to the backend in ONE bounded POST (`SELLER_CENTER_READ`). The run's
+`runCopyParams` carry **counts only** (`pagesRead`, `collected`, `stored`, `coverageComplete`); a walk that did
+not see the pager's last page is `COMPLETED` with `coverageComplete=false`, never rounded up. Two blocker
+codes are its own: `ACQUISITION_TARGET_UNRESOLVED` (the binding could not be resolved — press again) and
+`HANDOFF_REJECTED` (the single handoff was refused; nothing stored).
+
 **One binding ref per intent** (`INTENT_REQUIRED_REF`). Each intent requires exactly one opaque
 16-hex ref and **prohibits every other**: `submissionRef` iff `REPLY_SUBMISSION`, `discoveryRef` iff
-`INITIAL_REVIEW_IMPORT_DISCOVERY`, `importRef` iff `INITIAL_REVIEW_IMPORT_SEGMENT`; `EXPORT` and
+`INITIAL_REVIEW_IMPORT_DISCOVERY`, `importRef` iff `INITIAL_REVIEW_IMPORT_SEGMENT`, `locateRef` iff
+`REVIEW_LOCATE`, `acquisitionRef` iff `REVIEW_ACQUISITION`; `EXPORT` and
 `API_ISSUANCE_GUIDANCE` carry none. A run bound to the wrong kind of approved work is thereby
 unrepresentable, and an *unknown* intent requires none — so a rejected intent cannot smuggle a binding
 through.
@@ -47,8 +62,8 @@ under an FE-owned copy key, like any other step copy.
 
 **Carrier kind.** v2 envelopes are spoken by several different agent worlds, so
 `contracts/action-window/aw-carrier-kind.ts` announces which: `export` (v1), `reply` (v2), `import`
-(v2), `issuance` (v2). Version alone cannot separate `reply` / `import` / `issuance`; an unrecognised or
-absent value fails closed rather than defaulting.
+(v2), `issuance` (v2), `locate` (v2), `renewal` (v2), `acquire` (v2). Version alone cannot separate the v2
+carriers; an unrecognised or absent value fails closed rather than defaulting.
 
 ## Location & ownership
 
@@ -104,8 +119,16 @@ versions **fail closed**; **FE cannot directly mutate Runtime state** — a comm
 ## Events (Runtime → FE)
 
 `RUN_STARTED · RUN_STATUS_CHANGED · STEP_READY · HUMAN_ACTION_REQUIRED · TARGET_HIGHLIGHTED ·
-USER_ACTION_OBSERVED · DOWNLOAD_DETECTED · STEP_COMPLETED · RUN_BLOCKED · RUN_COMPLETED ·
-RUN_FAILED`.
+USER_ACTION_OBSERVED · DOWNLOAD_DETECTED · STEP_COMPLETED · SUBMISSION_REPORTED · RUN_BLOCKED ·
+RUN_COMPLETED · RUN_OPERATOR_REPORTED · RUN_FAILED · COMPOSER_FILLED · SELLER_SUBMISSION_OBSERVED`.
+
+`COMPOSER_FILLED` / `SELLER_SUBMISSION_OBSERVED` (2026-08-28, product-owner decision) belong to the GUIDED
+`REPLY_SUBMISSION` run only. The first says the runtime set the approved draft into the ONE composer the
+seller opened — after the row matched the target hint, the review-id fingerprint matched, and exactly one
+composer was open; any ambiguity fails closed as `TARGET_AMBIGUOUS` and nothing is typed. The second says the
+seller's OWN submit was observed on that composer. Neither is a completion and neither reaches `VERIFIED`:
+the seller may edit the text before submitting, the runtime never clicks a submit control, and the run's
+terminal is still what the operator reports (`OPERATOR_REPORTED`).
 
 Envelope: `protocolVersion, eventId, runId, sequence, revision, type, occurredAt, payload`.
 Semantics: `sequence` is monotonic within a Run (the ordering authority — **not** `occurredAt`);

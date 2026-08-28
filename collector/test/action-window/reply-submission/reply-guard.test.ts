@@ -201,7 +201,15 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     "reply-session.ts": resolve(SRC, "reply-session.ts"),
     "reply-stages.ts": resolve(SRC, "reply-stages.ts"),
     "reply-surface.ts": resolve(SRC, "reply-surface.ts"),
+    "reply-execution-observer-client.ts": resolve(SRC, "reply-execution-observer-client.ts"),
+    "reply-submission-target-client.ts": resolve(SRC, "reply-submission-target-client.ts"),
+    "review-id-ladder-parse.ts": resolve(SRC, "review-id-ladder-parse.ts"),
+    "guided-fill-reply-driver.ts": resolve(SRC, "guided-fill-reply-driver.ts"),
+    "resident-reply-carrier.ts": resolve(SRC, "resident-reply-carrier.ts"),
   };
+  // The ONE exception, by name: the guided fill helper may call `.fill(` on the composer the driver tagged —
+  // and nothing else (Agentic Operating Workspace v2 §13). Submit/click/keyboard tokens stay forbidden there too.
+  const FILL_ONLY = { "reply-composer-fill.ts": resolve(SRC, "reply-composer-fill.ts") };
 
   // The map above is hand-maintained, so a NEW module is unguarded until someone remembers to add it — and
   // the most safety-critical module in this milestone was itself missing from it when a reviewer looked.
@@ -213,10 +221,20 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     const onDisk = readdirSync(SRC)
       .filter((f) => f.endsWith(".ts"))
       .sort();
-    const guarded = Object.keys(files).sort();
+    const guarded = [...Object.keys(files), ...Object.keys(FILL_ONLY)].sort();
     const unguarded = onDisk.filter((f) => !guarded.includes(f));
     expect(unguarded, `unguarded modules in ${SRC}`).toEqual([]);
   });
+
+  for (const [name, path] of Object.entries(FILL_ONLY)) {
+    const code = codeOnly(path);
+    it.each(NO_SUBMIT_TOKENS.filter((t) => t !== ".fill("))(`${name} (fill-only) never contains %s`, (token) => {
+      expect(code).not.toContain(token);
+    });
+    it(`${name} fills only the driver-tagged composer selector`, () => {
+      expect(code).toContain("[data-aw-reply-target]");
+    });
+  }
 
   for (const [name, path] of Object.entries(files)) {
     const code = codeOnly(path);

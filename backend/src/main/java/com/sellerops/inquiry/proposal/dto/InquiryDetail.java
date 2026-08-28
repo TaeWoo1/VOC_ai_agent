@@ -69,6 +69,12 @@ public record InquiryDetail(
         String productName,
         String productBinding,
         String sourceSubtype,
+        /**
+         * {@code MARKETPLACE} | {@code NONE} — whether this row is an object reviewnary could act on at its
+         * channel, derived from acquisition provenance only ({@code ExecutableIdentityResolver}). A file
+         * import with a NAVER label is {@code NONE}, and {@code NONE} gets drafts and style but no send.
+         */
+        String executableIdentity,
         Boolean answerStateProven,
         String answerStateNote,
         List<DraftEvidenceView> draftEvidence,

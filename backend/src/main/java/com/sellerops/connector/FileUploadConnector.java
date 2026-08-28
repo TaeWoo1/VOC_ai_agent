@@ -103,7 +103,9 @@ public class FileUploadConnector implements ChannelConnector {
                 case REVIEW -> {
                     MapResult<CanonicalReview> r = reviewMapper.map(table);
                     mapErrors = r.errors();
-                    outcome = ingestionService.ingestReviews(orgId, channelId, r.ok());
+                    // The run is already open, so every inserted review carries its provenance (V83):
+                    // this is where SELLER_CENTER_EXPORT and MANUAL_UPLOAD stop being the same row.
+                    outcome = ingestionService.ingestReviews(orgId, channelId, r.ok(), job.getId());
                 }
                 case INQUIRY -> {
                     MapResult<CanonicalInquiry> r = inquiryMapper.map(table);

@@ -44,5 +44,7 @@ public record ChannelReviewItemView(
          * {@link AiTriageMarkView}. When present the row sorts with 확인 필요; {@code triage.tier} still
          * says what the RULE decided, and the two are shown side by side rather than merged.
          */
-        AiTriageMarkView aiMark) {
+        AiTriageMarkView aiMark,
+        /** {@code MARKETPLACE} | {@code NONE} — see {@code RecentReviewItemView.executableIdentity}. */
+        String executableIdentity) {
 }

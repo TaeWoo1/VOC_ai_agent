@@ -1,4 +1,4 @@
-# reviewnary Design Contract v2
+# reviewnary Design Contract v3
 
 **Status:** 2026-08-27 · Reviewnary Product UI Redesign v1 + **Contextual Agent Workspace & Interactive UX QA v1** (§8-A, §8-B) · `frontend/` only · **source of truth for new UI**
 
@@ -158,14 +158,14 @@ Extracted because the redesign needed them on more than one screen. They live in
 **Global shell.** Sidebar: wordmark, workspace name, two groups of nav, and at the bottom a
 **secondary** connection-health line (「연결 문제 3건」 as a small warn word with a dot, not a pill in
 the top-right of every page). No desktop top bar — the page title starts the page. No floating AI
-button: the Agent is entered from the home command box and from `AgentAction` in the context that
-owns the object.
+button: the Agent is the home conversation and the contextual panel (`AgentLaunch`, an open-ended
+「…에 대해 물어보기」) in the context that owns the object.
 
-**홈.** Briefing sentence (2xl) → command box → **먼저 볼 일** (prepared drafts · AI가 먼저 확인한 일 ·
-findings, all as `WorkItem` rows in one container) → **숫자** (compact metric row with the window
-control; one shared freshness line, not one per card) → **추이** (one wide chart, others behind the
-number they belong to) → 채널별 table → 「이 숫자에 대하여」 as a disclosure. The sentence is arithmetic
-over the rows rendered under it. Zero gets its own sentence.
+**홈.** The conversation (§8-A): greeting line (2xl, arithmetic) → compact context strip (3 numbers +
+one shared freshness line + 「자세한 숫자 보기」) → timeline (the proactive first turn, then the seller's
+turns and the operator's artifacts) → composer (sticky) → suggested prompts. No KPI grid, no chart wall,
+no feature buttons: the numbers the seller asks for come back as artifacts, and the old dashboard lives at
+`/overview`. Zero gets its own sentence.
 
 **상품.** An object list, not a SKU table: name → `채널 · 문의 N · 리뷰 N · 답변 기준 N · 미답변 N` →
 [열기]. Ordered by what needs attention (unanswered, then issue evidence, then reviews), so an
@@ -193,50 +193,121 @@ a row with a one-line meaning and one action. No card wall.
 
 ---
 
-## 8. The Agent
+## 8. The Agent — conversation-first, object-backed (v3, Agentic Operating Workspace v2)
 
-- **Observe → Investigate → Decide → Prepare → Ask → Execute** has to be legible: 「AI가 먼저 확인한 일」
-  is *observe/investigate*, a prepared draft is *prepare*, the answer-state card and the approval CTA are
-  *ask*, and the send behind the confirmation step is *execute*. Each is a structured object, not prose.
-- The briefing sentence counts rendered objects; no model is called to write it.
-- An Agent answer is rendered as the objects it cites, with links into the surfaces that own them.
-- Every operations surface offers `AgentAction` with a label that names the object in view; the home
-  command box is the free-text entry. The Agent's tool catalogue is READ-only; nothing here sends.
+reviewnary's primary interaction is a **conversation with an AI operator**. The seller hands over work in
+their own words; the operator investigates real data, asks for one human step only when it must, returns
+**structured artifacts**, keeps the thread across follow-ups and across screens, and hands off to a
+workspace or to Human Approval when that is the better tool. Text-only chat is forbidden; a menu of
+predefined AI buttons is forbidden as the primary path.
 
-### 8-A. The contextual Agent panel
+**Conversation vs workspace.** Conversation = where work is delegated, investigated, decided and prepared.
+Workspace (문의 / 리뷰 / 상품 / 주문 / 채널 / 설정) = where many objects are read precisely, handled in bulk,
+or explored deeply. An artifact links into the workspace (「전체 8건 처리하기」); the conversation does not
+end when the seller goes there — the same thread continues in the contextual panel.
 
-The workspace is primary; the Agent attaches to it like a colleague who can see the same screen.
+### 8-A. Home = the conversation
 
 | Rule | Value |
 |---|---|
-| Default | **closed**. Nothing opens it but a press. |
-| Entry | one launcher per operations page, in the page header, labelled with the object in view (`AgentLaunch`) — never a floating bubble, never two launchers on one screen. The home has no launcher: its command box is the entry. |
-| Width | **400px**, one width. No resize handle. |
-| ≥ 1440px | **docked** beside the page (in the flow; the page keeps its own scroll and shrinks). The seller may unpin it to an overlay; the choice is remembered per browser. |
-| < 1440px | **overlay** on the right edge, no backdrop — the list the seller was reading stays visible to its left. Full width below `md`. |
-| Header | `✳︎ AI 담당자` + the page's registered surface label (「이 상품 · 선바로 몰딩」, 「문의 목록」, 「주문 · 최근 7일」). It follows the route; it never claims a page the seller has left. |
-| Box | a two-line input. A launcher **lands** its sentence in it and the seller sends; the home command box **runs** its sentence because the seller already pressed send there. |
-| Context | structured (`productId` / `workItemId` / `channelCode` / `surface`) on the request, verified by the runtime with one org-scoped read each. **Never appended to the sentence.** A launcher may say 「이 문의」 only while it holds the row's work-item id; until then it offers the list goal (Contextual Agent Contract Completion v1). |
-| Planner context | what the screen fixed is told to the planner as closed words (`(INQUIRY)` / `(PRODUCT)` fixed) through the run-state seam — never an id, a channel, a name or a customer word. |
-| Result | the same `OperatorAnswerView` the `/agent` page renders: findings as statements with their evidence lines, the products it cites as rows with 「확인하기」, next actions as links. No planner id, no model name, no provenance string in the panel. |
-| Waiting | 「확인하는 중 · N초」 — a measured clock, never a bar. |
-| Failure | a real state: 「이 요청은 계획을 세우지 못했습니다」 + the runtime's reason. Never an empty success. |
-| Sending | a sentence that asks to send gets the approval boundary printed under the box **before** the wait: 「보내는 일은 AI 담당자가 하지 않습니다 …」. The panel imports nothing that can publish, approve or resume (structural test). |
-| Dependency down | notice **above** the box, controls disabled, no run started to learn what the page already knows. |
-| Keyboard | Esc closes; the box is focused on open; Enter sends, Shift+Enter breaks a line. |
-| Full page | `/agent` remains (footer link) for long investigations and the checkpoint lanes; the panel is the everyday entry. |
+| Order | greeting line → compact context strip (3 numbers + one freshness line + 「자세한 숫자 보기」→`/overview`) → conversation timeline → composer (sticky at the bottom on desktop) → suggested prompts |
+| Greeting | arithmetic, never a model: 「좋은 아침입니다. 오늘 제가 먼저 확인한 일이 N개 있습니다.」 / 「…먼저 확인한 일은 없습니다.」 |
+| First turn | the proactive cases the agent already prepared, as artifacts (`INQUIRY_LIST`/`LIST`). Actual zero renders as zero — no fixture. |
+| Composer | one two-line box, Enter sends, Shift+Enter breaks; the send fence sentence appears under the box the moment the sentence asks to send |
+| Suggested prompts | chips are examples (「오늘 리뷰 뭐 들어왔어?」「이번 주 매출 왜 이래?」…), never the capability boundary; anything typed goes to the planner |
+| Shortcuts | exact-match only (a chip label); a match renders a local turn labelled 「바로 보기」. Containment matching is forbidden — that is how 「오늘 새 리뷰」 became 「리뷰 문제」 |
+| History | 「새 대화」 and 「지난 대화」 (the seller's own first sentences); the current thread survives reload and navigation |
+| Dashboard | the old KPI/chart page lives at `/overview`; numbers the seller asks for arrive as `METRIC` / `ORDER_SUMMARY` / `CHART` artifacts in the thread |
 
-### 8-B. Interactive analytics
+### 8-B. Turn anatomy
+
+- **User turn**: the sentence, right-aligned, plain.
+- **Agent turn**: one or two deterministic sentences (a count, a clarification, or the reason it failed) →
+  artifacts → suggested follow-ups (chips) → 「확인한 자료」 disclosure (`EVIDENCE`: what was read, how much,
+  for which dates, whether any of it could not be judged).
+- **Progress**: only the stages the runtime reached, in order, each with a check and the elapsed clock —
+  「요청을 이해하고 있습니다」「관련 리뷰를 확인하고 있습니다」「확인한 내용을 검토하고 있습니다」. No bar, no
+  animated steps nobody measured.
+- **Failure**: a real state with the runtime's reason. Never an empty success, never a canned object.
+
+### 8-C. Artifact vocabulary (closed)
+
+`SUMMARY · METRIC · LIST · TABLE · REVIEW_LIST · INQUIRY_LIST · PRODUCT_LIST · ISSUE_LIST · ORDER_SUMMARY ·
+CHART · DRAFT · EVIDENCE · CHECKLIST · HUMAN_ACTION_REQUIRED · APPROVAL · EXECUTION_RESULT · WORKSPACE_LINK`
+
+Each renders with the existing primitives (`WorkItem`, `ObjectRow`, `Status`, compact `Metric`, `TrendChart`,
+`Section`/`ListBox`) — no new component library. A result with no dedicated artifact is a `LIST`/`TABLE`/
+`SUMMARY`. No planner id, model name, locator or raw enum reaches the screen.
+
+### 8-D. Follow-up behaviour
+
+A follow-up is read against the previous working set: 「안 좋은 것만」「카페24만 봐봐」「상품별로 묶어줘」
+「문의에서도 같은 얘기 있어?」「첫 번째 거 답변 준비해줘」「조금 더 부드럽게」「좋아 보내자」. The artifact changes
+to match (filtered list, grouped products, cross-domain list, draft, approval). The set is ids + closed
+filters; the customer's words are never part of it.
+
+### 8-E. HumanActionRequired
+
+A step only the seller can take is a state, not an error: headline (「새 리뷰를 확인하려면 리뷰 가져오기가
+필요합니다」), the channel, the reason, **one primary** (「지금 리뷰 가져오기」 for the product's own one-press
+collection; 「직접 진행하기」 into the existing flow otherwise) and 「계속 확인하기」. When the step completes
+the original request resumes and its result lands in the same thread (「새 리뷰 가져오기가 끝났습니다. 계속
+확인하겠습니다.」).
+
+### 8-F. Approval and execution
+
+「보내자」 produces an `APPROVAL` artifact bound to the exact draft version and fingerprint. Sending requires
+the same two-step confirm the inquiry screen uses (a first press reveals 「승인하고 전송」); the conversation
+modules import nothing that can publish except that one artifact (structural test). The verified result
+returns as `EXECUTION_RESULT`. Ambiguous results are never retried automatically.
+
+### 8-G. The contextual panel
+
+The panel on every workspace page is **the same conversation**: 400px, closed by default, docked ≥ 1440px,
+overlay below, Esc closes. The header names the object in view; the launcher opens the panel with the
+structured hint only (empty box, 「이 상품에 대해 무엇이든 물어보세요」) — it is not a feature button. Surface
+chips (≤ 3) are examples. Navigating from an artifact link opens the panel so the thread continues beside
+the workspace.
+
+### 8-G′. Channel capability, as artifacts
+
+The conversation never explains API differences in prose. The artifact itself says what happens next:
+
+| Situation | What renders |
+|---|---|
+| review channel automatic + stale | a `REFRESHING` stage, then the rows — no card asks the seller anything |
+| review channel guided + stale (NAVER / Coupang) | `HUMAN_ACTION_REQUIRED` per channel: 「네이버 리뷰 가져오기」 / 「쿠팡 리뷰 가져오기」 + 「일단 확인된 리뷰 보기」; the guided panel opens inline; pairing inline when no helper; file upload as a secondary link, never the primary |
+| partial completion | 「네이버 리뷰 확인이 끝났습니다. 쿠팡도 확인할까요?」 + `[쿠팡 확인] [지금까지 보기]`, working set kept |
+| reply on an API channel (Cafe24 review, NAVER/Cafe24/Coupang inquiry) | `DRAFT` → `APPROVAL` 「승인하고 게시」 with the two-step confirm → `EXECUTION_RESULT` |
+| reply on a guided channel (NAVER review) | `DRAFT` → `GUIDED_EXECUTION` 「네이버에서 답변하기」: the review is found, the draft is placed, 「등록은 판매자님이 누릅니다」 |
+| reply not supported (Coupang review) | one honest sentence + next-step chips (비슷한 리뷰 더 찾기 · 관련 문의 확인 · 상품 문제 조사 · 상세페이지 개선 검토) — no draft, no CTA |
+| object without marketplace identity (file-imported row) | draft + copy only, 「이 문의는 파일로 가져온 기록이라 채널로 보낼 수 없습니다」 |
+
+Copy rule: the seller performs the platform's own confirmations; reviewnary prepares, detects, ingests and resumes.
+Never 「한 번 클릭」 as a promise.
+
+### 8-H. Proactive messages
+
+What the agent found on its own enters the timeline as its first turn, in the same artifact vocabulary, with
+「근거」 and a follow-up prompt. It reuses the Proactive Operations Agent's cases; it does not invent work.
+
+### 8-I. Responsive
+
+≥ 1440: timeline 1120 + docked panel. 1366×768 and 1152×720: the composer stays visible above the fold,
+timeline scrolls inside `main`, panel overlays. Below `md`: one column, panel full width, composer above the
+tab bar. Long threads (8+ turns, several artifacts) must not break scroll, focus or the composer position.
+
+### 8-J. Interactive analytics (unchanged)
 
 A chart is an operational control or it is decoration; this product ships only the first kind.
 
 - **Hover and keyboard show exact values.** Every point is a band; the nearest band's date and each visible series' exact value render in one tooltip (`₩574,990`, `30건`), and ←/→ on the focused chart reach the same index with the same tooltip and an `aria-live` sentence. The sr-only table stays as the verification path.
 - **The legend toggles.** Each series is a button with `aria-pressed`; the last visible series cannot be hidden.
 - **Units decide the scale.** Same unit ⇒ one shared scale (「of which」 never looks larger than its whole). Different units (매출 · 주문) ⇒ each on its own scale **and the caption names both maxima**.
-- **A click does something or is not offered.** Bands get a pointer cursor, a 「눌러서 이 날 보기」 line and Enter only when the surface can honour a single-day view (`/orders?date=`). Inquiry and review series have no day filter, so their points are inert and the card links to the screen instead. No hover affordance for a click the backend cannot answer.
-- **Cross-filter: the URL is the state.** `주문` reads `?days=`, `?channel=`, `?date=`; the range control, the channel select, the channel-table rows and the chart bands all write to it; KPI, chart and table read one response per filter. A drilled-in day labels its figures with the day and keeps the chart on the window with the day highlighted (a one-point line is not a trend). The home's window control drives the same `days` into its own request and into its links.
+- **A click does something or is not offered.** Bands get a pointer cursor, a 「눌러서 이 날 보기」 line and Enter only when the surface can honour a single-day view (`/orders?date=`). Inquiry and review series have no day filter, so their points are inert and the card links to the screen instead.
+- **Cross-filter: the URL is the state.** `주문` reads `?days=`, `?channel=`, `?date=`; the range control, the channel select, the channel-table rows and the chart bands all write to it; KPI, chart and table read one response per filter.
 - **Sparse date ticks** (first, last, up to three between) so a 30-day line has a calendar.
-- **Interaction states**: hover (canvas tint), focus (`ring-2 ring-brand-700`), pressed (`aria-pressed` + surface/shadow), disabled (opacity 50, no pointer), loading (one line). Every clickable row and band is reachable by keyboard.
+- **Interaction states**: hover (canvas tint), focus (`ring-2 ring-brand-700`), pressed (`aria-pressed`), disabled (opacity 50, no pointer), loading (one line). Every clickable row and band is reachable by keyboard.
 
 ---
 

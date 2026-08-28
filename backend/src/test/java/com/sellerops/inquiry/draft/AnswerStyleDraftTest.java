@@ -158,6 +158,45 @@ class AnswerStyleDraftTest {
         assertThat(second.sawStyle).as("and the ONLY thing that moved").isNotEqualTo(first.sawStyle);
     }
 
+    @Test
+    @DisplayName("C2 — a conversation tone hint moves the style section only; the facts are byte-identical")
+    void toneHintDoesNotTouchTheFacts() {
+        UUID work = groundedInquiry();
+        StubModel plain = grounded();
+        composer(plain).generate(org, work, user);
+
+        StubModel softer = grounded();
+        composer(softer).generate(org, work, user, ToneHint.SOFTER);
+
+        assertThat(softer.sawKnowledge).isEqualTo(plain.sawKnowledge);
+        assertThat(softer.sawOrderState).isEqualTo(plain.sawOrderState);
+        assertThat(softer.sawSpecScope).isEqualTo(plain.sawSpecScope);
+        assertThat(softer.sawTitle).isEqualTo(plain.sawTitle);
+        assertThat(softer.sawDetails).isEqualTo(plain.sawDetails);
+        assertThat(plain.sawStyle).as("no profile, no hint: no style section").isNull();
+        assertThat(softer.sawStyle).as("the hint is the org tone, overridden, in our words")
+                .contains(AnswerTone.FRIENDLY.instructionKo());
+
+        StubModel shorter = grounded();
+        composer(shorter).generate(org, work, user, ToneHint.SHORTER);
+        assertThat(shorter.sawStyle).contains(AnswerLength.SHORT.instructionKo());
+        assertThat(shorter.sawKnowledge).isEqualTo(plain.sawKnowledge);
+        assertThat(shorter.sawDetails).isEqualTo(plain.sawDetails);
+
+        // The overridden profile is what the stamp sees, so the identity moved without a new column.
+        assertThat(styles.profileFor(org).isDefault()).as("and the org setting itself did not move").isTrue();
+    }
+
+    @Test
+    @DisplayName("C3 — a hint over NO_ANSWER_BASIS is ignored: no model, no draft, same as before")
+    void toneHintIgnoredWithoutBasis() {
+        StubModel model = grounded();
+        GeneratedDraftView view = composer(model).generate(org, unanswerableInquiry(), user, ToneHint.SOFTER);
+
+        assertThat(model.calls).isZero();
+        assertThat(view.draft()).isNull();
+    }
+
     // ---------------------------------------------------------------- D
 
     @Test

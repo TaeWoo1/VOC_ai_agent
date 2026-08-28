@@ -52,8 +52,10 @@ const SPECIALIST_SOURCES: Partial<Record<SpecialistName, string>> = {
   PRODUCT_OPS: "productOps.ts",
   REVIEW_OPS: "reviewOps.ts",
   INQUIRY_OPS: "inquiryOps.ts",
+  ORDER_OPS: "orderOps.ts",
   REPORT_OPS: "reportOpsNode.ts",
 };
+const ALL_SPECIALISTS: SpecialistName[] = ["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS", "ORDER_OPS", "REPORT_OPS"];
 
 /**
  * A specialist's source, plus every graph-local module it imports.
@@ -208,10 +210,7 @@ describe("the planner is only shown tools something can run", () => {
     await runtime.run("t-catalogue", { text: GOAL });
 
     const advertised = planner.seen!.catalogue.map((line) => line.split(":")[0]!.trim());
-    const executable = new Set(
-      (["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS", "REPORT_OPS"] as SpecialistName[])
-        .flatMap((s) => invokedBy(s)),
-    );
+    const executable = new Set(ALL_SPECIALISTS.flatMap((s) => invokedBy(s)));
     expect(advertised.length).toBeGreaterThan(0);
     expect(advertised.filter((name) => !executable.has(name))).toEqual([]);
     // The names go to the validator separately from the description lines — they are different shapes,
@@ -243,7 +242,7 @@ describe("the planner is only shown tools something can run", () => {
   });
 
   it("every tool a specialist invokes is declared in the capability matrix, and vice versa", () => {
-    for (const specialist of ["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS", "REPORT_OPS"] as SpecialistName[]) {
+    for (const specialist of ALL_SPECIALISTS) {
       expect(invokedBy(specialist), `${specialist} invocations`)
         .toEqual([...toolsFor(specialist)].sort());
     }
@@ -273,7 +272,7 @@ describe("the planner is only shown tools something can run", () => {
     // never exercised look like a read that happened. `get_inquiry_thread_context` was on the POLICY gap.
     const reachable = new Set(reachableToolNames());
     const byKey = new Map(Object.entries(OPERATOR_TOOL).map(([k, v]) => [k, v as string]));
-    for (const specialist of ["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS"] as SpecialistName[]) {
+    for (const specialist of ["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS", "ORDER_OPS"] as SpecialistName[]) {
       for (const match of sourceOf(specialist).matchAll(/sourceTool: OPERATOR_TOOL\.([A-Z_]+)/g)) {
         expect(reachable.has(byKey.get(match[1]!)!), `${specialist} stamps ${match[1]}`).toBe(true);
       }

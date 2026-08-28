@@ -37,6 +37,12 @@ export interface ReviewSpringClient {
   listReplyWork(accountId: string, params: ListReplyWorkParams): Promise<ReviewReplyWorkResponse>;
   /** Full reply-preparation context for one review (redacted body, suggestion, draft, approval). */
   getReviewReplyPrep(accountId: string, actionRef: string): Promise<ReviewReplyPrepView>;
+  /**
+   * Record the seller's triage decision on a review (`POST …/items/{actionRef}/triage`). The reply seam
+   * saves a draft only for a review marked 대응 필요 — and 「이 리뷰 답변해줘」 IS that decision, made in words.
+   * A local record, never a marketplace call.
+   */
+  recordReviewTriage(accountId: string, actionRef: string, request: { commandId: string; disposition: "RESPONSE_NEEDED" | "MONITOR" | "NO_ACTION" }): Promise<unknown>;
   /** Save an append-only reply-draft version; returns the version + content fingerprint. */
   saveReviewDraft(
     accountId: string,

@@ -60,6 +60,7 @@ class OperatorReviewReplyControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockBean ReviewReplyService service;
+    @MockBean com.sellerops.review.publish.ReviewReplyExecutionService executions;
     @MockBean JwtTokenProvider tokenProvider;
     /**
      * The token's organization has to exist for the request to be authenticated at all: `JwtAuthFilter` checks,
@@ -204,7 +205,12 @@ class OperatorReviewReplyControllerTest {
         // GUIDED submission run + record the operator's UNVERIFIED report. Still nothing that sends:
         // /submission-run mints an opaque binding and /outcome records a local operator report — the
         // operator posts the reply themselves; no route here calls a marketplace.
-        assertThat(mapped).containsExactlyInAnyOrder("/draft", "/approval", "/submission-run", "/outcome");
+        // Agentic Operating Workspace v2 (2026-08-28) adds the review execution seam: /execute is the ONE route
+        // that reaches a marketplace, and only behind an APPROVED head + matching fingerprint + the execution
+        // flag + the channel's write grant (Cafe24 comment adapter); /execution reads the row; /execution/observe
+        // records the guided-fill observations. None of them "sends" on its own initiative.
+        assertThat(mapped).containsExactlyInAnyOrder("/draft", "/approval", "/submission-run", "/outcome",
+                "/execute", "/execution", "/execution/observe");
     }
 
     private static void assertNotOutbound(String path) {

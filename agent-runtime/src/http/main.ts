@@ -14,18 +14,17 @@ import { RunStoreProvider } from "./runStoreProvider";
 import { defaultSpringClientFactory } from "./springClientFactory";
 import { AgentRunService } from "./AgentRunService";
 import { createHttpServer } from "./server";
+import { ConversationService } from "../conversation/ConversationService";
 import { log } from "../log";
 
 function main(): void {
   const config = loadConfig();
   // Throws ProductionStoreNotConfiguredError before any port is opened if the store is unsafe here.
   const storeProvider = new RunStoreProvider(config);
-  const service = new AgentRunService({
-    storeProvider,
-    clientFactory: defaultSpringClientFactory(config.backendBaseUrl),
-    env: config.env,
-  });
-  const server = createHttpServer(service, config);
+  const clientFactory = defaultSpringClientFactory(config.backendBaseUrl);
+  const service = new AgentRunService({ storeProvider, clientFactory, env: config.env });
+  const conversations = new ConversationService({ storeProvider, clientFactory });
+  const server = createHttpServer(service, config, { conversations });
 
   server.listen(config.port, () => {
     log("agent_runtime_listening", {

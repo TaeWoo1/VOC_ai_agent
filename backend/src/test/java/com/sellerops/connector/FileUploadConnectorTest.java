@@ -95,7 +95,7 @@ class FileUploadConnectorTest {
     @Test
     void reviewUploadTriggersAnalysisOnInsertedIds() {
         List<UUID> inserted = List.of(UUID.randomUUID(), UUID.randomUUID());
-        when(ingestionService.ingestReviews(eq(org), eq(channel), any()))
+        when(ingestionService.ingestReviews(eq(org), eq(channel), any(), any()))
                 .thenReturn(new IngestOutcome(2, 0, 0, List.of(), inserted));
         when(itemAnalysis.analyzeForSources(eq(org), eq("REVIEW"), eq(inserted)))
                 .thenReturn(new RunResult(2, 0));
@@ -122,7 +122,7 @@ class FileUploadConnectorTest {
     @Test
     void analysisFailureDoesNotFailUpload() {
         List<UUID> inserted = List.of(UUID.randomUUID());
-        when(ingestionService.ingestReviews(eq(org), eq(channel), any()))
+        when(ingestionService.ingestReviews(eq(org), eq(channel), any(), any()))
                 .thenReturn(new IngestOutcome(1, 0, 0, List.of(), inserted));
         when(itemAnalysis.analyzeForSources(any(), any(), any()))
                 .thenThrow(new RuntimeException("analyzer boom"));
@@ -146,7 +146,7 @@ class FileUploadConnectorTest {
 
     @Test
     void uploadOpensRunWithFaithfulShapePlusManualUploadMethod() {
-        when(ingestionService.ingestReviews(eq(org), eq(channel), any()))
+        when(ingestionService.ingestReviews(eq(org), eq(channel), any(), any()))
                 .thenReturn(new IngestOutcome(3, 0, 0, List.of(), List.of()));
 
         connector.ingest(org, channel, UploadType.REVIEW, "r.csv", data());
@@ -166,7 +166,7 @@ class FileUploadConnectorTest {
 
     @Test
     void exportUploadStampsSellerCenterExportMethod() {
-        when(ingestionService.ingestReviews(eq(org), eq(channel), any()))
+        when(ingestionService.ingestReviews(eq(org), eq(channel), any(), any()))
                 .thenReturn(new IngestOutcome(3, 0, 0, List.of(), List.of()));
 
         connector.ingest(org, channel, UploadType.REVIEW, "r.csv", data(),
@@ -191,7 +191,7 @@ class FileUploadConnectorTest {
 
     @Test
     void nullMethodDefaultsToManualUpload() {
-        when(ingestionService.ingestReviews(eq(org), eq(channel), any()))
+        when(ingestionService.ingestReviews(eq(org), eq(channel), any(), any()))
                 .thenReturn(new IngestOutcome(1, 0, 0, List.of(), List.of()));
 
         connector.ingest(org, channel, UploadType.REVIEW, "r.csv", data(), /*method*/ null);
@@ -214,7 +214,7 @@ class FileUploadConnectorTest {
 
     @Test
     void finalizeReceivesTalliesAndRawFirstError() {
-        when(ingestionService.ingestReviews(eq(org), eq(channel), any()))
+        when(ingestionService.ingestReviews(eq(org), eq(channel), any(), any()))
                 .thenReturn(new IngestOutcome(2, 1, 1, List.of(new RowError(5, "bad cell")), List.of()));
 
         IngestResult result = connector.ingest(org, channel, UploadType.REVIEW, "r.csv", data());
@@ -246,7 +246,7 @@ class FileUploadConnectorTest {
 
     private String statusFor(int success, int skipped, int failed) {
         List<RowError> errors = failed > 0 ? List.of(new RowError(2, "row error")) : List.of();
-        when(ingestionService.ingestReviews(eq(org), eq(channel), any()))
+        when(ingestionService.ingestReviews(eq(org), eq(channel), any(), any()))
                 .thenReturn(new IngestOutcome(success, skipped, failed, errors, List.of()));
         return connector.ingest(org, channel, UploadType.REVIEW, "r.csv", data()).status();
     }

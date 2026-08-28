@@ -171,6 +171,32 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     requires: ["CHANNEL_SCOPE_OR_GROUPING"],
   },
 
+  {
+    // Agentic Operating Workspace v2: review ROWS in a window, with the freshness of every channel
+    // beside them. The only read that can answer 「오늘 새 리뷰」 — the issue list has no period.
+    specialist: "REVIEW_OPS",
+    tool: OPERATOR_TOOL.LIST_RECENT_REVIEWS,
+    needKinds: ["REVIEW_SIGNAL"],
+    requires: ["NONE"],
+  },
+  {
+    // Channel-capability completion: read ONLY for a channel whose rows are stale, to decide between
+    // the product's own refresh and the seller's guided step. The registry decision table lives in
+    // `graph/reviewRows.ts`; this row is what lets that read happen under the plan's authorization.
+    specialist: "REVIEW_OPS",
+    tool: OPERATOR_TOOL.GET_CHANNEL_EXECUTION_CAPABILITY,
+    needKinds: ["REVIEW_SIGNAL"],
+    requires: ["NONE"],
+  },
+
+  // ── OrderOps — the order/sales flow (Agentic Operating Workspace v2).
+  {
+    specialist: "ORDER_OPS",
+    tool: OPERATOR_TOOL.GET_SALES_TREND,
+    needKinds: ["ORDER_HISTORY"],
+    requires: ["NONE"],
+  },
+
   // ── InquiryOps — the queue, the repeats, and what was answered before.
   {
     specialist: "INQUIRY_OPS",
@@ -200,6 +226,14 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     specialist: "INQUIRY_OPS",
     tool: OPERATOR_TOOL.LIST_REPEATED_INQUIRIES,
     needKinds: ["REPEAT_PATTERN"],
+    requires: ["NONE"],
+  },
+  {
+    // Agentic Operating Workspace v2: the queue, classified. An org-wide list read; the working-set and
+    // topic arguments narrow rows the planner already asked for, and need nothing resolved first.
+    specialist: "INQUIRY_OPS",
+    tool: OPERATOR_TOOL.LIST_INQUIRY_WORKLOAD,
+    needKinds: ["INQUIRY_VOLUME"],
     requires: ["NONE"],
   },
   {

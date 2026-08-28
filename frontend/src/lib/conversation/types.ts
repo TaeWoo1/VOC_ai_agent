@@ -1,0 +1,479 @@
+/**
+ * Wire types for the Agent Runtime's CONVERSATION surface — a hand-kept mirror of
+ * `agent-runtime/src/conversation/contract.ts`. The runtime is the source of truth; this file only
+ * repeats the shapes so the UI can type them. Nothing here is a Spring DTO.
+ *
+ * Privacy: fields marked transient (a review preview, an inquiry title, a draft body) arrive on a live
+ * turn and are absent on a reloaded conversation — the runtime strips them before it persists.
+ */
+import type { OperatorAnswer } from "../agentRuntime/types";
+import type { ChannelDataState } from "../types";
+
+export type ArtifactType =
+  | "SUMMARY"
+  | "METRIC"
+  | "LIST"
+  | "TABLE"
+  | "REVIEW_LIST"
+  | "INQUIRY_LIST"
+  | "PRODUCT_LIST"
+  | "ISSUE_LIST"
+  | "ORDER_SUMMARY"
+  | "CHART"
+  | "DRAFT"
+  | "EVIDENCE"
+  | "CHECKLIST"
+  | "HUMAN_ACTION_REQUIRED"
+  | "APPROVAL"
+  | "GUIDED_EXECUTION"
+  | "EXECUTION_RESULT"
+  | "WORKSPACE_LINK";
+
+export type StatusTone = "good" | "warn" | "bad" | "info" | "neutral";
+
+export interface WorkspaceLink {
+  label: string;
+  to: string;
+  count?: number;
+}
+
+interface ArtifactBase {
+  artifactId: string;
+  type: ArtifactType;
+  title: string;
+  note?: string;
+}
+
+export interface SummaryArtifact extends ArtifactBase {
+  type: "SUMMARY";
+  lines: string[];
+}
+
+export interface MetricArtifact extends ArtifactBase {
+  type: "METRIC";
+  metrics: Array<{
+    label: string;
+    value: number;
+    unit: "건" | "원" | "%" | "";
+    previous?: number | null;
+    deltaPercent?: number | null;
+    to?: string;
+  }>;
+}
+
+export interface ListArtifact extends ArtifactBase {
+  type: "LIST";
+  items: Array<{
+    id: string;
+    primary: string;
+    secondary?: string;
+    status?: { label: string; tone: StatusTone };
+    to?: string;
+  }>;
+  totalCount?: number;
+  more?: WorkspaceLink;
+}
+
+export interface TableArtifact extends ArtifactBase {
+  type: "TABLE";
+  columns: Array<{ key: string; label: string; align?: "left" | "right" }>;
+  rows: Array<Record<string, string | number | null>>;
+}
+
+export type PeriodToken =
+  | "TODAY"
+  | "YESTERDAY"
+  | "LAST_7_DAYS"
+  | "LAST_14_DAYS"
+  | "LAST_30_DAYS"
+  | "THIS_WEEK"
+  | "LAST_WEEK";
+
+export interface DateWindow {
+  from: string;
+  to: string;
+  token: PeriodToken | null;
+}
+
+export type FreshnessVerdict = "FRESH" | "UNPROVEN" | "NOT_COLLECTED" | "NOT_SUPPORTED" | "NOT_CONNECTED";
+
+export interface FreshnessRow {
+  channelCode: string;
+  channelNameKo: string | null;
+  state: ChannelDataState;
+  verdict: FreshnessVerdict;
+  lastSuccessfulSyncAt: string | null;
+  newestObservedAt: string | null;
+}
+
+export interface ReviewItem {
+  reviewId: string;
+  accountId: string;
+  channelCode: string;
+  channelNameKo: string | null;
+  writtenOn: string | null;
+  rating: number | null;
+  negative: boolean;
+  preview?: string | null;
+  productId: string | null;
+  productName: string | null;
+  executableIdentity?: ExecutableIdentity;
+  to: string;
+}
+
+export interface ReviewListArtifact extends ArtifactBase {
+  type: "REVIEW_LIST";
+  scope: { channelCode: string | null; period: DateWindow | null; rating: "ALL" | "LOW"; productId?: string | null };
+  totalCount: number;
+  items: ReviewItem[];
+  freshness: FreshnessRow[];
+  more?: WorkspaceLink;
+}
+
+export type InquiryGroupKey = "DRAFT_READY" | "NEEDS_CLARIFICATION" | "KNOWLEDGE_MISSING" | "UNANSWERED";
+
+export interface InquiryItem {
+  workItemId: string;
+  inquiryId: string;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  receivedAt: string;
+  phase: string;
+  status: string;
+  title?: string | null;
+  productId: string | null;
+  productName: string | null;
+  answerBasis: string | null;
+  sourceSubtype?: string | null;
+  executableIdentity?: ExecutableIdentity;
+  to: string;
+}
+
+export interface InquiryListArtifact extends ArtifactBase {
+  type: "INQUIRY_LIST";
+  groups: Array<{ key: InquiryGroupKey; label: string; items: InquiryItem[] }>;
+  totalCount: number;
+  more?: WorkspaceLink;
+}
+
+export interface ProductListArtifact extends ArtifactBase {
+  type: "PRODUCT_LIST";
+  items: Array<{ productId: string; productName: string; facts: Array<{ label: string; count: number }>; to: string }>;
+}
+
+export interface IssueListArtifact extends ArtifactBase {
+  type: "ISSUE_LIST";
+  items: Array<{
+    issueId: string;
+    title: string;
+    severity: string;
+    evidenceCount: number;
+    firstOn: string | null;
+    lastOn: string | null;
+    productId: string | null;
+    productName: string | null;
+    to: string;
+  }>;
+}
+
+export interface OrderSummaryArtifact extends ArtifactBase {
+  type: "ORDER_SUMMARY";
+  period: DateWindow & { days: number };
+  channelCode: string | null;
+  totals: {
+    orders: number;
+    sales: number;
+    previousOrders: number | null;
+    previousSales: number | null;
+    ordersDeltaPercent: number | null;
+    salesDeltaPercent: number | null;
+  };
+  channels: Array<{ channelCode: string; channelNameKo: string; orders: number; sales: number; state: ChannelDataState }>;
+  exampleDataIncluded: boolean;
+  exclusions: string[];
+  to: string;
+}
+
+export interface ChartArtifact extends ArtifactBase {
+  type: "CHART";
+  unit: "원" | "건";
+  series: Array<{ key: string; label: string; points: Array<{ date: string; value: number }> }>;
+  period: DateWindow;
+  caption?: string;
+  to?: string;
+}
+
+export type ToneHint = "SOFTER" | "MORE_FORMAL" | "SHORTER";
+
+export interface DraftArtifact extends ArtifactBase {
+  type: "DRAFT";
+  objectKind?: ObjectKind;
+  accountId?: string;
+  actionRef?: string;
+  workItemId: string;
+  inquiryId: string;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  version: number | null;
+  contentFingerprint: string | null;
+  comments?: string | null;
+  authorKind: string | null;
+  answerBasis: string | null;
+  answerBasisNote: string | null;
+  knowledgeState: string | null;
+  evidenceCount: number;
+  productId: string | null;
+  productName: string | null;
+  unavailableMessage: string | null;
+  tone: ToneHint | null;
+  to: string;
+}
+
+export interface EvidenceArtifact extends ArtifactBase {
+  type: "EVIDENCE";
+  items: Array<{ label: string; count: number | null; from: string | null; to: string | null; asOf: string | null; covered: boolean; link?: string }>;
+}
+
+export interface ChecklistArtifact extends ArtifactBase {
+  type: "CHECKLIST";
+  items: Array<{ label: string; detail?: string; to?: string }>;
+}
+
+export type HumanActionType = "REVIEW_IMPORT" | "CHANNEL_CONNECT" | "KNOWLEDGE_ENTRY" | "VARIANT_CLARIFICATION";
+export type HumanActionPath = "MANUAL_SYNC" | "ACTION_WINDOW" | "EXPORT_ACTION_WINDOW" | "WING_READ_ACTION_WINDOW" | "FILE_UPLOAD" | "WORKSPACE";
+export type ObjectKind = "INQUIRY" | "REVIEW";
+export type ExecutableIdentity = "MARKETPLACE" | "NONE";
+export type AcquisitionCapability = "AUTOMATIC" | "GUIDED_HUMAN_ACTION" | "UNSUPPORTED";
+export type ExecutionCapability = "API_EXECUTION" | "GUIDED_BROWSER_EXECUTION" | "NOT_SUPPORTED";
+export type HumanActionReason = "FRESHNESS_UNPROVEN" | "NOT_COLLECTED" | "NOT_CONNECTED" | "NO_ANSWER_BASIS";
+
+export interface HumanActionRequiredArtifact extends ArtifactBase {
+  type: "HUMAN_ACTION_REQUIRED";
+  actionType: HumanActionType;
+  reason: HumanActionReason;
+  path: HumanActionPath;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  accountId: string | null;
+  dataType: "REVIEW" | "INQUIRY" | "ORDER_SUMMARY" | null;
+  to: string | null;
+  requestedAt: string;
+  resumable: boolean;
+  requiresLocalAgent?: boolean;
+  fallback?: { path: HumanActionPath; to: string | null; label: string };
+}
+
+export interface ApprovalArtifact extends ArtifactBase {
+  type: "APPROVAL";
+  objectKind: ObjectKind;
+  targetId: string;
+  workItemId?: string;
+  inquiryId?: string;
+  accountId?: string;
+  actionRef?: string;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  draftVersion: number | null;
+  contentFingerprint: string | null;
+  execution: ExecutionCapability;
+  executableIdentity: ExecutableIdentity;
+  to: string;
+}
+
+export interface GuidedExecutionArtifact extends ArtifactBase {
+  type: "GUIDED_EXECUTION";
+  actionType: "REVIEW_REPLY";
+  objectKind: "REVIEW";
+  channelCode: string;
+  channelNameKo: string | null;
+  accountId: string;
+  reviewId: string;
+  actionRef: string;
+  draftVersion: number | null;
+  contentFingerprint: string | null;
+  requiresLocalAgent: true;
+  to: string;
+}
+
+export interface ExecutionResultArtifact extends ArtifactBase {
+  type: "EXECUTION_RESULT";
+  objectKind: ObjectKind;
+  targetId: string;
+  workItemId?: string;
+  phase: string;
+  executionStatus: string;
+  category: string;
+  verification: string;
+  to: string;
+}
+
+export interface WorkspaceLinkArtifact extends ArtifactBase {
+  type: "WORKSPACE_LINK";
+  link: WorkspaceLink;
+}
+
+export type Artifact =
+  | SummaryArtifact
+  | GuidedExecutionArtifact
+  | MetricArtifact
+  | ListArtifact
+  | TableArtifact
+  | ReviewListArtifact
+  | InquiryListArtifact
+  | ProductListArtifact
+  | IssueListArtifact
+  | OrderSummaryArtifact
+  | ChartArtifact
+  | DraftArtifact
+  | EvidenceArtifact
+  | ChecklistArtifact
+  | HumanActionRequiredArtifact
+  | ApprovalArtifact
+  | ExecutionResultArtifact
+  | WorkspaceLinkArtifact;
+
+export type WorkingSetKind = "REVIEWS" | "INQUIRIES" | "PRODUCTS" | "ORDERS" | "ISSUES";
+
+export interface WorkingSetView {
+  kind: WorkingSetKind;
+  label: string;
+  count: number;
+  ids: string[];
+  filters: {
+    period?: DateWindow | null;
+    channelCode?: string | null;
+    rating?: "ALL" | "LOW";
+    productIds?: string[];
+    topic?: "SHIPPING" | "EXCHANGE_RETURN" | "PRODUCT_SPEC" | "USAGE" | "OTHER" | null;
+  };
+  productIds: string[];
+  workItemIds: string[];
+  turnId: string;
+}
+
+export interface PendingHumanAction {
+  turnId: string;
+  actionType: HumanActionType;
+  path: HumanActionPath;
+  channelCode: string | null;
+  accountId: string | null;
+  dataType: "REVIEW" | "INQUIRY" | "ORDER_SUMMARY" | null;
+  requestedAt: string;
+}
+
+export interface PendingPreparedAction {
+  turnId: string;
+  kind: "INQUIRY_DRAFT" | "REVIEW_DRAFT";
+  workItemId: string;
+  inquiryId: string;
+  accountId?: string;
+  draftVersion: number | null;
+  contentFingerprint: string | null;
+}
+
+export interface SuggestedAction {
+  label: string;
+  kind: "PROMPT" | "LINK" | "RESUME";
+  prompt?: string;
+  to?: string;
+}
+
+export type TurnStatus = "DONE" | "FAILED" | "WAITING_HUMAN";
+
+export interface TurnView {
+  turnId: string;
+  conversationId: string;
+  role: "USER" | "AGENT";
+  text?: string;
+  message: string;
+  artifacts: Artifact[];
+  suggestedActions: SuggestedAction[];
+  continuation: {
+    workingSet: WorkingSetView | null;
+    pendingHumanAction: PendingHumanAction | null;
+    pendingHumanActions?: PendingHumanAction[];
+    pendingPrepared: PendingPreparedAction | null;
+  };
+  status: TurnStatus;
+  failureCode?: string;
+  failureReason?: string;
+  budget?: { toolCalls: number; llmCalls: number; elapsedMs: number; stopReason: string };
+  resumedFrom?: string;
+  createdAt: string;
+  answer?: OperatorAnswer;
+}
+
+export interface ConversationView {
+  conversationId: string;
+  createdAt: string;
+  updatedAt: string;
+  turns: TurnView[];
+  workingSet: WorkingSetView | null;
+  pendingHumanAction: PendingHumanAction | null;
+  pendingHumanActions?: PendingHumanAction[];
+  pendingPrepared: PendingPreparedAction | null;
+}
+
+export interface ConversationSummary {
+  conversationId: string;
+  createdAt: string;
+  updatedAt: string;
+  turnCount: number;
+  headline: string | null;
+}
+
+export type ProgressStage =
+  | "UNDERSTANDING"
+  | "PLANNED"
+  | "REFRESHING"
+  | "READING"
+  | "JUDGING"
+  | "COMPOSING"
+  | "PREPARING_DRAFT"
+  | "WAITING_HUMAN";
+
+export interface ProgressStageEvent {
+  type: "stage";
+  stage: ProgressStage;
+  label: string;
+  at: string;
+}
+export interface ProgressTurnEvent {
+  type: "turn";
+  turn: TurnView;
+}
+export interface ProgressErrorEvent {
+  type: "error";
+  code: string;
+  message: string;
+}
+export type ProgressEvent = ProgressStageEvent | ProgressTurnEvent | ProgressErrorEvent;
+
+export interface StartTurnRequest {
+  text?: string;
+  productId?: string;
+  workItemId?: string;
+  channelCode?: "NAVER" | "COUPANG" | "CAFE24";
+  surface?: string;
+  resumeOfTurnId?: string;
+  referenceDate?: string;
+  /**
+   * Whether this browser is paired with a local helper right now — a HINT from the bridge health probe
+   * (`lib/bridge/localAgentHint.ts`), so the runtime can choose a guided Action Window path over the
+   * file-upload fallback honestly. `UNKNOWN` when the probe did not run or did not answer in time.
+   */
+  localAgent?: LocalAgentHint;
+}
+
+/** Closed: the runtime's zod accepts exactly these three. */
+export type LocalAgentHint = "PAIRED" | "ABSENT" | "UNKNOWN";
+
+/** Closed review-execution verification vocabulary (mirrors the runtime contract; never widened here). */
+export type ReviewExecutionVerification =
+  | "VERIFIED"
+  | "STATUS_UNRESOLVED"
+  | "DELIVERY_UNKNOWN"
+  | "UNVERIFIABLE"
+  | "COMPOSER_FILLED"
+  | "SELLER_SUBMISSION_OBSERVED"
+  | "SUBMISSION_OBSERVED_CONTENT_UNVERIFIED";

@@ -71,7 +71,11 @@ public class AgentOperatorController {
                                         r.acceptableKinds()))
                                 .toList(),
                         p.riskClass(), p.maxIterations(), p.maxToolCalls(), p.stopWhenEnough(),
-                        p.clarificationNeeded(), p.clarificationReason(), p.rationale(), version, null))
+                        p.clarificationNeeded(), p.clarificationReason(), p.rationale(),
+                        p.requestedAction(), p.tone(),
+                        new PlanFiltersView(p.filters().period(), p.filters().rating(), p.filters().channel(),
+                                p.filters().scope(), p.filters().topic()),
+                        new PlanTargetView(p.target().selector(), p.target().index()), version, null))
                 .orElseGet(() -> PlanView.unavailable(version));
     }
 
@@ -114,6 +118,20 @@ public class AgentOperatorController {
     public record EvidenceRequirementView(String needId, int minEvidence, List<String> acceptableKinds) {
     }
 
+    /** Closed filter tokens (v3). Every field nullable; null means "not narrowed". */
+    public record PlanFiltersView(String period, String rating, String channel, String scope, String topic) {
+        static PlanFiltersView none() {
+            return new PlanFiltersView(null, null, null, null, null);
+        }
+    }
+
+    /** Which member of the working set the seller meant (v3). {@code index} only for {@code NTH}. */
+    public record PlanTargetView(String selector, Integer index) {
+        static PlanTargetView none() {
+            return new PlanTargetView("NONE", null);
+        }
+    }
+
     /** A SellerOps-composed sentence and a closed-vocabulary evidence digest. */
     public record JudgeRequest(String finding, String evidenceDigest, String runId) {
     }
@@ -121,6 +139,10 @@ public class AgentOperatorController {
     /**
      * @param available false when the capability is off for this org, or the model refused. The caller
      *     treats both identically (deterministic routing), which is why they are one field
+     * @param requestedAction v3 — what the seller asked the runtime to DO; {@code NONE} when only a
+     *     reading was asked for. Never a send: the closed set has no such value
+     * @param filters v3 — closed narrowing tokens; a working-set follow-up carries {@code scope}
+     * @param target v3 — which member of the working set the seller meant
      */
     public record PlanView(boolean available, boolean supported, String userGoal,
                            List<MentionView> unresolvedEntities, List<NeedView> informationNeeds,
@@ -129,12 +151,13 @@ public class AgentOperatorController {
                            List<EvidenceRequirementView> evidenceRequirements, String riskClass,
                            int maxIterations, int maxToolCalls, String stopWhenEnough,
                            boolean clarificationNeeded, String clarificationReason, String rationale,
-                           String providerVersion, String quotaMessage) {
+                           String requestedAction, String tone, PlanFiltersView filters,
+                           PlanTargetView target, String providerVersion, String quotaMessage) {
 
         static PlanView unavailable(String version) {
             return new PlanView(false, false, null, List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), null, List.of(), null, 0, 0, null, false, null, null, version,
-                    null);
+                    List.of(), List.of(), null, List.of(), null, 0, 0, null, false, null, null,
+                    "NONE", null, PlanFiltersView.none(), PlanTargetView.none(), version, null);
         }
 
         /**
@@ -145,8 +168,8 @@ public class AgentOperatorController {
          */
         static PlanView quotaExhausted(String version, String message) {
             return new PlanView(false, false, null, List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), null, List.of(), null, 0, 0, null, false, null, null, version,
-                    message);
+                    List.of(), List.of(), null, List.of(), null, 0, 0, null, false, null, null,
+                    "NONE", null, PlanFiltersView.none(), PlanTargetView.none(), version, message);
         }
     }
 

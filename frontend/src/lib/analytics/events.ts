@@ -18,6 +18,26 @@ export type AnalyticsChannel = (typeof ANALYTICS_CHANNELS)[number];
 export const PROACTIVE_KINDS = ["inquiry", "review"] as const;
 export type ProactiveKind = (typeof PROACTIVE_KINDS)[number];
 
+/** Where a conversation turn was typed — the home workspace or the contextual panel. */
+export const CONVERSATION_SURFACES = ["home", "panel"] as const;
+export type ConversationSurface = (typeof CONVERSATION_SURFACES)[number];
+
+/** The outcome of one agent turn, never its content. */
+export const AGENT_RESULT_STATUSES = ["done", "failed", "waiting_human"] as const;
+export type AgentResultStatus = (typeof AGENT_RESULT_STATUSES)[number];
+
+/** The closed artifact vocabulary, lowercase — `ArtifactType` in `lib/conversation/types.ts`. */
+export const ARTIFACT_TYPES = [
+  "summary", "metric", "list", "table", "review_list", "inquiry_list", "product_list", "issue_list",
+  "order_summary", "chart", "draft", "evidence", "checklist", "human_action_required", "approval",
+  "execution_result", "workspace_link", "guided_execution",
+] as const;
+export type ArtifactTypeLabel = (typeof ARTIFACT_TYPES)[number];
+
+/** The kinds of one-step human action the agent may ask for. */
+export const HUMAN_ACTION_TYPES = ["review_import", "channel_connect", "knowledge_entry", "variant_clarification"] as const;
+export type HumanActionTypeLabel = (typeof HUMAN_ACTION_TYPES)[number];
+
 export interface AnalyticsEvents {
   sign_up: { method: AuthMethod };
   login: { method: AuthMethod };
@@ -33,6 +53,16 @@ export interface AnalyticsEvents {
   proactive_cases_viewed: Record<string, never>;
   /** The seller opened one prepared case. `kind` is the subject, never its content. */
   proactive_case_opened: { kind: ProactiveKind };
+  /** Agentic Operating Workspace v2 — the conversation loop. Props are closed enums; never text. */
+  conversation_started: Record<string, never>;
+  conversation_turn_sent: { surface: ConversationSurface };
+  agent_result_shown: { status: AgentResultStatus };
+  artifact_shown: { type: ArtifactTypeLabel };
+  artifact_opened: { type: ArtifactTypeLabel };
+  human_action_requested: { type: HumanActionTypeLabel };
+  human_action_completed: { type: HumanActionTypeLabel };
+  approval_opened: Record<string, never>;
+  conversation_resumed: Record<string, never>;
 }
 
 export type AnalyticsEventName = keyof AnalyticsEvents;
@@ -51,6 +81,15 @@ const ALLOWED: { [E in AnalyticsEventName]: Record<string, readonly string[]> } 
   inquiry_opened: {},
   proactive_cases_viewed: {},
   proactive_case_opened: { kind: PROACTIVE_KINDS },
+  conversation_started: {},
+  conversation_turn_sent: { surface: CONVERSATION_SURFACES },
+  agent_result_shown: { status: AGENT_RESULT_STATUSES },
+  artifact_shown: { type: ARTIFACT_TYPES },
+  artifact_opened: { type: ARTIFACT_TYPES },
+  human_action_requested: { type: HUMAN_ACTION_TYPES },
+  human_action_completed: { type: HUMAN_ACTION_TYPES },
+  approval_opened: {},
+  conversation_resumed: {},
 };
 
 export const ANALYTICS_EVENT_NAMES = Object.keys(ALLOWED) as AnalyticsEventName[];

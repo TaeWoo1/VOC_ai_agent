@@ -55,6 +55,10 @@ export interface ReplyDispatchConfig {
   createDriver: (hint?: ReplyTargetHint) => ReplySubmitProbeDriver;
   /** When set, the sanitized reply-run marker is persisted after every transition (required in live mode). */
   persistDir?: string;
+  /** Guided composer fill (v2 §13): only honoured on a GUIDED plan, gated per fill by the driver. */
+  composerFill?: boolean;
+  /** Fired once per guided-fill observation (`COMPOSER_FILLED`, `SELLER_SUBMISSION_OBSERVED`). */
+  onExecutionObserved?: (state: import("./reply-execution-observer-client").ReplyExecutionObservation) => void;
   /** Synthetic monotonic marker source for the persisted `updatedAt` (never wall-clock). */
   now?: () => string;
 }
@@ -91,6 +95,7 @@ export function assembleReplyRun(transport: AwServerTransport, cfg: ReplyDispatc
     ...(cfg.submissionRef ? { submissionRef: cfg.submissionRef } : {}),
     ...(cfg.targetHint ? { targetHint: cfg.targetHint } : {}),
     ...(cfg.mode ? { mode: cfg.mode } : {}),
+    ...(cfg.composerFill ? { composerFill: true } : {}),
   });
   const now = cfg.now ?? makeReplyRunMarker();
   const persistDir = cfg.persistDir;
@@ -98,7 +103,10 @@ export function assembleReplyRun(transport: AwServerTransport, cfg: ReplyDispatc
     engine,
     cfg.createDriver(cfg.targetHint),
     transport,
-    persistDir ? { onStatePublished: () => saveReplyRun(persistDir, recordFrom(engine, now)) } : undefined,
+    {
+      ...(persistDir ? { onStatePublished: () => saveReplyRun(persistDir, recordFrom(engine, now)) } : {}),
+      ...(cfg.onExecutionObserved ? { onExecutionObserved: cfg.onExecutionObserved } : {}),
+    },
   );
   return { runId: cfg.runId, engine, session };
 }

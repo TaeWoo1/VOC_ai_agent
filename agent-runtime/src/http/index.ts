@@ -38,3 +38,6 @@ export { defaultSpringClientFactory } from "./springClientFactory";
 
 export { HttpAgentRunStateClient, StaleRunVersionError } from "../spring/AgentRunStateClient";
 export type { AgentRunStateClient, AgentRunStateRecord, ClaimOutcome } from "../spring/AgentRunStateClient";
+
+export { ConversationService } from "../conversation/ConversationService";
+export type { ConversationServiceDeps } from "../conversation/ConversationService";

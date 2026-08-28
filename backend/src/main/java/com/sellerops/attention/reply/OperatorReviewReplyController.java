@@ -4,12 +4,16 @@ import com.sellerops.attention.reply.dto.ReviewReplyApprovalRequest;
 import com.sellerops.attention.reply.dto.ReviewReplyApprovalResponse;
 import com.sellerops.attention.reply.dto.ReviewReplyDraftRequest;
 import com.sellerops.attention.reply.dto.ReviewReplyDraftView;
+import com.sellerops.attention.reply.dto.ReviewReplyExecuteRequest;
+import com.sellerops.attention.reply.dto.ReviewReplyExecutionObserveRequest;
 import com.sellerops.attention.reply.dto.ReviewReplyOutcomeRequest;
 import com.sellerops.attention.reply.dto.ReviewReplyOutcomeResponse;
 import com.sellerops.attention.reply.dto.ReviewReplyPrepView;
 import com.sellerops.attention.reply.dto.ReviewReplySubmissionRunRequest;
 import com.sellerops.attention.reply.dto.ReviewReplySubmissionRunResponse;
 import com.sellerops.auth.AuthPrincipal;
+import com.sellerops.review.publish.ReviewExecutionView;
+import com.sellerops.review.publish.ReviewReplyExecutionService;
 import java.util.UUID;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,10 +29,15 @@ import org.springframework.web.bind.annotation.RestController;
  * version, approve or withdraw. Thin delegate over {@link ReviewReplyService}; {@code orgId}
  * always comes from the authenticated principal, never the client.
  *
- * <p><b>No send, and nothing that resembles one.</b> There is no publish endpoint here and no
- * marketplace call behind any of these routes. The approved text leaves through the operator's
- * clipboard (Frontend Spec §10.2: 발송처럼 보이는 버튼 금지 — which binds the client, and is
- * easier to honour when the server offers nothing to send with).
+ * <p><b>Preparation routes send nothing.</b> Draft, approval, submission-run mint and outcome carry no
+ * marketplace call. The approved text leaves through the operator's clipboard or a guided run.
+ *
+ * <p><b>One route sends, and it says so:</b> {@code POST …/reply/execute} (Agentic Operating
+ * Workspace v2 §A2) posts the APPROVED head at the channel through
+ * {@link ReviewReplyExecutionService} — behind the execution flag, the connector, the seller's write
+ * grant, {@code executableIdentity = MARKETPLACE}, an armed live approval and the approved
+ * fingerprint the client saw. Off by default it records a refusal and touches no transport. The
+ * guided lane's {@code …/execution/observe} records what the collector saw and sends nothing.
  *
  * <p>A third controller in this family rather than an addition to either existing one.
  * {@code OperatorAttentionController} is a pure read delegate over a metadata-only projection,
@@ -47,9 +56,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class OperatorReviewReplyController {
 
     private final ReviewReplyService service;
+    private final ReviewReplyExecutionService executions;
 
-    public OperatorReviewReplyController(ReviewReplyService service) {
+    public OperatorReviewReplyController(ReviewReplyService service, ReviewReplyExecutionService executions) {
         this.service = service;
+        this.executions = executions;
     }
 
     /**
@@ -166,5 +177,46 @@ public class OperatorReviewReplyController {
         return service.recordSubmissionReported(principal.orgId(), accountId, actionRef,
                 request.submissionRef(), request.operatorOutcome(), request.awRunRef(),
                 request.commandId(), principal.userId());
+    }
+
+    /**
+     * Execute the approved reply at its channel (API lane — Cafe24 board comment).
+     *
+     * <p>Returns 200 with the recorded execution for a fresh attempt and for an exact replay
+     * ({@code replayed}); the recorded {@code status}/{@code reason} say whether anything left — a
+     * deployment with the lane off answers {@code REFUSED / EXECUTION_DISABLED}, never a 500. 400 for a
+     * missing commandId; 404 when the ref is not addressable from this account; 409 when no approval
+     * stands, the fingerprint is stale, the channel already reports a reply, or the command id was
+     * spent on a different target.
+     */
+    @PostMapping("/execute")
+    public ReviewExecutionView execute(@AuthenticationPrincipal AuthPrincipal principal,
+                                       @PathVariable UUID accountId,
+                                       @PathVariable String actionRef,
+                                       @RequestBody ReviewReplyExecuteRequest request) {
+        return executions.execute(principal.orgId(), accountId, actionRef, request.commandId(),
+                request.expectedFingerprint(), principal.userId());
+    }
+
+    /** Where the current approved head's execution stands; 404 when nothing was executed or observed. */
+    @GetMapping("/execution")
+    public ReviewExecutionView execution(@AuthenticationPrincipal AuthPrincipal principal,
+                                         @PathVariable UUID accountId,
+                                         @PathVariable String actionRef) {
+        return executions.read(principal.orgId(), accountId, actionRef);
+    }
+
+    /**
+     * The guided lane's observation (NAVER): the collector reports {@code COMPOSER_FILLED} or
+     * {@code SELLER_SUBMISSION_OBSERVED} against the run's {@code submissionRef}. Order is enforced,
+     * nothing is promoted past what was observed, and nothing is sent.
+     */
+    @PostMapping("/execution/observe")
+    public ReviewExecutionView observe(@AuthenticationPrincipal AuthPrincipal principal,
+                                       @PathVariable UUID accountId,
+                                       @PathVariable String actionRef,
+                                       @RequestBody ReviewReplyExecutionObserveRequest request) {
+        return executions.observe(principal.orgId(), accountId, actionRef, request.commandId(),
+                request.submissionRef(), request.state(), principal.userId());
     }
 }

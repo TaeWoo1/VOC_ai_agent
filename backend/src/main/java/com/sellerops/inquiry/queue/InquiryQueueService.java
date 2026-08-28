@@ -62,13 +62,24 @@ public class InquiryQueueService {
     private final InquiryRepository inquiries;
     private final ChannelRepository channels;
     private final ProductRepository products;
+    private final com.sellerops.identity.ExecutableIdentityResolver identity;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public InquiryQueueService(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
-                               ChannelRepository channels, ProductRepository products) {
+                               ChannelRepository channels, ProductRepository products,
+                               com.sellerops.identity.ExecutableIdentityResolver identity) {
         this.workItems = workItems;
         this.inquiries = inquiries;
         this.channels = channels;
         this.products = products;
+        this.identity = identity;
+    }
+
+    /** Without a resolver every row reads {@code NONE} — the fail-closed identity. Test wiring. */
+    public InquiryQueueService(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
+                               ChannelRepository channels, ProductRepository products) {
+        this(workItems, inquiries, channels, products,
+                com.sellerops.identity.ExecutableIdentityResolver.unresolved());
     }
 
     public InquiryQueueResponse queue(UUID orgId, InquiryWorkItemPhase phase, int page, int size) {
@@ -95,11 +106,15 @@ public class InquiryQueueService {
                 .stream().collect(HashMap::new,
                         (m, p) -> m.put(p.getId(), OperatorProductName.displayNameOrNull(p)), HashMap::putAll);
 
+        // One provenance pass for the page — the resolver groups its reads per account.
+        Map<UUID, com.sellerops.identity.ExecutableIdentity> identities = identity.forInquiries(orgId, byId.values());
+
         List<InquiryQueueItem> content = workItemPage.getContent().stream()
                 // A work item whose inquiry is not operational is dropped, not rendered blank: a row
                 // with a null status and no title would still be a clickable task.
                 .filter(w -> byId.containsKey(w.getInquiryId()))
-                .map(w -> toItem(w, byId.get(w.getInquiryId()), channelsById, productNames))
+                .map(w -> toItem(w, byId.get(w.getInquiryId()), channelsById, productNames,
+                        identities.getOrDefault(w.getInquiryId(), com.sellerops.identity.ExecutableIdentity.NONE)))
                 .toList();
 
         return new InquiryQueueResponse(content, workItemPage.getNumber(), workItemPage.getSize(),
@@ -117,7 +132,8 @@ public class InquiryQueueService {
 
     private static InquiryQueueItem toItem(InquiryWorkItem workItem, Inquiry inquiry,
                                            Map<UUID, Channel> channelsById,
-                                           Map<UUID, String> productNames) {
+                                           Map<UUID, String> productNames,
+                                           com.sellerops.identity.ExecutableIdentity executableIdentity) {
         // inquiry is always present (FK-consistent), but stay null-safe on the read.
         String status = inquiry == null ? null : inquiry.getStatus();
         String title = inquiry == null ? null : inquiry.getTitle();
@@ -140,6 +156,8 @@ public class InquiryQueueService {
                 workItem.getPhase().name(),
                 status,
                 title,
-                receivedAt);
+                receivedAt,
+                inquiry == null ? null : inquiry.getSourceSubtype(),
+                executableIdentity.name());
     }
 }

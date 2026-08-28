@@ -60,7 +60,7 @@ export function Orders() {
   const rawDate = searchParams.get("date");
   const date = rawDate && ISO_DAY.test(rawDate) ? rawDate : null;
 
-  useAgentSurface({ surface: "orders", label: date ? `주문 · ${fmtDay(date)}` : `주문 · 최근 ${range}일`, goal: "최근 주문과 매출 변화를 채널별로 설명해 줘" });
+  useAgentSurface({ surface: "orders", label: date ? `주문 · ${fmtDay(date)}` : `주문 · 최근 ${range}일` });
 
   const write = (patch: { days?: number; channel?: string | null; date?: string | null }) => {
     setSearchParams(
@@ -116,7 +116,7 @@ export function Orders() {
       <PageHead
         title="주문"
         meta={<span className="text-sm text-muted">주문 처리는 각 판매자센터에서 합니다</span>}
-        action={<AgentLaunch context={{ surface: "orders", goal: "최근 주문과 매출 변화를 채널별로 설명해 줘" }} label="매출 변화 설명 듣기" />}
+        action={<AgentLaunch context={{ surface: "orders" }} label="주문에 대해 물어보기" />}
       />
 
       <div className="flex flex-wrap items-center gap-3" role="group" aria-label="기간과 채널">

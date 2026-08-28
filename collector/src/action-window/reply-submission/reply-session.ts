@@ -11,10 +11,17 @@ import { validateCommandEnvelope } from "../../../../contracts/action-window/v2/
 import type { AwClientFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
 import type { ReplyEffect, ReplyEngine } from "./reply-engine";
 import type { ReplySubmitProbeDriver } from "./reply-driver";
+import type { ReplyExecutionObservation } from "./reply-execution-observer-client";
 
 /** Optional session hooks. `onStatePublished` fires after every published transition (R3 persistence). */
 export interface ReplySessionOptions {
   onStatePublished?: () => void;
+  /**
+   * 2026-08-28: fires once per observation the guided fill path makes — `COMPOSER_FILLED` when the draft went
+   * into the box, `SELLER_SUBMISSION_OBSERVED` when the seller's submit was seen on it. The carrier reports
+   * these to the backend's execution record; the session itself neither posts nor verifies anything.
+   */
+  onExecutionObserved?: (state: ReplyExecutionObservation) => void;
 }
 
 export class ReplySubmitSession {
@@ -23,6 +30,7 @@ export class ReplySubmitSession {
   private readonly transport: AwServerTransport;
   private readonly runId: string;
   private readonly onStatePublished: (() => void) | undefined;
+  private readonly onExecutionObserved: ((state: ReplyExecutionObservation) => void) | undefined;
 
   private started = false;
   private publishedSeq = 0;
@@ -36,6 +44,7 @@ export class ReplySubmitSession {
     this.runId = engine.view().runId;
     this.started = engine.isStarted();
     this.onStatePublished = opts?.onStatePublished;
+    this.onExecutionObserved = opts?.onExecutionObserved;
   }
 
   attach(): () => void {
@@ -131,6 +140,14 @@ export class ReplySubmitSession {
         this.publishState();
         return this.drive(next);
       }
+      case "FILL": {
+        // A driver without `fillComposer` cannot fill; the run reaches the barrier unfilled, as it always did.
+        const res = this.driver.fillComposer ? await this.driver.fillComposer() : ({ filled: false, reason: "NOT_FILLABLE" } as const);
+        const next = this.engine.onComposerFilled(res);
+        this.publishState();
+        if (res.filled) this.onExecutionObserved?.("COMPOSER_FILLED");
+        return this.drive(next);
+      }
       case "OBSERVE": {
         await this.driver.armObserve();
         // Rest at the human barrier; the seller submits. The session never submits — it observes.
@@ -173,6 +190,7 @@ export class ReplySubmitSession {
     if (observed && this.engine.currentStage() === "WAIT_FOR_SUBMIT") {
       this.engine.onUserActionObserved();
       this.publishState();
+      if (this.engine.wasComposerFilled()) this.onExecutionObserved?.("SELLER_SUBMISSION_OBSERVED");
     }
   }
 

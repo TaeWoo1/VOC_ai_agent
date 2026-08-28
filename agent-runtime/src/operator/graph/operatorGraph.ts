@@ -59,6 +59,11 @@ import { runProductOps, PRODUCT_NEEDS } from "./productOps";
 import { runReviewOps, REVIEW_NEEDS } from "./reviewOps";
 import { runInquiryOps, INQUIRY_NEEDS } from "./inquiryOps";
 import { runReportOps } from "./reportOpsNode";
+import { runOrderOps, ORDER_NEEDS } from "./orderOps";
+import { conversationAxisOf } from "../plan/InvestigationPlan";
+import { effectiveAxisOf } from "../plan/scopeOverride";
+import type { Artifact, ProgressStage } from "../../conversation/contract";
+import { READING_LABEL, STAGE_LABEL } from "../../conversation/contract";
 import type { KnowledgeCoverageRow, SignalCoverage } from "../../spring/types";
 import { log } from "../../log";
 
@@ -86,7 +91,19 @@ export interface OperatorGraphDeps {
    * refs the id `e1`. Defaults to a fresh builder, which is every non-contextual run.
    */
   readonly evidence?: EvidenceBuilder;
+  /**
+   * Where the stages the run actually reaches are reported (Agentic Operating Workspace v2).
+   *
+   * Wired from the same points that already log `operator_stage` — no second tracer. A stage is
+   * emitted when it BEGINS, so a UI renders exactly what the runtime did and nothing ahead of it.
+   */
+  readonly progress?: ProgressSink;
+  /** Conversation lane only — see `SpecialistInput.refresher`. */
+  readonly refresher?: import("./reviewRefresh").ReviewRefresher;
 }
+
+/** A stage sink. Labels are the closed seller-facing set in `conversation/contract.ts`. */
+export type ProgressSink = (stage: ProgressStage, label: string) => void;
 
 /**
  * A specialist's own tools come from the capability matrix — see `tools/ToolReachability.ts`, which is
@@ -146,6 +163,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       ...(priorContextFor(state) ? { priorContext: priorContextFor(state) } : {}),
     });
     log("operator_stage", { stage: "plan", ms: Date.now() - planStarted, replan: state.plan != null });
+    deps.progress?.("PLANNED", STAGE_LABEL.PLANNED);
     log("operator_plan_node", {
       supported: plan.supported,
       needs: plan.informationNeeds.length,
@@ -176,6 +194,14 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     const results: SpecialistResult[] = [];
     const needStates: NeedState[] = [];
     const resolved = [...state.entities];
+    // <b>「첫 번째 거」 over a PRODUCTS set names one product (R5).</b> The ordinal is the planner's
+    // token, the id comes from the previous turn's rows, and one org-scoped read — charged, through the
+    // registry — turns that id into a VERIFIED entity before any specialist runs, exactly as a screen
+    // hint does. No name is resolved; a set that does not hold that index resolves nothing.
+    const ordinal = await ordinalProduct(plan, state, resolved);
+    if (ordinal) resolved.push(ordinal);
+    // R7: decided once per dispatch, logged once; every specialist reads the same axis.
+    const axis = effectiveAxisOf(plan, state.conversation?.workingSet ?? null, true);
     let knowledge: Record<string, import("../../spring/types").ProductKnowledge> = {};
     let knowledgeCoverage: KnowledgeCoverageRow[] = [];
     const findingsSoFar: Finding[] = [...state.findings];
@@ -191,9 +217,11 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // find nothing behind every report sentence and silently delete the report.
     const seenEvidence: EvidenceRef[] = [...state.evidence];
     const dispatchStarted = Date.now();
+    const artifacts: Artifact[] = [];
     for (const specialist of ordered) {
       const specialistStarted = Date.now();
-      const outcome = await runSpecialist(specialist, plan, state, resolved, findingsSoFar, seenEvidence);
+      deps.progress?.("READING", READING_LABEL[specialist] ?? STAGE_LABEL.READING);
+      const outcome = await runSpecialist(specialist, plan, state, resolved, findingsSoFar, seenEvidence, axis);
       log("operator_stage", { stage: `specialist:${specialist}`, ms: Date.now() - specialistStarted });
       seenEvidence.push(...outcome.result.evidence);
       // The gate runs against the entities known AT THIS POINT, which includes whatever this specialist
@@ -203,6 +231,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       scopeRejections.push(...gated.rejected);
       specialistFailures.push(...(outcome.result.failures ?? []));
       results.push({ ...outcome.result, findings: gated.findings });
+      artifacts.push(...(outcome.result.artifacts ?? []));
       needStates.push(...gated.needStates);
       resolved.push(...outcome.resolvedEntities);
       findingsSoFar.push(...gated.findings);
@@ -220,8 +249,33 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       knowledge,
       scopeRejections: [...state.scopeRejections, ...scopeRejections],
       specialistFailures,
+      artifacts,
       trail: [`dispatched:${ordered.join("+")}`],
     };
+  }
+
+  async function ordinalProduct(
+    plan: InvestigationPlan, state: OperatorState, known: readonly ResolvedEntity[],
+  ): Promise<ResolvedEntity | null> {
+    const { target } = conversationAxisOf(plan);
+    const set = state.conversation?.workingSet;
+    if (!set || set.kind !== "PRODUCTS" || known.some((e) => e.kind === "PRODUCT")) return null;
+    const index = target.selector === "FIRST" ? 0 : target.selector === "NTH" && target.index ? target.index - 1 : -1;
+    const productId = index >= 0 ? set.ids[index] : undefined;
+    if (!productId || !deps.budget.spend("tool")) return null;
+    try {
+      const signals = await deps.registry.invoke<import("../../spring/types").ProductSignals>(
+        OPERATOR_TOOL.GET_PRODUCT_SIGNALS, { productId },
+      );
+      log("operator_ordinal_product_resolved", { resolved: true, index });
+      return {
+        kind: "PRODUCT", mention: signals.productName, id: signals.productId, label: signals.productName,
+        resolvedBy: OPERATOR_TOOL.GET_PRODUCT_SIGNALS,
+      };
+    } catch {
+      log("operator_ordinal_product_resolved", { resolved: false, index });
+      return null;
+    }
   }
 
   /**
@@ -314,6 +368,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     resolved: readonly import("../plan/InvestigationPlan").ResolvedEntity[],
     findingsSoFar: readonly Finding[],
     priorEvidence: readonly EvidenceRef[],
+    axis: ReturnType<typeof conversationAxisOf> = conversationAxisOf(plan),
   ): Promise<{
     result: SpecialistResult;
     needStates: NeedState[];
@@ -343,6 +398,16 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       priorEvidence,
       goalText: state.goalText,
       ...(deps.referenceDate ? { referenceDate: deps.referenceDate } : {}),
+      // The conversation axis — planner tokens and the previous working set. Read by the rows paths
+      // of ReviewOps/InquiryOps and by OrderOps; ignored by everything else.
+      ...axis,
+      // An overridden scope reads the org, so the previous set is not handed down either.
+      workingSet: axis.filters.scope === "WORKING_SET" ? state.conversation?.workingSet ?? null : null,
+      ...(state.conversation?.collected ? { collected: state.conversation.collected } : {}),
+      ...(state.conversation?.pendingHumanWindow ? { pendingHumanWindow: state.conversation.pendingHumanWindow } : {}),
+      ...(state.conversation?.localAgent ? { localAgent: state.conversation.localAgent } : {}),
+      ...(deps.refresher ? { refresher: deps.refresher } : {}),
+      ...(deps.progress ? { progress: deps.progress } : {}),
     };
     try {
       switch (specialist) {
@@ -369,6 +434,12 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
         case "INQUIRY_OPS": {
           const result = await runInquiryOps({
             ...shared, needs: needsInOrder(plan, INQUIRY_NEEDS), mentions: [],
+          });
+          return { result, needStates: [...result.needStates], resolvedEntities: [], knowledge: {}, knowledgeCoverage: [] };
+        }
+        case "ORDER_OPS": {
+          const result = await runOrderOps({
+            ...shared, needs: needsInOrder(plan, ORDER_NEEDS), mentions: [],
           });
           return { result, needStates: [...result.needStates], resolvedEntities: [], knowledge: {}, knowledgeCoverage: [] };
         }
@@ -423,6 +494,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
 
   async function judge(state: OperatorState): Promise<Partial<OperatorState>> {
     const judgeStarted = Date.now();
+    deps.progress?.("JUDGING", STAGE_LABEL.JUDGING);
     const judged: Finding[] = [];
     for (const finding of state.findings) {
       if (finding.verdict) {
@@ -489,6 +561,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
 
   function compose(state: OperatorState): Partial<OperatorState> {
     const plan = state.plan;
+    deps.progress?.("COMPOSING", STAGE_LABEL.COMPOSING);
     // E1: a finding with no evidence never reaches the seller. UNSUPPORTED means the judge found
     // nothing behind it — presenting it anyway is the whole failure this graph is built to avoid.
     const presentable = dedupeStatements(state.findings.filter(
@@ -575,7 +648,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // tool, no specialist and no status, and the same shape of keyword check already decides what the
     // rule judge refuses to say. Without it a seller who asked for drafts reads an answer that silently
     // dropped half the request.
-    if (DRAFT_WORDS.some((w) => state.goalText.includes(w))) {
+    // Not when the plan itself asked for a draft: the conversation lane prepares one through the
+    // product's own draft path, outside this registry, and saying "not here" would contradict it.
+    if (conversationAxisOf(plan ?? { requestedAction: "NONE" } as InvestigationPlan).requestedAction === "NONE"
+        && DRAFT_WORDS.some((w) => state.goalText.includes(w))) {
       notes.push("답변 초안 작성은 이 대화 창구에서 하지 않습니다 — 조회만 가능합니다."
         + " 초안은 문의 화면의 답변 준비에서 만들 수 있습니다.");
     }
@@ -629,7 +705,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
   function servedElsewhere(plan: InvestigationPlan, needId: string): boolean {
     const need = plan.informationNeeds.find((n) => n.id === needId);
     if (!need) return true;
-    const owned: readonly string[] = [...PRODUCT_NEEDS, ...REVIEW_NEEDS, ...INQUIRY_NEEDS];
+    const owned: readonly string[] = [...PRODUCT_NEEDS, ...REVIEW_NEEDS, ...INQUIRY_NEEDS, ...ORDER_NEEDS];
     return owned.includes(need.kind)
       && plan.specialistTargets.some((s) => s !== "REPORT_OPS");
   }
@@ -704,11 +780,14 @@ function contextLine(entities: readonly ResolvedEntity[]): string {
   return parts.join(" ");
 }
 
-/** Progress (re-plan) and fixed context (any plan), or nothing. */
+/** Progress (re-plan), fixed context (any plan), and the conversation's working-set line — or nothing. */
 function priorContextFor(state: OperatorState): string | undefined {
   const lines = [
     state.plan ? progressLine(state) : "",
     contextLine(state.entities ?? []),
+    // Closed tokens built by the conversation service (`직전 작업 집합: REVIEWS (기간:TODAY, …)`) —
+    // the same seam a re-plan uses, so the payload floor is unchanged in kind.
+    state.conversation?.priorLine ?? "",
   ].filter((l) => l.length > 0);
   return lines.length > 0 ? lines.join("\n") : undefined;
 }

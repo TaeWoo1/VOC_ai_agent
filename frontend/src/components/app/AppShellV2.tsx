@@ -9,6 +9,7 @@ import { AgentDock } from "../bridge/AgentDock";
 import { ProjectionView } from "../bridge/ProjectionView";
 import { AgentPanelProvider } from "../../lib/agentPanel";
 import { AgentPanelDock } from "../agent/AgentPanel";
+import { ConversationProvider } from "../../lib/conversation/ConversationProvider";
 
 // Opt-in guided-connection infrastructure surfaces. Absent from the default app; they mount only
 // when explicitly enabled and do not participate in navigation. Carried over from the previous
@@ -35,6 +36,7 @@ export function AppShellV2() {
 
   return (
     <AgentPanelProvider>
+    <ConversationProvider>
     <div className="flex h-full flex-col">
       {/* Without this, a keyboard user tabs through all seven nav destinations and the sign-out
           button before reaching page content — on every screen. Hidden until focused. */}
@@ -78,6 +80,7 @@ export function AppShellV2() {
         </div>
       )}
     </div>
+    </ConversationProvider>
     </AgentPanelProvider>
   );
 }

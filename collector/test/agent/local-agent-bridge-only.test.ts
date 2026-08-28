@@ -264,7 +264,7 @@ describe("runBridgeOnlyBoot — the guided walk on demand", () => {
       mode: "BRIDGE_ONLY",
       browserLaunched: false,
       marketplaceOpened: false,
-      onDemandCarriers: ["issuance/coupang", "issuance/naver", "renewal/coupang", "locate/coupang", "import/naver"],
+      onDemandCarriers: ["issuance/coupang", "issuance/naver", "renewal/coupang", "locate/coupang", "import/naver", "acquire/coupang", "reply/naver"],
     });
 
     // 1. A tab that does not ask sees bridge-only as it always was: hello + snapshot, NO aw_session.
@@ -379,6 +379,8 @@ describe("activateResidentCarrier", () => {
       // until now — a seller with the resident helper paired pressed [쿠팡에서 보기] / 가져오기 into nothing.
       ["locate", "coupang"],
       ["import", "naver"],
+      ["acquire", "coupang"],
+      ["reply", "naver"],
     ];
     for (const [carrier, channelCode] of wired) {
       const activated = activateResidentCarrier({ carrier, channelCode });
@@ -388,7 +390,8 @@ describe("activateResidentCarrier", () => {
     }
     // Still unwired, and refused rather than served by the wrong walk: the NAVER guided REPLY carrier is
     // hosted by its own boot, and no channel other than the three named above has any of these surfaces.
-    expect(activateResidentCarrier({ carrier: "reply", channelCode: "naver" })).toBeNull();
+    // `reply/naver` is wired since 2026-08-28 (v2 §13); a reply carrier for a channel with no guided reply stays refused.
+    expect(activateResidentCarrier({ carrier: "reply", channelCode: "coupang" })).toBeNull();
     expect(activateResidentCarrier({ carrier: AW_CARRIER_ISSUANCE, channelCode: "cafe24" })).toBeNull();
     expect(activateResidentCarrier({ carrier: "renewal", channelCode: "naver" })).toBeNull();
     expect(activateResidentCarrier({ carrier: "locate", channelCode: "naver" })).toBeNull();
@@ -401,6 +404,9 @@ describe("activateResidentCarrier", () => {
       "renewal/coupang",
       "locate/coupang",
       "import/naver",
+      // Agentic Operating Workspace v2 (2026-08-28): the conversation starts these two through the paired helper.
+      "acquire/coupang",
+      "reply/naver",
     ]);
     for (const name of RESIDENT_ON_DEMAND_CARRIERS) {
       const [carrier, channelCode] = name.split("/") as [string, string];

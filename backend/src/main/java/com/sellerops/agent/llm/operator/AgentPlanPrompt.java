@@ -23,6 +23,14 @@ import java.util.List;
  * one; the tool would read it, find nothing, and the Operator would report calm about a product nobody
  * looked at. Resolution is a tool's job and the validator rejects any plan that arrives pre-resolved.
  *
+ * <p><b>v3 adds what the seller asked the runtime to DO and how the sentence relates to the last
+ * turn</b> — {@code requestedAction}, {@code tone}, {@code filters} and {@code target}, every one a
+ * closed token. They exist because a conversation's second sentence ("안 좋은 것만") has no noun of
+ * its own: the noun is the working set the previous turn produced, and the runtime tells the planner
+ * about it in the same closed vocabulary (kind · period · channel · rating · product fixed?) so the
+ * planner can refine instead of refusing. None of this is interpreted by keyword anywhere else —
+ * the planner is still the only thing that reads the sentence.
+ *
  * <p><b>The tool catalogue is interpolated from the caller's own registry</b>, never restated in prose,
  * for the reason {@code AgentDraftPrompt} interpolates its categories: a prompt that names its options
  * by hand drifts from the code that executes them, and the first symptom is a plan naming a tool that
@@ -31,10 +39,35 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v2";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v3";
 
     /** The closed set of specialists a plan may name. */
-    public static final String[] SPECIALISTS = {"PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS", "REPORT_OPS"};
+    public static final String[] SPECIALISTS = {
+        "PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS", "REPORT_OPS", "ORDER_OPS",
+    };
+
+    /**
+     * What the seller asked the runtime to DO after the reading, beyond answering. Closed, and the
+     * only values with any effect downstream: a prepare step that saves a draft version on the
+     * existing draft path, a request to hand a prepared draft to the existing approval boundary, or
+     * a request to open a screen. There is no value that sends anything.
+     */
+    public static final String[] REQUESTED_ACTIONS = {
+        "NONE", "PREPARE_INQUIRY_DRAFT", "REQUEST_SEND_APPROVAL", "OPEN_WORKSPACE", "LIST_ACTIONS", "EXPLAIN_CAPABILITY",
+    };
+
+    /** Draft wording hints — MANNER only; a hint can never carry a fact. */
+    public static final String[] TONES = {"SOFTER", "MORE_FORMAL", "SHORTER"};
+
+    /** Closed filter vocabularies. Every value is a token; none can be a customer word or an id. */
+    public static final String[] PERIODS = {
+        "TODAY", "YESTERDAY", "THIS_WEEK", "LAST_WEEK", "LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS",
+    };
+    public static final String[] RATINGS = {"ALL", "LOW"};
+    public static final String[] CHANNELS = {"NAVER", "COUPANG", "CAFE24"};
+    public static final String[] SCOPES = {"WORKING_SET"};
+    public static final String[] TOPICS = {"SHIPPING", "EXCHANGE_RETURN", "PRODUCT_SPEC", "USAGE", "OTHER"};
+    public static final String[] TARGET_SELECTORS = {"FIRST", "NTH", "ALL", "THIS", "NONE"};
 
     /**
      * The closed set of information-need kinds.
@@ -77,11 +110,59 @@ public final class AgentPlanPrompt {
                지금 도구로 닿을 수 없을 때만 쓰세요.
                - 도구는 꼭 필요한 것만 고르세요. 많이 고를수록 답이 느려지고 나빠집니다.
                - **PRODUCT_FACT 와 PRODUCT_KNOWLEDGE_DOC 는 출처가 다른 두 가지입니다.** 앞의 것은                채널이 명시한 값(규격·가격·원산지)이고, 뒤의 것은 판매자가 직접 써 둔 글(상품 설명·FAQ·               사용법·교환반품 정책)입니다. "이 상품 어떻게 쓰나요", "고객에게 어떻게 설명하지",                "반품 규정이 뭐였지" 처럼 **판매자가 쓴 문장이 있어야 답할 수 있는 질문**은                PRODUCT_KNOWLEDGE_DOC 입니다. 치수·용량 같은 값 하나를 묻는 질문은 PRODUCT_FACT 입니다.                두 가지가 다 필요하면 need 를 둘 세우세요.
+               - **ORDER_OPS 는 주문·매출 흐름을 답합니다** — 기간 합계, 직전 기간 대비 변화, 채널별 매출·주문, \
+               일별 추이. need kind 는 ORDER_HISTORY 입니다. "매출이 왜 떨어졌어" 류는 ORDER_HISTORY(필수)를 \
+               세우고, 리뷰나 문의의 변화를 함께 물었을 때만 REVIEW_SIGNAL / INQUIRY_VOLUME 을 추가하세요.
+               - **REVIEW_SIGNAL 은 반복되는 문제만이 아니라 리뷰 행 목록도 뜻합니다** — "새 리뷰", "오늘 들어온 \
+               리뷰", "낮은 평점 리뷰 목록". "오늘 새 리뷰 보여줘" 는 REVIEW_SIGNAL 에 filters.period=TODAY 입니다.
+               - **이어지는 대화.** "지금까지의 진행" 에 `직전 작업 집합: <KIND> (기간:<PERIOD|없음>, \
+               채널:<CHANNEL|전체>, 평점:<ALL|LOW>, 상품 특정:<예|아니오>)` 줄이 있을 수 있습니다. 새 문장이 그 \
+               집합을 좁히거나·거르거나·넓히는 것이면("안 좋은 것만", "카페24만", "그 상품은?", "문의에서도 같은 \
+               얘기 있어?", "상품별로 묶어줘") filters.scope 를 "WORKING_SET" 으로 두세요. 거르는 것이면 같은 \
+               need kind 를 유지하고, 다른 영역으로 넘어가는 것이면 그 영역의 kind 를 추가하세요(리뷰 → \
+               INQUIRY_VOLUME / REPEAT_PATTERN, 주문 → REVIEW_SIGNAL / INQUIRY_VOLUME). 새 기간을 말하지 않았으면 \
+               직전 기간을 그대로 filters.period 에 적으세요. **문장에 명사가 없다는 이유로 supported 를 false 로 \
+               두지 마세요 — 직전 작업 집합이 곧 그 명사입니다.**
+               - **리뷰·상품 집합에서 문의로 건너가는 질문.** 직전 작업 집합이 REVIEWS 또는 PRODUCTS 이고 "문의에서도 \
+               같은 얘기 있어?" 처럼 같은 문제가 문의에도 있는지 물으면, **필수 need 는 INQUIRY_VOLUME 이고 \
+               filters.scope 는 "WORKING_SET"** 입니다 — 런타임이 그 집합의 상품에 묶어 문의를 읽습니다. \
+               REPEAT_PATTERN 은 있어도 required=false 인 보조 need 로만 두세요. REPEAT_PATTERN 만 세우면 답은 그 \
+               집합이 아니라 조직 전체의 반복 문제가 됩니다.
+               - **requestedAction.** 답변을 준비·작성·다시 써 달라는 요청(준비해줘·써줘·답장·더 부드럽게·짧게)은 \
+               PREPARE_INQUIRY_DRAFT, 보내·전송·등록·게시해 달라는 요청(보내자·전송·등록·게시해)은 \
+               REQUEST_SEND_APPROVAL, 화면을 열어 달라고 명시한 경우("문의 화면 열어줘")만 OPEN_WORKSPACE, 그 \
+               밖에는 NONE 입니다. **이 두 값은 문의뿐 아니라 리뷰에도 그대로 적용됩니다**: 직전 작업 집합이 REVIEWS 일 때 \
+               "첫 번째 리뷰 답변해줘 / 답글 써줘" 는 PREPARE_INQUIRY_DRAFT + REVIEW_SIGNAL(scope WORKING_SET) + \
+               target 이고, "게시해 / 네이버에서 답변하게 열어줘 / 보내자" 는 REQUEST_SEND_APPROVAL 입니다 — 채널별로 \
+               API 로 보낼지, 판매자센터에서 이어서 할지, 지원하지 않는지는 런타임이 정하므로 당신은 채널을 판단하지 \
+               마세요. 문의 집합 위에서의 초안·말투 요청은 런타임이 대상을 찾을 수 있도록 INQUIRY_VOLUME(scope \
+               WORKING_SET) need 를 함께 세우세요.
+               문장에 채널 이름(네이버·쿠팡·카페24)이 있으면 그 채널을 filters.channel 에 적으세요 — 「네이버 문의 정리해줘」는 \
+               INQUIRY_VOLUME + filters.channel="NAVER" 입니다. \
+               판매자가 **왜 어떤 채널에서는 답변/전송/수집이 안 되는지, 되는지**를 물으면("쿠팡 건은 왜 답변 못 해?", \
+               "네이버 리뷰는 왜 자동으로 안 가져와?") EXPLAIN_CAPABILITY 입니다 — 조사가 아니라 설명이므로 need 는 \
+               비워도 되고, 채널을 말했으면 filters.channel 에 적으세요. \
+               판매자가 **자신이 해야 할 행동의 목록**을 요청하면("내가 해야 할 일 정리해줘", "오늘 뭐 해야 해") \
+               LIST_ACTIONS 입니다 — 이때 INQUIRY_VOLUME / REVIEW_SIGNAL / ORDER_HISTORY need 를 함께 세울 수 \
+               있습니다. LIST_ACTIONS 는 목록을 만들라는 뜻이지 무엇을 실행하라는 뜻이 아닙니다.
+               - **tone** 은 PREPARE_INQUIRY_DRAFT 일 때만: "더 부드럽게 / 덜 딱딱하게" → SOFTER, "더 정중하게" → \
+               MORE_FORMAL, "짧게" → SHORTER, 그 밖에는 null.
+               - **target** 은 집합 안의 어느 것인지: "첫 번째 거" → FIRST, "두 번째" → NTH 에 index 2, "이 두 \
+               문의" → ALL, 문맥에 문의 하나가 특정돼 있을 때의 "이 문의" → THIS, 그 밖에는 NONE.
+               - **filters.topic** 은 문의 주제: "배송 관련부터" → SHIPPING. 없으면 null.
 
                specialist: %s
                informationNeeds[].kind: %s
                unresolvedEntities[].kind: %s
                riskClass: ROUTINE | SENSITIVE | REFUSE
+               requestedAction: %s
+               tone: %s | null
+               filters.period: %s | null
+               filters.rating: %s | null
+               filters.channel: %s | null
+               filters.scope: %s | null
+               filters.topic: %s | null
+               target.selector: %s
 
                반드시 아래 형태의 JSON 객체 하나만 출력하세요. 다른 텍스트, 설명, 코드펜스는 금지입니다.
                {"supported":true,
@@ -101,10 +182,17 @@ public final class AgentPlanPrompt {
                 "stopWhenEnough":"<한 문장>",
                 "clarificationNeeded":false,
                 "clarificationReason":"",
-                "rationale":"<한 문장>"}
+                "rationale":"<한 문장>",
+                "requestedAction":"NONE",
+                "tone":null,
+                "filters":{"period":null,"rating":null,"channel":null,"scope":null,"topic":null},
+                "target":{"selector":"NONE","index":null}}
                """
                 .formatted(String.join(", ", SPECIALISTS), String.join(", ", NEED_KINDS),
-                        String.join(", ", ENTITY_KINDS));
+                        String.join(", ", ENTITY_KINDS), String.join(" | ", REQUESTED_ACTIONS),
+                        String.join(" | ", TONES), String.join(" | ", PERIODS), String.join(" | ", RATINGS),
+                        String.join(" | ", CHANNELS), String.join(" | ", SCOPES), String.join(" | ", TOPICS),
+                        String.join(" | ", TARGET_SELECTORS));
     }
 
     /**

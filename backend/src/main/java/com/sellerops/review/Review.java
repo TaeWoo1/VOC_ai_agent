@@ -100,4 +100,14 @@ public class Review extends BaseEntity {
      *  quantises to UTC start-of-day) and diagnostic only — nothing gates on it. */
     @Column(name = "replied_at")
     private Instant repliedAt;
+
+    /**
+     * The {@code sync_jobs} row of the run that INSERTED this review — the acquisition provenance
+     * {@code ExecutableIdentityResolver} reads (V83). Written at ingest time only, by the path that
+     * opened the run; never backfilled and never rewritten by a duplicate. Null on rows predating the
+     * column and on rows written by a path that records no run, and a null reads as {@code NONE}: a
+     * review whose provenance cannot be proven is a review that cannot be sent to a channel.
+     */
+    @Column(name = "acquisition_sync_job_id")
+    private UUID acquisitionSyncJobId;
 }

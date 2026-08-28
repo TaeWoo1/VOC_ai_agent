@@ -28,6 +28,13 @@ export type ReplyStage =
   | "WAIT_FOR_ROW_OPEN"
   | "LOCATE_COMPOSER"
   | "HIGHLIGHT_COMPOSER"
+  /**
+   * 2026-08-28 (product-owner decision): the runtime sets the approved draft into the ONE composer the seller
+   * opened — after the row matched the hint, the review-id fingerprint matched, and exactly one composer is
+   * open. Automatic and momentary; any ambiguity fails closed and nothing is typed. Submit is still the
+   * seller's click at `WAIT_FOR_SUBMIT`.
+   */
+  | "FILL_COMPOSER"
   | "WAIT_FOR_SUBMIT"
   | "OPERATOR_REPORTED"
   | "FAILED"
@@ -103,6 +110,7 @@ export function replyStageStepIndex(stage: ReplyStage, guided = false): number {
       return 2; // guided-only: the review-row open barrier
     case "LOCATE_COMPOSER":
     case "HIGHLIGHT_COMPOSER":
+    case "FILL_COMPOSER":
       return guided ? 3 : 1;
     case "WAIT_FOR_SUBMIT":
     case "OPERATOR_REPORTED":
@@ -120,6 +128,7 @@ export function replyStageToRunStatus(stage: ReplyStage): RunStatus {
     case "HIGHLIGHT_ROW":
     case "LOCATE_COMPOSER":
     case "HIGHLIGHT_COMPOSER":
+    case "FILL_COMPOSER":
       return "RUNNING";
     case "WAIT_FOR_ROW_OPEN":
     case "WAIT_FOR_SUBMIT":
@@ -150,6 +159,8 @@ export function replyStageToStepStatus(stage: ReplyStage): StepStatus {
       return "PREPARING";
     case "HIGHLIGHT_COMPOSER":
       return "READY";
+    case "FILL_COMPOSER":
+      return "PROCESSING";
     case "WAIT_FOR_SUBMIT":
       return "AWAITING_USER";
     case "OPERATOR_REPORTED":
@@ -188,6 +199,7 @@ export function replyAllowedCommands(stage: ReplyStage, mode: ReplyRunMode = "FU
     case "HIGHLIGHT_ROW":
     case "LOCATE_COMPOSER":
     case "HIGHLIGHT_COMPOSER":
+    case "FILL_COMPOSER":
       return [...abort, "PAUSE_RUN", "CANCEL_RUN", "FIND_CURRENT_STEP", "SET_GUIDANCE_ENABLED"];
     case "WAIT_FOR_ROW_OPEN":
       // The row-open barrier is lifted by OBSERVATION (the operator's own click), never a report command.

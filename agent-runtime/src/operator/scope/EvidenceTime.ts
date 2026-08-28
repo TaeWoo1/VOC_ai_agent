@@ -160,7 +160,13 @@ export function assertsEventOccurrence(statement: string): boolean {
     && OCCURRENCE_WORDS.some((w) => statement.includes(w));
 }
 
-/** The observation date for a run: the caller's reference date, or the day the read happens. */
+/** The seller's calendar. A Korean seller's 「오늘」 is a KST day; a UTC day would end at 09:00 for them. */
+const SELLER_TIME_ZONE = "Asia/Seoul";
+
+/** The observation date for a run: the caller's reference date, or the seller's day the read happens on. */
 export function observationDate(referenceDate?: string | null): string {
-  return referenceDate ?? new Date().toISOString().slice(0, 10);
+  if (referenceDate) return referenceDate;
+  // en-CA formats as YYYY-MM-DD, which is the only reason that locale is named here.
+  return new Intl.DateTimeFormat("en-CA", { timeZone: SELLER_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(new Date());
 }

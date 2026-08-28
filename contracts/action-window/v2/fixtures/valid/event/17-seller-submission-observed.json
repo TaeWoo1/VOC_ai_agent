@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 2,
+  "eventId": "evt_17-seller-submission-observed",
+  "runId": "run_0002",
+  "sequence": 10,
+  "revision": 10,
+  "type": "SELLER_SUBMISSION_OBSERVED",
+  "occurredAt": "2026-08-28T00:00:00.000010Z",
+  "payload": {
+    "stepId": "aw.user_reply_submit",
+    "observed": true
+  }
+}

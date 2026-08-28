@@ -19,6 +19,7 @@ import type { AttentionCoverage, KnowledgeCoverageRow, ProductKnowledge, SignalC
 import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 import { mergeNeedState } from "../plan/needOutcome";
 import type { EventRange } from "../scope/EvidenceTime";
+import type { Artifact, WorkingSetView } from "../../conversation/contract";
 
 /**
  * What a tool is allowed to do.
@@ -30,7 +31,7 @@ import type { EventRange } from "../scope/EvidenceTime";
 export type ActionClass = "READ" | "PREPARE" | "WRITE";
 
 /** The specialists an Operator plan may dispatch to. A closed set; an unknown name fails closed. */
-export type SpecialistName = "PRODUCT_OPS" | "REVIEW_OPS" | "INQUIRY_OPS" | "REPORT_OPS";
+export type SpecialistName = "PRODUCT_OPS" | "REVIEW_OPS" | "INQUIRY_OPS" | "ORDER_OPS" | "REPORT_OPS";
 
 /** The evidence kinds. Mirrors the backend's `SignalCoverageView` signal names plus the run-only ones. */
 export type EvidenceKind =
@@ -86,7 +87,14 @@ export type EvidenceKind =
    * 자동 수집이 멈춰 있어 지금이 최신인지 확인하지 못했습니다" rests on. Giving it the kind of the rows
    * it is about would let a coverage sentence be cited as a count, and a count as a coverage sentence.
    */
-  | "CHANNEL_COVERAGE";
+  | "CHANNEL_COVERAGE"
+  /* ── Agentic Operating Workspace v2 (2026-08-27) ── */
+  /** Review ROWS in a window — a list, dated by the rows' own dates. Never the issue signal. */
+  | "REVIEW_LIST"
+  /** A window's order/sales totals — a COUNT dated by the window. */
+  | "ORDER_SUMMARY"
+  /** A step only the seller can take before a question can be answered — a GAP, stated as evidence. */
+  | "HUMAN_ACTION";
 
 /**
  * Where a claim came from. Ids, labels, counts and dates — never a body, never a quote.
@@ -295,6 +303,38 @@ export interface SpecialistResult {
   readonly failures?: readonly ToolFailure[];
   /** OK / PARTIAL / FAILED, when the specialist knows its own. Derived by the graph otherwise. */
   readonly terminal?: SpecialistTerminal;
+  /**
+   * Structured objects the conversation lane renders (Agentic Operating Workspace v2).
+   *
+   * Composed by the specialist from the rows it read — closed {@code ArtifactType}s only. They ride
+   * beside findings, never instead of them: every sentence still rests on evidence, and an artifact
+   * with no finding behind it is a table with nothing said about it.
+   */
+  readonly artifacts?: readonly Artifact[];
+}
+
+/** What a conversation hands a run: the previous working set, and closed-vocabulary lines for the planner. */
+export interface ConversationRunContext {
+  readonly workingSet: WorkingSetView | null;
+  /** Closed tokens only — `직전 작업 집합: REVIEWS (기간:TODAY, …)`. Built by the conversation service. */
+  readonly priorLine?: string;
+  /**
+   * Human steps this conversation itself saw finish (a REVIEW collection the seller ran after being
+   * asked). A finished step is a fact about the channel for the window it covers — the coverage row the
+   * backend serves cannot know a file upload was a collection, so the runtime carries it.
+   */
+  /**
+   * The window of a review collection the seller was already asked for and has not finished. Asking the
+   * same window again must not ask a second time — the rows held are shown instead.
+   */
+  readonly pendingHumanWindow?: string | null;
+  readonly collected?: ReadonlyArray<{
+    readonly channelCode: string; readonly dataType: string; readonly finishedAt: string;
+    /** The run's own count of rows it brought in — INGESTED, never "written in the window" (`conversation/reviewClaim.ts`). */
+    readonly successRows?: number | null;
+  }>;
+  /** Whether the seller's local agent is paired, as the frontend last saw it. Absent ⇒ UNKNOWN. */
+  readonly localAgent?: "PAIRED" | "ABSENT" | "UNKNOWN";
 }
 
 /** One specialist's terminal state as the answer reports it. */
@@ -412,6 +452,10 @@ export const OperatorStateAnnotation = Annotation.Root({
   }),
   answer: Annotation<OperatorAnswer | null>({ reducer: (_p, n) => n, default: () => null }),
   trail: Annotation<string[]>({ reducer: (p, n) => [...p, ...n], default: () => [] }),
+  /** Artifacts APPEND like evidence: a second pass adds objects rather than replacing the first's. */
+  artifacts: Annotation<Artifact[]>({ reducer: (p, n) => [...p, ...n], default: () => [] }),
+  /** The conversation's context for this run. Set once by the runtime; the graph only reads it. */
+  conversation: Annotation<ConversationRunContext | null>({ reducer: (_p, n) => n, default: () => null }),
 });
 
 export type OperatorState = typeof OperatorStateAnnotation.State;

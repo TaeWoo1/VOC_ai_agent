@@ -25,7 +25,11 @@ import type {
   ProductSummary,
   RepeatedInquiry,
 } from "./types";
-import type { ChannelCoverageRow, KnowledgeSearchResult } from "./types";
+import type {
+  ChannelCapabilityOverview, ChannelCoverageRow, ChannelSummary, DashboardOverview, InquiryReplyTransportRow,
+  KnowledgeSearchResult, OrderSummaryParams, OrderSummaryResponse, RecentReviewsParams, RecentReviewsResponse,
+  ReviewChannelCapabilityView,
+} from "./types";
 
 /**
  * One inquiry's context WITHOUT its body.
@@ -138,6 +142,31 @@ export interface OperatorSpringClient {
   getDashboardSummary(): Promise<DashboardSummary>;
   /** One inquiry's operational context — metadata, product link and past-response summary. No body. */
   getInquiryThreadContext(workItemId: string): Promise<InquiryThreadContext>;
+
+  /* ── Agentic Operating Workspace v2 (2026-08-27). All READ; each maps onto exactly one endpoint. ── */
+
+  /** Review rows in a window + the REVIEW coverage of every visible channel (`GET /api/reviews/recent`). */
+  listRecentReviews(params: RecentReviewsParams): Promise<RecentReviewsResponse>;
+  /** The overview metrics for a trailing window (`GET /api/dashboard/overview?days=N`). */
+  getDashboardOverview(days: number): Promise<DashboardOverview>;
+  /** One channel's order trend (`GET /api/orders/summary?from&to&channelId`). */
+  getOrdersSummary(params: OrderSummaryParams): Promise<OrderSummaryResponse>;
+  /** The channel catalogue (`GET /api/channels`) — the only way a channel CODE becomes an id. */
+  listChannels(): Promise<ChannelSummary[]>;
+
+  /* ── Channel-capability completion (2026-08-28). All READ; the capability RESOLUTION is a pure function
+     over these (`operator/capability/ChannelCapability.ts`) — no new registry, no prose. ── */
+
+  /** How one channel's data types are acquired (`GET /api/channels/{code}/capabilities/overview`). */
+  getChannelCapabilityOverview?(channelCode: string): Promise<ChannelCapabilityOverview>;
+  /** The audited inquiry-reply transport per (channel, subtype) (`GET /api/inquiry-publish/transports`). */
+  listInquiryReplyTransports?(): Promise<InquiryReplyTransportRow[]>;
+  /**
+   * The review-reply capability of one account's channel — the `channel` block of
+   * `GET /api/seller-accounts/{accountId}/channel-reviews?size=1`. Only that block is returned; the page's
+   * review rows are dropped at the transport.
+   */
+  getReviewChannelCapability?(accountId: string): Promise<ReviewChannelCapabilityView>;
 
   /**
    * Search platform knowledge about how a sales channel works.

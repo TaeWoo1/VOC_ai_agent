@@ -138,6 +138,11 @@ const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
   // exactly what separates grounding from a summary.
   PRODUCT_KNOWLEDGE_DOC: "DETAIL",
   GROUPING_GAP: "GAP",
+  // Agentic Operating Workspace v2: rows are a LIST, a window total is a COUNT, a missing human step
+  // is a GAP — the same three shapes the rest of the table already uses.
+  REVIEW_LIST: "LIST",
+  ORDER_SUMMARY: "COUNT",
+  HUMAN_ACTION: "GAP",
 };
 
 /**
@@ -151,7 +156,7 @@ const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
 const KIND_FLOOR: Record<InformationNeed["kind"], readonly Granularity[]> = {
   INQUIRY_VOLUME: ["COUNT", "LIST", "DETAIL"],
   REPEAT_PATTERN: ["LIST", "ISSUE_SIGNAL", "ISSUE_EVIDENCE", "COUNT"],
-  REVIEW_SIGNAL: ["ISSUE_SIGNAL", "ISSUE_EVIDENCE", "COUNT", "DETAIL"],
+  REVIEW_SIGNAL: ["ISSUE_SIGNAL", "ISSUE_EVIDENCE", "COUNT", "DETAIL", "LIST"],
   CUSTOMER_HISTORY: ["LIST", "DETAIL"],
   ORDER_HISTORY: ["LIST", "DETAIL", "COUNT"],
   PRODUCT_FACT: ["DETAIL", "GAP"],

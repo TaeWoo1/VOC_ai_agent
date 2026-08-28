@@ -25,6 +25,7 @@ import { groupByProduct, namedRows } from "../group/ProductGrouping";
 import { senseDeclaration, senseOf } from "../group/ReviewEvidenceSense";
 import type { DashboardSummary } from "../../spring/types";
 import { log } from "../../log";
+import { readRecentReviews } from "./reviewRows";
 
 /** The need kinds this specialist answers. */
 export const REVIEW_NEEDS = ["REVIEW_SIGNAL"] as const;
@@ -67,6 +68,13 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
   });
   if (input.needs.length === 0) {
     return pending("리뷰 신호는 이번 조사 계획에 포함되지 않았습니다.");
+  }
+  // <b>Rows are a different question from the issue signal, and the PLAN says which was asked.</b>
+  // 「오늘 새 리뷰 보여줘」 wants the reviews that arrived; 「반복되는 문제 있어?」 wants the extracted
+  // signal. The planner distinguishes them in closed tokens (`filters.period` / `filters.rating` /
+  // `scope=WORKING_SET` over a review set); this file reads those tokens and never the sentence.
+  if (wantsRows(input)) {
+    return readRecentReviews(input);
   }
   // <b>Do not re-buy what the run already proved, and never re-say it in weaker words.</b> When
   // ProductOps has resolved the product it also read that product's OWN issue list — selected by the
@@ -282,6 +290,14 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
     })),
     ...(note ? { note } : {}),
   };
+}
+
+/** Whether the plan asked for review ROWS — decided from plan fields only (Agentic Operating Workspace v2). */
+function wantsRows(input: SpecialistInput): boolean {
+  const f = input.filters;
+  if (!f) return false;
+  if (f.period != null || f.rating != null) return true;
+  return f.scope === "WORKING_SET" && input.workingSet?.kind === "REVIEWS";
 }
 
 /** The note this specialist adds: what the grouped scan left unread, or that there is nothing to read. */

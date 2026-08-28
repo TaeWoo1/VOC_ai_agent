@@ -17,7 +17,8 @@ import type {
   StartRunRequest,
 } from "./types";
 
-const AGENT_URL = (import.meta.env.VITE_AGENT_RUNTIME_URL ?? "http://127.0.0.1:8787").replace(/\/+$/, "");
+/** The runtime origin — shared with the conversation client so both lanes reach the same service. */
+export const AGENT_URL = (import.meta.env.VITE_AGENT_RUNTIME_URL ?? "http://127.0.0.1:8787").replace(/\/+$/, "");
 
 export class AgentRuntimeError extends Error {
   constructor(

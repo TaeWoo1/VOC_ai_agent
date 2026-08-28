@@ -464,3 +464,77 @@ describe("Action Window v2 — idempotency & ordering semantics (unchanged from 
     expect(isDuplicateEvent("evt_1", new Set(["evt_1"]))).toBe(true);
   });
 });
+
+describe("Action Window v2 — REVIEW_ACQUISITION binding rules (2026-08-28)", () => {
+  const base = { protocolVersion: 2, commandId: "c", runId: "r", expectedRevision: 0, type: "START_RUN" as const };
+  const ACQ = "5e11e70ac0de0001";
+  const LOCATE = "c0ffee0123456789";
+  const SUBMISSION = "a1b2c3d4e5f60718";
+
+  it("an acquisition requires an opaque acquisitionRef, and nothing else", () => {
+    expect(INTENT_REQUIRED_REF.REVIEW_ACQUISITION).toBe("acquisitionRef");
+    expect(errorCodes(validateCommandEnvelope({ ...base, payload: { channelCode: "coupang", intent: "REVIEW_ACQUISITION" } })))
+      .toContain("CONSTRAINT_VIOLATION");
+    // an account slot (24 hex) or a seller-account id must never ride here — neither is 16-hex
+    expect(validateCommandEnvelope({ ...base, payload: { channelCode: "coupang", intent: "REVIEW_ACQUISITION", acquisitionRef: "0".repeat(24) } }).ok).toBe(false);
+    expect(validateCommandEnvelope({ ...base, payload: { channelCode: "coupang", intent: "REVIEW_ACQUISITION", acquisitionRef: ACQ } })).toEqual({ ok: true });
+  });
+
+  it.each([
+    ["an acquisition carrying a locateRef", { intent: "REVIEW_ACQUISITION", acquisitionRef: ACQ, locateRef: LOCATE }],
+    ["an acquisition carrying a submissionRef", { intent: "REVIEW_ACQUISITION", acquisitionRef: ACQ, submissionRef: SUBMISSION }],
+    ["a locate carrying an acquisitionRef", { intent: "REVIEW_LOCATE", locateRef: LOCATE, acquisitionRef: ACQ }],
+    ["an export carrying an acquisitionRef", { intent: "EXPORT", acquisitionRef: ACQ }],
+    ["a bare start carrying an acquisitionRef", { acquisitionRef: ACQ }],
+  ])("rejects %s", (_label, payload) => {
+    expect(errorCodes(validateCommandEnvelope({ ...base, payload: { channelCode: "coupang", ...payload } }))).toContain("CONSTRAINT_VIOLATION");
+  });
+
+  it("treats an acquisitionRef as an opaque ref (never an account slot, an id, or a path)", () => {
+    expect(findProhibitedFields({ acquisitionRef: "0".repeat(24) }).length).toBeGreaterThan(0);
+    expect(findProhibitedFields({ acquisitionRef: "/Users/seller/.sellerops" }).length).toBeGreaterThan(0);
+    expect(findProhibitedFields({ acquisitionRef: ACQ })).toEqual([]);
+  });
+
+  it("an acquisition run reaches COMPLETED with counts only in its copy params", () => {
+    const view = {
+      protocolVersion: 2, runId: "r", revision: 7, channelCode: "coupang",
+      runCopyKey: "actionWindow.reviewAcquisition.run",
+      runCopyParams: { pagesRead: 3, collected: 27, stored: 27, coverageComplete: true },
+      status: "COMPLETED", executionMode: "ACTION_WINDOW",
+      intent: "REVIEW_ACQUISITION", guidanceEnabled: true, allowedCommands: [],
+      progress: { completedSteps: 3, totalSteps: 3 }, updatedAt: "2026-08-28T00:00:00Z",
+    };
+    expect(validateRunView(view)).toEqual({ ok: true });
+  });
+
+  it("its two failure causes are blocker codes of their own, and v2 still adds rather than narrows", () => {
+    expect((BLOCKER_CODES as readonly string[]).includes("ACQUISITION_TARGET_UNRESOLVED")).toBe(true);
+    expect((BLOCKER_CODES as readonly string[]).includes("HANDOFF_REJECTED")).toBe(true);
+    for (const code of V1_BLOCKER_CODES) expect((BLOCKER_CODES as readonly string[]).includes(code), code).toBe(true);
+  });
+
+  it("the acquire carrier is its own announceable kind", () => {
+    expect(parseAwCarrierKind("acquire")).toBe("acquire");
+    expect(parseAwCarrierKind("acquisition")).toBeNull();
+  });
+});
+
+describe("Action Window v2 — guided composer fill events (2026-08-28)", () => {
+  const envelope = (type: string, payload: Record<string, unknown>) => ({
+    protocolVersion: 2, eventId: "e", runId: "r", sequence: 1, revision: 1, type,
+    occurredAt: "2026-08-28T00:00:00Z", payload,
+  });
+
+  it("COMPOSER_FILLED names the step and the composer's opaque ref — never the text", () => {
+    expect(validateEventEnvelope(envelope("COMPOSER_FILLED", { stepId: "aw.user_reply_submit", targetRef: "a1b2c3d4e5f60718" }))).toEqual({ ok: true });
+    expect(errorCodes(validateEventEnvelope(envelope("COMPOSER_FILLED", { stepId: "aw.user_reply_submit" })))).toContain("CONSTRAINT_VIOLATION");
+    expect(validateEventEnvelope(envelope("COMPOSER_FILLED", { stepId: "aw.user_reply_submit", targetRef: "a1b2c3d4e5f60718", reviewText: "x" })).ok).toBe(false);
+  });
+
+  it("SELLER_SUBMISSION_OBSERVED is an observation with a boolean, and reaches no verification", () => {
+    expect(validateEventEnvelope(envelope("SELLER_SUBMISSION_OBSERVED", { stepId: "aw.user_reply_submit", observed: true }))).toEqual({ ok: true });
+    expect(errorCodes(validateEventEnvelope(envelope("SELLER_SUBMISSION_OBSERVED", { stepId: "aw.user_reply_submit" })))).toContain("MISSING_FIELD");
+    expect((VERIFICATION_STATES as readonly string[])).toEqual(["UNVERIFIED"]);
+  });
+});

@@ -93,7 +93,7 @@ export class FakeReviewSpringClient implements ReviewSpringClient {
   readonly submissionRefs: string[] = [];
   /** Standing invariant: the runtime must never cause an external send. */
   externalSendAttempts = 0;
-  readonly calls = { list: 0, prep: 0, saveDraft: 0, approve: 0, submissionRun: 0 };
+  readonly calls = { list: 0, prep: 0, saveDraft: 0, approve: 0, submissionRun: 0, triage: 0 };
   private mintSeq = 0;
 
   private readonly dispatchAdapterEnabled: boolean;
@@ -207,6 +207,13 @@ export class FakeReviewSpringClient implements ReviewSpringClient {
       productName: it.seed.productName ?? null,
       reviewDate: it.seed.sourceCreatedDate,
     };
+  }
+
+  async recordReviewTriage(_accountId: string, actionRef: string, request: { commandId: string; disposition: "RESPONSE_NEEDED" | "MONITOR" | "NO_ACTION" }): Promise<unknown> {
+    this.calls.triage += 1;
+    const it = this.require(actionRef);
+    it.disposition = request.disposition;
+    return { actionRef, disposition: request.disposition };
   }
 
   async saveReviewDraft(_accountId: string, actionRef: string, request: ReviewReplyDraftRequest): Promise<ReviewReplyDraftView> {

@@ -47,6 +47,20 @@ import type {
   ProductKnowledge,
   ChannelCoverageRow,
   KnowledgeSearchResult,
+  ChannelSummary,
+  DashboardOverview,
+  GeneratedDraftView,
+  OrderSummaryParams,
+  OrderSummaryResponse,
+  RecentReviewsParams,
+  RecentReviewsResponse,
+  SellerAccountSummary,
+  SyncRunParams,
+  SyncRunSummary,
+  ChannelCapabilityOverview,
+  InquiryReplyTransportRow,
+  ReviewChannelCapabilityView,
+  ManualSyncRequest,
 } from "./types";
 import type { ListReplyWorkParams, ReviewSpringClient } from "./ReviewSpringClient";
 import type { IssueSpringClient, ListReviewIssuesParams } from "./IssueSpringClient";
@@ -86,6 +100,34 @@ export interface SpringClient {
    * derives the org from it. That is what keeps the backend the only LLM egress in the repository.
    */
   generateInquiryDraft?(request: { title: string; details: string | null }): Promise<AgentDraftView>;
+
+  /* ── Agentic Operating Workspace v2 (2026-08-27) ── */
+
+  /** The seller's connected accounts (`GET /api/seller-accounts`). Ids and labels; no credential. */
+  listSellerAccounts(): Promise<SellerAccountSummary[]>;
+  /** Collection run history (`GET /api/sync-runs?…`) — how a paused conversation learns a step finished. */
+  listSyncRuns(params: SyncRunParams): Promise<SyncRunSummary[]>;
+  /**
+   * Ask the backend to PREPARE one reply draft (`POST /api/inquiries/{id}/draft/generate`).
+   *
+   * A PREPARE, not a WRITE: it saves an append-only draft version and moves nothing toward a channel.
+   * Deliberately NOT an Operator tool — the registry stays 100% READ — and reached only from the
+   * conversation lane's `DraftPreparer`, on the seller's explicit sentence.
+   */
+  generateDraftFor(workItemId: string, tone: "SOFTER" | "MORE_FORMAL" | "SHORTER" | null): Promise<GeneratedDraftView>;
+
+  /**
+   * The product's own one-press collection (`POST /api/seller-accounts/{accountId}/sync {dataType}`) —
+   * `CollectControlService.manualSync`: a synchronous READ of a channel the seller already connected,
+   * single-flight and rate-budgeted on the backend.
+   *
+   * <b>Not an Operator tool and not reachable from the conversation lane except through
+   * `conversation/Refresher.ts`</b> (`conversationWriteFence.test.ts` pins the one caller). It is the
+   * AUTOMATIC-acquisition half of the freshness decision: a channel whose review rows are stale and whose
+   * acquisition is the API is refreshed once, bounded, and the outcome is reported honestly — never
+   * retried, never a substitute for a seller's own step.
+   */
+  manualSync(accountId: string, request: ManualSyncRequest): Promise<SyncRunSummary>;
 }
 
 /**
@@ -216,6 +258,18 @@ export class HttpSpringClient
     request: ReviewReplyDraftRequest,
   ): Promise<ReviewReplyDraftView> {
     return this.request<ReviewReplyDraftView>("PUT", `${this.reviewBase(accountId, actionRef)}/draft`, request);
+  }
+
+  async recordReviewTriage(
+    accountId: string,
+    actionRef: string,
+    request: { commandId: string; disposition: "RESPONSE_NEEDED" | "MONITOR" | "NO_ACTION" },
+  ): Promise<unknown> {
+    return this.request<unknown>(
+      "POST",
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/attention/items/${encodeURIComponent(actionRef)}/triage`,
+      request,
+    );
   }
 
   async decideReviewApproval(
@@ -409,6 +463,92 @@ export class HttpSpringClient
     return this.request<KnowledgeSearchResult>(
       "GET",
       `/api/products/${encodeURIComponent(productId)}/knowledge/search?${params.toString()}`,
+    );
+  }
+
+  // ─────────────── Agentic Operating Workspace v2 (2026-08-27) ───────────────
+
+  async listRecentReviews(params: RecentReviewsParams): Promise<RecentReviewsResponse> {
+    const q = new URLSearchParams();
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    if (params.negativeOnly != null) q.set("negativeOnly", String(params.negativeOnly));
+    if (params.channel) q.set("channel", params.channel);
+    if (params.productId) q.set("productId", params.productId);
+    if (params.size != null) q.set("size", String(params.size));
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<RecentReviewsResponse>("GET", `/api/reviews/recent${suffix}`);
+  }
+
+  async getDashboardOverview(days: number): Promise<DashboardOverview> {
+    return this.request<DashboardOverview>("GET", `/api/dashboard/overview?days=${encodeURIComponent(String(days))}`);
+  }
+
+  async getOrdersSummary(params: OrderSummaryParams): Promise<OrderSummaryResponse> {
+    const q = new URLSearchParams();
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    if (params.channelId) q.set("channelId", params.channelId);
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<OrderSummaryResponse>("GET", `/api/orders/summary${suffix}`);
+  }
+
+  async listChannels(): Promise<ChannelSummary[]> {
+    return this.request<ChannelSummary[]>("GET", `/api/channels`);
+  }
+
+  async listSellerAccounts(): Promise<SellerAccountSummary[]> {
+    return this.request<SellerAccountSummary[]>("GET", `/api/seller-accounts`);
+  }
+
+  async listSyncRuns(params: SyncRunParams): Promise<SyncRunSummary[]> {
+    const q = new URLSearchParams();
+    if (params.sellerAccountId) q.set("sellerAccountId", params.sellerAccountId);
+    if (params.channelId) q.set("channelId", params.channelId);
+    if (params.dataType) q.set("dataType", params.dataType);
+    if (params.status) q.set("status", params.status);
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<SyncRunSummary[]>("GET", `/api/sync-runs${suffix}`);
+  }
+
+  async manualSync(accountId: string, request: ManualSyncRequest): Promise<SyncRunSummary> {
+    return this.request<SyncRunSummary>(
+      "POST",
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/sync`,
+      request,
+    );
+  }
+
+  async getChannelCapabilityOverview(channelCode: string): Promise<ChannelCapabilityOverview> {
+    return this.request<ChannelCapabilityOverview>(
+      "GET",
+      `/api/channels/${encodeURIComponent(channelCode)}/capabilities/overview`,
+    );
+  }
+
+  async listInquiryReplyTransports(): Promise<InquiryReplyTransportRow[]> {
+    return this.request<InquiryReplyTransportRow[]>("GET", `/api/inquiry-publish/transports`);
+  }
+
+  async getReviewChannelCapability(accountId: string): Promise<ReviewChannelCapabilityView> {
+    // One page of size 1 is the smallest read that carries the `channel` block; the rows are dropped
+    // here so nothing review-shaped leaves the transport for a capability question.
+    const page = await this.request<{ channel: ReviewChannelCapabilityView }>(
+      "GET",
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews?page=0&size=1`,
+    );
+    return page.channel;
+  }
+
+  async generateDraftFor(
+    workItemId: string,
+    tone: "SOFTER" | "MORE_FORMAL" | "SHORTER" | null,
+  ): Promise<GeneratedDraftView> {
+    // The body is sent only when a tone was asked for: the no-body caller is the existing screen.
+    return this.request<GeneratedDraftView>(
+      "POST",
+      `/api/inquiries/${encodeURIComponent(workItemId)}/draft/generate`,
+      tone ? { tone } : undefined,
     );
   }
 

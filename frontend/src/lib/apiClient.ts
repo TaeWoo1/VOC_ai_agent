@@ -73,6 +73,8 @@ import type {
   ReviewReplyOutcomeResponse,
   ReviewReplyPrep,
   ReviewReplySubmissionRunResponse,
+  ReviewExecutionView,
+  ReviewAcquisitionRunResponse,
   TriageDecisionResponse,
   TriageDisposition,
   ScheduleView,
@@ -1339,6 +1341,47 @@ export const api = {
     }
     const { data } = await http.post<ReviewReplySubmissionRunResponse>(
       `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/submission-run`,
+      {},
+    );
+    return data;
+  },
+
+  // v2 channel-capability completion: EXECUTE an approved Cafe24 review reply through the backend's
+  // review comment adapter — the ONE marketplace WRITE of the review lane. `commandId` is minted per
+  // press; `expectedFingerprint` binds the write to the approved head the seller read. 409 when the
+  // approval moved or the fingerprint no longer matches; 4xx when this deployment cannot execute.
+  // Never retried by the client; an ambiguous result is read back with `getReviewReplyExecution`.
+  async executeReviewReply(
+    accountId: string,
+    actionRef: string,
+    body: { commandId: string; expectedFingerprint: string },
+  ): Promise<ReviewExecutionView> {
+    const { data } = await http.post<ReviewExecutionView>(
+      `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/execute`,
+      body,
+    );
+    return data;
+  },
+
+  // Read-back of the execution row (both the API lane and the NAVER guided lane's observed states).
+  // Null when nothing has been recorded for this review yet.
+  async getReviewReplyExecution(accountId: string, actionRef: string): Promise<ReviewExecutionView | null> {
+    try {
+      const { data } = await http.get<ReviewExecutionView>(
+        `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/execution`,
+      );
+      return data;
+    } catch (e) {
+      if (isAxiosError(e) && e.response?.status === 404) return null;
+      throw e;
+    }
+  },
+
+  // v2: mint a single-use `acquisitionRef` for a Coupang WING review read run (Action Window
+  // `START_RUN(REVIEW_ACQUISITION)`). COUPANG only server-side; the ref carries no review identity.
+  async startReviewAcquisitionRun(accountId: string): Promise<ReviewAcquisitionRunResponse> {
+    const { data } = await http.post<ReviewAcquisitionRunResponse>(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/review-acquisition-runs`,
       {},
     );
     return data;

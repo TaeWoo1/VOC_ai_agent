@@ -469,6 +469,18 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
 
     boolean existsByOrgIdAndChannelIdAndExternalId(UUID orgId, UUID channelId, String externalId);
 
+    /**
+     * Stamp the acquisition run on rows that were inserted WITHOUT it — the Coupang WING handoff records
+     * its {@code sync_jobs} row after the reviews it describes ({@code AgentReviewHandoffService}). Only
+     * rows whose stamp is still null and that belong to this org are touched: a review's provenance is
+     * written once, by the run that inserted it, and a later run cannot claim an earlier row.
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update Review r set r.acquisitionSyncJobId = :jobId "
+            + "where r.orgId = :orgId and r.id in :ids and r.acquisitionSyncJobId is null")
+    int stampAcquisitionSyncJob(@Param("orgId") UUID orgId, @Param("ids") java.util.Collection<UUID> ids,
+                                @Param("jobId") UUID jobId);
+
     boolean existsByOrgIdAndChannelIdAndContentHash(UUID orgId, UUID channelId, String contentHash);
 
     /** The stored row a duplicate import matches, so its reply state can be refreshed forward. */
@@ -999,4 +1011,48 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             """ + NOT_DISMISSED_PREDICATE + """
             """)
     long countActiveReplyWork(@Param("orgId") UUID orgId, @Param("reviewId") UUID reviewId);
+    /**
+     * The rows behind {@code GET /api/reviews/recent} — one channel, one half-open window over
+     * {@code receivedAt}, REAL rows only, optionally narrowed to negative reviews and to one product.
+     *
+     * <p><b>Its own query, not a widening of {@link #findInWindowByChannelFiltered}.</b> That query
+     * serves the attention drill-down and must keep counting every stored row; this one answers
+     * "what did buyers write this week" for the Agent, and a synthetic row in that answer would be
+     * the seller's AI describing a review nobody wrote. {@code dataOrigin = REAL} is stated in the
+     * predicate rather than left to the entity filter so the exclusion is readable where the query
+     * is, and survives a caller that has the filter disabled.
+     *
+     * <p>Null {@code productId} collapses to "any product"; {@code negativeOnly=false} collapses the
+     * rating constraint. {@code id} is a tiebreaker only, never surfaced as an order.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and r.dataOrigin = com.sellerops.common.DataOrigin.REAL
+              and (:negativeOnly = false or r.negative = true)
+              and (:productId is null or r.productId = :productId)
+              and r.receivedAt >= :from and r.receivedAt < :toExclusive
+            order by r.receivedAt desc, r.id desc
+            """)
+    List<Review> findRecentInWindowByChannel(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+                                             @Param("negativeOnly") boolean negativeOnly,
+                                             @Param("productId") UUID productId,
+                                             @Param("from") Instant from,
+                                             @Param("toExclusive") Instant toExclusive,
+                                             Pageable pageable);
+
+    /** The count that pairs with {@link #findRecentInWindowByChannel} — same predicate, so N건 matches the rows. */
+    @Query("""
+            select count(r) from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and r.dataOrigin = com.sellerops.common.DataOrigin.REAL
+              and (:negativeOnly = false or r.negative = true)
+              and (:productId is null or r.productId = :productId)
+              and r.receivedAt >= :from and r.receivedAt < :toExclusive
+            """)
+    long countRecentInWindowByChannel(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+                                      @Param("negativeOnly") boolean negativeOnly,
+                                      @Param("productId") UUID productId,
+                                      @Param("from") Instant from,
+                                      @Param("toExclusive") Instant toExclusive);
 }

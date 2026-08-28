@@ -152,7 +152,19 @@ public class InquiryDraftComposer {
      * ({@code unavailableMessage}). The dashboard, the queue and the send path are unaffected.
      */
     public GeneratedDraftView generate(UUID orgId, UUID workItemId, UUID sellerUserId) {
-        return compose(orgId, workItemId, "SELLER:" + sellerUserId);
+        return generate(orgId, workItemId, sellerUserId, null);
+    }
+
+    /**
+     * As {@link #generate(UUID, UUID, UUID)}, with a one-turn wording hint from the conversation.
+     *
+     * <p>The hint overrides ONE field of the org's style profile for this draft (see
+     * {@link ToneHint}); a null hint is exactly the three-argument call. Nothing about retrieval,
+     * basis, quota or the facts section moves — a tone is a request about manner, and manner never
+     * wins over grounding. In {@code NO_ANSWER_BASIS} the hint is ignored along with the model.
+     */
+    public GeneratedDraftView generate(UUID orgId, UUID workItemId, UUID sellerUserId, ToneHint tone) {
+        return compose(orgId, workItemId, "SELLER:" + sellerUserId, tone);
     }
 
     /**
@@ -165,10 +177,10 @@ public class InquiryDraftComposer {
      * budget the seller cannot see.
      */
     public GeneratedDraftView generateAs(UUID orgId, UUID workItemId, String actor) {
-        return compose(orgId, workItemId, actor);
+        return compose(orgId, workItemId, actor, null);
     }
 
-    private GeneratedDraftView compose(UUID orgId, UUID workItemId, String actor) {
+    private GeneratedDraftView compose(UUID orgId, UUID workItemId, String actor, ToneHint tone) {
         InquiryWorkItem workItem = workItems.findById(workItemId)
                 .filter(w -> w.getOrgId().equals(orgId))
                 .orElseThrow(() -> ApiException.notFound("문의 작업을 찾을 수 없습니다."));
@@ -201,7 +213,10 @@ public class InquiryDraftComposer {
         // forbidden-phrase check, the fallback, the provenance stamp — reads this same snapshot, so
         // a save that lands mid-compose cannot produce a draft written under one style and recorded
         // under another.
-        AnswerStyleProfile style = styleFor(orgId);
+        // A conversation hint is applied HERE, to the snapshot, so the prompt section, the forbidden
+        // check and the stamp all see the same overridden profile — and the fallback sentence below,
+        // which is the seller's own words and takes no tone, is read from the same object unchanged.
+        AnswerStyleProfile style = tone == null ? styleFor(orgId) : tone.applyTo(styleFor(orgId));
         if (!basis.mayGenerate()) {
             // No model call and no saved version. Nothing here is a refusal to help — the seller
             // writes their own reply on the same screen — it is a refusal to manufacture one.

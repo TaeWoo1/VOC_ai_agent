@@ -24,6 +24,7 @@ export function WorkItem({
   selected = false,
   dim = false,
   ariaCurrent,
+  onClick,
 }: {
   state?: string | null;
   tone?: StatusTone;
@@ -36,6 +37,8 @@ export function WorkItem({
   /** An old or settled row: same information, quieter ink. */
   dim?: boolean;
   ariaCurrent?: "true" | "page";
+  /** Side effect as the seller leaves — telemetry or opening the panel, never navigation of its own. */
+  onClick?: () => void;
 }) {
   const body = (
     <>
@@ -58,6 +61,7 @@ export function WorkItem({
       <Link
         to={to}
         aria-current={ariaCurrent}
+        onClick={onClick}
         className={`${shell} transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700`}
       >
         {body}

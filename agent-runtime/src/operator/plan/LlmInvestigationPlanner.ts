@@ -21,7 +21,8 @@
  */
 import type { GoalRequest } from "../../goal/parseGoal";
 import type { AgentPlanView } from "../../spring/types";
-import type { InvestigationPlan, RiskClass } from "./InvestigationPlan";
+import type { InvestigationPlan, PlanFilters, PlanTarget, RiskClass } from "./InvestigationPlan";
+import { NO_FILTERS, NO_TARGET } from "./InvestigationPlan";
 import type { SpecialistName } from "../state/OperatorState";
 import { validatePlan, PlanRejectedError, REPLANNABLE_REJECTIONS } from "./PlanValidator";
 import type { PlanRejection } from "./PlanValidator";
@@ -352,7 +353,35 @@ function toPlan(view: AgentPlanView, goalText: string): InvestigationPlan {
     appliedDefaults: [],
     rationale: view.rationale ?? null,
     plannerVersion: view.providerVersion ?? "agent-plan/unknown",
+    // v3. Absent sections are defaults, never a failure; an unknown token is the default too.
+    requestedAction: oneOf(view.requestedAction, ["PREPARE_INQUIRY_DRAFT", "REQUEST_SEND_APPROVAL", "OPEN_WORKSPACE", "LIST_ACTIONS", "EXPLAIN_CAPABILITY"] as const) ?? "NONE",
+    tone: oneOf(view.tone, ["SOFTER", "MORE_FORMAL", "SHORTER"] as const),
+    filters: filtersOf(view.filters),
+    target: targetOf(view.target),
   };
+}
+
+/** A closed-set read: the value when it is one of the allowed tokens, else null. */
+function oneOf<T extends string>(value: string | null | undefined, allowed: readonly T[]): T | null {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : null;
+}
+
+function filtersOf(raw: AgentPlanView["filters"]): PlanFilters {
+  if (!raw) return NO_FILTERS;
+  return {
+    period: oneOf(raw.period, ["TODAY", "YESTERDAY", "LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS", "THIS_WEEK", "LAST_WEEK"] as const),
+    rating: oneOf(raw.rating, ["ALL", "LOW"] as const),
+    channel: oneOf(raw.channel, ["NAVER", "COUPANG", "CAFE24"] as const),
+    scope: oneOf(raw.scope, ["WORKING_SET", "ORG"] as const),
+    topic: oneOf(raw.topic, ["SHIPPING", "EXCHANGE_RETURN", "PRODUCT_SPEC", "USAGE", "OTHER"] as const),
+  };
+}
+
+function targetOf(raw: AgentPlanView["target"]): PlanTarget {
+  if (!raw) return NO_TARGET;
+  const selector = oneOf(raw.selector, ["FIRST", "NTH", "ALL", "THIS"] as const) ?? "NONE";
+  const index = typeof raw.index === "number" && Number.isInteger(raw.index) && raw.index >= 1 ? raw.index : null;
+  return { selector, index: selector === "NTH" ? index : null };
 }
 
 /** An unrecognised entity kind becomes PRODUCT — the only kind a specialist can resolve today. */

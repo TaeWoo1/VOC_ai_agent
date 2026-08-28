@@ -33,6 +33,7 @@ import { REPEAT_WINDOW_DAYS } from "../defaults/OperationalDefaults";
 import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { log } from "../../log";
 import type { ResolvedEntity } from "../plan/InvestigationPlan";
+import { readInquiryWorkload, wantsWorkload } from "./inquiryWorkloadStep";
 
 /** Where the POLICY answer comes from — a store that does not exist, named honestly. Not a tool. */
 const POLICY_STORE = "policy-store";
@@ -76,7 +77,31 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
   // evidence about this inquiry the specialist will ever cite — see {@link focusedInquiry}.
   const focus = focusedInquiry(input);
 
+  // One workload read per RUN (Agentic Operating Workspace v2) — the classified queue answers every
+  // INQUIRY_VOLUME need the plan declared, the same way one inbox read does on the count path.
+  let workloadRead = false;
+  const artifacts: import("../../conversation/contract").Artifact[] = [];
+
   for (const need of input.needs) {
+    if (need.kind === "INQUIRY_VOLUME" && wantsWorkload(input)) {
+      // <b>Rows, classified — asked for by the PLAN in closed tokens, never read off the sentence.</b>
+      // A working-set follow-up, a topic filter, a period or a draft request are all planner fields;
+      // the count path below stays exactly what it was for a plan that carries none of them.
+      if (workloadRead) {
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      workloadRead = true;
+      const read = await readInquiryWorkload(input, need.id);
+      failures.push(...read.failures);
+      if (read.evidence.length > 0) succeeded += 1;
+      refs.push(...read.evidence);
+      findings.push(...read.findings);
+      notes.push(...read.notes);
+      artifacts.push(...read.artifacts);
+      needStates.push(read.needState);
+      continue;
+    }
     if (need.kind === "INQUIRY_VOLUME"
         && (groupsBy(input.grouping, "CHANNEL") || input.channelScope != null)) {
       // <b>The org total is the wrong shape for this question, and the gate already knows it.</b> A
@@ -547,6 +572,7 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     needStates,
     failures,
     terminal,
+    ...(artifacts.length > 0 ? { artifacts } : {}),
     // Deduped: one read serves every need of its kind, so "반복 문의는 없었습니다" is one fact however
     // many needs asked for it. Three copies of a true sentence read as three findings.
     ...(notes.length > 0 ? { note: [...new Set(notes)].join(" ") } : {}),

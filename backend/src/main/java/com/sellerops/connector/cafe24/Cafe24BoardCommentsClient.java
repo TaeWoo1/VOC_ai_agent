@@ -29,10 +29,12 @@ import java.util.regex.Pattern;
  * 2026-08-25 actor probe. That comparison happens HERE, and only its BOOLEAN leaves: the id is bound
  * on a private wire record and has no field on {@link Cafe24BoardCommentRow}.
  *
- * <p><b>No text, no person.</b> {@code content}, {@code writer}, {@code client_ip},
- * {@code attach_file_urls} and {@code rating} have no field on any record in this file, so a
- * comment's words and its author cannot be persisted later by accident. What the connector needs is
- * "did the shop answer, and when" — and that is exactly what this returns.
+ * <p><b>No text, no person.</b> {@code writer}, {@code client_ip}, {@code attach_file_urls} and
+ * {@code rating} have no field on any record in this file. {@code content} is bound on the private
+ * wire record for ONE purpose — to be hashed — and leaves only as that hash
+ * ({@link Cafe24BoardCommentRow#contentHash()}), so a comment's words and its author cannot be
+ * persisted later by accident. What the connector needs is "did the shop answer, and when", plus,
+ * for the review lane, "is this comment the approved text" — and that is exactly what this returns.
  *
  * <p><b>READ only.</b> The sibling {@code POST}/{@code DELETE} on this resource are not called and
  * not spelled; a structural test asserts their absence.
@@ -106,7 +108,8 @@ public class Cafe24BoardCommentsClient {
             List<Cafe24BoardCommentRow> out = new ArrayList<>();
             for (RawComment raw : parsed.comments() == null ? List.<RawComment>of() : parsed.comments()) {
                 out.add(new Cafe24BoardCommentRow(raw.commentNo(), raw.articleNo(),
-                        raw.createdDate(), authoredByMall(raw.memberId(), mallId)));
+                        raw.createdDate(), authoredByMall(raw.memberId(), mallId),
+                        contentHash(raw.content())));
             }
             return List.copyOf(out);
         } catch (Exception e) {
@@ -127,6 +130,27 @@ public class Cafe24BoardCommentsClient {
     private record RawComment(@JsonProperty("comment_no") Long commentNo,
                               @JsonProperty("article_no") Long articleNo,
                               @JsonProperty("created_date") String createdDate,
-                              @JsonProperty("member_id") String memberId) {
+                              @JsonProperty("member_id") String memberId,
+                              @JsonProperty("content") String content) {
+    }
+
+    /**
+     * The comment's words, reduced to a one-way comparison value and dropped — whitespace collapsed,
+     * SHA-256 hex, the same rule {@code Cafe24ReviewCommentAdapter.normalizedHash} applies to the
+     * approved draft. Bound here, hashed here; the text has no field on the public row.
+     */
+    static String contentHash(String content) {
+        String normalized = content == null ? "" : content.replaceAll("\\s+", " ").strip();
+        try {
+            byte[] out = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(normalized.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(out.length * 2);
+            for (byte b : out) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
     }
 }

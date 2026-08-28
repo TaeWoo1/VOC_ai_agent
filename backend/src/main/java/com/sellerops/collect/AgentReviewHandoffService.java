@@ -218,6 +218,12 @@ public class AgentReviewHandoffService {
         int failed = outcome.failed() + batch.unresolved();
         SyncJob record = recordImport(orgId, channel.getId(), sellerAccountId, request, received, failed,
                 outcome, startedAt);
+        // The run row exists only now (it carries the counts), so the provenance stamp (V83) follows it.
+        // Bounded to the ids this ingest inserted; a swallowed recordImport failure leaves them unstamped,
+        // which reads as NONE — the fail-closed side.
+        if (record != null) {
+            ingestion.stampAcquisition(orgId, outcome.insertedIds(), record.getId());
+        }
         // Counts and enums only. The bodies are in hand at this point, which is exactly why they are not here.
         log.info("Coupang review handoff: received={} stored={} skipped={} failed={} unresolved={} "
                         + "complete={} stopReason={}",

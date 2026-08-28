@@ -126,6 +126,16 @@ export type ExecutionMode = (typeof EXECUTION_MODES)[number];
  * ordinary `COMPLETED` terminal — where "completed" means the ISSUANCE GUIDANCE finished, NOT that a
  * credential was stored or a connection made. It binds to no approved marketplace work, so it carries no
  * ref (like `EXPORT`).
+ *
+ * `REVIEW_ACQUISITION` (2026-08-28) is the Coupang WING 상품평 read, started from a SellerOps screen or a
+ * conversation instead of from the seated CLI that live-proved it. reviewnary prepares the WING window; the
+ * seller brings the 상품평 list up and turns every page themselves (the pager is a marketplace control); at
+ * each page the seller confirms and the runtime reads the rows in front of them; when the pager shows its
+ * last page — or the seller ends the walk early — everything read is handed to the backend in ONE bounded
+ * POST (`SELLER_CENTER_READ`). It carries an `acquisitionRef` minted server-side against ONE seller account,
+ * so no account id crosses this boundary; the run reaches the ordinary `COMPLETED` terminal, and its
+ * `runCopyParams` carry counts only (pages read, reviews collected/stored, whether the pager's end was seen).
+ * A walk that ended before the last page is COMPLETED with `coverageComplete=false`, never rounded up.
  */
 export const RUN_INTENTS = [
   "EXPORT",
@@ -134,6 +144,7 @@ export const RUN_INTENTS = [
   "INITIAL_REVIEW_IMPORT_SEGMENT",
   "API_ISSUANCE_GUIDANCE",
   "REVIEW_LOCATE",
+  "REVIEW_ACQUISITION",
 ] as const;
 export type RunIntent = (typeof RUN_INTENTS)[number];
 
@@ -146,7 +157,7 @@ export type RunIntent = (typeof RUN_INTENTS)[number];
  * all of them and is stated once. `EXPORT` maps to no ref — it binds to nothing.
  */
 export const INTENT_REQUIRED_REF: Readonly<
-  Record<RunIntent, "submissionRef" | "discoveryRef" | "importRef" | "locateRef" | null>
+  Record<RunIntent, "submissionRef" | "discoveryRef" | "importRef" | "locateRef" | "acquisitionRef" | null>
 > = {
   EXPORT: null,
   REPLY_SUBMISSION: "submissionRef",
@@ -159,10 +170,13 @@ export const INTENT_REQUIRED_REF: Readonly<
   // the fields that find that review on the screen are a description of one buyer's review, and the ref is how
   // they stay on the server side of this boundary.
   REVIEW_LOCATE: "locateRef",
+  // An acquisition binds to ONE seller account, resolved server-side — the run stores what it reads under
+  // that account, so which account must be settled before a page is read, and by the server, not the tab.
+  REVIEW_ACQUISITION: "acquisitionRef",
 };
 
 /** Every binding ref a `START_RUN` payload may carry (exactly one, chosen by intent). */
-export const START_RUN_REF_KEYS = ["submissionRef", "discoveryRef", "importRef", "locateRef"] as const;
+export const START_RUN_REF_KEYS = ["submissionRef", "discoveryRef", "importRef", "locateRef", "acquisitionRef"] as const;
 
 /**
  * What the operator reports happened at the submit barrier (v2). Kept SEPARATE from `verification`.
@@ -302,6 +316,20 @@ export const BLOCKER_CODES = [
    * that would need one is over. The next press is a new run.
    */
   "LOCATE_TARGET_UNRESOLVED",
+  /**
+   * A `REVIEW_ACQUISITION` run could not turn its `acquisitionRef` into the account it collects for — spent,
+   * expired, or the backend could not be asked. The sibling of `LOCATE_TARGET_UNRESOLVED`, for the same
+   * reason: every existing code would send the seller to look at Coupang for a problem that is between
+   * SellerOps and itself. The repair is one press: start the read again, which mints a fresh binding.
+   */
+  "ACQUISITION_TARGET_UNRESOLVED",
+  /**
+   * The ONE bounded handoff at the end of a `REVIEW_ACQUISITION` walk was refused by the backend, or never
+   * reached it. Nothing was stored (the handoff is all-or-nothing by design), and the pages the seller
+   * turned are not re-read: the run ends here and the seller may start another. Not `INGEST_FAILED`, which
+   * names a FILE the seller uploaded; there is no file on this path.
+   */
+  "HANDOFF_REJECTED",
 ] as const;
 export type BlockerCode = (typeof BLOCKER_CODES)[number];
 
@@ -331,6 +359,22 @@ export const EVENT_TYPES = [
   "RUN_COMPLETED",
   "RUN_OPERATOR_REPORTED",
   "RUN_FAILED",
+  /**
+   * v2 (2026-08-28, product-owner decision): on a GUIDED `REPLY_SUBMISSION` run the runtime set the approved
+   * draft into the ONE composer the seller opened — and only after the row matched the target hint, the
+   * review-id fingerprint matched, and exactly one composer was open. It says the text is IN the box; it
+   * says nothing about posting. The seller may still edit it, and the seller's own click is still the only
+   * thing that submits. Payload: `stepId` + the composer's opaque `targetRef`.
+   */
+  "COMPOSER_FILLED",
+  /**
+   * v2 (2026-08-28): the seller's OWN submit was observed on the composer the runtime filled. Distinct from
+   * `USER_ACTION_OBSERVED` (which every human barrier emits) so a consumer can tell "they pressed something at
+   * the barrier" from "they pressed the submit of a box we filled" — the state the backend records as
+   * `SELLER_SUBMISSION_OBSERVED`. Still an observation: no read-back, no `VERIFIED`, and the run's terminal
+   * is still what the operator reports. Payload: `stepId` + `observed: true`.
+   */
+  "SELLER_SUBMISSION_OBSERVED",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -357,6 +401,7 @@ export type CommandPayload =
       discoveryRef?: string;
       importRef?: string;
       locateRef?: string;
+      acquisitionRef?: string;
     }
   | { enabled: boolean } // SET_GUIDANCE_ENABLED
   /**
@@ -423,6 +468,12 @@ export interface EventPayload {
    * server side of this boundary and reach the runtime over its own backend session.
    */
   locateRef?: string;
+  /**
+   * v2: opaque 16-hex binding to the ONE seller account a `REVIEW_ACQUISITION` run collects for — NEVER an
+   * account id, a slot, or a channel account identifier. Resolved by the runtime over its own backend
+   * session; what identifies the account never travels here.
+   */
+  acquisitionRef?: string;
 }
 
 /** Primitive, interpolation-safe copy parameter value (FE owns final copy). */
@@ -560,6 +611,7 @@ const REF_KEYS: readonly string[] = [
   "discoveryRef",
   "importRef",
   "locateRef",
+  "acquisitionRef",
 ];
 const HEX16 = /^[0-9a-f]{16}$/;
 /** A dotted semantic copy key (e.g. `actionWindow.review.ready`) — never final prose. */
@@ -694,6 +746,10 @@ const EVENT_PAYLOAD_RULES: Record<EventType, (p: Record<string, unknown>) => Val
     ...enumField(p, "verification", VERIFICATION_STATES),
   ],
   RUN_FAILED: (p) => (p.code === undefined ? [] : enumField(p, "code", BLOCKER_CODES)),
+  // v2 guided-fill: the composer the draft went into is named by the same opaque ref TARGET_HIGHLIGHTED used.
+  COMPOSER_FILLED: (p) => [...stringField(p, "stepId"), ...refField(p, "targetRef")],
+  // v2 guided-fill: an observation of the SELLER's submit — `observed` must be present and true-typed.
+  SELLER_SUBMISSION_OBSERVED: (p) => [...stringField(p, "stepId"), ...boolField(p, "observed")],
 };
 
 function enumField(p: Record<string, unknown>, key: string, allowed: readonly string[]): ValidationError[] {

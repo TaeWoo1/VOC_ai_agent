@@ -118,12 +118,19 @@ public class ChannelReviewService {
     private final AiTriagePilotService pilot;
     private final ChannelRepository channels;
     private final ReviewReplyWorkLookup replyWork;
+    private final com.sellerops.identity.ExecutableIdentityResolver identity;
+    private final com.sellerops.review.publish.ReviewExecutionCapability execution;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public ChannelReviewService(ReviewRepository reviews, ProductRepository products,
                                 SellerAccountRepository accounts, SyncJobRepository syncJobs,
                                 ItemAnalysisRepository analyses, AiTriageCurrentRepository aiCurrent,
                                 AiTriagePilotService pilot, ChannelRepository channels,
-                                ReviewReplyWorkLookup replyWork) {
+                                ReviewReplyWorkLookup replyWork,
+                                com.sellerops.identity.ExecutableIdentityResolver identity,
+                                com.sellerops.review.publish.ReviewExecutionCapability execution) {
+        this.identity = identity;
+        this.execution = execution;
         this.channels = channels;
         this.replyWork = replyWork;
         this.reviews = reviews;
@@ -133,6 +140,20 @@ public class ChannelReviewService {
         this.analyses = analyses;
         this.aiCurrent = aiCurrent;
         this.pilot = pilot;
+    }
+
+    /**
+     * Test wiring with no provenance resolver and no execution lane: every row reads {@code NONE} and
+     * every channel's execution is {@code NOT_SUPPORTED / EXECUTION_DISABLED} — both fail-closed.
+     */
+    public ChannelReviewService(ReviewRepository reviews, ProductRepository products,
+                                SellerAccountRepository accounts, SyncJobRepository syncJobs,
+                                ItemAnalysisRepository analyses, AiTriageCurrentRepository aiCurrent,
+                                AiTriagePilotService pilot, ChannelRepository channels,
+                                ReviewReplyWorkLookup replyWork) {
+        this(reviews, products, accounts, syncJobs, analyses, aiCurrent, pilot, channels, replyWork,
+                com.sellerops.identity.ExecutableIdentityResolver.unresolved(),
+                com.sellerops.review.publish.ReviewExecutionCapability.disabled());
     }
 
     public ChannelReviewPageView list(UUID orgId, UUID accountId, String sort, String tier, int page, int size) {
@@ -158,10 +179,13 @@ public class ChannelReviewService {
         Map<UUID, String> categories = categoriesOf(orgId, found.getContent());
         Map<String, Long> categoryCounts = categoryCounts(orgId, channelId);
         Map<UUID, AiTriageMarkView> marks = marksOf(orgId, found.getContent());
+        Map<UUID, com.sellerops.identity.ExecutableIdentity> identities =
+                identity.forReviews(orgId, found.getContent());
 
         List<ChannelReviewItemView> items = found.getContent().stream()
                 .map(r -> item(r, productOf(byProduct, r), newSince, note(r, categories, categoryCounts),
-                        marks.get(r.getId())))
+                        marks.get(r.getId()),
+                        identities.getOrDefault(r.getId(), com.sellerops.identity.ExecutableIdentity.NONE)))
                 .toList();
 
         long newCount = newSince == null ? 0
@@ -172,7 +196,7 @@ public class ChannelReviewService {
                 lastImport.map(SyncJob::getFinishedAt).orElse(null),
                 lastImport.map(j -> "SUCCESS".equals(j.getStatus())).orElse(false),
                 pilot.isEnabledFor(orgId),
-                capabilityOf(channelId),
+                capabilityOf(orgId, account),
                 summary(orgId, channelId, categoryCounts),
                 items);
     }
@@ -211,8 +235,10 @@ public class ChannelReviewService {
      * server would refuse (no `[쿠팡에서 보기]` on a NAVER account, no feedback control on a channel
      * outside the three) and asserts nothing about the channel that the server did not say.
      */
-    private ReviewChannelCapabilityView capabilityOf(UUID channelId) {
-        return ReviewChannelCapabilityView.of(ReviewTriageChannelCapability.of(channelCodeOf(channelId)));
+    private ReviewChannelCapabilityView capabilityOf(UUID orgId, SellerAccount account) {
+        String code = channelCodeOf(account.getChannelId());
+        return ReviewChannelCapabilityView.of(ReviewTriageChannelCapability.of(code),
+                execution.of(orgId, account.getId(), code));
     }
 
     private String channelCodeOf(UUID channelId) {
@@ -268,14 +294,17 @@ public class ChannelReviewService {
                         review.getRating()),
                 // The reply flow's address, only where the channel has one (A6). Same capability row as
                 // `capabilityOf`, so the detail never carries a ref the reply endpoints would refuse.
-                replyWork.forReview(orgId, channelCodeOf(account.getChannelId()), review.getId())
+                replyWork.forReview(orgId, channelCodeOf(account.getChannelId()), review.getId(),
+                                execution.of(orgId, account.getId(), channelCodeOf(account.getChannelId())).kind())
                         .map(r -> new ChannelReviewDetailView.ReplyWork(
                                 r.actionRef(), r.triageDisposition(), r.hasReplyPreparation()))
-                        .orElse(null));
+                        .orElse(null),
+                identity.forReview(review).name());
     }
 
     private ChannelReviewItemView item(Review review, Product product, Instant newSince,
-                                       ReviewTriageNote triage, AiTriageMarkView aiMark) {
+                                       ReviewTriageNote triage, AiTriageMarkView aiMark,
+                                       com.sellerops.identity.ExecutableIdentity executableIdentity) {
         SafePreviewResult preview = VocPreviewSanitizer.sanitize(review.getBody());
         return new ChannelReviewItemView(
                 review.getId(),
@@ -290,7 +319,8 @@ public class ChannelReviewService {
                 isTextless(review),
                 isNew(review, newSince),
                 triage,
-                aiMark);
+                aiMark,
+                executableIdentity.name());
     }
 
     /**

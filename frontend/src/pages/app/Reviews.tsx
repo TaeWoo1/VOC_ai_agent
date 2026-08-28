@@ -51,7 +51,6 @@ export function Reviews() {
   useAgentSurface({
     surface: "reviews",
     label: selectedTarget ? `리뷰 · ${selectedTarget.label}` : "리뷰",
-    goal: "반복되는 리뷰 문제가 문의에서도 반복되는지 확인해 줘",
   });
 
   if (loading) {
@@ -99,10 +98,7 @@ export function Reviews() {
         action={
           <>
             {targets.length > 1 ? <ChannelSwitcher targets={targets} selectedAccountId={accountId} /> : null}
-            <AgentLaunch
-              context={{ surface: "reviews", goal: "반복되는 리뷰 문제가 문의에서도 반복되는지 확인해 줘" }}
-              label="문의에서도 반복되는지 확인"
-            />
+            <AgentLaunch context={{ surface: "reviews" }} label="리뷰에 대해 물어보기" />
           </>
         }
       />

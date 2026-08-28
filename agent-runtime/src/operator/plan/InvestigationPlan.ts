@@ -16,6 +16,13 @@ import type { SpecialistName } from "../state/OperatorState";
 import type { AppliedDefault } from "../defaults/OperationalDefaults";
 import type { AttentionCoverage } from "../../spring/types";
 import type { EntityRole } from "./EntityRole";
+import type { PlanFilters, PlanTarget, RequestedAction, ToneHint } from "../../conversation/contract";
+
+export type { PlanFilters, PlanTarget, RequestedAction, ToneHint };
+
+/** The v3 defaults — what a plan carries when the planner said nothing about the conversation axis. */
+export const NO_FILTERS: PlanFilters = { period: null, rating: null, channel: null, scope: null, topic: null };
+export const NO_TARGET: PlanTarget = { selector: "NONE", index: null };
 
 /** What kind of thing a mention refers to. Closed — an unknown kind is dropped by the validator. */
 export type EntityKind = "PRODUCT" | "CHANNEL" | "ORDER" | "INQUIRY" | "ISSUE" | "PERIOD";
@@ -173,6 +180,32 @@ export interface InvestigationPlan {
    * clarification the model asked for actually reaches the seller.
    */
   readonly appliedDefaults: readonly AppliedDefault[];
+  /* ── Plan schema v3 (Agentic Operating Workspace v2). Planner-decided, closed vocabulary. ── */
+  /**
+   * What the seller asked the operator to DO beyond reading. `NONE` unless the model said otherwise.
+   *
+   * Optional on the TYPE, always set by `toPlan`: a plan built before v3 (every recorded v2 plan, every
+   * test fixture) reads as the defaults through {@link conversationAxisOf} rather than failing to compile.
+   */
+  readonly requestedAction?: RequestedAction;
+  /** A closed tone adjustment for a draft — only meaningful with `PREPARE_INQUIRY_DRAFT`. */
+  readonly tone?: ToneHint | null;
+  /** Period / rating / channel / scope / topic, each a closed token or null. Never the seller's words. */
+  readonly filters?: PlanFilters;
+  /** Which item of the working set a sentence points at (「첫 번째 거」). */
+  readonly target?: PlanTarget;
+}
+
+/** The v3 axis of a plan, with defaults filled — the one reader every consumer goes through. */
+export function conversationAxisOf(plan: InvestigationPlan): {
+  requestedAction: RequestedAction; tone: ToneHint | null; filters: PlanFilters; target: PlanTarget;
+} {
+  return {
+    requestedAction: plan.requestedAction ?? "NONE",
+    tone: plan.tone ?? null,
+    filters: plan.filters ?? NO_FILTERS,
+    target: plan.target ?? NO_TARGET,
+  };
 }
 
 /** The needs assigned to one specialist, in the strategy's order. */

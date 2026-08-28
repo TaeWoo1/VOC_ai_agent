@@ -1147,6 +1147,35 @@ export interface ReviewReplySubmissionRunResponse {
   approvedVersion: number;
 }
 
+// Mirrors the review-reply EXECUTION read/write (`POST …/reply/execute`, `GET …/reply/execution`) —
+// Agentic Operating Workspace v2, channel-capability completion. `verification` is the closed vocabulary
+// shared with the runtime contract; the UI renders a word per value and NOTHING for an unknown one.
+// `providerRef` is the channel's opaque id for the posted comment/reply, never its content.
+export type ReviewExecutionVerification =
+  | "VERIFIED"
+  | "STATUS_UNRESOLVED"
+  | "DELIVERY_UNKNOWN"
+  | "UNVERIFIABLE"
+  | "COMPOSER_FILLED"
+  | "SELLER_SUBMISSION_OBSERVED"
+  | "SUBMISSION_OBSERVED_CONTENT_UNVERIFIED";
+
+export interface ReviewExecutionView {
+  status: string;
+  category: string;
+  verification: ReviewExecutionVerification;
+  providerRef?: string | null;
+}
+
+// Mirrors `POST /api/seller-accounts/{accountId}/review-acquisition-runs` — a single-use, org-scoped
+// `acquisitionRef` the Action Window `START_RUN(REVIEW_ACQUISITION)` spends (Coupang WING read).
+// Carries no review identity; the collector resolves it against the backend.
+export interface ReviewAcquisitionRunResponse {
+  acquisitionRef: string;
+  channelCode: string;
+  expiresAt?: string | null;
+}
+
 // Mirrors dto.ReviewReplyOutcomeResponse. Deliberately carries no body and no channel claim.
 // `replayed` distinguishes an idempotent retry from a fresh record; both are successes.
 export interface ReviewReplyOutcomeResponse {

@@ -16,6 +16,10 @@ import type { OperatorBudget } from "../budget/OperatorBudget";
 import type { InformationNeed, ResolvedEntity } from "../plan/InvestigationPlan";
 import type { EvidenceRef } from "../state/OperatorState";
 import type { GroupingDimension } from "../group/ProductGrouping";
+import type { PlanFilters, PlanTarget, RequestedAction } from "../plan/InvestigationPlan";
+import type { ProgressStage, WorkingSetView } from "../../conversation/contract";
+import type { LocalAgentHint } from "../capability/ChannelCapability";
+import type { ReviewRefresher } from "./reviewRefresh";
 
 export interface SpecialistInput {
   readonly registry: OperatorToolRegistry;
@@ -74,4 +78,31 @@ export interface SpecialistInput {
   readonly priorEvidence?: readonly EvidenceRef[];
   readonly referenceDate?: string;
   readonly goalText?: string;
+  /* ── Agentic Operating Workspace v2 — the conversation axis, decided by the PLANNER, read here. ── */
+  /**
+   * The plan's closed filters (period / rating / channel / scope / topic).
+   *
+   * <b>Read, never derived from the sentence.</b> Whether a review question wants ROWS or the issue
+   * signal is a planner decision expressed in these tokens; a specialist that keyword-matched the goal
+   * to decide would be the second planner invariant I2 forbids.
+   */
+  readonly filters?: PlanFilters;
+  readonly target?: PlanTarget;
+  readonly requestedAction?: RequestedAction;
+  /** What the previous turn put in front of the seller — ids and closed filters. Null on a first turn. */
+  readonly workingSet?: WorkingSetView | null;
+  /** Human collections this conversation saw finish — see `ConversationRunContext.collected`. */
+  /** See `ConversationRunContext.pendingHumanWindow`. */
+  readonly pendingHumanWindow?: string | null;
+  readonly collected?: ReadonlyArray<{ readonly channelCode: string; readonly dataType: string; readonly finishedAt: string; readonly successRows?: number | null }>;
+  /** Whether the seller's local agent is paired (frontend hint). Absent ⇒ UNKNOWN. */
+  readonly localAgent?: LocalAgentHint;
+  /**
+   * The conversation lane's bounded refresh seam (`conversation/Refresher.ts`), present only on a
+   * conversation run. NOT a tool: the planner cannot select it, the registry does not hold it, and the
+   * rows path calls it at most once per stale AUTOMATIC channel (`reviewRows.ts`).
+   */
+  readonly refresher?: ReviewRefresher;
+  /** The conversation lane's stage sink, so a refresh can say 「…새로 가져오고 있습니다」 while it runs. */
+  readonly progress?: (stage: ProgressStage, label: string) => void;
 }

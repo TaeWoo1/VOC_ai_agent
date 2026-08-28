@@ -584,6 +584,23 @@ sellerops:
       # `ai`/`openai` is a reserved, unimplemented value; wiring a real provider is
       # a later slice that would gate its bean behind this flag.
       provider: ${SELLEROPS_ANALYSIS_ITEM_PROVIDER:rule_based}
+  review:
+    publish:
+      # The review-reply API lane (Agentic Operating Workspace v2 §A2) — reviewnary posting an APPROVED
+      # reply as a Cafe24 board comment. Off by default and absent from every deployment that has not
+      # deliberately turned it on: with it off NO Cafe24ReviewCommentAdapter bean exists,
+      # ReviewExecutionCapability answers NOT_SUPPORTED / EXECUTION_DISABLED, and /reply/execute records
+      # a refusal without touching a transport. Independent of the inquiry flag on purpose.
+      execution-enabled: ${SELLEROPS_REVIEW_PUBLISH_EXECUTION_ENABLED:false}
+      cafe24:
+        # The live-run approval id a Cafe24 comment POST must be armed with, per
+        # docs/sellerops_live_approval_contract.md. Blank = no live comment can leave this process
+        # (Cafe24ReviewCommentClient throws Cafe24WriteApprovalRequired before the request is built).
+        # An ENVIRONMENT-binding token, never a credential.
+        live-approval-id: ${SELLEROPS_REVIEW_PUBLISH_CAFE24_LIVE_APPROVAL_ID:}
+        # Which shop of the mall the comment is written into. Defaults to the inquiry lane's OBSERVED
+        # value for this mall; 0 = no send. The contract's default of 1 is the platform's, not ours.
+        shop-no: ${SELLEROPS_REVIEW_PUBLISH_CAFE24_SHOP_NO:${SELLEROPS_INQUIRY_PUBLISH_CAFE24_SHOP_NO:0}}
   reply:
     review:
       # Review reply-draft suggestion. The shipped provider is rule-based:

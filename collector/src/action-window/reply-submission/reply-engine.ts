@@ -38,6 +38,7 @@ import {
   type ReplyStepMeta,
 } from "./reply-stages";
 import type { ReplyTargetHint } from "./reply-surface";
+import type { ComposerFillResult } from "./reply-composer-fill";
 
 export type ReplyEffect =
   | "PREPARE"
@@ -46,6 +47,7 @@ export type ReplyEffect =
   | "OBSERVE_ROW"
   | "LOCATE"
   | "HIGHLIGHT"
+  | "FILL"
   | "OBSERVE"
   | "CLEANUP"
   | "NONE";
@@ -80,6 +82,12 @@ export interface ReplyRunConfig {
    * target hint (guided-only, no legacy fallback). Defaults to `FULL_SUBMIT`.
    */
   mode?: ReplyRunMode;
+  /**
+   * 2026-08-28 (product-owner decision): after the composer is highlighted, ask the driver to set the approved
+   * draft into it (`FILL_COMPOSER`). GUIDED runs only — the fill gate needs the row match — and only when a
+   * driver offers `fillComposer`. Off by default; the legacy path is byte-identical without it.
+   */
+  composerFill?: boolean;
 }
 
 export type ReplyClock = () => string;
@@ -101,6 +109,8 @@ export class ReplyEngine {
   private readonly plan: readonly ReplyStepMeta[];
   private readonly totalSteps: number;
   private readonly targetHint: ReplyTargetHint | null;
+  private readonly composerFill: boolean;
+  private composerFilled = false;
 
   private started = false;
   private stage: ReplyStage = "PREPARE_SESSION";
@@ -130,6 +140,9 @@ export class ReplyEngine {
     this.planKind = this.targetHint ? "GUIDED" : "LEGACY";
     this.plan = replyPlanFor(this.planKind);
     this.totalSteps = this.plan.length;
+    // A fill needs the guided row match as one of its three exact-match preconditions; a LEGACY run has no
+    // row to match, so it can never fill regardless of the flag.
+    this.composerFill = (config.composerFill ?? false) && this.planKind === "GUIDED";
   }
 
   private isTerminal(): boolean {
@@ -258,6 +271,36 @@ export class ReplyEngine {
 
   onHighlighted(): ReplyEffect {
     if (this.isTerminal()) return "NONE";
+    if (this.composerFill) {
+      this.stage = "FILL_COMPOSER";
+      return "FILL";
+    }
+    return this.restAtSubmitBarrier();
+  }
+
+  /**
+   * 2026-08-28: the driver tried to set the approved draft into the highlighted composer.
+   *
+   * <p>Three outcomes, and the middle one is the point. `filled` ⇒ `COMPOSER_FILLED` (the text is in the box —
+   * not posted, not verified; the seller may edit it) and then the barrier. `AMBIGUOUS` ⇒ fail closed as
+   * `TARGET_AMBIGUOUS`: two candidate rows, two composers, or a review id found twice is not a tie to break,
+   * and typing into the wrong buyer's reply box is the failure this whole gate exists to make impossible.
+   * `NOT_FILLABLE` (no draft, page moved, driver could not) ⇒ the barrier, unfilled — the run the seller
+   * always had, where they paste. "Could not fill" is never "could not reply".
+   */
+  onComposerFilled(res: ComposerFillResult): ReplyEffect {
+    if (this.stage !== "FILL_COMPOSER") return "NONE";
+    if (!res.filled && res.reason === "AMBIGUOUS") return this.fail("TARGET_AMBIGUOUS");
+    if (res.filled) {
+      this.composerFilled = true;
+      this.completedSteps = this.totalSteps - 1;
+      this.activeStepIndex = this.totalSteps;
+      this.emit("COMPOSER_FILLED", { stepId: this.stepId(), targetRef: this.targetSig! });
+    }
+    return this.restAtSubmitBarrier();
+  }
+
+  private restAtSubmitBarrier(): ReplyEffect {
     // The composer submit barrier is the LAST step of whichever plan is active (2 legacy / 3 guided).
     this.completedSteps = this.totalSteps - 1;
     this.activeStepIndex = this.totalSteps;
@@ -277,7 +320,15 @@ export class ReplyEngine {
   onUserActionObserved(): ReplyEffect {
     if (this.stage !== "WAIT_FOR_SUBMIT") return "NONE";
     this.emit("USER_ACTION_OBSERVED", { stepId: this.stepId(), observed: true });
+    // The seller's own submit on a composer WE filled. Still an observation — the text may have been edited,
+    // and there is no read-back — but a different fact from "they pressed something at the barrier".
+    if (this.composerFilled) this.emit("SELLER_SUBMISSION_OBSERVED", { stepId: this.stepId(), observed: true });
     return "NONE";
+  }
+
+  /** Whether the approved draft was set into the composer on this run. Never implies it was posted. */
+  wasComposerFilled(): boolean {
+    return this.composerFilled;
   }
 
   private reportOutcome(outcome: OperatorOutcome): ReplyEffect {

@@ -118,6 +118,18 @@ public class IngestionService {
     }
 
     public IngestOutcome ingestReviews(UUID orgId, UUID channelId, List<CanonicalReview> rows) {
+        return ingestReviews(orgId, channelId, rows, null);
+    }
+
+    /**
+     * As above, stamping each INSERTED row with the run that brought it in ({@code
+     * reviews.acquisition_sync_job_id}, V83). {@code acquisitionSyncJobId} is the {@code sync_jobs} row
+     * the caller already opened — the file-upload connector opens its run before it parses a byte, so
+     * the id exists here. A null stamps nothing; a duplicate (skipped) row keeps whatever it had, so a
+     * re-import can never re-attribute a review to a later run.
+     */
+    public IngestOutcome ingestReviews(UUID orgId, UUID channelId, List<CanonicalReview> rows,
+                                       UUID acquisitionSyncJobId) {
         Tally tally = new Tally();
         Set<String> seen = new HashSet<>();
         // The channel's formula, resolved once per batch. The VERSION is then decided per row: a textless
@@ -171,6 +183,7 @@ public class IngestionService {
                 // deliberately allowed to change reply state and nothing else.
                 entity.setSourceOptionId(row.sourceOptionId());
                 entity.setMediaCount(row.mediaCount());
+                entity.setAcquisitionSyncJobId(acquisitionSyncJobId);
                 trySave(tally, row.sourceRow(),
                         () -> reviews.save(entity).getId(),
                         () -> existsReview(orgId, channelId, hasExternal, row.externalId(), hash));
@@ -179,6 +192,19 @@ public class IngestionService {
             }
         }
         return tally.toOutcome();
+    }
+
+    /**
+     * Stamp the acquisition run on reviews inserted before their run row existed. The Coupang WING
+     * handoff records its {@code sync_jobs} row AFTER ingesting (so the row can carry the counts), and
+     * this is how those rows still get their provenance in the same request. Idempotent and bounded to
+     * the ids the ingest itself returned; an empty list or a null job writes nothing.
+     */
+    public int stampAcquisition(UUID orgId, List<UUID> insertedIds, UUID acquisitionSyncJobId) {
+        if (acquisitionSyncJobId == null || insertedIds == null || insertedIds.isEmpty()) {
+            return 0;
+        }
+        return reviews.stampAcquisitionSyncJob(orgId, insertedIds, acquisitionSyncJobId);
     }
 
     /**

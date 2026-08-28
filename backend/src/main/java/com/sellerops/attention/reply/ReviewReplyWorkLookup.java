@@ -3,6 +3,7 @@ package com.sellerops.attention.reply;
 import com.sellerops.attention.VocItemRef;
 import com.sellerops.attention.triage.ReviewTriage;
 import com.sellerops.attention.triage.ReviewTriageRepository;
+import com.sellerops.review.publish.ReviewExecutionKind;
 import com.sellerops.review.triage.ReviewTriageChannelCapability;
 import java.util.List;
 import java.util.Optional;
@@ -21,8 +22,10 @@ import org.springframework.stereotype.Component;
  * review from the same repositories.
  *
  * <p><b>Capability-gated.</b> Empty for every channel whose {@link ReviewTriageChannelCapability} says
- * {@code replySupported = false} (Coupang, Cafe24): the surface then renders no reply control at all, and a
- * client that guessed the ref would still be refused by the reply endpoints' own checks.
+ * {@code replySupported = false} (Coupang, Cafe24) UNLESS the account's execution capability is
+ * {@code API_EXECUTION} — a Cafe24 mall with the review lane on and the write grant recorded has a reply
+ * flow, and it is this one. Otherwise the surface renders no reply control at all, and a client that
+ * guessed the ref would still be refused by the reply endpoints' own checks.
  */
 @Component
 public class ReviewReplyWorkLookup {
@@ -44,7 +47,14 @@ public class ReviewReplyWorkLookup {
 
     /** The reply work one review can carry, or empty when its channel has no reply flow. */
     public Optional<ReplyWorkRef> forReview(UUID orgId, String channelCode, UUID reviewId) {
-        if (!ReviewTriageChannelCapability.of(channelCode).replySupported()) {
+        return forReview(orgId, channelCode, reviewId, ReviewExecutionKind.NOT_SUPPORTED);
+    }
+
+    /** As above, with the account's execution capability opening the flow where the §1 table does not. */
+    public Optional<ReplyWorkRef> forReview(UUID orgId, String channelCode, UUID reviewId,
+                                            ReviewExecutionKind executionKind) {
+        if (!ReviewTriageChannelCapability.of(channelCode).replySupported()
+                && executionKind != ReviewExecutionKind.API_EXECUTION) {
             return Optional.empty();
         }
         String disposition = triages.findByOrgIdAndReviewId(orgId, reviewId)
