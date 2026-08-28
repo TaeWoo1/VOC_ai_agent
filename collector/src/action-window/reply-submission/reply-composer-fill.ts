@@ -17,9 +17,10 @@
  *
  * **Review-id assertion.** The channel review id is the strongest identity the surface exposes, and when the
  * backend holds a fingerprint for the review the gate REQUIRES the in-page ladder to find it exactly once.
- * When the backend has none (`UNAVAILABLE`), the row match on rating + recency + body fingerprint is the
- * identity, as it is for the highlight. A ladder that found it twice, or found it on a different row than
- * the hint matched, is ambiguity — not a tie to break.
+ * When no verdict is available (`UNAVAILABLE`) nothing is typed (Acceptance Closure §3): the hint match is
+ * enough to highlight a row for a person to look at, not enough to put words into a box under that row. A
+ * ladder that found it twice, or found it on a different row than the hint matched, is ambiguity — not a tie
+ * to break.
  *
  * What goes into the box is the approved draft byte for byte. The seller may edit it in NAVER's own UI
  * before submitting, which is why `COMPOSER_FILLED` never promotes anything (see the engine).
@@ -59,7 +60,9 @@ export function composerFillDecision(gate: ComposerFillGate): ComposerFillDecisi
     case "AMBIGUOUS":
       return { fill: false, reason: "AMBIGUOUS" };
     case "UNAVAILABLE":
-      return { fill: true };
+      // Acceptance Closure §3: a hint-only match is a highlight, not an identity strong enough to type under.
+      // Without a review-id verdict the run reaches the barrier unfilled and the seller pastes.
+      return { fill: false, reason: "NOT_FILLABLE" };
   }
 }
 

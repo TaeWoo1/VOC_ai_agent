@@ -29,7 +29,7 @@ export interface ResidentReplyCarrierDeps {
   /** Build the driver for this target — the approved draft is handed to the driver and to nothing else. */
   readonly createDriver: (target: ReplySubmissionTarget) => ReplySubmitProbeDriver;
   /** Report a guided-fill observation for the backend's execution row; never awaited on the hot path. */
-  readonly observe?: (target: ReplySubmissionTarget, state: ReplyExecutionObservation) => Promise<boolean>;
+  readonly observe?: (target: ReplySubmissionTarget, state: ReplyExecutionObservation, submissionRef: string) => Promise<boolean>;
 }
 
 /** The subset of the transport a session sees: replayed frames, plus the real send. */
@@ -101,9 +101,10 @@ export class ResidentReplyCarrier {
           targetHint: target.hint,
           mode: "FULL_SUBMIT",
           composerFill: true,
+          agentOpensComposer: true,
           createDriver: () => this.deps.createDriver(target),
           onExecutionObserved: (state) => {
-            void this.deps.observe?.(target, state).catch(() => false);
+            void this.deps.observe?.(target, state, ref).catch(() => false);
           },
         });
         this.engine = assembly.engine;

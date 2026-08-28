@@ -39,12 +39,14 @@ import {
 } from "./reply-stages";
 import type { ReplyTargetHint } from "./reply-surface";
 import type { ComposerFillResult } from "./reply-composer-fill";
+import type { ComposerOpenResult } from "./reply-composer-open";
 
 export type ReplyEffect =
   | "PREPARE"
   | "LOCATE_ROW"
   | "HIGHLIGHT_ROW"
   | "OBSERVE_ROW"
+  | "OPEN_COMPOSER"
   | "LOCATE"
   | "HIGHLIGHT"
   | "FILL"
@@ -88,6 +90,12 @@ export interface ReplyRunConfig {
    * driver offers `fillComposer`. Off by default; the legacy path is byte-identical without it.
    */
   composerFill?: boolean;
+  /**
+   * Acceptance Closure §2: after the row is verified, the runtime presses the row's NON-SUBMIT open control
+   * itself (`OPEN_COMPOSER`) instead of resting at the row-open barrier. GUIDED runs only, and only when the
+   * driver offers `openComposer`; an ambiguous or missing control falls back to the barrier.
+   */
+  agentOpensComposer?: boolean;
 }
 
 export type ReplyClock = () => string;
@@ -110,7 +118,9 @@ export class ReplyEngine {
   private readonly totalSteps: number;
   private readonly targetHint: ReplyTargetHint | null;
   private readonly composerFill: boolean;
+  private readonly agentOpensComposer: boolean;
   private composerFilled = false;
+  private composerOpenedByRuntime = false;
 
   private started = false;
   private stage: ReplyStage = "PREPARE_SESSION";
@@ -143,6 +153,7 @@ export class ReplyEngine {
     // A fill needs the guided row match as one of its three exact-match preconditions; a LEGACY run has no
     // row to match, so it can never fill regardless of the flag.
     this.composerFill = (config.composerFill ?? false) && this.planKind === "GUIDED";
+    this.agentOpensComposer = (config.agentOpensComposer ?? false) && this.planKind === "GUIDED";
   }
 
   private isTerminal(): boolean {
@@ -234,7 +245,43 @@ export class ReplyEngine {
     if (res.count > 1) return this.fail("TARGET_AMBIGUOUS");
     if (res.count === 0 || !res.sig || res.sig !== this.rowSig) return this.fail("TARGET_NOT_FOUND");
     this.completedSteps = 1; // step 1 (prepare surface + locate row) complete
-    this.activeStepIndex = 2; // step 2: the operator opens the review row
+    this.activeStepIndex = 2; // step 2: the review row is opened (runtime press, or the operator's own)
+    if (this.agentOpensComposer) {
+      this.stage = "OPEN_COMPOSER";
+      this.emit("TARGET_HIGHLIGHTED", { stepId: this.stepId(), targetRef: this.rowSig! });
+      this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
+      return "OPEN_COMPOSER";
+    }
+    return this.restAtRowOpenBarrier();
+  }
+
+  /**
+   * The runtime pressed (or could not press) the row's non-submit open control. Opened ⇒ step 2 is complete
+   * by the runtime's own act and the composer chain continues, scoped to the verified row. Not opened ⇒ the
+   * seller is asked for exactly that step (the barrier this plan always had) — never a guess at which of two
+   * controls to press, and never a submit.
+   */
+  onComposerOpened(res: ComposerOpenResult): ReplyEffect {
+    if (this.stage !== "OPEN_COMPOSER") return "NONE";
+    if (res.opened) {
+      this.composerOpenedByRuntime = true;
+      this.emit("STEP_COMPLETED", { stepId: this.stepId() });
+      this.completedSteps = 2;
+      this.activeStepIndex = 3;
+      this.stage = "LOCATE_COMPOSER";
+      return "LOCATE";
+    }
+    return this.restAtRowOpenBarrier();
+  }
+
+  /** Whether the runtime, not the seller, opened the composer on this run. */
+  wasComposerOpenedByRuntime(): boolean {
+    return this.composerOpenedByRuntime;
+  }
+
+  private restAtRowOpenBarrier(): ReplyEffect {
+    this.completedSteps = 1;
+    this.activeStepIndex = 2;
     this.stage = "WAIT_FOR_ROW_OPEN";
     this.emit("STEP_READY", { stepId: this.stepId(), stepStatus: "READY" });
     this.emit("HUMAN_ACTION_REQUIRED", { stepId: this.stepId() });

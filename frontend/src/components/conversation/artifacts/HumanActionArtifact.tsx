@@ -13,6 +13,8 @@ import {
   type GuidedAcquisitionPath,
 } from "../../../lib/actionWindow/acquire/useGuidedAcquisition";
 import { useBridge } from "../../../hooks/useBridge";
+import { useGuidedImport } from "../../../lib/actionWindow/import/useGuidedImport";
+import type { GuidedImportRuntime } from "../../../lib/actionWindow/import/importRuntime";
 import { AgentPairingPanel } from "../../reviewImport/AgentPairingPanel";
 import { ActionWindowControlPanel } from "../../actionWindow/ActionWindowControlPanel";
 import { HumanCheckpointCard, CHECKPOINT_COMMANDS } from "../../actionWindow/HumanCheckpointCard";
@@ -56,12 +58,15 @@ export function HumanActionArtifact({
   artifact,
   onResume,
   acquireRuntime,
+  importRuntime,
   connect,
 }: {
   artifact: HumanAction;
   onResume: () => void;
-  /** Test seam: a runtime supplied here skips pairing and the socket. */
+  /** Test seam: a runtime supplied here skips pairing and the socket (Coupang WING read). */
   acquireRuntime?: AcquireRuntime;
+  /** Test seam: the guided-import runtime for the NAVER export (Acceptance Closure §4). */
+  importRuntime?: GuidedImportRuntime;
   connect?: AcquisitionConnect;
 }) {
   const onOpen = useContinueInPanel("HUMAN_ACTION_REQUIRED");
@@ -99,7 +104,16 @@ export function HumanActionArtifact({
         {guided ? <p className="break-keep text-sm text-muted">{GUIDED_SENTENCE[guided]}</p> : null}
         {failed ? <p className="text-sm text-bad">수집을 시작하지 못했습니다. 채널 연결 화면에서 다시 시도해 주세요.</p> : null}
 
-        {guided && engaged && artifact.accountId ? (
+        {guided === "EXPORT_ACTION_WINDOW" && engaged && artifact.accountId ? (
+          <NaverGuidedImportRun
+            accountId={artifact.accountId}
+            onCompleted={() => {
+              analytics.track("human_action_completed", { type: "review_import" });
+              onResume();
+            }}
+            inject={importRuntime}
+          />
+        ) : guided && engaged && artifact.accountId ? (
           <GuidedAcquisitionRun
             path={guided}
             accountId={artifact.accountId}
@@ -242,6 +256,136 @@ function GuidedAcquisitionRun({
       ) : null}
       {!terminal ? (
         <ActionWindowControlPanel run={view} onCommand={send} exclude={view.status === "WAITING_FOR_HUMAN" ? CHECKPOINT_COMMANDS : []} />
+      ) : null}
+    </div>
+  );
+}
+
+
+/** `YYYY-MM` of today (UTC) — the shortest range the import plan accepts: the current month up to today. */
+function thisMonth(): string {
+  return new Date().toISOString().slice(0, 7);
+}
+
+/**
+ * The NAVER export started from a conversation — routed through the TRUSTED `import/naver` carrier (Acceptance
+ * Closure §4, option B): the same live driver, download detection and launch-bound ingest the onboarding import
+ * uses, so the rows it writes carry `SELLER_CENTER_EXPORT` provenance with the launch binding that makes them
+ * marketplace objects. Nothing new is hosted: the conversation MINTS the bounded launch the carrier already
+ * understands, on a plan that covers the period that has arrived (an existing DRAFT/ACTIVE plan is reused and
+ * carried forward; otherwise a plan for this month is created).
+ *
+ * Order: pair → attach → plan → extend (idempotent) → mint the next segment → ONE `START_RUN` → the run's own
+ * `COMPLETED` resumes the turn. A refused start hands the unspent ticket back. The seller performs NAVER's own
+ * confirmations in their window; nothing here clicks, downloads or submits for them.
+ */
+function NaverGuidedImportRun({
+  accountId,
+  onCompleted,
+  inject,
+}: {
+  accountId: string;
+  onCompleted: () => void;
+  inject?: GuidedImportRuntime;
+}) {
+  const bridge = useBridge(!inject, { autoPair: true });
+  const paired = !!inject || bridge.state.phase === "paired";
+  const { snapshot, unavailable, ensureRuntime, send } = useGuidedImport(inject);
+  const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const startedRef = useRef(false);
+  const completedRef = useRef(false);
+
+  useEffect(() => {
+    if (!paired || startedRef.current) return;
+    startedRef.current = true;
+    let live = true;
+    setStarting(true);
+    void (async () => {
+      try {
+        // Attach BEFORE minting: a refused attach must not spend a single-use ticket.
+        const runtime = await ensureRuntime();
+        if (!runtime || !live) return;
+        const plans = await api.listReviewImportPlans(accountId);
+        const open = plans.find((p) => p.status === "DRAFT" || p.status === "ACTIVE");
+        const planId = open ? open.id : (await api.selectReviewImportRange(accountId, thisMonth())).plan.id;
+        // Carry the plan up to today so "new reviews" has a segment to run; idempotent on the server.
+        await api.extendReviewImportPlan(planId).catch(() => undefined);
+        const launch = await api.launchNextReviewImportSegment(planId);
+        try {
+          await runtime.start({ launchRef: launch.launchRef, kind: launch.kind });
+        } catch (e) {
+          await api.expireReviewImportLaunch(launch.launchRef).catch(() => undefined);
+          throw e;
+        }
+      } catch {
+        if (live) setError("판매자센터 화면을 준비하지 못했습니다. 아래 다른 방법으로 진행할 수 있습니다.");
+      } finally {
+        if (live) setStarting(false);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [paired, ensureRuntime, accountId]);
+
+  useEffect(() => {
+    if (snapshot?.status === "COMPLETED" && !completedRef.current) {
+      completedRef.current = true;
+      onCompleted();
+    }
+  }, [snapshot?.status, onCompleted]);
+
+  if (!paired) {
+    return (
+      <AgentPairingPanel
+        phase={bridge.state.phase}
+        confirmationCode={bridge.state.confirmationCode}
+        confirmUrl={bridge.state.confirmUrl}
+        attestedApproval={bridge.state.attestedApproval}
+        pairingHint={bridge.state.pairingHint}
+        maybeNeedsLocalNetworkAccess={bridge.state.maybeNeedsLocalNetworkAccess}
+        onConnect={bridge.requestPairing}
+        onRetry={bridge.retry}
+      />
+    );
+  }
+  if (unavailable) {
+    return (
+      <p className="break-keep text-sm text-warn" role="status">
+        {unavailable === "wrong_carrier"
+          ? "연결된 도우미가 다른 작업을 진행 중입니다. 그 작업을 마친 뒤 다시 시도해 주세요."
+          : "내 PC의 도우미와 연결하지 못했습니다. 도우미를 실행한 뒤 다시 시도해 주세요."}
+      </p>
+    );
+  }
+  if (error) {
+    return <p className="break-keep text-sm text-warn" role="status">{error}</p>;
+  }
+  if (!snapshot) {
+    return <p className="text-sm text-muted" role="status">{starting ? "판매자센터 화면을 준비하는 중…" : "도우미와 연결하는 중…"}</p>;
+  }
+  const terminal = ["COMPLETED", "FAILED", "CANCELLED", "OPERATOR_REPORTED"].includes(snapshot.status);
+  return (
+    <div className="space-y-3" data-testid="guided-import-run">
+      {snapshot.step && !terminal ? (
+        <p className="break-keep text-sm text-ink">{resolveCopy(snapshot.step.copyKey, snapshot.step.copyParams)}</p>
+      ) : null}
+      {snapshot.blocker ? (
+        <p className="break-keep text-sm text-warn" role="status">{resolveCopy(`actionWindow.blocker.${snapshot.blocker.code}`)}</p>
+      ) : null}
+      {snapshot.status === "COMPLETED" ? (
+        <p className="break-keep text-sm text-ink" role="status">리뷰 가져오기가 끝났습니다. 이어서 확인하겠습니다.</p>
+      ) : null}
+      {!terminal ? (
+        <div className="flex flex-wrap gap-2">
+          {snapshot.allowedCommands.includes("REQUEST_STEP_RECHECK") ? (
+            <Btn onClick={() => send("REQUEST_STEP_RECHECK")}>내려받기를 마쳤습니다 · 다시 확인</Btn>
+          ) : null}
+          {snapshot.allowedCommands.includes("CANCEL_RUN") ? (
+            <Btn variant="outline" onClick={() => send("CANCEL_RUN")}>그만두기</Btn>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

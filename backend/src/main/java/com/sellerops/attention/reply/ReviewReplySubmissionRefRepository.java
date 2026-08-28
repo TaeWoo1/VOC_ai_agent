@@ -14,4 +14,16 @@ public interface ReviewReplySubmissionRefRepository
      * them.
      */
     Optional<ReviewReplySubmissionRef> findByOrgIdAndSubmissionRef(UUID orgId, String submissionRef);
+
+    /**
+     * Spend the ref for the Local Agent: exactly one UPDATE wins. Returns 0 when the ref was already
+     * resolved, unknown, or belongs to another org — the caller treats every 0 as the same refusal.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("update ReviewReplySubmissionRef r set r.targetResolvedAt = :now "
+            + "where r.orgId = :orgId and r.submissionRef = :ref and r.targetResolvedAt is null")
+    int markTargetResolved(@org.springframework.data.repository.query.Param("orgId") UUID orgId,
+                           @org.springframework.data.repository.query.Param("ref") String submissionRef,
+                           @org.springframework.data.repository.query.Param("now") java.time.Instant now);
 }

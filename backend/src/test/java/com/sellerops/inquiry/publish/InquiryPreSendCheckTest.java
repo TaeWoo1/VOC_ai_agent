@@ -6,6 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
+import com.sellerops.community.Cafe24CommunityArticleRepository;
+import com.sellerops.identity.ExecutableIdentityResolver;
+import com.sellerops.reviewimport.ReviewImportPlanRepository;
+import com.sellerops.reviewimport.ReviewImportSegmentAttemptRepository;
+import com.sellerops.reviewimport.ReviewImportSegmentRepository;
+import com.sellerops.selleraccount.SellerAccount;
+import com.sellerops.selleraccount.SellerAccountRepository;
+import com.sellerops.sync.SyncJobRepository;
 import com.sellerops.common.DataOrigin;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryOperationalState;
@@ -64,6 +72,27 @@ class InquiryPreSendCheckTest {
     @Autowired InquiryWorkItemAuditRepository audits;
     @Autowired ChannelRepository channels;
     @Autowired PlatformTransactionManager txManager;
+    @Autowired SellerAccountRepository sellerAccounts;
+    @Autowired Cafe24CommunityArticleRepository articles;
+    @Autowired SyncJobRepository syncJobs;
+    @Autowired ReviewImportSegmentAttemptRepository attempts;
+    @Autowired ReviewImportSegmentRepository segments;
+    @Autowired ReviewImportPlanRepository plans;
+
+    /** The real resolver over the real repositories — the identity gate is exercised, not stubbed. */
+    private ExecutableIdentityResolver resolver() {
+        return new ExecutableIdentityResolver(sellerAccounts, channels, articles, syncJobs, attempts, segments, plans);
+    }
+
+    /** An API-mode account on the channel — what makes a row a marketplace object. */
+    private UUID seedApiAccount(UUID orgId, UUID channelId) {
+        SellerAccount acc = new SellerAccount();
+        acc.setOrgId(orgId);
+        acc.setChannelId(channelId);
+        acc.setConnectionStatus(ChannelStatus.CONNECTED);
+        acc.setFileUpload(false);
+        return sellerAccounts.save(acc).getId();
+    }
 
     private static final String CH_CODE = "COUPANG";
     private static final String TITLE = "승인 제목";
@@ -105,6 +134,25 @@ class InquiryPreSendCheckTest {
     void targetChanged() {
         assertRefused(PreSendCheck.TARGET_CHANGED, null,
                 q -> q.setExternalId("onlineInquiry:9999"));
+    }
+
+    @Test
+    @DisplayName("a file-imported row with a channel label is not a marketplace object — nothing is sent")
+    void aFileImportedRowIsRefusedByProvenance() {
+        // Acceptance Closure §11: the approval names the same account, channel and handle as before;
+        // what changed is what the account IS. A file-upload account can label a row NAVER/Coupang
+        // but cannot make it a channel object, and this gate reads provenance, not the label.
+        assertRefused(PreSendCheck.NOT_MARKETPLACE_OBJECT, wi -> {
+            SellerAccount acc = sellerAccounts.findById(wi.getSellerAccountId()).orElseThrow();
+            acc.setFileUpload(true);
+            sellerAccounts.save(acc);
+        }, null);
+    }
+
+    @Test
+    @DisplayName("a row no connector stamped an account on is not a marketplace object — nothing is sent")
+    void aRowWithoutAcquisitionBindingIsRefusedByProvenance() {
+        assertRefused(PreSendCheck.NOT_MARKETPLACE_OBJECT, null, q -> q.setSellerAccountId(null));
     }
 
     @Test
@@ -421,7 +469,7 @@ class InquiryPreSendCheckTest {
     private InquiryPublishService service(PreSendCheck answer) {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of(adapter)),
-                fixed(answer), new InquiryReplyCapabilityRegistry(), channels);
+                fixed(answer), new InquiryReplyCapabilityRegistry(), channels, resolver());
     }
 
     private static String naverCode() {
@@ -445,13 +493,13 @@ class InquiryPreSendCheckTest {
     private InquiryPublishService serviceFor(ChannelReplyAdapter only, PreSendCheck answer) {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of(only)),
-                fixed(answer), new InquiryReplyCapabilityRegistry(), channels);
+                fixed(answer), new InquiryReplyCapabilityRegistry(), channels, resolver());
     }
 
     private InquiryPublishService serviceWithoutAdapter() {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of()),
-                fixed(PreSendCheck.proven()), new InquiryReplyCapabilityRegistry(), channels);
+                fixed(PreSendCheck.proven()), new InquiryReplyCapabilityRegistry(), channels, resolver());
     }
 
     private static InquiryTargetStateReader fixed(PreSendCheck answer) {
@@ -485,12 +533,14 @@ class InquiryPreSendCheckTest {
         q.setSourceSubtype(subtype);
         q.setOperationalState(InquiryOperationalState.ACTIVE);
         q.setReceivedAt(Instant.parse("2026-08-20T00:00:00Z"));
+        UUID accountId = seedApiAccount(org, channel);
+        q.setSellerAccountId(accountId);
         UUID inquiryId = inquiries.save(q).getId();
 
         InquiryWorkItem wi = new InquiryWorkItem();
         wi.setOrgId(org);
         wi.setInquiryId(inquiryId);
-        wi.setSellerAccountId(UUID.randomUUID());
+        wi.setSellerAccountId(accountId);
         wi.setChannelId(channel);
         wi.setPhase(InquiryWorkItemPhase.PROPOSED);
         wi = workItems.save(wi);

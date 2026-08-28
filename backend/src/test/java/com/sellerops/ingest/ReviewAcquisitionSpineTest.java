@@ -421,6 +421,18 @@ class ReviewAcquisitionSpineTest {
     }
 
     @Test
+    void aSellerCenterExportStampsItsRunOnEveryRowItWrote() throws Exception {
+        // Acceptance Closure §11: the V83 provenance is written on the ingest path itself, not by a test
+        // constructing the entity. The run the connector opened for this export is the run every inserted
+        // review names — that link is what ExecutableIdentityResolver walks back to the launch binding.
+        IngestResult result = ingestFixture();
+        assertThat(result.syncJobId()).isNotNull();
+        List<Review> stored = reviews.findAllByOrgId(org);
+        assertThat(stored).isNotEmpty();
+        assertThat(stored).allSatisfy(r -> assertThat(r.getAcquisitionSyncJobId()).isEqualTo(result.syncJobId()));
+    }
+
+    @Test
     void anUnreadableExportIsNeverReportedAsAnHonestZero() throws Exception {
         // The guard on the rule above: a parse failure also lands with zero rows, and it must stay an
         // error. "We could not read it" must never be reported as "there was nothing in it".

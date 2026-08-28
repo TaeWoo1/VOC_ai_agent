@@ -32,7 +32,10 @@ function page() {
 describe("guided-fill reply driver — fill only on an exact, single target; never a submit", () => {
   it("fills the tagged composer when exactly one row and one composer matched", async () => {
     const p = page();
-    const d = new GuidedFillReplyDriver({ draftBody: "안녕하세요, 확인해 드리겠습니다.", open: async () => ({ inner: inner(1, 1), page: p }) });
+    const d = new GuidedFillReplyDriver({
+      draftBody: "안녕하세요, 확인해 드리겠습니다.", open: async () => ({ inner: inner(1, 1), page: p }),
+      reviewIdVerdict: () => ({ kind: "MATCHED", rowIndex: 0 }),
+    });
     await d.prepareSurface(); await d.locateReviewRow(); await d.locateComposer();
     expect(await d.fillComposer()).toEqual({ filled: true });
     expect(p.filled).toEqual(["안녕하세요, 확인해 드리겠습니다."]);
@@ -65,6 +68,32 @@ describe("guided-fill reply driver — fill only on an exact, single target; nev
     await d.prepareSurface(); await d.locateReviewRow(); await d.locateComposer();
     expect(await d.fillComposer()).toEqual({ filled: false, reason: "AMBIGUOUS" });
     expect(p.filled).toEqual([]);
+  });
+
+  it("never fills on a hint-only match — no review-id verdict means nothing is typed (Acceptance Closure §3)", async () => {
+    const p = page();
+    const d = new GuidedFillReplyDriver({ draftBody: "x", open: async () => ({ inner: inner(1, 1), page: p }) });
+    await d.prepareSurface(); await d.locateReviewRow(); await d.locateComposer();
+    expect(await d.fillComposer()).toEqual({ filled: false, reason: "NOT_FILLABLE" });
+    expect(p.filled).toEqual([]);
+  });
+
+  it("takes the review-id verdict from an inner driver that can answer it, and passes openComposer through", async () => {
+    const p = page();
+    let opens = 0;
+    const aware = Object.assign(inner(1, 1), {
+      reviewIdVerdict: () => ({ kind: "MATCHED", rowIndex: 0 } as const),
+      openComposer: async () => { opens += 1; return { opened: true } as const; },
+    });
+    const d = new GuidedFillReplyDriver({ draftBody: "x", open: async () => ({ inner: aware, page: p }) });
+    await d.prepareSurface(); await d.locateReviewRow();
+    expect(await d.openComposer()).toEqual({ opened: true });
+    expect(opens).toBe(1);
+    await d.locateComposer();
+    expect(await d.fillComposer()).toEqual({ filled: true });
+    const cannot = new GuidedFillReplyDriver({ draftBody: "x", open: async () => ({ inner: inner(1, 1), page: page() }) });
+    await cannot.prepareSurface();
+    expect(await cannot.openComposer()).toEqual({ opened: false, reason: "NOT_SUPPORTED" });
   });
 
   it("opens the surface lazily — an idle carrier holds no browser", async () => {

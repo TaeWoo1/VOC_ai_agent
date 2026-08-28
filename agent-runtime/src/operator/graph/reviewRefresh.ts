@@ -22,7 +22,7 @@ export type RefreshFailure =
   | "UNAVAILABLE";
 
 export type RefreshOutcome =
-  | { readonly ok: true; readonly finishedAt: string; readonly successRows: number | null; readonly status: string }
+  | { readonly ok: true; readonly finishedAt: string; readonly successRows: number | null; readonly status: string; readonly partial: boolean }
   | { readonly ok: false; readonly failure: RefreshFailure };
 
 export interface ReviewRefresher {

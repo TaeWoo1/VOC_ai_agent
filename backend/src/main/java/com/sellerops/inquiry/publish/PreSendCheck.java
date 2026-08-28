@@ -68,6 +68,14 @@ public record PreSendCheck(boolean refused, String reason, boolean stateProven, 
      */
     public static final String SYNTHETIC_TARGET = "SYNTHETIC_TARGET";
     /**
+     * The row is not a marketplace object ({@code ExecutableIdentity.NONE}) — no trusted acquisition
+     * provenance, no API-mode account on its own channel, or an external id that names no channel
+     * object. A file import with a channel label, or a forged external id, lands here. Checked server-
+     * side at the last gate before the write (Acceptance Closure §11): the runtime and the screen also
+     * gate on identity, and neither is trusted for this.
+     */
+    public static final String NOT_MARKETPLACE_OBJECT = "NOT_MARKETPLACE_OBJECT";
+    /**
      * SellerOps has no audited, implemented way to post a reply to this channel + source subtype.
      *
      * <p>Distinct from "no adapter registered", which is a deployment fact (execution disabled). This

@@ -114,7 +114,11 @@ export function acquisitionOf(channelCode: string, dataType: CapabilityDataType,
       acquisitionEvidence: { verification: guided.verificationStatus, source: `overview:${guided.method.toUpperCase()}` },
     };
   }
-  const upload = row.acquisitionPaths.find((p) => p.method.toUpperCase() === "EXPORT" || p.method.toUpperCase() === "MANUAL");
+  // A channel whose only path is the seller's own file (`MANUAL`) reaches us by file upload — that IS its
+  // acquisition path. An EXPORT with no reviewnary carrier is not turned into "upload a file": the fallback
+  // exists only beside a guided path (Acceptance Closure §12). Whether the helper is paired right now is a
+  // runtime-availability fact the screen resolves (`requiresLocalAgent` + `fallback`), not a capability.
+  const upload = row.acquisitionPaths.find((p) => p.method.toUpperCase() === "MANUAL");
   if (upload) {
     return {
       acquisition: "GUIDED_HUMAN_ACTION", guidedPath: "FILE_UPLOAD", requiresLocalAgent: false, fallback: null,

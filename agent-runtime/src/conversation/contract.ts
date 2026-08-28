@@ -435,6 +435,11 @@ export interface PlanFilters {
   /** `WORKING_SET` = a follow-up over what the previous turn showed; `ORG` = start over. */
   readonly scope: "WORKING_SET" | "ORG" | null;
   readonly topic: "SHIPPING" | "EXCHANGE_RETURN" | "PRODUCT_SPEC" | "USAGE" | "OTHER" | null;
+  /**
+   * What a REVIEW_SIGNAL need is for (Acceptance Closure §9): the rows (`ROWS`) or the repeated problems
+   * across them (`ISSUES`). A closed plan token; absent ⇒ the legacy reading (period/rating decide).
+   */
+  readonly reviewIntent: "ROWS" | "ISSUES" | null;
 }
 
 export interface PlanTarget {

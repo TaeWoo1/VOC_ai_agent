@@ -736,6 +736,7 @@ export interface AgentPlanView {
     channel?: string | null;
     scope?: string | null;
     topic?: string | null;
+    reviewIntent?: string | null;
   } | null;
   readonly target?: { selector?: string | null; index?: number | null } | null;
 }

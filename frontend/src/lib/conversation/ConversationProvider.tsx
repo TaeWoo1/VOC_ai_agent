@@ -127,6 +127,22 @@ export function completedAfter(runs: Array<{ finishedAt: string | null; status: 
   );
 }
 
+/**
+ * Which runs on the requested channel are THIS step (Acceptance Closure §5). Two shapes of one fact: a
+ * connector or guided run is stamped with the account — it must be the requested one; a seller-center export
+ * ingest or a file upload carries no account, only the channel and `uploadType` — it must be upload-shaped and
+ * of the requested type. A run another account started on the same channel is never this step.
+ */
+export function runsOfThisStep(
+  runs: Array<{ sellerAccountId: string | null; channelId: string | null; dataType: string | null; uploadType: string | null; finishedAt: string | null; status: string }>,
+  pending: { accountId: string; channelId: string | null; dataType: string },
+) {
+  return runs.filter((run) => {
+    if (run.sellerAccountId != null) return run.sellerAccountId === pending.accountId && (run.dataType ?? run.uploadType) === pending.dataType;
+    return pending.channelId != null && run.channelId === pending.channelId && run.uploadType === pending.dataType;
+  });
+}
+
 const POLL_MS = 5_000;
 const POLL_LIMIT = 15 * 60 * 1000;
 
@@ -335,6 +351,11 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     const { accountId, dataType, requestedAt, turnId, actionType } = pendingHumanAction;
     const started = Date.now();
     let stopped = false;
+    // The account's channel, read once: an export ingest is stamped with the channel, not the account.
+    const channelIdOf: Promise<string | null> = api
+      .getSellerAccountsStrict()
+      .then((accounts) => accounts.find((a) => a.id === accountId)?.channelId ?? null)
+      .catch(() => null);
     const timer = window.setInterval(() => {
       if (stopped) return;
       if (Date.now() - started > POLL_LIMIT) {
@@ -342,8 +363,11 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      void api
-        .getSyncRunsStrict({ sellerAccountId: accountId, dataType })
+      void channelIdOf
+        .then((channelId) => Promise.all([
+          api.getSyncRunsStrict({ sellerAccountId: accountId, dataType }),
+          channelId ? api.getSyncRunsStrict({ channelId }) : Promise.resolve([]),
+        ]).then(([mine, onChannel]) => runsOfThisStep([...mine, ...onChannel], { accountId, channelId, dataType })))
         .then((runs) => {
           if (stopped || pendingRef.current?.turnId !== turnId) return;
           if (completedAfter(runs, requestedAt)) {

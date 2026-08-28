@@ -58,16 +58,29 @@ export function envelopeRefusal(diff: ReadonlyArray<keyof FactualEnvelope>): str
   return `말투를 바꾼 초안에서 ${families}이(가) 달라져 채택하지 않았습니다. 이전 초안을 그대로 둡니다.`;
 }
 
+function headFrom(detail: Awaited<ReturnType<SpringClient["getInquiryDetail"]>> | null): { version: number; contentFingerprint: string; comments: string } | null {
+  return detail?.draft ? { version: detail.draft.version, contentFingerprint: detail.draft.contentFingerprint, comments: detail.draft.comments } : null;
+}
+
 export class DraftPreparer {
   constructor(
-    private readonly client: Pick<SpringClient, "generateDraftFor" | "getInquiryDetail">,
+    private readonly client: Pick<SpringClient, "generateDraftFor" | "getInquiryDetail" | "proposeInquiry">,
     private readonly review?: Pick<ReviewSpringClient, "getReviewReplyPrep" | "saveReviewDraft" | "recordReviewTriage">,
   ) {}
 
   async prepare(target: DraftTarget, tone: ToneHint | null, artifactId: string): Promise<DraftArtifact> {
+    // The product's own draft path is propose → generate: a draft version is saved only on a PROPOSED
+    // work item, and an OPEN one is moved there by the same proposal step the inquiry screen uses
+    // (a local row, never a marketplace call). Found on the throwaway QA org (Acceptance Closure): the
+    // Demo Org never showed it because its open inquiries have no answer basis and save nothing.
+    const detail = await this.detailOf(target.workItemId);
+    if (detail?.phase === "OPEN") {
+      await this.client.proposeInquiry(target.workItemId);
+      log("conversation_inquiry_proposed", { objectKind: "INQUIRY" });
+    }
     // A tone variant is checked against the head it replaces — read before generating, since the
     // generate call appends atomically and the previous head is gone from the detail afterwards.
-    const previous = tone ? await this.headOf(target.workItemId) : null;
+    const previous = tone ? headFrom(detail) : null;
     const view: GeneratedDraftView = await this.client.generateDraftFor(target.workItemId, tone);
     const draft = view.draft;
     if (tone && previous && draft) {
@@ -80,10 +93,9 @@ export class DraftPreparer {
     return this.inquiryArtifact(target, view, draft, tone, artifactId, null);
   }
 
-  private async headOf(workItemId: string): Promise<{ version: number; contentFingerprint: string; comments: string } | null> {
+  private async detailOf(workItemId: string): Promise<Awaited<ReturnType<SpringClient["getInquiryDetail"]>> | null> {
     try {
-      const detail = await this.client.getInquiryDetail(workItemId);
-      return detail.draft ? { version: detail.draft.version, contentFingerprint: detail.draft.contentFingerprint, comments: detail.draft.comments } : null;
+      return await this.client.getInquiryDetail(workItemId);
     } catch {
       return null;
     }
@@ -127,7 +139,10 @@ export class DraftPreparer {
    * A review reply draft through the review screen's own seam: read the prep (suggestion + head), then
    * save the suggestion as the next append-only version. Returns null-versioned when the seam refuses.
    */
-  async prepareReview(target: ReviewDraftTarget, tone: ToneHint | null, artifactId: string): Promise<DraftArtifact> {
+  async prepareReview(
+    target: ReviewDraftTarget, tone: ToneHint | null, artifactId: string,
+    capability?: { readonly execution: string; readonly reason: string | null } | null,
+  ): Promise<DraftArtifact> {
     const base = (unavailable: string | null, body: string | null, version: number | null, fingerprint: string | null, note?: string): DraftArtifact => ({
       artifactId, type: "DRAFT", objectKind: "REVIEW",
       title: unavailable ? "초안을 준비하지 못했습니다" : "리뷰 답글 초안",
@@ -141,6 +156,15 @@ export class DraftPreparer {
       ...(note ? { note } : {}),
     });
     if (!this.review) return base("이 배포에서는 리뷰 답글 초안을 준비할 수 없습니다.", null, null, null);
+    // Acceptance Closure §10, defence in depth: a channel with no reply flow (Coupang), or one whose flow
+    // could not be read, gets no draft here whatever the caller decided. Only a switched-off deployment
+    // of an audited lane (`EXECUTION_DISABLED`) may still draft — the seller copies it.
+    if (capability && capability.execution === "NOT_SUPPORTED" && capability.reason !== "EXECUTION_DISABLED") {
+      return base("이 채널에서는 리뷰 답글을 등록할 수 없어 초안을 준비하지 않았습니다.", null, null, null);
+    }
+    if ((target.channelCode ?? "").toUpperCase() === "COUPANG") {
+      return base("쿠팡에서는 판매자가 리뷰에 직접 답글을 남기는 기능을 지원하지 않습니다.", null, null, null);
+    }
     let prep;
     try {
       prep = await this.review.getReviewReplyPrep(target.accountId, target.actionRef);

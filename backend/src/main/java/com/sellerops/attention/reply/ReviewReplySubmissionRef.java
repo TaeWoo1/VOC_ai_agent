@@ -76,6 +76,38 @@ public class ReviewReplySubmissionRef {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    // ── Acceptance Closure (V86): the action intent, not just the token ────────────────────────
+    // The approval binds (org, review, version, fingerprint); the intent adds who acts where and
+    // how. Null on rows minted before V86 — such a row can never be spent by the target route.
+
+    /** The seller account the run acts through; must own the review's channel at mint. */
+    @Column(name = "seller_account_id")
+    private UUID sellerAccountId;
+
+    /** The channel of that account (denormalised on purpose: the binding must not move with the account). */
+    @Column(name = "channel_id")
+    private UUID channelId;
+
+    /** What the review resolved to at mint ({@code MARKETPLACE} / {@code NONE}); re-resolved at spend. */
+    @Column(name = "executable_identity", length = 16)
+    private String executableIdentity;
+
+    /** Always {@code REVIEW_REPLY}; the column exists so the intent names its operation. */
+    @Column(name = "operation", nullable = false, length = 32)
+    private String operation = "REVIEW_REPLY";
+
+    /** {@code GUIDED_BROWSER_EXECUTION} for a NAVER guided run. */
+    @Column(name = "execution_mode", length = 40)
+    private String executionMode;
+
+    /** After this instant the Local Agent may not spend the ref. */
+    @Column(name = "expires_at")
+    private Instant expiresAt;
+
+    /** Set exactly once, by the target route — the ref is single-use for the Local Agent. */
+    @Column(name = "target_resolved_at")
+    private Instant targetResolvedAt;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) {

@@ -21,6 +21,7 @@ import type { ComposerFillResult, ReviewIdMatchVerdict } from "./reply-composer-
 import { composerFillDecision, fillComposer } from "./reply-composer-fill";
 import type { ComposerFillPageLike } from "./reply-composer-fill";
 import type { ReplySubmitProbeDriver } from "./reply-driver";
+import type { ComposerOpenResult } from "./reply-composer-open";
 import type { LocateComposerResult, LocateRowResult, SurfaceProbeResult } from "./reply-engine";
 
 export interface GuidedFillReplyDriverDeps {
@@ -28,12 +29,22 @@ export interface GuidedFillReplyDriverDeps {
   open(): Promise<{ inner: ReplySubmitProbeDriver; page: ComposerFillPageLike }>;
   /** The approved draft, byte for byte. Absent ⇒ NOT_FILLABLE, the legacy unfilled barrier. */
   draftBody: string | null;
-  /** Whether the backend's channel-review-id fingerprint matched the located row, when the driver can say. */
+  /**
+   * Whether the backend's channel-review-id fingerprint matched the located row. Optional here because the
+   * inner driver may answer it itself (`NaverLadderReplyDriver.reviewIdVerdict`); when neither can, the gate
+   * reads UNAVAILABLE and nothing is typed.
+   */
   reviewIdVerdict?: () => ReviewIdMatchVerdict;
 }
 
+/** An inner driver that can say whether the review id matched, and can press the open control. */
+type IdentityAwareDriver = ReplySubmitProbeDriver & {
+  reviewIdVerdict?: () => ReviewIdMatchVerdict;
+  openComposer?: () => Promise<ComposerOpenResult>;
+};
+
 export class GuidedFillReplyDriver implements ReplySubmitProbeDriver {
-  private opened: { inner: ReplySubmitProbeDriver; page: ComposerFillPageLike } | null = null;
+  private opened: { inner: IdentityAwareDriver; page: ComposerFillPageLike } | null = null;
   private rowMatchCount = 0;
   private composerCount = 0;
 
@@ -70,6 +81,13 @@ export class GuidedFillReplyDriver implements ReplySubmitProbeDriver {
     return (await this.inner()).waitForRowOpen();
   }
 
+  /** The runtime's own press on the verified row's open control — only when the inner driver can name it. */
+  async openComposer(): Promise<ComposerOpenResult> {
+    const inner = await this.inner();
+    if (!inner.openComposer) return { opened: false, reason: "NOT_SUPPORTED" };
+    return inner.openComposer();
+  }
+
   async locateComposer(): Promise<LocateComposerResult> {
     const res = await (await this.inner()).locateComposer();
     this.composerCount = res.count;
@@ -87,7 +105,7 @@ export class GuidedFillReplyDriver implements ReplySubmitProbeDriver {
     const decision = composerFillDecision({
       rowMatchCount: this.rowMatchCount,
       matchedRowIndex: this.rowMatchCount === 1 ? 0 : null,
-      reviewId: this.deps.reviewIdVerdict?.() ?? { kind: "UNAVAILABLE" },
+      reviewId: this.deps.reviewIdVerdict?.() ?? opened.inner.reviewIdVerdict?.() ?? { kind: "UNAVAILABLE" },
       composerCount: this.composerCount,
       hasDraft: this.deps.draftBody != null && this.deps.draftBody.length > 0,
     });

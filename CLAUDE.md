@@ -590,7 +590,15 @@ V83; 임의 CSV는 `NONE`). Cafe24 리뷰 댓글 API 실행(`review/publish/cafe
 판매자의 클릭, `COMPOSER_FILLED ≠ posted`), Coupang guided acquisition `acquire/coupang` carrier(V85 mint)는 전부
 **IMPLEMENTED · LOCAL_PROVEN · LIVE_UNPROVEN**(안전한 라이브 대상이 없어 WRITE를 강제하지 않았다). 홈 `/`은 대화,
 Overview는 `/overview`, panel은 같은 thread. A–L 증명·free-language QA·browser QA(1440/1366/1152, AA 0)·§15–§23
-보고. **마켓플레이스 호출 0 · WRITE 0 · 자동 submit 0** ⇒ evidence 행 없음. 동반: `docs/cafe24_review_comment_execution_v1.md`).
+보고. **마켓플레이스 호출 0 · WRITE 0 · 자동 submit 0** ⇒ evidence 행 없음. 동반: `docs/cafe24_review_comment_execution_v1.md`.
+**§24 Acceptance Closure(08-28)**: read-only 감사가 찾은 저장소 측 gap을 전부 닫았다 — `POST /api/agent/reply-submission-targets`
+(단일 사용 spend, 모든 승인 게이트 재확인), **`OPEN_COMPOSER`**(런타임이 정확한 리뷰 행의 비제출 「답글 작성」을 직접 누르고 그 행
+범위 안의 composer만 채운다; `.click(`은 `reply-composer-open.ts` 한 곳, 자동 submit 0 — real-DOM 증명), review-id ladder 기반
+`NaverLadderReplyDriver`(hint-only fill 금지), NAVER 대화 export는 신뢰된 `import/naver` carrier + launch 바인딩으로, V86 action
+intent 바인딩(계정·채널·identity·operation·mode·만료·단일 사용) + v1→v2 회귀 테스트, Cafe24 per-review 중복 POST 펜스
+(`ALREADY_EXECUTED`), fake freshness 3건, `filters.reviewIntent` plan token(+ 라이브 planner 녹음 2건), Coupang capability 펜스,
+서버측 `NOT_MARKETPLACE_OBJECT`, FILE_UPLOAD 의미, 홈 shortcut 제거, E는 QA org에서 GROUNDED v1→v2 증명. 남은 것은 **외부 라이브
+증명뿐**).
 
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은

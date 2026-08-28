@@ -31,7 +31,12 @@ public enum ReviewExecutionReason {
      */
     BLOCKED_BY_PASSWORD_SOURCE(true),
     /** The channel offers no seller reply flow at all (Coupang reviews): not a switch, a fact about the platform. */
-    CHANNEL_UNSUPPORTED(false);
+    CHANNEL_UNSUPPORTED(false),
+    /**
+     * The API lane already sent (or may have sent — DELIVERY_UNKNOWN) a reply for this review. A
+     * second public reply is the one outcome the seam exists to prevent, whatever the command id.
+     */
+    ALREADY_EXECUTED(false);
 
     private final boolean retryable;
 

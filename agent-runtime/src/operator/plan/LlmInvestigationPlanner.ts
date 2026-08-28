@@ -374,6 +374,7 @@ function filtersOf(raw: AgentPlanView["filters"]): PlanFilters {
     channel: oneOf(raw.channel, ["NAVER", "COUPANG", "CAFE24"] as const),
     scope: oneOf(raw.scope, ["WORKING_SET", "ORG"] as const),
     topic: oneOf(raw.topic, ["SHIPPING", "EXCHANGE_RETURN", "PRODUCT_SPEC", "USAGE", "OTHER"] as const),
+    reviewIntent: oneOf(raw.reviewIntent, ["ROWS", "ISSUES"] as const),
   };
 }
 

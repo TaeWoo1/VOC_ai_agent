@@ -6,6 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
+import com.sellerops.community.Cafe24CommunityArticleRepository;
+import com.sellerops.identity.ExecutableIdentityResolver;
+import com.sellerops.reviewimport.ReviewImportPlanRepository;
+import com.sellerops.reviewimport.ReviewImportSegmentAttemptRepository;
+import com.sellerops.reviewimport.ReviewImportSegmentRepository;
+import com.sellerops.selleraccount.SellerAccount;
+import com.sellerops.selleraccount.SellerAccountRepository;
+import com.sellerops.sync.SyncJobRepository;
 import com.sellerops.common.ApiException;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
@@ -56,6 +64,27 @@ class InquiryPublishServiceTest {
     @Autowired InquiryWorkItemAuditRepository audits;
     @Autowired ChannelRepository channels;
     @Autowired PlatformTransactionManager txManager;
+    @Autowired SellerAccountRepository sellerAccounts;
+    @Autowired Cafe24CommunityArticleRepository articles;
+    @Autowired SyncJobRepository syncJobs;
+    @Autowired ReviewImportSegmentAttemptRepository attempts;
+    @Autowired ReviewImportSegmentRepository segments;
+    @Autowired ReviewImportPlanRepository plans;
+
+    /** The real resolver over the real repositories — the identity gate is exercised, not stubbed. */
+    private ExecutableIdentityResolver resolver() {
+        return new ExecutableIdentityResolver(sellerAccounts, channels, articles, syncJobs, attempts, segments, plans);
+    }
+
+    /** An API-mode account on the channel — what makes a row a marketplace object. */
+    private UUID seedApiAccount(UUID orgId, UUID channelId) {
+        SellerAccount acc = new SellerAccount();
+        acc.setOrgId(orgId);
+        acc.setChannelId(channelId);
+        acc.setConnectionStatus(ChannelStatus.CONNECTED);
+        acc.setFileUpload(false);
+        return sellerAccounts.save(acc).getId();
+    }
 
     static final String CH_CODE = "COUPANG";
     private final UUID org = UUID.randomUUID();
@@ -92,14 +121,14 @@ class InquiryPublishServiceTest {
     private InquiryPublishService withAdapter() {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of(adapter)),
-                targetState(), new InquiryReplyCapabilityRegistry(), channels);
+                targetState(), new InquiryReplyCapabilityRegistry(), channels, resolver());
     }
 
     /** Service with NO adapter registered (fail-closed: nothing dispatches). */
     private InquiryPublishService withoutAdapter() {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of()),
-                targetState(), new InquiryReplyCapabilityRegistry(), channels);
+                targetState(), new InquiryReplyCapabilityRegistry(), channels, resolver());
     }
 
     /**
@@ -129,14 +158,16 @@ class InquiryPublishServiceTest {
         q.setBody("문의 본문");
         q.setStatus("UNANSWERED");
         q.setInformStatus("미처리");
-        q.setExternalId("MSG-123"); // externalId (ESM messageNo, but neutral to the core)
+        q.setExternalId("onlineInquiry:123"); // a channel object the resolver can name
         q.setReceivedAt(Instant.parse("2026-06-27T00:00:00Z"));
+        UUID accountId = seedApiAccount(orgId, channelId);
+        q.setSellerAccountId(accountId);
         UUID inquiryId = inquiries.save(q).getId();
 
         InquiryWorkItem wi = new InquiryWorkItem();
         wi.setOrgId(orgId);
         wi.setInquiryId(inquiryId);
-        wi.setSellerAccountId(UUID.randomUUID());
+        wi.setSellerAccountId(accountId);
         wi.setChannelId(channelId);
         wi.setPhase(InquiryWorkItemPhase.PROPOSED);
         wi = workItems.save(wi);
@@ -260,7 +291,7 @@ class InquiryPublishServiceTest {
 
         assertThat(adapter.published).hasSize(1);
         ReplyPublishCommand c = adapter.published.get(0);
-        assertThat(c.externalId()).isEqualTo("MSG-123");
+        assertThat(c.externalId()).isEqualTo("onlineInquiry:123");
         assertThat(c.subject()).isEqualTo(APPROVED_TITLE);
         assertThat(c.body()).isEqualTo(APPROVED_COMMENTS);
         assertThat(c.channelId()).isEqualTo(servedChannelId);

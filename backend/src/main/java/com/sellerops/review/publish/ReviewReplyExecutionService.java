@@ -60,6 +60,8 @@ import org.springframework.stereotype.Service;
 public class ReviewReplyExecutionService {
 
     static final String ACTOR_PREFIX = "SELLER:";
+    static final java.util.List<ReviewExecutionStatus> SENT_STATUSES =
+            java.util.List.of(ReviewExecutionStatus.POSTED, ReviewExecutionStatus.DELIVERY_UNKNOWN);
     static final String READBACK_COMMAND_PREFIX = "READBACK:";
 
     private final ReviewRepository reviews;
@@ -122,6 +124,15 @@ public class ReviewReplyExecutionService {
                     decision.reason() == null ? ReviewExecutionReason.EXECUTION_DISABLED : decision.reason(),
                     null, null, actor);
         }
+        // One public reply per review. A NEW command id against a review this lane already POSTED to
+        // (or may have — DELIVERY_UNKNOWN) is refused here, and `uq_review_reply_execution_api_sent`
+        // is the boundary under a race. The check is per review, not per fingerprint: a newer approved
+        // text does not make a second reply less public.
+        if (executions.existsByOrgIdAndReviewIdAndLaneAndStatusIn(scope.review().getOrgId(), scope.review().getId(),
+                ReviewExecutionLane.API, SENT_STATUSES)) {
+            return record(scope, approval, command, ReviewExecutionLane.API, ReviewExecutionStatus.REFUSED, null,
+                    ReviewExecutionReason.ALREADY_EXECUTED, null, null, actor);
+        }
         return executeCafe24(scope, approval, command, actorUserId);
     }
 
@@ -170,6 +181,20 @@ public class ReviewReplyExecutionService {
         ReviewReplySubmissionRef binding = submissionRefs.findByOrgIdAndSubmissionRef(orgId, ref)
                 .filter(b -> b.getReviewId().equals(reviewId))
                 .orElseThrow(() -> ApiException.conflict("유효하지 않은 제출 참조입니다. 다시 시작해 주세요."));
+        // The binding must still describe the approved head (Acceptance Closure §6): a ref minted for
+        // v1 must not stamp the ledger after v1 was withdrawn or v2 approved. Same predicate the
+        // outcome path uses; an observation about a superseded draft is refused, not recorded.
+        if (binding.getSellerAccountId() != null && !binding.getSellerAccountId().equals(accountId)) {
+            throw ApiException.conflict("유효하지 않은 제출 참조입니다. 다시 시작해 주세요.");
+        }
+        ReviewReplyApproval standing = approvals.findByOrgIdAndReviewId(orgId, reviewId)
+                .filter(a -> a.getState() == ReviewReplyApprovalState.APPROVED)
+                .orElse(null);
+        if (standing == null || standing.getApprovedVersion() == null
+                || standing.getApprovedVersion().intValue() != binding.getBoundVersion().intValue()
+                || !standing.getApprovedFingerprint().equals(binding.getBoundFingerprint())) {
+            throw ApiException.conflict("승인 상태가 바뀌었습니다. 답변 제출을 다시 시작해 주세요.");
+        }
 
         Optional<ReviewReplyExecution> prior = executions.findByOrgIdAndCommandId(orgId, command);
         if (prior.isPresent()) {

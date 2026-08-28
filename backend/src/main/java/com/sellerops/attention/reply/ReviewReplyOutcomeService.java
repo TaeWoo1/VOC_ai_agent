@@ -48,6 +48,19 @@ public class ReviewReplyOutcomeService {
      * {@code submissionRef} requires, and never reversible to a review id.
      */
     public String mint(UUID orgId, UUID reviewId, int boundVersion, String boundFingerprint, String actor) {
+        return mint(orgId, reviewId, boundVersion, boundFingerprint, actor, null);
+    }
+
+    /**
+     * The action intent a guided run is bound to (Acceptance Closure, V86): who acts, where, as what,
+     * and until when. {@code null} mints a token-only row that the Local Agent's target route refuses.
+     */
+    public record SubmissionIntent(UUID sellerAccountId, UUID channelId, String executableIdentity,
+                                   String executionMode, java.time.Instant expiresAt) {
+    }
+
+    public String mint(UUID orgId, UUID reviewId, int boundVersion, String boundFingerprint, String actor,
+                       SubmissionIntent intent) {
         ReviewReplySubmissionRef row = new ReviewReplySubmissionRef();
         row.setOrgId(orgId);
         row.setReviewId(reviewId);
@@ -55,6 +68,13 @@ public class ReviewReplyOutcomeService {
         row.setBoundVersion(boundVersion);
         row.setBoundFingerprint(boundFingerprint);
         row.setCreatedBy(actor);
+        if (intent != null) {
+            row.setSellerAccountId(intent.sellerAccountId());
+            row.setChannelId(intent.channelId());
+            row.setExecutableIdentity(intent.executableIdentity());
+            row.setExecutionMode(intent.executionMode());
+            row.setExpiresAt(intent.expiresAt());
+        }
         return refs.save(row).getSubmissionRef();
     }
 

@@ -296,6 +296,11 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
 function wantsRows(input: SpecialistInput): boolean {
   const f = input.filters;
   if (!f) return false;
+  // Acceptance Closure §9: the plan SAYS what the review need is for. ROWS is rows whatever else was
+  // named (a missing period is the default window, never a reason to read repeated problems instead);
+  // ISSUES is the repeated-problems reader even when a period was named.
+  if (f.reviewIntent === "ROWS") return true;
+  if (f.reviewIntent === "ISSUES") return false;
   if (f.period != null || f.rating != null) return true;
   return f.scope === "WORKING_SET" && input.workingSet?.kind === "REVIEWS";
 }

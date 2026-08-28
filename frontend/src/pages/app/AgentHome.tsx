@@ -16,7 +16,7 @@ import { caseTarget, preparedBadge } from "../../lib/proactive";
 import { previewText } from "../../lib/plainText";
 import { relativeTime } from "../../lib/format";
 import { matchCommandIntent, INTENT_HEADING } from "../../lib/commandIntents";
-import type { ConversationSummary, InquiryListArtifact, IssueListArtifact, ListArtifact } from "../../lib/conversation/types";
+import type { ConversationSummary, InquiryListArtifact, ListArtifact } from "../../lib/conversation/types";
 import type { MetricKpi, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
 
 /**
@@ -113,29 +113,7 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
           .catch(() => conversation.addLocalTurn(text, { message: "문의를 읽지 못했습니다. 문의 화면에서 확인해 주세요.", artifacts: [] }));
         return true;
       }
-      void api
-        .getReviewIssuesStrict()
-        .then((issues) => {
-          const artifact: IssueListArtifact = {
-            artifactId: "local-issues",
-            type: "ISSUE_LIST",
-            title: INTENT_HEADING.REVIEW_ISSUES,
-            items: issues.slice(0, 5).map((issue) => ({
-              issueId: issue.id,
-              title: issue.title,
-              severity: issue.severity,
-              evidenceCount: issue.evidenceCount,
-              firstOn: issue.firstEvidenceOn,
-              lastOn: issue.lastEvidenceOn,
-              productId: issue.dominantProductId,
-              productName: issue.dominantProductName,
-              to: `/memory/${issue.id}`,
-            })),
-          };
-          conversation.addLocalTurn(text, { message: "바로 보여드립니다.", artifacts: [artifact] });
-        })
-        .catch(() => conversation.addLocalTurn(text, { message: "리뷰 문제를 읽지 못했습니다. 리뷰 화면에서 확인해 주세요.", artifacts: [] }));
-      return true;
+      return false;
     },
     [conversation, data],
   );

@@ -198,9 +198,9 @@ no live run) · **NOT_SUPPORTED** · **BLOCKED_BY_PASSWORD_SOURCE**. "The API ex
 | NAVER | 상품 · 주문 read | AUTOMATIC (API, scheduled) | — | LIVE_VERIFIED (routine runs) |
 | NAVER | 상품 문의 (Q&A) read → grounded draft → approval → API reply → read-back | AUTOMATIC | API_EXECUTION (`PUT qnas/{questionId}`) | read LIVE_VERIFIED · reply **LIVE_VERIFIED** (2026-08-26) · conversation path LOCAL_PROVEN |
 | NAVER | 고객 문의 (네이버페이) read → draft → approval → API reply → read-back | AUTOMATIC | API_EXECUTION (`POST pay-merchant/inquiries/{inquiryNo}/answer`) | read LIVE_VERIFIED · adapter IMPLEMENTED · reply **LIVE_UNPROVEN** |
-| NAVER | 리뷰 acquisition (guided export → download detected → ingest → resume) | GUIDED_HUMAN_ACTION (`EXPORT_ACTION_WINDOW`, local agent; fallback file upload) | — | export path LIVE_PROVEN (2026-07-15 / 08-23 partial) · conversation start + auto-resume IMPLEMENTED · LOCAL_PROVEN (file path on the QA org: stale → upload → detect → resume → rows) · guided-from-conversation **LIVE_UNPROVEN** |
+| NAVER | 리뷰 acquisition (guided export → download detected → launch-bound ingest → resume) | GUIDED_HUMAN_ACTION (`EXPORT_ACTION_WINDOW`; the conversation mints a bounded launch and starts the TRUSTED `import/naver` carrier — §24; fallback file upload) | — | export path LIVE_PROVEN (2026-07-15 / 08-23 partial) · conversation start + auto-resume IMPLEMENTED · LOCAL_PROVEN (file path on the QA org: stale → upload → detect → resume → rows; the launch-bound start is unit-proven) · guided-from-conversation **LIVE_UNPROVEN** (needs a paired helper + seller-center session). **Before §24 this row was unwired**: the card started a v1 `export` carrier that only a dev fixture hosts. |
 | NAVER | 리뷰 analysis / triage / draft | — | — | IMPLEMENTED · LOCAL_PROVEN (draft prepared in conversation, triage recorded from the seller's sentence) |
-| NAVER | 리뷰 guided reply (locate → composer fill → seller submit → observe) | — | GUIDED_BROWSER_EXECUTION (`reply/naver` resident carrier, `FILL_COMPOSER`) | IMPLEMENTED · LOCAL_PROVEN (fixture DOM; automatic submit 0 by guard) · **LIVE_SUBMIT_UNPROVEN**; on the Demo Org the stored NAVER reviews carry no trusted acquisition binding ⇒ identity `NONE`, so the card is not offered live |
+| NAVER | 리뷰 guided reply (locate by review-id ladder → **runtime presses 「답글 작성」** → composer in that row → fill → seller submit → observe) | — | GUIDED_BROWSER_EXECUTION (`reply/naver` resident carrier, `OPEN_COMPOSER` + `FILL_COMPOSER`, target spent at `POST /api/agent/reply-submission-targets`) | IMPLEMENTED · LOCAL_PROVEN (**real-DOM proof**: `ladder-open-composer-browser.test.ts` — the runtime's own press opens the exact row's composer, fills the draft, `__submitClicks` 0; automatic submit 0 by guard) · **LIVE_SUBMIT_UNPROVEN**; on the Demo Org the stored NAVER reviews carry no trusted acquisition binding ⇒ identity `NONE`, so the card is not offered live. **Before §24 this row was unreachable**: the target endpoint did not exist and the seller opened the composer. |
 | Cafe24 | 상품 · 주문 read | AUTOMATIC | — | LIVE_VERIFIED |
 | Cafe24 | 문의 read → draft → approval → API reply (child article) → verify | AUTOMATIC | API_EXECUTION | **LIVE_VERIFIED** (2026-08-25) · conversation path LOCAL_PROVEN |
 | Cafe24 | 리뷰 automatic acquisition (+ agent self-refresh when stale) | AUTOMATIC (`manualSync` on demand) | — | acquisition LIVE_VERIFIED (2026-07-30) · self-refresh IMPLEMENTED · LOCAL_PROVEN (attempted live with connectors OFF ⇒ honest failure) |
@@ -253,13 +253,17 @@ guided / API only on `MARKETPLACE`).
   by channel + `uploadType` (a file upload has no account/dataType), `collected` carried into the re-run so the
   channel reads FRESH for the window; partial completion prompts the next channel. Runtime tests: `liveResumeProof`,
   `liveQaFollowups`, `scopeOverride`, `conversationService` B.
-- Guided acquisition from a conversation: NAVER `EXPORT` run and Coupang `REVIEW_ACQUISITION` run are startable from
-  the human-action card through the paired helper (`acquire/coupang` resident carrier; `acquisitionRef` mint);
+- Guided acquisition from a conversation: Coupang `REVIEW_ACQUISITION` runs through the `acquire/coupang` resident
+  carrier (`acquisitionRef` mint); NAVER runs through the TRUSTED `import/naver` carrier on a launch the conversation
+  mints (§24 — the v1 `export` start this section first described was hosted by nothing but a dev fixture).
   **LIVE_UNPROVEN** here — this machine has no paired helper session against a seller center in this package.
-- Guided NAVER reply: `GUIDED_EXECUTION` card → `submission-run` mint → `REPLY_SUBMISSION` with `FILL_COMPOSER`
-  (`guided-fill-reply-driver`: fills only on one matched row + one composer + non-contradicting review-id
-  fingerprint; ambiguity fills nothing); submit is the seller's click — **automatic submit 0** by the source
-  guard; state `COMPOSER_FILLED → SELLER_SUBMISSION_OBSERVED → SUBMISSION_OBSERVED_CONTENT_UNVERIFIED`, never a
+- Guided NAVER reply: `GUIDED_EXECUTION` card → `submission-run` mint (the intent bound to account · channel ·
+  identity · mode · deadline, V86) → the Local Agent spends the ref at `POST /api/agent/reply-submission-targets`
+  (every approval gate re-asked NOW; single-use) → `REPLY_SUBMISSION`: ladder locate by the backend's review-id
+  fingerprint → **`OPEN_COMPOSER` — the runtime's own press on the row's non-submit control** → composer inside that
+  row's scope → `FILL_COMPOSER`; ambiguity opens/fills nothing and asks the seller for exactly that step; submit is
+  the seller's click — **automatic submit 0** by the source guard (`.click(` exists in `reply-composer-open.ts` only,
+  once); state `COMPOSER_FILLED → SELLER_SUBMISSION_OBSERVED → SUBMISSION_OBSERVED_CONTENT_UNVERIFIED`, never a
   strong Memory. **LIVE_SUBMIT_UNPROVEN.**
 - Cafe24 review comment: `docs/cafe24_review_comment_execution_v1.md` — IMPLEMENTED · LOCAL_PROVEN · **LIVE_UNPROVEN**.
 
@@ -313,16 +317,72 @@ Marketplace calls **0** · marketplace WRITE **0** · automatic submits **0** ·
 across ≈ 60 live turns (+ 0 judge — rule judge locally) · DB rows written outside the product's own flows: 0 (QA org
 rows came through signup / file-channel / upload endpoints). Cloud resources created: 0.
 
-## 23. Remaining limitations before an external pilot
+## 23. Remaining limitations before an external pilot (as amended by §24)
 
 1. Every guided path that reaches a seller center (NAVER export/reply, Coupang WING read) is LIVE_UNPROVEN from a
-   conversation — it needs a paired helper and a seller-center session under an approval manifest.
+   conversation — it needs a paired helper and a seller-center session under an approval manifest. These are the
+   only **external-only** proof gaps left; the repository paths are connected (§24).
 2. Cafe24 review comment: `password` acceptance for a mall-authored comment is the one open contract question.
 3. NAVER customer-inquiry reply and Coupang inquiry reply adapters exist but have never been run live.
-4. Grounded inquiry drafts need an org with Product Knowledge; the Demo Org's open inquiries are all `NO_ANSWER_BASIS`.
-5. Planner latency 7–33 s per turn remains the dominant wait (no change in this package).
+4. Grounded inquiry drafts need an org with Product Knowledge; the Demo Org's open inquiries are all `NO_ANSWER_BASIS`
+   (proven on the QA org instead — §24 E).
+5. Planner latency 7–38 s per turn remains the dominant wait (no change in this package).
 6. The old NAVER export rows carry no acquisition binding, so their guided reply is refused by design until a
    guided export re-acquires them.
 7. `/reviews` page's 「승인」 button contrast (pre-existing).
+
+## 24. Acceptance Closure (2026-08-28)
+
+A read-only acceptance audit of `29aac9b2` found repository-side gaps behind the labels above. This section is the
+closure: each item, the verdict before, what changed, the verdict after. Nothing in it is a live marketplace
+action; every "PASS" below is a code path plus a test or a bounded proof named by file.
+
+| # | Audit item | Before | Change | After |
+|---|---|---|---|---|
+| 1 | NAVER guided reply reachable | **MISSING** — `POST /api/agent/reply-submission-targets` did not exist; the resident carrier died `SUBMISSION_REF_REFUSED`; observations posted `submissionRef: ""` | `ReviewReplySubmissionTargetService` + `AgentReplySubmissionTargetController`: spends the ref once (conditional UPDATE), refuses expired · reused · cross-org · pre-V86 · stale draft · non-marketplace · non-approved · answered · not-대응 필요; returns account · actionRef · hint · as-of date · review-id fingerprint · approved body/version/fingerprint · operation · mode. The real `submissionRef` now travels to `…/execution/observe`. | PASS — `ReviewReplySubmissionTargetServiceTest` (5) |
+| 2 | Agent opens the composer | **MISSING** — the seller's own click at a row-open barrier | `OPEN_COMPOSER` stage (engine · session · stages); `reply-composer-open.ts` is the ONE module allowed to `.click(` (source guard: exactly one site, no submit tokens); ambiguity/NOT_FOUND falls back to the seller's own row-open step | PASS — `open-composer.test.ts` (11), real DOM `ladder-open-composer-browser.test.ts` (2) |
+| 3 | Composer scoped to the exact review; `reviewIdVerdict` wired | **PARTIAL** — document-wide composer, verdict never supplied in production, hint-only fill allowed | `NaverLadderReplyDriver`: identity by the review-id ladder (fingerprint on exactly one row, rating only as a contradiction check), composer searched inside that row's exclusive scope (`reply-row-composer-inpage.ts`), `reviewIdVerdict()` answered by the driver; `composerFillDecision` refuses `UNAVAILABLE` | PASS — same suites; `guided-fill-reply-driver.test.ts` |
+| 4 | NAVER guided acquisition has a live carrier | **MISSING** — the card started a v1 `export` carrier hosted only by a dev fixture | Option B: the card mints a bounded launch on the account's plan (`selected-range` / reuse open plan → `extend` → `next-segment`) and starts the TRUSTED `import/naver` carrier (`launchRef`, `SEGMENT`), whose ingest is `/launches/{ref}/ingest` = `SELLER_CENTER_EXPORT` + launch binding ⇒ V83 stamp ⇒ MARKETPLACE | PASS (repo) · LIVE_UNPROVEN (seller center) — `HumanActionArtifact.test.tsx` |
+| 5 | Completion matching (FE) | **PARTIAL** — polled by `sellerAccountId,dataType`; an export ingest (`null,null,uploadType`) never matched | `runsOfThisStep`: this account's run, or an upload-shaped run on this account's channel with the requested `uploadType`; never another account's | PASS — `ConversationProvider.test.tsx` |
+| 6 | Approval/action binding (correction B) | **PARTIAL** — 4/9 fields; no v1→v2 test; `observe()` no head recheck | V86: the guided intent (`review_reply_submission_ref`) binds seller account · channel · executable identity · operation `REVIEW_REPLY` · execution mode · deadline · single-use; `observe()` re-checks the approved head and the account; the execution row already binds account · channel · lane · version · fingerprint | PASS — v1→v2 regressions in `ReviewReplyExecutionServiceTest` (execute 409, POST 0; observe 409, ledger 0) and `ReviewReplySubmissionTargetServiceTest` (target refused) |
+| 7 | Cafe24 double-post · service tests | **PARTIAL/MISSING** | `ALREADY_EXECUTED`: a NEW command id against a review already POSTED/DELIVERY_UNKNOWN is refused before the transport; `uq_review_reply_execution_api_sent` partial unique index is the race boundary | PASS — `ReviewReplyExecutionServiceTest` (12: approval · identity · account/channel · disabled · ANSWERED · same-command replay · new-command fence · DELIVERY_UNKNOWN · read-back) |
+| 8 | Fake freshness (3 holes) | **PARTIAL** | Refresher: only terminal SUCCESS/PARTIAL with a finish time counts; QUEUED/PENDING ⇒ IN_PROGRESS, unknown ⇒ UNAVAILABLE. `syncCompleted`: account-stamped runs must be this account's; upload-shaped runs only on this channel with the requested type and a seller-driven trigger; PARTIAL carried as partial. `pendingHumanWindow` suppresses the second card, never the gate; a failed/partial refresh keeps the window gated with its own sentence, never 「0건」 | PASS — `acceptanceClosure.test.ts` §8 (7 cases) |
+| 9 | Canned-command drift · rows vs issues | **DRIFT/PARTIAL** | 「리뷰 문제 보여줘」 shortcut removed (two exact object operations remain); plan token `filters.reviewIntent ∈ ROWS | ISSUES` (prompt v3 rule, parser, view, runtime); `wantsRows` routes on it; two LIVE planner recordings pinned (`liveRecordedPlans.ts`) | PASS — `acceptanceClosure.test.ts` §9, `AgentOperatorResponseParserTest`, `commandIntents.test.ts` |
+| 10 | Coupang capability fence | **PARTIAL** | `CAPABILITY_UNKNOWN` no longer drafts (conversation) and `DraftPreparer.prepareReview` refuses NOT_SUPPORTED/Coupang itself; backend `ReviewReplyService.authorize` refuses a channel with no reply flow (`replyFlowExists`); dead chip 「상세페이지 개선 검토」 replaced by servable prompts | PASS — `acceptanceClosure.test.ts` §10, `ReviewReplyServiceTest` |
+| 11 | Server-side identity backstop | **PARTIAL** | `PreSendCheck.NOT_MARKETPLACE_OBJECT` in `InquiryPublishService.revalidate` via the real resolver; ingest-through-service stamp test (`ReviewAcquisitionSpineTest`); runtime NONE-item refusal test | PASS — `InquiryPreSendCheckTest` (+2) |
+| 12 | FILE_UPLOAD semantics | **DRIFT** | an EXPORT with no reviewnary carrier is UNSUPPORTED, never a file-upload primary; MANUAL stays a real file path; pairing is a runtime-availability fact the screen resolves | PASS — `channelCapability.test.ts` |
+| E | Grounded draft proof | proof gap | QA org: product-bound inquiry + one POLICY knowledge through product endpoints (+ one bounded SQL work-item row — the file path opens no work item by design) → 「배송 얘기부터 처리하자」 → 「첫 번째 거 답변 준비해줘」 → **DRAFT v1 `GROUNDED`** → 「조금 더 부드럽게 써줘」 → **v2 `GROUNDED`, tone SOFTER**, envelope intact (both bodies carry 1~2일 · 2~3일). Found and fixed on the way: the conversation lane never proposed an OPEN item before drafting (409 on a real save; the fake had masked it) — `DraftPreparer` now proposes through the product's own seam, the fake mirrors the backend | PASS |
+
+Also in this closure: the runtime target endpoint records nothing beyond the spend timestamp; no customer text is
+returned to the agent except the review body fingerprint and the approved reply; the composer-open click is
+bounded by wording (open words only, submit words excluded before the marker is set).
+
+**Re-drive (Demo Org, planner ON, connectors OFF, this tree):** V (natural rows/issues variants) · A7 · M · R · RN · RC ·
+N · G · R2 · C · D · L — all as in §15, with the new behaviour visible: 「일단 확인된 리뷰 보기」 re-asks nothing and
+still says the window is gated; the failed Cafe24 refresh is said as failed; Coupang chips are the servable three;
+the identity-`NONE` NAVER row is refused for the guided card. QA org: E (NEEDS_CLARIFICATION on a 2호 question with
+no registered variants — the correct answer) and E2 (GROUNDED, above).
+
+**Suites (this tree, once, after integration):** backend `./gradlew test` BUILD SUCCESSFUL · agent-runtime 577 (+ typecheck) ·
+collector 9,364 passed / 152 skipped (+ the real-DOM OPEN_COMPOSER proof under `RUN_INTEGRATION=1`) · frontend 207 files /
+2,546 passed (+ typecheck). Failures 0.
+
+**Browser QA (Chromium, real stack restarted from this tree):** home 0/1/3/5/10 turns, workspace handoff + panel follow-up,
+reload continuity, 1366×768 and 1152×720 — horizontal scroll 0, console errors 0, off-host requests 0, AA text violations 0 on
+every conversation surface (the one 4.4:1 hit is the pre-existing 「승인」 control on the `/reviews` page itself); capability
+pass — multi-channel cards (`지금 네이버 스마트스토어 리뷰 가져오기` · `지금 쿠팡 리뷰 가져오기` · `계속 확인하기`), Cafe24 draft +
+honest disabled send, NAVER draft + identity-`NONE` refusal, Coupang unsupported + the three servable chips. The only
+non-runtime write observed was the review workspace's own `triage-feedback/behavior` event when a review was opened —
+existing product telemetry, not a conversation write and not a marketplace call. Screenshots stay in the scratchpad.
+
+**Counts for this closure:** marketplace calls **0** · marketplace WRITE **0** · automatic submits **0** · model calls: planner
+1–2 per turn over ≈ 45 live turns (Demo Org re-drive, QA org E/E2, two browser passes) + 2 planner recordings + 4 QA-org
+drafts (v1/v2 × 2 inquiries) · DB rows written outside product flows: **2** (the QA org's bounded work-item fixture rows,
+documented above) · migrations 1 (V86) · cloud resources 0.
+
+**External-only proof gaps that remain:** NAVER guided export and guided reply against a real seller-center session
+(paired helper); Coupang WING read from a conversation; Cafe24 comment POST; NAVER customer-inquiry and Coupang
+inquiry POSTs. Each needs a fresh single-use approval manifest.
+
 
 

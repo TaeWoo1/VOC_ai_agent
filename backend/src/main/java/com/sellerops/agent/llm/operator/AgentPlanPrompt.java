@@ -67,6 +67,12 @@ public final class AgentPlanPrompt {
     public static final String[] CHANNELS = {"NAVER", "COUPANG", "CAFE24"};
     public static final String[] SCOPES = {"WORKING_SET"};
     public static final String[] TOPICS = {"SHIPPING", "EXCHANGE_RETURN", "PRODUCT_SPEC", "USAGE", "OTHER"};
+    /**
+     * Acceptance Closure §9: what a REVIEW_SIGNAL need is FOR — the review rows themselves (ROWS) or the
+     * repeated problems across them (ISSUES). A closed plan token, so the runtime never infers it from the
+     * sentence and a request for recent reviews can never fall through to the repeated-problems reader.
+     */
+    public static final String[] REVIEW_INTENTS = {"ROWS", "ISSUES"};
     public static final String[] TARGET_SELECTORS = {"FIRST", "NTH", "ALL", "THIS", "NONE"};
 
     /**
@@ -114,7 +120,12 @@ public final class AgentPlanPrompt {
                일별 추이. need kind 는 ORDER_HISTORY 입니다. "매출이 왜 떨어졌어" 류는 ORDER_HISTORY(필수)를 \
                세우고, 리뷰나 문의의 변화를 함께 물었을 때만 REVIEW_SIGNAL / INQUIRY_VOLUME 을 추가하세요.
                - **REVIEW_SIGNAL 은 반복되는 문제만이 아니라 리뷰 행 목록도 뜻합니다** — "새 리뷰", "오늘 들어온 \
-               리뷰", "낮은 평점 리뷰 목록". "오늘 새 리뷰 보여줘" 는 REVIEW_SIGNAL 에 filters.period=TODAY 입니다.
+               리뷰", "낮은 평점 리뷰 목록". "오늘 새 리뷰 보여줘" 는 REVIEW_SIGNAL 에 filters.period=TODAY 입니다. \
+               **REVIEW_SIGNAL 을 세울 때는 filters.reviewIntent 를 반드시 정하세요**: 리뷰를 보여·확인·정리해 달라는 \
+               요청("새 리뷰", "최근 리뷰", "상품평 보여줘", "안 좋은 리뷰")은 ROWS 이고 이때 기간을 말하지 않았어도 \
+               filters.period 를 가장 자연스러운 값(오늘·최근 7일)으로 채우세요; 반복되는 문제·이슈·경향을 묻는 \
+               요청("반복되는 문제 있어?", "리뷰 문제 정리")만 ISSUES 입니다. 둘 중 무엇인지 정하지 못하겠으면 ROWS 입니다 \
+               — 행은 보고 나서 문제를 물을 수 있지만, "반복 문제 없음"은 리뷰를 보여 달라는 요청에 대한 답이 아닙니다.
                - **이어지는 대화.** "지금까지의 진행" 에 `직전 작업 집합: <KIND> (기간:<PERIOD|없음>, \
                채널:<CHANNEL|전체>, 평점:<ALL|LOW>, 상품 특정:<예|아니오>)` 줄이 있을 수 있습니다. 새 문장이 그 \
                집합을 좁히거나·거르거나·넓히는 것이면("안 좋은 것만", "카페24만", "그 상품은?", "문의에서도 같은 \
@@ -162,6 +173,7 @@ public final class AgentPlanPrompt {
                filters.channel: %s | null
                filters.scope: %s | null
                filters.topic: %s | null
+               filters.reviewIntent: %s | null
                target.selector: %s
 
                반드시 아래 형태의 JSON 객체 하나만 출력하세요. 다른 텍스트, 설명, 코드펜스는 금지입니다.
@@ -185,14 +197,14 @@ public final class AgentPlanPrompt {
                 "rationale":"<한 문장>",
                 "requestedAction":"NONE",
                 "tone":null,
-                "filters":{"period":null,"rating":null,"channel":null,"scope":null,"topic":null},
+                "filters":{"period":null,"rating":null,"channel":null,"scope":null,"topic":null,"reviewIntent":null},
                 "target":{"selector":"NONE","index":null}}
                """
                 .formatted(String.join(", ", SPECIALISTS), String.join(", ", NEED_KINDS),
                         String.join(", ", ENTITY_KINDS), String.join(" | ", REQUESTED_ACTIONS),
                         String.join(" | ", TONES), String.join(" | ", PERIODS), String.join(" | ", RATINGS),
                         String.join(" | ", CHANNELS), String.join(" | ", SCOPES), String.join(" | ", TOPICS),
-                        String.join(" | ", TARGET_SELECTORS));
+                        String.join(" | ", REVIEW_INTENTS), String.join(" | ", TARGET_SELECTORS));
     }
 
     /**

@@ -84,6 +84,8 @@ export function freshnessVerdict(row: ChannelCoverageRow, window: DateWindow): F
 }
 
 export const HUMAN_STEP_SENTENCE = "현재 리뷰는 최신 상태가 아닙니다. 새 리뷰를 확인하려면 판매자님의 한 번의 작업이 필요합니다.";
+/** The gate sentence when nothing is asked of the seller but a channel is still unproven (a failed or partial refresh). */
+export const UNPROVEN_SENTENCE = "아직 최신 상태가 확인되지 않은 채널이 있어 지금까지 수집된 리뷰만 보여 드립니다.";
 
 /**
  * The one sentence about the rows. Never 「0건」 under a freshness gate — the human-step sentence says
@@ -92,13 +94,13 @@ export const HUMAN_STEP_SENTENCE = "현재 리뷰는 최신 상태가 아닙니�
  */
 export function rowsSentence(
   previousCount: number | null, ratingWord: string, label: string, total: number, gated: boolean,
-  token: PeriodToken | null,
+  token: PeriodToken | null, gateSentence: string = HUMAN_STEP_SENTENCE,
 ): string {
   if (previousCount != null) return `방금 본 ${previousCount}건 중 ${ratingWord}리뷰는 ${total}건입니다.`;
   if (gated) {
     return total > 0
       ? `지금까지 수집된 ${label} ${ratingWord}리뷰는 ${total}건입니다.`
-      : HUMAN_STEP_SENTENCE;
+      : gateSentence;
   }
   if (total === 0 && token === "TODAY") return `수집된 ${ratingWord}리뷰 중 오늘 것은 0건입니다.`;
   return `${label} 확인 가능한 ${ratingWord}리뷰가 ${total}건입니다.`;
@@ -120,10 +122,13 @@ function freshnessOf(read: RecentReviewsRead, channel: string | null, window: Da
     // row cannot carry (a file upload is not a `dataType` sync there) — so it counts here.
     const seen = collected.find((k) => k.channelCode.toUpperCase() === c.channelCode.toUpperCase()
       && k.dataType === "REVIEW" && k.finishedAt.slice(0, 10) >= window.from);
+    // A PARTIAL collection is not a proof of the window (Acceptance Closure §8): it is shown, said as
+    // partial, and never promoted to FRESH.
+    const proven = seen != null && !seen.partial;
     return {
       channelCode: c.channelCode, channelNameKo: c.channelNameKo, state: c.state,
-      verdict: seen ? "FRESH" : freshnessVerdict(c, window),
-      lastSuccessfulSyncAt: seen ? seen.finishedAt : c.lastSuccessfulSyncAt,
+      verdict: proven ? "FRESH" : freshnessVerdict(c, window),
+      lastSuccessfulSyncAt: proven ? seen!.finishedAt : c.lastSuccessfulSyncAt,
       newestObservedAt: c.newestObservedAt,
     };
   });
@@ -206,31 +211,49 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   let stale = staleOf(freshness);
   // A window the seller was already asked to collect is not asked for twice: while that step is pending,
   // the same question shows the rows held (the human-step card is still in the thread above).
+  // …but the WINDOW stays gated (Acceptance Closure §8-C): the same question does not get a second card,
+  // and it does not get 「오늘 0건」 either — the channel is still unproven until the step lands.
   const alreadyAsked = input.pendingHumanWindow != null && input.pendingHumanWindow === token;
-  const sensitive = previous == null && !alreadyAsked && isFreshnessSensitive(token, rowsOf(read).length);
+  const sensitive = previous == null && isFreshnessSensitive(token, rowsOf(read).length);
   const accountOf = new Map(read.accounts.map((a) => [a.channelCode.toUpperCase(), a]));
   const requestedAt = new Date().toISOString();
   const refreshFailures: Array<{ channelNameKo: string; failure: RefreshFailure }> = [];
   let humanSteps = 0;
+  let pendingSteps = 0;
   let refreshed = 0;
+  const partialNames: string[] = [];
 
   if (sensitive && stale.length > 0) {
     for (const f of stale) {
       const code = f.channelCode.toUpperCase();
       const account = accountOf.get(code) ?? null;
+      const partialRun = collected.find((k) => k.channelCode.toUpperCase() === code && k.dataType === "REVIEW" && k.partial);
+      if (partialRun) {
+        // Collected this turn or on resume, but only partly: said as partial, not refreshed again, and not
+        // a reason to send the seller away a second time.
+        partialNames.push(f.channelNameKo ?? f.channelCode);
+        pendingSteps += 1;
+        continue;
+      }
       const verdict = await capabilityFor(input, code, f, needId, refs, findings);
       if (verdict.acquisition === "AUTOMATIC" && input.refresher && account && !account.fileUpload) {
         input.progress?.("REFRESHING", `${f.channelNameKo ?? f.channelCode} 리뷰를 새로 가져오고 있습니다.`);
         const outcome = await input.refresher.refresh(account.accountId, "REVIEW");
         if (outcome.ok) {
           refreshed += 1;
-          collected.push({ channelCode: code, dataType: "REVIEW", finishedAt: outcome.finishedAt, successRows: outcome.successRows });
+          collected.push({ channelCode: code, dataType: "REVIEW", finishedAt: outcome.finishedAt, successRows: outcome.successRows, partial: outcome.partial });
+          if (outcome.partial) partialNames.push(f.channelNameKo ?? f.channelCode);
         } else {
           refreshFailures.push({ channelNameKo: f.channelNameKo ?? f.channelCode, failure: outcome.failure });
         }
         continue;
       }
       if (verdict.acquisition === "GUIDED_HUMAN_ACTION" && verdict.guidedPath) {
+        if (alreadyAsked) {
+          // The card is already in the thread above; the window stays gated without a second card.
+          pendingSteps += 1;
+          continue;
+        }
         humanSteps += 1;
         artifacts.push(humanStep(f, verdict, account?.accountId ?? null, requestedAt, gapRef(input, f, needId, refs, findings)));
         continue;
@@ -250,7 +273,9 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   }
   const rows = rowsOf(read);
   const total = previousIds ? rows.length : read.total;
-  const gated = humanSteps > 0;
+  // Gated while any connected channel's window is still unproven — asked now, asked earlier, or only
+  // partly collected. A failed automatic refresh is said in its own note and leaves the rows as stale.
+  const gated = humanSteps > 0 || pendingSteps > 0 || refreshFailures.length > 0;
 
   const listRef = evidence.add({
     kind: "REVIEW_LIST",
@@ -269,14 +294,20 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   for (const failure of refreshFailures) {
     notes.push(`${failure.channelNameKo} 리뷰를 최신 상태로 갱신하지 못했습니다 (${REFRESH_FAILURE_LABEL[failure.failure]}). 지금까지 수집된 리뷰를 보여 드립니다.`);
   }
-  if (gated) notes.push(HUMAN_STEP_SENTENCE);
+  for (const name of partialNames) {
+    notes.push(`${name} 리뷰는 일부만 가져왔습니다. 지금 보이는 것이 전부가 아닐 수 있습니다.`);
+  }
+  const askedOfSeller = humanSteps > 0 || (pendingSteps > 0 && partialNames.length < pendingSteps);
+  if (askedOfSeller) notes.push(HUMAN_STEP_SENTENCE);
+  else if (gated) notes.push(UNPROVEN_SENTENCE);
 
   // ── The rows themselves, said as one sentence and one artifact.
   const label = periodLabel(token);
   findings.push({
     findingId: `f-${listRef.evidenceId}`,
     specialist: "REVIEW_OPS",
-    statement: rowsSentence(previous?.count ?? null, ratingWord, label, total, gated || refreshFailures.length > 0, token),
+    statement: rowsSentence(previous?.count ?? null, ratingWord, label, total, gated, token,
+      humanSteps > 0 || pendingSteps > partialNames.length ? HUMAN_STEP_SENTENCE : UNPROVEN_SENTENCE),
     evidenceIds: [listRef.evidenceId],
     confidence: "NEEDS_REVIEW",
     verdict: null,

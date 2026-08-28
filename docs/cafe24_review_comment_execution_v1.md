@@ -95,6 +95,6 @@ the stale rows shown as stale). With the connector disabled it fails closed; not
 |---|---|
 | request shape · live interlock · no-retry · ephemeral password | IMPLEMENTED · LOCAL_PROVEN |
 | verification decision (hash / unresolved / unknown) | IMPLEMENTED · LOCAL_PROVEN |
-| execute / execution / observe endpoints, idempotency, gates | IMPLEMENTED · LOCAL_PROVEN |
+| execute / execution / observe endpoints, idempotency, gates | IMPLEMENTED · LOCAL_PROVEN (`ReviewReplyExecutionServiceTest`, 2026-08-28: approval · identity · account/channel · disabled · ANSWERED · same-command replay · **new command id against an already-POSTED review ⇒ `ALREADY_EXECUTED`, transport touched once** · DELIVERY_UNKNOWN · read-back; `uq_review_reply_execution_api_sent` is the race boundary) |
 | one real comment on a mall, read back | **LIVE_UNPROVEN** |
 | arbitrary password accepted for a mall-authored comment | **LIVE_UNPROVEN** (the only open contract question) |

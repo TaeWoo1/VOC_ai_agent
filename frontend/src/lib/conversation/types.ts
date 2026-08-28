@@ -345,6 +345,7 @@ export interface WorkingSetView {
     rating?: "ALL" | "LOW";
     productIds?: string[];
     topic?: "SHIPPING" | "EXCHANGE_RETURN" | "PRODUCT_SPEC" | "USAGE" | "OTHER" | null;
+    reviewIntent?: "ROWS" | "ISSUES" | null;
   };
   productIds: string[];
   workItemIds: string[];

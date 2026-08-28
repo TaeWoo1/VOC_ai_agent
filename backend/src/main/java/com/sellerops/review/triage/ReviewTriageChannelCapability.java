@@ -51,6 +51,16 @@ public record ReviewTriageChannelCapability(String channelCode, boolean aiTriage
         return c == null ? outside(channelCode) : c;
     }
 
+    /**
+     * Whether the PRODUCT has any reply flow for this channel's reviews (Acceptance Closure §10): NAVER's
+     * guided seller-center reply, Cafe24's board-comment API lane. {@code replySupported} is the triage
+     * contract's older column (NAVER only); this is the platform fact the reply endpoints gate on, so a
+     * draft or an approval cannot be written for a review nobody can ever answer (Coupang).
+     */
+    public boolean replyFlowExists() {
+        return "NAVER".equals(channelCode) || "CAFE24".equals(channelCode);
+    }
+
     /** True for the three channels the contract names, whatever their individual columns say. */
     public boolean inContract() {
         return TABLE.containsKey(channelCode);

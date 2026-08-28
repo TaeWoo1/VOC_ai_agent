@@ -122,6 +122,16 @@ export class ReplySubmitSession {
         this.publishState();
         return this.drive(next);
       }
+      case "OPEN_COMPOSER": {
+        // The runtime's own press on the verified row's non-submit open control — or, when the driver cannot
+        // say which control that is, the barrier where the seller opens it.
+        const res = this.driver.openComposer
+          ? await this.driver.openComposer()
+          : ({ opened: false, reason: "NOT_SUPPORTED" } as const);
+        const next = this.engine.onComposerOpened(res);
+        this.publishState();
+        return this.drive(next);
+      }
       case "OBSERVE_ROW": {
         await this.driver.armRowObserve();
         // Rest at the row-open barrier; the operator opens the reply control themselves (their own click).

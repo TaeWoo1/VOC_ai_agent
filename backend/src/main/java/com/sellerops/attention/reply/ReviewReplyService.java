@@ -19,6 +19,9 @@ import com.sellerops.common.RedactedBody;
 import com.sellerops.common.ReviewBodyFingerprint;
 import com.sellerops.common.ReviewIdFingerprint;
 import com.sellerops.common.VocPreviewSanitizer;
+import com.sellerops.identity.ExecutableIdentityResolver;
+import com.sellerops.channel.ChannelRepository;
+import com.sellerops.review.triage.ReviewTriageChannelCapability;
 import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
@@ -80,6 +83,14 @@ public class ReviewReplyService {
     private final ReviewReplyOutcomeService outcomes;
     private final ReviewReplyProposalProvider provider;
     private final Clock clock;
+    /** Resolves the executable identity recorded on a guided run's intent at mint (Acceptance Closure). */
+    private final ExecutableIdentityResolver identity;
+    /** Names the review's channel so the reply-flow gate can refuse a channel with no reply flow at all. */
+    private final ChannelRepository channels;
+
+    /** How long a minted guided run may wait for the Local Agent to spend it. */
+    static final java.time.Duration SUBMISSION_REF_TTL = java.time.Duration.ofMinutes(15);
+    static final String GUIDED_EXECUTION_MODE = "GUIDED_BROWSER_EXECUTION";
 
     @Autowired
     public ReviewReplyService(ReviewRepository reviews, ProductRepository products,
@@ -87,9 +98,21 @@ public class ReviewReplyService {
                               ReviewTriageRepository triages, ReviewReplyDraftService drafts,
                               ReviewReplyApprovalService approvals,
                               ReviewReplyOutcomeService outcomes,
-                              ReviewReplyProposalProvider provider) {
+                              ReviewReplyProposalProvider provider,
+                              ExecutableIdentityResolver identity, ChannelRepository channels) {
         this(reviews, products, sellerAccounts, triages, drafts, approvals, outcomes, provider,
-                Clock.systemUTC());
+                Clock.systemUTC(), identity, channels);
+    }
+
+    /** Test seam without a resolver: every minted intent records {@code NONE}, which the target route refuses. */
+    ReviewReplyService(ReviewRepository reviews, ProductRepository products,
+                       SellerAccountRepository sellerAccounts,
+                       ReviewTriageRepository triages, ReviewReplyDraftService drafts,
+                       ReviewReplyApprovalService approvals,
+                       ReviewReplyOutcomeService outcomes,
+                       ReviewReplyProposalProvider provider, Clock clock) {
+        this(reviews, products, sellerAccounts, triages, drafts, approvals, outcomes, provider, clock,
+                ExecutableIdentityResolver.unresolved(), null);
     }
 
     /** Test seam: an explicit {@link Clock} pins the KST as-of date used for the recency bucket. */
@@ -98,7 +121,10 @@ public class ReviewReplyService {
                        ReviewTriageRepository triages, ReviewReplyDraftService drafts,
                        ReviewReplyApprovalService approvals,
                        ReviewReplyOutcomeService outcomes,
-                       ReviewReplyProposalProvider provider, Clock clock) {
+                       ReviewReplyProposalProvider provider, Clock clock,
+                       ExecutableIdentityResolver identity, ChannelRepository channels) {
+        this.identity = identity;
+        this.channels = channels;
         this.reviews = reviews;
         this.products = products;
         this.sellerAccounts = sellerAccounts;
@@ -269,8 +295,14 @@ public class ReviewReplyService {
             asOfDate = asOf.toString();
         }
 
+        // The intent (V86): the account the run acts through, its channel, what the review resolves
+        // to right now, the mode, and a deadline. Identity is RECORDED here and ENFORCED where the
+        // Local Agent spends the ref — a NONE row mints a run nobody can resolve to a page.
+        ReviewReplyOutcomeService.SubmissionIntent intent = new ReviewReplyOutcomeService.SubmissionIntent(
+                accountId, review.getChannelId(), identity.forReview(review).name(), GUIDED_EXECUTION_MODE,
+                clock.instant().plus(SUBMISSION_REF_TTL));
         String ref = outcomes.mint(orgId, reviewId, approval.getApprovedVersion(),
-                approval.getApprovedFingerprint(), ACTOR_PREFIX + actorUserId);
+                approval.getApprovedFingerprint(), ACTOR_PREFIX + actorUserId, intent);
         return new ReviewReplySubmissionRunResponse(actionRef, ref, approval.getApprovedVersion(),
                 targetHint, asOfDate);
     }
@@ -411,7 +443,24 @@ public class ReviewReplyService {
         if (account.getChannelId() == null || !account.getChannelId().equals(review.getChannelId())) {
             throw unaddressable();
         }
+        requireReplyFlow(review.getChannelId());
         return review;
+    }
+
+    /**
+     * Acceptance Closure §10: a channel with no reply flow at all (Coupang) gets no draft, no approval and
+     * no guided run through these endpoints — the conversation route refuses it too, and this is the
+     * server-side reason a client that skipped the conversation is refused as well. A test seam without a
+     * channel repository cannot name the channel and does not gate (the legacy fixtures are NAVER).
+     */
+    private void requireReplyFlow(UUID channelId) {
+        if (channels == null || channelId == null) {
+            return;
+        }
+        String code = channels.findById(channelId).map(c -> c.getCode()).orElse(null);
+        if (code != null && !ReviewTriageChannelCapability.of(code).replyFlowExists()) {
+            throw ApiException.conflict("이 채널에서는 판매자가 리뷰에 직접 답글을 남길 수 없습니다.");
+        }
     }
 
     private Optional<TriageDisposition> disposition(UUID orgId, UUID reviewId) {

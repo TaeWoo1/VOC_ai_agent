@@ -206,10 +206,17 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     "review-id-ladder-parse.ts": resolve(SRC, "review-id-ladder-parse.ts"),
     "guided-fill-reply-driver.ts": resolve(SRC, "guided-fill-reply-driver.ts"),
     "resident-reply-carrier.ts": resolve(SRC, "resident-reply-carrier.ts"),
+    // Acceptance Closure: the resident run's identity-by-ladder driver and its row-scoped in-page seams.
+    "naver-ladder-reply-driver.ts": resolve(SRC, "naver-ladder-reply-driver.ts"),
+    "reply-row-composer-inpage.ts": resolve(SRC, "reply-row-composer-inpage.ts"),
   };
   // The ONE exception, by name: the guided fill helper may call `.fill(` on the composer the driver tagged —
   // and nothing else (Agentic Operating Workspace v2 §13). Submit/click/keyboard tokens stay forbidden there too.
   const FILL_ONLY = { "reply-composer-fill.ts": resolve(SRC, "reply-composer-fill.ts") };
+  // The SECOND exception, by name (Acceptance Closure §2): the composer-open helper may `.click(` the ONE
+  // non-submit open control the in-page tagger marked inside the verified row — and nothing else. Every
+  // typing/submitting token stays forbidden there; submit wording is excluded before the marker is ever set.
+  const OPEN_ONLY = { "reply-composer-open.ts": resolve(SRC, "reply-composer-open.ts") };
 
   // The map above is hand-maintained, so a NEW module is unguarded until someone remembers to add it — and
   // the most safety-critical module in this milestone was itself missing from it when a reviewer looked.
@@ -221,7 +228,7 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     const onDisk = readdirSync(SRC)
       .filter((f) => f.endsWith(".ts"))
       .sort();
-    const guarded = [...Object.keys(files), ...Object.keys(FILL_ONLY)].sort();
+    const guarded = [...Object.keys(files), ...Object.keys(FILL_ONLY), ...Object.keys(OPEN_ONLY)].sort();
     const unguarded = onDisk.filter((f) => !guarded.includes(f));
     expect(unguarded, `unguarded modules in ${SRC}`).toEqual([]);
   });
@@ -235,6 +242,23 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
       expect(code).toContain("[data-aw-reply-target]");
     });
   }
+
+  for (const [name, path] of Object.entries(OPEN_ONLY)) {
+    const code = codeOnly(path);
+    it.each(NO_SUBMIT_TOKENS.filter((t) => t !== ".click("))(`${name} (open-only) never contains %s`, (token) => {
+      expect(code).not.toContain(token);
+    });
+    it(`${name} clicks only the driver-tagged open-control selector`, () => {
+      expect(code).toContain("[data-aw-reply-open-target]");
+      // Exactly one click site in the whole reply runtime.
+      expect(code.split(".click(").length - 1).toBe(1);
+    });
+  }
+  it("the in-page tagger never marks a submit control as the open control", () => {
+    const code = codeOnly(resolve(SRC, "reply-row-composer-inpage.ts"));
+    for (const w of ["ub4f1", "ub85d", "submit", "post", "send"]) expect(code).toContain(w);
+    expect(code).toContain("__awSubmitWords");
+  });
 
   for (const [name, path] of Object.entries(files)) {
     const code = codeOnly(path);

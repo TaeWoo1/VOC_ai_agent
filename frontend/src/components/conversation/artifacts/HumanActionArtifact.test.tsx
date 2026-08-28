@@ -11,13 +11,44 @@ import type { ActionWindowRunView } from "../../../lib/actionWindow/contract";
 
 const manualSync = vi.fn();
 const startReviewAcquisitionRun = vi.fn();
+const listReviewImportPlans = vi.fn(async (..._a: unknown[]) => [] as unknown[]);
+const selectReviewImportRange = vi.fn(async (..._a: unknown[]) => ({ plan: { id: "plan-1" } }));
+const extendReviewImportPlan = vi.fn(async (..._a: unknown[]) => ({ plan: { id: "plan-1" } }));
+const launchNextReviewImportSegment = vi.fn(async (..._a: unknown[]) => ({ launchRef: "0f1e2d3c4b5a6978", kind: "SEGMENT" }));
+const expireReviewImportLaunch = vi.fn(async (..._a: unknown[]) => ({}));
 vi.mock("../../../lib/apiClient", () => ({
   api: {
     manualSync: (...a: unknown[]) => manualSync(...a),
     startReviewAcquisitionRun: (...a: unknown[]) => startReviewAcquisitionRun(...a),
+    listReviewImportPlans: (...a: unknown[]) => listReviewImportPlans(...a),
+    selectReviewImportRange: (...a: unknown[]) => selectReviewImportRange(...a),
+    extendReviewImportPlan: (...a: unknown[]) => extendReviewImportPlan(...a),
+    launchNextReviewImportSegment: (...a: unknown[]) => launchNextReviewImportSegment(...a),
+    expireReviewImportLaunch: (...a: unknown[]) => expireReviewImportLaunch(...a),
   },
   getToken: () => null,
 }));
+
+/** A fake guided-IMPORT runtime (the trusted `import/naver` carrier): records the one START_RUN, publishes snapshots. */
+function fakeImport() {
+  type Snap = import("../../../lib/actionWindow/import/importRuntime").GuidedImportSnapshot;
+  const listeners = new Set<(s: Snap | null) => void>();
+  let latest: Snap | null = null;
+  const starts: Array<{ launchRef: string; kind: string }> = [];
+  const runtime = {
+    starts,
+    snapshot: () => latest,
+    subscribe(l: (s: Snap | null) => void) { listeners.add(l); return () => listeners.delete(l); },
+    start: vi.fn(async (input: { launchRef: string; kind: "DISCOVERY" | "SEGMENT" }) => { starts.push(input); }),
+    setGuidancePack: vi.fn(),
+    subscribeIntent: () => () => undefined,
+    send: vi.fn(),
+    resync: () => undefined,
+    dispose: vi.fn(),
+    publish(s: Snap) { latest = s; listeners.forEach((l) => l(s)); },
+  };
+  return runtime;
+}
 
 /** A fake acquisition runtime: records the one START_RUN and lets the test publish views. */
 function fakeAcquire() {
@@ -47,13 +78,6 @@ function fakeAcquire() {
   return runtime;
 }
 
-function view(status: ActionWindowRunView["status"], allowed: ActionWindowRunView["allowedCommands"] = []): ActionWindowRunView {
-  return {
-    runId: "run_1", channelCode: "naver", status, revision: 2, runCopyKey: "actionWindow.run.export",
-    currentStep: { stepNumber: 2, totalSteps: 3, stepId: "aw.user_download", copyKey: "actionWindow.step.userDownload", copyParams: {}, mode: "ACTION_WINDOW", status: "WAITING_FOR_HUMAN" },
-    progress: { completedSteps: 1, totalSteps: 3 }, blocker: null, allowedCommands: allowed, updatedAt: "2026-08-28T00:00:00Z",
-  } as unknown as ActionWindowRunView;
-}
 
 function artifact(over: Partial<HumanActionRequiredArtifact>): HumanActionRequiredArtifact {
   return {
@@ -109,15 +133,15 @@ describe("human action artifact — one primary per path", () => {
 });
 
 describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WINDOW · WING_READ_ACTION_WINDOW)", () => {
-  it("NAVER export: the seller's press starts ONE v1-clean START_RUN; controls come from allowedCommands; COMPLETED resumes once", async () => {
-    const runtime = fakeAcquire();
+  it("NAVER export: the seller's press mints a bounded launch and starts ONE run on the trusted import carrier; COMPLETED resumes once", async () => {
+    const runtime = fakeImport();
     const onResume = vi.fn();
     render(
       <MemoryRouter>
         <HumanActionArtifact
           artifact={artifact({ path: "EXPORT_ACTION_WINDOW", channelCode: "NAVER", channelNameKo: "네이버", accountId: "acc-nv", to: "/connect/imports", fallback: { path: "FILE_UPLOAD", to: "/connect/upload", label: "파일로 올리기" } })}
           onResume={onResume}
-          acquireRuntime={runtime}
+          importRuntime={runtime as never}
         />
       </MemoryRouter>,
     );
@@ -128,24 +152,44 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
     expect(runtime.start).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "지금 네이버 리뷰 가져오기" }));
     await waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
-    expect(runtime.starts).toEqual([{ intent: "EXPORT" }]);
+    // Acceptance Closure §4: the run is bound to a launch the backend minted for THIS account — the same
+    // trusted `import/naver` path onboarding uses — never a v1-clean export nobody can attribute.
+    expect(listReviewImportPlans).toHaveBeenCalledWith("acc-nv");
+    expect(selectReviewImportRange).toHaveBeenCalledTimes(1);
+    expect(launchNextReviewImportSegment).toHaveBeenCalledWith("plan-1");
+    expect(runtime.starts).toEqual([{ launchRef: "0f1e2d3c4b5a6978", kind: "SEGMENT" }]);
     expect(startReviewAcquisitionRun).not.toHaveBeenCalled();
+    expect(expireReviewImportLaunch).not.toHaveBeenCalled();
 
-    act(() => runtime.publish(view("WAITING_FOR_HUMAN", ["REQUEST_STEP_RECHECK", "CANCEL_RUN"])));
-    expect(await screen.findByTestId("guided-acquisition-run")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /확인 완료/ })).toBeInTheDocument();
-    // SWITCH_TO_MANUAL was not allowed by the runtime's view ⇒ not rendered.
-    expect(screen.queryByRole("button", { name: /직접 진행/ })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: /확인 완료/ }));
-    expect(runtime.sent).toEqual(["REQUEST_STEP_RECHECK"]);
-    // Nothing completed client-side: still waiting until the runtime says otherwise.
+    act(() => runtime.publish({ runId: "run_1", channelCode: "naver", status: "WAITING_FOR_HUMAN", intent: "INITIAL_REVIEW_IMPORT_SEGMENT", step: { stepNumber: 2, totalSteps: 3, copyKey: "actionWindow.step.userDownload", copyParams: {}, status: "AWAITING_USER" }, blocker: null, allowedCommands: ["REQUEST_STEP_RECHECK", "CANCEL_RUN"], revision: 2 } as never));
+    expect(await screen.findByTestId("guided-import-run")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /다시 확인/ }));
+    expect(runtime.send).toHaveBeenCalledWith("REQUEST_STEP_RECHECK");
     expect(onResume).not.toHaveBeenCalled();
 
-    act(() => runtime.publish(view("COMPLETED")));
+    act(() => runtime.publish({ runId: "run_1", channelCode: "naver", status: "COMPLETED", intent: "INITIAL_REVIEW_IMPORT_SEGMENT", step: null, blocker: null, allowedCommands: [], revision: 3 } as never));
     await waitFor(() => expect(onResume).toHaveBeenCalledTimes(1));
-    act(() => runtime.publish(view("COMPLETED")));
+    act(() => runtime.publish({ runId: "run_1", channelCode: "naver", status: "COMPLETED", intent: "INITIAL_REVIEW_IMPORT_SEGMENT", step: null, blocker: null, allowedCommands: [], revision: 4 } as never));
     expect(onResume).toHaveBeenCalledTimes(1);
-    expect(manualSync).not.toHaveBeenCalled();
+  });
+
+  it("NAVER export: an existing open plan is reused, and a refused start hands the unspent ticket back", async () => {
+    listReviewImportPlans.mockResolvedValueOnce([{ id: "plan-9", status: "ACTIVE" }]);
+    const runtime = fakeImport();
+    runtime.start.mockRejectedValueOnce(new Error("refused"));
+    render(
+      <MemoryRouter>
+        <HumanActionArtifact
+          artifact={artifact({ path: "EXPORT_ACTION_WINDOW", channelCode: "NAVER", channelNameKo: "네이버", accountId: "acc-nv" })}
+          onResume={vi.fn()}
+          importRuntime={runtime as never}
+        />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "지금 네이버 리뷰 가져오기" }));
+    await waitFor(() => expect(expireReviewImportLaunch).toHaveBeenCalledWith("0f1e2d3c4b5a6978"));
+    expect(launchNextReviewImportSegment).toHaveBeenCalledWith("plan-9");
+    expect(await screen.findByRole("status")).toHaveTextContent(/준비하지 못했습니다/);
   });
 
   it("Coupang WING read: connect first, mint the single-use acquisitionRef second, then START_RUN(REVIEW_ACQUISITION)", async () => {

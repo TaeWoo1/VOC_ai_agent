@@ -39,7 +39,7 @@ class AgentOperatorResponseParserTest {
              "clarificationNeeded":false,"clarificationReason":"","rationale":"초안 요청",
              "requestedAction":"PREPARE_INQUIRY_DRAFT",
              "tone":"SOFTER",
-             "filters":{"period":"LAST_WEEK","rating":"LOW","channel":"CAFE24","scope":"WORKING_SET","topic":"SHIPPING"},
+             "filters":{"period":"LAST_WEEK","rating":"LOW","channel":"CAFE24","scope":"WORKING_SET","topic":"SHIPPING","reviewIntent":"ROWS"},
              "target":{"selector":"NTH","index":2}}
             """;
 
@@ -61,6 +61,9 @@ class AgentOperatorResponseParserTest {
         assertThat(plan.filters().channel()).isEqualTo("CAFE24");
         assertThat(plan.filters().scope()).isEqualTo("WORKING_SET");
         assertThat(plan.filters().topic()).isEqualTo("SHIPPING");
+        assertThat(plan.filters().reviewIntent()).isEqualTo("ROWS");
+        assertThat(AgentPlanPrompt.REVIEW_INTENTS).containsExactly("ROWS", "ISSUES");
+        assertThat(AgentPlanPrompt.system()).contains("filters.reviewIntent");
         assertThat(plan.target().selector()).isEqualTo("NTH");
         assertThat(plan.target().index()).isEqualTo(2);
         // And the v2 part is untouched by the additions.

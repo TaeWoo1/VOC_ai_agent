@@ -97,8 +97,8 @@ import { AW_CARRIER_REPLY } from "../../../contracts/action-window/aw-carrier-ki
 import { ReplySubmissionEndpoint } from "../bridge/reply-submission-endpoint";
 import { ResidentReplyCarrier } from "../action-window/reply-submission/resident-reply-carrier";
 import { GuidedFillReplyDriver } from "../action-window/reply-submission/guided-fill-reply-driver";
-import { NaverReplySubmitProbeDriver } from "../action-window/reply-submission/naver-reply-driver";
-import type { ReplyPageLike } from "../action-window/reply-submission/naver-reply-driver";
+import { NaverLadderReplyDriver } from "../action-window/reply-submission/naver-ladder-reply-driver";
+import type { LadderReplyPage } from "../action-window/reply-submission/naver-ladder-reply-driver";
 import type { ComposerFillPageLike } from "../action-window/reply-submission/reply-composer-fill";
 import { fetchReplySubmissionTarget } from "../action-window/reply-submission/reply-submission-target-client";
 import type { ReplySubmissionTarget } from "../action-window/reply-submission/reply-submission-target-client";
@@ -1317,7 +1317,7 @@ export interface NaverReplyLiveCarrier {
   channelCode: string;
   resolveTarget: (submissionRef: string) => Promise<ReplySubmissionTarget | null>;
   createDriver: (target: ReplySubmissionTarget) => GuidedFillReplyDriver;
-  observe: (target: ReplySubmissionTarget, state: ReplyExecutionObservation) => Promise<boolean>;
+  observe: (target: ReplySubmissionTarget, state: ReplyExecutionObservation, submissionRef: string) => Promise<boolean>;
   closeSurface: () => Promise<void>;
   isSurfaceOpen: () => boolean;
 }
@@ -1371,19 +1371,23 @@ export function buildNaverReplyLiveConfig(): NaverReplyLiveCarrier {
           const page = (context.pages()[0] ?? (await context.newPage())) as Page;
           log("aw_naver_reply_landing", {});
           await page.goto(NAVER_REVIEW_MANAGEMENT_LANDING_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
-          const inner = new NaverReplySubmitProbeDriver(page as unknown as ReplyPageLike, {
-            hint: target.hint, asOfDate: target.asOfDate, locateMode: "match",
+          // Identity by the review-id ladder (Acceptance Closure §3): the backend's channel-review-id fingerprint
+          // must be found on exactly one row, and the composer is looked for inside that row's scope only. The
+          // driver also answers `reviewIdVerdict`, so a hint-only match never fills.
+          const inner = new NaverLadderReplyDriver(page as unknown as LadderReplyPage, {
+            hint: target.hint, asOfDate: target.asOfDate,
+            reviewIdFingerprint: target.channelReviewIdFingerprint, draftBody: target.draftBody,
           });
           return { inner, page: page as unknown as ComposerFillPageLike };
         },
       });
       return driver;
     },
-    observe: async (target, state) => {
+    observe: async (target, state, submissionRef) => {
       const t = await session();
       if (t === null || origin === null) return false;
       return reportReplyExecutionObservation(origin, t, {
-        accountId: target.accountId, actionRef: target.actionRef, submissionRef: "", commandId: randomBytes(8).toString("hex"), state,
+        accountId: target.accountId, actionRef: target.actionRef, submissionRef, commandId: randomBytes(8).toString("hex"), state,
       });
     },
     closeSurface: async () => {

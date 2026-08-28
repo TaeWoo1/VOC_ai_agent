@@ -12,12 +12,14 @@ describe("palette shortcuts — exact sentences only, everything else is the Age
     expect(matchCommandIntent("미답변 문의 보여줘")).toBe("UNANSWERED_INQUIRIES");
     expect(matchCommandIntent("미답변 문의 보여줘요")).toBe("UNANSWERED_INQUIRIES");
     expect(matchCommandIntent("  미답변   문의   보여줘?  ")).toBe("UNANSWERED_INQUIRIES");
-    expect(matchCommandIntent("리뷰 문제 보여주세요")).toBe("REVIEW_ISSUES");
     expect(matchCommandIntent("오늘 할 일 알려줘.")).toBe("TODAY");
   });
 
   it("a different sentence about the same noun is NOT a shortcut — the planner interprets it", () => {
     expect(matchCommandIntent("오늘 새로 달린 리뷰 보여줘")).toBeNull();
+    // Acceptance Closure §9: a review sentence is never a shortcut — rows or repeated problems is the planner's call.
+    expect(matchCommandIntent("리뷰 문제 보여줘")).toBeNull();
+    expect(matchCommandIntent("오늘 새 리뷰 보여줘")).toBeNull();
     expect(matchCommandIntent("문의 목록")).toBeNull();
     expect(matchCommandIntent("3호 몰딩 문의가 몇 건이야")).toBeNull();
     expect(matchCommandIntent("이번 달 매출이 왜 줄었어")).toBeNull();

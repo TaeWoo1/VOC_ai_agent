@@ -4,6 +4,8 @@ import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
 import com.sellerops.common.DataOrigin;
+import com.sellerops.identity.ExecutableIdentity;
+import com.sellerops.identity.ExecutableIdentityResolver;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.InquiryRepository;
@@ -55,6 +57,8 @@ public class InquiryPublishService {
     private final InquiryReplyCapabilityRegistry capabilities;
     private final ChannelRepository channels;
     private final InquiryAnswerMemoryHook answerMemory;
+    /** The server-side identity backstop: provenance, not the label the caller saw. */
+    private final ExecutableIdentityResolver identity;
 
     @org.springframework.beans.factory.annotation.Autowired
     public InquiryPublishService(InquiryWorkItemRepository workItems, InquiryReplyDraftRepository drafts,
@@ -63,7 +67,8 @@ public class InquiryPublishService {
                                  InquiryWorkItemAuditRepository audits, InquiryPublishBindingWriter binding,
                                  ChannelReplyAdapterRegistry adapters, InquiryTargetStateReader targetState,
                                  InquiryReplyCapabilityRegistry capabilities, ChannelRepository channels,
-                                 InquiryAnswerMemoryHook answerMemory) {
+                                 InquiryAnswerMemoryHook answerMemory, ExecutableIdentityResolver identity) {
+        this.identity = identity;
         this.workItems = workItems;
         this.drafts = drafts;
         this.inquiries = inquiries;
@@ -88,9 +93,10 @@ public class InquiryPublishService {
                                  InquiryExecutionRepository executions, InquiryVerificationRepository verifications,
                                  InquiryWorkItemAuditRepository audits, InquiryPublishBindingWriter binding,
                                  ChannelReplyAdapterRegistry adapters, InquiryTargetStateReader targetState,
-                                 InquiryReplyCapabilityRegistry capabilities, ChannelRepository channels) {
+                                 InquiryReplyCapabilityRegistry capabilities, ChannelRepository channels,
+                                 ExecutableIdentityResolver identity) {
         this(workItems, drafts, inquiries, approvals, executions, verifications, audits, binding,
-                adapters, targetState, capabilities, channels, null);
+                adapters, targetState, capabilities, channels, null, identity);
     }
 
     /** Confirm the exact draft version, bind immutably, create the intent, and (if a channel adapter exists) dispatch. */
@@ -429,6 +435,12 @@ public class InquiryPublishService {
         // that created it and this is the last gate before an irreversible write.
         if (inquiry.getDataOrigin() != DataOrigin.REAL) {
             return PreSendCheck.refuse(PreSendCheck.SYNTHETIC_TARGET);
+        }
+        // Executable identity, resolved from provenance on the server — never from the label the
+        // runtime or the screen carried. A channel-shaped external id on a file-imported row, or an
+        // id somebody typed, resolves to NONE here whatever the caller believed.
+        if (identity.forInquiry(inquiry) != ExecutableIdentity.MARKETPLACE) {
+            return PreSendCheck.refuse(PreSendCheck.NOT_MARKETPLACE_OBJECT);
         }
         // Capability, per exact source subtype. The two NAVER resources have different identifier
         // spaces and different endpoints, so "NAVER can be answered" is not a sentence this product

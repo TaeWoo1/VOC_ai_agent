@@ -117,7 +117,8 @@ class ReviewReplyServiceTest {
                         new ReviewReplyApprovalWriter(approvalRepo, approvalAudits, txManager)),
                 new ReviewReplyOutcomeService(submissionRefRepo, outcomeRepo,
                         new ReviewReplyOutcomeWriter(outcomeRepo, txManager)),
-                new RuleBasedReviewReplyProvider(), FIXED_CLOCK);
+                new RuleBasedReviewReplyProvider(), FIXED_CLOCK,
+                com.sellerops.identity.ExecutableIdentityResolver.unresolved(), channels);
         triageService = new ReviewTriageService(triages, triageAudits, reviews, sellerAccounts,
                 new ReviewTriageWriter(triages, triageAudits, txManager));
         naverChannel = seedChannel("NAVER", "네이버 스마트스토어");
@@ -139,6 +140,26 @@ class ReviewReplyServiceTest {
         reviews.deleteAll();
         sellerAccounts.deleteAll();
         channels.deleteAll();
+    }
+
+    @Test
+    void aChannelWithNoReplyFlowGetsNoDraftAndNoApproval() {
+        // Acceptance Closure §10: Coupang reviews cannot be answered by a seller anywhere, so the legacy
+        // endpoints refuse them as the conversation route does — a draft for a place that does not exist
+        // is not a draft.
+        UUID coupangChannel = seedChannel("COUPANG", "쿠팡");
+        UUID coupangAccount = seedAccount(org, coupangChannel);
+        Review coupangReview = seedReview(org, coupangChannel, 1);
+        String coupangRef = VocItemRef.forReview(coupangReview.getId());
+        triageService.decide(org, coupangAccount, coupangRef, TriageDisposition.RESPONSE_NEEDED.name(),
+                UUID.randomUUID().toString(), user);
+        assertThatThrownBy(() -> service.saveDraft(org, coupangAccount, coupangRef, "합성-쿠팡 답글", 0, user))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("직접 답글을 남길 수 없습니다");
+        assertThatThrownBy(() -> service.decideApproval(org, coupangAccount, coupangRef, "APPROVED", 1,
+                UUID.randomUUID().toString(), user))
+                .isInstanceOf(ApiException.class);
+        assertThat(draftRepo.findAll()).isEmpty();
     }
 
     // --- fixtures -------------------------------------------------------------------

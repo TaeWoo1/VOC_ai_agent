@@ -21,7 +21,7 @@ import type { PlanFilters, PlanTarget, RequestedAction, ToneHint } from "../../c
 export type { PlanFilters, PlanTarget, RequestedAction, ToneHint };
 
 /** The v3 defaults — what a plan carries when the planner said nothing about the conversation axis. */
-export const NO_FILTERS: PlanFilters = { period: null, rating: null, channel: null, scope: null, topic: null };
+export const NO_FILTERS: PlanFilters = { period: null, rating: null, channel: null, scope: null, topic: null, reviewIntent: null };
 export const NO_TARGET: PlanTarget = { selector: "NONE", index: null };
 
 /** What kind of thing a mention refers to. Closed — an unknown kind is dropped by the validator. */

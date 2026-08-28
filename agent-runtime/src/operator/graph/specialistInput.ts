@@ -94,7 +94,7 @@ export interface SpecialistInput {
   /** Human collections this conversation saw finish — see `ConversationRunContext.collected`. */
   /** See `ConversationRunContext.pendingHumanWindow`. */
   readonly pendingHumanWindow?: string | null;
-  readonly collected?: ReadonlyArray<{ readonly channelCode: string; readonly dataType: string; readonly finishedAt: string; readonly successRows?: number | null }>;
+  readonly collected?: ReadonlyArray<{ readonly channelCode: string; readonly dataType: string; readonly finishedAt: string; readonly successRows?: number | null; readonly partial?: boolean }>;
   /** Whether the seller's local agent is paired (frontend hint). Absent ⇒ UNKNOWN. */
   readonly localAgent?: LocalAgentHint;
   /**

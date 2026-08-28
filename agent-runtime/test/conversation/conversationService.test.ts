@@ -244,7 +244,8 @@ describe("E/F/G — the inquiry loop: list → topic → draft → tone → appr
     });
     expect(turn.message).toContain("다음 초안을 전송하려면 승인이 필요합니다. 전송은 승인 뒤 기존 실행 경로로만 진행됩니다.");
     const methods = new Set(h.inquiry.methodCalls.map((c) => c.method));
-    expect([...methods].sort()).toEqual(["generateDraftFor", "getInquiryDetail", "listInquiries"]);
+    // `proposeInquiry` is the product's own OPEN → PROPOSED step, a local row; still no send, no approval.
+    expect([...methods].sort()).toEqual(["generateDraftFor", "getInquiryDetail", "listInquiries", "proposeInquiry"]);
     expect(h.inquiry.externalSendAttempts).toBe(0);
     expect(h.inquiry.phaseOf(W_SHIP)).toBe("PROPOSED");
   });

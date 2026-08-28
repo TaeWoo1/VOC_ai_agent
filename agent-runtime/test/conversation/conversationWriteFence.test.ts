@@ -36,7 +36,7 @@ describe("conversation write fence", () => {
   // Two named exceptions, each a PREPARE/REFRESH step the plan authorises and nothing else may reach:
   // the review draft seam from the draft preparer, and the product's own one-press collection from the refresher.
   const ALLOWED: Record<string, RegExp[]> = {
-    "DraftPreparer.ts": [/\bsaveReviewDraft\b/, /\brecordReviewTriage\b/],
+    "DraftPreparer.ts": [/\bsaveReviewDraft\b/, /\brecordReviewTriage\b/, /\bproposeInquiry\b/],
     "Refresher.ts": [/\bmanualSync\b/],
   };
 
@@ -52,6 +52,7 @@ describe("conversation write fence", () => {
   it("the two exceptions stay in their one file each", () => {
     expect(FILES.filter((f) => /\bsaveReviewDraft\b/.test(f.text)).map((f) => f.name)).toEqual(["DraftPreparer.ts"]);
     expect(FILES.filter((f) => /\bmanualSync\b/.test(f.text)).map((f) => f.name)).toEqual(["Refresher.ts"]);
+    expect(FILES.filter((f) => /\bproposeInquiry\b/.test(f.text)).map((f) => f.name)).toEqual(["DraftPreparer.ts"]);
   });
 
   it("generateDraftFor is reached from DraftPreparer.ts and nowhere else in the lane", () => {

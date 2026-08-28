@@ -89,7 +89,9 @@ export const NOT_EXECUTABLE_SENTENCE: Record<"INQUIRY" | "REVIEW", string> = {
 export const COPY_ONLY_SENTENCE = "초안을 복사해 직접 등록해 주세요.";
 export const COUPANG_REVIEW_UNSUPPORTED_SENTENCE = "쿠팡에서는 판매자가 리뷰에 직접 답글을 남기는 기능을 지원하지 않습니다.";
 /** What a seller can still do about a review nobody can reply to — prompts, never a CTA. */
-const REVIEW_UNSUPPORTED_CHIPS = ["비슷한 리뷰 더 찾기", "관련 문의 확인", "상품 문제 조사", "상세페이지 개선 검토"];
+// Each chip is a sentence the planner already serves (review rows · inquiry workload · product signals);
+// 「상세페이지 개선 검토」 was removed — no tool answers it, and a dead action is worse than none.
+const REVIEW_UNSUPPORTED_CHIPS = ["이 상품 리뷰 더 보여줘", "이 상품 관련 문의 확인해줘", "이 상품에 반복되는 문제 있어?"];
 const SEE_SO_FAR_PROMPT = "지금까지 확인된 리뷰 보여줘";
 
 type ResolvedTarget =
@@ -192,12 +194,15 @@ export class ConversationService {
           .filter((c) => c.pending.channelCode && c.pending.dataType && c.check.finishedAt)
           .map((c) => ({
             channelCode: c.pending.channelCode!, dataType: c.pending.dataType!, finishedAt: c.check.finishedAt!,
-            successRows: c.check.successRows,
+            successRows: c.check.successRows, partial: c.check.partial,
           }));
         const names = await channelNamesOf(bundle, target);
         const nameOf = (p: PendingHumanAction) => (p.channelCode ? names.get(p.channelCode.toUpperCase()) ?? p.channelCode : "채널");
+        const anyPartial = done.some((c) => c.check.partial);
         if (remaining.length === 0) {
-          prefix = "새 리뷰 가져오기가 끝났습니다. 계속 확인하겠습니다. ";
+          prefix = anyPartial
+            ? "새 리뷰 가져오기가 일부만 끝났습니다. 가져온 만큼 계속 확인하겠습니다. "
+            : "새 리뷰 가져오기가 끝났습니다. 계속 확인하겠습니다. ";
         } else {
           // Partial: one channel's step is done, others are still waiting. Say so, show what is
           // known now, and offer the next step and the rows so far as the two obvious next moves.
@@ -417,8 +422,16 @@ export class ConversationService {
               extraChips.push(...REVIEW_UNSUPPORTED_CHIPS.map(promptChip));
               continue;
             }
+            if (verdict.execution === "NOT_SUPPORTED" && verdict.reason === EXECUTION_REASON.CAPABILITY_UNKNOWN) {
+              // Acceptance Closure §10: a channel whose reply semantics could not be read gets no draft — a
+              // draft for a place that may not exist is the Coupang loophole by another door.
+              const line = `${resolved.target.channelNameKo ?? resolved.target.channelCode ?? "이 채널"}에서 리뷰 답글을 어떻게 처리할 수 있는지 확인하지 못해 초안을 준비하지 않았습니다.`;
+              artifacts.push(reasonSummary(`a-cap-${resolved.target.reviewId}`, "리뷰 답글 초안을 준비하지 않았습니다", [line]));
+              headline = headline ?? line;
+              continue;
+            }
             stage("PREPARING_DRAFT", STAGE_LABEL.PREPARING_DRAFT);
-            const draft = await preparer.prepareReview(resolved.target, axis.tone, `a-draft-${resolved.target.reviewId}`);
+            const draft = await preparer.prepareReview(resolved.target, axis.tone, `a-draft-${resolved.target.reviewId}`, verdict);
             artifacts.push(draft);
             if (draft.unavailableMessage) {
               headline = headline ?? draft.unavailableMessage;
@@ -834,23 +847,36 @@ async function channelNamesOf(bundle: SpringClientBundle, target: TurnView): Pro
 }
 
 /** Has the pending human step's own record finished since it was requested? One READ, nothing else. */
-async function syncCompleted(bundle: SpringClientBundle, pending: PendingHumanAction): Promise<{ completed: boolean; failed: boolean; finishedAt: string | null; successRows: number | null }> {
-  if (!pending.accountId || !pending.dataType) return { completed: false, failed: false, finishedAt: null, successRows: null };
-  // Two shapes of the same fact: a connector run is stamped with the account and `dataType`; a file
-  // upload (the seller's manual path) carries only the channel and `uploadType`. Both are the step the
-  // seller was asked for, so both count — matched by the account, or by the account's channel.
+async function syncCompleted(bundle: SpringClientBundle, pending: PendingHumanAction): Promise<{ completed: boolean; failed: boolean; partial: boolean; finishedAt: string | null; successRows: number | null }> {
+  const none = { completed: false, failed: false, partial: false, finishedAt: null, successRows: null };
+  if (!pending.accountId || !pending.dataType) return none;
+  // Two shapes of the same fact, matched as tightly as each shape allows (Acceptance Closure §8-B):
+  //  - a connector/guided run is stamped with the ACCOUNT and `dataType` — it must be this account's;
+  //  - a file upload carries no account, only the channel and `uploadType` — it must be this account's
+  //    channel, upload-shaped (no account on the row), and of the requested type.
+  // Either way it must have FINISHED after the step was requested, and be the kind of step that was
+  // asked for. A run some other tab started on another account never satisfies this one.
   const accounts = await bundle.inquiry.listSellerAccounts();
   const channelId = accounts.find((a) => a.id === pending.accountId)?.channelId ?? null;
   const runs = await bundle.inquiry.listSyncRuns({});
-  const mine = runs.filter((r) =>
-    (r.sellerAccountId === pending.accountId || (channelId != null && r.channelId === channelId))
-    && ((r.dataType ?? r.uploadType ?? null) === pending.dataType));
+  const guidedOrManual = new Set(["MANUAL", "UPLOAD", "ACTION_WINDOW", "AGENT", "GUIDED"]);
+  const mine = runs.filter((r) => {
+    const type = r.dataType ?? r.uploadType ?? null;
+    if (type !== pending.dataType) return false;
+    if (r.sellerAccountId != null) return r.sellerAccountId === pending.accountId;
+    // Upload-shaped: no account on the row. Only the requested channel, and only a seller-driven trigger.
+    return channelId != null && r.channelId === channelId && r.uploadType != null
+      && (r.trigger == null || guidedOrManual.has(r.trigger.toUpperCase()));
+  });
   const after = mine.filter((r) => r.finishedAt != null && r.finishedAt > pending.requestedAt);
   const done = after.filter((r) => r.status === "SUCCESS" || r.status === "PARTIAL");
   const completed = done.length > 0;
   const failed = !completed && after.some((r) => r.status === "FAILED");
   const latest = [...done].sort((a, b) => a.finishedAt!.localeCompare(b.finishedAt!)).at(-1) ?? null;
-  return { completed, failed, finishedAt: latest?.finishedAt ?? null, successRows: latest?.successRows ?? null };
+  return {
+    completed, failed, partial: latest?.status === "PARTIAL",
+    finishedAt: latest?.finishedAt ?? null, successRows: latest?.successRows ?? null,
+  };
 }
 
 /** The last REVIEW_LIST row of a channel the thread has shown — the object an explanation is about. */

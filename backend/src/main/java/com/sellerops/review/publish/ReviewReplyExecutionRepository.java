@@ -13,6 +13,13 @@ public interface ReviewReplyExecutionRepository extends JpaRepository<ReviewRepl
     Optional<ReviewReplyExecution> findTopByOrgIdAndReviewIdAndApprovedVersionOrderByCreatedAtDesc(
             UUID orgId, UUID reviewId, Integer approvedVersion);
 
+    /**
+     * Whether the API lane already sent (or may have sent) a reply for this review — the
+     * per-review double-post guard, backed by {@code uq_review_reply_execution_api_sent}.
+     */
+    boolean existsByOrgIdAndReviewIdAndLaneAndStatusIn(UUID orgId, UUID reviewId, ReviewExecutionLane lane,
+                                                        java.util.Collection<ReviewExecutionStatus> statuses);
+
     /** The most recent guided observation for one binding. */
     Optional<ReviewReplyExecution> findTopByOrgIdAndSubmissionRefOrderByCreatedAtDesc(UUID orgId,
                                                                                        String submissionRef);

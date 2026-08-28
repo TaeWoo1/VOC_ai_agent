@@ -153,7 +153,8 @@ public final class AgentOperatorResponseParser {
                 closedOr(node, "rating", AgentPlanPrompt.RATINGS, null),
                 closedOr(node, "channel", AgentPlanPrompt.CHANNELS, null),
                 closedOr(node, "scope", AgentPlanPrompt.SCOPES, null),
-                closedOr(node, "topic", AgentPlanPrompt.TOPICS, null));
+                closedOr(node, "topic", AgentPlanPrompt.TOPICS, null),
+                closedOr(node, "reviewIntent", AgentPlanPrompt.REVIEW_INTENTS, null));
     }
 
     private static PlanTarget target(JsonNode node) {
@@ -354,9 +355,10 @@ public final class AgentOperatorResponseParser {
      * How the sentence narrows what is read — closed tokens only. {@code scope=WORKING_SET} means
      * "over what the previous turn produced"; the runtime, not this parser, knows what that was.
      */
-    public record PlanFilters(String period, String rating, String channel, String scope, String topic) {
+    public record PlanFilters(String period, String rating, String channel, String scope, String topic,
+                              String reviewIntent) {
         public static PlanFilters none() {
-            return new PlanFilters(null, null, null, null, null);
+            return new PlanFilters(null, null, null, null, null, null);
         }
     }
 

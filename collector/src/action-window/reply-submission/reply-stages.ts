@@ -26,6 +26,13 @@ export type ReplyStage =
   | "LOCATE_ROW"
   | "HIGHLIGHT_ROW"
   | "WAIT_FOR_ROW_OPEN"
+  /**
+   * Acceptance Closure §2 (product-owner correction, 2026-08-28): the runtime presses the matched row's
+   * NON-SUBMIT open control itself, so the seller does not normally open the composer. Automatic and
+   * momentary; an ambiguous or missing control falls back to `WAIT_FOR_ROW_OPEN` — the seller is asked for
+   * exactly that one step. Submit is still the seller's click at `WAIT_FOR_SUBMIT`.
+   */
+  | "OPEN_COMPOSER"
   | "LOCATE_COMPOSER"
   | "HIGHLIGHT_COMPOSER"
   /**
@@ -107,7 +114,8 @@ export function replyStageStepIndex(stage: ReplyStage, guided = false): number {
     case "HIGHLIGHT_ROW":
       return 1;
     case "WAIT_FOR_ROW_OPEN":
-      return 2; // guided-only: the review-row open barrier
+    case "OPEN_COMPOSER":
+      return 2; // guided-only: the review-row open step (runtime press, or the operator's own)
     case "LOCATE_COMPOSER":
     case "HIGHLIGHT_COMPOSER":
     case "FILL_COMPOSER":
@@ -126,6 +134,7 @@ export function replyStageToRunStatus(stage: ReplyStage): RunStatus {
       return "PREPARING";
     case "LOCATE_ROW":
     case "HIGHLIGHT_ROW":
+    case "OPEN_COMPOSER":
     case "LOCATE_COMPOSER":
     case "HIGHLIGHT_COMPOSER":
     case "FILL_COMPOSER":
@@ -155,6 +164,8 @@ export function replyStageToStepStatus(stage: ReplyStage): StepStatus {
       return "READY";
     case "WAIT_FOR_ROW_OPEN":
       return "AWAITING_USER";
+    case "OPEN_COMPOSER":
+      return "PROCESSING";
     case "LOCATE_COMPOSER":
       return "PREPARING";
     case "HIGHLIGHT_COMPOSER":
@@ -197,6 +208,7 @@ export function replyAllowedCommands(stage: ReplyStage, mode: ReplyRunMode = "FU
     case "PREPARE_SESSION":
     case "LOCATE_ROW":
     case "HIGHLIGHT_ROW":
+    case "OPEN_COMPOSER":
     case "LOCATE_COMPOSER":
     case "HIGHLIGHT_COMPOSER":
     case "FILL_COMPOSER":

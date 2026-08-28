@@ -57,6 +57,8 @@ export interface ReplyDispatchConfig {
   persistDir?: string;
   /** Guided composer fill (v2 §13): only honoured on a GUIDED plan, gated per fill by the driver. */
   composerFill?: boolean;
+  /** Acceptance Closure §2: the runtime presses the verified row's non-submit open control itself. */
+  agentOpensComposer?: boolean;
   /** Fired once per guided-fill observation (`COMPOSER_FILLED`, `SELLER_SUBMISSION_OBSERVED`). */
   onExecutionObserved?: (state: import("./reply-execution-observer-client").ReplyExecutionObservation) => void;
   /** Synthetic monotonic marker source for the persisted `updatedAt` (never wall-clock). */
@@ -96,6 +98,7 @@ export function assembleReplyRun(transport: AwServerTransport, cfg: ReplyDispatc
     ...(cfg.targetHint ? { targetHint: cfg.targetHint } : {}),
     ...(cfg.mode ? { mode: cfg.mode } : {}),
     ...(cfg.composerFill ? { composerFill: true } : {}),
+    ...(cfg.agentOpensComposer ? { agentOpensComposer: true } : {}),
   });
   const now = cfg.now ?? makeReplyRunMarker();
   const persistDir = cfg.persistDir;

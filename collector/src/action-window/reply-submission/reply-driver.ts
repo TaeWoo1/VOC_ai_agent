@@ -14,6 +14,7 @@
  */
 import type { LocateComposerResult, LocateRowResult, SurfaceProbeResult } from "./reply-engine";
 import type { ComposerFillResult } from "./reply-composer-fill";
+import type { ComposerOpenResult } from "./reply-composer-open";
 
 export interface ReplySubmitProbeDriver {
   /** Open/verify the reply surface precondition. */
@@ -32,6 +33,12 @@ export interface ReplySubmitProbeDriver {
   armRowObserve(): Promise<void>;
   /** GUIDED only: resolve true once the OPERATOR opened the reply control; false on timeout. Observation only. */
   waitForRowOpen(): Promise<boolean>;
+  /**
+   * OPTIONAL (Acceptance Closure §2): press the verified row's NON-SUBMIT open control so the composer opens.
+   * The only click the reply runtime makes, confined to `reply-composer-open.ts`. `AMBIGUOUS`/`NOT_FOUND` ⇒ the
+   * engine falls back to the row-open barrier (the seller opens it). Never submits. Absent ⇒ the barrier.
+   */
+  openComposer?(): Promise<ComposerOpenResult>;
   /** Find the single reply composer, READ-ONLY. `count`/`sig` feed the engine's fail-closed logic. */
   locateComposer(): Promise<LocateComposerResult>;
   /** Spotlight the composer (never intercepts input). */
@@ -60,6 +67,8 @@ export interface SyntheticReplyOptions {
   revalidateRow?: LocateRowResult;
   /** What `fillComposer` answers. Absent ⇒ the method is not offered (a driver that cannot fill). */
   fill?: ComposerFillResult;
+  /** What `openComposer` answers. Absent ⇒ the method is not offered (a driver that cannot open). */
+  open?: ComposerOpenResult;
 }
 
 /**
@@ -74,6 +83,9 @@ export class SyntheticReplySubmitDriver implements ReplySubmitProbeDriver {
   private readonly fillResult: ComposerFillResult | null;
   /** TEST-facing: how many times a fill was attempted. */
   fills = 0;
+  /** TEST-facing: how many times the runtime pressed the open control. */
+  opens = 0;
+  private readonly openResult: ComposerOpenResult | null;
   private submitResolve: ((observed: boolean) => void) | null = null;
   private pendingSubmit: boolean | null = null;
   private rowOpenResolve: ((observed: boolean) => void) | null = null;
@@ -85,6 +97,13 @@ export class SyntheticReplySubmitDriver implements ReplySubmitProbeDriver {
     this.locateRowResult = opts.locateRow ?? { count: 1, sig: "b2c3d4e5f6071829" };
     this.revalidateRowResult = opts.revalidateRow ?? this.locateRowResult;
     this.fillResult = opts.fill ?? null;
+    this.openResult = opts.open ?? null;
+    if (this.openResult) {
+      this.openComposer = async () => {
+        this.opens += 1;
+        return this.openResult!;
+      };
+    }
     if (this.fillResult) {
       // Offered only when configured, so a driver "that cannot fill" really has no such method.
       this.fillComposer = async () => {
@@ -95,6 +114,7 @@ export class SyntheticReplySubmitDriver implements ReplySubmitProbeDriver {
   }
 
   fillComposer?: () => Promise<ComposerFillResult>;
+  openComposer?: () => Promise<ComposerOpenResult>;
 
   prepareSurface(): Promise<SurfaceProbeResult> {
     return Promise.resolve(this.surface);

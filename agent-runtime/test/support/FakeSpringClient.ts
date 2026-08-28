@@ -401,9 +401,11 @@ export class FakeSpringClient implements SpringClient {
     const unavailable = seeded.unavailableMessage ?? null;
     let draft: ReplyDraftView | null = null;
     if (!unavailable && basis !== "NO_ANSWER_BASIS") {
+      // Mirrors `InquiryReplyDraftService.persist`: a draft is saved only on a PROPOSED item. The backend
+      // does NOT propose on the seller's behalf here — the conversation lane must do that through the
+      // product's own propose seam first (Acceptance Closure: found live on the QA org).
       if (it.phase === "OPEN") {
-        it.phase = "PROPOSED";
-        it.proposalCategory = it.proposalCategory ?? "general_reply";
+        throw new SpringApiError(409, "CONFLICT", "PROPOSED 상태의 문의만 답변 초안을 저장할 수 있습니다.");
       }
       const head = it.drafts.length ? it.drafts[it.drafts.length - 1]! : null;
       const comments = seeded.comments ?? "안녕하세요. 문의 주신 내용 확인했습니다.";
