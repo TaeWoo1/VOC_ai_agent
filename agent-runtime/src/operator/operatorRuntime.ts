@@ -99,7 +99,7 @@ export class OperatorAgentRuntime {
    * and sharing either across runs would let one seller's run spend another's budget or reuse its ids.
    * Building is cheap — a StateGraph over four nodes.
    */
-  async run(threadId: string, request: GoalRequest): Promise<OperatorRunResult> {
+  async run(threadId: string, request: GoalRequest, options: { signal?: AbortSignal } = {}): Promise<OperatorRunResult> {
     const tools = buildOperatorTools({
       operator: this.deps.operator,
       inquiry: this.deps.inquiry,
@@ -109,6 +109,9 @@ export class OperatorAgentRuntime {
     // mid-run surprise.
     const registry = new OperatorToolRegistry(tools);
     const budget = new OperatorBudget(this.deps.limits ?? OPERATOR_BUDGET_V1, this.deps.now);
+    // Stop = the budget is cancelled: the step in flight finishes, no next step is charged.
+    if (options.signal?.aborted) budget.cancel();
+    options.signal?.addEventListener("abort", () => budget.cancel(), { once: true });
     const evidence = new EvidenceBuilder(request.referenceDate);
 
     const graph = buildOperatorGraph({

@@ -67,6 +67,14 @@ export interface ConversationState {
   readonly plannerOff: boolean;
   send(text: string, hints?: TurnHints, surface?: ConversationSurface): Promise<void>;
   resume(turnId: string): Promise<void>;
+  /**
+   * Stop the turn in flight. Bounded and honest: the stream is closed, the runtime cancels the run's
+   * budget (the step already running finishes on its own; nothing new starts), and the thread shows
+   * 「요청을 중지했습니다」 — never a half-answer, never a claim that what already ran was undone.
+   */
+  stop(): void;
+  /** Bumps when the thread list may have changed (a turn landed, a conversation was opened or started). */
+  readonly historyVersion: number;
   newConversation(): void;
   loadHistory(limit?: number): Promise<ConversationSummary[]>;
   openConversation(id: string): Promise<void>;
@@ -96,6 +104,9 @@ function writeCurrent(id: string | null): void {
 }
 
 let localSeq = 0;
+
+/** Mirrors the runtime's `CANCELLED_MESSAGE` — the same sentence whether the stop is read live or after a reload. */
+export const STOPPED_MESSAGE = "요청을 중지했습니다. 이미 시작된 확인은 되돌리지 않습니다.";
 
 function agentStatus(turn: TurnView): "done" | "failed" | "waiting_human" {
   if (turn.status === "FAILED") return "failed";
@@ -158,8 +169,10 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   const [pendingHumanAction, setPending] = useState<PendingHumanAction | null>(null);
   const [workingSet, setWorkingSet] = useState<WorkingSetView | null>(null);
   const [plannerOff, setPlannerOff] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
   const idRef = useRef<string | null>(conversationId);
   idRef.current = conversationId;
+  const abortRef = useRef<AbortController | null>(null);
 
   const adopt = useCallback((view: { conversationId: string; turns: TurnView[]; pendingHumanAction: PendingHumanAction | null; workingSet: WorkingSetView | null }) => {
     setConversationId(view.conversationId);
@@ -232,6 +245,8 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       setBusy(true);
       setError(null);
       setStages([]);
+      const controller = new AbortController();
+      abortRef.current = controller;
       try {
         const id = await ensureId();
         if (userText !== null) {
@@ -254,13 +269,26 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         }
         const turn = await conversationClient.sendTurn(id, request, (event) => {
           if (event.type === "stage") setStages((prev) => [...prev, event]);
-        });
+        }, controller.signal);
         appendAgent(turn);
       } catch (err) {
-        setError(explainAgentError(err));
+        if (controller.signal.aborted) {
+          // The seller's own Stop — a recorded fact in the thread, not an error to read.
+          setTurns((prev) => [...prev, {
+            turnId: `local-stop-${++localSeq}`, conversationId: idRef.current ?? "local", role: "AGENT",
+            message: STOPPED_MESSAGE, artifacts: [], suggestedActions: [],
+            continuation: { workingSet: null, pendingHumanAction: null, pendingPrepared: null },
+            status: "FAILED", failureCode: "CANCELLED", createdAt: new Date().toISOString(), local: true,
+          }]);
+          analytics.track("conversation_turn_stopped");
+        } else {
+          setError(explainAgentError(err));
+        }
       } finally {
+        abortRef.current = null;
         setBusy(false);
         setStages([]);
+        setHistoryVersion((v) => v + 1);
       }
     },
     [busy, ensureId, appendAgent],
@@ -299,7 +327,12 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     [run],
   );
 
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
   const newConversation = useCallback(() => {
+    abortRef.current?.abort();
     idRef.current = null;
     setConversationId(null);
     writeCurrent(null);
@@ -317,6 +350,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       idRef.current = view.conversationId;
       adopt(view);
       setError(null);
+      setHistoryVersion((v) => v + 1);
     },
     [adopt],
   );
@@ -398,12 +432,14 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       plannerOff,
       send,
       resume,
+      stop,
+      historyVersion,
       newConversation,
       loadHistory,
       openConversation,
       addLocalTurn,
     }),
-    [conversationId, turns, busy, elapsed, stages, error, pendingHumanAction, workingSet, plannerOff, send, resume, newConversation, loadHistory, openConversation, addLocalTurn],
+    [conversationId, turns, busy, elapsed, stages, error, pendingHumanAction, workingSet, plannerOff, send, resume, stop, historyVersion, newConversation, loadHistory, openConversation, addLocalTurn],
   );
   return <ConversationContext.Provider value={value}>{children}</ConversationContext.Provider>;
 }

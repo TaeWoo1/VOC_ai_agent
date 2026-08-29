@@ -80,6 +80,23 @@ export class OperatorBudget {
     return this.limitValues;
   }
 
+  private cancelled = false;
+
+  /**
+   * The seller pressed Stop. Bounded cancel: nothing further is affordable — the step in flight (a
+   * planner call already sent, a tool read already issued) finishes on its own and is not undone;
+   * no next step starts. Honest by construction: this is the same "not affordable" path a spent
+   * budget takes, so every caller already knows how to stop.
+   */
+  cancel(): void {
+    this.cancelled = true;
+    this.exhausted = true;
+  }
+
+  isCancelled(): boolean {
+    return this.cancelled;
+  }
+
   /** True while another plan→dispatch→judge cycle is allowed. */
   canIterate(): boolean {
     return !this.exhausted && this.iterations < this.limitValues.maxIterations && !this.pastDeadline();

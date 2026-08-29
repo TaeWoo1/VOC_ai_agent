@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Btn } from "../ui/Btn";
+import { NavIcon } from "../icons/NavIcon";
 import { asksToSend, SEND_FENCE_COPY } from "../../lib/agentSendFence";
 
 /**
- * The one box (docs/reviewnary_design.md §8-A). Enter sends, Shift+Enter breaks a line; the approval
+ * The one box (docs/reviewnary_design.md §8-A), docked at the bottom of the transcript (Chat UI v1).
+ *
+ * Enter sends, Shift+Enter breaks a line; the box grows with the text up to ~8 lines and then scrolls.
+ * ONE round control at the right edge: ArrowUp to send while idle, Stop while a turn is running — the
+ * same place, so the seller's hand does not move. Stop is real: it closes the stream and the runtime
+ * cancels the run's budget (`ConversationProvider.stop`) — the box never pretends. The approval
  * boundary is printed under a sentence that asks to send BEFORE the wait. The box never dispatches on
  * its own — a launcher lands nothing here, and a chip is a sentence the seller still has to send.
  */
 export function Composer({
   onSend,
+  onStop,
   busy,
   disabled = false,
   placeholder = "무엇이든 물어보세요",
@@ -20,6 +26,8 @@ export function Composer({
   inputId = "conversation-input",
 }: {
   onSend: (text: string) => void;
+  /** Present when the turn in flight can be stopped; absent ⇒ no Stop control is drawn. */
+  onStop?: () => void;
   busy: boolean;
   disabled?: boolean;
   placeholder?: string;
@@ -42,6 +50,16 @@ export function Composer({
     if (autoFocus) window.setTimeout(() => ref.current?.focus(), 0);
   }, [autoFocus]);
 
+  // Grow with the text (1 → ~8 lines), then scroll inside the box.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "0px";
+    const max = compact ? 160 : 200;
+    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
+  }, [text, compact]);
+
   const blocked = busy || disabled;
   function submit(sentence: string) {
     const trimmed = sentence.trim();
@@ -50,6 +68,7 @@ export function Composer({
     setText("");
   }
   const sendAsked = asksToSend(text);
+  const canStop = busy && !!onStop;
 
   return (
     <form
@@ -60,8 +79,10 @@ export function Composer({
       }}
       className="space-y-2"
     >
-      <div className={`flex gap-2 rounded-2xl border border-line bg-surface focus-within:border-brand-700 ${compact ? "p-1.5" : "p-2"}`}>
-        <span aria-hidden="true" className="flex items-start pl-2 pt-2 text-brand-700">✳︎</span>
+      <div
+        className={`flex items-end gap-2 rounded-2xl border border-line bg-surface shadow-sm transition focus-within:border-brand-700 focus-within:shadow-md ${compact ? "px-3 py-2" : "px-4 py-2.5"} ${disabled ? "opacity-60" : ""}`}
+        data-state={canStop ? "running" : disabled ? "disabled" : "idle"}
+      >
         <label htmlFor={inputId} className="sr-only">
           무엇이든 물어보세요
         </label>
@@ -70,7 +91,7 @@ export function Composer({
           ref={ref}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          rows={compact ? 2 : 2}
+          rows={1}
           disabled={disabled}
           placeholder={placeholder}
           onKeyDown={(e) => {
@@ -79,13 +100,29 @@ export function Composer({
               submit(text);
             }
           }}
-          className="min-h-[40px] min-w-0 flex-1 resize-none bg-transparent py-2 text-base text-ink placeholder:text-muted focus:outline-none disabled:opacity-50"
+          className="min-h-[28px] min-w-0 flex-1 resize-none bg-transparent py-1 text-base leading-relaxed text-ink placeholder:text-muted focus:outline-none disabled:cursor-not-allowed"
         />
-        <div className="flex items-end">
-          <Btn type="submit" size={compact ? "sm" : "md"} disabled={blocked || !text.trim()}>
-            {busy ? "확인 중…" : "보내기"}
-          </Btn>
-        </div>
+        {canStop ? (
+          <button
+            type="button"
+            onClick={onStop}
+            aria-label="중지"
+            title="중지"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-white transition hover:bg-ink/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+          >
+            <NavIcon name="stop" className="h-4 w-4" />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            aria-label="보내기"
+            title="보내기 (Enter)"
+            disabled={blocked || !text.trim()}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-700 text-white transition hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 disabled:bg-line disabled:text-muted"
+          >
+            <NavIcon name="arrowUp" className="h-5 w-5" />
+          </button>
+        )}
       </div>
       {sendAsked ? (
         <p className="break-keep rounded-lg bg-canvas px-3 py-2 text-sm text-muted" data-testid="agent-send-fence">

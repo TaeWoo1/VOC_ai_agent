@@ -603,7 +603,7 @@ intent 바인딩(계정·채널·identity·operation·mode·만료·단일 사�
 읽기 인자가 아님, zod strip으로 channel 유실) ⇒ 프롬프트 v4의 닫힌 토큰 넷(`inquiryIntent ROWS|WORKLOAD|COUNT`·`limit`·
 `order`·`status`)이 **tool/backend 인자까지 그대로** 도달하고, 「최근 문의」는 새 `GET /api/inquiries/rows`(문의 자체),
 「내가 답해야 할 문의」는 작업 큐로 **명시 토큰**으로 갈라지며, ROWS는 항상 artifact + working set을 만들어 refine 체인이
-직전 집합 위에 선다; judge 꺼짐은 org당 한 번만 묻는다. Text-to-SQL 0 · 마켓플레이스 0 · WRITE 0 · 마이그레이션 0. **§26 Freshness UX v1(08-29)**: 네 사실(마지막 관측 시각 · 요청 창 · freshness 판정 · acquisition capability)을 분리 — 답할 수 있으면 결과 먼저 + 「채널 · 언제 기준」 + 선택적 [최신 상태로 갱신](DONE), 「오늘」류만 필수 단계(WAITING_HUMAN)이고 채널당 문장 하나; stale 0은 「0건」이 아니고 플래너는 말하지 않은 「오늘」을 만들지 않는다(v5).
+직전 집합 위에 선다; judge 꺼짐은 org당 한 번만 묻는다. Text-to-SQL 0 · 마켓플레이스 0 · WRITE 0 · 마이그레이션 0. **§26 Freshness UX v1(08-29)**: 네 사실(마지막 관측 시각 · 요청 창 · freshness 판정 · acquisition capability)을 분리 — 답할 수 있으면 결과 먼저 + 「채널 · 언제 기준」 + 선택적 [최신 상태로 갱신](DONE), 「오늘」류만 필수 단계(WAITING_HUMAN)이고 채널당 문장 하나; stale 0은 「0건」이 아니고 플래너는 말하지 않은 「오늘」을 만들지 않는다(v5). **§27 Chat UI v1(08-29)**: 홈 = 대화(transcript 독립 스크롤 · composer viewport bottom dock · KPI 띠 → 빈 스레드의 muted 한 줄 · 스레드 목록은 사이드바 · 예시 프롬프트는 빈 대화에서만); composer는 ArrowUp/Stop 한 자리이고 **Stop은 실제**다 — 스트림 종료 → `OperatorBudget.cancel()`로 다음 단계 0(진행 중 단계는 끝남) · `CANCELLED` 턴 영속 · 되돌렸다고 말하지 않는다; 한 대화의 턴은 직렬화.
 
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은

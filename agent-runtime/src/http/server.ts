@@ -278,7 +278,11 @@ async function route(ctx: HandlerContext, req: IncomingMessage, res: ServerRespo
     if (!parsed.success) throw new HttpError(400, "INVALID_REQUEST", "invalid turn request");
     const accept = String(req.headers.accept ?? "");
     if (accept.includes("text/event-stream")) {
-      await streamTurn(res, (progress) => service.turn(token, id, parsed.data, progress));
+      // The seller's Stop is the client closing the stream: the turn's budget is cancelled and the run
+      // stops at its next step (bounded — the step in flight finishes; nothing new starts).
+      const controller = new AbortController();
+      res.on("close", () => { if (!res.writableEnded) controller.abort(); });
+      await streamTurn(res, (progress) => service.turn(token, id, parsed.data, progress, { signal: controller.signal }));
       return;
     }
     const turn = await service.turn(token, id, parsed.data, () => undefined);

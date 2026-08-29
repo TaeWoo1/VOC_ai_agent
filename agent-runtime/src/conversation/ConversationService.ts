@@ -106,6 +106,9 @@ interface Composed {
   budget?: TurnView["budget"]; answer?: OperatorAnswer;
 }
 
+/** What the thread says where a stopped turn would have answered. Never a claim about what was found. */
+export const CANCELLED_MESSAGE = "요청을 중지했습니다. 이미 시작된 확인은 되돌리지 않습니다.";
+
 export class ConversationService {
   constructor(private readonly deps: ConversationServiceDeps) {}
 
@@ -145,7 +148,25 @@ export class ConversationService {
     return store.list(Math.max(1, Math.min(limit, 50)));
   }
 
-  async turn(token: string, id: string, request: StartTurnRequest, progress: ProgressFn): Promise<TurnView> {
+  /**
+   * Turns on ONE conversation run one at a time. A stopped turn still finishes its bounded step after the
+   * seller's composer is free again; the next sentence must land AFTER it, or two whole-view saves race
+   * and the later one silently drops the earlier turns (observed live 2026-08-29 — the stop record vanished).
+   */
+  private readonly lanes = new Map<string, Promise<unknown>>();
+
+  async turn(token: string, id: string, request: StartTurnRequest, progress: ProgressFn, options: { signal?: AbortSignal } = {}): Promise<TurnView> {
+    const previous = this.lanes.get(id) ?? Promise.resolve();
+    const mine = previous.catch(() => undefined).then(() => this.turnNow(token, id, request, progress, options));
+    this.lanes.set(id, mine);
+    try {
+      return await mine;
+    } finally {
+      if (this.lanes.get(id) === mine) this.lanes.delete(id);
+    }
+  }
+
+  private async turnNow(token: string, id: string, request: StartTurnRequest, progress: ProgressFn, options: { signal?: AbortSignal } = {}): Promise<TurnView> {
     const started = Date.now();
     const { bundle, store, orgId } = await this.tenant(token);
     const view = await store.load(id);
@@ -258,7 +279,21 @@ export class ConversationService {
         localAgent: hints.localAgent ?? "UNKNOWN",
       },
     };
-    const result = await runtime.run(`conv-${id}-${userTurn.turnId}`, goal);
+    const result = await runtime.run(`conv-${id}-${userTurn.turnId}`, goal, options.signal ? { signal: options.signal } : {});
+
+    if (options.signal?.aborted) {
+      // Bounded cancel (Chat UI v1): the seller stopped the turn. What ran, ran — a read is not undone
+      // and a collection already started keeps going — but nothing was composed, nothing is claimed,
+      // and the thread records the stop so a reload does not show a half-answer as an answer.
+      const stopped = this.agentTurn(view, {
+        status: "FAILED", message: CANCELLED_MESSAGE, artifacts: [], suggestedActions: [],
+        workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
+        failureCode: "CANCELLED", failureReason: CANCELLED_MESSAGE, ...(resumedFrom ? { resumedFrom } : {}),
+      });
+      await this.persist(store, view, [userTurn, stopped], view.workingSet, pendingActionsOf(view), view.pendingPrepared);
+      log("conversation_turn", { status: "CANCELLED", ms: Date.now() - started });
+      return stopped;
+    }
 
     const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? []);
     if (partialChips.length > 0) {

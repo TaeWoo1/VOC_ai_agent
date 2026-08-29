@@ -497,3 +497,49 @@ errors 0 · off-host requests 0 · marketplace calls 0 · WRITE 0 · DB changes 
 **Reported, not fixed:** Cafe24 REVIEW coverage has no successful run in this DB (footer says 「확인 기록 없음」 and the
 automatic refresh fails with connectors OFF — data/deployment truth, not wording); the home KPI strip's own
 「일부 채널 최신 수집 확인 필요」 is dashboard copy outside this package.
+
+## §27 Chat UI v1 — conversation-first workspace (2026-08-29)
+
+`frontend/` shell + a bounded cancel seam in `agent-runtime/`. Agent / query / freshness logic untouched.
+
+**Layout.** The home IS the thread: `AppShellV2` gives `/` the full column (`data-layout="chat"`, no page
+padding, no outer scroll); `ConversationWorkspace` is a flex column — transcript in its own scroll area
+(`max-w-[840px]`), composer docked at the viewport bottom, nothing rendered below it. The KPI strip is
+gone from the home; the three numbers are ONE muted context line under the greeting, shown only while the
+thread is empty (`/overview` keeps every number). Threads moved to the sidebar (`ConversationNav`: 「새 대화」
+as a `compose` icon control, the recent list with `aria-current` on the open thread, collapsible — folded by
+default under 1366px). Example prompts render on an empty thread only; the latest agent turn alone carries
+its follow-up chips.
+
+**Composer.** One round control at the right edge: ArrowUp 「보내기」 while idle, Square 「중지」 while a
+turn runs — same place. Enter sends, Shift+Enter breaks a line, the box grows to ~8 lines. `data-state`
+= idle | running | disabled.
+
+**Stop is real and bounded — audited first.** Before this package the SSE handler kept running after the
+client disconnected and nothing could cancel a run. Now: the client aborts the fetch → the server sees the
+response close → `AbortController` → `ConversationService.turn(…, {signal})` → `OperatorAgentRuntime.run`
+→ `OperatorBudget.cancel()` (nothing further affordable; the step in flight — typically the planner call —
+finishes on its own and no next step starts). The thread records 「요청을 중지했습니다. 이미 시작된 확인은
+되돌리지 않습니다.」 both live (client) and persisted (`failureCode: CANCELLED`), so a reload shows the stop,
+never a half-answer. What ran is never claimed undone (a Cafe24 refresh already started keeps going). Live:
+Stop at 0.9 s → runtime `conversation_turn status=CANCELLED ms=6033` (after the in-flight planner step).
+**Defect found by the live QA and closed:** a stop frees the composer while the runtime is still finishing,
+so the next sentence raced the first turn and the later whole-view save dropped the stop record ⇒ turns on
+one conversation are now serialized in `ConversationService` (`lanes`), pinned by `cancel.test.ts`.
+
+**Icons.** No new dependency: Lucide-shaped strokes added to the existing `NavIcon` set (`compose`,
+`history`, `panelLeft`, `arrowUp`, `stop`, `ellipsis`, `copy`, `chevronDown`, `refresh`, `check`); every
+icon-only control carries `aria-label` + `title`. Agent sentences get a hover 「복사」 that says 「복사됨」
+only after the clipboard accepted.
+
+**Density.** Progress is one line (latest stage + measured seconds, earlier stages as quiet checks);
+`ArtifactCard` header is one row with the action always top-right; user bubbles 80% max width.
+
+**QA** (Playwright, real planner, 1440 / 1366 / 1152 × empty · sidebar collapsed · 10-turn thread top/bottom
+· HumanAction · long artifact; 1440 also keyboard send · running · stop · one turn · reload): horizontal
+scroll 0 · console errors 0 · off-host requests 0 · composer bottom gap 27px on every state · elements below
+the composer 0. Before/after screenshots in the session scratchpad (contain live thread text; not committed).
+Tests: frontend 210 files / 2,560 · runtime 609. Marketplace calls 0 · WRITE 0 · DB changes 0 · model calls
+3 (the live stop/turn proofs). **Reported, not fixed:** the planner step itself cannot be aborted mid-flight
+(the backend→vendor call has no abort seam), so a stop lands after it; no motion added (next package); the
+`/agent` page keeps its legacy sections under the thread.

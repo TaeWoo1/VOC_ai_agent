@@ -28,6 +28,10 @@ const AGENT_PROJECTION_ENABLED = import.meta.env.VITE_ENABLE_AGENT_PROJECTION ==
 export function AppShellV2() {
   const [moreOpen, setMoreOpen] = useState(false);
   const location = useLocation();
+  // Conversation-first (Chat UI v1): the home IS the thread. It owns its scroll area and docks its
+  // composer at the bottom of the viewport, so the shell gives it the full column — no page padding,
+  // no content-width cap, no outer scroll. Every other page keeps the work-surface layout.
+  const chat = location.pathname === "/";
 
   // Close the drawer on any navigation, including a tap on the item that is already active.
   useEffect(() => {
@@ -53,19 +57,25 @@ export function AppShellV2() {
         <div className="flex min-w-0 flex-1 flex-col">
           <AppTopBar />
           {/* pb-28 on mobile keeps content clear of the fixed tab bar. */}
-          <main
-            id="main-content"
-            tabIndex={-1}
-            className="flex-1 overflow-y-auto px-4 pb-28 pt-5 outline-none md:px-8 md:pb-10 md:pt-6"
-          >
-            {/* Left-aligned content column, 1120px (docs/reviewnary_design.md §2): a work surface reads
-                from the top-left, and a centred column on a wide monitor floats the page away from the
-                navigation that names it. */}
-            <div className="max-w-content space-y-6">
-              {AGENT_PROJECTION_ENABLED && <ProjectionView />}
+          {chat ? (
+            <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col overflow-hidden pb-16 outline-none md:pb-0" data-layout="chat">
               <Outlet />
-            </div>
-          </main>
+            </main>
+          ) : (
+            <main
+              id="main-content"
+              tabIndex={-1}
+              className="flex-1 overflow-y-auto px-4 pb-28 pt-5 outline-none md:px-8 md:pb-10 md:pt-6"
+            >
+              {/* Left-aligned content column, 1120px (docs/reviewnary_design.md §2): a work surface reads
+                  from the top-left, and a centred column on a wide monitor floats the page away from the
+                  navigation that names it. */}
+              <div className="max-w-content space-y-6">
+                {AGENT_PROJECTION_ENABLED && <ProjectionView />}
+                <Outlet />
+              </div>
+            </main>
+          )}
         </div>
         {/* The contextual Agent: closed by default, overlay below 1440px, pinnable beside the page above it. */}
         <AgentPanelDock />

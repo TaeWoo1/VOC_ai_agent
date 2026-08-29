@@ -107,9 +107,13 @@ describe("home — the Agent operating workspace", () => {
   it("opens with the greeting, three numbers, and the prepared cases as the first agent turn", async () => {
     renderHome();
     expect(await screen.findByText("좋은 아침입니다. 오늘 제가 먼저 확인한 일이 2개 있습니다.")).toBeInTheDocument();
+    // Chat UI v1: the numbers are ONE muted context line under the greeting, not a strip of cards.
     const numbers = screen.getByLabelText("오늘 상태");
-    expect(within(numbers).getByText("현재 미답변 문의")).toBeInTheDocument();
+    expect(numbers.tagName).toBe("P");
+    expect(numbers).toHaveTextContent("현재 미답변 문의");
     expect(within(numbers).getByRole("link", { name: "자세한 숫자 보기" })).toHaveAttribute("href", "/overview");
+    expect(screen.queryByText("새 대화")).toBeNull();
+    expect(screen.queryByRole("button", { name: "지난 대화" })).toBeNull();
     const turn = screen.getAllByTestId("agent-turn")[0]!;
     expect(within(turn).getByRole("link", { name: /배송은 언제 되나요/ })).toHaveAttribute("href", "/inquiries/i-1");
     expect(within(turn).getAllByText("답변 준비됨")).toHaveLength(2);
@@ -155,13 +159,14 @@ describe("home — the Agent operating workspace", () => {
     expect(await screen.findByText("이 상품에 미답변 문의는 없습니다.")).toBeInTheDocument();
   });
 
-  it("「지난 대화」 lists earlier conversations and opens one", async () => {
-    vi.mocked(conversationClient.getConversation).mockResolvedValue({ conversationId: "c-old", createdAt: "x", updatedAt: "x", turns: [agentTurn({ conversationId: "c-old", message: "지난 답변입니다." })], workingSet: null, pendingHumanAction: null, pendingPrepared: null });
+  it("example prompts show only while the thread is empty; after the first message the thread speaks", async () => {
+    vi.mocked(conversationClient.sendTurn).mockResolvedValue(agentTurn());
     renderHome();
     await screen.findByText(/좋은 아침입니다/);
-    await userEvent.click(screen.getByRole("button", { name: "지난 대화" }));
-    await userEvent.click(await screen.findByRole("button", { name: /지난 리뷰 확인/ }));
-    expect(await screen.findByText("지난 답변입니다.")).toBeInTheDocument();
-    expect(window.localStorage.getItem("reviewnary.conversation.current")).toBe("c-old");
+    expect(screen.getByLabelText("예시 질문")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "오늘 리뷰 뭐 들어왔어?" }));
+    await screen.findByText("이 상품에 미답변 문의는 없습니다.");
+    expect(screen.queryByLabelText("예시 질문")).toBeNull();
+    expect(screen.queryByLabelText("오늘의 브리핑")).toBeNull();
   });
 });

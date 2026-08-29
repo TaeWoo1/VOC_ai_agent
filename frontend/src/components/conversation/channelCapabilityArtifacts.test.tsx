@@ -29,7 +29,8 @@ describe("channel-capability artifacts (D5)", () => {
     for (const name of ["비슷한 리뷰 더 찾기", "관련 문의 확인", "상품 문제 조사", "상세페이지 개선 검토"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
-    expect(screen.queryByRole("button", { name: /보내기|답변하기|복사/ })).toBeNull();
+    // No draft, no CTA. (The transcript's own 「복사」 on the agent sentence is a chat control, not an action.)
+    expect(screen.queryByRole("button", { name: /보내기|답변하기|초안 복사/ })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "관련 문의 확인" }));
     expect(onPrompt).toHaveBeenCalledWith("관련 문의 확인해줘");
   });
@@ -45,7 +46,7 @@ describe("channel-capability artifacts (D5)", () => {
       />,
     );
     expect(screen.getByText("카페24 리뷰를 새로 가져오고 있습니다")).toBeInTheDocument();
-    expect(screen.getByText("확인하는 중 · 4초")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("4초");
   });
 
   it("a turn with one HUMAN_ACTION_REQUIRED per channel renders one card per channel and the 「일단 확인된 리뷰 보기」 chip", () => {

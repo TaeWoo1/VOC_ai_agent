@@ -63,6 +63,8 @@ export interface AnalyticsEvents {
   human_action_completed: { type: HumanActionTypeLabel };
   approval_opened: Record<string, never>;
   conversation_resumed: Record<string, never>;
+  /** The seller pressed Stop on a turn in flight (Chat UI v1). */
+  conversation_turn_stopped: Record<string, never>;
 }
 
 export type AnalyticsEventName = keyof AnalyticsEvents;
@@ -90,6 +92,7 @@ const ALLOWED: { [E in AnalyticsEventName]: Record<string, readonly string[]> } 
   human_action_completed: { type: HUMAN_ACTION_TYPES },
   approval_opened: {},
   conversation_resumed: {},
+  conversation_turn_stopped: {},
 };
 
 export const ANALYTICS_EVENT_NAMES = Object.keys(ALLOWED) as AnalyticsEventName[];

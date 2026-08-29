@@ -116,11 +116,12 @@ export const conversationClient = {
    * One turn. `onEvent` receives every stage as the runtime reaches it; the promise resolves with the
    * agent's turn. An `error` event rejects with its code; a transport failure rejects as usual.
    */
-  async sendTurn(id: string, request: StartTurnRequest, onEvent: (e: ProgressEvent) => void): Promise<TurnView> {
+  async sendTurn(id: string, request: StartTurnRequest, onEvent: (e: ProgressEvent) => void, signal?: AbortSignal): Promise<TurnView> {
     const res = await fetch(`${AGENT_URL}/api/conversations/${encodeURIComponent(id)}/turns`, {
       method: "POST",
       headers: headers({ Accept: "text/event-stream" }),
       body: JSON.stringify(request),
+      ...(signal ? { signal } : {}),
     });
     if (!res.ok) throw await failure(res);
     const type = res.headers.get("content-type") ?? "";
