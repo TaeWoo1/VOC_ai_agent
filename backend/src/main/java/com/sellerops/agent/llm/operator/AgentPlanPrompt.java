@@ -39,7 +39,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v6";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v7";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -98,6 +98,7 @@ public final class AgentPlanPrompt {
     public static final String[] NEED_KINDS = {
         "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC", "POLICY",
         "CUSTOMER_HISTORY", "REVIEW_SIGNAL", "INQUIRY_VOLUME", "REPEAT_PATTERN", "ORDER_HISTORY",
+        "COMPANY_PROFILE",
     };
 
     /** The closed set of entity kinds a mention may carry. */
@@ -124,6 +125,10 @@ public final class AgentPlanPrompt {
                상품을 특정할 필요가 없습니다 — 회사 기준만 묻는 문장에는 PRODUCT entity 를 만들지 마세요. POLICY need 는 \
                specialists 에 INQUIRY_OPS, tools 에 search_org_knowledge 를 넣으세요. 특정 상품의 설명·FAQ 에 적힌 \
                내용은 PRODUCT_KNOWLEDGE_DOC 입니다.
+               - **회사가 어떤 곳인지(등록된 회사 소개)는 COMPANY_PROFILE 입니다** — "우리 회사는 어떤 곳으로 등록돼 \
+               있어", "우리 업체 특성을 고려해서" 처럼 회사 자체를 묻거나 참고하라고 할 때만 세우고(specialists 에 \
+               INQUIRY_OPS, tools 에 get_seller_profile), 목록·개수·최근 문의·리뷰처럼 회사 소개가 필요 없는 질문에는 \
+               세우지 마세요. 배송·환불·규격의 근거는 아닙니다.
                - 목록에 없는 specialist / tool / kind 이름을 만들어내지 마세요. 목록 밖 이름은 거부됩니다.
                - 목표가 지원 범위 밖이면 supported 를 false 로 두세요. 무엇을 묻는지 알 수 없으면 \
                clarificationNeeded 를 true 로 두고 무엇이 불명확한지 적으세요. 억지 계획보다 되묻는 편이 낫습니다.

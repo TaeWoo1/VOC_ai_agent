@@ -20,7 +20,7 @@ import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorSt
 import type { NeedState } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import type { SpecialistInput } from "./specialistInput";
-import type { OrgKnowledgeSearchResult } from "../../spring/types";
+import type { OrgKnowledgeSearchResult, SellerProfileView } from "../../spring/types";
 import type {
   CustomerMemorySearch, InboxSummary, InquiryQueueResponse, RepeatedInquiry,
 } from "../../spring/types";
@@ -93,7 +93,9 @@ const QUEUE_PAGE = 100;
 const WAITING_DAYS = 30;
 
 /** The need kinds this specialist answers. */
-export const INQUIRY_NEEDS = ["INQUIRY_VOLUME", "CUSTOMER_HISTORY", "REPEAT_PATTERN", "POLICY"] as const;
+export const INQUIRY_NEEDS = ["INQUIRY_VOLUME", "CUSTOMER_HISTORY", "REPEAT_PATTERN", "POLICY", "COMPANY_PROFILE"] as const;
+/** Where the company's own description is written — the only link a profile finding may carry. */
+const COMPANY_SCREEN = "/settings/company";
 
 export interface InquiryOpsResult extends SpecialistResult {
   readonly needStates: readonly NeedState[];
@@ -551,6 +553,78 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
         evidenceIds: cited,
         ...(cited.length === 0 ? { reason: "색인된 과거 사례가 없습니다." } : {}),
       });
+      continue;
+    }
+
+    // COMPANY_PROFILE — who this company is, in the seller's words (Seller Context v1-B). One org-keyed
+    // read, made only because the plan asked. The seller reads their own summary back, attributed as
+    // theirs; the judge learns only THAT one is registered (and how long it is), never its text. It is
+    // context — never a basis: nothing about 배송·환불·교환·규격 may rest on this finding, which is why
+    // it carries no policy label and links to the profile screen rather than the rules screen.
+    if (need.kind === "COMPANY_PROFILE") {
+      if (!budget.spend("tool")) {
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      const attempt = await attemptTool(
+        { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.GET_SELLER_PROFILE, needId: need.id },
+        () => registry.invoke<SellerProfileView>(OPERATOR_TOOL.GET_SELLER_PROFILE, {}, allowedTools),
+      );
+      if (!attempt.ok) {
+        failures.push(attempt.failure);
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      succeeded += 1;
+      const profile = attempt.value;
+      const summary = (profile.businessSummary ?? "").trim();
+      if (summary.length === 0) {
+        const ref = evidence.add({
+          kind: "COMPANY_PROFILE_GAP",
+          sourceTool: OPERATOR_TOOL.GET_SELLER_PROFILE,
+          args: {},
+          locator: { facet: "COMPANY_PROFILE", label: "회사 정보 없음" },
+          coverage: "COVERED",
+          provenance: "seller-profile/EMPTY",
+        });
+        refs.push(ref);
+        findings.push({
+          findingId: `f-${ref.evidenceId}`,
+          specialist: "INQUIRY_OPS",
+          statement: "등록된 회사 정보가 아직 없습니다. 설정의 회사 정보에서 회사 소개를 적어 두면 그에 맞춰 답할 수 있습니다.",
+          evidenceIds: [ref.evidenceId],
+          confidence: "NEEDS_REVIEW",
+          verdict: null,
+          surfaceLink: COMPANY_SCREEN,
+          claimsCoverageLimit: true,
+          needId: need.id,
+        });
+        needStates.push({ id: need.id, status: "UNSATISFIABLE", evidenceIds: [ref.evidenceId], reason: "등록된 회사 정보가 없습니다." });
+        continue;
+      }
+      const ref = evidence.add({
+        kind: "COMPANY_PROFILE",
+        sourceTool: OPERATOR_TOOL.GET_SELLER_PROFILE,
+        args: {},
+        // Metadata only: the label is the section name; the summary lives in the finding the seller reads.
+        locator: { facet: "COMPANY_PROFILE", label: "회사 정보", count: summary.length },
+        asOf: profile.updatedAt ? profile.updatedAt.slice(0, 10) : null,
+        coverage: "COVERED",
+        provenance: "seller-profile/SET",
+      });
+      refs.push(ref);
+      findings.push({
+        findingId: `f-${ref.evidenceId}`,
+        specialist: "INQUIRY_OPS",
+        statement: `회사 정보에는 이렇게 등록돼 있습니다: "${summary}"`,
+        judgeStatement: `판매자가 등록한 회사 정보(회사 소개 ${summary.length}자)가 있습니다.`,
+        evidenceIds: [ref.evidenceId],
+        confidence: "NEEDS_REVIEW",
+        verdict: null,
+        surfaceLink: COMPANY_SCREEN,
+        needId: need.id,
+      });
+      needStates.push({ id: need.id, status: "SATISFIED", evidenceIds: [ref.evidenceId] });
       continue;
     }
 

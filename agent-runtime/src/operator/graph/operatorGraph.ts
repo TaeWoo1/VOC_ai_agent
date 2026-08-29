@@ -776,8 +776,11 @@ function scopeForNeed(
  */
 export function policyRouted(ordered: readonly SpecialistName[], plan: Pick<InvestigationPlan, "informationNeeds">): SpecialistName[] {
   const needs = plan.informationNeeds;
-  if (!needs.some((n) => n.kind === "POLICY")) return [...ordered];
-  if (needs.every((n) => n.kind === "POLICY")) return ["INQUIRY_OPS"];
+  // Seller Context v1-B: COMPANY_PROFILE is the org's in exactly the way POLICY is — one org-keyed read
+  // that no product narrows — so it routes by the same closed-token rule.
+  const orgOwned = (n: { readonly kind: string }) => n.kind === "POLICY" || n.kind === "COMPANY_PROFILE";
+  if (!needs.some(orgOwned)) return [...ordered];
+  if (needs.every(orgOwned)) return ["INQUIRY_OPS"];
   return ordered.includes("INQUIRY_OPS") ? [...ordered] : orderSpecialists([...ordered, "INQUIRY_OPS"]);
 }
 

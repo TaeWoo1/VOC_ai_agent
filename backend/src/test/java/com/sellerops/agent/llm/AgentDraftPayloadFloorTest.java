@@ -236,4 +236,48 @@ class AgentDraftPayloadFloorTest {
                 .contains("주문 상태")
                 .contains("(확인된 값 없음)");
     }
+
+    @ParameterizedTest
+    @EnumSource(AgentDraftGenerator.Vendor.class)
+    @DisplayName("Seller Context v1-B — the company description leaves as quoted context on the USER turn, with no identifier, and never touches the facts")
+    void theCompanySectionIsContextNotEvidence(AgentDraftGenerator.Vendor vendor) {
+        List<AgentDraftGenerator.Passage> knowledge = List.of(
+                new AgentDraftGenerator.Passage("상품 정보", "부착 방법", "몰딩 뒷면 테이프를 벗기고 벽면에 눌러 붙입니다."));
+        String order = "이 주문은 결제가 완료된 것으로 확인됩니다.";
+        String company = "전선몰딩과 전기자재를 제조·판매하며, 기업 고객과 시공업체 주문 비중이 높습니다.";
+
+        // The factual half is IDENTICAL, and the company section is strictly appended to it — like the
+        // style, and before the style: two drafts with and without a profile read the same facts.
+        String plainTurn = AgentDraftPrompt.user("질문", "본문", knowledge, order, null, null, null);
+        String withCompany = AgentDraftPrompt.user("질문", "본문", knowledge, order, null, null, company);
+        assertThat(withCompany).startsWith(plainTurn);
+        assertThat(plainTurn).doesNotContain(AgentDraftPrompt.COMPANY_SECTION_TITLE);
+        assertThat(withCompany).contains(AgentDraftPrompt.COMPANY_SECTION_TITLE + ":")
+                .contains(company)
+                .contains(AgentDraftPrompt.COMPANY_FOOTER);
+        // Section order: facts, then company context, then style — the style footer is the last word.
+        String style = com.sellerops.knowledge.style.AnswerStyleInstruction.of(
+                new com.sellerops.knowledge.style.AnswerStyleProfile(
+                        com.sellerops.knowledge.style.AnswerTone.FRIENDLY,
+                        com.sellerops.knowledge.style.AnswerLength.SHORT,
+                        com.sellerops.knowledge.style.EmojiPolicy.NONE,
+                        null, null, "고객님", List.of(), List.of(), null, 2));
+        String both = AgentDraftPrompt.user("질문", "본문", knowledge, order, null, style, company);
+        assertThat(both.indexOf(AgentDraftPrompt.COMPANY_SECTION_TITLE + ":"))
+                .isLessThan(both.indexOf("답변 스타일:"));
+
+        // On the wire: the system turn is a constant that never carries the seller's text.
+        String body = generator(vendor).requestBody(new AgentDraftGenerator.Input(
+                "질문", "본문", knowledge, order, null, null, company));
+        assertThat(body).contains(company);
+        assertThat(AgentDraftPrompt.system()).doesNotContain(company);
+        for (String forbidden : FORBIDDEN) {
+            assertThat(body).as("%s must never reach the vendor", forbidden).doesNotContain(forbidden);
+        }
+        // And a blank profile renders NOTHING — absence means "nothing to say", not "(없음)".
+        assertThat(generator(vendor).requestBody(new AgentDraftGenerator.Input(
+                "질문", "본문", knowledge, order, null, null, "  ")))
+                .doesNotContain(AgentDraftPrompt.COMPANY_SECTION_TITLE + ":")
+                .doesNotContain(AgentDraftPrompt.COMPANY_FOOTER);
+    }
 }

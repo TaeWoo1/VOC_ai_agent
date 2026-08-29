@@ -237,6 +237,8 @@ export interface DraftArtifact extends ArtifactBase {
   evidenceCount: number;
   /** Passages per lane (상품 정보 · 운영 정책 · 과거 답변 · 주문 상태) — counts only, never text. */
   evidenceSummary?: ReadonlyArray<{ scopeLabel: string; count: number }>;
+  /** Seller Context v1-B: the registered 회사 정보 was read as wording context. A flag, never the text, never a lane. */
+  companyContextUsed?: boolean;
   productId: string | null;
   productName: string | null;
   unavailableMessage: string | null;

@@ -388,7 +388,7 @@ class AnswerStyleDraftTest {
                 allowingQuota(), variants, new DraftEvidenceSnippets(productChunks, orgChunks, memories),
                 new com.sellerops.product.detail.ProductDetailEnrichmentTrigger(
                         null, null, null, null, List.of(), false),
-                null, styles);
+                null, styles, null);
     }
 
     private static AgentQuotaService allowingQuota() {
@@ -434,7 +434,7 @@ class AnswerStyleDraftTest {
         @Override
         public Optional<AgentDraftResponseParser.ParsedDraft> draft(
                 UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
-                String orderState, String specScope, String style) {
+                String orderState, String specScope, String style, String companyContext) {
             calls++;
             sawKnowledge.clear();
             sawKnowledge.addAll(knowledge);

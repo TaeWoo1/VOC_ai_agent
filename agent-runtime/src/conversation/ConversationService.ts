@@ -1239,6 +1239,7 @@ function evidenceOf(answer: OperatorAnswer): EvidenceArtifact | null {
     CUSTOMER_MEMORY: "과거 사례", REPEATED_INQUIRY: "반복 문의", CHANNEL_COVERAGE: "채널 수집 상태",
     HUMAN_ACTION: "필요한 작업", PRODUCT_FACT: "상품 정보", PRODUCT_LISTING: "채널 등록 정보",
     PRODUCT_VARIANT: "옵션 정보", PRODUCT_KNOWLEDGE_DOC: "판매자가 쓴 글", ORG_POLICY: "운영 기준", ORG_POLICY_GAP: "운영 기준 없음", PRODUCT_SIGNAL: "상품 신호",
+    COMPANY_PROFILE: "회사 정보", COMPANY_PROFILE_GAP: "회사 정보 없음",
   };
   return {
     artifactId: "a-evidence", type: "EVIDENCE", title: "확인한 자료",

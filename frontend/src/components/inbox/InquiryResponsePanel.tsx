@@ -111,6 +111,11 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   /** The one sentence above the draft: what the knowledge library could and could not offer. */
   const [knowledgeNote, setKnowledgeNote] = useState<string | null>(null);
   /**
+   * Whether THIS generate read the registered 회사 정보 as wording context (Seller Context v1-B). Not
+   * stored on the version, so a reload does not claim it; a flag, never the text; never a citation.
+   */
+  const [companyContextUsed, setCompanyContextUsed] = useState(false);
+  /**
    * Whether that sentence is the good-news one.
    *
    * Held as a boolean rather than read off the draft row, because the two places it comes from — a
@@ -158,6 +163,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       setReplyComments(next.draft?.comments ?? "");
       setEvidence(next.draftEvidence ?? []);
       setKnowledgeNote(next.draft?.knowledgeNote ?? null);
+      setCompanyContextUsed(false);
       setKnowledgeGrounded(next.draft?.knowledgeState === "GROUNDED");
       // The state is READ, never re-derived (Agent Command Center v1 §2). It was computed on the
       // generate and stored on the version, because `knowledgeState` alone cannot tell a grounded
@@ -331,6 +337,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
       const generated = await api.generateInquiryDraft(workItemId);
       setEvidence(generated.evidence);
       setKnowledgeNote(generated.knowledgeNote);
+      setCompanyContextUsed(generated.companyContextUsed === true);
       setKnowledgeGrounded(generated.knowledgeState === "GROUNDED");
       setUnavailable(generated.unavailableMessage);
       // Which of the three states this generate landed in — computed once and applied whether or not
@@ -632,6 +639,11 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                   {draft.comments}
                 </p>
                 <DraftEvidence evidence={evidence} />
+                {companyContextUsed ? (
+                  <p className="mt-2 break-keep text-sm text-muted" aria-label="회사 정보 참고">
+                    회사 정보를 참고해 표현했습니다. 배송·환불·규격 같은 사실의 근거는 아닙니다.
+                  </p>
+                ) : null}
               </div>
             )}
 

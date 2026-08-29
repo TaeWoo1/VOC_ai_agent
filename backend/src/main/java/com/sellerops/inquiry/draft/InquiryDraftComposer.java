@@ -21,6 +21,7 @@ import com.sellerops.knowledge.style.AnswerStyleInstruction;
 import com.sellerops.knowledge.style.AnswerStyleProfile;
 import com.sellerops.knowledge.style.AnswerStyleService;
 import com.sellerops.order.fact.OrderFact;
+import com.sellerops.organization.profile.SellerProfileService;
 import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.product.detail.ProductDetailEnrichmentTrigger;
 import com.sellerops.product.detail.image.ProductDetailImageKnowledge;
@@ -93,6 +94,7 @@ public class InquiryDraftComposer {
     private final ProductDetailEnrichmentTrigger detail;
     private final ProductDetailImageKnowledge images;
     private final AnswerStyleService styles;
+    private final SellerProfileService profiles;
 
     /**
      * The three operational sentences, and one rule covering all of them: <b>none of them says
@@ -127,7 +129,8 @@ public class InquiryDraftComposer {
                                 AgentQuotaService quota, ProductVariantRepository variants,
                                 DraftEvidenceSnippets snippets,
                                 ProductDetailEnrichmentTrigger detail,
-                                ProductDetailImageKnowledge images, AnswerStyleService styles) {
+                                ProductDetailImageKnowledge images, AnswerStyleService styles,
+                                SellerProfileService profiles) {
         this.workItems = workItems;
         this.inquiries = inquiries;
         this.drafts = drafts;
@@ -140,6 +143,7 @@ public class InquiryDraftComposer {
         this.detail = detail;
         this.images = images;
         this.styles = styles;
+        this.profiles = profiles;
     }
 
     /**
@@ -242,6 +246,10 @@ public class InquiryDraftComposer {
         // Each branch names its own reason, because the three are not interchangeable to the person
         // reading the screen: a budget comes back tomorrow, a switch is an operator's job, and a
         // vendor that did not answer is worth pressing the button again for.
+        // The company's own description of itself (Seller Context v1-B), read ONCE, and only on the
+        // path that reaches a model. It is deliberately read AFTER the basis verdict: the verdict
+        // never sees it, so a summary alone can never turn NO_ANSWER_BASIS into a draft.
+        String company = companyContextFor(orgId);
         String unavailable = null;
         Optional<AgentDraftResponseParser.ParsedDraft> written = Optional.empty();
         String modelVersion = model.versionFor(orgId);
@@ -254,7 +262,7 @@ public class InquiryDraftComposer {
                         retrieved.order().messageKo(),
                         applicability.messageKo(retrieved.figuresUnaided(),
                                 retrieved.variantSpecific()),
-                        AnswerStyleInstruction.of(style));
+                        AnswerStyleInstruction.of(style), company);
                 if (written.isEmpty()) {
                     unavailable = MODEL_FAILED;
                 } else if (!AnswerStyleInstruction
@@ -292,7 +300,21 @@ public class InquiryDraftComposer {
         return new GeneratedDraftView(saved, DraftAuthorKind.MODEL.name(), retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), applicability),
-                retrieved.productId(), views, null);
+                retrieved.productId(), views, company != null, null);
+    }
+
+    /**
+     * The seller's registered 회사 정보, or null. Never fails a draft, and never a basis.
+     *
+     * <p>Null when no profile exists, when the lookup threw, or when the service is absent — three
+     * different facts that all mean the same thing to a drafter: nothing to say about the company.
+     */
+    private String companyContextFor(UUID orgId) {
+        try {
+            return profiles == null ? null : profiles.summaryFor(orgId).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**
@@ -350,7 +372,7 @@ public class InquiryDraftComposer {
                 retrieved.state().name(), retrieved.state().messageKo(retrieved.scopes()),
                 basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability()),
-                retrieved.productId(), List.of(), null);
+                retrieved.productId(), List.of(), false, null);
     }
 
     /**
@@ -366,7 +388,7 @@ public class InquiryDraftComposer {
         return new GeneratedDraftView(null, null, retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability()),
-                retrieved.productId(), List.of(), unavailableMessage);
+                retrieved.productId(), List.of(), false, unavailableMessage);
     }
 
     /**

@@ -743,3 +743,55 @@ policy registered (§29; by design, not retuned). The legacy approve loop is a s
 backend endpoints as the inquiry screen; whether `/agent` should keep it is a product-owner decision (it is
 reachable, so it was delegated rather than removed).
 
+## §31 Seller Context v1-B — a small seller-authored company context, read only when a turn needs it (2026-08-30)
+
+**What it is.** One seller-written paragraph about the company (≤500 chars), stored as its own org profile —
+`organization_profile(org_id pk, business_summary, updated_at, updated_by)` (V87), deliberately **not** a column on
+the answer style (HOW a reply is worded) and **not** an `org_knowledge_sources` row (WHAT is true and searchable).
+`Organization.name` is reused, not duplicated. **Seller-authored only**: the only writer is `SellerProfileService.save`
+behind `PUT /api/seller-profile`; `SellerProfileFenceTest` pins that no other package references the repository, that
+the profile package holds no model/connector/memory reader, that `AnswerBasisState`·`InquiryEvidenceRetriever`·
+`SpecApplicability` never see it, and that the draft prompt renders it into the **user turn only**. The
+`AnswerStyleSafetyFloor` runs at save time here too — a summary that is an instruction is refused by name (the two
+"exactly one caller" pins became "the two settings services").
+
+**Where it is read — and where it is not.**
+- *Draft composer.* `InquiryDraftComposer` reads `summaryFor(org)` **after** the basis verdict and only on the model
+  path; it travels as `AgentDraftPrompt` section 「회사 정보」 (facts → 회사 정보 → 답변 스타일; prompt v8), under a
+  footer saying it is context and not evidence, and a system rule that it may shape tone/perspective but never
+  ground 배송·환불·교환·A/S·규격. `GeneratedDraftView.companyContextUsed` is a **flag** (true only for a written MODEL
+  draft) — the text never comes back, and it is not an evidence row or a lane. Payload floor: the factual half of the
+  user turn is byte-identical with and without the profile; blank renders nothing; the system turn never carries it.
+  **Business summary alone can never produce GROUNDED** — structurally, because the verdict is computed from
+  `(knowledgeState, applicability)` before the profile is even looked up (`companyContextAloneIsNotABasis`).
+- *Agent lane.* One READ tool `get_seller_profile` (`GET /api/seller-profile`) behind a new closed need token
+  `COMPANY_PROFILE` (planner prompt v7: one sentence + one `NEED_KINDS` entry; `system()` source +307 chars, catalogue
+  +1 line; **no prompt injection** — `planCatalogues` never contains the summary). `COMPANY_PROFILE` routes like
+  POLICY (`policyRouted`, always ORG scope), so a specific-inquiry turn that asks to consider the company reads it
+  without an ITEM-scope refusal. Finding: 「회사 정보에는 이렇게 등록돼 있습니다: "…"」 for the seller; the judge digest
+  carries `label=회사정보 count=<length>` only. Absence is a fact with a link to `/settings/company`, never a refusal.
+  Listing/count/review turns declare no such need and make **zero** profile reads (`sellerContext.test.ts` E/E2).
+- *Screens.* 설정 › **회사 정보** (`/settings/company`): the org name read-only, one textarea with the example
+  placeholder, a counter, and the sentence that says what it is not for (facts → 운영 정책 / 답변 기준). `DraftArtifact`
+  and the inquiry screen show 「회사 정보를 참고해 표현했습니다 · 사실의 근거는 아닙니다」 only when the flag is true;
+  a reload never claims it.
+
+**QA (Demo Org, connectors OFF, real planner, backend restarted on V87).** A: `PUT` → `GET` identical; browser
+type → 저장 → reload identical (57/500자 counter, console errors 0, off-host requests 0). B: 「우리 회사는 어떤 곳으로
+등록돼 있어?」 → planner declared `COMPANY_PROFILE`, tool calls 1, summary quoted, evidence `COMPANY_PROFILE(회사 정보)`.
+C (specific inquiry `11af1717`, 「우리 업체 특성을 고려해서 답변해줘」): composer used (propose + generate), planner
+also read the profile once beside the draft, org queue **not** read, no 「전체 집계」 note — and the draft was
+`NO_ANSWER_BASIS` (no CASH_RECEIPT rule registered; absence gate as in §29/§30), so `companyContextUsed=false` and the
+KNOWLEDGE_ENTRY step appeared: **D observed live** on a real inquiry; the GROUNDED shape of C (summary in the model
+payload, flag true, evidence unchanged) is proven by `InquiryDraftComposerTest` C and `sellerContext.test.ts` C.
+E 「최근 문의 3개」 and 「오늘 리뷰 보여줘」: profile reads 0 (runtime log: 2 `get_seller_profile` calls in the whole
+session = B + C). F: `SellerProfileServiceTest` two orgs, no crossover; the controller has no org parameter.
+G: product/variant knowledge suites unchanged and green. Side effects: `organization_profile` row for the Demo Org
+(cleared to null at the end of QA — the row remains), work item `11af1717` OPEN→PROPOSED by the draft turn's proposal
+step (no draft version). Planner/judge ≈5 calls, draft model 0, marketplace 0, WRITE 0, migration 1 (V87). Suites:
+backend 3,536 · runtime 636 · frontend 2,569, 0 failures.
+
+**Reported, not fixed.** The Agent quotes the whole summary back in a draft turn that merely asked to consider it
+(the finding is the planner's COMPANY_PROFILE need; harmless, slightly verbose). Grounded C on a real Demo Org
+inquiry stays unreachable for the §29 reason. No exemplar/learning: the profile is never derived from replies.
+

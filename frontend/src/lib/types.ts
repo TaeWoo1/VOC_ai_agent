@@ -1456,6 +1456,8 @@ export interface GeneratedDraftView {
   answerBasisAction: string | null;
   productId: string | null;
   evidence: DraftEvidenceView[];
+  /** Seller Context v1-B: the registered 회사 정보 was read as wording context. A flag, never the text. */
+  companyContextUsed?: boolean;
   unavailableMessage: string | null;
 }
 
@@ -2320,6 +2322,26 @@ export interface AnswerStyleView {
   unknownFallbackTemplate: string | null;
   configured: boolean;
   version: number;
+}
+
+/**
+ * 회사 정보 — the company as the seller registered it (Seller Context v1-B).
+ *
+ * `name` is the organization's existing name, reused. `businessSummary` is the one seller-authored
+ * paragraph (≤500 chars) the AI may read as context for HOW to word a reply — never as the basis for
+ * a delivery, refund, exchange, A/S or spec claim. `configured` is the honest half: an org with no
+ * row is shown an empty box and told nobody has written one yet.
+ */
+export interface SellerProfileView {
+  name: string | null;
+  businessSummary: string | null;
+  configured: boolean;
+  updatedAt: string | null;
+}
+
+/** The whole form. Blank clears — a save is a replacement, never a merge. */
+export interface SellerProfileRequest {
+  businessSummary: string | null;
 }
 
 /** The whole form. A save is a replacement, never a merge — an emptied box means emptied. */

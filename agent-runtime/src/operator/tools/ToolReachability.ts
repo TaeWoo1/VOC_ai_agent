@@ -207,6 +207,14 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     requires: ["NONE"],
   },
   {
+    // Seller Context v1-B: a COMPANY_PROFILE need is met by one org-keyed read of the seller's own
+    // description — nothing to resolve first, and nothing a product could narrow.
+    specialist: "INQUIRY_OPS",
+    tool: OPERATOR_TOOL.GET_SELLER_PROFILE,
+    needKinds: ["COMPANY_PROFILE"],
+    requires: ["NONE"],
+  },
+  {
     specialist: "INQUIRY_OPS",
     tool: OPERATOR_TOOL.GET_TODAY_INBOX,
     needKinds: ["INQUIRY_VOLUME"],

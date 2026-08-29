@@ -49,6 +49,12 @@ describe("설정", () => {
     expect(screen.getByText("데모 데이터")).toBeInTheDocument();
   });
 
+  it("routes to the company profile, and says what it is for and what it is not", () => {
+    renderSettings();
+    expect(screen.getByRole("link", { name: "회사 소개 적기" })).toHaveAttribute("href", "/settings/company");
+    expect(screen.getByText(/배송·환불·규격의 근거는 아닙니다/)).toBeInTheDocument();
+  });
+
   it("routes to the alert list", () => {
     renderSettings();
     expect(screen.getByRole("link", { name: "알림 보기" })).toHaveAttribute(

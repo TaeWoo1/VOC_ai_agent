@@ -290,6 +290,11 @@ export interface DraftArtifact extends ArtifactBase {
    * metadata only, kept on reload. The passage text lives on the inquiry screen (Knowledge Context v1-A).
    */
   readonly evidenceSummary?: ReadonlyArray<DraftEvidenceSummary>;
+  /**
+   * Seller Context v1-B: the registered 회사 정보 was put in front of the drafter as wording context.
+   * A flag, never the text — and never a lane: it is not evidence and is not counted with the lanes above.
+   */
+  readonly companyContextUsed?: boolean;
   readonly productId: string | null;
   readonly productName: string | null;
   readonly unavailableMessage: string | null;

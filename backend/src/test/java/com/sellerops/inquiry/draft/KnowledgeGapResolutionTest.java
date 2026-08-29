@@ -348,7 +348,7 @@ class KnowledgeGapResolutionTest {
                 allowingQuota(), variants, new DraftEvidenceSnippets(productChunks, orgChunks, memories),
                 new com.sellerops.product.detail.ProductDetailEnrichmentTrigger(
                         null, null, null, null, List.of(), false),
-                null, null);
+                null, null, null);
     }
 
     private static AgentQuotaService allowingQuota() {
@@ -391,7 +391,7 @@ class KnowledgeGapResolutionTest {
         public Optional<AgentDraftResponseParser.ParsedDraft> draft(
                 UUID orgId, String title, String details,
                 List<AgentDraftGenerator.Passage> knowledge, String orderState, String applicability,
-                String style) {
+                String style, String companyContext) {
             calls++;
             sawKnowledge.clear();
             sawKnowledge.addAll(knowledge);

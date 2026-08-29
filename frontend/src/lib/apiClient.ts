@@ -3,6 +3,8 @@ import type {
   AgentQuotaStatus,
   AnswerStyleRequest,
   AnswerStyleView,
+  SellerProfileRequest,
+  SellerProfileView,
   KnowledgeSourceRequest,
   OrgKnowledgeRequest,
   OrgKnowledgeView,
@@ -1787,6 +1789,18 @@ export const api = {
   /** Save the whole form. The backend refuses a style that reaches for a fact, and says which. */
   async saveAnswerStyle(request: AnswerStyleRequest): Promise<AnswerStyleView> {
     const { data } = await http.put<AnswerStyleView>("/api/answer-style", request);
+    return data;
+  },
+
+  /** 회사 정보 — org-scoped from the token, like the answer style. */
+  async getSellerProfile(): Promise<SellerProfileView> {
+    const { data } = await http.get<SellerProfileView>("/api/seller-profile");
+    return data;
+  },
+
+  /** Save the summary. Blank clears; over-length or unsafe text is refused with the reason. */
+  async saveSellerProfile(request: SellerProfileRequest): Promise<SellerProfileView> {
+    const { data } = await http.put<SellerProfileView>("/api/seller-profile", request);
     return data;
   },
 

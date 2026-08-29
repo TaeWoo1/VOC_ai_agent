@@ -60,6 +60,9 @@ export function DraftArtifact({ artifact }: { artifact: Draft }) {
             근거 · {artifact.evidenceSummary.map((s) => `${s.scopeLabel} ${s.count}`).join(" · ")}
           </p>
         ) : null}
+        {artifact.companyContextUsed ? (
+          <p className="text-sm text-muted" aria-label="회사 정보 참고">회사 정보를 참고해 표현했습니다 · 사실의 근거는 아닙니다</p>
+        ) : null}
         {artifact.comments ? (
           <p className="whitespace-pre-wrap break-keep rounded-xl bg-canvas px-3 py-2 text-base leading-relaxed text-ink">{artifact.comments}</p>
         ) : artifact.version == null ? (

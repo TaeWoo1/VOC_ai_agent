@@ -42,6 +42,7 @@ import { Operations } from "./pages/Operations";
 import { AlertSettings } from "./pages/AlertSettings";
 import { OperationsPolicies } from "./pages/app/OperationsPolicies";
 import { AnswerStyle } from "./pages/app/AnswerStyle";
+import { CompanyProfile } from "./pages/app/CompanyProfile";
 import { Cafe24Connect } from "./pages/Cafe24Connect";
 import { Cafe24ConnectResult } from "./pages/Cafe24ConnectResult";
 import { Cafe24Tutorial } from "./pages/Cafe24Tutorial";
@@ -159,6 +160,7 @@ export function App() {
         <Route path="/settings/alerts" element={<AlertSettings />} />
         <Route path="/settings/policies" element={<OperationsPolicies />} />
         <Route path="/settings/style" element={<AnswerStyle />} />
+        <Route path="/settings/company" element={<CompanyProfile />} />
 
         {/* Operations agent — reachable, but not a navigation destination. It becomes an action
             offered inside 운영 홈 / 인박스 / 메모리 rather than a menu entry of its own. */}

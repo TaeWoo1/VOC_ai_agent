@@ -410,6 +410,75 @@ class InquiryDraftComposerTest {
 
     // ---- helpers ----
 
+    // ---------------------------------------------------------------- Seller Context v1-B
+
+    /** A profile service that answers one summary and touches no table. */
+    private static com.sellerops.organization.profile.SellerProfileService profileSaying(String summary) {
+        return new com.sellerops.organization.profile.SellerProfileService(null, null) {
+            @Override
+            public Optional<String> summaryFor(UUID orgId) {
+                return Optional.ofNullable(summary);
+            }
+        };
+    }
+
+    @Test
+    @DisplayName("C — a registered 회사 정보 reaches a GROUNDED draft as context, and the view says so")
+    void companyContextReachesAGroundedDraft() {
+        profiles = profileSaying("전선몰딩과 전기자재를 제조·판매하며, 기업 고객과 시공업체 주문 비중이 높습니다.");
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedProposed(productId);
+        StubModel model = StubModel.writing("[답변] 사용 방법", "테이프를 벗기고 벽면에 붙이시면 됩니다.");
+
+        GeneratedDraftView view = composer(StubLibrary.returning(passage("사용법", "테이프를 벗기고 벽면에 붙입니다.")),
+                model).generate(org, wi.getId(), user);
+
+        assertThat(model.sawCompanyContext).contains("기업 고객과 시공업체 주문 비중이 높습니다");
+        assertThat(view.companyContextUsed()).isTrue();
+        // Nothing about the evidence moved: same basis, same citation, same passage in front of the model.
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.GROUNDED.name());
+        assertThat(view.evidence()).hasSize(1);
+        assertThat(model.sawKnowledge).extracting(AgentDraftGenerator.Passage::text)
+                .containsExactly("테이프를 벗기고 벽면에 붙입니다.");
+    }
+
+    @Test
+    @DisplayName("D — 회사 정보 alone is not a basis: a delivery question with no evidence stays NO_ANSWER_BASIS and calls no model")
+    void companyContextAloneIsNotABasis() {
+        profiles = profileSaying("B2B 주문이 많은 전기자재 업체입니다. 당일 출고를 원칙으로 합니다.");
+        InquiryWorkItem wi = seedAsking(null, "배송 문의", "주문하면 며칠 만에 도착하나요? 환불도 되나요?");
+        StubModel model = StubModel.writing("제목", "본문");
+
+        GeneratedDraftView view = composer(StubLibrary.empty(0), model).generate(org, wi.getId(), user);
+
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.NO_ANSWER_BASIS.name());
+        assertThat(view.answerBasisNote()).isEqualTo("답변 기준이 필요합니다.");
+        assertThat(model.calls).as("the summary is never shown to a model that has no evidence to write from").isZero();
+        assertThat(view.draft()).isNull();
+        assertThat(view.companyContextUsed()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a profile lookup that throws costs the draft nothing — the reply is written without company context")
+    void aFailedProfileLookupNeverFailsADraft() {
+        profiles = new com.sellerops.organization.profile.SellerProfileService(null, null) {
+            @Override
+            public Optional<String> summaryFor(UUID orgId) {
+                throw new IllegalStateException("profile store down");
+            }
+        };
+        UUID productId = seedProduct();
+        InquiryWorkItem wi = seedProposed(productId);
+        StubModel model = StubModel.writing("[답변] 사용 방법", "테이프를 벗기고 벽면에 붙이시면 됩니다.");
+
+        GeneratedDraftView view = composer(StubLibrary.returning(passage("사용법", "테이프를 벗기고 벽면에 붙입니다.")),
+                model).generate(org, wi.getId(), user);
+
+        assertThat(view.draft()).isNotNull();
+        assertThat(model.sawCompanyContext).isNull();
+        assertThat(view.companyContextUsed()).isFalse();
+    }
+
     private InquiryDraftComposer composer(StubLibrary library, StubModel model) {
         return composer(library, model, allowingQuota());
     }
@@ -419,6 +488,8 @@ class InquiryDraftComposerTest {
      * "no picture is being read", which is the state every deployment is in until the lane is on.
      */
     private com.sellerops.product.detail.image.ProductDetailImageKnowledge imageKnowledge;
+    /** 회사 정보 (Seller Context v1-B). Null = no profile service, the state before the package. */
+    private com.sellerops.organization.profile.SellerProfileService profiles;
 
     private InquiryDraftComposer composer(StubLibrary library, StubModel model, AgentQuotaService quota) {
         // The 상세페이지 trigger, switched off: a disabled trigger returns before it touches a
@@ -441,7 +512,7 @@ class InquiryDraftComposerTest {
                 com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH));
         return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, retriever, model,
                 quota, variants, new DraftEvidenceSnippets(productChunks, orgChunks, memories),
-                trigger, imageKnowledge, null);
+                trigger, imageKnowledge, null, profiles);
     }
 
     /** A passage whose chunk really exists, for the paths that go back to the source to read it. */
@@ -610,6 +681,8 @@ class InquiryDraftComposerTest {
         final List<AgentDraftGenerator.Passage> sawKnowledge = new ArrayList<>();
         String sawTitle;
         String sawDetails;
+        String sawCompanyContext;
+        int calls;
 
         private StubModel(AgentDraftResponseParser.ParsedDraft answer, boolean enabled) {
             super(null, null);
@@ -653,8 +726,10 @@ class InquiryDraftComposerTest {
         @Override
         public Optional<AgentDraftResponseParser.ParsedDraft> draft(
                 UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
-                String orderState, String specScope, String style) {
+                String orderState, String specScope, String style, String companyContext) {
+            calls++;
             sawStyle = style;
+            sawCompanyContext = companyContext;
             sawTitle = title;
             sawDetails = details;
             sawKnowledge.addAll(knowledge);

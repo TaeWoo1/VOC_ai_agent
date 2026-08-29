@@ -110,14 +110,29 @@ public class AgentDraftService {
     public Optional<AgentDraftResponseParser.ParsedDraft> draft(
             UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
             String orderState, String specScope, String style) {
+        return draft(orgId, title, details, knowledge, orderState, specScope, style, null);
+    }
+
+    /**
+     * The grounded form, plus the seller's own description of their company (Seller Context v1-B).
+     *
+     * <p>{@code companyContext} arrives as the seller's text and leaves as quoted data on a labelled
+     * user-turn line — never the system turn, for the reason the style never reaches it. It is
+     * context for wording; whether a draft may be written at all was decided before this call by the
+     * evidence rules, which do not read it.
+     */
+    public Optional<AgentDraftResponseParser.ParsedDraft> draft(
+            UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
+            String orderState, String specScope, String style, String companyContext) {
         if (!properties.isEnabledFor(orgId)) {
             return Optional.empty();
         }
         AgentDraftGenerator.Result result = generator().generate(new AgentDraftGenerator.Input(
-                title, details, knowledge, orderState, specScope, style));
-        log.info("agent_draft orgId={} drafted={} grounded={} styled={} reason={}",
+                title, details, knowledge, orderState, specScope, style, companyContext));
+        log.info("agent_draft orgId={} drafted={} grounded={} styled={} company={} reason={}",
                 orgId, result.draft().isPresent(), knowledge == null ? 0 : knowledge.size(),
-                style != null && !style.isBlank(), result.reason());
+                style != null && !style.isBlank(), companyContext != null && !companyContext.isBlank(),
+                result.reason());
         return result.draft();
     }
 

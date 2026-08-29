@@ -146,6 +146,9 @@ const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
   PRODUCT_KNOWLEDGE_DOC: "DETAIL",
   ORG_POLICY: "DETAIL",
   ORG_POLICY_GAP: "GAP",
+  // Seller Context v1-B: the registered company description is one checkable thing; its absence a gap.
+  COMPANY_PROFILE: "DETAIL",
+  COMPANY_PROFILE_GAP: "GAP",
   GROUPING_GAP: "GAP",
   // Agentic Operating Workspace v2: rows are a LIST, a window total is a COUNT, a missing human step
   // is a GAP — the same three shapes the rest of the table already uses.
@@ -173,6 +176,7 @@ const KIND_FLOOR: Record<InformationNeed["kind"], readonly Granularity[]> = {
   PRODUCT_VARIANT: ["DETAIL", "GAP"],
   PRODUCT_KNOWLEDGE_DOC: ["DETAIL", "GAP"],
   POLICY: ["DETAIL", "GAP"],
+  COMPANY_PROFILE: ["DETAIL", "GAP"],
 };
 
 /** `acceptableKinds` speaks the EvidenceKind vocabulary; map it onto shapes. Unknown names are ignored. */
@@ -249,7 +253,10 @@ export function needScopeOf(
   // store has no product axis (a product-specific rule is PRODUCT_KNOWLEDGE_DOC), so a product mention
   // cannot narrow it — and reading it as PRODUCT scope withheld a shipping policy the org had written
   // because the planner had called 「우리」 a product.
-  const entity: EntityScope = need.kind === "POLICY" ? "ORG" : namesProduct ? "PRODUCT" : namesItem ? "ITEM" : "ORG";
+  // Seller Context v1-B: a COMPANY_PROFILE need is the company's for the same reason — the profile has no
+  // product axis, so 「이 문의에 우리 업체 특성을 고려해서」 must not read it as ITEM-scoped and refuse it.
+  const entity: EntityScope = need.kind === "POLICY" || need.kind === "COMPANY_PROFILE" ? "ORG"
+    : namesProduct ? "PRODUCT" : namesItem ? "ITEM" : "ORG";
 
   const channelMention = named.find((m) => m.kind === "CHANNEL")?.mention
     ?? resolved.find((r) => r.kind === "CHANNEL")?.label

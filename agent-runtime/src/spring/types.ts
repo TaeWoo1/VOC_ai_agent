@@ -895,6 +895,18 @@ export interface OrgKnowledgePassage {
   readonly updatedAt: string | null;
 }
 
+/**
+ * GET /api/seller-profile (mirror of `SellerProfileView`) — Seller Context v1-B. The company as the
+ * seller registered it: the org's existing name and one seller-authored summary (≤500 chars), or none.
+ * Org-scoped by the bearer. Context about who is speaking, never evidence for an operational claim.
+ */
+export interface SellerProfileView {
+  readonly name: string | null;
+  readonly businessSummary: string | null;
+  readonly configured: boolean;
+  readonly updatedAt: string | null;
+}
+
 /** GET /api/org-knowledge/search — org-scoped by the bearer; `documentsSearched: 0` is "nothing registered". */
 export interface OrgKnowledgeSearchResult {
   readonly query: string;
@@ -1082,6 +1094,8 @@ export interface GeneratedDraftView {
   readonly answerBasisAction: string | null;
   readonly productId: string | null;
   readonly evidence: ReadonlyArray<DraftEvidenceRef>;
+  /** Seller Context v1-B: the registered 회사 정보 was shown to the drafter as wording context. Metadata only. */
+  readonly companyContextUsed?: boolean;
   readonly unavailableMessage: string | null;
 }
 

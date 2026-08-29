@@ -483,6 +483,8 @@ export class FakeSpringClient implements SpringClient {
       productId: it.seed.productId ?? null,
       // Seeded lane rows (Knowledge Context v1-A) — the runtime keeps only counts by scopeLabel.
       evidence: seeded.evidence ?? [],
+      // Seller Context v1-B: true only for a written MODEL draft, as the composer reports it.
+      companyContextUsed: draft != null && seeded.companyContextUsed === true,
       unavailableMessage: unavailable,
     };
   }

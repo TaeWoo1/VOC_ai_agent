@@ -30,7 +30,7 @@ import type {
   DashboardOverview,
   InquiryReplyTransportRow,
   KnowledgeSearchResult,
-  OrgKnowledgeSearchResult,
+  OrgKnowledgeSearchResult, SellerProfileView,
   ReviewChannelCapabilityView,
   OrderSummaryParams,
   OrderSummaryResponse,
@@ -85,6 +85,8 @@ export interface FakeOperatorSeed {
   readonly productKnowledgeSearch?: Record<string, KnowledgeSearchResult>;
   /** The org's operating rules, as one search result; absent = nothing registered. */
   readonly orgKnowledgeSearch?: OrgKnowledgeSearchResult;
+  /** Seller Context v1-B: what `getSellerProfile` answers. Absent ⇒ no profile registered. */
+  readonly sellerProfile?: SellerProfileView;
   /**
    * When absent, the client has NO planGoal method at all.
    *
@@ -143,7 +145,7 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
     plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0, channelCoverage: 0,
     knowledgeSearch: 0, orgKnowledgeSearch: 0, recentReviews: 0, overview: 0, ordersSummary: 0, channels: 0,
-    channelOverview: 0, transports: 0, reviewChannelCapability: 0,
+    channelOverview: 0, transports: 0, reviewChannelCapability: 0, sellerProfile: 0,
   };
   /** Every recent-reviews request, so a test can assert the window and filters the read was made with. */
   readonly recentReviewParams: RecentReviewsParams[] = [];
@@ -391,6 +393,11 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
   readonly orgKnowledgeQueries: string[] = [];
   /** Every finding sentence handed to the model judge — what leaves for the vendor. */
   readonly judgeFindings: string[] = [];
+
+  async getSellerProfile(): Promise<SellerProfileView> {
+    this.calls.sellerProfile += 1;
+    return this.seed.sellerProfile ?? { name: "테스트 스토어", businessSummary: null, configured: false, updatedAt: null };
+  }
 
   async searchOrgKnowledge(query: string, limit?: number): Promise<OrgKnowledgeSearchResult> {
     this.calls.orgKnowledgeSearch += 1;

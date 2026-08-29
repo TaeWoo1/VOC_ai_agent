@@ -33,6 +33,10 @@ import java.util.UUID;
  * @param answerBasisAction what the seller could do about a missing basis, or null
  * @param productId        the canonical product the retrieval was scoped to, or null
  * @param evidence         the passages actually put in front of the drafter, in order
+ * @param companyContextUsed whether the seller's registered 회사 정보 was put in front of the
+ *                         drafter as wording context (Seller Context v1-B). Metadata only — the
+ *                         text itself is never returned here — and never a basis: it is true only
+ *                         for a MODEL draft that was already grounded by the evidence rules
  * @param unavailableMessage why no draft exists for an OPERATIONAL reason — the day's AI budget,
  *                         the capability being off, a vendor that did not answer, or a 상세페이지
  *                         read that failed. <b>Its presence changes what the screen may say.</b>
@@ -44,5 +48,6 @@ import java.util.UUID;
 public record GeneratedDraftView(ReplyDraftView draft, String authorKind, String knowledgeState,
                                  String knowledgeNote, String answerBasis, String answerBasisNote,
                                  String answerBasisAction, UUID productId,
-                                 List<DraftEvidenceView> evidence, String unavailableMessage) {
+                                 List<DraftEvidenceView> evidence, boolean companyContextUsed,
+                                 String unavailableMessage) {
 }

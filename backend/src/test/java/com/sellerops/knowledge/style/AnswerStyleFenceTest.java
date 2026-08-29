@@ -126,7 +126,7 @@ class AnswerStyleFenceTest {
     // ---------------------------------------------------------------- the floor is wired now
 
     @Test
-    @DisplayName("the safety floor has a production caller at last — and exactly one")
+    @DisplayName("the safety floor has production callers at last — the two settings services, and no other")
     void theFloorIsEnforcedSomewhere() throws IOException {
         List<String> referrers = new ArrayList<>();
         for (Path source : javaIn(MAIN)) {
@@ -139,8 +139,10 @@ class AnswerStyleFenceTest {
         }
         // It was written a package ahead of its caller and asserted to have none. That assertion is
         // now the other way round: the floor runs where a style is SAVED, so a refusal is a message
-        // the seller reads rather than a setting that silently does nothing.
-        assertThat(referrers).containsExactly("AnswerStyleService.java");
+        // the seller reads rather than a setting that silently does nothing. Seller Context v1-B
+        // added the second door of exactly the same kind — the 회사 정보 summary is another
+        // seller-typed string that reaches a user turn, and it is checked where it is saved too.
+        assertThat(referrers).containsExactlyInAnyOrder("AnswerStyleService.java", "SellerProfileService.java");
     }
 
     @Test

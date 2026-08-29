@@ -81,7 +81,13 @@ export type NeedKind =
   | "REVIEW_SIGNAL"
   | "INQUIRY_VOLUME"
   | "REPEAT_PATTERN"
-  | "ORDER_HISTORY";
+  | "ORDER_HISTORY"
+  /**
+   * 판매자가 등록한 회사 소개 — 어떤 회사인지 (Seller Context v1-B). The company's own words about itself,
+   * read on the turn that asks about or wants to reason from it. Context, never evidence: no delivery,
+   * refund, exchange, A/S or spec claim may rest on it, and a plan that merely lists or counts never needs it.
+   */
+  | "COMPANY_PROFILE";
 
 export interface InformationNeed {
   readonly id: string;

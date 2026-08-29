@@ -78,6 +78,13 @@ export type EvidenceKind =
   /** The company has no registered rule that covers this question — its own fact, never a refusal. */
   | "ORG_POLICY_GAP"
   /**
+   * The company's own description of itself — `organization_profile` (Seller Context v1-B). One row,
+   * seller-authored, org-keyed. Context for who is speaking; NEVER a basis for an operational claim.
+   */
+  | "COMPANY_PROFILE"
+  /** No 회사 정보 registered — its own fact, with the screen where it can be written. */
+  | "COMPANY_PROFILE_GAP"
+  /**
    * An axis the data cannot be cut along — "반복 문의에는 상품 정보가 없다".
    *
    * <b>Its own kind because it is its own fact.</b> A grouped answer that quietly stopped grouping

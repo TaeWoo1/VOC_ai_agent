@@ -99,23 +99,33 @@ public class AgentDraftGenerator {
      * here whose absence is rendered as nothing at all.
      */
     public record Input(String title, String details, List<Passage> knowledge, String orderState,
-                        String specScope, String style) {
+                        String specScope, String style, String companyContext) {
 
         public Input(String title, String details) {
-            this(title, details, List.of(), null, null, null);
+            this(title, details, List.of(), null, null, null, null);
         }
 
         public Input(String title, String details, List<Passage> knowledge) {
-            this(title, details, knowledge, null, null, null);
+            this(title, details, knowledge, null, null, null, null);
         }
 
         public Input(String title, String details, List<Passage> knowledge, String orderState) {
-            this(title, details, knowledge, orderState, null, null);
+            this(title, details, knowledge, orderState, null, null, null);
         }
 
         public Input(String title, String details, List<Passage> knowledge, String orderState,
                      String specScope) {
-            this(title, details, knowledge, orderState, specScope, null);
+            this(title, details, knowledge, orderState, specScope, null, null);
+        }
+
+        /**
+         * {@code companyContext} (Seller Context v1-B) is the fifth and last class of content: the
+         * seller's own description of their company, quoted as data. Context for wording, never
+         * evidence — the prompt says so under it, and no basis verdict reads it.
+         */
+        public Input(String title, String details, List<Passage> knowledge, String orderState,
+                     String specScope, String style) {
+            this(title, details, knowledge, orderState, specScope, style, null);
         }
 
         public Input {
@@ -219,7 +229,7 @@ public class AgentDraftGenerator {
         ObjectNode user = messages.addObject();
         user.put("role", "user");
         user.put("content", AgentDraftPrompt.user(input.title(), input.details(), input.knowledge(),
-                input.orderState(), input.specScope(), input.style()));
+                input.orderState(), input.specScope(), input.style(), input.companyContext()));
         if (vendor == Vendor.ANTHROPIC) {
             root.put("max_tokens", maxOutputTokens);
             root.put("system", AgentDraftPrompt.system());

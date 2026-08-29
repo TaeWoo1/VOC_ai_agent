@@ -49,6 +49,7 @@ import type {
   ChannelCoverageRow,
   KnowledgeSearchResult,
   OrgKnowledgeSearchResult,
+  SellerProfileView,
   ChannelSummary,
   DashboardOverview,
   GeneratedDraftView,
@@ -466,6 +467,14 @@ export class HttpSpringClient
    * the inquiry draft lane reads; this is the Agent lane reaching it on the turn that needs it, not the
    * corpus being folded into a prompt (Knowledge Context v1-A).
    */
+  /**
+   * The company as the seller registered it (Seller Context v1-B) — one org-keyed row, read only on a
+   * turn whose plan declared a COMPANY_PROFILE need. Never folded into a prompt.
+   */
+  async getSellerProfile(): Promise<SellerProfileView> {
+    return this.request<SellerProfileView>("GET", "/api/seller-profile");
+  }
+
   async searchOrgKnowledge(query: string, limit?: number): Promise<OrgKnowledgeSearchResult> {
     const params = new URLSearchParams({ query });
     if (limit && limit > 0) params.set("limit", String(limit));

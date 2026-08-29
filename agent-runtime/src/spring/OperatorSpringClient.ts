@@ -27,7 +27,7 @@ import type {
 } from "./types";
 import type {
   ChannelCapabilityOverview, ChannelCoverageRow, ChannelSummary, DashboardOverview, InquiryReplyTransportRow,
-  KnowledgeSearchResult, OrgKnowledgeSearchResult, OrderSummaryParams, OrderSummaryResponse, RecentReviewsParams, RecentReviewsResponse,
+  KnowledgeSearchResult, OrgKnowledgeSearchResult, SellerProfileView, OrderSummaryParams, OrderSummaryResponse, RecentReviewsParams, RecentReviewsResponse,
   ReviewChannelCapabilityView,
 } from "./types";
 
@@ -134,6 +134,11 @@ export interface OperatorSpringClient {
    * reads, reachable from the Agent lane on demand (Knowledge Context v1-A). No product, no id.
    */
   searchOrgKnowledge?(query: string, limit?: number): Promise<OrgKnowledgeSearchResult>;
+  /**
+   * The company as the seller registered it (Seller Context v1-B) — one bounded org-keyed READ, made only
+   * on a turn whose plan declared a COMPANY_PROFILE need. Not an input to any prompt.
+   */
+  getSellerProfile?(): Promise<SellerProfileView>;
   /** Precedents for an inquiry (or a closed-vocabulary cue), with the index's coverage verdict. */
   searchCustomerMemory(params: CustomerMemorySearchParams): Promise<CustomerMemorySearch>;
   /** Repeat candidates in a trailing window. */

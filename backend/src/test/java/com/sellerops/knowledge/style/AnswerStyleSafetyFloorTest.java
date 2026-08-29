@@ -164,7 +164,8 @@ class AnswerStyleSafetyFloorTest {
     void theFloorIsAPureFunction() throws Exception {
         // Until Organization Answer Style v1 this asserted ZERO production referrers, which was the
         // honest thing to say about a class written a package ahead of its caller. The caller exists
-        // now (AnswerStyleService, at write time), and the assertion that it is the ONLY one lives in
+        // now (AnswerStyleService, at write time; since Seller Context v1-B also SellerProfileService,
+        // the same write-time door for the 회사 정보 summary), and the assertion naming them lives in
         // AnswerStyleFenceTest — beside the other absences that package has to keep true.
         var main = java.nio.file.Path.of("src/main/java/com/sellerops");
         long referrers;
@@ -184,7 +185,7 @@ class AnswerStyleSafetyFloorTest {
                     })
                     .count();
         }
-        assertThat(referrers).as("one door, so a refusal always reaches the person who typed it")
-                .isEqualTo(1);
+        assertThat(referrers).as("write-time doors only, so a refusal always reaches the person who typed it")
+                .isEqualTo(2);
     }
 }

@@ -156,6 +156,7 @@ export class DraftPreparer {
       knowledgeState: view.knowledgeState,
       evidenceCount: Array.isArray(view.evidence) ? view.evidence.length : 0,
       evidenceSummary: evidenceSummaryOf(view.evidence),
+      companyContextUsed: view.companyContextUsed === true,
       productId: view.productId ?? target.productId,
       productName: target.productName,
       unavailableMessage: view.unavailableMessage,

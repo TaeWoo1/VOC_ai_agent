@@ -33,6 +33,13 @@ export function SettingsHome() {
         <ul className="divide-y divide-line/70">
           <li>
             <ObjectRow
+              name="회사 정보"
+              facets={<span className="break-keep">어떤 회사인지 — AI가 답변 표현을 고를 때 참고합니다. 배송·환불·규격의 근거는 아닙니다</span>}
+              action={<BtnLink to="/settings/company" size="sm" variant="outline">회사 소개 적기</BtnLink>}
+            />
+          </li>
+          <li>
+            <ObjectRow
               name="운영 정책 / 답변 기준"
               facets={<span className="break-keep">무엇을 안내할지 — 배송·취소·교환·증빙처럼 상품과 무관한 답변의 근거</span>}
               action={<BtnLink to="/settings/policies" size="sm" variant="outline">기준 관리</BtnLink>}

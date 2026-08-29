@@ -22,7 +22,7 @@ import type { SpringClient } from "../../spring/SpringClient";
 import type { IssueSpringClient } from "../../spring/IssueSpringClient";
 import type {
   ChannelCapabilityOverview, ChannelCoverageRow, DashboardOverview, InquiryReplyTransportRow, OrderSummaryResponse,
-  OrgKnowledgeSearchResult, PublishCapabilityView, RecentReviewsResponse, ReviewChannelCapabilityView, SellerAccountSummary,
+  OrgKnowledgeSearchResult, SellerProfileView, PublishCapabilityView, RecentReviewsResponse, ReviewChannelCapabilityView, SellerAccountSummary,
 } from "../../spring/types";
 import { listInquiryWorkload, WORKLOAD_DETAIL_CAP } from "./inquiryWorkload";
 
@@ -58,6 +58,8 @@ export const OPERATOR_TOOL = {
   GET_CHANNEL_EXECUTION_CAPABILITY: "get_channel_execution_capability",
   /* Knowledge Context v1-A (2026-08-29). READ: the company's own operating rules, on the turn that needs them. */
   SEARCH_ORG_KNOWLEDGE: "search_org_knowledge",
+  /* Seller Context v1-B (2026-08-30). READ: who this company is, in the seller's words, on the turn that asks. */
+  GET_SELLER_PROFILE: "get_seller_profile",
 } as const;
 
 /**
@@ -514,6 +516,23 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         + "이 질문에 해당하는 문장을 찾는다. '우리 배송 정책 뭐였지', '환불 기준으로 답해줘' 류 질문의 출처이며 "
         + "상품을 특정할 필요가 없다. 필요한 정보: POLICY.",
       schema: z.object({ query: z.string().min(1).max(400), limit: z.number().int().min(1).max(5).optional() }),
+    })),
+
+    // <b>The company's own description of itself, read on demand</b> (Seller Context v1-B). Backed by
+    // `GET /api/seller-profile`, one org-keyed row. Read only when the plan declared a COMPANY_PROFILE
+    // need — never injected into the planner or judge — and context for wording only: nothing here is
+    // evidence for a delivery, refund, exchange, A/S or spec claim, and no basis verdict reads it.
+    read(tool(async () => {
+      if (!deps.operator.getSellerProfile) {
+        return { name: null, businessSummary: null, configured: false, updatedAt: null } satisfies SellerProfileView;
+      }
+      return deps.operator.getSellerProfile();
+    }, {
+      name: OPERATOR_TOOL.GET_SELLER_PROFILE,
+      description:
+        "판매자가 설정에 등록한 회사 소개(어떤 회사인지, 주 고객층·업종). '우리 회사는 어떤 곳으로 등록돼 있어', "
+        + "'우리 업체 특성을 고려해서' 같은 질문에서만 읽는다. 배송·환불·규격의 근거가 아니다. 필요한 정보: COMPANY_PROFILE.",
+      schema: z.object({}),
     })),
 
     read(tool(async () => deps.operator.getChannelCoverage?.() ?? [], {
