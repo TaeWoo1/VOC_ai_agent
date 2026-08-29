@@ -32,14 +32,16 @@ function runtime(client: FakeSpringClient, store = new InMemoryInquiryDraftRunSt
 }
 
 describe("inquiry draft-preparation runtime", () => {
-  it("prepares a rule-based draft for the top OPEN inquiry and mutates nothing", async () => {
+  // Knowledge Context v1-A: the rule provider names the category and writes NO text — a template
+  // promise was the evidence-free draft this package closes. The run is honest about it: not prepared.
+  it("selects the top OPEN inquiry, names its category, prepares NO template text and mutates nothing", async () => {
     const client = new FakeSpringClient(twoInquiries());
     const { rt } = runtime(client);
 
     const res = await rt.run("t-draft", { intent: "PREPARE_INQUIRY_DRAFT" });
 
     expect(res.status).toBe("DONE");
-    expect(res.preparation.prepared).toBe(true);
+    expect(res.preparation.prepared).toBe(false);
     const m = res.preparation.meta!;
     // Oldest-first: the 환불 요청 item is selected; its body keys the exchange/return category.
     expect(m.workItemId).toBe(OLDER_WORK_ITEM);
@@ -48,8 +50,9 @@ describe("inquiry draft-preparation runtime", () => {
     expect(m.inquiryStatus).toBe("UNANSWERED");
     expect(m.phase).toBe("OPEN");
     expect(m.generatedAt).toBe(FIXED_NOW);
-    expect(res.preparation.replyDraft).toContain("안녕하세요");
-    expect(res.trail).toEqual(["searched", "prioritized", "detailed", "drafted"]);
+    expect(res.preparation.replyDraft).toBeNull();
+    expect(res.preparation.note).toContain("답변 기준");
+    expect(res.trail).toEqual(["searched", "prioritized", "detailed", "drafted", "no_answer_basis"]);
 
     // NO backend mutation, NO send: propose/saveDraft/confirmPublish never called.
     expect(client.calls.propose).toBe(0);
@@ -75,9 +78,8 @@ describe("inquiry draft-preparation runtime", () => {
     expect(m.isSecret).toBe(true);
     expect(m.category).toBe("delivery_status_reply");
 
-    // The generated draft is a generic template — it never echoes the customer body/contact.
-    expect(res.preparation.replyDraft).not.toContain(PHONE_TOKEN);
-    expect(res.preparation.replyDraft).not.toContain("배송 언제 오나요");
+    // No draft text at all (Knowledge Context v1-A) — so nothing can echo the customer body/contact.
+    expect(res.preparation.replyDraft).toBeNull();
 
     // The durable snapshot is BODY-FREE: metadata only, no draft text, no customer content.
     const snap = await store.load("t-secret");
@@ -85,7 +87,6 @@ describe("inquiry draft-preparation runtime", () => {
     const serialized = JSON.stringify(snap);
     expect(serialized).not.toContain(PHONE_TOKEN);
     expect(serialized).not.toContain("배송 언제 오나요");
-    expect(serialized).not.toContain(res.preparation.replyDraft!);
     // But the sanitized scalars ARE retained.
     expect(snap!.meta!.isSecret).toBe(true);
     expect(snap!.meta!.channelCode).toBe("CAFE24");

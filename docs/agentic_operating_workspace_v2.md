@@ -572,3 +572,104 @@ below the dock 0 · reload shows the stop record and the answer. Tests: frontend
 Three tests were made to await exit animations (jsdom keeps an exiting node until its exit completes).
 **Reported, not fixed:** reduced-motion was not measured in the browser (relies on Motion's own media
 handling); the `/agent` page and the contextual panel inherit the message motion but keep their layouts.
+
+## §29 Knowledge Context v1-A — the company's rules reach the Agent, and no path promises without evidence (2026-08-30)
+
+**Scope.** The audit (08-29) found the three-layer context the product wants — lightweight seller context ·
+current entity context · task-specific evidence retrieval — with layer 2 built, layer 3 built **only inside
+`InquiryDraftComposer`**, and the Agent lane unable to reach the company's own rules at all: a `POLICY` need ended
+in one fixed sentence, 「판매 정책은 SellerOps가 아직 보관하고 있지 않아 확인할 수 없습니다」, printed whether or
+not the org had written its shipping policy. This package wires the existing grounded evidence system into the
+general Agent and closes the evidence-free seller-facing paths. No Text-to-SQL, no vector store, no ontology, no
+UI redesign, no planner-latency work, **no migration**.
+
+**1. Org knowledge in the Agent lane.** One READ tool, `search_org_knowledge` → the existing
+`GET /api/org-knowledge/search` (org-scoped by the bearer; `OperatorSpringClient.searchOrgKnowledge`,
+`ToolReachability` row `INQUIRY_OPS / POLICY / requires NONE`). The POLICY branch of `inquiryOps` reads it on the
+turn that declares the need and nothing is folded into a prompt. Three shapes, each its own sentence: a passage
+covers the question ⇒ 「판매자가 등록한 배송 기준 "배송 안내"에 이렇게 적혀 있습니다: …」 (`ORG_POLICY` evidence,
+label = document title, provenance `org-knowledge/SHIPPING_POLICY:v1`); rules exist but none about this noun ⇒
+「등록된 운영 기준 중 배송에 해당하는 내용이 아직 없습니다.」; nothing registered ⇒ 「등록된 배송 기준이 아직
+없습니다.」 (`ORG_POLICY_GAP`, `claimsCoverageLimit`). The gap adds the existing `KNOWLEDGE_ENTRY` human step
+pointing at `/settings/policies`, **offered, not required** (`optional: true` — nothing can resume it; the seller
+registers and asks again). The fixed denial is gone from the source (test). **The retrieval query is the seller's
+noun, not the sentence**: 「이 문의에 우리 배송 정책 기준으로 답변해줘」 carries five words no policy contains and
+the lexical retriever's absence gate refused it live beside a policy titled 「배송 안내」; `policyQueryOf` sends
+「배송」 (or `filters.topic`), the sentence only when no noun matched.
+
+**Two live defects the first run exposed, both closed deterministically.** The planner (v6) sent the policy-only
+question to **PRODUCT_OPS with 「우리」 as a product mention** (answer: a product clarification) and, on the next
+run, to **REPORT_OPS** (answer: 「대표 보고로 올릴 항목이 없습니다」; after routing, the same sentence twice under a
+「문의:」 label). `policyRouted` is a closed-token routing like `inquiryIntent`: a POLICY need runs INQUIRY_OPS;
+a POLICY-only plan runs INQUIRY_OPS alone. And `needScopeOf` scopes a POLICY need to the **org** whatever the
+sentence named — the rules store has no product axis (a product-specific rule is `PRODUCT_KNOWLEDGE_DOC`), and
+reading it as PRODUCT scope withheld a policy the org had written. Prompt: `agent-plan-prompt/v6` adds one bullet
+(회사 운영 기준은 POLICY · 상품 entity 를 만들지 마세요 · INQUIRY_OPS + `search_org_knowledge`) and fixes the v5
+example that filed 「반품 규정이 뭐였지」 under PRODUCT_KNOWLEDGE_DOC. Measured system prompt: 8,748 → 9,150 chars
+(+≈180 tokens); catalogue +1 line.
+
+**2. The draft lane stays authoritative.** 「이 문의에 … 기준으로 답변해줘」 still goes through `DraftPreparer` →
+`POST /api/inquiries/{id}/draft/generate` → `InquiryDraftComposer` (3-lane retrieval, applicability, answer basis).
+The runtime composes no policy of its own — live, the same turn quoted the policy as a finding **and** reported the
+composer's `NO_ANSWER_BASIS` for the customer's actual text, which is the right split: the rule exists; it does not
+answer this inquiry.
+
+**3. Draft evidence summary.** `GeneratedDraftView.evidence` was dropped at `DraftPreparer.ts:127` beyond a count.
+`DraftArtifact.evidenceSummary` now carries **counts by the backend's own lane word** (상품 정보 · 운영 정책 · 과거
+답변 · 주문 상태; `evidenceSummaryOf`), persisted, no title/snippet/locator; the artifact renders 「근거 · 상품 정보 2
+· 운영 정책 1」. The passage text stays on the inquiry screen.
+
+**4. Answer Memory.** `InquiryAnswerMemoryHook.remember` now refuses anything but `SELLER` / `MODEL` author kinds
+(`isRememberable`): approving the org's `SELLER_APPROVED_FALLBACK` deferral — or a legacy `RULE` row — is a decision
+about one inquiry, not precedent. `InquiryAnswerMemoryHookFenceTest` pins the guard in front of the only write;
+`InquiryAnswerMemoryHookTest` (proof E) executes it: fallback approved ⇒ 0 memories, MODEL approved ⇒ 1. The
+AI-draft fences are unchanged.
+
+**5. The legacy rule drafter cannot promise.** `RuleBasedDraftProvider` keeps its keyword **category** and writes
+**no text** (`answerBasis: NO_ANSWER_BASIS`, provenance `rules-v2-no-basis`); its four templates — 「배송 진행 상황을
+확인하여 빠르게 안내드리겠습니다」 and kin — are deleted, not reworded. The `/api/agent-runs` lanes fail closed:
+`PREPARE_INQUIRY_DRAFT` returns `prepared: false` with 「답변 기준이 없어 초안을 만들지 않았습니다…」; the approval
+checkpoint shows an empty box, the approve button is disabled without text, and `performRecord` refuses an approval
+with no text (`NO_DRAFT_TEXT`). **A second evidence-free path was found live**: `SpringDraftProvider` drafts from
+`/api/agent/inquiry-draft`, which takes title+body only — a model reply with no retrievable basis (「정보 확인 후 …
+안내드리겠습니다」). It now asks the product's own retriever first (`GET /api/inquiries/{id}/knowledge-evidence`, no
+model) and, with no passage, returns the gap without a model call. **Reported, not fixed:** when a passage does
+exist the legacy prompt still does not carry it — that lane's grounded draft is the composer's, and the product
+owner decides whether the legacy buttons should route to it (proposal is a local phase move) or be retired.
+
+**6. Judge digest.** `productOps` put the passage body in the evidence label and the finding statement; the label
+is now the document title and the judge receives `Finding.judgeStatement` — 「…"제목"이(가) 이 질문에 해당하는
+내용을 담고 있습니다」 — while the seller still reads their own words. The org-policy finding uses the same pair.
+
+**7. Ranking.** Provenance is a **tie-break, never a weight**: `ProductKnowledgeLibraryService.search` sorts by
+coverage, then `KnowledgeAuthorship.tieBreakRank()` (SELLER_ENTERED > SELLER_AUTHORED_CHANNEL_CONTENT >
+AI_EXTRACTED_FROM_SELLER_IMAGE), then title/ordinal — `KnowledgeProvenanceTieBreakTest` pins both halves (three
+tied passages order by provenance; a more relevant image passage still wins). Answer Memory already ordered
+coverage → strength → recency (`AnswerMemoryService.resolveConflicts`); unchanged, verified.
+
+**8. Live QA (Demo Org, connectors/scheduler/proactive OFF, real planner).**
+A 「우리 배송 정책 뭐였지?」 with a SHIPPING_POLICY registered → the policy quoted verbatim as the seller's own,
+`search_org_knowledge` 1 · product knowledge 0 · memory 0, DONE (7.0 s). B same question, no policy → 「등록된 배송
+기준이 아직 없습니다.」 + `KNOWLEDGE_ENTRY → /settings/policies`, DONE, no denial sentence. C 「이 문의에 우리 배송
+정책 기준으로 답변해줘」 on a real Cafe24 shipping inquiry with the policy present → composer called, **NO_ANSWER_BASIS**
+(the retriever's absence gate: the customer's text is not about the rule) + `KNOWLEDGE_ENTRY`, the policy quoted
+beside it; the GROUNDED + evidence-summary shape is proven in the harness (`knowledgeContext.test.ts` C/D) — no real
+inquiry in this org is answerable from a shipping policy, so the live GROUNDED case is **not shown**. D
+(product knowledge + org policy, no cross-variant mixing) is proven by `InquiryEvidenceRetrieverTest` (mixed
+question keeps both lanes; variant asymmetry) — no product-bound inquiry in this org mentions shipping. E proven by
+`InquiryAnswerMemoryHookTest` (an approval on a real inquiry was not performed). F live: `/api/agent-runs`
+PREPARE_INQUIRY_DRAFT → `prepared: false`, `rules-v2-no-basis`, `agent_draft_seam reason=NO_ANSWER_BASIS`, **draft
+model calls 0**; HANDLE_UNANSWERED_INQUIRIES → checkpoint `replyDraft: ""`. G 「최근 문의 3개 보여줘」 →
+`list_inquiry_rows` only; org knowledge 0 · product knowledge 0 · memory 0 (query-accuracy regression suite green).
+Counts: marketplace calls 0 · marketplace WRITE 0 · migrations 0 · draft-model calls 0 · planner/judge calls ≈12
+across the QA runs · DB rows: one `SHIPPING_POLICY` document created for A/C and deleted afterwards; the C inquiry's
+work item moved OPEN→PROPOSED by the chat lane's own proposal step (product behaviour, no draft version written).
+
+**Tests.** backend `InquiryAnswerMemoryHookFenceTest` · `InquiryAnswerMemoryHookTest` · `KnowledgeProvenanceTieBreakTest`
+· parser pin v6; runtime `knowledgeContext.test.ts` (A · A2 routing · B · B2 · C/D summary · G · digest · legacy F ·
+`policyRouted`), `springDraftProvider` gate cases, `draftSeam` rewritten (no template in code), legacy approvals now
+carry text; frontend `DraftArtifact` summary line. Reported, not fixed: the legacy model lane's ungrounded prompt
+(§5), the chat message still appending the org-wide scope note 「이 질문에 대해 확인한 것은 전체 집계뿐이라…」 on a
+product-scoped draft turn (pre-existing), and the retriever's absence gate being the reason C is not GROUNDED on
+real data (by design — not retuned here).
+

@@ -40,6 +40,8 @@ export interface DraftProvenance {
 
 /** In-memory input; seller-owned content that must stay off every log line. */
 export interface DraftInput {
+  /** The work item, when the caller has one — lets a provider check for grounding before drafting. */
+  readonly workItemId?: string;
   readonly title: string;
   readonly details: string | null;
   readonly status: string;
@@ -48,9 +50,15 @@ export interface DraftInput {
 
 export interface DraftCandidate {
   readonly title: string;
+  /** Empty when no evidence-grounded text exists — a checkpoint may show it, nothing may record it. */
   readonly comments: string;
   readonly category: string;
   readonly provenance: DraftProvenance;
+  /**
+   * Knowledge Context v1-A: set when the candidate carries NO reply text because nothing grounded one.
+   * The legacy lanes surface it as a gap; `performRecord` refuses to save an approval without text.
+   */
+  readonly answerBasis?: "NO_ANSWER_BASIS";
 }
 
 export interface DraftModelProvider {
@@ -64,49 +72,32 @@ export interface DraftModelProvider {
 }
 
 /**
- * Deterministic, closed-vocabulary reply drafter. Pure: no network, no LLM, no clock,
- * no fs. Selects a coarse category from keyword hits in the seller's own title/details
- * and returns a templated starter reply for that category. Same input → same output.
+ * Deterministic, closed-vocabulary CATEGORISER — and, since Knowledge Context v1-A, no longer a drafter.
+ *
+ * It used to return a templated starter reply per category: 「배송 진행 상황을 확인하여 빠르게 안내
+ * 드리겠습니다」, 「교환/반품/환불 절차를 확인하여 처리 방법을 안내드리겠습니다」. Those were promises
+ * made in the seller's voice with no evidence behind them — the same shape the backend deleted from
+ * its own draft path on 2026-08-26 — and a checkpoint that showed one looked reviewed while being
+ * grounded in a keyword. The category survives (it names what the inquiry is about and is safe to
+ * log); the text does not. A candidate from here carries `answerBasis: NO_ANSWER_BASIS` and an empty
+ * body, which the legacy graphs surface as a gap and which `performRecord` refuses to record.
+ * Pure: no network, no LLM, no clock, no fs. Same input → same output.
  */
 export class RuleBasedDraftProvider implements DraftModelProvider {
   readonly provenance: DraftProvenance = {
     providerKind: "RULE_BASED",
     name: "rule-drafter",
-    version: "rules-v1",
+    version: "rules-v2-no-basis",
   };
 
-  private static readonly RULES: ReadonlyArray<{ category: string; keywords: readonly string[]; template: string }> = [
-    {
-      category: "delivery_status_reply",
-      keywords: ["배송", "택배", "발송", "출고", "송장", "delivery", "shipping"],
-      template:
-        "안녕하세요, 문의해 주셔서 감사합니다. 배송 진행 상황을 확인하여 빠르게 안내드리겠습니다. 잠시만 기다려 주세요.",
-    },
-    {
-      category: "exchange_return_reply",
-      keywords: ["교환", "반품", "환불", "취소", "return", "refund", "exchange"],
-      template:
-        "안녕하세요, 문의해 주셔서 감사합니다. 교환/반품/환불 절차를 확인하여 처리 방법을 안내드리겠습니다.",
-    },
-    {
-      category: "stock_restock_reply",
-      keywords: ["재고", "품절", "입고", "재입고", "stock", "restock"],
-      template:
-        "안녕하세요, 문의해 주셔서 감사합니다. 해당 상품의 재고/입고 일정을 확인하여 안내드리겠습니다.",
-    },
-    {
-      category: "product_info_reply",
-      keywords: ["사이즈", "색상", "옵션", "사양", "size", "color", "option", "spec"],
-      template:
-        "안녕하세요, 문의해 주셔서 감사합니다. 상품 정보를 확인하여 자세히 안내드리겠습니다.",
-    },
+  private static readonly RULES: ReadonlyArray<{ category: string; keywords: readonly string[] }> = [
+    { category: "delivery_status_reply", keywords: ["배송", "택배", "발송", "출고", "송장", "delivery", "shipping"] },
+    { category: "exchange_return_reply", keywords: ["교환", "반품", "환불", "취소", "return", "refund", "exchange"] },
+    { category: "stock_restock_reply", keywords: ["재고", "품절", "입고", "재입고", "stock", "restock"] },
+    { category: "product_info_reply", keywords: ["사이즈", "색상", "옵션", "사양", "size", "color", "option", "spec"] },
   ];
 
-  private static readonly GENERAL = {
-    category: "general_reply",
-    template:
-      "안녕하세요, 문의해 주셔서 감사합니다. 내용을 확인하여 정확하게 안내드리겠습니다. 잠시만 기다려 주세요.",
-  } as const;
+  private static readonly GENERAL_CATEGORY = "general_reply";
 
   draft(input: DraftInput): Promise<DraftCandidate> {
     return Promise.resolve(this.draftNow(input));
@@ -124,10 +115,11 @@ export class RuleBasedDraftProvider implements DraftModelProvider {
     const matched = RuleBasedDraftProvider.RULES.find((r) =>
       r.keywords.some((k) => haystack.includes(k.toLowerCase())),
     );
-    const category = matched?.category ?? RuleBasedDraftProvider.GENERAL.category;
-    const comments = matched?.template ?? RuleBasedDraftProvider.GENERAL.template;
+    const category = matched?.category ?? RuleBasedDraftProvider.GENERAL_CATEGORY;
+    // No text. A sentence here would be a promise nobody grounded.
+    const comments = "";
     // Echo the seller's own subject back as the reply title, prefixed — deterministic.
     const title = input.title ? `[답변] ${input.title}` : "[답변]";
-    return { title, comments, category, provenance: this.provenance };
+    return { title, comments, category, provenance: this.provenance, answerBasis: "NO_ANSWER_BASIS" };
   }
 }

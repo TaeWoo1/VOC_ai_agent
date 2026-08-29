@@ -235,6 +235,8 @@ export interface DraftArtifact extends ArtifactBase {
   answerBasisNote: string | null;
   knowledgeState: string | null;
   evidenceCount: number;
+  /** Passages per lane (상품 정보 · 운영 정책 · 과거 답변 · 주문 상태) — counts only, never text. */
+  evidenceSummary?: ReadonlyArray<{ scopeLabel: string; count: number }>;
   productId: string | null;
   productName: string | null;
   unavailableMessage: string | null;

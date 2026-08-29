@@ -31,6 +31,11 @@ import { log } from "../log";
 
 /** The one backend call this provider needs. Structural, so any client that has it fits. */
 export interface DraftBackend {
+  /**
+   * Knowledge Context v1-A: what the product's own retriever finds for this inquiry — a READ with no
+   * model call (`GET /api/inquiries/{id}/knowledge-evidence`). Only `passages.length` is read here.
+   */
+  previewInquiryEvidence?(workItemId: string): Promise<{ readonly knowledgeState: string; readonly passages: readonly unknown[] }>;
   generateInquiryDraft?(request: { title: string; details: string | null }): Promise<{
     available: boolean;
     category: string | null;
@@ -67,6 +72,25 @@ export class SpringDraftProvider implements DraftModelProvider {
       // A backend that predates the endpoint, or a test fake. Indistinguishable from "off" to the
       // graph, and it should be: both mean "no model draft", and both leave the shipped behaviour.
       return rule;
+    }
+    // Knowledge Context v1-A, fail closed BEFORE the model: the legacy endpoint drafts from title and
+    // body alone, so a reply it writes with no retrievable basis is a promise in the seller's voice
+    // grounded in nothing — the same defect as the deleted template, with better grammar. When the
+    // product's own retriever finds no passage for this inquiry, no model is asked and the candidate
+    // is the gap. (When it does find one, the legacy prompt still does not carry it — the grounded draft
+    // is the inquiry screen's / the chat lane's `InquiryDraftComposer`, which stays authoritative.)
+    if (input.workItemId && this.backend.previewInquiryEvidence) {
+      let preview: { readonly knowledgeState: string; readonly passages: readonly unknown[] } | null = null;
+      try {
+        preview = await this.backend.previewInquiryEvidence(input.workItemId);
+      } catch {
+        log("agent_draft_seam", { providerKind: "RULE_BASED", modelAnswered: false, reason: "PREVIEW_TRANSPORT" });
+        return rule;
+      }
+      if (!preview || preview.passages.length === 0) {
+        log("agent_draft_seam", { providerKind: "RULE_BASED", modelAnswered: false, reason: "NO_ANSWER_BASIS", knowledgeState: preview?.knowledgeState ?? null });
+        return rule;
+      }
     }
     let view;
     try {

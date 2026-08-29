@@ -56,6 +56,13 @@ export async function performRecord(registry: ToolRegistry, input: RecordInput):
     };
   }
 
+  // Knowledge Context v1-A, fail closed: an approval is of TEXT. A candidate with none (the rule
+  // categoriser, or a client that sent nothing back) has nothing to record, and recording an empty
+  // reply as an approved draft would be the promise template's failure with the words removed.
+  if (input.comments.trim().length === 0) {
+    throw new Error("NO_DRAFT_TEXT: an approval without reply text is not recorded");
+  }
+
   // OPEN -> PROPOSED (idempotent replay if already proposed).
   const proposal = await registry.invoke<ProposalResult>(TOOL.PROPOSE_REPLY, { workItemId });
   log("inquiry_propose", { phase: proposal.phase, category: proposal.proposal.summaryCategory });

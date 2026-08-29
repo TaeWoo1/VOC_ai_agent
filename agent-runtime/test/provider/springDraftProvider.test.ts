@@ -82,6 +82,32 @@ describe("SpringDraftProvider — the model, and the fallback that is the shippe
     expect(candidate.provenance.providerKind).toBe("RULE_BASED");
   });
 
+  // Knowledge Context v1-A: the legacy endpoint drafts from title/body alone. When the product's own
+  // retriever finds nothing for the inquiry, the model is not asked and the candidate is the gap.
+  it("asks the retriever first: no passage ⇒ no model call, NO_ANSWER_BASIS candidate", async () => {
+    let asked = 0;
+    const provider = new SpringDraftProvider({
+      previewInquiryEvidence: async () => ({ knowledgeState: "NO_PRODUCT", passages: [] }),
+      generateInquiryDraft: async () => { asked += 1; return MODEL_ANSWER; },
+    });
+    const candidate = await provider.draft({ ...input(), workItemId: "w-1" });
+    expect(asked).toBe(0);
+    expect(candidate.comments).toBe("");
+    expect(candidate.answerBasis).toBe("NO_ANSWER_BASIS");
+    expect(candidate.provenance.providerKind).toBe("RULE_BASED");
+  });
+
+  it("asks the retriever first: a passage exists ⇒ the model is asked as before", async () => {
+    let asked = 0;
+    const provider = new SpringDraftProvider({
+      previewInquiryEvidence: async () => ({ knowledgeState: "GROUNDED", passages: [{}] }),
+      generateInquiryDraft: async () => { asked += 1; return MODEL_ANSWER; },
+    });
+    const candidate = await provider.draft({ ...input(), workItemId: "w-1" });
+    expect(asked).toBe(1);
+    expect(candidate.comments).toBe(MODEL_ANSWER.comments);
+  });
+
   it("falls back when the backend has no such endpoint at all", async () => {
     // A client that predates the endpoint, and every test fake. Indistinguishable from "off" to the
     // graph, and it should be: both mean no model draft, and both leave the shipped behaviour.
@@ -142,8 +168,11 @@ describe("the graph's drafting node uses the seam", () => {
 
     const { preparation } = await runtime.run("t-rule", { intent: "PREPARE_INQUIRY_DRAFT" });
 
-    expect(preparation.prepared).toBe(true);
+    // Knowledge Context v1-A: the fallback categorises and writes nothing — a run that lands on it is
+    // honestly NOT prepared, and the model's sentence is not substituted by a template.
+    expect(preparation.prepared).toBe(false);
     expect(preparation.meta?.provenance.providerKind).toBe("RULE_BASED");
-    expect(preparation.replyDraft).not.toBe(MODEL_ANSWER.comments);
+    expect(preparation.replyDraft).toBeNull();
+    expect(preparation.note).toContain("답변 기준");
   });
 });

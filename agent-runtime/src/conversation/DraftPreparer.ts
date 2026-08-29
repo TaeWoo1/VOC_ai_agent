@@ -28,7 +28,7 @@ import { randomUUID } from "node:crypto";
 import type { SpringClient } from "../spring/SpringClient";
 import type { ReviewSpringClient } from "../spring/ReviewSpringClient";
 import type { GeneratedDraftView } from "../spring/types";
-import type { DraftArtifact, ToneHint } from "./contract";
+import type { DraftArtifact, DraftEvidenceSummary, ToneHint } from "./contract";
 import { ENVELOPE_FAMILY_LABEL, envelopeDiff, extractEnvelope } from "./factualEnvelope";
 import type { FactualEnvelope } from "./factualEnvelope";
 import { log } from "../log";
@@ -56,6 +56,25 @@ export interface ReviewDraftTarget {
 export function envelopeRefusal(diff: ReadonlyArray<keyof FactualEnvelope>): string {
   const families = diff.map((d) => ENVELOPE_FAMILY_LABEL[d]).join("·");
   return `말투를 바꾼 초안에서 ${families}이(가) 달라져 채택하지 않았습니다. 이전 초안을 그대로 둡니다.`;
+}
+
+/** The seller's words for each lane, in the order the draft screen lists them. */
+const LANE_ORDER = ["상품 정보", "운영 정책", "과거 답변", "주문 상태"] as const;
+
+/**
+ * How many passages each lane put in front of the drafter — counts by the backend's own `scopeLabel`,
+ * never the passage text (Knowledge Context v1-A). A lane the backend does not know is kept, last.
+ */
+export function evidenceSummaryOf(evidence: unknown): DraftEvidenceSummary[] {
+  const counts = new Map<string, number>();
+  for (const row of Array.isArray(evidence) ? evidence : []) {
+    const label = row && typeof row === "object" && typeof (row as { scopeLabel?: unknown }).scopeLabel === "string"
+      ? (row as { scopeLabel: string }).scopeLabel : null;
+    if (!label) continue;
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  const rank = (label: string) => { const i = LANE_ORDER.indexOf(label as typeof LANE_ORDER[number]); return i < 0 ? LANE_ORDER.length : i; };
+  return [...counts.entries()].sort((a, b) => rank(a[0]) - rank(b[0])).map(([scopeLabel, count]) => ({ scopeLabel, count }));
 }
 
 function headFrom(detail: Awaited<ReturnType<SpringClient["getInquiryDetail"]>> | null): { version: number; contentFingerprint: string; comments: string } | null {
@@ -125,6 +144,7 @@ export class DraftPreparer {
       answerBasisNote: view.answerBasisNote ?? view.draft?.answerBasisNote ?? null,
       knowledgeState: view.knowledgeState,
       evidenceCount: Array.isArray(view.evidence) ? view.evidence.length : 0,
+      evidenceSummary: evidenceSummaryOf(view.evidence),
       productId: view.productId ?? target.productId,
       productName: target.productName,
       unavailableMessage: view.unavailableMessage,

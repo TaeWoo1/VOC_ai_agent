@@ -27,7 +27,7 @@ import type {
 } from "./types";
 import type {
   ChannelCapabilityOverview, ChannelCoverageRow, ChannelSummary, DashboardOverview, InquiryReplyTransportRow,
-  KnowledgeSearchResult, OrderSummaryParams, OrderSummaryResponse, RecentReviewsParams, RecentReviewsResponse,
+  KnowledgeSearchResult, OrgKnowledgeSearchResult, OrderSummaryParams, OrderSummaryResponse, RecentReviewsParams, RecentReviewsResponse,
   ReviewChannelCapabilityView,
 } from "./types";
 
@@ -129,6 +129,11 @@ export interface OperatorSpringClient {
     query: string,
     limit?: number,
   ): Promise<KnowledgeSearchResult>;
+  /**
+   * The company's operating rules that cover a question — the ORG_OPERATIONS lane the draft path already
+   * reads, reachable from the Agent lane on demand (Knowledge Context v1-A). No product, no id.
+   */
+  searchOrgKnowledge?(query: string, limit?: number): Promise<OrgKnowledgeSearchResult>;
   /** Precedents for an inquiry (or a closed-vocabulary cue), with the index's coverage verdict. */
   searchCustomerMemory(params: CustomerMemorySearchParams): Promise<CustomerMemorySearch>;
   /** Repeat candidates in a trailing window. */

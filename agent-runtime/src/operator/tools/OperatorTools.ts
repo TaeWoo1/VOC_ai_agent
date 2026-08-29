@@ -22,7 +22,7 @@ import type { SpringClient } from "../../spring/SpringClient";
 import type { IssueSpringClient } from "../../spring/IssueSpringClient";
 import type {
   ChannelCapabilityOverview, ChannelCoverageRow, DashboardOverview, InquiryReplyTransportRow, OrderSummaryResponse,
-  PublishCapabilityView, RecentReviewsResponse, ReviewChannelCapabilityView, SellerAccountSummary,
+  OrgKnowledgeSearchResult, PublishCapabilityView, RecentReviewsResponse, ReviewChannelCapabilityView, SellerAccountSummary,
 } from "../../spring/types";
 import { listInquiryWorkload, WORKLOAD_DETAIL_CAP } from "./inquiryWorkload";
 
@@ -56,6 +56,8 @@ export const OPERATOR_TOOL = {
   LIST_INQUIRY_ROWS: "list_inquiry_rows",
   /* Channel-capability completion (2026-08-28). READ: four existing capability reads, one answer. */
   GET_CHANNEL_EXECUTION_CAPABILITY: "get_channel_execution_capability",
+  /* Knowledge Context v1-A (2026-08-29). READ: the company's own operating rules, on the turn that needs them. */
+  SEARCH_ORG_KNOWLEDGE: "search_org_knowledge",
 } as const;
 
 /**
@@ -493,6 +495,25 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         + "필요한지, 문의 답변을 채널로 보낼 수 있는지(출처 종류별), 리뷰 답글을 채널로 보낼 수 있는지. "
         + "런타임이 실행 경로를 정할 때 읽는 사실이며 판매자 데이터는 없다. 필요한 정보: REVIEW_SIGNAL, INQUIRY_VOLUME.",
       schema: z.object({ channel: z.enum(["NAVER", "COUPANG", "CAFE24"]) }),
+    })),
+
+    // <b>The company's operating rules, read on demand.</b> Backed by `GET /api/org-knowledge/search` —
+    // the same corpus the inquiry draft's ORG_OPERATIONS lane reads, scoped to the org by the bearer.
+    // Nothing here is injected into a prompt: the planner declares a POLICY need, and only then is the
+    // corpus searched, for this question. An empty result is a real answer with two shapes the response
+    // keeps apart (nothing registered vs. nothing that covers this question).
+    read(tool(async ({ query, limit }: { query: string; limit?: number }) => {
+      if (!deps.operator.searchOrgKnowledge) {
+        return { query, documentsSearched: 0, passagesSearched: 0, passages: [] } satisfies OrgKnowledgeSearchResult;
+      }
+      return deps.operator.searchOrgKnowledge(query, limit);
+    }, {
+      name: OPERATOR_TOOL.SEARCH_ORG_KNOWLEDGE,
+      description:
+        "회사가 등록해 둔 운영 기준(배송·주문 취소·교환·반품·환불·결제·세금계산서·현금영수증·공통 안내) 중 "
+        + "이 질문에 해당하는 문장을 찾는다. '우리 배송 정책 뭐였지', '환불 기준으로 답해줘' 류 질문의 출처이며 "
+        + "상품을 특정할 필요가 없다. 필요한 정보: POLICY.",
+      schema: z.object({ query: z.string().min(1).max(400), limit: z.number().int().min(1).max(5).optional() }),
     })),
 
     read(tool(async () => deps.operator.getChannelCoverage?.() ?? [], {

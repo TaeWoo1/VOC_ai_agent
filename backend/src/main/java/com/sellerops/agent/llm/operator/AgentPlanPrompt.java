@@ -39,7 +39,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v5";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v6";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -119,6 +119,11 @@ public final class AgentPlanPrompt {
                없습니다. 판매자가 말한 표현(mention)만 그대로 적으세요. 실제 해석은 도구가 합니다.
                - 서로 다른 질문은 서로 다른 informationNeeds 를 가져야 합니다. 규격 질문, 교환 정책 질문, \
                과거 구매와 다르다는 문의는 필요한 정보가 서로 다릅니다.
+               - **회사 운영 기준은 POLICY 입니다.** 배송·주문 취소·교환·반품·환불·결제·세금계산서·현금영수증처럼 \
+               상품과 무관하게 회사가 정해 둔 기준("우리 배송 정책 뭐였지", "환불 기준으로 답해줘")은 POLICY 이며 \
+               상품을 특정할 필요가 없습니다 — 회사 기준만 묻는 문장에는 PRODUCT entity 를 만들지 마세요. POLICY need 는 \
+               specialists 에 INQUIRY_OPS, tools 에 search_org_knowledge 를 넣으세요. 특정 상품의 설명·FAQ 에 적힌 \
+               내용은 PRODUCT_KNOWLEDGE_DOC 입니다.
                - 목록에 없는 specialist / tool / kind 이름을 만들어내지 마세요. 목록 밖 이름은 거부됩니다.
                - 목표가 지원 범위 밖이면 supported 를 false 로 두세요. 무엇을 묻는지 알 수 없으면 \
                clarificationNeeded 를 true 로 두고 무엇이 불명확한지 적으세요. 억지 계획보다 되묻는 편이 낫습니다.
@@ -128,7 +133,7 @@ public final class AgentPlanPrompt {
                거부되면 판매자는 답할 수 있었던 절반까지 잃습니다. supported=false 는 목표의 **어느 부분도** \
                지금 도구로 닿을 수 없을 때만 쓰세요.
                - 도구는 꼭 필요한 것만 고르세요. 많이 고를수록 답이 느려지고 나빠집니다.
-               - **PRODUCT_FACT 와 PRODUCT_KNOWLEDGE_DOC 는 출처가 다른 두 가지입니다.** 앞의 것은                채널이 명시한 값(규격·가격·원산지)이고, 뒤의 것은 판매자가 직접 써 둔 글(상품 설명·FAQ·               사용법·교환반품 정책)입니다. "이 상품 어떻게 쓰나요", "고객에게 어떻게 설명하지",                "반품 규정이 뭐였지" 처럼 **판매자가 쓴 문장이 있어야 답할 수 있는 질문**은                PRODUCT_KNOWLEDGE_DOC 입니다. 치수·용량 같은 값 하나를 묻는 질문은 PRODUCT_FACT 입니다.                두 가지가 다 필요하면 need 를 둘 세우세요.
+               - **PRODUCT_FACT 와 PRODUCT_KNOWLEDGE_DOC 는 출처가 다른 두 가지입니다.** 앞의 것은                채널이 명시한 값(규격·가격·원산지)이고, 뒤의 것은 판매자가 직접 써 둔 글(상품 설명·FAQ·               사용법·교환반품 정책)입니다. "이 상품 어떻게 쓰나요", "고객에게 어떻게 설명하지",                "이 상품 반품 규정이 뭐였지" 처럼 **판매자가 쓴 문장이 있어야 답할 수 있는 질문**은                PRODUCT_KNOWLEDGE_DOC 입니다. 치수·용량 같은 값 하나를 묻는 질문은 PRODUCT_FACT 입니다.                두 가지가 다 필요하면 need 를 둘 세우세요.
                - **ORDER_OPS 는 주문·매출 흐름을 답합니다** — 기간 합계, 직전 기간 대비 변화, 채널별 매출·주문, \
                일별 추이. need kind 는 ORDER_HISTORY 입니다. "매출이 왜 떨어졌어" 류는 ORDER_HISTORY(필수)를 \
                세우고, 리뷰나 문의의 변화를 함께 물었을 때만 REVIEW_SIGNAL / INQUIRY_VOLUME 을 추가하세요.

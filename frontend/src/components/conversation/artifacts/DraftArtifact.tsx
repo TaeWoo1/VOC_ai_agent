@@ -55,6 +55,11 @@ export function DraftArtifact({ artifact }: { artifact: Draft }) {
             {artifact.answerBasisNote ? <span className="break-keep text-sm text-muted">{artifact.answerBasisNote}</span> : null}
           </div>
         ) : null}
+        {artifact.evidenceSummary && artifact.evidenceSummary.length > 0 ? (
+          <p className="text-sm text-muted" aria-label="초안 근거">
+            근거 · {artifact.evidenceSummary.map((s) => `${s.scopeLabel} ${s.count}`).join(" · ")}
+          </p>
+        ) : null}
         {artifact.comments ? (
           <p className="whitespace-pre-wrap break-keep rounded-xl bg-canvas px-3 py-2 text-base leading-relaxed text-ink">{artifact.comments}</p>
         ) : artifact.version == null ? (

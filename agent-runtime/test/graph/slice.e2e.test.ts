@@ -27,7 +27,7 @@ describe("inquiry vertical slice (end to end)", () => {
     expect(fake.calls.confirmPublish).toBe(0);
     expect(fake.externalSendAttempts).toBe(0);
 
-    const done = await runtime.resume("t-e2e", { approved: true, approvedBy: "user-1" });
+    const done = await runtime.resume("t-e2e", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "user-1" });
 
     expect(done.status).toBe("DONE");
     if (done.status !== "DONE") return;

@@ -219,7 +219,8 @@ export class SpringEvidenceJudge implements EvidenceJudge {
     let view: AgentJudgeView;
     try {
       view = await this.backend.judgeFinding({
-        finding: finding.statement,
+        // A finding that quotes the seller's own passage sends the judge its metadata form only.
+        finding: finding.judgeStatement ?? finding.statement,
         evidenceDigest: digestFor(cited),
         ...(this.runId ? { runId: this.runId } : {}),
       });

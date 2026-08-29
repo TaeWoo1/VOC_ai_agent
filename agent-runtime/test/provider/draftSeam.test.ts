@@ -11,9 +11,9 @@ function input(title: string, details: string | null = null): DraftInput {
 }
 
 describe("RuleBasedDraftProvider", () => {
-  // The seam widened to `Promise<DraftCandidate>` so a provider that reaches a model fits behind it.
-  // The rule provider stays deterministic in substance — it resolves immediately, does no I/O, and
-  // gives the same answer to the same input — which is exactly what these assertions still check.
+  // Knowledge Context v1-A: the provider categorises and writes NO reply text. Its templates —
+  // 「배송 진행 상황을 확인하여 빠르게 안내드리겠습니다」 and kin — were promises in the seller's voice
+  // with nothing behind them, and they are gone, not reworded.
   it("is deterministic: same input -> same output", async () => {
     const a = await provider.draft(input("배송 언제 오나요"));
     const b = await provider.draft(input("배송 언제 오나요"));
@@ -27,12 +27,23 @@ describe("RuleBasedDraftProvider", () => {
     expect((await provider.draft(input("사이즈 알려주세요"))).category).toBe("product_info_reply");
   });
 
-  it("falls back to a general reply and tags rule-based provenance", async () => {
-    const c = await provider.draft(input("그냥 궁금해서요"));
-    expect(c.category).toBe("general_reply");
-    expect(c.provenance).toEqual({ providerKind: "RULE_BASED", name: "rule-drafter", version: "rules-v1" });
-    expect(c.title.startsWith("[답변]")).toBe(true);
-    expect(c.comments.length).toBeGreaterThan(0);
+  it("writes no text for any category — the candidate is a NO_ANSWER_BASIS gap, tagged rule-based", async () => {
+    for (const title of ["배송 문의", "환불 해주세요", "재고 있나요", "사이즈 알려주세요", "그냥 궁금해서요"]) {
+      const c = await provider.draft(input(title));
+      expect(c.comments).toBe("");
+      expect(c.answerBasis).toBe("NO_ANSWER_BASIS");
+      expect(c.provenance).toEqual({ providerKind: "RULE_BASED", name: "rule-drafter", version: "rules-v2-no-basis" });
+      expect(c.title.startsWith("[답변]")).toBe(true);
+    }
+    expect((await provider.draft(input("그냥 궁금해서요"))).category).toBe("general_reply");
+  });
+
+  it("holds no promise template in its code (comments may name what was removed)", () => {
+    const src = readFileSync(fileURLToPath(new URL("../../src/provider/DraftModelSeam.ts", import.meta.url)), "utf8");
+    const code = src.split("\n").filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join("\n");
+    for (const promise of ["안내드리겠습니다", "기다려 주세요", "template:"]) {
+      expect(code).not.toContain(promise);
+    }
   });
 
   /**

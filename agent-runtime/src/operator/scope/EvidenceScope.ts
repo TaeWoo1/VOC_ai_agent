@@ -137,6 +137,8 @@ const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
   // A quoted passage is a DETAIL: it is one identifiable thing a reader can go and check, which is
   // exactly what separates grounding from a summary.
   PRODUCT_KNOWLEDGE_DOC: "DETAIL",
+  ORG_POLICY: "DETAIL",
+  ORG_POLICY_GAP: "GAP",
   GROUPING_GAP: "GAP",
   // Agentic Operating Workspace v2: rows are a LIST, a window total is a COUNT, a missing human step
   // is a GAP — the same three shapes the rest of the table already uses.
@@ -236,7 +238,11 @@ export function needScopeOf(
     || resolved.some((r) => r.kind === "PRODUCT");
   const namesItem = named.some((m) => m.kind === "INQUIRY" || m.kind === "ORDER")
     || resolved.some((r) => r.kind === "INQUIRY" || r.kind === "ORDER");
-  const entity: EntityScope = namesProduct ? "PRODUCT" : namesItem ? "ITEM" : "ORG";
+  // Knowledge Context v1-A: a POLICY need is the company's, whatever else the sentence named. The rules
+  // store has no product axis (a product-specific rule is PRODUCT_KNOWLEDGE_DOC), so a product mention
+  // cannot narrow it — and reading it as PRODUCT scope withheld a shipping policy the org had written
+  // because the planner had called 「우리」 a product.
+  const entity: EntityScope = need.kind === "POLICY" ? "ORG" : namesProduct ? "PRODUCT" : namesItem ? "ITEM" : "ORG";
 
   const channelMention = named.find((m) => m.kind === "CHANNEL")?.mention
     ?? resolved.find((r) => r.kind === "CHANNEL")?.label

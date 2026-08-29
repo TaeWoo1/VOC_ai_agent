@@ -118,8 +118,10 @@ describe("AgentRunService contract", () => {
     expect(view.checkpoint).toBeUndefined();
     const dp = view.draftPreparation!;
     expect(dp.kind).toBe("INQUIRY_DRAFT_PREPARATION");
-    expect(dp.prepared).toBe(true);
-    expect(dp.replyDraft).toContain("안녕하세요");
+    // Knowledge Context v1-A: the rule provider writes no template, so the run is honestly not prepared.
+    expect(dp.prepared).toBe(false);
+    expect(dp.replyDraft ?? null).toBeNull();
+    expect(dp.note).toContain("답변 기준");
     expect(dp.inquiryStatus).toBe("UNANSWERED");
     expect(dp.provenance?.providerKind).toBe("RULE_BASED");
 
@@ -138,7 +140,6 @@ describe("AgentRunService contract", () => {
     const logged = JSON.stringify(getLogSink());
     expect(logged).not.toContain(PHONE_TOKEN);
     expect(logged).not.toContain(EMAIL_TOKEN);
-    expect(logged).not.toContain(dp.replyDraft!);
   });
 
   it("inquiry-draft: the draft is transient — a reloaded run and a resume both fail closed (never persisted durably)", async () => {
@@ -159,7 +160,8 @@ describe("AgentRunService contract", () => {
     expect(view.status).toBe("AWAITING_APPROVAL");
     expect(view.checkpoint?.kind).toBe("INQUIRY_REPLY_APPROVAL");
     const cp = view.checkpoint as { replyDraft?: string };
-    expect(cp.replyDraft).toContain("안녕하세요");
+    // Knowledge Context v1-A: no template text — the checkpoint shows an empty box the seller fills.
+    expect(cp.replyDraft).toBe("");
     const serialized = JSON.stringify(view);
     for (const leak of [PHONE_TOKEN, EMAIL_TOKEN, "사이즈 문의", "환불 요청", "색상 옵션"]) {
       expect(serialized).not.toContain(leak);
@@ -168,7 +170,7 @@ describe("AgentRunService contract", () => {
 
   it("inquiry: resume approve records at the backend and never sends", async () => {
     const start = await service.start("tok", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-    const done = await service.resume("tok", start.threadId, { approved: true, approvedBy: "SELLER:test" });
+    const done = await service.resume("tok", start.threadId, { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" });
     expect(done.status).toBe("DONE");
     expect((done.outcome as { decision: string }).decision).toBe("APPROVED");
     expect((done.outcome as { externalSendAttempted: boolean }).externalSendAttempted).toBe(false);
@@ -197,11 +199,11 @@ describe("AgentRunService contract", () => {
     expect(JSON.stringify(start)).not.toContain(PHONE_TOKEN);
     expect(JSON.stringify(start)).not.toContain(EMAIL_TOKEN);
 
-    const done = await service.resume("tok", start.threadId, { approved: true, approvedBy: "SELLER:test" });
+    const done = await service.resume("tok", start.threadId, { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" });
     expect(done.status).toBe("DONE");
     expect((done.outcome as { guidedSessionPrepared: boolean }).guidedSessionPrepared).toBe(true);
     expect(fakes.review.mintCount).toBe(1);
-    const again = await service.resume("tok", start.threadId, { approved: true, approvedBy: "SELLER:test" });
+    const again = await service.resume("tok", start.threadId, { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" });
     expect(again.status).toBe("DONE");
     expect(fakes.review.mintCount).toBe(1);
     expect(fakes.review.externalSendAttempts).toBe(0);
@@ -293,7 +295,7 @@ describe("AgentRunService contract", () => {
 
       const start = await svcA.start("tok", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
       expect(start.status).toBe("AWAITING_APPROVAL");
-      const done = await svcB.resume("tok", start.threadId, { approved: true, approvedBy: "SELLER:test" });
+      const done = await svcB.resume("tok", start.threadId, { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" });
       expect(done.status).toBe("DONE");
       expect((done.outcome as { decision: string }).decision).toBe("APPROVED");
       expect(fakes.inquiry.externalSendAttempts).toBe(0);
@@ -306,9 +308,9 @@ describe("AgentRunService contract", () => {
     getLogSink();
     try {
       const inq = await service.start("tok", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-      await service.resume("tok", inq.threadId, { approved: true, approvedBy: "SELLER:test" });
+      await service.resume("tok", inq.threadId, { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" });
       const rev = await service.start("tok", { intent: "HANDLE_REVIEW_REPLIES", accountId: ACCOUNT });
-      await service.resume("tok", rev.threadId, { approved: true, approvedBy: "SELLER:test" });
+      await service.resume("tok", rev.threadId, { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" });
       await service.start("tok", { intent: "HANDLE_OPERATIONS_ISSUES" });
       const dump = JSON.stringify(getLogSink());
       for (const leak of [PHONE_TOKEN, EMAIL_TOKEN, "사이즈 문의", "하자가 있어요", "원문"]) {

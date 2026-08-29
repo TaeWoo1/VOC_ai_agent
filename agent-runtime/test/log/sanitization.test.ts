@@ -29,7 +29,7 @@ describe("log sanitization", () => {
     const runtime = new InquiryAgentRuntime({ client: fake });
 
     await runtime.start("t-log", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-    await runtime.resume("t-log", { approved: true, approvedBy: "user-1" });
+    await runtime.resume("t-log", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "user-1" });
 
     const blob = JSON.stringify(sink);
     expect(sink.length).toBeGreaterThan(0); // it did log sanitized progress

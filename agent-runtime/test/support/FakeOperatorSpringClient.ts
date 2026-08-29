@@ -30,6 +30,7 @@ import type {
   DashboardOverview,
   InquiryReplyTransportRow,
   KnowledgeSearchResult,
+  OrgKnowledgeSearchResult,
   ReviewChannelCapabilityView,
   OrderSummaryParams,
   OrderSummaryResponse,
@@ -82,6 +83,8 @@ export interface FakeOperatorSeed {
    * does not do. Absent ⇒ the product has no library, which is the honest "아직 아무것도 쓰지 않음".
    */
   readonly productKnowledgeSearch?: Record<string, KnowledgeSearchResult>;
+  /** The org's operating rules, as one search result; absent = nothing registered. */
+  readonly orgKnowledgeSearch?: OrgKnowledgeSearchResult;
   /**
    * When absent, the client has NO planGoal method at all.
    *
@@ -139,7 +142,7 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
   readonly calls = {
     inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
     plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0, channelCoverage: 0,
-    knowledgeSearch: 0, recentReviews: 0, overview: 0, ordersSummary: 0, channels: 0,
+    knowledgeSearch: 0, orgKnowledgeSearch: 0, recentReviews: 0, overview: 0, ordersSummary: 0, channels: 0,
     channelOverview: 0, transports: 0, reviewChannelCapability: 0,
   };
   /** Every recent-reviews request, so a test can assert the window and filters the read was made with. */
@@ -223,6 +226,7 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
       (this as OperatorSpringClient).judgeFinding = async (request) => {
         this.calls.judge += 1;
         this.judgeDigests.push(request.evidenceDigest);
+        this.judgeFindings.push(request.finding);
         return seed.judge!;
       };
     }
@@ -382,6 +386,19 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     // Mirrors the backend's expansion: a bare name matches its namespaced key. A fake that required the
     // full key would let a specialist ship a lookup that silently finds nothing in production.
     return all.filter((f) => factKeys.some((k) => f.factKey === k || f.factKey.endsWith(`:${k}`)));
+  }
+
+  readonly orgKnowledgeQueries: string[] = [];
+  /** Every finding sentence handed to the model judge — what leaves for the vendor. */
+  readonly judgeFindings: string[] = [];
+
+  async searchOrgKnowledge(query: string, limit?: number): Promise<OrgKnowledgeSearchResult> {
+    this.calls.orgKnowledgeSearch += 1;
+    this.orgKnowledgeQueries.push(query);
+    const seeded = this.seed.orgKnowledgeSearch;
+    if (!seeded) return { query, documentsSearched: 0, passagesSearched: 0, passages: [] };
+    const cap = limit && limit > 0 ? limit : seeded.passages.length;
+    return { ...seeded, query, passages: seeded.passages.slice(0, cap) };
   }
 
   async searchProductKnowledge(

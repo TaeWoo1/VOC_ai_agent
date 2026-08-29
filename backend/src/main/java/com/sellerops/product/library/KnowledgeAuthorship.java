@@ -55,6 +55,22 @@ public enum KnowledgeAuthorship {
      * it is the statement that an extracted figure has one more way to be wrong than a typed one,
      * and so needs the same treatment a variant-unresolved spec already gets.
      */
+    /**
+     * Provenance as a TIE-BREAK between passages of equal relevance — never a weight.
+     *
+     * <p>Knowledge Context v1-A: a seller-typed passage outranks the same-scoring channel passage,
+     * which outranks the same-scoring passage a model read off an image. Relevance and applicability
+     * are decided first and are not overturned by this number; two passages that differ in coverage
+     * never reach it. Lower sorts first.
+     */
+    public int tieBreakRank() {
+        return switch (this) {
+            case SELLER_ENTERED_KNOWLEDGE -> 0;
+            case SELLER_AUTHORED_CHANNEL_CONTENT -> 1;
+            case AI_EXTRACTED_FROM_SELLER_IMAGE -> 2;
+        };
+    }
+
     public boolean carriesExactFiguresUnaided() {
         return this != AI_EXTRACTED_FROM_SELLER_IMAGE;
     }

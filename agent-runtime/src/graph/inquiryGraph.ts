@@ -122,6 +122,7 @@ export function buildInquiryGraph(deps: InquiryGraphDeps) {
   async function generateDraft(state: AgentState): Promise<Partial<AgentState>> {
     const d = state.detail!;
     const candidate = await drafter.draft({
+      workItemId: state.selected!.workItemId,
       title: d.title,
       details: d.details,
       status: d.status,

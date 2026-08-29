@@ -213,7 +213,9 @@ describe("the run says what it did not find out", () => {
     expect(policyNeed!.status).toBe("UNSATISFIABLE");
     // The one sentence that must never appear: a policy asserted without a policy source.
     expect(answer.findings.some((f) => /교환이 가능합니다|교환됩니다/.test(f.statement))).toBe(false);
-    expect(answer.findings.some((f) => f.statement.includes("보관하고 있지 않아"))).toBe(true);
+    // Knowledge Context v1-A: the rules store WAS read (this org has none) — the gap is named, not denied.
+    expect(answer.findings.some((f) => f.statement.includes("기준이 아직 없습니다"))).toBe(true);
+    expect(answer.findings.some((f) => f.statement.includes("보관하고 있지 않아"))).toBe(false);
   });
 });
 

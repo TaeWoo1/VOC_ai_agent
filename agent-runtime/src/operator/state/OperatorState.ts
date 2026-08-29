@@ -70,6 +70,14 @@ export type EvidenceKind =
    */
   | "PRODUCT_KNOWLEDGE_DOC"
   /**
+   * A passage of the company's OWN operating rules — `org_knowledge_sources` (Knowledge Context v1-A).
+   * Not a product fact and not a product document: it belongs to the org, names no product, and is what
+   * a sentence about 배송·교환·환불 기준 rests on.
+   */
+  | "ORG_POLICY"
+  /** The company has no registered rule that covers this question — its own fact, never a refusal. */
+  | "ORG_POLICY_GAP"
+  /**
    * An axis the data cannot be cut along — "반복 문의에는 상품 정보가 없다".
    *
    * <b>Its own kind because it is its own fact.</b> A grouped answer that quietly stopped grouping
@@ -199,6 +207,12 @@ export interface Finding {
   readonly findingId: string;
   readonly specialist: SpecialistName;
   readonly statement: string;
+  /**
+   * What the MODEL judge is shown instead of `statement`, when the statement quotes the seller's own
+   * passage (Knowledge Context v1-A). The seller reads their own words; the judge needs only that a
+   * document of this kind and title covers the question — the passage body never leaves for the vendor.
+   */
+  readonly judgeStatement?: string;
   readonly evidenceIds: readonly string[];
   readonly confidence: FindingConfidence;
   readonly verdict: JudgeVerdict | null;

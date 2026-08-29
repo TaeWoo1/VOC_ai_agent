@@ -49,6 +49,7 @@ import type {
   ProductKnowledge,
   ChannelCoverageRow,
   KnowledgeSearchResult,
+  OrgKnowledgeSearchResult,
   ChannelSummary,
   DashboardOverview,
   GeneratedDraftView,
@@ -243,6 +244,13 @@ export class HttpSpringClient
    * make the endpoint a second reader of inquiry content with its own authorization story to get
    * right. Reads nothing, writes nothing, moves no state.
    */
+  /** The product's own retrieval for one inquiry, with no model call (Knowledge Context v1-A). */
+  async previewInquiryEvidence(workItemId: string): Promise<{ readonly knowledgeState: string; readonly passages: readonly unknown[] }> {
+    return this.request<{ readonly knowledgeState: string; readonly passages: readonly unknown[] }>(
+      "GET", `/api/inquiries/${encodeURIComponent(workItemId)}/knowledge-evidence`,
+    );
+  }
+
   async generateInquiryDraft(request: { title: string; details: string | null }): Promise<AgentDraftView> {
     return this.request<AgentDraftView>("POST", `/api/agent/inquiry-draft`, request);
   }
@@ -480,6 +488,19 @@ export class HttpSpringClient
       "GET",
       `/api/products/${encodeURIComponent(productId)}/knowledge/search?${params.toString()}`,
     );
+  }
+
+  /**
+   * The company's own operating rules (배송·교환·환불·결제·세금계산서…), narrowed to what answers `query`.
+   *
+   * <b>Org-scoped by the bearer, never by an argument.</b> The same `SellerOperationsKnowledgeService`
+   * the inquiry draft lane reads; this is the Agent lane reaching it on the turn that needs it, not the
+   * corpus being folded into a prompt (Knowledge Context v1-A).
+   */
+  async searchOrgKnowledge(query: string, limit?: number): Promise<OrgKnowledgeSearchResult> {
+    const params = new URLSearchParams({ query });
+    if (limit && limit > 0) params.set("limit", String(limit));
+    return this.request<OrgKnowledgeSearchResult>("GET", `/api/org-knowledge/search?${params.toString()}`);
   }
 
   // ─────────────── Agentic Operating Workspace v2 (2026-08-27) ───────────────

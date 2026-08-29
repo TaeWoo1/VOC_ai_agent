@@ -199,6 +199,14 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
 
   // ── InquiryOps — the queue, the repeats, and what was answered before.
   {
+    // Knowledge Context v1-A: a POLICY need is met by reading the company's own rules — nothing to
+    // resolve first, since the rules are the org's and the org is the bearer's.
+    specialist: "INQUIRY_OPS",
+    tool: OPERATOR_TOOL.SEARCH_ORG_KNOWLEDGE,
+    needKinds: ["POLICY"],
+    requires: ["NONE"],
+  },
+  {
     specialist: "INQUIRY_OPS",
     tool: OPERATOR_TOOL.GET_TODAY_INBOX,
     needKinds: ["INQUIRY_VOLUME"],

@@ -890,6 +890,47 @@ export interface KnowledgeSearchResult {
   readonly passages: KnowledgePassage[];
 }
 
+/* ─────────────── Knowledge Context v1-A (2026-08-29) — the company's operating rules, read on demand ─────────────── */
+
+/** The closed vocabulary of `org_knowledge_sources.knowledge_type` (backend `OrgKnowledgeType`). */
+export type OrgKnowledgeType =
+  | "SHIPPING_POLICY" | "CANCELLATION_POLICY" | "EXCHANGE_REFUND_POLICY" | "PAYMENT_POLICY"
+  | "TAX_INVOICE" | "CASH_RECEIPT" | "GENERAL_CS_FAQ" | "OTHER";
+
+/** One passage of GET /api/org-knowledge/search (mirror of `OrgKnowledgePassage`). */
+export interface OrgKnowledgePassage {
+  readonly sourceId: string;
+  readonly chunkId: string;
+  readonly knowledgeType: OrgKnowledgeType | string;
+  readonly title: string;
+  readonly content: string;
+  readonly ordinal: number;
+  readonly score: number;
+  readonly authorName: string | null;
+  readonly sourceUrl: string | null;
+  readonly version: number;
+  readonly updatedAt: string | null;
+}
+
+/** GET /api/org-knowledge/search — org-scoped by the bearer; `documentsSearched: 0` is "nothing registered". */
+export interface OrgKnowledgeSearchResult {
+  readonly query: string;
+  readonly documentsSearched: number;
+  readonly passagesSearched: number;
+  readonly passages: OrgKnowledgePassage[];
+}
+
+/** One evidence row of a generated draft (mirror of `DraftEvidenceView`). `snippet` is never forwarded. */
+export interface DraftEvidenceRef {
+  readonly kind: string;
+  readonly scopeLabel: string;
+  readonly title: string | null;
+  readonly locator: string | null;
+  readonly sourceId: string | null;
+  readonly chunkId: string | null;
+  readonly snippet: string | null;
+}
+
 /* ─────────────── Agentic Operating Workspace v2 (2026-08-27) — conversation-lane reads ─────────────── */
 
 /** One row of GET /api/reviews/recent. `preview` is the backend's sanitized preview, or null when textless. */
@@ -1057,7 +1098,7 @@ export interface GeneratedDraftView {
   readonly answerBasisNote: string | null;
   readonly answerBasisAction: string | null;
   readonly productId: string | null;
-  readonly evidence: unknown[];
+  readonly evidence: ReadonlyArray<DraftEvidenceRef>;
   readonly unavailableMessage: string | null;
 }
 

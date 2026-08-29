@@ -54,7 +54,7 @@ describe("durable restart-resume", () => {
     // Simulate restart: a brand-new runtime (empty in-memory checkpointer + liveThreads),
     // same durable store, same backend.
     const after = new InquiryAgentRuntime({ client: fake, runStore: store });
-    const done = await after.resume("t-restart", { approved: true, approvedBy: "user-1" });
+    const done = await after.resume("t-restart", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "user-1" });
 
     expect(done.status).toBe("DONE");
     if (done.status !== "DONE") return;
@@ -93,8 +93,8 @@ describe("durable restart-resume", () => {
     const fake = new FakeSpringClient(twoInquiries());
 
     await new InquiryAgentRuntime({ client: fake, runStore: store }).start("t-dbl", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-    const first = await new InquiryAgentRuntime({ client: fake, runStore: store }).resume("t-dbl", { approved: true, approvedBy: "u" });
-    const second = await new InquiryAgentRuntime({ client: fake, runStore: store }).resume("t-dbl", { approved: true, approvedBy: "u" });
+    const first = await new InquiryAgentRuntime({ client: fake, runStore: store }).resume("t-dbl", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "u" });
+    const second = await new InquiryAgentRuntime({ client: fake, runStore: store }).resume("t-dbl", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "u" });
 
     expect(first.status).toBe("DONE");
     expect(second.status).toBe("DONE");
@@ -146,7 +146,7 @@ describe("resume fails closed against an execution-enabled backend", () => {
     const enabled = new FakeSpringClient(twoInquiries(), { dispatchAdapterEnabled: true });
     const runtime = new InquiryAgentRuntime({ client: enabled, runStore: store });
 
-    await expect(runtime.resume("t-guard-resume", { approved: true, approvedBy: "u" })).rejects.toThrow(
+    await expect(runtime.resume("t-guard-resume", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "u" })).rejects.toThrow(
       /reply-send is ENABLED/,
     );
     expect(enabled.calls.propose).toBe(0);

@@ -16,7 +16,7 @@ describe("approval idempotency (deterministic commandId)", () => {
     const runtime = new InquiryAgentRuntime({ client: fake });
 
     await runtime.start("t-idem", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-    const done = await runtime.resume("t-idem", { approved: true, approvedBy: "user-1" });
+    const done = await runtime.resume("t-idem", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "user-1" });
     expect(done.status).toBe("DONE");
     if (done.status !== "DONE") return;
 
@@ -38,7 +38,7 @@ describe("approval idempotency (deterministic commandId)", () => {
     const runtime = new InquiryAgentRuntime({ client: fake });
 
     await runtime.start("t-conf", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-    const done = await runtime.resume("t-conf", { approved: true, approvedBy: "user-1" });
+    const done = await runtime.resume("t-conf", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "user-1" });
     if (done.status !== "DONE") throw new Error("expected DONE");
     const fingerprint = done.outcome!.approvedFingerprint!;
 

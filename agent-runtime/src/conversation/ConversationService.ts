@@ -550,6 +550,19 @@ export class ConversationService {
         : "지금 먼저 하실 일은 없습니다.";
     }
 
+    // Knowledge Context v1-A: a POLICY need the company's rules could not meet is a gap the seller can
+    // close on the rules screen — offered, not required (nothing here can resume; the seller asks again).
+    const policyGap = answer.evidence.find((e) => e.kind === "ORG_POLICY_GAP");
+    if (policyGap && !artifacts.some((a) => a.type === "HUMAN_ACTION_REQUIRED" && a.actionType === "KNOWLEDGE_ENTRY")) {
+      const topic = (policyGap.locator.label ?? "운영 기준 없음").replace(/ 기준 없음$/, "");
+      artifacts.push({
+        artifactId: "a-policy-gap", type: "HUMAN_ACTION_REQUIRED",
+        title: `${topic} 기준을 등록하면 답할 수 있습니다`,
+        actionType: "KNOWLEDGE_ENTRY", reason: "NO_ANSWER_BASIS", path: "WORKSPACE",
+        channelCode: null, channelNameKo: null, accountId: null, dataType: null,
+        to: "/settings/policies", requestedAt: this.now(), resumable: false, optional: true,
+      });
+    }
     const humans = artifacts.filter((a): a is HumanActionRequiredArtifact => a.type === "HUMAN_ACTION_REQUIRED");
     // An offered refresh (`optional`) is a control under the rows, not a reason to wait: the turn is DONE.
     const human = humans.find((h) => !h.optional) ?? null;
@@ -1225,7 +1238,7 @@ function evidenceOf(answer: OperatorAnswer): EvidenceArtifact | null {
     REVIEW_ISSUE: "반복 리뷰 문제", ISSUE_EVIDENCE: "리뷰 문제 근거", NEGATIVE_REVIEW: "부정 리뷰",
     CUSTOMER_MEMORY: "과거 사례", REPEATED_INQUIRY: "반복 문의", CHANNEL_COVERAGE: "채널 수집 상태",
     HUMAN_ACTION: "필요한 작업", PRODUCT_FACT: "상품 정보", PRODUCT_LISTING: "채널 등록 정보",
-    PRODUCT_VARIANT: "옵션 정보", PRODUCT_KNOWLEDGE_DOC: "판매자가 쓴 글", PRODUCT_SIGNAL: "상품 신호",
+    PRODUCT_VARIANT: "옵션 정보", PRODUCT_KNOWLEDGE_DOC: "판매자가 쓴 글", ORG_POLICY: "운영 기준", ORG_POLICY_GAP: "운영 기준 없음", PRODUCT_SIGNAL: "상품 신호",
   };
   return {
     artifactId: "a-evidence", type: "EVIDENCE", title: "확인한 자료",

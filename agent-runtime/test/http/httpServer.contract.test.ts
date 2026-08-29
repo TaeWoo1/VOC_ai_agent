@@ -124,7 +124,7 @@ describe("HTTP server contract", () => {
     const resumeRes = await fetch(`${base}/api/agent-runs/${encodeURIComponent(threadId)}/resume`, {
       method: "POST",
       headers: auth,
-      body: JSON.stringify({ approved: true, approvedBy: "SELLER:test" }),
+      body: JSON.stringify({ approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" }),
     });
     expect(resumeRes.status).toBe(200);
     expect((await json(resumeRes)).status).toBe("DONE");

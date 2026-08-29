@@ -80,7 +80,7 @@ describe("AgentRunService on the Spring store — pilot concurrency + durability
 
     const start = await svcA.start(TOKEN, { intent: "HANDLE_UNANSWERED_INQUIRIES" });
     expect(start.status).toBe("AWAITING_APPROVAL");
-    const done = await svcB.resume(TOKEN, start.threadId, { approved: true, approvedBy: "SELLER:test" });
+    const done = await svcB.resume(TOKEN, start.threadId, { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" });
     expect(done.status).toBe("DONE");
     expect((done.outcome as { decision: string }).decision).toBe("APPROVED");
   });
@@ -94,7 +94,7 @@ describe("AgentRunService on the Spring store — pilot concurrency + durability
     expect(start.status).toBe("AWAITING_APPROVAL");
     expect(fakes.review.mintCount).toBe(0);
 
-    const decision = { approved: true, approvedBy: "SELLER:test" };
+    const decision = { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" };
     const [r1, r2] = await Promise.all([
       svc.resume(TOKEN, start.threadId, decision).catch((e) => e),
       svc.resume(TOKEN, start.threadId, decision).catch((e) => e),
@@ -119,8 +119,8 @@ describe("AgentRunService on the Spring store — pilot concurrency + durability
     const svc = new AgentRunService({ storeProvider: providerOver(backend), clientFactory: factory(fakes, ORG), env: "development" });
 
     const start = await svc.start(TOKEN, { intent: "HANDLE_REVIEW_REPLIES", accountId: ACCOUNT });
-    const first = await svc.resume(TOKEN, start.threadId, { approved: true, approvedBy: "SELLER:test" });
-    const second = await svc.resume(TOKEN, start.threadId, { approved: true, approvedBy: "SELLER:test" });
+    const first = await svc.resume(TOKEN, start.threadId, { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" });
+    const second = await svc.resume(TOKEN, start.threadId, { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "SELLER:test" });
     expect(first.status).toBe("DONE");
     expect(second.status).toBe("DONE");
     expect(fakes.review.mintCount).toBe(1);

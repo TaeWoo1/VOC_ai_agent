@@ -299,9 +299,9 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
           locator: {
             productId, productName,
             facet: passage.sourceType,
-            // The label IS the quotable passage. An evidence row whose label is a title would let a
-            // reader verify that a document exists, which is not what the sentence rested on.
-            label: passage.content,
+            // The label is the document's TITLE. The passage body is what the seller reads in the
+            // finding, not what leaves for the judge: the digest is metadata (Knowledge Context v1-A).
+            label: passage.title,
             sourceId: passage.sourceId,
             chunkId: passage.chunkId,
             title: passage.title,
@@ -320,6 +320,9 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
           // knowledge invites the seller to trust it further than its source allows.
           statement: `${productName} — 판매자가 등록한 ${sourceTypeLabel(passage.sourceType)}`
             + `"${passage.title}"에 이렇게 적혀 있습니다: ${passage.content}`,
+          // The judge sees that a document of this kind and title covers the question — not its text.
+          judgeStatement: `${productName} — 판매자가 등록한 ${sourceTypeLabel(passage.sourceType)}`
+            + `"${passage.title}"이(가) 이 질문에 해당하는 내용을 담고 있습니다.`,
           evidenceIds: [ref.evidenceId],
           confidence: "NEEDS_REVIEW",
           verdict: null,

@@ -604,7 +604,9 @@ function InquiryCheckpointCard({
       <div className="mt-3 flex gap-2">
         <button
           className="btn-primary"
-          disabled={busy || checkpoint.replyDraft === undefined}
+          // Knowledge Context v1-A: an approval is of text. With none on screen there is nothing to
+          // approve, and the runtime refuses to record an empty reply anyway.
+          disabled={busy || checkpoint.replyDraft === undefined || reply.trim().length === 0}
           // **Always the text on screen, not only when it was edited.**
           //
           // The runtime cannot replay a draft it never stored (`RunSnapshot` holds no draft text, by

@@ -20,6 +20,7 @@ import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorSt
 import type { NeedState } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import type { SpecialistInput } from "./specialistInput";
+import type { OrgKnowledgeSearchResult } from "../../spring/types";
 import type {
   CustomerMemorySearch, InboxSummary, InquiryQueueResponse, RepeatedInquiry,
 } from "../../spring/types";
@@ -37,7 +38,50 @@ import { inquiryIntentOf, readInquiryWorkload } from "./inquiryWorkloadStep";
 import { readInquiryRows } from "./inquiryRowsStep";
 
 /** Where the POLICY answer comes from — a store that does not exist, named honestly. Not a tool. */
-const POLICY_STORE = "policy-store";
+/** Where the company's rules are written and read — the only link a policy finding may carry. */
+const POLICY_SCREEN = "/settings/policies";
+/** Passages quoted per POLICY need. The draft lane keeps one per lane; three is enough to say a rule. */
+const POLICY_PASSAGES_MAX = 3;
+/** `OrgKnowledgeType` → the seller's word for it (mirror of the backend's `labelKo`). */
+const ORG_KNOWLEDGE_LABEL: Record<string, string> = {
+  SHIPPING_POLICY: "배송", CANCELLATION_POLICY: "주문 취소", EXCHANGE_REFUND_POLICY: "교환 · 반품 · 환불",
+  PAYMENT_POLICY: "결제", TAX_INVOICE: "세금계산서", CASH_RECEIPT: "현금영수증", GENERAL_CS_FAQ: "공통 안내", OTHER: "기타",
+};
+/**
+ * The noun the seller used → the seller-facing word and the retrieval query.
+ *
+ * The query is the NOUN, not the sentence: the rules store is searched by a lexical retriever with an
+ * absence gate over the question's content words, and 「이 문의에 우리 배송 정책 기준으로 답변해줘」
+ * carries five words no policy contains. Live, that sentence found nothing beside a shipping policy
+ * whose title was 「배송 안내」. The noun is what the seller asked about; the rest was addressed to us.
+ */
+const POLICY_TOPIC_WORDS: ReadonlyArray<readonly [RegExp, string, string]> = [
+  [/배송|택배|출고|발송/, "배송", "배송"], [/교환|반품|환불/, "교환·반품·환불", "교환 반품 환불"],
+  [/취소/, "주문 취소", "주문 취소"], [/세금계산서/, "세금계산서", "세금계산서"],
+  [/현금영수증/, "현금영수증", "현금영수증"], [/결제|카드|무통장/, "결제", "결제"],
+];
+
+function policyTopicOf(input: SpecialistInput, need: { readonly question: string }): readonly [string, string] | null {
+  const topic = input.filters?.topic;
+  if (topic === "SHIPPING") return ["배송", "배송"];
+  if (topic === "EXCHANGE_RETURN") return ["교환·반품·환불", "교환 반품 환불"];
+  for (const text of [input.goalText ?? "", input.plannerGoal ?? "", need.question]) {
+    const hit = POLICY_TOPIC_WORDS.find(([re]) => re.test(text));
+    if (hit) return [hit[1], hit[2]];
+  }
+  return null;
+}
+
+function policyQueryOf(input: SpecialistInput, need: { readonly question: string }): string {
+  const topic = policyTopicOf(input, need);
+  if (topic) return topic[1];
+  const goal = (input.goalText ?? input.plannerGoal ?? "").trim();
+  return (goal.length > 0 ? goal : need.question).slice(0, 400);
+}
+
+function policyTopicWord(input: SpecialistInput, need: { readonly question: string }): string {
+  return policyTopicOf(input, need)?.[0] ?? "운영";
+}
 
 /**
  * How much of the queue one read takes, and what counts as having waited.
@@ -505,40 +549,93 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
       continue;
     }
 
-    // POLICY — declared, and honestly unanswerable today.
-    //
-    // Nothing in this repository stores a seller or channel policy: not the exchange window, not the
-    // return conditions, not the warranty. v2 lets the planner DECLARE that need — which is what makes
-    // "교환 가능한가요?" a structurally different investigation from "폭이 몇 mm인가요?" — and then says
-    // plainly that it cannot be met. Answering it from a review or a past reply would be inventing a
-    // policy from anecdote, which is the exact failure invariant I3 forbids.
-    const ref = evidence.add({
-      kind: "PRODUCT_KNOWLEDGE_GAP",
-      // <b>Not a tool name.</b> No tool produced this row and none could: the absence of a policy store
-      // is the fact. It used to be stamped `get_inquiry_thread_context`, a tool nothing in the runtime
-      // has ever invoked, which made a dead capability look like a read that had happened (A5).
-      sourceTool: POLICY_STORE,
-      args: { need: need.id },
-      locator: { facet: "POLICY", label: "정책" },
-      coverage: "COVERED",
-      provenance: "policy-store/UNAVAILABLE",
-    });
-    refs.push(ref);
-    findings.push({
-      findingId: `f-${ref.evidenceId}`,
-      specialist: "INQUIRY_OPS",
-      statement: "교환·반품·보증 같은 판매 정책은 SellerOps가 아직 보관하고 있지 않아 확인할 수 없습니다.",
-      evidenceIds: [ref.evidenceId],
-      confidence: "NEEDS_REVIEW",
-      verdict: null,
-      surfaceLink: null,
-      claimsCoverageLimit: true,
-      needId: need.id,
-    });
-    needStates.push({
-      id: need.id, status: "UNSATISFIABLE", evidenceIds: [ref.evidenceId],
-      reason: "판매 정책이 저장돼 있지 않습니다.",
-    });
+    // POLICY — the company's own operating rules, read on the turn that needs them (Knowledge Context
+    // v1-A). Before this the branch was a fixed sentence — 「판매 정책은 보관하고 있지 않아」 — and it
+    // was wrong for every org that had written one: `org_knowledge_sources` existed, the inquiry draft
+    // lane read it, and the Agent lane could not reach it. Now the same corpus is searched, org-scoped
+    // by the bearer, and an empty result is the gap it always was — said with the seller's own noun and
+    // the screen where the rule can be written. Nothing here composes a policy: the sentence quotes the
+    // passage or says none is registered.
+    if (!budget.spend("tool")) {
+      needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+      continue;
+    }
+    const query = policyQueryOf(input, need);
+    const topic = policyTopicWord(input, need);
+    const attempt = await attemptTool(
+      { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.SEARCH_ORG_KNOWLEDGE, needId: need.id },
+      () => registry.invoke<OrgKnowledgeSearchResult>(
+        OPERATOR_TOOL.SEARCH_ORG_KNOWLEDGE, { query, limit: POLICY_PASSAGES_MAX }, allowedTools,
+      ),
+    );
+    if (!attempt.ok) {
+      failures.push(attempt.failure);
+      needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+      continue;
+    }
+    succeeded += 1;
+    const found = attempt.value;
+    if (found.passages.length === 0) {
+      const registered = found.documentsSearched > 0;
+      const ref = evidence.add({
+        kind: "ORG_POLICY_GAP",
+        sourceTool: OPERATOR_TOOL.SEARCH_ORG_KNOWLEDGE,
+        args: { query },
+        locator: { facet: "POLICY", label: `${topic} 기준 없음` },
+        coverage: "COVERED",
+        provenance: `org-knowledge/${registered ? "NO_MATCH" : "EMPTY"}`,
+      });
+      refs.push(ref);
+      findings.push({
+        findingId: `f-${ref.evidenceId}`,
+        specialist: "INQUIRY_OPS",
+        statement: registered
+          ? `등록된 운영 기준 중 ${topic}에 해당하는 내용이 아직 없습니다.`
+          : `등록된 ${topic} 기준이 아직 없습니다.`,
+        evidenceIds: [ref.evidenceId],
+        confidence: "NEEDS_REVIEW",
+        verdict: null,
+        surfaceLink: POLICY_SCREEN,
+        claimsCoverageLimit: true,
+        needId: need.id,
+      });
+      needStates.push({
+        id: need.id, status: "UNSATISFIABLE", evidenceIds: [ref.evidenceId],
+        reason: registered ? "등록된 운영 기준이 이 질문을 다루지 않습니다." : "등록된 운영 기준이 없습니다.",
+      });
+      continue;
+    }
+    const cited: string[] = [];
+    for (const passage of found.passages.slice(0, POLICY_PASSAGES_MAX)) {
+      const ref = evidence.add({
+        kind: "ORG_POLICY",
+        sourceTool: OPERATOR_TOOL.SEARCH_ORG_KNOWLEDGE,
+        args: { query },
+        // Metadata only: the title is the label, the body stays in the finding the seller reads.
+        locator: { facet: String(passage.knowledgeType), label: passage.title, title: passage.title,
+          sourceId: passage.sourceId, chunkId: passage.chunkId },
+        asOf: passage.updatedAt ? passage.updatedAt.slice(0, 10) : null,
+        coverage: "COVERED",
+        provenance: `org-knowledge/${passage.knowledgeType}:v${passage.version}`,
+      });
+      refs.push(ref);
+      cited.push(ref.evidenceId);
+      const kindLabel = ORG_KNOWLEDGE_LABEL[String(passage.knowledgeType)] ?? "운영";
+      findings.push({
+        findingId: `f-${ref.evidenceId}`,
+        specialist: "INQUIRY_OPS",
+        // The seller reads their own words, attributed as theirs.
+        statement: `판매자가 등록한 ${kindLabel} 기준 "${passage.title}"에 이렇게 적혀 있습니다: ${passage.content}`,
+        // The judge learns that a rule of this kind and title covers the question — never its text.
+        judgeStatement: `판매자가 등록한 ${kindLabel} 기준 "${passage.title}"이(가) 이 질문에 해당하는 내용을 담고 있습니다.`,
+        evidenceIds: [ref.evidenceId],
+        confidence: "NEEDS_REVIEW",
+        verdict: null,
+        surfaceLink: POLICY_SCREEN,
+        needId: need.id,
+      });
+    }
+    needStates.push({ id: need.id, status: "SATISFIED", evidenceIds: cited });
   }
 
   // <b>What the run may say about the inquiry it was opened on — from the runtime's ref, no read.</b>

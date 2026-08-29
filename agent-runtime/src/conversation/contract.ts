@@ -285,11 +285,21 @@ export interface DraftArtifact extends ArtifactBase {
   readonly answerBasisNote: string | null;
   readonly knowledgeState: string | null;
   readonly evidenceCount: number;
+  /**
+   * Passages per lane, by the backend's own lane word (상품 정보 · 운영 정책 · 과거 답변 · 주문 상태) —
+   * metadata only, kept on reload. The passage text lives on the inquiry screen (Knowledge Context v1-A).
+   */
+  readonly evidenceSummary?: ReadonlyArray<DraftEvidenceSummary>;
   readonly productId: string | null;
   readonly productName: string | null;
   readonly unavailableMessage: string | null;
   readonly tone: ToneHint | null;
   readonly to: string;
+}
+
+export interface DraftEvidenceSummary {
+  readonly scopeLabel: string;
+  readonly count: number;
 }
 
 export interface EvidenceArtifact extends ArtifactBase {

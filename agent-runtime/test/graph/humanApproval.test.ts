@@ -46,7 +46,7 @@ describe("human checkpoint gate", () => {
     const runtime = new InquiryAgentRuntime({ client: fake });
 
     await runtime.start("t-approve", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-    const done = await runtime.resume("t-approve", { approved: true, approvedBy: "user-1" });
+    const done = await runtime.resume("t-approve", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "user-1" });
 
     expect(done.status).toBe("DONE");
     expect(fake.auditEvents(OLDER_WORK_ITEM)).toContain("APPROVAL_GRANTED");
@@ -59,7 +59,7 @@ describe("human checkpoint gate", () => {
     const failClosed = new FakeSpringClient(twoInquiries());
     const runtime = new InquiryAgentRuntime({ client: failClosed });
     await runtime.start("t-fc", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-    await runtime.resume("t-fc", { approved: true, approvedBy: "user-1" });
+    await runtime.resume("t-fc", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "user-1" });
     expect(failClosed.externalSendAttempts).toBe(0);
     expect(failClosed.phaseOf(OLDER_WORK_ITEM)).toBe("ACTION_PENDING");
 

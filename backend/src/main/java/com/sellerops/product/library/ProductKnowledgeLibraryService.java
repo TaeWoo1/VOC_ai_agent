@@ -171,6 +171,11 @@ public class ProductKnowledgeLibraryService {
                     source.getAuthoredOrigin(), variantNames.get(source.getVariantId())));
         }
         hits.sort(Comparator.comparingDouble(KnowledgePassage::score).reversed()
+                // Equal relevance: what the seller typed before what a channel page said before what
+                // a model read off an image (Knowledge Context v1-A). A tie-break, not a weight — it
+                // cannot lift a less relevant passage over a more relevant one.
+                .thenComparingInt(p -> p.authoredOrigin() == null
+                        ? Integer.MAX_VALUE : p.authoredOrigin().tieBreakRank())
                 // Ties resolve by document order, not by whatever the map iterated — an answer that
                 // cites a different passage on every identical run is not reproducible evidence.
                 .thenComparing(KnowledgePassage::title)

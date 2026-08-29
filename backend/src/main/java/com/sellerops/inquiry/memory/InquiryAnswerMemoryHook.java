@@ -4,6 +4,7 @@ import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.MarkupText;
 import com.sellerops.inquiry.Inquiry;
+import com.sellerops.inquiry.draft.DraftAuthorKind;
 import com.sellerops.inquiry.proposal.InquiryProposalProvider;
 import com.sellerops.inquiry.reply.InquiryReplyDraft;
 import com.sellerops.knowledge.memory.AnswerMemoryService;
@@ -79,6 +80,14 @@ public class InquiryAnswerMemoryHook {
         if (inquiry == null || draft == null) {
             return;
         }
+        if (!isRememberable(draft.getAuthorKind())) {
+            // Knowledge Context v1-A: approving the org's own 「확인 후 안내드리겠습니다」 deferral is a
+            // decision about THIS inquiry, not a statement of how the company answers that question.
+            // Remembering it would make a content-free sentence come back as 과거 답변 precedent.
+            log.info("answer-memory hook skipped org={} strength={} authorKind={}: not an answer",
+                    inquiry.getOrgId(), strength, draft.getAuthorKind());
+            return;
+        }
         try {
             String title = MarkupText.toPlainText(inquiry.getTitle());
             String body = MarkupText.toPlainText(inquiry.getBody());
@@ -113,5 +122,21 @@ public class InquiryAnswerMemoryHook {
     private String channelCode(UUID channelId) {
         return channelId == null ? null
                 : channels.findById(channelId).map(Channel::getCode).orElse(null);
+    }
+
+    /**
+     * Only a sentence a person wrote or a model wrote FROM EVIDENCE is an answer worth remembering.
+     *
+     * <p>{@code SELLER_APPROVED_FALLBACK} is the company's pre-approved deferral — approved once in
+     * settings, reproduced verbatim where no basis existed. {@code RULE} was a template promise.
+     * Neither says how the company answers the question, so neither may become precedent for it.
+     * A null kind is a row from before the column existed and is treated as the seller's own.
+     */
+    static boolean isRememberable(String authorKind) {
+        if (authorKind == null || authorKind.isBlank()) {
+            return true;
+        }
+        return DraftAuthorKind.SELLER.name().equals(authorKind)
+                || DraftAuthorKind.MODEL.name().equals(authorKind);
     }
 }

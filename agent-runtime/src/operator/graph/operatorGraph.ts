@@ -209,7 +209,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // Order matters and is the plan's, not this function's: PRODUCT_OPS runs first when present so a
     // resolved product is available to the specialists that can use one, and REPORT_OPS runs last
     // because it composes what the others produced.
-    const ordered = orderSpecialists(plan.specialistTargets);
+    // Knowledge Context v1-A: a POLICY need is INQUIRY_OPS's whatever the planner named (the rules store
+    // is org-scoped and needs no product), and a plan whose ONLY needs are POLICY does not run
+    // PRODUCT_OPS — live, 「우리 배송 정책 뭐였지」 was answered with a product clarification.
+    const ordered = policyRouted(orderSpecialists(plan.specialistTargets), plan);
     const scopeRejections: RejectedEvidence[] = [];
     const specialistFailures: ToolFailure[] = [];
     // Every ref the run has minted so far, not just this specialist's. REPORT_OPS cites the OTHERS'
@@ -734,6 +737,20 @@ function scopeForNeed(
 ): NeedScope {
   const need = plan.informationNeeds.find((n) => n.id === needId);
   return need ? needScopeOf(plan, need, resolved) : planScopeOf(plan, resolved);
+}
+
+/**
+ * Deterministic routing from the closed need token: POLICY ⇒ INQUIRY_OPS runs; a POLICY-only plan runs
+ * INQUIRY_OPS alone. Live, the planner sent 「우리 배송 정책 뭐였지」 to PRODUCT_OPS (a product
+ * clarification) and, on the next try, to REPORT_OPS (which restated the one policy sentence under a
+ * 「문의:」 label). Neither is a report or a product question; the rule is a closed-token routing, the
+ * same kind `inquiryIntent` already is.
+ */
+export function policyRouted(ordered: readonly SpecialistName[], plan: Pick<InvestigationPlan, "informationNeeds">): SpecialistName[] {
+  const needs = plan.informationNeeds;
+  if (!needs.some((n) => n.kind === "POLICY")) return [...ordered];
+  if (needs.every((n) => n.kind === "POLICY")) return ["INQUIRY_OPS"];
+  return ordered.includes("INQUIRY_OPS") ? [...ordered] : orderSpecialists([...ordered, "INQUIRY_OPS"]);
 }
 
 function orderSpecialists(targets: readonly SpecialistName[]): SpecialistName[] {

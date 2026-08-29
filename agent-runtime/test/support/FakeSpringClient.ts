@@ -481,7 +481,8 @@ export class FakeSpringClient implements SpringClient {
       answerBasisNote: seeded.answerBasisNote ?? (basis === "NO_ANSWER_BASIS" ? "답변 기준이 필요합니다." : null),
       answerBasisAction: seeded.answerBasisAction ?? null,
       productId: it.seed.productId ?? null,
-      evidence: [],
+      // Seeded lane rows (Knowledge Context v1-A) — the runtime keeps only counts by scopeLabel.
+      evidence: seeded.evidence ?? [],
       unavailableMessage: unavailable,
     };
   }

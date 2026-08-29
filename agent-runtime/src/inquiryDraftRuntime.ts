@@ -111,6 +111,20 @@ export class InquiryDraftAgentRuntime {
       generatedAt: this.now(),
     };
 
+    // Knowledge Context v1-A: a candidate with no text is not a prepared draft. The rule categoriser
+    // (and the model seam's fallback onto it) names the category and nothing else; saying `prepared`
+    // would hand the operator an empty box that looks reviewed. Fail closed: not prepared, said why.
+    if (final.candidate.answerBasis === "NO_ANSWER_BASIS" || final.candidate.comments.trim().length === 0) {
+      await this.runStore.save({ threadId, status: "DONE", prepared: false, meta, trail: [...trail, "no_answer_basis"] });
+      log("inquiry_draft_run_done", { prepared: false, reason: "NO_ANSWER_BASIS", category: meta.category });
+      return {
+        status: "DONE",
+        preparation: { prepared: false, meta, replyDraft: null,
+          note: "답변 기준이 없어 초안을 만들지 않았습니다. 문의 화면에서 답변 기준을 등록하면 초안을 준비합니다." },
+        trail: [...trail, "no_answer_basis"],
+      };
+    }
+
     // Snapshot is body-free: metadata only, never candidate.comments/title.
     await this.runStore.save({ threadId, status: "DONE", prepared: true, meta, trail });
     // Log coarse, non-content scalars only. (An "isSecret" key would be dropped by the log filter's
