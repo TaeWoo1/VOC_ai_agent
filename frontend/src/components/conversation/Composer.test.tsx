@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Composer } from "./Composer";
 
@@ -26,8 +26,8 @@ describe("composer (Chat UI v1)", () => {
     await userEvent.click(screen.getByRole("button", { name: "중지" }));
     expect(onStop).toHaveBeenCalledTimes(1);
     rerender(<Composer onSend={() => undefined} busy />);
-    expect(screen.queryByRole("button", { name: "중지" })).toBeNull();
-    expect(screen.getByRole("button", { name: "보내기" })).toBeDisabled();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "중지" })).toBeNull());
+    expect(await screen.findByRole("button", { name: "보내기" })).toBeDisabled();
   });
 
   it("disabled: the box and the send are inert and the state is named", () => {

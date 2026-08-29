@@ -67,7 +67,7 @@ describe("sidebar conversation list (Chat UI v1)", () => {
     shell();
     await screen.findByRole("list", { name: "지난 대화" });
     await userEvent.click(screen.getByRole("button", { name: "대화", expanded: true }));
-    expect(screen.queryByRole("list", { name: "지난 대화" })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("list", { name: "지난 대화" })).toBeNull());
     await userEvent.click(screen.getByRole("button", { name: "대화", expanded: false }));
     expect(await screen.findByRole("list", { name: "지난 대화" })).toBeInTheDocument();
   });

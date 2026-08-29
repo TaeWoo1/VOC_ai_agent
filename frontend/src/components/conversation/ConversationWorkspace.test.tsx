@@ -97,11 +97,12 @@ describe("conversation provider + workspace", () => {
     expect(Array.from(items).map((li) => li.textContent)).toEqual(["✓요청을 이해했습니다"]);
     expect(progress).not.toHaveTextContent("계획");
     // Stop is real and sits where Send was.
-    expect(screen.getByRole("button", { name: "중지" })).toBeInTheDocument();
+    // The control swaps in place with a short crossfade, so it is awaited, never assumed.
+    expect(await screen.findByRole("button", { name: "중지" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "보내기" })).toBeNull();
     await act(async () => finish());
     expect(await screen.findByText("이 상품에 미답변 문의는 없습니다.")).toBeInTheDocument();
-    expect(screen.queryByTestId("conversation-progress")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("conversation-progress")).toBeNull());
     // Evidence is folded, not first.
     expect(screen.getByText("확인한 자료")).toBeInTheDocument();
   });
@@ -118,8 +119,8 @@ describe("conversation provider + workspace", () => {
     await userEvent.click(await screen.findByRole("button", { name: "중지" }));
     expect(await screen.findByText("요청을 중지했습니다. 이미 시작된 확인은 되돌리지 않습니다.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.queryByTestId("conversation-progress")).toBeNull();
-    expect(screen.getByRole("button", { name: "보내기" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("conversation-progress")).toBeNull());
+    expect(await screen.findByRole("button", { name: "보내기" })).toBeInTheDocument();
     const turnsShown = screen.getAllByTestId("agent-turn");
     expect(turnsShown[turnsShown.length - 1]).toHaveAttribute("data-status", "FAILED");
   });

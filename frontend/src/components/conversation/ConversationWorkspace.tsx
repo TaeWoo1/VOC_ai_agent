@@ -81,7 +81,11 @@ export function ConversationWorkspace({
           />
         </div>
       </div>
-      <div className={`shrink-0 ${compact ? "border-t border-line bg-surface px-4 py-3" : "bg-canvas px-4 pb-4 pt-2 md:px-8"}`}>
+      {/* The dock (Chat Motion v1): the box sits 20px off the viewport edge on a solid ground, and the
+          transcript slides UNDER a short fade above it — a deliberate edge, not a box floating in the
+          scroll. One fade, one place; it is the only gradient in the shell. */}
+      <div className={`relative shrink-0 ${compact ? "border-t border-line bg-surface px-4 py-3" : "bg-canvas px-4 pb-5 pt-1 md:px-8"}`} data-testid="composer-dock">
+        {!compact ? <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-canvas to-transparent" /> : null}
         <div className={compact ? "" : "mx-auto w-full max-w-[840px]"}>
           {conversation.plannerOff ? (
             <p className="mb-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn" role="status">

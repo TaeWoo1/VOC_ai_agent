@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { LAYOUT, MESSAGE, SWAP } from "../../lib/motion";
 import { ArtifactView } from "./ArtifactView";
 import { ProgressView } from "./ProgressView";
 import { EvidenceArtifact } from "./artifacts/EvidenceArtifact";
@@ -41,26 +43,36 @@ export function ConversationTimeline({
   }, [turns.length, busy]);
   const lastAgent = [...turns].reverse().find((t) => t.role === "AGENT")?.turnId ?? null;
 
+  // A thread that is already there (a reload, an opened conversation) is not re-played: `initial={false}`
+  // means only turns that ARRIVE animate. Layout is animated so a turn that appears or a progress row that
+  // leaves moves its neighbours instead of teleporting them.
   return (
     <div className={compact ? "space-y-4" : "space-y-5"} aria-label="대화" role="log">
-      {turns.map((turn) =>
-        turn.role === "USER" ? (
-          <UserTurn key={turn.turnId} text={turn.text ?? ""} />
-        ) : (
-          <AgentTurn
-            key={turn.turnId}
-            turn={turn}
-            compact={compact}
-            latest={turn.turnId === lastAgent && !busy}
-            onPrompt={onPrompt}
-            onResume={() => onResume(turn.turnId)}
-          />
-        ),
-      )}
-      {busy ? <ProgressView stages={stages} elapsed={elapsed} /> : null}
-      {error ? (
-        <p className="break-keep rounded-xl border border-line bg-canvas px-4 py-2.5 text-sm text-bad" role="alert">{error}</p>
-      ) : null}
+      <AnimatePresence initial={false}>
+        {turns.map((turn) => (
+          <motion.div key={turn.turnId} layout="position" variants={MESSAGE} initial="hidden" animate="shown" transition={LAYOUT}>
+            {turn.role === "USER" ? (
+              <UserTurn text={turn.text ?? ""} />
+            ) : (
+              <AgentTurn
+                turn={turn}
+                compact={compact}
+                latest={turn.turnId === lastAgent && !busy}
+                onPrompt={onPrompt}
+                onResume={() => onResume(turn.turnId)}
+              />
+            )}
+          </motion.div>
+        ))}
+        {busy ? (
+          <motion.div key="progress" layout="position" variants={MESSAGE} initial="hidden" animate="shown" exit="gone" transition={LAYOUT}>
+            <ProgressView stages={stages} elapsed={elapsed} />
+          </motion.div>
+        ) : null}
+        {error ? (
+          <motion.p key="error" variants={MESSAGE} initial="hidden" animate="shown" exit="gone" className="break-keep rounded-xl border border-line bg-canvas px-4 py-2.5 text-sm text-bad" role="alert">{error}</motion.p>
+        ) : null}
+      </AnimatePresence>
       <div ref={endRef} />
     </div>
   );
@@ -98,16 +110,24 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume }: { turn: Displa
       </div>
       {shown.length > 0 ? (
         <div className={`space-y-2.5 ${compact ? "" : "pl-6"}`}>
-          {shown.map((artifact) => (
-            <div key={artifact.artifactId} data-artifact={artifact.type}>
-              <ArtifactView artifact={artifact} onResume={onResume} />
-            </div>
-          ))}
+          {/* Artifacts animate their own layout: a card that grows (a guided run engaged, a disclosure
+              opened) or is replaced glides; the ones around it follow. */}
+          <AnimatePresence initial={false}>
+            {shown.map((artifact) => (
+              <motion.div key={artifact.artifactId} layout variants={MESSAGE} initial="hidden" animate="shown" exit="gone" transition={LAYOUT} data-artifact={artifact.type}>
+                <ArtifactView artifact={artifact} onResume={onResume} />
+              </motion.div>
+            ))}
+          </AnimatePresence>
         </div>
       ) : null}
-      {latest && turn.suggestedActions.length > 0 ? (
-        <Suggestions actions={turn.suggestedActions} compact={compact} onPrompt={onPrompt} onResume={onResume} />
-      ) : null}
+      <AnimatePresence initial={false}>
+        {latest && turn.suggestedActions.length > 0 ? (
+          <motion.div key="suggestions" layout="position" variants={MESSAGE} initial="hidden" animate="shown" exit="gone" transition={LAYOUT}>
+            <Suggestions actions={turn.suggestedActions} compact={compact} onPrompt={onPrompt} onResume={onResume} />
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
       {evidence.length > 0 ? (
         <div className={compact ? "" : "pl-6"}>
           <Disclosure label="확인한 자료" note={evidence.reduce((n, e) => n + (e.type === "EVIDENCE" ? e.items.length : 0), 0) || undefined} summaryClassName="px-0">
@@ -141,7 +161,11 @@ function CopyButton({ text }: { text: string }) {
       title="복사"
       className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition hover:bg-canvas hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 group-hover:opacity-100"
     >
-      <NavIcon name={done ? "check" : "copy"} className="h-4 w-4" />
+      <AnimatePresence initial={false} mode="wait">
+        <motion.span key={done ? "check" : "copy"} variants={SWAP} initial="hidden" animate="shown" exit="gone" className={`inline-flex ${done ? "text-good" : ""}`}>
+          <NavIcon name={done ? "check" : "copy"} className="h-4 w-4" />
+        </motion.span>
+      </AnimatePresence>
     </button>
   );
 }

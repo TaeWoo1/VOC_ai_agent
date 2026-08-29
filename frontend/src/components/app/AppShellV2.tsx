@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MotionConfig } from "motion/react";
 import { Outlet, useLocation } from "react-router-dom";
 import { SideNav } from "./SideNav";
 import { AppTopBar } from "./AppTopBar";
@@ -39,6 +40,7 @@ export function AppShellV2() {
   }, [location.pathname]);
 
   return (
+    <MotionConfig reducedMotion="user">
     <AgentPanelProvider>
     <ConversationProvider>
     <div className="flex h-full flex-col">
@@ -92,5 +94,6 @@ export function AppShellV2() {
     </div>
     </ConversationProvider>
     </AgentPanelProvider>
+    </MotionConfig>
   );
 }

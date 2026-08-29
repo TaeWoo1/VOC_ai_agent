@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { SWAP } from "../../lib/motion";
 import { NavIcon } from "../icons/NavIcon";
 import { asksToSend, SEND_FENCE_COPY } from "../../lib/agentSendFence";
 
@@ -102,27 +104,42 @@ export function Composer({
           }}
           className="min-h-[28px] min-w-0 flex-1 resize-none bg-transparent py-1 text-base leading-relaxed text-ink placeholder:text-muted focus:outline-none disabled:cursor-not-allowed"
         />
-        {canStop ? (
-          <button
-            type="button"
-            onClick={onStop}
-            aria-label="중지"
-            title="중지"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-white transition hover:bg-ink/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
-          >
-            <NavIcon name="stop" className="h-4 w-4" />
-          </button>
-        ) : (
-          <button
-            type="submit"
-            aria-label="보내기"
-            title="보내기 (Enter)"
-            disabled={blocked || !text.trim()}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-700 text-white transition hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 disabled:bg-line disabled:text-muted"
-          >
-            <NavIcon name="arrowUp" className="h-5 w-5" />
-          </button>
-        )}
+        {/* One place, two states: the control crossfades in situ (150 ms) so the hand never moves. */}
+        <span className="relative inline-flex h-9 w-9 shrink-0">
+          <AnimatePresence initial={false} mode="wait">
+            {canStop ? (
+              <motion.button
+                key="stop"
+                type="button"
+                onClick={onStop}
+                aria-label="중지"
+                title="중지"
+                variants={SWAP}
+                initial="hidden"
+                animate="shown"
+                exit="gone"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-ink text-white transition-colors hover:bg-ink/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+              >
+                <NavIcon name="stop" className="h-4 w-4" />
+              </motion.button>
+            ) : (
+              <motion.button
+                key="send"
+                type="submit"
+                aria-label="보내기"
+                title="보내기 (Enter)"
+                disabled={blocked || !text.trim()}
+                variants={SWAP}
+                initial="hidden"
+                animate="shown"
+                exit="gone"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-brand-700 text-white transition-colors hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 disabled:bg-line disabled:text-muted"
+              >
+                <NavIcon name="arrowUp" className="h-5 w-5" />
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </span>
       </div>
       {sendAsked ? (
         <p className="break-keep rounded-lg bg-canvas px-3 py-2 text-sm text-muted" data-testid="agent-send-fence">

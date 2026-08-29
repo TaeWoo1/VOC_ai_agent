@@ -543,3 +543,32 @@ Tests: frontend 210 files / 2,560 · runtime 609. Marketplace calls 0 · WRITE 0
 3 (the live stop/turn proofs). **Reported, not fixed:** the planner step itself cannot be aborted mid-flight
 (the backend→vendor call has no abort seam), so a stop lands after it; no motion added (next package); the
 `/agent` page keeps its legacy sections under the thread.
+
+## §28 Chat Motion v1 — restrained motion + dock geometry (2026-08-29)
+
+`frontend/` only; Agent / query / freshness / runtime untouched. Dependency: `motion` (Motion for React).
+
+**Dock geometry first.** Measured on the real screen: the box sat 15 px off the bottom edge with the
+transcript ending hard above it — readable as "a box in the scroll". Now the composer ground is solid
+canvas with the box 20 px off the viewport edge, and the transcript slides UNDER a 24 px fade above the
+dock (the one gradient in the shell). Measured after: nothing rendered below the box at any width; the
+textarea's bottom edge is 31 px from the viewport in every state (71 px on an empty thread = the example
+chips under the box).
+
+**Motion system** (`lib/motion.ts`, four numbers): ease-out `[0.22,1,0.36,1]`; FAST 150 ms · BASE 200 ms
+· layout 220 ms. New user/agent message: fade + rise 8 px. Artifacts, the progress row, follow-up chips:
+`layout` animated so an appearance, a replacement or an expansion moves its neighbours instead of
+teleporting them (HumanAction → result is the same path: the card exits, the list enters, the column
+glides). Send ↔ Stop and copy ↔ check: crossfade + 0.85 scale in place (150 ms). Sidebar thread list:
+height auto ↔ 0 (200/150 ms). A thread already on screen (reload, opened conversation) is **not**
+re-played (`AnimatePresence initial={false}`). No springs, no bounce, no route transition (not needed:
+the shell does not remount between routes). `MotionConfig reducedMotion="user"` honours
+`prefers-reduced-motion` (transforms dropped, opacity kept). Nothing gates an interaction — every
+animation runs on the element that already changed.
+
+**QA** (Playwright, 1440 / 1366 / 1152 × empty · sidebar · 10-turn thread · long artifact · HumanAction;
+1440 also keyboard send · running · stop · reload): hscroll 0 · console errors 0 · off-host 0 · elements
+below the dock 0 · reload shows the stop record and the answer. Tests: frontend 210 files / 2,561.
+Three tests were made to await exit animations (jsdom keeps an exiting node until its exit completes).
+**Reported, not fixed:** reduced-motion was not measured in the browser (relies on Motion's own media
+handling); the `/agent` page and the contextual panel inherit the message motion but keep their layouts.
