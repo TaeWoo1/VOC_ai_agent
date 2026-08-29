@@ -118,20 +118,23 @@ describe("AgentRunService contract", () => {
     expect(view.checkpoint).toBeUndefined();
     const dp = view.draftPreparation!;
     expect(dp.kind).toBe("INQUIRY_DRAFT_PREPARATION");
-    // Knowledge Context v1-A: the rule provider writes no template, so the run is honestly not prepared.
-    expect(dp.prepared).toBe(false);
-    expect(dp.replyDraft ?? null).toBeNull();
-    expect(dp.note).toContain("답변 기준");
+    // Knowledge Context v1-A closure: the draft is the product's own composer's saved version.
+    expect(dp.prepared).toBe(true);
+    expect(dp.replyDraft).toBe("안녕하세요. 문의 주신 내용 확인했습니다.");
     expect(dp.inquiryStatus).toBe("UNANSWERED");
-    expect(dp.provenance?.providerKind).toBe("RULE_BASED");
+    expect(dp.provenance).toEqual({ providerKind: "LLM", name: "inquiry-draft-composer", version: "composer/v1" });
+    expect(dp.answerBasis).toBe("GROUNDED");
+    expect(dp.draftVersion).toBe(1);
 
     // The view carries the generated draft + scalar metadata but NEVER the customer body/contact.
     const serialized = JSON.stringify(view);
     expect(serialized).not.toContain(PHONE_TOKEN);
     expect(serialized).not.toContain(EMAIL_TOKEN);
 
-    // No mutation, no send.
-    expect(fakes.inquiry.calls.propose).toBe(0);
+    // The product's own PREPARE (propose + one generated version) and nothing further: no approval,
+    // no send.
+    expect(fakes.inquiry.calls.propose).toBe(1);
+    expect(fakes.inquiry.calls.generate).toBe(1);
     expect(fakes.inquiry.calls.saveDraft).toBe(0);
     expect(fakes.inquiry.calls.confirmPublish).toBe(0);
     expect(fakes.inquiry.externalSendAttempts).toBe(0);
@@ -152,16 +155,18 @@ describe("AgentRunService contract", () => {
     ).rejects.toMatchObject({ code: "UNKNOWN_THREAD" });
   });
 
-  it("inquiry: start parks at a checkpoint exposing only the templated reply — no customer 원문", async () => {
+  it("inquiry: start parks at a checkpoint exposing only the composer's reply — no customer 원문", async () => {
     // Reached by INTENT, not by a sentence: since Operator Graph v2 free text goes to the Operator and
     // the approve loop is a Dashboard-lane capability a button names outright.
     const view = await service.start("tok", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
     expect(view.domain).toBe("INQUIRY");
     expect(view.status).toBe("AWAITING_APPROVAL");
     expect(view.checkpoint?.kind).toBe("INQUIRY_REPLY_APPROVAL");
-    const cp = view.checkpoint as { replyDraft?: string };
-    // Knowledge Context v1-A: no template text — the checkpoint shows an empty box the seller fills.
-    expect(cp.replyDraft).toBe("");
+    const cp = view.checkpoint as { replyDraft?: string; draftVersion?: number | null; answerBasis?: string | null };
+    // Knowledge Context v1-A closure: the checkpoint shows the composer's saved version, not a template.
+    expect(cp.replyDraft).toBe("안녕하세요. 문의 주신 내용 확인했습니다.");
+    expect(cp.draftVersion).toBe(1);
+    expect(cp.answerBasis).toBe("GROUNDED");
     const serialized = JSON.stringify(view);
     for (const leak of [PHONE_TOKEN, EMAIL_TOKEN, "사이즈 문의", "환불 요청", "색상 옵션"]) {
       expect(serialized).not.toContain(leak);

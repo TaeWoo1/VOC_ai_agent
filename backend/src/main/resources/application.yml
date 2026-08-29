@@ -70,9 +70,10 @@ sellerops:
   # A deployment that wants one and not the other must be able to have exactly that.
   #
   # OFF by default and opt-in per organisation. Off, unkeyed, or an org outside the list all mean the same
-  # thing to the graph — no model draft — and it falls back to its own deterministic rule drafter, which is the
-  # behaviour that shipped. `agent-runtime` never sees this key: it calls /api/agent/inquiry-draft with the
-  # operator's own bearer token, so the backend stays the only LLM egress in the repository.
+  # thing — no model draft, and `InquiryDraftComposer` reports the capability as unavailable instead of
+  # writing anything. `agent-runtime` never sees this key: every inquiry draft, from the inquiry screen, the
+  # chat lane or the legacy /api/agent-runs lanes, goes through POST /api/inquiries/{id}/draft/generate with
+  # the operator's own bearer token, so the backend stays the only LLM egress in the repository.
   agent:
     draft:
       enabled: ${SELLEROPS_AGENT_DRAFT_ENABLED:false}

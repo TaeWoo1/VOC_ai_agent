@@ -50,7 +50,39 @@ import type {
  * capability is off or declines, so the honest default is the conservative one.
  */
 function draftKindLabel(provenance: DraftProvenance | null | undefined): string {
-  return provenance?.providerKind === "LLM" ? "AI 생성" : "규칙 기반";
+  if (provenance?.providerKind === "LLM") return "AI 생성";
+  // The seller's own registered fallback sentence, saved unchanged when no answer basis exists.
+  if (provenance?.providerKind === "SELLER_APPROVED_FALLBACK") return "등록한 안내 문구";
+  return "규칙 기반";
+}
+
+/**
+ * What the draft stood on — the product's own words, never the passage text (Knowledge Context v1-A).
+ * The basis note is the backend's sentence about what is missing or what to ask; the summary is counts
+ * per lane. Both come from the same saved version the inquiry screen shows.
+ */
+function DraftBasisLine({
+  answerBasis,
+  answerBasisNote,
+  evidenceSummary,
+}: {
+  answerBasis?: string | null;
+  answerBasisNote?: string | null;
+  evidenceSummary?: ReadonlyArray<{ scopeLabel: string; count: number }>;
+}) {
+  const summary = (evidenceSummary ?? []).filter((e) => e.count > 0);
+  const note = answerBasis && answerBasis !== "GROUNDED" ? answerBasisNote : null;
+  if (summary.length === 0 && !note) return null;
+  return (
+    <div className="mt-2 space-y-1 text-sm">
+      {summary.length > 0 ? (
+        <p className="text-muted" aria-label="초안 근거">
+          근거 · {summary.map((e) => `${e.scopeLabel} ${e.count}`).join(" · ")}
+        </p>
+      ) : null}
+      {note ? <p className="text-warn">{note}</p> : null}
+    </div>
+  );
 }
 
 export function Agent() {
@@ -588,6 +620,11 @@ function InquiryCheckpointCard({
         </Link>
         화면에서 확인하세요.
       </p>
+      <DraftBasisLine
+        answerBasis={checkpoint.answerBasis}
+        answerBasisNote={checkpoint.answerBasisNote}
+        evidenceSummary={checkpoint.evidenceSummary}
+      />
       {checkpoint.replyDraft !== undefined ? (
         <textarea
           className="mt-3 w-full rounded-xl border border-line bg-canvas p-3 text-ink"
@@ -648,9 +685,19 @@ function InquiryDraftPreparationCard({
   const [copied, setCopied] = useState(false);
 
   if (!prep.prepared) {
+    // Two different facts: no inquiry to draft for, or an inquiry the composer wrote nothing for
+    // (no answer basis, capability off). The second names the inquiry screen, where the basis is added.
+    const picked = prep.workItemId != null;
     return (
       <div className="rounded-2xl border border-line bg-surface p-4" role="group" aria-label="문의 답변 초안">
-        <p className="text-ink">지금 초안을 만들 미답변 문의가 없습니다.</p>
+        <p className="text-ink">
+          {picked ? (prep.note ?? "답변 기준이 필요합니다.") : "지금 초안을 만들 미답변 문의가 없습니다."}
+        </p>
+        {picked && prep.inquiryId ? (
+          <Link to={`/inquiries/${prep.inquiryId}`} className="mt-2 inline-block text-sm text-brand underline">
+            문의 화면에서 답변 기준 추가하기
+          </Link>
+        ) : null}
         <button type="button" className="btn-ghost mt-3" disabled={busy} onClick={onRegenerate}>
           다시 확인
         </button>
@@ -703,11 +750,16 @@ function InquiryDraftPreparationCard({
 
       <p className="mt-3 text-sm text-muted">
         {draftKindLabel(prep.provenance)} 초안입니다. 고객 원문은
-        <Link to="/inquiries" className="mx-1 text-brand underline">
+        <Link to={prep.inquiryId ? `/inquiries/${prep.inquiryId}` : "/inquiries"} className="mx-1 text-brand underline">
           문의 응답
         </Link>
-        화면에서 확인하세요.
+        화면에서 확인하세요.{prep.draftVersion != null ? ` 같은 초안(v${prep.draftVersion})이 그 화면에 저장돼 있습니다.` : ""}
       </p>
+      <DraftBasisLine
+        answerBasis={prep.answerBasis}
+        answerBasisNote={prep.answerBasisNote}
+        evidenceSummary={prep.evidenceSummary}
+      />
       <textarea
         className="mt-3 w-full rounded-xl border border-line bg-canvas p-3 text-ink"
         rows={4}

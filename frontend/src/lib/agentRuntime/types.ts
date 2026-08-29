@@ -28,8 +28,20 @@ export interface InquiryCheckpointView {
   priorityBucket: string;
   category: string;
   provenance?: DraftProvenance;
-  /** The rule-based template reply — present in the live start/resume response, absent on GET. */
+  /** The composer's reply text for the saved version — present in the live start/resume response, absent on GET. */
   replyDraft?: string;
+  /** The product's answer-basis state for that version (GROUNDED / NEEDS_CLARIFICATION / NO_ANSWER_BASIS) and its note. */
+  answerBasis?: string | null;
+  answerBasisNote?: string | null;
+  /** The saved append-only version shown — the inquiry screen shows the same one. */
+  draftVersion?: number | null;
+  /** Passages per lane, counts only — never text. */
+  evidenceSummary?: ReadonlyArray<DraftEvidenceSummary>;
+}
+
+export interface DraftEvidenceSummary {
+  scopeLabel: string;
+  count: number;
 }
 
 export interface ReviewCheckpointView {
@@ -50,13 +62,13 @@ export interface ReviewCheckpointView {
 export type CheckpointView = InquiryCheckpointView | ReviewCheckpointView;
 
 /**
- * The draft-preparation result (domain INQUIRY_DRAFT, always DONE). The run reads one inquiry and
- * generates a rule-based answer DRAFT, then stops at a terminal human checkpoint — nothing is
- * proposed, saved, or sent. `replyDraft` is the templated reply text the operator reviews/edits
- * locally; it carries NO customer body and is present only in the live start response. The scalar
- * fields let the UI name the target channel, show the inquiry status, flag a 비밀글, and show when
- * the draft was made — without exposing the inquiry content. `prepared` is false when the OPEN queue
- * was empty.
+ * The draft-preparation result (domain INQUIRY_DRAFT, always DONE). The run picks the top OPEN inquiry
+ * and asks the product's own draft path (`InquiryDraftComposer`) for the answer draft — the same saved
+ * version the inquiry screen shows — then stops at a terminal human checkpoint: nothing is approved or
+ * sent. `replyDraft` is that text; it carries NO customer body and is present only in the live start
+ * response. The scalar fields let the UI name the target channel, show the inquiry status, flag a
+ * 비밀글, and show when the draft was made — without exposing the inquiry content. `prepared` is false
+ * when the OPEN queue was empty or when the composer wrote nothing (`note` says which).
  */
 export interface InquiryDraftPreparationView {
   kind: "INQUIRY_DRAFT_PREPARATION";
@@ -77,6 +89,10 @@ export interface InquiryDraftPreparationView {
   generatedAt: string | null;
   replyDraft?: string;
   note?: string;
+  answerBasis?: string | null;
+  answerBasisNote?: string | null;
+  draftVersion?: number | null;
+  evidenceSummary?: ReadonlyArray<DraftEvidenceSummary>;
 }
 
 export interface InquiryOutcome {

@@ -9,9 +9,10 @@
  *
  * <b>Privacy is enforced at this boundary, not just downstream.</b> The response views below
  * carry NO raw customer text:
- *  - the inquiry checkpoint exposes the rule-based reply DRAFT (a closed-vocabulary template,
- *    operator-approvable) plus coarse locating metadata, but NOT the echoed customer subject
- *    (`candidate.title`) and never the customer body/details;
+ *  - the inquiry checkpoint exposes the composer's reply DRAFT (the saved version's text, the same
+ *    one the inquiry screen shows — operator-approvable) plus coarse locating metadata and the
+ *    answer-basis state, but NOT the echoed customer subject (`candidate.title`) and never the
+ *    customer body/details;
  *  - the review checkpoint carries no body and no reply text at all (only a version + fingerprint
  *    and coarse locating aids — the operator reads the actual draft on the authorized review-reply
  *    screen);
@@ -20,6 +21,7 @@
  */
 import { z } from "zod";
 import type { DraftProvenance } from "../provider/DraftModelSeam";
+import type { DraftEvidenceSummary } from "../conversation/contract";
 import type { RunOutcome } from "../state/AgentState";
 import type { ReviewRunOutcome } from "../state/ReviewAgentState";
 import type { IssueOperationsBrief } from "../state/IssueAgentState";
@@ -115,6 +117,12 @@ export interface InquiryCheckpointView {
   readonly category: string;
   readonly provenance?: DraftProvenance;
   readonly replyDraft?: string;
+  /** The composer's answer-basis state and note for the saved version the checkpoint shows. */
+  readonly answerBasis?: string | null;
+  readonly answerBasisNote?: string | null;
+  readonly draftVersion?: number | null;
+  /** Passages per lane, counts only — never text (Knowledge Context v1-A). */
+  readonly evidenceSummary?: ReadonlyArray<DraftEvidenceSummary>;
 }
 
 /** The review checkpoint as surfaced over HTTP — NO body, NO reply text; version + locating aids only. */
@@ -166,6 +174,11 @@ export interface InquiryDraftPreparationView {
   readonly generatedAt: string | null;
   readonly replyDraft?: string;
   readonly note?: string;
+  readonly answerBasis?: string | null;
+  readonly answerBasisNote?: string | null;
+  /** The saved append-only version the text IS — the inquiry screen shows the same one. */
+  readonly draftVersion?: number | null;
+  readonly evidenceSummary?: ReadonlyArray<DraftEvidenceSummary>;
 }
 
 /** The unified run view every endpoint returns. Sanitized: no token, no credential, no customer 원문. */

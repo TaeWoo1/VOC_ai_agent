@@ -13,7 +13,6 @@
  * scope and is done by the caller.
  */
 import type {
-  AgentDraftView,
   AgentJudgeView,
   AgentPlanView,
   CustomerMemorySearch,
@@ -92,20 +91,6 @@ export interface SpringClient {
   proposeInquiry(workItemId: string): Promise<ProposalResult>;
   saveDraft(workItemId: string, request: ReplyDraftRequest): Promise<ReplyDraftView>;
   confirmPublish(workItemId: string, request: ConfirmPublishRequest): Promise<PublishStatusView>;
-  /**
-   * Ask the backend's model seam for a starter reply draft.
-   *
-   * **OPTIONAL on purpose.** The graph's drafting node must work against a client that does not have
-   * it — every test fake, and any deployment whose backend predates the endpoint — and the honest
-   * behaviour there is the same one an org outside the allow-list gets: the deterministic rule draft.
-   * Making it required would have turned "this backend has no draft endpoint" into a crash instead of
-   * a fallback.
-   *
-   * The runtime holds NO vendor key; this call carries the operator's own bearer, and the backend
-   * derives the org from it. That is what keeps the backend the only LLM egress in the repository.
-   */
-  generateInquiryDraft?(request: { title: string; details: string | null }): Promise<AgentDraftView>;
-
   /* ── Agentic Operating Workspace v2 (2026-08-27) ── */
 
   /** The seller's connected accounts (`GET /api/seller-accounts`). Ids and labels; no credential. */
@@ -238,23 +223,6 @@ export class HttpSpringClient
     );
   }
 
-  /**
-   * The model seam. Takes the two fields that may leave and no id: the runtime already holds the
-   * detail (it fetched it through its own authorized tool call), and passing a work-item id would
-   * make the endpoint a second reader of inquiry content with its own authorization story to get
-   * right. Reads nothing, writes nothing, moves no state.
-   */
-  /** The product's own retrieval for one inquiry, with no model call (Knowledge Context v1-A). */
-  async previewInquiryEvidence(workItemId: string): Promise<{ readonly knowledgeState: string; readonly passages: readonly unknown[] }> {
-    return this.request<{ readonly knowledgeState: string; readonly passages: readonly unknown[] }>(
-      "GET", `/api/inquiries/${encodeURIComponent(workItemId)}/knowledge-evidence`,
-    );
-  }
-
-  async generateInquiryDraft(request: { title: string; details: string | null }): Promise<AgentDraftView> {
-    return this.request<AgentDraftView>("POST", `/api/agent/inquiry-draft`, request);
-  }
-
   // --- review-reply domain (ReviewSpringClient) -------------------------------------
 
   private reviewBase(accountId: string, actionRef: string): string {
@@ -357,9 +325,10 @@ export class HttpSpringClient
 
   // ─────────────────────────── Operator domain (all READ) ───────────────────────────
   // Every one of these maps onto an existing endpoint, and none of them mutates anything. The two
-  // model seams below (plan/judge) look nothing up and store nothing either — they are the same
-  // shape as generateInquiryDraft: the runtime holds no vendor key, so a model call is one more
-  // backend capability reached with the operator's own forwarded bearer.
+  // model seams below (plan/judge) look nothing up and store nothing either: the runtime holds no
+  // vendor key, so a model call is one more backend capability reached with the operator's own
+  // forwarded bearer. (The title/body-only draft seam `/api/agent/inquiry-draft` is gone — every
+  // inquiry draft is the product's own `InquiryDraftComposer`, reached through `generateDraftFor`.)
 
   async getInbox(limit?: number): Promise<InboxSummary> {
     const suffix = limit != null ? `?limit=${encodeURIComponent(String(limit))}` : "";

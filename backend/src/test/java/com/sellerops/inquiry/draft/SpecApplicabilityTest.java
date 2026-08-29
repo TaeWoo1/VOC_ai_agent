@@ -137,6 +137,6 @@ class SpecApplicabilityTest {
     void theSectionIsAlwaysPresent() {
         // An absent section reads to a model as "not relevant here"; that is the same reason the
         // order-state line is unconditional.
-        assertThat(AgentDraftPrompt.user("문의", "본문")).contains("규격 적용 범위:").contains("(해당 없음)");
+        assertThat(AgentDraftPrompt.user("문의", "본문", List.of())).contains("규격 적용 범위:").contains("(해당 없음)");
     }
 }

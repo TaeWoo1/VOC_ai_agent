@@ -53,8 +53,11 @@ const INQUIRY_AWAITING: AgentRunView = {
     phase: "OPEN",
     priorityBucket: "HIGH",
     category: "exchange_return_reply",
-    provenance: { providerKind: "RULE_BASED", name: "rule-drafter", version: "rules-v1" },
+    provenance: { providerKind: "LLM", name: "inquiry-draft-composer", version: "composer/v1" },
     replyDraft: "안녕하세요, 문의해 주셔서 감사합니다.",
+    answerBasis: "GROUNDED",
+    draftVersion: 1,
+    evidenceSummary: [{ scopeLabel: "상품 정보", count: 2 }],
   },
 };
 
@@ -127,7 +130,10 @@ const DRAFT_PREPARED: AgentRunView = {
     phase: "OPEN",
     priorityBucket: "HIGH",
     category: "delivery_status_reply",
-    provenance: { providerKind: "RULE_BASED", name: "rule-drafter", version: "rules-v1" },
+    provenance: { providerKind: "LLM", name: "inquiry-draft-composer", version: "composer/v1" },
+    answerBasis: "GROUNDED",
+    draftVersion: 1,
+    evidenceSummary: [{ scopeLabel: "상품 정보", count: 2 }, { scopeLabel: "운영 정책", count: 1 }],
     channelId: "chan-cafe24",
     channelCode: "CAFE24",
     channelNameKo: "카페24",
@@ -259,7 +265,9 @@ describe("운영 에이전트 page", () => {
     expect(screen.getByText("카페24")).toBeInTheDocument();
     expect(screen.getByText("미답변")).toBeInTheDocument();
     expect(screen.getByText("비밀글")).toBeInTheDocument();
-    expect(screen.getByText(/규칙 기반 · rule-drafter/)).toBeInTheDocument();
+    expect(screen.getByText(/AI 생성 · inquiry-draft-composer/)).toBeInTheDocument();
+    // Knowledge Context v1-A: what the draft stood on, as counts per lane — never the passage text.
+    expect(screen.getByLabelText("초안 근거")).toHaveTextContent("근거 · 상품 정보 2 · 운영 정책 1");
     // The explicit not-sent status line for the target channel.
     expect(screen.getByText(/초안만 생성되었습니다\. 카페24에는 아직 전송되지 않았습니다\./)).toBeInTheDocument();
     // NO send/전송/발송 control and NO approve/reject — this run already finished at the checkpoint.

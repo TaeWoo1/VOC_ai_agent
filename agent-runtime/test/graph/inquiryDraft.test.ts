@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InquiryDraftAgentRuntime } from "../../src/inquiryDraftRuntime";
+import { ComposerDraftProvider } from "../../src/provider/ComposerDraftProvider";
 import { buildInquiryReadToolRegistry } from "../../src/tools/ToolRegistry";
 import { InMemoryInquiryDraftRunStore } from "../../src/checkpoint/InquiryDraftRunStore";
 import { FakeSpringClient } from "../support/FakeSpringClient";
@@ -24,9 +25,10 @@ function cafe24SecretInquiry(): SeedInquiry {
   };
 }
 
+/** The production wiring: the drafter is the product's own composer (Knowledge Context v1-A closure). */
 function runtime(client: FakeSpringClient, store = new InMemoryInquiryDraftRunStore()) {
   return {
-    rt: new InquiryDraftAgentRuntime({ client, runStore: store, now: () => FIXED_NOW }),
+    rt: new InquiryDraftAgentRuntime({ client, runStore: store, now: () => FIXED_NOW, draftProvider: new ComposerDraftProvider(client) }),
     store,
   };
 }
@@ -34,36 +36,57 @@ function runtime(client: FakeSpringClient, store = new InMemoryInquiryDraftRunSt
 describe("inquiry draft-preparation runtime", () => {
   // Knowledge Context v1-A: the rule provider names the category and writes NO text — a template
   // promise was the evidence-free draft this package closes. The run is honest about it: not prepared.
-  it("selects the top OPEN inquiry, names its category, prepares NO template text and mutates nothing", async () => {
+  it("selects the top OPEN inquiry and prepares it through the product's own draft path — propose + one saved version, no approval, no send", async () => {
     const client = new FakeSpringClient(twoInquiries());
     const { rt } = runtime(client);
 
     const res = await rt.run("t-draft", { intent: "PREPARE_INQUIRY_DRAFT" });
 
     expect(res.status).toBe("DONE");
-    expect(res.preparation.prepared).toBe(false);
+    expect(res.preparation.prepared).toBe(true);
     const m = res.preparation.meta!;
-    // Oldest-first: the 환불 요청 item is selected; its body keys the exchange/return category.
     expect(m.workItemId).toBe(OLDER_WORK_ITEM);
     expect(m.category).toBe("exchange_return_reply");
-    expect(m.provenance.providerKind).toBe("RULE_BASED");
+    expect(m.provenance).toEqual({ providerKind: "LLM", name: "inquiry-draft-composer", version: "composer/v1" });
     expect(m.inquiryStatus).toBe("UNANSWERED");
-    expect(m.phase).toBe("OPEN");
+    expect(m.phase).toBe("OPEN"); // the phase the item was READ in; the composer moved it afterwards
     expect(m.generatedAt).toBe(FIXED_NOW);
-    expect(res.preparation.replyDraft).toBeNull();
-    expect(res.preparation.note).toContain("답변 기준");
-    expect(res.trail).toEqual(["searched", "prioritized", "detailed", "drafted", "no_answer_basis"]);
+    // The text is the composer's saved version — the same one the inquiry screen shows.
+    expect(res.preparation.replyDraft).toBe("안녕하세요. 문의 주신 내용 확인했습니다.");
+    expect(res.preparation.draftVersion).toBe(1);
+    expect(res.preparation.answerBasis).toBe("GROUNDED");
+    expect(res.trail).toEqual(["searched", "prioritized", "detailed", "drafted"]);
 
-    // NO backend mutation, NO send: propose/saveDraft/confirmPublish never called.
-    expect(client.calls.propose).toBe(0);
+    expect(client.calls.propose).toBe(1);
+    expect(client.calls.generate).toBe(1);
     expect(client.calls.saveDraft).toBe(0);
     expect(client.calls.confirmPublish).toBe(0);
     expect(client.externalSendAttempts).toBe(0);
 
-    // Work item phase is UNCHANGED — re-reading detail still shows OPEN / UNANSWERED.
     const after = await client.getInquiryDetail(OLDER_WORK_ITEM);
-    expect(after.phase).toBe("OPEN");
+    expect(after.phase).toBe("PROPOSED");
     expect(after.status).toBe("UNANSWERED");
+    expect(after.draft?.version).toBe(1);
+  });
+
+  it("NO_ANSWER_BASIS: not prepared, the backend's own note, no text invented — the same answer the inquiry screen gives", async () => {
+    const seeds = twoInquiries().map((s) => s.workItemId === OLDER_WORK_ITEM
+      ? { ...s, draftGeneration: { answerBasis: "NO_ANSWER_BASIS", answerBasisNote: "'교환' 관련 내용이 없습니다." } }
+      : s);
+    const client = new FakeSpringClient(seeds);
+    const { rt } = runtime(client);
+
+    const res = await rt.run("t-gap", { intent: "PREPARE_INQUIRY_DRAFT" });
+
+    expect(res.preparation.prepared).toBe(false);
+    expect(res.preparation.replyDraft).toBeNull();
+    expect(res.preparation.answerBasis).toBe("NO_ANSWER_BASIS");
+    expect(res.preparation.note).toBe("'교환' 관련 내용이 없습니다.");
+    expect(res.preparation.meta!.provenance.providerKind).toBe("RULE_BASED");
+    expect(res.trail).toContain("no_answer_basis");
+    expect(client.calls.generate).toBe(1);
+    expect(client.calls.saveDraft).toBe(0);
+    expect(client.calls.confirmPublish).toBe(0);
   });
 
   it("surfaces the target channel + secret flag for a Cafe24 board-6 비밀글, without exposing the body", async () => {
@@ -78,8 +101,8 @@ describe("inquiry draft-preparation runtime", () => {
     expect(m.isSecret).toBe(true);
     expect(m.category).toBe("delivery_status_reply");
 
-    // No draft text at all (Knowledge Context v1-A) — so nothing can echo the customer body/contact.
-    expect(res.preparation.replyDraft).toBeNull();
+    // The composer's saved text and nothing else — the customer body/contact never reaches the view.
+    expect(res.preparation.replyDraft).toBe("안녕하세요. 문의 주신 내용 확인했습니다.");
 
     // The durable snapshot is BODY-FREE: metadata only, no draft text, no customer content.
     const snap = await store.load("t-secret");
@@ -92,19 +115,22 @@ describe("inquiry draft-preparation runtime", () => {
     expect(snap!.meta!.channelCode).toBe("CAFE24");
   });
 
-  it("is deterministic: replaying the same request reproduces an identical draft (idempotent, no cumulative effect)", async () => {
+  it("a second run moves on to the next OPEN inquiry — the first is PROPOSED with its version and is not drafted twice", async () => {
     const client = new FakeSpringClient(twoInquiries());
     const { rt } = runtime(client);
 
-    const first = await rt.run("t-replay", { intent: "PREPARE_INQUIRY_DRAFT" });
-    const second = await rt.run("t-replay", { intent: "PREPARE_INQUIRY_DRAFT" });
+    const first = await rt.run("t-next-1", { intent: "PREPARE_INQUIRY_DRAFT" });
+    const second = await rt.run("t-next-2", { intent: "PREPARE_INQUIRY_DRAFT" });
 
-    expect(second.preparation).toEqual(first.preparation);
-    // Still no mutation after a replay.
-    expect(client.calls.propose).toBe(0);
+    expect(first.preparation.meta!.workItemId).toBe(OLDER_WORK_ITEM);
+    expect(second.preparation.meta!.workItemId).not.toBe(OLDER_WORK_ITEM);
+    expect(second.preparation.draftVersion).toBe(1);
+    expect(client.calls.propose).toBe(2);
+    expect(client.calls.generate).toBe(2);
     expect(client.calls.saveDraft).toBe(0);
     expect(client.calls.confirmPublish).toBe(0);
     expect(client.externalSendAttempts).toBe(0);
+    expect((await client.getInquiryDetail(OLDER_WORK_ITEM)).draft?.version).toBe(1);
   });
 
   it("reports nothing to draft when the OPEN queue is empty — no detail read, no mutation", async () => {

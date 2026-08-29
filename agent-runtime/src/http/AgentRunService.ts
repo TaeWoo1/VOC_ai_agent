@@ -30,7 +30,7 @@ import type { IssueRunResult } from "../issueRuntime";
 import { OperatorAgentRuntime } from "../operator/operatorRuntime";
 import type { OperatorRunResult } from "../operator/operatorRuntime";
 import type { OperatorSpringClient } from "../spring/OperatorSpringClient";
-import { SpringDraftProvider } from "../provider/SpringDraftProvider";
+import { ComposerDraftProvider } from "../provider/ComposerDraftProvider";
 import { parseGoal, routeIntent, UnrecognizedGoalError } from "../goal/parseGoal";
 import type { GoalRequest } from "../goal/parseGoal";
 import type { SpringClient } from "../spring/SpringClient";
@@ -171,18 +171,21 @@ export class AgentRunService {
         inquiry: bundle.inquiry,
         issue: bundle.issue,
       }),
+      // Both inquiry lanes draft through the product's own composer (Knowledge Context v1-A closure):
+      // one grounded drafter, reached exactly as the inquiry screen and the chat lane reach it.
       inquiry: new InquiryAgentRuntime({
         client: bundle.inquiry,
         runStore: stores.inquiry,
-        draftProvider: new SpringDraftProvider(bundle.inquiry),
+        draftProvider: new ComposerDraftProvider(bundle.inquiry),
       }),
-      // Draft preparation is a TERMINAL read (no checkpoint, no pause): it returns the draft in the
-      // response and retains nothing. So it takes no store from the durable provider — its default
-      // in-memory store is per-request scratch, and there is no paused state to survive a restart.
-      // This is why it is safe even under APP_ENV=production despite not being the spring store.
+      // Draft preparation is TERMINAL (no checkpoint, no pause): it returns the draft in the response
+      // and retains nothing — the saved version lives on the inquiry. So it takes no store from the
+      // durable provider: its default in-memory store is per-request scratch, and there is no paused
+      // state to survive a restart. This is why it is safe even under APP_ENV=production despite not
+      // being the spring store.
       inquiryDraft: new InquiryDraftAgentRuntime({
         client: bundle.inquiry,
-        draftProvider: new SpringDraftProvider(bundle.inquiry),
+        draftProvider: new ComposerDraftProvider(bundle.inquiry),
       }),
       review: new ReviewAgentRuntime({ client: bundle.review, runStore: stores.review }),
       issue: new IssueAgentRuntime({ client: bundle.issue, runStore: stores.issue }),
@@ -380,9 +383,13 @@ export class AgentRunService {
         priorityBucket: cp.priorityBucket,
         category: cp.category,
         provenance: cp.candidate.provenance,
-        // Expose ONLY the templated reply comments — never candidate.title (which echoes the
-        // customer subject) and never the customer body.
+        // Expose ONLY the reply comments — never candidate.title (which echoes the customer subject)
+        // and never the customer body.
         replyDraft: cp.candidate.comments,
+        answerBasis: cp.candidate.answerBasis ?? null,
+        answerBasisNote: cp.candidate.answerBasisNote ?? null,
+        draftVersion: cp.candidate.draftVersion ?? null,
+        evidenceSummary: cp.candidate.evidenceSummary ?? [],
       };
       return { threadId, domain: "INQUIRY", status: "AWAITING_APPROVAL", trail: result.trail, checkpoint };
     }
@@ -464,6 +471,10 @@ export class AgentRunService {
       // live response only; never persisted, so a reloaded run cannot re-surface it.
       ...(p.replyDraft != null ? { replyDraft: p.replyDraft } : {}),
       ...(p.note != null ? { note: p.note } : {}),
+      answerBasis: p.answerBasis ?? null,
+      answerBasisNote: p.answerBasisNote ?? null,
+      draftVersion: p.draftVersion ?? null,
+      evidenceSummary: p.evidenceSummary ?? [],
     };
     return { threadId, domain: "INQUIRY_DRAFT", status: "DONE", trail: result.trail, draftPreparation };
   }

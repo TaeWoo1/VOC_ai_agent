@@ -13,11 +13,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The Operator Graph's two model seams, server-side — siblings of {@code AgentDraftController}.
+ * The Operator Graph's two model seams, server-side.
  *
  * <p>{@code agent-runtime} holds no vendor key, so the Operator's planner node and Evidence Judge node
- * reach a model by calling here with the operator's bearer token, exactly as the draft node already
- * does. The org comes from that token, so an operator cannot plan or judge on someone else's behalf,
+ * reach a model by calling here with the operator's bearer token, exactly as every inquiry draft
+ * reaches {@code InquiryDraftComposer}. The org comes from that token, so an operator cannot plan or judge on someone else's behalf,
  * and the backend stays the only LLM egress in the repository.
  *
  * <p>Both routes read nothing and write nothing: no work item is looked up, no state moves, nothing is

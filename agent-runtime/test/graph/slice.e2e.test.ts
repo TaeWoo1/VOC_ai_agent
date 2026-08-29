@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { InquiryAgentRuntime } from "../../src/runtime";
+import { ComposerDraftProvider } from "../../src/provider/ComposerDraftProvider";
 import { FakeSpringClient } from "../support/FakeSpringClient";
 import { twoInquiries, OLDER_WORK_ITEM } from "../support/fixtures";
 
 describe("inquiry vertical slice (end to end)", () => {
-  it("runs goal -> search -> prioritize -> detail -> propose -> draft -> checkpoint -> record(approve)", async () => {
+  it("runs goal -> search -> prioritize -> detail -> draft(composer: propose + version) -> checkpoint -> record(approve)", async () => {
     const fake = new FakeSpringClient(twoInquiries());
-    const runtime = new InquiryAgentRuntime({ client: fake });
+    const runtime = new InquiryAgentRuntime({ client: fake, draftProvider: new ComposerDraftProvider(fake) });
 
     const started = await runtime.start("t-e2e", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
 
@@ -16,13 +17,15 @@ describe("inquiry vertical slice (end to end)", () => {
     expect(started.checkpoint.kind).toBe("INQUIRY_REPLY_APPROVAL");
     expect(started.checkpoint.workItemId).toBe(OLDER_WORK_ITEM);
     expect(started.checkpoint.priorityBucket).toBe("top");
-    expect(started.checkpoint.candidate.provenance.providerKind).toBe("RULE_BASED");
+    expect(started.checkpoint.candidate.provenance).toEqual({ providerKind: "LLM", name: "inquiry-draft-composer", version: "composer/v1" });
+    expect(started.checkpoint.candidate.comments).toBe("안녕하세요. 문의 주신 내용 확인했습니다.");
     expect(started.trail).toEqual(["searched", "prioritized", "detailed", "drafted"]);
 
     // Before approval: NOTHING is written to the backend — the item is still OPEN, no
     // proposal, no draft, no approval bound, nothing sent.
-    expect(fake.phaseOf(OLDER_WORK_ITEM)).toBe("OPEN");
-    expect(fake.calls.propose).toBe(0);
+    // The product's own PREPARE ran (propose + one composer version); nothing was approved or sent.
+    expect(fake.phaseOf(OLDER_WORK_ITEM)).toBe("PROPOSED");
+    expect(fake.calls.propose).toBe(1);
     expect(fake.calls.saveDraft).toBe(0);
     expect(fake.calls.confirmPublish).toBe(0);
     expect(fake.externalSendAttempts).toBe(0);
@@ -42,7 +45,7 @@ describe("inquiry vertical slice (end to end)", () => {
     // Backend spine (only on approve): OPEN -> proposed -> draft v1 -> approval bound +
     // audited -> ACTION_PENDING, nothing sent.
     expect(fake.phaseOf(OLDER_WORK_ITEM)).toBe("ACTION_PENDING");
-    expect(fake.calls.propose).toBe(1);
+    expect(fake.calls.propose).toBe(2); // the composer's proposal + performRecord's idempotent replay
     expect(fake.calls.saveDraft).toBe(1);
     expect(fake.calls.confirmPublish).toBe(1);
     expect(fake.auditEvents(OLDER_WORK_ITEM)).toContain("APPROVAL_GRANTED");
@@ -51,7 +54,7 @@ describe("inquiry vertical slice (end to end)", () => {
 
   it("handles an empty queue by finishing with decision NONE, touching nothing", async () => {
     const fake = new FakeSpringClient([]);
-    const runtime = new InquiryAgentRuntime({ client: fake });
+    const runtime = new InquiryAgentRuntime({ client: fake, draftProvider: new ComposerDraftProvider(fake) });
 
     const res = await runtime.start("t-empty", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
 
@@ -66,7 +69,7 @@ describe("inquiry vertical slice (end to end)", () => {
 
   it("lets the human edit the draft before approving", async () => {
     const fake = new FakeSpringClient(twoInquiries());
-    const runtime = new InquiryAgentRuntime({ client: fake });
+    const runtime = new InquiryAgentRuntime({ client: fake, draftProvider: new ComposerDraftProvider(fake) });
 
     await runtime.start("t-edit", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
     const done = await runtime.resume("t-edit", {

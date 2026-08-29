@@ -132,6 +132,15 @@ So the model lives where the other one already does:
   interface and calls that endpoint with the operator's forwarded bearer. `DraftModelProvider.draft`
   widened from `DraftCandidate` to `Promise<DraftCandidate>`; nothing else about the seam moved.
 
+> **Superseded on 2026-08-30 (Knowledge Context v1-A closure, `docs/agentic_operating_workspace_v2.md`
+> §30).** The title/body-only endpoint `POST /api/agent/inquiry-draft` and `SpringDraftProvider` were
+> removed: a draft they wrote was a model reply grounded in nothing, while the product's own
+> `InquiryDraftComposer` already had retrieval, applicability, answer-basis and answer-style. The
+> `DraftModelProvider` seam stays; the one implementation behind it is `provider/ComposerDraftProvider.ts`,
+> which reaches the composer through `conversation/DraftPreparer.ts` — the same call the inquiry screen
+> and the chat lane make. The split this ADR records (no key in the runtime, backend as the only LLM
+> egress, per-org gate and payload floor in Spring) is unchanged; only the second drafter is gone.
+
 **Deliberately separate from the triage pilot**, in flag, key, transport and prompt. They are different
 exposures — a review's rating and body vs an inquiry's title and body — and a deployment must be able to
 run either without the other. `AgentDraftBoundaryTest` asserts the draft package never reads the triage

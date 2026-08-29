@@ -70,8 +70,8 @@ export class InquiryAgentRuntime {
     this.client = deps.client;
     this.registry = buildInquiryToolRegistry(deps.client);
     this.drafter = deps.draftProvider ?? new RuleBasedDraftProvider();
-    // The restart-safe reconstruction drafter. Always the rule one, never `deps.draftProvider` — see
-    // the note in `resume()` for why a model must not re-derive an already-approved draft.
+    // The restart-safe categoriser (text-free). Never `deps.draftProvider` — see `resumeFromDurable`
+    // for why a model must not re-derive an already-approved draft.
     this.deterministicDrafter = new RuleBasedDraftProvider();
     const graph = buildInquiryGraph({ registry: this.registry, draftProvider: this.drafter });
     this.graph = graph.compile({ checkpointer: deps.checkpointer ?? createCheckpointer() });
@@ -109,7 +109,7 @@ export class InquiryAgentRuntime {
 
   /** Resume a paused run with a human decision — same-process fast path or durable reconstruction. */
   async resume(threadId: string, decision: CheckpointDecision): Promise<RunResult> {
-    // Resume is the only path that mutates the backend (and the CLI runs it in a fresh
+    // Resume is the only path that records an approval (and the CLI runs it in a fresh
     // process that never called start()), so the fail-closed guard must fire here too.
     await this.assertExecutionDisabled();
     if (this.liveThreads.has(threadId)) {
@@ -136,27 +136,31 @@ export class InquiryAgentRuntime {
     // never came from the store; the durable snapshot holds ids, a coarse category and the trail.
     const detail = await this.registry.invoke<InquiryDetail>(TOOL.GET_DETAIL, { workItemId: snap.workItemId });
     /**
-     * **The reconstruction is DETERMINISTIC, and that is now a deliberate choice rather than a
-     * property of the only provider that existed.**
+     * **The text an approval binds to is the SAVED version the human saw — read back, never re-derived.**
      *
      * A resume happens after a restart, against a snapshot that holds no draft text (`RunSnapshot`'s
-     * contract: no title/body/comments/candidate, ever). So whatever is recorded here has to be
-     * re-derived. With a rule drafter that was free — same input, same output. With a MODEL behind the
-     * seam it is not: re-asking would record a draft the human never saw, under an approval they gave
-     * to a different one. That is a silent integrity failure, not a cosmetic one.
-     *
-     * So the resume path uses the RULE drafter, always, and the human's own text wins over it. The
-     * frontend sends the text it displayed on every approve (not only on an edit), so in practice this
-     * value is overridden and exists to keep a client that sends nothing from recording an empty
-     * reply. The LLM's place is the GENERATION node — the draft a human reads and approves — which is
-     * exactly where a non-deterministic provider belongs.
+     * contract: no title/body/comments/candidate, ever). Before Knowledge Context v1-A closure the
+     * text was regenerated here by a rule drafter; with the composer behind the seam there is nothing
+     * deterministic to regenerate — and re-asking a model would record a draft the human never saw,
+     * under an approval they gave to a different one. So the head version on the inquiry is read back
+     * and compared to the fingerprint the checkpoint recorded: a match is the draft they approved; a
+     * mismatch (someone regenerated meanwhile) is refused unless the human sent their own text, which
+     * always wins. The frontend sends the text it displayed on every approve, so in practice that path
+     * is the one taken; this is the fail-closed floor under it.
      */
-    const candidate = this.deterministicDrafter.draftNow({
-      title: detail.title,
-      details: detail.details,
-      status: detail.status,
-      informStatus: detail.informStatus,
-    });
+    const head = detail.draft;
+    const sawHead = head != null && snap.contentFingerprint != null && head.contentFingerprint === snap.contentFingerprint;
+    if (parsed.approved && parsed.editedComments == null && !sawHead) {
+      throw new Error("DRAFT_CHANGED: the saved draft is not the version this approval was given on; approve again with the text on screen");
+    }
+    const candidate = sawHead
+      ? { title: head.title, comments: head.comments }
+      : this.deterministicDrafter.draftNow({
+          title: detail.title,
+          details: detail.details,
+          status: detail.status,
+          informStatus: detail.informStatus,
+        });
     const title = parsed.editedTitle ?? candidate.title;
     const comments = parsed.editedComments ?? candidate.comments;
 
@@ -183,6 +187,9 @@ export class InquiryAgentRuntime {
       priorityBucket: cp.priorityBucket,
       category: cp.category,
       trail,
+      // Version + fingerprint of the saved draft the checkpoint showed (never its text).
+      draftVersion: cp.candidate.draftVersion ?? null,
+      contentFingerprint: cp.candidate.contentFingerprint ?? null,
     };
   }
 

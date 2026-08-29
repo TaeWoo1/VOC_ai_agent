@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InquiryAgentRuntime } from "../../src/runtime";
+import { ComposerDraftProvider } from "../../src/provider/ComposerDraftProvider";
 import { approvalCommandId } from "../../src/graph/inquiryGraph";
 import { SpringApiError } from "../../src/spring/SpringClient";
 import { FakeSpringClient } from "../support/FakeSpringClient";
@@ -13,7 +14,7 @@ describe("approval idempotency (deterministic commandId)", () => {
 
   it("replaying the approval with the same commandId+fingerprint is a no-op (one bind, one audit)", async () => {
     const fake = new FakeSpringClient(twoInquiries());
-    const runtime = new InquiryAgentRuntime({ client: fake });
+    const runtime = new InquiryAgentRuntime({ client: fake, draftProvider: new ComposerDraftProvider(fake) });
 
     await runtime.start("t-idem", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
     const done = await runtime.resume("t-idem", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "user-1" });
@@ -35,7 +36,7 @@ describe("approval idempotency (deterministic commandId)", () => {
 
   it("a different commandId for an already-approved item is rejected (no double approval)", async () => {
     const fake = new FakeSpringClient(twoInquiries());
-    const runtime = new InquiryAgentRuntime({ client: fake });
+    const runtime = new InquiryAgentRuntime({ client: fake, draftProvider: new ComposerDraftProvider(fake) });
 
     await runtime.start("t-conf", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
     const done = await runtime.resume("t-conf", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "user-1" });

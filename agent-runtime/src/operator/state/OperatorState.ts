@@ -161,6 +161,8 @@ export interface EvidenceLocator {
    */
   readonly phase?: string;
   readonly status?: string;
+  /** The saved reply-draft head's version on that inquiry, when one exists — a number, never its text. */
+  readonly draftVersion?: number;
   /** Product-fact evidence: which key, and the source that stated it. Never free prose. */
   readonly factKey?: string;
   readonly factSource?: string;

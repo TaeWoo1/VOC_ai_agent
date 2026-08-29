@@ -289,6 +289,7 @@ export class OperatorAgentRuntime {
             ...(bound ? bound : {}),
             phase: detail.phase,
             status: detail.status,
+            ...(detail.draft ? { draftVersion: detail.draft.version } : {}),
             label: channel ? `${channel} 문의` : "이 문의",
           },
           events: eventOn(detail.receivedAt.slice(0, 10)),

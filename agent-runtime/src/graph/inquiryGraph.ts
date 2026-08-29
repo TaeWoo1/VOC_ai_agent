@@ -5,11 +5,12 @@
  *        → HUMAN CHECKPOINT (interrupt) → record approval result
  *
  * LangGraph owns the orchestration: sequencing, the human-checkpoint interrupt, and
- * resume. Every side-effecting step goes through a Tool onto the Spring backend, which
- * remains the system of record. Nothing is written to the backend before the checkpoint
- * — propose/draft/confirm run only in the approve branch (via {@link performRecord}) —
- * so the graph can only mutate anything after the checkpoint is resumed with an approval,
- * and even then the backend's fail-closed publish gate means no external reply is sent.
+ * resume. The draft step is the product's own PREPARE ({@link ComposerDraftProvider} →
+ * `InquiryDraftComposer`): it moves an OPEN item to PROPOSED and appends a MODEL draft
+ * version — what the inquiry screen's 「초안 생성」 does — and moves nothing toward a
+ * channel. Approval and the publish intent run only in the approve branch (via
+ * {@link performRecord}) after the checkpoint is resumed with a human decision, and even
+ * then the backend's fail-closed publish gate decides whether anything is sent.
  *
  * `interrupt`/`Command` require a checkpointer; the graph is compiled with one in
  * {@link ../runtime}.
@@ -23,6 +24,8 @@ import type { ToolRegistry } from "../tools/ToolRegistry";
 import { prioritizeInquiries, selectTop } from "../prioritize/prioritizeInquiries";
 import { RuleBasedDraftProvider } from "../provider/DraftModelSeam";
 import type { DraftModelProvider } from "../provider/DraftModelSeam";
+// (`ComposerDraftProvider` is the production drafter; the rule categoriser is the text-free default a
+// caller that injects nothing gets — it never writes a reply.)
 import {
   CHECKPOINT_KIND,
   parseDecision,
@@ -123,6 +126,11 @@ export function buildInquiryGraph(deps: InquiryGraphDeps) {
     const d = state.detail!;
     const candidate = await drafter.draft({
       workItemId: state.selected!.workItemId,
+      inquiryId: state.selected!.inquiryId,
+      channelCode: d.channelCode ?? null,
+      channelNameKo: d.channelNameKo ?? null,
+      productId: d.productId ?? null,
+      productName: d.productName ?? null,
       title: d.title,
       details: d.details,
       status: d.status,

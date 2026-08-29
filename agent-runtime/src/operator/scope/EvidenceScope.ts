@@ -104,6 +104,13 @@ export interface NeedScope {
 export interface RejectedEvidence {
   readonly evidenceId: string;
   readonly reason: ScopeMismatch;
+  /**
+   * What the NEED was about when the citation was refused — the axis the seller-facing sentence has to
+   * name. An org aggregate refused for a need about one inquiry is not "이 상품의 근거로는 쓸 수 없다";
+   * the same closed reason, said about the wrong kind of thing, was the wording defect Knowledge
+   * Context v1-A closure found on a specified-inquiry draft turn (2026-08-30).
+   */
+  readonly needEntity: EntityScope;
 }
 
 /**
@@ -399,20 +406,29 @@ export function partitionEvidence(
   const rejected: RejectedEvidence[] = [];
   for (const ref of refs) {
     const reason = checkEvidence(need, ref);
-    if (reason) rejected.push({ evidenceId: ref.evidenceId, reason });
+    if (reason) rejected.push({ evidenceId: ref.evidenceId, reason, needEntity: need.entity });
     else accepted.push(ref);
   }
   return { accepted, rejected };
 }
 
-/** The seller-facing sentence for a reason. Closed vocabulary in, plain Korean out. */
-export function reasonSentence(reason: ScopeMismatch, subject?: string): string {
+/**
+ * The seller-facing sentence for a reason. Closed vocabulary in, plain Korean out.
+ *
+ * `entity` is the scope of the NEED the citation failed — it decides which kind of thing the sentence
+ * names. `subject` is the seller's own word for that thing when the run has one (a product mention,
+ * 「이 문의」); without it the sentence says 「이 질문」 and never guesses a noun.
+ */
+export function reasonSentence(reason: ScopeMismatch, subject?: string, entity: EntityScope = "PRODUCT"): string {
   const named = subject ? `「${subject}」` : "이 질문";
+  // The thing an org-wide citation cannot narrow to: the product, or the one inquiry/order the run was
+  // opened on. An ORG need never produces this reason (invariants 2–3 only fire for PRODUCT/ITEM).
+  const narrow = entity === "ITEM" ? (subject ?? "이 문의") : "이 상품";
   switch (reason) {
     case "NO_RESOLVED_PRODUCT":
       return `${named}에 해당하는 상품을 찾지 못해, 상품 단위로 확인할 수 있는 근거가 없습니다.`;
     case "ORG_EVIDENCE_FOR_PRODUCT_NEED":
-      return `${named}에 대해 확인한 것은 전체 집계뿐이라, 이 상품의 근거로는 쓸 수 없습니다.`;
+      return `${named}에 대해 확인한 것은 전체 집계뿐이라, ${narrow}의 근거로는 쓸 수 없습니다.`;
     case "PRODUCT_MISMATCH":
       return `${named}이 아닌 다른 상품의 근거여서 사용하지 않았습니다.`;
     case "CHANNEL_MISMATCH":

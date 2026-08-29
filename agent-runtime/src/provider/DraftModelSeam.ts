@@ -5,21 +5,13 @@
  * `providerKind`/`name`/`version` provenance and a rule-based implementation
  * (`RuleBasedInquiryProposalProvider`, `RuleBasedReviewReplyProvider`).
  *
- * **A real model now drops in behind this interface** (`SpringDraftProvider`), which is what the
- * original note reserved it for: "a real model drops in behind this same interface later, under its
- * own gate and its own privacy review — inquiry title/body is PII and must not egress until that
- * decision." Both halves of that condition are met, and neither is met HERE:
- *
- *  - the **gate** is `sellerops.agent.draft.*` on the backend — off by default, keyed, and opt-in per
- *    organisation;
- *  - the **payload floor** is `AgentDraftPrompt.user`, asserted on the serialized request bytes by
- *    `AgentDraftPayloadFloorTest`. Exactly the inquiry's own title and body leave; no id, no buyer
- *    field, no channel, no phase, no timestamp.
- *
- * Both live in the backend rather than here, and that is the point: this service holds NO vendor key
- * (its own `.env.example` opens by saying it holds no credential of any kind), so the LLM call is one
- * more backend capability reached with the operator's forwarded bearer — the backend stays the only
- * LLM egress in the repository, and there is still exactly one place a key lives.
+ * **The drafter behind this interface is the product's own composer** (`ComposerDraftProvider` →
+ * `DraftPreparer` → `POST /api/inquiries/{id}/draft/generate`, i.e. `InquiryDraftComposer`). The
+ * earlier `SpringDraftProvider`, which sent title and body to a retrieval-free model endpoint, is gone
+ * (Knowledge Context v1-A closure, 2026-08-30): one grounded drafter, and no second one that could
+ * say something the first would refuse. The gate, the payload floor, the retrieval, the applicability
+ * check and the answer style all live in the backend, which stays the only LLM egress; this service
+ * holds NO vendor key.
  *
  * **`draft` is async because a model call is.** The rule provider still answers synchronously in
  * substance (it resolves immediately, no I/O, same input → same output); the signature widened so a
@@ -31,6 +23,8 @@
  * "규칙 기반" (rule-based) or an AI draft — and never claim the wrong one.
  */
 
+import type { DraftEvidenceSummary } from "../conversation/contract";
+
 export interface DraftProvenance {
   /** `RULE_BASED` or `LLM`. The UI's label is derived from this and must never be hardcoded. */
   readonly providerKind: string;
@@ -40,8 +34,14 @@ export interface DraftProvenance {
 
 /** In-memory input; seller-owned content that must stay off every log line. */
 export interface DraftInput {
-  /** The work item, when the caller has one — lets a provider check for grounding before drafting. */
+  /** The work item, when the caller has one — what the composer path drafts FOR. Without it: no text. */
   readonly workItemId?: string;
+  /** Ids/labels the composer artifact names (never customer text). All optional; the id above suffices. */
+  readonly inquiryId?: string | null;
+  readonly channelCode?: string | null;
+  readonly channelNameKo?: string | null;
+  readonly productId?: string | null;
+  readonly productName?: string | null;
   readonly title: string;
   readonly details: string | null;
   readonly status: string;
@@ -55,10 +55,20 @@ export interface DraftCandidate {
   readonly category: string;
   readonly provenance: DraftProvenance;
   /**
-   * Knowledge Context v1-A: set when the candidate carries NO reply text because nothing grounded one.
-   * The legacy lanes surface it as a gap; `performRecord` refuses to save an approval without text.
+   * The backend's answer-basis state for this candidate — `GROUNDED` / `NEEDS_CLARIFICATION` /
+   * `NO_ANSWER_BASIS` — as the composer computed it. `NO_ANSWER_BASIS` with an empty body is the gap
+   * the legacy lanes surface; `performRecord` refuses to save an approval without text.
    */
-  readonly answerBasis?: "NO_ANSWER_BASIS";
+  readonly answerBasis?: string | null;
+  /** The backend's own sentence about what is missing / what to ask; never composed here. */
+  readonly answerBasisNote?: string | null;
+  /** The operational reason nothing was written (capability off, budget, vendor), when that is why. */
+  readonly unavailableMessage?: string | null;
+  /** The saved append-only version this text IS, when it came from the composer. */
+  readonly draftVersion?: number | null;
+  readonly contentFingerprint?: string | null;
+  /** Passages per lane the composer stood on — counts by lane word, never text (Knowledge Context v1-A). */
+  readonly evidenceSummary?: ReadonlyArray<DraftEvidenceSummary>;
 }
 
 export interface DraftModelProvider {

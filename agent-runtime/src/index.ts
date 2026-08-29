@@ -49,6 +49,7 @@ export { prioritizeIssues, selectTopIssues } from "./prioritize/prioritizeIssues
 export type { RankedIssue, IssuePriorityBucket } from "./prioritize/prioritizeIssues";
 
 export { RuleBasedDraftProvider } from "./provider/DraftModelSeam";
+export { ComposerDraftProvider } from "./provider/ComposerDraftProvider";
 export type { DraftModelProvider, DraftCandidate, DraftInput, DraftProvenance } from "./provider/DraftModelSeam";
 
 export { ToolRegistry, UnknownToolError, buildInquiryToolRegistry } from "./tools/ToolRegistry";

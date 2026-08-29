@@ -673,3 +673,73 @@ carry text; frontend `DraftArtifact` summary line. Reported, not fixed: the lega
 product-scoped draft turn (pre-existing), and the retriever's absence gate being the reason C is not GROUNDED on
 real data (by design — not retuned here).
 
+## §30 Knowledge Context v1-A closure — one drafter, and scope sentences that name the right thing (2026-08-30)
+
+Closes the two items §29 reported and did not fix. No new feature; schema 0; marketplace 0; WRITE 0.
+
+**1. The legacy inquiry lanes draft through `InquiryDraftComposer`, and the model-only seam is gone.** Trace on
+`8ec14e13`: `/agent` (reachable — the panel's 「전체 화면」 link and every `agentContext` launcher) still offered
+「미답변 문의로 답변 초안 만들어 보기」 (`PREPARE_INQUIRY_DRAFT` → `InquiryDraftAgentRuntime`) and the 「미답변 문의
+처리」 shortcut (`HANDLE_UNANSWERED_INQUIRIES` → `InquiryAgentRuntime` + checkpoint + `performRecord`). Both drafted
+through `SpringDraftProvider` → `POST /api/agent/inquiry-draft`, a title/body-only model call with no retrieval,
+no applicability, no style and no answer basis — §29's gate stopped it when the retriever found nothing, but when
+a passage existed the legacy prompt still did not carry it. So the lanes are not dead and are not rewritten:
+**they delegate.** `provider/ComposerDraftProvider.ts` implements the unchanged `DraftModelProvider` seam by calling
+`conversation/DraftPreparer.ts` (`prepareWithView`) — propose when OPEN, `POST /api/inquiries/{id}/draft/generate`,
+the same two calls the inquiry screen and the chat lane make — and returns the saved version's text, title,
+version, fingerprint, answer basis, the backend's own note and lane counts. A composer answer with no draft becomes
+a candidate with an **empty body** (category from the deterministic rule categoriser, text never), which the
+draft-prep lane reports as `prepared:false` with the backend's sentence and the checkpoint shows as an empty box
+whose approve button is disabled; `performRecord` still refuses `NO_DRAFT_TEXT`. Removed: `SpringDraftProvider`,
+`SpringClient.generateInquiryDraft`/`previewInquiryEvidence`, `AgentDraftView`, backend `AgentDraftController` +
+`dto/AgentDraftRequest` + `dto/AgentDraftView`, `AgentDraftService.draft(org,title,details)` and
+`AgentDraftPrompt.user(title,details)` — the grounded overloads the composer uses are untouched. A structural test
+walks `agent-runtime/src` for `/api/agent/inquiry-draft` and `generateInquiryDraft` (0) and for the provider file.
+
+What this changes about the legacy graphs, said plainly: the composer PREPARES, so an OPEN item moves to PROPOSED
+and one MODEL version is appended **before** the checkpoint — exactly what 「초안 생성」 on the inquiry screen does.
+The old claim "nothing is written before the checkpoint" is narrowed to what it protected: nothing moves toward a
+channel; approval, the publish intent and any send stay behind the human checkpoint and the backend's gates. The
+restart-resume path no longer regenerates a draft with a rule table: the snapshot records the shown version's
+number + fingerprint (never its text), the head is read back, an unedited approval binds to it (reused, not
+re-saved), and a head that changed meanwhile is refused (`DRAFT_CHANGED`) unless the human sent their own text.
+`InquiryAgentRuntime.assertExecutionDisabled` is unchanged: it still refuses to run against a backend with any
+reply adapter registered, so on a connector-ON deployment the approve loop refuses at `start()` — as it always did.
+
+**2. Scope wording.** Reproduced live on `8ec14e13`: 「이 문의에 우리 배송 정책 기준으로 답변해줘」 with a work-item
+context ended with 「이 질문에 대해 확인한 것은 전체 집계뿐이라, 이 상품의 근거로는 쓸 수 없습니다」. Two defects:
+(a) `inquiryIntentOf` makes a PREPARE turn a WORKLOAD intent, and the C3 rule (a run about one inquiry does not
+read the org queue) lived only on the COUNT path — so the queue was read, refused by the gate as ORG evidence for
+an ITEM need, and reported; (b) `reasonSentence` had one wording per reason and it named 「이 상품」 whatever the
+need's entity was. Fixes: the entity rule now precedes the intent token (a focused run answers `INQUIRY_VOLUME`
+with 「전체 대기열 집계는 읽지 않았습니다」 and reads nothing); `RejectedEvidence` carries `needEntity`, compose
+de-duplicates by (reason, entity) and picks the subject per entity — the seller's product mention for PRODUCT,
+「이 문의」/「이 주문」 for ITEM — and the sentence names that thing (「이 문의의 근거로는 쓸 수 없습니다」). Also
+found while there: the contextual ref said 「AI 초안이 준비돼 있습니다」 from the work phase alone, and PROPOSED is
+reached before the model writes anything (§29 QA left one such item); the ref now carries `locator.draftVersion`
+and the sentence is 「AI 초안이 준비돼 있습니다」 only when a version exists, else 「답변을 준비하는 중이며 초안은
+아직 없습니다」. WORKING_SET is not an evidence-scope axis (it is a plan filter), so it needed no sentence.
+
+**QA (Demo Org, connectors/scheduler/proactive/self-pilot OFF, real planner, processes restarted on this code).**
+Specified inquiry + policy present (`856607a8`, `043d3e70`): composer called, **NO_ANSWER_BASIS** on the real
+customer text (the retriever's absence gate, unchanged), policy quoted beside, KNOWLEDGE_ENTRY step, no queue read
+(`toolCalls 2`: `search_org_knowledge` + context), and **no org-scope note**. Product-bound inquiry (`6735d0c3`):
+「아직 답변되지 않았습니다, AI 초안이 준비돼 있습니다」 + product line, no note. Legacy `PREPARE_INQUIRY_DRAFT` on the
+top OPEN item: `prepared:false`, note 「답변 기준이 필요합니다.」, `agent_draft_seam reason=NO_ANSWER_BASIS`, model 0;
+legacy `HANDLE_UNANSWERED_INQUIRIES`: checkpoint `replyDraft ""` (approve disabled). **GROUNDED on a real Demo Org
+inquiry was not reached** — every open inquiry fails the retriever's absence gate against the shipping policy,
+and writing a policy that quotes the customer's nouns would be gaming the gate; the GROUNDED shape (text, version,
+basis, lane counts, head reuse on unedited approval, `DRAFT_CHANGED`) is proven by `composerDraftProvider.test.ts`,
+`inquiryDraft.test.ts`, `humanApproval.test.ts`, `durableRestart.test.ts`, `slice.e2e.test.ts`, the run-service
+contract and `knowledgeContext.test.ts` (C/D + the new no-queue-read regression), plus the backend composer suites.
+Query accuracy / freshness suites: unchanged, green. Side effects on the Demo Org: two SHIPPING_POLICY documents
+created and deleted; work items `575bbbbd`, `d0a04aac` moved OPEN→PROPOSED by the legacy lanes' proposal step
+(no draft version written); `856607a8`/`043d3e70` unchanged (already PROPOSED, nothing written). Planner/judge
+calls ≈8, draft model 0, marketplace 0, WRITE 0, migration 0. Suites: backend 3,521 · runtime 624 · frontend 2,561,
+0 failures.
+
+**Reported, not fixed.** The retriever's absence gate is why real inquiries stay `NO_ANSWER_BASIS` with a relevant
+policy registered (§29; by design, not retuned). The legacy approve loop is a second approval surface on the same
+backend endpoints as the inquiry screen; whether `/agent` should keep it is a product-owner decision (it is
+reachable, so it was delegated rather than removed).
+

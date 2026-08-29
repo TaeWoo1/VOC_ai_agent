@@ -88,6 +88,17 @@ export class DraftPreparer {
   ) {}
 
   async prepare(target: DraftTarget, tone: ToneHint | null, artifactId: string): Promise<DraftArtifact> {
+    return (await this.prepareWithView(target, tone, artifactId)).artifact;
+  }
+
+  /**
+   * The same PREPARE, returning the backend's view beside the artifact — for a caller that needs a
+   * field the artifact does not carry (the legacy lanes' `ComposerDraftProvider` needs the saved
+   * version's title so an unedited approval binds to the head instead of re-saving it).
+   */
+  async prepareWithView(
+    target: DraftTarget, tone: ToneHint | null, artifactId: string,
+  ): Promise<{ readonly artifact: DraftArtifact; readonly view: GeneratedDraftView }> {
     // The product's own draft path is propose → generate: a draft version is saved only on a PROPOSED
     // work item, and an OPEN one is moved there by the same proposal step the inquiry screen uses
     // (a local row, never a marketplace call). Found on the throwaway QA org (Acceptance Closure): the
@@ -106,10 +117,10 @@ export class DraftPreparer {
       const diff = envelopeDiff(extractEnvelope(previous.comments), extractEnvelope(draft.comments));
       if (diff.length > 0) {
         log("conversation_draft_refused", { objectKind: "INQUIRY", tone, families: diff.join(",") });
-        return this.inquiryArtifact(target, view, previous, tone, artifactId, envelopeRefusal(diff));
+        return { artifact: this.inquiryArtifact(target, view, previous, tone, artifactId, envelopeRefusal(diff)), view };
       }
     }
-    return this.inquiryArtifact(target, view, draft, tone, artifactId, null);
+    return { artifact: this.inquiryArtifact(target, view, draft, tone, artifactId, null), view };
   }
 
   private async detailOf(workItemId: string): Promise<Awaited<ReturnType<SpringClient["getInquiryDetail"]>> | null> {

@@ -4,18 +4,20 @@
  * draft. There is no `resume`.
  *
  * What it does: reads the OPEN inquiry queue, picks the top-priority item, reads its seller-owned
- * detail, and generates a rule-based answer DRAFT — then STOPS. It never proposes, saves a draft to
- * the backend, records an approval, or sends anything. The "Human Checkpoint" is terminal: the run
- * finishes with the draft in the response and hands off to the human.
+ * detail, and asks the product's own draft path for the answer draft — then STOPS. Since Knowledge
+ * Context v1-A closure (2026-08-30) the drafter is {@link ComposerDraftProvider}: `InquiryDraftComposer`
+ * behind `POST /api/inquiries/{id}/draft/generate`, the same call the inquiry screen and the chat lane
+ * make. That path PREPARES — an OPEN item moves to PROPOSED and one MODEL version is appended — and
+ * moves nothing toward a channel. This runtime never records an approval and never sends.
  *
- * Structural no-mutation: the graph is built on the READ-ONLY inquiry tool registry (search + detail),
- * so there is no mutating tool to reach and no interrupt to resume. The backend work item stays OPEN
- * and the inquiry status is untouched, because nothing on this path can write.
+ * The graph's tool registry is READ-ONLY (search + detail): there is no propose/save/record tool to
+ * reach and no interrupt to resume; the one PREPARE goes through the drafter seam.
  *
- * Transient draft: the generated draft body (`replyDraft`) is returned in the live result and is NEVER
- * persisted — the run store keeps only the sanitized {@link InquiryDraftMeta}. Re-running the same
- * request reproduces the same draft deterministically (the drafter is pure), so replay is idempotent
- * with no cumulative effect; `generatedAt` records when this preparation ran.
+ * Transient text: the draft body (`replyDraft`) is returned in the live result and NEVER persisted by
+ * this runtime — the run store keeps only the sanitized {@link InquiryDraftMeta}. The text itself lives
+ * where the product keeps it: the saved version on the inquiry (`draftVersion`), which the inquiry
+ * screen shows. Re-running the same request appends another version (a regenerate), exactly as the
+ * screen's 「다시 만들기」 does.
  */
 import { buildInquiryDraftGraph } from "./graph/inquiryDraftGraph";
 import { buildInquiryReadToolRegistry } from "./tools/ToolRegistry";
@@ -71,9 +73,9 @@ export class InquiryDraftAgentRuntime {
   }
 
   /**
-   * Prepare a draft for the top-priority OPEN inquiry. Read-only: no interrupt, no backend mutation,
-   * no send. Persists only the sanitized metadata (never the draft body) so a reloaded run cannot
-   * re-surface the draft.
+   * Prepare a draft for the top-priority OPEN inquiry through the product's own draft path: no
+   * interrupt, no approval, no send. Persists only the sanitized metadata (never the draft body) so a
+   * reloaded run cannot re-surface the text here; the saved version lives on the inquiry itself.
    */
   async run(threadId: string, request: GoalRequest): Promise<InquiryDraftRunResult> {
     const goal = parseGoal(request);
@@ -111,16 +113,26 @@ export class InquiryDraftAgentRuntime {
       generatedAt: this.now(),
     };
 
-    // Knowledge Context v1-A: a candidate with no text is not a prepared draft. The rule categoriser
-    // (and the model seam's fallback onto it) names the category and nothing else; saying `prepared`
-    // would hand the operator an empty box that looks reviewed. Fail closed: not prepared, said why.
-    if (final.candidate.answerBasis === "NO_ANSWER_BASIS" || final.candidate.comments.trim().length === 0) {
+    const c = final.candidate;
+    const basis = {
+      answerBasis: c.answerBasis ?? null,
+      answerBasisNote: c.answerBasisNote ?? null,
+      evidenceSummary: c.evidenceSummary ?? [],
+    };
+    // Knowledge Context v1-A: a candidate with no text is not a prepared draft. The composer wrote
+    // nothing (no answer basis, capability off, vendor failure) and the rule categoriser names the
+    // category and nothing else; saying `prepared` would hand the operator an empty box that looks
+    // reviewed. Fail closed: not prepared, and the reason is the backend's own sentence.
+    if (c.comments.trim().length === 0) {
+      const reason = c.unavailableMessage ? "UNAVAILABLE" : "NO_ANSWER_BASIS";
       await this.runStore.save({ threadId, status: "DONE", prepared: false, meta, trail: [...trail, "no_answer_basis"] });
-      log("inquiry_draft_run_done", { prepared: false, reason: "NO_ANSWER_BASIS", category: meta.category });
+      log("inquiry_draft_run_done", { prepared: false, reason, category: meta.category });
       return {
         status: "DONE",
-        preparation: { prepared: false, meta, replyDraft: null,
-          note: "답변 기준이 없어 초안을 만들지 않았습니다. 문의 화면에서 답변 기준을 등록하면 초안을 준비합니다." },
+        preparation: { prepared: false, meta, replyDraft: null, ...basis,
+          note: c.unavailableMessage
+            ?? c.answerBasisNote
+            ?? "답변 기준이 없어 초안을 만들지 않았습니다. 문의 화면에서 답변 기준을 등록하면 초안을 준비합니다." },
         trail: [...trail, "no_answer_basis"],
       };
     }
@@ -133,13 +145,18 @@ export class InquiryDraftAgentRuntime {
       prepared: true,
       category: meta.category,
       channelCode: meta.channelCode,
+      answerBasis: basis.answerBasis,
+      draftVersion: c.draftVersion ?? null,
     });
 
     return {
       status: "DONE",
-      // Expose ONLY the templated reply comments — never candidate.title (which echoes the customer
-      // subject) and never the customer body/details.
-      preparation: { prepared: true, meta, replyDraft: final.candidate.comments },
+      // Expose ONLY the reply comments — never candidate.title (which echoes the customer subject)
+      // and never the customer body/details.
+      preparation: {
+        prepared: true, meta, replyDraft: c.comments, ...basis,
+        draftVersion: c.draftVersion ?? null, contentFingerprint: c.contentFingerprint ?? null,
+      },
       trail,
     };
   }

@@ -45,22 +45,20 @@ public class AgentDraftService {
     }
 
     /**
-     * Generate a starter draft for one inquiry, or nothing.
+     * Generate a draft for one inquiry from its title, body and the seller's own retrieved knowledge,
+     * or nothing.
+     *
+     * <p>There is no title-and-body-only form any more (Knowledge Context v1-A closure, 2026-08-30):
+     * the {@code /api/agent/inquiry-draft} endpoint that offered one wrote replies grounded in nothing,
+     * and every caller now comes through {@code InquiryDraftComposer}, which decides what the model may
+     * see. A caller with no knowledge passes an empty list and the composer's answer-basis rules decide
+     * whether the call happens at all.
      *
      * <p>The log line is coarse by construction: an org id, a boolean and a reason marker. The title,
      * the body, the generated draft, and any vendor text are never logged — this is the one method in
-     * the backend that holds all of them at once.
-     */
-    public Optional<AgentDraftResponseParser.ParsedDraft> draft(UUID orgId, String title, String details) {
-        return draft(orgId, title, details, List.of());
-    }
-
-    /**
-     * The grounded form: the same call, plus the seller's own retrieved product knowledge.
-     *
-     * <p>The passage count is logged and the passage TEXT is not — the same rule the title and body
-     * have always been under. Knowing that a run was grounded in two passages is an operational fact;
-     * knowing what they said is the seller's business.
+     * the backend that holds all of them at once. The passage count is logged and the passage TEXT is
+     * not: knowing that a run was grounded in two passages is an operational fact; knowing what they
+     * said is the seller's business.
      */
     public Optional<AgentDraftResponseParser.ParsedDraft> draft(
             UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge) {

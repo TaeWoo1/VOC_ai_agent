@@ -486,23 +486,6 @@ export interface UserIdentity {
   readonly orgId: string;
 }
 
-/**
- * What `POST /api/agent/inquiry-draft` answers — the model seam's server side.
- *
- * `available: false` covers every reason there is no model draft (the capability is off for this org,
- * the vendor refused, the answer was off-schema) because the caller does the same thing with all of
- * them: fall back to the deterministic rule drafter. `providerVersion` is present whenever the
- * capability is ON for the org, so a run can record WHICH model was asked even when the answer was a
- * refusal — "the LLM was asked and declined" and "no LLM was configured" are different facts.
- */
-export interface AgentDraftView {
-  readonly available: boolean;
-  readonly category: string | null;
-  readonly title: string | null;
-  readonly comments: string | null;
-  readonly providerVersion: string | null;
-}
-
 /* ─────────────────────────── Operator Graph v1 (2026-08-21) ─────────────────────────── */
 
 /**

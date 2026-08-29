@@ -132,6 +132,22 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
   const intent = inquiryIntentOf(input);
 
   for (const need of input.needs) {
+    if (need.kind === "INQUIRY_VOLUME" && focus) {
+      // <b>A run about ONE inquiry has no use for the org's queue, whichever shape it was asked in.</b>
+      // The gate would refuse every row of it (ORG evidence for an ITEM need), so the read is not made
+      // and the need says why. This used to hold only on the COUNT path: a draft turn opened on one
+      // inquiry is a WORKLOAD intent by definition, so it read the whole queue, had it refused, and
+      // printed 「전체 집계뿐이라 이 상품의 근거로는 쓸 수 없습니다」 under a draft for one inquiry
+      // (Knowledge Context v1-A closure, live 2026-08-30). The C3 rule is about the entity, not the
+      // intent token.
+      needStates.push({
+        id: need.id,
+        status: "UNSATISFIABLE",
+        evidenceIds: [],
+        reason: "이 문의 하나를 조사하는 중이라 전체 대기열 집계는 읽지 않았습니다.",
+      });
+      continue;
+    }
     if (need.kind === "INQUIRY_VOLUME" && intent !== "COUNT") {
       if (workloadRead) {
         needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
@@ -218,18 +234,7 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     }
 
     if (need.kind === "INQUIRY_VOLUME") {
-      // <b>A run about ONE inquiry has no use for the org's queue depth.</b> The gate would refuse
-      // every row of it (ORG evidence for an ITEM need), so the read is not made and the need says
-      // why — the same C3 rule as the product case below, one entity kind over.
-      if (focus) {
-        needStates.push({
-          id: need.id,
-          status: "UNSATISFIABLE",
-          evidenceIds: [],
-          reason: "이 문의 하나를 조사하는 중이라 전체 대기열 집계는 읽지 않았습니다.",
-        });
-        continue;
-      }
+      // (A focused run never reaches here — the entity rule above answered the need first.)
       // <b>The org inbox cannot answer a product question, and the run may already hold one that
       // can.</b> `get_today_inbox` returns the whole org's unanswered depth; for a need about a
       // resolved product the scope gate refuses it (ORG_EVIDENCE_FOR_PRODUCT_NEED) and always will.
@@ -835,7 +840,11 @@ const ANSWER_STATUS_SENTENCE: Record<string, string> = {
 };
 const WORK_PHASE_SENTENCE: Record<string, string> = {
   OPEN: "초안은 아직 없습니다",
-  PROPOSED: "AI 초안이 준비돼 있습니다",
+  // PROPOSED says a proposal exists, not that a draft does: the product's own path moves an item to
+  // PROPOSED before it asks the model, and the model may write nothing (NO_ANSWER_BASIS). Whether a
+  // draft version exists is a separate scalar on the ref (`locator.draftVersion`); focusFindings
+  // chooses the sentence, so this entry is the fallback wording only.
+  PROPOSED: "답변을 준비하는 중입니다",
   APPROVED: "답변이 승인돼 전송을 기다립니다",
   ACTION_PENDING: "답변 전송이 진행 중입니다",
   EXECUTED: "답변이 전송됐습니다",
@@ -852,7 +861,11 @@ function focusFindings(focus: FocusedInquiry, needId: string): Finding[] {
   const loc = focus.ref.locator;
   const receivedOn = focus.ref.events?.from ?? null;
   const status = loc.status ? ANSWER_STATUS_SENTENCE[loc.status] : undefined;
-  const phase = loc.phase ? WORK_PHASE_SENTENCE[loc.phase] : undefined;
+  // 「AI 초안이 준비돼 있습니다」 is a claim about a saved draft version, and only the version proves it:
+  // a PROPOSED item is one the product is preparing, with or without a draft yet.
+  const phase = loc.phase === "PROPOSED"
+    ? (loc.draftVersion != null ? "AI 초안이 준비돼 있습니다" : "답변을 준비하는 중이며 초안은 아직 없습니다")
+    : loc.phase ? WORK_PHASE_SENTENCE[loc.phase] : undefined;
   const state = [status, phase].filter(Boolean).join(", ");
   const findings: Finding[] = [{
     findingId: `f-${focus.ref.evidenceId}`,

@@ -26,7 +26,7 @@ import { RECORDED_PLANS, REPAIRED_PLANS } from "../support/recordedPlans";
 import type { OperatorAnswer, EvidenceRef } from "../../src/operator/state/OperatorState";
 import type { InvestigationPlan, InformationNeed } from "../../src/operator/plan/InvestigationPlan";
 import {
-  checkEvidence, evidenceScopeOf, granularityOf, needScopeOf, partitionEvidence,
+  checkEvidence, evidenceScopeOf, granularityOf, needScopeOf, partitionEvidence, reasonSentence,
 } from "../../src/operator/scope/EvidenceScope";
 import type { NeedScope } from "../../src/operator/scope/EvidenceScope";
 import { RuleEvidenceJudge } from "../../src/operator/judge/EvidenceJudge";
@@ -334,7 +334,7 @@ describe("invariant 5 — compatibility is checked before a finding is assembled
       ref({ evidenceId: "e2", locator: { productId: "p-molding" } }),
     ]);
     expect(accepted.map((e) => e.evidenceId)).toEqual(["e2"]);
-    expect(rejected).toEqual([{ evidenceId: "e1", reason: "ORG_EVIDENCE_FOR_PRODUCT_NEED" }]);
+    expect(rejected).toEqual([{ evidenceId: "e1", reason: "ORG_EVIDENCE_FOR_PRODUCT_NEED", needEntity: "PRODUCT" }]);
   });
 });
 
@@ -379,5 +379,26 @@ describe("invariant 6 — the rule judge carries the same floor, independently",
     const verdict = await judge.judge(gapFinding, [ref({ coverage: "UNCERTAIN_PRODUCT_UNLINKED" })],
       productScope());
     expect(verdict.hasEvidence).toBe(true);
+  });
+});
+
+describe("scope wording — the sentence names the kind of thing the NEED was about", () => {
+  it("an org aggregate refused for a PRODUCT need is said about the product; for an ITEM need, about the inquiry", () => {
+    expect(reasonSentence("ORG_EVIDENCE_FOR_PRODUCT_NEED", "전선몰딩", "PRODUCT"))
+      .toBe("「전선몰딩」에 대해 확인한 것은 전체 집계뿐이라, 이 상품의 근거로는 쓸 수 없습니다.");
+    expect(reasonSentence("ORG_EVIDENCE_FOR_PRODUCT_NEED", "이 문의", "ITEM"))
+      .toBe("「이 문의」에 대해 확인한 것은 전체 집계뿐이라, 이 문의의 근거로는 쓸 수 없습니다.");
+    expect(reasonSentence("ORG_EVIDENCE_FOR_PRODUCT_NEED", undefined, "ITEM")).not.toContain("이 상품");
+  });
+
+  it("a rejection carries the need's entity, so compose cannot reach for the wrong noun", () => {
+    const scope = needScopeOf(
+      plan({ entities: { resolved: [], unresolved: [] } }),
+      NEED,
+      [{ kind: "INQUIRY", mention: "이 문의", id: "wi-1", label: "카페24 문의", resolvedBy: "get_inquiry_detail" }],
+    );
+    expect(scope.entity).toBe("ITEM");
+    const { rejected } = partitionEvidence(scope, [ref({ evidenceId: "org-count" })]);
+    expect(rejected).toEqual([{ evidenceId: "org-count", reason: "ORG_EVIDENCE_FOR_PRODUCT_NEED", needEntity: "ITEM" }]);
   });
 });

@@ -59,11 +59,15 @@ Plus `tools/` — operator harnesses, validation scripts, and calibration instru
 ## The two facts most often mis-remembered
 
 1. **`agent-runtime/` holds no credential, and the backend is still the only LLM egress.** This line
-   used to read "`agent-runtime/` contains no LLM call", and that stopped being true on 2026-08-20:
-   `provider/SpringDraftProvider.ts` produces a real inquiry draft. It does so by calling the BACKEND
-   (`POST /api/agent/inquiry-draft`) with the operator's forwarded bearer — the model, the key, the
-   prompt, the per-org flag and the payload floor all live in Spring (`agent/llm/**`), and this service
-   still holds no vendor key of any kind. That — not "no model is involved" — is the property to check
+   used to read "`agent-runtime/` contains no LLM call", and that stopped being true on 2026-08-20,
+   when the runtime's draft node first reached a real model — through the BACKEND, with the operator's
+   forwarded bearer. Since 2026-08-30 (Knowledge Context v1-A closure) every inquiry draft the runtime
+   obtains, from the chat lane or the legacy `/api/agent-runs` lanes, is the product's own
+   `InquiryDraftComposer` (`POST /api/inquiries/{id}/draft/generate`, via `provider/ComposerDraftProvider.ts`
+   → `conversation/DraftPreparer.ts`); the title/body-only seam `POST /api/agent/inquiry-draft` and
+   `SpringDraftProvider` no longer exist. The model, the key, the prompt, the per-org flag, the
+   retrieval and the payload floor all live in Spring (`agent/llm/**`, `inquiry/draft/**`), and this
+   service still holds no vendor key of any kind. That — not "no model is involved" — is the property to check
    when reading it. `docs/decisions/agent-runtime-langgraph-llm-split.md` records the decision;
    `docs/sellerops_operator_graph_v1.md` (and v2) extends the same rule to the Operator planner and evidence
    judge (their own flags, their own prompts, their own payload floors, all in Spring).

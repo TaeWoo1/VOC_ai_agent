@@ -16,6 +16,7 @@
  *    can therefore never re-surface the draft body; the human regenerates it if needed.
  */
 import type { DraftProvenance } from "../provider/DraftModelSeam";
+import type { DraftEvidenceSummary } from "../conversation/contract";
 
 /** Sanitized, body-free metadata about a prepared draft. Safe to persist and to log. */
 export interface InquiryDraftMeta {
@@ -50,4 +51,12 @@ export interface InquiryDraftPreparation {
   readonly meta: InquiryDraftMeta | null;
   readonly replyDraft: string | null;
   readonly note?: string;
+  /** The composer's answer-basis state and its own note — the product's words, not this runtime's. */
+  readonly answerBasis?: string | null;
+  readonly answerBasisNote?: string | null;
+  /** The saved append-only version the text IS (the inquiry screen shows the same one). */
+  readonly draftVersion?: number | null;
+  readonly contentFingerprint?: string | null;
+  /** Passages per lane, counts only (상품 정보 · 운영 정책 · 과거 답변 · 주문 상태). */
+  readonly evidenceSummary?: ReadonlyArray<DraftEvidenceSummary>;
 }

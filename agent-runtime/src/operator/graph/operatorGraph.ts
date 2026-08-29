@@ -39,7 +39,7 @@ import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/Inves
 import { needsInOrder } from "../plan/InvestigationPlan";
 import { instanceMentionsOf, isInstance } from "../plan/EntityRole";
 import { groupingOf } from "../group/ProductGrouping";
-import type { NeedScope, RejectedEvidence } from "../scope/EvidenceScope";
+import type { EntityScope, NeedScope, RejectedEvidence } from "../scope/EvidenceScope";
 import {
   channelScopeOf, needScopeOf, partitionEvidence, periodNamedIn, planScopeOf, reasonSentence,
 } from "../scope/EvidenceScope";
@@ -346,11 +346,12 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       // Invariant 1: a need whose every citation failed the check is NOT satisfied, and says why in
       // the seller's language rather than falling silent.
       const reason = bad[0]?.reason;
+      const scope = scopeFor(state.id);
       needStates.push({
         id: state.id,
         status: "UNSATISFIABLE",
         evidenceIds: [],
-        ...(reason ? { reason: reasonSentence(reason, productMentionOf(plan)) } : {}),
+        ...(reason ? { reason: reasonSentence(reason, scopeSubjectOf(scope.entity, plan, known), scope.entity) } : {}),
       });
     }
 
@@ -602,9 +603,16 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // question cannot be answered with what SellerOps can currently read, which is the sentence Q4
     // should have produced instead of three issues belonging to other products.
     if (state.scopeRejections.length > 0) {
-      const reasons = [...new Set(state.scopeRejections.map((r) => r.reason))];
-      const subject = plan ? productMentionOf(plan) : undefined;
-      notes.push(...reasons.map((r) => reasonSentence(r, subject)));
+      // One sentence per (reason, need scope): the same reason about a product and about the one
+      // inquiry the run was opened on are two different facts, and each names its own kind of thing.
+      const seen = new Set<string>();
+      for (const r of state.scopeRejections) {
+        const key = `${r.reason}|${r.needEntity}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const subject = plan ? scopeSubjectOf(r.needEntity, plan, state.entities ?? []) : undefined;
+        notes.push(reasonSentence(r.reason, subject, r.needEntity));
+      }
     }
 
     const stopReason: OperatorStopReason = !plan || !plan.supported
@@ -721,6 +729,26 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
  * The seller's own words, never a resolved label: when the gate fires because nothing resolved, there
  * IS no label, and the only honest way to name the thing is the way they named it.
  */
+/**
+ * The seller's word for what a need of this scope is about. PRODUCT ⇒ the product they named (or the
+ * one the screen handed over); ITEM ⇒ the inquiry/order the run was opened on, as a demonstrative —
+ * never a customer title. ORG ⇒ nothing, and the sentence says 「이 질문」.
+ */
+function scopeSubjectOf(
+  entity: EntityScope,
+  plan: InvestigationPlan,
+  resolved: readonly ResolvedEntity[],
+): string | undefined {
+  if (entity === "PRODUCT") return productMentionOf(plan);
+  if (entity === "ITEM") {
+    if (resolved.some((e) => e.kind === "INQUIRY")) return "이 문의";
+    if (resolved.some((e) => e.kind === "ORDER")) return "이 주문";
+    const named = plan.entities.unresolved.find((e) => (e.kind === "INQUIRY" || e.kind === "ORDER") && isInstance(e));
+    return named ? (named.kind === "ORDER" ? "이 주문" : "이 문의") : undefined;
+  }
+  return undefined;
+}
+
 function productMentionOf(plan: InvestigationPlan): string | undefined {
   // An INSTANCE only: a category mention never put the run into product scope, so it can never be the
   // reason a row was withheld, and quoting it back ("「상품」에 해당하는 상품을 찾지 못해…") would name

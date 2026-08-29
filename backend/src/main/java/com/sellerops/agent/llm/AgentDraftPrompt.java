@@ -1,8 +1,8 @@
 package com.sellerops.agent.llm;
 
 /**
- * The prompt behind {@code POST /api/agent/inquiry-draft}, versioned so a run can say which one
- * produced it.
+ * The prompt behind the inquiry draft model call ({@code InquiryDraftComposer} via
+ * {@code POST /api/inquiries/{id}/draft/generate}), versioned so a run can say which one produced it.
  *
  * <p><b>Structured output is a requirement, not a convenience.</b> The graph node that consumes this
  * has to put a category and a reply body into typed state; a model answering in prose would either
@@ -207,10 +207,5 @@ public final class AgentDraftPrompt {
             sb.append("\n\n답변 스타일:\n").append(style);
         }
         return sb.toString().strip();
-    }
-
-    /** The two-argument form, kept for callers with no product knowledge to offer. */
-    public static String user(String title, String details) {
-        return user(title, details, java.util.List.of());
     }
 }

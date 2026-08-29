@@ -175,6 +175,20 @@ describe("Knowledge Context v1-A — the draft lane stays authoritative", () => 
     expect(JSON.stringify(draft)).not.toContain("snippet");
   });
 
+  it("closure: a turn opened on ONE inquiry never reads the org queue for it, so no org-scope withholding note appears", async () => {
+    // Live 2026-08-30: the draft turn is a WORKLOAD intent by definition, so InquiryOps read the whole
+    // queue, the scope gate refused it (ORG evidence for an ITEM need) and the answer ended with
+    // 「이 질문에 대해 확인한 것은 전체 집계뿐이라, 이 상품의 근거로는 쓸 수 없습니다」 — under a draft for
+    // one inquiry that names no product. The entity rule now precedes the intent token.
+    const h = harness({ plansByGoal: PLANS });
+    const { turn } = await ask(h, ASK_DRAFT, { workItemId: W_SHIP });
+    // The workload read is `listInquiries` on the inquiry client; the count path is the operator inbox.
+    expect(h.inquiry.calls.list).toBe(0);
+    expect(h.operator.calls.inbox).toBe(0);
+    expect(turn.message).not.toContain("전체 집계");
+    expect(turn.message).not.toContain("이 상품의 근거");
+  });
+
   it("evidenceSummaryOf counts by the backend's lane word, in lane order, and never carries text", () => {
     expect(evidenceSummaryOf([
       { scopeLabel: "과거 답변", snippet: "x" }, { scopeLabel: "주문 상태" }, { scopeLabel: "운영 정책" },

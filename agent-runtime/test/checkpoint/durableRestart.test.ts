@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { InquiryAgentRuntime } from "../../src/runtime";
+import { ComposerDraftProvider } from "../../src/provider/ComposerDraftProvider";
 import { FileRunStore, InMemoryRunStore } from "../../src/checkpoint/RunStore";
 import { performRecord } from "../../src/graph/performRecord";
 import { buildInquiryToolRegistry } from "../../src/tools/ToolRegistry";
@@ -21,7 +22,7 @@ describe("durable restart-resume", () => {
     const dir = freshStoreDir();
     const store = new FileRunStore(dir);
     const fake = new FakeSpringClient(twoInquiries());
-    const r1 = new InquiryAgentRuntime({ client: fake, runStore: store });
+    const r1 = new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) });
 
     await r1.start("t-snap", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
 
@@ -45,15 +46,16 @@ describe("durable restart-resume", () => {
     const store = new FileRunStore(freshStoreDir());
     const fake = new FakeSpringClient(twoInquiries()); // the backend survives; only the runtime restarts
 
-    const before = new InquiryAgentRuntime({ client: fake, runStore: store });
+    const before = new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) });
     const started = await before.start("t-restart", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
     expect(started.status).toBe("AWAITING_APPROVAL");
-    // Nothing mutated before the checkpoint.
-    expect(fake.phaseOf(OLDER_WORK_ITEM)).toBe("OPEN");
+    // The product's own PREPARE ran before the checkpoint; nothing was approved.
+    expect(fake.phaseOf(OLDER_WORK_ITEM)).toBe("PROPOSED");
+    expect(fake.calls.confirmPublish).toBe(0);
 
     // Simulate restart: a brand-new runtime (empty in-memory checkpointer + liveThreads),
     // same durable store, same backend.
-    const after = new InquiryAgentRuntime({ client: fake, runStore: store });
+    const after = new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) });
     const done = await after.resume("t-restart", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "user-1" });
 
     expect(done.status).toBe("DONE");
@@ -69,12 +71,12 @@ describe("durable restart-resume", () => {
     expect(fake.externalSendAttempts).toBe(0);
   });
 
-  it("resumes a reject across a restart, leaving the item OPEN and untouched", async () => {
+  it("resumes a reject across a restart, approving nothing (the prepared version waits on the inquiry)", async () => {
     const store = new FileRunStore(freshStoreDir());
     const fake = new FakeSpringClient(twoInquiries());
 
-    await new InquiryAgentRuntime({ client: fake, runStore: store }).start("t-rj", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-    const done = await new InquiryAgentRuntime({ client: fake, runStore: store }).resume("t-rj", {
+    await new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) }).start("t-rj", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
+    const done = await new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) }).resume("t-rj", {
       approved: false,
       approvedBy: "user-1",
     });
@@ -82,8 +84,7 @@ describe("durable restart-resume", () => {
     expect(done.status).toBe("DONE");
     if (done.status !== "DONE") return;
     expect(done.outcome?.decision).toBe("REJECTED");
-    expect(fake.phaseOf(OLDER_WORK_ITEM)).toBe("OPEN");
-    expect(fake.calls.propose).toBe(0);
+    expect(fake.phaseOf(OLDER_WORK_ITEM)).toBe("PROPOSED");
     expect(fake.calls.saveDraft).toBe(0);
     expect(fake.calls.confirmPublish).toBe(0);
   });
@@ -92,9 +93,9 @@ describe("durable restart-resume", () => {
     const store = new FileRunStore(freshStoreDir());
     const fake = new FakeSpringClient(twoInquiries());
 
-    await new InquiryAgentRuntime({ client: fake, runStore: store }).start("t-dbl", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-    const first = await new InquiryAgentRuntime({ client: fake, runStore: store }).resume("t-dbl", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "u" });
-    const second = await new InquiryAgentRuntime({ client: fake, runStore: store }).resume("t-dbl", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "u" });
+    await new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) }).start("t-dbl", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
+    const first = await new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) }).resume("t-dbl", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "u" });
+    const second = await new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) }).resume("t-dbl", { approved: true, editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다.", approvedBy: "u" });
 
     expect(first.status).toBe("DONE");
     expect(second.status).toBe("DONE");
@@ -104,6 +105,41 @@ describe("durable restart-resume", () => {
     expect(fake.calls.saveDraft).toBe(1);
     expect(fake.calls.confirmPublish).toBe(1);
     expect(fake.auditEvents(OLDER_WORK_ITEM).filter((e) => e === "APPROVAL_GRANTED").length).toBe(1);
+  });
+
+  it("restart-resume WITHOUT edited text binds to the version the checkpoint showed — read back, never regenerated", async () => {
+    const store = new FileRunStore(freshStoreDir());
+    const fake = new FakeSpringClient(twoInquiries());
+
+    const started = await new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) })
+      .start("t-head", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
+    if (started.status !== "AWAITING_APPROVAL") throw new Error("expected checkpoint");
+    const shown = started.checkpoint.candidate.contentFingerprint;
+
+    const done = await new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) })
+      .resume("t-head", { approved: true, approvedBy: "u" });
+    if (done.status !== "DONE") throw new Error("expected DONE");
+    expect(done.outcome?.approvedFingerprint).toBe(shown);
+    expect(fake.calls.generate).toBe(1); // no second model draft on resume
+    expect(fake.calls.saveDraft).toBe(0);
+  });
+
+  it("restart-resume refuses to approve a head that changed since the checkpoint, unless the human sent their own text", async () => {
+    const store = new FileRunStore(freshStoreDir());
+    const fake = new FakeSpringClient(twoInquiries());
+
+    await new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) })
+      .start("t-changed", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
+    // Someone edited on the inquiry screen meanwhile: a different v2 is now the head.
+    await fake.saveDraft(OLDER_WORK_ITEM, { title: "[답변] 환불", comments: "화면에서 고쳐 쓴 다른 초안입니다.", baseVersion: 1 });
+
+    const after = new InquiryAgentRuntime({ client: fake, runStore: store, draftProvider: new ComposerDraftProvider(fake) });
+    await expect(after.resume("t-changed", { approved: true, approvedBy: "u" })).rejects.toThrow(/DRAFT_CHANGED/);
+    expect(fake.calls.confirmPublish).toBe(0);
+
+    const done = await after.resume("t-changed", { approved: true, approvedBy: "u", editedComments: "네, 확인했습니다. 곧 처리해 드리겠습니다." });
+    expect(done.status).toBe("DONE");
+    expect(fake.calls.confirmPublish).toBe(1);
   });
 
   it("performRecord itself is idempotent when re-run against the same backend", async () => {

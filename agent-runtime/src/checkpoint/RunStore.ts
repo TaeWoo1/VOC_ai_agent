@@ -48,6 +48,13 @@ export interface RunSnapshot {
   readonly category: string;
   readonly trail: string[];
   readonly outcome?: RunOutcome | null;
+  /**
+   * The saved draft version the checkpoint showed — its number and fingerprint, never its text. A
+   * restart-resume reads the version back from the backend and refuses to record an approval on a
+   * head that is no longer the one this person saw (Knowledge Context v1-A closure).
+   */
+  readonly draftVersion?: number | null;
+  readonly contentFingerprint?: string | null;
 }
 
 export interface RunStore {
