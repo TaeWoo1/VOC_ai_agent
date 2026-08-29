@@ -48,6 +48,8 @@ export interface InquiryRowsSpec {
   readonly order: Order;
   readonly limit: number | null;
   readonly previousIds: readonly string[] | null;
+  /** On a refine: the order the previous set was read in. The re-read uses it; `order` is applied in-process. */
+  readonly baseOrder: Order;
 }
 
 export function resolveRowsSpec(input: SpecialistInput): InquiryRowsSpec {
@@ -60,7 +62,8 @@ export function resolveRowsSpec(input: SpecialistInput): InquiryRowsSpec {
   const status: Status = filters?.status ?? previous?.filters.status ?? "ALL";
   const order: Order = filters?.order ?? "NEWEST";
   const limit = filters?.limit ?? null;
-  return { window, channel, status, order, limit, previousIds: previous ? [...previous.ids] : null };
+  const baseOrder: Order = previous?.filters.order ?? "NEWEST";
+  return { window, channel, status, order, limit, previousIds: previous ? [...previous.ids] : null, baseOrder };
 }
 
 export async function readInquiryRows(input: SpecialistInput, needId: string): Promise<RowsRead> {
@@ -74,12 +77,14 @@ export async function readInquiryRows(input: SpecialistInput, needId: string): P
   }
   const spec = resolveRowsSpec(input);
   // A follow-up over a set must see every row of that set before it narrows, so the read itself is not
-  // limited; the limit is applied after the intersection. A fresh read hands the limit to the backend.
+  // limited and is made in the ORDER the set was read in (「최근 3개」 then 「그중 가장 오래된 1개」: the
+  // oldest page of 92 holds none of the 3 newest — the base set is reproduced first, re-sorted after);
+  // the limit is applied after the intersection. A fresh read hands order and limit to the backend.
   const args: InquiryRowsParams = {
     ...(spec.window ? { from: spec.window.from, to: spec.window.to } : {}),
     ...(spec.channel ? { channel: spec.channel } : {}),
     status: spec.status,
-    order: spec.order,
+    order: spec.previousIds ? spec.baseOrder : spec.order,
     limit: spec.previousIds ? ROWS_PAGE : spec.limit ?? ROWS_PAGE,
   };
   const attempt = await attemptTool(
@@ -92,6 +97,7 @@ export async function readInquiryRows(input: SpecialistInput, needId: string): P
   const read = attempt.value;
   const previousIds = spec.previousIds ? new Set(spec.previousIds) : null;
   const inSet = previousIds ? read.items.filter((i) => previousIds.has(i.inquiryId)) : read.items;
+  if (previousIds && spec.order !== spec.baseOrder) inSet.reverse();
   const rows = spec.previousIds && spec.limit != null ? inSet.slice(0, spec.limit) : inSet;
   const total = previousIds ? inSet.length : read.totalCount;
 

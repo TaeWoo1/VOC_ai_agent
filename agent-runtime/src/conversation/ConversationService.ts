@@ -41,7 +41,7 @@ import type { RunStoreProvider } from "../http/runStoreProvider";
 import { scopeFor } from "../http/runStoreProvider";
 import { capabilityOf, EXECUTION_REASON } from "../operator/capability/ChannelCapability";
 import type { ChannelCapabilityVerdict } from "../operator/capability/ChannelCapability";
-import { HUMAN_STEP_SENTENCE } from "../operator/graph/reviewRows";
+import { rowsSentence } from "../operator/graph/reviewRows";
 import { log } from "../log";
 import { inquiryRowsSentence } from "../operator/graph/inquiryRowsStep";
 import type { ConversationStore } from "./ConversationStore";
@@ -516,7 +516,8 @@ export class ConversationService {
     }
 
     const humans = artifacts.filter((a): a is HumanActionRequiredArtifact => a.type === "HUMAN_ACTION_REQUIRED");
-    const human = humans[0] ?? null;
+    // An offered refresh (`optional`) is a control under the rows, not a reason to wait: the turn is DONE.
+    const human = humans.find((h) => !h.optional) ?? null;
     const primary = primaryOf(artifacts);
     const first = headline ?? headlineOf(primary, artifacts, view, axis, answer);
     // R3: a count finding that says what the headline already said (same numbers, same noun) is one
@@ -534,13 +535,10 @@ export class ConversationService {
         sentences.push(claim.sentence);
       }
     }
-    if (humans.some((h) => h.actionType === "REVIEW_IMPORT")) {
-      sentences.push(HUMAN_STEP_SENTENCE);
-    }
-    // The rows path's own note — a refresh that could not be made, or the human-step sentence again
-    // (deduped below). Never model prose.
-    if (primary?.type === "REVIEW_LIST" && primary.note) sentences.push(primary.note);
-    if (answer.note) sentences.push(answer.note);
+    // The rows path's own note — 「언제 기준」 per stale channel, a refresh that could not be made, a
+    // partial collection — each said once here and nowhere else in the prose. Never model prose.
+    // Sentence by sentence, so a fact the findings already said (the per-channel 「언제 기준」) is not read twice.
+    if (answer.note) sentences.push(...answer.note.split(/(?<=[.!?])\s+/).filter((s) => s.length > 0));
 
     const evidenceArtifact = evidenceOf(answer);
     if (evidenceArtifact) artifacts.push(evidenceArtifact);
@@ -548,6 +546,7 @@ export class ConversationService {
     const pendingHumanActions: PendingHumanAction[] = humans.map((h) => ({
       turnId: "", actionType: h.actionType, path: h.path, channelCode: h.channelCode,
       accountId: h.accountId, dataType: h.dataType, requestedAt: h.requestedAt,
+      ...(h.optional ? { optional: true } : {}),
     }));
     const status: TurnStatus = human ? "WAITING_HUMAN" : "DONE";
     return {
@@ -918,7 +917,8 @@ function dedupeLists(artifacts: readonly Artifact[]): Artifact[] {
 /** The period token of the review window a pending human step was asked for — null when none is pending. */
 function pendingHumanWindowOf(view: ConversationView): string | null {
   const pending = view.pendingHumanActions?.length ? view.pendingHumanActions : view.pendingHumanAction ? [view.pendingHumanAction] : [];
-  if (!pending.some((p) => p.actionType === "REVIEW_IMPORT")) return null;
+  // An offered refresh gates nothing: only a REQUIRED step keeps the window gated on the next question.
+  if (!pending.some((p) => p.actionType === "REVIEW_IMPORT" && !p.optional)) return null;
   return view.workingSet?.kind === "REVIEWS" ? view.workingSet.filters.period?.token ?? null : null;
 }
 
@@ -956,31 +956,16 @@ function headlineOf(
   primary: Artifact | null, artifacts: readonly Artifact[], view: ConversationView,
   axis: ReturnType<typeof conversationAxisOf>, answer: OperatorAnswer,
 ): string {
-  const gated = artifacts.some((a) => a.type === "HUMAN_ACTION_REQUIRED" && a.actionType === "REVIEW_IMPORT");
   switch (primary?.type) {
     case "REVIEW_LIST": {
       const rating = primary.scope.rating === "LOW" ? "낮은 평점 " : "";
       const previous = axis.filters.scope === "WORKING_SET" && view.workingSet?.kind === "REVIEWS" ? view.workingSet : null;
-      if (previous) return `방금 본 ${previous.count}건 중 ${rating}리뷰는 ${primary.totalCount}건입니다.`;
-      const label = periodLabel(primary.scope.period?.token ?? null);
       const token = primary.scope.period?.token ?? null;
-      const allFresh = primary.freshness.every((f) => f.verdict !== "UNPROVEN" && f.verdict !== "NOT_COLLECTED");
-      if (gated) {
-        // Never 「0건」 while a channel is not proven current: what is held is said as what is held,
-        // and when nothing is held the human-step sentence (added below) is the whole answer.
-        return primary.totalCount > 0
-          ? `지금까지 수집된 ${label} ${rating}리뷰는 ${primary.totalCount}건입니다.`
-          : HUMAN_STEP_SENTENCE;
-      }
-      if (!allFresh) {
-        // Stale with no seller step to take (the product's own refresh could not be made): what is
-        // held is said as held, and the rows path's note says why it is not current.
-        return primary.totalCount > 0
-          ? `지금까지 수집된 ${label} ${rating}리뷰는 ${primary.totalCount}건입니다.`
-          : (primary.note ?? "현재 리뷰는 최신 상태가 아닙니다.");
-      }
-      if (primary.totalCount === 0 && token === "TODAY") return `수집된 ${rating}리뷰 중 오늘 것은 0건입니다.`;
-      return `${label} 확인 가능한 ${rating}리뷰가 ${primary.totalCount}건입니다.`;
+      // The same sentence the rows path wrote: the result first, 「지금까지 확인한」 as the bound when some
+      // channel is not proven current, never 「0건」 under a stale channel. Which channel and since when is
+      // the message's own per-channel sentence and the card's footer — not repeated here.
+      const anyStale = previous == null && primary.freshness.some((f) => f.verdict === "UNPROVEN" || f.verdict === "NOT_COLLECTED");
+      return rowsSentence(previous?.count ?? null, rating, periodLabel(token), primary.totalCount, anyStale, token);
     }
     case "PRODUCT_LIST":
       return `방금 본 리뷰를 상품 ${primary.items.length}개로 묶었습니다.`;
@@ -1069,6 +1054,7 @@ function workingSetOf(
           ...(axis.filters.topic ? { topic: axis.filters.topic } : {}),
           ...(primary.scope ? {
             period: primary.scope.period, channelCode: primary.scope.channelCode, status: primary.scope.status,
+            order: primary.scope.order,
           } : {}),
           inquiryIntent: rows ? "ROWS" : "WORKLOAD",
         },

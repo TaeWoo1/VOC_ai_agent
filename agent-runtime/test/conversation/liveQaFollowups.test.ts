@@ -111,12 +111,12 @@ describe("R6 — 「내가 해야 할 일 정리해줘」 composes a CHECKLIST w
 });
 
 describe("TODAY zero wording", () => {
-  it("says 「수집된 리뷰 중 오늘 것은 0건」 only when every channel is FRESH", async () => {
+  it("says 「오늘 들어온 리뷰는 없습니다」 only when every channel is FRESH", async () => {
     const { h, id } = await fresh();
     h.recentReviews["false:ALL"] = { ...freshReviews(), items: [], total: 0 };
     const { turn } = await say(h, id, "오늘 새로 달린 리뷰 보여줘");
     expect(turn.status).toBe("DONE");
-    expect(turn.message).toContain("수집된 리뷰 중 오늘 것은 0건입니다.");
+    expect(turn.message).toContain("오늘 들어온 리뷰는 없습니다.");
   });
 
   it("omits the 0 sentence entirely while a channel is unproven", async () => {
@@ -125,7 +125,8 @@ describe("TODAY zero wording", () => {
     const { turn } = await say(h, id, "오늘 새로 달린 리뷰 보여줘");
     expect(turn.status).toBe("WAITING_HUMAN");
     expect(turn.message).not.toContain("0건");
-    expect(turn.message).toContain("현재 리뷰는 최신 상태가 아닙니다.");
+    expect(turn.message).toContain("지금까지 확인한 범위에는 오늘 리뷰가 없습니다.");
+    expect(turn.message).toContain("쿠팡 리뷰는 8월 20일 이후 아직 확인하지 못했어요.");
     expect(TODAY).toBeTruthy();
   });
 });

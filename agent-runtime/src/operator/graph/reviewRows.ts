@@ -53,6 +53,7 @@ import { groupsBy } from "../group/ProductGrouping";
 import { capabilityOf } from "../capability/ChannelCapability";
 import type { ChannelCapabilitySources, ChannelCapabilityVerdict } from "../capability/ChannelCapability";
 import { REFRESH_FAILURE_LABEL } from "./reviewRefresh";
+import { asOfWord } from "../../conversation/asOf";
 import type { RefreshFailure } from "./reviewRefresh";
 import { log } from "../../log";
 
@@ -83,32 +84,60 @@ export function freshnessVerdict(row: ChannelCoverageRow, window: DateWindow): F
   return row.state === "OBSERVED_FRESHNESS_UNPROVEN" ? "UNPROVEN" : "NOT_COLLECTED";
 }
 
+/**
+ * Kept as the closed vocabulary of the gate for older consumers; the answer no longer repeats it. What
+ * the seller reads instead is one per-channel 「언제 기준」 sentence (`staleSentence`) said once.
+ */
 export const HUMAN_STEP_SENTENCE = "현재 리뷰는 최신 상태가 아닙니다. 새 리뷰를 확인하려면 판매자님의 한 번의 작업이 필요합니다.";
 /** The gate sentence when nothing is asked of the seller but a channel is still unproven (a failed or partial refresh). */
 export const UNPROVEN_SENTENCE = "아직 최신 상태가 확인되지 않은 채널이 있어 지금까지 수집된 리뷰만 보여 드립니다.";
 
 /**
- * The one sentence about the rows. Never 「0건」 under a freshness gate — the human-step sentence says
- * why there is nothing to count; and a measured zero for 「오늘」 is said as what it is: of the reviews
- * collected, none is from today.
+ * The one sentence about the rows — <b>the result first, the freshness as a bound on it, never as a
+ * warning</b>.
+ * <ul>
+ *   <li>A follow-up over the previous set: 「방금 본 N건 중 …」.</li>
+ *   <li>Stale (some connected channel's window is not proven current): the rows are said as
+ *       「지금까지 확인한」 — what is held is held — and a zero is never 「0건」, it is 「확인한 범위에는
+ *       없습니다」, because the unproven channel may hold what was not read.</li>
+ *   <li>Fresh: the count as a fact; a fresh zero for 「오늘」 is said as none arrived.</li>
+ * </ul>
+ * Which channel is stale and since when is the artifact footer's job and `staleSentence`'s — not this one's.
  */
 export function rowsSentence(
-  previousCount: number | null, ratingWord: string, label: string, total: number, gated: boolean,
-  token: PeriodToken | null, gateSentence: string = HUMAN_STEP_SENTENCE,
+  previousCount: number | null, ratingWord: string, label: string, total: number, stale: boolean,
+  token: PeriodToken | null,
 ): string {
   if (previousCount != null) return `방금 본 ${previousCount}건 중 ${ratingWord}리뷰는 ${total}건입니다.`;
-  if (gated) {
+  if (stale) {
     return total > 0
-      ? `지금까지 수집된 ${label} ${ratingWord}리뷰는 ${total}건입니다.`
-      : gateSentence;
+      ? `지금까지 확인한 ${label} ${ratingWord}리뷰는 ${total}건입니다.`
+      : `지금까지 확인한 범위에는 ${label} ${ratingWord}리뷰가 없습니다.`;
   }
-  if (total === 0 && token === "TODAY") return `수집된 ${ratingWord}리뷰 중 오늘 것은 0건입니다.`;
+  if (total === 0 && token === "TODAY") return `오늘 들어온 ${ratingWord}리뷰는 없습니다.`;
   return `${label} 확인 가능한 ${ratingWord}리뷰가 ${total}건입니다.`;
 }
 
-/** Whether a "new" read must refuse to say 0 while some connected channel is not proven current. */
-function isFreshnessSensitive(token: PeriodToken | null, rows: number): boolean {
-  return token === "TODAY" || token === "YESTERDAY" || token === "THIS_WEEK" || rows === 0;
+/**
+ * 「네이버 리뷰는 오늘 09:12 이후 아직 확인하지 못했어요.」 — the per-channel fact behind a required step,
+ * or 「…는 8월 20일 기준입니다.」 behind an offered one. Said ONCE, in the message; the artifact carries
+ * the same instant as a compact footer status.
+ */
+export function staleSentence(channelName: string, asOf: string | null, required: boolean): string {
+  if (required) {
+    return asOf ? `${channelName} 리뷰는 ${asOf} 이후 아직 확인하지 못했어요.` : `${channelName} 리뷰는 아직 확인한 적이 없어요.`;
+  }
+  return asOf ? `${channelName} 리뷰는 ${asOf} 기준입니다.` : `${channelName} 리뷰는 아직 확인한 적이 없어요.`;
+}
+
+/**
+ * Whether THIS question needs current rows: a 「오늘 / 어제 / 이번 주」 read is about what arrived, and a
+ * channel not observed since the window opened cannot answer it. Every other window (a rating filter,
+ * the last 7/30 days, a product) is answered from what is held, as of its last observation — a zero
+ * there is still never 「0건」 under a stale channel (`rowsSentence`), and a refresh is offered.
+ */
+export function isFreshnessRequired(token: PeriodToken | null): boolean {
+  return token === "TODAY" || token === "YESTERDAY" || token === "THIS_WEEK";
 }
 
 type Collected = NonNullable<SpecialistInput["collected"]>[number];
@@ -218,52 +247,72 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   // …but the WINDOW stays gated (Acceptance Closure §8-C): the same question does not get a second card,
   // and it does not get 「오늘 0건」 either — the channel is still unproven until the step lands.
   const alreadyAsked = input.pendingHumanWindow != null && input.pendingHumanWindow === token;
-  const sensitive = previous == null && isFreshnessSensitive(token, rowsOf(read).length);
+  const required = previous == null && isFreshnessRequired(token);
   const accountOf = new Map(read.accounts.map((a) => [a.channelCode.toUpperCase(), a]));
   const requestedAt = new Date().toISOString();
-  const refreshFailures: Array<{ channelNameKo: string; failure: RefreshFailure }> = [];
+  const refreshFailures: Array<{ channelNameKo: string; asOf: string | null; failure: RefreshFailure }> = [];
   let humanSteps = 0;
+  let offers = 0;
   let pendingSteps = 0;
   let refreshed = 0;
   const partialNames: string[] = [];
+  const staleSentences: string[] = [];
+  const asOfOf = (f: FreshnessRow) => asOfWord(f.lastSuccessfulSyncAt, today);
 
-  if (sensitive && stale.length > 0) {
+  // A follow-up over what was already shown filters rows the seller has; it asks for no collection (R1).
+  if (previous == null && stale.length > 0) {
     for (const f of stale) {
       const code = f.channelCode.toUpperCase();
+      const name = f.channelNameKo ?? f.channelCode;
       const account = accountOf.get(code) ?? null;
       const partialRun = collected.find((k) => k.channelCode.toUpperCase() === code && k.dataType === "REVIEW" && k.partial);
       if (partialRun) {
         // Collected this turn or on resume, but only partly: said as partial, not refreshed again, and not
         // a reason to send the seller away a second time.
-        partialNames.push(f.channelNameKo ?? f.channelCode);
+        partialNames.push(name);
         pendingSteps += 1;
         continue;
       }
       const verdict = await capabilityFor(input, code, f, needId, refs, findings);
       if (verdict.acquisition === "AUTOMATIC" && input.refresher && account && !account.fileUpload) {
-        input.progress?.("REFRESHING", `${f.channelNameKo ?? f.channelCode} 리뷰를 새로 가져오고 있습니다.`);
+        // AUTOMATIC + stale ⇒ the agent refreshes itself, whether or not the question required it: the
+        // seller connected this channel, and a connected channel is one the product may read.
+        input.progress?.("REFRESHING", `${name} 리뷰를 새로 가져오고 있습니다.`);
         const outcome = await input.refresher.refresh(account.accountId, "REVIEW");
         if (outcome.ok) {
           refreshed += 1;
           collected.push({ channelCode: code, dataType: "REVIEW", finishedAt: outcome.finishedAt, successRows: outcome.successRows, partial: outcome.partial });
-          if (outcome.partial) partialNames.push(f.channelNameKo ?? f.channelCode);
+          if (outcome.partial) partialNames.push(name);
         } else {
-          refreshFailures.push({ channelNameKo: f.channelNameKo ?? f.channelCode, failure: outcome.failure });
+          refreshFailures.push({ channelNameKo: name, asOf: asOfOf(f), failure: outcome.failure });
         }
         continue;
       }
       if (verdict.acquisition === "GUIDED_HUMAN_ACTION" && verdict.guidedPath) {
+        if (!required) {
+          // The rows answer the question as of their last observation; the step is offered, compactly.
+          offers += 1;
+          const sentence = staleSentence(name, asOfOf(f), false);
+          staleSentences.push(sentence);
+          artifacts.push(humanStep(f, verdict, account?.accountId ?? null, requestedAt, gapRef(input, f, needId, refs, findings, false, sentence), true));
+          continue;
+        }
         if (alreadyAsked) {
           // The card is already in the thread above; the window stays gated without a second card.
           pendingSteps += 1;
+          staleSentences.push(staleSentence(name, asOfOf(f), true));
           continue;
         }
         humanSteps += 1;
-        artifacts.push(humanStep(f, verdict, account?.accountId ?? null, requestedAt, gapRef(input, f, needId, refs, findings)));
+        const sentence = staleSentence(name, asOfOf(f), true);
+        staleSentences.push(sentence);
+        artifacts.push(humanStep(f, verdict, account?.accountId ?? null, requestedAt, gapRef(input, f, needId, refs, findings, true, sentence), false));
         continue;
       }
       // UNSUPPORTED (or AUTOMATIC with nothing to refresh through): said once, as a limit of the answer.
-      gapRef(input, f, needId, refs, findings);
+      const sentence = staleSentence(name, asOfOf(f), required);
+      gapRef(input, f, needId, refs, findings, required, sentence);
+      staleSentences.push(sentence);
     }
     if (refreshed > 0) {
       // The re-read: the same window, with this turn's own collections counted. One attempt, charged.
@@ -279,9 +328,10 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   const total = previousIds ? matched.length : read.total;
   // Query Accuracy v1: the limit is applied after the set intersection, so 「그중 최근 1개」 stands on the set.
   const rows = limit != null ? matched.slice(0, limit) : matched;
-  // Gated while any connected channel's window is still unproven — asked now, asked earlier, or only
-  // partly collected. A failed automatic refresh is said in its own note and leaves the rows as stale.
-  const gated = humanSteps > 0 || pendingSteps > 0 || refreshFailures.length > 0;
+  // Gated = a required read over a channel whose window is still unproven — asked now, asked earlier,
+  // only partly collected, or a refresh that failed. An offered step gates nothing.
+  const gated = required && (humanSteps > 0 || pendingSteps > 0 || refreshFailures.length > 0);
+  const anyStale = previous == null && stale.length > 0;
 
   const listRef = evidence.add({
     kind: "REVIEW_LIST",
@@ -298,22 +348,21 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   refs.push(listRef);
 
   for (const failure of refreshFailures) {
-    notes.push(`${failure.channelNameKo} 리뷰를 최신 상태로 갱신하지 못했습니다 (${REFRESH_FAILURE_LABEL[failure.failure]}). 지금까지 수집된 리뷰를 보여 드립니다.`);
+    notes.push(`${failure.channelNameKo} 리뷰를 최신 상태로 갱신하지 못했습니다 (${REFRESH_FAILURE_LABEL[failure.failure]}). `
+      + (failure.asOf ? `${failure.asOf} 기준으로 보여 드립니다.` : "지금까지 확인한 리뷰를 보여 드립니다."));
   }
   for (const name of partialNames) {
     notes.push(`${name} 리뷰는 일부만 가져왔습니다. 지금 보이는 것이 전부가 아닐 수 있습니다.`);
   }
-  const askedOfSeller = humanSteps > 0 || (pendingSteps > 0 && partialNames.length < pendingSteps);
-  if (askedOfSeller) notes.push(HUMAN_STEP_SENTENCE);
-  else if (gated) notes.push(UNPROVEN_SENTENCE);
+  // One 「언제 기준」 sentence per stale channel — never the same warning twice, never a channel that is fine.
+  notes.push(...staleSentences);
 
   // ── The rows themselves, said as one sentence and one artifact.
   const label = periodLabel(token);
   findings.push({
     findingId: `f-${listRef.evidenceId}`,
     specialist: "REVIEW_OPS",
-    statement: rowsSentence(previous?.count ?? null, ratingWord, label, total, gated, token,
-      humanSteps > 0 || pendingSteps > partialNames.length ? HUMAN_STEP_SENTENCE : UNPROVEN_SENTENCE)
+    statement: rowsSentence(previous?.count ?? null, ratingWord, label, total, anyStale, token)
       + (limit != null && rows.length < total ? ` 그중 ${order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${rows.length}건입니다.` : ""),
     evidenceIds: [listRef.evidenceId],
     confidence: "NEEDS_REVIEW",
@@ -337,10 +386,13 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
       to: `/reviews`,
     })),
     freshness,
+    freshnessRequired: required,
+    referenceDate: today,
     more: { label: "리뷰 화면에서 보기", to: "/reviews", count: total },
-    ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+    // No freshness prose on the card: the footer shows 「채널 · 언제 기준」 and the message says it once.
   };
-  artifacts.push(list);
+  // The rows come first; an offered refresh sits under them.
+  artifacts.unshift(list);
 
   // ── 「상품별로 묶어줘」: the same rows, grouped in-process by the product each row already carries.
   if (previous && groupsBy(input.grouping, "PRODUCT")) {
@@ -378,8 +430,8 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   }
 
   log("review_rows", { period: token, rating, channel: channel ?? "NONE", rows: rows.length, total, order, limit: limit ?? "NONE",
-    workingSet: previous != null, gated, stale: stale.length, refreshed, refreshFailed: refreshFailures.length,
-    humanSteps, terminal: "OK" });
+    workingSet: previous != null, required, gated, stale: stale.length, refreshed, refreshFailed: refreshFailures.length,
+    humanSteps, offers, terminal: "OK" });
   return {
     specialist: "REVIEW_OPS",
     findings,
@@ -399,7 +451,8 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
 
 /** The evidence ref + finding for one channel that cannot say "new" — the GAP the answer discloses. */
 function gapRef(
-  input: SpecialistInput, f: FreshnessRow, needId: string, refs: EvidenceRef[], findings: Finding[],
+  input: SpecialistInput, f: FreshnessRow, needId: string, refs: EvidenceRef[], findings: Finding[], required: boolean,
+  sentence: string,
 ): EvidenceRef {
   const ref = input.evidence.add({
     kind: "HUMAN_ACTION",
@@ -411,10 +464,12 @@ function gapRef(
     provenance: `reviews/recent:freshness:${f.verdict}`,
   });
   refs.push(ref);
-  findings.push({
+  // A coverage-limit finding only when the question required current rows; an offered refresh is not a gap.
+  // Its statement IS the per-channel sentence the note carries, so the prose says it once (deduped by text).
+  if (required) findings.push({
     findingId: `f-${ref.evidenceId}`,
     specialist: "REVIEW_OPS",
-    statement: `${f.channelNameKo ?? f.channelCode} 리뷰는 ${f.verdict === "NOT_COLLECTED" ? "이 기간에 수집된 적이 없어" : "최신 수집이 확인되지 않아"} 새 리뷰를 말할 수 없습니다.`,
+    statement: sentence,
     evidenceIds: [ref.evidenceId],
     confidence: "NEEDS_REVIEW",
     verdict: null,
@@ -473,12 +528,14 @@ async function capabilityFor(
 
 function humanStep(
   f: FreshnessRow, verdict: ChannelCapabilityVerdict, accountId: string | null, requestedAt: string, ref: EvidenceRef,
+  optional: boolean,
 ): HumanActionRequiredArtifact {
   const path = verdict.guidedPath!;
+  const name = f.channelNameKo ?? f.channelCode;
   return {
     artifactId: `a-${ref.evidenceId}`,
     type: "HUMAN_ACTION_REQUIRED",
-    title: `${f.channelNameKo ?? f.channelCode} 새 리뷰를 확인하려면 판매자님의 확인이 필요합니다`,
+    title: optional ? `${name} 리뷰 최신 상태로 갱신` : `${name} 최신 리뷰 가져오기`,
     actionType: "REVIEW_IMPORT",
     reason: f.verdict === "NOT_COLLECTED" ? "NOT_COLLECTED" : "FRESHNESS_UNPROVEN",
     path,
@@ -491,5 +548,7 @@ function humanStep(
     resumable: true,
     requiresLocalAgent: verdict.requiresLocalAgent,
     ...(verdict.fallback ? { fallback: verdict.fallback } : {}),
+    asOf: f.lastSuccessfulSyncAt,
+    ...(optional ? { optional: true } : {}),
   };
 }

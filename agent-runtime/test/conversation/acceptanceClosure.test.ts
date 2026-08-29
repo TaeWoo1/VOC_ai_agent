@@ -93,7 +93,7 @@ describe("§8 — acquisition capability ≠ freshness: the AUTOMATIC branch, ca
     h.inquiry.manualSyncBehavior = { runStatus: "FAILED" };
     const { turn } = await say(h, id, "오늘 새로 달린 리뷰 보여줘");
     expect(turn.message).toContain("수집이 실패했습니다");
-    expect(turn.message).toContain("아직 최신 상태가 확인되지 않은 채널이 있어");
+    expect(turn.message).toContain("1월 1일 기준으로 보여 드립니다.");
     expect(turn.message).not.toMatch(/0건/);
     expect(turn.artifacts.some((a) => a.type === "HUMAN_ACTION_REQUIRED")).toBe(false);
   });
@@ -116,7 +116,7 @@ describe("§8 — acquisition capability ≠ freshness: the AUTOMATIC branch, ca
     const again = await say(h, id, "오늘 새로 달린 리뷰 보여줘");
     expect(again.turn.artifacts.filter((a) => a.type === "HUMAN_ACTION_REQUIRED")).toHaveLength(0);
     expect(again.turn.message).not.toMatch(/오늘 것은 0건/);
-    expect(again.turn.message).toContain("판매자님의 한 번의 작업이 필요합니다");
+    expect(again.turn.message).toContain("쿠팡 리뷰는 8월 20일 이후 아직 확인하지 못했어요.");
   });
 
   it("GUIDED completed: only THIS account's run (or an upload-shaped run on its channel) satisfies the step", async () => {

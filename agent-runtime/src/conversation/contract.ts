@@ -157,6 +157,14 @@ export interface ReviewListArtifact extends ArtifactBase {
   readonly totalCount: number;
   readonly items: readonly ReviewItem[];
   readonly freshness: readonly FreshnessRow[];
+  /**
+   * Whether THIS question needed current rows (「오늘 / 어제 / 이번 주」). A stale channel under a
+   * required read is a gap the answer must name; under a non-required read the rows answer the
+   * question as of their last observation and a refresh is merely offered. Absent (older turns) = false.
+   */
+  readonly freshnessRequired?: boolean;
+  /** The observation date the as-of phrases were rendered against (`YYYY-MM-DD`, seller time). */
+  readonly referenceDate?: string;
   readonly more?: WorkspaceLink;
 }
 
@@ -337,6 +345,13 @@ export interface HumanActionRequiredArtifact extends ArtifactBase {
   readonly requiresLocalAgent?: boolean;
   /** The fallback the seller may take when the guided path is unavailable (never the default). */
   readonly fallback?: { readonly path: HumanActionPath; readonly to: string | null; readonly label: string };
+  /** The channel's last successful observation (ISO instant) — the 「언제 기준」 the reason names. */
+  readonly asOf?: string | null;
+  /**
+   * An OFFER, not a gate: the rows already answered the question as of `asOf`, and this step only makes
+   * them current. The turn is DONE, not WAITING_HUMAN; the card is compact (「최신 상태로 갱신」).
+   */
+  readonly optional?: boolean;
 }
 
 /** What kind of operational object an approval / draft / execution is about. */
@@ -493,6 +508,8 @@ export interface WorkingSetView {
     /** Query Accuracy v1: which inquiry read produced the set, and the status it was read with. */
     readonly inquiryIntent?: "ROWS" | "WORKLOAD";
     readonly status?: "UNANSWERED" | "ANSWERED" | "ALL";
+    /** The order the set was read in — a refine re-reads in THIS order so the base set is reproduced before it re-sorts. */
+    readonly order?: "NEWEST" | "OLDEST";
   };
   /** Products the set is about, when known — the anchor for a cross-domain follow-up. */
   readonly productIds: readonly string[];
@@ -505,6 +522,8 @@ export const WORKING_SET_MAX_IDS = 50;
 
 export interface PendingHumanAction {
   readonly turnId: string;
+  /** Mirrors the artifact: an offered refresh, never a reason to wait or to gate a later read. */
+  readonly optional?: boolean;
   readonly actionType: HumanActionType;
   readonly path: HumanActionPath;
   readonly channelCode: string | null;

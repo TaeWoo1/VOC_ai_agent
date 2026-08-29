@@ -39,7 +39,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v4";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v5";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -135,8 +135,10 @@ public final class AgentPlanPrompt {
                - **REVIEW_SIGNAL 은 반복되는 문제만이 아니라 리뷰 행 목록도 뜻합니다** — "새 리뷰", "오늘 들어온 \
                리뷰", "낮은 평점 리뷰 목록". "오늘 새 리뷰 보여줘" 는 REVIEW_SIGNAL 에 filters.period=TODAY 입니다. \
                **REVIEW_SIGNAL 을 세울 때는 filters.reviewIntent 를 반드시 정하세요**: 리뷰를 보여·확인·정리해 달라는 \
-               요청("새 리뷰", "최근 리뷰", "상품평 보여줘", "안 좋은 리뷰")은 ROWS 이고 이때 기간을 말하지 않았어도 \
-               filters.period 를 가장 자연스러운 값(오늘·최근 7일)으로 채우세요; 반복되는 문제·이슈·경향을 묻는 \
+               요청("새 리뷰", "최근 리뷰", "상품평 보여줘", "안 좋은 리뷰")은 ROWS 입니다. **filters.period 는 판매자가 \
+               기간을 말했을 때만 채우세요** — "오늘"·"어제"·"이번 주"·"최근 7일"처럼 문장에 있는 말만 옮기고, \
+               "별점 낮은 리뷰 보여줘"처럼 기간이 없으면 null 로 두세요(기본 창은 실행이 정하고 답에 밝힙니다; 판매자가 \
+               묻지 않은 "오늘"을 만들어 넣으면 답이 오늘에 대한 주장이 되어 버립니다); 반복되는 문제·이슈·경향을 묻는 \
                요청("반복되는 문제 있어?", "리뷰 문제 정리")만 ISSUES 입니다. 둘 중 무엇인지 정하지 못하겠으면 ROWS 입니다 \
                — 행은 보고 나서 문제를 물을 수 있지만, "반복 문제 없음"은 리뷰를 보여 달라는 요청에 대한 답이 아닙니다.
                - **문의 목록 질문에는 filters.inquiryIntent 를 반드시 정하세요.** 문의를 보여·확인해 달라는 요청 \

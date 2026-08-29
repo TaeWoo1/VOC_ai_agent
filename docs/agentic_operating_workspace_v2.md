@@ -462,3 +462,38 @@ on the other — both are honest readings and both were executed as stated.
 the answer states which. A NAVER unanswered inquiry with no open work item (a known queue-scope gap) shows as a row with
 no draftable target. The prompt is ~5.7 KB per call on a reasoning model with `reasoning-effort: low`; the planner is
 still the whole latency budget.
+
+## §26 Freshness Semantics + Seller-facing UX v1 (2026-08-29)
+
+Four facts stay apart and each is allowed to say one thing: **last successful observation** (coverage
+`lastSuccessfulSyncAt`, rendered 「오늘 09:12」/「어제 18:40」/「8월 20일」 in seller time — `conversation/asOf.ts`,
+mirrored in `frontend/src/lib/conversation/asOf.ts`), **requested window** (the seller's period only — planner v5 no
+longer invents 「오늘」 when no period was said; the runtime default window is disclosed in the label), **freshness
+verdict** (`freshnessVerdict` unchanged; `isFreshnessRequired` = TODAY/YESTERDAY/THIS_WEEK — only those need current
+rows), and **acquisition capability** (AUTOMATIC / GUIDED / UNSUPPORTED, unchanged resolver).
+
+Decision table (`graph/reviewRows.ts`): held rows answer a non-required question **first**; each stale channel gets one
+sentence 「{채널} 리뷰는 {언제} 기준입니다.」 and an **offered** step (`HUMAN_ACTION_REQUIRED.optional=true`, turn DONE,
+gates nothing, card 「{채널} 리뷰 · 8월 20일 기준 / [최신 상태로 갱신]」). A required question over a stale channel says
+「{채널} 리뷰는 {언제} 이후 아직 확인하지 못했어요.」 **once** (the gap finding's statement is that same sentence; the note
+is split into sentences before dedupe) and asks for exactly that channel's step (WAITING_HUMAN; NAVER
+`EXPORT_ACTION_WINDOW` + file fallback, Coupang `WING_READ_ACTION_WINDOW`). Cafe24 AUTOMATIC+stale is refreshed by the
+agent in both cases; a failed refresh is said once with the as-of it falls back to. A stale zero is never 「0건」
+(「지금까지 확인한 범위에는 … 없습니다」); a fresh TODAY zero is 「오늘 들어온 리뷰는 없습니다」. Claim levels stay B/C, never A.
+The generic warning (`HUMAN_STEP_SENTENCE`) is no longer read; `REVIEW_LIST` carries `freshnessRequired` +
+`referenceDate` and no freshness prose — the footer shows 「채널 · 언제 기준」 compactly (stale in warn colour).
+
+Regression: `test/conversation/freshnessUx.test.ts` (14: stale+held result, stale+required, Cafe24 automatic,
+NAVER/Coupang guided, partial/failed, unrelated sync ≠ satisfied, resume shows the original request, B/C, offered
+refresh resume) + `HumanActionArtifact.test.tsx` (compact/offer) + `ReviewListArtifact.test.tsx`. Query-accuracy
+regression kept and one live defect closed: a refine that flips order (「최근 3개」→「그중 가장 오래된 1개」) re-read the
+oldest page and intersected to 0 — the base set is now re-read in its own order (`WorkingSet.filters.order`) and
+re-sorted in-process (`queryAccuracy.test.ts`).
+
+Browser QA (Playwright 1440×900, Demo Org, connectors OFF, planner live): 「오늘 리뷰 뭐 들어왔어?」 → rows sentence +
+one line per stale channel + two compact cards; 「별점 2점 이하 리뷰 보여줘」 (fresh conversation) → LAST_7_DAYS result
+first + NAVER offer card; in a conversation after 「오늘 리뷰」 the planner refines the TODAY set (by design). Console
+errors 0 · off-host requests 0 · marketplace calls 0 · WRITE 0 · DB changes 0 · migrations 0 · model calls: planner 1/turn.
+**Reported, not fixed:** Cafe24 REVIEW coverage has no successful run in this DB (footer says 「확인 기록 없음」 and the
+automatic refresh fails with connectors OFF — data/deployment truth, not wording); the home KPI strip's own
+「일부 채널 최신 수집 확인 필요」 is dashboard copy outside this package.

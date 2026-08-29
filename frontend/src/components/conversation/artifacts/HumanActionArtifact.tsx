@@ -19,10 +19,11 @@ import { AgentPairingPanel } from "../../reviewImport/AgentPairingPanel";
 import { ActionWindowControlPanel } from "../../actionWindow/ActionWindowControlPanel";
 import { HumanCheckpointCard, CHECKPOINT_COMMANDS } from "../../actionWindow/HumanCheckpointCard";
 import { ArtifactCard } from "./ArtifactCard";
+import { asOfWord } from "../../../lib/conversation/asOf";
 import { useContinueInPanel } from "../useContinueInPanel";
 
 const HEADLINE: Record<HumanAction["actionType"], string> = {
-  REVIEW_IMPORT: "새 리뷰를 확인하려면 리뷰 가져오기가 필요합니다",
+  REVIEW_IMPORT: "최신 리뷰 가져오기",
   CHANNEL_CONNECT: "이 채널을 확인하려면 연결이 필요합니다",
   KNOWLEDGE_ENTRY: "답변하려면 답변 기준이 필요합니다",
   VARIANT_CLARIFICATION: "규격을 확인해야 정확한 답변을 준비할 수 있습니다",
@@ -42,6 +43,25 @@ const GUIDED_SENTENCE: Record<GuidedAcquisitionPath, string> = {
   EXPORT_ACTION_WINDOW: "reviewnary가 판매자센터의 리뷰 내려받기 화면과 기간을 준비합니다. 판매자님은 화면이 요구하는 확인만 누르시면, 내려받은 파일을 reviewnary가 읽어 이 질문을 이어서 확인합니다.",
   WING_READ_ACTION_WINDOW: "reviewnary가 판매자센터의 리뷰 화면을 준비합니다. 판매자님은 화면이 요구하는 확인과 페이지 넘기기만 하시면, reviewnary가 그 화면의 리뷰를 읽어 이 질문을 이어서 확인합니다.",
 };
+
+/** The card's title: the channel's own step, in four words — 「네이버 최신 리뷰 가져오기」 / 「네이버 리뷰 · 8월 20일 기준」. */
+function titleOf(artifact: HumanAction, channel: string | null): string {
+  if (artifact.actionType !== "REVIEW_IMPORT") return HEADLINE[artifact.actionType];
+  if (artifact.optional) {
+    const word = asOfWord(artifact.asOf);
+    return `${channel ?? "채널"} 리뷰 · ${word ? `${word} 기준` : "확인 기록 없음"}`;
+  }
+  return `${channel ?? ""} ${HEADLINE.REVIEW_IMPORT}`.trim();
+}
+
+/** One line of reason. For a review step it names the instant, never the mechanism (no "sync", no "coverage"). */
+function reasonOf(artifact: HumanAction): string {
+  if (artifact.actionType !== "REVIEW_IMPORT") return REASON[artifact.reason];
+  if (artifact.reason === "NOT_CONNECTED") return REASON.NOT_CONNECTED;
+  const word = asOfWord(artifact.asOf);
+  if (artifact.optional) return word ? "지금 보이는 목록은 그때까지 확인한 것입니다." : "아직 확인한 적이 없어 목록이 비어 있을 수 있습니다.";
+  return word ? `${word} 이후 아직 확인하지 못했어요.` : "아직 확인한 적이 없어요.";
+}
 
 /**
  * The one-step human action the agent could not do itself. ONE primary, decided by the path: the
@@ -76,6 +96,9 @@ export function HumanActionArtifact({
   const channel = artifact.channelNameKo ?? artifact.channelCode;
   const canSync = artifact.path === "MANUAL_SYNC" && !!artifact.accountId;
   const guided = GUIDED_PATHS.includes(artifact.path) && !!artifact.accountId ? (artifact.path as GuidedAcquisitionPath) : null;
+  const review = artifact.actionType === "REVIEW_IMPORT";
+  // The primary's label: an offer says what it does to the list; a required step says what it fetches.
+  const primaryLabel = artifact.optional ? "최신 상태로 갱신" : review ? "최신 리뷰 가져오기" : "지금 리뷰 가져오기";
 
   async function startSync() {
     if (!artifact.accountId) return;
@@ -94,62 +117,67 @@ export function HumanActionArtifact({
 
   const returnTo = (to: string) => `${to}${to.includes("?") ? "&" : "?"}returnTo=%2F`;
 
+  const primary = canSync ? (
+    <Btn onClick={startSync} disabled={starting}>{starting ? "시작하는 중…" : primaryLabel}</Btn>
+  ) : guided ? (
+    !engaged ? <Btn onClick={() => setEngaged(true)}>{primaryLabel}</Btn> : null
+  ) : artifact.to ? (
+    <BtnLink to={returnTo(artifact.to)} onClick={onOpen}>직접 진행하기</BtnLink>
+  ) : null;
+  const running = guided != null && engaged && !!artifact.accountId;
+
+  // Compact: title · one reason line · the primary in the header. The guided run's own sentence and controls
+  // appear only after the press; 「계속 확인하기」 only when the turn is actually waiting on this step.
   return (
-    <ArtifactCard title={HEADLINE[artifact.actionType]} testId="human-action-artifact">
-      <div className="space-y-3 px-4 pb-3">
-        <p className="break-keep text-sm text-muted">
-          {channel ? <span className="font-semibold text-ink">{channel} · </span> : null}
-          {REASON[artifact.reason]}
-        </p>
-        {guided ? <p className="break-keep text-sm text-muted">{GUIDED_SENTENCE[guided]}</p> : null}
-        {failed ? <p className="text-sm text-bad">수집을 시작하지 못했습니다. 채널 연결 화면에서 다시 시도해 주세요.</p> : null}
+    <ArtifactCard
+      title={titleOf(artifact, channel)}
+      note={reasonOf(artifact)}
+      action={primary}
+      testId={artifact.optional ? "human-action-offer" : "human-action-artifact"}
+    >
+      {running || failed || (artifact.resumable && !artifact.optional) || artifact.fallback?.to ? (
+        <div className="space-y-3 px-4 pb-3">
+          {running && guided ? <p className="break-keep text-sm text-muted">{GUIDED_SENTENCE[guided]}</p> : null}
+          {failed ? <p className="text-sm text-bad">수집을 시작하지 못했습니다. 채널 연결 화면에서 다시 시도해 주세요.</p> : null}
 
-        {guided === "EXPORT_ACTION_WINDOW" && engaged && artifact.accountId ? (
-          <NaverGuidedImportRun
-            accountId={artifact.accountId}
-            onCompleted={() => {
-              analytics.track("human_action_completed", { type: "review_import" });
-              onResume();
-            }}
-            inject={importRuntime}
-          />
-        ) : guided && engaged && artifact.accountId ? (
-          <GuidedAcquisitionRun
-            path={guided}
-            accountId={artifact.accountId}
-            onCompleted={() => {
-              analytics.track("human_action_completed", { type: "review_import" });
-              onResume();
-            }}
-            inject={acquireRuntime}
-            connect={connect}
-          />
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-2">
-          {canSync ? (
-            <Btn onClick={startSync} disabled={starting}>{starting ? "시작하는 중…" : "지금 리뷰 가져오기"}</Btn>
-          ) : guided ? (
-            !engaged ? (
-              <Btn onClick={() => setEngaged(true)}>지금 {channel ?? "채널"} 리뷰 가져오기</Btn>
-            ) : null
-          ) : artifact.to ? (
-            <BtnLink to={returnTo(artifact.to)} onClick={onOpen}>직접 진행하기</BtnLink>
+          {guided === "EXPORT_ACTION_WINDOW" && running && artifact.accountId ? (
+            <NaverGuidedImportRun
+              accountId={artifact.accountId}
+              onCompleted={() => {
+                analytics.track("human_action_completed", { type: "review_import" });
+                onResume();
+              }}
+              inject={importRuntime}
+            />
+          ) : guided && running && artifact.accountId ? (
+            <GuidedAcquisitionRun
+              path={guided}
+              accountId={artifact.accountId}
+              onCompleted={() => {
+                analytics.track("human_action_completed", { type: "review_import" });
+                onResume();
+              }}
+              inject={acquireRuntime}
+              connect={connect}
+            />
           ) : null}
-          {artifact.resumable ? (
-            <Btn variant="outline" onClick={onResume}>계속 확인하기</Btn>
+
+          {artifact.resumable && !artifact.optional ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Btn variant="outline" onClick={onResume}>계속 확인하기</Btn>
+            </div>
+          ) : null}
+
+          {artifact.fallback?.to ? (
+            <p className="text-sm text-muted">
+              도우미 없이 진행하려면{" "}
+              <Link to={returnTo(artifact.fallback.to)} onClick={onOpen} className="font-semibold text-brand-700 hover:underline">
+                {artifact.fallback.label}
+              </Link>
+            </p>
           ) : null}
         </div>
-
-        {artifact.fallback?.to ? (
-          <p className="text-sm text-muted">
-            도우미 없이 진행하려면{" "}
-            <Link to={returnTo(artifact.fallback.to)} onClick={onOpen} className="font-semibold text-brand-700 hover:underline">
-              {artifact.fallback.label}
-            </Link>
-          </p>
-        ) : null}
-      </div>
+      ) : null}
     </ArtifactCard>
   );
 }

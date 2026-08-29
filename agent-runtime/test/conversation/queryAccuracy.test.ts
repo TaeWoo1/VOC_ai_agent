@@ -65,6 +65,7 @@ const PLANS: Record<string, AgentPlanView> = {
   "그중 네이버만": plan("INQUIRY_VOLUME", "방금 본 문의 중 네이버만", { inquiryIntent: "ROWS", scope: "WORKING_SET", channel: "NAVER" }),
   "그중 최근 1개": plan("INQUIRY_VOLUME", "방금 본 문의 중 가장 최근 1개", { inquiryIntent: "ROWS", scope: "WORKING_SET", order: "NEWEST", limit: 1 }),
   "답변 안 한 것만": plan("INQUIRY_VOLUME", "방금 본 문의 중 미답변만", { inquiryIntent: "ROWS", scope: "WORKING_SET", status: "UNANSWERED" }),
+  "그중 가장 오래된 1개": plan("INQUIRY_VOLUME", "방금 본 문의 중 가장 오래된 1개", { inquiryIntent: "ROWS", scope: "WORKING_SET", order: "OLDEST", limit: 1 }),
   "내가 답해야 할 문의 정리해줘": plan("INQUIRY_VOLUME", "내가 답해야 할 문의", { inquiryIntent: "WORKLOAD" }),
   "미답변 문의 몇 건이야?": plan("INQUIRY_VOLUME", "미답변 문의 수", { inquiryIntent: "COUNT" }),
 };
@@ -166,6 +167,18 @@ describe("Query Accuracy v1 — Planner QuerySpec → tool args → result", () 
     expect(ids(open.turn)).toEqual([]);
     expect(open.turn.message).toContain("없습니다");
     expect(open.turn.continuation.workingSet?.ids).toEqual(["i-n3"]);
+  });
+
+  it("refine that flips the order: 최근 3개 → 그중 가장 오래된 1개 — the base set is re-read in ITS order, then re-sorted (live regression 08-29)", async () => {
+    const { h, id } = await fresh();
+    const three = await say(h, id, "최근 문의 3개 보여줘");
+    expect(ids(three.turn)).toEqual(["i-n3", "i-c1", "i-n2"]);
+    expect(three.turn.continuation.workingSet?.filters).toMatchObject({ order: "NEWEST" });
+    const oldest = await say(h, id, "그중 가장 오래된 1개");
+    // The re-read reproduces the base set (NEWEST page), never the oldest page of the whole org.
+    expect(h.inquiry.rowsParams.at(-1)).toEqual({ status: "ALL", order: "NEWEST", limit: 50 });
+    expect(ids(oldest.turn)).toEqual(["i-n2"]);
+    expect(oldest.turn.message).toContain("방금 본 문의 중");
   });
 
   it("「내가 답해야 할 문의」 is the work queue (WORKLOAD), 「몇 건이야」 is one number (COUNT) — three paths, one token each", async () => {

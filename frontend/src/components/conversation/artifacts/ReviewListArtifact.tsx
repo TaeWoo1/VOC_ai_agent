@@ -4,12 +4,15 @@ import { Status } from "../../ui/Status";
 import { previewText } from "../../../lib/plainText";
 import { ArtifactCard } from "./ArtifactCard";
 import { FRESHNESS_LABEL, FRESHNESS_TONE } from "./freshness";
+import { asOfStatus } from "../../../lib/conversation/asOf";
 import { useContinueInPanel } from "../useContinueInPanel";
 
 /**
- * Review rows: state word · ★ rating · the customer's sentence (or 「별점만」) · product. One freshness
- * line per channel underneath, in seller words — a list that cannot prove it is current says so
- * beside the rows rather than pretending the rows are all there is.
+ * Review rows: state word · ★ rating · the customer's sentence (or 「별점만」) · product. Underneath, ONE
+ * compact status per channel — 「네이버 · 오늘 09:12 기준」 — the last observation as a fact, not a warning:
+ * the rows are the answer as of that instant, and whether they must be made current is the message's and
+ * the (optional or required) step card's job, never this footer's. A channel with no observation path
+ * or no connection keeps its short label.
  */
 export function ReviewListArtifact({ artifact }: { artifact: ReviewList }) {
   const onOpen = useContinueInPanel("REVIEW_LIST");
@@ -40,13 +43,23 @@ export function ReviewListArtifact({ artifact }: { artifact: ReviewList }) {
         </ul>
       )}
       {artifact.freshness.length > 0 ? (
-        <ul className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line/70 px-4 py-2" aria-label="채널별 수집 상태">
-          {artifact.freshness.map((f) => (
-            <li key={f.channelCode} className="flex items-center gap-1.5 text-sm text-muted">
-              <span>{f.channelNameKo ?? f.channelCode}</span>
-              <Status tone={FRESHNESS_TONE[f.verdict]} variant="word">{FRESHNESS_LABEL[f.verdict]}</Status>
-            </li>
-          ))}
+        <ul className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line/70 px-4 py-2 text-sm text-muted" aria-label="채널별 확인 기준">
+          {artifact.freshness.map((f) => {
+            const name = f.channelNameKo ?? f.channelCode;
+            const observed = f.verdict === "FRESH" || f.verdict === "UNPROVEN" || f.verdict === "NOT_COLLECTED";
+            return (
+              <li key={f.channelCode} className="flex items-center gap-1.5">
+                {observed ? (
+                  <span className={f.verdict === "FRESH" ? undefined : "text-warn"}>{asOfStatus(name, f.lastSuccessfulSyncAt)}</span>
+                ) : (
+                  <>
+                    <span>{name}</span>
+                    <Status tone={FRESHNESS_TONE[f.verdict]} variant="word">{FRESHNESS_LABEL[f.verdict]}</Status>
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
       {artifact.more ? (

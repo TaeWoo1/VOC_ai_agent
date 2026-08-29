@@ -108,17 +108,16 @@ describe("human action artifact — one primary per path", () => {
     manualSync.mockResolvedValue({ id: "run-1" });
     const onResume = vi.fn();
     render(<MemoryRouter><HumanActionArtifact artifact={artifact({})} onResume={onResume} /></MemoryRouter>);
-    expect(screen.getByRole("heading", { name: "새 리뷰를 확인하려면 리뷰 가져오기가 필요합니다" })).toBeInTheDocument();
-    expect(screen.getByText(/카페24 자사몰/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "카페24 자사몰 최신 리뷰 가져오기" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "직접 진행하기" })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "지금 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
     await waitFor(() => expect(manualSync).toHaveBeenCalledWith("acc-1", "REVIEW"));
     await waitFor(() => expect(onResume).toHaveBeenCalledTimes(1));
   });
 
   it("ACTION_WINDOW / FILE_UPLOAD: a link to the screen, returning to the home", () => {
     render(<MemoryRouter><HumanActionArtifact artifact={artifact({ path: "ACTION_WINDOW", to: "/connect/channels/acc-1", channelNameKo: "쿠팡" })} onResume={() => undefined} /></MemoryRouter>);
-    expect(screen.queryByRole("button", { name: "지금 리뷰 가져오기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "최신 리뷰 가져오기" })).toBeNull();
     expect(screen.getByRole("link", { name: "직접 진행하기" })).toHaveAttribute("href", "/connect/channels/acc-1?returnTo=%2F");
     expect(manualSync).not.toHaveBeenCalled();
   });
@@ -145,12 +144,14 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
         />
       </MemoryRouter>,
     );
-    expect(screen.getByText(/판매자센터의 리뷰 내려받기 화면과 기간을 준비합니다/)).toBeInTheDocument();
-    expect(screen.queryByText(/한 번 클릭/)).toBeNull();
+    // Compact before the press: title · reason · primary — the guided sentence comes with the run itself.
+    expect(screen.queryByText(/판매자센터의 리뷰 내려받기 화면과 기간을 준비합니다/)).toBeNull();
     // The fallback is a secondary text link, never the primary.
     expect(screen.getByRole("link", { name: "파일로 올리기" })).toHaveAttribute("href", "/connect/upload?returnTo=%2F");
     expect(runtime.start).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "지금 네이버 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
+    expect(screen.getByText(/판매자센터의 리뷰 내려받기 화면과 기간을 준비합니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/한 번 클릭/)).toBeNull();
     await waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
     // Acceptance Closure §4: the run is bound to a launch the backend minted for THIS account — the same
     // trusted `import/naver` path onboarding uses — never a v1-clean export nobody can attribute.
@@ -186,7 +187,7 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
         />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole("button", { name: "지금 네이버 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
     await waitFor(() => expect(expireReviewImportLaunch).toHaveBeenCalledWith("0f1e2d3c4b5a6978"));
     expect(launchNextReviewImportSegment).toHaveBeenCalledWith("plan-9");
     expect(await screen.findByRole("status")).toHaveTextContent(/준비하지 못했습니다/);
@@ -203,7 +204,7 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
         />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole("button", { name: "지금 쿠팡 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
     await waitFor(() => expect(startReviewAcquisitionRun).toHaveBeenCalledWith("acc-cp"));
     await waitFor(() => expect(runtime.starts).toEqual([{ intent: "REVIEW_ACQUISITION", acquisitionRef: "acq-1" }]));
     expect(screen.queryByRole("link", { name: "직접 진행하기" })).toBeNull();
@@ -217,7 +218,7 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
         <HumanActionArtifact artifact={artifact({ path: "WING_READ_ACTION_WINDOW", channelCode: "COUPANG", channelNameKo: "쿠팡", accountId: "acc-cp", to: null })} onResume={() => undefined} acquireRuntime={runtime} />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole("button", { name: "지금 쿠팡 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
     expect(await screen.findByText(/판매자센터 화면을 준비하지 못했습니다/)).toBeInTheDocument();
     expect(runtime.start).not.toHaveBeenCalled();
   });
@@ -230,7 +231,35 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
       </MemoryRouter>,
     );
     expect(screen.getAllByTestId("human-action-artifact")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "지금 네이버 리뷰 가져오기" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "지금 쿠팡 리뷰 가져오기" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "네이버 최신 리뷰 가져오기" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "쿠팡 최신 리뷰 가져오기" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "최신 리뷰 가져오기" })).toHaveLength(2);
+  });
+});
+
+describe("human action artifact — freshness UX v1: compact, 「언제 기준」, offer vs required", () => {
+  const reference = new Date("2026-08-29T03:00:00Z"); // 12:00 KST
+  it("a required step names the last observation in one line, and no mechanism word", () => {
+    render(<MemoryRouter><HumanActionArtifact artifact={artifact({ path: "WING_READ_ACTION_WINDOW", channelCode: "COUPANG", channelNameKo: "쿠팡", accountId: "acc-cp", asOf: "2026-08-20T01:00:00Z" })} onResume={() => undefined} acquireRuntime={fakeAcquire()} /></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: "쿠팡 최신 리뷰 가져오기" })).toBeInTheDocument();
+    expect(screen.getByText("8월 20일 이후 아직 확인하지 못했어요.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "계속 확인하기" })).toBeInTheDocument();
+    const text = screen.getByTestId("human-action-artifact").textContent ?? "";
+    expect(text).not.toMatch(/sync|coverage|SyncJob|수집 확인 안 됨|최신 상태가 아닙니다/i);
+    expect(text.length).toBeLessThan(120);
+    void reference;
+  });
+  it("an OFFER is a compact card: 「채널 리뷰 · 언제 기준」, 「최신 상태로 갱신」, no 「계속 확인하기」", async () => {
+    const runtime = fakeAcquire();
+    render(<MemoryRouter><HumanActionArtifact artifact={artifact({ optional: true, path: "WING_READ_ACTION_WINDOW", channelCode: "COUPANG", channelNameKo: "쿠팡", accountId: "acc-cp", asOf: "2026-08-20T01:00:00Z" })} onResume={() => undefined} acquireRuntime={runtime} /></MemoryRouter>);
+    expect(screen.getByTestId("human-action-offer")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "쿠팡 리뷰 · 8월 20일 기준" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "계속 확인하기" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "최신 상태로 갱신" }));
+    await waitFor(() => expect(runtime.starts).toHaveLength(1));
+  });
+  it("a channel never observed says so instead of inventing an instant", () => {
+    render(<MemoryRouter><HumanActionArtifact artifact={artifact({ path: "FILE_UPLOAD", to: "/connect/upload", channelNameKo: "네이버", reason: "NOT_COLLECTED", asOf: null })} onResume={() => undefined} /></MemoryRouter>);
+    expect(screen.getByText("아직 확인한 적이 없어요.")).toBeInTheDocument();
   });
 });

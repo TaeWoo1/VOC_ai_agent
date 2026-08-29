@@ -127,6 +127,10 @@ export interface ReviewListArtifact extends ArtifactBase {
   totalCount: number;
   items: ReviewItem[];
   freshness: FreshnessRow[];
+  /** Whether THIS question needed current rows (「오늘 / 어제 / 이번 주」). Absent = false. */
+  freshnessRequired?: boolean;
+  /** The seller-time observation date (`YYYY-MM-DD`) the runtime rendered its as-of phrases against. */
+  referenceDate?: string;
   more?: WorkspaceLink;
 }
 
@@ -270,6 +274,10 @@ export interface HumanActionRequiredArtifact extends ArtifactBase {
   resumable: boolean;
   requiresLocalAgent?: boolean;
   fallback?: { path: HumanActionPath; to: string | null; label: string };
+  /** The channel's last successful observation (ISO instant) — the 「언제 기준」 the card names. */
+  asOf?: string | null;
+  /** An OFFER under rows that already answered the question: compact card, no waiting. */
+  optional?: boolean;
 }
 
 export interface ApprovalArtifact extends ArtifactBase {
@@ -357,6 +365,7 @@ export interface WorkingSetView {
     reviewIntent?: "ROWS" | "ISSUES" | null;
     inquiryIntent?: "ROWS" | "WORKLOAD";
     status?: "UNANSWERED" | "ANSWERED" | "ALL";
+    order?: "NEWEST" | "OLDEST";
   };
   productIds: string[];
   workItemIds: string[];
@@ -365,6 +374,7 @@ export interface WorkingSetView {
 
 export interface PendingHumanAction {
   turnId: string;
+  optional?: boolean;
   actionType: HumanActionType;
   path: HumanActionPath;
   channelCode: string | null;
