@@ -36,16 +36,35 @@ export const GROUP_LABEL: Record<InquiryGroupKey, string> = {
   NEEDS_CLARIFICATION: "규격 확인이 필요한 문의",
   KNOWLEDGE_MISSING: "답변 기준이 없는 문의",
   UNANSWERED: "아직 초안이 없는 문의",
+  ANSWERED: "답변함",
 };
 const MEMORY_PRODUCTS_CAP = 3;
 
 /** Whether the plan asked for the classified queue rather than the count — plan fields only. */
-export function wantsWorkload(input: SpecialistInput): boolean {
+/**
+ * Which inquiry read an INQUIRY_VOLUME need is served by (Query Accuracy v1). The planner's closed
+ * `inquiryIntent` token decides; the two structural cases that can only stand on work items (a draft or
+ * send request, an ordinal target) are WORKLOAD whatever the token says, because a row without a work
+ * item has nothing to draft on. With no token at all: a follow-up keeps the kind of the set it refines,
+ * and a spec that names any row axis (window · channel · status · order · limit) is a ROWS question —
+ * every one of those is a spec FIELD, not a word in the sentence.
+ */
+export type InquiryIntent = "ROWS" | "WORKLOAD" | "COUNT";
+
+export function inquiryIntentOf(input: SpecialistInput): InquiryIntent {
   const f = input.filters;
-  if (input.requestedAction === "PREPARE_INQUIRY_DRAFT" || input.requestedAction === "REQUEST_SEND_APPROVAL") return true;
-  if (input.target && input.target.selector !== "NONE") return true;
-  if (!f) return false;
-  return f.scope === "WORKING_SET" || f.topic != null || f.period != null;
+  if (input.requestedAction === "PREPARE_INQUIRY_DRAFT" || input.requestedAction === "REQUEST_SEND_APPROVAL") return "WORKLOAD";
+  if (input.target && input.target.selector !== "NONE") return "WORKLOAD";
+  if (f?.inquiryIntent) return f.inquiryIntent;
+  if (f?.scope === "WORKING_SET" && input.workingSet?.kind === "INQUIRIES") {
+    return input.workingSet.filters.inquiryIntent ?? "WORKLOAD";
+  }
+  if (f?.scope === "WORKING_SET" && input.workingSet?.kind === "REVIEWS") return "WORKLOAD";
+  // No token (a plan from before v4): the legacy reading, so recorded plans keep their meaning — a
+  // period, topic or working-set follow-up was the queue; a status/order/limit could only mean rows.
+  if (f && (f.period != null || f.topic != null || f.scope === "WORKING_SET")) return "WORKLOAD";
+  if (f && (f.status != null || f.order != null || f.limit != null)) return "ROWS";
+  return "COUNT";
 }
 
 export interface WorkloadRead {
@@ -77,6 +96,12 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
       : fromInquiries && fromInquiries.productIds.length > 0 && !fromInquiries.workItemIds.length ? [...fromInquiries.productIds] : [];
   const workItemIds = fromInquiries ? [...fromInquiries.workItemIds] : [];
   const topic = filters?.topic ?? null;
+  // Query Accuracy v1: the spec axes reach the tool by name. A work queue has NO receipt window — what is
+  // pending is pending whenever it arrived — so `period` is not an axis here; 「어제 온 문의 중 답해야 할
+  // 것」 is a ROWS read with status=UNANSWERED (`inquiryRowsStep`). Channel, order and limit apply.
+  const channel = filters?.channel ?? input.channelScope ?? fromInquiries?.filters.channelCode ?? null;
+  const order = filters?.order ?? null;
+  const limit = filters?.limit ?? null;
 
   const attempt = await attemptTool(
     { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.LIST_INQUIRY_WORKLOAD, needId },
@@ -86,7 +111,9 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
         ...(productIds.length > 0 ? { productIds } : {}),
         ...(workItemIds.length > 0 ? { workItemIds } : {}),
         ...(topic ? { topic } : {}),
-        ...(filters?.channel ? { channel: filters.channel } : {}),
+        ...(channel ? { channel } : {}),
+        ...(order ? { order } : {}),
+        ...(limit != null ? { limit } : {}),
         maxDetailReads: WORKLOAD_DETAIL_CAP,
       },
       allowedTools,
@@ -174,6 +201,7 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
     title: subject,
     groups,
     totalCount: read.items.length,
+    scope: { period: null, channelCode: channel, status: "UNANSWERED", order: order ?? "OLDEST", limit },
     more: { label: "문의 화면에서 처리하기", to: "/inquiries?state=NEEDS_REPLY", count: read.totalOpen + read.totalProposed },
     ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
   };

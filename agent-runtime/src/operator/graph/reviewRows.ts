@@ -179,9 +179,13 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   const channel = filters.channel ?? input.channelScope ?? previous?.filters.channelCode ?? null;
   const product = input.resolved.find((e) => e.kind === "PRODUCT")?.id
     ?? previous?.filters.productIds?.[0] ?? null;
+  // Query Accuracy v1: order goes to the backend (so OLDEST is the window's oldest, not the newest
+  // page reversed); the limit is applied after the read so a follow-up can still intersect the set.
+  const order: "NEWEST" | "OLDEST" = filters.order ?? "NEWEST";
+  const limit = filters.limit ?? null;
   const readArgs = {
     from: window.from, to: window.to, negativeOnly: rating === "LOW",
-    ...(channel ? { channel } : {}), ...(product ? { productId: product } : {}), size: ROWS_SIZE,
+    ...(channel ? { channel } : {}), ...(product ? { productId: product } : {}), size: ROWS_SIZE, order,
   };
   const readRows = () => attemptTool(
     { specialist: "REVIEW_OPS", tool: OPERATOR_TOOL.LIST_RECENT_REVIEWS, needId },
@@ -271,8 +275,10 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
       stale = staleOf(freshness);
     }
   }
-  const rows = rowsOf(read);
-  const total = previousIds ? rows.length : read.total;
+  const matched = rowsOf(read);
+  const total = previousIds ? matched.length : read.total;
+  // Query Accuracy v1: the limit is applied after the set intersection, so 「그중 최근 1개」 stands on the set.
+  const rows = limit != null ? matched.slice(0, limit) : matched;
   // Gated while any connected channel's window is still unproven — asked now, asked earlier, or only
   // partly collected. A failed automatic refresh is said in its own note and leaves the rows as stale.
   const gated = humanSteps > 0 || pendingSteps > 0 || refreshFailures.length > 0;
@@ -307,7 +313,8 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
     findingId: `f-${listRef.evidenceId}`,
     specialist: "REVIEW_OPS",
     statement: rowsSentence(previous?.count ?? null, ratingWord, label, total, gated, token,
-      humanSteps > 0 || pendingSteps > partialNames.length ? HUMAN_STEP_SENTENCE : UNPROVEN_SENTENCE),
+      humanSteps > 0 || pendingSteps > partialNames.length ? HUMAN_STEP_SENTENCE : UNPROVEN_SENTENCE)
+      + (limit != null && rows.length < total ? ` 그중 ${order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${rows.length}건입니다.` : ""),
     evidenceIds: [listRef.evidenceId],
     confidence: "NEEDS_REVIEW",
     verdict: null,
@@ -317,7 +324,8 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   const list: ReviewListArtifact = {
     artifactId: `a-${listRef.evidenceId}`,
     type: "REVIEW_LIST",
-    title: previous ? (ratingWord ? `방금 본 리뷰 중 ${ratingWord}리뷰` : "방금 본 리뷰") : `${label} 들어온 ${ratingWord}리뷰`,
+    title: (previous ? (ratingWord ? `방금 본 리뷰 중 ${ratingWord}리뷰` : "방금 본 리뷰") : `${label} 들어온 ${ratingWord}리뷰`)
+      + (limit != null ? ` · ${order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${Math.min(limit, rows.length)}건` : ""),
     scope: { channelCode: channel, period: window, rating, productId: product },
     totalCount: total,
     items: rows.map((r) => ({
@@ -369,7 +377,7 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
     });
   }
 
-  log("review_rows", { period: token, rating, channel: channel ?? "NONE", rows: rows.length, total,
+  log("review_rows", { period: token, rating, channel: channel ?? "NONE", rows: rows.length, total, order, limit: limit ?? "NONE",
     workingSet: previous != null, gated, stale: stale.length, refreshed, refreshFailed: refreshFailures.length,
     humanSteps, terminal: "OK" });
   return {

@@ -386,3 +386,79 @@ inquiry POSTs. Each needs a fresh single-use approval manifest.
 
 
 
+
+## 25. Query Accuracy v1 — typed QuerySpec, end to end (2026-08-29)
+
+**Why.** A read-only diagnosis of HEAD `99ff330e` (every sentence run through the live planner with a recording proxy
+between the runtime and the backend) showed that the planner read every sentence correctly — object, channel, period,
+order, count, status all appeared in its `question`/`filters` — and that the meaning was lost **after** planning:
+
+| sentence | planner said | where it died |
+|---|---|---|
+| 가장 최근 리뷰 1개만 | ROWS · LAST_7_DAYS · "1개" in prose | `PlanFilters` had no `limit`/`order`; `readRecentReviews` read `size=50` → 13 rows |
+| 최근 문의 3개 | INQUIRY_VOLUME · `list_inquiry_workload` · "3개" in prose | `wantsWorkload()` (a heuristic over *other* filters) sent it to the **count** path → 「22건 / 18건」 summary, no artifact, no working set |
+| 가장 오래된 문의 1개 | same | same |
+| 오늘 들어온 문의 | `period=TODAY` | the period only *gated* the workload path and was never an argument of the read → 2016–2025 rows |
+| 오늘 네이버 문의 중 최근 2개 | `period=TODAY, channel=NAVER` | `channel` was stripped by the tool's zod schema (LangChain `tool()` parses and drops unknown keys) → Cafe24 rows |
+| 답변 안 한 것만 | INQUIRY_VOLUME | no `status` axis; the only inquiry reads were work-queue phases → the queue summary |
+| (follow-up) 답변 안 한 것만 | `scope` unset | the count path had produced no working set, so the planner never saw a 「직전 작업 집합」 line |
+
+Every one of these was a **contract/runtime** defect, not a model defect: 6/6 sentences were understood; 0/6 reached the
+tool with their axes intact. Per turn: planner **1** call (no replan, no repair), ~5.4 KB request / ~1.3 KB response,
+8–16 s latency = the planner; plus one `POST /api/agent/judge` round-trip per turn to a capability that was **off**
+(`available:false`), counted as `llmCalls`.
+
+**What changed (no Text-to-SQL, no new engine).**
+
+- **Planner prompt v4** (`agent-plan-prompt/v4`): four closed tokens — `filters.inquiryIntent ∈ ROWS|WORKLOAD|COUNT`,
+  `filters.limit` (int, clamped to 50 by the parser), `filters.order ∈ NEWEST|OLDEST`, `filters.status ∈
+  UNANSWERED|ANSWERED|ALL` — with the rule that these are executed **only** from `filters`, never from prose, and that
+  `period` is an inquiry's *receipt* window (ROWS only): 「오늘 내가 답해야 할 문의」 is WORKLOAD with no period. The prior
+  line the runtime sends now carries `상태:` too. Parser/controller records grew by the same four fields.
+- **Inquiry semantics split** (`inquiryIntentOf`, `inquiryOps.ts`): `ROWS` → new `inquiryRowsStep` over a new backend read
+  `GET /api/inquiries/rows` (`InquiryRowsService`: ACTIVE·REAL inquiries, window · channel · status · order · limit as
+  query parameters, count under the same predicate, the open/proposed work item riding along when one exists);
+  `WORKLOAD` → the existing classified queue (now with `channel`, `order`, `limit` honoured; a queue has no receipt
+  window); `COUNT` → the existing inbox count. The `wantsWorkload` heuristic is **gone**; the only structural override is
+  that a draft/send request or an ordinal target is WORKLOAD (a row without a work item has nothing to draft on).
+  Without a token (a v3 plan) the legacy reading is kept so recorded plans keep their meaning.
+- **No silent loss**: the workload tool's zod schema names `channel`/`from`/`to`/`order`/`limit`; the rows tool names every
+  axis; `list_recent_reviews` takes `order` and the backend reads oldest-first from the window (a new repository query, not
+  the newest page reversed); the review limit is applied after the set intersection so 「그중 1개」 stands on the set.
+- **ROWS always produces an artifact + working set** (`INQUIRY_LIST` with `scope`, anchored by inquiry ids, the spec
+  copied into the set), and a follow-up re-reads with the previous spec as its base, keeps only the previous ids, then
+  applies order/limit — 최근 5개 → 그중 네이버만 → 그중 최근 1개 → 답변 안 한 것만 each stand on the set before it. The
+  rows keep the requested order on screen (consecutive same-status runs become one group each; a new `ANSWERED` group
+  key, the only `frontend/` change besides the nullable `workItemId`).
+- **Judge round-trip**: the learned "capability off" state is memoised per org for 10 minutes
+  (`SpringEvidenceJudge` memo, keyed by the org the conversation lane already resolves) — one probe per org, not per turn.
+
+**Tests.** Backend: `InquiryRowsServiceTest` (window/order/limit · channel/status · work item + tenancy), parser pins for
+the four tokens and their closed sets/clamping, `RecentReviewServiceTest` unchanged and green. Runtime:
+`queryAccuracy.test.ts` — the seven sentences and the refine chain, each asserting **Planner filters → exact tool args →
+rows → working set**, plus WORKLOAD/COUNT routing, the schema-strip regression, and the judge memo. Two AUTHORED v3
+fixtures that carried `period: "TODAY"` on a work-queue sentence were rewritten as v4 (`inquiryIntent: "WORKLOAD"`, no
+period) — with a period now reaching the read, the fixture had to say what the sentence means.
+
+**Live re-run (real planner, Demo Org, connectors OFF, marketplace 0 · WRITE 0 · DB rows 0).**
+
+| sentence | planner filters (verbatim) | tool request | result | planner ms |
+|---|---|---|---|---|
+| 가장 최근 리뷰 1개만 보여줘 | ROWS · LAST_7_DAYS · limit 1 · NEWEST | `/api/reviews/recent?…&size=50&order=NEWEST` | 1 row (title 「· 가장 최근 1건」) | 8,070 |
+| 최근 문의 3개 보여줘 | inquiryIntent ROWS · limit 3 · NEWEST (· LAST_7_DAYS) | `/api/inquiries/rows?…&status=ALL&order=NEWEST&limit=3` | 3 newest rows, 「답변 필요 1 · 답변함 2」 | 7,742 |
+| 가장 오래된 문의 1개 보여줘 | ROWS · limit 1 · OLDEST · ALL | `…/rows?status=ALL&order=OLDEST&limit=1` | 1 row from 2014-10-27 of 92 | 8,494 |
+| 오늘 들어온 문의 보여줘 | ROWS · TODAY | `…/rows?from=2026-08-29&to=2026-08-29&…` | 「오늘 들어온 문의는 없습니다.」 (true today) | 6,634 |
+| 오늘 네이버 문의 중 최근 2개만 | ROWS · TODAY · NAVER · limit 2 · NEWEST | `…/rows?from=…&channel=NAVER&…&limit=2` | 「오늘 들어온 네이버 문의는 없습니다.」 | 6,155 |
+| 답변 안 한 문의만 보여줘 | ROWS · status UNANSWERED | `…/rows?status=UNANSWERED&order=NEWEST&limit=50` | 22 rows, all UNANSWERED, 2016–2026 (the real backlog) | 9,075 |
+| 최근 문의 5개 → 그중 네이버만 → 그중 최근 1개 → 답변 안 한 것만 | ROWS → +scope WS·NAVER → +limit 1 → +UNANSWERED | 4 rows reads, each carrying the previous set's window/channel | 5 → 3 (all NAVER) → 1 → 1 (UNANSWERED); prior line `직전 작업 집합: INQUIRIES (…채널:NAVER, 상태:ALL…)` reached the planner | 7.5–12.2 s |
+| 오늘 내가 답해야 할 문의 정리해줘 | WORKLOAD · period null · LIST_ACTIONS | `/api/inquiries?phase=PROPOSED`, `?phase=OPEN` | the queue (20), unchanged behaviour | 8,513 |
+
+Model calls: planner **1 per turn**, 15 turns → 15; replans 0; repairs 0; judge round-trips **1** for the whole session
+(first turn of the org; every later turn `llmCalls: 1`). Latency is the planner (6.2–12.2 s); tools 20–90 ms.
+Nondeterminism observed and accepted: the planner set `LAST_7_DAYS` on 「최근 문의 5개」 on one of two runs and no period
+on the other — both are honest readings and both were executed as stated.
+
+**Reported, not fixed.** 「최근」 with no period is sometimes read as a 7-day window and sometimes as "newest overall";
+the answer states which. A NAVER unanswered inquiry with no open work item (a known queue-scope gap) shows as a row with
+no draftable target. The prompt is ~5.7 KB per call on a reasoning model with `reasoning-effort: low`; the planner is
+still the whole latency budget.

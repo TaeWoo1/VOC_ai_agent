@@ -237,6 +237,14 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     requires: ["NONE"],
   },
   {
+    // Query Accuracy v1: the customer's inquiries as rows. Org-wide, every axis a closed token, and
+    // nothing to resolve first.
+    specialist: "INQUIRY_OPS",
+    tool: OPERATOR_TOOL.LIST_INQUIRY_ROWS,
+    needKinds: ["INQUIRY_VOLUME"],
+    requires: ["NONE"],
+  },
+  {
     // Anchored, and the anchor reachable today is a resolved product — `inquiryOps` skips the call and
     // says so rather than trawling the org (§10 A2).
     specialist: "INQUIRY_OPS",

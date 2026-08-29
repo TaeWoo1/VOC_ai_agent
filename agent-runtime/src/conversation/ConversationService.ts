@@ -43,6 +43,7 @@ import { capabilityOf, EXECUTION_REASON } from "../operator/capability/ChannelCa
 import type { ChannelCapabilityVerdict } from "../operator/capability/ChannelCapability";
 import { HUMAN_STEP_SENTENCE } from "../operator/graph/reviewRows";
 import { log } from "../log";
+import { inquiryRowsSentence } from "../operator/graph/inquiryRowsStep";
 import type { ConversationStore } from "./ConversationStore";
 import { DraftPreparer } from "./DraftPreparer";
 import type { DraftTarget, ReviewDraftTarget } from "./DraftPreparer";
@@ -113,11 +114,11 @@ export class ConversationService {
   }
 
   /** Resolve the tenant exactly the way runs do: verify the bearer at the backend, scope the store. */
-  private async tenant(token: string): Promise<{ bundle: SpringClientBundle; store: ConversationStore }> {
+  private async tenant(token: string): Promise<{ bundle: SpringClientBundle; store: ConversationStore; orgId: string }> {
     const bundle = this.deps.clientFactory(token);
     const { orgId } = await bundle.identity.whoami();
     const stores = this.deps.storeProvider.storesForRequest({ token, scope: scopeFor(orgId) });
-    return { bundle, store: stores.conversations };
+    return { bundle, store: stores.conversations, orgId };
   }
 
   async create(token: string): Promise<ConversationView> {
@@ -146,7 +147,7 @@ export class ConversationService {
 
   async turn(token: string, id: string, request: StartTurnRequest, progress: ProgressFn): Promise<TurnView> {
     const started = Date.now();
-    const { bundle, store } = await this.tenant(token);
+    const { bundle, store, orgId } = await this.tenant(token);
     const view = await store.load(id);
     if (!view) throw new HttpError(404, "UNKNOWN_CONVERSATION", "no conversation found for this id");
 
@@ -232,6 +233,7 @@ export class ConversationService {
       progress({ type: "stage", stage: s, label, at: this.now() });
     const runtime = new OperatorAgentRuntime({
       operator: bundle.operator, inquiry: bundle.inquiry, issue: bundle.issue,
+      judgeMemoKey: orgId,
       progress: (s, label) => stage(s, label),
       // The one collection seam the run may call, bounded to AUTOMATIC-acquisition channels whose rows
       // are stale for the question (`graph/reviewRows.ts`). Constructed here so the lane owns it.
@@ -926,7 +928,7 @@ export function priorLineOf(view: ConversationView): string | null {
   const parts: string[] = [];
   if (set) {
     parts.push(`직전 작업 집합: ${set.kind} (기간:${set.filters.period?.token ?? "없음"}, 채널:${set.filters.channelCode ?? "전체"}, `
-      + `평점:${set.filters.rating ?? "ALL"}, 상품 특정:${set.productIds.length > 0 ? "예" : "아니오"})`);
+      + `평점:${set.filters.rating ?? "ALL"}, 상태:${set.filters.status ?? "없음"}, 상품 특정:${set.productIds.length > 0 ? "예" : "아니오"})`);
   }
   if (view.pendingPrepared) {
     parts.push(view.pendingPrepared.kind === "REVIEW_DRAFT"
@@ -984,6 +986,14 @@ function headlineOf(
       return `방금 본 리뷰를 상품 ${primary.items.length}개로 묶었습니다.`;
     case "INQUIRY_LIST": {
       const previousReviews = axis.filters.scope === "WORKING_SET" && view.workingSet?.kind === "REVIEWS";
+      if (primary.scope && !(primary.more?.to ?? "").includes("NEEDS_REPLY")) {
+        // Query Accuracy v1: a ROWS list is said in the spec's own words — the set it refines, the status
+        // it was read with, the count the predicate found, and how many of those are on screen.
+        const refine = axis.filters.scope === "WORKING_SET" && view.workingSet?.kind === "INQUIRIES";
+        const count = (key: string) => primary.groups.filter((g) => g.key === key).reduce((n, g) => n + g.items.length, 0);
+        return inquiryRowsSentence(primary.scope, count("UNANSWERED") + count("ANSWERED"), primary.totalCount, refine,
+          { unanswered: count("UNANSWERED"), answered: count("ANSWERED") });
+      }
       if (primary.totalCount === 0) {
         return previousReviews ? "같은 상품에 대한 미답변 문의는 없습니다." : `${primary.title}는 없습니다.`;
       }
@@ -1048,11 +1058,21 @@ function workingSetOf(
     case "INQUIRY_LIST": {
       const items: InquiryItem[] = primary.groups.flatMap((g) => g.items);
       const productIds = [...new Set(items.map((i) => i.productId).filter((p): p is string => p != null))];
+      const workItemIds = items.map((i) => i.workItemId).filter((w): w is string => w != null);
+      // Query Accuracy v1: a ROWS list is anchored by inquiry ids and remembers the spec it was read
+      // with, so the next sentence refines the same read; a WORKLOAD list is anchored by work items.
+      const rows = primary.scope != null && !(primary.more?.to ?? "").includes("NEEDS_REPLY");
       return {
         kind: "INQUIRIES", label: primary.title, count: primary.totalCount,
-        ids: bounded(items.map((i) => i.workItemId)),
-        filters: { ...(axis.filters.topic ? { topic: axis.filters.topic } : {}) },
-        productIds: bounded(productIds), workItemIds: bounded(items.map((i) => i.workItemId)), turnId: "",
+        ids: bounded(rows ? items.map((i) => i.inquiryId) : workItemIds),
+        filters: {
+          ...(axis.filters.topic ? { topic: axis.filters.topic } : {}),
+          ...(primary.scope ? {
+            period: primary.scope.period, channelCode: primary.scope.channelCode, status: primary.scope.status,
+          } : {}),
+          inquiryIntent: rows ? "ROWS" : "WORKLOAD",
+        },
+        productIds: bounded(productIds), workItemIds: bounded(workItemIds), turnId: "",
       };
     }
     case "PRODUCT_LIST":
@@ -1094,7 +1114,8 @@ function inquiryFromHistory(view: ConversationView, workItemId: string): Inquiry
 
 function inquiryTargetFromHistory(view: ConversationView, workItemId: string): ResolvedTarget | null {
   const item = inquiryFromHistory(view, workItemId);
-  if (!item) return null;
+  // A row with no work item (an answered inquiry on a ROWS list) has nothing to draft on.
+  if (!item || !item.workItemId) return null;
   return {
     kind: "INQUIRY",
     target: {
@@ -1237,7 +1258,11 @@ function suggestionsFor(
         chips.push(promptChip("안 좋은 것만 봐줘"), promptChip("상품별로 묶어줘"), promptChip("문의에서도 같은 문제가 있는지 봐줘"));
         break;
       case "INQUIRIES":
-        chips.push(promptChip("배송 관련부터"), promptChip("첫 번째 거 답변 준비해줘"));
+        if (workingSet.filters.inquiryIntent === "ROWS") {
+          chips.push(promptChip("답변 안 한 것만 보여줘"), promptChip("그중 가장 최근 1개만"), promptChip("첫 번째 거 답변 준비해줘"));
+        } else {
+          chips.push(promptChip("배송 관련부터"), promptChip("첫 번째 거 답변 준비해줘"));
+        }
         break;
       case "ORDERS":
         chips.push(promptChip("카페24만 봐봐"), promptChip("그때 리뷰나 문의에도 변화 있었어?"));
@@ -1264,6 +1289,7 @@ const NUMBER = /\d[\d,]*/g;
 
 /** Same numbers (as a subset) and the same noun ⇒ the finding restates the headline. */
 export function redundantWithHeadline(statement: string, headline: string): boolean {
+  if (statement.trim() === headline.trim()) return true;
   const nums = statement.match(NUMBER) ?? [];
   if (nums.length === 0) return false;
   const headNums = new Set(headline.match(NUMBER) ?? []);

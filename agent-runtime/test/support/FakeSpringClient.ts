@@ -27,6 +27,8 @@ import type {
   InquiryDetail,
   InquiryQueueItem,
   InquiryQueueResponse,
+  InquiryRowsParams,
+  InquiryRowsResponse,
   ProposalResult,
   PublishCapabilityView,
   PublishStatusView,
@@ -100,7 +102,9 @@ export class FakeSpringClient implements SpringClient {
   externalSendAttempts = 0;
   /** Call counters for idempotency assertions. */
   readonly calls = { list: 0, detail: 0, propose: 0, saveDraft: 0, confirmPublish: 0, generate: 0,
-    sellerAccounts: 0, syncRuns: 0 };
+    sellerAccounts: 0, syncRuns: 0, rows: 0 };
+  /** Query Accuracy v1: every `listInquiryRows` request, verbatim — how a test proves spec → tool args. */
+  readonly rowsParams: InquiryRowsParams[] = [];
   /** EVERY method call, in order — how a conversation test proves the lane made only READs + PREPARE. */
   readonly methodCalls: RecordedCall[] = [];
   /** Seeded connected accounts (`GET /api/seller-accounts`). */
@@ -127,8 +131,12 @@ export class FakeSpringClient implements SpringClient {
   /** When set, `getPublishCapability` answers this instead of the dispatch-flag derivation. */
   publishCapability: PublishCapabilityView | null = null;
 
-  constructor(seeds: readonly SeedInquiry[] = [], opts: { dispatchAdapterEnabled?: boolean } = {}) {
+  /** Query Accuracy v1: inquiries with NO work item (answered on the channel) — visible to the rows read only. */
+  readonly answeredSeeds: SeedInquiry[] = [];
+
+  constructor(seeds: readonly SeedInquiry[] = [], opts: { dispatchAdapterEnabled?: boolean; answered?: readonly SeedInquiry[] } = {}) {
     this.dispatchAdapterEnabled = opts.dispatchAdapterEnabled ?? false;
+    this.answeredSeeds.push(...(opts.answered ?? []));
     for (const s of seeds) {
       this.items.set(s.workItemId, {
         phase: "OPEN",
@@ -180,6 +188,45 @@ export class FakeSpringClient implements SpringClient {
         executableIdentity: it.seed.executableIdentity ?? "MARKETPLACE",
       }));
     return { content: all, page: params.page ?? 0, size: params.size ?? 20, totalElements: all.length, totalPages: 1 };
+  }
+
+  /**
+   * Query Accuracy v1: the rows read over the same seeds. `answered` (constructor opts) models inquiries
+   * that have no work item at all — an inquiry answered on the channel, which the queue never shows.
+   */
+  async listInquiryRows(params: InquiryRowsParams): Promise<InquiryRowsResponse> {
+    this.calls.rows += 1;
+    this.rowsParams.push(params);
+    this.methodCalls.push({ method: "listInquiryRows" });
+    const status = params.status ?? "ALL";
+    const channel = params.channel ? params.channel.toUpperCase() : null;
+    const all = [
+      ...[...this.items.values()].map((it) => ({
+        seed: it.seed, status: it.status, phase: it.phase as string | null,
+        workItemId: (it.phase === "OPEN" || it.phase === "PROPOSED" ? it.seed.workItemId : null) as string | null,
+      })),
+      ...this.answeredSeeds.map((seed) => ({ seed, status: seed.status ?? "ANSWERED", phase: null as string | null, workItemId: null as string | null })),
+    ]
+      .filter((r) => !channel || (r.seed.channelCode ?? "").toUpperCase() === channel)
+      .filter((r) => status === "ALL" || r.status === status)
+      .filter((r) => !params.from || r.seed.receivedAt.slice(0, 10) >= params.from)
+      .filter((r) => !params.to || r.seed.receivedAt.slice(0, 10) <= params.to)
+      .sort((a, b) => params.order === "OLDEST"
+        ? a.seed.receivedAt.localeCompare(b.seed.receivedAt)
+        : b.seed.receivedAt.localeCompare(a.seed.receivedAt));
+    const limit = params.limit ?? 20;
+    const items = all.slice(0, limit).map((r) => ({
+      inquiryId: r.seed.inquiryId, workItemId: r.workItemId, sellerAccountId: r.seed.sellerAccountId,
+      channelId: r.seed.channelId, channelCode: r.seed.channelCode ?? null, channelNameKo: r.seed.channelNameKo ?? null,
+      productId: r.seed.productId ?? null, productName: r.seed.productName ?? null,
+      phase: r.workItemId ? r.phase : null, status: r.status, title: r.seed.title, receivedAt: r.seed.receivedAt,
+      answeredAt: null, sourceSubtype: r.seed.sourceSubtype ?? null,
+      executableIdentity: r.seed.executableIdentity ?? "MARKETPLACE",
+    }));
+    return {
+      from: params.from ?? null, to: params.to ?? "2099-12-31", channel, status, order: params.order ?? "NEWEST",
+      limit, totalCount: all.length, items,
+    };
   }
 
   async getInquiryDetail(workItemId: string): Promise<InquiryDetail> {

@@ -156,17 +156,37 @@ export class RuleEvidenceJudge implements EvidenceJudge {
  * outright if it is not — two checks on the same property, one on each side of the hop, because this
  * is the one Operator payload that is assembled rather than structurally bounded.
  */
+/**
+ * Query Accuracy v1: what a run learned about the judge capability, remembered across runs of the same
+ * org for a while. Measured live 2026-08-28: with the capability OFF, every turn still paid one
+ * `POST /api/agent/judge` round-trip to learn it again and counted it against the model budget. The
+ * memo is process-local and bounded by time — a capability switched on mid-day is re-asked within the TTL.
+ */
+const JUDGE_OFF_MEMO = new Map<string, number>();
+export const JUDGE_OFF_MEMO_TTL_MS = 10 * 60_000;
+
+/** Test seam: forget every learned "off" state. */
+export function resetJudgeCapabilityMemo(): void {
+  JUDGE_OFF_MEMO.clear();
+}
+
 export class SpringEvidenceJudge implements EvidenceJudge {
   readonly kind = "LLM" as const;
 
   /** Set once the backend answers `available: false` — the capability is off for this org. */
-  private capabilityOff = false;
+  private capabilityOff: boolean;
 
   constructor(
     private readonly backend: JudgeBackend,
     private readonly fallback: EvidenceJudge = new RuleEvidenceJudge(),
     private readonly runId?: string,
-  ) {}
+    /** The org (or any stable tenant key) whose learned "off" state this judge shares across runs. */
+    private readonly memoKey?: string,
+    private readonly now: () => number = () => Date.now(),
+  ) {
+    const learnedAt = memoKey ? JUDGE_OFF_MEMO.get(memoKey) : undefined;
+    this.capabilityOff = learnedAt != null && this.now() - learnedAt < JUDGE_OFF_MEMO_TTL_MS;
+  }
 
   /**
    * Whether the NEXT call will reach a model.
@@ -217,6 +237,7 @@ export class SpringEvidenceJudge implements EvidenceJudge {
       // recorded as the same thing anywhere a seller can see.
       if (!view.providerVersion || view.quotaMessage) {
         this.capabilityOff = true;
+        if (this.memoKey) JUDGE_OFF_MEMO.set(this.memoKey, this.now());
       }
       log("operator_judge", {
         judgeKind: "RULE_BASED",

@@ -1041,6 +1041,23 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
                                              @Param("toExclusive") Instant toExclusive,
                                              Pageable pageable);
 
+    /** {@link #findRecentInWindowByChannel} oldest-first — the same predicate, the opposite order (Query Accuracy v1). */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and r.dataOrigin = com.sellerops.common.DataOrigin.REAL
+              and (:negativeOnly = false or r.negative = true)
+              and (:productId is null or r.productId = :productId)
+              and r.receivedAt >= :from and r.receivedAt < :toExclusive
+            order by r.receivedAt asc, r.id asc
+            """)
+    List<Review> findOldestInWindowByChannel(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+                                             @Param("negativeOnly") boolean negativeOnly,
+                                             @Param("productId") UUID productId,
+                                             @Param("from") Instant from,
+                                             @Param("toExclusive") Instant toExclusive,
+                                             Pageable pageable);
+
     /** The count that pairs with {@link #findRecentInWindowByChannel} — same predicate, so N건 matches the rows. */
     @Query("""
             select count(r) from Review r

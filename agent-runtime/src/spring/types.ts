@@ -45,6 +45,46 @@ export interface InquiryQueueResponse {
   readonly totalPages: number;
 }
 
+/** GET /api/inquiries/rows (Query Accuracy v1) — the customer's inquiries as rows, not the work queue. */
+export interface InquiryRowsParams {
+  readonly from?: string;
+  readonly to?: string;
+  readonly channel?: string;
+  readonly status?: "UNANSWERED" | "ANSWERED" | "ALL";
+  readonly order?: "NEWEST" | "OLDEST";
+  readonly limit?: number;
+}
+
+export interface InquiryRowItem {
+  readonly inquiryId: string;
+  /** The open/proposed work item, when one exists; null for an answered or otherwise settled inquiry. */
+  readonly workItemId: string | null;
+  readonly sellerAccountId: string | null;
+  readonly channelId: string | null;
+  readonly channelCode: string | null;
+  readonly channelNameKo: string | null;
+  readonly productId: string | null;
+  readonly productName: string | null;
+  readonly phase: string | null;
+  readonly status: string;
+  readonly title: string | null;
+  readonly receivedAt: string;
+  readonly answeredAt: string | null;
+  readonly sourceSubtype?: string | null;
+  readonly executableIdentity?: ExecutableIdentity;
+}
+
+export interface InquiryRowsResponse {
+  readonly from: string | null;
+  readonly to: string;
+  readonly channel: string | null;
+  readonly status: string;
+  readonly order: string;
+  readonly limit: number;
+  readonly totalCount: number;
+  readonly items: InquiryRowItem[];
+}
+
 /** Sanitized proposal view (coarse category + provider provenance; no body). */
 export interface ProposalView {
   readonly proposalId: string;
@@ -737,6 +777,10 @@ export interface AgentPlanView {
     scope?: string | null;
     topic?: string | null;
     reviewIntent?: string | null;
+    inquiryIntent?: string | null;
+    limit?: number | null;
+    order?: string | null;
+    status?: string | null;
   } | null;
   readonly target?: { selector?: string | null; index?: number | null } | null;
 }
@@ -881,6 +925,8 @@ export interface RecentReviewsParams {
   readonly channel?: string;
   readonly productId?: string;
   readonly size?: number;
+  /** Query Accuracy v1: which end of the window comes first. Absent ⇒ NEWEST. */
+  readonly order?: "NEWEST" | "OLDEST";
 }
 
 /** Mirrors of the dashboard overview DTOs (`com.sellerops.dashboard.metrics.dto`). */

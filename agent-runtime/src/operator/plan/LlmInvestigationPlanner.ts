@@ -375,8 +375,15 @@ function filtersOf(raw: AgentPlanView["filters"]): PlanFilters {
     scope: oneOf(raw.scope, ["WORKING_SET", "ORG"] as const),
     topic: oneOf(raw.topic, ["SHIPPING", "EXCHANGE_RETURN", "PRODUCT_SPEC", "USAGE", "OTHER"] as const),
     reviewIntent: oneOf(raw.reviewIntent, ["ROWS", "ISSUES"] as const),
+    inquiryIntent: oneOf(raw.inquiryIntent, ["ROWS", "WORKLOAD", "COUNT"] as const),
+    limit: typeof raw.limit === "number" && Number.isInteger(raw.limit) && raw.limit >= 1 ? Math.min(raw.limit, MAX_LIMIT) : null,
+    order: oneOf(raw.order, ["NEWEST", "OLDEST"] as const),
+    status: oneOf(raw.status, ["UNANSWERED", "ANSWERED", "ALL"] as const),
   };
 }
+
+/** The most rows a plan may ask for — the backend parser clamps to the same number. */
+export const MAX_LIMIT = 50;
 
 function targetOf(raw: AgentPlanView["target"]): PlanTarget {
   if (!raw) return NO_TARGET;

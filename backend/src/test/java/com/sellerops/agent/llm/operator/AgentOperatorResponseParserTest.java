@@ -39,7 +39,8 @@ class AgentOperatorResponseParserTest {
              "clarificationNeeded":false,"clarificationReason":"","rationale":"초안 요청",
              "requestedAction":"PREPARE_INQUIRY_DRAFT",
              "tone":"SOFTER",
-             "filters":{"period":"LAST_WEEK","rating":"LOW","channel":"CAFE24","scope":"WORKING_SET","topic":"SHIPPING","reviewIntent":"ROWS"},
+             "filters":{"period":"LAST_WEEK","rating":"LOW","channel":"CAFE24","scope":"WORKING_SET","topic":"SHIPPING","reviewIntent":"ROWS",
+                        "inquiryIntent":"ROWS","limit":3,"order":"OLDEST","status":"UNANSWERED"},
              "target":{"selector":"NTH","index":2}}
             """;
 
@@ -64,6 +65,15 @@ class AgentOperatorResponseParserTest {
         assertThat(plan.filters().reviewIntent()).isEqualTo("ROWS");
         assertThat(AgentPlanPrompt.REVIEW_INTENTS).containsExactly("ROWS", "ISSUES");
         assertThat(AgentPlanPrompt.system()).contains("filters.reviewIntent");
+        // Query Accuracy v1: the QuerySpec axes the runtime executes — every one a closed token.
+        assertThat(plan.filters().inquiryIntent()).isEqualTo("ROWS");
+        assertThat(plan.filters().limit()).isEqualTo(3);
+        assertThat(plan.filters().order()).isEqualTo("OLDEST");
+        assertThat(plan.filters().status()).isEqualTo("UNANSWERED");
+        assertThat(AgentPlanPrompt.INQUIRY_INTENTS).containsExactly("ROWS", "WORKLOAD", "COUNT");
+        assertThat(AgentPlanPrompt.ORDERS).containsExactly("NEWEST", "OLDEST");
+        assertThat(AgentPlanPrompt.STATUSES).containsExactly("UNANSWERED", "ANSWERED", "ALL");
+        assertThat(AgentPlanPrompt.system()).contains("filters.inquiryIntent", "filters.limit", "filters.order", "filters.status");
         assertThat(plan.target().selector()).isEqualTo("NTH");
         assertThat(plan.target().index()).isEqualTo(2);
         // And the v2 part is untouched by the additions.
@@ -168,6 +178,23 @@ class AgentOperatorResponseParserTest {
             assertThat(system).contains(token);
         }
         assertThat(system).contains("ORDER_OPS");
-        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v3");
+        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v4");
+    }
+
+    @Test
+    @DisplayName("QuerySpec tokens outside the closed sets are null, and a limit is clamped, never trusted")
+    void querySpecTokensAreClosed() {
+        String text = V3_FULL
+                .replace("\"inquiryIntent\":\"ROWS\"", "\"inquiryIntent\":\"SQL\"")
+                .replace("\"limit\":3", "\"limit\":999")
+                .replace("\"order\":\"OLDEST\"", "\"order\":\"RANDOM\"")
+                .replace("\"status\":\"UNANSWERED\"", "\"status\":\"MAYBE\"");
+        ParsedPlan plan = parse(text);
+        assertThat(plan.filters().inquiryIntent()).isNull();
+        assertThat(plan.filters().limit()).isEqualTo(AgentPlanPrompt.MAX_LIMIT);
+        assertThat(plan.filters().order()).isNull();
+        assertThat(plan.filters().status()).isNull();
+        ParsedPlan zero = parse(V3_FULL.replace("\"limit\":3", "\"limit\":0"));
+        assertThat(zero.filters().limit()).isNull();
     }
 }

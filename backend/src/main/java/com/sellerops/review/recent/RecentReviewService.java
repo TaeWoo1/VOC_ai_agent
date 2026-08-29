@@ -108,6 +108,17 @@ public class RecentReviewService {
     @Transactional(readOnly = true)
     public RecentReviewsResponse recent(UUID orgId, LocalDate from, LocalDate to, boolean negativeOnly,
                                         String channel, UUID productId, Integer size) {
+        return recent(orgId, from, to, negativeOnly, channel, productId, size, null);
+    }
+
+    /**
+     * @param order {@code NEWEST} (default) or {@code OLDEST} — which end of the window the first row comes
+     *     from (Query Accuracy v1). Anything else is refused, never silently read as newest.
+     */
+    @Transactional(readOnly = true)
+    public RecentReviewsResponse recent(UUID orgId, LocalDate from, LocalDate to, boolean negativeOnly,
+                                        String channel, UUID productId, Integer size, String order) {
+        boolean oldest = oldestFirst(order);
         LocalDate toDate = to == null ? LocalDate.now(clock) : to;
         LocalDate fromDate = from == null ? toDate.minusDays(DEFAULT_WINDOW_DAYS - 1L) : from;
         if (fromDate.isAfter(toDate)) {
@@ -139,13 +150,19 @@ public class RecentReviewService {
             accountByChannel.put(ch.getId(), account.get());
             channelById.put(ch.getId(), ch);
             total += reviews.countRecentInWindowByChannel(orgId, ch.getId(), negativeOnly, productId, start, end);
-            merged.addAll(reviews.findRecentInWindowByChannel(orgId, ch.getId(), negativeOnly, productId,
-                    start, end, PageRequest.of(0, limit)));
+            merged.addAll(oldest
+                    ? reviews.findOldestInWindowByChannel(orgId, ch.getId(), negativeOnly, productId,
+                            start, end, PageRequest.of(0, limit))
+                    : reviews.findRecentInWindowByChannel(orgId, ch.getId(), negativeOnly, productId,
+                            start, end, PageRequest.of(0, limit)));
         }
-        // Each channel page is already newest-first; the merge re-sorts across channels and cuts,
-        // so the first N of the merged list are the first N of the whole window.
-        merged.sort(Comparator.comparing(Review::getReceivedAt, Comparator.reverseOrder())
-                .thenComparing(Review::getId, Comparator.reverseOrder()));
+        // Each channel page is already in the requested order; the merge re-sorts across channels and
+        // cuts, so the first N of the merged list are the first N of the whole window.
+        Comparator<Review> byReceipt = oldest
+                ? Comparator.comparing(Review::getReceivedAt).thenComparing(Review::getId)
+                : Comparator.comparing(Review::getReceivedAt, Comparator.reverseOrder())
+                        .thenComparing(Review::getId, Comparator.reverseOrder());
+        merged.sort(byReceipt);
         List<Review> page = merged.size() > limit ? merged.subList(0, limit) : merged;
 
         Map<UUID, Product> byProduct = productsOf(orgId, page);
@@ -158,6 +175,17 @@ public class RecentReviewService {
                 .filter(row -> DATA_TYPE_REVIEW.equals(row.dataType()))
                 .toList();
         return new RecentReviewsResponse(fromDate, toDate, negativeOnly, total, items, reviewCoverage);
+    }
+
+    private static boolean oldestFirst(String order) {
+        if (order == null || order.isBlank()) {
+            return false;
+        }
+        return switch (order.strip().toUpperCase(java.util.Locale.ROOT)) {
+            case "NEWEST" -> false;
+            case "OLDEST" -> true;
+            default -> throw ApiException.badRequest("알 수 없는 정렬입니다.");
+        };
     }
 
     private static List<String> channelCodes(String channel) {

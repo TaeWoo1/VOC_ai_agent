@@ -41,7 +41,7 @@ describe("A — a free-form review question becomes a REVIEW_LIST", () => {
     await say(h, id, "오늘 새로 달린 리뷰 보여줘");
     await say(h, id, "안 좋은 것만 봐줘");
     const prior = h.operator.planPriorContexts.at(-1) ?? "";
-    expect(prior).toContain("직전 작업 집합: REVIEWS (기간:TODAY, 채널:전체, 평점:ALL, 상품 특정:예)");
+    expect(prior).toContain("직전 작업 집합: REVIEWS (기간:TODAY, 채널:전체, 평점:ALL, 상태:없음, 상품 특정:예)");
     expect(prior).not.toContain("r-1");
     expect(prior).not.toContain("3건");
   });

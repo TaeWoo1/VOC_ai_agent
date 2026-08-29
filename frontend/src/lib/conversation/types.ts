@@ -130,10 +130,11 @@ export interface ReviewListArtifact extends ArtifactBase {
   more?: WorkspaceLink;
 }
 
-export type InquiryGroupKey = "DRAFT_READY" | "NEEDS_CLARIFICATION" | "KNOWLEDGE_MISSING" | "UNANSWERED";
+export type InquiryGroupKey = "DRAFT_READY" | "NEEDS_CLARIFICATION" | "KNOWLEDGE_MISSING" | "UNANSWERED" | "ANSWERED";
 
 export interface InquiryItem {
-  workItemId: string;
+  /** The open/proposed work item, when one exists; a ROWS list shows answered inquiries too, and those have none. */
+  workItemId: string | null;
   inquiryId: string;
   channelCode: string | null;
   channelNameKo: string | null;
@@ -154,6 +155,14 @@ export interface InquiryListArtifact extends ArtifactBase {
   groups: Array<{ key: InquiryGroupKey; label: string; items: InquiryItem[] }>;
   totalCount: number;
   more?: WorkspaceLink;
+  /** Query Accuracy v1: the QuerySpec a ROWS read executed; absent on a work-queue list. */
+  scope?: {
+    period: DateWindow | null;
+    channelCode: string | null;
+    status: "UNANSWERED" | "ANSWERED" | "ALL";
+    order: "NEWEST" | "OLDEST";
+    limit: number | null;
+  };
 }
 
 export interface ProductListArtifact extends ArtifactBase {
@@ -346,6 +355,8 @@ export interface WorkingSetView {
     productIds?: string[];
     topic?: "SHIPPING" | "EXCHANGE_RETURN" | "PRODUCT_SPEC" | "USAGE" | "OTHER" | null;
     reviewIntent?: "ROWS" | "ISSUES" | null;
+    inquiryIntent?: "ROWS" | "WORKLOAD";
+    status?: "UNANSWERED" | "ANSWERED" | "ALL";
   };
   productIds: string[];
   workItemIds: string[];

@@ -836,8 +836,12 @@ export const GROUP_BY_PRODUCT_FOLLOWUP_PLAN = reviewRowsPlan("방금 본 리뷰�
 export const CROSS_DOMAIN_INQUIRIES_PLAN = inquiryRowsPlan("방금 본 리뷰의 상품에 대해 문의에서도 비슷한 얘기가 있는지 알고 싶다",
   { period: null, rating: null, channel: null, scope: "WORKING_SET", topic: null },
   { tools: ["list_inquiry_workload", "search_customer_memory"] });
+// Query Accuracy v1: 「오늘 답해야 할」 is the seller's day, not the inquiries' receipt date — a v4 plan says
+// WORKLOAD with no period (the v4 prompt says so in as many words). The AUTHORED v3 shape carried
+// `period: "TODAY"`, which the runtime used to ignore; now that a period reaches the queue read, the
+// fixture says what the sentence means.
 export const TODAY_INQUIRIES_PLAN = inquiryRowsPlan("오늘 내가 답해야 할 문의를 정리하고 싶다",
-  { period: "TODAY", rating: null, channel: null, scope: null, topic: null });
+  { period: null, rating: null, channel: null, scope: null, topic: null, inquiryIntent: "WORKLOAD" });
 export const SHIPPING_FIRST_PLAN = inquiryRowsPlan("방금 본 문의 중 배송 관련부터 보고 싶다",
   { period: null, rating: null, channel: null, scope: "WORKING_SET", topic: "SHIPPING" });
 export const PREPARE_FIRST_DRAFT_PLAN = inquiryRowsPlan("방금 본 문의 중 첫 번째 것의 답변을 준비하고 싶다",
@@ -923,7 +927,8 @@ export const LIST_ACTIONS_PLAN: AgentPlanView = {
   riskClass: "ROUTINE", maxIterations: 1, maxToolCalls: 12, stopWhenEnough: null, clarificationNeeded: false,
   clarificationReason: null, rationale: "할 일은 문의와 리뷰에서 나온다", providerVersion: V3,
   requestedAction: "LIST_ACTIONS", tone: null,
-  filters: { period: "TODAY", rating: null, channel: null, scope: null, topic: null }, target: { selector: "NONE", index: null },
+  // Query Accuracy v1: the queue half is WORKLOAD (a queue has no receipt window); the period is the review half's.
+  filters: { period: "TODAY", rating: null, channel: null, scope: null, topic: null, inquiryIntent: "WORKLOAD" }, target: { selector: "NONE", index: null },
 };
 Object.assign(CONVERSATION_PLANS, {
   "지난 7일 동안 들어온 상품평 좀 보여봐": LAST7_REVIEWS_PLAN,

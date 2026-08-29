@@ -39,7 +39,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v3";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v4";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -73,6 +73,19 @@ public final class AgentPlanPrompt {
      * sentence and a request for recent reviews can never fall through to the repeated-problems reader.
      */
     public static final String[] REVIEW_INTENTS = {"ROWS", "ISSUES"};
+    /**
+     * Query Accuracy v1 (2026-08-28): what an INQUIRY_VOLUME need is FOR. {@code ROWS} = the customer's
+     * inquiries themselves (any status, ordered, limited); {@code WORKLOAD} = what the seller still has to
+     * answer, classified by draft state (the work queue); {@code COUNT} = one org-wide number. A closed plan
+     * token, so 「최근 문의 3개」 and 「내가 답해야 할 문의」 never share a path by accident.
+     */
+    public static final String[] INQUIRY_INTENTS = {"ROWS", "WORKLOAD", "COUNT"};
+    /** Row order — the newest first, or the oldest first. Absent ⇒ NEWEST. */
+    public static final String[] ORDERS = {"NEWEST", "OLDEST"};
+    /** Which inquiries: still unanswered, already answered, or all. Absent ⇒ ROWS reads ALL, WORKLOAD is by nature UNANSWERED. */
+    public static final String[] STATUSES = {"UNANSWERED", "ANSWERED", "ALL"};
+    /** The most rows a plan may ask for. A limit above this is clamped, not refused. */
+    public static final int MAX_LIMIT = 50;
     public static final String[] TARGET_SELECTORS = {"FIRST", "NTH", "ALL", "THIS", "NONE"};
 
     /**
@@ -126,13 +139,28 @@ public final class AgentPlanPrompt {
                filters.period 를 가장 자연스러운 값(오늘·최근 7일)으로 채우세요; 반복되는 문제·이슈·경향을 묻는 \
                요청("반복되는 문제 있어?", "리뷰 문제 정리")만 ISSUES 입니다. 둘 중 무엇인지 정하지 못하겠으면 ROWS 입니다 \
                — 행은 보고 나서 문제를 물을 수 있지만, "반복 문제 없음"은 리뷰를 보여 달라는 요청에 대한 답이 아닙니다.
+               - **문의 목록 질문에는 filters.inquiryIntent 를 반드시 정하세요.** 문의를 보여·확인해 달라는 요청 \
+               ("최근 문의 3개", "오늘 들어온 문의", "네이버 문의 보여줘", "답변 안 한 것만", "가장 오래된 문의")은 \
+               ROWS 이고, **판매자가 처리해야 할 일**을 묻는 요청("내가 답해야 할 문의", "오늘 처리할 문의 정리", \
+               "초안 준비된 것")은 WORKLOAD 이며, 숫자 하나만 묻는 요청("미답변 문의 몇 건이야")은 COUNT 입니다. \
+               답변을 준비·전송해 달라는 요청(requestedAction 이 NONE 이 아닐 때)과 「첫 번째 거」류 target 은 \
+               WORKLOAD 위에서만 동작합니다. 정하지 못하겠으면 ROWS 입니다. **filters.period 는 문의가 접수된 \
+               기간이고 ROWS 에만 적용됩니다** — 작업 큐(WORKLOAD)는 언제 들어왔든 지금 밀린 것 전부입니다. "오늘 \
+               들어온 문의" 는 ROWS + period=TODAY, "어제 온 문의 중 답해야 할 것" 은 ROWS + period=YESTERDAY + \
+               status=UNANSWERED, "오늘 내가 답해야 할 문의" 는 WORKLOAD 이고 period 는 null 입니다.
+               - **개수·순서·상태는 문장에 있으면 반드시 토큰으로 적으세요.** "1개만", "3개", "두 개" → filters.limit 에 \
+               정수; "가장 최근", "최신" → filters.order=NEWEST; "가장 오래된", "먼저 들어온" → OLDEST; "답변 안 한", \
+               "미답변" → filters.status=UNANSWERED, "답변한", "답변 완료" → ANSWERED, 둘 다 아니면 null. 이 값들은 \
+               question 문장에만 적으면 실행되지 않습니다 — 런타임은 filters 만 읽습니다. 리뷰(REVIEW_SIGNAL) 에도 \
+               limit·order 는 그대로 적용됩니다.
                - **이어지는 대화.** "지금까지의 진행" 에 `직전 작업 집합: <KIND> (기간:<PERIOD|없음>, \
-               채널:<CHANNEL|전체>, 평점:<ALL|LOW>, 상품 특정:<예|아니오>)` 줄이 있을 수 있습니다. 새 문장이 그 \
+               채널:<CHANNEL|전체>, 평점:<ALL|LOW>, 상태:<STATUS|없음>, 상품 특정:<예|아니오>)` 줄이 있을 수 있습니다. 새 문장이 그 \
                집합을 좁히거나·거르거나·넓히는 것이면("안 좋은 것만", "카페24만", "그 상품은?", "문의에서도 같은 \
                얘기 있어?", "상품별로 묶어줘") filters.scope 를 "WORKING_SET" 으로 두세요. 거르는 것이면 같은 \
                need kind 를 유지하고, 다른 영역으로 넘어가는 것이면 그 영역의 kind 를 추가하세요(리뷰 → \
                INQUIRY_VOLUME / REPEAT_PATTERN, 주문 → REVIEW_SIGNAL / INQUIRY_VOLUME). 새 기간을 말하지 않았으면 \
-               직전 기간을 그대로 filters.period 에 적으세요. **문장에 명사가 없다는 이유로 supported 를 false 로 \
+               직전 기간을 그대로 filters.period 에 적으세요. 직전 집합이 INQUIRIES 이면 filters.inquiryIntent 도 \
+               직전과 같게(행 목록이면 ROWS) 두고, 새 조건(채널·개수·상태)만 더하세요. **문장에 명사가 없다는 이유로 supported 를 false 로 \
                두지 마세요 — 직전 작업 집합이 곧 그 명사입니다.**
                - **리뷰·상품 집합에서 문의로 건너가는 질문.** 직전 작업 집합이 REVIEWS 또는 PRODUCTS 이고 "문의에서도 \
                같은 얘기 있어?" 처럼 같은 문제가 문의에도 있는지 물으면, **필수 need 는 INQUIRY_VOLUME 이고 \
@@ -174,6 +202,10 @@ public final class AgentPlanPrompt {
                filters.scope: %s | null
                filters.topic: %s | null
                filters.reviewIntent: %s | null
+               filters.inquiryIntent: %s | null
+               filters.limit: 1 이상의 정수 | null
+               filters.order: %s | null
+               filters.status: %s | null
                target.selector: %s
 
                반드시 아래 형태의 JSON 객체 하나만 출력하세요. 다른 텍스트, 설명, 코드펜스는 금지입니다.
@@ -197,14 +229,16 @@ public final class AgentPlanPrompt {
                 "rationale":"<한 문장>",
                 "requestedAction":"NONE",
                 "tone":null,
-                "filters":{"period":null,"rating":null,"channel":null,"scope":null,"topic":null,"reviewIntent":null},
+                "filters":{"period":null,"rating":null,"channel":null,"scope":null,"topic":null,"reviewIntent":null,
+                           "inquiryIntent":null,"limit":null,"order":null,"status":null},
                 "target":{"selector":"NONE","index":null}}
                """
                 .formatted(String.join(", ", SPECIALISTS), String.join(", ", NEED_KINDS),
                         String.join(", ", ENTITY_KINDS), String.join(" | ", REQUESTED_ACTIONS),
                         String.join(" | ", TONES), String.join(" | ", PERIODS), String.join(" | ", RATINGS),
                         String.join(" | ", CHANNELS), String.join(" | ", SCOPES), String.join(" | ", TOPICS),
-                        String.join(" | ", REVIEW_INTENTS), String.join(" | ", TARGET_SELECTORS));
+                        String.join(" | ", REVIEW_INTENTS), String.join(" | ", INQUIRY_INTENTS),
+                        String.join(" | ", ORDERS), String.join(" | ", STATUSES), String.join(" | ", TARGET_SELECTORS));
     }
 
     /**

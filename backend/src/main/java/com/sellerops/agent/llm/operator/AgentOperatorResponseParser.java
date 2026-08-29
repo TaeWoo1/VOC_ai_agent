@@ -154,7 +154,20 @@ public final class AgentOperatorResponseParser {
                 closedOr(node, "channel", AgentPlanPrompt.CHANNELS, null),
                 closedOr(node, "scope", AgentPlanPrompt.SCOPES, null),
                 closedOr(node, "topic", AgentPlanPrompt.TOPICS, null),
-                closedOr(node, "reviewIntent", AgentPlanPrompt.REVIEW_INTENTS, null));
+                closedOr(node, "reviewIntent", AgentPlanPrompt.REVIEW_INTENTS, null),
+                closedOr(node, "inquiryIntent", AgentPlanPrompt.INQUIRY_INTENTS, null),
+                limitOr(node, "limit"),
+                closedOr(node, "order", AgentPlanPrompt.ORDERS, null),
+                closedOr(node, "status", AgentPlanPrompt.STATUSES, null));
+    }
+
+    /** A positive integer row limit, clamped to {@link AgentPlanPrompt#MAX_LIMIT}; anything else is null. */
+    private static Integer limitOr(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        if (value == null || !value.isInt() || value.asInt() < 1) {
+            return null;
+        }
+        return Math.min(value.asInt(), AgentPlanPrompt.MAX_LIMIT);
     }
 
     private static PlanTarget target(JsonNode node) {
@@ -356,9 +369,10 @@ public final class AgentOperatorResponseParser {
      * "over what the previous turn produced"; the runtime, not this parser, knows what that was.
      */
     public record PlanFilters(String period, String rating, String channel, String scope, String topic,
-                              String reviewIntent) {
+                              String reviewIntent, String inquiryIntent, Integer limit, String order,
+                              String status) {
         public static PlanFilters none() {
-            return new PlanFilters(null, null, null, null, null, null);
+            return new PlanFilters(null, null, null, null, null, null, null, null, null, null);
         }
     }
 

@@ -54,6 +54,8 @@ export interface OperatorRuntimeDeps {
   readonly planner?: Planner;
   /** Defaults to the Spring judge with the rule judge beneath it. */
   readonly judge?: EvidenceJudge;
+  /** Query Accuracy v1: the tenant key under which the judge's learned "capability off" state is shared across runs. */
+  readonly judgeMemoKey?: string;
   readonly limits?: OperatorBudgetLimits;
   /** Injectable clock, so a budget deadline is deterministic in tests. */
   readonly now?: () => number;
@@ -115,7 +117,7 @@ export class OperatorAgentRuntime {
       evidence,
       planner: this.deps.planner ?? new LlmInvestigationPlanner(this.deps.operator),
       judge: this.deps.judge
-        ?? new SpringEvidenceJudge(this.deps.operator, new RuleEvidenceJudge(), threadId),
+        ?? new SpringEvidenceJudge(this.deps.operator, new RuleEvidenceJudge(), threadId, this.deps.judgeMemoKey),
       budget,
       // The thread IS the run on this surface, and it is what the quota counts as one.
       runId: threadId,

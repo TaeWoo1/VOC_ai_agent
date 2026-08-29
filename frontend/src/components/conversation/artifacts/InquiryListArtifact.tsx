@@ -13,6 +13,7 @@ const STATE: Record<InquiryGroupKey, { word: string; tone: StatusTone }> = {
   NEEDS_CLARIFICATION: { word: "되묻는 초안", tone: "warn" },
   KNOWLEDGE_MISSING: { word: "답변 기준 필요", tone: "warn" },
   UNANSWERED: { word: "답변 필요", tone: "warn" },
+  ANSWERED: { word: "답변함", tone: "good" },
 };
 
 export function InquiryListArtifact({ artifact }: { artifact: InquiryList }) {
@@ -30,7 +31,7 @@ export function InquiryListArtifact({ artifact }: { artifact: InquiryList }) {
           ) : null}
           <ul className="divide-y divide-line/70">
             {group.items.map((item) => (
-              <li key={item.workItemId}>
+              <li key={item.workItemId ?? item.inquiryId}>
                 <WorkItem
                   state={STATE[group.key].word}
                   tone={STATE[group.key].tone}

@@ -79,6 +79,11 @@ export interface InquiryWorkloadArgs {
   /** Narrow to one channel (closed code). A data filter over rows already read, not routing. */
   readonly channel?: string | null;
   readonly maxDetailReads?: number;
+  /** Query Accuracy v1: receipt window (inclusive ISO dates), order and row limit — applied to the rows read. */
+  readonly from?: string | null;
+  readonly to?: string | null;
+  readonly order?: "NEWEST" | "OLDEST" | null;
+  readonly limit?: number | null;
 }
 
 /** Does this row's own subject (and body, when read) fall under the topic? */
@@ -122,11 +127,17 @@ export async function listInquiryWorkload(
   const topic = args.topic ?? null;
 
   const channel = args.channel ? args.channel.toUpperCase() : null;
-  const rows: InquiryQueueItem[] = [...open.content, ...proposed.content]
+  const from = args.from ?? null;
+  const to = args.to ?? null;
+  const oldestFirst = args.order !== "NEWEST";
+  const all: InquiryQueueItem[] = [...open.content, ...proposed.content]
     .filter((r) => !channel || (r.channelCode ?? "").toUpperCase() === channel)
+    .filter((r) => !from || r.receivedAt.slice(0, 10) >= from)
+    .filter((r) => !to || r.receivedAt.slice(0, 10) <= to)
     .filter((r) => !workItemIds || workItemIds.has(r.workItemId))
     .filter((r) => !productIds || (r.productId != null && productIds.has(r.productId)))
-    .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
+    .sort((a, b) => oldestFirst ? a.receivedAt.localeCompare(b.receivedAt) : b.receivedAt.localeCompare(a.receivedAt));
+  const rows = args.limit != null && args.limit >= 1 ? all.slice(0, args.limit) : all;
 
   let detailReads = 0;
   let truncated = false;

@@ -1,0 +1,228 @@
+/**
+ * The customer's inquiries as ROWS (Query Accuracy v1, 2026-08-28) — 「최근 문의 3개」, 「오늘 들어온 문의」,
+ * 「오늘 네이버 문의 중 최근 2개」, 「답변 안 한 것만」.
+ *
+ * <b>Not the work queue.</b> {@link readInquiryWorkload} answers 「내가 답해야 할 일」 over work-item phases;
+ * this step answers "which inquiries came in" over the inquiries themselves, through one backend read
+ * (`GET /api/inquiries/rows`) whose every axis is a closed token the planner chose: window · channel ·
+ * status · order · limit. Nothing here reads the seller's sentence, and nothing here invents a default the
+ * spec did not state — the defaults are named once, below, and disclosed in the artifact's `scope`.
+ *
+ * <b>A follow-up refines the same read.</b> With `scope=WORKING_SET` over an INQUIRIES set this step
+ * re-reads with the previous set's window/channel/status as the base, the new tokens layered on top, then
+ * keeps only the rows that were in the set (by inquiry id) before applying order and limit — so 「그중
+ * 네이버만」 → 「그중 최근 1개」 → 「답변 안 한 것만」 each stand on the set the seller was looking at.
+ */
+import type { EvidenceRef, Finding } from "../state/OperatorState";
+import type { NeedState } from "../plan/InvestigationPlan";
+import type { SpecialistInput } from "./specialistInput";
+import { OPERATOR_TOOL } from "../tools/OperatorTools";
+import { attemptTool } from "../failure/SpecialistOutcome";
+import type { ToolFailure } from "../failure/SpecialistOutcome";
+import { eventOn, eventRange, observationDate } from "../scope/EvidenceTime";
+import type { Artifact, DateWindow, InquiryItem, InquiryListArtifact, PeriodToken } from "../../conversation/contract";
+import type { InquiryRowsParams, InquiryRowsResponse } from "../../spring/types";
+import { periodLabel, windowOf } from "../../conversation/period";
+import { log } from "../../log";
+
+/** The most rows a ROWS read fetches when no limit was asked for — the backend page ceiling. */
+export const ROWS_PAGE = 50;
+
+export interface RowsRead {
+  readonly findings: Finding[];
+  readonly evidence: EvidenceRef[];
+  readonly artifacts: Artifact[];
+  readonly notes: string[];
+  readonly failures: ToolFailure[];
+  readonly needState: NeedState;
+}
+
+type Status = "UNANSWERED" | "ANSWERED" | "ALL";
+type Order = "NEWEST" | "OLDEST";
+
+/** The QuerySpec this read executes — resolved from the plan's filters and, on a follow-up, the previous set. */
+export interface InquiryRowsSpec {
+  readonly window: DateWindow | null;
+  readonly channel: string | null;
+  readonly status: Status;
+  readonly order: Order;
+  readonly limit: number | null;
+  readonly previousIds: readonly string[] | null;
+}
+
+export function resolveRowsSpec(input: SpecialistInput): InquiryRowsSpec {
+  const filters = input.filters;
+  const previous = filters?.scope === "WORKING_SET" && input.workingSet?.kind === "INQUIRIES" ? input.workingSet : null;
+  const today = observationDate(input.referenceDate);
+  const token: PeriodToken | null = filters?.period ?? previous?.filters.period?.token ?? null;
+  const window = token ? windowOf(token, today) : previous?.filters.period ?? null;
+  const channel = filters?.channel ?? input.channelScope ?? previous?.filters.channelCode ?? null;
+  const status: Status = filters?.status ?? previous?.filters.status ?? "ALL";
+  const order: Order = filters?.order ?? "NEWEST";
+  const limit = filters?.limit ?? null;
+  return { window, channel, status, order, limit, previousIds: previous ? [...previous.ids] : null };
+}
+
+export async function readInquiryRows(input: SpecialistInput, needId: string): Promise<RowsRead> {
+  const { registry, budget, evidence, allowedTools } = input;
+  const pending = (reason: string): RowsRead => ({
+    findings: [], evidence: [], artifacts: [], notes: [reason], failures: [],
+    needState: { id: needId, status: "PENDING", evidenceIds: [] },
+  });
+  if (!budget.spend("tool")) {
+    return pending("문의 목록을 읽기 전에 예산이 끝났습니다.");
+  }
+  const spec = resolveRowsSpec(input);
+  // A follow-up over a set must see every row of that set before it narrows, so the read itself is not
+  // limited; the limit is applied after the intersection. A fresh read hands the limit to the backend.
+  const args: InquiryRowsParams = {
+    ...(spec.window ? { from: spec.window.from, to: spec.window.to } : {}),
+    ...(spec.channel ? { channel: spec.channel } : {}),
+    status: spec.status,
+    order: spec.order,
+    limit: spec.previousIds ? ROWS_PAGE : spec.limit ?? ROWS_PAGE,
+  };
+  const attempt = await attemptTool(
+    { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.LIST_INQUIRY_ROWS, needId },
+    () => registry.invoke<InquiryRowsResponse>(OPERATOR_TOOL.LIST_INQUIRY_ROWS, { ...args }, allowedTools),
+  );
+  if (!attempt.ok) {
+    return { ...pending("문의 목록을 읽지 못했습니다."), failures: [attempt.failure] };
+  }
+  const read = attempt.value;
+  const previousIds = spec.previousIds ? new Set(spec.previousIds) : null;
+  const inSet = previousIds ? read.items.filter((i) => previousIds.has(i.inquiryId)) : read.items;
+  const rows = spec.previousIds && spec.limit != null ? inSet.slice(0, spec.limit) : inSet;
+  const total = previousIds ? inSet.length : read.totalCount;
+
+  const refs: EvidenceRef[] = [];
+  const findings: Finding[] = [];
+  const notes: string[] = [];
+  const pageRef = evidence.add({
+    kind: "INQUIRY",
+    sourceTool: OPERATOR_TOOL.LIST_INQUIRY_ROWS,
+    args: { from: spec.window?.from ?? null, to: spec.window?.to ?? null, channel: spec.channel, status: spec.status, order: spec.order, limit: spec.limit },
+    locator: { count: total, label: "문의", ...(spec.channel ? { channelCode: spec.channel } : {}) },
+    events: spec.window
+      ? eventRange(spec.window.from, spec.window.to)
+      : rows.length > 0
+        ? eventRange(
+          rows.map((r) => r.receivedAt.slice(0, 10)).sort()[0]!,
+          rows.map((r) => r.receivedAt.slice(0, 10)).sort().at(-1)!,
+        )
+        : null,
+    coverage: "COVERED",
+    provenance: `inquiry-rows/${spec.status}:${spec.order}${spec.previousIds ? ":working-set" : ""}`,
+  });
+  refs.push(pageRef);
+  for (const item of rows) {
+    refs.push(evidence.add({
+      kind: "INQUIRY",
+      sourceTool: OPERATOR_TOOL.LIST_INQUIRY_ROWS,
+      args: { inquiryId: item.inquiryId },
+      locator: {
+        inquiryId: item.inquiryId, ...(item.workItemId ? { workItemId: item.workItemId } : {}),
+        ...(item.channelCode ? { channelCode: item.channelCode } : {}),
+        ...(item.productId ? { productId: item.productId } : {}),
+        ...(item.productName ? { productName: item.productName } : {}),
+        status: item.status, label: item.status,
+      },
+      events: eventOn(item.receivedAt.slice(0, 10)),
+      coverage: "COVERED",
+      provenance: "inquiry-rows/item",
+    }));
+  }
+
+  const toItem = (i: InquiryRowsResponse["items"][number]): InquiryItem => ({
+    workItemId: i.workItemId ?? null, inquiryId: i.inquiryId, channelCode: i.channelCode, channelNameKo: i.channelNameKo,
+    receivedAt: i.receivedAt, phase: i.phase ?? "", status: i.status, title: i.title,
+    productId: i.productId, productName: i.productName, answerBasis: null,
+    sourceSubtype: i.sourceSubtype ?? null, executableIdentity: i.executableIdentity ?? "NONE",
+    to: `/inquiries/${i.inquiryId}`,
+  });
+  // The seller asked for an ORDER, so the rows stay in it: consecutive runs of the same answered state
+  // become one group each (the group key is what names a row's state on screen), never a re-sort.
+  const groups: Array<{ key: "UNANSWERED" | "ANSWERED"; label: string; items: InquiryItem[] }> = [];
+  for (const r of rows) {
+    const key = r.status === "UNANSWERED" ? "UNANSWERED" : "ANSWERED";
+    const last = groups.at(-1);
+    if (last && last.key === key) last.items.push(toItem(r));
+    else groups.push({ key, label: key === "UNANSWERED" ? "답변 필요" : "답변함", items: [toItem(r)] });
+  }
+
+  const title = rowsTitle(spec);
+  findings.push({
+    findingId: `f-${pageRef.evidenceId}`,
+    specialist: "INQUIRY_OPS",
+    statement: rowsStatement(spec, rows.length, total),
+    evidenceIds: [pageRef.evidenceId],
+    confidence: "NEEDS_REVIEW",
+    verdict: null,
+    surfaceLink: "/inquiries",
+    needId,
+  });
+  const list: InquiryListArtifact = {
+    artifactId: `a-${pageRef.evidenceId}`,
+    type: "INQUIRY_LIST",
+    title,
+    groups,
+    totalCount: total,
+    scope: { period: spec.window, channelCode: spec.channel, status: spec.status, order: spec.order, limit: spec.limit },
+    more: { label: "문의 화면에서 보기", to: "/inquiries", count: total },
+  };
+  log("inquiry_rows", {
+    window: spec.window?.token ?? "NONE", channel: spec.channel ?? "NONE", status: spec.status, order: spec.order,
+    limit: spec.limit ?? "NONE", rows: rows.length, total, workingSet: spec.previousIds != null,
+  });
+  return {
+    findings, evidence: refs, artifacts: [list], notes, failures: [],
+    needState: { id: needId, status: "SATISFIED", evidenceIds: refs.map((r) => r.evidenceId) },
+  };
+}
+
+function statusWord(status: Status): string {
+  return status === "UNANSWERED" ? "답변 안 한 " : status === "ANSWERED" ? "답변한 " : "";
+}
+
+/** Closed channel vocabulary → seller word. An unknown code produces NO word rather than the token. */
+const CHANNEL_WORD: Record<string, string> = { NAVER: "네이버", COUPANG: "쿠팡", CAFE24: "카페24" };
+
+function rowsTitle(spec: InquiryRowsSpec): string {
+  const period = spec.window ? `${periodLabel(spec.window.token ?? null)} ` : "";
+  const channel = spec.channel && CHANNEL_WORD[spec.channel.toUpperCase()] ? `${CHANNEL_WORD[spec.channel.toUpperCase()]} ` : "";
+  const which = spec.limit != null ? `${spec.order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${spec.limit}건` : "문의";
+  return `${period}${channel}${statusWord(spec.status)}${which}`.trim();
+}
+
+/** The scope of a ROWS list as its artifact carries it — what the headline is built from. */
+export interface RowsScopeWords {
+  readonly period: DateWindow | null;
+  readonly channelCode: string | null;
+  readonly status: Status;
+  readonly order: Order;
+  readonly limit: number | null;
+}
+
+/**
+ * ONE sentence for a ROWS read, shared by the finding and the conversation headline so the two can never
+ * say the same fact twice in different words (the zero case has no number for the dedupe rule to match on).
+ */
+export function inquiryRowsSentence(scope: RowsScopeWords, shown: number, total: number, refine: boolean,
+  breakdown: { unanswered: number; answered: number } | null = null): string {
+  const period = scope.period ? `${periodLabel(scope.period.token ?? null)} 들어온 ` : "";
+  const channel = scope.channelCode && CHANNEL_WORD[scope.channelCode.toUpperCase()] ? `${CHANNEL_WORD[scope.channelCode.toUpperCase()]} ` : "";
+  const subject = `${refine ? "방금 본 문의 중 " : ""}${period}${channel}${statusWord(scope.status)}문의`;
+  if (total === 0) return `${subject}는 없습니다.`;
+  const which = scope.limit != null && shown < total
+    ? ` 그중 ${scope.order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${shown}건입니다.` : "";
+  const mix = !which && scope.status === "ALL" && breakdown && breakdown.unanswered > 0 && breakdown.answered > 0
+    ? ` (답변 필요 ${breakdown.unanswered}건 · 답변함 ${breakdown.answered}건)` : "";
+  return `${subject}는 ${total}건입니다${mix}.${which}`;
+}
+
+function rowsStatement(spec: InquiryRowsSpec, shown: number, total: number): string {
+  return inquiryRowsSentence(
+    { period: spec.window, channelCode: spec.channel, status: spec.status, order: spec.order, limit: spec.limit },
+    shown, total, spec.previousIds != null,
+  );
+}

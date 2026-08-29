@@ -251,4 +251,31 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
 
     /** The existing inquiry for an external key, when present — used by import reconciliation. */
     Optional<Inquiry> findByOrgIdAndChannelIdAndExternalId(UUID orgId, UUID channelId, String externalId);
+
+    /**
+     * Query Accuracy v1 (2026-08-28): the customer's inquiries as ROWS — the org's ACTIVE, REAL inquiries
+     * in a receipt window, optionally one channel and one status, in the caller's order. This is the read
+     * behind 「최근 문의 3개」 / 「오늘 네이버 문의」 / 「답변 안 한 것만」; it is NOT the work queue
+     * ({@code InquiryWorkItem}), which answers 「내가 답해야 할 일」 and lives in {@code InquiryQueueService}.
+     * The window bounds are always supplied (the service substitutes the epoch / far future), so the
+     * query never depends on a nullable timestamp parameter.
+     */
+    @Query("select q from Inquiry q where q.orgId = :orgId"
+            + " and (:channelId is null or q.channelId = :channelId)"
+            + " and (:status is null or q.status = :status)"
+            + " and q.receivedAt >= :from and q.receivedAt < :toExclusive"
+            + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE)
+    List<Inquiry> findRowsInWindow(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+                                   @Param("status") String status, @Param("from") Instant from,
+                                   @Param("toExclusive") Instant toExclusive, Pageable pageable);
+
+    /** The count that pairs with {@link #findRowsInWindow} — same predicate, so N건 matches the rows. */
+    @Query("select count(q) from Inquiry q where q.orgId = :orgId"
+            + " and (:channelId is null or q.channelId = :channelId)"
+            + " and (:status is null or q.status = :status)"
+            + " and q.receivedAt >= :from and q.receivedAt < :toExclusive"
+            + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE)
+    long countRowsInWindow(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+                           @Param("status") String status, @Param("from") Instant from,
+                           @Param("toExclusive") Instant toExclusive);
 }

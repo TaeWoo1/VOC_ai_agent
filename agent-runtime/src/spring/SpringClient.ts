@@ -25,6 +25,8 @@ import type {
   ConfirmPublishRequest,
   InquiryDetail,
   InquiryQueueResponse,
+  InquiryRowsParams,
+  InquiryRowsResponse,
   IssueContext,
   IssueEvidenceSummary,
   IssueTrend,
@@ -83,6 +85,8 @@ export interface SpringClient {
   /** Read-only fail-closed status of the external reply-send path. */
   getPublishCapability(): Promise<PublishCapabilityView>;
   listInquiries(params: ListInquiriesParams): Promise<InquiryQueueResponse>;
+  /** Query Accuracy v1: the customer's inquiries as rows — window · channel · status · order · limit. */
+  listInquiryRows(params: InquiryRowsParams): Promise<InquiryRowsResponse>;
   getInquiryDetail(workItemId: string): Promise<InquiryDetail>;
   proposeInquiry(workItemId: string): Promise<ProposalResult>;
   saveDraft(workItemId: string, request: ReplyDraftRequest): Promise<ReplyDraftView>;
@@ -189,6 +193,18 @@ export class HttpSpringClient
     if (params.page != null) q.set("page", String(params.page));
     if (params.size != null) q.set("size", String(params.size));
     return this.request<InquiryQueueResponse>("GET", `/api/inquiries?${q.toString()}`);
+  }
+
+  async listInquiryRows(params: InquiryRowsParams): Promise<InquiryRowsResponse> {
+    const q = new URLSearchParams();
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    if (params.channel) q.set("channel", params.channel);
+    if (params.status) q.set("status", params.status);
+    if (params.order) q.set("order", params.order);
+    if (params.limit != null) q.set("limit", String(params.limit));
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<InquiryRowsResponse>("GET", `/api/inquiries/rows${suffix}`);
   }
 
   async getInquiryDetail(workItemId: string): Promise<InquiryDetail> {
@@ -476,6 +492,7 @@ export class HttpSpringClient
     if (params.channel) q.set("channel", params.channel);
     if (params.productId) q.set("productId", params.productId);
     if (params.size != null) q.set("size", String(params.size));
+    if (params.order) q.set("order", params.order);
     const suffix = q.toString() ? `?${q.toString()}` : "";
     return this.request<RecentReviewsResponse>("GET", `/api/reviews/recent${suffix}`);
   }

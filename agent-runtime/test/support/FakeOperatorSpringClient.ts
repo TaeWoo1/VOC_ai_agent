@@ -410,12 +410,17 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     if (!found) {
       throw new SpringApiError(404, "HTTP_404", "backend request failed (GET /api/reviews/recent)");
     }
+    // Query Accuracy v1: the fake honours order the way the backend does — the seeded rows are newest-
+    // first; OLDEST reverses by writtenOn before the page is cut.
+    const ordered = params.order === "OLDEST"
+      ? [...found.items].sort((a, b) => (a.writtenOn ?? "").localeCompare(b.writtenOn ?? ""))
+      : found.items;
     return {
       ...found,
       from: params.from ?? found.from,
       to: params.to ?? found.to,
       negativeOnly: params.negativeOnly ?? found.negativeOnly,
-      items: found.items.slice(0, params.size ?? found.items.length),
+      items: ordered.slice(0, params.size ?? ordered.length),
     };
   }
 

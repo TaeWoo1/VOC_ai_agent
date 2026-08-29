@@ -598,7 +598,12 @@ Overview는 `/overview`, panel은 같은 thread. A–L 증명·free-language QA�
 intent 바인딩(계정·채널·identity·operation·mode·만료·단일 사용) + v1→v2 회귀 테스트, Cafe24 per-review 중복 POST 펜스
 (`ALREADY_EXECUTED`), fake freshness 3건, `filters.reviewIntent` plan token(+ 라이브 planner 녹음 2건), Coupang capability 펜스,
 서버측 `NOT_MARKETPLACE_OBJECT`, FILE_UPLOAD 의미, 홈 shortcut 제거, E는 QA org에서 GROUNDED v1→v2 증명. 남은 것은 **외부 라이브
-증명뿐**).
+증명뿐**). **§25 Query Accuracy v1(08-29)**: 조회 정확도 진단에서 planner는 6/6 문장을 맞게 읽었고 의미는 전부
+**계획 이후**에 죽었다(`PlanFilters`에 limit·order·status 칸 없음, 휴리스틱 `wantsWorkload` 라우팅, period가 게이트에만 쓰이고
+읽기 인자가 아님, zod strip으로 channel 유실) ⇒ 프롬프트 v4의 닫힌 토큰 넷(`inquiryIntent ROWS|WORKLOAD|COUNT`·`limit`·
+`order`·`status`)이 **tool/backend 인자까지 그대로** 도달하고, 「최근 문의」는 새 `GET /api/inquiries/rows`(문의 자체),
+「내가 답해야 할 문의」는 작업 큐로 **명시 토큰**으로 갈라지며, ROWS는 항상 artifact + working set을 만들어 refine 체인이
+직전 집합 위에 선다; judge 꺼짐은 org당 한 번만 묻는다. Text-to-SQL 0 · 마켓플레이스 0 · WRITE 0 · 마이그레이션 0.
 
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은

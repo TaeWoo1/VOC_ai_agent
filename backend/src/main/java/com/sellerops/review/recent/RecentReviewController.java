@@ -38,7 +38,8 @@ public class RecentReviewController {
                                         @RequestParam(defaultValue = "false") boolean negativeOnly,
                                         @RequestParam(required = false) String channel,
                                         @RequestParam(required = false) UUID productId,
-                                        @RequestParam(required = false) Integer size) {
-        return service.recent(principal.orgId(), from, to, negativeOnly, channel, productId, size);
+                                        @RequestParam(required = false) Integer size,
+                                        @RequestParam(required = false) String order) {
+        return service.recent(principal.orgId(), from, to, negativeOnly, channel, productId, size, order);
     }
 }

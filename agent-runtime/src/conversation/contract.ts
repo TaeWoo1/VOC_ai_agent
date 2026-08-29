@@ -160,10 +160,11 @@ export interface ReviewListArtifact extends ArtifactBase {
   readonly more?: WorkspaceLink;
 }
 
-export type InquiryGroupKey = "DRAFT_READY" | "NEEDS_CLARIFICATION" | "KNOWLEDGE_MISSING" | "UNANSWERED";
+export type InquiryGroupKey = "DRAFT_READY" | "NEEDS_CLARIFICATION" | "KNOWLEDGE_MISSING" | "UNANSWERED" | "ANSWERED";
 
 export interface InquiryItem {
-  readonly workItemId: string;
+  /** The open/proposed work item, when one exists. A ROWS read shows answered inquiries too, and those have none. */
+  readonly workItemId: string | null;
   readonly inquiryId: string;
   readonly channelCode: string | null;
   readonly channelNameKo: string | null;
@@ -185,6 +186,17 @@ export interface InquiryListArtifact extends ArtifactBase {
   readonly groups: ReadonlyArray<{ readonly key: InquiryGroupKey; readonly label: string; readonly items: readonly InquiryItem[] }>;
   readonly totalCount: number;
   readonly more?: WorkspaceLink;
+  /**
+   * The QuerySpec a ROWS read executed (Query Accuracy v1) — absent on a WORKLOAD list. The working set
+   * copies it so a follow-up (「그중 네이버만」) refines the same read instead of starting a new one.
+   */
+  readonly scope?: {
+    readonly period: DateWindow | null;
+    readonly channelCode: string | null;
+    readonly status: "UNANSWERED" | "ANSWERED" | "ALL";
+    readonly order: "NEWEST" | "OLDEST";
+    readonly limit: number | null;
+  };
 }
 
 export interface ProductListArtifact extends ArtifactBase {
@@ -440,6 +452,18 @@ export interface PlanFilters {
    * across them (`ISSUES`). A closed plan token; absent ⇒ the legacy reading (period/rating decide).
    */
   readonly reviewIntent: "ROWS" | "ISSUES" | null;
+  /**
+   * Query Accuracy v1 (2026-08-28) — the typed QuerySpec the runtime executes VERBATIM. What an
+   * INQUIRY_VOLUME need is for: the customer's inquiries as rows (`ROWS`), the seller's work queue
+   * (`WORKLOAD`), or one number (`COUNT`). Absent ⇒ derived from the other spec fields, never from words.
+   */
+  readonly inquiryIntent: "ROWS" | "WORKLOAD" | "COUNT" | null;
+  /** How many rows the seller asked for (「1개만」, 「3개」). Clamped by the parser; null = the read's default page. */
+  readonly limit: number | null;
+  /** Which end of the window comes first. Absent ⇒ NEWEST. */
+  readonly order: "NEWEST" | "OLDEST" | null;
+  /** Which inquiries: still unanswered, already answered, or all. Absent ⇒ ROWS reads ALL. */
+  readonly status: "UNANSWERED" | "ANSWERED" | "ALL" | null;
 }
 
 export interface PlanTarget {
@@ -466,6 +490,9 @@ export interface WorkingSetView {
     readonly rating?: "ALL" | "LOW";
     readonly productIds?: readonly string[];
     readonly topic?: PlanFilters["topic"];
+    /** Query Accuracy v1: which inquiry read produced the set, and the status it was read with. */
+    readonly inquiryIntent?: "ROWS" | "WORKLOAD";
+    readonly status?: "UNANSWERED" | "ANSWERED" | "ALL";
   };
   /** Products the set is about, when known — the anchor for a cross-domain follow-up. */
   readonly productIds: readonly string[];

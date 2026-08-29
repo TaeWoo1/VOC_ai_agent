@@ -52,6 +52,8 @@ export const OPERATOR_TOOL = {
   LIST_RECENT_REVIEWS: "list_recent_reviews",
   GET_SALES_TREND: "get_sales_trend",
   LIST_INQUIRY_WORKLOAD: "list_inquiry_workload",
+  /* Query Accuracy v1 (2026-08-28). READ: the customer's inquiries as rows, every axis a closed token. */
+  LIST_INQUIRY_ROWS: "list_inquiry_rows",
   /* Channel-capability completion (2026-08-28). READ: four existing capability reads, one answer. */
   GET_CHANNEL_EXECUTION_CAPABILITY: "get_channel_execution_capability",
 } as const;
@@ -359,9 +361,9 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
     // row here, not an omission — an omitted channel is read as a zero by anything that counts what it
     // was given, and that is precisely the false calm the whole coverage vocabulary exists to prevent.
     // ---- Agentic Operating Workspace v2 ------------------------------------------------------
-    read(tool(async ({ from, to, negativeOnly, channel, productId, size }:
-      { from?: string; to?: string; negativeOnly?: boolean; channel?: string; productId?: string; size?: number }) => {
-      const response = await deps.operator.listRecentReviews({ from, to, negativeOnly, channel, productId, size });
+    read(tool(async ({ from, to, negativeOnly, channel, productId, size, order }:
+      { from?: string; to?: string; negativeOnly?: boolean; channel?: string; productId?: string; size?: number; order?: "NEWEST" | "OLDEST" }) => {
+      const response = await deps.operator.listRecentReviews({ from, to, negativeOnly, channel, productId, size, order });
       let accounts: RecentReviewsRead["accounts"] = [];
       if (freshnessInDoubt(response.coverage ?? [])) {
         const [channels, sellerAccounts] = await Promise.all([
@@ -386,6 +388,7 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         channel: z.enum(["NAVER", "COUPANG", "CAFE24"]).optional(),
         productId: z.string().min(1).optional(),
         size: z.number().int().min(1).max(50).optional(),
+        order: z.enum(["NEWEST", "OLDEST"]).optional(),
       }),
     })),
 
@@ -416,10 +419,11 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
       }),
     })),
 
-    read(tool(async ({ productIds, workItemIds, topic, maxDetailReads }:
-      { productIds?: string[]; workItemIds?: string[]; topic?: string; maxDetailReads?: number }) =>
+    read(tool(async ({ productIds, workItemIds, topic, maxDetailReads, channel, from, to, order, limit }:
+      { productIds?: string[]; workItemIds?: string[]; topic?: string; maxDetailReads?: number; channel?: string;
+        from?: string; to?: string; order?: "NEWEST" | "OLDEST"; limit?: number }) =>
       listInquiryWorkload(deps.inquiry, {
-        productIds, workItemIds, maxDetailReads,
+        productIds, workItemIds, maxDetailReads, channel, from, to, order, limit,
         topic: (topic ?? null) as Parameters<typeof listInquiryWorkload>[1]["topic"],
       }), {
       name: OPERATOR_TOOL.LIST_INQUIRY_WORKLOAD,
@@ -432,6 +436,31 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         workItemIds: z.array(z.string().min(1)).max(50).optional(),
         topic: z.enum(["SHIPPING", "EXCHANGE_RETURN", "PRODUCT_SPEC", "USAGE", "OTHER"]).optional(),
         maxDetailReads: z.number().int().min(0).max(WORKLOAD_DETAIL_CAP).optional(),
+        // Query Accuracy v1: the QuerySpec axes. Named here so the schema cannot strip them — a filter
+        // the planner set and the tool never saw was the defect this package closes.
+        channel: z.enum(["NAVER", "COUPANG", "CAFE24"]).optional(),
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        order: z.enum(["NEWEST", "OLDEST"]).optional(),
+        limit: z.number().int().min(1).max(50).optional(),
+      }),
+    })),
+
+    read(tool(async ({ from, to, channel, status, order, limit }:
+      { from?: string; to?: string; channel?: string; status?: "UNANSWERED" | "ANSWERED" | "ALL"; order?: "NEWEST" | "OLDEST"; limit?: number }) =>
+      deps.inquiry.listInquiryRows({ from, to, channel, status, order, limit }), {
+      name: OPERATOR_TOOL.LIST_INQUIRY_ROWS,
+      description:
+        "고객 문의 행 목록 — 기간·채널·상태(미답변/답변/전체)·순서(최신/오래된)·개수로 좁힌다. '최근 문의 3개', "
+        + "'오늘 들어온 문의', '답변 안 한 것만' 류 질문의 출처. 판매자가 처리할 일(작업 큐)이 아니라 문의 자체다. "
+        + "필요한 정보: INQUIRY_VOLUME.",
+      schema: z.object({
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        channel: z.enum(["NAVER", "COUPANG", "CAFE24"]).optional(),
+        status: z.enum(["UNANSWERED", "ANSWERED", "ALL"]).optional(),
+        order: z.enum(["NEWEST", "OLDEST"]).optional(),
+        limit: z.number().int().min(1).max(50).optional(),
       }),
     })),
 
