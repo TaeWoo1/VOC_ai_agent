@@ -9,6 +9,7 @@ import com.sellerops.agent.quota.QuotaDecision;
 import com.sellerops.common.ApiException;
 import com.sellerops.common.MarkupText;
 import com.sellerops.inquiry.Inquiry;
+import com.sellerops.knowledge.KnowledgeTopic;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.draft.dto.GeneratedDraftView;
@@ -237,10 +238,10 @@ public class InquiryDraftComposer {
             // do not know there is no basis, and answering "확인 후 안내드리겠습니다" to a question we
             // may be seconds from being able to answer is the deferral this product deleted.
             if (operational == null && style.hasUnknownFallback()) {
-                return approvedFallback(orgId, workItemId, actor, title, retrieved, basis, verdict,
+                return approvedFallback(orgId, workItemId, actor, title, retrieved, basis, verdict, askedTopic(inquiry),
                         style);
             }
-            return noBasis(retrieved, basis, verdict, operational);
+            return noBasis(retrieved, basis, verdict, askedTopic(inquiry), operational);
         }
 
         // Each branch names its own reason, because the three are not interchangeable to the person
@@ -281,7 +282,7 @@ public class InquiryDraftComposer {
             // is a promise with no author. The BASIS is reported as it was actually computed — this
             // question IS grounded, and overwriting that with NO_ANSWER_BASIS would be a second
             // false statement laid on top of the first — and the operational reason travels beside it.
-            return noBasis(retrieved, basis, verdict, unavailable);
+            return noBasis(retrieved, basis, verdict, askedTopic(inquiry), unavailable);
         }
 
         AgentDraftResponseParser.ParsedDraft parsed = written.get();
@@ -299,7 +300,9 @@ public class InquiryDraftComposer {
                 retrieved.passages(), retrieved.order());
         return new GeneratedDraftView(saved, DraftAuthorKind.MODEL.name(), retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
-                basis.actionKo(retrieved.state(), verdict.topicWord(), applicability),
+                basis.actionKo(retrieved.state(), verdict.topicWord(), applicability,
+                        retrieved.productOutcome(), retrieved.policyOutcome(), askedTopic(inquiry),
+                        retrieved.policyDeclares(askedTopic(inquiry))),
                 retrieved.productId(), views, company != null, null);
     }
 
@@ -360,6 +363,7 @@ public class InquiryDraftComposer {
                                                 InquiryEvidenceRetriever.InquiryEvidence retrieved,
                                                 AnswerBasisState basis,
                                                 SpecApplicability.Verdict verdict,
+                                                KnowledgeTopic asked,
                                                 AnswerStyleProfile style) {
         int base = drafts.currentVersion(workItemId);
         ReplyDraftView saved = drafts.saveAs(orgId, workItemId, actor, defaultTitle(inquiryTitle),
@@ -371,7 +375,8 @@ public class InquiryDraftComposer {
         return new GeneratedDraftView(saved, DraftAuthorKind.SELLER_APPROVED_FALLBACK.name(),
                 retrieved.state().name(), retrieved.state().messageKo(retrieved.scopes()),
                 basis.name(), basis.messageKo(),
-                basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability()),
+                basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
+                        retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked)),
                 retrieved.productId(), List.of(), false, null);
     }
 
@@ -384,10 +389,12 @@ public class InquiryDraftComposer {
     private static GeneratedDraftView noBasis(InquiryEvidenceRetriever.InquiryEvidence retrieved,
                                               AnswerBasisState basis,
                                               SpecApplicability.Verdict verdict,
+                                              KnowledgeTopic asked,
                                               String unavailableMessage) {
         return new GeneratedDraftView(null, null, retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
-                basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability()),
+                basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
+                        retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked)),
                 retrieved.productId(), List.of(), false, unavailableMessage);
     }
 
@@ -520,5 +527,16 @@ public class InquiryDraftComposer {
         String base = inquiryTitle == null || inquiryTitle.isBlank() ? "문의" : inquiryTitle.strip();
         String prefixed = "[답변] " + base;
         return prefixed.length() > 100 ? prefixed.substring(0, 100) : prefixed;
+    }
+
+    /**
+     * The one operating topic the customer's own words name, or null — the noun the gap line is
+     * allowed to use. Two topics (「반품 배송비」) name none: the line stays general rather than guess.
+     */
+    private static KnowledgeTopic askedTopic(Inquiry inquiry) {
+        java.util.Set<KnowledgeTopic> topics = KnowledgeTopic.of(
+                (inquiry.getTitle() == null ? "" : inquiry.getTitle()) + " "
+                        + (inquiry.getBody() == null ? "" : inquiry.getBody()));
+        return topics.size() == 1 ? topics.iterator().next() : null;
     }
 }

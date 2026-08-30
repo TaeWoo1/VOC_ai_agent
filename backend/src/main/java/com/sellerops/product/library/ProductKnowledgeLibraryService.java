@@ -2,6 +2,9 @@ package com.sellerops.product.library;
 
 import com.sellerops.common.ApiException;
 import com.sellerops.knowledge.KnowledgeRetriever;
+import com.sellerops.knowledge.KnowledgeTopic;
+import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.knowledge.KnowledgeText;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
@@ -16,6 +19,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -132,6 +136,21 @@ public class ProductKnowledgeLibraryService {
     @Transactional(readOnly = true)
     public KnowledgeSearchResponse search(UUID orgId, UUID productId, String query, int limit,
                                           KnowledgeVariantScope scope) {
+        return search(orgId, productId, RetrievalQuery.ofText(query), limit, scope);
+    }
+
+    /**
+     * The search, over the bounded candidates of one question (Retrieval &amp; Grounding Correctness v1).
+     *
+     * <p>Each candidate is ranked by the unchanged gates; the first one that yields an APPLICABLE
+     * passage answers. A lexical hit whose document is declared about another operating topic
+     * ({@link KnowledgeTopic}) is counted as rejected, not returned — 「배송 기간」 does not get the
+     * return policy because that policy mentions 반품 배송비. The response says which of the four
+     * outcomes this was and which form of the question found it.
+     */
+    @Transactional(readOnly = true)
+    public KnowledgeSearchResponse search(UUID orgId, UUID productId, RetrievalQuery question, int limit,
+                                          KnowledgeVariantScope scope) {
         Product product = requireProduct(orgId, productId);
         List<ProductKnowledgeSource> documents =
                 sources.findAllByOrgIdAndProductIdOrderByCreatedAtAsc(orgId, productId).stream()
@@ -159,17 +178,42 @@ public class ProductKnowledgeLibraryService {
         // The product's own name is handed in because it distinguishes no passage in its own library
         // and must not be able to admit one: a question that names the product would otherwise score
         // against every document that repeats the title.
+        Set<KnowledgeTopic> asked = KnowledgeTopic.of(question.text());
         List<KnowledgePassage> hits = new ArrayList<>();
-        for (KnowledgeRetriever.Hit<ProductKnowledgeChunk> hit
-                : KnowledgeRetriever.rank(query, candidates, product.getName())) {
-            ProductKnowledgeChunk chunk = hit.ref();
-            ProductKnowledgeSource source = byId.get(chunk.getSourceId());
-            hits.add(new KnowledgePassage(source.getId(), chunk.getId(), source.getSourceType(),
-                    source.getTitle(), chunk.getContent(), chunk.getOrdinal(),
-                    round(hit.coverage()), source.getAuthorName(), source.getSourceUrl(),
-                    source.getUpdatedAt(),
-                    source.getAuthoredOrigin(), variantNames.get(source.getVariantId())));
+        int rejected = 0;
+        int tried = 0;
+        String matchedBy = question.full();
+        for (RetrievalQuery.Candidate candidate : question.candidates()) {
+            tried++;
+            List<KnowledgePassage> found = new ArrayList<>();
+            int rejectedHere = 0;
+            for (KnowledgeRetriever.Hit<ProductKnowledgeChunk> hit
+                    : KnowledgeRetriever.rank(candidate.text(), candidates, product.getName())) {
+                ProductKnowledgeChunk chunk = hit.ref();
+                ProductKnowledgeSource source = byId.get(chunk.getSourceId());
+                // The document's declared topic comes from its title only — the body may mention
+                // 배송비 inside a return policy without being about shipping.
+                if (!KnowledgeTopic.applicable(asked, KnowledgeTopic.of(source.getTitle()))) {
+                    rejectedHere++;
+                    continue;
+                }
+                found.add(new KnowledgePassage(source.getId(), chunk.getId(), source.getSourceType(),
+                        source.getTitle(), chunk.getContent(), chunk.getOrdinal(),
+                        round(hit.coverage()), source.getAuthorName(), source.getSourceUrl(),
+                        source.getUpdatedAt(),
+                        source.getAuthoredOrigin(), variantNames.get(source.getVariantId())));
+            }
+            rejected += rejectedHere;
+            if (!found.isEmpty()) {
+                hits = found;
+                matchedBy = candidate.text();
+                break;
+            }
         }
+        RetrievalOutcome outcome = documents.isEmpty() ? RetrievalOutcome.ABSENT
+                : !hits.isEmpty() ? RetrievalOutcome.FOUND
+                : rejected > 0 ? RetrievalOutcome.NOT_APPLICABLE
+                : RetrievalOutcome.NO_RELEVANT_EVIDENCE;
         hits.sort(Comparator.comparingDouble(KnowledgePassage::score).reversed()
                 // Equal relevance: what the seller typed before what a channel page said before what
                 // a model read off an image (Knowledge Context v1-A). A tie-break, not a weight — it
@@ -181,8 +225,9 @@ public class ProductKnowledgeLibraryService {
                 .thenComparing(KnowledgePassage::title)
                 .thenComparingInt(KnowledgePassage::ordinal));
         int cap = Math.max(1, Math.min(limit <= 0 ? MAX_PASSAGES : limit, MAX_PASSAGES));
-        return new KnowledgeSearchResponse(productId, query, documents.size(), corpus.size(),
-                hits.size() > cap ? List.copyOf(hits.subList(0, cap)) : List.copyOf(hits));
+        return new KnowledgeSearchResponse(productId, matchedBy, documents.size(), corpus.size(),
+                hits.size() > cap ? List.copyOf(hits.subList(0, cap)) : List.copyOf(hits),
+                outcome, rejected, tried);
     }
 
     /** Rebuild one document's passages, through the collaborator every writer shares. */

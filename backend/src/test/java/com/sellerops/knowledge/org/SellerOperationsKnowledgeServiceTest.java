@@ -8,6 +8,8 @@ import com.sellerops.knowledge.org.dto.OrgKnowledgeSearchResponse;
 import com.sellerops.knowledge.org.dto.OrgKnowledgeView;
 import com.sellerops.organization.Organization;
 import com.sellerops.organization.OrganizationRepository;
+import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.RetrievalQuery;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -126,6 +128,51 @@ class SellerOperationsKnowledgeServiceTest {
         assertThat(service.search(otherOrg, "배송 언제 되나요", 5).passages()).isEmpty();
         assertThatThrownBy(() -> service.delete(otherOrg, mine.id()))
                 .hasMessageContaining("운영 정책");
+    }
+
+    // ── Retrieval & Grounding Correctness v1: the four outcomes, and the candidates that reach a rule.
+
+    @Test
+    @DisplayName("D. no rules at all → ABSENT")
+    void noRulesIsAbsent() {
+        assertThat(service.search(org, "배송은 며칠 걸리나요?", 5).outcome()).isEqualTo(RetrievalOutcome.ABSENT);
+    }
+
+    @Test
+    @DisplayName("E. a return rule that matches a shipping question lexically is NOT_APPLICABLE — not 「기준 없음」")
+    void existingRuleThatDoesNotApplyIsNotAbsence() {
+        // The rule really contains the question's words (배송, 기간): a lexical hit, declared about returns.
+        write(OrgKnowledgeType.EXCHANGE_REFUND_POLICY, "교환 반품 안내",
+                "반품 배송 기간은 수령 후 7일 이내이며 반품 배송비는 고객 부담입니다.");
+
+        OrgKnowledgeSearchResponse found = service.search(org, "배송 기간 얼마나 걸려요", 5);
+
+        assertThat(found.passages()).isEmpty();
+        assertThat(found.outcome()).isEqualTo(RetrievalOutcome.NOT_APPLICABLE);
+        assertThat(found.rejectedNotApplicable()).isGreaterThan(0);
+        assertThat(found.documentsSearched()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("F. rules exist but none has words for the question → NO_RELEVANT_EVIDENCE")
+    void missOverExistingRulesIsNotAbsence() {
+        write(OrgKnowledgeType.SHIPPING_POLICY, "배송 안내", "주문 후 영업일 기준 2일 안에 발송합니다.");
+        OrgKnowledgeSearchResponse found = service.search(org, "방수 되나요?", 5);
+        assertThat(found.outcome()).isEqualTo(RetrievalOutcome.NO_RELEVANT_EVIDENCE);
+    }
+
+    @Test
+    @DisplayName("a customer's shipping thread — title, greeting, body — still reaches the shipping rule")
+    void longQuestionReachesTheRuleThroughItsShorterForms() {
+        write(OrgKnowledgeType.SHIPPING_POLICY, "배송 기준",
+                "주문 후 영업일 기준 2일 안에 출고하며, 출고 후 1~2일 안에 도착합니다.");
+        RetrievalQuery question = RetrievalQuery.of(null, "배송 문의",
+                "안녕하세요. 어제 주문했는데 배송은 보통 며칠 걸리나요? 급해서 문의드립니다. 확인 부탁드립니다.");
+
+        OrgKnowledgeSearchResponse found = service.search(org, question, 5);
+
+        assertThat(found.outcome()).isEqualTo(RetrievalOutcome.FOUND);
+        assertThat(found.passages().get(0).title()).isEqualTo("배송 기준");
     }
 
     private OrgKnowledgeView write(OrgKnowledgeType type, String title, String body) {

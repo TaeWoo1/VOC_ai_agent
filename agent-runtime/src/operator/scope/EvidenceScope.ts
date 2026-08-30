@@ -149,6 +149,8 @@ const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
   // Seller Context v1-B: the registered company description is one checkable thing; its absence a gap.
   COMPANY_PROFILE: "DETAIL",
   COMPANY_PROFILE_GAP: "GAP",
+  PAST_ANSWER: "DETAIL",
+  PAST_ANSWER_GAP: "GAP",
   GROUPING_GAP: "GAP",
   // Agentic Operating Workspace v2: rows are a LIST, a window total is a COUNT, a missing human step
   // is a GAP — the same three shapes the rest of the table already uses.
@@ -177,6 +179,7 @@ const KIND_FLOOR: Record<InformationNeed["kind"], readonly Granularity[]> = {
   PRODUCT_KNOWLEDGE_DOC: ["DETAIL", "GAP"],
   POLICY: ["DETAIL", "GAP"],
   COMPANY_PROFILE: ["DETAIL", "GAP"],
+  PAST_ANSWER: ["DETAIL", "GAP"],
 };
 
 /** `acceptableKinds` speaks the EvidenceKind vocabulary; map it onto shapes. Unknown names are ignored. */
@@ -255,7 +258,11 @@ export function needScopeOf(
   // because the planner had called 「우리」 a product.
   // Seller Context v1-B: a COMPANY_PROFILE need is the company's for the same reason — the profile has no
   // product axis, so 「이 문의에 우리 업체 특성을 고려해서」 must not read it as ITEM-scoped and refuse it.
+  // Retrieval & Grounding Correctness v1: a PAST_ANSWER need is the company's memory, product-bound only
+  // when a product was named — an inquiry mention does not make it ITEM-scoped (the memory store has no
+  // inquiry axis; the inquiry being worked on is excluded, not selected).
   const entity: EntityScope = need.kind === "POLICY" || need.kind === "COMPANY_PROFILE" ? "ORG"
+    : need.kind === "PAST_ANSWER" ? (namesProduct ? "PRODUCT" : "ORG")
     : namesProduct ? "PRODUCT" : namesItem ? "ITEM" : "ORG";
 
   const channelMention = named.find((m) => m.kind === "CHANNEL")?.mention

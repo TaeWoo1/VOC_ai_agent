@@ -2,6 +2,9 @@ package com.sellerops.knowledge.org;
 
 import com.sellerops.common.ApiException;
 import com.sellerops.knowledge.KnowledgeRetriever;
+import com.sellerops.knowledge.KnowledgeTopic;
+import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.knowledge.KnowledgeText;
 import com.sellerops.knowledge.org.dto.OrgKnowledgePassage;
 import com.sellerops.knowledge.org.dto.OrgKnowledgeRequest;
@@ -12,6 +15,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.EnumSet;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -110,6 +115,17 @@ public class SellerOperationsKnowledgeService {
      */
     @Transactional(readOnly = true)
     public OrgKnowledgeSearchResponse search(UUID orgId, String query, int limit) {
+        return search(orgId, RetrievalQuery.ofText(query), limit);
+    }
+
+    /**
+     * The search over one question's bounded candidates, with the applicability gate — the same
+     * loop the product library runs (Retrieval &amp; Grounding Correctness v1). A rule's declared
+     * topic is its {@link OrgKnowledgeType} plus whatever its title names; a question about 세금계산서
+     * does not get the shipping policy because both mention 발송.
+     */
+    @Transactional(readOnly = true)
+    public OrgKnowledgeSearchResponse search(UUID orgId, RetrievalQuery question, int limit) {
         List<OrgKnowledgeSource> documents = sources.findAllByOrgIdOrderByCreatedAtAsc(orgId);
         List<OrgKnowledgeChunk> corpus = chunks.findAllByOrgId(orgId);
         Map<UUID, OrgKnowledgeSource> byId = new HashMap<>();
@@ -125,24 +141,80 @@ public class SellerOperationsKnowledgeService {
                         KnowledgeText.normalize(source.getTitle()) + chunk.getNormalized()));
             }
         }
+        Set<KnowledgeTopic> asked = KnowledgeTopic.of(question.text());
         List<OrgKnowledgePassage> hits = new ArrayList<>();
-        for (KnowledgeRetriever.Hit<OrgKnowledgeChunk> hit
-                : KnowledgeRetriever.rank(query, candidates, null)) {
-            OrgKnowledgeChunk chunk = hit.ref();
-            OrgKnowledgeSource source = byId.get(chunk.getSourceId());
-            hits.add(new OrgKnowledgePassage(source.getId(), chunk.getId(), source.getKnowledgeType(),
-                    source.getTitle(), chunk.getContent(), chunk.getOrdinal(), round(hit.coverage()),
-                    source.getAuthorName(), source.getSourceUrl(), source.getVersion(),
-                    source.getUpdatedAt()));
+        int rejected = 0;
+        int tried = 0;
+        String matchedBy = question.full();
+        for (RetrievalQuery.Candidate candidate : question.candidates()) {
+            tried++;
+            List<OrgKnowledgePassage> found = new ArrayList<>();
+            int rejectedHere = 0;
+            for (KnowledgeRetriever.Hit<OrgKnowledgeChunk> hit
+                    : KnowledgeRetriever.rank(candidate.text(), candidates, null)) {
+                OrgKnowledgeChunk chunk = hit.ref();
+                OrgKnowledgeSource source = byId.get(chunk.getSourceId());
+                if (!KnowledgeTopic.applicable(asked, declaredTopics(source))) {
+                    rejectedHere++;
+                    continue;
+                }
+                found.add(new OrgKnowledgePassage(source.getId(), chunk.getId(), source.getKnowledgeType(),
+                        source.getTitle(), chunk.getContent(), chunk.getOrdinal(), round(hit.coverage()),
+                        source.getAuthorName(), source.getSourceUrl(), source.getVersion(),
+                        source.getUpdatedAt()));
+            }
+            rejected += rejectedHere;
+            if (!found.isEmpty()) {
+                hits = found;
+                matchedBy = candidate.text();
+                break;
+            }
         }
+        RetrievalOutcome outcome = documents.isEmpty() ? RetrievalOutcome.ABSENT
+                : !hits.isEmpty() ? RetrievalOutcome.FOUND
+                : rejected > 0 ? RetrievalOutcome.NOT_APPLICABLE
+                : RetrievalOutcome.NO_RELEVANT_EVIDENCE;
         hits.sort(Comparator.comparingDouble(OrgKnowledgePassage::score).reversed()
                 // Ties resolve by document title then position, never by map iteration order: an
                 // answer that cites a different policy on every identical run is not evidence.
                 .thenComparing(OrgKnowledgePassage::title)
                 .thenComparingInt(OrgKnowledgePassage::ordinal));
         int cap = Math.max(1, Math.min(limit <= 0 ? MAX_PASSAGES : limit, MAX_PASSAGES));
-        return new OrgKnowledgeSearchResponse(query, documents.size(), corpus.size(),
-                hits.size() > cap ? List.copyOf(hits.subList(0, cap)) : List.copyOf(hits));
+        Set<KnowledgeTopic> declared = EnumSet.noneOf(KnowledgeTopic.class);
+        documents.forEach(d -> declared.addAll(declaredTopics(d)));
+        return new OrgKnowledgeSearchResponse(matchedBy, documents.size(), corpus.size(),
+                hits.size() > cap ? List.copyOf(hits.subList(0, cap)) : List.copyOf(hits),
+                outcome, rejected, tried, List.copyOf(declared));
+    }
+
+    /**
+     * What a rule declares itself to be about: its type, and whatever its title names. A type with no
+     * operating topic (공통 안내, 기타) declares nothing and is never rejected on topic.
+     */
+    static Set<KnowledgeTopic> declaredTopics(OrgKnowledgeSource source) {
+        Set<KnowledgeTopic> topics = EnumSet.noneOf(KnowledgeTopic.class);
+        KnowledgeTopic typed = topicOf(source.getKnowledgeType());
+        if (typed != null) {
+            topics.add(typed);
+        }
+        topics.addAll(KnowledgeTopic.of(source.getTitle()));
+        return topics;
+    }
+
+    /** The one-to-one part of the two vocabularies; the rest declare no topic. */
+    static KnowledgeTopic topicOf(OrgKnowledgeType type) {
+        if (type == null) {
+            return null;
+        }
+        return switch (type) {
+            case SHIPPING_POLICY -> KnowledgeTopic.SHIPPING;
+            case CANCELLATION_POLICY -> KnowledgeTopic.CANCELLATION;
+            case EXCHANGE_REFUND_POLICY -> KnowledgeTopic.EXCHANGE_RETURN;
+            case PAYMENT_POLICY -> KnowledgeTopic.PAYMENT;
+            case TAX_INVOICE -> KnowledgeTopic.TAX_INVOICE;
+            case CASH_RECEIPT -> KnowledgeTopic.CASH_RECEIPT;
+            case GENERAL_CS_FAQ, OTHER -> null;
+        };
     }
 
     /** Rebuild one rule's passages. Old passages go first, so a shortened policy shrinks. */

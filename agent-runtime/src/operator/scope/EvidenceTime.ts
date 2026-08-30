@@ -81,6 +81,8 @@ const DEMAND_OF: Record<NeedKind, TemporalDemand> = {
   PRODUCT_KNOWLEDGE_DOC: "CURRENT_STATE",
   POLICY: "CURRENT_STATE",
   COMPANY_PROFILE: "CURRENT_STATE",
+  // A remembered answer is dated by when it was sent; the need itself asks for what was said, not for a window.
+  PAST_ANSWER: "CURRENT_STATE",
   REPEAT_PATTERN: "PERIOD_EVENTS",
   REVIEW_SIGNAL: "PERIOD_EVENTS",
   CUSTOMER_HISTORY: "PERIOD_EVENTS",

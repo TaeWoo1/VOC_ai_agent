@@ -19,6 +19,7 @@
 import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorState";
 import type { NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
+import { outcomeOf } from "../../spring/types";
 import { eventRange } from "../scope/EvidenceTime";
 import { attemptTool } from "../failure/SpecialistOutcome";
 import type { ToolFailure } from "../failure/SpecialistOutcome";
@@ -258,27 +259,32 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
         allowedTools,
       );
       if (found.passages.length === 0) {
-        // <b>Two absences, two sentences.</b> Nothing written and nothing matching are different
-        // facts about the LIBRARY, and neither is a fact about the product. Collapsing them is how a
-        // gap in the seller's own notes gets reported back to them as "그런 건 없습니다".
-        const empty = found.documentsSearched === 0;
+        // <b>Three absences, three sentences</b> (Retrieval & Grounding Correctness v1). Nothing written,
+        // nothing covering the question, and something matching that is declared about another topic
+        // are different facts about the LIBRARY, and none is a fact about the product. The backend
+        // already asked the question in its bounded forms, so a miss here is a miss of the subject too
+        // — never 「해당하는 내용이 없습니다」 said of a library that was searched with a planner's sentence.
+        const outcome = outcomeOf(found);
         const ref = evidence.add({
           kind: "PRODUCT_KNOWLEDGE_GAP",
           sourceTool: OPERATOR_TOOL.SEARCH_PRODUCT_KNOWLEDGE,
           args: { productId, query },
-          locator: { productId, productName, facet: "KNOWLEDGE_DOC", label: query },
+          // The label is the seller-facing topic word, never the planner's sentence.
+          locator: { productId, productName, facet: "KNOWLEDGE_DOC", label: outcome === "ABSENT" ? "상품 지식 없음" : outcome === "NOT_APPLICABLE" ? "상품 지식 비적용" : "상품 지식 근거 없음", outcome },
           coverage: "COVERED",
-          provenance: `product-knowledge-library/${empty ? "EMPTY" : "NO_MATCH"}`,
+          provenance: `product-knowledge-library/${outcome}`,
         });
         refs.push(ref);
         findings.push({
           findingId: `f-${ref.evidenceId}`,
           specialist: "PRODUCT_OPS",
-          statement: empty
+          statement: outcome === "ABSENT"
             ? `${productName}에 대해 등록된 상품 지식이 아직 없습니다. `
               + "상품 화면에서 설명·FAQ·사용법을 추가하면 답변에 사용할 수 있습니다."
-            : `${productName}의 등록된 상품 지식(${found.documentsSearched}건)에는 `
-              + "이 질문에 해당하는 내용이 없습니다. (상품에 그런 내용이 없다는 뜻은 아닙니다.)",
+            : outcome === "NOT_APPLICABLE"
+              ? `${productName}에 관련 상품 지식은 등록되어 있지만, 이 질문에 적용할 근거로 확인되지는 않았습니다.`
+              : `${productName}의 등록된 상품 정보(${found.documentsSearched}건)에서 `
+                + "이 질문에 해당하는 근거를 찾지 못했습니다. (상품에 그런 내용이 없다는 뜻은 아닙니다.)",
           evidenceIds: [ref.evidenceId],
           confidence: "NEEDS_REVIEW",
           verdict: null,
@@ -287,7 +293,9 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
           needId: need.id,
         });
         needStates.push({ id: need.id, status: "UNSATISFIABLE", evidenceIds: [ref.evidenceId],
-          reason: empty ? "등록된 상품 지식이 없습니다." : "등록된 지식에 해당 내용이 없습니다." });
+          reason: outcome === "ABSENT" ? "등록된 상품 지식이 없습니다."
+            : outcome === "NOT_APPLICABLE" ? "등록된 상품 지식이 이 질문에 적용되지 않습니다."
+            : "등록된 상품 정보에서 이 질문의 근거를 찾지 못했습니다." });
         continue;
       }
       const cited: string[] = [];

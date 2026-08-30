@@ -19,8 +19,10 @@
 import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorState";
 import type { NeedState } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
+import { outcomeOf } from "../../spring/types";
 import type { SpecialistInput } from "./specialistInput";
-import type { OrgKnowledgeSearchResult, SellerProfileView } from "../../spring/types";
+import type {
+  AnswerMemorySearchResult, OrgKnowledgeSearchResult, SellerProfileView } from "../../spring/types";
 import type {
   CustomerMemorySearch, InboxSummary, InquiryQueueResponse, RepeatedInquiry,
 } from "../../spring/types";
@@ -55,6 +57,11 @@ const ORG_KNOWLEDGE_LABEL: Record<string, string> = {
  * carries five words no policy contains. Live, that sentence found nothing beside a shipping policy
  * whose title was 「배송 안내」. The noun is what the seller asked about; the rest was addressed to us.
  */
+/** The seller's topic word → the backend's `KnowledgeTopic` name, for reading `topicsDeclared`. */
+const TOPIC_ENUM: Record<string, string> = {
+  "배송": "SHIPPING", "교환·반품·환불": "EXCHANGE_RETURN", "주문 취소": "CANCELLATION", "세금계산서": "TAX_INVOICE",
+  "현금영수증": "CASH_RECEIPT", "결제": "PAYMENT",
+};
 const POLICY_TOPIC_WORDS: ReadonlyArray<readonly [RegExp, string, string]> = [
   [/배송|택배|출고|발송/, "배송", "배송"], [/교환|반품|환불/, "교환·반품·환불", "교환 반품 환불"],
   [/취소/, "주문 취소", "주문 취소"], [/세금계산서/, "세금계산서", "세금계산서"],
@@ -93,7 +100,7 @@ const QUEUE_PAGE = 100;
 const WAITING_DAYS = 30;
 
 /** The need kinds this specialist answers. */
-export const INQUIRY_NEEDS = ["INQUIRY_VOLUME", "CUSTOMER_HISTORY", "REPEAT_PATTERN", "POLICY", "COMPANY_PROFILE"] as const;
+export const INQUIRY_NEEDS = ["INQUIRY_VOLUME", "CUSTOMER_HISTORY", "REPEAT_PATTERN", "POLICY", "COMPANY_PROFILE", "PAST_ANSWER"] as const;
 /** Where the company's own description is written — the only link a profile finding may carry. */
 const COMPANY_SCREEN = "/settings/company";
 
@@ -459,6 +466,92 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
       continue;
     }
 
+    if (need.kind === "PAST_ANSWER") {
+      // <b>What this company actually answered before</b> (Retrieval & Grounding Correctness v1) — the
+      // `answer_memory` store, read through its own READ tool. Before this, 「예전에 뭐라고 답했어」 went
+      // to the customer-memory search, which holds signatures and no answer text, and reported nothing
+      // over a product with eight remembered answers. The query is the seller's sentence; the backend
+      // asks it in its bounded forms. A product anchor narrows to that product's answers plus the
+      // unbound ones; the inquiry being worked on is excluded, never selected.
+      if (!budget.spend("tool")) {
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      const product = input.resolved.find((e) => e.kind === "PRODUCT");
+      const focusInquiryId = focus?.ref.locator.inquiryId ?? null;
+      const query = (input.goalText ?? input.plannerGoal ?? need.question).slice(0, 400);
+      const attempt = await attemptTool(
+        { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.SEARCH_ANSWER_MEMORY, needId: need.id },
+        () => registry.invoke<AnswerMemorySearchResult>(
+          OPERATOR_TOOL.SEARCH_ANSWER_MEMORY,
+          { query, ...(product ? { productId: product.id, productName: product.label } : {}), ...(focusInquiryId ? { excludeInquiryId: focusInquiryId } : {}), limit: 3 },
+          allowedTools,
+        ),
+      );
+      if (!attempt.ok) {
+        failures.push(attempt.failure);
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      succeeded += 1;
+      const remembered = attempt.value;
+      const memoryOutcome = remembered.outcome ?? (remembered.memoriesSearched === 0 ? "ABSENT" : remembered.passages.length === 0 ? "NO_RELEVANT_EVIDENCE" : "FOUND");
+      if (remembered.passages.length === 0) {
+        const ref = evidence.add({
+          kind: "PAST_ANSWER_GAP",
+          sourceTool: OPERATOR_TOOL.SEARCH_ANSWER_MEMORY,
+          args: { query, ...(product ? { productId: product.id } : {}) },
+          locator: { ...(product ? { productId: product.id, productName: product.label } : {}), label: "과거 답변 없음" },
+          coverage: "COVERED",
+          provenance: `answer-memory/${memoryOutcome}`,
+        });
+        refs.push(ref);
+        const statement = memoryOutcome === "ABSENT"
+          ? "저장된 과거 답변이 아직 없습니다. 답변을 보내거나 승인하면 여기에 쌓입니다."
+          : "저장된 과거 답변 중 이 질문에 해당하는 것을 찾지 못했습니다.";
+        findings.push({
+          findingId: `f-${ref.evidenceId}`, specialist: "INQUIRY_OPS", statement,
+          evidenceIds: [ref.evidenceId], confidence: "NEEDS_REVIEW", verdict: null, surfaceLink: null,
+          claimsCoverageLimit: true, needId: need.id,
+        });
+        needStates.push({ id: need.id, status: "UNSATISFIABLE", evidenceIds: [ref.evidenceId],
+          reason: memoryOutcome === "ABSENT" ? "저장된 과거 답변이 없습니다." : "과거 답변 중 이 질문에 해당하는 것이 없습니다." });
+        continue;
+      }
+      const cited: string[] = [];
+      for (const passage of remembered.passages.slice(0, 3)) {
+        const ref = evidence.add({
+          kind: "PAST_ANSWER",
+          sourceTool: OPERATOR_TOOL.SEARCH_ANSWER_MEMORY,
+          args: { query, ...(product ? { productId: product.id } : {}) },
+          locator: {
+            ...(passage.productId ? { productId: passage.productId } : {}),
+            ...(passage.channelCode ? { channelCode: passage.channelCode } : {}),
+            label: passage.strengthLabel, memoryId: passage.memoryId,
+          },
+          ...(passage.updatedAt ? { events: eventOn(passage.updatedAt.slice(0, 10)) } : {}),
+          coverage: "COVERED",
+          provenance: `answer-memory/${passage.strength}`,
+        });
+        refs.push(ref);
+        cited.push(ref.evidenceId);
+        findings.push({
+          findingId: `f-${ref.evidenceId}`,
+          specialist: "INQUIRY_OPS",
+          // The seller's own past sentence, attributed by its strength — what was said, not what is true.
+          statement: `예전에 보낸 답변(${passage.strengthLabel}${passage.updatedAt ? `, ${passage.updatedAt.slice(0, 10)}` : ""}): ${passage.answerBody}`,
+          judgeStatement: `이 질문과 같은 주제로 회사가 예전에 보내거나 승인한 답변(${passage.strengthLabel})이 저장돼 있습니다.`,
+          evidenceIds: [ref.evidenceId],
+          confidence: "NEEDS_REVIEW",
+          verdict: null,
+          surfaceLink: null,
+          needId: need.id,
+        });
+      }
+      needStates.push({ id: need.id, status: "SATISFIED", evidenceIds: cited });
+      continue;
+    }
+
     if (need.kind === "CUSTOMER_HISTORY") {
       // <b>The anchor is checked BEFORE the call, and its absence is a reason rather than a 400.</b>
       // `/api/customer-memory/search` requires one of inquiryId / signatureKey / topic / productId and
@@ -655,22 +748,33 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
     succeeded += 1;
     const found = attempt.value;
     if (found.passages.length === 0) {
-      const registered = found.documentsSearched > 0;
+      // Three different facts, said as which (Retrieval & Grounding Correctness v1): no rule at all;
+      // rules, none covering the question; a rule that matched and is declared about another topic.
+      // The last is NOT 「기준 없음」 — telling the seller to register the rule again is how duplicates
+      // are made — and the gap's label says so, so the KNOWLEDGE_ENTRY step is offered only for ABSENT.
+      // Rules that exist but declare nothing about the asked topic are, for that topic, absence:
+      // 「등록된 세금계산서 기준이 아직 없습니다」 is the true sentence, and the register step is right.
+      const declared = found.topicsDeclared;
+      const topicEnum = TOPIC_ENUM[topic];
+      const outcome = outcomeOf(found) === "NO_RELEVANT_EVIDENCE" && declared && topicEnum && !declared.includes(topicEnum)
+        ? "ABSENT" : outcomeOf(found);
       const ref = evidence.add({
         kind: "ORG_POLICY_GAP",
         sourceTool: OPERATOR_TOOL.SEARCH_ORG_KNOWLEDGE,
         args: { query },
-        locator: { facet: "POLICY", label: `${topic} 기준 없음` },
+        locator: { facet: "POLICY", label: outcome === "ABSENT" ? `${topic} 기준 없음` : outcome === "NOT_APPLICABLE" ? `${topic} 기준 비적용` : `${topic} 근거 없음`, outcome },
         coverage: "COVERED",
-        provenance: `org-knowledge/${registered ? "NO_MATCH" : "EMPTY"}`,
+        provenance: `org-knowledge/${outcome}`,
       });
       refs.push(ref);
       findings.push({
         findingId: `f-${ref.evidenceId}`,
         specialist: "INQUIRY_OPS",
-        statement: registered
-          ? `등록된 운영 기준 중 ${topic}에 해당하는 내용이 아직 없습니다.`
-          : `등록된 ${topic} 기준이 아직 없습니다.`,
+        statement: outcome === "ABSENT"
+          ? `등록된 ${topic} 기준이 아직 없습니다.`
+          : outcome === "NOT_APPLICABLE"
+            ? `${topic} 기준은 등록되어 있지만, 이 문의에 적용할 근거로 확인되지는 않았습니다.`
+            : `등록된 운영 기준에서 이 질문에 해당하는 근거를 찾지 못했습니다.`,
         evidenceIds: [ref.evidenceId],
         confidence: "NEEDS_REVIEW",
         verdict: null,
@@ -680,7 +784,9 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
       });
       needStates.push({
         id: need.id, status: "UNSATISFIABLE", evidenceIds: [ref.evidenceId],
-        reason: registered ? "등록된 운영 기준이 이 질문을 다루지 않습니다." : "등록된 운영 기준이 없습니다.",
+        reason: outcome === "ABSENT" ? "등록된 운영 기준이 없습니다."
+          : outcome === "NOT_APPLICABLE" ? "등록된 운영 기준이 이 문의에 적용되지 않습니다."
+          : "등록된 운영 기준이 이 질문을 다루지 않습니다.",
       });
       continue;
     }

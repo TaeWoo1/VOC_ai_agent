@@ -774,13 +774,21 @@ function scopeForNeed(
  * 「문의:」 label). Neither is a report or a product question; the rule is a closed-token routing, the
  * same kind `inquiryIntent` already is.
  */
-export function policyRouted(ordered: readonly SpecialistName[], plan: Pick<InvestigationPlan, "informationNeeds">): SpecialistName[] {
+export function policyRouted(
+  ordered: readonly SpecialistName[],
+  plan: Pick<InvestigationPlan, "informationNeeds"> & Partial<Pick<InvestigationPlan, "entities">>,
+): SpecialistName[] {
   const needs = plan.informationNeeds;
   // Seller Context v1-B: COMPANY_PROFILE is the org's in exactly the way POLICY is — one org-keyed read
   // that no product narrows — so it routes by the same closed-token rule.
-  const orgOwned = (n: { readonly kind: string }) => n.kind === "POLICY" || n.kind === "COMPANY_PROFILE";
+  const orgOnly = (n: { readonly kind: string }) => n.kind === "POLICY" || n.kind === "COMPANY_PROFILE";
+  // Retrieval & Grounding Correctness v1: PAST_ANSWER is INQUIRY_OPS's read too, but a product the
+  // sentence named must be resolved FIRST (PRODUCT_OPS) so the memory search is anchored to it — the
+  // collapse to INQUIRY_OPS alone happens only when no product is named.
+  const orgOwned = (n: { readonly kind: string }) => orgOnly(n) || n.kind === "PAST_ANSWER";
   if (!needs.some(orgOwned)) return [...ordered];
-  if (needs.every(orgOwned)) return ["INQUIRY_OPS"];
+  const namesProduct = plan.entities?.unresolved.some((m) => m.kind === "PRODUCT") ?? false;
+  if (needs.every(orgOnly) || (needs.every(orgOwned) && !namesProduct)) return ["INQUIRY_OPS"];
   return ordered.includes("INQUIRY_OPS") ? [...ordered] : orderSpecialists([...ordered, "INQUIRY_OPS"]);
 }
 

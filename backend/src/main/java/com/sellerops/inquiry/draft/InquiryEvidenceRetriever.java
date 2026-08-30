@@ -2,7 +2,10 @@ package com.sellerops.inquiry.draft;
 
 import com.sellerops.common.MarkupText;
 import com.sellerops.inquiry.Inquiry;
+import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.knowledge.KnowledgeScope;
+import com.sellerops.knowledge.KnowledgeTopic;
 import com.sellerops.knowledge.memory.AnswerMemoryService;
 import com.sellerops.knowledge.memory.dto.AnswerMemoryPassage;
 import com.sellerops.knowledge.memory.dto.AnswerMemorySearchResponse;
@@ -162,7 +165,33 @@ public class InquiryEvidenceRetriever {
     public record InquiryEvidence(UUID productId, DraftKnowledgeState state,
                                   List<ScopedPassage> passages,
                                   OrderFact order,
-                                  int supersededMemories) {
+                                  int supersededMemories,
+                                  RetrievalOutcome productOutcome,
+                                  RetrievalOutcome policyOutcome,
+                                  List<KnowledgeTopic> policyTopicsDeclared) {
+
+        public InquiryEvidence(UUID productId, DraftKnowledgeState state, List<ScopedPassage> passages,
+                               OrderFact order, int supersededMemories,
+                               RetrievalOutcome productOutcome, RetrievalOutcome policyOutcome) {
+            this(productId, state, passages, order, supersededMemories, productOutcome, policyOutcome, List.of());
+        }
+
+        /** Whether the company registered ANY rule about this topic — the 「기준 없음」 fact per topic. */
+        public boolean policyDeclares(KnowledgeTopic topic) {
+            return topic != null && policyTopicsDeclared != null && policyTopicsDeclared.contains(topic);
+        }
+
+        /** The pre-outcome shape: lanes described only by the state and the passages. */
+        public InquiryEvidence(UUID productId, DraftKnowledgeState state, List<ScopedPassage> passages,
+                               OrderFact order, int supersededMemories) {
+            this(productId, state, passages, order, supersededMemories,
+                    productId == null ? RetrievalOutcome.ABSENT
+                            : state == DraftKnowledgeState.NO_LIBRARY ? RetrievalOutcome.ABSENT
+                            : passages.stream().anyMatch(p -> p.scope() == KnowledgeScope.PRODUCT)
+                                    ? RetrievalOutcome.FOUND : RetrievalOutcome.NO_RELEVANT_EVIDENCE,
+                    passages.stream().anyMatch(p -> p.scope() == KnowledgeScope.ORG_OPERATIONS)
+                            ? RetrievalOutcome.FOUND : RetrievalOutcome.ABSENT);
+        }
 
         /** The scopes that actually contributed, in the order the passages are in. */
         public Set<KnowledgeScope> scopes() {
@@ -213,7 +242,10 @@ public class InquiryEvidenceRetriever {
     public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry, KnowledgeVariantScope scope) {
         String title = MarkupText.toPlainText(inquiry.getTitle());
         String details = MarkupText.toPlainText(inquiry.getBody());
-        return retrieve(orgId, inquiry, query(title, details), OrderFactLookup.EXACT_ALLOWED, scope);
+        // The question in its bounded forms — title, subject, whole — never one glued string
+        // (Retrieval & Grounding Correctness v1): the absence gate judges each form on its own.
+        return retrieve(orgId, inquiry, RetrievalQuery.of(null, title, details),
+                OrderFactLookup.EXACT_ALLOWED, scope);
     }
 
     /**
@@ -246,13 +278,22 @@ public class InquiryEvidenceRetriever {
     /** The gather, with both the order-fact reach and the 규격 scope stated by the caller. */
     public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry, String query, OrderFactLookup lookup,
                                     KnowledgeVariantScope scope) {
+        return retrieve(orgId, inquiry, RetrievalQuery.ofText(query), lookup, scope);
+    }
+
+    /** The gather, over the question's bounded candidates. */
+    public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry, RetrievalQuery question,
+                                    OrderFactLookup lookup, KnowledgeVariantScope scope) {
         UUID productId = namedProductOrNull(orgId, inquiry.getProductId());
+        String query = question.full();
 
         List<ScopedPassage> productLane = new ArrayList<>();
         DraftKnowledgeState productVerdict = DraftKnowledgeState.NO_PRODUCT;
+        RetrievalOutcome productOutcome = RetrievalOutcome.ABSENT;
         if (productId != null) {
             KnowledgeSearchResponse found =
-                    productKnowledge.search(orgId, productId, query, MAX_PASSAGES, scope);
+                    productKnowledge.search(orgId, productId, question, MAX_PASSAGES, scope);
+            productOutcome = found.outcome();
             productVerdict = found.documentsSearched() == 0 ? DraftKnowledgeState.NO_LIBRARY
                     : found.passages().isEmpty() ? DraftKnowledgeState.NO_MATCH
                     : DraftKnowledgeState.GROUNDED;
@@ -264,7 +305,7 @@ public class InquiryEvidenceRetriever {
             }
         }
 
-        OrgKnowledgeSearchResponse policies = orgKnowledge.search(orgId, query, MAX_PASSAGES);
+        OrgKnowledgeSearchResponse policies = orgKnowledge.search(orgId, question, MAX_PASSAGES);
         List<ScopedPassage> policyLane = new ArrayList<>();
         for (OrgKnowledgePassage passage : policies.passages()) {
             policyLane.add(new ScopedPassage(KnowledgeScope.ORG_OPERATIONS, passage.title(),
@@ -275,7 +316,7 @@ public class InquiryEvidenceRetriever {
         // This inquiry's own answer is excluded: a reply approved on THIS work item must not come
         // back as precedent for the next version of itself.
         AnswerMemorySearchResponse remembered =
-                answerMemory.search(orgId, query, productId, inquiry.getId(), MAX_PASSAGES);
+                answerMemory.search(orgId, question, productId, inquiry.getId(), MAX_PASSAGES);
         List<ScopedPassage> memoryLane = new ArrayList<>();
         for (AnswerMemoryPassage passage : remembered.passages()) {
             memoryLane.add(new ScopedPassage(KnowledgeScope.PAST_ANSWER, headingFor(passage),
@@ -290,7 +331,8 @@ public class InquiryEvidenceRetriever {
         DraftKnowledgeState state =
                 groundedInCurrent ? DraftKnowledgeState.GROUNDED : productVerdict;
         return new InquiryEvidence(productId, state, merged,
-                orderFacts.read(orgId, inquiry, lookup), remembered.supersededByConflict());
+                orderFacts.read(orgId, inquiry, lookup), remembered.supersededByConflict(),
+                productOutcome, policies.outcome(), policies.topicsDeclared());
     }
 
     /** At most this many passages of the window may be a past answer. */

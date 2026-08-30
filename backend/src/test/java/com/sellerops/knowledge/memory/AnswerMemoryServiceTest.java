@@ -14,6 +14,8 @@ import com.sellerops.organization.OrganizationRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.library.ProductKnowledgeChunkRepository;
+import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.RetrievalQuery;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -179,6 +181,28 @@ class AnswerMemoryServiceTest {
         assertThat(row.getTopicSignature())
                 .doesNotContain("홍길동").doesNotContain("강남").doesNotContain("1234")
                 .contains("교환");
+    }
+
+    @Test
+    @DisplayName("a topic-less 「이 상품에 예전에 뭐라고 답했어」 lists that product's record; a topical miss stays a miss")
+    void topicLessQuestionBrowsesTheProductsRecord() {
+        UUID molding = product("QA 전선몰딩");
+        remember("inquiry-answer:m1", AnswerMemoryStrength.EXECUTOR_SENT_VERIFIED,
+                "반품 조건이 어떻게 되나요", "수령 후 7일 이내 미사용 상태에서만 반품이 가능합니다.",
+                "exchange_return_reply", molding);
+        remember("inquiry-answer:m2", AnswerMemoryStrength.IMPORTED_SELLER_ANSWER,
+                "배송 언제 오나요", "영업일 기준 2일 안에 발송됩니다.", "delivery_status_reply", molding);
+
+        AnswerMemorySearchResponse browsed = service.search(org,
+                RetrievalQuery.ofText("QA 전선몰딩 문의에 예전에 뭐라고 답했어?"), molding, "QA 전선몰딩", null, 3);
+        assertThat(browsed.outcome()).isEqualTo(RetrievalOutcome.FOUND);
+        assertThat(browsed.passages()).extracting(p -> p.strength())
+                .containsExactly(AnswerMemoryStrength.EXECUTOR_SENT_VERIFIED, AnswerMemoryStrength.IMPORTED_SELLER_ANSWER);
+
+        AnswerMemorySearchResponse miss = service.search(org,
+                RetrievalQuery.ofText("QA 전선몰딩 방수 문의에 예전에 뭐라고 답했어?"), molding, "QA 전선몰딩", null, 3);
+        assertThat(miss.outcome()).isEqualTo(RetrievalOutcome.NO_RELEVANT_EVIDENCE);
+        assertThat(miss.passages()).isEmpty();
     }
 
     private void remember(String originRef, AnswerMemoryStrength strength, String question,

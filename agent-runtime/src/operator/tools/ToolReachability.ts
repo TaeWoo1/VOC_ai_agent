@@ -207,6 +207,14 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     requires: ["NONE"],
   },
   {
+    // Retrieval & Grounding Correctness v1: a PAST_ANSWER need is met by reading the answers this org
+    // sent or approved — org-keyed like the rules; a resolved product only narrows, never gates.
+    specialist: "INQUIRY_OPS",
+    tool: OPERATOR_TOOL.SEARCH_ANSWER_MEMORY,
+    needKinds: ["PAST_ANSWER"],
+    requires: ["NONE"],
+  },
+  {
     // Seller Context v1-B: a COMPANY_PROFILE need is met by one org-keyed read of the seller's own
     // description — nothing to resolve first, and nothing a product could narrow.
     specialist: "INQUIRY_OPS",

@@ -14,6 +14,8 @@
  * decide to do on its own — which is exactly why the privileged plane is not on it.
  */
 import type {
+  AnswerMemorySearchParams,
+  AnswerMemorySearchResult,
   AgentJudgeView,
   AgentPlanView,
   CustomerMemorySearch,
@@ -134,6 +136,11 @@ export interface OperatorSpringClient {
    * reads, reachable from the Agent lane on demand (Knowledge Context v1-A). No product, no id.
    */
   searchOrgKnowledge?(query: string, limit?: number): Promise<OrgKnowledgeSearchResult>;
+  /**
+   * The answers this company actually sent or approved, narrowed to what answers `query` — `GET
+   * /api/answer-memory/search` (Retrieval & Grounding Correctness v1). READ; org-scoped by the bearer.
+   */
+  searchAnswerMemory?(params: AnswerMemorySearchParams): Promise<AnswerMemorySearchResult>;
   /**
    * The company as the seller registered it (Seller Context v1-B) — one bounded org-keyed READ, made only
    * on a turn whose plan declared a COMPANY_PROFILE need. Not an input to any prompt.

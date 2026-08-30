@@ -84,6 +84,10 @@ export type EvidenceKind =
   | "COMPANY_PROFILE"
   /** No 회사 정보 registered — its own fact, with the screen where it can be written. */
   | "COMPANY_PROFILE_GAP"
+  /** An answer this company actually sent or approved — `answer_memory`. What was said, never a current fact. */
+  | "PAST_ANSWER"
+  /** No remembered answer covers this question — ABSENT or NO_RELEVANT_EVIDENCE, said as which. */
+  | "PAST_ANSWER_GAP"
   /**
    * An axis the data cannot be cut along — "반복 문의에는 상품 정보가 없다".
    *
@@ -170,6 +174,10 @@ export interface EvidenceLocator {
   readonly status?: string;
   /** The saved reply-draft head's version on that inquiry, when one exists — a number, never its text. */
   readonly draftVersion?: number;
+  /** A remembered answer's row id (Retrieval & Grounding Correctness v1) — an id, never its text. */
+  readonly memoryId?: string;
+  /** What a retrieval established — `FOUND` · `ABSENT` · `NO_RELEVANT_EVIDENCE` · `NOT_APPLICABLE`. Closed vocabulary. */
+  readonly outcome?: string;
   /** Product-fact evidence: which key, and the source that stated it. Never free prose. */
   readonly factKey?: string;
   readonly factSource?: string;

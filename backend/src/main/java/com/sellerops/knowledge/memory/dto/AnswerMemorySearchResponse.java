@@ -1,5 +1,6 @@
 package com.sellerops.knowledge.memory.dto;
 
+import com.sellerops.knowledge.RetrievalOutcome;
 import java.util.List;
 
 /**
@@ -11,5 +12,15 @@ import java.util.List;
  * it looks like it never saw the older answer at all.
  */
 public record AnswerMemorySearchResponse(String query, int memoriesSearched, int supersededByConflict,
-                                         List<AnswerMemoryPassage> passages) {
+                                         List<AnswerMemoryPassage> passages, RetrievalOutcome outcome,
+                                         int candidatesTried) {
+
+    /** The pre-outcome shape: derives the outcome from the counts, as every caller used to. */
+    public AnswerMemorySearchResponse(String query, int memoriesSearched, int supersededByConflict,
+                                      List<AnswerMemoryPassage> passages) {
+        this(query, memoriesSearched, supersededByConflict, passages,
+                memoriesSearched == 0 ? RetrievalOutcome.ABSENT
+                        : passages.isEmpty() ? RetrievalOutcome.NO_RELEVANT_EVIDENCE : RetrievalOutcome.FOUND,
+                1);
+    }
 }

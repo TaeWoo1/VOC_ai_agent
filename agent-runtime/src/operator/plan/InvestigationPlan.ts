@@ -87,7 +87,13 @@ export type NeedKind =
    * read on the turn that asks about or wants to reason from it. Context, never evidence: no delivery,
    * refund, exchange, A/S or spec claim may rest on it, and a plan that merely lists or counts never needs it.
    */
-  | "COMPANY_PROFILE";
+  | "COMPANY_PROFILE"
+  /**
+   * 회사가 예전에 실제로 보냈거나 승인한 답변 (Retrieval & Grounding Correctness v1) — `answer_memory`, read
+   * through `search_answer_memory`. Distinct from CUSTOMER_HISTORY, which is the signature record of past
+   * cases and holds no answer text. A record of what was said, never a current fact.
+   */
+  | "PAST_ANSWER";
 
 export interface InformationNeed {
   readonly id: string;

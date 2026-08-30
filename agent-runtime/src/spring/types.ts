@@ -865,12 +865,65 @@ export interface KnowledgePassage {
  * nothing about this product; documents with no matching passage means they wrote about something
  * else. An answer that conflates them reports a gap in the library as a fact about the product.
  */
+/**
+ * What one retrieval established (Retrieval & Grounding Correctness v1). FOUND · ABSENT (no document to
+ * search) · NO_RELEVANT_EVIDENCE (documents, no covering passage) · NOT_APPLICABLE (lexical hits, every
+ * one declared about another operating topic). Optional on the wire for an older backend; `outcomeOf`
+ * derives the two-valued version from the counts when it is missing.
+ */
+export type RetrievalOutcome = "FOUND" | "ABSENT" | "NO_RELEVANT_EVIDENCE" | "NOT_APPLICABLE";
+
+export function outcomeOf(r: { readonly outcome?: RetrievalOutcome | null; readonly documentsSearched: number; readonly passages: readonly unknown[] }): RetrievalOutcome {
+  if (r.outcome) return r.outcome;
+  return r.documentsSearched === 0 ? "ABSENT" : r.passages.length === 0 ? "NO_RELEVANT_EVIDENCE" : "FOUND";
+}
+
 export interface KnowledgeSearchResult {
   readonly productId: string;
+  /** The form of the question that matched (a bounded candidate), or the whole question when none did. */
   readonly query: string;
   readonly documentsSearched: number;
   readonly passagesSearched: number;
   readonly passages: KnowledgePassage[];
+  readonly outcome?: RetrievalOutcome | null;
+  readonly rejectedNotApplicable?: number;
+  readonly candidatesTried?: number;
+}
+
+/** Mirror of `AnswerMemoryPassage` — an answer this company actually sent or approved. */
+export interface AnswerMemoryPassage {
+  readonly memoryId: string;
+  readonly topicSignature: string | null;
+  readonly topicCategory: string | null;
+  readonly answerTitle: string | null;
+  readonly answerBody: string;
+  readonly score: number;
+  readonly strength: "IMPORTED_SELLER_ANSWER" | "USER_APPROVED" | "EXECUTOR_SENT_VERIFIED" | string;
+  readonly strengthLabel: string;
+  readonly productId: string | null;
+  readonly channelCode: string | null;
+  readonly authorName: string | null;
+  readonly version: number;
+  readonly updatedAt: string | null;
+}
+
+/** Mirror of `AnswerMemorySearchResponse` — `GET /api/answer-memory/search`. */
+export interface AnswerMemorySearchResult {
+  readonly query: string;
+  readonly memoriesSearched: number;
+  readonly supersededByConflict: number;
+  readonly passages: AnswerMemoryPassage[];
+  readonly outcome?: RetrievalOutcome | null;
+  readonly candidatesTried?: number;
+}
+
+export interface AnswerMemorySearchParams {
+  readonly query: string;
+  readonly productId?: string;
+  /** The product's display name — discounted from the question, and what lets a topic-less question list the record. */
+  readonly productName?: string;
+  readonly excludeInquiryId?: string;
+  readonly limit?: number;
 }
 
 /* ─────────────── Knowledge Context v1-A (2026-08-29) — the company's operating rules, read on demand ─────────────── */
@@ -913,6 +966,11 @@ export interface OrgKnowledgeSearchResult {
   readonly documentsSearched: number;
   readonly passagesSearched: number;
   readonly passages: OrgKnowledgePassage[];
+  readonly outcome?: RetrievalOutcome | null;
+  readonly rejectedNotApplicable?: number;
+  readonly candidatesTried?: number;
+  /** Which operating topics the registered rules declare (`KnowledgeTopic` names) — the 「기준 없음」 fact per topic. */
+  readonly topicsDeclared?: string[];
 }
 
 /** One evidence row of a generated draft (mirror of `DraftEvidenceView`). `snippet` is never forwarded. */

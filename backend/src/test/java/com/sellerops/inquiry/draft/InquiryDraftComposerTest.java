@@ -667,6 +667,14 @@ class InquiryDraftComposerTest {
             return new KnowledgeSearchResponse(productId, query, documentsSearched,
                     documentsSearched, passages);
         }
+
+        /** The candidate form the composer now asks in — the stub answers it the same way. */
+        @Override
+        public KnowledgeSearchResponse search(UUID orgId, UUID productId,
+                                              com.sellerops.knowledge.RetrievalQuery question, int limit,
+                                              com.sellerops.product.library.KnowledgeVariantScope scope) {
+            return search(orgId, productId, question.full(), limit, scope);
+        }
     }
 
     /** A model that either writes a fixed draft or is off, recording exactly what it was shown. */

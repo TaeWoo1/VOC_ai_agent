@@ -39,7 +39,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v7";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v8";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -98,7 +98,7 @@ public final class AgentPlanPrompt {
     public static final String[] NEED_KINDS = {
         "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC", "POLICY",
         "CUSTOMER_HISTORY", "REVIEW_SIGNAL", "INQUIRY_VOLUME", "REPEAT_PATTERN", "ORDER_HISTORY",
-        "COMPANY_PROFILE",
+        "COMPANY_PROFILE", "PAST_ANSWER",
     };
 
     /** The closed set of entity kinds a mention may carry. */
@@ -129,6 +129,10 @@ public final class AgentPlanPrompt {
                있어", "우리 업체 특성을 고려해서" 처럼 회사 자체를 묻거나 참고하라고 할 때만 세우고(specialists 에 \
                INQUIRY_OPS, tools 에 get_seller_profile), 목록·개수·최근 문의·리뷰처럼 회사 소개가 필요 없는 질문에는 \
                세우지 마세요. 배송·환불·규격의 근거는 아닙니다.
+               - **회사가 예전에 실제로 보내거나 승인한 답변("예전에 비슷한 문의에 뭐라고 답했어", "과거 승인 답변 \
+               참고해서")은 PAST_ANSWER 입니다** — specialists 에 INQUIRY_OPS, tools 에 search_answer_memory. \
+               CUSTOMER_HISTORY 는 고객·문의·리뷰의 과거 **사례 기록**(같은 문제를 본 적이 있는지)이지 답변 본문이 \
+               아니므로, 답변 문장을 찾는 질문에 CUSTOMER_HISTORY 를 세우지 마세요.
                - 목록에 없는 specialist / tool / kind 이름을 만들어내지 마세요. 목록 밖 이름은 거부됩니다.
                - 목표가 지원 범위 밖이면 supported 를 false 로 두세요. 무엇을 묻는지 알 수 없으면 \
                clarificationNeeded 를 true 로 두고 무엇이 불명확한지 적으세요. 억지 계획보다 되묻는 편이 낫습니다.

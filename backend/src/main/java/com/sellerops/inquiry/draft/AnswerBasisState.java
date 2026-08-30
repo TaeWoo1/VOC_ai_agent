@@ -1,5 +1,8 @@
 package com.sellerops.inquiry.draft;
 
+import com.sellerops.knowledge.KnowledgeTopic;
+import com.sellerops.knowledge.RetrievalOutcome;
+
 /**
  * <b>Whether this question can be answered at all, and if not, what is missing.</b>
  *
@@ -95,6 +98,30 @@ public enum AnswerBasisState {
      */
     public String actionKo(DraftKnowledgeState knowledge, String topicWord,
                            SpecApplicability.Applicability applicability) {
+        return actionKo(knowledge, topicWord, applicability, null, null, null);
+    }
+
+    /**
+     * The same line, told what each lane actually established (Retrieval &amp; Grounding
+     * Correctness v1). The action must match the retrieval: a rule that EXISTS and does not apply is
+     * not fixed by registering it again, and a product-knowledge miss is not fixed by linking a
+     * product. {@code asked} is the operating topic the customer's words name, or null.
+     */
+    public String actionKo(DraftKnowledgeState knowledge, String topicWord,
+                           SpecApplicability.Applicability applicability,
+                           RetrievalOutcome productOutcome, RetrievalOutcome policyOutcome,
+                           KnowledgeTopic asked) {
+        return actionKo(knowledge, topicWord, applicability, productOutcome, policyOutcome, asked, false);
+    }
+
+    /**
+     * @param topicDeclared whether ANY registered rule declares itself about {@code asked}. Rules that
+     *                      exist but say nothing about the asked topic are, for that topic, absence.
+     */
+    public String actionKo(DraftKnowledgeState knowledge, String topicWord,
+                           SpecApplicability.Applicability applicability,
+                           RetrievalOutcome productOutcome, RetrievalOutcome policyOutcome,
+                           KnowledgeTopic asked, boolean topicDeclared) {
         if (this == NEEDS_CLARIFICATION) {
             // What is missing, and nothing else. The customer has not said which 규격 they mean, so
             // the reply asks — and this line exists so the seller reads that BEFORE the draft and does
@@ -109,6 +136,28 @@ public enum AnswerBasisState {
         String perVariant = applicability == null
                 || applicability == SpecApplicability.Applicability.NOT_VARIANT_SENSITIVE
                 ? "" : " 규격에 따라 답이 달라진다면 규격별로 등록할 수 있습니다.";
+        // What the rules lane established decides the sentence before the product lane does: a
+        // question the customer asked in policy words is answered from the rules, product or not.
+        if (policyOutcome == RetrievalOutcome.NOT_APPLICABLE) {
+            String rule = asked == null ? "운영 기준" : asked.labelKo() + " 기준";
+            return rule + "은 등록되어 있지만, 이 문의에 적용할 근거로 확인되지는 않았습니다.";
+        }
+        if (asked != null && (policyOutcome == RetrievalOutcome.ABSENT
+                || (policyOutcome == RetrievalOutcome.NO_RELEVANT_EVIDENCE && !topicDeclared))) {
+            return "등록된 " + asked.labelKo() + " 기준이 아직 없습니다. 기준을 등록하면 근거가 생깁니다.";
+        }
+        if (policyOutcome == RetrievalOutcome.NO_RELEVANT_EVIDENCE && asked != null
+                && (knowledge == DraftKnowledgeState.NO_PRODUCT || productOutcome == RetrievalOutcome.ABSENT)) {
+            return "등록된 운영 기준에서 이 질문에 해당하는 근거를 찾지 못했습니다.";
+        }
+        if (productOutcome == RetrievalOutcome.NOT_APPLICABLE) {
+            return "관련 상품 지식은 등록되어 있지만, 이 질문에 적용할 근거로 확인되지는 않았습니다.";
+        }
+        if (productOutcome == RetrievalOutcome.NO_RELEVANT_EVIDENCE) {
+            return (topic == null
+                    ? "등록된 상품 정보에서 이 질문에 해당하는 근거를 찾지 못했습니다."
+                    : "등록된 상품 정보에서 " + topic + " 관련 근거를 찾지 못했습니다.") + perVariant;
+        }
         return switch (knowledge) {
             case NO_PRODUCT -> "이 문의가 어떤 상품에 대한 것인지 연결하면 근거를 찾을 수 있습니다.";
             case NO_LIBRARY -> (topic == null

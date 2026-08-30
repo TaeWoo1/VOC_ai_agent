@@ -1,5 +1,9 @@
 package com.sellerops.inquiry.draft;
 
+import com.sellerops.knowledge.RetrievalOutcome;
+
+import com.sellerops.knowledge.KnowledgeTopic;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.sellerops.inquiry.draft.SpecApplicability.Applicability;
@@ -65,6 +69,38 @@ class AnswerBasisStateTest {
             assertThat(AnswerBasisState.NO_ANSWER_BASIS.actionKo(DraftKnowledgeState.NO_PRODUCT))
                     .isNotEqualTo(AnswerBasisState.NO_ANSWER_BASIS.actionKo(DraftKnowledgeState.NO_LIBRARY));
             assertThat(AnswerBasisState.GROUNDED.actionKo(DraftKnowledgeState.GROUNDED)).isNull();
+        }
+
+        @Test
+        @DisplayName("the action matches what retrieval established — a rule that exists and does not apply is not re-registered")
+        void theActionMatchesTheRetrievalOutcome() {
+            AnswerBasisState none = AnswerBasisState.NO_ANSWER_BASIS;
+            SpecApplicability.Applicability flat = SpecApplicability.Applicability.NOT_VARIANT_SENSITIVE;
+            // Policy exists, does not apply: not 「기준 없음」, not 「상품을 연결하면」.
+            String notApplicable = none.actionKo(DraftKnowledgeState.NO_PRODUCT, null, flat,
+                    RetrievalOutcome.ABSENT, RetrievalOutcome.NOT_APPLICABLE, KnowledgeTopic.SHIPPING);
+            assertThat(notApplicable).isEqualTo("배송 기준은 등록되어 있지만, 이 문의에 적용할 근거로 확인되지는 않았습니다.");
+            // No policy at all for a policy question: register one.
+            String absent = none.actionKo(DraftKnowledgeState.NO_PRODUCT, null, flat,
+                    RetrievalOutcome.ABSENT, RetrievalOutcome.ABSENT, KnowledgeTopic.CASH_RECEIPT);
+            assertThat(absent).isEqualTo("등록된 현금영수증 기준이 아직 없습니다. 기준을 등록하면 근거가 생깁니다.");
+            // Rules exist, one of them IS about tax invoices, none covers the question: a miss, not a
+            // link-the-product instruction and not 「기준 없음」.
+            String miss = none.actionKo(DraftKnowledgeState.NO_PRODUCT, null, flat,
+                    RetrievalOutcome.ABSENT, RetrievalOutcome.NO_RELEVANT_EVIDENCE, KnowledgeTopic.TAX_INVOICE, true);
+            assertThat(miss).isEqualTo("등록된 운영 기준에서 이 질문에 해당하는 근거를 찾지 못했습니다.");
+            // Rules exist but none declares itself about tax invoices: for THAT topic this is absence.
+            String absentForTopic = none.actionKo(DraftKnowledgeState.NO_PRODUCT, null, flat,
+                    RetrievalOutcome.ABSENT, RetrievalOutcome.NO_RELEVANT_EVIDENCE, KnowledgeTopic.TAX_INVOICE, false);
+            assertThat(absentForTopic).isEqualTo("등록된 세금계산서 기준이 아직 없습니다. 기준을 등록하면 근거가 생깁니다.");
+            // Product knowledge exists and missed: said as a miss over the product information.
+            String productMiss = none.actionKo(DraftKnowledgeState.NO_MATCH, "가닥", flat,
+                    RetrievalOutcome.NO_RELEVANT_EVIDENCE, RetrievalOutcome.ABSENT, null);
+            assertThat(productMiss).isEqualTo("등록된 상품 정보에서 「가닥」 관련 근거를 찾지 못했습니다.");
+            // A product question with no product and no policy topic keeps the original instruction.
+            assertThat(none.actionKo(DraftKnowledgeState.NO_PRODUCT, null, flat,
+                    RetrievalOutcome.ABSENT, RetrievalOutcome.ABSENT, null))
+                    .isEqualTo("이 문의가 어떤 상품에 대한 것인지 연결하면 근거를 찾을 수 있습니다.");
         }
 
         @Test

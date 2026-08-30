@@ -49,6 +49,8 @@ import type {
   ChannelCoverageRow,
   KnowledgeSearchResult,
   OrgKnowledgeSearchResult,
+  AnswerMemorySearchParams,
+  AnswerMemorySearchResult,
   SellerProfileView,
   ChannelSummary,
   DashboardOverview,
@@ -377,6 +379,15 @@ export class HttpSpringClient
       "GET",
       `/api/inquiries/${encodeURIComponent(workItemId)}/context`,
     );
+  }
+
+  async searchAnswerMemory(params: AnswerMemorySearchParams): Promise<AnswerMemorySearchResult> {
+    const q = new URLSearchParams({ query: params.query });
+    if (params.productId) q.set("productId", params.productId);
+    if (params.productName) q.set("productName", params.productName);
+    if (params.excludeInquiryId) q.set("excludeInquiryId", params.excludeInquiryId);
+    if (params.limit != null) q.set("limit", String(params.limit));
+    return this.request<AnswerMemorySearchResult>("GET", `/api/answer-memory/search?${q.toString()}`);
   }
 
   async searchCustomerMemory(params: CustomerMemorySearchParams): Promise<CustomerMemorySearch> {

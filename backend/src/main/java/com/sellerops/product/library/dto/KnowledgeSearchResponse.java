@@ -1,5 +1,6 @@
 package com.sellerops.product.library.dto;
 
+import com.sellerops.knowledge.RetrievalOutcome;
 import java.util.List;
 import java.util.UUID;
 
@@ -12,5 +13,16 @@ import java.util.UUID;
  * Collapsing them would let an answer report a gap in the library as a fact about the product.
  */
 public record KnowledgeSearchResponse(UUID productId, String query, int documentsSearched,
-                                      int passagesSearched, List<KnowledgePassage> passages) {
+                                      int passagesSearched, List<KnowledgePassage> passages,
+                                      RetrievalOutcome outcome, int rejectedNotApplicable,
+                                      int candidatesTried) {
+
+    /** The pre-outcome shape: derives the outcome from the counts, as every caller used to. */
+    public KnowledgeSearchResponse(UUID productId, String query, int documentsSearched,
+                                   int passagesSearched, List<KnowledgePassage> passages) {
+        this(productId, query, documentsSearched, passagesSearched, passages,
+                documentsSearched == 0 ? RetrievalOutcome.ABSENT
+                        : passages.isEmpty() ? RetrievalOutcome.NO_RELEVANT_EVIDENCE : RetrievalOutcome.FOUND,
+                0, 1);
+    }
 }

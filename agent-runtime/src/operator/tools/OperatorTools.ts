@@ -21,6 +21,7 @@ import type { OperatorSpringClient } from "../../spring/OperatorSpringClient";
 import type { SpringClient } from "../../spring/SpringClient";
 import type { IssueSpringClient } from "../../spring/IssueSpringClient";
 import type {
+  AnswerMemorySearchResult,
   ChannelCapabilityOverview, ChannelCoverageRow, DashboardOverview, InquiryReplyTransportRow, OrderSummaryResponse,
   OrgKnowledgeSearchResult, SellerProfileView, PublishCapabilityView, RecentReviewsResponse, ReviewChannelCapabilityView, SellerAccountSummary,
 } from "../../spring/types";
@@ -58,6 +59,7 @@ export const OPERATOR_TOOL = {
   GET_CHANNEL_EXECUTION_CAPABILITY: "get_channel_execution_capability",
   /* Knowledge Context v1-A (2026-08-29). READ: the company's own operating rules, on the turn that needs them. */
   SEARCH_ORG_KNOWLEDGE: "search_org_knowledge",
+  SEARCH_ANSWER_MEMORY: "search_answer_memory",
   /* Seller Context v1-B (2026-08-30). READ: who this company is, in the seller's words, on the turn that asks. */
   GET_SELLER_PROFILE: "get_seller_profile",
 } as const;
@@ -207,8 +209,9 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
       deps.operator.searchCustomerMemory(args), {
       name: OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
       description:
-        "과거에 같은 문제를 본 적이 있는지, 그때 승인된 답변이 무엇이었는지. inquiryId를 주면 그 문의의 "
-        + "색인된 단서로 조회한다(고객 원문은 조회 조건으로도 쓰이지 않는다). 필요한 정보: CUSTOMER_HISTORY.",
+        "과거에 같은 문제(문의·리뷰의 유형 기록)를 본 적이 있는지. 답변 본문은 이 도구에 없다 — 예전에 보낸 답변은 "
+        + "search_answer_memory 다. inquiryId를 주면 그 문의의 색인된 단서로 조회한다(고객 원문은 조회 조건으로도 "
+        + "쓰이지 않는다). 필요한 정보: CUSTOMER_HISTORY.",
       schema: z.object({
         inquiryId: z.string().min(1).optional(),
         signatureKey: z.string().min(1).optional(),
@@ -516,6 +519,31 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         + "이 질문에 해당하는 문장을 찾는다. '우리 배송 정책 뭐였지', '환불 기준으로 답해줘' 류 질문의 출처이며 "
         + "상품을 특정할 필요가 없다. 필요한 정보: POLICY.",
       schema: z.object({ query: z.string().min(1).max(400), limit: z.number().int().min(1).max(5).optional() }),
+    })),
+
+    // <b>The answers this company actually sent or approved</b> (Retrieval & Grounding Correctness v1).
+    // Backed by `GET /api/answer-memory/search` — the same `answer_memory` the draft composer's memory
+    // lane reads; AI drafts and fallbacks are never in it. A past answer is a record of what was said,
+    // never a current fact: the composer still refuses to ground on it alone.
+    read(tool(async (args: { query: string; productId?: string; productName?: string; excludeInquiryId?: string; limit?: number }) => {
+      if (!deps.operator.searchAnswerMemory) {
+        return { query: args.query, memoriesSearched: 0, supersededByConflict: 0, passages: [], outcome: "ABSENT" } satisfies AnswerMemorySearchResult;
+      }
+      return deps.operator.searchAnswerMemory(args);
+    }, {
+      name: OPERATOR_TOOL.SEARCH_ANSWER_MEMORY,
+      description:
+        "회사가 예전에 실제로 보냈거나 승인한 답변 중 이 질문에 해당하는 것. '예전에 비슷한 문의에 뭐라고 답했어', "
+        + "'과거 승인 답변 참고해서' 류 질문의 출처다. 결과의 강도(채널에 등록된 답변 < 판매자가 승인한 답변 < "
+        + "전송이 확인된 답변)는 동률일 때의 순서일 뿐이며, 과거 답변은 그때 한 말이지 지금의 사실이 아니다. "
+        + "필요한 정보: PAST_ANSWER.",
+      schema: z.object({
+        query: z.string().min(1).max(400),
+        productId: z.string().min(1).optional(),
+        productName: z.string().min(1).max(200).optional(),
+        excludeInquiryId: z.string().min(1).optional(),
+        limit: z.number().int().min(1).max(5).optional(),
+      }),
     })),
 
     // <b>The company's own description of itself, read on demand</b> (Seller Context v1-B). Backed by

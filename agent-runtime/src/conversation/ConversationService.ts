@@ -658,9 +658,12 @@ export class ConversationService {
 
     // Knowledge Context v1-A: a POLICY need the company's rules could not meet is a gap the seller can
     // close on the rules screen — offered, not required (nothing here can resume; the seller asks again).
-    const policyGap = answer.evidence.find((e) => e.kind === "ORG_POLICY_GAP");
+    // Retrieval & Grounding Correctness v1: offered only when a rule is MISSING (ABSENT, or a miss over
+    // the rules that exist). A rule that exists and does not apply (NOT_APPLICABLE) is not fixed by
+    // registering it again — that gap carries no step.
+    const policyGap = answer.evidence.find((e) => e.kind === "ORG_POLICY_GAP" && e.locator.outcome !== "NOT_APPLICABLE");
     if (policyGap && !artifacts.some((a) => a.type === "HUMAN_ACTION_REQUIRED" && a.actionType === "KNOWLEDGE_ENTRY")) {
-      const topic = (policyGap.locator.label ?? "운영 기준 없음").replace(/ 기준 없음$/, "");
+      const topic = (policyGap.locator.label ?? "운영 기준 없음").replace(/ (기준|근거) 없음$/, "");
       artifacts.push({
         artifactId: "a-policy-gap", type: "HUMAN_ACTION_REQUIRED",
         title: `${topic} 기준을 등록하면 답할 수 있습니다`,
@@ -680,10 +683,12 @@ export class ConversationService {
     // read beside it stays in the evidence disclosure and out of the prose — a queue count under
     // 「이미 답변된 문의라…」 reads as a second, contradicting answer (Conversation Object Integrity v1).
     const draftTurn = axis.requestedAction === "PREPARE_INQUIRY_DRAFT" && selected != null;
+    // A coverage-limit sentence (「…근거를 찾지 못했습니다」) is never a restated count, whatever digits a
+    // product name carries — 「전선몰딩 1호」 under a 「상품 1개」 headline is not the same fact twice.
     const supported = draftTurn ? [] : answer.findings
       .filter((f) => f.confidence === "SUPPORTED")
-      .map((f) => f.statement)
-      .filter((s) => s !== first && !redundantWithHeadline(s, first));
+      .filter((f) => f.statement !== first && (f.claimsCoverageLimit || !redundantWithHeadline(f.statement, first)))
+      .map((f) => f.statement);
     const sentences = [prefix + first, ...dedupe(supported).slice(0, FINDINGS_MAX)];
     // Claim levels for the channels whose step just finished — B (rows written in the window) over C
     // (rows ingested); never A. `reviewClaim.ts` keeps ingested ≠ written.
@@ -1567,7 +1572,7 @@ function evidenceOf(answer: OperatorAnswer): EvidenceArtifact | null {
     CUSTOMER_MEMORY: "과거 사례", REPEATED_INQUIRY: "반복 문의", CHANNEL_COVERAGE: "채널 수집 상태",
     HUMAN_ACTION: "필요한 작업", PRODUCT_FACT: "상품 정보", PRODUCT_LISTING: "채널 등록 정보",
     PRODUCT_VARIANT: "옵션 정보", PRODUCT_KNOWLEDGE_DOC: "판매자가 쓴 글", ORG_POLICY: "운영 기준", ORG_POLICY_GAP: "운영 기준 없음", PRODUCT_SIGNAL: "상품 신호",
-    COMPANY_PROFILE: "회사 정보", COMPANY_PROFILE_GAP: "회사 정보 없음",
+    COMPANY_PROFILE: "회사 정보", COMPANY_PROFILE_GAP: "회사 정보 없음", PAST_ANSWER: "과거 답변", PAST_ANSWER_GAP: "과거 답변 없음",
   };
   return {
     artifactId: "a-evidence", type: "EVIDENCE", title: "확인한 자료",

@@ -13,6 +13,7 @@
  * than merely stopped reporting.
  */
 import type {
+  AnswerMemorySearchParams, AnswerMemorySearchResult,
   AgentJudgeView,
   AgentPlanView,
   CustomerMemorySearch,
@@ -85,6 +86,8 @@ export interface FakeOperatorSeed {
   readonly productKnowledgeSearch?: Record<string, KnowledgeSearchResult>;
   /** The org's operating rules, as one search result; absent = nothing registered. */
   readonly orgKnowledgeSearch?: OrgKnowledgeSearchResult;
+  /** Retrieval & Grounding Correctness v1: the answers this org sent/approved, as `search_answer_memory` sees them. */
+  readonly answerMemorySearch?: AnswerMemorySearchResult;
   /** Seller Context v1-B: what `getSellerProfile` answers. Absent ⇒ no profile registered. */
   readonly sellerProfile?: SellerProfileView;
   /**
@@ -144,7 +147,7 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
   readonly calls = {
     inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
     plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0, channelCoverage: 0,
-    knowledgeSearch: 0, orgKnowledgeSearch: 0, recentReviews: 0, overview: 0, ordersSummary: 0, channels: 0,
+    knowledgeSearch: 0, orgKnowledgeSearch: 0, answerMemorySearch: 0, recentReviews: 0, overview: 0, ordersSummary: 0, channels: 0,
     channelOverview: 0, transports: 0, reviewChannelCapability: 0, sellerProfile: 0,
   };
   /** Every recent-reviews request, so a test can assert the window and filters the read was made with. */
@@ -397,6 +400,17 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
   async getSellerProfile(): Promise<SellerProfileView> {
     this.calls.sellerProfile += 1;
     return this.seed.sellerProfile ?? { name: "테스트 스토어", businessSummary: null, configured: false, updatedAt: null };
+  }
+
+  readonly answerMemoryParams: AnswerMemorySearchParams[] = [];
+
+  async searchAnswerMemory(params: AnswerMemorySearchParams): Promise<AnswerMemorySearchResult> {
+    this.calls.answerMemorySearch += 1;
+    this.answerMemoryParams.push(params);
+    const seeded = this.seed.answerMemorySearch;
+    if (!seeded) return { query: params.query, memoriesSearched: 0, supersededByConflict: 0, passages: [], outcome: "ABSENT" };
+    const cap = params.limit && params.limit > 0 ? params.limit : seeded.passages.length;
+    return { ...seeded, query: params.query, passages: seeded.passages.slice(0, cap) };
   }
 
   async searchOrgKnowledge(query: string, limit?: number): Promise<OrgKnowledgeSearchResult> {

@@ -2,6 +2,8 @@ package com.sellerops.knowledge.memory;
 
 import com.sellerops.common.DataOrigin;
 import com.sellerops.knowledge.KnowledgeRetriever;
+import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.knowledge.KnowledgeText;
 import com.sellerops.knowledge.TopicSignature;
 import com.sellerops.knowledge.memory.dto.AnswerMemoryPassage;
@@ -15,6 +17,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -148,6 +151,43 @@ public class AnswerMemoryService {
     @Transactional(readOnly = true)
     public AnswerMemorySearchResponse search(UUID orgId, String query, UUID productId,
                                              UUID excludeInquiryId, int limit) {
+        return search(orgId, RetrievalQuery.ofText(query), productId, excludeInquiryId, limit);
+    }
+
+    /**
+     * The search over one question's bounded candidates (Retrieval &amp; Grounding Correctness v1):
+     * the same forms the product library and the rules are asked in, so 「예전에 반품 문의에 뭐라고
+     * 답했어?」 finds the answer that was sent about 반품. Order within a candidate is unchanged —
+     * relevance, then strength, then recency.
+     */
+    @Transactional(readOnly = true)
+    public AnswerMemorySearchResponse search(UUID orgId, RetrievalQuery question, UUID productId,
+                                             UUID excludeInquiryId, int limit) {
+        return search(orgId, question, productId, null, excludeInquiryId, limit);
+    }
+
+    /**
+     * The closed phrasing of a "what did we answer before" request — words that say the seller wants
+     * a past answer, not what the answer should be about. Reviewable in one line, like the rest.
+     */
+    static final Set<String> PAST_ANSWER_PHRASING = Set.of(
+            "예전", "이전", "과거", "전에", "지난", "뭐라", "뭐라고", "어떻게", "답했", "답변", "답한", "보냈", "보낸",
+            "승인", "대응", "응대", "처리", "했었", "했는지", "했나", "참고", "문의", "리뷰", "사례", "기록");
+
+    /**
+     * The same search, told the product's name so words that only name the product are not read as
+     * a topic — and, when the question names no topic at all, answering by LISTING that product's
+     * remembered answers (strongest first, then newest) instead of by matching.
+     *
+     * <p>Live (2026-08-30): 「QA 전선몰딩 문의에 예전에 뭐라고 답했어?」 carried no topical word, so the
+     * lexical gate correctly matched nothing — over a product with a verified answer on record. A
+     * question that asks for the record without naming a topic is answered by the record. A question
+     * that names a topic (「예전에 방수 문의에 뭐라고 답했어」) and misses stays a miss: listing would
+     * hand back answers about something else as if they were about 방수.
+     */
+    @Transactional(readOnly = true)
+    public AnswerMemorySearchResponse search(UUID orgId, RetrievalQuery question, UUID productId,
+                                             String productName, UUID excludeInquiryId, int limit) {
         List<AnswerMemory> corpus = memories.findAllByOrgId(orgId).stream()
                 .filter(m -> m.getProductId() == null || m.getProductId().equals(productId))
                 .filter(m -> excludeInquiryId == null
@@ -156,8 +196,30 @@ public class AnswerMemoryService {
         List<KnowledgeRetriever.Candidate<AnswerMemory>> candidates = corpus.stream()
                 .map(m -> new KnowledgeRetriever.Candidate<>(m, m.getNormalized()))
                 .toList();
-        List<KnowledgeRetriever.Hit<AnswerMemory>> ranked =
-                KnowledgeRetriever.rank(query, candidates, null);
+        List<KnowledgeRetriever.Hit<AnswerMemory>> ranked = List.of();
+        String matchedBy = question.full();
+        int tried = 0;
+        for (RetrievalQuery.Candidate candidate : question.candidates()) {
+            tried++;
+            ranked = KnowledgeRetriever.rank(candidate.text(), candidates, productName);
+            if (!ranked.isEmpty()) {
+                matchedBy = candidate.text();
+                break;
+            }
+        }
+        if (ranked.isEmpty() && productId != null
+                && RetrievalQuery.residualTopicWords(question.full(), productName, PAST_ANSWER_PHRASING).isEmpty()) {
+            // Browse, not match: the question named the product and nothing else. Only THIS product's
+            // answers (an unbound answer says nothing about which product it was for), in the order a
+            // conflict is resolved in — strength, then recency — with the retriever's score absent.
+            ranked = corpus.stream()
+                    .filter(m -> productId.equals(m.getProductId()))
+                    .sorted(Comparator.comparingInt((AnswerMemory m) -> -m.getStrength().rank())
+                            .thenComparing(AnswerMemory::getUpdatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                    .map(m -> new KnowledgeRetriever.Hit<>(m, 0.0, 0))
+                    .toList();
+            matchedBy = ranked.isEmpty() ? matchedBy : "";
+        }
 
         Conflicts resolved = resolveConflicts(ranked);
         int cap = Math.max(1, Math.min(limit <= 0 ? MAX_PASSAGES : limit, MAX_PASSAGES));
@@ -165,7 +227,10 @@ public class AnswerMemoryService {
                 .limit(cap)
                 .map(AnswerMemoryService::passage)
                 .toList();
-        return new AnswerMemorySearchResponse(query, corpus.size(), resolved.superseded(), passages);
+        RetrievalOutcome outcome = corpus.isEmpty() ? RetrievalOutcome.ABSENT
+                : passages.isEmpty() ? RetrievalOutcome.NO_RELEVANT_EVIDENCE : RetrievalOutcome.FOUND;
+        return new AnswerMemorySearchResponse(matchedBy, corpus.size(), resolved.superseded(), passages,
+                outcome, tried);
     }
 
     /**

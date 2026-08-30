@@ -624,6 +624,15 @@ gate**(`inquiryActionability.ts` — 답변된·전송 대기·비대상 문의�
 (`styleIntent.ts` — 세 `ToneHint` 토큰의 닫힌 cue 표, 초안이 있을 때만; planner 0·tool 0·같은 근거·새 버전). 실제 planner로
 A–G 재검증, 마켓플레이스 0 · WRITE 0. Knowledge retrieval tuning·wording 대개편·Knowledge Capture는 미포함.)
 
+**`docs/retrieval_grounding_correctness_v1.md`** (Retrieval & Grounding Correctness v1 — 2026-08-30. 새 RAG 엔진이
+아니라 결정론적 lexical retrieval을 정확하게 연결한다: **`RetrievalQuery`**(한 질문을 TOPIC→TITLE→SUBJECT→FULL의
+bounded candidate ≤4로 검색, 세 lane·composer·검색 endpoint 공유; scorer·threshold 불변), **`RetrievalOutcome`**
+(`FOUND`·`ABSENT`·`NO_RELEVANT_EVIDENCE`·`NOT_APPLICABLE`이 모든 검색 응답과 `InquiryEvidence` lane별로 실리고 seller
+문장·`answerBasisAction`·KNOWLEDGE_ENTRY 제안이 그것을 따른다), **`KnowledgeTopic`**(닫힌 topic 표로 질문과 문서
+**선언**(type·title)을 읽어 서로 다른 topic만 거절 — 인정은 못 하고 거절만 한다), **`search_answer_memory`**
+(`GET /api/answer-memory/search`, need `PAST_ANSWER`, prompt v8 — 과거 답변은 answer_memory를 읽고 customer memory와
+섞지 않는다; memory 단독 GROUNDED 금지 유지). 라이브 A–J on disposable org, 마켓플레이스 0 · WRITE 0.)
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의
