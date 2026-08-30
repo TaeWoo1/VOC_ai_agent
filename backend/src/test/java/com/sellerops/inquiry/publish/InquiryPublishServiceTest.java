@@ -302,6 +302,23 @@ class InquiryPublishServiceTest {
         assertThat(v.providerMessageNo()).isEqualTo("PROV-9");
         assertThat(workItems.findById(wi.getId()).orElseThrow().getPhase())
                 .isEqualTo(InquiryWorkItemPhase.COMPLETED);
+        // Conversation Object Integrity v1: the verified read-back is the inquiry's answer state too —
+        // rows/count (inquiries.status) and workload (work item phase) must never disagree.
+        Inquiry answered = inquiries.findById(wi.getInquiryId()).orElseThrow();
+        assertThat(answered.getStatus()).isEqualTo("ANSWERED");
+        assertThat(answered.getAnsweredAt()).isNotNull();
+    }
+
+    @Test
+    void executedButNotVerifiedLeavesTheInquiryUnanswered() {
+        InquiryWorkItem wi = seedServed();
+        adapter.publishResult = ReplyPublishResult.confirmed("PROV-9");
+        adapter.verifyResult = ReplyVerificationResult.notCompleted("PENDING");
+
+        withAdapter().confirmAndPublish(org, wi.getId(), user, "cmd1", approvedFingerprint());
+
+        // A 2xx is not an answer: only the verified read-back flips the row.
+        assertThat(inquiries.findById(wi.getInquiryId()).orElseThrow().getStatus()).isEqualTo("UNANSWERED");
     }
 
     @Test

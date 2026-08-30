@@ -179,7 +179,11 @@ export interface InquiryItem {
   readonly receivedAt: string;
   readonly phase: string;
   readonly status: string;
-  /** transient — the customer's subject line, stripped before persistence. */
+  /**
+   * The customer's subject line — the seller's own operational content, as the inquiry screen shows it.
+   * Persisted with the row (bounded list) so a reloaded thread names the same inquiry the seller chose
+   * (Conversation Object Integrity v1); the body never travels here.
+   */
   readonly title?: string | null;
   readonly productId: string | null;
   readonly productName: string | null;
@@ -528,9 +532,22 @@ export interface WorkingSetView {
   };
   /** Products the set is about, when known — the anchor for a cross-domain follow-up. */
   readonly productIds: readonly string[];
-  /** Inquiry work items in the set, in shown order — the anchor for 「첫 번째 거」. */
+  /** Inquiry work items in the set, in shown order — secondary identity: which rows can take a draft. */
   readonly workItemIds: readonly string[];
+  /**
+   * The ONE inquiry the seller selected (an ordinal, 「이 문의」, a screen launch) — the conversation's
+   * anchor until a new list is drawn. Products may be added to `productIds` beside it; nothing replaces
+   * it silently (Conversation Object Integrity v1). Keyed by inquiry id; the work item is secondary.
+   */
+  readonly selectedInquiry?: SelectedInquiry | null;
   readonly turnId: string;
+}
+
+export interface SelectedInquiry {
+  readonly inquiryId: string;
+  readonly workItemId: string | null;
+  readonly productId: string | null;
+  readonly channelCode: string | null;
 }
 
 export const WORKING_SET_MAX_IDS = 50;
@@ -726,7 +743,7 @@ export function persistableArtifact(artifact: Artifact): Artifact {
         ...artifact,
         groups: artifact.groups.map((g) => ({
           ...g,
-          items: g.items.slice(0, MAX_ITEMS_PERSISTED).map(({ title: _t, ...item }) => item),
+          items: g.items.slice(0, MAX_ITEMS_PERSISTED),
         })),
       };
     case "DRAFT": {

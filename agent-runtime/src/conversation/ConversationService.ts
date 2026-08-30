@@ -47,14 +47,17 @@ import { inquiryRowsSentence } from "../operator/graph/inquiryRowsStep";
 import type { ConversationStore } from "./ConversationStore";
 import { DraftPreparer } from "./DraftPreparer";
 import type { DraftTarget, ReviewDraftTarget } from "./DraftPreparer";
+import { ACTIONABILITY_SENTENCE, actionabilityOf } from "./inquiryActionability";
+import type { InquiryActionability } from "./inquiryActionability";
+import { ordinalSelectionOf, toneIntentOf } from "./styleIntent";
 import { Refresher } from "./Refresher";
 import { claimsFor } from "./reviewClaim";
 import { boundedTurns, STAGE_LABEL, WORKING_SET_MAX_IDS } from "./contract";
 import type {
   ApprovalArtifact, Artifact, ConversationSummary, ConversationView, DraftArtifact, EvidenceArtifact,
   ExecutableIdentity, GuidedExecutionArtifact, HumanActionRequiredArtifact, InquiryItem, PendingHumanAction,
-  PendingPreparedAction, ProgressEvent, ProgressStage, ReviewItem, StartTurnRequest, SuggestedAction,
-  SummaryArtifact, TurnStatus, TurnView, WorkingSetKind, WorkingSetView, WorkspaceLinkArtifact, ObjectKind,
+  PendingPreparedAction, ProgressEvent, ProgressStage, ReviewItem, SelectedInquiry, StartTurnRequest, SuggestedAction,
+  SummaryArtifact, ToneHint, TurnStatus, TurnView, WorkingSetKind, WorkingSetView, WorkspaceLinkArtifact, ObjectKind,
 } from "./contract";
 import { periodLabel } from "./period";
 
@@ -95,8 +98,25 @@ export const COUPANG_REVIEW_UNSUPPORTED_SENTENCE = "쿠팡에서는 판매자가
 const REVIEW_UNSUPPORTED_CHIPS = ["이 상품 리뷰 더 보여줘", "이 상품 관련 문의 확인해줘", "이 상품에 반복되는 문제 있어?"];
 const SEE_SO_FAR_PROMPT = "지금까지 확인된 리뷰 보여줘";
 
+/** The inquiry a sentence pointed at — by inquiry id; whether a draft can attach to it is a separate fact. */
+interface SelectedInquiryRow extends SelectedInquiry {
+  readonly channelNameKo: string | null;
+  readonly productName: string | null;
+  readonly title: string | null;
+  readonly status: string;
+  readonly receivedAt: string | null;
+}
+
 type ResolvedTarget =
-  | { readonly kind: "INQUIRY"; readonly target: DraftTarget; readonly executableIdentity: ExecutableIdentity; readonly sourceSubtype: string | null }
+  | {
+    readonly kind: "INQUIRY";
+    readonly inquiry: SelectedInquiryRow;
+    readonly actionability: InquiryActionability;
+    /** Present only when the row is DRAFTABLE — the product's draft path needs the work item. */
+    readonly target: DraftTarget | null;
+    readonly executableIdentity: ExecutableIdentity;
+    readonly sourceSubtype: string | null;
+  }
   | { readonly kind: "REVIEW"; readonly target: ReviewDraftTarget; readonly executableIdentity: ExecutableIdentity };
 
 interface Composed {
@@ -252,6 +272,26 @@ export class ConversationService {
 
     const stage = (s: ProgressStage, label: string): void =>
       progress({ type: "stage", stage: s, label, at: this.now() });
+    // ── Closed intents about the object already on the table are resolved here, with no planner call and
+    // no read (Conversation Object Integrity v1): a tone revision of the draft being viewed, or a bare
+    // ordinal over the list just shown. Anything else is the planner's.
+    const direct = resumedFrom ? null : await this.directLane(view, text, bundle, stage);
+    if (direct) {
+      const agentTurn = this.agentTurn(view, direct);
+      const workingSet = direct.workingSet ? { ...direct.workingSet, turnId: agentTurn.turnId } : null;
+      const pendingPrepared = direct.pendingPrepared ? { ...direct.pendingPrepared, turnId: agentTurn.turnId } : null;
+      const finalTurn: TurnView = {
+        ...agentTurn,
+        continuation: { workingSet, pendingHumanAction: null, pendingHumanActions: [], pendingPrepared },
+      };
+      await this.persist(store, view, [userTurn, finalTurn], workingSet, pendingActionsOf(view), pendingPrepared);
+      log("conversation_turn", {
+        status: finalTurn.status, toolCalls: 0, llmCalls: 0, ms: Date.now() - started,
+        artifactTypes: [...new Set(finalTurn.artifacts.map((a) => a.type))].join(","),
+        workingSetKind: workingSet?.kind ?? "NONE", requestedAction: direct.pendingPrepared ? "TONE_REVISION" : "SELECT",
+      });
+      return finalTurn;
+    }
     const runtime = new OperatorAgentRuntime({
       operator: bundle.operator, inquiry: bundle.inquiry, issue: bundle.issue,
       judgeMemoKey: orgId,
@@ -265,7 +305,12 @@ export class ConversationService {
     // one product-bound row is not about that product (live: 20 inquiries, one bound, and 「배송
     // 얘기부터」 became a product-scoped read that found nothing).
     const set = view.workingSet;
-    const anchoredProduct = !hints.productId && set?.kind === "PRODUCTS" && set.ids.length === 1 ? set.ids[0] : undefined;
+    // …and so does the product an anchored inquiry is bound to (Conversation Object Integrity v1):
+    // 「이 상품 기준으로」 after 「첫 번째 거」 names the inquiry's own product, not a product to resolve by name.
+    const anchoredProduct = !hints.productId
+      ? set?.kind === "PRODUCTS" && set.ids.length === 1 ? set.ids[0]
+        : set?.kind === "INQUIRIES" && set.selectedInquiry?.productId ? set.selectedInquiry.productId : undefined
+      : undefined;
     const goal: GoalRequest = {
       text,
       ...(hints.productId ? { productId: hints.productId } : anchoredProduct ? { productId: anchoredProduct } : {}),
@@ -441,9 +486,27 @@ export class ConversationService {
       workingSet = view.workingSet;
     }
 
+    // The inquiry this turn is about, when it is about exactly one — the conversation's anchor afterwards.
+    let selected: SelectedInquiryRow | null = null;
+    // A planner-side tone request while a draft is on the table is a revision of THAT draft: whatever
+    // the plan read beside it is not shown and does not replace the set (the direct lane catches the
+    // usual phrasings before the planner; this is the guard for the ones it did not).
+    const toneRevision = axis.requestedAction === "PREPARE_INQUIRY_DRAFT" && axis.tone != null && view.pendingPrepared != null;
+    if (toneRevision) {
+      artifacts.length = 0;
+      workingSet = view.workingSet;
+    }
+
     // ── PREPARE: a draft for the targeted inquiry or review, through the product's own draft path.
     if (axis.requestedAction === "PREPARE_INQUIRY_DRAFT") {
       const targets = await this.resolveTargets(axis.target.selector, axis.target.index, view, hints, bundle, workingSet);
+      const inquiryTargets = targets.filter((t): t is Extract<ResolvedTarget, { kind: "INQUIRY" }> => t.kind === "INQUIRY");
+      if (inquiryTargets.length === 1) selected = inquiryTargets[0]!.inquiry;
+      // A list the plan read beside the PREPARE is not what the seller asked for: the draft (or the state
+      // of the targeted inquiry) is the answer, and a queue printed under it reads as a second answer.
+      if (targets.length > 0) {
+        for (let i = artifacts.length - 1; i >= 0; i -= 1) if (artifacts[i]!.type === "INQUIRY_LIST") artifacts.splice(i, 1);
+      }
       if (targets.length === 0) {
         headline = "어떤 문의의 답변을 준비할지 알려주세요. 방금 본 목록에서 「첫 번째 거」처럼 말씀해 주시면 됩니다.";
       } else {
@@ -485,9 +548,28 @@ export class ConversationService {
             }
             continue;
           }
+          // Actionability gate: an answered, in-flight or unworkable inquiry gets its state said — no
+          // proposal, no retrieval, no model call (found live: READ ×4 + one draft call, then a 409).
+          if (resolved.actionability !== "DRAFTABLE" || !resolved.target) {
+            const line = ACTIONABILITY_SENTENCE[resolved.actionability === "DRAFTABLE" ? "NOT_WORKABLE" : resolved.actionability];
+            artifacts.push(inquiryStateSummary(resolved.inquiry, line));
+            headline = headline ?? line;
+            continue;
+          }
           const target = resolved.target;
           stage("PREPARING_DRAFT", STAGE_LABEL.PREPARING_DRAFT);
-          const draft = await preparer.prepare(target, axis.tone, `a-draft-${target.workItemId}`);
+          let draft: DraftArtifact;
+          try {
+            draft = await preparer.prepare(target, axis.tone, `a-draft-${target.workItemId}`);
+          } catch (err) {
+            // The draft path refused (a phase the gate could not see, a backend outage): said as a
+            // sentence on a DONE turn — never a vanished turn. The vendor/backend text stays out.
+            log("conversation_draft_failed", { objectKind: "INQUIRY", error: err instanceof Error ? err.name : "unknown" });
+            const line = DRAFT_FAILED_SENTENCE;
+            artifacts.push(inquiryStateSummary(resolved.inquiry, line));
+            headline = headline ?? line;
+            continue;
+          }
           artifacts.push(draft);
           if (draft.unavailableMessage) {
             headline = headline ?? draft.unavailableMessage;
@@ -550,6 +632,30 @@ export class ConversationService {
         : "지금 먼저 하실 일은 없습니다.";
     }
 
+    // ── Selection without an action: the planner's ordinal/「이 문의」 target over the shown list anchors
+    // that row and shows it (「첫 번째 문의, 뭐라고 답할까」 must not fall through to the org queue).
+    if (!selected && axis.requestedAction !== "REQUEST_SEND_APPROVAL"
+        && (axis.target.selector === "FIRST" || axis.target.selector === "NTH" || (axis.target.selector === "THIS" && hints.workItemId))) {
+      const picked = (await this.resolveTargets(axis.target.selector, axis.target.index, view, hints, bundle, workingSet))
+        .filter((t): t is Extract<ResolvedTarget, { kind: "INQUIRY" }> => t.kind === "INQUIRY");
+      if (picked.length === 1) {
+        selected = picked[0]!.inquiry;
+        if (!artifacts.some((a) => a.type === "SUMMARY" || a.type === "DRAFT")) artifacts.unshift(selectionSummary(selected));
+      }
+    }
+    // A screen launch (`workItemId` hint) resolved the inquiry inside the graph; its verified ref names it.
+    if (!selected && hints.workItemId) selected = selectedFromEntities(result, answer, hints.workItemId);
+    // ── Anchor preservation: a selected inquiry stays the working set until the seller draws a NEW list.
+    // Products found on the way (an R4 list, the inquiry's own binding) are added beside it — never over it.
+    const drewList = drewFreshList(result.artifacts, view.workingSet?.selectedInquiry ?? null);
+    const carried = !drewList ? view.workingSet?.selectedInquiry ?? null : null;
+    const anchor = selected ?? carried;
+    if (anchor) {
+      workingSet = anchoredSet(anchor, view.workingSet, [
+        ...(workingSet?.productIds ?? []), ...(anchor.productId ? [anchor.productId] : []), ...(hints.productId ? [hints.productId] : []),
+      ]);
+    }
+
     // Knowledge Context v1-A: a POLICY need the company's rules could not meet is a gap the seller can
     // close on the rules screen — offered, not required (nothing here can resume; the seller asks again).
     const policyGap = answer.evidence.find((e) => e.kind === "ORG_POLICY_GAP");
@@ -570,7 +676,11 @@ export class ConversationService {
     const first = headline ?? headlineOf(primary, artifacts, view, axis, answer);
     // R3: a count finding that says what the headline already said (same numbers, same noun) is one
     // fact twice. Dropped from the prose; it stays in the answer's findings with its evidence.
-    const supported = answer.findings
+    // A PREPARE turn about one inquiry answers with the draft (or that inquiry's state); whatever the plan
+    // read beside it stays in the evidence disclosure and out of the prose — a queue count under
+    // 「이미 답변된 문의라…」 reads as a second, contradicting answer (Conversation Object Integrity v1).
+    const draftTurn = axis.requestedAction === "PREPARE_INQUIRY_DRAFT" && selected != null;
+    const supported = draftTurn ? [] : answer.findings
       .filter((f) => f.confidence === "SUPPORTED")
       .map((f) => f.statement)
       .filter((s) => s !== first && !redundantWithHeadline(s, first));
@@ -586,7 +696,7 @@ export class ConversationService {
     // The rows path's own note — 「언제 기준」 per stale channel, a refresh that could not be made, a
     // partial collection — each said once here and nowhere else in the prose. Never model prose.
     // Sentence by sentence, so a fact the findings already said (the per-channel 「언제 기준」) is not read twice.
-    if (answer.note) sentences.push(...answer.note.split(/(?<=[.!?])\s+/).filter((s) => s.length > 0));
+    if (answer.note && !draftTurn) sentences.push(...answer.note.split(/(?<=[.!?])\s+/).filter((s) => s.length > 0));
 
     const evidenceArtifact = evidenceOf(answer);
     if (evidenceArtifact) artifacts.push(evidenceArtifact);
@@ -627,9 +737,14 @@ export class ConversationService {
         default: return set.ids.length === 1 ? pick(set.ids) : [];
       }
     }
-    const ids = set?.kind === "INQUIRIES" ? set.workItemIds : [];
-    const pick = (workItemIds: readonly string[]): ResolvedTarget[] =>
-      workItemIds.map((id) => inquiryTargetFromHistory(view, id)).filter((t): t is ResolvedTarget => t != null);
+    // Inquiry identity ≠ work-item identity: a ROWS set is indexed by inquiry id, a WORKLOAD set by
+    // work item id — both are looked up in the shown rows by either key, so 「첫 번째 거」 resolves whether
+    // or not the row has a work item. Whether a draft can attach is the row's own actionability.
+    const ids = set?.kind === "INQUIRIES" ? set.ids : [];
+    const pick = (rowIds: readonly string[]): ResolvedTarget[] =>
+      rowIds.map((id) => inquiryTargetFromHistory(view, id)).filter((t): t is ResolvedTarget => t != null);
+    // The selected inquiry, when the set is anchored on one — 「이 문의」 / 「이 상품 기준으로」 / a bare verb.
+    const anchored = set?.kind === "INQUIRIES" && set.selectedInquiry ? pick([set.selectedInquiry.inquiryId]) : [];
     switch (selector) {
       case "FIRST":
         return pick(ids.slice(0, 1));
@@ -639,19 +754,24 @@ export class ConversationService {
         return pick(ids.slice(0, ALL_TARGETS_MAX));
       case "THIS":
       default: {
-        // The inquiry the seller is standing on (the screen's hint), the draft just prepared, or the
-        // one inquiry in the set. A hint is verified by the same org-scoped read the runtime uses.
+        // The inquiry the seller is standing on (the screen's hint), the draft just prepared, the
+        // anchored inquiry, or the one inquiry in the set. A hint is verified by the same org-scoped
+        // read the runtime uses.
         if (hints.workItemId) {
           const known = inquiryTargetFromHistory(view, hints.workItemId);
           if (known) return [known];
           try {
             const detail = await bundle.inquiry.getInquiryDetail(hints.workItemId);
+            const row = {
+              workItemId: detail.workItemId, inquiryId: detail.inquiryId, channelCode: detail.channelCode,
+              channelNameKo: detail.channelNameKo, productId: detail.productId ?? null, productName: detail.productName ?? null,
+            };
+            const actionability = actionabilityOf({ workItemId: detail.workItemId, phase: detail.phase, status: detail.status });
             return [{
               kind: "INQUIRY",
-              target: {
-                workItemId: detail.workItemId, inquiryId: detail.inquiryId, channelCode: detail.channelCode,
-                channelNameKo: detail.channelNameKo, productId: detail.productId ?? null, productName: detail.productName ?? null,
-              },
+              inquiry: { ...row, title: detail.title ?? null, status: detail.status, receivedAt: detail.receivedAt ?? null },
+              actionability,
+              target: actionability === "DRAFTABLE" ? row : null,
               executableIdentity: detail.executableIdentity ?? "NONE",
               sourceSubtype: detail.sourceSubtype ?? null,
             }];
@@ -659,9 +779,108 @@ export class ConversationService {
             return [];
           }
         }
+        if (anchored.length === 1) return anchored;
         return ids.length === 1 ? pick(ids) : [];
       }
     }
+  }
+
+  /**
+   * The two closed intents the lane answers without the planner. `null` ⇒ not one of them.
+   * Tone revision: same inquiry (or review), same evidence, one new draft version, zero reads.
+   * Ordinal selection: the row at that position in the set just shown becomes the anchor, zero reads.
+   */
+  private async directLane(
+    view: ConversationView, text: string, bundle: SpringClientBundle, stage: (s: ProgressStage, label: string) => void,
+  ): Promise<Composed | null> {
+    const prepared = view.pendingPrepared;
+    const tone = prepared || view.workingSet?.selectedInquiry ? toneIntentOf(text) : null;
+    if (prepared && tone) return this.reviseTone(view, prepared, tone, bundle, stage);
+    if (tone) {
+      // A selected inquiry with no draft on the table: nothing to revise, and a plan would only read.
+      return {
+        status: "DONE", message: NO_DRAFT_TO_REVISE_SENTENCE, artifacts: [], suggestedActions: [promptChip("답변 준비해줘")],
+        workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: null,
+        budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "TONE_REVISION" },
+      };
+    }
+    const index = ordinalSelectionOf(text);
+    if (index == null) return null;
+    const set = pickSet(null, view);
+    if (!set) return null;
+    if (set.kind === "REVIEWS") {
+      const id = set.ids[index - 1];
+      const target = id ? reviewTargetFromHistory(view, id) : null;
+      if (!target || target.kind !== "REVIEW") return null;
+      // A review selection narrows the set to that row — the single id the existing FIRST/THIS rules read.
+      const single: WorkingSetView = { ...set, ids: [id!], count: 1, turnId: "" };
+      return {
+        status: "DONE", message: `${index}번째 리뷰를 골랐습니다. 이어서 「답변해줘」처럼 말씀해 주세요.`,
+        artifacts: [], suggestedActions: [promptChip("이 리뷰 답변해줘")],
+        workingSet: single, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
+        budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
+      };
+    }
+    const id = set.ids[index - 1];
+    const target = id ? inquiryTargetFromHistory(view, id) : null;
+    if (!target || target.kind !== "INQUIRY") {
+      return {
+        status: "DONE", message: `방금 본 목록에는 ${index}번째 문의가 없습니다.`, artifacts: [], suggestedActions: [],
+        workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
+        budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
+      };
+    }
+    const workingSet = anchoredSet(target.inquiry, view.workingSet, [...(view.workingSet?.productIds ?? []), ...(target.inquiry.productId ? [target.inquiry.productId] : [])]);
+    log("conversation_selected", { objectKind: "INQUIRY", index, actionability: target.actionability });
+    return {
+      status: "DONE", message: selectionLine(index, target.inquiry, target.actionability),
+      artifacts: [selectionSummary(target.inquiry)],
+      suggestedActions: suggestionsFor(null, workingSet, null, []),
+      workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
+      budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
+    };
+  }
+
+  /** The tone-revision lane: the draft on the table, one closed tone token, the same object. No planner, no read. */
+  private async reviseTone(
+    view: ConversationView, prepared: PendingPreparedAction, tone: ToneHint, bundle: SpringClientBundle,
+    stage: (s: ProgressStage, label: string) => void,
+  ): Promise<Composed> {
+    const started = Date.now();
+    const preparer = new DraftPreparer(bundle.inquiry, bundle.review);
+    const keep = (message: string, artifacts: Artifact[], pendingPrepared: PendingPreparedAction | null): Composed => ({
+      status: "DONE", message, artifacts, suggestedActions: suggestionsFor(artifacts[0] ?? null, view.workingSet, null, artifacts),
+      workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared,
+      budget: { toolCalls: 0, llmCalls: 0, elapsedMs: Date.now() - started, stopReason: "TONE_REVISION" },
+    });
+    log("conversation_tone_revision", { objectKind: prepared.kind === "REVIEW_DRAFT" ? "REVIEW" : "INQUIRY", tone });
+    stage("PREPARING_DRAFT", STAGE_LABEL.PREPARING_DRAFT);
+    if (prepared.kind === "REVIEW_DRAFT") {
+      const resolved = reviewTargetFromHistory(view, prepared.workItemId);
+      if (!resolved || resolved.kind !== "REVIEW") return keep(NO_DRAFT_TO_REVISE_SENTENCE, [], prepared);
+      const verdict = await this.reviewCapability(bundle, resolved.target);
+      const draft = await preparer.prepareReview(resolved.target, tone, `a-draft-${resolved.target.reviewId}`, verdict);
+      if (draft.note && !draft.tone) return keep(draft.note, [draft], prepared);
+      return keep("말투를 바꿔 리뷰 답글 초안을 다시 준비했습니다.", [draft], {
+        turnId: "", kind: "REVIEW_DRAFT", workItemId: resolved.target.reviewId, inquiryId: resolved.target.actionRef,
+        accountId: resolved.target.accountId, draftVersion: draft.version, contentFingerprint: draft.contentFingerprint,
+      });
+    }
+    const resolved = inquiryTargetFromHistory(view, prepared.workItemId);
+    if (!resolved || resolved.kind !== "INQUIRY" || !resolved.target) return keep(NO_DRAFT_TO_REVISE_SENTENCE, [], prepared);
+    let draft: DraftArtifact;
+    try {
+      draft = await preparer.prepare(resolved.target, tone, `a-draft-${resolved.target.workItemId}`);
+    } catch (err) {
+      log("conversation_draft_failed", { objectKind: "INQUIRY", error: err instanceof Error ? err.name : "unknown" });
+      return keep(DRAFT_FAILED_SENTENCE, [inquiryStateSummary(resolved.inquiry, DRAFT_FAILED_SENTENCE)], prepared);
+    }
+    if (draft.note && !draft.tone) return keep(draft.note, [draft], prepared);
+    if (!draft.version) return keep(draft.unavailableMessage ?? draft.answerBasisNote ?? "답변 기준이 필요합니다.", [draft], prepared);
+    return keep("말투를 바꿔 초안을 다시 준비했습니다.", [draft], {
+      turnId: "", kind: "INQUIRY_DRAFT", workItemId: resolved.target.workItemId, inquiryId: resolved.target.inquiryId,
+      draftVersion: draft.version, contentFingerprint: draft.contentFingerprint,
+    });
   }
 
   /** The execution capability of a review's channel, read for its own API-mode account. Fail closed. */
@@ -814,6 +1033,8 @@ export class ConversationService {
       return { artifact: approval, headline: "다음 답글을 전송하려면 승인이 필요합니다. 전송은 승인 뒤 기존 실행 경로로만 진행됩니다.", chips: [] };
     }
 
+    // An inquiry with no draftable work item has no draft to send — the state sentence already said so.
+    if (!resolved.target) return null;
     const t = resolved.target;
     const name = t.channelNameKo ?? t.channelCode ?? "채널";
     if (resolved.executableIdentity !== "MARKETPLACE") {
@@ -872,9 +1093,14 @@ function pendingActionsOf(view: ConversationView): PendingHumanAction[] {
   return view.pendingHumanAction ? [view.pendingHumanAction] : [];
 }
 
-/** The set a draft/send sentence indexes into — the turn's own when it drew one, else the conversation's. */
+/**
+ * The set a draft/send sentence indexes into — the one the seller was LOOKING AT when they said it
+ * (the conversation's), and only when there is none, the list this turn happened to draw. Found live:
+ * a PREPARE plan that also read the org queue made 「첫 번째 거」 the first row of that queue, not of the
+ * three rows on screen (Conversation Object Integrity v1).
+ */
 function pickSet(workingSet: WorkingSetView | null, view: ConversationView): WorkingSetView | null {
-  const candidates = [workingSet, view.workingSet];
+  const candidates = [view.workingSet, workingSet];
   return candidates.find((s) => s?.kind === "INQUIRIES" || s?.kind === "REVIEWS") ?? null;
 }
 
@@ -977,6 +1203,9 @@ export function priorLineOf(view: ConversationView): string | null {
   if (set) {
     parts.push(`직전 작업 집합: ${set.kind} (기간:${set.filters.period?.token ?? "없음"}, 채널:${set.filters.channelCode ?? "전체"}, `
       + `평점:${set.filters.rating ?? "ALL"}, 상태:${set.filters.status ?? "없음"}, 상품 특정:${set.productIds.length > 0 ? "예" : "아니오"})`);
+  }
+  if (set?.kind === "INQUIRIES" && set.selectedInquiry) {
+    parts.push("직전 선택: INQUIRY (판매자가 방금 문의 하나를 골랐습니다 — 「이 문의」·「답변 준비해줘」는 그 문의를 가리킵니다)");
   }
   if (view.pendingPrepared) {
     parts.push(view.pendingPrepared.kind === "REVIEW_DRAFT"
@@ -1132,13 +1361,13 @@ function workingSetOf(
   }
 }
 
-/** A DraftTarget for a work item the conversation has shown, from the persisted INQUIRY_LIST rows. */
-function inquiryFromHistory(view: ConversationView, workItemId: string): InquiryItem | null {
+/** An inquiry the conversation has shown, from the persisted INQUIRY_LIST rows — by inquiry id OR work item id. */
+function inquiryFromHistory(view: ConversationView, id: string): InquiryItem | null {
   for (let i = view.turns.length - 1; i >= 0; i -= 1) {
     for (const artifact of view.turns[i]!.artifacts) {
       if (artifact.type !== "INQUIRY_LIST") continue;
       for (const group of artifact.groups) {
-        const item = group.items.find((it) => it.workItemId === workItemId);
+        const item = group.items.find((it) => it.inquiryId === id || it.workItemId === id);
         if (item) return item;
       }
     }
@@ -1146,19 +1375,118 @@ function inquiryFromHistory(view: ConversationView, workItemId: string): Inquiry
   return null;
 }
 
-function inquiryTargetFromHistory(view: ConversationView, workItemId: string): ResolvedTarget | null {
-  const item = inquiryFromHistory(view, workItemId);
-  // A row with no work item (an answered inquiry on a ROWS list) has nothing to draft on.
-  if (!item || !item.workItemId) return null;
+function inquiryTargetFromHistory(view: ConversationView, id: string): ResolvedTarget | null {
+  const item = inquiryFromHistory(view, id);
+  if (!item) return null;
+  const actionability = actionabilityOf({ workItemId: item.workItemId, phase: item.phase, status: item.status });
   return {
     kind: "INQUIRY",
-    target: {
+    inquiry: {
+      inquiryId: item.inquiryId, workItemId: item.workItemId, productId: item.productId, channelCode: item.channelCode,
+      channelNameKo: item.channelNameKo, productName: item.productName, title: item.title ?? null, status: item.status,
+      receivedAt: item.receivedAt ?? null,
+    },
+    actionability,
+    // Only a DRAFTABLE row has a work item the product's draft path will accept.
+    target: actionability === "DRAFTABLE" && item.workItemId ? {
       workItemId: item.workItemId, inquiryId: item.inquiryId, channelCode: item.channelCode,
       channelNameKo: item.channelNameKo, productId: item.productId, productName: item.productName,
-    },
+    } : null,
     // Absent on a row from an older backend ⇒ NONE: a channel label is not a marketplace binding.
     executableIdentity: item.executableIdentity ?? "NONE",
     sourceSubtype: item.sourceSubtype ?? null,
+  };
+}
+
+/** The seller-facing refusal when the draft path itself failed. Deterministic; the backend's text never travels. */
+export const DRAFT_FAILED_SENTENCE = "초안을 준비하는 중 문제가 생겨 이번에는 만들지 못했습니다. 잠시 후 다시 시도해 주세요.";
+export const NO_DRAFT_TO_REVISE_SENTENCE = "말투를 바꿀 초안을 찾지 못했습니다. 먼저 「답변 준비해줘」로 초안을 만들어 주세요.";
+
+const STATUS_WORD: Record<string, string> = { UNANSWERED: "답변 필요", ANSWERED: "답변함" };
+
+function inquiryLine(row: SelectedInquiryRow): string {
+  const parts = [row.channelNameKo ?? row.channelCode ?? "채널", STATUS_WORD[row.status.toUpperCase()] ?? "상태 미확인"];
+  if (row.receivedAt) parts.push(`${row.receivedAt.slice(0, 10)} 접수`);
+  if (row.productName) parts.push(row.productName);
+  return parts.join(" · ");
+}
+
+/** The state of a non-draftable inquiry, as an artifact the seller can act on — the row, the sentence, the link. */
+function inquiryStateSummary(row: SelectedInquiryRow, line: string): SummaryArtifact {
+  return {
+    artifactId: `a-state-${row.inquiryId}`, type: "SUMMARY", title: "초안을 만들지 않은 문의",
+    lines: [row.title ? `「${row.title}」` : inquiryLine(row), ...(row.title ? [inquiryLine(row)] : []), line],
+  };
+}
+
+/** The selected inquiry, shown so the seller sees WHICH row the next verb will act on. */
+function selectionSummary(row: SelectedInquiryRow): SummaryArtifact {
+  return {
+    artifactId: `a-selected-${row.inquiryId}`, type: "SUMMARY", title: "선택한 문의",
+    lines: [row.title ? `「${row.title}」` : "제목 없는 문의", inquiryLine(row)],
+  };
+}
+
+function selectionLine(index: number, row: SelectedInquiryRow, actionability: InquiryActionability): string {
+  const head = `${index}번째 문의를 골랐습니다.`;
+  switch (actionability) {
+    case "DRAFTABLE": return `${head} 「답변 준비해줘」라고 하시면 이 문의의 초안을 준비합니다.`;
+    case "ALREADY_ANSWERED": return `${head} 이미 답변된 문의입니다.`;
+    case "AWAITING_SEND": return `${head} 승인된 답변이 전송을 기다리고 있는 문의입니다.`;
+    default: return `${head} 지금은 답변 준비 대상이 아닌 문의입니다.`;
+  }
+}
+
+/**
+ * The working set anchored on one inquiry: the INQUIRIES kind the follow-up rules already read, exactly
+ * one id, the previous set's closed filters (so 「그중 …」 still refines the same read), the products
+ * beside it, and the selection itself. The label is the selection, never a customer word.
+ */
+function anchoredSet(row: SelectedInquiry, previous: WorkingSetView | null, productIds: readonly string[]): WorkingSetView {
+  // The list the selection was made from stays the set (「세 번째 거」 after 「첫 번째 거」 still counts on
+  // the same three rows; 「그중 네이버만」 still refines the same read); the selection rides beside it.
+  const list = previous?.kind === "INQUIRIES" && previous.ids.includes(row.inquiryId) ? previous : null;
+  const inherited = previous?.kind === "INQUIRIES" ? previous.filters : {};
+  const selectedInquiry: SelectedInquiry = {
+    inquiryId: row.inquiryId, workItemId: row.workItemId, productId: row.productId, channelCode: row.channelCode,
+  };
+  return {
+    kind: "INQUIRIES", label: list?.label ?? "선택한 문의", count: list?.count ?? 1, ids: list ? [...list.ids] : [row.inquiryId],
+    filters: { ...inherited, inquiryIntent: inherited.inquiryIntent ?? "ROWS" },
+    productIds: [...new Set(productIds)].slice(0, WORKING_SET_MAX_IDS),
+    workItemIds: list ? [...list.workItemIds] : row.workItemId ? [row.workItemId] : [],
+    selectedInquiry, turnId: "",
+  };
+}
+
+/** Did THIS turn's own specialists draw a list the seller asked for? (An R4 product grouping is not one.) */
+function drewFreshList(turnArtifacts: readonly Artifact[], anchor: SelectedInquiry | null): boolean {
+  const list = turnArtifacts.find((a) => a.type === "INQUIRY_LIST" || a.type === "REVIEW_LIST" || a.type === "ISSUE_LIST" || a.type === "ORDER_SUMMARY");
+  if (!list) return false;
+  // A refine that narrowed the list to the anchored inquiry itself is still about that inquiry.
+  if (anchor && list.type === "INQUIRY_LIST") {
+    const ids = list.groups.flatMap((g) => g.items.map((i) => i.inquiryId));
+    if (ids.length === 1 && ids[0] === anchor.inquiryId) return false;
+  }
+  return true;
+}
+
+/** The inquiry a screen launch resolved inside the graph — read back from the ref the runtime minted for it. */
+function selectedFromEntities(result: Extract<OperatorRunResult, { status: "DONE" }>, answer: OperatorAnswer, workItemId: string): SelectedInquiryRow | null {
+  const entity = result.entities.find((e) => e.kind === "INQUIRY" && e.id === workItemId);
+  if (!entity) return null;
+  const ref = answer.evidence.find((e) => e.kind === "INQUIRY" && e.locator.workItemId === workItemId);
+  const inquiryId = typeof ref?.locator.inquiryId === "string" ? ref.locator.inquiryId : null;
+  if (!inquiryId) return null;
+  return {
+    inquiryId, workItemId,
+    productId: typeof ref?.locator.productId === "string" ? ref.locator.productId : null,
+    channelCode: typeof ref?.locator.channelCode === "string" ? ref.locator.channelCode : null,
+    channelNameKo: null,
+    productName: typeof ref?.locator.productName === "string" ? ref.locator.productName : null,
+    title: null,
+    status: typeof ref?.locator.status === "string" ? ref.locator.status : "",
+    receivedAt: ref?.events?.from ?? null,
   };
 }
 
@@ -1293,7 +1621,11 @@ function suggestionsFor(
         chips.push(promptChip("안 좋은 것만 봐줘"), promptChip("상품별로 묶어줘"), promptChip("문의에서도 같은 문제가 있는지 봐줘"));
         break;
       case "INQUIRIES":
-        if (workingSet.filters.inquiryIntent === "ROWS") {
+        if (workingSet.selectedInquiry) {
+          chips.push(promptChip("답변 준비해줘"));
+          if (workingSet.selectedInquiry.productId) chips.push(promptChip("이 상품 기준으로 답변 준비해줘"));
+          chips.push(promptChip("답변 안 한 문의만 보여줘"));
+        } else if (workingSet.filters.inquiryIntent === "ROWS") {
           chips.push(promptChip("답변 안 한 것만 보여줘"), promptChip("그중 가장 최근 1개만"), promptChip("첫 번째 거 답변 준비해줘"));
         } else {
           chips.push(promptChip("배송 관련부터"), promptChip("첫 번째 거 답변 준비해줘"));

@@ -54,6 +54,7 @@ export interface SeedInquiry {
   readonly details: string;
   readonly receivedAt: string; // ISO-8601
   readonly status?: string; // canonical status; defaults UNANSWERED
+  readonly phase?: string; // work item phase; defaults OPEN (a COMPLETED seed models an inquiry already answered through the executor)
   readonly channelCode?: string | null; // resolved catalog label; defaults null
   readonly channelNameKo?: string | null; // resolved catalog label; defaults null
   readonly isSecret?: boolean | null; // Cafe24 비밀글 flag; defaults null (unclassified)
@@ -139,7 +140,7 @@ export class FakeSpringClient implements SpringClient {
     this.answeredSeeds.push(...(opts.answered ?? []));
     for (const s of seeds) {
       this.items.set(s.workItemId, {
-        phase: "OPEN",
+        phase: s.phase ?? "OPEN",
         status: s.status ?? "UNANSWERED",
         informStatus: null,
         seed: s,

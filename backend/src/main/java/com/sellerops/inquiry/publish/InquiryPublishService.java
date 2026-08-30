@@ -19,6 +19,7 @@ import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemEvent;
 import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -500,6 +501,11 @@ public class InquiryPublishService {
         if (verified) {
             execution.setStatus(InquiryExecutionStatus.COMPLETED);
             setPhase(workItem, InquiryWorkItemPhase.COMPLETED);
+            // Canonical answer state (Conversation Object Integrity v1): the verified read-back is the
+            // same deterministic proof the connector reconcilers act on, so the inquiry row itself
+            // becomes ANSWERED here — otherwise rows/count read UNANSWERED while the work item says
+            // COMPLETED and one conversation shows the same inquiry as both 「답변 필요」 and 「답변 없음」.
+            markInquiryAnswered(inquiry);
             // Only here. A dispatch whose delivery is unknown is not a sent answer, and remembering
             // it as one would put text the customer may never have received into the precedent the
             // next draft is written from.
@@ -510,6 +516,20 @@ public class InquiryPublishService {
                 "verify:" + workItem.getId() + ":" + execution.getVerifyAttempts(),
                 InquiryWorkItemEvent.VERIFICATION_RECORDED, from,
                 verified ? InquiryWorkItemPhase.COMPLETED : from);
+    }
+
+    /**
+     * The verified answer, on the inquiry row: {@code status=ANSWERED}, {@code answeredAt} stamped once.
+     * Idempotent — a row already ANSWERED (by a connector sweep that ran first) keeps its own timestamp.
+     */
+    private void markInquiryAnswered(Inquiry inquiry) {
+        if (!"ANSWERED".equals(inquiry.getStatus())) {
+            inquiry.setStatus("ANSWERED");
+            if (inquiry.getAnsweredAt() == null) {
+                inquiry.setAnsweredAt(Instant.now());
+            }
+            inquiries.save(inquiry);
+        }
     }
 
     /**

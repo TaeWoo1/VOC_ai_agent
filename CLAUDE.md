@@ -616,6 +616,14 @@ env secret 미포함). 권장: EC2 t3.medium + EIP + A 레코드, 공개 포트 
 `/api/connect/cafe24/callback`에 stable host를 앞세울 뿐이고 Demo Org 토큰은 건드리지 않는다. **billable 리소스 생성 0** —
 region·domain·Cafe24 app·NAVER IP 등록·SSH 자세·off-host 백업은 product-owner 입력).
 
+**`docs/conversation_object_integrity_v1.md`** (Conversation Object Integrity v1 — 2026-08-30. 통합 QA가 이름 붙인
+객체 정합성 결함만 닫는다: **문의 identity ≠ work-item identity**(ROWS 집합은 inquiry id로 색인, `title`은 영속),
+**effective answer state 하나**(검증된 read-back이 `inquiries.status`도 ANSWERED로 — V88이 과거 검증 행을 닫음),
+**선택 문의 anchor**(`WorkingSetView.selectedInquiry` — 새 목록을 그리기 전까지 유지, 상품은 곁에 추가), **actionability
+gate**(`inquiryActionability.ts` — 답변된·전송 대기·비대상 문의는 retrieval·proposal·모델 호출 0), **tone revision lane**
+(`styleIntent.ts` — 세 `ToneHint` 토큰의 닫힌 cue 표, 초안이 있을 때만; planner 0·tool 0·같은 근거·새 버전). 실제 planner로
+A–G 재검증, 마켓플레이스 0 · WRITE 0. Knowledge retrieval tuning·wording 대개편·Knowledge Capture는 미포함.)
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

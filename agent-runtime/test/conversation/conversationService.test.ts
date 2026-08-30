@@ -342,7 +342,7 @@ describe("L / misc — failure, clarification, workspace link, persistence", () 
     expect(artifact(turn, "WORKSPACE_LINK").link.to).toBe("/inquiries?state=NEEDS_REPLY");
   });
 
-  it("persistence strips previews, titles, comments and the answer; the live turn keeps them", async () => {
+  it("persistence strips previews, comments and the answer; the live turn keeps them — inquiry titles persist", async () => {
     const { h, id } = await fresh();
     const a = await say(h, id, "오늘 새로 달린 리뷰 보여줘");
     expect(artifact(a.turn, "REVIEW_LIST").items[0]!.preview).toBeTruthy();
@@ -354,7 +354,9 @@ describe("L / misc — failure, clarification, workspace link, persistence", () 
     const stored = await h.service.get(TOKEN, id);
     const serialized = JSON.stringify(stored);
     expect(serialized).not.toContain("붙이기 쉽고");
-    expect(serialized).not.toContain("배송 언제 오나요");
+    // Conversation Object Integrity v1: the inquiry subject line is the seller's own operational content
+    // and is what names the selected row after a reload — it stays (bounded); the body never travels here.
+    expect(serialized).toContain("배송 언제 오나요");
     expect(serialized).not.toContain("문의 주신 내용 확인했습니다");
     expect(stored.turns.every((t) => t.answer === undefined)).toBe(true);
     expect(stored.turns).toHaveLength(6);

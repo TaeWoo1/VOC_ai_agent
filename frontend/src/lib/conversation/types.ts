@@ -373,6 +373,8 @@ export interface WorkingSetView {
   };
   productIds: string[];
   workItemIds: string[];
+  /** The one inquiry the seller selected — the anchor a follow-up acts on (Conversation Object Integrity v1). */
+  selectedInquiry?: { inquiryId: string; workItemId: string | null; productId: string | null; channelCode: string | null } | null;
   turnId: string;
 }
 
