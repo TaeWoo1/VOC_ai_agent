@@ -27,7 +27,8 @@ export type ArtifactType =
   | "APPROVAL"
   | "GUIDED_EXECUTION"
   | "EXECUTION_RESULT"
-  | "WORKSPACE_LINK";
+  | "WORKSPACE_LINK"
+  | "KNOWLEDGE_CAPTURE";
 
 export type StatusTone = "good" | "warn" | "bad" | "info" | "neutral";
 
@@ -330,6 +331,29 @@ export interface ExecutionResultArtifact extends ArtifactBase {
   to: string;
 }
 
+/** Knowledge Capture v1 — one capture as the seller sees it (mirror of the runtime's contract). */
+export type KnowledgeCaptureState = "ASKED" | "CANDIDATE" | "SAVED" | "DUPLICATE" | "CONFLICT" | "CANCELLED" | "STALE";
+
+export interface KnowledgeCaptureArtifact extends ArtifactBase {
+  type: "KNOWLEDGE_CAPTURE";
+  captureId: string;
+  state: KnowledgeCaptureState;
+  scope: "ORG" | "PRODUCT";
+  topicLabel: string;
+  productId: string | null;
+  productName: string | null;
+  variantName: string | null;
+  inquiryId: string | null;
+  question: string;
+  /** CANDIDATE/SAVED: the seller's own sentence, verbatim (whitespace only). */
+  content: string | null;
+  /** CANDIDATE: what 「저장하고 계속」 must echo back — a changed sentence is a new fingerprint. */
+  fingerprint: string | null;
+  existing: { title: string; excerpt: string } | null;
+  resume: "DRAFT_GROUNDED" | "DRAFT_STILL_GAP" | "INQUIRY_NOT_ACTIONABLE" | "PENDING_RESUME" | null;
+  settingsTo: string;
+}
+
 export interface WorkspaceLinkArtifact extends ArtifactBase {
   type: "WORKSPACE_LINK";
   link: WorkspaceLink;
@@ -353,7 +377,8 @@ export type Artifact =
   | HumanActionRequiredArtifact
   | ApprovalArtifact
   | ExecutionResultArtifact
-  | WorkspaceLinkArtifact;
+  | WorkspaceLinkArtifact
+  | KnowledgeCaptureArtifact;
 
 export type WorkingSetKind = "REVIEWS" | "INQUIRIES" | "PRODUCTS" | "ORDERS" | "ISSUES";
 
@@ -423,6 +448,8 @@ export interface TurnView {
     pendingHumanAction: PendingHumanAction | null;
     pendingHumanActions?: PendingHumanAction[];
     pendingPrepared: PendingPreparedAction | null;
+    /** Knowledge Capture v1: the gap the agent is holding open after this turn, if any. */
+    pendingCapture?: { captureId: string; state: "ASKED" | "CANDIDATE"; inquiryId: string | null } | null;
   };
   status: TurnStatus;
   failureCode?: string;
@@ -486,6 +513,11 @@ export interface StartTurnRequest {
   channelCode?: "NAVER" | "COUPANG" | "CAFE24";
   surface?: string;
   resumeOfTurnId?: string;
+  /**
+   * Knowledge Capture v1: the seller's decision on the candidate card, bound to it by capture id AND
+   * the fingerprint of the exact sentence shown. Sent alone (no text); the runtime writes only on SAVE.
+   */
+  captureDecision?: { captureId: string; fingerprint: string; decision: "SAVE" | "CANCEL" };
   referenceDate?: string;
   /**
    * Whether this browser is paired with a local helper right now — a HINT from the bridge health probe

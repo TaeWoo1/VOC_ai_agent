@@ -618,6 +618,8 @@ export interface ProductListing {
 
 /** Mirror of `ProductVariantView`. A derived variant carries an id and no name — see the backend doc. */
 export interface ProductVariantRow {
+  /** SellerOps's own row id — what a 규격-scoped knowledge document binds to (`variantId`). */
+  readonly id?: string;
   readonly channelCode: string;
   readonly externalVariantId: string | null;
   readonly optionName: string | null;
@@ -1155,6 +1157,69 @@ export interface GeneratedDraftView {
   /** Seller Context v1-B: the registered 회사 정보 was shown to the drafter as wording context. Metadata only. */
   readonly companyContextUsed?: boolean;
   readonly unavailableMessage: string | null;
+  /**
+   * Knowledge Capture v1 — the retrieval's closed verdict per lane (mirror of `KnowledgeGapView`), so a
+   * gap is decided from values the composer computed, never from a sentence. Absent on an older backend.
+   */
+  readonly knowledgeGap?: KnowledgeGapView | null;
+}
+
+/** Mirror of `KnowledgeGapView`: what each lane established and which noun/topic the question named. */
+export interface KnowledgeGapView {
+  readonly productId: string | null;
+  /** `KnowledgeTopic` name (SHIPPING · EXCHANGE_RETURN · CANCELLATION · PAYMENT · TAX_INVOICE · CASH_RECEIPT) or null. */
+  readonly topic: string | null;
+  /** Every operating topic the question's words name (`topic` is the single member); absent on an older backend. */
+  readonly topics?: ReadonlyArray<string>;
+  /** The customer's own property noun, quoted from the question, or null. */
+  readonly missingSubject: string | null;
+  readonly productOutcome: RetrievalOutcome | null;
+  readonly policyOutcome: RetrievalOutcome | null;
+  /** `NOT_VARIANT_SENSITIVE` · `VARIANT_UNRESOLVED` · `VARIANT_NAMED`, or null. */
+  readonly applicability: string | null;
+  readonly variantId: string | null;
+  readonly policyDeclaresTopic: boolean;
+}
+
+/* ─────────────── Knowledge Capture v1 (2026-08-30) — the seller-write seams the lane may reach ─────────────── */
+
+/** Mirror of `OrgKnowledgeView` (`GET/POST /api/org-knowledge/sources`). */
+export interface OrgKnowledgeSourceView {
+  readonly id: string;
+  readonly knowledgeType: string;
+  readonly typeLabel: string | null;
+  readonly title: string;
+  readonly body: string;
+  readonly version?: number;
+  readonly passageCount?: number;
+}
+
+export interface OrgKnowledgeCreateRequest {
+  readonly knowledgeType: string;
+  readonly title: string;
+  readonly body: string;
+  readonly sourceUrl: null;
+}
+
+/** Mirror of `KnowledgeSourceView` (`GET/POST /api/products/{id}/knowledge/sources`). */
+export interface ProductKnowledgeSourceView {
+  readonly id: string;
+  readonly productId: string;
+  readonly sourceType: string;
+  readonly title: string;
+  readonly body: string;
+  readonly chunks?: number;
+  readonly authoredOrigin?: string | null;
+  readonly variantId: string | null;
+  readonly variantName?: string | null;
+}
+
+export interface ProductKnowledgeCreateRequest {
+  readonly sourceType: "DESCRIPTION" | "FAQ" | "USAGE" | "POLICY";
+  readonly title: string;
+  readonly body: string;
+  readonly sourceUrl: null;
+  readonly variantId: string | null;
 }
 
 /* ─────────────── Channel capability sources (Agentic Operating Workspace v2 — channel-capability completion, 2026-08-28) ─────────────── */

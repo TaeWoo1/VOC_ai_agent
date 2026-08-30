@@ -78,6 +78,7 @@ export function ConversationWorkspace({
             compact={compact}
             onPrompt={send}
             onResume={(turnId) => void conversation.resume(turnId)}
+            onCaptureDecision={(captureId, fingerprint, decision) => void conversation.decideCapture(captureId, fingerprint, decision)}
           />
         </div>
       </div>

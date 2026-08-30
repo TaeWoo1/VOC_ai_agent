@@ -643,6 +643,19 @@ bounded candidate ≤4로 검색, 세 lane·composer·검색 endpoint 공유; sc
 `DraftArtifact`는 본문 우선 + compact 근거 한 줄 + 「말투 다듬기」/「보내기 준비」(둘 다 대화 문장, 승인 경계 무변경) +
 reload 시 저장 버전 재읽기. 라이브 A–J (disposable org, 마켓플레이스 0 · WRITE 0) + 브라우저 7턴 토큰 0.)
 
+**`docs/knowledge_capture_learning_loop_v1.md`** (Knowledge Capture / Learning Loop v1 — 2026-08-30. Agent가 업무 중
+실제 Knowledge Gap을 만나면 **판매자에게 그 사실 하나를 묻고**, 판매자가 쓴 문장을 **fingerprint에 묶인 「저장하고 계속」**
+뒤에만 기존 seller-write seam(`POST /api/org-knowledge/sources` · `POST /api/products/{id}/knowledge/sources`,
+`SELLER_ENTERED_KNOWLEDGE`)으로 저장하고 원래 일을 **한 번** 다시 한다. 게이트는 composer의 per-lane 판정을 값으로 실은
+`GeneratedDraftView.knowledgeGap`(문장 파싱 0) — `ABSENT`/미선언 miss만 묻고 **`NOT_APPLICABLE`은 같은 정책을 다시
+묻지 않으며**, 두 topic을 이름 짓는 질문은 planner의 POLICY gap이 그중 하나를 골랐을 때만 ORG로 간다. 질문은 scope×topic
+닫힌 템플릿(모델 0), 답변 판정은 닫힌 취소/질문/명령 cue, 정규화는 공백·길이뿐, 중복/충돌 fence는 결정론(같은 본문·같은 제목·
+같은 단위 다른 수치 → 덮어쓰기 0, 설정 화면으로). `pendingCapture`가 대화 상태에 영속되고 다른 문의로 옮기면 떨어진다;
+resume 전 actionability 재검사(답변된 문의는 기준만 저장). writer는 `KnowledgeCaptureWriter.ts` 한 파일(write fence).
+라이브: 충돌·중복·취소·stale·저장→GROUNDED 재초안(근거 인용)·GOAL 재실행·ANSWERED 경계 전부 확인; **lexical retriever가
+판매자의 「출고」와 고객의 「배송」을 잇지 못해 저장 뒤에도 `DRAFT_STILL_GAP`인 경우는 정직하게 남기고 보고**(threshold 무변경).
+마켓플레이스 0 · WRITE 0 · 마이그레이션 0).
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

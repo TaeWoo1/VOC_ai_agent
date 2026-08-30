@@ -81,11 +81,12 @@ describe("E — a rule that exists and does not apply is said as that", () => {
     expect(turn.answer?.evidence.find((e) => e.kind === "ORG_POLICY_GAP")?.locator.outcome).toBe("NOT_APPLICABLE");
   });
 
-  it("ABSENT: 「등록된 배송 기준이 아직 없습니다」 and the register step is offered", async () => {
+  it("ABSENT: 「등록된 배송 기준이 아직 없습니다」 and the rule is asked for (Knowledge Capture v1)", async () => {
     const h = harness({ plansByGoal: PLANS, orgKnowledgeSearch: policy("ABSENT", 0) });
     const { turn } = await ask(h, POLICY_ASK);
     expect(turn.message).toContain("등록된 배송 기준이 아직 없습니다.");
-    expect(artifact(turn, "HUMAN_ACTION_REQUIRED").actionType).toBe("KNOWLEDGE_ENTRY");
+    expect(artifact(turn, "KNOWLEDGE_CAPTURE").state).toBe("ASKED");
+    expect(turn.artifacts.some((a) => a.type === "HUMAN_ACTION_REQUIRED")).toBe(false);
   });
 
   it("an older backend without `outcome` still gets the two-valued truth from the counts", async () => {

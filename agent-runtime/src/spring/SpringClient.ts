@@ -55,6 +55,10 @@ import type {
   ChannelSummary,
   DashboardOverview,
   GeneratedDraftView,
+  OrgKnowledgeSourceView,
+  OrgKnowledgeCreateRequest,
+  ProductKnowledgeSourceView,
+  ProductKnowledgeCreateRequest,
   OrderSummaryParams,
   OrderSummaryResponse,
   RecentReviewsParams,
@@ -108,6 +112,19 @@ export interface SpringClient {
    * conversation lane's `DraftPreparer`, on the seller's explicit sentence.
    */
   generateDraftFor(workItemId: string, tone: "SOFTER" | "MORE_FORMAL" | "SHORTER" | null): Promise<GeneratedDraftView>;
+
+  /**
+   * Knowledge Capture v1 — the seller-authored knowledge seams, exactly the ones the settings screens use.
+   *
+   * The two `create*` methods are the ONLY writes a captured fact may take, and `conversationWriteFence`
+   * pins their one caller (`KnowledgeCaptureWriter.ts`). What is written is the seller's own sentence
+   * after an explicit, fingerprint-bound confirmation — never a model's, never a customer's. The two
+   * `list*` reads exist so the lane can refuse a duplicate or a conflicting fact BEFORE asking to save.
+   */
+  listOrgKnowledge(): Promise<OrgKnowledgeSourceView[]>;
+  createOrgKnowledge(request: OrgKnowledgeCreateRequest): Promise<OrgKnowledgeSourceView>;
+  listProductKnowledgeSources(productId: string): Promise<ProductKnowledgeSourceView[]>;
+  createProductKnowledgeSource(productId: string, request: ProductKnowledgeCreateRequest): Promise<ProductKnowledgeSourceView>;
 
   /**
    * The product's own one-press collection (`POST /api/seller-accounts/{accountId}/sync {dataType}`) —
@@ -579,6 +596,22 @@ export class HttpSpringClient
       `/api/inquiries/${encodeURIComponent(workItemId)}/draft/generate`,
       tone ? { tone } : undefined,
     );
+  }
+
+  async listOrgKnowledge(): Promise<OrgKnowledgeSourceView[]> {
+    return this.request<OrgKnowledgeSourceView[]>("GET", "/api/org-knowledge/sources");
+  }
+
+  async createOrgKnowledge(request: OrgKnowledgeCreateRequest): Promise<OrgKnowledgeSourceView> {
+    return this.request<OrgKnowledgeSourceView>("POST", "/api/org-knowledge/sources", request);
+  }
+
+  async listProductKnowledgeSources(productId: string): Promise<ProductKnowledgeSourceView[]> {
+    return this.request<ProductKnowledgeSourceView[]>("GET", `/api/products/${encodeURIComponent(productId)}/knowledge/sources`);
+  }
+
+  async createProductKnowledgeSource(productId: string, request: ProductKnowledgeCreateRequest): Promise<ProductKnowledgeSourceView> {
+    return this.request<ProductKnowledgeSourceView>("POST", `/api/products/${encodeURIComponent(productId)}/knowledge/sources`, request);
   }
 
   async planGoal(request: {

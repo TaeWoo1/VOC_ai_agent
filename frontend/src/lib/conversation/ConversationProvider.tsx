@@ -68,6 +68,12 @@ export interface ConversationState {
   send(text: string, hints?: TurnHints, surface?: ConversationSurface): Promise<void>;
   resume(turnId: string): Promise<void>;
   /**
+   * Knowledge Capture v1: 「저장하고 계속」 / 「취소」 on a candidate card. Nothing is written here — the
+   * decision travels to the runtime bound to the capture id and the fingerprint of the sentence shown,
+   * and the runtime writes (through the seller's own knowledge seam) only on a matching SAVE.
+   */
+  decideCapture(captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL"): Promise<void>;
+  /**
    * Stop the turn in flight. Bounded and honest: the stream is closed, the runtime cancels the run's
    * budget (the step already running finishes on its own; nothing new starts), and the thread shows
    * 「요청을 중지했습니다」 — never a half-answer, never a claim that what already ran was undone.
@@ -327,6 +333,14 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     [run],
   );
 
+  const decideCapture = useCallback(
+    async (captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL") => {
+      // The runtime logs the decision; no client analytics event carries the sentence.
+      await run({ captureDecision: { captureId, fingerprint, decision } }, decision === "SAVE" ? "저장하고 계속" : "취소");
+    },
+    [run],
+  );
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -432,6 +446,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       plannerOff,
       send,
       resume,
+      decideCapture,
       stop,
       historyVersion,
       newConversation,
@@ -439,7 +454,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       openConversation,
       addLocalTurn,
     }),
-    [conversationId, turns, busy, elapsed, stages, error, pendingHumanAction, workingSet, plannerOff, send, resume, stop, historyVersion, newConversation, loadHistory, openConversation, addLocalTurn],
+    [conversationId, turns, busy, elapsed, stages, error, pendingHumanAction, workingSet, plannerOff, send, resume, decideCapture, stop, historyVersion, newConversation, loadHistory, openConversation, addLocalTurn],
   );
   return <ConversationContext.Provider value={value}>{children}</ConversationContext.Provider>;
 }

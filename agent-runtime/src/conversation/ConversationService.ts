@@ -51,6 +51,13 @@ import type { DraftTarget, ReviewDraftTarget } from "./DraftPreparer";
 import { ACTIONABILITY_SENTENCE, actionabilityOf } from "./inquiryActionability";
 import type { InquiryActionability } from "./inquiryActionability";
 import { ordinalSelectionOf, toneIntentOf } from "./styleIntent";
+import {
+  CAPTURE_SENTENCE, captureGapOf, classifySellerAnswer, fingerprintOf, judgeCandidate, normalizeContent, orgTopicOf,
+  questionFor, settingsPathFor, titleOf, variantFromAnswer,
+} from "./knowledgeCapture";
+import type { ExistingKnowledge, OpenedGap } from "./knowledgeCapture";
+import { KnowledgeCaptureWriter } from "./KnowledgeCaptureWriter";
+import { excerpt } from "../operator/wording/sellerWording";
 import { Refresher } from "./Refresher";
 import { claimsFor } from "./reviewClaim";
 import { boundedTurns, STAGE_LABEL, WORKING_SET_MAX_IDS } from "./contract";
@@ -59,7 +66,9 @@ import type {
   ExecutableIdentity, GuidedExecutionArtifact, HumanActionRequiredArtifact, InquiryItem, PendingHumanAction,
   PendingPreparedAction, ProgressEvent, ProgressStage, ReviewItem, SelectedInquiry, StartTurnRequest, SuggestedAction,
   SummaryArtifact, ToneHint, TurnStatus, TurnView, WorkingSetKind, WorkingSetView, WorkspaceLinkArtifact, ObjectKind,
+  KnowledgeCaptureArtifact, PendingKnowledgeCapture,
 } from "./contract";
+import type { GeneratedDraftView } from "../spring/types";
 import { periodLabel } from "./period";
 
 export interface ConversationServiceDeps {
@@ -125,7 +134,12 @@ interface Composed {
   workingSet: WorkingSetView | null; pendingHumanActions: PendingHumanAction[];
   pendingPrepared: PendingPreparedAction | null; failureCode?: string; failureReason?: string;
   budget?: TurnView["budget"]; answer?: OperatorAnswer;
+  /** Knowledge Capture v1: the gap to hold open after this turn; `undefined` = carry the thread's as it is. */
+  pendingCapture?: PendingKnowledgeCapture | null;
 }
+
+/** What a resumed turn says first when it follows a saved capture (Knowledge Capture v1, GOAL resume). */
+interface AfterCapture { readonly message: string; readonly artifact: KnowledgeCaptureArtifact }
 
 /** What the thread says where a stopped turn would have answered. Never a claim about what was found. */
 export const CANCELLED_MESSAGE = "요청을 중지했습니다. 이미 시작된 확인은 되돌리지 않습니다.";
@@ -187,11 +201,19 @@ export class ConversationService {
     }
   }
 
-  private async turnNow(token: string, id: string, request: StartTurnRequest, progress: ProgressFn, options: { signal?: AbortSignal } = {}): Promise<TurnView> {
+  private async turnNow(
+    token: string, id: string, request: StartTurnRequest, progress: ProgressFn,
+    options: { signal?: AbortSignal; afterCapture?: AfterCapture } = {},
+  ): Promise<TurnView> {
     const started = Date.now();
     const { bundle, store, orgId } = await this.tenant(token);
     const view = await store.load(id);
     if (!view) throw new HttpError(404, "UNKNOWN_CONVERSATION", "no conversation found for this id");
+
+    // ── Knowledge Capture v1: the seller's decision on the candidate shown — bound to it, never to text.
+    if (request.captureDecision) {
+      return this.decideCapture(token, id, view, request.captureDecision, bundle, store, progress, options.signal, started);
+    }
 
     // ── A resumed turn: the seller (or the watcher) says a human step may be done. Check each step's
     // own record before spending anything else — no model call, no tool call beyond those reads.
@@ -202,6 +224,7 @@ export class ConversationService {
     let prefix = "";
     let remaining: PendingHumanAction[] = [];
     let partialChips: SuggestedAction[] = [];
+    if (options.afterCapture) prefix = `${options.afterCapture.message} `;
     if (request.resumeOfTurnId) {
       const target = view.turns.find((t) => t.turnId === request.resumeOfTurnId && t.role === "AGENT");
       const pendingAll = pendingActionsOf(view);
@@ -230,7 +253,7 @@ export class ConversationService {
             workingSet: view.workingSet, pendingHumanActions: mine, pendingPrepared: view.pendingPrepared,
             resumedFrom,
           });
-          await this.persist(store, view, [again], view.workingSet, mine, view.pendingPrepared);
+          await this.persist(store, view, [again], view.workingSet, mine, view.pendingPrepared, view.pendingCapture ?? null);
           return again;
         }
         collected = done
@@ -281,11 +304,12 @@ export class ConversationService {
       const agentTurn = this.agentTurn(view, direct);
       const workingSet = direct.workingSet ? { ...direct.workingSet, turnId: agentTurn.turnId } : null;
       const pendingPrepared = direct.pendingPrepared ? { ...direct.pendingPrepared, turnId: agentTurn.turnId } : null;
+      const pendingCapture = stampCapture(direct.pendingCapture !== undefined ? direct.pendingCapture : view.pendingCapture ?? null, agentTurn.turnId);
       const finalTurn: TurnView = {
         ...agentTurn,
-        continuation: { workingSet, pendingHumanAction: null, pendingHumanActions: [], pendingPrepared },
+        continuation: { workingSet, pendingHumanAction: null, pendingHumanActions: [], pendingPrepared, pendingCapture },
       };
-      await this.persist(store, view, [userTurn, finalTurn], workingSet, pendingActionsOf(view), pendingPrepared);
+      await this.persist(store, view, [userTurn, finalTurn], workingSet, pendingActionsOf(view), pendingPrepared, pendingCapture);
       log("conversation_turn", {
         status: finalTurn.status, toolCalls: 0, llmCalls: 0, ms: Date.now() - started,
         artifactTypes: [...new Set(finalTurn.artifacts.map((a) => a.type))].join(","),
@@ -336,12 +360,13 @@ export class ConversationService {
         workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
         failureCode: "CANCELLED", failureReason: CANCELLED_MESSAGE, ...(resumedFrom ? { resumedFrom } : {}),
       });
-      await this.persist(store, view, [userTurn, stopped], view.workingSet, pendingActionsOf(view), view.pendingPrepared);
+      await this.persist(store, view, [userTurn, stopped], view.workingSet, pendingActionsOf(view), view.pendingPrepared, view.pendingCapture ?? null);
       log("conversation_turn", { status: "CANCELLED", ms: Date.now() - started });
       return stopped;
     }
 
-    const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? []);
+    const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? [], options.afterCapture);
+    if (options.afterCapture) composed.artifacts = [options.afterCapture.artifact, ...composed.artifacts];
     if (partialChips.length > 0) {
       composed.suggestedActions = [...partialChips, ...composed.suggestedActions.filter((s) => s.kind !== "RESUME")];
     }
@@ -357,13 +382,19 @@ export class ConversationService {
     const pendingPrepared = composed.pendingPrepared
       ? { ...composed.pendingPrepared, turnId: agentTurn.turnId } : null;
     const workingSet = composed.workingSet ? { ...composed.workingSet, turnId: agentTurn.turnId } : null;
+    // A gap opened this turn is bound to this turn; one carried over is dropped when the seller moved to
+    // another inquiry — a stale question must never file its answer under a different customer's case.
+    const pendingCapture = stampCapture(
+      composed.pendingCapture !== undefined ? composed.pendingCapture : carriedCapture(view.pendingCapture ?? null, workingSet),
+      agentTurn.turnId,
+    );
     const finalTurn: TurnView = {
       ...agentTurn,
       continuation: {
-        workingSet, pendingHumanAction: pendingHumanActions[0] ?? null, pendingHumanActions, pendingPrepared,
+        workingSet, pendingHumanAction: pendingHumanActions[0] ?? null, pendingHumanActions, pendingPrepared, pendingCapture,
       },
     };
-    await this.persist(store, view, [userTurn, finalTurn], workingSet, pendingHumanActions, pendingPrepared);
+    await this.persist(store, view, [userTurn, finalTurn], workingSet, pendingHumanActions, pendingPrepared, pendingCapture);
     log("conversation_turn", {
       status: finalTurn.status,
       toolCalls: finalTurn.budget?.toolCalls ?? 0,
@@ -380,7 +411,7 @@ export class ConversationService {
     status: TurnStatus; message: string; artifacts: readonly Artifact[]; suggestedActions: readonly SuggestedAction[];
     workingSet: WorkingSetView | null; pendingHumanActions: readonly PendingHumanAction[];
     pendingPrepared: PendingPreparedAction | null; resumedFrom?: string; failureCode?: string; failureReason?: string;
-    budget?: TurnView["budget"]; answer?: OperatorAnswer;
+    budget?: TurnView["budget"]; answer?: OperatorAnswer; pendingCapture?: PendingKnowledgeCapture | null;
   }): TurnView {
     return {
       turnId: randomUUID(), conversationId: view.conversationId, role: "AGENT",
@@ -388,6 +419,7 @@ export class ConversationService {
       continuation: {
         workingSet: input.workingSet, pendingHumanAction: input.pendingHumanActions[0] ?? null,
         pendingHumanActions: [...input.pendingHumanActions], pendingPrepared: input.pendingPrepared,
+        pendingCapture: input.pendingCapture ?? view.pendingCapture ?? null,
       },
       status: input.status,
       ...(input.failureCode ? { failureCode: input.failureCode } : {}),
@@ -402,12 +434,13 @@ export class ConversationService {
   private async persist(
     store: ConversationStore, view: ConversationView, turns: readonly TurnView[],
     workingSet: WorkingSetView | null, pendingHumanActions: readonly PendingHumanAction[],
-    pendingPrepared: PendingPreparedAction | null,
+    pendingPrepared: PendingPreparedAction | null, pendingCapture: PendingKnowledgeCapture | null,
   ): Promise<void> {
     await store.save({
       ...view,
       turns: boundedTurns([...view.turns, ...turns]),
       workingSet, pendingHumanAction: pendingHumanActions[0] ?? null, pendingHumanActions: [...pendingHumanActions], pendingPrepared,
+      pendingCapture,
       updatedAt: this.now(),
     });
   }
@@ -417,7 +450,14 @@ export class ConversationService {
     view: ConversationView, result: OperatorRunResult, hints: StartTurnRequest, prefix: string,
     bundle: SpringClientBundle, stage: (s: ProgressStage, label: string) => void,
     stillPending: readonly PendingHumanAction[], collected: NonNullable<ConversationRunContext["collected"]>,
+    afterCapture?: AfterCapture,
   ): Promise<Composed> {
+    // One automatic resume per saved capture: a turn that follows a save never opens another gap, and
+    // neither does the turn right after a SAVED card (the loop this fence forbids).
+    const captureAllowed = !afterCapture && !lastTurnSavedCapture(view);
+    let pendingCapture: PendingKnowledgeCapture | null | undefined = undefined;
+    // An agent-lane capture question is said LAST: the finding (「등록된 배송 기준이 아직 없습니다」) first, then the ask.
+    let trailingQuestion: string | null = null;
     if (result.status === "FAILED") {
       return {
         status: "FAILED", message: result.reason, artifacts: [], suggestedActions: [],
@@ -582,8 +622,11 @@ export class ConversationService {
           const target = resolved.target;
           stage("PREPARING_DRAFT", STAGE_LABEL.PREPARING_DRAFT);
           let draft: DraftArtifact;
+          let generated: GeneratedDraftView | null = null;
           try {
-            draft = await preparer.prepare(target, axis.tone, `a-draft-${target.workItemId}`);
+            const prepared = await preparer.prepareWithView(target, axis.tone, `a-draft-${target.workItemId}`);
+            draft = prepared.artifact;
+            generated = prepared.view;
           } catch (err) {
             // The draft path refused (a phase the gate could not see, a backend outage): said as a
             // sentence on a DONE turn — never a vanished turn. The vendor/backend text stays out.
@@ -600,6 +643,22 @@ export class ConversationService {
             // ① what is missing (the backend's own sentence) ② the one next step. The card's title says
             // 「답변 기준이 필요합니다」 once; the prose does not say it a second time.
             const specificNote = draft.answerBasisNote && !GENERIC_BASIS_NOTE.test(draft.answerBasisNote) ? draft.answerBasisNote : null;
+            // Knowledge Capture v1: when the composer's own verdict names ONE fact the seller can state,
+            // ask for it here — a specific question, held open for the next sentence — instead of only
+            // pointing at a screen. NOT_APPLICABLE never asks for the same rule again (`captureGapOf`).
+            const plannedGap = answer.evidence.find((e) => e.kind === "ORG_POLICY_GAP" && e.locator.outcome === "ABSENT");
+            const plannerTopic = plannedGap ? orgTopicOf(String(plannedGap.locator.label ?? "").replace(/ (기준|근거) 없음$/, ""))?.topic ?? null : null;
+            const gap = captureAllowed && !draft.unavailableMessage ? captureGapOf(generated?.knowledgeGap, {
+              inquiryId: target.inquiryId, workItemId: target.workItemId, productId: target.productId, productName: target.productName, tone: axis.tone,
+            }, plannerTopic) : null;
+            if (gap) {
+              const opened = this.openCapture(gap, { kind: "INQUIRY_DRAFT", workItemId: target.workItemId, inquiryId: target.inquiryId, tone: axis.tone });
+              pendingCapture = opened;
+              artifacts.push(captureArtifact(opened, "ASKED", {}));
+              headline = headline ?? [specificNote, gap.question].filter((line): line is string => !!line && line.trim().length > 0).join(" ");
+              log("conversation_capture_asked", { scope: gap.scope, topic: gap.topic ?? gap.knowledgeType, variantRequired: gap.variantRequired });
+              continue;
+            }
             headline = headline ?? [specificNote, draft.answerBasisAction ?? "답변 기준을 하나 더 등록하면 초안을 만들 수 있습니다."]
               .filter((line): line is string => !!line && line.trim().length > 0).join(" ");
             artifacts.push({
@@ -693,7 +752,24 @@ export class ConversationService {
     // the rules that exist). A rule that exists and does not apply (NOT_APPLICABLE) is not fixed by
     // registering it again — that gap carries no step.
     const policyGap = answer.evidence.find((e) => e.kind === "ORG_POLICY_GAP" && e.locator.outcome !== "NOT_APPLICABLE");
-    if (policyGap && !artifacts.some((a) => a.type === "HUMAN_ACTION_REQUIRED" && a.actionType === "KNOWLEDGE_ENTRY")) {
+    const policyTopic = policyGap ? orgTopicOf((policyGap.locator.label ?? "").replace(/ (기준|근거) 없음$/, "")) : null;
+    if (policyGap && policyTopic && policyGap.locator.outcome === "ABSENT" && captureAllowed && pendingCapture === undefined
+        && !artifacts.some((a) => a.type === "KNOWLEDGE_CAPTURE" || (a.type === "HUMAN_ACTION_REQUIRED" && a.actionType === "KNOWLEDGE_ENTRY"))) {
+      // Knowledge Capture v1 (agent lane): a rule that is MISSING is asked for, and the original request is
+      // re-run once after the save. A rule that exists and does not apply carries no question.
+      const gap: OpenedGap = {
+        scope: "ORG", topic: policyTopic.topic, knowledgeType: policyTopic.knowledgeType, topicLabel: policyTopic.label, missingSubject: null,
+        inquiryId: workingSet?.selectedInquiry?.inquiryId ?? null, workItemId: workingSet?.selectedInquiry?.workItemId ?? null,
+        productId: null, productName: null, variantRequired: false, variantId: null, variantName: null,
+        question: questionFor("ORG", policyTopic.topic, null, null, false),
+      };
+      const opened = this.openCapture(gap, { kind: "GOAL", turnId: "" });
+      pendingCapture = opened;
+      artifacts.push(captureArtifact(opened, "ASKED", {}));
+      trailingQuestion = gap.question;
+      log("conversation_capture_asked", { scope: "ORG", topic: policyTopic.topic, variantRequired: false });
+    } else if (policyGap && !afterCapture && !artifacts.some((a) => a.type === "KNOWLEDGE_CAPTURE" || (a.type === "HUMAN_ACTION_REQUIRED" && a.actionType === "KNOWLEDGE_ENTRY"))) {
+      // (Not on the turn that just saved a rule: 「등록하면 답할 수 있습니다」 beside 「저장했습니다」 is two answers.)
       const topic = (policyGap.locator.label ?? "운영 기준 없음").replace(/ (기준|근거) 없음$/, "");
       artifacts.push({
         artifactId: "a-policy-gap", type: "HUMAN_ACTION_REQUIRED",
@@ -743,6 +819,7 @@ export class ConversationService {
     // partial collection — each said once here and nowhere else in the prose. Never model prose.
     // Sentence by sentence, so a fact the findings already said (the per-channel 「언제 기준」) is not read twice.
     if (answer.note && !draftTurn) sentences.push(...answer.note.split(/(?<=[.!?])\s+/).filter((s) => s.length > 0));
+    if (trailingQuestion) sentences.push(trailingQuestion);
 
     const evidenceArtifact = evidenceOf(answer);
     if (evidenceArtifact) artifacts.push(evidenceArtifact);
@@ -756,8 +833,176 @@ export class ConversationService {
     return {
       status, message: dedupeNear(sentences).join(" "), artifacts,
       suggestedActions: [...extraChips, ...suggestionsFor(primary, workingSet, human, artifacts)].slice(0, extraChips.length + 4),
-      workingSet, pendingHumanActions, pendingPrepared, budget, answer,
+      workingSet, pendingHumanActions, pendingPrepared, budget, answer, pendingCapture,
     };
+  }
+
+  // ─────────────── Knowledge Capture v1 ───────────────
+
+  /** A gap as the thread holds it: verified ids only, minted capture id, the turn id stamped later. */
+  private openCapture(gap: OpenedGap, resume: PendingKnowledgeCapture["resume"]): PendingKnowledgeCapture {
+    return { ...gap, captureId: randomUUID(), turnId: "", state: "ASKED", candidate: null, resume, askedAt: this.now() };
+  }
+
+  /**
+   * The seller's next sentence while a gap is open. Closed cues decide: 「취소」 closes it, a question or a
+   * command goes to the planner with the gap still open, anything else is THE answer — shown back verbatim
+   * as a candidate with [저장하고 계속], after the duplicate/conflict fence read the existing rules. No write.
+   */
+  private async captureAnswerLane(
+    view: ConversationView, pending: PendingKnowledgeCapture, text: string, bundle: SpringClientBundle,
+  ): Promise<Composed | null> {
+    const started = Date.now();
+    const keep = (message: string, artifacts: Artifact[], next: PendingKnowledgeCapture | null, reads: number, chips: SuggestedAction[] = []): Composed => ({
+      status: "DONE", message, artifacts, suggestedActions: chips,
+      workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, pendingCapture: next,
+      budget: { toolCalls: reads, llmCalls: 0, elapsedMs: Date.now() - started, stopReason: "KNOWLEDGE_CAPTURE" },
+    });
+    const kind = classifySellerAnswer(text);
+    if (kind === "CANCEL") {
+      log("conversation_capture_cancelled", { scope: pending.scope });
+      return keep(CAPTURE_SENTENCE.cancelled, [captureArtifact(pending, "CANCELLED", {})], null, 0);
+    }
+    if (kind !== "CANDIDATE") return null;
+    const content = normalizeContent(text);
+    let variantId = pending.variantId;
+    let variantName = pending.variantName;
+    let reads = 0;
+    if (pending.variantRequired && pending.productId) {
+      let options: Array<{ id: string; name: string }> = [];
+      try {
+        reads += 1;
+        const known = await bundle.operator.getProductKnowledge(pending.productId);
+        options = known.variants.filter((v) => v.id && v.optionName).map((v) => ({ id: v.id!, name: v.optionName! }));
+      } catch { options = []; }
+      // A listing with NO variant rows has no 규격 to bind to: the whole listing is the only truthful scope
+      // (the draft then asks the customer, as Knowledge Gap Resolution v1 §5 says). Found live.
+      const named = options.length === 0 ? { kind: "GENERIC" as const } : variantFromAnswer(content, options);
+      if (named.kind === "UNRESOLVED") {
+        // A 규격-dependent fact with no 규격 named is not saved as a fact about the whole listing.
+        return keep(CAPTURE_SENTENCE.variantUnresolved(options.map((o) => o.name)), [], pending, reads);
+      }
+      if (named.kind === "VARIANT") { variantId = named.id; variantName = named.name; }
+    }
+    const title = titleOf(content);
+    let existing: ExistingKnowledge[] = [];
+    try {
+      reads += 1;
+      existing = pending.scope === "ORG"
+        ? (await bundle.inquiry.listOrgKnowledge()).map((r) => ({ id: r.id, title: r.title, body: r.body, type: r.knowledgeType }))
+        : (await bundle.inquiry.listProductKnowledgeSources(pending.productId!)).map((r) => ({ id: r.id, title: r.title, body: r.body, type: r.sourceType, variantId: r.variantId }));
+    } catch { existing = []; }
+    const verdict = judgeCandidate(content, title, existing, { type: pending.knowledgeType, variantId, scopeKind: pending.scope });
+    const settingsChip: SuggestedAction = { label: "설정에서 직접 편집", kind: "LINK", to: settingsPathFor(pending.scope, pending.productId) };
+    if (verdict.kind === "DUPLICATE") {
+      log("conversation_capture_refused", { scope: pending.scope, reason: "DUPLICATE" });
+      return keep(CAPTURE_SENTENCE.duplicate(pending.topicLabel), [captureArtifact(pending, "DUPLICATE", { content, existing: verdict.existing })], null, reads, [settingsChip]);
+    }
+    if (verdict.kind === "CONFLICT") {
+      log("conversation_capture_refused", { scope: pending.scope, reason: verdict.reason });
+      return keep(CAPTURE_SENTENCE.conflict(pending.topicLabel), [captureArtifact(pending, "CONFLICT", { content, existing: verdict.existing })], null, reads, [settingsChip]);
+    }
+    const fingerprint = fingerprintOf({ scope: pending.scope, productId: pending.productId, variantId, knowledgeType: pending.knowledgeType, content });
+    const next: PendingKnowledgeCapture = { ...pending, state: "CANDIDATE", variantId, variantName, candidate: { content, title, fingerprint } };
+    log("conversation_capture_candidate", { scope: pending.scope, chars: content.length, variant: variantId != null });
+    return keep(CAPTURE_SENTENCE.candidate(pending.topicLabel), [captureArtifact(next, "CANDIDATE", { content, fingerprint })], next, reads);
+  }
+
+  /**
+   * 「저장하고 계속」 / 「취소」 on the candidate. The decision must name the open capture AND the fingerprint of
+   * the sentence the card showed; anything else is stale and writes nothing. A SAVE writes once through the
+   * seller's own knowledge seam, then resumes the original work exactly once: the inquiry's draft path (after
+   * re-checking the inquiry is still workable) or the turn whose goal was being answered.
+   */
+  private async decideCapture(
+    token: string, id: string, view: ConversationView, decision: NonNullable<StartTurnRequest["captureDecision"]>,
+    bundle: SpringClientBundle, store: ConversationStore, progress: ProgressFn, signal: AbortSignal | undefined, started: number,
+  ): Promise<TurnView> {
+    const pending = view.pendingCapture ?? null;
+    const userTurn: TurnView = {
+      turnId: randomUUID(), conversationId: id, role: "USER", text: decision.decision === "SAVE" ? "저장하고 계속" : "취소",
+      message: decision.decision === "SAVE" ? "저장하고 계속" : "취소", artifacts: [], suggestedActions: [],
+      continuation: { workingSet: view.workingSet, pendingHumanAction: null, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, pendingCapture: pending },
+      status: "DONE", createdAt: this.now(),
+    };
+    const finish = async (composed: Composed): Promise<TurnView> => {
+      const agentTurn = this.agentTurn(view, { ...composed, pendingCapture: composed.pendingCapture ?? null });
+      const pendingPrepared = composed.pendingPrepared ? { ...composed.pendingPrepared, turnId: agentTurn.turnId } : null;
+      const pendingCapture = composed.pendingCapture ?? null;
+      const finalTurn: TurnView = { ...agentTurn, continuation: { ...agentTurn.continuation, pendingPrepared, pendingCapture } };
+      await this.persist(store, view, [userTurn, finalTurn], view.workingSet, pendingActionsOf(view), pendingPrepared, pendingCapture);
+      log("conversation_turn", { status: finalTurn.status, toolCalls: finalTurn.budget?.toolCalls ?? 0, llmCalls: finalTurn.budget?.llmCalls ?? 0, ms: Date.now() - started, artifactTypes: [...new Set(finalTurn.artifacts.map((a) => a.type))].join(","), workingSetKind: view.workingSet?.kind ?? "NONE", requestedAction: "KNOWLEDGE_CAPTURE" });
+      return finalTurn;
+    };
+    const done = (message: string, artifacts: Artifact[], next: PendingKnowledgeCapture | null, budget: { toolCalls: number; llmCalls: number }, pendingPrepared = view.pendingPrepared, chips: SuggestedAction[] = []): Composed => ({
+      status: "DONE", message, artifacts, suggestedActions: chips, workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared,
+      pendingCapture: next, budget: { ...budget, elapsedMs: Date.now() - started, stopReason: "KNOWLEDGE_CAPTURE" },
+    });
+    const bound = pending && pending.captureId === decision.captureId && pending.state === "CANDIDATE" && pending.candidate?.fingerprint === decision.fingerprint;
+    if (!bound) {
+      log("conversation_capture_stale", { hadPending: pending != null });
+      return finish(done(CAPTURE_SENTENCE.stale, [], pending, { toolCalls: 0, llmCalls: 0 }));
+    }
+    if (decision.decision === "CANCEL") {
+      log("conversation_capture_cancelled", { scope: pending.scope });
+      return finish(done(CAPTURE_SENTENCE.cancelled, [captureArtifact(pending, "CANCELLED", {})], null, { toolCalls: 0, llmCalls: 0 }));
+    }
+    let savedId: string;
+    try {
+      savedId = (await new KnowledgeCaptureWriter(bundle.inquiry).write(pending)).id;
+    } catch (err) {
+      log("conversation_capture_write_failed", { scope: pending.scope, error: err instanceof Error ? err.name : "unknown" });
+      const settingsChip: SuggestedAction = { label: "설정에서 직접 편집", kind: "LINK", to: settingsPathFor(pending.scope, pending.productId) };
+      return finish(done(CAPTURE_SENTENCE.saveFailed, [captureArtifact(pending, "CANDIDATE", { content: pending.candidate!.content, fingerprint: pending.candidate!.fingerprint })], pending, { toolCalls: 0, llmCalls: 0 }, view.pendingPrepared, [settingsChip]));
+    }
+    log("conversation_capture_saved", { scope: pending.scope, topic: pending.topic ?? pending.knowledgeType, variant: pending.variantId != null, resume: pending.resume.kind });
+    const savedLine = CAPTURE_SENTENCE.saved(pending.topicLabel);
+    if (pending.resume.kind === "GOAL") {
+      // The original request is re-run through the same resume path a finished human step uses — one
+      // planner call, the saved rule now readable — with the save said first. Persist the decision, then run.
+      const artifact = captureArtifact(pending, "SAVED", { content: pending.candidate!.content, resume: "PENDING_RESUME" });
+      await this.persist(store, view, [userTurn], view.workingSet, pendingActionsOf(view), view.pendingPrepared, null);
+      return this.turnNow(token, id, { resumeOfTurnId: pending.resume.turnId }, progress, {
+        signal, afterCapture: { message: `${savedLine} ${CAPTURE_SENTENCE.resumeGoal}`, artifact },
+      });
+    }
+    // INQUIRY_DRAFT: the same inquiry, re-checked, then the product's own draft path once — no planner.
+    const { workItemId, inquiryId, tone } = pending.resume;
+    let detail: Awaited<ReturnType<typeof bundle.inquiry.getInquiryDetail>> | null = null;
+    try { detail = await bundle.inquiry.getInquiryDetail(workItemId); } catch { detail = null; }
+    const actionability = actionabilityOf({ workItemId, phase: detail?.phase, status: detail?.status });
+    if (actionability !== "DRAFTABLE" || !detail) {
+      log("conversation_capture_resumed", { resume: "INQUIRY_NOT_ACTIONABLE", actionability });
+      return finish(done(`${savedLine} ${CAPTURE_SENTENCE.savedNotActionable}`, [captureArtifact(pending, "SAVED", { content: pending.candidate!.content, resume: "INQUIRY_NOT_ACTIONABLE" })], null, { toolCalls: 1, llmCalls: 0 }));
+    }
+    progress({ type: "stage", stage: "PREPARING_DRAFT", label: STAGE_LABEL.PREPARING_DRAFT, at: this.now() });
+    const target: DraftTarget = {
+      workItemId, inquiryId, channelCode: detail.channelCode ?? null, channelNameKo: detail.channelNameKo ?? null,
+      productId: detail.productId ?? pending.productId, productName: detail.productName ?? pending.productName,
+    };
+    let draft: DraftArtifact;
+    let generated: GeneratedDraftView | null = null;
+    try {
+      const prepared = await new DraftPreparer(bundle.inquiry, bundle.review).prepareWithView(target, tone, `a-draft-${workItemId}`);
+      draft = prepared.artifact;
+      generated = prepared.view;
+    } catch (err) {
+      log("conversation_draft_failed", { objectKind: "INQUIRY", error: err instanceof Error ? err.name : "unknown" });
+      return finish(done(`${savedLine} ${DRAFT_FAILED_SENTENCE}`, [captureArtifact(pending, "SAVED", { content: pending.candidate!.content, resume: "DRAFT_STILL_GAP" })], null, { toolCalls: 1, llmCalls: 0 }));
+    }
+    const cited = (generated?.evidence ?? []).some((e) => e.sourceId === savedId);
+    const grounded = draft.version != null && draft.answerBasis !== "NO_ANSWER_BASIS" && !draft.unavailableMessage;
+    log("conversation_capture_resumed", { resume: grounded ? "DRAFT_GROUNDED" : "DRAFT_STILL_GAP", cited, answerBasis: draft.answerBasis });
+    if (!grounded) {
+      // The fact is saved; it did not make THIS question answerable. Said honestly — the new knowledge is
+      // never pushed into a draft by hand, and no second question is opened on the same breath.
+      const line = draft.unavailableMessage ?? [CAPTURE_SENTENCE.savedStillGap, draft.answerBasisNote && !GENERIC_BASIS_NOTE.test(draft.answerBasisNote) ? draft.answerBasisNote : null].filter(Boolean).join(" ");
+      return finish(done(`${savedLine} ${line}`, [captureArtifact(pending, "SAVED", { content: pending.candidate!.content, resume: "DRAFT_STILL_GAP" }), draft], null, { toolCalls: 1, llmCalls: draft.version != null ? 1 : 0 }));
+    }
+    const asksBack = draft.answerBasis === "NEEDS_CLARIFICATION";
+    const line = `${savedLine} ${cited ? "저장한 기준을 근거로 " : ""}${asksBack ? "고객에게 되묻는 답변 초안을 다시 준비했습니다." : "답변 초안을 다시 준비했습니다."}`;
+    const pendingPrepared: PendingPreparedAction = { turnId: "", kind: "INQUIRY_DRAFT", workItemId, inquiryId, draftVersion: draft.version, contentFingerprint: draft.contentFingerprint };
+    return finish(done(line, [captureArtifact(pending, "SAVED", { content: pending.candidate!.content, resume: "DRAFT_GROUNDED" }), draft], null, { toolCalls: 1, llmCalls: 1 }, pendingPrepared));
   }
 
   /** Which objects a draft/send sentence points at — an index into what the previous turn showed. */
@@ -839,6 +1084,11 @@ export class ConversationService {
   private async directLane(
     view: ConversationView, text: string, bundle: SpringClientBundle, stage: (s: ProgressStage, label: string) => void,
   ): Promise<Composed | null> {
+    // Knowledge Capture v1: a gap the agent is holding open listens to this sentence first.
+    if (view.pendingCapture) {
+      const captured = await this.captureAnswerLane(view, view.pendingCapture, text, bundle);
+      if (captured) return captured;
+    }
     const prepared = view.pendingPrepared;
     const tone = prepared || view.workingSet?.selectedInquiry ? toneIntentOf(text) : null;
     if (prepared && tone) return this.reviseTone(view, prepared, tone, bundle, stage);
@@ -1837,3 +2087,43 @@ function humanItem(actionType: string, channel: string | null, to: string | null
 
 /** Type-level use so an unused-import lint never removes the draft artifact shape from this file's vocabulary. */
 export type { DraftArtifact as ConversationDraftArtifact };
+
+/* ───────────── Knowledge Capture v1 helpers ───────────── */
+
+/** The card for one capture state. `content` is the seller's normalized sentence and nothing else. */
+function captureArtifact(
+  pending: PendingKnowledgeCapture, state: KnowledgeCaptureArtifact["state"],
+  extra: { content?: string; fingerprint?: string; existing?: ExistingKnowledge; resume?: KnowledgeCaptureArtifact["resume"] },
+): KnowledgeCaptureArtifact {
+  return {
+    artifactId: `a-capture-${pending.captureId}-${state.toLowerCase()}`, type: "KNOWLEDGE_CAPTURE",
+    title: state === "SAVED" ? `${pending.topicLabel} 기준 저장됨` : state === "CANDIDATE" ? `${pending.topicLabel} 기준으로 저장` : `${pending.topicLabel} 기준`,
+    captureId: pending.captureId, state, scope: pending.scope, topicLabel: pending.topicLabel,
+    productId: pending.productId, productName: pending.productName, variantName: pending.variantName,
+    inquiryId: pending.inquiryId, question: pending.question,
+    content: extra.content ?? null, fingerprint: extra.fingerprint ?? null,
+    existing: extra.existing ? { title: extra.existing.title, excerpt: excerpt(extra.existing.body) } : null,
+    resume: extra.resume ?? null, settingsTo: settingsPathFor(pending.scope, pending.productId),
+  };
+}
+
+/** A capture opened this turn gets this turn's id (and, for a GOAL resume, the turn to re-run). */
+function stampCapture(pending: PendingKnowledgeCapture | null, turnId: string): PendingKnowledgeCapture | null {
+  if (!pending) return null;
+  const resume = pending.resume.kind === "GOAL" && pending.resume.turnId === "" ? { kind: "GOAL" as const, turnId } : pending.resume;
+  return pending.turnId === "" ? { ...pending, turnId, resume } : pending;
+}
+
+/** A carried gap survives a turn unless the seller now stands on a different inquiry. */
+function carriedCapture(pending: PendingKnowledgeCapture | null, workingSet: WorkingSetView | null): PendingKnowledgeCapture | null {
+  if (!pending) return null;
+  const now = workingSet?.selectedInquiry?.inquiryId ?? null;
+  if (pending.inquiryId && now && now !== pending.inquiryId) return null;
+  return pending;
+}
+
+/** Did the previous AGENT turn save a capture? Then this turn is its one resume and opens no new gap. */
+function lastTurnSavedCapture(view: ConversationView): boolean {
+  const last = [...view.turns].reverse().find((t) => t.role === "AGENT");
+  return last?.artifacts.some((a) => a.type === "KNOWLEDGE_CAPTURE" && a.state === "SAVED") ?? false;
+}

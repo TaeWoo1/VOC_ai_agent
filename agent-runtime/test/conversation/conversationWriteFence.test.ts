@@ -26,6 +26,7 @@ const FORBIDDEN = [
   /\bconfirmPublish\b/, /\bconfirmInquiryPublish\b/, /\.resume\s*\(/, /\bresumeInquiryPublish\b/,
   /\bverify\w*\s*\(/, /\bapprove\w*\s*\(/, /\bdecideReviewApproval\b/, /\bstartReviewSubmissionRun\b/,
   /\bmanualSync\b/, /\bbackfill\w*/i, /\bcredential\w*/i, /\bproposeInquiry\b/, /\bsaveDraft\b/, /\bsaveReviewDraft\b/, /\brecordReviewTriage\b/,
+  /\bcreateOrgKnowledge\b/, /\bcreateProductKnowledgeSource\b/,
 ];
 
 describe("conversation write fence", () => {
@@ -38,6 +39,8 @@ describe("conversation write fence", () => {
   const ALLOWED: Record<string, RegExp[]> = {
     "DraftPreparer.ts": [/\bsaveReviewDraft\b/, /\brecordReviewTriage\b/, /\bproposeInquiry\b/],
     "Refresher.ts": [/\bmanualSync\b/],
+    // Knowledge Capture v1: the seller's own knowledge seams, written only after a fingerprint-bound 「저장하고 계속」.
+    "KnowledgeCaptureWriter.ts": [/\bcreateOrgKnowledge\b/, /\bcreateProductKnowledgeSource\b/],
   };
 
   it("no conversation file references a write, approval, verification, collection or credential method", () => {
@@ -53,6 +56,15 @@ describe("conversation write fence", () => {
     expect(FILES.filter((f) => /\bsaveReviewDraft\b/.test(f.text)).map((f) => f.name)).toEqual(["DraftPreparer.ts"]);
     expect(FILES.filter((f) => /\bmanualSync\b/.test(f.text)).map((f) => f.name)).toEqual(["Refresher.ts"]);
     expect(FILES.filter((f) => /\bproposeInquiry\b/.test(f.text)).map((f) => f.name)).toEqual(["DraftPreparer.ts"]);
+    expect(FILES.filter((f) => /\bcreateOrgKnowledge\b|\bcreateProductKnowledgeSource\b/.test(f.text)).map((f) => f.name)).toEqual(["KnowledgeCaptureWriter.ts"]);
+  });
+
+  it("a captured fact is never a model's, a customer's or an assistant's sentence: the writer reads only the candidate the seller confirmed", () => {
+    const writer = FILES.find((f) => f.name === "KnowledgeCaptureWriter.ts")!.text;
+    expect(writer).toMatch(/candidate\.content/);
+    for (const forbidden of [/generateDraftFor/, /comments/, /details\b/, /answerBody/, /\bmessage\b/, /searchAnswerMemory/, /planGoal/]) {
+      expect(writer, `writer names ${forbidden}`).not.toMatch(forbidden);
+    }
   });
 
   it("generateDraftFor is reached from DraftPreparer.ts and nowhere else in the lane", () => {

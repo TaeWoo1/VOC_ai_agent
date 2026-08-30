@@ -13,6 +13,7 @@ import com.sellerops.knowledge.KnowledgeTopic;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.draft.dto.GeneratedDraftView;
+import com.sellerops.inquiry.draft.dto.KnowledgeGapView;
 import com.sellerops.inquiry.reply.InquiryReplyDraftService;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
@@ -239,9 +240,9 @@ public class InquiryDraftComposer {
             // may be seconds from being able to answer is the deferral this product deleted.
             if (operational == null && style.hasUnknownFallback()) {
                 return approvedFallback(orgId, workItemId, actor, title, retrieved, basis, verdict, askedTopic(inquiry),
-                        style);
+                        namedTopics(inquiry), style);
             }
-            return noBasis(retrieved, basis, verdict, askedTopic(inquiry), operational);
+            return noBasis(retrieved, basis, verdict, askedTopic(inquiry), namedTopics(inquiry), operational);
         }
 
         // Each branch names its own reason, because the three are not interchangeable to the person
@@ -282,7 +283,7 @@ public class InquiryDraftComposer {
             // is a promise with no author. The BASIS is reported as it was actually computed — this
             // question IS grounded, and overwriting that with NO_ANSWER_BASIS would be a second
             // false statement laid on top of the first — and the operational reason travels beside it.
-            return noBasis(retrieved, basis, verdict, askedTopic(inquiry), unavailable);
+            return noBasis(retrieved, basis, verdict, askedTopic(inquiry), namedTopics(inquiry), unavailable);
         }
 
         AgentDraftResponseParser.ParsedDraft parsed = written.get();
@@ -303,7 +304,8 @@ public class InquiryDraftComposer {
                 basis.actionKo(retrieved.state(), verdict.topicWord(), applicability,
                         retrieved.productOutcome(), retrieved.policyOutcome(), askedTopic(inquiry),
                         retrieved.policyDeclares(askedTopic(inquiry))),
-                retrieved.productId(), views, company != null, null);
+                retrieved.productId(), views, company != null, null,
+                KnowledgeGapView.of(retrieved, verdict, askedTopic(inquiry), namedTopics(inquiry)));
     }
 
     /**
@@ -364,6 +366,7 @@ public class InquiryDraftComposer {
                                                 AnswerBasisState basis,
                                                 SpecApplicability.Verdict verdict,
                                                 KnowledgeTopic asked,
+                                                java.util.Set<KnowledgeTopic> named,
                                                 AnswerStyleProfile style) {
         int base = drafts.currentVersion(workItemId);
         ReplyDraftView saved = drafts.saveAs(orgId, workItemId, actor, defaultTitle(inquiryTitle),
@@ -377,7 +380,8 @@ public class InquiryDraftComposer {
                 basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
                         retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked)),
-                retrieved.productId(), List.of(), false, null);
+                retrieved.productId(), List.of(), false, null,
+                KnowledgeGapView.of(retrieved, verdict, asked, named));
     }
 
     /**
@@ -390,12 +394,14 @@ public class InquiryDraftComposer {
                                               AnswerBasisState basis,
                                               SpecApplicability.Verdict verdict,
                                               KnowledgeTopic asked,
+                                              java.util.Set<KnowledgeTopic> named,
                                               String unavailableMessage) {
         return new GeneratedDraftView(null, null, retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
                         retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked)),
-                retrieved.productId(), List.of(), false, unavailableMessage);
+                retrieved.productId(), List.of(), false, unavailableMessage,
+                KnowledgeGapView.of(retrieved, verdict, asked, named));
     }
 
     /**
@@ -534,9 +540,14 @@ public class InquiryDraftComposer {
      * allowed to use. Two topics (「반품 배송비」) name none: the line stays general rather than guess.
      */
     private static KnowledgeTopic askedTopic(Inquiry inquiry) {
-        java.util.Set<KnowledgeTopic> topics = KnowledgeTopic.of(
+        java.util.Set<KnowledgeTopic> topics = namedTopics(inquiry);
+        return topics.size() == 1 ? topics.iterator().next() : null;
+    }
+
+    /** Every operating topic the customer's words name — the set {@link #askedTopic} is the single member of. */
+    private static java.util.Set<KnowledgeTopic> namedTopics(Inquiry inquiry) {
+        return KnowledgeTopic.of(
                 (inquiry.getTitle() == null ? "" : inquiry.getTitle()) + " "
                         + (inquiry.getBody() == null ? "" : inquiry.getBody()));
-        return topics.size() == 1 ? topics.iterator().next() : null;
     }
 }

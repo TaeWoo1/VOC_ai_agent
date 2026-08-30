@@ -34,6 +34,10 @@ import type {
   PublishStatusView,
   ReplyDraftRequest,
   ReplyDraftView,
+  OrgKnowledgeSourceView,
+  OrgKnowledgeCreateRequest,
+  ProductKnowledgeSourceView,
+  ProductKnowledgeCreateRequest,
 } from "../../src/spring/types";
 
 export interface AuditRecord {
@@ -444,7 +448,7 @@ export class FakeSpringClient implements SpringClient {
     this.calls.generate += 1;
     this.methodCalls.push({ method: "generateDraftFor", workItemId, tone });
     const it = this.require(workItemId);
-    const seeded = it.seed.draftGeneration ?? {};
+    const seeded = this.draftGenerationOverride.get(workItemId) ?? it.seed.draftGeneration ?? {};
     const basis = seeded.answerBasis ?? "GROUNDED";
     const unavailable = seeded.unavailableMessage ?? null;
     let draft: ReplyDraftView | null = null;
@@ -487,10 +491,59 @@ export class FakeSpringClient implements SpringClient {
       // Seller Context v1-B: true only for a written MODEL draft, as the composer reports it.
       companyContextUsed: draft != null && seeded.companyContextUsed === true,
       unavailableMessage: unavailable,
+      knowledgeGap: seeded.knowledgeGap ?? null,
     };
   }
 
+  // ─────────────── Knowledge Capture v1 — the seller-write seams, in memory ───────────────
+  /** Org rules the fake holds (`GET /api/org-knowledge/sources`). A test seeds an existing rule here. */
+  orgKnowledge: OrgKnowledgeSourceView[] = [];
+  /** Product documents per product id (`GET /api/products/{id}/knowledge/sources`). */
+  productKnowledgeSources = new Map<string, ProductKnowledgeSourceView[]>();
+  /** Every knowledge WRITE the lane made — the count a capture test asserts (0 until 「저장하고 계속」). */
+  readonly knowledgeWrites: Array<{ scope: "ORG" | "PRODUCT"; productId?: string; knowledgeType: string; title: string; body: string; variantId: string | null }> = [];
+  /** A test hook: runs after a write lands, so the next `generateDraftFor` can answer with the new source cited. */
+  onKnowledgeSaved: ((write: { scope: "ORG" | "PRODUCT"; id: string }) => void) | null = null;
+  /** Overrides the seeded `draftGeneration` for one item — how a test makes the resumed draft GROUNDED. */
+  draftGenerationOverride = new Map<string, Partial<GeneratedDraftView> & { readonly comments?: string }>();
+
+  async listOrgKnowledge(): Promise<OrgKnowledgeSourceView[]> {
+    this.methodCalls.push({ method: "listOrgKnowledge" });
+    return [...this.orgKnowledge];
+  }
+  async createOrgKnowledge(request: OrgKnowledgeCreateRequest): Promise<OrgKnowledgeSourceView> {
+    this.methodCalls.push({ method: "createOrgKnowledge" });
+    if (this.orgKnowledge.some((r) => r.title === request.title)) {
+      throw new SpringApiError(500, "SERVER_ERROR", "duplicate title");
+    }
+    const view: OrgKnowledgeSourceView = { id: `org-k-${this.orgKnowledge.length + 1}`, knowledgeType: request.knowledgeType, typeLabel: null, title: request.title, body: request.body, version: 1, passageCount: 1 };
+    this.orgKnowledge.push(view);
+    this.knowledgeWrites.push({ scope: "ORG", knowledgeType: request.knowledgeType, title: request.title, body: request.body, variantId: null });
+    this.onKnowledgeSaved?.({ scope: "ORG", id: view.id });
+    return view;
+  }
+  async listProductKnowledgeSources(productId: string): Promise<ProductKnowledgeSourceView[]> {
+    this.methodCalls.push({ method: "listProductKnowledgeSources" });
+    return [...(this.productKnowledgeSources.get(productId) ?? [])];
+  }
+  async createProductKnowledgeSource(productId: string, request: ProductKnowledgeCreateRequest): Promise<ProductKnowledgeSourceView> {
+    this.methodCalls.push({ method: "createProductKnowledgeSource" });
+    const list = this.productKnowledgeSources.get(productId) ?? [];
+    if (list.some((r) => r.title === request.title)) throw new SpringApiError(500, "SERVER_ERROR", "duplicate title");
+    const view: ProductKnowledgeSourceView = { id: `pk-${productId}-${list.length + 1}`, productId, sourceType: request.sourceType, title: request.title, body: request.body, chunks: 1, authoredOrigin: "SELLER_ENTERED_KNOWLEDGE", variantId: request.variantId };
+    this.productKnowledgeSources.set(productId, [...list, view]);
+    this.knowledgeWrites.push({ scope: "PRODUCT", productId, knowledgeType: request.sourceType, title: request.title, body: request.body, variantId: request.variantId });
+    this.onKnowledgeSaved?.({ scope: "PRODUCT", id: view.id });
+    return view;
+  }
+
   // Test helpers.
+  /** The inquiry was answered elsewhere meanwhile (Knowledge Capture v1 case J): the row reads ANSWERED / COMPLETED. */
+  markAnswered(workItemId: string): void {
+    const it = this.require(workItemId);
+    it.status = "ANSWERED";
+    it.phase = "COMPLETED";
+  }
   phaseOf(workItemId: string): string {
     return this.require(workItemId).phase;
   }

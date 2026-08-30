@@ -27,6 +27,7 @@ export function ConversationTimeline({
   compact = false,
   onPrompt,
   onResume,
+  onCaptureDecision,
 }: {
   turns: DisplayTurn[];
   busy: boolean;
@@ -36,6 +37,8 @@ export function ConversationTimeline({
   compact?: boolean;
   onPrompt: (prompt: string) => void;
   onResume: (turnId: string) => void;
+  /** Knowledge Capture v1: the candidate card's 「저장하고 계속」 / 「취소」. Absent ⇒ the card shows no controls. */
+  onCaptureDecision?: (captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL") => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -60,6 +63,7 @@ export function ConversationTimeline({
                 latest={turn.turnId === lastAgent && !busy}
                 onPrompt={onPrompt}
                 onResume={() => onResume(turn.turnId)}
+                onCaptureDecision={onCaptureDecision}
               />
             )}
           </motion.div>
@@ -88,7 +92,10 @@ function UserTurn({ text }: { text: string }) {
   );
 }
 
-function AgentTurn({ turn, compact, latest, onPrompt, onResume }: { turn: DisplayTurn; compact: boolean; latest: boolean; onPrompt: (p: string) => void; onResume: () => void }) {
+function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecision }: {
+  turn: DisplayTurn; compact: boolean; latest: boolean; onPrompt: (p: string) => void; onResume: () => void;
+  onCaptureDecision?: (captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL") => void;
+}) {
   const evidence = turn.artifacts.filter((a) => a.type === "EVIDENCE");
   const shown = turn.artifacts.filter((a) => a.type !== "EVIDENCE");
   const failed = turn.status === "FAILED";
@@ -116,7 +123,7 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume }: { turn: Displa
           <AnimatePresence initial={false}>
             {shown.map((artifact) => (
               <motion.div key={artifact.artifactId} layout variants={MESSAGE} initial="hidden" animate="shown" exit="gone" transition={LAYOUT} data-artifact={artifact.type}>
-                <ArtifactView artifact={artifact} onResume={onResume} onPrompt={onPrompt} />
+                <ArtifactView artifact={artifact} onResume={onResume} onPrompt={onPrompt} onCaptureDecision={latest ? onCaptureDecision : undefined} />
               </motion.div>
             ))}
           </AnimatePresence>

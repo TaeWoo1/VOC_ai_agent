@@ -17,9 +17,13 @@ import { ApprovalArtifact } from "./artifacts/ApprovalArtifact";
 import { GuidedExecutionArtifact } from "./artifacts/GuidedExecutionArtifact";
 import { ExecutionResultArtifact } from "./artifacts/ExecutionResultArtifact";
 import { WorkspaceLinkArtifact } from "./artifacts/WorkspaceLinkArtifact";
+import { KnowledgeCaptureArtifact } from "./artifacts/KnowledgeCaptureArtifact";
 
 /** One component per artifact type. The switch is exhaustive: an unknown type renders nothing, never its token. */
-export function ArtifactView({ artifact, onResume, onPrompt }: { artifact: Artifact; onResume: () => void; onPrompt?: (prompt: string) => void }) {
+export function ArtifactView({ artifact, onResume, onPrompt, onCaptureDecision }: {
+  artifact: Artifact; onResume: () => void; onPrompt?: (prompt: string) => void;
+  onCaptureDecision?: (captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL") => void;
+}) {
   switch (artifact.type) {
     case "SUMMARY":
       return <SummaryArtifact artifact={artifact} />;
@@ -57,6 +61,8 @@ export function ArtifactView({ artifact, onResume, onPrompt }: { artifact: Artif
       return <ExecutionResultArtifact artifact={artifact} />;
     case "WORKSPACE_LINK":
       return <WorkspaceLinkArtifact artifact={artifact} />;
+    case "KNOWLEDGE_CAPTURE":
+      return <KnowledgeCaptureArtifact artifact={artifact} onDecision={onCaptureDecision} />;
     default:
       return null;
   }

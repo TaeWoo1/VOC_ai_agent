@@ -135,6 +135,15 @@ class KnowledgeGapResolutionTest {
                 .as("§9 — the customer's own noun, handed back deterministically")
                 .contains("「가닥」").contains("규격");
         assertThat(model.calls).as("no basis means no model call, before and after").isZero();
+        // Knowledge Capture v1: the same verdict as closed values, so a caller that ASKS the seller for
+        // the missing fact decides from them and never parses the sentence above.
+        assertThat(before.knowledgeGap()).isNotNull();
+        assertThat(before.knowledgeGap().productId()).isEqualTo(productId);
+        assertThat(before.knowledgeGap().missingSubject()).isEqualTo("가닥");
+        assertThat(before.knowledgeGap().topic()).as("a spec question names no operating topic").isNull();
+        assertThat(before.knowledgeGap().applicability())
+                .isEqualTo(SpecApplicability.Applicability.VARIANT_UNRESOLVED.name());
+        assertThat(before.knowledgeGap().productOutcome()).isEqualTo("ABSENT");
 
         library.create(org, productId, new KnowledgeSourceRequest(KnowledgeSourceType.DESCRIPTION,
                 "수용 가능한 전선", "몰딩 안에는 전선을 3가닥까지 넣을 수 있습니다.", null, null), user, "판매자");
@@ -148,6 +157,7 @@ class KnowledgeGapResolutionTest {
         assertThat(after.answerBasis()).isEqualTo(AnswerBasisState.NEEDS_CLARIFICATION.name());
         assertThat(after.draft()).isNotNull();
         assertThat(after.evidence()).hasSize(1);
+        assertThat(after.knowledgeGap().productOutcome()).as("the verdict travels on every view").isEqualTo("FOUND");
         assertThat(model.sawKnowledge).extracting(AgentDraftGenerator.Passage::text)
                 .anyMatch(t -> t.contains("3가닥"));
     }

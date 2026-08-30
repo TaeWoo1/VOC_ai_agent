@@ -49,5 +49,5 @@ public record GeneratedDraftView(ReplyDraftView draft, String authorKind, String
                                  String knowledgeNote, String answerBasis, String answerBasisNote,
                                  String answerBasisAction, UUID productId,
                                  List<DraftEvidenceView> evidence, boolean companyContextUsed,
-                                 String unavailableMessage) {
+                                 String unavailableMessage, KnowledgeGapView knowledgeGap) {
 }

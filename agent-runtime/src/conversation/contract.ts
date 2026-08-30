@@ -47,7 +47,8 @@ export type ArtifactType =
   | "APPROVAL"
   | "GUIDED_EXECUTION"
   | "EXECUTION_RESULT"
-  | "WORKSPACE_LINK";
+  | "WORKSPACE_LINK"
+  | "KNOWLEDGE_CAPTURE";
 
 export type StatusTone = "good" | "warn" | "bad" | "info" | "neutral";
 
@@ -443,6 +444,46 @@ export interface ExecutionResultArtifact extends ArtifactBase {
   readonly to: string;
 }
 
+/* ───────────── Knowledge Capture v1 (2026-08-30) ───────────── */
+
+/** Where a captured fact would live — the two seller-authored corpora the settings screens already own. */
+export type KnowledgeCaptureScope = "ORG" | "PRODUCT";
+
+/**
+ * The state of one capture as the seller sees it. `ASKED`: the agent asked a specific question and is
+ * listening for the next sentence. `CANDIDATE`: the seller's own sentence is shown back, verbatim, with
+ * [저장하고 계속] / [취소] — nothing is written yet. `SAVED`: written through the seller's own knowledge
+ * seam and the original work resumed (or not — `resume` says which). `DUPLICATE` / `CONFLICT`: a fence
+ * refused before any write; the settings screen is the path. `CANCELLED` / `STALE`: nothing written.
+ */
+export type KnowledgeCaptureState = "ASKED" | "CANDIDATE" | "SAVED" | "DUPLICATE" | "CONFLICT" | "CANCELLED" | "STALE";
+
+export interface KnowledgeCaptureArtifact extends ArtifactBase {
+  readonly type: "KNOWLEDGE_CAPTURE";
+  readonly captureId: string;
+  readonly state: KnowledgeCaptureState;
+  readonly scope: KnowledgeCaptureScope;
+  /** The seller's word for the topic (배송 · 교환·반품·환불 · 규격 …) — the card's noun. */
+  readonly topicLabel: string;
+  readonly productId: string | null;
+  readonly productName: string | null;
+  readonly variantName: string | null;
+  /** The inquiry this capture was opened for, when one was. */
+  readonly inquiryId: string | null;
+  /** The specific question asked (ASKED), kept on later states for the reader. */
+  readonly question: string;
+  /** CANDIDATE/SAVED: the seller's own sentence, mechanically normalized and nothing else. */
+  readonly content: string | null;
+  /** CANDIDATE: what [저장하고 계속] must echo back. A changed candidate is a new fingerprint. */
+  readonly fingerprint: string | null;
+  /** CONFLICT: the title and a bounded excerpt of the rule/document that already says something else. */
+  readonly existing: { readonly title: string; readonly excerpt: string } | null;
+  /** SAVED: what happened to the original work after the write. */
+  readonly resume: "DRAFT_GROUNDED" | "DRAFT_STILL_GAP" | "INQUIRY_NOT_ACTIONABLE" | "PENDING_RESUME" | null;
+  /** The settings screen where this fact is edited by hand (「설정에서 직접 편집」). */
+  readonly settingsTo: string;
+}
+
 export interface WorkspaceLinkArtifact extends ArtifactBase {
   readonly type: "WORKSPACE_LINK";
   readonly link: WorkspaceLink;
@@ -466,7 +507,8 @@ export type Artifact =
   | HumanActionRequiredArtifact
   | ApprovalArtifact
   | ExecutionResultArtifact
-  | WorkspaceLinkArtifact;
+  | WorkspaceLinkArtifact
+  | KnowledgeCaptureArtifact;
 
 /* ───────────────────────────────── plan vocabulary ───────────────────────────────── */
 
@@ -577,6 +619,42 @@ export interface PendingPreparedAction {
   readonly contentFingerprint: string | null;
 }
 
+/**
+ * A Knowledge Gap the agent is holding open across turns (Knowledge Capture v1). Every identity here is
+ * one the runtime VERIFIED — the inquiry/work item the draft path read, the product the composer scoped
+ * to, the 규격 the customer or seller named from the listing's own rows — never one a model produced.
+ */
+export interface PendingKnowledgeCapture {
+  readonly captureId: string;
+  /** The AGENT turn that asked. */
+  readonly turnId: string;
+  readonly state: "ASKED" | "CANDIDATE";
+  readonly scope: KnowledgeCaptureScope;
+  /** `KnowledgeTopic` name for an ORG capture; null for a product-specific fact. */
+  readonly topic: string | null;
+  /** ORG: `OrgKnowledgeType`; PRODUCT: `KnowledgeSourceType` (DESCRIPTION for a spec fact, POLICY for a topic). */
+  readonly knowledgeType: string;
+  readonly topicLabel: string;
+  /** The customer's own noun the question named, or null. */
+  readonly missingSubject: string | null;
+  readonly inquiryId: string | null;
+  readonly workItemId: string | null;
+  readonly productId: string | null;
+  readonly productName: string | null;
+  /** True when the answer depends on a 규격 the customer did not name: the seller must name one (or say 공통). */
+  readonly variantRequired: boolean;
+  readonly variantId: string | null;
+  readonly variantName: string | null;
+  readonly question: string;
+  /** What to do again after a save: the draft path for this inquiry, or the turn whose goal to re-run. */
+  readonly resume:
+    | { readonly kind: "INQUIRY_DRAFT"; readonly workItemId: string; readonly inquiryId: string; readonly tone: ToneHint | null }
+    | { readonly kind: "GOAL"; readonly turnId: string };
+  /** CANDIDATE: the seller's sentence and the fingerprint the confirmation must echo. */
+  readonly candidate: { readonly content: string; readonly title: string; readonly fingerprint: string } | null;
+  readonly askedAt: string;
+}
+
 export interface SuggestedAction {
   readonly label: string;
   readonly kind: "PROMPT" | "LINK" | "RESUME";
@@ -602,6 +680,8 @@ export interface TurnView {
     readonly pendingHumanAction: PendingHumanAction | null;
     readonly pendingHumanActions?: readonly PendingHumanAction[];
     readonly pendingPrepared: PendingPreparedAction | null;
+    /** Knowledge Capture v1: the gap being held open, if any. Absent on older turns. */
+    readonly pendingCapture?: PendingKnowledgeCapture | null;
   };
   readonly status: TurnStatus;
   readonly failureCode?: string;
@@ -628,6 +708,8 @@ export interface ConversationView {
   readonly pendingHumanAction: PendingHumanAction | null;
   readonly pendingHumanActions?: readonly PendingHumanAction[];
   readonly pendingPrepared: PendingPreparedAction | null;
+  /** Knowledge Capture v1: survives reload with the thread; absent on files written before it. */
+  readonly pendingCapture?: PendingKnowledgeCapture | null;
 }
 
 export interface ConversationSummary {
@@ -713,10 +795,23 @@ export const StartTurnRequestSchema = z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, "referenceDate must be YYYY-MM-DD")
       .optional(),
+    /**
+     * Knowledge Capture v1: the seller's decision on the candidate shown, BOUND to it — the capture id
+     * and the fingerprint of the exact sentence the card displayed. A stale card (changed candidate,
+     * cancelled capture, another conversation) cannot save anything: the runtime compares both.
+     */
+    captureDecision: z
+      .object({
+        captureId: z.string().min(1).max(80),
+        fingerprint: z.string().min(1).max(80),
+        decision: z.enum(["SAVE", "CANCEL"]),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
-  .refine((r) => Boolean(r.text) || Boolean(r.resumeOfTurnId), {
-    message: "a turn carries either text or resumeOfTurnId",
+  .refine((r) => Boolean(r.text) || Boolean(r.resumeOfTurnId) || Boolean(r.captureDecision), {
+    message: "a turn carries either text, resumeOfTurnId or captureDecision",
   });
 export type StartTurnRequest = z.infer<typeof StartTurnRequestSchema>;
 

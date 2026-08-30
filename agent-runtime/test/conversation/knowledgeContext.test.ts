@@ -93,18 +93,20 @@ describe("Knowledge Context v1-A — org policy in the Agent lane", () => {
     expect(ev.provenance).toBe("org-knowledge/SHIPPING_POLICY:v1");
   });
 
-  it("B. no policy registered → the gap in the seller's noun + a KNOWLEDGE_ENTRY step to the rules screen, never 「보관하고 있지 않아」", async () => {
+  it("B. no policy registered → the gap in the seller's noun, then the agent ASKS for the rule (Knowledge Capture v1), never 「보관하고 있지 않아」", async () => {
     const h = harness({ plansByGoal: PLANS });
     const { turn } = await ask(h, ASK);
     expect(turn.message).toContain("등록된 배송 기준이 아직 없습니다.");
     expect(turn.message).not.toContain("보관하고 있지 않아");
-    const step = artifact(turn, "HUMAN_ACTION_REQUIRED");
-    expect(step.actionType).toBe("KNOWLEDGE_ENTRY");
-    expect(step.to).toBe("/settings/policies");
-    expect(step.title).toBe("배송 기준을 등록하면 답할 수 있습니다");
-    // Offered, not required: nothing can resume this turn, so it does not wait on the seller.
+    // The finding first, the specific question last — a closed template, no model wrote it.
+    expect(turn.message.endsWith("보통 결제 후 며칠 안에 출고하시나요?")).toBe(true);
+    const step = artifact(turn, "KNOWLEDGE_CAPTURE");
+    expect(step).toMatchObject({ state: "ASKED", scope: "ORG", topicLabel: "배송", settingsTo: "/settings/policies", content: null });
+    expect(turn.continuation.pendingCapture).toMatchObject({ state: "ASKED", knowledgeType: "SHIPPING_POLICY", resume: { kind: "GOAL", turnId: turn.turnId } });
+    // A question, not a wait: the turn is DONE and nothing was written.
     expect(turn.status).toBe("DONE");
     expect(h.operator.calls.orgKnowledgeSearch).toBe(1);
+    expect(h.inquiry.knowledgeWrites).toHaveLength(0);
   });
 
   it("B2. rules registered but none covering the question → NO_RELEVANT_EVIDENCE, not 「기준 없음」", async () => {
