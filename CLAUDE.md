@@ -654,7 +654,12 @@ reload 시 저장 버전 재읽기. 라이브 A–J (disposable org, 마켓플�
 resume 전 actionability 재검사(답변된 문의는 기준만 저장). writer는 `KnowledgeCaptureWriter.ts` 한 파일(write fence).
 라이브: 충돌·중복·취소·stale·저장→GROUNDED 재초안(근거 인용)·GOAL 재실행·ANSWERED 경계 전부 확인; **lexical retriever가
 판매자의 「출고」와 고객의 「배송」을 잇지 못해 저장 뒤에도 `DRAFT_STILL_GAP`인 경우는 정직하게 남기고 보고**(threshold 무변경).
-마켓플레이스 0 · WRITE 0 · 마이그레이션 0).
+마켓플레이스 0 · WRITE 0 · 마이그레이션 0. **§12–15 Captured Knowledge Reuse Robustness v1 (08-31)**: 저장 직후의 두 miss를
+scorer에서 닫았다 — threshold·candidate 구조·세 lane 불변. 상품명이 설명하는 낱말은 **조사까지** 분모에서 빠지고, 질문이
+**정확히 하나의** `KnowledgeTopic`을 이름 지을 때만 그 topic 어휘(배송↔출고↔발송)가 서로를 만나며, 닫힌 어미(나요)와 ㅂ니다
+활용 규칙 하나가 stem을 잇고, **측정 단위**(mm·일·개, 며칠)는 실제 낱말 매치 옆에서만 세는 보조 concept이다(단독 채택 0 — 「폭 몇
+mm」→「높이 18mm」도 닫힘); 가닥 같은 **셈 명사는 단위가 아니라 낱말**이고 「몇 가닥」은 `\d+가닥`을 말한 passage가 답한다.
+숫자는 판매자의 것 그대로. 라이브 A–I 전부 FOUND/거절이 맞고, 지연 3–6ms · 모델 호출 증가 0).
 
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·

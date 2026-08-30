@@ -162,3 +162,83 @@ off-host requests 0, horizontal scroll 0, knowledge writes from the browser 0 (t
 QA org 「QA 지식학습」 removed after the run (rows, work items, seller account, knowledge, runtime store
 scope); Demo Org untouched; backend restored on its original env. Marketplace calls 0 · WRITE 0 ·
 migrations 0 · new tables 0 ⇒ no evidence row.
+
+---
+
+# Captured Knowledge Reuse Robustness v1 (2026-08-31)
+
+**Scope.** The capture mechanics above are unchanged. This closes only the two live blockers §10 left:
+a fact the seller just confirmed, asked for again in other words, was `DRAFT_STILL_GAP` — 「출고까지 보통
+2~3일」 for 「배송은 며칠 걸리나요」, and 「3가닥입니다」 for 「몰딩 안에 몇 가닥 들어가나요」. No embedding,
+no vector store, no threshold change (`MIN_ASKABLE_RATIO` 0.35 · `MIN_TOPIC_COVERAGE` 0.4 ·
+`MIN_MATCHED_CHARS` 2 are asserted unchanged); the shared `RetrievalQuery` structure and the three lanes
+are untouched. Base: `1ee89e50`.
+
+## 12. Where each miss actually died (scorer trace, not a sentence)
+
+| question | passage | before | why |
+|---|---|---|---|
+| 주문하면 배송은 보통 며칠 정도 걸리나요 | 결제 후 보통 2~3일 안에 출고합니다… | 2/17 = 0.12 | only 보통 shared a string; 배송·출고 are one `KnowledgeTopic` the scorer could not see; 며칠 and 2~3일 share the day concept and no string |
+| 이 몰딩 안에 전선이 몇 가닥까지 들어가나요 (product 「QA 전선몰딩」) | …최대 3가닥까지 들어갑니다 | 4/12 = 0.33 | 전선이 is ⅔ covered by the product's name and its particle 이 still sat in the denominator; 들어가나요 could not meet 들어갑니다 (나요 was not an allowed leftover; the ㅂ batchim of 갑니다) |
+| 몰딩 안에 몇 가닥 들어가나요 | 3가닥입니다. | 2/9 = 0.22 | the seller answered with the figure alone; 안에·들어가나요 diluted the ratio |
+
+## 13. The closure — four closed rules in the one scorer (`KnowledgeText`)
+
+1. **Entity-scoped denominator.** A query word the product's name explains, *with its particle*
+   (전선+이, 몰딩), leaves the question entirely; before, only a whole-word cover did. Scope is unchanged:
+   the corpus is still one product's, the name still admits nothing.
+2. **Topic alias (`KnowledgeTopic` vocabulary).** A query word that is exactly a vocabulary word of the
+   question's **one** operating topic (배송) meets a passage that states a sibling word (출고 · 발송 ·
+   택배). Closed on both sides (`KnowledgeTopic.ofWord` · `mentionedIn`), applied only when
+   `KnowledgeTopic.of(question)` names exactly one topic — 「반품 배송비」 expands nothing, 배송비 is not a
+   vocabulary word. Symmetric.
+3. **Endings as leftovers.** `prefixMatch` accepts the closed polite/interrogative ending list as a
+   leftover for a ≥2-syllable stem (들어가+나요), and one Hangul conjugation rule — a vowel-final stem
+   takes ㅂ before 니다 (들어가 → 들어갑니다, 걸리 → 걸립니다). No morphology service.
+4. **Quantity concepts (`QuantityTokens`), supplementary only.** A bare **measure unit** (mm · 일 · 개 …)
+   or 며칠 in the question is a concept term that matches a passage stating a figure in that unit
+   (`\d+일` — the seller's 2~3일 stays the seller's, normalized only for comparison). A concept counts
+   *only beside a real match in the same passage*; alone it admits nothing — which also closes the
+   pre-existing 「폭이 몇 mm」→「높이 18mm」 false positive. **Count nouns are not units**: 가닥 is a real
+   word about the product (listing it would have made 「몇 가닥」 unanswerable), so `UNITS` holds
+   measures only. And 「몇 + noun」 is a *quantity question about that noun*: a passage that states a
+   figure of exactly that noun (`\d+가닥`) makes the question askable whatever grammar stood around it
+   (`Weighing.askable` = ratio **or** `figureAnswered`); the noun is still a real term, so a passage
+   without it scores nothing.
+
+Nothing rewrites a number: evidence and drafts quote the seller's 2~3일 / 3가닥 verbatim (A/D live
+drafts below say exactly that). §4's invariant is pinned in the runtime fence: after a save, the
+resume reaches the fact only through `DraftPreparer` → composer → the ordinary `RetrievalQuery`;
+`decideCapture` names no passage, evidence list, prompt or search call.
+
+## 14. Verified
+
+Pure (`CapturedKnowledgeReuseTest`, `KnowledgeRetriever.rank` on the live sentences): A/B/C phrasings
+find the 출고 rule; the two 08-30 misses verbatim; F (a refund rule without 배송 never adopted; one
+*with* 「반품 배송비」 is the lexical hit the service topic gate refuses — pinned in
+`SellerOperationsKnowledgeServiceTest` E); F2 (two-topic question expands no alias); G (mm/일/가닥
+alone admit nothing; 폭+mm finds the width note among four unit-bearing notes); E (another product's
+corpus finds nothing); the closed vocabularies. Backend 3,578 / 0 · runtime 711 / 0 (fence +1).
+
+Live (disposable org 「QA 지식재사용」, 2 products, 6 inquiries, real planner + draft model; marketplace
+0 · WRITE 0):
+
+| case | result |
+|---|---|
+| A 「배송은 며칠 걸리나요?」 → capture → 「출고까지 보통 2~3일 걸립니다.」 → save | resumed **FOUND · GROUNDED v1 · cited**; draft quotes 「보통 2~3일」 |
+| B 「출고는 며칠 걸리나요?」 (new conversation) | GROUNDED directly from the same source; capture 0 |
+| C 「배송 기간이 어떻게 되나요?」 with a refund rule registered | GROUNDED on the shipping rule only; refund rule `rejectedNotApplicable=1` (F) |
+| D 「몰딩 안에 몇 가닥 들어가나요?」 → 「3가닥입니다.」 → save | resumed **FOUND · cited**; `NEEDS_CLARIFICATION` because the listing declares no 규격 (Knowledge Gap Resolution v1 §5) — the draft states 3가닥 and asks which |
+| E same question on 「QA 케이블타이」 | product corpus ABSENT, its own capture asked; D's source 0 |
+| G 「폭이 몇 mm인가요?」 with 「높이 18mm, 두께 2mm」·「무게 120g」 notes | `NO_RELEVANT_EVIDENCE`, capture asks for 폭; 「높이가 몇 mm」 finds 치수 |
+| I 「최근 문의 3개」 | retrieval 0 · capture 0 |
+
+Endpoint measurements: candidates tried 1–2, outcome as above, local latency 3–6 ms per search;
+planner 1 per planned turn and draft 1 per grounded resume — unchanged.
+
+## 15. Not fixed, reported
+
+- A particle on an **unmatched** word still counts in the denominator (「무게가 얼마나 되나요」 vs 「무게는
+  120g」: 2/6 = 0.33). Symmetric to rule 1 but not one of this package's blockers; noted, not changed.
+- 「최근 문의 3개」 on this org answered 「문의는 없습니다」 while the list artifact existed — the rows
+  window's date clipping on inquiries dated today; unrelated to retrieval, observed only.

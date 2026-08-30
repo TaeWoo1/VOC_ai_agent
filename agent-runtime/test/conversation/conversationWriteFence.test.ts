@@ -59,6 +59,19 @@ describe("conversation write fence", () => {
     expect(FILES.filter((f) => /\bcreateOrgKnowledge\b|\bcreateProductKnowledgeSource\b/.test(f.text)).map((f) => f.name)).toEqual(["KnowledgeCaptureWriter.ts"]);
   });
 
+  it("Captured Knowledge Reuse v1: after a save the original work is resumed through the ordinary draft path — no capture-specific bypass hands the saved text to a prompt or an evidence list", () => {
+    const service = FILES.find((f) => f.name === "ConversationService.ts")!.text;
+    const start = service.indexOf("private async decideCapture(");
+    const end = service.indexOf("/** Which objects a draft/send sentence points at", start);
+    const decide = service.slice(start, end);
+    expect(decide).toMatch(/prepareWithView\(/);
+    // The resume reads the saved source id back from the backend's own evidence; it never writes one in.
+    expect(decide).toMatch(/evidence \?\? \[\]\)\.some\(\(e\) => e\.sourceId === savedId\)/);
+    for (const forbidden of [/passages\s*:/, /evidence\s*:\s*\[/, /searchProductKnowledge/, /searchOrgKnowledge/, /planGoal/, /judgeFinding/, /candidate\.content/]) {
+      expect(decide, `decideCapture names ${forbidden}`).not.toMatch(forbidden);
+    }
+  });
+
   it("a captured fact is never a model's, a customer's or an assistant's sentence: the writer reads only the candidate the seller confirmed", () => {
     const writer = FILES.find((f) => f.name === "KnowledgeCaptureWriter.ts")!.text;
     expect(writer).toMatch(/candidate\.content/);

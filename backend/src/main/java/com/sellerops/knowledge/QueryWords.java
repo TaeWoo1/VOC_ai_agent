@@ -126,6 +126,16 @@ final class QueryWords {
     }
 
     /**
+     * Whether what was left over is a polite / interrogative ENDING — the closed list above — so
+     * 들어가+나요 meets a passage that wrote 들어갑니다 the way 폭+이 meets 폭은 (Captured Knowledge Reuse
+     * Robustness v1). Only ever consulted for a stem of two or more characters: a one-syllable stem
+     * before an ending is scaffolding (되나요), and {@link #isFunctionWord} already dropped it.
+     */
+    static boolean isEndingTail(String tail) {
+        return ENDINGS.contains(tail);
+    }
+
+    /**
      * The question, as words.
      *
      * <p>Split on everything that is not a letter or a digit, and again wherever the script changes —

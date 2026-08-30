@@ -3,6 +3,7 @@ package com.sellerops.knowledge;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Splitting a document into quotable passages, and scoring a passage against a question.
@@ -150,9 +151,52 @@ public final class KnowledgeText {
             return 0;
         }
         for (int length = Math.min(word.length(), text.length()); length >= 1; length--) {
-            if ((length == word.length() || QueryWords.isParticleTail(word.substring(length)))
+            String tail = word.substring(length);
+            boolean ending = length >= 2 && QueryWords.isEndingTail(tail);
+            if ((length == word.length() || QueryWords.isParticleTail(tail) || ending)
                     && text.contains(word.substring(0, length))) {
                 return length;
+            }
+            // The formal ending: a vowel-final stem takes ㅂ as its batchim before 니다 (들어가 → 들어갑니다,
+            // 걸리 → 걸립니다). One closed conjugation rule of Hangul arithmetic, so the customer's
+            // 「들어가나요」 meets the seller's 「들어갑니다」 the way 폭+이 meets 폭은.
+            if (ending && text.contains(withBieupBatchim(word.substring(0, length)) + "니다")) {
+                return length;
+            }
+        }
+        return 0;
+    }
+
+    /** The stem with ㅂ added as the final consonant of its last syllable; unchanged when that syllable already has one. */
+    private static String withBieupBatchim(String stem) {
+        char last = stem.charAt(stem.length() - 1);
+        if (last < 0xAC00 || last > 0xD7A3 || (last - 0xAC00) % 28 != 0) {
+            return stem;
+        }
+        return stem.substring(0, stem.length() - 1) + (char) (last + 17);
+    }
+
+    /**
+     * The topic-alias match (Captured Knowledge Reuse Robustness v1): a query word that IS a word of the
+     * question's one operating topic (배송) meets a passage that states the same topic in a sibling
+     * word (출고 · 발송 · 택배). Closed on both sides — the word must be exactly a {@link KnowledgeTopic}
+     * vocabulary entry once its particle is removed, and {@code topic} is passed only when the question
+     * names exactly one topic — so 「반품 배송비」 (two topics) expands nothing, and 배송비 (not a
+     * vocabulary word) expands nothing.
+     *
+     * @return the stem's length when the alias applies; 0 otherwise
+     */
+    static int aliasMatch(String word, String normalizedText, KnowledgeTopic topic) {
+        if (topic == null || word.isEmpty()) {
+            return 0;
+        }
+        for (int length = word.length(); length >= 2; length--) {
+            if (length != word.length() && !QueryWords.isParticleTail(word.substring(length))) {
+                continue;
+            }
+            String stem = word.substring(0, length);
+            if (KnowledgeTopic.ofWord(stem) == topic) {
+                return topic.mentionedIn(normalizedText) ? length : 0;
             }
         }
         return 0;
@@ -197,19 +241,46 @@ public final class KnowledgeText {
         double askableWeight = 0.0;
         int matchableChars = 0;
         int reachableChars = 0;
+        int conceptChars = 0;
         int passages = normalizedCorpus.size();
+        // Captured Knowledge Reuse Robustness v1: a topic alias applies only when the question names
+        // exactly ONE operating topic — a question about 반품 배송비 is not about shipping alone.
+        Set<KnowledgeTopic> asked = KnowledgeTopic.of(query);
+        KnowledgeTopic aliasTopic = asked.size() == 1 ? asked.iterator().next() : null;
+        List<Set<String>> statedUnits = normalizedCorpus.stream().map(QuantityTokens::statedUnits).toList();
         for (String word : QueryWords.content(query)) {
             int nameCover = prefixMatch(word, normalizedName);
-            if (nameCover >= word.length()) {
-                // The question named the product. Retrieval was already scoped to it, so this word
-                // separates nothing — and letting it count is what returned a 1.00 citation for
-                // "선바로 방수 되나요?" from a description that never mentions 방수.
+            if (nameCover >= word.length()
+                    || (nameCover > 0 && QueryWords.isParticleTail(word.substring(nameCover)))) {
+                // The question named the product (전선몰딩, or 전선이 with its particle). Retrieval was
+                // already scoped to it, so this word separates nothing — and letting it count is what
+                // returned a 1.00 citation for "선바로 방수 되나요?" from a description that never
+                // mentions 방수; letting its PARTICLE stay in the denominator is what sank 「몰딩 안에
+                // 전선이 몇 가닥」 to 0.33 against the note that answers it.
+                continue;
+            }
+            String unit = QuantityTokens.unitOf(word);
+            if (unit != null) {
+                // A quantity CONCEPT (며칠 · mm · 가닥까지): reachable wherever a passage states a
+                // figure in that unit, and counted only beside a real match (see Weighing).
+                int documentFrequency = 0;
+                for (Set<String> units : statedUnits) {
+                    if (units.contains(unit)) {
+                        documentFrequency++;
+                    }
+                }
+                int best = documentFrequency > 0 ? word.length() : 0;
+                double weight = Math.log((passages + 1.0) / (documentFrequency + 0.5));
+                matchableChars += word.length();
+                conceptChars += best;
+                askableWeight += weight * best;
+                terms.add(new Term(word, 0, best, weight, unit));
                 continue;
             }
             int documentFrequency = 0;
             int best = 0;
             for (String text : normalizedCorpus) {
-                int matched = prefixMatch(word, text) - nameCover;
+                int matched = Math.max(prefixMatch(word, text), aliasMatch(word, text, aliasTopic)) - nameCover;
                 if (matched > 0) {
                     documentFrequency++;
                     best = Math.max(best, matched);
@@ -219,10 +290,24 @@ public final class KnowledgeText {
             matchableChars += word.length() - nameCover;
             reachableChars += best;
             askableWeight += weight * best;
-            terms.add(new Term(word, nameCover, best, weight));
+            terms.add(new Term(word, nameCover, best, weight, null));
         }
-        return new Weighing(List.copyOf(terms), askableWeight,
-                matchableChars == 0 ? 0.0 : (double) reachableChars / matchableChars);
+        // Concept matches are supplementary: they raise the ratio only when the corpus already has a
+        // real word for the question. A corpus whose only overlap is a unit has no words for it.
+        int reached = reachableChars + (reachableChars > 0 ? conceptChars : 0);
+        // 「몇 가닥」 is a quantity question about 가닥; a passage that states 3가닥 answers it whatever else
+        // the question said around it (안에 · 들어가나요). The noun itself is still a real term above, so a
+        // passage without it scores nothing; this only says the corpus HAS the asked fact.
+        boolean figureAnswered = false;
+        for (String noun : QuantityTokens.countedNouns(query)) {
+            for (String text : normalizedCorpus) {
+                if (QuantityTokens.statesFigureOf(text, noun)) {
+                    figureAnswered = true;
+                }
+            }
+        }
+        return new Weighing(List.copyOf(terms), askableWeight, aliasTopic, figureAnswered,
+                matchableChars == 0 ? 0.0 : (double) reached / matchableChars);
     }
 
     /**
@@ -234,11 +319,16 @@ public final class KnowledgeText {
      *                  nobody wrote this word and no passage can earn anything for it
      * @param weight    its rarity across this product's passages
      */
-    record Term(String word, int nameCover, int best, double weight) {
+    record Term(String word, int nameCover, int best, double weight, String unit) {
 
         /** Whether any passage has words for this one at all. */
         boolean askable() {
             return best > 0;
+        }
+
+        /** A quantity concept (며칠 · mm · 가닥까지) rather than a lexical word — supplementary only. */
+        boolean concept() {
+            return unit != null;
         }
     }
 
@@ -252,7 +342,16 @@ public final class KnowledgeText {
      *                      for, in [0,1]. The absence signal, and the only place the unanswerable part
      *                      of a question is allowed to count
      */
-    public record Weighing(List<Term> terms, double askableWeight, double askableRatio) {
+    public record Weighing(List<Term> terms, double askableWeight, KnowledgeTopic aliasTopic,
+                           boolean figureAnswered, double askableRatio) {
+
+        /**
+         * Whether the corpus has words for the question: the character ratio over its content words, or a
+         * stated figure of the count noun it asked 몇 of (Captured Knowledge Reuse Robustness v1).
+         */
+        public boolean askable(double minRatio) {
+            return figureAnswered || askableRatio >= minRatio;
+        }
 
         /** How well one passage answers the reachable part of the question. */
         public Assessment assess(String normalizedContent) {
@@ -261,17 +360,35 @@ public final class KnowledgeText {
             }
             double hit = 0.0;
             int matchedChars = 0;
+            // Real words first; a concept (며칠 · mm) counts for THIS passage only when the passage
+            // already matched a real word — a figure in the right unit is not, alone, an answer.
             for (Term term : terms) {
-                if (!term.askable()) {
+                if (!term.askable() || term.concept()) {
                     continue;
                 }
-                int matched = Math.min(term.best(),
-                        Math.max(0, prefixMatch(term.word(), normalizedContent) - term.nameCover()));
+                int matched = Math.min(term.best(), Math.max(0,
+                        Math.max(prefixMatch(term.word(), normalizedContent),
+                                aliasMatch(term.word(), normalizedContent, aliasTopic)) - term.nameCover()));
                 if (matched == 0) {
                     continue;
                 }
                 matchedChars += matched;
                 hit += term.weight() * matched;
+            }
+            if (matchedChars > 0) {
+                Set<String> units = null;
+                for (Term term : terms) {
+                    if (!term.askable() || !term.concept()) {
+                        continue;
+                    }
+                    if (units == null) {
+                        units = QuantityTokens.statedUnits(normalizedContent);
+                    }
+                    if (units.contains(term.unit())) {
+                        matchedChars += term.best();
+                        hit += term.weight() * term.best();
+                    }
+                }
             }
             return new Assessment(hit / askableWeight, matchedChars);
         }

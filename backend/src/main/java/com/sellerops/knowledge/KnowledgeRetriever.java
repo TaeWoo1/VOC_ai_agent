@@ -97,7 +97,7 @@ public final class KnowledgeRetriever {
             return List.of();
         }
         KnowledgeText.Weighing weighing = weigh(query, candidates, discountedSubject);
-        if (weighing.askableRatio() < MIN_ASKABLE_RATIO) {
+        if (!weighing.askable(MIN_ASKABLE_RATIO)) {
             return List.of();
         }
         List<Hit<T>> hits = new ArrayList<>();
@@ -126,7 +126,7 @@ public final class KnowledgeRetriever {
     public static <T> boolean canAnswer(String query, List<Candidate<T>> candidates,
                                         String discountedSubject) {
         return !candidates.isEmpty()
-                && weigh(query, candidates, discountedSubject).askableRatio() >= MIN_ASKABLE_RATIO;
+                && weigh(query, candidates, discountedSubject).askable(MIN_ASKABLE_RATIO);
     }
 
     private static <T> KnowledgeText.Weighing weigh(String query, List<Candidate<T>> candidates,

@@ -47,6 +47,37 @@ public enum KnowledgeTopic {
         return labelKo;
     }
 
+    /**
+     * The topic whose closed vocabulary contains exactly this word (「배송」, 「출고」, 「반품」…), or null.
+     * Exact membership — never a substring — so 배송비 is not 배송 here.
+     */
+    public static KnowledgeTopic ofWord(String word) {
+        if (word == null || word.isEmpty()) {
+            return null;
+        }
+        for (KnowledgeTopic topic : values()) {
+            for (String w : topic.words) {
+                if (w.equals(word)) {
+                    return topic;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Whether the normalized text contains ANY word of this topic's closed vocabulary. */
+    public boolean mentionedIn(String normalizedText) {
+        if (normalizedText == null || normalizedText.isEmpty()) {
+            return false;
+        }
+        for (String w : words) {
+            if (normalizedText.contains(w)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Every topic the text names. Substring match on the closed table; empty when it names none. */
     public static Set<KnowledgeTopic> of(String text) {
         Set<KnowledgeTopic> found = EnumSet.noneOf(KnowledgeTopic.class);
