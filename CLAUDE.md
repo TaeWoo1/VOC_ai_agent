@@ -631,7 +631,7 @@ bounded candidate ≤4로 검색, 세 lane·composer·검색 endpoint 공유; sc
 문장·`answerBasisAction`·KNOWLEDGE_ENTRY 제안이 그것을 따른다), **`KnowledgeTopic`**(닫힌 topic 표로 질문과 문서
 **선언**(type·title)을 읽어 서로 다른 topic만 거절 — 인정은 못 하고 거절만 한다), **`search_answer_memory`**
 (`GET /api/answer-memory/search`, need `PAST_ANSWER`, prompt v8 — 과거 답변은 answer_memory를 읽고 customer memory와
-섞지 않는다; memory 단독 GROUNDED 금지 유지). 라이브 A–J on disposable org, 마켓플레이스 0 · WRITE 0.)
+섞지 않는다; memory 단독 GROUNDED 금지 유지). 라이브 A–J on disposable org, 마켓플레이스 0 · WRITE 0. **Retrieval Query Selection v1 (08-30, 같은 문서 §):** 같은 문서가 판매자의 「반품 조건」에는 FOUND, 플래너의 need 문장에는 NO_RELEVANT이던 결함 — 첫 divergence는 SUBJECT candidate였다(플래너의 문서·설명·FAQ·작성·상품의 같은 **artefact 명사**가 topic 단어로 채점되고 8단어 cap이 조건을 밀어냈다). `QueryTokens`가 닫힌 두 class — INSTRUCTION(어간 + 닫힌 어미 문법: 명시돼·명시된·확인해주세요가 항목 하나) · META(artefact·당사자·관계·기록 명사 + 조사) — 를 분리하고 topic-bearing 단어만 SUBJECT가 된다(문장마다 stop word 추가 금지); 구조화된 topic은 `?topic=`으로 **먼저** 시도하되 질문의 KnowledgeTopic을 단어 하나짜리 candidate로 만들지는 않는다(threshold lowering의 다른 모양). 세 lane이 같은 정규화를 쓰고 answer memory lane의 같은 결함(문의에·뭐라고·답했어)도 함께 닫혔다. threshold·scorer·candidate 상한·planner 호출 수 불변, 마이그레이션 0.)
 
 **`docs/seller_facing_response_hygiene_v1.md`** (Seller-facing Response Hygiene v1 — 2026-08-30. Agent 내부
 구조는 그대로 두고 판매자가 읽는 문장만 닫는다: 모든 seller-facing 문장은 **`operator/wording/sellerWording.ts`

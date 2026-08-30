@@ -25,10 +25,12 @@ import java.util.Set;
  *       The narrowest statement of what is asked; nothing to normalize.</li>
  *   <li>{@code TITLE} — the inquiry's subject line. A seller-facing field that is usually the
  *       question itself, without the greeting and the thread.</li>
- *   <li>{@code SUBJECT} — the head of the question with its scaffolding removed: function words,
- *       polite endings ({@link QueryWords}) and, new here, the closed list of INSTRUCTION words a
- *       seller or a planner addresses to us rather than to the topic (「확인해줘」, 「명시돼 있는지」,
- *       「가능한」). At most {@link #SUBJECT_WORDS} words, taken from the front, where the question is.</li>
+ *   <li>{@code SUBJECT} — the question's TOPIC-bearing words only: function words and polite endings
+ *       ({@link QueryWords}) removed, and — Retrieval Query Selection v1 — the two closed classes a
+ *       planner writes removed by {@link QueryTokens}: INSTRUCTION (「확인해줘」, 「명시돼 있는지」,
+ *       「가능한」, in any inflection) and META (the nouns for the artefact and the party: 문서·설명·FAQ·
+ *       정책·판매자·상품의). At most {@link #SUBJECT_WORDS} such words, from the front. Because the
+ *       meta words no longer take a slot, the cap no longer drops 조건 to keep 문서.</li>
  *   <li>{@code FULL} — the title and the head of the body as one string, bounded to
  *       {@link #FULL_CHARS}. The form the retriever was always given; kept last so a short question the
  *       subject rule over-trimmed is still asked whole.</li>
@@ -37,8 +39,11 @@ import java.util.Set;
  * goes through the unchanged gates; a candidate cannot lower a threshold, only phrase the question
  * the way the corpus could have been written about.
  *
- * <p>No model is asked for keywords and no morphological service is called: {@link #SUBJECT_STOP}
- * is a reviewable list, like {@code QueryWords.FUNCTION} beside it.
+ * <p>No model is asked for keywords and no morphological service is called: {@link QueryTokens} is
+ * two reviewable lists and one closed grammar, like {@code QueryWords.FUNCTION} beside it. A planner's
+ * sentence and the seller's own about the same document therefore reduce to the same SUBJECT — the
+ * candidate-agreement property the tests pin — and a structured topic the caller already holds
+ * ({@code TOPIC}) is tried before any free-text form.
  */
 public final class RetrievalQuery {
 
@@ -55,23 +60,6 @@ public final class RetrievalQuery {
     /** One form of the question. */
     public record Candidate(String text, Origin origin) {
     }
-
-    /**
-     * Words addressed to the reader rather than to the topic. Removing them from the SUBJECT
-     * candidate cannot change what the question is about; keeping them is what made a planner's
-     * sentence about a return policy fail the absence gate on 확인·명시·가능·있는지.
-     */
-    static final Set<String> SUBJECT_STOP = Set.of(
-            // Requests and confirmations.
-            "확인", "확인해줘", "확인해", "확인해주세요", "확인부탁", "체크", "알려", "알려줘", "말해", "말해줘",
-            "찾아", "찾아줘", "찾아봐", "조회", "검색", "봐줘", "봐", "해줘", "해주세요", "주세요", "부탁",
-            // Existence and possibility scaffolding.
-            "있는지", "없는지", "있나요", "없나요", "있는", "없는", "여부", "가능", "가능한", "가능한지",
-            "명시", "명시돼", "명시된", "명시되어", "명시되", "적혀", "적혀있는지", "나와", "나와있는지", "나오는",
-            "되는지", "되나요", "인지", "필요", "필요한",
-            // Meta nouns for the artefact being asked about, not its topic.
-            "내용", "정보", "관련", "답변", "질문", "기준", "정책", "규정", "안내", "판매자", "고객", "우리",
-            "회사", "등록", "등록된");
 
     private final List<Candidate> candidates;
 
@@ -94,8 +82,17 @@ public final class RetrievalQuery {
         return candidates.isEmpty() ? "" : candidates.get(candidates.size() - 1).text();
     }
 
-    /** The question as one string, for the caller that needs to classify or log it. */
+    /**
+     * The question as one string, for the caller that needs to classify or log it — the structured
+     * topic (when the caller gave one) beside the whole, so a topic asked as {@code TOPIC} is a topic
+     * the applicability gate sees.
+     */
     public String text() {
+        for (Candidate c : candidates) {
+            if (c.origin() == Origin.TOPIC) {
+                return (c.text() + " " + full()).strip();
+            }
+        }
         return full();
     }
 
@@ -139,7 +136,7 @@ public final class RetrievalQuery {
     static String subjectOf(String text) {
         List<String> words = new ArrayList<>();
         for (String word : QueryWords.content(text)) {
-            if (SUBJECT_STOP.contains(word) || word.length() < 2) {
+            if (!QueryTokens.isTopicBearing(word)) {
                 continue;
             }
             words.add(word);
@@ -162,7 +159,7 @@ public final class RetrievalQuery {
         String subject = KnowledgeText.normalize(discountedSubject == null ? "" : discountedSubject);
         List<String> out = new ArrayList<>();
         for (String word : QueryWords.content(text)) {
-            if (SUBJECT_STOP.contains(word) || word.length() < 2) {
+            if (!QueryTokens.isTopicBearing(word)) {
                 continue;
             }
             if (extraStop != null && extraStop.stream().anyMatch(word::startsWith)) {

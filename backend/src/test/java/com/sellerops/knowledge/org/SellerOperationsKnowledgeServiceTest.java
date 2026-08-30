@@ -175,6 +175,20 @@ class SellerOperationsKnowledgeServiceTest {
         assertThat(found.passages().get(0).title()).isEqualTo("배송 기준");
     }
 
+    @Test
+    @DisplayName("the seller's noun and an instruction sentence about the same rule find the same rule (Retrieval Query Selection v1)")
+    void instructionPhrasingFindsTheSameRule() {
+        write(OrgKnowledgeType.EXCHANGE_REFUND_POLICY, "교환·반품 처리 기준",
+                "교환·반품은 수령 후 7일 이내 접수분만 처리합니다. 단순 변심 반품은 왕복 배송비 6,000원을 고객이 부담합니다.");
+        OrgKnowledgeSearchResponse noun = service.search(org, "우리 반품 기준 뭐였지", 5);
+        OrgKnowledgeSearchResponse sentence = service.search(org,
+                "우리 회사 규정에 교환이나 반품이 가능한 조건이 명시돼 있는지 확인해줘", 5);
+        assertThat(noun.outcome()).isEqualTo(RetrievalOutcome.FOUND);
+        assertThat(sentence.outcome()).isEqualTo(RetrievalOutcome.FOUND);
+        assertThat(sentence.passages().get(0).title()).isEqualTo(noun.passages().get(0).title());
+        assertThat(sentence.query()).doesNotContain("확인").doesNotContain("규정").doesNotContain("명시");
+    }
+
     private OrgKnowledgeView write(OrgKnowledgeType type, String title, String body) {
         return service.create(org, new OrgKnowledgeRequest(type, title, body, null),
                 UUID.randomUUID(), "데모 운영자");

@@ -142,7 +142,7 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
   /** Every query `resolve_product` was called with, in order. See {@link searchProducts}. */
   readonly productQueries: string[] = [];
   /** Every knowledge retrieval, so a test can assert WHAT was asked of the library and for which product. */
-  readonly productKnowledgeQueries: Array<{ productId: string; query: string }> = [];
+  readonly productKnowledgeQueries: Array<{ productId: string; query: string; topic?: string }> = [];
 
   readonly calls = {
     inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
@@ -426,9 +426,10 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     productId: string,
     query: string,
     limit?: number,
+    topic?: string,
   ): Promise<KnowledgeSearchResult> {
     this.calls.knowledgeSearch += 1;
-    this.productKnowledgeQueries.push({ productId, query });
+    this.productKnowledgeQueries.push({ productId, query, ...(topic ? { topic } : {}) });
     const seeded = this.seed.productKnowledgeSearch?.[productId];
     if (!seeded) {
       // A product with no library. NOT an error and NOT an empty match: the two are different

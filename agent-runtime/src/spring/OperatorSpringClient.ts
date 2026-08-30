@@ -130,6 +130,8 @@ export interface OperatorSpringClient {
     productId: string,
     query: string,
     limit?: number,
+    /** A structured topic the plan already fixed, as the seller's word — tried before any form of `query`. */
+    topic?: string,
   ): Promise<KnowledgeSearchResult>;
   /**
    * The company's operating rules that cover a question — the ORG_OPERATIONS lane the draft path already

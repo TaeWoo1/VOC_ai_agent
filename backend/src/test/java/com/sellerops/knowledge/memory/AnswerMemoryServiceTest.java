@@ -205,6 +205,20 @@ class AnswerMemoryServiceTest {
         assertThat(miss.passages()).isEmpty();
     }
 
+    @Test
+    @DisplayName("the seller's noun and an instruction sentence about the same answer find the same answer (Retrieval Query Selection v1)")
+    void instructionPhrasingFindsTheSameAnswer() {
+        remember("inquiry-answer:ret", AnswerMemoryStrength.IMPORTED_SELLER_ANSWER,
+                "반품 조건 어떻게 되나요", "반품은 수령 후 7일 이내, 미사용 상태에서만 가능합니다.",
+                "exchange_return_reply", null);
+        AnswerMemorySearchResponse noun = service.search(org, "반품 조건", null, 3);
+        AnswerMemorySearchResponse sentence = service.search(org,
+                "예전에 반품 조건에 대해 고객에게 어떻게 답변했는지 확인해줘", null, 3);
+        assertThat(noun.outcome()).isEqualTo(RetrievalOutcome.FOUND);
+        assertThat(sentence.outcome()).isEqualTo(RetrievalOutcome.FOUND);
+        assertThat(sentence.passages().get(0).memoryId()).isEqualTo(noun.passages().get(0).memoryId());
+    }
+
     private void remember(String originRef, AnswerMemoryStrength strength, String question,
                           String answer, String category, UUID productId) {
         service.remember(new AnswerMemoryService.RememberCommand(

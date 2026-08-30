@@ -58,7 +58,8 @@ class ProductKnowledgeRetrievalOutcomeTest {
         org = organizations.save(o).getId();
         Product p = new Product();
         p.setOrgId(org);
-        p.setName("전선몰딩");
+        // The live product's name: the planner's sentences quote it, and the library discounts it.
+        p.setName("QA 전선몰딩");
         p.setSku("SKU-" + UUID.randomUUID());
         p.setStatus("ACTIVE");
         productId = products.save(p).getId();
@@ -84,6 +85,53 @@ class ProductKnowledgeRetrievalOutcomeTest {
         assertThat(found.query()).isNotEqualTo("이 상품의 교환이나 반품이 가능한 조건이 명시돼 있는지 확인해줘");
         assertThat(found.query()).contains("반품");
         assertThat(found.candidatesTried()).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("C. the three sentences the live planner wrote about the same document find the same document")
+    void thePlannersOwnSentencesFindTheSameDocument() {
+        source(RETURN_DOC_TITLE, RETURN_DOC_BODY);
+        for (String sentence : com.sellerops.knowledge.PlannerSentences.ABOUT_THE_RETURN_DOCUMENT) {
+            KnowledgeSearchResponse found = search(sentence);
+            assertThat(found.outcome()).as(sentence).isEqualTo(RetrievalOutcome.FOUND);
+            assertThat(found.passages()).extracting(KnowledgePassage::title).containsExactly(RETURN_DOC_TITLE);
+            assertThat(found.query()).as("matched through a shorter form").isNotEqualTo(sentence).contains("반품");
+        }
+    }
+
+    @Test
+    @DisplayName("capture safety: a source the seller's sentence finds is found by every planner phrasing — same first passage")
+    void plannerPhrasingNeverTurnsAFoundSourceIntoAGap() {
+        source(RETURN_DOC_TITLE, RETURN_DOC_BODY);
+        source("설치 방법", "양면테이프를 떼고 벽면에 눌러 붙입니다. 재부착 시 접착력이 떨어질 수 있습니다.");
+        KnowledgeSearchResponse seller = search("QA 전선몰딩 반품 조건이 명시돼 있는지 확인해줘");
+        assertThat(seller.outcome()).isEqualTo(RetrievalOutcome.FOUND);
+        for (String sentence : com.sellerops.knowledge.PlannerSentences.ABOUT_THE_RETURN_DOCUMENT) {
+            KnowledgeSearchResponse planner = search(sentence);
+            assertThat(planner.outcome()).as(sentence).isEqualTo(seller.outcome());
+            assertThat(planner.passages().get(0).title()).as(sentence).isEqualTo(seller.passages().get(0).title());
+        }
+    }
+
+    @Test
+    @DisplayName("a structured topic the caller already holds is tried first and reported as the matching form")
+    void structuredTopicIsTriedFirst() {
+        source(RETURN_DOC_TITLE, RETURN_DOC_BODY);
+        KnowledgeSearchResponse found = library.search(org, productId,
+                RetrievalQuery.of("교환 반품 환불", null, com.sellerops.knowledge.PlannerSentences.ABOUT_THE_RETURN_DOCUMENT[1]),
+                5, KnowledgeVariantScope.unresolved());
+        assertThat(found.outcome()).isEqualTo(RetrievalOutcome.FOUND);
+        assertThat(found.candidatesTried()).isEqualTo(1);
+        assertThat(found.query()).isEqualTo("교환 반품 환불");
+    }
+
+    @Test
+    @DisplayName("D. the planner's phrasing of a shipping question still does not adopt the return document")
+    void plannerShippingPhrasingStaysNotApplicable() {
+        source(RETURN_DOC_TITLE, RETURN_DOC_BODY);
+        KnowledgeSearchResponse found = search("‘QA 전선몰딩’의 상품 설명/FAQ 문서 중 배송 기간이 명시된 문장이 있는가");
+        assertThat(found.passages()).isEmpty();
+        assertThat(found.outcome()).isEqualTo(RetrievalOutcome.NOT_APPLICABLE);
     }
 
     @Test

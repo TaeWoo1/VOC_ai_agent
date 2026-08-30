@@ -1,6 +1,7 @@
 package com.sellerops.product.library;
 
 import com.sellerops.auth.AuthPrincipal;
+import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.product.library.dto.KnowledgeSearchResponse;
 import com.sellerops.product.library.dto.KnowledgeSourceRequest;
 import com.sellerops.product.library.dto.KnowledgeSourceView;
@@ -72,13 +73,21 @@ public class ProductKnowledgeLibraryController {
         library.delete(principal.orgId(), sourceId);
     }
 
-    /** Retrieval over one product's library. {@code limit} is capped by the service. */
+    /**
+     * Retrieval over one product's library. {@code limit} is capped by the service.
+     *
+     * @param topic a structured topic the caller already resolved (the runtime's closed plan filter
+     *              as the seller's word — 「교환 반품 환불」), tried before any form of {@code query};
+     *              absent for a caller that holds only the sentence (Retrieval Query Selection v1)
+     */
     @GetMapping("/{productId}/knowledge/search")
     public KnowledgeSearchResponse search(@AuthenticationPrincipal AuthPrincipal principal,
                                           @PathVariable UUID productId,
                                           @RequestParam String query,
+                                          @RequestParam(required = false) String topic,
                                           @RequestParam(required = false, defaultValue = "0") int limit) {
-        return library.search(principal.orgId(), productId, query, limit);
+        return library.search(principal.orgId(), productId, RetrievalQuery.of(topic, null, query), limit,
+                KnowledgeVariantScope.unresolved());
     }
 
     /**

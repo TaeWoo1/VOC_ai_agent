@@ -462,9 +462,11 @@ export class HttpSpringClient
     productId: string,
     query: string,
     limit?: number,
+    topic?: string,
   ): Promise<KnowledgeSearchResult> {
     const params = new URLSearchParams({ query });
     if (limit && limit > 0) params.set("limit", String(limit));
+    if (topic) params.set("topic", topic);
     return this.request<KnowledgeSearchResult>(
       "GET",
       `/api/products/${encodeURIComponent(productId)}/knowledge/search?${params.toString()}`,

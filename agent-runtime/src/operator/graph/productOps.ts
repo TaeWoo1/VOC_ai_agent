@@ -80,6 +80,18 @@ export interface ProductOpsResult extends SpecialistResult {
   readonly knowledgeCoverage: readonly KnowledgeCoverageRow[];
 }
 
+
+/**
+ * The plan's closed topic filter as the seller's word — the same two words the POLICY lane already
+ * searches with (`inquiryOps.ts`). Only the operating topics the knowledge table knows; a spec/usage
+ * filter names no `KnowledgeTopic` and sends nothing (a question with no topic is not forced into one).
+ */
+function knowledgeTopicWord(topic: string | null | undefined): string | null {
+  if (topic === "SHIPPING") return "배송";
+  if (topic === "EXCHANGE_RETURN") return "교환 반품 환불";
+  return null;
+}
+
 export async function runProductOps(input: SpecialistInput): Promise<ProductOpsResult> {
   const { registry, budget, evidence, allowedTools } = input;
   const findings: Finding[] = [];
@@ -252,11 +264,14 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
       }
       // The need's own question is the query. Not the seller's whole sentence: a goal carries the
       // product name and the pleasantries, and matching a library against "누비아 사용법 좀 알려줘"
-      // scores every passage that happens to contain the product's name.
+      // scores every passage that happens to contain the product's name. The backend reduces the
+      // sentence to its topic-bearing words (Retrieval Query Selection v1); and when the plan already
+      // fixed a closed topic, that topic — as the seller's word — is tried before any form of it.
       const query = need.question || input.goalText || "";
+      const topic = knowledgeTopicWord(input.filters?.topic);
       const found = await registry.invoke<KnowledgeSearchResult>(
         OPERATOR_TOOL.SEARCH_PRODUCT_KNOWLEDGE,
-        { productId, query, limit: KNOWLEDGE_PASSAGE_LIMIT },
+        { productId, query, limit: KNOWLEDGE_PASSAGE_LIMIT, ...(topic ? { topic } : {}) },
         allowedTools,
       );
       if (found.passages.length === 0) {

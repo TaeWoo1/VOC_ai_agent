@@ -26,6 +26,40 @@ class RetrievalQueryTest {
         assertThat(inflected).contains("반품").contains("조건").doesNotContain("명시되어");
     }
 
+    static final String[] PLANNER_SENTENCES = PlannerSentences.ABOUT_THE_RETURN_DOCUMENT;
+
+    @Test
+    @DisplayName("candidate agreement: the seller's noun, the seller's sentence and the planner's three sentences share one SUBJECT")
+    void candidateAgreement() {
+        String[] inputs = {"반품 조건", "이 상품의 교환이나 반품이 가능한 조건이 명시돼 있는지 확인해줘",
+                PLANNER_SENTENCES[0], PLANNER_SENTENCES[1], PLANNER_SENTENCES[2]};
+        for (String in : inputs) {
+            String subject = RetrievalQuery.subjectOf(in);
+            assertThat(subject).as(in).contains("반품").contains("조건");
+            // Nothing the planner addressed to us, and nothing that names the artefact, is a topic word.
+            for (String meta : new String[] {"문서", "설명", "faq", "정책", "판매자", "작성", "상품의", "문장", "안내문",
+                    "핵심", "내용", "명시", "확인", "있는", "가능", "대해", "해당"}) {
+                assertThat(subject).as(in + " keeps " + meta).doesNotContain(meta);
+            }
+        }
+        // The seller's own what-did-we-say sentence reduces to the same subject (live 2026-08-30: the memory lane
+        // missed 「QA 전선몰딩 문의에 반품 조건 예전에 뭐라고 답했어?」 on 문의에·뭐라고·답했어 counted as topic).
+        assertThat(RetrievalQuery.subjectOf("QA 전선몰딩 문의에 반품 조건 예전에 뭐라고 답했어?")).isEqualTo("qa 전선몰딩 반품 조건");
+        // D: a question about another topic is not touched — its own words are its subject.
+        assertThat(RetrievalQuery.subjectOf("배송 기간")).isEqualTo("배송 기간");
+    }
+
+    @Test
+    @DisplayName("a structured topic is the first candidate and part of the text the topic gate classifies")
+    void structuredTopicFirst() {
+        RetrievalQuery q = RetrievalQuery.of("교환 반품 환불", null, PLANNER_SENTENCES[0]);
+        assertThat(q.candidates().get(0).origin()).isEqualTo(RetrievalQuery.Origin.TOPIC);
+        assertThat(q.candidates().get(0).text()).isEqualTo("교환 반품 환불");
+        assertThat(q.text()).startsWith("교환 반품 환불 ");
+        assertThat(q.full()).isEqualTo(PLANNER_SENTENCES[0]);
+        assertThat(q.candidates()).hasSizeLessThanOrEqualTo(RetrievalQuery.MAX_CANDIDATES);
+    }
+
     @Test
     @DisplayName("candidates: topic → title → subject → full, deduped, never more than four")
     void candidatesInOrder() {

@@ -263,8 +263,8 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
       }),
     })),
 
-    read(tool(async ({ productId, query, limit }: { productId: string; query: string; limit?: number }) =>
-      deps.operator.searchProductKnowledge(productId, query, limit), {
+    read(tool(async ({ productId, query, limit, topic }: { productId: string; query: string; limit?: number; topic?: string }) =>
+      deps.operator.searchProductKnowledge(productId, query, limit, topic), {
       name: OPERATOR_TOOL.SEARCH_PRODUCT_KNOWLEDGE,
       description:
         "판매자가 이 상품에 대해 직접 써 둔 글(상품 설명·FAQ·사용법·정책) 중 질문에 해당하는 대목만. "
@@ -278,6 +278,8 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         productId: z.string().min(1),
         query: z.string().min(1),
         limit: z.number().int().min(1).max(5).optional(),
+        // The plan's closed topic as the seller's word (Retrieval Query Selection v1) — never the sentence.
+        topic: z.string().min(1).max(40).optional(),
       }),
     })),
 
