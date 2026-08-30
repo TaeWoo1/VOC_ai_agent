@@ -287,6 +287,8 @@ export interface DraftArtifact extends ArtifactBase {
   readonly authorKind: string | null;
   readonly answerBasis: string | null;
   readonly answerBasisNote: string | null;
+  /** The backend's one next-step sentence for a NO_ANSWER_BASIS (what to register) — null otherwise. */
+  readonly answerBasisAction?: string | null;
   readonly knowledgeState: string | null;
   readonly evidenceCount: number;
   /**

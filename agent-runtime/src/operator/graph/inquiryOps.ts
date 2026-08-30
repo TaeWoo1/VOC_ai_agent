@@ -16,6 +16,7 @@
  * context read is explicitly body-free, and the recall read returns closed-vocabulary cues plus the
  * operator's own past approved reply.
  */
+import { excerpt, quotedRule, retrievalSentence } from "../wording/sellerWording";
 import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorState";
 import type { NeedState } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
@@ -506,9 +507,11 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
           provenance: `answer-memory/${memoryOutcome}`,
         });
         refs.push(ref);
-        const statement = memoryOutcome === "ABSENT"
-          ? "저장된 과거 답변이 아직 없습니다. 답변을 보내거나 승인하면 여기에 쌓입니다."
-          : "저장된 과거 답변 중 이 질문에 해당하는 것을 찾지 못했습니다.";
+        // Without a product anchor only the unbound memories were searched: an ABSENT here is true of that
+        // scope, not of the org (found live: a product-bound VERIFIED answer read as 「과거 답변이 아직 없습니다」).
+        const statement = memoryOutcome === "ABSENT" && !product
+          ? "상품과 연결되지 않은 과거 답변은 아직 없습니다. 상품 이름을 말씀해 주시면 그 상품의 과거 답변을 찾아봅니다."
+          : retrievalSentence("PAST_ANSWER", memoryOutcome === "FOUND" ? "NO_RELEVANT_EVIDENCE" : memoryOutcome);
         findings.push({
           findingId: `f-${ref.evidenceId}`, specialist: "INQUIRY_OPS", statement,
           evidenceIds: [ref.evidenceId], confidence: "NEEDS_REVIEW", verdict: null, surfaceLink: null,
@@ -526,6 +529,8 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
           args: { query, ...(product ? { productId: product.id } : {}) },
           locator: {
             ...(passage.productId ? { productId: passage.productId } : {}),
+            // The product's name travels with its id so the answer's product card can name it.
+            ...(passage.productId && product && passage.productId === product.id ? { productName: product.label } : {}),
             ...(passage.channelCode ? { channelCode: passage.channelCode } : {}),
             label: passage.strengthLabel, memoryId: passage.memoryId,
           },
@@ -539,7 +544,7 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
           findingId: `f-${ref.evidenceId}`,
           specialist: "INQUIRY_OPS",
           // The seller's own past sentence, attributed by its strength — what was said, not what is true.
-          statement: `예전에 보낸 답변(${passage.strengthLabel}${passage.updatedAt ? `, ${passage.updatedAt.slice(0, 10)}` : ""}): ${passage.answerBody}`,
+          statement: `예전에 보낸 답변(${passage.strengthLabel}${passage.updatedAt ? `, ${passage.updatedAt.slice(0, 10)}` : ""}): ${excerpt(passage.answerBody)}`,
           judgeStatement: `이 질문과 같은 주제로 회사가 예전에 보내거나 승인한 답변(${passage.strengthLabel})이 저장돼 있습니다.`,
           evidenceIds: [ref.evidenceId],
           confidence: "NEEDS_REVIEW",
@@ -770,11 +775,7 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
       findings.push({
         findingId: `f-${ref.evidenceId}`,
         specialist: "INQUIRY_OPS",
-        statement: outcome === "ABSENT"
-          ? `등록된 ${topic} 기준이 아직 없습니다.`
-          : outcome === "NOT_APPLICABLE"
-            ? `${topic} 기준은 등록되어 있지만, 이 문의에 적용할 근거로 확인되지는 않았습니다.`
-            : `등록된 운영 기준에서 이 질문에 해당하는 근거를 찾지 못했습니다.`,
+        statement: retrievalSentence("POLICY", outcome === "FOUND" ? "NO_RELEVANT_EVIDENCE" : outcome, { topic }),
         evidenceIds: [ref.evidenceId],
         confidence: "NEEDS_REVIEW",
         verdict: null,
@@ -810,7 +811,7 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
         findingId: `f-${ref.evidenceId}`,
         specialist: "INQUIRY_OPS",
         // The seller reads their own words, attributed as theirs.
-        statement: `판매자가 등록한 ${kindLabel} 기준 "${passage.title}"에 이렇게 적혀 있습니다: ${passage.content}`,
+        statement: quotedRule(kindLabel, passage.title, passage.content),
         // The judge learns that a rule of this kind and title covers the question — never its text.
         judgeStatement: `판매자가 등록한 ${kindLabel} 기준 "${passage.title}"이(가) 이 질문에 해당하는 내용을 담고 있습니다.`,
         evidenceIds: [ref.evidenceId],

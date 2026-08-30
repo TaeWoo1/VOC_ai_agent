@@ -177,7 +177,7 @@ describe("product knowledge as evidence", () => {
     // Availability: we never held this fact. Attribution: we hold rows we cannot tie to this product.
     // A single merged sentence would leave a seller unable to tell "connect the channel" from
     // "run the product read".
-    const availability = gapFindings.filter((f) => f.statement.includes("갖고 있지 않습니다"));
+    const availability = gapFindings.filter((f) => f.statement.includes("저장돼 있지 않습니다"));
     const attribution = gapFindings.filter((f) => f.statement.includes("연결되지 않아 판단할 수 없습니다"));
     expect(availability.length, "the missing-fact limit must be stated").toBeGreaterThan(0);
     expect(attribution.length, "the unattributable-signal limit must be stated").toBeGreaterThan(0);
@@ -223,17 +223,19 @@ describe("clarification and refusal are answers", () => {
   it("an ambiguous goal asks back instead of guessing", async () => {
     const { runtime } = build();
     const answer = done(await runtime.run("t-clarify", { text: "상품에 문제 있어?" }));
-    expect(answer.clarification).toBe("어떤 상품을 말씀하시는지 알려주세요.");
+    // Response Hygiene v1: the planner's reason picks a closed seller question; its own text stays in the plan.
+    expect(answer.clarification).toBe("어떤 상품에 대한 질문인지 알려주세요.");
     expect(answer.findings).toEqual([]);
     expect(answer.budget.stopReason).toBe("CLARIFICATION_NEEDED");
   });
 
-  it("a goal the model refused is reported as unsupported, with the model's own reason", async () => {
+  it("a goal the model refused is reported as unsupported, in the runtime's closed words (never the model's own sentence)", async () => {
     const { runtime } = build();
     const answer = done(await runtime.run("t-refuse", { text: "오늘 날씨 어때?" }));
     expect(answer.budget.stopReason).toBe("NO_PLAN");
     expect(answer.findings).toEqual([]);
-    expect(answer.note).toContain("판매 운영과 관련이 없는");
+    expect(answer.note).toContain("이 요청은 아직 도와드리기 어렵습니다");
+    expect(answer.note).not.toContain("판매 운영과 관련이 없는");
   });
 });
 

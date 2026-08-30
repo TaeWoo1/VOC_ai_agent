@@ -19,7 +19,7 @@ import { ExecutionResultArtifact } from "./artifacts/ExecutionResultArtifact";
 import { WorkspaceLinkArtifact } from "./artifacts/WorkspaceLinkArtifact";
 
 /** One component per artifact type. The switch is exhaustive: an unknown type renders nothing, never its token. */
-export function ArtifactView({ artifact, onResume }: { artifact: Artifact; onResume: () => void }) {
+export function ArtifactView({ artifact, onResume, onPrompt }: { artifact: Artifact; onResume: () => void; onPrompt?: (prompt: string) => void }) {
   switch (artifact.type) {
     case "SUMMARY":
       return <SummaryArtifact artifact={artifact} />;
@@ -42,7 +42,7 @@ export function ArtifactView({ artifact, onResume }: { artifact: Artifact; onRes
     case "CHART":
       return <ChartArtifact artifact={artifact} />;
     case "DRAFT":
-      return <DraftArtifact artifact={artifact} />;
+      return <DraftArtifact artifact={artifact} onPrompt={onPrompt} />;
     case "EVIDENCE":
       return <EvidenceArtifact artifact={artifact} />;
     case "CHECKLIST":

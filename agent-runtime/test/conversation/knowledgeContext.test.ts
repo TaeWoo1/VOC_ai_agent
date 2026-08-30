@@ -79,7 +79,7 @@ describe("Knowledge Context v1-A — org policy in the Agent lane", () => {
     const h: Harness = harness({ plansByGoal: PLANS, orgKnowledgeSearch: SHIPPING });
     const { turn } = await ask(h, ASK);
     expect(turn.status).toBe("DONE");
-    expect(turn.message).toContain("판매자가 등록한 배송 기준 \"배송 안내\"에 이렇게 적혀 있습니다");
+    expect(turn.message).toContain("등록된 배송 기준 「배송 안내」:");
     expect(turn.message).toContain("영업일 기준 2일 이내 출고");
     expect(turn.message).not.toContain("보관하고 있지 않아");
     expect(h.operator.calls.orgKnowledgeSearch).toBe(1);
@@ -111,7 +111,7 @@ describe("Knowledge Context v1-A — org policy in the Agent lane", () => {
     const h = harness({ plansByGoal: PLANS, orgKnowledgeSearch: { ...SHIPPING, passages: [] } });
     const { turn } = await ask(h, ASK);
     // Retrieval & Grounding Correctness v1: rules exist; the miss is said as a miss, never as absence.
-    expect(turn.message).toContain("등록된 운영 기준에서 이 질문에 해당하는 근거를 찾지 못했습니다.");
+    expect(turn.message).toContain("등록된 운영 정책에서 이 질문에 맞는 근거를 찾지 못했습니다.");
     expect(turn.message).not.toContain("기준이 아직 없습니다");
     expect(artifact(turn, "HUMAN_ACTION_REQUIRED").actionType).toBe("KNOWLEDGE_ENTRY");
   });

@@ -261,6 +261,8 @@ describe("E/F/G — the inquiry loop: list → topic → draft → tone → appr
     expect(turn.status).toBe("DONE");
     expect(turn.artifacts.some((a) => a.type === "DRAFT")).toBe(false);
     expect(turn.message).toContain("어떤 문의의 답변을 준비할지 알려주세요");
+    // The question is the whole answer (Response Hygiene v1): nothing the plan read beside it is recited.
+    expect(turn.message).toBe("어떤 문의의 답변을 준비할지 알려주세요. 방금 본 목록에서 「첫 번째 거」처럼 말씀해 주시면 됩니다.");
     expect(h.operator.calls.plan).toBe(plans + 1);
     expect(h.inquiry.calls.generate).toBe(0);
   });
@@ -317,7 +319,7 @@ describe("L / misc — failure, clarification, workspace link, persistence", () 
     expect(turn.status).toBe("FAILED");
     expect(turn.failureCode).toBe("GOAL_UNSUPPORTED");
     expect(turn.artifacts).toEqual([]);
-    expect(turn.message).toContain("판매 운영과 관련이 없는 요청입니다.");
+    expect(turn.message).toContain("이 요청은 아직 도와드리기 어렵습니다.");
   });
 
   it("a planner that cannot be reached fails the turn with the existing code", async () => {
@@ -332,7 +334,7 @@ describe("L / misc — failure, clarification, workspace link, persistence", () 
     const { h, id } = await fresh();
     const { turn } = await say(h, id, "상품에 문제 있어?");
     expect(turn.status).toBe("DONE");
-    expect(turn.message).toBe("어떤 상품을 말씀하시는지 알려주세요.");
+    expect(turn.message).toBe("어떤 상품에 대한 질문인지 알려주세요.");
     expect(turn.artifacts).toEqual([]);
   });
 

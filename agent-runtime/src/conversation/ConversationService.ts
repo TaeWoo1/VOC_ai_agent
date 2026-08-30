@@ -27,6 +27,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { OperatorAgentRuntime } from "../operator/operatorRuntime";
+import { INTERNAL_TOKEN, SOURCE_LABEL, clarificationKindOf, isSellerSafeLabel } from "../operator/wording/sellerWording";
 import type { ConversationRunContext } from "../operator/state/OperatorState";
 import type { OperatorRunResult } from "../operator/operatorRuntime";
 import type { InvestigationPlan } from "../operator/plan/InvestigationPlan";
@@ -443,6 +444,24 @@ export class ConversationService {
       };
     }
     if (answer.budget.stopReason === "CLARIFICATION_NEEDED" && answer.clarification) {
+      // A question about WHICH inquiry, asked while one is already selected, is not put to the seller
+      // again (Response Hygiene v1 §6): the anchor is shown and the next moves are offered instead.
+      const anchor = view.workingSet?.kind === "INQUIRIES" ? view.workingSet.selectedInquiry ?? null : null;
+      const anchorItem = anchor ? inquiryFromHistory(view, anchor.inquiryId) : null;
+      const anchorRow: SelectedInquiryRow | null = anchor && anchorItem ? {
+        inquiryId: anchor.inquiryId, workItemId: anchor.workItemId, productId: anchor.productId, channelCode: anchor.channelCode,
+        channelNameKo: anchorItem.channelNameKo, productName: anchorItem.productName, title: anchorItem.title ?? null,
+        status: anchorItem.status, receivedAt: anchorItem.receivedAt,
+      } : null;
+      if (anchorRow && clarificationKindOf(plan?.clarificationReason) === "INQUIRY") {
+        return {
+          status: "DONE",
+          message: `지금 보고 있는 문의 기준으로 계속하겠습니다. ${inquiryLine(anchorRow)} 「답변 준비해줘」처럼 무엇을 할지 말씀해 주세요.`,
+          artifacts: [selectionSummary(anchorRow)],
+          suggestedActions: [promptChip("답변 준비해줘"), ...(anchorRow.productId ? [promptChip("이 상품 기준으로 답변 준비해줘")] : []), promptChip("답변 안 한 문의만 보여줘")],
+          workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, budget, answer,
+        };
+      }
       return {
         status: "DONE", message: answer.clarification, artifacts: [], suggestedActions: [],
         workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, budget, answer,
@@ -460,6 +479,9 @@ export class ConversationService {
     const artifacts: Artifact[] = dedupeLists(stamped);
     let pendingPrepared: PendingPreparedAction | null = view.pendingPrepared;
     let headline: string | null = null;
+    // A PREPARE with nothing to point at answers with the question alone (Response Hygiene v1 §2/§6):
+    // whatever the plan read beside it (a rule, a resolver miss) stays in the evidence disclosure.
+    let askedWhich = false;
     const extraChips: SuggestedAction[] = [];
     // R4: a product answer with no list artifact still names products — in its evidence refs and in
     // the entity the run resolved. Those become a PRODUCT_LIST and a PRODUCTS set, so 「첫 번째 거」 has
@@ -509,6 +531,7 @@ export class ConversationService {
       }
       if (targets.length === 0) {
         headline = "어떤 문의의 답변을 준비할지 알려주세요. 방금 본 목록에서 「첫 번째 거」처럼 말씀해 주시면 됩니다.";
+        askedWhich = true;
       } else {
         const preparer = new DraftPreparer(bundle.inquiry, bundle.review);
         for (const resolved of targets) {
@@ -574,10 +597,14 @@ export class ConversationService {
           if (draft.unavailableMessage) {
             headline = headline ?? draft.unavailableMessage;
           } else if (draft.answerBasis === "NO_ANSWER_BASIS" || !draft.version) {
-            headline = headline ?? (draft.answerBasisNote ?? "답변 기준이 필요합니다.");
+            // ① what is missing (the backend's own sentence) ② the one next step. The card's title says
+            // 「답변 기준이 필요합니다」 once; the prose does not say it a second time.
+            const specificNote = draft.answerBasisNote && !GENERIC_BASIS_NOTE.test(draft.answerBasisNote) ? draft.answerBasisNote : null;
+            headline = headline ?? [specificNote, draft.answerBasisAction ?? "답변 기준을 하나 더 등록하면 초안을 만들 수 있습니다."]
+              .filter((line): line is string => !!line && line.trim().length > 0).join(" ");
             artifacts.push({
               artifactId: `a-knowledge-${target.workItemId}`, type: "HUMAN_ACTION_REQUIRED",
-              title: "답변 기준을 등록하면 초안을 만들 수 있습니다",
+              title: "답변 기준 추가",
               actionType: "KNOWLEDGE_ENTRY", reason: "NO_ANSWER_BASIS", path: "WORKSPACE",
               channelCode: target.channelCode, channelNameKo: target.channelNameKo, accountId: null,
               dataType: "INQUIRY", to: `/inquiries/${target.inquiryId}`, requestedAt: this.now(), resumable: false,
@@ -586,7 +613,11 @@ export class ConversationService {
             // A tone variant that moved a fact: refused, previous head kept, and said so.
             headline = headline ?? draft.note;
           } else {
-            headline = headline ?? (axis.tone ? "말투를 바꿔 초안을 다시 준비했습니다." : "답변 초안을 준비했습니다.");
+            // A draft that asks the customer back is said as that — the seller must not read a question
+            // as a short answer (Core Daily Loop UX v1; Response Hygiene v1 §2).
+            const asksBack = draft.answerBasis === "NEEDS_CLARIFICATION";
+            headline = headline ?? (axis.tone ? "말투를 바꿔 초안을 다시 준비했습니다."
+              : asksBack ? "고객에게 되묻는 답변 초안을 준비했습니다." : "답변 초안을 준비했습니다.");
             pendingPrepared = {
               turnId: "", kind: "INQUIRY_DRAFT", workItemId: target.workItemId, inquiryId: target.inquiryId,
               draftVersion: draft.version, contentFingerprint: draft.contentFingerprint,
@@ -676,19 +707,29 @@ export class ConversationService {
     // An offered refresh (`optional`) is a control under the rows, not a reason to wait: the turn is DONE.
     const human = humans.find((h) => !h.optional) ?? null;
     const primary = primaryOf(artifacts);
-    const first = headline ?? headlineOf(primary, artifacts, view, axis, answer);
+    const first = headline ?? sellerSentence(headlineOf(primary, artifacts, view, axis, answer), hints.text ?? "") ?? "확인한 내용입니다.";
     // R3: a count finding that says what the headline already said (same numbers, same noun) is one
     // fact twice. Dropped from the prose; it stays in the answer's findings with its evidence.
     // A PREPARE turn about one inquiry answers with the draft (or that inquiry's state); whatever the plan
     // read beside it stays in the evidence disclosure and out of the prose — a queue count under
     // 「이미 답변된 문의라…」 reads as a second, contradicting answer (Conversation Object Integrity v1).
-    const draftTurn = axis.requestedAction === "PREPARE_INQUIRY_DRAFT" && selected != null;
+    const draftTurn = axis.requestedAction === "PREPARE_INQUIRY_DRAFT" && (selected != null || askedWhich);
     // A coverage-limit sentence (「…근거를 찾지 못했습니다」) is never a restated count, whatever digits a
     // product name carries — 「전선몰딩 1호」 under a 「상품 1개」 headline is not the same fact twice.
-    const supported = draftTurn ? [] : answer.findings
+    const knowledgeGap = artifacts.some((a) => a.type === "HUMAN_ACTION_REQUIRED" && a.actionType === "KNOWLEDGE_ENTRY")
+      || artifacts.some((a) => a.type === "DRAFT" && a.answerBasis === "NO_ANSWER_BASIS");
+    // ① the answer, ② its limits: a coverage-limit sentence (「…아직 저장돼 있지 않습니다」) never precedes
+    // the finding that actually answers the question (Response Hygiene v1 §2). Stable within each group.
+    const ordered = [...answer.findings.filter((f) => !f.claimsCoverageLimit), ...answer.findings.filter((f) => f.claimsCoverageLimit)];
+    const supported = draftTurn ? [] : ordered
       .filter((f) => f.confidence === "SUPPORTED")
       .filter((f) => f.statement !== first && (f.claimsCoverageLimit || !redundantWithHeadline(f.statement, first)))
-      .map((f) => f.statement);
+      .map((f) => sellerSentence(f.statement, hints.text ?? ""))
+      .filter((line): line is string => line != null)
+      // Response Hygiene v1 §6: a selected inquiry is described by its own card, not again by prose; a
+      // 「AI 초안이 준비돼 있습니다」 beside a knowledge gap is two answers to one question.
+      .filter((line) => !(selected && /^이 문의(는|에 연결된 상품)/.test(line)))
+      .filter((line) => !(knowledgeGap && line.includes("초안이 준비돼 있습니다")));
     const sentences = [prefix + first, ...dedupe(supported).slice(0, FINDINGS_MAX)];
     // Claim levels for the channels whose step just finished — B (rows written in the window) over C
     // (rows ingested); never A. `reviewClaim.ts` keeps ingested ≠ written.
@@ -713,7 +754,7 @@ export class ConversationService {
     }));
     const status: TurnStatus = human ? "WAITING_HUMAN" : "DONE";
     return {
-      status, message: [...new Set(sentences)].join(" "), artifacts,
+      status, message: dedupeNear(sentences).join(" "), artifacts,
       suggestedActions: [...extraChips, ...suggestionsFor(primary, workingSet, human, artifacts)].slice(0, extraChips.length + 4),
       workingSet, pendingHumanActions, pendingPrepared, budget, answer,
     };
@@ -1249,8 +1290,14 @@ function headlineOf(
       const anyStale = previous == null && primary.freshness.some((f) => f.verdict === "UNPROVEN" || f.verdict === "NOT_COLLECTED");
       return rowsSentence(previous?.count ?? null, rating, periodLabel(token), primary.totalCount, anyStale, token);
     }
-    case "PRODUCT_LIST":
-      return `방금 본 리뷰를 상품 ${primary.items.length}개로 묶었습니다.`;
+    case "PRODUCT_LIST": {
+      // 「방금 본 리뷰를 …묶었습니다」 is true of exactly one shape: a grouping follow-up over a REVIEWS set.
+      // Any other product answer (a policy read on a product, a knowledge miss) says its first finding.
+      const groupedReviews = axis.filters.scope === "WORKING_SET" && view.workingSet?.kind === "REVIEWS";
+      if (groupedReviews) return `방금 본 리뷰를 상품 ${primary.items.length}개로 묶었습니다.`;
+      const first = answer.findings.find((f) => f.confidence === "SUPPORTED") ?? answer.findings.find((f) => f.confidence === "NEEDS_REVIEW");
+      return first?.statement ?? `상품 ${primary.items.length}개를 확인했습니다.`;
+    }
     case "INQUIRY_LIST": {
       const previousReviews = axis.filters.scope === "WORKING_SET" && view.workingSet?.kind === "REVIEWS";
       if (primary.scope && !(primary.more?.to ?? "").includes("NEEDS_REPLY")) {
@@ -1296,6 +1343,26 @@ function won(amount: number): string {
 
 function dedupe(values: readonly string[]): string[] {
   return [...new Set(values)];
+}
+
+/**
+ * Sentences that say the same limit twice in two shapes (the resolver's 「"이 상품"에 해당하는 상품을 찾지
+ * 못했습니다」 and the scope gate's 「「이 상품」에 해당하는 상품을 찾지 못해, …」) are one fact: the first
+ * form is kept (Response Hygiene v1 §6). Exact repeats collapse as before.
+ */
+const NEAR_KEYS: ReadonlyArray<RegExp> = [/에 해당하는 상품을 찾지 못/, /저장된 과거 답변/, /등록된 회사 정보/];
+export function dedupeNear(sentences: readonly string[]): string[] {
+  const out: string[] = [];
+  const seenKey = new Set<number>();
+  for (const s of new Set(sentences)) {
+    const key = NEAR_KEYS.findIndex((re) => re.test(s));
+    if (key >= 0) {
+      if (seenKey.has(key)) continue;
+      seenKey.add(key);
+    }
+    out.push(s);
+  }
+  return out;
 }
 
 function promptChip(label: string): SuggestedAction {
@@ -1564,20 +1631,22 @@ export function executionReasonSentence(verdict: ChannelCapabilityVerdict, chann
   }
 }
 
+/** Evidence kinds whose locator label is a seller-authored title (a rule, a document, a remembered answer, an issue). */
+const EVIDENCE_DETAIL_KINDS = new Set(["ORG_POLICY", "PRODUCT_KNOWLEDGE_DOC", "PAST_ANSWER", "REVIEW_ISSUE", "ISSUE_EVIDENCE", "REPEATED_INQUIRY"]);
+
 function evidenceOf(answer: OperatorAnswer): EvidenceArtifact | null {
   if (answer.evidence.length === 0) return null;
-  const KIND_LABEL: Record<string, string> = {
-    REVIEW_LIST: "기간 내 리뷰", ORDER_SUMMARY: "주문·매출", INQUIRY: "문의", INBOX_COUNT: "미답변 문의",
-    REVIEW_ISSUE: "반복 리뷰 문제", ISSUE_EVIDENCE: "리뷰 문제 근거", NEGATIVE_REVIEW: "부정 리뷰",
-    CUSTOMER_MEMORY: "과거 사례", REPEATED_INQUIRY: "반복 문의", CHANNEL_COVERAGE: "채널 수집 상태",
-    HUMAN_ACTION: "필요한 작업", PRODUCT_FACT: "상품 정보", PRODUCT_LISTING: "채널 등록 정보",
-    PRODUCT_VARIANT: "옵션 정보", PRODUCT_KNOWLEDGE_DOC: "판매자가 쓴 글", ORG_POLICY: "운영 기준", ORG_POLICY_GAP: "운영 기준 없음", PRODUCT_SIGNAL: "상품 신호",
-    COMPANY_PROFILE: "회사 정보", COMPANY_PROFILE_GAP: "회사 정보 없음", PAST_ANSWER: "과거 답변", PAST_ANSWER_GAP: "과거 답변 없음",
+  // The seller's word for the source, then the row's own title when it reads as words (a document
+  // title, a strength label) — never a token, a stamp or an id (Response Hygiene v1 §1).
+  const labelOf = (kind: string, detail: string | null | undefined): string => {
+    const source = SOURCE_LABEL[kind] ?? "자료";
+    if (!EVIDENCE_DETAIL_KINDS.has(kind) || !isSellerSafeLabel(detail) || !/[가-힣]/.test(detail) || detail === source) return source;
+    return detail.includes(source) ? detail : `${source} · ${detail}`;
   };
   return {
     artifactId: "a-evidence", type: "EVIDENCE", title: "확인한 자료",
     items: answer.evidence.slice(0, EVIDENCE_ITEMS_MAX).map((e) => ({
-      label: e.locator.label ?? KIND_LABEL[e.kind] ?? "자료",
+      label: labelOf(e.kind, e.locator.label),
       count: e.locator.count ?? null,
       from: e.events?.from ?? null, to: e.events?.to ?? null, asOf: e.asOf,
       covered: e.coverage === "COVERED",
@@ -1659,6 +1728,25 @@ function suggestionsFor(
 
 const NUMBER = /\d[\d,]*/g;
 
+/** The backend's generic basis note — the card's title already says it, so the prose does not. */
+const GENERIC_BASIS_NOTE = /^답변 기준이 필요합니다\.?$/;
+
+/** The seller asked to see the company introduction itself — the one case its text is read back. */
+const COMPANY_INTRO_ASK = /(회사|우리|저희).{0,12}(어떤 곳|소개|등록돼|등록되어|뭐라고|어떻게 (돼|되어)|뭐야|뭐지)/;
+
+/**
+ * A finding's statement as the seller reads it (Response Hygiene v1 §3): the registered 회사 정보 is
+ * referred to, not read back, unless the seller asked for the introduction itself; a statement that
+ * carries an internal token is not shown at all (the trace still has it).
+ */
+export function sellerSentence(statement: string, userText: string): string | null {
+  if (statement.startsWith("회사 정보에는 이렇게 등록돼 있습니다")) {
+    return COMPANY_INTRO_ASK.test(userText) ? statement : "등록된 회사 정보를 참고했습니다.";
+  }
+  if (INTERNAL_TOKEN.test(statement)) return null;
+  return statement;
+}
+
 /** Same numbers (as a subset) and the same noun ⇒ the finding restates the headline. */
 export function redundantWithHeadline(statement: string, headline: string): boolean {
   if (statement.trim() === headline.trim()) return true;
@@ -1675,7 +1763,10 @@ export function productListOf(answer: OperatorAnswer, entities: readonly { kind:
   for (const ref of answer.evidence) {
     const productId = ref.locator.productId;
     if (!productId) continue;
-    const row = rows.get(productId) ?? { name: ref.locator.productName ?? "(이름 없는 상품)", facts: new Map() };
+    // A ref that carries the id without the name is named by the entity the run resolved (found live:
+    // a remembered answer's product read as 「(이름 없는 상품)」 under the product it was about).
+    const resolvedName = entities.find((e) => e.kind === "PRODUCT" && e.id === productId)?.label ?? null;
+    const row = rows.get(productId) ?? { name: ref.locator.productName ?? resolvedName ?? "(이름 없는 상품)", facts: new Map() };
     if (ref.locator.productName && row.name === "(이름 없는 상품)") row.name = ref.locator.productName;
     if (ref.locator.count != null) {
       const label = FACT_LABEL[ref.kind] ?? ref.locator.label ?? "근거";

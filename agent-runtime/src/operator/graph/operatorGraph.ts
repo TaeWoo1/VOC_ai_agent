@@ -23,6 +23,7 @@
  */
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { OperatorStateAnnotation } from "../state/OperatorState";
+import { NEED_KIND_LABEL, clarificationKindOf, clarificationSentence, unsupportedSentence } from "../wording/sellerWording";
 import type {
   AnsweredNeed,
   EvidenceRef,
@@ -625,8 +626,9 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     if (budget.stopReason === "NO_PLAN") {
       // An unsupported goal must SAY it is unsupported. A silent empty answer reads as "나는 확인했고
       // 아무것도 없었다", which is a different and false statement.
-      notes.push(plan?.rationale
-        ?? "이 요청은 아직 지원하지 않습니다. 문의·리뷰·상품·리포트 중 무엇을 보고 싶은지 알려주세요.");
+      // The planner's rationale is model prose (possibly 반말, possibly about "objects" and "targets") and
+      // stays in the trace; the seller reads one of a few closed sentences chosen from it.
+      notes.push(unsupportedSentence(plan?.rationale));
     } else if (budget.exhausted) {
       notes.push("조회 예산에 도달해 일부는 확인하지 못했습니다.");
     }
@@ -636,7 +638,9 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     const answered = answeredNeeds(state);
     const unanswered = answered.filter((n) => n.required && n.status === "PENDING");
     if (unanswered.length > 0) {
-      notes.push(`확인하지 못한 항목: ${unanswered.map((n) => n.question).join(" / ")}.`);
+      // Named by what each need was about — the planner's question text is not a seller sentence.
+      const kindOf = (id: string) => plan?.informationNeeds.find((n) => n.id === id)?.kind ?? "";
+      notes.push(`확인하지 못한 항목: ${[...new Set(unanswered.map((n) => NEED_KIND_LABEL[kindOf(n.id)] ?? "일부 자료"))].join(" · ")}.`);
     }
 
     // How each specialist ended. Derived here rather than trusted from the result, so a specialist that
@@ -681,7 +685,9 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       ),
       nextActions: nextActionsFor(ordered),
       specialistOutcomes: outcomes,
-      clarification: plan?.clarificationNeeded ? (plan.clarificationReason ?? plan.userGoal) : null,
+      // The clarification the seller reads is a closed question chosen from the planner's reason —
+      // the reason itself (model prose) stays in the plan for the trace.
+      clarification: plan?.clarificationNeeded ? clarificationSentence(clarificationKindOf(plan.clarificationReason)) : null,
       budget,
       // Deduped: two passes over the same unresolvable product produce the same sentence twice,
       // and a note that repeats itself reads as two separate problems.

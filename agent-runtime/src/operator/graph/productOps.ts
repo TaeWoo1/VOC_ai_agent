@@ -16,6 +16,7 @@
  * <b>Absence is never a negative fact.</b> An empty spec list under `SPEC: UNAVAILABLE` produces
  * "규격 정보를 갖고 있지 않습니다" — never "이 상품에는 규격이 없습니다".
  */
+import { excerpt, factSourceLabel, retrievalSentence } from "../wording/sellerWording";
 import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorState";
 import type { NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
@@ -198,8 +199,8 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
         findings.push({
           findingId: `f-${ref.evidenceId}`,
           specialist: "PRODUCT_OPS",
-          statement: `${productName}에 대해 ${keys.length > 0 ? `"${keys.join(", ")}" ` : ""}`
-            + "규격 정보를 SellerOps가 갖고 있지 않습니다. (상품에 그 규격이 없다는 뜻이 아닙니다.)",
+          statement: `${productName}의 ${keys.length > 0 ? `${keys.map(label).join(", ")} ` : ""}`
+            + "규격 정보가 아직 저장돼 있지 않습니다. 상품에 그 규격이 없다는 뜻은 아닙니다.",
           evidenceIds: [ref.evidenceId],
           confidence: "NEEDS_REVIEW",
           verdict: null,
@@ -232,7 +233,7 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
           findingId: `f-${ref.evidenceId}`,
           specialist: "PRODUCT_OPS",
           statement: `${productName}의 ${withTopic(label(fact.factKey))} ${fact.value}`
-            + `${fact.unit ? fact.unit : ""}입니다 (출처 ${fact.source}).`,
+            + `${fact.unit ? fact.unit : ""}입니다 (${factSourceLabel(fact.source)}).`,
           evidenceIds: [ref.evidenceId],
           confidence: "NEEDS_REVIEW",
           verdict: null,
@@ -278,13 +279,8 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
         findings.push({
           findingId: `f-${ref.evidenceId}`,
           specialist: "PRODUCT_OPS",
-          statement: outcome === "ABSENT"
-            ? `${productName}에 대해 등록된 상품 지식이 아직 없습니다. `
-              + "상품 화면에서 설명·FAQ·사용법을 추가하면 답변에 사용할 수 있습니다."
-            : outcome === "NOT_APPLICABLE"
-              ? `${productName}에 관련 상품 지식은 등록되어 있지만, 이 질문에 적용할 근거로 확인되지는 않았습니다.`
-              : `${productName}의 등록된 상품 정보(${found.documentsSearched}건)에서 `
-                + "이 질문에 해당하는 근거를 찾지 못했습니다. (상품에 그런 내용이 없다는 뜻은 아닙니다.)",
+          statement: retrievalSentence("PRODUCT", outcome === "FOUND" ? "NO_RELEVANT_EVIDENCE" : outcome,
+            { subject: productName, documents: found.documentsSearched }),
           evidenceIds: [ref.evidenceId],
           confidence: "NEEDS_REVIEW",
           verdict: null,
@@ -326,8 +322,7 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
           specialist: "PRODUCT_OPS",
           // The sentence names WHOSE words these are. A grounded answer that reads as SellerOps's own
           // knowledge invites the seller to trust it further than its source allows.
-          statement: `${productName} — 판매자가 등록한 ${sourceTypeLabel(passage.sourceType)}`
-            + `"${passage.title}"에 이렇게 적혀 있습니다: ${passage.content}`,
+          statement: `${productName} — 등록된 ${sourceTypeLabel(passage.sourceType)} 「${passage.title}」: ${excerpt(passage.content)}`,
           // The judge sees that a document of this kind and title covers the question — not its text.
           judgeStatement: `${productName} — 판매자가 등록한 ${sourceTypeLabel(passage.sourceType)}`
             + `"${passage.title}"이(가) 이 질문에 해당하는 내용을 담고 있습니다.`,
@@ -364,8 +359,8 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
           findingId: `f-${ref.evidenceId}`,
           specialist: "PRODUCT_OPS",
           statement: need.kind === "PRODUCT_LISTING"
-            ? `${productName}의 채널 리스팅 정보를 SellerOps가 갖고 있지 않습니다.`
-            : `${productName}의 옵션 정보를 SellerOps가 갖고 있지 않습니다.`,
+            ? `${productName}의 채널 등록 정보가 아직 저장돼 있지 않습니다.`
+            : `${productName}의 옵션 정보가 아직 저장돼 있지 않습니다.`,
           evidenceIds: [ref.evidenceId],
           confidence: "NEEDS_REVIEW",
           verdict: null,

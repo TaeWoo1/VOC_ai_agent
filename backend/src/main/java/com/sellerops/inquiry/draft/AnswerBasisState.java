@@ -139,8 +139,10 @@ public enum AnswerBasisState {
         // What the rules lane established decides the sentence before the product lane does: a
         // question the customer asked in policy words is answered from the rules, product or not.
         if (policyOutcome == RetrievalOutcome.NOT_APPLICABLE) {
-            String rule = asked == null ? "운영 기준" : asked.labelKo() + " 기준";
-            return rule + "은 등록되어 있지만, 이 문의에 적용할 근거로 확인되지는 않았습니다.";
+            // Seller-facing Response Hygiene v1: one sentence per outcome, shared with the Agent lane —
+            // 없다 (ABSENT) · 찾지 못했다 (NO_RELEVANT_EVIDENCE) · 바로 적용하기 어렵다 (NOT_APPLICABLE).
+            String rule = asked == null ? "관련 기준" : asked.labelKo() + " 기준";
+            return rule + "은 등록되어 있지만 이 문의에 바로 적용하기 어렵습니다.";
         }
         if (asked != null && (policyOutcome == RetrievalOutcome.ABSENT
                 || (policyOutcome == RetrievalOutcome.NO_RELEVANT_EVIDENCE && !topicDeclared))) {
@@ -148,25 +150,25 @@ public enum AnswerBasisState {
         }
         if (policyOutcome == RetrievalOutcome.NO_RELEVANT_EVIDENCE && asked != null
                 && (knowledge == DraftKnowledgeState.NO_PRODUCT || productOutcome == RetrievalOutcome.ABSENT)) {
-            return "등록된 운영 기준에서 이 질문에 해당하는 근거를 찾지 못했습니다.";
+            return "등록된 운영 정책에서 이 질문에 맞는 근거를 찾지 못했습니다.";
         }
         if (productOutcome == RetrievalOutcome.NOT_APPLICABLE) {
-            return "관련 상품 지식은 등록되어 있지만, 이 질문에 적용할 근거로 확인되지는 않았습니다.";
+            return "관련 상품 정보는 등록되어 있지만 이 문의에 바로 적용하기 어렵습니다.";
         }
         if (productOutcome == RetrievalOutcome.NO_RELEVANT_EVIDENCE) {
             return (topic == null
-                    ? "등록된 상품 정보에서 이 질문에 해당하는 근거를 찾지 못했습니다."
+                    ? "등록된 상품 정보에서 이 질문에 맞는 근거를 찾지 못했습니다."
                     : "등록된 상품 정보에서 " + topic + " 관련 근거를 찾지 못했습니다.") + perVariant;
         }
         return switch (knowledge) {
             case NO_PRODUCT -> "이 문의가 어떤 상품에 대한 것인지 연결하면 근거를 찾을 수 있습니다.";
             case NO_LIBRARY -> (topic == null
-                    ? "이 상품에 등록된 지식이 없습니다. 상품 지식을 등록하면 근거가 생깁니다."
-                    : "이 상품에 등록된 지식이 없습니다. " + topic + " 관련 답변 기준을 등록하면 "
+                    ? "이 상품에 등록된 상품 정보가 아직 없습니다. 상품 정보를 등록하면 근거가 생깁니다."
+                    : "이 상품에 등록된 상품 정보가 아직 없습니다. " + topic + " 관련 답변 기준을 등록하면 "
                             + "근거가 생깁니다.") + perVariant;
             case NO_MATCH -> (topic == null
-                    ? "등록된 상품 지식·운영 정책에 이 질문에 해당하는 내용이 없습니다."
-                    : "등록된 상품 지식·운영 정책에 " + topic + " 관련 내용이 없습니다.") + perVariant;
+                    ? "등록된 상품 정보·운영 정책에서 이 질문에 맞는 근거를 찾지 못했습니다."
+                    : "등록된 상품 정보·운영 정책에서 " + topic + " 관련 근거를 찾지 못했습니다.") + perVariant;
             case GROUNDED -> null;
         };
     }

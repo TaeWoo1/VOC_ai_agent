@@ -21,6 +21,9 @@ class RetrievalQueryTest {
         String subject = RetrievalQuery.subjectOf("이 상품의 교환이나 반품이 가능한 조건이 명시돼 있는지 확인해줘");
         assertThat(subject).contains("교환").contains("반품").contains("조건");
         assertThat(subject).doesNotContain("확인").doesNotContain("명시").doesNotContain("가능").doesNotContain("있는지");
+        // The planner also writes the inflected form (live 2026-08-30): an inflection of a stop word is a stop word.
+        String inflected = RetrievalQuery.subjectOf("이 상품의 반품 조건이 명시되어 있는지 확인");
+        assertThat(inflected).contains("반품").contains("조건").doesNotContain("명시되어");
     }
 
     @Test

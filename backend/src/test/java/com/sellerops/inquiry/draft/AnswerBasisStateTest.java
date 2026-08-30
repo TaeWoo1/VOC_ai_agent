@@ -79,7 +79,7 @@ class AnswerBasisStateTest {
             // Policy exists, does not apply: not 「기준 없음」, not 「상품을 연결하면」.
             String notApplicable = none.actionKo(DraftKnowledgeState.NO_PRODUCT, null, flat,
                     RetrievalOutcome.ABSENT, RetrievalOutcome.NOT_APPLICABLE, KnowledgeTopic.SHIPPING);
-            assertThat(notApplicable).isEqualTo("배송 기준은 등록되어 있지만, 이 문의에 적용할 근거로 확인되지는 않았습니다.");
+            assertThat(notApplicable).isEqualTo("배송 기준은 등록되어 있지만 이 문의에 바로 적용하기 어렵습니다.");
             // No policy at all for a policy question: register one.
             String absent = none.actionKo(DraftKnowledgeState.NO_PRODUCT, null, flat,
                     RetrievalOutcome.ABSENT, RetrievalOutcome.ABSENT, KnowledgeTopic.CASH_RECEIPT);
@@ -88,7 +88,7 @@ class AnswerBasisStateTest {
             // link-the-product instruction and not 「기준 없음」.
             String miss = none.actionKo(DraftKnowledgeState.NO_PRODUCT, null, flat,
                     RetrievalOutcome.ABSENT, RetrievalOutcome.NO_RELEVANT_EVIDENCE, KnowledgeTopic.TAX_INVOICE, true);
-            assertThat(miss).isEqualTo("등록된 운영 기준에서 이 질문에 해당하는 근거를 찾지 못했습니다.");
+            assertThat(miss).isEqualTo("등록된 운영 정책에서 이 질문에 맞는 근거를 찾지 못했습니다.");
             // Rules exist but none declares itself about tax invoices: for THAT topic this is absence.
             String absentForTopic = none.actionKo(DraftKnowledgeState.NO_PRODUCT, null, flat,
                     RetrievalOutcome.ABSENT, RetrievalOutcome.NO_RELEVANT_EVIDENCE, KnowledgeTopic.TAX_INVOICE, false);

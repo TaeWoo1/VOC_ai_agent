@@ -124,8 +124,9 @@ describe("contextual Agent panel — the same conversation, beside the workspace
     await userEvent.type(await screen.findByLabelText("무엇이든 물어보세요"), "답변 보내줘");
     expect(screen.getByTestId("agent-send-fence")).toHaveTextContent("보내는 일은 AI 담당자가 하지 않습니다");
     await userEvent.click(screen.getByRole("button", { name: "보내기" }));
-    expect(await screen.findByText("이 요청은 계획을 세우지 못했습니다")).toBeInTheDocument();
-    expect(screen.getByText("보낼 수 없습니다")).toBeInTheDocument();
+    // Response Hygiene v1: a failed turn reads as its sentence — no 「계획을 세우지 못했습니다」 mechanism headline.
+    expect(await screen.findByText("보낼 수 없습니다")).toBeInTheDocument();
+    expect(screen.queryByText("이 요청은 계획을 세우지 못했습니다")).toBeNull();
   });
 
   it("follows the page: the header reads the current surface when the route changes", async () => {

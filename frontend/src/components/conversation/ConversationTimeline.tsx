@@ -93,18 +93,19 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume }: { turn: Displa
   const shown = turn.artifacts.filter((a) => a.type !== "EVIDENCE");
   const failed = turn.status === "FAILED";
   const stopped = failed && turn.failureCode === "CANCELLED";
-  const headline = stopped ? turn.message : failed ? "이 요청은 계획을 세우지 못했습니다" : turn.message;
+  // A failed turn reads as its own sentence (the runtime's closed seller wording — Response Hygiene v1),
+  // never as a mechanism headline (「계획을 세우지 못했습니다」) with the sentence repeated under it.
+  const headline = turn.message || turn.failureReason || "요청을 처리하지 못했습니다.";
+  const detail = failed && !stopped && turn.failureReason && turn.failureReason !== turn.message ? turn.failureReason : null;
   return (
     <article className="group space-y-2.5" aria-label="AI 담당자" data-testid="agent-turn" data-status={turn.status}>
       <div className="flex items-start gap-2">
         <span aria-hidden="true" className={`mt-1 ${stopped ? "text-muted" : "text-brand-700"}`}>✳︎</span>
         <div className="min-w-0 flex-1">
-          <p className={`whitespace-pre-wrap break-keep leading-relaxed ${stopped ? "text-muted" : "text-ink"} ${compact ? "text-base" : "text-[17px]"} ${failed && !stopped ? "font-semibold" : ""}`}>
+          <p className={`whitespace-pre-wrap break-keep leading-relaxed ${stopped ? "text-muted" : "text-ink"} ${compact ? "text-base" : "text-[17px]"}`}>
             {headline}
           </p>
-          {failed && !stopped && (turn.failureReason || turn.message) ? (
-            <p className="mt-1 break-keep text-sm text-muted">{turn.failureReason ?? turn.message}</p>
-          ) : null}
+          {detail ? <p className="mt-1 break-keep text-sm text-muted">{detail}</p> : null}
         </div>
         {!stopped && turn.message ? <CopyButton text={turn.message} /> : null}
       </div>
@@ -115,7 +116,7 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume }: { turn: Displa
           <AnimatePresence initial={false}>
             {shown.map((artifact) => (
               <motion.div key={artifact.artifactId} layout variants={MESSAGE} initial="hidden" animate="shown" exit="gone" transition={LAYOUT} data-artifact={artifact.type}>
-                <ArtifactView artifact={artifact} onResume={onResume} />
+                <ArtifactView artifact={artifact} onResume={onResume} onPrompt={onPrompt} />
               </motion.div>
             ))}
           </AnimatePresence>

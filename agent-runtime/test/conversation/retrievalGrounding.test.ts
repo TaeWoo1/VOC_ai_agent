@@ -75,7 +75,7 @@ describe("E — a rule that exists and does not apply is said as that", () => {
   it("NOT_APPLICABLE: 「기준은 등록되어 있지만…」, no 「기준 없음」, no register-again step", async () => {
     const h = harness({ plansByGoal: PLANS, orgKnowledgeSearch: policy("NOT_APPLICABLE", 2) });
     const { turn } = await ask(h, POLICY_ASK);
-    expect(turn.message).toContain("배송 기준은 등록되어 있지만, 이 문의에 적용할 근거로 확인되지는 않았습니다.");
+    expect(turn.message).toContain("배송 기준은 등록되어 있지만 이 문의에 바로 적용하기 어렵습니다.");
     expect(turn.message).not.toContain("기준이 아직 없습니다");
     expect(turn.artifacts.some((a) => a.type === "HUMAN_ACTION_REQUIRED" && a.actionType === "KNOWLEDGE_ENTRY")).toBe(false);
     expect(turn.answer?.evidence.find((e) => e.kind === "ORG_POLICY_GAP")?.locator.outcome).toBe("NOT_APPLICABLE");
@@ -91,7 +91,7 @@ describe("E — a rule that exists and does not apply is said as that", () => {
   it("an older backend without `outcome` still gets the two-valued truth from the counts", async () => {
     const h = harness({ plansByGoal: PLANS, orgKnowledgeSearch: { query: "", documentsSearched: 2, passagesSearched: 2, passages: [] } });
     const { turn } = await ask(h, POLICY_ASK);
-    expect(turn.message).toContain("등록된 운영 기준에서 이 질문에 해당하는 근거를 찾지 못했습니다.");
+    expect(turn.message).toContain("등록된 운영 정책에서 이 질문에 맞는 근거를 찾지 못했습니다.");
   });
 });
 
@@ -99,7 +99,7 @@ describe("F — product knowledge that exists but does not cover the question", 
   it("NO_RELEVANT_EVIDENCE: a miss over the product information, never 「상품 지식이 없다」", async () => {
     const h = harness({ plansByGoal: PLANS, productKnowledgeSearch: { [MOLDING.id]: knowledge("NO_RELEVANT_EVIDENCE") } });
     const { turn } = await ask(h, DOC_ASK);
-    expect(turn.message).toContain("등록된 상품 정보(3건)에서 이 질문에 해당하는 근거를 찾지 못했습니다.");
+    expect(turn.message).toContain("등록된 상품 정보(3건)에서 이 질문에 맞는 근거를 찾지 못했습니다.");
     expect(turn.message).not.toContain("등록된 상품 지식이 아직 없습니다");
     // The query the tool was asked with is the need's question; the backend normalizes it — the label never echoes it.
     expect(turn.answer?.evidence.find((e) => e.kind === "PRODUCT_KNOWLEDGE_GAP")?.locator.label).toBe("상품 지식 근거 없음");
@@ -108,7 +108,7 @@ describe("F — product knowledge that exists but does not cover the question", 
   it("NOT_APPLICABLE: 「관련 상품 지식은 등록되어 있지만…」", async () => {
     const h = harness({ plansByGoal: PLANS, productKnowledgeSearch: { [MOLDING.id]: knowledge("NOT_APPLICABLE") } });
     const { turn } = await ask(h, DOC_ASK);
-    expect(turn.message).toContain("관련 상품 지식은 등록되어 있지만, 이 질문에 적용할 근거로 확인되지는 않았습니다.");
+    expect(turn.message).toContain("관련 상품 정보는 등록되어 있지만 이 문의에 바로 적용하기 어렵습니다.");
   });
 });
 
@@ -130,7 +130,7 @@ describe("G — 「예전에 뭐라고 답했어」 reads the answer store", () 
     const none = harness({ plansByGoal: PLANS });
     expect((await ask(none, PAST_ASK)).turn.message).toContain("저장된 과거 답변이 아직 없습니다.");
     const miss = harness({ plansByGoal: PLANS, answerMemorySearch: { ...MEMORY, passages: [], outcome: "NO_RELEVANT_EVIDENCE" } });
-    expect((await ask(miss, PAST_ASK)).turn.message).toContain("저장된 과거 답변 중 이 질문에 해당하는 것을 찾지 못했습니다.");
+    expect((await ask(miss, PAST_ASK)).turn.message).toContain("저장된 과거 답변에서 이 질문에 맞는 것을 찾지 못했습니다.");
   });
 });
 

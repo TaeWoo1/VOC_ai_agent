@@ -633,6 +633,16 @@ bounded candidate ≤4로 검색, 세 lane·composer·검색 endpoint 공유; sc
 (`GET /api/answer-memory/search`, need `PAST_ANSWER`, prompt v8 — 과거 답변은 answer_memory를 읽고 customer memory와
 섞지 않는다; memory 단독 GROUNDED 금지 유지). 라이브 A–J on disposable org, 마켓플레이스 0 · WRITE 0.)
 
+**`docs/seller_facing_response_hygiene_v1.md`** (Seller-facing Response Hygiene v1 — 2026-08-30. Agent 내부
+구조는 그대로 두고 판매자가 읽는 문장만 닫는다: 모든 seller-facing 문장은 **`operator/wording/sellerWording.ts`
+한 곳의 닫힌 어휘**에서 고른다 — 출처 라벨(상품 정보·운영 정책·과거 승인 답변·주문 정보·회사 정보), lane×outcome
+문장표(없다·찾지 못했다·바로 적용하기 어렵다는 섞이지 않는다; backend `AnswerBasisState`와 같은 문장), 판매자
+문서의 **bounded excerpt**(전문 복창 0), planner rationale/clarification은 **읽어서 닫힌 문장을 고를 뿐** 출력하지
+않는다. 회사 정보는 소개 자체를 물은 turn에만 읽어 주고, NO_ANSWER_BASIS는 「무엇이 빠졌나 + 다음 한 걸음(답변
+기준 추가)」, 선택된 문의는 다시 묻지 않으며, 「방금 본 리뷰를 …묶었습니다」는 리뷰 집합을 실제로 묶었을 때만이다.
+`DraftArtifact`는 본문 우선 + compact 근거 한 줄 + 「말투 다듬기」/「보내기 준비」(둘 다 대화 문장, 승인 경계 무변경) +
+reload 시 저장 버전 재읽기. 라이브 A–J (disposable org, 마켓플레이스 0 · WRITE 0) + 브라우저 7턴 토큰 0.)
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

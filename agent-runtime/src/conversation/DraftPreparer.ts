@@ -153,6 +153,7 @@ export class DraftPreparer {
       authorKind: view.authorKind,
       answerBasis: view.answerBasis ?? view.draft?.answerBasis ?? null,
       answerBasisNote: view.answerBasisNote ?? view.draft?.answerBasisNote ?? null,
+      answerBasisAction: view.answerBasisAction ?? view.draft?.answerBasisAction ?? null,
       knowledgeState: view.knowledgeState,
       evidenceCount: Array.isArray(view.evidence) ? view.evidence.length : 0,
       evidenceSummary: evidenceSummaryOf(view.evidence),

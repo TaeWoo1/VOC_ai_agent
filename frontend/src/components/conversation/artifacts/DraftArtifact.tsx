@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { DraftArtifact as Draft } from "../../../lib/conversation/types";
 import { Status } from "../../ui/Status";
 import { Btn } from "../../ui/Btn";
+import { api } from "../../../lib/apiClient";
 import { copyText } from "../../../lib/clipboard";
 import { answerStateIsGood } from "../../../lib/answerState";
 import { ArtifactCard } from "./ArtifactCard";
@@ -15,30 +16,63 @@ const BASIS_WORD: Record<string, string> = {
   NO_ANSWER_BASIS: "답변 기준이 필요합니다",
 };
 
+/** The two follow-ups a draft invites, as the sentences the conversation already understands. */
+const REVISE_PROMPT = "조금 더 부드럽게 써줘";
+const SEND_PROMPT = "좋아 보내자";
+
 /**
- * A prepared reply. The body is the stored version's text as the runtime handed it over (transient
- * — a reloaded conversation shows the link only). [초안 복사] copies exactly that stored text and never
- * claims a copy that did not happen. Sending is not here: the Approval artifact owns it.
+ * A prepared reply, body first (Seller-facing Response Hygiene v1 §5): the seller reads the draft here,
+ * sees its grounding as one compact line, and moves on with 「말투 다듬기」 / 「보내기 준비」 — both are
+ * conversation sentences, and 「보내기 준비」 only leads to the Approval artifact, which owns the one
+ * irreversible control. The inquiry screen is a secondary link, not the default path.
+ *
+ * The body is the stored version's text as the runtime handed it over; on a reloaded thread it is
+ * re-read from the inquiry's own detail (the same saved version — nothing is regenerated). [초안 복사]
+ * copies exactly that stored text and never claims a copy that did not happen.
  */
-export function DraftArtifact({ artifact }: { artifact: Draft }) {
+export function DraftArtifact({ artifact, onPrompt }: { artifact: Draft; onPrompt?: (prompt: string) => void }) {
   const onOpen = useContinueInPanel("DRAFT");
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
+  const [reloaded, setReloaded] = useState<{ state: "loading" | "loaded" | "superseded" | "failed"; body: string | null }>({ state: "loading", body: null });
   const basis = artifact.answerBasis;
   const basisWord = basis ? (BASIS_WORD[basis] ?? null) : null;
   const machinery = artifact.unavailableMessage;
+  const inquiryDraft = (artifact.objectKind ?? "INQUIRY") === "INQUIRY";
+  const body = artifact.comments ?? reloaded.body;
+  const noDraft = artifact.version == null && !machinery;
+
+  // A reloaded thread carries no body: read the same saved version back from the inquiry (READ only).
+  useEffect(() => {
+    if (artifact.comments || artifact.version == null || !inquiryDraft) return;
+    let live = true;
+    api.getInquiryDetailStrict(artifact.workItemId)
+      .then((detail) => {
+        if (!live) return;
+        // Only the head version is readable back; an older card says it was superseded rather than loading forever.
+        if (detail.draft?.version === artifact.version) setReloaded({ state: "loaded", body: detail.draft.comments });
+        else setReloaded({ state: "superseded", body: null });
+      })
+      .catch(() => { if (live) setReloaded({ state: "failed", body: null }); });
+    return () => { live = false; };
+  }, [artifact.comments, artifact.version, artifact.workItemId, inquiryDraft]);
 
   async function copy() {
-    if (!artifact.comments) return;
-    const result = await copyText(artifact.comments);
+    if (!body) return;
+    const result = await copyText(body);
     setCopied(result.ok ? "done" : "failed");
   }
+
+  const grounding = [
+    ...(artifact.evidenceSummary ?? []).map((s) => `${s.scopeLabel} ${s.count}`),
+    ...(artifact.companyContextUsed ? ["회사 정보 참고"] : []),
+  ];
 
   return (
     <ArtifactCard
       title={artifact.title}
       note={[artifact.channelNameKo, artifact.productName, artifact.version != null ? `버전 ${artifact.version}` : null].filter(Boolean).join(" · ") || null}
       action={
-        artifact.comments ? (
+        body ? (
           <Btn size="sm" variant="outline" onClick={copy}>
             {copied === "done" ? "복사했습니다" : "초안 복사"}
           </Btn>
@@ -49,31 +83,37 @@ export function DraftArtifact({ artifact }: { artifact: Draft }) {
       <div className="space-y-2 px-4 pb-3">
         {machinery ? (
           <p className="break-keep rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn" role="status">{machinery}</p>
-        ) : basis ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Status tone={answerStateIsGood(basis as "GROUNDED") ? "good" : "warn"}>{basisWord ?? "답변 상태"}</Status>
-            {artifact.answerBasisNote ? <span className="break-keep text-sm text-muted">{artifact.answerBasisNote}</span> : null}
-          </div>
         ) : null}
-        {artifact.evidenceSummary && artifact.evidenceSummary.length > 0 ? (
-          <p className="text-sm text-muted" aria-label="초안 근거">
-            근거 · {artifact.evidenceSummary.map((s) => `${s.scopeLabel} ${s.count}`).join(" · ")}
+        {body ? (
+          <p className="whitespace-pre-wrap break-keep rounded-xl bg-canvas px-3 py-2 text-base leading-relaxed text-ink" data-testid="draft-body">{body}</p>
+        ) : noDraft ? (
+          <p className="break-keep text-sm text-muted" data-testid="draft-gap">
+            {artifact.answerBasisNote ?? "초안을 만들려면 답변 기준이 하나 더 필요합니다."}
+          </p>
+        ) : !machinery ? (
+          <p className="text-sm text-muted" data-testid="draft-reload">
+            {reloaded.state === "superseded" ? "이 초안은 이후 버전으로 바뀌었습니다. 최신 초안은 아래 카드에 있습니다."
+              : reloaded.state === "failed" ? "저장된 초안을 불러오지 못했습니다. 아래 화면에서 확인해 주세요."
+                : "저장된 초안을 불러오는 중입니다."}
           </p>
         ) : null}
-        {artifact.companyContextUsed ? (
-          <p className="text-sm text-muted" aria-label="회사 정보 참고">회사 정보를 참고해 표현했습니다 · 사실의 근거는 아닙니다</p>
+        {body && (basis || grounding.length > 0) ? (
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted" aria-label="초안 근거">
+            {basis && basisWord ? <Status tone={answerStateIsGood(basis as "GROUNDED") ? "good" : "warn"}>{basisWord}</Status> : null}
+            {basis === "NEEDS_CLARIFICATION" && artifact.answerBasisNote ? <span className="break-keep">{artifact.answerBasisNote}</span> : null}
+            {grounding.length > 0 ? <span>근거 · {grounding.join(" · ")}</span> : null}
+          </p>
         ) : null}
-        {artifact.comments ? (
-          <p className="whitespace-pre-wrap break-keep rounded-xl bg-canvas px-3 py-2 text-base leading-relaxed text-ink">{artifact.comments}</p>
-        ) : artifact.version == null ? (
-          <p className="text-sm text-muted">초안이 아직 없습니다. 답변 기준을 추가하면 다시 준비합니다.</p>
-        ) : (
-          <p className="text-sm text-muted">초안 본문은 문의 화면에서 확인할 수 있습니다.</p>
-        )}
-        {copied === "failed" ? <p className="text-sm text-muted">이 브라우저에서는 복사할 수 없습니다. 문의 화면에서 옮겨 주세요.</p> : null}
-        <p className="text-sm">
-          <Link to={artifact.to} onClick={onOpen} className="font-semibold text-brand-700 hover:underline">문의 화면에서 확인</Link>
-          <span className="ml-2 text-muted">아직 아무 곳에도 보내지 않았습니다.</span>
+        {copied === "failed" ? <p className="text-sm text-muted">이 브라우저에서는 복사할 수 없습니다. 아래 화면에서 옮겨 주세요.</p> : null}
+        {body && onPrompt ? (
+          <div className="flex flex-wrap gap-2" aria-label="초안 다음 단계">
+            <Btn size="sm" variant="outline" onClick={() => onPrompt(REVISE_PROMPT)}>말투 다듬기</Btn>
+            <Btn size="sm" onClick={() => onPrompt(SEND_PROMPT)}>보내기 준비</Btn>
+          </div>
+        ) : null}
+        <p className="text-sm text-muted">
+          <Link to={artifact.to} onClick={onOpen} className="hover:underline">{inquiryDraft ? "문의 화면에서 직접 고치기" : "리뷰 화면에서 직접 고치기"}</Link>
+          <span className="ml-2">아직 아무 곳에도 보내지 않았습니다.</span>
         </p>
       </div>
     </ArtifactCard>
