@@ -12,6 +12,7 @@ import type { MetricKpi, OverviewResponse } from "../../lib/types";
 const getOverviewStrict = vi.fn();
 const getProactiveCases = vi.fn();
 const getInquiryQueueStrict = vi.fn();
+const getInquiryRowsStrict = vi.fn();
 const getReviewIssuesStrict = vi.fn();
 vi.mock("../../../lib/bridge/localAgentHint", () => ({ probeLocalAgent: async () => "PAIRED" }));
 vi.mock("../../lib/apiClient", () => ({
@@ -19,6 +20,7 @@ vi.mock("../../lib/apiClient", () => ({
     getOverviewStrict: (d?: number) => getOverviewStrict(d),
     getProactiveCases: (n?: number) => getProactiveCases(n),
     getInquiryQueueStrict: (p: unknown) => getInquiryQueueStrict(p),
+    getInquiryRowsStrict: (p: unknown) => getInquiryRowsStrict(p),
     getReviewIssuesStrict: () => getReviewIssuesStrict(),
     getSyncRunsStrict: vi.fn(async () => []),
     markProactiveCaseOpened: vi.fn(),
@@ -82,6 +84,9 @@ beforeEach(() => {
   getProactiveCases.mockResolvedValue({ items: [CASE, { ...CASE, id: "case-2", subjectId: "i-2", snippet: "교환 가능한가요?" }], total: 2, high: 2 });
   getInquiryQueueStrict.mockResolvedValue({ content: [{ workItemId: "w1", inquiryId: "i1", sellerAccountId: "s", channelId: "c", channelCode: "CAFE24", channelNameKo: "카페24 자사몰", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "배송 언제 되나요?", receivedAt: "2026-08-26T00:00:00Z" }], page: 0, size: 5, totalElements: 1, totalPages: 1 });
   getReviewIssuesStrict.mockResolvedValue([]);
+  // Working Context v1 §2: the brief names the oldest waiting inquiries. Empty by default —
+  // the tests that care about the named rows set their own.
+  getInquiryRowsStrict.mockResolvedValue({ from: null, to: null, channel: null, status: "UNANSWERED", order: "OLDEST", limit: 3, term: null, totalCount: 0, items: [] });
   vi.mocked(conversationClient.sendTurn).mockReset();
 });
 afterEach(() => vi.clearAllMocks());
@@ -132,6 +137,37 @@ describe("home — the Agent operating workspace", () => {
     expect(screen.getByText(/답변을 기다리는 문의 22건/)).toBeInTheDocument();
     expect(screen.queryByText(/새로 들어온 문의나 리뷰가 생기면/)).toBeNull();
     expect(screen.queryByText("AI가 먼저 확인한 일")).toBeNull();
+  });
+
+  it("§2: with rows to name, the brief NAMES them and says the count once — no 「기다리는 일」 card", async () => {
+    getProactiveCases.mockResolvedValue({ items: [], total: 0, high: 0 });
+    getInquiryRowsStrict.mockResolvedValue({
+      from: null, to: null, channel: null, status: "UNANSWERED", order: "OLDEST", limit: 3, term: null, totalCount: 22,
+      items: [
+        { inquiryId: "i-1", workItemId: "w-1", sellerAccountId: "s", channelId: "c", channelCode: "NAVER", channelNameKo: "네이버 스마트스토어", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "현금영수증 발행 부탁드립니다", snippet: "주문할 때 신청을 못 했는데…", receivedAt: "2026-07-22T00:00:00Z", answeredAt: null, sourceSubtype: null, executableIdentity: null },
+        { inquiryId: "i-2", workItemId: "w-2", sellerAccountId: "s", channelId: "c", channelCode: "CAFE24", channelNameKo: "카페24 자사몰", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "배송이 너무 늦습니다", snippet: "일주일이 넘었는데…", receivedAt: "2026-07-30T00:00:00Z", answeredAt: null, sourceSubtype: null, executableIdentity: null },
+      ],
+    });
+    renderHome();
+    // The work itself, not a link that says how much of it there is.
+    expect(await screen.findByText("현금영수증 발행 부탁드립니다")).toBeInTheDocument();
+    expect(screen.getByText("배송이 너무 늦습니다")).toBeInTheDocument();
+    expect(screen.getByText(/가장 오래 기다린 것부터/)).toBeInTheDocument();
+    // The old card said the same number a third time; it is gone, and so is the chip re-asking for it.
+    expect(screen.queryByText("지금 기다리는 일")).toBeNull();
+    expect(screen.queryByRole("button", { name: "답변 안 한 문의 보여줘" })).toBeNull();
+    expect(screen.getByRole("link", { name: "문의 22건 전체 보기" })).toHaveAttribute("href", "/inquiries?state=NEEDS_REPLY");
+    // §5: the strip stops printing the number the brief is already saying one line below.
+    expect(screen.queryByText("현재 미답변 문의")).toBeNull();
+    expect(screen.getByText(/부정 리뷰/)).toBeInTheDocument();
+  });
+
+  it("§2: when the rows read fails the brief falls back to the count it already has", async () => {
+    getProactiveCases.mockResolvedValue({ items: [], total: 0, high: 0 });
+    getInquiryRowsStrict.mockRejectedValue(new Error("nope"));
+    renderHome();
+    expect(await screen.findByText(/지금 확인이 필요한 일이 있습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/답변을 기다리는 문의 22건/)).toBeInTheDocument();
   });
 
   it("a genuinely quiet morning — no cases AND no waiting work — is the truthful zero", async () => {

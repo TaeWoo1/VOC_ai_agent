@@ -50,8 +50,12 @@ describe("KnowledgeCaptureArtifact", () => {
     expect(screen.getByTestId("capture-existing")).toHaveTextContent("등록된 기준 「배송 안내」: 결제 후 1~2일 안에 출고합니다.");
     expect(screen.getByText("기존 기준과 다름")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "저장하고 계속" })).toBeNull();
+    // Working Context v1 §5: the grounded re-draft is the TURN's own sentence and the draft card below
+    // it — the card adds no third copy. An outcome the sentence does not cover keeps its line.
     render(<MemoryRouter><KnowledgeCaptureArtifact artifact={{ ...base, artifactId: "a-cap-2", state: "SAVED", fingerprint: null, resume: "DRAFT_GROUNDED" }} /></MemoryRouter>);
-    expect(screen.getByTestId("capture-resume")).toHaveTextContent("저장한 기준으로 답변 초안을 다시 준비했습니다.");
+    expect(screen.queryByTestId("capture-resume")).toBeNull();
+    render(<MemoryRouter><KnowledgeCaptureArtifact artifact={{ ...base, artifactId: "a-cap-3", state: "SAVED", fingerprint: null, resume: "DRAFT_STILL_GAP" }} /></MemoryRouter>);
+    expect(screen.getByTestId("capture-resume")).toHaveTextContent("저장했지만 이 문의에 바로 적용할 근거로는 아직 부족합니다.");
   });
 
   it("in the timeline the controls exist only on the latest agent turn", async () => {

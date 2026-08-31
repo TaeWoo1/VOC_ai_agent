@@ -41,11 +41,22 @@ export function InquiryListArtifact({ artifact, onPrompt }: { artifact: InquiryL
   // A list with no rows draws NOTHING (Conversation UX v2 §D): 「…는 없습니다」 is already the turn's own
   // sentence, and a box under it saying 「보여드릴 문의가 없습니다」 is that answer a second time.
   if (groups.length === 0) return null;
+  // A ROWS list keeps the ORDER the seller asked for, so its groups are consecutive runs of one state
+  // — and a mixed set comes back as 답변 필요 1 · 답변함 1 · 답변 필요 1, three headers that name the
+  // same two things and count to one each. Every row already carries its state as its first word, so
+  // when a label repeats the headers say nothing the rows do not (Working Context v1 §5). Headers stay
+  // for a genuinely grouped list, where each label appears once and the count is the group's size.
+  const labelled = new Set(groups.map((g) => g.label)).size === groups.length;
+  const showHeaders = groups.length > 1 && labelled;
   return (
     <ArtifactCard title={artifact.title} note={artifact.note}>
-      {groups.map((group) => (
-        <section key={group.key} aria-label={group.label}>
-          {groups.length > 1 ? (
+      {/* Keyed by POSITION as well as kind: a ROWS list keeps the seller's order, so its groups are
+          consecutive runs and the same `key` ("UNANSWERED") legitimately appears more than once. React
+          was told two siblings were the same node and warned it might drop or duplicate rows — a list
+          of the seller's work is the last place to let that happen. */}
+      {groups.map((group, runIndex) => (
+        <section key={`${group.key}-${runIndex}`} aria-label={group.label}>
+          {showHeaders ? (
             <p className="border-y border-line/70 bg-canvas px-4 py-1.5 text-xs font-semibold text-muted">
               {group.label} <span className="tabular-nums">{group.items.length}</span>
             </p>
@@ -106,8 +117,10 @@ function Row({ item, state, selected, expanded, onSelect, onOpen, onPrompt }: {
         <Status tone={state.tone} variant="word">{state.word}</Status>
       </div>
       {/* The customer's own sentence, one line, without a click — a row the seller can read is the
-          difference between a list of objects and a table of ids. Absent on a reloaded thread. */}
-      {preview && preview !== title ? (
+          difference between a list of objects and a table of ids. Absent on a reloaded thread.
+          Hidden while the row is OPEN: the full message is right below it, and a one-line copy of its
+          own first line above it is that sentence twice (Working Context v1 §5). */}
+      {preview && preview !== title && !expanded ? (
         <p className="mt-0.5 break-keep text-sm leading-snug text-muted line-clamp-1" data-testid="inquiry-row-preview">{preview}</p>
       ) : null}
       <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-sm text-muted">

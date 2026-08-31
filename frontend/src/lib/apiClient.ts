@@ -59,6 +59,7 @@ import type {
   PublishStatusView,
   ReplyDraftView,
   InquiryQueueResponse,
+  InquiryRowsResponse,
   ItemAnalysis,
   ProposalResult,
   OperatorAttentionSummary,
@@ -701,6 +702,23 @@ export const api = {
     const { data } = await http.get<InquiryQueueResponse>(
       `/api/inquiries${query ? `?${query}` : ""}`,
     );
+    return data;
+  },
+  /**
+   * The customer's inquiries as ROWS (Query Accuracy v1) — the same read the conversation's 「최근 문의」
+   * makes. The home brief uses it to NAME the work that is waiting instead of restating a count
+   * (Working Context v1 §2); `order=OLDEST` is the one criterion this product has for urgency, and the
+   * rows carry it visibly in their own receipt times.
+   */
+  async getInquiryRowsStrict(
+    params: { status?: string; order?: string; limit?: number; channel?: string; q?: string } = {},
+  ): Promise<InquiryRowsResponse> {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value != null && value !== "") search.set(key, String(value));
+    }
+    const query = search.toString();
+    const { data } = await http.get<InquiryRowsResponse>(`/api/inquiries/rows${query ? `?${query}` : ""}`);
     return data;
   },
   // Seller-only detail for one work item: exposes title/details (never author),

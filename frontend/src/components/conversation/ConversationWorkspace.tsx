@@ -1,6 +1,9 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
+import { AnimatePresence } from "motion/react";
 import { ConversationTimeline } from "./ConversationTimeline";
+import { ContextBar } from "./ContextBar";
 import { Composer } from "./Composer";
+import { currentContext } from "../../lib/conversation/currentContext";
 import { placeholderFor, promptsFor } from "./surfacePrompts";
 import { useConversation, type DisplayTurn, type TurnHints } from "../../lib/conversation/ConversationProvider";
 import { useAgentPanel } from "../../lib/agentPanel";
@@ -63,6 +66,15 @@ export function ConversationWorkspace({
   };
   const blocked = disabled || conversation.plannerOff;
   const empty = conversation.turns.length === 0;
+  // Working Context v1 §1: what the next sentence will be about, resolved from what the thread already
+  // drew. Null while the conversation holds nothing — the common case at the start, and it renders nothing.
+  const context = useMemo(
+    () => currentContext(conversation.workingSet, conversation.activeTask, conversation.turns),
+    [conversation.workingSet, conversation.activeTask, conversation.turns],
+  );
+  // §4: the box asks for what the agent asked for. A gap question ends with the seller typing the
+  // answer, and 「무엇이든 물어보세요」 above the cursor was the one place that did not say so.
+  const askedPlaceholder = conversation.activeTask === "CAPTURE_KNOWLEDGE" ? "답변 기준을 여기에 적어 주세요" : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-workspace">
@@ -76,6 +88,7 @@ export function ConversationWorkspace({
             elapsed={conversation.elapsed}
             error={conversation.error}
             compact={compact}
+            dockKey={context ? `${context.kind}:${context.label}:${context.task ?? ""}` : ""}
             onPrompt={send}
             onResume={(turnId) => void conversation.resume(turnId)}
             onCaptureDecision={(captureId, fingerprint, decision) => void conversation.decideCapture(captureId, fingerprint, decision)}
@@ -94,12 +107,17 @@ export function ConversationWorkspace({
             </p>
           ) : null}
           {disabledReason}
+          <AnimatePresence initial={false}>
+            {context ? (
+              <ContextBar key="context" context={context} onClear={() => void conversation.clearSelection()} />
+            ) : null}
+          </AnimatePresence>
           <Composer
             onSend={send}
             onStop={conversation.stop}
             busy={conversation.busy}
             disabled={blocked}
-            placeholder={placeholder ?? placeholderFor(registered?.label)}
+            placeholder={askedPlaceholder ?? placeholder ?? placeholderFor(registered?.label)}
             initialText={initialText}
             autoFocus={autoFocus}
             chips={empty ? (chips ?? promptsFor(registered?.surface)) : []}

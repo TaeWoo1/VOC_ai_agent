@@ -80,6 +80,8 @@ export interface ConversationState {
   decideCapture(captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL"): Promise<void>;
   /** §3/§9: a click on a shown inquiry row — the same focus transition as naming it. Never blocks the composer. */
   selectEntity(target: { inquiryId: string; workItemId?: string | null }): Promise<void>;
+  /** Working Context v1 §1: leave the anchored object. The same contract backwards; the set stays. */
+  clearSelection(): Promise<void>;
   /**
    * Stop the turn in flight. Bounded and honest: the stream is closed, the runtime cancels the run's
    * budget (the step already running finishes on its own; nothing new starts), and the thread shows
@@ -413,6 +415,25 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     }
   }, [ensureId]);
 
+  /**
+   * Working Context v1 §1: leaving the anchored object. The same focus contract, backwards — the
+   * runtime drops the selection and the task in flight, and the set the seller is looking at stays.
+   * On a failure the bar keeps showing what the runtime still holds; it never clears optimistically,
+   * because a bar that says 「해제됨」 while the next turn is still anchored is the defect it exists
+   * to close.
+   */
+  const clearSelection = useCallback(async () => {
+    const id = idRef.current;
+    if (!id) return;
+    try {
+      const turn = await conversationClient.sendTurn(id, { select: { kind: "CLEAR" } }, () => undefined);
+      setWorkingSet(turn.continuation.workingSet);
+      setActiveTask(turn.continuation.activeTask ?? null);
+    } catch {
+      // Nothing changed on the server; nothing changes here.
+    }
+  }, []);
+
   const openConversation = useCallback(
     async (id: string) => {
       const view = await conversationClient.getConversation(id);
@@ -504,6 +525,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       resume,
       decideCapture,
       selectEntity,
+      clearSelection,
       stop,
       historyVersion,
       newConversation,
@@ -511,7 +533,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       openConversation,
       addLocalTurn,
     }),
-    [conversationId, turns, busy, elapsed, stages, error, pendingHumanAction, workingSet, activeTask, plannerOff, send, resume, decideCapture, selectEntity, stop, historyVersion, newConversation, loadHistory, openConversation, addLocalTurn],
+    [conversationId, turns, busy, elapsed, stages, error, pendingHumanAction, workingSet, activeTask, plannerOff, send, resume, decideCapture, selectEntity, clearSelection, stop, historyVersion, newConversation, loadHistory, openConversation, addLocalTurn],
   );
   return <ConversationContext.Provider value={value}>{children}</ConversationContext.Provider>;
 }

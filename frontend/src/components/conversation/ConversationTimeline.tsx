@@ -25,6 +25,7 @@ export function ConversationTimeline({
   elapsed,
   error,
   compact = false,
+  dockKey = "",
   onPrompt,
   onResume,
   onCaptureDecision,
@@ -35,6 +36,12 @@ export function ConversationTimeline({
   elapsed: number;
   error: string | null;
   compact?: boolean;
+  /**
+   * Changes whenever the dock below grows or shrinks (Working Context v1 §1) — the context bar
+   * appearing takes height the transcript was using, and without re-pinning the last turn ends up
+   * behind it. It is a scroll trigger, not content.
+   */
+  dockKey?: string;
   onPrompt: (prompt: string) => void;
   onResume: (turnId: string) => void;
   /** Knowledge Capture v1: the candidate card's 「저장하고 계속」 / 「취소」. Absent ⇒ the card shows no controls. */
@@ -43,7 +50,7 @@ export function ConversationTimeline({
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: "end" });
-  }, [turns.length, busy]);
+  }, [turns.length, busy, dockKey]);
   const lastAgent = [...turns].reverse().find((t) => t.role === "AGENT")?.turnId ?? null;
 
   // A thread that is already there (a reload, an opened conversation) is not re-played: `initial={false}`

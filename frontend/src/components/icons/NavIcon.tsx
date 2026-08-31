@@ -166,6 +166,19 @@ const NAV_ICON_PATHS: Record<string, ReactElement> = {
     </>
   ),
   check: <path d="m5 12 5 5L20 7" />,
+  // Working Context v1 §1: the ONE object the conversation is anchored on, vs. the rows on screen.
+  target: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
+    </>
+  ),
+  list: (
+    <>
+      <path d="M8 6h12M8 12h12M8 18h12" />
+      <path d="M4 6h.01M4 12h.01M4 18h.01" />
+    </>
+  ),
   // Open the object's own workspace (secondary row action — Agent Interaction Model v2 §7).
   open: (
     <>

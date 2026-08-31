@@ -427,6 +427,8 @@ export interface WorkingSetView {
     rating?: "ALL" | "LOW";
     productIds?: string[];
     topic?: "SHIPPING" | "EXCHANGE_RETURN" | "PRODUCT_SPEC" | "USAGE" | "OTHER" | null;
+    /** The seller's own subject word the set was narrowed by, when one was (`subjectTerm.ts`). */
+    term?: string | null;
     reviewIntent?: "ROWS" | "ISSUES" | null;
     inquiryIntent?: "ROWS" | "WORKLOAD";
     status?: "UNANSWERED" | "ANSWERED" | "ALL";
@@ -569,7 +571,10 @@ export interface StartTurnRequest {
    * selection makes. The runtime verifies the id (history row, or one org-scoped READ) and persists the
    * anchor; nothing is appended to the transcript.
    */
-  select?: { kind: "INQUIRY"; inquiryId: string; workItemId?: string | null };
+  select?:
+    | { kind: "INQUIRY"; inquiryId: string; workItemId?: string | null }
+    /** Working Context v1 §1: leave the anchored object. The same focus contract, backwards. */
+    | { kind: "CLEAR" };
 }
 
 /** Closed: the runtime's zod accepts exactly these three. */

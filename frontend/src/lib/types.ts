@@ -1260,6 +1260,44 @@ export interface InquiryQueueResponse {
   totalPages: number;
 }
 
+/**
+ * Mirrors com.sellerops.inquiry.queue.dto.InquiryRowItem — the INQUIRY, not a work item. `workItemId`
+ * is present only while an open or proposed work item exists, so a row the seller can draft on and a
+ * row that is merely shown are told apart by the field. `snippet` is the same bounded, PII-masked
+ * opening of the customer's message the 문의 feed shows — never the raw body.
+ */
+export interface InquiryRowItem {
+  inquiryId: string;
+  workItemId: string | null;
+  sellerAccountId: string | null;
+  channelId: string | null;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  productId: string | null;
+  productName: string | null;
+  phase: string | null;
+  status: string;
+  title: string | null;
+  snippet: string | null;
+  receivedAt: string;
+  answeredAt: string | null;
+  sourceSubtype: string | null;
+  executableIdentity: string | null;
+}
+
+// Mirrors com.sellerops.inquiry.queue.dto.InquiryRowsResponse.
+export interface InquiryRowsResponse {
+  from: string | null;
+  to: string | null;
+  channel: string | null;
+  status: string | null;
+  order: string | null;
+  limit: number;
+  term: string | null;
+  totalCount: number;
+  items: InquiryRowItem[];
+}
+
 // Mirrors com.sellerops.inquiry.proposal.dto.ProposalView. Coarse decision
 // metadata + provider provenance only — never a reply body, buyer identity, or
 // audit internals.

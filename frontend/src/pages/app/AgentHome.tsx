@@ -13,8 +13,8 @@ import { DISCONNECTED_HEADLINE, DISCONNECTED_SUBLINE } from "../../lib/briefing"
 import { caseTarget, preparedBadge } from "../../lib/proactive";
 import { previewText } from "../../lib/plainText";
 import { matchCommandIntent, INTENT_HEADING } from "../../lib/commandIntents";
-import type { InquiryListArtifact, ListArtifact } from "../../lib/conversation/types";
-import type { MetricKpi, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
+import type { InquiryListArtifact, InquiryListArtifact as InquiryList, ListArtifact } from "../../lib/conversation/types";
+import type { InquiryRowItem, MetricKpi, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
 
 /**
  * 홈 — the Agent operating workspace (Agentic Operating Workspace v2 §3-C).
@@ -54,9 +54,31 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
     };
   }, []);
 
+  // Working Context v1 §2: the brief NAMES the work. One bounded READ of the seller's own oldest
+  // waiting inquiries — the same `/api/inquiries/rows` the conversation's 「최근 문의」 makes, ordered
+  // by the one urgency signal this product has. `undefined` = not read yet (say nothing about it),
+  // `null` = the read failed (the brief falls back to the count it already has).
+  const [oldest, setOldest] = useState<InquiryRowItem[] | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    api
+      .getInquiryRowsStrict({ status: "UNANSWERED", order: "OLDEST", limit: BRIEF_ROWS })
+      .then((r) => {
+        if (live) setOldest(r.items);
+      })
+      .catch(() => {
+        if (live) setOldest(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   const data = overview.data;
   const beforeFirstConnection = data ? !hasAnyConnectedChannel(data.metrics.channels) : false;
-  const strip = data ? contextStrip(data, now) : [];
+  // §5: when the brief names the waiting inquiries it also says how many — so the strip stops saying
+  // it. Before this the seller read 「현재 미답변 문의 12건」 and 「…문의가 12건 있습니다」 one line apart.
+  const strip = data ? contextStrip(data, now, (oldest?.length ?? 0) > 0) : [];
   const anyUnproven = strip.some((kpi) => kpi.freshnessUnproven);
   const count = cases ? cases.items.length : null;
 
@@ -65,8 +87,8 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   // numbers line reads) when there are none. 「없습니다」 only when the same reads came back empty.
   const workload = useMemo(() => (data ? workloadPriorities(data) : null), [data]);
   const leadingTurns = useMemo<DisplayTurn[]>(
-    () => (cases && !beforeFirstConnection ? [proactiveTurn(cases, workload)] : []),
-    [cases, workload, beforeFirstConnection],
+    () => (cases && !beforeFirstConnection && oldest !== undefined ? [proactiveTurn(cases, workload, oldest)] : []),
+    [cases, workload, oldest, beforeFirstConnection],
   );
 
   const onBeforeSend = useCallback(
@@ -193,13 +215,17 @@ const STRIP_ROUTE: Record<string, string> = {
 /**
  * Three numbers from the one overview read. 「오늘 주문」 is the series' last point only when that
  * point IS today; otherwise the 7-day KPI under its own honest label.
+ *
+ * `briefNamesInquiries` = the opener turn below is naming the waiting inquiries and their count, so
+ * this line drops that one number rather than printing it a second time six inches above (§5). The
+ * other two are not in the brief and stay.
  */
-export function contextStrip(data: OverviewResponse, now: Date): MetricKpi[] {
+export function contextStrip(data: OverviewResponse, now: Date, briefNamesInquiries = false): MetricKpi[] {
   const kpis = data.metrics.kpis;
   const find = (key: string) => kpis.find((k) => k.key === key);
   const out: MetricKpi[] = [];
   const unanswered = find("unansweredInquiries");
-  if (unanswered) out.push({ ...unanswered, label: "현재 미답변 문의" });
+  if (unanswered && !briefNamesInquiries) out.push({ ...unanswered, label: "현재 미답변 문의" });
   const orders = find("orders");
   const series = data.metrics.series.find((s) => s.key === "orders");
   const last = series?.points[series.points.length - 1];
@@ -246,12 +272,28 @@ export function workloadPriorities(data: OverviewResponse): WorkloadPriority[] {
   return out.slice(0, 3);
 }
 
+/** How many waiting inquiries the brief names. Three is a brief; ten is the queue with a sentence on top. */
+export const BRIEF_ROWS = 3;
+
 /**
  * The first agent turn: what reviewnary prepared before the seller asked — and, when it prepared
  * nothing, what is genuinely waiting (§11). 「없습니다」 is said only when both reads came back empty.
  * Client-composed, never persisted.
+ *
+ * <b>Working Context v1 §2 — a brief names things.</b> This turn used to end in a link that said
+ * 「답변을 기다리는 문의 12건」 — the third printing of a number the greeting and the context line above
+ * it had already given, and the seller still did not know what any of the twelve WERE. A brief that
+ * ends in a count is a dashboard row wearing a chat bubble. It now ends in the actual rows, oldest
+ * first, each clickable into the conversation: the decision point, not the total.
+ *
+ * `oldest` is `null` when that read failed — the count line stands in, because a brief that can only
+ * say the number is still better than one that invents rows.
  */
-export function proactiveTurn(cases: ProactiveCaseListResponse, workload: WorkloadPriority[] | null): DisplayTurn {
+export function proactiveTurn(
+  cases: ProactiveCaseListResponse,
+  workload: WorkloadPriority[] | null,
+  oldest: InquiryRowItem[] | null,
+): DisplayTurn {
   const items = cases.items;
   const list: ListArtifact = {
     artifactId: "home-proactive",
@@ -273,17 +315,55 @@ export function proactiveTurn(cases: ProactiveCaseListResponse, workload: Worklo
     ...(cases.total > items.length ? { more: { label: `전체 ${cases.total}건 보기`, to: "/inquiries" } } : {}),
   };
   const waiting = workload ?? [];
+  const unanswered = waiting.find((w) => w.to.startsWith("/inquiries"))?.count ?? 0;
+  const rows = oldest ?? [];
+  // The rows the brief names, as the same object every other inquiry list in this product is — so a
+  // click here anchors the conversation exactly as a click on an answered list does.
+  const waitingRows: InquiryList = {
+    artifactId: "home-waiting-rows",
+    type: "INQUIRY_LIST",
+    title: "가장 오래 기다린 문의",
+    totalCount: unanswered,
+    groups: [
+      {
+        key: "UNANSWERED",
+        label: "답변 필요",
+        items: rows.map((row) => ({
+          workItemId: row.workItemId,
+          inquiryId: row.inquiryId,
+          channelCode: row.channelCode,
+          channelNameKo: row.channelNameKo,
+          receivedAt: row.receivedAt,
+          phase: row.phase ?? "OPEN",
+          status: row.status,
+          title: row.title,
+          snippet: row.snippet,
+          productId: row.productId,
+          productName: row.productName,
+          answerBasis: null,
+          to: `/inquiries/${row.inquiryId}`,
+        })),
+      },
+    ],
+    ...(unanswered > rows.length ? { more: { label: `문의 ${unanswered.toLocaleString("ko-KR")}건 전체 보기`, to: "/inquiries?state=NEEDS_REPLY" } } : {}),
+  };
+  // The count read failed or the rows are empty while the count is not — then the brief still has one
+  // honest thing to say, and it says it as a line rather than a card.
   const waitingList: ListArtifact = {
     artifactId: "home-waiting",
     type: "LIST",
     title: "지금 기다리는 일",
     items: waiting.map((w) => ({ id: w.to, primary: `${w.label} ${w.count.toLocaleString("ko-KR")}건`, to: w.to })),
   };
+  const namedRows = rows.length > 0;
   const message = items.length > 0
     ? "제가 먼저 확인해 둔 일입니다. 확인하고 보내시면 됩니다 — 아직 아무 곳에도 보내지 않았습니다."
-    : waiting.length > 0
-      ? "오늘 미리 준비해 둔 일은 없지만, 지금 확인이 필요한 일이 있습니다."
-      : "지금 먼저 확인할 일은 없습니다. 새로 들어온 문의나 리뷰가 생기면 여기에 먼저 정리해 두겠습니다.";
+    : namedRows
+      // The number is said ONCE, and it is said as the reason these particular rows are on top.
+      ? `답변을 기다리는 문의가 ${unanswered.toLocaleString("ko-KR")}건 있습니다. 가장 오래 기다린 것부터 보여드릴게요 — 눌러서 바로 이어가시면 됩니다.`
+      : waiting.length > 0
+        ? "오늘 미리 준비해 둔 일은 없지만, 지금 확인이 필요한 일이 있습니다."
+        : "지금 먼저 확인할 일은 없습니다. 새로 들어온 문의나 리뷰가 생기면 여기에 먼저 정리해 두겠습니다.";
   return {
     turnId: "home-proactive",
     conversationId: "local",
@@ -291,9 +371,11 @@ export function proactiveTurn(cases: ProactiveCaseListResponse, workload: Worklo
     message,
     artifacts: [
       ...(items.length > 0 ? [list] : []),
-      ...(waiting.length > 0 ? [waitingList] : []),
+      ...(namedRows ? [waitingRows] : waiting.length > 0 ? [waitingList] : []),
     ],
-    suggestedActions: waiting.some((w) => w.to.startsWith("/inquiries"))
+    // A named row IS the next action — a chip re-asking for the same list under it is the same move
+    // twice (Conversation UX v2 §D). The chip stands in only when nothing could be named.
+    suggestedActions: !namedRows && waiting.some((w) => w.to.startsWith("/inquiries"))
       ? [{ label: "답변 안 한 문의 보여줘", kind: "PROMPT", prompt: "답변 안 한 문의만 보여줘" }]
       : [],
     continuation: { workingSet: null, pendingHumanAction: null, pendingPrepared: null },

@@ -876,14 +876,25 @@ export const StartTurnRequestSchema = z
      * conversation, and appended to the transcript as nothing (the row's own highlight is the
      * feedback). Ids are hints, not facts: a row this conversation never showed is verified by one
      * org-scoped READ before it may become the anchor, exactly like a screen-launch `workItemId`.
+     *
+     * <b>CLEAR is the same transition backwards</b> (Working Context v1 §1). The seller can now SEE
+     * which object the conversation is anchored on, and a state that can be seen must be one the
+     * seller can leave — otherwise the bar reports a fact and offers no way to change it. Clearing
+     * drops the anchor and the task in flight and touches nothing else: the set stays on screen, the
+     * transcript is not appended to, no read is made and no model is called. It carries no id because
+     * there is only ever one anchor to drop.
      */
     select: z
-      .object({
-        kind: z.literal("INQUIRY"),
-        inquiryId: z.string().min(1).max(200),
-        workItemId: z.string().min(1).max(200).nullable().optional(),
-      })
-      .strict()
+      .union([
+        z
+          .object({
+            kind: z.literal("INQUIRY"),
+            inquiryId: z.string().min(1).max(200),
+            workItemId: z.string().min(1).max(200).nullable().optional(),
+          })
+          .strict(),
+        z.object({ kind: z.literal("CLEAR") }).strict(),
+      ])
       .optional(),
   })
   .strict()

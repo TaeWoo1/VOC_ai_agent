@@ -1613,7 +1613,6 @@ export class ConversationService {
     view: ConversationView, select: NonNullable<StartTurnRequest["select"]>, bundle: SpringClientBundle,
     store: ConversationStore, started: number,
   ): Promise<TurnView> {
-    const resolved = inquiryTargetFromHistory(view, select.inquiryId) ?? await this.verifiedTarget(select.workItemId ?? null, bundle);
     const respond = (workingSet: WorkingSetView | null, activeTask: ActiveTask | null): TurnView => ({
       turnId: `select-${randomUUID()}`, conversationId: view.conversationId, role: "AGENT",
       message: "", artifacts: [], suggestedActions: [],
@@ -1623,6 +1622,21 @@ export class ConversationService {
       },
       status: "DONE", createdAt: this.now(),
     });
+    // Working Context v1 §1: leaving the anchor. The set the seller is looking at stays exactly as it
+    // is — only the ONE selected inquiry and the task in flight are dropped, and a capture that was
+    // held open for that inquiry goes with it (the same rule a move to another inquiry applies).
+    if (select.kind === "CLEAR") {
+      const set = view.workingSet;
+      const cleared = set ? { ...set, selectedInquiry: null } : null;
+      const pendingCapture = carriedCapture(view.pendingCapture ?? null, cleared);
+      await this.persist(store, view, [], cleared, pendingActionsOf(view), view.pendingPrepared, pendingCapture, null);
+      log("conversation_turn", {
+        status: "DONE", toolCalls: 0, llmCalls: 0, ms: Date.now() - started,
+        artifactTypes: "", workingSetKind: cleared?.kind ?? "", requestedAction: "CLEAR_SELECT",
+      });
+      return respond(cleared, null);
+    }
+    const resolved = inquiryTargetFromHistory(view, select.inquiryId) ?? await this.verifiedTarget(select.workItemId ?? null, bundle);
     if (!resolved || resolved.kind !== "INQUIRY" || resolved.inquiry.inquiryId !== select.inquiryId) {
       log("conversation_select_unresolved", {});
       return respond(view.workingSet, view.activeTask ?? null);
@@ -2328,7 +2342,15 @@ function selectionSummary(row: SelectedInquiryRow): SummaryArtifact {
 function anchoredSet(row: SelectedInquiry, previous: WorkingSetView | null, productIds: readonly string[]): WorkingSetView {
   // The list the selection was made from stays the set (「세 번째 거」 after 「첫 번째 거」 still counts on
   // the same three rows; 「그중 네이버만」 still refines the same read); the selection rides beside it.
-  const list = previous?.kind === "INQUIRIES" && previous.ids.includes(row.inquiryId) ? previous : null;
+  //
+  // A set is keyed by ONE of two identities and which one depends on the read that produced it: a ROWS
+  // list is inquiry ids, a work-queue list is work-item ids (`ids: bounded(rows ? … : workItemIds)`).
+  // Testing only the inquiry id therefore never matched a work-queue list, so clicking a row of the
+  // queue silently collapsed the set to that one row — and 「세 번째 거」 or 「그중 네이버만」 after the
+  // click acted on a set of one. The row carries both ids; recognise the set by either.
+  const inSet = (set: WorkingSetView): boolean =>
+    set.ids.includes(row.inquiryId) || (row.workItemId != null && set.workItemIds.includes(row.workItemId));
+  const list = previous?.kind === "INQUIRIES" && inSet(previous) ? previous : null;
   const inherited = previous?.kind === "INQUIRIES" ? previous.filters : {};
   const selectedInquiry: SelectedInquiry = {
     inquiryId: row.inquiryId, workItemId: row.workItemId, productId: row.productId, channelCode: row.channelCode,

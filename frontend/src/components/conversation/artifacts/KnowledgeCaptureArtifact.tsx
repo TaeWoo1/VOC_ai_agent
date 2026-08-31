@@ -24,8 +24,15 @@ const STATE_WORD: Record<Capture["state"], { word: string; tone: "good" | "warn"
   STALE: { word: "무효", tone: "neutral" },
 };
 
-const RESUME_LINE: Record<NonNullable<Capture["resume"]>, string> = {
-  DRAFT_GROUNDED: "저장한 기준으로 답변 초안을 다시 준비했습니다.",
+/**
+ * What happened after the save, for the cases the TURN'S own sentence does not already carry.
+ *
+ * Working Context v1 §5: on a grounded re-draft the assistant already says 「저장한 기준을 근거로 답변
+ * 초안을 다시 준비했습니다」 one line above, in the largest type on screen, and the new draft card is
+ * right below — printing it a third time inside this card is exactly the repetition PO QA named. The
+ * outcomes that the sentence does NOT cover keep their line, because nothing else says them.
+ */
+const RESUME_LINE: Partial<Record<NonNullable<Capture["resume"]>, string>> = {
   DRAFT_STILL_GAP: "저장했지만 이 문의에 바로 적용할 근거로는 아직 부족합니다.",
   INQUIRY_NOT_ACTIONABLE: "이 문의는 이미 처리되어 기준만 저장했습니다.",
   PENDING_RESUME: "저장한 기준으로 원래 요청을 다시 확인합니다.",
@@ -60,7 +67,7 @@ export function KnowledgeCaptureArtifact({ artifact, onDecision }: {
             등록된 기준 「{artifact.existing.title}」: {artifact.existing.excerpt}
           </p>
         ) : null}
-        {artifact.state === "SAVED" && artifact.resume ? (
+        {artifact.state === "SAVED" && artifact.resume && RESUME_LINE[artifact.resume] ? (
           <p className="break-keep text-sm text-muted" data-testid="capture-resume">{RESUME_LINE[artifact.resume]}</p>
         ) : null}
         {decidable ? (
