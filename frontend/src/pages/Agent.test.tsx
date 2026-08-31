@@ -21,8 +21,6 @@ vi.mock("../lib/auth", () => ({
 import { Agent } from "./Agent";
 import { AgentRuntimeError } from "../lib/agentRuntime/agentClient";
 import { renderWithRouter, screen, waitFor } from "../test/renderWithRouter";
-import { render } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { api } from "../lib/apiClient";
 import type { AgentRunView, CapabilitiesView } from "../lib/agentRuntime/types";
@@ -153,61 +151,36 @@ describe("운영 에이전트 page", () => {
     vi.spyOn(api, "getSellerAccountsStrict").mockResolvedValue([]);
   });
 
-  it("§9 — the product the seller was standing on is sent with the run", async () => {
-    agentMock.startRun.mockResolvedValue(INQUIRY_AWAITING);
-    render(
-      <MemoryRouter initialEntries={["/agent?productId=p-77&from=product&goal=%EC%9D%B4%20%EC%83%81%ED%92%88%EB%A7%8C%20%EB%B4%90%EC%A4%98"]}>
-        <Agent />
-      </MemoryRouter>,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
-
-    // The sentence has no product name in it. Until this package that made the run unanswerable, and
-    // the only reason nobody noticed is that every launch link also writes the name into the goal.
-    await waitFor(() => expect(agentMock.startRun).toHaveBeenCalled());
-    expect(agentMock.startRun.mock.calls[0]![0]).toMatchObject({
-      goalText: "이 상품만 봐줘",
-      productId: "p-77",
-    });
-  });
-
-  it("§9 — a run started from a screen with no entity sends no scope hint", async () => {
-    agentMock.startRun.mockResolvedValue(INQUIRY_AWAITING);
+  it("renders the closed-intent shortcuts, the fail-closed badge, and the way to the home conversation", async () => {
     renderWithRouter(<Agent />);
-    await userEvent.type(screen.getByLabelText("확인할 내용"), "오늘 뭐부터 봐야 해?");
-    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
-
-    await waitFor(() => expect(agentMock.startRun).toHaveBeenCalled());
-    expect(agentMock.startRun.mock.calls[0]![0]).not.toHaveProperty("productId");
-  });
-
-  it("renders the command form and the fail-closed capability badge", async () => {
-    renderWithRouter(<Agent />);
-    expect(screen.getByRole("form", { name: "에이전트 명령 입력" })).toBeInTheDocument();
+    // Conversation Core v1: no free-text form here — a sentence belongs to the home conversation.
+    expect(screen.queryByRole("form", { name: "에이전트 명령 입력" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "미답변 문의 처리" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "리뷰 답변 준비" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "홈 대화" })).toHaveAttribute("href", "/");
     expect(await screen.findByText(/외부 발송 없음/)).toBeInTheDocument();
   });
 
-  it("inquiry: shows the templated reply + approve/reject and a link to 문의 응답 (no raw 원문 here)", async () => {
+  it("inquiry: the intent shortcut runs the closed intent and shows the reply + approve/reject and a link to 문의 응답", async () => {
     agentMock.startRun.mockResolvedValue(INQUIRY_AWAITING);
     renderWithRouter(<Agent />);
-    await userEvent.type(screen.getByLabelText("확인할 내용"), "미답변 문의 처리해줘");
-    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
+    await userEvent.click(await screen.findByRole("button", { name: "미답변 문의 처리" }));
 
     const group = await screen.findByRole("group", { name: "문의 답변 승인" });
     expect(group).toBeInTheDocument();
     expect((screen.getByLabelText("답변 초안") as HTMLTextAreaElement).value).toContain("안녕하세요");
     // The authorized detail screen is linked for the raw customer 원문.
     expect(screen.getByRole("link", { name: "문의 응답" })).toHaveAttribute("href", "/inquiries");
-    expect(agentMock.startRun).toHaveBeenCalledWith(expect.objectContaining({ goalText: "미답변 문의 처리해줘" }));
+    // A button sends a closed intent, never a sentence (the two-lane contract).
+    expect(agentMock.startRun).toHaveBeenCalledWith(expect.objectContaining({ intent: "HANDLE_UNANSWERED_INQUIRIES" }));
+    expect(agentMock.startRun.mock.calls[0]![0]).not.toHaveProperty("goalText");
   });
 
   it("inquiry: approve calls resumeRun and shows the recorded, no-send outcome", async () => {
     agentMock.startRun.mockResolvedValue(INQUIRY_AWAITING);
     agentMock.resumeRun.mockResolvedValue(INQUIRY_DONE);
     renderWithRouter(<Agent />);
-    await userEvent.type(screen.getByLabelText("확인할 내용"), "미답변 문의");
-    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
+    await userEvent.click(await screen.findByRole("button", { name: "미답변 문의 처리" }));
     await screen.findByRole("group", { name: "문의 답변 승인" });
     await userEvent.click(screen.getByRole("button", { name: "승인 (기록)" }));
 
@@ -219,10 +192,11 @@ describe("운영 에이전트 page", () => {
   });
 
   it("issue: renders the quote-free brief with a link to 상품 이슈", async () => {
+    // The render contract for an ISSUE run — driven through a shortcut; RunView renders whatever
+    // domain the runtime answered with.
     agentMock.startRun.mockResolvedValue(ISSUE_DONE);
     renderWithRouter(<Agent />);
-    await userEvent.type(screen.getByLabelText("확인할 내용"), "지금 먼저 확인할 운영 이슈는 뭐야");
-    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
+    await userEvent.click(await screen.findByRole("button", { name: "미답변 문의 처리" }));
 
     expect(await screen.findByRole("group", { name: "운영 이슈 브리핑" })).toBeInTheDocument();
     expect(screen.getByText("포장 파손")).toBeInTheDocument();
@@ -238,15 +212,13 @@ describe("운영 에이전트 page", () => {
     };
     agentMock.startRun.mockResolvedValueOnce(runA).mockResolvedValueOnce(runB);
     renderWithRouter(<Agent />);
-    await userEvent.type(screen.getByLabelText("확인할 내용"), "미답변 문의");
-    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
+    await userEvent.click(await screen.findByRole("button", { name: "미답변 문의 처리" }));
     const editor = (await screen.findByLabelText("답변 초안")) as HTMLTextAreaElement;
     // Operator edits run A's draft but does NOT approve.
     await userEvent.clear(editor);
     await userEvent.type(editor, "운영자가 A를 수정함");
-    // A second command produces a different AWAITING inquiry run.
-    await userEvent.type(screen.getByLabelText("확인할 내용"), " 다시");
-    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
+    // A second press produces a different AWAITING inquiry run.
+    await userEvent.click(screen.getByRole("button", { name: "미답변 문의 처리" }));
     // The editor must show run B's fresh draft, not the stale edit from run A.
     const editor2 = (await screen.findByLabelText("답변 초안")) as HTMLTextAreaElement;
     expect(editor2.value).toBe("다른 초안 내용입니다.");
@@ -331,8 +303,7 @@ describe("운영 에이전트 page", () => {
   it("surfaces a missing-account-scope error with a helpful hint", async () => {
     agentMock.startRun.mockRejectedValue(new AgentRuntimeError(400, "MISSING_ACCOUNT_SCOPE"));
     renderWithRouter(<Agent />);
-    await userEvent.type(screen.getByLabelText("확인할 내용"), "리뷰 답변 준비해줘");
-    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
+    await userEvent.click(await screen.findByRole("button", { name: "리뷰 답변 준비" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("판매 계정을 선택");
   });
 });

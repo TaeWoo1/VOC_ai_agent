@@ -168,6 +168,8 @@ export interface InquiryListArtifact extends ArtifactBase {
     status: "UNANSWERED" | "ANSWERED" | "ALL";
     order: "NEWEST" | "OLDEST";
     limit: number | null;
+    /** Conversation Core v1: the closed topic family the read was narrowed by, when one was. */
+    topic?: "SHIPPING" | "EXCHANGE_RETURN" | "PRODUCT_SPEC" | "USAGE" | "OTHER" | null;
   };
 }
 

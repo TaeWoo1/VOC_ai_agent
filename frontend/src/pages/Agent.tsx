@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
-import { readAgentContext } from "../lib/agentContext";
 import { Link } from "react-router-dom";
 import { ProactiveCases } from "../components/proactive/ProactiveCases";
 import { PageHeader } from "../components/PageHeader";
@@ -13,7 +11,6 @@ import { api } from "../lib/apiClient";
 import { productAccounts } from "../lib/productAccounts";
 import { agentRuntime } from "../lib/agentRuntime/agentClient";
 import { OperatorAnswerView } from "../components/agent/OperatorAnswerView";
-import { ConversationWorkspace } from "../components/conversation/ConversationWorkspace";
 import { explainAgentError as explain } from "../lib/agentRuntime/explain";
 import type {
   AgentRunView,
@@ -111,19 +108,8 @@ export function Agent() {
    * <b>And it does not send.</b> The sentence lands in the box; the seller presses the button. That is
    * the same rule the Action Window follows one layer up.
    */
-  const launchContext = readAgentContext(useLocation().search);
-  const [command, setCommand] = useState(launchContext.goal ?? "");
   const [accountId, setAccountId] = useState("");
   const [run, setRun] = useState<AgentRunView | null>(null);
-  /**
-   * Whether free-text planning is known to be unavailable for THIS org.
-   *
-   * Learned from a run rather than from `/capabilities`, because that route is public and the planner
-   * capability is per-org: a service-level "enabled" would tell one seller that a capability their org
-   * does not have is available. Once a run has failed for that reason the input is disabled, so the
-   * seller is not invited to type a second sentence that is guaranteed to fail the same way.
-   */
-  const plannerUnavailable = run?.status === "FAILED" && run.failureCode === "PLANNER_CAPABILITY_OFF";
 
   /**
    * The runtime itself did not answer.
@@ -139,7 +125,6 @@ export function Agent() {
    * the copy says so.
    */
   const runtimeUnavailable = caps.error && !caps.loading;
-  const askDisabled = plannerUnavailable || runtimeUnavailable;
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -167,31 +152,6 @@ export function Agent() {
   // Advisory label only — the backend re-derives the authoritative approver from the JWT principal,
   // so this is never the security identity. The fallback is unreachable behind the auth-gated route.
   const approvedBy = useMemo(() => (user ? `SELLER:${user.id}` : "SELLER:operator"), [user]);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!command.trim() || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const view = await agentRuntime.startRun({
-        goalText: command.trim(),
-        ...(accountId ? { accountId } : {}),
-        // The screen the seller came from, carried into the run (Chat-first Agent Shell Completion
-        // v1 §9). Until this package the id reached the URL and died here, so 「이 상품만 봐줘」 from
-        // a product page had to name the product again in the sentence — and did, which is why the
-        // gap was invisible. The id is a hint the runtime verifies, never an injected fact.
-        ...(launchContext.productId ? { productId: launchContext.productId } : {}),
-        ...(launchContext.workItemId ? { workItemId: launchContext.workItemId } : {}),
-      });
-      setRun(view);
-    } catch (err) {
-      setRun(null);
-      setError(explain(err));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   /**
    * Prepare a rule-based answer draft for the top-priority unanswered inquiry (Cafe24 등). The run
@@ -260,37 +220,34 @@ export function Agent() {
           「한 줄로 운영 작업을 지시하면 에이전트가 문의·리뷰·이슈를 분류해 사람이 확인할 지점까지
           준비합니다」 is a description of an execution graph (Executive-friendly UX Redesign v1). */}
       <PageHeader
-        title="운영 에이전트"
-        description="물어보면 대신 확인하고 정리해 드립니다."
+        title="정해진 작업"
+        description="버튼 한 번으로 도는 정해진 확인 작업입니다."
         meta={caps.data ? <CapabilityMeta /> : undefined}
       />
 
-      {/* The conversation — the same one as the home and the panel — full width (Agentic Operating
-          Workspace v2 §3-D). Renders nothing outside the app shell's provider. */}
-      <ConversationWorkspace surface="home" />
+      {/* The conversation lives on the HOME (Conversation Core v1). This page used to embed a second
+          copy of the same thread above the legacy free-text form — two agent surfaces answering one
+          question, and the panel's 「전체 화면」 landing on the worse one. What stays here is the
+          deterministic button lane (closed intents, no planner) and its human checkpoint, which the
+          conversation deliberately does not own. */}
+      <p className="text-base text-muted">
+        문장으로 물어보는 대화는{" "}
+        <Link to="/" className="font-semibold text-brand-700 hover:underline">홈 대화</Link>
+        에서 이어집니다.
+      </p>
 
-      {/* The Dashboard-lane capabilities (button lanes) and the single-run lane they came with, folded.
+      {/* The Dashboard-lane capabilities (button lanes) and the single-run lane they came with.
           They never go through the planner, which is why they stay reachable when planning is off. */}
-      <Disclosure label="정해진 작업" summaryClassName="px-0">
-      <div className="mt-3 space-y-6">
+      <div className="space-y-6">
       <ProactiveCases limit={4} />
 
-      <Section title="무엇을 확인해볼까요?">
-        <form onSubmit={submit} className="space-y-3" aria-label="에이전트 명령 입력">
+      <Section title="바로 실행할 작업">
+        <div className="space-y-3" aria-label="정해진 작업 실행">
           {runtimeUnavailable ? (
-            /*
-              ABOVE the box it disables. It shipped below the input and the account picker, so the
-              seller met a dead control first and the reason for it third.
-
-              And it does NOT say 「채널 연결에는 문제가 없습니다」. On an org with nothing connected
-              that sentence is false, and this notice is not entitled to an opinion about the
-              seller's channels — only about the fact that this failure is not one of them.
-            */
             <div id="agent-runtime-off" className="rounded-xl border border-warn/40 bg-warn/5 p-3" role="status">
               <p className="text-base font-semibold text-ink">AI 도우미를 시작하지 못했습니다.</p>
               <p className="mt-1 break-keep text-sm text-muted">
-                채널 연결과는 관계없는 문제입니다. 문의·리뷰·주문 화면은 그대로 사용할 수 있고, 홈의
-                「무엇을 도와드릴까요?」에서 미답변 문의와 리뷰 문제도 계속 확인할 수 있습니다.
+                채널 연결과는 관계없는 문제입니다. 문의·리뷰·주문 화면은 그대로 사용할 수 있습니다.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <BtnLink to="/" size="sm" variant="outline">
@@ -302,50 +259,15 @@ export function Agent() {
               </div>
             </div>
           ) : null}
-          {/* The heading above already asks the question; a second 「명령」 label under it was the
-              same field named twice, in the harsher of the two words. */}
-          <label htmlFor="agent-command" className="sr-only">
-            확인할 내용
-          </label>
-          <textarea
-            id="agent-command"
-            className="w-full rounded-xl border border-line bg-canvas p-3 text-ink"
-            rows={2}
-            placeholder="예: 오늘 뭐부터 봐야 해?"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            disabled={askDisabled}
-            aria-describedby={
-              runtimeUnavailable ? "agent-runtime-off" : plannerUnavailable ? "agent-planner-off" : undefined
-            }
-          />
-          {/* Examples sit between the box and the button, where a seller who does not know what to
-              type reads them — not under the account picker two controls further down. */}
-          {caps.data ? (
-            <ExampleChips onPick={setCommand} onRunIntent={runIntent} busy={busy} />
-          ) : null}
-
-          {/* The button is alone on its line. The 판매 계정 select used to sit beside it at the same
-              weight while mattering to one kind of request out of many, and a labelled dropdown next
-              to the only submit control reads as a required field. */}
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={busy || !command.trim() || askDisabled}
-          >
-            {busy ? "확인 중…" : "물어보기"}
-          </button>
-          {/* What a seller cannot tell from a spinner: whether anything is still happening. The
-              number is measured, and the sentence says the shape of the work without claiming a
-              stage this screen has no way to know it reached. */}
+          {/* Closed intents only (the button lane): each names its capability the way a menu item
+              does. The free-text lane this page carried was a second, weaker copy of the home
+              conversation and was removed with it (Conversation Core v1). */}
+          {caps.data ? <ExampleChips onRunIntent={runIntent} busy={busy || Boolean(runtimeUnavailable)} /> : null}
           {busy ? (
             <p className="break-keep text-sm text-muted" role="status">
-              문의·리뷰·주문을 확인하고 있습니다. 조사에 잠시 시간이 걸릴 수 있습니다 · {elapsed}초 경과
+              확인하고 있습니다 · {elapsed}초 경과
             </p>
           ) : null}
-          {/* A collapsed control needs a marker, or it reads as a label with nothing behind it —
-              which is exactly how a reader with no explanation read this one (Executive Readiness
-              Fix v1): 「고를 것이 화면에 없다」. */}
           <Disclosure label="판매 계정 선택 (리뷰 답변을 준비할 때만 필요)" summaryClassName="px-0">
             <label htmlFor="agent-account" className="sr-only">
               판매 계정
@@ -364,24 +286,7 @@ export function Agent() {
               ))}
             </select>
           </Disclosure>
-          {plannerUnavailable ? (
-            /*
-              Not an error banner: a capability being off is a configuration state, not a failure of the
-              request. It stays visible after the failed run so the seller is not left re-typing the same
-              sentence — and it says what still works, because the rest of the product does.
-            */
-            <div id="agent-planner-off" className="rounded-xl border border-warn/40 bg-warn/5 p-3" role="status">
-              {/*
-                Says why the INPUT is disabled, and stops there. The run card below carries the run's own
-                reason; repeating that sentence here would print one fact twice and make the shorter,
-                more actionable line harder to find.
-              */}
-              <p className="text-sm text-muted">
-                지금은 문장으로 요청할 수 없습니다. 아래 바로가기를 사용해 주세요.
-              </p>
-            </div>
-          ) : null}
-        </form>
+        </div>
       </Section>
 
       {/*
@@ -423,7 +328,6 @@ export function Agent() {
         <RunView key={run.threadId} run={run} busy={busy} onDecide={decide} onRegenerate={prepareDraft} />
       ) : null}
       </div>
-      </Disclosure>
     </div>
   );
 }
@@ -447,43 +351,22 @@ function CapabilityMeta() {
 }
 
 /**
- * Starting points — and the two LANES made visible.
- *
- * <b>The first two fill the box; the last two run a capability directly.</b> That is not cosmetic. Until
- * Operator Graph v2, "미답변 문의 처리해줘" was a SENTENCE that a keyword table happened to route to the
- * approve loop. With the table gone, a sentence goes to the planner — so a chip that still typed those
- * words would silently change what the button does. A Dashboard-lane shortcut names its intent, the way
- * a menu item does.
- *
- * The two free-text chips are illustrations, not a supported list: anything may be typed, and the
- * planner interprets it or the run fails and says so.
+ * The Dashboard-lane shortcuts — closed intents, the way a menu item names a capability. The free-text
+ * illustration chips left with the free-text lane; a sentence belongs to the home conversation.
  */
 function ExampleChips({
-  onPick,
   onRunIntent,
   busy,
 }: {
-  onPick: (c: string) => void;
   onRunIntent: (intent: string) => void;
   busy: boolean;
 }) {
-  const goals = ["오늘 뭐부터 봐야 해?", "이번 주 대표에게 보고할 내용 정리해줘"];
   const shortcuts: Array<{ label: string; intent: string }> = [
     { label: "미답변 문의 처리", intent: "HANDLE_UNANSWERED_INQUIRIES" },
     { label: "리뷰 답변 준비", intent: "HANDLE_REVIEW_REPLIES" },
   ];
   return (
     <div className="flex flex-wrap gap-2 pt-1">
-      {goals.map((ex) => (
-        <button
-          key={ex}
-          type="button"
-          className="rounded-full border border-line px-3 py-1 text-sm text-muted hover:text-ink"
-          onClick={() => onPick(ex)}
-        >
-          {ex}
-        </button>
-      ))}
       {shortcuts.map((s) => (
         <button
           key={s.intent}

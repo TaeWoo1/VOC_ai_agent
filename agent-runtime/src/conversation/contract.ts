@@ -210,6 +210,8 @@ export interface InquiryListArtifact extends ArtifactBase {
     readonly status: "UNANSWERED" | "ANSWERED" | "ALL";
     readonly order: "NEWEST" | "OLDEST";
     readonly limit: number | null;
+    /** Conversation Core v1: the closed topic family the read was narrowed by, when one was. */
+    readonly topic?: PlanFilters["topic"];
   };
 }
 

@@ -64,12 +64,17 @@ import { boundedTurns, STAGE_LABEL, WORKING_SET_MAX_IDS } from "./contract";
 import type {
   ActiveTask, ApprovalArtifact, Artifact, ConversationSummary, ConversationView, DraftArtifact, EvidenceArtifact,
   ExecutableIdentity, GuidedExecutionArtifact, HumanActionRequiredArtifact, InquiryDetailArtifact, InquiryItem,
+  InquiryListArtifact,
   PendingHumanAction,
   PendingPreparedAction, ProgressEvent, ProgressStage, ReviewItem, SelectedInquiry, StartTurnRequest, SuggestedAction,
   SummaryArtifact, ToneHint, TurnStatus, TurnView, WorkingSetKind, WorkingSetView, WorkspaceLinkArtifact, ObjectKind,
   KnowledgeCaptureArtifact, PendingKnowledgeCapture,
 } from "./contract";
 import { prepareIntentOf, pronounInspectOf, visibleSelectionOf } from "./visibleSelection";
+import { analyzeIntentOf, TOPIC_LABEL, visibleFilterOf } from "./taskInterpreter";
+import type { VisibleFilter } from "./taskInterpreter";
+import { adviseOnInquiry } from "./advisory";
+import { matchesTopic } from "../operator/tools/inquiryWorkload";
 import type { VisibleRow } from "./visibleSelection";
 import type { GeneratedDraftView } from "../spring/types";
 import { periodLabel } from "./period";
@@ -89,6 +94,8 @@ const EVIDENCE_ITEMS_MAX = 20;
 const FINDINGS_MAX = 4;
 /** 「이 두 문의」 — at most this many drafts from one sentence. */
 const ALL_TARGETS_MAX = 2;
+/** Detail READs one deterministic FILTER may spend on topic matching (the workload lane's own cap). */
+const FILTER_DETAIL_CAP = 8;
 
 const WORKSPACE_OF: Record<WorkingSetKind, { label: string; to: string }> = {
   REVIEWS: { label: "리뷰", to: "/reviews" },
@@ -650,6 +657,20 @@ export class ConversationService {
             }
             continue;
           }
+          // ANALYZE guard (Conversation Core v1): an advisory question the planner routed as PREPARE
+          // (「첫 번째 문의, 뭐라고 답하면 좋을까」) over a non-draftable target is answered with advice,
+          // never with the gate's refusal — the same rule the direct lane applies.
+          if (resolved.actionability !== "DRAFTABLE" && analyzeIntentOf(hints.text ?? "")) {
+            stage("READING", STAGE_LABEL.READING);
+            const advice = await adviseOnInquiry(bundle, {
+              inquiryId: resolved.inquiry.inquiryId, workItemId: resolved.inquiry.workItemId,
+              productId: resolved.inquiry.productId, title: resolved.inquiry.title, actionability: resolved.actionability,
+            });
+            artifacts.push(...advice.artifacts);
+            headline = headline ?? advice.headline;
+            extraChips.push(...advice.suggestedActions);
+            continue;
+          }
           // Actionability gate + propose→generate + capture question — the SAME single-inquiry step the
           // direct 「뭐라고 답하면 좋을까」 lane runs (§8/§13); extracted so there is exactly one.
           const plannedGap = answer.evidence.find((e) => e.kind === "ORG_POLICY_GAP" && e.locator.outcome === "ABSENT");
@@ -1088,26 +1109,36 @@ export class ConversationService {
     // the existing planner path resolves and verifies the hint (Contextual Agent Contract Completion v1).
     if (anchor && hints.workItemId && hints.workItemId !== anchor.workItemId) anchor = null;
 
-    // 「이 고객한테 뭐라고 답하면 좋을까?」 over the anchored inquiry — the product's own draft path, no planner.
-    if (anchor && prepareIntentOf(text)) {
+    // ── ANALYZE (Conversation Core v1): 「이 고객한테 뭐라고 답하면 좋을까?」 over the anchored inquiry
+    // is a request for ADVICE, never gated by actionability. A DRAFTABLE anchor gets the draft — the
+    // strongest advice — through the same step as before; any other state gets an advisory composed
+    // from the seller's own corpus (state fact + grounded direction), so the conversation continues.
+    if (anchor && analyzeIntentOf(text)) {
       const resolved = inquiryTargetFromHistory(view, anchor.inquiryId) ?? await this.verifiedTarget(anchor.workItemId, bundle);
       if (resolved && resolved.kind === "INQUIRY") {
-        const captureAllowed = !lastTurnSavedCapture(view);
-        const one = await this.prepareOneInquiry(resolved, null, bundle, stage, captureAllowed, null);
+        if (resolved.actionability === "DRAFTABLE") return this.directPrepare(view, resolved, bundle, stage);
+        const started = Date.now();
+        stage("READING", STAGE_LABEL.READING);
+        const advice = await adviseOnInquiry(bundle, {
+          inquiryId: resolved.inquiry.inquiryId, workItemId: resolved.inquiry.workItemId,
+          productId: resolved.inquiry.productId, title: resolved.inquiry.title, actionability: resolved.actionability,
+        });
         const workingSet = anchoredSet(resolved.inquiry, view.workingSet, [
           ...(view.workingSet?.productIds ?? []), ...(resolved.inquiry.productId ? [resolved.inquiry.productId] : []),
         ]);
-        log("conversation_direct_prepare", { actionability: resolved.actionability, captureOpened: one.pendingCapture != null });
         return {
-          status: "DONE", message: one.headline ?? "답변 초안을 준비했습니다.",
-          artifacts: one.artifacts,
-          suggestedActions: one.pendingPrepared ? [promptChip("조금 더 부드럽게 써줘"), promptChip("좋아 보내자")] : [],
-          workingSet, pendingHumanActions: [], pendingPrepared: one.pendingPrepared ?? view.pendingPrepared,
-          ...(one.pendingCapture !== undefined ? { pendingCapture: one.pendingCapture } : {}),
-          activeTask: one.pendingCapture ? "CAPTURE_KNOWLEDGE" : one.pendingPrepared ? "PREPARE_REPLY" : view.activeTask ?? null,
-          budget: { toolCalls: 1, llmCalls: one.pendingPrepared ? 1 : 0, elapsedMs: 0, stopReason: "DIRECT_PREPARE" },
+          status: "DONE", message: advice.headline, artifacts: advice.artifacts, suggestedActions: advice.suggestedActions,
+          workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: "INSPECT",
+          budget: { toolCalls: advice.toolCalls, llmCalls: 0, elapsedMs: Date.now() - started, stopReason: "ADVISORY" },
         };
       }
+    }
+
+    // 「답변 준비해줘」 over the anchored inquiry — the product's own draft path, no planner. The
+    // actionability gate applies HERE (an instruction to produce a draft), not to advisory questions.
+    if (anchor && prepareIntentOf(text)) {
+      const resolved = inquiryTargetFromHistory(view, anchor.inquiryId) ?? await this.verifiedTarget(anchor.workItemId, bundle);
+      if (resolved && resolved.kind === "INQUIRY") return this.directPrepare(view, resolved, bundle, stage);
     }
 
     // 「이 문의」 / 「이 고객」 / 「아까 그 문의」 — the anchored object, inspected. Zero planner, ≤1 read.
@@ -1143,6 +1174,18 @@ export class ConversationService {
       }
       log("conversation_selected", { objectKind: "INQUIRY", index, actionability: target.actionability });
       return this.inspect(view, target, bundle, index);
+    }
+
+    // ── FILTER (Conversation Core v1): 「배송 관련 문의만 봐줘」 · 「네이버 것만」 · 「답변 안 한 것만」 ·
+    // 「그중 최근 2개」 — a deterministic narrowing of the rows on screen. Zero model calls; bounded
+    // detail reads only for a topic the row's own title cannot answer (the same in-process comparison
+    // the workload filter makes). A sentence the closed grammar cannot fully consume is the planner's.
+    if (set?.kind === "INQUIRIES") {
+      const filter = visibleFilterOf(text);
+      if (filter) {
+        const filtered = await this.applyVisibleFilter(view, set, filter, bundle);
+        if (filtered) return filtered;
+      }
     }
 
     // Label selection over the visible rows: 「배송 문의 봐줘」 · 「종이컵 문의」 · 「네이버 배송 문의」.
@@ -1222,6 +1265,148 @@ export class ConversationService {
     } catch {
       return null;
     }
+  }
+
+  /** The direct PREPARE over one resolved inquiry — shared by the PREPARE and ANALYZE(DRAFTABLE) lanes. */
+  private async directPrepare(
+    view: ConversationView, resolved: Extract<ResolvedTarget, { kind: "INQUIRY" }>, bundle: SpringClientBundle,
+    stage: (s: ProgressStage, label: string) => void,
+  ): Promise<Composed> {
+    const started = Date.now();
+    const captureAllowed = !lastTurnSavedCapture(view);
+    const one = await this.prepareOneInquiry(resolved, null, bundle, stage, captureAllowed, null);
+    const workingSet = anchoredSet(resolved.inquiry, view.workingSet, [
+      ...(view.workingSet?.productIds ?? []), ...(resolved.inquiry.productId ? [resolved.inquiry.productId] : []),
+    ]);
+    log("conversation_direct_prepare", { actionability: resolved.actionability, captureOpened: one.pendingCapture != null });
+    return {
+      status: "DONE", message: one.headline ?? "답변 초안을 준비했습니다.",
+      artifacts: one.artifacts,
+      suggestedActions: one.pendingPrepared ? [promptChip("조금 더 부드럽게 써줘"), promptChip("좋아 보내자")] : [],
+      workingSet, pendingHumanActions: [], pendingPrepared: one.pendingPrepared ?? view.pendingPrepared,
+      ...(one.pendingCapture !== undefined ? { pendingCapture: one.pendingCapture } : {}),
+      activeTask: one.pendingCapture ? "CAPTURE_KNOWLEDGE" : one.pendingPrepared ? "PREPARE_REPLY" : view.activeTask ?? null,
+      budget: { toolCalls: 1, llmCalls: one.pendingPrepared ? 1 : 0, elapsedMs: Date.now() - started, stopReason: "DIRECT_PREPARE" },
+    };
+  }
+
+  /**
+   * FILTER (Conversation Core v1): narrow the VISIBLE inquiry rows by closed axes — channel · topic ·
+   * status · order · limit — with no planner and no org re-read. Topic matching reads the row's own
+   * persisted title/product name first; a row that cannot answer from its title spends one bounded
+   * detail READ (in-process comparison, never persisted — the same rule the workload filter follows).
+   * `null` ⇒ the sentence asks for more than the set can carry (a larger limit) and the planner decides.
+   */
+  private async applyVisibleFilter(
+    view: ConversationView, set: WorkingSetView, filter: VisibleFilter, bundle: SpringClientBundle,
+  ): Promise<Composed | null> {
+    const started = Date.now();
+    const rows = set.ids
+      .map((id) => inquiryFromHistory(view, id))
+      .filter((item): item is InquiryItem => item != null);
+    if (rows.length === 0) return null;
+    // Persistence bounds the rows a thread keeps; a set this lane cannot fully see is the planner's
+    // WORKING_SET re-read — filtering a fifth of the rows would be a silently wrong answer.
+    if (rows.length < set.ids.length) return null;
+    // A limit larger than the set cannot be a refine of it (scopeOverride's NEW_LIMIT, same rule here).
+    if (filter.limit != null && filter.limit > rows.length) return null;
+
+    let detailReads = 0;
+    const matched: InquiryItem[] = [];
+    for (const row of rows) {
+      if (filter.channel && (row.channelCode ?? "").toUpperCase() !== filter.channel) continue;
+      if (filter.status === "UNANSWERED" && row.status.toUpperCase() === "ANSWERED") continue;
+      if (filter.status === "ANSWERED" && row.status.toUpperCase() !== "ANSWERED") continue;
+      if (filter.topic) {
+        let hit = matchesTopic(filter.topic, [row.title, row.productName]);
+        if (!hit && row.workItemId && detailReads < FILTER_DETAIL_CAP) {
+          detailReads += 1;
+          try {
+            const detail = await bundle.inquiry.getInquiryDetail(row.workItemId);
+            hit = matchesTopic(filter.topic, [detail.title, detail.details]);
+          } catch {
+            hit = false;
+          }
+        }
+        if (!hit) continue;
+      }
+      matched.push(row);
+    }
+    if (filter.order) {
+      matched.sort((a, b) => filter.order === "OLDEST"
+        ? a.receivedAt.localeCompare(b.receivedAt)
+        : b.receivedAt.localeCompare(a.receivedAt));
+    }
+    const kept = filter.limit != null ? matched.slice(0, filter.limit) : matched;
+
+    const budget = { toolCalls: detailReads, llmCalls: 0, elapsedMs: Date.now() - started, stopReason: "VISIBLE_FILTER" };
+    const desc = filterWords(filter);
+    const orderWord = filter.order === "OLDEST" ? "가장 오래된" : "가장 최근";
+    log("conversation_visible_filter", {
+      axes: [filter.channel && "channel", filter.topic && "topic", filter.status && "status", filter.limit != null && "limit", filter.order && "order"].filter(Boolean).join(","),
+      of: rows.length, matched: kept.length, detailReads,
+    });
+    if (kept.length === 0) {
+      // R2: a filter that left nothing keeps the previous set as the anchor — 「없습니다」 is the answer.
+      return {
+        status: "DONE", message: `방금 본 문의 ${rows.length}건 중 ${desc}문의는 없습니다.`,
+        artifacts: [], suggestedActions: [promptChip("답변 안 한 문의만 보여줘")],
+        workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, budget,
+      };
+    }
+    const message = desc.length === 0 && filter.limit != null
+      ? `방금 본 문의 ${rows.length}건 중 ${orderWord} ${kept.length}건입니다.`
+      : filter.limit != null && matched.length > kept.length
+        ? `방금 본 문의 ${rows.length}건 중 ${desc}문의는 ${matched.length}건이고, 그중 ${orderWord} ${kept.length}건입니다.`
+        : `방금 본 문의 ${rows.length}건 중 ${desc}문의는 ${kept.length}건입니다.`;
+
+    // Consecutive runs of the same answered state become one group each — the rows step's own rule.
+    const groups: Array<{ key: "UNANSWERED" | "ANSWERED"; label: string; items: InquiryItem[] }> = [];
+    for (const row of kept) {
+      const key = row.status.toUpperCase() === "ANSWERED" ? "ANSWERED" as const : "UNANSWERED" as const;
+      const last = groups.at(-1);
+      if (last && last.key === key) last.items.push(row);
+      else groups.push({ key, label: key === "UNANSWERED" ? "답변 필요" : "답변함", items: [row] });
+    }
+    const title = desc.length === 0 && filter.limit != null
+      ? `방금 본 문의 중 ${orderWord} ${kept.length}건`
+      : `방금 본 문의 중 ${desc}문의${filter.limit != null && matched.length > kept.length ? ` · ${orderWord} ${kept.length}건` : ""}`;
+    const artifact: InquiryListArtifact = {
+      artifactId: `a-filter-${randomUUID()}`, type: "INQUIRY_LIST", title, groups, totalCount: kept.length,
+      scope: {
+        period: set.filters.period ?? null,
+        channelCode: filter.channel ?? set.filters.channelCode ?? null,
+        status: filter.status ?? set.filters.status ?? "ALL",
+        order: filter.order ?? set.filters.order ?? "NEWEST",
+        limit: filter.limit,
+      },
+      more: { label: "문의 화면에서 보기", to: "/inquiries", count: kept.length },
+    };
+    const workingSet: WorkingSetView = {
+      kind: "INQUIRIES", label: title, count: kept.length,
+      ids: kept.map((i) => i.inquiryId).slice(0, WORKING_SET_MAX_IDS),
+      filters: {
+        ...(set.filters.period ? { period: set.filters.period } : {}),
+        channelCode: filter.channel ?? set.filters.channelCode ?? null,
+        ...(filter.status ? { status: filter.status } : set.filters.status ? { status: set.filters.status } : {}),
+        order: filter.order ?? set.filters.order ?? "NEWEST",
+        ...(filter.topic ? { topic: filter.topic } : set.filters.topic ? { topic: set.filters.topic } : {}),
+        inquiryIntent: set.filters.inquiryIntent ?? "ROWS",
+      },
+      productIds: [...new Set(kept.map((i) => i.productId).filter((p): p is string => p != null))].slice(0, WORKING_SET_MAX_IDS),
+      workItemIds: kept.map((i) => i.workItemId).filter((w): w is string => w != null).slice(0, WORKING_SET_MAX_IDS),
+      turnId: "",
+    };
+    return {
+      status: "DONE",
+      message,
+      artifacts: [artifact],
+      suggestedActions: [
+        promptChip("첫 번째 거 답변 준비해줘"),
+        ...(filter.status !== "UNANSWERED" ? [promptChip("답변 안 한 것만 보여줘")] : []),
+      ],
+      workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: null, budget,
+    };
   }
 
   /**
@@ -1756,6 +1941,13 @@ export function priorLineOf(view: ConversationView): string | null {
   if (set) {
     parts.push(`직전 작업 집합: ${set.kind} (기간:${set.filters.period?.token ?? "없음"}, 채널:${set.filters.channelCode ?? "전체"}, `
       + `평점:${set.filters.rating ?? "ALL"}, 상태:${set.filters.status ?? "없음"}, 상품 특정:${set.productIds.length > 0 ? "예" : "아니오"})`);
+    // New-list Scope Integrity (Conversation Core v1 §9): the set's axes DESCRIBE what is on screen —
+    // they are not defaults for the next sentence. A fixed instruction, like `contextLine`'s: closed
+    // vocabulary about run state, no data. The deterministic backstop is `scopeOverride`'s axis strip.
+    parts.push("집합 규칙: 위 괄호의 값은 지금 화면에 있는 집합의 설명이지 이번 문장의 조건이 아닙니다. "
+      + "그 집합을 좁히는 문장(「그중」·「여기서」·「~만」)에서만 filters.scope=\"WORKING_SET\"으로 두고 새 조건만 더하세요. "
+      + "새 목록을 요청하는 문장(「최근 문의 N개 보여줘」·「오늘 문의 보여줘」)은 filters.scope=\"ORG\"이고, "
+      + "filters의 채널·상태·기간·주제는 이번 문장에 적힌 것만 적으세요 — 위 괄호의 값을 복사하지 마세요.");
   }
   if (set?.kind === "INQUIRIES" && set.selectedInquiry) {
     parts.push("직전 선택: INQUIRY (판매자가 방금 문의 하나를 골랐습니다 — 「이 문의」·「답변 준비해줘」는 그 문의를 가리킵니다)");
@@ -1876,6 +2068,16 @@ function promptChip(label: string): SuggestedAction {
   return { label, kind: "PROMPT", prompt: label };
 }
 
+/** The seller's words for a visible filter's predicate axes (channel · topic · status), trailing space. */
+const FILTER_CHANNEL_WORD: Record<string, string> = { NAVER: "네이버", COUPANG: "쿠팡", CAFE24: "카페24" };
+function filterWords(filter: VisibleFilter): string {
+  const parts: string[] = [];
+  if (filter.channel) parts.push(FILTER_CHANNEL_WORD[filter.channel] ?? filter.channel);
+  if (filter.topic) parts.push(TOPIC_LABEL[filter.topic]);
+  if (filter.status) parts.push(filter.status === "UNANSWERED" ? "답변 안 한" : "답변한");
+  return parts.length > 0 ? `${parts.join(" ")} ` : "";
+}
+
 /** The working set the primary artifact leaves behind — ids and closed filters, bounded. */
 function workingSetOf(
   artifacts: readonly Artifact[], axis: ReturnType<typeof conversationAxisOf>, view: ConversationView,
@@ -1907,7 +2109,7 @@ function workingSetOf(
         kind: "INQUIRIES", label: primary.title, count: primary.totalCount,
         ids: bounded(rows ? items.map((i) => i.inquiryId) : workItemIds),
         filters: {
-          ...(axis.filters.topic ? { topic: axis.filters.topic } : {}),
+          ...(primary.scope?.topic ?? axis.filters.topic ? { topic: primary.scope?.topic ?? axis.filters.topic } : {}),
           ...(primary.scope ? {
             period: primary.scope.period, channelCode: primary.scope.channelCode, status: primary.scope.status,
             order: primary.scope.order,

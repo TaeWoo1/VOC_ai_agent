@@ -145,40 +145,45 @@ describe("Query Accuracy v1 — Planner QuerySpec → tool args → result", () 
     expect(turn.message).not.toContain("답변 대기열");
   });
 
-  it("refine chain: 최근 5개 → 그중 네이버만 → 그중 최근 1개 → 답변 안 한 것만 — each stands on the previous set", async () => {
+  it("refine chain: 최근 5개 → 그중 네이버만 → 그중 최근 1개 → 답변 안 한 것만 — deterministic over the visible set, plan 0, re-read 0 (Conversation Core v1)", async () => {
     const { h, id } = await fresh();
     const first = await say(h, id, "최근 문의 5개 보여줘");
     expect(ids(first.turn)).toEqual(["i-n3", "i-c1", "i-n2", "i-n1", "i-c2"]);
+    const reads = h.inquiry.rowsParams.length;
+    const plans = h.operator.calls.plan;
 
     const naver = await say(h, id, "그중 네이버만");
-    expect(h.inquiry.rowsParams.at(-1)).toEqual({ channel: "NAVER", status: "ALL", order: "NEWEST", limit: 50 });
+    expect(h.inquiry.rowsParams).toHaveLength(reads); // the rows on screen ARE the input — no re-read
+    expect(h.operator.calls.plan).toBe(plans); // and no planner call
     expect(ids(naver.turn)).toEqual(["i-n3", "i-n2", "i-n1"]);
-    expect(naver.turn.message).toContain("방금 본 문의 중");
-    expect(h.operator.planPriorContexts.at(-1)).toContain("직전 작업 집합: INQUIRIES");
-    expect(naver.turn.continuation.workingSet?.filters).toMatchObject({ channelCode: "NAVER", status: "ALL", inquiryIntent: "ROWS" });
+    expect(naver.turn.message).toContain("방금 본 문의");
+    expect(naver.turn.budget?.llmCalls).toBe(0);
+    expect(naver.turn.continuation.workingSet?.filters).toMatchObject({ channelCode: "NAVER", inquiryIntent: "ROWS" });
 
     const one = await say(h, id, "그중 최근 1개");
-    expect(h.inquiry.rowsParams.at(-1)).toEqual({ channel: "NAVER", status: "ALL", order: "NEWEST", limit: 50 });
+    expect(h.inquiry.rowsParams).toHaveLength(reads);
+    expect(h.operator.calls.plan).toBe(plans);
     expect(ids(one.turn)).toEqual(["i-n3"]);
 
     // 「답변 안 한 것만」 over a set whose one row is answered: an honest 0, and the anchor stays.
     const open = await say(h, id, "답변 안 한 것만");
-    expect(h.inquiry.rowsParams.at(-1)).toEqual({ channel: "NAVER", status: "UNANSWERED", order: "NEWEST", limit: 50 });
-    expect(ids(open.turn)).toEqual([]);
+    expect(h.operator.calls.plan).toBe(plans);
+    expect(open.turn.artifacts.filter((a) => a.type === "INQUIRY_LIST")).toHaveLength(0);
     expect(open.turn.message).toContain("없습니다");
     expect(open.turn.continuation.workingSet?.ids).toEqual(["i-n3"]);
   });
 
-  it("refine that flips the order: 최근 3개 → 그중 가장 오래된 1개 — the base set is re-read in ITS order, then re-sorted (live regression 08-29)", async () => {
+  it("refine that flips the order: 최근 3개 → 그중 가장 오래된 1개 — deterministic re-sort of the set on screen, re-read 0", async () => {
     const { h, id } = await fresh();
     const three = await say(h, id, "최근 문의 3개 보여줘");
     expect(ids(three.turn)).toEqual(["i-n3", "i-c1", "i-n2"]);
     expect(three.turn.continuation.workingSet?.filters).toMatchObject({ order: "NEWEST" });
+    const reads = h.inquiry.rowsParams.length;
     const oldest = await say(h, id, "그중 가장 오래된 1개");
-    // The re-read reproduces the base set (NEWEST page), never the oldest page of the whole org.
-    expect(h.inquiry.rowsParams.at(-1)).toEqual({ status: "ALL", order: "NEWEST", limit: 50 });
+    // The rows on screen are re-sorted by their own receipt dates — never the oldest page of the org.
+    expect(h.inquiry.rowsParams).toHaveLength(reads);
     expect(ids(oldest.turn)).toEqual(["i-n2"]);
-    expect(oldest.turn.message).toContain("방금 본 문의 중");
+    expect(oldest.turn.message).toContain("방금 본 문의");
   });
 
   it("prose and rows are one execution: a zero count cannot stand next to returned rows (live 08-30 shape)", async () => {

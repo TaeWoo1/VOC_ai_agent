@@ -154,14 +154,16 @@ export function pronounInspectOf(text: string): boolean {
 }
 
 /**
- * 「뭐라고 답하면 좋을까」 / 「답변 준비해줘」 said while ONE inquiry is the anchor — a request to prepare
- * THAT inquiry's reply through the product's own draft path, with no planner (Agent Interaction Model
- * v2 §13: a deterministic operation over the selected object spends no plan). Closed cues; a sentence
- * that also draws a list (「답변 안 한 문의만 보여줘」) or names a different object is the planner's.
+ * 「답변 준비해줘」 / 「초안 만들어줘」 said while ONE inquiry is the anchor — an INSTRUCTION to produce
+ * the draft through the product's own draft path, with no planner (Agent Interaction Model v2 §13).
+ * Closed cues; a sentence that also draws a list (「답변 안 한 문의만 보여줘」) or names a different
+ * object is the planner's.
+ *
+ * <b>Advisory questions are NOT here.</b> 「뭐라고 답하면 좋을까」 / 「어떻게 답하지」 ask for advice
+ * about the object and belong to the ANALYZE lane (`taskInterpreter.analyzeIntentOf`) — only the
+ * imperative families below are subject to the actionability gate (Conversation Core v1).
  */
 const PREPARE_CUES = [
-  /뭐라고\s?(답|답변|답장|말|보내|하)/u,
-  /어떻게\s?답/u,
   /답변\s?(준비|작성|만들|달아|써)/u,
   /답\s?(해\s?줘|해줘|을\s?준비)/u,
   /초안\s?(준비|만들|작성|써)/u,

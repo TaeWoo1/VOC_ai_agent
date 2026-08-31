@@ -685,6 +685,32 @@ LLM 0, 클릭→「이 고객」 정확 대상, capture 저장→GROUNDED cited,
 0 · WRITE 0 · 마이그레이션 0** ⇒ evidence 행 없음. 정직 보고: cleanup 중 `agent-runtime/.runstore/` 전체 삭제는
 과했음(로컬 dev 대화 파일; DB·채널 무관), planner org allowlist는 파일럿 운영 결정, visibleSelection v1은 INQUIRIES만.)
 
+**`docs/conversation_core_chat_ux_v1.md`** (Conversation Core + Chat UX v1 — 2026-08-31. PO QA의 대화
+결함 다섯을 root cause에서 닫음. **ConversationTask 계약**(mode ANSWER·LIST·FILTER·INSPECT·ANALYZE·
+PREPARE·REVISE·EXECUTE × scope ORG·VISIBLE_SET·SELECTED_ENTITY, `taskInterpreter.ts`) — 결정론으로
+읽는 것은 테이블 위 객체에 대한 FILTER·ANALYZE·INSPECT·PREPARE·REVISE뿐이고 나머지는 그대로 LLM
+planner다(결정론 goal planner는 이번에도 0). **FILTER**: 「배송 관련 문의만 봐줘」가 같은 5건을
+반복하던 원인 둘 — ROWS 실행기에 topic 축이 없었고(플래너는 이미 닫힌 토큰을 내고 있었다) 결정론
+filter lane 자체가 없었다 — 를 `applyVisibleFilter`(visible set 위 channel·topic·status·order·limit,
+제목 우선 + bounded detail READ ≤8로 본문, **11~15ms · LLM 0**)와 `InquiryRowsSpec.topic`으로 닫음;
+집합보다 큰 limit·행을 다 못 든 집합은 플래너로. **ANALYZE**: 「뭐라고 답하면 좋을까」는 조언 요청이라
+actionability gate의 지배를 받지 않는다 — DRAFTABLE anchor는 기존 draft step(가장 강한 조언은
+초안), 그 외는 `advisory.ts`가 상태를 사실로 말하고 판매자 corpus 세 retrieval seam의 bounded
+excerpt로 답변 방향을 정리한다(모델 0·쓰기 0); gate는 명령형 PREPARE(「새 답변 준비해줘」)에만 남는다.
+UI: SUMMARY 카드 해제(평범한 대답은 산문), **legacy `/agent`의 중복 대화 embed·free-text 폼 제거**
+(「정해진 작업」= 닫힌 intent button lane + checkpoint만 남음, panel 「전체 화면」→`/`). **§9 New-list
+Scope Integrity**: 「최근 문의 7개 보여줘」가 anchored 스레드에서 직전 집합의 채널/상태를 물려받아
+「네이버 답변 안 한 최근 7건」이 되던 context contamination을 결정론으로 닫음 — 명시적 새 LIST는 ORG
+scope이고 계승은 refine 표현(「그중·여기서·방금 본·~만」)만 한다: voided refine(NEW_LIMIT·NEW_PERIOD)은
+**직전 집합 값과 같은 filter 축을 base로 보고 떨어뜨리며**(`scopeOverride` — 닫힌 토큰 동등성, 문장
+읽기 0; EMPTY_SET은 유지), `priorLineOf`가 집합 축은 화면 설명이지 조건이 아니라고 고정 지시문으로
+말하고(backend 프롬프트 무변경), `visibleFilterOf`는 refine 표현 없는 문장을 받지 않는다(「7개만」의
+만은 개수라 limit 소비 후 marker 판독). selected entity는 감사 결과 구조적으로 이미 목록 read에 닿지
+않았다. 라이브 브라우저 acceptance 8종 + §9 두 chain 전부 통과(disposable org, 결정론 lane 전부 LLM 0),
+runtime 737·frontend 2,575 green. **backend 0 · 마이그레이션 0 · marketplace 호출 0 · WRITE 0**. 정직
+보고: FILTER v1은 INQUIRIES만, grounded advisory 인용은 라이브 미관측(unit test로 고정),
+fast-interpretation 모델은 만들지 않음 — 필요가 관측되면 product-owner 결정.)
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

@@ -19,6 +19,7 @@ vi.mock("../lib/auth", () => ({
 }));
 
 import { Agent } from "./Agent";
+import { OperatorAnswerView } from "../components/agent/OperatorAnswerView";
 import { renderWithRouter, screen, waitFor } from "../test/renderWithRouter";
 import userEvent from "@testing-library/user-event";
 import { api } from "../lib/apiClient";
@@ -86,13 +87,10 @@ function run(a: OperatorAnswer): AgentRunView {
   return { threadId: "t-1", domain: "OPERATOR", status: "DONE", trail: ["planned"], answer: a };
 }
 
+// Conversation Core v1: free language belongs to the home conversation; this page carries no
+// free-text entry any more. The answer-rendering contract is the COMPONENT's, tested directly.
 async function ask(view: AgentRunView) {
-  agentMock.startRun.mockResolvedValue(view);
-  renderWithRouter(<Agent />);
-  await screen.findByRole("heading", { level: 1 });
-  await userEvent.type(screen.getByRole("textbox"), "오늘 뭐부터 봐야 해?");
-  await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
-  // The card's own heading — "운영 판단" also appears as the run's domain label above it.
+  renderWithRouter(<OperatorAnswerView answer={view.answer!} />);
   await waitFor(() =>
     expect(screen.getByRole("heading", { level: 3, name: "운영 판단" })).toBeInTheDocument(),
   );
@@ -248,58 +246,22 @@ describe("운영 판단 — the Operator answer", () => {
 });
 
 /**
- * The two lanes, on screen.
- *
- * <b>Invariant I2's user-visible half.</b> When free-text planning is unavailable the input must stop
- * inviting sentences that cannot be answered — and the Dashboard shortcuts must keep working, because
- * they never needed a plan. A screen that disabled both would be reporting a capability outage as a
- * product outage.
+ * The button lane, on screen (invariant I2's user-visible half): a shortcut names its intent the way
+ * a menu item does — it never types a sentence, so it keeps working when free-text planning is off.
+ * (The free-text half of the old two-lane test left with the legacy lane — Conversation Core v1.)
  */
-describe("planner unavailable — the Agent lane stops, the Dashboard lane does not", () => {
-  const FAILED: AgentRunView = {
-    threadId: "t-fail",
-    domain: "OPERATOR",
-    status: "FAILED",
-    trail: ["plan_unavailable"],
-    failureCode: "PLANNER_CAPABILITY_OFF",
-    failureReason:
-      "AI 계획 기능이 꺼져 있어 지금은 대화형 요청을 처리할 수 없습니다. 홈·문의·리뷰·리포트 화면은 평소대로 사용할 수 있습니다.",
-  };
-
-  async function askAndFail() {
-    agentMock.startRun.mockResolvedValue(FAILED);
+describe("the Dashboard shortcuts send an intent, not a sentence", () => {
+  it("a shortcut press starts a run with the closed intent and no goalText", async () => {
+    agentMock.startRun.mockResolvedValue({
+      threadId: "t-int", domain: "INQUIRY", status: "DONE", trail: ["searched"],
+    } as AgentRunView);
     renderWithRouter(<Agent />);
-    await screen.findByRole("heading", { level: 1 });
-    await userEvent.type(screen.getByRole("textbox"), "오늘 뭐부터 봐야 해?");
-    await userEvent.click(screen.getByRole("button", { name: "물어보기" }));
-    await waitFor(() => expect(screen.getByText("처리하지 못함")).toBeInTheDocument());
-  }
-
-  it("renders the reason instead of an empty answer", async () => {
-    await askAndFail();
-    expect(screen.getByText(/AI 계획 기능이 꺼져 있어/)).toBeInTheDocument();
-    // The one thing it must not look like: a clean answer with nothing in it.
-    expect(screen.queryByRole("heading", { level: 3, name: "운영 판단" })).toBeNull();
-    expect(screen.queryByText("말씀드릴 만한 것을 찾지 못했습니다.")).toBeNull();
-  });
-
-  it("disables the free-text input rather than inviting another guaranteed failure", async () => {
-    await askAndFail();
-    expect(screen.getByRole("textbox")).toBeDisabled();
-    // The disabled input explains itself in ONE place; the run's own reason lives on the run card.
-    expect(screen.getByText(/지금은 문장으로 요청할 수 없습니다/)).toBeInTheDocument();
-  });
-
-  it("the Dashboard shortcuts remain enabled and send an intent, not a sentence", async () => {
-    await askAndFail();
-    const shortcut = screen.getByRole("button", { name: "미답변 문의 처리" });
+    const shortcut = await screen.findByRole("button", { name: "미답변 문의 처리" });
     expect(shortcut).toBeEnabled();
 
-    agentMock.startRun.mockClear();
     await userEvent.click(shortcut);
     await waitFor(() => expect(agentMock.startRun).toHaveBeenCalled());
     const sent = agentMock.startRun.mock.calls[0]![0] as Record<string, unknown>;
-    // A chip that typed the words would go through the planner and fail like everything else.
     expect(sent.intent).toBe("HANDLE_UNANSWERED_INQUIRIES");
     expect(sent.goalText).toBeUndefined();
   });

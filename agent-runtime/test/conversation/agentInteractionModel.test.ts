@@ -26,6 +26,7 @@ import { ConversationService } from "../../src/conversation/ConversationService"
 import { RunStoreProvider } from "../../src/http/runStoreProvider";
 import type { SpringClientFactory } from "../../src/http/AgentRunService";
 import { prepareIntentOf, pronounInspectOf, visibleSelectionOf } from "../../src/conversation/visibleSelection";
+import { analyzeIntentOf, visibleFilterOf } from "../../src/conversation/taskInterpreter";
 import { HttpError } from "../../src/http/errors";
 import { MOLDING } from "../support/operatorFixtures";
 
@@ -93,16 +94,46 @@ describe("visibleSelectionOf — deterministic, conservative, closed classes", (
     expect(visibleSelectionOf("문의 봐줘", ROWS)).toEqual({ kind: "NONE" });
     expect(visibleSelectionOf("배송 문의가 몇 건이야?", ROWS)).toEqual({ kind: "NONE" });
   });
-  it("pronoun and prepare intents are their own closed readers", () => {
+  it("pronoun, prepare and analyze intents are their own closed readers (Conversation Core v1)", () => {
     expect(pronounInspectOf("이 문의")).toBe(true);
     expect(pronounInspectOf("이 문의 자세히")).toBe(true);
     expect(pronounInspectOf("아까 그 문의 봐줘")).toBe(true);
     expect(pronounInspectOf("이 고객한테 뭐라고 답하면 좋을까?")).toBe(false);
-    expect(prepareIntentOf("이 고객한테 뭐라고 답하면 좋을까?")).toBe(true);
-    expect(prepareIntentOf("뭐라고 답하지")).toBe(true);
+    // Advisory questions are ANALYZE, never PREPARE — the actionability gate applies only to the
+    // imperative families (PO QA 2026-08-31, failure 2).
+    expect(analyzeIntentOf("이 고객한테 뭐라고 답하면 좋을까?")).toBe(true);
+    expect(analyzeIntentOf("뭐라고 답하지")).toBe(true);
+    expect(analyzeIntentOf("어떻게 대응하면 좋을까")).toBe(true);
+    expect(analyzeIntentOf("답변 준비해줘")).toBe(false);
+    expect(prepareIntentOf("이 고객한테 뭐라고 답하면 좋을까?")).toBe(false);
     expect(prepareIntentOf("답변 준비해줘")).toBe(true);
+    expect(prepareIntentOf("새 답변 준비해줘")).toBe(true);
     expect(prepareIntentOf("첫 번째 거 답변 준비해줘")).toBe(false); // names another object — the planner's
     expect(prepareIntentOf("답변 안 한 문의만 보여줘")).toBe(false);
+  });
+
+  it("visibleFilterOf — a narrowing needs refine wording (~만·그중·중에서·여기서·방금 본); selections stay selections", () => {
+    expect(visibleFilterOf("배송 관련 문의만 봐줘")).toMatchObject({ topic: "SHIPPING" });
+    expect(visibleFilterOf("네이버 것만")).toMatchObject({ channel: "NAVER" });
+    expect(visibleFilterOf("답변 안 한 것만")).toMatchObject({ status: "UNANSWERED" });
+    expect(visibleFilterOf("여기서 답변 안 한 것만")).toMatchObject({ status: "UNANSWERED" });
+    expect(visibleFilterOf("그중 최근 2개")).toMatchObject({ order: "NEWEST", limit: 2 });
+    expect(visibleFilterOf("방금 본 것 중에서 최근 2개")).toMatchObject({ order: "NEWEST", limit: 2 });
+    expect(visibleFilterOf("그중 가장 오래된 1개")).toMatchObject({ order: "OLDEST", limit: 1 });
+    expect(visibleFilterOf("네이버 배송 관련 답변 안 한 것만")).toMatchObject({ channel: "NAVER", topic: "SHIPPING", status: "UNANSWERED" });
+    // A bare label + viewing verb is the SELECTION lane's (§2), not a filter.
+    expect(visibleFilterOf("배송 문의 봐줘")).toBeNull();
+    // An explicit NEW-LIST request is a fresh ORG question, never a refine of the rows on screen —
+    // even when its axes (limit·order·status) are ones this grammar could read. The 만 of a count
+    // (「7개만」) is not refine wording; only 「~만」 on a named thing is (New-list Scope Integrity).
+    expect(visibleFilterOf("최근 문의 7개 보여줘")).toBeNull();
+    expect(visibleFilterOf("최근 문의 7개만 보여줘")).toBeNull();
+    expect(visibleFilterOf("최근 2개 보여줘")).toBeNull();
+    expect(visibleFilterOf("답변 안 한 문의 보여줘")).toBeNull();
+    // A leftover content token means the sentence says more than the closed tables can read.
+    expect(visibleFilterOf("종이컵 문의만 보여줘")).toBeNull();
+    expect(visibleFilterOf("배송 관련 문의 정리해줘")).toBeNull();
+    expect(visibleFilterOf("답변 준비해줘")).toBeNull();
   });
 });
 

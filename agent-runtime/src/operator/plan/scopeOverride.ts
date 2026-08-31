@@ -8,7 +8,7 @@
  * follow-up answered 「방금 본 0건 중 0건」 instead of the 23 rows the week held). Both are closed
  * tokens on the plan and the set; the override is logged with its reason.
  */
-import type { InvestigationPlan } from "./InvestigationPlan";
+import type { InvestigationPlan, PlanFilters } from "./InvestigationPlan";
 import { conversationAxisOf } from "./InvestigationPlan";
 import type { WorkingSetView } from "../../conversation/contract";
 import { log } from "../../log";
@@ -34,6 +34,33 @@ export function scopeOverrideOf(
   return null;
 }
 
+/**
+ * NEW_LIST semantics (Conversation Core v1 §9, PO QA 2026-08-31): a voided refine takes its BASE with it.
+ *
+ * The planner marked the turn a follow-up over the previous set, so its filter axes are that set's own
+ * axes (the base it believed it was narrowing) plus whatever the sentence added. When NEW_PERIOD or
+ * NEW_LIMIT proves the turn a NEW question of the org, the base must not survive into the fresh read:
+ * every axis whose value EQUALS the set's is inherited, not asked for, and is dropped — an axis the
+ * sentence actually named either differs from the base or was never on it. Live 2026-08-31: an anchored
+ * NAVER/UNANSWERED set turned 「최근 문의 7개 보여줘」 into 「네이버 답변 안 한 가장 최근 7건」 —
+ * NEW_LIMIT flipped the scope to ORG but the inherited channel and status rode into the org read.
+ *
+ * EMPTY_SET keeps the axes: there the sentence IS a refine (the planner read narrowing words) and the
+ * inherited frame — 「오늘」, a channel — is the seller's own earlier question, not contamination; only
+ * the empty set cannot carry it. Closed-token equality; no sentence is read.
+ */
+function inheritedAxesDropped(filters: PlanFilters, set: WorkingSetView): PlanFilters {
+  const base = set.filters;
+  return {
+    ...filters,
+    period: filters.period != null && filters.period === (base.period?.token ?? null) ? null : filters.period,
+    channel: filters.channel != null && filters.channel === (base.channelCode ?? "").toUpperCase() ? null : filters.channel,
+    status: filters.status != null && filters.status === (base.status ?? null) ? null : filters.status,
+    topic: filters.topic != null && filters.topic === (base.topic ?? null) ? null : filters.topic,
+    rating: filters.rating != null && filters.rating === (base.rating ?? null) ? null : filters.rating,
+  };
+}
+
 /** The plan's conversation axis with the override applied. Logs once when asked to. */
 export function effectiveAxisOf(
   plan: InvestigationPlan, workingSet: WorkingSetView | null, emitLog = false,
@@ -42,5 +69,8 @@ export function effectiveAxisOf(
   const reason = scopeOverrideOf(plan, workingSet);
   if (!reason) return axis;
   if (emitLog) log("operator_scope_override", { from: "WORKING_SET", to: "ORG", reason });
-  return { ...axis, filters: { ...axis.filters, scope: "ORG" } };
+  const filters = (reason === "NEW_LIMIT" || reason === "NEW_PERIOD") && workingSet
+    ? inheritedAxesDropped(axis.filters, workingSet)
+    : axis.filters;
+  return { ...axis, filters: { ...filters, scope: "ORG" } };
 }
