@@ -129,13 +129,18 @@ describe("A — 「최근 문의 3개」 → 「첫 번째 거」 resolves the i
 
     const { turn, stages } = await say(h, id, "첫 번째 거");
     expect(turn.status).toBe("DONE");
-    expect(turn.message).toBe("1번째 문의를 골랐습니다. 이미 답변된 문의입니다.");
-    expect(artifact(turn, "SUMMARY").lines[0]).toContain("네이버 오늘 저녁");
+    // Agent Interaction Model v2 §4: an ordinal is an INSPECT — the row itself, as one compact object.
+    expect(turn.message).toBe("1번째 문의입니다. 이미 답변된 문의입니다.");
+    const detail = artifact(turn, "INQUIRY_DETAIL");
+    expect(detail.title).toContain("네이버 오늘 저녁");
+    expect(detail.actionability).toBe("ALREADY_ANSWERED");
     // The list stays the set (an ordinal after this still counts on the same rows); the selection rides beside it.
     expect(turn.continuation.workingSet).toMatchObject({
       kind: "INQUIRIES", ids: ["i-done", "i-c1", "i-n2"], selectedInquiry: { inquiryId: "i-done", workItemId: null },
     });
+    expect(turn.continuation.activeTask).toBe("INSPECT");
     expect(h.operator.calls.plan).toBe(plans);
+    // No work item on the row ⇒ nothing to read: the inspect card is composed from the shown row alone.
     expect(h.inquiry.calls.rows + h.inquiry.calls.list + h.inquiry.calls.detail).toBe(reads);
     expect(stages).toEqual(["UNDERSTANDING"]);
   });
@@ -143,19 +148,20 @@ describe("A — 「최근 문의 3개」 → 「첫 번째 거」 resolves the i
   it("「두 번째 거」 → the open Cafe24 row, with its product beside the anchor and draft chips offered", async () => {
     const { h, id } = await fresh();
     await say(h, id, "최근 문의 3개 보여줘");
+    const plans = h.operator.calls.plan;
     const { turn } = await say(h, id, "두 번째 거");
-    expect(turn.message).toContain("2번째 문의를 골랐습니다.");
+    expect(turn.message).toContain("2번째 문의입니다.");
+    expect(artifact(turn, "INQUIRY_DETAIL")).toMatchObject({ inquiryId: "i-c1", actionability: "DRAFTABLE" });
     expect(turn.continuation.workingSet).toMatchObject({
       ids: ["i-done", "i-c1", "i-n2"], productIds: [MOLDING.id],
       selectedInquiry: { inquiryId: "i-c1", workItemId: "w-c1", productId: MOLDING.id, channelCode: "CAFE24" },
     });
     expect(turn.suggestedActions.map((s) => s.label)).toEqual(expect.arrayContaining(["답변 준비해줘", "이 상품 기준으로 답변 준비해줘"]));
-    // The planner hears the selection as a closed token on the next sentence — never an id or a title.
-    await say(h, id, "답변 준비해줘");
-    const prior = h.operator.planPriorContexts.at(-1) ?? "";
-    expect(prior).toContain("직전 선택: INQUIRY");
-    expect(prior).not.toContain("i-c1");
-    expect(prior).not.toContain("카페24 오늘");
+    // Agent Interaction Model v2 §13: with an anchored inquiry, 「답변 준비해줘」 is the product's own
+    // draft path directly — the planner is not called, and the draft is for the anchor.
+    const { turn: prepared } = await say(h, id, "답변 준비해줘");
+    expect(h.operator.calls.plan).toBe(plans);
+    expect(artifact(prepared, "DRAFT")).toMatchObject({ workItemId: "w-c1", inquiryId: "i-c1" });
   });
 
   it("an ordinal AFTER a selection still counts on the list the seller saw", async () => {
@@ -163,7 +169,7 @@ describe("A — 「최근 문의 3개」 → 「첫 번째 거」 resolves the i
     await say(h, id, "최근 문의 3개 보여줘");
     await say(h, id, "첫 번째 거");
     const { turn } = await say(h, id, "세 번째 거");
-    expect(turn.message).toContain("3번째 문의를 골랐습니다.");
+    expect(turn.message).toContain("3번째 문의입니다.");
     expect(turn.continuation.workingSet?.selectedInquiry?.inquiryId).toBe("i-n2");
     expect(turn.continuation.workingSet?.ids).toEqual(["i-done", "i-c1", "i-n2"]);
   });
@@ -265,14 +271,16 @@ describe("D/E/F — one inquiry through draft → product context → tone, the 
 
   it("E — 「이 상품 기준으로 답변 준비해줘」 keeps the inquiry and carries the product beside it", async () => {
     const { h, id } = await drafted();
+    const plans = h.operator.calls.plan;
     const { turn } = await say(h, id, "이 상품 기준으로 답변 준비해줘");
     expect(artifact(turn, "DRAFT")).toMatchObject({ workItemId: "w-c1", inquiryId: "i-c1", version: 2 });
     expect(turn.continuation.workingSet).toMatchObject({
       kind: "INQUIRIES", productIds: [MOLDING.id], selectedInquiry: { inquiryId: "i-c1", productId: MOLDING.id },
     });
     expect(h.inquiry.calls.propose).toBe(1);
-    // The anchored inquiry's product travelled as the verified hint — the planner did not have to resolve 「이 상품」 by name.
-    expect(h.operator.planPriorContexts.at(-1) ?? "").toContain("상품 특정:예");
+    // Agent Interaction Model v2 §13: an anchored PREPARE spends no plan — the inquiry's own product
+    // binding scopes the draft, and 「이 상품」 needs no resolver because the anchor already names it.
+    expect(h.operator.calls.plan).toBe(plans);
   });
 
   it("F — 「조금 더 부드럽게」 is a tone revision only: planner 0, list/workload/detail reads 0, same inquiry, same facts, new version", async () => {

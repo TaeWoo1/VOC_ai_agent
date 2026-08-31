@@ -89,7 +89,9 @@ afterEach(() => vi.clearAllMocks());
 describe("greeting — arithmetic, never a model", () => {
   it("is the hour plus the count of what was prepared; zero gets its own sentence", () => {
     expect(greetingLine(9, 2)).toBe("좋은 아침입니다. 오늘 제가 먼저 확인한 일이 2개 있습니다.");
-    expect(greetingLine(15, 0)).toBe("안녕하세요. 오늘 먼저 확인한 일은 없습니다.");
+    // §11: zero says only hello — whether anything is WAITING is the opener turn's sentence, computed
+    // from the real workload, so the greeting can never contradict it.
+    expect(greetingLine(15, 0)).toBe("안녕하세요.");
     expect(greetingLine(15, null)).toBe("안녕하세요.");
   });
 
@@ -123,12 +125,25 @@ describe("home — the Agent operating workspace", () => {
     expect(screen.queryByText(/proactive|PROPOSED|DRAFT_PREPARED|case/i)).toBeNull();
   });
 
-  it("a quiet morning is a truthful zero, not an empty list", async () => {
+  it("no prepared cases + real waiting work ⇒ the opener names the workload, never 「없습니다」 (§11)", async () => {
     getProactiveCases.mockResolvedValue({ items: [], total: 0, high: 0 });
     renderHome();
-    expect(await screen.findByText("좋은 아침입니다. 오늘 먼저 확인한 일은 없습니다.")).toBeInTheDocument();
-    expect(screen.getByText(/새로 들어온 문의나 리뷰가 생기면/)).toBeInTheDocument();
+    expect(await screen.findByText(/지금 확인이 필요한 일이 있습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/답변을 기다리는 문의 22건/)).toBeInTheDocument();
+    expect(screen.queryByText(/새로 들어온 문의나 리뷰가 생기면/)).toBeNull();
     expect(screen.queryByText("AI가 먼저 확인한 일")).toBeNull();
+  });
+
+  it("a genuinely quiet morning — no cases AND no waiting work — is the truthful zero", async () => {
+    getProactiveCases.mockResolvedValue({ items: [], total: 0, high: 0 });
+    const quiet = overview();
+    quiet.metrics.kpis = quiet.metrics.kpis.map((k) =>
+      k.key === "unansweredInquiries" || k.key === "negativeReviews" ? { ...k, value: 0 } : k,
+    );
+    getOverviewStrict.mockResolvedValue(quiet);
+    renderHome();
+    expect(await screen.findByText(/새로 들어온 문의나 리뷰가 생기면/)).toBeInTheDocument();
+    expect(screen.queryByText(/확인이 필요한 일이 있습니다/)).toBeNull();
   });
 
   it("before the first connection the greeting stops counting and offers the one thing to do", async () => {
@@ -144,7 +159,9 @@ describe("home — the Agent operating workspace", () => {
     await screen.findByText(/좋은 아침입니다/);
     await userEvent.type(screen.getByLabelText("무엇이든 물어보세요"), "미답변 문의 보여줘");
     await userEvent.keyboard("{Enter}");
-    expect(await screen.findByRole("link", { name: /배송 언제 되나요/ })).toHaveAttribute("href", "/inquiries/i1");
+    // §7: the row itself is a select control; the workspace is the secondary icon action beside it.
+    expect(await screen.findByRole("button", { name: /배송 언제 되나요/ })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "문의 화면에서 열기" })[0]).toHaveAttribute("href", "/inquiries/i1");
     expect(screen.getByText("답변이 필요한 문의 22건")).toBeInTheDocument();
     expect(conversationClient.sendTurn).not.toHaveBeenCalled();
   });

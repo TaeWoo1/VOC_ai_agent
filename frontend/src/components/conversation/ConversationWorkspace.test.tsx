@@ -4,13 +4,16 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AgentPanelProvider } from "../../lib/agentPanel";
-import { ConversationProvider, CURRENT_KEY, completedAfter } from "../../lib/conversation/ConversationProvider";
+import { ConversationProvider, completedAfter, currentKeyFor } from "../../lib/conversation/ConversationProvider";
 import { AgentRuntimeError } from "../../lib/agentRuntime/agentClient";
 import { ConversationWorkspace } from "./ConversationWorkspace";
 import { agentTurn } from "../../test/conversationFixtures";
 import type { ConversationView, ProgressEvent } from "../../lib/conversation/types";
 
 vi.mock("../../lib/bridge/localAgentHint", () => ({ probeLocalAgent: async () => "PAIRED" }));
+// The provider namespaces its remembered-conversation pointer by the signed-in org (§0).
+vi.mock("../../lib/auth", () => ({ useOptionalAuth: () => ({ user: { orgId: "org-t" } }) }));
+const CURRENT_KEY = currentKeyFor("org-t")!;
 vi.mock("../../lib/conversation/conversationClient", () => ({
   conversationClient: {
     createConversation: vi.fn(async () => ({ conversationId: "c-new", createdAt: "2026-08-27T00:00:00Z" })),
@@ -103,8 +106,8 @@ describe("conversation provider + workspace", () => {
     await act(async () => finish());
     expect(await screen.findByText("이 상품에 미답변 문의는 없습니다.")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId("conversation-progress")).toBeNull());
-    // Evidence is folded, not first.
-    expect(screen.getByText("확인한 자료")).toBeInTheDocument();
+    // Evidence is folded, not first — a small 「근거 N」 affordance (Agent Interaction Model v2 §5).
+    expect(screen.getByText("근거")).toBeInTheDocument();
   });
 
   it("Stop closes the stream: the turn ends as 「요청을 중지했습니다」, nothing is claimed, the box is free again", async () => {

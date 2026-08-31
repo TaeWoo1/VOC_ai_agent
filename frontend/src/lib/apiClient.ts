@@ -220,17 +220,21 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-// Read-only GETs fall back to seeded mocks so the UI never shows a blank screen.
+/**
+ * Read-only GETs serve the seeded fixtures ONLY in the explicit mock build (`VITE_USE_MOCKS=true`).
+ *
+ * They used to also fall back to the fixtures on ANY error (401/403/500/timeout) — which meant a real
+ * org whose read failed rendered the fixture org's NAVER/Cafe24 channels, reviews and orders with no
+ * indication they were fake (Agent Interaction Model v2 §0 audit; the same reasoning `getMe` already
+ * applied to sessions: a silent fallback fabricates DATA). An error now propagates and the screen says
+ * it could not read — the honest failure.
+ */
 async function getOrMock<T>(path: string, mock: () => T): Promise<T> {
   if (USE_MOCKS) {
     return mock();
   }
-  try {
-    const { data } = await http.get<T>(path);
-    return data;
-  } catch {
-    return mock();
-  }
+  const { data } = await http.get<T>(path);
+  return data;
 }
 
 export const api = {

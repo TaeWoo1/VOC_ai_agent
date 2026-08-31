@@ -92,11 +92,23 @@ function UserTurn({ text }: { text: string }) {
   );
 }
 
+/**
+ * An evidence row worth reading names something: a source with a count, a window, or a document title.
+ * A bare generic label with nothing beside it is noise (§5) — it renders as an empty-looking bullet.
+ */
+function meaningfulEvidence(e: Extract<DisplayTurn["artifacts"][number], { type: "EVIDENCE" }>) {
+  const items = e.items.filter((i) => i.label && (i.count != null || i.from != null || i.asOf != null || i.label !== "자료"));
+  return items.length > 0 ? { ...e, items } : null;
+}
+
 function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecision }: {
   turn: DisplayTurn; compact: boolean; latest: boolean; onPrompt: (p: string) => void; onResume: () => void;
   onCaptureDecision?: (captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL") => void;
 }) {
-  const evidence = turn.artifacts.filter((a) => a.type === "EVIDENCE");
+  const evidence = turn.artifacts
+    .filter((a): a is Extract<DisplayTurn["artifacts"][number], { type: "EVIDENCE" }> => a.type === "EVIDENCE")
+    .map(meaningfulEvidence)
+    .filter((a): a is NonNullable<ReturnType<typeof meaningfulEvidence>> => a != null);
   const shown = turn.artifacts.filter((a) => a.type !== "EVIDENCE");
   const failed = turn.status === "FAILED";
   const stopped = failed && turn.failureCode === "CANCELLED";
@@ -138,9 +150,9 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecisio
       </AnimatePresence>
       {evidence.length > 0 ? (
         <div className={compact ? "" : "pl-6"}>
-          <Disclosure label="확인한 자료" note={evidence.reduce((n, e) => n + (e.type === "EVIDENCE" ? e.items.length : 0), 0) || undefined} summaryClassName="px-0">
+          <Disclosure label="근거" note={evidence.reduce((n, e) => n + e.items.length, 0) || undefined} summaryClassName="px-0">
             <div className="mt-1 space-y-2">
-              {evidence.map((e) => (e.type === "EVIDENCE" ? <EvidenceArtifact key={e.artifactId} artifact={e} /> : null))}
+              {evidence.map((e) => <EvidenceArtifact key={e.artifactId} artifact={e} />)}
             </div>
           </Disclosure>
         </div>

@@ -16,6 +16,7 @@ export type ArtifactType =
   | "TABLE"
   | "REVIEW_LIST"
   | "INQUIRY_LIST"
+  | "INQUIRY_DETAIL"
   | "PRODUCT_LIST"
   | "ISSUE_LIST"
   | "ORDER_SUMMARY"
@@ -168,6 +169,28 @@ export interface InquiryListArtifact extends ArtifactBase {
     order: "NEWEST" | "OLDEST";
     limit: number | null;
   };
+}
+
+/**
+ * One inquiry, inspected (Agent Interaction Model v2 §4): the row's own closed facts plus a bounded,
+ * transient excerpt of the customer's message. The answer to 「배송 문의 봐줘」 / 「이 문의 자세히」 /
+ * a click on a shown row — never a re-list, never a workload conversion.
+ */
+export interface InquiryDetailArtifact extends ArtifactBase {
+  type: "INQUIRY_DETAIL";
+  inquiryId: string;
+  workItemId: string | null;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  status: string;
+  receivedAt: string | null;
+  productId: string | null;
+  productName: string | null;
+  stateLabel: string;
+  /** transient — a bounded excerpt of the customer's message; absent on a reloaded thread. */
+  excerpt?: string | null;
+  actionability: "DRAFTABLE" | "ALREADY_ANSWERED" | "AWAITING_SEND" | "NOT_WORKABLE";
+  to: string;
 }
 
 export interface ProductListArtifact extends ArtifactBase {
@@ -367,6 +390,7 @@ export type Artifact =
   | TableArtifact
   | ReviewListArtifact
   | InquiryListArtifact
+  | InquiryDetailArtifact
   | ProductListArtifact
   | IssueListArtifact
   | OrderSummaryArtifact
@@ -404,6 +428,9 @@ export interface WorkingSetView {
   selectedInquiry?: { inquiryId: string; workItemId: string | null; productId: string | null; channelCode: string | null } | null;
   turnId: string;
 }
+
+/** Agent Interaction Model v2 §1-C: what the conversation is doing with the selected object right now. */
+export type ActiveTask = "INSPECT" | "PREPARE_REPLY" | "REVISE_DRAFT" | "CAPTURE_KNOWLEDGE" | "APPROVE_REPLY";
 
 export interface PendingHumanAction {
   turnId: string;
@@ -450,6 +477,8 @@ export interface TurnView {
     pendingPrepared: PendingPreparedAction | null;
     /** Knowledge Capture v1: the gap the agent is holding open after this turn, if any. */
     pendingCapture?: { captureId: string; state: "ASKED" | "CANDIDATE"; inquiryId: string | null } | null;
+    /** Agent Interaction Model v2 §1-C: the task this turn leaves in flight. Absent on older turns. */
+    activeTask?: ActiveTask | null;
   };
   status: TurnStatus;
   failureCode?: string;
@@ -525,6 +554,12 @@ export interface StartTurnRequest {
    * file-upload fallback honestly. `UNKNOWN` when the probe did not run or did not answer in time.
    */
   localAgent?: LocalAgentHint;
+  /**
+   * Agent Interaction Model v2 §3/§9: a CLICK on a shown row, sent as the same focus transition a typed
+   * selection makes. The runtime verifies the id (history row, or one org-scoped READ) and persists the
+   * anchor; nothing is appended to the transcript.
+   */
+  select?: { kind: "INQUIRY"; inquiryId: string; workItemId?: string | null };
 }
 
 /** Closed: the runtime's zod accepts exactly these three. */

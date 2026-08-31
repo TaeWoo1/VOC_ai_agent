@@ -26,9 +26,10 @@ export type WorkloadTopic = NonNullable<PlanFilters["topic"]>;
 
 /**
  * The closed Korean keyword table per topic. Deliberately small and literal — a word missed here
- * leaves a row in the queue, which is the safe direction for a filter.
+ * leaves a row in the queue, which is the safe direction for a filter. Exported so the conversation's
+ * visible-set selection reads the SAME table instead of keeping a third copy of the topic vocabulary.
  */
-const TOPIC_WORDS: Record<WorkloadTopic, readonly string[]> = {
+export const TOPIC_WORDS: Record<WorkloadTopic, readonly string[]> = {
   SHIPPING: ["배송", "택배", "도착", "발송", "언제 와", "언제와"],
   EXCHANGE_RETURN: ["교환", "반품", "환불", "취소"],
   PRODUCT_SPEC: ["규격", "사이즈", "mm", "cm", "크기", "용량", "가닥"],

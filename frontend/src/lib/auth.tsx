@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { AuthResponse, UserView } from "./types";
 import { api, clearToken, getToken, setToken } from "./apiClient";
 import { analytics } from "./analytics";
+import { clearSessionScopedState } from "./sessionScope";
 
 interface AuthState {
   user: UserView | null;
@@ -79,7 +80,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session.user);
       },
       logout() {
+        // A session teardown, not a token removal (Agent Interaction Model v2 §0): the conversation
+        // pointer, helper pairing token and connection-flow state must not stand into the next
+        // identity, which may be a different organization on this machine.
         clearToken();
+        clearSessionScopedState();
         setUser(null);
       },
     }),
@@ -95,4 +100,9 @@ export function useAuth(): AuthState {
     throw new Error("useAuth must be used within AuthProvider");
   }
   return ctx;
+}
+
+/** The session when one is around, null outside the shell (bare test renders). Never throws. */
+export function useOptionalAuth(): AuthState | null {
+  return useContext(AuthContext) ?? null;
 }

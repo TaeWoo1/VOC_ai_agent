@@ -14,8 +14,11 @@ import { explainAgentError } from "../agentRuntime/explain";
 import { api } from "../apiClient";
 import { analytics } from "../analytics";
 import { probeLocalAgent } from "../bridge/localAgentHint";
+import { useOptionalAuth } from "../auth";
+import { CONVERSATION_KEY_PREFIX } from "../sessionScope";
 import type { ConversationSurface } from "../analytics/events";
 import type {
+  ActiveTask,
   ConversationSummary,
   PendingHumanAction,
   ProgressStageEvent,
@@ -63,6 +66,8 @@ export interface ConversationState {
   readonly error: string | null;
   readonly pendingHumanAction: PendingHumanAction | null;
   readonly workingSet: WorkingSetView | null;
+  /** Agent Interaction Model v2 §1-C: the task in flight for the selected object, as the runtime last said. */
+  readonly activeTask: ActiveTask | null;
   /** A turn failed because free-text planning is off for this org — the box is disabled after that. */
   readonly plannerOff: boolean;
   send(text: string, hints?: TurnHints, surface?: ConversationSurface): Promise<void>;
@@ -73,6 +78,8 @@ export interface ConversationState {
    * and the runtime writes (through the seller's own knowledge seam) only on a matching SAVE.
    */
   decideCapture(captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL"): Promise<void>;
+  /** §3/§9: a click on a shown inquiry row — the same focus transition as naming it. Never blocks the composer. */
+  selectEntity(target: { inquiryId: string; workItemId?: string | null }): Promise<void>;
   /**
    * Stop the turn in flight. Bounded and honest: the stream is closed, the runtime cancels the run's
    * budget (the step already running finishes on its own; nothing new starts), and the thread shows
@@ -90,20 +97,29 @@ export interface ConversationState {
 
 const ConversationContext = createContext<ConversationState | null>(null);
 
-export const CURRENT_KEY = "reviewnary.conversation.current";
+/**
+ * The remembered-conversation pointer is namespaced BY ORG (Agent Interaction Model v2 §0): a machine
+ * that signs into two organizations must never hand one org's thread id to the other's session. The
+ * legacy un-namespaced key is neither read nor written; `clearSessionScopedState` removes it.
+ */
+export function currentKeyFor(orgId: string | null): string | null {
+  return orgId ? `${CONVERSATION_KEY_PREFIX}.${orgId}` : null;
+}
 
-function readCurrent(): string | null {
+function readCurrent(key: string | null): string | null {
+  if (!key) return null;
   try {
-    return window.localStorage.getItem(CURRENT_KEY);
+    return window.localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
-function writeCurrent(id: string | null): void {
+function writeCurrent(key: string | null, id: string | null): void {
+  if (!key) return;
   try {
-    if (id) window.localStorage.setItem(CURRENT_KEY, id);
-    else window.localStorage.removeItem(CURRENT_KEY);
+    if (id) window.localStorage.setItem(key, id);
+    else window.localStorage.removeItem(key);
   } catch {
     // storage unavailable — the id lives in memory for this tab
   }
@@ -164,8 +180,12 @@ const POLL_MS = 5_000;
 const POLL_LIMIT = 15 * 60 * 1000;
 
 export function ConversationProvider({ children }: { children: ReactNode }) {
+  const orgId = useOptionalAuth()?.user?.orgId ?? null;
+  const storageKey = currentKeyFor(orgId);
+  const keyRef = useRef(storageKey);
+  keyRef.current = storageKey;
   const [conversationId, setConversationId] = useState<string | null>(() =>
-    typeof window === "undefined" ? null : readCurrent(),
+    typeof window === "undefined" ? null : readCurrent(storageKey),
   );
   const [turns, setTurns] = useState<DisplayTurn[]>([]);
   const [busy, setBusy] = useState(false);
@@ -174,6 +194,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [pendingHumanAction, setPending] = useState<PendingHumanAction | null>(null);
   const [workingSet, setWorkingSet] = useState<WorkingSetView | null>(null);
+  const [activeTask, setActiveTask] = useState<ActiveTask | null>(null);
   const [plannerOff, setPlannerOff] = useState(false);
   const [historyVersion, setHistoryVersion] = useState(0);
   const idRef = useRef<string | null>(conversationId);
@@ -182,16 +203,26 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
 
   const adopt = useCallback((view: { conversationId: string; turns: TurnView[]; pendingHumanAction: PendingHumanAction | null; workingSet: WorkingSetView | null }) => {
     setConversationId(view.conversationId);
-    writeCurrent(view.conversationId);
+    writeCurrent(keyRef.current, view.conversationId);
     setTurns(view.turns);
     setPending(view.pendingHumanAction);
     setWorkingSet(view.workingSet);
+    setActiveTask(view.turns[view.turns.length - 1]?.continuation.activeTask ?? null);
   }, []);
 
-  // The remembered conversation, if the runtime still has it. A 404 (runtime restarted, memory store)
-  // is a fresh start, not an error the seller reads.
+  // The remembered conversation FOR THIS ORG, if the runtime still has it. A 404 (runtime restarted,
+  // memory store, another org's stale pointer) is a fresh start, not an error the seller reads.
+  // When the signed-in org changes while mounted, every piece of the previous org's thread state resets.
   useEffect(() => {
-    const id = readCurrent();
+    abortRef.current?.abort();
+    idRef.current = null;
+    setConversationId(null);
+    setTurns([]);
+    setPending(null);
+    setWorkingSet(null);
+    setActiveTask(null);
+    setError(null);
+    const id = readCurrent(storageKey);
     if (!id) return;
     let live = true;
     conversationClient
@@ -202,14 +233,14 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       .catch((err) => {
         if (!live) return;
         if (err instanceof AgentRuntimeError && err.status === 404) {
-          writeCurrent(null);
+          writeCurrent(keyRef.current, null);
           setConversationId(null);
         }
       });
     return () => {
       live = false;
     };
-  }, [adopt]);
+  }, [adopt, storageKey]);
 
   useEffect(() => {
     if (!busy) {
@@ -226,7 +257,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     const created = await conversationClient.createConversation();
     idRef.current = created.conversationId;
     setConversationId(created.conversationId);
-    writeCurrent(created.conversationId);
+    writeCurrent(keyRef.current, created.conversationId);
     analytics.track("conversation_started");
     return created.conversationId;
   }, []);
@@ -235,6 +266,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     setTurns((prev) => [...prev, turn]);
     setPending(turn.continuation.pendingHumanAction);
     if (turn.continuation.workingSet) setWorkingSet(turn.continuation.workingSet);
+    setActiveTask(turn.continuation.activeTask ?? null);
     if (turn.status === "FAILED" && turn.failureCode === "PLANNER_CAPABILITY_OFF") setPlannerOff(true);
     analytics.track("agent_result_shown", { status: agentStatus(turn) });
     for (const artifact of turn.artifacts) {
@@ -349,14 +381,37 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     abortRef.current?.abort();
     idRef.current = null;
     setConversationId(null);
-    writeCurrent(null);
+    writeCurrent(keyRef.current, null);
     setTurns([]);
     setPending(null);
     setWorkingSet(null);
+    setActiveTask(null);
     setError(null);
   }, []);
 
   const loadHistory = useCallback((limit = 10) => conversationClient.listConversations(limit), []);
+
+  /**
+   * Agent Interaction Model v2 §3/§9: a CLICK on a shown inquiry row is the same focus transition a
+   * typed selection makes — sent to the runtime as a `select` turn (verified there, persisted with the
+   * thread, appended to the transcript as nothing). The row's own highlight is the feedback; the next
+   * sentence (「이 고객한테 뭐라고 답하면 좋을까?」) acts on exactly this inquiry.
+   */
+  const selectEntity = useCallback(async (target: { inquiryId: string; workItemId?: string | null }) => {
+    try {
+      const id = await ensureId();
+      const turn = await conversationClient.sendTurn(
+        id,
+        { select: { kind: "INQUIRY", inquiryId: target.inquiryId, workItemId: target.workItemId ?? null } },
+        () => undefined,
+      );
+      if (turn.continuation.workingSet) setWorkingSet(turn.continuation.workingSet);
+      setActiveTask(turn.continuation.activeTask ?? null);
+      analytics.track("conversation_object_selected");
+    } catch {
+      // Selection is a convenience over navigation — a failed one changes nothing and says nothing.
+    }
+  }, [ensureId]);
 
   const openConversation = useCallback(
     async (id: string) => {
@@ -443,10 +498,12 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       error,
       pendingHumanAction,
       workingSet,
+      activeTask,
       plannerOff,
       send,
       resume,
       decideCapture,
+      selectEntity,
       stop,
       historyVersion,
       newConversation,
@@ -454,7 +511,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       openConversation,
       addLocalTurn,
     }),
-    [conversationId, turns, busy, elapsed, stages, error, pendingHumanAction, workingSet, plannerOff, send, resume, decideCapture, stop, historyVersion, newConversation, loadHistory, openConversation, addLocalTurn],
+    [conversationId, turns, busy, elapsed, stages, error, pendingHumanAction, workingSet, activeTask, plannerOff, send, resume, decideCapture, selectEntity, stop, historyVersion, newConversation, loadHistory, openConversation, addLocalTurn],
   );
   return <ConversationContext.Provider value={value}>{children}</ConversationContext.Provider>;
 }

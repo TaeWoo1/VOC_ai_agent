@@ -152,17 +152,19 @@ describe("§8 — planner text is read, never repeated", () => {
 });
 
 describe("§6 — a selected inquiry is not asked for again", () => {
-  it("clarification 「어떤 문의?」 after 「두 번째 거」 → the anchor is shown and the next moves offered", async () => {
+  it("「그거 뭐라고 답할까」 after 「두 번째 거」 → the anchored inquiry's draft, no clarification, no plan", async () => {
     const h = harness({ plansByGoal: PLANS });
     const view = await h.service.create(TOKEN);
     await say(h, view.conversationId, ROWS_ASK);
     await say(h, view.conversationId, "두 번째 거");
+    const plans = h.operator.calls.plan;
     const { turn } = await say(h, view.conversationId, WHICH_ASK);
     expect(turn.status).toBe("DONE");
+    // Agent Interaction Model v2 §13: with an anchor, 「뭐라고 답할까」 IS the prepare request — the
+    // product's own draft path answers it; the planner (and its clarification) is never reached.
     expect(turn.message).not.toContain("어떤 문의");
-    expect(turn.message).toContain("지금 보고 있는 문의 기준으로 계속하겠습니다.");
-    expect(artifact(turn, "SUMMARY")).toBeTruthy();
-    expect(turn.suggestedActions.map((s) => s.label)).toContain("답변 준비해줘");
+    expect(h.operator.calls.plan).toBe(plans);
+    expect(turn.artifacts.some((a) => a.type === "DRAFT" || a.type === "SUMMARY")).toBe(true);
     expect(turn.continuation.workingSet?.selectedInquiry).toBeTruthy();
   });
 

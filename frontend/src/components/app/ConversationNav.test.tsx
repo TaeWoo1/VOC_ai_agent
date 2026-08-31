@@ -8,6 +8,8 @@ import { AgentPanelProvider } from "../../lib/agentPanel";
 import { ConversationNav } from "./ConversationNav";
 import { agentTurn } from "../../test/conversationFixtures";
 
+// The provider namespaces its remembered-conversation pointer by the signed-in org (§0).
+vi.mock("../../lib/auth", () => ({ useOptionalAuth: () => ({ user: { orgId: "org-t" } }) }));
 vi.mock("../../lib/conversation/conversationClient", () => ({
   conversationClient: {
     createConversation: vi.fn(async () => ({ conversationId: "c-new", createdAt: "x" })),
@@ -44,7 +46,7 @@ beforeEach(() => {
 
 describe("sidebar conversation list (Chat UI v1)", () => {
   it("lists the threads with the current one marked, and 「새 대화」 is an icon control that goes home", async () => {
-    window.localStorage.setItem("reviewnary.conversation.current", "c-1");
+    window.localStorage.setItem("reviewnary.conversation.current.org-t", "c-1");
     vi.mocked(conversationClient.getConversation).mockResolvedValue({ conversationId: "c-1", createdAt: "x", updatedAt: "x", turns: [agentTurn({ conversationId: "c-1" })], workingSet: null, pendingHumanAction: null, pendingPrepared: null });
     shell();
     const current = await screen.findByRole("button", { name: /지난 리뷰 확인/ });
@@ -52,14 +54,14 @@ describe("sidebar conversation list (Chat UI v1)", () => {
     expect(screen.getByRole("button", { name: /제목 없는 대화/ })).not.toHaveAttribute("aria-current");
     await userEvent.click(screen.getByRole("button", { name: "새 대화" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/");
-    expect(window.localStorage.getItem("reviewnary.conversation.current")).toBeNull();
+    expect(window.localStorage.getItem("reviewnary.conversation.current.org-t")).toBeNull();
   });
 
   it("opens an earlier thread from the sidebar and lands on the home", async () => {
     vi.mocked(conversationClient.getConversation).mockResolvedValue({ conversationId: "c-1", createdAt: "x", updatedAt: "x", turns: [agentTurn({ conversationId: "c-1", message: "지난 답변입니다." })], workingSet: null, pendingHumanAction: null, pendingPrepared: null });
     shell();
     await userEvent.click(await screen.findByRole("button", { name: /지난 리뷰 확인/ }));
-    await waitFor(() => expect(window.localStorage.getItem("reviewnary.conversation.current")).toBe("c-1"));
+    await waitFor(() => expect(window.localStorage.getItem("reviewnary.conversation.current.org-t")).toBe("c-1"));
     expect(screen.getByTestId("where")).toHaveTextContent("/");
   });
 

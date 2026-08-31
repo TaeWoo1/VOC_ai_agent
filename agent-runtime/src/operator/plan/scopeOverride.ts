@@ -13,7 +13,7 @@ import { conversationAxisOf } from "./InvestigationPlan";
 import type { WorkingSetView } from "../../conversation/contract";
 import { log } from "../../log";
 
-export type ScopeOverrideReason = "NEW_PERIOD" | "EMPTY_SET";
+export type ScopeOverrideReason = "NEW_PERIOD" | "EMPTY_SET" | "NEW_LIMIT";
 
 export function scopeOverrideOf(
   plan: InvestigationPlan, workingSet: WorkingSetView | null,
@@ -25,6 +25,10 @@ export function scopeOverrideOf(
   // new question whatever the previous set held (or did not).
   const previous = workingSet.filters.period?.token ?? null;
   if (filters.period != null && previous != null && filters.period !== previous) return "NEW_PERIOD";
+  // A row count LARGER than the set on screen cannot be a refine of it — filtering 5 rows can never
+  // show 8 (Agent Interaction Model v2, found live: an anchored thread turned 「최근 문의 8개 보여줘」
+  // into 「방금 본 5건 중 5건」). A limit within the set stays a refine (「그중 3개만」).
+  if (filters.limit != null && workingSet.kind !== "ORDERS" && filters.limit > workingSet.ids.length) return "NEW_LIMIT";
   // An ORDERS set holds no ids by nature — its anchor is its window and channel, so "empty" does not apply.
   if (workingSet.kind !== "ORDERS" && workingSet.ids.length === 0 && workingSet.workItemIds.length === 0) return "EMPTY_SET";
   return null;

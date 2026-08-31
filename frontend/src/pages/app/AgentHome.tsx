@@ -60,7 +60,14 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   const anyUnproven = strip.some((kpi) => kpi.freshnessUnproven);
   const count = cases ? cases.items.length : null;
 
-  const leadingTurns = useMemo<DisplayTurn[]>(() => (cases ? [proactiveTurn(cases)] : []), [cases]);
+  // §11 (Agent Interaction Model v2): the opener speaks the authenticated org's REAL operational truth
+  // — prepared cases when there are any, and the waiting workload (from the same strict overview the
+  // numbers line reads) when there are none. 「없습니다」 only when the same reads came back empty.
+  const workload = useMemo(() => (data ? workloadPriorities(data) : null), [data]);
+  const leadingTurns = useMemo<DisplayTurn[]>(
+    () => (cases && !beforeFirstConnection ? [proactiveTurn(cases, workload)] : []),
+    [cases, workload, beforeFirstConnection],
+  );
 
   const onBeforeSend = useCallback(
     (text: string): boolean => {
@@ -165,11 +172,14 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   );
 }
 
-/** Deterministic. `count` null = not yet read (say nothing about it); 0 = truthful zero. */
+/**
+ * Deterministic. `count` null = not yet read (say nothing about it). Zero says only hello — whether
+ * anything is WAITING is the opener turn's sentence (§11), computed from the real workload, so the
+ * greeting never contradicts it.
+ */
 export function greetingLine(hour: number, count: number | null): string {
   const hello = hour < 12 ? "좋은 아침입니다." : "안녕하세요.";
-  if (count === null) return hello;
-  if (count === 0) return `${hello} 오늘 먼저 확인한 일은 없습니다.`;
+  if (count === null || count === 0) return hello;
   return `${hello} 오늘 제가 먼저 확인한 일이 ${count}개 있습니다.`;
 }
 
@@ -214,8 +224,34 @@ export function contextStrip(data: OverviewResponse, now: Date): MetricKpi[] {
   return out;
 }
 
-/** The first agent turn: what reviewnary prepared before the seller asked. Client-composed, never persisted. */
-export function proactiveTurn(cases: ProactiveCaseListResponse): DisplayTurn {
+/** One waiting-work line for the opener — a real number the strict overview answered, never invented. */
+export interface WorkloadPriority {
+  label: string;
+  count: number;
+  to: string;
+}
+
+/**
+ * The org's waiting work, from the SAME strict overview read as the numbers line (§11): current
+ * unanswered inquiries (windowless), then the window's negative reviews. At most three lines; only
+ * counts the backend actually answered.
+ */
+export function workloadPriorities(data: OverviewResponse): WorkloadPriority[] {
+  const kpis = data.metrics.kpis;
+  const out: WorkloadPriority[] = [];
+  const unanswered = kpis.find((k) => k.key === "unansweredInquiries");
+  if (unanswered && unanswered.value > 0) out.push({ label: "답변을 기다리는 문의", count: unanswered.value, to: "/inquiries?state=NEEDS_REPLY" });
+  const negative = kpis.find((k) => k.key === "negativeReviews");
+  if (negative && negative.value > 0) out.push({ label: `최근 ${data.metrics.period.days}일 부정 리뷰`, count: negative.value, to: "/reviews" });
+  return out.slice(0, 3);
+}
+
+/**
+ * The first agent turn: what reviewnary prepared before the seller asked — and, when it prepared
+ * nothing, what is genuinely waiting (§11). 「없습니다」 is said only when both reads came back empty.
+ * Client-composed, never persisted.
+ */
+export function proactiveTurn(cases: ProactiveCaseListResponse, workload: WorkloadPriority[] | null): DisplayTurn {
   const items = cases.items;
   const list: ListArtifact = {
     artifactId: "home-proactive",
@@ -236,13 +272,30 @@ export function proactiveTurn(cases: ProactiveCaseListResponse): DisplayTurn {
     totalCount: cases.total,
     ...(cases.total > items.length ? { more: { label: `전체 ${cases.total}건 보기`, to: "/inquiries" } } : {}),
   };
+  const waiting = workload ?? [];
+  const waitingList: ListArtifact = {
+    artifactId: "home-waiting",
+    type: "LIST",
+    title: "지금 기다리는 일",
+    items: waiting.map((w) => ({ id: w.to, primary: `${w.label} ${w.count.toLocaleString("ko-KR")}건`, to: w.to })),
+  };
+  const message = items.length > 0
+    ? "제가 먼저 확인해 둔 일입니다. 확인하고 보내시면 됩니다 — 아직 아무 곳에도 보내지 않았습니다."
+    : waiting.length > 0
+      ? "오늘 미리 준비해 둔 일은 없지만, 지금 확인이 필요한 일이 있습니다."
+      : "지금 먼저 확인할 일은 없습니다. 새로 들어온 문의나 리뷰가 생기면 여기에 먼저 정리해 두겠습니다.";
   return {
     turnId: "home-proactive",
     conversationId: "local",
     role: "AGENT",
-    message: items.length > 0 ? "제가 먼저 확인해 둔 일입니다. 확인하고 보내시면 됩니다 — 아직 아무 곳에도 보내지 않았습니다." : "오늘 먼저 확인한 일은 없습니다. 새로 들어온 문의나 리뷰가 생기면 여기에 먼저 정리해 두겠습니다.",
-    artifacts: items.length > 0 ? [list] : [],
-    suggestedActions: [],
+    message,
+    artifacts: [
+      ...(items.length > 0 ? [list] : []),
+      ...(waiting.length > 0 ? [waitingList] : []),
+    ],
+    suggestedActions: waiting.some((w) => w.to.startsWith("/inquiries"))
+      ? [{ label: "답변 안 한 문의 보여줘", kind: "PROMPT", prompt: "답변 안 한 문의만 보여줘" }]
+      : [],
     continuation: { workingSet: null, pendingHumanAction: null, pendingPrepared: null },
     status: "DONE",
     createdAt: new Date(0).toISOString(),

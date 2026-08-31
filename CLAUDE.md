@@ -661,6 +661,30 @@ scorer에서 닫았다 — threshold·candidate 구조·세 lane 불변. 상품�
 mm」→「높이 18mm」도 닫힘); 가닥 같은 **셈 명사는 단위가 아니라 낱말**이고 「몇 가닥」은 `\d+가닥`을 말한 passage가 답한다.
 숫자는 판매자의 것 그대로. 라이브 A–I 전부 FOUND/거절이 맞고, 지연 3–6ms · 모델 호출 증가 0).
 
+**`docs/agent_interaction_model_v2.md`** (Agent Interaction Model v2 — 2026-08-31. 홈 대화를 「챗봇이 붙은
+SaaS」가 아니라 **보이는 객체를 가리키고 클릭하고 이어서 맡기는** operating workspace로 만든 coherent refactor.
+**P0 org/session binding 먼저**: backend는 깨끗했고 노출은 프론트 셋 — `getOrMock`이 **모든 오류에서** NAVER+Cafe24
+fixture를 라벨 없이 렌더하던 fallback 삭제(mock 빌드 한정), 로그아웃을 세션 해체로(`sessionScope.ts` — 대화 포인터·
+bridge 페어링·연결 흐름 상태), 대화 포인터 **org 네임스페이스** + org 전환 시 provider 전체 리셋; runtime은
+`ConversationView.orgId` 스탬프+load 단언(불일치=404)으로 위치적 격리에 단언을 더했다. **Focus는 명시 상태다**:
+`activeTask`(INSPECT·PREPARE_REPLY·REVISE_DRAFT·CAPTURE_KNOWLEDGE·APPROVE_REPLY)가 continuation에 실려 reload를
+넘긴다. **자연어 선택은 결정론**(`visibleSelection.ts`, model 0): 채널 map + workload와 **같은** `TOPIC_WORDS` +
+행 텍스트 literal — 집합 밖을 이름 지으면 플래너로 거절, 복수면 **후보 제시**(집합이 후보로 좁혀져 ordinal·클릭이 그
+위에 선다). **CLICK == FOCUS**: 행 클릭이 `StartTurnRequest.select`로 같은 anchor 전이를 만들고(transcript 무추가·
+영속·미검증 id는 READ 1회 검증 후에만), 모든 UI 버튼이 같은 contract를 쓴다. **INSPECT ≠ WORKLOAD**: 선택은 새
+`INQUIRY_DETAIL` artifact(닫힌 사실 + transient 고객 발췌, org 재조회 0)이고, **anchor 위의 PREPARE는 플래너 0** —
+compose에서 추출한 `prepareOneInquiry` 하나를 직접 lane과 공유(33s→0.2s, capture 질문 포함). 홈 오프너는 **실제
+workload**를 말한다(proactive 0 + 미답변>0 ⇒ 「확인이 필요한 일이 있습니다」; 「없습니다」는 두 읽기가 빈손일 때만;
+중복 소유자 `AgentBriefing`/`briefingHeadline` 퇴역). 목록 행은 객체(제목+상태+메타, workspace는 보조 아이콘), 근거는
+「근거 N」으로 접히고 빈 generic 행은 렌더 안 됨. QA가 드러낸 결함 둘을 닫음: anchor 상품 힌트는 **「이 상품」을 말한
+문장에만** 실리고, 집합보다 큰 limit은 refine이 아니다(`scopeOverride` **`NEW_LIMIT`**). 재계약 §14(안전 테스트 약화 0):
+ordinal=INSPECT·anchored PREPARE plan 0으로 objectIntegrity/responseHygiene 재작성. 검증: runtime 727 · frontend
+2,579 · backend 3,580 전부 green + **라이브 브라우저 QA**(disposable org, 시나리오 1–7 전부 통과 — label select 74ms
+LLM 0, 클릭→「이 고객」 정확 대상, capture 저장→GROUNDED cited, 새 대화에서 저장 기준 재사용·재질문 0, 후보 3건 임의
+선택 0, Org B 격리, reload 후 anchor 유지; 모델 PLAN 5·DRAFT 4·JUDGE 2, 콘솔 오류 0·off-host 0). **marketplace 호출
+0 · WRITE 0 · 마이그레이션 0** ⇒ evidence 행 없음. 정직 보고: cleanup 중 `agent-runtime/.runstore/` 전체 삭제는
+과했음(로컬 dev 대화 파일; DB·채널 무관), planner org allowlist는 파일럿 운영 결정, visibleSelection v1은 INQUIRIES만.)
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

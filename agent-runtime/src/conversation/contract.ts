@@ -36,6 +36,7 @@ export type ArtifactType =
   | "TABLE"
   | "REVIEW_LIST"
   | "INQUIRY_LIST"
+  | "INQUIRY_DETAIL"
   | "PRODUCT_LIST"
   | "ISSUE_LIST"
   | "ORDER_SUMMARY"
@@ -210,6 +211,31 @@ export interface InquiryListArtifact extends ArtifactBase {
     readonly order: "NEWEST" | "OLDEST";
     readonly limit: number | null;
   };
+}
+
+/**
+ * One inquiry, inspected (Agent Interaction Model v2 §4). The answer to 「배송 문의 봐줘」 / 「이 문의
+ * 자세히」 / a click on a shown row: the row's own closed facts, plus a bounded excerpt of the
+ * customer's sentence — transient, stripped before persistence like every other customer text.
+ * INSPECT never re-reads the org queue and never converts the question into a workload.
+ */
+export interface InquiryDetailArtifact extends ArtifactBase {
+  readonly type: "INQUIRY_DETAIL";
+  readonly inquiryId: string;
+  readonly workItemId: string | null;
+  readonly channelCode: string | null;
+  readonly channelNameKo: string | null;
+  readonly status: string;
+  readonly receivedAt: string | null;
+  readonly productId: string | null;
+  readonly productName: string | null;
+  /** The seller's word for the row's state — the same closed sentence set the lists use. */
+  readonly stateLabel: string;
+  /** transient — a bounded excerpt of the customer's message, re-read from the inquiry screen on reload. */
+  readonly excerpt?: string | null;
+  /** Whether a reply draft can attach right now — the same gate the PREPARE lane uses. */
+  readonly actionability: "DRAFTABLE" | "ALREADY_ANSWERED" | "AWAITING_SEND" | "NOT_WORKABLE";
+  readonly to: string;
 }
 
 export interface ProductListArtifact extends ArtifactBase {
@@ -497,6 +523,7 @@ export type Artifact =
   | TableArtifact
   | ReviewListArtifact
   | InquiryListArtifact
+  | InquiryDetailArtifact
   | ProductListArtifact
   | IssueListArtifact
   | OrderSummaryArtifact
@@ -594,6 +621,14 @@ export interface SelectedInquiry {
   readonly channelCode: string | null;
 }
 
+/**
+ * What the conversation is DOING with the selected object right now (Agent Interaction Model v2 §1-C)
+ * — explicit state, never inferred from which tool ran last. Set by the lane that performed the step:
+ * a selection/inspection sets INSPECT, the draft path PREPARE_REPLY, the tone lane REVISE_DRAFT, an
+ * open knowledge gap CAPTURE_KNOWLEDGE, a routed approval APPROVE_REPLY. Null = no task in flight.
+ */
+export type ActiveTask = "INSPECT" | "PREPARE_REPLY" | "REVISE_DRAFT" | "CAPTURE_KNOWLEDGE" | "APPROVE_REPLY";
+
 export const WORKING_SET_MAX_IDS = 50;
 
 export interface PendingHumanAction {
@@ -682,6 +717,8 @@ export interface TurnView {
     readonly pendingPrepared: PendingPreparedAction | null;
     /** Knowledge Capture v1: the gap being held open, if any. Absent on older turns. */
     readonly pendingCapture?: PendingKnowledgeCapture | null;
+    /** Agent Interaction Model v2 §1-C: the task this turn leaves in flight. Absent on older turns. */
+    readonly activeTask?: ActiveTask | null;
   };
   readonly status: TurnStatus;
   readonly failureCode?: string;
@@ -701,6 +738,12 @@ export interface TurnView {
 
 export interface ConversationView {
   readonly conversationId: string;
+  /**
+   * The tenant this conversation belongs to (Agent Interaction Model v2 §0) — defense in depth on top
+   * of the per-org store scoping: a load whose caller's org differs is a 404, never a render. Absent
+   * on records written before this field existed; those rely on the store scoping alone.
+   */
+  readonly orgId?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly turns: readonly TurnView[];
@@ -710,6 +753,8 @@ export interface ConversationView {
   readonly pendingPrepared: PendingPreparedAction | null;
   /** Knowledge Capture v1: survives reload with the thread; absent on files written before it. */
   readonly pendingCapture?: PendingKnowledgeCapture | null;
+  /** Agent Interaction Model v2 §1-C: the task in flight for the selected object. Absent on older records. */
+  readonly activeTask?: ActiveTask | null;
 }
 
 export interface ConversationSummary {
@@ -808,10 +853,25 @@ export const StartTurnRequestSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * Agent Interaction Model v2 §3/§9: a CLICK on a shown object is the same state transition as
+     * saying its name — the selection is applied through the same focus contract, persisted with the
+     * conversation, and appended to the transcript as nothing (the row's own highlight is the
+     * feedback). Ids are hints, not facts: a row this conversation never showed is verified by one
+     * org-scoped READ before it may become the anchor, exactly like a screen-launch `workItemId`.
+     */
+    select: z
+      .object({
+        kind: z.literal("INQUIRY"),
+        inquiryId: z.string().min(1).max(200),
+        workItemId: z.string().min(1).max(200).nullable().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
-  .refine((r) => Boolean(r.text) || Boolean(r.resumeOfTurnId) || Boolean(r.captureDecision), {
-    message: "a turn carries either text, resumeOfTurnId or captureDecision",
+  .refine((r) => Boolean(r.text) || Boolean(r.resumeOfTurnId) || Boolean(r.captureDecision) || Boolean(r.select), {
+    message: "a turn carries either text, resumeOfTurnId, captureDecision or select",
   });
 export type StartTurnRequest = z.infer<typeof StartTurnRequestSchema>;
 
@@ -845,6 +905,10 @@ export function persistableArtifact(artifact: Artifact): Artifact {
       };
     case "DRAFT": {
       const { comments: _c, ...rest } = artifact;
+      return rest;
+    }
+    case "INQUIRY_DETAIL": {
+      const { excerpt: _e, ...rest } = artifact;
       return rest;
     }
     case "LIST":

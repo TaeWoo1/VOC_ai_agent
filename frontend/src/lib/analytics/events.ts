@@ -30,7 +30,7 @@ export type AgentResultStatus = (typeof AGENT_RESULT_STATUSES)[number];
 export const ARTIFACT_TYPES = [
   "summary", "metric", "list", "table", "review_list", "inquiry_list", "product_list", "issue_list",
   "order_summary", "chart", "draft", "evidence", "checklist", "human_action_required", "approval",
-  "execution_result", "workspace_link", "guided_execution", "knowledge_capture",
+  "execution_result", "workspace_link", "guided_execution", "knowledge_capture", "inquiry_detail",
 ] as const;
 export type ArtifactTypeLabel = (typeof ARTIFACT_TYPES)[number];
 
@@ -65,6 +65,8 @@ export interface AnalyticsEvents {
   conversation_resumed: Record<string, never>;
   /** The seller pressed Stop on a turn in flight (Chat UI v1). */
   conversation_turn_stopped: Record<string, never>;
+  /** Agent Interaction Model v2 §3: a shown object was clicked into conversation focus. No ids, no text. */
+  conversation_object_selected: Record<string, never>;
 }
 
 export type AnalyticsEventName = keyof AnalyticsEvents;
@@ -93,6 +95,7 @@ const ALLOWED: { [E in AnalyticsEventName]: Record<string, readonly string[]> } 
   approval_opened: {},
   conversation_resumed: {},
   conversation_turn_stopped: {},
+  conversation_object_selected: {},
 };
 
 export const ANALYTICS_EVENT_NAMES = Object.keys(ALLOWED) as AnalyticsEventName[];

@@ -62,12 +62,15 @@ import { Refresher } from "./Refresher";
 import { claimsFor } from "./reviewClaim";
 import { boundedTurns, STAGE_LABEL, WORKING_SET_MAX_IDS } from "./contract";
 import type {
-  ApprovalArtifact, Artifact, ConversationSummary, ConversationView, DraftArtifact, EvidenceArtifact,
-  ExecutableIdentity, GuidedExecutionArtifact, HumanActionRequiredArtifact, InquiryItem, PendingHumanAction,
+  ActiveTask, ApprovalArtifact, Artifact, ConversationSummary, ConversationView, DraftArtifact, EvidenceArtifact,
+  ExecutableIdentity, GuidedExecutionArtifact, HumanActionRequiredArtifact, InquiryDetailArtifact, InquiryItem,
+  PendingHumanAction,
   PendingPreparedAction, ProgressEvent, ProgressStage, ReviewItem, SelectedInquiry, StartTurnRequest, SuggestedAction,
   SummaryArtifact, ToneHint, TurnStatus, TurnView, WorkingSetKind, WorkingSetView, WorkspaceLinkArtifact, ObjectKind,
   KnowledgeCaptureArtifact, PendingKnowledgeCapture,
 } from "./contract";
+import { prepareIntentOf, pronounInspectOf, visibleSelectionOf } from "./visibleSelection";
+import type { VisibleRow } from "./visibleSelection";
 import type { GeneratedDraftView } from "../spring/types";
 import { periodLabel } from "./period";
 
@@ -136,6 +139,8 @@ interface Composed {
   budget?: TurnView["budget"]; answer?: OperatorAnswer;
   /** Knowledge Capture v1: the gap to hold open after this turn; `undefined` = carry the thread's as it is. */
   pendingCapture?: PendingKnowledgeCapture | null;
+  /** Agent Interaction Model v2 §1-C: the task this turn leaves in flight; `undefined` = derive/carry. */
+  activeTask?: ActiveTask | null;
 }
 
 /** What a resumed turn says first when it follows a saved capture (Knowledge Capture v1, GOAL resume). */
@@ -160,10 +165,10 @@ export class ConversationService {
   }
 
   async create(token: string): Promise<ConversationView> {
-    const { store } = await this.tenant(token);
+    const { store, orgId } = await this.tenant(token);
     const at = this.now();
     const view: ConversationView = {
-      conversationId: randomUUID(), createdAt: at, updatedAt: at, turns: [],
+      conversationId: randomUUID(), orgId, createdAt: at, updatedAt: at, turns: [],
       workingSet: null, pendingHumanAction: null, pendingHumanActions: [], pendingPrepared: null,
     };
     await store.save(view);
@@ -171,11 +176,25 @@ export class ConversationService {
     return view;
   }
 
+  /**
+   * Defense in depth over the per-org store scoping (Agent Interaction Model v2 §0): a record that
+   * carries a tenant stamp must carry the CALLER's. A mismatch is indistinguishable from "not found" —
+   * never a render, never a message that confirms the record exists. Records written before the stamp
+   * existed rely on the store scoping alone.
+   */
+  private assertTenant(view: ConversationView, orgId: string): ConversationView {
+    if (view.orgId && view.orgId !== orgId) {
+      log("conversation_tenant_mismatch", {});
+      throw new HttpError(404, "UNKNOWN_CONVERSATION", "no conversation found for this id");
+    }
+    return view;
+  }
+
   async get(token: string, id: string): Promise<ConversationView> {
-    const { store } = await this.tenant(token);
+    const { store, orgId } = await this.tenant(token);
     const view = await store.load(id);
     if (!view) throw new HttpError(404, "UNKNOWN_CONVERSATION", "no conversation found for this id");
-    return view;
+    return this.assertTenant(view, orgId);
   }
 
   async list(token: string, limit: number): Promise<ConversationSummary[]> {
@@ -207,8 +226,15 @@ export class ConversationService {
   ): Promise<TurnView> {
     const started = Date.now();
     const { bundle, store, orgId } = await this.tenant(token);
-    const view = await store.load(id);
-    if (!view) throw new HttpError(404, "UNKNOWN_CONVERSATION", "no conversation found for this id");
+    const loaded = await store.load(id);
+    if (!loaded) throw new HttpError(404, "UNKNOWN_CONVERSATION", "no conversation found for this id");
+    const view = this.assertTenant(loaded, orgId);
+
+    // ── Agent Interaction Model v2 §3/§9: a click on a shown row. The same focus transition as naming
+    // the row — persisted with the conversation, appended to the transcript as nothing.
+    if (request.select) {
+      return this.applyClickSelection(view, request.select, bundle, store, started);
+    }
 
     // ── Knowledge Capture v1: the seller's decision on the candidate shown — bound to it, never to text.
     if (request.captureDecision) {
@@ -299,21 +325,22 @@ export class ConversationService {
     // ── Closed intents about the object already on the table are resolved here, with no planner call and
     // no read (Conversation Object Integrity v1): a tone revision of the draft being viewed, or a bare
     // ordinal over the list just shown. Anything else is the planner's.
-    const direct = resumedFrom ? null : await this.directLane(view, text, bundle, stage);
+    const direct = resumedFrom ? null : await this.directLane(view, text, hints, bundle, stage);
     if (direct) {
       const agentTurn = this.agentTurn(view, direct);
       const workingSet = direct.workingSet ? { ...direct.workingSet, turnId: agentTurn.turnId } : null;
       const pendingPrepared = direct.pendingPrepared ? { ...direct.pendingPrepared, turnId: agentTurn.turnId } : null;
       const pendingCapture = stampCapture(direct.pendingCapture !== undefined ? direct.pendingCapture : view.pendingCapture ?? null, agentTurn.turnId);
+      const activeTask = direct.activeTask !== undefined ? direct.activeTask : view.activeTask ?? null;
       const finalTurn: TurnView = {
         ...agentTurn,
-        continuation: { workingSet, pendingHumanAction: null, pendingHumanActions: [], pendingPrepared, pendingCapture },
+        continuation: { workingSet, pendingHumanAction: null, pendingHumanActions: [], pendingPrepared, pendingCapture, activeTask },
       };
-      await this.persist(store, view, [userTurn, finalTurn], workingSet, pendingActionsOf(view), pendingPrepared, pendingCapture);
+      await this.persist(store, view, [userTurn, finalTurn], workingSet, pendingActionsOf(view), pendingPrepared, pendingCapture, activeTask);
       log("conversation_turn", {
-        status: finalTurn.status, toolCalls: 0, llmCalls: 0, ms: Date.now() - started,
+        status: finalTurn.status, toolCalls: direct.budget?.toolCalls ?? 0, llmCalls: direct.budget?.llmCalls ?? 0, ms: Date.now() - started,
         artifactTypes: [...new Set(finalTurn.artifacts.map((a) => a.type))].join(","),
-        workingSetKind: workingSet?.kind ?? "NONE", requestedAction: direct.pendingPrepared ? "TONE_REVISION" : "SELECT",
+        workingSetKind: workingSet?.kind ?? "NONE", requestedAction: direct.budget?.stopReason ?? (direct.pendingPrepared ? "TONE_REVISION" : "SELECT"),
       });
       return finalTurn;
     }
@@ -330,11 +357,14 @@ export class ConversationService {
     // one product-bound row is not about that product (live: 20 inquiries, one bound, and 「배송
     // 얘기부터」 became a product-scoped read that found nothing).
     const set = view.workingSet;
-    // …and so does the product an anchored inquiry is bound to (Conversation Object Integrity v1):
-    // 「이 상품 기준으로」 after 「첫 번째 거」 names the inquiry's own product, not a product to resolve by name.
+    // …and the product an anchored inquiry is bound to travels ONLY when the sentence says 「이 상품」
+    // (Conversation Object Integrity v1's case). Found live in this package's own QA: sent on every
+    // turn, the anchor's product turned 「최근 문의 8개 보여줘」 into a product-scoped read that answered
+    // 「이 상품의 근거로는 쓸 수 없습니다」 about a product the sentence never named.
+    const saysThisProduct = /이 상품/.test(text);
     const anchoredProduct = !hints.productId
       ? set?.kind === "PRODUCTS" && set.ids.length === 1 ? set.ids[0]
-        : set?.kind === "INQUIRIES" && set.selectedInquiry?.productId ? set.selectedInquiry.productId : undefined
+        : saysThisProduct && set?.kind === "INQUIRIES" && set.selectedInquiry?.productId ? set.selectedInquiry.productId : undefined
       : undefined;
     const goal: GoalRequest = {
       text,
@@ -388,13 +418,21 @@ export class ConversationService {
       composed.pendingCapture !== undefined ? composed.pendingCapture : carriedCapture(view.pendingCapture ?? null, workingSet),
       agentTurn.turnId,
     );
+    // Explicit task state (§1-C): what this turn did with the object, or — when the anchor merely
+    // carried — what was already in flight. A fresh list clears it with the selection.
+    const activeTask: ActiveTask | null = composed.activeTask !== undefined ? composed.activeTask
+      : pendingCapture ? "CAPTURE_KNOWLEDGE"
+        : composed.artifacts.some((a) => a.type === "APPROVAL" || a.type === "GUIDED_EXECUTION") ? "APPROVE_REPLY"
+          : pendingPrepared && pendingPrepared !== view.pendingPrepared ? "PREPARE_REPLY"
+            : workingSet?.selectedInquiry && workingSet.selectedInquiry.inquiryId === view.workingSet?.selectedInquiry?.inquiryId
+              ? view.activeTask ?? null : null;
     const finalTurn: TurnView = {
       ...agentTurn,
       continuation: {
-        workingSet, pendingHumanAction: pendingHumanActions[0] ?? null, pendingHumanActions, pendingPrepared, pendingCapture,
+        workingSet, pendingHumanAction: pendingHumanActions[0] ?? null, pendingHumanActions, pendingPrepared, pendingCapture, activeTask,
       },
     };
-    await this.persist(store, view, [userTurn, finalTurn], workingSet, pendingHumanActions, pendingPrepared, pendingCapture);
+    await this.persist(store, view, [userTurn, finalTurn], workingSet, pendingHumanActions, pendingPrepared, pendingCapture, activeTask);
     log("conversation_turn", {
       status: finalTurn.status,
       toolCalls: finalTurn.budget?.toolCalls ?? 0,
@@ -435,12 +473,13 @@ export class ConversationService {
     store: ConversationStore, view: ConversationView, turns: readonly TurnView[],
     workingSet: WorkingSetView | null, pendingHumanActions: readonly PendingHumanAction[],
     pendingPrepared: PendingPreparedAction | null, pendingCapture: PendingKnowledgeCapture | null,
+    activeTask: ActiveTask | null = view.activeTask ?? null,
   ): Promise<void> {
     await store.save({
       ...view,
       turns: boundedTurns([...view.turns, ...turns]),
       workingSet, pendingHumanAction: pendingHumanActions[0] ?? null, pendingHumanActions: [...pendingHumanActions], pendingPrepared,
-      pendingCapture,
+      pendingCapture, activeTask,
       updatedAt: this.now(),
     });
   }
@@ -611,77 +650,15 @@ export class ConversationService {
             }
             continue;
           }
-          // Actionability gate: an answered, in-flight or unworkable inquiry gets its state said — no
-          // proposal, no retrieval, no model call (found live: READ ×4 + one draft call, then a 409).
-          if (resolved.actionability !== "DRAFTABLE" || !resolved.target) {
-            const line = ACTIONABILITY_SENTENCE[resolved.actionability === "DRAFTABLE" ? "NOT_WORKABLE" : resolved.actionability];
-            artifacts.push(inquiryStateSummary(resolved.inquiry, line));
-            headline = headline ?? line;
-            continue;
-          }
-          const target = resolved.target;
-          stage("PREPARING_DRAFT", STAGE_LABEL.PREPARING_DRAFT);
-          let draft: DraftArtifact;
-          let generated: GeneratedDraftView | null = null;
-          try {
-            const prepared = await preparer.prepareWithView(target, axis.tone, `a-draft-${target.workItemId}`);
-            draft = prepared.artifact;
-            generated = prepared.view;
-          } catch (err) {
-            // The draft path refused (a phase the gate could not see, a backend outage): said as a
-            // sentence on a DONE turn — never a vanished turn. The vendor/backend text stays out.
-            log("conversation_draft_failed", { objectKind: "INQUIRY", error: err instanceof Error ? err.name : "unknown" });
-            const line = DRAFT_FAILED_SENTENCE;
-            artifacts.push(inquiryStateSummary(resolved.inquiry, line));
-            headline = headline ?? line;
-            continue;
-          }
-          artifacts.push(draft);
-          if (draft.unavailableMessage) {
-            headline = headline ?? draft.unavailableMessage;
-          } else if (draft.answerBasis === "NO_ANSWER_BASIS" || !draft.version) {
-            // ① what is missing (the backend's own sentence) ② the one next step. The card's title says
-            // 「답변 기준이 필요합니다」 once; the prose does not say it a second time.
-            const specificNote = draft.answerBasisNote && !GENERIC_BASIS_NOTE.test(draft.answerBasisNote) ? draft.answerBasisNote : null;
-            // Knowledge Capture v1: when the composer's own verdict names ONE fact the seller can state,
-            // ask for it here — a specific question, held open for the next sentence — instead of only
-            // pointing at a screen. NOT_APPLICABLE never asks for the same rule again (`captureGapOf`).
-            const plannedGap = answer.evidence.find((e) => e.kind === "ORG_POLICY_GAP" && e.locator.outcome === "ABSENT");
-            const plannerTopic = plannedGap ? orgTopicOf(String(plannedGap.locator.label ?? "").replace(/ (기준|근거) 없음$/, ""))?.topic ?? null : null;
-            const gap = captureAllowed && !draft.unavailableMessage ? captureGapOf(generated?.knowledgeGap, {
-              inquiryId: target.inquiryId, workItemId: target.workItemId, productId: target.productId, productName: target.productName, tone: axis.tone,
-            }, plannerTopic) : null;
-            if (gap) {
-              const opened = this.openCapture(gap, { kind: "INQUIRY_DRAFT", workItemId: target.workItemId, inquiryId: target.inquiryId, tone: axis.tone });
-              pendingCapture = opened;
-              artifacts.push(captureArtifact(opened, "ASKED", {}));
-              headline = headline ?? [specificNote, gap.question].filter((line): line is string => !!line && line.trim().length > 0).join(" ");
-              log("conversation_capture_asked", { scope: gap.scope, topic: gap.topic ?? gap.knowledgeType, variantRequired: gap.variantRequired });
-              continue;
-            }
-            headline = headline ?? [specificNote, draft.answerBasisAction ?? "답변 기준을 하나 더 등록하면 초안을 만들 수 있습니다."]
-              .filter((line): line is string => !!line && line.trim().length > 0).join(" ");
-            artifacts.push({
-              artifactId: `a-knowledge-${target.workItemId}`, type: "HUMAN_ACTION_REQUIRED",
-              title: "답변 기준 추가",
-              actionType: "KNOWLEDGE_ENTRY", reason: "NO_ANSWER_BASIS", path: "WORKSPACE",
-              channelCode: target.channelCode, channelNameKo: target.channelNameKo, accountId: null,
-              dataType: "INQUIRY", to: `/inquiries/${target.inquiryId}`, requestedAt: this.now(), resumable: false,
-            });
-          } else if (draft.note && !draft.tone) {
-            // A tone variant that moved a fact: refused, previous head kept, and said so.
-            headline = headline ?? draft.note;
-          } else {
-            // A draft that asks the customer back is said as that — the seller must not read a question
-            // as a short answer (Core Daily Loop UX v1; Response Hygiene v1 §2).
-            const asksBack = draft.answerBasis === "NEEDS_CLARIFICATION";
-            headline = headline ?? (axis.tone ? "말투를 바꿔 초안을 다시 준비했습니다."
-              : asksBack ? "고객에게 되묻는 답변 초안을 준비했습니다." : "답변 초안을 준비했습니다.");
-            pendingPrepared = {
-              turnId: "", kind: "INQUIRY_DRAFT", workItemId: target.workItemId, inquiryId: target.inquiryId,
-              draftVersion: draft.version, contentFingerprint: draft.contentFingerprint,
-            };
-          }
+          // Actionability gate + propose→generate + capture question — the SAME single-inquiry step the
+          // direct 「뭐라고 답하면 좋을까」 lane runs (§8/§13); extracted so there is exactly one.
+          const plannedGap = answer.evidence.find((e) => e.kind === "ORG_POLICY_GAP" && e.locator.outcome === "ABSENT");
+          const plannerTopic = plannedGap ? orgTopicOf(String(plannedGap.locator.label ?? "").replace(/ (기준|근거) 없음$/, ""))?.topic ?? null : null;
+          const one = await this.prepareOneInquiry(resolved, axis.tone, bundle, stage, captureAllowed, plannerTopic);
+          artifacts.push(...one.artifacts);
+          headline = headline ?? one.headline;
+          if (one.pendingPrepared) pendingPrepared = one.pendingPrepared;
+          if (one.pendingCapture !== undefined) pendingCapture = one.pendingCapture;
         }
       }
     }
@@ -1077,12 +1054,17 @@ export class ConversationService {
   }
 
   /**
-   * The two closed intents the lane answers without the planner. `null` ⇒ not one of them.
+   * The closed intents the lane answers without the planner. `null` ⇒ not one of them.
    * Tone revision: same inquiry (or review), same evidence, one new draft version, zero reads.
-   * Ordinal selection: the row at that position in the set just shown becomes the anchor, zero reads.
+   * Ordinal / label / pronoun selection (Agent Interaction Model v2 §2/§4): the row the sentence
+   * points at inside the VISIBLE set becomes the anchor and is INSPECTED — never a re-query of the
+   * org, never the same list printed again. Ambiguity shows the candidates; it never guesses.
+   * Direct PREPARE (§13): 「뭐라고 답하면 좋을까」 over the anchored inquiry runs the product's own
+   * draft path with no planner call.
    */
   private async directLane(
-    view: ConversationView, text: string, bundle: SpringClientBundle, stage: (s: ProgressStage, label: string) => void,
+    view: ConversationView, text: string, hints: StartTurnRequest, bundle: SpringClientBundle,
+    stage: (s: ProgressStage, label: string) => void,
   ): Promise<Composed | null> {
     // Knowledge Capture v1: a gap the agent is holding open listens to this sentence first.
     if (view.pendingCapture) {
@@ -1100,41 +1082,316 @@ export class ConversationService {
         budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "TONE_REVISION" },
       };
     }
-    const index = ordinalSelectionOf(text);
-    if (index == null) return null;
     const set = pickSet(null, view);
-    if (!set) return null;
-    if (set.kind === "REVIEWS") {
+    let anchor = set?.kind === "INQUIRIES" ? set.selectedInquiry ?? null : null;
+    // A screen launch that names a DIFFERENT inquiry is about that inquiry, not the thread's anchor —
+    // the existing planner path resolves and verifies the hint (Contextual Agent Contract Completion v1).
+    if (anchor && hints.workItemId && hints.workItemId !== anchor.workItemId) anchor = null;
+
+    // 「이 고객한테 뭐라고 답하면 좋을까?」 over the anchored inquiry — the product's own draft path, no planner.
+    if (anchor && prepareIntentOf(text)) {
+      const resolved = inquiryTargetFromHistory(view, anchor.inquiryId) ?? await this.verifiedTarget(anchor.workItemId, bundle);
+      if (resolved && resolved.kind === "INQUIRY") {
+        const captureAllowed = !lastTurnSavedCapture(view);
+        const one = await this.prepareOneInquiry(resolved, null, bundle, stage, captureAllowed, null);
+        const workingSet = anchoredSet(resolved.inquiry, view.workingSet, [
+          ...(view.workingSet?.productIds ?? []), ...(resolved.inquiry.productId ? [resolved.inquiry.productId] : []),
+        ]);
+        log("conversation_direct_prepare", { actionability: resolved.actionability, captureOpened: one.pendingCapture != null });
+        return {
+          status: "DONE", message: one.headline ?? "답변 초안을 준비했습니다.",
+          artifacts: one.artifacts,
+          suggestedActions: one.pendingPrepared ? [promptChip("조금 더 부드럽게 써줘"), promptChip("좋아 보내자")] : [],
+          workingSet, pendingHumanActions: [], pendingPrepared: one.pendingPrepared ?? view.pendingPrepared,
+          ...(one.pendingCapture !== undefined ? { pendingCapture: one.pendingCapture } : {}),
+          activeTask: one.pendingCapture ? "CAPTURE_KNOWLEDGE" : one.pendingPrepared ? "PREPARE_REPLY" : view.activeTask ?? null,
+          budget: { toolCalls: 1, llmCalls: one.pendingPrepared ? 1 : 0, elapsedMs: 0, stopReason: "DIRECT_PREPARE" },
+        };
+      }
+    }
+
+    // 「이 문의」 / 「이 고객」 / 「아까 그 문의」 — the anchored object, inspected. Zero planner, ≤1 read.
+    if (anchor && pronounInspectOf(text)) {
+      const resolved = inquiryTargetFromHistory(view, anchor.inquiryId) ?? await this.verifiedTarget(anchor.workItemId, bundle);
+      if (resolved && resolved.kind === "INQUIRY") return this.inspect(view, resolved, bundle, null);
+    }
+
+    const index = ordinalSelectionOf(text);
+    if (index != null) {
+      if (!set) return null;
+      if (set.kind === "REVIEWS") {
+        const id = set.ids[index - 1];
+        const target = id ? reviewTargetFromHistory(view, id) : null;
+        if (!target || target.kind !== "REVIEW") return null;
+        // A review selection narrows the set to that row — the single id the existing FIRST/THIS rules read.
+        const single: WorkingSetView = { ...set, ids: [id!], count: 1, turnId: "" };
+        return {
+          status: "DONE", message: `${index}번째 리뷰를 골랐습니다. 이어서 「답변해줘」처럼 말씀해 주세요.`,
+          artifacts: [], suggestedActions: [promptChip("이 리뷰 답변해줘")],
+          workingSet: single, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: "INSPECT",
+          budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
+        };
+      }
       const id = set.ids[index - 1];
-      const target = id ? reviewTargetFromHistory(view, id) : null;
-      if (!target || target.kind !== "REVIEW") return null;
-      // A review selection narrows the set to that row — the single id the existing FIRST/THIS rules read.
-      const single: WorkingSetView = { ...set, ids: [id!], count: 1, turnId: "" };
-      return {
-        status: "DONE", message: `${index}번째 리뷰를 골랐습니다. 이어서 「답변해줘」처럼 말씀해 주세요.`,
-        artifacts: [], suggestedActions: [promptChip("이 리뷰 답변해줘")],
-        workingSet: single, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
-        budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
-      };
+      const target = id ? inquiryTargetFromHistory(view, id) : null;
+      if (!target || target.kind !== "INQUIRY") {
+        return {
+          status: "DONE", message: `방금 본 목록에는 ${index}번째 문의가 없습니다.`, artifacts: [], suggestedActions: [],
+          workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
+          budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
+        };
+      }
+      log("conversation_selected", { objectKind: "INQUIRY", index, actionability: target.actionability });
+      return this.inspect(view, target, bundle, index);
     }
-    const id = set.ids[index - 1];
-    const target = id ? inquiryTargetFromHistory(view, id) : null;
-    if (!target || target.kind !== "INQUIRY") {
-      return {
-        status: "DONE", message: `방금 본 목록에는 ${index}번째 문의가 없습니다.`, artifacts: [], suggestedActions: [],
-        workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
-        budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
-      };
+
+    // Label selection over the visible rows: 「배송 문의 봐줘」 · 「종이컵 문의」 · 「네이버 배송 문의」.
+    if (set?.kind === "INQUIRIES") {
+      const rows = this.visibleRowsOf(view, set);
+      const selection = visibleSelectionOf(text, rows);
+      if (selection.kind === "SELECTED") {
+        const target = inquiryTargetFromHistory(view, selection.id);
+        if (target && target.kind === "INQUIRY") {
+          log("conversation_selected", { objectKind: "INQUIRY", by: "LABEL", actionability: target.actionability });
+          return this.inspect(view, target, bundle, null);
+        }
+      }
+      if (selection.kind === "AMBIGUOUS") {
+        const items = selection.ids
+          .map((rid) => inquiryFromHistory(view, rid))
+          .filter((item): item is InquiryItem => item != null);
+        if (items.length >= 2) {
+          const narrowed: WorkingSetView = {
+            kind: "INQUIRIES", label: "선택할 문의", count: items.length,
+            ids: items.map((i) => i.inquiryId), filters: set.filters,
+            productIds: [...new Set(items.map((i) => i.productId).filter((p): p is string => p != null))],
+            workItemIds: items.map((i) => i.workItemId).filter((w): w is string => w != null), turnId: "",
+          };
+          log("conversation_selection_ambiguous", { candidates: items.length });
+          const unanswered = items.filter((i) => i.status.toUpperCase() !== "ANSWERED");
+          const answered = items.filter((i) => i.status.toUpperCase() === "ANSWERED");
+          return {
+            status: "DONE", message: `말씀하신 조건에 맞는 문의가 ${items.length}건입니다. 하나를 골라 주세요.`,
+            artifacts: [{
+              artifactId: "a-select-candidates", type: "INQUIRY_LIST", title: "선택할 문의",
+              groups: [
+                ...(unanswered.length > 0 ? [{ key: "UNANSWERED" as const, label: "답변 필요", items: unanswered }] : []),
+                ...(answered.length > 0 ? [{ key: "ANSWERED" as const, label: "답변함", items: answered }] : []),
+              ],
+              totalCount: items.length,
+            }],
+            suggestedActions: [promptChip("첫 번째 거"), promptChip("두 번째 거")],
+            workingSet: narrowed, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: null,
+            budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTION_AMBIGUOUS" },
+          };
+        }
+      }
     }
-    const workingSet = anchoredSet(target.inquiry, view.workingSet, [...(view.workingSet?.productIds ?? []), ...(target.inquiry.productId ? [target.inquiry.productId] : [])]);
-    log("conversation_selected", { objectKind: "INQUIRY", index, actionability: target.actionability });
-    return {
-      status: "DONE", message: selectionLine(index, target.inquiry, target.actionability),
-      artifacts: [selectionSummary(target.inquiry)],
-      suggestedActions: suggestionsFor(null, workingSet, null, []),
-      workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
-      budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
+    return null;
+  }
+
+  /** The rows the seller can currently see, from the persisted artifacts — never a new read. */
+  private visibleRowsOf(view: ConversationView, set: WorkingSetView): VisibleRow[] {
+    return set.ids
+      .map((id) => inquiryFromHistory(view, id))
+      .filter((item): item is InquiryItem => item != null)
+      .map((item) => ({
+        id: item.inquiryId, title: item.title ?? null, productName: item.productName,
+        channelCode: item.channelCode, channelNameKo: item.channelNameKo,
+      }));
+  }
+
+  /** A row this conversation never showed, verified by the same org-scoped READ the runtime uses. */
+  private async verifiedTarget(workItemId: string | null, bundle: SpringClientBundle): Promise<ResolvedTarget | null> {
+    if (!workItemId) return null;
+    try {
+      const detail = await bundle.inquiry.getInquiryDetail(workItemId);
+      const row = {
+        workItemId: detail.workItemId, inquiryId: detail.inquiryId, channelCode: detail.channelCode,
+        channelNameKo: detail.channelNameKo, productId: detail.productId ?? null, productName: detail.productName ?? null,
+      };
+      const actionability = actionabilityOf({ workItemId: detail.workItemId, phase: detail.phase, status: detail.status });
+      return {
+        kind: "INQUIRY",
+        inquiry: { ...row, title: detail.title ?? null, status: detail.status, receivedAt: detail.receivedAt ?? null },
+        actionability,
+        target: actionability === "DRAFTABLE" ? row : null,
+        executableIdentity: detail.executableIdentity ?? "NONE",
+        sourceSubtype: detail.sourceSubtype ?? null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * INSPECT (§4): the selected inquiry as one compact object — the row's own closed facts plus a
+   * bounded excerpt of the customer's message (one READ when the row has a work item; the excerpt is
+   * transient and never persisted). No org re-query, no list re-print, no workload conversion.
+   */
+  private async inspect(
+    view: ConversationView, resolved: Extract<ResolvedTarget, { kind: "INQUIRY" }>, bundle: SpringClientBundle,
+    index: number | null,
+  ): Promise<Composed> {
+    const row = resolved.inquiry;
+    let excerptText: string | null = null;
+    let reads = 0;
+    if (row.workItemId) {
+      try {
+        reads += 1;
+        const detail = await bundle.inquiry.getInquiryDetail(row.workItemId);
+        excerptText = excerpt(detail.details ?? detail.title ?? null);
+      } catch {
+        excerptText = null;
+      }
+    }
+    const detailArtifact: InquiryDetailArtifact = {
+      artifactId: `a-inspect-${row.inquiryId}`, type: "INQUIRY_DETAIL",
+      title: row.title ?? "제목 없는 문의",
+      inquiryId: row.inquiryId, workItemId: row.workItemId,
+      channelCode: row.channelCode, channelNameKo: row.channelNameKo,
+      status: row.status, receivedAt: row.receivedAt,
+      productId: row.productId, productName: row.productName,
+      stateLabel: STATUS_WORD[row.status.toUpperCase()] ?? "상태 미확인",
+      excerpt: excerptText,
+      actionability: resolved.actionability,
+      to: `/inquiries/${row.inquiryId}`,
     };
+    const workingSet = anchoredSet(row, view.workingSet, [
+      ...(view.workingSet?.productIds ?? []), ...(row.productId ? [row.productId] : []),
+    ]);
+    const head = index != null ? `${index}번째 문의입니다.` : "이 문의를 보고 있습니다.";
+    return {
+      status: "DONE", message: `${head} ${INSPECT_SENTENCE[resolved.actionability]}`,
+      artifacts: [detailArtifact],
+      suggestedActions: [
+        ...(resolved.actionability === "DRAFTABLE" ? [promptChip("답변 준비해줘")] : []),
+        ...(row.productId ? [promptChip("이 상품 기준으로 답변 준비해줘")] : []),
+        promptChip("답변 안 한 문의만 보여줘"),
+      ],
+      workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: "INSPECT",
+      budget: { toolCalls: reads, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
+    };
+  }
+
+  /**
+   * ONE inquiry through the product's own draft path — the shared PREPARE step behind both the
+   * planner's PREPARE_INQUIRY_DRAFT and the direct 「뭐라고 답하면 좋을까」 lane. Actionability gate
+   * first (no read, no model call for a non-workable row), then propose→generate, then — on a
+   * NO_ANSWER_BASIS — the Knowledge Capture question when the composer named ONE askable fact.
+   */
+  private async prepareOneInquiry(
+    resolved: Extract<ResolvedTarget, { kind: "INQUIRY" }>, tone: ToneHint | null, bundle: SpringClientBundle,
+    stage: (s: ProgressStage, label: string) => void, captureAllowed: boolean, plannerTopic: string | null,
+  ): Promise<{
+    artifacts: Artifact[]; headline: string | null; pendingPrepared?: PendingPreparedAction;
+    pendingCapture?: PendingKnowledgeCapture | null;
+  }> {
+    // Actionability gate: an answered, in-flight or unworkable inquiry gets its state said — no
+    // proposal, no retrieval, no model call (found live: READ ×4 + one draft call, then a 409).
+    if (resolved.actionability !== "DRAFTABLE" || !resolved.target) {
+      const line = ACTIONABILITY_SENTENCE[resolved.actionability === "DRAFTABLE" ? "NOT_WORKABLE" : resolved.actionability];
+      return { artifacts: [inquiryStateSummary(resolved.inquiry, line)], headline: line };
+    }
+    const target = resolved.target;
+    stage("PREPARING_DRAFT", STAGE_LABEL.PREPARING_DRAFT);
+    let draft: DraftArtifact;
+    let generated: GeneratedDraftView | null = null;
+    try {
+      const prepared = await new DraftPreparer(bundle.inquiry, bundle.review).prepareWithView(target, tone, `a-draft-${target.workItemId}`);
+      draft = prepared.artifact;
+      generated = prepared.view;
+    } catch (err) {
+      // The draft path refused (a phase the gate could not see, a backend outage): said as a
+      // sentence on a DONE turn — never a vanished turn. The vendor/backend text stays out.
+      log("conversation_draft_failed", { objectKind: "INQUIRY", error: err instanceof Error ? err.name : "unknown" });
+      return { artifacts: [inquiryStateSummary(resolved.inquiry, DRAFT_FAILED_SENTENCE)], headline: DRAFT_FAILED_SENTENCE };
+    }
+    const artifacts: Artifact[] = [draft];
+    if (draft.unavailableMessage) return { artifacts, headline: draft.unavailableMessage };
+    if (draft.answerBasis === "NO_ANSWER_BASIS" || !draft.version) {
+      // ① what is missing (the backend's own sentence) ② the one next step. The card's title says
+      // 「답변 기준이 필요합니다」 once; the prose does not say it a second time.
+      const specificNote = draft.answerBasisNote && !GENERIC_BASIS_NOTE.test(draft.answerBasisNote) ? draft.answerBasisNote : null;
+      // Knowledge Capture v1: when the composer's own verdict names ONE fact the seller can state,
+      // ask for it here — a specific question, held open for the next sentence — instead of only
+      // pointing at a screen. NOT_APPLICABLE never asks for the same rule again (`captureGapOf`).
+      const gap = captureAllowed ? captureGapOf(generated?.knowledgeGap, {
+        inquiryId: target.inquiryId, workItemId: target.workItemId, productId: target.productId, productName: target.productName, tone,
+      }, plannerTopic) : null;
+      if (gap) {
+        const opened = this.openCapture(gap, { kind: "INQUIRY_DRAFT", workItemId: target.workItemId, inquiryId: target.inquiryId, tone });
+        artifacts.push(captureArtifact(opened, "ASKED", {}));
+        log("conversation_capture_asked", { scope: gap.scope, topic: gap.topic ?? gap.knowledgeType, variantRequired: gap.variantRequired });
+        return {
+          artifacts, pendingCapture: opened,
+          headline: [specificNote, gap.question].filter((line): line is string => !!line && line.trim().length > 0).join(" "),
+        };
+      }
+      artifacts.push({
+        artifactId: `a-knowledge-${target.workItemId}`, type: "HUMAN_ACTION_REQUIRED",
+        title: "답변 기준 추가",
+        actionType: "KNOWLEDGE_ENTRY", reason: "NO_ANSWER_BASIS", path: "WORKSPACE",
+        channelCode: target.channelCode, channelNameKo: target.channelNameKo, accountId: null,
+        dataType: "INQUIRY", to: `/inquiries/${target.inquiryId}`, requestedAt: this.now(), resumable: false,
+      });
+      return {
+        artifacts,
+        headline: [specificNote, draft.answerBasisAction ?? "답변 기준을 하나 더 등록하면 초안을 만들 수 있습니다."]
+          .filter((line): line is string => !!line && line.trim().length > 0).join(" "),
+      };
+    }
+    // A tone variant that moved a fact: refused, previous head kept, and said so.
+    if (draft.note && !draft.tone) return { artifacts, headline: draft.note };
+    // A draft that asks the customer back is said as that — the seller must not read a question
+    // as a short answer (Core Daily Loop UX v1; Response Hygiene v1 §2).
+    const asksBack = draft.answerBasis === "NEEDS_CLARIFICATION";
+    return {
+      artifacts,
+      headline: tone ? "말투를 바꿔 초안을 다시 준비했습니다."
+        : asksBack ? "고객에게 되묻는 답변 초안을 준비했습니다." : "답변 초안을 준비했습니다.",
+      pendingPrepared: {
+        turnId: "", kind: "INQUIRY_DRAFT", workItemId: target.workItemId, inquiryId: target.inquiryId,
+        draftVersion: draft.version, contentFingerprint: draft.contentFingerprint,
+      },
+    };
+  }
+
+  /**
+   * A click on a shown row (§3/§9): the SAME anchor transition a typed selection makes, persisted with
+   * the conversation and appended to the transcript as nothing — the row's own highlight is the
+   * feedback. An id the thread never showed is a hint, not a fact: one org-scoped READ verifies it
+   * (the same rule a screen-launch `workItemId` follows), and an unverifiable id changes nothing.
+   */
+  private async applyClickSelection(
+    view: ConversationView, select: NonNullable<StartTurnRequest["select"]>, bundle: SpringClientBundle,
+    store: ConversationStore, started: number,
+  ): Promise<TurnView> {
+    const resolved = inquiryTargetFromHistory(view, select.inquiryId) ?? await this.verifiedTarget(select.workItemId ?? null, bundle);
+    const respond = (workingSet: WorkingSetView | null, activeTask: ActiveTask | null): TurnView => ({
+      turnId: `select-${randomUUID()}`, conversationId: view.conversationId, role: "AGENT",
+      message: "", artifacts: [], suggestedActions: [],
+      continuation: {
+        workingSet, pendingHumanAction: view.pendingHumanAction, pendingHumanActions: pendingActionsOf(view),
+        pendingPrepared: view.pendingPrepared, pendingCapture: view.pendingCapture ?? null, activeTask,
+      },
+      status: "DONE", createdAt: this.now(),
+    });
+    if (!resolved || resolved.kind !== "INQUIRY" || resolved.inquiry.inquiryId !== select.inquiryId) {
+      log("conversation_select_unresolved", {});
+      return respond(view.workingSet, view.activeTask ?? null);
+    }
+    const workingSet = anchoredSet(resolved.inquiry, view.workingSet, [
+      ...(view.workingSet?.productIds ?? []), ...(resolved.inquiry.productId ? [resolved.inquiry.productId] : []),
+    ]);
+    // A capture held open for a DIFFERENT inquiry drops when the seller moves (the same rule a turn applies).
+    const pendingCapture = carriedCapture(view.pendingCapture ?? null, workingSet);
+    await this.persist(store, view, [], workingSet, pendingActionsOf(view), view.pendingPrepared, pendingCapture, "INSPECT");
+    log("conversation_turn", {
+      status: "DONE", toolCalls: 0, llmCalls: 0, ms: Date.now() - started,
+      artifactTypes: "", workingSetKind: workingSet.kind, requestedAction: "CLICK_SELECT",
+    });
+    return respond(workingSet, "INSPECT");
   }
 
   /** The tone-revision lane: the draft on the table, one closed tone token, the same object. No planner, no read. */
@@ -1725,6 +1982,14 @@ export const DRAFT_FAILED_SENTENCE = "초안을 준비하는 중 문제가 생�
 export const NO_DRAFT_TO_REVISE_SENTENCE = "말투를 바꿀 초안을 찾지 못했습니다. 먼저 「답변 준비해줘」로 초안을 만들어 주세요.";
 
 const STATUS_WORD: Record<string, string> = { UNANSWERED: "답변 필요", ANSWERED: "답변함" };
+
+/** What an INSPECT says after naming the row — closed per actionability, never a backend message. */
+const INSPECT_SENTENCE: Record<InquiryActionability, string> = {
+  DRAFTABLE: "「답변 준비해줘」라고 하시면 이 문의의 초안을 준비합니다.",
+  ALREADY_ANSWERED: "이미 답변된 문의입니다.",
+  AWAITING_SEND: "승인된 답변이 전송을 기다리고 있는 문의입니다.",
+  NOT_WORKABLE: "지금은 답변 준비 대상이 아닌 문의입니다.",
+};
 
 function inquiryLine(row: SelectedInquiryRow): string {
   const parts = [row.channelNameKo ?? row.channelCode ?? "채널", STATUS_WORD[row.status.toUpperCase()] ?? "상태 미확인"];

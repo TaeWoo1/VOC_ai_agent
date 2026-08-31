@@ -166,6 +166,14 @@ const NAV_ICON_PATHS: Record<string, ReactElement> = {
     </>
   ),
   check: <path d="m5 12 5 5L20 7" />,
+  // Open the object's own workspace (secondary row action — Agent Interaction Model v2 §7).
+  open: (
+    <>
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+    </>
+  ),
 };
 
 /** The set of known icon keys — lets callers (and tests) validate that a name resolves. */
