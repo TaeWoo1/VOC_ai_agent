@@ -280,34 +280,49 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const run = useCallback(
-    async (request: StartTurnRequest, userText: string | null) => {
+    /**
+     * @param enrich a last piece of the request that costs a round trip to learn. Applied AFTER the
+     *     seller's sentence is on screen, never before it — the local-helper probe is a hint about
+     *     which guided path the runtime may name, and no hint outranks showing someone their own words.
+     */
+    async (request: StartTurnRequest, userText: string | null,
+           enrich?: (r: StartTurnRequest) => Promise<StartTurnRequest>) => {
       if (busy) return;
       setBusy(true);
       setError(null);
       setStages([]);
       const controller = new AbortController();
       abortRef.current = controller;
+      // <b>The seller's own sentence is drawn before anything is awaited</b> (Agent Responsiveness v1
+      // §4). It used to be appended after `ensureId()`, so on the first message of a conversation the
+      // words the seller had just typed sat invisible for a round trip — and `send` awaited the local
+      // helper probe before even that, up to 1.5s for a paired browser. Neither wait is about the
+      // sentence, and neither has any business standing in front of it: the composer clears, the bubble
+      // appears, and the network starts underneath it.
+      if (userText !== null) {
+        setTurns((prev) => [
+          ...prev,
+          {
+            turnId: `local-user-${++localSeq}`,
+            conversationId: idRef.current ?? "local",
+            role: "USER",
+            text: userText,
+            message: "",
+            artifacts: [],
+            suggestedActions: [],
+            continuation: { workingSet: null, pendingHumanAction: null, pendingPrepared: null },
+            status: "DONE",
+            createdAt: new Date().toISOString(),
+            local: true,
+          },
+        ]);
+      }
       try {
-        const id = await ensureId();
-        if (userText !== null) {
-          setTurns((prev) => [
-            ...prev,
-            {
-              turnId: `local-user-${++localSeq}`,
-              conversationId: id,
-              role: "USER",
-              text: userText,
-              message: "",
-              artifacts: [],
-              suggestedActions: [],
-              continuation: { workingSet: null, pendingHumanAction: null, pendingPrepared: null },
-              status: "DONE",
-              createdAt: new Date().toISOString(),
-              local: true,
-            },
-          ]);
-        }
-        const turn = await conversationClient.sendTurn(id, request, (event) => {
+        const [id, enriched] = await Promise.all([
+          ensureId(),
+          enrich ? enrich(request).catch(() => request) : Promise.resolve(request),
+        ]);
+        const turn = await conversationClient.sendTurn(id, enriched, (event) => {
           if (event.type === "stage") setStages((prev) => [...prev, event]);
         }, controller.signal);
         appendAgent(turn);
@@ -339,13 +354,9 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       const trimmed = text.trim();
       if (!trimmed) return;
       analytics.track("conversation_turn_sent", { surface });
-      // A hint, sent as one: whether a local helper is paired decides which guided path the runtime may
-      // name (Action Window vs file upload). Nothing is paired or opened here — a health probe only.
-      const localAgent = await probeLocalAgent().catch(() => "UNKNOWN" as const);
       await run(
         {
           text: trimmed,
-          localAgent,
           ...(hints.productId ? { productId: hints.productId } : {}),
           ...(hints.workItemId ? { workItemId: hints.workItemId } : {}),
           ...(hints.channelCode && ["NAVER", "COUPANG", "CAFE24"].includes(hints.channelCode)
@@ -354,6 +365,8 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
           ...(hints.surface ? { surface: hints.surface } : {}),
         },
         trimmed,
+        // The helper probe — a hint, sent as one. Nothing is paired or opened here.
+        async (request) => ({ ...request, localAgent: await probeLocalAgent().catch(() => "UNKNOWN" as const) }),
       );
     },
     [run],

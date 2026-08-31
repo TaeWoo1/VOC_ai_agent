@@ -56,7 +56,7 @@ public class AgentOperatorController {
         }
         Optional<AgentOperatorResponseParser.ParsedPlan> plan =
                 planService.plan(principal.orgId(), request.goalText(), request.toolCatalogue(),
-                        request.priorContext());
+                        request.priorContext(), request.isRetry());
         return plan
                 .map(p -> new PlanView(true, p.supported(), p.userGoal(),
                         p.unresolvedEntities().stream()
@@ -106,7 +106,22 @@ public class AgentOperatorController {
      * anything up, and a null is honest — a call that belongs to no run is counted as a call only.
      */
     public record PlanRequest(String goalText, List<String> toolCatalogue, String priorContext,
-                              String runId) {
+                              String runId, Boolean retry) {
+
+        /**
+         * Whether this is a SECOND attempt at the same goal — the validator refused the first plan, or
+         * the run came back to re-plan.
+         *
+         * <p>An explicit field rather than "is {@code priorContext} present", which is what Agent
+         * Responsiveness v1 first tried and measured wrong: that field carries two unrelated things.
+         * A re-plan's progress line, yes — but also the conversation's working-set line, which rides
+         * along on ordinary FOLLOW-UP sentences. Reading the presence of the field as difficulty made
+         * every second sentence in a conversation pay for deep reasoning (measured: 3.4s → 5.6-9.6s on
+         * turns nothing had struggled with). Only the caller knows which it is, so the caller says.
+         */
+        public boolean isRetry() {
+            return Boolean.TRUE.equals(retry);
+        }
     }
 
     /** One thing the seller named. There is deliberately NO id field — see AgentPlanPrompt. */

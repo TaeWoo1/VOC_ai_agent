@@ -35,11 +35,23 @@ import java.util.List;
  * for the reason {@code AgentDraftPrompt} interpolates its categories: a prompt that names its options
  * by hand drifts from the code that executes them, and the first symptom is a plan naming a tool that
  * does not exist.
+ *
+ * <p><b>v10 asks for less, because the answer's LENGTH is the turn's latency.</b> Agent Responsiveness
+ * v1 measured one plan call as 98–99% of every free-sentence turn, and the call's duration tracks the
+ * number of tokens it emits. So the schema was audited against the code that reads it: {@code why} on
+ * every need, {@code retrievalStopWhen}, {@code retrievalParallel} and {@code stopWhenEnough} had
+ * <b>no consumer anywhere in agent-runtime</b> — the validator copied them into a plan object and
+ * nothing ever read them again. They were prose the model wrote, the network carried and the seller
+ * waited for, and removing them removes exactly that. {@code rationale} and {@code clarificationReason}
+ * are read on one branch each, so they are now asked for on those branches only. Nothing that decides
+ * WHAT the run does was touched: needs, kinds, specialists, tools, evidence requirements, filters,
+ * target, action and tone are all unchanged, which is why the accuracy suite is comparable across
+ * versions.
  */
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v9";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v10";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -238,24 +250,22 @@ public final class AgentPlanPrompt {
                target.selector: %s
 
                반드시 아래 형태의 JSON 객체 하나만 출력하세요. 다른 텍스트, 설명, 코드펜스는 금지입니다.
+               아래에 없는 칸은 만들지 마세요 — 읽는 쪽이 없는 문장은 답을 느리게만 합니다.
                {"supported":true,
                 "userGoal":"<판매자 목표를 한 문장으로 다시 적기>",
                 "unresolvedEntities":[{"kind":"PRODUCT","mention":"<판매자가 말한 표현 그대로>"}],
                 "informationNeeds":[{"id":"n1","question":"<무엇을 알아내야 하는가>","kind":"<위 목록 중 하나>",
-                                     "why":"<한 문장>","required":true}],
+                                     "required":true}],
                 "specialists":["..."],
                 "tools":["..."],
                 "retrievalOrder":["n1","n2"],
-                "retrievalParallel":["n2"],
-                "retrievalStopWhen":"<더 볼 필요가 없어지는 조건 또는 빈 문자열>",
                 "evidenceRequirements":[{"needId":"n1","minEvidence":1,"acceptableKinds":["..."]}],
                 "riskClass":"ROUTINE",
                 "maxIterations":2,
                 "maxToolCalls":8,
-                "stopWhenEnough":"<한 문장>",
                 "clarificationNeeded":false,
-                "clarificationReason":"",
-                "rationale":"<한 문장>",
+                "clarificationReason":"<clarificationNeeded 가 true 일 때만, 아니면 빈 문자열>",
+                "rationale":"<supported 가 false 일 때만 한 문장, 아니면 빈 문자열>",
                 "requestedAction":"NONE",
                 "tone":null,
                 "filters":{"period":null,"rating":null,"channel":null,"scope":null,"topic":null,"reviewIntent":null,

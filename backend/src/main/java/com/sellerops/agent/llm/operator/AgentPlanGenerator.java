@@ -2,6 +2,7 @@ package com.sellerops.agent.llm.operator;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sellerops.agent.llm.AgentLlmCallMetrics;
 import com.sellerops.agent.llm.AgentLlmTransport;
 import java.util.List;
 import java.util.Optional;
@@ -65,40 +66,46 @@ public class AgentPlanGenerator {
         }
     }
 
-    public record Result(Optional<AgentOperatorResponseParser.ParsedPlan> plan, String reason, String version) {
+    /**
+     * @param metrics what the call cost in time and tokens — never null, and reported on every path
+     *     including the failures, because a plan that times out is the slowest turn a seller can have
+     */
+    public record Result(Optional<AgentOperatorResponseParser.ParsedPlan> plan, String reason, String version,
+                         AgentLlmCallMetrics metrics) {
 
-        static Result failed(String version, String reason) {
-            return new Result(Optional.empty(), reason, version);
+        static Result failed(String version, String reason, AgentLlmCallMetrics metrics) {
+            return new Result(Optional.empty(), reason, version, metrics);
         }
     }
 
     public Result generate(Input input) {
         AgentLlmTransport.Response response =
                 http.post(vendor.endpoint(), AgentLlmWireFormat.headers(vendor, apiKey), requestBody(input));
+        AgentLlmCallMetrics metrics = AgentLlmCallMetrics.of(response);
         if (response.status() == 0) {
-            return Result.failed(version, "transport:" + response.body());
+            return Result.failed(version, "transport:" + response.body(), metrics);
         }
         if (!response.ok()) {
             // The status only. A vendor error body can quote the request.
-            return Result.failed(version, "http:" + response.status());
+            return Result.failed(version, "http:" + response.status(), metrics);
         }
         JsonNode envelope;
         try {
             envelope = MAPPER.readTree(response.body());
         } catch (Exception e) {
-            return Result.failed(version, "unreadable_envelope");
+            return Result.failed(version, "unreadable_envelope", metrics);
         }
         if (isBudgetExhausted(envelope)) {
-            return Result.failed(version, "budget_exhausted");
+            return Result.failed(version, "budget_exhausted", metrics);
         }
         Optional<String> text = AgentOperatorResponseParser.assistantText(response.body());
         if (text.isEmpty()) {
-            return Result.failed(version, "no_message_text");
+            return Result.failed(version, "no_message_text", metrics);
         }
         Optional<AgentOperatorResponseParser.ParsedPlan> parsed =
                 AgentOperatorResponseParser.parsePlan(text.get());
-        return parsed.map(p -> new Result(Optional.of(p), "ok", version))
-                .orElseGet(() -> Result.failed(version, "off_schema"));
+        return parsed.map(p -> new Result(Optional.of(p), "ok", version, metrics))
+                .orElseGet(() -> Result.failed(version, "off_schema", metrics));
     }
 
     /**

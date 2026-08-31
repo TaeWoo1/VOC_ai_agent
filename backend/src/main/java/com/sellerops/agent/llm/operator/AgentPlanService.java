@@ -68,12 +68,30 @@ public class AgentPlanService {
     public Optional<AgentOperatorResponseParser.ParsedPlan> plan(UUID orgId, String goalText,
                                                                  List<String> toolCatalogue,
                                                                  String priorContext) {
+        return plan(orgId, goalText, toolCatalogue, priorContext, false);
+    }
+
+    /**
+     * As above, told whether this is a second attempt at the same goal.
+     *
+     * <p>{@code retry} is the caller's assertion, not an inference from {@code priorContext}: that
+     * field also carries the conversation's working-set line on ordinary follow-up sentences, and
+     * treating its presence as difficulty made every second sentence in a conversation pay for deep
+     * reasoning. See {@code AgentOperatorController.PlanRequest#isRetry}.
+     */
+    public Optional<AgentOperatorResponseParser.ParsedPlan> plan(UUID orgId, String goalText,
+                                                                 List<String> toolCatalogue,
+                                                                 String priorContext, boolean retry) {
         if (!properties.isEnabledFor(orgId)) {
             return Optional.empty();
         }
-        AgentPlanGenerator.Result result =
-                generator().generate(new AgentPlanGenerator.Input(goalText, toolCatalogue, priorContext));
-        log.info("agent_plan orgId={} planned={} reason={}", orgId, result.plan().isPresent(), result.reason());
+        AgentPlanGenerator.Result result = generator(retry)
+                .generate(new AgentPlanGenerator.Input(goalText, toolCatalogue, priorContext));
+        // The cost of the call rides on the same line as its outcome: a planned=true that took 30
+        // seconds and a planned=true that took 3 are the same event to every reader that cannot see
+        // both. Metadata only — a duration and the vendor's own token counts, never the sentence.
+        log.info("agent_plan orgId={} planned={} reason={} {}",
+                orgId, result.plan().isPresent(), result.reason(), result.metrics().toLogFields());
         return result.plan();
     }
 
@@ -83,8 +101,12 @@ public class AgentPlanService {
      * using the previous one. No long-lived object holds the API key beyond one request.
      */
     private AgentPlanGenerator generator() {
+        return generator(false);
+    }
+
+    private AgentPlanGenerator generator(boolean retry) {
         return new AgentPlanGenerator(transport, AgentLlmWireFormat.Vendor.of(properties.vendor()),
                 properties.model(), properties.apiKey(), properties.maxOutputTokens(),
-                properties.reasoningEffort());
+                retry ? properties.retryReasoningEffort() : properties.reasoningEffort());
     }
 }

@@ -766,6 +766,57 @@ Asana Dash · Notion Agent · Devin · Sierra Explorer · Glean)의 interaction 
 마이그레이션 0** ⇒ evidence 행 없음. 정직 보고: 플래너 대기의 단계별 진행은 새 프로토콜이 필요하고, 제안 칩은
 여전히 working set만 따르며, ContextBar는 문의 anchor만 이름 짓는다.)
 
+**`docs/agent_responsiveness_v1.md`** (Agent Responsiveness v1 — 2026-09-01. 자유 문장 turn이 8~27초라
+직전 네 패키지가 만든 Agent 행동 개선이 전부 대기 시간에 잠겨 있던 문제. **추측으로 architecture를 만들지
+않았다 — §1이 측정이고 이후 모든 변경이 자기를 정당화한 숫자를 이름으로 댄다.** 측정 자체가 불가능했던 것이
+먼저다: 런타임은 자기 plan stage만 재서 **벤더 호출·백엔드·네트워크가 한 숫자**로 왔고, 30초짜리 turn의
+원인 넷(큰 프롬프트 · 느린 회선 · 큐 · 출력 예산을 생각에 쓰는 reasoning 모델)을 가를 방법이 없었다 ⇒
+`AgentLlmCallMetrics`(경과 ms + 벤더 자신의 토큰 수)를 기존 `agent_plan`/`agent_draft` 로그 줄에 실었다
+(실패 경로 포함 전부, **메타데이터 전용** — `usage` 블록만 읽고 요청·응답 본문은 읽지 않는다; 시간은
+transport 사실이므로 transport가 잰다). **결과: 한 번의 벤더 호출이 모든 turn의 98~99%**(plan 11,274ms /
+tools 65ms / judge 12ms), 그리고 그 호출의 길이는 **읽은 토큰이 아니라 뱉은 토큰**을 따른다 — 입력은 지연이
+4배 떨어지는 동안 5.5k로 **상수**였으므로 큰 시스템 프롬프트는 겉보기와 달리 지렛대가 아니고, 뱉은
+592~926 토큰 중 **256~576이 내부 reasoning**이었다(답 자체는 ~340 토큰 JSON). 결정론 lane은 이미 **6~8ms**
+였으므로 제품에는 두 계층뿐 중간이 없었다. **금지선 유지**: 문장 분류기·키워드 표·예문별 canned intent
+**0**, LLM planner가 계획하거나 run이 실패한다는 v2 계약 무변경. 바꾼 것은 플래너에게 **무엇을 요구하는가**
+와 **무엇으로 생각하게 하는가**, 그리고 생각하는 동안 **화면이 무엇을 하는가**다. (1) **읽는 코드가 없는
+칸을 요구하지 않는다** — `informationNeeds[].why`·`retrievalStopWhen`·`stopWhenEnough`·`retrievalParallel`은
+`agent-runtime` 전체에서 **소비자 0**이었다(검증기가 plan 객체에 복사하고 아무도 다시 읽지 않았다):
+프롬프트 **v10**이 요구를 멈추고 `rationale`·`clarificationReason`은 그것을 읽는 분기에서만 요구하며, 실행을
+정하는 칸(needs·kinds·specialists·tools·evidence·filters·target·action·tone)은 **전부 그대로**라 before/after
+비교가 성립한다(`promptAsksOnlyForFieldsWithAConsumer`가 되돌아오면 실패한다). (2) **plan reasoning-effort
+기본값 `low` → `minimal`** — 실제 Demo Org 14문장에서 reasoning 토큰 256~576 → **0**, 중앙값 12.2s → 4.8s,
+그리고 **14문장 중 13문장 결과 동일**(나머지 하나는 빠른 설정이 근거를 *더* 실어 답한 capability 질문).
+초안 capability는 손대지 않았다 — 그 모델은 고객이 읽을 한국어 문장을 쓰고 이 모델은 스키마에 닫힌 토큰을
+채운다. (3) **깊은 reasoning은 「어렵다는 증거」가 있는 한 곳에만** — 검증기가 plan을 거절한 뒤의 **repair
+1회**(`retry-reasoning-effort`, 기본 `low`, 공란이면 escalation off). 이웃 둘은 시도했고 **측정으로 기각**했고
+그 기록을 남긴다: **follow-up은 retry가 아니다**(`priorContext`는 re-plan 진행 줄과 대화의 working-set 줄
+**둘**을 나르므로 존재만 보고 「어렵다」로 읽자 대화의 두 번째 문장마다 3.4s → 5.6~9.6s가 됐다 ⇒ wire에 명시
+`retry` 플래그), **graph re-plan은 계획이 아니라 세상에 대한 것이다**(라이브 실측: 이미 6.6s를 쓴 turn에서
+re-plan이 강한 설정으로 **12.6s**를 더 쓰고 needs 0·specialists 0을 돌려줘 합계 19.4s — 비용은 확실하고
+이득은 미관측). (4) **판매자 자신의 문장이 네트워크보다 먼저 그려진다** — user turn이 `ensureId()` **뒤에**
+append돼 첫 메시지가 왕복 한 번을 기다렸고, `send`는 그 앞에서 로컬 도우미 health probe(페어링된 브라우저
+기준 최대 1.5s)까지 **await**하고 있었다; 이제 말풍선은 동기로 그려지고 둘은 그 아래에서 돈다(도우미 힌트는
+요청 **옆에서** 해결되므로 런타임이 듣는 내용은 무변경). 실측 **말풍선 7~18ms**. 진행 행은 여전히 런타임이
+보고한 stage만 그린다 — **가짜 진행 0**이고, 플래너 호출 중 참인 사실은 「이해하는 중」과 시계뿐이라 그것만
+그린다. **before/after(같은 14문장·같은 org·같은 기계): 중앙값 12,236ms → 3,433ms(3.6×), 최악 26,554ms →
+5,822ms(4.6×), 분포 7.4~26.6s → 2.5~5.8s**이고 **14문장 전부 status·artifact·working set·headline 동일**
+(latency diff가 아니라 **outcome diff**로 비교했다 — 다른 질문에 답하는 빠른 플래너는 빠른 것이 아니다).
+라이브 브라우저 한 스레드: 3,377ms / **157ms** / **159ms** / 4,494ms / 6,233ms, 마지막 turn의 trace는
+plan 5,874ms · tool 9회 합 151ms · judge 0ms(플래너가 여전히 97%), 콘솔 오류 0. **부수 결함 하나**: org 범위
+답변 뒤에 직전 working set의 제안 칩이 붙던 context pollution — anchor는 「그중…」의 지시 대상이라 계속
+이어져야 하지만 **칩은 이 답변이 화면에 올린 것**을 따라야 한다 ⇒ `drewSetOf(artifacts)`로 두 값을 분리했고,
+**anchor된 문의의 칩은 남긴다**(ContextBar가 그 객체를 계속 이름으로 부르고 있으므로 판매자가 무엇에 대한
+칩인지 볼 수 있다). backend 3,592 · runtime 756 · frontend 2,592 · 실패 0. **마켓플레이스 호출 0 · WRITE 0 ·
+DB 변경 0 · 마이그레이션 0** ⇒ evidence 행 없음. **하지 않고 보고한 것**: **모델 교체**(여섯 capability 기본값이
+벤더가 deprecated로 표시한 스냅샷이고 교체는 `image_product_knowledge_v1.md` §10이 기록한 **product-owner
+결정** — 플래너의 일은 닫힌 토큰 스키마 채우기라 작은 모델이 잘하는 모양이고 **남은 가장 큰 지렛대**이지만
+이 패키지는 쓰지 않았다; §1-B의 토큰-시간 관계로 외삽하면 방출 속도 2배 모델에서 중앙값 ≈1.7s인데 **그것은
+외삽이지 측정이 아니다**), 5.5k 시스템 프롬프트 단축(측정이 지렛대가 아니라고 말한다), **초안 모델 미측정**
+(Demo Org에서 초안을 만드는 것은 실제 고객 문의에 버전을 쓰는 일이라 하지 않았다 ⇒ PREPARE turn의 두 번째
+모델 호출은 **UNMEASURED**), 플래너 호출 **내부**의 단계별 진행(새 프로토콜 필요), plan 캐시(같은 문장도
+working set이 다르면 다른 뜻이라 문장 키 캐시는 두 번째 질문에 첫 번째의 범위로 답한다).)
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

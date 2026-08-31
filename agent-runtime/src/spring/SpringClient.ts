@@ -620,6 +620,7 @@ export class HttpSpringClient
     toolCatalogue: string[];
     priorContext?: string;
     runId?: string;
+    retry?: boolean;
   }): Promise<AgentPlanView> {
     return this.request<AgentPlanView>("POST", `/api/agent/plan`, request);
   }

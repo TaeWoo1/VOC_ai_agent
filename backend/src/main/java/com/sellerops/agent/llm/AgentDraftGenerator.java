@@ -157,50 +157,53 @@ public class AgentDraftGenerator {
      *
      * @param draft  the validated candidate, or empty
      * @param reason a sanitized enum-ish marker for the log line; never vendor body text
+     * @param metrics what the call cost in time and tokens — reported on every path, failures included
      */
-    public record Result(Optional<AgentDraftResponseParser.ParsedDraft> draft, String reason, String version) {
+    public record Result(Optional<AgentDraftResponseParser.ParsedDraft> draft, String reason, String version,
+                         AgentLlmCallMetrics metrics) {
 
-        static Result failed(String version, String reason) {
-            return new Result(Optional.empty(), reason, version);
+        static Result failed(String version, String reason, AgentLlmCallMetrics metrics) {
+            return new Result(Optional.empty(), reason, version, metrics);
         }
     }
 
     public Result generate(Input input) {
         String body = requestBody(input);
         AgentLlmTransport.Response response = http.post(vendor.endpoint, headers(), body);
+        AgentLlmCallMetrics metrics = AgentLlmCallMetrics.of(response);
         if (response.status() == 0) {
             // Transport-level: connect failure, timeout, interruption. The marker is the exception TYPE.
-            return Result.failed(version, "transport:" + response.body());
+            return Result.failed(version, "transport:" + response.body(), metrics);
         }
         if (!response.ok()) {
             // The status only. A vendor error body can quote the request, and the request contains the inquiry.
-            return Result.failed(version, "http:" + response.status());
+            return Result.failed(version, "http:" + response.status(), metrics);
         }
         JsonNode envelope;
         try {
             envelope = MAPPER.readTree(response.body());
         } catch (Exception e) {
-            return Result.failed(version, "unreadable_envelope");
+            return Result.failed(version, "unreadable_envelope", metrics);
         }
         String stop = stopReason(envelope);
         if ("length".equals(stop) || "max_tokens".equals(stop)) {
             // Named rather than left to surface as "empty response": on a reasoning model the output budget is
             // shared with internal reasoning, so this is the difference between "the model cannot do this" and
             // "the budget was too small" — and one of those is fixable by raising max-output-tokens.
-            return Result.failed(version, "budget_exhausted");
+            return Result.failed(version, "budget_exhausted", metrics);
         }
         Optional<String> text = AgentDraftResponseParser.assistantText(response.body());
         if (text.isEmpty()) {
-            return Result.failed(version, "no_message_text");
+            return Result.failed(version, "no_message_text", metrics);
         }
         Optional<AgentDraftResponseParser.ParsedDraft> parsed = AgentDraftResponseParser.parse(text.get());
         if (parsed.isEmpty()) {
             // Off-schema, unknown category, blank field, or over-long. No repair pass and no second call: a
             // malformed answer is a refusal, and a partial candidate reaching a human as a reviewed draft is
             // worse than none.
-            return Result.failed(version, "off_schema");
+            return Result.failed(version, "off_schema", metrics);
         }
-        return new Result(parsed, "ok", version);
+        return new Result(parsed, "ok", version, metrics);
     }
 
     private Map<String, String> headers() {

@@ -152,13 +152,13 @@ class AgentOperatorPayloadFloorTest {
     @DisplayName("plan and judge are each off by default in three independent ways")
     void offByDefaultThreeWays() {
         java.util.UUID org = java.util.UUID.randomUUID();
-        assertThat(new AgentPlanProperties(false, org.toString(), "OPENAI", "m", "sk", 2000, "low")
+        assertThat(new AgentPlanProperties(false, org.toString(), "OPENAI", "m", "sk", 2000, "low", "low")
                 .isEnabledFor(org)).as("plan: flag off").isFalse();
-        assertThat(new AgentPlanProperties(true, org.toString(), "OPENAI", "m", "", 2000, "low")
+        assertThat(new AgentPlanProperties(true, org.toString(), "OPENAI", "m", "", 2000, "low", "low")
                 .isEnabledFor(org)).as("plan: no key").isFalse();
-        assertThat(new AgentPlanProperties(true, "", "OPENAI", "m", "sk", 2000, "low")
+        assertThat(new AgentPlanProperties(true, "", "OPENAI", "m", "sk", 2000, "low", "low")
                 .isEnabledFor(org)).as("plan: org not listed").isFalse();
-        assertThat(new AgentPlanProperties(true, org.toString(), "OPENAI", "m", "sk", 2000, "low")
+        assertThat(new AgentPlanProperties(true, org.toString(), "OPENAI", "m", "sk", 2000, "low", "low")
                 .isEnabledFor(org)).as("plan: all three").isTrue();
         assertThat(new AgentJudgeProperties(true, "*", "OPENAI", "m", "sk", 2000, "low")
                 .isEnabledFor(org)).as("judge: the local single-user wildcard").isTrue();

@@ -129,10 +129,10 @@ public class AgentDraftService {
         }
         AgentDraftGenerator.Result result = generator().generate(new AgentDraftGenerator.Input(
                 title, details, knowledge, orderState, specScope, style, companyContext));
-        log.info("agent_draft orgId={} drafted={} grounded={} styled={} company={} reason={}",
+        log.info("agent_draft orgId={} drafted={} grounded={} styled={} company={} reason={} {}",
                 orgId, result.draft().isPresent(), knowledge == null ? 0 : knowledge.size(),
                 style != null && !style.isBlank(), companyContext != null && !companyContext.isBlank(),
-                result.reason());
+                result.reason(), result.metrics().toLogFields());
         return result.draft();
     }
 

@@ -229,8 +229,21 @@ export interface OperatorSpringClient {
   planGoal?(request: {
     goalText: string;
     toolCatalogue: string[];
-    /** Re-plan only: need ids and statuses in closed vocabulary. Never evidence, never customer text. */
+    /**
+     * Run state in closed vocabulary. Never evidence, never customer text.
+     *
+     * <b>Two different things travel here</b> and that matters to whoever reads it: a re-plan's
+     * progress line, and the conversation's working-set line, which rides along on ordinary follow-up
+     * sentences. Its presence therefore says nothing about whether this goal was hard — {@link retry}
+     * does.
+     */
     priorContext?: string;
+    /**
+     * A SECOND attempt at the same goal: the validator refused the first plan, or the run came back to
+     * re-plan. The backend spends its stronger reasoning setting on exactly these (Agent
+     * Responsiveness v1 §3) — a first pass and a follow-up sentence are both `false`.
+     */
+    retry?: boolean;
   }): Promise<AgentPlanView>;
 
   /** Ask the backend's judge seam to check one finding. OPTIONAL for the same reason. */

@@ -35,15 +35,21 @@ public class JdkAgentLlmTransport implements AgentLlmTransport {
                 .header("Content-Type", "application/json;charset=UTF-8")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8));
         headers.forEach(builder::header);
+        long started = System.nanoTime();
         try {
             HttpResponse<String> response =
                     client.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            return new Response(response.statusCode(), response.body());
+            return new Response(response.statusCode(), response.body(), elapsedMs(started));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new Response(0, "interrupted");
+            return new Response(0, "interrupted", elapsedMs(started));
         } catch (Exception e) {
-            return new Response(0, e.getClass().getSimpleName());
+            return new Response(0, e.getClass().getSimpleName(), elapsedMs(started));
         }
+    }
+
+    /** A failed call is timed too: a slow failure and a fast one are different problems. */
+    private static long elapsedMs(long startedNanos) {
+        return (System.nanoTime() - startedNanos) / 1_000_000L;
     }
 }

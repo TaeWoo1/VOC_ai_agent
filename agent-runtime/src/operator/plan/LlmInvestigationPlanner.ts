@@ -123,6 +123,8 @@ export interface PlanBackend {
     priorContext?: string;
     /** The run this plan belongs to, so a re-plan does not buy a second daily run slot. */
     runId?: string;
+    /** A second attempt at the same goal — the backend spends its stronger reasoning setting there. */
+    retry?: boolean;
   }): Promise<AgentPlanView>;
 }
 
@@ -198,6 +200,17 @@ export class LlmInvestigationPlanner implements Planner {
         goalText,
         toolCatalogue: [...input.catalogue],
         priorContext: repairContext(first.rejection, input.priorContext),
+        // <b>The one call that gets the stronger reasoning setting</b>, and the reason it is this one:
+        // the plan just broke a structural contract and is being told which rule it broke. That is a
+        // question with a right answer that thinking can reach.
+        //
+        // Two neighbouring cases were tried and measured, and neither is here. A FOLLOW-UP sentence
+        // also carries `priorContext` (the conversation's working-set line) and is not hard at all —
+        // treating it as one put every second sentence of a conversation at 5.6–9.6s against 3.4s. A
+        // graph RE-PLAN is about the world rather than the plan: measured live 2026-09-01, one took
+        // 12.6s at the stronger setting to return a plan with no needs and no specialists, on a turn
+        // that had already spent 6.6s. Cost certain, benefit unobserved.
+        retry: true,
       });
     } catch {
       throw new PlannerUnavailableError("TRANSPORT", "the planner capability could not be reached");

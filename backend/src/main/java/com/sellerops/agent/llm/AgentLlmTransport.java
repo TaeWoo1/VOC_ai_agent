@@ -23,10 +23,22 @@ public interface AgentLlmTransport {
     Response post(URI uri, Map<String, String> headers, String jsonBody);
 
     /**
-     * @param status the HTTP status, or 0 when the request never completed
-     * @param body   the response body, or a transport-level marker when {@code status} is 0
+     * @param status    the HTTP status, or 0 when the request never completed
+     * @param body      the response body, or a transport-level marker when {@code status} is 0
+     * @param elapsedMs how long the vendor took, wall clock, measured around the call itself
+     *
+     * <p><b>Why the elapsed time lives here.</b> Agent Responsiveness v1 had to answer "where do the
+     * 30 seconds go" and the repository could not: {@code agent-runtime} times its own plan stage, so
+     * everything from its own HTTP call outward — this backend's work, the network, and the vendor's
+     * generation — arrived as one number. It is a transport fact, so it is measured where the transport
+     * is and nowhere else. Never a request or response body, only a duration.
      */
-    record Response(int status, String body) {
+    record Response(int status, String body, long elapsedMs) {
+
+        /** A response nobody timed — the shape every test and every fake transport builds. */
+        public Response(int status, String body) {
+            this(status, body, 0L);
+        }
 
         public boolean ok() {
             return status >= 200 && status < 300;

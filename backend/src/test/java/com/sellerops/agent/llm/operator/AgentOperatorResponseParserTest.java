@@ -180,7 +180,28 @@ class AgentOperatorResponseParserTest {
             assertThat(system).contains(token);
         }
         assertThat(system).contains("ORDER_OPS");
-        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v9");
+        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v10");
+    }
+
+    /**
+     * Agent Responsiveness v1 §2 — the answer's LENGTH is the turn's latency.
+     *
+     * <p>These four fields were asked for on every plan and read by nothing anywhere in agent-runtime:
+     * a {@code why} sentence per information need, and three prose sentences about when to stop. They
+     * cost output tokens, output tokens cost seconds, and the seconds were the seller's. Re-adding one
+     * is a decision with a price, so it fails here first — and if a consumer for one is ever written,
+     * this assertion is the right place to argue with.
+     *
+     * <p>The fields that DO decide what a run does are asserted above and are untouched.
+     */
+    @Test
+    @DisplayName("the schema asks for no field that nothing reads")
+    void promptAsksOnlyForFieldsWithAConsumer() {
+        String system = AgentPlanPrompt.system();
+        assertThat(system).doesNotContain("\"why\"", "retrievalStopWhen", "stopWhenEnough", "retrievalParallel");
+        // …while everything the runtime actually executes is still requested.
+        assertThat(system).contains("informationNeeds", "evidenceRequirements", "retrievalOrder",
+                "specialists", "tools", "filters", "target", "requestedAction");
     }
 
     @Test

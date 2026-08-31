@@ -853,7 +853,13 @@ export class ConversationService {
       // Three next moves at most: a fourth is a menu, and a menu is the shape a chat is not. A lane
       // that named its OWN next moves owns them — the generic set chips beside them offered 「답변
       // 준비해줘」 on an inquiry the same turn had just said was already answered (live 2026-08-31).
-      suggestedActions: (extraChips.length > 0 ? extraChips : suggestionsFor(primary, workingSet, human, artifacts)).slice(0, 3),
+      // <b>Whether THIS turn put the set on screen</b>, read off the artifacts the seller is about to
+      // see — not off the anchor, which is deliberately carried forward whether or not this turn drew
+      // anything. The two used to be one value and the chips read the wrong one: an org-scope answer
+      // that draws no list (「우리 배송 정책 뭐였지?」) keeps the previous set as its anchor — correctly,
+      // so a later 「그중…」 still has a referent — and then offered 「첫 번째 거 답변 준비해줘」 under the
+      // policy sentence, three next moves about rows that answer had nothing to do with.
+      suggestedActions: (extraChips.length > 0 ? extraChips : suggestionsFor(primary, workingSet, human, artifacts, drewSetOf(artifacts))).slice(0, 3),
       workingSet, pendingHumanActions, pendingPrepared, budget, answer, pendingCapture,
     };
   }
@@ -2046,6 +2052,19 @@ const PRIMARY_ORDER: readonly Artifact["type"][] = [
   "WORKSPACE_LINK", "CHART", "METRIC", "TABLE", "LIST", "SUMMARY", "CHECKLIST",
 ];
 
+/**
+ * The artifact types that ARE a working set on screen — the same five {@link workingSetOf} builds one
+ * from. Listed here rather than derived from that switch because the two answer different questions:
+ * that one asks "what is the conversation standing on now", which has a carried-forward answer, and
+ * this one asks "did this turn draw it", which must not.
+ */
+const SET_ARTIFACT_TYPES: readonly Artifact["type"][] =
+  ["INQUIRY_LIST", "REVIEW_LIST", "PRODUCT_LIST", "ORDER_SUMMARY", "ISSUE_LIST"];
+
+function drewSetOf(artifacts: readonly Artifact[]): boolean {
+  return artifacts.some((a) => SET_ARTIFACT_TYPES.includes(a.type));
+}
+
 function primaryOf(artifacts: readonly Artifact[]): Artifact | null {
   for (const type of PRIMARY_ORDER) {
     const found = artifacts.find((a) => a.type === type);
@@ -2506,10 +2525,18 @@ function workspaceFor(plan: InvestigationPlan | null, workingSet: WorkingSetView
   return { artifactId: "a-workspace", type: "WORKSPACE_LINK", title: `${target.label} 화면`, link: { label: target.label, to: target.to } };
 }
 
-/** Up to three prompt chips from the set's kind, plus the workspace link. Examples, never capabilities. */
+/**
+ * Up to three prompt chips from the set's kind, plus the workspace link. Examples, never capabilities.
+ *
+ * @param drewSet whether THIS turn put the set on screen. A conversation stays anchored on the last set
+ *     it saw so that 「그중…」 keeps a referent, and that carried-forward anchor used to reach here: an
+ *     org-scope answer about a shipping policy came with 「첫 번째 거 답변 준비해줘」 attached, naming
+ *     rows the answer had nothing to do with. Chips about a LIST need the list; chips about the
+ *     ANCHORED inquiry do not, because the context bar is still naming it on screen.
+ */
 function suggestionsFor(
   primary: Artifact | null, workingSet: WorkingSetView | null, human: HumanActionRequiredArtifact | null,
-  artifacts: readonly Artifact[],
+  artifacts: readonly Artifact[], drewSet = true,
 ): SuggestedAction[] {
   const chips: SuggestedAction[] = [];
   if (human) {
@@ -2530,14 +2557,14 @@ function suggestionsFor(
   } else if (workingSet) {
     switch (workingSet.kind) {
       case "REVIEWS":
-        chips.push(promptChip("안 좋은 것만 봐줘"), promptChip("상품별로 묶어줘"), promptChip("문의에서도 같은 문제가 있는지 봐줘"));
+        if (drewSet) chips.push(promptChip("안 좋은 것만 봐줘"), promptChip("상품별로 묶어줘"), promptChip("문의에서도 같은 문제가 있는지 봐줘"));
         break;
       case "INQUIRIES":
         if (workingSet.selectedInquiry) {
           chips.push(promptChip("답변 준비해줘"));
           if (workingSet.selectedInquiry.productId) chips.push(promptChip("이 상품 기준으로 답변 준비해줘"));
           chips.push(promptChip("답변 안 한 문의만 보여줘"));
-        } else {
+        } else if (drewSet) {
           // The chips are examples of what to say NEXT about what is on screen, so they follow the set:
           // one row has no 「첫 번째」 and no narrowing left to offer, and a set already ordered by
           // urgency is not re-offered a 「가장 최근 1개」 (Conversation UX v2 §D).
@@ -2551,13 +2578,13 @@ function suggestionsFor(
         }
         break;
       case "ORDERS":
-        chips.push(promptChip("카페24만 봐봐"), promptChip("그때 리뷰나 문의에도 변화 있었어?"));
+        if (drewSet) chips.push(promptChip("카페24만 봐봐"), promptChip("그때 리뷰나 문의에도 변화 있었어?"));
         break;
       case "PRODUCTS":
-        chips.push(promptChip("문의에서도 같은 문제가 있는지 봐줘"));
+        if (drewSet) chips.push(promptChip("문의에서도 같은 문제가 있는지 봐줘"));
         break;
       case "ISSUES":
-        chips.push(promptChip("어느 상품이 제일 많아?"));
+        if (drewSet) chips.push(promptChip("어느 상품이 제일 많아?"));
         break;
     }
   }
