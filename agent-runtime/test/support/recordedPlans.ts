@@ -946,3 +946,20 @@ Object.assign(CONVERSATION_PLANS, {
   "지난 7일 것도 보여줘": LAST7_AS_FOLLOWUP_PLAN,
   "배송 얘기부터 처리하자": SHIPPING_FIRST_PLAN,
 });
+
+/* ───────────── Conversation UX v2 — subject term · PRIORITIZE ─────────────
+ *
+ * Both plans are what the LIVE planner is now told to produce: the subject word is NOT in the plan
+ * (no closed token holds 현금영수증, and the runtime reads it from the sentence deterministically),
+ * and a superlative names ONE row (`limit: 1`).
+ */
+export const RECEIPT_ROWS_PLAN = inquiryRowsPlan("현금영수증 관련 문의 중 가장 최근 것을 보고 싶다",
+  { period: null, rating: null, channel: null, scope: null, topic: null, inquiryIntent: "ROWS", order: "NEWEST", limit: 1, status: null });
+
+export const URGENT_PRIORITY_PLAN = inquiryRowsPlan("답변이 밀린 문의 중 무엇을 먼저 처리해야 하는지 알고 싶다",
+  { period: null, rating: null, channel: null, scope: null, topic: null, inquiryIntent: "PRIORITY", status: "UNANSWERED" });
+
+Object.assign(CONVERSATION_PLANS, {
+  "현금영수증 관련 문의 중 가장 최근 문의": RECEIPT_ROWS_PLAN,
+  "미응답 문의 중 가장 시급한 건?": URGENT_PRIORITY_PLAN,
+});

@@ -211,7 +211,10 @@ describe("E/F/G — the inquiry loop: list → topic → draft → tone → appr
     expect(h.inquiry.methodCalls.filter((c) => c.method === "generateDraftFor")).toEqual([{ method: "generateDraftFor", workItemId: W_SHIP, tone: null }]);
     expect(turn.message).toContain("답변 초안을 준비했습니다.");
     expect(turn.continuation.pendingPrepared).toMatchObject({ kind: "INQUIRY_DRAFT", workItemId: W_SHIP, draftVersion: 1 });
-    expect(turn.suggestedActions.map((s) => s.label)).toEqual(expect.arrayContaining(["조금 더 부드럽게 써줘", "좋아 보내자"]));
+    // The two next moves live ON the draft card (「말투 다듬기」·「보내기 준비」); a chip row repeating them
+    // is the same action twice (Conversation UX v2 §D).
+    expect(turn.suggestedActions.map((s) => s.label)).not.toContain("조금 더 부드럽게 써줘");
+    expect(turn.suggestedActions.map((s) => s.label)).not.toContain("좋아 보내자");
   });
 
   it("F — a tone request forwards the tone and changes nothing else about the call", async () => {

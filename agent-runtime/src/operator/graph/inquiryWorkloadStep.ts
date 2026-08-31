@@ -28,6 +28,9 @@ import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { eventOn } from "../scope/EvidenceTime";
 import type { Artifact, InquiryGroupKey, InquiryListArtifact } from "../../conversation/contract";
 import type { CustomerMemorySearch } from "../../spring/types";
+import { subjectTermOf } from "../../conversation/subjectTerm";
+import { rankByUrgency, URGENCY_CRITERION, URGENCY_LIMIT, waitingDaysOf } from "../../conversation/urgency";
+import { observationDate } from "../scope/EvidenceTime";
 import { log } from "../../log";
 
 const GROUP_ORDER: readonly InquiryGroupKey[] = ["DRAFT_READY", "NEEDS_CLARIFICATION", "KNOWLEDGE_MISSING", "UNANSWERED"];
@@ -49,7 +52,7 @@ const MEMORY_PRODUCTS_CAP = 3;
  * and a spec that names any row axis (window · channel · status · order · limit) is a ROWS question —
  * every one of those is a spec FIELD, not a word in the sentence.
  */
-export type InquiryIntent = "ROWS" | "WORKLOAD" | "COUNT";
+export type InquiryIntent = "ROWS" | "WORKLOAD" | "COUNT" | "PRIORITY";
 
 export function inquiryIntentOf(input: SpecialistInput): InquiryIntent {
   const f = input.filters;
@@ -76,7 +79,21 @@ export interface WorkloadRead {
   readonly needState: NeedState;
 }
 
-export async function readInquiryWorkload(input: SpecialistInput, needId: string): Promise<WorkloadRead> {
+/** How many ranked rows a PRIORITIZE answer names when the seller did not say a number. */
+export const PRIORITY_DEFAULT = 3;
+
+/**
+ * ONE sentence for a ranked queue, shared by the finding and the conversation headline so the two can
+ * never say the same fact in different words — and so the criterion is never dropped as "redundant".
+ */
+export function urgencySentence(subject: string, total: number, shown: number): string {
+  if (total === 0) return `${subject}는 없습니다.`;
+  return shown >= total
+    ? `${subject} ${total}건을 먼저 볼 순서로 정리했습니다. ${URGENCY_CRITERION}`
+    : `${subject} ${total}건 중 먼저 보실 ${shown}건입니다. ${URGENCY_CRITERION}`;
+}
+
+export async function readInquiryWorkload(input: SpecialistInput, needId: string, rank = false): Promise<WorkloadRead> {
   const { registry, budget, evidence, allowedTools } = input;
   const pending = (reason: string): WorkloadRead => ({
     findings: [], evidence: [], artifacts: [], notes: [reason], failures: [],
@@ -96,11 +113,16 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
       : fromInquiries && fromInquiries.productIds.length > 0 && !fromInquiries.workItemIds.length ? [...fromInquiries.productIds] : [];
   const workItemIds = fromInquiries ? [...fromInquiries.workItemIds] : [];
   const topic = filters?.topic ?? null;
+  // The subject the sentence named when no closed family holds it (`subjectTerm.ts`) — the same axis
+  // the ROWS read carries, so 「현금영수증 관련 답해야 할 문의」 narrows here too.
+  const term = topic ? null : subjectTermOf(input.goalText);
   // Query Accuracy v1: the spec axes reach the tool by name. A work queue has NO receipt window — what is
   // pending is pending whenever it arrived — so `period` is not an axis here; 「어제 온 문의 중 답해야 할
   // 것」 is a ROWS read with status=UNANSWERED (`inquiryRowsStep`). Channel, order and limit apply.
   const channel = filters?.channel ?? input.channelScope ?? fromInquiries?.filters.channelCode ?? null;
   const order = filters?.order ?? null;
+  // A ranked answer names a FEW rows and says why they are first; reading the whole queue and then
+  // cutting is what makes 「가장 시급한 건」 answerable at all.
   const limit = filters?.limit ?? null;
 
   const attempt = await attemptTool(
@@ -111,9 +133,12 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
         ...(productIds.length > 0 ? { productIds } : {}),
         ...(workItemIds.length > 0 ? { workItemIds } : {}),
         ...(topic ? { topic } : {}),
+        ...(term ? { term } : {}),
         ...(channel ? { channel } : {}),
-        ...(order ? { order } : {}),
-        ...(limit != null ? { limit } : {}),
+        ...(rank ? {} : {
+          ...(order ? { order } : {}),
+          ...(limit != null ? { limit } : {}),
+        }),
         maxDetailReads: WORKLOAD_DETAIL_CAP,
       },
       allowedTools,
@@ -163,34 +188,53 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
     }));
   }
 
-  const groups = GROUP_ORDER
-    .map((key) => ({
-      key, label: GROUP_LABEL[key],
-      items: read.items.filter((i) => i.group === key).map((i) => ({
-        workItemId: i.workItemId, inquiryId: i.inquiryId, channelCode: i.channelCode, channelNameKo: i.channelNameKo,
-        receivedAt: i.receivedAt, phase: i.phase, status: i.status, title: i.title,
-        productId: i.productId, productName: i.productName, answerBasis: i.answerBasis,
-        sourceSubtype: i.sourceSubtype, executableIdentity: i.executableIdentity,
-        to: `/inquiries/${i.inquiryId}`,
-      })),
-    }))
-    .filter((g) => g.items.length > 0);
-  const counts = groups.map((g) => `${g.label} ${g.items.length}건`).join(" · ");
-  const subject = fromReviews ? "같은 상품에 대한 미답변 문의" : topic ? `${topicLabel(topic)} 관련 문의` : "답변이 필요한 문의";
+  const today = observationDate(input.referenceDate);
+  // PRIORITIZE: the queue in urgency order, cut to the few rows the answer names. The criterion and its
+  // limit are said in the prose — a ranking whose basis is not stated is a judgement the data cannot back.
+  const shown = rank
+    ? rankByUrgency(read.items).slice(0, Math.max(1, limit ?? PRIORITY_DEFAULT))
+    : read.items;
+  const toItem = (i: (typeof read.items)[number]) => ({
+    workItemId: i.workItemId, inquiryId: i.inquiryId, channelCode: i.channelCode, channelNameKo: i.channelNameKo,
+    receivedAt: i.receivedAt, phase: i.phase, status: i.status, title: i.title, snippet: i.snippet,
+    productId: i.productId, productName: i.productName, answerBasis: i.answerBasis,
+    sourceSubtype: i.sourceSubtype, executableIdentity: i.executableIdentity,
+    ...(rank ? { waitingDays: waitingDaysOf(i.receivedAt, today) } : {}),
+    to: `/inquiries/${i.inquiryId}`,
+  });
+  // A ranked answer keeps the RANK as its order: consecutive rows of the same work state become one
+  // group each (each row still reads its own state word), never a re-sort into state buckets.
+  const groups = rank
+    ? shown.reduce<Array<{ key: InquiryGroupKey; label: string; items: ReturnType<typeof toItem>[] }>>((acc, i) => {
+      const last = acc.at(-1);
+      if (last && last.key === i.group) last.items.push(toItem(i));
+      else acc.push({ key: i.group, label: GROUP_LABEL[i.group], items: [toItem(i)] });
+      return acc;
+    }, [])
+    : GROUP_ORDER
+      .map((key) => ({ key, label: GROUP_LABEL[key], items: read.items.filter((i) => i.group === key).map(toItem) }))
+      .filter((g) => g.items.length > 0);
+  const counts = rank ? "" : groups.map((g) => `${g.label} ${g.items.length}건`).join(" · ");
+  const narrowed = topic ? `${topicLabel(topic)} 관련 ` : term ? `${term} 관련 ` : "";
+  const subject = fromReviews ? "같은 상품에 대한 미답변 문의" : `${narrowed}답변이 필요한 문의`;
+  const rankedStatement = urgencySentence(subject, read.items.length, shown.length);
   findings.push({
     findingId: `f-${pageRef.evidenceId}`,
     specialist: "INQUIRY_OPS",
-    statement: read.items.length === 0
-      ? `${subject}는 없습니다.`
-      : fromInquiries
-        ? `방금 본 ${fromInquiries.count}건 중 ${subject}는 ${read.items.length}건입니다${counts ? ` (${counts})` : ""}.`
-        : `${subject}가 ${read.items.length}건 있습니다${counts ? ` (${counts})` : ""}.`,
+    statement: rank
+      ? rankedStatement
+      : read.items.length === 0
+        ? `${subject}는 없습니다.`
+        : fromInquiries
+          ? `방금 본 ${fromInquiries.count}건 중 ${subject}는 ${read.items.length}건입니다${counts ? ` (${counts})` : ""}.`
+          : `${subject}가 ${read.items.length}건 있습니다${counts ? ` (${counts})` : ""}.`,
     evidenceIds: [pageRef.evidenceId],
     confidence: "NEEDS_REVIEW",
     verdict: null,
     surfaceLink: "/inquiries?state=NEEDS_REPLY",
     needId,
   });
+  if (rank && read.items.length > 0) notes.push(URGENCY_LIMIT);
   if (read.truncated) {
     notes.push(`초안이 있는 문의 중 ${read.detailReads}건까지만 답변 근거를 확인했습니다. 나머지는 초안 준비됨으로 표시했습니다.`);
   }
@@ -198,12 +242,15 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
   const list: InquiryListArtifact = {
     artifactId: `a-${pageRef.evidenceId}`,
     type: "INQUIRY_LIST",
-    title: subject,
+    title: rank ? `${narrowed}먼저 볼 문의` : subject,
     groups,
-    totalCount: read.items.length,
-    scope: { period: null, channelCode: channel, status: "UNANSWERED", order: order ?? "OLDEST", limit },
+    totalCount: rank ? shown.length : read.items.length,
+    scope: {
+      period: null, channelCode: channel, status: "UNANSWERED", order: order ?? "OLDEST",
+      limit: rank ? shown.length : limit, ...(term ? { term } : {}), ...(rank ? { rank: "URGENCY" as const } : {}),
+    },
     more: { label: "문의 화면에서 처리하기", to: "/inquiries?state=NEEDS_REPLY", count: read.totalOpen + read.totalProposed },
-    ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+    ...(read.truncated ? { note: notes.filter((n) => n !== URGENCY_LIMIT).join(" ") } : {}),
   };
   artifacts.push(list);
 
@@ -248,8 +295,9 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
     }
   }
 
-  log("inquiry_workload", { items: read.items.length, queued: read.queued, detailReads: read.detailReads,
-    truncated: read.truncated, topic: topic ?? "NONE", workingSet: set?.kind ?? "NONE", products: productIds.length });
+  log("inquiry_workload", { items: read.items.length, shown: shown.length, rank, queued: read.queued,
+    detailReads: read.detailReads, truncated: read.truncated, topic: topic ?? "NONE", term: term != null,
+    workingSet: set?.kind ?? "NONE", products: productIds.length });
   return {
     findings, evidence: refs, artifacts, notes, failures,
     needState: { id: needId, status: "SATISFIED", evidenceIds: refs.map((r) => r.evidenceId) },

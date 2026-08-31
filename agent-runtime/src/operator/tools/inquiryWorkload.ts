@@ -56,6 +56,8 @@ export interface InquiryWorkloadItem {
   readonly executableIdentity: ExecutableIdentity;
   /** The seller-visible subject line — transient; a live screen shows it, persistence drops it. */
   readonly title: string | null;
+  /** transient — the bounded opening of the customer's message, so a row can be read without opening it. */
+  readonly snippet: string | null;
   /** Whether a detail read informed this classification (false ⇒ phase-only). */
   readonly detailRead: boolean;
 }
@@ -71,12 +73,19 @@ export interface InquiryWorkloadResult {
   /** True when more PROPOSED rows existed than the detail cap could classify by basis. */
   readonly truncated: boolean;
   readonly topic: WorkloadTopic | null;
+  readonly term: string | null;
 }
 
 export interface InquiryWorkloadArgs {
   readonly productIds?: readonly string[];
   readonly workItemIds?: readonly string[];
   readonly topic?: WorkloadTopic | null;
+  /**
+   * The seller's own subject word, when the closed topic families cannot hold it (`subjectTerm.ts`).
+   * Matched in-process against the row's own subject line and — when a detail was read for another
+   * reason — the customer's message, exactly like {@link matchesTopic}. Never logged, never persisted.
+   */
+  readonly term?: string | null;
   /** Narrow to one channel (closed code). A data filter over rows already read, not routing. */
   readonly channel?: string | null;
   readonly maxDetailReads?: number;
@@ -85,6 +94,12 @@ export interface InquiryWorkloadArgs {
   readonly to?: string | null;
   readonly order?: "NEWEST" | "OLDEST" | null;
   readonly limit?: number | null;
+}
+
+/** Does this row's own subject (and body, when read) contain the seller's subject word? */
+export function matchesTerm(term: string, texts: readonly (string | null | undefined)[]): boolean {
+  const haystack = texts.filter((t): t is string => typeof t === "string").join("\n").toLowerCase();
+  return haystack.includes(term.toLowerCase());
 }
 
 /** Does this row's own subject (and body, when read) fall under the topic? */
@@ -126,6 +141,7 @@ export async function listInquiryWorkload(
   const productIds = args.productIds && args.productIds.length > 0 ? new Set(args.productIds) : null;
   const workItemIds = args.workItemIds && args.workItemIds.length > 0 ? new Set(args.workItemIds) : null;
   const topic = args.topic ?? null;
+  const term = args.term ?? null;
 
   const channel = args.channel ? args.channel.toUpperCase() : null;
   const from = args.from ?? null;
@@ -161,6 +177,9 @@ export async function listInquiryWorkload(
     if (topic && !matchesTopic(topic, [row.title, detail?.title, detail?.details])) {
       continue;
     }
+    if (term && !matchesTerm(term, [row.title, row.productName, detail?.title, detail?.details])) {
+      continue;
+    }
     const { group, answerBasis } = classify(row.phase, detail);
     items.push({
       workItemId: row.workItemId,
@@ -178,6 +197,7 @@ export async function listInquiryWorkload(
       sourceSubtype: row.sourceSubtype ?? detail?.sourceSubtype ?? null,
       executableIdentity: row.executableIdentity ?? detail?.executableIdentity ?? "NONE",
       title: row.title ?? detail?.title ?? null,
+      snippet: row.snippet ?? detail?.details ?? null,
       detailRead: detail != null,
     });
   }
@@ -189,5 +209,6 @@ export async function listInquiryWorkload(
     detailReads,
     truncated,
     topic,
+    term,
   };
 }

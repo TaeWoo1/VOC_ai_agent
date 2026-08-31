@@ -164,7 +164,9 @@ export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsR
         continue;
       }
       workloadRead = true;
-      const read = intent === "ROWS" ? await readInquiryRows(input, need.id) : await readInquiryWorkload(input, need.id);
+      const read = intent === "ROWS"
+        ? await readInquiryRows(input, need.id)
+        : await readInquiryWorkload(input, need.id, intent === "PRIORITY");
       failures.push(...read.failures);
       if (read.evidence.length > 0) succeeded += 1;
       refs.push(...read.evidence);

@@ -259,23 +259,34 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
      * ({@code InquiryWorkItem}), which answers 「내가 답해야 할 일」 and lives in {@code InquiryQueueService}.
      * The window bounds are always supplied (the service substitutes the epoch / far future), so the
      * query never depends on a nullable timestamp parameter.
+     *
+     * <p><b>{@code term} is the seller's own subject word, and it is one bound parameter.</b> The
+     * closed topic families ({@code SHIPPING} · {@code EXCHANGE_RETURN} · …) cannot name 현금영수증,
+     * 세금계산서, 파손 or any other subject a real seller asks about, so before this axis existed the
+     * word was dropped and 「현금영수증 관련 문의 중 가장 최근 것」 was answered with the org's newest
+     * inquiry — a different question, answered confidently. The match is a case-insensitive LIKE over
+     * the subject line and the body the customer wrote; the caller supplies the wildcards, so this is
+     * one predicate with one parameter and never a sentence turned into SQL.
      */
     @Query("select q from Inquiry q where q.orgId = :orgId"
             + " and (:channelId is null or q.channelId = :channelId)"
             + " and (:status is null or q.status = :status)"
+            + " and (:term is null or lower(q.title) like :term or lower(q.body) like :term)"
             + " and q.receivedAt >= :from and q.receivedAt < :toExclusive"
             + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE)
     List<Inquiry> findRowsInWindow(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
-                                   @Param("status") String status, @Param("from") Instant from,
+                                   @Param("status") String status, @Param("term") String term,
+                                   @Param("from") Instant from,
                                    @Param("toExclusive") Instant toExclusive, Pageable pageable);
 
     /** The count that pairs with {@link #findRowsInWindow} — same predicate, so N건 matches the rows. */
     @Query("select count(q) from Inquiry q where q.orgId = :orgId"
             + " and (:channelId is null or q.channelId = :channelId)"
             + " and (:status is null or q.status = :status)"
+            + " and (:term is null or lower(q.title) like :term or lower(q.body) like :term)"
             + " and q.receivedAt >= :from and q.receivedAt < :toExclusive"
             + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE)
     long countRowsInWindow(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
-                           @Param("status") String status, @Param("from") Instant from,
-                           @Param("toExclusive") Instant toExclusive);
+                           @Param("status") String status, @Param("term") String term,
+                           @Param("from") Instant from, @Param("toExclusive") Instant toExclusive);
 }

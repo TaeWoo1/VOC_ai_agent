@@ -29,6 +29,12 @@ public record InquiryQueueItem(
         String phase,
         String status,
         String title,
+        /**
+         * The SAME bounded, PII-masked opening of the customer's message the 문의 feed shows
+         * ({@code InboxService.snippet}) — not the raw body. A queue row the operator cannot read is a
+         * row they must open to triage; this is the one line that makes the list itself workable.
+         */
+        String snippet,
         Instant receivedAt,
         /** Which resource of the channel produced the row ({@code InquirySourceSubtype} name), or null. */
         String sourceSubtype,

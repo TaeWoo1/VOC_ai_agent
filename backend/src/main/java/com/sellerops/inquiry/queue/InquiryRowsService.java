@@ -35,9 +35,11 @@ import org.springframework.transaction.annotation.Transactional;
  * <p><b>This is not the work queue.</b> {@link InquiryQueueService} answers 「내가 답해야 할 일」 over
  * {@code InquiryWorkItem} phases; this read answers 「최근 문의 3개」 / 「오늘 네이버 문의」 / 「답변 안 한
  * 것만」 over {@link Inquiry} itself — a receipt window, one channel or all, one status or all, newest or
- * oldest first, cut to a limit. Every axis is a closed token the caller chose; nothing here reads the
- * seller's sentence. The open/proposed work item, when one exists, rides along on the row so a later
- * 「첫 번째 거 답변 준비해줘」 can find it without a second read.
+ * oldest first, cut to a limit, and — since Conversation UX v2 — narrowed by ONE subject word the seller
+ * typed ({@code subject}). Every other axis is a closed token the caller chose; nothing here reads the
+ * seller's sentence, only the one word the caller already isolated from it. The open/proposed work item,
+ * when one exists, rides along on the row so a later 「첫 번째 거 답변 준비해줘」 can find it without a
+ * second read.
  *
  * <p>Same floor as the queue: ACTIVE and {@code REAL} rows only, no buyer identity, no raw body.
  */
@@ -84,6 +86,13 @@ public class InquiryRowsService {
         this.clock = clock;
     }
 
+    /** The pre-term signature. */
+    @Transactional(readOnly = true)
+    public InquiryRowsResponse rows(UUID orgId, LocalDate from, LocalDate to, String channel, String status,
+                                    String order, Integer limit) {
+        return rows(orgId, from, to, channel, status, order, limit, null);
+    }
+
     /**
      * @param from inclusive calendar date (an Asia/Seoul day, the seller's calendar); null = no lower bound
      * @param to inclusive calendar date (Asia/Seoul); null = the seller's today
@@ -91,10 +100,13 @@ public class InquiryRowsService {
      * @param status {@code UNANSWERED} | {@code ANSWERED} | {@code ALL}/null
      * @param order {@code NEWEST} (default) | {@code OLDEST}
      * @param limit rows to return, clamped to [1, {@link #MAX_LIMIT}]
+     * @param subject the seller's own subject word (「현금영수증」), matched against the subject line and the
+     *          customer's message; blank or null = no narrowing. Bounded to {@link #MAX_TERM} characters
+     *          so a whole sentence can never arrive here as a search
      */
     @Transactional(readOnly = true)
     public InquiryRowsResponse rows(UUID orgId, LocalDate from, LocalDate to, String channel, String status,
-                                    String order, Integer limit) {
+                                    String order, Integer limit, String subject) {
         LocalDate toDate = to == null ? LocalDate.ofInstant(clock.instant(), SELLER_ZONE) : to;
         if (from != null && from.isAfter(toDate)) {
             throw ApiException.badRequest("조회 기간의 시작일이 종료일보다 늦습니다.");
@@ -105,6 +117,8 @@ public class InquiryRowsService {
         String statusFilter = "ALL".equals(statusToken) ? null : statusToken;
         boolean oldest = oldestFirst(order);
         int size = limit == null ? DEFAULT_LIMIT : Math.max(1, Math.min(MAX_LIMIT, limit));
+        String term = term(subject);
+        String pattern = term == null ? null : "%" + term.toLowerCase(Locale.ROOT) + "%";
 
         UUID channelId = null;
         String channelCode = null;
@@ -118,7 +132,7 @@ public class InquiryRowsService {
             Optional<Channel> found = channels.findByCode(channelCode);
             if (found.isEmpty()) {
                 return new InquiryRowsResponse(from, toDate, channelCode, statusToken, oldest ? "OLDEST" : "NEWEST",
-                        size, 0, List.of());
+                        size, term, 0, List.of());
             }
             channelId = found.get().getId();
         }
@@ -126,9 +140,9 @@ public class InquiryRowsService {
         Sort sort = oldest
                 ? Sort.by(Sort.Order.asc("receivedAt"), Sort.Order.asc("id"))
                 : Sort.by(Sort.Order.desc("receivedAt"), Sort.Order.desc("id"));
-        List<Inquiry> page = inquiries.findRowsInWindow(orgId, channelId, statusFilter, start, end,
+        List<Inquiry> page = inquiries.findRowsInWindow(orgId, channelId, statusFilter, pattern, start, end,
                 PageRequest.of(0, size, sort));
-        long total = inquiries.countRowsInWindow(orgId, channelId, statusFilter, start, end);
+        long total = inquiries.countRowsInWindow(orgId, channelId, statusFilter, pattern, start, end);
 
         Map<UUID, Channel> channelsById = new HashMap<>();
         for (Channel ch : channels.findAllById(page.stream().map(Inquiry::getChannelId).filter(java.util.Objects::nonNull).distinct().toList())) {
@@ -152,7 +166,7 @@ public class InquiryRowsService {
                         identities.getOrDefault(q.getId(), com.sellerops.identity.ExecutableIdentity.NONE)))
                 .toList();
         return new InquiryRowsResponse(from, toDate, channelCode, statusToken, oldest ? "OLDEST" : "NEWEST",
-                size, total, items);
+                size, term, total, items);
     }
 
     private static InquiryRowItem toItem(Inquiry q, Channel channel, Map<UUID, String> productNames,
@@ -171,10 +185,25 @@ public class InquiryRowsService {
                 workItem == null ? null : workItem.getPhase().name(),
                 q.getStatus(),
                 q.getTitle(),
+                com.sellerops.inbox.InboxService.snippet(q.getBody()),
                 q.getReceivedAt(),
                 q.getAnsweredAt(),
                 q.getSourceSubtype(),
                 executableIdentity.name());
+    }
+
+    /** The longest subject word this read accepts. A sentence is not a subject; it is refused, not cut. */
+    public static final int MAX_TERM = 40;
+
+    private static String term(String q) {
+        if (q == null || q.isBlank()) {
+            return null;
+        }
+        String trimmed = q.strip();
+        if (trimmed.length() > MAX_TERM) {
+            throw ApiException.badRequest("검색어가 너무 깁니다.");
+        }
+        return trimmed;
     }
 
     private static String statusToken(String status) {

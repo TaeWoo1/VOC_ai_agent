@@ -36,6 +36,13 @@ const REASON: Record<HumanAction["reason"], string> = {
   NO_ANSWER_BASIS: "이 질문에 적용할 수 있는 답변 기준이 없습니다.",
 };
 
+/** What a link-only step's button says. Absent ⇒ the generic 「직접 진행하기」. */
+const LINK_LABEL: Partial<Record<HumanAction["actionType"], string>> = {
+  KNOWLEDGE_ENTRY: "답변 기준 추가",
+  VARIANT_CLARIFICATION: "규격 확인",
+  CHANNEL_CONNECT: "채널 연결하기",
+};
+
 const GUIDED_PATHS: ReadonlyArray<HumanAction["path"]> = ["EXPORT_ACTION_WINDOW", "WING_READ_ACTION_WINDOW"];
 
 /** What the guided run does, per path — the product contract's wording (a bounded set of platform confirmations, not a one-press promise). */
@@ -55,7 +62,10 @@ function titleOf(artifact: HumanAction, channel: string | null): string {
 }
 
 /** One line of reason. For a review step it names the instant, never the mechanism (no "sync", no "coverage"). */
-function reasonOf(artifact: HumanAction): string {
+function reasonOf(artifact: HumanAction): string | null {
+  // 「답변하려면 답변 기준이 필요합니다」 as the title and 「이 질문에 적용할 수 있는 답변 기준이
+  // 없습니다」 under it are one fact in two shapes (Conversation UX v2 §D). The title keeps it.
+  if (artifact.actionType === "KNOWLEDGE_ENTRY") return null;
   if (artifact.actionType !== "REVIEW_IMPORT") return REASON[artifact.reason];
   if (artifact.reason === "NOT_CONNECTED") return REASON.NOT_CONNECTED;
   const word = asOfWord(artifact.asOf);
@@ -122,7 +132,9 @@ export function HumanActionArtifact({
   ) : guided ? (
     !engaged ? <Btn onClick={() => setEngaged(true)}>{primaryLabel}</Btn> : null
   ) : artifact.to ? (
-    <BtnLink to={returnTo(artifact.to)} onClick={onOpen}>직접 진행하기</BtnLink>
+    // The button says the STEP, not 「직접 진행하기」: a seller reading 「답변 기준이 필요합니다」 needs the
+    // control to name the thing they are about to add (the same words the 문의 screen uses).
+    <BtnLink to={returnTo(artifact.to)} onClick={onOpen}>{LINK_LABEL[artifact.actionType] ?? "직접 진행하기"}</BtnLink>
   ) : null;
   const running = guided != null && engaged && !!artifact.accountId;
 

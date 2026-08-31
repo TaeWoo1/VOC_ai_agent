@@ -34,10 +34,13 @@ describe("KnowledgeCaptureArtifact", () => {
     expect(screen.getByTestId("knowledge-capture").textContent).not.toMatch(INTERNAL);
   });
 
-  it("ASKED shows the question and no controls; a card without a decision handler shows none either", () => {
-    render(<MemoryRouter><KnowledgeCaptureArtifact artifact={{ ...base, state: "ASKED", content: null, fingerprint: null, title: "배송 기준" }} onDecision={vi.fn()} /></MemoryRouter>);
-    expect(screen.getByTestId("capture-question")).toHaveTextContent("보통 결제 후 며칠 안에 출고하시나요?");
+  it("ASKED draws NOTHING — the question is the turn's own sentence, asked once", () => {
+    // Conversation UX v2 §D: a card that repeats the question verbatim under it was the same ask twice.
+    const { container } = render(<MemoryRouter><KnowledgeCaptureArtifact artifact={{ ...base, state: "ASKED", content: null, fingerprint: null, title: "배송 기준" }} onDecision={vi.fn()} /></MemoryRouter>);
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("capture-question")).toBeNull();
     expect(screen.queryByRole("button", { name: "저장하고 계속" })).toBeNull();
+    // A card with a candidate but no handler still shows no control.
     render(<MemoryRouter><KnowledgeCaptureArtifact artifact={base} /></MemoryRouter>);
     expect(screen.queryByRole("button", { name: "저장하고 계속" })).toBeNull();
   });

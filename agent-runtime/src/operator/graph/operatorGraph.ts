@@ -66,6 +66,7 @@ import { effectiveAxisOf } from "../plan/scopeOverride";
 import type { Artifact, ProgressStage } from "../../conversation/contract";
 import { READING_LABEL, STAGE_LABEL } from "../../conversation/contract";
 import type { KnowledgeCoverageRow, SignalCoverage } from "../../spring/types";
+import { subjectTermOf } from "../../conversation/subjectTerm";
 import { log } from "../../log";
 
 export interface OperatorGraphDeps {
@@ -202,7 +203,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     const ordinal = await ordinalProduct(plan, state, resolved);
     if (ordinal) resolved.push(ordinal);
     // R7: decided once per dispatch, logged once; every specialist reads the same axis.
-    const axis = effectiveAxisOf(plan, state.conversation?.workingSet ?? null, true);
+    const axis = effectiveAxisOf(plan, state.conversation?.workingSet ?? null, true, {
+      topic: plan.filters?.topic && plan.filters.topic !== "OTHER" ? plan.filters.topic : null,
+      term: plan.filters?.topic && plan.filters.topic !== "OTHER" ? null : subjectTermOf(state.goalText),
+    });
     let knowledge: Record<string, import("../../spring/types").ProductKnowledge> = {};
     let knowledgeCoverage: KnowledgeCoverageRow[] = [];
     const findingsSoFar: Finding[] = [...state.findings];

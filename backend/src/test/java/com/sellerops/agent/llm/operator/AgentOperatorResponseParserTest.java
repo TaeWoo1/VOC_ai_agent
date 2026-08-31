@@ -70,7 +70,9 @@ class AgentOperatorResponseParserTest {
         assertThat(plan.filters().limit()).isEqualTo(3);
         assertThat(plan.filters().order()).isEqualTo("OLDEST");
         assertThat(plan.filters().status()).isEqualTo("UNANSWERED");
-        assertThat(AgentPlanPrompt.INQUIRY_INTENTS).containsExactly("ROWS", "WORKLOAD", "COUNT");
+        // PRIORITY (Conversation UX v2): 「가장 시급한 건」 is a question about ORDER, and a list was the
+        // only shape it could take before this token existed.
+        assertThat(AgentPlanPrompt.INQUIRY_INTENTS).containsExactly("ROWS", "WORKLOAD", "COUNT", "PRIORITY");
         assertThat(AgentPlanPrompt.ORDERS).containsExactly("NEWEST", "OLDEST");
         assertThat(AgentPlanPrompt.STATUSES).containsExactly("UNANSWERED", "ANSWERED", "ALL");
         assertThat(AgentPlanPrompt.system()).contains("filters.inquiryIntent", "filters.limit", "filters.order", "filters.status");
@@ -178,7 +180,7 @@ class AgentOperatorResponseParserTest {
             assertThat(system).contains(token);
         }
         assertThat(system).contains("ORDER_OPS");
-        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v8");
+        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v9");
     }
 
     @Test

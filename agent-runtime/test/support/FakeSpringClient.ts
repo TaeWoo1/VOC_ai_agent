@@ -216,6 +216,8 @@ export class FakeSpringClient implements SpringClient {
       .filter((r) => status === "ALL" || r.status === status)
       .filter((r) => !params.from || r.seed.receivedAt.slice(0, 10) >= params.from)
       .filter((r) => !params.to || r.seed.receivedAt.slice(0, 10) <= params.to)
+      // The backend's `q`: one bounded LIKE over the subject line and the customer's message.
+      .filter((r) => !params.q || `${r.seed.title}\n${r.seed.details}`.toLowerCase().includes(params.q.toLowerCase()))
       .sort((a, b) => params.order === "OLDEST"
         ? a.seed.receivedAt.localeCompare(b.seed.receivedAt)
         : b.seed.receivedAt.localeCompare(a.seed.receivedAt));
@@ -224,13 +226,14 @@ export class FakeSpringClient implements SpringClient {
       inquiryId: r.seed.inquiryId, workItemId: r.workItemId, sellerAccountId: r.seed.sellerAccountId,
       channelId: r.seed.channelId, channelCode: r.seed.channelCode ?? null, channelNameKo: r.seed.channelNameKo ?? null,
       productId: r.seed.productId ?? null, productName: r.seed.productName ?? null,
-      phase: r.workItemId ? r.phase : null, status: r.status, title: r.seed.title, receivedAt: r.seed.receivedAt,
+      phase: r.workItemId ? r.phase : null, status: r.status, title: r.seed.title,
+      snippet: r.seed.details, receivedAt: r.seed.receivedAt,
       answeredAt: null, sourceSubtype: r.seed.sourceSubtype ?? null,
       executableIdentity: r.seed.executableIdentity ?? "MARKETPLACE",
     }));
     return {
       from: params.from ?? null, to: params.to ?? "2099-12-31", channel, status, order: params.order ?? "NEWEST",
-      limit, totalCount: all.length, items,
+      limit, term: params.q ?? null, totalCount: all.length, items,
     };
   }
 

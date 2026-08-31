@@ -187,6 +187,15 @@ export interface InquiryItem {
    * (Conversation Object Integrity v1); the body never travels here.
    */
   readonly title?: string | null;
+  /**
+   * transient — the same bounded, PII-masked opening of the customer's message the 문의 feed shows.
+   * Present on a ROWS list so the seller reads what the customer actually wrote without opening
+   * anything, and so a row with no work item (an answered inquiry) can still show its body. Stripped
+   * before persistence like every other customer text.
+   */
+  readonly snippet?: string | null;
+  /** PRIORITIZE: whole days this inquiry has been waiting, as of the run's reference date. */
+  readonly waitingDays?: number | null;
   readonly productId: string | null;
   readonly productName: string | null;
   readonly answerBasis: string | null;
@@ -212,6 +221,10 @@ export interface InquiryListArtifact extends ArtifactBase {
     readonly limit: number | null;
     /** Conversation Core v1: the closed topic family the read was narrowed by, when one was. */
     readonly topic?: PlanFilters["topic"];
+    /** The seller's own subject word the read was narrowed by (`subjectTerm.ts`), when one was. */
+    readonly term?: string | null;
+    /** PRIORITIZE: the rows are in urgency order, and the answer says by what. */
+    readonly rank?: "URGENCY" | null;
   };
 }
 
@@ -564,7 +577,7 @@ export interface PlanFilters {
    * INQUIRY_VOLUME need is for: the customer's inquiries as rows (`ROWS`), the seller's work queue
    * (`WORKLOAD`), or one number (`COUNT`). Absent ⇒ derived from the other spec fields, never from words.
    */
-  readonly inquiryIntent: "ROWS" | "WORKLOAD" | "COUNT" | null;
+  readonly inquiryIntent: "ROWS" | "WORKLOAD" | "COUNT" | "PRIORITY" | null;
   /** How many rows the seller asked for (「1개만」, 「3개」). Clamped by the parser; null = the read's default page. */
   readonly limit: number | null;
   /** Which end of the window comes first. Absent ⇒ NEWEST. */
@@ -597,6 +610,8 @@ export interface WorkingSetView {
     readonly rating?: "ALL" | "LOW";
     readonly productIds?: readonly string[];
     readonly topic?: PlanFilters["topic"];
+    /** The seller's own subject word the set was narrowed by, when one was (`subjectTerm.ts`). */
+    readonly term?: string | null;
     /** Query Accuracy v1: which inquiry read produced the set, and the status it was read with. */
     readonly inquiryIntent?: "ROWS" | "WORKLOAD";
     readonly status?: "UNANSWERED" | "ANSWERED" | "ALL";
@@ -902,7 +917,7 @@ export function persistableArtifact(artifact: Artifact): Artifact {
         ...artifact,
         groups: artifact.groups.map((g) => ({
           ...g,
-          items: g.items.slice(0, MAX_ITEMS_PERSISTED),
+          items: g.items.slice(0, MAX_ITEMS_PERSISTED).map(({ snippet: _s, ...item }) => item),
         })),
       };
     case "DRAFT": {

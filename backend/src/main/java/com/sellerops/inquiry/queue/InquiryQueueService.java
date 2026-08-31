@@ -156,6 +156,7 @@ public class InquiryQueueService {
                 workItem.getPhase().name(),
                 status,
                 title,
+                inquiry == null ? null : com.sellerops.inbox.InboxService.snippet(inquiry.getBody()),
                 receivedAt,
                 inquiry == null ? null : inquiry.getSourceSubtype(),
                 executableIdentity.name());

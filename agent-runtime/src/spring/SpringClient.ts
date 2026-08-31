@@ -209,6 +209,7 @@ export class HttpSpringClient
     if (params.status) q.set("status", params.status);
     if (params.order) q.set("order", params.order);
     if (params.limit != null) q.set("limit", String(params.limit));
+    if (params.q) q.set("q", params.q);
     const suffix = q.toString() ? `?${q.toString()}` : "";
     return this.request<InquiryRowsResponse>("GET", `/api/inquiries/rows${suffix}`);
   }

@@ -428,11 +428,11 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
       }),
     })),
 
-    read(tool(async ({ productIds, workItemIds, topic, maxDetailReads, channel, from, to, order, limit }:
-      { productIds?: string[]; workItemIds?: string[]; topic?: string; maxDetailReads?: number; channel?: string;
+    read(tool(async ({ productIds, workItemIds, topic, term, maxDetailReads, channel, from, to, order, limit }:
+      { productIds?: string[]; workItemIds?: string[]; topic?: string; term?: string; maxDetailReads?: number; channel?: string;
         from?: string; to?: string; order?: "NEWEST" | "OLDEST"; limit?: number }) =>
       listInquiryWorkload(deps.inquiry, {
-        productIds, workItemIds, maxDetailReads, channel, from, to, order, limit,
+        productIds, workItemIds, maxDetailReads, channel, from, to, order, limit, term,
         topic: (topic ?? null) as Parameters<typeof listInquiryWorkload>[1]["topic"],
       }), {
       name: OPERATOR_TOOL.LIST_INQUIRY_WORKLOAD,
@@ -444,6 +444,9 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         productIds: z.array(z.string().min(1)).max(50).optional(),
         workItemIds: z.array(z.string().min(1)).max(50).optional(),
         topic: z.enum(["SHIPPING", "EXCHANGE_RETURN", "PRODUCT_SPEC", "USAGE", "OTHER"]).optional(),
+        // The seller's own subject word, when no closed family holds it (`subjectTerm.ts`). Runtime-read,
+        // never planner-supplied, and bounded to one word.
+        term: z.string().min(2).max(12).optional(),
         maxDetailReads: z.number().int().min(0).max(WORKLOAD_DETAIL_CAP).optional(),
         // Query Accuracy v1: the QuerySpec axes. Named here so the schema cannot strip them — a filter
         // the planner set and the tool never saw was the defect this package closes.
@@ -455,9 +458,9 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
       }),
     })),
 
-    read(tool(async ({ from, to, channel, status, order, limit }:
-      { from?: string; to?: string; channel?: string; status?: "UNANSWERED" | "ANSWERED" | "ALL"; order?: "NEWEST" | "OLDEST"; limit?: number }) =>
-      deps.inquiry.listInquiryRows({ from, to, channel, status, order, limit }), {
+    read(tool(async ({ from, to, channel, status, order, limit, q }:
+      { from?: string; to?: string; channel?: string; status?: "UNANSWERED" | "ANSWERED" | "ALL"; order?: "NEWEST" | "OLDEST"; limit?: number; q?: string }) =>
+      deps.inquiry.listInquiryRows({ from, to, channel, status, order, limit, q }), {
       name: OPERATOR_TOOL.LIST_INQUIRY_ROWS,
       description:
         "고객 문의 행 목록 — 기간·채널·상태(미답변/답변/전체)·순서(최신/오래된)·개수로 좁힌다. '최근 문의 3개', "
@@ -470,6 +473,10 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         status: z.enum(["UNANSWERED", "ANSWERED", "ALL"]).optional(),
         order: z.enum(["NEWEST", "OLDEST"]).optional(),
         limit: z.number().int().min(1).max(50).optional(),
+        // ONE bounded subject word the runtime read from the seller's own sentence (`subjectTerm.ts`).
+        // The planner never fills it — it is not in the plan schema — so this can only ever be a word
+        // the seller typed, and the length bound keeps a sentence from arriving here as a search.
+        q: z.string().min(2).max(12).optional(),
       }),
     })),
 

@@ -24,6 +24,7 @@
  */
 import { TOPIC_WORDS } from "../operator/tools/inquiryWorkload";
 import type { WorkloadTopic } from "../operator/tools/inquiryWorkload";
+import { usableTerm } from "./subjectTerm";
 
 export type TaskMode = "ANSWER" | "LIST" | "FILTER" | "INSPECT" | "ANALYZE" | "PREPARE" | "REVISE" | "EXECUTE";
 export type TaskScope = "ORG" | "VISIBLE_SET" | "SELECTED_ENTITY";
@@ -32,9 +33,17 @@ export type TaskScope = "ORG" | "VISIBLE_SET" | "SELECTED_ENTITY";
 export interface VisibleFilter {
   readonly channel: "NAVER" | "COUPANG" | "CAFE24" | null;
   readonly topic: WorkloadTopic | null;
+  /**
+   * The seller's own subject word, when the sentence narrowed by one the closed topic families do not
+   * hold (「그중 현금영수증만」). Matched literally against the rows on screen — a word that matches no
+   * row answers 「…는 없습니다」, which is the truth about the visible set and never a silent widening.
+   */
+  readonly term: string | null;
   readonly status: "UNANSWERED" | "ANSWERED" | null;
   readonly limit: number | null;
   readonly order: "NEWEST" | "OLDEST" | null;
+  /** PRIORITIZE over the rows on screen: order them by how long the customer has waited. */
+  readonly urgency: boolean;
 }
 
 /** The seller's word for each topic family — the FILTER lane's honest label for what it narrowed by. */
@@ -68,6 +77,53 @@ export function analyzeIntentOf(text: string): boolean {
   if (t.length === 0 || t.length > ANALYZE_MAX_CHARS) return false;
   if (ANALYZE_EXCLUDES.some((cue) => t.includes(cue))) return false;
   return ANALYZE_CUES.some((re) => re.test(t));
+}
+
+/* ───────────────────────────── PRIORITIZE — which of these first ─────────────────────────────
+ *
+ * 「가장 시급한 건」 · 「급한 것부터」 · 「뭐부터 봐야 해」 — a question about ORDER, not about which rows
+ * exist. Over rows already on screen it is answered with no read and no model call; over the org it is
+ * the planner's `inquiryIntent=PRIORITY`. The criterion (waiting time) is stated by the answer itself —
+ * see `conversation/urgency.ts` for why there is exactly one.
+ */
+const URGENCY_CUES: readonly RegExp[] = [
+  /시급/u,
+  /급한\s?(것|거|건|순)/u,
+  /(먼저|우선|제일\s?먼저)\s?(볼|봐야|처리|해야|하는)/u,
+  /(뭐|무엇|어떤\s?것?)\s?부터/u,
+  /우선순위/u,
+];
+/** A sentence that also asks to draft, send or open something is not a ranking question. */
+const URGENCY_EXCLUDES = ["준비", "초안", "보내", "전송", "승인", "말투", "번째", "화면"];
+const URGENCY_MAX_CHARS = 50;
+
+/**
+ * Words that give a sentence a scope of its OWN. 「미응답 문의 중 가장 시급한 건?」 asks about the org's
+ * unanswered queue, not about whatever rows happen to be on screen — answering it from the visible set
+ * would silently narrow the question, which is the defect this whole package exists to close.
+ */
+const OWN_SCOPE_WORDS = [
+  "네이버", "스마트스토어", "쿠팡", "카페24", "자사몰",
+  "미답변", "미응답", "답변 안", "답변안", "무응답", "답변한", "답변함",
+  "오늘", "어제", "이번 주", "이번주", "지난주", "최근", "전체", "전부", "모든",
+];
+
+/**
+ * Is this ranking question about the rows the seller is LOOKING AT? True when the sentence points back
+ * at them (「그중」·「여기서」·「방금 본」) or names no scope of its own. Otherwise the planner answers it.
+ */
+export function visiblePriorityOf(text: string): boolean {
+  if (!priorityIntentOf(text)) return false;
+  if (/그중|이\s?중|여기서|방금\s?본|중에서/u.test(text)) return true;
+  return !OWN_SCOPE_WORDS.some((w) => text.includes(w));
+}
+
+/** Does this sentence ask which of the things on the table to do FIRST? */
+export function priorityIntentOf(text: string): boolean {
+  const t = text.trim();
+  if (t.length === 0 || t.length > URGENCY_MAX_CHARS) return false;
+  if (URGENCY_EXCLUDES.some((cue) => t.includes(cue))) return false;
+  return URGENCY_CUES.some((re) => re.test(t));
 }
 
 /* ───────────────────────────── FILTER — a refine of the visible set ─────────────────────────────
@@ -188,18 +244,23 @@ export function visibleFilterOf(text: string): VisibleFilter | null {
     }
   }
 
-  if (!channel && !topic && !status && limit == null && order == null) return null;
-
-  // Everything left must be filler. One unconsumed content token ⇒ not this lane's sentence.
+  // Everything the axis tables did not consume. ONE leftover word is the SUBJECT the seller narrowed
+  // by (「그중 현금영수증만」) — the axis the closed topic families cannot hold; it is matched literally
+  // against the rows on screen, so naming something the set does not contain answers 「없습니다」 about
+  // the set rather than guessing. Two or more leftovers mean the sentence says something these tables
+  // cannot read, and the planner decides what it is.
   for (const filler of FILTER_FILLERS) rest = rest.split(filler).join(" ");
   const leftovers = rest
     .split(/\s+/)
     .map((token) => token.trim())
     .filter((token) => token.length >= 2);
-  if (leftovers.length > 0) return null;
+  if (leftovers.length > 1) return null;
+  const term = topic || leftovers.length === 0 ? null : usableTerm(leftovers[0]!);
+  if (leftovers.length === 1 && !term) return null;
 
+  if (!channel && !topic && !term && !status && limit == null && order == null) return null;
   // 「최근 5개」 alone: an order+limit refine. 「최근」 alone names no narrowing — decline.
-  if (!channel && !topic && !status && limit == null && order != null) return null;
+  if (!channel && !topic && !term && !status && limit == null && order != null) return null;
 
-  return { channel, topic, status, limit, order };
+  return { channel, topic, term, status, limit, order, urgency: false };
 }

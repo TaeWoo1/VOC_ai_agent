@@ -5,8 +5,15 @@
  * <b>Not the work queue.</b> {@link readInquiryWorkload} answers 「내가 답해야 할 일」 over work-item phases;
  * this step answers "which inquiries came in" over the inquiries themselves, through one backend read
  * (`GET /api/inquiries/rows`) whose every axis is a closed token the planner chose: window · channel ·
- * status · order · limit. Nothing here reads the seller's sentence, and nothing here invents a default the
- * spec did not state — the defaults are named once, below, and disclosed in the artifact's `scope`.
+ * status · order · limit. Nothing here invents a default the spec did not state — the defaults are named
+ * once, below, and disclosed in the artifact's `scope`.
+ *
+ * <b>One axis is not a closed token, and it is the seller's own word.</b> `term` (`spec.term`) is the
+ * subject the sentence named when no closed topic family holds it — 현금영수증, 세금계산서, 파손. It is
+ * extracted deterministically by `conversation/subjectTerm.ts` (never by the planner, never by a model)
+ * and sent to the backend as one bounded `q`. This is the ONLY sentence-reading this step does, it can
+ * only ever narrow, and the narrowing is said back in the seller's own word — so a zero under it is a
+ * zero about that subject. Before it existed the word was dropped and the read answered a wider question.
  *
  * <b>A follow-up refines the same read.</b> With `scope=WORKING_SET` over an INQUIRIES set this step
  * re-reads with the previous set's window/channel/status as the base, the new tokens layered on top, then
@@ -26,6 +33,7 @@ import { periodLabel, windowOf } from "../../conversation/period";
 import { matchesTopic } from "../tools/inquiryWorkload";
 import type { WorkloadTopic } from "../tools/inquiryWorkload";
 import { TOPIC_LABEL } from "../../conversation/taskInterpreter";
+import { subjectTermOf } from "../../conversation/subjectTerm";
 import { log } from "../../log";
 
 /** The most rows a ROWS read fetches when no limit was asked for — the backend page ceiling. */
@@ -57,6 +65,14 @@ export interface InquiryRowsSpec {
    * re-served the previous rows unchanged (PO QA 2026-08-31, failure 1).
    */
   readonly topic: WorkloadTopic | null;
+  /**
+   * The seller's own subject word (「현금영수증」) — the axis `topic` cannot carry. Read from the
+   * sentence by the closed extractor in `conversation/subjectTerm.ts`, never by the planner, and sent
+   * to the backend as `q`. This is the one place this step reads the seller's words, and it reads them
+   * for exactly one purpose: to narrow by a noun the closed vocabularies do not hold. Before it existed
+   * the noun was dropped and the answer was about a wider question than the one that was asked.
+   */
+  readonly term: string | null;
   readonly previousIds: readonly string[] | null;
   /** On a refine: the order the previous set was read in. The re-read uses it; `order` is applied in-process. */
   readonly baseOrder: Order;
@@ -74,8 +90,11 @@ export function resolveRowsSpec(input: SpecialistInput): InquiryRowsSpec {
   const limit = filters?.limit ?? null;
   const topic: WorkloadTopic | null = (filters?.topic && filters.topic !== "OTHER" ? filters.topic : null)
     ?? (previous?.filters.topic && previous.filters.topic !== "OTHER" ? previous.filters.topic : null);
+  // A topic family already names the subject; a term beside it would narrow the same noun twice and
+  // the seller would read back two words for one question.
+  const term = topic ? null : subjectTermOf(input.goalText) ?? previous?.filters.term ?? null;
   const baseOrder: Order = previous?.filters.order ?? "NEWEST";
-  return { window, channel, status, order, limit, topic, previousIds: previous ? [...previous.ids] : null, baseOrder };
+  return { window, channel, status, order, limit, topic, term, previousIds: previous ? [...previous.ids] : null, baseOrder };
 }
 
 export async function readInquiryRows(input: SpecialistInput, needId: string): Promise<RowsRead> {
@@ -98,8 +117,10 @@ export async function readInquiryRows(input: SpecialistInput, needId: string): P
     status: spec.status,
     order: spec.previousIds ? spec.baseOrder : spec.order,
     // A topic is filtered in-process, so the read must not be pre-limited to fewer rows than the
-    // filter will inspect — the limit is applied after the topic keeps or drops each row.
+    // filter will inspect — the limit is applied after the topic keeps or drops each row. A TERM is
+    // applied by the query itself, so it does not widen the page.
     limit: spec.previousIds || spec.topic ? ROWS_PAGE : spec.limit ?? ROWS_PAGE,
+    ...(spec.term ? { q: spec.term } : {}),
   };
   const attempt = await attemptTool(
     { specialist: "INQUIRY_OPS", tool: OPERATOR_TOOL.LIST_INQUIRY_ROWS, needId },
@@ -128,7 +149,7 @@ export async function readInquiryRows(input: SpecialistInput, needId: string): P
   const pageRef = evidence.add({
     kind: "INQUIRY",
     sourceTool: OPERATOR_TOOL.LIST_INQUIRY_ROWS,
-    args: { from: spec.window?.from ?? null, to: spec.window?.to ?? null, channel: spec.channel, status: spec.status, order: spec.order, limit: spec.limit },
+    args: { from: spec.window?.from ?? null, to: spec.window?.to ?? null, channel: spec.channel, status: spec.status, order: spec.order, limit: spec.limit, term: spec.term },
     locator: { count: total, label: "문의", ...(spec.channel ? { channelCode: spec.channel } : {}) },
     events: spec.window
       ? eventRange(spec.window.from, spec.window.to)
@@ -162,7 +183,7 @@ export async function readInquiryRows(input: SpecialistInput, needId: string): P
 
   const toItem = (i: InquiryRowsResponse["items"][number]): InquiryItem => ({
     workItemId: i.workItemId ?? null, inquiryId: i.inquiryId, channelCode: i.channelCode, channelNameKo: i.channelNameKo,
-    receivedAt: i.receivedAt, phase: i.phase ?? "", status: i.status, title: i.title,
+    receivedAt: i.receivedAt, phase: i.phase ?? "", status: i.status, title: i.title, snippet: i.snippet ?? null,
     productId: i.productId, productName: i.productName, answerBasis: null,
     sourceSubtype: i.sourceSubtype ?? null, executableIdentity: i.executableIdentity ?? "NONE",
     to: `/inquiries/${i.inquiryId}`,
@@ -194,12 +215,12 @@ export async function readInquiryRows(input: SpecialistInput, needId: string): P
     title,
     groups,
     totalCount: total,
-    scope: { period: spec.window, channelCode: spec.channel, status: spec.status, order: spec.order, limit: spec.limit, topic: spec.topic },
+    scope: { period: spec.window, channelCode: spec.channel, status: spec.status, order: spec.order, limit: spec.limit, topic: spec.topic, term: spec.term },
     more: { label: "문의 화면에서 보기", to: "/inquiries", count: total },
   };
   log("inquiry_rows", {
     window: spec.window?.token ?? "NONE", channel: spec.channel ?? "NONE", status: spec.status, order: spec.order,
-    limit: spec.limit ?? "NONE", topic: spec.topic ?? "NONE", rows: rows.length, total, workingSet: spec.previousIds != null,
+    limit: spec.limit ?? "NONE", topic: spec.topic ?? "NONE", term: spec.term != null, rows: rows.length, total, workingSet: spec.previousIds != null,
   });
   return {
     findings, evidence: refs, artifacts: [list], notes, failures: [],
@@ -217,7 +238,7 @@ const CHANNEL_WORD: Record<string, string> = { NAVER: "네이버", COUPANG: "쿠
 function rowsTitle(spec: InquiryRowsSpec): string {
   const period = spec.window ? `${periodLabel(spec.window.token ?? null)} ` : "";
   const channel = spec.channel && CHANNEL_WORD[spec.channel.toUpperCase()] ? `${CHANNEL_WORD[spec.channel.toUpperCase()]} ` : "";
-  const topic = spec.topic ? `${TOPIC_LABEL[spec.topic]} ` : "";
+  const topic = spec.topic ? `${TOPIC_LABEL[spec.topic]} ` : spec.term ? `${spec.term} 관련 ` : "";
   const which = spec.limit != null ? `${spec.order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${spec.limit}건` : "문의";
   return `${period}${channel}${topic}${statusWord(spec.status)}${which}`.trim();
 }
@@ -230,6 +251,7 @@ export interface RowsScopeWords {
   readonly order: Order;
   readonly limit: number | null;
   readonly topic?: WorkloadTopic | null;
+  readonly term?: string | null;
 }
 
 /**
@@ -243,7 +265,9 @@ export function inquiryRowsSentence(scope: RowsScopeWords, shown: number, total:
   const count = Math.max(total, shown);
   const period = scope.period ? `${periodLabel(scope.period.token ?? null)} 들어온 ` : "";
   const channel = scope.channelCode && CHANNEL_WORD[scope.channelCode.toUpperCase()] ? `${CHANNEL_WORD[scope.channelCode.toUpperCase()]} ` : "";
-  const topic = scope.topic ? `${TOPIC_LABEL[scope.topic]} ` : "";
+  // The seller's own word, said back verbatim: a zero under it is a zero about THAT subject, and a
+  // read that could not narrow by it never wears its label.
+  const topic = scope.topic ? `${TOPIC_LABEL[scope.topic]} ` : scope.term ? `${scope.term} 관련 ` : "";
   const subject = `${refine ? "방금 본 문의 중 " : ""}${period}${channel}${topic}${statusWord(scope.status)}문의`;
   if (count === 0) return `${subject}는 없습니다.`;
   const which = scope.limit != null && shown < count
@@ -255,7 +279,7 @@ export function inquiryRowsSentence(scope: RowsScopeWords, shown: number, total:
 
 function rowsStatement(spec: InquiryRowsSpec, shown: number, total: number): string {
   return inquiryRowsSentence(
-    { period: spec.window, channelCode: spec.channel, status: spec.status, order: spec.order, limit: spec.limit, topic: spec.topic },
+    { period: spec.window, channelCode: spec.channel, status: spec.status, order: spec.order, limit: spec.limit, topic: spec.topic, term: spec.term },
     shown, total, spec.previousIds != null,
   );
 }

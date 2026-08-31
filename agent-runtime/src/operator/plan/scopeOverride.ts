@@ -13,14 +13,40 @@ import { conversationAxisOf } from "./InvestigationPlan";
 import type { WorkingSetView } from "../../conversation/contract";
 import { log } from "../../log";
 
-export type ScopeOverrideReason = "NEW_PERIOD" | "EMPTY_SET" | "NEW_LIMIT";
+export type ScopeOverrideReason = "NEW_PERIOD" | "EMPTY_SET" | "NEW_LIMIT" | "NEW_SUBJECT";
+
+/**
+ * What the SENTENCE says the question is about — the closed topic family the planner named and the
+ * seller's own subject word the runtime read (`conversation/subjectTerm.ts`). Both are values, never
+ * text to interpret; the caller supplies them because only it has the sentence.
+ */
+export interface SentenceSubject {
+  readonly topic: PlanFilters["topic"];
+  readonly term: string | null;
+}
+
+/** Does the sentence name a subject, and is it a different one from the set's? */
+function subjectChanged(subject: SentenceSubject | undefined, set: WorkingSetView): boolean {
+  if (!subject) return false;
+  const setTopic = set.filters.topic ?? null;
+  const setTerm = set.filters.term ?? null;
+  // A set with NO subject of its own can be narrowed by one — 「그중 배송 관련만」 is a real refine.
+  if (setTopic == null && setTerm == null) return false;
+  const asked = subject.topic ?? subject.term;
+  if (asked == null) return false;
+  return subject.topic != null ? subject.topic !== setTopic : subject.term !== setTerm;
+}
 
 export function scopeOverrideOf(
-  plan: InvestigationPlan, workingSet: WorkingSetView | null,
+  plan: InvestigationPlan, workingSet: WorkingSetView | null, subject?: SentenceSubject,
 ): ScopeOverrideReason | null {
   const { filters } = conversationAxisOf(plan);
   if (filters.scope !== "WORKING_SET") return null;
   if (!workingSet) return "EMPTY_SET";
+  // A set that IS 「파손 문의」 cannot be narrowed into 「교환 문의」: the two subjects are disjoint by
+  // construction, so 「방금 본 문의 중 교환 관련은 없습니다」 is arithmetically true and operationally a
+  // wrong answer — the seller asked the ORG a new question. Found live 2026-08-31.
+  if (subjectChanged(subject, workingSet)) return "NEW_SUBJECT";
   // A new period is the stronger reading and is checked first: a sentence naming another period is a
   // new question whatever the previous set held (or did not).
   const previous = workingSet.filters.period?.token ?? null;
@@ -63,13 +89,13 @@ function inheritedAxesDropped(filters: PlanFilters, set: WorkingSetView): PlanFi
 
 /** The plan's conversation axis with the override applied. Logs once when asked to. */
 export function effectiveAxisOf(
-  plan: InvestigationPlan, workingSet: WorkingSetView | null, emitLog = false,
+  plan: InvestigationPlan, workingSet: WorkingSetView | null, emitLog = false, subject?: SentenceSubject,
 ): ReturnType<typeof conversationAxisOf> {
   const axis = conversationAxisOf(plan);
-  const reason = scopeOverrideOf(plan, workingSet);
+  const reason = scopeOverrideOf(plan, workingSet, subject);
   if (!reason) return axis;
   if (emitLog) log("operator_scope_override", { from: "WORKING_SET", to: "ORG", reason });
-  const filters = (reason === "NEW_LIMIT" || reason === "NEW_PERIOD") && workingSet
+  const filters = (reason === "NEW_LIMIT" || reason === "NEW_PERIOD" || reason === "NEW_SUBJECT") && workingSet
     ? inheritedAxesDropped(axis.filters, workingSet)
     : axis.filters;
   return { ...axis, filters: { ...filters, scope: "ORG" } };

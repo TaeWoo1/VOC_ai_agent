@@ -67,18 +67,18 @@ describe("DraftArtifact — body first, compact grounding, next moves", () => {
     expect(screen.queryByTestId("draft-body")).toBeNull();
   });
 
-  it("NO_ANSWER_BASIS: the title says it once, the card names what is missing, no body, no next-move buttons", () => {
-    render(<MemoryRouter><DraftArtifact artifact={{
+  it("NO_ANSWER_BASIS draws NOTHING: the gap is the turn's own sentence and the step is its own card", () => {
+    // Conversation UX v2 §D — one representation per fact. A draft card with no draft could only
+    // restate the sentence above it (what is missing) and the card beside it (what to do).
+    const { container } = render(<MemoryRouter><DraftArtifact artifact={{
       ...grounded, title: "답변 기준이 필요합니다", version: null, comments: null, contentFingerprint: null, authorKind: null,
       answerBasis: "NO_ANSWER_BASIS", answerBasisNote: "'배송' 관련 내용이 없습니다.", answerBasisAction: "등록된 배송 기준이 아직 없습니다.",
       evidenceSummary: [], companyContextUsed: false,
     }} onPrompt={() => undefined} /></MemoryRouter>);
-    const card = screen.getByTestId("draft-artifact");
-    expect(card.textContent?.split("답변 기준이 필요합니다").length).toBe(2);
-    expect(screen.getByTestId("draft-gap")).toHaveTextContent("'배송' 관련 내용이 없습니다.");
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("draft-artifact")).toBeNull();
     expect(screen.queryByTestId("draft-body")).toBeNull();
     expect(screen.queryByRole("button", { name: "보내기 준비" })).toBeNull();
-    expect(card.textContent).not.toMatch(INTERNAL);
     expect(getInquiryDetailStrict).not.toHaveBeenCalled();
   });
 });

@@ -36,6 +36,11 @@ export function KnowledgeCaptureArtifact({ artifact, onDecision }: {
   onDecision?: (captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL") => void;
 }) {
   const onOpen = useContinueInPanel("KNOWLEDGE_CAPTURE");
+  // ASKED draws NOTHING (Conversation UX v2 §D). The question is the assistant's own sentence, one
+  // line above; a card that repeats it verbatim inside a box was the same ask twice — PO QA read the
+  // gap loop as 「같은 의미를 여러 UI 요소로 반복」. The card returns when there is something new to
+  // show: the sentence the seller wrote, and the decision bound to it.
+  if (artifact.state === "ASKED") return null;
   const status = STATE_WORD[artifact.state];
   const scopeNote = [artifact.scope === "PRODUCT" ? artifact.productName ?? "이 상품" : "회사 공통", artifact.variantName].filter(Boolean).join(" · ");
   const decidable = artifact.state === "CANDIDATE" && artifact.fingerprint && onDecision;
@@ -47,14 +52,8 @@ export function KnowledgeCaptureArtifact({ artifact, onDecision }: {
       testId="knowledge-capture"
     >
       <div className="space-y-2 px-4 pb-3">
-        {artifact.state === "ASKED" ? (
-          <p className="break-keep text-base leading-relaxed text-ink" data-testid="capture-question">{artifact.question}</p>
-        ) : null}
         {artifact.content ? (
           <p className="whitespace-pre-wrap break-keep rounded-xl bg-canvas px-3 py-2 text-base leading-relaxed text-ink" data-testid="capture-content">{artifact.content}</p>
-        ) : null}
-        {artifact.state === "CANDIDATE" ? (
-          <p className="break-keep text-sm text-muted">판매자님이 쓰신 문장 그대로 저장합니다. 저장 전에는 아무것도 바뀌지 않습니다.</p>
         ) : null}
         {artifact.existing ? (
           <p className="break-keep text-sm text-muted" data-testid="capture-existing">
@@ -70,11 +69,9 @@ export function KnowledgeCaptureArtifact({ artifact, onDecision }: {
             <Btn size="sm" variant="outline" onClick={() => onDecision(artifact.captureId, artifact.fingerprint!, "CANCEL")}>취소</Btn>
           </div>
         ) : null}
-        {artifact.state !== "ASKED" ? (
-          <p className="text-sm text-muted">
-            <Link to={artifact.settingsTo} onClick={onOpen} className="hover:underline">설정에서 직접 편집</Link>
-          </p>
-        ) : null}
+        <p className="text-sm text-muted">
+          <Link to={artifact.settingsTo} onClick={onOpen} className="hover:underline">설정에서 직접 편집</Link>
+        </p>
       </div>
     </ArtifactCard>
   );

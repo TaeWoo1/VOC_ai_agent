@@ -196,6 +196,53 @@ class InquiryRowsServiceTest {
         assertThat(rows.totalCount()).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("q: the seller's own subject word narrows by title OR body, and the count follows the rows")
+    void subjectWord() {
+        UUID receipt = inquiry(cafe24, "ANSWERED", "2026-08-10", DataOrigin.REAL);
+        inquiries.findById(receipt).ifPresent(q -> {
+            q.setTitle("현금영수증 발행 문의");
+            q.setBody("주문 번호로 현금영수증 발행 부탁드립니다.");
+            inquiries.save(q);
+        });
+        UUID inBody = inquiry(naver, "UNANSWERED", "2026-08-12", DataOrigin.REAL);
+        inquiries.findById(inBody).ifPresent(q -> {
+            q.setTitle("문의드립니다");
+            q.setBody("현금영수증도 되나요?");
+            inquiries.save(q);
+        });
+        inquiry(naver, "UNANSWERED", "2026-08-25", DataOrigin.REAL);
+
+        InquiryRowsResponse hit = service.rows(org, null, null, null, null, "NEWEST", null, "현금영수증");
+        assertThat(hit.term()).isEqualTo("현금영수증");
+        assertThat(hit.items()).extracting(InquiryRowItem::inquiryId).containsExactly(inBody, receipt);
+        // The count is the same predicate as the rows: a narrowed read never reports the wider total.
+        assertThat(hit.totalCount()).isEqualTo(2);
+
+        // The other axes still apply on top of it, and a word nothing holds is an honest zero.
+        assertThat(service.rows(org, null, null, "NAVER", null, null, null, "현금영수증").items())
+                .extracting(InquiryRowItem::inquiryId).containsExactly(inBody);
+        assertThat(service.rows(org, null, null, null, null, null, null, "세금계산서").items()).isEmpty();
+        // No word = no narrowing (the shape before this axis existed).
+        assertThat(service.rows(org, null, null, null, null, null, null, "  ").totalCount()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("snippet: every row carries the masked opening of the customer's message, work item or not")
+    void rowSnippet() {
+        UUID answered = inquiry(cafe24, "ANSWERED", "2026-08-11", DataOrigin.REAL);
+        inquiries.findById(answered).ifPresent(q -> {
+            q.setBody("<p>안녕하세요. 010-1234-5678 로 연락 주세요.</p>");
+            inquiries.save(q);
+        });
+        InquiryRowItem row = service.rows(org, null, null, null, null, null, null).items().get(0);
+        assertThat(row.workItemId()).isNull();
+        assertThat(row.snippet()).contains("안녕하세요.");
+        // The same masking the 문의 feed applies — a row is not a hole in the PII floor.
+        assertThat(row.snippet()).doesNotContain("010-1234-5678");
+        assertThat(row.snippet()).doesNotContain("<p>");
+    }
+
     private UUID inquiryAt(UUID channelId, String receivedAt) {
         Inquiry q = new Inquiry();
         q.setOrgId(org);

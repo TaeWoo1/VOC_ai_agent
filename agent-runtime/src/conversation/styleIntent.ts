@@ -53,8 +53,15 @@ const ORDINAL_WORD: Record<string, number> = {
   "첫": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10,
 };
 
-/** The whole sentence is an ordinal + an optional object noun + an optional particle. Nothing else. */
-const ORDINAL_SENTENCE = /^(첫|두|세|네|다섯|여섯|일곱|여덟|아홉|열|[1-9]\d?)\s*번째\s*(거|것|문의|리뷰|건)?\s*(요|이요|은|는|을|를|이|가)?\s*[.!]?$/u;
+/**
+ * The whole sentence is an ordinal + an optional object noun + an optional particle — and, since
+ * Conversation UX v2, an optional VIEWING verb (「두 번째 거 자세히 보여줘」). Asking to see the row one
+ * named is still a selection: before this, the trailing verb made the sentence the planner's, and the
+ * planner re-read the org queue and printed the whole list again under a 「선택한 문의」 card — PO QA read
+ * that as 「선택해도 본문이 바로 보이지 않는다」. An ordinal with an ACTION verb (답변 준비·보내·말투) is
+ * still the planner's: the tail below is a closed viewing family and nothing else matches it.
+ */
+const ORDINAL_SENTENCE = /^(첫|두|세|네|다섯|여섯|일곱|여덟|아홉|열|[1-9]\d?)\s*번째\s*(거|것|문의|리뷰|건)?\s*(요|이요|은|는|을|를|이|가)?\s*(자세히)?\s*(봐\s?줘요?|봐\s?주세요|보여\s?줘요?|보여\s?주세요|볼래요?|볼게요?|보자|열어\s?줘요?|확인해\s?줘요?|확인해\s?주세요)?\s*[.!?]?$/u;
 
 /** 1-based position when the sentence is a bare ordinal selection; `null` otherwise. */
 export function ordinalSelectionOf(text: string): number | null {

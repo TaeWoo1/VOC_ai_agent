@@ -27,7 +27,11 @@ const SESSION_KEYS = [
   "sellerops_social_onboarding",
 ];
 
+import { forgetSnippets } from "./conversation/snippetCache";
+
 export function clearSessionScopedState(): void {
+  // In-memory too: the page's own memory of the customer sentences it drew is one org's content.
+  forgetSnippets();
   try {
     const doomed: string[] = [];
     for (let i = 0; i < window.localStorage.length; i += 1) {

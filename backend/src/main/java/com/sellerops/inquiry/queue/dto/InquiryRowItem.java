@@ -8,6 +8,11 @@ import java.util.UUID;
  * work item. {@code workItemId}/{@code phase} are present only while an open or proposed work item exists
  * for it, so a row the seller can draft on and a row that is merely shown are told apart by the field,
  * never by a guess. No buyer identity, no raw body — the same floor as {@link InquiryQueueItem}.
+ *
+ * <p>{@code snippet} is the SAME bounded, PII-masked opening of the customer's message the 문의 feed
+ * already shows ({@code InboxService.snippet}) — not the raw body. It is here because a row without an
+ * open work item has no {@code /api/inquiries/{workItemId}} to read, so an answered inquiry the seller
+ * clicked could show its title and nothing else.
  */
 public record InquiryRowItem(
         UUID inquiryId,
@@ -21,6 +26,7 @@ public record InquiryRowItem(
         String phase,
         String status,
         String title,
+        String snippet,
         Instant receivedAt,
         Instant answeredAt,
         String sourceSubtype,

@@ -67,6 +67,12 @@ export function DraftArtifact({ artifact, onPrompt }: { artifact: Draft; onPromp
     ...(artifact.companyContextUsed ? ["회사 정보 참고"] : []),
   ];
 
+  // ONE representation per fact (Conversation UX v2 §D): this card exists to show a DRAFT. With no
+  // saved version there is none, and every sentence it could put in the box — what is missing, why the
+  // draft could not be made — is already the turn's own sentence, with the next step on its own card.
+  // Live QA read the old shape as one outcome stated three times.
+  if (artifact.version == null) return null;
+
   return (
     <ArtifactCard
       title={artifact.title}

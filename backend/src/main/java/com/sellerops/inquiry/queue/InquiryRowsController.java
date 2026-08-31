@@ -11,8 +11,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Read-only customer inquiry ROWS (Query Accuracy v1). Every axis is a closed token: window, channel,
- * status, order, limit. Org-scoped via {@code principal.orgId()}; sanitized rows only.
+ * Read-only customer inquiry ROWS (Query Accuracy v1). Window, channel, status, order and limit are
+ * closed tokens; {@code q} is the seller's own subject word, matched as one bounded LIKE over the
+ * subject line and the customer's message. Org-scoped via {@code principal.orgId()}; sanitized rows only.
  */
 @RestController
 @RequestMapping("/api/inquiries/rows")
@@ -33,7 +34,8 @@ public class InquiryRowsController {
                                     @RequestParam(required = false) String channel,
                                     @RequestParam(required = false) String status,
                                     @RequestParam(required = false) String order,
-                                    @RequestParam(required = false) Integer limit) {
-        return service.rows(principal.orgId(), from, to, channel, status, order, limit);
+                                    @RequestParam(required = false) Integer limit,
+                                    @RequestParam(required = false) String q) {
+        return service.rows(principal.orgId(), from, to, channel, status, order, limit, q);
     }
 }

@@ -55,7 +55,7 @@ const EXCLUDE_CUES: readonly string[] = [
 ];
 
 /** The viewing verb a selection sentence may end with. Optional — a bare noun phrase also selects. */
-const SELECT_TAIL = /(봐\s?줘요?|봐\s?주세요|보여\s?줘요?|보여\s?주세요|볼래요?|볼게요?|보자|열어\s?줘요?|열어\s?봐|자세히(\s?(봐줘|보여줘|볼래))?|확인해\s?줘요?|확인해\s?볼래|확인해\s?주세요)\s*[.!]?$/u;
+export const SELECT_TAIL = /(봐\s?줘요?|봐\s?주세요|보여\s?줘요?|보여\s?주세요|볼래요?|볼게요?|보자|열어\s?줘요?|열어\s?봐|자세히(\s?(봐줘|보여줘|볼래))?|확인해\s?줘요?|확인해\s?볼래|확인해\s?주세요)\s*[.!]?$/u;
 
 /** The object noun the phrase may carry (dropped from matching): 문의 · 건 · 거 · 것. */
 const OBJECT_NOUNS = new Set(["문의", "문의건", "거", "것", "건", "내용"]);

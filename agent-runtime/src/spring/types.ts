@@ -22,6 +22,8 @@ export interface InquiryQueueItem {
   readonly phase: string;
   readonly status: string;
   readonly title: string;
+  /** transient — the bounded, PII-masked opening of the customer's message the 문의 feed shows. */
+  readonly snippet?: string | null;
   readonly receivedAt: string;
   /** NAVER: `NAVER_PRODUCT_QNA` | `NAVER_CUSTOMER_INQUIRY`; null for a channel with one source (Lane A, 2026-08-28). */
   readonly sourceSubtype?: string | null;
@@ -53,6 +55,13 @@ export interface InquiryRowsParams {
   readonly status?: "UNANSWERED" | "ANSWERED" | "ALL";
   readonly order?: "NEWEST" | "OLDEST";
   readonly limit?: number;
+  /**
+   * The seller's own subject word (「현금영수증」), matched by the backend against the subject line and
+   * the customer's message. Not a closed token and not a sentence: one bounded word the seller typed,
+   * extracted deterministically (`conversation/subjectTerm.ts`) — the axis the closed topic families
+   * could never carry.
+   */
+  readonly q?: string;
 }
 
 export interface InquiryRowItem {
@@ -68,6 +77,8 @@ export interface InquiryRowItem {
   readonly phase: string | null;
   readonly status: string;
   readonly title: string | null;
+  /** transient — the same bounded, PII-masked opening of the customer's message the 문의 feed shows. */
+  readonly snippet?: string | null;
   readonly receivedAt: string;
   readonly answeredAt: string | null;
   readonly sourceSubtype?: string | null;
@@ -81,6 +92,8 @@ export interface InquiryRowsResponse {
   readonly status: string;
   readonly order: string;
   readonly limit: number;
+  /** The subject word this read was narrowed by, echoed back; null when none. */
+  readonly term?: string | null;
   readonly totalCount: number;
   readonly items: InquiryRowItem[];
 }

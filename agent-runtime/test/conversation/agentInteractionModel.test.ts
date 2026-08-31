@@ -130,8 +130,13 @@ describe("visibleSelectionOf — deterministic, conservative, closed classes", (
     expect(visibleFilterOf("최근 문의 7개만 보여줘")).toBeNull();
     expect(visibleFilterOf("최근 2개 보여줘")).toBeNull();
     expect(visibleFilterOf("답변 안 한 문의 보여줘")).toBeNull();
-    // A leftover content token means the sentence says more than the closed tables can read.
-    expect(visibleFilterOf("종이컵 문의만 보여줘")).toBeNull();
+    // ONE leftover content token is the SUBJECT the seller narrowed by — the axis the closed topic
+    // families cannot hold (Conversation UX v2 §A). 「~만」 still decides filter-vs-select: the bare
+    // label above is a selection, this is a narrowing.
+    expect(visibleFilterOf("종이컵 문의만 보여줘")).toMatchObject({ term: "종이컵" });
+    expect(visibleFilterOf("그중 현금영수증 관련만")).toMatchObject({ term: "현금영수증" });
+    // Two leftovers say more than these tables can read; the planner decides what.
+    expect(visibleFilterOf("종이컵 파손 문의만 보여줘")).toBeNull();
     expect(visibleFilterOf("배송 관련 문의 정리해줘")).toBeNull();
     expect(visibleFilterOf("답변 준비해줘")).toBeNull();
   });

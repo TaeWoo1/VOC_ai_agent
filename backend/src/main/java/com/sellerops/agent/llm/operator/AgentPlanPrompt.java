@@ -39,7 +39,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v8";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v9";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -76,10 +76,12 @@ public final class AgentPlanPrompt {
     /**
      * Query Accuracy v1 (2026-08-28): what an INQUIRY_VOLUME need is FOR. {@code ROWS} = the customer's
      * inquiries themselves (any status, ordered, limited); {@code WORKLOAD} = what the seller still has to
-     * answer, classified by draft state (the work queue); {@code COUNT} = one org-wide number. A closed plan
-     * token, so 「최근 문의 3개」 and 「내가 답해야 할 문의」 never share a path by accident.
+     * answer, classified by draft state (the work queue); {@code COUNT} = one org-wide number;
+     * {@code PRIORITY} = the same queue RANKED, for 「가장 시급한 건」 — a superlative question whose only
+     * expressible shape used to be a list, so twenty rows were printed and nothing was answered. A closed
+     * plan token, so 「최근 문의 3개」 and 「내가 답해야 할 문의」 never share a path by accident.
      */
-    public static final String[] INQUIRY_INTENTS = {"ROWS", "WORKLOAD", "COUNT"};
+    public static final String[] INQUIRY_INTENTS = {"ROWS", "WORKLOAD", "COUNT", "PRIORITY"};
     /** Row order — the newest first, or the oldest first. Absent ⇒ NEWEST. */
     public static final String[] ORDERS = {"NEWEST", "OLDEST"};
     /** Which inquiries: still unanswered, already answered, or all. Absent ⇒ ROWS reads ALL, WORKLOAD is by nature UNANSWERED. */
@@ -124,7 +126,9 @@ public final class AgentPlanPrompt {
                상품과 무관하게 회사가 정해 둔 기준("우리 배송 정책 뭐였지", "환불 기준으로 답해줘")은 POLICY 이며 \
                상품을 특정할 필요가 없습니다 — 회사 기준만 묻는 문장에는 PRODUCT entity 를 만들지 마세요. POLICY need 는 \
                specialists 에 INQUIRY_OPS, tools 에 search_org_knowledge 를 넣으세요. 특정 상품의 설명·FAQ 에 적힌 \
-               내용은 PRODUCT_KNOWLEDGE_DOC 입니다.
+               내용은 PRODUCT_KNOWLEDGE_DOC 입니다. **다만 그 주제의 "문의"를 보여 달라는 요청은 POLICY 가 아니라 \
+               INQUIRY_VOLUME 입니다** — "현금영수증 관련 문의 보여줘"는 고객이 보낸 문의 목록을 달라는 뜻이고, \
+               "현금영수증 기준이 뭐였지"만 POLICY 입니다.
                - **회사가 어떤 곳인지(등록된 회사 소개)는 COMPANY_PROFILE 입니다** — "우리 회사는 어떤 곳으로 등록돼 \
                있어", "우리 업체 특성을 고려해서" 처럼 회사 자체를 묻거나 참고하라고 할 때만 세우고(specialists 에 \
                INQUIRY_OPS, tools 에 get_seller_profile), 목록·개수·최근 문의·리뷰처럼 회사 소개가 필요 없는 질문에는 \
@@ -158,14 +162,19 @@ public final class AgentPlanPrompt {
                - **문의 목록 질문에는 filters.inquiryIntent 를 반드시 정하세요.** 문의를 보여·확인해 달라는 요청 \
                ("최근 문의 3개", "오늘 들어온 문의", "네이버 문의 보여줘", "답변 안 한 것만", "가장 오래된 문의")은 \
                ROWS 이고, **판매자가 처리해야 할 일**을 묻는 요청("내가 답해야 할 문의", "오늘 처리할 문의 정리", \
-               "초안 준비된 것")은 WORKLOAD 이며, 숫자 하나만 묻는 요청("미답변 문의 몇 건이야")은 COUNT 입니다. \
+               "초안 준비된 것")은 WORKLOAD 이며, **무엇을 먼저 처리해야 하는지 순위를 묻는 요청**("가장 시급한 건", \
+               "급한 것부터", "먼저 볼 것", "어떤 것부터 처리할까")은 PRIORITY 이고, 숫자 하나만 묻는 요청("미답변 문의 \
+               몇 건이야")은 COUNT 입니다. **특정 주제의 문의가 있는지 묻는 질문("현금영수증 관련 문의 있어?", \
+               "파손 얘기 나온 적 있어?", "세금계산서 문의 받은 적 있나")도 ROWS 입니다** — 그런 질문의 답은 숫자가 \
+               아니라 그 주제의 문의 행이고, COUNT 는 판매자가 숫자 하나만 물었을 때에만 씁니다. \
                답변을 준비·전송해 달라는 요청(requestedAction 이 NONE 이 아닐 때)과 「첫 번째 거」류 target 은 \
                WORKLOAD 위에서만 동작합니다. 정하지 못하겠으면 ROWS 입니다. **filters.period 는 문의가 접수된 \
                기간이고 ROWS 에만 적용됩니다** — 작업 큐(WORKLOAD)는 언제 들어왔든 지금 밀린 것 전부입니다. "오늘 \
                들어온 문의" 는 ROWS + period=TODAY, "어제 온 문의 중 답해야 할 것" 은 ROWS + period=YESTERDAY + \
                status=UNANSWERED, "오늘 내가 답해야 할 문의" 는 WORKLOAD 이고 period 는 null 입니다.
                - **개수·순서·상태는 문장에 있으면 반드시 토큰으로 적으세요.** "1개만", "3개", "두 개" → filters.limit 에 \
-               정수; "가장 최근", "최신" → filters.order=NEWEST; "가장 오래된", "먼저 들어온" → OLDEST; "답변 안 한", \
+               정수; **하나를 묻는 최상급 표현("가장 최근 문의", "제일 오래된 건", "가장 시급한 건")은 filters.limit=1** \
+               입니다 — 개수를 말하지 않았어도 하나를 물은 것입니다; "가장 최근", "최신" → filters.order=NEWEST; "가장 오래된", "먼저 들어온" → OLDEST; "답변 안 한", \
                "미답변" → filters.status=UNANSWERED, "답변한", "답변 완료" → ANSWERED, 둘 다 아니면 null. 이 값들은 \
                question 문장에만 적으면 실행되지 않습니다 — 런타임은 filters 만 읽습니다. 리뷰(REVIEW_SIGNAL) 에도 \
                limit·order 는 그대로 적용됩니다.
@@ -204,7 +213,11 @@ public final class AgentPlanPrompt {
                MORE_FORMAL, "짧게" → SHORTER, 그 밖에는 null.
                - **target** 은 집합 안의 어느 것인지: "첫 번째 거" → FIRST, "두 번째" → NTH 에 index 2, "이 두 \
                문의" → ALL, 문맥에 문의 하나가 특정돼 있을 때의 "이 문의" → THIS, 그 밖에는 NONE.
-               - **filters.topic** 은 문의 주제: "배송 관련부터" → SHIPPING. 없으면 null.
+               - **filters.topic** 은 문의 주제: "배송 관련부터" → SHIPPING. 없으면 null. **다섯 값 중 어느 것에도 \
+               맞지 않는 주제(현금영수증·세금계산서·파손·색상·A/S…)를 판매자가 말했으면 topic 은 null 로 두세요** — \
+               억지로 OTHER 나 가까운 값을 고르지 마세요. 그 낱말은 런타임이 판매자가 쓴 그대로 문의 본문에 대고 \
+               좁힙니다. 당신이 할 일은 그 문장이 문의 목록 질문(INQUIRY_VOLUME + inquiryIntent)이라는 것을 \
+               맞게 정하는 것뿐입니다.
 
                specialist: %s
                informationNeeds[].kind: %s

@@ -148,6 +148,10 @@ export interface InquiryItem {
   phase: string;
   status: string;
   title?: string | null;
+  /** transient — the bounded, PII-masked opening of the customer's message. Absent on a reloaded thread. */
+  snippet?: string | null;
+  /** PRIORITIZE: whole days this inquiry has been waiting, as of the run's reference date. */
+  waitingDays?: number | null;
   productId: string | null;
   productName: string | null;
   answerBasis: string | null;
@@ -170,6 +174,10 @@ export interface InquiryListArtifact extends ArtifactBase {
     limit: number | null;
     /** Conversation Core v1: the closed topic family the read was narrowed by, when one was. */
     topic?: "SHIPPING" | "EXCHANGE_RETURN" | "PRODUCT_SPEC" | "USAGE" | "OTHER" | null;
+    /** The seller's own subject word the read was narrowed by, when one was. */
+    term?: string | null;
+    /** PRIORITIZE: the rows are in urgency order, and the answer says by what. */
+    rank?: "URGENCY" | null;
   };
 }
 

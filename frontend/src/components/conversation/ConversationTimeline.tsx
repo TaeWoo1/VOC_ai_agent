@@ -150,7 +150,9 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecisio
       </AnimatePresence>
       {evidence.length > 0 ? (
         <div className={compact ? "" : "pl-6"}>
-          <Disclosure label="근거" note={evidence.reduce((n, e) => n + e.items.length, 0) || undefined} summaryClassName="px-0">
+          {/* No count beside 「근거」: the number was the count of rows read, which a seller reads as the
+              strength of the answer. The disclosure is opened on purpose; what is inside says how much. */}
+          <Disclosure label="근거" summaryClassName="px-0">
             <div className="mt-1 space-y-2">
               {evidence.map((e) => <EvidenceArtifact key={e.artifactId} artifact={e} />)}
             </div>
