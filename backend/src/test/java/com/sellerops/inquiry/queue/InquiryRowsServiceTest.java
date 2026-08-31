@@ -166,4 +166,45 @@ class InquiryRowsServiceTest {
 
         assertThat(service.rows(UUID.randomUUID(), null, null, null, null, null, null).items()).isEmpty();
     }
+
+    @Test
+    @DisplayName("자정 경계 KST: a window date is the seller's Asia/Seoul day, not a UTC day")
+    void windowIsSellersCalendarDay() {
+        LocalDate day = LocalDate.of(2026, 8, 28);
+        UUID inDay = inquiryAt(naver, "2026-08-27T16:00:00Z");   // 08-28 01:00 KST — the seller's 08-28
+        inquiryAt(naver, "2026-08-27T14:59:00Z");                // 08-27 23:59 KST — the day before
+        inquiryAt(naver, "2026-08-28T15:30:00Z");                // 08-29 00:30 KST — the day after
+
+        InquiryRowsResponse rows = service.rows(org, day, day, null, null, null, null);
+        assertThat(rows.items()).extracting(InquiryRowItem::inquiryId).containsExactly(inDay);
+        assertThat(rows.totalCount()).isEqualTo(rows.items().size());
+    }
+
+    @Test
+    @DisplayName("default window: 「최근 문의」 cannot clip a row from the seller's today (2026-08-30 live turn)")
+    void defaultWindowCoversTheSellersToday() {
+        // 17:24Z on 08-30 is already 02:24 KST on 08-31, and the file importer stamps a 작성일 of 08-31
+        // at 2026-08-31T00:00:00Z. The old UTC default (to = UTC-today = 08-30) ended the window at
+        // exactly that instant and answered 「문의는 없습니다」 over rows the /inquiries screen showed.
+        InquiryRowsService lateEvening = new InquiryRowsService(inquiries, workItems, channels, products,
+                com.sellerops.identity.ExecutableIdentityResolver.unresolved(),
+                Clock.fixed(Instant.parse("2026-08-30T17:24:00Z"), ZoneOffset.UTC));
+        inquiryAt(naver, "2026-08-31T00:00:00Z");
+
+        InquiryRowsResponse rows = lateEvening.rows(org, null, null, null, null, "NEWEST", 3);
+        assertThat(rows.items()).hasSize(1);
+        assertThat(rows.totalCount()).isEqualTo(1);
+    }
+
+    private UUID inquiryAt(UUID channelId, String receivedAt) {
+        Inquiry q = new Inquiry();
+        q.setOrgId(org);
+        q.setChannelId(channelId);
+        q.setTitle("문의 " + receivedAt);
+        q.setBody("본문");
+        q.setStatus("UNANSWERED");
+        q.setDataOrigin(DataOrigin.REAL);
+        q.setReceivedAt(Instant.parse(receivedAt));
+        return inquiries.save(q).getId();
+    }
 }

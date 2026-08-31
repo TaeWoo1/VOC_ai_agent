@@ -181,6 +181,27 @@ describe("Query Accuracy v1 — Planner QuerySpec → tool args → result", () 
     expect(oldest.turn.message).toContain("방금 본 문의 중");
   });
 
+  it("prose and rows are one execution: a zero count cannot stand next to returned rows (live 08-30 shape)", async () => {
+    const { h, id } = await fresh();
+    // The 2026-08-30 live turn: a count saying less than the rows beside it made the headline claim
+    // 「문의는 없습니다」 under a rendered list. The sentence and the artifact must follow the rows.
+    const orig = h.inquiry.listInquiryRows.bind(h.inquiry);
+    h.inquiry.listInquiryRows = async (params) => ({ ...(await orig(params)), totalCount: 0 });
+    const { turn } = await say(h, id, "최근 문의 3개 보여줘");
+    expect(turn.message).not.toContain("없습니다");
+    expect(turn.message).toContain("3건");
+    expect(artifact(turn, "INQUIRY_LIST").totalCount).toBe(3);
+  });
+
+  it("the headline's count is the artifact's count — 「최근 문의 3개」 says the window's total over the 3 shown", async () => {
+    const { h, id } = await fresh();
+    const { turn } = await say(h, id, "최근 문의 3개 보여줘");
+    const list = artifact(turn, "INQUIRY_LIST");
+    expect(list.groups.flatMap((g) => g.items)).toHaveLength(3);
+    expect(turn.message).toContain(`${list.totalCount}건`);
+    expect(turn.message).toContain("가장 최근 3건");
+  });
+
   it("「내가 답해야 할 문의」 is the work queue (WORKLOAD), 「몇 건이야」 is one number (COUNT) — three paths, one token each", async () => {
     const { h, id } = await fresh();
     const work = await say(h, id, "내가 답해야 할 문의 정리해줘");

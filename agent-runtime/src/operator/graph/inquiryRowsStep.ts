@@ -99,7 +99,10 @@ export async function readInquiryRows(input: SpecialistInput, needId: string): P
   const inSet = previousIds ? read.items.filter((i) => previousIds.has(i.inquiryId)) : read.items;
   if (previousIds && spec.order !== spec.baseOrder) inSet.reverse();
   const rows = spec.previousIds && spec.limit != null ? inSet.slice(0, spec.limit) : inSet;
-  const total = previousIds ? inSet.length : read.totalCount;
+  // The rows in hand ARE this read's result: a count that arrived beside them can never say less than
+  // them, so the rows are the floor of `total` — a zero claim can never stand next to returned rows
+  // (the 2026-08-30 live turn answered 「문의는 없습니다」 while a list stood under it).
+  const total = Math.max(previousIds ? inSet.length : read.totalCount, rows.length);
 
   const refs: EvidenceRef[] = [];
   const findings: Finding[] = [];
@@ -215,15 +218,18 @@ export interface RowsScopeWords {
  */
 export function inquiryRowsSentence(scope: RowsScopeWords, shown: number, total: number, refine: boolean,
   breakdown: { unanswered: number; answered: number } | null = null): string {
+  // The prose and the rows are ONE execution's result. Whatever `total` claims, the rows on screen are
+  // the floor of it: 「없습니다」 is only sayable when the same read returned nothing.
+  const count = Math.max(total, shown);
   const period = scope.period ? `${periodLabel(scope.period.token ?? null)} 들어온 ` : "";
   const channel = scope.channelCode && CHANNEL_WORD[scope.channelCode.toUpperCase()] ? `${CHANNEL_WORD[scope.channelCode.toUpperCase()]} ` : "";
   const subject = `${refine ? "방금 본 문의 중 " : ""}${period}${channel}${statusWord(scope.status)}문의`;
-  if (total === 0) return `${subject}는 없습니다.`;
-  const which = scope.limit != null && shown < total
+  if (count === 0) return `${subject}는 없습니다.`;
+  const which = scope.limit != null && shown < count
     ? ` 그중 ${scope.order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${shown}건입니다.` : "";
   const mix = !which && scope.status === "ALL" && breakdown && breakdown.unanswered > 0 && breakdown.answered > 0
     ? ` (답변 필요 ${breakdown.unanswered}건 · 답변함 ${breakdown.answered}건)` : "";
-  return `${subject}는 ${total}건입니다${mix}.${which}`;
+  return `${subject}는 ${count}건입니다${mix}.${which}`;
 }
 
 function rowsStatement(spec: InquiryRowsSpec, shown: number, total: number): string {

@@ -16,7 +16,7 @@ import com.sellerops.product.ProductRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -48,6 +48,15 @@ public class InquiryRowsService {
     public static final int MAX_LIMIT = 50;
     /** How far back a window with no {@code from} reaches — the epoch, i.e. the whole history. */
     private static final Instant BEGINNING = Instant.EPOCH;
+    /**
+     * The seller's calendar. A window date names an Asia/Seoul day — the day the runtime's period
+     * tokens (「오늘」, 「최근 7일」) are computed in and the day the seller reads on every screen. This
+     * class once converted the same dates at UTC, which shifted every window +9h: an inquiry received
+     * at 08:00 KST was not in 「오늘」, and the default {@code to} (UTC-today) ended at 09:00 KST, so a
+     * row stamped later that seller day fell outside 「최근 문의 3개」 while the /inquiries screen showed
+     * it — the 2026-08-30 live turn that answered 「문의는 없습니다」 over an org holding six.
+     */
+    private static final ZoneId SELLER_ZONE = ZoneId.of("Asia/Seoul");
     private static final EnumSet<InquiryWorkItemPhase> WORKABLE = EnumSet.of(InquiryWorkItemPhase.OPEN, InquiryWorkItemPhase.PROPOSED);
 
     private final InquiryRepository inquiries;
@@ -76,8 +85,8 @@ public class InquiryRowsService {
     }
 
     /**
-     * @param from inclusive calendar date (UTC, the zone {@code receivedAt} is stored in); null = no lower bound
-     * @param to inclusive calendar date; null = today
+     * @param from inclusive calendar date (an Asia/Seoul day, the seller's calendar); null = no lower bound
+     * @param to inclusive calendar date (Asia/Seoul); null = the seller's today
      * @param channel one of {@link ProductChannels#VISIBLE_CODES}, or null for all
      * @param status {@code UNANSWERED} | {@code ANSWERED} | {@code ALL}/null
      * @param order {@code NEWEST} (default) | {@code OLDEST}
@@ -86,12 +95,12 @@ public class InquiryRowsService {
     @Transactional(readOnly = true)
     public InquiryRowsResponse rows(UUID orgId, LocalDate from, LocalDate to, String channel, String status,
                                     String order, Integer limit) {
-        LocalDate toDate = to == null ? LocalDate.now(clock) : to;
+        LocalDate toDate = to == null ? LocalDate.ofInstant(clock.instant(), SELLER_ZONE) : to;
         if (from != null && from.isAfter(toDate)) {
             throw ApiException.badRequest("조회 기간의 시작일이 종료일보다 늦습니다.");
         }
-        Instant start = from == null ? BEGINNING : from.atStartOfDay(ZoneOffset.UTC).toInstant();
-        Instant end = toDate.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant start = from == null ? BEGINNING : from.atStartOfDay(SELLER_ZONE).toInstant();
+        Instant end = toDate.plusDays(1).atStartOfDay(SELLER_ZONE).toInstant();
         String statusToken = statusToken(status);
         String statusFilter = "ALL".equals(statusToken) ? null : statusToken;
         boolean oldest = oldestFirst(order);

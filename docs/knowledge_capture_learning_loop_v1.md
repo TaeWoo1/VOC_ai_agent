@@ -242,3 +242,9 @@ planner 1 per planned turn and draft 1 per grounded resume — unchanged.
   120g」: 2/6 = 0.33). Symmetric to rule 1 but not one of this package's blockers; noted, not changed.
 - 「최근 문의 3개」 on this org answered 「문의는 없습니다」 while the list artifact existed — the rows
   window's date clipping on inquiries dated today; unrelated to retrieval, observed only.
+  **Closed 2026-08-31**: `InquiryRowsService` converted window dates at UTC — the default `to`
+  (UTC-today) ended the effective window at 09:00 KST of the seller's day, clipping this org's rows
+  (stamped `2026-08-31T00:00:00Z` by the file importer) from a turn run at 02:24 KST 08-31 — while the
+  runtime's period tokens and the /inquiries screen speak Asia/Seoul calendar days. Window bounds now
+  convert at Asia/Seoul, and the shared ROWS sentence (`inquiryRowsSentence`) treats the returned rows
+  as the floor of its count, so 「없습니다」 is only sayable when the same read returned nothing.
