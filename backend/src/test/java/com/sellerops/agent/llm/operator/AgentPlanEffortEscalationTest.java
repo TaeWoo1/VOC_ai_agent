@@ -46,7 +46,8 @@ class AgentPlanEffortEscalationTest {
     @DisplayName("the first attempt is the fast setting; a second attempt at the same goal is the strong one")
     void escalatesOnlyOnTheSecondAttempt() {
         Recorder http = new Recorder();
-        AgentPlanService service = new AgentPlanService(properties("minimal", "low"), http);
+        AgentPlanService service = new AgentPlanService(properties("minimal", "low"), http,
+                new com.sellerops.agent.access.AgentCapabilityAccess("ALLOW_LIST", null));
 
         service.plan(ORG, "최근 문의 3개 보여줘", CATALOGUE);
         service.plan(ORG, "최근 문의 3개 보여줘", CATALOGUE, "plan-invalid: PRODUCT_UNRESOLVABLE.", true);
@@ -68,7 +69,8 @@ class AgentPlanEffortEscalationTest {
     @DisplayName("a follow-up sentence carries a progress line and is still the fast pass")
     void aFollowUpIsNotARetry() {
         Recorder http = new Recorder();
-        AgentPlanService service = new AgentPlanService(properties("minimal", "low"), http);
+        AgentPlanService service = new AgentPlanService(properties("minimal", "low"), http,
+                new com.sellerops.agent.access.AgentCapabilityAccess("ALLOW_LIST", null));
 
         service.plan(ORG, "그중 네이버만", CATALOGUE, "직전 작업 집합: INQUIRIES (기간:없음, 채널:전체)", false);
         service.plan(ORG, "그중 네이버만", CATALOGUE, "직전 작업 집합: INQUIRIES (기간:없음, 채널:전체)");
@@ -81,7 +83,8 @@ class AgentPlanEffortEscalationTest {
     @DisplayName("a deployment turns the escalation off with a blank value, not with an invented one")
     void blankRetryEffortFallsBackToTheFirstPass() {
         Recorder http = new Recorder();
-        AgentPlanService service = new AgentPlanService(properties("minimal", ""), http);
+        AgentPlanService service = new AgentPlanService(properties("minimal", ""), http,
+                new com.sellerops.agent.access.AgentCapabilityAccess("ALLOW_LIST", null));
 
         service.plan(ORG, "최근 문의 3개 보여줘", CATALOGUE, "plan-invalid: PRODUCT_UNRESOLVABLE.", true);
 
@@ -92,7 +95,8 @@ class AgentPlanEffortEscalationTest {
     @DisplayName("the escalation is a setting, never a change to what is sent")
     void payloadFloorIsUnchangedByTheRetryEffort() {
         Recorder http = new Recorder();
-        AgentPlanService service = new AgentPlanService(properties("minimal", "low"), http);
+        AgentPlanService service = new AgentPlanService(properties("minimal", "low"), http,
+                new com.sellerops.agent.access.AgentCapabilityAccess("ALLOW_LIST", null));
 
         service.plan(ORG, "최근 문의 3개 보여줘", CATALOGUE, "plan-invalid: PRODUCT_UNRESOLVABLE.", true);
 

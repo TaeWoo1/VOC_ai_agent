@@ -1,5 +1,6 @@
 package com.sellerops.agent.llm;
 
+import com.sellerops.agent.access.AgentCapabilityAccess;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,20 +29,24 @@ public class AgentDraftService {
 
     private final AgentDraftProperties properties;
     private final AgentLlmTransport transport;
+    /** Who may use this capability — the deployment's named policy, not a written-down list. */
+    private final AgentCapabilityAccess access;
 
-    public AgentDraftService(AgentDraftProperties properties, AgentLlmTransport transport) {
+    public AgentDraftService(AgentDraftProperties properties, AgentLlmTransport transport,
+                                   AgentCapabilityAccess access) {
         this.properties = properties;
         this.transport = transport;
+        this.access = access;
     }
 
     /** Whether this org may reach the model at all — the honest capability answer for a UI. */
     public boolean isEnabledFor(UUID orgId) {
-        return properties.isEnabledFor(orgId);
+        return access.allows(properties, orgId);
     }
 
     /** The version string a run records, or null when the capability is off for this org. */
     public String versionFor(UUID orgId) {
-        return properties.isEnabledFor(orgId) ? generator().version() : null;
+        return access.allows(properties, orgId) ? generator().version() : null;
     }
 
     /**
@@ -124,7 +129,7 @@ public class AgentDraftService {
     public Optional<AgentDraftResponseParser.ParsedDraft> draft(
             UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
             String orderState, String specScope, String style, String companyContext) {
-        if (!properties.isEnabledFor(orgId)) {
+        if (!access.allows(properties, orgId)) {
             return Optional.empty();
         }
         AgentDraftGenerator.Result result = generator().generate(new AgentDraftGenerator.Input(

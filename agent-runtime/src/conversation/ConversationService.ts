@@ -87,6 +87,7 @@ import { matchesTopic } from "../operator/tools/inquiryWorkload";
 import type { VisibleRow } from "./visibleSelection";
 import type { GeneratedDraftView, ReviewDetailResponse } from "../spring/types";
 import { issueSentence, reviewLine } from "../operator/graph/reviewDetail";
+import type { ReviewReplyCapability } from "../operator/graph/reviewDetail";
 import { periodLabel } from "./period";
 
 export interface ConversationServiceDeps {
@@ -1285,12 +1286,26 @@ export class ConversationService {
         const id = set.ids[index - 1];
         const target = id ? reviewTargetFromHistory(view, id) : null;
         if (!target || target.kind !== "REVIEW") return null;
-        // A review selection narrows the set to that row — the single id the existing FIRST/THIS rules read.
-        const single: WorkingSetView = { ...set, ids: [id!], count: 1, turnId: "" };
+        // <b>Naming a row by its position is the same act as pressing it</b> — Pilot Readiness Closure
+        // v1 §6. This branch used to narrow the set and say 「N번째 리뷰를 골랐습니다」, which is the
+        // product telling the seller that something happened somewhere else: the click path and the
+        // 「이 리뷰」 path both draw the review's own card, and an ordinal is neither more ambiguous nor
+        // cheaper. One selection, one card, whichever way the seller pointed at the row.
+        const object: SelectedObject = {
+          kind: "REVIEW",
+          id: id!,
+          productId: target.target.productId ?? null,
+          channelCode: target.target.channelCode ?? null,
+        };
+        const inspected = await this.inspectReview(view, object, bundle);
+        if (inspected) return inspected;
+        // The exact read failed. The selection is still real — it came from a row this thread drew —
+        // so the anchor is kept and the card is not invented from the row's own fields.
         return {
-          status: "DONE", message: `${index}번째 리뷰를 골랐습니다. 이어서 「답변해줘」처럼 말씀해 주세요.`,
+          status: "DONE", message: `${index}번째 리뷰를 골랐습니다. 자세한 내용은 지금 불러오지 못했습니다.`,
           artifacts: [], suggestedActions: [promptChip("이 리뷰 답변해줘")],
-          workingSet: single, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: "INSPECT",
+          workingSet: anchoredObjectSet(object, set), pendingHumanActions: [],
+          pendingPrepared: view.pendingPrepared, activeTask: "INSPECT",
           budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
         };
       }
@@ -1643,6 +1658,7 @@ export class ConversationService {
     } catch {
       return null;
     }
+    const replyCapability = await this.reviewReplyCapability(bundle, detail);
     const artifact: ReviewDetailArtifact = {
       artifactId: `a-review-${detail.id}`, type: "REVIEW_DETAIL", title: "선택한 리뷰",
       reviewId: detail.id, channelCode: detail.channelCode, channelNameKo: detail.channelNameKo,
@@ -1651,12 +1667,10 @@ export class ConversationService {
       body: detail.body ? excerpt(detail.body) : null,
       ...(detail.bodyRedacted ? { bodyRedacted: true } : {}),
       issues: detail.issues.map((i) => ({ issueId: i.issueId, title: i.title, severity: i.severity, to: `/memory/${i.issueId}` })),
-      // The deterministic lane makes ONE read; what a channel does with replies is a second one, and
-      // this lane does not buy it. UNKNOWN is the honest value and the card says so rather than guessing.
-      replyCapability: "UNKNOWN",
+      replyCapability,
       to: "/reviews",
     };
-    log("conversation_review_inspect", { issues: detail.issues.length, rating: detail.rating ?? -1 });
+    log("conversation_review_inspect", { issues: detail.issues.length, rating: detail.rating ?? -1, replyCapability });
     return {
       status: "DONE",
       message: `${reviewLine(detail)} 리뷰입니다. ${issueSentence(detail)}`,
@@ -1664,8 +1678,43 @@ export class ConversationService {
       suggestedActions: [promptChip("같은 상품의 비슷한 리뷰도 보여줘")],
       workingSet: anchoredObjectSet(object, view.workingSet),
       pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: "INSPECT",
-      budget: { toolCalls: 1, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
+      budget: { toolCalls: replyCapability === "UNKNOWN" ? 1 : 2, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
     };
+  }
+
+  /**
+   * Can the seller reply to THIS review at its channel? — Pilot Readiness Closure v1 §6.
+   *
+   * <b>UNKNOWN was a budget decision, not an honest one.</b> This lane used to hardcode it because it
+   * had chosen to make one read; the consequence was a card that never offered the reply control on
+   * the path a seller actually reaches by clicking a row, while the planner path offered it for the
+   * same review. The answer is a second org-scoped READ against the account the review came in on —
+   * the same `capabilityOf` resolver, over the same view, that every other execution decision uses.
+   *
+   * <b>What is still not guessed.</b> An absent capability view resolves to NOT_SUPPORTED inside
+   * `reviewExecutionOf` (correctly, for a fail-closed execution decision), but this card is not an
+   * execution decision — it is a description. So a read that answers nothing stays UNKNOWN: 「확인하지
+   * 못했습니다」 and 「지원하지 않습니다」 are different claims and only one of them was observed.
+   */
+  private async reviewReplyCapability(
+    bundle: SpringClientBundle, detail: ReviewDetailResponse,
+  ): Promise<ReviewReplyCapability> {
+    const code = (detail.channelCode ?? "").toUpperCase();
+    if (!code || !detail.sellerAccountId || !bundle.operator.getReviewChannelCapability) {
+      return "UNKNOWN";
+    }
+    let reviewChannel: Awaited<ReturnType<NonNullable<typeof bundle.operator.getReviewChannelCapability>>> | null = null;
+    try {
+      reviewChannel = (await bundle.operator.getReviewChannelCapability(detail.sellerAccountId)) ?? null;
+    } catch {
+      return "UNKNOWN";
+    }
+    if (!reviewChannel) return "UNKNOWN";
+    const verdict = capabilityOf(
+      { channelCode: code, objectKind: "REVIEW" },
+      { overview: null, transports: null, publish: null, reviewChannel, localAgent: "UNKNOWN" },
+    );
+    return verdict.execution === "NOT_SUPPORTED" ? "NOT_SUPPORTED" : "DRAFTABLE";
   }
 
   /**

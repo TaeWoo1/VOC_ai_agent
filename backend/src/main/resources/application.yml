@@ -75,6 +75,26 @@ sellerops:
   # chat lane or the legacy /api/agent-runs lanes, goes through POST /api/inquiries/{id}/draft/generate with
   # the operator's own bearer token, so the backend stays the only LLM egress in the repository.
   agent:
+    # ── WHO may use the three Agent capabilities (Pilot Readiness Closure v1 §2) ─────────────────
+    #
+    # Each capability below keeps its own flag, key and org list — they are different exposures and a
+    # deployment must be able to run any subset. This property answers the other question ONCE: given a
+    # capability this deployment has configured, which organisations are its audience?
+    #
+    #   ALLOW_LIST (default) — only the org ids written into each capability's `enabled-org-ids`.
+    #     Byte-identical to the behaviour before this property existed. Admitting a seller means an env
+    #     edit and a restart, which is why it is not the pilot's value.
+    #   CONNECTED_SELLERS   — any org that owns a CONNECTED, non-file-upload seller account. A seller
+    #     reaches CONNECTED only by finishing an OAuth consent or entering a credential, so this is the
+    #     record of who asked, not a guess — the same sentence sellerops.self-pilot.scope uses for
+    #     routine collection. No env edit, no restart, and a drive-by signup that connected nothing
+    #     spends nothing.
+    #   ALL_ORGS            — every org in this backend. The honest name for what a bare "*" meant.
+    #
+    # The policy only WIDENS, and only the org question: a capability with no flag or no key stays off
+    # for everyone under every value, and an org named in a capability's own list stays admitted.
+    access:
+      scope: ${SELLEROPS_AGENT_ACCESS_SCOPE:ALLOW_LIST}
     draft:
       enabled: ${SELLEROPS_AGENT_DRAFT_ENABLED:false}
       # Comma-separated org UUIDs, or "*" for every org in this backend (local single-user deployment —
@@ -340,6 +360,14 @@ sellerops:
       # ownership. Never enable in an environment that should not run dismissals.
       enabled: ${SELLEROPS_ADMIN_INQUIRY_DISMISSAL_ENABLED:false}
   connector:
+    # <b>A channel whose own connector is off must COLLECT NOTHING — not synthesize.</b>
+    # Pilot Readiness Closure v1 §8. MockApiConnector declares no dedicated channels, so it was the
+    # generic fallback for every channel whose connector bean is absent — which is what a disabled
+    # connector flag produces. The result was not a stopped sync but a SUCCESSFUL one writing invented
+    # reviews and inquiries into a real seller's tables. True keeps the local/dev behaviour the mock
+    # exists for; a deployment a seller can reach sets it false.
+    mock-fallback:
+      enabled: ${SELLEROPS_CONNECTOR_MOCK_FALLBACK_ENABLED:true}
     naver:
       # Real Naver Commerce API connector (Phase 3C Slice 1a). Off by default —
       # the connector beans are not even created, and NAVER keeps resolving to

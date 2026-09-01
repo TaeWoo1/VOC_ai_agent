@@ -218,4 +218,43 @@ class AgentRunStoreServiceTest {
         assertThatThrownBy(() -> service.upsert(orgA, "t2", insert("INQUIRY", "WEIRD", "{}")))
                 .isInstanceOf(ApiException.class);
     }
+
+    // ── Pilot Readiness Closure v1 §7 — conversations are what a deployed host actually stores ──
+
+    @Test
+    void aConversationTurnCanBeStored_becauseProductionHasNoOtherStore() {
+        AgentRunStateResponse got = service.upsert(orgA, "c1",
+                insert("CONVERSATION", "OPEN",
+                        "{\"turns\":[{\"role\":\"USER\",\"text\":\"미답변 문의 보여줘\"},"
+                                + "{\"role\":\"ASSISTANT\",\"message\":\"답변 안 한 문의는 3건입니다.\"}]}"));
+
+        assertThat(got.domain()).isEqualTo("CONVERSATION");
+        assertThat(got.status()).isEqualTo("OPEN");
+    }
+
+    @Test
+    void aConversationWaitingOnTheSellerIsAValidStatus() {
+        assertThat(service.upsert(orgA, "c2", insert("CONVERSATION", "WAITING_HUMAN", "{\"turns\":[]}")).status())
+                .isEqualTo("WAITING_HUMAN");
+    }
+
+    @Test
+    void aConversationStillMayNotCarryTheCustomersWords() {
+        assertThatThrownBy(() -> service.upsert(orgA, "c3",
+                insert("CONVERSATION", "OPEN", "{\"turns\":[{\"artifacts\":[{\"body\":\"고객이 쓴 문장\"}]}]}")))
+                .as("the narrowing is three keys the conversation contract owns — not the fence")
+                .isInstanceOf(ApiException.class);
+
+        assertThatThrownBy(() -> service.upsert(orgA, "c4",
+                insert("CONVERSATION", "OPEN", "{\"turns\":[{\"artifacts\":[{\"draft\":\"초안\"}]}]}")))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void theNarrowingIsScopedToConversations_aRunSnapshotStillMayNotCarryText() {
+        assertThatThrownBy(() -> service.upsert(orgA, "t9",
+                insert("INQUIRY", "DONE", "{\"text\":\"무언가\"}")))
+                .as("a run snapshot has no transcript, so nothing there owns these keys")
+                .isInstanceOf(ApiException.class);
+    }
 }

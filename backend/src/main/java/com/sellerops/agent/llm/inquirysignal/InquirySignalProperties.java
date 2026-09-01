@@ -52,4 +52,9 @@ public class InquirySignalProperties extends AgentOperatorProperties {
     public int maxBatchPerCall() {
         return maxBatchPerCall;
     }
+
+    @Override
+    public String capabilityName() {
+        return "SELLEROPS_INQUIRY_SIGNATURE";
+    }
 }

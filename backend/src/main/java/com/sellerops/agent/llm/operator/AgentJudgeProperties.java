@@ -24,4 +24,9 @@ public class AgentJudgeProperties extends AgentOperatorProperties {
             @Value("${sellerops.agent.judge.reasoning-effort:low}") String reasoningEffort) {
         super(enabled, enabledOrgIds, vendor, model, apiKey, maxOutputTokens, reasoningEffort);
     }
+
+    @Override
+    public String capabilityName() {
+        return "SELLEROPS_AGENT_JUDGE";
+    }
 }

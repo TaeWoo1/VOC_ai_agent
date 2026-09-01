@@ -1,5 +1,6 @@
 package com.sellerops.agent.llm.operator;
 
+import com.sellerops.agent.access.AgentCapabilityGate;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -23,7 +24,7 @@ import java.util.UUID;
  *
  * <p>The API key is held in memory only. Never logged, never stored, never part of a version string.
  */
-public abstract class AgentOperatorProperties {
+public abstract class AgentOperatorProperties implements AgentCapabilityGate {
 
     private final boolean enabled;
     private final boolean allOrgs;
@@ -57,10 +58,26 @@ public abstract class AgentOperatorProperties {
                 .map(UUID::fromString).toList();
     }
 
-    /** True only when the master switch is on AND a key is present AND the org is listed (or {@code *}). */
-    public boolean isEnabledFor(UUID orgId) {
-        return enabled && apiKey != null && !apiKey.isBlank() && orgId != null
-                && (allOrgs || enabledOrgIds.contains(orgId));
+    @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    @Override
+    public boolean namesAnyOrg() {
+        return allOrgs || !enabledOrgIds.isEmpty();
+    }
+
+    /** Deployment-level: the flag is on and a key is present. No organisation policy widens this. */
+    @Override
+    public boolean isDeployed() {
+        return enabled && apiKey != null && !apiKey.isBlank();
+    }
+
+    /** Organisation-level, from configuration alone: the {@code *} wildcard or the explicit list. */
+    @Override
+    public boolean isConfiguredFor(UUID orgId) {
+        return orgId != null && (allOrgs || enabledOrgIds.contains(orgId));
     }
 
     public String vendor() {

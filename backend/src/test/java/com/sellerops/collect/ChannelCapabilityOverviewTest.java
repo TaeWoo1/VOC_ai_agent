@@ -284,4 +284,26 @@ class ChannelCapabilityOverviewTest {
                     new UnsupportedScope("AUTO_REPLY", "자동 답변 미지원"));
         }
     }
+
+    // ── Pilot Readiness Closure v1 §8 — a channel with no connector collects nothing ────────────
+
+    @Test
+    void aChannelWithNoDedicatedConnectorResolvesToTheMockOnlyWhenTheFallbackIsOn() {
+        ConnectorRegistry withFallback = new ConnectorRegistry(java.util.List.of(new MockApiConnector()), true);
+        ConnectorRegistry fenced = new ConnectorRegistry(java.util.List.of(new MockApiConnector()), false);
+
+        org.assertj.core.api.Assertions.assertThat(withFallback.resolvePullConnector("CAFE24"))
+                .as("locally the mock IS the point").isPresent();
+        org.assertj.core.api.Assertions.assertThat(fenced.resolvePullConnector("CAFE24"))
+                .as("a disabled connector must stop collection, not synthesize rows into a seller's tables")
+                .isEmpty();
+    }
+
+    @Test
+    void theFenceNeverHidesAChannelsOwnConnector() {
+        ConnectorRegistry fenced = new ConnectorRegistry(
+                java.util.List.of(new MockApiConnector(), new StubCafe24Connector()), false);
+
+        org.assertj.core.api.Assertions.assertThat(fenced.resolvePullConnector("CAFE24")).isPresent();
+    }
 }

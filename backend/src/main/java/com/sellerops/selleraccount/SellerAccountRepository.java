@@ -29,6 +29,17 @@ public interface SellerAccountRepository extends JpaRepository<SellerAccount, UU
     List<UUID> findOrgIdsWithConnectedApiAccount();
 
     /**
+     * The same question about ONE organisation — Pilot Readiness Closure v1 §2.
+     *
+     * <p>Asked per request by {@code AgentCapabilityAccess}, so it is an existence check rather than
+     * the whole list: the answer is a single boolean about the caller's own org and never carries a
+     * row, a credential or another organisation's id.
+     */
+    @Query("select count(a) > 0 from SellerAccount a where a.orgId = :orgId "
+            + "and a.connectionStatus = com.sellerops.channel.ChannelStatus.CONNECTED and a.fileUpload = false")
+    boolean hasConnectedApiAccount(@Param("orgId") UUID orgId);
+
+    /**
      * Load a seller-account row under a {@code PESSIMISTIC_WRITE} lock (SELECT … FOR UPDATE) — the
      * serialization point for the NAVER connection lifecycle. Concurrent test / order-sync events for
      * one account take the lock one at a time, so the PENDING → PREPARING → CONNECTED transition is

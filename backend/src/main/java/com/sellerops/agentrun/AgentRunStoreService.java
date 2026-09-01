@@ -33,9 +33,25 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AgentRunStoreService {
 
-    private static final Set<String> DOMAINS = Set.of("INQUIRY", "REVIEW", "ISSUE");
-    /** The only statuses a client may WRITE via upsert. RESUMING is set only by the claim lock. */
-    private static final Set<String> STATUSES = Set.of("AWAITING_APPROVAL", "DONE");
+    /**
+     * <b>CONVERSATION is here because without it the product does not run on a deployed host</b> —
+     * Pilot Readiness Closure v1 §7.
+     *
+     * <p>{@code APP_ENV=production} REQUIRES the backend-owned store (the file store is
+     * single-instance and the memory store loses paused runs), the pilot compose sets exactly that,
+     * and this set did not contain the domain every chat turn writes. So every conversation on every
+     * deployed host was a 400 at create: the chat-first product, refused at its first sentence, by a
+     * list that had simply not been extended when conversations became durable.
+     */
+    private static final Set<String> DOMAINS = Set.of("INQUIRY", "REVIEW", "ISSUE", "CONVERSATION");
+    private static final String DOMAIN_CONVERSATION = "CONVERSATION";
+    /**
+     * The only statuses a client may WRITE via upsert. RESUMING is set only by the claim lock.
+     * OPEN / WAITING_HUMAN are the conversation store's two, and they mean for a conversation what
+     * DONE / AWAITING_APPROVAL mean for a run.
+     */
+    private static final Set<String> STATUSES =
+            Set.of("AWAITING_APPROVAL", "DONE", "OPEN", "WAITING_HUMAN");
     private static final String STATUS_DONE = "DONE";
 
     /**
@@ -57,6 +73,24 @@ public class AgentRunStoreService {
             "draft", "draftbody", "drafttext", "replydraft", "replytext", "reply",
             "quote", "safepreview", "content", "text", "subject", "message",
             "writer", "author", "email", "phone", "memo", "address");
+
+    /**
+     * The three keys a CONVERSATION snapshot owns, and only for that domain.
+     *
+     * <p>Each one is <b>the seller's own words or ours</b>, never a customer's: {@code turns[].text}
+     * is the sentence the seller typed, {@code turns[].message} is the sentence reviewnary composed
+     * back, and {@code pendingCapture.candidate.content} is the seller's own answer on its way to
+     * their own knowledge base. A transcript that cannot hold what the seller typed is not a
+     * transcript.
+     *
+     * <p><b>Everything else stays forbidden for conversations too</b> — body, details, draft, quote,
+     * writer, email, phone, address. The customer's words are already stripped before a turn is
+     * persisted (`persistableArtifact`), so this is the second fence behind that one, and moving
+     * conversations off the unfenced local file store onto this path makes them MORE checked than
+     * they were, not less. Measured against every conversation the local file store held (40 of
+     * them): these three keys collide and nothing else does.
+     */
+    private static final Set<String> CONVERSATION_OWN_KEYS = Set.of("text", "message", "content");
 
     /** A sanitized snapshot is small (ids, enums, a trail, a bounded brief). This bounds abuse. */
     private static final int MAX_SNAPSHOT_BYTES = 256 * 1024;
@@ -91,7 +125,7 @@ public class AgentRunStoreService {
         }
         // Size cap first (bounds work before the recursive key walk), then the raw-content key check.
         String snapshotText = serialize(request.snapshot());
-        assertSanitizedSnapshot(request.snapshot());
+        assertSanitizedSnapshot(request.snapshot(), request.domain());
         Instant now = Instant.now();
 
         if (request.version() == null) {
@@ -182,11 +216,21 @@ public class AgentRunStoreService {
      * "required" check applies only at the root; the recursive walk tolerates nulls and only inspects
      * keys.
      */
-    private void assertSanitizedSnapshot(JsonNode node) {
+    private void assertSanitizedSnapshot(JsonNode node, String domain) {
         if (node == null || node.isNull()) {
             throw ApiException.badRequest("snapshot is required");
         }
-        rejectForbiddenKeys(node);
+        rejectForbiddenKeys(node, forbiddenFor(domain));
+    }
+
+    /** The forbidden set for one domain — narrowed only by what that domain's own contract owns. */
+    private static Set<String> forbiddenFor(String domain) {
+        if (!DOMAIN_CONVERSATION.equals(domain)) {
+            return FORBIDDEN_KEYS;
+        }
+        Set<String> narrowed = new java.util.HashSet<>(FORBIDDEN_KEYS);
+        narrowed.removeAll(CONVERSATION_OWN_KEYS);
+        return Set.copyOf(narrowed);
     }
 
     /**
@@ -194,7 +238,7 @@ public class AgentRunStoreService {
      * key exactly and case-insensitively against {@link #FORBIDDEN_KEYS} (never a substring, so
      * {@code bodyFingerprint} / {@code draftVersion} are unaffected). Null and scalar values are fine.
      */
-    private void rejectForbiddenKeys(JsonNode node) {
+    private void rejectForbiddenKeys(JsonNode node, Set<String> forbidden) {
         if (node == null) {
             return;
         }
@@ -202,14 +246,14 @@ public class AgentRunStoreService {
             Iterator<String> names = node.fieldNames();
             while (names.hasNext()) {
                 String name = names.next();
-                if (FORBIDDEN_KEYS.contains(name.toLowerCase(java.util.Locale.ROOT))) {
+                if (forbidden.contains(name.toLowerCase(java.util.Locale.ROOT))) {
                     throw ApiException.badRequest("snapshot carries a forbidden raw-content field");
                 }
-                rejectForbiddenKeys(node.get(name));
+                rejectForbiddenKeys(node.get(name), forbidden);
             }
         } else if (node.isArray()) {
             for (JsonNode child : node) {
-                rejectForbiddenKeys(child);
+                rejectForbiddenKeys(child, forbidden);
             }
         }
     }

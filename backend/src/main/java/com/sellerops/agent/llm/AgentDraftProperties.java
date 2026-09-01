@@ -1,5 +1,6 @@
 package com.sellerops.agent.llm;
 
+import com.sellerops.agent.access.AgentCapabilityGate;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -21,7 +22,7 @@ import org.springframework.stereotype.Component;
  * stored, and never part of any version string.
  */
 @Component
-public class AgentDraftProperties {
+public class AgentDraftProperties implements AgentCapabilityGate {
 
     private final boolean enabled;
     private final boolean allOrgs;
@@ -60,10 +61,31 @@ public class AgentDraftProperties {
         return Arrays.stream(csv.split(",")).map(String::trim).filter(s -> !s.isEmpty()).map(UUID::fromString).toList();
     }
 
-    /** True only when the master switch is on AND a key is present AND the org is listed (or the list is {@code *}). */
-    public boolean isEnabledFor(UUID orgId) {
-        return enabled && apiKey != null && !apiKey.isBlank() && orgId != null
-                && (allOrgs || enabledOrgIds.contains(orgId));
+    @Override
+    public String capabilityName() {
+        return "SELLEROPS_AGENT_DRAFT";
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    @Override
+    public boolean namesAnyOrg() {
+        return allOrgs || !enabledOrgIds.isEmpty();
+    }
+
+    /** Deployment-level: the flag is on and a key is present. No organisation policy widens this. */
+    @Override
+    public boolean isDeployed() {
+        return enabled && apiKey != null && !apiKey.isBlank();
+    }
+
+    /** Organisation-level, from configuration alone: the {@code *} wildcard or the explicit list. */
+    @Override
+    public boolean isConfiguredFor(UUID orgId) {
+        return orgId != null && (allOrgs || enabledOrgIds.contains(orgId));
     }
 
     public String vendor() {

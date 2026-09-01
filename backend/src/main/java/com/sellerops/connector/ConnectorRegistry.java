@@ -2,6 +2,8 @@ package com.sellerops.connector;
 
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -27,12 +29,40 @@ public class ConnectorRegistry {
     private final List<ChannelConnector> connectors;
     private final List<PullConnector> pullConnectors;
 
-    public ConnectorRegistry(List<ChannelConnector> connectors) {
+    /**
+     * <b>Whether a channel with no dedicated connector may fall back to the offline mock.</b>
+     * Pilot Readiness Closure v1 §8.
+     *
+     * <p>{@link com.sellerops.connector.MockApiConnector} declares no dedicated channels, so it was
+     * the generic fallback for EVERY channel whose own connector bean is absent — which is exactly
+     * what a disabled connector flag produces. The consequence on a deployed host is not a stopped
+     * collection: it is a SUCCESSFUL sync that writes synthesized reviews and inquiries into a real
+     * seller's tables, indistinguishable from theirs. A seller who connected Cafe24 and whose
+     * operator later switched the Cafe24 connector off would watch invented rows arrive.
+     *
+     * <p>Default {@code true} preserves every existing local and test deployment, where the mock is
+     * the point. The pilot environment sets it false, and the boot validator says so.
+     */
+    private final boolean mockFallbackEnabled;
+
+    /** The registry as a deployment configures it. */
+    @Autowired
+    public ConnectorRegistry(List<ChannelConnector> connectors,
+                             @Value("${sellerops.connector.mock-fallback.enabled:true}") boolean mockFallbackEnabled) {
+        this.mockFallbackEnabled = mockFallbackEnabled;
         this.connectors = List.copyOf(connectors);
         this.pullConnectors = this.connectors.stream()
                 .filter(PullConnector.class::isInstance)
                 .map(PullConnector.class::cast)
                 .toList();
+    }
+
+    /**
+     * The registry with the fallback on — the historical behaviour, and what a unit test that hands
+     * in exactly the connectors it wants to exercise means.
+     */
+    public ConnectorRegistry(List<ChannelConnector> connectors) {
+        this(connectors, true);
     }
 
     /** True for the manual file-upload channel, which has no pull connector. */
@@ -49,12 +79,15 @@ public class ConnectorRegistry {
         if (isFileChannel(channelCode)) {
             return Optional.empty();
         }
-        return pullConnectors.stream()
+        Optional<PullConnector> dedicated = pullConnectors.stream()
                 .filter(p -> p.dedicatedChannels().contains(channelCode))
-                .findFirst()
-                .or(() -> pullConnectors.stream()
-                        .filter(p -> p.dedicatedChannels().isEmpty())
-                        .findFirst());
+                .findFirst();
+        if (dedicated.isPresent() || !mockFallbackEnabled) {
+            return dedicated;
+        }
+        return pullConnectors.stream()
+                .filter(p -> p.dedicatedChannels().isEmpty())
+                .findFirst();
     }
 
     /**

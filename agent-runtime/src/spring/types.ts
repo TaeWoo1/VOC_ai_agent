@@ -761,6 +761,13 @@ export interface AgentPlanView {
   readonly stopWhenEnough?: string | null;
   /** Set only when the org's daily Agent budget is what refused — a different remedy from "off". */
   readonly quotaMessage?: string | null;
+  /**
+   * Set when the capability is configured but this ORGANISATION may not use it and the seller has a
+   * next step (Pilot Readiness Closure v1 §2 — an access policy of CONNECTED_SELLERS on an org that
+   * has connected no channel yet). Separate from `quotaMessage`: no ceiling was met, so reporting it
+   * as AGENT_QUOTA_EXHAUSTED would name the wrong remedy.
+   */
+  readonly unavailableMessage?: string | null;
   readonly clarificationNeeded?: boolean;
   readonly clarificationReason?: string | null;
   readonly rationale: string | null;

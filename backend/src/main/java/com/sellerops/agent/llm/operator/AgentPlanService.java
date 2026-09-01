@@ -1,5 +1,6 @@
 package com.sellerops.agent.llm.operator;
 
+import com.sellerops.agent.access.AgentCapabilityAccess;
 import com.sellerops.agent.llm.AgentLlmTransport;
 import java.util.List;
 import java.util.Optional;
@@ -31,19 +32,34 @@ public class AgentPlanService {
 
     private final AgentPlanProperties properties;
     private final AgentLlmTransport transport;
+    /** Who may use this capability — the deployment's named policy, not a written-down list. */
+    private final AgentCapabilityAccess access;
 
-    public AgentPlanService(AgentPlanProperties properties, AgentLlmTransport transport) {
+    public AgentPlanService(AgentPlanProperties properties, AgentLlmTransport transport,
+                                   AgentCapabilityAccess access) {
         this.properties = properties;
         this.transport = transport;
+        this.access = access;
     }
 
     public boolean isEnabledFor(UUID orgId) {
-        return properties.isEnabledFor(orgId);
+        return access.allows(properties, orgId);
+    }
+
+    /**
+     * The seller's own next step when this org may not plan, or null when there is none.
+     *
+     * <p>Only one refusal has a seller-side remedy: an access policy of CONNECTED_SELLERS on an
+     * organisation that has connected nothing yet. "The capability is off" and "this org is not on
+     * the list" are operator actions, and the runtime already has one honest sentence for them.
+     */
+    public String accessMessageFor(UUID orgId) {
+        return access.sellerMessage(access.decide(properties, orgId));
     }
 
     /** The version string a run records, or null when the capability is off for this org. */
     public String versionFor(UUID orgId) {
-        return properties.isEnabledFor(orgId) ? generator().version() : null;
+        return access.allows(properties, orgId) ? generator().version() : null;
     }
 
     /**
@@ -82,7 +98,7 @@ public class AgentPlanService {
     public Optional<AgentOperatorResponseParser.ParsedPlan> plan(UUID orgId, String goalText,
                                                                  List<String> toolCatalogue,
                                                                  String priorContext, boolean retry) {
-        if (!properties.isEnabledFor(orgId)) {
+        if (!access.allows(properties, orgId)) {
             return Optional.empty();
         }
         AgentPlanGenerator.Result result = generator(retry)

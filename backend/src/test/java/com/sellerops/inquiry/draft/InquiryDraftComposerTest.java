@@ -693,7 +693,7 @@ class InquiryDraftComposerTest {
         int calls;
 
         private StubModel(AgentDraftResponseParser.ParsedDraft answer, boolean enabled) {
-            super(null, null);
+            super(null, null, null);
             this.answer = answer;
             this.enabled = enabled;
         }

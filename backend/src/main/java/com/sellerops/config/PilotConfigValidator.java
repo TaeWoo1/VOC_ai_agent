@@ -1,6 +1,7 @@
 package com.sellerops.config;
 
 import java.net.URI;
+import com.sellerops.agent.access.AgentCapabilityGate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -43,6 +44,16 @@ public class PilotConfigValidator {
     private final String cafe24ClientId;
     private final String cafe24ClientSecret;
     private final String cafe24RedirectUri;
+    private final String agentAccessScope;
+    /**
+     * The AI capabilities, as beans that describe themselves.
+     *
+     * <p><b>Not their property keys.</b> A file that reads {@code sellerops.agent.plan.*} AND
+     * {@code sellerops.agent.draft.*} is a file where two separate exposures have become one switch,
+     * and {@code AgentDraftBoundaryTest} refuses exactly that shape. Asking each capability three
+     * questions about itself keeps this validator able to check all of them while reading none.
+     */
+    private final List<AgentCapabilityGate> agentCapabilities;
 
     public PilotConfigValidator(
             @Value("${sellerops.connector.naver.enabled:false}") boolean naverEnabled,
@@ -52,7 +63,9 @@ public class PilotConfigValidator {
             @Value("${sellerops.connector.naver.advertised-egress-ips:}") String naverAdvertisedEgressIps,
             @Value("${sellerops.connector.cafe24.oauth.client-id:}") String cafe24ClientId,
             @Value("${sellerops.connector.cafe24.oauth.client-secret:}") String cafe24ClientSecret,
-            @Value("${sellerops.connector.cafe24.oauth.redirect-uri:}") String cafe24RedirectUri) {
+            @Value("${sellerops.connector.cafe24.oauth.redirect-uri:}") String cafe24RedirectUri,
+            @Value("${sellerops.agent.access.scope:ALLOW_LIST}") String agentAccessScope,
+            List<AgentCapabilityGate> agentCapabilities) {
         this.naverEnabled = naverEnabled;
         this.coupangEnabled = coupangEnabled;
         this.cafe24Enabled = cafe24Enabled;
@@ -61,6 +74,8 @@ public class PilotConfigValidator {
         this.cafe24ClientId = cafe24ClientId;
         this.cafe24ClientSecret = cafe24ClientSecret;
         this.cafe24RedirectUri = cafe24RedirectUri;
+        this.agentAccessScope = agentAccessScope;
+        this.agentCapabilities = agentCapabilities == null ? List.of() : List.copyOf(agentCapabilities);
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -68,7 +83,8 @@ public class PilotConfigValidator {
         List<String> problems = problems();
         if (!problems.isEmpty()) {
             throw new IllegalStateException(
-                    "이 배포는 채널을 켰지만 실제로 연결할 수 없는 설정입니다. 다음을 채운 뒤 다시 시작하세요:\n  - "
+                    "이 배포는 켜 둔 기능을 실제로 사용할 수 없는 설정입니다. "
+                            + "아래를 채우거나 해당 기능을 끈 뒤 다시 시작하세요:\n  - "
                             + String.join("\n  - ", problems));
         }
     }
@@ -100,6 +116,44 @@ public class PilotConfigValidator {
             String redirectProblem = redirectUriProblem(cafe24RedirectUri);
             if (redirectProblem != null) {
                 problems.add("SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI — " + redirectProblem);
+            }
+        }
+        problems.addAll(agentProblems());
+        return problems;
+    }
+
+    /**
+     * <b>An AI capability that is switched on but can reach nobody.</b> Pilot Readiness Closure v1 §4.
+     *
+     * <p>Same failure class as a keyless vault: the deployment starts, the chat box accepts a
+     * sentence, and every free-language turn comes back 「AI 계획 기능이 꺼져 있습니다」 while the
+     * operator's configuration says it is on. Two conditions, both unambiguous:
+     *
+     * <ul>
+     *   <li>enabled with no key — the call cannot be made at all;</li>
+     *   <li>enabled and keyed, but the access policy is the explicit allow-list and the list is
+     *       empty — the call can be made and no organisation may make it. This is exactly the pilot
+     *       trap: the operator turned the Agent on and every seller still sees it off.</li>
+     * </ul>
+     *
+     * <p>A capability that is OFF is checked for nothing, for the reason every connector is: the
+     * honest default posture must boot.
+     */
+    List<String> agentProblems() {
+        List<String> problems = new ArrayList<>();
+        boolean allowList = agentAccessScope == null || agentAccessScope.isBlank()
+                || agentAccessScope.trim().equalsIgnoreCase("ALLOW_LIST");
+        for (AgentCapabilityGate capability : agentCapabilities) {
+            if (!capability.isEnabled()) {
+                continue;
+            }
+            String name = capability.capabilityName();
+            if (!capability.isDeployed()) {
+                problems.add(name + "_API_KEY — 이 AI 기능을 켰지만 호출할 키가 없습니다.");
+            } else if (allowList && !capability.namesAnyOrg()) {
+                problems.add(name + "_ORG_IDS / SELLEROPS_AGENT_ACCESS_SCOPE — "
+                        + "이 AI 기능을 켰지만 사용할 수 있는 조직이 하나도 없습니다 "
+                        + "(조직을 나열하거나, 접근 정책을 CONNECTED_SELLERS로 설정하세요).");
             }
         }
         return problems;

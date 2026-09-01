@@ -412,7 +412,7 @@ class AnswerStyleDraftTest {
         int calls;
 
         private StubModel(AgentDraftResponseParser.ParsedDraft answer) {
-            super(null, null);
+            super(null, null, null);
             this.answer = answer;
         }
 

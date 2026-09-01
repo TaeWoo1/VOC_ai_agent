@@ -14,7 +14,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { TOKEN, artifact, harness, say } from "./support";
-import type { AgentPlanView, ReviewDetailResponse } from "../../src/spring/types";
+import type { AgentPlanView, ReviewChannelCapabilityView, ReviewDetailResponse } from "../../src/spring/types";
 import { OPERATOR_TOOL } from "../../src/operator/tools/OperatorTools";
 import { MOLDING } from "../support/operatorFixtures";
 import { assistantCapabilityAnswer } from "../../src/operator/capability/AssistantCapability";
@@ -62,8 +62,14 @@ function detail(over: Partial<ReviewDetailResponse> = {}): ReviewDetailResponse 
 }
 
 /** A conversation that has drawn the review list and clicked one of its rows. */
-async function anchored(plans: Record<string, AgentPlanView>, reviewDetails: Record<string, ReviewDetailResponse>) {
-  const h = harness({ plansByGoal: { "오늘 새로 달린 리뷰 보여줘": ROWS_PLAN, ...plans }, reviewDetails });
+async function anchored(
+  plans: Record<string, AgentPlanView>, reviewDetails: Record<string, ReviewDetailResponse>,
+  reviewChannelCapabilities?: Record<string, ReviewChannelCapabilityView>,
+) {
+  const h = harness({
+    plansByGoal: { "오늘 새로 달린 리뷰 보여줘": ROWS_PLAN, ...plans }, reviewDetails,
+    ...(reviewChannelCapabilities ? { reviewChannelCapabilities } : {}),
+  });
   const { conversationId: id } = await h.service.create(TOKEN);
   await say(h, id, "오늘 새로 달린 리뷰 보여줘");
   await h.service.turn(TOKEN, id, { select: { kind: "REVIEW", reviewId: "r-2" } } as never, () => undefined);
@@ -83,8 +89,8 @@ describe("§1 — the selected review is the object the answer is about", () => 
     const card = artifact(turn, "REVIEW_DETAIL");
     expect(card).toMatchObject({
       reviewId: "r-2", rating: 2, negative: true, productId: MOLDING.id, channelNameKo: "카페24",
-      // No channel capability was seeded in this harness, so the honest verdict is UNKNOWN — the card
-      // says it did not check rather than claiming the channel refuses replies.
+      // No channel capability exists to read in this harness, so the honest verdict is UNKNOWN — the
+      // card says it did not check rather than claiming the channel refuses replies.
       replyCapability: "UNKNOWN",
     });
     expect(card.issues).toEqual([{ issueId: "iss-1", title: "접착력 부족", severity: "HIGH", to: "/memory/iss-1" }]);
@@ -149,7 +155,7 @@ describe("§1-C — 「이 리뷰 자세히 봐줘」 is answered by the object,
     const card = artifact(turn, "REVIEW_DETAIL");
     expect(card.reviewId).toBe("r-2");
     expect(card.body).toContain("접착이 금방 떨어졌어요");
-    // The deterministic lane buys ONE read: what the channel does with replies is a second one.
+    // Nothing to read about this channel's replies here, so the card says it did not check.
     expect(card.replyCapability).toBe("UNKNOWN");
     expect(turn.continuation.activeTask).toBe("INSPECT");
     // §3: the object's own card names its product — the answer does not roll the same evidence up

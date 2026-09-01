@@ -77,8 +77,8 @@ public class AgentOperatorController {
                                 p.filters().scope(), p.filters().topic(), p.filters().reviewIntent(),
                                 p.filters().inquiryIntent(), p.filters().limit(), p.filters().order(),
                                 p.filters().status()),
-                        new PlanTargetView(p.target().selector(), p.target().index()), version, null))
-                .orElseGet(() -> PlanView.unavailable(version));
+                        new PlanTargetView(p.target().selector(), p.target().index()), version, null, null))
+                .orElseGet(() -> PlanView.unavailable(version, planService.accessMessageFor(principal.orgId())));
     }
 
     @PostMapping("/judge")
@@ -171,12 +171,21 @@ public class AgentOperatorController {
                            int maxIterations, int maxToolCalls, String stopWhenEnough,
                            boolean clarificationNeeded, String clarificationReason, String rationale,
                            String requestedAction, String tone, PlanFiltersView filters,
-                           PlanTargetView target, String providerVersion, String quotaMessage) {
+                           PlanTargetView target, String providerVersion, String quotaMessage,
+                           String unavailableMessage) {
 
-        static PlanView unavailable(String version) {
+        /**
+         * The capability produced no plan — and, when the reason is one the SELLER can act on, the
+         * sentence saying so.
+         *
+         * <p>A separate field from {@code quotaMessage} on purpose: the runtime reads a quota message
+         * as the AGENT_QUOTA_EXHAUSTED status, and "connect a channel first" is not a ceiling that was
+         * met. Same {@code available=false} either way, so nothing new degrades down a fresh branch.
+         */
+        static PlanView unavailable(String version, String message) {
             return new PlanView(false, false, null, List.of(), List.of(), List.of(), List.of(),
                     List.of(), List.of(), null, List.of(), null, 0, 0, null, false, null, null,
-                    "NONE", null, PlanFiltersView.none(), PlanTargetView.none(), version, null);
+                    "NONE", null, PlanFiltersView.none(), PlanTargetView.none(), version, null, message);
         }
 
         /**
@@ -188,7 +197,7 @@ public class AgentOperatorController {
         static PlanView quotaExhausted(String version, String message) {
             return new PlanView(false, false, null, List.of(), List.of(), List.of(), List.of(),
                     List.of(), List.of(), null, List.of(), null, 0, 0, null, false, null, null,
-                    "NONE", null, PlanFiltersView.none(), PlanTargetView.none(), version, message);
+                    "NONE", null, PlanFiltersView.none(), PlanTargetView.none(), version, message, null);
         }
     }
 

@@ -1020,6 +1020,62 @@ ordinal 선택은 여전히 카드를 그리지 않는다(frozen 대화 semantic
 `replyCapability`는 읽기 하나만 사서 `UNKNOWN`, 상품에는 detail 카드가 없어 context bar가 목록 행에서
 이름을 되찾는다, QA 한정 예산·allowlist override는 바이트 단위로 복원했다).
 
+**`docs/pilot_readiness_closure_v1.md`** (Pilot Readiness Closure v1 — 2026-09-01. feature package가 아니라
+질문 하나: **개발자가 env를 고치거나 서버를 재기동하지 않고 새 판매자를 파일럿에 추가할 수 있는가.** Agent/
+conversation architecture는 **freeze**. 감사한 다섯 항목 중 넷이 진짜였고 둘이 더 나왔는데 그 둘은 「불편」이
+아니라 **배포된 호스트에서 제품이 돌지 않는다**였다. **§2 접근 정책에 이름을 붙였다** — 판매자 하나를 넣는 일이
+org UUID를 env 셋에 붙여넣고 재기동하는 일(그 사이 다른 판매자의 대화·실행이 전부 죽는다)이었고, 유일한 대안
+`*`는 자기 docblock이 「공유 백엔드에서는 쓰지 말라」고 적어 둔 로컬 단일 사용자 장치였다 — 즉 **production
+onboarding 경로가 「판매자마다 재기동」 아니면 「여기서는 안전하지 않다고 문서화된 스위치」 둘뿐**이었다 ⇒
+`sellerops.agent.access.scope` 하나: `ALLOW_LIST`(기본, 기존 동작과 바이트 동일) · **`CONNECTED_SELLERS`**(파일럿
+값 — CONNECTED·비파일업로드 계정을 가진 org, `findOrgIdsWithConnectedApiAccount`가 정기 수집에 이미 쓰는 **같은
+문장**이고 「누가 원하는가」의 추측이 아니라 **누가 요청했는가의 기록**이다; 공개 호스트의 drive-by 가입은 연결한
+것이 없으므로 쓰는 것도 없다) · `ALL_ORGS`(bare `*`가 뜻하던 것의 정직한 이름). **정책은 넓히기만 하고 org 질문만
+넓힌다** — flag·key(`isDeployed`)는 어떤 scope도 덮지 못하고 목록에 적힌 org는 어떤 scope에서도 유지되며 오타는
+기동 시 거절된다(`AgentCapabilityGate`가 배포 질문과 org 질문을 가른다; `isEnabledFor`는 여전히 정확히 그 둘의
+논리곱이라 쪼개는 것만으로는 아무것도 안 움직인다). 범위는 **plan·draft·judge**이고 triage/signature/image는 각자
+rollout 상태가 있어 조용히 넓히지 않았다. **§2-A 거절 문장은 누구의 차례인지 말한다** — 연결이 없는 org가 첫
+문장에서 「AI 계획 기능이 꺼져 있습니다」(배포에 대해 참, 판매자에게 무용)를 듣고 있었다 ⇒ `unavailableMessage`
+(quota와 **별도 칸** — 한도에 닿은 것이 아니므로 AGENT_QUOTA_EXHAUSTED로 보고하면 다른 처방을 말하게 된다),
+failure 분류는 무변경. **§3 컨테이너가 볼 수 없던 이름들**: `docker-compose.yml`이 `SELLEROPS_AGENT_*`를 **하나도**
+통과시키지 않았고 두 env 예시에도 없었다 — 런북대로 세운 호스트는 플래너가 꺼진 채로 뜨고 자유문장 turn이 전부
+실패하며 어떤 변수를 채우라는 말도 없다(모델 override는 일부러 제외 — `${K:-}`는 컨테이너에서 **빈 문자열**이 되어
+설정된 모델을 지운다). **§4 켜졌는데 아무도 못 쓰는 capability는 기동 실패다**(키 없음 · ALLOW_LIST인데 목록이 빔 —
+정확히 그 파일럿 함정), 그리고 validator는 **어떤 capability의 property key도 읽지 않는다** — 두 capability의 flag를
+한 파일이 읽으면 두 노출이 한 스위치가 되고 `AgentDraftBoundaryTest`가 첫 버전을 잡았다 ⇒ capability가 **자기 이름을
+말한다**(`capabilityName()`). **§5 `tools/dev/org-cleanup.sh`** — org UUID 하나, dry-run 기본, **CONNECTED 계정을 가진
+org는 거절**(실측: 데모 org와 이 패키지 자신의 QA org를 거절), 단일 트랜잭션이라 막히면 전부 롤백, 표 목록은 카탈로그에서
+(손으로 쓴 목록은 다음 마이그레이션에서 낡는다). **§6 상호작용 둘**: 서수로 부르는 것은 **누르는 것과 같은 행위**라
+「두 번째 리뷰 자세히」가 클릭·「이 리뷰」와 같은 결정론 lane으로 exact 카드를 그리고, `replyCapability`의 `UNKNOWN`은
+**예산 결정이었지 정직함이 아니었다** ⇒ 계정 기준 org-scoped READ 하나를 더 사서 같은 `capabilityOf`로 판정한다(다만
+**읽어서 아무것도 안 나오면 여전히 UNKNOWN** — 「확인 못 했다」와 「지원 안 한다」는 다른 주장이고 관측된 것은 하나뿐이다).
+**§7 production run store가 제품이 쓰는 것을 받지 않았다** — 허용 domain이 `{INQUIRY,REVIEW,ISSUE}`인데 대화는
+`CONVERSATION`/`OPEN`을 쓰고, `APP_ENV=production`은 그 store를 **요구**하며 파일럿 compose가 정확히 그 조합이다 ⇒
+**모든 배포 호스트에서 모든 대화가 create에서 400**이었다(= chat-first 제품이 첫 문장에서 거절). domain·status를 넣되
+**sanitization fence는 유지**하고 이 domain에 한해 **세 키만** 좁혔다 — `turns[].text`(판매자가 친 문장) ·
+`turns[].message`(우리가 쓴 문장) · `pendingCapture.candidate.content`(판매자 자신의 지식이 될 문장); **판매자가 친 것을
+담지 못하는 transcript는 transcript가 아니다**. body·details·draft·quote·writer·email·phone·address는 대화에서도 그대로
+금지이고 고객의 문장은 저장 전에 이미 제거된다(§9-6이 실측) ⇒ 펜스 없는 로컬 파일 store에서 이 경로로 옮기는 것은
+검사가 **늘어나는** 변화다(실측: 파일 store의 대화 40개 전수에서 `text`/`message` 40건 · `content` 1건 · 그 외 0건).
+**§8 커넥터가 꺼진 채널은 수집을 멈춰야지 지어내면 안 된다** — `resolvePullConnector`가 dedicated channel이 없는
+connector(=`MockApiConnector`)로 폴백해서, 커넥터 flag를 끈 채널의 sync가 실패가 아니라 **성공**하며 합성 리뷰·문의를
+`data_origin='REAL'`로 판매자 표에 썼다(이 패키지 QA에서 실측: 커넥터 전부 off인 QA org가 스케줄러 두 tick에 리뷰 60·문의
+45를 수집; **마켓플레이스 호출은 0** — mock은 네트워크도 자격도 쓰지 않으므로 egress 결함이 아니라 데이터 정합 결함이다)
+⇒ `sellerops.connector.mock-fallback.enabled`(기본 **true**로 로컬·테스트 무변경, 파일럿 예시는 **false**), 채널 자신의
+커넥터는 절대 가리지 않는다. **§9 검증은 clean pilot-style boot 위에서**(시드·커넥터·self-pilot·proactive·전송 전부 off,
+mock fallback 펜스, plan/draft on **allow-list 비어 있음**, scope=CONNECTED_SELLERS, 런타임은 production+spring store —
+파일럿 compose가 만드는 그 자세; 마이그레이션 86 검증·적용 0, ERROR/WARN 0, 7.0초): 가입 직후 연결 전 → 판매자의 다음
+걸음 문장 · 연결 직후 → **env 편집 0 · 재기동 0 · 같은 프로세스**에서 DONE · org A/B 격리(404) · 데이터 org 「미답변 35건」 ·
+서수 inspect가 row #2와 **같은 id**의 카드 · **backend와 runtime 재기동 뒤** 대화 6 turn·anchor 유지·저장된 카드의 `body`
+제거 확인·같은 스레드 계속 · scoped cleanup 실행. 브라우저 1440/1366/1152에서 첫사용 3상태와 서수 카드 — **AA 위반 0 ·
+가로 스크롤 0 · 콘솔 오류 0 · off-host 0**. backend **3,613** · runtime **801** · frontend **2,627** · 실패 0.
+**마켓플레이스 호출 0 · WRITE 0 · 마이그레이션 0** ⇒ evidence 행 없음. **정직 보고**: CONNECTED 계정은 안전한 테스트 몰이
+없어 **행을 직접 넣었다**(마켓플레이스 0·자격 0) — 증명된 것은 그 행을 **읽는 admission 정책**이지 그 행을 **쓰는 연결
+흐름**이 아니며, 후자의 첫 증명은 여전히 첫 파일럿 판매자의 첫 연결이다. **고치지 않고 보고**: 대화에 turn 상한이 없고
+스냅샷 천장은 256KB(현재 최대 85KB — 상한을 정하는 것은 판매자가 무엇을 잃느냐는 제품 결정) · 접근 정책은 gate마다 존재
+쿼리 1회(캐시 없음) · 나머지 세 AI capability는 allow-list 유지(다만 §4 validator는 그것들에도 적용된다) · mock fallback이
+이미 쓴 합성 행은 로컬 QA org에 남아 있다. **남은 외부 증명과 파일럿 프로비저닝 입력은 §10**)
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

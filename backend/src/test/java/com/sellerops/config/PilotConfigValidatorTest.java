@@ -22,7 +22,51 @@ class PilotConfigValidatorTest {
 
     private PilotConfigValidator v(boolean naver, boolean coupang, boolean cafe24, String vault,
                                    String egress, String id, String secret, String redirect) {
-        return new PilotConfigValidator(naver, coupang, cafe24, vault, egress, id, secret, redirect);
+        return new PilotConfigValidator(naver, coupang, cafe24, vault, egress, id, secret, redirect,
+                "ALLOW_LIST", java.util.List.of());
+    }
+
+    /** An AI capability with three switches, everything else off. */
+    private PilotConfigValidator agent(String scope, boolean enabled, String key, String orgIds) {
+        return new PilotConfigValidator(false, false, false, "", "", "", "", "",
+                scope, java.util.List.of(capability(enabled, key, orgIds)));
+    }
+
+    /** One AI capability, described the way the real property beans describe themselves. */
+    private com.sellerops.agent.access.AgentCapabilityGate capability(boolean enabled, String key, String orgIds) {
+        return new com.sellerops.agent.access.AgentCapabilityGate() {
+            @Override public String capabilityName() { return "SELLEROPS_AGENT_PLAN"; }
+            @Override public boolean isEnabled() { return enabled; }
+            @Override public boolean isDeployed() { return enabled && !key.isBlank(); }
+            @Override public boolean namesAnyOrg() { return !orgIds.isBlank(); }
+            @Override public boolean isConfiguredFor(java.util.UUID orgId) { return !orgIds.isBlank(); }
+        };
+    }
+
+    @Test
+    void planCapabilityOff_needsNothing() {
+        assertThat(agent("ALLOW_LIST", false, "", "").problems())
+                .as("a capability nobody turned on is not a misconfiguration").isEmpty();
+    }
+
+    @Test
+    void planEnabledWithoutKey_refusesToBoot() {
+        assertThat(agent("ALLOW_LIST", true, "", "*").problems())
+                .singleElement().asString().contains("SELLEROPS_AGENT_PLAN_API_KEY");
+    }
+
+    @Test
+    void planEnabledAndKeyedButNoOrgMayUseIt_refusesToBoot() {
+        assertThat(agent("ALLOW_LIST", true, "sk-key", "").problems())
+                .as("the pilot trap: switched on, and off for every seller")
+                .singleElement().asString().contains("SELLEROPS_AGENT_ACCESS_SCOPE");
+    }
+
+    @Test
+    void connectedSellersScope_needsNoWrittenDownOrgList() {
+        assertThat(agent("CONNECTED_SELLERS", true, "sk-key", "").problems())
+                .as("the database answers who may use it — an empty list is the correct state")
+                .isEmpty();
     }
 
     /** H — nothing is on, nothing is configured, and that is a correct deployment. */

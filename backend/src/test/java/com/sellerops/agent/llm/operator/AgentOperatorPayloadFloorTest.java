@@ -140,7 +140,7 @@ class AgentOperatorPayloadFloorTest {
         java.util.UUID org = java.util.UUID.randomUUID();
         AgentJudgeService service = new AgentJudgeService(
                 new AgentJudgeProperties(true, org.toString(), "OPENAI", "m", "sk-key", 2000, "low"),
-                counting);
+                counting, new com.sellerops.agent.access.AgentCapabilityAccess("ALLOW_LIST", null));
 
         assertThat(service.judge(org, "무언가 반복되고 있습니다.", "e1 quote=" + CUSTOMER_UTTERANCE))
                 .as("a refused digest yields no verdict").isEmpty();

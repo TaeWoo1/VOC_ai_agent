@@ -50,4 +50,9 @@ public class AgentPlanProperties extends AgentOperatorProperties {
                 ? reasoningEffort()
                 : retryReasoningEffort;
     }
+
+    @Override
+    public String capabilityName() {
+        return "SELLEROPS_AGENT_PLAN";
+    }
 }

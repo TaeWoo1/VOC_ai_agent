@@ -168,8 +168,13 @@ export class LlmInvestigationPlanner implements Planner {
         : (view.providerVersion ? "OFF_SCHEMA" : "CAPABILITY_OFF");
       log("operator_plan", { plannerKind: "LLM", modelAnswered: false, reason: failure });
       const error = new PlannerUnavailableError(failure, "the planner produced no plan");
+      // The backend's own sentence, whichever kind it sent. `unavailableMessage` does NOT change the
+      // failure above: the capability really is off for this org, and only the sentence differs —
+      // 「채널을 연결하시면…」 is a step the seller can take, 「기능이 꺼져 있습니다」 is not.
       if (view.quotaMessage) {
         error.sellerMessage = view.quotaMessage;
+      } else if (view.unavailableMessage) {
+        error.sellerMessage = view.unavailableMessage;
       }
       throw error;
     }

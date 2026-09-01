@@ -1,5 +1,6 @@
 package com.sellerops.agent.llm.operator;
 
+import com.sellerops.agent.access.AgentCapabilityAccess;
 import com.sellerops.agent.llm.AgentLlmTransport;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,24 +25,28 @@ public class AgentJudgeService {
 
     private final AgentJudgeProperties properties;
     private final AgentLlmTransport transport;
+    /** Who may use this capability — the deployment's named policy, not a written-down list. */
+    private final AgentCapabilityAccess access;
 
-    public AgentJudgeService(AgentJudgeProperties properties, AgentLlmTransport transport) {
+    public AgentJudgeService(AgentJudgeProperties properties, AgentLlmTransport transport,
+                                   AgentCapabilityAccess access) {
         this.properties = properties;
         this.transport = transport;
+        this.access = access;
     }
 
     public boolean isEnabledFor(UUID orgId) {
-        return properties.isEnabledFor(orgId);
+        return access.allows(properties, orgId);
     }
 
     public String versionFor(UUID orgId) {
-        return properties.isEnabledFor(orgId) ? generator().version() : null;
+        return access.allows(properties, orgId) ? generator().version() : null;
     }
 
     /** Judge one finding against one evidence digest, or nothing. */
     public Optional<AgentOperatorResponseParser.ParsedVerdict> judge(UUID orgId, String finding,
                                                                      String evidenceDigest) {
-        if (!properties.isEnabledFor(orgId)) {
+        if (!access.allows(properties, orgId)) {
             return Optional.empty();
         }
         if (!EvidenceDigestFloor.isSafe(evidenceDigest)) {
