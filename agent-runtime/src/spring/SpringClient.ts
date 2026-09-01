@@ -63,6 +63,7 @@ import type {
   OrderSummaryResponse,
   RecentReviewsParams,
   RecentReviewsResponse,
+  ReviewDetailResponse,
   SellerAccountSummary,
   SyncRunParams,
   SyncRunSummary,
@@ -525,6 +526,10 @@ export class HttpSpringClient
     if (params.order) q.set("order", params.order);
     const suffix = q.toString() ? `?${q.toString()}` : "";
     return this.request<RecentReviewsResponse>("GET", `/api/reviews/recent${suffix}`);
+  }
+
+  async getReviewDetail(reviewId: string): Promise<ReviewDetailResponse> {
+    return this.request<ReviewDetailResponse>("GET", `/api/reviews/${encodeURIComponent(reviewId)}`);
   }
 
   async getDashboardOverview(days: number): Promise<DashboardOverview> {

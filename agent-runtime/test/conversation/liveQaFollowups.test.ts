@@ -126,7 +126,9 @@ describe("TODAY zero wording", () => {
     expect(turn.status).toBe("WAITING_HUMAN");
     expect(turn.message).not.toContain("0건");
     expect(turn.message).toContain("지금까지 확인한 범위에는 오늘 리뷰가 없습니다.");
-    expect(turn.message).toContain("쿠팡 리뷰는 8월 20일 이후 아직 확인하지 못했어요.");
+    // The stale channel is named by its own step card now, not a second time in the prose
+    // (Agent Object + First-use Closure v1 §3).
+    expect(turn.message).not.toContain("쿠팡 리뷰는");
     expect(TODAY).toBeTruthy();
   });
 });

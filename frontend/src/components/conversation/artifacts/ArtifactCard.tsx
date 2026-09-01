@@ -6,8 +6,16 @@ import type { ReactNode } from "react";
  * body rows carry their own padding, and the action always sits in the same place — top-right — so a
  * seller finds the control of any object where they found the last one. Never a card wall — one per object.
  */
-export function ArtifactCard({ title, note, children, action, testId, headline }: {
+export function ArtifactCard({ title, note, children, action, testId, headline, titleSaid }: {
   title: string; note?: string | null; children?: ReactNode; action?: ReactNode; testId?: string;
+  /**
+   * The producer's own declaration that the sentence above already said this title (Agent Object +
+   * First-use Closure v1 §3). It DECIDES when present: the writer of both sentences knows a
+   * near-repeat («가장 오래 기다린 것부터 …» over 「가장 오래 기다린 문의」) that no containment test can
+   * see, and knows an accidental substring that is not a repeat at all. `headline` containment stays
+   * as the fallback for producers that have not declared — there the two strings are literally equal.
+   */
+  titleSaid?: boolean;
   /**
    * The sentence the agent said above this card. When it already contains the card's title, the
    * header is not drawn (Agentic Experience v2 §6): 「답변 안 한 문의는 12건입니다.」 with 「답변 안 한
@@ -16,7 +24,7 @@ export function ArtifactCard({ title, note, children, action, testId, headline }
    */
   headline?: string;
 }) {
-  const said = Boolean(headline && title && headline.includes(title));
+  const said = titleSaid ?? Boolean(headline && title && headline.includes(title));
   // ONE header row (Frontend-first Agent Workspace Redesign v1). The note used to be a row of its own
   // under an otherwise empty header, so a card whose title was already said still opened with a lone
   // button floating over a blank line and then the meta beneath it — three rows of chrome before the

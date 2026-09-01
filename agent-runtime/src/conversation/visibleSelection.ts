@@ -153,11 +153,16 @@ export function visibleSelectionOf(text: string, rows: readonly VisibleRow[]): V
 }
 
 /**
- * 「이 문의」 / 「이 고객」 / 「아까 그 문의」 / 「이 문의 자세히」 — the anchored object, inspected. True only
+ * 「이 문의」 / 「이 고객」 / 「이 리뷰 자세히」 / 「아까 그 문의」 — the anchored object, inspected. True only
  * when the WHOLE sentence is the pronoun phrase (optionally with a viewing verb); a pronoun inside a
  * longer request (「이 고객한테 뭐라고 답하면 좋을까」) belongs to the lane that owns that request.
+ *
+ * <b>The noun list is the OBJECTS a conversation can stand on</b> (Agent Object v1). 리뷰 and 상품 join
+ * it because the same sentence about them means the same thing — and because the planner has no way to
+ * say it: 「이 리뷰 자세히 봐줘」 was planned as review ROWS with limit 1, which read the product's most
+ * recent review and answered a question about a ★1 with a ★5. Same table, same rule, one more noun.
  */
-const PRONOUN_INSPECT = /^(이|아까\s?그|그|방금\s?그) ?(문의|고객|건|거)( ?(내용|상세))? ?(자세히)? ?(봐\s?줘요?|보여\s?줘요?|볼래|볼게|확인해\s?줘요?)? ?[.!]?$/u;
+const PRONOUN_INSPECT = /^(이|아까\s?그|그|방금\s?그) ?(문의|고객|리뷰|상품|건|거)( ?(내용|상세))? ?(자세히)? ?(봐\s?줘요?|보여\s?줘요?|볼래|볼게|확인해\s?줘요?)? ?[.!]?$/u;
 
 export function pronounInspectOf(text: string): boolean {
   return PRONOUN_INSPECT.test(text.trim());

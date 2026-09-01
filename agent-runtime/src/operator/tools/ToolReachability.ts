@@ -61,7 +61,16 @@ export type ToolPrecondition =
    * read is the same read: a scoped run filters the coverage list to one channel, a grouped run keeps
    * all of them, and neither needs anything resolved first — the channel set comes from the answer.
    */
-  | "CHANNEL_SCOPE_OR_GROUPING";
+  | "CHANNEL_SCOPE_OR_GROUPING"
+  /**
+   * The conversation is standing on ONE review the seller selected (Agent Object v1).
+   *
+   * <b>Not a weaker `RESOLVED_PRODUCT`.</b> A review id cannot be searched for from a sentence — there
+   * is no resolver that turns words into a review — so this precondition is satisfied only by an
+   * anchor the seller created by clicking or naming a row this conversation drew. Without one the exact
+   * read has no argument, and the honest behaviour is the org-wide review question, not a guess.
+   */
+  | "SELECTED_REVIEW";
 
 export interface ToolCapability {
   readonly specialist: SpecialistName;
@@ -187,6 +196,14 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     tool: OPERATOR_TOOL.LIST_RECENT_REVIEWS,
     needKinds: ["REVIEW_SIGNAL"],
     requires: ["NONE"],
+  },
+  {
+    // Agent Object v1: the exact single-review read. It answers about ONE review and cannot be reached
+    // without one — which is what keeps 「이 리뷰」 from becoming a scope over that review's product.
+    specialist: "REVIEW_OPS",
+    tool: OPERATOR_TOOL.GET_REVIEW_DETAIL,
+    needKinds: ["REVIEW_SIGNAL"],
+    requires: ["SELECTED_REVIEW"],
   },
   {
     // Channel-capability completion: read ONLY for a channel whose rows are stale, to decide between

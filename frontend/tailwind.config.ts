@@ -38,7 +38,13 @@ export default {
         // the badge introduced by the previous package that failed. #92400E measures 7.1:1 on
         // surface, 6.4:1 on canvas and 6.2:1 on its own tint, so one token closes every case.
         warn: "#92400E",
-        bad: "#DC2626",
+        // Darkened from #DC2626 for the third time in this family's story and the same reason
+        // (Agent Object + First-use Closure v1): the negative words sit on a `bad/10` tint — the
+        // 「부정」 chip on a review row — and there the old value measured 4.49:1 against canvas,
+        // under AA by a hundredth. It surfaced the moment a review list drew a negative row beside
+        // the anchored review. #B91C1C measures 6.5:1 on surface, 6.1:1 on canvas and 5.2:1 on its
+        // own tint, so one token closes the chip, the word and the bar.
+        bad: "#B91C1C",
       },
       fontFamily: {
         sans: [

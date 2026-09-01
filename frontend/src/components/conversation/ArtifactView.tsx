@@ -6,6 +6,7 @@ import { TableArtifact } from "./artifacts/TableArtifact";
 import { ReviewListArtifact } from "./artifacts/ReviewListArtifact";
 import { InquiryListArtifact } from "./artifacts/InquiryListArtifact";
 import { InquiryDetailArtifact } from "./artifacts/InquiryDetailArtifact";
+import { ReviewDetailArtifact } from "./artifacts/ReviewDetailArtifact";
 import { ProductListArtifact } from "./artifacts/ProductListArtifact";
 import { IssueListArtifact } from "./artifacts/IssueListArtifact";
 import { OrderSummaryArtifact } from "./artifacts/OrderSummaryArtifact";
@@ -44,6 +45,8 @@ export function ArtifactView({ artifact, onResume, onPrompt, onCaptureDecision, 
       return <InquiryListArtifact artifact={artifact} onPrompt={onPrompt} headline={headline} />;
     case "INQUIRY_DETAIL":
       return <InquiryDetailArtifact artifact={artifact} onPrompt={onPrompt} />;
+    case "REVIEW_DETAIL":
+      return <ReviewDetailArtifact artifact={artifact} onPrompt={onPrompt} />;
     case "PRODUCT_LIST":
       return <ProductListArtifact artifact={artifact} headline={headline} />;
     case "ISSUE_LIST":

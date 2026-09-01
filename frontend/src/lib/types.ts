@@ -2394,3 +2394,27 @@ export interface AnswerStyleRequest {
   forbiddenPhrases: string[];
   unknownFallbackTemplate: string | null;
 }
+
+/**
+ * GET /api/reviews/{reviewId} — ONE review, exactly (Agent Object v1).
+ *
+ * `body` is the backend's redacted FULL text, not the list preview: this read answers what the
+ * customer wrote. `issues` is what THIS review is recorded as evidence for — never the product's rows.
+ */
+export interface ReviewDetailResponse {
+  id: string;
+  sellerAccountId: string | null;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  writtenOn: string | null;
+  rating: number | null;
+  negative: boolean;
+  body: string | null;
+  bodyRedacted: boolean;
+  productId: string | null;
+  productName: string | null;
+  replyState: string | null;
+  executableIdentity: string;
+  triageTier: string | null;
+  issues: Array<{ issueId: string; title: string; severity: string | null; occurredOn: string | null }>;
+}

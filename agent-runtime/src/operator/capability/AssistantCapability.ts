@@ -22,6 +22,8 @@
 import type { SpecialistName } from "../state/OperatorState";
 import type { ActionClass } from "../state/OperatorState";
 import { TOOL_CAPABILITIES } from "../tools/ToolReachability";
+import { OPERATOR_TOOL } from "../tools/OperatorTools";
+import type { OperatorToolName } from "../tools/OperatorTools";
 
 interface Domain {
   /** The noun in the one-line answer — 「문의 · 리뷰 · 상품」. */
@@ -30,6 +32,15 @@ interface Domain {
   readonly line: string;
   /** A sentence this conversation already understands, offered as the next move. */
   readonly chip: string;
+  /**
+   * One more thing this domain can do — said only when the tool behind it is REGISTERED.
+   *
+   * <b>Why a per-tool clause rather than a longer `line`.</b> The domain line is true as soon as the
+   * specialist owns any tool; a capability that arrives with ONE read (an exact single review, the
+   * catalogue) would otherwise either be missing from the answer or promised before it existed. This
+   * keeps the answer derived at the granularity the catalogue actually changes at.
+   */
+  readonly extra?: { readonly tool: OperatorToolName; readonly line: string };
 }
 
 /**
@@ -46,11 +57,20 @@ const DOMAIN: Partial<Record<SpecialistName, Domain>> = {
     short: "리뷰",
     line: "새 리뷰와 반복해서 올라오는 문제를 찾아 드립니다.",
     chip: "별점 낮은 리뷰 보여줘",
+    // Agent Object v1 — true only once the exact single-review read is in the catalogue.
+    extra: {
+      tool: OPERATOR_TOOL.GET_REVIEW_DETAIL,
+      line: "리뷰 하나를 고르시면 그 리뷰만 놓고 무슨 내용인지, 어떤 반복 문제와 이어지는지 봐 드립니다.",
+    },
   },
   PRODUCT_OPS: {
     short: "상품",
     line: "상품별로 무엇이 쌓이고 있는지, 어떤 답변 기준이 있는지 봅니다.",
     chip: "우리 상품 목록 보여줘",
+    extra: {
+      tool: OPERATOR_TOOL.LIST_PRODUCTS,
+      line: "등록된 상품 목록도 바로 보여 드립니다.",
+    },
   },
   ORDER_OPS: {
     short: "주문",
@@ -110,9 +130,14 @@ export function assistantCapabilityAnswer(
     : connectedChannels.length > 0
       ? [`지금 연결된 채널은 ${connectedChannels.join(" · ")}입니다.`]
       : ["아직 연결된 판매 채널이 없어, 채널을 연결하시면 여기서 바로 확인해 드릴 수 있습니다."];
+  const registered = new Set(registeredTools);
   return {
     headline,
-    lines: [...domains.map((d) => d.line), ...channels, boundarySentence(actionClasses)],
+    lines: [
+      ...domains.flatMap((d) => (d.extra && registered.has(d.extra.tool) ? [d.line, d.extra.line] : [d.line])),
+      ...channels,
+      boundarySentence(actionClasses),
+    ],
     chips: domains.map((d) => d.chip),
   };
 }

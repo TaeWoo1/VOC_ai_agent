@@ -29,7 +29,7 @@ import type {
 } from "./types";
 import type {
   ChannelCapabilityOverview, ChannelCoverageRow, ChannelSummary, DashboardOverview, InquiryReplyTransportRow,
-  KnowledgeSearchResult, OrgKnowledgeSearchResult, SellerProfileView, OrderSummaryParams, OrderSummaryResponse, RecentReviewsParams, RecentReviewsResponse,
+  KnowledgeSearchResult, OrgKnowledgeSearchResult, SellerProfileView, OrderSummaryParams, OrderSummaryResponse, RecentReviewsParams, RecentReviewsResponse, ReviewDetailResponse,
   ReviewChannelCapabilityView,
 } from "./types";
 
@@ -166,6 +166,13 @@ export interface OperatorSpringClient {
 
   /** Review rows in a window + the REVIEW coverage of every visible channel (`GET /api/reviews/recent`). */
   listRecentReviews(params: RecentReviewsParams): Promise<RecentReviewsResponse>;
+  /**
+   * ONE review, by id (`GET /api/reviews/{reviewId}`) — the exact read the review anchor stands on.
+   *
+   * Optional so an older backend simply has no single-review lane rather than throwing: the tool is
+   * registered only when this method exists, and the catalogue the planner sees follows.
+   */
+  getReviewDetail?(reviewId: string): Promise<ReviewDetailResponse>;
   /** The overview metrics for a trailing window (`GET /api/dashboard/overview?days=N`). */
   getDashboardOverview(days: number): Promise<DashboardOverview>;
   /** One channel's order trend (`GET /api/orders/summary?from&to&channelId`). */

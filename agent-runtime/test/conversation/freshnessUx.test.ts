@@ -116,7 +116,10 @@ describe("stale data + a question the held rows can answer", () => {
     // The sentence names no period, so the answer claims none (Conversation Contract Correctness v2):
     // it used to read 「지금까지 확인한 최근 7일 …」 under a window the seller never asked for.
     expect(turn.message.startsWith("지금까지 확인한 낮은 평점 리뷰는 1건입니다.")).toBe(true);
-    expect(once(said(turn), "쿠팡 리뷰는 8월 20일 기준입니다.")).toBe(true);
+    // Agent Object + First-use Closure v1 §3: the CARD owns this channel's collection state — it names
+    // the channel, the instant and the move. The prose used to say the same thing beside it, and the
+    // seller had to work out that the two were about one channel.
+    expect(said(turn)).not.toContain("쿠팡 리뷰는 8월 20일 기준입니다.");
     expect(turn.message).not.toContain("최신 상태가 아닙니다");
     expect(turn.message).not.toContain("아직 확인하지 못했어요");
     expect(turn.continuation.pendingHumanActions?.[0]).toMatchObject({ optional: true, accountId: COUPANG_ACCOUNT });
@@ -148,7 +151,7 @@ describe("stale + a question that needs current rows", () => {
     expect(step!.optional).toBeUndefined();
     expect(step).toMatchObject({ title: "쿠팡 최신 리뷰 가져오기", asOf: "2026-08-20T01:00:00Z", reason: "FRESHNESS_UNPROVEN" });
     expect(said(turn)).toContain("지금까지 확인한 오늘 리뷰는 3건입니다.");
-    expect(once(said(turn), "쿠팡 리뷰는 8월 20일 이후 아직 확인하지 못했어요.")).toBe(true);
+    expect(said(turn)).not.toContain("쿠팡 리뷰는 8월 20일 이후 아직 확인하지 못했어요.");
     expect(turn.message).not.toContain("카페24 리뷰는");
     expect(turn.message).not.toContain("최신 수집");
     expect(turn.message).not.toMatch(/SyncJob|coverage|sync/i);
@@ -174,7 +177,7 @@ describe("per channel: acquisition capability decides the step, never the seller
     expect(turn.status).toBe("WAITING_HUMAN");
     expect(humansOf(turn)[0]).toMatchObject({ channelCode: "NAVER", path: "EXPORT_ACTION_WINDOW", accountId: NAVER_ACCOUNT,
       fallback: { path: "FILE_UPLOAD" }, asOf: "2026-08-10T00:00:00Z", title: "네이버 최신 리뷰 가져오기" });
-    expect(once(said(turn), "네이버 리뷰는 8월 10일 이후 아직 확인하지 못했어요.")).toBe(true);
+    expect(said(turn)).not.toContain("네이버 리뷰는 8월 10일 이후 아직 확인하지 못했어요.");
     expect(h.inquiry.manualSyncCalls).toHaveLength(0);
   });
   it("Coupang GUIDED + stale: the WING read Action Window, requiring the local helper", async () => {

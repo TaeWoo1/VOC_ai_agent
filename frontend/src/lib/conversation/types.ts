@@ -17,6 +17,7 @@ export type ArtifactType =
   | "REVIEW_LIST"
   | "INQUIRY_LIST"
   | "INQUIRY_DETAIL"
+  | "REVIEW_DETAIL"
   | "PRODUCT_LIST"
   | "ISSUE_LIST"
   | "ORDER_SUMMARY"
@@ -44,6 +45,12 @@ interface ArtifactBase {
   type: ArtifactType;
   title: string;
   note?: string;
+  /**
+   * The sentence above this card already said what the title says — declared by whoever wrote both
+   * (Agent Object + First-use Closure v1 §3). The renderer used to decide this by testing whether the
+   * headline CONTAINED the title, a string search standing in for a fact only the producer knows.
+   */
+  titleSaid?: boolean;
 }
 
 export interface SummaryArtifact extends ArtifactBase {
@@ -200,6 +207,28 @@ export interface InquiryDetailArtifact extends ArtifactBase {
   /** transient — a bounded excerpt of the customer's message; absent on a reloaded thread. */
   excerpt?: string | null;
   actionability: "DRAFTABLE" | "ALREADY_ANSWERED" | "AWAITING_SEND" | "NOT_WORKABLE";
+  to: string;
+}
+
+/**
+ * ONE review, inspected (Agent Object v1): the review's own closed facts, the customer's redacted
+ * sentence (transient — absent on a reloaded thread), and the repeated problems it is evidence for.
+ */
+export interface ReviewDetailArtifact extends ArtifactBase {
+  type: "REVIEW_DETAIL";
+  reviewId: string;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  writtenOn: string | null;
+  rating: number | null;
+  negative: boolean;
+  productId: string | null;
+  productName: string | null;
+  /** transient — the customer's redacted sentence; absent on a reloaded thread. */
+  body?: string | null;
+  bodyRedacted?: boolean;
+  issues: Array<{ issueId: string; title: string; severity: string | null; to: string }>;
+  replyCapability: "DRAFTABLE" | "NOT_SUPPORTED" | "UNKNOWN";
   to: string;
 }
 
@@ -403,6 +432,7 @@ export type Artifact =
   | ReviewListArtifact
   | InquiryListArtifact
   | InquiryDetailArtifact
+  | ReviewDetailArtifact
   | ProductListArtifact
   | IssueListArtifact
   | OrderSummaryArtifact

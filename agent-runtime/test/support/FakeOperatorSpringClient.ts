@@ -37,6 +37,7 @@ import type {
   OrderSummaryResponse,
   RecentReviewsParams,
   RecentReviewsResponse,
+  ReviewDetailResponse,
 } from "../../src/spring/types";
 import type {
   CustomerMemorySearchParams,
@@ -126,6 +127,8 @@ export interface FakeOperatorSeed {
    * exactly what the backend would have returned for that request and nothing this fake invented.
    */
   readonly recentReviews?: Record<string, RecentReviewsResponse>;
+  /** Agent Object v1: `GET /api/reviews/{reviewId}` by review id. An unseeded id is a 404, like the backend. */
+  readonly reviewDetails?: Record<string, ReviewDetailResponse>;
   readonly overviewByDays?: Record<number, DashboardOverview>;
   readonly ordersSummary?: OrderSummaryResponse;
   readonly channels?: ChannelSummary[];
@@ -148,11 +151,13 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
     plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0, channelCoverage: 0,
     knowledgeSearch: 0, orgKnowledgeSearch: 0, answerMemorySearch: 0, recentReviews: 0, overview: 0, ordersSummary: 0, channels: 0,
-    channelOverview: 0, transports: 0, reviewChannelCapability: 0, sellerProfile: 0,
+    channelOverview: 0, transports: 0, reviewChannelCapability: 0, sellerProfile: 0, reviewDetail: 0,
   };
   /** Every recent-reviews request, so a test can assert the window and filters the read was made with. */
   readonly recentReviewParams: RecentReviewsParams[] = [];
   readonly overviewDays: number[] = [];
+  /** Every exact review read, so a test can assert WHICH review an anchored turn asked about. */
+  readonly reviewDetailIds: string[] = [];
   readonly ordersSummaryParams: OrderSummaryParams[] = [];
 
   /** Every digest the judge was sent, so a test can assert what actually left for a vendor. */
@@ -461,6 +466,16 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
       negativeOnly: params.negativeOnly ?? found.negativeOnly,
       items: ordered.slice(0, params.size ?? ordered.length),
     };
+  }
+
+  async getReviewDetail(reviewId: string): Promise<ReviewDetailResponse> {
+    this.calls.reviewDetail += 1;
+    this.reviewDetailIds.push(reviewId);
+    const found = this.seed.reviewDetails?.[reviewId];
+    if (!found) {
+      throw new SpringApiError(404, "HTTP_404", "backend request failed (GET /api/reviews/{id})");
+    }
+    return found;
   }
 
   async getDashboardOverview(days: number): Promise<DashboardOverview> {

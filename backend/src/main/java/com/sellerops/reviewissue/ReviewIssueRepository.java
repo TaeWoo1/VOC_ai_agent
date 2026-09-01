@@ -29,4 +29,7 @@ public interface ReviewIssueRepository extends JpaRepository<ReviewIssue, UUID> 
      * re-announced) but the operator could never reach it again.
      */
     List<ReviewIssue> findByOrgIdAndDismissedTrue(UUID orgId);
+
+    /** Issues by id, org-scoped — the titles behind one review's own evidence links (Agent Object v1). */
+    List<ReviewIssue> findByOrgIdAndIdIn(UUID orgId, java.util.Collection<UUID> ids);
 }

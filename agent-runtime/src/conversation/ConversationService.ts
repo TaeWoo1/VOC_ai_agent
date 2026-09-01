@@ -70,7 +70,7 @@ import { claimsFor } from "./reviewClaim";
 import { boundedTurns, STAGE_LABEL, WORKING_SET_MAX_IDS } from "./contract";
 import type {
   ActiveTask, ApprovalArtifact, Artifact, ConversationSummary, ConversationView, DraftArtifact, EvidenceArtifact,
-  ExecutableIdentity, GuidedExecutionArtifact, HumanActionRequiredArtifact, InquiryDetailArtifact, InquiryItem,
+  ExecutableIdentity, GuidedExecutionArtifact, HumanActionRequiredArtifact, InquiryDetailArtifact, InquiryItem, ReviewDetailArtifact,
   InquiryListArtifact,
   PendingHumanAction,
   PendingPreparedAction, ProgressEvent, ProgressStage, ReviewItem, SelectedInquiry, SelectedObject, StartTurnRequest, SuggestedAction,
@@ -85,7 +85,8 @@ import { listInquiryWorkload, matchesTerm } from "../operator/tools/inquiryWorkl
 import { adviseOnInquiry } from "./advisory";
 import { matchesTopic } from "../operator/tools/inquiryWorkload";
 import type { VisibleRow } from "./visibleSelection";
-import type { GeneratedDraftView } from "../spring/types";
+import type { GeneratedDraftView, ReviewDetailResponse } from "../spring/types";
+import { issueSentence, reviewLine } from "../operator/graph/reviewDetail";
 import { periodLabel } from "./period";
 
 export interface ConversationServiceDeps {
@@ -605,7 +606,11 @@ export class ConversationService {
     // R4: a product answer with no list artifact still names products — in its evidence refs and in
     // the entity the run resolved. Those become a PRODUCT_LIST and a PRODUCTS set, so 「첫 번째 거」 has
     // something to point at.
-    if (!primaryOf(artifacts)) {
+    // …but a turn that drew ONE object's card has already named that object and the product it belongs
+    // to (Agent Object v1 §3): rolling the same evidence up into 「이 답변이 가리키는 상품 · 선택한 리뷰
+    // 1」 under the card is the object counted a second time, in weaker words.
+    const drewObjectCard = artifacts.some((a) => a.type === "REVIEW_DETAIL" || a.type === "INQUIRY_DETAIL");
+    if (!primaryOf(artifacts) && !drewObjectCard) {
       const products = productListOf(answer, result.entities);
       if (products) artifacts.push(products);
     }
@@ -798,6 +803,16 @@ export class ConversationService {
       workingSet = anchoredSet(anchor, view.workingSet, [
         ...(workingSet?.productIds ?? []), ...(anchor.productId ? [anchor.productId] : []), ...(hints.productId ? [hints.productId] : []),
       ]);
+    } else {
+      // <b>The other two objects keep their anchor the same way</b> (Agent Object v1 §1). A product or
+      // review anchor used to survive exactly one turn: `workingSetOf` returns null for a turn that drew
+      // artifacts but no SET, so the object the seller had selected was dropped by the very turn that
+      // answered about it — and the second 「이 리뷰…」 went to the org. One rule for all three kinds:
+      // the anchor stands until a NEW set is drawn that does not contain it.
+      const object = view.workingSet?.selectedObject ?? null;
+      if (object && !drewFreshObjectList(result.artifacts, object)) {
+        workingSet = anchoredObjectSet(object, workingSet ?? view.workingSet);
+      }
     }
 
     // Knowledge Context v1-A: a POLICY need the company's rules could not meet is a gap the seller can
@@ -1253,6 +1268,16 @@ export class ConversationService {
       if (resolved && resolved.kind === "INQUIRY") return this.inspect(view, resolved, bundle, null);
     }
 
+    // 「이 리뷰 자세히 봐줘」 — the same lane for the other object (Agent Object v1). One exact READ of the
+    // review the seller selected, no planner. It is here rather than in the graph because the planner has
+    // no token for "this object": it expressed the sentence as review ROWS with limit 1, which read the
+    // product's most recent review and answered a ★1 question with a ★5 (measured live 2026-09-01).
+    const objectAnchor = set?.selectedObject ?? null;
+    if (objectAnchor?.kind === "REVIEW" && pronounInspectOf(text)) {
+      const inspected = await this.inspectReview(view, objectAnchor, bundle);
+      if (inspected) return inspected;
+    }
+
     const index = ordinalSelectionOf(text);
     if (index != null) {
       if (!set) return null;
@@ -1597,6 +1622,49 @@ export class ConversationService {
         ...(filter.status !== "UNANSWERED" ? [promptChip("답변 안 한 것만 보여줘")] : []),
       ],
       workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: null, budget,
+    };
+  }
+
+  /**
+   * INSPECT for the OTHER object (Agent Object v1 §1): the selected review, read exactly.
+   *
+   * The same shape as {@link inspect} — one read, the object's own card, the anchor kept, zero planner
+   * and zero model calls. `null` when the read failed: a card assembled from the anchor's own fields
+   * would be this runtime describing a review it could not read, so the turn falls through to the
+   * planner instead of inventing one.
+   */
+  private async inspectReview(
+    view: ConversationView, object: SelectedObject, bundle: SpringClientBundle,
+  ): Promise<Composed | null> {
+    if (!bundle.operator.getReviewDetail) return null;
+    let detail: ReviewDetailResponse;
+    try {
+      detail = await bundle.operator.getReviewDetail(object.id);
+    } catch {
+      return null;
+    }
+    const artifact: ReviewDetailArtifact = {
+      artifactId: `a-review-${detail.id}`, type: "REVIEW_DETAIL", title: "선택한 리뷰",
+      reviewId: detail.id, channelCode: detail.channelCode, channelNameKo: detail.channelNameKo,
+      writtenOn: detail.writtenOn, rating: detail.rating, negative: detail.negative,
+      productId: detail.productId, productName: detail.productName,
+      body: detail.body ? excerpt(detail.body) : null,
+      ...(detail.bodyRedacted ? { bodyRedacted: true } : {}),
+      issues: detail.issues.map((i) => ({ issueId: i.issueId, title: i.title, severity: i.severity, to: `/memory/${i.issueId}` })),
+      // The deterministic lane makes ONE read; what a channel does with replies is a second one, and
+      // this lane does not buy it. UNKNOWN is the honest value and the card says so rather than guessing.
+      replyCapability: "UNKNOWN",
+      to: "/reviews",
+    };
+    log("conversation_review_inspect", { issues: detail.issues.length, rating: detail.rating ?? -1 });
+    return {
+      status: "DONE",
+      message: `${reviewLine(detail)} 리뷰입니다. ${issueSentence(detail)}`,
+      artifacts: [artifact],
+      suggestedActions: [promptChip("같은 상품의 비슷한 리뷰도 보여줘")],
+      workingSet: anchoredObjectSet(object, view.workingSet),
+      pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: "INSPECT",
+      budget: { toolCalls: 1, llmCalls: 0, elapsedMs: 0, stopReason: "SELECTED" },
     };
   }
 
@@ -2246,7 +2314,10 @@ export function priorLineOf(view: ConversationView): string | null {
   if (set?.selectedObject?.kind === "PRODUCT") {
     parts.push("직전 선택: PRODUCT (판매자가 방금 상품 하나를 골랐습니다 — 「이 상품」은 그 상품을 가리킵니다)");
   } else if (set?.selectedObject?.kind === "REVIEW") {
-    parts.push("직전 선택: REVIEW (판매자가 방금 리뷰 하나를 골랐습니다 — 「이 리뷰」는 그 리뷰를 가리킵니다)");
+    // Agent Object v1: the exact single-review read exists, so a question about the selected review is
+    // answerable — the planner declares a REVIEW_SIGNAL need instead of asking which review it was.
+    parts.push("직전 선택: REVIEW (판매자가 방금 리뷰 하나를 골랐습니다 — 「이 리뷰」는 그 리뷰를 가리키며, "
+      + "그 리뷰 하나를 정확히 읽는 조회가 있습니다: REVIEW_SIGNAL 필요 정보로 두면 됩니다)");
   }
   if (view.pendingPrepared) {
     parts.push(view.pendingPrepared.kind === "REVIEW_DRAFT"
@@ -2637,6 +2708,25 @@ function drewFreshList(turnArtifacts: readonly Artifact[], anchor: SelectedInqui
   return true;
 }
 
+/**
+ * Did this turn draw a set that leaves the anchored PRODUCT or REVIEW behind?
+ *
+ * The object analogue of {@link drewFreshList}, and the same rule: a list that still holds the anchored
+ * object (「비슷한 리뷰도 있어?」 returns this review among its product's rows) has not moved the seller
+ * off it, so the anchor stands and 「이 리뷰」 still means the same review.
+ */
+function drewFreshObjectList(turnArtifacts: readonly Artifact[], object: SelectedObject): boolean {
+  const list = turnArtifacts.find((a) => SET_ARTIFACT_TYPES.includes(a.type));
+  if (!list) return false;
+  if (object.kind === "REVIEW" && list.type === "REVIEW_LIST") {
+    return !list.items.some((i) => i.reviewId === object.id);
+  }
+  if (object.kind === "PRODUCT" && list.type === "PRODUCT_LIST") {
+    return !list.items.some((i) => i.productId === object.id);
+  }
+  return true;
+}
+
 /** The inquiry a screen launch resolved inside the graph — read back from the ref the runtime minted for it. */
 function selectedFromEntities(result: Extract<OperatorRunResult, { status: "DONE" }>, answer: OperatorAnswer, workItemId: string): SelectedInquiryRow | null {
   const entity = result.entities.find((e) => e.kind === "INQUIRY" && e.id === workItemId);
@@ -2845,9 +2935,20 @@ function suggestionsFor(
     // The next move is the artifact's own control; no prompt competes with it.
   } else if (workingSet) {
     switch (workingSet.kind) {
-      case "REVIEWS":
+      case "REVIEWS": {
+        // Agent Object v1: standing ON one review, the next moves are about THAT review — and the
+        // reply move is offered only when the channel actually takes one (the card's own capability).
+        const detail = artifacts.find((a) => a.type === "REVIEW_DETAIL");
+        if (workingSet.selectedObject?.kind === "REVIEW") {
+          if (detail?.type === "REVIEW_DETAIL" && detail.replyCapability === "DRAFTABLE") {
+            chips.push(promptChip("답글 초안 준비해줘"));
+          }
+          chips.push(promptChip("같은 상품의 비슷한 리뷰도 보여줘"));
+          break;
+        }
         if (drewSet) chips.push(promptChip("안 좋은 것만 봐줘"), promptChip("상품별로 묶어줘"), promptChip("문의에서도 같은 문제가 있는지 봐줘"));
         break;
+      }
       case "INQUIRIES":
         if (workingSet.selectedInquiry) {
           chips.push(promptChip("답변 준비해줘"));

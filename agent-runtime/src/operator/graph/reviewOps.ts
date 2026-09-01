@@ -26,6 +26,7 @@ import { senseDeclaration, senseOf } from "../group/ReviewEvidenceSense";
 import type { DashboardSummary } from "../../spring/types";
 import { log } from "../../log";
 import { readRecentReviews } from "./reviewRows";
+import { anchoredReviewId, readSelectedReview } from "./reviewDetail";
 
 /** The need kinds this specialist answers. */
 export const REVIEW_NEEDS = ["REVIEW_SIGNAL"] as const;
@@ -73,6 +74,34 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
   // guard in `operatorGraph` still says any REQUIRED need that ended PENDING.
   if (input.needs.length === 0) {
     return { specialist: "REVIEW_OPS", findings: [], evidence: [], coverage: [], needStates: [] };
+  }
+  // <b>An anchored review is an OBJECT, and the question is about it</b> (Agent Object v1). When the
+  // conversation is standing on one review, a review question is answered from that review — one exact
+  // read — unless the plan asked for ROWS, which is the seller widening on purpose (「비슷한 리뷰도
+  // 있어?」) and is answered by the rows path with this review's product named in the sentence. The
+  // org-wide issue list can say nothing about one review, and letting it try is how 「이 리뷰」 became a
+  // scope over the product.
+  const selectedReview = anchoredReviewId(input);
+  if (selectedReview) {
+    // <b>The anchored object is always IN the answer.</b> The planner has no token for "this one
+    // object" — 「이 리뷰 자세히 봐줘」 arrived as review ROWS with `limit: 1`, and answering it from the
+    // rows read the product's most recent review: a ★5 under a question about a ★1 (live, 2026-09-01).
+    // So the exact read runs first, whatever the plan asked for.
+    const detail = await readSelectedReview(input, selectedReview);
+    // …and a request for ROWS adds the neighbours BESIDE it, named as the same product's reviews
+    // (`reviewRows.ts`). A plan that asked for exactly one row asked for the anchor itself.
+    if (!wantsRows(input) || input.filters?.limit === 1 || detail.terminal === "FAILED") {
+      return detail;
+    }
+    const neighbours = await readRecentReviews(input);
+    return {
+      ...neighbours,
+      findings: [...detail.findings, ...neighbours.findings],
+      evidence: [...detail.evidence, ...neighbours.evidence],
+      artifacts: [...(detail.artifacts ?? []), ...(neighbours.artifacts ?? [])],
+      failures: [...(detail.failures ?? []), ...(neighbours.failures ?? [])],
+      note: [detail.note, neighbours.note].filter(Boolean).join(" ") || undefined,
+    };
   }
   // <b>Rows are a different question from the issue signal, and the PLAN says which was asked.</b>
   // 「오늘 새 리뷰 보여줘」 wants the reviews that arrived; 「반복되는 문제 있어?」 wants the extracted

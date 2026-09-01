@@ -1028,6 +1028,36 @@ export interface RecentReviewsResponse {
   readonly coverage: ChannelCoverageRow[];
 }
 
+/**
+ * GET /api/reviews/{reviewId} — ONE review, exactly (Agent Object v1).
+ *
+ * `body` is the backend's redacted FULL text (not the 60-char list preview): the question this read
+ * answers is what the customer wrote. `issues` is what THIS review is already evidence for — never the
+ * product's rows and never the org's.
+ */
+export interface ReviewDetailResponse {
+  readonly id: string;
+  readonly sellerAccountId: string | null;
+  readonly channelCode: string | null;
+  readonly channelNameKo: string | null;
+  readonly writtenOn: string | null;
+  readonly rating: number | null;
+  readonly negative: boolean;
+  readonly body: string | null;
+  readonly bodyRedacted: boolean;
+  readonly productId: string | null;
+  readonly productName: string | null;
+  readonly replyState: string | null;
+  readonly executableIdentity: ExecutableIdentity;
+  readonly triageTier: string | null;
+  readonly issues: ReadonlyArray<{
+    readonly issueId: string;
+    readonly title: string;
+    readonly severity: string | null;
+    readonly occurredOn: string | null;
+  }>;
+}
+
 export interface RecentReviewsParams {
   readonly from?: string;
   readonly to?: string;

@@ -17,7 +17,7 @@ import type { InformationNeed, ResolvedEntity } from "../plan/InvestigationPlan"
 import type { EvidenceRef } from "../state/OperatorState";
 import type { GroupingDimension } from "../group/ProductGrouping";
 import type { PlanFilters, PlanTarget, RequestedAction } from "../plan/InvestigationPlan";
-import type { ProgressStage, WorkingSetView } from "../../conversation/contract";
+import type { ProgressStage, SelectedObject, WorkingSetView } from "../../conversation/contract";
 import type { LocalAgentHint } from "../capability/ChannelCapability";
 import type { ReviewRefresher } from "./reviewRefresh";
 
@@ -91,6 +91,16 @@ export interface SpecialistInput {
   readonly requestedAction?: RequestedAction;
   /** What the previous turn put in front of the seller — ids and closed filters. Null on a first turn. */
   readonly workingSet?: WorkingSetView | null;
+  /**
+   * The ONE object the seller is standing on — a product or a review they selected (Agent Object v1).
+   *
+   * <b>Its own field, because an anchor is not a set scope.</b> {@link workingSet} reaches a specialist
+   * only when the plan asked to refine the rows on screen (`filters.scope=WORKING_SET`), which is right
+   * for "그중 …" and wrong for "이 리뷰 자세히": the seller narrowed nothing, they pointed at an object.
+   * Passing the anchor separately keeps that distinction — and keeps `workingSet`'s meaning exactly
+   * where every existing rows path already relies on it.
+   */
+  readonly selectedObject?: SelectedObject | null;
   /** Human collections this conversation saw finish — see `ConversationRunContext.collected`. */
   /** See `ConversationRunContext.pendingHumanWindow`. */
   readonly pendingHumanWindow?: string | null;

@@ -63,8 +63,9 @@ describe("B — stale coverage asks for one human step instead of saying 0", () 
     // Freshness UX v1: the result first, then ONE 「언제 기준」 sentence for the stale channel — never the
     // generic warning, never twice, never 「0건」.
     expect(turn.message).toContain("지금까지 확인한 오늘 리뷰는 3건입니다.");
-    expect(turn.message).toContain("쿠팡 리뷰는 8월 20일 이후 아직 확인하지 못했어요.");
-    expect(turn.message.split("쿠팡 리뷰는").length).toBe(2);
+    // Agent Object + First-use Closure v1 §3: the step card owns this channel's state (title, instant,
+    // move); the prose no longer repeats it beside the card.
+    expect(turn.message).not.toContain("쿠팡 리뷰는");
     expect(turn.message).not.toContain("0건");
     expect(turn.message).not.toContain("최신 상태가 아닙니다");
     expect(turn.continuation.pendingHumanAction).toMatchObject({ accountId: COUPANG_ACCOUNT, dataType: "REVIEW" });

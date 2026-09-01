@@ -209,7 +209,13 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
     return pending("리뷰 목록을 읽기 전에 예산이 끝났습니다.");
   }
   const filters = input.filters!;
-  const previous = filters.scope === "WORKING_SET" && input.workingSet?.kind === "REVIEWS" ? input.workingSet : null;
+  const anchorId = input.selectedObject?.kind === "REVIEW" ? input.selectedObject.id : null;
+  const set = filters.scope === "WORKING_SET" && input.workingSet?.kind === "REVIEWS" ? input.workingSet : null;
+  // <b>A set that is the anchor alone is not a filter to intersect with</b> (Agent Object v1). After a
+  // click the working set holds one id — this review — so 「같은 상품의 비슷한 리뷰도 보여줘」 intersected
+  // the product's rows down to the review the seller was already looking at and answered 「방금 본 1건
+  // 중 1건」. Asking about the neighbours of an object is not a narrowing OF that object.
+  const previous = set && anchorId && set.ids.length === 1 && set.ids[0] === anchorId ? null : set;
   const today = observationDate(input.referenceDate);
   // <b>An unnamed period is not a window</b> (Conversation Contract Correctness v2). This read used to
   // fall back to the last seven days when the sentence named no period: 「별점 낮은 리뷰 보여줘」 was
@@ -223,8 +229,15 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   const window: DateWindow | null = token ? windowOf(token, today, periodDays) : null;
   const rating: "ALL" | "LOW" = filters.rating ?? previous?.filters.rating ?? "ALL";
   const channel = filters.channel ?? input.channelScope ?? previous?.filters.channelCode ?? null;
+  // <b>An anchored review widens to ITS product, and the sentence says so</b> (Agent Object v1).
+  // 「비슷한 리뷰도 있어?」 over a selected review is a question about that product's other reviews; the
+  // honest answer names the widening rather than presenting the product's rows as 「이 리뷰」. Without
+  // this the same sentence read the whole org, which is the same failure wearing a wider scope.
+  const anchoredReview = input.selectedObject?.kind === "REVIEW" ? input.selectedObject : null;
   const product = input.resolved.find((e) => e.kind === "PRODUCT")?.id
-    ?? previous?.filters.productIds?.[0] ?? null;
+    ?? previous?.filters.productIds?.[0] ?? anchoredReview?.productId ?? null;
+  const widenedFromReview = anchoredReview != null && product != null && product === anchoredReview.productId
+    && input.resolved.every((e) => e.kind !== "PRODUCT");
   // Query Accuracy v1: order goes to the backend (so OLDEST is the window's oldest, not the newest
   // page reversed); the limit is applied after the read so a follow-up can still intersect the set.
   const order: "NEWEST" | "OLDEST" = filters.order ?? "NEWEST";
@@ -306,11 +319,15 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
         continue;
       }
       if (verdict.acquisition === "GUIDED_HUMAN_ACTION" && verdict.guidedPath) {
+        // <b>One channel's collection state is said ONCE, by whichever thing carries the control</b>
+        // (Agent Object + First-use Closure v1 §3). A step card already names the channel, the as-of
+        // instant and the move; the prose sentence beside it was the same fact in weaker words, and the
+        // seller had to notice the two were about the same channel. The card wins — it is the only one
+        // of the two that can be acted on. Channels with NO card still say their sentence below.
         if (!required) {
           // The rows answer the question as of their last observation; the step is offered, compactly.
           offers += 1;
           const sentence = staleSentence(name, asOfOf(f), false);
-          staleSentences.push(sentence);
           artifacts.push(humanStep(f, verdict, account?.accountId ?? null, requestedAt, gapRef(input, f, needId, refs, findings, false, sentence), true));
           continue;
         }
@@ -322,8 +339,9 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
         }
         humanSteps += 1;
         const sentence = staleSentence(name, asOfOf(f), true);
-        staleSentences.push(sentence);
-        artifacts.push(humanStep(f, verdict, account?.accountId ?? null, requestedAt, gapRef(input, f, needId, refs, findings, true, sentence), false));
+        // The card carries this channel's state AND the step; the gap is still evidence (the answer's
+        // coverage limit is real), but it is not also printed as prose above its own card.
+        artifacts.push(humanStep(f, verdict, account?.accountId ?? null, requestedAt, gapRef(input, f, needId, refs, findings, false, sentence), false));
         continue;
       }
       // UNSUPPORTED (or AUTOMATIC with nothing to refresh through): said once, as a limit of the answer.
@@ -376,6 +394,9 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   }
   // One 「언제 기준」 sentence per stale channel — never the same warning twice, never a channel that is fine.
   notes.push(...staleSentences);
+  // Agent Object v1: the widening is NAMED. These rows are the anchored review's product's, not that
+  // review's — an answer that showed them without saying so would be the demonstrative quietly growing.
+  if (widenedFromReview) notes.push("방금 보신 리뷰와 같은 상품의 리뷰입니다.");
 
   // ── The rows themselves, said as one sentence and one artifact.
   // A label only when a period was named: 「최근」 on a read with no window would be a period claim the
@@ -395,7 +416,9 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   const list: ReviewListArtifact = {
     artifactId: `a-${listRef.evidenceId}`,
     type: "REVIEW_LIST",
-    title: (previous ? (ratingWord ? `방금 본 리뷰 중 ${ratingWord}리뷰` : "방금 본 리뷰") : label ? `${label} 들어온 ${ratingWord}리뷰` : `${ratingWord}리뷰`)
+    title: (previous ? (ratingWord ? `방금 본 리뷰 중 ${ratingWord}리뷰` : "방금 본 리뷰")
+      : widenedFromReview ? `같은 상품의 ${ratingWord}리뷰`
+        : label ? `${label} 들어온 ${ratingWord}리뷰` : `${ratingWord}리뷰`)
       + (limit != null ? ` · ${order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${Math.min(limit, rows.length)}건` : ""),
     scope: { channelCode: channel, period: window, rating, productId: product },
     totalCount: total,

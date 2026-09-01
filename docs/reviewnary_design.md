@@ -1,6 +1,6 @@
 # reviewnary Design Contract v3
 
-**Status:** 2026-09-01 · Reviewnary Product UI Redesign v1 + Contextual Agent Workspace & Interactive UX QA v1 (§8-A, §8-B) + **Frontend-first Agent Workspace Redesign v1** (§8-B′, §8-K) · `frontend/` only · **source of truth for new UI**
+**Status:** 2026-09-01 · Reviewnary Product UI Redesign v1 + Contextual Agent Workspace & Interactive UX QA v1 (§8-A, §8-B) + Frontend-first Agent Workspace Redesign v1 (§8-B′, §8-K) + **Agent Object + First-use Closure v1** (§8-K, §8-L, colour `bad`) · `frontend/` only · **source of truth for new UI**
 
 v1 of this document was a record of what the code already did. v2 is the other thing: the contract the
 code is built to. Where the code and this document disagree, the code is wrong.
@@ -119,7 +119,7 @@ fills on cards, no gradients, no glow, no glass.
 |---|---|---|---|
 | `GOOD` | `good` `#12662F` | `good/10` | settled, grounded, connected — a **proven** state only |
 | `WARN` | `warn` `#92400E` | `warn/10` | look at this before acting |
-| `BAD` | `bad` `#DC2626` | `bad/10` | failed, negative, disconnected |
+| `BAD` | `bad` `#B91C1C` | `bad/10` | failed, negative, disconnected |
 | `INFO` | `brand-700` | `brand-50` | reviewnary prepared something |
 | neutral | `muted` `#4E5968` | `canvas` | reference |
 
@@ -262,6 +262,28 @@ nothing), and 「해제」 is that transition backwards.
   (product · ★ · date) instead of quoting it.
 - 「이 상품」 resolves to the anchored product without a second lookup; a REVIEW anchor's product travels
   only when the sentence says 「이 상품」, because it is a fact ABOUT the review and not the review.
+- **An anchored object can be worked with** (Agent Object v1). A review has its own card — the customer's
+  redacted sentence at `lg`, the closed facts above it, the repeated problems it is evidence for as links,
+  and a reply control ONLY where the channel takes one. The body is transient like every customer text:
+  stripped before the thread is stored and re-read from the same exact endpoint on a reload.
+- **The anchor stands until a new set is drawn that does not contain it** — not until the next turn.
+
+### 8-L. The first-use mornings
+
+Three states, derived from the channel table the page already has, never a second read:
+
+| state | the home's lead |
+|---|---|
+| no channel connected | what connecting hands over (derived from what those channels offer) + ONE action |
+| connected, nothing held | 「연결은 끝났습니다 · 첫 수집이 끝나면…」 — or, when a collection HAS run empty, that |
+| rows exist | the ordinary brief |
+
+「지금 먼저 확인할 일은 없습니다」 belongs to the third alone. In the other two it reads as a verdict on the
+seller's store that no read supports.
+
+**One fact, one owner.** A channel's collection state is said by whichever thing carries the control (the
+step card), never also as prose beside it; a card whose title the sentence above already said declares that
+itself (`titleSaid`) rather than being guessed at by containment.
 
 ### 8-C. Artifact vocabulary (closed)
 

@@ -9,8 +9,8 @@ import { useAgentSurface } from "../../lib/agentPanel";
 import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
 import { analytics } from "../../lib/analytics";
-import { hasAnyConnectedChannel } from "../../lib/firstConnectionState";
-import { DISCONNECTED_HEADLINE, DISCONNECTED_SUBLINE } from "../../lib/briefing";
+import { DISCONNECTED_HEADLINE } from "../../lib/briefing";
+import { delegableSentence, homeFirstUseState, noDataSentence } from "../../lib/homeFirstUse";
 import { caseTarget, preparedBadge } from "../../lib/proactive";
 import { previewText } from "../../lib/plainText";
 import { matchCommandIntent, INTENT_HEADING } from "../../lib/commandIntents";
@@ -76,7 +76,11 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   }, []);
 
   const data = overview.data;
-  const beforeFirstConnection = data ? !hasAnyConnectedChannel(data.metrics.channels) : false;
+  // §2: three first-use states, one derivation, from the numbers already on the page. A failed read is
+  // `null` and claims nothing — telling a connected seller they have no channels is the one error this
+  // screen can make that they cannot check.
+  const firstUse = data ? homeFirstUseState(data.metrics.channels) : null;
+  const beforeFirstConnection = firstUse?.kind === "NO_CHANNEL";
   // §5: when the brief names the waiting inquiries it also says how many — so the strip stops saying
   // it. Before this the seller read 「현재 미답변 문의 12건」 and 「…문의가 12건 있습니다」 one line apart.
   const strip = data ? contextStrip(data, now, (oldest?.length ?? 0) > 0) : [];
@@ -88,8 +92,12 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   // numbers line reads) when there are none. 「없습니다」 only when the same reads came back empty.
   const workload = useMemo(() => (data ? workloadPriorities(data) : null), [data]);
   const leadingTurns = useMemo<DisplayTurn[]>(
-    () => (cases && !beforeFirstConnection && oldest !== undefined ? [proactiveTurn(cases, workload, oldest)] : []),
-    [cases, workload, oldest, beforeFirstConnection],
+    // §2: the opener speaks only when there is something to speak about. Before the first connection,
+    // and on the morning after one when nothing has arrived, the lead sentence above IS the briefing —
+    // an opener saying 「지금 먼저 확인할 일은 없습니다」 under it would be the same morning explained twice,
+    // and the weaker explanation would be the one that sounds like a verdict on the store.
+    () => (cases && firstUse?.kind === "WORKING" && oldest !== undefined ? [proactiveTurn(cases, workload, oldest)] : []),
+    [cases, workload, oldest, firstUse],
   );
 
   const onBeforeSend = useCallback(
@@ -156,12 +164,25 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   const lead = (
     <div className="space-y-2">
       <h1 className="sr-only">오늘의 운영</h1>
-      {beforeFirstConnection ? (
-        <section className="space-y-1" aria-label="오늘의 브리핑">
+      {beforeFirstConnection && firstUse ? (
+        // §2 — nothing is connected. What is missing is not a briefing: it is the one thing that can be
+        // done, plus what doing it hands over. The sentence names the data types the channels on this
+        // seller's own table actually offer, and there is exactly one next action.
+        <section className="space-y-1" aria-label="오늘의 브리핑" data-testid="first-use-no-channel">
           <p className="break-keep text-xl font-bold leading-tight text-ink" aria-live="polite">{DISCONNECTED_HEADLINE}</p>
-          <p className="break-keep text-base text-muted">{DISCONNECTED_SUBLINE}</p>
+          <p className="break-keep text-base text-muted">{delegableSentence(firstUse)}</p>
           <div className="pt-3">
             <BtnLink to="/connect">채널 연결하기</BtnLink>
+          </div>
+        </section>
+      ) : firstUse?.kind === "NO_DATA" ? (
+        // §2 — connected, and nothing has arrived yet. 「먼저 확인할 일은 없습니다」 would be arithmetic
+        // truth and operational nonsense on the morning a seller connected: it reads as "the product
+        // looked and your store is quiet", which is a claim about their business that no read supports.
+        <section className="space-y-1" aria-label="오늘의 브리핑" data-testid="first-use-no-data">
+          <p className="break-keep text-xl font-bold leading-tight text-ink" aria-live="polite">{noDataSentence(firstUse)}</p>
+          <div className="pt-3">
+            <BtnLink to="/connect" variant="outline">채널 연결 상태 보기</BtnLink>
           </div>
         </section>
       ) : !briefed ? (
@@ -348,6 +369,9 @@ export function proactiveTurn(
     artifactId: "home-waiting-rows",
     type: "INQUIRY_LIST",
     title: "가장 오래 기다린 문의",
+    // The sentence above this card says 「가장 오래 기다린 것부터 보여드릴게요」 — the producer of BOTH
+    // declares the repeat, because no containment test can see it (Agent Object v1 §3).
+    titleSaid: true,
     totalCount: unanswered,
     // The read this brief actually made. It is what the card uses to know the seller (or, here, the
     // brief's own sentence) already said these are the waiting ones — so the list does not add

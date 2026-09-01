@@ -26,7 +26,7 @@ export function ProductListArtifact({ artifact, headline }: { artifact: ProductL
   const selectedId = conversation?.workingSet?.selectedObject?.kind === "PRODUCT"
     ? conversation.workingSet.selectedObject.id : null;
   return (
-    <ArtifactCard title={artifact.title} note={artifact.note} headline={headline}>
+    <ArtifactCard title={artifact.title} note={artifact.note} headline={headline} titleSaid={artifact.titleSaid}>
       <ul className="divide-y divide-line/70">
         {artifact.items.map((p) => {
           const expanded = open === p.productId;

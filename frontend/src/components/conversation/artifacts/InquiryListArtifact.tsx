@@ -75,7 +75,7 @@ export function InquiryListArtifact({ artifact, onPrompt, headline }: { artifact
   const caption = shared && !askedFor && !(headline ?? "").includes(shared) ? STATE[headKey].all : null;
   const note = [artifact.note, caption].filter(Boolean).join(" ") || null;
   return (
-    <ArtifactCard title={artifact.title} note={note} headline={headline}>
+    <ArtifactCard title={artifact.title} note={note} headline={headline} titleSaid={artifact.titleSaid}>
       {/* Keyed by POSITION as well as kind: a ROWS list keeps the seller's order, so its groups are
           consecutive runs and the same `key` ("UNANSWERED") legitimately appears more than once. React
           was told two siblings were the same node and warned it might drop or duplicate rows — a list

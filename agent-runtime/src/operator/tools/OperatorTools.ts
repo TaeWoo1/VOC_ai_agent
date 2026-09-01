@@ -72,6 +72,16 @@ export const OPERATOR_TOOL = {
    * missing capability. The read is the same org-scoped endpoint, bounded and ordered by the backend.
    */
   LIST_PRODUCTS: "list_products",
+  /**
+   * Agent Object v1 (2026-09-01). READ: ONE review, by id — the object a review anchor stands on.
+   *
+   * <b>Why it is not `list_recent_reviews` with a narrow window.</b> That read answers "what arrived";
+   * this one answers "what did THIS customer write, and what is it already evidence for". Without it a
+   * follow-up on an anchored review had two outcomes and both were wrong: silence, or a widening to the
+   * product that answered 「이 리뷰는 어떤 상품 문제야?」 with that product's most recent ★5 (measured
+   * 2026-09-01). A demonstrative that names one object must be answerable from that object.
+   */
+  GET_REVIEW_DETAIL: "get_review_detail",
 } as const;
 
 /**
@@ -420,6 +430,24 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         size: z.number().int().min(1).max(50).optional(),
         order: z.enum(["NEWEST", "OLDEST"]).optional(),
       }),
+    })),
+
+    // <b>ONE review, by id</b> (Agent Object v1). The exact READ a review anchor stands on: this
+    // review's own facts, the customer's redacted sentence, and the repeated problems it is already
+    // recorded as evidence for. `null` when the backend has no single-review lane — a caller must say
+    // "I could not read it", never describe a review it did not read.
+    read(tool(async ({ reviewId }: { reviewId: string }) => {
+      if (!deps.operator.getReviewDetail) {
+        return null;
+      }
+      return deps.operator.getReviewDetail(reviewId);
+    }, {
+      name: OPERATOR_TOOL.GET_REVIEW_DETAIL,
+      description:
+        "리뷰 하나를 정확히 읽는다 — 고객이 쓴 문장(비식별 처리), 별점·채널·상품·작성일, 답글 상태, 그리고 "
+        + "이 리뷰가 이미 어떤 반복 문제의 근거로 기록돼 있는지. '이 리뷰 자세히 / 왜 이런 리뷰가' 류 질문의 "
+        + "출처이며, 화면에서 고른 리뷰 id가 있어야 한다. 필요한 정보: REVIEW_SIGNAL.",
+      schema: z.object({ reviewId: z.string().min(1).max(200) }),
     })),
 
     read(tool(async ({ days, channel, from, to }: { days: number; channel?: string; from?: string; to?: string }) => {

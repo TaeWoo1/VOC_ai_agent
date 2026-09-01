@@ -53,6 +53,7 @@ import type {
   IngestResult,
   InboxResponse,
   InquiryDetail,
+  ReviewDetailResponse,
   GeneratedDraftView,
   InquiryReplyCapabilityView,
   PublishCapabilityView,
@@ -723,6 +724,14 @@ export const api = {
   },
   // Seller-only detail for one work item: exposes title/details (never author),
   // and the attached proposal once PROPOSED. A 404 (foreign/unknown id) throws.
+  /**
+   * ONE review, exactly (Agent Object v1) — the same read the conversation's review anchor stands on.
+   * Used by the review card to re-read the customer's sentence after a reload, where it was stripped.
+   */
+  async getReviewDetailStrict(reviewId: string): Promise<ReviewDetailResponse> {
+    const { data } = await http.get<ReviewDetailResponse>(`/api/reviews/${reviewId}`);
+    return data;
+  },
   async getInquiryDetailStrict(workItemId: string): Promise<InquiryDetail> {
     const { data } = await http.get<InquiryDetail>(`/api/inquiries/${workItemId}`);
     return data;

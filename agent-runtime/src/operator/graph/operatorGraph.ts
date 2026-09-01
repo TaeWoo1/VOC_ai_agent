@@ -412,6 +412,9 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       ...axis,
       // An overridden scope reads the org, so the previous set is not handed down either.
       workingSet: axis.filters.scope === "WORKING_SET" ? state.conversation?.workingSet ?? null : null,
+      // The anchor travels whatever the scope is: 「이 리뷰 자세히」 narrows no set and still names an
+      // object (Agent Object v1). Only the object — its id and the product it belongs to — never rows.
+      selectedObject: state.conversation?.workingSet?.selectedObject ?? null,
       ...(state.conversation?.collected ? { collected: state.conversation.collected } : {}),
       ...(state.conversation?.pendingHumanWindow ? { pendingHumanWindow: state.conversation.pendingHumanWindow } : {}),
       ...(state.conversation?.localAgent ? { localAgent: state.conversation.localAgent } : {}),

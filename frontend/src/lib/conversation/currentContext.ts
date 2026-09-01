@@ -100,6 +100,17 @@ export function nameSelectedObject(
           return { title: item.productName, channelNameKo: null, productName: null, to: item.to };
         }
       }
+      // Agent Object v1: the review's own card names it more precisely than the row it came from, and
+      // it is the artifact that survives when the seller filtered the list away.
+      if (object.kind === "REVIEW" && a.type === "REVIEW_DETAIL" && a.reviewId === object.id) {
+        return {
+          title: null,
+          channelNameKo: [a.productName, a.rating != null ? `★ ${a.rating}` : null, a.writtenOn]
+            .filter(Boolean).join(" · ") || null,
+          productName: null,
+          to: a.to,
+        };
+      }
       if (object.kind === "REVIEW" && a.type === "REVIEW_LIST") {
         const item = a.items.find((r) => r.reviewId === object.id);
         if (item) {

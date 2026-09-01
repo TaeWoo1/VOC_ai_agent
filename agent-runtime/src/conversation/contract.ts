@@ -37,6 +37,7 @@ export type ArtifactType =
   | "REVIEW_LIST"
   | "INQUIRY_LIST"
   | "INQUIRY_DETAIL"
+  | "REVIEW_DETAIL"
   | "PRODUCT_LIST"
   | "ISSUE_LIST"
   | "ORDER_SUMMARY"
@@ -67,6 +68,18 @@ interface ArtifactBase {
   readonly title: string;
   /** What was NOT seen, when anything was not. Rendered whenever present. */
   readonly note?: string;
+  /**
+   * The sentence above this card already said what the title says — so the header is not drawn.
+   *
+   * <b>Declared by the producer, not matched from prose</b> (Agent Object + First-use Closure v1 §3).
+   * The renderer used to decide this by testing whether the headline CONTAINED the title, which is a
+   * string search standing in for a fact only the writer of both sentences knows: 「가장 오래 기다린
+   * 것부터 보여드릴게요」 over a card titled 「가장 오래 기다린 문의」 is a repeat that no containment
+   * test can see, and a title that happens to be a substring of an unrelated sentence is a header
+   * dropped for no reason. The title itself stays — it is the section's accessible name; what this
+   * suppresses is the second RENDERING.
+   */
+  readonly titleSaid?: boolean;
 }
 
 export interface SummaryArtifact extends ArtifactBase {
@@ -265,6 +278,45 @@ export interface InquiryDetailArtifact extends ArtifactBase {
   readonly excerpt?: string | null;
   /** Whether a reply draft can attach right now — the same gate the PREPARE lane uses. */
   readonly actionability: "DRAFTABLE" | "ALREADY_ANSWERED" | "AWAITING_SEND" | "NOT_WORKABLE";
+  readonly to: string;
+}
+
+/**
+ * ONE review, inspected (Agent Object + First-use Closure v1 §1) — the answer to 「이 리뷰 자세히 봐줘」
+ * and the card a click on a review row produces.
+ *
+ * <b>Identity is kept; the customer's words are not.</b> `reviewId` is what the conversation stores, and
+ * `body` — the seller-visible sentence — is transient like every other customer text here: stripped
+ * before persistence and re-read from the same exact endpoint when a later turn needs it. So a reload
+ * still knows WHICH review is anchored, and never keeps a second copy of what a buyer wrote.
+ *
+ * <b>`issues` is what this review is already evidence FOR</b>, from the extractor's own links. It is the
+ * only honest answer to 「왜 이런 리뷰가 나왔을까」 that stays on this review — a count over the product
+ * would be a different claim about different rows.
+ */
+export interface ReviewDetailArtifact extends ArtifactBase {
+  readonly type: "REVIEW_DETAIL";
+  readonly reviewId: string;
+  readonly channelCode: string | null;
+  readonly channelNameKo: string | null;
+  readonly writtenOn: string | null;
+  readonly rating: number | null;
+  readonly negative: boolean;
+  readonly productId: string | null;
+  readonly productName: string | null;
+  /** transient — the redacted sentence the customer wrote, bounded. Never persisted. */
+  readonly body?: string | null;
+  /** True when a span of the body was tokenized, so the reader knows they are reading a redaction. */
+  readonly bodyRedacted?: boolean;
+  /** The repeated problems this review is recorded as evidence for. Titles and ranks — never quotes. */
+  readonly issues: ReadonlyArray<{
+    readonly issueId: string;
+    readonly title: string;
+    readonly severity: string | null;
+    readonly to: string;
+  }>;
+  /** What can be done with this review at its channel today — the seller's sentence, decided by capability. */
+  readonly replyCapability: "DRAFTABLE" | "NOT_SUPPORTED" | "UNKNOWN";
   readonly to: string;
 }
 
@@ -556,6 +608,7 @@ export type Artifact =
   | ReviewListArtifact
   | InquiryListArtifact
   | InquiryDetailArtifact
+  | ReviewDetailArtifact
   | ProductListArtifact
   | IssueListArtifact
   | OrderSummaryArtifact
@@ -1006,6 +1059,12 @@ export function persistableArtifact(artifact: Artifact): Artifact {
     }
     case "INQUIRY_DETAIL": {
       const { excerpt: _e, ...rest } = artifact;
+      return rest;
+    }
+    case "REVIEW_DETAIL": {
+      // The identity and the closed facts persist; the customer's sentence does not. A later turn that
+      // needs the words re-reads them from `get_review_detail` — one exact read, never a second copy.
+      const { body: _b, ...rest } = artifact;
       return rest;
     }
     case "LIST":

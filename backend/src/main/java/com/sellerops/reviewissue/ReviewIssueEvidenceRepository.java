@@ -87,4 +87,13 @@ public interface ReviewIssueEvidenceRepository extends JpaRepository<ReviewIssue
 
     /** Evidence for one issue, newest first, for the drill-down that renders 대표 고객 표현. */
     List<ReviewIssueEvidence> findByOrgIdAndIssueIdOrderByOccurredOnDesc(UUID orgId, UUID issueId);
+
+    /**
+     * The other direction: which repeated problems ONE review is evidence for.
+     *
+     * <p>Agent Object v1 — the exact review read answers 「왜 이런 리뷰가 나왔을까」 from this review's own
+     * links. Bounded by the row itself (a review holds a handful of opinion units), and org-scoped like
+     * every other read here.
+     */
+    List<ReviewIssueEvidence> findByOrgIdAndReviewId(UUID orgId, UUID reviewId);
 }
