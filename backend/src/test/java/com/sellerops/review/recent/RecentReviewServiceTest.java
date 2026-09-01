@@ -177,16 +177,19 @@ class RecentReviewServiceTest {
     }
 
     @Test
-    @DisplayName("no dates means today and the six days before it")
-    void defaultWindowIsSevenDays() {
+    @DisplayName("no dates means everything held — an absent lower bound is NO lower bound")
+    void noDatesIsUnbounded() {
+        // Conversation Contract Correctness v2: this read used to substitute a seven-day window, so a
+        // question with no period in it ("별점 낮은 리뷰 보여줘") was answered about a week. The caller
+        // stopped inventing a window for that reason and the invention had simply moved down a layer.
         real(coupang, 5, TODAY.minusDays(6));
         real(coupang, 5, TODAY.minusDays(7));
 
         RecentReviewsResponse page = service.recent(org, null, null, false, null, null, null);
 
-        assertThat(page.from()).isEqualTo(TODAY.minusDays(6));
+        assertThat(page.from()).isEqualTo(LocalDate.of(1970, 1, 1));
         assertThat(page.to()).isEqualTo(TODAY);
-        assertThat(page.total()).isEqualTo(1);
+        assertThat(page.total()).isEqualTo(2);
     }
 
     @Test

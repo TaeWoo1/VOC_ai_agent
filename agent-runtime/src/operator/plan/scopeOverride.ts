@@ -1,19 +1,31 @@
 /**
  * Scope override by PLAN FIELDS — the two cases where 「WORKING_SET」 cannot mean what the planner said.
  *
- * <b>No keyword is read.</b> The planner marks a sentence as a follow-up over the previous set; this
- * function only checks whether that set can carry the follow-up: a set with nothing in it cannot be
+ * <b>Four of the five read no keyword.</b> The planner marks a sentence as a follow-up over the previous
+ * set; those four only check whether that set can carry the follow-up: a set with nothing in it cannot be
  * filtered, and a sentence that names a DIFFERENT period is asking a new question of the org, not a
  * narrower one of the rows on screen (R7: 「오늘」 with 0 rows, then 「지난 7일」 planned as a
  * follow-up answered 「방금 본 0건 중 0건」 instead of the 23 rows the week held). Both are closed
  * tokens on the plan and the set; the override is logged with its reason.
+ *
+ * <b>The fifth reads the sentence for one closed grammatical fact, and it is the rule this repository
+ * already had</b> (Conversation Contract Correctness v2). `taskInterpreter.visibleFilterOf` has required
+ * an explicit refine expression since Conversation Core v1 §9 — 「그중」·「여기서」·「~만」 on something that
+ * can point at the rows — because "an explicit new-list request is a fresh ORG question and never a
+ * narrowing of the rows on screen". The planner path had no such requirement and reached the opposite
+ * conclusion on the same sentences: 「답변 안 한 문의 보여줘」, said after a topic list, was answered
+ * 「방금 본 문의 중 배송 관련 답변 안 한 문의는 1건입니다」 — twelve inquiries answered with one. The
+ * grammar is `conversation/reference.ts`'s, shared with the lane that has always applied it, and the
+ * check is narrowed to plans that are a pure FILTER of the same domain: a follow-up that names no axis
+ * at all (「상품별로 묶어줘」, 「문의에서도 같은 얘기 있어?」) is not a narrowing and is untouched.
  */
 import type { InvestigationPlan, PlanFilters } from "./InvestigationPlan";
 import { conversationAxisOf } from "./InvestigationPlan";
 import type { WorkingSetView } from "../../conversation/contract";
+import { hasRefineExpression, namesOwnObject } from "../../conversation/reference";
 import { log } from "../../log";
 
-export type ScopeOverrideReason = "NEW_PERIOD" | "EMPTY_SET" | "NEW_LIMIT" | "NEW_SUBJECT";
+export type ScopeOverrideReason = "NEW_PERIOD" | "EMPTY_SET" | "NEW_LIMIT" | "NEW_SUBJECT" | "NO_REFINE_EXPRESSION";
 
 /**
  * What the SENTENCE says the question is about — the closed topic family the planner named and the
@@ -37,8 +49,15 @@ function subjectChanged(subject: SentenceSubject | undefined, set: WorkingSetVie
   return subject.topic != null ? subject.topic !== setTopic : subject.term !== setTerm;
 }
 
+/** Does this plan narrow by a FILTER axis at all? A grouping or cross-domain follow-up names none. */
+function namesFilterAxis(filters: PlanFilters): boolean {
+  return filters.channel != null || filters.status != null || filters.topic != null
+    || filters.period != null || filters.rating != null || filters.limit != null;
+}
+
 export function scopeOverrideOf(
   plan: InvestigationPlan, workingSet: WorkingSetView | null, subject?: SentenceSubject,
+  goalText?: string | null,
 ): ScopeOverrideReason | null {
   const { filters } = conversationAxisOf(plan);
   if (filters.scope !== "WORKING_SET") return null;
@@ -55,6 +74,10 @@ export function scopeOverrideOf(
   // show 8 (Agent Interaction Model v2, found live: an anchored thread turned 「최근 문의 8개 보여줘」
   // into 「방금 본 5건 중 5건」). A limit within the set stays a refine (「그중 3개만」).
   if (filters.limit != null && workingSet.kind !== "ORDERS" && filters.limit > workingSet.ids.length) return "NEW_LIMIT";
+  // A narrowing that never SAID it was one is a new question of the org — checked after the reasons that
+  // name a specific contradiction, so those keep their own name in the log.
+  if (namesFilterAxis(filters) && goalText != null
+      && namesOwnObject(goalText) && !hasRefineExpression(goalText)) return "NO_REFINE_EXPRESSION";
   // An ORDERS set holds no ids by nature — its anchor is its window and channel, so "empty" does not apply.
   if (workingSet.kind !== "ORDERS" && workingSet.ids.length === 0 && workingSet.workItemIds.length === 0) return "EMPTY_SET";
   return null;
@@ -90,12 +113,14 @@ function inheritedAxesDropped(filters: PlanFilters, set: WorkingSetView): PlanFi
 /** The plan's conversation axis with the override applied. Logs once when asked to. */
 export function effectiveAxisOf(
   plan: InvestigationPlan, workingSet: WorkingSetView | null, emitLog = false, subject?: SentenceSubject,
+  goalText?: string | null,
 ): ReturnType<typeof conversationAxisOf> {
   const axis = conversationAxisOf(plan);
-  const reason = scopeOverrideOf(plan, workingSet, subject);
+  const reason = scopeOverrideOf(plan, workingSet, subject, goalText);
   if (!reason) return axis;
   if (emitLog) log("operator_scope_override", { from: "WORKING_SET", to: "ORG", reason });
-  const filters = (reason === "NEW_LIMIT" || reason === "NEW_PERIOD" || reason === "NEW_SUBJECT") && workingSet
+  const voided: readonly ScopeOverrideReason[] = ["NEW_LIMIT", "NEW_PERIOD", "NEW_SUBJECT", "NO_REFINE_EXPRESSION"];
+  const filters = voided.includes(reason) && workingSet
     ? inheritedAxesDropped(axis.filters, workingSet)
     : axis.filters;
   return { ...axis, filters: { ...filters, scope: "ORG" } };

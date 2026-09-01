@@ -107,7 +107,9 @@ describe("stale data + a question the held rows can answer", () => {
     expect(list.freshness.find((f) => f.channelCode === "COUPANG")).toMatchObject({ verdict: "UNPROVEN", lastSuccessfulSyncAt: "2026-08-20T01:00:00Z" });
     const [offer] = humansOf(turn);
     expect(offer).toMatchObject({ optional: true, channelCode: "COUPANG", path: "WING_READ_ACTION_WINDOW", asOf: "2026-08-20T01:00:00Z", title: "쿠팡 리뷰 최신 상태로 갱신" });
-    expect(turn.message.startsWith("지금까지 확인한 최근 7일 낮은 평점 리뷰는 1건입니다.")).toBe(true);
+    // The sentence names no period, so the answer claims none (Conversation Contract Correctness v2):
+    // it used to read 「지금까지 확인한 최근 7일 …」 under a window the seller never asked for.
+    expect(turn.message.startsWith("지금까지 확인한 낮은 평점 리뷰는 1건입니다.")).toBe(true);
     expect(once(turn.message, "쿠팡 리뷰는 8월 20일 기준입니다.")).toBe(true);
     expect(turn.message).not.toContain("최신 상태가 아닙니다");
     expect(turn.message).not.toContain("아직 확인하지 못했어요");
@@ -119,7 +121,7 @@ describe("stale data + a question the held rows can answer", () => {
   it("an offered refresh does NOT gate the next question, and a stale zero is said as a bound, not 「0건」", async () => {
     const { h, id } = await fresh({ recentReviews: { "true:ALL": { ...lowRows(), items: [], total: 0 } } });
     const first = await say(h, id, "별점 2점 이하 리뷰 보여줘");
-    expect(first.turn.message).toContain("지금까지 확인한 범위에는 최근 7일 낮은 평점 리뷰가 없습니다.");
+    expect(first.turn.message).toContain("지금까지 확인한 범위에는 낮은 평점 리뷰가 없습니다.");
     expect(first.turn.message).not.toContain("0건");
     const again = await say(h, id, "별점 2점 이하 리뷰 보여줘");
     expect(again.turn.status).toBe("DONE");
@@ -156,7 +158,7 @@ describe("per channel: acquisition capability decides the step, never the seller
     expect(humansOf(turn)).toHaveLength(0);
     expect(turn.status).toBe("DONE");
     expect((artifact(turn, "REVIEW_LIST") as ReviewListArtifact).freshness.find((f) => f.channelCode === "CAFE24")?.verdict).toBe("FRESH");
-    expect(turn.message).toBe("최근 7일 확인 가능한 낮은 평점 리뷰가 1건입니다.");
+    expect(turn.message).toBe("확인 가능한 낮은 평점 리뷰가 1건입니다.");
   });
   it("NAVER GUIDED + stale: the export Action Window with the file upload as the explicit fallback", async () => {
     const { h, id } = await fresh();

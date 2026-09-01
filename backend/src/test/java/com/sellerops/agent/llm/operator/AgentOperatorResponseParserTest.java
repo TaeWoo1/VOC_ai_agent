@@ -180,7 +180,7 @@ class AgentOperatorResponseParserTest {
             assertThat(system).contains(token);
         }
         assertThat(system).contains("ORDER_OPS");
-        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v10");
+        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v11");
     }
 
     /**

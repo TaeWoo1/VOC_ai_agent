@@ -83,7 +83,10 @@ export function resolveRowsSpec(input: SpecialistInput): InquiryRowsSpec {
   const previous = filters?.scope === "WORKING_SET" && input.workingSet?.kind === "INQUIRIES" ? input.workingSet : null;
   const today = observationDate(input.referenceDate);
   const token: PeriodToken | null = filters?.period ?? previous?.filters.period?.token ?? null;
-  const window = token ? windowOf(token, today) : previous?.filters.period ?? null;
+  // The day count belongs to the token that carries it: taken from the sentence when the sentence named
+  // the period, otherwise from the window the previous set was read with.
+  const periodDays = filters?.period ? filters.periodDays : previous?.filters.period?.days ?? null;
+  const window = token ? windowOf(token, today, periodDays) : previous?.filters.period ?? null;
   const channel = filters?.channel ?? input.channelScope ?? previous?.filters.channelCode ?? null;
   const status: Status = filters?.status ?? previous?.filters.status ?? "ALL";
   const order: Order = filters?.order ?? "NEWEST";
@@ -236,7 +239,7 @@ function statusWord(status: Status): string {
 const CHANNEL_WORD: Record<string, string> = { NAVER: "네이버", COUPANG: "쿠팡", CAFE24: "카페24" };
 
 function rowsTitle(spec: InquiryRowsSpec): string {
-  const period = spec.window ? `${periodLabel(spec.window.token ?? null)} ` : "";
+  const period = spec.window ? `${periodLabel(spec.window.token ?? null, spec.window.days)} ` : "";
   const channel = spec.channel && CHANNEL_WORD[spec.channel.toUpperCase()] ? `${CHANNEL_WORD[spec.channel.toUpperCase()]} ` : "";
   const topic = spec.topic ? `${TOPIC_LABEL[spec.topic]} ` : spec.term ? `${spec.term} 관련 ` : "";
   const which = spec.limit != null ? `${spec.order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${spec.limit}건` : "문의";
@@ -263,7 +266,7 @@ export function inquiryRowsSentence(scope: RowsScopeWords, shown: number, total:
   // The prose and the rows are ONE execution's result. Whatever `total` claims, the rows on screen are
   // the floor of it: 「없습니다」 is only sayable when the same read returned nothing.
   const count = Math.max(total, shown);
-  const period = scope.period ? `${periodLabel(scope.period.token ?? null)} 들어온 ` : "";
+  const period = scope.period ? `${periodLabel(scope.period.token ?? null, scope.period.days)} 들어온 ` : "";
   const channel = scope.channelCode && CHANNEL_WORD[scope.channelCode.toUpperCase()] ? `${CHANNEL_WORD[scope.channelCode.toUpperCase()]} ` : "";
   // The seller's own word, said back verbatim: a zero under it is a zero about THAT subject, and a
   // read that could not narrow by it never wears its label.

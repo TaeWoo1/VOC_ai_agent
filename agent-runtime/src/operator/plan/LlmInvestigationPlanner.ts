@@ -22,6 +22,7 @@
 import type { GoalRequest } from "../../goal/parseGoal";
 import type { AgentPlanView } from "../../spring/types";
 import type { InvestigationPlan, PlanFilters, PlanTarget, RiskClass } from "./InvestigationPlan";
+import { MAX_PERIOD_DAYS } from "../../conversation/period";
 import { NO_FILTERS, NO_TARGET } from "./InvestigationPlan";
 import type { SpecialistName } from "../state/OperatorState";
 import { validatePlan, PlanRejectedError, REPLANNABLE_REJECTIONS } from "./PlanValidator";
@@ -382,7 +383,11 @@ function oneOf<T extends string>(value: string | null | undefined, allowed: read
 function filtersOf(raw: AgentPlanView["filters"]): PlanFilters {
   if (!raw) return NO_FILTERS;
   return {
-    period: oneOf(raw.period, ["TODAY", "YESTERDAY", "LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS", "THIS_WEEK", "LAST_WEEK"] as const),
+    period: oneOf(raw.period, ["TODAY", "YESTERDAY", "LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS", "THIS_WEEK", "LAST_WEEK", "LAST_N_DAYS"] as const),
+    // The day count is only a window WITH the token that needs one: a number beside 「오늘」 would be a
+    // second period the seller did not name, so it is dropped rather than reconciled.
+    periodDays: raw.period === "LAST_N_DAYS" && typeof raw.periodDays === "number" && Number.isInteger(raw.periodDays)
+      && raw.periodDays >= 1 ? Math.min(raw.periodDays, MAX_PERIOD_DAYS) : null,
     rating: oneOf(raw.rating, ["ALL", "LOW"] as const),
     channel: oneOf(raw.channel, ["NAVER", "COUPANG", "CAFE24"] as const),
     scope: oneOf(raw.scope, ["WORKING_SET", "ORG"] as const),

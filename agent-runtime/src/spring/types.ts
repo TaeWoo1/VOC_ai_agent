@@ -770,6 +770,7 @@ export interface AgentPlanView {
   readonly tone?: string | null;
   readonly filters?: {
     period?: string | null;
+    periodDays?: number | null;
     rating?: string | null;
     channel?: string | null;
     scope?: string | null;

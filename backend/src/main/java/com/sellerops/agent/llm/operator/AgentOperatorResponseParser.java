@@ -150,6 +150,7 @@ public final class AgentOperatorResponseParser {
         }
         return new PlanFilters(
                 closedOr(node, "period", AgentPlanPrompt.PERIODS, null),
+                periodDaysOr(node),
                 closedOr(node, "rating", AgentPlanPrompt.RATINGS, null),
                 closedOr(node, "channel", AgentPlanPrompt.CHANNELS, null),
                 closedOr(node, "scope", AgentPlanPrompt.SCOPES, null),
@@ -159,6 +160,23 @@ public final class AgentOperatorResponseParser {
                 limitOr(node, "limit"),
                 closedOr(node, "order", AgentPlanPrompt.ORDERS, null),
                 closedOr(node, "status", AgentPlanPrompt.STATUSES, null));
+    }
+
+    /**
+     * The trailing day count behind {@code period=LAST_N_DAYS} — the one axis value that is a number
+     * rather than a token, because the thing it represents is one (「최근 3일」). Clamped, and dropped
+     * entirely unless the period token that needs it is the one the model chose: a count beside 「오늘」
+     * would be a second period nobody named.
+     */
+    private static Integer periodDaysOr(JsonNode node) {
+        if (!"LAST_N_DAYS".equals(closedOr(node, "period", AgentPlanPrompt.PERIODS, null))) {
+            return null;
+        }
+        JsonNode value = node.get("periodDays");
+        if (value == null || !value.isInt() || value.asInt() < 1) {
+            return null;
+        }
+        return Math.min(value.asInt(), AgentPlanPrompt.MAX_PERIOD_DAYS);
     }
 
     /** A positive integer row limit, clamped to {@link AgentPlanPrompt#MAX_LIMIT}; anything else is null. */
@@ -368,11 +386,11 @@ public final class AgentOperatorResponseParser {
      * How the sentence narrows what is read — closed tokens only. {@code scope=WORKING_SET} means
      * "over what the previous turn produced"; the runtime, not this parser, knows what that was.
      */
-    public record PlanFilters(String period, String rating, String channel, String scope, String topic,
-                              String reviewIntent, String inquiryIntent, Integer limit, String order,
-                              String status) {
+    public record PlanFilters(String period, Integer periodDays, String rating, String channel, String scope,
+                              String topic, String reviewIntent, String inquiryIntent, Integer limit,
+                              String order, String status) {
         public static PlanFilters none() {
-            return new PlanFilters(null, null, null, null, null, null, null, null, null, null);
+            return new PlanFilters(null, null, null, null, null, null, null, null, null, null, null);
         }
     }
 

@@ -112,12 +112,27 @@ export type PeriodToken =
   | "LAST_14_DAYS"
   | "LAST_30_DAYS"
   | "THIS_WEEK"
-  | "LAST_WEEK";
+  | "LAST_WEEK"
+  /**
+   * A trailing window the seller named by its LENGTH — 「최근 3일」, 「최근 열흘」 (Conversation Contract
+   * Correctness v2). Carries its day count in {@link PlanFilters.periodDays} and in
+   * {@link DateWindow.days}.
+   *
+   * <b>Why the enum grew a shape instead of a value.</b> The closed list held seven windows and the
+   * seller may name any number of days. 「최근 3일 안에 들어온 문의만 보여줘」 had no token, so the axis
+   * was silently empty and the read returned all fifteen inquiries under the headline 「문의는 15건」 —
+   * a condition the seller stated, dropped without a word. Adding LAST_3_DAYS would have left the same
+   * hole at 「최근 5일」. Every other axis stays closed; this one is a bounded integer because the thing
+   * it represents is one.
+   */
+  | "LAST_N_DAYS";
 
 export interface DateWindow {
   readonly from: string;
   readonly to: string;
   readonly token: PeriodToken | null;
+  /** Set only for `LAST_N_DAYS`: the trailing day count the seller named. */
+  readonly days?: number;
 }
 
 export type FreshnessVerdict = "FRESH" | "UNPROVEN" | "NOT_COLLECTED" | "NOT_SUPPORTED" | "NOT_CONNECTED";
@@ -562,6 +577,11 @@ export type ToneHint = "SOFTER" | "MORE_FORMAL" | "SHORTER";
 
 export interface PlanFilters {
   readonly period: PeriodToken | null;
+  /**
+   * The day count behind `period: "LAST_N_DAYS"`, and meaningful only with it — 「최근 3일」 ⇒ 3.
+   * Clamped by the parser to a bounded range; null on every other token.
+   */
+  readonly periodDays: number | null;
   readonly rating: "ALL" | "LOW" | null;
   readonly channel: "NAVER" | "COUPANG" | "CAFE24" | null;
   /** `WORKING_SET` = a follow-up over what the previous turn showed; `ORG` = start over. */

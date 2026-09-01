@@ -70,7 +70,7 @@ const ROWS_SIZE = 50;
 /** Channels whose review collection is a seller-run step rather than an API pull. */
 const MANUAL_PATH_CHANNELS: ReadonlySet<string> = new Set(["NAVER", "COUPANG"]);
 
-export function freshnessVerdict(row: ChannelCoverageRow, window: DateWindow): FreshnessVerdict {
+export function freshnessVerdict(row: ChannelCoverageRow, window: DateWindow | null): FreshnessVerdict {
   if (row.state === "OBSERVED_FRESH") return "FRESH";
   if (row.state === "NOT_CONNECTED" || row.state === "BLOCKED") return "NOT_CONNECTED";
   // "Not supported" is the backend's word for "no automatic (API) path". NAVER (export upload) and
@@ -79,8 +79,10 @@ export function freshnessVerdict(row: ChannelCoverageRow, window: DateWindow): F
   if (row.state === "NOT_SUPPORTED" && !(row.connected && MANUAL_PATH_CHANNELS.has(row.channelCode))) {
     return "NOT_SUPPORTED";
   }
+  // With no window there is no "since when" to promote against: the question named no span, so the
+  // backend's own state is the whole verdict (Conversation Contract Correctness v2).
   const synced = dateOf(row.lastSuccessfulSyncAt);
-  if (synced != null && synced >= window.from) return "FRESH";
+  if (window != null && synced != null && synced >= window.from) return "FRESH";
   return row.state === "OBSERVED_FRESHNESS_UNPROVEN" ? "UNPROVEN" : "NOT_COLLECTED";
 }
 
@@ -109,13 +111,16 @@ export function rowsSentence(
   token: PeriodToken | null,
 ): string {
   if (previousCount != null) return `방금 본 ${previousCount}건 중 ${ratingWord}리뷰는 ${total}건입니다.`;
+  // The label is empty when no period was named; the sentence must then read as one about the reviews
+  // themselves, not as one with a hole where a window would have been.
+  const period = label ? `${label} ` : "";
   if (stale) {
     return total > 0
-      ? `지금까지 확인한 ${label} ${ratingWord}리뷰는 ${total}건입니다.`
-      : `지금까지 확인한 범위에는 ${label} ${ratingWord}리뷰가 없습니다.`;
+      ? `지금까지 확인한 ${period}${ratingWord}리뷰는 ${total}건입니다.`
+      : `지금까지 확인한 범위에는 ${period}${ratingWord}리뷰가 없습니다.`;
   }
   if (total === 0 && token === "TODAY") return `오늘 들어온 ${ratingWord}리뷰는 없습니다.`;
-  return `${label} 확인 가능한 ${ratingWord}리뷰가 ${total}건입니다.`;
+  return `${period}확인 가능한 ${ratingWord}리뷰가 ${total}건입니다.`;
 }
 
 /**
@@ -142,15 +147,21 @@ export function isFreshnessRequired(token: PeriodToken | null): boolean {
 
 type Collected = NonNullable<SpecialistInput["collected"]>[number];
 
+/** The span the returned rows themselves cover — used when no window was named, so nothing is claimed. */
+function datesOf(rows: ReadonlyArray<{ writtenOn: string | null }>): ReturnType<typeof eventRange> | null {
+  const days = rows.map((r) => r.writtenOn?.slice(0, 10)).filter((d): d is string => d != null).sort();
+  return days.length > 0 ? eventRange(days[0]!, days.at(-1)!) : null;
+}
+
 /** The freshness rows for one read, with this conversation's own completed collections counted. */
-function freshnessOf(read: RecentReviewsRead, channel: string | null, window: DateWindow, collected: readonly Collected[]): FreshnessRow[] {
+function freshnessOf(read: RecentReviewsRead, channel: string | null, window: DateWindow | null, collected: readonly Collected[]): FreshnessRow[] {
   const coverage = (read.coverage ?? []).filter((c) => c.dataType === "REVIEW"
     && (!channel || c.channelCode.toUpperCase() === channel.toUpperCase()));
   return coverage.map((c) => {
     // A collection the seller just ran at the conversation's request is a fact the backend's coverage
     // row cannot carry (a file upload is not a `dataType` sync there) — so it counts here.
     const seen = collected.find((k) => k.channelCode.toUpperCase() === c.channelCode.toUpperCase()
-      && k.dataType === "REVIEW" && k.finishedAt.slice(0, 10) >= window.from);
+      && k.dataType === "REVIEW" && (window == null || k.finishedAt.slice(0, 10) >= window.from));
     // A PARTIAL collection is not a proof of the window (Acceptance Closure §8): it is shown, said as
     // partial, and never promoted to FRESH.
     const proven = seen != null && !seen.partial;
@@ -200,10 +211,16 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   const filters = input.filters!;
   const previous = filters.scope === "WORKING_SET" && input.workingSet?.kind === "REVIEWS" ? input.workingSet : null;
   const today = observationDate(input.referenceDate);
-  // The previous set's window carries over a follow-up unless a new period was named; a fresh question
-  // with no period defaults to the last seven days — a retrieval default, disclosed in the label.
-  const token: PeriodToken | null = filters.period ?? previous?.filters.period?.token ?? "LAST_7_DAYS";
-  const window = windowOf(token, today);
+  // <b>An unnamed period is not a window</b> (Conversation Contract Correctness v2). This read used to
+  // fall back to the last seven days when the sentence named no period: 「별점 낮은 리뷰 보여줘」 was
+  // answered 「최근 7일 낮은 평점 리뷰는 3건」 while the seller held eight — a condition nobody stated,
+  // narrowing an answer by more than half. The label disclosed the window, which makes the sentence
+  // honest and the ANSWER still wrong: the seller asked about their low-rated reviews, not about a week.
+  // So no period means no window; the read returns what is held, bounded by its page size and order.
+  // The previous set's window still carries over a follow-up, because there the seller DID name it.
+  const token: PeriodToken | null = filters.period ?? previous?.filters.period?.token ?? null;
+  const periodDays = filters.period ? filters.periodDays : previous?.filters.period?.days ?? null;
+  const window: DateWindow | null = token ? windowOf(token, today, periodDays) : null;
   const rating: "ALL" | "LOW" = filters.rating ?? previous?.filters.rating ?? "ALL";
   const channel = filters.channel ?? input.channelScope ?? previous?.filters.channelCode ?? null;
   const product = input.resolved.find((e) => e.kind === "PRODUCT")?.id
@@ -213,7 +230,7 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   const order: "NEWEST" | "OLDEST" = filters.order ?? "NEWEST";
   const limit = filters.limit ?? null;
   const readArgs = {
-    from: window.from, to: window.to, negativeOnly: rating === "LOW",
+    ...(window ? { from: window.from, to: window.to } : {}), negativeOnly: rating === "LOW",
     ...(channel ? { channel } : {}), ...(product ? { productId: product } : {}), size: ROWS_SIZE, order,
   };
   const readRows = () => attemptTool(
@@ -336,14 +353,17 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   const listRef = evidence.add({
     kind: "REVIEW_LIST",
     sourceTool: OPERATOR_TOOL.LIST_RECENT_REVIEWS,
-    args: { from: window.from, to: window.to, negativeOnly: rating === "LOW", channel: channel ?? null, product: product ?? null },
+    args: { from: window?.from ?? null, to: window?.to ?? null, negativeOnly: rating === "LOW", channel: channel ?? null, product: product ?? null },
     locator: {
       label: "기간 내 리뷰", count: total,
       ...(channel ? { channelCode: channel } : {}), ...(product ? { productId: product } : {}),
     },
-    events: eventRange(window.from, window.to),
+    // No window ⇒ the rows date themselves: the evidence's span is what came back, never a claimed one.
+    events: window
+      ? eventRange(window.from, window.to)
+      : datesOf(rows),
     coverage: "COVERED",
-    provenance: `reviews/recent:${token}${previous ? ":working-set" : ""}${refreshed > 0 ? ":refreshed" : ""}`,
+    provenance: `reviews/recent:${token ?? "NONE"}${previous ? ":working-set" : ""}${refreshed > 0 ? ":refreshed" : ""}`,
   });
   refs.push(listRef);
 
@@ -358,7 +378,9 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   notes.push(...staleSentences);
 
   // ── The rows themselves, said as one sentence and one artifact.
-  const label = periodLabel(token);
+  // A label only when a period was named: 「최근」 on a read with no window would be a period claim the
+  // sentence never made and the query never applied.
+  const label = token ? periodLabel(token, window?.days) : "";
   findings.push({
     findingId: `f-${listRef.evidenceId}`,
     specialist: "REVIEW_OPS",
@@ -373,7 +395,7 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   const list: ReviewListArtifact = {
     artifactId: `a-${listRef.evidenceId}`,
     type: "REVIEW_LIST",
-    title: (previous ? (ratingWord ? `방금 본 리뷰 중 ${ratingWord}리뷰` : "방금 본 리뷰") : `${label} 들어온 ${ratingWord}리뷰`)
+    title: (previous ? (ratingWord ? `방금 본 리뷰 중 ${ratingWord}리뷰` : "방금 본 리뷰") : label ? `${label} 들어온 ${ratingWord}리뷰` : `${ratingWord}리뷰`)
       + (limit != null ? ` · ${order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${Math.min(limit, rows.length)}건` : ""),
     scope: { channelCode: channel, period: window, rating, productId: product },
     totalCount: total,
@@ -429,7 +451,7 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
     });
   }
 
-  log("review_rows", { period: token, rating, channel: channel ?? "NONE", rows: rows.length, total, order, limit: limit ?? "NONE",
+  log("review_rows", { period: token ?? "NONE", rating, channel: channel ?? "NONE", rows: rows.length, total, order, limit: limit ?? "NONE",
     workingSet: previous != null, required, gated, stale: stale.length, refreshed, refreshFailed: refreshFailures.length,
     humanSteps, offers, terminal: "OK" });
   return {

@@ -24,7 +24,7 @@
  */
 import { TOPIC_WORDS } from "../operator/tools/inquiryWorkload";
 import type { WorkloadTopic } from "../operator/tools/inquiryWorkload";
-import { usableTerm } from "./subjectTerm";
+import { subjectTermOf, usableTerm } from "./subjectTerm";
 
 export type TaskMode = "ANSWER" | "LIST" | "FILTER" | "INSPECT" | "ANALYZE" | "PREPARE" | "REVISE" | "EXECUTE";
 export type TaskScope = "ORG" | "VISIBLE_SET" | "SELECTED_ENTITY";
@@ -155,6 +155,13 @@ const ANSWERED_RE = /답변\s?(한|된|완료된?|끝난)\s?(것|거|건)?|답�
 /** 「N개」 「2건」 「한 개」 — the limit, with the count word consumed. */
 const LIMIT_RE = /(\d{1,2}|한|두|세|네|다섯)\s?(개|건)\s?(만)?/u;
 const COUNT_WORD: Record<string, number> = { 한: 1, 두: 2, 세: 3, 네: 4, 다섯: 5 };
+/**
+ * The bare native numeral — 「하나만」 · 「둘만」. It is the same LIMIT axis said the short way, and it
+ * belongs to no other: read as a leftover content word it became a SUBJECT, and 「그중 제일 오래된 거
+ * 하나만」 was answered 「방금 본 문의 1건 중 하나 관련 문의는 없습니다」 (PO QA regression corpus, G12.4).
+ */
+const BARE_COUNT_RE = /(?:^|\s)(하나|둘|셋|넷|다섯)(?:\s?만)?(?=\s|$)/u;
+const BARE_COUNT: Record<string, number> = { 하나: 1, 둘: 2, 셋: 3, 넷: 4, 다섯: 5 };
 
 const ORDER_WORDS: ReadonlyArray<{ readonly order: NonNullable<VisibleFilter["order"]>; readonly words: readonly string[] }> = [
   { order: "NEWEST", words: ["최근", "최신"] },
@@ -203,6 +210,13 @@ export function visibleFilterOf(text: string): VisibleFilter | null {
       rest = rest.replace(LIMIT_RE, " ");
     }
   }
+  if (limit == null) {
+    const bare = BARE_COUNT_RE.exec(rest);
+    if (bare) {
+      limit = BARE_COUNT[bare[1]!]!;
+      rest = rest.replace(BARE_COUNT_RE, " ");
+    }
+  }
 
   // FILTER is a REFINE and only refine wording enters this lane (New-list Scope Integrity, PO QA
   // 2026-08-31): 「그중 최근 2개」 narrows the rows on screen; 「최근 문의 7개 보여줘」 asks the org a
@@ -244,18 +258,27 @@ export function visibleFilterOf(text: string): VisibleFilter | null {
     }
   }
 
-  // Everything the axis tables did not consume. ONE leftover word is the SUBJECT the seller narrowed
-  // by (「그중 현금영수증만」) — the axis the closed topic families cannot hold; it is matched literally
-  // against the rows on screen, so naming something the set does not contain answers 「없습니다」 about
-  // the set rather than guessing. Two or more leftovers mean the sentence says something these tables
-  // cannot read, and the planner decides what it is.
+  // Everything the axis tables did not consume. ONE leftover word MAY be the SUBJECT the seller narrowed
+  // by (「그중 현금영수증만」) — the axis the closed topic families cannot hold.
+  //
+  // <b>But a leftover is not evidence of a subject.</b> "these tables could not read this token" and
+  // "the seller narrowed by this word" are different claims, and this lane used to treat the first as
+  // the second: 「그중 제일 오래된 거 하나만」 left 하나 unconsumed and answered 「하나 관련 문의는
+  // 없습니다」 — a narrowing by a word nobody said, in a lane whose stated failure direction is *no*
+  // narrowing. So the leftover is promoted only when the SENTENCE MARKS it as the thing it narrows by:
+  // the delimitative 만 on the word itself (「그중 현금영수증만」), or a subject marker the one extractor
+  // that owns that question recognises (`subjectTerm.ts`). An unread token narrows nothing.
   for (const filler of FILTER_FILLERS) rest = rest.split(filler).join(" ");
   const leftovers = rest
     .split(/\s+/)
     .map((token) => token.trim())
     .filter((token) => token.length >= 2);
   if (leftovers.length > 1) return null;
-  const term = topic || leftovers.length === 0 ? null : usableTerm(leftovers[0]!);
+  const candidate = topic || leftovers.length === 0 ? null : usableTerm(leftovers[0]!);
+  const lowered = t.toLowerCase();
+  const marked = candidate != null
+    && (lowered.includes(`${candidate}만`) || subjectTermOf(t) === candidate);
+  const term = marked ? candidate : null;
   if (leftovers.length === 1 && !term) return null;
 
   if (!channel && !topic && !term && !status && limit == null && order == null) return null;

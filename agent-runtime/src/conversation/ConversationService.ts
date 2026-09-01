@@ -27,14 +27,16 @@
  */
 import { randomUUID } from "node:crypto";
 import { OperatorAgentRuntime } from "../operator/operatorRuntime";
-import { INTERNAL_TOKEN, SOURCE_LABEL, clarificationKindOf, isSellerSafeLabel } from "../operator/wording/sellerWording";
+import { INTERNAL_TOKEN, SOURCE_LABEL, clarificationKindOf, clarificationSentence, isSellerSafeLabel } from "../operator/wording/sellerWording";
 import type { ConversationRunContext } from "../operator/state/OperatorState";
 import type { OperatorRunResult } from "../operator/operatorRuntime";
 import type { InvestigationPlan } from "../operator/plan/InvestigationPlan";
 import { conversationAxisOf } from "../operator/plan/InvestigationPlan";
+import type { PlanFilters } from "../operator/plan/InvestigationPlan";
 import { effectiveAxisOf } from "../operator/plan/scopeOverride";
 import type { SentenceSubject } from "../operator/plan/scopeOverride";
 import { subjectTermOf } from "./subjectTerm";
+import { isReferenceOnly } from "./reference";
 import { OPERATOR_TOOL } from "../operator/tools/OperatorTools";
 import type { OperatorAnswer } from "../operator/state/OperatorState";
 import type { GoalRequest } from "../goal/parseGoal";
@@ -77,7 +79,7 @@ import { prepareIntentOf, pronounInspectOf, visibleSelectionOf } from "./visible
 import { analyzeIntentOf, TOPIC_LABEL, visibleFilterOf, visiblePriorityOf } from "./taskInterpreter";
 import type { VisibleFilter } from "./taskInterpreter";
 import { rankByUrgency, URGENCY_CRITERION, URGENCY_LIMIT, waitingDaysOf } from "./urgency";
-import { matchesTerm } from "../operator/tools/inquiryWorkload";
+import { listInquiryWorkload, matchesTerm } from "../operator/tools/inquiryWorkload";
 import { adviseOnInquiry } from "./advisory";
 import { matchesTopic } from "../operator/tools/inquiryWorkload";
 import type { VisibleRow } from "./visibleSelection";
@@ -527,7 +529,7 @@ export class ConversationService {
     const { answer, plan } = result;
     // The same override the graph applied (R7) — the headline must not say 「방금 본 N건 중」 about a
     // set the read did not use.
-    const axis = effectiveAxisOf(plan ?? emptyPlan(), view.workingSet, false, sentenceSubjectOf(plan, hints.text ?? ""));
+    const axis = effectiveAxisOf(plan ?? emptyPlan(), view.workingSet, false, sentenceSubjectOf(plan, hints.text ?? ""), hints.text ?? "");
     const budget = {
       toolCalls: answer.budget.toolCalls, llmCalls: answer.budget.llmCalls,
       elapsedMs: answer.budget.elapsedMs, stopReason: answer.budget.stopReason,
@@ -620,7 +622,18 @@ export class ConversationService {
 
     // ── PREPARE: a draft for the targeted inquiry or review, through the product's own draft path.
     if (axis.requestedAction === "PREPARE_INQUIRY_DRAFT") {
-      const targets = await this.resolveTargets(axis.target.selector, axis.target.index, view, hints, bundle, workingSet);
+      let targets = await this.resolveTargets(axis.target.selector, axis.target.index, view, hints, bundle, workingSet, artifacts);
+      // <b>An action needs the object it acts on.</b> A PREPARE plan that dispatched no inquiry read
+      // (live: the planner sent `search_org_knowledge` + `search_answer_memory` for 「재입고 언제 되냐는
+      // 문의 답변 준비해줘」 and nothing that could name a row) leaves nothing to draft for, and the seller
+      // is asked which inquiry they meant — about a sentence that described exactly one. This is not a
+      // second planner choosing a goal: the goal is already PREPARE, and this satisfies its precondition
+      // with ONE bounded org-scoped read narrowed by the subject the sentence itself named. Anything
+      // other than exactly one row still asks.
+      if (targets.length === 0) {
+        const located = await this.locateBySubject(hints.text ?? "", axis.filters.topic ?? null, bundle);
+        if (located) targets = [located];
+      }
       const inquiryTargets = targets.filter((t): t is Extract<ResolvedTarget, { kind: "INQUIRY" }> => t.kind === "INQUIRY");
       if (inquiryTargets.length === 1) selected = inquiryTargets[0]!.inquiry;
       // A list the plan read beside the PREPARE is not what the seller asked for: the draft (or the state
@@ -737,7 +750,7 @@ export class ConversationService {
     // that row and shows it (「첫 번째 문의, 뭐라고 답할까」 must not fall through to the org queue).
     if (!selected && axis.requestedAction !== "REQUEST_SEND_APPROVAL"
         && (axis.target.selector === "FIRST" || axis.target.selector === "NTH" || (axis.target.selector === "THIS" && hints.workItemId))) {
-      const picked = (await this.resolveTargets(axis.target.selector, axis.target.index, view, hints, bundle, workingSet))
+      const picked = (await this.resolveTargets(axis.target.selector, axis.target.index, view, hints, bundle, workingSet, artifacts))
         .filter((t): t is Extract<ResolvedTarget, { kind: "INQUIRY" }> => t.kind === "INQUIRY");
       if (picked.length === 1) {
         selected = picked[0]!.inquiry;
@@ -1045,7 +1058,7 @@ export class ConversationService {
   /** Which objects a draft/send sentence points at — an index into what the previous turn showed. */
   private async resolveTargets(
     selector: string, index: number | null, view: ConversationView, hints: StartTurnRequest,
-    bundle: SpringClientBundle, workingSet: WorkingSetView | null,
+    bundle: SpringClientBundle, workingSet: WorkingSetView | null, drawn: readonly Artifact[] = [],
   ): Promise<ResolvedTarget[]> {
     const set = pickSet(workingSet, view);
     // 「이거」 over a prepared draft: the draft's own object, whatever the current set is.
@@ -1069,24 +1082,31 @@ export class ConversationService {
     // work item id — both are looked up in the shown rows by either key, so 「첫 번째 거」 resolves whether
     // or not the row has a work item. Whether a draft can attach is the row's own actionability.
     const ids = set?.kind === "INQUIRIES" ? set.ids : [];
-    const pick = (rowIds: readonly string[]): ResolvedTarget[] =>
+    // <b>An ordinal indexes what the seller was LOOKING AT; a singular target may be what this turn
+    // found.</b> 「첫 번째 거」 said with nothing on screen points at nothing, and resolving it against
+    // rows the same turn drew would answer an ordinal the seller could not have counted. So the ordinal
+    // selectors read the persisted set only, and `drawn` is available to the THIS/NONE branch — where
+    // the question is not "which of these" but "the one this turn is about".
+    const pickShown = (rowIds: readonly string[]): ResolvedTarget[] =>
       rowIds.map((id) => inquiryTargetFromHistory(view, id)).filter((t): t is ResolvedTarget => t != null);
+    const pick = (rowIds: readonly string[]): ResolvedTarget[] =>
+      rowIds.map((id) => inquiryTargetFromHistory(view, id, drawn)).filter((t): t is ResolvedTarget => t != null);
     // The selected inquiry, when the set is anchored on one — 「이 문의」 / 「이 상품 기준으로」 / a bare verb.
     const anchored = set?.kind === "INQUIRIES" && set.selectedInquiry ? pick([set.selectedInquiry.inquiryId]) : [];
     switch (selector) {
       case "FIRST":
-        return pick(ids.slice(0, 1));
+        return pickShown(ids.slice(0, 1));
       case "NTH":
-        return index != null && index >= 1 ? pick(ids.slice(index - 1, index)) : [];
+        return index != null && index >= 1 ? pickShown(ids.slice(index - 1, index)) : [];
       case "ALL":
-        return pick(ids.slice(0, ALL_TARGETS_MAX));
+        return pickShown(ids.slice(0, ALL_TARGETS_MAX));
       case "THIS":
       default: {
         // The inquiry the seller is standing on (the screen's hint), the draft just prepared, the
         // anchored inquiry, or the one inquiry in the set. A hint is verified by the same org-scoped
         // read the runtime uses.
         if (hints.workItemId) {
-          const known = inquiryTargetFromHistory(view, hints.workItemId);
+          const known = inquiryTargetFromHistory(view, hints.workItemId, drawn);
           if (known) return [known];
           try {
             const detail = await bundle.inquiry.getInquiryDetail(hints.workItemId);
@@ -1143,7 +1163,24 @@ export class ConversationService {
       };
     }
     const set = pickSet(null, view);
-    let anchor = set?.kind === "INQUIRIES" ? set.selectedInquiry ?? null : null;
+
+    // ── A reference with no referent (Conversation Contract Correctness v2). 「그거 어떻게 처리하지?」
+    // said with nothing on the table names no object and points at none. Planned anyway it became an
+    // investigation of the org's ORDERS, its REVIEWS and a checklist — three subjects the seller never
+    // mentioned, produced by a twelve-second model call. The tools a run may spend must be justified by
+    // what the sentence names or by what is already on the table; when neither exists, the honest answer
+    // is the question, and it costs no call at all.
+    if (!set && !view.pendingPrepared && isReferenceOnly(text)) {
+      log("conversation_reference_unresolved", { hadSet: false });
+      return {
+        status: "DONE", message: clarificationSentence("GENERAL"), artifacts: [],
+        suggestedActions: [promptChip("답변 안 한 문의만 보여줘"), promptChip("최근 리뷰 보여줘")],
+        workingSet: null, pendingHumanActions: [], pendingPrepared: null,
+        budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "NO_REFERENT" },
+      };
+    }
+
+    let anchor = focusInquiryOf(set);
     // A screen launch that names a DIFFERENT inquiry is about that inquiry, not the thread's anchor —
     // the existing planner path resolves and verifies the hint (Contextual Agent Contract Completion v1).
     if (anchor && hints.workItemId && hints.workItemId !== anchor.workItemId) anchor = null;
@@ -1307,6 +1344,34 @@ export class ConversationService {
         executableIdentity: detail.executableIdentity ?? "NONE",
         sourceSubtype: detail.sourceSubtype ?? null,
       };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The ONE inquiry the sentence's own subject word names, or null — the PREPARE precondition read.
+   *
+   * Bounded and org-scoped: the same work-queue read the plan would have made, narrowed by the term the
+   * closed extractor took from the seller's sentence (`subjectTerm.ts`). Zero or several matches return
+   * null, and the turn asks which one; a read that fails returns null too, so the worst case is the
+   * behaviour before this existed.
+   */
+  private async locateBySubject(
+    text: string, topic: PlanFilters["topic"], bundle: SpringClientBundle,
+  ): Promise<ResolvedTarget | null> {
+    // The sentence's OWN narrowing, in whichever vocabulary carries it: the closed topic family the
+    // planner named, or the subject word the extractor took. Never both — a topic already names the
+    // subject, and narrowing by the same noun twice is one narrowing said twice.
+    const family = topic && topic !== "OTHER" ? topic : null;
+    const term = family ? null : subjectTermOf(text);
+    if (!family && !term) return null;
+    try {
+      const found = await listInquiryWorkload(bundle.inquiry, { term, topic: family, maxDetailReads: FILTER_DETAIL_CAP });
+      if (found.items.length !== 1) return null;
+      const one = found.items[0]!;
+      log("conversation_prepare_located", { by: "SUBJECT_TERM", candidates: found.items.length });
+      return await this.verifiedTarget(one.workItemId, bundle);
     } catch {
       return null;
     }
@@ -1919,6 +1984,30 @@ function pendingActionsOf(view: ConversationView): PendingHumanAction[] {
 }
 
 /**
+ * The inquiry a reference resolves to — the FOCUS of the conversation.
+ *
+ * <b>Selection is one way to have a referent, not the only one.</b> The deterministic lanes bound
+ * 「이 고객」·「답변 준비해줘」 to `selectedInquiry` alone, so a refine that left exactly ONE row on screen
+ * had a referent everybody could see and nobody could name: 「파손 관련 문의 보여줘」 → 「그중 네이버 것만」
+ * → 「이 고객한테 뭐라고 답해야 해?」 fell through to the planner, which read the org's whole queue and
+ * ended the turn WAITING_HUMAN. The planner's own `resolveTargets` had always treated a one-row set as
+ * the target, so the two paths disagreed about what 「이 문의」 means; this is the one answer.
+ *
+ * A set of two or more has no unique referent and returns null — the sentence is then a selection
+ * question, and the lanes that ask it are the ones that run.
+ */
+function focusInquiryOf(set: WorkingSetView | null): SelectedInquiry | null {
+  if (set?.kind !== "INQUIRIES") return null;
+  if (set.selectedInquiry) return set.selectedInquiry;
+  if (set.ids.length !== 1) return null;
+  return {
+    inquiryId: set.ids[0]!, workItemId: set.workItemIds.length === 1 ? set.workItemIds[0]! : null,
+    productId: set.productIds.length === 1 ? set.productIds[0]! : null,
+    channelCode: set.filters.channelCode ?? null,
+  };
+}
+
+/**
  * The set a draft/send sentence indexes into — the one the seller was LOOKING AT when they said it
  * (the conversation's), and only when there is none, the list this turn happened to draw. Found live:
  * a PREPARE plan that also read the org queue made 「첫 번째 거」 the first row of that queue, not of the
@@ -2087,7 +2176,10 @@ function headlineOf(
       // channel is not proven current, never 「0건」 under a stale channel. Which channel and since when is
       // the message's own per-channel sentence and the card's footer — not repeated here.
       const anyStale = previous == null && primary.freshness.some((f) => f.verdict === "UNPROVEN" || f.verdict === "NOT_COLLECTED");
-      return rowsSentence(previous?.count ?? null, rating, periodLabel(token), primary.totalCount, anyStale, token);
+      // A label only when a period was named — the same rule the rows path applies, so the headline and
+      // the finding are one sentence and the dedupe can see they are.
+      return rowsSentence(previous?.count ?? null, rating, token ? periodLabel(token, primary.scope.period?.days) : "",
+        primary.totalCount, anyStale, token);
     }
     case "PRODUCT_LIST": {
       // 「방금 본 리뷰를 …묶었습니다」 is true of exactly one shape: a grouping follow-up over a REVIEWS set.
@@ -2125,7 +2217,7 @@ function headlineOf(
     }
     case "ORDER_SUMMARY": {
       const t = primary.totals;
-      const label = periodLabel(primary.period.token);
+      const label = periodLabel(primary.period.token, primary.period.days);
       const name = primary.channelCode
         ? (primary.channels[0]?.channelNameKo ?? primary.channelCode) + " " : "";
       const head = `${label} ${name}매출은 ${won(t.sales)}(주문 ${t.orders}건)`;
@@ -2162,14 +2254,25 @@ function dedupe(values: readonly string[]): string[] {
 const NEAR_KEYS: ReadonlyArray<RegExp> = [/에 해당하는 상품을 찾지 못/, /저장된 과거 답변/, /등록된 회사 정보/];
 export function dedupeNear(sentences: readonly string[]): string[] {
   const out: string[] = [];
+  const seen = new Set<string>();
   const seenKey = new Set<number>();
-  for (const s of new Set(sentences)) {
-    const key = NEAR_KEYS.findIndex((re) => re.test(s));
-    if (key >= 0) {
-      if (seenKey.has(key)) continue;
-      seenKey.add(key);
+  for (const entry of sentences) {
+    // <b>Deduped sentence by sentence, not entry by entry.</b> A headline and a note can carry the same
+    // fact in differently-sized strings — 「어떤 상품을 묻는지 확인하지 못했습니다. 상품명이나 SKU를 함께
+    // 알려주세요.」 arrived once as one entry and once as two, and whole-string equality saw no repeat, so
+    // the seller read the same two sentences twice with an unrelated line wedged between them.
+    const kept: string[] = [];
+    for (const one of entry.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter((x) => x.length > 0)) {
+      if (seen.has(one)) continue;
+      const key = NEAR_KEYS.findIndex((re) => re.test(one));
+      if (key >= 0) {
+        if (seenKey.has(key)) continue;
+        seenKey.add(key);
+      }
+      seen.add(one);
+      kept.push(one);
     }
-    out.push(s);
+    if (kept.length > 0) out.push(kept.join(" "));
   }
   return out;
 }
@@ -2258,22 +2361,38 @@ function workingSetOf(
   }
 }
 
-/** An inquiry the conversation has shown, from the persisted INQUIRY_LIST rows — by inquiry id OR work item id. */
-function inquiryFromHistory(view: ConversationView, id: string): InquiryItem | null {
-  for (let i = view.turns.length - 1; i >= 0; i -= 1) {
-    for (const artifact of view.turns[i]!.artifacts) {
+/**
+ * An inquiry the conversation has shown, by inquiry id OR work item id.
+ *
+ * <b>`drawn` is the rows THIS turn produced, and it is searched first.</b> The persisted history is the
+ * previous turns only — the current turn's artifacts are not saved until it ends — so a turn that both
+ * FOUND a row and was asked to act on it could not see its own result: 「케이블 커버에 전선 몇 가닥
+ * 들어가는지 물어본 문의 답변 준비해줘」 read the queue, drew exactly one row, and then answered
+ * 「어떤 문의의 답변을 준비할지 알려주세요」 with that row printed underneath. The target step must be
+ * able to see the objects the same turn put on the table.
+ */
+function inquiryFromHistory(view: ConversationView, id: string, drawn: readonly Artifact[] = []): InquiryItem | null {
+  const scan = (artifacts: readonly Artifact[]): InquiryItem | null => {
+    for (const artifact of artifacts) {
       if (artifact.type !== "INQUIRY_LIST") continue;
       for (const group of artifact.groups) {
         const item = group.items.find((it) => it.inquiryId === id || it.workItemId === id);
         if (item) return item;
       }
     }
+    return null;
+  };
+  const fresh = scan(drawn);
+  if (fresh) return fresh;
+  for (let i = view.turns.length - 1; i >= 0; i -= 1) {
+    const found = scan(view.turns[i]!.artifacts);
+    if (found) return found;
   }
   return null;
 }
 
-function inquiryTargetFromHistory(view: ConversationView, id: string): ResolvedTarget | null {
-  const item = inquiryFromHistory(view, id);
+function inquiryTargetFromHistory(view: ConversationView, id: string, drawn: readonly Artifact[] = []): ResolvedTarget | null {
+  const item = inquiryFromHistory(view, id, drawn);
   if (!item) return null;
   const actionability = actionabilityOf({ workItemId: item.workItemId, phase: item.phase, status: item.status });
   return {

@@ -206,7 +206,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     const axis = effectiveAxisOf(plan, state.conversation?.workingSet ?? null, true, {
       topic: plan.filters?.topic && plan.filters.topic !== "OTHER" ? plan.filters.topic : null,
       term: plan.filters?.topic && plan.filters.topic !== "OTHER" ? null : subjectTermOf(state.goalText),
-    });
+    }, state.goalText);
     let knowledge: Record<string, import("../../spring/types").ProductKnowledge> = {};
     let knowledgeCoverage: KnowledgeCoverageRow[] = [];
     const findingsSoFar: Finding[] = [...state.findings];

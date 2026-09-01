@@ -73,7 +73,7 @@ public class AgentOperatorController {
                         p.riskClass(), p.maxIterations(), p.maxToolCalls(), p.stopWhenEnough(),
                         p.clarificationNeeded(), p.clarificationReason(), p.rationale(),
                         p.requestedAction(), p.tone(),
-                        new PlanFiltersView(p.filters().period(), p.filters().rating(), p.filters().channel(),
+                        new PlanFiltersView(p.filters().period(), p.filters().periodDays(), p.filters().rating(), p.filters().channel(),
                                 p.filters().scope(), p.filters().topic(), p.filters().reviewIntent(),
                                 p.filters().inquiryIntent(), p.filters().limit(), p.filters().order(),
                                 p.filters().status()),
@@ -136,11 +136,11 @@ public class AgentOperatorController {
     }
 
     /** Closed filter tokens (v3). Every field nullable; null means "not narrowed". */
-    public record PlanFiltersView(String period, String rating, String channel, String scope, String topic,
-                                  String reviewIntent, String inquiryIntent, Integer limit, String order,
-                                  String status) {
+    public record PlanFiltersView(String period, Integer periodDays, String rating, String channel, String scope,
+                                  String topic, String reviewIntent, String inquiryIntent, Integer limit,
+                                  String order, String status) {
         static PlanFiltersView none() {
-            return new PlanFiltersView(null, null, null, null, null, null, null, null, null, null);
+            return new PlanFiltersView(null, null, null, null, null, null, null, null, null, null, null);
         }
     }
 

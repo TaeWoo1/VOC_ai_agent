@@ -60,6 +60,9 @@ public class RecentReviewService {
     static final int MAX_SIZE = 50;
     /** 「최근」 with no dates named: today and the six days before it. */
     static final int DEFAULT_WINDOW_DAYS = 7;
+
+    /** The lower bound of "everything this org holds" — the same shape {@code InquiryRowsService} uses. */
+    private static final LocalDate BEGINNING = LocalDate.of(1970, 1, 1);
     private static final String DATA_TYPE_REVIEW = "REVIEW";
 
     private final ReviewRepository reviews;
@@ -120,7 +123,13 @@ public class RecentReviewService {
                                         String channel, UUID productId, Integer size, String order) {
         boolean oldest = oldestFirst(order);
         LocalDate toDate = to == null ? LocalDate.now(clock) : to;
-        LocalDate fromDate = from == null ? toDate.minusDays(DEFAULT_WINDOW_DAYS - 1L) : from;
+        // <b>An absent lower bound is NO lower bound</b> (Conversation Contract Correctness v2). This
+        // read used to substitute a seven-day window, so 「별점 낮은 리뷰 보여줘」 — a question with no
+        // period in it — was answered about a week: three of the eight low-rated reviews the seller
+        // held. The caller had already stopped inventing a window for exactly that reason, and the
+        // invention simply moved down a layer. {@code GET /api/inquiries/rows} has always read an
+        // absent {@code from} as unbounded; one axis cannot mean two things in two READs.
+        LocalDate fromDate = from == null ? BEGINNING : from;
         if (fromDate.isAfter(toDate)) {
             throw ApiException.badRequest("조회 기간의 시작일이 종료일보다 늦습니다.");
         }

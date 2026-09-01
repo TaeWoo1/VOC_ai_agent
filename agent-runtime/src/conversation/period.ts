@@ -25,10 +25,19 @@ function isoWeekday(iso: string): number {
   return d === 0 ? 7 : d;
 }
 
+/** The largest trailing window `LAST_N_DAYS` may name. Beyond it the number is not a window a seller meant. */
+export const MAX_PERIOD_DAYS = 365;
+
 /** The window a token names, ending on (or before) `today`. */
-export function windowOf(token: PeriodToken, today: string): DateWindow {
+export function windowOf(token: PeriodToken, today: string, days?: number | null): DateWindow {
   const t = dayMs(today);
   switch (token) {
+    case "LAST_N_DAYS": {
+      // The count is the seller's own and is clamped, never invented: a token that arrives without one
+      // cannot name a window, so it falls back to the nearest declared window rather than guessing.
+      const n = Math.max(1, Math.min(Math.trunc(days ?? 7), MAX_PERIOD_DAYS));
+      return { from: toIso(t - (n - 1) * DAY_MS), to: today, token, days: n };
+    }
     case "TODAY":
       return { from: today, to: today, token };
     case "YESTERDAY": {
@@ -53,7 +62,8 @@ export function windowOf(token: PeriodToken, today: string): DateWindow {
 }
 
 /** The trailing-day count a token maps onto for the overview read (7 | 14 | 30). */
-export function overviewDaysOf(token: PeriodToken | null): 7 | 14 | 30 {
+export function overviewDaysOf(token: PeriodToken | null, days?: number | null): 7 | 14 | 30 {
+  if (token === "LAST_N_DAYS" && days != null) return days <= 7 ? 7 : days <= 14 ? 14 : 30;
   switch (token) {
     case "LAST_14_DAYS":
     case "THIS_WEEK":
@@ -72,8 +82,9 @@ export function daysBetween(from: string, to: string): number {
   return Number.isNaN(ms) ? 0 : Math.round(ms / DAY_MS);
 }
 
-/** The seller's word for a token. */
-export function periodLabel(token: PeriodToken | null): string {
+/** The seller's word for a token. `LAST_N_DAYS` says the number they named. */
+export function periodLabel(token: PeriodToken | null, days?: number | null): string {
+  if (token === "LAST_N_DAYS") return days != null ? `최근 ${days}일` : "최근";
   switch (token) {
     case "TODAY": return "오늘";
     case "YESTERDAY": return "어제";

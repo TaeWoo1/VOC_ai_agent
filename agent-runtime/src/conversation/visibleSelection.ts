@@ -22,6 +22,7 @@
  */
 import { TOPIC_WORDS } from "../operator/tools/inquiryWorkload";
 import type { WorkloadTopic } from "../operator/tools/inquiryWorkload";
+import { namesContent } from "./reference";
 
 export interface VisibleRow {
   readonly id: string;
@@ -57,7 +58,16 @@ const EXCLUDE_CUES: readonly string[] = [
 /** The viewing verb a selection sentence may end with. Optional — a bare noun phrase also selects. */
 export const SELECT_TAIL = /(봐\s?줘요?|봐\s?주세요|보여\s?줘요?|보여\s?주세요|볼래요?|볼게요?|보자|열어\s?줘요?|열어\s?봐|자세히(\s?(봐줘|보여줘|볼래))?|확인해\s?줘요?|확인해\s?볼래|확인해\s?주세요)\s*[.!]?$/u;
 
-/** The object noun the phrase may carry (dropped from matching): 문의 · 건 · 거 · 것. */
+/**
+ * The object noun the phrase may carry (dropped from matching): 문의 · 건 · 거 · 것 — and, since
+ * Conversation Contract Correctness v2, every other word class that POINTS instead of naming.
+ *
+ * <b>Why this became a shared table.</b> 「배송이 너무 늦습니다 이거 보여줘」 quotes a row's own subject
+ * line and points at it. 이거 was not in the private list here, so it became a literal every row had to
+ * contain; no row did, the lane declined, and the planner answered by re-printing the whole list. The
+ * seller named exactly one row and got fifteen. A demonstrative refers to what is already on the table;
+ * it can never be a constraint on it — `conversation/reference.ts` owns that judgement for every lane.
+ */
 const OBJECT_NOUNS = new Set(["문의", "문의건", "거", "것", "건", "내용"]);
 
 /** Trailing single-syllable particles stripped from a token when what remains is still a word. */
@@ -120,7 +130,7 @@ export function visibleSelectionOf(text: string, rows: readonly VisibleRow[]): V
     .map((token) => stripParticle(token.trim()))
     .filter((token) => token.length >= 2)
     .map((token) => token.toLowerCase())
-    .filter((token) => !OBJECT_NOUNS.has(token))
+    .filter((token) => !OBJECT_NOUNS.has(token) && namesContent(token))
     .filter((token) => !consumed.has(token) && ![...consumed].some((w) => token.includes(w)));
 
   // Nothing named at all (「문의 봐줘」) is not a selection over the set — the planner decides what it is.

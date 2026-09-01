@@ -22,6 +22,7 @@
  */
 import { TOPIC_WORDS } from "../operator/tools/inquiryWorkload";
 import type { WorkloadTopic } from "../operator/tools/inquiryWorkload";
+import { namesContent, stripParticles } from "./reference";
 
 /** The longest word this accepts as a subject. A phrase is not a subject; it is declined, not cut. */
 export const SUBJECT_TERM_MAX = 12;
@@ -45,14 +46,6 @@ const NOT_A_SUBJECT: ReadonlySet<string> = new Set([
   "리뷰", "주문", "상품", "채널", "문의", "내용", "목록", "정리", "확인",
 ]);
 
-/**
- * A token ending in one of these reads as a verb form describing the rows, not as their subject —
- * 「들어온 문의」·「밀린 문의」·「처리할 문의」 all mark a word as the subject grammatically, and none of
- * them names one. The list is closed and the failure direction is safe: a real noun caught here simply
- * loses its narrowing, which is the behaviour before this axis existed.
- */
-const VERB_TAILS = ["온", "운", "된", "한", "인", "린", "난", "든", "길", "줄", "할", "을", "른", "쁜", "픈"];
-
 /** Every word the closed topic families already own — those keep their axis (`filters.topic`). */
 const TOPIC_OWNED: ReadonlySet<string> = new Set(
   (Object.keys(TOPIC_WORDS) as WorkloadTopic[]).flatMap((t) => TOPIC_WORDS[t].map((w) => w.toLowerCase())),
@@ -62,18 +55,58 @@ const TOPIC_OWNED: ReadonlySet<string> = new Set(
 const PARTICLES = ["은", "는", "이", "가", "을", "를", "의", "에", "도", "만", "과", "와", "로"];
 
 /**
- * The subject marker patterns. Each one requires the sentence itself to say that the captured word is
+ * The subject marker patterns. Each one requires the sentence itself to say that the captured span is
  * what the question is ABOUT; a bare leftover word is never promoted to a filter here.
+ *
+ * <b>The capture is a SPAN, not one token.</b> 「재입고 언제 되냐는 문의」 marks a subject grammatically,
+ * and the token beside the marker is the relative clause's verb (되냐는) — read as the subject it became
+ * `q=되냐`, which matched nothing and answered 「그런 문의는 없습니다」 about an inquiry that exists. The
+ * modifier can be several tokens long, so the whole noun phrase is captured and {@link scanForSubject}
+ * walks it.
  */
 const SUBJECT_PATTERNS: readonly RegExp[] = [
-  /([^\s]{2,12})\s*에\s*(?:대한|관한|대해서?|관해서?)/gu,
-  /([^\s]{2,12})\s*(?:관련|관한|얘기|이야기)/gu,
-  /([^\s]{2,12})\s*(?:문의|질문|건들|건에|건은|건만)/gu,
+  /((?:[^\s]+\s+){0,3}[^\s]{2,12})\s*에\s*(?:대한|관한|대해서?|관해서?)/gu,
+  /((?:[^\s]+\s+){0,3}[^\s]{2,12})\s*(?:관련|관한|얘기|이야기)/gu,
+  /((?:[^\s]+\s+){0,3}[^\s]{2,12})\s*(?:문의|질문|건들|건에|건은|건만)/gu,
 ];
+
+/** Object nouns that END a noun phrase: a scan that reaches one has left the phrase it started in. */
+const PHRASE_BOUNDARY: ReadonlySet<string> = new Set([
+  "문의", "질문", "리뷰", "상품", "주문", "고객", "채널", "건", "것", "거",
+]);
+
+/**
+ * The subject inside a marked noun phrase — the NEAREST content word to the head noun.
+ *
+ * <b>Nearest, because Korean puts the head last.</b> 「무선 청소기 관련 문의」 is about 청소기, not 무선;
+ * 「케이블 커버에 전선 몇 가닥 들어가는지 물어본 문의」 is about 가닥, and everything between it and the
+ * marker is the clause's predicate. So the walk goes right to left and takes the first token the shared
+ * grammar accepts as content (`reference.ts`) — a verb form, an interrogative, a quantity or a word with
+ * its own axis is stepped over, and a noun that closes a previous phrase stops the walk rather than
+ * letting it reach into another clause. Nothing found ⇒ null, which is no narrowing.
+ */
+function scanForSubject(span: string): string | null {
+  const tokens = span.trim().split(/\s+/).filter((t) => t.length > 0);
+  for (let i = tokens.length - 1; i >= 0; i -= 1) {
+    const raw = tokens[i]!.toLowerCase();
+    // The boundary test comes first and runs on the token with its particles removed: 「문의에서도」 is
+    // the end of a previous noun phrase, and a scan that reads it as a noun has left the phrase the
+    // marker opened — which is how 「문의에서도 비슷한 얘기 있어?」 acquired the subject 「문의에서」.
+    if (PHRASE_BOUNDARY.has(stripParticles(raw))) return null;
+    const term = usableTerm(raw);
+    if (term) return term;
+  }
+  return null;
+}
 
 /** Is this word usable as a subject on its own? */
 export function usableTerm(raw: string): string | null {
   let token = raw.trim().toLowerCase();
+  // Reference · quantity · measure · interrogative · verb form — the classes that point, count or ask
+  // instead of naming (`reference.ts`). One shared table, so 「하나」 cannot be a subject in one lane and
+  // not another. Tested TWICE, and the first time matters: 는 is both a topic particle and the present
+  // adnominal ending, so stripping it first would turn 되냐는 into the "noun" 되냐.
+  if (!namesContent(token)) return null;
   for (const p of PARTICLES) {
     if (token.length >= SUBJECT_TERM_MIN + 1 && token.endsWith(p)) {
       token = token.slice(0, -1);
@@ -86,7 +119,8 @@ export function usableTerm(raw: string): string | null {
   // A word the topic families own keeps its own axis — two narrowings for one noun would be one
   // narrowing said twice, and the topic label is the one the seller reads back.
   if (TOPIC_OWNED.has(token) || [...TOPIC_OWNED].some((w) => token.includes(w))) return null;
-  if (VERB_TAILS.some((tail) => token.endsWith(tail))) return null;
+  // …and again on what remains, so a reference word wearing a particle (「이거를」) is caught too.
+  if (!namesContent(token)) return null;
   return token;
 }
 
@@ -101,7 +135,7 @@ export function subjectTermOf(text: string | null | undefined): string | null {
     // Every occurrence, not the first: 「최근 문의 중 현금영수증 문의」 marks two words as subjects and
     // only the second is one — reading the first and giving up would drop the sentence's real subject.
     for (const match of t.matchAll(pattern)) {
-      const term = usableTerm(match[1]!);
+      const term = scanForSubject(match[1]!);
       if (term) return term;
     }
   }

@@ -228,6 +228,42 @@ class InquiryRowsServiceTest {
     }
 
     @Test
+    @DisplayName("q: a subject that names the BOUND PRODUCT matches, even when no customer typed the name")
+    void subjectMatchesBoundProduct() {
+        // Conversation Contract Correctness v2. The same axis had two implementations that disagreed:
+        // the visible-set FILTER lane matched the seller's word against the row's subject line, its
+        // snippet AND its product name; this read matched only the two text columns. So 「실리콘 몰딩
+        // 관련 문의 있어?」 answered 「몰딩 관련 문의는 없습니다」 to a seller holding inquiries about that
+        // exact product — none of whose customers happened to type its name.
+        com.sellerops.product.Product product = new com.sellerops.product.Product();
+        product.setOrgId(org);
+        product.setName("실리콘 몰딩 2호");
+        product.setSku("MOLD-2");
+        product.setStatus("ACTIVE");
+        UUID productId = products.save(product).getId();
+
+        UUID bound = inquiry(cafe24, "UNANSWERED", "2026-08-14", DataOrigin.REAL);
+        inquiries.findById(bound).ifPresent(q -> {
+            q.setTitle("사이즈 교환 가능한가요");
+            q.setBody("2호 주문했는데 3호로 바꾸고 싶습니다.");
+            q.setProductId(productId);
+            inquiries.save(q);
+        });
+        inquiry(naver, "UNANSWERED", "2026-08-15", DataOrigin.REAL);
+
+        InquiryRowsResponse hit = service.rows(org, null, null, null, null, "NEWEST", null, "몰딩");
+        assertThat(hit.items()).extracting(InquiryRowItem::inquiryId).containsExactly(bound);
+        assertThat(hit.totalCount()).isEqualTo(1);
+        // Still org-scoped: another org's product with the same name narrows nothing here.
+        com.sellerops.product.Product other = new com.sellerops.product.Product();
+        other.setOrgId(UUID.randomUUID());
+        other.setName("몰딩 전용");
+        other.setStatus("ACTIVE");
+        products.save(other);
+        assertThat(service.rows(org, null, null, null, null, "NEWEST", null, "몰딩").totalCount()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("snippet: every row carries the masked opening of the customer's message, work item or not")
     void rowSnippet() {
         UUID answered = inquiry(cafe24, "ANSWERED", "2026-08-11", DataOrigin.REAL);

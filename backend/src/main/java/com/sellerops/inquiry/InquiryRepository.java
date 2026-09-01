@@ -267,11 +267,22 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
      * inquiry — a different question, answered confidently. The match is a case-insensitive LIKE over
      * the subject line and the body the customer wrote; the caller supplies the wildcards, so this is
      * one predicate with one parameter and never a sentence turned into SQL.
+     *
+     * <p><b>The subject also matches the BOUND PRODUCT's name</b> (Conversation Contract Correctness
+     * v2). The same axis had two implementations that disagreed: the visible-set FILTER lane matched
+     * the seller's word against the row's subject line, its snippet AND its product name, while this
+     * read matched only the two text columns. So 「실리콘 몰딩 관련 문의 있어?」 answered 「몰딩 관련
+     * 문의는 없습니다」 to a seller holding four inquiries about that exact product — none of whose
+     * customers happened to type the product's name. A product an inquiry is bound to is what that
+     * inquiry is about; one axis, one set of fields, and the subquery is org-scoped like every other
+     * predicate here.
      */
     @Query("select q from Inquiry q where q.orgId = :orgId"
             + " and (:channelId is null or q.channelId = :channelId)"
             + " and (:status is null or q.status = :status)"
-            + " and (:term is null or lower(q.title) like :term or lower(q.body) like :term)"
+            + " and (:term is null or lower(q.title) like :term or lower(q.body) like :term"
+            + " or exists (select 1 from Product p where p.id = q.productId and p.orgId = q.orgId"
+            + " and lower(p.name) like :term))"
             + " and q.receivedAt >= :from and q.receivedAt < :toExclusive"
             + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE)
     List<Inquiry> findRowsInWindow(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
@@ -283,7 +294,9 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
     @Query("select count(q) from Inquiry q where q.orgId = :orgId"
             + " and (:channelId is null or q.channelId = :channelId)"
             + " and (:status is null or q.status = :status)"
-            + " and (:term is null or lower(q.title) like :term or lower(q.body) like :term)"
+            + " and (:term is null or lower(q.title) like :term or lower(q.body) like :term"
+            + " or exists (select 1 from Product p where p.id = q.productId and p.orgId = q.orgId"
+            + " and lower(p.name) like :term))"
             + " and q.receivedAt >= :from and q.receivedAt < :toExclusive"
             + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE)
     long countRowsInWindow(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
