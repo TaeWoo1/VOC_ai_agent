@@ -55,6 +55,15 @@ export interface DisplayTurn extends TurnView {
   local?: boolean;
 }
 
+/**
+ * What a click selects. Three object kinds, one anchor: the runtime keeps at most one, and which one
+ * is decided by which id arrives (Frontend-first Agent Workspace Redesign v1).
+ */
+export type SelectTarget =
+  | { inquiryId: string; workItemId?: string | null }
+  | { productId: string }
+  | { reviewId: string };
+
 export interface ConversationState {
   readonly conversationId: string | null;
   readonly turns: DisplayTurn[];
@@ -78,8 +87,11 @@ export interface ConversationState {
    * and the runtime writes (through the seller's own knowledge seam) only on a matching SAVE.
    */
   decideCapture(captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL"): Promise<void>;
-  /** §3/§9: a click on a shown inquiry row — the same focus transition as naming it. Never blocks the composer. */
-  selectEntity(target: { inquiryId: string; workItemId?: string | null }): Promise<void>;
+  /**
+   * A click on a shown OBJECT — inquiry, product or review — the same focus transition as naming it.
+   * Never blocks the composer. Exactly one of the three ids is given.
+   */
+  selectEntity(target: SelectTarget): Promise<void>;
   /** Working Context v1 §1: leave the anchored object. The same contract backwards; the set stays. */
   clearSelection(): Promise<void>;
   /**
@@ -412,14 +424,15 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
    * thread, appended to the transcript as nothing). The row's own highlight is the feedback; the next
    * sentence (「이 고객한테 뭐라고 답하면 좋을까?」) acts on exactly this inquiry.
    */
-  const selectEntity = useCallback(async (target: { inquiryId: string; workItemId?: string | null }) => {
+  const selectEntity = useCallback(async (target: SelectTarget) => {
     try {
       const id = await ensureId();
-      const turn = await conversationClient.sendTurn(
-        id,
-        { select: { kind: "INQUIRY", inquiryId: target.inquiryId, workItemId: target.workItemId ?? null } },
-        () => undefined,
-      );
+      const select = "inquiryId" in target
+        ? { kind: "INQUIRY" as const, inquiryId: target.inquiryId, workItemId: target.workItemId ?? null }
+        : "productId" in target
+          ? { kind: "PRODUCT" as const, productId: target.productId }
+          : { kind: "REVIEW" as const, reviewId: target.reviewId };
+      const turn = await conversationClient.sendTurn(id, { select }, () => undefined);
       if (turn.continuation.workingSet) setWorkingSet(turn.continuation.workingSet);
       setActiveTask(turn.continuation.activeTask ?? null);
       analytics.track("conversation_object_selected");

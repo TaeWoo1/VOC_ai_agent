@@ -26,6 +26,7 @@ export function Composer({
   footer,
   compact = false,
   inputId = "conversation-input",
+  attachedTop = false,
 }: {
   onSend: (text: string) => void;
   /** Present when the turn in flight can be stopped; absent ⇒ no Stop control is drawn. */
@@ -40,6 +41,12 @@ export function Composer({
   footer?: ReactNode;
   compact?: boolean;
   inputId?: string;
+  /**
+   * The context bar is sitting directly on top of the box, and the two are ONE thing: the object the
+   * next sentence is about, and the place that sentence is typed. Two separately-rounded outlines with
+   * a gap between them said they were two (Frontend-first Agent Workspace Redesign v1).
+   */
+  attachedTop?: boolean;
 }) {
   const [text, setText] = useState(initialText);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -82,7 +89,7 @@ export function Composer({
       className="space-y-2"
     >
       <div
-        className={`flex items-end gap-2 rounded-2xl border border-line bg-surface shadow-sm transition focus-within:border-brand-700 focus-within:shadow-md ${compact ? "px-3 py-2" : "px-4 py-2.5"} ${disabled ? "opacity-60" : ""}`}
+        className={`flex items-end gap-2 border border-line bg-surface shadow-sm transition focus-within:border-brand-700 focus-within:shadow-md ${attachedTop ? "rounded-b-2xl rounded-t-none border-t-0" : "rounded-2xl"} ${compact ? "px-3 py-2" : "px-4 py-2.5"} ${disabled ? "opacity-60" : ""}`}
         data-state={canStop ? "running" : disabled ? "disabled" : "idle"}
       >
         <label htmlFor={inputId} className="sr-only">

@@ -57,7 +57,10 @@ export function ConversationTimeline({
   // means only turns that ARRIVE animate. Layout is animated so a turn that appears or a progress row that
   // leaves moves its neighbours instead of teleporting them.
   return (
-    <div className={compact ? "space-y-4" : "space-y-5"} aria-label="대화" role="log">
+    // The rhythm is the reading order (Frontend-first Agent Workspace Redesign v1): turns are separated
+    // by more space than anything INSIDE a turn, so a seller's eye finds the next answer before it finds
+    // the next card. 24px between turns, 12px between a sentence and the objects it is about.
+    <div className={compact ? "space-y-5" : "space-y-6"} aria-label="대화" role="log">
       <AnimatePresence initial={false}>
         {turns.map((turn) => (
           <motion.div key={turn.turnId} layout="position" variants={MESSAGE} initial="hidden" animate="shown" transition={LAYOUT}>
@@ -130,11 +133,14 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecisio
   const headline = turn.message || turn.failureReason || "요청을 처리하지 못했습니다.";
   const detail = failed && !stopped && turn.failureReason && turn.failureReason !== turn.message ? turn.failureReason : null;
   return (
-    <article className="group space-y-2.5" aria-label="AI 담당자" data-testid="agent-turn" data-status={turn.status}>
+    <article className="group space-y-3" aria-label="AI 담당자" data-testid="agent-turn" data-status={turn.status}>
       <div className="flex items-start gap-2">
         <span aria-hidden="true" className={`mt-1 ${stopped ? "text-muted" : "text-brand-700"}`}>✳︎</span>
         <div className="min-w-0 flex-1">
-          <p className={`whitespace-pre-wrap break-keep leading-relaxed ${stopped ? "text-muted" : "text-ink"} ${compact ? "text-base" : "text-[17px]"}`}>
+          {/* The answer is prose at reading size, and it is NOT the largest thing in its own turn —
+              what the seller acts on (the customer's sentence, the draft) is. An announcement set in a
+              bigger type than the thing announced is the shape this package came to fix. */}
+          <p className={`whitespace-pre-wrap break-keep text-base ${compact ? "leading-relaxed" : "leading-[1.7]"} ${stopped ? "text-muted" : "text-ink"}`}>
             {headline}
           </p>
           {detail ? <p className="mt-1 break-keep text-sm text-muted">{detail}</p> : null}
@@ -142,7 +148,7 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecisio
         {!stopped && turn.message ? <CopyButton text={turn.message} /> : null}
       </div>
       {shown.length > 0 ? (
-        <div className={`space-y-2.5 ${compact ? "" : "pl-6"}`}>
+        <div className={`space-y-3 ${compact ? "" : "pl-6"}`}>
           {/* Artifacts animate their own layout: a card that grows (a guided run engaged, a disclosure
               opened) or is replaced glides; the ones around it follow. */}
           <AnimatePresence initial={false}>

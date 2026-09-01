@@ -650,12 +650,35 @@ export interface WorkingSetView {
    * it silently (Conversation Object Integrity v1). Keyed by inquiry id; the work item is secondary.
    */
   readonly selectedInquiry?: SelectedInquiry | null;
+  /**
+   * The ONE product or review the seller selected — the same anchor, for the other two objects a
+   * conversation can stand on (Frontend-first Agent Workspace Redesign v1).
+   *
+   * <b>One anchor at a time.</b> A conversation cannot be standing on an inquiry AND a product: setting
+   * this clears {@link selectedInquiry} and setting that clears this. The invariant is here rather than
+   * in a caller because everything downstream — the context bar, 「이 상품」, 「이 리뷰」 — reads it as
+   * "the object", and two of them would make that word ambiguous exactly where it must not be.
+   *
+   * <b>Ids only, like the inquiry anchor.</b> The seller-visible name is resolved from the artifact the
+   * thread already drew, so a stored conversation never accumulates a second copy of a product label or
+   * a customer's review sentence.
+   */
+  readonly selectedObject?: SelectedObject | null;
   readonly turnId: string;
 }
 
 export interface SelectedInquiry {
   readonly inquiryId: string;
   readonly workItemId: string | null;
+  readonly productId: string | null;
+  readonly channelCode: string | null;
+}
+
+export interface SelectedObject {
+  readonly kind: "PRODUCT" | "REVIEW";
+  /** The product id or the review id — whichever `kind` says. */
+  readonly id: string;
+  /** The product this object IS, or the one the review is about. Null when the review has no binding. */
   readonly productId: string | null;
   readonly channelCode: string | null;
 }
@@ -923,6 +946,20 @@ export const StartTurnRequestSchema = z
             kind: z.literal("INQUIRY"),
             inquiryId: z.string().min(1).max(200),
             workItemId: z.string().min(1).max(200).nullable().optional(),
+          })
+          .strict(),
+        /**
+         * The same transition for the other two objects a conversation can stand on (Frontend-first
+         * Agent Workspace Redesign v1). A product is verified the way a screen hint is — one org-scoped
+         * READ — and a review by the thread's own record of having drawn it, which is the only proof
+         * available: there is no single-review endpoint, and inventing one to check a click would be a
+         * read the seller did not ask for.
+         */
+        z.object({ kind: z.literal("PRODUCT"), productId: z.string().min(1).max(200) }).strict(),
+        z
+          .object({
+            kind: z.literal("REVIEW"),
+            reviewId: z.string().min(1).max(200),
           })
           .strict(),
         z.object({ kind: z.literal("CLEAR") }).strict(),

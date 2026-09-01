@@ -440,6 +440,8 @@ export interface WorkingSetView {
   workItemIds: string[];
   /** The one inquiry the seller selected — the anchor a follow-up acts on (Conversation Object Integrity v1). */
   selectedInquiry?: { inquiryId: string; workItemId: string | null; productId: string | null; channelCode: string | null } | null;
+  /** The one product or review the seller selected — the same anchor, the other two object kinds. */
+  selectedObject?: { kind: "PRODUCT" | "REVIEW"; id: string; productId: string | null; channelCode: string | null } | null;
   turnId: string;
 }
 
@@ -580,6 +582,9 @@ export interface StartTurnRequest {
    */
   select?:
     | { kind: "INQUIRY"; inquiryId: string; workItemId?: string | null }
+    /** The same transition for the other two objects a conversation can stand on. */
+    | { kind: "PRODUCT"; productId: string }
+    | { kind: "REVIEW"; reviewId: string }
     /** Working Context v1 §1: leave the anchored object. The same focus contract, backwards. */
     | { kind: "CLEAR" };
 }

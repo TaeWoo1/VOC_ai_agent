@@ -121,6 +121,7 @@ export function ConversationWorkspace({
             onStop={conversation.stop}
             busy={conversation.busy}
             disabled={blocked}
+            attachedTop={context != null}
             placeholder={askedPlaceholder ?? placeholder ?? placeholderFor(registered?.label)}
             initialText={initialText}
             autoFocus={autoFocus}

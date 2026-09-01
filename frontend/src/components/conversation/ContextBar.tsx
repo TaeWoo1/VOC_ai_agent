@@ -25,7 +25,9 @@ export function ContextBar({ context, onClear }: { context: CurrentContext; onCl
       initial="hidden"
       animate="shown"
       transition={LAYOUT}
-      className="mb-2 flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5"
+      // Attached to the box below it: one outline, one thing. The object the next sentence is about and
+      // the place that sentence is typed were two separately-rounded cards with a gap between them.
+      className="flex items-center gap-2 rounded-t-2xl border border-b-0 border-line bg-canvas px-4 py-2"
       data-testid="context-bar"
       aria-label="지금 보고 있는 것"
     >

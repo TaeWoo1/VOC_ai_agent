@@ -198,9 +198,11 @@ describe("home — the Agent operating workspace", () => {
     await screen.findByText(/좋은 아침입니다/);
     await userEvent.type(screen.getByLabelText("무엇이든 물어보세요"), "미답변 문의 보여줘");
     await userEvent.keyboard("{Enter}");
-    // §7: the row itself is a select control; the workspace is the secondary icon action beside it.
+    // ONE control per row (Frontend-first v1): the row IS the control, and the workspace link lives
+    // inside the row it belongs to — opened by that press, not sitting beside every row as a third copy
+    // of the same action.
     expect(await screen.findByRole("button", { name: /배송 언제 되나요/ })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "문의 화면에서 열기" })[0]).toHaveAttribute("href", "/inquiries/i1");
+    expect(screen.queryByRole("link", { name: "문의 화면에서 열기" })).toBeNull();
     expect(screen.getByText("답변이 필요한 문의 22건")).toBeInTheDocument();
     expect(conversationClient.sendTurn).not.toHaveBeenCalled();
   });

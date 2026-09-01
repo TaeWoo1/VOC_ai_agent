@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { BtnLink } from "../../components/ui/Btn";
+import { Dot } from "../../components/ui/ObjectRow";
 import { ConversationWorkspace } from "../../components/conversation/ConversationWorkspace";
 import { HOME_PROMPTS } from "../../components/conversation/surfacePrompts";
 import { useConversation, type DisplayTurn } from "../../lib/conversation/ConversationProvider";
@@ -173,13 +174,20 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
           {briefed ? <span className="font-medium text-ink">{greetingLine(now.getHours(), null)}</span> : null}
           {strip.map((kpi, i) => (
             <span key={kpi.key} className="flex items-center gap-x-2">
-              {briefed || i > 0 ? <span aria-hidden="true" className="text-line">·</span> : null}
+              {/* A drawn dot, not a glyph: 「·」 in `line` colour is a text node and it measured 1.12:1
+                  — the last two AA violations on this page were both this separator. */}
+              {briefed || i > 0 ? <Dot /> : null}
               <Link to={STRIP_ROUTE[kpi.key] ?? "/overview"} className="hover:text-ink hover:underline">
                 {kpi.label} <span className="font-semibold tabular-nums text-ink">{kpi.value.toLocaleString("ko-KR")}</span>{kpi.unit ?? "건"}
               </Link>
             </span>
           ))}
-          {anyUnproven ? <span className="text-warn">· 일부 채널 최신 수집 확인 필요</span> : null}
+          {/* Collection state is context, not an alarm: it qualifies the numbers beside it and it is
+              read in the same breath as them (secondary disclosure). The warn colour was spending the
+              page's strongest signal on machinery. */}
+          {anyUnproven ? (
+            <span className="flex items-center gap-x-2"><Dot /><span>일부 채널 최신 수집 확인 필요</span></span>
+          ) : null}
           <Link to="/overview" className="font-semibold text-brand-700 hover:underline">자세한 숫자 보기</Link>
         </p>
       ) : overview.error ? (
@@ -341,6 +349,10 @@ export function proactiveTurn(
     type: "INQUIRY_LIST",
     title: "가장 오래 기다린 문의",
     totalCount: unanswered,
+    // The read this brief actually made. It is what the card uses to know the seller (or, here, the
+    // brief's own sentence) already said these are the waiting ones — so the list does not add
+    // 「모두 답변이 필요한 문의입니다」 under a sentence that just said exactly that.
+    scope: { period: null, channelCode: null, status: "UNANSWERED", order: "OLDEST", limit: BRIEF_ROWS, rank: null },
     groups: [
       {
         key: "UNANSWERED",

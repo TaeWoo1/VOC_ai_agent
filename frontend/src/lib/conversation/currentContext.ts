@@ -80,6 +80,43 @@ export function nameSelected(turns: readonly TurnView[], inquiryId: string): Nam
   return null;
 }
 
+/**
+ * The same walk for a PRODUCT or a REVIEW anchor (Frontend-first Agent Workspace Redesign v1).
+ *
+ * <b>A product is named; a review is described.</b> A product's name is the seller's own catalogue
+ * label and it survives a reload inside the persisted artifact, so the bar says it. A review's text is
+ * the CUSTOMER's and is transient by contract — it is stripped before the conversation is stored — so
+ * the bar never promises to quote it: 「선택한 리뷰」 with the closed facts beside it (product, rating,
+ * date) is what stays true on the next page load.
+ */
+export function nameSelectedObject(
+  turns: readonly TurnView[], object: { kind: "PRODUCT" | "REVIEW"; id: string },
+): NamedRow | null {
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    for (const a of turns[i]!.artifacts) {
+      if (object.kind === "PRODUCT" && a.type === "PRODUCT_LIST") {
+        const item = a.items.find((p) => p.productId === object.id);
+        if (item) {
+          return { title: item.productName, channelNameKo: null, productName: null, to: item.to };
+        }
+      }
+      if (object.kind === "REVIEW" && a.type === "REVIEW_LIST") {
+        const item = a.items.find((r) => r.reviewId === object.id);
+        if (item) {
+          return {
+            title: null,
+            channelNameKo: [item.productName, item.rating != null ? `★ ${item.rating}` : null, item.writtenOn]
+              .filter(Boolean).join(" · ") || null,
+            productName: null,
+            to: item.to,
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /** How the set on screen was narrowed, in the seller's own words — the subject word they typed included. */
 function setMeta(set: WorkingSetView): string | null {
   const parts: string[] = [];
@@ -127,6 +164,20 @@ export function currentContext(
       // 「선택한 문의」 is true then; a made-up title would not be.
       label: named?.title?.trim() || "선택한 문의",
       meta: meta || null,
+      task,
+      to: named?.to ?? null,
+      clearable: true,
+    };
+  }
+  // The other two objects a conversation can stand on. Same bar, same 「해제」, same rule about names:
+  // what the thread drew, or the honest generic.
+  const object = workingSet.selectedObject ?? null;
+  if (object) {
+    const named = nameSelectedObject(turns, object);
+    return {
+      kind: "ANCHOR",
+      label: named?.title?.trim() || (object.kind === "PRODUCT" ? "선택한 상품" : "선택한 리뷰"),
+      meta: named?.channelNameKo ?? null,
       task,
       to: named?.to ?? null,
       clearable: true,

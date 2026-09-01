@@ -17,17 +17,23 @@ export function ArtifactCard({ title, note, children, action, testId, headline }
   headline?: string;
 }) {
   const said = Boolean(headline && title && headline.includes(title));
-  const header = !said || action;
+  // ONE header row (Frontend-first Agent Workspace Redesign v1). The note used to be a row of its own
+  // under an otherwise empty header, so a card whose title was already said still opened with a lone
+  // button floating over a blank line and then the meta beneath it — three rows of chrome before the
+  // draft. Title (when it is not a repeat) and note share the left; the action keeps its one place.
+  const head = !said || note || action;
   return (
     <section aria-label={title} data-testid={testId} className="overflow-hidden rounded-xl border border-line bg-surface">
-      {header ? (
-        <header className="flex items-center justify-between gap-3 px-4 pt-2.5">
-          {said ? <span /> : <h3 className="min-w-0 break-keep text-sm font-semibold text-ink">{title}</h3>}
+      {head ? (
+        <header className="flex items-start justify-between gap-3 px-4 pt-2.5">
+          <div className="min-w-0">
+            {said ? null : <h3 className="break-keep text-sm font-semibold text-ink">{title}</h3>}
+            {note ? <p className="break-keep text-sm text-muted">{note}</p> : null}
+          </div>
           {action ? <div className="shrink-0">{action}</div> : null}
         </header>
       ) : null}
-      {note ? <p className="break-keep px-4 pt-0.5 text-sm text-muted">{note}</p> : null}
-      <div className={`pb-1 ${header || note ? "pt-1.5" : "pt-1"}`}>{children}</div>
+      <div className={`pb-1 ${head ? "pt-1.5" : "pt-1"}`}>{children}</div>
     </section>
   );
 }

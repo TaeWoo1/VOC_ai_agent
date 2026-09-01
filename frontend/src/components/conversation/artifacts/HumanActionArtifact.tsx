@@ -127,10 +127,16 @@ export function HumanActionArtifact({
 
   const returnTo = (to: string) => `${to}${to.includes("?") ? "&" : "?"}returnTo=%2F`;
 
+  // An OFFERED refresh is not this answer's primary action (Frontend-first Agent Workspace Redesign
+  // v1). Measured: on a screen whose subject was eight customer complaints, the only solid button was
+  // 「최신 상태로 갱신」 — the loudest control on the page belonged to our collection machinery. It is
+  // still here, still one press, and now it looks like what it is: an offer beside the work. A REQUIRED
+  // step keeps its primary, because then the answer genuinely waits on it.
+  const tone = artifact.optional ? ("outline" as const) : ("solid" as const);
   const primary = canSync ? (
-    <Btn onClick={startSync} disabled={starting}>{starting ? "시작하는 중…" : primaryLabel}</Btn>
+    <Btn variant={tone} onClick={startSync} disabled={starting}>{starting ? "시작하는 중…" : primaryLabel}</Btn>
   ) : guided ? (
-    !engaged ? <Btn onClick={() => setEngaged(true)}>{primaryLabel}</Btn> : null
+    !engaged ? <Btn variant={tone} onClick={() => setEngaged(true)}>{primaryLabel}</Btn> : null
   ) : artifact.to ? (
     // The button says the STEP, not 「직접 진행하기」: a seller reading 「답변 기준이 필요합니다」 needs the
     // control to name the thing they are about to add (the same words the 문의 screen uses).

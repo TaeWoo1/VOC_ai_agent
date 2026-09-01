@@ -51,7 +51,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v12";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v13";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -237,6 +237,11 @@ public final class AgentPlanPrompt {
                판매자가 **왜 어떤 채널에서는 답변/전송/수집이 안 되는지, 되는지**를 물으면("쿠팡 건은 왜 답변 못 해?", \
                "네이버 리뷰는 왜 자동으로 안 가져와?") EXPLAIN_CAPABILITY 입니다 — 조사가 아니라 설명이므로 need 는 \
                비워도 되고, 채널을 말했으면 filters.channel 에 적으세요. \
+               판매자가 **reviewnary(=당신) 자체가 무엇을 할 수 있는지**를 물으면("너는 어떤 일을 도와줄 수 있어?", \
+               "뭘 할 수 있어?", "어떻게 쓰는 거야?") 역시 EXPLAIN_CAPABILITY 이고, 이때는 **informationNeeds 를 \
+               반드시 비우고 filters.channel 도 null 로 두세요** — 판매자의 데이터를 조회할 질문이 아니므로 POLICY \
+               나 PRODUCT 같은 need 를 만들면 회사의 운영 정책이 답으로 나갑니다. 런타임이 등록된 기능과 연결된 \
+               채널로 답합니다. \
                판매자가 **자신이 해야 할 행동의 목록**을 요청하면("내가 해야 할 일 정리해줘", "오늘 뭐 해야 해") \
                LIST_ACTIONS 입니다 — 이때 INQUIRY_VOLUME / REVIEW_SIGNAL / ORDER_HISTORY need 를 함께 세울 수 \
                있습니다. LIST_ACTIONS 는 목록을 만들라는 뜻이지 무엇을 실행하라는 뜻이 아닙니다.

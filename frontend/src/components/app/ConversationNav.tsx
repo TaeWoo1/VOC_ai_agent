@@ -4,7 +4,6 @@ import { COLLAPSE } from "../../lib/motion";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useConversation } from "../../lib/conversation/ConversationProvider";
 import { NavIcon } from "../icons/NavIcon";
-import { relativeTime } from "../../lib/format";
 import type { ConversationSummary } from "../../lib/conversation/types";
 
 const ITEM =
@@ -95,8 +94,11 @@ export function ConversationNav() {
                         }}
                         className={`${ITEM} ${current ? "bg-canvas font-semibold text-brand-700" : "text-muted hover:bg-canvas hover:text-ink"}`}
                       >
+                        {/* The thread's own first sentence, and nothing else. A time column beside every
+                            row made twelve near-identical truncated sentences into a table, and the
+                            list is ordered by recency already — the column restated the order it was
+                            in (Frontend-first Agent Workspace Redesign v1). */}
                         <span className="min-w-0 flex-1 truncate">{h.headline ?? "제목 없는 대화"}</span>
-                        <span className="shrink-0 text-xs tabular-nums text-muted">{relativeTime(h.updatedAt)}</span>
                       </button>
                     </li>
                   );

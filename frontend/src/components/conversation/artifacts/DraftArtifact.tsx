@@ -92,7 +92,11 @@ export function DraftArtifact({ artifact, onPrompt, headline }: { artifact: Draf
           <p className="break-keep rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn" role="status">{machinery}</p>
         ) : null}
         {body ? (
-          <p className="whitespace-pre-wrap break-keep rounded-xl bg-canvas px-3 py-2 text-base leading-relaxed text-ink" data-testid="draft-body">{body}</p>
+          // The draft is what the seller came for, and it was the smallest text in its own card: 16px
+          // regular inside a grey inset, under a 17px announcement of it. It is now the largest thing in
+          // the turn (design contract §1 — 「the customer's sentence, the draft」 are `lg`), and it is no
+          // longer a panel inside a panel: one hairline on the left marks it as quoted text.
+          <p className="whitespace-pre-wrap break-keep border-l-2 border-brand-700/30 pl-3 text-lg leading-relaxed text-ink" data-testid="draft-body">{body}</p>
         ) : noDraft ? (
           <p className="break-keep text-sm text-muted" data-testid="draft-gap">
             {artifact.answerBasisNote ?? "초안을 만들려면 답변 기준이 하나 더 필요합니다."}
@@ -118,9 +122,13 @@ export function DraftArtifact({ artifact, onPrompt, headline }: { artifact: Draf
             <Btn size="sm" onClick={() => onPrompt(SEND_PROMPT)}>보내기 준비</Btn>
           </div>
         ) : null}
-        <p className="text-sm text-muted">
-          <Link to={artifact.to} onClick={onOpen} className="hover:underline">{inquiryDraft ? "문의 화면에서 직접 고치기" : "리뷰 화면에서 직접 고치기"}</Link>
-          <span className="ml-2">아직 아무 곳에도 보내지 않았습니다.</span>
+        {/* Two different facts, and they were running together on one line as one sentence — a link and
+            a guarantee. The guarantee is the one that matters, so it gets the line. */}
+        <p className="text-sm text-muted">아직 아무 곳에도 보내지 않았습니다.</p>
+        <p className="text-sm">
+          <Link to={artifact.to} onClick={onOpen} className="text-muted hover:text-ink hover:underline">
+            {inquiryDraft ? "문의 화면에서 직접 고치기" : "리뷰 화면에서 직접 고치기"}
+          </Link>
         </p>
       </div>
     </ArtifactCard>

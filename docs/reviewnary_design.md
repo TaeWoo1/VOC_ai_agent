@@ -1,6 +1,6 @@
 # reviewnary Design Contract v3
 
-**Status:** 2026-08-27 · Reviewnary Product UI Redesign v1 + **Contextual Agent Workspace & Interactive UX QA v1** (§8-A, §8-B) · `frontend/` only · **source of truth for new UI**
+**Status:** 2026-09-01 · Reviewnary Product UI Redesign v1 + Contextual Agent Workspace & Interactive UX QA v1 (§8-A, §8-B) + **Frontend-first Agent Workspace Redesign v1** (§8-B′, §8-K) · `frontend/` only · **source of truth for new UI**
 
 v1 of this document was a record of what the code already did. v2 is the other thing: the contract the
 code is built to. Where the code and this document disagree, the code is wrong.
@@ -225,10 +225,43 @@ end when the seller goes there — the same thread continues in the contextual p
 - **Agent turn**: one or two deterministic sentences (a count, a clarification, or the reason it failed) →
   artifacts → suggested follow-ups (chips) → 「확인한 자료」 disclosure (`EVIDENCE`: what was read, how much,
   for which dates, whether any of it could not be judged).
-- **Progress**: only the stages the runtime reached, in order, each with a check and the elapsed clock —
-  「요청을 이해하고 있습니다」「관련 리뷰를 확인하고 있습니다」「확인한 내용을 검토하고 있습니다」. No bar, no
-  animated steps nobody measured.
+- **Progress**: ONE line — the stages the runtime reached as a quiet trail, then what is happening now and
+  the elapsed clock. No bar, no animated steps nobody measured, and no column that grows while the seller
+  waits and then shoves the answer down when it lands.
 - **Failure**: a real state with the runtime's reason. Never an empty success, never a canned object.
+
+### 8-B′. Rhythm, weight and repetition (Frontend-first Agent Workspace Redesign v1)
+
+Five rules. They are what stops a conversation surface from reading as an admin panel with a chat box.
+
+| Rule | Value |
+|---|---|
+| **Turn rhythm** | 24px between turns, 12px inside one. Nothing inside a turn may be spaced like a turn. |
+| **The answer is prose** | `base` 16 / 1.7 on the canvas, no container. A SUMMARY is prose too — a paragraph never earns a card. |
+| **The object outranks the narration** | The largest text in a turn is what the seller acts on — the customer's message when a row is open, the draft body — at `lg`. An announcement set larger than the thing announced is a defect. |
+| **One control per row** | The row is the control. Its workspace link lives inside the row it belongs to, as a text link, once. Never an icon beside every row AND a button in the row AND a footer link. |
+| **One fact, one rendering** | A word every row shares is said once, in the caption — or not at all when the sentence above already said it (`lib/conversation/sharedWord.ts`). A wait replaces a receipt date rather than standing beside it. |
+
+**Objects that get a container:** 문의 · 리뷰 · 상품 · 초안 · 승인 · 사람이 할 단계. Everything else is content.
+
+**System state is secondary disclosure.** Collection freshness, connection state and 「최신 상태로 갱신」 are
+context for the work, never the loudest thing on a screen whose subject is the work: an OFFERED refresh is
+an `outline` control, and only a step the answer genuinely waits on takes a solid primary.
+
+### 8-K. The current object
+
+The conversation can stand on ONE object: **문의 · 상품 · 리뷰**. A press is the same state transition as
+naming it (`select`, verified in the runtime, persisted with the thread, appended to the transcript as
+nothing), and 「해제」 is that transition backwards.
+
+- The **context bar** names it, and it is **attached to the composer** — one outline, because the object
+  the next sentence is about and the place that sentence is typed are one thing.
+- **A product is named; a review is described.** The bar resolves a name from the artifact the thread
+  already drew. A product's name is the seller's own catalogue label and survives a reload; a review's
+  text is the customer's and is transient by contract, so the bar says 「선택한 리뷰」 with the closed facts
+  (product · ★ · date) instead of quoting it.
+- 「이 상품」 resolves to the anchored product without a second lookup; a REVIEW anchor's product travels
+  only when the sentence says 「이 상품」, because it is a fact ABOUT the review and not the review.
 
 ### 8-C. Artifact vocabulary (closed)
 

@@ -37,7 +37,9 @@ import { effectiveAxisOf } from "../operator/plan/scopeOverride";
 import type { SentenceSubject } from "../operator/plan/scopeOverride";
 import { subjectTermOf } from "./subjectTerm";
 import { isReferenceOnly } from "./reference";
-import { OPERATOR_TOOL } from "../operator/tools/OperatorTools";
+import { OPERATOR_TOOL, buildOperatorTools } from "../operator/tools/OperatorTools";
+import { OperatorToolRegistry } from "../operator/tools/OperatorToolRegistry";
+import { assistantCapabilityAnswer } from "../operator/capability/AssistantCapability";
 import type { OperatorAnswer } from "../operator/state/OperatorState";
 import type { GoalRequest } from "../goal/parseGoal";
 import type { SpringClientBundle, SpringClientFactory } from "../http/AgentRunService";
@@ -71,7 +73,7 @@ import type {
   ExecutableIdentity, GuidedExecutionArtifact, HumanActionRequiredArtifact, InquiryDetailArtifact, InquiryItem,
   InquiryListArtifact,
   PendingHumanAction,
-  PendingPreparedAction, ProgressEvent, ProgressStage, ReviewItem, SelectedInquiry, StartTurnRequest, SuggestedAction,
+  PendingPreparedAction, ProgressEvent, ProgressStage, ReviewItem, SelectedInquiry, SelectedObject, StartTurnRequest, SuggestedAction,
   SummaryArtifact, ToneHint, TurnStatus, TurnView, WorkingSetKind, WorkingSetView, WorkspaceLinkArtifact, ObjectKind,
   KnowledgeCaptureArtifact, PendingKnowledgeCapture,
 } from "./contract";
@@ -386,9 +388,21 @@ export class ConversationService {
     // turn, the anchor's product turned 「최근 문의 8개 보여줘」 into a product-scoped read that answered
     // 「이 상품의 근거로는 쓸 수 없습니다」 about a product the sentence never named.
     const saysThisProduct = /이 상품/.test(text);
+    // A product the seller SELECTED is the object the conversation is standing on — the same statement
+    // as a one-product list, made more deliberately, and the context bar shows it with a 「해제」 beside
+    // it. A REVIEW anchor's product is a side fact about that review, so it travels under the same rule
+    // an anchored inquiry's product does: only when the sentence says 「이 상품」.
+    const anchoredObject = set?.selectedObject ?? null;
     const anchoredProduct = !hints.productId
-      ? set?.kind === "PRODUCTS" && set.ids.length === 1 ? set.ids[0]
-        : saysThisProduct && set?.kind === "INQUIRIES" && set.selectedInquiry?.productId ? set.selectedInquiry.productId : undefined
+      ? anchoredObject?.kind === "PRODUCT" ? anchoredObject.productId ?? undefined
+        // A REVIEW anchor's product is a fact ABOUT the review, so it travels only when the sentence
+        // names the PRODUCT. Tried and measured the other way in this package: letting 「이 리뷰」 resolve
+        // to the review's product turned 「이 리뷰는 어떤 상품 문제야?」 into a product-scoped review read
+        // that answered with that product's most recent review — a five-star one. A demonstrative that
+        // names one object must not silently become a scope over another.
+        : saysThisProduct && anchoredObject?.kind === "REVIEW" && anchoredObject.productId ? anchoredObject.productId
+          : set?.kind === "PRODUCTS" && set.ids.length === 1 ? set.ids[0]
+            : saysThisProduct && set?.kind === "INQUIRIES" && set.selectedInquiry?.productId ? set.selectedInquiry.productId : undefined
       : undefined;
     const goal: GoalRequest = {
       text,
@@ -728,7 +742,12 @@ export class ConversationService {
 
     // ── EXPLAIN_CAPABILITY: 「쿠팡 건은 왜 답변 못 해?」 — the capability verdict, said in the seller's words.
     if (axis.requestedAction === "EXPLAIN_CAPABILITY") {
-      const explained = await this.explainCapability(bundle, view, axis.filters.channel ?? workingSet?.filters.channelCode ?? null, workingSet);
+      // A capability question that asked for nothing to be looked up is about the assistant, not about
+      // a channel — the planner's own shape, read here rather than the sentence's words.
+      const aboutAssistant = (plan?.informationNeeds.length ?? 0) === 0;
+      const explained = await this.explainCapability(
+        bundle, view, axis.filters.channel ?? workingSet?.filters.channelCode ?? null, workingSet, aboutAssistant,
+      );
       artifacts.push(explained.artifact);
       headline = headline ?? explained.headline;
       extraChips.push(...explained.chips);
@@ -1361,6 +1380,28 @@ export class ConversationService {
   }
 
   /**
+   * A clicked PRODUCT, verified.
+   *
+   * The thread's own record first — a product this conversation drew came out of an org-scoped read and
+   * needs no second one. Only an id the thread cannot account for costs a read, and it is the same read
+   * a product-screen launch makes (`OperatorAgentRuntime.contextEntities`): another org's id, a deleted
+   * row and a typo all come back as a failure, and a failure changes nothing.
+   */
+  private async verifiedProduct(
+    view: ConversationView, productId: string, bundle: SpringClientBundle,
+  ): Promise<SelectedObject | null> {
+    if (productFromHistory(view, productId)) {
+      return { kind: "PRODUCT", id: productId, productId, channelCode: null };
+    }
+    try {
+      const signals = await bundle.operator.getProductSignals(productId);
+      return { kind: "PRODUCT", id: signals.productId, productId: signals.productId, channelCode: null };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * The ONE inquiry the sentence's own subject word names, or null — the PREPARE precondition read.
    *
    * Bounded and org-scoped: the same work-queue read the plan would have made, narrowed by the term the
@@ -1709,7 +1750,9 @@ export class ConversationService {
     // held open for that inquiry goes with it (the same rule a move to another inquiry applies).
     if (select.kind === "CLEAR") {
       const set = view.workingSet;
-      const cleared = set ? { ...set, selectedInquiry: null } : null;
+      // Both anchors, because there is only ever one: 「해제」 on a product must not leave an inquiry
+      // anchor the bar had stopped naming.
+      const cleared = set ? { ...set, selectedInquiry: null, selectedObject: null } : null;
       const pendingCapture = carriedCapture(view.pendingCapture ?? null, cleared);
       await this.persist(store, view, [], cleared, pendingActionsOf(view), view.pendingPrepared, pendingCapture, null);
       log("conversation_turn", {
@@ -1717,6 +1760,25 @@ export class ConversationService {
         artifactTypes: "", workingSetKind: cleared?.kind ?? "", requestedAction: "CLEAR_SELECT",
       });
       return respond(cleared, null);
+    }
+    // A PRODUCT or a REVIEW anchor — the same transition, verified by what can actually prove it.
+    if (select.kind === "PRODUCT" || select.kind === "REVIEW") {
+      const object = select.kind === "PRODUCT"
+        ? await this.verifiedProduct(view, select.productId, bundle)
+        : verifiedReview(view, select.reviewId);
+      if (!object) {
+        log("conversation_select_unresolved", {});
+        return respond(view.workingSet, view.activeTask ?? null);
+      }
+      const workingSet = anchoredObjectSet(object, view.workingSet);
+      // A capture is held open for an inquiry; standing on another object leaves that inquiry.
+      const pendingCapture = carriedCapture(view.pendingCapture ?? null, workingSet);
+      await this.persist(store, view, [], workingSet, pendingActionsOf(view), view.pendingPrepared, pendingCapture, "INSPECT");
+      log("conversation_turn", {
+        status: "DONE", toolCalls: select.kind === "PRODUCT" ? 1 : 0, llmCalls: 0, ms: Date.now() - started,
+        artifactTypes: "", workingSetKind: workingSet.kind, requestedAction: "CLICK_SELECT",
+      });
+      return respond(workingSet, "INSPECT");
     }
     const resolved = inquiryTargetFromHistory(view, select.inquiryId) ?? await this.verifiedTarget(select.workItemId ?? null, bundle);
     if (!resolved || resolved.kind !== "INQUIRY" || resolved.inquiry.inquiryId !== select.inquiryId) {
@@ -1778,6 +1840,40 @@ export class ConversationService {
     });
   }
 
+  /**
+   * What reviewnary itself can do — the catalogue it is wired to, the channels it is connected to, and
+   * the boundary it works inside (`operator/capability/AssistantCapability.ts`).
+   *
+   * <b>No model, and no list kept by hand.</b> The domains come from the same tool catalogue the runtime
+   * builds for a run — constructing it is also the WRITE fence, since {@link OperatorToolRegistry}
+   * throws on anything that is not READ — and the connected channels come from ONE org-scoped coverage
+   * read, the same one every channel-aware answer makes. A read that fails costs the channel sentence
+   * and nothing else: the rest of the answer is about this runtime and is true without it.
+   */
+  private async assistantCapability(
+    bundle: SpringClientBundle,
+  ): Promise<{ artifact: SummaryArtifact; headline: string; chips: SuggestedAction[] }> {
+    const registry = new OperatorToolRegistry(
+      buildOperatorTools({ operator: bundle.operator, inquiry: bundle.inquiry, issue: bundle.issue }),
+    );
+    let channels: string[] | null = null;
+    try {
+      const rows = (await bundle.operator.getChannelCoverage?.()) ?? null;
+      if (rows) {
+        channels = [...new Map(rows.filter((r) => r.connected).map((r) => [r.channelCode, r.channelNameKo ?? r.channelCode])).values()];
+      }
+    } catch {
+      channels = null;
+    }
+    const answer = assistantCapabilityAnswer(registry.names(), registry.actionClasses(), channels);
+    log("assistant_capability", { domains: answer.chips.length, channels: channels?.length ?? -1 });
+    return {
+      artifact: reasonSummary("a-assistant-capability", "제가 도와드릴 수 있는 일", [...answer.lines]),
+      headline: answer.headline,
+      chips: answer.chips.map((c) => promptChip(c)),
+    };
+  }
+
   /** The execution capability of a review's channel, read for its own API-mode account. Fail closed. */
   /**
    * What reviewnary can and cannot do on one channel for the kind of object the seller is looking at —
@@ -1785,9 +1881,15 @@ export class ConversationService {
    */
   private async explainCapability(
     bundle: SpringClientBundle, view: ConversationView, channel: string | null, workingSet: WorkingSetView | null,
+    aboutAssistant = false,
   ): Promise<{ artifact: SummaryArtifact; headline: string; chips: SuggestedAction[] }> {
     const objectKind: ObjectKind = workingSet?.kind === "INQUIRIES" ? "INQUIRY" : "REVIEW";
     const code = channel?.toUpperCase() ?? null;
+    // 「너는 어떤 일을 도와줄 수 있어?」 — the question is about reviewnary, and it is answerable without
+    // asking anything back. The two are told apart by the PLAN's own structure, never by words: a
+    // capability question that named no channel AND declared nothing to find out is about the
+    // assistant; one that is about a channel either names it or has facts to look up.
+    if (!code && aboutAssistant) return this.assistantCapability(bundle);
     if (!code) {
       const line = "어느 채널에 대한 질문인지 알려주세요 (네이버 · 쿠팡 · 카페24).";
       return { artifact: reasonSummary("a-capability", "채널을 알려주세요", [line]), headline: line, chips: [] };
@@ -2138,6 +2240,13 @@ export function priorLineOf(view: ConversationView): string | null {
   }
   if (set?.kind === "INQUIRIES" && set.selectedInquiry) {
     parts.push("직전 선택: INQUIRY (판매자가 방금 문의 하나를 골랐습니다 — 「이 문의」·「답변 준비해줘」는 그 문의를 가리킵니다)");
+  }
+  // The same fact for the other two objects: WHICH one is never sent (an id is not a plan input), only
+  // that one is standing — so 「이 상품」·「이 리뷰」 is a resolved reference and not a question to ask back.
+  if (set?.selectedObject?.kind === "PRODUCT") {
+    parts.push("직전 선택: PRODUCT (판매자가 방금 상품 하나를 골랐습니다 — 「이 상품」은 그 상품을 가리킵니다)");
+  } else if (set?.selectedObject?.kind === "REVIEW") {
+    parts.push("직전 선택: REVIEW (판매자가 방금 리뷰 하나를 골랐습니다 — 「이 리뷰」는 그 리뷰를 가리킵니다)");
   }
   if (view.pendingPrepared) {
     parts.push(view.pendingPrepared.kind === "REVIEW_DRAFT"
@@ -2511,7 +2620,8 @@ function anchoredSet(row: SelectedInquiry, previous: WorkingSetView | null, prod
     filters: { ...inherited, inquiryIntent: inherited.inquiryIntent ?? "ROWS" },
     productIds: [...new Set(productIds)].slice(0, WORKING_SET_MAX_IDS),
     workItemIds: list ? [...list.workItemIds] : row.workItemId ? [row.workItemId] : [],
-    selectedInquiry, turnId: "",
+    // One anchor at a time: standing on an inquiry leaves whatever product or review was anchored.
+    selectedInquiry, selectedObject: null, turnId: "",
   };
 }
 
@@ -2556,6 +2666,53 @@ function reviewFromHistory(view: ConversationView, reviewId: string): ReviewItem
     }
   }
   return null;
+}
+
+/** A product row the conversation has drawn — the proof that an org-scoped read returned it. */
+function productFromHistory(view: ConversationView, productId: string): { productId: string } | null {
+  for (let i = view.turns.length - 1; i >= 0; i -= 1) {
+    for (const artifact of view.turns[i]!.artifacts) {
+      if (artifact.type !== "PRODUCT_LIST") continue;
+      if (artifact.items.some((p) => p.productId === productId)) return { productId };
+    }
+  }
+  return null;
+}
+
+/**
+ * A clicked REVIEW, verified by the only proof this runtime has.
+ *
+ * There is no single-review endpoint, so the check is the thread's own record: a review row the
+ * conversation drew came back from an org-scoped read of this seller's reviews. An id that appears in
+ * no drawn list is refused rather than trusted — and refusing costs the seller nothing, because a row
+ * they can click is by definition a row on their screen.
+ */
+function verifiedReview(view: ConversationView, reviewId: string): SelectedObject | null {
+  const item = reviewFromHistory(view, reviewId);
+  if (!item) return null;
+  return { kind: "REVIEW", id: item.reviewId, productId: item.productId ?? null, channelCode: item.channelCode ?? null };
+}
+
+/**
+ * The working set anchored on a product or a review — the same shape {@link anchoredSet} builds for an
+ * inquiry: the list the selection was made from stays the set (「그중 …」 still refines the same rows),
+ * the object rides beside it, and the OTHER anchor is dropped because there is only ever one.
+ */
+function anchoredObjectSet(object: SelectedObject, previous: WorkingSetView | null): WorkingSetView {
+  const kind: WorkingSetView["kind"] = object.kind === "PRODUCT" ? "PRODUCTS" : "REVIEWS";
+  const list = previous?.kind === kind && previous.ids.includes(object.id) ? previous : null;
+  return {
+    kind,
+    label: list?.label ?? (object.kind === "PRODUCT" ? "선택한 상품" : "선택한 리뷰"),
+    count: list?.count ?? 1,
+    ids: list ? [...list.ids] : [object.id],
+    filters: list?.filters ?? {},
+    productIds: [...new Set([...(list?.productIds ?? []), ...(object.productId ? [object.productId] : [])])].slice(0, WORKING_SET_MAX_IDS),
+    workItemIds: list ? [...list.workItemIds] : [],
+    selectedInquiry: null,
+    selectedObject: object,
+    turnId: "",
+  };
 }
 
 function reviewTargetFromHistory(view: ConversationView, reviewId: string): ResolvedTarget | null {
