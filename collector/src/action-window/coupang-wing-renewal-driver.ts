@@ -94,11 +94,11 @@ const OVERLAY_STEP: Readonly<Record<CoupangRenewalTarget, number>> = {
 
 /** Operator-legible dev-overlay labels for the headed live run (diagnostic aid only — NOT the product FE copy). */
 const OPERATOR_STEP_LABELS: Readonly<Record<CoupangRenewalTarget, string>> = {
-  reach_open_api: "WING 홈에서 '오픈API 키 발급' 페이지로 직접 이동하세요. (SellerOps가 이동을 관찰합니다.)",
-  check_expiry: "표시된 '유효기간'을 직접 확인한 뒤 SellerOps에서 '다음'을 누르세요. (도구는 만료일만 읽습니다.)",
-  reissue: "표시된 '재발급' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 재발급 후 '다음'을 누르세요.",
+  reach_open_api: "WING 홈에서 '오픈API 키 발급' 페이지로 직접 이동하세요. (reviewnary가 이동을 관찰합니다.)",
+  check_expiry: "표시된 '유효기간'을 직접 확인한 뒤 reviewnary에서 '다음'을 누르세요. (도구는 만료일만 읽습니다.)",
+  reissue: "표시된 '재발급' 버튼을 직접 누르세요. reviewnary는 대신 누르지 않습니다. 재발급 후 '다음'을 누르세요.",
   credentials: "새로 표시된 Access Key / Secret Key / 업체코드를 직접 복사한 뒤 '다음'을 누르세요 (도구는 값을 읽지 않습니다).",
-  return: "SellerOps로 돌아와 '다음'을 누르세요.",
+  return: "reviewnary로 돌아와 '다음'을 누르세요.",
 };
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */

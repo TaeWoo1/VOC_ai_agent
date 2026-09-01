@@ -47,7 +47,7 @@ export const NAVER_ISSUANCE_TUTORIAL: readonly TutorialStep[] = [
   {
     id: "open_center",
     title: "NAVER 커머스 API 센터 열기",
-    hint: "아래 버튼을 누르면 공식 API 센터가 새 탭으로 열립니다. 이 SellerOps 화면은 그대로 남아 있으니, 확인 후 다시 이 탭으로 돌아오세요.",
+    hint: "아래 버튼을 누르면 공식 API 센터가 새 탭으로 열립니다. 이 reviewnary 화면은 그대로 남아 있으니, 확인 후 다시 이 탭으로 돌아오세요.",
     opensCenter: true,
   },
   {
@@ -68,7 +68,7 @@ export const NAVER_ISSUANCE_TUTORIAL: readonly TutorialStep[] = [
   {
     id: "app_usage_check",
     title: "애플리케이션 상태 확인",
-    hint: "방금 만든 애플리케이션이 사용 가능한 상태인지 확인합니다. 화면에 '다시사용' 버튼이 보이면 직접 눌러 활성화하세요. 버튼이 보이지 않더라도 SellerOps가 활성 상태라고 단정하지는 않습니다 — 확인 후 다음으로 진행하세요.",
+    hint: "방금 만든 애플리케이션이 사용 가능한 상태인지 확인합니다. 화면에 '다시사용' 버튼이 보이면 직접 눌러 활성화하세요. 버튼이 보이지 않더라도 reviewnary가 활성 상태라고 단정하지는 않습니다 — 확인 후 다음으로 진행하세요.",
   },
   {
     id: "select_api_group",
@@ -77,18 +77,18 @@ export const NAVER_ISSUANCE_TUTORIAL: readonly TutorialStep[] = [
   },
   {
     id: "register_call_ip",
-    title: "API 호출 IP에 SellerOps 고정 IP 등록",
-    hint: "SellerOps는 고정된 서버 IP에서 NAVER API를 호출합니다. 애플리케이션의 'API 호출 IP' 설정에 아래에 표시된 고정 IP를 그대로 등록하세요. 표시된 IP가 없으면 아직 준비 중이므로 이 단계는 건너뛰고 담당자에게 문의하세요. (등록하지 않으면 첫 주문 수집이 호출 IP 오류로 실패할 수 있습니다.)",
+    title: "API 호출 IP에 reviewnary 고정 IP 등록",
+    hint: "reviewnary는 고정된 서버 IP에서 NAVER API를 호출합니다. 애플리케이션의 'API 호출 IP' 설정에 아래에 표시된 고정 IP를 그대로 등록하세요. 표시된 IP가 없으면 아직 준비 중이므로 이 단계는 건너뛰고 담당자에게 문의하세요. (등록하지 않으면 첫 주문 수집이 호출 IP 오류로 실패할 수 있습니다.)",
   },
   {
     id: "view_credentials",
     title: "애플리케이션 ID와 시크릿 확인",
-    hint: "애플리케이션 상세 화면에서 애플리케이션 ID와 시크릿(클라이언트 시크릿)을 확인합니다. 시크릿은 화면에서 눈으로 확인만 하고, 다음 단계에서 SellerOps 보안 입력란에 직접 입력하세요.",
+    hint: "애플리케이션 상세 화면에서 애플리케이션 ID와 시크릿(클라이언트 시크릿)을 확인합니다. 시크릿은 화면에서 눈으로 확인만 하고, 다음 단계에서 reviewnary 보안 입력란에 직접 입력하세요.",
   },
   {
     id: "return_to_sellerops",
-    title: "SellerOps로 돌아와 입력",
-    hint: "확인한 애플리케이션 ID와 시크릿을 들고 이 탭으로 돌아옵니다. 아래 '발급을 완료했어요'를 누르면 SellerOps 보안 입력 단계로 넘어갑니다.",
+    title: "reviewnary로 돌아와 입력",
+    hint: "확인한 애플리케이션 ID와 시크릿을 들고 이 탭으로 돌아옵니다. 아래 '발급을 완료했어요'를 누르면 reviewnary 보안 입력 단계로 넘어갑니다.",
   },
 ] as const;
 
@@ -112,7 +112,7 @@ export const NAVER_EXISTING_APP_TUTORIAL: readonly TutorialStep[] = [
   {
     id: "app_usage_check",
     title: "애플리케이션 상태 확인",
-    hint: "이 애플리케이션이 사용 가능한 상태인지 먼저 확인합니다. 화면에 '다시사용' 버튼이 보이면 앱이 일시중단된 것이니 직접 눌러 활성화하세요. 버튼이 보이지 않더라도 SellerOps가 활성 상태라고 단정하지는 않습니다 — 확인 후 다음으로 진행하세요.",
+    hint: "이 애플리케이션이 사용 가능한 상태인지 먼저 확인합니다. 화면에 '다시사용' 버튼이 보이면 앱이 일시중단된 것이니 직접 눌러 활성화하세요. 버튼이 보이지 않더라도 reviewnary가 활성 상태라고 단정하지는 않습니다 — 확인 후 다음으로 진행하세요.",
   },
   {
     id: "verify_api_group",
@@ -121,13 +121,13 @@ export const NAVER_EXISTING_APP_TUTORIAL: readonly TutorialStep[] = [
   },
   {
     id: "register_call_ip",
-    title: "API 호출 IP에 SellerOps 고정 IP 등록",
-    hint: "SellerOps는 고정된 서버 IP에서 NAVER API를 호출합니다. 애플리케이션의 'API 호출 IP' 설정에 아래에 표시된 고정 IP가 등록되어 있는지 확인하고, 없으면 그대로 등록하세요. 표시된 IP가 없으면 아직 준비 중이므로 이 단계는 건너뛰고 담당자에게 문의하세요.",
+    title: "API 호출 IP에 reviewnary 고정 IP 등록",
+    hint: "reviewnary는 고정된 서버 IP에서 NAVER API를 호출합니다. 애플리케이션의 'API 호출 IP' 설정에 아래에 표시된 고정 IP가 등록되어 있는지 확인하고, 없으면 그대로 등록하세요. 표시된 IP가 없으면 아직 준비 중이므로 이 단계는 건너뛰고 담당자에게 문의하세요.",
   },
   {
     id: "view_credentials",
     title: "애플리케이션 ID와 시크릿 확인",
-    hint: "애플리케이션 상세에서 애플리케이션 ID와 시크릿을 확인합니다. 시크릿은 눈으로만 확인하고, SellerOps 보안 입력란에 직접 입력하세요. 확인이 어려우면 시크릿 재발급이 필요할 수 있습니다.",
+    hint: "애플리케이션 상세에서 애플리케이션 ID와 시크릿을 확인합니다. 시크릿은 눈으로만 확인하고, reviewnary 보안 입력란에 직접 입력하세요. 확인이 어려우면 시크릿 재발급이 필요할 수 있습니다.",
   },
 ] as const;
 
@@ -168,7 +168,7 @@ export const COUPANG_ISSUANCE_TUTORIAL: readonly TutorialStep[] = [
   {
     id: "open_wing",
     title: "쿠팡 윙 열기",
-    hint: "아래 버튼을 누르면 쿠팡 판매자센터(쿠팡 윙)가 새 탭으로 열립니다. 이 SellerOps 화면은 그대로 남아 있으니, 확인 후 다시 이 탭으로 돌아오세요.",
+    hint: "아래 버튼을 누르면 쿠팡 판매자센터(쿠팡 윙)가 새 탭으로 열립니다. 이 reviewnary 화면은 그대로 남아 있으니, 확인 후 다시 이 탭으로 돌아오세요.",
     opensCenter: true,
   },
   {
@@ -189,7 +189,7 @@ export const COUPANG_ISSUANCE_TUTORIAL: readonly TutorialStep[] = [
   {
     id: "terms_consent",
     title: "약관 2건 직접 읽고 동의",
-    hint: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도 않습니다.",
+    hint: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. reviewnary는 약관을 읽지도, 대신 동의하지도 않습니다.",
   },
   {
     id: "terms_issue_button",
@@ -204,22 +204,22 @@ export const COUPANG_ISSUANCE_TUTORIAL: readonly TutorialStep[] = [
   {
     id: "register_call_ip",
     title: "업체명·URL 입력 + 호출 IP 등록",
-    hint: "업체명과 URL을 입력하고, 'IP 주소'에 아래 SellerOps 고정 IP를 넣은 뒤 옆의 '추가'까지 누르세요 — '추가'를 누르지 않으면 IP가 등록되지 않고, 나중에 첫 주문 수집이 호출 IP 오류로 실패합니다. 아래에 표시된 IP가 없으면 아직 준비 중이므로 담당자에게 문의하세요.",
+    hint: "업체명과 URL을 입력하고, 'IP 주소'에 아래 reviewnary 고정 IP를 넣은 뒤 옆의 '추가'까지 누르세요 — '추가'를 누르지 않으면 IP가 등록되지 않고, 나중에 첫 주문 수집이 호출 IP 오류로 실패합니다. 아래에 표시된 IP가 없으면 아직 준비 중이므로 담당자에게 문의하세요.",
   },
   {
     id: "issue_checkpoint",
     title: "'확인' 직접 누르기 (여기서 키가 발급됩니다)",
-    hint: "입력한 내용을 한 번 더 확인한 뒤 '확인'을 직접 누르세요. ⚠ 이 버튼에서 실제 API 키가 발급되어 쿠팡 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 대신 누르지 않습니다 — 발급은 반드시 판매자 본인이 진행합니다.",
+    hint: "입력한 내용을 한 번 더 확인한 뒤 '확인'을 직접 누르세요. ⚠ 이 버튼에서 실제 API 키가 발급되어 쿠팡 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). reviewnary는 대신 누르지 않습니다 — 발급은 반드시 판매자 본인이 진행합니다.",
   },
   {
     id: "copy_keys",
     title: "액세스 키·시크릿 키·업체코드 복사",
-    hint: "발급된 액세스 키(Access Key), 시크릿 키(Secret Key), 업체코드(Vendor ID)를 복사합니다. 시크릿 키는 발급 시 한 번만 표시되니 안전하게 보관하세요. 값은 눈으로 확인·복사만 하고, 다음 단계에서 SellerOps 보안 입력란에 직접 붙여넣으세요.",
+    hint: "발급된 액세스 키(Access Key), 시크릿 키(Secret Key), 업체코드(Vendor ID)를 복사합니다. 시크릿 키는 발급 시 한 번만 표시되니 안전하게 보관하세요. 값은 눈으로 확인·복사만 하고, 다음 단계에서 reviewnary 보안 입력란에 직접 붙여넣으세요.",
   },
   {
     id: "return_to_sellerops",
-    title: "SellerOps로 돌아와 입력",
-    hint: "복사한 세 값을 들고 이 탭으로 돌아옵니다. 아래 '발급을 완료했어요'를 누르면 SellerOps 보안 입력 단계로 넘어갑니다.",
+    title: "reviewnary로 돌아와 입력",
+    hint: "복사한 세 값을 들고 이 탭으로 돌아옵니다. 아래 '발급을 완료했어요'를 누르면 reviewnary 보안 입력 단계로 넘어갑니다.",
   },
 ] as const;
 
@@ -234,7 +234,7 @@ export const COUPANG_RENEWAL_TUTORIAL: readonly TutorialStep[] = [
   {
     id: "open_wing",
     title: "쿠팡 윙 열기",
-    hint: "아래 버튼을 누르면 쿠팡 판매자센터(쿠팡 윙)가 새 탭으로 열립니다. 이 SellerOps 화면은 그대로 남아 있으니, 확인 후 다시 이 탭으로 돌아오세요.",
+    hint: "아래 버튼을 누르면 쿠팡 판매자센터(쿠팡 윙)가 새 탭으로 열립니다. 이 reviewnary 화면은 그대로 남아 있으니, 확인 후 다시 이 탭으로 돌아오세요.",
     opensCenter: true,
   },
   {
@@ -245,21 +245,21 @@ export const COUPANG_RENEWAL_TUTORIAL: readonly TutorialStep[] = [
   {
     id: "check_expiry",
     title: "현재 키의 유효기간 확인",
-    hint: "현재 발급된 키의 유효기간(만료일)을 확인합니다. 얼마 남지 않았거나 이미 지났다면 새 키를 재발급해야 합니다. 이 만료일은 뒤에서 SellerOps에 직접 입력할 값이니 함께 확인해 두세요.",
+    hint: "현재 발급된 키의 유효기간(만료일)을 확인합니다. 얼마 남지 않았거나 이미 지났다면 새 키를 재발급해야 합니다. 이 만료일은 뒤에서 reviewnary에 직접 입력할 값이니 함께 확인해 두세요.",
   },
   {
     id: "reissue_checkpoint",
     title: "재발급 버튼 직접 누르기",
-    hint: "입력한 내용을 한 번 더 확인한 뒤, 재발급 버튼을 직접 누르세요. SellerOps는 대신 재발급하지 않습니다 — 재발급은 반드시 판매자 본인이 진행합니다.",
+    hint: "입력한 내용을 한 번 더 확인한 뒤, 재발급 버튼을 직접 누르세요. reviewnary는 대신 재발급하지 않습니다 — 재발급은 반드시 판매자 본인이 진행합니다.",
   },
   {
     id: "copy_keys",
     title: "새 액세스 키·시크릿 키·업체코드 복사",
-    hint: "재발급된 새 액세스 키(Access Key), 시크릿 키(Secret Key), 업체코드(Vendor ID)를 복사합니다. 시크릿 키는 재발급 시 한 번만 표시되니 안전하게 보관하세요. 값은 눈으로 확인·복사만 하고, 다음 단계에서 SellerOps 보안 입력란에 직접 붙여넣으세요.",
+    hint: "재발급된 새 액세스 키(Access Key), 시크릿 키(Secret Key), 업체코드(Vendor ID)를 복사합니다. 시크릿 키는 재발급 시 한 번만 표시되니 안전하게 보관하세요. 값은 눈으로 확인·복사만 하고, 다음 단계에서 reviewnary 보안 입력란에 직접 붙여넣으세요.",
   },
   {
     id: "return_to_sellerops",
-    title: "SellerOps로 돌아와 새 키 입력",
+    title: "reviewnary로 돌아와 새 키 입력",
     hint: "복사한 새 값과 확인한 만료일을 들고 이 탭으로 돌아옵니다. 아래 '재발급을 완료했어요'를 누르면 새 키로 교체하는 입력 단계로 넘어갑니다.",
   },
 ] as const;

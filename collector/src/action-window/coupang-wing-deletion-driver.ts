@@ -68,7 +68,7 @@ export const WING_DELETION_TOTAL_STEPS = 1 as const;
  */
 export const WING_DELETION_WARNING_LABEL =
   "⚠ 이 '삭제' 버튼을 누르면 기존 오픈API 키가 영구 삭제됩니다. 되돌릴 수 없고, 기존 Access Key/Secret Key가 즉시 무효화됩니다. " +
-  "직접 확인한 뒤 삭제를 누르세요 — SellerOps는 대신 누르지 않습니다.";
+  "직접 확인한 뒤 삭제를 누르세요 — reviewnary는 대신 누르지 않습니다.";
 
 const SETTLE_TIMEOUT_MS = 15_000;
 const DEFAULT_LOCATOR_SETTLE_MS = 400;

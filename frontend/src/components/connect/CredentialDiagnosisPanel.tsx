@@ -51,7 +51,7 @@ export function CredentialDiagnosisPanel({ accountId }: { accountId: string }) {
       role="status"
     >
       <p className="font-semibold">
-        {serverSide ? "SellerOps 서버 설정 문제입니다" : "자격 증명을 다시 확인해야 합니다"}
+        {serverSide ? "reviewnary 서버 설정 문제입니다" : "자격 증명을 다시 확인해야 합니다"}
       </p>
       {diagnosis.remedy ? <p className="mt-1 text-sm">{diagnosis.remedy}</p> : null}
       {serverSide ? (

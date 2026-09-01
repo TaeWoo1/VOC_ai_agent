@@ -84,7 +84,7 @@ export const WING_REVEAL_CHECKPOINT_LABEL =
   "화면이 열리면 그대로 두고 더 진행하지 마세요. '확인'(최종 발급)은 절대 누르지 마세요. " +
   // 4. The honest limit, in Korean, on the surface the seller actually reads — it had existed only in English in
   //    the terminal, which the person who can see the screen never looks at.
-  "SellerOps는 화면 종류만 한 번 확인하고 멈추며, 키가 실제로 만들어졌는지 여부는 판단할 수 없습니다. 화면은 판매자만 확인할 수 있습니다. " +
+  "reviewnary는 화면 종류만 한 번 확인하고 멈추며, 키가 실제로 만들어졌는지 여부는 판단할 수 없습니다. 화면은 판매자만 확인할 수 있습니다. " +
   // 5. The window closes when you signal — so read the screen BEFORE signalling, not after.
   "신호를 보내면 이 창은 닫히므로 먼저 화면을 확인해 주세요.";
 

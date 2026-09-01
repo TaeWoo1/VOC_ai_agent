@@ -97,6 +97,8 @@ export interface GuidedImportCardProps {
   onLaunched?: (launch: ReviewImportLaunchView) => void;
   /** Called when a guided run reaches a terminal state, so the page can re-read the plan it just changed. */
   onRunSettled?: () => void;
+  /** Called once the seller has abandoned this plan, so the page re-reads and offers the range chooser. */
+  onPlanAbandoned?: () => void;
   /** Reveals the secondary manual-file path. */
   onUseFileFallback?: () => void;
   /** Test seam: an already-built runtime, so a component test needs no bridge. */
@@ -112,6 +114,7 @@ export function GuidedImportCard({
   agent,
   pairing,
   onPlanCreated,
+  onPlanAbandoned,
   onLaunched,
   onRunSettled,
   onUseFileFallback,
@@ -198,6 +201,7 @@ export function GuidedImportCard({
    */
   const [summary, setSummary] = useState<ReviewOpsLoopSummary | null>(null);
   const [extendBusy, setExtendBusy] = useState(false);
+  const [abandonBusy, setAbandonBusy] = useState(false);
   useEffect(() => {
     if (!hasPlan || next !== null || running) return; // only when finished and idle
     let cancelled = false;
@@ -232,6 +236,34 @@ export function GuidedImportCard({
       setExtendBusy(false);
     }
   }, [plan, extendBusy, onPlanCreated]);
+
+  /**
+   * Give up on this plan and choose a different period.
+   *
+   * The API has existed since the plan model did; nothing in the product called it, so a plan was permanent
+   * once created. That is only invisible until a plan is WRONG: the card shows the newest non-abandoned plan
+   * and the range chooser appears only when there is none, so a seller handed a plan covering the wrong days
+   * had no way back to the chooser — observed live on 2026-09-01, where a one-day plan stood between the
+   * seller and the two weeks they actually wanted.
+   *
+   * Confirmed first, because it discards progress: covered segments are not re-collected, but the plan that
+   * remembers them is closed. Nothing on the marketplace is touched, and the reviews already ingested stay.
+   */
+  const abandonPlan = useCallback(async (): Promise<void> => {
+    if (!plan || abandonBusy) return;
+    if (!window.confirm("이 기간 가져오기를 그만두고 다른 기간을 선택할까요? 이미 가져온 리뷰는 그대로 남습니다.")) return;
+    setAbandonBusy(true);
+    setError(null);
+    try {
+      await api.abandonReviewImportPlan(plan.plan.id);
+      // The page re-reads its plan list on this, and with no open plan left it renders the chooser.
+      onPlanAbandoned?.();
+    } catch {
+      setError("가져오기를 그만두지 못했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setAbandonBusy(false);
+    }
+  }, [plan, abandonBusy, onPlanAbandoned]);
 
   /**
    * Start the next segment — from the button on this card, or from the panel in the seller's SmartStore window.
@@ -372,6 +404,20 @@ export function GuidedImportCard({
             </>
           ) : null}
         </div>
+      ) : null}
+
+      {/* The way out of a plan that covers the wrong days. Secondary and quiet — this is not the normal path,
+          it is the one that was missing entirely, so a seller whose plan was wrong had to live with it. */}
+      {hasPlan ? (
+        <button
+          type="button"
+          onClick={() => void abandonPlan()}
+          disabled={abandonBusy}
+          data-testid="abandon-plan-cta"
+          className="self-start text-sm font-medium text-muted underline underline-offset-2 transition hover:text-ink disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        >
+          {abandonBusy ? "그만두는 중…" : "다른 기간으로 다시 선택하기"}
+        </button>
       ) : null}
 
       {/* An unavailable agent explains itself. Collapsing every cause into "offline" is what leaves a

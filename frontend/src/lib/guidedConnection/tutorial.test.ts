@@ -154,7 +154,7 @@ describe("Coupang WING issuance checklist content", () => {
     expect(at("issue_checkpoint")).toBeLessThan(at("copy_keys"));
     const step = COUPANG_ISSUANCE_TUTORIAL[at("issue_checkpoint")]!;
     expect(`${step.title} ${step.hint}`).toMatch(/발급됩니다|발급되어/); // the one place that claims it
-    expect(step.hint).toMatch(/SellerOps는 대신 누르지 않습니다/); // …and never on the seller's behalf
+    expect(step.hint).toMatch(/reviewnary는 대신 누르지 않습니다/); // …and never on the seller's behalf
   });
 
   it("registers the call IP on the screen that actually has the field, and requires the '추가' press", () => {

@@ -258,9 +258,9 @@ const NAVER_STEP_BRIEF: Readonly<Record<IssuanceTarget, string>> = {
   create_app: "'애플리케이션 등록'을 직접 눌러 애플리케이션을 만드세요. 다 만드셨으면 아래 '다음'을 누르세요.",
   open_app: "연결할 애플리케이션을 직접 여세요. 상세 화면이 열리면 자동으로 넘어갑니다.",
   api_group: "표시된 '커머스 API' 그룹이 선택돼 있는지 확인하세요.",
-  application_id: "표시된 애플리케이션 ID를 직접 복사해 두세요. SellerOps는 값을 읽지 않습니다.",
-  application_secret: "'보기'를 눌러 시크릿을 확인하고 직접 복사해 두세요. SellerOps는 값을 읽지 않습니다.",
-  return: "복사한 두 값을 SellerOps 창에 입력하면 연결이 끝납니다.",
+  application_id: "표시된 애플리케이션 ID를 직접 복사해 두세요. reviewnary는 값을 읽지 않습니다.",
+  application_secret: "'보기'를 눌러 시크릿을 확인하고 직접 복사해 두세요. reviewnary는 값을 읽지 않습니다.",
+  return: "복사한 두 값을 reviewnary 창에 입력하면 연결이 끝납니다.",
 };
 
 /**
@@ -282,14 +282,14 @@ export const NAVER_STEP_DETAIL: Readonly<Record<IssuanceTarget, string>> = {
   api_group:
     "이 애플리케이션에 상품·주문(판매자) 관련 API 그룹이 포함돼 있는지 확인하고, 없으면 추가하세요. 정확한 그룹 이름은 화면마다 다를 수 있으니 '주문'·'판매자'가 포함된 항목을 찾아 선택하면 됩니다.",
   application_id:
-    "애플리케이션 ID를 복사해 주세요. 표시된 애플리케이션 ID 행에서 값을 직접 복사하시면 됩니다. SellerOps는 이 값을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 SellerOps 보안 입력란에 붙여넣으세요.",
+    "애플리케이션 ID를 복사해 주세요. 표시된 애플리케이션 ID 행에서 값을 직접 복사하시면 됩니다. reviewnary는 이 값을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 reviewnary 보안 입력란에 붙여넣으세요.",
   application_secret:
-    "애플리케이션 시크릿을 확인하고 복사해 주세요. 표시된 '보기/복사' 컨트롤에서 시크릿을 직접 확인·복사하시면 됩니다. SellerOps는 시크릿 값도, 클립보드도 읽지 않습니다. 확인이 어려우면 시크릿 재발급이 필요할 수 있습니다.",
+    "애플리케이션 시크릿을 확인하고 복사해 주세요. 표시된 '보기/복사' 컨트롤에서 시크릿을 직접 확인·복사하시면 됩니다. reviewnary는 시크릿 값도, 클립보드도 읽지 않습니다. 확인이 어려우면 시크릿 재발급이 필요할 수 있습니다.",
   // **The honest ending, and it is deliberately different from the WING walk's.** Coupang shows the three
   // values on a page SellerOps can read under the seller's consent, so that walk ends with one press. NAVER
   // does not: the seller types the two values in themselves, and a panel that implied otherwise would be
   // promising a capability this channel does not have.
-  return: "두 값을 복사했다면 SellerOps로 돌아가 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
+  return: "두 값을 복사했다면 reviewnary로 돌아가 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
 };
 
 /**
@@ -307,13 +307,13 @@ export const NAVER_APP_USAGE_COPY = Object.freeze({
   existing: {
     brief: "애플리케이션 상태를 확인해 주세요.",
     detail:
-      "애플리케이션 상태를 확인해 주세요. 화면에 '다시사용' 버튼이 보인다면 직접 눌러 앱을 활성화해 주세요. 버튼이 보이지 않더라도 SellerOps가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
+      "애플리케이션 상태를 확인해 주세요. 화면에 '다시사용' 버튼이 보인다면 직접 눌러 앱을 활성화해 주세요. 버튼이 보이지 않더라도 reviewnary가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
     badge: "애플리케이션 상태 확인",
   },
   new: {
     brief: "방금 만든 애플리케이션의 상태를 확인해 주세요.",
     detail:
-      "방금 만든 애플리케이션의 상태를 확인해 주세요. 새로 만든 앱은 보통 바로 사용할 수 있지만, 혹시 화면에 '다시사용' 버튼이 보이면 직접 눌러 활성화해 주세요. 버튼이 보이지 않더라도 SellerOps가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
+      "방금 만든 애플리케이션의 상태를 확인해 주세요. 새로 만든 앱은 보통 바로 사용할 수 있지만, 혹시 화면에 '다시사용' 버튼이 보이면 직접 눌러 활성화해 주세요. 버튼이 보이지 않더라도 reviewnary가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
     badge: "생성 직후 상태 확인",
   },
 });
@@ -336,7 +336,7 @@ const NAVER_ADVANCE_LABEL: Readonly<Partial<Record<IssuanceTarget, string>>> = {
   // the seller types the two values they just copied. The navigation behind it is real (see
   // `returnToSellerOps`); a button here that recorded a press and moved nothing is the defect the sibling walk
   // had to fix on 2026-08-12.
-  return: "SellerOps에서 연결 마무리하기",
+  return: "reviewnary에서 연결 마무리하기",
 };
 
 /** The chip above the ring: which step this is, never an abbreviated instruction (the panel carries that). */
@@ -346,7 +346,7 @@ export const NAVER_STEP_TITLE: Readonly<Record<IssuanceTarget, string>> = {
   api_group: "주문·판매자 관련 API 그룹 추가",
   application_id: "애플리케이션 ID 복사",
   application_secret: "애플리케이션 시크릿 확인·복사",
-  return: "SellerOps로 돌아와 입력",
+  return: "reviewnary로 돌아와 입력",
 };
 
 /**
@@ -361,12 +361,12 @@ const NAVER_PARK_NOTICE_COPY: Readonly<Record<NaverIssuanceParkNotice, { badge: 
     TARGET_NOT_FOUND: {
       badge: "안내 멈춤",
       brief: "이 화면에서 다음 위치를 찾지 못했어요.",
-      detail: "화면이 모두 뜬 뒤 SellerOps에서 '다시 확인'을 눌러 주세요.",
+      detail: "화면이 모두 뜬 뒤 reviewnary에서 '다시 확인'을 눌러 주세요.",
     },
     UI_DRIFT: {
       badge: "안내 멈춤",
       brief: "네이버 화면이 예상과 달라요.",
-      detail: "연결할 애플리케이션의 상세 화면인지 확인한 뒤, SellerOps에서 '다시 확인'을 눌러 주세요.",
+      detail: "연결할 애플리케이션의 상세 화면인지 확인한 뒤, reviewnary에서 '다시 확인'을 눌러 주세요.",
     },
   });
 
@@ -378,7 +378,7 @@ const NAVER_PARK_NOTICE_COPY: Readonly<Record<NaverIssuanceParkNotice, { badge: 
 const NAVER_COMPLETION_COPY = Object.freeze({
   badge: "확인 완료",
   brief: "✓ 네이버 API 확인 완료",
-  detail: "SellerOps 창으로 돌아가 애플리케이션 ID와 시크릿을 입력하면 연결이 끝납니다. 이 창은 닫으셔도 됩니다.",
+  detail: "reviewnary 창으로 돌아가 애플리케이션 ID와 시크릿을 입력하면 연결이 끝납니다. 이 창은 닫으셔도 됩니다.",
 });
 
 /**

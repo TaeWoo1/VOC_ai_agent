@@ -81,11 +81,33 @@ export interface GuidedImportRuntime {
    * listener does what the SellerOps button does, through the same endpoint, and may refuse.
    */
   subscribeIntent(listener: (intent: AwGuidanceIntent) => void): () => void;
+  /**
+   * A press that did NOT take effect, and why — so a refusal is never silence.
+   *
+   * Two ways a press dies, and before this neither left a trace the seller could see: `send` drops anything
+   * the current view does not allow (no frame is even written), and the runtime refuses a command whose
+   * `expectedRevision` is stale (a frame goes out and comes back `accepted: false`). On 2026-09-01 a seller
+   * pressed the only control on screen twice and the run did not move; from the UI, from the log, and from
+   * the wire, "ignored" and "never sent" were indistinguishable.
+   */
+  subscribeRefusal(listener: (refusal: GuidedImportRefusal) => void): () => void;
   /** Forward an operator command. Refuses anything the current view does not allow. */
   send(type: CommandType): void;
   /** Ask the agent to replay the run it is hosting — recovers a guided view after a page refresh. */
   resync(): void;
   dispose(): void;
+}
+
+/**
+ * Why a press did not take effect. `NOT_ALLOWED_NOW` never left this process; `REFUSED_BY_RUNTIME` made the
+ * round trip and came back rejected. The distinction matters to the seller only as "it did not happen", but
+ * it matters to whoever debugs the next sitting.
+ */
+export interface GuidedImportRefusal {
+  type: CommandType;
+  cause: "NOT_ALLOWED_NOW" | "REFUSED_BY_RUNTIME";
+  /** The runtime's own refusal enum when it answered; null when the press never left. */
+  reason: string | null;
 }
 
 /** How long `start` waits for the agent's acknowledgement. A machine round-trip with no human in it. */
@@ -164,6 +186,13 @@ export function createGuidedImportRuntime(
   let guidancePack: AwGuidancePack | null = null;
   const listeners = new Set<(snapshot: GuidedImportSnapshot | null) => void>();
   const intentListeners = new Set<(intent: AwGuidanceIntent) => void>();
+  const refusalListeners = new Set<(refusal: GuidedImportRefusal) => void>();
+  /** Commands this runtime sent and is still waiting on, so a refusal can be attributed to its type. */
+  const inFlight = new Map<string, CommandType>();
+
+  const refuse = (refusal: GuidedImportRefusal): void => {
+    for (const listener of [...refusalListeners]) listener(refusal);
+  };
 
   const publish = (next: GuidedImportSnapshot | null): void => {
     latest = next;
@@ -176,6 +205,16 @@ export function createGuidedImportRuntime(
       // Deliberately NOT folded into the snapshot: this is not run state, it is a thing the seller asked for
       // once, and a state field would replay it on every re-render.
       for (const listener of [...intentListeners]) listener(frame.intent);
+      return;
+    }
+    if (frame.kind === "aw_command_result") {
+      // `start` matches its OWN result by commandId and settles its promise; this only speaks for the
+      // fire-and-forget presses `send` makes, which had nowhere to report a rejection before.
+      const type = inFlight.get(frame.commandId);
+      if (type) {
+        inFlight.delete(frame.commandId);
+        if (!frame.accepted) refuse({ type, cause: "REFUSED_BY_RUNTIME", reason: frame.reason ?? null });
+      }
       return;
     }
     if (frame.kind === "aw_view") {
@@ -277,9 +316,20 @@ export function createGuidedImportRuntime(
     send(type) {
       if (disposed) return;
       // The view is the authority on what is permitted right now. Sending anything else would be a client
-      // deciding a run's state machine, which is the runtime's job alone.
-      if (!latest?.allowedCommands.includes(type)) return;
-      transport.send({ kind: "aw_command", command: envelope(type) });
+      // deciding a run's state machine, which is the runtime's job alone. Still refused — but no longer in
+      // silence: the caller is told, so a control that cannot act right now can say so instead of looking
+      // broken.
+      if (!latest?.allowedCommands.includes(type)) {
+        refuse({ type, cause: "NOT_ALLOWED_NOW", reason: null });
+        return;
+      }
+      const command = envelope(type);
+      inFlight.set(command.commandId, type);
+      transport.send({ kind: "aw_command", command });
+    },
+    subscribeRefusal(listener) {
+      refusalListeners.add(listener);
+      return () => refusalListeners.delete(listener);
     },
     resync() {
       if (disposed) return;
@@ -291,6 +341,8 @@ export function createGuidedImportRuntime(
       stopViews();
       listeners.clear();
       intentListeners.clear();
+      refusalListeners.clear();
+      inFlight.clear();
     },
   };
 }

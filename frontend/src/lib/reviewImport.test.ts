@@ -331,9 +331,9 @@ describe("importStageText", () => {
 describe("scopeEvidenceLabel", () => {
   // The whole point: a seller's confirmation is described as theirs. Calling it verification would claim
   // SellerOps checked something it could not read.
-  it("never describes an operator confirmation as a SellerOps check", () => {
-    expect(scopeEvidenceLabel("OPERATOR_CONFIRMED")).not.toContain("SellerOps");
-    expect(scopeEvidenceLabel("MACHINE_MATCHED")).toContain("SellerOps");
+  it("never describes an operator confirmation as a reviewnary check", () => {
+    expect(scopeEvidenceLabel("OPERATOR_CONFIRMED")).not.toContain("reviewnary");
+    expect(scopeEvidenceLabel("MACHINE_MATCHED")).toContain("reviewnary");
   });
 
   it("says nothing was recorded when evidence is absent", () => {
@@ -428,7 +428,7 @@ describe("buildImportGuidancePack", () => {
   });
 
   it("names the product, so a panel on someone else's site says whose it is", () => {
-    expect(buildImportGuidancePack().chrome.product).toContain("SellerOps");
+    expect(buildImportGuidancePack().chrome.product).toContain("reviewnary");
   });
 
   /** The templates the runtime substitutes ITS facts into: neither side can produce these lines alone. */

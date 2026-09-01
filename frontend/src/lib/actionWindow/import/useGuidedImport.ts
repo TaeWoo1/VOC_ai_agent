@@ -11,7 +11,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentAvailability } from "../../reviewImport";
 import { connectImportSession, type ImportBridgeSession } from "./importSession";
-import { createGuidedImportRuntime, type GuidedImportRuntime, type GuidedImportSnapshot } from "./importRuntime";
+import {
+  createGuidedImportRuntime,
+  type GuidedImportRefusal,
+  type GuidedImportRuntime,
+  type GuidedImportSnapshot,
+} from "./importRuntime";
 import type { AwRefusalReason } from "../wsTransport";
 import type { AwGuidanceIntent } from "../../../../../contracts/action-window/v2/transport";
 
@@ -38,6 +43,8 @@ export interface GuidedImportBinding {
   snapshot: GuidedImportSnapshot | null;
   /** Why a guided run could not be attached, or null when nothing has refused. */
   unavailable: AgentAvailability | null;
+  /** The last press that did not take effect, or null. A refusal must never be silence. */
+  refused: GuidedImportRefusal | null;
   /** Attach if needed; resolves the runtime, or null when the agent cannot host a guided import. */
   ensureRuntime: () => Promise<GuidedImportRuntime | null>;
   /** Forward an operator command to the hosted run (refused unless the view allows it). */
@@ -58,6 +65,9 @@ export function useGuidedImport(
 ): GuidedImportBinding {
   const [snapshot, setSnapshot] = useState<GuidedImportSnapshot | null>(inject?.snapshot() ?? null);
   const [unavailable, setUnavailable] = useState<AgentAvailability | null>(null);
+  /** The last press that did not take effect. Null until one does; cleared by the next press. */
+  const [refused, setRefused] = useState<GuidedImportRefusal | null>(null);
+  const stopRefusalRef = useRef<(() => void) | null>(null);
   const runtimeRef = useRef<GuidedImportRuntime | null>(inject ?? null);
   const sessionRef = useRef<ImportBridgeSession | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
@@ -72,6 +82,10 @@ export function useGuidedImport(
     stopRef.current = runtime.subscribe((next) => {
       // A late frame from a released session must not repaint a card that has moved on.
       if (liveRef.current) setSnapshot(next);
+    });
+    stopRefusalRef.current?.();
+    stopRefusalRef.current = runtime.subscribeRefusal((refusal) => {
+      if (liveRef.current) setRefused(refusal);
     });
     stopIntentRef.current?.();
     stopIntentRef.current = runtime.subscribeIntent((intent) => {
@@ -88,6 +102,8 @@ export function useGuidedImport(
       stopRef.current = null;
       stopIntentRef.current?.();
       stopIntentRef.current = null;
+      stopRefusalRef.current?.();
+      stopRefusalRef.current = null;
       // Only tear down what this hook created. An injected runtime belongs to its owner.
       if (!inject) {
         runtimeRef.current?.dispose();
@@ -130,8 +146,10 @@ export function useGuidedImport(
   }, [adopt]);
 
   const send = useCallback<GuidedImportRuntime["send"]>((type) => {
+    // Cleared on every press so a stale refusal from a minute ago cannot sit under a control that now works.
+    setRefused(null);
     runtimeRef.current?.send(type);
   }, []);
 
-  return { snapshot, unavailable, ensureRuntime, send };
+  return { snapshot, unavailable, refused, ensureRuntime, send };
 }

@@ -11,9 +11,17 @@
  * family still says SellerOps because the string there is not only a brand: 「SellerOps 도우미」 names
  * a program the seller installs and then has to FIND on their own computer, and this repository
  * cannot verify what that installed application is actually called. Renaming the instruction without
- * renaming the thing it points at would be a worse defect than an inconsistent name. Those screens
- * are the subject of the next package (Disconnected Channel Onboarding Live Walkthrough v1), which
- * is where the installed name can be observed and both moved together.
+ * renaming the thing it points at would be a worse defect than an inconsistent name.
+ *
+ * <b>2026-09-02 — NAVER Guided Acquisition Live Findings Closure v1 moved the guided COPY.</b> The
+ * deferral was doing two jobs and only one of them was justified: naming the installed helper, and
+ * naming the PRODUCT in guidance prose the helper draws. The second had no reason to wait, and a
+ * live sitting had a seller reading 「SellerOps 안내」 on the panel of a product called reviewnary. So
+ * every guided string whose subject is the product moved (the in-page panel's own title, the
+ * walkthrough prose, the Coupang mirror), and only 「SellerOps 도우미」 — the installed program, and
+ * the confirmation page's pointer at the window that program titles — stayed. The deferral count
+ * therefore fell 40 → 29; the files that left are the ones whose SellerOps strings were all
+ * product-name prose.
  *
  * Comments are not user-facing and are not scanned.
  */
@@ -78,7 +86,7 @@ describe("the product name a seller reads", () => {
       DECLARED_EXCEPTIONS.some((prefix) => path.startsWith(prefix)),
     ).filter((path) => code(readFileSync(path, "utf-8")).includes("SellerOps"));
 
-    expect(deferred).toHaveLength(40);
+    expect(deferred).toHaveLength(29);
   });
 
   it("the browser tab carries the product name", () => {

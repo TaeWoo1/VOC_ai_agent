@@ -21,8 +21,6 @@ import com.sellerops.selleraccount.SessionProbeReason;
 import com.sellerops.selleraccount.SessionReadinessState;
 import jakarta.validation.Valid;
 import java.io.IOException;
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.MediaType;
@@ -182,7 +180,9 @@ public class ReviewImportPlanController {
     @PostMapping("/plans/{planId}/extend")
     public ReviewImportPlanDetailView extendPlan(@AuthenticationPrincipal AuthPrincipal principal,
                                                  @PathVariable UUID planId) {
-        planService.extendPlanForward(principal.orgId(), planId, LocalDate.now(ZoneOffset.UTC));
+        // The seller's calendar, not the server's — see ReviewImportCalendar for the nine-hour window
+        // in which the two disagreed and handed a Korean seller a one-day segment.
+        planService.extendPlanForward(principal.orgId(), planId, ReviewImportCalendar.today());
         return queryService.planDetail(principal.orgId(), planId);
     }
 

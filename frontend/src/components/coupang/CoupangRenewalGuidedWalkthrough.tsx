@@ -150,7 +150,7 @@ export function CoupangRenewalGuidedWalkthrough({
           쿠팡 윙에서 새 Open API 키를 재발급하도록 화면으로 안내해 드릴게요.
         </p>
         <p className="text-sm text-muted break-keep">
-          시작하면 전용 쿠팡 윙 창이 열립니다. 로그인·클릭·재발급은 직접 하시면 되고, SellerOps는 어디를 봐야
+          시작하면 전용 쿠팡 윙 창이 열립니다. 로그인·클릭·재발급은 직접 하시면 되고, reviewnary는 어디를 봐야
           하는지 화면으로 안내만 합니다 — 값·클립보드·화면을 읽지 않습니다.
         </p>
         <button
@@ -238,7 +238,7 @@ export function CoupangRenewalGuidedWalkthrough({
                 onClick={onComplete}
                 disabled={busy}
               >
-                SellerOps로 돌아가 새 키 입력하기
+                reviewnary로 돌아가 새 키 입력하기
               </button>
             </div>
           )}

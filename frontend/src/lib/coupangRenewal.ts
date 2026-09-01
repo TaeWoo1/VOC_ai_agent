@@ -87,7 +87,7 @@ export const COUPANG_RENEWAL_COPY = {
   // expiry-date confirmation (operator-confirm; never auto-estimated)
   expiryConfirmTitle: "새 키의 만료일 확인",
   expiryConfirmBody:
-    "재발급 화면에 표시된 새 키의 유효기간(만료일)을 확인해 그대로 입력해 주세요. SellerOps는 만료일을 임의로 추정하지 않습니다.",
+    "재발급 화면에 표시된 새 키의 유효기간(만료일)을 확인해 그대로 입력해 주세요. reviewnary는 만료일을 임의로 추정하지 않습니다.",
   expiryConfirmLabel: "만료일을 확인해 입력",
   expiryConfirmOptional: "만료일을 아직 확인하지 못했다면 비워 두어도 교체는 진행됩니다.",
 

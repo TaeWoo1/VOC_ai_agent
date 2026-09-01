@@ -33,7 +33,7 @@ const COPY: Record<string, string> = {
   "actionWindow.issuance.apiGroup": "주문·판매자 관련 API 그룹 추가",
   "actionWindow.issuance.applicationId": "애플리케이션 ID 복사",
   "actionWindow.issuance.applicationSecret": "애플리케이션 시크릿 확인·복사",
-  "actionWindow.issuance.return": "SellerOps로 돌아와 입력",
+  "actionWindow.issuance.return": "reviewnary로 돌아와 입력",
 
   // Coupang WING Open API key issuance guidance (Action Window). Shared step copy keys with the collector
   // runtime — the runtime sends only the key, this FE owns the wording. Hedged, position/role based: exact
@@ -63,7 +63,7 @@ const COPY: Record<string, string> = {
   // while the panel asked the seller to transcribe a 40-character secret by hand, then "SellerOps로 돌아가기"
   // while the decision lived in the other tab. The decision is now made where the values are, so the step is
   // the consent — and the return is the outcome panel's button, after the credential is actually stored.
-  "actionWindow.coupangIssuance.copyKeys": "SellerOps에 연결하기",
+  "actionWindow.coupangIssuance.copyKeys": "reviewnary에 연결하기",
 
   // Coupang WING Open API key RENEWAL guidance (Action Window). Entered from an already-connected account
   // whose credential is expiring. The renewal step plan reuses the issuance runtime but highlights 유효기간
@@ -75,7 +75,7 @@ const COPY: Record<string, string> = {
   "actionWindow.coupangRenewal.checkExpiry": "현재 키의 유효기간 확인",
   "actionWindow.coupangRenewal.reissueCheckpoint": "재발급 버튼 직접 누르기",
   "actionWindow.coupangRenewal.copyKeys": "새 액세스 키·시크릿 키·업체코드 복사",
-  "actionWindow.coupangRenewal.return": "SellerOps로 돌아와 새 키 입력",
+  "actionWindow.coupangRenewal.return": "reviewnary로 돌아와 새 키 입력",
 
   // Coupang WING 고객문의 답변 guidance (Action Window). Unlike the issuance walk, NOTHING on the 고객문의
   // screen has been measured, so this run highlights nothing and asserts no label — it opens the screened
@@ -95,7 +95,7 @@ const COPY: Record<string, string> = {
 // Keyed by the SAME `actionWindow.issuance.*` copy keys the runtime emits; an unmapped step renders no detail.
 const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   "actionWindow.issuance.run":
-    "SellerOps가 화면에서 어디를 봐야 하는지 안내합니다. 각 단계는 열린 NAVER 창에서 직접 진행하시고, 이 화면의 설명을 따라가세요. SellerOps는 로그인·클릭·입력을 하지 않고 어떤 값도 읽지 않습니다.",
+    "reviewnary가 화면에서 어디를 봐야 하는지 안내합니다. 각 단계는 열린 NAVER 창에서 직접 진행하시고, 이 화면의 설명을 따라가세요. reviewnary는 로그인·클릭·입력을 하지 않고 어떤 값도 읽지 않습니다.",
   "actionWindow.issuance.reachApplications":
     "애플리케이션(앱)을 만들고 관리하는 영역으로 이동하세요. 보통 '내 애플리케이션' 또는 애플리케이션 목록 형태의 메뉴입니다.",
   "actionWindow.issuance.createApp":
@@ -106,24 +106,24 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   // step, so a suspended app doesn't fail later. SellerOps does not read the app's state and never asserts it is
   // active — absence of a reactivate button is NOT treated as active. The seller reactivates it themselves if shown.
   "actionWindow.issuance.appUsageCheck":
-    "애플리케이션 상태를 확인해 주세요. 화면에 '다시사용' 버튼이 보인다면 직접 눌러 앱을 활성화해 주세요. 버튼이 보이지 않더라도 SellerOps가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
+    "애플리케이션 상태를 확인해 주세요. 화면에 '다시사용' 버튼이 보인다면 직접 눌러 앱을 활성화해 주세요. 버튼이 보이지 않더라도 reviewnary가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
   "actionWindow.issuance.appUsageCheckNew":
-    "방금 만든 애플리케이션의 상태를 확인해 주세요. 새로 만든 앱은 보통 바로 사용할 수 있지만, 혹시 화면에 '다시사용' 버튼이 보이면 직접 눌러 활성화해 주세요. 버튼이 보이지 않더라도 SellerOps가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
+    "방금 만든 애플리케이션의 상태를 확인해 주세요. 새로 만든 앱은 보통 바로 사용할 수 있지만, 혹시 화면에 '다시사용' 버튼이 보이면 직접 눌러 활성화해 주세요. 버튼이 보이지 않더라도 reviewnary가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
   "actionWindow.issuance.apiGroup":
     "이 애플리케이션에 상품·주문(판매자) 관련 API 그룹이 포함돼 있는지 확인하고, 없으면 추가하세요. 정확한 그룹 이름은 화면마다 다를 수 있으니 '주문'·'판매자'가 포함된 항목을 찾아 선택하면 됩니다.",
   "actionWindow.issuance.applicationId":
-    "애플리케이션 ID를 복사해 주세요. 표시된 애플리케이션 ID 행에서 값을 직접 복사하시면 됩니다. SellerOps는 이 값을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 SellerOps 보안 입력란에 붙여넣으세요.",
+    "애플리케이션 ID를 복사해 주세요. 표시된 애플리케이션 ID 행에서 값을 직접 복사하시면 됩니다. reviewnary는 이 값을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 reviewnary 보안 입력란에 붙여넣으세요.",
   "actionWindow.issuance.applicationSecret":
-    "애플리케이션 시크릿을 확인하고 복사해 주세요. 표시된 '보기/복사' 컨트롤에서 시크릿을 직접 확인·복사하시면 됩니다. SellerOps는 시크릿 값도, 클립보드도 읽지 않습니다. 확인이 어려우면 시크릿 재발급이 필요할 수 있습니다.",
+    "애플리케이션 시크릿을 확인하고 복사해 주세요. 표시된 '보기/복사' 컨트롤에서 시크릿을 직접 확인·복사하시면 됩니다. reviewnary는 시크릿 값도, 클립보드도 읽지 않습니다. 확인이 어려우면 시크릿 재발급이 필요할 수 있습니다.",
   "actionWindow.issuance.return":
-    "두 값을 복사했다면 SellerOps로 돌아가 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
+    "두 값을 복사했다면 reviewnary로 돌아가 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
 
   // Coupang WING Open API key issuance — FULL per-step instruction. Same hedged, position/role wording
   // (exact WING labels differ by screen version, so none is asserted as fact) and the same privacy
   // invariant — SellerOps never logs in, clicks, or reads a key value; the seller performs each step and
   // clicks 발급 themselves. Keyed by the SAME `actionWindow.coupangIssuance.*` keys the runtime emits.
   "actionWindow.coupangIssuance.run":
-    "SellerOps가 화면에서 어디를 봐야 하는지 안내합니다. 각 단계는 열린 쿠팡 윙 창에서 직접 진행하시고, 이 화면의 설명을 따라가세요. SellerOps는 로그인·클릭·입력을 하지 않고 어떤 값도 읽지 않습니다.",
+    "reviewnary가 화면에서 어디를 봐야 하는지 안내합니다. 각 단계는 열린 쿠팡 윙 창에서 직접 진행하시고, 이 화면의 설명을 따라가세요. reviewnary는 로그인·클릭·입력을 하지 않고 어떤 값도 읽지 않습니다.",
   // VERBATIM from `OPERATOR_STEP_LABELS` in collector/src/action-window/coupang-wing-issuance-driver.ts —
   // the WING-resident panel copy an operator read on screen and confirmed correct during the 2026-08-10
   // dev-host guided walk. Reused rather than rewritten: two places wording the same step differently is how
@@ -140,27 +140,27 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   "actionWindow.coupangIssuance.confirmPurpose":
     "사용 목적이 'OPEN API'인지 확인하고(기본값입니다) '확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
   "actionWindow.coupangIssuance.termsConsent":
-    "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
+    "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. reviewnary는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
   "actionWindow.coupangIssuance.issueCheckpoint":
-    "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않습니다. 이 버튼에서는 키가 발급되지 않고 연동 방식을 고르는 화면이 열립니다(live walk 2회에서 그렇게 보고되었습니다. SellerOps는 키 발급 여부를 확인할 수 없습니다). 그 화면이 열리면 자동으로 넘어갑니다.",
+    "'약관 동의 및 Key 발급받기'를 직접 누르세요 — reviewnary는 이 버튼을 절대 누르지 않습니다. 이 버튼에서는 키가 발급되지 않고 연동 방식을 고르는 화면이 열립니다(live walk 2회에서 그렇게 보고되었습니다. reviewnary는 키 발급 여부를 확인할 수 없습니다). 그 화면이 열리면 자동으로 넘어갑니다.",
   "actionWindow.coupangIssuance.vendorMethod":
-    "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요 — SellerOps는 선택하지 않습니다. 선택하면 URL · IP 주소 입력란이 더 나타납니다(업체명은 이미 화면에 있습니다). 업체명 · URL을 입력하고 IP는 '추가'까지 누르면 자동으로 넘어갑니다(SellerOps는 입력란이 비었는지만 보고 값은 읽지 않습니다. 넘어가지 않으면 아래 버튼을 누르세요).",
+    "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요 — reviewnary는 선택하지 않습니다. 선택하면 URL · IP 주소 입력란이 더 나타납니다(업체명은 이미 화면에 있습니다). 업체명 · URL을 입력하고 IP는 '추가'까지 누르면 자동으로 넘어갑니다(reviewnary는 입력란이 비었는지만 보고 값은 읽지 않습니다. 넘어가지 않으면 아래 버튼을 누르세요).",
   "actionWindow.coupangIssuance.vendorConfirm":
-    "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
+    "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). reviewnary는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   "actionWindow.coupangIssuance.copyKeys":
-    "SellerOps는 이 화면에 표시된 업체코드·Access Key·Secret Key만 읽어 곧바로 암호화해 저장하고, 저장한 뒤 연결이 되는지 한 번만 확인합니다. 값은 SellerOps 화면에 표시되지 않고, 기록에도 남지 않습니다. 아래 'SellerOps에 연결하기'를 누르시기 전에는 아무것도 읽지 않습니다. 직접 입력하고 싶으시면 그 아래 버튼을 누르세요.",
+    "reviewnary는 이 화면에 표시된 업체코드·Access Key·Secret Key만 읽어 곧바로 암호화해 저장하고, 저장한 뒤 연결이 되는지 한 번만 확인합니다. 값은 reviewnary 화면에 표시되지 않고, 기록에도 남지 않습니다. 아래 'reviewnary에 연결하기'를 누르시기 전에는 아무것도 읽지 않습니다. 직접 입력하고 싶으시면 그 아래 버튼을 누르세요.",
 
   // Coupang 고객문의 답변 — FULL per-step instruction. Deliberately vaguer than the issuance walk about
   // WHERE things are: no sitting has measured this screen, so naming a menu path would be asserting a
   // layout nobody has seen. The seller knows their own WING; SellerOps holds the draft and stays out of it.
   "actionWindow.coupangInquiryReply.run":
-    "SellerOps가 쿠팡 윙 창을 열어 드립니다. 답변 초안은 이 화면에 있으니 보고 쓰시면 됩니다. 등록은 셀러님이 직접 하시고, SellerOps는 대신 입력하거나 등록하지 않습니다.",
+    "reviewnary가 쿠팡 윙 창을 열어 드립니다. 답변 초안은 이 화면에 있으니 보고 쓰시면 됩니다. 등록은 셀러님이 직접 하시고, reviewnary는 대신 입력하거나 등록하지 않습니다.",
   "actionWindow.coupangInquiryReply.openWing":
-    "쿠팡 윙 창을 엽니다. 로그인은 셀러님이 직접 하세요 — SellerOps는 로그인하지 않습니다.",
+    "쿠팡 윙 창을 엽니다. 로그인은 셀러님이 직접 하세요 — reviewnary는 로그인하지 않습니다.",
   "actionWindow.coupangInquiryReply.reachScreen":
-    "윙에서 이 문의가 있는 고객문의 화면으로 직접 이동하세요. 도착하셨으면 아래에서 알려 주세요. SellerOps는 화면을 읽지 않기 때문에 도착 여부를 스스로 알 수 없습니다.",
+    "윙에서 이 문의가 있는 고객문의 화면으로 직접 이동하세요. 도착하셨으면 아래에서 알려 주세요. reviewnary는 화면을 읽지 않기 때문에 도착 여부를 스스로 알 수 없습니다.",
   "actionWindow.coupangInquiryReply.userReply":
-    "옆의 답변 초안을 참고해 답변을 직접 등록하세요 — SellerOps는 등록 버튼을 누르지 않습니다. 마치신 뒤 결과를 알려 주시면 그대로 기록합니다(SellerOps가 등록을 확인한 것은 아닙니다).",
+    "옆의 답변 초안을 참고해 답변을 직접 등록하세요 — reviewnary는 등록 버튼을 누르지 않습니다. 마치신 뒤 결과를 알려 주시면 그대로 기록합니다(reviewnary가 등록을 확인한 것은 아닙니다).",
 };
 
 /** The FULL per-step instruction for a guided issuance step, or null when the step has no detail mapping. */
@@ -175,17 +175,17 @@ export function issuanceStepDetail(copyKey: string | null | undefined): string |
 // `actionWindow.coupangRenewal.*` keys the runtime emits; an unmapped step renders no detail.
 const RENEWAL_STEP_DETAIL: Record<string, string> = {
   "actionWindow.coupangRenewal.run":
-    "현재 키의 유효기간이 다가와 새 키로 갱신하는 안내입니다. 각 단계는 열린 쿠팡 윙 창에서 직접 진행하시고, 이 화면의 설명을 따라가세요. SellerOps는 로그인·클릭·입력을 하지 않고 어떤 값도 읽지 않습니다.",
+    "현재 키의 유효기간이 다가와 새 키로 갱신하는 안내입니다. 각 단계는 열린 쿠팡 윙 창에서 직접 진행하시고, 이 화면의 설명을 따라가세요. reviewnary는 로그인·클릭·입력을 하지 않고 어떤 값도 읽지 않습니다.",
   "actionWindow.coupangRenewal.reachOpenApi":
     "쿠팡 윙에서 '판매자정보'의 오픈API 키 발급 영역으로 이동하세요. 정확한 메뉴 이름은 화면 버전에 따라 다를 수 있으니 '오픈API'·'키 발급'이 포함된 항목을 찾아 주세요.",
   "actionWindow.coupangRenewal.checkExpiry":
-    "현재 발급된 키의 유효기간(만료일)을 확인해 주세요. 유효기간이 얼마 남지 않았거나 이미 지났다면 새 키를 재발급해야 합니다. 이 만료일은 뒤에서 직접 입력하실 값이니 함께 확인해 두세요. SellerOps는 이 화면의 값을 읽지 않습니다.",
+    "현재 발급된 키의 유효기간(만료일)을 확인해 주세요. 유효기간이 얼마 남지 않았거나 이미 지났다면 새 키를 재발급해야 합니다. 이 만료일은 뒤에서 직접 입력하실 값이니 함께 확인해 두세요. reviewnary는 이 화면의 값을 읽지 않습니다.",
   "actionWindow.coupangRenewal.reissueCheckpoint":
-    "이제 재발급 버튼을 누르기 직전 단계입니다. 재발급 버튼은 반드시 직접 눌러 주세요 — SellerOps는 대신 재발급하지 않습니다. 재발급하면 새 키가 생성되며, 기존 키는 쿠팡 정책에 따라 처리됩니다.",
+    "이제 재발급 버튼을 누르기 직전 단계입니다. 재발급 버튼은 반드시 직접 눌러 주세요 — reviewnary는 대신 재발급하지 않습니다. 재발급하면 새 키가 생성되며, 기존 키는 쿠팡 정책에 따라 처리됩니다.",
   "actionWindow.coupangRenewal.copyKeys":
-    "재발급된 새 액세스 키(Access Key), 시크릿 키(Secret Key), 업체코드(Vendor ID)를 직접 복사하세요. 시크릿 키는 재발급 시 한 번만 표시되니 안전하게 보관하세요. SellerOps는 이 값들을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 SellerOps 보안 입력란에 붙여넣으세요.",
+    "재발급된 새 액세스 키(Access Key), 시크릿 키(Secret Key), 업체코드(Vendor ID)를 직접 복사하세요. 시크릿 키는 재발급 시 한 번만 표시되니 안전하게 보관하세요. reviewnary는 이 값들을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 reviewnary 보안 입력란에 붙여넣으세요.",
   "actionWindow.coupangRenewal.return":
-    "새 키 세 값과 확인한 만료일을 들고 SellerOps로 돌아와 주세요. 안내가 끝나면 새 키로 교체하는 입력 화면으로 이동합니다.",
+    "새 키 세 값과 확인한 만료일을 들고 reviewnary로 돌아와 주세요. 안내가 끝나면 새 키로 교체하는 입력 화면으로 이동합니다.",
 };
 
 /** The FULL per-step instruction for a guided renewal step, or null when the step has no detail mapping. */

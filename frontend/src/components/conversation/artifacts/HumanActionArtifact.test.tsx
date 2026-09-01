@@ -42,6 +42,7 @@ function fakeImport() {
     start: vi.fn(async (input: { launchRef: string; kind: "DISCOVERY" | "SEGMENT" }) => { starts.push(input); }),
     setGuidancePack: vi.fn(),
     subscribeIntent: () => () => undefined,
+    subscribeRefusal: () => () => undefined,
     send: vi.fn(),
     resync: () => undefined,
     dispose: vi.fn(),

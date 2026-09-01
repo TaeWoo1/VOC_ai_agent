@@ -20,7 +20,7 @@ const BASE = {
 describe("the confirmation page's approval-code instruction", () => {
   it("points at the OS dialog when that is the channel", () => {
     const html = renderConfirmationPage({ ...BASE, approvalChannel: "os_dialog" });
-    expect(html).toContain("SellerOps 승인 창");
+    expect(html).toContain("SellerOps 도우미 승인 창");
     expect(html).not.toContain("터미널");
   });
 
@@ -45,8 +45,8 @@ describe("the confirmation page's approval-code instruction", () => {
   it("names the same window in the instruction and in the empty-field message", () => {
     // Two places to look for one code is worse than one wrong place: the person cannot tell which is stale.
     const html = renderConfirmationPage({ ...BASE, approvalChannel: "os_dialog" });
-    expect(html).toContain("화면에 뜬 SellerOps 승인 창에 표시된 <strong>승인 코드</strong>를 입력하세요.");
-    expect(html).toContain("'화면에 뜬 SellerOps 승인 창에 표시된 승인 코드를 입력하세요.'");
+    expect(html).toContain("화면에 뜬 SellerOps 도우미 승인 창에 표시된 <strong>승인 코드</strong>를 입력하세요.");
+    expect(html).toContain("'화면에 뜬 SellerOps 도우미 승인 창에 표시된 승인 코드를 입력하세요.'");
     // The script assigns this to textContent, which renders tags literally — so the phrase carries no markup.
     expect(html).not.toContain("'화면에 뜬 <strong>");
   });

@@ -1134,6 +1134,43 @@ Coupang 문의 답변/guided acquisition(자격 + **호출 IP 등록** + 미답�
 사본이라 두 번째 합성 생산자가 생기기 전에는 만들지 않는다), 접근 정책의 gate당 존재 쿼리 1회 무캐시,
 `sellerops.seed.enabled=true`의 데모 계정 생성.)
 
+**`docs/naver_guided_acquisition_live_findings_closure_v1.md`** (NAVER Guided Acquisition Live Findings
+Closure v1 — 2026-09-02. 2026-09-01 라이브 sitting이 `BLOCKED at LOCATE_EXPORT`로 끝나며 남긴 결함 9종을
+**예시별 patch가 아니라 구조로** 닫는다. 라이브 실행 0 · 마켓플레이스 0 · WRITE 0 · 마이그레이션 0.
+**(1) 끝난 run은 어디서 죽었는지 말한다** — `recordFailure`는 **회복 가능한** park 8종만 덮었고 terminal
+engine 실패(`TARGET_NOT_FOUND`·`DOWNLOAD_TIMEOUT`·`ARTIFACT_INVALID`·`INGEST_FAILED`·`RUNTIME_FAULT`)는
+마커가 **0**이라 두 sitting이 모두 귀속 불가로 끝났다. **첫 보고를 정정한다 — 판매자 UI는 gap이 아니었다**
+(`view.blocker`도, FE copy도, in-page 팩도 이미 있었다); 없던 것은 **로그**다. `fail()`이 stage를 덮기 전에
+붙잡아 `terminalFailure(){code,stage}`가 답하고(`TARGET_NOT_FOUND`만으로는 「판매자가 다른 화면」과 「우리
+locator가 틀림」을 못 가른다), 새 마커 `aw_acquisition_terminal`은 park enum과 **일부러 분리**한다(그 8종은
+`isRecoverable` total-true라 terminal을 넣으면 불변식이 거짓이 된다). 발행은 `publishState()` 단일 choke
+point에 latch. **그리고 export locate가 증거를 남긴다** — 날짜 branch는 처음부터 구조 진단을 로깅했는데
+export branch는 0이었다 ⇒ `aw_import_export_locate_unresolved`(+`frameResolved`·`childFrames`·기존 순수
+분류기 `planExportAction`; selector·페이지 텍스트 0). **locate 자체는 무변경.** **(2) 하루짜리 창은 완전한
+읽기다** — `extractDates`가 중복 제거를 하므로 시작=종료면 distinct 1이고 `matchExportScope`는 2를 요구해
+그 segment 모양에서 `MATCH`가 **도달 불가**였다(라이브 `UNREADABLE datesParsed=1`, plan이 스스로 만든 창).
+이제 요구 창이 하루이고 **두 컨트롤이 모두 읽혔을 때만**(`countDateReadings`) 1개를 받는다 — 반쯤 채운
+picker가 확신에 찬 MATCH가 되지 않도록. **(3) 확인 단계**는 `"NONE"` 대신 `CLEAR_HIGHLIGHT`(finding 12와
+같은 결함·같은 수리) — 끝난 칸을 계속 가리키던 하이라이트 제거. **(4) 라벨은 step의 것** — FE에 이미 있던
+`recheckLabel`을 대화 카드도 쓴다(다운로드 전에 「내려받기를 마쳤습니다」라고 말하던 유일한 컨트롤).
+**(5) 거절은 침묵이 아니다** — 헬퍼 `aw_import_command_refused`, FE `subscribeRefusal`이
+`NOT_ALLOWED_NOW`(프레임조차 안 나감)와 `REFUSED_BY_RUNTIME`(왕복 후 거절)을 구분. **(6) 이미 맞는 날짜는
+(2)와 같은 뿌리** — `isTargetPrefilled`가 `MATCH`를 요구했고 하루 창에서 그것이 불가능해 `prefilled=false`,
+판매자가 맞는 값을 바꿨다 되돌려야 했다. **(7) 끝난 run에서 다시 시작** 가능(remount). **(8) 달력은
+Asia/Seoul 하나** — `ReviewImportLaunchService`는 이미 KST였고 controller만 `ZoneOffset.UTC`라 KST 00:00–09:00
+아홉 시간 동안 어긋났다; `ReviewImportCalendar`는 3줄·설정 0(**timezone framework 금지**), 저장은 UTC instant
+그대로. **UTC 09-01/KST 09-02에서 실측 검증**: extend가 plan을 `09-01 → 09-02`로 옮기고 두 번째 segment를
+만들었다(이전 코드에서는 no-op). **(9) plan 취소 UI** — `abandonReviewImportPlan`은 caller **0**이었다.
+**(10) 이름** — 가이드 산문 125곳/16파일 + JSX 3곳 + `wing-reveal-preflight.sh`의 미러 1문장(테스트가
+잡았다)이 reviewnary로; `productName.test.ts` 예외 수 **40 → 29**. **「SellerOps 도우미」는 남는다**(판매자가
+자기 컴퓨터에서 찾아야 하는 프로그램, launchd label `ai.sellerops.local-agent`), 그래서 그 창을 가리키는
+confirmation page 문장은 sweep이 바꾼 뒤 **되돌렸다** — 창과 다른 이름을 부르는 포인터가 더 나쁜 결함이다;
+운영자 CLI(승인 매니페스트 포함)는 seller-facing이 아니라 무변경. **LOCATE_EXPORT root cause는 `NOT PROVEN`**
+이고 추측 수정 0 — export와 날짜 locate가 **같은 context**를 쓰고 그 context에서 날짜는 성공했으므로 「다른
+프레임」 가설은 약해졌다(다만 `frameResolved=false`는 미해명). backend 3,631 · collector 9,374 · frontend
+2,627 · 실패 0, 브라우저 QA 1440×900(가로 스크롤 0 · off-host 0 · 콘솔 오류는 전부 헬퍼 미기동 health probe).
+**다음 라이브 proof는 새 승인이 필요하다** — 이월된 승인은 없다.)
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

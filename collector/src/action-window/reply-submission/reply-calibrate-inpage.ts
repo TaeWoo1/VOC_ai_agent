@@ -35,7 +35,7 @@ export const IN_PAGE_CALIBRATION_INSTALL = `(() => {
     banner.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:2147483600;pointer-events:none;background:#111;color:#fff;font:14px system-ui;padding:8px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.4)';
     document.body.appendChild(banner);
   }
-  function paint() { banner.textContent = 'SellerOps 캘리브레이션 — ' + (LABELS[st.step] || st.step); }
+  function paint() { banner.textContent = 'reviewnary 캘리브레이션 — ' + (LABELS[st.step] || st.step); }
   paint();
 
   function sameTagSiblings(el) {

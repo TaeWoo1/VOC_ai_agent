@@ -202,7 +202,7 @@ echo "  WHAT YOU WILL SEE ON THE WING PAGE (the complete on-page text, Korean �
 # CHECKPOINT-COPY-BEGIN
 echo "    강조 표시된 '발급' 버튼을 직접 눌러 주세요. 누르면 연동 방식 설정 화면이 열릴 것으로 예상되지만"
 echo "    확인된 사실은 아닙니다. 화면이 열리면 그대로 두고 더 진행하지 마세요. '확인'(최종 발급)은 절대"
-echo "    누르지 마세요. SellerOps는 화면 종류만 한 번 확인하고 멈추며, 키가 실제로 만들어졌는지 여부는"
+echo "    누르지 마세요. reviewnary는 화면 종류만 한 번 확인하고 멈추며, 키가 실제로 만들어졌는지 여부는"
 echo "    판단할 수 없습니다. 화면은 판매자만 확인할 수 있습니다. 신호를 보내면 이 창은 닫히므로 먼저"
 echo "    화면을 확인해 주세요."
 # CHECKPOINT-COPY-END

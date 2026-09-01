@@ -30,7 +30,7 @@ export const ARM_COMPOSER_CAPTURE = `(() => {
     banner.id = '__aw_composer_banner';
     banner.setAttribute('aria-hidden', 'true');
     banner.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:2147483602;pointer-events:none;background:#0a7f42;color:#fff;font:14px system-ui;padding:8px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.4)';
-    banner.textContent = 'SellerOps composer abort 리허설 — 답변 입력창을 한 번 클릭하세요 (입력·전송 금지)';
+    banner.textContent = 'reviewnary composer abort 리허설 — 답변 입력창을 한 번 클릭하세요 (입력·전송 금지)';
     document.body.appendChild(banner);
   }
   var handler = function (ev) {
@@ -38,7 +38,7 @@ export const ARM_COMPOSER_CAPTURE = `(() => {
     ev.preventDefault(); ev.stopImmediatePropagation();
     ev.target.setAttribute('data-aw-composer-anchor', '1');
     window.__awComposerPicked = true;
-    banner.textContent = 'SellerOps composer abort 리허설 — 입력창 지정됨. 하이라이트·초안 확인 후 abort 하세요';
+    banner.textContent = 'reviewnary composer abort 리허설 — 입력창 지정됨. 하이라이트·초안 확인 후 abort 하세요';
     document.removeEventListener('click', handler, true);
   };
   window.__awComposerHandler = handler;
@@ -94,7 +94,7 @@ export function renderDraftOverlay(draftBody: string): string {
     box.style.cssText = 'position:fixed;right:16px;bottom:16px;max-width:380px;max-height:50vh;overflow:auto;z-index:2147483601;pointer-events:none;background:#0a2a1c;color:#eafff2;font:13px/1.55 system-ui;padding:12px 14px;border:1px solid #0a7f42;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.45);white-space:pre-wrap;word-break:break-word';
     var label = document.createElement('div');
     label.style.cssText = 'font-weight:700;margin-bottom:6px;color:#7ff0b0';
-    label.textContent = 'SellerOps · 승인된 답변 초안 (읽기 전용 — 붙여넣지 마세요)';
+    label.textContent = 'reviewnary · 승인된 답변 초안 (읽기 전용 — 붙여넣지 마세요)';
     var body = document.createElement('div');
     body.textContent = ${embedded};
     box.appendChild(label); box.appendChild(body);

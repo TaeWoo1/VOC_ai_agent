@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import {
+  countDateReadings,
   extractDates,
   matchExportScope,
   normalizeDateToken,
@@ -112,6 +113,57 @@ describe("export-scope-match — module boundary", () => {
     expect(code).not.toMatch(/\bimport\b/);
     expect(code).not.toMatch(/\bDate\b/);
     expect(code).not.toMatch(/playwright|page\.|document\./);
+  });
+
+  /**
+   * A ONE-DAY segment, which is what the conversation-started import produces at the start of a month.
+   *
+   * Observed live on 2026-09-01: the plan minted `2026-09-01 ~ 2026-09-01`, the seller set both controls to
+   * that day, and the verdict came back `UNREADABLE datesParsed=1` — a window the runtime could have checked
+   * exactly, downgraded to the seller's own confirmation. `MATCH` was unreachable for this segment shape.
+   */
+  describe("a one-day window is a complete reading, not an unreadable one", () => {
+    const ONE_DAY: RequiredRange = { start: "2026-09-01", end: "2026-09-01" };
+
+    it("matches when both controls hold the required day", () => {
+      const verdict = matchExportScope(["2026-09-01", "2026-09-01"], ONE_DAY);
+      expect(verdict.match).toBe("MATCH");
+      expect(verdict.datesParsed).toBe(1);
+      expect(verdict.spanDiffers).toBe(false);
+    });
+
+    it("mismatches when both controls hold the WRONG day — a read that disagrees is not a read that failed", () => {
+      expect(matchExportScope(["2026-08-31", "2026-08-31"], ONE_DAY).match).toBe("MISMATCH");
+    });
+
+    it("stays UNREADABLE when only one of two controls held a date", () => {
+      // Both would collapse to one distinct date, so the distinct count alone cannot tell these apart —
+      // an empty end control must never pass as "both ends agree".
+      expect(matchExportScope(["2026-09-01", ""], ONE_DAY).match).toBe("UNREADABLE");
+      expect(matchExportScope(["", "2026-09-01"], ONE_DAY).match).toBe("UNREADABLE");
+    });
+
+    it("accepts a surface whose SINGLE control holds the whole one-day window", () => {
+      expect(matchExportScope(["2026-09-01"], ONE_DAY).match).toBe("MATCH");
+    });
+
+    it("still refuses a single date against a MULTI-day window", () => {
+      expect(matchExportScope(["2026-09-01", "2026-09-01"], { start: "2026-09-01", end: "2026-09-02" }).match)
+        .toBe("UNREADABLE");
+    });
+
+    it("still mismatches a two-day selection against a one-day window", () => {
+      expect(matchExportScope(["2026-09-01", "2026-09-02"], ONE_DAY).match).toBe("MISMATCH");
+    });
+  });
+
+  describe("countDateReadings", () => {
+    it("counts controls that held a date, not distinct dates", () => {
+      expect(countDateReadings(["2026-09-01", "2026-09-01"])).toBe(2);
+      expect(countDateReadings(["2026-09-01", ""])).toBe(1);
+      expect(countDateReadings(["", ""])).toBe(0);
+      expect(countDateReadings(["2026-09-01 ~ 2026-09-02"])).toBe(1);
+    });
   });
 
   // The verdict is the ONLY thing allowed to leave the process; a date field on it would carry the

@@ -51,7 +51,7 @@ describe("CredentialDiagnosisPanel", () => {
 
       render(<CredentialDiagnosisPanel accountId="a1" />);
 
-      expect(await screen.findByText("SellerOps 서버 설정 문제입니다")).toBeInTheDocument();
+      expect(await screen.findByText("reviewnary 서버 설정 문제입니다")).toBeInTheDocument();
       expect(
         screen.getByText(/판매자가 채널을 다시 연결해도 해결되지 않습니다/),
       ).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe("CredentialDiagnosisPanel", () => {
 
     render(<CredentialDiagnosisPanel accountId="a1" />);
 
-    expect(await screen.findByText("SellerOps 서버 설정 문제입니다")).toBeInTheDocument();
+    expect(await screen.findByText("reviewnary 서버 설정 문제입니다")).toBeInTheDocument();
   });
 
   it("stays silent when the diagnosis itself cannot be read", async () => {

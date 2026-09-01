@@ -301,7 +301,7 @@ export const IMPORT_STAGE_COPY: Readonly<Record<string, string>> = {
   "actionWindow.import.confirmRange": "선택한 기간이 위 기간과 같은지 확인해 주세요.",
   "actionWindow.import.export": "엑셀 다운로드 버튼을 눌러 주세요.",
   "actionWindow.import.consent": "네이버 확인 창의 버튼을 눌러 주세요.",
-  "actionWindow.import.ingest": "받은 파일을 SellerOps가 정리하고 있어요.",
+  "actionWindow.import.ingest": "받은 파일을 reviewnary가 정리하고 있어요.",
 
   // The `actionWindow.importDiscovery.*` keys are GONE, and that is the fix for finding 16 rather than a
   // rewording of it. They described a run that asked the seller to find the earliest date NAVER's calendar
@@ -400,7 +400,7 @@ export function buildImportGuidancePack(continuation?: ImportContinuation | null
   return {
     chrome: {
       // Named, because this panel appears on someone else's site and the seller has to know whose it is.
-      product: "SellerOps 안내",
+      product: "reviewnary 안내",
       stepCounter: "{total}단계 중 {step}",
       requiredRange: "가져올 기간: {start} ~ {end}",
       blockedLabel: "잠깐 멈췄어요",
@@ -543,7 +543,7 @@ export function monthOptions(today: string, monthsBack = 72): { value: string; l
 export function scopeEvidenceLabel(evidence: ScopeEvidence | null): string {
   switch (evidence) {
     case "MACHINE_MATCHED":
-      return "SellerOps가 선택된 기간을 확인했어요";
+      return "reviewnary가 선택된 기간을 확인했어요";
     case "OPERATOR_CONFIRMED":
       return "직접 확인한 기간이에요";
     default:

@@ -44,6 +44,7 @@ import type { Frame, Page } from "playwright";
 import type { ScopeEvidenceWire } from "../scope-evidence";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import { matchExportScope } from "../../naver/export-scope-match";
+import { planExportAction } from "../../naver/export-classify";
 import {
   importLocateDiagnostic,
   inferRequiresApply,
@@ -289,6 +290,25 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     if (target === "export") {
       const decision = await this.proven.locate();
       if (decision.count === 1 && decision.sig) this.sigs.set("export", decision.sig);
+      // The DATE branch below has logged a sanitized structural diagnostic on every unresolved locate since
+      // it was written; this one logged nothing, and the engine's `fail("TARGET_NOT_FOUND")` was silent too.
+      // So the 2026-09-01 sitting ended twice at exactly this call with no evidence of WHY: the run reached
+      // the export step, found no control, and died leaving a trail that stopped at the range confirmation.
+      //
+      // Diagnostic only — the locate itself is untouched, and the root cause is deliberately NOT guessed at
+      // here. `planExportAction` is the existing pure, no-click classifier: it reads the same content the
+      // decision read and reports the layout it sees plus bucketed candidate counts, never a selector, never
+      // page text. That is enough to tell "the export control is in a frame we are not reading" from "the
+      // page is an async-job layout" from "the wording no longer matches" — the three hypotheses that
+      // currently have no evidence between them.
+      if (decision.count !== 1) {
+        log("aw_import_export_locate_unresolved", {
+          count: decision.count,
+          frameResolved: this.proven.surfaceFrameResolved(),
+          childFrames: this.proven.childFrameCount(),
+          ...planExportAction(await this.ctx().content()),
+        });
+      }
       return decision;
     }
     if (target === "consent") {

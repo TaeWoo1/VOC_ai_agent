@@ -182,6 +182,12 @@ export function ReviewImportPage() {
           // The seller's chosen period became a plan, so the card's summary is re-read from the backend rather
           // than inferred from what was posted.
           onPlanCreated={() => setPlansKey((k) => k + 1)}
+          // An abandoned plan drops out of `currentPlan` (which skips ABANDONED), so the re-read is what puts
+          // the range chooser back on screen — the seller's way to pick a different period.
+          onPlanAbandoned={() => {
+            setPlanId(null);
+            setPlansKey((k) => k + 1);
+          }}
           onLaunched={() => setPlansKey((k) => k + 1)}
           // A finished segment run covered a month of the plan server-side, so the same re-read applies.
           onRunSettled={() => setPlansKey((k) => k + 1)}

@@ -934,17 +934,17 @@ const PARK_NOTICE_COPY: Readonly<
     TARGET_NOT_FOUND: {
       badge: "안내 멈춤",
       brief: "이 화면에서 다음 버튼을 찾지 못했어요.",
-      detail: "화면이 모두 뜬 뒤 SellerOps에서 '다시 확인'을 눌러 주세요.",
+      detail: "화면이 모두 뜬 뒤 reviewnary에서 '다시 확인'을 눌러 주세요.",
     },
     UI_DRIFT: {
       badge: "안내 멈춤",
       brief: "쿠팡 윙 화면이 바뀐 것 같아요.",
-      detail: "SellerOps에서 '다시 확인'을 눌러 주세요.",
+      detail: "reviewnary에서 '다시 확인'을 눌러 주세요.",
     },
     SURFACE_SETTLE_TIMEOUT: {
       badge: "안내 멈춤",
       brief: "화면이 아직 준비되지 않았어요.",
-      detail: "화면이 모두 뜬 뒤 SellerOps에서 '다시 확인'을 눌러 주세요.",
+      detail: "화면이 모두 뜬 뒤 reviewnary에서 '다시 확인'을 눌러 주세요.",
     },
   });
 
@@ -973,20 +973,20 @@ const HANDOFF_PANEL_COPY: Readonly<
 > = Object.freeze({
   WORKING: {
     badge: "저장 중",
-    brief: "SellerOps가 연결 정보를 저장하고 있어요.",
+    brief: "reviewnary가 연결 정보를 저장하고 있어요.",
     detail: "이 창을 닫지 말고 잠시만 기다려 주세요. 값은 어디에도 표시되지 않습니다.",
   },
   STORED: {
     badge: "연결 완료",
     brief: "✓ 쿠팡 연결 완료",
     detail: "업체코드·Access Key·Secret Key를 암호화해 저장하고, 연결이 되는지 확인했어요. 값은 화면에 표시되지 않았고 기록에도 남지 않았습니다.",
-    confirm: "SellerOps로 돌아가기",
+    confirm: "reviewnary로 돌아가기",
   },
   FAILED: {
     badge: "저장 실패",
     brief: "연결 정보를 저장하지 못했어요.",
-    detail: "이 창의 값은 SellerOps에 저장되지 않았습니다. SellerOps에서 직접 입력해 연결을 마칠 수 있어요.",
-    confirm: "SellerOps로 돌아가기",
+    detail: "이 창의 값은 reviewnary에 저장되지 않았습니다. reviewnary에서 직접 입력해 연결을 마칠 수 있어요.",
+    confirm: "reviewnary로 돌아가기",
   },
 });
 
@@ -1012,7 +1012,7 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
    * run, and reads nothing by itself: it records the seller's consent, and SellerOps — where the seller is
    * authenticated — performs the read, the vault write and the connection check under it.
    */
-  credentials: "SellerOps에 연결하기",
+  credentials: "reviewnary에 연결하기",
 };
 
 /** The seller's OTHER way forward at the credential step: type the three values in themselves. */
@@ -1229,7 +1229,7 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   reach_open_api: "WING에 로그인한 뒤 '오픈API 키 발급' 페이지로 이동하세요. 도착하면 자동으로 넘어갑니다.",
   issue: "'API Key 발급 받기'를 직접 누르세요. 키는 아직 만들어지지 않고 사용 목적 화면만 열립니다. 화면이 열리면 자동으로 넘어갑니다.",
   confirm_purpose: "사용 목적이 'OPEN API'인지 확인하고(기본값입니다) '확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
-  terms_consent: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
+  terms_consent: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. reviewnary는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
   // NOT trimmed. Every sentence here is a safety claim the approval harness reproduces and asserts before the
   // operator grants (`wing-walk-selfcheck.sh`, "the COMPLETE Korean copy of the key-creation step").
   //
@@ -1245,12 +1245,12 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   // 않으니 직접 진행해 주세요" — true when written, false since the vendor screen was measured. Guidance that
   // apologises for not guiding, on a step that now guides, is the same class of stale safety copy as the
   // key-creation warning this string already had to lose.
-  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않습니다. 이 버튼에서는 키가 발급되지 않고 연동 방식을 고르는 화면이 열립니다(live walk 2회에서 그렇게 보고되었습니다. SellerOps는 키 발급 여부를 확인할 수 없습니다). 그 화면이 열리면 자동으로 넘어갑니다.",
+  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — reviewnary는 이 버튼을 절대 누르지 않습니다. 이 버튼에서는 키가 발급되지 않고 연동 방식을 고르는 화면이 열립니다(live walk 2회에서 그렇게 보고되었습니다. reviewnary는 키 발급 여부를 확인할 수 없습니다). 그 화면이 열리면 자동으로 넘어갑니다.",
   // The last clause used to read "선택한 뒤 아래 버튼을 누르세요." The step now finishes itself the moment the
   // form reads complete, and a panel that still asks for a press the runtime no longer waits for is the same
   // stale-copy defect this file keeps correcting — one step later. The button is still there and still works,
   // which is what the parenthesis says.
-  vendor_method: "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요 — SellerOps는 선택하지 않습니다. 선택하면 URL · IP 주소 입력란이 더 나타납니다(업체명은 이미 화면에 있습니다). 업체명 · URL을 입력하고 IP는 '추가'까지 누르면 자동으로 넘어갑니다(SellerOps는 입력란이 비었는지만 보고 값은 읽지 않습니다. 넘어가지 않으면 아래 버튼을 누르세요).",
+  vendor_method: "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요 — reviewnary는 선택하지 않습니다. 선택하면 URL · IP 주소 입력란이 더 나타납니다(업체명은 이미 화면에 있습니다). 업체명 · URL을 입력하고 IP는 '추가'까지 누르면 자동으로 넘어갑니다(reviewnary는 입력란이 비었는지만 보고 값은 읽지 않습니다. 넘어가지 않으면 아래 버튼을 누르세요).",
   // NOT trimmed, and every sentence is a safety claim the approval harness reproduces before the operator
   // grants. This is the one step in the whole walk that brings a real marketplace credential into existence,
   // and the seller is the only one who can do it.
@@ -1260,10 +1260,10 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   // falsify does not make them more careful — it teaches them that these warnings are approximate, on the one
   // screen where they must not be. What is true is that a real key comes into existence and live account state
   // changes; removing it later is a separate act, not an undo.
-  vendor_confirm: "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
+  vendor_confirm: "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). reviewnary는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   // No copy request. The seller issued the key; SellerOps fetches what it needs, and the ASKING happens on a
   // SellerOps surface where a press can be verified — not here, on a marketplace page.
-  credentials: "SellerOps는 이 화면에 표시된 업체코드·Access Key·Secret Key만 읽어 곧바로 암호화해 저장하고, 저장한 뒤 연결이 되는지 한 번만 확인합니다. 값은 SellerOps 화면에 표시되지 않고, 기록에도 남지 않습니다. 아래 'SellerOps에 연결하기'를 누르시기 전에는 아무것도 읽지 않습니다. 직접 입력하고 싶으시면 그 아래 버튼을 누르세요.",
+  credentials: "reviewnary는 이 화면에 표시된 업체코드·Access Key·Secret Key만 읽어 곧바로 암호화해 저장하고, 저장한 뒤 연결이 되는지 한 번만 확인합니다. 값은 reviewnary 화면에 표시되지 않고, 기록에도 남지 않습니다. 아래 'reviewnary에 연결하기'를 누르시기 전에는 아무것도 읽지 않습니다. 직접 입력하고 싶으시면 그 아래 버튼을 누르세요.",
 };
 
 /**
@@ -1291,7 +1291,7 @@ export const OPERATOR_STEP_BRIEF: Readonly<Record<CoupangIssuanceTarget, string>
   // with an empty form.
   vendor_method: "'자체개발(직접입력)'을 직접 선택한 뒤, 업체명 · URL을 입력하고 IP는 '추가'까지 누르세요. 다 채우면 자동으로 넘어갑니다.",
   vendor_confirm: "⚠ 이 화면의 '확인'에서 실제 API 키가 발급됩니다. 업체명 · URL을 입력하고 IP는 '추가'까지 누른 뒤, '확인'을 직접 누르세요.",
-  credentials: "API 정보가 발급됐어요. 업체코드·Access Key·Secret Key를 SellerOps에 암호화해 저장하고 연결을 한 번 확인합니다. 값은 화면에 표시하지 않습니다.",
+  credentials: "API 정보가 발급됐어요. 업체코드·Access Key·Secret Key를 reviewnary에 암호화해 저장하고 연결을 한 번 확인합니다. 값은 화면에 표시하지 않습니다.",
 };
 
 /**
@@ -1349,7 +1349,7 @@ export const OPERATOR_STEP_TITLES: Readonly<Record<CoupangIssuanceTarget, string
   // The one chip in the walk that names a CONSEQUENCE, because this control creates a real credential.
   // Every other chip names the control; this is the exception the panel copy alone should not have to carry.
   vendor_confirm: "'확인' 누르기 (키 발급)",
-  credentials: "SellerOps에 연결하기",
+  credentials: "reviewnary에 연결하기",
 };
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */

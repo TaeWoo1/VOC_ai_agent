@@ -63,6 +63,22 @@ export function normalizeDateToken(year: string, month: string, day: string): st
 }
 
 /**
+ * Pure: how many of the given controls held at least one readable date.
+ *
+ * DISTINCT from {@link extractDates}, and the difference is the whole point: on a one-day window both ends
+ * hold the same date, so the distinct count collapses to 1 and can no longer tell "both ends say 09-01" from
+ * "the start says 09-01 and the end is empty". The first is a fully-read window; the second is half a
+ * reading and must stay `UNREADABLE`. Counting per control is what keeps those apart.
+ */
+export function countDateReadings(values: readonly string[]): number {
+  let readings = 0;
+  for (const value of values) {
+    if (extractDates([value]).length > 0) readings += 1;
+  }
+  return readings;
+}
+
+/**
  * Pure: every distinct `YYYY-MM-DD` date found across the given control values, sorted ascending.
  *
  * Values are concatenated before scanning so a single control holding both ends of a range is read the
@@ -90,12 +106,34 @@ export function extractDates(values: readonly string[]): string[] {
 /**
  * Pure: compare the seller's selected scope against the segment we asked them to export.
  *
- * Fewer than two readable dates is `UNREADABLE`, not `MISMATCH`: a surface whose picker keeps its value
- * somewhere we cannot see is a limit of our reading, not evidence the seller chose the wrong window, and
- * calling it a mismatch would strand a correct export.
+ * Unreadability is `UNREADABLE`, not `MISMATCH`: a surface whose picker keeps its value somewhere we cannot
+ * see is a limit of our reading, not evidence the seller chose the wrong window, and calling it a mismatch
+ * would strand a correct export.
+ *
+ * **A one-day window reads as ONE date, and that is a complete reading — not a failure to read.** The
+ * original rule demanded two distinct dates, so a segment whose start equals its end could never reach
+ * `MATCH` no matter what the seller selected: `extractDates` de-duplicates, both controls hold the same
+ * day, and the count collapses to 1. Observed live on 2026-09-01 (`UNREADABLE datesParsed=1
+ * spanDiffers=false`) on a `2026-09-01 ~ 2026-09-01` segment — a window the plan itself had produced. The
+ * seller was then asked to confirm a range the runtime could have verified, and the run's scope evidence was
+ * downgraded to `OPERATOR_CONFIRMED` for no reason.
+ *
+ * So one distinct date is accepted **only** when the required window is itself one day AND both controls
+ * actually held a date ({@link countDateReadings}) — otherwise a half-filled picker on a one-day segment
+ * would read as a confident MATCH. Every other shape keeps the old behaviour, and every doubt still falls
+ * to `UNREADABLE` rather than to a match.
  */
 export function matchExportScope(values: readonly string[], required: RequiredRange): ScopeMatchVerdict {
   const dates = extractDates(values);
+  if (dates.length === 1 && required.start === required.end) {
+    // A single control legitimately holds the whole window only when the surface HAS a single control.
+    // With two controls we require both to have been read, so an empty end date cannot pass as agreement.
+    if (values.length > 1 && countDateReadings(values) < 2) {
+      return { match: "UNREADABLE", datesParsed: 1, spanDiffers: false };
+    }
+    const spanDiffers = dates[0]! !== required.start;
+    return { match: spanDiffers ? "MISMATCH" : "MATCH", datesParsed: 1, spanDiffers };
+  }
   if (dates.length < 2) {
     return { match: "UNREADABLE", datesParsed: dates.length, spanDiffers: false };
   }

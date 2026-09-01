@@ -632,7 +632,7 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
           "display:flex;gap:12px;align-items:baseline;justify-content:space-between;font:600 12px system-ui,-apple-system,sans-serif;color:#cfe0ff;letter-spacing:0.02em";
         const who = document.createElement("span");
         who.setAttribute("data-aw-panel-channel", "");
-        who.textContent = `SellerOps · ${o.channelName}`;
+        who.textContent = `reviewnary · ${o.channelName}`;
         const where = document.createElement("span");
         where.setAttribute("data-aw-panel-step", "");
         where.textContent = `${o.stepNumber}/${o.totalSteps}`;

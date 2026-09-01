@@ -174,7 +174,7 @@ describe("the copy carries the consequence exactly once, on the control that has
   });
 
   it("the method step says WHO chooses, and does not offer the option the walk does not guide", () => {
-    expect(OPERATOR_STEP_LABELS.vendor_method).toContain("SellerOps는 선택하지 않습니다");
+    expect(OPERATOR_STEP_LABELS.vendor_method).toContain("reviewnary는 선택하지 않습니다");
     // `연동업체 선택` is measured to the same standard and deliberately not named: the walk guides one method.
     expect(OPERATOR_STEP_LABELS.vendor_method).not.toContain("연동업체");
   });

@@ -51,7 +51,7 @@ function press(doc: Doc, attr: string, env: { run: (fn: () => void) => void }, t
 }
 
 describe("the panel header — channel and step, on every panel", () => {
-  it("carries `SellerOps · <channel>` and `n/total`", async () => {
+  it("carries `reviewnary · <channel>` and `n/total`", async () => {
     const doc = new Doc();
     tagged(doc, rect(100, 300, 120, 40));
     const { page } = fakePage(doc);
@@ -60,7 +60,7 @@ describe("the panel header — channel and step, on every panel", () => {
 
     const panel = doc.getElementById("__aw_advance_panel__")!;
     const header = panel.children.find((c) => c.hasAttribute("data-aw-panel-header"))!;
-    expect(header.children.map((c) => c.textContent)).toEqual(["SellerOps · 쿠팡 윙", "7/9"]);
+    expect(header.children.map((c) => c.textContent)).toEqual(["reviewnary · 쿠팡 윙", "7/9"]);
   });
 
   it("**a DOCKED panel still says which step it is** — the chip that used to carry it is hidden there", async () => {

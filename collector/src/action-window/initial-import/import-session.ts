@@ -44,7 +44,7 @@ import { log } from "../../log";
 import type { ImportEffect, ImportSegmentEngine } from "./import-engine";
 import { IMPORT_TERMINAL_STAGES } from "./import-stages";
 import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-driver";
-import { recordFailure, recordStage } from "./reliability-instrumentation";
+import { recordFailure, recordStage, recordTerminalFailure } from "./reliability-instrumentation";
 import { isReliabilityFailure } from "./reliability-failure";
 
 export interface ImportSessionOptions {
@@ -102,6 +102,8 @@ export class ImportSegmentSession {
 
   private started = false;
   private publishedSeq = 0;
+  /** Latched so a terminal failure is recorded exactly once, however many times state is republished. */
+  private terminalRecorded = false;
   private autoBusy = false;
   private unsubscribe: (() => void) | null = null;
   /** The PREPARE-start watchdog handle; cleared the moment the drive loop enters PREPARE. */
@@ -278,6 +280,7 @@ export class ImportSegmentSession {
     const command = frame.command;
     const valid = validateCommandEnvelope(command);
     if (!valid.ok) {
+      log("aw_import_command_refused", { reason: "INVALID_ENVELOPE" });
       this.transport.send({
         kind: "aw_command_result",
         commandId: safeCommandId(command),
@@ -287,6 +290,11 @@ export class ImportSegmentSession {
       return;
     }
     const outcome = this.engine.command(command);
+    // A refused command leaves NO other trace: the run does not move, the view does not change, and the
+    // reason travels only on the wire where nothing writes it down. On 2026-09-01 a press that appeared to
+    // do nothing could not be distinguished from a press that was never sent. Sanitized — the command type
+    // and the engine's own refusal enum, never the envelope.
+    if (!outcome.ok) log("aw_import_command_refused", { type: command.type, reason: outcome.reason });
     // An accepted command is the SELLER asking for something, which is the ONE thing that may re-open a window
     // they closed. Cleared before the drive, so the chain this command starts is allowed to bring it back up.
     if (outcome.ok) this.surfaceClosed = false;
@@ -555,6 +563,16 @@ export class ImportSegmentSession {
   }
 
   private publishState(): void {
+    // EVERY state change funnels through here, which is why the terminal marker lives here rather than at each
+    // `fail()` call site: a new terminal path added later cannot forget to announce itself. Recorded before the
+    // wire send so the log line exists even if the transport is gone.
+    if (!this.terminalRecorded) {
+      const terminal = this.engine.terminalFailure();
+      if (terminal) {
+        this.terminalRecorded = true;
+        recordTerminalFailure(terminal.code, terminal.stage);
+      }
+    }
     for (const e of this.engine.events()) {
       if (e.sequence > this.publishedSeq) {
         this.transport.send({ kind: "aw_event", event: e });

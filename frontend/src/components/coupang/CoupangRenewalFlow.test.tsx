@@ -69,7 +69,7 @@ describe("CoupangRenewalFlow", () => {
       />,
     );
     expect(screen.getByTestId("coupang-renewal")).toHaveAttribute("data-phase", "guide");
-    await userEvent.click(screen.getByRole("button", { name: "SellerOps로 돌아가 새 키 입력하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "reviewnary로 돌아가 새 키 입력하기" }));
     expect(screen.getByTestId("coupang-renewal")).toHaveAttribute("data-phase", "replace");
     expect(screen.getByRole("heading", { name: "새 키로 교체" })).toBeInTheDocument();
   });
@@ -88,7 +88,7 @@ describe("CoupangRenewalFlow", () => {
         walkthroughSeam={{ run: completedRun }}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "SellerOps로 돌아가 새 키 입력하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "reviewnary로 돌아가 새 키 입력하기" }));
 
     // Operator-confirm the new key's expiry date.
     const dateInput = screen.getByLabelText("만료일을 확인해 입력") as HTMLInputElement;
@@ -124,7 +124,7 @@ describe("CoupangRenewalFlow", () => {
         walkthroughSeam={{ run: completedRun }}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "SellerOps로 돌아가 새 키 입력하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "reviewnary로 돌아가 새 키 입력하기" }));
     await fillCredentials();
     await act(async () => {
       await userEvent.click(screen.getByRole("button", { name: "연결 정보 저장" }));
@@ -150,7 +150,7 @@ describe("CoupangRenewalFlow", () => {
         walkthroughSeam={{ run: completedRun }}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "SellerOps로 돌아가 새 키 입력하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "reviewnary로 돌아가 새 키 입력하기" }));
     await fillCredentials();
     await act(async () => {
       await userEvent.click(screen.getByRole("button", { name: "연결 정보 저장" }));
@@ -167,7 +167,7 @@ describe("CoupangRenewalFlow", () => {
         walkthroughSeam={{ run: completedRun }}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "SellerOps로 돌아가 새 키 입력하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "reviewnary로 돌아가 새 키 입력하기" }));
     await expectNoAxeViolations(container);
   });
 });

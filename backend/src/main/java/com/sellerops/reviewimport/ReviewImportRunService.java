@@ -7,8 +7,6 @@ import com.sellerops.ingest.IngestResult;
 import com.sellerops.ingest.UploadType;
 import java.io.InputStream;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.UUID;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -134,7 +132,7 @@ public class ReviewImportRunService {
         // Fired only on success, AFTER_COMMIT-consumed and best-effort, so it never affects this ingest.
         if (attempt.getResult() == SegmentAttemptResult.SUCCEEDED) {
             events.publishEvent(
-                    new ReviewSegmentIngestedEvent(orgId, plan.getChannelId(), LocalDate.now(ZoneOffset.UTC)));
+                    new ReviewSegmentIngestedEvent(orgId, plan.getChannelId(), ReviewImportCalendar.today()));
         }
         return attempt;
     }

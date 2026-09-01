@@ -27,6 +27,7 @@ function stubRuntime() {
       intentListeners.add(listener);
       return () => intentListeners.delete(listener);
     },
+    subscribeRefusal: () => () => {},
     start: async () => {},
     setGuidancePack: () => {},
     send: () => {},

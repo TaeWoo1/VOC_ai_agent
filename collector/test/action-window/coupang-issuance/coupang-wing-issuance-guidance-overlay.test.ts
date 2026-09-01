@@ -182,7 +182,7 @@ describe("the chip's title and the panel's instruction are different things", ()
     // shape of every disclosure clause, and a chip cannot hold one whole. A destination is fine:
     // `SellerOps로 돌아가기` names where the seller goes, and asserts nothing about what we do or don't do.
     for (const target of TARGETS) {
-      expect(OPERATOR_STEP_TITLES[target], target).not.toContain("SellerOps는");
+      expect(OPERATOR_STEP_TITLES[target], target).not.toContain("reviewnary는");
       expect(OPERATOR_STEP_TITLES[target], target).not.toContain("자동으로 넘어");
     }
   });
@@ -199,7 +199,7 @@ describe("the chip's title and the panel's instruction are different things", ()
     for (const clause of [
       "'약관 동의 및 Key 발급받기'를 직접 누르세요",
       "이 버튼에서는 키가 발급되지 않고",
-      "SellerOps는 키 발급 여부를 확인할 수 없습니다",
+      "reviewnary는 키 발급 여부를 확인할 수 없습니다",
     ]) {
       expect(OPERATOR_STEP_LABELS.issue_final, clause).toContain(clause);
     }
@@ -207,7 +207,7 @@ describe("the chip's title and the panel's instruction are different things", ()
     // 진행해 주세요" and "Access Key가 화면에 표시되면 아래 버튼을 누르세요" — both true when written, both false
     // once the vendor screen was measured and the walk gained steps for it. Guidance that apologises for not
     // guiding, on a step that now guides, is the same class of stale safety copy as the warning above.
-    expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("아직 SellerOps가 안내하지 않으니");
+    expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("아직 reviewnary가 안내하지 않으니");
     expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("Access Key가 화면에 표시되면");
     expect(OPERATOR_STEP_LABELS.issue_final).toContain("자동으로 넘어갑니다");
   });
@@ -231,7 +231,7 @@ describe("the chip's title and the panel's instruction are different things", ()
     expect(OPERATOR_STEP_LABELS.vendor_method).toContain("'자체개발(직접입력)'을 직접 선택하세요");
     // 업체명 was ALREADY painting on the untouched vendor screen; only URL and IP 주소 appeared on selection.
     expect(OPERATOR_STEP_LABELS.vendor_method).toContain("업체명은 이미 화면에 있습니다");
-    expect(OPERATOR_STEP_LABELS.vendor_method).toContain("SellerOps는 선택하지 않습니다");
+    expect(OPERATOR_STEP_LABELS.vendor_method).toContain("reviewnary는 선택하지 않습니다");
   });
 
   it("the chip has a STRUCTURAL ceiling too — a long label is visibly cut, not lost off-screen", () => {

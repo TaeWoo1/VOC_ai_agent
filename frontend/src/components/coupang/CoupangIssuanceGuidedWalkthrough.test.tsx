@@ -632,7 +632,7 @@ describe("CoupangIssuanceGuidedWalkthrough — the credential handoff", () => {
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} ensureAccountId={async () => "acc-1"} accountReady />);
     start();
     act(() => host.publish(asking()));
-    expect(screen.getByLabelText("연결 정보 저장").textContent ?? "").toContain("[SellerOps에 연결하기]");
+    expect(screen.getByLabelText("연결 정보 저장").textContent ?? "").toContain("[reviewnary에 연결하기]");
 
     await act(async () => {
       host.publish(consented());

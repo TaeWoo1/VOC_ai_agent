@@ -42,6 +42,9 @@ function fakeRuntime(opts: { attach?: boolean; startRejects?: Error } = {}) {
       intentListeners.add(listener);
       return () => intentListeners.delete(listener);
     },
+    subscribeRefusal() {
+      return () => {};
+    },
     setGuidancePack(pack) {
       packs.push(pack);
     },

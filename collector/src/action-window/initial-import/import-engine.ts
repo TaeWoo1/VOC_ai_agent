@@ -165,6 +165,12 @@ export class ImportSegmentEngine {
   private processed: number | null = null;
   private blockerCode: ImportBlockerCode | null = null;
   private blockerRecoverable = false;
+  /**
+   * The stage the run was in when {@link fail} moved it to `FAILED` — captured because `fail` overwrites
+   * `stage`, and "it failed" without "where" is the shape that made the 2026-09-01 live sitting
+   * undiagnosable. Read by the session to record the terminal marker; null until a terminal failure.
+   */
+  private failedFromStage: ImportStage | null = null;
   private readonly log: EventEnvelope[] = [];
 
   constructor(config: ImportRunConfig, opts?: { clock?: ImportClock }) {
@@ -436,7 +442,12 @@ export class ImportSegmentEngine {
       this.emit("STEP_READY", { stepId: this.stepId(), stepStatus: "READY" });
       this.emit("HUMAN_ACTION_REQUIRED", { stepId: this.stepId() });
       this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
-      return "NONE";
+      // NOT "NONE". This step asks the seller to confirm the WINDOW, and it has no control to point at —
+      // so the annotation still sitting on the end-date field is pointing at the step they just finished.
+      // Observed live on 2026-09-01: the seller read that leftover highlight as "still waiting for this
+      // field" and reported the run stuck on the second date box, while it was in fact waiting on the
+      // panel. Same defect, same repair, as finding 12: stop pointing at what is no longer being asked.
+      return "CLEAR_HIGHLIGHT";
     }
     this.scopeEvidence = "MACHINE_MATCHED";
     this.completedSteps = this.activeStepIndex;
@@ -577,6 +588,9 @@ export class ImportSegmentEngine {
   private fail(code: ImportBlockerCode): ImportEffect {
     this.blockerCode = code;
     this.blockerRecoverable = false;
+    // BEFORE the overwrite: a terminal failure has to say where it happened, and `stage` is about to stop
+    // being able to. `LOCATE_EXPORT` vs `LOCATE_START` is the whole difference between two `TARGET_NOT_FOUND`s.
+    this.failedFromStage = this.stage;
     this.stage = "FAILED";
     this.emit("RUN_BLOCKED", { code, recoverable: false });
     this.emit("RUN_FAILED", { code });
@@ -714,6 +728,15 @@ export class ImportSegmentEngine {
   }
   currentStage(): ImportStage {
     return this.stage;
+  }
+  /**
+   * Where a terminal failure happened, and what it was — the pair the session records so a dead run is never
+   * silent. Null while the run has not failed terminally; a recoverable park is NOT a terminal failure and
+   * deliberately does not answer here (those already have their own `aw_acquisition_failure` marker).
+   */
+  terminalFailure(): { code: ImportBlockerCode; stage: ImportStage } | null {
+    if (this.stage !== "FAILED" || !this.blockerCode || !this.failedFromStage) return null;
+    return { code: this.blockerCode, stage: this.failedFromStage };
   }
   isStarted(): boolean {
     return this.started;

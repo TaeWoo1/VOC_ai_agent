@@ -5,6 +5,7 @@ import { Btn, BtnLink } from "../../ui/Btn";
 import { api } from "../../../lib/apiClient";
 import { analytics } from "../../../lib/analytics";
 import { resolveCopy } from "../../../lib/actionWindow/copy";
+import { recheckLabel } from "../../../lib/reviewImport";
 import { isTerminalRunStatus } from "../../../lib/actionWindow/homeFixtures";
 import { type AcquireRuntime } from "../../../lib/actionWindow/acquire/acquireRuntime";
 import {
@@ -103,6 +104,14 @@ export function HumanActionArtifact({
   const [starting, setStarting] = useState(false);
   const [failed, setFailed] = useState(false);
   const [engaged, setEngaged] = useState(false);
+  /**
+   * Bumped to start a NEW guided run in this same card.
+   *
+   * Once `engaged` is true the card replaces its primary with the run panel, so a run that reached a terminal
+   * state left the seller with no control at all — observed live on 2026-09-01: after 「그만두기」 the card had
+   * neither 「최신 리뷰 가져오기」 nor anything else, and only a page reload brought it back.
+   */
+  const [runKey, setRunKey] = useState(0);
   const channel = artifact.channelNameKo ?? artifact.channelCode;
   const canSync = artifact.path === "MANUAL_SYNC" && !!artifact.accountId;
   const guided = GUIDED_PATHS.includes(artifact.path) && !!artifact.accountId ? (artifact.path as GuidedAcquisitionPath) : null;
@@ -160,11 +169,16 @@ export function HumanActionArtifact({
 
           {guided === "EXPORT_ACTION_WINDOW" && running && artifact.accountId ? (
             <NaverGuidedImportRun
+              // Remounting on restart is the point: a fresh mount runs the whole attach → plan → launch →
+              // START_RUN chain again, which is exactly what "try again" has to mean. Keeping the component
+              // and re-firing part of the chain would leave it addressing the run that just ended.
+              key={runKey}
               accountId={artifact.accountId}
               onCompleted={() => {
                 analytics.track("human_action_completed", { type: "review_import" });
                 onResume();
               }}
+              onRestart={() => setRunKey((k) => k + 1)}
               inject={importRuntime}
             />
           ) : guided && running && artifact.accountId ? (
@@ -328,15 +342,18 @@ function thisMonth(): string {
 function NaverGuidedImportRun({
   accountId,
   onCompleted,
+  onRestart,
   inject,
 }: {
   accountId: string;
   onCompleted: () => void;
+  /** Ask the card for a brand-new run. Offered only once this one has terminated. */
+  onRestart?: () => void;
   inject?: GuidedImportRuntime;
 }) {
   const bridge = useBridge(!inject, { autoPair: true });
   const paired = !!inject || bridge.state.phase === "paired";
-  const { snapshot, unavailable, ensureRuntime, send } = useGuidedImport(inject);
+  const { snapshot, unavailable, refused, ensureRuntime, send } = useGuidedImport(inject);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const startedRef = useRef(false);
@@ -423,10 +440,33 @@ function NaverGuidedImportRun({
       {snapshot.status === "COMPLETED" ? (
         <p className="break-keep text-sm text-ink" role="status">리뷰 가져오기가 끝났습니다. 이어서 확인하겠습니다.</p>
       ) : null}
+      {/* A run that ENDED without finishing still has somewhere to go. `COMPLETED` deliberately does not
+          offer this — that run's next step is the conversation resuming, not another import. */}
+      {terminal && snapshot.status !== "COMPLETED" && onRestart ? (
+        <Btn variant="outline" onClick={onRestart} data-testid="guided-import-restart">다시 시도</Btn>
+      ) : null}
+      {/* A press that did nothing has to say so. Before this, `send` dropped a command the view did not allow
+          without writing anything anywhere, and a runtime rejection came back on the wire and was discarded —
+          so the seller pressed, nothing moved, and no surface could tell them why. */}
+      {refused ? (
+        <p className="break-keep text-sm text-warn" role="status" data-testid="guided-import-refused">
+          {refused.cause === "NOT_ALLOWED_NOW"
+            ? "지금은 이 동작을 할 수 없습니다. 화면이 바뀌면 다시 시도해 주세요."
+            : "요청이 처리되지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요."}
+        </p>
+      ) : null}
       {!terminal ? (
         <div className="flex flex-wrap gap-2">
+          {/* The label is the STEP's, not the run's. `REQUEST_STEP_RECHECK` is one command that means a
+              different thing at every barrier — "시작일 입력했어요", "기간이 같아요", "엑셀 다운로드
+              눌렀어요" — and this card used to hardcode the download one for all of them. Observed live on
+              2026-09-01: at the range-confirm step, before anything had been downloaded, the only control on
+              screen claimed the seller had downloaded a file. `recheckLabel` is the same lookup the in-page
+              panel already used, so the two windows now say the same word. */}
           {snapshot.allowedCommands.includes("REQUEST_STEP_RECHECK") ? (
-            <Btn onClick={() => send("REQUEST_STEP_RECHECK")}>내려받기를 마쳤습니다 · 다시 확인</Btn>
+            <Btn onClick={() => send("REQUEST_STEP_RECHECK")}>
+              {recheckLabel({ copyKey: snapshot.step?.copyKey ?? null, blockerCode: snapshot.blocker?.code ?? null })}
+            </Btn>
           ) : null}
           {snapshot.allowedCommands.includes("CANCEL_RUN") ? (
             <Btn variant="outline" onClick={() => send("CANCEL_RUN")}>그만두기</Btn>

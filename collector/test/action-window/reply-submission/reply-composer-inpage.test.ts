@@ -41,7 +41,7 @@ describe("renderDraftOverlay — read-only, safely embedded", () => {
     const s = renderDraftOverlay("draft");
     expect(s).toContain("pointer-events:none");
     expect(s).toContain("읽기 전용");
-    expect(s).toContain("SellerOps");
+    expect(s).toContain("reviewnary");
   });
 
   it("neutralises a hostile draft that tries to break out of the expression", () => {

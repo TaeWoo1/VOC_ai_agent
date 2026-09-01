@@ -11,7 +11,7 @@ import type { GuidedActor, GuidedFailureReason, GuidedPhase } from "./types";
 export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = {
   check_saved_credential: {
     title: "저장된 연결 정보 확인",
-    body: "SellerOps에 저장된 NAVER 연결 정보가 있는지 확인하고 있습니다. 있으면 다시 입력하지 않고 바로 연결을 확인합니다.",
+    body: "reviewnary에 저장된 NAVER 연결 정보가 있는지 확인하고 있습니다. 있으면 다시 입력하지 않고 바로 연결을 확인합니다.",
   },
   application_path_choice: {
     title: "애플리케이션 확인",
@@ -23,11 +23,11 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
   },
   existing_credential_entry: {
     title: "기존 연결 정보 입력",
-    body: "이미 발급된 애플리케이션 ID와 시크릿을 SellerOps 보안 입력란에 직접 입력해 주세요. 새 앱을 만들 필요가 없습니다. 이 시크릿은 해당 스토어 애플리케이션의 공용 자격 증명이라, 같은 앱을 쓰는 다른 프로그램과 동일한 값입니다. 나중에 시크릿을 재발급하면 그 앱을 쓰는 모든 프로그램의 연결이 함께 끊깁니다.",
+    body: "이미 발급된 애플리케이션 ID와 시크릿을 reviewnary 보안 입력란에 직접 입력해 주세요. 새 앱을 만들 필요가 없습니다. 이 시크릿은 해당 스토어 애플리케이션의 공용 자격 증명이라, 같은 앱을 쓰는 다른 프로그램과 동일한 값입니다. 나중에 시크릿을 재발급하면 그 앱을 쓰는 모든 프로그램의 연결이 함께 끊깁니다.",
   },
   credential_recovery_required: {
     title: "시크릿 재확인 필요",
-    body: "애플리케이션은 있지만 시크릿을 확보하지 못했습니다. NAVER 커머스 API 센터의 기존 애플리케이션 화면에서 시크릿을 다시 확인하거나, 확인이 어려우면 시크릿을 재발급해 주세요. 앱을 삭제할 필요는 없습니다 (NAVER는 앱 삭제 기능을 제공하지 않습니다). 다만 시크릿을 재발급하면 이 앱을 사용하는 다른 프로그램의 연결도 함께 끊기므로, 다른 프로그램에서 사용 중인지 먼저 확인해 주세요. SellerOps는 시크릿을 대신 확인하거나 재발급하지 않습니다.",
+    body: "애플리케이션은 있지만 시크릿을 확보하지 못했습니다. NAVER 커머스 API 센터의 기존 애플리케이션 화면에서 시크릿을 다시 확인하거나, 확인이 어려우면 시크릿을 재발급해 주세요. 앱을 삭제할 필요는 없습니다 (NAVER는 앱 삭제 기능을 제공하지 않습니다). 다만 시크릿을 재발급하면 이 앱을 사용하는 다른 프로그램의 연결도 함께 끊기므로, 다른 프로그램에서 사용 중인지 먼저 확인해 주세요. reviewnary는 시크릿을 대신 확인하거나 재발급하지 않습니다.",
   },
   account_store_choice_required: {
     title: "계정·스토어 선택",
@@ -43,11 +43,11 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
   },
   credential_issued: {
     title: "발급 완료 확인",
-    body: "애플리케이션 ID와 시크릿이 발급되면 다음 단계에서 SellerOps에 안전하게 입력합니다.",
+    body: "애플리케이션 ID와 시크릿이 발급되면 다음 단계에서 reviewnary에 안전하게 입력합니다.",
   },
   sellerops_credential_entry: {
     title: "연결 정보 입력",
-    body: "발급 화면에서 확인한 애플리케이션 ID와 시크릿을 SellerOps 보안 입력란에 직접 입력해 주세요.",
+    body: "발급 화면에서 확인한 애플리케이션 ID와 시크릿을 reviewnary 보안 입력란에 직접 입력해 주세요.",
   },
   credential_registration: {
     title: "연결 정보 저장 중",
@@ -67,7 +67,7 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
   },
   order_access_denied: {
     title: "주문 API 접근 확인 필요",
-    body: "연결 정보는 정상이지만 주문 API 접근이 거부되었습니다. 애플리케이션에 주문 관련 API 그룹 권한이 있는지, 그리고 SellerOps 고정 호출 IP가 'API 호출 IP'에 등록되어 있는지 두 가지를 모두 확인한 뒤 다시 시도해 주세요.",
+    body: "연결 정보는 정상이지만 주문 API 접근이 거부되었습니다. 애플리케이션에 주문 관련 API 그룹 권한이 있는지, 그리고 reviewnary 고정 호출 IP가 'API 호출 IP'에 등록되어 있는지 두 가지를 모두 확인한 뒤 다시 시도해 주세요.",
   },
   first_order_sync: {
     title: "첫 주문 수집",
@@ -97,8 +97,8 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
 
 export const ACTOR_COPY: Record<GuidedActor, string> = {
   USER_REQUIRED: "고객님이 진행",
-  SELLEROPS_AUTOMATED: "SellerOps가 진행",
-  SELLEROPS_GUIDED: "SellerOps 안내",
+  SELLEROPS_AUTOMATED: "reviewnary가 진행",
+  SELLEROPS_GUIDED: "reviewnary 안내",
   SUPERVISED_ACTION: "확인 후 진행",
   UNSUPPORTED: "지원하지 않음",
 };
@@ -111,7 +111,7 @@ export const ACTOR_COPY: Record<GuidedActor, string> = {
  */
 export const DISCONNECT_GUARDRAIL_COPY = {
   title: "연결 해제 안내",
-  body: "SellerOps 연결을 해제하면 SellerOps에 저장된 연결 정보만 삭제됩니다. NAVER 애플리케이션은 비활성화하거나 삭제하지 않습니다. NAVER 앱은 스토어당 1개뿐이고 삭제할 수 없으며 다른 프로그램도 함께 쓸 수 있으므로, SellerOps 연결 해제를 위해 NAVER 앱을 비활성화·삭제하지 마세요.",
+  body: "reviewnary 연결을 해제하면 reviewnary에 저장된 연결 정보만 삭제됩니다. NAVER 애플리케이션은 비활성화하거나 삭제하지 않습니다. NAVER 앱은 스토어당 1개뿐이고 삭제할 수 없으며 다른 프로그램도 함께 쓸 수 있으므로, reviewnary 연결 해제를 위해 NAVER 앱을 비활성화·삭제하지 마세요.",
 } as const;
 
 /**
@@ -150,7 +150,7 @@ export const FIRST_SYNC_CHECKPOINT_COPY = {
 
 export const CALL_IP_COPY = {
   registerTitle: "아래 고정 IP를 애플리케이션의 'API 호출 IP'에 등록하세요.",
-  advertisedUnsetTitle: "SellerOps 고정 호출 IP가 아직 설정되지 않았습니다.",
+  advertisedUnsetTitle: "reviewnary 고정 호출 IP가 아직 설정되지 않았습니다.",
   advertisedUnsetBody:
     "준비되면 이 자리에 표시되며, 그때 애플리케이션의 'API 호출 IP'에 등록하면 됩니다. 이미 직접 등록하셨다면 아래에서 확인 표시 후 계속 진행할 수 있어요. 급하면 담당자에게 문의하세요.",
   alreadyRegisteredCta: "이미 API 호출 IP를 등록했어요",
@@ -235,14 +235,14 @@ export const FAILURE_COPY: Record<GuidedFailureReason, string> = {
   INVALID_CREDENTIAL: "연결 정보가 올바르지 않습니다. 애플리케이션 ID와 시크릿을 다시 확인해 주세요.",
   PERMISSION_INSUFFICIENT: "연결에 필요한 권한이 부족할 수 있습니다. 애플리케이션의 API 그룹·권한을 확인해 주세요.",
   CALL_ENVIRONMENT_MISMATCH: "허용된 호출 환경과 일치하지 않을 수 있습니다. 애플리케이션의 호출 IP 설정을 확인해 주세요.",
-  ORDER_ACCESS_DENIED: "주문 API 접근이 거부되었습니다. 주문 API 그룹 권한과 SellerOps 고정 호출 IP 등록을 함께 확인해 주세요.",
+  ORDER_ACCESS_DENIED: "주문 API 접근이 거부되었습니다. 주문 API 그룹 권한과 reviewnary 고정 호출 IP 등록을 함께 확인해 주세요.",
   SECRET_UNRECOVERABLE: "시크릿을 확보하지 못했습니다. 기존 애플리케이션의 시크릿을 다시 확인하거나, 확인이 어려우면 시크릿을 재발급해 주세요. (앱 삭제는 필요하지 않으며 NAVER도 제공하지 않습니다. 단, 재발급은 같은 앱을 쓰는 모든 프로그램의 연결을 함께 끊습니다.)",
   TEMPORARY_PROVIDER_ERROR: "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
   PROVIDER_UNAVAILABLE: "NAVER 서비스에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
   // Deliberately does NOT say "다시 시도해 주세요": the retry cannot work until someone changes a
   // server setting, and inviting one is how a seller spends an afternoon on a problem that is not theirs.
   CREDENTIAL_UNREADABLE:
-    "SellerOps가 저장된 연결 정보를 열지 못했습니다. SellerOps 서버 설정 문제이며, 다시 연결해도 해결되지 않습니다. 담당자에게 문의해 주세요.",
+    "reviewnary가 저장된 연결 정보를 열지 못했습니다. reviewnary 서버 설정 문제이며, 다시 연결해도 해결되지 않습니다. 담당자에게 문의해 주세요.",
   TEST_UNSUPPORTED: "이 연결 방식은 아직 지원되지 않습니다.",
   NOT_CONFIGURED: "저장된 연결 정보가 없습니다. 연결 정보를 입력해 주세요.",
   SYNC_FAILED: "첫 주문 수집에 실패했습니다. 잠시 후 다시 시도해 주세요.",

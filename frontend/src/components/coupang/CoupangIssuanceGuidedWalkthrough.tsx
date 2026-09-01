@@ -283,7 +283,7 @@ export function CoupangIssuanceGuidedWalkthrough({
         : handoffState === "AWAITING_CONSENT"
           ? {
               title: "쿠팡 윙 창에서 저장 여부를 선택해 주세요",
-              body: "발급된 업체코드·Access Key·Secret Key를 SellerOps에 저장할지, 쿠팡 윙 창의 안내에서 [SellerOps에 연결하기]로 알려 주세요.",
+              body: "발급된 업체코드·Access Key·Secret Key를 reviewnary에 저장할지, 쿠팡 윙 창의 안내에서 [reviewnary에 연결하기]로 알려 주세요.",
               offerManual: false,
             }
           : handoffState === "CONSENTED"

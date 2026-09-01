@@ -106,7 +106,7 @@ describe("CoupangRenewalGuidedWalkthrough", () => {
       />,
     );
     expect(screen.getByText(/재발급 버튼은 반드시 직접 눌러 주세요/)).toBeInTheDocument();
-    expect(screen.getByText(/SellerOps는 대신 재발급하지 않습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/reviewnary는 대신 재발급하지 않습니다/)).toBeInTheDocument();
   });
 
   it("commands come ONLY from allowedCommands, and recheck reports intent (never completes)", async () => {
@@ -127,7 +127,7 @@ describe("CoupangRenewalGuidedWalkthrough", () => {
       />,
     );
     expect(screen.getByText("새 API 키 재발급 완료")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "SellerOps로 돌아가 새 키 입력하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "reviewnary로 돌아가 새 키 입력하기" }));
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 

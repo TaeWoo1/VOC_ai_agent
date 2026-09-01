@@ -64,10 +64,12 @@ public class ReviewImportLaunchService {
     private final Clock clock;
 
     /**
-     * The seller's "today". KST rather than UTC because the end of the period is the date the seller sees on
-     * their own calendar, and for a Korean seller a UTC "today" is yesterday for nine hours every night.
+     * The seller's "today" — {@link ReviewImportCalendar#KST}, aliased here so existing references keep
+     * working. It is the SAME constant every guided-import date boundary now reads, which is the point: this
+     * service was already on it while the extend endpoint was not, and the split is what produced the
+     * one-day segment observed on 2026-09-01.
      */
-    static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    static final ZoneId KST = ReviewImportCalendar.KST;
 
     /**
      * The earliest month a seller may choose to import from.
