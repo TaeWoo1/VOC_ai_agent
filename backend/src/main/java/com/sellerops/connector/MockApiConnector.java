@@ -23,8 +23,25 @@ import org.springframework.stereotype.Component;
  * <p>Slice 2 scope: contract + pagination + a deterministic rate-limit signal
  * ONLY. It does not persist, advance cursors, or write sync jobs — those are
  * later slices.
+ *
+ * <h2>Why this bean does not exist by default</h2>
+ *
+ * <p><b>Everything this class synthesizes is indistinguishable from a seller's own data once it
+ * lands.</b> The records it invents flow through the ordinary ingest path, and {@code Inquiry} /
+ * {@code Review} default {@code dataOrigin = REAL} — nothing downstream can tell an invented row
+ * from a collected one. That was survivable while this was a local backbone exercise and fatal the
+ * moment a deployment a seller can reach resolves a channel to it: a sync that should have stopped
+ * instead SUCCEEDS, and invented reviews and inquiries arrive in that seller's tables.
+ *
+ * <p>So the fixture is opt-in ({@code sellerops.connector.mock.enabled}, default {@code false}) and
+ * the switch is the bean's own existence, not a branch inside it. An absent bean cannot be resolved
+ * by any code path — present or future, registry or otherwise — which is a stronger statement than
+ * any predicate this class could carry. {@link ConnectorRegistry} fences the same hole a second time
+ * at resolution; neither fence depends on the other being right.
  */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        name = "sellerops.connector.mock.enabled", havingValue = "true")
 public class MockApiConnector implements PullConnector {
 
     public static final String KIND = "MOCK_API";

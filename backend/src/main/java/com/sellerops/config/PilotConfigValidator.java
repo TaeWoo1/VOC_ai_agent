@@ -45,6 +45,7 @@ public class PilotConfigValidator {
     private final String cafe24ClientSecret;
     private final String cafe24RedirectUri;
     private final String agentAccessScope;
+    private final boolean mockConnectorEnabled;
     /**
      * The AI capabilities, as beans that describe themselves.
      *
@@ -65,7 +66,9 @@ public class PilotConfigValidator {
             @Value("${sellerops.connector.cafe24.oauth.client-secret:}") String cafe24ClientSecret,
             @Value("${sellerops.connector.cafe24.oauth.redirect-uri:}") String cafe24RedirectUri,
             @Value("${sellerops.agent.access.scope:ALLOW_LIST}") String agentAccessScope,
+            @Value("${sellerops.connector.mock.enabled:false}") boolean mockConnectorEnabled,
             List<AgentCapabilityGate> agentCapabilities) {
+        this.mockConnectorEnabled = mockConnectorEnabled;
         this.naverEnabled = naverEnabled;
         this.coupangEnabled = coupangEnabled;
         this.cafe24Enabled = cafe24Enabled;
@@ -117,6 +120,16 @@ public class PilotConfigValidator {
             if (redirectProblem != null) {
                 problems.add("SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI — " + redirectProblem);
             }
+        }
+        // The offline fixture and a real marketplace, in one database, writing into the same tables.
+        // Both connectors' rows land as data_origin=REAL, so once they are mixed nothing downstream —
+        // no screen, no query, no export — can separate the seller's data from the invented data
+        // again. This is the one connector condition that is a problem even though every switch
+        // involved is doing exactly what it was set to do, which is why it has to be said at boot.
+        if (mockConnectorEnabled && anyConnector) {
+            problems.add("SELLEROPS_CONNECTOR_MOCK_ENABLED — "
+                    + "오프라인 모의 커넥터와 실제 채널 커넥터가 함께 켜져 있습니다. "
+                    + "합성된 리뷰·문의는 판매자가 수집한 행과 구분되지 않으므로 함께 켤 수 없습니다.");
         }
         problems.addAll(agentProblems());
         return problems;

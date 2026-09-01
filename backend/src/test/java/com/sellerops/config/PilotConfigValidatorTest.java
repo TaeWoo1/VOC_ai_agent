@@ -23,13 +23,13 @@ class PilotConfigValidatorTest {
     private PilotConfigValidator v(boolean naver, boolean coupang, boolean cafe24, String vault,
                                    String egress, String id, String secret, String redirect) {
         return new PilotConfigValidator(naver, coupang, cafe24, vault, egress, id, secret, redirect,
-                "ALLOW_LIST", java.util.List.of());
+                "ALLOW_LIST", false, java.util.List.of());
     }
 
     /** An AI capability with three switches, everything else off. */
     private PilotConfigValidator agent(String scope, boolean enabled, String key, String orgIds) {
         return new PilotConfigValidator(false, false, false, "", "", "", "", "",
-                scope, java.util.List.of(capability(enabled, key, orgIds)));
+                scope, false, java.util.List.of(capability(enabled, key, orgIds)));
     }
 
     /** One AI capability, described the way the real property beans describe themselves. */
@@ -90,6 +90,29 @@ class PilotConfigValidatorTest {
                 .anySatisfy(p -> assertThat(p).contains("SELLEROPS_VAULT_MASTER_KEY"));
         assertThatThrownBy(() -> v(false, true, false, "", "", "", "", "").validate())
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    /**
+     * The offline fixture and a real marketplace connector, in one database. Both switches are doing
+     * what they were set to do, which is why nothing else in the system will ever complain: the
+     * synthesized rows and the collected rows land in the same tables as {@code data_origin=REAL} and
+     * become inseparable. Refusing at boot is the only moment the two are still distinguishable.
+     */
+    @Test
+    void theOfflineMockAndARealConnectorMayNotBeOnTogether() {
+        PilotConfigValidator mixed = new PilotConfigValidator(false, false, true, "key", "",
+                "id", "secret", HTTPS, "ALLOW_LIST", true, java.util.List.of());
+
+        assertThat(mixed.problems())
+                .anySatisfy(p -> assertThat(p).contains("SELLEROPS_CONNECTOR_MOCK_ENABLED"));
+        assertThatThrownBy(mixed::validate).isInstanceOf(IllegalStateException.class);
+    }
+
+    /** A local stack running the fixture alone is exactly what the fixture is for. */
+    @Test
+    void theOfflineMockAloneIsNotAProblem() {
+        assertThat(new PilotConfigValidator(false, false, false, "", "", "", "", "",
+                "ALLOW_LIST", true, java.util.List.of()).problems()).isEmpty();
     }
 
     /** I — NAVER without an advertised call IP tells the seller to register a value we cannot name. */

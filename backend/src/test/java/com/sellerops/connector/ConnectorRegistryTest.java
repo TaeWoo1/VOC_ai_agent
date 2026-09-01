@@ -124,7 +124,15 @@ class ConnectorRegistryTest {
     void springInjectsAllConnectorsAndOnlyMockIsTreatedAsPull() {
         // Exercises the real List<ChannelConnector> constructor injection path with
         // two coexisting connector beans, without booting the full application.
+        //
+        // Both properties are stated because both defaults moved to false in Pilot Connection &
+        // External Proof Gate v1 §3: the mock is no longer a bean unless a deployment asks, and a
+        // channel with no dedicated connector no longer falls back to one that declares none. This
+        // test is about wiring, so it asks for the fixture the way a dev deployment does; the
+        // defaults themselves are asserted in MockConnectorAvailabilityTest.
         new ApplicationContextRunner()
+                .withPropertyValues("sellerops.connector.mock.enabled=true",
+                        "sellerops.connector.mock-fallback.enabled=true")
                 .withBean(MockApiConnector.class)
                 .withBean(StubFileConnector.class)
                 .withBean(ConnectorRegistry.class)

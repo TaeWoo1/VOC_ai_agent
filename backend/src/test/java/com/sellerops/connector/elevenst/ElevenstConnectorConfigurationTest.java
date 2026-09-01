@@ -60,7 +60,14 @@ class ElevenstConnectorConfigurationTest {
 
     /** The production bean graph (registry + connectors), not a hand-built registry. */
     private ApplicationContextRunner registryGraph() {
+        // These tests are about DEDICATION — that a connector serves its own channel and no other —
+        // and they express "no other" as "still the mock". Since Pilot Connection & External Proof
+        // Gate v1 §3 the mock is neither a bean nor a fallback unless a deployment asks, so this
+        // graph asks the way a dev deployment does. The defaults themselves are asserted in
+        // MockConnectorAvailabilityTest, and the consequence for collection in MockConnectorFenceTest.
         return runner()
+                .withPropertyValues("sellerops.connector.mock.enabled=true",
+                        "sellerops.connector.mock-fallback.enabled=true")
                 .withBean(MockApiConnector.class)
                 .withBean(ConnectorRegistry.class);
     }

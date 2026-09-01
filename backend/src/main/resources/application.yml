@@ -361,13 +361,20 @@ sellerops:
       enabled: ${SELLEROPS_ADMIN_INQUIRY_DISMISSAL_ENABLED:false}
   connector:
     # <b>A channel whose own connector is off must COLLECT NOTHING — not synthesize.</b>
-    # Pilot Readiness Closure v1 §8. MockApiConnector declares no dedicated channels, so it was the
-    # generic fallback for every channel whose connector bean is absent — which is what a disabled
-    # connector flag produces. The result was not a stopped sync but a SUCCESSFUL one writing invented
-    # reviews and inquiries into a real seller's tables. True keeps the local/dev behaviour the mock
-    # exists for; a deployment a seller can reach sets it false.
+    # Pilot Readiness Closure v1 §8, closed the rest of the way in Pilot Connection & External Proof
+    # Gate v1 §3. MockApiConnector synthesizes reviews and inquiries offline, and what it produces is
+    # written through the ordinary ingest path as data_origin=REAL — indistinguishable, once stored,
+    # from the seller's own. Both switches are therefore OFF unless a deployment asks:
+    mock:
+      # Does the offline fixture connector exist as a bean at all? Off = it cannot be resolved by any
+      # code path. Turn it on only in a local or test deployment that wants the stand-in.
+      enabled: ${SELLEROPS_CONNECTOR_MOCK_ENABLED:false}
     mock-fallback:
-      enabled: ${SELLEROPS_CONNECTOR_MOCK_FALLBACK_ENABLED:true}
+      # May a channel with NO dedicated connector be served by a connector that declares no channel?
+      # Off = a channel whose own connector flag is off resolves to nothing, and its syncs record a
+      # configuration failure instead of succeeding with invented rows. Independent of the switch
+      # above on purpose: neither fence relies on the other being right.
+      enabled: ${SELLEROPS_CONNECTOR_MOCK_FALLBACK_ENABLED:false}
     naver:
       # Real Naver Commerce API connector (Phase 3C Slice 1a). Off by default —
       # the connector beans are not even created, and NAVER keeps resolving to

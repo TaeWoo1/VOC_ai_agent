@@ -1076,6 +1076,64 @@ mock fallback 펜스, plan/draft on **allow-list 비어 있음**, scope=CONNECTE
 쿼리 1회(캐시 없음) · 나머지 세 AI capability는 allow-list 유지(다만 §4 validator는 그것들에도 적용된다) · mock fallback이
 이미 쓴 합성 행은 로컬 QA org에 남아 있다. **남은 외부 증명과 파일럿 프로비저닝 입력은 §10**)
 
+**`docs/pilot_connection_external_proof_gate_v1.md`** (Pilot Connection & External Proof Gate v1 —
+2026-09-01. Agent/UI architecture **freeze**. 질문 둘과 감사 하나. **(1) 연결 flow가 정말 admission을
+만드는가** — 직전 패키지는 `CONNECTED_SELLERS`를 **읽는** 정책만 증명했고 그 행은 **DB에 직접 넣은**
+것이었다: 손으로 넣은 행은 연결 flow가 admission query가 모르는 상태에 착지해도 **알아챌 수 없다**(그
+행이 맞도록 쓰였기 때문). 이번엔 아무것도 삽입하지 않고 제품 자신의 flow를 돌린다 — 실제
+`Cafe24OnboardingService` · 실제 `/api/connect/cafe24/start` · state guard · mall-identity gate ·
+이 저장소가 만드는 토큰 요청 · 실제 `CredentialVault` 봉인 · 실제 상태 전이 · 실제
+`hasConnectedApiAccount` · 실제 `AgentCapabilityAccess`. **가짜는 하나뿐이고 그것은 반드시 가짜여야 하는
+것이다** — `Cafe24HttpClient`, 자기 docblock이 이미 「커넥터의 유일한 fakeable HTTP 경계」라고 적어 둔
+그 인터페이스(앱 자격은 placeholder이고 프로세스를 나가지 않는다). CI에서 항상 도는
+`ConnectionAdmissionTest`(4) + 배포 모양 그대로의 **disposable Postgres IT**(`SELLEROPS_PG_PROOF=1`,
+2/2 · Flyway 86 · allow-list **비움** · 시드 off · mock 두 스위치 off · `PilotConfigValidator` 통과):
+가입 → `POST /api/agent/plan`이 「판매 채널을 연결하시면…」 → start(PENDING, **시작은 완료가 아니다**) →
+callback **302 `status=connected`**(인가 코드는 리다이렉트에 없다) → 토큰 교환 **1** · 봉인된 자격 **1** ·
+`CONNECTED`·`is_file_upload=false` → **같은 프로세스에서 `ALLOWED`**(env 편집 0 · 재기동 0), 두 번째
+판매자는 여전히 거절, 합성 행 **리뷰 0 · 문의 0**, 실 로컬 DB 무접촉(44 org 불변). 끝은 정책 bean으로
+단언하고 `/api/agent/plan`을 두 번 부르지 않는다 — gate 뒤는 **유료 벤더 호출**이고 게이트가 이미 답한
+것을 사려고 테스트가 돈을 쓰지 않는다(비용 0인 거절은 HTTP로 단언했다). 외부로 남는 것: 실제 mall의 동의
+화면 · 그것이 발급하는 code · 그 mall의 토큰 엔드포인트가 이 요청을 받는가 — **첫 파일럿 판매자의 첫
+연결**. **(2) mock fail-closed** — 오류가 없는 결함이다: 아무것도 throw하지 않고 sync가 **성공**하며
+`data_origin=REAL` 기본값 때문에 합성 행이 판매자 행과 구분되지 않는다. 독립적인 fence **둘**(서로에게
+의존하지 않는다): `sellerops.connector.mock.enabled`(기본 **false**) = **bean 자체가 없다**(등록되지 않은
+bean은 registry든 나중에 쓰일 코드든 어떤 경로로도 resolve 불가) · `sellerops.connector.mock-fallback.enabled`
+(**true→false**) = dedicated 커넥터 없는 채널은 **아무것도** resolve하지 않는다. **기본값 on으로 낸 것이
+잘못이었다** — 아무 말도 하지 않은 배포(= 아직 아무도 감사하지 않은 모든 배포)를 위험한 쪽으로 만들었다.
+세 번째 조건은 기동 시: mock과 실제 커넥터가 **함께** 켜지면 `PilotConfigValidator`가 거부한다(두 스위치
+모두 시킨 대로 동작하므로 다른 무엇도 항의하지 않는다; 섞이면 되돌릴 수 없고 기동이 마지막 구분
+가능한 순간이다). **삭제가 아니라 fence** — `ConnectorRegistry`의 1-인자 생성자는 fallback을 켠 채로
+남고 그것이 「명시적 dev/test fixture」의 뜻이다(Spring은 그 생성자에 닿지 않는다). `MockConnectorFenceTest`가
+brief의 세 상태(커넥터 off · 자격 없음 · 미지원 타입)에서 **행 0**을 고정하고 — registry는 Spring이 만드는
+모양(fallback off)이며 mock은 **일부러 목록 안에** 있다 — `MockConnectorAvailabilityTest`가 `application.yml`을
+텍스트로 읽어 기본값 둘을 고정한다. 로컬 실측: 자기 커넥터가 켜진 CAFE24·NAVER·COUPANG은 **무변경**,
+커넥터 없는 GMARKET·ELEVENST·SSG는 `API/auto-collect=true/전 타입 지원`(mock의 것)에서
+**`null`/false/0타입**으로 — 수집할 수 없는 채널이 그렇다고 말한다. **(3) 외부 live proof 감사(마켓플레이스
+WRITE 0)**: **READY** NAVER Guided Acquisition(`import/naver` — 계정 + **foreground TTY**로 페어링된
+도우미; 분리 실행된 resident helper는 `503 approval_unavailable`로 페어링을 거부한다) · NAVER Review
+Guided Reply **composer-fill**(승인된 초안 + 단일 사용 `submissionRef` + **review-id fingerprint 보유**;
+`UNAVAILABLE`이면 한 글자도 넣지 않는다. 경계는 열거형 source guard가 강제한다 — `.fill(`는 **한 파일**,
+`.click(`는 **한 파일에서 정확히 한 번**(등록/submit 단어가 붙은 컨트롤에는 tagger가 마커를 달지 않는다),
+`.press(`·`keyboard`·`dispatchEvent`·`.submit(`·`requestSubmit`는 **어디에도 없다**, 디렉터리에 추가된
+모듈이 목록에 없으면 **빌드 실패**; fill gate는 순수하고 fail-closed이며 채우지 못한 run도 barrier까지
+가서 판매자가 붙여넣는다 — **「채우지 못함」은 「답변하지 못함」이 아니다**; `COMPOSER_FILLED ≠ posted`) ·
+**BLOCKED** Cafe24 리뷰 댓글(플래그 · 단일 사용 승인 id · `SHOP_NO`(**0=전송 없음**) · `mall.write_community`
+재동의는 전부 설정이고, 진짜로 없는 것은 **공개 댓글을 달아도 되는 리뷰 객체**다 — 쓸 수 있는 mall은
+실제 고객 리뷰를 든 Demo Org의 그것뿐) · NAVER 고객 문의 답변(승인이 **subtype을 묶는다** — 두 subtype은
+겹치지 않는 bare int64라 잘못 쓰면 실패가 아니라 **다른 고객에게 답이 간다**; 없는 것은 미답변 문의) ·
+Coupang 문의 답변/guided acquisition(자격 + **호출 IP 등록** + 미답변 문의; acquisition만 돌리면 행의 작은
+쪽만 증명된다. Coupang 리뷰 답글은 기능 자체가 없어 `NOT_SUPPORTED`이지 「아직」이 아니다). 검증: backend
+**3,631** · runtime **801** · frontend **2,627**(소스 무변경) · 실패 0, 로컬 스택 재기동 clean(ERROR/WARN 0,
+7.6초). **계약이 바뀌어 테스트를 다시 썼다** — 여섯 `*ConnectorConfigurationTest`는 *dedication*을 단언하며
+「나머지는 mock」으로 표현하고 있었으므로 `registryGraph()`가 dev 배포처럼 fixture를 요청한다(단언은 전부
+보존, 기본값은 `MockConnectorAvailabilityTest`가·수집 결과는 `MockConnectorFenceTest`가 소유). **안전 테스트
+약화 0.** **마켓플레이스 호출 0 · WRITE 0 · 모델 호출 0 · 마이그레이션 0** ⇒ evidence 행 없음. **고치지 않고
+보고**: 커넥터 없는 채널의 로컬 동작 변화(되돌리려면 두 스위치를 **모두** true), fallback이 이미 쓴 합성 행은
+로컬 QA org에 잔존, `data_origin` 기본값은 여전히 `REAL`(생산자 기준 provenance 스탬프는 같은 규칙의 네 번째
+사본이라 두 번째 합성 생산자가 생기기 전에는 만들지 않는다), 접근 정책의 gate당 존재 쿼리 1회 무캐시,
+`sellerops.seed.enabled=true`의 데모 계정 생성.)
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

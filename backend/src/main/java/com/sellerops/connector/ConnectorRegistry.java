@@ -40,15 +40,23 @@ public class ConnectorRegistry {
      * seller's tables, indistinguishable from theirs. A seller who connected Cafe24 and whose
      * operator later switched the Cafe24 connector off would watch invented rows arrive.
      *
-     * <p>Default {@code true} preserves every existing local and test deployment, where the mock is
-     * the point. The pilot environment sets it false, and the boot validator says so.
+     * <p><b>Default {@code false} since Pilot Connection &amp; External Proof Gate v1 §3.</b> Shipping
+     * this fence default-on was the wrong way round: it made every deployment that said nothing —
+     * which is every deployment nobody has yet audited — the unsafe one. Fail closed is the default,
+     * and a dev or test deployment that wants the offline fixture says so.
+     *
+     * <p>This is the second of two independent fences. The first is that {@link MockApiConnector} is
+     * not a bean unless {@code sellerops.connector.mock.enabled} is true, so on an ordinary
+     * deployment there is no generic connector to fall back TO. This one holds even if some future
+     * connector declares no dedicated channel: without it, adding such a bean would silently make it
+     * the answer for every channel whose own connector is off.
      */
     private final boolean mockFallbackEnabled;
 
     /** The registry as a deployment configures it. */
     @Autowired
     public ConnectorRegistry(List<ChannelConnector> connectors,
-                             @Value("${sellerops.connector.mock-fallback.enabled:true}") boolean mockFallbackEnabled) {
+                             @Value("${sellerops.connector.mock-fallback.enabled:false}") boolean mockFallbackEnabled) {
         this.mockFallbackEnabled = mockFallbackEnabled;
         this.connectors = List.copyOf(connectors);
         this.pullConnectors = this.connectors.stream()
@@ -58,8 +66,12 @@ public class ConnectorRegistry {
     }
 
     /**
-     * The registry with the fallback on — the historical behaviour, and what a unit test that hands
-     * in exactly the connectors it wants to exercise means.
+     * <b>The explicit fixture constructor</b> — the fallback is on because the caller named every
+     * connector in the list by hand. That is the whole of "the mock is available in an explicit
+     * dev/test fixture": a unit test that passes {@code List.of(new MockApiConnector())} has said,
+     * in the only way that matters, that it wants the offline stand-in. Spring never reaches this
+     * constructor ({@link Autowired} marks the other one), so no deployment can acquire the
+     * fallback by omission.
      */
     public ConnectorRegistry(List<ChannelConnector> connectors) {
         this(connectors, true);
