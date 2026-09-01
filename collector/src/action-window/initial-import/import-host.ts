@@ -41,6 +41,7 @@ import {
 import type { InitialImportEndpoint } from "../../bridge/initial-import-endpoint";
 import { log } from "../../log";
 import { assembleImportRun, makeImportRunMarker, mintImportRunId } from "./import-dispatch";
+import { isRetriableAfterImportRunStatus } from "./import-stages";
 import type { ImportProbeDriver, RequiredRange } from "./import-driver";
 import type { ImportSegmentSession } from "./import-session";
 
@@ -206,6 +207,29 @@ export class ImportSegmentHost {
     this.hostedRef = null;
   }
 
+  /**
+   * **A run that has ENDED holds no slot.**
+   *
+   * `hostedRef` is the idempotency guard for a duplicate `START_RUN` — the same ticket arriving twice must not
+   * build two sessions. It was never cleared when the run ended, and the backend mint is idempotent, so a
+   * RETRY carries the SAME ref: on 2026-09-02 every attempt after a terminal run was answered
+   * `IGNORE_ALREADY_HOSTED` and returned in silence, and the seller's screen said the window had been raised.
+   * The guard has to mean "already hosting a LIVE run with this ref", which is what it was always read as.
+   *
+   * Checked at the moment a start arrives rather than on a timer: a dead run holds nothing anyone is waiting
+   * on, and the only reader that cares is the next start. A COMPLETED run KEEPS its slot — see
+   * `isRetriableAfterImportRunStatus` — so a spent ticket can never host a second ingest of the same segment.
+   */
+  private releaseIfSettled(): void {
+    if (!this.session) return;
+    const status = this.session.runStatus();
+    if (!isRetriableAfterImportRunStatus(status)) return;
+    // Sanitized: the status enum and nothing else — never the ref, never the run id.
+    log("aw_import_host_slot_released", { status });
+    this.releaseHostedSession();
+    this.hostedRef = null;
+  }
+
   /** Detach whatever run is hosted, so exactly one session is ever subscribed to the endpoint. */
   private releaseHostedSession(): void {
     this.sessionDetach?.();
@@ -217,6 +241,8 @@ export class ImportSegmentHost {
     const ref = importRefFromStartRun(frame);
     if (!ref) return;
     const declared = declaredImportKindFromStartRun(frame);
+    // A start is the one reader of the slot, so it is where a finished run gives it back.
+    this.releaseIfSettled();
 
     // Phase 1 — the pre-resolve entry decision (idempotent same-ref, concurrent-start race). The pure kernel
     // decides; the host still owns the `building` flag and the exact log line for a deferred start.
@@ -224,7 +250,12 @@ export class ImportSegmentHost {
       { hostedRef: this.hostedRef, building: this.building },
       { type: "START_RUN_RECEIVED", ref, declaredKind: declared },
     );
-    if (entry.type === "IGNORE_ALREADY_HOSTED") return;
+    if (entry.type === "IGNORE_ALREADY_HOSTED") {
+      // Never silent. This is the exact branch that swallowed every retry on 2026-09-02 without writing a
+      // line anywhere; a duplicate for a run that IS live is legitimate, and it still has to be legible.
+      log("aw_import_host_start_ignored_already_hosted", {});
+      return;
+    }
     if (entry.type === "IGNORE_BUSY") {
       log("aw_import_host_start_ignored_busy", {});
       return;

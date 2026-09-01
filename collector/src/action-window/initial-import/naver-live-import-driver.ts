@@ -45,6 +45,7 @@ import type { ScopeEvidenceWire } from "../scope-evidence";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import { matchExportScope } from "../../naver/export-scope-match";
 import { planExportAction } from "../../naver/export-classify";
+import { exportCandidateShapes } from "../../naver/review-export";
 import {
   importLocateDiagnostic,
   inferRequiresApply,
@@ -302,11 +303,16 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
       // page is an async-job layout" from "the wording no longer matches" — the three hypotheses that
       // currently have no evidence between them.
       if (decision.count !== 1) {
+        const exportHtml = await this.ctx().content();
         log("aw_import_export_locate_unresolved", {
           count: decision.count,
           frameResolved: this.proven.surfaceFrameResolved(),
           childFrames: this.proven.childFrameCount(),
-          ...planExportAction(await this.ctx().content()),
+          ...planExportAction(exportHtml),
+          // WHAT the tied candidates are, not just how many. A bucketed count cannot tell an operator whether
+          // two matches are one nested control or two real ones, and on 2026-09-02 that is exactly the question
+          // the record could not answer. Sanitized structure only — see `ExportCandidateShape`.
+          candidates: JSON.stringify(exportCandidateShapes(exportHtml)),
         });
       }
       return decision;
@@ -717,17 +723,29 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
         // implementation of it in-page is how this driver failed three times: `readonly` was corrected in
         // the pure module and left in place here, so the two disagreed and the tag count came back 0.
         // In-page work is now selection only, and the count assertion below is what detects real drift.
+        const DATE_SELECTOR =
+          'input[type="date"], input[class*="date"], input[class*="calendar"], input[class*="picker"]';
+        // MIRRORS `applyCandidates` in `naver/import-locate.ts`, rule for rule: a control element, whose
+        // visible label carries apply wording, standing AFTER the first date control in document order. The
+        // pure side reads a character offset and this side reads `compareDocumentPosition`; they are the same
+        // statement about the same document. When they were allowed to differ — the pure side matched whole
+        // tags including attributes — the pure side counted 45 controls and this one counted a handful, and
+        // the run answered "this surface needs no apply press" (live, 2026-09-02).
+        const firstDate = document.querySelector(DATE_SELECTOR);
         const candidates =
           kind === "apply_range"
-            ? Array.from(document.querySelectorAll("button, a, input[type=button], input[type=submit]")).filter((el) => {
-                const text = `${el.textContent ?? ""} ${(el as HTMLInputElement).value ?? ""}`.toLowerCase();
-                return ["조회", "검색", "적용", "search"].some((w) => text.includes(w.toLowerCase()));
+            ? (firstDate
+                ? Array.from(document.querySelectorAll("button, a, input[type=button], input[type=submit]"))
+                : []
+              ).filter((el) => {
+                if (!firstDate) return false;
+                const follows =
+                  (firstDate.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+                if (!follows) return false;
+                const label = `${el.textContent ?? ""} ${(el as HTMLInputElement).value ?? ""}`.toLowerCase();
+                return ["조회", "검색", "적용", "search"].some((w) => label.includes(w.toLowerCase()));
               })
-            : Array.from(
-                document.querySelectorAll(
-                  'input[type="date"], input[class*="date"], input[class*="calendar"], input[class*="picker"]',
-                ),
-              );
+            : Array.from(document.querySelectorAll(DATE_SELECTOR));
         // The pure decision counted `total` of these a moment ago. A different number now means the DOM
         // moved between the two reads — that is drift, and it fails closed with no tag left behind.
         if (candidates.length !== total) return -1;

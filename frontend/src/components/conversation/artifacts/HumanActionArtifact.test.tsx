@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -192,6 +193,37 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
     await waitFor(() => expect(expireReviewImportLaunch).toHaveBeenCalledWith("0f1e2d3c4b5a6978"));
     expect(launchNextReviewImportSegment).toHaveBeenCalledWith("plan-9");
     expect(await screen.findByRole("status")).toHaveTextContent(/준비하지 못했습니다/);
+  });
+
+  /**
+   * <b>The 2026-09-02 defect, as a test.</b> — Runtime Closure v2, blocker 2.
+   *
+   * `React.StrictMode` mounts an effect, tears it down, and mounts it again. The start effect set
+   * `startedRef` BEFORE its first `await` and the cleanup never released it, so pass one abandoned itself at
+   * `if (!runtime || !live) return;` and pass two was refused by the ref: no ticket was minted, no
+   * `START_RUN` was sent, no error appeared, and the card sat there looking ready. `StrictMode` is what the
+   * product renders under (`main.tsx`), so this is the product's real mount, not a synthetic one.
+   */
+  it("StrictMode: a double-invoked mount starts the run exactly once — never zero times", async () => {
+    const runtime = fakeImport();
+    render(
+      <StrictMode>
+        <MemoryRouter>
+          <HumanActionArtifact
+            artifact={artifact({ path: "EXPORT_ACTION_WINDOW", channelCode: "NAVER", channelNameKo: "네이버", accountId: "acc-nv" })}
+            onResume={vi.fn()}
+            importRuntime={runtime as never}
+          />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
+    await waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
+    // The mint MAY be attempted more than once here and that is not a defect: it is idempotent by segment —
+    // an open `ISSUED` ticket is handed back rather than a second one created, which was verified against the
+    // live backend on 2026-09-02. What must be exactly one is the `START_RUN`, and what must never be zero is
+    // the run. The teardown of an uncommitted attempt is what allows the second invocation to get there.
+    expect(launchNextReviewImportSegment.mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 
   it("Coupang WING read: connect first, mint the single-use acquisitionRef second, then START_RUN(REVIEW_ACQUISITION)", async () => {

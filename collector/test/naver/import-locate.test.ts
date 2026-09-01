@@ -132,14 +132,25 @@ describe("apply control locate", () => {
     expect(inferRequiresApply(RANGE)).toBe(true);
   });
 
+  /**
+   * Rewritten for the CONTRACT change in Runtime Closure v2: an apply control is identified relative to the
+   * date fields it applies to, so every case here now carries them. The wording assertions themselves are
+   * unchanged — that half of the rule did not move.
+   */
   it("recognises the wording variants and nothing beyond them", () => {
+    const dates = `<input type="date" /><input type="date" />`;
     for (const word of ["조회", "검색", "적용", "Search"]) {
-      expect(locateApplyDecision(`<button>${word}</button>`).count).toBe(1);
+      expect(locateApplyDecision(`${dates}<button>${word}</button>`).count).toBe(1);
     }
     // A generic verb is not apply wording — widening it is how a locate starts matching unrelated buttons.
     for (const word of ["확인", "저장", "닫기", "다운로드"]) {
-      expect(locateApplyDecision(`<button>${word}</button>`).count).toBe(0);
+      expect(locateApplyDecision(`${dates}<button>${word}</button>`).count).toBe(0);
     }
+  });
+
+  /** The new half of the rule, stated where the old one was: wording alone is not enough. */
+  it("does not resolve an apply control on a surface with no date fields", () => {
+    expect(locateApplyDecision(`<button>조회</button>`)).toEqual({ count: 0 });
   });
 
   it("reports no apply control when the surface has none", () => {
@@ -150,7 +161,7 @@ describe("apply control locate", () => {
 
   /** Two 조회 buttons is a surface we do not understand yet; the honest response is to stop. */
   it("fails closed on two apply candidates rather than taking the first", () => {
-    const html = `<button>조회</button><button>조회</button>`;
+    const html = `<input type="date" /><input type="date" /><button>조회</button><button>조회</button>`;
     expect(locateApplyDecision(html)).toEqual({ count: 2 });
     expect(inferRequiresApply(html)).toBe(false);
   });
@@ -204,7 +215,10 @@ describe("the DOM questions asked when the model is wrong", () => {
   });
 
   it("asks about the date controls when they did not resolve", () => {
-    const questions = questionsFor(importLocateDiagnostic(`<button>조회</button>`));
+    // ONE date input, so the date locate cannot resolve (it needs exactly two), and a 조회 button after it,
+    // so the apply locate does. The old fixture had no date input at all, which under the v2 rule means the
+    // apply control cannot resolve either — and this test is about what is asked when only the DATES fail.
+    const questions = questionsFor(importLocateDiagnostic(`<input type="date" /><button>조회</button>`));
     expect(questions).toContain("dom.question.dateInput.tagName");
     expect(questions).toContain("dom.question.dateInput.startAndEndAreSiblings");
     // The apply control resolved, so it is not asked about.

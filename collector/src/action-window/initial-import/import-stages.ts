@@ -99,6 +99,34 @@ export type ImportStage =
 
 export const IMPORT_TERMINAL_STAGES: readonly ImportStage[] = ["COMPLETED", "FAILED", "CANCELLED"];
 
+/**
+ * The run statuses a settled import run can hold — DERIVED from the terminal stages rather than typed out.
+ *
+ * A third hand-written copy is what let the 2026-09-02 sitting fail: the host kept its slot after a terminal
+ * run because nothing on that side could answer "is this run over?", while the carrier answered it from its
+ * own list. One definition, and every reader gets the same answer when a stage is added.
+ */
+export const IMPORT_TERMINAL_RUN_STATUSES: readonly RunStatus[] =
+  IMPORT_TERMINAL_STAGES.map(importStageToRunStatus);
+
+/** Is this hosted run over? The one question a CARRIER may ask about someone else's run. */
+export function isSettledImportRunStatus(status: RunStatus): boolean {
+  return IMPORT_TERMINAL_RUN_STATUSES.includes(status);
+}
+
+/**
+ * Did this run end WITHOUT finishing its work? The narrower question a HOST asks before letting a start with
+ * the same ticket through.
+ *
+ * `COMPLETED` deliberately keeps its slot. The mint is idempotent, so a retry carries the SAME ref, and the
+ * duplicate guard is what stops a finished segment being hosted — and re-ingested — a second time; the next
+ * segment arrives under a different ref and was never blocked by it. `FAILED` and `CANCELLED` are the two
+ * where a retry is the seller asking for the work that did not happen.
+ */
+export function isRetriableAfterImportRunStatus(status: RunStatus): boolean {
+  return status === "FAILED" || status === "CANCELLED";
+}
+
 /** Stages where the run is resting on the seller. Nothing advances until the driver observes them. */
 export const IMPORT_BARRIER_STAGES: readonly ImportStage[] = [
   "WAIT_FOR_START",

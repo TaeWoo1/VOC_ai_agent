@@ -87,6 +87,7 @@ import { LazyImportDriver } from "../action-window/initial-import/lazy-import-dr
 import { ReadinessObservingImportDriver } from "../action-window/initial-import/readiness-observing-driver";
 import { ImportAcquisitionCoordinator } from "../action-window/initial-import/import-acquisition-coordinator";
 import { ImportSegmentHost } from "../action-window/initial-import/import-host";
+import { isSettledImportRunStatus } from "../action-window/initial-import/import-stages";
 import { InitialImportEndpoint } from "../bridge/initial-import-endpoint";
 import { checkGuidedPreflight, PREFLIGHT_RECOVERY } from "../action-window/initial-import/guided-preflight";
 import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
@@ -1491,8 +1492,9 @@ export function activateNaverReviewImport(
     isSettled: () => {
       const session = host.activeSession();
       if (!session) return true;
-      const status = session.runStatus();
-      return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
+      // The SAME definition the host releases its slot on. Two hand-written copies of "is this run over?" is
+      // how the carrier and the host disagreed on 2026-09-02.
+      return isSettledImportRunStatus(session.runStatus());
     },
     isSurfaceOpen: () => core.isSurfaceOpen(),
     dispose: async () => {

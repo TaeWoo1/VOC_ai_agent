@@ -835,9 +835,14 @@ export class NaverLiveProbeDriver implements ProbeDriver {
         return `${text} ${value} ${aria} ${title}`.toLowerCase();
       };
       const selector = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
-      const matches = Array.from(document.querySelectorAll(selector)).filter(
+      const named = Array.from(document.querySelectorAll(selector)).filter(
         (el) => visibleEnabled(el) && kws.some((k) => accessibleName(el).includes(k)),
       );
+      // MIRRORS `dropNestedDuplicates` in `naver/review-export.ts`: a container matches on its child's own
+      // accessible name, so a wrapper and the control inside it are ONE control. The innermost wins — the same
+      // rule `markContinuationTarget` below has always applied to its candidate set. Both sides must apply it
+      // or the string decision and this count disagree and every locate fails closed on drift.
+      const matches = named.filter((el) => !named.some((o) => o !== el && el.contains(o)));
       if (matches.length === 1) {
         const el = matches[0]!;
         el.setAttribute("data-aw-target", "");

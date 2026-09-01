@@ -209,26 +209,38 @@ export function ConnectHub() {
               </li>
             ))}
           </ol>
+          {/* The link that used to live here moved OUT of this disclosure — see the section below. A path
+              to a screen is not a path if it is folded inside prose in a section about something else. */}
           <p className="mt-2 break-keep text-sm text-muted">
-            이전 기간의 리뷰는{" "}
-            <BtnLink to="/connect/review-history" size="sm" variant="ghost">
-              과거 리뷰 가져오기
-            </BtnLink>
-            에서 구간별로 채울 수 있습니다.
+            이전 기간의 리뷰는 아래 「리뷰 수집 실행」에서 구간별로 채울 수 있습니다.
           </p>
         </Disclosure>
       </Section>
 
+      {/* **The recovery surface has to be reachable by pressing things.**
+
+          `/connect/review-history` is where a seller picks the period, continues a stopped run, and — since
+          the last package — abandons a plan that covers the wrong days. Its ONLY entry point was a ghost link
+          inside the collapsed 「어떻게 진행되나요」 disclosure of a different section, which is not an entry
+          point: on 2026-09-02 the operator reached it by typing the URL, and said so. It is now the action of
+          the section it belongs to, beside the run it repairs. */}
       <Section
         title="리뷰 수집 실행"
         hint="판매자센터에서 리뷰 파일을 내려받는 작업의 상태와 이력"
         action={
-          <BtnLink to="/connect/imports" size="sm" variant="outline">
-            작업대 열기
+          <BtnLink to="/connect/review-history" size="sm" variant="outline">
+            기간별로 가져오기
           </BtnLink>
         }
       >
         <HomeReviewOpsCard run={liveRun} />
+        <p className="mt-3 break-keep text-sm text-muted">
+          지난 실행 기록과 구간별 이력은{" "}
+          <BtnLink to="/connect/imports" size="sm" variant="ghost">
+            작업대
+          </BtnLink>
+          에서 볼 수 있습니다.
+        </p>
       </Section>
     </>
   );

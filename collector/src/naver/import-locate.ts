@@ -156,26 +156,97 @@ export function locateDateDecision(html: string, which: "start" | "end"): Import
  */
 const APPLY_WORDING: readonly string[] = ["조회", "검색", "적용", "search"];
 
-/** Tags that can plausibly BE a control, so prose containing 조회 cannot become a candidate. */
-function controlTags(html: string): string[] {
-  const tags = html.match(/<(?:button|a|input)\b[^>]*>[^<]*(?:<\/(?:button|a)>)?/gi) ?? [];
-  return tags;
+/**
+ * One control, with the two things a decision about it may read: where it sits in the document, and the
+ * words a PERSON would see on it.
+ */
+interface ControlOccurrence {
+  /** Character offset of the control's opening tag — document order, and the only positional fact used. */
+  at: number;
+  /** The opening tag alone, for the actionability rules (which are attribute rules). */
+  tag: string;
+  /** What the seller reads: element text plus a `value` attribute, and nothing else from the markup. */
+  label: string;
 }
 
-function hasApplyWording(tag: string): boolean {
-  const lower = tag.toLowerCase();
+/** The control elements the in-page selector also considers, in document order, with their labels. */
+function controlOccurrences(html: string): ControlOccurrence[] {
+  const out: ControlOccurrence[] = [];
+  const re = /<(button|a|input)\b([^>]*)>([^<]*)/gi;
+  for (let m = re.exec(html); m !== null; m = re.exec(html)) {
+    const name = m[1]!.toLowerCase();
+    const attrs = m[2] ?? "";
+    const tag = `<${name}${attrs}>`;
+    if (name === "input") {
+      const type = /type\s*=\s*["']?([a-z]+)["']?/i.exec(attrs)?.[1]?.toLowerCase() ?? "";
+      // Mirrors the in-page selector exactly: only button/submit inputs are controls here.
+      if (type !== "button" && type !== "submit") continue;
+    }
+    const value = /value\s*=\s*["']([^"']*)["']/i.exec(attrs)?.[1] ?? "";
+    out.push({ at: m.index, tag, label: `${m[3] ?? ""} ${value}` });
+  }
+  return out;
+}
+
+/**
+ * **Apply wording is read off the LABEL, never off the whole tag.**
+ *
+ * The old test lowercased the entire opening tag — attributes included — and asked whether it contained
+ * `조회 · 검색 · 적용 · search`. On a real NAVER seller surface that matched **45** controls on
+ * 2026-09-02, because `search` is a substring of ordinary `class`, `id` and `href` values. Forty-five is
+ * not one, so `inferRequiresApply` answered "this surface needs no apply press", the `APPLY_RANGE` step
+ * was never planned, and the seller was walked from the date fields straight to the export locate without
+ * ever being asked to press 조회.
+ *
+ * The in-page selector had ALWAYS read `textContent` + `value` only. So the two implementations of one
+ * rule disagreed — the exact divergence this module's header forbids — and the pure side was the wrong one.
+ */
+function hasApplyWording(label: string): boolean {
+  const lower = label.toLowerCase();
   return APPLY_WORDING.some((word) => lower.includes(word.toLowerCase()));
+}
+
+/** Document offset of the first actionable date input, or -1 when the surface has none. */
+function firstDateInputOffset(html: string): number {
+  const re = /<input\b[^>]*>/gi;
+  for (let m = re.exec(html); m !== null; m = re.exec(html)) {
+    const tag = m[0];
+    if (isDateInputTag(tag) && isActionable(tag)) return m.index;
+  }
+  return -1;
+}
+
+/**
+ * The apply candidates: actionable controls whose LABEL carries apply wording and that stand AFTER the
+ * first date control in document order.
+ *
+ * The positional half is the DOM relationship the 2026-09-02 sitting showed was missing. An apply control
+ * belongs to the date filter it applies, and a filter's button follows its fields; a site-wide 검색 box in
+ * the page header does not. It is stated as document order rather than as a common ancestor because both
+ * sides of this decision have to compute the SAME answer — the pure side from serialized HTML, the in-page
+ * side from the live DOM — and "follows the first date input" is exactly expressible in both
+ * (`compareDocumentPosition` there, a character offset here), while an ancestry walk is not.
+ *
+ * A surface with no date input yields NO candidates: with nothing to apply to, an apply control is not a
+ * thing this run can identify.
+ */
+export function applyCandidates(html: string): ControlOccurrence[] {
+  const firstDate = firstDateInputOffset(html);
+  if (firstDate < 0) return [];
+  return controlOccurrences(html).filter(
+    (c) => c.at > firstDate && isActionable(c.tag) && hasApplyWording(c.label),
+  );
 }
 
 /**
  * Locate the apply control.
  *
- * Modeled from wording, so it fails closed on 0 and on >1 alike. A surface with two 조회 buttons is a
- * surface we do not understand yet, and the honest response is to stop and ask what distinguishes them —
- * not to take the first one and hope.
+ * Modeled from wording and position, so it fails closed on 0 and on >1 alike. A surface with two 조회
+ * buttons after its date fields is a surface we do not understand yet, and the honest response is to stop
+ * and ask what distinguishes them — not to take the first one and hope.
  */
 export function locateApplyDecision(html: string): ImportLocateDecision {
-  const candidates = controlTags(html).filter((tag) => isActionable(tag) && hasApplyWording(tag));
+  const candidates = applyCandidates(html);
   if (candidates.length !== 1) return { count: candidates.length };
   return { count: 1, index: 0 };
 }
@@ -195,7 +266,7 @@ export function inferRequiresApply(html: string): boolean {
 
 /** Sanitized diagnostics for a failed locate. Counts and booleans only. */
 export function importLocateDiagnostic(html: string): ImportLocateDiagnostic {
-  const applyCandidates = controlTags(html).filter((tag) => isActionable(tag) && hasApplyWording(tag));
+  const applyMatches = applyCandidates(html);
   const dateTags = dateInputTags(html);
   const dateExcluded = { disabled: 0, hidden: 0, displayNone: 0 };
   for (const tag of dateTags) {
@@ -208,8 +279,8 @@ export function importLocateDiagnostic(html: string): ImportLocateDiagnostic {
     dateExcludedDisabled: dateExcluded.disabled,
     dateExcludedHidden: dateExcluded.hidden,
     dateExcludedDisplayNone: dateExcluded.displayNone,
-    applyWordingPresent: applyCandidates.length > 0,
-    applyCandidateCount: applyCandidates.length,
+    applyWordingPresent: applyMatches.length > 0,
+    applyCandidateCount: applyMatches.length,
     iframePresent: /<iframe\b/i.test(html),
   };
 }

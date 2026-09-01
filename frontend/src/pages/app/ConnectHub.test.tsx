@@ -153,11 +153,15 @@ describe("채널 연결 — the hub", () => {
       "href",
       "/connect/upload",
     );
-    expect(screen.getByRole("link", { name: "과거 리뷰 가져오기" })).toHaveAttribute(
+    // Runtime Closure v2, blocker 6: this link WAS the ghost inside a collapsed disclosure of another
+    // section, which is how a seller ended up typing the URL to reach the recovery surface (2026-09-02). It is
+    // now the action of the section it belongs to, and the workbench moved to the secondary line — so the
+    // names changed while the destinations, which are what this test is about, did not.
+    expect(screen.getByRole("link", { name: "기간별로 가져오기" })).toHaveAttribute(
       "href",
       "/connect/review-history",
     );
-    expect(screen.getByRole("link", { name: "작업대 열기" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "작업대" })).toHaveAttribute(
       "href",
       "/connect/imports",
     );

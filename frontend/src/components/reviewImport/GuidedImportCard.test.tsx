@@ -572,6 +572,11 @@ describe("GuidedImportCard — the launch ref is not seller-facing", () => {
       <GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />,
     );
     await userEvent.click(screen.getByTestId("guided-import-cta"));
+    // Runtime Closure v2: the handoff note now requires a LIVE run, not merely a minted ticket — a card that
+    // said the window was raised over a run that had never started is the defect it closes. The ticket must
+    // stay invisible either way, so the run is published and the assertion is unchanged.
+    await waitFor(() => expect(fake.starts).toHaveLength(1));
+    act(() => fake.publish({ status: "WAITING_FOR_HUMAN" }));
 
     await waitFor(() => expect(screen.getByTestId("guided-run-started")).toBeInTheDocument());
     // it authorizes action against a live marketplace — it is a credential, not a status line
@@ -787,6 +792,9 @@ describe("GuidedImportCard — the seller can act on what they are told", () => 
     render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
 
     await userEvent.click(screen.getByTestId("guided-import-cta"));
+    await waitFor(() => expect(fake.starts).toHaveLength(1));
+    // See above: a live view is what earns this sentence now.
+    act(() => fake.publish({ status: "WAITING_FOR_HUMAN" }));
     await waitFor(() => expect(screen.getByTestId("guided-run-started")).toBeInTheDocument());
     const text = screen.getByTestId("guided-run-started").textContent ?? "";
     // The agent raises that window itself when the run starts, so the copy says it is up rather than asking the

@@ -467,8 +467,12 @@ export function GuidedImportCard({
       ) : null}
 
       {/* A stopped run says WHY and what repairs it. Without this the runtime reported a scope mismatch
-          correctly and the seller saw nothing change on their screen. */}
-      {running && snapshot?.blocker ? (
+          correctly and the seller saw nothing change on their screen.
+
+          NOT gated on `running` any more. A run that ended on a blocker is exactly when the seller most needs
+          to read one, and the gate meant a terminal failure rendered NOTHING here — observed live on
+          2026-09-02, where a `RUNTIME_FAULT` left this card with no statement of any kind. */}
+      {snapshot?.blocker ? (
         <div className="flex flex-col gap-1 rounded-xl bg-warn/10 px-4 py-3" role="alert" data-testid="guided-run-blocker">
           <p className="text-sm font-semibold text-ink break-keep">{blockerView(snapshot.blocker.code).title}</p>
           <p className="text-sm text-ink break-keep">{blockerView(snapshot.blocker.code).body}</p>
@@ -494,7 +498,24 @@ export function GuidedImportCard({
         </div>
       ) : null}
 
-      {launched && !running ? (
+      {/* A press that did NOT take effect says so here too. The conversation card gained this on 2026-09-01;
+          this card — the recovery surface a stuck seller is sent to — did not, so the same press died in
+          silence on the one screen whose job is to explain a stuck run. */}
+      {guided.refused ? (
+        <p className="rounded-xl bg-warn/10 px-4 py-3 text-sm text-ink break-keep" role="status" data-testid="guided-import-refused">
+          {guided.refused.cause === "NOT_ALLOWED_NOW"
+            ? "지금은 이 동작을 할 수 없습니다. 화면이 바뀌면 다시 시도해 주세요."
+            : "요청이 처리되지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요."}
+        </p>
+      ) : null}
+
+      {/* **Only a run the runtime is actually driving may say the window was raised.**
+
+          This was `launched && !running`, which read as "we handed off, nothing to render here" — and so it
+          rendered in the two cases where the claim is FALSE: the host never hosted the run, and the run died.
+          On 2026-09-02 the seller read "판매자센터 창을 띄웠어요" over a run that had never started. A minted
+          ticket is a request; a live view is the evidence. */}
+      {launched && running ? (
         <p className="rounded-xl bg-brand/5 px-4 py-3 text-sm text-ink break-keep" role="status" data-testid="guided-run-started">
           판매자센터 창을 띄웠어요. 남은 구간도 그 창에서 이어서 진행할 수 있으니, 이 화면으로 돌아오지 않아도
           괜찮아요.

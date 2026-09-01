@@ -372,6 +372,27 @@ const V2_ONLY_BLOCKER_VIEW: Record<string, BlockerView> = {
     title: "요청이 만료됐어요",
     body: "'쿠팡에서 보기'를 다시 눌러 주세요.",
   },
+  /**
+   * TERMINAL, and the code that exposed the gap. On 2026-09-02 a guided import died of a driver fault and the
+   * conversation card rendered `COPY_FALLBACK` — 「안내를 준비하고 있어요」 — over a run that had been dead for
+   * minutes. A blocker with no entry here is a blocker the seller is told nothing true about, so every code in
+   * `BLOCKER_CODES` now has one and a test holds that line.
+   *
+   * Says the two things that are true and no more: this run has stopped, and the recovery is a NEW run —
+   * never a 다시 확인, which is the recoverable parks' repair and cannot restart a terminal one.
+   */
+  RUNTIME_FAULT: {
+    title: "가져오기가 중단됐어요",
+    body: "이번 가져오기는 더 진행할 수 없어요. '다시 시도'를 눌러 새로 시작해 주세요.",
+  },
+  ACQUISITION_TARGET_UNRESOLVED: {
+    title: "요청이 만료됐어요",
+    body: "리뷰 화면에서 다시 눌러 주세요.",
+  },
+  HANDOFF_REJECTED: {
+    title: "도우미가 이 요청을 받지 못했어요",
+    body: "'다시 시도'를 눌러 주세요.",
+  },
   CREDENTIAL_STATE_UNKNOWN: {
     title: "발급된 키가 있는지 확인하지 못했어요",
     // Points at the WING window, because that is where the answer is and where the button now is. SellerOps

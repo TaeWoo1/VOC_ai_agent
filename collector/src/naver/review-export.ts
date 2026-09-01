@@ -60,6 +60,9 @@ interface ExportCandidate {
   inText: boolean;
   inAriaLabel: boolean;
   inTitle: boolean;
+  /** Character range of the matched element in the scanned HTML — used ONLY to drop nested duplicates. */
+  at: number;
+  to: number;
 }
 
 const stripComments = (html: string): string => html.replace(/<!--[\s\S]*?-->/g, " ");
@@ -106,7 +109,7 @@ function scanInteractiveElements(
   const html = stripComments(rawHtml);
   const out: ExportCandidate[] = [];
 
-  const consider = (tag: string, attrs: string, inner: string): void => {
+  const consider = (tag: string, attrs: string, inner: string, at: number, to: number): void => {
     if (isDisabled(attrs) || isHidden(attrs)) return;
     const visibleText = `${stripTags(inner)} ${readAttr(attrs, "value") ?? ""}`;
     const ariaLabel = readAttr(attrs, "aria-label") ?? "";
@@ -123,27 +126,48 @@ function scanInteractiveElements(
       inText: matched.re.test(visibleText),
       inAriaLabel: matched.re.test(ariaLabel),
       inTitle: matched.re.test(title),
+      at,
+      to,
     });
   };
 
   // <button>…</button> and <a>…</a> with inner text.
   for (const m of html.matchAll(/<(button|a)\b([^>]*)>([\s\S]*?)<\/\1>/gi)) {
-    consider((m[1] ?? "").toLowerCase(), m[2] ?? "", m[3] ?? "");
+    consider((m[1] ?? "").toLowerCase(), m[2] ?? "", m[3] ?? "", m.index ?? 0, (m.index ?? 0) + m[0].length);
   }
   // role="button" containers that are not already a <button>/<a>.
   for (const m of html.matchAll(
     /<(?!a\b|button\b)([a-z][a-z0-9]*)\b([^>]*\brole\s*=\s*["']button["'][^>]*)>([\s\S]*?)<\/\1>/gi,
   )) {
-    consider((m[1] ?? "").toLowerCase(), m[2] ?? "", m[3] ?? "");
+    consider((m[1] ?? "").toLowerCase(), m[2] ?? "", m[3] ?? "", m.index ?? 0, (m.index ?? 0) + m[0].length);
   }
   // <input type="button|submit"> — accessible text comes from its value attribute.
   for (const m of html.matchAll(/<input\b([^>]*?)\/?>/gi)) {
     const attrs = m[1] ?? "";
     const type = (readAttr(attrs, "type") ?? "").toLowerCase();
     if (type !== "button" && type !== "submit") continue;
-    consider("input", attrs, "");
+    consider("input", attrs, "", m.index ?? 0, (m.index ?? 0) + m[0].length);
   }
-  return out;
+  return dropNestedDuplicates(out);
+}
+
+/**
+ * **Two matches where one CONTAINS the other are one control, not two.**
+ *
+ * A wrapper carrying the same accessible name as the control inside it — `<a class="btn"><button>엑셀
+ * 다운로드</button></a>`, or a `role="button"` container around a labelled child — matches this scan twice,
+ * because a container's `textContent` includes its child's. The run then reports `TARGET_AMBIGUOUS` and stops
+ * on a surface that has exactly one export control (live, 2026-09-02: `count: 2` on a screen whose layout
+ * classified cleanly as `SYNC_DOWNLOAD`).
+ *
+ * The innermost wins, which is the same rule `markContinuationTarget` has always applied to its own candidate
+ * set — so this is not a new heuristic, it is the one already proven here being applied on both sides. It can
+ * only ever collapse a nested pair; two disjoint controls stay two, and the run still fails closed on them.
+ */
+function dropNestedDuplicates(candidates: ExportCandidate[]): ExportCandidate[] {
+  return candidates.filter(
+    (c) => !candidates.some((other) => other !== c && other.at >= c.at && other.to <= c.to),
+  );
 }
 
 /**
@@ -154,6 +178,37 @@ function scanInteractiveElements(
  */
 export function findExportCandidates(rawHtml: string): ExportCandidate[] {
   return scanInteractiveElements(rawHtml, EXPORT_WORDING);
+}
+
+/**
+ * **What each surviving export candidate IS, in sanitized structure only.**
+ *
+ * The 2026-09-02 sitting ended `TARGET_AMBIGUOUS count: 2` and the record could not say what the two were —
+ * the diagnostic carried a bucketed count and nothing about the candidates themselves, so no rule could be
+ * derived from it and none was invented. This is what makes the next ambiguity decidable: per candidate, the
+ * element kind, WHICH accessible source carried the keyword, WHICH of our own keywords it was (an index into
+ * our closed list — our word, never the page's), whether it declares `data-export="review"`, and its ordinal.
+ *
+ * No text, no attribute values, no ids, no selectors. Everything here is an enum, a boolean or an integer.
+ */
+export interface ExportCandidateShape {
+  order: number;
+  tag: string;
+  keywordIndex: number;
+  source: "TEXT" | "ARIA_LABEL" | "TITLE";
+  dataExportReview: boolean;
+  hasId: boolean;
+}
+
+export function exportCandidateShapes(rawHtml: string): ExportCandidateShape[] {
+  return findExportCandidates(rawHtml).map((c, order) => ({
+    order,
+    tag: c.tag,
+    keywordIndex: EXPORT_WORDING_KEYWORDS.indexOf(c.keyword),
+    source: c.inText ? "TEXT" : c.inAriaLabel ? "ARIA_LABEL" : "TITLE",
+    dataExportReview: c.dataExportReview,
+    hasId: c.id !== undefined,
+  }));
 }
 
 /**

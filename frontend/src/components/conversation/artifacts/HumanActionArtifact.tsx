@@ -4,7 +4,7 @@ import type { HumanActionRequiredArtifact as HumanAction } from "../../../lib/co
 import { Btn, BtnLink } from "../../ui/Btn";
 import { api } from "../../../lib/apiClient";
 import { analytics } from "../../../lib/analytics";
-import { resolveCopy } from "../../../lib/actionWindow/copy";
+import { blockerView, resolveCopy } from "../../../lib/actionWindow/copy";
 import { recheckLabel } from "../../../lib/reviewImport";
 import { isTerminalRunStatus } from "../../../lib/actionWindow/homeFixtures";
 import { type AcquireRuntime } from "../../../lib/actionWindow/acquire/acquireRuntime";
@@ -238,10 +238,29 @@ function GuidedAcquisitionRun({
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const startedRef = useRef(false);
+  /**
+   * A start that actually reached `runtime.start` — the ONE thing that must never happen twice, and the one
+   * thing `startedRef` alone could not express.
+   */
+  const committedRef = useRef(false);
   const completedRef = useRef(false);
 
+  /**
+   * **Start once per mounted card, and never lock the card out of starting at all.**
+   *
+   * `startedRef` was set BEFORE the first await and never reset, while the cleanup set `live = false`. Under
+   * `React.StrictMode` (this app mounts under it — `main.tsx`) an effect runs, is cleaned up, and runs again:
+   * the first pass abandoned itself at `if (!runtime || !live) return;` and the second was refused by the ref,
+   * so the run was NEVER started and nothing anywhere said so. Observed live on 2026-09-02: sockets attached,
+   * a snapshot arrived, no ticket was minted, no `START_RUN` was sent, no error was shown.
+   *
+   * The repair is to say what the two flags actually mean. `startedRef` guards an attempt that is still in
+   * flight and is RELEASED when that attempt is torn down; `committedRef` is set once a `START_RUN` has been
+   * handed to the runtime and is never released, so a re-run of this effect cannot start a second run. An
+   * abandoned first pass returns before minting, so it leaves no unspent ticket behind.
+   */
   useEffect(() => {
-    if (!paired || startedRef.current) return;
+    if (!paired || startedRef.current || committedRef.current) return;
     startedRef.current = true;
     let live = true;
     setStarting(true);
@@ -250,12 +269,20 @@ function GuidedAcquisitionRun({
         const runtime = await ensureRuntime();
         if (!runtime || !live) return;
         // Connect first, mint second: a refused attach must not spend a single-use ref.
-        if (path === "WING_READ_ACTION_WINDOW") {
-          const minted = await api.startReviewAcquisitionRun(accountId);
-          if (!live) return;
-          await runtime.start({ intent: "REVIEW_ACQUISITION", acquisitionRef: minted.acquisitionRef });
-        } else {
-          await runtime.start({ intent: "EXPORT" });
+        // From here the attempt is COMMITTED: a ref is spent-or-spendable and a command is on the wire, so no
+        // later invocation of this effect may start another.
+        committedRef.current = true;
+        try {
+          if (path === "WING_READ_ACTION_WINDOW") {
+            const minted = await api.startReviewAcquisitionRun(accountId);
+            if (!live) return;
+            await runtime.start({ intent: "REVIEW_ACQUISITION", acquisitionRef: minted.acquisitionRef });
+          } else {
+            await runtime.start({ intent: "EXPORT" });
+          }
+        } catch (e) {
+          committedRef.current = false;
+          throw e;
         }
       } catch {
         if (live) setError("판매자센터 화면을 준비하지 못했습니다. 아래 다른 방법으로 진행할 수 있습니다.");
@@ -265,6 +292,9 @@ function GuidedAcquisitionRun({
     })();
     return () => {
       live = false;
+      // An attempt torn down before it committed started nothing, so the next invocation must be allowed to
+      // try. Leaving this set is what made the card permanently dead.
+      if (!committedRef.current) startedRef.current = false;
     };
   }, [paired, ensureRuntime, path, accountId]);
 
@@ -357,10 +387,16 @@ function NaverGuidedImportRun({
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const startedRef = useRef(false);
+  /** See `GuidedAcquisitionRun` above: an attempt in flight vs a `START_RUN` actually handed over. */
+  const committedRef = useRef(false);
   const completedRef = useRef(false);
 
+  /**
+   * Start once per mounted card, and never lock the card out of starting at all — the 2026-09-02 defect, and
+   * the same repair as its sibling above.
+   */
   useEffect(() => {
-    if (!paired || startedRef.current) return;
+    if (!paired || startedRef.current || committedRef.current) return;
     startedRef.current = true;
     let live = true;
     setStarting(true);
@@ -376,8 +412,12 @@ function NaverGuidedImportRun({
         await api.extendReviewImportPlan(planId).catch(() => undefined);
         const launch = await api.launchNextReviewImportSegment(planId);
         try {
+          // From here the attempt is COMMITTED: a ticket is spent-or-spendable and a command is on the wire,
+          // so no later invocation of this effect may start another.
+          committedRef.current = true;
           await runtime.start({ launchRef: launch.launchRef, kind: launch.kind });
         } catch (e) {
+          committedRef.current = false;
           await api.expireReviewImportLaunch(launch.launchRef).catch(() => undefined);
           throw e;
         }
@@ -389,6 +429,9 @@ function NaverGuidedImportRun({
     })();
     return () => {
       live = false;
+      // An attempt that was torn down before it committed did not start anything, so the next invocation of
+      // this effect must be allowed to try. Leaving this set is what made the card permanently dead.
+      if (!committedRef.current) startedRef.current = false;
     };
   }, [paired, ensureRuntime, accountId]);
 
@@ -434,8 +477,16 @@ function NaverGuidedImportRun({
       {snapshot.step && !terminal ? (
         <p className="break-keep text-sm text-ink">{resolveCopy(snapshot.step.copyKey, snapshot.step.copyParams)}</p>
       ) : null}
+      {/* **A stopped run is described by `blockerView`, never by `resolveCopy`.**
+
+          `resolveCopy` answers an unknown key with `COPY_FALLBACK` — 「안내를 준비하고 있어요」 — so on
+          2026-09-02 a terminal `RUNTIME_FAULT` told the seller the run was being prepared while it had already
+          died. `blockerView` is the lookup whose fallback is honest ("진행이 멈췄어요"), and it is the same one
+          the recovery card uses, so the two screens now say the same thing about the same run. */}
       {snapshot.blocker ? (
-        <p className="break-keep text-sm text-warn" role="status">{resolveCopy(`actionWindow.blocker.${snapshot.blocker.code}`)}</p>
+        <p className="break-keep text-sm text-warn" role="status">
+          {blockerView(snapshot.blocker.code).title} · {blockerView(snapshot.blocker.code).body}
+        </p>
       ) : null}
       {snapshot.status === "COMPLETED" ? (
         <p className="break-keep text-sm text-ink" role="status">리뷰 가져오기가 끝났습니다. 이어서 확인하겠습니다.</p>
@@ -443,7 +494,15 @@ function NaverGuidedImportRun({
       {/* A run that ENDED without finishing still has somewhere to go. `COMPLETED` deliberately does not
           offer this — that run's next step is the conversation resuming, not another import. */}
       {terminal && snapshot.status !== "COMPLETED" && onRestart ? (
-        <Btn variant="outline" onClick={onRestart} data-testid="guided-import-restart">다시 시도</Btn>
+        <div className="flex flex-wrap items-center gap-3">
+          <Btn variant="outline" onClick={onRestart} data-testid="guided-import-restart">다시 시도</Btn>
+          {/* A stopped run's second exit. The seller who has just been told the run ended needs the screen
+              that can pick a different period or abandon the plan, and until now nothing in the product
+              pointed at it — it was reachable only by typing the URL (2026-09-02). */}
+          <Link to="/connect/review-history" className="text-sm font-semibold text-brand-700 hover:underline">
+            기간을 다시 고르기
+          </Link>
+        </div>
       ) : null}
       {/* A press that did nothing has to say so. Before this, `send` dropped a command the view did not allow
           without writing anything anywhere, and a runtime rejection came back on the wire and was discarded —
