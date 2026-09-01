@@ -72,6 +72,12 @@ export interface ResolvedEntity {
  */
 export type NeedKind =
   | "PRODUCT_FACT"
+  /**
+   * 판매자가 등록해 둔 상품 목록 자체 (Agentic Experience v2). A question that names NO product and asks
+   * what the catalogue holds. Its own kind because every other product need is about one resolved
+   * product and is answered by refusing when none was named — which is what 「우리 상품 목록 보여줘」 got.
+   */
+  | "PRODUCT_CATALOG"
   | "PRODUCT_LISTING"
   | "PRODUCT_VARIANT"
   /** 판매자가 이 상품에 대해 직접 써 둔 글 — 설명·FAQ·사용법·정책. 채널이 말한 사실과 다른 축이다. */

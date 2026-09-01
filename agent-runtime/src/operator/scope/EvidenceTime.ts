@@ -73,6 +73,8 @@ export type TemporalDemand =
 const DEMAND_OF: Record<NeedKind, TemporalDemand> = {
   INQUIRY_VOLUME: "CURRENT_STATE",
   PRODUCT_FACT: "CURRENT_STATE",
+  // What the catalogue holds NOW. A registered product is a standing thing, not an event on a date.
+  PRODUCT_CATALOG: "CURRENT_STATE",
   PRODUCT_LISTING: "CURRENT_STATE",
   PRODUCT_VARIANT: "CURRENT_STATE",
   // What the seller wrote about the product is a standing description, not something that happened

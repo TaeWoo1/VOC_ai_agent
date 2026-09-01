@@ -174,6 +174,9 @@ const KIND_FLOOR: Record<InformationNeed["kind"], readonly Granularity[]> = {
   CUSTOMER_HISTORY: ["LIST", "DETAIL"],
   ORDER_HISTORY: ["LIST", "DETAIL", "COUNT"],
   PRODUCT_FACT: ["DETAIL", "GAP"],
+  // The catalogue is a list of things with a count; it is org-scoped by construction (a question that
+  // named a product is not this need) and rests on one read of the seller's own rows.
+  PRODUCT_CATALOG: ["LIST", "COUNT", "DETAIL", "GAP"],
   PRODUCT_LISTING: ["DETAIL", "GAP"],
   PRODUCT_VARIANT: ["DETAIL", "GAP"],
   PRODUCT_KNOWLEDGE_DOC: ["DETAIL", "GAP"],
@@ -261,7 +264,10 @@ export function needScopeOf(
   // Retrieval & Grounding Correctness v1: a PAST_ANSWER need is the company's memory, product-bound only
   // when a product was named — an inquiry mention does not make it ITEM-scoped (the memory store has no
   // inquiry axis; the inquiry being worked on is excluded, not selected).
-  const entity: EntityScope = need.kind === "POLICY" || need.kind === "COMPANY_PROFILE" ? "ORG"
+  // Agentic Experience v2: a PRODUCT_CATALOG need is the company's catalogue. The question named no
+  // product by definition, and a stray PRODUCT mention the planner read out of 「우리 상품」 must not
+  // narrow the one need whose whole answer is "here is everything".
+  const entity: EntityScope = need.kind === "POLICY" || need.kind === "COMPANY_PROFILE" || need.kind === "PRODUCT_CATALOG" ? "ORG"
     : need.kind === "PAST_ANSWER" ? (namesProduct ? "PRODUCT" : "ORG")
     : namesProduct ? "PRODUCT" : namesItem ? "ITEM" : "ORG";
 

@@ -62,6 +62,16 @@ export const OPERATOR_TOOL = {
   SEARCH_ANSWER_MEMORY: "search_answer_memory",
   /* Seller Context v1-B (2026-08-30). READ: who this company is, in the seller's words, on the turn that asks. */
   GET_SELLER_PROFILE: "get_seller_profile",
+  /**
+   * Agentic Experience v2 (2026-09-01). READ: the seller's own catalogue, head first.
+   *
+   * <b>Why it is not `resolve_product` with an empty query.</b> That tool exists to turn a word the
+   * seller typed into one row, and it is described to the planner that way; a plan that wanted the
+   * catalogue had to invent a search term for a question that named none. 「우리 상품 목록 보여줘」 was
+   * therefore answered 「어떤 상품을 묻는지 확인하지 못했습니다」 — a resolver's refusal standing in for a
+   * missing capability. The read is the same org-scoped endpoint, bounded and ordered by the backend.
+   */
+  LIST_PRODUCTS: "list_products",
 } as const;
 
 /**
@@ -189,6 +199,17 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         "판매자가 말한 상품 이름/SKU를 실제 상품 행으로 해석한다. 후보를 여러 개 줄 수 있다. "
         + "상품에 관한 어떤 조회보다 먼저 필요하다 — 계획은 id 를 만들 수 없고 이 도구만 id 를 만든다.",
       schema: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(10).optional() }),
+    })),
+
+    // The catalogue itself — no query, because the question named no product. The backend returns the
+    // org's catalog head (name order, bounded); nothing here searches, creates or merges.
+    read(tool(async ({ limit }: { limit?: number }) => deps.operator.searchProducts("", limit ?? 10), {
+      name: OPERATOR_TOOL.LIST_PRODUCTS,
+      description:
+        "이 판매자가 등록해 둔 상품 목록 — 「우리 상품 목록」·「어떤 상품을 팔고 있지」처럼 특정 상품을 "
+        + "지목하지 않은 질문의 출처. 이름순으로 앞에서부터 돌려준다. 상품 하나를 이름으로 찾는 것은 "
+        + "resolve_product 다. 필요한 정보: PRODUCT_CATALOG.",
+      schema: z.object({ limit: z.number().int().min(1).max(10).optional() }),
     })),
 
     read(tool(async ({ productId, referenceDate }: { productId: string; referenceDate?: string }) =>

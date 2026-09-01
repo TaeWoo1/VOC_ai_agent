@@ -94,10 +94,13 @@ describe("conversation provider + workspace", () => {
     await userEvent.click(screen.getByRole("button", { name: "보내기" }));
     expect(await screen.findByTestId("user-turn")).toHaveTextContent("오늘 리뷰 뭐 들어왔어?");
     const progress = await screen.findByTestId("conversation-progress");
-    // Chat density: the latest stage is the line; the earlier ones are quiet checks above it.
+    // Agentic Experience v2 §7: ONE line — what is happening now, with the finished stages as a quiet
+    // trail on the same line rather than a column that grows while the seller waits. Still only the
+    // stages the runtime reported, still in the order it reported them.
     expect(progress).toHaveTextContent("리뷰를 읽는 중");
-    const items = progress.querySelectorAll("li");
-    expect(Array.from(items).map((li) => li.textContent)).toEqual(["✓요청을 이해했습니다"]);
+    expect(progress).toHaveTextContent("요청을 이해했습니다");
+    expect(progress.querySelectorAll("li")).toHaveLength(0);
+    expect(progress.textContent?.indexOf("요청을 이해했습니다")).toBeLessThan(progress.textContent!.indexOf("리뷰를 읽는 중"));
     expect(progress).not.toHaveTextContent("계획");
     // Stop is real and sits where Send was.
     // The control swaps in place with a short crossfade, so it is awaited, never assumed.

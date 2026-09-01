@@ -68,9 +68,13 @@ export function ConversationWorkspace({
   const empty = conversation.turns.length === 0;
   // Working Context v1 §1: what the next sentence will be about, resolved from what the thread already
   // drew. Null while the conversation holds nothing — the common case at the start, and it renders nothing.
+  // <b>Everything the seller can SEE, not only what the server persisted.</b> The bar names the anchor
+  // from the rows the thread already drew — and the home's brief is a client-composed leading turn, so
+  // pressing one of ITS rows anchored an inquiry the bar could only call 「선택한 문의」 (measured live).
+  // The rows are on screen either way; which list they came from is not something a seller can see.
   const context = useMemo(
-    () => currentContext(conversation.workingSet, conversation.activeTask, conversation.turns),
-    [conversation.workingSet, conversation.activeTask, conversation.turns],
+    () => currentContext(conversation.workingSet, conversation.activeTask, [...leadingTurns, ...conversation.turns]),
+    [conversation.workingSet, conversation.activeTask, conversation.turns, leadingTurns],
   );
   // §4: the box asks for what the agent asked for. A gap question ends with the seller typing the
   // answer, and 「무엇이든 물어보세요」 above the cursor was the one place that did not say so.

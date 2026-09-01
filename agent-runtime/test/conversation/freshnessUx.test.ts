@@ -71,6 +71,12 @@ async function fresh(seed: Parameters<typeof harness>[0] = {}) {
 const humansOf = (t: { artifacts: readonly unknown[] }) =>
   (t.artifacts as Array<{ type: string }>).filter((a) => a.type === "HUMAN_ACTION_REQUIRED") as HumanActionRequiredArtifact[];
 const once = (text: string, needle: string) => text.split(needle).length === 2;
+/**
+ * Everything the seller reads in one turn — the answer AND, since Agentic Experience v2, the run's
+ * limits as their own field (`TurnView.notes`). The "said once" property is about what reaches the
+ * screen, so it is asserted over both rather than over whichever field happens to hold the sentence.
+ */
+const said = (turn: { message: string; notes?: readonly string[] }) => [turn.message, ...(turn.notes ?? [])].join(" ");
 
 describe("the vocabulary — one instant, one phrase", () => {
   it("asOfWord: today / yesterday keep the time, older days drop it, another year names the year", () => {
@@ -110,7 +116,7 @@ describe("stale data + a question the held rows can answer", () => {
     // The sentence names no period, so the answer claims none (Conversation Contract Correctness v2):
     // it used to read 「지금까지 확인한 최근 7일 …」 under a window the seller never asked for.
     expect(turn.message.startsWith("지금까지 확인한 낮은 평점 리뷰는 1건입니다.")).toBe(true);
-    expect(once(turn.message, "쿠팡 리뷰는 8월 20일 기준입니다.")).toBe(true);
+    expect(once(said(turn), "쿠팡 리뷰는 8월 20일 기준입니다.")).toBe(true);
     expect(turn.message).not.toContain("최신 상태가 아닙니다");
     expect(turn.message).not.toContain("아직 확인하지 못했어요");
     expect(turn.continuation.pendingHumanActions?.[0]).toMatchObject({ optional: true, accountId: COUPANG_ACCOUNT });
@@ -141,8 +147,8 @@ describe("stale + a question that needs current rows", () => {
     const [step] = humansOf(turn);
     expect(step!.optional).toBeUndefined();
     expect(step).toMatchObject({ title: "쿠팡 최신 리뷰 가져오기", asOf: "2026-08-20T01:00:00Z", reason: "FRESHNESS_UNPROVEN" });
-    expect(turn.message).toContain("지금까지 확인한 오늘 리뷰는 3건입니다.");
-    expect(once(turn.message, "쿠팡 리뷰는 8월 20일 이후 아직 확인하지 못했어요.")).toBe(true);
+    expect(said(turn)).toContain("지금까지 확인한 오늘 리뷰는 3건입니다.");
+    expect(once(said(turn), "쿠팡 리뷰는 8월 20일 이후 아직 확인하지 못했어요.")).toBe(true);
     expect(turn.message).not.toContain("카페24 리뷰는");
     expect(turn.message).not.toContain("최신 수집");
     expect(turn.message).not.toMatch(/SyncJob|coverage|sync/i);
@@ -168,7 +174,7 @@ describe("per channel: acquisition capability decides the step, never the seller
     expect(turn.status).toBe("WAITING_HUMAN");
     expect(humansOf(turn)[0]).toMatchObject({ channelCode: "NAVER", path: "EXPORT_ACTION_WINDOW", accountId: NAVER_ACCOUNT,
       fallback: { path: "FILE_UPLOAD" }, asOf: "2026-08-10T00:00:00Z", title: "네이버 최신 리뷰 가져오기" });
-    expect(once(turn.message, "네이버 리뷰는 8월 10일 이후 아직 확인하지 못했어요.")).toBe(true);
+    expect(once(said(turn), "네이버 리뷰는 8월 10일 이후 아직 확인하지 못했어요.")).toBe(true);
     expect(h.inquiry.manualSyncCalls).toHaveLength(0);
   });
   it("Coupang GUIDED + stale: the WING read Action Window, requiring the local helper", async () => {
@@ -186,7 +192,7 @@ describe("partial / failed acquisition", () => {
     h.inquiry.manualSyncBehavior = { runStatus: "FAILED" };
     const { turn } = await say(h, id, "별점 2점 이하 리뷰 보여줘");
     expect(turn.status).toBe("DONE");
-    expect(once(turn.message, "카페24 리뷰를 최신 상태로 갱신하지 못했습니다 (수집이 실패했습니다). 8월 1일 기준으로 보여 드립니다.")).toBe(true);
+    expect(once(said(turn), "카페24 리뷰를 최신 상태로 갱신하지 못했습니다 (수집이 실패했습니다). 8월 1일 기준으로 보여 드립니다.")).toBe(true);
     expect(turn.message).not.toContain("카페24 리뷰는 8월 1일 기준입니다.");
     expect((artifact(turn, "REVIEW_LIST") as ReviewListArtifact).freshness.find((f) => f.channelCode === "CAFE24")?.verdict).toBe("UNPROVEN");
     expect(humansOf(turn)).toHaveLength(0);
@@ -196,7 +202,7 @@ describe("partial / failed acquisition", () => {
     h.recentReviews["false:ALL"] = freshReviews(staleCafe24());
     h.inquiry.manualSyncBehavior = { runStatus: "PARTIAL", successRows: 1 };
     const { turn } = await say(h, id, "오늘 리뷰 뭐 들어왔어?");
-    expect(once(turn.message, "카페24 리뷰는 일부만 가져왔습니다.")).toBe(true);
+    expect(once(said(turn), "카페24 리뷰는 일부만 가져왔습니다.")).toBe(true);
     expect((artifact(turn, "REVIEW_LIST") as ReviewListArtifact).freshness.find((f) => f.channelCode === "CAFE24")?.verdict).not.toBe("FRESH");
   });
 });
@@ -231,7 +237,7 @@ describe("resume: only the requested collection satisfies the step, and the ORIG
     expect(turn.status).toBe("DONE");
     expect(turn.resumedFrom).toBe(first.turn.turnId);
     expect(turn.message.startsWith("새 리뷰 가져오기가 끝났습니다. 계속 확인하겠습니다. 오늘 확인 가능한 리뷰가 1건입니다.")).toBe(true);
-    expect(turn.message).toContain("이번에 확인한 네이버 리뷰 중 오늘 작성된 리뷰는 1건입니다.");
+    expect(said(turn)).toContain("이번에 확인한 네이버 리뷰 중 오늘 작성된 리뷰는 1건입니다.");
     expect(turn.message).not.toMatch(/전부 확인|모두 확인|새로 가져왔습니다/);
     expect((artifact(turn, "REVIEW_LIST") as ReviewListArtifact).freshness.find((f) => f.channelCode === "NAVER")?.verdict).toBe("FRESH");
     expect(humansOf(turn)).toHaveLength(0);
@@ -244,9 +250,9 @@ describe("resume: only the requested collection satisfies the step, and the ORIG
     h.inquiry.syncRuns.push({ id: "up-2", sellerAccountId: null, channelId: "chan-naver", dataType: null, uploadType: "REVIEW", trigger: "UPLOAD",
       status: "SUCCESS", successRows: 5, startedAt: "2099-01-01T00:00:00Z", finishedAt: "2099-01-01T00:02:00Z" });
     const { turn } = await say(h, id, "", { resumeOfTurnId: first.turn.turnId });
-    expect(turn.message).toContain("이전에 없던 네이버 리뷰 5건을 새로 가져왔습니다.");
+    expect(said(turn)).toContain("이전에 없던 네이버 리뷰 5건을 새로 가져왔습니다.");
     expect(turn.message).not.toContain("작성된 리뷰는");
-    expect(turn.message).toContain("오늘 들어온 리뷰는 없습니다.");
+    expect(said(turn)).toContain("오늘 들어온 리뷰는 없습니다.");
   });
   it("an OFFERED refresh the seller took resumes the same way — the rows are re-read and the offer is gone", async () => {
     const { h, id } = await fresh({ recentReviews: { "true:ALL": lowRows() } });

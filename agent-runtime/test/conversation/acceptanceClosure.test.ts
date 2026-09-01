@@ -12,6 +12,14 @@ import { LIVE_RECORDED_PLANS } from "../support/liveRecordedPlans";
 import type { AgentPlanView, RecentReviewsResponse } from "../../src/spring/types";
 import { MOLDING } from "../support/operatorFixtures";
 
+/**
+ * Everything the seller reads in one turn — the answer AND, since Agentic Experience v2, the run's
+ * limits as their own field (`TurnView.notes`). Which of the two holds a sentence is a rendering
+ * fact; that the seller reads it is the contract these tests are about.
+ */
+const said = (turn: { message: string; notes?: readonly string[] }) => [turn.message, ...(turn.notes ?? [])].join(" ");
+
+
 const V3 = "agent-plan-prompt/v3";
 
 function reviewPlan(goal: string, filters: AgentPlanView["filters"], extra: Partial<AgentPlanView> = {}): AgentPlanView {
@@ -83,7 +91,7 @@ describe("§8 — acquisition capability ≠ freshness: the AUTOMATIC branch, ca
     const { turn } = await say(h, id, "오늘 새로 달린 리뷰 보여줘");
     expect(turn.status).toBe("DONE");
     expect(artifact(turn, "REVIEW_LIST").freshness.find((f) => f.channelCode === "CAFE24")?.verdict).toBe("UNPROVEN");
-    expect(turn.message).toContain("이미 수집이 진행 중입니다");
+    expect(said(turn)).toContain("이미 수집이 진행 중입니다");
     expect(turn.message).not.toMatch(/오늘 것은 0건/);
   });
 
@@ -92,8 +100,8 @@ describe("§8 — acquisition capability ≠ freshness: the AUTOMATIC branch, ca
     h.recentReviews["false:ALL"] = { ...freshReviews(staleCafe24()), items: [], total: 0 };
     h.inquiry.manualSyncBehavior = { runStatus: "FAILED" };
     const { turn } = await say(h, id, "오늘 새로 달린 리뷰 보여줘");
-    expect(turn.message).toContain("수집이 실패했습니다");
-    expect(turn.message).toContain("1월 1일 기준으로 보여 드립니다.");
+    expect(said(turn)).toContain("수집이 실패했습니다");
+    expect(said(turn)).toContain("1월 1일 기준으로 보여 드립니다.");
     expect(turn.message).not.toMatch(/0건/);
     expect(turn.artifacts.some((a) => a.type === "HUMAN_ACTION_REQUIRED")).toBe(false);
   });
@@ -103,7 +111,7 @@ describe("§8 — acquisition capability ≠ freshness: the AUTOMATIC branch, ca
     h.recentReviews["false:ALL"] = freshReviews(staleCafe24());
     h.inquiry.manualSyncBehavior = { runStatus: "PARTIAL", successRows: 1 };
     const { turn } = await say(h, id, "오늘 새로 달린 리뷰 보여줘");
-    expect(turn.message).toContain("일부만 가져왔습니다");
+    expect(said(turn)).toContain("일부만 가져왔습니다");
     expect(artifact(turn, "REVIEW_LIST").freshness.find((f) => f.channelCode === "CAFE24")?.verdict).toBe("UNPROVEN");
     expect(h.inquiry.manualSyncCalls).toHaveLength(1);
   });
@@ -116,7 +124,7 @@ describe("§8 — acquisition capability ≠ freshness: the AUTOMATIC branch, ca
     const again = await say(h, id, "오늘 새로 달린 리뷰 보여줘");
     expect(again.turn.artifacts.filter((a) => a.type === "HUMAN_ACTION_REQUIRED")).toHaveLength(0);
     expect(again.turn.message).not.toMatch(/오늘 것은 0건/);
-    expect(again.turn.message).toContain("쿠팡 리뷰는 8월 20일 이후 아직 확인하지 못했어요.");
+    expect(said(again.turn)).toContain("쿠팡 리뷰는 8월 20일 이후 아직 확인하지 못했어요.");
   });
 
   it("GUIDED completed: only THIS account's run (or an upload-shaped run on its channel) satisfies the step", async () => {

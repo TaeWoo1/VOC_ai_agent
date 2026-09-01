@@ -29,7 +29,7 @@ import { eventOn } from "../scope/EvidenceTime";
 import type { Artifact, InquiryGroupKey, InquiryListArtifact } from "../../conversation/contract";
 import type { CustomerMemorySearch } from "../../spring/types";
 import { subjectTermOf } from "../../conversation/subjectTerm";
-import { rankByUrgency, URGENCY_CRITERION, URGENCY_LIMIT, waitingDaysOf } from "../../conversation/urgency";
+import { rankByUrgency, URGENCY_CRITERION, URGENCY_LIMIT, waitingDaysOf, waitingPhrase } from "../../conversation/urgency";
 import { observationDate } from "../scope/EvidenceTime";
 import { log } from "../../log";
 
@@ -86,11 +86,24 @@ export const PRIORITY_DEFAULT = 3;
  * ONE sentence for a ranked queue, shared by the finding and the conversation headline so the two can
  * never say the same fact in different words — and so the criterion is never dropped as "redundant".
  */
-export function urgencySentence(subject: string, total: number, shown: number): string {
+export function urgencySentence(
+  subject: string, total: number, shown: number,
+  /** The row that came first, when there is one — a ranking's answer is an object, not a count. */
+  top?: { readonly title: string | null; readonly waitingDays: number | null } | null,
+): string {
   if (total === 0) return `${subject}는 없습니다.`;
-  return shown >= total
-    ? `${subject} ${total}건을 먼저 볼 순서로 정리했습니다. ${URGENCY_CRITERION}`
-    : `${subject} ${total}건 중 먼저 보실 ${shown}건입니다. ${URGENCY_CRITERION}`;
+  const order = shown >= total
+    ? `${subject} ${total}건을 먼저 볼 순서로 정리했습니다.`
+    : `${subject} ${total}건 중 먼저 보실 ${shown}건입니다.`;
+  // <b>A ranking answers WHICH ONE, and says why it is first</b> (Agentic Experience v2). Before this
+  // the seller read 「…12건 중 먼저 보실 1건입니다」 and had to look down into the card to learn what it
+  // was — a count where a judgement belonged. The name and the wait are the row's own facts; the
+  // criterion still follows, and the limit of that criterion is still said once, as a limit.
+  const wait = top ? waitingPhrase(top.waitingDays) : null;
+  const named = top?.title?.trim()
+    ? `먼저 보실 것은 「${top.title.trim()}」입니다${wait ? ` — ${wait === "오늘 접수" ? "오늘 들어왔습니다" : `${wait} 중입니다`}` : ""}.`
+    : null;
+  return named ? `${named} ${order} ${URGENCY_CRITERION}` : `${order} ${URGENCY_CRITERION}`;
 }
 
 export async function readInquiryWorkload(input: SpecialistInput, needId: string, rank = false): Promise<WorkloadRead> {
@@ -217,7 +230,9 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
   const counts = rank ? "" : groups.map((g) => `${g.label} ${g.items.length}건`).join(" · ");
   const narrowed = topic ? `${topicLabel(topic)} 관련 ` : term ? `${term} 관련 ` : "";
   const subject = fromReviews ? "같은 상품에 대한 미답변 문의" : `${narrowed}답변이 필요한 문의`;
-  const rankedStatement = urgencySentence(subject, read.items.length, shown.length);
+  const first = shown[0];
+  const rankedStatement = urgencySentence(subject, read.items.length, shown.length,
+    first ? { title: first.title ?? null, waitingDays: waitingDaysOf(first.receivedAt, today) } : null);
   findings.push({
     findingId: `f-${pageRef.evidenceId}`,
     specialist: "INQUIRY_OPS",

@@ -156,6 +156,8 @@ type ResolvedTarget =
 
 interface Composed {
   status: TurnStatus; message: string; artifacts: Artifact[]; suggestedActions: SuggestedAction[];
+  /** The run's limits, said apart from the answer (contract `TurnView.notes`). */
+  notes?: string[];
   workingSet: WorkingSetView | null; pendingHumanActions: PendingHumanAction[];
   pendingPrepared: PendingPreparedAction | null; failureCode?: string; failureReason?: string;
   budget?: TurnView["budget"]; answer?: OperatorAnswer;
@@ -468,7 +470,8 @@ export class ConversationService {
   }
 
   private agentTurn(view: ConversationView, input: {
-    status: TurnStatus; message: string; artifacts: readonly Artifact[]; suggestedActions: readonly SuggestedAction[];
+    status: TurnStatus; message: string; notes?: readonly string[];
+    artifacts: readonly Artifact[]; suggestedActions: readonly SuggestedAction[];
     workingSet: WorkingSetView | null; pendingHumanActions: readonly PendingHumanAction[];
     pendingPrepared: PendingPreparedAction | null; resumedFrom?: string; failureCode?: string; failureReason?: string;
     budget?: TurnView["budget"]; answer?: OperatorAnswer; pendingCapture?: PendingKnowledgeCapture | null;
@@ -476,6 +479,7 @@ export class ConversationService {
     return {
       turnId: randomUUID(), conversationId: view.conversationId, role: "AGENT",
       message: input.message, artifacts: input.artifacts, suggestedActions: input.suggestedActions,
+      ...(input.notes && input.notes.length > 0 ? { notes: [...input.notes] } : {}),
       continuation: {
         workingSet: input.workingSet, pendingHumanAction: input.pendingHumanActions[0] ?? null,
         pendingHumanActions: [...input.pendingHumanActions], pendingPrepared: input.pendingPrepared,
@@ -847,9 +851,14 @@ export class ConversationService {
       }
     }
     // The rows path's own note — 「언제 기준」 per stale channel, a refresh that could not be made, a
-    // partial collection — each said once here and nowhere else in the prose. Never model prose.
-    // Sentence by sentence, so a fact the findings already said (the per-channel 「언제 기준」) is not read twice.
-    if (answer.note && !draftTurn) sentences.push(...answer.note.split(/(?<=[.!?])\s+/).filter((s) => s.length > 0));
+    // partial collection — each said once here and nowhere else. Never model prose.
+    //
+    // <b>These are the answer's LIMITS and they leave the answer's paragraph</b> (Agentic Experience v2).
+    // Sentence by sentence, so a fact the findings already said (the per-channel 「언제 기준」) is not read
+    // twice, and a limit the answer itself already stated is dropped rather than repeated underneath it.
+    const limits = answer.note && !draftTurn
+      ? answer.note.split(/(?<=[.!?])\s+/).filter((s) => s.length > 0)
+      : [];
     if (trailingQuestion) sentences.push(trailingQuestion);
 
     const evidenceArtifact = evidenceOf(answer);
@@ -861,8 +870,10 @@ export class ConversationService {
       ...(h.optional ? { optional: true } : {}),
     }));
     const status: TurnStatus = human ? "WAITING_HUMAN" : "DONE";
+    const message = dedupeNear(sentences).join(" ");
     return {
-      status, message: dedupeNear(sentences).join(" "), artifacts,
+      status, message, artifacts,
+      notes: dedupeNear(limits).filter((s) => !message.includes(s)),
       // Three next moves at most: a fourth is a menu, and a menu is the shape a chat is not. A lane
       // that named its OWN next moves owns them — the generic set chips beside them offered 「답변
       // 준비해줘」 on an inquiry the same turn had just said was already answered (live 2026-08-31).
@@ -2198,7 +2209,9 @@ function headlineOf(
         const ranked = answer.findings.find((f) => f.statement.includes(URGENCY_CRITERION));
         if (ranked) return ranked.statement;
         const shown = primary.groups.reduce((n, g) => n + g.items.length, 0);
-        return urgencySentence(primary.title, Math.max(primary.totalCount, shown), shown);
+        const head = primary.groups.flatMap((g) => g.items)[0] ?? null;
+        return urgencySentence(primary.title, Math.max(primary.totalCount, shown), shown,
+          head ? { title: head.title ?? null, waitingDays: head.waitingDays ?? null } : null);
       }
       const previousReviews = axis.filters.scope === "WORKING_SET" && view.workingSet?.kind === "REVIEWS";
       if (primary.scope && !(primary.more?.to ?? "").includes("NEEDS_REPLY")) {
@@ -2693,7 +2706,10 @@ function suggestionsFor(
             chips.push(promptChip(workingSet.filters.inquiryIntent === "ROWS" ? "답변 안 한 것만 보여줘" : "배송 관련부터"));
             if (workingSet.filters.inquiryIntent === "ROWS") chips.push(promptChip("그중 가장 최근 1개만"));
           }
-          chips.push(promptChip(one ? "답변 준비해줘" : "첫 번째 거 답변 준비해줘"));
+          // A RANKED list opens the row it judged first, and that row carries 「답변 준비」 as its own
+          // control (Agentic Experience v2 §5). A chip under the card offering the same move is that
+          // action twice, six inches apart, with the seller deciding which one is the real one.
+          if (!ranked) chips.push(promptChip(one ? "답변 준비해줘" : "첫 번째 거 답변 준비해줘"));
         }
         break;
       case "ORDERS":

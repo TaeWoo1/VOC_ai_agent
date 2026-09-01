@@ -30,7 +30,7 @@ const SEND_PROMPT = "좋아 보내자";
  * re-read from the inquiry's own detail (the same saved version — nothing is regenerated). [초안 복사]
  * copies exactly that stored text and never claims a copy that did not happen.
  */
-export function DraftArtifact({ artifact, onPrompt }: { artifact: Draft; onPrompt?: (prompt: string) => void }) {
+export function DraftArtifact({ artifact, onPrompt, headline }: { artifact: Draft; onPrompt?: (prompt: string) => void; headline?: string }) {
   const onOpen = useContinueInPanel("DRAFT");
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
   const [reloaded, setReloaded] = useState<{ state: "loading" | "loaded" | "superseded" | "failed"; body: string | null }>({ state: "loading", body: null });
@@ -85,6 +85,7 @@ export function DraftArtifact({ artifact, onPrompt }: { artifact: Draft; onPromp
         ) : undefined
       }
       testId="draft-artifact"
+      headline={headline}
     >
       <div className="space-y-2 px-4 pb-3">
         {machinery ? (

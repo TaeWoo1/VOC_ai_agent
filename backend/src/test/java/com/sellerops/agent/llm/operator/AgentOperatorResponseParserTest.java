@@ -180,7 +180,11 @@ class AgentOperatorResponseParserTest {
             assertThat(system).contains(token);
         }
         assertThat(system).contains("ORDER_OPS");
-        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v11");
+        // Agentic Experience v2: the catalogue need and the read that serves it are BOTH named, so a
+        // planner that hears 「우리 상품 목록 보여줘」 has a kind to put it in and a tool to reach it.
+        assertThat(system).contains("PRODUCT_CATALOG");
+        assertThat(system).contains("list_products");
+        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v12");
     }
 
     /**

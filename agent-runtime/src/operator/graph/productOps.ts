@@ -18,6 +18,7 @@
  */
 import { excerpt, factSourceLabel, retrievalSentence } from "../wording/sellerWording";
 import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorState";
+import type { Artifact } from "../../conversation/contract";
 import type { NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import { outcomeOf } from "../../spring/types";
@@ -59,9 +60,16 @@ const EXACT_SURFACES: readonly ProductMatchSurface[] = [
 
 /** The need kinds this specialist answers. Anything else belongs to another one. */
 export const PRODUCT_NEEDS = [
-  "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC",
+  "PRODUCT_FACT", "PRODUCT_CATALOG", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC",
   "REVIEW_SIGNAL", "INQUIRY_VOLUME",
 ] as const;
+
+/**
+ * How many catalogue rows one answer shows. The backend's own ceiling is the same number, so a full
+ * page is also the point at which this answer stops being able to claim it is the whole catalogue —
+ * which is why {@link readCatalog} says which of the two it is rather than implying the first.
+ */
+const CATALOG_ROWS = 10;
 
 /**
  * How many of the seller's own passages one answer may rest on.
@@ -104,6 +112,34 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
   const failures: ToolFailure[] = [];
   /** One settled outcome per signal need kind — see the note at the call site. */
   const answered = new Map<string, NeedState>();
+
+  // ── 0. The catalogue — a question that named no product (Agentic Experience v2).
+  //
+  // It runs BEFORE resolution because resolution is exactly what it must not do: every other need here
+  // is about one product and is honestly refused when none was named, and that refusal
+  // (「어떤 상품을 묻는지 확인하지 못했습니다」) was the whole answer 「우리 상품 목록 보여줘」 received.
+  // One org-scoped READ, no mention, no id, and the rows are the answer.
+  const catalogNeeds = input.needs.filter((n) => n.kind === "PRODUCT_CATALOG");
+  const artifacts: Artifact[] = [];
+  if (catalogNeeds.length > 0) {
+    const read = await readCatalog(input, catalogNeeds[0]!.id);
+    findings.push(...read.findings);
+    refs.push(...read.evidence);
+    artifacts.push(...read.artifacts);
+    for (const need of catalogNeeds) {
+      needStates.push({ id: need.id, status: read.ok ? "SATISFIED" : "PENDING", evidenceIds: read.evidence.map((e) => e.evidenceId) });
+    }
+    if (read.failure) failures.push(read.failure);
+    // Nothing else was asked of this specialist ⇒ the catalogue IS the answer, and resolving a product
+    // nobody named would only produce a refusal beside it.
+    if (catalogNeeds.length === input.needs.length) {
+      return {
+        specialist: "PRODUCT_OPS", findings, evidence: refs, coverage: [], resolvedEntities: [],
+        needStates, knowledge, knowledgeCoverage: [], artifacts,
+        ...(failures.length > 0 ? { failures } : {}),
+      };
+    }
+  }
 
   // ── 1. Resolve. The planner could not: it has no id and is refused if it invents one.
   const already = input.resolved.find((e) => e.kind === "PRODUCT");
@@ -511,8 +547,72 @@ export async function runProductOps(input: SpecialistInput): Promise<ProductOpsR
     failures,
     knowledge,
     knowledgeCoverage: view?.knowledgeCoverage ?? [],
+    ...(artifacts.length > 0 ? { artifacts } : {}),
     ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
   };
+}
+
+/**
+ * The seller's catalogue as rows — one bounded org-scoped READ, no product resolution.
+ *
+ * <b>It says which of two things it is.</b> A short page IS the catalogue; a full page is the head of
+ * one, and the difference is the whole honesty of the sentence. The backend returns no total, so the
+ * only truthful distinction available is "fewer than the ceiling" — and the answer draws it rather
+ * than calling ten rows 「등록된 상품 10개」 for a seller who has forty.
+ */
+async function readCatalog(
+  input: SpecialistInput, needId: string,
+): Promise<{ ok: boolean; findings: Finding[]; evidence: EvidenceRef[]; artifacts: Artifact[]; failure?: ToolFailure }> {
+  if (!input.budget.spend("tool")) {
+    return { ok: false, findings: [], evidence: [], artifacts: [] };
+  }
+  const attempt = await attemptTool(
+    { specialist: "PRODUCT_OPS", tool: OPERATOR_TOOL.LIST_PRODUCTS, needId },
+    () => input.registry.invoke<ProductSummary[]>(OPERATOR_TOOL.LIST_PRODUCTS, { limit: CATALOG_ROWS }, input.allowedTools),
+  );
+  if (!attempt.ok) return { ok: false, findings: [], evidence: [], artifacts: [], failure: attempt.failure };
+  const rows = attempt.value;
+  const whole = rows.length < CATALOG_ROWS;
+  // ORG-scoped by construction: one ref for the read, carrying the count and no productId. A per-row
+  // ref would make the catalogue look like product evidence, and a catalogue is a fact about the org.
+  const ref = input.evidence.add({
+    kind: "PRODUCT_LISTING",
+    sourceTool: OPERATOR_TOOL.LIST_PRODUCTS,
+    args: { limit: CATALOG_ROWS },
+    locator: { label: "상품 목록", count: rows.length },
+    coverage: "COVERED",
+    provenance: "product-catalog",
+  });
+  const findings: Finding[] = [{
+    findingId: `f-${ref.evidenceId}`,
+    specialist: "PRODUCT_OPS",
+    statement: rows.length === 0
+      ? "아직 등록된 상품이 없습니다."
+      : whole
+        ? `등록된 상품은 ${rows.length}개입니다.`
+        : `등록된 상품을 이름순으로 ${rows.length}개 보여드립니다.`,
+    evidenceIds: [ref.evidenceId],
+    confidence: "SUPPORTED",
+    verdict: null,
+    surfaceLink: "/products",
+    needId,
+  }];
+  const artifacts: Artifact[] = rows.length === 0 ? [] : [{
+    artifactId: `a-${ref.evidenceId}-catalog`,
+    type: "PRODUCT_LIST",
+    title: "등록된 상품",
+    items: rows.map((p) => ({
+      productId: p.id,
+      // `products.name` is a SKU number for a Coupang/Cafe24-derived catalogue; the listing title the
+      // seller can actually read is the alias, exactly as the resolver treats it.
+      productName: p.matchedName ?? p.name,
+      facts: [],
+      to: `/products/${p.id}`,
+    })),
+    ...(whole ? {} : { more: { label: "상품 화면에서 전체 보기", to: "/products" } }),
+  }];
+  log("product_catalog", { rows: rows.length, whole });
+  return { ok: true, findings, evidence: [ref], artifacts };
 }
 
 /** What the two signal readers below share — the registry seam plus the buffers they append to. */

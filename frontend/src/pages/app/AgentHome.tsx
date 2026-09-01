@@ -145,27 +145,35 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   // What an EMPTY thread opens with: the greeting (arithmetic, never a model) and — as a secondary,
   // single muted line — the three numbers the old strip carried. The transcript is the surface; the
   // numbers are context, one press from `/overview` where nothing moved.
+  //
+  // <b>The greeting is not the briefing</b> (Agentic Experience v2 §4). 「안녕하세요.」 was the largest
+  // text on the page and said the least, with the agent turn under it saying the same thing WITH the
+  // work attached — a hello, a numbers line and a brief, three layers before anything actionable. Once
+  // there is a brief, the greeting joins the numbers as one quiet line and the brief is the headline.
+  // Before the first connection there is no brief and nothing else to say, so the headline stays.
+  const briefed = leadingTurns.length > 0 && !beforeFirstConnection;
   const lead = (
     <div className="space-y-2">
       <h1 className="sr-only">오늘의 운영</h1>
-      <section className="space-y-1" aria-label="오늘의 브리핑">
-        <p className="break-keep text-xl font-bold leading-tight text-ink" aria-live="polite">
-          {beforeFirstConnection ? DISCONNECTED_HEADLINE : greetingLine(now.getHours(), count)}
-        </p>
-        {beforeFirstConnection ? (
-          <>
-            <p className="break-keep text-base text-muted">{DISCONNECTED_SUBLINE}</p>
-            <div className="pt-3">
-              <BtnLink to="/connect">채널 연결하기</BtnLink>
-            </div>
-          </>
-        ) : null}
-      </section>
+      {beforeFirstConnection ? (
+        <section className="space-y-1" aria-label="오늘의 브리핑">
+          <p className="break-keep text-xl font-bold leading-tight text-ink" aria-live="polite">{DISCONNECTED_HEADLINE}</p>
+          <p className="break-keep text-base text-muted">{DISCONNECTED_SUBLINE}</p>
+          <div className="pt-3">
+            <BtnLink to="/connect">채널 연결하기</BtnLink>
+          </div>
+        </section>
+      ) : !briefed ? (
+        <section aria-label="오늘의 브리핑">
+          <p className="break-keep text-xl font-bold leading-tight text-ink" aria-live="polite">{greetingLine(now.getHours(), count)}</p>
+        </section>
+      ) : null}
       {data && !beforeFirstConnection ? (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted" aria-label="오늘 상태">
+          {briefed ? <span className="font-medium text-ink">{greetingLine(now.getHours(), null)}</span> : null}
           {strip.map((kpi, i) => (
             <span key={kpi.key} className="flex items-center gap-x-2">
-              {i > 0 ? <span aria-hidden="true" className="text-line">·</span> : null}
+              {briefed || i > 0 ? <span aria-hidden="true" className="text-line">·</span> : null}
               <Link to={STRIP_ROUTE[kpi.key] ?? "/overview"} className="hover:text-ink hover:underline">
                 {kpi.label} <span className="font-semibold tabular-nums text-ink">{kpi.value.toLocaleString("ko-KR")}</span>{kpi.unit ?? "건"}
               </Link>
@@ -275,6 +283,15 @@ export function workloadPriorities(data: OverviewResponse): WorkloadPriority[] {
 /** How many waiting inquiries the brief names. Three is a brief; ten is the queue with a sentence on top. */
 export const BRIEF_ROWS = 3;
 
+/** Whole days a row has been waiting, from dates alone. `null` when the date cannot be read. */
+export function waitingDays(receivedAt: string | null | undefined, today = new Date()): number | null {
+  if (!receivedAt) return null;
+  const from = Date.parse(`${receivedAt.slice(0, 10)}T00:00:00Z`);
+  const to = Date.parse(`${today.toISOString().slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  return Math.max(0, Math.round((to - from) / 86_400_000));
+}
+
 /**
  * The first agent turn: what reviewnary prepared before the seller asked — and, when it prepared
  * nothing, what is genuinely waiting (§11). 「없습니다」 is said only when both reads came back empty.
@@ -341,6 +358,10 @@ export function proactiveTurn(
           productId: row.productId,
           productName: row.productName,
           answerBasis: null,
+          // Why this row is above the others. The brief is ordered OLDEST and says so; without the
+          // number beside each row 「1개월 전」 is a receipt date, not a reason — the same wait the
+          // ranked answer states, computed the same way (whole days, dates, never clock time).
+          waitingDays: waitingDays(row.receivedAt),
           to: `/inquiries/${row.inquiryId}`,
         })),
       },

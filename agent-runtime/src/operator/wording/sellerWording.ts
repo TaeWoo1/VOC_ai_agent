@@ -37,6 +37,7 @@ export const NEED_KIND_LABEL: Readonly<Record<string, string>> = {
   REVIEW_SIGNAL: "리뷰", INQUIRY_VOLUME: "문의", CUSTOMER_HISTORY: "과거 사례", ORDER_HISTORY: "주문 정보",
   PRODUCT_FACT: "상품 정보", PRODUCT_LISTING: "상품 정보", PRODUCT_VARIANT: "상품 정보", PRODUCT_KNOWLEDGE_DOC: "상품 정보",
   POLICY: "운영 정책", COMPANY_PROFILE: "회사 정보", PAST_ANSWER: "과거 승인 답변", CHANNEL_COVERAGE: "채널 수집 상태",
+  PRODUCT_CATALOG: "상품 목록",
 };
 
 /**

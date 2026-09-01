@@ -206,6 +206,8 @@ export interface InquiryDetailArtifact extends ArtifactBase {
 export interface ProductListArtifact extends ArtifactBase {
   type: "PRODUCT_LIST";
   items: Array<{ productId: string; productName: string; facts: Array<{ label: string; count: number }>; to: string }>;
+  /** Where the rest is, when these rows are the head of a longer list rather than the whole of it. */
+  more?: { label: string; to: string };
 }
 
 export interface IssueListArtifact extends ArtifactBase {
@@ -480,6 +482,11 @@ export interface TurnView {
   role: "USER" | "AGENT";
   text?: string;
   message: string;
+  /**
+   * What the answer could NOT see — the run's own limits, said apart from the answer. Rendered as a
+   * quiet line under the objects, never welded to the sentence that answered the question.
+   */
+  notes?: string[];
   artifacts: Artifact[];
   suggestedActions: SuggestedAction[];
   continuation: {

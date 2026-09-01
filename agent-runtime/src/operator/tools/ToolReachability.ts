@@ -89,6 +89,15 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     requires: ["PRODUCT_MENTION"],
   },
   {
+    // The catalogue, for a question that named no product — so it requires no mention and no id.
+    specialist: "PRODUCT_OPS",
+    tool: OPERATOR_TOOL.LIST_PRODUCTS,
+    needKinds: ["PRODUCT_CATALOG"],
+    // NONE, and that is the point: the catalogue is the one product read that must NOT wait for a
+    // product — a question that named one is a different need.
+    requires: ["NONE"],
+  },
+  {
     specialist: "PRODUCT_OPS",
     tool: OPERATOR_TOOL.GET_PRODUCT_KNOWLEDGE,
     needKinds: ["PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_FACT", "REVIEW_SIGNAL", "INQUIRY_VOLUME"],

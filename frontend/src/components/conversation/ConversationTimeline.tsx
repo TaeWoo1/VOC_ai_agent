@@ -117,6 +117,12 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecisio
     .map(meaningfulEvidence)
     .filter((a): a is NonNullable<ReturnType<typeof meaningfulEvidence>> => a != null);
   const shown = turn.artifacts.filter((a) => a.type !== "EVIDENCE");
+  // Which channels this turn already raised as a STEP. A list under a step card must not restate the
+  // same channel's state in its own footer — the card says it, and it carries the control that fixes it.
+  const stepped = turn.artifacts
+    .filter((a) => a.type === "HUMAN_ACTION_REQUIRED")
+    .map((a) => (a.type === "HUMAN_ACTION_REQUIRED" ? a.channelCode : null))
+    .filter((c): c is string => c != null);
   const failed = turn.status === "FAILED";
   const stopped = failed && turn.failureCode === "CANCELLED";
   // A failed turn reads as its own sentence (the runtime's closed seller wording — Response Hygiene v1),
@@ -142,11 +148,22 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecisio
           <AnimatePresence initial={false}>
             {shown.map((artifact) => (
               <motion.div key={artifact.artifactId} layout variants={MESSAGE} initial="hidden" animate="shown" exit="gone" transition={LAYOUT} data-artifact={artifact.type}>
-                <ArtifactView artifact={artifact} onResume={onResume} onPrompt={onPrompt} onCaptureDecision={latest ? onCaptureDecision : undefined} />
+                <ArtifactView artifact={artifact} onResume={onResume} onPrompt={onPrompt} onCaptureDecision={latest ? onCaptureDecision : undefined} stepped={stepped} headline={headline} />
               </motion.div>
             ))}
           </AnimatePresence>
         </div>
+      ) : null}
+      {/* The run's LIMITS, apart from its answer (Agentic Experience v2). What the agent could not see
+          is a real fact and it is said — but it is not the answer, and welding it to the answer's
+          paragraph is how 「낮은 평점 리뷰는 8건입니다」 arrived inside a four-line block about failed
+          collection. One quiet line per limit, under the objects the answer is about. */}
+      {turn.notes && turn.notes.length > 0 ? (
+        <ul className={`space-y-0.5 ${compact ? "" : "pl-6"}`} aria-label="확인하지 못한 것">
+          {turn.notes.map((note, i) => (
+            <li key={i} className="break-keep text-sm leading-snug text-muted">{note}</li>
+          ))}
+        </ul>
       ) : null}
       <AnimatePresence initial={false}>
         {latest && turn.suggestedActions.length > 0 ? (

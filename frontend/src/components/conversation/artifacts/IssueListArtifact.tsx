@@ -11,10 +11,10 @@ const SEVERITY: Record<string, { word: string; tone: StatusTone }> = {
   LOW: { word: "참고", tone: "neutral" },
 };
 
-export function IssueListArtifact({ artifact }: { artifact: IssueList }) {
+export function IssueListArtifact({ artifact, headline }: { artifact: IssueList; headline?: string }) {
   const onOpen = useContinueInPanel("ISSUE_LIST");
   return (
-    <ArtifactCard title={artifact.title} note={artifact.note}>
+    <ArtifactCard title={artifact.title} note={artifact.note} headline={headline}>
       {artifact.items.length === 0 ? <p className="px-4 pb-2 text-sm text-muted">반복해서 나타나는 문제는 아직 없습니다.</p> : null}
       <ul className="divide-y divide-line/70">
         {artifact.items.map((issue) => {

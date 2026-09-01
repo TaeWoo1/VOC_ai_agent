@@ -23,6 +23,14 @@ import { NO_FILTERS } from "../../src/operator/plan/InvestigationPlan";
 import type { InvestigationPlan } from "../../src/operator/plan/InvestigationPlan";
 import type { WorkingSetView } from "../../src/conversation/contract";
 
+/**
+ * Everything the seller reads in one turn — the answer AND, since Agentic Experience v2, the run's
+ * limits as their own field (`TurnView.notes`). Which of the two holds a sentence is a rendering
+ * fact; that the seller reads it is the contract these tests are about.
+ */
+const said = (turn: { message: string; notes?: readonly string[] }) => [turn.message, ...(turn.notes ?? [])].join(" ");
+
+
 function emptyPlanForTest(): InvestigationPlan {
   return {
     supported: true, userGoal: "", entities: { resolved: [], unresolved: [] }, informationNeeds: [],
@@ -160,7 +168,7 @@ describe("B — 「가장 시급한 건」 is answered with an order and its rea
     // The criterion and its limit are said — a ranking whose basis is unstated is a claim the data
     // cannot back.
     expect(turn.message).toContain("고객이 기다린 시간을 기준으로 정했습니다.");
-    expect(turn.message).toContain("답변 기한 정보는 아직 없어");
+    expect(said(turn)).toContain("답변 기한 정보는 아직 없어");
   });
 
   it("「그중 급한 것부터」 ranks the rows on screen: planner 0, backend reads 0", async () => {

@@ -51,7 +51,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v11";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v12";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -121,7 +121,7 @@ public final class AgentPlanPrompt {
      * order and the divergence test would be measuring nothing.
      */
     public static final String[] NEED_KINDS = {
-        "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC", "POLICY",
+        "PRODUCT_FACT", "PRODUCT_CATALOG", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC", "POLICY",
         "CUSTOMER_HISTORY", "REVIEW_SIGNAL", "INQUIRY_VOLUME", "REPEAT_PATTERN", "ORDER_HISTORY",
         "COMPANY_PROFILE", "PAST_ANSWER",
     };
@@ -170,6 +170,10 @@ public final class AgentPlanPrompt {
                지금 도구로 닿을 수 없을 때만 쓰세요.
                - 도구는 꼭 필요한 것만 고르세요. 많이 고를수록 답이 느려지고 나빠집니다.
                - **PRODUCT_FACT 와 PRODUCT_KNOWLEDGE_DOC 는 출처가 다른 두 가지입니다.** 앞의 것은                채널이 명시한 값(규격·가격·원산지)이고, 뒤의 것은 판매자가 직접 써 둔 글(상품 설명·FAQ·               사용법·교환반품 정책)입니다. "이 상품 어떻게 쓰나요", "고객에게 어떻게 설명하지",                "이 상품 반품 규정이 뭐였지" 처럼 **판매자가 쓴 문장이 있어야 답할 수 있는 질문**은                PRODUCT_KNOWLEDGE_DOC 입니다. 치수·용량 같은 값 하나를 묻는 질문은 PRODUCT_FACT 입니다.                두 가지가 다 필요하면 need 를 둘 세우세요.
+               - **어떤 상품인지 지목하지 않고 상품 목록 자체를 묻는 질문**("우리 상품 목록 보여줘", "무슨 상품 \
+               팔고 있지", "등록된 상품 뭐뭐 있어")은 PRODUCT_CATALOG 입니다 — specialists 에 PRODUCT_OPS, tools 에 \
+               list_products. 상품 하나를 이름으로 지목한 질문에는 PRODUCT_CATALOG 를 쓰지 마세요(그때는 \
+               PRODUCT_FACT / PRODUCT_KNOWLEDGE_DOC 이고 resolve_product 가 그 상품을 찾습니다).
                - **ORDER_OPS 는 주문·매출 흐름을 답합니다** — 기간 합계, 직전 기간 대비 변화, 채널별 매출·주문, \
                일별 추이. need kind 는 ORDER_HISTORY 입니다. "매출이 왜 떨어졌어" 류는 ORDER_HISTORY(필수)를 \
                세우고, 리뷰나 문의의 변화를 함께 물었을 때만 REVIEW_SIGNAL / INQUIRY_VOLUME 을 추가하세요.

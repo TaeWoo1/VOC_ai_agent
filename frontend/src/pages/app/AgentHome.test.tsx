@@ -113,10 +113,13 @@ describe("greeting — arithmetic, never a model", () => {
 describe("home — the Agent operating workspace", () => {
   it("opens with the greeting, three numbers, and the prepared cases as the first agent turn", async () => {
     renderHome();
-    expect(await screen.findByText("좋은 아침입니다. 오늘 제가 먼저 확인한 일이 2개 있습니다.")).toBeInTheDocument();
-    // Chat UI v1: the numbers are ONE muted context line under the greeting, not a strip of cards.
-    const numbers = screen.getByLabelText("오늘 상태");
+    // Agentic Experience v2 §4: once there IS a brief, the brief is the headline and the greeting
+    // joins the numbers as one quiet line — the hello no longer restates what the brief says with
+    // the work attached, and it never appears as the largest text on the page.
+    const numbers = await screen.findByLabelText("오늘 상태");
     expect(numbers.tagName).toBe("P");
+    expect(numbers).toHaveTextContent("좋은 아침입니다.");
+    expect(numbers).not.toHaveTextContent("먼저 확인한 일이");
     expect(numbers).toHaveTextContent("현재 미답변 문의");
     expect(within(numbers).getByRole("link", { name: "자세한 숫자 보기" })).toHaveAttribute("href", "/overview");
     expect(screen.queryByText("새 대화")).toBeNull();

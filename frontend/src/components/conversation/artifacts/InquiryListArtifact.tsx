@@ -32,12 +32,19 @@ const PREPARE_PROMPT = "답변 준비해줘";
  * secondary icon action, not the row's default. Outside the provider (a bare render) the row falls
  * back to a plain link so nothing dead-ends.
  */
-export function InquiryListArtifact({ artifact, onPrompt }: { artifact: InquiryList; onPrompt?: (prompt: string) => void }) {
+export function InquiryListArtifact({ artifact, onPrompt, headline }: { artifact: InquiryList; onPrompt?: (prompt: string) => void; headline?: string }) {
   const conversation = useConversation();
   const onOpen = useContinueInPanel("INQUIRY_LIST");
   const selectedId = conversation?.workingSet?.selectedInquiry?.inquiryId ?? null;
-  const [expanded, setExpanded] = useState<string | null>(null);
   const groups = artifact.groups.filter((g) => g.items.length > 0);
+  // A RANKED list has already made a judgement — 「먼저 보실 것은 …」 — so its top row opens with the
+  // list (Agentic Experience v2 §3). A ranking whose answer is still a row the seller has to click is
+  // a list wearing a judgement's sentence: the point of asking 「제일 급한 게 뭐야」 is to see THAT one,
+  // read it, and act. The same bounded detail READ a click makes, and only for the first row.
+  const ranked = artifact.scope?.rank === "URGENCY";
+  const [expanded, setExpanded] = useState<string | null>(
+    () => (ranked ? groups[0]?.items[0]?.inquiryId ?? null : null),
+  );
   // A list with no rows draws NOTHING (Conversation UX v2 §D): 「…는 없습니다」 is already the turn's own
   // sentence, and a box under it saying 「보여드릴 문의가 없습니다」 is that answer a second time.
   if (groups.length === 0) return null;
@@ -49,7 +56,7 @@ export function InquiryListArtifact({ artifact, onPrompt }: { artifact: InquiryL
   const labelled = new Set(groups.map((g) => g.label)).size === groups.length;
   const showHeaders = groups.length > 1 && labelled;
   return (
-    <ArtifactCard title={artifact.title} note={artifact.note}>
+    <ArtifactCard title={artifact.title} note={artifact.note} headline={headline}>
       {/* Keyed by POSITION as well as kind: a ROWS list keeps the seller's order, so its groups are
           consecutive runs and the same `key` ("UNANSWERED") legitimately appears more than once. React
           was told two siblings were the same node and warned it might drop or duplicate rows — a list

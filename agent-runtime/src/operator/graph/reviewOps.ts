@@ -66,8 +66,13 @@ export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsRes
     needStates: input.needs.map((n) => ({ id: n.id, status: "PENDING" as const, evidenceIds: [] })),
     note: reason,
   });
+  // <b>A specialist with no needs reports nothing.</b> 「…는 이번 조사 계획에 포함되지 않았습니다」 is a fact
+  // about OUR plan, not about the seller's business, and it arrived under answers it had nothing to do
+  // with (live: 「너는 어떤 일을 도와줄 수 있어?」 ended in 「주문·매출 흐름은 이번 조사 계획에 포함되지
+  // 않았습니다」). Nothing was asked of this specialist, so it claims nothing either way — the silence
+  // guard in `operatorGraph` still says any REQUIRED need that ended PENDING.
   if (input.needs.length === 0) {
-    return pending("리뷰 신호는 이번 조사 계획에 포함되지 않았습니다.");
+    return { specialist: "REVIEW_OPS", findings: [], evidence: [], coverage: [], needStates: [] };
   }
   // <b>Rows are a different question from the issue signal, and the PLAN says which was asked.</b>
   // 「오늘 새 리뷰 보여줘」 wants the reviews that arrived; 「반복되는 문제 있어?」 wants the extracted

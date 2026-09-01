@@ -276,6 +276,8 @@ export interface ProductListArtifact extends ArtifactBase {
     readonly facts: ReadonlyArray<{ readonly label: string; readonly count: number }>;
     readonly to: string;
   }>;
+  /** Where the rest is, when these rows are the head of a longer list rather than the whole of it. */
+  readonly more?: { readonly label: string; readonly to: string };
 }
 
 export interface IssueListArtifact extends ArtifactBase {
@@ -744,6 +746,16 @@ export interface TurnView {
   readonly text?: string;
   /** The operator's sentence(s) — deterministic prose over the artifacts, never model-written. */
   readonly message: string;
+  /**
+   * What the answer could NOT see — the run's own limits, kept out of the answer (Agentic Experience v2).
+   *
+   * <b>Why they are a separate field.</b> "① the answer, ② its limits" has been the ordering rule for
+   * several packages, but both halves were joined into one paragraph, so 「지금까지 확인한 낮은 평점
+   * 리뷰는 8건입니다」 arrived welded to 「카페24 리뷰를 최신 상태로 갱신하지 못했습니다」 and a seller read
+   * one four-line block with no shape. These are the same sentences, deterministic and closed as before;
+   * only their place changed. Absent on older turns and on turns with nothing to qualify.
+   */
+  readonly notes?: readonly string[];
   readonly artifacts: readonly Artifact[];
   readonly suggestedActions: readonly SuggestedAction[];
   readonly continuation: {

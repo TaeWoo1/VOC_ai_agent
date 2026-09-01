@@ -424,7 +424,7 @@ function normalizeEntityKind(kind: string | undefined): import("./InvestigationP
  */
 function normalizeNeedKind(kind: string | undefined): import("./InvestigationPlan").NeedKind {
   const known = [
-    "PRODUCT_FACT", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC", "POLICY",
+    "PRODUCT_FACT", "PRODUCT_CATALOG", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC", "POLICY",
     "CUSTOMER_HISTORY",
     "REVIEW_SIGNAL", "INQUIRY_VOLUME", "REPEAT_PATTERN", "ORDER_HISTORY", "COMPANY_PROFILE", "PAST_ANSWER",
   ];

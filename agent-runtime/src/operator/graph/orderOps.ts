@@ -38,8 +38,13 @@ export async function runOrderOps(input: SpecialistInput): Promise<OrderOpsResul
     needStates: input.needs.map((n) => ({ id: n.id, status: "PENDING" as const, evidenceIds: [] })),
     note: reason,
   });
+  // <b>A specialist with no needs reports nothing.</b> 「…는 이번 조사 계획에 포함되지 않았습니다」 is a fact
+  // about OUR plan, not about the seller's business, and it arrived under answers it had nothing to do
+  // with (live: 「너는 어떤 일을 도와줄 수 있어?」 ended in 「주문·매출 흐름은 이번 조사 계획에 포함되지
+  // 않았습니다」). Nothing was asked of this specialist, so it claims nothing either way — the silence
+  // guard in `operatorGraph` still says any REQUIRED need that ended PENDING.
   if (input.needs.length === 0) {
-    return pending("주문·매출 흐름은 이번 조사 계획에 포함되지 않았습니다.");
+    return { specialist: "ORDER_OPS", findings: [], evidence: [], coverage: [], needStates: [] };
   }
   if (!budget.spend("tool")) {
     return pending("주문·매출을 읽기 전에 예산이 끝났습니다.");
