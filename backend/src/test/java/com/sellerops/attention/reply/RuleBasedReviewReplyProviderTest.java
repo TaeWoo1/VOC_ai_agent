@@ -73,38 +73,31 @@ class RuleBasedReviewReplyProviderTest {
     }
 
     /**
-     * <b>Rewritten by a product-owner decision, not by a bug</b> (Template Settings v1 closure,
-     * 2026-09-03). This test used to assert the opposite: that a 5★ review mentioning 배송 kept the
-     * positive template, so praise was never answered with an apology. The rule is now the other way
-     * round — a named issue outranks the star — because the case it protected was rarer than the case
-     * it broke, and a ★4 complaint answered with 「좋은 후기를 남겨주셔서 감사합니다」 is the failure
-     * the product is judged on.
-     *
-     * <p>The old assertion is not deleted so much as inverted, and the cost it named is real: this IS
-     * an apology to a happy customer. It is pinned here and in {@code ReviewReplyTemplateDefaultsTest}
-     * with the measured size of the exposure, and the answer to it is the seller's own wording for
-     * that template rather than a sentiment guess in a keyword table.
+     * The case the rating-first rule exists for, and the one a measurement confirmed. "배송 빨라요" on
+     * a 5★ review contains a delivery keyword; a keyword-first provider apologises for late delivery
+     * to a happy customer, in public. That ordering was tried on 2026-09-03 and reverted: against the
+     * real NAVER corpus it moved 1,153 reviews and 1,098 of them were ★5.
      */
     @Test
-    void aNamedIssueOutranksTheStarEvenOnAPraisingReview() {
+    void aPraisingReviewNeverGetsAnApologyJustBecauseItMentionsAKeyword() {
         Suggestion s = suggest("배송 빨라요! 포장도 좋았고 가격도 만족합니다", 5);
-        assertThat(s.category()).isEqualTo("delivery_reply");
-    }
-
-    @Test
-    void praiseWithNoIssueWordIsStillPraise() {
-        Suggestion s = suggest("정말 마음에 듭니다. 잘 쓰겠습니다", 5);
         assertThat(s.category()).isEqualTo("positive_reply");
         assertThat(s.body()).doesNotContain("죄송").doesNotContain("사과");
         assertThat(s.body()).contains("감사");
     }
 
+    /**
+     * <b>And the cost of that ordering, stated rather than hidden.</b> A 4★ review that names a problem
+     * also takes the rating template — the selector cannot see the complaint. What changed on
+     * 2026-09-03 is that the template it gets no longer congratulates them: it thanks the customer and
+     * asserts nothing, so the seller edits a neutral sentence instead of deleting a wrong one.
+     */
     @Test
-    void ratingAtTheThresholdIsPraiseOnlyWhenNothingIsNamed() {
-        assertThat(suggest("불량이 있었지만 교환은 빨랐어요", RuleBasedReviewReplyProvider.POSITIVE_MIN_RATING)
-                .category()).isEqualTo("quality_reply");
-        assertThat(suggest("아주 만족합니다", RuleBasedReviewReplyProvider.POSITIVE_MIN_RATING)
-                .category()).isEqualTo("positive_reply");
+    void aComplaintAboveTheThresholdGetsANeutralTemplateRatherThanCongratulations() {
+        Suggestion s = suggest("불량이 있었지만 교환은 빨랐어요", RuleBasedReviewReplyProvider.POSITIVE_MIN_RATING);
+        assertThat(s.category()).isEqualTo("positive_reply");
+        assertThat(s.body()).doesNotContain("좋은 후기").doesNotContain("만족");
+        assertThat(s.body()).contains("감사");
     }
 
     @Test

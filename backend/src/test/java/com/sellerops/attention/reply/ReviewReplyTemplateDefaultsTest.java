@@ -18,15 +18,24 @@ import org.junit.jupiter.api.Test;
  * <p>The keyword lists and their order are pinned for the same reason — they are the rule that picks
  * a template, and a settings screen that lets a seller rewrite the words must not quietly change
  * which review gets which one.
+ *
+ * <p><b>One body has been reworded since, and that is what this test is for.</b>
+ * {@link ReviewReplyTemplateKey#POSITIVE} lost 「좋은 후기를 남겨주셔서」 on 2026-09-03 (product-owner
+ * decision): the rating template is what a review gets when the words establish nothing, so
+ * congratulating the customer is a claim the selector cannot support. The literal below moved with it,
+ * deliberately and in the same commit.
  */
 class ReviewReplyTemplateDefaultsTest {
 
     @Test
-    @DisplayName("the seven shipped bodies are byte-identical to the wording the provider had")
+    @DisplayName("the shipped bodies are pinned; six are the provider's originals, one was reworded on purpose")
     void defaultsAreUnchanged() {
+        // Reworded 2026-09-03 by product-owner decision, and this is where that shows: the rating
+        // template is what a high-rated review gets when nothing else is established, so it thanks the
+        // customer and asserts nothing about how pleased they were.
         assertThat(ReviewReplyTemplateKey.POSITIVE.defaultBody()).isEqualTo(
-                "안녕하세요, 고객님. 좋은 후기를 남겨주셔서 진심으로 감사합니다. "
-                        + "앞으로도 만족하실 수 있도록 노력하겠습니다.");
+                "안녕하세요, 고객님. 저희 제품을 이용해 주셔서 감사합니다. "
+                        + "남겨주신 후기 잘 읽었습니다.");
         assertThat(ReviewReplyTemplateKey.QUALITY.defaultBody()).isEqualTo(
                 "안녕하세요, 고객님. 상품에 문제가 있어 불편을 드린 점 진심으로 사과드립니다. "
                         + "말씀해 주신 내용을 확인한 뒤 필요한 조치를 안내드리겠습니다. 알려주셔서 감사합니다.");
@@ -51,8 +60,8 @@ class ReviewReplyTemplateDefaultsTest {
     @DisplayName("the taxonomy is the same seven categories, under the same names")
     void categoriesAreUnchanged() {
         assertThat(ReviewReplyTemplateKey.values()).extracting(ReviewReplyTemplateKey::category)
-                .containsExactly("quality_reply", "delivery_reply", "packaging_reply",
-                        "product_info_reply", "pricing_reply", "positive_reply", "general_reply");
+                .containsExactly("positive_reply", "quality_reply", "delivery_reply",
+                        "packaging_reply", "product_info_reply", "pricing_reply", "general_reply");
         assertThat(ReviewReplyTemplateKey.POSITIVE.category())
                 .isEqualTo(RuleBasedReviewReplyProvider.POSITIVE_CATEGORY);
         assertThat(ReviewReplyTemplateKey.GENERAL.category())
@@ -83,64 +92,57 @@ class ReviewReplyTemplateDefaultsTest {
     }
 
     /**
-     * <b>The rule the closure changed.</b> A named issue now decides before the star does, so a 4★
-     * review that says 불량 is answered about 불량. The keyword pass itself did not move: same words,
-     * same precedence, first hit wins.
+     * <b>Rating first, and the round trip that confirmed it.</b> On 2026-09-03 this was briefly the
+     * other way round so a named issue would outrank the star. Measured against the real NAVER corpus
+     * the flip moved 1,153 reviews, 1,098 of them ★5 — 「배송 빨라요」 answered with an apology for
+     * late delivery — so it was reverted. These keywords detect a TOPIC, never a polarity, and until
+     * something can tell 빨라요 from 늦어요 a topic word must not outrank a star.
      */
     @Test
-    @DisplayName("an issue signal outranks the star, and the keyword precedence is unchanged")
-    void anIssueSignalDecidesBeforeTheRating() {
-        assertThat(keyFor("불량이 있었지만 교환은 빨랐어요", 4)).isEqualTo(ReviewReplyTemplateKey.QUALITY);
+    @DisplayName("a high rating takes the rating template whatever words the review contains")
+    void theRatingDecidesBeforeAnyKeyword() {
+        assertThat(keyFor("배송 빨라요! 포장도 좋았고 가격도 만족합니다", 5)).isEqualTo(ReviewReplyTemplateKey.POSITIVE);
+        assertThat(keyFor("불량이 있었지만 교환은 빨랐어요", 4)).isEqualTo(ReviewReplyTemplateKey.POSITIVE);
+    }
+
+    @Test
+    @DisplayName("below the threshold the keyword precedence decides, first hit in declaration order")
+    void keywordsDecideBelowTheThreshold() {
         assertThat(keyFor("상품이 불량입니다", 1)).isEqualTo(ReviewReplyTemplateKey.QUALITY);
         assertThat(keyFor("배송이 너무 늦어요", 2)).isEqualTo(ReviewReplyTemplateKey.DELIVERY);
         assertThat(keyFor("포장이 엉망이었어요", 2)).isEqualTo(ReviewReplyTemplateKey.PACKAGING);
         assertThat(keyFor("설명이랑 너무 달라요", 2)).isEqualTo(ReviewReplyTemplateKey.PRODUCT_INFO);
         assertThat(keyFor("가격이 너무 비싸요", 3)).isEqualTo(ReviewReplyTemplateKey.PRICING);
-        // First hit in declaration order still wins when a review names two.
+        // First hit in declaration order wins when a review names two.
         assertThat(keyFor("불량인데 배송도 늦었어요", 1)).isEqualTo(ReviewReplyTemplateKey.QUALITY);
         assertThat(keyFor("배송도 늦고 포장도 엉망", 1)).isEqualTo(ReviewReplyTemplateKey.DELIVERY);
     }
 
     @Test
-    @DisplayName("with no issue word the rating decides: praise at 4+, otherwise the fallback")
-    void theRatingDecidesWhenNothingIsNamed() {
-        assertThat(keyFor("정말 마음에 듭니다", 5)).isEqualTo(ReviewReplyTemplateKey.POSITIVE);
-        assertThat(keyFor("정말 마음에 듭니다", 4)).isEqualTo(ReviewReplyTemplateKey.POSITIVE);
+    @DisplayName("no keyword and no praise rating is the fallback; an unrated review takes the keyword path")
+    void theFallbackAndTheUnratedPath() {
         assertThat(keyFor("합성-리뷰-본문: 특별히 할 말은 없습니다", 3)).isEqualTo(ReviewReplyTemplateKey.GENERAL);
-        // No rating is no evidence of praise.
-        assertThat(keyFor("합성-리뷰-본문: 별점 없는 리뷰", null)).isEqualTo(ReviewReplyTemplateKey.GENERAL);
+        assertThat(keyFor("합성-리뷰-본문: 특별히 할 말은 없습니다", null)).isEqualTo(ReviewReplyTemplateKey.GENERAL);
+        assertThat(keyFor("합성-리뷰-본문: 배송이 늦었습니다", null)).isEqualTo(ReviewReplyTemplateKey.DELIVERY);
     }
 
     /**
-     * <b>What the reversal costs, pinned so it cannot be forgotten.</b> A 5★ review that merely names
-     * a topic word now takes that topic's template — an apology to a happy customer. On the real
-     * NAVER corpus this is 1,098 of the 1,153 reviews the change moves. It is recorded here rather
-     * than fixed, because fixing it inside a keyword table means guessing sentiment, and the lever
-     * this product actually offers is the seller's own wording for that template.
-     */
-    @Test
-    @DisplayName("KNOWN COST — praise that names a topic word takes that topic's template")
-    void praiseThatNamesATopicWordIsAnsweredAboutTheTopic() {
-        assertThat(keyFor("배송 빨라요! 포장도 좋았고 가격도 만족합니다", 5))
-                .isEqualTo(ReviewReplyTemplateKey.DELIVERY);
-    }
-
-    /**
-     * <b>The limit of a keyword table, pinned because the closure ran into it.</b> The review this
-     * package was asked to fix — 4★, a plain complaint that the part keeps coming off — names not one
-     * word in any of the five lists. Reordering the selector therefore does not move it: with no
-     * issue signal the rating decides, and at 4★ that is still the positive template.
+     * <b>The case this closure was asked about, and the honest answer to it.</b> The review the
+     * package was pointed at is 4★ with a plain complaint — the part keeps coming off — written in
+     * words no list contains. It takes the rating template, and after 2026-09-03 that template no
+     * longer congratulates anyone: it thanks the customer and stops, which is a sentence the seller
+     * can edit into a reply rather than one they have to delete first.
      *
-     * <p>Written with a synthetic body of the same shape rather than the customer's sentence. The fix
-     * is not in this file: either the seller's own 칭찬 리뷰 wording (available today, no code), or a
-     * product-owner decision to add words to a list — which is classification data, not a bug.
+     * <p>Synthetic body of the same shape, never the customer's sentence.
      */
     @Test
-    @DisplayName("KNOWN LIMIT — a complaint that names no listed word is still read as praise at 4+")
-    void aComplaintInWordsNobodyListedIsNotSeenAsAnIssue() {
+    @DisplayName("a 4-star complaint the words cannot see gets the neutral rating template")
+    void aComplaintInWordsNobodyListedGetsTheNeutralDefault() {
         assertThat(keyFor("합성-리뷰-본문: 괜찮은데 자꾸 떨어져서 직접 붙였어요", 4))
                 .isEqualTo(ReviewReplyTemplateKey.POSITIVE);
-        // The same sentence at a low rating is a general reply, not an issue category either.
+        assertThat(ReviewReplyTemplateKey.POSITIVE.defaultBody())
+                .doesNotContain("좋은 후기").doesNotContain("만족");
+        // The same sentence below the threshold is the fallback — no list names it either.
         assertThat(keyFor("합성-리뷰-본문: 괜찮은데 자꾸 떨어져서 직접 붙였어요", 2))
                 .isEqualTo(ReviewReplyTemplateKey.GENERAL);
     }

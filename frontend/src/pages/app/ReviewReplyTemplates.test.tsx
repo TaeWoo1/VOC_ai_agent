@@ -34,12 +34,12 @@ function template(over: Partial<ReviewReplyTemplateView> = {}): ReviewReplyTempl
 /** The shape the backend sends: every category, in decision order. */
 function allTemplates(): ReviewReplyTemplateView[] {
   return [
+    template({ key: "positive_reply", body: "기본 별점 문구", defaultBody: "기본 별점 문구", matchWords: [] }),
     template({ key: "quality_reply", body: "기본 불량 문구", defaultBody: "기본 불량 문구", matchWords: ["불량"] }),
     template(),
     template({ key: "packaging_reply", body: "기본 포장 문구", defaultBody: "기본 포장 문구", matchWords: ["포장"] }),
     template({ key: "product_info_reply", body: "기본 설명 문구", defaultBody: "기본 설명 문구", matchWords: ["설명"] }),
     template({ key: "pricing_reply", body: "기본 가격 문구", defaultBody: "기본 가격 문구", matchWords: ["가격"] }),
-    template({ key: "positive_reply", body: "기본 칭찬 문구", defaultBody: "기본 칭찬 문구", matchWords: [] }),
     template({ key: "general_reply", body: "기본 일반 문구", defaultBody: "기본 일반 문구", matchWords: [] }),
   ];
 }
@@ -59,7 +59,7 @@ describe("리뷰 답변 문구", () => {
     getReviewReplyTemplates.mockResolvedValue({ templates: allTemplates() });
     const { container } = renderScreen();
 
-    expect(await screen.findByText("칭찬 리뷰")).toBeInTheDocument();
+    expect(await screen.findByText("별점 4~5점 기본 문구")).toBeInTheDocument();
     for (const key of LABELLED_TEMPLATE_KEYS) {
       expect(screen.getByText(templateLabel(key)!.name)).toBeInTheDocument();
     }
@@ -88,8 +88,8 @@ describe("리뷰 답변 문구", () => {
     renderScreen();
 
     expect(await screen.findByText("이런 낱말이 있을 때: 배송 · 택배")).toBeInTheDocument();
-    // 칭찬 리뷰 is chosen by rating; it must not claim a word list.
-    const positive = screen.getByRole("heading", { name: "칭찬 리뷰" }).closest("section")!;
+    // The rating template is chosen by the star; it must not claim a word list.
+    const positive = screen.getByRole("heading", { name: "별점 4~5점 기본 문구" }).closest("section")!;
     expect(within(positive).queryByText(/이런 낱말이 있을 때/)).not.toBeInTheDocument();
   });
 
@@ -165,7 +165,7 @@ describe("리뷰 답변 문구", () => {
   it("has no accessibility violations", async () => {
     getReviewReplyTemplates.mockResolvedValue({ templates: allTemplates() });
     const { container } = renderScreen();
-    await screen.findByText("칭찬 리뷰");
+    await screen.findByText("별점 4~5점 기본 문구");
     await expectNoAxeViolations(container);
   });
 });

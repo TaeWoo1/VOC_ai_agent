@@ -9,9 +9,9 @@ import type { ReviewReplyTemplateView } from "./types";
  * line saying WHEN reviewnary uses it — because a settings screen that cannot say when a setting
  * applies is asking the seller to guess.
  *
- * The order the backend sends is the order the product actually decides in — the five issue types
- * first, in the order they are tried, then the two the rating decides — and the screen keeps it:
- * reading the list top to bottom is reading the rule.
+ * The order the backend sends is the order the product actually decides in (the rating first, then
+ * the keyword list, then the fallback), and the screen keeps it: reading the list top to bottom is
+ * reading the rule.
  */
 export interface ReviewReplyTemplateLabel {
   /** The name on screen. A noun phrase a seller would say out loud. */
@@ -21,6 +21,13 @@ export interface ReviewReplyTemplateLabel {
 }
 
 const LABELS: Record<string, ReviewReplyTemplateLabel> = {
+  positive_reply: {
+    // NOT 「칭찬 리뷰」. The product cannot tell a compliment from a complaint — it only sees the star
+    // and a topic word — so naming this "praise" promises the seller a judgement nobody made. It is
+    // what a high-rated review gets, said plainly.
+    name: "별점 4~5점 기본 문구",
+    when: "별점이 4~5점인 리뷰에 씁니다. 아래 유형의 낱말이 있어도 별점이 높으면 이 문구를 씁니다.",
+  },
   quality_reply: {
     name: "불량 · 파손 리뷰",
     when: "상품이 불량이거나 깨지고 고장 났다는 리뷰에 씁니다.",
@@ -41,13 +48,9 @@ const LABELS: Record<string, ReviewReplyTemplateLabel> = {
     name: "가격 리뷰",
     when: "가격이 비싸다거나 가성비를 말한 리뷰에 씁니다.",
   },
-  positive_reply: {
-    name: "칭찬 리뷰",
-    when: "별점이 4~5점이고 위 유형의 낱말이 없는 리뷰에 씁니다. 낱말이 하나라도 있으면 별점이 높아도 그 유형의 문구를 씁니다.",
-  },
   general_reply: {
     name: "그 밖의 리뷰",
-    when: "위 유형의 낱말이 없고 별점도 높지 않은 리뷰에 씁니다.",
+    when: "별점이 4점 미만이고 위 유형의 낱말도 없는 리뷰에 씁니다.",
   },
 };
 

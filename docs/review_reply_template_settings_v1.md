@@ -129,92 +129,85 @@ disposable QA org는 `tools/dev/org-cleanup.sh --confirm`으로 제거(연결 �
 * 이번 패키지에서 **grounded AI drafting · planner/model · 승인/write architecture ·
   NAVER Guided Reply execution driver 무변경.**
 
+
 ---
 
-## 8. Closure (2026-09-03) — selection 우선순위 뒤집기
+## 8. Closure (2026-09-03) — precedence를 뒤집었다가, 재서, 되돌렸다
 
-**product-owner 결정**: 「명백한 불만이 있는 ★4 리뷰가 `positive_reply`로 가는 것」을 고친다.
-새 taxonomy·AI classifier **0**, 기존 7종 deterministic selector 안에서만.
+Template Settings v1은 이 절로 **freeze**된다. 아래는 그 마지막 라운드의 기록이다.
 
-### 8-1. 바뀐 것은 rating을 묻는 위치 하나
+### 8-1. 뒤집었다
 
-```
-before   rating >= 4 → POSITIVE ; else 낱말 5종(선언 순서) ; else GENERAL
-after    낱말 5종(선언 순서) ; else rating >= 4 → POSITIVE ; else GENERAL
-```
+product-owner 결정으로 selection을 `낱말 5종 → rating>=4 POSITIVE → GENERAL`로 바꿨다.
+겨냥한 것은 「명백한 불만이 있는 ★4 리뷰가 칭찬 문구로 시작하는 것」이었다.
 
-**낱말 목록과 그 사이 우선순위는 한 글자도 바뀌지 않았다**(`keywordsAndOrderAreUnchanged`).
-enum 선언 순서도 새 결정 순서로 옮겨 화면 순서 = 규칙 순서가 계속 참이다
-(불량·배송·포장·설명·가격 → 칭찬 → 그 밖).
+### 8-2. 쟀다 — 1,153건 중 ★5가 1,098건
 
-### 8-2. 대가를 재서 적는다 — 1,153건 중 1,098건이 ★5다
-
-이 저장소의 실제 NAVER 코퍼스 **4,455행**에 두 규칙을 돌린 결과:
+실제 NAVER 코퍼스 **4,455행**에 두 규칙을 돌린 결과:
 
 | | |
 |---|---|
-| 판정이 그대로 | 3,302 |
-| **`positive_reply`에서 이동** | **1,153** — delivery 896 · pricing 117 · quality 77 · product_info 48 · packaging 15 |
+| 판정 그대로 | 3,302 |
+| `positive_reply`에서 이동 | **1,153** — delivery 896 · pricing 117 · quality 77 · product_info 48 · packaging 15 |
 | 그중 별점 | **★5 1,098** · ★4 55 |
 
-즉 이 변경이 실제로 움직이는 것은 대부분 **「배송 빨라요」류 칭찬**이고, 겨냥한 ★4 불만은 55건이다.
-낱말 표는 「배송 빨라요」와 「배송 늦어요」를 구분할 수 없고, **이 클래스는 구분하려고 시도하지 않는다** —
-거기서 감정을 판정하는 것이 곧 이 provider가 「아니라고 정의된」 AI다.
+즉 실제로 움직인 것은 대부분 **「배송 빨라요」류 칭찬**이었고, 겨냥한 ★4 불만은 55건이었다.
+그리고 target `c329471c`는 불만이 다섯 목록의 **어떤 낱말도 쓰지 않아** 여전히 `positive_reply`였다 —
+바꾸려던 것은 안 바뀌고, 안 바꾸려던 것이 1,098건 바뀌었다.
 
-그래서 **지렛대는 판매자의 것**이고 그것이 이 패키지가 만든 바로 그것이다: 칭찬이 대부분인 회사는
-배송 템플릿을 양쪽으로 읽히는 문구로 바꾼다. reviewnary 기본값이 **fallback**이고 org template이
-**주 경로**라는 제품 방향이 이 결정을 감당 가능하게 만드는 유일한 이유다.
+### 8-3. 되돌렸다 — 이유는 구조적이다
 
-테스트가 이 대가에 이름을 붙여 고정한다 — `praiseThatNamesATopicWordIsAnsweredAboutTheTopic`,
-`aNamedIssueOutranksTheStarEvenOnAPraisingReview`. **안전 테스트를 약화한 것이 아니라 뒤집은 것**이고,
-뒤집은 이유를 테스트 자신이 적는다.
+```
+복원   rating >= 4 → POSITIVE ; else 낱말 5종(선언 순서) ; else GENERAL
+```
 
-### 8-3. `c329471c`는 움직이지 않았다 — 요청과 다른 결과
+**이 낱말들은 topic을 감지하지 polarity를 감지하지 않는다.** 「배송 빨라요」와 「배송 늦어요」는 이 표에
+같은 단어다. 그것을 가릴 수 있는 것이 생기기 전에는 topic 낱말이 별점을 이겨서는 안 된다 — 그리고 여기에
+감정 heuristic을 넣는 것이 곧 이 provider가 「아니라고 정의된」 AI다. 낱말 목록·새 classifier·polarity
+heuristic **0**.
 
-closure 요구사항은 「target `c329471c`가 `positive_reply`가 아니라 실제 내용에 맞는 issue category로
-선택되는지 회귀 테스트로 고정」이었다. **그렇게 되지 않는다**:
+### 8-4. 대신 고친 것: `positive_reply`는 「칭찬」이 아니다
 
-이 리뷰의 불만(부착이 유지되지 않아 고객이 직접 붙였다)은 다섯 목록의 **어떤 낱말도 쓰지 않는다**
-— 불량·하자·깨짐·파손·터짐·고장·품질 0, 배송 계열 0, 포장 계열 0, 설명 계열 0, 가격 계열 0.
-issue signal이 없으므로 rating이 결정하고 ★4는 여전히 `POSITIVE`다. 라이브 확인:
-`category=positive_reply`.
+되돌리면 ★4 불만은 다시 이 문구로 시작한다. 그래서 **그 문구가 축하하지 않게** 했다.
 
-**추측으로 낱말을 더하지 않았다.** 「떨어」·「붙」을 quality 목록에 넣으면 target은 옮겨가지만 그것은
-분류 데이터를 발명하는 일이고, 이 저장소의 assumption rule이 금지하는 종류의 결정이다 ⇒
-**product-owner 결정으로 올린다**. 오늘 코드 없이 가능한 답은 판매자가 「칭찬 리뷰」 문구를
-양쪽으로 읽히게 바꾸는 것이고, §8-5가 실제로 그렇게 했다.
+* **이름** — 「칭찬 리뷰」 → **「별점 4~5점 기본 문구」**. 제품은 칭찬인지 불만인지 모른다(별점과 topic
+  낱말만 본다); 「칭찬」이라고 부르는 것은 아무도 하지 않은 판정을 판매자에게 약속하는 일이다.
+  `reviewReplyTemplates.test.ts`가 어떤 이름에도 「칭찬」이 없음을 고정한다.
+* **설명** — 「별점이 4~5점인 리뷰에 씁니다. 아래 유형의 낱말이 있어도 별점이 높으면 이 문구를 씁니다.」
+  (규칙 그대로. 「그 밖의 리뷰」도 같은 이유로 한 줄 고쳤다.)
+* **기본 문구** — 「좋은 후기를 남겨주셔서 진심으로 감사합니다. 앞으로도 만족하실 수 있도록
+  노력하겠습니다.」 → **「저희 제품을 이용해 주셔서 감사합니다. 남겨주신 후기 잘 읽었습니다.」**
+  감사는 하되 고객이 만족했다고 **단정하지 않고** 아무것도 약속하지 않는다. 판매자는 이제 **틀린 문장을
+  지우는 대신 중립적인 문장을 고쳐 쓴다**. `ReviewReplyTemplateDefaultsTest`의 리터럴이 같은 커밋에서
+  함께 움직였다 — 그 테스트가 존재하는 이유가 「reword를 아무도 안 읽은 diff가 아니라 결정으로 만드는 것」이다.
 
-한계는 테스트로 고정했다 — `aComplaintInWordsNobodyListedIsNotSeenAsAnIssue`(합성 본문, 고객 문장 아님).
+부수로 **provenance를 행 기준으로** 고쳤다: 기본값과 **같은 문구**를 저장한 회사도 그 문구를 고른 것이므로
+`templates-v1+org`로 보고한다(이전에는 문자열 비교라 `templates-v1`이라고 답했다). 읽기 횟수는 그대로 1회.
 
-### 8-4. 뒤집기가 실제로 작동하는 것도 라이브로 확인
+### 8-5. 회귀 — 라이브
 
-Demo Org의 실제 ★4 리뷰 둘(`b1ec4c4e` · `c60b3df1`, 품질 낱말 보유) — 이전 규칙이라면
-`positive_reply`였을 것이 지금 **`quality_reply`**로 판정되고 「상품에 문제가 있어 불편을 드린 점…」에서
-시작한다.
-
-### 8-5. org template → new draft 정상 경로
-
-판매자가 설정 화면에서 「칭찬 리뷰」 문구를 바꾸고(`PUT /api/review-reply-templates/positive_reply`),
-같은 리뷰의 새 초안을 만들면 **그 문구가 출발 문구**가 된다:
-
-| | |
+| | 결과 |
 |---|---|
-| 저장한 문구 | 「…남겨주신 후기 **하나하나 확인하고 있습니다**.」 |
-| 새 초안의 시작 문구(suggestion) | **바이트 동일** · `providerVersion=templates-v1+org` |
-| 저장된 새 초안 | **v3** fp `44627df4…` (출발 문구 + 판매자가 이 리뷰에 더한 두 문장) |
-| 기존 버전 | v1 `700b7924…` · v2 `7482a92e…` **무변경** |
-| 승인 · execution | **0 · 0** — 승인하지 않았다 |
-
-### 8-6. 검증
+| ★5 + 「배송」 (실제 리뷰 `710852f0`) | **`positive_reply`** — 사과문 아님 |
+| ★≤2 + 「배송」 (실제 리뷰 `4e923596`) | **`delivery_reply`** — 「받아보시기까지 불편을 드린 점 사과드립니다」 |
+| **`c329471c` ★4** | **`positive_reply`** · `templates-v1+org` · 시작 문구 = org override |
+| `c329471c` 초안 | **v3 `44627df4…` 유지** — v1 `700b7924…` · v2 `7482a92e…` 무변경, 재생성 0 |
+| 승인 · execution | **0 · 0** |
+| org override · 기본값 fallback | override 1행 유지, 나머지 6종 `customized=false` |
 
 backend **3,666** · frontend **2,667** / 225 files · 실패 0 · typecheck clean.
 브라우저 1440/1366/1152 — 내부 key 노출 0 · **AA 위반 0** · 가로 스크롤 0 · 콘솔 오류 0 · off-host 0,
-패널 순서가 새 결정 순서(불량·파손 → 배송 → 포장 → 상품 설명 → 가격 → 칭찬 → 그 밖).
-마이그레이션 **0**(V89 그대로) · 마켓플레이스 **0** · 모델 **0**.
+패널 순서 = 결정 순서(별점 4~5점 기본 문구 → 불량·파손 → 배송 → 포장 → 상품 설명 → 가격 → 그 밖).
+마이그레이션 **0** · 마켓플레이스 **0** · 모델 **0**.
 
-### 8-7. 화면 문구도 규칙을 따라 고쳤다
+### 8-6. FREEZE
 
-「칭찬 리뷰」의 설명이 **거짓이 됐으므로** 바꿨다 — 「아쉬운 점이 함께 적혀 있어도 별점이 높으면 이
-문구입니다」 → **「별점이 4~5점이고 위 유형의 낱말이 없는 리뷰에 씁니다. 낱말이 하나라도 있으면 별점이
-높아도 그 유형의 문구를 씁니다.」** 「그 밖의 리뷰」도 같은 이유로 한 줄 고쳤다.
-새 컴포넌트·새 색·visual system 변경 **0**.
+**유지**: org override · 7 categories · save/reset/default fallback · org isolation ·
+next-draft application · validation · approval/version/fingerprint immutability.
+
+**추가하지 않는다**: configurable trigger words · product/channel/account override · custom category ·
+interpolation/template DSL · AI classifier · polarity heuristic · grounded drafting.
+
+**열린 채로 남는 것 하나** — ★4 불만을 낱말로 알아보는 문제는 이 층에서 풀 수 없다. 오늘의 답은
+중립 기본 문구 + 판매자 편집이고, 진짜 답은 polarity를 아는 층(Grounded Review Drafting)이며 그것은
+이 패키지가 만들지 않는다.

@@ -1203,28 +1203,31 @@ baseVersion 1로 **v2** 생성(v1 fp `700b7924…` 그대로 · 승인 0 · exec
 콘솔 오류 0 · off-host 0. backend **3,662** · frontend **2,667** · 실패 0. **마켓플레이스 호출 0 · WRITE 0 ·
 모델 호출 0** ⇒ evidence 행 없음. **고치지 않고 보고**: Demo Org의 `positive_reply` override는 QA가 설정한 값
 그대로 남아 있고(화면에서 [기본값 복원] 한 번), 이 org에 승인된 리뷰 답변이 없어 「승인된 초안 무변경」의
-라이브 관측은 없으며, **★4 + 불만 리뷰가 「칭찬 리뷰」 문구로 시작하는 것**은 §8이 닫았다.
-**§8 Closure(09-03) — selection 우선순위를 뒤집었다**: `낱말 5종(선언 순서) → rating≥4 POSITIVE → GENERAL`
-(이전은 rating이 먼저). **낱말 목록과 그 사이 우선순위는 한 글자도 안 바뀌었고** 바뀐 것은 rating을 묻는
-위치 하나이며, enum 선언 순서도 새 결정 순서로 옮겨 「화면 순서 = 규칙 순서」가 계속 참이다. **대가를 재서
-적는다** — 실제 NAVER 코퍼스 4,455행에서 `positive_reply`를 떠나는 것은 **1,153건**이고 그중 **★5가
-1,098건**이다(delivery 896 · pricing 117 · quality 77 · product_info 48 · packaging 15): 이 변경이 실제로
-움직이는 것은 대부분 「배송 빨라요」류 **칭찬**이고 겨냥한 ★4 불만은 55건이다. 낱말 표는 「배송 빨라요」와
-「배송 늦어요」를 구분할 수 없고 **이 클래스는 구분하려 시도하지 않는다**(거기서 감정을 판정하는 것이 곧 이
-provider가 「아니라고 정의된」 AI다) ⇒ 지렛대는 판매자의 문구이고, reviewnary 기본값이 **fallback**이고 org
-template이 **주 경로**라는 방향이 이 결정을 감당 가능하게 만드는 유일한 이유다. 기존 안전 테스트
-(「칭찬 리뷰는 낱말 때문에 사과문을 받지 않는다」)는 **약화가 아니라 뒤집힘**이고 테스트 자신이 왜인지 적는다.
-**요청과 다른 결과 하나** — target `c329471c`는 여전히 `positive_reply`다: 그 불만(부착이 유지되지 않음)이
-다섯 목록의 **어떤 낱말도 쓰지 않아** issue signal이 0이고, 그러면 rating이 결정하며 ★4는 POSITIVE다.
-「떨어」·「붙」을 목록에 넣으면 옮겨가지만 그것은 **분류 데이터를 발명**하는 일이라 하지 않고 **product-owner
-결정**으로 올린다(한계는 합성 본문 테스트로 고정). 뒤집기가 작동하는 것은 실제 ★4 리뷰 둘
-(`b1ec4c4e`·`c60b3df1`, 품질 낱말 보유)이 **`quality_reply`**로 판정되는 것으로 라이브 확인했다.
-**org template → new draft 정상 경로 확인**: 설정 화면에서 문구를 바꾸면 같은 리뷰의 새 초안 시작 문구가
-**바이트 동일**로 그것이 되고(`templates-v1+org`), 정상 경로로 **v3** `44627df4…` 생성 — v1 `700b7924…` ·
-v2 `7482a92e…` **무변경**, 승인 0 · execution 0. 화면 문구도 거짓이 된 곳을 고쳤다(「아쉬운 점이 함께 적혀
-있어도 별점이 높으면 이 문구입니다」 → 「별점이 4~5점이고 위 유형의 낱말이 없는 리뷰에 씁니다…」).
-backend **3,666** · frontend **2,667** · 실패 0, 브라우저 3폭 AA 0 · key 노출 0, 마이그레이션 0 ·
-마켓플레이스 0 · 모델 0).
+라이브 관측은 없으며, **§8 Closure(09-03) — precedence를 뒤집었다가, 재서, 되돌렸다.** 「★4 불만이 칭찬 문구로 시작하는 것」을
+고치려고 selection을 `낱말 5종 → rating≥4 → GENERAL`로 바꿨고, 실제 NAVER 코퍼스 4,455행에 두 규칙을 돌려
+**쟀다**: `positive_reply`를 떠나는 것은 **1,153건**이고 그중 **★5가 1,098건**(delivery 896 · pricing 117 ·
+quality 77 · product_info 48 · packaging 15), 겨냥한 ★4 불만은 **55건**이며, 정작 target `c329471c`는 불만이
+다섯 목록의 **어떤 낱말도 쓰지 않아** 그대로였다 — **바꾸려던 것은 안 바뀌고 안 바꾸려던 것이 1,098건
+바뀌었다** ⇒ **되돌렸다**(`rating≥4 → POSITIVE ; else 낱말 5종 ; else GENERAL`). 이유는 구조적이다:
+**이 낱말들은 topic을 감지하지 polarity를 감지하지 않는다** — 「배송 빨라요」와 「배송 늦어요」는 이 표에 같은
+단어이고, 가릴 수 있는 것이 생기기 전에는 topic이 별점을 이겨서는 안 되며 여기에 감정 heuristic을 넣는 것이
+곧 이 provider가 「아니라고 정의된」 AI다(낱말 목록·classifier·polarity heuristic **0**). **대신 고친 것은
+문구의 성격이다** — 되돌리면 ★4 불만이 다시 이 문구로 시작하므로 **그 문구가 축하하지 않게** 했다:
+이름 「칭찬 리뷰」 → **「별점 4~5점 기본 문구」**(제품은 칭찬인지 불만인지 모르고 별점과 topic 낱말만 보므로
+「칭찬」은 아무도 하지 않은 판정을 판매자에게 약속하는 일이다 — 어떤 이름에도 「칭찬」이 없음을 테스트가
+고정), 기본 문구 「좋은 후기를 남겨주셔서 진심으로 감사합니다…」 → **「저희 제품을 이용해 주셔서 감사합니다.
+남겨주신 후기 잘 읽었습니다.」**(감사하되 만족을 **단정하지 않고** 약속 0 ⇒ 판매자는 **틀린 문장을 지우는
+대신 중립적인 문장을 고쳐 쓴다**; `ReviewReplyTemplateDefaultsTest`의 리터럴이 같은 커밋에서 함께 움직였고,
+그 테스트가 존재하는 이유가 「reword를 아무도 안 읽은 diff가 아니라 결정으로 만드는 것」이다). 부수로
+provenance를 **행 기준**으로 고쳤다(기본값과 같은 문구를 저장한 회사도 그것을 고른 것이므로 `+org`; 읽기 1회
+유지). 라이브 회귀: ★5+「배송」 → `positive_reply`(사과문 아님) · ★≤2+「배송」 → `delivery_reply` ·
+**`c329471c` ★4 → `positive_reply` + org override가 시작 문구 + 초안 v3 `44627df4…` 유지**(v1·v2 무변경 ·
+재생성 0 · 승인 0 · execution 0). backend **3,666** · frontend **2,667** · 실패 0 · 브라우저 3폭 AA 0 ·
+key 노출 0 · 마이그레이션 0 · 마켓플레이스 0 · 모델 0. **FREEZE** — org override · 7 categories ·
+save/reset/default fallback · isolation · next-draft application · validation · approval 불변성은 유지하고,
+configurable trigger words · product/channel/account override · custom category · interpolation DSL ·
+AI classifier · polarity heuristic · grounded drafting은 **추가하지 않는다**. **열린 채로 남는 것**: ★4 불만을
+낱말로 알아보는 문제는 이 층에서 풀 수 없고, 진짜 답은 polarity를 아는 층이며 이 패키지가 만들지 않는다).
 
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·

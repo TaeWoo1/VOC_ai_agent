@@ -13,17 +13,19 @@ import java.util.Optional;
  * product change; this file is a relocation, and {@code ReviewReplyTemplateDefaultsTest} pins the
  * bodies byte for byte so it stays one.
  *
- * <p><b>Order is behaviour, not presentation.</b> The five keyword members are tried in declaration
- * order and the first hit wins; only when none matches does the rating decide, taking {@link #POSITIVE}
- * at {@code >= POSITIVE_MIN_RATING} and {@link #GENERAL} otherwise. The settings screen lists them in
- * this same order for the same reason — a seller reading the list top to bottom is reading how the
- * choice is actually made.
+ * <p><b>Order is behaviour, not presentation.</b> {@link #POSITIVE} is chosen by rating before any
+ * keyword is read; the five keyword members are then tried in declaration order and the first hit
+ * wins; {@link #GENERAL} is the fallback. The settings screen lists them in this same order for the
+ * same reason — a seller reading the list top to bottom is reading how the choice is actually made.
  *
- * <p><b>The order changed once, deliberately</b> (Template Settings v1 closure, 2026-09-03). Rating
- * used to win first, so a ★4 review that plainly named a problem was answered with 「좋은 후기를
- * 남겨주셔서 감사합니다」. Product-owner decision: an issue signal outranks a star. What that costs is
- * stated where it is paid — {@link RuleBasedReviewReplyProvider#keyFor} — and the seller's own wording
- * is the lever for it, which is what these templates exist to be.
+ * <p><b>That order was reversed for one commit and measured back</b> (2026-09-03). Putting keywords
+ * first was meant to stop a ★4 complaint being answered as praise; run against this repository's real
+ * NAVER corpus it moved <b>1,153</b> reviews, <b>1,098 of them ★5</b> — overwhelmingly 「배송 빨라요」
+ * praise redirected into an apology, against 55 of the complaints it was for. The reason is structural
+ * and is the thing to remember: <b>these keywords detect a TOPIC, not a polarity.</b> Until something
+ * can tell 빨라요 from 늦어요, a topic word must not outrank a star, and the honest response to a ★4
+ * complaint the words cannot see is a neutral default plus the seller's own edit — not a confident
+ * apology to everyone who mentioned 배송.
  *
  * <p><b>This is a communication layer.</b> A template says how the seller sounds, never what is true:
  * no default promises a refund, an exchange, a discount, a delivery date, or a cause, and nothing in
@@ -31,6 +33,19 @@ import java.util.Optional;
  * exists, composes WITH this — it does not arrive through it.
  */
 public enum ReviewReplyTemplateKey {
+
+    /**
+     * Chosen by rating alone ({@code >= POSITIVE_MIN_RATING}), before any keyword is read.
+     *
+     * <p><b>It is not "the praise template", and the wording says so.</b> A keyword table detects a
+     * TOPIC, never a polarity — 「배송 빨라요」 and 「배송 늦어요」 are the same word to it — so this
+     * member is what a high-rated review gets when nothing else can be established about it. Its
+     * default therefore thanks the customer and commits to nothing; asserting that they were delighted
+     * is a claim this selector cannot support, and the seller's own wording is the place to be warmer.
+     */
+    POSITIVE("positive_reply", List.of(),
+            "안녕하세요, 고객님. 저희 제품을 이용해 주셔서 감사합니다. "
+                    + "남겨주신 후기 잘 읽었습니다."),
 
     QUALITY("quality_reply", List.of("불량", "하자", "깨짐", "파손", "터짐", "고장", "품질"),
             "안녕하세요, 고객님. 상품에 문제가 있어 불편을 드린 점 진심으로 사과드립니다. "
@@ -52,16 +67,7 @@ public enum ReviewReplyTemplateKey {
             "안녕하세요, 고객님. 가격에 대한 의견 감사합니다. "
                     + "더 나은 가치를 드릴 수 있도록 계속 고민하겠습니다."),
 
-    /**
-     * Chosen by rating ({@code >= POSITIVE_MIN_RATING}) — but only after every keyword member has
-     * failed to match (Template Settings v1 closure). A review that names an issue is answered about
-     * that issue whatever its star rating.
-     */
-    POSITIVE("positive_reply", List.of(),
-            "안녕하세요, 고객님. 좋은 후기를 남겨주셔서 진심으로 감사합니다. "
-                    + "앞으로도 만족하실 수 있도록 노력하겠습니다."),
-
-    /** No keyword matched and the rating is not praise (or is absent). */
+    /** No keyword matched and the rating is below the threshold (or absent). */
     GENERAL("general_reply", List.of(),
             "안녕하세요, 고객님. 소중한 후기를 남겨주셔서 감사합니다. "
                     + "남겨주신 의견을 잘 살펴보고 반영하겠습니다.");

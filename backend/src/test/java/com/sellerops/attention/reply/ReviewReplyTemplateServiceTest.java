@@ -105,8 +105,8 @@ class ReviewReplyTemplateServiceTest {
     @DisplayName("the list is in the provider's own decision order, so reading it top to bottom is reading the rule")
     void theListIsInDecisionOrder() {
         assertThat(service.view(orgA).templates()).extracting(ReviewReplyTemplateView::key)
-                .containsExactly("quality_reply", "delivery_reply", "packaging_reply",
-                        "product_info_reply", "pricing_reply", "positive_reply", "general_reply");
+                .containsExactly("positive_reply", "quality_reply", "delivery_reply",
+                        "packaging_reply", "product_info_reply", "pricing_reply", "general_reply");
     }
 
     // ---------------------------------------------------------------- override
@@ -127,13 +127,26 @@ class ReviewReplyTemplateServiceTest {
     }
 
     @Test
-    @DisplayName("selection is unaffected by settings: the same review takes the same template")
-    void settingsChangeTheWordingNotTheChoice() {
+    @DisplayName("rating still beats keywords after a company has written its own wording")
+    void ratingStillDecidesFirst() {
         service.save(orgA, "delivery_reply", "배송이 늦어 죄송합니다.", user);
 
-        // A named issue decides (closure); a review that names none falls to the rating.
-        assertThat(suggest(orgA, "배송 빨라요! 포장도 좋았습니다", 5).category()).isEqualTo("delivery_reply");
-        assertThat(suggest(orgA, "정말 마음에 듭니다", 5).category()).isEqualTo("positive_reply");
+        assertThat(suggest(orgA, "배송 빨라요! 포장도 좋았습니다", 5).category()).isEqualTo("positive_reply");
+        assertThat(suggest(orgA, "배송이 너무 늦어요", 2).category()).isEqualTo("delivery_reply");
+    }
+
+    /**
+     * Provenance follows the ROW, not a string comparison: a company that saves wording identical to
+     * the shipped default has still chosen it, and reporting reviewnary as the author would be wrong.
+     */
+    @Test
+    @DisplayName("wording identical to the default is still the company's own")
+    void identicalWordingIsStillAnOverride() {
+        service.save(orgA, "general_reply", ReviewReplyTemplateKey.GENERAL.defaultBody(), user);
+
+        assertThat(service.isCustomized(orgA, ReviewReplyTemplateKey.GENERAL)).isTrue();
+        assertThat(suggest(orgA, "합성-리뷰-본문", 3).providerVersion())
+                .isEqualTo(RuleBasedReviewReplyProvider.ORG_VERSION);
     }
 
     @Test

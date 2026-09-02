@@ -47,25 +47,42 @@ public class ReviewReplyTemplateService {
     }
 
     /**
-     * The wording this org answers a {@code key} review with — the override, or the shipped default.
-     * Never empty, never null; an unreadable repository is not a reason to answer with nothing.
+     * The wording this org answers a {@code key} review with, and whether that wording is the company's
+     * own. Two answers from one read, because the caller always wants both and asking twice would let
+     * them disagree.
+     */
+    public record Resolved(String body, boolean customized) {
+    }
+
+    /**
+     * Resolve one template for one org. Never empty, never null: an org with no row — the normal state
+     * — gets the shipped wording, and {@code customized} is false.
      */
     @Transactional(readOnly = true)
-    public String bodyFor(UUID orgId, ReviewReplyTemplateKey key) {
-        if (orgId == null || key == null) {
-            return key == null ? "" : key.defaultBody();
+    public Resolved resolve(UUID orgId, ReviewReplyTemplateKey key) {
+        if (key == null) {
+            return new Resolved("", false);
+        }
+        if (orgId == null) {
+            return new Resolved(key.defaultBody(), false);
         }
         return templates.findByOrgIdAndTemplateKey(orgId, key.category())
                 .map(ReviewReplyTemplate::getBody)
                 .filter(body -> !body.isBlank())
-                .orElseGet(key::defaultBody);
+                .map(body -> new Resolved(body, true))
+                .orElseGet(() -> new Resolved(key.defaultBody(), false));
+    }
+
+    /** The wording alone — the override, or the shipped default. */
+    @Transactional(readOnly = true)
+    public String bodyFor(UUID orgId, ReviewReplyTemplateKey key) {
+        return resolve(orgId, key).body();
     }
 
     /** Whether this org has its own wording for {@code key} — provenance, never a gate. */
     @Transactional(readOnly = true)
     public boolean isCustomized(UUID orgId, ReviewReplyTemplateKey key) {
-        return orgId != null && key != null
-                && templates.findByOrgIdAndTemplateKey(orgId, key.category()).isPresent();
+        return resolve(orgId, key).customized();
     }
 
     /** Every template, effective wording included, in the provider's own decision order. */

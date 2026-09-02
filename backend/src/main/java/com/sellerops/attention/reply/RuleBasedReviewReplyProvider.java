@@ -15,27 +15,27 @@ import org.springframework.stereotype.Component;
  * {@link ReviewReplyProposalProvider} would report its own kind/name/version and would be
  * selected by the same flag this bean is gated on.
  *
- * <p><b>An issue signal decides first, the rating second — and this was reversed once, on
- * purpose.</b> Until 2026-09-03 the rating won: a review of {@value #POSITIVE_MIN_RATING} stars or
- * more took the positive template whatever words it contained. That protected a 5★ "배송 빨라요"
- * from being answered with an apology, and it cost the case the product is actually for — a 4★
- * review that plainly names a problem was answered with 「좋은 후기를 남겨주셔서 감사합니다」.
- * Product-owner decision (Template Settings v1 closure): the problem outranks the star.
+ * <p><b>Rating decides first, keywords second — reversed for one commit, then measured back.</b>
+ * A rating of {@value #POSITIVE_MIN_RATING} or above takes {@link ReviewReplyTemplateKey#POSITIVE}
+ * whatever words appear. On 2026-09-03 that was flipped so a named issue would outrank the star,
+ * because a ★4 review that plainly describes a problem should not be answered as praise. Run against
+ * this repository's real NAVER corpus (4,455 rows) the flip moved <b>1,153</b> reviews off the
+ * rating template and <b>1,098 of them were ★5</b> — 「배송 빨라요」 redirected into an apology for
+ * late delivery, in public, against the 55 complaints it was meant to catch. It was reverted.
  *
- * <p><b>What that costs, measured rather than guessed.</b> On this repository's real NAVER corpus
- * (4,455 rows) the reversal moves <b>1,153</b> reviews off the positive template, and
- * <b>1,098 of them are 5★</b> — overwhelmingly praise that merely names a topic word, not the 55
- * four-star complaints the change was made for. A keyword list cannot tell 「배송 빨라요」 from
- * 「배송 늦어요」, and this class deliberately does not try: a sentiment classifier here would be
- * the AI this provider is defined as not being.
+ * <p><b>The reason is structural, and it is the thing to remember: these keywords detect a TOPIC,
+ * not a polarity.</b> 「배송 빨라요」 and 「배송 늦어요」 are the same word to this table. Until
+ * something can tell them apart, a topic word must not outrank a star — and adding a sentiment
+ * heuristic here would be the AI this provider is defined as not being.
  *
- * <p>So the lever is the seller's, and it is the one this package built. A company whose reviews
- * are mostly praise sets its 배송 template to wording that reads correctly either way — that is
- * what {@link ReviewReplyTemplateService} is for, and it is why reviewnary's own defaults are a
- * fallback rather than the answer. The operator still edits every draft before it is approved.
+ * <p>So the ★4 complaint the words cannot see is answered with a NEUTRAL default and the seller's
+ * own edit, not with a confident apology to everyone who mentioned 배송. That is why
+ * {@link ReviewReplyTemplateKey#POSITIVE}'s wording thanks the customer and asserts nothing about
+ * how pleased they were, and why {@link ReviewReplyTemplateService} exists: reviewnary's defaults
+ * are the fallback, and the company's own wording is the answer.
  *
- * <p>An unrated review (null rating — the source carried none) reaches the rating step with no
- * evidence of praise and falls to {@link ReviewReplyTemplateKey#GENERAL}.
+ * <p>An unrated review (null rating — the source carried none) takes the keyword path: with no
+ * rating there is no evidence of praise, and the keywords are the only signal there is.
  *
  * <p><b>The choice moved out; the decision did not</b> (Review Reply Template Settings v1). The
  * categories, keywords, order and shipped wording now live in {@link ReviewReplyTemplateKey}, and
@@ -95,13 +95,15 @@ public class RuleBasedReviewReplyProvider implements ReviewReplyProposalProvider
     }
 
     /**
-     * Which template this review takes: the keyword members in their declared order, first hit wins;
-     * then, only if none matched, the rating; then the fallback.
-     *
-     * <p>The keyword pass is unchanged from the day it was written — same words, same precedence.
-     * All that moved is where the rating is asked, and the class note above says what that costs.
+     * Which template this review takes. Rating first, then the keyword members in their declared
+     * order, then the fallback — the selection this class has made since it was written, and the one
+     * the 2026-09-03 measurement restored.
      */
     static ReviewReplyTemplateKey keyFor(ReviewReplyContext context) {
+        Integer rating = context.rating();
+        if (rating != null && rating >= POSITIVE_MIN_RATING) {
+            return ReviewReplyTemplateKey.POSITIVE;
+        }
         String haystack = context.redactedBody() == null ? "" : context.redactedBody();
         for (ReviewReplyTemplateKey key : ReviewReplyTemplateKey.KEYWORD_ORDER) {
             for (String keyword : key.keywords()) {
@@ -110,10 +112,7 @@ public class RuleBasedReviewReplyProvider implements ReviewReplyProposalProvider
                 }
             }
         }
-        Integer rating = context.rating();
-        return rating != null && rating >= POSITIVE_MIN_RATING
-                ? ReviewReplyTemplateKey.POSITIVE
-                : ReviewReplyTemplateKey.GENERAL;
+        return ReviewReplyTemplateKey.GENERAL;
     }
 
     private Suggestion suggestion(UUID orgId, ReviewReplyTemplateKey key) {
@@ -121,8 +120,11 @@ public class RuleBasedReviewReplyProvider implements ReviewReplyProposalProvider
         if (service == null || orgId == null) {
             return new Suggestion(key.defaultBody(), key.category(), KIND, NAME, VERSION);
         }
-        String body = service.bodyFor(orgId, key);
-        boolean fromOrg = !body.equals(key.defaultBody());
-        return new Suggestion(body, key.category(), KIND, NAME, fromOrg ? ORG_VERSION : VERSION);
+        // Provenance is the ROW, not a string comparison: a company may save wording identical to the
+        // shipped default, and reporting that as reviewnary's own would be wrong about where it came
+        // from. One read answers both questions.
+        ReviewReplyTemplateService.Resolved resolved = service.resolve(orgId, key);
+        return new Suggestion(resolved.body(), key.category(), KIND, NAME,
+                resolved.customized() ? ORG_VERSION : VERSION);
     }
 }

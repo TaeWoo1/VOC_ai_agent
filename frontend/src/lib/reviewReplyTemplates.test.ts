@@ -7,14 +7,14 @@ import type { ReviewReplyTemplateView } from "./types";
  * between them is a string. If the backend grows a category, this test is what says the screen cannot
  * name it yet — and `labelledTemplates` is what stops it from being rendered raw in the meantime.
  */
-/** Decision order: the five issue types, then the two the rating decides. */
+/** Decision order: the rating first, then the keyword list, then the fallback. */
 const BACKEND_KEYS = [
+  "positive_reply",
   "quality_reply",
   "delivery_reply",
   "packaging_reply",
   "product_info_reply",
   "pricing_reply",
-  "positive_reply",
   "general_reply",
 ] as const;
 
@@ -33,6 +33,8 @@ describe("review reply template labels", () => {
       expect(label.name).not.toContain(key);
       expect(label.when).not.toContain(key);
       expect(label.name).not.toMatch(/[a-zA-Z_]/);
+      // 「칭찬」 is a judgement the selector never makes: it sees a star and a topic word, not a mood.
+      expect(label.name).not.toContain("칭찬");
       expect(label.when).not.toMatch(/[a-zA-Z_]/);
       expect(label.when).toMatch(/\.$/);
     }
