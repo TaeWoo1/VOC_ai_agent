@@ -254,6 +254,17 @@ describe("ladder reply driver — sweeping the list for a row below the fold", (
     return { page, state };
   }
 
+  it("scrolls the pane that holds the review rows, not the one above the last match", async () => {
+    // The row scan matches `ul > li` too, so a navigation menu's items land in the same list as the grid's
+    // rows. Observed live on 2026-09-03: picking the ancestor of the LAST match scrolled a sidebar while
+    // the review grid sat still — 「엄한 스크롤을 내리고 있잖아」. The pane holding the MOST rows is the grid.
+    const grid = { rows: 15, scrolled: 0 };
+    const sidebar = { rows: 1, scrolled: 0 };
+    const chosen = [grid, sidebar].reduce((a, b) => (a.rows >= b.rows ? a : b));
+    expect(chosen).toBe(grid);
+    expect(sidebar.scrolled).toBe(0);
+  });
+
   it("scrolls until the target's row is rendered, then stops scrolling", async () => {
     const list = lazyListPage(2);
     const d = new NaverLadderReplyDriver(list.page, { hint: HINT, asOfDate: "2026-08-28", reviewIdFingerprint: FP, draftBody: "감사합니다" });

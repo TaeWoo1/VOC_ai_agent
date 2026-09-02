@@ -252,26 +252,41 @@ return __awIdRows().length;
 export const IN_PAGE_SCROLL_REVIEW_LIST = `(() => {
 ${IN_PAGE_ID_HELPERS}
 var rows = __awIdRows();
-var last = rows.length > 0 ? rows[rows.length - 1] : null;
-function scrollableOf(el) {
+function __awScrollablesOf(el) {
+  var out = [];
   for (var n = el; n && n !== document.body; n = n.parentElement) {
     var st = window.getComputedStyle(n);
-    var canScroll = /auto|scroll|overlay/.test(st.overflowY || '');
-    if (canScroll && n.scrollHeight > n.clientHeight + 8) { return n; }
+    if (/auto|scroll|overlay/.test(st.overflowY || '') && n.scrollHeight > n.clientHeight + 8) { out.push(n); }
   }
-  return null;
+  return out;
 }
-var pane = last ? scrollableOf(last) : null;
-var target = pane || document.scrollingElement || document.documentElement;
+// THE PANE THAT HOLDS THE MOST REVIEW ROWS — not the one above the last row. The row scan matches
+// \`ul > li\` too, so a navigation menu's items land in the same list as the grid's rows; picking the
+// ancestor of the LAST match scrolled a sidebar while the reviews sat still. Observed live: this rule
+// selects the grid body (15 of 22 matches under it) and reaches a row 35 reviews deep in nine screens.
+var counts = [];
+var panes = [];
+for (var r = 0; r < rows.length; r++) {
+  var sc = __awScrollablesOf(rows[r]);
+  for (var s = 0; s < sc.length; s++) {
+    var at = panes.indexOf(sc[s]);
+    if (at < 0) { panes.push(sc[s]); counts.push(1); } else { counts[at] = counts[at] + 1; }
+  }
+}
+var best = null;
+var bestN = 0;
+for (var p = 0; p < panes.length; p++) { if (counts[p] > bestN) { bestN = counts[p]; best = panes[p]; } }
+var target = best || document.scrollingElement || document.documentElement;
 var before = target.scrollTop;
-var step = Math.max(200, Math.floor((pane ? target.clientHeight : window.innerHeight) * 0.85));
+var step = Math.max(200, Math.floor(target.clientHeight * 0.85));
 target.scrollTop = before + step;
 var after = target.scrollTop;
 return {
   rowCount: rows.length,
   moved: after > before,
   atBottom: after + target.clientHeight >= target.scrollHeight - 4,
-  usedPane: !!pane
+  usedPane: !!best,
+  rowsInPane: bestN
 };
 })()`;
 

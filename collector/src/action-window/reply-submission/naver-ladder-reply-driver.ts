@@ -263,14 +263,17 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
   }
 
   /** One screen down the review list. Read-only: it moves the viewport, it presses nothing. */
-  private async scrollListOnce(): Promise<{ rowCount: number; moved: boolean; atBottom: boolean }> {
+  private async scrollListOnce(): Promise<{ rowCount: number; moved: boolean; atBottom: boolean; rowsInPane: number }> {
     try {
-      const r = await this.page.evaluate<{ rowCount: number; moved: boolean; atBottom: boolean }>(
+      const r = await this.page.evaluate<{ rowCount: number; moved: boolean; atBottom: boolean; rowsInPane?: number }>(
         IN_PAGE_SCROLL_REVIEW_LIST,
       );
-      return { rowCount: Number(r?.rowCount ?? 0), moved: !!r?.moved, atBottom: !!r?.atBottom };
+      return {
+        rowCount: Number(r?.rowCount ?? 0), moved: !!r?.moved, atBottom: !!r?.atBottom,
+        rowsInPane: Number(r?.rowsInPane ?? 0),
+      };
     } catch {
-      return { rowCount: 0, moved: false, atBottom: true };
+      return { rowCount: 0, moved: false, atBottom: true, rowsInPane: 0 };
     }
   }
 
@@ -286,7 +289,7 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
       await new Promise<void>((resolve) => setTimeout(resolve, LOCATE_SCROLL_SETTLE_MS));
       d = await this.ladder();
       this.diag("aw_naver_reply_locate_sweep", {
-        step: step + 1, rowsOnPage: s.rowCount, matches: d.count, atBottom: s.atBottom,
+        step: step + 1, rowsOnPage: s.rowCount, rowsInPane: s.rowsInPane, matches: d.count, atBottom: s.atBottom,
       });
       if (d.count > 0 || s.atBottom) break;
     }
