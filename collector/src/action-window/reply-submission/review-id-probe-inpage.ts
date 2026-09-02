@@ -184,7 +184,15 @@ function __awAttributeTokens(row) {
     if (!attrs) { continue; }
     for (var a = 0; a < attrs.length; a++) {
       var name = attrs[a].name;
-      if (name.indexOf('data-') !== 0 && name !== 'id' && name !== 'name') { continue; }
+      // A DENY-LIST, not an allow-list (2026-09-03). It used to accept only data-*, id and name, and a NAVER
+      // review row has NONE of those. Observed live: the accepted set on a real row was empty, so this rung
+      // contributed nothing and the review id stayed unreachable however far the run scrolled. The id lives
+      // in an ng-click handler on the row's link; row-id is the grid's own index ("43"), not the review.
+      // Presentation attributes are the only ones worth refusing: everything else is where a framework keeps
+      // its identifiers, and __awIdTokens already keeps nothing but 6..20-digit runs. Measured on the live
+      // page: two such tokens on the target's row, six at most on any row. Not a wider net, the same net
+      // cast where the fish are.
+      if (name === 'class' || name === 'style') { continue; }
       if (name === '${ID_MATCH_MARKER_ATTRIBUTE}') { continue; }
       if (attrs[a].value) { texts.push(attrs[a].value); }
     }
@@ -260,8 +268,8 @@ function __awScrollablesOf(el) {
   }
   return out;
 }
-// THE PANE THAT HOLDS THE MOST REVIEW ROWS — not the one above the last row. The row scan matches
-// \`ul > li\` too, so a navigation menu's items land in the same list as the grid's rows; picking the
+// THE PANE THAT HOLDS THE MOST REVIEW ROWS, not the one above the last row. The row scan matches
+// "ul > li" too, so a navigation menu's items land in the same list as the grid's rows; picking the
 // ancestor of the LAST match scrolled a sidebar while the reviews sat still. Observed live: this rule
 // selects the grid body (15 of 22 matches under it) and reaches a row 35 reviews deep in nine screens.
 var counts = [];
