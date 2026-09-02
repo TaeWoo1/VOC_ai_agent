@@ -302,6 +302,16 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   private lastInspectionResult: CandidateInspection | null = null;
   /** Armed BEFORE the user acts (a download can fire the instant they click); resolved lazily. */
   private pendingDownload: Promise<Download | null> | null = null;
+  /**
+   * Has the armed download listener already produced its one answer?
+   *
+   * The listener is a single `waitForEvent("download")` and it can only be awaited once usefully. Dropping
+   * it at the end of a TIMED-OUT attempt is what created a hole: Playwright delivers nothing that happened
+   * while no listener was armed, so a seller who confirmed NAVER's dialog during the re-arm gap produced a
+   * file the run could not see. An unsettled listener is now carried across attempts and only released once
+   * it has actually answered.
+   */
+  private pendingDownloadSettled = false;
   /** The detected artifact buffered in memory (bytes re-readable for validate + ingest). */
   private retained: ByteDownloadLike | null = null;
   /**
@@ -575,7 +585,7 @@ export class NaverLiveProbeDriver implements ProbeDriver {
       // timeout: 0 disables Playwright's own timeout; detectDownload() races the deadline instead.
       // Download detection stays PAGE-level: the event is delivered to the page no matter which frame
       // originated it, so a control in a child frame still yields the download here.
-      this.pendingDownload = this.page.waitForEvent("download", { timeout: 0 }).catch(() => null);
+      this.pendingDownload = this.armDownloadListener();
     }
     await this.ctx().evaluate(NAME_SHIM);
     await armObserver(this.ctx());
@@ -623,7 +633,7 @@ export class NaverLiveProbeDriver implements ProbeDriver {
    */
   async detectDownload(): Promise<DownloadDetectResult> {
     const timeoutMs = this.opts.downloadTimeoutMs ?? 15_000;
-    const armed = this.pendingDownload ?? this.page.waitForEvent("download", { timeout: 0 }).catch(() => null);
+    const armed = this.pendingDownload ?? this.armDownloadListener();
     this.pendingDownload = armed;
     const diagnostic: ContinuationDiagnostic = { checkpoints: 0, observedLast: false, ambiguous: false, dialog: "none" };
     this.lastContinuationDiagnostic = diagnostic;
@@ -666,8 +676,25 @@ export class NaverLiveProbeDriver implements ProbeDriver {
       }
       return { detected: false }; // fail closed: checkpoint cap reached without a download
     } finally {
-      this.pendingDownload = null;
+      // Only release a listener that has ANSWERED. A timed-out attempt leaves the seller mid-dialog with the
+      // file still to come, and re-arming from scratch would miss the event that arrives in the gap.
+      if (this.pendingDownloadSettled) this.pendingDownload = null;
     }
+  }
+
+  /** One download listener, marked when it answers so a timed-out attempt does not throw it away. */
+  private armDownloadListener(): Promise<Download | null> {
+    this.pendingDownloadSettled = false;
+    return this.page
+      .waitForEvent("download", { timeout: 0 })
+      .then((d) => {
+        this.pendingDownloadSettled = true;
+        return d;
+      })
+      .catch(() => {
+        this.pendingDownloadSettled = true;
+        return null;
+      });
   }
 
   /**
@@ -790,6 +817,7 @@ export class NaverLiveProbeDriver implements ProbeDriver {
     this.retained = null;
     const pending = this.pendingDownload;
     this.pendingDownload = null;
+    this.pendingDownloadSettled = false;
     if (pending) {
       void pending.then((late) => (late ? late.delete().catch(() => {}) : undefined)).catch(() => {});
     }
@@ -810,8 +838,8 @@ export class NaverLiveProbeDriver implements ProbeDriver {
    * cross-check against the string decision and fail closed on disagreement. Read-only annotation
    * only — it NEVER clicks. Proven against synthetic pages; real-NAVER behavior is a live-run finding.
    */
-  private markExportTarget(): Promise<number> {
-    return this.ctx().evaluate((keywords: readonly string[]) => {
+  private markExportTarget(all = false): Promise<number> {
+    return this.ctx().evaluate(({ keywords, all }: { keywords: readonly string[]; all: boolean }) => {
       const w = window as unknown as { getComputedStyle(e: Element): CSSStyleDeclaration };
       document.querySelectorAll("[data-aw-target]").forEach((el) => {
         el.removeAttribute("data-aw-target");
@@ -843,14 +871,34 @@ export class NaverLiveProbeDriver implements ProbeDriver {
       // rule `markContinuationTarget` below has always applied to its candidate set. Both sides must apply it
       // or the string decision and this count disagree and every locate fails closed on drift.
       const matches = named.filter((el) => !named.some((o) => o !== el && el.contains(o)));
-      if (matches.length === 1) {
-        const el = matches[0]!;
+      // `all` rings EVERY match instead of failing closed on a tie. It is only ever passed when the engine
+      // has decided the tie is the seller's to break (`highlightAllCandidates`), and it changes nothing about
+      // who acts: the overlay is `pointer-events: none` and nothing here clicks. Default stays exactly-one.
+      const tagged = all ? matches : matches.length === 1 ? matches : [];
+      for (const el of tagged) {
         el.setAttribute("data-aw-target", "");
         el.setAttribute("data-aw-role", "primary-action");
         el.setAttribute("data-aw-label", "review-export");
       }
       return matches.length;
-    }, this.exportKeywords());
+    }, { keywords: this.exportKeywords(), all });
+  }
+
+  /**
+   * **Ring every export candidate and let the seller pick.**
+   *
+   * The 2026-09-02 live sitting ended `TARGET_AMBIGUOUS` with two REAL controls on the review surface — an
+   * anchor reading 「다운로드」 and a button reading 「엑셀」, neither nested in the other. Failing closed was
+   * right while the runtime had to name one of them; it is the wrong answer to a question the seller can
+   * settle in one press, and it stranded the run at the last step before the file.
+   *
+   * Nothing about the safety posture changes: we still never click, the annotation is still read-only, and
+   * the file the seller produces still has to pass artifact validation and the scope gate before a row is
+   * written. What changes is that "we cannot tell which of these is yours" is now asked instead of fatal.
+   */
+  async markAllExportTargets(): Promise<number> {
+    await this.ctx().evaluate(NAME_SHIM);
+    return this.markExportTarget(true);
   }
 
   /**

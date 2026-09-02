@@ -54,6 +54,12 @@ export type ImportEffect =
   /** Ask whether this date control already holds what the gate will accept (finding 13). */
   | { prefilled: ImportTarget }
   | { highlight: ImportTarget }
+  /**
+   * Ring EVERY candidate and let the seller press the one they mean. Reached only for a target whose
+   * completion is verified by something other than knowing which element it was — today the export, whose
+   * oracle is the file itself (2026-09-02: two real export controls, run died `TARGET_AMBIGUOUS`).
+   */
+  | { highlightAll: ImportTarget }
   | { observe: ImportTarget }
   | "READ_SCOPE"
   /** Take the annotation off the control the run has stopped pointing at (finding 12). */
@@ -314,6 +320,15 @@ export class ImportSegmentEngine {
 
   onTargetLocated(target: ImportTarget, res: LocateResult): ImportEffect {
     if (this.isTerminal()) return "NONE";
+    // A tie the SELLER can break is not a dead end. Only the export qualifies: it is pressed rather than
+    // read, and what it produces is checked by the artifact parse and the scope gate before a row is
+    // written — so pointing at both and watching for a download is strictly more informative than dying.
+    // Dates and the apply control stay fail-closed: those are READ, and reading the wrong one is a wrong
+    // answer nobody would notice.
+    if (res.count > 1 && target === "export") {
+      this.stage = this.highlightStageFor(target);
+      return { highlightAll: target };
+    }
     if (res.count > 1) return this.fail("TARGET_AMBIGUOUS");
     if (res.count === 0 || !res.sig) return this.fail("TARGET_NOT_FOUND");
     this.targetSig[target] = res.sig;
@@ -353,6 +368,8 @@ export class ImportSegmentEngine {
    */
   onTargetHighlighted(target: ImportTarget, res: LocateResult): ImportEffect {
     if (this.isTerminal()) return "NONE";
+    // The surface grew a second export control between locate and highlight: same tie, same owner.
+    if (res.count > 1 && target === "export") return { highlightAll: target };
     if (res.count > 1) return this.fail("TARGET_AMBIGUOUS");
     if (res.count === 0 || !res.sig || res.sig !== this.targetSig[target]) {
       return this.fail("TARGET_NOT_FOUND");
@@ -363,6 +380,55 @@ export class ImportSegmentEngine {
     this.emit("TARGET_HIGHLIGHTED", { stepId: this.stepId(), targetRef: res.sig });
     this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
     return { observe: target };
+  }
+
+  /**
+   * Several candidates were rung and the seller is being asked to press theirs.
+   *
+   * The barrier that follows is the ordinary one: the runtime observes, it never presses. `rung` is a count,
+   * never an identity — with more than one candidate there IS no single target ref, and inventing one would
+   * be the drift check lying. `0` means nothing could be annotated, which is the honest `TARGET_NOT_FOUND`.
+   */
+  onCandidatesHighlighted(target: ImportTarget, rung: number): ImportEffect {
+    if (this.isTerminal()) return "NONE";
+    if (this.stage !== this.highlightStageFor(target)) return "NONE";
+    if (rung < 1) return this.fail("TARGET_NOT_FOUND");
+    this.targetSig[target] = `candidates:${rung}`;
+    this.stage = this.barrierStageFor(target);
+    this.emit("STEP_READY", { stepId: this.stepId(), stepStatus: "READY" });
+    this.emit("HUMAN_ACTION_REQUIRED", { stepId: this.stepId() });
+    this.emit("TARGET_HIGHLIGHTED", { stepId: this.stepId(), targetRef: `candidates:${rung}` });
+    this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
+    return { observe: target };
+  }
+
+  /**
+   * **The automatic twin of {@link recheck} — what a watcher issues instead of the seller.**
+   *
+   * Every recoverable park in this engine has the same repair and it is a READ: look at the surface again,
+   * or read the selected range again. On 2026-09-02 a live run parked 0.2s after the window opened (the
+   * seller was, necessarily, still logging in) and then waited for a human to press 「다시 확인」 — and after
+   * the scope mismatch it waited again while the seller corrected the dates in front of it. Both waits were
+   * for information the runtime could simply go and look at.
+   *
+   * The safety line is unchanged and is the reason this is allowed at all: re-probing and re-reading are
+   * `AUTO_READ`, which may advance GUIDANCE and may never cross an action barrier
+   * (`docs/sellerops_live_approval_contract.md` §5b). Nothing here presses anything.
+   *
+   * Returns `NONE` when the run is not resting on a park with an automatic repair, so a watcher that fires
+   * one tick late cannot move a run that has already moved.
+   */
+  autoRetryPark(): ImportEffect {
+    if (this.isTerminal()) return "NONE";
+    if (this.stage === "SCOPE_BLOCKED" || this.stage === "SESSION_BLOCKED" || this.stage === "SURFACE_BLOCKED") {
+      return this.recheck();
+    }
+    return "NONE";
+  }
+
+  /** Does this surface need a separate apply press before a range is in effect? Null until facts are read. */
+  requiresApply(): boolean {
+    return this.facts?.requiresApply === true;
   }
 
   /**

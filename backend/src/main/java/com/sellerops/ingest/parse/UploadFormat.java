@@ -44,14 +44,30 @@ public enum UploadFormat {
 
     /**
      * The OOXML marker. A ZIP alone is not a workbook, and accepting one would let an arbitrary archive
-     * reach POI. This entry name appears in the first local file header of every workbook Excel writes,
-     * and NAVER's export is written by Excel's own writer.
+     * reach POI. Every OOXML package contains this entry, and a zip stores each entry's name literally in
+     * its local header, so finding the bytes proves the package declares one.
+     *
+     * <p><b>It is not necessarily the FIRST entry.</b> This class used to say it was — "appears in the first
+     * local file header of every workbook Excel writes" — and that assumption cost a live guided import on
+     * 2026-09-02: NAVER's Seller Center export is a perfectly valid workbook with nine entries whose FIRST
+     * entry is {@code xl/worksheets/sheet1.xml}, so the marker's local header sits 15,413 bytes in. The run
+     * had walked the seller through the whole export and was refused at the last step with "지원하지 않는 파일
+     * 형식입니다" — about a file Excel opens.
      */
     private static final byte[] OOXML_CONTENT_TYPES =
             "[Content_Types].xml".getBytes(StandardCharsets.US_ASCII);
 
     /** How far in we look. Generous enough for the zip directory preamble, bounded so a huge upload costs nothing. */
     static final int SNIFF_BYTES = 8 * 1024;
+
+    /**
+     * How far into a ZIP we look for the OOXML marker.
+     *
+     * <p>Only spent on a file that has already proven it is a zip, and only until the marker is found. Large
+     * enough that entry ORDER stops being an assumption (the observed export needed 15 KB, and a workbook
+     * with a big first sheet needs more), bounded so an arbitrary 2 GB archive still costs a fixed read.
+     */
+    static final int ZIP_SNIFF_BYTES = 1024 * 1024;
 
     /** Delimiters a header row may legitimately use. A single column with none of these is not a table. */
     private static final char[] DELIMITERS = {',', ';', '\t'};
@@ -62,8 +78,17 @@ public enum UploadFormat {
      * the same bytes afterwards.
      */
     public static UploadFormat detect(BufferedInputStream in) throws IOException {
-        in.mark(SNIFF_BYTES + 1);
+        // Marked for the larger window up front: the buffer only grows as bytes are actually read, so a CSV
+        // still costs one 8 KB read and only a zip pays for the longer look.
+        in.mark(ZIP_SNIFF_BYTES + 1);
         byte[] head = in.readNBytes(SNIFF_BYTES);
+        if (startsWith(head, ZIP_LOCAL_HEADER)) {
+            byte[] rest = in.readNBytes(Math.max(0, ZIP_SNIFF_BYTES - head.length));
+            in.reset();
+            byte[] both = Arrays.copyOf(head, head.length + rest.length);
+            System.arraycopy(rest, 0, both, head.length, rest.length);
+            return zipFormat(both);
+        }
         in.reset();
         return of(head);
     }
@@ -74,10 +99,14 @@ public enum UploadFormat {
             return UNKNOWN;
         }
         if (startsWith(head, ZIP_LOCAL_HEADER)) {
-            // A zip, but only a workbook if it says so. Otherwise UNKNOWN — never handed to POI.
-            return contains(head, OOXML_CONTENT_TYPES) ? XLSX : UNKNOWN;
+            return zipFormat(head);
         }
         return looksLikeDelimitedText(head) ? CSV : UNKNOWN;
+    }
+
+    /** A zip is a workbook only if it declares the OOXML content types. Otherwise UNKNOWN — never POI. */
+    private static UploadFormat zipFormat(byte[] prefix) {
+        return contains(prefix, OOXML_CONTENT_TYPES) ? XLSX : UNKNOWN;
     }
 
     /**

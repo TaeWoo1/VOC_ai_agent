@@ -5,7 +5,7 @@ import { Btn, BtnLink } from "../../ui/Btn";
 import { api } from "../../../lib/apiClient";
 import { analytics } from "../../../lib/analytics";
 import { blockerView, resolveCopy } from "../../../lib/actionWindow/copy";
-import { recheckLabel } from "../../../lib/reviewImport";
+import { buildImportGuidancePack, continuationAfterNext, recheckLabel } from "../../../lib/reviewImport";
 import { isTerminalRunStatus } from "../../../lib/actionWindow/homeFixtures";
 import { type AcquireRuntime } from "../../../lib/actionWindow/acquire/acquireRuntime";
 import {
@@ -410,6 +410,19 @@ function NaverGuidedImportRun({
         const planId = open ? open.id : (await api.selectReviewImportRange(accountId, thisMonth())).plan.id;
         // Carry the plan up to today so "new reviews" has a segment to run; idempotent on the server.
         await api.extendReviewImportPlan(planId).catch(() => undefined);
+        // **The words the seller reads inside their SmartStore window.**
+        //
+        // Without this the runtime renders NO in-page panel at all (`ImportSegmentSession.queuePanelRender`
+        // returns early with no pack) — which is what the 2026-09-02 live sitting hit: rings appeared on the
+        // right controls and nothing on that screen said what to do, why the run had stopped, or offered the
+        // recovery. The runtime authors no sentence of its own by design, so a lane that does not send the
+        // pack is a lane with no guidance. The onboarding card has always sent it; this one never did.
+        const detail = await api.getReviewImportPlan(planId).catch(() => null);
+        runtime.setGuidancePack(
+          buildImportGuidancePack(
+            detail ? continuationAfterNext(detail.segments, detail.nextSegmentId) : null,
+          ),
+        );
         const launch = await api.launchNextReviewImportSegment(planId);
         try {
           // From here the attempt is COMMITTED: a ticket is spent-or-spendable and a command is on the wire,

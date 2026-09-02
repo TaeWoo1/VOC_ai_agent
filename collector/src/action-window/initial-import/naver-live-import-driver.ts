@@ -203,10 +203,15 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
    * surface never came up (the "idle CPU, page never rendered" failure), and this throws a
    * {@link ReliabilityFailure} the session parks as `SURFACE_SETTLE_TIMEOUT` rather than hanging forever.
    */
-  async prepareSurface(): Promise<boolean | SurfaceProbeResult> {
-    await this.opts
-      .presentSurface?.()
-      .catch((e) => log("aw_import_surface_present_failed", { reason: errName(e) }, "warn"));
+  async prepareSurface(opts?: { present?: boolean }): Promise<boolean | SurfaceProbeResult> {
+    // `present: false` is the automatic re-probe that watches a parked run. Raising the window every few
+    // seconds while the seller is typing a password INTO that window would make the observation worse than
+    // the wait it replaces, so the quiet probe reads and does not touch the presentation.
+    if (opts?.present !== false) {
+      await this.opts
+        .presentSurface?.()
+        .catch((e) => log("aw_import_surface_present_failed", { reason: errName(e) }, "warn"));
+    }
     recordStage("SESSION_PROBE");
     const result = await this.withSettleGuard(this.proven.prepareSurface());
     recordStage("SURFACE_SETTLE");
@@ -358,6 +363,20 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     if (!sig) return { count: 0 };
     this.sigs.set(target, sig);
     return { count: 1, sig };
+  }
+
+  /**
+   * Ring every export candidate. See `ImportProbeDriver.highlightAllCandidates` for why a tie here is the
+   * seller's to break rather than the run's to die on.
+   */
+  async highlightAllCandidates(target: ImportTarget): Promise<number> {
+    if (target !== "export") return 0;
+    const rung = await this.proven.markAllExportTargets();
+    if (rung < 1) return 0;
+    await this.proven.highlight();
+    await this.verifyOverlayVisible();
+    log("aw_import_export_candidates_offered", { rung });
+    return rung;
   }
 
   /**
@@ -533,8 +552,19 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     if (target === "consent") {
       // Join the race armed at the export barrier. Falling back to starting one here keeps a driver used
       // without the session's arming call working exactly as before.
-      this.consentRace = await (this.downloadRace ?? this.proven.detectDownload());
-      return this.consentRace.detected;
+      const race = this.downloadRace ?? this.proven.detectDownload();
+      this.downloadRace = race;
+      const result = await race;
+      this.consentRace = result;
+      // **A race that answered "no download yet" is spent, not an answer about the run.**
+      //
+      // The detection deadline is 15 seconds; a seller reading NAVER's consent dialog routinely takes longer.
+      // Keeping the resolved promise meant every later poll re-awaited the SAME `false` instantly, so the
+      // barrier could never advance again and the run could not complete even after the file arrived. Clearing
+      // it re-arms on the next pass; the underlying download listener is preserved across attempts by the
+      // proven driver, so nothing that happens in between is missed.
+      if (!result.detected) this.downloadRace = null;
+      return result.detected;
     }
     if (target === "start_date" || target === "end_date") {
       // A generous window: the seller is picking a date from a calendar, which is slower than a click.

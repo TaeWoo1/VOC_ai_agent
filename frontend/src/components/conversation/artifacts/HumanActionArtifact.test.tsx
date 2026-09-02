@@ -16,6 +16,11 @@ const listReviewImportPlans = vi.fn(async (..._a: unknown[]) => [] as unknown[])
 const selectReviewImportRange = vi.fn(async (..._a: unknown[]) => ({ plan: { id: "plan-1" } }));
 const extendReviewImportPlan = vi.fn(async (..._a: unknown[]) => ({ plan: { id: "plan-1" } }));
 const launchNextReviewImportSegment = vi.fn(async (..._a: unknown[]) => ({ launchRef: "0f1e2d3c4b5a6978", kind: "SEGMENT" }));
+const getReviewImportPlan = vi.fn(async (..._a: unknown[]) => ({
+  plan: { id: "plan-1" },
+  segments: [{ id: "seg-1", segmentStart: "2026-08-20", segmentEnd: "2026-09-02", executionState: "PENDING", coverageState: "UNVERIFIED" }],
+  nextSegmentId: "seg-1",
+}));
 const expireReviewImportLaunch = vi.fn(async (..._a: unknown[]) => ({}));
 vi.mock("../../../lib/apiClient", () => ({
   api: {
@@ -25,6 +30,7 @@ vi.mock("../../../lib/apiClient", () => ({
     selectReviewImportRange: (...a: unknown[]) => selectReviewImportRange(...a),
     extendReviewImportPlan: (...a: unknown[]) => extendReviewImportPlan(...a),
     launchNextReviewImportSegment: (...a: unknown[]) => launchNextReviewImportSegment(...a),
+    getReviewImportPlan: (...a: unknown[]) => getReviewImportPlan(...a),
     expireReviewImportLaunch: (...a: unknown[]) => expireReviewImportLaunch(...a),
   },
   getToken: () => null,
@@ -224,6 +230,38 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
     // live backend on 2026-09-02. What must be exactly one is the `START_RUN`, and what must never be zero is
     // the run. The teardown of an uncommitted attempt is what allows the second invocation to get there.
     expect(launchNextReviewImportSegment.mock.calls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  /**
+   * <b>The 2026-09-02 live sitting's silent screen.</b>
+   *
+   * The runtime authors no sentence of its own: with no guidance pack `ImportSegmentSession` renders NO
+   * in-page panel, so the seller's SmartStore window showed rings on the right controls and nothing that said
+   * what to do, why the run had stopped, or how to recover. The onboarding card had always sent the pack;
+   * this lane — the one the product is built around — never did, and the log for that sitting carries no
+   * `aw_import_guidance_pack` line at all.
+   */
+  it("sends the in-page guidance pack BEFORE the run starts — otherwise the seller's window is wordless", async () => {
+    const runtime = fakeImport();
+    render(
+      <MemoryRouter>
+        <HumanActionArtifact
+          artifact={artifact({ path: "EXPORT_ACTION_WINDOW", channelCode: "NAVER", channelNameKo: "네이버", accountId: "acc-nv" })}
+          onResume={vi.fn()}
+          importRuntime={runtime as never}
+        />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
+    await waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
+    expect(runtime.setGuidancePack).toHaveBeenCalledTimes(1);
+    const pack = runtime.setGuidancePack.mock.calls[0]![0] as { chrome?: { product?: string } };
+    expect(pack.chrome?.product).toBeTruthy();
+    // Order matters: a pack that arrives after the run has already parked leaves the seller reading nothing
+    // during the stretch that needed it most.
+    expect(runtime.setGuidancePack.mock.invocationCallOrder[0]!).toBeLessThan(
+      runtime.start.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("Coupang WING read: connect first, mint the single-use acquisitionRef second, then START_RUN(REVIEW_ACQUISITION)", async () => {

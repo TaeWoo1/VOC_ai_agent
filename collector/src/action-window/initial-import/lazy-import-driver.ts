@@ -166,6 +166,10 @@ export class LazyImportDriver implements ImportProbeDriver {
     return (await this.surface()).highlightTarget(target);
   }
 
+  async highlightAllCandidates(target: ImportTarget): Promise<number> {
+    return (await this.surface()).highlightAllCandidates(target);
+  }
+
   async isTargetPrefilled(target: ImportTarget, required: RequiredRange): Promise<boolean> {
     return (await this.surface()).isTargetPrefilled(target, required);
   }

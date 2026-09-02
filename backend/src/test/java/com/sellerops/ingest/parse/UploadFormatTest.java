@@ -85,6 +85,74 @@ class UploadFormatTest {
         assertThat(in.readAllBytes()).isEqualTo(csv);
     }
 
+    /**
+     * <b>The 2026-09-02 live guided import, refused at the last step.</b>
+     *
+     * The seller was walked through the whole NAVER export — login, dates, 조회, download — and the run died
+     * `INGEST_FAILED` with "지원하지 않는 파일 형식입니다" about a workbook Excel opens without complaint.
+     * The detector looked for the OOXML marker in the first 8 KB because this class asserted the entry is
+     * always first. In NAVER's export it is SECOND: nine entries, {@code xl/worksheets/sheet1.xml} first, and
+     * the marker's local header 15,413 bytes in.
+     *
+     * <p>Built synthetically here rather than from the real export — that file is seller data and does not
+     * belong in the repository. What matters is the SHAPE: a valid package whose marker sits past the old
+     * window.
+     */
+    @Test
+    @DisplayName("a workbook whose [Content_Types].xml is not the first entry is still a workbook")
+    void aWorkbookWithALateContentTypesEntryIsRecognised() throws Exception {
+        byte[] zip = zipWithLateContentTypes();
+
+        assertThat(zip[0]).isEqualTo((byte) 0x50);
+        // The shape that caused the refusal: nothing to find in the window the detector used to read.
+        assertThat(UploadFormat.of(java.util.Arrays.copyOf(zip, UploadFormat.SNIFF_BYTES)))
+                .isEqualTo(UploadFormat.UNKNOWN);
+        // Reading the stream, which is what production does, now finds it.
+        assertThat(UploadFormat.detect(new BufferedInputStream(new ByteArrayInputStream(zip))))
+                .isEqualTo(UploadFormat.XLSX);
+    }
+
+    @Test
+    @DisplayName("a big archive that never declares OOXML is still UNKNOWN — the longer look is not a loosening")
+    void aLargeArchiveWithoutTheMarkerIsStillUnknown() throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(out)) {
+            zos.putNextEntry(new java.util.zip.ZipEntry("notes/a.txt"));
+            zos.write(new byte[64 * 1024]);
+            zos.closeEntry();
+        }
+
+        assertThat(UploadFormat.detect(new BufferedInputStream(new ByteArrayInputStream(out.toByteArray()))))
+                .isEqualTo(UploadFormat.UNKNOWN);
+    }
+
+    @Test
+    @DisplayName("the longer look still rewinds — a workbook parses from byte zero afterwards")
+    void theZipLookRewindsToo() throws Exception {
+        byte[] zip = zipWithLateContentTypes();
+        BufferedInputStream in = new BufferedInputStream(new ByteArrayInputStream(zip));
+
+        assertThat(UploadFormat.detect(in)).isEqualTo(UploadFormat.XLSX);
+        assertThat(in.readAllBytes()).isEqualTo(zip);
+    }
+
+    /** A valid OOXML package whose marker entry is second and lands well past {@link UploadFormat#SNIFF_BYTES}. */
+    private static byte[] zipWithLateContentTypes() throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(out)) {
+            zos.putNextEntry(new java.util.zip.ZipEntry("xl/worksheets/sheet1.xml"));
+            // Incompressible, so the entry really occupies the window rather than deflating away to nothing.
+            byte[] filler = new byte[32 * 1024];
+            new java.util.Random(7).nextBytes(filler);
+            zos.write(filler);
+            zos.closeEntry();
+            zos.putNextEntry(new java.util.zip.ZipEntry("[Content_Types].xml"));
+            zos.write("<Types/>".getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+        }
+        return out.toByteArray();
+    }
+
     private static byte[] utf8(String s) {
         return s.getBytes(StandardCharsets.UTF_8);
     }

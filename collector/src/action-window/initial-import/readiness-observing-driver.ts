@@ -58,6 +58,10 @@ export class ReadinessObservingImportDriver implements ImportProbeDriver {
     return this.inner.highlightTarget(target);
   }
 
+  highlightAllCandidates(target: ImportTarget): Promise<number> {
+    return this.inner.highlightAllCandidates(target);
+  }
+
   clearTargetHighlight(): Promise<void> {
     return this.inner.clearTargetHighlight();
   }

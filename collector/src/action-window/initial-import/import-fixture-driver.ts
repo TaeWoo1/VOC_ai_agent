@@ -60,6 +60,10 @@ export interface ImportFixtureScript {
    * a reliability failure parks recoverably, and this one used to be swallowed into a silent teardown.
    */
   locateThrow?: Partial<Record<ImportTarget, string>>;
+  /** How many candidates `highlightAllCandidates` rings. Defaults to the scripted `locate` count. */
+  candidates?: Partial<Record<ImportTarget, number>>;
+  /** Successive `readSelectedScope` verdicts; the last repeats. Models a mismatch the seller then corrects. */
+  scopeSequence?: ScopeMatch[];
 }
 
 /** Deterministic 16-hex signature per target — opaque, and stable across a run so drift is detectable. */
@@ -94,8 +98,10 @@ export class ImportFixtureDriver implements ImportProbeDriver {
     this.script = script;
   }
 
-  async prepareSurface(): Promise<boolean | SurfaceProbeResult> {
-    this.calls.push("prepareSurface");
+  async prepareSurface(opts?: { present?: boolean }): Promise<boolean | SurfaceProbeResult> {
+    // Recorded distinctly: the AUTOMATIC re-probe must not raise the seller's window, and "it did not steal
+    // focus" is only checkable if the call says which kind it was.
+    this.calls.push(opts?.present === false ? "prepareSurface:quiet" : "prepareSurface");
     const index = this.prepareCount;
     this.prepareCount += 1;
     if (this.script.prepareHang) return new Promise<never>(() => {});
@@ -103,6 +109,8 @@ export class ImportFixtureDriver implements ImportProbeDriver {
     if (fail) throw new ReliabilityFailure(fail);
     return this.script.surface ?? true;
   }
+
+  private scopeReads = 0;
 
   /** How many times the surface was prepared — a re-open (after a close/park + re-check) increments it. */
   prepareCalls(): number {
@@ -154,6 +162,15 @@ export class ImportFixtureDriver implements ImportProbeDriver {
     );
   }
 
+  /**
+   * How many candidates the ring-them-all path finds. Defaults to whatever `locate` reported, so a test that
+   * scripts an ambiguous export gets a matching number of rings without saying it twice.
+   */
+  async highlightAllCandidates(target: ImportTarget): Promise<number> {
+    this.calls.push(`highlightAll:${target}`);
+    return this.script.candidates?.[target] ?? this.script.locate?.[target]?.count ?? 0;
+  }
+
   async armTargetObserve(target: ImportTarget): Promise<void> {
     this.calls.push(`observe:${target}`);
   }
@@ -167,6 +184,14 @@ export class ImportFixtureDriver implements ImportProbeDriver {
     // The required window is recorded, never the values read off the screen — the fixture mirrors the live
     // driver's rule that raw selected dates do not leave the read.
     this.calls.push(`scope:${required.start}..${required.end}`);
+    // A sequence models the run that is corrected: the gate says MISMATCH, the seller fixes the dates, and
+    // the NEXT read agrees. The last entry repeats once the sequence runs out.
+    const seq = this.script.scopeSequence;
+    if (seq && seq.length > 0) {
+      const at = Math.min(this.scopeReads, seq.length - 1);
+      this.scopeReads += 1;
+      return seq[at]!;
+    }
     return this.script.scope ?? "MATCH";
   }
 

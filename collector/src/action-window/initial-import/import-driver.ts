@@ -48,8 +48,12 @@ export interface ImportProbeDriver {
   /**
    * Is the seller on a usable review-management surface? A bare `false` maps to `UNSUPPORTED_STATE`;
    * a result carrying a `blockerCode` reports the semantic cause the seller can act on.
+   *
+   * `present` (default `true`) is whether to raise/focus the window first. The session passes `false` for
+   * the AUTOMATIC re-probe that watches a parked run: a probe that runs every few seconds must not steal
+   * focus from the seller who is in the middle of typing a password on that very window.
    */
-  prepareSurface(): Promise<boolean | SurfaceProbeResult>;
+  prepareSurface(opts?: { present?: boolean }): Promise<boolean | SurfaceProbeResult>;
 
   /**
    * What this surface requires — notably whether a separate search/apply control must be pressed. Read
@@ -66,6 +70,19 @@ export interface ImportProbeDriver {
    * locate and highlight, fail closed rather than highlight the wrong control.
    */
   highlightTarget(target: ImportTarget): Promise<LocateResult>;
+
+  /**
+   * Ring EVERY candidate for {@code target} and report how many were rung.
+   *
+   * Reached only when the locate found more than one and the engine decided this is a tie the SELLER can
+   * break — today, the export control (2026-09-02: an anchor reading 「다운로드」 and a button reading
+   * 「엑셀」, both real, neither nested in the other). Annotation only: it never clicks, and the artifact
+   * and scope gates still decide whether anything is ingested.
+   *
+   * A date or apply control is deliberately NOT eligible — those are read, not pressed-and-verified, so an
+   * ambiguous one still fails closed.
+   */
+  highlightAllCandidates(target: ImportTarget): Promise<number>;
 
   /**
    * Take the annotation off whatever is currently highlighted.

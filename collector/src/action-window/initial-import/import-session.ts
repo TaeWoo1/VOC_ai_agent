@@ -44,6 +44,7 @@ import { log } from "../../log";
 import type { ImportEffect, ImportSegmentEngine } from "./import-engine";
 import { IMPORT_TERMINAL_STAGES } from "./import-stages";
 import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-driver";
+import type { LocateResult } from "../engine";
 import { recordFailure, recordStage, recordTerminalFailure } from "./reliability-instrumentation";
 import { isReliabilityFailure } from "./reliability-failure";
 
@@ -67,6 +68,15 @@ export interface ImportSessionOptions {
    * continuously for the whole sitting.
    */
   panelPollMs?: number;
+  /**
+   * How often a PARKED run looks again by itself.
+   *
+   * Every recoverable park in this engine is waiting for something the runtime can simply go and read: the
+   * seller finishing a login, or the dates they are correcting on screen. Slow on purpose for the same reason
+   * `panelPollMs` is — a person is doing something, and a few seconds of latency costs nothing while a tight
+   * loop would evaluate in their page continuously.
+   */
+  parkPollMs?: number;
   /**
    * How long the panel keeps waiting for a press AFTER the run has finished.
    *
@@ -97,6 +107,7 @@ export class ImportSegmentSession {
   private readonly onStatePublished: (() => void) | undefined;
   private readonly rearmDelayMs: number;
   private readonly panelPollMs: number;
+  private readonly parkPollMs: number;
   private readonly terminalPanelBudgetMs: number;
   private readonly prepareStartGuardMs: number;
 
@@ -131,6 +142,12 @@ export class ImportSegmentSession {
   private pack: AwGuidancePack | null = null;
   private panelStopped = false;
   private panelLoopRunning = false;
+  /** Consumed by the next PREPARE: the automatic re-probe must not raise the seller's window. */
+  private nextPrepareQuiet = false;
+  /** The stage a park watcher is currently running for, or null when nothing is being watched. */
+  private parkWatchStage: string | null = null;
+  /** Latched by `attach()`'s release: no watcher may outlive the session that owns the page. */
+  private released = false;
 
   constructor(
     engine: ImportSegmentEngine,
@@ -147,6 +164,7 @@ export class ImportSegmentSession {
     this.started = engine.isStarted();
     this.onStatePublished = opts?.onStatePublished;
     this.rearmDelayMs = opts?.rearmDelayMs ?? 250;
+    this.parkPollMs = opts?.parkPollMs ?? 2_000;
     this.panelPollMs = opts?.panelPollMs ?? 500;
     // Fifteen minutes: long enough that a seller who steps away between two monthly exports still finds the
     // control, short enough that an abandoned sitting stops touching their page the same afternoon.
@@ -172,6 +190,9 @@ export class ImportSegmentSession {
     void this.watchPanel();
     this.unsubscribe = () => {
       this.panelStopped = true;
+      // A released session must stop looking at the seller's page — a park watcher left running would keep
+      // probing a finished run's window, exactly as a left-running panel poller would.
+      this.released = true;
       this.clearPrepareWatchdog();
       // Retire the current window's close watch so a late close after release cannot park a released run.
       this.surfaceCloseToken += 1;
@@ -398,6 +419,14 @@ export class ImportSegmentSession {
         this.publishState();
         return this.drive(next);
       }
+      if ("highlightAll" in effect) {
+        // The tie the seller breaks. Ring them all, then rest on the ordinary barrier — the runtime still
+        // only watches, and the file it is waiting for still has to pass the artifact and scope gates.
+        const rung = await this.driver.highlightAllCandidates(effect.highlightAll);
+        const next = this.engine.onCandidatesHighlighted(effect.highlightAll, rung);
+        this.publishState();
+        return this.drive(next);
+      }
       // `observe` rests at a seller barrier. The watcher runs detached so the drive chain unwinds and the
       // run is genuinely idle while the seller works on NAVER. Reaching the first barrier means the guidance is
       // up and the seller can act — the run reached them, which is the pipeline's terminal `READY` marker.
@@ -428,7 +457,11 @@ export class ImportSegmentSession {
         // neither resolves nor rejects (the driver's own open/settle guards catch a bounded stall sooner, with a
         // specific failure state).
         this.armPrepareWatchdog();
-        const res = await this.driver.prepareSurface();
+        // Set by the park watcher for its automatic re-probe, and consumed exactly once so a later PREPARE
+        // driven by a seller press still raises the window the way it always did.
+        const quiet = this.nextPrepareQuiet;
+        this.nextPrepareQuiet = false;
+        const res = await this.driver.prepareSurface({ present: !quiet });
         // PREPARE produced a result — the run did not go silent, so cancel the watchdog. A prepare that never
         // resolves never reaches here, and the watchdog is what catches that. An explicit stall is a
         // ReliabilityFailure the driver threw, cleared in `onDriveError`.
@@ -555,6 +588,106 @@ export class ImportSegmentSession {
     return BARRIER_STAGE_FOR[target];
   }
 
+  /* ── the park watcher ──────────────────────────────────────────────────────── */
+
+  /**
+   * **A parked run looks again by itself.**
+   *
+   * Called from every publish, so a park cannot be entered without a watcher and a park that has been left
+   * cannot keep one. At most one loop runs: it owns `parkWatchStage` for its whole life and re-evaluates on
+   * the way out, so a run that moves from one park to another is picked up without ever having two watchers.
+   *
+   * Why this exists: on 2026-09-02 a live run parked 0.2 SECONDS after the window opened — the seller was
+   * still logging in, which is not an unusual state but the normal first one — and then waited for a human to
+   * press 「다시 확인」. After the scope gate said `MISMATCH` it waited again, while the seller corrected the
+   * dates in front of it. Both waits were for information the runtime could go and read, and the seller had
+   * no way to know it had stopped looking.
+   */
+  private maybeWatchPark(): void {
+    if (this.released) return;
+    if (this.parkWatchStage !== null) return; // a loop owns it and re-evaluates when it exits
+    const stage = this.engine.currentStage();
+    if (!AUTO_WATCHED_PARKS.includes(stage)) return;
+    this.parkWatchStage = stage;
+    void this.watchPark(stage);
+  }
+
+  /**
+   * Watch ONE park until the run leaves it.
+   *
+   * The two parks want different things watched, and the difference is not cosmetic:
+   *
+   *  - **session / surface** — re-probe on a timer, QUIETLY. The probe is what tells us the seller reached
+   *    the review screen; raising their window every couple of seconds while they type a password into it
+   *    would be worse than the wait it replaces.
+   *  - **scope, on a surface with an apply control** — wait for the seller's own 조회 press, then read. The
+   *    scope read reads the date INPUTS, which hold a typed value whether or not it has been applied; a
+   *    match read before the press would pass a window the grid is not showing. Where the surface has no
+   *    apply control there is nothing to wait for and the timer is the whole story.
+   *
+   * Everything here is a read. No branch presses, submits, downloads or consents — that is what allows a
+   * watcher at all (`docs/sellerops_live_approval_contract.md` §5b: AUTO_READ may advance guidance, never an
+   * action barrier).
+   */
+  private async watchPark(stage: string): Promise<void> {
+    try {
+      while (!this.released && !this.surfaceClosed && this.engine.currentStage() === stage) {
+        const awaited = await this.awaitParkSignal(stage);
+        if (!awaited) continue;
+        if (this.released || this.surfaceClosed || this.engine.currentStage() !== stage) return;
+        if (this.autoBusy) continue;
+        this.autoBusy = true;
+        try {
+          // The re-probe must not steal the window; the scope re-read never opens one.
+          this.nextPrepareQuiet = stage !== "SCOPE_BLOCKED";
+          const next = this.engine.autoRetryPark();
+          if (next === "NONE") return;
+          log("aw_import_park_auto_retry", { stage });
+          this.publishState();
+          await this.drive(next);
+        } catch (e) {
+          this.onDriveError(e);
+        } finally {
+          this.nextPrepareQuiet = false;
+          this.autoBusy = false;
+        }
+      }
+    } finally {
+      this.parkWatchStage = null;
+      // The run may have parked somewhere else while this loop was working. Re-evaluating here is what makes
+      // "one watcher, always the right one" true without a second timer to reconcile.
+      this.maybeWatchPark();
+    }
+  }
+
+  /** Wait for whatever this park is waiting on. `false` means "nothing yet — go round again". */
+  private async awaitParkSignal(stage: string): Promise<boolean> {
+    if (stage === "SCOPE_BLOCKED" && this.engine.requiresApply()) {
+      // Re-locate first: the block cleared the annotation, and the observer binds to what is tagged.
+      const located = await this.driver.locateTarget("apply_range").catch(() => ({ count: 0 }) as LocateResult);
+      if (located.count === 1) {
+        await this.driver.armTargetObserve("apply_range").catch(() => undefined);
+        const acted = await this.driver.waitForTargetAction("apply_range").catch(() => false);
+        if (acted) return true;
+        // Not yet. Pause before re-arming for the same reason `watchBarrier` does: with a driver that
+        // answers instantly this would be a hot loop, and a re-arm is never a hot path.
+        await this.pause(this.rearmDelayMs);
+        return false;
+      }
+      // No single apply control to watch — fall back to the timer rather than stop watching.
+    }
+    await this.pause(this.parkPollMs);
+    return true;
+  }
+
+  /** A pause that can never keep the process alive — the same rule the prepare watchdog follows. */
+  private pause(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      timer.unref?.();
+    });
+  }
+
   private async fatalCleanup(): Promise<void> {
     this.clearPrepareWatchdog();
     // Not swallowed silently: a cleanup that fails during fatal teardown is still worth a sanitized line, so a
@@ -580,6 +713,9 @@ export class ImportSegmentSession {
       }
     }
     this.transport.send({ kind: "aw_view", view: this.engine.view() });
+    // A park is entered and left through here like every other transition, so this is the one place that can
+    // guarantee a parked run is being watched and a moving one is not.
+    this.maybeWatchPark();
     // The seller is in the marketplace window, so the same transition is drawn there too. Queued rather
     // than awaited: publishing state must not wait on a page evaluate, and it must not fail because of one.
     this.queuePanelRender();
@@ -741,6 +877,12 @@ export class ImportSegmentSession {
  * The barrier stage the engine sits at while resting on one target. Mirrored here (rather than exported from
  * the engine) so the session can ask "is this barrier still open" without reaching into engine internals.
  */
+/**
+ * The parks a watcher looks after. Every one is recoverable and its repair is a READ — which is what makes
+ * automatic re-observation legitimate rather than an act taken on the seller's behalf.
+ */
+const AUTO_WATCHED_PARKS: readonly string[] = ["SESSION_BLOCKED", "SURFACE_BLOCKED", "SCOPE_BLOCKED"];
+
 const BARRIER_STAGE_FOR: Readonly<Record<ImportTarget, string>> = {
   start_date: "WAIT_FOR_START",
   end_date: "WAIT_FOR_END",
