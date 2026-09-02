@@ -637,10 +637,24 @@ export class ConversationService {
       const prior = stillPending.find((p) => p.actionType === a.actionType && (p.channelCode ?? null) === (a.channelCode ?? null));
       return prior ? { ...a, requestedAt: prior.requestedAt } : a;
     });
+    /**
+     * <b>A finished collection owns its own turn's freshness</b> (Presentation Closure v1 §1).
+     *
+     * The resumed turn re-plans the original question, so the read it makes is newer than the sync it
+     * just consumed and the freshness rule correctly asks for the next collection — which arrived
+     * directly under the receipt as 「오늘 12:43 이후 아직 확인하지 못했어요 · 최신 상태 확인」, a card
+     * asking for the step the seller had just completed, beside the proof that they completed it.
+     *
+     * Nothing about freshness or coverage is recomputed here: the verdict, the as-of and the channel
+     * state are exactly what they were. What this drops is the SECOND rendering of one channel's
+     * collection state in the one turn that already carries its receipt — and only for the channels a
+     * receipt names. The next turn asks the question again and gets the answer the contract gives it.
+     */
+    const settled = withoutSettledCollectionSteps(stamped, receipts);
     // A replan runs a specialist twice and would show the same list twice; the later read is the one kept.
     // The acquisition receipts lead: the seller pressed 「가져오기」 and the first thing they should read
     // under the sentence is what that run brought in, before the rows it was collected for.
-    const artifacts: Artifact[] = [...receipts, ...dedupeLists(stamped)];
+    const artifacts: Artifact[] = [...receipts, ...dedupeLists(settled)];
     let pendingPrepared: PendingPreparedAction | null = view.pendingPrepared;
     let headline: string | null = null;
     // A PREPARE with nothing to point at answers with the question alone (Response Hygiene v1 §2/§6):
@@ -2472,6 +2486,26 @@ async function syncCompleted(bundle: SpringClientBundle, pending: PendingHumanAc
     // The run's own id — the only thing the summary needs, because the backend answers what it did.
     runId: latest?.id ?? null,
   };
+}
+
+/**
+ * The artifacts of a completion turn, minus the collection step for a channel this turn already
+ * reports (Presentation Closure v1 §1).
+ *
+ * Only REVIEW_IMPORT, only channels a receipt names, and only when there is a receipt: a turn with
+ * nothing to show about the run keeps the step, because then the card is the only thing that says
+ * where the collection stands. No freshness or coverage value is read here — this decides which of two
+ * renderings of one already-computed state survives in one turn.
+ */
+export function withoutSettledCollectionSteps(
+  artifacts: readonly Artifact[], receipts: readonly AcquisitionResultArtifact[],
+): Artifact[] {
+  if (receipts.length === 0) return [...artifacts];
+  const collected = new Set(receipts.map((r) => r.channelCode.toUpperCase()));
+  return artifacts.filter((a) => !(
+    a.type === "HUMAN_ACTION_REQUIRED" && a.actionType === "REVIEW_IMPORT"
+    && a.channelCode != null && collected.has(a.channelCode.toUpperCase())
+  ));
 }
 
 /** The last REVIEW_LIST row of a channel the thread has shown — the object an explanation is about. */

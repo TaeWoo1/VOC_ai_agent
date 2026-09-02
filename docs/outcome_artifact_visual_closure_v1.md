@@ -135,10 +135,6 @@ refusing to pair. Asking is how the page finds out; the browser logs any non-2xx
 - **Two ratings-only reviews of the same product on the same day still share a row name.** The facts that
   could separate them further are the date (already on the meta line) and nothing else; putting three
   facts in the title makes it a caption rather than a name. Left as is.
-- **The completion turn re-raises its own step.** After the resume the re-planned turn asks for the next
-  collection (「오늘 12:43 이후 아직 확인하지 못했어요」) directly under the receipt. That is the freshness
-  routing being correct — the read IS newer than the sync — but a card asking for the step the seller
-  just completed sits oddly beside its receipt. Frozen lane; reported.
 - **The receipt is lost when the follow-up read fails.** `compose`'s FAILED branch returns no artifacts,
   exactly as it already dropped the completion prose. Carrying it through is a behaviour change to the
   failure path and is out of this package's scope.
@@ -146,3 +142,52 @@ refusing to pair. Asking is how the page finds out; the browser logs any non-2xx
   of a real waiting turn with its `requestedAt` moved before the real run finished, so the resume matches
   that run), and the QA-only JVM quota raise on the local backend. No product default changed, nothing
   written to the Demo Org.
+
+---
+
+## §5 Presentation Closure (2026-09-02, same day)
+
+**The completion turn owns its own freshness rendering.** §1's "reported, not fixed" is closed. The
+resumed turn re-plans the original question, so the read it makes is newer than the sync it just
+consumed and the freshness rule correctly asks for the next collection — which arrived as
+「오늘 12:43 이후 아직 확인하지 못했어요 · 최신 상태 확인」 **directly under the receipt**. The persisted
+turn carried `ACQUISITION_RESULT` and `HUMAN_ACTION_REQUIRED/REVIEW_IMPORT` together and waited on it:
+the step the seller had just completed, beside the proof that they completed it.
+
+`withoutSettledCollectionSteps(artifacts, receipts)` drops it. **No freshness or coverage value is
+recomputed** — the verdict, the as-of and the channel state are exactly what they were, and what this
+decides is which of two renderings of one already-computed state survives in one turn. It is scoped
+three ways: only `REVIEW_IMPORT`, only channels a receipt names, and only when a receipt exists (a
+completion with nothing to show keeps its card, because then the card is the only thing that says where
+the collection stands). Another channel's step in the same turn is untouched.
+
+The turn no longer waits on a step it is not drawing: `humans`, `pendingHumanActions`, the status and
+the 「계속 확인하기」 chip are all derived from the same artifact list, so they follow. **The next turn
+asks again and gets the contract's answer** — live, 「네이버 리뷰 최신이야?」 answers
+「네이버 스마트스토어 리뷰 · 오늘 12:43 기준 / 지금 보이는 목록은 그때까지 확인한 것입니다」 with the
+offered 「최신 상태로 갱신」. And because the channel is no longer raised as a step, its as-of line
+returns to the list footer where it belongs: the fact is stated, the demand to redo it is gone.
+
+**The failure path was checked from a fixture and left alone.** `done.length === 0` renders the sentence
+(「수집이 실패했습니다. 채널 연결 화면에서 상태를 확인한 뒤 다시 시도해 주세요.」), the step card with its
+primary and its manual fallback, `WAITING_HUMAN`, and the 「계속 확인하기」 chip — the fact and the
+seller's next action, both present, nothing silently disappearing. A harness test now pins all of it
+(and that no receipt is claimed for a run that failed). **No change was made.**
+
+**Live proof, 1440 / 1366 / 1152** — three screens, identical at every width:
+
+| | |
+|---|---|
+| acquisition completion | receipt present · **step absent** · no 「최신 상태 확인 / 아직 확인하지 못했어요」 in that turn |
+| the next turn's freshness question | recomputed as before — as-of sentence + offered refresh, step present |
+| a collection that did not complete | sentence + step card + 「계속 확인하기」 + 「파일로 직접 올리기」, receipt absent |
+
+`agent-runtime` **826** tests · 0 failures · typecheck clean; `frontend` unchanged this round. Sentinel
+occurrences in the rendered page **0**, AA violations **0**, horizontal scroll 0, off-host requests 0.
+
+**Honest note on the failure screen.** Every account in the Demo Org has a SUCCESSFUL review run newer
+than its last failed one, so `syncCompleted` cannot select a failure-only match there today — the live
+screenshot is the neighbouring `아직 수집이 끝나지 않았습니다` branch, which renders the **same surface**
+(same card, same escapes, same chip) and differs only in its sentence. That sentence is what the harness
+test pins, against a real FAILED run row. Forcing a live failure would mean starting a real marketplace
+collection, which this package does not do.

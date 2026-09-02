@@ -1217,9 +1217,21 @@ unit(같은 수 · sentinel 0)과 **source scan**(`agent-runtime/src` 어느 .ts
 frontend **2,652**/223 files · 실패 0 · typecheck clean(직전 커밋에 있던 `freshnessUx` cast 오류도 함께
 수정), 라이브 브라우저 A–E × 1440/1366/1152 — **AA 위반 0 · 가로 스크롤 0 · off-host 0**.
 **마켓플레이스 호출 0 · WRITE 0 · DB 변경 0 · 마이그레이션 0** ⇒ evidence 행 없음. **고치지 않고 보고**:
-같은 상품·같은 별점·같은 날짜의 본문 없는 리뷰 둘은 여전히 같은 이름, 완료 턴이 자기 step을 다시 올리는
-것(freshness routing이 맞게 동작한 결과), 실패 경로에서 receipt가 사라지는 것, QA 발판(폭당 대화 fixture ·
-로컬 백엔드 JVM 예산 상향))
+같은 상품·같은 별점·같은 날짜의 본문 없는 리뷰 둘은 여전히 같은 이름, 실패 경로에서 receipt가 사라지는 것,
+QA 발판(폭당 대화 fixture · 로컬 백엔드 JVM 예산 상향). **§5 Presentation Closure(같은 날)**: 그 「완료 턴이
+자기 step을 다시 올린다」를 닫았다 — resume이 원래 질문을 재계획하면서 만든 읽기가 방금 소비한 sync보다
+새로우므로 freshness 규칙이 다음 수집을 **맞게** 요구했고, 그 카드가 **영수증 바로 아래**에 섰다(영속된 턴이
+ACQUISITION_RESULT와 HUMAN_ACTION_REQUIRED/REVIEW_IMPORT를 함께 들고 WAITING_HUMAN이었다). `withoutSettledCollectionSteps`가
+그 **두 번째 렌더링만** 떨어뜨린다 — freshness·coverage 값은 하나도 재계산하지 않고, REVIEW_IMPORT만 · receipt가
+이름 붙인 채널만 · receipt가 있을 때만(보여줄 것이 없는 완료는 카드를 지킨다)이며 같은 턴의 **다른 채널 step은
+그대로**다. status·pendingHumanActions·「계속 확인하기」 칩은 같은 목록에서 파생되므로 따라오고, **다음 turn은
+계약대로 다시 계산한다**(라이브: 「최신이야?」 → 「오늘 12:43 기준 …」 + 제안된 「최신 상태로 갱신」). step에서
+빠진 채널의 as-of 줄은 목록 footer로 돌아온다 — 사실은 말하고 다시 하라는 요구만 사라진다. **실패 경로는 실제
+fixture로 확인하고 무변경**: 문장 + step 카드 + 「계속 확인하기」 + 「파일로 직접 올리기」가 전부 있고 실패 run에
+receipt를 주장하지 않는다(harness 테스트가 고정). 라이브 3폭 — 완료 턴 step **없음** · 다음 turn freshness 재계산
+**있음** · 미완료 턴 surface 온전, sentinel 0 · AA 0 · off-host 0. runtime **826**. 정직 보고: Demo Org의 모든
+계정이 마지막 실패보다 새로운 성공 run을 갖고 있어 라이브에서 실패 분기를 고를 수 없다 ⇒ 스크린샷은 같은
+surface를 그리는 「아직 수집이 끝나지 않았습니다」 분기이고, 실패 문장 자체는 harness가 실제 FAILED row로 고정한다)
 
 **Demo org / channel knowledge:** `docs/demo_org_and_channel_knowledge_v1.md` owns the canonical Demo
 Org's **provenance contract** (`REAL` / `DEMO_SEED` / `VERIFY_FIXTURE`, default reads exclude synthetic),
