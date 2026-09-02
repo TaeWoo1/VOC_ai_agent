@@ -1226,6 +1226,8 @@ function toVocItem(review: MockNaverReview, signalType: string): OperatorVocItem
     // visible under every other card that surfaces the same review.
     triageDisposition: mockTriageFor(review, actionRef),
     hasReplyPreparation: mockHasReplyPreparation(actionRef),
+    // The mock store keeps drafts but no approvals, so a prepared row is one awaiting one.
+    replyWorkState: mockHasReplyPreparation(actionRef) ? "AWAITING_APPROVAL" : "DRAFT_NEEDED",
     // What the row is ABOUT, per the stored analysis — context, not a queue rule. Null for a
     // row nothing analyzed, which the card renders as no chip at all.
     category: review.category,

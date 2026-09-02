@@ -62,9 +62,19 @@ export function VocItemReplyPrep({
   onOutcomeRecorded,
   onLocalWork,
   replyRuntime,
+  headingLevel = 4,
 }: {
   accountId: string;
   actionRef: string;
+  /**
+   * The heading level 「답변 준비」 renders at.
+   *
+   * The panel is mounted inside three different outlines — a worklist row, the record's 상세 pane, and
+   * the 답변 작업 screen where it is the page's only section. A fixed `h4` was right in the first two
+   * and skipped h2/h3 in the third, which is a real reading-order defect (axe: heading-order), not a
+   * style preference. The level is the caller's to state because only the caller knows the outline.
+   */
+  headingLevel?: 2 | 3 | 4;
   /**
    * The reply-submission runtime the guided flow drives, when this build HAS one.
    *
@@ -465,11 +475,13 @@ export function VocItemReplyPrep({
     }
   }
 
+  const Heading = `h${headingLevel}` as "h2" | "h3" | "h4";
+
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3 rounded-xl bg-canvas p-3">
-      <h4 id={headingId} className="text-sm font-semibold text-ink">
+      <Heading id={headingId} className="text-sm font-semibold text-ink">
         답변 준비
-      </h4>
+      </Heading>
 
       {/* The review, in full. Not the list's 60-char preview — an operator cannot answer a
           complaint they can only glimpse. Sensitive spans arrive already tokenized by the
@@ -549,8 +561,16 @@ export function VocItemReplyPrep({
             aria-disabled={!approvable || working || unavailable}
             aria-busy={busy === "approving"}
             onClick={() => void decide("APPROVED")}
-            className={`rounded-lg px-2.5 py-1 text-sm font-semibold ${
-              approvable && !working ? "bg-brand/10 text-brand-700" : "bg-canvas text-muted opacity-40"
+            /* THE primary action of every reply-work surface (Approval Path v1 §4). It was a tint —
+               `bg-brand/10 text-brand-700` — beside a neutral 초안 저장, so the one irreversible-ish
+               decision on the screen carried no more weight than saving text, and on the 리뷰 detail it
+               was the quietest control in the panel. Solid `brand-700` is the product's measured
+               primary (5.41:1, 7.38:1 on hover). It never competes with 복사: 복사 exists only once an
+               approval stands, and this button is gone by then. */
+            className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+              approvable && !working
+                ? "bg-brand-700 text-white hover:bg-brand-800"
+                : "bg-canvas text-muted opacity-40"
             }`}
           >
             승인

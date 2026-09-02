@@ -85,6 +85,18 @@ export function reviewWord(channelCode?: string | null): string {
 }
 
 /**
+ * How one review's rating reads — the number and its stars, and 「평점 없음」 when the channel sent
+ * none. One definition: the record's list, its detail and the 답변 작업 screen all print this, and a
+ * second copy is how ★0 and 「평점 없음」 end up meaning the same thing on two screens.
+ */
+export function ratingLabel(rating: number | null | undefined): string {
+  if (rating === null || rating === undefined) {
+    return "평점 없음";
+  }
+  return `${"★".repeat(rating)}${"☆".repeat(Math.max(0, 5 - rating))} ${rating}점`;
+}
+
+/**
  * The entry's label, carrying the count when it is known.
  *
  * A count that failed to load, or has not arrived yet, drops out of the label — it never becomes a

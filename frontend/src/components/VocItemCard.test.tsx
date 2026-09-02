@@ -79,6 +79,7 @@ function naverReviewItem(over: Partial<Omit<OperatorVocItem, NaverInvariant>> = 
     actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
     triageDisposition: null,
     hasReplyPreparation: false,
+    replyWorkState: "DRAFT_NEEDED",
     category: "배송",
     hasReportedSubmission: false,
     ...over,
@@ -126,6 +127,7 @@ function cafe24CommunityItem(
     // attach. Pinned here with its twins rather than defaulted, so a fixture cannot claim
     // reply work on a row that can never carry any.
     hasReplyPreparation: false,
+    replyWorkState: "DRAFT_NEEDED",
     // The community store's real column — this row is the only one of the two that has one.
     replyStatus: over.replyStatus ?? "PENDING",
   };

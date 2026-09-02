@@ -605,6 +605,60 @@ intent 바인딩(계정·채널·identity·operation·mode·만료·단일 사�
 「내가 답해야 할 문의」는 작업 큐로 **명시 토큰**으로 갈라지며, ROWS는 항상 artifact + working set을 만들어 refine 체인이
 직전 집합 위에 선다; judge 꺼짐은 org당 한 번만 묻는다. Text-to-SQL 0 · 마켓플레이스 0 · WRITE 0 · 마이그레이션 0. **§26 Freshness UX v1(08-29)**: 네 사실(마지막 관측 시각 · 요청 창 · freshness 판정 · acquisition capability)을 분리 — 답할 수 있으면 결과 먼저 + 「채널 · 언제 기준」 + 선택적 [최신 상태로 갱신](DONE), 「오늘」류만 필수 단계(WAITING_HUMAN)이고 채널당 문장 하나; stale 0은 「0건」이 아니고 플래너는 말하지 않은 「오늘」을 만들지 않는다(v5). **§27 Chat UI v1(08-29)**: 홈 = 대화(transcript 독립 스크롤 · composer viewport bottom dock · KPI 띠 → 빈 스레드의 muted 한 줄 · 스레드 목록은 사이드바 · 예시 프롬프트는 빈 대화에서만); composer는 ArrowUp/Stop 한 자리이고 **Stop은 실제**다 — 스트림 종료 → `OperatorBudget.cancel()`로 다음 단계 0(진행 중 단계는 끝남) · `CANCELLED` 턴 영속 · 되돌렸다고 말하지 않는다; 한 대화의 턴은 직렬화. **§28 Chat Motion v1(08-29)**: `motion`으로 절제된 motion(150–250ms ease-out, 메시지 fade+8px, artifact/progress/칩 layout, send↔stop·copy↔check 제자리 crossfade, 사이드바 height, reduced-motion 존중, 기존 스레드 재생 0) + composer dock 기하(20px 바닥, 위 fade 하나). **§29 Knowledge Context v1-A(08-30)**: 회사 운영 기준이 Agent에 닿는다 — READ tool `search_org_knowledge`(기존 `/api/org-knowledge/search`, 필요한 turn에서만 검색·프롬프트 주입 0)로 POLICY need를 읽고, 「보관하고 있지 않다」 고정 부정문은 삭제(정책 있으면 인용 · 없으면 「등록된 배송 기준이 아직 없습니다」+`KNOWLEDGE_ENTRY→/settings/policies` 선택 단계); 라이브가 드러낸 planner 오라우팅(PRODUCT_OPS 상품 되묻기 · REPORT_OPS 재진술)은 `policyRouted`(POLICY-only ⇒ INQUIRY_OPS 단독)와 `needScopeOf`(POLICY는 항상 ORG scope)로 결정론 닫음, 검색 query는 문장이 아니라 판매자의 **명사**; draft lane은 `InquiryDraftComposer`가 계속 authoritative이고 `DraftArtifact.evidenceSummary`가 lane별 **개수만** 싣는다; `InquiryAnswerMemoryHook`은 SELLER/MODEL만 기억(`SELLER_APPROVED_FALLBACK`·`RULE` 승인은 memory 0); `RuleBasedDraftProvider` 템플릿 삭제(카테고리만, 본문 ""·`NO_ANSWER_BASIS`) + `SpringDraftProvider`는 retriever preview에 passage 0이면 모델 미호출, `performRecord`는 본문 없는 승인 거절; judge digest는 passage 본문 대신 제목·`judgeStatement`; provenance/memory strength는 tie-break만(`tieBreakRank`). 마이그레이션 0 · 마켓플레이스 0 · WRITE 0. **§30 v1-A closure(08-30)**: 문의 초안 drafter는 **`InquiryDraftComposer` 하나** — 레거시 `/api/agent-runs` 두 lane(`/agent`의 초안 버튼·미답변 처리 shortcut, 도달 가능)은 `ComposerDraftProvider`→`DraftPreparer`로 **위임**(propose→`draft/generate`, 문의 화면과 같은 호출)하고 title/body-only 모델 seam(`SpringDraftProvider`·`POST /api/agent/inquiry-draft`·`AgentDraftController`·ungrounded overload)은 **삭제**(구조 테스트); 초안 없음은 빈 본문(+백엔드 문장)이고 승인은 비활성·`NO_DRAFT_TEXT`; restart-resume는 규칙 재생성 대신 **저장 버전을 읽어 fingerprint로 확인**(`DRAFT_CHANGED`). scope 문구: 특정 문의 턴이 WORKLOAD intent라 org 큐를 읽고 gate에 거절돼 「전체 집계뿐이라 이 상품의…」가 붙던 것 — entity 규칙이 intent 토큰보다 앞서고 `RejectedEvidence.needEntity`로 문장이 문의/상품/조직을 구분; 「AI 초안이 준비돼 있습니다」는 phase가 아니라 `locator.draftVersion`이 말한다. 실제 Demo Org 문의에서 GROUNDED는 retriever absence gate 때문에 미도달(harness·backend 테스트로 증명). 마이그레이션 0 · 마켓플레이스 0 · WRITE 0. **§31 Seller Context v1-B(08-30)**: 회사가 어떤 곳인지 한 문단(≤500자)을 **판매자만** 쓰는 별도 org profile(V87 `organization_profile`, 답변 스타일·정책 테이블과 분리)로 두고, 초안 composer는 basis 판정 **뒤** 모델 경로에서만 「회사 정보」 섹션(user turn · 사실 아님 footer)으로 읽으며 `companyContextUsed`는 플래그뿐 — **business_summary만으로 GROUNDED 불가**(판정이 그것을 보지 않는다, fence 테스트). Agent lane은 닫힌 need `COMPANY_PROFILE` + READ tool `get_seller_profile` 하나로 필요한 turn에서만 읽고(POLICY와 같은 ORG 라우팅) 목록·개수·리뷰 turn은 읽기 0, planner prompt는 문장 하나(+307자)·catalogue 한 줄이며 상시 inject 0; judge는 라벨·길이만. 화면은 `/settings/company` 하나. 마이그레이션 1 · 마켓플레이스 0 · WRITE 0.
 
+**`docs/review_approval_path_v1.md`** (Review Approval Path v1 — 2026-09-03. 새 기능이 아니라 **이미
+동작하는 승인 경로에 도달할 수 없던 문제**만 닫는다. Template Settings · selector · Grounded Drafting ·
+Chat semantics · visual system · approval/write architecture · Guided Reply execution driver는 **freeze**.
+**직전 안내가 실제 UI와 불일치한 이유를 먼저 잰다** — 「내 답변 작업 3번째 카드」의 각 조각은 DOM에
+있었고 화면으로서는 없었다: `/reviews/{account}` 문서 **5,587px**(뷰포트 900)에서 그 제목은 y=**3,420**,
+첫 「승인」은 y=**5,425**(6 화면 아래), 첫 화면은 리뷰 **4,455개** 기록이며 대상 `c329471c`는 tier가
+`참고`라 「확인 필요순」 1페이지에 **없다**. 「3번째」라는 좌표도 화면에 번호로 적혀 있지 않다 —
+**판매자가 셀 수 없으면 좌표가 아니다.** ⇒ 결함은 승인 기능의 부재가 아니라 「어느 리뷰인지 아는 상태」
+에서 「그 리뷰의 승인 버튼」까지 가는 길의 부재. **§1 주소가 진입점**: 기존 exact read를 재사용해 라우트
+둘 — `/reviews/:accountId/reply/:reviewId`(모든 reply 엔드포인트가 이미 받는 쌍, 읽기 1회)와
+**`/reviews/reply/:reviewId`**(대화는 리뷰 id만 들고 있으므로 계정은 wire가 아니라 화면이 org-scoped
+exact read로 푼다 — 두 번째 식별자를 계약에 넣어 읽기 한 번을 아끼는 것은 잘못된 교환이고, 남의 org id는
+그 읽기에서 404라 삭제된 리뷰와 같은 실패로 착지한다). `actionRef`는 계약대로 **파싱하지 않는다**.
+**§2 배치를 뒤집었다** — 「내 답변 작업」이 기록 **아래**에 있던 이유(「기록의 후속 조치이지 무엇을 봐야
+하는지의 두 번째 목록이 아니다」)는 **그것이 무엇인가**에 대해 여전히 참이고 **어디에 놓이는가**에
+대해서는 틀린 결론이었다: y **3,420 → 161**, 세 폭 전부 fold 위, 목록보다 먼저. 그리고 업무 상태에
+이름이 생겼다 — 행의 chip 셋(`미답변`=채널이 한 말 · `기타`=무엇에 관한 것인지 · `답변함으로 기록`=운영자
+보고) 중 어느 것도 「어느 행이 내 승인을 기다리나」에 답하지 않았다 ⇒ `ReviewReplyWorkState`
+{`DRAFT_NEEDED`·**`AWAITING_APPROVAL`**·`APPROVED`}, `null`은 네 번째 상태가 아니라 reply work를 질 수
+없는 행(capability 부재는 진술의 부재). **`hasReplyPreparation`의 사본이 아니다** — 그 boolean은 초안 ·
+서 있는 승인 · **철회된** 승인을 합집합하고(패널 mount에는 정확히 옳다), 「승인을 기다린다」와 「이미
+승인했다」는 반대 지시다 ⇒ 배치 쿼리 **하나** 추가(`findReviewIdsWithStandingApproval`, state=APPROVED,
+인덱스 조회 1회/페이지). 정렬·개수는 **표현 규칙**(승인 대기→초안 필요→승인됨, 같은 상태 안 서버 순서
+유지; 제목은 **승인 대기만** 세고 0은 렌더 0 — 세 행 위의 「3건」은 판매자가 지금 할 수 없는 일을 센다).
+**§3 작업 화면**: 상품 · ★ · 작성일 · 고객 문장 · 초안 · 저장 · **승인**이 한 화면이고 목록·필터·정렬·
+페이지네이션 **0**, AI tier/분류는 **지우지 않고 접는다**(정렬된 이유이지 답변의 근거가 아니다);
+`ReplyWorkControls`는 기록·큐가 mount하는 **그 클러스터 그대로**라 두 번째 reply flow가 없고 이 화면이
+얻은 write는 **0**(승인 경계·append-only version·fingerprint 무변경, dirty면 저장 전 승인 불가).
+부수로 `VocItemReplyPrep`의 heading level이 caller 소유가 됐다(고정 `h4`가 이 화면에서 h2/h3를 건너뛰던
+axe `heading-order` — 취향이 아니라 읽기 순서 결함). **§4 primary**: 「승인」이 틴트(`bg-brand/10`)에서
+측정된 solid primary(`brand-700` 5.41:1 · hover `brand-800` 7.38:1)로 — 되돌리기 어려운 유일한 결정이
+텍스트 저장과 같은 무게를 지고 있었다; 「복사」와 경쟁하지 않는다(복사는 승인이 선 뒤에만 있고 그때 이
+버튼은 사라진다). **sticky는 쓰지 않았다 — 필요 없었다**: 1440/1366/1152 **전부 문서가 뷰포트를 넘지
+않고** 승인 y=**478**. **§5 chat handoff**: `conversationWriteFence` **무변경**이고 승인을 대화 안으로
+들이지 않았다 — 바뀐 것은 리뷰 action artifact 둘의 `to` 문자열(`"/reviews"` → `/reviews/reply/{id}?from=chat`)
+과 FE 문구(「리뷰 화면에서 확인」 → 「이 리뷰의 답변 작업 열기」)뿐. `from=chat`은 상태가 아니라 「돌아갈
+길을 제시해도 된다」는 신호이고 그 대화는 `/`의 org-네임스페이스 포인터가 이미 복원한다(새 배관 0);
+기록에서 들어오면 그 링크는 렌더되지 않는다(가 본 적 없는 곳으로 가는 길은 거짓이다). fence는 **소스
+스캔** — 두 리터럴이 helper를 쓰고 bare `/reviews`를 쓰지 않으며 `routeSend`가 approve/publish/execute/
+outcome에 이름으로도 닿지 않는다. **§6 라이브 QA**(재기동 후 실제 Demo Org, 대상 `c329471c` 초안 v3
+`44627df4…`): 대화 진입 → **한 번의 navigation** → exact target → v3 초안 표시 → 승인 활성·solid,
+1440/1366/1152 동일; 기록 화면은 「승인 대기 2건」과 대상이 **첫 행**. **AA 위반 3폭 전부 0** · 가로
+스크롤 0 · 콘솔 오류 0 · off-host 0. **판매자 클릭 2회**(링크 1 + 승인 1, 스크롤 0) — 전에는 1회 +
+3,420px 스크롤 + 카드 세기. 사후 확인: 초안 head **v3 무변경** · 대상 approval **0** · submissionRef
+**0** · `RESPONSE_NEEDED` 유지. backend **3,669** · runtime **829** · frontend **2,685** · 실패 0.
+**마켓플레이스 호출 0 · WRITE 0 · 모델 0 · 마이그레이션 0 · 승인 0** ⇒ evidence 행 없음. **계약이 바뀌어
+테스트 1건을 다시 썼다**(「the page ends with 내 답변 작업」 → DOM position으로 「목록보다 먼저」).
+**고치지 않고 보고**: 기록 화면의 첫 승인 버튼은 1152×720에서 fold 아래(y=746/720 — 큐를 접는 것은 이
+패키지가 하지 않기로 한 워크리스트 재설계이고 보장된 경로는 작업 화면이다), 작업 큐 행의 첫 줄은 여전히
+상품명, 행마다 패널 mount(행당 읽기 1회) 유지, `frontend/CLAUDE.md`가 그 workstream에 금지한
+`backend/**` 수정을 product-owner 지시(「없다면 최소한으로 추가한다」)에 따라 읽기 전용으로 셋 했다는
+충돌, 대화의 **읽기용** 리뷰 artifact는 여전히 bare `/reviews`, 그리고 Phase 2 라이브 실행은 보류·승인은
+판매자의 것).
+
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은
 `deploy/pilot/`: compose overlay(`ports: !reset []`로 raw port 공개 0, `restart: unless-stopped`, JVM heap 고정, Cafe24

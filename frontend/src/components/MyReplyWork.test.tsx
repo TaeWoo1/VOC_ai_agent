@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MyReplyWork } from "./MyReplyWork";
 import { api } from "../lib/apiClient";
@@ -30,6 +30,7 @@ function item(over: Partial<OperatorVocItem> = {}): OperatorVocItem {
     actionRef: "review:11111111-1111-1111-1111-111111111111",
     triageDisposition: "RESPONSE_NEEDED",
     hasReplyPreparation: false,
+    replyWorkState: "DRAFT_NEEDED",
     category: null,
     hasReportedSubmission: false,
     ...over,
@@ -49,6 +50,39 @@ function view(over: Partial<OperatorReplyWorkView> = {}): OperatorReplyWorkView 
 
 beforeEach(() => vi.restoreAllMocks());
 afterEach(() => vi.restoreAllMocks());
+
+describe("MyReplyWork — what the seller is being asked to do (Approval Path v1 §2)", () => {
+  it("leads with what one press finishes, and says how many of those there are", async () => {
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(
+      view({
+        todo: [
+          item({ actionRef: "review:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", replyWorkState: "APPROVED", hasReplyPreparation: true }),
+          item({ actionRef: "review:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", replyWorkState: "DRAFT_NEEDED" }),
+          item({ actionRef: "review:cccccccc-cccc-cccc-cccc-cccccccccccc", replyWorkState: "AWAITING_APPROVAL", hasReplyPreparation: true }),
+        ],
+      }),
+    );
+
+    render(<MyReplyWork accountId="acct-1" />);
+
+    const todo = await screen.findByTestId("reply-work-todo");
+    const states = within(todo).getAllByTestId("reply-work-state").map((el) => el.textContent);
+    // 승인 대기 first; 승인됨 last, because its remaining step is outside this product.
+    expect(states).toEqual(["답변 작업: 승인 대기", "답변 작업: 초안 필요", "답변 작업: 승인됨"]);
+    // Only what a press finishes is counted — a heading over three rows saying 「3건」 would be a
+    // number the seller cannot act on.
+    expect(screen.getByTestId("reply-work-waiting")).toHaveTextContent("승인 대기 1건");
+  });
+
+  it("says nothing about a count when nothing is waiting", async () => {
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(
+      view({ todo: [item({ replyWorkState: "DRAFT_NEEDED" })] }),
+    );
+    render(<MyReplyWork accountId="acct-1" />);
+    await screen.findByTestId("reply-work-todo");
+    expect(screen.queryByTestId("reply-work-waiting")).toBeNull();
+  });
+});
 
 describe("MyReplyWork — 내 답변 작업", () => {
   it("lists the reviews the operator committed to, and says the list persists", async () => {

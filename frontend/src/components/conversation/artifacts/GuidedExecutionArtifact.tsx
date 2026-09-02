@@ -49,7 +49,9 @@ export function GuidedExecutionArtifact({ artifact, replyRuntime }: { artifact: 
         )}
         {!done ? (
           <p className="text-sm">
-            <Link to={artifact.to} className="font-semibold text-brand-700 hover:underline">리뷰 화면에서 확인</Link>
+            {/* The link now opens THIS review's reply work, not the channel's whole record, so it says
+              what it opens. A link named after a screen was accurate when it went to one. */}
+          <Link to={artifact.to} className="font-semibold text-brand-700 hover:underline">이 리뷰의 답변 작업 열기</Link>
           </p>
         ) : null}
       </div>

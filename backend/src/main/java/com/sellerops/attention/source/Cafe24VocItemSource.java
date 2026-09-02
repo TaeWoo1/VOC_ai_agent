@@ -133,6 +133,9 @@ public class Cafe24VocItemSource implements VocItemSource {
                 // No triage anchor → no ref → no decision and no reply work can exist here.
                 // false is a capability limit, not a claim that nobody has prepared anything.
                 null, null, false,
+                // No reply work can exist on a row with no ref, so there is no state to name. null is
+                // the absence of a statement, never a fourth state meaning "nothing to do".
+                null,
                 // category is always null: item_analyses covers `reviews` and `inquiries`, and a
                 // community article is neither, so nothing has ever analyzed this row. Same kind of
                 // capability limit as productName above — not a claim that it fits no category.

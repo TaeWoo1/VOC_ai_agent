@@ -940,6 +940,13 @@ export interface OperatorDismissedReplyWorkView {
 // nothing to do") — collapsing the two would erase the work of having decided. A row
 // can have a ref and no disposition (the common case); a row with no ref necessarily
 // has no disposition.
+/**
+ * Where one review's reply work stands. Three states, each a fact the server read; see
+ * `OperatorVocItem.replyWorkState`. `APPROVED` never means 「완료」 — the seller's next step is in the
+ * seller center, which this product does not observe.
+ */
+export type ReviewReplyWorkState = "DRAFT_NEEDED" | "AWAITING_APPROVAL" | "APPROVED";
+
 export interface OperatorVocItem {
   channelCode: string | null;
   channelNameKo: string | null;
@@ -972,6 +979,14 @@ export interface OperatorVocItem {
   // version, and the approval's state all come from the reply read. `false` for a row that
   // cannot be prepped at all (null actionRef) — a capability limit, not a claim.
   hasReplyPreparation: boolean;
+  // WHERE that work stands — mirrors com.sellerops.attention.reply.ReviewReplyWorkState.
+  //
+  // Not a second copy of the boolean above. `hasReplyPreparation` unions a withdrawn approval with a
+  // standing one because both are reasons to keep the reply panel mounted; this field has to tell them
+  // apart, because 「승인을 기다린다」 and 「이미 승인했다」 are opposite instructions to the seller.
+  // Null where the row cannot carry reply work at all (null actionRef) — the absence of a statement,
+  // never a fourth state meaning "nothing to do". Says nothing about whether a reply was posted.
+  replyWorkState: ReviewReplyWorkState | null;
   // The row's stored rule-based analysis category — one of nine fixed Korean labels. It is
   // CONTEXT, not a queue rule: whether a row appears here is still decided by rating and
   // reply state alone.

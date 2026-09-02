@@ -121,6 +121,20 @@ const ALL_TARGETS_MAX = 2;
 /** Detail READs one deterministic FILTER may spend on topic matching (the workload lane's own cap). */
 const FILTER_DETAIL_CAP = 8;
 
+/**
+ * Where a seller goes to finish ONE review's reply — the review alone, because that is all a
+ * conversation holds. The account is resolved by the screen from the same org-scoped exact read the
+ * review anchor already stands on, rather than being carried here as a second identifier.
+ *
+ * `from=chat` is not state: it only tells that screen it may offer a way back to this conversation,
+ * which is the thread the pointer at `/` already restores. Before this, every review action artifact
+ * linked to the bare `/reviews` — the channel's whole record, 4,455 rows on the live account, with the
+ * approve button six screens down and no way to say which row was meant.
+ */
+export function reviewReplyTaskLink(reviewId: string): string {
+  return `/reviews/reply/${encodeURIComponent(reviewId)}?from=chat`;
+}
+
 const WORKSPACE_OF: Record<WorkingSetKind, { label: string; to: string }> = {
   REVIEWS: { label: "리뷰", to: "/reviews" },
   INQUIRIES: { label: "문의", to: "/inquiries?state=NEEDS_REPLY" },
@@ -2312,7 +2326,7 @@ export class ConversationService {
           artifactId: `a-guided-${t.reviewId}`, type: "GUIDED_EXECUTION", title: `${name}에서 답변하기`,
           actionType: "REVIEW_REPLY", objectKind: "REVIEW", channelCode: t.channelCode ?? "", channelNameKo: t.channelNameKo,
           accountId: t.accountId, reviewId: t.reviewId, actionRef: t.actionRef, draftVersion, contentFingerprint,
-          requiresLocalAgent: true, to: "/reviews",
+          requiresLocalAgent: true, to: reviewReplyTaskLink(t.reviewId),
         };
         return {
           artifact: guided,
@@ -2324,7 +2338,7 @@ export class ConversationService {
         artifactId: `a-approval-${t.reviewId}`, type: "APPROVAL", title: "답글 전송 승인",
         objectKind: "REVIEW", targetId: t.reviewId, accountId: t.accountId, actionRef: t.actionRef,
         channelCode: t.channelCode, channelNameKo: t.channelNameKo, draftVersion, contentFingerprint,
-        execution: "API_EXECUTION", executableIdentity: "MARKETPLACE", to: "/reviews",
+        execution: "API_EXECUTION", executableIdentity: "MARKETPLACE", to: reviewReplyTaskLink(t.reviewId),
       };
       return { artifact: approval, headline: "다음 답글을 전송하려면 승인이 필요합니다. 전송은 승인 뒤 기존 실행 경로로만 진행됩니다.", chips: [] };
     }

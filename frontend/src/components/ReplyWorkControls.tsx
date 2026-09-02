@@ -23,6 +23,7 @@ export function ReplyWorkControls({
   disposition,
   hasReplyPreparation,
   triageMode = "edit",
+  headingLevel,
   onOutcomeRecorded,
   onDecided,
 }: {
@@ -42,6 +43,8 @@ export function ReplyWorkControls({
    * silently fails to remove it. The reply flow itself is unchanged in both modes.
    */
   triageMode?: "edit" | "readonly";
+  /** The heading level 「답변 준비」 renders at — the caller owns the outline. See VocItemReplyPrep. */
+  headingLevel?: 2 | 3 | 4;
   /** Bubbled to the owner so a count or badge can reflect a reply the operator just posted. */
   onOutcomeRecorded?: () => void;
   /** The server-confirmed decision, announced so an owner-level list (내 답변 작업) can re-read. */
@@ -130,6 +133,7 @@ export function ReplyWorkControls({
           onPrepared={promote}
           onOutcomeRecorded={onOutcomeRecorded}
           onLocalWork={noteLocalWork}
+          headingLevel={headingLevel}
         />
       ) : null}
     </>

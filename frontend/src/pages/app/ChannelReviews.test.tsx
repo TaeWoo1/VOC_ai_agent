@@ -147,8 +147,14 @@ beforeEach(() => {
 /**
  * Product assembly A6: review work starts on the 리뷰 screen. Where the server says the channel has a
  * reply flow (`replySupported`, and a server-minted `replyWork` on the detail), the detail carries the
- * product's one reply cluster and the page ends with 내 답변 작업. Where it does not, nothing of the kind
+ * product's one reply cluster and the page OPENS with 내 답변 작업. Where it does not, nothing of the kind
  * renders — no control the server would refuse.
+ *
+ * <b>The placement assertion was rewritten, not weakened</b> (Approval Path v1 §2). It used to pin
+ * 내 답변 작업 at the END of the page, which was the deliberate arrangement at the time — the worklist is
+ * the record's follow-through, not a second list of what needs a look. On the live NAVER account that
+ * measured as the seller's own committed work sitting six screens below the fold behind 4,455 rows they
+ * did not come for. What it IS did not change; where it goes did.
  */
 describe("reply work on the 리뷰 screen (A6)", () => {
   const NAVER_PAGE: ChannelReviewPageView = {
@@ -160,7 +166,7 @@ describe("reply work on the 리뷰 screen (A6)", () => {
     replyWork: { actionRef: "review:r1", triageDisposition: null, hasReplyPreparation: false },
   };
 
-  it("NAVER: the detail offers the decision (대응 필요 …) and the page ends with 내 답변 작업", async () => {
+  it("NAVER: the detail offers the decision (대응 필요 …) and the page opens with 내 답변 작업", async () => {
     getChannelReviewsStrict.mockResolvedValue(NAVER_PAGE);
     getChannelReviewStrict.mockResolvedValue(NAVER_DETAIL);
     renderPage("/reviews/acc-1?review=r1");
@@ -173,8 +179,13 @@ describe("reply work on the 리뷰 screen (A6)", () => {
     expect(within(reply).queryByRole("heading", { name: "답변 준비" })).toBeNull();
     expect(getReviewReplyPrep).not.toHaveBeenCalled();
     // The operator's committed work has its home on this page now, for this account.
-    expect(await screen.findByRole("heading", { name: "내 답변 작업" })).toBeInTheDocument();
+    const worklist = await screen.findByRole("heading", { name: "내 답변 작업" });
+    expect(worklist).toBeInTheDocument();
     expect(getReplyWork).toHaveBeenCalledWith("acc-1", expect.anything());
+    // And it comes BEFORE the record it follows through on: what the seller is being asked to do is
+    // above the material they might read, not under 4,455 rows of it.
+    const list = await screen.findByRole("heading", { name: "목록" });
+    expect(worklist.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("NAVER: a review already marked 대응 필요 mounts the preparation panel — the same flow, entered from here", async () => {

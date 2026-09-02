@@ -8,6 +8,7 @@ import {
   reportedSubmissionLabel,
 } from "../lib/vocItems";
 import { ReplyWorkControls } from "./ReplyWorkControls";
+import { replyWorkStateLabel } from "../lib/replyWorkState";
 
 // One reply-work row (내 답변 작업 · 제외한 작업): the product it concerns, a reply
 // chip, ★rating, dates, and a sanitized preview line. The preview is produced/redacted
@@ -42,6 +43,10 @@ export function VocItemCard({
   const product = productLabel(item.productName);
   const category = categoryChip(item.category);
   const reported = reportedSubmissionLabel(item.hasReportedSubmission);
+  // What the SELLER is being asked to do, as opposed to what the channel said (reply) or what the
+  // review is about (category). It leads the chip row because it is the only one of the four that
+  // tells the seller whether this row is the one they came to finish.
+  const workState = replyWorkStateLabel(item.replyWorkState);
 
   return (
     /* A div, not an li: every caller already wraps this in its own <li> with its own padding, so
@@ -58,6 +63,17 @@ export function VocItemCard({
       </p>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-wrap items-center gap-3">
+          {workState != null ? (
+            <span
+              className={`inline-flex items-center rounded-lg px-2.5 py-1 text-sm font-semibold ${
+                item.replyWorkState === "AWAITING_APPROVAL" ? "bg-brand-50 text-brand-700" : "bg-canvas text-ink"
+              }`}
+              data-testid="reply-work-state"
+            >
+              <span className="sr-only">답변 작업: </span>
+              {workState}
+            </span>
+          ) : null}
           <span
             className={`inline-flex items-center rounded-lg px-2.5 py-1 text-sm font-semibold ${reply.cls}`}
           >

@@ -57,4 +57,21 @@ public interface ReviewReplyApprovalRepository extends JpaRepository<ReviewReply
             + "where a.orgId = :orgId and a.reviewId in :reviewIds")
     List<UUID> findReviewIdsWithApproval(@Param("orgId") UUID orgId,
                                          @Param("reviewIds") Collection<UUID> reviewIds);
+
+    /**
+     * Which of these reviews carry an approval that STANDS right now — {@code APPROVED} only.
+     *
+     * <p>Deliberately NOT the same question as {@link #findReviewIdsWithApproval}, which counts any
+     * approval row including a withdrawn one because that row is still the operator's work. This one
+     * answers a different question, and the difference is the whole point: a seller asking "무엇이
+     * 승인을 기다리나" must not be handed a review they approved and then withdrew, and must not be
+     * told a review still waits when it has already been approved. One predicate cannot be both.
+     *
+     * <p>One indexed batch query per page, on the same bounded id set as its neighbour.
+     */
+    @Query("select a.reviewId from ReviewReplyApproval a "
+            + "where a.orgId = :orgId and a.reviewId in :reviewIds "
+            + "and a.state = com.sellerops.attention.reply.ReviewReplyApprovalState.APPROVED")
+    List<UUID> findReviewIdsWithStandingApproval(@Param("orgId") UUID orgId,
+                                                 @Param("reviewIds") Collection<UUID> reviewIds);
 }

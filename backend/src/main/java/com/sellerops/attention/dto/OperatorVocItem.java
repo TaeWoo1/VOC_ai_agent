@@ -90,6 +90,14 @@ package com.sellerops.attention.dto;
  * <p>{@code false} for every row that cannot be prepped at all (a null {@code actionRef}),
  * which is a capability limit rather than a claim that no work exists.
  *
+ * <p>{@code replyWorkState} says WHERE that work stands — see
+ * {@link com.sellerops.attention.reply.ReviewReplyWorkState}. It is not a second copy of
+ * {@code hasReplyPreparation}: that boolean unions a withdrawn approval with a standing one because
+ * both are reasons to keep a panel mounted, and this one has to tell them apart because 「승인을
+ * 기다린다」 and 「이미 승인했다」 are opposite instructions to the seller. Still metadata only — a
+ * state name, never the draft's text or version. {@code null} where the row cannot carry reply work
+ * at all (a null {@code actionRef}), which is the same capability limit that field carries.
+ *
  * <p>{@code hasReportedSubmission} says the operator has REPORTED posting the reply that currently
  * stands — SellerOps' own record of a guided reply, not the channel's statement. Like
  * {@code triageDisposition} and {@code hasReplyPreparation} it is a fact about the operator's work.
@@ -132,6 +140,7 @@ public record OperatorVocItem(
         String actionRef,
         String triageDisposition,
         boolean hasReplyPreparation,
+        String replyWorkState,
         String category,
         boolean hasReportedSubmission) {
 }

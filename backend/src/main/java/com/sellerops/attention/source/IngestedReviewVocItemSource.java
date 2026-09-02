@@ -12,6 +12,7 @@ import com.sellerops.attention.triage.ReviewTriage;
 import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
 import com.sellerops.attention.reply.ReviewReplyOutcomeRepository;
 import com.sellerops.attention.reply.ReviewReplyDraftRepository;
+import com.sellerops.attention.reply.ReviewReplyWorkState;
 import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.attention.triage.TriageDisposition;
 import com.sellerops.common.VocPreviewSanitizer;
@@ -229,12 +230,12 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                         fromInstant, toExclusive, pageRequest);
         Map<UUID, String> productNames = productNamesFor(orgId, result.getContent());
         Map<UUID, TriageDisposition> dispositions = dispositionsFor(orgId, result.getContent());
-        Set<UUID> prepared = preparedFor(orgId, result.getContent());
+        ReplyWork replyWork = replyWorkFor(orgId, result.getContent());
         Map<UUID, String> categories = categoriesFor(orgId, result.getContent());
         Set<UUID> reported = reportedSubmissionsFor(orgId, result.getContent());
         List<OperatorVocItem> rows = result.getContent().stream()
                 .map(r -> toItem(r, signalType, channelCode, channelNameKo, productNames,
-                        dispositions, prepared, categories, reported))
+                        dispositions, replyWork, categories, reported))
                 .toList();
 
         // The breakdown is offered only for the lens the facet applies to; an arrivals list is a
@@ -321,9 +322,9 @@ public class IngestedReviewVocItemSource implements VocItemSource {
 
     /**
      * Which of this page's rows carry a REPORTED submission for the reply version that stands — one
-     * org-scoped batch query, the same shape as {@link #preparedFor} beside it.
+     * org-scoped batch query, the same shape as {@link #replyWorkFor} beside it.
      *
-     * <p>Distinct from {@code preparedFor}: that answers "is there work in progress here" (a draft
+     * <p>Distinct from {@code replyWorkFor}: that answers "is there work in progress here" (a draft
      * or an approval) and drives whether the reply panel mounts. This answers "did the operator say
      * they posted it", which is what removes the row from the count and sinks it down the list.
      * Collapsing the two would make a saved draft look like a finished reply.
@@ -338,7 +339,7 @@ public class IngestedReviewVocItemSource implements VocItemSource {
 
     /**
      * Stored analysis categories for this page's rows — ONE org-scoped batch query, the same shape
-     * and the same reasoning as {@link #dispositionsFor}/{@link #preparedFor}: the id set is bounded
+     * and the same reasoning as {@link #dispositionsFor}/{@link #replyWorkFor}: the id set is bounded
      * by the clamped page size and each id hits {@code uq_item_analyses_source}, so the cost is a
      * page rather than the corpus.
      *
@@ -380,21 +381,39 @@ public class IngestedReviewVocItemSource implements VocItemSource {
     }
 
     /**
-     * Which of these reviews already carry reply work — TWO batch queries per page, never a
+     * Which of these reviews carry reply work, and where it stands — THREE batch queries per page, never a
      * per-row lookup (see {@code ReviewReplyDraftRepository.findReviewIdsWithDraft}).
      *
      * <p>Drafts OR approvals, unioned rather than derived one from the other: an approval
      * implies a draft today, but only because a service rule says so, and a read that is
      * correct only while an unrelated invariant holds is a read that breaks silently.
      */
-    private Set<UUID> preparedFor(UUID orgId, List<Review> rows) {
+    private ReplyWork replyWorkFor(UUID orgId, List<Review> rows) {
         Set<UUID> reviewIds = rows.stream().map(Review::getId).collect(Collectors.toSet());
         if (reviewIds.isEmpty()) {
-            return Set.of();
+            return ReplyWork.NONE;
         }
-        Set<UUID> prepared = new HashSet<>(replyDrafts.findReviewIdsWithDraft(orgId, reviewIds));
+        Set<UUID> drafted = new HashSet<>(replyDrafts.findReviewIdsWithDraft(orgId, reviewIds));
+        Set<UUID> standing = new HashSet<>(replyApprovals.findReviewIdsWithStandingApproval(orgId, reviewIds));
+        Set<UUID> prepared = new HashSet<>(drafted);
         prepared.addAll(replyApprovals.findReviewIdsWithApproval(orgId, reviewIds));
-        return prepared;
+        return new ReplyWork(prepared, drafted, standing);
+    }
+
+    /**
+     * The reply-work facts for one page, as read: which rows have work at all (the panel's mount
+     * predicate) and which rows are where (the seller's queue state).
+     *
+     * <p>{@code prepared} unions drafts with ANY approval including a withdrawn one; {@code standing}
+     * counts only an approval that stands. Both are needed and neither derives the other — see
+     * {@code ReviewReplyApprovalRepository.findReviewIdsWithStandingApproval}.
+     */
+    private record ReplyWork(Set<UUID> prepared, Set<UUID> drafted, Set<UUID> standing) {
+        static final ReplyWork NONE = new ReplyWork(Set.of(), Set.of(), Set.of());
+
+        String stateOf(UUID reviewId) {
+            return ReviewReplyWorkState.of(drafted.contains(reviewId), standing.contains(reviewId)).name();
+        }
     }
 
     /**
@@ -528,12 +547,12 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         }
         Map<UUID, String> productNames = productNamesFor(orgId, rows);
         Map<UUID, TriageDisposition> dispositions = dispositionsFor(orgId, rows);
-        Set<UUID> prepared = preparedFor(orgId, rows);
+        ReplyWork replyWork = replyWorkFor(orgId, rows);
         Map<UUID, String> categories = categoriesFor(orgId, rows);
         Set<UUID> reported = reportedSubmissionsFor(orgId, rows);
         return rows.stream()
                 .map(r -> toItem(r, AttentionSignalType.LOW_RATING_REVIEW, channelCode, channelNameKo,
-                        productNames, dispositions, prepared, categories, reported))
+                        productNames, dispositions, replyWork, categories, reported))
                 .toList();
     }
 
@@ -567,7 +586,7 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                                    String channelCode, String channelNameKo,
                                    Map<UUID, String> productNames,
                                    Map<UUID, TriageDisposition> dispositions,
-                                   Set<UUID> prepared,
+                                   ReplyWork replyWork,
                                    Map<UUID, String> categories,
                                    Set<UUID> reported) {
         // Read-time, fail-closed preview — never the raw body, never persisted/logged.
@@ -592,7 +611,10 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                 signalType.name(), safePreview,
                 actionRef,
                 disposition == null ? null : disposition.name(),
-                prepared.contains(r.getId()),
+                replyWork.prepared().contains(r.getId()),
+                // WHERE that work stands. Not derived from the boolean above: that one cannot tell a
+                // standing approval from a withdrawn one, and this screen's whole job is to.
+                replyWork.stateOf(r.getId()),
                 // Absent from the map = no analysis row. Passed through as null, never inferred
                 // into 기타 — see categoriesFor.
                 categories.get(r.getId()),

@@ -5,6 +5,7 @@ import { DismissedReplyWork } from "./DismissedReplyWork";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
 import { attentionUncertaintyCopy } from "../lib/attention";
+import { awaitingApprovalCount, byReplyWorkState } from "../lib/replyWorkState";
 
 // "내 답변 작업" — the operator's OWN committed reply work, and a bounded record of what they
 // reported posting.
@@ -92,8 +93,24 @@ export function MyReplyWork({
   // render as "no work".
   const uncertainty = data ? attentionUncertaintyCopy(data.coverage) : null;
 
+  // What is waiting on the seller comes first, and the heading says how much of it there is.
+  // Presentation only — the server's set and its membership rule are untouched; this re-ranks the
+  // rows it sent (see `byReplyWorkState`). Zero is not rendered: 「승인 대기 0건」 beside a list of
+  // work still to draft is a number nobody asked for.
+  const todo = data ? byReplyWorkState(data.todo) : [];
+  const waiting = awaitingApprovalCount(todo);
+
   return (
-    <Section title="내 답변 작업">
+    <Section
+      title="내 답변 작업"
+      action={
+        !loading && !uncertainty && waiting > 0 ? (
+          <span className="text-sm font-semibold text-brand-700" data-testid="reply-work-waiting">
+            승인 대기 {waiting}건
+          </span>
+        ) : undefined
+      }
+    >
       {loading ? (
         <p className="text-base text-muted">불러오는 중…</p>
       ) : error || !data ? (
@@ -127,13 +144,13 @@ export function MyReplyWork({
             </p>
           ) : null}
 
-          {data.todo.length === 0 ? (
+          {todo.length === 0 ? (
             <p className="text-base text-muted" data-testid="reply-work-todo-empty">
               아직 답변을 준비하기로 한 리뷰가 없습니다.
             </p>
           ) : (
             <ul className="divide-y divide-line" data-testid="reply-work-todo">
-              {data.todo.map((item) => (
+              {todo.map((item) => (
                 <li key={item.actionRef} className="py-3">
                   {/* Read-only triage here — the decision is shown, editing lives on the
                       arrival-signal drill-down. See VocItemCard `triageMode`. */}

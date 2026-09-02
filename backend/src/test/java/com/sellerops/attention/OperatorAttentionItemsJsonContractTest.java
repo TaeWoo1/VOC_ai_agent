@@ -339,6 +339,10 @@ class OperatorAttentionItemsJsonContractTest {
                 "NAVER", "네이버", "REVIEW", productName, 2, "UNANSWERED",
                 "2026-05-14", "2026-05-15", "LOW_RATING_REVIEW",
                 "배송은 빨랐는데 색이 생각과 달라요",
-                actionRef, triageDisposition, hasReplyPreparation, "배송", false);
+                actionRef, triageDisposition, hasReplyPreparation,
+                // The state a row with a ref always carries; a ref-less row would carry null, which
+                // the null-actionRef case below already exercises through the same record.
+                actionRef == null ? null : (hasReplyPreparation ? "AWAITING_APPROVAL" : "DRAFT_NEEDED"),
+                "배송", false);
     }
 }

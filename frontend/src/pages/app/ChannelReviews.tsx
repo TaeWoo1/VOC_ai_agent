@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { analytics } from "../../lib/analytics";
 import { useParams, useSearchParams } from "react-router-dom";
 import { channelDataTypeLabel } from "../../lib/channelVocabulary";
+import { ratingLabel } from "../../lib/reviewRecord";
 import { Section, ListBox } from "../../components/ui/Section";
 import { Status, type StatusTone } from "../../components/ui/Status";
 import { Disclosure } from "../../components/ui/Disclosure";
@@ -335,6 +336,20 @@ export function ChannelReviews({
       ) : null}
 
       {/*
+        The operator's OWN committed reply work — reviews marked 대응 필요 or holding a draft — with its
+        honest exits (작업에서 제외 · 복원). Only where the channel has a reply flow; the server says so.
+
+        **It moved above the record** (Approval Path v1 §2). It used to sit underneath, on the reasoning
+        that it is the record's follow-through rather than a second list of what needs a look — which is
+        still true about what it IS, and turned out to be the wrong conclusion about WHERE it goes. On
+        the live NAVER account the record is 4,455 rows, so "underneath" measured as y=3,420 with the
+        first 승인 button at y=5,425 of a 5,587px page: the seller's own committed work was six screens
+        below the fold, behind a list ordered by a triage tier that says nothing about whether they owe
+        anyone an answer. What the seller is being asked to do comes before the material they might read.
+      */}
+      {capability?.replySupported ? <MyReplyWork accountId={accountId} refreshKey={replyWorkVersion} /> : null}
+
+      {/*
         **What to look at first, before the list itself.** The counts are of the WHOLE record, not the
         page and not the current filter, so pressing a tier never changes the numbers describing the
         others — otherwise choosing 확인 필요 would zero the chips that lead back out of it.
@@ -574,13 +589,6 @@ export function ChannelReviews({
           ) : null}
         </div>
       )}
-      {/*
-        The operator's OWN committed reply work — reviews marked 대응 필요 or holding a draft — with its
-        honest exits (작업에서 제외 · 복원). Only where the channel has a reply flow; the server says so.
-        It sits under the record rather than beside it because it is the record's follow-through, not
-        a second list of what needs a look: which reviews need attention is the tier list above.
-      */}
-      {capability?.replySupported ? <MyReplyWork accountId={accountId} refreshKey={replyWorkVersion} /> : null}
     </div>
   );
 }
@@ -1027,12 +1035,6 @@ function tierCount(page: ChannelReviewPageView, tier: ReviewTriageTier): number 
   if (tier === "NEEDS_ATTENTION") return page.triageSummary.needsAttention;
   if (tier === "WATCH") return page.triageSummary.watch;
   return page.triageSummary.fyi;
-}
-
-/** A rating renders as its number plus stars; an unread rating says so rather than showing zero stars. */
-function ratingLabel(rating: number | null): string {
-  if (rating === null) return "평점 없음";
-  return `${"★".repeat(rating)}${"☆".repeat(Math.max(0, 5 - rating))} ${rating}점`;
 }
 
 function formatDateTime(iso: string): string {
