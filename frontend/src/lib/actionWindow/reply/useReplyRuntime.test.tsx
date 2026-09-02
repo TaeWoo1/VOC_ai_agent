@@ -6,11 +6,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GuidedReplyConnectResult } from "./replyBridge";
 import { ReplyRuntimeDisposedError, type ReplyRuntime } from "./replyRuntime";
 import { useReplyRuntime } from "./useReplyRuntime";
+import { acquireReplyConnection, replyConnectionRefs, resetReplyConnection } from "./replyConnection";
 
 // FILE-SCOPE: resolveReplyRuntime reads import.meta.env.DEV, and a cleanup scoped to one describe
 // leaves the stub live for every describe after it.
 afterEach(() => {
   vi.unstubAllEnvs();
+  // The reply session is shared across the app (`replyConnection.ts`), so it is shared across tests too
+  // unless each one lets go of it.
+  resetReplyConnection();
 });
 beforeEach(() => {
   // The simulated fallback is developer chrome (A6): DEV AND the fixture-preview opt-in.
@@ -83,7 +87,11 @@ describe("useReplyRuntime", () => {
 
     unmount();
 
-    expect(closes).toBe(1);
+    // **The close is one tick late by design.** The session is shared and refcounted, and a
+    // StrictMode remount arrives in the same frame as the unmount that preceded it — closing
+    // synchronously would tear down the socket the next mount is about to ask for. The last release
+    // still closes it; it closes after the grace window (`replyConnection.ts`).
+    await waitFor(() => expect(closes).toBe(1), { timeout: 2000 });
     expect(bridgeRuntime.disposed).toBe(true);
   });
 
@@ -108,5 +116,56 @@ describe("useReplyRuntime", () => {
     await act(async () => {});
 
     expect(result.current).toBeNull();
+  });
+});
+
+/**
+ * Chat-first Completion & Continuity v1 §6 — the mount-ticket storm, closed structurally.
+ *
+ * The helper logged seven `bridge_ticket_minted` inside 70ms for one screen: a ticket is single-use and
+ * this hook minted one per mounted card and per StrictMode double-invocation. What follows is that shape
+ * as a test — many holders, one connection — plus the two rules that make sharing safe: the last release
+ * closes, and a release that is immediately followed by a new lease closes nothing.
+ */
+describe("the reply session is shared and refcounted", () => {
+  const handle = (onClose: () => void) => ({
+    ok: true as const,
+    handle: { runtime: stubRuntime(), close: onClose },
+  });
+
+  it("many mounts in one frame connect ONCE — the storm cannot be minted", async () => {
+    let closes = 0;
+    const connector = vi.fn(async () => handle(() => (closes += 1)));
+    const a = renderHook(() => useReplyRuntime(undefined, connector));
+    const b = renderHook(() => useReplyRuntime(undefined, connector));
+    const c = renderHook(() => useReplyRuntime(undefined, connector));
+    await act(async () => {});
+
+    expect(connector).toHaveBeenCalledTimes(1);
+    expect(replyConnectionRefs()).toBe(3);
+
+    a.unmount();
+    b.unmount();
+    await act(async () => {});
+    // Holders remain: nothing is closed while anyone is still using it.
+    expect(closes).toBe(0);
+
+    c.unmount();
+    await waitFor(() => expect(closes).toBe(1), { timeout: 2000 });
+  });
+
+  it("a release immediately followed by a new lease keeps the same session — the StrictMode pair is a no-op", async () => {
+    let closes = 0;
+    const connector = vi.fn(async () => handle(() => (closes += 1)));
+    const lease = acquireReplyConnection(connector);
+    await act(async () => {});
+    lease.release();
+    const again = acquireReplyConnection(connector);
+    await act(async () => {});
+
+    expect(connector).toHaveBeenCalledTimes(1);
+    expect(closes).toBe(0);
+    again.release();
+    await waitFor(() => expect(closes).toBe(1), { timeout: 2000 });
   });
 });

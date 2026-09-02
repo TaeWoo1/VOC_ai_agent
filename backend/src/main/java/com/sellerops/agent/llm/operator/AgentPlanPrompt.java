@@ -51,7 +51,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v13";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v14";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -73,8 +73,8 @@ public final class AgentPlanPrompt {
 
     /** Closed filter vocabularies. Every value is a token; none can be a customer word or an id. */
     public static final String[] PERIODS = {
-        "TODAY", "YESTERDAY", "THIS_WEEK", "LAST_WEEK", "LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS",
-        "LAST_N_DAYS",
+        "TODAY", "YESTERDAY", "THIS_WEEK", "LAST_WEEK", "THIS_MONTH", "LAST_MONTH",
+        "LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS", "LAST_N_DAYS",
     };
     /**
      * The largest trailing window {@code LAST_N_DAYS} may name (Conversation Contract Correctness v2).
@@ -201,8 +201,9 @@ public final class AgentPlanPrompt {
                status=UNANSWERED, "오늘 내가 답해야 할 문의" 는 WORKLOAD 이고 period 는 null 입니다.
                - **기간은 판매자가 말한 그 기간입니다.** 문장에 기간이 있으면 목록의 토큰 중 맞는 것을 고르고, \
                「최근 3일」·「지난 10일」처럼 목록에 없는 길이의 기간이면 period 를 LAST_N_DAYS 로 두고 \
-               periodDays 에 그 날짜 수를 적으세요 — 가까운 토큰(LAST_7_DAYS)으로 바꾸지 마세요. 판매자가 \
-               말하지 않은 기간은 만들지 마세요(period 도 periodDays 도 null).
+               periodDays 에 그 날짜 수를 적으세요 — 가까운 토큰(LAST_7_DAYS)으로 바꾸지 마세요. \
+               「이번 달」은 THIS_MONTH, 「지난달」·「저번 달」은 LAST_MONTH 이고, 달을 말한 문장을 주 단위 \
+               토큰으로 바꾸지 마세요. 판매자가 말하지 않은 기간은 만들지 마세요(period 도 periodDays 도 null).
                - **개수·순서·상태는 문장에 있으면 반드시 토큰으로 적으세요.** "1개만", "3개", "두 개" → filters.limit 에 \
                정수; **하나를 묻는 최상급 표현("가장 최근 문의", "제일 오래된 건", "가장 시급한 건")은 filters.limit=1** \
                입니다 — 개수를 말하지 않았어도 하나를 물은 것입니다; "가장 최근", "최신" → filters.order=NEWEST; "가장 오래된", "먼저 들어온" → OLDEST; "답변 안 한", \

@@ -417,7 +417,15 @@ export function proactiveTurn(
     ? "제가 먼저 확인해 둔 일입니다. 확인하고 보내시면 됩니다 — 아직 아무 곳에도 보내지 않았습니다."
     : namedRows
       // The number is said ONCE, and it is said as the reason these particular rows are on top.
-      ? `답변을 기다리는 문의가 ${unanswered.toLocaleString("ko-KR")}건 있습니다. 가장 오래 기다린 것부터 보여드릴게요 — 눌러서 바로 이어가시면 됩니다.`
+      //
+      // **…and only while it can still describe them.** The count and the rows are different reads with
+      // different definitions of "waiting" (the KPI counts operational work items; the feed counts the
+      // inquiry's own status), and on 2026-09-02 they disagreed: 「답변을 기다리는 문의가 0건 있습니다」
+      // stood above three rows waiting since 2016. A total the rows below it contradict is worse than no
+      // total, so the sentence keeps the number only when it is at least the number of rows it introduces.
+      ? unanswered >= rows.length
+        ? `답변을 기다리는 문의가 ${unanswered.toLocaleString("ko-KR")}건 있습니다. 가장 오래 기다린 것부터 보여드릴게요 — 눌러서 바로 이어가시면 됩니다.`
+        : "답변을 기다리는 문의를 가장 오래 기다린 것부터 보여드릴게요 — 눌러서 바로 이어가시면 됩니다."
       : waiting.length > 0
         ? "오늘 미리 준비해 둔 일은 없지만, 지금 확인이 필요한 일이 있습니다."
         : "지금 먼저 확인할 일은 없습니다. 새로 들어온 문의나 리뷰가 생기면 여기에 먼저 정리해 두겠습니다.";

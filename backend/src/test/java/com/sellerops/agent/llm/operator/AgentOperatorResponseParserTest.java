@@ -184,7 +184,7 @@ class AgentOperatorResponseParserTest {
         // planner that hears 「우리 상품 목록 보여줘」 has a kind to put it in and a tool to reach it.
         assertThat(system).contains("PRODUCT_CATALOG");
         assertThat(system).contains("list_products");
-        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v13");
+        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v14");
     }
 
     /**

@@ -978,6 +978,21 @@ export const api = {
     );
     return data;
   },
+  /**
+   * **"Get this account's new reviews" — one call, and no plan on screen.**
+   *
+   * The conversation lane used to stitch this itself: list the plans, create one from the first of the
+   * current month if none was open, extend, then ask for the next segment. The month it guessed had
+   * nothing to do with what the account had already covered, which is how a seller ended up abandoning a
+   * plan, typing dates and merging segments to ask a question the product could answer. The server derives
+   * the period from this account's verified coverage instead.
+   */
+  async launchNextReviewImportForAccount(accountId: string): Promise<ReviewImportLaunchView> {
+    const { data } = await http.post<ReviewImportLaunchView>(
+      `/api/imports/reviews/plans/next-launch?accountId=${encodeURIComponent(accountId)}`,
+    );
+    return data;
+  },
   async launchReviewImportSegment(segmentId: string): Promise<ReviewImportLaunchView> {
     const { data } = await http.post<ReviewImportLaunchView>(
       `/api/imports/reviews/segments/${segmentId}/launch`,

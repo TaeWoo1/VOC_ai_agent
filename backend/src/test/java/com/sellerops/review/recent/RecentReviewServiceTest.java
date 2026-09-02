@@ -21,6 +21,7 @@ import com.sellerops.review.recent.dto.RecentReviewItemView;
 import com.sellerops.review.recent.dto.RecentReviewsResponse;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
+import com.sellerops.reviewimport.ReviewImportSegmentAttemptRepository;
 import com.sellerops.sync.SyncJobRepository;
 import com.sellerops.sync.SyncScheduleRepository;
 import java.time.Clock;
@@ -65,6 +66,7 @@ class RecentReviewServiceTest {
     @Autowired SyncJobRepository syncJobs;
     @Autowired InquiryRepository inquiries;
     @Autowired OrderDailySummaryRepository orders;
+    @Autowired ReviewImportSegmentAttemptRepository acquisitions;
 
     private final UUID org = UUID.randomUUID();
     private RecentReviewService service;
@@ -75,7 +77,7 @@ class RecentReviewServiceTest {
     @BeforeEach
     void setUp() {
         ChannelCoverageService coverage = new ChannelCoverageService(channels, capabilities, accounts, schedules,
-                syncJobs, inquiries, reviews, orders);
+                syncJobs, inquiries, reviews, orders, acquisitions);
         service = new RecentReviewService(reviews, products, accounts, channels, coverage, CLOCK);
         coupang = channel("COUPANG");
         cafe24 = channel("CAFE24");

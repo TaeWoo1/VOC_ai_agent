@@ -430,6 +430,14 @@ export class FakeSpringClient implements SpringClient {
     return run;
   }
 
+  /** Guided-acquisition receipts by sync-run id — empty by default, so a run reads as "not a guided one". */
+  acquisitionResults = new Map<string, import("../../src/spring/types").ReviewAcquisitionResult>();
+
+  async reviewAcquisitionResult(syncJobId: string): Promise<import("../../src/spring/types").ReviewAcquisitionResult | null> {
+    this.methodCalls.push({ method: "reviewAcquisitionResult" });
+    return this.acquisitionResults.get(syncJobId) ?? null;
+  }
+
   async listSyncRuns(params: SyncRunParams): Promise<SyncRunSummary[]> {
     this.calls.syncRuns += 1;
     this.methodCalls.push({ method: "listSyncRuns" });

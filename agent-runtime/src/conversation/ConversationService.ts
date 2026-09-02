@@ -36,6 +36,11 @@ import type { PlanFilters } from "../operator/plan/InvestigationPlan";
 import { effectiveAxisOf } from "../operator/plan/scopeOverride";
 import type { SentenceSubject } from "../operator/plan/scopeOverride";
 import { subjectTermOf } from "./subjectTerm";
+import { isAcquisitionRequest } from "./acquisitionRequest";
+import { acquisitionArtifacts, acquisitionStepFor } from "./acquisitionStep";
+import { channelInSentence } from "./channelFocus";
+import { acquisitionSummary } from "./acquisitionSummary";
+import { channelFocusOf, focusForAxis, withChannelFocus } from "./channelFocus";
 import { isReferenceOnly } from "./reference";
 import { OPERATOR_TOOL, buildOperatorTools } from "../operator/tools/OperatorTools";
 import { OperatorToolRegistry } from "../operator/tools/OperatorToolRegistry";
@@ -320,9 +325,19 @@ export class ConversationService {
         const nameOf = (p: PendingHumanAction) => (p.channelCode ? names.get(p.channelCode.toUpperCase()) ?? p.channelCode : "채널");
         const anyPartial = done.some((c) => c.check.partial);
         if (remaining.length === 0) {
-          prefix = anyPartial
-            ? "새 리뷰 가져오기가 일부만 끝났습니다. 가져온 만큼 계속 확인하겠습니다. "
-            : "새 리뷰 가져오기가 끝났습니다. 계속 확인하겠습니다. ";
+          // <b>What the run DID, from the record it wrote.</b> The card that drove it knows the run's id and
+          // nothing it may assert; the backend answers the window and the three tallies (§3). A run that is
+          // not a guided acquisition, or a read that fails, falls back to the sentence that was always true.
+          const receipts = (await Promise.all(done.map(async (c) => {
+            if (!c.check.runId) return null;
+            const result = await bundle.inquiry.reviewAcquisitionResult(c.check.runId).catch(() => null);
+            return result ? acquisitionSummary(nameOf(c.pending), result) : null;
+          }))).filter((line): line is string => line != null);
+          prefix = receipts.length > 0
+            ? `${receipts.join(" ")} 이어서 확인하겠습니다. `
+            : anyPartial
+              ? "새 리뷰 가져오기가 일부만 끝났습니다. 가져온 만큼 계속 확인하겠습니다. "
+              : "새 리뷰 가져오기가 끝났습니다. 계속 확인하겠습니다. ";
         } else {
           // Partial: one channel's step is done, others are still waiting. Say so, show what is
           // known now, and offer the next step and the rows so far as the two obvious next moves.
@@ -360,11 +375,20 @@ export class ConversationService {
       const pendingPrepared = direct.pendingPrepared ? { ...direct.pendingPrepared, turnId: agentTurn.turnId } : null;
       const pendingCapture = stampCapture(direct.pendingCapture !== undefined ? direct.pendingCapture : view.pendingCapture ?? null, agentTurn.turnId);
       const activeTask = direct.activeTask !== undefined ? direct.activeTask : view.activeTask ?? null;
+      // A deterministic lane may WAIT on the seller (the acquisition step, §1): its pending action is
+      // stamped with this turn and persisted like the planner path's, so 「계속 확인하기」 and the run's own
+      // completion resume THIS turn. Every other direct lane returns none and nothing changes for it.
+      const pendingHumanActions = direct.pendingHumanActions.map((p) => ({ ...p, turnId: agentTurn.turnId }));
       const finalTurn: TurnView = {
         ...agentTurn,
-        continuation: { workingSet, pendingHumanAction: null, pendingHumanActions: [], pendingPrepared, pendingCapture, activeTask },
+        continuation: {
+          workingSet, pendingHumanAction: pendingHumanActions[0] ?? null, pendingHumanActions,
+          pendingPrepared, pendingCapture, activeTask,
+        },
       };
-      await this.persist(store, view, [userTurn, finalTurn], workingSet, pendingActionsOf(view), pendingPrepared, pendingCapture, activeTask);
+      await this.persist(store, view, [userTurn, finalTurn], workingSet,
+        pendingHumanActions.length > 0 ? [...pendingActionsOf(view), ...pendingHumanActions] : pendingActionsOf(view),
+        pendingPrepared, pendingCapture, activeTask);
       log("conversation_turn", {
         status: finalTurn.status, toolCalls: direct.budget?.toolCalls ?? 0, llmCalls: direct.budget?.llmCalls ?? 0, ms: Date.now() - started,
         artifactTypes: [...new Set(finalTurn.artifacts.map((a) => a.type))].join(","),
@@ -372,6 +396,9 @@ export class ConversationService {
       });
       return finalTurn;
     }
+    // <b>The channel the seller last named, decided once for this turn.</b> Both the graph's read and this
+    // service's own axis use it, so the rows and the sentence about them can never be scoped differently.
+    const channelFocus = channelFocusOf(view.turns, text);
     const runtime = new OperatorAgentRuntime({
       operator: bundle.operator, inquiry: bundle.inquiry, issue: bundle.issue,
       judgeMemoKey: orgId,
@@ -417,6 +444,8 @@ export class ConversationService {
         ...(collected ? { collected } : {}),
         ...(pendingHumanWindowOf(view) ? { pendingHumanWindow: pendingHumanWindowOf(view) } : {}),
         localAgent: hints.localAgent ?? "UNKNOWN",
+        // Channel continuity, decided from the seller's own sentences and applied to the READ.
+        ...(channelFocus ? { channelFocus } : {}),
       },
     };
     const result = await runtime.run(`conv-${id}-${userTurn.turnId}`, goal, options.signal ? { signal: options.signal } : {});
@@ -549,7 +578,12 @@ export class ConversationService {
     const { answer, plan } = result;
     // The same override the graph applied (R7) — the headline must not say 「방금 본 N건 중」 about a
     // set the read did not use.
-    const axis = effectiveAxisOf(plan ?? emptyPlan(), view.workingSet, false, sentenceSubjectOf(plan, hints.text ?? ""), hints.text ?? "");
+    const effective = plan ?? emptyPlan();
+    const subject = sentenceSubjectOf(plan, hints.text ?? "");
+    const axis = withChannelFocus(
+      effectiveAxisOf(effective, view.workingSet, false, subject, hints.text ?? ""),
+      focusForAxis(effective, view.workingSet, subject, hints.text ?? "", channelFocusOf(view.turns, hints.text ?? null)),
+    );
     const budget = {
       toolCalls: answer.budget.toolCalls, llmCalls: answer.budget.llmCalls,
       elapsedMs: answer.budget.elapsedMs, stopReason: answer.budget.stopReason,
@@ -848,6 +882,17 @@ export class ConversationService {
         channelCode: null, channelNameKo: null, accountId: null, dataType: null,
         to: "/settings/policies", requestedAt: this.now(), resumable: false, optional: true,
       });
+    }
+    // <b>An instruction is not answered with a button that repeats it.</b> When the sentence said "가져와",
+    // the review-import card starts its guided run on arrival — and it is a REQUIRED step, not an offer,
+    // because the seller asked for the collection rather than for the rows as they stand.
+    const acquisitionAsked = isAcquisitionRequest(hints.text ?? "", { reviewsInContext: view.workingSet?.kind === "REVIEWS" });
+    if (acquisitionAsked) {
+      for (let i = 0; i < artifacts.length; i += 1) {
+        const a = artifacts[i]!;
+        if (a.type !== "HUMAN_ACTION_REQUIRED" || a.actionType !== "REVIEW_IMPORT") continue;
+        artifacts[i] = { ...a, optional: false, autoStart: true };
+      }
     }
     const humans = artifacts.filter((a): a is HumanActionRequiredArtifact => a.type === "HUMAN_ACTION_REQUIRED");
     // An offered refresh (`optional`) is a control under the rows, not a reason to wait: the turn is DONE.
@@ -1208,6 +1253,33 @@ export class ConversationService {
         budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "TONE_REVISION" },
       };
     }
+    // ── ACQUISITION (Chat-first Completion & Continuity v1 §1). An instruction to collect is a closed
+    // action on a channel the conversation is already about — no plan can improve it and, measured live,
+    // every plan made it worse: 「그럼 최신화해줘」 came back as a re-print of the same rows on one attempt
+    // and as 「지금 먼저 하실 일은 없습니다」 on another, because the sentence names no object to route on.
+    // The channel comes from the sentence or from the thread's focus; with neither, the planner keeps it.
+    if (isAcquisitionRequest(text, { reviewsInContext: view.workingSet?.kind === "REVIEWS" })) {
+      const channel = channelInSentence(text) ?? channelFocusOf(view.turns, text);
+      const step = channel
+        ? await acquisitionStepFor(bundle, channel, hints.localAgent ?? "UNKNOWN", this.now())
+        : null;
+      if (step) {
+        stage("WAITING_HUMAN", STAGE_LABEL.WAITING_HUMAN);
+        return {
+          status: "WAITING_HUMAN", message: step.message, artifacts: acquisitionArtifacts(step),
+          suggestedActions: [],
+          workingSet: view.workingSet,
+          pendingHumanActions: [{
+            turnId: "", actionType: step.artifact.actionType, path: step.artifact.path,
+            channelCode: step.artifact.channelCode, accountId: step.artifact.accountId,
+            dataType: step.artifact.dataType, requestedAt: step.artifact.requestedAt,
+          }],
+          pendingPrepared: view.pendingPrepared,
+          budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "ACQUISITION" },
+        };
+      }
+    }
+
     const set = pickSet(null, view);
 
     // ── A reference with no referent (Conversation Contract Correctness v2). 「그거 어떻게 처리하지?」
@@ -2266,8 +2338,8 @@ async function channelNamesOf(bundle: SpringClientBundle, target: TurnView): Pro
 }
 
 /** Has the pending human step's own record finished since it was requested? One READ, nothing else. */
-async function syncCompleted(bundle: SpringClientBundle, pending: PendingHumanAction): Promise<{ completed: boolean; failed: boolean; partial: boolean; finishedAt: string | null; successRows: number | null }> {
-  const none = { completed: false, failed: false, partial: false, finishedAt: null, successRows: null };
+async function syncCompleted(bundle: SpringClientBundle, pending: PendingHumanAction): Promise<{ completed: boolean; failed: boolean; partial: boolean; finishedAt: string | null; successRows: number | null; runId: string | null }> {
+  const none = { completed: false, failed: false, partial: false, finishedAt: null, successRows: null, runId: null };
   if (!pending.accountId || !pending.dataType) return none;
   // Two shapes of the same fact, matched as tightly as each shape allows (Acceptance Closure §8-B):
   //  - a connector/guided run is stamped with the ACCOUNT and `dataType` — it must be this account's;
@@ -2295,6 +2367,8 @@ async function syncCompleted(bundle: SpringClientBundle, pending: PendingHumanAc
   return {
     completed, failed, partial: latest?.status === "PARTIAL",
     finishedAt: latest?.finishedAt ?? null, successRows: latest?.successRows ?? null,
+    // The run's own id — the only thing the summary needs, because the backend answers what it did.
+    runId: latest?.id ?? null,
   };
 }
 

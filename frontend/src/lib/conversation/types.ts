@@ -349,6 +349,11 @@ export interface HumanActionRequiredArtifact extends ArtifactBase {
   asOf?: string | null;
   /** An OFFER under rows that already answered the question: compact card, no waiting. */
   optional?: boolean;
+  /**
+   * The seller's sentence WAS the instruction to collect, so the card starts its guided READ run on
+   * arrival rather than rendering a button that asks for it again. Decided by the runtime, never here.
+   */
+  autoStart?: boolean;
 }
 
 export interface ApprovalArtifact extends ArtifactBase {

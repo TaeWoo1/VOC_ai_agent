@@ -58,6 +58,15 @@ export function windowOf(token: PeriodToken, today: string, days?: number | null
       const thisMonday = t - (isoWeekday(today) - 1) * DAY_MS;
       return { from: toIso(thisMonday - 7 * DAY_MS), to: toIso(thisMonday - DAY_MS), token };
     }
+    case "THIS_MONTH":
+      // The month is a calendar fact, so it is read off the date string rather than counted in days —
+      // a 30-day arithmetic window is a different question in every month that is not 30 days long.
+      return { from: `${today.slice(0, 7)}-01`, to: today, token };
+    case "LAST_MONTH": {
+      const first = dayMs(`${today.slice(0, 7)}-01`);
+      const lastDay = toIso(first - DAY_MS);
+      return { from: `${lastDay.slice(0, 7)}-01`, to: lastDay, token };
+    }
   }
 }
 
@@ -70,6 +79,8 @@ export function overviewDaysOf(token: PeriodToken | null, days?: number | null):
     case "LAST_WEEK":
       return 14;
     case "LAST_30_DAYS":
+    case "THIS_MONTH":
+    case "LAST_MONTH":
       return 30;
     default:
       return 7;
@@ -93,6 +104,8 @@ export function periodLabel(token: PeriodToken | null, days?: number | null): st
     case "LAST_30_DAYS": return "최근 30일";
     case "THIS_WEEK": return "이번 주";
     case "LAST_WEEK": return "지난주";
+    case "THIS_MONTH": return "이번 달";
+    case "LAST_MONTH": return "지난달";
     default: return "최근";
   }
 }

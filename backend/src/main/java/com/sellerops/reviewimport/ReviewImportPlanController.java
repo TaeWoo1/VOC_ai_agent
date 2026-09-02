@@ -6,6 +6,7 @@ import com.sellerops.reviewimport.ReviewImportSegmentPlanner.DateRange;
 import com.sellerops.reviewimport.dto.CreateReviewImportPlanRequest;
 import com.sellerops.reviewimport.dto.MergeSegmentsRequest;
 import com.sellerops.reviewimport.dto.RecordDiscoveredRangeRequest;
+import com.sellerops.reviewimport.dto.ReviewAcquisitionResultView;
 import com.sellerops.reviewimport.dto.ReviewImportAttemptView;
 import com.sellerops.reviewimport.dto.ReviewImportHealthView;
 import com.sellerops.reviewimport.dto.ReviewImportLaunchScopeView;
@@ -164,6 +165,21 @@ public class ReviewImportPlanController {
         return queryService.planDetail(principal.orgId(), plan.getId());
     }
 
+    /**
+     * <b>"이 계정의 새 리뷰를 가져와" — one call, no plan on screen.</b> Find or create the plan, carry it to
+     * today, authorize the next run. The conversation lane calls this instead of stitching four requests
+     * (list plans → select a range → extend → next segment) around a range it had to guess; the range comes
+     * from the account's verified coverage instead.
+     *
+     * <p>Same authorization as every other mint: the account must be this org's, and nothing remaining is a
+     * conflict rather than an invented run.
+     */
+    @PostMapping("/plans/next-launch")
+    public ReviewImportLaunchView launchNextForAccount(@AuthenticationPrincipal AuthPrincipal principal,
+                                                       @RequestParam UUID accountId) {
+        return launchView(launchService.mintNextForAccount(principal.orgId(), accountId));
+    }
+
     /** "계속 가져오기" — authorize a run for the next segment that still needs one. */
     @PostMapping("/plans/{planId}/launches/next-segment")
     public ReviewImportLaunchView launchNextSegment(@AuthenticationPrincipal AuthPrincipal principal,
@@ -312,6 +328,17 @@ public class ReviewImportPlanController {
     public List<ReviewImportAttemptView> attempts(@AuthenticationPrincipal AuthPrincipal principal,
                                                   @PathVariable UUID segmentId) {
         return queryService.attemptsOf(principal.orgId(), segmentId);
+    }
+
+    /**
+     * What the guided acquisition behind one finished run did — its window and its three row tallies.
+     * 404 when the run was not a guided acquisition; nothing is invented for a hand-uploaded file.
+     */
+    @GetMapping("/runs/{syncJobId}/acquisition")
+    public ReviewAcquisitionResultView acquisitionResult(@AuthenticationPrincipal AuthPrincipal principal,
+                                                         @PathVariable UUID syncJobId) {
+        return queryService.acquisitionResultOf(principal.orgId(), syncJobId)
+                .orElseThrow(() -> ApiException.notFound("가져오기 기록을 찾을 수 없습니다."));
     }
 
     @GetMapping("/health")

@@ -11,6 +11,7 @@
 //      manual handoff.
 import { useEffect, useMemo, useState } from "react";
 import { connectGuidedReplyRuntime } from "./replyBridge";
+import { acquireReplyConnection } from "./replyConnection";
 import { resolveReplyRuntime, type ReplyRuntime } from "./replyRuntime";
 
 export function useReplyRuntime(
@@ -26,24 +27,21 @@ export function useReplyRuntime(
   useEffect(() => {
     if (injected) return;
     let unmounted = false;
-    let close: (() => void) | null = null;
+    // **One session, leased** (`replyConnection.ts`). Connecting per mount minted one single-use ticket and
+    // one socket per mounted card AND per StrictMode double-invocation — seven tickets in 70ms, measured in
+    // the helper's own log. The lease shares whatever is already connected and closes it when the last
+    // holder lets go.
+    const lease = acquireReplyConnection(connector);
     // A refusal (bridge-disabled, unpaired, export-hosting agent, …) simply leaves the fallback in
     // place — the same honest-fallback rule the export world follows. In a shipped build the
     // connector refuses before touching the network.
-    void connector().then((result) => {
-      if (!result.ok) return;
-      if (unmounted) {
-        // Resolved after cleanup already ran: nothing will ever use this session — release it now
-        // instead of leaking a socket whose owner is gone.
-        result.handle.close();
-        return;
-      }
-      close = () => result.handle.close();
+    void lease.result.then((result) => {
+      if (!result.ok || unmounted) return;
       setBridge(result.handle.runtime);
     });
     return () => {
       unmounted = true;
-      close?.();
+      lease.release();
       setBridge(null);
     };
   }, [injected, connector]);

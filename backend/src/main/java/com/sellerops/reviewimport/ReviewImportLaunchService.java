@@ -147,6 +147,73 @@ public class ReviewImportLaunchService {
     }
 
     /**
+     * <b>The whole of "get this account's new reviews", as one call.</b> Find or create the plan, carry it to
+     * today, and authorize the next run — so a seller who asks for their latest reviews never meets a plan, a
+     * segment, or a merge.
+     *
+     * <p><b>The period is DERIVED, not asked for.</b> The seller's question is "what has arrived", and the
+     * answer to "from when" is already in the record: the last date this account has verified coverage for.
+     * Reading it is what stops the conversation lane doing what it did before — creating a plan from the first
+     * of the current month whatever had already been covered, which is how a seller ended up abandoning a
+     * plan, typing dates and merging segments to ask a question the product could answer itself.
+     *
+     * <p><b>Calendar months stay the unit.</b> The continuation is expressed as the month containing the day
+     * after the last covered one, because that is the segmentation this product's exports have always used —
+     * one export per month is a bound the marketplace screen imposes, not a detail to optimize away. A month
+     * that overlaps days already covered is safe by construction: ingest dedups, so the overlap costs rows
+     * nobody counts twice, never a wrong answer.
+     *
+     * <p>An account with nothing covered yet starts at the current month: one export, the reviews that exist
+     * now. Reaching further back is the recovery surface's job, where the seller can see what it costs.
+     *
+     * <p>Fails closed exactly where the pieces already do: an account that is not this org's, a plan with
+     * nothing remaining ("남은 구간이 없습니다"), a segment already running.
+     */
+    @Transactional
+    public ReviewImportLaunch mintNextForAccount(UUID orgId, UUID sellerAccountId) {
+        fence.bindAccount(orgId, sellerAccountId);
+        LocalDate today = LocalDate.now(clock);
+        ReviewImportPlan plan = openPlanOf(orgId, sellerAccountId)
+                .orElseGet(() -> recordSelectedRange(orgId, sellerAccountId,
+                        continuationMonth(orgId, sellerAccountId, today).toString()));
+        planService.extendPlanForward(orgId, plan.getId(), today);
+        return mintNextSegment(orgId, plan.getId());
+    }
+
+    /** The account's live plan, if it has one. Two live plans cannot exist — {@link #recordSelectedRange} refuses. */
+    private Optional<ReviewImportPlan> openPlanOf(UUID orgId, UUID sellerAccountId) {
+        return plans.findByOrgIdAndSellerAccountIdOrderByCreatedAtDesc(orgId, sellerAccountId).stream()
+                .filter(p -> p.getStatus() == ReviewImportPlanStatus.DRAFT || p.getStatus() == ReviewImportPlanStatus.ACTIVE)
+                .findFirst();
+    }
+
+    /**
+     * The month a new plan should start from: the one holding the day after this account's last VERIFIED
+     * covered date, clamped to what a plan may name. Coverage is read across all of the account's plans
+     * because coverage is a fact about the account, not about a plan.
+     */
+    private YearMonth continuationMonth(UUID orgId, UUID sellerAccountId, LocalDate today) {
+        LocalDate lastCovered = null;
+        for (ReviewImportPlan p : plans.findByOrgIdAndSellerAccountIdOrderByCreatedAtDesc(orgId, sellerAccountId)) {
+            LocalDate covered = ReviewImportCoverage
+                    .of(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(p.getId()))
+                    .lastCoveredDate();
+            if (covered != null && (lastCovered == null || covered.isAfter(lastCovered))) {
+                lastCovered = covered;
+            }
+        }
+        YearMonth current = YearMonth.from(today);
+        if (lastCovered == null) {
+            return current;
+        }
+        YearMonth next = YearMonth.from(lastCovered.plusDays(1));
+        if (next.isAfter(current)) {
+            return current;
+        }
+        return next.isBefore(EARLIEST_SELECTABLE_MONTH) ? EARLIEST_SELECTABLE_MONTH : next;
+    }
+
+    /**
      * Authorize a run for one specific segment (also the retry path for a FAILED one). Idempotent for the
      * same reason as {@link #mintDiscovery}.
      */

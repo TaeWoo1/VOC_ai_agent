@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useConversation } from "../../lib/conversation/ConversationProvider";
 import { NavIcon } from "../icons/NavIcon";
 import type { ConversationSummary } from "../../lib/conversation/types";
+import { relativeTime } from "../../lib/format";
 
 const ITEM =
   "flex min-h-[34px] w-full items-center gap-2 rounded-lg px-2.5 text-left text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2";
@@ -83,6 +84,12 @@ export function ConversationNav() {
               <ul className="space-y-0.5" aria-label="지난 대화">
                 {items.map((h) => {
                   const current = h.conversationId === currentId;
+                  // **The disambiguator appears exactly where the ambiguity is.** A seller who asks
+                  // 「네이버 리뷰 최신화해줘」 on three days gets three rows reading the same words, and the
+                  // list becomes unnavigable. A time column on EVERY row was removed for a good reason —
+                  // it restated the order the list is already in — so it comes back only on the rows that
+                  // cannot otherwise be told apart.
+                  const ambiguous = items.filter((o) => (o.headline ?? "") === (h.headline ?? "")).length > 1;
                   return (
                     <li key={h.conversationId}>
                       <button
@@ -99,6 +106,9 @@ export function ConversationNav() {
                             list is ordered by recency already — the column restated the order it was
                             in (Frontend-first Agent Workspace Redesign v1). */}
                         <span className="min-w-0 flex-1 truncate">{h.headline ?? "제목 없는 대화"}</span>
+                        {ambiguous ? (
+                          <span className="shrink-0 text-xs font-normal text-muted">{relativeTime(h.updatedAt)}</span>
+                        ) : null}
                       </button>
                     </li>
                   );

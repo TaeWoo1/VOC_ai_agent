@@ -7,11 +7,13 @@ import com.sellerops.reviewimport.dto.ReviewImportCoverageView;
 import com.sellerops.reviewimport.dto.ReviewImportHealthView;
 import com.sellerops.reviewimport.dto.ReviewImportPlanDetailView;
 import com.sellerops.reviewimport.dto.ReviewImportPlanView;
+import com.sellerops.reviewimport.dto.ReviewAcquisitionResultView;
 import com.sellerops.reviewimport.dto.ReviewImportSegmentView;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -61,6 +63,26 @@ public class ReviewImportQueryService {
         return attempts.findBySegmentIdOrderByAttemptNoAsc(segmentId).stream()
                 .map(ReviewImportAttemptView::from)
                 .toList();
+    }
+
+    /**
+     * What the guided run behind one ingest actually did — the window it covered and its three row tallies.
+     *
+     * <p><b>The run is named by its sync job, because that is the only id the caller has already proved.</b>
+     * The conversation's resume check matches a finished run to the step it asked for and holds that run's
+     * id; walking it back through {@code ReviewImportSegmentAttempt.syncJobId} reaches the attempt and its
+     * segment without the caller ever naming a plan. A run that no attempt links to was not a guided
+     * acquisition — the same test {@code ExecutableIdentityResolver} applies — and answers empty rather than
+     * inventing a window for a file somebody uploaded by hand.
+     */
+    @Transactional(readOnly = true)
+    public Optional<ReviewAcquisitionResultView> acquisitionResultOf(UUID orgId, UUID syncJobId) {
+        return attempts.findFirstBySyncJobId(syncJobId)
+                .filter(a -> orgId.equals(a.getOrgId()))
+                .flatMap(a -> segments.findByIdAndOrgId(a.getSegmentId(), orgId)
+                        .map(s -> new ReviewAcquisitionResultView(
+                                s.getSegmentStart(), s.getSegmentEnd(), a.getResult().name(),
+                                a.getRowsNew(), a.getRowsDuplicate(), a.getRowsFailed(), a.getFinishedAt())));
     }
 
     /**

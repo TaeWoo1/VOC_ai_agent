@@ -24,7 +24,10 @@ import { asOfWord } from "../../../lib/conversation/asOf";
 import { useContinueInPanel } from "../useContinueInPanel";
 
 const HEADLINE: Record<HumanAction["actionType"], string> = {
-  REVIEW_IMPORT: "최신 리뷰 가져오기",
+  // **The card names the QUESTION it answers, not the machinery that answers it** (Continuity v1 §1).
+  // A seller who asked 「오늘 네이버 리뷰 있어?」 is being offered the one thing that can answer it: a check
+  // of what has arrived. 「가져오기」 described our import; 「최신 상태 확인」 describes their question.
+  REVIEW_IMPORT: "리뷰 최신 상태 확인",
   CHANNEL_CONNECT: "이 채널을 확인하려면 연결이 필요합니다",
   KNOWLEDGE_ENTRY: "답변하려면 답변 기준이 필요합니다",
   VARIANT_CLARIFICATION: "규격을 확인해야 정확한 답변을 준비할 수 있습니다",
@@ -52,7 +55,7 @@ const GUIDED_SENTENCE: Record<GuidedAcquisitionPath, string> = {
   WING_READ_ACTION_WINDOW: "reviewnary가 판매자센터의 리뷰 화면을 준비합니다. 판매자님은 화면이 요구하는 확인과 페이지 넘기기만 하시면, reviewnary가 그 화면의 리뷰를 읽어 이 질문을 이어서 확인합니다.",
 };
 
-/** The card's title: the channel's own step, in four words — 「네이버 최신 리뷰 가져오기」 / 「네이버 리뷰 · 8월 20일 기준」. */
+/** The card's title: the channel's own step, in four words — 「네이버 리뷰 최신 상태 확인」 / 「네이버 리뷰 · 8월 20일 기준」. */
 function titleOf(artifact: HumanAction, channel: string | null): string {
   if (artifact.actionType !== "REVIEW_IMPORT") return HEADLINE[artifact.actionType];
   if (artifact.optional) {
@@ -103,7 +106,16 @@ export function HumanActionArtifact({
   const onOpen = useContinueInPanel("HUMAN_ACTION_REQUIRED");
   const [starting, setStarting] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [engaged, setEngaged] = useState(false);
+  /**
+   * **The press that opens the seller center — unless the sentence WAS that press.**
+   *
+   * 「네이버 리뷰 최신화해줘」 and 「오늘 리뷰 있어?」 reached the identical card, so a seller who had just
+   * written the instruction was handed a button repeating it back. `autoStart` is the runtime's
+   * deterministic reading of that sentence (`conversation/acquisitionRequest.ts`), and it starts the same
+   * guided READ run the button starts — same path, same seller confirmations in their own window, nothing
+   * clicked or downloaded for them. It never applies to a write, a composer or a submission.
+   */
+  const [engaged, setEngaged] = useState(artifact.autoStart === true);
   /**
    * Bumped to start a NEW guided run in this same card.
    *
@@ -117,7 +129,7 @@ export function HumanActionArtifact({
   const guided = GUIDED_PATHS.includes(artifact.path) && !!artifact.accountId ? (artifact.path as GuidedAcquisitionPath) : null;
   const review = artifact.actionType === "REVIEW_IMPORT";
   // The primary's label: an offer says what it does to the list; a required step says what it fetches.
-  const primaryLabel = artifact.optional ? "최신 상태로 갱신" : review ? "최신 리뷰 가져오기" : "지금 리뷰 가져오기";
+  const primaryLabel = artifact.optional ? "최신 상태로 갱신" : review ? "최신 상태 확인" : "지금 리뷰 가져오기";
 
   async function startSync() {
     if (!artifact.accountId) return;
@@ -373,10 +385,6 @@ function GuidedAcquisitionRun({
 }
 
 
-/** `YYYY-MM` of today (UTC) — the shortest range the import plan accepts: the current month up to today. */
-function thisMonth(): string {
-  return new Date().toISOString().slice(0, 7);
-}
 
 /**
  * The NAVER export started from a conversation — routed through the TRUSTED `import/naver` carrier (Acceptance
@@ -426,11 +434,11 @@ function NaverGuidedImportRun({
         // Attach BEFORE minting: a refused attach must not spend a single-use ticket.
         const runtime = await ensureRuntime();
         if (!runtime || !live) return;
-        const plans = await api.listReviewImportPlans(accountId);
-        const open = plans.find((p) => p.status === "DRAFT" || p.status === "ACTIVE");
-        const planId = open ? open.id : (await api.selectReviewImportRange(accountId, thisMonth())).plan.id;
-        // Carry the plan up to today so "new reviews" has a segment to run; idempotent on the server.
-        await api.extendReviewImportPlan(planId).catch(() => undefined);
+        // **The plan is the server's business, not the seller's** (Continuity v1 §2). One call finds or
+        // creates it, carries it to today, and authorizes the next run — from the period this account has
+        // actually verified. The four-request stitch this replaces guessed the period from the calendar and
+        // is what put 「구간」, 「병합」 and a date picker in a seller's way.
+        const launch = await api.launchNextReviewImportForAccount(accountId);
         // **The words the seller reads inside their SmartStore window.**
         //
         // Without this the runtime renders NO in-page panel at all (`ImportSegmentSession.queuePanelRender`
@@ -438,13 +446,12 @@ function NaverGuidedImportRun({
         // right controls and nothing on that screen said what to do, why the run had stopped, or offered the
         // recovery. The runtime authors no sentence of its own by design, so a lane that does not send the
         // pack is a lane with no guidance. The onboarding card has always sent it; this one never did.
-        const detail = await api.getReviewImportPlan(planId).catch(() => null);
+        const detail = launch.planId ? await api.getReviewImportPlan(launch.planId).catch(() => null) : null;
         runtime.setGuidancePack(
           buildImportGuidancePack(
-            detail ? continuationAfterNext(detail.segments, detail.nextSegmentId) : null,
+            detail ? continuationAfterNext(detail.segments, launch.segmentId ?? detail.nextSegmentId) : null,
           ),
         );
-        const launch = await api.launchNextReviewImportSegment(planId);
         try {
           // From here the attempt is COMMITTED: a ticket is spent-or-spendable and a command is on the wire,
           // so no later invocation of this effect may start another.

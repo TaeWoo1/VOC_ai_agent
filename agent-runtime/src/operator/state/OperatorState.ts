@@ -366,6 +366,12 @@ export interface ConversationRunContext {
   }>;
   /** Whether the seller's local agent is paired, as the frontend last saw it. Absent ⇒ UNKNOWN. */
   readonly localAgent?: "PAIRED" | "ABSENT" | "UNKNOWN";
+  /**
+   * The channel the SELLER last named in this thread (`conversation/channelFocus.ts`). Fills the plan's
+   * channel axis when the plan carries none, so a NAVER thread's follow-up reads NAVER rather than the
+   * org — the read itself, not only what the screen shows. Never replaces a channel the plan named.
+   */
+  readonly channelFocus?: string | null;
 }
 
 /** One specialist's terminal state as the answer reports it. */

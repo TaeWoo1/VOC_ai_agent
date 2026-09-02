@@ -38,6 +38,8 @@
 import type { InformationNeed, InvestigationPlan, NeedKind } from "../plan/InvestigationPlan";
 import { namesInstance } from "../plan/EntityRole";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
+import { settledPeriod } from "../../conversation/periodTerm";
+import { log } from "../../log";
 
 /**
  * How a need's scope came to be settled.
@@ -263,7 +265,15 @@ export function clarificationStands(plan: InvestigationPlan): boolean {
  */
 export function withOperationalDefaults(plan: InvestigationPlan, goalText?: string): InvestigationPlan {
   const appliedDefaults = plan.informationNeeds.map((n) => resolveScope(plan, n, goalText));
-  return { ...plan, appliedDefaults, clarificationNeeded: clarificationStands(plan) };
+  // A period the sentence NAMED outranks a different one the plan carries — the seller determined it, and
+  // an answer that reports 「이번 주」 under the words 「이번 달」 answers a smaller question in their voice
+  // (`conversation/periodTerm.ts`). Correction only: a plan with no period keeps none.
+  const period = plan.filters ? settledPeriod(plan.filters.period ?? null, goalText ?? "") : null;
+  const filters = plan.filters && period !== (plan.filters.period ?? null)
+    ? { ...plan.filters, period, periodDays: null }
+    : plan.filters;
+  if (filters !== plan.filters) log("plan_period_settled", { planned: plan.filters?.period ?? "NONE", settled: period ?? "NONE" });
+  return { ...plan, filters, appliedDefaults, clarificationNeeded: clarificationStands(plan) };
 }
 
 /** What each need kind is about, in the seller's language. Closed vocabulary — never a plan sentence. */

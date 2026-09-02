@@ -66,6 +66,7 @@ import type {
   ReviewDetailResponse,
   SellerAccountSummary,
   SyncRunParams,
+  ReviewAcquisitionResult,
   SyncRunSummary,
   ChannelCapabilityOverview,
   InquiryReplyTransportRow,
@@ -105,6 +106,11 @@ export interface SpringClient {
   listSellerAccounts(): Promise<SellerAccountSummary[]>;
   /** Collection run history (`GET /api/sync-runs?…`) — how a paused conversation learns a step finished. */
   listSyncRuns(params: SyncRunParams): Promise<SyncRunSummary[]>;
+  /**
+   * What the guided acquisition behind one finished run covered and brought in. Absent (null) when the run
+   * was not a guided acquisition — a hand-uploaded file has no window this may claim.
+   */
+  reviewAcquisitionResult(syncJobId: string): Promise<ReviewAcquisitionResult | null>;
   /**
    * Ask the backend to PREPARE one reply draft (`POST /api/inquiries/{id}/draft/generate`).
    *
@@ -561,6 +567,12 @@ export class HttpSpringClient
     if (params.status) q.set("status", params.status);
     const suffix = q.toString() ? `?${q.toString()}` : "";
     return this.request<SyncRunSummary[]>("GET", `/api/sync-runs${suffix}`);
+  }
+
+  async reviewAcquisitionResult(syncJobId: string): Promise<ReviewAcquisitionResult | null> {
+    return this.request<ReviewAcquisitionResult>(
+      "GET", `/api/imports/reviews/runs/${encodeURIComponent(syncJobId)}/acquisition`,
+    ).catch(() => null);
   }
 
   async manualSync(accountId: string, request: ManualSyncRequest): Promise<SyncRunSummary> {

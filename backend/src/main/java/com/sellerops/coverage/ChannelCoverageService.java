@@ -10,6 +10,7 @@ import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.order.fact.OrderStoreFreshness;
 import com.sellerops.review.ReviewRepository;
+import com.sellerops.reviewimport.ReviewImportSegmentAttemptRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import com.sellerops.sync.SyncJob;
@@ -73,11 +74,13 @@ public class ChannelCoverageService implements OrderStoreFreshness {
     private final InquiryRepository inquiries;
     private final ReviewRepository reviews;
     private final OrderDailySummaryRepository orders;
+    private final ReviewImportSegmentAttemptRepository acquisitions;
 
     public ChannelCoverageService(ChannelRepository channels, ConnectorCapabilityRepository capabilities,
                                   SellerAccountRepository accounts, SyncScheduleRepository schedules,
                                   SyncJobRepository syncJobs, InquiryRepository inquiries,
-                                  ReviewRepository reviews, OrderDailySummaryRepository orders) {
+                                  ReviewRepository reviews, OrderDailySummaryRepository orders,
+                                  ReviewImportSegmentAttemptRepository acquisitions) {
         this.channels = channels;
         this.capabilities = capabilities;
         this.accounts = accounts;
@@ -86,6 +89,7 @@ public class ChannelCoverageService implements OrderStoreFreshness {
         this.inquiries = inquiries;
         this.reviews = reviews;
         this.orders = orders;
+        this.acquisitions = acquisitions;
     }
 
     /**
@@ -284,14 +288,32 @@ public class ChannelCoverageService implements OrderStoreFreshness {
         return lastSuccess.isAfter(now.minusSeconds((long) minutes * 60 * FRESH_PERIODS));
     }
 
+    /**
+     * When this channel × type was last observed successfully — from EITHER record that can prove it.
+     *
+     * <p><b>Two paths reach the store and only one of them was being read.</b> A connector pull writes a
+     * sync run stamped with the account and the data type; a guided acquisition writes an upload-shaped run
+     * plus the {@code ReviewImportSegmentAttempt} that is its actual provenance. Reading only the first made
+     * a channel that had been verifiably exported this morning report 「아직 확인한 적이 없어요」, because a
+     * column that happens to be null decided the answer. The two records are the same claim in two shapes,
+     * so the later of them is the fact — and neither row is edited to make the past look different.
+     */
     private Instant lastSuccessfulSync(UUID orgId, UUID channelId, String dataType) {
         Optional<SyncJob> latest =
                 syncJobs.findFirstByOrgIdAndChannelIdAndDataTypeOrderByCreatedAtDesc(orgId, channelId, dataType);
         // Only a run that actually landed rows counts. A FAILED run is evidence the channel is NOT
         // answering, and letting it stand in for a success is how a broken credential reads as fresh.
-        return latest.filter(j -> "SUCCESS".equals(j.getStatus()) || "PARTIAL".equals(j.getStatus()))
+        Instant collected = latest.filter(j -> "SUCCESS".equals(j.getStatus()) || "PARTIAL".equals(j.getStatus()))
                 .map(SyncJob::getFinishedAt)
                 .orElse(null);
+        if (!"REVIEW".equals(dataType)) {
+            return collected;
+        }
+        Instant acquired = acquisitions.lastSucceededAt(orgId, channelId);
+        if (collected == null) {
+            return acquired;
+        }
+        return acquired == null || acquired.isBefore(collected) ? collected : acquired;
     }
 
     private static Map<UUID, long[]> pairs(List<Object[]> rows) {

@@ -250,9 +250,13 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
     needId,
   });
   if (rank && read.items.length > 0) notes.push(URGENCY_LIMIT);
-  if (read.truncated) {
-    notes.push(`초안이 있는 문의 중 ${read.detailReads}건까지만 답변 근거를 확인했습니다. 나머지는 초안 준비됨으로 표시했습니다.`);
-  }
+  // **The truncation is a fact about THESE rows, and the rows carry it.** It used to ride on the card AND
+  // in the turn's notes, so the same sentence appeared twice on one screen a few centimetres apart
+  // (observed 2026-09-02). The card wins for the same reason a step card wins over prose beside it: it is
+  // the thing the sentence is about.
+  const truncationNote = read.truncated
+    ? `초안이 있는 문의 중 ${read.detailReads}건까지만 답변 근거를 확인했습니다. 나머지는 초안 준비됨으로 표시했습니다.`
+    : null;
   const artifacts: Artifact[] = [];
   const list: InquiryListArtifact = {
     artifactId: `a-${pageRef.evidenceId}`,
@@ -265,7 +269,7 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
       limit: rank ? shown.length : limit, ...(term ? { term } : {}), ...(rank ? { rank: "URGENCY" as const } : {}),
     },
     more: { label: "문의 화면에서 처리하기", to: "/inquiries?state=NEEDS_REPLY", count: read.totalOpen + read.totalProposed },
-    ...(read.truncated ? { note: notes.filter((n) => n !== URGENCY_LIMIT).join(" ") } : {}),
+    ...(truncationNote ? { note: truncationNote } : {}),
   };
   artifacts.push(list);
 

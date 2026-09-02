@@ -144,4 +144,45 @@ class ReviewImportQueryServiceTest {
 
         assertThat(service.planDetail(orgId, planId).nextSegmentId()).isNull();
     }
+
+    /* ────────────── acquisitionResultOf — what one guided run did (Continuity v1 §3) ────────────── */
+
+    /**
+     * The client names the run; the server answers the window and the tallies. A run in another org, and a
+     * run no attempt links to (a hand-uploaded file), both answer empty — never a window we cannot prove.
+     */
+    @Test
+    void acquisitionResultAnswersTheWindowAndTalliesOfTheRunBehindOneIngest() {
+        UUID syncJobId = UUID.randomUUID();
+        UUID segId = UUID.randomUUID();
+        ReviewImportSegment segment = seg(segId, "2026-09-01", "2026-09-30", SegmentCoverageState.COVERED, 115);
+        ReviewImportSegmentAttempt attempt = new ReviewImportSegmentAttempt();
+        attempt.setOrgId(orgId);
+        attempt.setSegmentId(segId);
+        attempt.setSyncJobId(syncJobId);
+        attempt.setResult(SegmentAttemptResult.SUCCEEDED);
+        attempt.setRowsNew(115);
+        attempt.setRowsDuplicate(33);
+        attempt.setRowsFailed(0);
+        when(attempts.findFirstBySyncJobId(syncJobId)).thenReturn(Optional.of(attempt));
+        when(segments.findByIdAndOrgId(segId, orgId)).thenReturn(Optional.of(segment));
+
+        var result = service.acquisitionResultOf(orgId, syncJobId).orElseThrow();
+
+        assertThat(result.periodStart()).isEqualTo(LocalDate.parse("2026-09-01"));
+        assertThat(result.periodEnd()).isEqualTo(LocalDate.parse("2026-09-30"));
+        assertThat(result.rowsNew()).isEqualTo(115);
+        assertThat(result.rowsDuplicate()).isEqualTo(33);
+        assertThat(result.rowsFailed()).isZero();
+
+        // Another org's run does not exist for this caller.
+        assertThat(service.acquisitionResultOf(UUID.randomUUID(), syncJobId)).isEmpty();
+    }
+
+    @Test
+    void aRunNoAttemptLinksToIsNotAGuidedAcquisition() {
+        UUID syncJobId = UUID.randomUUID();
+        when(attempts.findFirstBySyncJobId(syncJobId)).thenReturn(Optional.empty());
+        assertThat(service.acquisitionResultOf(orgId, syncJobId)).isEmpty();
+    }
 }

@@ -67,6 +67,7 @@ import type { Artifact, ProgressStage } from "../../conversation/contract";
 import { READING_LABEL, STAGE_LABEL } from "../../conversation/contract";
 import type { KnowledgeCoverageRow, SignalCoverage } from "../../spring/types";
 import { subjectTermOf } from "../../conversation/subjectTerm";
+import { focusForAxis, withChannelFocus } from "../../conversation/channelFocus";
 import { log } from "../../log";
 
 export interface OperatorGraphDeps {
@@ -203,10 +204,17 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     const ordinal = await ordinalProduct(plan, state, resolved);
     if (ordinal) resolved.push(ordinal);
     // R7: decided once per dispatch, logged once; every specialist reads the same axis.
-    const axis = effectiveAxisOf(plan, state.conversation?.workingSet ?? null, true, {
+    // The thread's channel fills a channel axis the plan left empty — continuity at the READ, not at the
+    // renderer (`conversation/channelFocus.ts`). A plan that named a channel is untouched.
+    const subject = {
       topic: plan.filters?.topic && plan.filters.topic !== "OTHER" ? plan.filters.topic : null,
       term: plan.filters?.topic && plan.filters.topic !== "OTHER" ? null : subjectTermOf(state.goalText),
-    }, state.goalText);
+    };
+    const workingSet = state.conversation?.workingSet ?? null;
+    const axis = withChannelFocus(
+      effectiveAxisOf(plan, workingSet, true, subject, state.goalText),
+      focusForAxis(plan, workingSet, subject, state.goalText, state.conversation?.channelFocus ?? null),
+    );
     let knowledge: Record<string, import("../../spring/types").ProductKnowledge> = {};
     let knowledgeCoverage: KnowledgeCoverageRow[] = [];
     const findingsSoFar: Finding[] = [...state.findings];

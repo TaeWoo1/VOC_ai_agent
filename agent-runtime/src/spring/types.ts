@@ -1187,6 +1187,21 @@ export interface SyncRunSummary {
   readonly startedAt: string | null;
   readonly finishedAt: string | null;
 }
+/**
+ * GET /api/imports/reviews/runs/{syncJobId}/acquisition — what ONE guided acquisition covered and brought
+ * in. The conversation's resume check names the run; the backend answers from the attempt row the ingest
+ * wrote, so no count the browser could assert reaches the transcript.
+ */
+export interface ReviewAcquisitionResult {
+  readonly periodStart: string | null;
+  readonly periodEnd: string | null;
+  readonly result: string;
+  readonly rowsNew: number | null;
+  readonly rowsDuplicate: number | null;
+  readonly rowsFailed: number | null;
+  readonly finishedAt: string | null;
+}
+
 export interface SyncRunParams {
   readonly sellerAccountId?: string;
   readonly channelId?: string;

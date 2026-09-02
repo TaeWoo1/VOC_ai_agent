@@ -16,6 +16,14 @@ const listReviewImportPlans = vi.fn(async (..._a: unknown[]) => [] as unknown[])
 const selectReviewImportRange = vi.fn(async (..._a: unknown[]) => ({ plan: { id: "plan-1" } }));
 const extendReviewImportPlan = vi.fn(async (..._a: unknown[]) => ({ plan: { id: "plan-1" } }));
 const launchNextReviewImportSegment = vi.fn(async (..._a: unknown[]) => ({ launchRef: "0f1e2d3c4b5a6978", kind: "SEGMENT" }));
+/**
+ * Continuity v1 §2: the conversation lane asks for ONE thing — "authorize this account's next review run" —
+ * and the server finds or creates the plan, carries it to today and picks the segment. The four-request
+ * stitch this replaces is what made the seller meet a plan, a date picker and a merge.
+ */
+const launchNextReviewImportForAccount = vi.fn(async (..._a: unknown[]) => (
+  { launchRef: "0f1e2d3c4b5a6978", kind: "SEGMENT", planId: "plan-1", segmentId: "seg-1" }
+));
 const getReviewImportPlan = vi.fn(async (..._a: unknown[]) => ({
   plan: { id: "plan-1" },
   segments: [{ id: "seg-1", segmentStart: "2026-08-20", segmentEnd: "2026-09-02", executionState: "PENDING", coverageState: "UNVERIFIED" }],
@@ -30,6 +38,7 @@ vi.mock("../../../lib/apiClient", () => ({
     selectReviewImportRange: (...a: unknown[]) => selectReviewImportRange(...a),
     extendReviewImportPlan: (...a: unknown[]) => extendReviewImportPlan(...a),
     launchNextReviewImportSegment: (...a: unknown[]) => launchNextReviewImportSegment(...a),
+    launchNextReviewImportForAccount: (...a: unknown[]) => launchNextReviewImportForAccount(...a),
     getReviewImportPlan: (...a: unknown[]) => getReviewImportPlan(...a),
     expireReviewImportLaunch: (...a: unknown[]) => expireReviewImportLaunch(...a),
   },
@@ -116,16 +125,16 @@ describe("human action artifact — one primary per path", () => {
     manualSync.mockResolvedValue({ id: "run-1" });
     const onResume = vi.fn();
     render(<MemoryRouter><HumanActionArtifact artifact={artifact({})} onResume={onResume} /></MemoryRouter>);
-    expect(screen.getByRole("heading", { name: "카페24 자사몰 최신 리뷰 가져오기" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "카페24 자사몰 리뷰 최신 상태 확인" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "직접 진행하기" })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 상태 확인" }));
     await waitFor(() => expect(manualSync).toHaveBeenCalledWith("acc-1", "REVIEW"));
     await waitFor(() => expect(onResume).toHaveBeenCalledTimes(1));
   });
 
   it("ACTION_WINDOW / FILE_UPLOAD: a link to the screen, returning to the home", () => {
     render(<MemoryRouter><HumanActionArtifact artifact={artifact({ path: "ACTION_WINDOW", to: "/connect/channels/acc-1", channelNameKo: "쿠팡" })} onResume={() => undefined} /></MemoryRouter>);
-    expect(screen.queryByRole("button", { name: "최신 리뷰 가져오기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "최신 상태 확인" })).toBeNull();
     expect(screen.getByRole("link", { name: "직접 진행하기" })).toHaveAttribute("href", "/connect/channels/acc-1?returnTo=%2F");
     expect(manualSync).not.toHaveBeenCalled();
   });
@@ -159,7 +168,7 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
     expect(screen.queryByRole("link", { name: "파일로 올리기" })).toBeNull();
     expect(screen.queryByRole("button", { name: "계속 확인하기" })).toBeNull();
     expect(runtime.start).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 상태 확인" }));
     expect(screen.getByText(/판매자센터의 리뷰 내려받기 화면과 기간을 준비합니다/)).toBeInTheDocument();
     // …and now they are there, as what they are: the way out of a step the seller is standing in. Still a
     // text link, never a second primary.
@@ -168,9 +177,10 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
     await waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
     // Acceptance Closure §4: the run is bound to a launch the backend minted for THIS account — the same
     // trusted `import/naver` path onboarding uses — never a v1-clean export nobody can attribute.
-    expect(listReviewImportPlans).toHaveBeenCalledWith("acc-nv");
-    expect(selectReviewImportRange).toHaveBeenCalledTimes(1);
-    expect(launchNextReviewImportSegment).toHaveBeenCalledWith("plan-1");
+    expect(launchNextReviewImportForAccount).toHaveBeenCalledWith("acc-nv");
+    // The lane no longer picks a period of its own — that is what put 구간/병합 in a seller's way (§2).
+    expect(selectReviewImportRange).not.toHaveBeenCalled();
+    expect(extendReviewImportPlan).not.toHaveBeenCalled();
     expect(runtime.starts).toEqual([{ launchRef: "0f1e2d3c4b5a6978", kind: "SEGMENT" }]);
     expect(startReviewAcquisitionRun).not.toHaveBeenCalled();
     expect(expireReviewImportLaunch).not.toHaveBeenCalled();
@@ -187,8 +197,54 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
     expect(onResume).toHaveBeenCalledTimes(1);
   });
 
-  it("NAVER export: an existing open plan is reused, and a refused start hands the unspent ticket back", async () => {
-    listReviewImportPlans.mockResolvedValueOnce([{ id: "plan-9", status: "ACTIVE" }]);
+  /**
+   * <b>§1 — an instruction is not answered with a button that repeats it.</b>
+   *
+   * 「네이버 리뷰 최신화해줘」 and 「오늘 리뷰 있어?」 produced the same card, so a seller who had just written
+   * the instruction was handed a control asking for it again. `autoStart` is the runtime's deterministic
+   * reading of that sentence; the run it starts is the identical guided READ — same carrier, same launch,
+   * same seller-performed confirmations in their own window.
+   */
+  it("autoStart: the sentence WAS the press — the run starts on arrival, with no second control to find", async () => {
+    const runtime = fakeImport();
+    render(
+      <MemoryRouter>
+        <HumanActionArtifact
+          artifact={artifact({
+            path: "EXPORT_ACTION_WINDOW", channelCode: "NAVER", channelNameKo: "네이버",
+            accountId: "acc-nv", autoStart: true,
+          })}
+          onResume={vi.fn()}
+          importRuntime={runtime as never}
+        />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
+    expect(launchNextReviewImportForAccount).toHaveBeenCalledWith("acc-nv");
+    // The button that asked for the instruction a second time is not rendered at all.
+    expect(screen.queryByRole("button", { name: "최신 상태 확인" })).toBeNull();
+    expect(screen.getByText(/판매자센터의 리뷰 내려받기 화면과 기간을 준비합니다/)).toBeInTheDocument();
+  });
+
+  it("without autoStart nothing starts until the seller presses — the default is unchanged", async () => {
+    launchNextReviewImportForAccount.mockClear();
+    const runtime = fakeImport();
+    render(
+      <MemoryRouter>
+        <HumanActionArtifact
+          artifact={artifact({ path: "EXPORT_ACTION_WINDOW", channelCode: "NAVER", channelNameKo: "네이버", accountId: "acc-nv" })}
+          onResume={vi.fn()}
+          importRuntime={runtime as never}
+        />
+      </MemoryRouter>,
+    );
+    await act(async () => {});
+    expect(runtime.start).not.toHaveBeenCalled();
+    expect(launchNextReviewImportForAccount).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "최신 상태 확인" })).toBeInTheDocument();
+  });
+
+  it("NAVER export: a refused start hands the unspent ticket back", async () => {
     const runtime = fakeImport();
     runtime.start.mockRejectedValueOnce(new Error("refused"));
     render(
@@ -200,9 +256,9 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
         />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 상태 확인" }));
     await waitFor(() => expect(expireReviewImportLaunch).toHaveBeenCalledWith("0f1e2d3c4b5a6978"));
-    expect(launchNextReviewImportSegment).toHaveBeenCalledWith("plan-9");
+    expect(launchNextReviewImportForAccount).toHaveBeenCalledWith("acc-nv");
     expect(await screen.findByRole("status")).toHaveTextContent(/준비하지 못했습니다/);
   });
 
@@ -228,13 +284,13 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
         </MemoryRouter>
       </StrictMode>,
     );
-    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 상태 확인" }));
     await waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
     // The mint MAY be attempted more than once here and that is not a defect: it is idempotent by segment —
     // an open `ISSUED` ticket is handed back rather than a second one created, which was verified against the
     // live backend on 2026-09-02. What must be exactly one is the `START_RUN`, and what must never be zero is
     // the run. The teardown of an uncommitted attempt is what allows the second invocation to get there.
-    expect(launchNextReviewImportSegment.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(launchNextReviewImportForAccount.mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 
   /**
@@ -257,7 +313,7 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
         />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 상태 확인" }));
     await waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
     expect(runtime.setGuidancePack).toHaveBeenCalledTimes(1);
     const pack = runtime.setGuidancePack.mock.calls[0]![0] as { chrome?: { product?: string } };
@@ -280,7 +336,7 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
         />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 상태 확인" }));
     await waitFor(() => expect(startReviewAcquisitionRun).toHaveBeenCalledWith("acc-cp"));
     await waitFor(() => expect(runtime.starts).toEqual([{ intent: "REVIEW_ACQUISITION", acquisitionRef: "acq-1" }]));
     expect(screen.queryByRole("link", { name: "직접 진행하기" })).toBeNull();
@@ -294,7 +350,7 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
         <HumanActionArtifact artifact={artifact({ path: "WING_READ_ACTION_WINDOW", channelCode: "COUPANG", channelNameKo: "쿠팡", accountId: "acc-cp", to: null })} onResume={() => undefined} acquireRuntime={runtime} />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
+    await userEvent.click(screen.getByRole("button", { name: "최신 상태 확인" }));
     expect(await screen.findByText(/판매자센터 화면을 준비하지 못했습니다/)).toBeInTheDocument();
     expect(runtime.start).not.toHaveBeenCalled();
   });
@@ -307,9 +363,9 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
       </MemoryRouter>,
     );
     expect(screen.getAllByTestId("human-action-artifact")).toHaveLength(2);
-    expect(screen.getByRole("heading", { name: "네이버 최신 리뷰 가져오기" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "쿠팡 최신 리뷰 가져오기" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "최신 리뷰 가져오기" })).toHaveLength(2);
+    expect(screen.getByRole("heading", { name: "네이버 리뷰 최신 상태 확인" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "쿠팡 리뷰 최신 상태 확인" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "최신 상태 확인" })).toHaveLength(2);
   });
 });
 
@@ -317,11 +373,11 @@ describe("human action artifact — freshness UX v1: compact, 「언제 기준�
   const reference = new Date("2026-08-29T03:00:00Z"); // 12:00 KST
   it("a required step names the last observation in one line, and no mechanism word", () => {
     render(<MemoryRouter><HumanActionArtifact artifact={artifact({ path: "WING_READ_ACTION_WINDOW", channelCode: "COUPANG", channelNameKo: "쿠팡", accountId: "acc-cp", asOf: "2026-08-20T01:00:00Z" })} onResume={() => undefined} acquireRuntime={fakeAcquire()} /></MemoryRouter>);
-    expect(screen.getByRole("heading", { name: "쿠팡 최신 리뷰 가져오기" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "쿠팡 리뷰 최신 상태 확인" })).toBeInTheDocument();
     expect(screen.getByText("8월 20일 이후 아직 확인하지 못했어요.")).toBeInTheDocument();
     // ONE control at rest. 「계속 확인하기」 arrives with the run it would resume (v3) — before the press
     // there is no run, and offering to resume nothing is how this card came to hold three buttons.
-    expect(screen.getByRole("button", { name: "최신 리뷰 가져오기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "최신 상태 확인" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "계속 확인하기" })).toBeNull();
     const text = screen.getByTestId("human-action-artifact").textContent ?? "";
     expect(text).not.toMatch(/sync|coverage|SyncJob|수집 확인 안 됨|최신 상태가 아닙니다/i);

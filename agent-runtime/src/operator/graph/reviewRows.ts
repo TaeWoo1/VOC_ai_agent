@@ -55,6 +55,7 @@ import type { ChannelCapabilitySources, ChannelCapabilityVerdict } from "../capa
 import { REFRESH_FAILURE_LABEL } from "./reviewRefresh";
 import { asOfWord } from "../../conversation/asOf";
 import type { RefreshFailure } from "./reviewRefresh";
+import { isAcquisitionRequest } from "../../conversation/acquisitionRequest";
 import { log } from "../../log";
 
 const ROWS_SIZE = 50;
@@ -180,7 +181,7 @@ function freshnessOf(read: RecentReviewsRead, channel: string | null, window: Da
  * the seller-run path the product ships for that channel. The same closed fact `freshnessVerdict`
  * already relies on, expressed in the overview's shape so one resolver serves both.
  */
-function overviewFromCoverage(row: ChannelCoverageRow): ChannelCapabilityOverview {
+export function overviewFromCoverage(row: ChannelCoverageRow): ChannelCapabilityOverview {
   const code = row.channelCode.toUpperCase();
   const guidedMethod = code === "NAVER" ? "EXPORT" : code === "COUPANG" ? "ACTION_WINDOW" : null;
   return {
@@ -271,13 +272,24 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
   // A follow-up over what was already shown filters rows the seller has; it asks for no collection
   // (R1). The freshness rows are still on the artifact — what changes is that nobody is sent away.
   const staleOf = (rows: readonly FreshnessRow[]) => rows.filter((f) => f.verdict === "UNPROVEN" || f.verdict === "NOT_COLLECTED");
-  let stale = staleOf(freshness);
+  /**
+   * <b>An instruction to collect is not a freshness question.</b> Freshness decides whether we must ASK;
+   * it does not decide whether the seller may ask US. Once the guided export had run this morning the
+   * channel read FRESH, and 「최신화해줘」 answered with the rows and no way to collect — the seller's own
+   * instruction refused by our verdict about it. So an explicit request treats every readable channel as
+   * one to act on, and everything downstream (capability, path, the seller's own confirmations) is
+   * unchanged (`conversation/acquisitionRequest.ts`).
+   */
+  const acquisitionAsked = isAcquisitionRequest(input.goalText ?? "", { reviewsInContext: input.workingSet?.kind === "REVIEWS" });
+  const actionableOf = (rows: readonly FreshnessRow[]) =>
+    rows.filter((f) => f.verdict !== "NOT_CONNECTED" && f.verdict !== "NOT_SUPPORTED");
+  let stale = acquisitionAsked ? actionableOf(freshness) : staleOf(freshness);
   // A window the seller was already asked to collect is not asked for twice: while that step is pending,
   // the same question shows the rows held (the human-step card is still in the thread above).
   // …but the WINDOW stays gated (Acceptance Closure §8-C): the same question does not get a second card,
   // and it does not get 「오늘 0건」 either — the channel is still unproven until the step lands.
   const alreadyAsked = input.pendingHumanWindow != null && input.pendingHumanWindow === token;
-  const required = previous == null && isFreshnessRequired(token);
+  const required = previous == null && (acquisitionAsked || isFreshnessRequired(token));
   const accountOf = new Map(read.accounts.map((a) => [a.channelCode.toUpperCase(), a]));
   const requestedAt = new Date().toISOString();
   const refreshFailures: Array<{ channelNameKo: string; asOf: string | null; failure: RefreshFailure }> = [];
@@ -413,12 +425,18 @@ export async function readRecentReviews(input: SpecialistInput): Promise<ReviewO
     surfaceLink: "/reviews",
     needId,
   });
+  const scopeName = channel
+    ? freshness.find((f) => f.channelCode.toUpperCase() === channel.toUpperCase())?.channelNameKo ?? null
+    : null;
   const list: ReviewListArtifact = {
     artifactId: `a-${listRef.evidenceId}`,
     type: "REVIEW_LIST",
+    // <b>A scoped read names its scope on the object, not in prose.</b> When the rows are one channel's —
+    // whether the sentence said so or the thread's focus did — the card says whose they are, so a narrowing
+    // the seller did not restate this turn is still visible where the rows are (Chat-first Continuity §5).
     title: (previous ? (ratingWord ? `방금 본 리뷰 중 ${ratingWord}리뷰` : "방금 본 리뷰")
       : widenedFromReview ? `같은 상품의 ${ratingWord}리뷰`
-        : label ? `${label} 들어온 ${ratingWord}리뷰` : `${ratingWord}리뷰`)
+        : `${scopeName ? `${scopeName} ` : ""}${label ? `${label} 들어온 ` : ""}${ratingWord}리뷰`)
       + (limit != null ? ` · ${order === "OLDEST" ? "가장 오래된" : "가장 최근"} ${Math.min(limit, rows.length)}건` : ""),
     scope: { channelCode: channel, period: window, rating, productId: product },
     totalCount: total,

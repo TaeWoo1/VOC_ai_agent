@@ -388,7 +388,7 @@ function oneOf<T extends string>(value: string | null | undefined, allowed: read
 function filtersOf(raw: AgentPlanView["filters"]): PlanFilters {
   if (!raw) return NO_FILTERS;
   return {
-    period: oneOf(raw.period, ["TODAY", "YESTERDAY", "LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS", "THIS_WEEK", "LAST_WEEK", "LAST_N_DAYS"] as const),
+    period: oneOf(raw.period, ["TODAY", "YESTERDAY", "LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS", "THIS_WEEK", "LAST_WEEK", "THIS_MONTH", "LAST_MONTH", "LAST_N_DAYS"] as const),
     // The day count is only a window WITH the token that needs one: a number beside 「오늘」 would be a
     // second period the seller did not name, so it is dropped rather than reconciled.
     periodDays: raw.period === "LAST_N_DAYS" && typeof raw.periodDays === "number" && Number.isInteger(raw.periodDays)

@@ -23,9 +23,11 @@ import type { InvestigationPlan, PlanFilters } from "./InvestigationPlan";
 import { conversationAxisOf } from "./InvestigationPlan";
 import type { WorkingSetView } from "../../conversation/contract";
 import { hasRefineExpression, namesOwnObject } from "../../conversation/reference";
+import { isAcquisitionRequest } from "../../conversation/acquisitionRequest";
 import { log } from "../../log";
 
-export type ScopeOverrideReason = "NEW_PERIOD" | "EMPTY_SET" | "NEW_LIMIT" | "NEW_SUBJECT" | "NO_REFINE_EXPRESSION";
+export type ScopeOverrideReason =
+  | "NEW_PERIOD" | "EMPTY_SET" | "NEW_LIMIT" | "NEW_SUBJECT" | "NO_REFINE_EXPRESSION" | "ACQUISITION_REQUEST";
 
 /**
  * What the SENTENCE says the question is about — the closed topic family the planner named and the
@@ -62,6 +64,13 @@ export function scopeOverrideOf(
   const { filters } = conversationAxisOf(plan);
   if (filters.scope !== "WORKING_SET") return null;
   if (!workingSet) return "EMPTY_SET";
+  // <b>「그럼 최신화해줘」 is not a filter of the rows on screen.</b> An instruction to COLLECT is about the
+  // channel, so reading it as a narrowing re-prints the same list and collects nothing — observed live
+  // 2026-09-02: 「오늘 네이버 리뷰 있어?」 then 「그럼 최신화해줘」 answered 「방금 본 2건 중 리뷰는 2건입니다」.
+  // Checked first because it contradicts the follow-up reading outright rather than qualifying it.
+  if (goalText != null && isAcquisitionRequest(goalText, { reviewsInContext: workingSet.kind === "REVIEWS" })) {
+    return "ACQUISITION_REQUEST";
+  }
   // A set that IS 「파손 문의」 cannot be narrowed into 「교환 문의」: the two subjects are disjoint by
   // construction, so 「방금 본 문의 중 교환 관련은 없습니다」 is arithmetically true and operationally a
   // wrong answer — the seller asked the ORG a new question. Found live 2026-08-31.

@@ -127,6 +127,16 @@ export type PeriodToken =
   | "THIS_WEEK"
   | "LAST_WEEK"
   /**
+   * The calendar month, this one or the last (Chat-first Completion & Continuity v1).
+   *
+   * <b>An axis that cannot hold what the seller said drops it silently.</b> The token list held weeks and
+   * trailing day counts and no months, so 「이번 달 리뷰 어때?」 had nothing to be planned as — and what came
+   * back was 「이번 주」, a different question answered under the seller's own words. That is the LAST_N_DAYS
+   * defect in a second axis: the repair is the value the calendar already has, not a better prompt.
+   */
+  | "THIS_MONTH"
+  | "LAST_MONTH"
+  /**
    * A trailing window the seller named by its LENGTH — 「최근 3일」, 「최근 열흘」 (Conversation Contract
    * Correctness v2). Carries its day count in {@link PlanFilters.periodDays} and in
    * {@link DateWindow.days}.
@@ -484,6 +494,15 @@ export interface HumanActionRequiredArtifact extends ArtifactBase {
    * them current. The turn is DONE, not WAITING_HUMAN; the card is compact (「최신 상태로 갱신」).
    */
   readonly optional?: boolean;
+  /**
+   * <b>The seller already said "do it".</b> Set when the sentence that produced this card was an explicit
+   * instruction to collect (`conversation/acquisitionRequest.ts`) — the card then starts its guided run on
+   * arrival instead of rendering a button that asks for the instruction a second time.
+   *
+   * READ acquisition only, and it widens nothing: the run is the same guided run, the seller still performs
+   * every confirmation the marketplace asks for in their own window, and no write path reads this field.
+   */
+  readonly autoStart?: boolean;
 }
 
 /** What kind of operational object an approval / draft / execution is about. */

@@ -689,4 +689,80 @@ class ReviewImportLaunchServiceTest {
             return e;
         }
     }
+
+    /* ───────────────── mintNextForAccount — the plan the seller never sees (Continuity v1 §2) ───────────────── */
+
+    /**
+     * An account already working through a plan continues it: the plan is carried to today and the next
+     * remaining segment is authorized. No range is asked for, and no second plan is created.
+     */
+    @Test
+    void nextForAccountContinuesTheOpenPlan() {
+        stubSave();
+        ReviewImportPlan open = plan();
+        open.setStatus(ReviewImportPlanStatus.ACTIVE);
+        when(plans.findByOrgIdAndSellerAccountIdOrderByCreatedAtDesc(orgId, accountId)).thenReturn(List.of(open));
+        when(plans.findByIdAndOrgId(planId, orgId)).thenReturn(Optional.of(open));
+        when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId))
+                .thenReturn(List.of(segment(SegmentExecutionState.PENDING, SegmentCoverageState.UNVERIFIED)));
+        when(launches.findBySegmentIdAndStatus(segId, ReviewImportLaunchStatus.ISSUED)).thenReturn(Optional.empty());
+
+        ReviewImportLaunch ticket = dated.mintNextForAccount(orgId, accountId);
+
+        assertThat(ticket.getKind()).isEqualTo(ReviewImportLaunchKind.SEGMENT);
+        assertThat(ticket.getSegmentId()).isEqualTo(segId);
+        // Carried forward on the SAME plan — the incremental step, not a new plan.
+        verify(planService).extendPlanForward(orgId, planId, LocalDate.parse("2026-07-26"));
+        verify(planService, never()).createPlan(any(), any(), any(), any(), any());
+    }
+
+    /**
+     * With no open plan, the period is DERIVED from what this account has already verified: coverage
+     * through 2026-06-30 makes the continuation July, not "the current month whatever was covered" and
+     * not a range the seller had to type.
+     */
+    @Test
+    void nextForAccountStartsFromTheLastCoveredMonth() {
+        stubSave();
+        ReviewImportPlan finished = plan();
+        finished.setStatus(ReviewImportPlanStatus.COMPLETED);
+        ReviewImportSegment covered = segment(SegmentExecutionState.COMPLETED, SegmentCoverageState.COVERED);
+        covered.setSegmentStart(LocalDate.parse("2026-06-01"));
+        covered.setSegmentEnd(LocalDate.parse("2026-06-30"));
+        when(plans.findByOrgIdAndSellerAccountIdOrderByCreatedAtDesc(orgId, accountId)).thenReturn(List.of(finished));
+        when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId)).thenReturn(List.of(covered));
+        when(launches.findByOrgIdAndSellerAccountIdAndKindAndStatus(
+                orgId, accountId, ReviewImportLaunchKind.DISCOVERY, ReviewImportLaunchStatus.ISSUED))
+                .thenReturn(Optional.empty());
+        ReviewImportPlan created = plan();
+        created.setId(UUID.randomUUID());
+        when(planService.createPlan(eq(orgId), eq(accountId), eq(channelId), any(), any())).thenReturn(created);
+        when(plans.findByIdAndOrgId(created.getId(), orgId)).thenReturn(Optional.of(created));
+        ReviewImportSegment july = segment(SegmentExecutionState.PENDING, SegmentCoverageState.UNVERIFIED);
+        july.setId(UUID.randomUUID());
+        july.setPlanId(created.getId());
+        when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(created.getId())).thenReturn(List.of(july));
+        when(segments.findByIdAndOrgId(july.getId(), orgId)).thenReturn(Optional.of(july));
+        when(plans.findByIdAndOrgId(created.getId(), orgId)).thenReturn(Optional.of(created));
+        when(launches.findBySegmentIdAndStatus(july.getId(), ReviewImportLaunchStatus.ISSUED)).thenReturn(Optional.empty());
+
+        dated.mintNextForAccount(orgId, accountId);
+
+        verify(planService).createPlan(orgId, accountId, channelId,
+                LocalDate.parse("2026-07-01"), LocalDate.parse("2026-07-26"));
+    }
+
+    /** Nothing remaining is a conflict, not an invented run. */
+    @Test
+    void nextForAccountRefusesWhenNothingRemains() {
+        ReviewImportPlan open = plan();
+        open.setStatus(ReviewImportPlanStatus.ACTIVE);
+        when(plans.findByOrgIdAndSellerAccountIdOrderByCreatedAtDesc(orgId, accountId)).thenReturn(List.of(open));
+        when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId))
+                .thenReturn(List.of(segment(SegmentExecutionState.COMPLETED, SegmentCoverageState.COVERED)));
+
+        assertThatThrownBy(() -> dated.mintNextForAccount(orgId, accountId))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("남은 구간이 없습니다");
+    }
 }

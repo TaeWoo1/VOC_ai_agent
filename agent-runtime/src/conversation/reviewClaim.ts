@@ -38,6 +38,8 @@ function windowWord(window: DateWindow): string {
     case "YESTERDAY": return "어제";
     case "THIS_WEEK": return "이번 주에";
     case "LAST_WEEK": return "지난주에";
+    case "THIS_MONTH": return "이번 달에";
+    case "LAST_MONTH": return "지난달에";
     case "LAST_7_DAYS": return "최근 7일 안에";
     case "LAST_14_DAYS": return "최근 14일 안에";
     case "LAST_30_DAYS": return "최근 30일 안에";
