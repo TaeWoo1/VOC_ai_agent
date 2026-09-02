@@ -217,6 +217,20 @@ function __awPageStateText() {
  *
  * `asOfDate` is the explicit KST as-of civil date the recency bucket is computed against (no clock is read).
  */
+/**
+ * How many review rows the page is showing, and nothing else.
+ *
+ * <b>The cheap half of the ladder</b> (2026-09-03). The seller center is a single-page app: at
+ * `domcontentloaded` the shell exists and the review list does not, and a run that scanned 441ms after
+ * landing read an empty page and ended as TARGET_NOT_FOUND — measured, twice. Waiting needs a probe that
+ * can be asked every few hundred milliseconds, so this one counts rows with the SAME `__awIdRows()` the
+ * ladder uses and computes no fingerprints. Read-only; returns a number, never a row, never any text.
+ */
+export const IN_PAGE_REVIEW_ROW_COUNT = `(() => {
+${IN_PAGE_ID_HELPERS}
+return __awIdRows().length;
+})()`;
+
 export function inPageReviewIdLadder(asOfDate: { year: number; month: number; day: number }): string {
   return `(async () => {
 ${IN_PAGE_ID_HELPERS}

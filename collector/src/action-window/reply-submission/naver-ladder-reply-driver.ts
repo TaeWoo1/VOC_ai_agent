@@ -23,7 +23,9 @@ import type { ReplySubmitProbeDriver } from "./reply-driver";
 import { composerSigFor, replyComposerLocateDecision } from "./reply-surface";
 import type { ReplyTargetHint } from "./reply-surface";
 import { civilDateParts, parseLadderResult } from "./review-id-ladder-parse";
-import { IN_PAGE_ID_OUTLINE_TEARDOWN, inPageOutlineRowAt, inPageReviewIdLadder } from "./review-id-probe-inpage";
+import { IN_PAGE_ID_OUTLINE_TEARDOWN, inPageOutlineRowAt, inPageReviewIdLadder,
+  IN_PAGE_REVIEW_ROW_COUNT,
+} from "./review-id-probe-inpage";
 import {
   IN_PAGE_ANNOTATE_SCOPED_COMPOSER,
   IN_PAGE_ARM_OPEN_OBSERVER,
@@ -75,6 +77,11 @@ const ARM_SUBMIT_OBSERVER = `(() => {
   return true;
 })()`;
 
+/** How often the surface wait re-asks the page. Short enough to feel immediate, long enough to be free. */
+const SURFACE_POLL_INTERVAL_MS = 700;
+/** The floor between two re-landings, so a stubborn page is not navigated in a loop. */
+const SURFACE_RELAND_INTERVAL_MS = 6_000;
+
 export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
   private readonly page: LadderReplyPage;
   private readonly hint: ReplyTargetHint;
@@ -112,11 +119,34 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
     }
   }
 
+  /** How many review rows the page is showing right now. Read-only; a failure reads as none. */
+  private async reviewRowCount(): Promise<number> {
+    try {
+      const n = await this.page.evaluate<number>(IN_PAGE_REVIEW_ROW_COUNT);
+      return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * The precondition the engine has always ASSUMED this meant: the seller's review list is on screen.
+   *
+   * <b>It used to mean「the URL does not say login」</b>, which is a different and much weaker claim. The
+   * seller center is a single-page app, so at `domcontentloaded` the shell has rendered and the list has
+   * not: measured on 2026-09-03, the ladder ran 441ms after landing, saw `rowsOnPage: 0`, and the run ended
+   * as TARGET_NOT_FOUND on a page that was about to show the review the run was looking for.
+   *
+   * A missing list is reported as `LOGIN_REQUIRED` — the recoverable code — because the two reasons it is
+   * missing are both things a wait resolves: the seller has not signed in yet, or the app has not painted
+   * yet. {@link waitForSurfaceReady} is what waits; if it gives up, this code is what the seller is told,
+   * and 「리뷰 목록을 화면에 띄우지 못했습니다」 is what it will have meant.
+   */
   async prepareSurface(): Promise<SurfaceProbeResult> {
-    const loggedIn = await this.page.evaluate<boolean>(IN_PAGE_LOGIN_SIGNAL);
-    this.diag("aw_naver_reply_surface_probe", { loggedIn });
-    if (!loggedIn) return { ok: false, code: "LOGIN_REQUIRED" };
-    return true;
+    const loggedIn = await this.page.evaluate<boolean>(IN_PAGE_LOGIN_SIGNAL).catch(() => false);
+    const rows = loggedIn ? await this.reviewRowCount() : 0;
+    this.diag("aw_naver_reply_surface_probe", { loggedIn, rowsOnPage: rows });
+    return loggedIn && rows > 0 ? true : { ok: false, code: "LOGIN_REQUIRED" };
   }
 
   /**
@@ -130,17 +160,33 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
    * already navigated to.
    */
   async waitForSurfaceReady(): Promise<boolean> {
-    try {
-      await this.page.waitForFunction(IN_PAGE_LOGIN_SIGNAL, { timeout: this.loginTimeoutMs });
-    } catch {
-      return false;
+    const deadline = Date.now() + this.loginTimeoutMs;
+    let lastRelandAt = 0;
+    for (;;) {
+      const loggedIn = await this.page.evaluate<boolean>(IN_PAGE_LOGIN_SIGNAL).catch(() => false);
+      if (loggedIn) {
+        const rows = await this.reviewRowCount();
+        if (rows > 0) {
+          this.diag("aw_naver_reply_surface_ready", { rowsOnPage: rows });
+          return true;
+        }
+        // Signed in with no list in front of us: the login flow lands wherever NAVER decides, and it is
+        // usually not the review page. Re-open it — THROTTLED, because a navigation loop on the seller's
+        // own window is worse than waiting. Never while `loggedIn` is false: that is the seller's sign-in
+        // form, and navigating away from it would throw away what they were typing.
+        if (this.onSurfaceRecovered && Date.now() - lastRelandAt >= SURFACE_RELAND_INTERVAL_MS) {
+          lastRelandAt = Date.now();
+          await this.onSurfaceRecovered().catch(() => undefined);
+        }
+      }
+      if (Date.now() >= deadline) {
+        this.diag("aw_naver_reply_surface_timeout", { loggedIn });
+        return false;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, SURFACE_POLL_INTERVAL_MS));
     }
-    // The login flow lands wherever NAVER decides — usually the seller-center home, not the review list.
-    // Re-observing the review surface is what makes the next locate a scan of reviews rather than of
-    // whatever page the login ended on.
-    if (this.onSurfaceRecovered) await this.onSurfaceRecovered().catch(() => undefined);
-    return true;
   }
+
 
   /** The ladder: rows carrying the backend's review-id fingerprint. Exactly one, or nothing. */
   private async ladder(): Promise<{ count: number; rowIndex: number | null; truncated: boolean }> {

@@ -216,50 +216,68 @@ describe("composer open helper — exactly one tagged control or nothing", () =>
  * Read-only throughout: it polls the same signal `prepareSurface` reads and asks the carrier to re-open the
  * review list it had already navigated to. No click, no credential, no submit.
  */
-describe("ladder reply driver — waiting out a login", () => {
-  function loginPage(script: { readyAfterMs?: number; timesOut?: boolean }) {
-    let waited = false;
+describe("ladder reply driver — waiting for the seller's review list", () => {
+  /**
+   * A page that is a login screen until `signIn()` is called, and paints its review rows a moment later.
+   * That is the shape both live failures had: the shell answers instantly, the list does not.
+   */
+  function sellerCenterPage(script: { rowsAfterLogin?: number } = {}) {
+    const state = { signedIn: false, rows: 0, relandings: 0 };
     const page = {
-      url: () => "https://example.invalid/login",
+      url: () => (state.signedIn ? "https://sell.smartstore.naver.com/#/review/search" : "https://nid.naver.com/nidlogin.login"),
       content: async () => "",
       evaluate: async <T,>(fn: string): Promise<T> => {
-        // The login signal: false until the wait has resolved, true afterwards.
-        if (fn.includes("data-page")) return (waited as unknown) as T;
+        if (fn.includes("authHost")) return (state.signedIn as unknown) as T;
+        if (fn.includes("return __awIdRows().length;")) return (state.rows as unknown) as T;
         return (0 as unknown) as T;
       },
-      waitForFunction: async () => {
-        if (script.timesOut) throw new Error("timeout");
-        waited = true;
-        return undefined;
-      },
+      waitForFunction: async () => undefined,
       locator: () => ({ count: async () => 0, click: async () => undefined, fill: async () => undefined }),
     } as unknown as LadderReplyPage;
-    return page;
+    return {
+      page,
+      state,
+      signIn: () => { state.signedIn = true; },
+      paint: () => { state.rows = script.rowsAfterLogin ?? 3; },
+    };
   }
 
-  it("waits, asks the carrier to re-open the review surface, and then probes ready", async () => {
-    let relanded = 0;
-    const page = loginPage({});
-    const d = new NaverLadderReplyDriver(page, {
+  it("does not call a login screen ready, and does not navigate away from it", async () => {
+    const sc = sellerCenterPage();
+    const d = new NaverLadderReplyDriver(sc.page, {
       hint: HINT, asOfDate: "2026-08-28", reviewIdFingerprint: FP, draftBody: "감사합니다",
-      onSurfaceRecovered: async () => { relanded += 1; },
+      loginTimeoutMs: 60, onSurfaceRecovered: async () => { sc.state.relandings += 1; },
     });
     expect(await d.prepareSurface()).toEqual({ ok: false, code: "LOGIN_REQUIRED" });
+    expect(await d.waitForSurfaceReady()).toBe(false);
+    // The sign-in form is the seller's; navigating it away would throw out what they were typing.
+    expect(sc.state.relandings).toBe(0);
+  });
+
+  it("signed in with an empty shell is NOT ready — it re-opens the list and waits for rows", async () => {
+    const sc = sellerCenterPage({ rowsAfterLogin: 4 });
+    const d = new NaverLadderReplyDriver(sc.page, {
+      hint: HINT, asOfDate: "2026-08-28", reviewIdFingerprint: FP, draftBody: "감사합니다",
+      loginTimeoutMs: 4_000,
+      onSurfaceRecovered: async () => { sc.state.relandings += 1; sc.paint(); },
+    });
+    sc.signIn();
+    // The SPA shell is up and the list is not: the old signal called this ready and scanned an empty page.
+    expect(await d.prepareSurface()).toEqual({ ok: false, code: "LOGIN_REQUIRED" });
     expect(await d.waitForSurfaceReady()).toBe(true);
-    expect(relanded).toBe(1);
+    expect(sc.state.relandings).toBe(1);
     expect(await d.prepareSurface()).toBe(true);
   });
 
-  it("a login that never arrives is a timeout, not a pretend-ready surface", async () => {
-    let relanded = 0;
-    const d = new NaverLadderReplyDriver(loginPage({ timesOut: true }), {
+  it("a list that is already on screen is ready with no navigation at all", async () => {
+    const sc = sellerCenterPage();
+    sc.signIn();
+    sc.paint();
+    const d = new NaverLadderReplyDriver(sc.page, {
       hint: HINT, asOfDate: "2026-08-28", reviewIdFingerprint: FP, draftBody: "감사합니다",
-      loginTimeoutMs: 5,
-      onSurfaceRecovered: async () => { relanded += 1; },
+      onSurfaceRecovered: async () => { sc.state.relandings += 1; },
     });
-    expect(await d.waitForSurfaceReady()).toBe(false);
-    // Nothing is re-opened on a timeout: the run is about to end and a navigation would be noise on the
-    // seller's own window.
-    expect(relanded).toBe(0);
+    expect(await d.prepareSurface()).toBe(true);
+    expect(sc.state.relandings).toBe(0);
   });
 });
