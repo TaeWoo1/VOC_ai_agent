@@ -23,8 +23,12 @@ import type { ReplySubmitProbeDriver } from "./reply-driver";
 import { composerSigFor, replyComposerLocateDecision } from "./reply-surface";
 import type { ReplyTargetHint } from "./reply-surface";
 import { civilDateParts, parseLadderResult } from "./review-id-ladder-parse";
-import { IN_PAGE_ID_OUTLINE_TEARDOWN, inPageOutlineRowAt, inPageReviewIdLadder,
+import {
+  IN_PAGE_ID_OUTLINE_TEARDOWN,
   IN_PAGE_REVIEW_ROW_COUNT,
+  IN_PAGE_SCROLL_REVIEW_LIST,
+  inPageOutlineRowAt,
+  inPageReviewIdLadder,
 } from "./review-id-probe-inpage";
 import {
   IN_PAGE_ANNOTATE_SCOPED_COMPOSER,
@@ -90,6 +94,17 @@ const SURFACE_RELAND_INTERVAL_MS = 6_000;
  * finished list held twenty-two. Reading a growing list is reading the wrong page slowly.
  */
 const SURFACE_STABLE_POLLS = 3;
+/**
+ * How many screens of the review list one locate may sweep before giving up.
+ *
+ * The list is lazy: the landing view showed 22 rows while 35 reviews were newer than the target, so the
+ * target could not be on the first screen and the seller found it by scrolling. A locate that reads only
+ * the first screen can only ever find the newest reviews. Bounded, because an unbounded sweep on someone
+ * else's page is not a search, it is a crawl.
+ */
+const LOCATE_SCROLL_STEPS = 24;
+/** Time given to the list to render what a scroll pulled in, before the next scan. */
+const LOCATE_SCROLL_SETTLE_MS = 600;
 
 export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
   private readonly page: LadderReplyPage;
@@ -247,8 +262,34 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
     };
   }
 
+  /** One screen down the review list. Read-only: it moves the viewport, it presses nothing. */
+  private async scrollListOnce(): Promise<{ rowCount: number; moved: boolean; atBottom: boolean }> {
+    try {
+      const r = await this.page.evaluate<{ rowCount: number; moved: boolean; atBottom: boolean }>(
+        IN_PAGE_SCROLL_REVIEW_LIST,
+      );
+      return { rowCount: Number(r?.rowCount ?? 0), moved: !!r?.moved, atBottom: !!r?.atBottom };
+    } catch {
+      return { rowCount: 0, moved: false, atBottom: true };
+    }
+  }
+
   async locateReviewRow(): Promise<LocateRowResult> {
-    const d = await this.ladder();
+    let d = await this.ladder();
+    // The target is not always on the first screen — usually it is not. Sweep DOWN, one screen at a time,
+    // re-scanning after each: the list renders lazily, so rows the first scan could not see appear as the
+    // viewport moves. Stops the moment the row is found (so nothing scrolls out from under the match that
+    // highlight/open/fill are about to use), at the bottom, or at the step cap.
+    for (let step = 0; d.count === 0 && step < LOCATE_SCROLL_STEPS; step++) {
+      const s = await this.scrollListOnce();
+      if (!s.moved) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, LOCATE_SCROLL_SETTLE_MS));
+      d = await this.ladder();
+      this.diag("aw_naver_reply_locate_sweep", {
+        step: step + 1, rowsOnPage: s.rowCount, matches: d.count, atBottom: s.atBottom,
+      });
+      if (d.count > 0 || s.atBottom) break;
+    }
     this.matchCount = d.count;
     this.matchedRowIndex = d.rowIndex;
     // A truncated scan that found nothing is "not established", which the engine reads as not found; a

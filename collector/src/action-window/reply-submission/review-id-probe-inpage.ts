@@ -231,6 +231,50 @@ ${IN_PAGE_ID_HELPERS}
 return __awIdRows().length;
 })()`;
 
+/**
+ * Scroll the seller's review list down one screen, and say what happened.
+ *
+ * <b>Why a run has to scroll at all</b> (2026-09-03). The review-management list renders lazily: a settled
+ * scan of the landing view found 22 rows, all newer than the target, and the seller confirmed the review
+ * WAS on the page — further down. Thirty-five reviews are newer than it, so the top of the list can never
+ * contain it. A locate that only ever reads the first screen is a locate that can only find the newest
+ * reviews.
+ *
+ * <b>It is not a click.</b> No control is pressed, no form is touched, no value is set — this moves the
+ * viewport, which is the same thing the seller's own wheel does. The submit fence
+ * (`reply-guard.test.ts`) is untouched: this file adds no `.click(`, `.fill(`, `.press(` or any other
+ * write verb.
+ *
+ * Scrolls the nearest scrollable ancestor of the last review row when there is one (the list often scrolls
+ * inside a pane rather than the document), else the document. Returns the row count and whether the
+ * scroller can go further, so the caller knows when sweeping is pointless.
+ */
+export const IN_PAGE_SCROLL_REVIEW_LIST = `(() => {
+${IN_PAGE_ID_HELPERS}
+var rows = __awIdRows();
+var last = rows.length > 0 ? rows[rows.length - 1] : null;
+function scrollableOf(el) {
+  for (var n = el; n && n !== document.body; n = n.parentElement) {
+    var st = window.getComputedStyle(n);
+    var canScroll = /auto|scroll|overlay/.test(st.overflowY || '');
+    if (canScroll && n.scrollHeight > n.clientHeight + 8) { return n; }
+  }
+  return null;
+}
+var pane = last ? scrollableOf(last) : null;
+var target = pane || document.scrollingElement || document.documentElement;
+var before = target.scrollTop;
+var step = Math.max(200, Math.floor((pane ? target.clientHeight : window.innerHeight) * 0.85));
+target.scrollTop = before + step;
+var after = target.scrollTop;
+return {
+  rowCount: rows.length,
+  moved: after > before,
+  atBottom: after + target.clientHeight >= target.scrollHeight - 4,
+  usedPane: !!pane
+};
+})()`;
+
 export function inPageReviewIdLadder(asOfDate: { year: number; month: number; day: number }): string {
   return `(async () => {
 ${IN_PAGE_ID_HELPERS}

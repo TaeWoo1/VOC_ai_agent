@@ -216,6 +216,62 @@ describe("composer open helper — exactly one tagged control or nothing", () =>
  * Read-only throughout: it polls the same signal `prepareSurface` reads and asks the carrier to re-open the
  * review list it had already navigated to. No click, no credential, no submit.
  */
+/**
+ * The target is usually NOT on the first screen (2026-09-03). Thirty-five NAVER reviews are newer than the
+ * one under test, the landing view renders twenty-two, and the seller confirmed the review was there —
+ * further down. A locate that reads only the first screen can find nothing but the newest reviews.
+ *
+ * Sweeping moves the viewport and presses nothing: `reply-guard.test.ts` still finds no write verb in this
+ * directory, and the sweep stops the instant the row is found so nothing scrolls out from under the match
+ * that highlight/open/fill are about to use.
+ */
+describe("ladder reply driver — sweeping the list for a row below the fold", () => {
+  /** A list whose rows only exist once the viewport has been scrolled `appearsAtStep` times. */
+  function lazyListPage(appearsAtStep: number) {
+    const state = { scrolls: 0, atBottom: false };
+    const page = {
+      url: () => "https://sell.smartstore.naver.com/#/review/search",
+      content: async () => "",
+      evaluate: async <T,>(fn: string): Promise<T> => {
+        if (fn.includes("authHost")) return (true as unknown) as T;
+        if (fn.includes("return __awIdRows().length;")) return (22 as unknown) as T;
+        if (fn.includes("var before = target.scrollTop")) {
+          state.scrolls += 1;
+          return ({ rowCount: 22 + state.scrolls * 20, moved: true, atBottom: state.atBottom } as unknown) as T;
+        }
+        if (fn.includes("scopeExpandedRows: scopeExpandedRows")) {
+          // The target's row is only rendered once the sweep has scrolled far enough.
+          const rows = state.scrolls >= appearsAtStep
+            ? [{ rowIndex: 0, idFingerprints: [{ source: "visible-text", fingerprint: FP }], secondary: { rating: 2, recencyBucket: "THIS_WEEK" } }]
+            : [{ rowIndex: 0, idFingerprints: [{ source: "visible-text", fingerprint: "e".repeat(64) }], secondary: { rating: 5, recencyBucket: "TODAY" } }];
+          return ({ rows, pageStateFingerprints: [], rowCount: rows.length, rowsTruncated: false, tokensTruncated: false, scopeExpandedRows: 0 } as unknown) as T;
+        }
+        return (0 as unknown) as T;
+      },
+      waitForFunction: async () => undefined,
+      locator: () => ({ count: async () => 1, click: async () => undefined, fill: async () => undefined }),
+    } as unknown as LadderReplyPage;
+    return { page, state };
+  }
+
+  it("scrolls until the target's row is rendered, then stops scrolling", async () => {
+    const list = lazyListPage(2);
+    const d = new NaverLadderReplyDriver(list.page, { hint: HINT, asOfDate: "2026-08-28", reviewIdFingerprint: FP, draftBody: "감사합니다" });
+    expect(await d.locateReviewRow()).toMatchObject({ count: 1 });
+    // Two sweeps to reach it, and NOT a third: the match must still be where the scan left it.
+    expect(list.state.scrolls).toBe(2);
+    expect(d.reviewIdVerdict()).toEqual({ kind: "MATCHED", rowIndex: 0 });
+  });
+
+  it("stops at the bottom rather than sweeping a list that has no more to give", async () => {
+    const list = lazyListPage(99);
+    list.state.atBottom = true;
+    const d = new NaverLadderReplyDriver(list.page, { hint: HINT, asOfDate: "2026-08-28", reviewIdFingerprint: FP, draftBody: "감사합니다" });
+    expect(await d.locateReviewRow()).toMatchObject({ count: 0 });
+    expect(list.state.scrolls).toBe(1);
+  });
+});
+
 describe("ladder reply driver — waiting for the seller's review list", () => {
   /**
    * A page that is a login screen until `signIn()` is called, and paints its review rows a moment later.
