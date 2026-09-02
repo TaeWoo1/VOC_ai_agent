@@ -75,6 +75,7 @@ export function DraftArtifact({ artifact, onPrompt, headline }: { artifact: Draf
 
   return (
     <ArtifactCard
+      framed
       title={artifact.title}
       note={[artifact.channelNameKo, artifact.productName, artifact.version != null ? `버전 ${artifact.version}` : null].filter(Boolean).join(" · ") || null}
       action={

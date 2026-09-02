@@ -7,8 +7,12 @@ import { NavIcon } from "../icons/NavIcon";
 import type { ConversationSummary } from "../../lib/conversation/types";
 import { relativeTime } from "../../lib/format";
 
+// Reviewnary Visual System v1 §6 — the thread list is history, not navigation. It sits at `xs` in
+// `muted`, and the current thread is marked by an accent RULE rather than a filled blue row: a
+// filled row is the strongest thing the rail can draw, and it was being spent on "you are already
+// here". 32px rows keep twelve of them from out-weighing the five destinations below.
 const ITEM =
-  "flex min-h-[34px] w-full items-center gap-2 rounded-lg px-2.5 text-left text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2";
+  "flex min-h-[32px] w-full items-center gap-2 rounded-md border-l-2 px-2 text-left text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2";
 
 /**
  * The thread list, in the sidebar (Chat UI v1): 「새 대화」 as an icon control beside the heading, then the
@@ -31,7 +35,7 @@ export function ConversationNav() {
     if (!conversation || !open) return;
     let live = true;
     conversation
-      .loadHistory(12)
+      .loadHistory(8)
       .then((rows) => {
         if (live) setItems(rows);
       })
@@ -99,7 +103,7 @@ export function ConversationNav() {
                           void conversation.openConversation(h.conversationId);
                           goHome();
                         }}
-                        className={`${ITEM} ${current ? "bg-canvas font-semibold text-brand-700" : "text-muted hover:bg-canvas hover:text-ink"}`}
+                        className={`${ITEM} ${current ? "border-brand-700 font-semibold text-ink" : "border-transparent text-muted hover:border-line hover:text-ink"}`}
                       >
                         {/* The thread's own first sentence, and nothing else. A time column beside every
                             row made twelve near-identical truncated sentences into a table, and the

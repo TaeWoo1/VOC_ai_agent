@@ -1175,6 +1175,20 @@ confirmation page 문장은 sweep이 바꾼 뒤 **되돌렸다** — 창과 다�
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의
 기록이고 새 디자인 시스템이 아니다**; 여기 없는 색·서체·컴포넌트 라이브러리는 이 문서가 허가하지 않는다.
+**`docs/reviewnary_visual_system_v1.md`** (Reviewnary Visual System + Conversation Shell v1 — 그 계약 위에서
+**대화 셸의 시각 체계**를 다시 정한 `frontend/` 전용 패키지. 행동 변경 0: freshness routing · channel
+continuity · actionable work 정의 · acquisition E2E · planner/retrieval/memory · 승인 경계 전부 무변경.
+핵심은 **containment가 정보가 된다**는 것 — 대화 열은 **종이**(`bg-surface`)이고 레일과 업무 화면이 가라앉은
+바닥이며, 읽는 객체(목록·표·차트·지표)는 상자 없이 **머리카락 선 사이에 끼워 넣어** 문단과 같은 왼쪽 끝에
+정렬되고, **테두리는 「손이 필요한 것」에만** 남는다(단계·승인·guided run·지식 질문·보낼 초안). 고도(그림자)는
+**입력 상자 하나**에만 쓴다. 타입은 어시스턴트 산문 전용 단계 `prose` 17/1.75가 생겨 평범한 턴에서 **답이 가장
+큰 글자**가 되고(판매자가 여는 것은 여전히 그 위), 읽기 열은 840→**720px**, 턴 간격 24→32px. `✳︎` 이름표는
+**정체성이 아니라 정보를 나르는 두 자리**(실행 중 · 중지됨)에만 남는다. 새 색 토큰 **0** — accent와 세 번
+측정해 어둡게 만든 상태색 사다리는 건드리지 않았고, 추가 토큰은 셋(`prose`·`shadow-composer`·`max-w-thread`).
+skill 감사: 공식 `frontend-design`을 **프로세스**로 썼고, `shadcn`/`vercel/ai-elements`는 참고만 — registry의
+`bubble`·`marker`는 **radix-ui + Tailwind v4** 문법이라 이 저장소(Tailwind 3.4 · Radix 0)에서 조용히 깨지고
+`message-scroller`는 새 npm 의존성을 요구하므로 **가져온 컴포넌트 0**이다. 마켓플레이스 0 · WRITE 0 ·
+마이그레이션 0 ⇒ evidence 행 없음)
 
 **Demo org / channel knowledge:** `docs/demo_org_and_channel_knowledge_v1.md` owns the canonical Demo
 Org's **provenance contract** (`REAL` / `DEMO_SEED` / `VERIFY_FIXTURE`, default reads exclude synthetic),

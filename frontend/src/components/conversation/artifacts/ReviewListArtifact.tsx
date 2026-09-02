@@ -69,14 +69,19 @@ export function ReviewListArtifact({ artifact, stepped = [], headline }: { artif
                   <div className="flex items-start gap-2">
                     {/* The customer's sentence IS the row, and when the row is open it is the largest
                         text in the turn — the same rule the inquiry row follows. */}
-                    <p className={`min-w-0 flex-1 break-keep font-semibold leading-snug text-ink ${expanded ? "text-lg leading-relaxed" : "text-base line-clamp-2"}`}>
+                    <p className={`min-w-0 flex-1 break-keep leading-snug text-ink ${expanded ? "text-lg font-semibold leading-relaxed" : "text-base font-medium line-clamp-2"}`}>
                       {text}
                     </p>
-                    {r.rating != null ? <span className="shrink-0 text-sm tabular-nums text-muted">★ {r.rating}</span> : null}
+                    {r.rating != null ? <span className="shrink-0 text-xs tabular-nums text-muted">★ {r.rating}</span> : null}
                     {mixed && r.negative ? <Status tone="bad" variant="word">부정</Status> : null}
                   </div>
-                  <p className="mt-0.5 break-keep text-sm text-muted">
-                    {[r.productName, r.channelNameKo, r.writtenOn].filter(Boolean).join(" · ")}
+                  {/* Three facts, three columns — the product it is about, where it came from, when.
+                      Joined by 「·」 into one string they read as a single caption and the eye cannot
+                      scan the date down the list (Reviewnary Visual System v1 §3). */}
+                  <p className="mt-1 flex flex-wrap items-center gap-x-3 break-keep text-xs text-muted">
+                    {r.productName ? <span className="min-w-0 truncate">{r.productName}</span> : null}
+                    {r.channelNameKo ? <span className="shrink-0">{r.channelNameKo}</span> : null}
+                    {r.writtenOn ? <span className="shrink-0 tabular-nums">{r.writtenOn}</span> : null}
                   </p>
                 </button>
                 {expanded ? (
@@ -95,8 +100,13 @@ export function ReviewListArtifact({ artifact, stepped = [], headline }: { artif
         </ul>
       )}
       <MoreRows hidden={head.hidden} noun="리뷰" onExpand={head.expand} />
+      {/* ONE footer line (Reviewnary Visual System v1 §3): what was last observed, and the way to the
+          screen that holds all of it. They were two stacked rows saying two unrelated things in two
+          weights, under a third row offering the rest of the list. */}
+      {freshness.length > 0 || artifact.more ? (
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line/70 px-4 py-2">
       {freshness.length > 0 ? (
-        <ul className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line/70 px-4 py-2 text-sm text-muted" aria-label="채널별 확인 기준">
+        <ul className="flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-xs text-muted" aria-label="채널별 확인 기준">
           {freshness.map((f) => {
             const name = f.channelNameKo ?? f.channelCode;
             const observed = f.verdict === "FRESH" || f.verdict === "UNPROVEN" || f.verdict === "NOT_COLLECTED";
@@ -116,9 +126,9 @@ export function ReviewListArtifact({ artifact, stepped = [], headline }: { artif
         </ul>
       ) : null}
       {artifact.more ? (
-        <p className="px-4 py-2">
-          <Link to={artifact.more.to} onClick={onOpen} className="text-sm font-semibold text-brand-700 hover:underline">{artifact.more.label}</Link>
-        </p>
+        <Link to={artifact.more.to} onClick={onOpen} className="shrink-0 text-xs font-semibold text-brand-700 hover:underline">{artifact.more.label}</Link>
+      ) : null}
+      </div>
       ) : null}
     </ArtifactCard>
   );

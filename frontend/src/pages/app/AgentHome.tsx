@@ -197,7 +197,9 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
         </section>
       ) : null}
       {data && !beforeFirstConnection ? (
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted" aria-label="오늘 상태">
+        // Reviewnary Visual System v1 §2 — the numbers are the smallest thing on the morning screen.
+        // They qualify the briefing under them; a seller who wants them presses 「자세한 숫자 보기」.
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted" aria-label="오늘 상태">
           {briefed ? <span className="font-medium text-ink">{greetingLine(now.getHours(), null)}</span> : null}
           {strip.map((kpi, i) => (
             <span key={kpi.key} className="flex items-center gap-x-2">

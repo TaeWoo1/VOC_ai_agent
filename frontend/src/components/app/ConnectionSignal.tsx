@@ -22,7 +22,10 @@ export function ConnectionSignal() {
   return (
     <Link
       to={ALERTS_ROUTE}
-      className="inline-flex items-center gap-1.5 rounded-md text-sm font-semibold text-warn transition hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+      // §6 — a status line in the rail, at the rail's own size. Semibold `sm` made it one of the
+      // loudest things in a column whose job is to stay out of the conversation's way; it is still
+      // the only badge in the app, still one press away, and now it sits with its neighbours.
+      className="inline-flex items-center gap-1.5 rounded-md text-xs font-medium text-warn transition hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
     >
       <span aria-hidden="true" className="h-2 w-2 rounded-full bg-warn" />
       {`연결 문제 ${openCount}건`}

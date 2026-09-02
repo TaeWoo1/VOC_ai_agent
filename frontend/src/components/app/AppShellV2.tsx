@@ -60,7 +60,11 @@ export function AppShellV2() {
           <AppTopBar />
           {/* pb-28 on mobile keeps content clear of the fixed tab bar. */}
           {chat ? (
-            <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col overflow-hidden pb-16 outline-none md:pb-0" data-layout="chat">
+            // Reviewnary Visual System v1 §1 — the conversation is PAPER. Everything else in this
+            // shell (the rail, the work surfaces) is the recessed ground; the thread is the lit
+            // surface it is written on. That single inversion is what stops an answer from arriving
+            // as a white card floating on grey, and it costs no new colour token.
+            <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface pb-16 outline-none md:pb-0" data-layout="chat">
               <Outlet />
             </main>
           ) : (

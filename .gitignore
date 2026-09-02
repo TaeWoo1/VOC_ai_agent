@@ -101,6 +101,12 @@ eval_data/.DS_Store
 .claude/commands/*
 !.claude/commands/orchestrate.md
 
+# Vendored third-party skills (`npx skills add`). The LOCKFILE is tracked — it names the source and
+# pins a content hash, so `npx skills install` restores the same three skills — but the 1.3MB of
+# fetched markdown is not this repository's source and does not belong in its diffs. The symlinks
+# under .claude/skills/ point here and are dangling until a clone runs the install.
+.agents/skills/
+
 # OS
 .DS_Store
 Thumbs.db

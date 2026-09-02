@@ -70,6 +70,11 @@ export default {
         xs: ["13px", "1.5"],
         sm: ["15px", "1.6"],
         base: ["16px", "1.6"],
+        // Reviewnary Visual System v1 §2 — the ONE step above body, reserved for the assistant's own
+        // prose. In a conversation the answer is the thing being read; every object under it steps
+        // down to `base`/`sm`, so the sentence is the largest thing in its own turn without any
+        // component special-casing it. 1.75 leading because Korean paragraphs at 1.6 crowd.
+        prose: ["17px", "1.75"],
         lg: ["18px", "1.5"],
         xl: ["22px", "1.35"],
         "2xl": ["26px", "1.25"],
@@ -86,9 +91,16 @@ export default {
       },
       maxWidth: {
         content: "1120px",
+        // The conversation's reading column. 840px ran to ~52 Korean characters a line; 720 lands
+        // near 45, which is where Korean prose stops needing the eye to travel back (§2).
+        thread: "720px",
       },
       boxShadow: {
         card: "0 1px 3px rgba(0,0,0,0.04), 0 6px 16px rgba(0,0,0,0.04)",
+        // Reviewnary Visual System v1 §7 — elevation is not decoration here, it is the mark of the
+        // ONE live element on the page. The conversation is paper and every object is set into it
+        // with rules; the box the seller types in is the only thing that sits ON the paper.
+        composer: "0 1px 2px rgba(25,31,40,0.04), 0 10px 28px rgba(25,31,40,0.07)",
       },
     },
   },

@@ -187,6 +187,7 @@ export function HumanActionArtifact({
       note={reasonOf(artifact)}
       action={primary}
       testId={artifact.optional ? "human-action-offer" : "human-action-artifact"}
+      framed
     >
       {running || failed || showEscapes ? (
         <div className="space-y-3 px-4 pb-3">
@@ -227,19 +228,23 @@ export function HumanActionArtifact({
               only mean anything after the first has been pressed: there is nothing to resume before a run
               exists, and the manual fallback is what you reach for when the guided path did not work. A card
               with one action says what to do; a card with three asks the seller to choose a strategy. */}
-          {artifact.resumable && !artifact.optional && showEscapes ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <Btn variant="outline" onClick={onResume}>계속 확인하기</Btn>
+          {/* ONE row of ways out (Reviewnary Visual System v1 §4). Two controls stacked vertically,
+              each on its own line, read as two steps in a sequence; they are alternatives, and an
+              alternative sits beside the thing it is an alternative to. */}
+          {(artifact.resumable && !artifact.optional && showEscapes) || (artifact.fallback?.to && showEscapes) ? (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3">
+              {artifact.resumable && !artifact.optional && showEscapes ? (
+                <Btn variant="outline" size="sm" onClick={onResume}>계속 확인하기</Btn>
+              ) : null}
+              {artifact.fallback?.to && showEscapes ? (
+                <p className="text-sm text-muted">
+                  도우미 없이 진행하려면{" "}
+                  <Link to={returnTo(artifact.fallback.to)} onClick={onOpen} className="font-semibold text-brand-700 hover:underline">
+                    {artifact.fallback.label}
+                  </Link>
+                </p>
+              ) : null}
             </div>
-          ) : null}
-
-          {artifact.fallback?.to && showEscapes ? (
-            <p className="text-sm text-muted">
-              도우미 없이 진행하려면{" "}
-              <Link to={returnTo(artifact.fallback.to)} onClick={onOpen} className="font-semibold text-brand-700 hover:underline">
-                {artifact.fallback.label}
-              </Link>
-            </p>
           ) : null}
         </div>
       ) : null}

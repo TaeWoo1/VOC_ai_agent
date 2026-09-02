@@ -27,14 +27,17 @@ export function ContextBar({ context, onClear }: { context: CurrentContext; onCl
       transition={LAYOUT}
       // Attached to the box below it: one outline, one thing. The object the next sentence is about and
       // the place that sentence is typed were two separately-rounded cards with a gap between them.
-      className="flex items-center gap-2 rounded-t-2xl border border-b-0 border-line bg-canvas px-4 py-2"
+      // §5 — the current object and the box that will talk about it are ONE surface. A grey band
+      // above a white box read as an admin toolbar bolted on top of the composer; it is the same
+      // paper, divided by a hairline, with the object's name as the only emphasis on it.
+      className="flex items-center gap-2 rounded-t-xl border border-b-0 border-line bg-surface px-4 py-2 shadow-composer"
       data-testid="context-bar"
       aria-label="지금 보고 있는 것"
     >
       <span aria-hidden="true" className={`shrink-0 ${anchored ? "text-brand-700" : "text-muted"}`}>
         <NavIcon name={anchored ? "target" : "list"} className="h-4 w-4" />
       </span>
-      <p className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-sm">
+      <p className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-xs">
         {context.to ? (
           <Link to={context.to} className="min-w-0 truncate font-semibold text-ink hover:underline" data-testid="context-bar-label">
             {context.label}
@@ -51,7 +54,7 @@ export function ContextBar({ context, onClear }: { context: CurrentContext; onCl
         <button
           type="button"
           onClick={onClear}
-          className="shrink-0 rounded-md px-1.5 py-0.5 text-sm text-muted transition hover:bg-canvas hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted transition hover:bg-canvas hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
         >
           해제
         </button>

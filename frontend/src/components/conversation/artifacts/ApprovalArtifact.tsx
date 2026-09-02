@@ -134,7 +134,7 @@ function InquiryApproval({ artifact }: { artifact: Approval }) {
 
   if (status) {
     return (
-      <ArtifactCard title="전송 결과" note={meta} testId="approval-artifact">
+      <ArtifactCard title="전송 결과" note={meta} testId="approval-artifact" framed>
         <div className="px-4 pb-3">
           <ExecutionResultView phase={status.phase} category={status.category} objectKind="INQUIRY" to={artifact.to} />
         </div>
@@ -143,7 +143,7 @@ function InquiryApproval({ artifact }: { artifact: Approval }) {
   }
 
   return (
-    <ArtifactCard title={artifact.title} note={meta} testId="approval-artifact">
+    <ArtifactCard title={artifact.title} note={meta} testId="approval-artifact" framed>
       <div className="space-y-3 px-4 pb-3">
         {!loaded ? <p className="text-sm text-muted">확인하는 중…</p> : null}
         {loaded && !detail ? <p className="text-sm text-muted">이 문의를 다시 읽지 못했습니다. 문의 화면에서 확인해 주세요.</p> : null}
@@ -240,7 +240,7 @@ function ReviewApproval({ artifact }: { artifact: Approval }) {
 
   if (result) {
     return (
-      <ArtifactCard title="전송 결과" note={meta} testId="approval-artifact">
+      <ArtifactCard title="전송 결과" note={meta} testId="approval-artifact" framed>
         <div className="px-4 pb-3">
           <ExecutionResultView phase={result.status} category={result.category} verification={result.verification} objectKind="REVIEW" to={artifact.to} />
         </div>
@@ -249,7 +249,7 @@ function ReviewApproval({ artifact }: { artifact: Approval }) {
   }
 
   return (
-    <ArtifactCard title={artifact.title} note={meta} testId="approval-artifact">
+    <ArtifactCard title={artifact.title} note={meta} testId="approval-artifact" framed>
       <div className="space-y-3 px-4 pb-3">
         {!loaded ? <p className="text-sm text-muted">확인하는 중…</p> : null}
         {loaded && !prep ? <p className="text-sm text-muted">이 리뷰의 답변을 다시 읽지 못했습니다. 리뷰 화면에서 확인해 주세요.</p> : null}

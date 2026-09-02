@@ -53,6 +53,7 @@ export function KnowledgeCaptureArtifact({ artifact, onDecision }: {
   const decidable = artifact.state === "CANDIDATE" && artifact.fingerprint && onDecision;
   return (
     <ArtifactCard
+      framed
       title={artifact.title}
       note={scopeNote || null}
       action={status ? <Status tone={status.tone}>{status.word}</Status> : undefined}

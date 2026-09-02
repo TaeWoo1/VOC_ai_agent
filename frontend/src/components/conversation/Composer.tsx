@@ -89,7 +89,11 @@ export function Composer({
       className="space-y-2"
     >
       <div
-        className={`flex items-end gap-2 border border-line bg-surface shadow-sm transition focus-within:border-brand-700 focus-within:shadow-md ${attachedTop ? "rounded-b-2xl rounded-t-none border-t-0" : "rounded-2xl"} ${compact ? "px-3 py-2" : "px-4 py-2.5"} ${disabled ? "opacity-60" : ""}`}
+        // Reviewnary Visual System v1 §5 — the box is the ONE elevated thing in the shell. On the
+        // paper ground a flat outlined box disappeared into the transcript; the shadow is what makes
+        // this read as the live surface a seller returns to, and it is the only place elevation is
+        // spent (`shadow-composer`).
+        className={`flex items-end gap-2 border border-line bg-surface shadow-composer transition focus-within:border-brand-700 ${attachedTop ? "rounded-b-xl rounded-t-none border-t-0" : "rounded-xl"} ${compact ? "px-3 py-2" : "px-4 py-3"} ${disabled ? "opacity-60" : ""}`}
         data-state={canStop ? "running" : disabled ? "disabled" : "idle"}
       >
         <label htmlFor={inputId} className="sr-only">
@@ -161,7 +165,7 @@ export function Composer({
               type="button"
               disabled={blocked}
               onClick={() => submit(chip)}
-              className="min-h-[32px] rounded-full border border-line bg-surface px-3 text-sm font-medium text-muted transition hover:border-brand/40 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 disabled:opacity-50"
+              className="min-h-[32px] rounded-lg bg-canvas px-3 text-sm font-medium text-muted transition hover:bg-line/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 disabled:opacity-50"
             >
               {chip}
             </button>

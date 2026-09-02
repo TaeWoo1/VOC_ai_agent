@@ -74,7 +74,10 @@ export function AgentPairingPanel({
     phase === "unreachable" || phase === "connecting" || phase === "connecting_ws" || phase === "disconnected";
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl bg-canvas px-4 py-3" data-testid="agent-pairing">
+    // Reviewnary Visual System v1 §4 — one task surface. This block used to be a grey rounded box
+    // INSIDE the step card that already had an edge, so the seller met a card, a card inside it, and
+    // a button inside that. It is the same content, set into the card it belongs to with a rule.
+    <div className="flex flex-col gap-2 border-t border-line pt-3" data-testid="agent-pairing">
       {/* Why the seller is stopped, in one line, before the fix. The dock says nothing on the screens that do
           not need the helper — this is where "the helper is needed" is said. */}
       <p className="text-sm font-semibold text-ink" data-testid="agent-pairing-title">reviewnary 도우미가 필요합니다</p>
@@ -89,7 +92,7 @@ export function AgentPairingPanel({
           </p>
           {confirmationCode ? (
             <p
-              className="rounded-lg bg-surface px-3 py-2 text-center text-xl font-bold tracking-widest text-ink"
+              className="rounded-lg border border-line bg-surface px-3 py-2 text-center text-xl font-bold tracking-widest text-ink"
               data-testid="agent-pairing-code"
             >
               {confirmationCode}
@@ -101,7 +104,7 @@ export function AgentPairingPanel({
               target="_blank"
               rel="noopener noreferrer"
               data-testid="agent-pairing-confirm-link"
-              className="self-start rounded-xl border border-line px-4 py-2 text-sm font-medium text-ink transition hover:bg-line/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              className="self-start rounded-lg border border-line bg-surface px-4 py-2 text-sm font-medium text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
             >
               허용 창이 안 열렸나요? 다시 열기
             </a>
@@ -128,7 +131,7 @@ export function AgentPairingPanel({
             type="button"
             onClick={onRetry}
             data-testid="agent-pairing-retry"
-            className="self-start rounded-xl border border-line px-4 py-2 text-sm font-medium text-ink transition hover:bg-line/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            className="self-start rounded-lg border border-line bg-surface px-4 py-2 text-sm font-medium text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
           >
             다시 찾기
           </button>
@@ -153,7 +156,7 @@ export function AgentPairingPanel({
             type="button"
             onClick={onConnect}
             data-testid="agent-pairing-connect"
-            className="self-start rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            className="self-start rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
           >
             도우미 연결하기
           </button>

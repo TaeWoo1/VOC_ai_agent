@@ -60,8 +60,10 @@ export function ConversationTimeline({
   return (
     // The rhythm is the reading order (Frontend-first Agent Workspace Redesign v1): turns are separated
     // by more space than anything INSIDE a turn, so a seller's eye finds the next answer before it finds
-    // the next card. 24px between turns, 12px between a sentence and the objects it is about.
-    <div className={compact ? "space-y-5" : "space-y-6"} aria-label="대화" role="log">
+    // the next card. Reviewnary Visual System v1 §1 widens it to 32px: without card outlines around the
+    // objects, WHITE SPACE is the only thing left saying where one answer ends and the next begins, and
+    // 24px was not enough of it to read as a document.
+    <div className={compact ? "space-y-6" : "space-y-8"} aria-label="대화" role="log">
       <AnimatePresence initial={false}>
         {turns.map((turn, i) => (
           <motion.div key={turn.turnId} layout="position" variants={MESSAGE} initial="hidden" animate="shown" transition={LAYOUT}>
@@ -87,7 +89,7 @@ export function ConversationTimeline({
           </motion.div>
         ) : null}
         {error ? (
-          <motion.p key="error" variants={MESSAGE} initial="hidden" animate="shown" exit="gone" className="break-keep rounded-xl border border-line bg-canvas px-4 py-2.5 text-sm text-bad" role="alert">{error}</motion.p>
+          <motion.p key="error" variants={MESSAGE} initial="hidden" animate="shown" exit="gone" className="break-keep border-l-2 border-bad/40 pl-3 text-sm text-bad" role="alert">{error}</motion.p>
         ) : null}
       </AnimatePresence>
       <div ref={endRef} />
@@ -131,10 +133,15 @@ export function stepCardsFor<T extends { type: string; artifactId: string; chann
   return [(mine[0] ?? steps[0])!];
 }
 
+/**
+ * The seller's own words: the ONE bubble left in the transcript (§2). It is `canvas`, not a brand
+ * tint — the accent is spent on things you press, and a chat needs exactly one signal for "this side
+ * is you", which the alignment and the ground already give.
+ */
 function UserTurn({ text }: { text: string }) {
   return (
     <div className="flex justify-end">
-      <p className="max-w-[80%] whitespace-pre-wrap break-keep rounded-2xl rounded-br-md bg-brand-50 px-4 py-2 text-base leading-relaxed text-ink" data-testid="user-turn">
+      <p className="max-w-[78%] whitespace-pre-wrap break-keep rounded-2xl rounded-br-md bg-canvas px-4 py-2.5 text-base leading-relaxed text-ink" data-testid="user-turn">
         {text}
       </p>
     </div>
@@ -230,14 +237,25 @@ function AgentTurn({ turn, threadChannel: thread, compact, latest, userText, onP
   const headline = turn.message || turn.failureReason || "요청을 처리하지 못했습니다.";
   const detail = failed && !stopped && turn.failureReason && turn.failureReason !== turn.message ? turn.failureReason : null;
   return (
-    <article className="group space-y-3" aria-label="AI 담당자" data-testid="agent-turn" data-status={turn.status}>
+    // <b>No nameplate.</b> The ✳︎ that opened every agent turn was a label saying who was speaking,
+    // in a two-party conversation where the alignment already says it — and the 24px indent it
+    // forced pushed every object list one step off the reading edge. It survives in exactly the two
+    // places where it carries information rather than identity: the running progress line, and a
+    // turn that STOPPED (Reviewnary Visual System v1 §2). A failed turn keeps a rule, because "this
+    // did not happen" is not something to infer from a colour alone.
+    <article
+      className={`group space-y-3 ${failed ? "border-l-2 border-line pl-3" : ""}`}
+      aria-label="AI 담당자"
+      data-testid="agent-turn"
+      data-status={turn.status}
+    >
       <div className="flex items-start gap-2">
-        <span aria-hidden="true" className={`mt-1 ${stopped ? "text-muted" : "text-brand-700"}`}>✳︎</span>
         <div className="min-w-0 flex-1">
-          {/* The answer is prose at reading size, and it is NOT the largest thing in its own turn —
-              what the seller acts on (the customer's sentence, the draft) is. An announcement set in a
-              bigger type than the thing announced is the shape this package came to fix. */}
-          <p className={`whitespace-pre-wrap break-keep text-base ${compact ? "leading-relaxed" : "leading-[1.7]"} ${stopped ? "text-muted" : "text-ink"}`}>
+          {/* The answer is the assistant's own voice and it gets its own type step (`prose`, 17/1.75)
+              — the largest text in an ordinary turn, above the objects it is about. What the seller
+              OPENS (a customer's message, a draft) still steps up past it, because that is the thing
+              they came to read. */}
+          <p className={`whitespace-pre-wrap break-keep ${compact ? "text-base leading-relaxed" : "text-prose"} ${stopped ? "text-muted" : "text-ink"}`}>
             {headline}
           </p>
           {detail ? <p className="mt-1 break-keep text-sm text-muted">{detail}</p> : null}
@@ -245,7 +263,7 @@ function AgentTurn({ turn, threadChannel: thread, compact, latest, userText, onP
         {!stopped && turn.message ? <CopyButton text={turn.message} /> : null}
       </div>
       {shown.length > 0 ? (
-        <div className={`space-y-3 ${compact ? "" : "pl-6"}`}>
+        <div className="space-y-3">
           {/* Artifacts animate their own layout: a card that grows (a guided run engaged, a disclosure
               opened) or is replaced glides; the ones around it follow. */}
           <AnimatePresence initial={false}>
@@ -267,7 +285,7 @@ function AgentTurn({ turn, threadChannel: thread, compact, latest, userText, onP
           paragraph is how 「낮은 평점 리뷰는 8건입니다」 arrived inside a four-line block about failed
           collection. One quiet line per limit, under the objects the answer is about. */}
       {turn.notes && turn.notes.length > 0 ? (
-        <ul className={`space-y-0.5 ${compact ? "" : "pl-6"}`} aria-label="확인하지 못한 것">
+        <ul className="space-y-0.5" aria-label="확인하지 못한 것">
           {turn.notes.map((note, i) => (
             <li key={i} className="break-keep text-sm leading-snug text-muted">{note}</li>
           ))}
@@ -276,12 +294,12 @@ function AgentTurn({ turn, threadChannel: thread, compact, latest, userText, onP
       <AnimatePresence initial={false}>
         {latest && chips.length > 0 ? (
           <motion.div key="suggestions" layout="position" variants={MESSAGE} initial="hidden" animate="shown" exit="gone" transition={LAYOUT}>
-            <Suggestions actions={chips} compact={compact} onPrompt={onPrompt} onResume={onResume} />
+            <Suggestions actions={chips} onPrompt={onPrompt} onResume={onResume} />
           </motion.div>
         ) : null}
       </AnimatePresence>
       {evidence.length > 0 ? (
-        <div className={compact ? "" : "pl-6"}>
+        <div>
           {/* No count beside 「근거」: the number was the count of rows read, which a seller reads as the
               strength of the answer. The disclosure is opened on purpose; what is inside says how much. */}
           <Disclosure label="근거" summaryClassName="px-0">
@@ -324,10 +342,10 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function Suggestions({ actions, compact, onPrompt, onResume }: { actions: SuggestedAction[]; compact: boolean; onPrompt: (p: string) => void; onResume: () => void }) {
+function Suggestions({ actions, onPrompt, onResume }: { actions: SuggestedAction[]; onPrompt: (p: string) => void; onResume: () => void }) {
   const onOpen = useContinueInPanel();
   return (
-    <div className={`flex flex-wrap gap-1.5 ${compact ? "" : "pl-6"}`} aria-label="다음으로 할 수 있는 것">
+    <div className="flex flex-wrap gap-1.5" aria-label="다음으로 할 수 있는 것">
       {actions.map((a) =>
         a.kind === "LINK" && a.to ? (
           <BtnLink key={a.label} to={a.to} variant="outline" size="sm" onClick={onOpen}>{a.label}</BtnLink>
@@ -336,7 +354,7 @@ function Suggestions({ actions, compact, onPrompt, onResume }: { actions: Sugges
             key={a.label}
             type="button"
             onClick={() => (a.kind === "RESUME" ? onResume() : onPrompt(a.prompt ?? a.label))}
-            className="min-h-[32px] rounded-full border border-line bg-surface px-3 text-sm font-medium text-muted transition hover:border-brand/40 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            className="min-h-[32px] rounded-lg bg-canvas px-3 text-sm font-medium text-muted transition hover:bg-line/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
           >
             {a.label}
           </button>

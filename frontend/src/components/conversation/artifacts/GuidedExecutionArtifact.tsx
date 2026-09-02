@@ -34,7 +34,7 @@ export function GuidedExecutionArtifact({ artifact, replyRuntime }: { artifact: 
   const channel = artifact.channelNameKo ?? "네이버";
 
   return (
-    <ArtifactCard title={artifact.title} note={meta} testId="guided-execution-artifact">
+    <ArtifactCard title={artifact.title} note={meta} testId="guided-execution-artifact" framed>
       <div className="space-y-3 px-4 pb-3">
         <p className="break-keep text-sm text-muted">
           reviewnary가 {channel} 판매자센터에서 이 리뷰의 답변란을 찾아 승인한 초안을 채웁니다. 등록은 판매자님이 직접 누릅니다.

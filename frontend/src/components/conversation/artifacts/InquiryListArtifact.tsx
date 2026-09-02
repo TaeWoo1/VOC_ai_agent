@@ -123,8 +123,8 @@ export function InquiryListArtifact({ artifact, onPrompt, headline }: { artifact
       })}
       <MoreRows hidden={head.hidden} noun="문의" onExpand={head.expand} />
       {artifact.more ? (
-        <p className="px-4 py-2">
-          <Link to={artifact.more.to} onClick={onOpen} className="text-sm font-semibold text-brand-700 hover:underline">{artifact.more.label}</Link>
+        <p className="border-t border-line/70 px-4 py-2">
+          <Link to={artifact.more.to} onClick={onOpen} className="text-xs font-semibold text-brand-700 hover:underline">{artifact.more.label}</Link>
         </p>
       ) : null}
     </ArtifactCard>
@@ -142,17 +142,26 @@ function Row({ item, state, selected, expanded, onSelect, onOpen, onPrompt }: {
   onOpen: () => void;
   onPrompt?: (prompt: string) => void;
 }) {
-  const title = previewText(item.title) || "제목 없는 문의";
+  const given = previewText(item.title);
   // The snippet is transient by contract, so a refine of the rows on screen is composed from the
   // PERSISTED rows and arrives without one. What this page already drew for that inquiry stands in —
   // page memory only, never storage (`snippetCache.ts`).
   rememberSnippet(item.inquiryId, item.snippet);
   const preview = previewText(item.snippet ?? recallSnippet(item.inquiryId));
-  const meta = [item.productName, item.channelNameKo].filter(Boolean).join(" · ");
+  /**
+   * **A row is named by something the seller can recognise** (Reviewnary Visual System v1 §3).
+   *
+   * 「제목 없는 문의」 was rendered at the row's largest weight while the customer's actual sentence sat
+   * under it in muted — the loudest element on the row was a statement that a field is empty. Nothing
+   * new is read: when the channel gave no title, the sentence already on the row becomes its name, and
+   * the placeholder is only reached when there is no sentence either.
+   */
+  const title = given || preview || "제목 없는 문의";
+  const meta = [item.productName, item.channelNameKo].filter(Boolean);
   const body = (
     <>
       <div className="flex items-start gap-2">
-        <p className="min-w-0 flex-1 break-keep text-base font-semibold leading-snug text-ink line-clamp-2">{title}</p>
+        <p className="min-w-0 flex-1 break-keep text-base font-medium leading-snug text-ink line-clamp-2">{title}</p>
         {state ? <Status tone={state.tone} variant="word">{state.word}</Status> : null}
       </div>
       {/* The customer's own sentence, one line, without a click — a row the seller can read is the
@@ -162,13 +171,17 @@ function Row({ item, state, selected, expanded, onSelect, onOpen, onPrompt }: {
       {preview && preview !== title && !expanded ? (
         <p className="mt-0.5 break-keep text-sm leading-snug text-muted line-clamp-1" data-testid="inquiry-row-preview">{preview}</p>
       ) : null}
-      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-sm text-muted">
-        {meta ? <span className="break-keep">{meta}</span> : null}
+      <p className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-muted">
+        {meta.map((m) => <span key={m} className="min-w-0 truncate break-keep">{m}</span>)}
         {/* PRIORITIZE: why this row is where it is. It REPLACES the receipt date rather than standing
             beside it — 「1개월 전」 and 「40일째 대기」 are one fact in two renderings, and the one that
             explains the order is the one worth the space. */}
         {item.waitingDays != null ? (
-          <span className="font-semibold text-warn" data-testid="inquiry-row-waiting">
+          // <b>Waiting time is a measure, not an alarm</b> (Reviewnary Visual System v1 §5). Colour
+          // in this product means state — 「look before acting」 — and three orange numbers were the
+          // loudest thing on the morning screen while naming nothing the seller can act on. It is
+          // still the reason the row is where it is, so it stays the emphasised fact on the line.
+          <span className="font-semibold tabular-nums text-ink" data-testid="inquiry-row-waiting">
             {item.waitingDays === 0 ? "오늘 접수" : `${item.waitingDays}일째 대기`}
           </span>
         ) : (

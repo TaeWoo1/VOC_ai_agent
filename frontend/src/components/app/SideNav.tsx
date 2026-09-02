@@ -10,7 +10,7 @@ const ITEM_BASE =
 
 function itemClass({ isActive }: { isActive: boolean }): string {
   return `${ITEM_BASE} ${
-    isActive ? "bg-canvas font-semibold text-brand-700" : "font-medium text-muted hover:bg-canvas hover:text-ink"
+    isActive ? "bg-surface font-semibold text-ink shadow-sm" : "font-medium text-muted hover:bg-surface/70 hover:text-ink"
   }`;
 }
 
@@ -29,7 +29,10 @@ export function SideNav() {
   const { user, logout } = useAuth();
 
   return (
-    <aside className="hidden w-sidebar shrink-0 flex-col border-r border-line bg-surface md:flex">
+    // §1 — the rail is the recessed ground, so the conversation beside it reads as the page. An
+    // active row is the raised one (`bg-surface`), which is the same information the old blue fill
+    // carried with one less colour spent on chrome.
+    <aside className="hidden w-sidebar shrink-0 flex-col border-r border-line bg-canvas md:flex">
       <div className="px-4 pb-3 pt-5">
         <p className="text-lg font-bold tracking-tight text-ink">reviewnary</p>
         <p className="mt-0.5 truncate text-sm text-muted">{user?.orgName ?? "내 스토어"}</p>

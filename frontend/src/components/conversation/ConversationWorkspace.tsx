@@ -82,9 +82,14 @@ export function ConversationWorkspace({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-workspace">
-      <div className={`min-h-0 flex-1 overflow-y-auto ${compact ? "px-4 py-4" : "px-4 py-5 md:px-8"}`}>
-        <div className={compact ? "" : "mx-auto w-full max-w-[840px]"}>
-          {empty && lead ? <div className="mb-6">{lead}</div> : null}
+      <div className={`min-h-0 flex-1 overflow-y-auto ${compact ? "px-4 py-4" : "px-4 py-8 md:px-8"}`}>
+        {/* Reviewnary Visual System v1 §5 — before the first message the morning screen is ONE
+            composition: the briefing and the box under it. Anchored to the top it left ~470px of
+            empty paper between what the seller reads and where they answer, which is the shape of a
+            page waiting for content rather than an assistant waiting for a sentence. Once the thread
+            has turns it is a transcript again and reads from the top. */}
+        <div className={compact ? "" : `mx-auto w-full max-w-thread${empty ? " flex min-h-full flex-col justify-center" : ""}`}>
+          {empty && lead ? <div className="mb-8">{lead}</div> : null}
           <ConversationTimeline
             turns={[...leadingTurns, ...conversation.turns]}
             busy={conversation.busy}
@@ -102,9 +107,9 @@ export function ConversationWorkspace({
       {/* The dock (Chat Motion v1): the box sits 20px off the viewport edge on a solid ground, and the
           transcript slides UNDER a short fade above it — a deliberate edge, not a box floating in the
           scroll. One fade, one place; it is the only gradient in the shell. */}
-      <div className={`relative shrink-0 ${compact ? "border-t border-line bg-surface px-4 py-3" : "bg-canvas px-4 pb-5 pt-1 md:px-8"}`} data-testid="composer-dock">
-        {!compact ? <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-canvas to-transparent" /> : null}
-        <div className={compact ? "" : "mx-auto w-full max-w-[840px]"}>
+      <div className={`relative shrink-0 ${compact ? "border-t border-line bg-surface px-4 py-3" : "bg-surface px-4 pb-5 pt-1 md:px-8"}`} data-testid="composer-dock">
+        {!compact ? <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-t from-surface to-transparent" /> : null}
+        <div className={compact ? "" : "mx-auto w-full max-w-thread"}>
           {conversation.plannerOff ? (
             <p className="mb-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn" role="status">
               이 계정에서는 자유 문장 요청이 아직 열려 있지 않습니다.
