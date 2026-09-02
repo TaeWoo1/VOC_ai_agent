@@ -60,6 +60,19 @@ describe("guided-fill reply driver — fill only on an exact, single target; nev
     expect(p.filled).toEqual([]);
   });
 
+  it("fills when the inner driver's own verdict names a row far down the list, not row 0", async () => {
+    // The live failure (2026-09-03). The wrapper compared the inner driver's REAL matched row index against a
+    // hardcoded 0, so a target nine screens down read as AMBIGUOUS: the run opened the correct review's
+    // composer and then refused to type into it. The inner verdict is the same scan that produced the hint
+    // match, in the same index space — it is not a second opinion to check against a placeholder.
+    const p = page();
+    const innerFar = { ...inner(1, 1), reviewIdVerdict: () => ({ kind: "MATCHED" as const, rowIndex: 28 }) };
+    const d = new GuidedFillReplyDriver({ draftBody: "감사합니다", open: async () => ({ inner: innerFar, page: p }) });
+    await d.prepareSurface(); await d.locateReviewRow(); await d.locateComposer();
+    expect(await d.fillComposer()).toEqual({ filled: true });
+    expect(p.filled).toEqual(["감사합니다"]);
+  });
+
   it("refuses when the backend's review-id fingerprint contradicts the matched row", async () => {
     const p = page();
     const d = new GuidedFillReplyDriver({

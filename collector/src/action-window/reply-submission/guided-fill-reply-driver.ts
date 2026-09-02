@@ -112,10 +112,25 @@ export class GuidedFillReplyDriver implements ReplySubmitProbeDriver {
   async fillComposer(): Promise<ComposerFillResult> {
     const opened = this.opened;
     if (!opened) return { filled: false, reason: "NOT_FILLABLE" };
+    // TWO SOURCES OR ONE — and the gate below only means something when there are two.
+    //
+    // An INDEPENDENT verdict (`deps.reviewIdVerdict`, supplied by whoever built this driver) is a second
+    // opinion about which row the review is on, and the wrapper checks it against its own: exactly one row
+    // matched the hint, so index 0. Two sources disagreeing is the ambiguity this refuses.
+    //
+    // The INNER driver's verdict is not a second source — it is the same scan that produced the hint match,
+    // in the same index space. Comparing it against `0` compared a real row index against a placeholder: on
+    // a list where the target happens to be first they agree by accident, and on the live NAVER grid, where
+    // the target sits nine screens down, `index !== 0` read as AMBIGUOUS. Every live run opened the correct
+    // review's composer and then refused to type into it, on a comparison between two different things.
+    const independent = this.deps.reviewIdVerdict?.();
+    const reviewId = independent ?? opened.inner.reviewIdVerdict?.() ?? { kind: "UNAVAILABLE" as const };
+    const matchedRowIndex = this.rowMatchCount !== 1 ? null
+      : independent || reviewId.kind !== "MATCHED" ? 0 : reviewId.rowIndex;
     const decision = composerFillDecision({
       rowMatchCount: this.rowMatchCount,
-      matchedRowIndex: this.rowMatchCount === 1 ? 0 : null,
-      reviewId: this.deps.reviewIdVerdict?.() ?? opened.inner.reviewIdVerdict?.() ?? { kind: "UNAVAILABLE" },
+      matchedRowIndex,
+      reviewId,
       composerCount: this.composerCount,
       hasDraft: this.deps.draftBody != null && this.deps.draftBody.length > 0,
     });
