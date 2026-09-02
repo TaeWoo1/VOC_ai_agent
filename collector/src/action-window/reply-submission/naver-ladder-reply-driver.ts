@@ -81,6 +81,15 @@ const ARM_SUBMIT_OBSERVER = `(() => {
 const SURFACE_POLL_INTERVAL_MS = 700;
 /** The floor between two re-landings, so a stubborn page is not navigated in a loop. */
 const SURFACE_RELAND_INTERVAL_MS = 6_000;
+/**
+ * How many consecutive polls must agree on the row count before the list counts as loaded.
+ *
+ * <b>`rows > 0` is not `rows are all here`</b> (2026-09-03). The seller center paints its review list
+ * incrementally: a run that accepted the first non-zero count scanned SEVEN rows — six of them with an
+ * unparseable date and three with no channel id at all, the signature of a half-drawn table — while the
+ * finished list held twenty-two. Reading a growing list is reading the wrong page slowly.
+ */
+const SURFACE_STABLE_POLLS = 3;
 
 export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
   private readonly page: LadderReplyPage;
@@ -162,30 +171,41 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
   async waitForSurfaceReady(): Promise<boolean> {
     const deadline = Date.now() + this.loginTimeoutMs;
     let lastRelandAt = 0;
+    let lastCount = -1;
+    let stableFor = 0;
     for (;;) {
       const loggedIn = await this.page.evaluate<boolean>(IN_PAGE_LOGIN_SIGNAL).catch(() => false);
       if (loggedIn) {
         const rows = await this.reviewRowCount();
-        if (rows > 0) {
-          this.diag("aw_naver_reply_surface_ready", { rowsOnPage: rows });
+        // SETTLED, not merely non-empty: the same count, several polls running. A list still filling in
+        // answers a different number every few hundred milliseconds, and scanning it reads a page that no
+        // longer exists by the time the verdict is used.
+        stableFor = rows > 0 && rows === lastCount ? stableFor + 1 : 0;
+        lastCount = rows;
+        if (rows > 0 && stableFor + 1 >= SURFACE_STABLE_POLLS) {
+          this.diag("aw_naver_reply_surface_ready", { rowsOnPage: rows, stablePolls: stableFor + 1 });
           return true;
         }
         // Signed in with no list in front of us: the login flow lands wherever NAVER decides, and it is
         // usually not the review page. Re-open it — THROTTLED, because a navigation loop on the seller's
         // own window is worse than waiting. Never while `loggedIn` is false: that is the seller's sign-in
         // form, and navigating away from it would throw away what they were typing.
-        if (this.onSurfaceRecovered && Date.now() - lastRelandAt >= SURFACE_RELAND_INTERVAL_MS) {
+        if (rows === 0 && this.onSurfaceRecovered && Date.now() - lastRelandAt >= SURFACE_RELAND_INTERVAL_MS) {
           lastRelandAt = Date.now();
           await this.onSurfaceRecovered().catch(() => undefined);
         }
+      } else {
+        lastCount = -1;
+        stableFor = 0;
       }
       if (Date.now() >= deadline) {
-        this.diag("aw_naver_reply_surface_timeout", { loggedIn });
+        this.diag("aw_naver_reply_surface_timeout", { loggedIn, rowsOnPage: lastCount });
         return false;
       }
       await new Promise<void>((resolve) => setTimeout(resolve, SURFACE_POLL_INTERVAL_MS));
     }
   }
+
 
 
   /** The ladder: rows carrying the backend's review-id fingerprint. Exactly one, or nothing. */

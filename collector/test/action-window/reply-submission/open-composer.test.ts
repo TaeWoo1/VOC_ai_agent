@@ -269,6 +269,26 @@ describe("ladder reply driver — waiting for the seller's review list", () => {
     expect(await d.prepareSurface()).toBe(true);
   });
 
+  it("a list still filling in is not ready — the count has to settle first", async () => {
+    const sc = sellerCenterPage();
+    sc.signIn();
+    // The shape both live sittings had: the page paints part of the table, then the rest. The first
+    // non-zero count was SEVEN on a list that finished at twenty-two, and scanning it read six rows with
+    // no parseable date and three with no channel id — a half-drawn table, not the seller's reviews.
+    sc.state.rows = 7;
+    const d = new NaverLadderReplyDriver(sc.page, {
+      hint: HINT, asOfDate: "2026-08-28", reviewIdFingerprint: FP, draftBody: "감사합니다",
+      loginTimeoutMs: 6_000,
+      onSurfaceRecovered: async () => { sc.state.relandings += 1; },
+    });
+    setTimeout(() => { sc.state.rows = 22; }, 300);
+    expect(await d.waitForSurfaceReady()).toBe(true);
+    // It waited for the growth to stop, so what the ladder scans is the finished list.
+    expect(sc.state.rows).toBe(22);
+    // A growing list is not a missing list: nothing was re-navigated.
+    expect(sc.state.relandings).toBe(0);
+  });
+
   it("a list that is already on screen is ready with no navigation at all", async () => {
     const sc = sellerCenterPage();
     sc.signIn();
