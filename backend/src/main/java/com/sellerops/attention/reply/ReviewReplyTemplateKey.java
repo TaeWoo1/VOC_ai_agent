@@ -13,10 +13,17 @@ import java.util.Optional;
  * product change; this file is a relocation, and {@code ReviewReplyTemplateDefaultsTest} pins the
  * bodies byte for byte so it stays one.
  *
- * <p><b>Order is behaviour, not presentation.</b> {@link #POSITIVE} is chosen by rating before any
- * keyword is read; the four keyword members are tried in declaration order and the first hit wins;
- * {@link #GENERAL} is the fallback. The settings screen lists them in this same order for the same
- * reason — a seller reading the list top to bottom is reading how the choice is actually made.
+ * <p><b>Order is behaviour, not presentation.</b> The five keyword members are tried in declaration
+ * order and the first hit wins; only when none matches does the rating decide, taking {@link #POSITIVE}
+ * at {@code >= POSITIVE_MIN_RATING} and {@link #GENERAL} otherwise. The settings screen lists them in
+ * this same order for the same reason — a seller reading the list top to bottom is reading how the
+ * choice is actually made.
+ *
+ * <p><b>The order changed once, deliberately</b> (Template Settings v1 closure, 2026-09-03). Rating
+ * used to win first, so a ★4 review that plainly named a problem was answered with 「좋은 후기를
+ * 남겨주셔서 감사합니다」. Product-owner decision: an issue signal outranks a star. What that costs is
+ * stated where it is paid — {@link RuleBasedReviewReplyProvider#keyFor} — and the seller's own wording
+ * is the lever for it, which is what these templates exist to be.
  *
  * <p><b>This is a communication layer.</b> A template says how the seller sounds, never what is true:
  * no default promises a refund, an exchange, a discount, a delivery date, or a cause, and nothing in
@@ -24,14 +31,6 @@ import java.util.Optional;
  * exists, composes WITH this — it does not arrive through it.
  */
 public enum ReviewReplyTemplateKey {
-
-    /**
-     * Chosen by rating alone ({@code >= POSITIVE_MIN_RATING}), before any keyword is read — see the
-     * provider's note on why praise must never be answered with an apology.
-     */
-    POSITIVE("positive_reply", List.of(),
-            "안녕하세요, 고객님. 좋은 후기를 남겨주셔서 진심으로 감사합니다. "
-                    + "앞으로도 만족하실 수 있도록 노력하겠습니다."),
 
     QUALITY("quality_reply", List.of("불량", "하자", "깨짐", "파손", "터짐", "고장", "품질"),
             "안녕하세요, 고객님. 상품에 문제가 있어 불편을 드린 점 진심으로 사과드립니다. "
@@ -53,7 +52,16 @@ public enum ReviewReplyTemplateKey {
             "안녕하세요, 고객님. 가격에 대한 의견 감사합니다. "
                     + "더 나은 가치를 드릴 수 있도록 계속 고민하겠습니다."),
 
-    /** No rating and no keyword matched. */
+    /**
+     * Chosen by rating ({@code >= POSITIVE_MIN_RATING}) — but only after every keyword member has
+     * failed to match (Template Settings v1 closure). A review that names an issue is answered about
+     * that issue whatever its star rating.
+     */
+    POSITIVE("positive_reply", List.of(),
+            "안녕하세요, 고객님. 좋은 후기를 남겨주셔서 진심으로 감사합니다. "
+                    + "앞으로도 만족하실 수 있도록 노력하겠습니다."),
+
+    /** No keyword matched and the rating is not praise (or is absent). */
     GENERAL("general_reply", List.of(),
             "안녕하세요, 고객님. 소중한 후기를 남겨주셔서 감사합니다. "
                     + "남겨주신 의견을 잘 살펴보고 반영하겠습니다.");

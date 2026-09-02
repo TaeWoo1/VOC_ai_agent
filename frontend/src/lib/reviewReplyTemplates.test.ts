@@ -7,13 +7,14 @@ import type { ReviewReplyTemplateView } from "./types";
  * between them is a string. If the backend grows a category, this test is what says the screen cannot
  * name it yet — and `labelledTemplates` is what stops it from being rendered raw in the meantime.
  */
+/** Decision order: the five issue types, then the two the rating decides. */
 const BACKEND_KEYS = [
-  "positive_reply",
   "quality_reply",
   "delivery_reply",
   "packaging_reply",
   "product_info_reply",
   "pricing_reply",
+  "positive_reply",
   "general_reply",
 ] as const;
 

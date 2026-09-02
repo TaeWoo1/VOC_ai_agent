@@ -15,18 +15,27 @@ import org.springframework.stereotype.Component;
  * {@link ReviewReplyProposalProvider} would report its own kind/name/version and would be
  * selected by the same flag this bean is gated on.
  *
- * <p><b>Rating decides first, keywords second — and the tradeoff is real, so it is stated
- * rather than buried.</b> A 5★ review saying "배송 빨라요" contains a delivery keyword; running
- * keywords first would answer praise with an apology for late delivery, which is worse than
- * useless in a public reply. So a rating of {@value #POSITIVE_MIN_RATING} or above takes the
- * positive template regardless of what words appear. The cost: a 4★ review that praises the
- * product but mentions one late delivery also gets the positive template, and the operator has
- * to add the apology themselves. That is the right side to err on — a suggestion that is
- * merely incomplete is edited in seconds, while one that apologises to a happy customer has to
- * be noticed first, and the operator might not notice.
+ * <p><b>An issue signal decides first, the rating second — and this was reversed once, on
+ * purpose.</b> Until 2026-09-03 the rating won: a review of {@value #POSITIVE_MIN_RATING} stars or
+ * more took the positive template whatever words it contained. That protected a 5★ "배송 빨라요"
+ * from being answered with an apology, and it cost the case the product is actually for — a 4★
+ * review that plainly names a problem was answered with 「좋은 후기를 남겨주셔서 감사합니다」.
+ * Product-owner decision (Template Settings v1 closure): the problem outranks the star.
  *
- * <p>An unrated review (null rating — the source carried none) takes the keyword path: with no
- * rating there is no evidence of praise, and the keywords are the only signal there is.
+ * <p><b>What that costs, measured rather than guessed.</b> On this repository's real NAVER corpus
+ * (4,455 rows) the reversal moves <b>1,153</b> reviews off the positive template, and
+ * <b>1,098 of them are 5★</b> — overwhelmingly praise that merely names a topic word, not the 55
+ * four-star complaints the change was made for. A keyword list cannot tell 「배송 빨라요」 from
+ * 「배송 늦어요」, and this class deliberately does not try: a sentiment classifier here would be
+ * the AI this provider is defined as not being.
+ *
+ * <p>So the lever is the seller's, and it is the one this package built. A company whose reviews
+ * are mostly praise sets its 배송 template to wording that reads correctly either way — that is
+ * what {@link ReviewReplyTemplateService} is for, and it is why reviewnary's own defaults are a
+ * fallback rather than the answer. The operator still edits every draft before it is approved.
+ *
+ * <p>An unrated review (null rating — the source carried none) reaches the rating step with no
+ * evidence of praise and falls to {@link ReviewReplyTemplateKey#GENERAL}.
  *
  * <p><b>The choice moved out; the decision did not</b> (Review Reply Template Settings v1). The
  * categories, keywords, order and shipped wording now live in {@link ReviewReplyTemplateKey}, and
@@ -86,14 +95,13 @@ public class RuleBasedReviewReplyProvider implements ReviewReplyProposalProvider
     }
 
     /**
-     * Which template this review takes. Rating first, then the keyword members in their declared
-     * order, then the fallback — the selection this class has always made.
+     * Which template this review takes: the keyword members in their declared order, first hit wins;
+     * then, only if none matched, the rating; then the fallback.
+     *
+     * <p>The keyword pass is unchanged from the day it was written — same words, same precedence.
+     * All that moved is where the rating is asked, and the class note above says what that costs.
      */
     static ReviewReplyTemplateKey keyFor(ReviewReplyContext context) {
-        Integer rating = context.rating();
-        if (rating != null && rating >= POSITIVE_MIN_RATING) {
-            return ReviewReplyTemplateKey.POSITIVE;
-        }
         String haystack = context.redactedBody() == null ? "" : context.redactedBody();
         for (ReviewReplyTemplateKey key : ReviewReplyTemplateKey.KEYWORD_ORDER) {
             for (String keyword : key.keywords()) {
@@ -102,7 +110,10 @@ public class RuleBasedReviewReplyProvider implements ReviewReplyProposalProvider
                 }
             }
         }
-        return ReviewReplyTemplateKey.GENERAL;
+        Integer rating = context.rating();
+        return rating != null && rating >= POSITIVE_MIN_RATING
+                ? ReviewReplyTemplateKey.POSITIVE
+                : ReviewReplyTemplateKey.GENERAL;
     }
 
     private Suggestion suggestion(UUID orgId, ReviewReplyTemplateKey key) {

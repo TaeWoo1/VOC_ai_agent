@@ -105,8 +105,8 @@ class ReviewReplyTemplateServiceTest {
     @DisplayName("the list is in the provider's own decision order, so reading it top to bottom is reading the rule")
     void theListIsInDecisionOrder() {
         assertThat(service.view(orgA).templates()).extracting(ReviewReplyTemplateView::key)
-                .containsExactly("positive_reply", "quality_reply", "delivery_reply",
-                        "packaging_reply", "product_info_reply", "pricing_reply", "general_reply");
+                .containsExactly("quality_reply", "delivery_reply", "packaging_reply",
+                        "product_info_reply", "pricing_reply", "positive_reply", "general_reply");
     }
 
     // ---------------------------------------------------------------- override
@@ -127,11 +127,13 @@ class ReviewReplyTemplateServiceTest {
     }
 
     @Test
-    @DisplayName("rating still beats keywords after a company has written its own wording")
-    void ratingStillDecidesFirst() {
+    @DisplayName("selection is unaffected by settings: the same review takes the same template")
+    void settingsChangeTheWordingNotTheChoice() {
         service.save(orgA, "delivery_reply", "배송이 늦어 죄송합니다.", user);
 
-        assertThat(suggest(orgA, "배송 빨라요! 포장도 좋았습니다", 5).category()).isEqualTo("positive_reply");
+        // A named issue decides (closure); a review that names none falls to the rating.
+        assertThat(suggest(orgA, "배송 빨라요! 포장도 좋았습니다", 5).category()).isEqualTo("delivery_reply");
+        assertThat(suggest(orgA, "정말 마음에 듭니다", 5).category()).isEqualTo("positive_reply");
     }
 
     @Test

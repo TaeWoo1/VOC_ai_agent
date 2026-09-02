@@ -34,12 +34,12 @@ function template(over: Partial<ReviewReplyTemplateView> = {}): ReviewReplyTempl
 /** The shape the backend sends: every category, in decision order. */
 function allTemplates(): ReviewReplyTemplateView[] {
   return [
-    template({ key: "positive_reply", body: "기본 칭찬 문구", defaultBody: "기본 칭찬 문구", matchWords: [] }),
     template({ key: "quality_reply", body: "기본 불량 문구", defaultBody: "기본 불량 문구", matchWords: ["불량"] }),
     template(),
     template({ key: "packaging_reply", body: "기본 포장 문구", defaultBody: "기본 포장 문구", matchWords: ["포장"] }),
     template({ key: "product_info_reply", body: "기본 설명 문구", defaultBody: "기본 설명 문구", matchWords: ["설명"] }),
     template({ key: "pricing_reply", body: "기본 가격 문구", defaultBody: "기본 가격 문구", matchWords: ["가격"] }),
+    template({ key: "positive_reply", body: "기본 칭찬 문구", defaultBody: "기본 칭찬 문구", matchWords: [] }),
     template({ key: "general_reply", body: "기본 일반 문구", defaultBody: "기본 일반 문구", matchWords: [] }),
   ];
 }
