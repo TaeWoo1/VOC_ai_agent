@@ -15,7 +15,7 @@ import { caseTarget, preparedBadge } from "../../lib/proactive";
 import { previewText } from "../../lib/plainText";
 import { matchCommandIntent, INTENT_HEADING } from "../../lib/commandIntents";
 import type { InquiryListArtifact, InquiryListArtifact as InquiryList, ListArtifact } from "../../lib/conversation/types";
-import type { InquiryRowItem, MetricKpi, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
+import type { InquiryQueueResponse, MetricKpi, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
 
 /**
  * 홈 — the Agent operating workspace (Agentic Operating Workspace v2 §3-C).
@@ -55,20 +55,26 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
     };
   }, []);
 
-  // Working Context v1 §2: the brief NAMES the work. One bounded READ of the seller's own oldest
-  // waiting inquiries — the same `/api/inquiries/rows` the conversation's 「최근 문의」 makes, ordered
-  // by the one urgency signal this product has. `undefined` = not read yet (say nothing about it),
-  // `null` = the read failed (the brief falls back to the count it already has).
-  const [oldest, setOldest] = useState<InquiryRowItem[] | null | undefined>(undefined);
+  /**
+   * **What is waiting is the WORK QUEUE, not the inquiry feed** (Chat-first Outcome & Visual Closure v1
+   * §1). The brief read `/api/inquiries/rows?status=UNANSWERED` — the customer's inquiries as records —
+   * while its number came from a freshness-qualified KPI, and the two are different questions with
+   * different answers: measured on the real org, 10 actionable work items against 21 unanswered records.
+   * Neither number is wrong; they were being shown as one. The home brief is about what the seller has to
+   * DO, so it now asks the queue that owns that — one read, and its own total.
+   *
+   * `undefined` = not read yet (say nothing about it), `null` = the read failed.
+   */
+  const [queue, setQueue] = useState<InquiryQueueResponse | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
     api
-      .getInquiryRowsStrict({ status: "UNANSWERED", order: "OLDEST", limit: BRIEF_ROWS })
+      .getInquiryQueueStrict({ size: BRIEF_ROWS })
       .then((r) => {
-        if (live) setOldest(r.items);
+        if (live) setQueue(r);
       })
       .catch(() => {
-        if (live) setOldest(null);
+        if (live) setQueue(null);
       });
     return () => {
       live = false;
@@ -83,7 +89,7 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   const beforeFirstConnection = firstUse?.kind === "NO_CHANNEL";
   // §5: when the brief names the waiting inquiries it also says how many — so the strip stops saying
   // it. Before this the seller read 「현재 미답변 문의 12건」 and 「…문의가 12건 있습니다」 one line apart.
-  const strip = data ? contextStrip(data, now, (oldest?.length ?? 0) > 0) : [];
+  const strip = data ? contextStrip(data, now, (queue?.content.length ?? 0) > 0) : [];
   const anyUnproven = strip.some((kpi) => kpi.freshnessUnproven);
   const count = cases ? cases.items.length : null;
 
@@ -96,8 +102,8 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
     // and on the morning after one when nothing has arrived, the lead sentence above IS the briefing —
     // an opener saying 「지금 먼저 확인할 일은 없습니다」 under it would be the same morning explained twice,
     // and the weaker explanation would be the one that sounds like a verdict on the store.
-    () => (cases && firstUse?.kind === "WORKING" && oldest !== undefined ? [proactiveTurn(cases, workload, oldest)] : []),
-    [cases, workload, oldest, firstUse],
+    () => (cases && firstUse?.kind === "WORKING" && queue !== undefined ? [proactiveTurn(cases, workload, queue, storedInquiries(data))] : []),
+    [cases, workload, queue, firstUse, data],
   );
 
   const onBeforeSend = useCallback(
@@ -335,10 +341,23 @@ export function waitingDays(receivedAt: string | null | undefined, today = new D
  * `oldest` is `null` when that read failed — the count line stands in, because a brief that can only
  * say the number is still better than one that invents rows.
  */
+/**
+ * How many inquiry RECORDS this org holds, as the overview's channel rows report them — the source
+ * records the 문의 workspace is built on, never a count of work. `null` when the read is not in yet.
+ *
+ * It exists for exactly one sentence: when the queue is empty and records are not, the brief has to say
+ * which of the two it means, or 「지금 처리할 일은 없습니다」 reads as a claim about the records too.
+ */
+export function storedInquiries(data: OverviewResponse | null | undefined): number | null {
+  if (!data) return null;
+  return data.metrics.channels.reduce((n, c) => n + (c.unansweredInquiries ?? 0), 0);
+}
+
 export function proactiveTurn(
   cases: ProactiveCaseListResponse,
   workload: WorkloadPriority[] | null,
-  oldest: InquiryRowItem[] | null,
+  queue: InquiryQueueResponse | null,
+  storedRecords: number | null = null,
 ): DisplayTurn {
   const items = cases.items;
   const list: ListArtifact = {
@@ -361,8 +380,11 @@ export function proactiveTurn(
     ...(cases.total > items.length ? { more: { label: `전체 ${cases.total}건 보기`, to: "/inquiries" } } : {}),
   };
   const waiting = workload ?? [];
-  const unanswered = waiting.find((w) => w.to.startsWith("/inquiries"))?.count ?? 0;
-  const rows = oldest ?? [];
+  // ONE number for 「지금 처리할 일」, and it is the queue's own total — the same set the rows below come
+  // from. The freshness-qualified KPI stays where it belongs, in the numbers line, saying a different
+  // thing about a different question (§1).
+  const actionable = queue?.totalElements ?? 0;
+  const rows = queue?.content ?? [];
   // The rows the brief names, as the same object every other inquiry list in this product is — so a
   // click here anchors the conversation exactly as a click on an answered list does.
   const waitingRows: InquiryList = {
@@ -372,7 +394,7 @@ export function proactiveTurn(
     // The sentence above this card says 「가장 오래 기다린 것부터 보여드릴게요」 — the producer of BOTH
     // declares the repeat, because no containment test can see it (Agent Object v1 §3).
     titleSaid: true,
-    totalCount: unanswered,
+    totalCount: actionable,
     // The read this brief actually made. It is what the card uses to know the seller (or, here, the
     // brief's own sentence) already said these are the waiting ones — so the list does not add
     // 「모두 답변이 필요한 문의입니다」 under a sentence that just said exactly that.
@@ -390,7 +412,10 @@ export function proactiveTurn(
           phase: row.phase ?? "OPEN",
           status: row.status,
           title: row.title,
-          snippet: row.snippet,
+          // The queue answers identity, channel, product and time — never the customer's sentence. The
+          // preview belonged to the feed read this card no longer makes, and a brief does not need it:
+          // the title, the shop and the wait are what put a row above the others.
+          snippet: null,
           productId: row.productId,
           productName: row.productName,
           answerBasis: null,
@@ -402,7 +427,7 @@ export function proactiveTurn(
         })),
       },
     ],
-    ...(unanswered > rows.length ? { more: { label: `문의 ${unanswered.toLocaleString("ko-KR")}건 전체 보기`, to: "/inquiries?state=NEEDS_REPLY" } } : {}),
+    ...(actionable > rows.length ? { more: { label: `처리할 일 ${actionable.toLocaleString("ko-KR")}건 전체 보기`, to: "/inquiries?state=NEEDS_REPLY" } } : {}),
   };
   // The count read failed or the rows are empty while the count is not — then the brief still has one
   // honest thing to say, and it says it as a line rather than a card.
@@ -416,19 +441,17 @@ export function proactiveTurn(
   const message = items.length > 0
     ? "제가 먼저 확인해 둔 일입니다. 확인하고 보내시면 됩니다 — 아직 아무 곳에도 보내지 않았습니다."
     : namedRows
-      // The number is said ONCE, and it is said as the reason these particular rows are on top.
-      //
-      // **…and only while it can still describe them.** The count and the rows are different reads with
-      // different definitions of "waiting" (the KPI counts operational work items; the feed counts the
-      // inquiry's own status), and on 2026-09-02 they disagreed: 「답변을 기다리는 문의가 0건 있습니다」
-      // stood above three rows waiting since 2016. A total the rows below it contradict is worse than no
-      // total, so the sentence keeps the number only when it is at least the number of rows it introduces.
-      ? unanswered >= rows.length
-        ? `답변을 기다리는 문의가 ${unanswered.toLocaleString("ko-KR")}건 있습니다. 가장 오래 기다린 것부터 보여드릴게요 — 눌러서 바로 이어가시면 됩니다.`
-        : "답변을 기다리는 문의를 가장 오래 기다린 것부터 보여드릴게요 — 눌러서 바로 이어가시면 됩니다."
-      : waiting.length > 0
-        ? "오늘 미리 준비해 둔 일은 없지만, 지금 확인이 필요한 일이 있습니다."
-        : "지금 먼저 확인할 일은 없습니다. 새로 들어온 문의나 리뷰가 생기면 여기에 먼저 정리해 두겠습니다.";
+      // The number is said ONCE, and it is said as the reason these particular rows are on top. It is the
+      // queue's own total, so it can never disagree with the rows underneath it.
+      ? `지금 처리할 일이 ${actionable.toLocaleString("ko-KR")}건 있습니다. 가장 오래 기다린 것부터 보여드릴게요 — 눌러서 바로 이어가시면 됩니다.`
+      // **An empty queue is not an empty shop** (§1). With records held and nothing actionable in them,
+      // 「지금 처리할 일은 없습니다」 alone reads as a claim about the records too — so the sentence names
+      // which of the two it is talking about, and where the other one lives.
+      : (storedRecords ?? 0) > 0
+        ? `지금 처리할 일은 없습니다. 지금까지 들어온 문의 ${storedRecords!.toLocaleString("ko-KR")}건은 문의 화면에서 볼 수 있습니다.`
+        : waiting.length > 0
+          ? "오늘 미리 준비해 둔 일은 없지만, 지금 확인이 필요한 일이 있습니다."
+          : "지금 먼저 확인할 일은 없습니다. 새로 들어온 문의나 리뷰가 생기면 여기에 먼저 정리해 두겠습니다.";
   return {
     turnId: "home-proactive",
     conversationId: "local",

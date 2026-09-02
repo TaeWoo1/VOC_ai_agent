@@ -27,7 +27,7 @@ export function CompletedResult({ run }: { run: ActionWindowRunView }) {
         <h2 className="text-lg font-semibold text-ink">리뷰 내려받기를 마쳤어요</h2>
       </div>
       <p className="mt-2 text-ink">
-        {channelLabel(run.channelCode)} 리뷰를 가져와 SellerOps에 넘겼어요.
+        {channelLabel(run.channelCode)} 리뷰를 가져와 reviewnary에 넘겼어요.
       </p>
       <p className="mt-1 text-sm text-muted">
         무엇이 들어왔는지는 &lsquo;최근 가져오기 기록&rsquo;에 표시돼요. 확인이 필요한 리뷰는{" "}

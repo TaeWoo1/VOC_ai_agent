@@ -25,7 +25,7 @@ import { isIssuanceResumeReturn } from "../../lib/coupangTutorial";
  * The bridge lives INSIDE this component, which mounts only in the `issuance` journey phase. Credential
  * entry, the connection test, the first sync, and every already-progressed path never see it. A seller with
  * no helper — or who declines pairing — is never blocked: the screen walk is the PRIMARY path and the resident
- * SellerOps 도우미 brings it up on demand (the tab asks for the `issuance`/`coupang` carrier; the helper
+ * reviewnary 도우미 brings it up on demand (the tab asks for the `issuance`/`coupang` carrier; the helper
  * assembles the walk and announces it; the WING window opens on the seller's 시작). The text checklist is the
  * FALLBACK, entered only when the walk is known to be impossible on this machine (no helper, pairing will not
  * fix it, or the paired helper cannot host the walk — an older helper, or one holding a different carrier) —
@@ -129,7 +129,7 @@ export function CoupangIssuanceGuidedWalkthrough({
 
   // Live issuance run host — the SHARED host for every channel (the run's channelCode comes from the agent
   // announcement). Inert until `attach()` is called. `channelCode` here is the ASK, not the answer: the resident
-  // SellerOps 도우미 hosts no carrier until a tab asks, and this is the tab asking for the Coupang guided walk —
+  // reviewnary 도우미 hosts no carrier until a tab asks, and this is the tab asking for the Coupang guided walk —
   // the announced channelCode still decides what the run is.
   /**
    * **The credential handoff's own state, and it holds no value.**
@@ -338,7 +338,7 @@ export function CoupangIssuanceGuidedWalkthrough({
           쿠팡 윙에서 Open API 키를 발급하는 순서를 안내해 드릴게요.
         </p>
         <p className="text-sm text-muted break-keep">
-          직접 진행하시면 무엇을 어디서 누르는지 순서대로 알려 드립니다. 내 PC에 SellerOps 도우미를 실행해
+          직접 진행하시면 무엇을 어디서 누르는지 순서대로 알려 드립니다. 내 PC에 reviewnary 도우미를 실행해
           두셨다면, 도우미가 전용 쿠팡 윙 창을 열어 눌러야 할 위치를 표시하는 화면 안내도 쓸 수 있어요.
         </p>
         <button
@@ -412,7 +412,7 @@ export function CoupangIssuanceGuidedWalkthrough({
       <section className="space-y-1 rounded-lg border border-line px-4 py-3" aria-label="API 호출 IP 등록 안내">
         <p className="text-sm font-medium text-ink">API 호출 IP 등록</p>
         <p className="text-xs text-muted">
-          발급 화면의 'API 호출 IP'에 SellerOps 고정 호출 IP를 등록하세요. 등록하지 않으면 첫 주문 수집이
+          발급 화면의 'API 호출 IP'에 reviewnary 고정 호출 IP를 등록하세요. 등록하지 않으면 첫 주문 수집이
           호출 IP 오류로 실패할 수 있습니다.
         </p>
         <AdvertisedCallIpPanel ips={advertisedEgressIps} />
@@ -425,7 +425,7 @@ export function CoupangIssuanceGuidedWalkthrough({
         <div className="flex items-center gap-3 rounded-xl bg-canvas px-4 py-3" role="status">
           <Spinner />
           <p className="text-sm text-muted break-keep">
-            {paired ? "도우미가 연결됐어요. 쿠팡 윙 안내를 준비하고 있어요." : "내 PC의 SellerOps 도우미를 찾고 있어요…"}
+            {paired ? "도우미가 연결됐어요. 쿠팡 윙 안내를 준비하고 있어요." : "내 PC의 reviewnary 도우미를 찾고 있어요…"}
           </p>
         </div>
       )}

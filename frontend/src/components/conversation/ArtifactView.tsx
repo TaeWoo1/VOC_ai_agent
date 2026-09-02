@@ -75,7 +75,7 @@ function FoldedList({ size, children }: { size: { count: number; noun: string };
 }
 
 /** One component per artifact type. The switch is exhaustive: an unknown type renders nothing, never its token. */
-export function ArtifactView({ artifact, onResume, onPrompt, onCaptureDecision, stepped, headline, latest = true }: {
+export function ArtifactView({ artifact, onResume, onPrompt, onCaptureDecision, stepped, headline, latest = true, secondary = false }: {
   artifact: Artifact; onResume: () => void; onPrompt?: (prompt: string) => void;
   onCaptureDecision?: (captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL") => void;
   /** Channel codes THIS turn already raised as a step — so a list does not restate what the step card says. */
@@ -84,8 +84,15 @@ export function ArtifactView({ artifact, onResume, onPrompt, onCaptureDecision, 
   headline?: string;
   /** Is this the turn the seller is reading? An older turn folds its bulk lists away. */
   latest?: boolean;
+  /**
+   * **One primary object collection per turn** (Chat-first Outcome & Visual Closure v1 §4). Set on every
+   * collection after the first in a turn the seller asked ONE question of: the second list is folded to
+   * its count, exactly as an older turn's is. Nothing is hidden — the count is the fact, and one press
+   * brings the rows back — but the answer is not two lists deep before the seller has read the first.
+   */
+  secondary?: boolean;
 }) {
-  const size = latest ? null : bulkSize(artifact);
+  const size = latest && !secondary ? null : bulkSize(artifact);
   if (size && size.count > 3) {
     return (
       <FoldedList size={size}>

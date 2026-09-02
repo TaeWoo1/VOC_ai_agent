@@ -32,7 +32,7 @@ describe("FE-11 CompletedResult (DOM/a11y)", () => {
     // analysis. It previously said "정리·분석까지 끝냈어요" while showing nothing but step progress.
     render(<MemoryRouter><CompletedResult run={run} /></MemoryRouter>);
     const region = screen.getByRole("region", { name: "완료 결과" });
-    expect(region).toHaveTextContent("SellerOps에 넘겼어요");
+    expect(region).toHaveTextContent("reviewnary에 넘겼어요");
     expect(region).toHaveTextContent("리뷰 화면");
     expect(region.textContent ?? "").not.toContain("분석까지 끝냈어요");
   });

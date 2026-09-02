@@ -8,7 +8,7 @@
  * something unfinished.
  *
  * <b>The exceptions are declared, not discovered.</b> The connection / onboarding / Action Window
- * family still says SellerOps because the string there is not only a brand: 「SellerOps 도우미」 names
+ * family still says SellerOps because the string there is not only a brand: 「reviewnary 도우미」 names
  * a program the seller installs and then has to FIND on their own computer, and this repository
  * cannot verify what that installed application is actually called. Renaming the instruction without
  * renaming the thing it points at would be a worse defect than an inconsistent name.
@@ -18,10 +18,19 @@
  * naming the PRODUCT in guidance prose the helper draws. The second had no reason to wait, and a
  * live sitting had a seller reading 「SellerOps 안내」 on the panel of a product called reviewnary. So
  * every guided string whose subject is the product moved (the in-page panel's own title, the
- * walkthrough prose, the Coupang mirror), and only 「SellerOps 도우미」 — the installed program, and
+ * walkthrough prose, the Coupang mirror), and only 「reviewnary 도우미」 — the installed program, and
  * the confirmation page's pointer at the window that program titles — stayed. The deferral count
  * therefore fell 40 → 29; the files that left are the ones whose SellerOps strings were all
  * product-name prose.
+ *
+ * <b>2026-09-02 — the helper's own name is a product-owner decision, and it was made.</b> The deferral
+ * above rested on one thing this repository could not verify: what the installed program is actually
+ * called on the seller's computer. The product owner settled it — the seller reads 「reviewnary 도우미」
+ * — and the internal names it is deferred against (the launchd label `ai.sellerops.local-agent`, the
+ * package, the env vars, the connector ids) are untouched, because an internal name is not a lie to
+ * anybody. The same pass moved the product prose those screens still carried — 「reviewnary가 대신
+ * 클릭하지 않아요」, 「reviewnary에 넘겼어요」, 「reviewnary 고정 호출 IP」 — because the pointer at a window
+ * this repository had just renamed could not keep calling it something else. The count fell 29 → 6.
  *
  * Comments are not user-facing and are not scanned.
  */
@@ -86,7 +95,7 @@ describe("the product name a seller reads", () => {
       DECLARED_EXCEPTIONS.some((prefix) => path.startsWith(prefix)),
     ).filter((path) => code(readFileSync(path, "utf-8")).includes("SellerOps"));
 
-    expect(deferred).toHaveLength(29);
+    expect(deferred).toHaveLength(6);
   });
 
   it("the browser tab carries the product name", () => {

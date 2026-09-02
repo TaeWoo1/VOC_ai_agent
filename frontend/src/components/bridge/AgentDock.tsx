@@ -12,10 +12,10 @@ import {
 } from "../../lib/bridge/agentDock";
 
 /**
- * The SellerOps 도우미 dock (bottom-right, mounted by the shell behind `VITE_ENABLE_AGENT_BRIDGE`).
+ * The reviewnary 도우미 dock (bottom-right, mounted by the shell behind `VITE_ENABLE_AGENT_BRIDGE`).
  *
  * Quiet by default: nothing for a seller who never connected the helper — the screens that need it carry their
- * own "SellerOps 도우미가 필요합니다" panel. Connected → a small chip (details on tap). Previously connected and now
+ * own "reviewnary 도우미가 필요합니다" panel. Connected → a small chip (details on tap). Previously connected and now
  * broken → a reconnect notice. The rule lives in `lib/bridge/agentDock.ts`; this component only renders it and
  * wires the same three bridge actions the old status console had (connect / retry / revoke). Pairing, the bridge
  * client and every live flow are untouched.
@@ -76,7 +76,7 @@ export function AgentDock() {
   if (view.kind === "connected") {
     const connections = state.snapshot?.connections ?? [];
     return (
-      <section className="flex flex-col items-end gap-2" aria-label="SellerOps 도우미 연결 상태" data-testid="agent-dock">
+      <section className="flex flex-col items-end gap-2" aria-label="reviewnary 도우미 연결 상태" data-testid="agent-dock">
         {expanded && (
           <div className="card w-full p-4" data-testid="agent-dock-detail">
             <p className="text-sm font-medium text-ink">{DOCK_COPY.connectedDetail}</p>
@@ -114,7 +114,7 @@ export function AgentDock() {
 
   if (view.kind === "pairing") {
     return (
-      <section className="card p-4" aria-label="SellerOps 도우미 다시 연결" data-testid="agent-dock">
+      <section className="card p-4" aria-label="reviewnary 도우미 다시 연결" data-testid="agent-dock">
         <p className="text-sm text-ink break-keep">
           {state.attestedApproval ? DOCK_COPY.pairingAttested : DOCK_COPY.pairing}
         </p>
@@ -143,7 +143,7 @@ export function AgentDock() {
         ? null
         : { label: DOCK_COPY.reconnect, onClick: retry };
   return (
-    <section className="card p-4" role="status" aria-label="SellerOps 도우미 다시 연결" data-testid="agent-dock">
+    <section className="card p-4" role="status" aria-label="reviewnary 도우미 다시 연결" data-testid="agent-dock">
       <div className="flex items-start gap-2">
         <span className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full bg-warn" aria-hidden="true" />
         <div className="min-w-0">

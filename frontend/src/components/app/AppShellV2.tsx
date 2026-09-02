@@ -15,7 +15,7 @@ import { ConversationProvider } from "../../lib/conversation/ConversationProvide
 // Opt-in guided-connection infrastructure surfaces. Absent from the default app; they mount only
 // when explicitly enabled and do not participate in navigation. Carried over from the previous
 // shell — these are runtime tools, not product surface. The dock itself is quiet unless the
-// SellerOps 도우미 is connected, or was and broke (`lib/bridge/agentDock.ts`).
+// reviewnary 도우미 is connected, or was and broke (`lib/bridge/agentDock.ts`).
 const AGENT_BRIDGE_ENABLED = import.meta.env.VITE_ENABLE_AGENT_BRIDGE === "true";
 const AGENT_PROJECTION_ENABLED = import.meta.env.VITE_ENABLE_AGENT_PROJECTION === "true";
 

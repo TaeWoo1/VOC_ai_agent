@@ -614,8 +614,8 @@ export function VocItemReplyPrep({
       </div>
 
       {/* The guided run in progress. The operator posts the reply in the seller center themselves;
-          SellerOps only guides and records what they report. Two reports, both honest: 답변함 /
-          답변 안 함 — never a claim SellerOps posted anything, and never a 완료. */}
+          reviewnary only guides and records what they report. Two reports, both honest: 답변함 /
+          답변 안 함 — never a claim reviewnary posted anything, and never a 완료. */}
       {guided != null ? (
         <div
           role="group"

@@ -98,8 +98,8 @@ describe("agent dock — quiet unless the helper is connected or was and broke",
     expect(hasStoredPairing(undefined)).toBe(false);
   });
 
-  it("copy says SellerOps 도우미, never 로컬 에이전트", () => {
+  it("copy says reviewnary 도우미, never 로컬 에이전트", () => {
     expect(JSON.stringify(DOCK_COPY)).not.toMatch(/로컬 에이전트|에이전트/);
-    expect(JSON.stringify(DOCK_COPY)).toMatch(/SellerOps 도우미/);
+    expect(JSON.stringify(DOCK_COPY)).toMatch(/reviewnary 도우미/);
   });
 });

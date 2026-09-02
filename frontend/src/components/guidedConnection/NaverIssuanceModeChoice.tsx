@@ -67,7 +67,7 @@ export function NaverIssuanceModeChoice({
         화면을 보며 안내받기 (도우미 필요)
       </button>
       <p className="text-xs text-muted">
-        화면 안내는 내 PC의 SellerOps 도우미가 NAVER API 센터 창을 열어 눌러야 할 위치를 표시합니다. 도우미를
+        화면 안내는 내 PC의 reviewnary 도우미가 NAVER API 센터 창을 열어 눌러야 할 위치를 표시합니다. 도우미를
         실행해 두지 않았다면 텍스트 안내로 끝까지 진행할 수 있어요.
       </p>
     </div>

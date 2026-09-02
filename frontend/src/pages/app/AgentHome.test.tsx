@@ -82,7 +82,8 @@ beforeEach(() => {
   window.localStorage.clear();
   getOverviewStrict.mockResolvedValue(overview());
   getProactiveCases.mockResolvedValue({ items: [CASE, { ...CASE, id: "case-2", subjectId: "i-2", snippet: "교환 가능한가요?" }], total: 2, high: 2 });
-  getInquiryQueueStrict.mockResolvedValue({ content: [{ workItemId: "w1", inquiryId: "i1", sellerAccountId: "s", channelId: "c", channelCode: "CAFE24", channelNameKo: "카페24 자사몰", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "배송 언제 되나요?", receivedAt: "2026-08-26T00:00:00Z" }], page: 0, size: 5, totalElements: 1, totalPages: 1 });
+  // §1: the home brief reads the WORK QUEUE. Empty by default — a test that is about waiting work says so.
+  getInquiryQueueStrict.mockResolvedValue({ content: [], page: 0, size: 5, totalElements: 0, totalPages: 0 });
   getReviewIssuesStrict.mockResolvedValue([]);
   // Working Context v1 §2: the brief names the oldest waiting inquiries. Empty by default —
   // the tests that care about the named rows set their own.
@@ -133,22 +134,29 @@ describe("home — the Agent operating workspace", () => {
     expect(screen.queryByText(/proactive|PROPOSED|DRAFT_PREPARED|case/i)).toBeNull();
   });
 
-  it("no prepared cases + real waiting work ⇒ the opener names the workload, never 「없습니다」 (§11)", async () => {
+  /**
+   * §1 — an empty QUEUE over held RECORDS is not an empty shop.
+   *
+   * The two are different questions with different answers (measured live: 10 actionable work items
+   * against 21 unanswered records), so a brief that says 「지금 처리할 일은 없습니다」 has to name which one
+   * it means or the sentence reads as a verdict on the records too.
+   */
+  it("no prepared cases + nothing actionable + records held ⇒ the brief names both, and confuses neither", async () => {
     getProactiveCases.mockResolvedValue({ items: [], total: 0, high: 0 });
     renderHome();
-    expect(await screen.findByText(/지금 확인이 필요한 일이 있습니다/)).toBeInTheDocument();
-    expect(screen.getByText(/답변을 기다리는 문의 22건/)).toBeInTheDocument();
+    expect(await screen.findByText(/지금 처리할 일은 없습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/문의 화면에서 볼 수 있습니다/)).toBeInTheDocument();
     expect(screen.queryByText(/새로 들어온 문의나 리뷰가 생기면/)).toBeNull();
     expect(screen.queryByText("AI가 먼저 확인한 일")).toBeNull();
   });
 
-  it("§2: with rows to name, the brief NAMES them and says the count once — no 「기다리는 일」 card", async () => {
+  it("§2: with work to name, the brief NAMES it and says the QUEUE's own count once", async () => {
     getProactiveCases.mockResolvedValue({ items: [], total: 0, high: 0 });
-    getInquiryRowsStrict.mockResolvedValue({
-      from: null, to: null, channel: null, status: "UNANSWERED", order: "OLDEST", limit: 3, term: null, totalCount: 22,
-      items: [
-        { inquiryId: "i-1", workItemId: "w-1", sellerAccountId: "s", channelId: "c", channelCode: "NAVER", channelNameKo: "네이버 스마트스토어", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "현금영수증 발행 부탁드립니다", snippet: "주문할 때 신청을 못 했는데…", receivedAt: "2026-07-22T00:00:00Z", answeredAt: null, sourceSubtype: null, executableIdentity: null },
-        { inquiryId: "i-2", workItemId: "w-2", sellerAccountId: "s", channelId: "c", channelCode: "CAFE24", channelNameKo: "카페24 자사몰", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "배송이 너무 늦습니다", snippet: "일주일이 넘었는데…", receivedAt: "2026-07-30T00:00:00Z", answeredAt: null, sourceSubtype: null, executableIdentity: null },
+    getInquiryQueueStrict.mockResolvedValue({
+      page: 0, size: 3, totalElements: 22, totalPages: 8,
+      content: [
+        { inquiryId: "i-1", workItemId: "w-1", sellerAccountId: "s", channelId: "c", channelCode: "NAVER", channelNameKo: "네이버 스마트스토어", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "현금영수증 발행 부탁드립니다", receivedAt: "2026-07-22T00:00:00Z" },
+        { inquiryId: "i-2", workItemId: "w-2", sellerAccountId: "s", channelId: "c", channelCode: "CAFE24", channelNameKo: "카페24 자사몰", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "배송이 너무 늦습니다", receivedAt: "2026-07-30T00:00:00Z" },
       ],
     });
     renderHome();
@@ -159,18 +167,21 @@ describe("home — the Agent operating workspace", () => {
     // The old card said the same number a third time; it is gone, and so is the chip re-asking for it.
     expect(screen.queryByText("지금 기다리는 일")).toBeNull();
     expect(screen.queryByRole("button", { name: "답변 안 한 문의 보여줘" })).toBeNull();
-    expect(screen.getByRole("link", { name: "문의 22건 전체 보기" })).toHaveAttribute("href", "/inquiries?state=NEEDS_REPLY");
+    expect(screen.getByText(/지금 처리할 일이 22건 있습니다/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "처리할 일 22건 전체 보기" })).toHaveAttribute("href", "/inquiries?state=NEEDS_REPLY");
     // §5: the strip stops printing the number the brief is already saying one line below.
     expect(screen.queryByText("현재 미답변 문의")).toBeNull();
     expect(screen.getByText(/부정 리뷰/)).toBeInTheDocument();
   });
 
-  it("§2: when the rows read fails the brief falls back to the count it already has", async () => {
+  it("§2: when the queue read fails the brief names no work and claims none", async () => {
     getProactiveCases.mockResolvedValue({ items: [], total: 0, high: 0 });
-    getInquiryRowsStrict.mockRejectedValue(new Error("nope"));
+    getInquiryQueueStrict.mockRejectedValue(new Error("nope"));
     renderHome();
-    expect(await screen.findByText(/지금 확인이 필요한 일이 있습니다/)).toBeInTheDocument();
-    expect(screen.getByText(/답변을 기다리는 문의 22건/)).toBeInTheDocument();
+    // A failed read is not a zero: the brief says what it still knows (records are held) and never
+    // reports 「처리할 일 0건」, which would be a claim about work it could not look at.
+    expect(await screen.findByText(/지금 처리할 일은 없습니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/지금 처리할 일이 0건/)).toBeNull();
   });
 
   it("a genuinely quiet morning — no cases AND no waiting work — is the truthful zero", async () => {
@@ -179,6 +190,8 @@ describe("home — the Agent operating workspace", () => {
     quiet.metrics.kpis = quiet.metrics.kpis.map((k) =>
       k.key === "unansweredInquiries" || k.key === "negativeReviews" ? { ...k, value: 0 } : k,
     );
+    // Truly quiet: no work AND no records held — otherwise the honest sentence is §1's, not this one.
+    quiet.metrics.channels = quiet.metrics.channels.map((c) => ({ ...c, unansweredInquiries: 0 }));
     getOverviewStrict.mockResolvedValue(quiet);
     renderHome();
     expect(await screen.findByText(/새로 들어온 문의나 리뷰가 생기면/)).toBeInTheDocument();
@@ -194,6 +207,11 @@ describe("home — the Agent operating workspace", () => {
   });
 
   it("an exact shortcut answers locally with an object; no turn is sent", async () => {
+    // The shortcut renders the work queue, so this test states its own row (the suite default is empty).
+    getInquiryQueueStrict.mockResolvedValue({
+      page: 0, size: 5, totalElements: 22, totalPages: 5,
+      content: [{ workItemId: "w1", inquiryId: "i1", sellerAccountId: "s", channelId: "c", channelCode: "CAFE24", channelNameKo: "카페24 자사몰", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "배송 언제 되나요?", receivedAt: "2026-08-26T00:00:00Z" }],
+    });
     renderHome();
     await screen.findByText(/좋은 아침입니다/);
     await userEvent.type(screen.getByLabelText("무엇이든 물어보세요"), "미답변 문의 보여줘");
@@ -201,9 +219,13 @@ describe("home — the Agent operating workspace", () => {
     // ONE control per row (Frontend-first v1): the row IS the control, and the workspace link lives
     // inside the row it belongs to — opened by that press, not sitting beside every row as a third copy
     // of the same action.
-    expect(await screen.findByRole("button", { name: /배송 언제 되나요/ })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "문의 화면에서 열기" })).toBeNull();
-    expect(screen.getByText("답변이 필요한 문의 22건")).toBeInTheDocument();
+    // Scoped to the shortcut's OWN turn: the home brief reads the same queue now (§1), so the row it
+    // named is legitimately on screen too — this test is about what the shortcut answers.
+    await screen.findByText("답변이 필요한 문의 22건");
+    const turns = screen.getAllByTestId("agent-turn");
+    const answer = turns[turns.length - 1]!;
+    expect(within(answer).getByRole("button", { name: /배송 언제 되나요/ })).toBeInTheDocument();
+    expect(within(answer).queryByRole("link", { name: "문의 화면에서 열기" })).toBeNull();
     expect(conversationClient.sendTurn).not.toHaveBeenCalled();
   });
 

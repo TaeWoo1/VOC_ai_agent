@@ -50,14 +50,14 @@ function approvalSourceText(channel: ApprovalChannel | undefined): string {
   switch (channel) {
     case "os_dialog":
       // NOT renamed with the rest of the guided copy: this sentence points at a window the HELPER draws, and
-      // that window's own title is "SellerOps 도우미 연결". The helper keeps its name until there is an
+      // that window's own title is "reviewnary 도우미 연결". The helper keeps its name until there is an
       // installable artifact to rename (see the disconnected-onboarding decision), so renaming the pointer
       // and not the window would send the seller looking for a window that does not exist under that name.
-      return "화면에 뜬 SellerOps 도우미 승인 창에 표시된";
+      return "화면에 뜬 reviewnary 도우미 승인 창에 표시된";
     case "terminal":
       return "에이전트를 실행한 터미널에 표시된";
     default:
-      return "SellerOps 도우미가 표시한";
+      return "reviewnary 도우미가 표시한";
   }
 }
 

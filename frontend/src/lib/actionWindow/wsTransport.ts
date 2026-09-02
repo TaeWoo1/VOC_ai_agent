@@ -68,7 +68,7 @@ export interface AwWsDeps {
   expectedCarrier?: AwCarrierKind;
   /**
    * OPTIONAL (2026-08-19): ASK the agent for the carrier by name, on the socket, right after it opens —
-   * `{type:"aw_attach", carrier, channelCode}`. The resident SellerOps 도우미 (`--bridge-only`) hosts no carrier
+   * `{type:"aw_attach", carrier, channelCode}`. The resident reviewnary 도우미 (`--bridge-only`) hosts no carrier
    * until asked; on this request it brings the named one up (the Coupang guided walk) and announces it, and the
    * rest of this handshake is unchanged. A fixed-carrier agent already announced on connect and ignores the
    * request; an older agent ignores unknown message types. So the request is additive: with it absent the
@@ -284,7 +284,7 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | AwRe
          * An on-demand host announces whatever it is currently hosting to every socket the moment it
          * connects — before that socket has had a chance to say which carrier it wants. So a seller
          * pressing `[쿠팡에서 보기]` while an abandoned renewal walk still held the slot met the
-         * renewal announcement, refused `carrier-mismatch`, and read "SellerOps 도우미가 지금 다른
+         * renewal announcement, refused `carrier-mismatch`, and read "reviewnary 도우미가 지금 다른
          * 작업을 하고 있어…" — even though the host handed the slot over ~170 ms later and the right
          * announcement was already on its way (live, 2026-08-20). The seller pressed again and it
          * worked, which is the shape of a race, not of a real refusal.

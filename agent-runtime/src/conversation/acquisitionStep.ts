@@ -27,9 +27,34 @@ import { overviewFromCoverage } from "../operator/graph/reviewRows";
 import { asOfWord } from "./asOf";
 import { log } from "../log";
 
+/**
+ * What this channel's review acquisition needs, decided by CAPABILITY rather than by the sentence.
+ *
+ * The same seller intent — "make this current" — is a different action per channel, and the difference is
+ * not the seller's to know: an AUTOMATIC channel is the product's own collection, a GUIDED one is one step
+ * in the seller's own window. Both are READs.
+ */
+export type AcquisitionPlan =
+  | {
+      readonly kind: "GUIDED";
+      readonly artifact: HumanActionRequiredArtifact;
+      readonly message: string;
+      readonly accountId: string;
+      readonly channelName: string;
+    }
+  | {
+      readonly kind: "AUTOMATIC";
+      readonly accountId: string;
+      readonly channelName: string;
+    };
+
+/** Back-compat alias for the guided shape the acquisition lane renders. */
 export interface AcquisitionStep {
   readonly artifact: HumanActionRequiredArtifact;
   readonly message: string;
+  /** True when the product can make this channel current by itself — no seller step exists to ask for. */
+  readonly refreshable: boolean;
+  readonly accountId: string;
 }
 
 /**
@@ -39,9 +64,9 @@ export interface AcquisitionStep {
  * on it is connected, or when its acquisition is AUTOMATIC (there the product refreshes itself through the
  * rows path's own refresher, and asking the seller for a step would be asking for nothing).
  */
-export async function acquisitionStepFor(
+export async function acquisitionPlanFor(
   bundle: SpringClientBundle, channelCode: string, localAgent: "PAIRED" | "ABSENT" | "UNKNOWN", now: string,
-): Promise<AcquisitionStep | null> {
+): Promise<AcquisitionPlan | null> {
   const code = channelCode.toUpperCase();
   let coverage: ChannelCoverageRow | null = null;
   let accountId: string | null = null;
@@ -67,10 +92,11 @@ export async function acquisitionStepFor(
     { channelCode: code, dataType: "REVIEW", objectKind: "REVIEW" },
     { overview: overview ?? overviewFromCoverage(coverage), transports: null, publish: null, reviewChannel: null, localAgent },
   );
-  // AUTOMATIC is the product's own job and needs no seller step; UNSUPPORTED has no step to offer.
+  const name = coverage.channelNameKo ?? coverage.channelCode;
+  // AUTOMATIC is the product's own job and has no seller step to ask for; UNSUPPORTED has neither.
+  if (verdict.acquisition === "AUTOMATIC") return { kind: "AUTOMATIC", accountId, channelName: name };
   if (verdict.acquisition !== "GUIDED_HUMAN_ACTION" || !verdict.guidedPath) return null;
 
-  const name = coverage.channelNameKo ?? coverage.channelCode;
   const path = verdict.guidedPath;
   const artifact: HumanActionRequiredArtifact = {
     artifactId: `a-acquire-${code.toLowerCase()}`,
@@ -99,10 +125,25 @@ export async function acquisitionStepFor(
     ? `${name} 리뷰를 지금 확인하겠습니다. 마지막으로 확인한 것은 ${word}입니다.`
     : `${name} 리뷰를 지금 확인하겠습니다.`;
   log("conversation_acquisition_lane", { channel: code, path, asOf: word != null });
-  return { artifact, message };
+  return { kind: "GUIDED", artifact, message, accountId, channelName: name };
+}
+
+/**
+ * The guided step alone — what a caller that can only render a card wants. An AUTOMATIC channel answers
+ * with `refreshable`, so the caller can run the product's own collection instead of asking for nothing.
+ */
+export async function acquisitionStepFor(
+  bundle: SpringClientBundle, channelCode: string, localAgent: "PAIRED" | "ABSENT" | "UNKNOWN", now: string,
+): Promise<AcquisitionStep | null> {
+  const plan = await acquisitionPlanFor(bundle, channelCode, localAgent, now);
+  if (!plan) return null;
+  if (plan.kind === "AUTOMATIC") {
+    return { artifact: null as never, message: "", refreshable: true, accountId: plan.accountId };
+  }
+  return { artifact: plan.artifact, message: plan.message, refreshable: false, accountId: plan.accountId };
 }
 
 /** The artifacts a settled acquisition turn carries — the card, and nothing else it did not read. */
-export function acquisitionArtifacts(step: AcquisitionStep): Artifact[] {
+export function acquisitionArtifacts(step: { readonly artifact: HumanActionRequiredArtifact }): Artifact[] {
   return [step.artifact];
 }

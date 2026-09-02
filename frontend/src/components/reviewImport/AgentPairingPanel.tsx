@@ -10,7 +10,7 @@
  *
  * So the pairing action lives HERE, on the card that is blocked without it, ungated. It is deliberately not a
  * second copy of the dock: that surface is quiet unless the helper is connected or was and broke, and this is the
- * "SellerOps 도우미가 필요합니다" — two sentences and one button — a seller needs at the moment they are stopped.
+ * "reviewnary 도우미가 필요합니다" — two sentences and one button — a seller needs at the moment they are stopped.
  *
  * ## Props, not a hook
  *
@@ -77,12 +77,12 @@ export function AgentPairingPanel({
     <div className="flex flex-col gap-2 rounded-xl bg-canvas px-4 py-3" data-testid="agent-pairing">
       {/* Why the seller is stopped, in one line, before the fix. The dock says nothing on the screens that do
           not need the helper — this is where "the helper is needed" is said. */}
-      <p className="text-sm font-semibold text-ink" data-testid="agent-pairing-title">SellerOps 도우미가 필요합니다</p>
+      <p className="text-sm font-semibold text-ink" data-testid="agent-pairing-title">reviewnary 도우미가 필요합니다</p>
       {phase === "pairing_pending" ? (
         <>
           <p className="text-sm text-ink break-keep" data-testid="agent-pairing-instruction">
             {attestedApproval ? (
-              <>내 PC 화면에 뜬 SellerOps 창에서 <strong>허용</strong>을 눌러 주세요.</>
+              <>내 PC 화면에 뜬 reviewnary 창에서 <strong>허용</strong>을 눌러 주세요.</>
             ) : (
               <>내 PC에 열린 창에서 아래 숫자가 같은지 확인하고 <strong>허용</strong>을 눌러 주세요.</>
             )}
@@ -112,7 +112,7 @@ export function AgentPairingPanel({
         <>
           {/* "Not running" and "not connected" need different fixes, so they are never one message. */}
           <p className="text-sm text-ink break-keep">
-            내 PC의 SellerOps 도우미를 찾지 못했어요. 도우미를 실행한 뒤 다시 시도해 주세요.
+            내 PC의 reviewnary 도우미를 찾지 못했어요. 도우미를 실행한 뒤 다시 시도해 주세요.
           </p>
           {/* Helper running but blocked by the browser permission looks identical to "not running" at the socket
               layer — so when the origin makes that plausible, tell the seller how to allow it. The second
@@ -144,10 +144,10 @@ export function AgentPairingPanel({
           ) : null}
           <p className="text-sm text-ink break-keep">
             {phase === "pairing_denied"
-              ? "SellerOps 도우미 연결이 거부됐어요. 다시 연결하고, 내 PC에 열리는 창에서 허용을 눌러 주세요."
+              ? "reviewnary 도우미 연결이 거부됐어요. 다시 연결하고, 내 PC에 열리는 창에서 허용을 눌러 주세요."
               : phase === "revoked"
-                ? "SellerOps 도우미 연결이 해제됐어요. 다시 연결해 주세요."
-                : "이 브라우저를 내 PC의 SellerOps 도우미와 연결해 주세요."}
+                ? "reviewnary 도우미 연결이 해제됐어요. 다시 연결해 주세요."
+                : "이 브라우저를 내 PC의 reviewnary 도우미와 연결해 주세요."}
           </p>
           <button
             type="button"

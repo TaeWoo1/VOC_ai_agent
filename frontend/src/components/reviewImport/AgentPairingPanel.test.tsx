@@ -135,7 +135,7 @@ describe("AgentPairingPanel", () => {
 describe("AgentPairingPanel — native approval", () => {
   it("points at the window on the Mac and shows NO code", () => {
     renderPanel("pairing_pending", { attestedApproval: true });
-    expect(screen.getByTestId("agent-pairing-instruction").textContent).toContain("SellerOps 창에서");
+    expect(screen.getByTestId("agent-pairing-instruction").textContent).toContain("reviewnary 창에서");
     expect(screen.queryByTestId("agent-pairing-code")).toBeNull();
     expect(screen.queryByTestId("agent-pairing-confirm-link")).toBeNull();
   });

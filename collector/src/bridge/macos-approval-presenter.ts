@@ -140,12 +140,12 @@ export function buildApprovalScript(p: ApprovalPresentation, dialogSeconds: numb
   // is pure exposure (a shoulder-surfer, a screen share, a screenshot). It stays inside the process and is
   // consumed by the agent itself, which makes this flow strictly less exposed than the one it replaces.
   const lines = [
-    "SellerOps 도우미 연결 요청",
+    "reviewnary 도우미 연결 요청",
     "",
     `요청 출처: ${sanitizeField(p.origin)}`,
     `워크스페이스: ${sanitizeField(p.workspaceLabel)}`,
     "",
-    "이 브라우저를 내 PC의 SellerOps 도우미에 연결할까요?",
+    "이 브라우저를 내 PC의 reviewnary 도우미에 연결할까요?",
     "요청한 적이 없다면 [거부]를 누르세요.",
   ];
   // Each line is its OWN literal, joined by AppleScript's `linefeed` constant. A line break cannot be a
@@ -153,7 +153,7 @@ export function buildApprovalScript(p: ApprovalPresentation, dialogSeconds: numb
   // anyway — so the breaks must be built as AppleScript syntax. (Composing the body with "\n" and escaping
   // it wholesale silently produced a run-on, truncated wall of text; found by dumping the live script.)
   const body = lines.map((line) => appleScriptLiteral(line)).join(" & linefeed & ");
-  const title = appleScriptLiteral("SellerOps 도우미 연결");
+  const title = appleScriptLiteral("reviewnary 도우미 연결");
   // The trailing bare `_verdict` is the script's result, which osascript prints on stdout.
   return [
     `set _verdict to ${appleScriptLiteral(VERDICT_GAVE_UP)}`,

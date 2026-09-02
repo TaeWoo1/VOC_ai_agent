@@ -335,7 +335,7 @@ describe("actionWindow/wsTransport — carrier discrimination", () => {
    * must not take that first frame as the answer.
    *
    * Live on 2026-08-20: a seller pressed `[쿠팡에서 보기]` while an abandoned renewal walk still held the
-   * slot, met the renewal announcement, and read "SellerOps 도우미가 지금 다른 작업을 하고 있어…" — while
+   * slot, met the renewal announcement, and read "reviewnary 도우미가 지금 다른 작업을 하고 있어…" — while
    * the host handed the slot over ~170 ms later and the correct announcement was already on its way.
    * Pressing again worked, which is the shape of a race and not of a refusal.
    */

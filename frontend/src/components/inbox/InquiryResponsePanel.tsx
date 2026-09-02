@@ -617,7 +617,7 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                     /*
                       THE GUARANTEE TRAVELS WITH THE BUTTON (Executive Readiness Fix v1).
 
-                      「이 환경에서는 SellerOps가 답변을 대신 등록하지 않습니다」 lives at the bottom of
+                      「이 환경에서는 reviewnary가 답변을 대신 등록하지 않습니다」 lives at the bottom of
                       the section, and at 125% zoom it is the FIRST thing to leave the screen — so a
                       reader enlarging the type, which is exactly what a 50-year-old operator does,
                       was left pressing a button on a customer's inquiry with no visible promise about

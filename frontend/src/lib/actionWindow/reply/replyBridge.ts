@@ -33,7 +33,7 @@ export type GuidedReplyConnectResult = { ok: true; handle: GuidedReplyHandle } |
  *
  * <p><b>Removing it opens nothing new.</b> `expectedCarrier` is matched against the agent's own
  * announcement inside the shared transport, so this attaches to an agent hosting the REPLY carrier and
- * to nothing else — and the resident SellerOps 도우미 deliberately does NOT host that carrier
+ * to nothing else — and the resident reviewnary 도우미 deliberately does NOT host that carrier
  * (`RESIDENT_CARRIER_ACTIVATORS` serves the four guided READ walks and refuses `reply`). The only
  * thing that announces `reply` today is the seated-operator live harness, which performs the account
  * fingerprint, chrome-identity and selector-store preflights before it hosts anything. So a seller

@@ -101,7 +101,7 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
   it("product surface (fixture source, no preview): read-only, says the agent is not connected", () => {
     seedHome("home-empty");
     renderWithRouter(<OperationsHome />);
-    expect(screen.getByRole("note")).toHaveTextContent("SellerOps 도우미가 필요합니다");
+    expect(screen.getByRole("note")).toHaveTextContent("reviewnary 도우미가 필요합니다");
     expect(screen.queryByRole("button", { name: "내려받기 시작" })).toBeNull();
   });
 

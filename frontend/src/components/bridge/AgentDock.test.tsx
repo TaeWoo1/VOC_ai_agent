@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * The dock is quiet unless the SellerOps 도우미 is connected, or was and broke (agent UX cleanup, 2026-08-19).
+ * The dock is quiet unless the reviewnary 도우미 is connected, or was and broke (agent UX cleanup, 2026-08-19).
  * A new seller must never meet "내 PC 연결 / 연결하지 못했습니다" as a default fixture of the shell.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -58,10 +58,10 @@ describe("AgentDock", () => {
     render(<AgentDock />);
     phase("paired", { snapshot: { connections: [], supportedEvents: [] } as never });
     const chip = screen.getByTestId("agent-dock-chip");
-    expect(chip).toHaveTextContent("SellerOps 도우미 연결됨");
+    expect(chip).toHaveTextContent("reviewnary 도우미 연결됨");
     expect(screen.queryByTestId("agent-dock-detail")).toBeNull();
     await userEvent.click(chip);
-    expect(screen.getByTestId("agent-dock-detail")).toHaveTextContent(/SellerOps 도우미와 연결되어 있어요/);
+    expect(screen.getByTestId("agent-dock-detail")).toHaveTextContent(/reviewnary 도우미와 연결되어 있어요/);
     await userEvent.click(screen.getByTestId("agent-dock-revoke"));
     expect(bridge.revoke).toHaveBeenCalled();
     phase("unpaired");
@@ -73,7 +73,7 @@ describe("AgentDock", () => {
     phase("paired", { snapshot: { connections: [], supportedEvents: [] } as never });
     phase("disconnected");
     const dock = screen.getByTestId("agent-dock");
-    expect(dock).toHaveTextContent("SellerOps 도우미와 연결이 끊어졌어요");
+    expect(dock).toHaveTextContent("reviewnary 도우미와 연결이 끊어졌어요");
     phase("connecting");
     expect(screen.getByTestId("agent-dock")).toHaveTextContent("다시 연결하는 중…");
     phase("unreachable");
@@ -100,7 +100,7 @@ describe("AgentDock", () => {
     render(<AgentDock />);
     phase("connecting_ws");
     phase("revoked");
-    expect(screen.getByTestId("agent-dock")).toHaveTextContent("SellerOps 도우미 연결이 해제됐어요");
+    expect(screen.getByTestId("agent-dock")).toHaveTextContent("reviewnary 도우미 연결이 해제됐어요");
     await userEvent.click(screen.getByTestId("agent-dock-reconnect"));
     expect(bridge.requestPairing).toHaveBeenCalled();
     phase("pairing_pending", { confirmationCode: "4821" });

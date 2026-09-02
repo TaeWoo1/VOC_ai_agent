@@ -163,8 +163,13 @@ describe("§2 — three first-use mornings", () => {
   it("derives the state from the channel table, and the delegable work from what those channels offer", () => {
     expect(homeFirstUseState([NOT_CONNECTED])).toMatchObject({ kind: "NO_CHANNEL", connected: [], observed: false });
     expect(homeFirstUseState([CONNECTED_EMPTY])).toMatchObject({ kind: "NO_DATA", connected: ["카페24"], observed: false });
-    expect(homeFirstUseState([row({ reviewState: "ZERO", reviews: 0, orders: 0, inquiries: 0, orderState: "ZERO", inquiryState: "ZERO" })]))
+    // 「가져왔지만 아무것도 없다」 means nothing held — the backlog counter too, which is windowless and
+    // is what tells a shop holding year-old inquiries apart from one holding none (Outcome v1 §1).
+    expect(homeFirstUseState([row({ reviewState: "ZERO", reviews: 0, orders: 0, inquiries: 0, unansweredInquiries: 0, orderState: "ZERO", inquiryState: "ZERO" })]))
       .toMatchObject({ kind: "NO_DATA", observed: true });
+    // Records older than the window are still records: the shop is not empty and must not be told it is.
+    expect(homeFirstUseState([row({ reviewState: "ZERO", reviews: 0, orders: 0, inquiries: 0, unansweredInquiries: 3, orderState: "ZERO", inquiryState: "OBSERVED_FRESHNESS_UNPROVEN" })]))
+      .toMatchObject({ kind: "WORKING" });
     expect(homeFirstUseState([row()])).toMatchObject({ kind: "WORKING" });
     // A data type this product cannot collect on any channel is never promised.
     const naverOnly = row({ channelCode: "NAVER", channelNameKo: "네이버", reviewState: "NOT_SUPPORTED", reviews: 0 });

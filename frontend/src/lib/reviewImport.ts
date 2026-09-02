@@ -261,7 +261,7 @@ export function agentAvailabilityCopy(state: AgentAvailability): AgentAvailabili
     case "not_running":
       return {
         canGuide: false,
-        message: "SellerOps 로컬 도우미가 실행되지 않았어요. 실행한 뒤 다시 시도해 주세요.",
+        message: "reviewnary 로컬 도우미가 실행되지 않았어요. 실행한 뒤 다시 시도해 주세요.",
         offerFallback: true,
       };
     case "unpaired":

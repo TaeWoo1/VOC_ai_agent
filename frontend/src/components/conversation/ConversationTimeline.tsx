@@ -63,7 +63,7 @@ export function ConversationTimeline({
     // the next card. 24px between turns, 12px between a sentence and the objects it is about.
     <div className={compact ? "space-y-5" : "space-y-6"} aria-label="대화" role="log">
       <AnimatePresence initial={false}>
-        {turns.map((turn) => (
+        {turns.map((turn, i) => (
           <motion.div key={turn.turnId} layout="position" variants={MESSAGE} initial="hidden" animate="shown" transition={LAYOUT}>
             {turn.role === "USER" ? (
               <UserTurn text={turn.text ?? ""} />
@@ -73,6 +73,7 @@ export function ConversationTimeline({
                 threadChannel={thread}
                 compact={compact}
                 latest={turn.turnId === lastAgent && !busy}
+                userText={precedingUserText(turns, i)}
                 onPrompt={onPrompt}
                 onResume={() => onResume(turn.turnId)}
                 onCaptureDecision={onCaptureDecision}
@@ -149,8 +150,56 @@ function meaningfulEvidence(e: Extract<DisplayTurn["artifacts"][number], { type:
   return items.length > 0 ? { ...e, items } : null;
 }
 
-function AgentTurn({ turn, threadChannel: thread, compact, latest, onPrompt, onResume, onCaptureDecision }: {
-  turn: DisplayTurn; threadChannel: string | null; compact: boolean; latest: boolean; onPrompt: (p: string) => void; onResume: () => void;
+/** The sentence this agent turn is answering — read backwards, so a resumed turn keeps the original ask. */
+export function precedingUserText(turns: readonly DisplayTurn[], index: number): string {
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const t = turns[i]!;
+    if (t.role === "USER") return t.text ?? "";
+  }
+  return "";
+}
+
+/** The operational domains a sentence NAMES. Closed nouns; two of them means the seller asked for two. */
+const DOMAIN_WORDS: ReadonlyArray<readonly [string, string]> = [
+  ["리뷰", "REVIEW"], ["후기", "REVIEW"],
+  ["문의", "INQUIRY"], ["문의사항", "INQUIRY"],
+  ["주문", "ORDER"], ["매출", "ORDER"],
+  ["상품", "PRODUCT"],
+];
+
+export function domainsAsked(text: string): number {
+  const lower = (text ?? "").toLowerCase();
+  return new Set(DOMAIN_WORDS.filter(([w]) => lower.includes(w)).map(([, d]) => d)).size;
+}
+
+/** Which artifact types ARE an object collection — the things a turn can be two lists deep in. */
+const COLLECTIONS = new Set(["INQUIRY_LIST", "REVIEW_LIST", "PRODUCT_LIST", "ISSUE_LIST", "LIST", "CHECKLIST"]);
+
+/**
+ * **One primary collection per turn, unless the seller asked for more than one** (§4).
+ *
+ * A turn that draws two lists asks the seller to read the second before they have finished the first, and
+ * the sentence above them only answered one question. The first collection stays open; the rest fold to
+ * their counts (one press restores them). A sentence that named two domains — 「리뷰랑 문의 둘 다」 — asked
+ * for both, and nothing folds.
+ */
+export function secondaryCollections(
+  artifacts: ReadonlyArray<{ type: string }>, domains: number,
+): ReadonlySet<number> {
+  if (domains > 1) return new Set();
+  const out = new Set<number>();
+  let seen = 0;
+  artifacts.forEach((a, i) => {
+    if (!COLLECTIONS.has(a.type)) return;
+    seen += 1;
+    if (seen > 1) out.add(i);
+  });
+  return out;
+}
+
+function AgentTurn({ turn, threadChannel: thread, compact, latest, userText, onPrompt, onResume, onCaptureDecision }: {
+  turn: DisplayTurn; threadChannel: string | null; compact: boolean; latest: boolean; userText: string;
+  onPrompt: (p: string) => void; onResume: () => void;
   onCaptureDecision?: (captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL") => void;
 }) {
   const evidence = turn.artifacts
@@ -200,9 +249,14 @@ function AgentTurn({ turn, threadChannel: thread, compact, latest, onPrompt, onR
           {/* Artifacts animate their own layout: a card that grows (a guided run engaged, a disclosure
               opened) or is replaced glides; the ones around it follow. */}
           <AnimatePresence initial={false}>
-            {shown.map((artifact) => (
+            {shown.map((artifact, i) => (
               <motion.div key={artifact.artifactId} layout variants={MESSAGE} initial="hidden" animate="shown" exit="gone" transition={LAYOUT} data-artifact={artifact.type}>
-                <ArtifactView artifact={artifact} onResume={onResume} onPrompt={onPrompt} onCaptureDecision={latest ? onCaptureDecision : undefined} stepped={stepped} headline={headline} latest={latest} />
+                <ArtifactView
+                  artifact={artifact} onResume={onResume} onPrompt={onPrompt}
+                  onCaptureDecision={latest ? onCaptureDecision : undefined}
+                  stepped={stepped} headline={headline} latest={latest}
+                  secondary={secondaryCollections(shown, domainsAsked(userText)).has(i)}
+                />
               </motion.div>
             ))}
           </AnimatePresence>

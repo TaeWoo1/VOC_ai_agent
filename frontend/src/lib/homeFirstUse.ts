@@ -60,7 +60,18 @@ export function homeFirstUseState(rows: readonly ChannelMetricRow[]): HomeFirstU
     return { kind: "NO_CHANNEL", connected: [], observed: false, delegable };
   }
   const connected = connectedRows.map((row) => row.channelNameKo || row.channelCode);
-  const held = connectedRows.some((row) => typesOf(row).some((t) => !SILENT.has(t.state) && t.count > 0));
+  /**
+   * **Holding records is holding data, whenever they arrived.**
+   *
+   * The window counts are a 7-day flow; `unansweredInquiries` is the backlog, windowless. An org whose
+   * inquiries are all older than the window read as 「아직 아무것도 없습니다 · 첫 수집이 끝나면…」 while it
+   * held three of them — the product telling a seller it had not started on data it already had. The two
+   * measures are not added (they count different things); either one being non-zero is enough to say the
+   * shop is not empty.
+   */
+  const held = connectedRows.some((row) =>
+    typesOf(row).some((t) => !SILENT.has(t.state) && t.count > 0)
+    || (!SILENT.has(row.inquiryState) && (row.unansweredInquiries ?? 0) > 0));
   const observed = connectedRows.some((row) => typesOf(row).some((t) => OBSERVED.has(t.state)));
   return { kind: held ? "WORKING" : "NO_DATA", connected, observed, delegable };
 }

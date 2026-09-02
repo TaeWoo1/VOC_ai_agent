@@ -97,14 +97,14 @@ export interface AgentEnvCopy {
 
 export const AGENT_ENV_COPY: Record<AgentEnvCode, AgentEnvCopy | null> = {
   PAIRED: null,
-  CONNECTING: { title: "도우미 연결 중", body: "내 PC의 SellerOps 도우미와 연결하고 있어요…" },
+  CONNECTING: { title: "도우미 연결 중", body: "내 PC의 reviewnary 도우미와 연결하고 있어요…" },
   NOT_RUNNING: {
     title: "도우미가 실행되어 있지 않아요",
-    body: "내 PC의 SellerOps 도우미를 찾지 못했어요. 도우미를 실행한 뒤 다시 시도해 주세요.",
+    body: "내 PC의 reviewnary 도우미를 찾지 못했어요. 도우미를 실행한 뒤 다시 시도해 주세요.",
   },
   NOT_PAIRED: {
     title: "도우미와 연결이 필요해요",
-    body: "이 브라우저를 내 PC의 SellerOps 도우미와 연결해 주세요.",
+    body: "이 브라우저를 내 PC의 reviewnary 도우미와 연결해 주세요.",
   },
   PAIRING_PENDING: {
     title: "확인을 기다리는 중",

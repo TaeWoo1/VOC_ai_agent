@@ -71,7 +71,7 @@ export async function connectLocateSession(deps?: {
    * **This request is what makes the resident helper able to answer at all.** Without it the session attached
    * silently and waited for an announcement, which only a FIXED-carrier locate agent ever sends — and the only
    * thing that ever booted one was a seated-operator harness behind an approval manifest. A seller with the
-   * SellerOps 도우미 paired pressed the button into nothing. Naming the carrier lets the resident helper bring
+   * reviewnary 도우미 paired pressed the button into nothing. Naming the carrier lets the resident helper bring
    * it up on demand, exactly as `/connect/coupang` does for the guided walk.
    */
   channelCode?: string;

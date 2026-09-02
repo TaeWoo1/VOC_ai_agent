@@ -270,13 +270,13 @@ describe("dialog body — structural integrity under long/hostile input", () => 
     const script = buildApprovalScript({ ...PRESENTATION, workspaceLabel: LONG }, 90);
     // What must survive is what the person decides ON: the question, and how to say no. A dialog whose
     // question scrolled off would ask someone to approve something while showing them nothing.
-    expect(script).toContain("이 브라우저를 내 PC의 SellerOps 도우미에 연결할까요?");
+    expect(script).toContain("이 브라우저를 내 PC의 reviewnary 도우미에 연결할까요?");
     expect(script).toContain("요청한 적이 없다면 [거부]를 누르세요."); // complete, not clipped
   });
 
   it("a 5000-char origin cannot push out the question or the refusal instruction", () => {
     const script = buildApprovalScript({ ...PRESENTATION, origin: `http://${LONG}` }, 90);
-    expect(script).toContain("이 브라우저를 내 PC의 SellerOps 도우미에 연결할까요?");
+    expect(script).toContain("이 브라우저를 내 PC의 reviewnary 도우미에 연결할까요?");
     expect(script).toContain("요청한 적이 없다면 [거부]를 누르세요.");
   });
 
@@ -284,7 +284,7 @@ describe("dialog body — structural integrity under long/hostile input", () => 
     const script = buildApprovalScript({ ...PRESENTATION, origin: `http://${LONG}`, workspaceLabel: LONG }, 90);
     // Both are long; both are individually bounded, and neither starves the other or the question.
     expect(script.match(/…/g)).toHaveLength(2);
-    expect(script).toContain("이 브라우저를 내 PC의 SellerOps 도우미에 연결할까요?");
+    expect(script).toContain("이 브라우저를 내 PC의 reviewnary 도우미에 연결할까요?");
     expect(script).not.toContain("훼".repeat(200));
   });
 
@@ -308,7 +308,7 @@ describe("dialog body — structural integrity under long/hostile input", () => 
   it("the body keeps every line even when both untrusted fields are empty", () => {
     const script = buildApprovalScript({ ...PRESENTATION, origin: "", workspaceLabel: "" }, 90);
     expect(script.match(/& linefeed &/g)!.length).toBe(6);
-    expect(script).toContain("이 브라우저를 내 PC의 SellerOps 도우미에 연결할까요?");
+    expect(script).toContain("이 브라우저를 내 PC의 reviewnary 도우미에 연결할까요?");
   });
 });
 

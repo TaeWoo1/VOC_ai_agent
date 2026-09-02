@@ -37,7 +37,9 @@ import { effectiveAxisOf } from "../operator/plan/scopeOverride";
 import type { SentenceSubject } from "../operator/plan/scopeOverride";
 import { subjectTermOf } from "./subjectTerm";
 import { isAcquisitionRequest } from "./acquisitionRequest";
-import { acquisitionArtifacts, acquisitionStepFor } from "./acquisitionStep";
+import { acquisitionArtifacts, acquisitionPlanFor } from "./acquisitionStep";
+import { REFRESH_FAILURE_LABEL } from "../operator/graph/reviewRefresh";
+import { answerFreshnessQuestion, freshnessQuestionOf } from "./freshnessQuestion";
 import { channelInSentence } from "./channelFocus";
 import { acquisitionSummary } from "./acquisitionSummary";
 import { channelFocusOf, focusForAxis, withChannelFocus } from "./channelFocus";
@@ -569,6 +571,47 @@ export class ConversationService {
     // An agent-lane capture question is said LAST: the finding (「등록된 배송 기준이 아직 없습니다」) first, then the ask.
     let trailingQuestion: string | null = null;
     if (result.status === "FAILED") {
+      /**
+       * **A question the product can answer must not depend on the planner's mood** (Chat-first Outcome
+       * & Visual Closure v1 §3).
+       *
+       * 「오늘 네이버 리뷰 있어?」 has three parts this product owns — the object it stores, the channel
+       * whose coverage it knows, the period it can name — and across four QA passes the identical
+       * sentence failed once with 「요청을 어떻게 조사할지 계획하지 못했습니다」. The planner still gets the
+       * turn, because its answer carries claim levels, partial-collection honesty and the resume gate
+       * this recovery deliberately does not reimplement; but when it produces nothing, the closed shape
+       * is answered from the same reads instead of handing the seller a shrug.
+       *
+       * Only the closed shape (`freshnessQuestionOf`) is recovered, and only when the reads succeed —
+       * otherwise the failure stands, exactly as before.
+       */
+      const shape = freshnessQuestionOf(hints.text ?? "");
+      if (shape) {
+        const answered = await answerFreshnessQuestion(
+          bundle, shape, channelInSentence(hints.text ?? "") ?? channelFocusOf(view.turns, hints.text ?? null),
+          hints.localAgent ?? "UNKNOWN", this.now(),
+        );
+        if (answered) {
+          log("conversation_freshness_recovered", { failureCode: result.failureCode ?? "NONE", waiting: answered.waiting });
+          if (answered.waiting) stage("WAITING_HUMAN", STAGE_LABEL.WAITING_HUMAN);
+          return {
+            status: answered.waiting ? "WAITING_HUMAN" : "DONE",
+            message: answered.message,
+            artifacts: [...answered.artifacts],
+            suggestedActions: [...answered.suggestedActions],
+            workingSet: answered.workingSet,
+            pendingHumanActions: answered.pending
+              ? [{
+                  turnId: "", actionType: answered.pending.actionType, path: answered.pending.path,
+                  channelCode: answered.pending.channelCode, accountId: answered.pending.accountId,
+                  dataType: answered.pending.dataType, requestedAt: answered.pending.requestedAt,
+                }]
+              : [],
+            pendingPrepared: view.pendingPrepared,
+            budget: { toolCalls: answered.toolCalls, llmCalls: 0, elapsedMs: 0, stopReason: "FRESHNESS_RECOVERED" },
+          };
+        }
+      }
       return {
         status: "FAILED", message: result.reason, artifacts: [], suggestedActions: [],
         workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
@@ -1260,9 +1303,25 @@ export class ConversationService {
     // The channel comes from the sentence or from the thread's focus; with neither, the planner keeps it.
     if (isAcquisitionRequest(text, { reviewsInContext: view.workingSet?.kind === "REVIEWS" })) {
       const channel = channelInSentence(text) ?? channelFocusOf(view.turns, text);
-      const step = channel
-        ? await acquisitionStepFor(bundle, channel, hints.localAgent ?? "UNKNOWN", this.now())
+      const plan = channel
+        ? await acquisitionPlanFor(bundle, channel, hints.localAgent ?? "UNKNOWN", this.now())
         : null;
+      // **The same instruction, a different action per channel — decided by CAPABILITY** (§3). An
+      // AUTOMATIC channel is the product's own collection: it runs it and says what happened. Asking that
+      // seller for a step would be asking for something that does not exist.
+      if (plan?.kind === "AUTOMATIC") {
+        const outcome = await new Refresher(bundle.inquiry).refresh(plan.accountId, "REVIEW");
+        return {
+          status: "DONE",
+          message: outcome.ok
+            ? `${plan.channelName} 리뷰를 새로 가져왔습니다.`
+            : `${plan.channelName} 리뷰를 최신 상태로 갱신하지 못했습니다 (${REFRESH_FAILURE_LABEL[outcome.failure]}).`,
+          artifacts: [], suggestedActions: [], workingSet: view.workingSet,
+          pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
+          budget: { toolCalls: 2, llmCalls: 0, elapsedMs: 0, stopReason: "ACQUISITION" },
+        };
+      }
+      const step = plan?.kind === "GUIDED" ? plan : null;
       if (step) {
         stage("WAITING_HUMAN", STAGE_LABEL.WAITING_HUMAN);
         return {
@@ -2349,7 +2408,13 @@ async function syncCompleted(bundle: SpringClientBundle, pending: PendingHumanAc
   // asked for. A run some other tab started on another account never satisfies this one.
   const accounts = await bundle.inquiry.listSellerAccounts();
   const channelId = accounts.find((a) => a.id === pending.accountId)?.channelId ?? null;
-  const runs = await bundle.inquiry.listSyncRuns({});
+  // **Scoped to the channel the step is about.** The unfiltered read returns the org's newest runs and
+  // stops there, so a completion could fall out of the list behind the routine collection of every other
+  // channel — measured on the real org, the E2E acquisition was no longer in it hours later, and a seller
+  // pressing 「계속 확인하기」 would have been told the collection had not finished. `dataType` is
+  // deliberately NOT sent: an upload-shaped row carries the type in `uploadType`, and a server-side
+  // filter on the other column would drop exactly the rows this check exists to find.
+  const runs = await bundle.inquiry.listSyncRuns(channelId ? { channelId } : {});
   const guidedOrManual = new Set(["MANUAL", "UPLOAD", "ACTION_WINDOW", "AGENT", "GUIDED"]);
   const mine = runs.filter((r) => {
     const type = r.dataType ?? r.uploadType ?? null;

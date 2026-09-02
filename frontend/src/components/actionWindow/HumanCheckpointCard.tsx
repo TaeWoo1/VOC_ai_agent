@@ -46,7 +46,7 @@ export function HumanCheckpointCard({
         </p>
       ) : null}
       <p className="mt-1.5 text-sm text-muted">
-        실제 판매자센터 화면에서 직접 진행해 주세요. SellerOps가 대신 클릭하지 않아요.
+        실제 판매자센터 화면에서 직접 진행해 주세요. reviewnary가 대신 클릭하지 않아요.
       </p>
 
       {blocker ? (
@@ -82,7 +82,7 @@ export function HumanCheckpointCard({
       <p className="mt-3 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.act}</p>
 
       <p className="mt-3 hidden text-xs text-muted sm:block">
-        ‘확인 완료’를 누르면 SellerOps가 화면을 다시 확인해요. 단계 완료는 SellerOps가 직접 확인한
+        ‘확인 완료’를 누르면 reviewnary가 화면을 다시 확인해요. 단계 완료는 reviewnary가 직접 확인한
         뒤에만 표시돼요.
       </p>
     </section>

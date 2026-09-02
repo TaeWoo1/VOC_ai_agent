@@ -215,7 +215,7 @@ export function NaverIssuanceGuidedWalkthrough({
   // **The start screen offers the path that works on this machine first** (Pilot Readiness Gate v1 §3).
   //
   // It used to offer exactly one control — 네이버 연결 안내 시작 — which begins pairing with the local
-  // 도우미. Measured 2026-08-27 on a seller with no helper: the press led to 「SellerOps 도우미가
+  // 도우미. Measured 2026-08-27 on a seller with no helper: the press led to 「reviewnary 도우미가
   // 필요합니다 · 도우미를 실행한 뒤 다시 시도해 주세요」, an instruction to run a program that has no
   // installable artifact today, with the way out (텍스트로 직접 진행하기) rendered as the smallest
   // control on the screen, BELOW a 다시 찾기 for the thing that cannot be found.
@@ -229,7 +229,7 @@ export function NaverIssuanceGuidedWalkthrough({
       <div className="space-y-3" aria-label="네이버 연결 안내 시작">
         <p className="text-sm text-ink break-keep">네이버 API 센터에서 연결 정보를 확인하도록 안내해 드릴게요.</p>
         <p className="text-sm text-muted break-keep">
-          직접 진행하시면 무엇을 어디서 확인하는지 순서대로 알려 드립니다. 내 PC에 SellerOps 도우미를
+          직접 진행하시면 무엇을 어디서 확인하는지 순서대로 알려 드립니다. 내 PC에 reviewnary 도우미를
           실행해 두셨다면, 도우미가 전용 NAVER 창을 열어 눌러야 할 위치를 표시하는 화면 안내도 쓸 수 있어요.
         </p>
         <button type="button" className="btn-primary block w-full" onClick={toText} disabled={busy}>
@@ -254,7 +254,7 @@ export function NaverIssuanceGuidedWalkthrough({
       <section className="space-y-1 rounded-lg border border-line px-4 py-3" aria-label="API 호출 IP 등록 안내">
         <p className="text-sm font-medium text-ink">API 호출 IP 등록</p>
         <p className="text-xs text-muted">
-          애플리케이션 설정의 'API 호출 IP'에 SellerOps 고정 호출 IP를 등록하세요. 등록하지 않으면 첫 주문 수집이
+          애플리케이션 설정의 'API 호출 IP'에 reviewnary 고정 호출 IP를 등록하세요. 등록하지 않으면 첫 주문 수집이
           호출 IP 오류로 실패할 수 있습니다.
         </p>
         <AdvertisedCallIpPanel ips={advertisedEgressIps} />

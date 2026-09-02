@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { ConversationTimeline } from "./ConversationTimeline";
+import { ConversationTimeline, domainsAsked, precedingUserText, secondaryCollections } from "./ConversationTimeline";
 import { agentTurn } from "../../test/conversationFixtures";
 
 vi.mock("../../lib/apiClient", () => ({ api: {}, getToken: () => null }));
@@ -78,5 +78,32 @@ describe("transcript density", () => {
     render(<MemoryRouter><ConversationTimeline turns={[older, latest]} busy={false} stages={[]} elapsed={0} error={null} onPrompt={() => undefined} onResume={() => undefined} /></MemoryRouter>);
 
     expect(screen.getAllByText(/리뷰 본문/)).toHaveLength(3);
+  });
+});
+
+describe("§4 — one primary object collection per turn", () => {
+  it("folds every collection after the first when the seller asked one question", () => {
+    const two = [{ type: "REVIEW_LIST" }, { type: "EVIDENCE" }, { type: "INQUIRY_LIST" }];
+    expect([...secondaryCollections(two, domainsAsked("최근 리뷰 보여줘"))]).toEqual([2]);
+    // A sentence that named two domains asked for two; nothing folds.
+    expect([...secondaryCollections(two, domainsAsked("리뷰랑 문의 둘 다 보여줘"))]).toEqual([]);
+    // One collection is never secondary, whatever else the turn drew.
+    expect([...secondaryCollections([{ type: "SUMMARY" }, { type: "REVIEW_LIST" }, { type: "DRAFT" }], 1)]).toEqual([]);
+  });
+
+  it("counts the domains a sentence NAMES, never the ones an answer happened to draw", () => {
+    expect(domainsAsked("오늘 리뷰 있어?")).toBe(1);
+    expect(domainsAsked("리뷰랑 문의 정리해줘")).toBe(2);
+    expect(domainsAsked("뭐부터 봐야 해?")).toBe(0);
+  });
+
+  it("reads the sentence a turn is answering backwards, so a resumed turn keeps the original ask", () => {
+    const turns = [
+      { turnId: "u1", role: "USER", text: "오늘 리뷰 있어?" },
+      { turnId: "a1", role: "AGENT", text: null },
+      { turnId: "a2", role: "AGENT", text: null },
+    ] as never;
+    expect(precedingUserText(turns, 2)).toBe("오늘 리뷰 있어?");
+    expect(precedingUserText(turns, 0)).toBe("");
   });
 });
