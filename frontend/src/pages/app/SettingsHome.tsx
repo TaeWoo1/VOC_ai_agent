@@ -54,6 +54,13 @@ export function SettingsHome() {
           </li>
           <li>
             <ObjectRow
+              name="리뷰 답변 문구"
+              facets={<span className="break-keep">리뷰에 답변할 때 처음 채워지는 문구 — 칭찬·배송·불량 등 유형별로 회사 말투를 정합니다</span>}
+              action={<BtnLink to="/settings/review-templates" size="sm" variant="outline">문구 설정</BtnLink>}
+            />
+          </li>
+          <li>
+            <ObjectRow
               name="연결 알림"
               facets={<span className="break-keep">연결이 끊기거나 확인이 필요할 때. 표시가 없다고 모든 연결이 정상은 아닙니다</span>}
               action={<BtnLink to="/settings/alerts" size="sm" variant="outline">알림 보기</BtnLink>}

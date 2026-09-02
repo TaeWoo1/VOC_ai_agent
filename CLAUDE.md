@@ -1171,6 +1171,41 @@ confirmation page 문장은 sweep이 바꾼 뒤 **되돌렸다** — 창과 다�
 2,627 · 실패 0, 브라우저 QA 1440×900(가로 스크롤 0 · off-host 0 · 콘솔 오류는 전부 헬퍼 미기동 health probe).
 **다음 라이브 proof는 새 승인이 필요하다** — 이월된 승인은 없다.)
 
+**`docs/review_reply_template_settings_v1.md`** (Review Reply Template Settings v1 — 2026-09-02.
+리뷰 답변 초안이 **코드에 박힌 문구**에서 시작하던 것을 회사가 자기 말투로 정하게 만든다. 새 AI drafting
+architecture도 새 taxonomy도 아니고, 이미 있던 분류를 **org 설정값으로 끌어올린 최소 변경**이다. **감사가
+먼저 숫자를 고쳤다** — `RuleBasedReviewReplyProvider`의 category는 **7종**(별점으로 고르는 `positive_reply` ·
+낱말 **5종** `quality`/`delivery`/`packaging`/`product_info`/`pricing` · fallback `general_reply`)이고 직전
+preflight 보고의 「키워드 6종」은 부정확했다; enum으로 옮기며 `pricing_reply`를 한 번 빠뜨렸고
+`ReviewReplyTemplateDefaultsTest`가 잡았다(그 테스트가 존재하는 이유). **선택 규칙 무변경** — 별점이 낱말을
+이기고(★5 「배송 빨라요」에 사과문을 보내지 않기 위해), 낱말은 선언 순서 첫 hit, 그 외 fallback. **두 층이고
+세 번째는 없다**: `ReviewReplyTemplateKey`(category·낱말·순서·기본 문구) → V89 `review_reply_template`
+(`(org, key)` 유니크, **행은 override일 때만** 존재 · 백필 0 · 가입 시 생성 0) → 없으면 출고 기본값.
+**기본값 복원은 DELETE**(기본 문구를 다시 써 넣으면 그 org는 이후 제품이 문구를 고쳐도 따라오지 않는다 —
+고르지도 않은 문장을 영구히 얼리는 것이다). v1에 상품별·계정별·채널별 override·조건식·우선순위·템플릿 언어
+**0**이고 `ReviewReplyTemplateFenceTest`가 `productId`/`sellerAccountId`/`channelCode`를 이름으로 금지한다.
+provider는 `ObjectProvider` optional 주입이라 template 저장이 없는 context에서도 **테이블 생기기 전과 같은
+바이트**를 낸다. **style layer임을 구조로 고정** — fence가 사실 출처(`KnowledgeRetriever`·`ProductKnowledge`·
+`AnswerMemory`·`OrderFact`·repository들) · 모델 seam(`AgentLlm`·`ChatModel`·`prompt`) · **보간 문법**
+(`{{`·`${`) · 승인 계약(`ReviewReplyDraft`·`ReviewReplyApproval`·`contentFingerprint`)을 전부 이름으로
+막는다: template은 **문장 전체**이지 사실을 끼워 넣는 슬롯이 아니고, 향후 Grounded Review Drafting은 이 층과
+**합성**되지 이 층을 **통해** 도착하지 않는다(이번 grounding 구현 **0**). **provenance는 view에만** —
+override 문구는 `providerVersion=templates-v1+org`로 보고되지만 저장되지 않고 아무것도 바인딩하지 않으며,
+초안 version·`content_fingerprint`·승인·execution binding은 **무변경**이고 **APPROVED head만** 실행에 쓰인다.
+화면은 `/settings/review-templates` 「리뷰 답변 문구」 — 유형별 **한국어 이름 · 언제 쓰는지 한 줄 · 트리거
+낱말 · 상자 · 저장 · 기본값 복원**이고 **내부 key 노출 0**(렌더된 전체 텍스트를 검사; 이름 없는 category는
+raw로 그리지 않고 아예 렌더하지 않는다), 순서는 제품이 실제로 판단하는 순서, 저장은 내용이 바뀌었을 때만
+활성화돼 기본값과 같은 내용을 override로 써 넣는 경로를 화면에서 막는다. 라이브(로컬 스택 재기동 · V89 62ms ·
+ERROR/WARN 0): 설정 전 7종 기본값 → 저장 → `c329471c` 제안이 org 문구 + `templates-v1+org`로 바뀌고 **초안
+head v1은 무변경**, 제품 signup으로 만든 **org B는 기본값**이며 서로의 문구가 보이지 않고, `PUT …/reply/draft`
+baseVersion 1로 **v2** 생성(v1 fp `700b7924…` 그대로 · 승인 0 · execution 0), 공백/4000바이트 초과/알 수 없는
+유형은 400에 행 0, 기본값 복원은 행 삭제. 브라우저 1440/1366/1152 — key 노출 0 · **AA 위반 0** · 가로 스크롤 0 ·
+콘솔 오류 0 · off-host 0. backend **3,662** · frontend **2,667** · 실패 0. **마켓플레이스 호출 0 · WRITE 0 ·
+모델 호출 0** ⇒ evidence 행 없음. **고치지 않고 보고**: Demo Org의 `positive_reply` override는 QA가 설정한 값
+그대로 남아 있고(화면에서 [기본값 복원] 한 번), 이 org에 승인된 리뷰 답변이 없어 「승인된 초안 무변경」의
+라이브 관측은 없으며, **★4 + 불만 리뷰가 「칭찬 리뷰」 문구로 시작하는 것 자체는 고치지 않았다** — 별점이
+낱말을 이기는 provider의 문서화된 tradeoff이고 바꾸려면 선택 규칙을 바꿔야 한다).
+
 **Design contract:** `docs/reviewnary_design.md` — 40~50대 비기술 판매회사 대표를 기준 사용자로 하는
 `frontend/` 디자인 계약(타이포 스케일 · 간격 리듬 · 콘텐츠 폭 · 표면 위계 · CTA 위계 · 상태 색 ·
 Agent 브리핑 · 구조화 객체 카드 · 근거 공개 · 빈/로딩/오류 · 접근성 · 반응형). **코드가 이미 하는 것의

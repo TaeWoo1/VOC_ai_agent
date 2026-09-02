@@ -3,6 +3,8 @@ import type {
   AgentQuotaStatus,
   AnswerStyleRequest,
   AnswerStyleView,
+  ReviewReplyTemplateView,
+  ReviewReplyTemplatesView,
   SellerProfileRequest,
   SellerProfileView,
   KnowledgeSourceRequest,
@@ -1835,6 +1837,32 @@ export const api = {
   /** Save the whole form. The backend refuses a style that reaches for a fact, and says which. */
   async saveAnswerStyle(request: AnswerStyleRequest): Promise<AnswerStyleView> {
     const { data } = await http.put<AnswerStyleView>("/api/answer-style", request);
+    return data;
+  },
+
+  /**
+   * 리뷰 답변 문구 — every review reply template with its effective wording, in the order the
+   * product decides between them. Org-scoped from the token, like the answer style.
+   */
+  async getReviewReplyTemplates(): Promise<ReviewReplyTemplatesView> {
+    const { data } = await http.get<ReviewReplyTemplatesView>("/api/review-reply-templates");
+    return data;
+  },
+
+  /** Save one template's wording. The backend refuses blank/over-long text and says why. */
+  async saveReviewReplyTemplate(key: string, body: string): Promise<ReviewReplyTemplateView> {
+    const { data } = await http.put<ReviewReplyTemplateView>(
+      `/api/review-reply-templates/${encodeURIComponent(key)}`,
+      { body },
+    );
+    return data;
+  },
+
+  /** 기본값 복원 — removes the override so reviewnary's wording applies again. */
+  async resetReviewReplyTemplate(key: string): Promise<ReviewReplyTemplateView> {
+    const { data } = await http.delete<ReviewReplyTemplateView>(
+      `/api/review-reply-templates/${encodeURIComponent(key)}`,
+    );
     return data;
   },
 

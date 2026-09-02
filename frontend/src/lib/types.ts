@@ -2348,6 +2348,30 @@ export type EmojiPolicy = "NONE" | "LIMITED";
  * records in its provenance, so a reply sent last month stays readable against the wording it was
  * written under.
  */
+/**
+ * 리뷰 답변 문구 — one review reply template as the settings screen reads it
+ * (Review Reply Template Settings v1).
+ *
+ * `body` is the EFFECTIVE wording: the company's own where it has one, reviewnary's otherwise, so the
+ * screen never decides which of two fields is in force. `defaultBody` is what 기본값 복원 would put
+ * back, and `customized` is the one bit that says whether the company has written its own.
+ *
+ * `key` is the storage address; the screen renders a Korean name from `lib/reviewReplyTemplates.ts`
+ * and never the key — `ReviewReplyTemplates.test.tsx` asserts that.
+ */
+export interface ReviewReplyTemplateView {
+  key: string;
+  body: string;
+  defaultBody: string;
+  customized: boolean;
+  /** The words that select this template. Empty for the one chosen by rating and the fallback. */
+  matchWords: string[];
+}
+
+export interface ReviewReplyTemplatesView {
+  templates: ReviewReplyTemplateView[];
+}
+
 export interface AnswerStyleView {
   tone: AnswerTone;
   lengthPreference: AnswerLength;

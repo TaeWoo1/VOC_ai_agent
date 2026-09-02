@@ -1,6 +1,8 @@
 package com.sellerops.attention.reply;
 
-import java.util.List;
+import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -26,12 +28,18 @@ import org.springframework.stereotype.Component;
  * <p>An unrated review (null rating — the source carried none) takes the keyword path: with no
  * rating there is no evidence of praise, and the keywords are the only signal there is.
  *
- * <p><b>The templates commit to nothing.</b> They acknowledge, apologise where an apology is
- * owed, and say the seller will look into it. None of them promises a refund, an exchange, a
- * discount, or a delivery date — a rule engine cannot know whether the seller intends any of
- * those, and a promise the seller has not agreed to is the one output here that could do real
- * damage once it is public. None of them blames the customer. The operator supplies every
- * specific.
+ * <p><b>The choice moved out; the decision did not</b> (Review Reply Template Settings v1). The
+ * categories, keywords, order and shipped wording now live in {@link ReviewReplyTemplateKey}, and
+ * {@link ReviewReplyTemplateService} answers with an organization's own text where it has one. What
+ * this class decides — rating first, then keywords in order, then the fallback — is unchanged, and an
+ * org with no settings gets the same bytes it got before the table existed.
+ *
+ * <p><b>A template is a whole reply, never a slot for a fact.</b> The seller supplies wording; nothing
+ * here retrieves a product detail, a policy, a cause or a remedy to splice into it, and the defaults
+ * promise no refund, exchange, discount or delivery date — a rule engine cannot know whether the
+ * seller intends any of those, and a promise the seller has not agreed to is the one output here that
+ * could do real damage once it is public. None of them blames the customer. The operator supplies
+ * every specific.
  */
 @Component
 @ConditionalOnProperty(name = "sellerops.reply.review.provider", havingValue = "rule_based",
@@ -42,65 +50,68 @@ public class RuleBasedReviewReplyProvider implements ReviewReplyProposalProvider
     static final String NAME = "review-reply-template";
     static final String VERSION = "templates-v1";
 
+    /**
+     * Reported instead of {@link #VERSION} when the body came from the organization's own settings.
+     * Provenance only: it travels in the suggestion view, is never persisted, and binds nothing — the
+     * draft's version, fingerprint and approval contract are untouched by it.
+     */
+    static final String ORG_VERSION = "templates-v1+org";
+
     /** At or above this rating a review reads as praise; below it, the keywords decide. */
     static final int POSITIVE_MIN_RATING = 4;
 
     static final String POSITIVE_CATEGORY = "positive_reply";
     static final String DEFAULT_CATEGORY = "general_reply";
 
-    /** A coarse reply category, its keywords, and the template it suggests. */
-    private record Rule(String category, List<String> keywords, String body) {
+    /**
+     * Optional on purpose. Resolved lazily so this provider is constructible — and byte-identical to
+     * the wording it shipped with — in a context that has no template storage at all, which is what
+     * {@code RuleBasedReviewReplyProviderTest}'s bean-condition assertions run in.
+     */
+    private final ObjectProvider<ReviewReplyTemplateService> templates;
+
+    @Autowired
+    public RuleBasedReviewReplyProvider(ObjectProvider<ReviewReplyTemplateService> templates) {
+        this.templates = templates;
     }
 
-    private static final String POSITIVE_BODY =
-            "안녕하세요, 고객님. 좋은 후기를 남겨주셔서 진심으로 감사합니다. "
-                    + "앞으로도 만족하실 수 있도록 노력하겠습니다.";
-
-    private static final String DEFAULT_BODY =
-            "안녕하세요, 고객님. 소중한 후기를 남겨주셔서 감사합니다. "
-                    + "남겨주신 의견을 잘 살펴보고 반영하겠습니다.";
-
-    /** Detection order: first keyword hit wins, else {@link #DEFAULT_CATEGORY}. */
-    private static final List<Rule> RULES = List.of(
-            new Rule("quality_reply",
-                    List.of("불량", "하자", "깨짐", "파손", "터짐", "고장", "품질"),
-                    "안녕하세요, 고객님. 상품에 문제가 있어 불편을 드린 점 진심으로 사과드립니다. "
-                            + "말씀해 주신 내용을 확인한 뒤 필요한 조치를 안내드리겠습니다. 알려주셔서 감사합니다."),
-            new Rule("delivery_reply",
-                    List.of("배송", "택배", "발송", "도착", "출고", "지연"),
-                    "안녕하세요, 고객님. 상품을 받아보시기까지 불편을 드린 점 사과드립니다. "
-                            + "배송 과정을 다시 살펴보고 개선하겠습니다. 소중한 의견 남겨주셔서 감사합니다."),
-            new Rule("packaging_reply",
-                    List.of("포장", "박스", "완충"),
-                    "안녕하세요, 고객님. 포장 상태로 불편을 드려 죄송합니다. "
-                            + "포장 방식을 다시 점검하겠습니다. 알려주셔서 감사합니다."),
-            new Rule("product_info_reply",
-                    List.of("설명", "사양", "스펙", "사진", "상이", "다릅", "달라요"),
-                    "안녕하세요, 고객님. 상품 정보가 기대하신 것과 달라 실망을 드린 점 사과드립니다. "
-                            + "상품 설명을 다시 점검해 더 정확히 안내하겠습니다. 의견 감사합니다."),
-            new Rule("pricing_reply",
-                    List.of("가격", "비싸", "할인", "가성비"),
-                    "안녕하세요, 고객님. 가격에 대한 의견 감사합니다. "
-                            + "더 나은 가치를 드릴 수 있도록 계속 고민하겠습니다."));
+    /** Defaults only — no org settings are reachable. Used where no template storage is wired. */
+    public RuleBasedReviewReplyProvider() {
+        this(null);
+    }
 
     @Override
     public Suggestion suggest(ReviewReplyContext context) {
+        return suggestion(context.orgId(), keyFor(context));
+    }
+
+    /**
+     * Which template this review takes. Rating first, then the keyword members in their declared
+     * order, then the fallback — the selection this class has always made.
+     */
+    static ReviewReplyTemplateKey keyFor(ReviewReplyContext context) {
         Integer rating = context.rating();
         if (rating != null && rating >= POSITIVE_MIN_RATING) {
-            return suggestion(POSITIVE_BODY, POSITIVE_CATEGORY);
+            return ReviewReplyTemplateKey.POSITIVE;
         }
         String haystack = context.redactedBody() == null ? "" : context.redactedBody();
-        for (Rule rule : RULES) {
-            for (String keyword : rule.keywords()) {
+        for (ReviewReplyTemplateKey key : ReviewReplyTemplateKey.KEYWORD_ORDER) {
+            for (String keyword : key.keywords()) {
                 if (haystack.contains(keyword)) {
-                    return suggestion(rule.body(), rule.category());
+                    return key;
                 }
             }
         }
-        return suggestion(DEFAULT_BODY, DEFAULT_CATEGORY);
+        return ReviewReplyTemplateKey.GENERAL;
     }
 
-    private static Suggestion suggestion(String body, String category) {
-        return new Suggestion(body, category, KIND, NAME, VERSION);
+    private Suggestion suggestion(UUID orgId, ReviewReplyTemplateKey key) {
+        ReviewReplyTemplateService service = templates == null ? null : templates.getIfAvailable();
+        if (service == null || orgId == null) {
+            return new Suggestion(key.defaultBody(), key.category(), KIND, NAME, VERSION);
+        }
+        String body = service.bodyFor(orgId, key);
+        boolean fromOrg = !body.equals(key.defaultBody());
+        return new Suggestion(body, key.category(), KIND, NAME, fromOrg ? ORG_VERSION : VERSION);
     }
 }

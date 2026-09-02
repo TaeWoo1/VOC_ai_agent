@@ -42,6 +42,7 @@ import { Operations } from "./pages/Operations";
 import { AlertSettings } from "./pages/AlertSettings";
 import { OperationsPolicies } from "./pages/app/OperationsPolicies";
 import { AnswerStyle } from "./pages/app/AnswerStyle";
+import { ReviewReplyTemplates } from "./pages/app/ReviewReplyTemplates";
 import { CompanyProfile } from "./pages/app/CompanyProfile";
 import { Cafe24Connect } from "./pages/Cafe24Connect";
 import { Cafe24ConnectResult } from "./pages/Cafe24ConnectResult";
@@ -160,6 +161,7 @@ export function App() {
         <Route path="/settings/alerts" element={<AlertSettings />} />
         <Route path="/settings/policies" element={<OperationsPolicies />} />
         <Route path="/settings/style" element={<AnswerStyle />} />
+        <Route path="/settings/review-templates" element={<ReviewReplyTemplates />} />
         <Route path="/settings/company" element={<CompanyProfile />} />
 
         {/* Operations agent — reachable, but not a navigation destination. It becomes an action

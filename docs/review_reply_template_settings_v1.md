@@ -1,0 +1,129 @@
+# Review Reply Template Settings v1
+
+**2026-09-02 · `feat/proactive-operations-agent-v1` · marketplace 호출 0 · WRITE 0 · 모델 호출 0**
+
+리뷰 답변 초안이 **코드에 박힌 문구**에서 시작하던 것을, 회사가 자기 말투로 정할 수 있게 만든다.
+새 AI drafting architecture가 아니고, 새 taxonomy도 아니다 — 이미 있던 분류를 **org 설정값으로
+끌어올린 최소 변경**이다.
+
+---
+
+## 1. 기존 구조 감사 — 7종이다, 6종이 아니다
+
+`RuleBasedReviewReplyProvider`가 실제로 갖고 있던 것:
+
+| # | category | 선택 방법 | 낱말 |
+|---|---|---|---|
+| 1 | `positive_reply` | **별점 ≥ 4** (낱말보다 먼저) | — |
+| 2 | `quality_reply` | 낱말 1순위 | 불량 · 하자 · 깨짐 · 파손 · 터짐 · 고장 · 품질 |
+| 3 | `delivery_reply` | 낱말 2순위 | 배송 · 택배 · 발송 · 도착 · 출고 · 지연 |
+| 4 | `packaging_reply` | 낱말 3순위 | 포장 · 박스 · 완충 |
+| 5 | `product_info_reply` | 낱말 4순위 | 설명 · 사양 · 스펙 · 사진 · 상이 · 다릅 · 달라요 |
+| 6 | `pricing_reply` | 낱말 5순위 | 가격 · 비싸 · 할인 · 가성비 |
+| 7 | `general_reply` | fallback | — |
+
+**정정**: 직전 preflight 보고서가 「키워드 6종」이라고 적은 것은 부정확했다. 키워드 규칙은 **5개**이고
+전체 category는 **7개**다. 이 문서를 쓰면서 enum을 옮길 때 `pricing_reply`를 한 번 빠뜨렸고,
+`ReviewReplyTemplateDefaultsTest`를 쓰다가 잡았다 — 그 테스트가 존재하는 이유가 정확히 그것이다.
+
+선택 규칙은 **바뀌지 않았다**: 별점이 낱말을 이긴다(★5 「배송 빨라요」에 사과문을 보내지 않기 위해),
+낱말은 선언 순서대로 첫 hit이 이기고, 아무것도 안 맞으면 fallback. 별점이 없는 리뷰는 낱말 경로.
+
+---
+
+## 2. org override — 두 층이고 세 번째는 없다
+
+`ReviewReplyTemplateKey`(enum, 7 member)가 category · 낱말 · 순서 · **기본 문구**를 갖고,
+`ReviewReplyTemplateService.bodyFor(orgId, key)`가 org override 또는 기본값을 돌려준다.
+
+* **V89 `review_reply_template`** — `(org_id, template_key)` 부분 유니크, 행은 **override일 때만** 존재.
+  백필 0, 가입 시 생성 0. **행이 없는 것이 정상 상태**이고 그때 답은 제품이 출고한 그 문구다.
+* **기본값 복원 = DELETE**. 기본 문구를 다시 써 넣으면 화면에서는 똑같아 보이지만 그 org는
+  이후 제품이 문구를 고쳐도 따라오지 않는다 — 고르지도 않은 문장을 영구히 얼린 셈이 된다.
+* v1에 **없는 것**: 상품별 · 계정별 · 채널별 override, 조건식, 우선순위 컬럼, 템플릿 언어.
+  각각이 「아무도 명세하지 않은 우선순위를 해결하겠다」는 약속이고, 파일럿이 요구한 적이 없다.
+  `ReviewReplyTemplateFenceTest`가 service·entity에서 `productId`/`sellerAccountId`/`channelCode`를
+  **이름으로** 금지한다.
+
+**provider는 선택을 그대로 들고 있고**, 달라진 것은 body를 어디서 가져오는가 하나다.
+`ObjectProvider`로 optional 주입이라 template 저장이 없는 context에서도 생성되고 — 그때는
+테이블이 생기기 전과 **같은 바이트**를 낸다(`aProviderWithNoStorageAndAnOrgWithNoRowAgree`).
+
+---
+
+## 3. style layer라는 것을 구조로 고정한다
+
+**template은 「어떻게 말하는가」이고 「무엇이 사실인가」가 아니다.** `ReviewReplyTemplateFenceTest`가
+template 패키지 5개 파일에서 이름으로 금지한다:
+
+* 사실 출처 — `KnowledgeRetriever` · `ProductKnowledge` · `OrgKnowledge` · `AnswerMemory` ·
+  `OrderFact` · `ProductRepository` · `InquiryRepository` · `ReviewRepository`
+* 모델 seam — `AgentLlm` · `OpenAi` · `ChatModel` · `prompt`
+* **보간 문법** — `{{` · `%s"` · `${`. template은 **문장 전체**이지 사실을 끼워 넣는 슬롯이 아니다.
+* 승인 계약 — `ReviewReplyDraft` · `ReviewReplyApproval` · `ReviewReplyFingerprint` ·
+  `ReviewReplySubmissionRef` · `contentFingerprint`
+
+향후 Grounded Review Drafting은 이 층과 **합성**되지, 이 층을 **통해** 도착하지 않는다.
+이번 패키지에서 grounding architecture는 **0**이다.
+
+## 4. provenance — 계약은 그대로
+
+override에서 온 문구는 `providerVersion`이 **`templates-v1+org`**로 보고된다(기본은 `templates-v1`).
+그것은 suggestion **view**에만 실리고 저장되지 않으며 아무것도 바인딩하지 않는다.
+초안 version · `content_fingerprint` · `review-reply-v1` · 승인 · execution binding은 **무변경**이고,
+판매자가 초안을 고치면 기존 append-only 흐름 그대로다. **APPROVED head만** execution binding에 쓰인다.
+
+## 5. 화면 — `/settings/review-templates`
+
+「리뷰 답변 문구」. 유형별로 **한국어 이름 · 언제 쓰는지 한 줄 · 트리거 낱말 · 텍스트 상자 ·
+저장 · 기본값 복원**. `positive_reply` 같은 **내부 key는 화면에 0회** 노출되고
+(`ReviewReplyTemplates.test.tsx`가 렌더된 전체 텍스트에서 7개 key와 `provider`/`prompt`/`RULE_BASED`를
+검사한다), 이름은 `lib/reviewReplyTemplates.ts`가 소유하며 이름 없는 category는 **raw로 그리지 않고
+아예 렌더하지 않는다**. 순서는 backend가 보낸 순서 = 제품이 실제로 판단하는 순서다.
+
+맨 위 3줄이 이 화면의 계약을 판매자 말로 적는다 — 「말투와 표현만 정합니다. 배송일·환불·교환 같은
+약속은 문구가 대신 정하지 않습니다」 · 「저장하면 **다음에 만드는 초안부터** 반영됩니다.
+이미 승인한 답변은 그대로입니다」.
+
+`저장`은 내용이 바뀌었을 때만, `기본값 복원`은 직접 정한 문구가 있을 때만 활성화된다 — 기본값과
+같은 내용을 override로 써 넣는 경로를 화면에서 막는다.
+
+## 6. 검증
+
+**단위·구조**: backend **3,662** / 실패 0 (신규 `ReviewReplyTemplateServiceTest` ·
+`ReviewReplyTemplateDefaultsTest` · `ReviewReplyTemplateFenceTest`), frontend **2,667** / 225 files /
+실패 0 · typecheck clean.
+
+**라이브(로컬 스택 재기동, V89 적용 62ms, ERROR/WARN 0)** — 마켓플레이스 0 · 모델 0:
+
+| | 결과 |
+|---|---|
+| A 설정 전 | 7종 전부 `customized=false`, 문구 = 출고 기본값 |
+| B `c329471c` 제안 (전) | `positive_reply` · 기본 문구 · `providerVersion=templates-v1` |
+| C 저장 | 200, `customized=true` |
+| D `c329471c` 제안 (후) | org 문구 · `providerVersion=templates-v1+org` · **초안 head v1 무변경**(fp `700b7924…`) |
+| F org B (제품 signup) | `customized=false` · 기본값 · **org A 문구 안 보임** |
+| G org B 저장 후 org A | **org B 문구 안 보임** |
+| H v2 생성 | `PUT …/reply/draft` baseVersion 1 → **v2** fp `7482a92e…` |
+| I append-only | v1 `700b7924…` **그대로**, 승인 0 · ref 6(전부 pre-V86 사용 불가) · execution 0 |
+| J validation | 공백 400 · 4000바이트 초과 400 · 알 수 없는 유형 400, 행 0 |
+| K 기본값 복원 | 행 삭제 · `customized=false` · 미설정 유형 복원도 200 |
+
+**브라우저 1440 / 1366 / 1152** — 내부 key 노출 **0** · AA 위반 **0** · 가로 스크롤 0 · 콘솔 오류 0 ·
+off-host 0. 7개 패널 전부 렌더(제목 8 = 안내 1 + 유형 7, textarea 7).
+
+disposable QA org는 `tools/dev/org-cleanup.sh --confirm`으로 제거(연결 계정 0).
+
+## 7. 남긴 것 / 보고
+
+* **Demo Org의 `positive_reply` override는 남아 있다** — QA에서 설정한 값이고
+  「안녕하세요, 고객님. 저희 제품을 이용해 주셔서 감사합니다. 남겨주신 후기 잘 읽었습니다.」이다.
+  product-owner가 화면에서 고치거나 [기본값 복원] 한 번으로 되돌릴 수 있다.
+* **이미 승인된 초안에 대한 라이브 무변경 관측은 없다** — 이 org에 승인된 리뷰 답변이 하나도 없다.
+  구조로는 fence 테스트가 승인 계약 타입을 이름으로 금지하고, 관측으로는 override 저장 후
+  초안 head의 version·fingerprint가 바뀌지 않았다.
+* **★4 리뷰의 오답 자체는 이 패키지가 고치지 않는다.** 별점이 낱말을 이기는 규칙 때문에
+  `c329471c`(★4 + 접착 불만)는 여전히 「칭찬 리뷰」 문구로 시작하고, 판매자가 고쳐 쓴다.
+  그것이 provider가 문서화한 tradeoff이고, 바꾸려면 선택 규칙을 바꿔야 하므로 하지 않았다.
+* 이번 패키지에서 **grounded AI drafting · planner/model · 승인/write architecture ·
+  NAVER Guided Reply execution driver 무변경.**
