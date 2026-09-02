@@ -186,3 +186,56 @@ describe("reply session — guided review-row locator over the fixture driver", 
     expect(latestView()?.status).not.toBe("FAILED");
   });
 });
+
+/**
+ * A recoverable precondition is a WAIT, not an outcome (2026-09-03).
+ *
+ * Live: the dedicated window opened on NAVER's login screen, `prepareSurface` answered `LOGIN_REQUIRED`
+ * in milliseconds, and the engine went terminal while the seller was still typing their password. The
+ * seller then signed in, reached the review list, and was looking at a live page belonging to a dead run —
+ * no highlight, no guidance, nothing to press, and a spent single-use `submissionRef`.
+ *
+ * The engine is unchanged: it still fails on a recoverable blocker it is told about. What changed is WHEN
+ * it is told — after the driver has watched the page and re-probed, or not at all if the driver cannot watch.
+ */
+describe("recoverable surface preconditions", () => {
+  class LoginThenReadyDriver extends SyntheticReplySubmitDriver {
+    probes = 0;
+    waits = 0;
+    constructor(private readonly canWait: boolean) {
+      super({ rowLocate: { count: 1, sig: "row-1" }, locate: { count: 1, sig: "composer-1" } });
+    }
+    override async prepareSurface() {
+      this.probes += 1;
+      return this.probes === 1 ? ({ ok: false, code: "LOGIN_REQUIRED" } as const) : true;
+    }
+    waitForSurfaceReady = async (): Promise<boolean> => {
+      this.waits += 1;
+      return this.canWait;
+    };
+  }
+
+  it("waits for the login, re-probes, and the run goes on to locate the row", async () => {
+    const driver = new LoginThenReadyDriver(true);
+    const { client, session, latestView } = harness(driver, { targetHint: REPLY_FIXTURE_HINT });
+    client.send({ kind: "aw_command", command: startCommand() });
+    await session.whenSettled();
+
+    expect(driver.waits).toBe(1);
+    // TWO probes: the wait says "it looks signed in now", the probe is what the decision rests on.
+    expect(driver.probes).toBe(2);
+    expect(latestView()?.status).not.toBe("FAILED");
+    expect(latestView()?.blocker).toBeUndefined();
+  });
+
+  it("a driver that cannot watch fails exactly as it did before — no silent waiting", async () => {
+    const driver = new LoginThenReadyDriver(false);
+    const { client, session, latestView } = harness(driver, { targetHint: REPLY_FIXTURE_HINT });
+    client.send({ kind: "aw_command", command: startCommand() });
+    await session.whenSettled();
+
+    // The wait timed out (false): the ORIGINAL blocker is what reaches the engine, unchanged.
+    expect(driver.probes).toBe(1);
+    expect(latestView()?.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+  });
+});

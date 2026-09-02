@@ -207,3 +207,59 @@ describe("composer open helper — exactly one tagged control or nothing", () =>
     expect(clicks).toBe(1);
   });
 });
+
+/**
+ * Post-login re-observation (2026-09-03). The dedicated window opens where NAVER puts it — a login screen
+ * when the profile has no session — and the run used to end there, terminally, in the milliseconds before
+ * the seller had typed anything. This is the wait that makes the login a step rather than an outcome.
+ *
+ * Read-only throughout: it polls the same signal `prepareSurface` reads and asks the carrier to re-open the
+ * review list it had already navigated to. No click, no credential, no submit.
+ */
+describe("ladder reply driver — waiting out a login", () => {
+  function loginPage(script: { readyAfterMs?: number; timesOut?: boolean }) {
+    let waited = false;
+    const page = {
+      url: () => "https://example.invalid/login",
+      content: async () => "",
+      evaluate: async <T,>(fn: string): Promise<T> => {
+        // The login signal: false until the wait has resolved, true afterwards.
+        if (fn.includes("data-page")) return (waited as unknown) as T;
+        return (0 as unknown) as T;
+      },
+      waitForFunction: async () => {
+        if (script.timesOut) throw new Error("timeout");
+        waited = true;
+        return undefined;
+      },
+      locator: () => ({ count: async () => 0, click: async () => undefined, fill: async () => undefined }),
+    } as unknown as LadderReplyPage;
+    return page;
+  }
+
+  it("waits, asks the carrier to re-open the review surface, and then probes ready", async () => {
+    let relanded = 0;
+    const page = loginPage({});
+    const d = new NaverLadderReplyDriver(page, {
+      hint: HINT, asOfDate: "2026-08-28", reviewIdFingerprint: FP, draftBody: "감사합니다",
+      onSurfaceRecovered: async () => { relanded += 1; },
+    });
+    expect(await d.prepareSurface()).toEqual({ ok: false, code: "LOGIN_REQUIRED" });
+    expect(await d.waitForSurfaceReady()).toBe(true);
+    expect(relanded).toBe(1);
+    expect(await d.prepareSurface()).toBe(true);
+  });
+
+  it("a login that never arrives is a timeout, not a pretend-ready surface", async () => {
+    let relanded = 0;
+    const d = new NaverLadderReplyDriver(loginPage({ timesOut: true }), {
+      hint: HINT, asOfDate: "2026-08-28", reviewIdFingerprint: FP, draftBody: "감사합니다",
+      loginTimeoutMs: 5,
+      onSurfaceRecovered: async () => { relanded += 1; },
+    });
+    expect(await d.waitForSurfaceReady()).toBe(false);
+    // Nothing is re-opened on a timeout: the run is about to end and a navigation would be noise on the
+    // seller's own window.
+    expect(relanded).toBe(0);
+  });
+});

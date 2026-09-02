@@ -9,7 +9,7 @@
  */
 import { validateCommandEnvelope } from "../../../../contracts/action-window/v2/index";
 import type { AwClientFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
-import type { ReplyEffect, ReplyEngine } from "./reply-engine";
+import type { ReplyEffect, ReplyEngine, SurfaceProbeResult } from "./reply-engine";
 import type { ReplySubmitProbeDriver } from "./reply-driver";
 import type { ReplyExecutionObservation } from "./reply-execution-observer-client";
 
@@ -22,6 +22,15 @@ export interface ReplySessionOptions {
    * these to the backend's execution record; the session itself neither posts nor verifies anything.
    */
   onExecutionObserved?: (state: ReplyExecutionObservation) => void;
+}
+
+/**
+ * Whether a surface probe failed on something a HUMAN can still fix on the page in front of them —
+ * the same two codes the engine calls recoverable. Anything else (and a bare `false`) is a state this
+ * run cannot wait its way out of.
+ */
+function isRecoverableSurfaceBlocker(res: SurfaceProbeResult): boolean {
+  return res !== true && res !== false && (res.code === "LOGIN_REQUIRED" || res.code === "SESSION_EXPIRED");
 }
 
 export class ReplySubmitSession {
@@ -104,7 +113,20 @@ export class ReplySubmitSession {
   private async drive(effect: ReplyEffect): Promise<void> {
     switch (effect) {
       case "PREPARE": {
-        const res = await this.driver.prepareSurface();
+        // A RECOVERABLE precondition is not an outcome — it is a wait (2026-09-03). `LOGIN_REQUIRED` has
+        // always been labelled recoverable, and the engine has always turned it into `FAILED` anyway: the
+        // dedicated window opens at a login screen, the probe answers in milliseconds, and the run is dead
+        // before the seller has finished typing. When the driver can watch the page for that condition
+        // clearing, it does, and the engine hears one final answer instead of a premature one. A driver
+        // that cannot watch keeps the old behaviour exactly.
+        let res = await this.driver.prepareSurface();
+        if (isRecoverableSurfaceBlocker(res) && this.driver.waitForSurfaceReady) {
+          const ready = await this.driver.waitForSurfaceReady();
+          // Re-PROBE rather than trusting the wait: the wait says "the page looks signed in now", and the
+          // probe is what the engine's decision is allowed to rest on. A timeout falls through with the
+          // original blocker, which fails exactly as it did before.
+          if (ready) res = await this.driver.prepareSurface();
+        }
         const next = this.engine.onSurfaceReady(res);
         this.publishState();
         return this.drive(next);

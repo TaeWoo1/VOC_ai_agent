@@ -41,6 +41,7 @@ export interface GuidedFillReplyDriverDeps {
 type IdentityAwareDriver = ReplySubmitProbeDriver & {
   reviewIdVerdict?: () => ReviewIdMatchVerdict;
   openComposer?: () => Promise<ComposerOpenResult>;
+  waitForSurfaceReady?: () => Promise<boolean>;
 };
 
 export class GuidedFillReplyDriver implements ReplySubmitProbeDriver {
@@ -61,6 +62,15 @@ export class GuidedFillReplyDriver implements ReplySubmitProbeDriver {
 
   async prepareSurface(): Promise<SurfaceProbeResult> {
     return (await this.inner()).prepareSurface();
+  }
+
+  /**
+   * Forwarded, never invented: the wrapper cannot watch a page it does not own, so a driver that offers no
+   * wait keeps the old behaviour (a recoverable blocker ends the run) exactly.
+   */
+  async waitForSurfaceReady(): Promise<boolean> {
+    const inner = (await this.inner()) as IdentityAwareDriver;
+    return inner.waitForSurfaceReady ? inner.waitForSurfaceReady() : false;
   }
 
   async locateReviewRow(): Promise<LocateRowResult> {

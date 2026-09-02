@@ -1378,6 +1378,13 @@ export function buildNaverReplyLiveConfig(): NaverReplyLiveCarrier {
           const inner = new NaverLadderReplyDriver(page as unknown as LadderReplyPage, {
             hint: target.hint, asOfDate: target.asOfDate,
             reviewIdFingerprint: target.channelReviewIdFingerprint, draftBody: target.draftBody,
+            // Post-login re-observation (2026-09-03): the same review list, re-opened once the seller has
+            // signed in. A READ of the seller's own review page — the run still clicks nothing and submits
+            // nothing. Without it the locate would scan whatever page the login flow happened to end on.
+            onSurfaceRecovered: async () => {
+              log("aw_naver_reply_relanding", {});
+              await page.goto(NAVER_REVIEW_MANAGEMENT_LANDING_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+            },
           });
           return { inner, page: page as unknown as ComposerFillPageLike };
         },

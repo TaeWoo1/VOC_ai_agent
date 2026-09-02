@@ -46,6 +46,14 @@ export interface NaverLadderReplyDriverOptions {
   draftBody: string | null;
   submitTimeoutMs?: number;
   rowOpenTimeoutMs?: number;
+  /** How long to watch for a seller-resolvable precondition (a login) before giving up. */
+  loginTimeoutMs?: number;
+  /**
+   * Called ONCE after a login is observed, before the surface is re-probed — the carrier's chance to put
+   * the page back on the review surface. Read-only by contract: the carrier navigates to the review list
+   * it already opened, nothing else. Absent ⇒ the page is re-probed wherever the login left it.
+   */
+  onSurfaceRecovered?: () => Promise<void>;
 }
 
 const ARM_SUBMIT_OBSERVER = `(() => {
@@ -68,6 +76,8 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
   private readonly draftBody: string | null;
   private readonly submitTimeoutMs: number;
   private readonly rowOpenTimeoutMs: number;
+  private readonly loginTimeoutMs: number;
+  private readonly onSurfaceRecovered: (() => Promise<void>) | undefined;
   private matchedRowIndex: number | null = null;
   private matchCount = 0;
   private composerCount = 0;
@@ -81,11 +91,36 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
     this.draftBody = opts.draftBody;
     this.submitTimeoutMs = opts.submitTimeoutMs ?? 600_000;
     this.rowOpenTimeoutMs = opts.rowOpenTimeoutMs ?? this.submitTimeoutMs;
+    this.loginTimeoutMs = opts.loginTimeoutMs ?? this.submitTimeoutMs;
+    this.onSurfaceRecovered = opts.onSurfaceRecovered;
   }
 
   async prepareSurface(): Promise<SurfaceProbeResult> {
     const loggedIn = await this.page.evaluate<boolean>(IN_PAGE_LOGIN_SIGNAL);
     if (!loggedIn) return { ok: false, code: "LOGIN_REQUIRED" };
+    return true;
+  }
+
+  /**
+   * Watch — read-only — for the seller to finish signing in, then put the page back on the review surface.
+   *
+   * <b>Observed 2026-09-03:</b> the dedicated window opened on a login screen, the probe answered
+   * `LOGIN_REQUIRED` within milliseconds, and the run went terminal while the seller was still typing. The
+   * seller then signed in, reached the review list, and was looking at a live page belonging to a dead run
+   * — with no highlight, no guidance and nothing to press. Nothing here logs in, types, or clicks: it polls
+   * the same signal {@link prepareSurface} reads, and the recovery hook re-opens the list the carrier had
+   * already navigated to.
+   */
+  async waitForSurfaceReady(): Promise<boolean> {
+    try {
+      await this.page.waitForFunction(IN_PAGE_LOGIN_SIGNAL, { timeout: this.loginTimeoutMs });
+    } catch {
+      return false;
+    }
+    // The login flow lands wherever NAVER decides — usually the seller-center home, not the review list.
+    // Re-observing the review surface is what makes the next locate a scan of reviews rather than of
+    // whatever page the login ended on.
+    if (this.onSurfaceRecovered) await this.onSurfaceRecovered().catch(() => undefined);
     return true;
   }
 

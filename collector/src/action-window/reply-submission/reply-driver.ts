@@ -20,6 +20,23 @@ export interface ReplySubmitProbeDriver {
   /** Open/verify the reply surface precondition. */
   prepareSurface(): Promise<SurfaceProbeResult>;
   /**
+   * OPTIONAL (2026-09-03): wait, READ-ONLY, for a RECOVERABLE surface precondition to resolve itself —
+   * today that means the seller finishing a login the run cannot do for them. Resolve `true` once the
+   * surface is ready to be probed again, `false` on timeout.
+   *
+   * <b>Why the wait belongs to the driver and not to the engine.</b> `LOGIN_REQUIRED` was already marked
+   * `recoverable: true`, but nothing acted on that label: the engine moved to `FAILED` and the run was
+   * terminal, so a seller who logged in five seconds later was looking at a dead run on a live page —
+   * observed on 2026-09-03, where the dedicated window opened at a login screen and the run ended before
+   * the seller had typed their password. Only the driver holds the page, so only the driver can tell when
+   * the precondition changed. The engine's stage machine is untouched: it simply hears about the surface
+   * once, when the answer is final.
+   *
+   * Observation only — never a click, never a credential, never a navigation. Absent ⇒ the previous
+   * behaviour byte for byte (a recoverable blocker ends the run).
+   */
+  waitForSurfaceReady?(): Promise<boolean>;
+  /**
    * GUIDED only: find the ONE review row matching the target hint, READ-ONLY. `count`/`sig` feed the
    * engine's fail-closed logic. Retains the matched element for {@link highlightRow} (anti-drift).
    */
