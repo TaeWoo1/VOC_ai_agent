@@ -121,7 +121,8 @@ describe("home — the Agent operating workspace", () => {
     expect(numbers.tagName).toBe("P");
     expect(numbers).toHaveTextContent("좋은 아침입니다.");
     expect(numbers).not.toHaveTextContent("먼저 확인한 일이");
-    expect(numbers).toHaveTextContent("현재 미답변 문의");
+    // §2: the strip's inquiry number is the same 「처리할 일」 the rest of the screen means.
+    expect(numbers).toHaveTextContent("지금 처리할 일");
     expect(within(numbers).getByRole("link", { name: "자세한 숫자 보기" })).toHaveAttribute("href", "/overview");
     expect(screen.queryByText("새 대화")).toBeNull();
     expect(screen.queryByRole("button", { name: "지난 대화" })).toBeNull();

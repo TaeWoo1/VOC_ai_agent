@@ -30,8 +30,6 @@ import { periodTermOf } from "./periodTerm";
 import { freshnessVerdict, isFreshnessRequired, rowsSentence, staleSentence } from "../operator/graph/reviewRows";
 import { asOfWord } from "./asOf";
 import { acquisitionStepFor } from "./acquisitionStep";
-import { Refresher } from "./Refresher";
-import { REFRESH_FAILURE_LABEL } from "../operator/graph/reviewRefresh";
 import { log } from "../log";
 
 /** The object this lane can answer about. Reviews only — nothing else has a freshness axis a seller asks about. */
@@ -52,27 +50,52 @@ const NOT_RECOGNISED = [
   "안 좋", "나쁜", "낮은", "별점", "부정", "상품별", "그중", "여기서", "방금", "왜", "이유", "비교", "반복", "문제",
 ];
 
+/**
+ * Asking about the STATE of the collection rather than about its rows — 「네이버 리뷰 최신이야?」,
+ * 「언제까지 확인했어?」. The answer is the as-of instant this product already computes; drawing a list
+ * under it would be answering a question the seller did not ask.
+ */
+const AS_OF_CUES = ["최신이야", "최신인가", "최신인지", "최신 상태", "최신상태", "언제까지", "언제 확인", "마지막으로 확인", "언제 기준", "업데이트 됐", "업데이트됐"];
+
+/**
+ * 「언제까지 확인했어?」 names no object at all — the object is the conversation's. These are the words
+ * that make a bare state question one about collection rather than about anything else on the table.
+ */
+const COVERAGE_WORDS = ["확인", "수집", "가져"];
+
+export type FreshnessAsk = "ROWS" | "AS_OF";
+
 export interface FreshnessQuestion {
+  /** What the sentence asks for: the rows in a window, or how current the collection is. */
+  readonly ask: FreshnessAsk;
   /** The calendar period the sentence named, or null when it asked about the reviews themselves. */
   readonly period: PeriodToken | null;
 }
 
 /**
- * The three-part question, or null when this sentence is not one.
+ * The question, or null when this sentence is not one this lane owns.
  *
- * Deliberately strict: it must name reviews, must not name another operational object, must carry a
- * question cue, and must carry none of the words that make it a different question. The failure
- * direction is "not recognised" — which costs a planner call, exactly as today.
+ * Deliberately strict: it must not name another operational object, must carry none of the words that
+ * make it a different question about the same rows, and must either name reviews with an existence cue
+ * (ROWS) or ask about the state of the collection (AS_OF). The failure direction is "not recognised",
+ * which costs a planner call exactly as before.
  */
 export function freshnessQuestionOf(text: string): FreshnessQuestion | null {
   const s = (text ?? "").trim();
   if (s.length === 0) return null;
   const lower = s.toLowerCase();
-  if (!OBJECT_WORDS.some((w) => lower.includes(w))) return null;
   if (OTHER_OBJECT_WORDS.some((w) => lower.includes(w))) return null;
   if (NOT_RECOGNISED.some((w) => lower.includes(w))) return null;
+  const period = periodTermOf(s);
+  // A state question may name reviews or lean on the thread for its object; either way it asks about
+  // collection, which is why it must carry one of the collection words.
+  if (AS_OF_CUES.some((w) => lower.includes(w))
+      && (OBJECT_WORDS.some((w) => lower.includes(w)) || COVERAGE_WORDS.some((w) => lower.includes(w)))) {
+    return { ask: "AS_OF", period: null };
+  }
+  if (!OBJECT_WORDS.some((w) => lower.includes(w))) return null;
   if (!QUESTION_CUES.some((w) => lower.includes(w))) return null;
-  return { period: periodTermOf(s) };
+  return { ask: "ROWS", period };
 }
 
 const ROWS_SHOWN = 5;
@@ -115,6 +138,7 @@ export async function answerFreshnessQuestion(
     return null;
   }
 
+  const coverageRows = (response.coverage ?? []).filter((c) => c.dataType === "REVIEW");
   let freshness: FreshnessRow[] = (response.coverage ?? [])
     .filter((c) => c.dataType === "REVIEW" && (!code || c.channelCode.toUpperCase() === code))
     .map((c) => ({
@@ -128,42 +152,47 @@ export async function answerFreshnessQuestion(
 
   // ── The window cannot be answered from what is held. The CAPABILITY decides what happens, not the
   // sentence: the product refreshes what it can refresh, and asks for the one step it cannot.
+  //
+  // <b>A channel the PRODUCT can refresh belongs to the planner path.</b> That path owns what a refresh
+  // means afterwards — a partial collection said as partial, a failure said with its reason class, and
+  // the claim ladder that keeps 「가져왔다」 apart from 「그 기간에 작성됐다」 (`reviewClaim.ts`). None of
+  // that is reimplemented here, so rather than answering half of it this lane stands down and the run
+  // proceeds exactly as it did before.
   const notes: string[] = [];
+  const steps: HumanActionRequiredArtifact[] = [];
   let pending: HumanActionRequiredArtifact | null = null;
-  let refreshed = false;
   for (const f of stale()) {
-    const step = await acquisitionStepFor(bundle, f.channelCode, localAgent, now);
-    if (step?.refreshable) {
-      const outcome = await new Refresher(bundle.inquiry).refresh(step.accountId, "REVIEW");
-      toolCalls += 1;
-      if (outcome.ok) {
-        refreshed = true;
-      } else {
-        notes.push(`${f.channelNameKo ?? f.channelCode} 리뷰를 최신 상태로 갱신하지 못했습니다 (${REFRESH_FAILURE_LABEL[outcome.failure]}).`);
-      }
+    const step = await acquisitionStepFor(bundle, f.channelCode, localAgent, now,
+      coverageRows.find((c) => c.channelCode.toUpperCase() === f.channelCode.toUpperCase()) ?? null);
+    if (step?.refreshable) return null;
+    if (step) {
+      // **The same rule the rows path applies**: a question that needs current rows WAITS on the step; a
+      // question the held rows already answer is merely OFFERED it. One card per stale channel, and the
+      // card itself is the shared producer's.
+      const card: HumanActionRequiredArtifact = required ? step.artifact : { ...step.artifact, optional: true };
+      steps.push(card);
+      if (required && !pending) pending = card;
       continue;
     }
-    if (step && required && !pending) {
-      // One step at a time: the question waits on the channel it is about.
-      pending = step.artifact;
-      continue;
-    }
-    notes.push(staleSentence(f.channelNameKo ?? f.channelCode, asOfWord(f.lastSuccessfulSyncAt, today), required && step != null));
+    // A channel with no step to offer says its state, once, as prose.
+    notes.push(staleSentence(f.channelNameKo ?? f.channelCode, asOfWord(f.lastSuccessfulSyncAt, today), false));
   }
 
-  if (refreshed) {
-    try {
-      response = await read();
-      freshness = (response.coverage ?? [])
-        .filter((c) => c.dataType === "REVIEW" && (!code || c.channelCode.toUpperCase() === code))
-        .map((c) => ({
-          channelCode: c.channelCode, channelNameKo: c.channelNameKo, state: c.state,
-          verdict: freshnessVerdict(c, window), lastSuccessfulSyncAt: c.lastSuccessfulSyncAt,
-          newestObservedAt: c.newestObservedAt,
-        }));
-    } catch {
-      /* keep what we had; the note already says the refresh outcome */
-    }
+  // ── 「최신이야?」 / 「언제까지 확인했어?」 — the state, and nothing under it. The per-channel sentence is
+  // `staleSentence`'s, the same one every other surface says it with.
+  if (question.ask === "AS_OF") {
+    const lines = freshness.map((f) => staleSentence(
+      f.channelNameKo ?? f.channelCode, asOfWord(f.lastSuccessfulSyncAt, today), false,
+    ));
+    if (lines.length === 0) return null;
+    log("conversation_freshness_lane", {
+      channel: code ?? "ALL", period: "NONE", ask: "AS_OF", rows: 0, total: 0,
+      stale: stale().length, waiting: false, toolCalls,
+    });
+    return {
+      message: lines.join(" "), artifacts: [], workingSet: null, suggestedActions: [],
+      waiting: false, pending: null, toolCalls,
+    };
   }
 
   const anyStale = stale().length > 0;
@@ -192,8 +221,8 @@ export async function answerFreshnessQuestion(
 
   const message = [rowsSentence(null, "", label, response.total, anyStale, question.period), ...notes].join(" ");
   log("conversation_freshness_lane", {
-    channel: code ?? "ALL", period: question.period ?? "NONE", rows: items.length, total: response.total,
-    stale: stale().length, refreshed, waiting: pending != null, toolCalls,
+    channel: code ?? "ALL", period: question.period ?? "NONE", ask: "ROWS", rows: items.length,
+    total: response.total, stale: stale().length, waiting: pending != null, toolCalls,
   });
   return {
     message,

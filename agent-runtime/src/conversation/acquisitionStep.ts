@@ -23,7 +23,7 @@ import type { SpringClientBundle } from "../http/AgentRunService";
 import type { ChannelCoverageRow, ChannelSummary, SellerAccountSummary } from "../spring/types";
 import type { Artifact, HumanActionRequiredArtifact } from "./contract";
 import { capabilityOf } from "../operator/capability/ChannelCapability";
-import { overviewFromCoverage } from "../operator/graph/reviewRows";
+import { overviewFromCoverage, reviewImportStep } from "../operator/graph/reviewRows";
 import { asOfWord } from "./asOf";
 import { log } from "../log";
 
@@ -36,6 +36,11 @@ import { log } from "../log";
  */
 export type AcquisitionPlan =
   | {
+      /**
+       * The card as the shared producer builds it — plain, and NOT auto-starting. Whether the seller
+       * already gave the instruction is the CALLER's fact: the acquisition lane sets `autoStart`, and the
+       * freshness question lane, which is answering a question rather than carrying out an order, does not.
+       */
       readonly kind: "GUIDED";
       readonly artifact: HumanActionRequiredArtifact;
       readonly message: string;
@@ -66,17 +71,31 @@ export interface AcquisitionStep {
  */
 export async function acquisitionPlanFor(
   bundle: SpringClientBundle, channelCode: string, localAgent: "PAIRED" | "ABSENT" | "UNKNOWN", now: string,
+  /**
+   * The coverage row the CALLER already read, when it has one.
+   *
+   * One turn, one source for one fact: a caller that has just read this channel's coverage for its own
+   * answer must not have the card built from a second, independently-timed read — that is how the same
+   * step showed 「8월 27일 기준」 on the card and 「8월 20일 기준」 in the sentence beside it.
+   */
+  known?: ChannelCoverageRow | null,
 ): Promise<AcquisitionPlan | null> {
   const code = channelCode.toUpperCase();
   let coverage: ChannelCoverageRow | null = null;
+  let account: SellerAccountSummary | null = null;
   let accountId: string | null = null;
   try {
-    const rows = (await bundle.operator.getChannelCoverage?.()) ?? [];
+    const rows = known ? [known] : (await bundle.operator.getChannelCoverage?.()) ?? [];
     coverage = rows.find((r: ChannelCoverageRow) => r.dataType === "REVIEW" && r.channelCode.toUpperCase() === code) ?? null;
     if (!coverage || !coverage.connected) return null;
     const [channels, accounts] = await Promise.all([bundle.operator.listChannels(), bundle.inquiry.listSellerAccounts()]);
     const channelId = channels.find((c: ChannelSummary) => c.code.toUpperCase() === code)?.id ?? null;
-    accountId = channelId ? accounts.find((a: SellerAccountSummary) => a.channelId === channelId && !a.fileUpload)?.id ?? null : null;
+    // **A file-upload account is exactly what a GUIDED export writes through**, so it is not excluded
+    // here — it is excluded only where it genuinely cannot serve (the AUTOMATIC refresh below). A
+    // non-upload account is preferred when the channel has both.
+    const onChannel = channelId ? accounts.filter((a: SellerAccountSummary) => a.channelId === channelId) : [];
+    account = onChannel.find((a: SellerAccountSummary) => !a.fileUpload) ?? onChannel[0] ?? null;
+    accountId = account?.id ?? null;
   } catch {
     return null;
   }
@@ -94,37 +113,29 @@ export async function acquisitionPlanFor(
   );
   const name = coverage.channelNameKo ?? coverage.channelCode;
   // AUTOMATIC is the product's own job and has no seller step to ask for; UNSUPPORTED has neither.
-  if (verdict.acquisition === "AUTOMATIC") return { kind: "AUTOMATIC", accountId, channelName: name };
+  // An upload-only account has no API collection to run, whatever the registry says about the channel.
+  if (verdict.acquisition === "AUTOMATIC") {
+    return account?.fileUpload ? null : { kind: "AUTOMATIC", accountId, channelName: name };
+  }
   if (verdict.acquisition !== "GUIDED_HUMAN_ACTION" || !verdict.guidedPath) return null;
 
-  const path = verdict.guidedPath;
-  const artifact: HumanActionRequiredArtifact = {
-    artifactId: `a-acquire-${code.toLowerCase()}`,
-    type: "HUMAN_ACTION_REQUIRED",
-    title: `${name} 리뷰 최신 상태 확인`,
-    actionType: "REVIEW_IMPORT",
-    reason: coverage.lastSuccessfulSyncAt ? "FRESHNESS_UNPROVEN" : "NOT_COLLECTED",
-    path,
-    channelCode: coverage.channelCode,
-    channelNameKo: coverage.channelNameKo,
-    accountId,
-    dataType: "REVIEW",
-    to: path === "FILE_UPLOAD" ? "/connect/upload" : `/connect/channels/${accountId}`,
-    requestedAt: now,
-    resumable: true,
-    requiresLocalAgent: verdict.requiresLocalAgent,
-    ...(verdict.fallback ? { fallback: verdict.fallback } : {}),
-    asOf: coverage.lastSuccessfulSyncAt,
-    // The seller already gave the instruction; the card does not ask for it a second time.
-    autoStart: true,
-  };
+  // **The card is built by ONE producer**, shared with the rows path — two lanes asking for the same step
+  // must not name it two different things (`reviewRows.reviewImportStep`).
+  const artifact = reviewImportStep(
+    {
+      channelCode: coverage.channelCode, channelNameKo: coverage.channelNameKo, state: coverage.state,
+      verdict: coverage.lastSuccessfulSyncAt ? "UNPROVEN" : "NOT_COLLECTED",
+      lastSuccessfulSyncAt: coverage.lastSuccessfulSyncAt, newestObservedAt: coverage.newestObservedAt,
+    },
+    verdict, accountId, now, `a-acquire-${code.toLowerCase()}`, false,
+  );
   // What is honest to say before the run: what we are about to do, and when this channel was last read.
   // Never a promise about what will come back — that sentence belongs to the run's own result (§3).
   const word = asOfWord(coverage.lastSuccessfulSyncAt, now.slice(0, 10));
   const message = word
     ? `${name} 리뷰를 지금 확인하겠습니다. 마지막으로 확인한 것은 ${word}입니다.`
     : `${name} 리뷰를 지금 확인하겠습니다.`;
-  log("conversation_acquisition_lane", { channel: code, path, asOf: word != null });
+  log("conversation_acquisition_lane", { channel: code, path: artifact.path, asOf: word != null });
   return { kind: "GUIDED", artifact, message, accountId, channelName: name };
 }
 
@@ -134,8 +145,9 @@ export async function acquisitionPlanFor(
  */
 export async function acquisitionStepFor(
   bundle: SpringClientBundle, channelCode: string, localAgent: "PAIRED" | "ABSENT" | "UNKNOWN", now: string,
+  known?: ChannelCoverageRow | null,
 ): Promise<AcquisitionStep | null> {
-  const plan = await acquisitionPlanFor(bundle, channelCode, localAgent, now);
+  const plan = await acquisitionPlanFor(bundle, channelCode, localAgent, now, known);
   if (!plan) return null;
   if (plan.kind === "AUTOMATIC") {
     return { artifact: null as never, message: "", refreshable: true, accountId: plan.accountId };

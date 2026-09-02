@@ -571,47 +571,6 @@ export class ConversationService {
     // An agent-lane capture question is said LAST: the finding (「등록된 배송 기준이 아직 없습니다」) first, then the ask.
     let trailingQuestion: string | null = null;
     if (result.status === "FAILED") {
-      /**
-       * **A question the product can answer must not depend on the planner's mood** (Chat-first Outcome
-       * & Visual Closure v1 §3).
-       *
-       * 「오늘 네이버 리뷰 있어?」 has three parts this product owns — the object it stores, the channel
-       * whose coverage it knows, the period it can name — and across four QA passes the identical
-       * sentence failed once with 「요청을 어떻게 조사할지 계획하지 못했습니다」. The planner still gets the
-       * turn, because its answer carries claim levels, partial-collection honesty and the resume gate
-       * this recovery deliberately does not reimplement; but when it produces nothing, the closed shape
-       * is answered from the same reads instead of handing the seller a shrug.
-       *
-       * Only the closed shape (`freshnessQuestionOf`) is recovered, and only when the reads succeed —
-       * otherwise the failure stands, exactly as before.
-       */
-      const shape = freshnessQuestionOf(hints.text ?? "");
-      if (shape) {
-        const answered = await answerFreshnessQuestion(
-          bundle, shape, channelInSentence(hints.text ?? "") ?? channelFocusOf(view.turns, hints.text ?? null),
-          hints.localAgent ?? "UNKNOWN", this.now(),
-        );
-        if (answered) {
-          log("conversation_freshness_recovered", { failureCode: result.failureCode ?? "NONE", waiting: answered.waiting });
-          if (answered.waiting) stage("WAITING_HUMAN", STAGE_LABEL.WAITING_HUMAN);
-          return {
-            status: answered.waiting ? "WAITING_HUMAN" : "DONE",
-            message: answered.message,
-            artifacts: [...answered.artifacts],
-            suggestedActions: [...answered.suggestedActions],
-            workingSet: answered.workingSet,
-            pendingHumanActions: answered.pending
-              ? [{
-                  turnId: "", actionType: answered.pending.actionType, path: answered.pending.path,
-                  channelCode: answered.pending.channelCode, accountId: answered.pending.accountId,
-                  dataType: answered.pending.dataType, requestedAt: answered.pending.requestedAt,
-                }]
-              : [],
-            pendingPrepared: view.pendingPrepared,
-            budget: { toolCalls: answered.toolCalls, llmCalls: 0, elapsedMs: 0, stopReason: "FRESHNESS_RECOVERED" },
-          };
-        }
-      }
       return {
         status: "FAILED", message: result.reason, artifacts: [], suggestedActions: [],
         workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared,
@@ -967,9 +926,29 @@ export class ConversationService {
     const sentences = [prefix + first, ...dedupe(supported).slice(0, FINDINGS_MAX)];
     // Claim levels for the channels whose step just finished — B (rows written in the window) over C
     // (rows ingested); never A. `reviewClaim.ts` keeps ingested ≠ written.
+    const claimEvidence: EvidenceArtifact["items"][number][] = [];
     if (collected.length > 0 && primary?.type === "REVIEW_LIST") {
       const names = new Map(primary.freshness.map((f) => [f.channelCode.toUpperCase(), f.channelNameKo ?? f.channelCode]));
       for (const claim of claimsFor(primary.items, primary.scope.period ?? { from: "0000-00-00", to: "9999-99-99", token: null }, collected, names)) {
+        /**
+         * **The ladder stays; the prose says the number once** (Chat-first Semantic & Surface
+         * Finalization v1 §3).
+         *
+         * 「오늘 확인 가능한 리뷰가 2건입니다」 and 「이번에 확인한 … 오늘 작성된 리뷰는 2건입니다」 are two
+         * different grounds for one number — what is held, and what this run brought in — and
+         * `reviewClaim.ts` is right to keep them apart. But at the same count a seller reads 2 and 2 and
+         * has to work out why we said it twice. So when the numbers agree the claim leaves the paragraph
+         * and becomes what it is: the provenance of a number already stated, in the evidence disclosure.
+         * When they differ it is genuinely new information and it is said.
+         */
+        if (claim.count === primary.totalCount) {
+          claimEvidence.push({
+            label: claim.sentence, count: claim.count,
+            from: primary.scope.period?.from ?? null, to: primary.scope.period?.to ?? null,
+            asOf: null, covered: true,
+          });
+          continue;
+        }
         sentences.push(claim.sentence);
       }
     }
@@ -984,7 +963,7 @@ export class ConversationService {
       : [];
     if (trailingQuestion) sentences.push(trailingQuestion);
 
-    const evidenceArtifact = evidenceOf(answer);
+    const evidenceArtifact = evidenceOf(answer, claimEvidence);
     if (evidenceArtifact) artifacts.push(evidenceArtifact);
 
     const pendingHumanActions: PendingHumanAction[] = humans.map((h) => ({
@@ -1321,7 +1300,10 @@ export class ConversationService {
           budget: { toolCalls: 2, llmCalls: 0, elapsedMs: 0, stopReason: "ACQUISITION" },
         };
       }
-      const step = plan?.kind === "GUIDED" ? plan : null;
+      // The instruction already happened: this card starts on arrival rather than asking for it again.
+      const step = plan?.kind === "GUIDED"
+        ? { ...plan, artifact: { ...plan.artifact, autoStart: true } }
+        : null;
       if (step) {
         stage("WAITING_HUMAN", STAGE_LABEL.WAITING_HUMAN);
         return {
@@ -1335,6 +1317,45 @@ export class ConversationService {
           }],
           pendingPrepared: view.pendingPrepared,
           budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "ACQUISITION" },
+        };
+      }
+    }
+
+    // ── FRESHNESS (Chat-first Semantic & Surface Finalization v1 §1). 「오늘 네이버 리뷰 있어?」,
+    // 「네이버 리뷰 최신이야?」, 「언제까지 확인했어?」 are three parts this product owns — the object it
+    // stores, the channel whose coverage it knows, the period it can name — and nothing about them is
+    // discovered by planning them. Planning them is where they went wrong: the same sentence failed once
+    // across four QA passes and answered a checklist on another. So the closed shape is ROUTED here, not
+    // recovered afterwards, and the lane reuses the coverage verdict, the as-of word and the rows
+    // sentence rather than computing its own. Anything it cannot answer in full — a channel the product
+    // could refresh, whose partial/failure/claim semantics the planner path owns — returns null and the
+    // run proceeds exactly as before.
+    const freshnessAsk = view.workingSet ? null : freshnessQuestionOf(text);
+    if (freshnessAsk) {
+      const answered = await answerFreshnessQuestion(
+        bundle, freshnessAsk, channelInSentence(text) ?? channelFocusOf(view.turns, text),
+        hints.localAgent ?? "UNKNOWN",
+        // The run's OWN reference day, exactly as the graph reads it — a lane that asked the server clock
+        // would judge 「오늘」 against a different day from the answer beside it.
+        hints.referenceDate ? `${hints.referenceDate}T00:00:00.000Z` : this.now(),
+      );
+      if (answered) {
+        if (answered.waiting) stage("WAITING_HUMAN", STAGE_LABEL.WAITING_HUMAN);
+        return {
+          status: answered.waiting ? "WAITING_HUMAN" : "DONE",
+          message: answered.message,
+          artifacts: [...answered.artifacts],
+          suggestedActions: [...answered.suggestedActions],
+          workingSet: answered.workingSet,
+          pendingHumanActions: answered.pending
+            ? [{
+                turnId: "", actionType: answered.pending.actionType, path: answered.pending.path,
+                channelCode: answered.pending.channelCode, accountId: answered.pending.accountId,
+                dataType: answered.pending.dataType, requestedAt: answered.pending.requestedAt,
+              }]
+            : [],
+          pendingPrepared: view.pendingPrepared,
+          budget: { toolCalls: answered.toolCalls, llmCalls: 0, elapsedMs: 0, stopReason: "FRESHNESS" },
         };
       }
     }
@@ -3053,8 +3074,10 @@ export function executionReasonSentence(verdict: ChannelCapabilityVerdict, chann
 /** Evidence kinds whose locator label is a seller-authored title (a rule, a document, a remembered answer, an issue). */
 const EVIDENCE_DETAIL_KINDS = new Set(["ORG_POLICY", "PRODUCT_KNOWLEDGE_DOC", "PAST_ANSWER", "REVIEW_ISSUE", "ISSUE_EVIDENCE", "REPEATED_INQUIRY"]);
 
-function evidenceOf(answer: OperatorAnswer): EvidenceArtifact | null {
-  if (answer.evidence.length === 0) return null;
+function evidenceOf(
+  answer: OperatorAnswer, extra: ReadonlyArray<EvidenceArtifact["items"][number]> = [],
+): EvidenceArtifact | null {
+  if (answer.evidence.length === 0 && extra.length === 0) return null;
   // The seller's word for the source, then the row's own title when it reads as words (a document
   // title, a strength label) — never a token, a stamp or an id (Response Hygiene v1 §1).
   const labelOf = (kind: string, detail: string | null | undefined): string => {
@@ -3071,7 +3094,7 @@ function evidenceOf(answer: OperatorAnswer): EvidenceArtifact | null {
       covered: e.coverage === "COVERED",
       ...(e.locator.productId ? { link: `/products/${e.locator.productId}` }
         : e.locator.inquiryId ? { link: `/inquiries/${e.locator.inquiryId}` } : {}),
-    })),
+    })).concat(extra),
   };
 }
 

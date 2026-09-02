@@ -89,7 +89,7 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   const beforeFirstConnection = firstUse?.kind === "NO_CHANNEL";
   // §5: when the brief names the waiting inquiries it also says how many — so the strip stops saying
   // it. Before this the seller read 「현재 미답변 문의 12건」 and 「…문의가 12건 있습니다」 one line apart.
-  const strip = data ? contextStrip(data, now, (queue?.content.length ?? 0) > 0) : [];
+  const strip = data ? contextStrip(data, now, (queue?.content.length ?? 0) > 0, queue?.totalElements ?? null) : [];
   const anyUnproven = strip.some((kpi) => kpi.freshnessUnproven);
   const count = cases ? cases.items.length : null;
 
@@ -263,12 +263,29 @@ const STRIP_ROUTE: Record<string, string> = {
  * this line drops that one number rather than printing it a second time six inches above (§5). The
  * other two are not in the brief and stay.
  */
-export function contextStrip(data: OverviewResponse, now: Date, briefNamesInquiries = false): MetricKpi[] {
+export function contextStrip(
+  data: OverviewResponse, now: Date, briefNamesInquiries = false, actionable: number | null = null,
+): MetricKpi[] {
   const kpis = data.metrics.kpis;
   const find = (key: string) => kpis.find((k) => k.key === key);
   const out: MetricKpi[] = [];
   const unanswered = find("unansweredInquiries");
-  if (unanswered && !briefNamesInquiries) out.push({ ...unanswered, label: "현재 미답변 문의" });
+  /**
+   * **The strip's inquiry number is the same 「처리할 일」 the brief means** (Chat-first Semantic &
+   * Surface Finalization v1 §2).
+   *
+   * It used to be the freshness-qualified KPI, which excludes channels whose collection is unproven —
+   * so a seller read 「현재 미답변 문의 0건」 directly above 「지금까지 들어온 문의 3건」 and had to know an
+   * internal definition to see that both were true. The queue's own total is what the whole screen
+   * means by work, so the strip says that, and the KPI keeps its place on the numbers screen where its
+   * exclusions are shown. When the queue read has not landed the old number stands rather than a
+   * fabricated zero.
+   */
+  if (unanswered && !briefNamesInquiries) {
+    out.push(actionable != null
+      ? { ...unanswered, label: "지금 처리할 일", value: actionable }
+      : { ...unanswered, label: "현재 미답변 문의" });
+  }
   const orders = find("orders");
   const series = data.metrics.series.find((s) => s.key === "orders");
   const last = series?.points[series.points.length - 1];

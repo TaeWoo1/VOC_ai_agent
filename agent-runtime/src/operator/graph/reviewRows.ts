@@ -593,10 +593,26 @@ function humanStep(
   f: FreshnessRow, verdict: ChannelCapabilityVerdict, accountId: string | null, requestedAt: string, ref: EvidenceRef,
   optional: boolean,
 ): HumanActionRequiredArtifact {
+  return reviewImportStep(f, verdict, accountId, requestedAt, `a-${ref.evidenceId}`, optional);
+}
+
+/**
+ * **The review-import step card — ONE producer.**
+ *
+ * Two lanes ask a seller for the same step (this path, and the deterministic freshness/acquisition lanes
+ * beside it), and for a while they built the card independently: two titles for one action, and fields
+ * that could drift apart without anything noticing. Everything that decides what the card SAYS is here,
+ * and the callers supply only what is genuinely theirs — the artifact id, and whether the answer waits on
+ * it (Chat-first Semantic & Surface Finalization v1 §1).
+ */
+export function reviewImportStep(
+  f: FreshnessRow, verdict: ChannelCapabilityVerdict, accountId: string | null, requestedAt: string,
+  artifactId: string, optional: boolean,
+): HumanActionRequiredArtifact {
   const path = verdict.guidedPath!;
   const name = f.channelNameKo ?? f.channelCode;
   return {
-    artifactId: `a-${ref.evidenceId}`,
+    artifactId,
     type: "HUMAN_ACTION_REQUIRED",
     title: optional ? `${name} 리뷰 최신 상태로 갱신` : `${name} 최신 리뷰 가져오기`,
     actionType: "REVIEW_IMPORT",

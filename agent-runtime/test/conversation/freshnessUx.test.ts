@@ -240,7 +240,11 @@ describe("resume: only the requested collection satisfies the step, and the ORIG
     expect(turn.status).toBe("DONE");
     expect(turn.resumedFrom).toBe(first.turn.turnId);
     expect(turn.message.startsWith("새 리뷰 가져오기가 끝났습니다. 계속 확인하겠습니다. 오늘 확인 가능한 리뷰가 1건입니다.")).toBe(true);
-    expect(said(turn)).toContain("이번에 확인한 네이버 리뷰 중 오늘 작성된 리뷰는 1건입니다.");
+    // §3: at the same count the claim leaves the paragraph and becomes the provenance of a number the
+    // prose already said — the ladder is intact, the seller reads 1건 once.
+    expect(turn.message).not.toContain("이번에 확인한 네이버 리뷰 중 오늘 작성된 리뷰는 1건입니다.");
+    expect((artifact(turn, "EVIDENCE") as { items: { label: string }[] }).items
+      .some((i) => i.label === "이번에 확인한 네이버 리뷰 중 오늘 작성된 리뷰는 1건입니다.")).toBe(true);
     expect(turn.message).not.toMatch(/전부 확인|모두 확인|새로 가져왔습니다/);
     expect((artifact(turn, "REVIEW_LIST") as ReviewListArtifact).freshness.find((f) => f.channelCode === "NAVER")?.verdict).toBe("FRESH");
     expect(humansOf(turn)).toHaveLength(0);
