@@ -121,12 +121,16 @@ export function InquiryListArtifact({ artifact, onPrompt, headline }: { artifact
         </section>
         );
       })}
-      <MoreRows hidden={head.hidden} noun="문의" onExpand={head.expand} />
-      {artifact.more ? (
-        <p className="border-t border-line/70 px-4 py-2">
-          <Link to={artifact.more.to} onClick={onOpen} className="text-xs font-semibold text-brand-700 hover:underline">{artifact.more.label}</Link>
-        </p>
-      ) : null}
+      {/* ONE footer line (Outcome Artifact v1 §3): the rest of the list, and the way to the screen that
+          holds all of it — not two rows in which the smaller move carries the larger weight. */}
+      <MoreRows
+        hidden={head.hidden}
+        noun="문의"
+        onExpand={head.expand}
+        trailing={artifact.more ? (
+          <Link to={artifact.more.to} onClick={onOpen} className="shrink-0 text-xs font-semibold text-brand-700 hover:underline">{artifact.more.label}</Link>
+        ) : undefined}
+      />
     </ArtifactCard>
   );
 }

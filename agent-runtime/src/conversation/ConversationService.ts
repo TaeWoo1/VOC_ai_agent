@@ -41,7 +41,7 @@ import { acquisitionArtifacts, acquisitionPlanFor } from "./acquisitionStep";
 import { REFRESH_FAILURE_LABEL } from "../operator/graph/reviewRefresh";
 import { answerFreshnessQuestion, freshnessQuestionOf } from "./freshnessQuestion";
 import { channelInSentence } from "./channelFocus";
-import { acquisitionSummary } from "./acquisitionSummary";
+import { acquisitionMeaning, acquisitionResultOf } from "./acquisitionSummary";
 import { channelFocusOf, focusForAxis, withChannelFocus } from "./channelFocus";
 import { isReferenceOnly } from "./reference";
 import { OPERATOR_TOOL, buildOperatorTools } from "../operator/tools/OperatorTools";
@@ -76,7 +76,7 @@ import { Refresher } from "./Refresher";
 import { claimsFor } from "./reviewClaim";
 import { boundedTurns, STAGE_LABEL, WORKING_SET_MAX_IDS } from "./contract";
 import type {
-  ActiveTask, ApprovalArtifact, Artifact, ConversationSummary, ConversationView, DraftArtifact, EvidenceArtifact,
+  AcquisitionResultArtifact, ActiveTask, ApprovalArtifact, Artifact, ConversationSummary, ConversationView, DraftArtifact, EvidenceArtifact,
   ExecutableIdentity, GuidedExecutionArtifact, HumanActionRequiredArtifact, InquiryDetailArtifact, InquiryItem, ReviewDetailArtifact,
   InquiryListArtifact,
   PendingHumanAction,
@@ -282,6 +282,8 @@ export class ConversationService {
     let hints: StartTurnRequest = request;
     let resumedFrom: string | undefined;
     let collected: ConversationRunContext["collected"] = undefined;
+    // What each finished acquisition DID, as an object rather than a paragraph (Outcome Artifact v1 §1).
+    let receipts: AcquisitionResultArtifact[] = [];
     let prefix = "";
     let remaining: PendingHumanAction[] = [];
     let partialChips: SuggestedAction[] = [];
@@ -330,13 +332,15 @@ export class ConversationService {
           // <b>What the run DID, from the record it wrote.</b> The card that drove it knows the run's id and
           // nothing it may assert; the backend answers the window and the three tallies (§3). A run that is
           // not a guided acquisition, or a read that fails, falls back to the sentence that was always true.
-          const receipts = (await Promise.all(done.map(async (c) => {
+          receipts = (await Promise.all(done.map(async (c) => {
             if (!c.check.runId) return null;
             const result = await bundle.inquiry.reviewAcquisitionResult(c.check.runId).catch(() => null);
-            return result ? acquisitionSummary(nameOf(c.pending), result) : null;
-          }))).filter((line): line is string => line != null);
-          prefix = receipts.length > 0
-            ? `${receipts.join(" ")} 이어서 확인하겠습니다. `
+            return result ? acquisitionResultOf(c.pending.channelCode ?? "", nameOf(c.pending), result) : null;
+          }))).filter((a): a is AcquisitionResultArtifact => a != null);
+          // The prose says what it MEANS; the card beside it says the window and the tallies (§1).
+          const meaning = acquisitionMeaning(receipts);
+          prefix = meaning
+            ? `${meaning} 이어서 확인하겠습니다. `
             : anyPartial
               ? "새 리뷰 가져오기가 일부만 끝났습니다. 가져온 만큼 계속 확인하겠습니다. "
               : "새 리뷰 가져오기가 끝났습니다. 계속 확인하겠습니다. ";
@@ -466,7 +470,7 @@ export class ConversationService {
       return stopped;
     }
 
-    const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? [], options.afterCapture);
+    const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? [], receipts, options.afterCapture);
     if (options.afterCapture) composed.artifacts = [options.afterCapture.artifact, ...composed.artifacts];
     if (partialChips.length > 0) {
       composed.suggestedActions = [...partialChips, ...composed.suggestedActions.filter((s) => s.kind !== "RESUME")];
@@ -562,6 +566,7 @@ export class ConversationService {
     view: ConversationView, result: OperatorRunResult, hints: StartTurnRequest, prefix: string,
     bundle: SpringClientBundle, stage: (s: ProgressStage, label: string) => void,
     stillPending: readonly PendingHumanAction[], collected: NonNullable<ConversationRunContext["collected"]>,
+    receipts: readonly AcquisitionResultArtifact[],
     afterCapture?: AfterCapture,
   ): Promise<Composed> {
     // One automatic resume per saved capture: a turn that follows a save never opens another gap, and
@@ -633,7 +638,9 @@ export class ConversationService {
       return prior ? { ...a, requestedAt: prior.requestedAt } : a;
     });
     // A replan runs a specialist twice and would show the same list twice; the later read is the one kept.
-    const artifacts: Artifact[] = dedupeLists(stamped);
+    // The acquisition receipts lead: the seller pressed 「가져오기」 and the first thing they should read
+    // under the sentence is what that run brought in, before the rows it was collected for.
+    const artifacts: Artifact[] = [...receipts, ...dedupeLists(stamped)];
     let pendingPrepared: PendingPreparedAction | null = view.pendingPrepared;
     let headline: string | null = null;
     // A PREPARE with nothing to point at answers with the question alone (Response Hygiene v1 §2/§6):
@@ -929,7 +936,11 @@ export class ConversationService {
     const claimEvidence: EvidenceArtifact["items"][number][] = [];
     if (collected.length > 0 && primary?.type === "REVIEW_LIST") {
       const names = new Map(primary.freshness.map((f) => [f.channelCode.toUpperCase(), f.channelNameKo ?? f.channelCode]));
-      for (const claim of claimsFor(primary.items, primary.scope.period ?? { from: "0000-00-00", to: "9999-99-99", token: null }, collected, names)) {
+      // <b>No window is `null`, never a placeholder one</b> (Outcome Artifact v1 §2). An unbounded read
+      // used to be handed a sentinel range so the filter would pass everything — and `windowWord` then
+      // printed it: 「… 중 0000-00-00~9999-99-99에 작성된 리뷰는 50건입니다」, live on 2026-09-02. The claim
+      // counts exactly the same rows; what it no longer does is name a period it does not have.
+      for (const claim of claimsFor(primary.items, primary.scope.period ?? null, collected, names)) {
         /**
          * **The ladder stays; the prose says the number once** (Chat-first Semantic & Surface
          * Finalization v1 §3).
@@ -941,7 +952,12 @@ export class ConversationService {
          * and becomes what it is: the provenance of a number already stated, in the evidence disclosure.
          * When they differ it is genuinely new information and it is said.
          */
-        if (claim.count === primary.totalCount) {
+        // The same rule, and the same reason, for the receipt card beside it (Outcome Artifact v1 §1):
+        // 「이전에 없던 네이버 리뷰 115건을 새로 가져왔습니다」 under a card whose 새로 들어옴 reads 115 is
+        // one number in two renderings, and the card is the stronger one. Only when the two agree — a
+        // claim that differs from what the record tallied is genuinely new information and is said.
+        const receipt = receipts.find((r) => r.channelCode === claim.channelCode);
+        if (claim.count === primary.totalCount || claim.count === receipt?.rowsNew) {
           claimEvidence.push({
             label: claim.sentence, count: claim.count,
             from: primary.scope.period?.from ?? null, to: primary.scope.period?.to ?? null,

@@ -17,7 +17,7 @@ import {
 } from "./support";
 import { CONVERSATION_PLANS, RECORDED_PLANS } from "../support/recordedPlans";
 import type { AgentPlanView, RecentReviewsResponse } from "../../src/spring/types";
-import type { HumanActionRequiredArtifact, ReviewListArtifact } from "../../src/conversation/contract";
+import type { EvidenceArtifact, HumanActionRequiredArtifact, ReviewListArtifact } from "../../src/conversation/contract";
 import { asOfWord, asOfStatus } from "../../src/conversation/asOf";
 import { isFreshnessRequired, rowsSentence, staleSentence } from "../../src/operator/graph/reviewRows";
 
@@ -243,7 +243,7 @@ describe("resume: only the requested collection satisfies the step, and the ORIG
     // §3: at the same count the claim leaves the paragraph and becomes the provenance of a number the
     // prose already said — the ladder is intact, the seller reads 1건 once.
     expect(turn.message).not.toContain("이번에 확인한 네이버 리뷰 중 오늘 작성된 리뷰는 1건입니다.");
-    expect((artifact(turn, "EVIDENCE") as { items: { label: string }[] }).items
+    expect((artifact(turn, "EVIDENCE") as EvidenceArtifact).items
       .some((i) => i.label === "이번에 확인한 네이버 리뷰 중 오늘 작성된 리뷰는 1건입니다.")).toBe(true);
     expect(turn.message).not.toMatch(/전부 확인|모두 확인|새로 가져왔습니다/);
     expect((artifact(turn, "REVIEW_LIST") as ReviewListArtifact).freshness.find((f) => f.channelCode === "NAVER")?.verdict).toBe("FRESH");

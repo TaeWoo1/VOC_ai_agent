@@ -19,6 +19,7 @@ import { HumanActionArtifact } from "./artifacts/HumanActionArtifact";
 import { ApprovalArtifact } from "./artifacts/ApprovalArtifact";
 import { GuidedExecutionArtifact } from "./artifacts/GuidedExecutionArtifact";
 import { ExecutionResultArtifact } from "./artifacts/ExecutionResultArtifact";
+import { AcquisitionResultArtifact } from "./artifacts/AcquisitionResultArtifact";
 import { WorkspaceLinkArtifact } from "./artifacts/WorkspaceLinkArtifact";
 import { KnowledgeCaptureArtifact } from "./artifacts/KnowledgeCaptureArtifact";
 
@@ -148,6 +149,8 @@ function ArtifactBody({ artifact, onResume, onPrompt, onCaptureDecision, stepped
       return <GuidedExecutionArtifact artifact={artifact} />;
     case "EXECUTION_RESULT":
       return <ExecutionResultArtifact artifact={artifact} />;
+    case "ACQUISITION_RESULT":
+      return <AcquisitionResultArtifact artifact={artifact} />;
     case "WORKSPACE_LINK":
       return <WorkspaceLinkArtifact artifact={artifact} />;
     case "KNOWLEDGE_CAPTURE":

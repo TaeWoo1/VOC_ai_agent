@@ -19,16 +19,33 @@ export function useHeadRows(total: number, head = HEAD_ROWS) {
   return { shown, hidden: total - shown, expanded, expand: () => setExpanded(true) };
 }
 
-/** The one control that brings the rest of a list back. Quiet on purpose — it is never the turn's action. */
-export function MoreRows({ hidden, noun, onExpand }: { hidden: number; noun: string; onExpand: () => void }) {
-  if (hidden <= 0) return null;
+/**
+ * The one control that brings the rest of a list back. Quiet on purpose — it is never the turn's action.
+ *
+ * <b>One footer, not two</b> (Outcome Artifact v1 §3). 「문의 16건 더 보기」 and 「문의 화면에서 보기」 were
+ * two stacked rows, and the heavier of the two was the weaker action: staying here and reading more is a
+ * smaller move than leaving for the workspace, and it was the one rendered full-width at `sm` while the
+ * link sat alone underneath. They share one line now — expand on the left where the rows end, the way
+ * out on the right — which is the shape the review list already had.
+ */
+export function MoreRows({ hidden, noun, onExpand, trailing }: {
+  hidden: number; noun: string; onExpand: () => void;
+  /** The way to the screen that holds all of it, when the list has one. Sits on the same line. */
+  trailing?: React.ReactNode;
+}) {
+  if (hidden <= 0 && !trailing) return null;
   return (
-    <button
-      type="button"
-      onClick={onExpand}
-      className="w-full border-t border-line/70 px-4 py-2 text-left text-sm text-muted transition-colors hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-    >
-      {noun} {hidden}건 더 보기
-    </button>
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line/70 px-4 py-2">
+      {hidden > 0 ? (
+        <button
+          type="button"
+          onClick={onExpand}
+          className="min-w-0 text-left text-sm text-muted transition-colors hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        >
+          {noun} {hidden}건 더 보기
+        </button>
+      ) : <span />}
+      {trailing}
+    </div>
   );
 }

@@ -11,7 +11,7 @@ import type { SeedInquiry } from "../support/FakeSpringClient";
 import { channelFocusOf, channelInSentence, namesAllChannels } from "../../src/conversation/channelFocus";
 import { periodTermOf, settledPeriod } from "../../src/conversation/periodTerm";
 import { isAcquisitionRequest } from "../../src/conversation/acquisitionRequest";
-import { acquisitionSummary } from "../../src/conversation/acquisitionSummary";
+import { acquisitionMeaning, acquisitionResultOf } from "../../src/conversation/acquisitionSummary";
 import { windowOf, periodLabel } from "../../src/conversation/period";
 
 const V4 = "agent-plan-prompt/v4";
@@ -141,34 +141,54 @@ describe("§1 an explicit READ instruction is not a question", () => {
   });
 });
 
-describe("§3 the completion summary is the four facts, in the seller's words", () => {
-  it("names the window and the tallies, and keeps a failure in its own sentence", () => {
-    expect(acquisitionSummary("네이버", {
-      periodStart: "2026-09-01", periodEnd: "2026-09-02", result: "SUCCEEDED",
-      rowsNew: 115, rowsDuplicate: 33, rowsFailed: 0, finishedAt: null,
-    })).toBe("네이버 리뷰 9월 1일~9월 2일을 확인했습니다. 새로 들어온 리뷰 115건, 이미 확인한 리뷰 33건입니다.");
-    expect(acquisitionSummary("네이버", {
-      periodStart: "2026-09-02", periodEnd: "2026-09-02", result: "SUCCEEDED",
-      rowsNew: 0, rowsDuplicate: 0, rowsFailed: 0, finishedAt: null,
-    })).toBe("네이버 리뷰 9월 2일을 확인했습니다. 새로 들어온 리뷰는 없습니다.");
-    expect(acquisitionSummary("네이버", {
-      periodStart: "2026-09-01", periodEnd: "2026-09-02", result: "SUCCEEDED",
-      rowsNew: 5, rowsDuplicate: 1, rowsFailed: 3, finishedAt: null,
-    })).toContain("3건은 읽지 못했습니다.");
+/**
+ * Outcome Artifact v1 §1 — the completion's facts became an object and its prose became a meaning.
+ * The old contract asserted five numbers inside one sentence; it is rewritten, not weakened: every fact
+ * it checked is still checked, on the artifact that now carries it.
+ */
+describe("§3 the completion result is a structured object, and the prose is its meaning", () => {
+  const NAVER = { periodStart: "2026-09-01", periodEnd: "2026-09-02", result: "SUCCEEDED",
+    rowsNew: 115, rowsDuplicate: 33, rowsFailed: 0, finishedAt: null };
+
+  it("carries the window and the three tallies as values", () => {
+    expect(acquisitionResultOf("NAVER", "네이버", NAVER)).toEqual({
+      artifactId: "a-acquisition-naver", type: "ACQUISITION_RESULT", title: "네이버 리뷰 가져오기 결과", titleSaid: true,
+      channelCode: "NAVER", channelNameKo: "네이버",
+      periodStart: "2026-09-01", periodEnd: "2026-09-02", rowsNew: 115, rowsDuplicate: 33, rowsFailed: 0,
+    });
+    // A tally the record does not hold stays null — never a zero we did not observe.
+    expect(acquisitionResultOf("NAVER", "네이버", { ...NAVER, rowsDuplicate: null, rowsFailed: null }))
+      .toMatchObject({ rowsNew: 115, rowsDuplicate: null, rowsFailed: null });
+    // Half a range is not a period: it is dropped rather than completed with a placeholder.
+    expect(acquisitionResultOf("NAVER", "네이버", { ...NAVER, periodEnd: null }))
+      .toMatchObject({ periodStart: null, periodEnd: null });
     // Nothing to describe is not a run that brought in nothing.
-    expect(acquisitionSummary("네이버", {
+    expect(acquisitionResultOf("NAVER", "네이버", {
       periodStart: null, periodEnd: null, result: "SUCCEEDED",
       rowsNew: null, rowsDuplicate: null, rowsFailed: null, finishedAt: null,
     })).toBeNull();
   });
 
-  it("no internal word reaches the sentence", () => {
-    const line = acquisitionSummary("네이버", {
-      periodStart: "2026-09-01", periodEnd: "2026-09-02", result: "SUCCEEDED",
-      rowsNew: 115, rowsDuplicate: 33, rowsFailed: 0, finishedAt: null,
-    })!;
-    for (const word of ["sync", "segment", "plan", "구간", "계획", "동기화", "provenance", "ingest"]) {
-      expect(line.toLowerCase()).not.toContain(word);
+  it("says what the result MEANS and not one number of it", () => {
+    const one = acquisitionResultOf("NAVER", "네이버", NAVER)!;
+    expect(acquisitionMeaning([one])).toBe("네이버 리뷰를 새로 가져왔습니다.");
+    expect(acquisitionMeaning([acquisitionResultOf("NAVER", "네이버", { ...NAVER, rowsNew: 0 })!]))
+      .toBe("네이버 리뷰를 확인했지만 새로 들어온 리뷰는 없습니다.");
+    // An untallied run cannot claim either way.
+    expect(acquisitionMeaning([acquisitionResultOf("NAVER", "네이버", { ...NAVER, rowsNew: null })!]))
+      .toBe("네이버 리뷰를 확인했습니다.");
+    expect(acquisitionMeaning([])).toBeNull();
+    // Every digit of the record stays on the card.
+    for (const digits of ["115", "33", "0", "9월 1일", "9월 2일"]) {
+      expect(acquisitionMeaning([one])).not.toContain(digits);
+    }
+  });
+
+  it("no internal word reaches the seller — in the sentence or on the card", () => {
+    const card = acquisitionResultOf("NAVER", "네이버", NAVER)!;
+    const seen = `${acquisitionMeaning([card])} ${card.title}`.toLowerCase();
+    for (const word of ["sync", "segment", "plan", "구간", "계획", "동기화", "provenance", "ingest", "run"]) {
+      expect(seen).not.toContain(word);
     }
   });
 });
@@ -204,9 +224,16 @@ describe("§3 end to end — the resume says what the run DID, not that it happe
 
     const { turn } = await say(h, id, "", { resumeOfTurnId: first.turn.turnId });
     expect(turn.status).toBe("DONE");
-    expect(turn.message).toContain("네이버 리뷰 9월 1일~9월 2일을 확인했습니다");
-    expect(turn.message).toContain("새로 들어온 리뷰 115건");
-    expect(turn.message).toContain("이미 확인한 리뷰 33건");
+    // The meaning is said once, in prose…
+    expect(turn.message).toContain("네이버 리뷰를 새로 가져왔습니다");
+    // …and the numbers and the window are on the card, not in the paragraph.
+    const card = turn.artifacts.find((a) => a.type === "ACQUISITION_RESULT");
+    expect(card).toMatchObject({
+      channelCode: "NAVER", channelNameKo: "네이버",
+      periodStart: "2026-09-01", periodEnd: "2026-09-02", rowsNew: 115, rowsDuplicate: 33, rowsFailed: 0,
+    });
+    expect(turn.message).not.toContain("115");
+    expect(turn.message).not.toContain("33건");
     // The old sentence said only that it happened. It is gone when there is something better to say.
     expect(turn.message).not.toContain("새 리뷰 가져오기가 끝났습니다");
   });

@@ -50,23 +50,30 @@ function windowWord(window: DateWindow): string {
 /**
  * One claim per completed channel, or none when neither level can be stated.
  *
- * `rows` are the rows the resumed read returned (all channels); `window` is that read's window;
+ * `rows` are the rows the resumed read returned (all channels); `window` is that read's window, or
+ * `null` when the read was unbounded — which drops the date clause rather than inventing a range;
  * `collected` are the runs the conversation saw finish. B wins over C when both are available —
  * a row's own date is stronger evidence than a run's count.
  */
 export function claimsFor(
-  rows: readonly ReviewItem[], window: DateWindow, collected: readonly CollectedRun[], channelNames: ReadonlyMap<string, string>,
+  rows: readonly ReviewItem[], window: DateWindow | null, collected: readonly CollectedRun[], channelNames: ReadonlyMap<string, string>,
 ): ReviewClaim[] {
   const claims: ReviewClaim[] = [];
   for (const run of collected) {
     const code = run.channelCode.toUpperCase();
     const name = channelNames.get(code) ?? run.channelCode;
     const written = rows.filter((r) => r.channelCode.toUpperCase() === code
-      && r.writtenOn != null && r.writtenOn >= window.from && r.writtenOn <= window.to);
+      && r.writtenOn != null && (window == null || (r.writtenOn >= window.from && r.writtenOn <= window.to)));
     if (written.length > 0) {
       claims.push({
         level: "B", channelCode: code, count: written.length,
-        sentence: `이번에 확인한 ${name} 리뷰 중 ${windowWord(window)} 작성된 리뷰는 ${written.length}건입니다.`,
+        // <b>A read with no window names no period</b> (Outcome Artifact v1 §2). The count is the same
+        // either way — every row with a date passes an unbounded filter — so the only thing a missing
+        // window may change is the clause, and the honest form of a clause with nothing to say is no
+        // clause. It must never become a placeholder range: a seller cannot read 0000-00-00.
+        sentence: window
+          ? `이번에 확인한 ${name} 리뷰 중 ${windowWord(window)} 작성된 리뷰는 ${written.length}건입니다.`
+          : `이번에 확인한 ${name} 리뷰는 ${written.length}건입니다.`,
       });
       continue;
     }

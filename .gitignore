@@ -97,14 +97,23 @@ eval_data/.DS_Store
 !.claude/agents/*.md
 !.claude/skills/
 !.claude/skills/**
+# …except the symlinks `npx skills add` writes into it. They point into `.agents/skills/`, which is not
+# tracked, so committing them ships three dangling links to a fresh clone — a file that exists, resolves
+# to nothing, and is read as breakage rather than as an install step. The lockfile and
+# `docs/design_skills_bootstrap.md` restore them in one command instead.
+.claude/skills/ai-elements
+.claude/skills/migrate-radix-to-base
+.claude/skills/shadcn
 !.claude/commands/
 .claude/commands/*
 !.claude/commands/orchestrate.md
 
 # Vendored third-party skills (`npx skills add`). The LOCKFILE is tracked — it names the source and
 # pins a content hash, so `npx skills install` restores the same three skills — but the 1.3MB of
-# fetched markdown is not this repository's source and does not belong in its diffs. The symlinks
-# under .claude/skills/ point here and are dangling until a clone runs the install.
+# fetched markdown is not this repository's source and does not belong in its diffs. Neither the
+# fetched markdown nor the symlinks that point at it are committed: they are DESIGN-TIME tooling for
+# whoever is working on the UI, and nothing this product builds, ships, or runs reads them
+# (`docs/design_skills_bootstrap.md`).
 .agents/skills/
 
 # OS

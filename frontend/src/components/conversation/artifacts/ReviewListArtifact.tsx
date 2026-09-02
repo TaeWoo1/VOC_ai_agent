@@ -13,6 +13,22 @@ import { asOfStatus } from "../../../lib/conversation/asOf";
 import { useContinueInPanel } from "../useContinueInPanel";
 
 /**
+ * <b>A review with no words still has to be one row and not another</b> (Outcome Artifact v1 §3).
+ *
+ * A customer who left only stars gave us no sentence, and every such row was named 「별점만」 — four of
+ * them read as one review printed four times. Nothing new is read or derived: the rating and the product
+ * are facts the row already holds, and they are what tells these rows apart. The rating alone is not
+ * enough — a list of five-star ratings-only reviews shares it — so the product joins the name and LEAVES
+ * the meta line, which keeps it said once. What is left below is the channel and the date, and the date
+ * is what separates two of the same product. When neither fact is there, there is genuinely nothing to
+ * tell them apart by and the row says so rather than pretending.
+ */
+function ratingOnlyName(rating: number | null | undefined, productName: string | null | undefined): string {
+  const stars = rating != null ? `별점 ${rating}점만 남긴 리뷰` : "내용 없는 리뷰";
+  return productName ? `${stars} · ${productName}` : stars;
+}
+
+/**
  * Review rows as OBJECTS, on the same terms as an inquiry row (Agentic Experience v2 §3): the
  * customer's sentence is the row, pressing it opens that review in place, and the workspace is a
  * secondary icon rather than the row's only behaviour. A review cannot be ANCHORED — the focus
@@ -52,7 +68,7 @@ export function ReviewListArtifact({ artifact, stepped = [], headline }: { artif
           {artifact.items.slice(0, head.shown).map((r) => {
             const expanded = open === r.reviewId;
             const selected = selectedId === r.reviewId;
-            const text = r.preview ? previewText(r.preview) : "별점만";
+            const text = r.preview ? previewText(r.preview) : ratingOnlyName(r.rating, r.productName);
             return (
               <li key={r.reviewId} className={selected ? "bg-brand-50/60" : ""}>
                 <button
@@ -72,14 +88,16 @@ export function ReviewListArtifact({ artifact, stepped = [], headline }: { artif
                     <p className={`min-w-0 flex-1 break-keep leading-snug text-ink ${expanded ? "text-lg font-semibold leading-relaxed" : "text-base font-medium line-clamp-2"}`}>
                       {text}
                     </p>
-                    {r.rating != null ? <span className="shrink-0 text-xs tabular-nums text-muted">★ {r.rating}</span> : null}
+                    {r.rating != null && r.preview ? <span className="shrink-0 text-xs tabular-nums text-muted">★ {r.rating}</span> : null}
                     {mixed && r.negative ? <Status tone="bad" variant="word">부정</Status> : null}
                   </div>
                   {/* Three facts, three columns — the product it is about, where it came from, when.
                       Joined by 「·」 into one string they read as a single caption and the eye cannot
                       scan the date down the list (Reviewnary Visual System v1 §3). */}
                   <p className="mt-1 flex flex-wrap items-center gap-x-3 break-keep text-xs text-muted">
-                    {r.productName ? <span className="min-w-0 truncate">{r.productName}</span> : null}
+                    {/* The product is on the meta line — unless the row has no words, in which case it is
+                        part of the row's NAME above and saying it twice is what this fix removed. */}
+                    {r.productName && r.preview ? <span className="min-w-0 truncate">{r.productName}</span> : null}
                     {r.channelNameKo ? <span className="shrink-0">{r.channelNameKo}</span> : null}
                     {r.writtenOn ? <span className="shrink-0 tabular-nums">{r.writtenOn}</span> : null}
                   </p>

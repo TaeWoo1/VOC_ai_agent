@@ -1190,6 +1190,37 @@ skill 감사: 공식 `frontend-design`을 **프로세스**로 썼고, `shadcn`/`
 `message-scroller`는 새 npm 의존성을 요구하므로 **가져온 컴포넌트 0**이다. 마켓플레이스 0 · WRITE 0 ·
 마이그레이션 0 ⇒ evidence 행 없음)
 
+**`docs/outcome_artifact_visual_closure_v1.md`** (Outcome Artifact + Visual Final Closure v1 — 2026-09-02.
+visual direction과 chat semantics는 **freeze**하고 `a041b163`이 남긴 cross-layer presentation blocker만
+닫는다. **§1 완료 결과의 숫자는 숫자로 이동한다** — 백엔드 attempt row의 다섯 사실(channel · window ·
+rowsNew · rowsDuplicate · rowsFailed)이 한국어 문장 하나로 납작해져 있어서, 화면이 숫자에 크기를 주려면
+**우리가 쓴 문장을 되파싱**해야 했다(이 저장소가 다른 모든 곳에서 거부하는 모양) ⇒ 닫힌 artifact
+**`ACQUISITION_RESULT`** 하나(값만 — run id·plan·segment·provenance 0)와 `acquisitionMeaning()`:
+**prose는 의미만**(새로 들어왔다 / 없다 / 말할 수 없다 — 숫자도 날짜도 0), **카드는 숫자와 기간만**.
+`titleSaid`는 생산자가 선언한다. **completion truth 복제 0** — claim ladder(`reviewClaim.ts`)는 무변경이고
+이미 있던 규칙(같은 수면 evidence로)에 절 하나만 붙었다(claim.count == 그 채널 receipt의 rowsNew이면
+disclosure로; **다르면 여전히 말한다** — 라이브에서 카드 115 옆에 「이번에 확인한 … 50건」이 선다).
+카드는 **파생 0**(115+33=148은 아무도 관측하지 않은 셋째 수), 기록에 없는 tally는 0이 아니라 렌더 0,
+`rowsFailed:0`은 행을 쓰지 않고 실패가 **있으면** 자기 figure를 `bad`로 갖는다. 라이브(실제 Demo Org
+attempt `c1701821`): **네이버 스마트스토어 · 8월 20일~9월 2일 · 115 새로 들어옴 · 33 이미 있던 리뷰**.
+**§2 sentinel window** — `claimsFor`에 `{from:"0000-00-00", to:"9999-99-99"}`를 넘겨 필터를 통과시키던
+자리에서 `windowWord`가 그것을 **판매자 문장에 인쇄**하고 있었다(「… 중 0000-00-00~9999-99-99에 작성된
+리뷰는 50건입니다」) ⇒ `DateWindow | null`, **행 수는 그대로**(sentinel 범위가 하던 일이 정확히 그것),
+바뀌는 것은 절 하나뿐 — **기간이 없으면 기간을 말하지 않는다**. claim 의미 재설계 0. 회귀는 둘:
+unit(같은 수 · sentinel 0)과 **source scan**(`agent-runtime/src` 어느 .ts의 코드에도 그 리터럴 없음),
+그리고 라이브 3폭에서 렌더된 문서의 sentinel **0**. **§3** 문의 collection의 두 줄 footer를 한 줄로
+(더 보기는 왼쪽 muted · 화면에서 보기는 오른쪽 — 리뷰 목록이 이미 쓰던 모양), 본문 없는 리뷰는
+「별점 5점만 남긴 리뷰 · {상품}」로 이름 짓고 **상품은 meta 줄에서 빠진다**(한 사실 한 번; ★ 배지도
+이름이 별점을 말하면 렌더 0) — 새 정보 생성 0. **§4** `.claude/skills/*` 심볼릭 링크 3개가 ignored
+디렉터리를 가리켜 fresh clone에서 **끊긴 파일**로 도착하던 것을 untrack하고 `skills-lock.json` +
+`docs/design_skills_bootstrap.md`(명령 하나)로 대체 — 제품 runtime 의존성 0. 검증: runtime **822** ·
+frontend **2,652**/223 files · 실패 0 · typecheck clean(직전 커밋에 있던 `freshnessUx` cast 오류도 함께
+수정), 라이브 브라우저 A–E × 1440/1366/1152 — **AA 위반 0 · 가로 스크롤 0 · off-host 0**.
+**마켓플레이스 호출 0 · WRITE 0 · DB 변경 0 · 마이그레이션 0** ⇒ evidence 행 없음. **고치지 않고 보고**:
+같은 상품·같은 별점·같은 날짜의 본문 없는 리뷰 둘은 여전히 같은 이름, 완료 턴이 자기 step을 다시 올리는
+것(freshness routing이 맞게 동작한 결과), 실패 경로에서 receipt가 사라지는 것, QA 발판(폭당 대화 fixture ·
+로컬 백엔드 JVM 예산 상향))
+
 **Demo org / channel knowledge:** `docs/demo_org_and_channel_knowledge_v1.md` owns the canonical Demo
 Org's **provenance contract** (`REAL` / `DEMO_SEED` / `VERIFY_FIXTURE`, default reads exclude synthetic),
 the **vault key diagnosis contract** (a credential is opened with the key that sealed IT; `KEY_MISMATCH`

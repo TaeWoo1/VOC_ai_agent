@@ -29,6 +29,7 @@ export type ArtifactType =
   | "APPROVAL"
   | "GUIDED_EXECUTION"
   | "EXECUTION_RESULT"
+  | "ACQUISITION_RESULT"
   | "WORKSPACE_LINK"
   | "KNOWLEDGE_CAPTURE";
 
@@ -400,6 +401,24 @@ export interface ExecutionResultArtifact extends ArtifactBase {
   to: string;
 }
 
+/**
+ * What one finished guided acquisition did — the mirror of the runtime's closed contract.
+ *
+ * Five facts as values: which channel, the window it covered, and the three tallies. A tally the
+ * backend's record does not hold is `null` and is not rendered as a zero; a window it does not hold is
+ * `null` and the card says no period rather than a placeholder one.
+ */
+export interface AcquisitionResultArtifact extends ArtifactBase {
+  type: "ACQUISITION_RESULT";
+  channelCode: string;
+  channelNameKo: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  rowsNew: number | null;
+  rowsDuplicate: number | null;
+  rowsFailed: number | null;
+}
+
 /** Knowledge Capture v1 — one capture as the seller sees it (mirror of the runtime's contract). */
 export type KnowledgeCaptureState = "ASKED" | "CANDIDATE" | "SAVED" | "DUPLICATE" | "CONFLICT" | "CANCELLED" | "STALE";
 
@@ -448,6 +467,7 @@ export type Artifact =
   | HumanActionRequiredArtifact
   | ApprovalArtifact
   | ExecutionResultArtifact
+  | AcquisitionResultArtifact
   | WorkspaceLinkArtifact
   | KnowledgeCaptureArtifact;
 

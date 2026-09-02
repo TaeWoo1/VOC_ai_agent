@@ -39,3 +39,39 @@ describe("review list — compact 「채널 · 언제 기준」 footer", () => {
     expect(asOfStatus("네이버", null, ref)).toBe("네이버 · 확인 기록 없음");
   });
 });
+
+describe("a review with no words — Outcome Artifact v1 §3", () => {
+  const starsOnly = (reviewId: string, rating: number | null, productName: string | null = null): ReviewList["items"][number] => ({
+    reviewId, accountId: "acc", channelCode: "CAFE24", channelNameKo: "카페24", writtenOn: "2026-08-25",
+    rating, negative: false, preview: null, productId: null, productName, to: "/reviews",
+  });
+
+  it("is named by the rating it does have, so two of them are not the same row twice", () => {
+    render(<MemoryRouter><ReviewListArtifact artifact={{
+      ...list, items: [starsOnly("r-1", 5), starsOnly("r-2", 2), starsOnly("r-3", null)],
+    }} /></MemoryRouter>);
+    expect(screen.getByText("별점 5점만 남긴 리뷰")).toBeInTheDocument();
+    expect(screen.getByText("별점 2점만 남긴 리뷰")).toBeInTheDocument();
+    // Nothing to tell it apart by is said plainly rather than pretended.
+    expect(screen.getByText("내용 없는 리뷰")).toBeInTheDocument();
+    // The rating is now the row's NAME, so the badge that repeated it is gone.
+    expect(screen.queryByText("★ 5")).toBeNull();
+    expect(screen.queryByText("별점만")).toBeNull();
+  });
+
+  it("a list that shares one rating is told apart by the product — said in the name, and not twice", () => {
+    render(<MemoryRouter><ReviewListArtifact artifact={{
+      ...list, items: [starsOnly("r-1", 5, "전선몰딩 1호"), starsOnly("r-2", 5, "생수컵 디스펜서")],
+    }} /></MemoryRouter>);
+    expect(screen.getByText("별점 5점만 남긴 리뷰 · 전선몰딩 1호")).toBeInTheDocument();
+    expect(screen.getByText("별점 5점만 남긴 리뷰 · 생수컵 디스펜서")).toBeInTheDocument();
+    // The product left the meta line rather than being said on both.
+    expect(screen.queryByText("전선몰딩 1호")).toBeNull();
+  });
+
+  it("a review that HAS words keeps its rating badge beside them", () => {
+    render(<MemoryRouter><ReviewListArtifact artifact={list} /></MemoryRouter>);
+    expect(screen.getByText("접착이 약해요")).toBeInTheDocument();
+    expect(screen.getByText("★ 2")).toBeInTheDocument();
+  });
+});

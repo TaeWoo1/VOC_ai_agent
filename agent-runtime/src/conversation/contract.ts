@@ -49,6 +49,7 @@ export type ArtifactType =
   | "APPROVAL"
   | "GUIDED_EXECUTION"
   | "EXECUTION_RESULT"
+  | "ACQUISITION_RESULT"
   | "WORKSPACE_LINK"
   | "KNOWLEDGE_CAPTURE";
 
@@ -613,6 +614,31 @@ export interface KnowledgeCaptureArtifact extends ArtifactBase {
   readonly settingsTo: string;
 }
 
+/**
+ * <b>What one finished guided acquisition actually did.</b>
+ *
+ * The seller ran an export and is owed the result of the export: which channel, which days were covered,
+ * how many reviews were new, how many were already held, how many could not be read. Those five facts
+ * live on the backend's attempt row, and until this artifact existed the runtime flattened them into one
+ * Korean sentence — five numbers inside a paragraph, which the frontend could only lay out by parsing the
+ * prose back apart. So the numbers travel as numbers and the prose says what it means.
+ *
+ * <b>Closed and complete.</b> No run id, no plan, no segment, no provenance: a record of the machinery is
+ * not the result of the work. A tally the record does not hold stays `null` — a run that never counted is
+ * not a run that brought in nothing, and only the renderer may decide how to say so.
+ */
+export interface AcquisitionResultArtifact extends ArtifactBase {
+  readonly type: "ACQUISITION_RESULT";
+  readonly channelCode: string;
+  readonly channelNameKo: string;
+  /** ISO date-only, both ends together or neither. Never a sentinel: an unknown window is `null`. */
+  readonly periodStart: string | null;
+  readonly periodEnd: string | null;
+  readonly rowsNew: number | null;
+  readonly rowsDuplicate: number | null;
+  readonly rowsFailed: number | null;
+}
+
 export interface WorkspaceLinkArtifact extends ArtifactBase {
   readonly type: "WORKSPACE_LINK";
   readonly link: WorkspaceLink;
@@ -638,6 +664,7 @@ export type Artifact =
   | HumanActionRequiredArtifact
   | ApprovalArtifact
   | ExecutionResultArtifact
+  | AcquisitionResultArtifact
   | WorkspaceLinkArtifact
   | KnowledgeCaptureArtifact;
 
