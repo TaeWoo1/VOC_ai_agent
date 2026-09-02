@@ -1385,6 +1385,8 @@ export function buildNaverReplyLiveConfig(): NaverReplyLiveCarrier {
               log("aw_naver_reply_relanding", {});
               await page.goto(NAVER_REVIEW_MANAGEMENT_LANDING_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
             },
+            // Sanitized counts only — the run's own account of what it read.
+            onDiagnostic: (event, fields) => log(event, fields),
           });
           return { inner, page: page as unknown as ComposerFillPageLike };
         },

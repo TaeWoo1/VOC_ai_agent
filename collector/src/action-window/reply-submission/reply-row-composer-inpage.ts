@@ -122,7 +122,15 @@ export const IN_PAGE_ARM_OPEN_OBSERVER = `(() => {
 export const IN_PAGE_LOGIN_SIGNAL = `(() => {
   var body = document.body ? (document.body.getAttribute('data-page') || '') : '';
   var url = String(location.href || '');
-  return !/login|\\ub85c\\uadf8\\uc778/i.test(body) && !/\\/login/i.test(url);
+  var host = String(location.hostname || '');
+  // The AUTH HOSTS, checked by name (2026-09-03). The two text tests below were the whole signal and
+  // they both pass on NAVER's real sign-in page: \`https://nid.naver.com/nidlogin.login?mode=form&url=…\`
+  // has no \`/login\` path segment ("nidlogin" is one word) and carries no \`data-page\`. So a run landing
+  // on the login screen was told it was signed in, went on to scan that page for review rows, found none,
+  // and failed as TARGET_NOT_FOUND — twice, on two live sittings, while the seller was still typing.
+  // A host is not a heuristic: these are the pages NAVER sends an unauthenticated seller to.
+  var authHost = /(^|\\.)nid\\.naver\\.com$/i.test(host) || /(^|\\.)accounts\\.commerce\\.naver\\.com$/i.test(host);
+  return !authHost && !/login|\\ub85c\\uadf8\\uc778/i.test(body) && !/\\/login/i.test(url);
 })()`;
 
 /** Remove every marker/outline/observer this module set. Idempotent; read-only. */

@@ -49,6 +49,13 @@ export interface NaverLadderReplyDriverOptions {
   /** How long to watch for a seller-resolvable precondition (a login) before giving up. */
   loginTimeoutMs?: number;
   /**
+   * Sanitized run diagnostics. NUMBERS AND VERDICTS ONLY — never a review id, never page text, never the
+   * draft. Exists because two live sittings ended with the run gone and no record of what the locate saw:
+   * the branch logged nothing, so 「어느 화면을 읽었고 몇 행을 봤는가」 had to be inferred from source, and
+   * the first inference was wrong. A locate that fails should say what it looked at.
+   */
+  onDiagnostic?: (event: string, fields: Record<string, string | number | boolean | null>) => void;
+  /**
    * Called ONCE after a login is observed, before the surface is re-probed — the carrier's chance to put
    * the page back on the review surface. Read-only by contract: the carrier navigates to the review list
    * it already opened, nothing else. Absent ⇒ the page is re-probed wherever the login left it.
@@ -78,6 +85,7 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
   private readonly rowOpenTimeoutMs: number;
   private readonly loginTimeoutMs: number;
   private readonly onSurfaceRecovered: (() => Promise<void>) | undefined;
+  private readonly onDiagnostic: NaverLadderReplyDriverOptions["onDiagnostic"];
   private matchedRowIndex: number | null = null;
   private matchCount = 0;
   private composerCount = 0;
@@ -93,10 +101,20 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
     this.rowOpenTimeoutMs = opts.rowOpenTimeoutMs ?? this.submitTimeoutMs;
     this.loginTimeoutMs = opts.loginTimeoutMs ?? this.submitTimeoutMs;
     this.onSurfaceRecovered = opts.onSurfaceRecovered;
+    this.onDiagnostic = opts.onDiagnostic;
+  }
+
+  private diag(event: string, fields: Record<string, string | number | boolean | null>): void {
+    try {
+      this.onDiagnostic?.(event, fields);
+    } catch {
+      // A diagnostic that throws must never be the reason a run ends.
+    }
   }
 
   async prepareSurface(): Promise<SurfaceProbeResult> {
     const loggedIn = await this.page.evaluate<boolean>(IN_PAGE_LOGIN_SIGNAL);
+    this.diag("aw_naver_reply_surface_probe", { loggedIn });
     if (!loggedIn) return { ok: false, code: "LOGIN_REQUIRED" };
     return true;
   }
@@ -135,6 +153,16 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
     // Secondary: when the row offers a single rating reading it must agree with the hint. A row that offers
     // none is not contradicted — the identity is the fingerprint, the rating only refuses a contradiction.
     const consistent = hits.filter((c) => (c.secondary?.rating ?? null) === null || c.secondary?.rating === this.hint.rating);
+    // What the scan actually saw, in numbers: how many review rows were on the page at all, how many
+    // carried the backend's review-id fingerprint, and how many of those survived the rating check. A run
+    // that ends here can now say WHICH of those three was zero.
+    this.diag("aw_naver_reply_ladder", {
+      rowsOnPage: parsed.candidates.length,
+      fingerprintHits: hits.length,
+      ratingConsistent: consistent.length,
+      rowsTruncated: parsed.rowsTruncated,
+      tokensTruncated: parsed.tokensTruncated,
+    });
     return {
       count: consistent.length,
       rowIndex: consistent.length === 1 ? consistent[0]!.rowIndex : null,

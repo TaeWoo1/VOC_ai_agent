@@ -203,7 +203,7 @@ describe("recoverable surface preconditions", () => {
     probes = 0;
     waits = 0;
     constructor(private readonly canWait: boolean) {
-      super({ rowLocate: { count: 1, sig: "row-1" }, locate: { count: 1, sig: "composer-1" } });
+      super({ locateRow: { count: 1, sig: "row-1" }, locate: { count: 1, sig: "composer-1" } });
     }
     override async prepareSurface() {
       this.probes += 1;
