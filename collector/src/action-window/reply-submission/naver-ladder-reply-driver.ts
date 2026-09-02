@@ -322,10 +322,17 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
     if (tagged === 0) {
       // Nothing to press: either the composer is already showing in this row's scope or no open word exists.
       const signals = await this.page.evaluate<{ composerCandidateCount: number }>(IN_PAGE_SCOPED_COMPOSER_SIGNALS);
-      return signals.composerCandidateCount === 1 ? { opened: true } : { opened: false, reason: "NOT_FOUND" };
+      const already = signals.composerCandidateCount === 1;
+      this.diag("aw_naver_reply_open_composer", { taggedControls: 0, composersInRow: signals.composerCandidateCount, opened: already });
+      return already ? { opened: true } : { opened: false, reason: "NOT_FOUND" };
     }
-    if (tagged !== 1) return { opened: false, reason: tagged > 1 ? "AMBIGUOUS" : "NOT_FOUND" };
-    return openComposer(this.page);
+    if (tagged !== 1) {
+      this.diag("aw_naver_reply_open_composer", { taggedControls: tagged, opened: false });
+      return { opened: false, reason: tagged > 1 ? "AMBIGUOUS" : "NOT_FOUND" };
+    }
+    const res = await openComposer(this.page);
+    this.diag("aw_naver_reply_open_composer", { taggedControls: 1, opened: res.opened, reason: res.opened ? null : (res.reason ?? null) });
+    return res;
   }
 
   async armRowObserve(): Promise<void> {
@@ -351,6 +358,7 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
       IN_PAGE_SCOPED_COMPOSER_SIGNALS,
     );
     this.composerCount = signals.composerCandidateCount;
+    this.diag("aw_naver_reply_locate_composer", { composersInRow: signals.composerCandidateCount });
     return replyComposerLocateDecision({
       composerCandidateCount: signals.composerCandidateCount,
       composerSignatureParts: signals.composerCandidateCount === 1 ? [signals.structuralFingerprint] : undefined,
@@ -377,8 +385,16 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
       composerCount: this.composerCount,
       hasDraft: this.draftBody != null && this.draftBody.length > 0,
     });
-    if (!decision.fill) return { filled: false, reason: decision.reason };
-    return fillComposer(this.page, this.draftBody!);
+    if (!decision.fill) {
+      this.diag("aw_naver_reply_fill_refused", {
+        reason: decision.reason, rowMatchCount: this.matchCount, composerCount: this.composerCount,
+        reviewIdVerdict: this.reviewIdVerdict().kind, hasDraft: this.draftBody != null && this.draftBody.length > 0,
+      });
+      return { filled: false, reason: decision.reason };
+    }
+    const res = await fillComposer(this.page, this.draftBody!);
+    this.diag("aw_naver_reply_fill", { filled: res.filled, reason: res.filled ? null : (res.reason ?? null) });
+    return res;
   }
 
   async armObserve(): Promise<void> {
