@@ -152,13 +152,18 @@ describe("human action artifact — guided acquisition inline (EXPORT_ACTION_WIN
         />
       </MemoryRouter>,
     );
-    // Compact before the press: title · reason · primary — the guided sentence comes with the run itself.
+    // Compact before the press: title · reason · ONE primary. The guided sentence comes with the run, and
+    // so do the escapes — a card with three controls at rest asks the seller to pick a strategy for a step
+    // that has one way forward (Chat-first Operating Experience v3; observed live 2026-09-02).
     expect(screen.queryByText(/판매자센터의 리뷰 내려받기 화면과 기간을 준비합니다/)).toBeNull();
-    // The fallback is a secondary text link, never the primary.
-    expect(screen.getByRole("link", { name: "파일로 올리기" })).toHaveAttribute("href", "/connect/upload?returnTo=%2F");
+    expect(screen.queryByRole("link", { name: "파일로 올리기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "계속 확인하기" })).toBeNull();
     expect(runtime.start).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "최신 리뷰 가져오기" }));
     expect(screen.getByText(/판매자센터의 리뷰 내려받기 화면과 기간을 준비합니다/)).toBeInTheDocument();
+    // …and now they are there, as what they are: the way out of a step the seller is standing in. Still a
+    // text link, never a second primary.
+    expect(screen.getByRole("link", { name: "파일로 올리기" })).toHaveAttribute("href", "/connect/upload?returnTo=%2F");
     expect(screen.queryByText(/한 번 클릭/)).toBeNull();
     await waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
     // Acceptance Closure §4: the run is bound to a launch the backend minted for THIS account — the same
@@ -314,7 +319,10 @@ describe("human action artifact — freshness UX v1: compact, 「언제 기준�
     render(<MemoryRouter><HumanActionArtifact artifact={artifact({ path: "WING_READ_ACTION_WINDOW", channelCode: "COUPANG", channelNameKo: "쿠팡", accountId: "acc-cp", asOf: "2026-08-20T01:00:00Z" })} onResume={() => undefined} acquireRuntime={fakeAcquire()} /></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "쿠팡 최신 리뷰 가져오기" })).toBeInTheDocument();
     expect(screen.getByText("8월 20일 이후 아직 확인하지 못했어요.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "계속 확인하기" })).toBeInTheDocument();
+    // ONE control at rest. 「계속 확인하기」 arrives with the run it would resume (v3) — before the press
+    // there is no run, and offering to resume nothing is how this card came to hold three buttons.
+    expect(screen.getByRole("button", { name: "최신 리뷰 가져오기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "계속 확인하기" })).toBeNull();
     const text = screen.getByTestId("human-action-artifact").textContent ?? "";
     expect(text).not.toMatch(/sync|coverage|SyncJob|수집 확인 안 됨|최신 상태가 아닙니다/i);
     expect(text.length).toBeLessThan(120);

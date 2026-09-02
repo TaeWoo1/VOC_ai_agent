@@ -52,6 +52,7 @@ export function ConversationTimeline({
     endRef.current?.scrollIntoView?.({ block: "end" });
   }, [turns.length, busy, dockKey]);
   const lastAgent = [...turns].reverse().find((t) => t.role === "AGENT")?.turnId ?? null;
+  const thread = threadChannel(turns);
 
   // A thread that is already there (a reload, an opened conversation) is not re-played: `initial={false}`
   // means only turns that ARRIVE animate. Layout is animated so a turn that appears or a progress row that
@@ -69,6 +70,7 @@ export function ConversationTimeline({
             ) : (
               <AgentTurn
                 turn={turn}
+                threadChannel={thread}
                 compact={compact}
                 latest={turn.turnId === lastAgent && !busy}
                 onPrompt={onPrompt}
@@ -92,6 +94,42 @@ export function ConversationTimeline({
   );
 }
 
+/**
+ * **The channel this conversation is about, until the seller changes it.**
+ *
+ * Read backwards from the newest turn: the first channel any object in the thread names is the one the
+ * seller is working in. Measured on the real Demo Org, 2026-09-02: a NAVER thread asked an ordinary
+ * follow-up and the answer arrived with a Cafe24 freshness footer and a COUPANG step card beside it — three
+ * marketplaces in a conversation about one. This does not change what was READ (scope belongs to the
+ * planner); it decides which of the step cards a turn produced belongs on screen in THIS thread.
+ */
+function threadChannel(turns: readonly DisplayTurn[]): string | null {
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    for (const artifact of turns[i]!.artifacts ?? []) {
+      const code = "channelCode" in artifact ? (artifact as { channelCode?: string | null }).channelCode : null;
+      if (code) return code.toUpperCase();
+    }
+  }
+  return null;
+}
+
+/**
+ * The step cards a turn may show: **one**, and the thread's own channel wins.
+ *
+ * A stale-channel card is a real fact, but three of them stacked under one answer is a status board, and
+ * the seller asked a question. The turn keeps the card for the channel it is about; the others are dropped
+ * from the transcript (the channel screen still holds every one of them).
+ */
+export function stepCardsFor<T extends { type: string; artifactId: string; channelCode?: string | null }>(
+  artifacts: readonly T[],
+  thread: string | null,
+): readonly T[] {
+  const steps = artifacts.filter((a) => a.type === "HUMAN_ACTION_REQUIRED");
+  if (steps.length <= 1) return steps;
+  const mine = thread ? steps.filter((a) => (a.channelCode ?? "").toUpperCase() === thread) : [];
+  return [(mine[0] ?? steps[0])!];
+}
+
 function UserTurn({ text }: { text: string }) {
   return (
     <div className="flex justify-end">
@@ -111,21 +149,31 @@ function meaningfulEvidence(e: Extract<DisplayTurn["artifacts"][number], { type:
   return items.length > 0 ? { ...e, items } : null;
 }
 
-function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecision }: {
-  turn: DisplayTurn; compact: boolean; latest: boolean; onPrompt: (p: string) => void; onResume: () => void;
+function AgentTurn({ turn, threadChannel: thread, compact, latest, onPrompt, onResume, onCaptureDecision }: {
+  turn: DisplayTurn; threadChannel: string | null; compact: boolean; latest: boolean; onPrompt: (p: string) => void; onResume: () => void;
   onCaptureDecision?: (captureId: string, fingerprint: string, decision: "SAVE" | "CANCEL") => void;
 }) {
   const evidence = turn.artifacts
     .filter((a): a is Extract<DisplayTurn["artifacts"][number], { type: "EVIDENCE" }> => a.type === "EVIDENCE")
     .map(meaningfulEvidence)
     .filter((a): a is NonNullable<ReturnType<typeof meaningfulEvidence>> => a != null);
-  const shown = turn.artifacts.filter((a) => a.type !== "EVIDENCE");
+  const keptSteps = new Set(stepCardsFor(turn.artifacts as ReadonlyArray<{ type: string; artifactId: string; channelCode?: string | null }>, thread).map((a) => a.artifactId));
+  const shown = turn.artifacts.filter(
+    (a) => a.type !== "EVIDENCE" && (a.type !== "HUMAN_ACTION_REQUIRED" || keptSteps.has(a.artifactId)),
+  );
   // Which channels this turn already raised as a STEP. A list under a step card must not restate the
   // same channel's state in its own footer — the card says it, and it carries the control that fixes it.
-  const stepped = turn.artifacts
+  const stepped = shown
     .filter((a) => a.type === "HUMAN_ACTION_REQUIRED")
     .map((a) => (a.type === "HUMAN_ACTION_REQUIRED" ? a.channelCode : null))
     .filter((c): c is string => c != null);
+  // **One control per thing to do.** A RESUME chip and a step card's 「계속 확인하기」 are the same press
+  // 15 cm apart, and the seller has to work out which is real — observed on the live screen, where the two
+  // sat one above the other. The card owns that control whenever it is on screen; the chip is what offers it
+  // when nothing else does.
+  const chips = shown.some((a) => a.type === "HUMAN_ACTION_REQUIRED")
+    ? turn.suggestedActions.filter((a) => a.kind !== "RESUME")
+    : turn.suggestedActions;
   const failed = turn.status === "FAILED";
   const stopped = failed && turn.failureCode === "CANCELLED";
   // A failed turn reads as its own sentence (the runtime's closed seller wording — Response Hygiene v1),
@@ -154,7 +202,7 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecisio
           <AnimatePresence initial={false}>
             {shown.map((artifact) => (
               <motion.div key={artifact.artifactId} layout variants={MESSAGE} initial="hidden" animate="shown" exit="gone" transition={LAYOUT} data-artifact={artifact.type}>
-                <ArtifactView artifact={artifact} onResume={onResume} onPrompt={onPrompt} onCaptureDecision={latest ? onCaptureDecision : undefined} stepped={stepped} headline={headline} />
+                <ArtifactView artifact={artifact} onResume={onResume} onPrompt={onPrompt} onCaptureDecision={latest ? onCaptureDecision : undefined} stepped={stepped} headline={headline} latest={latest} />
               </motion.div>
             ))}
           </AnimatePresence>
@@ -172,9 +220,9 @@ function AgentTurn({ turn, compact, latest, onPrompt, onResume, onCaptureDecisio
         </ul>
       ) : null}
       <AnimatePresence initial={false}>
-        {latest && turn.suggestedActions.length > 0 ? (
+        {latest && chips.length > 0 ? (
           <motion.div key="suggestions" layout="position" variants={MESSAGE} initial="hidden" animate="shown" exit="gone" transition={LAYOUT}>
-            <Suggestions actions={turn.suggestedActions} compact={compact} onPrompt={onPrompt} onResume={onResume} />
+            <Suggestions actions={chips} compact={compact} onPrompt={onPrompt} onResume={onResume} />
           </motion.div>
         ) : null}
       </AnimatePresence>

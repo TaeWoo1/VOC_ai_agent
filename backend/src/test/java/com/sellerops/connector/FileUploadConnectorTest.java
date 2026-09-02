@@ -155,6 +155,10 @@ class FileUploadConnectorTest {
         verify(collectionRuns).open(cap.capture());
         CollectionDescriptor d = cap.getValue();
         assertThat(d.method()).isEqualTo(CollectionMethod.MANUAL_UPLOAD);  // the new dimension
+        // …and a manual upload does NOT refresh freshness: a file of unknown age is not an observation of
+        // the channel now, and letting a year-old export read as today's state is the other direction of
+        // the same lie.
+        assertThat(d.dataType()).isNull();
         assertThat(d.trigger()).isEqualTo("UPLOAD");
         assertThat(d.jobType()).isEqualTo("FILE_UPLOAD");                  // legacy connector kind preserved
         assertThat(d.uploadType()).isEqualTo("REVIEW");
@@ -181,7 +185,13 @@ class FileUploadConnectorTest {
         assertThat(d.jobType()).isEqualTo("FILE_UPLOAD");
         assertThat(d.uploadType()).isEqualTo("REVIEW");
         assertThat(d.sellerAccountId()).isNull();
-        assertThat(d.dataType()).isNull();
+        // **A guided export IS an observation of the channel, and now says so.**
+        //
+        // `dataType` was null here, which meant `ChannelCoverageService.lastSuccessfulSync(org, channel,
+        // "REVIEW")` could never see this run. Live on 2026-09-02 a guided import landed 115 NAVER reviews
+        // and the product went on telling the seller 「네이버 스마트스토어 리뷰는 아직 확인한 적이 없어요」 —
+        // in the same answer that showed them two of the reviews it had just collected.
+        assertThat(d.dataType()).isEqualTo(DataType.REVIEW);
 
         // The finalize result mirrors the same method (used only by the sanitized view).
         ArgumentCaptor<ConnectorResult> rc = ArgumentCaptor.forClass(ConnectorResult.class);

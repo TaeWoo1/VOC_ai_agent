@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MoreRows, useHeadRows } from "./headRows";
 import { Link } from "react-router-dom";
 import type { InquiryGroupKey, InquiryItem, InquiryListArtifact as InquiryList } from "../../../lib/conversation/types";
 import { Status, type StatusTone } from "../../ui/Status";
@@ -74,13 +75,22 @@ export function InquiryListArtifact({ artifact, onPrompt, headline }: { artifact
   const askedFor = artifact.scope?.status ? ASKED_FOR[artifact.scope.status] === headKey : false;
   const caption = shared && !askedFor && !(headline ?? "").includes(shared) ? STATE[headKey].all : null;
   const note = [artifact.note, caption].filter(Boolean).join(" ") || null;
+  // The head is spent across the groups IN ORDER, so a capped list still reads as the list the seller
+  // asked for rather than the first group of it.
+  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  const head = useHeadRows(total);
+  let budget = head.shown;
   return (
     <ArtifactCard title={artifact.title} note={note} headline={headline} titleSaid={artifact.titleSaid}>
       {/* Keyed by POSITION as well as kind: a ROWS list keeps the seller's order, so its groups are
           consecutive runs and the same `key` ("UNANSWERED") legitimately appears more than once. React
           was told two siblings were the same node and warned it might drop or duplicate rows — a list
           of the seller's work is the last place to let that happen. */}
-      {groups.map((group, runIndex) => (
+      {groups.map((group, runIndex) => {
+        const take = Math.max(0, Math.min(budget, group.items.length));
+        budget -= take;
+        if (take === 0) return null;
+        return (
         <section key={`${group.key}-${runIndex}`} aria-label={group.label}>
           {showHeaders ? (
             <p className="border-y border-line/70 bg-canvas px-4 py-1.5 text-xs font-semibold text-muted">
@@ -88,7 +98,7 @@ export function InquiryListArtifact({ artifact, onPrompt, headline }: { artifact
             </p>
           ) : null}
           <ul className="divide-y divide-line/70">
-            {group.items.map((item) => (
+            {group.items.slice(0, take).map((item) => (
               <Row
                 key={item.inquiryId}
                 item={item}
@@ -109,7 +119,9 @@ export function InquiryListArtifact({ artifact, onPrompt, headline }: { artifact
             ))}
           </ul>
         </section>
-      ))}
+        );
+      })}
+      <MoreRows hidden={head.hidden} noun="문의" onExpand={head.expand} />
       {artifact.more ? (
         <p className="px-4 py-2">
           <Link to={artifact.more.to} onClick={onOpen} className="text-sm font-semibold text-brand-700 hover:underline">{artifact.more.label}</Link>

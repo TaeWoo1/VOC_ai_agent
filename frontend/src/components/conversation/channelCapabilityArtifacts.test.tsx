@@ -49,7 +49,16 @@ describe("channel-capability artifacts (D5)", () => {
     expect(screen.getByRole("status")).toHaveTextContent("4초");
   });
 
-  it("a turn with one HUMAN_ACTION_REQUIRED per channel renders one card per channel and the 「일단 확인된 리뷰 보기」 chip", () => {
+  /**
+   * <b>One step card per turn</b> — Chat-first Operating Experience v3.
+   *
+   * The runtime still raises a step per stale channel, and every one of them is true. Stacking them under a
+   * single answer is what turned a reply into a status board: measured on the real Demo Org, 2026-09-02, an
+   * ordinary NAVER follow-up arrived with a Cafe24 freshness footer and a COUPANG card beside it — three
+   * marketplaces in a conversation about one. The transcript keeps the one the thread is about; the channel
+   * screen still holds them all.
+   */
+  it("renders ONE step card for the thread's channel, and keeps the chip", () => {
     const base = { type: "HUMAN_ACTION_REQUIRED" as const, actionType: "REVIEW_IMPORT" as const, reason: "FRESHNESS_UNPROVEN" as const, dataType: "REVIEW" as const, requestedAt: "x", resumable: true, to: null };
     const turn = agentTurn({
       artifacts: [
@@ -60,7 +69,10 @@ describe("channel-capability artifacts (D5)", () => {
       status: "WAITING_HUMAN",
     });
     render(<MemoryRouter><ConversationTimeline turns={[turn]} busy={false} stages={[]} elapsed={0} error={null} onPrompt={() => undefined} onResume={() => undefined} /></MemoryRouter>);
-    expect(screen.getAllByTestId("human-action-artifact")).toHaveLength(2);
+    const cards = screen.getAllByTestId("human-action-artifact");
+    expect(cards).toHaveLength(1);
+    // With no earlier object naming a channel, the turn keeps the first card it raised.
+    expect(cards[0]!.textContent).toContain("네이버");
     expect(screen.getByRole("button", { name: "일단 확인된 리뷰 보기" })).toBeInTheDocument();
   });
 });

@@ -21,5 +21,22 @@ public enum CollectionMethod {
      * whose only evidence is what the agent returned — a weaker provenance, and the operator surface should
      * not have to infer the difference from a channel name.
      */
-    SELLER_CENTER_READ
+    SELLER_CENTER_READ;
+
+    /**
+     * Did this run OBSERVE the channel at the moment it ran?
+     *
+     * <p>A guided export and a guided screen read both did: the seller was standing in front of their own
+     * seller center and the file (or the screen) is what it held right then. A {@code MANUAL_UPLOAD} did not
+     * — it is a file of unknown age, and an API pull is already answered by its own run row.
+     *
+     * <p>The distinction is what lets a guided import count as freshness. Before this, a guided import wrote
+     * its run with no {@code dataType} at all, so {@code ChannelCoverageService.lastSuccessfulSync(org,
+     * channel, "REVIEW")} could never see it: on 2026-09-02 a run landed 115 reviews and the product went on
+     * telling the seller 「네이버 스마트스토어 리뷰는 아직 확인한 적이 없어요」 in the same answer that showed
+     * them two of the reviews it had just collected.
+     */
+    public boolean observesChannel() {
+        return this == SELLER_CENTER_EXPORT || this == SELLER_CENTER_READ;
+    }
 }

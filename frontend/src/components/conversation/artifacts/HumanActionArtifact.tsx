@@ -152,6 +152,20 @@ export function HumanActionArtifact({
     <BtnLink to={returnTo(artifact.to)} onClick={onOpen}>{LINK_LABEL[artifact.actionType] ?? "직접 진행하기"}</BtnLink>
   ) : null;
   const running = guided != null && engaged && !!artifact.accountId;
+  /**
+   * **Escapes belong beside a step you are IN, not beside the way in.**
+   *
+   * Live on 2026-09-02 this card offered three controls at rest — 「최신 리뷰 가져오기」, 「계속 확인하기」
+   * and 「파일로 직접 올리기」 — for a step with one way forward. Two of them only mean something after the
+   * first: there is nothing to resume before a run exists, and the manual fallback is what you reach for
+   * when the guided path did not work.
+   *
+   * A card whose primary acts IN PLACE (a guided run, a sync) can therefore hold them back until it has
+   * been pressed. A card whose primary sends the seller to another screen cannot: leaving IS the step, and
+   * 「계속 확인하기」 is how they come back — hiding it there would strand them.
+   */
+  const inPlace = guided != null || canSync;
+  const showEscapes = running || failed || !inPlace;
 
   // Compact: title · one reason line · the primary in the header. The guided run's own sentence and controls
   // appear only after the press; 「계속 확인하기」 only when the turn is actually waiting on this step.
@@ -162,7 +176,7 @@ export function HumanActionArtifact({
       action={primary}
       testId={artifact.optional ? "human-action-offer" : "human-action-artifact"}
     >
-      {running || failed || (artifact.resumable && !artifact.optional) || artifact.fallback?.to ? (
+      {running || failed || showEscapes ? (
         <div className="space-y-3 px-4 pb-3">
           {running && guided ? <p className="break-keep text-sm text-muted">{GUIDED_SENTENCE[guided]}</p> : null}
           {failed ? <p className="text-sm text-bad">수집을 시작하지 못했습니다. 채널 연결 화면에서 다시 시도해 주세요.</p> : null}
@@ -194,13 +208,20 @@ export function HumanActionArtifact({
             />
           ) : null}
 
-          {artifact.resumable && !artifact.optional ? (
+          {/* **The escapes appear once the seller is IN the step, not beside the way in.**
+
+              Live on 2026-09-02 this card offered three controls at rest — 「최신 리뷰 가져오기」,
+              「계속 확인하기」 and 「파일로 직접 올리기」 — for a step that has one way forward. Two of them
+              only mean anything after the first has been pressed: there is nothing to resume before a run
+              exists, and the manual fallback is what you reach for when the guided path did not work. A card
+              with one action says what to do; a card with three asks the seller to choose a strategy. */}
+          {artifact.resumable && !artifact.optional && showEscapes ? (
             <div className="flex flex-wrap items-center gap-2">
               <Btn variant="outline" onClick={onResume}>계속 확인하기</Btn>
             </div>
           ) : null}
 
-          {artifact.fallback?.to ? (
+          {artifact.fallback?.to && showEscapes ? (
             <p className="text-sm text-muted">
               도우미 없이 진행하려면{" "}
               <Link to={returnTo(artifact.fallback.to)} onClick={onOpen} className="font-semibold text-brand-700 hover:underline">

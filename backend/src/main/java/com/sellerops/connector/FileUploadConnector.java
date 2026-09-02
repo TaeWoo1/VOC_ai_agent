@@ -176,11 +176,36 @@ public class FileUploadConnector implements ChannelConnector {
      * collector-captured export. No seller account (uploads are channel-scoped) and no dataType,
      * preserving today's row and leaving the runtime's connection-health update a no-op.
      */
+    /**
+     * The run row for one upload.
+     *
+     * <p>{@code dataType} is set only for a run that OBSERVED the channel — a guided export or a guided screen
+     * read (see {@link CollectionMethod#observesChannel()}). That is what makes it visible to
+     * {@code ChannelCoverageService.lastSuccessfulSync(org, channel, dataType)}, and it is the difference
+     * between a guided import that updates "last checked" and one that lands 115 reviews while the product
+     * keeps saying the channel has never been checked (observed 2026-09-02). A {@code MANUAL_UPLOAD} keeps
+     * {@code null}: a file of unknown age is not an observation of the channel now, and letting it refresh
+     * freshness would let a year-old export read as today's state.
+     *
+     * <p>{@code sellerAccountId} stays null on purpose — an upload is not bound to an account, and the guided
+     * import's account binding lives where it is proven, on the segment's plan
+     * ({@code ExecutableIdentityResolver} resolves it through the attempt, never through this row).
+     */
     private CollectionDescriptor uploadDescriptor(UUID orgId, UUID channelId, String channelCode,
                                                   UploadType type, CollectionMethod method) {
         return new CollectionDescriptor(orgId, /*sellerAccountId*/ null, channelId, channelCode,
-                /*dataType*/ null, method, /*trigger*/ "UPLOAD",
+                /*dataType*/ method.observesChannel() ? observedDataType(type) : null, method, /*trigger*/ "UPLOAD",
                 /*jobType*/ kind(), /*uploadType*/ type.name());
+    }
+
+    /** The upload's kind as a collection data type. `UploadType` and `DataType` share these three names. */
+    private static DataType observedDataType(UploadType type) {
+        return switch (type) {
+            case REVIEW -> DataType.REVIEW;
+            case INQUIRY -> DataType.INQUIRY;
+            case ORDER_SUMMARY -> DataType.ORDER_SUMMARY;
+            default -> null;
+        };
     }
 
     /**

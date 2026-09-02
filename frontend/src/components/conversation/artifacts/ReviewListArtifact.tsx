@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MoreRows, useHeadRows } from "./headRows";
 import { Link } from "react-router-dom";
 import type { ReviewListArtifact as ReviewList } from "../../../lib/conversation/types";
 import { Status } from "../../ui/Status";
@@ -28,6 +29,7 @@ import { useContinueInPanel } from "../useContinueInPanel";
  */
 export function ReviewListArtifact({ artifact, stepped = [], headline }: { artifact: ReviewList; stepped?: readonly string[]; headline?: string }) {
   const onOpen = useContinueInPanel("REVIEW_LIST");
+  const head = useHeadRows(artifact.items.length);
   const conversation = useConversation();
   const [open, setOpen] = useState<string | null>(null);
   const selectedId = conversation?.workingSet?.selectedObject?.kind === "REVIEW"
@@ -47,7 +49,7 @@ export function ReviewListArtifact({ artifact, stepped = [], headline }: { artif
         <p className="px-4 pb-2 text-sm text-muted">보여드릴 리뷰 행이 없습니다.</p>
       ) : (
         <ul className="divide-y divide-line/70">
-          {artifact.items.map((r) => {
+          {artifact.items.slice(0, head.shown).map((r) => {
             const expanded = open === r.reviewId;
             const selected = selectedId === r.reviewId;
             const text = r.preview ? previewText(r.preview) : "별점만";
@@ -92,6 +94,7 @@ export function ReviewListArtifact({ artifact, stepped = [], headline }: { artif
           })}
         </ul>
       )}
+      <MoreRows hidden={head.hidden} noun="리뷰" onExpand={head.expand} />
       {freshness.length > 0 ? (
         <ul className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line/70 px-4 py-2 text-sm text-muted" aria-label="채널별 확인 기준">
           {freshness.map((f) => {
