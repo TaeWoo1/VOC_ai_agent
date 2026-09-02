@@ -202,10 +202,21 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
     // What the scan actually saw, in numbers: how many review rows were on the page at all, how many
     // carried the backend's review-id fingerprint, and how many of those survived the rating check. A run
     // that ends here can now say WHICH of those three was zero.
+    // When `fingerprintHits` is 0 there are two very different reasons and the run has to be able to tell
+    // them apart: the target is not among the rows CURRENTLY on screen (a range question), or the rows carry
+    // no channel ids at all (a DOM question). `rowsWithAnyId` separates them, and the recency spread says
+    // which slice of the seller's history is being shown. Buckets and counts only — no dates, no ids, no text.
+    const buckets: Record<string, number> = {};
+    for (const c of parsed.candidates) {
+      const b = c.secondary?.recencyBucket ?? "UNKNOWN";
+      buckets[b] = (buckets[b] ?? 0) + 1;
+    }
     this.diag("aw_naver_reply_ladder", {
       rowsOnPage: parsed.candidates.length,
+      rowsWithAnyId: parsed.candidates.filter((c) => c.idFingerprints.length > 0).length,
       fingerprintHits: hits.length,
       ratingConsistent: consistent.length,
+      recencySpread: Object.entries(buckets).map(([k, v]) => `${k}:${v}`).join(","),
       rowsTruncated: parsed.rowsTruncated,
       tokensTruncated: parsed.tokensTruncated,
     });
