@@ -37,6 +37,8 @@ import {
   IN_PAGE_SCOPED_COMPOSER_SIGNALS,
   IN_PAGE_SCOPED_TEARDOWN,
   IN_PAGE_TAG_OPEN_CONTROL,
+  inPageTagDetailControl,
+  inPageVerifyDetailScope,
 } from "./reply-row-composer-inpage";
 
 export type LadderReplyPage = ReplyPageLike & ComposerFillPageLike & ComposerOpenPageLike;
@@ -94,6 +96,8 @@ const SURFACE_RELAND_INTERVAL_MS = 6_000;
  * finished list held twenty-two. Reading a growing list is reading the wrong page slowly.
  */
 const SURFACE_STABLE_POLLS = 3;
+/** Time the detail panel is given to render before its identity is checked. */
+const DETAIL_SETTLE_MS = 1_200;
 /**
  * How many screens of the review list one locate may sweep before giving up.
  *
@@ -316,9 +320,49 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
   }
 
   /** The Agent's own press on the row's NON-SUBMIT open control. Ambiguity ⇒ the seller is asked instead. */
+  /**
+   * Make this review's composer exist, then prove the panel it is in belongs to this review.
+   *
+   * <b>Two shapes, and the second is NAVER's</b> (observed live 2026-09-03). Where a row carries its own
+   * 답글 control, that control is pressed and the composer appears inside the row, as before. The NAVER review
+   * grid has no such control and no composer in the row at all: the review-body cell is a link that opens a
+   * MODAL, and the reply box lives there. So the fallback presses the one control whose own id fingerprints to
+   * this review, and then re-establishes identity on the other side of the click — the panel's text must
+   * fingerprint to the same `review-body-fingerprint/v1` the submission target carries. Only then does it
+   * become the scope everything downstream fills into.
+   *
+   * The click stays where it always was ({@code reply-composer-open.ts}, the one file allowed one press), and
+   * submit wording still disqualifies a control before its identity is even considered.
+   */
   async openComposer(): Promise<ComposerOpenResult> {
     if (this.matchedRowIndex === null) return { opened: false, reason: "NOT_FOUND" };
     const tagged = await this.page.evaluate<number>(IN_PAGE_TAG_OPEN_CONTROL);
+    if (tagged === 0 && this.reviewIdFingerprint) {
+      // No worded control in this row. Try the exact-identity route: the control that names THIS review.
+      const detailControls = await this.page.evaluate<number>(inPageTagDetailControl(this.reviewIdFingerprint));
+      this.diag("aw_naver_reply_detail_control", { candidates: detailControls });
+      if (detailControls === 1) {
+        const opened = await openComposer(this.page);
+        if (!opened.opened) {
+          this.diag("aw_naver_reply_open_composer", { via: "detail", opened: false, reason: opened.reason ?? null });
+          return opened;
+        }
+        // The click landed somewhere; nothing may be typed until the panel says which review it is showing.
+        await new Promise<void>((resolve) => setTimeout(resolve, DETAIL_SETTLE_MS));
+        const scope = await this.page.evaluate<{ candidates: number; matched: number; nested?: number }>(
+          inPageVerifyDetailScope(this.hint.bodyFingerprint),
+        );
+        this.diag("aw_naver_reply_detail_scope", {
+          candidates: scope.candidates, matched: scope.matched, nested: scope.nested ?? 0,
+        });
+        if (scope.matched !== 1) {
+          return { opened: false, reason: scope.candidates > 1 ? "AMBIGUOUS" : "NOT_FOUND" };
+        }
+        this.diag("aw_naver_reply_open_composer", { via: "detail", opened: true });
+        return { opened: true };
+      }
+      if (detailControls > 1) return { opened: false, reason: "AMBIGUOUS" };
+    }
     if (tagged === 0) {
       // Nothing to press: either the composer is already showing in this row's scope or no open word exists.
       const signals = await this.page.evaluate<{ composerCandidateCount: number }>(IN_PAGE_SCOPED_COMPOSER_SIGNALS);
