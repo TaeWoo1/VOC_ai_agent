@@ -40,9 +40,12 @@ public class KnowledgeSemanticSearch {
     static final int MAX_SENTENCES = 64;
 
     private final KnowledgeEmbeddingService embeddings;
+    private final KnowledgeQuestionIntent intent;
 
-    public KnowledgeSemanticSearch(KnowledgeEmbeddingService embeddings) {
+    public KnowledgeSemanticSearch(KnowledgeEmbeddingService embeddings,
+                                   KnowledgeQuestionIntent intent) {
         this.embeddings = embeddings;
+        this.intent = intent;
     }
 
     /**
@@ -53,7 +56,7 @@ public class KnowledgeSemanticSearch {
      * forget once.
      */
     public static KnowledgeSemanticSearch disabled() {
-        return new KnowledgeSemanticSearch(null);
+        return new KnowledgeSemanticSearch(null, KnowledgeQuestionIntent.disabled());
     }
 
     public boolean enabledFor(UUID orgId) {
@@ -70,6 +73,22 @@ public class KnowledgeSemanticSearch {
      */
     public <T> KnowledgeSemantics forQuestion(UUID orgId, String question,
                                               List<KnowledgeRetriever.Candidate<T>> candidates) {
+        return forQuestion(orgId, question, candidates, false);
+    }
+
+    /**
+     * @param customerWritten whether a customer wrote the question — see
+     *                        {@code RetrievalQuery#customerWritten()}. When true and the
+     *                        retrieval-intent capability is on for this organisation, the question is
+     *                        ALSO embedded as a restatement of what it needs answered, and a passage
+     *                        is scored by whichever of the two phrasings comes closer.
+     *                        <b>Two phrasings of one question, not two questions</b>: the corpus, the
+     *                        gates and the thresholds are untouched, and with the capability off the
+     *                        second vector does not exist.
+     */
+    public <T> KnowledgeSemantics forQuestion(UUID orgId, String question,
+                                              List<KnowledgeRetriever.Candidate<T>> candidates,
+                                              boolean customerWritten) {
         if (candidates.isEmpty() || question == null || question.isBlank() || !enabledFor(orgId)) {
             return null;
         }
@@ -97,11 +116,25 @@ public class KnowledgeSemanticSearch {
         if (asked == null) {
             return null;
         }
+        // The customer's own sentence is always one of the phrasings. The restatement is added when
+        // there is one; a vendor that refused, a capability that is off and a sentence that asks for
+        // nothing all arrive here as null and all mean the same thing: search what they wrote.
+        List<float[]> phrasings = new ArrayList<>(2);
+        phrasings.add(asked);
+        if (customerWritten) {
+            String restated = intent == null ? null : intent.intentOf(orgId, question);
+            float[] alternate = restated == null ? null : embeddings.questionVector(orgId, restated);
+            if (alternate != null) {
+                phrasings.add(alternate);
+            }
+        }
         Map<String, Double> best = new HashMap<>();
         sentencesOf.forEach((quotable, sentences) -> {
             double top = -1;
             for (String sentence : sentences) {
-                top = Math.max(top, Vectors.cosine(asked, vectors.get(sentence)));
+                for (float[] phrasing : phrasings) {
+                    top = Math.max(top, Vectors.cosine(phrasing, vectors.get(sentence)));
+                }
             }
             best.put(quotable, top);
         });

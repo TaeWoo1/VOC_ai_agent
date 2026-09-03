@@ -5,6 +5,7 @@ import com.sellerops.knowledge.KnowledgeRetriever;
 import com.sellerops.knowledge.KnowledgeTopic;
 import com.sellerops.knowledge.KnowledgeSemantics;
 import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.semantic.KnowledgeEvidenceEligibility;
 import com.sellerops.knowledge.semantic.KnowledgeSemanticSearch;
 import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.knowledge.KnowledgeText;
@@ -52,19 +53,23 @@ public class SellerOperationsKnowledgeService {
     private final OrgKnowledgeSourceRepository sources;
     private final OrgKnowledgeChunkRepository chunks;
     private final KnowledgeSemanticSearch semanticSearch;
+    private final KnowledgeEvidenceEligibility eligibility;
 
     public SellerOperationsKnowledgeService(OrgKnowledgeSourceRepository sources,
                                             OrgKnowledgeChunkRepository chunks) {
-        this(sources, chunks, KnowledgeSemanticSearch.disabled());
+        this(sources, chunks, KnowledgeSemanticSearch.disabled(),
+                KnowledgeEvidenceEligibility.disabled());
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public SellerOperationsKnowledgeService(OrgKnowledgeSourceRepository sources,
                                             OrgKnowledgeChunkRepository chunks,
-                                            KnowledgeSemanticSearch semanticSearch) {
+                                            KnowledgeSemanticSearch semanticSearch,
+                                            KnowledgeEvidenceEligibility eligibility) {
         this.sources = sources;
         this.chunks = chunks;
         this.semanticSearch = semanticSearch;
+        this.eligibility = eligibility;
     }
 
     @Transactional(readOnly = true)
@@ -163,7 +168,8 @@ public class SellerOperationsKnowledgeService {
         int tried = 0;
         String matchedBy = question.full();
         // Same list, same filters: only rules this org owns and has not retired are ever seen.
-        KnowledgeSemantics semantics = semanticSearch.forQuestion(orgId, question.full(), candidates);
+        KnowledgeSemantics semantics = semanticSearch.forQuestion(orgId, question.full(), candidates,
+                question.customerWritten());
         for (RetrievalQuery.Candidate candidate : semantics != null
                 ? List.of(new RetrievalQuery.Candidate(question.full(), RetrievalQuery.Origin.FULL))
                 : question.candidates()) {
@@ -190,6 +196,11 @@ public class SellerOperationsKnowledgeService {
                 matchedBy = candidate.text();
                 break;
             }
+        }
+        // Same refusal-only judgement the product lane applies, on this lane's own passages.
+        if (semantics != null) {
+            hits = new ArrayList<>(eligibility.filter(orgId, question.full(), hits,
+                    p -> p.title() + "\n" + p.content()));
         }
         RetrievalOutcome outcome = documents.isEmpty() ? RetrievalOutcome.ABSENT
                 : !hits.isEmpty() ? RetrievalOutcome.FOUND

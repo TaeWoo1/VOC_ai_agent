@@ -269,6 +269,38 @@ sellerops:
       model: ${SELLEROPS_KNOWLEDGE_EMBEDDING_MODEL:text-embedding-3-large}
       api-key: ${SELLEROPS_KNOWLEDGE_EMBEDDING_API_KEY:}
       dimensions: ${SELLEROPS_KNOWLEDGE_EMBEDDING_DIMENSIONS:1024}
+    # ── Retrieval intent (Knowledge Retrieval Quality v2, 2026-09-03) ──────────────────────────
+    #
+    # THE EIGHTH capability. It restates ONE customer sentence as what information that sentence
+    # needs, before the sentence is embedded — so 「자꾸 붕 뜨는데요」 and the seller's 「접착면이 들뜰
+    # 수 있습니다」 can meet. Measured on the v2 benchmark (114 questions, 4 domains): recall 79.6%
+    # → 93.5%, and no-evidence precision went UP as well. Its payload is one customer sentence and
+    # nothing else — no passage, no product, no identifier — and its output is embedded, never
+    # stored and never quoted. Only questions a CUSTOMER wrote pay for it: a seller typing into
+    # their own library already uses their own words.
+    intent:
+      enabled: ${SELLEROPS_KNOWLEDGE_INTENT_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_KNOWLEDGE_INTENT_ORG_IDS:}
+      model: ${SELLEROPS_KNOWLEDGE_INTENT_MODEL:gpt-5-2025-08-07}
+      api-key: ${SELLEROPS_KNOWLEDGE_INTENT_API_KEY:}
+      max-output-tokens: ${SELLEROPS_KNOWLEDGE_INTENT_MAX_OUTPUT_TOKENS:400}
+      reasoning-effort: ${SELLEROPS_KNOWLEDGE_INTENT_REASONING_EFFORT:minimal}
+    # ── Evidence eligibility (Knowledge Retrieval Quality v2, 2026-09-03) ──────────────────────
+    #
+    # THE NINTH capability, and a REFUSAL-ONLY gate: after ranking, it asks whether each passage
+    # that would have been quoted actually holds a fact for this question, and can only remove one.
+    # 「물에 닿아도 되나요?」 and 「부착 전 유분을 제거하세요」 are genuinely close and one does not
+    # answer the other; no threshold separates them. Measured: wrong-source 2.2% → 0% and
+    # no-evidence precision 85.7% → 100%. Its payload is wider than either neighbour's — the
+    # customer's sentence AND the seller's passages in one request — which is why it is its own flag
+    # and its own key. Bounded to six passages per search; searches that found nothing pay nothing.
+    eligibility:
+      enabled: ${SELLEROPS_KNOWLEDGE_ELIGIBILITY_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_KNOWLEDGE_ELIGIBILITY_ORG_IDS:}
+      model: ${SELLEROPS_KNOWLEDGE_ELIGIBILITY_MODEL:gpt-5-2025-08-07}
+      api-key: ${SELLEROPS_KNOWLEDGE_ELIGIBILITY_API_KEY:}
+      max-output-tokens: ${SELLEROPS_KNOWLEDGE_ELIGIBILITY_MAX_OUTPUT_TOKENS:600}
+      reasoning-effort: ${SELLEROPS_KNOWLEDGE_ELIGIBILITY_REASONING_EFFORT:minimal}
   customermemory:
     retriever:
       # Retrieval strategy behind the CustomerMemoryRetriever port. `lexical` is the only implementation:

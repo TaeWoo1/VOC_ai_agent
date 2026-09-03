@@ -58,7 +58,18 @@ class AgentDraftBoundaryTest {
             // narrowest of them all — a model name, a dimension count and texts — but it is the only
             // one that sends something on every SEARCH, so it gets the same one door.
             new String[] {"KnowledgeEmbeddingGenerator", "KnowledgeEmbeddingService.java",
-                    "KnowledgeEmbeddingGenerator.java"});
+                    "KnowledgeEmbeddingGenerator.java"},
+            // The seventh (Knowledge Retrieval Quality v2, 2026-09-03): ONE customer sentence leaves
+            // and comes back restated as what it needs answered. Narrower than the sixth — no passage,
+            // no identifier — and still its own door, because the day it shares one it shares a flag.
+            new String[] {"KnowledgeQuestionIntentGenerator", "KnowledgeQuestionIntent.java",
+                    "KnowledgeQuestionIntentGenerator.java"},
+            // The eighth, and the widest payload of the three retrieval capabilities: the customer's
+            // sentence AND the seller's candidate passages in ONE request. It can only refuse a
+            // passage the scorer already admitted, which is a property of the caller — the door is
+            // here so the org gate cannot be walked around.
+            new String[] {"KnowledgeEligibilityGenerator", "KnowledgeEvidenceEligibility.java",
+                    "KnowledgeEligibilityGenerator.java"});
 
     /**
      * The classes allowed to name {@code AgentLlmTransport} beside a {@code .post(} call: the three
@@ -68,7 +79,8 @@ class AgentDraftBoundaryTest {
     private static final List<String> TRANSPORT_HOLDERS = List.of(
             "AgentDraftGenerator.java", "AgentPlanGenerator.java", "AgentJudgeGenerator.java",
             "InquirySignalGenerator.java", "ImageFactExtractionGenerator.java",
-            "KnowledgeEmbeddingGenerator.java",
+            "KnowledgeEmbeddingGenerator.java", "KnowledgeQuestionIntentGenerator.java",
+            "KnowledgeEligibilityGenerator.java",
             "JdkAgentLlmTransport.java", "AgentLlmConfiguration.java");
 
     @Test
@@ -120,7 +132,14 @@ class AgentDraftBoundaryTest {
                 new String[] {"sellerops.agent.judge.", "AgentJudgeProperties.java"},
                 new String[] {"sellerops.triage.ai-pilot", "AiTriagePilotProperties.java"},
                 new String[] {"sellerops.inquiry.signature.", "InquirySignalProperties.java"},
-                new String[] {"sellerops.product.image-knowledge.", "ImageKnowledgeProperties.java"});
+                new String[] {"sellerops.product.image-knowledge.", "ImageKnowledgeProperties.java"},
+                // The three retrieval capabilities. They must stay separable for a reason the others
+                // do not have: a deployment may want the cheap one (embedding) without paying two
+                // more vendor round trips per search, or may want the refusal-only judge without
+                // paying for restatements. One file reading two of these keys would end that.
+                new String[] {"sellerops.knowledge.embedding.", "KnowledgeEmbeddingProperties.java"},
+                new String[] {"sellerops.knowledge.intent.", "KnowledgeQuestionIntentProperties.java"},
+                new String[] {"sellerops.knowledge.eligibility.", "KnowledgeEligibilityProperties.java"});
         try (Stream<Path> walk = Files.walk(MAIN)) {
             for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
                 String name = source.getFileName().toString();

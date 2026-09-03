@@ -4,6 +4,8 @@ import com.sellerops.common.ApiException;
 import com.sellerops.knowledge.KnowledgeRetriever;
 import com.sellerops.knowledge.KnowledgeTopic;
 import com.sellerops.knowledge.KnowledgeSemantics;
+import com.sellerops.knowledge.KnowledgeEligibility;
+import com.sellerops.knowledge.semantic.KnowledgeEvidenceEligibility;
 import com.sellerops.knowledge.semantic.KnowledgeSemanticSearch;
 import com.sellerops.knowledge.RetrievalOutcome;
 import com.sellerops.knowledge.RetrievalQuery;
@@ -57,12 +59,14 @@ public class ProductKnowledgeLibraryService {
     private final ProductVariantRepository variants;
     private final ProductKnowledgeIndexer indexer;
     private final KnowledgeSemanticSearch semanticSearch;
+    private final KnowledgeEvidenceEligibility eligibility;
 
     public ProductKnowledgeLibraryService(ProductRepository products,
                                           ProductKnowledgeSourceRepository sources,
                                           ProductKnowledgeChunkRepository chunks,
                                           ProductVariantRepository variants) {
-        this(products, sources, chunks, variants, KnowledgeSemanticSearch.disabled());
+        this(products, sources, chunks, variants, KnowledgeSemanticSearch.disabled(),
+                KnowledgeEvidenceEligibility.disabled());
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -70,13 +74,15 @@ public class ProductKnowledgeLibraryService {
                                           ProductKnowledgeSourceRepository sources,
                                           ProductKnowledgeChunkRepository chunks,
                                           ProductVariantRepository variants,
-                                          KnowledgeSemanticSearch semanticSearch) {
+                                          KnowledgeSemanticSearch semanticSearch,
+                                          KnowledgeEvidenceEligibility eligibility) {
         this.products = products;
         this.sources = sources;
         this.chunks = chunks;
         this.variants = variants;
         this.indexer = new ProductKnowledgeIndexer(chunks);
         this.semanticSearch = semanticSearch;
+        this.eligibility = eligibility;
     }
 
     @Transactional(readOnly = true)
@@ -208,7 +214,8 @@ public class ProductKnowledgeLibraryService {
         // whether the seller retired the document — so nothing it can find is anything the lexical
         // lane could not also have been offered. Null means it could not see the whole corpus, and
         // then everything below is byte-for-byte what it was before this package.
-        KnowledgeSemantics semantics = semanticSearch.forQuestion(orgId, question.full(), candidates);
+        KnowledgeSemantics semantics = semanticSearch.forQuestion(orgId, question.full(), candidates,
+                question.customerWritten());
         List<RetrievalQuery.Candidate> forms = semantics != null
                 ? List.of(new RetrievalQuery.Candidate(question.full(), RetrievalQuery.Origin.FULL))
                 : question.candidates();
@@ -239,6 +246,14 @@ public class ProductKnowledgeLibraryService {
                 matchedBy = candidate.text();
                 break;
             }
+        }
+        // Refusal-only, after ranking, on the passages that would have been quoted: similarity says
+        // a passage is about the question's subject, and cannot say it holds the fact the answer
+        // needs. Nothing it does can add a passage, and when every one is refused the outcome is
+        // NO_RELEVANT_EVIDENCE — 「관련된 내용은 있지만 이 질문에 답하지 않습니다」, which is what happened.
+        if (semantics != null) {
+            hits = new ArrayList<>(eligibility.filter(orgId, question.full(), hits,
+                    p -> p.title() + "\n" + p.content()));
         }
         RetrievalOutcome outcome = documents.isEmpty() ? RetrievalOutcome.ABSENT
                 : !hits.isEmpty() ? RetrievalOutcome.FOUND

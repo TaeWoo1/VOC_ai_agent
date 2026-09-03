@@ -724,6 +724,38 @@ Need는 retrieval과 분리해 감사**했다 — 기준(「이 리뷰에 답하
 실패 0 · **마켓플레이스 호출 0 · WRITE 0 · 승인 0 · 실행 0 · 마이그레이션 1** ⇒ evidence 행 없음.
 **계약이 바뀌어 테스트 2건을 다시 썼다**)
 
+**`docs/knowledge_retrieval_quality_v2.md`** (Knowledge Retrieval Quality v2 — 2026-09-03. v1이 방향을
+증명했으니 v2는 **그 숫자가 정직한지 먼저** 확인했다: 46개 벤치마크는 v1의 임계값을 고르는 데 쓰인 집합이라
+**114개 · 7 라이브러리**(원두·가죽·**값이 반대인 다른 회사 정책**·**문서 18개 종합몰**)로 넓히고 범주 셋을
+더하자(**L 오타** 두깨·몆일·싸이즈 · **M 한두 낱말** 보관?·소음 · **N 질문하지 않는 불만**) v1의
+**86.1%가 79.6%로 읽혔다**. arm은 각각 독립 측정: **B passage 요약 +1.0pp(소음)** · **C1 query intent만
+90.3%/부재 90.5%** · **C2 원문+intent 93.5%** · **D synthetic question 색인은 해롭다**(74.2%, 부재 71.4% —
+생성된 질문이 이웃 질문과도 가까워 corpus 바닥을 올리고 LOO margin을 무너뜨린다; v1의 hybrid 기각과 같은
+모양) · **E eligibility는 recall을 사지 못하고 wrong-source와 false evidence를 전부 지운다**(0%/100%). 채택은
+**F5 = 원문+intent + 랭킹 후 거절 전용 judge → 92.5 / top1-wrong 0 / any-wrong 0 / no-evidence 100**;
+**C2 단독은 기각**했다(any-wrong 2.2 · 부재 85.7 — v1이 세운 「wrong-source 0」 보증을 못 지키고, 안전 테스트를
+약화시켜 얻는 recall은 교환 조건이 아니다). 부재 게이트의 cluster-aware 변형도 만들어 재고 **기각**(control은
++3.2pp지만 부재 76.2→71.4 · any-wrong 1.1→3.2, 채택 조합에서는 전면 후퇴). 새 capability **둘**, 둘 다 **기본값
+OFF** — 8번째 `knowledge.intent`(고객 문장 **하나만** 나가고 「무엇을 알아야 답하는가」로 되쓴다; 판매자가 친
+질문은 사지 않는다 — 자기 어휘를 쓰고 있으므로) · 9번째 `knowledge.eligibility`(**고객 문장 + 판매자 문단이 한
+요청**에 담기는 셋 중 가장 넓은 payload라 자기 flag·자기 key; `KnowledgeTopic`과 **같은 거절 전용 모양**이고
+문단 6개 상한, 못 찾은 검색은 0원). **채택한 조합은 생성물을 하나도 저장하지 않는다** — intent는 고객 문장의
+파생 사본이라 표도 컬럼도 만들지 않고 세 lane이 도는 5분만 메모리에 남으며(구조 테스트가 `Repository`·
+`@Entity`·`save(` 부재와 그것을 아는 파일이 셋뿐임을 고정), judge의 출력은 boolean 하나다; **저장될 뻔한 유일한
+생성물이 synthetic question이었고 측정이 그것을 기각했다** ⇒ Grounded Draft의 근거와 판매자 인용은 언제나 원본
+source이고 그것을 지키려고 새로 만든 장치는 0. 지식 획득 경로 6종은 감사만 하고 **변경 0**(문서 업로드는 여전히
+chunk 승인이 아니라 종류·범위·현행 여부만 묻고, 과거 답변은 자동 Canonical이 아니다). **라이브 before/after**
+(일회용 org · 승인 0 · 실행 0): v1이 「여전히 실패한다」고 적어 둔 **「잘떨어지네요 자꾸 들떠요」가 판매자 자신의
+부착 안내를 인용**하게 됐고, **「한 번 썼는데 눌어붙었어요」가 반품 정책을 근거로 들던 틀린 인용이 사라졌다**;
+capability를 분리해 한 번 더 돌리자 벤치마크의 이야기가 그대로 재현됐다 — **intent는 recall과 wrong-source를
+함께 올리고 judge가 틀린 쪽만 걷어낸다**(둘은 짝이지 선택지가 아니다). 실측 지연: 검색만 하는 turn
+**0.37s → 1.9~2.8s**, 초안 turn 5.7~13.4s → 10.3~25.6s; 벡터 39행/156KB. **Graph/ontology는 아직 필요하지 않다** —
+114+7건의 실패 원인에 관계형 multi-hop이 **0건**이고 재검토 조건만 적어 둔다. 남은 결정: 세 capability 모두
+**판매자 일일 AI 예산 밖**(v1의 결정이 이제 셋이고 둘은 검색당 LLM 왕복) · 지연 수용 여부 · 벤더로 나가는 폭 ·
+모델 · 파일럿 org 지정. backend **3,749 tests · 실패 0**, 벤치마크는 CI에서 벤더를 부르지 않는다(기각된 arm의
+캐시는 넣지 않았다 — 기각한다는 것이 그 뜻이다). 회귀 기준 상향: recall ≥ 0.90 · any-wrong 0 · 부재 정확도 1.0 ·
+lexical 대비 +0.45. **마켓플레이스 호출 0 · WRITE 0 · 승인 0 · 마이그레이션 0** ⇒ evidence 행 없음)
+
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은
 `deploy/pilot/`: compose overlay(`ports: !reset []`로 raw port 공개 0, `restart: unless-stopped`, JVM heap 고정, Cafe24

@@ -24,49 +24,15 @@ public interface RetrievalVariant {
     /**
      * <b>The production path, exactly as a lane runs it.</b>
      *
-     * <p>Not a re-implementation: the same {@link KnowledgeRetriever#rank(String, java.util.List,
-     * String, com.sellerops.knowledge.KnowledgeSemantics)} with the same thresholds, the same
-     * {@link KnowledgeText#sentences} split, the same {@link KnowledgeTopic} refusals and the same
-     * cap. What the fixture supplies is the one thing a test may not buy from a vendor — the vectors,
-     * cached and checked in. Change a threshold in production and this table moves.
+     * <p>Defined in one place ({@link RetrievalArm#shipped()}) so the sweep's control arm and the
+     * regression guard cannot drift apart: the same ranker, the same thresholds, the same topic
+     * refusals, the same cap, plus the two things Knowledge Retrieval Quality v2 added — the
+     * customer's sentence restated before it is embedded, and the refusal-only evidence judgement
+     * after ranking. What the fixture supplies is the one thing a test may not buy from a vendor: the
+     * vectors and the two model outputs, cached and checked in.
      */
     static RetrievalVariant production() {
-        return new RetrievalVariant() {
-            @Override
-            public String name() {
-                return "SEMANTIC (shipped)";
-            }
-
-            @Override
-            public List<Passage> retrieve(Corpus corpus, Query query) {
-                List<KnowledgeRetriever.Candidate<Passage>> candidates = corpus.passages().stream()
-                        .map(p -> new KnowledgeRetriever.Candidate<>(p, p.searchable(),
-                                p.title() + "\n" + p.content())).toList();
-                BenchmarkVectors vectors = BenchmarkVectors.shipped();
-                float[] asked = vectors.of(query.text());
-                com.sellerops.knowledge.KnowledgeSemantics semantics = quotable -> {
-                    double best = -1;
-                    for (String sentence : KnowledgeText.comparableUnits(quotable)) {
-                        best = Math.max(best, BenchmarkVectors.cosine(asked, vectors.of(sentence)));
-                    }
-                    return java.util.OptionalDouble.of(best);
-                };
-                Set<KnowledgeTopic> topics = KnowledgeTopic.of(query.text());
-                List<Passage> found = new ArrayList<>();
-                for (KnowledgeRetriever.Hit<Passage> hit
-                        : KnowledgeRetriever.rank(query.text(), candidates, corpus.subject(), semantics)) {
-                    if (!KnowledgeTopic.applicable(topics, KnowledgeTopic.of(hit.ref().title()))
-                            || !KnowledgeTopic.remedyApplicable(query.text(), hit.ref().title())) {
-                        continue;
-                    }
-                    found.add(hit.ref());
-                    if (found.size() >= MAX_PASSAGES) {
-                        break;
-                    }
-                }
-                return found;
-            }
-        };
+        return RetrievalArm.shipped();
     }
 
     /**

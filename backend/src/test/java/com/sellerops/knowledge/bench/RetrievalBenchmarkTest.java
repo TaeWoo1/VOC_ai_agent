@@ -26,7 +26,9 @@ class RetrievalBenchmarkTest {
     void measure() {
         Map<String, Corpus> corpora = BenchmarkFixture.corpora();
         List<Query> queries = BenchmarkFixture.queries();
-        assertThat(queries).hasSizeGreaterThan(30);
+        // v2 widened this from 46 to 114 across seven libraries. The size is pinned because the v1
+        // numbers were measured on the set that helped choose them, and read 6 points high.
+        assertThat(queries).hasSizeGreaterThanOrEqualTo(110);
         List<String> report = new ArrayList<>();
         for (RetrievalVariant variant : variants()) {
             BenchmarkScore score = BenchmarkScore.of(variant, corpora, queries);
@@ -36,6 +38,15 @@ class RetrievalBenchmarkTest {
             report.add("");
         }
         report.forEach(System.out::println);
+        // Written BEFORE the assertions: the table is what a person reads to find out WHY a threshold
+        // moved, and a failing assertion is exactly when it is wanted.
+        try {
+            Path out = Path.of(System.getProperty("bench.out", "build/retrieval-benchmark.txt"));
+            Files.createDirectories(out.getParent());
+            Files.write(out, report);
+        } catch (Exception ignored) {
+            // The table is a convenience; a missing build dir is not a test failure.
+        }
         BenchmarkScore lexical = BenchmarkScore.of(RetrievalVariant.lexicalBaseline(), corpora, queries);
         // The lexical baseline is pinned too: if it silently improves, the comparison this package
         // rests on has moved and the document that quotes these numbers is stale.
@@ -44,24 +55,17 @@ class RetrievalBenchmarkTest {
             BenchmarkScore shipped = BenchmarkScore.of(RetrievalVariant.production(), corpora, queries);
             assertThat(shipped.recall())
                     .as("the questions a seller's own knowledge can answer, answered")
-                    .isGreaterThanOrEqualTo(0.80);
+                    .isGreaterThanOrEqualTo(0.90);
             assertThat(shipped.anyWrongRate())
                     .as("a passage from a document that does not answer the question is the dangerous "
                             + "failure: it gives the customer a confident wrong number")
                     .isZero();
             assertThat(shipped.noEvidencePrecision())
                     .as("a compliment must not be answered with a citation")
-                    .isGreaterThanOrEqualTo(0.85);
+                    .isEqualTo(1.0);
             assertThat(shipped.recall() - lexical.recall())
                     .as("the whole reason this package exists")
-                    .isGreaterThan(0.30);
-        }
-        try {
-            Path out = Path.of(System.getProperty("bench.out", "build/retrieval-benchmark.txt"));
-            Files.createDirectories(out.getParent());
-            Files.write(out, report);
-        } catch (Exception ignored) {
-            // The table is the deliverable; a missing build dir is not a test failure.
+                    .isGreaterThan(0.45);
         }
     }
 

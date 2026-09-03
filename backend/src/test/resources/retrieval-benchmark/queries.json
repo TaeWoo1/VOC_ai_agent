@@ -1,56 +1,986 @@
 [
-{"id":"A1","cat":"A","corpus":"molding","text":"두께","expect":["mold-spec"]},
-{"id":"A2","cat":"A","corpus":"mat","text":"세척 방법","expect":["mat-clean"]},
-{"id":"A3","cat":"A","corpus":"fan","text":"충전","expect":["fan-battery"]},
-{"id":"A4","cat":"A","corpus":"org","text":"반품 배송비","expect":["org-return"]},
-{"id":"A5","cat":"A","corpus":"molding","text":"부착 방법","expect":["mold-attach"]},
-
-{"id":"B1","cat":"B","corpus":"molding","text":"두께가 생각보다 얇아 아쉬웠습니다","expect":["mold-spec"]},
-{"id":"B2","cat":"B","corpus":"molding","text":"몰딩 두께가 얼마나 되나요?","expect":["mold-spec"]},
-{"id":"B3","cat":"B","corpus":"mat","text":"식기세척기에 넣어도 괜찮을까요?","expect":["mat-clean"]},
-{"id":"B4","cat":"B","corpus":"fan","text":"충전하는 데 얼마나 걸리나요?","expect":["fan-battery"]},
-{"id":"B5","cat":"B","corpus":"org","text":"배송이 너무 느려서 실망했습니다","expect":["org-ship"]},
-{"id":"B6","cat":"B","corpus":"fan","text":"소리가 생각보다 커서 아쉽네요","expect":["fan-noise"]},
-
-{"id":"C1","cat":"C","corpus":"molding","text":"잘떨어지네요","expect":["mold-attach"]},
-{"id":"C2","cat":"C","corpus":"molding","text":"자꾸 떨어져요","expect":["mold-attach"]},
-{"id":"C3","cat":"C","corpus":"mat","text":"세척방법 알려주세요","expect":["mat-clean"]},
-{"id":"C4","cat":"C","corpus":"org","text":"언제출고되나요","expect":["org-ship"]},
-{"id":"C5","cat":"C","corpus":"fan","text":"충전시간이 궁금합니다","expect":["fan-battery"]},
-
-{"id":"D1","cat":"D","corpus":"molding","text":"자꾸 들떠요","expect":["mold-attach"]},
-{"id":"D2","cat":"D","corpus":"mat","text":"설거지할 때 같이 돌려도 되나요?","expect":["mat-clean"]},
-{"id":"D3","cat":"D","corpus":"fan","text":"배터리 얼마나 가요?","expect":["fan-battery"]},
-{"id":"D4","cat":"D","corpus":"molding","text":"벽에서 계속 떨어집니다","expect":["mold-attach"]},
-{"id":"D5","cat":"D","corpus":"mat","text":"뜨거운 냄비 올려도 되나요?","expect":["mat-heat"]},
-
-{"id":"E1","cat":"E","corpus":"org","text":"반품하고 싶은데 배송비는요?","expect":["org-return"]},
-{"id":"E2","cat":"E","corpus":"org","text":"환불은 언제 되나요?","expect":["org-return"]},
-{"id":"E3","cat":"E","corpus":"org","text":"색상 바꾸고 싶어요","expect":["org-exchange"]},
-{"id":"E4","cat":"E","corpus":"org","text":"세금계산서 발행 되나요?","expect":["org-receipt"]},
-
-{"id":"F1","cat":"F","corpus":"org","text":"언제쯤 받아볼 수 있을까요?","expect":["org-ship"]},
-{"id":"F2","cat":"F","corpus":"org","text":"제주도인데 며칠 걸릴까요?","expect":["org-ship"]},
-{"id":"F3","cat":"F","corpus":"org","text":"오늘 주문하면 오늘 나가나요?","expect":["org-ship"]},
-
-{"id":"G1","cat":"G","corpus":"org","text":"고장났는데 수리 되나요?","expect":["org-as"]},
-{"id":"G2","cat":"G","corpus":"molding","text":"무슨 색이 있나요?","expect":["mold-color"]},
-{"id":"G3","cat":"G","corpus":"fan","text":"얼마나 시끄러워요?","expect":["fan-noise"]},
-
-{"id":"H1","cat":"H","corpus":"molding","text":"너무 좋아요 만족합니다","expect":[]},
-{"id":"H2","cat":"H","corpus":"mat","text":"잘 쓰고 있습니다 감사합니다","expect":[]},
-{"id":"H3","cat":"H","corpus":"fan","text":"재구매 의사 있어요","expect":[]},
-{"id":"H4","cat":"H","corpus":"molding","text":"배송이 빨라서 좋았어요","expect":[]},
-{"id":"H5","cat":"H","corpus":"org","text":"포장이 예뻐요","expect":[]},
-
-{"id":"J1","cat":"J","corpus":"molding","text":"2호 내부 폭 알려주세요","expect":["mold-spec"]},
-{"id":"J2","cat":"J","corpus":"mat","text":"230도까지 견디나요?","expect":["mat-heat"]},
-{"id":"J3","cat":"J","corpus":"fan","text":"48데시벨이면 어느 정도인가요?","expect":["fan-noise"]},
-{"id":"J4","cat":"J","corpus":"molding","text":"PVC 재질인가요?","expect":["mold-color"]},
-{"id":"K1","cat":"K","corpus":"orgSingle","text":"언제쯤 받아볼 수 있을까요?","expect":["org-ship"]},
-{"id":"K2","cat":"K","corpus":"orgSingle","text":"환불 절차가 궁금합니다","expect":[]},
-{"id":"I1","cat":"I","corpus":"orgExchangeOnly","text":"환불 받고 싶어요","expect":[]},
-{"id":"I2","cat":"I","corpus":"orgExchangeOnly","text":"반품 배송비는 얼마인가요?","expect":[]},
-{"id":"I3","cat":"I","corpus":"molding","text":"방수 되나요?","expect":[]},
-{"id":"I4","cat":"I","corpus":"fan","text":"날개만 따로 교체할 수 있나요?","expect":[]}
+ {
+  "id": "A1",
+  "cat": "A",
+  "corpus": "molding",
+  "text": "두께",
+  "expect": [
+   "mold-spec"
+  ]
+ },
+ {
+  "id": "A2",
+  "cat": "A",
+  "corpus": "mat",
+  "text": "세척 방법",
+  "expect": [
+   "mat-clean"
+  ]
+ },
+ {
+  "id": "A3",
+  "cat": "A",
+  "corpus": "fan",
+  "text": "충전",
+  "expect": [
+   "fan-battery"
+  ]
+ },
+ {
+  "id": "A4",
+  "cat": "A",
+  "corpus": "org",
+  "text": "반품 배송비",
+  "expect": [
+   "org-return"
+  ]
+ },
+ {
+  "id": "A5",
+  "cat": "A",
+  "corpus": "molding",
+  "text": "부착 방법",
+  "expect": [
+   "mold-attach"
+  ]
+ },
+ {
+  "id": "B1",
+  "cat": "B",
+  "corpus": "molding",
+  "text": "두께가 생각보다 얇아 아쉬웠습니다",
+  "expect": [
+   "mold-spec"
+  ]
+ },
+ {
+  "id": "B2",
+  "cat": "B",
+  "corpus": "molding",
+  "text": "몰딩 두께가 얼마나 되나요?",
+  "expect": [
+   "mold-spec"
+  ]
+ },
+ {
+  "id": "B3",
+  "cat": "B",
+  "corpus": "mat",
+  "text": "식기세척기에 넣어도 괜찮을까요?",
+  "expect": [
+   "mat-clean"
+  ]
+ },
+ {
+  "id": "B4",
+  "cat": "B",
+  "corpus": "fan",
+  "text": "충전하는 데 얼마나 걸리나요?",
+  "expect": [
+   "fan-battery"
+  ]
+ },
+ {
+  "id": "B5",
+  "cat": "B",
+  "corpus": "org",
+  "text": "배송이 너무 느려서 실망했습니다",
+  "expect": [
+   "org-ship"
+  ]
+ },
+ {
+  "id": "B6",
+  "cat": "B",
+  "corpus": "fan",
+  "text": "소리가 생각보다 커서 아쉽네요",
+  "expect": [
+   "fan-noise"
+  ]
+ },
+ {
+  "id": "C1",
+  "cat": "C",
+  "corpus": "molding",
+  "text": "잘떨어지네요",
+  "expect": [
+   "mold-attach"
+  ]
+ },
+ {
+  "id": "C2",
+  "cat": "C",
+  "corpus": "molding",
+  "text": "자꾸 떨어져요",
+  "expect": [
+   "mold-attach"
+  ]
+ },
+ {
+  "id": "C3",
+  "cat": "C",
+  "corpus": "mat",
+  "text": "세척방법 알려주세요",
+  "expect": [
+   "mat-clean"
+  ]
+ },
+ {
+  "id": "C4",
+  "cat": "C",
+  "corpus": "org",
+  "text": "언제출고되나요",
+  "expect": [
+   "org-ship"
+  ]
+ },
+ {
+  "id": "C5",
+  "cat": "C",
+  "corpus": "fan",
+  "text": "충전시간이 궁금합니다",
+  "expect": [
+   "fan-battery"
+  ]
+ },
+ {
+  "id": "D1",
+  "cat": "D",
+  "corpus": "molding",
+  "text": "자꾸 들떠요",
+  "expect": [
+   "mold-attach"
+  ]
+ },
+ {
+  "id": "D2",
+  "cat": "D",
+  "corpus": "mat",
+  "text": "설거지할 때 같이 돌려도 되나요?",
+  "expect": [
+   "mat-clean"
+  ]
+ },
+ {
+  "id": "D3",
+  "cat": "D",
+  "corpus": "fan",
+  "text": "배터리 얼마나 가요?",
+  "expect": [
+   "fan-battery"
+  ]
+ },
+ {
+  "id": "D4",
+  "cat": "D",
+  "corpus": "molding",
+  "text": "벽에서 계속 떨어집니다",
+  "expect": [
+   "mold-attach"
+  ]
+ },
+ {
+  "id": "D5",
+  "cat": "D",
+  "corpus": "mat",
+  "text": "뜨거운 냄비 올려도 되나요?",
+  "expect": [
+   "mat-heat"
+  ]
+ },
+ {
+  "id": "E1",
+  "cat": "E",
+  "corpus": "org",
+  "text": "반품하고 싶은데 배송비는요?",
+  "expect": [
+   "org-return"
+  ]
+ },
+ {
+  "id": "E2",
+  "cat": "E",
+  "corpus": "org",
+  "text": "환불은 언제 되나요?",
+  "expect": [
+   "org-return"
+  ]
+ },
+ {
+  "id": "E3",
+  "cat": "E",
+  "corpus": "org",
+  "text": "색상 바꾸고 싶어요",
+  "expect": [
+   "org-exchange"
+  ]
+ },
+ {
+  "id": "E4",
+  "cat": "E",
+  "corpus": "org",
+  "text": "세금계산서 발행 되나요?",
+  "expect": [
+   "org-receipt"
+  ]
+ },
+ {
+  "id": "F1",
+  "cat": "F",
+  "corpus": "org",
+  "text": "언제쯤 받아볼 수 있을까요?",
+  "expect": [
+   "org-ship"
+  ]
+ },
+ {
+  "id": "F2",
+  "cat": "F",
+  "corpus": "org",
+  "text": "제주도인데 며칠 걸릴까요?",
+  "expect": [
+   "org-ship"
+  ]
+ },
+ {
+  "id": "F3",
+  "cat": "F",
+  "corpus": "org",
+  "text": "오늘 주문하면 오늘 나가나요?",
+  "expect": [
+   "org-ship"
+  ]
+ },
+ {
+  "id": "G1",
+  "cat": "G",
+  "corpus": "org",
+  "text": "고장났는데 수리 되나요?",
+  "expect": [
+   "org-as"
+  ]
+ },
+ {
+  "id": "G2",
+  "cat": "G",
+  "corpus": "molding",
+  "text": "무슨 색이 있나요?",
+  "expect": [
+   "mold-color"
+  ]
+ },
+ {
+  "id": "G3",
+  "cat": "G",
+  "corpus": "fan",
+  "text": "얼마나 시끄러워요?",
+  "expect": [
+   "fan-noise"
+  ]
+ },
+ {
+  "id": "H1",
+  "cat": "H",
+  "corpus": "molding",
+  "text": "너무 좋아요 만족합니다",
+  "expect": []
+ },
+ {
+  "id": "H2",
+  "cat": "H",
+  "corpus": "mat",
+  "text": "잘 쓰고 있습니다 감사합니다",
+  "expect": []
+ },
+ {
+  "id": "H3",
+  "cat": "H",
+  "corpus": "fan",
+  "text": "재구매 의사 있어요",
+  "expect": []
+ },
+ {
+  "id": "H4",
+  "cat": "H",
+  "corpus": "molding",
+  "text": "배송이 빨라서 좋았어요",
+  "expect": []
+ },
+ {
+  "id": "H5",
+  "cat": "H",
+  "corpus": "org",
+  "text": "포장이 예뻐요",
+  "expect": []
+ },
+ {
+  "id": "J1",
+  "cat": "J",
+  "corpus": "molding",
+  "text": "2호 내부 폭 알려주세요",
+  "expect": [
+   "mold-spec"
+  ]
+ },
+ {
+  "id": "J2",
+  "cat": "J",
+  "corpus": "mat",
+  "text": "230도까지 견디나요?",
+  "expect": [
+   "mat-heat"
+  ]
+ },
+ {
+  "id": "J3",
+  "cat": "J",
+  "corpus": "fan",
+  "text": "48데시벨이면 어느 정도인가요?",
+  "expect": [
+   "fan-noise"
+  ]
+ },
+ {
+  "id": "J4",
+  "cat": "J",
+  "corpus": "molding",
+  "text": "PVC 재질인가요?",
+  "expect": [
+   "mold-color"
+  ]
+ },
+ {
+  "id": "K1",
+  "cat": "K",
+  "corpus": "orgSingle",
+  "text": "언제쯤 받아볼 수 있을까요?",
+  "expect": [
+   "org-ship"
+  ]
+ },
+ {
+  "id": "K2",
+  "cat": "K",
+  "corpus": "orgSingle",
+  "text": "환불 절차가 궁금합니다",
+  "expect": []
+ },
+ {
+  "id": "I1",
+  "cat": "I",
+  "corpus": "orgExchangeOnly",
+  "text": "환불 받고 싶어요",
+  "expect": []
+ },
+ {
+  "id": "I2",
+  "cat": "I",
+  "corpus": "orgExchangeOnly",
+  "text": "반품 배송비는 얼마인가요?",
+  "expect": []
+ },
+ {
+  "id": "I3",
+  "cat": "I",
+  "corpus": "molding",
+  "text": "방수 되나요?",
+  "expect": []
+ },
+ {
+  "id": "I4",
+  "cat": "I",
+  "corpus": "fan",
+  "text": "날개만 따로 교체할 수 있나요?",
+  "expect": []
+ },
+ {
+  "id": "A6",
+  "cat": "A",
+  "corpus": "coffee",
+  "text": "보관 방법",
+  "expect": [
+   "cof-store"
+  ]
+ },
+ {
+  "id": "A7",
+  "cat": "A",
+  "corpus": "bag",
+  "text": "어깨끈",
+  "expect": [
+   "bag-size"
+  ]
+ },
+ {
+  "id": "A8",
+  "cat": "A",
+  "corpus": "orgB",
+  "text": "반품 배송비",
+  "expect": [
+   "b-return"
+  ]
+ },
+ {
+  "id": "B7",
+  "cat": "B",
+  "corpus": "coffee",
+  "text": "원두는 어떻게 보관하는 게 좋을까요?",
+  "expect": [
+   "cof-store"
+  ]
+ },
+ {
+  "id": "B8",
+  "cat": "B",
+  "corpus": "bag",
+  "text": "노트북도 들어가나요?",
+  "expect": [
+   "bag-size"
+  ]
+ },
+ {
+  "id": "B9",
+  "cat": "B",
+  "corpus": "coffee",
+  "text": "물 온도는 몇 도가 좋나요?",
+  "expect": [
+   "cof-brew"
+  ]
+ },
+ {
+  "id": "B10",
+  "cat": "B",
+  "corpus": "bag",
+  "text": "비를 맞았는데 어떻게 해야 하나요?",
+  "expect": [
+   "bag-care"
+  ]
+ },
+ {
+  "id": "B11",
+  "cat": "B",
+  "corpus": "orgB",
+  "text": "해외로도 보내주시나요?",
+  "expect": [
+   "b-ship"
+  ]
+ },
+ {
+  "id": "C6",
+  "cat": "C",
+  "corpus": "coffee",
+  "text": "보관방법알려주세요",
+  "expect": [
+   "cof-store"
+  ]
+ },
+ {
+  "id": "C7",
+  "cat": "C",
+  "corpus": "bag",
+  "text": "어깨끈길이조절되나요",
+  "expect": [
+   "bag-size"
+  ]
+ },
+ {
+  "id": "C8",
+  "cat": "C",
+  "corpus": "orgB",
+  "text": "무료배송기준이뭔가요",
+  "expect": [
+   "b-ship"
+  ]
+ },
+ {
+  "id": "C9",
+  "cat": "C",
+  "corpus": "molding",
+  "text": "붙였는데자꾸떨어져요",
+  "expect": [
+   "mold-attach"
+  ]
+ },
+ {
+  "id": "C10",
+  "cat": "C",
+  "corpus": "fan",
+  "text": "충전하는데얼마나걸리나요",
+  "expect": [
+   "fan-battery"
+  ]
+ },
+ {
+  "id": "D6",
+  "cat": "D",
+  "corpus": "coffee",
+  "text": "커피가 너무 써요",
+  "expect": [
+   "cof-brew"
+  ]
+ },
+ {
+  "id": "D7",
+  "cat": "D",
+  "corpus": "bag",
+  "text": "가죽이 갈라지려고 해요",
+  "expect": [
+   "bag-care"
+  ]
+ },
+ {
+  "id": "D8",
+  "cat": "D",
+  "corpus": "coffee",
+  "text": "냉장고에 넣어도 되나요?",
+  "expect": [
+   "cof-store"
+  ]
+ },
+ {
+  "id": "D9",
+  "cat": "D",
+  "corpus": "bag",
+  "text": "실밥이 터졌어요",
+  "expect": [
+   "bag-warranty"
+  ]
+ },
+ {
+  "id": "D10",
+  "cat": "D",
+  "corpus": "molding",
+  "text": "벽지에서 한쪽 끝이 뜹니다",
+  "expect": [
+   "mold-attach"
+  ]
+ },
+ {
+  "id": "D11",
+  "cat": "D",
+  "corpus": "mat",
+  "text": "전자레인지에 돌려도 되나요",
+  "expect": [
+   "mat-heat"
+  ]
+ },
+ {
+  "id": "E5",
+  "cat": "E",
+  "corpus": "orgB",
+  "text": "교환하고 싶은데요",
+  "expect": [
+   "b-noexchange"
+  ]
+ },
+ {
+  "id": "E6",
+  "cat": "E",
+  "corpus": "orgB",
+  "text": "15일 지났는데 반품 되나요?",
+  "expect": [
+   "b-return"
+  ]
+ },
+ {
+  "id": "E7",
+  "cat": "E",
+  "corpus": "org",
+  "text": "하자가 있는데 배송비는 제가 내야 하나요?",
+  "expect": [
+   "org-exchange"
+  ]
+ },
+ {
+  "id": "E8",
+  "cat": "E",
+  "corpus": "org",
+  "text": "현금영수증 신청은 어떻게 하나요?",
+  "expect": [
+   "org-receipt"
+  ]
+ },
+ {
+  "id": "F4",
+  "cat": "F",
+  "corpus": "orgB",
+  "text": "얼마 이상 사야 무료배송인가요?",
+  "expect": [
+   "b-ship"
+  ]
+ },
+ {
+  "id": "F5",
+  "cat": "F",
+  "corpus": "orgB",
+  "text": "오후 4시에 주문했는데 오늘 나가나요?",
+  "expect": [
+   "b-ship"
+  ]
+ },
+ {
+  "id": "F6",
+  "cat": "F",
+  "corpus": "org",
+  "text": "주말에 주문하면 언제 나가요?",
+  "expect": [
+   "org-ship"
+  ]
+ },
+ {
+  "id": "G4",
+  "cat": "G",
+  "corpus": "wide",
+  "text": "몰딩 두께가 어떻게 되나요?",
+  "expect": [
+   "mold-spec"
+  ]
+ },
+ {
+  "id": "G5",
+  "cat": "G",
+  "corpus": "wide",
+  "text": "원두 개봉하고 얼마나 두고 먹어도 되나요?",
+  "expect": [
+   "cof-store"
+  ]
+ },
+ {
+  "id": "G6",
+  "cat": "G",
+  "corpus": "wide",
+  "text": "반품 배송비 있나요?",
+  "expect": [
+   "org-return"
+  ]
+ },
+ {
+  "id": "G7",
+  "cat": "G",
+  "corpus": "wide",
+  "text": "가방에 13인치 노트북 들어가요?",
+  "expect": [
+   "bag-size"
+  ]
+ },
+ {
+  "id": "G8",
+  "cat": "G",
+  "corpus": "wide",
+  "text": "식기세척기 사용 가능한가요?",
+  "expect": [
+   "mat-clean"
+  ]
+ },
+ {
+  "id": "G9",
+  "cat": "G",
+  "corpus": "wide",
+  "text": "충전 시간 얼마나 걸려요?",
+  "expect": [
+   "fan-battery"
+  ]
+ },
+ {
+  "id": "G10",
+  "cat": "G",
+  "corpus": "wide",
+  "text": "커피가 너무 신맛이 나요",
+  "expect": [
+   "cof-roast"
+  ]
+ },
+ {
+  "id": "G11",
+  "cat": "G",
+  "corpus": "wide",
+  "text": "가죽에 크림 발라도 되나요?",
+  "expect": [
+   "bag-care"
+  ]
+ },
+ {
+  "id": "H6",
+  "cat": "H",
+  "corpus": "coffee",
+  "text": "향이 정말 좋아요",
+  "expect": []
+ },
+ {
+  "id": "H7",
+  "cat": "H",
+  "corpus": "bag",
+  "text": "선물했는데 아주 좋아하네요",
+  "expect": []
+ },
+ {
+  "id": "H8",
+  "cat": "H",
+  "corpus": "orgB",
+  "text": "포장이 꼼꼼해서 좋았습니다",
+  "expect": []
+ },
+ {
+  "id": "H9",
+  "cat": "H",
+  "corpus": "wide",
+  "text": "배송 빨라요 감사합니다",
+  "expect": []
+ },
+ {
+  "id": "H10",
+  "cat": "H",
+  "corpus": "bag",
+  "text": "색상이 사진이랑 똑같아요",
+  "expect": []
+ },
+ {
+  "id": "I5",
+  "cat": "I",
+  "corpus": "coffee",
+  "text": "카페인 함량이 얼마나 되나요?",
+  "expect": []
+ },
+ {
+  "id": "I6",
+  "cat": "I",
+  "corpus": "bag",
+  "text": "수선 비용은 얼마인가요?",
+  "expect": []
+ },
+ {
+  "id": "I7",
+  "cat": "I",
+  "corpus": "orgB",
+  "text": "배송 조회는 어디서 하나요?",
+  "expect": []
+ },
+ {
+  "id": "I8",
+  "cat": "I",
+  "corpus": "wide",
+  "text": "무선 이어폰도 파시나요?",
+  "expect": []
+ },
+ {
+  "id": "I9",
+  "cat": "I",
+  "corpus": "coffee",
+  "text": "디카페인도 있나요?",
+  "expect": []
+ },
+ {
+  "id": "J5",
+  "cat": "J",
+  "corpus": "bag",
+  "text": "무게가 몇 그램인가요?",
+  "expect": [
+   "bag-size"
+  ]
+ },
+ {
+  "id": "J6",
+  "cat": "J",
+  "corpus": "coffee",
+  "text": "1대 15 비율이 무슨 뜻인가요?",
+  "expect": [
+   "cof-brew"
+  ]
+ },
+ {
+  "id": "J7",
+  "cat": "J",
+  "corpus": "orgB",
+  "text": "2500원은 언제 붙나요?",
+  "expect": [
+   "b-ship"
+  ]
+ },
+ {
+  "id": "K3",
+  "cat": "K",
+  "corpus": "orgSingle",
+  "text": "제주도는 며칠 걸려요?",
+  "expect": [
+   "org-ship"
+  ]
+ },
+ {
+  "id": "K4",
+  "cat": "K",
+  "corpus": "orgSingle",
+  "text": "교환 되나요?",
+  "expect": []
+ },
+ {
+  "id": "L1",
+  "cat": "L",
+  "corpus": "molding",
+  "text": "두깨가 얼마나 되나요",
+  "expect": [
+   "mold-spec"
+  ]
+ },
+ {
+  "id": "L2",
+  "cat": "L",
+  "corpus": "org",
+  "text": "몆일 걸리나요",
+  "expect": [
+   "org-ship"
+  ]
+ },
+ {
+  "id": "L3",
+  "cat": "L",
+  "corpus": "bag",
+  "text": "싸이즈 알려주세요",
+  "expect": [
+   "bag-size"
+  ]
+ },
+ {
+  "id": "L4",
+  "cat": "L",
+  "corpus": "coffee",
+  "text": "분쇄도 어떻게 마춰요",
+  "expect": [
+   "cof-brew"
+  ]
+ },
+ {
+  "id": "L5",
+  "cat": "L",
+  "corpus": "fan",
+  "text": "베터리 얼마나 가나요",
+  "expect": [
+   "fan-battery"
+  ]
+ },
+ {
+  "id": "L6",
+  "cat": "L",
+  "corpus": "mat",
+  "text": "내열온도가 몆도인가요",
+  "expect": [
+   "mat-heat"
+  ]
+ },
+ {
+  "id": "M1",
+  "cat": "M",
+  "corpus": "coffee",
+  "text": "보관?",
+  "expect": [
+   "cof-store"
+  ]
+ },
+ {
+  "id": "M2",
+  "cat": "M",
+  "corpus": "bag",
+  "text": "사이즈",
+  "expect": [
+   "bag-size"
+  ]
+ },
+ {
+  "id": "M3",
+  "cat": "M",
+  "corpus": "fan",
+  "text": "소음",
+  "expect": [
+   "fan-noise"
+  ]
+ },
+ {
+  "id": "M4",
+  "cat": "M",
+  "corpus": "org",
+  "text": "반품비",
+  "expect": [
+   "org-return"
+  ]
+ },
+ {
+  "id": "M5",
+  "cat": "M",
+  "corpus": "mat",
+  "text": "내열",
+  "expect": [
+   "mat-heat"
+  ]
+ },
+ {
+  "id": "M6",
+  "cat": "M",
+  "corpus": "molding",
+  "text": "색상",
+  "expect": [
+   "mold-color"
+  ]
+ },
+ {
+  "id": "N1",
+  "cat": "N",
+  "corpus": "bag",
+  "text": "생각보다 무거워서 들고 다니기 힘드네요",
+  "expect": [
+   "bag-size"
+  ]
+ },
+ {
+  "id": "N2",
+  "cat": "N",
+  "corpus": "coffee",
+  "text": "집에서 내리면 카페 맛이 안 나요",
+  "expect": [
+   "cof-brew"
+  ]
+ },
+ {
+  "id": "N3",
+  "cat": "N",
+  "corpus": "molding",
+  "text": "겨울이라 그런지 잘 안 붙네요",
+  "expect": [
+   "mold-attach"
+  ]
+ },
+ {
+  "id": "N4",
+  "cat": "N",
+  "corpus": "fan",
+  "text": "책상에서 자꾸 드르륵 소리가 납니다",
+  "expect": [
+   "fan-noise"
+  ]
+ },
+ {
+  "id": "N5",
+  "cat": "N",
+  "corpus": "org",
+  "text": "주문한 지 한참 됐는데 아직 안 오네요",
+  "expect": [
+   "org-ship"
+  ]
+ },
+ {
+  "id": "N6",
+  "cat": "N",
+  "corpus": "mat",
+  "text": "한 번 썼는데 눌어붙었어요",
+  "expect": [
+   "mat-heat"
+  ]
+ },
+ {
+  "id": "N7",
+  "cat": "N",
+  "corpus": "bag",
+  "text": "몇 달 썼더니 색이 변했어요",
+  "expect": [
+   "bag-warranty"
+  ]
+ }
 ]

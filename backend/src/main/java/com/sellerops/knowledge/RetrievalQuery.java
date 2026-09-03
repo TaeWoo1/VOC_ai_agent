@@ -62,9 +62,25 @@ public final class RetrievalQuery {
     }
 
     private final List<Candidate> candidates;
+    private final boolean customerWritten;
 
-    private RetrievalQuery(List<Candidate> candidates) {
+    private RetrievalQuery(List<Candidate> candidates, boolean customerWritten) {
         this.candidates = List.copyOf(candidates);
+        this.customerWritten = customerWritten;
+    }
+
+    /**
+     * Whether a CUSTOMER wrote this question, rather than the seller or a planner.
+     *
+     * <p>Read by exactly one thing — the retrieval-intent lane (Knowledge Retrieval Quality v2),
+     * which pays a vendor call to restate a sentence in the words a document could have been written
+     * in. That is worth paying for 「자꾸 붕 뜨는데요」 and worth nothing for 「반품 조건」 typed into the
+     * seller's own search box, because the seller already writes in their own vocabulary. It changes
+     * no gate, no threshold and no candidate: a question is searched identically whoever wrote it,
+     * and this decides only whether one more phrasing of it is bought.
+     */
+    public boolean customerWritten() {
+        return customerWritten;
     }
 
     /** The candidates, in the order they are to be tried. Never empty for a non-blank question. */
@@ -113,7 +129,17 @@ public final class RetrievalQuery {
         add(out, seen, bound(cleanTitle, 120), Origin.TITLE);
         add(out, seen, subjectOf(full), Origin.SUBJECT);
         add(out, seen, full, Origin.FULL);
-        return new RetrievalQuery(out);
+        return new RetrievalQuery(out, false);
+    }
+
+    /**
+     * The candidates for a question a CUSTOMER wrote — an inquiry, a review.
+     *
+     * <p>Same candidates, same gates, same order as {@link #of}; the only difference is the answer to
+     * {@link #customerWritten()}.
+     */
+    public static RetrievalQuery ofCustomer(String title, String body) {
+        return new RetrievalQuery(of(null, title, body).candidates(), true);
     }
 
     /** The candidates for free text — a planner's need sentence, a screen's search box. */
@@ -125,7 +151,7 @@ public final class RetrievalQuery {
     public static RetrievalQuery exact(String text) {
         List<Candidate> out = new ArrayList<>();
         add(out, new LinkedHashSet<>(), clean(text), Origin.FULL);
-        return new RetrievalQuery(out);
+        return new RetrievalQuery(out, false);
     }
 
     /**

@@ -131,7 +131,7 @@ public class ReviewDraftComposer {
         // review states, it does not ask, so the only form of "what is this about" that exists is
         // what the customer wrote. The candidate ladder (TITLE/SUBJECT/FULL) narrows it the same way
         // it narrows a forwarded mail thread.
-        RetrievalQuery question = RetrievalQuery.of(null, null, redactedBody);
+        RetrievalQuery question = RetrievalQuery.ofCustomer(null, redactedBody);
         InquiryEvidenceRetriever.InquiryEvidence retrieved =
                 retriever.retrieveFor(orgId, productId, question, KnowledgeVariantScope.unresolved());
 

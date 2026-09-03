@@ -4,6 +4,7 @@ import com.sellerops.common.DataOrigin;
 import com.sellerops.knowledge.KnowledgeRetriever;
 import com.sellerops.knowledge.KnowledgeSemantics;
 import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.semantic.KnowledgeEvidenceEligibility;
 import com.sellerops.knowledge.semantic.KnowledgeSemanticSearch;
 import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.knowledge.KnowledgeText;
@@ -53,20 +54,24 @@ public class AnswerMemoryService {
     private final OrgKnowledgeChunkRepository orgChunks;
     private final ProductKnowledgeChunkRepository productChunks;
     private final KnowledgeSemanticSearch semanticSearch;
+    private final KnowledgeEvidenceEligibility eligibility;
 
     public AnswerMemoryService(AnswerMemoryRepository memories, OrgKnowledgeChunkRepository orgChunks,
                                ProductKnowledgeChunkRepository productChunks) {
-        this(memories, orgChunks, productChunks, KnowledgeSemanticSearch.disabled());
+        this(memories, orgChunks, productChunks, KnowledgeSemanticSearch.disabled(),
+                KnowledgeEvidenceEligibility.disabled());
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public AnswerMemoryService(AnswerMemoryRepository memories, OrgKnowledgeChunkRepository orgChunks,
                                ProductKnowledgeChunkRepository productChunks,
-                               KnowledgeSemanticSearch semanticSearch) {
+                               KnowledgeSemanticSearch semanticSearch,
+                               KnowledgeEvidenceEligibility eligibility) {
         this.memories = memories;
         this.orgChunks = orgChunks;
         this.productChunks = productChunks;
         this.semanticSearch = semanticSearch;
+        this.eligibility = eligibility;
     }
 
     /**
@@ -218,7 +223,8 @@ public class AnswerMemoryService {
         // different KIND of evidence: this is what the seller once said, not what is true now. One
         // physical vector cache, one retrieval loop, and the lane separation the drafter reads
         // (no reserved slot, at most one passage, never grounding a draft alone) is untouched.
-        KnowledgeSemantics semantics = semanticSearch.forQuestion(orgId, question.full(), candidates);
+        KnowledgeSemantics semantics = semanticSearch.forQuestion(orgId, question.full(), candidates,
+                question.customerWritten());
         for (RetrievalQuery.Candidate candidate : semantics != null
                 ? List.of(new RetrievalQuery.Candidate(question.full(), RetrievalQuery.Origin.FULL))
                 : question.candidates()) {
@@ -243,6 +249,14 @@ public class AnswerMemoryService {
             matchedBy = ranked.isEmpty() ? matchedBy : "";
         }
 
+        // The same refusal-only judgement, on what the seller actually wrote once. It runs BEFORE the
+        // conflict resolution below, because a past answer that does not answer this question should
+        // not get to win a conflict against one that does.
+        if (semantics != null) {
+            ranked = eligibility.filter(orgId, question.full(), ranked,
+                    h -> (h.ref().getAnswerTitle() == null ? "" : h.ref().getAnswerTitle() + "\n")
+                            + h.ref().getAnswerBody());
+        }
         Conflicts resolved = resolveConflicts(ranked);
         int cap = Math.max(1, Math.min(limit <= 0 ? MAX_PASSAGES : limit, MAX_PASSAGES));
         List<AnswerMemoryPassage> passages = resolved.kept().stream()

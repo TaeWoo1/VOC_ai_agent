@@ -57,6 +57,31 @@ public final class BenchmarkVectors {
         return shipped;
     }
 
+    /**
+     * The shipped cache with an exploration arm's generated texts laid over it.
+     *
+     * <p>The overlay never replaces a shipped vector — it only adds the texts the arms invented, so
+     * every arm judges the seller's own passages by exactly the same numbers.
+     */
+    public static BenchmarkVectors withOverlay(String path) {
+        Map<String, float[]> merged = new HashMap<>(shipped().cache);
+        try {
+            Path p = Path.of(path);
+            if (Files.exists(p)) {
+                load(new ObjectMapper().readTree(p.toFile()))
+                        .forEach(merged::putIfAbsent);
+            }
+        } catch (Exception ignored) {
+            // An arm without its cache simply cannot run; the caller checks.
+        }
+        return new BenchmarkVectors("overlay", merged);
+    }
+
+    /** Whether a text has a vector at all — an arm skips itself rather than throwing. */
+    public boolean has(String text) {
+        return cache.containsKey(key(text));
+    }
+
     /** A comparison arm from {@code build/bench/}; null when it was never generated. */
     public static BenchmarkVectors file(String label, String path) {
         try {

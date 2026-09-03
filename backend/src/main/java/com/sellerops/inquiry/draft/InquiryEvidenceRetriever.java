@@ -245,7 +245,7 @@ public class InquiryEvidenceRetriever {
         String details = MarkupText.toPlainText(inquiry.getBody());
         // The question in its bounded forms — title, subject, whole — never one glued string
         // (Retrieval & Grounding Correctness v1): the absence gate judges each form on its own.
-        return retrieve(orgId, inquiry, RetrievalQuery.of(null, title, details),
+        return retrieve(orgId, inquiry, RetrievalQuery.ofCustomer(title, details),
                 OrderFactLookup.EXACT_ALLOWED, scope);
     }
 
