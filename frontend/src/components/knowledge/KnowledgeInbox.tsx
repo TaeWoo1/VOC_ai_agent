@@ -170,8 +170,6 @@ function CandidateRow({
           scope={scope}
           productId={candidate.productId}
           productName={candidate.productName}
-          // `accept` stores PRODUCT or ORG and nothing finer, so the 규격 control is not offered here.
-          variants={false}
           // A gap opens EMPTY: its stored text is the question, and a question is never an answer.
           body={isGap ? "" : candidate.content}
           saveLabel="답변 기준으로 등록"
@@ -179,6 +177,10 @@ function CandidateRow({
             await api.acceptKnowledgeCandidate(candidate.id, {
               title: value.title,
               content: value.body,
+              // Carried since Knowledge Gap Continuity v1 — `accept` is the one write that files the
+              // fact and closes this exact row, so it has to be able to carry everything the editor
+              // asks for. Before that the 규격 control was hidden here rather than dropped silently.
+              variantId: value.variantId,
               ...(scope === "PRODUCT"
                 ? { sourceType: value.topic as string }
                 : { orgType: value.topic as string }),

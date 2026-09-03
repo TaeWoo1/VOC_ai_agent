@@ -180,6 +180,7 @@ public class KnowledgeAcquisitionController {
                 request == null ? null : request.content(),
                 request == null ? null : request.sourceType(),
                 request == null ? null : request.orgType(),
+                request == null ? null : request.variantId(),
                 principal.userId(), actorName(principal));
     }
 

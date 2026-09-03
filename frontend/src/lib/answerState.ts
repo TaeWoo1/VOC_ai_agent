@@ -45,6 +45,14 @@ export interface AnswerStateView {
    * the ASKED vocabulary (`SHIPPING`) and a write speaks the STORED one (`SHIPPING_POLICY`).
    */
   topic: OrgKnowledgeType | null;
+  /**
+   * The 확인 필요 row this gap was filed as, when it was filed (Knowledge Gap Continuity v1).
+   *
+   * Answering the gap here closes exactly that row. Null when nothing was filed — and null on a
+   * RELOAD, because the stored draft row records what was decided, not which inbox row a past run
+   * happened to create.
+   */
+  candidateId: string | null;
 }
 
 /**
@@ -65,6 +73,7 @@ export function answerStateOf(generated: GeneratedDraftView): AnswerStateView | 
     productId: generated.productId,
     gapScope: generated.productId ? "PRODUCT" : topic ? "ORG" : null,
     topic,
+    candidateId: gap?.candidateId ?? null,
   };
 }
 

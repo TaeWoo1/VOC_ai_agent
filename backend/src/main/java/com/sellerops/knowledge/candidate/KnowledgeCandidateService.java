@@ -12,6 +12,8 @@ import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
 import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
+import com.sellerops.product.ProductVariant;
+import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.product.library.KnowledgeAuthorship;
 import com.sellerops.product.library.KnowledgeSourceType;
 import com.sellerops.product.library.ProductKnowledgeIndexer;
@@ -79,13 +81,15 @@ public class KnowledgeCandidateService {
     private final ProductRepository products;
     private final OrgKnowledgeSourceRepository orgSources;
     private final SellerOperationsKnowledgeService orgKnowledge;
+    private final ProductVariantRepository variants;
 
     public KnowledgeCandidateService(KnowledgeCandidateRepository candidates,
                                      AnswerMemoryRepository memories,
                                      ProductKnowledgeSourceRepository productSources,
                                      ProductKnowledgeIndexer productIndexer, ProductRepository products,
                                      OrgKnowledgeSourceRepository orgSources,
-                                     SellerOperationsKnowledgeService orgKnowledge) {
+                                     SellerOperationsKnowledgeService orgKnowledge,
+                                     ProductVariantRepository variants) {
         this.candidates = candidates;
         this.memories = memories;
         this.productSources = productSources;
@@ -93,6 +97,7 @@ public class KnowledgeCandidateService {
         this.products = products;
         this.orgSources = orgSources;
         this.orgKnowledge = orgKnowledge;
+        this.variants = variants;
     }
 
     /* ─────────────────────────────── the two producers ─────────────────────────────── */
@@ -144,11 +149,24 @@ public class KnowledgeCandidateService {
      * File a gap a draft ran into, so the ask lives in one place instead of on every screen.
      *
      * <p>Idempotent by the same key: a review drafted five times files one candidate.
+     *
+     * <p><b>An ask the seller has already answered is not filed again</b> (Knowledge Gap Continuity
+     * v1). A save re-asks for the draft, the regenerate re-runs the gap detection, and the question
+     * can still be unanswerable from the library — so without this the row the seller had just
+     * closed came straight back as a new one, which reads on screen exactly like the defect this
+     * package set out to fix. Identity only: the same scope, product and question. A DISMISSED ask
+     * may be noticed again, because 「아니요」 means «not this, now».
+     *
+     * @return the open candidate, or <b>null</b> when this exact ask has already been accepted —
+     *         the screen then shows the gap with no inbox row behind it, which is the truth
      */
     @Transactional
     public KnowledgeCandidate noteGap(UUID orgId, String scope, UUID productId, String subject,
                                       String question) {
         String key = dedupeKey(scope, productId, question);
+        if (candidates.existsByOrgIdAndDedupeKeyAndState(orgId, key, STATE_ACCEPTED)) {
+            return null;
+        }
         return candidates.findByOrgIdAndDedupeKeyAndState(orgId, key, STATE_OPEN).orElseGet(() -> {
             KnowledgeCandidate row = new KnowledgeCandidate();
             row.setOrgId(orgId);
@@ -199,6 +217,24 @@ public class KnowledgeCandidateService {
     public KnowledgeCandidateView accept(UUID orgId, UUID candidateId, String title, String content,
                                          KnowledgeSourceType productType, OrgKnowledgeType orgType,
                                          UUID actorUserId, String actorName) {
+        return accept(orgId, candidateId, title, content, productType, orgType, null,
+                actorUserId, actorName);
+    }
+
+    /**
+     * As {@link #accept(UUID, UUID, String, String, KnowledgeSourceType, OrgKnowledgeType, UUID, String)},
+     * with the 규격 the seller chose.
+     *
+     * <p>Knowledge Gap Continuity v1: this is the ONE write that both files the fact and closes the
+     * exact ask it answers, so it has to be able to carry everything the quick-add asks for. A
+     * variant that belongs to another product or another org is a 400 rather than a silent null —
+     * the two look identical to a caller and are opposite to a seller, because the quiet one widens
+     * a statement about one 규격 into a statement about all of them.
+     */
+    @Transactional
+    public KnowledgeCandidateView accept(UUID orgId, UUID candidateId, String title, String content,
+                                         KnowledgeSourceType productType, OrgKnowledgeType orgType,
+                                         UUID variantId, UUID actorUserId, String actorName) {
         KnowledgeCandidate row = candidates.findByIdAndOrgId(candidateId, orgId)
                 .orElseThrow(() -> ApiException.notFound("확인할 항목을 찾을 수 없습니다."));
         if (!STATE_OPEN.equals(row.getState())) {
@@ -219,6 +255,7 @@ public class KnowledgeCandidateService {
             source.setOrgId(orgId);
             source.setProductId(product.getId());
             source.setSourceType(productType == null ? KnowledgeSourceType.FAQ : productType);
+            source.setVariantId(resolveVariant(orgId, product.getId(), variantId));
             source.setAuthoredOrigin(KnowledgeAuthorship.SELLER_ENTERED_KNOWLEDGE);
             source.setTitle(bounded(heading, 200));
             source.setBody(body);
@@ -245,6 +282,17 @@ public class KnowledgeCandidateService {
         row.setDecidedAt(Instant.now());
         row.setDecidedBy(actorName);
         return view(candidates.save(row), productName(orgId, row.getProductId()));
+    }
+
+    /** The 규격, checked against THIS product — see the note on the accept overload. */
+    private UUID resolveVariant(UUID orgId, UUID productId, UUID variantId) {
+        if (variantId == null || variants == null) {
+            return null;
+        }
+        ProductVariant variant = variants.findById(variantId)
+                .filter(v -> orgId.equals(v.getOrgId()) && productId.equals(v.getProductId()))
+                .orElseThrow(() -> ApiException.badRequest("이 상품의 규격이 아닙니다."));
+        return variant.getId();
     }
 
     /** Not this — and deliberately not "never": the same sentence may be noticed again later. */

@@ -185,31 +185,46 @@ public class ReviewDraftComposer {
                         retrieved.state().name(), basis, productId));
 
         List<DraftEvidenceView> views = recordEvidence(orgId, review.getId(), saved.version(), cited);
-        List<ReviewKnowledgeGapView> gaps = gapsFor(orgId, review, redactedBody, productId, retrieved, key);
         // §D: the ask also lands in 확인 필요, so a seller who is not on this screen still sees it once
         // and can answer it in the one place all of these collect. Idempotent by the question, so a
         // review drafted five times files one row. Never fails the draft.
-        fileGaps(orgId, gaps);
+        //
+        // The filed row's id comes BACK on the gap (Knowledge Gap Continuity v1), so answering the
+        // ask here closes exactly that row rather than leaving the seller to meet it again in the
+        // inbox — by identity, never by matching what they wrote against what was asked.
+        List<ReviewKnowledgeGapView> gaps =
+                fileGaps(orgId, gapsFor(orgId, review, redactedBody, productId, retrieved, key));
         return new GeneratedReviewDraftView(saved, authorKind, basis,
                 basisNoteOf(basis, !views.isEmpty()), views,
                 gaps, key.category(), template.customized() ? "ORG" : "DEFAULT", unavailable);
     }
 
-    /** File each ask in 확인 필요. Best effort: a knowledge inbox must never be able to fail a draft. */
-    private void fileGaps(UUID orgId, List<ReviewKnowledgeGapView> gaps) {
+    /**
+     * File each ask in 확인 필요, and hand each gap back the row it became.
+     *
+     * <p>Best effort: a knowledge inbox must never be able to fail a draft, so a gap whose filing
+     * threw is returned unchanged — with no id, which is what the screen reads as 「there is no
+     * inbox row to close」 rather than as an error.
+     */
+    private List<ReviewKnowledgeGapView> fileGaps(UUID orgId, List<ReviewKnowledgeGapView> gaps) {
         if (candidates == null) {
-            return;
+            return gaps;
         }
+        List<ReviewKnowledgeGapView> filed = new ArrayList<>(gaps.size());
         for (ReviewKnowledgeGapView gap : gaps) {
             try {
-                candidates.noteGap(orgId, gap.scope(),
+                // Null when this exact ask has already been answered — nothing filed, nothing to close.
+                com.sellerops.knowledge.candidate.KnowledgeCandidate row = candidates.noteGap(
+                        orgId, gap.scope(),
                         gap.productId() == null ? null : UUID.fromString(gap.productId()),
                         gap.subject(), gap.question());
+                filed.add(row == null ? gap : gap.filedAs(row.getId().toString()));
             } catch (RuntimeException e) {
                 // Enum-free and content-free: the draft is the seller's answer, and it is already saved.
-                continue;
+                filed.add(gap);
             }
         }
+        return List.copyOf(filed);
     }
 
     /** The model's answer, or the reason there is none. A null body means "use the template floor". */
@@ -333,7 +348,7 @@ public class ReviewDraftComposer {
             gaps.add(new ReviewKnowledgeGapView("PRODUCT", subject.text(), subject.kind(),
                     "'" + subject.text() + "'에 대해 고객에게 안내하는 공식 기준이 있나요? "
                             + "이 상품에 저장된 지식에서 찾지 못했습니다.",
-                    productId.toString()));
+                    productId.toString(), null));
         }
         // The ONE topic use of the template key, and it is a legitimate one: 「배송」 is a company
         // matter whether the customer praised the delivery or complained about it, so a keyword that
@@ -342,7 +357,7 @@ public class ReviewDraftComposer {
         if (key == ReviewReplyTemplateKey.DELIVERY && !hasPolicyPassage) {
             gaps.add(new ReviewKnowledgeGapView("ORG", "배송", "TOPIC",
                     "배송에 대해 고객에게 안내하는 회사 기준이 있나요? 저장된 운영 정책에서 찾지 못했습니다.",
-                    null));
+                    null, null));
         }
         return List.copyOf(gaps);
     }

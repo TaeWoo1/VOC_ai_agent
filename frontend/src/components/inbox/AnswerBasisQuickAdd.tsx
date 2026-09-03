@@ -23,12 +23,23 @@ export { titleFor } from "../knowledge/KnowledgeQuickAdd";
  * <b>It saves and re-asks. It does not send.</b> Saving re-indexes, the caller regenerates, and the
  * regenerated draft goes through the same approval and the same confirm-before-send as every other
  * one. Nothing here reaches a marketplace.
+ *
+ * <b>Answering an ask closes THAT ask</b> (Knowledge Gap Continuity v1). When the gap was filed in
+ * 확인 필요, the row's id came back with it, and the save routes through `accept` — the one write
+ * that files the fact AND closes the exact row, in one transaction, recording which source it
+ * became. Before this the seller answered a gap here and met the identical ask again in the inbox.
+ *
+ * <b>By identity, never by resemblance.</b> No other ask is closed, and knowledge written anywhere
+ * else — the library, the settings screen — closes nothing: deciding that a sentence a seller just
+ * wrote answers an ask that was phrased differently is exactly the guess this product does not make.
+ * With no `candidateId` this writes an ordinary source and leaves every card standing.
  */
 export function AnswerBasisQuickAdd({
   scope = "PRODUCT",
   productId,
   productName,
   topic,
+  candidateId,
   onSaved,
 }: {
   /** Which corpus was missing the answer. PRODUCT needs a `productId`. */
@@ -37,6 +48,13 @@ export function AnswerBasisQuickAdd({
   productName?: string | null;
   /** The operating topic the question named, when the retrieval named one. */
   topic?: KnowledgeTopicValue | null;
+  /**
+   * The 확인 필요 row this ask was filed as, when it was filed.
+   *
+   * Present ⇒ saving closes exactly that row and records the source it became. Absent ⇒ an ordinary
+   * source is written and no card is touched.
+   */
+  candidateId?: string | null;
   onSaved: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -57,7 +75,18 @@ export function AnswerBasisQuickAdd({
       topic={topic}
       saveLabel="저장하고 다시 답변 만들기"
       onSave={async (value) => {
-        if (scope === "PRODUCT" && productId) {
+        if (candidateId) {
+          // One write: the fact is filed and the ask that prompted it is closed, together. A partial
+          // failure cannot leave a fact stored under an ask that is still asking for it.
+          await api.acceptKnowledgeCandidate(candidateId, {
+            title: value.title,
+            content: value.body,
+            variantId: value.variantId,
+            ...(scope === "PRODUCT"
+              ? { sourceType: value.topic as KnowledgeSourceType }
+              : { orgType: value.topic as OrgKnowledgeType }),
+          });
+        } else if (scope === "PRODUCT" && productId) {
           await api.createProductKnowledgeSource(productId, {
             sourceType: value.topic as KnowledgeSourceType,
             title: value.title,

@@ -1450,7 +1450,14 @@ export const api = {
 
   async acceptKnowledgeCandidate(
     candidateId: string,
-    body: { title?: string; content?: string; sourceType?: string; orgType?: string },
+    body: {
+      title?: string;
+      content?: string;
+      sourceType?: string;
+      orgType?: string;
+      /** The 규격 the seller chose, so the one write that closes the ask carries it too. */
+      variantId?: string | null;
+    },
   ): Promise<KnowledgeCandidateView> {
     const { data } = await http.post<KnowledgeCandidateView>(
       `/api/knowledge/candidates/${encodeURIComponent(candidateId)}/accept`,

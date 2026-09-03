@@ -146,6 +146,7 @@ describe("reviewnary가 알고 있는 정보", () => {
       expect(acceptKnowledgeCandidate).toHaveBeenCalledWith("c-1", {
         title: "부착 전 표면의 먼지와 기름기를 제거해 주세요.",
         content: "부착 전 표면의 먼지와 기름기를 제거해 주세요.",
+        variantId: null,
         orgType: "SHIPPING_POLICY",
       }),
     );

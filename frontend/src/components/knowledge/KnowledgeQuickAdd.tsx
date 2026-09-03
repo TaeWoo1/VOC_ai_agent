@@ -58,9 +58,10 @@ export function KnowledgeQuickAdd({
   /**
    * Whether the caller's write can carry a 규격.
    *
-   * <p>False on the knowledge-inbox path, whose write is `accept` and which stores PRODUCT or ORG
-   * and nothing finer. The control is then not rendered — a select that silently drops the
-   * seller's choice is worse than an absent one, and v1's scope is PRODUCT/ORG.
+   * <p>All three callers can, since Knowledge Gap Continuity v1 gave `accept` a `variantId`. The
+   * switch stays because the rule it encodes is the one worth keeping: a select that silently drops
+   * the seller's choice is worse than an absent one, so a caller whose write cannot carry a 규격
+   * must not offer the control.
    */
   variants?: boolean;
   saveLabel?: string;

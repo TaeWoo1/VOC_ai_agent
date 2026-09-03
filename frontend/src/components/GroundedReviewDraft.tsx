@@ -176,7 +176,12 @@ function Gap({ gap, onSaved }: { gap: ReviewKnowledgeGapView; onSaved: () => voi
   return (
     <div className="flex flex-col gap-1">
       <p className="break-keep text-sm text-ink">{gap.question}</p>
-      <AnswerBasisQuickAdd scope={scope} productId={gap.productId} onSaved={onSaved} />
+      <AnswerBasisQuickAdd
+        scope={scope}
+        productId={gap.productId}
+        candidateId={gap.candidateId}
+        onSaved={onSaved}
+      />
     </div>
   );
 }

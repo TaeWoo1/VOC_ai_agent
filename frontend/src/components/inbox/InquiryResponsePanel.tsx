@@ -876,6 +876,9 @@ function storedAnswerState(
     // under a heading nobody chose.
     gapScope: productId ? "PRODUCT" : null,
     topic: null,
+    // A reload knows what was decided, not which inbox row a past run created. Guessing one here
+    // would let a reload close an ask this screen never established.
+    candidateId: null,
   };
 }
 
@@ -927,6 +930,7 @@ function AnswerStateCard({
           scope={state.gapScope}
           productId={state.productId}
           topic={state.topic}
+          candidateId={state.candidateId}
           onSaved={onSavedBasis}
         />
       ) : null}

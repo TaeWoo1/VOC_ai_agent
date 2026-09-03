@@ -263,11 +263,46 @@ tints) · horizontal scroll 0 · console errors 0 · off-host requests 0.
 
 ---
 
-## §13 Reported, not fixed
+## §12-A Knowledge Gap Continuity v1 (2026-09-04)
 
-- **A gap answered from the inquiry screen leaves its 확인 필요 card open.** Measured: the same
-  「두께」 ask is both satisfied and still listed. Closing it would need a rule matching a saved
-  sentence to an open gap, and that rule is a guess. A candidate closes on a person's press.
+The one residual §13 reported — *「a gap answered from the inquiry screen leaves its 확인 필요 card
+open」* — closed. **By object identity, never by resemblance.**
+
+**The id, not the sentence.** When a gap is filed, the 확인 필요 row's id comes BACK on the gap
+(`KnowledgeGapView.candidateId`, `ReviewKnowledgeGapView.candidateId`), so the quick-add on that
+screen knows which ask it is answering. It saves through `accept` — the write that already existed,
+and the only one that files the fact and closes the exact row in a single transaction, recording
+which source the ask became. §13's objection stands and is respected: nothing compares what the
+seller wrote against what was asked, so knowledge written anywhere else closes nothing, and a
+near-identical ask two rows down stays open.
+
+`accept` gained a `variantId` so it can carry everything the editor asks for — otherwise routing
+through it would have dropped the 규격, and a control whose value is silently discarded is worse
+than an absent one. The knowledge inbox's own editor now offers 규격 for the same reason.
+
+**And an answered ask does not come straight back.** Saving re-asks for the draft; the regenerate
+re-runs the gap detection; the question can still be unanswerable from the library. Measured live:
+the row the seller had just closed was filed anew in the same breath, which on screen is
+indistinguishable from never having closed it. So `noteGap` files nothing when this org has already
+ACCEPTED this exact ask (same scope, product and question) and returns null — the gap is still shown,
+because it is still true, with no inbox row behind it. `DISMISSED` is deliberately excluded:
+「아니요」 says «not this, now», and `dismiss` says so in as many words.
+
+Failure leaves the ask open, because `accept` is one transaction — proven on the foreign-규격
+refusal, which is a 400 with the candidate still `OPEN`.
+
+**Live, one seller session on the disposable org:** three asks filed (an inquiry gap, and a review's
+product ask plus its 배송 ask) → answer the inquiry gap → **확인 필요 2** → answer one of the
+review's two → **확인 필요 1**, and the one left standing is the 배송 ask nobody answered. Both
+closed rows carry the source they became; no duplicates were filed. Three widths over the knowledge,
+inquiry and review surfaces: **AA violations 0** · horizontal scroll 0 · console errors 0 ·
+off-host 0.
+
+**The Knowledge workstream is frozen here.**
+
+---
+
+## §13 Reported, not fixed
 - **「초안 준비됨」 on a work item with no draft.** The inbox row reads the work-item phase, and
   `InquiryProposalWriter` moves it to `PROPOSED` when a proposal is written even though the composer
   wrote no version. Pre-existing, and queue semantics are outside this package.

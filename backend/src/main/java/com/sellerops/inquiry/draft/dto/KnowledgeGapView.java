@@ -30,10 +30,21 @@ import java.util.UUID;
  * @param applicability      whether the answer depends on a 규격 and whether the customer named one
  * @param variantId          the 규격 the customer named, when they did
  * @param policyDeclaresTopic whether a registered rule declares {@code topic}; false when no topic
+ * @param candidateId the 확인 필요 row this ask was filed as, or null when nothing was filed —
+ *                    <b>the identity that lets answering it here close exactly it</b> (Knowledge Gap
+ *                    Continuity v1). It is an id and nothing else: the screen never reads the
+ *                    candidate's text, and closing is done by the id rather than by deciding that a
+ *                    sentence the seller just wrote resembles an ask.
  */
 public record KnowledgeGapView(UUID productId, String topic, List<String> topics, String missingSubject,
                                String productOutcome, String policyOutcome, String applicability,
-                               UUID variantId, boolean policyDeclaresTopic) {
+                               UUID variantId, boolean policyDeclaresTopic, UUID candidateId) {
+
+    /** The same gap, now carrying the 확인 필요 row it was filed as. */
+    public KnowledgeGapView filedAs(UUID candidateId) {
+        return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
+                policyOutcome, applicability, variantId, policyDeclaresTopic, candidateId);
+    }
 
     public static KnowledgeGapView of(InquiryEvidenceRetriever.InquiryEvidence retrieved,
                                       SpecApplicability.Verdict verdict, KnowledgeTopic asked,
@@ -47,7 +58,8 @@ public record KnowledgeGapView(UUID productId, String topic, List<String> topics
                 name(retrieved.policyOutcome()),
                 verdict.applicability() == null ? null : verdict.applicability().name(),
                 verdict.variantId(),
-                asked != null && retrieved.policyDeclares(asked));
+                asked != null && retrieved.policyDeclares(asked),
+                null);
     }
 
     private static String name(RetrievalOutcome outcome) {

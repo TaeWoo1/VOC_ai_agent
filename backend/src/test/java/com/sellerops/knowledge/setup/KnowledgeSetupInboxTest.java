@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.sellerops.common.ApiException;
 import com.sellerops.knowledge.candidate.KnowledgeCandidateRepository;
 import com.sellerops.knowledge.candidate.KnowledgeCandidateService;
+import com.sellerops.knowledge.candidate.dto.KnowledgeCandidateView;
 import com.sellerops.knowledge.document.KnowledgeSummaryService;
 import com.sellerops.knowledge.document.dto.KnowledgeSummaryView;
 import com.sellerops.knowledge.memory.AnswerMemoryRepository;
@@ -18,6 +19,8 @@ import com.sellerops.organization.Organization;
 import com.sellerops.organization.OrganizationRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
+import com.sellerops.product.ProductVariant;
+import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.product.library.KnowledgeSourceType;
 import com.sellerops.product.library.ProductKnowledgeChunkRepository;
 import com.sellerops.product.library.ProductKnowledgeIndexer;
@@ -58,6 +61,7 @@ class KnowledgeSetupInboxTest {
     @Autowired OrgKnowledgeChunkRepository orgChunks;
     @Autowired AnswerMemoryRepository memories;
     @Autowired KnowledgeCandidateRepository candidateRows;
+    @Autowired ProductVariantRepository variantRows;
 
     private KnowledgeCandidateService candidates;
     private KnowledgeSummaryService summary;
@@ -70,7 +74,7 @@ class KnowledgeSetupInboxTest {
         SellerOperationsKnowledgeService orgKnowledge =
                 new SellerOperationsKnowledgeService(orgSources, orgChunks, null, null);
         candidates = new KnowledgeCandidateService(candidateRows, memories, productSources,
-                productIndexer, products, orgSources, orgKnowledge);
+                productIndexer, products, orgSources, orgKnowledge, variantRows);
         summary = new KnowledgeSummaryService(productSources, orgSources, memories, products,
                 candidateRows);
 
@@ -83,6 +87,16 @@ class KnowledgeSetupInboxTest {
         p.setSku("SKU-" + UUID.randomUUID());
         p.setStatus("ACTIVE");
         productId = products.save(p).getId();
+    }
+
+    private UUID variant(String optionName) {
+        ProductVariant v = new ProductVariant();
+        v.setOrgId(org);
+        v.setProductId(productId);
+        v.setOptionName(optionName);
+        v.setSource("CHANNEL_LISTING");
+        v.setObservedAt(java.time.Instant.now());
+        return variantRows.save(v).getId();
     }
 
     @Test
@@ -140,6 +154,110 @@ class KnowledgeSetupInboxTest {
 
         OrgKnowledgeSource written = orgSources.findAllByOrgIdOrderByCreatedAtAsc(org).get(0);
         assertThat(written.getBody()).isEqualTo("제주 지역은 1~2일 더 걸릴 수 있습니다.");
+    }
+
+    /**
+     * Knowledge Gap Continuity v1 — <b>answering an ask closes THAT ask, and only that one.</b>
+     *
+     * <p>The measured defect: the seller answered a gap on the inquiry screen, the fact was filed,
+     * and the identical ask was still waiting in 확인 필요 — so the inbox counted work that was
+     * already done. It closes by IDENTITY: no other row is touched, and nothing here compares what
+     * the seller wrote against what was asked.
+     */
+    @Test
+    @DisplayName("§C — accepting one ask closes exactly it, links its source, and leaves the rest open")
+    void answeringOneAskClosesOnlyIt() {
+        UUID answered = candidates
+                .noteGap(org, "PRODUCT", productId, "미끄럼 방지",
+                        "「미끄럼 방지」에 대해 고객에게 안내할 공식 기준이 필요합니다.")
+                .getId();
+        UUID similar = candidates
+                .noteGap(org, "PRODUCT", productId, "미끄럼",
+                        "「미끄럼」에 대해 고객에게 안내할 공식 기준이 필요합니다.")
+                .getId();
+        UUID spec = variant("60x90cm / 5mm");
+
+        KnowledgeCandidateView closed = candidates.accept(org, answered, "미끄럼 방지",
+                "물기를 닦은 평평한 바닥에서는 밀리지 않습니다.",
+                KnowledgeSourceType.FAQ, null, spec, null, "판매자");
+
+        assertThat(closed.state()).isEqualTo(KnowledgeCandidateService.STATE_ACCEPTED);
+        // The link back: which source this ask became.
+        assertThat(closed.sourceId()).isNotNull();
+        ProductKnowledgeSource written = productSources.findById(closed.sourceId()).orElseThrow();
+        assertThat(written.getBody()).isEqualTo("물기를 닦은 평평한 바닥에서는 밀리지 않습니다.");
+        // The 규격 the seller chose survives the one write that also closed the ask.
+        assertThat(written.getVariantId()).isEqualTo(spec);
+        // A near-identical ask is NOT closed. Resemblance is not identity.
+        assertThat(candidateRows.findById(similar).orElseThrow().getState())
+                .isEqualTo(KnowledgeCandidateService.STATE_OPEN);
+    }
+
+    /**
+     * Knowledge Gap Continuity v1 — <b>an answered ask does not come straight back.</b>
+     *
+     * <p>Saving re-asks for the draft, and the regenerate re-runs the gap detection, so an ask that
+     * is still unanswerable from the library would be filed anew the moment the seller closed it.
+     * On screen that is indistinguishable from never having closed it. Identity only: same scope,
+     * same product, same question.
+     */
+    @Test
+    @DisplayName("§C — the same ask is not filed again after it has been answered")
+    void anAnsweredAskIsNotRefiled() {
+        String question = "「미끄럼 방지」에 대해 고객에게 안내할 공식 기준이 필요합니다.";
+        UUID first = candidates.noteGap(org, "PRODUCT", productId, "미끄럼 방지", question).getId();
+        candidates.accept(org, first, null, "밀리지 않습니다.", KnowledgeSourceType.FAQ, null,
+                null, null, "판매자");
+
+        // The regenerate's filing, on the very next breath.
+        assertThat(candidates.noteGap(org, "PRODUCT", productId, "미끄럼 방지", question)).isNull();
+        assertThat(candidateRows.countByOrgIdAndState(org, KnowledgeCandidateService.STATE_OPEN))
+                .isZero();
+
+        // A DIFFERENT question about the same product is still filed — this is identity, not topic.
+        assertThat(candidates.noteGap(org, "PRODUCT", productId, "내열",
+                "「내열」에 대해 고객에게 안내할 공식 기준이 필요합니다.")).isNotNull();
+        assertThat(candidateRows.countByOrgIdAndState(org, KnowledgeCandidateService.STATE_OPEN))
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("§C — a dismissed ask may still be noticed again: 「아니요」 means «not this, now»")
+    void aDismissedAskMayReturn() {
+        String question = "「내열」에 대해 고객에게 안내할 공식 기준이 필요합니다.";
+        UUID first = candidates.noteGap(org, "PRODUCT", productId, "내열", question).getId();
+        candidates.dismiss(org, first, "판매자");
+
+        assertThat(candidates.noteGap(org, "PRODUCT", productId, "내열", question)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("§C — a 규격 from another product is refused, never silently widened to all of them")
+    void aForeignSpecIsRefused() {
+        Product other = new Product();
+        other.setOrgId(org);
+        other.setName("다른 상품");
+        other.setSku("SKU-" + UUID.randomUUID());
+        other.setStatus("ACTIVE");
+        UUID otherId = products.save(other).getId();
+        ProductVariant foreign = new ProductVariant();
+        foreign.setOrgId(org);
+        foreign.setProductId(otherId);
+        foreign.setOptionName("대형");
+        foreign.setSource("CHANNEL_LISTING");
+        foreign.setObservedAt(java.time.Instant.now());
+        UUID foreignId = variantRows.save(foreign).getId();
+
+        UUID candidateId = candidates
+                .noteGap(org, "PRODUCT", productId, "미끄럼 방지", "「미끄럼 방지」에 대해…")
+                .getId();
+
+        assertThatThrownBy(() -> candidates.accept(org, candidateId, null, "밀리지 않습니다.",
+                KnowledgeSourceType.FAQ, null, foreignId, null, "판매자"))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("이 상품의 규격이 아닙니다");
+        assertThat(candidateRows.findById(candidateId).orElseThrow().getState())
+                .isEqualTo(KnowledgeCandidateService.STATE_OPEN);
     }
 
     @Test

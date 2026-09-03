@@ -1247,6 +1247,8 @@ export interface ReviewKnowledgeGapView {
   subjectKind: string;
   question: string;
   productId: string | null;
+  /** The 확인 필요 row this ask was filed as, or null when nothing was filed. An id, never text. */
+  candidateId: string | null;
 }
 
 /**
@@ -1657,6 +1659,8 @@ export interface InquiryKnowledgeGapView {
   applicability: string | null;
   variantId: string | null;
   policyDeclaresTopic: boolean;
+  /** The 확인 필요 row this ask was filed as, or null when nothing was filed. An id, never text. */
+  candidateId: string | null;
 }
 
 /**

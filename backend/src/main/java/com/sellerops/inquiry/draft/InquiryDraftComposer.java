@@ -15,6 +15,7 @@ import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.draft.dto.GeneratedDraftView;
 import com.sellerops.inquiry.draft.dto.KnowledgeGapView;
 import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.candidate.KnowledgeCandidate;
 import com.sellerops.knowledge.candidate.KnowledgeCandidateService;
 import com.sellerops.inquiry.reply.InquiryReplyDraftService;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
@@ -211,8 +212,14 @@ public class InquiryDraftComposer {
      */
     private GeneratedDraftView compose(UUID orgId, UUID workItemId, String actor, ToneHint tone) {
         GeneratedDraftView view = composeDraft(orgId, workItemId, actor, tone);
-        fileGap(orgId, view.knowledgeGap());
-        return view;
+        UUID filed = fileGap(orgId, view.knowledgeGap());
+        // The id travels back with the gap so that answering THIS ask on THIS screen closes THIS row
+        // (Knowledge Gap Continuity v1). Null when nothing was filed, and the screen then behaves
+        // exactly as it did before the inbox existed.
+        return filed == null ? view : new GeneratedDraftView(view.draft(), view.authorKind(),
+                view.knowledgeState(), view.knowledgeNote(), view.answerBasis(), view.answerBasisNote(),
+                view.answerBasisAction(), view.productId(), view.evidence(), view.companyContextUsed(),
+                view.unavailableMessage(), view.knowledgeGap().filedAs(filed));
     }
 
     /**
@@ -223,22 +230,27 @@ public class InquiryDraftComposer {
      * question rather than classified, and an ask a seller cannot recognise is an ask they will not
      * answer. Everything else — a partial hit, an unresolved 규격, a vendor failure — is a different
      * fact and files nothing.
+     *
+     * @return the 확인 필요 row's id, or null when nothing was filed
      */
-    private void fileGap(UUID orgId, KnowledgeGapView gap) {
+    private UUID fileGap(UUID orgId, KnowledgeGapView gap) {
         if (candidates == null || gap == null) {
-            return;
+            return null;
         }
         String subject = gap.missingSubject();
         if (subject == null || subject.isBlank()
                 || !ABSENT.equals(gap.productOutcome()) || !ABSENT.equals(gap.policyOutcome())) {
-            return;
+            return null;
         }
         String scope = gap.productId() == null ? "ORG" : "PRODUCT";
         try {
-            candidates.noteGap(orgId, scope, gap.productId(), subject,
+            // Null when this exact ask has already been answered — nothing filed, nothing to close.
+            KnowledgeCandidate filed = candidates.noteGap(orgId, scope, gap.productId(), subject,
                     "「" + subject + "」에 대해 고객에게 안내할 공식 기준이 필요합니다.");
+            return filed == null ? null : filed.getId();
         } catch (RuntimeException e) {
             // Enum-free and content-free: the draft is what the seller asked for, and it is already saved.
+            return null;
         }
     }
 

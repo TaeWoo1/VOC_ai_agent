@@ -29,7 +29,16 @@ package com.sellerops.review.draft.dto;
  *                   reviewnary understood the review
  * @param question   the seller-facing ask, composed from closed templates and {@code subject}
  * @param productId  the product to register it on, or null when this review resolves to none
+ * @param candidateId the 확인 필요 row this ask was filed as, or null when nothing was filed —
+ *                    <b>the identity that lets answering it here close exactly it</b> (Knowledge Gap
+ *                    Continuity v1). An id and nothing else: closing is done by identity, never by
+ *                    deciding that a sentence the seller just wrote resembles an ask.
  */
 public record ReviewKnowledgeGapView(String scope, String subject, String subjectKind,
-                                     String question, String productId) {
+                                     String question, String productId, String candidateId) {
+
+    /** The same ask, now carrying the 확인 필요 row it was filed as. */
+    public ReviewKnowledgeGapView filedAs(String candidateId) {
+        return new ReviewKnowledgeGapView(scope, subject, subjectKind, question, productId, candidateId);
+    }
 }

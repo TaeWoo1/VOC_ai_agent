@@ -62,6 +62,7 @@ function floor(): GeneratedReviewDraftView {
         subjectKind: "REVIEW_TEXT",
         question: "'괜찮긴한데 잘떨어지네요'에 대해 고객에게 안내하는 공식 기준이 있나요? 이 상품에 저장된 지식에서 찾지 못했습니다.",
         productId: "p-1",
+        candidateId: null,
       },
     ],
     templateCategory: "positive_reply",

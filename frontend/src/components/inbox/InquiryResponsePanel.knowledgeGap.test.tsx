@@ -17,6 +17,7 @@ const getInquiryPublishCapability = vi.fn();
 const generateInquiryProposal = vi.fn();
 const generateInquiryDraft = vi.fn();
 const createProductKnowledgeSource = vi.fn();
+const acceptKnowledgeCandidate = vi.fn();
 const getProductKnowledgeStrict = vi.fn();
 const confirmInquiryPublish = vi.fn();
 
@@ -31,6 +32,7 @@ vi.mock("../../lib/apiClient", () => ({
     generateInquiryProposal: (id: string) => generateInquiryProposal(id),
     generateInquiryDraft: (id: string) => generateInquiryDraft(id),
     createProductKnowledgeSource: (p: string, r: unknown) => createProductKnowledgeSource(p, r),
+    acceptKnowledgeCandidate: (...a: unknown[]) => acceptKnowledgeCandidate(...a),
     getProductKnowledgeStrict: (p: string) => getProductKnowledgeStrict(p),
   },
   getToken: () => null,
@@ -76,7 +78,22 @@ const NO_BASIS = {
   unavailableMessage: null,
 };
 
+/** The same gap, as it arrives once it has been filed in 확인 필요 — an id, and nothing else new. */
+const GAP_FILED = {
+  productId: "p1",
+  topic: null,
+  topics: [],
+  missingSubject: "가닥",
+  productOutcome: "ABSENT",
+  policyOutcome: "ABSENT",
+  applicability: "VARIANT_UNRESOLVED",
+  variantId: null,
+  policyDeclaresTopic: false,
+  candidateId: "cand-1",
+};
+
 beforeEach(() => {
+  acceptKnowledgeCandidate.mockReset().mockResolvedValue({ id: "cand-1", state: "ACCEPTED" });
   getInquiryDetailStrict.mockResolvedValue(detail());
   getInquiryPublishCapability.mockResolvedValue({
     executionEnabled: false,
@@ -167,6 +184,34 @@ describe("InquiryResponsePanel — the missing answer basis", () => {
       }),
     );
     // The whole of what saving does: re-ask. It does not approve and it does not send.
+    await waitFor(() => expect(generateInquiryDraft).toHaveBeenCalledTimes(2));
+    expect(confirmInquiryPublish).not.toHaveBeenCalled();
+  });
+
+  it("answering the ask that was filed closes THAT ask — one write, by identity", async () => {
+    // Knowledge Gap Continuity v1. The gap came back carrying the 확인 필요 row it was filed as, so
+    // the save routes through `accept`: the fact is filed and the exact ask is closed together. No
+    // ordinary source write happens, because that one would leave the card standing.
+    generateInquiryDraft.mockResolvedValue({ ...NO_BASIS, knowledgeGap: GAP_FILED });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <InquiryResponsePanel workItemId="w1" />
+      </MemoryRouter>,
+    );
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+    await user.click(await screen.findByRole("button", { name: "답변 기준 추가" }));
+    await user.type(screen.getByLabelText("고객에게 안내할 내용"), "몰딩 안쪽으로 전선 3가닥까지 들어갑니다.");
+    await user.click(screen.getByRole("button", { name: /저장하고 다시 답변 만들기/ }));
+
+    await waitFor(() =>
+      expect(acceptKnowledgeCandidate).toHaveBeenCalledWith(
+        "cand-1",
+        expect.objectContaining({ content: "몰딩 안쪽으로 전선 3가닥까지 들어갑니다." }),
+      ),
+    );
+    // Exactly one write — the ordinary source path is not also taken.
+    expect(createProductKnowledgeSource).not.toHaveBeenCalled();
     await waitFor(() => expect(generateInquiryDraft).toHaveBeenCalledTimes(2));
     expect(confirmInquiryPublish).not.toHaveBeenCalled();
   });
