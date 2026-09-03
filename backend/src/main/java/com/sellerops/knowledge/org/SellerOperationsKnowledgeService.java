@@ -3,7 +3,9 @@ package com.sellerops.knowledge.org;
 import com.sellerops.common.ApiException;
 import com.sellerops.knowledge.KnowledgeRetriever;
 import com.sellerops.knowledge.KnowledgeTopic;
+import com.sellerops.knowledge.KnowledgeSemantics;
 import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.semantic.KnowledgeSemanticSearch;
 import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.knowledge.KnowledgeText;
 import com.sellerops.knowledge.org.dto.OrgKnowledgePassage;
@@ -49,11 +51,20 @@ public class SellerOperationsKnowledgeService {
 
     private final OrgKnowledgeSourceRepository sources;
     private final OrgKnowledgeChunkRepository chunks;
+    private final KnowledgeSemanticSearch semanticSearch;
 
     public SellerOperationsKnowledgeService(OrgKnowledgeSourceRepository sources,
                                             OrgKnowledgeChunkRepository chunks) {
+        this(sources, chunks, KnowledgeSemanticSearch.disabled());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SellerOperationsKnowledgeService(OrgKnowledgeSourceRepository sources,
+                                            OrgKnowledgeChunkRepository chunks,
+                                            KnowledgeSemanticSearch semanticSearch) {
         this.sources = sources;
         this.chunks = chunks;
+        this.semanticSearch = semanticSearch;
     }
 
     @Transactional(readOnly = true)
@@ -142,7 +153,8 @@ public class SellerOperationsKnowledgeService {
             OrgKnowledgeSource source = byId.get(chunk.getSourceId());
             if (source != null) {
                 candidates.add(new KnowledgeRetriever.Candidate<>(chunk,
-                        KnowledgeText.normalize(source.getTitle()) + chunk.getNormalized()));
+                        KnowledgeText.normalize(source.getTitle()) + chunk.getNormalized(),
+                        source.getTitle() + "\n" + chunk.getContent()));
             }
         }
         Set<KnowledgeTopic> asked = KnowledgeTopic.of(question.text());
@@ -150,15 +162,20 @@ public class SellerOperationsKnowledgeService {
         int rejected = 0;
         int tried = 0;
         String matchedBy = question.full();
-        for (RetrievalQuery.Candidate candidate : question.candidates()) {
+        // Same list, same filters: only rules this org owns and has not retired are ever seen.
+        KnowledgeSemantics semantics = semanticSearch.forQuestion(orgId, question.full(), candidates);
+        for (RetrievalQuery.Candidate candidate : semantics != null
+                ? List.of(new RetrievalQuery.Candidate(question.full(), RetrievalQuery.Origin.FULL))
+                : question.candidates()) {
             tried++;
             List<OrgKnowledgePassage> found = new ArrayList<>();
             int rejectedHere = 0;
             for (KnowledgeRetriever.Hit<OrgKnowledgeChunk> hit
-                    : KnowledgeRetriever.rank(candidate.text(), candidates, null)) {
+                    : KnowledgeRetriever.rank(candidate.text(), candidates, null, semantics)) {
                 OrgKnowledgeChunk chunk = hit.ref();
                 OrgKnowledgeSource source = byId.get(chunk.getSourceId());
-                if (!KnowledgeTopic.applicable(asked, declaredTopics(source))) {
+                if (!KnowledgeTopic.applicable(asked, declaredTopics(source))
+                        || !KnowledgeTopic.remedyApplicable(question.text(), source.getTitle())) {
                     rejectedHere++;
                     continue;
                 }
@@ -235,8 +252,14 @@ public class SellerOperationsKnowledgeService {
         return reindex(source);
     }
 
+    /**
+     * <p><b>The delete is flushed before the inserts</b>, for the reason
+     * {@code ProductKnowledgeIndexer} records: Hibernate runs every insert before any delete, so
+     * re-indexing an existing rule would insert ordinal 1 beside the ordinal 1 still there.
+     */
     private int reindex(OrgKnowledgeSource source) {
         chunks.deleteAllBySourceId(source.getId());
+        chunks.flush();
         List<String> parts = KnowledgeText.chunk(source.getBody());
         List<OrgKnowledgeChunk> rows = new ArrayList<>(parts.size());
         for (int i = 0; i < parts.size(); i++) {

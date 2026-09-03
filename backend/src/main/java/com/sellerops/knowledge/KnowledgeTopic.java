@@ -101,6 +101,71 @@ public enum KnowledgeTopic {
     }
 
     /**
+     * The two remedies {@link #EXCHANGE_RETURN} covers, as a REFUSAL-ONLY axis beside it.
+     *
+     * <p><b>Why not split the enum.</b> {@code EXCHANGE_RETURN} is a wire token: the planner's plan
+     * schema, the inquiry list filter and three screens name it, and to a seller filtering their
+     * inbox 「교환·반품」 is one bucket on purpose. What it must NOT be is one bucket when deciding
+     * whether a document may ground an answer — measured on the benchmark corpus, a question about
+     * 반품 배송비 took the exchange policy at similarity 0.51 and would have told the customer the
+     * exchange fee (왕복 6000원) as their return fee (3000원). The remedy the customer asked about and
+     * the remedy the document is about are a finer question than the bucket, so it is asked finer,
+     * here, and nowhere else.
+     *
+     * <p>Read from TEXT — a question and a document's title — never from a declared type: a policy
+     * typed {@code EXCHANGE_REFUND_POLICY} names both remedies by its type and only one in its title,
+     * and the title is the claim its author actually made.
+     */
+    private enum Remedy {
+        EXCHANGE("교환"),
+        RETURN_REFUND("반품", "환불", "반송");
+
+        private final String[] words;
+
+        Remedy(String... words) {
+            this.words = words;
+        }
+    }
+
+    private static Set<Remedy> remediesOf(String text) {
+        Set<Remedy> found = EnumSet.noneOf(Remedy.class);
+        if (text == null || text.isBlank()) {
+            return found;
+        }
+        for (Remedy remedy : Remedy.values()) {
+            for (String word : remedy.words) {
+                if (text.contains(word)) {
+                    found.add(remedy);
+                    break;
+                }
+            }
+        }
+        return found;
+    }
+
+    /**
+     * May a document that reads like {@code source} ground a question that reads like {@code question},
+     * as far as the exchange/return distinction goes?
+     *
+     * <p>Same shape as {@link #applicable} and the same guarantee: true unless both sides name a
+     * remedy and they share none. A document naming both (「교환 및 반품 안내」) grounds either; a
+     * document naming neither is never refused; nothing here can admit a passage.
+     */
+    public static boolean remedyApplicable(String question, String source) {
+        Set<Remedy> asked = remediesOf(question);
+        Set<Remedy> declared = remediesOf(source);
+        if (asked.isEmpty() || declared.isEmpty()) {
+            return true;
+        }
+        for (Remedy remedy : asked) {
+            if (declared.contains(remedy)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * May a document declared about {@code source} ground a question about {@code question}?
      *
      * <p>True unless both sides name topics and share none. Symmetric, deterministic, and unable to

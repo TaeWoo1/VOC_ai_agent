@@ -297,8 +297,16 @@ public class ReviewDraftComposer {
         // §E: a retrieval miss is not by itself a reason to ask the seller for a standard. 「좋아요 아주
         // 만족합니다」 needs no factual basis, and asking for one reads as «your library is deficient
         // because a customer was happy». The need is decided by whether an ANSWER WAS OWED.
-        ReviewKnowledgeNeed need = ReviewKnowledgeNeed.of(hasProductPassage, productId != null,
-                retrieved.productOutcome(), review.getRating(), issueTitleFor(orgId, review.getId()) != null);
+        //
+        // The grounded flag is «did ANY lane answer it», not «did the product lane». Observed live
+        // 2026-09-03: 「배송이 너무 느려서 실망했습니다」 was answered from the company's own shipping
+        // policy and the same screen then asked whether a PRODUCT standard existed for it — a
+        // grounded draft asking for the facts it had just used, about the wrong corpus.
+        ReviewKnowledgeNeed need = ReviewKnowledgeNeed.of(hasProductPassage || hasPolicyPassage,
+                productId != null,
+                retrieved.productOutcome(), review.getRating(),
+                issueTitleFor(orgId, review.getId()) != null,
+                com.sellerops.knowledge.QuestionShape.asks(redactedBody));
         List<ReviewKnowledgeGapView> gaps = new ArrayList<>();
         Subject subject = subjectFor(orgId, review, redactedBody);
         if (need.asks() && productId != null && !hasProductPassage) {

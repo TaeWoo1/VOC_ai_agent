@@ -249,6 +249,26 @@ sellerops:
         # The 상세페이지 text lane. OFF by default (2026-08-27): a capability that has never run live
         # must not start reading a seller's channel because a class was merged.
         enabled: ${SELLEROPS_PRODUCT_DETAIL_ENRICHMENT_ENABLED:false}
+  # ── Semantic knowledge retrieval (Knowledge Retrieval Quality v1, 2026-09-03) ──────────────────
+  #
+  # THE SEVENTH LLM capability, and the only one whose payload includes something on EVERY search:
+  #   * the seller's own knowledge passages, once each, turned into vectors and cached by content; and
+  #   * the customer's question, embedded per search and never stored.
+  # The second is a widening — a draft that ends in NO_ANSWER_BASIS calls no drafter today, and a
+  # seller's knowledge search box calls nothing at all. So this is OFF by default and turning it on is
+  # a deployment decision: with it off every lane behaves exactly as it did before this package, and
+  # the lexical scorer answers as it always has.
+  #
+  # `dimensions` is measured, not decorative: the same model truncated to 256 answered 88.9% of the
+  # benchmark's «nothing here answers this» questions with a citation, because a short vector cannot
+  # tell «about this product» from «about this question». 1024 is the shipped value.
+  knowledge:
+    embedding:
+      enabled: ${SELLEROPS_KNOWLEDGE_EMBEDDING_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_KNOWLEDGE_EMBEDDING_ORG_IDS:}
+      model: ${SELLEROPS_KNOWLEDGE_EMBEDDING_MODEL:text-embedding-3-large}
+      api-key: ${SELLEROPS_KNOWLEDGE_EMBEDDING_API_KEY:}
+      dimensions: ${SELLEROPS_KNOWLEDGE_EMBEDDING_DIMENSIONS:1024}
   customermemory:
     retriever:
       # Retrieval strategy behind the CustomerMemoryRetriever port. `lexical` is the only implementation:

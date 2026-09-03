@@ -111,6 +111,28 @@ class ReviewDraftComposerTest {
                 "product-knowledge/USAGE:판매자", 0.9);
     }
 
+    private static ScopedPassage policyPassage(String text) {
+        return new ScopedPassage(KnowledgeScope.ORG_OPERATIONS, "배송 안내", text,
+                UUID.fromString("a1b2c3d4-0000-4000-8000-000000000006"),
+                UUID.fromString("e5f6a7b8-0000-4000-8000-000000000007"),
+                "org-knowledge/SHIPPING_POLICY:판매자", 0.9);
+    }
+
+    @Test
+    @DisplayName("a draft grounded in the company's policy does not then ask for a product standard")
+    void groundedIsGroundedWhicheverLaneAnsweredIt() {
+        // Observed live 2026-09-03: 「배송이 너무 느려서 실망했습니다」 was answered from the shipping
+        // policy and the same screen asked whether a PRODUCT standard for it existed — a grounded
+        // draft asking for facts it had just used, about the wrong corpus.
+        retrieval(DraftKnowledgeState.GROUNDED, policyPassage("평일 오후 2시 이전 결제 건은 당일 출고됩니다."));
+
+        GeneratedReviewDraftView view = composer.compose(ORG, review(), BODY, "SELLER:u1");
+
+        assertThat(view.knowledgeGaps())
+                .as("nothing about the product is missing that this reply needed")
+                .noneMatch(g -> "PRODUCT".equals(g.scope()));
+    }
+
     @Test
     @DisplayName("no evidence: NO MODEL IS CALLED, the org's own template is the draft, and the gap names the customer's words")
     void withoutEvidenceNothingIsInvented() {

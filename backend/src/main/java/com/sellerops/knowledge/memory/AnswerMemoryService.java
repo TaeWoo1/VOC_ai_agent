@@ -2,7 +2,9 @@ package com.sellerops.knowledge.memory;
 
 import com.sellerops.common.DataOrigin;
 import com.sellerops.knowledge.KnowledgeRetriever;
+import com.sellerops.knowledge.KnowledgeSemantics;
 import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.semantic.KnowledgeSemanticSearch;
 import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.knowledge.KnowledgeText;
 import com.sellerops.knowledge.TopicSignature;
@@ -50,12 +52,21 @@ public class AnswerMemoryService {
     private final AnswerMemoryRepository memories;
     private final OrgKnowledgeChunkRepository orgChunks;
     private final ProductKnowledgeChunkRepository productChunks;
+    private final KnowledgeSemanticSearch semanticSearch;
 
     public AnswerMemoryService(AnswerMemoryRepository memories, OrgKnowledgeChunkRepository orgChunks,
                                ProductKnowledgeChunkRepository productChunks) {
+        this(memories, orgChunks, productChunks, KnowledgeSemanticSearch.disabled());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AnswerMemoryService(AnswerMemoryRepository memories, OrgKnowledgeChunkRepository orgChunks,
+                               ProductKnowledgeChunkRepository productChunks,
+                               KnowledgeSemanticSearch semanticSearch) {
         this.memories = memories;
         this.orgChunks = orgChunks;
         this.productChunks = productChunks;
+        this.semanticSearch = semanticSearch;
     }
 
     /**
@@ -194,14 +205,25 @@ public class AnswerMemoryService {
                         || !excludeInquiryId.equals(m.getOriginInquiryId()))
                 .toList();
         List<KnowledgeRetriever.Candidate<AnswerMemory>> candidates = corpus.stream()
-                .map(m -> new KnowledgeRetriever.Candidate<>(m, m.getNormalized()))
+                // The past answer as the seller wrote it — its own title, then its body. Same two
+                // fields the normalized form is built from, spacing and punctuation kept, because a
+                // vector of text with the spaces removed is a vector of different text.
+                .map(m -> new KnowledgeRetriever.Candidate<>(m, m.getNormalized(),
+                        (m.getAnswerTitle() == null ? "" : m.getAnswerTitle() + "\n") + m.getAnswerBody()))
                 .toList();
         List<KnowledgeRetriever.Hit<AnswerMemory>> ranked = List.of();
         String matchedBy = question.full();
         int tried = 0;
-        for (RetrievalQuery.Candidate candidate : question.candidates()) {
+        // Answer Memory is searched by the same scorer as the two knowledge corpora and stays a
+        // different KIND of evidence: this is what the seller once said, not what is true now. One
+        // physical vector cache, one retrieval loop, and the lane separation the drafter reads
+        // (no reserved slot, at most one passage, never grounding a draft alone) is untouched.
+        KnowledgeSemantics semantics = semanticSearch.forQuestion(orgId, question.full(), candidates);
+        for (RetrievalQuery.Candidate candidate : semantics != null
+                ? List.of(new RetrievalQuery.Candidate(question.full(), RetrievalQuery.Origin.FULL))
+                : question.candidates()) {
             tried++;
-            ranked = KnowledgeRetriever.rank(candidate.text(), candidates, productName);
+            ranked = KnowledgeRetriever.rank(candidate.text(), candidates, productName, semantics);
             if (!ranked.isEmpty()) {
                 matchedBy = candidate.text();
                 break;

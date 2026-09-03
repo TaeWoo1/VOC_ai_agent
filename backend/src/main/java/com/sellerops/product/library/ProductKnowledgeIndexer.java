@@ -34,9 +34,19 @@ public class ProductKnowledgeIndexer {
         return chunks.countBySourceId(sourceId);
     }
 
-    /** Rebuild one document's passages. Old passages go first, so a shortened document shrinks. */
+    /**
+     * Rebuild one document's passages. Old passages go first, so a shortened document shrinks.
+     *
+     * <p><b>The delete is flushed before the inserts, and it has to be.</b> Hibernate orders its
+     * action queue by type — every insert executes before any delete — so without this the second
+     * indexing of a document inserts ordinal 1 while ordinal 1 is still there, and
+     * {@code uq_pk_chunks_ordinal} rejects it. Observed 2026-09-03 as a 500 on
+     * {@code PUT /api/products/knowledge/sources/{id}}: a seller could add a document and could not
+     * correct one.
+     */
     public int index(ProductKnowledgeSource source) {
         chunks.deleteAllBySourceId(source.getId());
+        chunks.flush();
         List<String> parts = KnowledgeText.chunk(source.getBody());
         List<ProductKnowledgeChunk> rows = new ArrayList<>(parts.size());
         for (int i = 0; i < parts.size(); i++) {

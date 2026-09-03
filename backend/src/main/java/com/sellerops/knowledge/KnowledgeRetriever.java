@@ -2,6 +2,7 @@ package com.sellerops.knowledge;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalDouble;
 
 /**
  * The one retrieval loop, over any corpus of quotable passages.
@@ -61,6 +62,42 @@ public final class KnowledgeRetriever {
      */
     public static final int MIN_MATCHED_CHARS = 2;
 
+    /**
+     * The least a passage may resemble the question at all.
+     *
+     * <p>A weak absolute guard under the real gate below, so a corpus of near-noise cannot produce a
+     * citation by having one passage that is marginally less unrelated than the rest.
+     */
+    public static final double MIN_SEMANTIC_COSINE = 0.20;
+
+    /**
+     * How far the best passage must stand out FROM THE OTHERS to count as evidence.
+     *
+     * <p><b>The semantic absence gate, and the measurement that chose its shape.</b> An absolute
+     * cosine cannot decide absence: on the benchmark corpus a Korean colloquial question and the
+     * passage that answers it sit at the same similarity as a compliment and the passage that does
+     * not — 「자꾸 들떠요」 reached 0.16 and 「너무 좋아요 만족합니다」 reached 0.18. What separates them is
+     * not the height of the best passage but its SHAPE against the corpus: one passage well clear of
+     * the others, versus every passage equally mediocre. Leave-one-out, so a two-passage library does
+     * not need twice the separation a ten-passage one needs to say the same thing.
+     *
+     * <p>This is the same argument {@link #MIN_TOPIC_COVERAGE} already makes on the lexical side:
+     * divide by what THIS corpus manages, not by a number chosen elsewhere.
+     */
+    public static final double MIN_SEMANTIC_MARGIN = 0.10;
+
+    /**
+     * A corpus of one passage has nothing to stand out from.
+     *
+     * <p>Named as its own, weaker rule rather than hidden inside the margin: with a single document
+     * the only signal left is the absolute similarity, and a seller with one FAQ must still be able
+     * to be grounded.
+     */
+    public static final double SOLO_MIN_SEMANTIC_COSINE = 0.25;
+
+    /** Passages within this share of the best one are offered beside it. */
+    public static final double SEMANTIC_BAND = 0.90;
+
     private KnowledgeRetriever() {
     }
 
@@ -71,8 +108,16 @@ public final class KnowledgeRetriever {
      * @param ref        the caller's own handle on this passage — never read here
      * @param searchable the passage's comparison text, {@link KnowledgeText#normalize}d, including
      *                   whatever heading the caller wants matched with it
+     * @param quotable   the same passage as it actually reads — title, spacing and punctuation intact.
+     *                   The lexical scorer never looks at it; the semantic lane needs it because a
+     *                   vector of text with the spaces removed is a vector of different text. Null
+     *                   when the caller has no semantic lane, and then only the lexical gates run.
      */
-    public record Candidate<T>(T ref, String searchable) {
+    public record Candidate<T>(T ref, String searchable, String quotable) {
+
+        public Candidate(T ref, String searchable) {
+            this(ref, searchable, null);
+        }
     }
 
     /** A passage that cleared every gate, with the two numbers a caller may report. */
@@ -113,6 +158,60 @@ public final class KnowledgeRetriever {
         // and every caller has a stable secondary key (document order, recency, strength) that this
         // one does not. A sort that is stable in Java keeps the caller's incoming order for ties.
         hits.sort((a, b) -> Double.compare(b.coverage(), a.coverage()));
+        return List.copyOf(hits);
+    }
+
+    /**
+     * The passages of this corpus that are ABOUT the question, best first — or the lexical answer when
+     * the semantic lane cannot see the whole corpus.
+     *
+     * <p><b>The semantic lane decides absence and the lexical lane does not get a second vote.</b>
+     * That order is measured, not preferred: on the benchmark every error the lexical scorer made was
+     * an ADMISSION — 배송 found inside a return policy, 교환 offered for a question about 환불 — so a
+     * union of the two lanes reproduced all of them (wrong-source 11.1%) while adding no answer the
+     * semantic lane did not already have (recall identical at 88.9%). What the lexical lane is for
+     * now is the case it is uniquely good at: being available. With the capability off, an unindexed
+     * passage, or a vendor that did not answer, {@code semantics} sees an incomplete corpus and this
+     * returns exactly what it returned before this package existed.
+     */
+    public static <T> List<Hit<T>> rank(String query, List<Candidate<T>> candidates,
+                                        String discountedSubject, KnowledgeSemantics semantics) {
+        if (semantics == null) {
+            return rank(query, candidates, discountedSubject);
+        }
+        List<Hit<T>> scored = new ArrayList<>(candidates.size());
+        for (Candidate<T> candidate : candidates) {
+            OptionalDouble similarity = candidate.quotable() == null
+                    ? OptionalDouble.empty() : semantics.similarityOf(candidate.quotable());
+            if (similarity.isEmpty()) {
+                // Not seen, not judged. A lane that has not read every passage cannot say the corpus
+                // is silent, so the whole search reverts to the scorer that has read all of them.
+                return rank(query, candidates, discountedSubject);
+            }
+            scored.add(new Hit<>(candidate.ref(), similarity.getAsDouble(), 0));
+        }
+        if (scored.isEmpty()) {
+            return List.of();
+        }
+        scored.sort((a, b) -> Double.compare(b.coverage(), a.coverage()));
+        double best = scored.get(0).coverage();
+        boolean admitted;
+        if (scored.size() < 2) {
+            admitted = best >= SOLO_MIN_SEMANTIC_COSINE;
+        } else {
+            double rest = scored.stream().skip(1).mapToDouble(Hit::coverage).average().orElse(0);
+            admitted = best >= MIN_SEMANTIC_COSINE && best - rest >= MIN_SEMANTIC_MARGIN;
+        }
+        if (!admitted) {
+            return List.of();
+        }
+        List<Hit<T>> hits = new ArrayList<>();
+        for (Hit<T> hit : scored) {
+            if (hit.coverage() < best * SEMANTIC_BAND) {
+                break;
+            }
+            hits.add(hit);
+        }
         return List.copyOf(hits);
     }
 

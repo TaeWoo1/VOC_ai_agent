@@ -1,5 +1,6 @@
 package com.sellerops.review.draft;
 
+import com.sellerops.knowledge.QuestionShape;
 import com.sellerops.knowledge.RetrievalOutcome;
 
 /**
@@ -58,14 +59,15 @@ public enum ReviewKnowledgeNeed {
 
     /**
      * @param grounded       whether any current passage reached the drafter
-     * @param productId      the canonical product, or null when this review resolves to none
+     * @param hasProduct     whether this review resolves to a product knowledge could be registered on
      * @param productOutcome the product lane's own verdict — {@code ABSENT} means the library is empty
      * @param rating         the review's star rating, or null when the source carried none
      * @param boundToIssue   whether this review is recorded evidence for a repeated problem
+     * @param asksSomething  whether the customer put a question to the seller ({@link QuestionShape})
      */
     public static ReviewKnowledgeNeed of(boolean grounded, boolean hasProduct,
                                          RetrievalOutcome productOutcome, Integer rating,
-                                         boolean boundToIssue) {
+                                         boolean boundToIssue, boolean asksSomething) {
         if (grounded) {
             return GROUNDED;
         }
@@ -74,13 +76,11 @@ public enum ReviewKnowledgeNeed {
             // and asking for a standard here would point at a form that cannot be opened.
             return NO_EVIDENCE;
         }
-        if (productOutcome == RetrievalOutcome.ABSENT) {
-            return KNOWLEDGE_NEEDED;
-        }
-        if (boundToIssue) {
-            return KNOWLEDGE_NEEDED;
-        }
-        return rating != null && rating < PRAISE_MIN_RATING ? KNOWLEDGE_NEEDED : NO_EVIDENCE;
+        boolean owed = productOutcome == RetrievalOutcome.ABSENT
+                || asksSomething
+                || boundToIssue
+                || (rating != null && rating < PRAISE_MIN_RATING);
+        return owed ? KNOWLEDGE_NEEDED : NO_EVIDENCE;
     }
 
     /** Whether the screen should ask the seller for anything. */

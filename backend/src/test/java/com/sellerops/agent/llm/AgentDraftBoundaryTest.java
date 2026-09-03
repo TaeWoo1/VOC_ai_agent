@@ -53,7 +53,12 @@ class AgentDraftBoundaryTest {
             // whose contents nobody has read before it leaves. Same one-door treatment, its own flag,
             // its own key, and — uniquely — its own model.
             new String[] {"ImageFactExtractionGenerator", "ImageFactExtractionService.java",
-                    "ImageFactExtractionGenerator.java"});
+                    "ImageFactExtractionGenerator.java"},
+            // The sixth generator (Knowledge Retrieval Quality v1, 2026-09-03). Its payload is the
+            // narrowest of them all — a model name, a dimension count and texts — but it is the only
+            // one that sends something on every SEARCH, so it gets the same one door.
+            new String[] {"KnowledgeEmbeddingGenerator", "KnowledgeEmbeddingService.java",
+                    "KnowledgeEmbeddingGenerator.java"});
 
     /**
      * The classes allowed to name {@code AgentLlmTransport} beside a {@code .post(} call: the three
@@ -63,6 +68,7 @@ class AgentDraftBoundaryTest {
     private static final List<String> TRANSPORT_HOLDERS = List.of(
             "AgentDraftGenerator.java", "AgentPlanGenerator.java", "AgentJudgeGenerator.java",
             "InquirySignalGenerator.java", "ImageFactExtractionGenerator.java",
+            "KnowledgeEmbeddingGenerator.java",
             "JdkAgentLlmTransport.java", "AgentLlmConfiguration.java");
 
     @Test

@@ -4,6 +4,7 @@ import com.sellerops.common.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
@@ -22,7 +23,11 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "product_knowledge_chunks")
+// The migration has carried this unique index since the table was created; declaring it
+// here is what lets a test on a generated schema reproduce what Postgres enforces.
+@Table(name = "product_knowledge_chunks",
+        uniqueConstraints = @UniqueConstraint(name = "uq_pk_chunks_ordinal",
+                columnNames = {"source_id", "ordinal"}))
 public class ProductKnowledgeChunk extends BaseEntity {
 
     @Column(name = "org_id", nullable = false)

@@ -109,6 +109,81 @@ public final class KnowledgeText {
         return Math.min(limit, text.length());
     }
 
+    /** Below this a fragment is not a claim of its own; it is folded into its neighbour. */
+    static final int MIN_SENTENCE_CHARS = 12;
+
+    /**
+     * The units a TITLED passage is compared in: its title, carried on each of its sentences.
+     *
+     * <p>The passage arrives as its document's title, a newline, then the passage — the form the
+     * lanes hand over. The title is prefixed to every unit for the same reason the lexical scorer
+     * matches it with the passage: a seller writes the topic in the title (「규격 안내」) and never
+     * repeats it in the body, so a sentence compared without it is a sentence about nothing in
+     * particular. Measured: 「두께가 생각보다 얇아 아쉬웠습니다」 finds the spec note when its sentences
+     * carry 「규격 안내」 and misses it when they do not.
+     */
+    public static List<String> comparableUnits(String titledPassage) {
+        if (titledPassage == null || titledPassage.isBlank()) {
+            return List.of();
+        }
+        int newline = titledPassage.indexOf('\n');
+        if (newline < 0) {
+            return sentences(titledPassage);
+        }
+        String title = titledPassage.substring(0, newline).strip();
+        String body = titledPassage.substring(newline + 1);
+        List<String> out = new ArrayList<>();
+        for (String sentence : sentences(body)) {
+            out.add(title.isEmpty() ? sentence : title + "\n" + sentence);
+        }
+        return out.isEmpty() ? List.of(titledPassage.strip()) : List.copyOf(out);
+    }
+
+    /**
+     * One passage, as the units it is COMPARED in.
+     *
+     * <p><b>A quotable passage and a comparable unit are different sizes.</b> A passage is sized for a
+     * seller to read as evidence — a FAQ question with its answer, a policy paragraph. Embedded whole,
+     * a 400-character paragraph gives one vector for four claims, and a short question about one of
+     * them is compared against the average of all four. Measured on the benchmark corpus: 「두께」
+     * against a paragraph stating three thicknesses scored 0.310, and against the colour note beside
+     * it 0.306 — the same number, because to a whole-paragraph vector both are «a paragraph about this
+     * molding». Split into sentences the same question separates them, and the passage the seller is
+     * shown does not change: a passage scores what its best sentence scores.
+     *
+     * <p>Never empty for a non-blank passage, so a caller can always ask.
+     */
+    public static List<String> sentences(String passage) {
+        List<String> out = new ArrayList<>();
+        if (passage == null || passage.isBlank()) {
+            return out;
+        }
+        StringBuilder current = new StringBuilder();
+        for (String raw : passage.split("(?<=[.!?])\\s+|\\n+")) {
+            String piece = raw.strip();
+            if (piece.isEmpty()) {
+                continue;
+            }
+            if (current.length() > 0 && current.length() < MIN_SENTENCE_CHARS) {
+                current.append(' ').append(piece);
+                continue;
+            }
+            if (current.length() > 0) {
+                out.add(current.toString());
+                current.setLength(0);
+            }
+            current.append(piece);
+        }
+        if (current.length() > 0) {
+            if (current.length() < MIN_SENTENCE_CHARS && !out.isEmpty()) {
+                out.set(out.size() - 1, out.get(out.size() - 1) + " " + current);
+            } else {
+                out.add(current.toString());
+            }
+        }
+        return out.isEmpty() ? List.of(passage.strip()) : List.copyOf(out);
+    }
+
     /**
      * The stored comparison form: lower-cased, with everything that is not a letter or digit removed.
      *

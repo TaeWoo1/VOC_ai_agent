@@ -3,6 +3,8 @@ package com.sellerops.product.library;
 import com.sellerops.common.ApiException;
 import com.sellerops.knowledge.KnowledgeRetriever;
 import com.sellerops.knowledge.KnowledgeTopic;
+import com.sellerops.knowledge.KnowledgeSemantics;
+import com.sellerops.knowledge.semantic.KnowledgeSemanticSearch;
 import com.sellerops.knowledge.RetrievalOutcome;
 import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.knowledge.KnowledgeText;
@@ -54,16 +56,27 @@ public class ProductKnowledgeLibraryService {
     private final ProductKnowledgeChunkRepository chunks;
     private final ProductVariantRepository variants;
     private final ProductKnowledgeIndexer indexer;
+    private final KnowledgeSemanticSearch semanticSearch;
 
     public ProductKnowledgeLibraryService(ProductRepository products,
                                           ProductKnowledgeSourceRepository sources,
                                           ProductKnowledgeChunkRepository chunks,
                                           ProductVariantRepository variants) {
+        this(products, sources, chunks, variants, KnowledgeSemanticSearch.disabled());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProductKnowledgeLibraryService(ProductRepository products,
+                                          ProductKnowledgeSourceRepository sources,
+                                          ProductKnowledgeChunkRepository chunks,
+                                          ProductVariantRepository variants,
+                                          KnowledgeSemanticSearch semanticSearch) {
         this.products = products;
         this.sources = sources;
         this.chunks = chunks;
         this.variants = variants;
         this.indexer = new ProductKnowledgeIndexer(chunks);
+        this.semanticSearch = semanticSearch;
     }
 
     @Transactional(readOnly = true)
@@ -176,7 +189,11 @@ public class ProductKnowledgeLibraryService {
             // is skipped rather than quoted with no attribution.
             if (source != null) {
                 candidates.add(new KnowledgeRetriever.Candidate<>(chunk,
-                        KnowledgeText.normalize(source.getTitle()) + chunk.getNormalized()));
+                        KnowledgeText.normalize(source.getTitle()) + chunk.getNormalized(),
+                        // The same passage as it reads, for the semantic lane. The lexical scorer
+                        // never looks at it; a vector of text with the spacing removed is a vector
+                        // of different text.
+                        source.getTitle() + "\n" + chunk.getContent()));
             }
         }
         // The product's own name is handed in because it distinguishes no passage in its own library
@@ -187,17 +204,26 @@ public class ProductKnowledgeLibraryService {
         int rejected = 0;
         int tried = 0;
         String matchedBy = question.full();
-        for (RetrievalQuery.Candidate candidate : question.candidates()) {
+        // The semantic lane reads THIS list — already filtered by product, by variant scope and by
+        // whether the seller retired the document — so nothing it can find is anything the lexical
+        // lane could not also have been offered. Null means it could not see the whole corpus, and
+        // then everything below is byte-for-byte what it was before this package.
+        KnowledgeSemantics semantics = semanticSearch.forQuestion(orgId, question.full(), candidates);
+        List<RetrievalQuery.Candidate> forms = semantics != null
+                ? List.of(new RetrievalQuery.Candidate(question.full(), RetrievalQuery.Origin.FULL))
+                : question.candidates();
+        for (RetrievalQuery.Candidate candidate : forms) {
             tried++;
             List<KnowledgePassage> found = new ArrayList<>();
             int rejectedHere = 0;
             for (KnowledgeRetriever.Hit<ProductKnowledgeChunk> hit
-                    : KnowledgeRetriever.rank(candidate.text(), candidates, product.getName())) {
+                    : KnowledgeRetriever.rank(candidate.text(), candidates, product.getName(), semantics)) {
                 ProductKnowledgeChunk chunk = hit.ref();
                 ProductKnowledgeSource source = byId.get(chunk.getSourceId());
                 // The document's declared topic comes from its title only — the body may mention
                 // 배송비 inside a return policy without being about shipping.
-                if (!KnowledgeTopic.applicable(asked, KnowledgeTopic.of(source.getTitle()))) {
+                if (!KnowledgeTopic.applicable(asked, KnowledgeTopic.of(source.getTitle()))
+                        || !KnowledgeTopic.remedyApplicable(question.text(), source.getTitle())) {
                     rejectedHere++;
                     continue;
                 }

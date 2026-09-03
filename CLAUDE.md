@@ -659,6 +659,71 @@ outcome에 이름으로도 닿지 않는다. **§6 라이브 QA**(재기동 후 
 충돌, 대화의 **읽기용** 리뷰 artifact는 여전히 bare `/reviews`, 그리고 Phase 2 라이브 실행은 보류·승인은
 판매자의 것).
 
+**`docs/knowledge_retrieval_quality_v1.md`** (Knowledge Retrieval Quality v1 — 2026-09-03. 판매자가
+올바른 Knowledge를 넣어도 고객의 표현이 조금만 달라지면 못 찾던 병목 하나만 닫는다. Source / Canonical
+Knowledge / Answer Memory / Style 분리 · PRODUCT/ORG scope · provenance · active · 문서 import ·
+evidence contract · Candidate는 **그대로**. **감사가 좋은 소식을 먼저 줬다** — 세 lane이
+`KnowledgeRetriever.rank` **한 함수**로 수렴하고 scope·active·variant·topic 거절은 전부 그 앞에서 끝나므로
+바꿀 seam이 하나였다. 병목은 셋으로 갈렸고 하나만 「의미」였다: **부재 게이트 희석**(분모가 모든 내용
+어절이라 「두께」 FOUND · 「두께가 생각보다 얇아 아쉬웠습니다」 0.13으로 탈락) · **활용/띄어쓰기**(떨어지↔떨어질은
+조사도 어미도 아니다) · **진짜 동의**(들뜨다→접착). 그리고 **lexical 자신이 wrong-source의 출처였다**
+(「제주도인데 며칠」→「반품과 환불 안내」, 그 문서에 `도착`이 있다 — 겹침이 진짜라 어떤 임계값도 못 가른다).
+**구현 전에 benchmark를 만들었다**: 4도메인 fixture(몰딩·주방매트·선풍기·회사정책 + 「교환만 있는 회사」·
+「문서 하나뿐인 회사」) 소스 15 · 질문 46(A~I + J 규격토큰 + K 단일문서), Recall@4 · wrong-source ·
+no-evidence precision 셋을 함께 본다(recall만 보면 전부 돌려주는 retriever가 이긴다). harness는 production
+클래스를 그대로 부르고 벡터만 checked-in 캐시라 **CI는 벤더를 부르지 않는다**. **측정이 답한 것 다섯**:
+① 절대 cosine 임계는 원리적으로 실패한다(「자꾸 들떠요」 0.159 vs 「너무 좋아요 만족합니다」 0.176 — 분포가
+겹쳐 recall과 no-evidence를 동시에 못 산다), ② **차원은 품질 변수**(같은 모델 256차원은 margin에서
+no-evidence 33%까지), ③ **비교 단위는 passage가 아니라 문장**(「두께」 vs 세 두께를 적은 문단 0.310 · 옆
+색상 노트 0.306 — 통짜 문단에겐 둘 다 「이 몰딩에 대한 글」이고, 판매자가 보는 passage는 그대로 두고 자기
+최고 문장의 점수를 받는다), ④ **부재는 높이가 아니라 모양**이다 ⇒ leave-one-out margin(「최고 passage가
+나머지로부터 얼마나 떨어져 있나」 — lexical의 `MIN_TOPIC_COVERAGE`가 이미 하는 주장과 같다: 이 코퍼스가
+해낸 것으로 나눈다), ⑤ **hybrid는 측정으로 기각**(선택 지점에서 lexical union은 recall을 하나도 더하지
+못하고 wrong-source만 0%→11.1%로 되돌린다 — lexical의 오류는 전부 admission이다). 결과
+**recall 38.9% → 86.1% · top1-wrong 5.6% → 0% · any-wrong 11.1% → 0% · no-evidence 90% 유지**.
+채택: `text-embedding-3-large` 1024차원 · 문장 단위 · LOO margin 0.10 · band 0.90 · 단일 문서는 자기
+약한 규칙(절대값). **semantic이 부재를 판정하고 lexical은 그것이 불가능할 때의 답**이다(capability off ·
+미색인 passage · 벤더 무응답 ⇒ 하나라도 못 보면 전체가 예전 그대로 — 절반만 읽고 내린 부재는 절반에 대한
+부재다). **scope는 재판정되지 않는다** — semantic lane은 lane이 만든 candidate 목록만 보고 구조 테스트가
+repository·findAll·isActive를 이름으로 막는다(은퇴한 매뉴얼은 목록에 없어 아무리 가까워도 못 찾는다).
+후보 사다리는 semantic에서 쓰지 않는다(그 넷은 lexical 분모 희석 우회용이고 벡터엔 그 분모가 없다 · 형태당
+호출 1회). **교환 ≠ 반품**: 남은 wrong-source는 한 모양이었다(「반품 배송비」가 「교환 안내」를 0.51로 가져와
+왕복 6000원을 반품비 3000원 자리에) ⇒ **enum은 쪼개지 않고**(`EXCHANGE_RETURN`은 플래너 토큰이자 판매자
+받은함 필터이고 거기선 한 칸이 옳다) 근거 자격을 정할 때만 `remedyApplicable`로 더 잘게 묻는다 — 거절 전용 ·
+제목/질문 텍스트만 · 둘 다 이름 지은 문서는 둘 다 근거. **저장소는 기존 PostgreSQL**(pgvector 없음 —
+이 배포에 확장이 없고 필요도 없다: 검색은 늘 상품 하나/회사 하나로 경계지어져 실측 4·6·26행이며 그 크기에서
+ANN은 마이크로초 선형 스캔에 운영 표면과 비결정성만 더한다), V92 `knowledge_embedding`은
+**content-addressed**(`org, model, dimensions, sha256`)라 **lifecycle이 사라진다** — 수정하면 새 해시라
+낡은 벡터는 다시 조회되지 않고, 되돌리면 캐시 적중으로 **임베딩 0회**(실측 32→33행), 은퇴는 candidate
+목록에서 빠지므로 표를 건드리지 않는다. **질문 벡터는 저장하지 않는다**(고객 문장의 두 번째 사본 금지).
+쓰기는 검색 시점 `REQUIRES_NEW`(벤더 호출이 판매자의 저장 트랜잭션에 들어가지 않는다) · 백그라운드 잡 0.
+**일곱 번째 LLM capability, 기본값 OFF** — 자기 flag·key·door(`AgentDraftBoundaryTest` 표가 여섯 번째 행을
+얻었다)·payload floor(model·dimensions·texts **셋뿐**, 일곱 중 가장 좁다). **정직하게 이름 붙이는 새 노출
+하나**: 매 검색마다 **고객의 질문**이 나간다 — `NO_ANSWER_BASIS` 초안과 판매자의 검색 상자는 오늘 모델을
+0회 부르므로 이것은 widening이고, 그래서 머지가 아니라 **배포 결정**이다(꺼 두면 바이트 단위로 이전과 동일).
+**§7 실행 중 기존 결함 하나를 찾아 고쳤다** — `PUT …/knowledge/sources/{id}`가 **500**이었다
+(`uq_pk_chunks_ordinal`: Hibernate가 모든 insert를 모든 delete보다 먼저 실행한다). 지식 **추가**는 되고
+**수정**만 안 돼서 아무도 못 봤다; 두 인덱서에 `flush()` 한 줄, 그리고 회귀 테스트가 실제로 빨개지게 하려고
+두 chunk 엔티티가 마이그레이션이 늘 갖고 있던 유니크 인덱스를 이제 `@Table`에 **선언**한다. **§9 Knowledge
+Need는 retrieval과 분리해 감사**했다 — 기준(「이 리뷰에 답하려면 판매자 고유 사실이 실제로 필요한가」)이
+닿지 못하는 경우는 정확히 하나, **별점이 반대를 가리키는 ★5 질문 리뷰**였다 ⇒ `QuestionShape`(토픽이 아니라
+**문법**: `QueryWords`가 갖고 있던 닫힌 목록의 의문 부분집합, 낱말 추가 0) 절을 **하나 더하고 아무것도 빼지
+않았다**. **빼려다 되돌린 것을 기록한다** — 「빈 라이브러리면 무조건 묻는다」를 지우면 §E 칭찬은 깨끗해지지만
+★4 「괜찮긴한데 잘떨어지네요」를 잃는다(별점이 볼 수 없는 불만이고 이 lane이 존재하는 이유). 라이브가 하나
+더 드러냈고 고쳤다: 회사 배송 정책으로 GROUNDED가 된 초안이 같은 화면에서 「이 **상품**의 기준이 있나요」를
+묻고 있었다 ⇒ grounded 판정을 「**어느 lane이든** 답했는가」로. **라이브 before/after**(일회용 QA org ·
+리뷰는 파일 업로드 · 지식은 판매자 CRUD · 실제 판매자 데이터 0 · DB 직접 수정 0 · **c329471c 무접촉**):
+검색 **3/15 → 12/15**, 초안 **1/5 → 3/5 GROUNDED**이고 「두께가 생각보다 얇아 아쉬웠습니다」가 판매자 자신의
+규격 노트(1.2/1.6/2.0mm)를 인용해 답한다; 칭찬은 before/after 모두 요청 0. **지연·비용 실측**: warm
+137–408ms(질문 임베딩 1회) · **cold 2,734ms**(그 코퍼스 첫 검색) vs lexical 5–29ms, 벡터 **32행 131KB**
+(행당 4KB), 검색당 질문 ≈20토큰 — 다만 임베딩은 판매자 **일일 AI 예산에 청구되지 않고** 그것은
+**product-owner 결정**으로 올린다. **overfit 점검**: production 코드에 「실리콘」·「전선몰딩」·「선바로」·
+「떨어」·특정 org/product id·이번 QA 문장 **0건**. **여전히 실패하는 것**: 「잘떨어지네요」·「자꾸 들떠요」
+(가장 큰 남은 gap) · 「방수 되나요?」가 부착 안내를 가져오는 false evidence 1건(m=0.12면 닫히지만 「두께가
+생각보다…」를 잃는다) · 「언제쯤 받아볼 수 있을까요?」 · polarity 미검출 · 첫 검색 2.7초. backend **3,737** ·
+실패 0 · **마켓플레이스 호출 0 · WRITE 0 · 승인 0 · 실행 0 · 마이그레이션 1** ⇒ evidence 행 없음.
+**계약이 바뀌어 테스트 2건을 다시 썼다**)
+
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은
 `deploy/pilot/`: compose overlay(`ports: !reset []`로 raw port 공개 0, `restart: unless-stopped`, JVM heap 고정, Cafe24

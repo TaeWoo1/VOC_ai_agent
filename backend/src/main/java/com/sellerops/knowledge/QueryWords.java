@@ -106,6 +106,37 @@ final class QueryWords {
     }
 
     /**
+     * The interrogative pronouns, and the endings that make a sentence a question.
+     *
+     * <p><b>A partition of the two lists above, not a third list.</b> Every entry here already
+     * appears in {@link #FUNCTION} or {@link #ENDINGS}; what this adds is the distinction those lists
+     * did not need to make, because dropping a word from a query and recognising a question are
+     * different jobs. 습니다 and 입니다 are endings and are not here; 습니까 and 나요 are.
+     */
+    private static final Set<String> INTERROGATIVE_WORDS = Set.of(
+            "무엇", "무슨", "뭐", "뭔", "언제", "어디", "어느", "어떤", "어떻게", "어떡", "어떠",
+            "얼마", "얼만", "왜", "몇");
+
+    private static final List<String> INTERROGATIVE_ENDINGS = List.of(
+            "습니까", "합니까", "니까", "나요", "가요", "까요", "는지", "은지", "인지", "인가", "런가");
+
+    /** Whether this word asks something — see {@link QuestionShape}, its only caller. */
+    static boolean isInterrogative(String word) {
+        if (word == null || word.isEmpty()) {
+            return false;
+        }
+        if (INTERROGATIVE_WORDS.contains(word)) {
+            return true;
+        }
+        for (String ending : INTERROGATIVE_ENDINGS) {
+            if (word.length() > ending.length() && word.endsWith(ending)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Tails that may be left over when only the head of a query word is found in a passage.
      *
      * <p>Case particles and the handful of 보조사 that follow a noun — a closed grammatical class. Their
