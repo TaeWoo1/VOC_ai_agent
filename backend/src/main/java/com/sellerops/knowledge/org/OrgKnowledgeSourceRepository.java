@@ -16,4 +16,10 @@ public interface OrgKnowledgeSourceRepository extends JpaRepository<OrgKnowledge
     List<OrgKnowledgeSource> findAllByOrgIdAndDocumentNameIsNotNull(UUID orgId);
 
     long countByOrgId(UUID orgId);
+
+    /** How many operating rules a person wrote — the 운영 기준 number. See the product repository's note. */
+    long countByOrgIdAndDocumentNameIsNull(UUID orgId);
+
+    /** How many uploaded files landed in the org corpus — the 자료 number, org side. */
+    long countByOrgIdAndDocumentNameIsNotNull(UUID orgId);
 }

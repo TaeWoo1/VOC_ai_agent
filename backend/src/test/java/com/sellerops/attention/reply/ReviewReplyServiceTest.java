@@ -629,6 +629,35 @@ class ReviewReplyServiceTest {
         assertThat(view().draft().body()).isEqualTo("합성-답변 수정본");
     }
 
+    /**
+     * Knowledge Setup &amp; Inbox UX v1 §9 / QA J — <b>a knowledge save never quietly rewrites an
+     * approved reply.</b>
+     *
+     * <p>The whole point of the quick-add loop is that saving a fact re-asks for the draft. So the
+     * one sequence that must not exist is: seller approves an exact sentence, someone adds knowledge,
+     * the regenerate replaces the text, and the standing approval carries over onto words nobody
+     * read. The approval freeze is what makes that impossible — a regenerate on an approved review
+     * is a 409, through the SAME gate a hand-typed save goes through, and the approved version and
+     * its fingerprint do not move.
+     */
+    @Test
+    void aRegenerateCannotReplaceTheTextAnApprovalIsBoundTo() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        approveHead();
+        String approvedFingerprint = view().draft().contentFingerprint();
+
+        assertThatThrownBy(() -> service.generateDraft(org, account, ref, user))
+                .isInstanceOf(ApiException.class)
+                // The APPROVAL is why, not a missing capability — the message names the way out.
+                .hasMessageContaining("승인된 초안은 수정할 수 없습니다");
+
+        // Untouched: same version, same bytes, same approval.
+        assertThat(view().draft().version()).isEqualTo(1);
+        assertThat(view().draft().contentFingerprint()).isEqualTo(approvedFingerprint);
+        assertThat(view().approval().state()).isEqualTo("APPROVED");
+    }
+
     @Test
     void approvingRequiresResponseNeeded() {
         triage(TriageDisposition.RESPONSE_NEEDED);

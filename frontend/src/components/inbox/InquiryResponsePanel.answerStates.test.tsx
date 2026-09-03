@@ -237,7 +237,7 @@ describe("the three answer states", () => {
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
     await user.click(await screen.findByRole("button", { name: "답변 기준 추가" }));
     await user.type(
-      screen.getByLabelText("답변 기준 내용"),
+      screen.getByLabelText("고객에게 안내할 내용"),
       "몰딩 안쪽으로 전선 3가닥까지 들어갑니다.",
     );
     await user.click(screen.getByRole("button", { name: /저장하고 다시 답변 만들기/ }));
@@ -263,7 +263,7 @@ describe("the three answer states", () => {
     open();
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
     await user.click(await screen.findByRole("button", { name: "답변 기준 추가" }));
-    await user.type(screen.getByLabelText("답변 기준 내용"), "설치는 벽면에 붙입니다.");
+    await user.type(screen.getByLabelText("고객에게 안내할 내용"), "설치는 벽면에 붙입니다.");
     await user.click(screen.getByRole("button", { name: /저장하고 다시 답변 만들기/ }));
 
     await waitFor(() => expect(generateInquiryDraft).toHaveBeenCalledTimes(2));
@@ -272,6 +272,28 @@ describe("the three answer states", () => {
     // does not claim the gap is closed.
     expect(await screen.findByText(/답변 기준을 저장했습니다/)).toBeInTheDocument();
     expect(screen.getByTestId("answer-state")).toHaveAttribute("data-basis", "NO_ANSWER_BASIS");
+  });
+
+  it("H — the save is acknowledged even when the regenerate could not run", async () => {
+    // The AI draft capability off, the budget spent, a vendor that did not answer: the regenerate
+    // produces no state card, and the confirmation used to live INSIDE that card — so the seller
+    // wrote a fact, pressed save, and the screen told them only that the machinery was unavailable.
+    generateInquiryDraft.mockResolvedValueOnce(NO_BASIS).mockResolvedValueOnce({
+      ...NO_BASIS,
+      unavailableMessage: "AI 답변 초안 기능이 켜져 있지 않습니다.",
+    });
+    const user = userEvent.setup();
+    open();
+    await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
+    await user.click(await screen.findByRole("button", { name: "답변 기준 추가" }));
+    await user.type(screen.getByLabelText("고객에게 안내할 내용"), "몰딩 안쪽으로 전선 3가닥까지 들어갑니다.");
+    await user.click(screen.getByRole("button", { name: /저장하고 다시 답변 만들기/ }));
+
+    await waitFor(() => expect(generateInquiryDraft).toHaveBeenCalledTimes(2));
+    // Saving is what THEY did, and it happened. One fact, and not the second one.
+    expect(await screen.findByTestId("basis-saved")).toHaveTextContent("답변 기준을 저장했습니다.");
+    expect(screen.getByTestId("basis-saved")).not.toHaveTextContent("다시 만들었습니다");
+    expect(screen.queryByTestId("answer-state")).toBeNull();
   });
 
   it("the machinery failing is not a knowledge gap — no state card, no library errand", async () => {

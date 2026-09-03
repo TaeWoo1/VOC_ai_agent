@@ -358,7 +358,7 @@ class KnowledgeGapResolutionTest {
                 allowingQuota(), variants, new DraftEvidenceSnippets(productChunks, orgChunks, memories),
                 new com.sellerops.product.detail.ProductDetailEnrichmentTrigger(
                         null, null, null, null, List.of(), false),
-                null, null, null);
+                null, null, null, null);
     }
 
     private static AgentQuotaService allowingQuota() {

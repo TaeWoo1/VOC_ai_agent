@@ -388,7 +388,7 @@ class AnswerStyleDraftTest {
                 allowingQuota(), variants, new DraftEvidenceSnippets(productChunks, orgChunks, memories),
                 new com.sellerops.product.detail.ProductDetailEnrichmentTrigger(
                         null, null, null, null, List.of(), false),
-                null, styles, null);
+                null, styles, null, null);
     }
 
     private static AgentQuotaService allowingQuota() {

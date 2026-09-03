@@ -120,6 +120,32 @@ public class KnowledgeDocumentService {
     /** Every uploaded document this org has, product and org corpora together, newest first. */
     @Transactional(readOnly = true)
     public List<KnowledgeDocumentView> list(UUID orgId) {
+        return everything(orgId);
+    }
+
+    /**
+     * The documents for ONE product — what the product screen lists beside its 상품 지식.
+     *
+     * <p>A separate query rather than a filter over the org's whole list, because a company with
+     * three hundred products would read three hundred products' documents to show one product's two.
+     * Org documents are excluded: they apply everywhere, and a shipping policy listed under a
+     * cutting board reads as a fact about the cutting board.
+     */
+    @Transactional(readOnly = true)
+    public List<KnowledgeDocumentView> listForProduct(UUID orgId, UUID productId) {
+        Product product = products.findById(productId)
+                .filter(p -> p.getOrgId().equals(orgId))
+                .orElseThrow(() -> ApiException.notFound("상품을 찾을 수 없습니다."));
+        List<KnowledgeDocumentView> out = new ArrayList<>();
+        for (ProductKnowledgeSource source
+                : productSources.findAllByOrgIdAndProductIdAndDocumentNameIsNotNull(orgId, productId)) {
+            out.add(view(source, chunkCountOf(source), product));
+        }
+        out.sort((a, b) -> b.uploadedAt().compareTo(a.uploadedAt()));
+        return List.copyOf(out);
+    }
+
+    private List<KnowledgeDocumentView> everything(UUID orgId) {
         List<KnowledgeDocumentView> out = new ArrayList<>();
         for (ProductKnowledgeSource source : productSources.findAllByOrgIdAndDocumentNameIsNotNull(orgId)) {
             Product product = products.findById(source.getProductId()).orElse(null);

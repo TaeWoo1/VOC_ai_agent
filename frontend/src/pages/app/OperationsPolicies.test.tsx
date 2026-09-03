@@ -121,7 +121,7 @@ describe("운영 정책 / 답변 기준", () => {
     listOrgKnowledge.mockRejectedValue(new Error("boom"));
     renderScreen();
 
-    expect(await screen.findByText("운영 정책을 불러오지 못했습니다.")).toBeInTheDocument();
+    expect(await screen.findByText("운영 기준을 불러오지 못했습니다.")).toBeInTheDocument();
     expect(screen.queryByText("아직 등록된 기준이 없습니다")).not.toBeInTheDocument();
   });
 });

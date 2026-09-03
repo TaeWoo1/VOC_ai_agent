@@ -32,6 +32,15 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     Optional<Product> findByOrgIdAndSku(UUID orgId, String sku);
 
+    /**
+     * How many products this org holds — the 「상품 정보」 line on the knowledge screen.
+     *
+     * <p>It is there so a seller who has just connected a channel is not told they have nothing.
+     * What reviewnary already knows without being taught is the catalogue it collected, and stating
+     * that number is the difference between 「지식을 입력하세요」 and 「이미 읽은 것이 있습니다」.
+     */
+    long countByOrgId(UUID orgId);
+
     Optional<Product> findFirstByOrgIdAndName(UUID orgId, String name);
 
     /**

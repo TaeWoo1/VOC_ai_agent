@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { SectionHeader } from "../../components/ui/SectionHeader";
@@ -6,10 +7,18 @@ import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
 import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { ProductKnowledgeLibrary } from "../../components/product/ProductKnowledgeLibrary";
+import {
+  KnowledgeDocumentAdd,
+  KnowledgeDocumentList,
+} from "../../components/knowledge/KnowledgeDocuments";
 import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
 import { count } from "../../lib/format";
-import type { KnowledgeCoverageView, ProductKnowledgeView } from "../../lib/types";
+import type {
+  KnowledgeCoverageView,
+  KnowledgeDocumentView,
+  ProductKnowledgeView,
+} from "../../lib/types";
 import { priceLabel, sellingStatusLabel } from "../../lib/productVocabulary";
 import { useAgentSurface } from "../../lib/agentPanel";
 
@@ -165,6 +174,23 @@ export function ProductDetail() {
         <ProductKnowledgeLibrary productId={productId} />
       </section>
 
+      {/*
+        자료 — the material the seller already had for THIS product (Knowledge Setup & Inbox UX v1 §5).
+
+        The API has taken a product-scoped document since Knowledge Sources & Acquisition v1 and no
+        screen ever offered one, so a manual could only be filed company-wide — and the 자료 list on
+        the knowledge screen showed product documents it had no way to create. Uploading from here
+        means the product is already chosen: a seller holding a manual for this listing is never
+        asked which listing it is for.
+      */}
+      <section className="space-y-3">
+        <SectionHeader
+          title="자료"
+          hint="이 상품의 사용설명서·FAQ 같은 파일. 올리면 답변 근거로 씁니다."
+        />
+        <ProductDocuments productId={productId} />
+      </section>
+
       {/* REFERENCE — what we hold about this product, and what we do not. */}
       <section className="space-y-3">
         <SectionHeader title="우리가 갖고 있는 정보" />
@@ -235,5 +261,34 @@ function Figure({ label, value, emphasis }: { label: string; value: number; emph
       <p className="text-sm font-medium text-muted">{label}</p>
       <p className="mt-1.5 text-2xl font-bold tabular-nums text-ink">{count(value)}</p>
     </div>
+  );
+}
+
+/**
+ * This product's uploaded files, and the control that adds one.
+ *
+ * <p>Its own read (`?productId=`) rather than a filter over the company's whole list: a shop with
+ * three hundred products would read three hundred products' documents to show this one's two.
+ */
+function ProductDocuments({ productId }: { productId: string }) {
+  const [documents, setDocuments] = useState<KnowledgeDocumentView[] | null>(null);
+
+  const load = useCallback(async () => {
+    setDocuments(await api.getKnowledgeDocuments(productId).catch(() => []));
+  }, [productId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <>
+      {documents === null ? (
+        <p className="text-sm text-muted">불러오는 중…</p>
+      ) : (
+        <KnowledgeDocumentList documents={documents} onChanged={load} />
+      )}
+      <KnowledgeDocumentAdd scope="PRODUCT" productId={productId} onImported={load} />
+    </>
   );
 }

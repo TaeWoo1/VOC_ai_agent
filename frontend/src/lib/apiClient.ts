@@ -81,6 +81,7 @@ import type {
   GeneratedReviewDraftView,
   KnowledgeCandidateView,
   KnowledgeDocumentView,
+  KnowledgeSummaryView,
   ReviewReplySubmissionRunResponse,
   ReviewExecutionView,
   ReviewAcquisitionRunResponse,
@@ -1410,8 +1411,20 @@ export const api = {
     return data;
   },
 
-  async getKnowledgeDocuments(): Promise<KnowledgeDocumentView[]> {
-    const { data } = await http.get<KnowledgeDocumentView[]>("/api/knowledge/documents");
+  // Every document, or one product's. The product screen passes an id so it does not read a
+  // three-hundred-product company's material to list one product's two files.
+  async getKnowledgeDocuments(productId?: string): Promise<KnowledgeDocumentView[]> {
+    const { data } = await http.get<KnowledgeDocumentView[]>(
+      productId
+        ? `/api/knowledge/documents?productId=${encodeURIComponent(productId)}`
+        : "/api/knowledge/documents",
+    );
+    return data;
+  },
+
+  // What reviewnary knows, as numbers — the 「알고 있는 정보」 line.
+  async getKnowledgeSummary(): Promise<KnowledgeSummaryView> {
+    const { data } = await http.get<KnowledgeSummaryView>("/api/knowledge/summary");
     return data;
   },
 

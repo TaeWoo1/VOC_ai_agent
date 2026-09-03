@@ -512,7 +512,7 @@ class InquiryDraftComposerTest {
                 com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels, FRESH));
         return new InquiryDraftComposer(workItems, inquiries, draftService, evidence, retriever, model,
                 quota, variants, new DraftEvidenceSnippets(productChunks, orgChunks, memories),
-                trigger, imageKnowledge, null, profiles);
+                trigger, imageKnowledge, null, profiles, null);
     }
 
     /** A passage whose chunk really exists, for the paths that go back to the source to read it. */

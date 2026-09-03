@@ -151,11 +151,11 @@ describe("InquiryResponsePanel — the missing answer basis", () => {
     await user.click(await screen.findByRole("button", { name: "답변 기준 추가" }));
 
     await user.type(
-      screen.getByLabelText("답변 기준 내용"),
+      screen.getByLabelText("고객에게 안내할 내용"),
       "3호 몰딩에는 전선을 4가닥까지 넣을 수 있습니다.",
     );
     await waitFor(() => expect(screen.getByRole("option", { name: "3호" })).toBeInTheDocument());
-    await user.selectOptions(screen.getByLabelText("적용 범위"), "v3");
+    await user.selectOptions(screen.getByLabelText("규격"), "v3");
     await user.click(screen.getByRole("button", { name: /저장하고 다시 답변 만들기/ }));
 
     await waitFor(() =>
@@ -181,7 +181,7 @@ describe("InquiryResponsePanel — the missing answer basis", () => {
     await user.click(await screen.findByRole("button", { name: /초안 만들기/ }));
     await user.click(await screen.findByRole("button", { name: "답변 기준 추가" }));
 
-    await user.type(screen.getByLabelText("답변 기준 내용"), "몰딩 안에는 전선을 3가닥까지 넣을 수 있습니다.");
+    await user.type(screen.getByLabelText("고객에게 안내할 내용"), "몰딩 안에는 전선을 3가닥까지 넣을 수 있습니다.");
     await user.click(screen.getByRole("button", { name: /저장하고 다시 답변 만들기/ }));
 
     await waitFor(() =>

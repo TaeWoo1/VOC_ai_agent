@@ -14,6 +14,8 @@ import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.draft.dto.GeneratedDraftView;
 import com.sellerops.inquiry.draft.dto.KnowledgeGapView;
+import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.candidate.KnowledgeCandidateService;
 import com.sellerops.inquiry.reply.InquiryReplyDraftService;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
@@ -125,6 +127,12 @@ public class InquiryDraftComposer {
     static final String STYLE_FORBIDDEN_PHRASE = "사용하지 않기로 한 표현이 들어가 초안을 저장하지 "
             + "않았습니다. 다시 생성해 보시거나, 설정에서 그 표현을 확인해 주세요.";
 
+    /**
+     * 확인 필요 — where an ask that a draft could not answer is filed. Optional: a knowledge inbox
+     * must never be able to fail a draft, and a context without one drafts exactly as before.
+     */
+    private final KnowledgeCandidateService candidates;
+
     public InquiryDraftComposer(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                 InquiryReplyDraftService drafts, InquiryDraftEvidenceRepository evidence,
                                 InquiryEvidenceRetriever retriever, AgentDraftService model,
@@ -132,7 +140,8 @@ public class InquiryDraftComposer {
                                 DraftEvidenceSnippets snippets,
                                 ProductDetailEnrichmentTrigger detail,
                                 ProductDetailImageKnowledge images, AnswerStyleService styles,
-                                SellerProfileService profiles) {
+                                SellerProfileService profiles,
+                                KnowledgeCandidateService candidates) {
         this.workItems = workItems;
         this.inquiries = inquiries;
         this.drafts = drafts;
@@ -146,6 +155,7 @@ public class InquiryDraftComposer {
         this.images = images;
         this.styles = styles;
         this.profiles = profiles;
+        this.candidates = candidates;
     }
 
     /**
@@ -186,7 +196,56 @@ public class InquiryDraftComposer {
         return compose(orgId, workItemId, actor, null);
     }
 
+    /**
+     * Compose, then file what could not be answered in 확인 필요.
+     *
+     * <p>(Knowledge Setup &amp; Inbox UX v1 §3) The review lane has filed its gaps since Grounded
+     * Review Drafting v1; the inquiry lane produced the same verdict, returned it to whoever was
+     * looking at that one inquiry, and dropped it. So the inbox that is supposed to collect
+     * 「reviewnary가 모르는 것」 held half of them, and the half it held was the half a seller was
+     * least likely to be standing in front of.
+     *
+     * <p>Nothing about the draft moves. The filing runs after the version is written, is idempotent
+     * by the question, and cannot throw into the caller: a knowledge inbox must never be able to
+     * fail a draft.
+     */
     private GeneratedDraftView compose(UUID orgId, UUID workItemId, String actor, ToneHint tone) {
+        GeneratedDraftView view = composeDraft(orgId, workItemId, actor, tone);
+        fileGap(orgId, view.knowledgeGap());
+        return view;
+    }
+
+    /**
+     * File one ask, when BOTH lanes came back empty about a noun the customer actually wrote.
+     *
+     * <p>Both lanes, because a question the operating rules answered is not a gap in the product's
+     * knowledge; and a noun the customer wrote, because {@code missingSubject} is quoted from the
+     * question rather than classified, and an ask a seller cannot recognise is an ask they will not
+     * answer. Everything else — a partial hit, an unresolved 규격, a vendor failure — is a different
+     * fact and files nothing.
+     */
+    private void fileGap(UUID orgId, KnowledgeGapView gap) {
+        if (candidates == null || gap == null) {
+            return;
+        }
+        String subject = gap.missingSubject();
+        if (subject == null || subject.isBlank()
+                || !ABSENT.equals(gap.productOutcome()) || !ABSENT.equals(gap.policyOutcome())) {
+            return;
+        }
+        String scope = gap.productId() == null ? "ORG" : "PRODUCT";
+        try {
+            candidates.noteGap(orgId, scope, gap.productId(), subject,
+                    "「" + subject + "」에 대해 고객에게 안내할 공식 기준이 필요합니다.");
+        } catch (RuntimeException e) {
+            // Enum-free and content-free: the draft is what the seller asked for, and it is already saved.
+        }
+    }
+
+    /** The retrieval outcome that means "this lane has nothing about it" — {@code RetrievalOutcome.ABSENT}. */
+    private static final String ABSENT = RetrievalOutcome.ABSENT.name();
+
+    private GeneratedDraftView composeDraft(UUID orgId, UUID workItemId, String actor, ToneHint tone) {
         InquiryWorkItem workItem = workItems.findById(workItemId)
                 .filter(w -> w.getOrgId().equals(orgId))
                 .orElseThrow(() -> ApiException.notFound("문의 작업을 찾을 수 없습니다."));

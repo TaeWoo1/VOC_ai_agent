@@ -4,10 +4,17 @@ import { Panel } from "../../components/ui/Panel";
 import { Btn } from "../../components/ui/Btn";
 import { Empty } from "../../components/ui/Empty";
 import { api } from "../../lib/apiClient";
+import { ORG_TOPICS } from "../../lib/knowledgeWords";
 import type { OrgKnowledgeType, OrgKnowledgeView } from "../../lib/types";
 
 /**
- * 운영 정책 / 답변 기준 — the rules this company answers by.
+ * 운영 기준 — the rules this company answers by.
+ *
+ * <b>One name.</b> This screen was 「운영 정책 / 답변 기준」, the knowledge screen linked to it as
+ * 「운영 정책」, and an uploaded shipping policy appeared here AND in 자료 under a third heading —
+ * three names for one set of rows, none of which said the other existed. `lib/knowledgeWords.ts`
+ * owns the seller-facing vocabulary now, and this is 운영 기준 everywhere (Knowledge Setup & Inbox
+ * UX v1 §1).
  *
  * <b>Why this screen exists at all.</b> 상품 지식 answers questions about a product. Most real
  * questions are not about a product: in the Demo Org's own unanswered backlog the two most common
@@ -22,16 +29,7 @@ import type { OrgKnowledgeType, OrgKnowledgeView } from "../../lib/types";
  * passages is a rule an answer can never quote, and the seller should learn that here rather than
  * from a reply that quietly did not use it.
  */
-const TYPES: Array<{ value: OrgKnowledgeType; label: string; hint: string }> = [
-  { value: "SHIPPING_POLICY", label: "배송", hint: "출고까지 걸리는 기간, 배송비, 도서산간" },
-  { value: "CANCELLATION_POLICY", label: "주문 취소", hint: "언제까지, 어떤 방법으로 취소되는지" },
-  { value: "EXCHANGE_REFUND_POLICY", label: "교환·반품·환불", hint: "기간, 조건, 배송비 부담" },
-  { value: "PAYMENT_POLICY", label: "결제", hint: "결제 수단, 입금 확인, 부분 결제" },
-  { value: "TAX_INVOICE", label: "세금계산서", hint: "발행 조건과 필요한 서류" },
-  { value: "CASH_RECEIPT", label: "현금영수증", hint: "발급 조건과 신청 방법" },
-  { value: "GENERAL_CS_FAQ", label: "공통 안내", hint: "위에 없는, 자주 묻는 것" },
-  { value: "OTHER", label: "기타", hint: "아직 분류하지 않은 기준" },
-];
+const TYPES = ORG_TOPICS;
 
 export function OperationsPolicies() {
   const [sources, setSources] = useState<OrgKnowledgeView[] | null>(null);
@@ -57,7 +55,7 @@ export function OperationsPolicies() {
   return (
     <>
       <PageHead
-        title="운영 정책 / 답변 기준"
+        title="운영 기준"
         description="배송·취소·교환·증빙처럼 상품과 무관한 질문에 답할 때 쓰는 기준입니다."
       />
 
@@ -66,7 +64,7 @@ export function OperationsPolicies() {
         description="여기에 적힌 내용만 답변의 근거로 쓰입니다. 적혀 있지 않은 조건이나 기간은 만들어 쓰지 않습니다."
       >
         {loadError ? (
-          <p className="text-warn">운영 정책을 불러오지 못했습니다.</p>
+          <p className="text-warn">운영 기준을 불러오지 못했습니다.</p>
         ) : sources === null ? (
           <p className="text-muted">불러오는 중…</p>
         ) : sources.length === 0 && editing === null ? (

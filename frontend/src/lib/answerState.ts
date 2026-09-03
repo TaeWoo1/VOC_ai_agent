@@ -1,4 +1,5 @@
-import type { GeneratedDraftView } from "./types";
+import { ruleTypeForAskedTopic } from "./knowledgeWords";
+import type { GeneratedDraftView, OrgKnowledgeType } from "./types";
 
 /** The three answers to "can this question be answered". Mirrors com.sellerops.inquiry.draft.AnswerBasisState. */
 export type AnswerBasis = GeneratedDraftView["answerBasis"];
@@ -24,6 +25,26 @@ export interface AnswerStateView {
   action: string | null;
   /** The product the missing knowledge would be attached to, when there is one. */
   productId: string | null;
+  /**
+   * Which corpus a quick-add here should write into.
+   *
+   * <b>PRODUCT when the inquiry resolved to a product; ORG when it did not and the question named
+   * an operating topic; null when neither.</b> One editor, chosen by what the question was about —
+   * a question with no product and no topic has nowhere honest to save, and a box with nowhere to
+   * save is worse than no box.
+   *
+   * Before Knowledge Setup & Inbox UX v1 only the PRODUCT case existed, so 「제주도인데 배송이 며칠
+   * 걸리나요?」 — a question with a perfectly ordinary answer the company has — named what was
+   * missing and offered nothing to do about it.
+   */
+  gapScope: "PRODUCT" | "ORG" | null;
+  /**
+   * The operating rule TYPE to preselect, when the question named a topic that has one.
+   *
+   * Crossed through `ruleTypeForAskedTopic`, never passed through raw: `knowledgeGap.topic` speaks
+   * the ASKED vocabulary (`SHIPPING`) and a write speaks the STORED one (`SHIPPING_POLICY`).
+   */
+  topic: OrgKnowledgeType | null;
 }
 
 /**
@@ -35,11 +56,15 @@ export interface AnswerStateView {
  */
 export function answerStateOf(generated: GeneratedDraftView): AnswerStateView | null {
   if (generated.unavailableMessage) return null;
+  const gap = generated.knowledgeGap ?? null;
+  const topic = ruleTypeForAskedTopic(gap?.topic);
   return {
     basis: generated.answerBasis,
     note: generated.answerBasisNote,
     action: generated.answerBasisAction,
     productId: generated.productId,
+    gapScope: generated.productId ? "PRODUCT" : topic ? "ORG" : null,
+    topic,
   };
 }
 

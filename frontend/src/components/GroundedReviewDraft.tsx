@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { isAxiosError } from "axios";
 import type { DraftEvidenceView, GeneratedReviewDraftView, ReviewKnowledgeGapView } from "../lib/types";
 import { api } from "../lib/apiClient";
@@ -167,23 +166,17 @@ export function GroundedReviewDraft({
 /**
  * One ask, with the way to answer it right there.
  *
- * <p>A PRODUCT gap opens the same quick-add the inquiry screen uses — the product is known, so the
- * seller writes the sentence and nothing else. An ORG gap has no in-place form yet and links to the
- * settings screen that owns operating rules; saying so plainly beats a button that opens nothing.
+ * <p>Both scopes open the same quick-add the inquiry screen uses, with the corpus fixed by what was
+ * missing. Until Knowledge Setup &amp; Inbox UX v1 an ORG gap was a LINK to the settings screen —
+ * the one gap the product could name and the one it made the seller leave the review for, write a
+ * title and a body on another screen, come back, and regenerate by hand.
  */
 function Gap({ gap, onSaved }: { gap: ReviewKnowledgeGapView; onSaved: () => void | Promise<void> }) {
+  const scope = gap.scope === "PRODUCT" && gap.productId ? "PRODUCT" : "ORG";
   return (
     <div className="flex flex-col gap-1">
       <p className="break-keep text-sm text-ink">{gap.question}</p>
-      {gap.scope === "PRODUCT" && gap.productId ? (
-        <AnswerBasisQuickAdd productId={gap.productId} onSaved={onSaved} />
-      ) : (
-        <p className="text-sm">
-          <Link to="/settings/policies" className="font-semibold text-brand-700 hover:underline">
-            운영 정책에 추가하기
-          </Link>
-        </p>
-      )}
+      <AnswerBasisQuickAdd scope={scope} productId={gap.productId} onSaved={onSaved} />
     </div>
   );
 }

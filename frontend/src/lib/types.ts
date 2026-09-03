@@ -1203,6 +1203,24 @@ export interface KnowledgeDocumentView {
  * answers) or `DRAFT_GAP` (a draft could not answer something) — because the two call for different
  * reading. `evidenceCount` is a COUNT of the seller's own answers, never a confidence score.
  */
+/**
+ * What reviewnary knows about this company, as numbers. Mirrors `KnowledgeSummaryView`.
+ *
+ * The first three PARTITION the two knowledge corpora — hand-written product facts, hand-written
+ * operating rules, and everything that came out of an uploaded file — so a seller can add them up.
+ * `products` is not part of that sum: it is what reviewnary read from the channels without being
+ * taught, and it is on the screen so a company that has connected but written nothing is not told
+ * it has nothing. `pastAnswers` is Answer Memory, which is consulted and never official.
+ */
+export interface KnowledgeSummaryView {
+  productKnowledge: number;
+  operatingRules: number;
+  documents: number;
+  pastAnswers: number;
+  products: number;
+  needsConfirmation: number;
+}
+
 export interface KnowledgeCandidateView {
   id: string;
   scope: "PRODUCT" | "ORG" | string;
@@ -1609,6 +1627,36 @@ export interface GeneratedDraftView {
   /** Seller Context v1-B: the registered 회사 정보 was read as wording context. A flag, never the text. */
   companyContextUsed?: boolean;
   unavailableMessage: string | null;
+  /**
+   * What the retrieval established, as closed values — mirrors `KnowledgeGapView`.
+   *
+   * The backend has returned it since Knowledge Capture v1 so a caller that wants to ASK for the
+   * missing basis reads the verdict instead of parsing the sentence. The screen reads it to decide
+   * WHICH corpus the quick-add should write into: a question that resolved to no product but named
+   * an operating topic is a gap in the company's rules, and until Knowledge Setup & Inbox UX v1 it
+   * was offered no way to answer it at all.
+   */
+  knowledgeGap?: InquiryKnowledgeGapView | null;
+}
+
+/** Mirrors com.sellerops.inquiry.draft.dto.KnowledgeGapView. Closed values only; no sentences. */
+export interface InquiryKnowledgeGapView {
+  productId: string | null;
+  /**
+   * The operating topic the question names (exactly one), or null.
+   *
+   * A `KnowledgeTopic` token (`SHIPPING`), which is NOT an `OrgKnowledgeType` (`SHIPPING_POLICY`).
+   * Cross it with `ruleTypeForAskedTopic` before it reaches a write.
+   */
+  topic: string | null;
+  topics: string[];
+  /** The property noun the question is about, quoted from the question. */
+  missingSubject: string | null;
+  productOutcome: string | null;
+  policyOutcome: string | null;
+  applicability: string | null;
+  variantId: string | null;
+  policyDeclaresTopic: boolean;
 }
 
 /**

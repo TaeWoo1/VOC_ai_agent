@@ -181,6 +181,19 @@ public class KnowledgeCandidateService {
      * <p>The seller may edit the sentence before accepting — that is what {@code content} carries —
      * and the source is written with {@code SELLER_ENTERED_KNOWLEDGE} authorship, because by pressing
      * this the seller is entering it. The candidate did not author anything; it asked.
+     *
+     * <p><b>A gap's stored text is the QUESTION, and a question is never an answer.</b>
+     * (Knowledge Setup &amp; Inbox UX v1 §3) A {@link #ORIGIN_REPEATED_ANSWER} candidate carries a
+     * sentence this seller has already written to customers many times, so accepting it with no
+     * edit means 「yes, that is our standard」 and falling back to the stored text is right. A
+     * {@link #ORIGIN_DRAFT_GAP} candidate carries 「'…'에 대해 안내하는 공식 기준이 있나요?」, and
+     * accepting THAT with no edit filed the question itself as the company's official knowledge —
+     * measured on 2026-09-03, a product FAQ whose body was 「…공식 기준이 있나요? 이 상품에 저장된
+     * 지식에서 찾지 못했습니다.」, indexed and citable, so the next customer to ask would have been
+     * answered with reviewnary's own confusion. There is no fallback for a gap: the seller writes
+     * the fact, or nothing is written.
+     *
+     * @throws ApiException 400 when a drafting gap is accepted with no content
      */
     @Transactional
     public KnowledgeCandidateView accept(UUID orgId, UUID candidateId, String title, String content,
@@ -191,7 +204,11 @@ public class KnowledgeCandidateService {
         if (!STATE_OPEN.equals(row.getState())) {
             throw ApiException.conflict("이미 처리한 항목입니다.");
         }
-        String body = content == null || content.isBlank() ? row.getContent() : content.strip();
+        boolean written = content != null && !content.isBlank();
+        if (!written && ORIGIN_DRAFT_GAP.equals(row.getOrigin())) {
+            throw ApiException.badRequest("고객에게 안내할 내용을 적어 주세요.");
+        }
+        String body = written ? content.strip() : row.getContent();
         String heading = title == null || title.isBlank() ? row.getSubject() : title.strip();
         UUID sourceId;
         if ("PRODUCT".equals(row.getScope()) && row.getProductId() != null) {

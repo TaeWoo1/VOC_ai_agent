@@ -508,6 +508,30 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
               back to the customer — appeared nowhere, so a seller read a polite request for the
               규격 as an answer that had come out short.
             */}
+            {/*
+              Said once, on the pass right after a save, and OUTSIDE the state card.
+
+              It used to live inside it, which meant a save whose regenerate could not run — the AI
+              draft capability off, the day's budget spent, a vendor that did not answer — rendered
+              no card and so no acknowledgement at all: the seller wrote a fact, pressed save, and
+              the screen said only that the machinery was unavailable. Saving is what THEY did, and
+              it happened whether or not the regenerate produced anything.
+
+              Which sentence depends on what actually followed. A state card means the regenerate
+              produced a verdict; no card means it did not, and claiming 「답변을 다시 만들었습니다」
+              would be the screen reporting work that nobody did.
+            */}
+            {basisSaved ? (
+              <p
+                className="mt-3 break-keep text-sm font-medium leading-relaxed text-good"
+                role="status"
+                data-testid="basis-saved"
+              >
+                {answerState
+                  ? "답변 기준을 저장했습니다. 저장한 내용으로 답변을 다시 만들었습니다."
+                  : "답변 기준을 저장했습니다."}
+              </p>
+            ) : null}
             <AnswerStateCard
               state={answerState}
               justSaved={basisSaved}
@@ -846,6 +870,12 @@ function storedAnswerState(
     note: draft.answerBasisNote,
     action: draft.answerBasisAction,
     productId,
+    // The stored row records WHAT was decided, not what the customer's words named. So a reload can
+    // still offer the product corpus — the row knows the product — and cannot claim an operating
+    // topic, because that fact was never written down. Guessing one here would file a shipping rule
+    // under a heading nobody chose.
+    gapScope: productId ? "PRODUCT" : null,
+    topic: null,
   };
 }
 
@@ -869,13 +899,6 @@ function AnswerStateCard({
         good ? "border-good/40 bg-good/5" : "border-warn/40 bg-warn/5"
       }`}
     >
-      {/* Said once, at the top, and only on the pass right after a save. It reports the two things
-          that happened and neither more nor less — the state below is the result. */}
-      {justSaved ? (
-        <p className="mb-2 break-keep text-sm font-medium leading-relaxed text-good">
-          답변 기준을 저장했습니다. 저장한 내용으로 답변을 다시 만들었습니다.
-        </p>
-      ) : null}
       <p className="break-keep text-lg font-semibold leading-relaxed text-ink">{state.note}</p>
       {state.action ? (
         <p className="mt-1.5 break-keep text-base leading-relaxed text-ink">{state.action}</p>
@@ -890,12 +913,22 @@ function AnswerStateCard({
 
         Saying what is missing and offering nothing to do about it is where this state stopped until
         2026-08-27: the seller read 「답변 기준이 필요합니다」, and the next identical question read it
-        again. It appears only with a product to attach the sentence to — with none, the line above
-        already says that binding a product is the first thing to fix, and a knowledge box with
-        nowhere to save would be worse than no box.
+        again. The corpus is chosen by what the question was about (`gapScope`) — a product when the
+        inquiry resolved to one, the company's rules when it did not but the question named an
+        operating topic. Until Knowledge Setup & Inbox UX v1 only the first case had a way out, so
+        「제주도인데 배송이 며칠 걸리나요?」 named what was missing and offered nothing.
+
+        `gapScope` is null when neither: no product to attach a sentence to and no topic to file it
+        under. A box with nowhere to save is worse than no box, and the line above already says
+        binding a product is the first thing to fix.
       */}
-      {noBasis && state.productId ? (
-        <AnswerBasisQuickAdd productId={state.productId} onSaved={onSavedBasis} />
+      {noBasis && state.gapScope ? (
+        <AnswerBasisQuickAdd
+          scope={state.gapScope}
+          productId={state.productId}
+          topic={state.topic}
+          onSaved={onSavedBasis}
+        />
       ) : null}
       {/*
         Where the sentence they just wrote now lives (§12). Offered after a save rather than always:
