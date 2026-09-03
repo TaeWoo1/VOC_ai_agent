@@ -82,5 +82,19 @@ public record ReviewReplyPrepView(
         Integer rating,
         String channelReplyState,
         String productName,
-        String reviewDate) {
+        String reviewDate,
+        /**
+         * What wrote the head draft — {@code MODEL}, {@code RULE}, or null for a version written
+         * before reviewnary recorded an author (Grounded Review Drafting v1). Null is «not recorded»,
+         * never «a person typed it»: the screen says nothing rather than guessing.
+         */
+        String draftAuthorKind,
+        /**
+         * What the head draft was written FROM, in the order the drafter was shown it — the stored
+         * citations, with their excerpts read back from the source documents at display time.
+         *
+         * <p>Empty for a template-floor draft and for every version written before V90, which are
+         * the same honest report: nothing was shown to a model, because none was called.
+         */
+        java.util.List<com.sellerops.inquiry.draft.dto.DraftEvidenceView> draftEvidence) {
 }

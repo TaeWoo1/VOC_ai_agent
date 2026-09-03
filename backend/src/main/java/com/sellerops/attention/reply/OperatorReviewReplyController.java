@@ -3,6 +3,7 @@ package com.sellerops.attention.reply;
 import com.sellerops.attention.reply.dto.ReviewReplyApprovalRequest;
 import com.sellerops.attention.reply.dto.ReviewReplyApprovalResponse;
 import com.sellerops.attention.reply.dto.ReviewReplyDraftRequest;
+import com.sellerops.review.draft.dto.GeneratedReviewDraftView;
 import com.sellerops.attention.reply.dto.ReviewReplyDraftView;
 import com.sellerops.attention.reply.dto.ReviewReplyExecuteRequest;
 import com.sellerops.attention.reply.dto.ReviewReplyExecutionObserveRequest;
@@ -99,6 +100,27 @@ public class OperatorReviewReplyController {
                                           @RequestBody ReviewReplyDraftRequest request) {
         return service.saveDraft(principal.orgId(), accountId, actionRef, request.body(),
                 request.baseVersion(), principal.userId());
+    }
+
+    /**
+     * <b>Write one grounded draft version</b> (Grounded Review Drafting v1).
+     *
+     * <p>POST, and it takes no body: everything the composer needs is the review, and the review is
+     * the URL. It writes exactly one new version through the same append-only path a typed save uses,
+     * and it makes at most one model call — charged to the org's daily AI budget like every other
+     * draft, so a regenerate is a call rather than a free retry.
+     *
+     * <p>Returns 200 with the saved version, its citations and what is still missing; 404 when the
+     * ref is not addressable from this account; 409 for a review that is not {@code RESPONSE_NEEDED},
+     * for a draft frozen by a standing approval, or in a deployment with no composer wired.
+     *
+     * <p>It reaches no marketplace and it approves nothing.
+     */
+    @PostMapping("/draft/generate")
+    public GeneratedReviewDraftView generateDraft(@AuthenticationPrincipal AuthPrincipal principal,
+                                                  @PathVariable UUID accountId,
+                                                  @PathVariable String actionRef) {
+        return service.generateDraft(principal.orgId(), accountId, actionRef, principal.userId());
     }
 
     /**

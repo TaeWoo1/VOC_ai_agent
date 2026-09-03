@@ -30,6 +30,8 @@ function prepView(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
     productName: "가을 니트 가디건 CHARCOAL",
     reviewDate: "2026-05-10",
     rating: 2,
+    draftAuthorKind: null,
+    draftEvidence: [],
     redactedBody: "합성-리뷰-본문: 배송이 너무 늦었습니다",
     bodyRedacted: true,
     triageDisposition: "RESPONSE_NEEDED",

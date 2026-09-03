@@ -99,7 +99,7 @@ public class RuleBasedReviewReplyProvider implements ReviewReplyProposalProvider
      * order, then the fallback — the selection this class has made since it was written, and the one
      * the 2026-09-03 measurement restored.
      */
-    static ReviewReplyTemplateKey keyFor(ReviewReplyContext context) {
+    public static ReviewReplyTemplateKey keyFor(ReviewReplyContext context) {
         Integer rating = context.rating();
         if (rating != null && rating >= POSITIVE_MIN_RATING) {
             return ReviewReplyTemplateKey.POSITIVE;

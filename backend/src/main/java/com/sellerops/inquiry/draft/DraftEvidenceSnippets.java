@@ -58,17 +58,34 @@ public class DraftEvidenceSnippets {
                 DraftEvidenceView.snippetOf(textOf(row)));
     }
 
+    /**
+     * One stored citation as a view, addressed by its values rather than by the inquiry row type
+     * (Grounded Review Drafting v1).
+     *
+     * <p>The review lane stores the same four fields in its own table, and the excerpt lookup is a
+     * function of the kind and the two ids — nothing about it is specific to a work item. Duplicating
+     * this reader for reviews would give the two screens two ways to render the same citation.
+     */
+    public DraftEvidenceView viewOf(String kind, UUID sourceId, UUID chunkId, String title,
+                                    String locator) {
+        return new DraftEvidenceView(kind, InquiryDraftEvidence.scopeLabelOf(kind), title, locator,
+                sourceId, chunkId, DraftEvidenceView.snippetOf(textOf(kind, sourceId, chunkId)));
+    }
+
     private String textOf(InquiryDraftEvidence row) {
-        String kind = row.getKind();
+        return textOf(row.getKind(), row.getSourceId(), row.getChunkId());
+    }
+
+    private String textOf(String kind, UUID sourceId, UUID chunkId) {
         if (InquiryDraftEvidence.KIND_PRODUCT_KNOWLEDGE.equals(kind)) {
-            return chunk(row.getChunkId(), productChunks, ProductKnowledgeChunk::getContent);
+            return chunk(chunkId, productChunks, ProductKnowledgeChunk::getContent);
         }
         if (InquiryDraftEvidence.KIND_ORG_POLICY.equals(kind)) {
-            return chunk(row.getChunkId(), orgChunks, OrgKnowledgeChunk::getContent);
+            return chunk(chunkId, orgChunks, OrgKnowledgeChunk::getContent);
         }
         if (InquiryDraftEvidence.KIND_ANSWER_MEMORY.equals(kind)) {
             // A past answer is stored whole rather than chunked, so the citation names the memory.
-            return chunk(row.getSourceId(), memories, AnswerMemory::getAnswerBody);
+            return chunk(sourceId, memories, AnswerMemory::getAnswerBody);
         }
         return null;
     }

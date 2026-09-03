@@ -15,6 +15,8 @@ import com.sellerops.attention.triage.ReviewTriage;
 import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.attention.triage.TriageDisposition;
 import com.sellerops.common.ApiException;
+import com.sellerops.review.draft.ReviewDraftComposer;
+import com.sellerops.review.draft.dto.GeneratedReviewDraftView;
 import com.sellerops.common.RedactedBody;
 import com.sellerops.common.ReviewBodyFingerprint;
 import com.sellerops.common.ReviewIdFingerprint;
@@ -99,9 +101,11 @@ public class ReviewReplyService {
                               ReviewReplyApprovalService approvals,
                               ReviewReplyOutcomeService outcomes,
                               ReviewReplyProposalProvider provider,
-                              ExecutableIdentityResolver identity, ChannelRepository channels) {
+                              ExecutableIdentityResolver identity, ChannelRepository channels,
+                              ReviewDraftComposer composer) {
         this(reviews, products, sellerAccounts, triages, drafts, approvals, outcomes, provider,
                 Clock.systemUTC(), identity, channels);
+        this.composer = composer;
     }
 
     /** Test seam without a resolver: every minted intent records {@code NONE}, which the target route refuses. */
@@ -136,6 +140,16 @@ public class ReviewReplyService {
         this.clock = clock;
     }
 
+    /**
+     * The grounded-drafting composer, or null in a context that has none.
+     *
+     * <p>Set by the Spring constructor only. Every test seam below leaves it null, and
+     * {@link #generateDraft} answers 409 rather than throwing — a context with no composer is a
+     * deployment fact, not a caller error, and the review screen's other twelve operations are
+     * unaffected by it.
+     */
+    private ReviewDraftComposer composer;
+
     /** Everything the preparation surface needs for one review, in one read. */
     public ReviewReplyPrepView view(UUID orgId, UUID accountId, String actionRef) {
         Review review = authorize(orgId, accountId, actionRef);
@@ -154,6 +168,29 @@ public class ReviewReplyService {
         requireResponseNeeded(orgId, review.getId());
         requireNotFrozen(orgId, review.getId());
         return drafts.save(orgId, review.getId(), ACTOR_PREFIX + actorUserId, body, baseVersion);
+    }
+
+    /**
+     * <b>Generate one grounded draft version</b> (Grounded Review Drafting v1).
+     *
+     * <p>Through the SAME three gates a hand-typed save goes through, because it produces the same
+     * kind of row: this account owns the review, the review is 대응 필요, and no approval stands. The
+     * approval freeze is why a regenerate on an approved review is a 409 rather than a silent
+     * replacement — the seller approved an exact sentence, and the binding is to that sentence.
+     *
+     * <p>The composer owns everything after those gates and reaches no marketplace: three retrieval
+     * lanes against this database, and at most one model call.
+     */
+    public GeneratedReviewDraftView generateDraft(UUID orgId, UUID accountId, String actionRef,
+                                                  UUID actorUserId) {
+        Review review = authorize(orgId, accountId, actionRef);
+        requireResponseNeeded(orgId, review.getId());
+        requireNotFrozen(orgId, review.getId());
+        if (composer == null) {
+            throw ApiException.conflict("AI 초안 기능을 사용할 수 없습니다.");
+        }
+        RedactedBody body = VocPreviewSanitizer.redactFullBody(review.getBody());
+        return composer.compose(orgId, review, body.text(), ACTOR_PREFIX + actorUserId);
     }
 
     /**
@@ -566,7 +603,12 @@ public class ReviewReplyService {
                 // rule is shared rather than re-implemented, so this panel cannot start rendering a
                 // SKU while the row beside it withholds one.
                 productDisplayName(orgId, review),
-                kstDate(review.getReceivedAt()));
+                kstDate(review.getReceivedAt()),
+                head == null ? null : head.getAuthorKind(),
+                // The head version's stored citations. One indexed read; empty when the version was
+                // the template floor, written before V90, or there is no draft at all.
+                head == null || composer == null ? java.util.List.of()
+                        : composer.evidenceFor(orgId, review.getId(), head.getVersion()));
     }
 
     /**

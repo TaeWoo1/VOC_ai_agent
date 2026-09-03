@@ -248,4 +248,102 @@ public final class AgentDraftPrompt {
         }
         return sb.toString().strip();
     }
+
+    /* ─────────────────────── Grounded Review Drafting v1 (2026-09-03) ─────────────────────── */
+
+    /**
+     * <b>The review lane's system turn — a different job, so a different prompt.</b>
+     *
+     * <p>It is not the inquiry prompt with a word changed. A private reply answers a question the
+     * customer asked; a <b>public</b> reply answers a verdict the customer published, is read by
+     * every future shopper, and can never be taken back. Three rules follow that the inquiry prompt
+     * has no reason to carry: never contradict or correct the customer, never explain away what they
+     * experienced, and never write a title — a review reply has no subject line.
+     *
+     * <p><b>The seven promises this product refuses to invent</b> (product-owner, Grounded Review
+     * Drafting v1) are named here one by one — cause, usage instructions, delivery timing, exchange
+     * or refund, compensation, re-shipment, and any internal action — because a model that is told
+     * only 「근거에 없는 것은 쓰지 마세요」 still writes 「빠르게 조치하겠습니다」, which is all seven at
+     * once. And the prompt is not the enforcement: {@code ReviewClaimGuard} reads the generated text
+     * afterwards and REFUSES a draft that promises something the seller's own evidence does not, the
+     * way the forbidden-phrase check refuses one that breaks the org's wording rule. Asking politely
+     * is not a control.
+     */
+    public static String reviewSystem() {
+        return """
+               당신은 한국 이커머스 판매자의 운영 보조입니다. 판매자가 받은 상품 후기 하나를 읽고, \
+               판매자가 그대로 쓰거나 고쳐 쓸 수 있는 공개 답글 초안을 한국어로 작성합니다.
+
+               이 글의 성격:
+               - 이 답글은 상품 페이지에 공개되며 다른 고객도 읽습니다. 되돌릴 수 없습니다.
+               - 사람이 검토하고 직접 등록합니다. 시스템이 대신 등록하지 않습니다.
+
+               규칙:
+               - 고객의 경험을 부정하거나 정정하지 마세요. 고객이 틀렸다고 쓰지 마세요.
+               - 「판매자가 등록한 근거」에 적혀 있지 않은 내용은 쓰지 마세요. 특히 다음은 근거에 \
+               그렇게 적혀 있지 않는 한 절대 쓰지 마세요:
+                 (1) 문제의 원인 (2) 사용·설치·보관 방법 (3) 배송 일정 (4) 교환·반품·환불 \
+               (5) 보상·할인 (6) 재발송 (7) 내부 조치·개선 약속.
+               - 위 항목에 대해 근거가 없으면, 그 항목을 아예 언급하지 마세요. \
+               「확인 후 안내드리겠습니다」 같은 유예 문장도 쓰지 마세요.
+               - 근거가 없으면 감사와 공감까지만 쓰고 끝내세요. 짧아도 됩니다.
+               - 근거는 [상품 정보] [운영 정책] [과거 답변]로 구분되어 있습니다. 상품의 사양·사용법은 \
+               [상품 정보]에서만, 배송·교환·환불 같은 회사 규정은 [운영 정책]에서만 가져오세요. \
+               [과거 답변]은 표현을 맞추는 데만 쓰고 사실의 출처로 쓰지 마세요.
+               - 「회사 기본 문구」가 주어지면 그 회사가 평소 쓰는 말투와 인사·마무리 표현을 참고하세요. \
+               표현 참고일 뿐이며 사실의 근거가 아닙니다. 거기 적힌 문장을 그대로 옮겨 써도 되지만, \
+               위의 사실·근거 규칙과 충돌하면 언제나 위 규칙이 우선합니다.
+               - 고객의 이름, 연락처, 주문번호를 쓰지 마세요.
+               - 별점을 언급하지 마세요.
+               - 2~4문장으로 씁니다. 존댓말로 쓰고 인사와 마무리를 포함합니다.
+
+               반드시 아래 형태의 JSON 객체 하나만 출력하세요. 다른 텍스트, 설명, 코드펜스는 금지입니다.
+               {"comments":"<답글 본문>"}
+               """;
+    }
+
+    /**
+     * <b>The review lane's user turn — its own payload floor, and it is NARROWER than the inquiry's.</b>
+     *
+     * <p>Exactly two classes of the seller's content leave: the review body as the customer wrote it
+     * (already redacted by {@code VocPreviewSanitizer} before it reaches here) and the seller-authored
+     * passages retrieved for it. Plus, when the org set one, its own wording preferences.
+     *
+     * <p><b>What is deliberately absent, and why each one is a decision.</b> No order state — a review
+     * names no order, and a section saying 「(확인된 값 없음)」 would invite a model to reason about one.
+     * No 규격 line — a review asks nothing, so there is no question whose answer could move with the
+     * option. No company description — a public reply is not the place to introduce the company, and
+     * every sentence it could add is one the evidence did not support. No rating: it decides which
+     * template is the floor, and telling the model would invite 「별점 4점 주셔서 감사합니다」, which is
+     * both a fact about the customer's private choice and a sentence no seller asked for. No product
+     * name, no ids, no channel, no dates.
+     */
+    public static String reviewUser(java.util.List<AgentDraftGenerator.Passage> knowledge,
+                                    String reviewBody, String voice) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("고객 후기:\n").append(reviewBody == null ? "" : reviewBody);
+        sb.append("\n\n판매자가 등록한 근거:\n");
+        if (knowledge == null || knowledge.isEmpty()) {
+            // Said out loud, for the reason the inquiry lane says it: an absent section reads as
+            // "not relevant here", and this one has to read as "there is nothing, so claim nothing".
+            sb.append("(없음)");
+        } else {
+            for (AgentDraftGenerator.Passage passage : knowledge) {
+                sb.append("- ");
+                if (passage.scopeLabel() != null && !passage.scopeLabel().isBlank()) {
+                    sb.append('[').append(passage.scopeLabel()).append("] ");
+                }
+                sb.append('[').append(passage.heading() == null ? "" : passage.heading()).append("] ")
+                        .append(passage.text() == null ? "" : passage.text()).append('\n');
+            }
+        }
+        // The company's own review wording, as a wording reference. It is the org's SAVED template
+        // body — a whole reply that promises nothing — so copying a sentence out of it is safe, and
+        // its own footer says it is not evidence.
+        if (voice != null && !voice.isBlank()) {
+            sb.append("\n\n회사 기본 문구(표현 참고):\n").append(voice.strip())
+                    .append("\n위 문구는 이 회사가 쓰는 표현이며 사실의 근거가 아닙니다.");
+        }
+        return sb.toString().strip();
+    }
 }

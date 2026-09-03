@@ -52,6 +52,8 @@ function prepView(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
     productName: "가을 니트 가디건 CHARCOAL",
     reviewDate: "2026-05-10",
     rating: 2,
+    draftAuthorKind: null,
+    draftEvidence: [],
     ...over,
   };
 }
@@ -159,11 +161,22 @@ describe("VocItemReplyPrep", () => {
     expect(screen.getByLabelText("답변 초안")).toHaveValue("합성-추천-초안");
   });
 
-  /** 규칙 기반, stated — never overstated as AI (Frontend Spec §10.3). */
-  it("labels the suggestion rule-based and never says AI", async () => {
+  /**
+   * Who wrote it, stated — never overstated (Frontend Spec §10.3, Grounded Review Drafting v1).
+   *
+   * <p>The claim this test used to make was 「never says AI」, which was right while no model could
+   * reach a review reply. One can now, so the honest rule is narrower and stronger: the panel says
+   * AI wrote the draft ONLY when the saved version records that a model did.
+   */
+  it("never calls a template draft AI — the author is read from the saved version", async () => {
     await renderPanel();
-    expect(screen.getByText(/규칙 기반/)).toBeTruthy();
-    expect(document.body.textContent).not.toMatch(/\bAI\b/);
+    expect(screen.getByText(/저장된 문구에서 시작합니다/)).toBeTruthy();
+    expect(screen.queryByText(/AI가 썼습니다/)).toBeNull();
+  });
+
+  it("says a model wrote it when the saved version says a model wrote it", async () => {
+    await renderPanel(prepView({ draftAuthorKind: "MODEL" }));
+    expect(screen.getByText(/저장된 지식을 근거로 AI가 썼습니다/)).toBeTruthy();
   });
 
   it("says so when something was hidden, so a token is not a mystery", async () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { GroundedReviewDraft } from "./GroundedReviewDraft";
 import { api } from "../lib/apiClient";
 import { copyText } from "../lib/clipboard";
 import { SecureRandomUnavailableError, newCommandId } from "../lib/commandId";
@@ -503,15 +504,32 @@ export function VocItemReplyPrep({
         ) : null}
       </div>
 
-      {/* 규칙 기반, stated plainly (Frontend Spec §10.3). The label is the FE's, not the
-          server's `providerKind` echoed raw — an enum name is a contract, not copy. */}
+      {/* Grounded Review Drafting v1: the seller asks for a draft written from what this company
+          actually knows. It writes into the editor below and does nothing else — the save, the
+          approval and the send are the same three controls they were before. */}
+      {canSave ? (
+        <GroundedReviewDraft
+          accountId={accountId}
+          actionRef={actionRef}
+          storedEvidence={prep.draftEvidence ?? []}
+          onDrafted={(generated) => {
+            setBody(generated);
+            setDirty(false);
+            // The panel re-reads its own state (the head version, its author, its citations) beside
+            // the draft rather than in front of it.
+            void refresh();
+          }}
+        />
+      ) : null}
+
       <div className="flex flex-col gap-1">
         <label htmlFor={editorId} className="text-sm font-semibold text-muted">
           답변 초안
         </label>
         <p className="text-sm text-muted">
-          아래 초안은 <strong className="font-semibold">규칙 기반 추천</strong>입니다. 내용을 확인하고
-          직접 고쳐 주세요.
+          {prep.draftAuthorKind === "MODEL"
+            ? "아래 초안은 저장된 지식을 근거로 AI가 썼습니다. 내용을 확인하고 직접 고쳐 주세요."
+            : "아래 초안은 저장된 문구에서 시작합니다. 내용을 확인하고 직접 고쳐 주세요."}
         </p>
         <textarea
           id={editorId}

@@ -78,6 +78,7 @@ import type {
   ReviewReplyDraft,
   ReviewReplyOutcomeResponse,
   ReviewReplyPrep,
+  GeneratedReviewDraftView,
   ReviewReplySubmissionRunResponse,
   ReviewExecutionView,
   ReviewAcquisitionRunResponse,
@@ -159,6 +160,21 @@ const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
 const TOKEN_KEY = "sellerops_token";
 
 const http = axios.create({ baseURL: BASE_URL, timeout: 8000 });
+
+/**
+ * How long a call that WAITS ON A MODEL may take, overriding the shared 8s.
+ *
+ * <p>Eight seconds is the right bound for a read: past it, something is wrong and saying so beats
+ * spinning. It is the wrong bound for a request whose server-side work is a vendor round-trip.
+ * Measured on the real Demo Org, 2026-09-03: review reply generations completed in 2.8s, 4.4s, 4.4s,
+ * 5.1s, 6.8s, 9.7s, 11.5s and 14.1s. The four over eight seconds were aborted by this client while
+ * the backend finished and SAVED the version — so the seller read 「초안을 만들지 못했습니다」 over a
+ * draft that existed, and pressing the button again spent another model call on it.
+ *
+ * <p>It is per-request rather than a raised default, because loosening every read's failure detection
+ * to accommodate the two calls that talk to a vendor is the wrong trade.
+ */
+const MODEL_TIMEOUT_MS = 60_000;
 
 http.interceptors.request.use((config) => {
   const token = getToken();
@@ -798,7 +814,8 @@ export const api = {
    * previous one can no longer be spent. It reaches no marketplace.
    */
   async generateInquiryDraft(workItemId: string): Promise<GeneratedDraftView> {
-    const { data } = await http.post<GeneratedDraftView>(`/api/inquiries/${workItemId}/draft/generate`);
+    const { data } = await http.post<GeneratedDraftView>(`/api/inquiries/${workItemId}/draft/generate`,
+      undefined, { timeout: MODEL_TIMEOUT_MS });
     return data;
   },
 
@@ -1343,6 +1360,22 @@ export const api = {
     const { data } = await http.put<ReviewReplyDraft>(
       `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/draft`,
       body,
+    );
+    return data;
+  },
+
+  // Grounded Review Drafting v1: write ONE new draft version from the seller's own knowledge.
+  //
+  // No body — the review is the URL and the composer reads everything else. It writes an
+  // append-only version through the same path a typed save uses, spends at most one model call
+  // against the org's daily AI budget, approves nothing and reaches no marketplace. 409 when the
+  // review is not RESPONSE_NEEDED, when an approval stands (the freeze), or when this deployment
+  // has no composer wired.
+  async generateReviewReplyDraft(accountId: string, actionRef: string): Promise<GeneratedReviewDraftView> {
+    const { data } = await http.post<GeneratedReviewDraftView>(
+      `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/draft/generate`,
+      {},
+      { timeout: MODEL_TIMEOUT_MS },
     );
     return data;
   },

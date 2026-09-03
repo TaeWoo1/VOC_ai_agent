@@ -529,7 +529,7 @@ class ReviewReplyApprovalConcurrencyTest {
                         new ReviewReplyApprovalWriter(approvals, audits, txManager)),
                 new ReviewReplyOutcomeService(submissionRefRepo, outcomeRepo,
                         new ReviewReplyOutcomeWriter(outcomeRepo, txManager)),
-                new RuleBasedReviewReplyProvider(), com.sellerops.identity.ExecutableIdentityResolver.unresolved(), channels);
+                new RuleBasedReviewReplyProvider(), com.sellerops.identity.ExecutableIdentityResolver.unresolved(), channels, null);
     }
 
     // --- helpers ---------------------------------------------------------------------

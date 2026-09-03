@@ -76,6 +76,25 @@ public class ReviewReplyDraft {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /* ── Grounded Review Drafting v1 (V90). Null on every version written before it existed. ── */
+
+    /** {@code MODEL} / {@code RULE} / {@code SELLER}, or null for a version written before V90. */
+    @Column(name = "author_kind", length = 20)
+    private String authorKind;
+
+    /** The vendor model id, or the template provenance string for a RULE draft. */
+    @Column(name = "model_version", length = 200)
+    private String modelVersion;
+
+    @Column(name = "knowledge_state", length = 20)
+    private String knowledgeState;
+
+    @Column(name = "answer_basis", length = 24)
+    private String answerBasis;
+
+    @Column(name = "product_id")
+    private UUID productId;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) {

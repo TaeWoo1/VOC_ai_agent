@@ -307,6 +307,8 @@ describe("MyReplyWork — 내 답변 작업", () => {
       productName: "합성 상품",
       reviewDate: "2026-05-10",
       rating: 1,
+      draftAuthorKind: null,
+      draftEvidence: [],
     });
 
     render(<MyReplyWork accountId="acct-1" />);

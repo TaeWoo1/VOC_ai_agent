@@ -45,6 +45,11 @@ public class ReviewReplyDraftService {
     }
 
     /** The current draft for a review (assumes the caller already authorized it). */
+    /** The head version, or 0 when none — the {@code baseVersion} the next save must pass. */
+    public int currentVersion(UUID reviewId) {
+        return latest(reviewId).map(ReviewReplyDraft::getVersion).orElse(0);
+    }
+
     public Optional<ReviewReplyDraft> latest(UUID reviewId) {
         return drafts.findTopByReviewIdOrderByVersionDesc(reviewId);
     }
@@ -60,8 +65,36 @@ public class ReviewReplyDraftService {
      * @throws ApiException 400 on a blank/over-long body or a missing/negative base; 409 on a
      *                      stale base or a lost concurrent race with different content.
      */
+    /**
+     * What wrote this version and what it was written from (Grounded Review Drafting v1).
+     *
+     * <p>Recorded on the row rather than derived later, for the reason the inquiry lane records it:
+     * a seller looking at an approved reply is entitled to know whether a model wrote that sentence,
+     * and «it has evidence rows» is not the same fact as «a model wrote it» — the template floor has
+     * an author and no evidence.
+     *
+     * @param authorKind   {@code MODEL} or {@code RULE}
+     * @param modelVersion the vendor model id, or the template provenance string for a RULE draft
+     * @param basis        {@code GROUNDED} / {@code NO_ANSWER_BASIS}
+     * @param productId    the product the retrieval was scoped to, or null
+     */
+    public record Provenance(String authorKind, String modelVersion, String knowledgeState,
+                             String basis, UUID productId) {
+    }
+
+    /** Save a new version and stamp what wrote it. A replayed identical save stamps nothing. */
+    public ReviewReplyDraftView saveAs(UUID orgId, UUID reviewId, String actor, String body,
+                                       Integer baseVersion, Provenance provenance) {
+        return save(orgId, reviewId, actor, body, baseVersion, provenance);
+    }
+
     public ReviewReplyDraftView save(UUID orgId, UUID reviewId, String actor, String body,
                                      Integer baseVersion) {
+        return save(orgId, reviewId, actor, body, baseVersion, null);
+    }
+
+    private ReviewReplyDraftView save(UUID orgId, UUID reviewId, String actor, String body,
+                                      Integer baseVersion, Provenance provenance) {
         if (baseVersion == null || baseVersion < 0) {
             throw ApiException.badRequest("baseVersion이 필요합니다 (첫 저장은 0).");
         }
@@ -98,6 +131,13 @@ public class ReviewReplyDraftService {
         draft.setContentFingerprint(fingerprint);
         draft.setFingerprintAlgorithm(ReviewReplyValidation.FINGERPRINT_ALGORITHM);
         draft.setCreatedBy(actor);
+        if (provenance != null) {
+            draft.setAuthorKind(provenance.authorKind());
+            draft.setModelVersion(provenance.modelVersion());
+            draft.setKnowledgeState(provenance.knowledgeState());
+            draft.setAnswerBasis(provenance.basis());
+            draft.setProductId(provenance.productId());
+        }
         try {
             return ReviewReplyDraftView.of(drafts.save(draft));
         } catch (DataIntegrityViolationException race) {

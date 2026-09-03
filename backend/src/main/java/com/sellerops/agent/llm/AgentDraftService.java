@@ -142,6 +142,32 @@ public class AgentDraftService {
     }
 
     /**
+     * <b>Write one public review reply</b> (Grounded Review Drafting v1).
+     *
+     * <p>The same capability — the same flag, the same key, the same model, the same org access
+     * check — and its own prompt, its own parser and its own narrower payload. It is not a second AI
+     * capability: drafting a reply a seller will read, edit and send is one job, and giving reviews
+     * their own key and flag would mean a deployment could have the review lane on while the inquiry
+     * lane is off, which nobody wants and which doubles the surface a reviewer has to check.
+     *
+     * <p>Returns the body alone. There is no title and no category to return: a review reply has no
+     * subject line, and which wording the org uses was decided by the template key before this call.
+     */
+    public Optional<String> draftReviewReply(UUID orgId, String reviewBody,
+                                             List<AgentDraftGenerator.Passage> knowledge, String style) {
+        if (!access.allows(properties, orgId)) {
+            return Optional.empty();
+        }
+        AgentDraftGenerator.Result result = generator().generateReview(
+                new AgentDraftGenerator.ReviewInput(reviewBody, knowledge, style));
+        Optional<String> written = result.draft().map(AgentDraftResponseParser.ParsedDraft::comments);
+        log.info("agent_review_draft orgId={} drafted={} grounded={} styled={} reason={} {}",
+                orgId, written.isPresent(), knowledge == null ? 0 : knowledge.size(),
+                style != null && !style.isBlank(), result.reason(), result.metrics().toLogFields());
+        return written;
+    }
+
+    /**
      * Built per call rather than held as a bean.
      *
      * <p>It costs nothing (the transport is the shared bean; this object is six fields) and it buys

@@ -73,7 +73,7 @@ public enum ReviewReplyTemplateKey {
                     + "남겨주신 의견을 잘 살펴보고 반영하겠습니다.");
 
     /** The keyword members, in the order the provider tries them. */
-    static final List<ReviewReplyTemplateKey> KEYWORD_ORDER =
+    public static final List<ReviewReplyTemplateKey> KEYWORD_ORDER =
             List.of(QUALITY, DELIVERY, PACKAGING, PRODUCT_INFO, PRICING);
 
     private final String category;

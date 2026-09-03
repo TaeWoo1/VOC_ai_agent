@@ -98,7 +98,7 @@ class OperatorReviewReplyControllerTest {
                 new ReviewReplyCapabilities(false, false, true, true, false),
                 "a".repeat(64),
                 1,
-                "PENDING", null, null);
+                "PENDING", null, null, null, java.util.List.of());
     }
 
     @Test
@@ -209,8 +209,11 @@ class OperatorReviewReplyControllerTest {
         // that reaches a marketplace, and only behind an APPROVED head + matching fingerprint + the execution
         // flag + the channel's write grant (Cafe24 comment adapter); /execution reads the row; /execution/observe
         // records the guided-fill observations. None of them "sends" on its own initiative.
-        assertThat(mapped).containsExactlyInAnyOrder("/draft", "/approval", "/submission-run", "/outcome",
-                "/execute", "/execution", "/execution/observe");
+        // Grounded Review Drafting v1 (2026-09-03) adds /draft/generate: it writes ONE more append-only
+        // version through the same path /draft writes through, reaching three retrieval lanes in this
+        // database and at most one model. It approves nothing and reaches no marketplace.
+        assertThat(mapped).containsExactlyInAnyOrder("/draft", "/draft/generate", "/approval",
+                "/submission-run", "/outcome", "/execute", "/execution", "/execution/observe");
     }
 
     private static void assertNotOutbound(String path) {

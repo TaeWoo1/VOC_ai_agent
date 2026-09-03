@@ -167,8 +167,75 @@ public class AgentDraftGenerator {
         }
     }
 
+    /**
+     * <b>The review lane's input — a separate record, so the review payload cannot widen by accident.</b>
+     *
+     * <p>It is not {@link Input} with fields left null. Reusing that record would mean the review
+     * request travels through the same builder as the inquiry one, and every future field added for
+     * inquiries (an order line, a 규격 line, a company summary) would silently start leaving on review
+     * requests too. Two records, two builders, two floor tests.
+     */
+    public record ReviewInput(String reviewBody, List<Passage> knowledge, String style) {
+
+        public ReviewInput {
+            knowledge = knowledge == null ? List.of() : List.copyOf(knowledge);
+        }
+    }
+
+    /**
+     * Generate one public review reply. Same transport, same model, same metrics — its own prompt.
+     *
+     * <p>The vendor branch is shared with {@link #generate} rather than duplicated: which field a
+     * vendor wants the system turn in is a fact about the vendor, not about what we are drafting.
+     */
+    public Result generateReview(ReviewInput input) {
+        // Its own parser: the review contract is one field, and reusing the inquiry parser would
+        // refuse every well-formed review answer for lacking a title it was told not to write.
+        return send(reviewRequestBody(input), AgentDraftResponseParser::parseReviewDraft);
+    }
+
+    /**
+     * The serialized review request — <b>the review payload floor</b>.
+     *
+     * <p>Asserted on these bytes by {@code AgentReviewDraftPayloadFloorTest}, for the reason the
+     * inquiry floor is asserted on its bytes: an intention is not a boundary.
+     */
+    String reviewRequestBody(ReviewInput input) {
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("model", modelId);
+        ArrayNode messages = root.putArray("messages");
+        ObjectNode user = messages.addObject();
+        user.put("role", "user");
+        user.put("content",
+                AgentDraftPrompt.reviewUser(input.knowledge(), input.reviewBody(), input.style()));
+        if (vendor == Vendor.ANTHROPIC) {
+            root.put("max_tokens", maxOutputTokens);
+            root.put("system", AgentDraftPrompt.reviewSystem());
+        } else {
+            root.put("max_completion_tokens", maxOutputTokens);
+            root.putObject("response_format").put("type", "json_object");
+            if (reasoningEffort != null) {
+                root.put("reasoning_effort", reasoningEffort);
+            }
+            ObjectNode system = messages.insertObject(0);
+            system.put("role", "system");
+            system.put("content", AgentDraftPrompt.reviewSystem());
+        }
+        return root.toString();
+    }
+
     public Result generate(Input input) {
-        String body = requestBody(input);
+        return send(requestBody(input), AgentDraftResponseParser::parse);
+    }
+
+    /**
+     * The one call, shared by both lanes: post, measure, parse, classify.
+     *
+     * <p>The PARSER is the parameter, because that is the only thing the two lanes disagree about.
+     * Everything before it — the transport, the metrics, the four refusal reasons — is about the
+     * vendor and is identical whichever contract we asked for.
+     */
+    private Result send(String body, java.util.function.Function<String, Optional<AgentDraftResponseParser.ParsedDraft>> parser) {
         AgentLlmTransport.Response response = http.post(vendor.endpoint, headers(), body);
         AgentLlmCallMetrics metrics = AgentLlmCallMetrics.of(response);
         if (response.status() == 0) {
@@ -196,7 +263,7 @@ public class AgentDraftGenerator {
         if (text.isEmpty()) {
             return Result.failed(version, "no_message_text", metrics);
         }
-        Optional<AgentDraftResponseParser.ParsedDraft> parsed = AgentDraftResponseParser.parse(text.get());
+        Optional<AgentDraftResponseParser.ParsedDraft> parsed = parser.apply(text.get());
         if (parsed.isEmpty()) {
             // Off-schema, unknown category, blank field, or over-long. No repair pass and no second call: a
             // malformed answer is a refusal, and a partial candidate reaching a human as a reviewed draft is

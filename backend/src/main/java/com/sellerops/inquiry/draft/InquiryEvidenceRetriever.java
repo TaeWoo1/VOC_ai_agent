@@ -14,6 +14,7 @@ import com.sellerops.knowledge.org.dto.OrgKnowledgePassage;
 import com.sellerops.knowledge.org.dto.OrgKnowledgeSearchResponse;
 import com.sellerops.order.fact.OrderFact;
 import com.sellerops.order.fact.OrderFactLookup;
+import com.sellerops.order.fact.OrderFactState;
 import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.library.KnowledgeAuthorship;
 import com.sellerops.product.Product;
@@ -285,8 +286,46 @@ public class InquiryEvidenceRetriever {
     public InquiryEvidence retrieve(UUID orgId, Inquiry inquiry, RetrievalQuery question,
                                     OrderFactLookup lookup, KnowledgeVariantScope scope) {
         UUID productId = namedProductOrNull(orgId, inquiry.getProductId());
-        String query = question.full();
+        return lanes(orgId, productId, question, inquiry.getId(), scope,
+                orderFacts.read(orgId, inquiry, lookup));
+    }
 
+    /**
+     * <b>The same three lanes, for an operational object that is not an inquiry</b>
+     * (Grounded Review Drafting v1, 2026-09-03).
+     *
+     * <p>A public reply to a review is grounded in the same corpora a private reply to a question is:
+     * this product's notes, this company's operating rules, and what this seller has actually
+     * answered before. Building a second retriever for reviews would give the two surfaces two
+     * scorers, two absence gates and two ways to disagree about whether a document answers a
+     * sentence — so reviews call THIS one, and the lane order, the reservation rule, the
+     * current-vs-historical split and the passage budget are shared rather than copied.
+     *
+     * <p><b>What a review does not have, and does not get.</b> No {@code ORDER_STATE} lane: a review
+     * names no order and there is nothing to read one from, so the order fact is
+     * {@link OrderFactState#NO_ORDER_REFERENCE} rather than an unknown lookup — the difference
+     * between «this object cannot have one» and «we did not find one». No memory exclusion either:
+     * the exclusion exists so an inquiry's own approved answer is not precedent for its next draft,
+     * and a review has no entry in that corpus to exclude.
+     *
+     * <p>The class name still says «Inquiry» because the inquiry lane is where these rules were
+     * written and where their tests live. Renaming it would touch every caller to say something the
+     * javadoc already says.
+     */
+    public InquiryEvidence retrieveFor(UUID orgId, UUID productId, RetrievalQuery question,
+                                       KnowledgeVariantScope scope) {
+        return lanes(orgId, namedProductOrNull(orgId, productId), question, null, scope,
+                OrderFact.unavailable(OrderFactState.NO_ORDER_REFERENCE, null, null));
+    }
+
+    /** Whether this id points at a real, named product of this org — the shared-bucket check. */
+    public UUID namedProduct(UUID orgId, UUID productId) {
+        return namedProductOrNull(orgId, productId);
+    }
+
+    /** The three retrieval lanes and the merge, over a product that is already resolved. */
+    private InquiryEvidence lanes(UUID orgId, UUID productId, RetrievalQuery question,
+                                  UUID excludeInquiryId, KnowledgeVariantScope scope, OrderFact order) {
         List<ScopedPassage> productLane = new ArrayList<>();
         DraftKnowledgeState productVerdict = DraftKnowledgeState.NO_PRODUCT;
         RetrievalOutcome productOutcome = RetrievalOutcome.ABSENT;
@@ -316,7 +355,7 @@ public class InquiryEvidenceRetriever {
         // This inquiry's own answer is excluded: a reply approved on THIS work item must not come
         // back as precedent for the next version of itself.
         AnswerMemorySearchResponse remembered =
-                answerMemory.search(orgId, question, productId, inquiry.getId(), MAX_PASSAGES);
+                answerMemory.search(orgId, question, productId, excludeInquiryId, MAX_PASSAGES);
         List<ScopedPassage> memoryLane = new ArrayList<>();
         for (AnswerMemoryPassage passage : remembered.passages()) {
             memoryLane.add(new ScopedPassage(KnowledgeScope.PAST_ANSWER, headingFor(passage),
@@ -330,9 +369,9 @@ public class InquiryEvidenceRetriever {
         boolean groundedInCurrent = merged.stream().anyMatch(p -> p.scope().current());
         DraftKnowledgeState state =
                 groundedInCurrent ? DraftKnowledgeState.GROUNDED : productVerdict;
-        return new InquiryEvidence(productId, state, merged,
-                orderFacts.read(orgId, inquiry, lookup), remembered.supersededByConflict(),
-                productOutcome, policies.outcome(), policies.topicsDeclared());
+        return new InquiryEvidence(productId, state, merged, order,
+                remembered.supersededByConflict(), productOutcome, policies.outcome(),
+                policies.topicsDeclared());
     }
 
     /** At most this many passages of the window may be a past answer. */

@@ -93,6 +93,45 @@ public final class AgentDraftResponseParser {
         }
     }
 
+    /**
+     * The review lane's answer: <b>one field, and only one</b> (Grounded Review Drafting v1).
+     *
+     * <p>A public review reply has no subject line and needs no category — the template key already
+     * decided which wording the org uses, and asking a model to re-state it would create a second
+     * classification of the same review that nothing reconciles. So this parser accepts
+     * {@code {"comments": …}} and refuses everything else, including an object that also carries a
+     * title: an extra field means the model answered a different contract than the one it was given.
+     */
+    public static Optional<ParsedDraft> parseReviewDraft(String assistantText) {
+        // The review lane has no category and no title, and this record has both fields. They are
+        // NULL rather than filled with a plausible value: a category nobody chose and a subject line
+        // a public reply does not have are two facts this parser must not invent to fit a shape.
+        return parseReview(assistantText).map(body -> new ParsedDraft(null, null, body));
+    }
+
+    public static Optional<String> parseReview(String assistantText) {
+        if (assistantText == null) {
+            return Optional.empty();
+        }
+        String text = stripFence(assistantText.trim());
+        if (!text.startsWith("{")) {
+            return Optional.empty();
+        }
+        try {
+            JsonNode node = MAPPER.readTree(text);
+            if (!node.isObject()) {
+                return Optional.empty();
+            }
+            String comments = text(node, "comments");
+            if (comments == null || comments.length() > MAX_COMMENTS) {
+                return Optional.empty();
+            }
+            return Optional.of(comments);
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
     private static String text(JsonNode node, String field) {
         JsonNode value = node.get(field);
         if (value == null || !value.isTextual()) {
@@ -115,7 +154,11 @@ public final class AgentDraftResponseParser {
         return text.substring(firstNewline + 1, lastFence).trim();
     }
 
-    /** A validated draft. Every field is non-blank, and {@code category} is one of the closed set. */
+    /**
+     * A validated draft. From {@link #parse}, every field is non-blank and {@code category} is one of
+     * the closed set; from {@link #parseReviewDraft}, {@code category} and {@code title} are null
+     * because a public review reply has neither.
+     */
     public record ParsedDraft(String category, String title, String comments) {
     }
 }

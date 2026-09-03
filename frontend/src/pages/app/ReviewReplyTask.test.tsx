@@ -47,6 +47,8 @@ function prep(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
     redactedBody: "괜찮긴한데 자꾸 떨어져요",
     bodyRedacted: false,
     triageDisposition: "RESPONSE_NEEDED",
+    draftAuthorKind: null,
+    draftEvidence: [],
     suggestion: {
       body: "합성 추천 문구",
       category: "positive_reply",

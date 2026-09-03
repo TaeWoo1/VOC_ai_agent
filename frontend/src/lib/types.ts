@@ -1151,6 +1151,47 @@ export interface ReviewReplyPrep {
   reviewDate: string | null;
   /** The review's coarse 1..5 rating, already on the wire and on the attention row. */
   rating: number | null;
+  /**
+   * What wrote the head draft — `MODEL`, `RULE`, or null for a version written before reviewnary
+   * recorded an author (Grounded Review Drafting v1). Null is "not recorded", never "a person typed
+   * it": the screen says nothing rather than guessing.
+   */
+  draftAuthorKind: string | null;
+  /** What the head draft was written FROM, in the order the drafter was shown it. Empty on a floor draft. */
+  draftEvidence: DraftEvidenceView[];
+}
+
+/**
+ * One thing reviewnary could not find, said as a question the seller can answer by registering it
+ * (Grounded Review Drafting v1). `subjectKind` says which shipped signal named the subject: `ISSUE`
+ * (a repeated review problem this review is evidence for) or `REVIEW_TEXT` (the customer's own words,
+ * quoted — never a classification).
+ */
+export interface ReviewKnowledgeGapView {
+  scope: "PRODUCT" | "ORG" | string;
+  subject: string;
+  subjectKind: string;
+  question: string;
+  productId: string | null;
+}
+
+/**
+ * The result of asking for one grounded review reply draft.
+ *
+ * A draft is ALWAYS written: with no evidence it is the org's own template, and `answerBasis` says
+ * which the seller is reading. `unavailableMessage` is an operational fact (budget, capability,
+ * vendor, a refused promise) and never a statement about the seller's knowledge.
+ */
+export interface GeneratedReviewDraftView {
+  draft: ReviewReplyDraft;
+  authorKind: string;
+  answerBasis: "GROUNDED" | "NO_ANSWER_BASIS" | string;
+  answerBasisNote: string;
+  evidence: DraftEvidenceView[];
+  knowledgeGaps: ReviewKnowledgeGapView[];
+  templateCategory: string;
+  templateSource: string;
+  unavailableMessage: string | null;
 }
 
 // Mirrors dto.ReviewReplySubmissionRunResponse. `submissionRef` is an opaque, single-use binding the
