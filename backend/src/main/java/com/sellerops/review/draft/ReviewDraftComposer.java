@@ -85,6 +85,26 @@ public class ReviewDraftComposer {
     static final String BASIS_NONE_NOTE =
             "이 후기에 해당하는 근거를 찾지 못해, 저장된 문구로 안전한 기본 답글만 준비했습니다.";
 
+    /**
+     * The sentence for a STORED version, read back from what that version recorded.
+     *
+     * <p><b>Why this is a method and not two literals at the read path</b> (Retrieval Runtime Closure
+     * v1 §1): the version already carries {@code answer_basis} and its own citation rows, so the
+     * screen can say on a reopen exactly what it said at generation — and it has to be the same
+     * sentence, chosen by the same rule, or the two renderings of one fact drift. Before this, the
+     * 「근거 있음 / 기본 문구」 line existed only in the session that pressed the button: a reload
+     * showed the draft and its citations with nothing saying whether it had been grounded.
+     *
+     * <p>Null for a version written before the column existed — «not recorded» is a different
+     * statement from either basis, and the screen says nothing rather than guessing.
+     */
+    public static String basisNoteOf(String answerBasis, boolean hasEvidence) {
+        if (answerBasis == null) {
+            return null;
+        }
+        return "GROUNDED".equals(answerBasis) && hasEvidence ? BASIS_GROUNDED_NOTE : BASIS_NONE_NOTE;
+    }
+
     private final InquiryEvidenceRetriever retriever;
     private final ReviewReplyDraftService drafts;
     private final ReviewDraftEvidenceRepository evidence;
@@ -171,7 +191,7 @@ public class ReviewDraftComposer {
         // review drafted five times files one row. Never fails the draft.
         fileGaps(orgId, gaps);
         return new GeneratedReviewDraftView(saved, authorKind, basis,
-                grounded && !views.isEmpty() ? BASIS_GROUNDED_NOTE : BASIS_NONE_NOTE, views,
+                basisNoteOf(basis, !views.isEmpty()), views,
                 gaps, key.category(), template.customized() ? "ORG" : "DEFAULT", unavailable);
     }
 

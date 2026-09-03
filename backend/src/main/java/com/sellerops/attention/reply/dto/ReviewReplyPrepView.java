@@ -96,5 +96,20 @@ public record ReviewReplyPrepView(
          * <p>Empty for a template-floor draft and for every version written before V90, which are
          * the same honest report: nothing was shown to a model, because none was called.
          */
-        java.util.List<com.sellerops.inquiry.draft.dto.DraftEvidenceView> draftEvidence) {
+        java.util.List<com.sellerops.inquiry.draft.dto.DraftEvidenceView> draftEvidence,
+        /**
+         * What the head draft was written FROM, as a state — {@code GROUNDED} or
+         * {@code NO_ANSWER_BASIS}, or null for a version written before the column existed (or one a
+         * person typed, which records no basis because none was decided).
+         *
+         * <p>Retrieval Runtime Closure v1 §1: the row has carried this since Grounded Review
+         * Drafting v1 and nothing read it back, so 「근거 있음 / 기본 문구」 lived only in the browser
+         * session that pressed the button. A seller who reloaded saw the draft and its citations with
+         * no statement of whether it had been grounded — the one fact that decides whether the text
+         * below is this company's knowledge or its safe default.
+         */
+        String draftAnswerBasis,
+        /** The seller-facing sentence for {@code draftAnswerBasis}, chosen by the same rule that
+         *  chose it at generation ({@code ReviewDraftComposer#basisNoteOf}). Null when the basis is. */
+        String draftAnswerBasisNote) {
 }

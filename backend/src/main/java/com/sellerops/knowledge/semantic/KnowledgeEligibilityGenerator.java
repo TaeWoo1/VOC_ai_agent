@@ -4,11 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sellerops.agent.llm.AgentLlmCallMetrics;
 import com.sellerops.agent.llm.AgentLlmTransport;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The one call the evidence-eligibility capability makes.
@@ -26,6 +30,7 @@ public class KnowledgeEligibilityGenerator {
 
     private static final URI ENDPOINT = URI.create("https://api.openai.com/v1/chat/completions");
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Logger log = LoggerFactory.getLogger(KnowledgeEligibilityGenerator.class);
 
     private final AgentLlmTransport transport;
     private final KnowledgeEligibilityProperties properties;
@@ -42,10 +47,14 @@ public class KnowledgeEligibilityGenerator {
      * @return an empty map when the vendor refused or answered a shape this does not recognise —
      *         and then nothing is refused, because a judge that did not answer has no opinion
      */
-    Map<Integer, Boolean> judge(String question, List<String> passages) {
+    Map<Integer, Boolean> judge(UUID orgId, String question, List<String> passages) {
         AgentLlmTransport.Response response = transport.post(ENDPOINT,
                 Map.of("Authorization", "Bearer " + properties.apiKey()),
                 requestBody(question, passages));
+        // Metadata only — see the note in KnowledgeQuestionIntentGenerator. The passage COUNT is a
+        // fact about this capability's bound; the passages themselves never appear.
+        log.info("knowledge_eligibility orgId={} passages={} answered={} {}", orgId, passages.size(),
+                response.ok(), AgentLlmCallMetrics.of(response).toLogFields());
         if (!response.ok()) {
             return Map.of();
         }

@@ -756,6 +756,80 @@ capability를 분리해 한 번 더 돌리자 벤치마크의 이야기가 그�
 캐시는 넣지 않았다 — 기각한다는 것이 그 뜻이다). 회귀 기준 상향: recall ≥ 0.90 · any-wrong 0 · 부재 정확도 1.0 ·
 lexical 대비 +0.45. **마켓플레이스 호출 0 · WRITE 0 · 승인 0 · 마이그레이션 0** ⇒ evidence 행 없음. **§12 Holdout 검증(09-03, 같은 커밋 · production 변경 0)**: 114 벤치마크는 architecture selection에도 쓰였으므로 **한 번도 보지 않은 44문항**(사료·카시트·앰플 + 회사 정책 — 어휘가 겹치지 않는 네 도메인, 실제 판매자 CRUD와 실제 `draft/generate` 경로)으로 다시 쟀다. **v1 80.6/8.3/19.4/50.0 → intent만 97.2/2.8/**30.6**/62.5 → F5 **97.2 / 0 / 0 / 100**** — 벤치마크의 이야기(intent가 recall과 wrong-source를 함께 올리고 judge가 그것을 0으로 되돌린다)가 unseen data에서 그대로 재현됐고 **「92.5/0/100」은 selection artefact가 아니었다**. judge는 15문단을 제거해 **14개가 옳은 제거**였다. **관측된 유일한 실패는 threshold가 아니라 성질이다** — 「화장품 냉장고에 넣어도 되나요?」가 채점 pass에서만 근거 없음이었고 반복 2회는 GROUNDED, 반대로 「몇 방울이나 쓰는 게 맞아요?」는 채점 pass에서만 맞았다: v1의 검색은 결정론이었으나 F5는 세 단계 중 **둘이 매 검색마다 새로 이루어지는 모델 호출**이라 경계선에서 흔들리고, **「같은 리뷰를 두 번 열면 같은 근거가 보인다」는 보장이 사라졌다**(고치지 않고 이름만 붙였다). 실측 호출·지연: intent **질문당 1회**(검색만 하는 turn 347ms → 2,556ms — 왕복 한 번의 크기이고 세 lane이 5분 메모를 공유한다), judge **48회**(상품 28 + 정책 20, 못 찾은 검색은 0회, 근거를 찾은 turn에 약 +1.3초), 전체 turn p50 6.3s → **10.6s** · p95 15.6s → **22.2s**. **이 44문항은 소진됐다** — 두 번째로 쓰면 selection 집합이 되므로 harness에 넣지 않았다. 파라미터 수정 0 · 마켓플레이스 0 · 승인 0)
 
+**`docs/retrieval_runtime_closure_v1.md`** (Retrieval Runtime Closure v1 — 2026-09-03. Knowledge Retrieval
+Quality v2는 **PASS**이고 recall은 더 올리지 않는다. threshold · scorer · candidate ladder · 프롬프트 · 모델 ·
+세 lane 구조 **전부 그대로**이고, 이 패키지는 F5를 **판매자 제품에서 일관되고 반복 가능하게** 만든다.
+**착수 이유는 holdout이 이름 붙인 성질이다** — v1의 검색은 결정론이었는데(「인용이 장식이 아니라 근거가 되는
+전제」) F5는 세 단계 중 **둘이 매 검색마다 새로 이루어지는 모델 호출**이라 경계선에서 흔들리고
+「같은 리뷰를 두 번 열면 같은 근거가 보인다」가 사라졌다 ⇒ 캐시가 아니라 **구조로** 되돌린다.
+**§1 감사 결과 본체는 이미 서 있었다** — 문의 상세와 리뷰 답변 작업 **어느 쪽도 retrieval을 다시 돌리지
+않고**(`InquiryEvidenceRetriever`를 이름으로도 모른다) 저장 행과 인용 행을 읽는다. 없던 것은 **리뷰 lane의
+answer basis 한 칸**과 그 성질을 고정하는 테스트였다: `review_reply_draft.answer_basis`는 Grounded Review
+Drafting v1부터 채워지는데 **읽는 코드가 0**이라 「근거 있음 / 기본 문구」가 그 세션의 `result`에서만 렌더됐고,
+새로고침하면 초안과 인용은 남고 **「이 문장이 회사의 지식으로 쓰였는가」만 사라졌다** — 판매자가 고객에게 보낼
+문장에 대해 가장 알아야 하는 사실이다. `ReviewReplyPrepView`에 두 칸을 더하고 문장은
+**`ReviewDraftComposer.basisNoteOf` 하나**가 정해 생성 경로와 읽기 경로가 공유한다(같은 사실의 두 렌더링이
+갈라질 자리를 만들지 않는다; `null`은 세 번째 진술 「기록되지 않았다」이고 그때 화면은 아무 말도 하지 않는다).
+**다시 계산하지 않고 다시 읽는다** — 재계산은 곧 retrieval 재실행이고 그 두 단계는 매번 새 모델 호출이다.
+`RetrievalRuntimeClosureTest`가 **retrieval을 부를 수 있는 파일은 셋**(초안 버전을 쓰는 두 composer + §4 진단),
+**두 판매자 읽기 경로는 retriever를 이름으로도 갖지 않음**, 생성 중간 산출물을 아는 파일 셋의
+`Repository`/`@Entity`/`save(` **0**을 고정한다. **§2 invalidation 경계는 새 표·새 버전 컬럼·새 프레임워크 0** —
+세 키가 전부 **내용**이라 낡은 답이 존재할 수 없다(문서를 고치면 다른 해시, 은퇴시키면 candidate 목록에서 빠지고,
+되돌리면 예전 키로 적중; 버전 컬럼을 두 chunk 표와 answer memory에 걸쳐 손으로 맞출 필요가 없다).
+**§3 감사 — 한 초안이 같은 문장을 여섯 번 샀다**: 한 grounded 초안은 세 lane을 한 질문의 두 표현으로 검색하는데
+`questionVector`는 **캐시가 없고** eligibility는 **memo가 아예 없었다**(intent만 5분 TTL) ⇒ 틀린 것은 없고
+**한 번 이상 지불한 것이 전부**였다. `SearchMemo` 하나를 세 문이 공유하고 키는 각각 (intent 모델+질문) ·
+(org+embedding 모델+차원+문장) · **(judge 모델+질문+순서대로 이어붙인 문단 텍스트)** — 마지막이 곧
+「동일 input + 동일 knowledge snapshot」의 정의다. **5분은 임의 캐시 수명이 아니라 retention**이다(정확성은
+키가 주고, 무한 보관해도 답은 옳다; 5분인 이유는 이 답들이 **고객 표현에서 파생된 사본**이고 이 저장소는 그
+사본을 하나만 갖는다는 쪽이다), null도 답으로 기억한다(방금 거절한 벤더에게 세 lane이 다시 묻지 않는다),
+**제품의 일관성은 memo가 아니라 저장된 행에서 온다**. 질문 벡터는 **DB 표에 넣지 않는다** — 그 표는 판매자
+문단의 content-addressed 캐시이고 고객 질문 행을 넣는 것이 v1이 거부한 두 번째 사본이다. **§4 결함 둘**:
+(A) `eligibility.filter`가 `semantics != null`만 보고 돌아서 **판매자가 자기 라이브러리에 「반품 조건」을 칠
+때**와 **Agent가 이 회사 정책을 읽을 때** 거절 전용 모델이 **판매자 자신의 문서 중 무엇을 볼지** 정하고 있었다
+— 측정된 문제(wrong-source 인용)와 **다른 종류의 실패**이고 판매자가 쓴 글을 쓴 사람에게 숨긴다 ⇒ 판정도
+`customerWritten`으로 게이트(intent가 처음부터 그랬던 그 게이트, 세 call site를 구조 테스트가 고정);
+(B) `InquiryKnowledgeCoverageService`는 docblock에 「no marketplace and no model」이라 적어 두고 두 라우트가
+**화면이 쓰는 오버로드**로 흘러가 있었다 — 주문 사실을 `EXACT_ALLOWED`로 읽어 **인증된 GET 하나가 결합된
+문의마다 마켓플레이스 요청 1회**(막으려고 존재하는 `STORED_ONLY` 오버로드는 caller 0이 돼 있었다), 그리고 v2
+capability가 켜지면 **행마다** 재진술 1 + 판정 최대 2의 **상한 없는 sweep** ⇒ `measured()` 하나로
+`STORED_ONLY` + non-customer-written이 되고 보고서가 자기가 측정한 것을 말한다
+(`retrieval = STORED_FACTS_NO_PER_QUESTION_MODEL` — 그 숫자를 배포 형상의 숫자로 읽으면 production이 닿는
+범위를 **과소평가**한다). **§5 production 사용 조건 감사**: 벤더로 나가는 것은 (7) 판매자 문단 + 고객 질문 +
+재진술 · (8) 고객 문장 하나 · (9) 고객 문장 + 순위에 오른 문단(위치로만)이고 payload floor는 세 테스트가
+**직렬화 바이트로** 단언한다. **redaction은 lane마다 다르다** — 리뷰는 `redactFullBody`를 지나고 문의는
+`toPlainText`뿐이며, 이 패키지가 만든 노출은 아니지만(초안 capability가 이미 그 텍스트를 보낸다) 세 retrieval
+capability가 **caller의 redaction을 그대로 물려받는다**는 것은 사실이라 **고치지 않고 product-owner 결정으로
+올린다**. 실패는 전부 fail-soft로 이전 동작으로 떨어진다(문단 하나라도 벡터가 없으면 전체가 lexical —
+「절반만 읽고 내린 부재는 절반에 대한 부재다」). **비용 귀속: 세 capability는 로그를 한 줄도 남기지 않았다** ⇒
+기존 `AgentLlmCallMetrics`로 **메타데이터 전용** 한 줄씩(`knowledge_embedding`은 `kind=PASSAGE|QUESTION`을
+**나눠** 보고한다 — 문단은 org당 1회 사서 영구 보관하고 질문은 검색 1회분이라 합친 숫자는 두 질문 어느 쪽의
+답도 아니다); 문장·재진술·문단은 로그에 없다. **세 capability는 여전히 판매자 일일 AI 예산 밖**이고 그 결정은
+그대로다 — 바뀐 것은 이제 그 결정을 데이터로 할 수 있다는 것뿐. **파일럿 함정 하나를 닫았다**: 세 capability가
+자기 allow-list를 직접 읽고 plan·draft·judge는 `AgentCapabilityAccess`에 묻고 있었으므로
+`SCOPE=CONNECTED_SELLERS` + `ENABLED=true` + 키 = **아무 조직에도 닿지 않고 기동 검증도 항의하지 않는**
+스위치였다 ⇒ 조직 질문을 한 곳에 묻는다(flag·key·명시 목록은 각자의 것, 정책은 **조직 질문만 · 넓히는
+방향으로만**, `ALLOW_LIST` 기본은 바이트 동일). 기본값은 전부 **OFF** 그대로. **§6 실측**: 왕복 횟수는 이 코드의
+성질이므로 결정론 테스트로 재고 커밋했다(세 lane · 실제 DB · Spring이 조립하는 문 · 벤더만 카운터) — 같은
+fixture를 `d956b920` worktree에서 한 번 더 돌려 arm을 비교했다. **cold** 임베딩 6→**4** · 재진술 1 · 판정 2 ·
+**다시 열기 0→0**(캐시가 아니라 구조) · **regenerate(상태 동일) 임베딩 4·판정 2 → 0·0·0** ·
+**Knowledge 수정 후 임베딩 5·판정 2 → 1·1**, 세 경로 합계 **22 → 9 왕복(−59%)**; regenerate가 0이라는 것은
+비용 이야기만이 아니라 **§0의 비결정성이 그 경로에서 사라진다**는 뜻이다. 로컬 실측 지연(모델 왕복 0):
+cold 17ms · **다시 열기 8ms** · regenerate 14ms · 수정 후 14ms이고, 같은 실행에서 **다시 열기가
+`draftAnswerBasis=GROUNDED`를 돌려주는 것이 라이브로 확인됐다**(retrieval 0 · 모델 0). **벤더 왕복이 포함된
+wall-clock은 이 세션에서 재지 못했다** — `.env.local`의 키가 이 환경에 없는 운영자 셸 변수를 참조하므로
+라이브 벤더 호출 0이고, 지연의 벤더 성분은 실측 횟수 × holdout이 실측한 왕복 비용의 곱으로만 말할 수 있어
+**유도값이지 측정값이 아니다**. 벤치마크 114와 소진된 holdout 44는 **새 parameter 선택에 다시 쓰지 않았다**
+(이 패키지는 parameter를 하나도 움직이지 않는다). backend **3,768** · frontend **2,720** · 실패 0 ·
+**마켓플레이스 호출 0 · WRITE 0 · 승인 0 · 모델 호출 0 · 마이그레이션 0** ⇒ evidence 행 없음. **계약이 바뀌어
+테스트 1건을 다시 썼다**(`KnowledgeQuestionIntentPayloadFloorTest`의 source scan이 주석을 제거한다 — 이웃 두
+capability가 memo·로그 규칙 때문에 이 capability의 docblock을 **가리키고**, `AgentDraftBoundaryTest`가 같은
+이유로 같은 일을 이미 한다: 「자기 설명 때문에 실패하는 guard는 고쳐지지 않고 삭제된다」; 성질은 **코드**에
+대한 것이고 같은 테스트가 `SearchMemo`의 존재를 새로 단언한다). **고치지 않고 보고**: 문의 lane의 벤더 payload
+redaction · 세 capability의 예산 귀속 · 경계선 비결정성은 regenerate 경로에서만 사라진다(*다른* 두 질문의 상대
+순서는 고정하지 않는다) · `answer_basis` 없는 과거 버전은 백필하지 않았다 · memory lane 판정 memo와 인용 행이
+붙은 GROUNDED 초안은 **라이브 관측 없음**(이 세션에 벤더 키가 없다))
+
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은
 `deploy/pilot/`: compose overlay(`ports: !reset []`로 raw port 공개 0, `restart: unless-stopped`, JVM heap 고정, Cafe24

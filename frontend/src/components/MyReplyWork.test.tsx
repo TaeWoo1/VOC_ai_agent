@@ -309,6 +309,8 @@ describe("MyReplyWork — 내 답변 작업", () => {
       rating: 1,
       draftAuthorKind: null,
       draftEvidence: [],
+  draftAnswerBasis: null,
+  draftAnswerBasisNote: null,
     });
 
     render(<MyReplyWork accountId="acct-1" />);

@@ -4,9 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sellerops.agent.llm.AgentLlmCallMetrics;
 import com.sellerops.agent.llm.AgentLlmTransport;
 import java.net.URI;
 import java.util.Map;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The one call the retrieval-intent capability makes.
@@ -28,6 +32,7 @@ public class KnowledgeQuestionIntentGenerator {
 
     private static final URI ENDPOINT = URI.create("https://api.openai.com/v1/chat/completions");
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Logger log = LoggerFactory.getLogger(KnowledgeQuestionIntentGenerator.class);
 
     private final AgentLlmTransport transport;
     private final KnowledgeQuestionIntentProperties properties;
@@ -45,9 +50,16 @@ public class KnowledgeQuestionIntentGenerator {
      *         sentence asks for nothing. <b>Null is a real answer</b>: the search then runs on the
      *         customer's own words exactly as it did before this capability existed.
      */
-    String intentOf(String question) {
+    String intentOf(UUID orgId, String question) {
         AgentLlmTransport.Response response = transport.post(ENDPOINT,
                 Map.of("Authorization", "Bearer " + properties.apiKey()), requestBody(question));
+        // Metadata only, in the shape the agent_* lines already use: which organisation, whether
+        // there was an answer, how long it took, how many tokens. Retrieval Runtime Closure v1 §5 —
+        // three capabilities were reaching a vendor on every search and leaving no trace at all, so
+        // "what does semantic retrieval cost this seller" was a question the deployment could not
+        // answer from its own logs. Never the sentence, never the restatement.
+        log.info("knowledge_intent orgId={} restated={} {}", orgId, response.ok(),
+                AgentLlmCallMetrics.of(response).toLogFields());
         if (!response.ok()) {
             return null;
         }

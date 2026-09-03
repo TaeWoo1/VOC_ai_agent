@@ -512,6 +512,8 @@ export function VocItemReplyPrep({
           accountId={accountId}
           actionRef={actionRef}
           storedEvidence={prep.draftEvidence ?? []}
+          storedBasis={prep.draftAnswerBasis ?? null}
+          storedBasisNote={prep.draftAnswerBasisNote ?? null}
           onDrafted={(generated) => {
             setBody(generated);
             setDirty(false);

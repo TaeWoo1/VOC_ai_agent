@@ -54,6 +54,8 @@ function prepView(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
     rating: 2,
     draftAuthorKind: null,
     draftEvidence: [],
+    draftAnswerBasis: null,
+    draftAnswerBasisNote: null,
     ...over,
   };
 }

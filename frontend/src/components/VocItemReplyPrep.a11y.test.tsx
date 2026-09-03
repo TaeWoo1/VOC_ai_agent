@@ -32,6 +32,8 @@ function prepView(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
     rating: 2,
     draftAuthorKind: null,
     draftEvidence: [],
+    draftAnswerBasis: null,
+    draftAnswerBasisNote: null,
     redactedBody: "합성-리뷰-본문: 배송이 너무 늦었습니다",
     bodyRedacted: true,
     triageDisposition: "RESPONSE_NEEDED",

@@ -583,6 +583,12 @@ public class ReviewReplyService {
                 // review the channel already reports as answered.
                 responseNeeded && approved && !channelAnswered);
 
+        // One indexed read; empty when the version was the template floor, written before V90, or
+        // there is no draft at all.
+        java.util.List<com.sellerops.inquiry.draft.dto.DraftEvidenceView> storedEvidence =
+                head == null || composer == null ? java.util.List.of()
+                        : composer.evidenceFor(orgId, review.getId(), head.getVersion());
+
         ReviewReplyProposalProvider.Suggestion suggestion = provider.suggest(
                 new ReviewReplyProposalProvider.ReviewReplyContext(orgId, review.getId(),
                         body.text(), review.getRating()));
@@ -612,10 +618,15 @@ public class ReviewReplyService {
                 productDisplayName(orgId, review),
                 kstDate(review.getReceivedAt()),
                 head == null ? null : head.getAuthorKind(),
-                // The head version's stored citations. One indexed read; empty when the version was
-                // the template floor, written before V90, or there is no draft at all.
-                head == null || composer == null ? java.util.List.of()
-                        : composer.evidenceFor(orgId, review.getId(), head.getVersion()));
+                storedEvidence,
+                // The head version's own record of what it was written from. Read back rather than
+                // re-derived: re-running the retrieval to answer «was this grounded?» would be a new
+                // retrieval on a read path, and the answer could differ from the one the seller was
+                // shown when the draft was written.
+                head == null ? null : head.getAnswerBasis(),
+                head == null ? null
+                        : ReviewDraftComposer.basisNoteOf(head.getAnswerBasis(),
+                                !storedEvidence.isEmpty()));
     }
 
     /**

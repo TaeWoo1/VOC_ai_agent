@@ -1,5 +1,6 @@
 package com.sellerops.knowledge.semantic;
 
+import com.sellerops.agent.access.AgentCapabilityAccess;
 import com.sellerops.agent.llm.AgentLlmTransport;
 import com.sellerops.knowledge.KnowledgeEligibility;
 import java.util.ArrayList;
@@ -22,7 +23,18 @@ import org.springframework.stereotype.Service;
  *
  * <p><b>It can only refuse.</b> Off, unreachable, over the bound, or silent about a passage — every
  * one of those leaves the result exactly as the scorer left it. Nothing here can add a passage, and
- * nothing here writes anything: the verdict is a boolean that lives for the length of one search.
+ * nothing here writes anything: the verdict is a boolean, and the only place it is remembered is a
+ * bounded in-memory {@link SearchMemo}.
+ *
+ * <p><b>The memo's key is the question AND the passages as they read</b> (Retrieval Runtime Closure
+ * v1 §3), which is exactly the condition under which the verdict cannot have changed: an edited
+ * document, a retired source and a new source all change the passage list, and a changed question
+ * changes the question. So a seller who presses 「다시 준비하기」 without changing anything pays for
+ * the drafter and not for this — and gets the SAME passages, which is the property the holdout
+ * measurement found missing (a model called afresh on every search wobbles at the borderline).
+ *
+ * <p><b>The organisation question is asked once, by the policy</b> — see the note on
+ * {@link KnowledgeQuestionIntent}. Flag, key and explicit list stay this capability's own.
  */
 @Service
 public class KnowledgeEvidenceEligibility {
@@ -36,21 +48,28 @@ public class KnowledgeEvidenceEligibility {
     static final int MAX_JUDGED = 6;
 
     private final KnowledgeEligibilityProperties properties;
+    private final AgentCapabilityAccess access;
     private final KnowledgeEligibilityGenerator generator;
+    private final SearchMemo<Map<Integer, Boolean>> memo = new SearchMemo<>();
 
     public KnowledgeEvidenceEligibility(KnowledgeEligibilityProperties properties,
+                                        AgentCapabilityAccess access,
                                         AgentLlmTransport transport) {
         this.properties = properties;
+        this.access = access;
         this.generator = new KnowledgeEligibilityGenerator(transport, properties);
     }
 
     /** A capability that is not present — what a unit test and a context without it get. */
     public static KnowledgeEvidenceEligibility disabled() {
-        return new KnowledgeEvidenceEligibility(null, null);
+        return new KnowledgeEvidenceEligibility(null, null, null);
     }
 
     public boolean enabledFor(UUID orgId) {
-        return properties != null && properties.isEnabledFor(orgId);
+        if (properties == null) {
+            return false;
+        }
+        return access == null ? properties.isEnabledFor(orgId) : access.allows(properties, orgId);
     }
 
     /**
@@ -61,11 +80,20 @@ public class KnowledgeEvidenceEligibility {
      * branch on that, which is the point: a judge that did not answer must leave the search exactly
      * as the scorer left it.
      *
+     * @param customerWritten whether a CUSTOMER wrote this question — see
+     *                        {@code RetrievalQuery#customerWritten()}. <b>Only their questions are
+     *                        judged</b> (Retrieval Runtime Closure v1 §4): when a seller types
+     *                        「반품 조건」 into their own knowledge library, or the Agent looks up this
+     *                        company's own policy for them, the passages are the seller's own
+     *                        documents and they asked to see them. A refusal-only model standing
+     *                        between a seller and their own library hides what they wrote from the
+     *                        person who wrote it — a different failure from the wrong-source citation
+     *                        this capability was measured against, and one it cannot help with.
      * @param quotableOf how a passage reads — what would be quoted, so what is judged
      */
-    public <T> List<T> filter(UUID orgId, String question, List<T> hits,
+    public <T> List<T> filter(UUID orgId, String question, boolean customerWritten, List<T> hits,
                               java.util.function.Function<T, String> quotableOf) {
-        if (hits.isEmpty()) {
+        if (hits.isEmpty() || !customerWritten) {
             return hits;
         }
         List<String> quotables = new ArrayList<>(hits.size());
@@ -97,7 +125,8 @@ public class KnowledgeEvidenceEligibility {
             return null;
         }
         List<String> asked = new ArrayList<>(new LinkedHashSet<>(quotables));
-        Map<Integer, Boolean> verdicts = generator.judge(question, asked);
+        Map<Integer, Boolean> verdicts = memo.get(keyFor(question, asked),
+                () -> generator.judge(orgId, question, asked));
         if (verdicts.isEmpty()) {
             return null;
         }
@@ -106,5 +135,25 @@ public class KnowledgeEvidenceEligibility {
             byText.put(asked.get(verdict.getKey()), verdict.getValue());
         }
         return quotable -> byText.getOrDefault(quotable, Boolean.TRUE);
+    }
+
+    /**
+     * What this verdict depends on: the judge model, the question, and the passages as they read.
+     *
+     * <p>The passage TEXT rather than an id or a version, for the same reason the vector cache is
+     * content-addressed: an edited document is a different passage, and a version column would have
+     * to be kept in step by hand across two chunk tables and the answer-memory rows.
+     */
+    private String keyFor(String question, List<String> asked) {
+        StringBuilder material = new StringBuilder(properties.model()).append('\n').append(question);
+        for (String passage : asked) {
+            material.append('\u0000').append(passage);
+        }
+        return Vectors.sha256(material.toString());
+    }
+
+    /** Whether this exact judgement is already paid for — asserted by the reuse test. */
+    boolean remembers(String question, List<String> asked) {
+        return properties != null && memo.holds(keyFor(question, asked));
     }
 }

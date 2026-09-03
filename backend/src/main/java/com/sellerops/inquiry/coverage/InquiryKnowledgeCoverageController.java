@@ -30,9 +30,11 @@ public class InquiryKnowledgeCoverageController {
     /**
      * What one inquiry's reply could be grounded in, without writing a draft.
      *
-     * <p>Read-only in the strong sense: no draft version is appended, no model call is spent, no work
-     * item moves. Returns the seller's own document titles and provenance strings — never the
-     * customer's words and never the passage text.
+     * <p>Read-only in the strong sense: no draft version is appended, no work item moves, no channel
+     * is reached, and no per-question model call is spent — see
+     * {@code InquiryKnowledgeCoverageService#measured}, which is what makes that sentence true again
+     * rather than merely written down. Returns the seller's own document titles and provenance
+     * strings — never the customer's words and never the passage text.
      */
     @GetMapping("/{workItemId}/knowledge-evidence")
     public InquiryKnowledgeCoverageService.EvidencePreview preview(

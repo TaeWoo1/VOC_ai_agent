@@ -253,7 +253,8 @@ public class AnswerMemoryService {
         // conflict resolution below, because a past answer that does not answer this question should
         // not get to win a conflict against one that does.
         if (semantics != null) {
-            ranked = eligibility.filter(orgId, question.full(), ranked,
+            ranked = eligibility.filter(orgId, question.full(), question.customerWritten(),
+                    ranked,
                     h -> (h.ref().getAnswerTitle() == null ? "" : h.ref().getAnswerTitle() + "\n")
                             + h.ref().getAnswerBody());
         }

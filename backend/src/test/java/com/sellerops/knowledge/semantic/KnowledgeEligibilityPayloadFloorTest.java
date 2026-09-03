@@ -30,7 +30,7 @@ class KnowledgeEligibilityPayloadFloorTest {
     private static KnowledgeEvidenceEligibility judgeReturning(String content) {
         String body = "{\"choices\":[{\"message\":{\"content\":" + MAPPER.valueToTree(content) + "}}]}";
         AgentLlmTransport transport = (uri, headers, request) -> new AgentLlmTransport.Response(200, body);
-        return new KnowledgeEvidenceEligibility(properties(), transport);
+        return new KnowledgeEvidenceEligibility(properties(), null, transport);
     }
 
     @Test
@@ -56,24 +56,24 @@ class KnowledgeEligibilityPayloadFloorTest {
         List<String> hits = List.of("A", "B");
         KnowledgeEvidenceEligibility judge = judgeReturning(
                 "{\"verdicts\":[{\"i\":0,\"supports\":false},{\"i\":1,\"supports\":true}]}");
-        assertThat(judge.filter(ORG, "질문", hits, s -> s)).containsExactly("B");
+        assertThat(judge.filter(ORG, "질문", true, hits, s -> s)).containsExactly("B");
         // Nothing it says can produce a passage the scorer did not rank.
-        assertThat(judge.filter(ORG, "질문", List.<String>of(), s -> s)).isEmpty();
+        assertThat(judge.filter(ORG, "질문", true, List.<String>of(), s -> s)).isEmpty();
     }
 
     @Test
     @DisplayName("no opinion leaves the search exactly as the scorer left it")
     void silenceChangesNothing() {
         List<String> hits = List.of("A", "B");
-        assertThat(judgeReturning("").filter(ORG, "질문", hits, s -> s)).isEqualTo(hits);
-        assertThat(judgeReturning("{\"verdicts\":[]}").filter(ORG, "질문", hits, s -> s)).isEqualTo(hits);
-        assertThat(new KnowledgeEvidenceEligibility(properties(),
+        assertThat(judgeReturning("").filter(ORG, "질문", true, hits, s -> s)).isEqualTo(hits);
+        assertThat(judgeReturning("{\"verdicts\":[]}").filter(ORG, "질문", true, hits, s -> s)).isEqualTo(hits);
+        assertThat(new KnowledgeEvidenceEligibility(properties(), null,
                 (uri, headers, request) -> new AgentLlmTransport.Response(500, "no"))
-                .filter(ORG, "질문", hits, s -> s)).isEqualTo(hits);
+                .filter(ORG, "질문", true, hits, s -> s)).isEqualTo(hits);
         // Off for this org, and off entirely.
         assertThat(judgeReturning("{\"verdicts\":[{\"i\":0,\"supports\":false}]}")
-                .filter(UUID.randomUUID(), "질문", hits, s -> s)).isEqualTo(hits);
-        assertThat(KnowledgeEvidenceEligibility.disabled().filter(ORG, "질문", hits, s -> s))
+                .filter(UUID.randomUUID(), "질문", true, hits, s -> s)).isEqualTo(hits);
+        assertThat(KnowledgeEvidenceEligibility.disabled().filter(ORG, "질문", true, hits, s -> s))
                 .isEqualTo(hits);
         // A passage it was not asked about is kept, not dropped.
         KnowledgeEligibility partial = judgeReturning("{\"verdicts\":[{\"i\":0,\"supports\":true}]}")
@@ -87,6 +87,6 @@ class KnowledgeEligibilityPayloadFloorTest {
         List<String> many = List.of("a", "b", "c", "d", "e", "f", "g");
         assertThat(many).hasSizeGreaterThan(KnowledgeEvidenceEligibility.MAX_JUDGED);
         assertThat(judgeReturning("{\"verdicts\":[{\"i\":0,\"supports\":false}]}")
-                .filter(ORG, "질문", many, s -> s)).isEqualTo(many);
+                .filter(ORG, "질문", true, many, s -> s)).isEqualTo(many);
     }
 }

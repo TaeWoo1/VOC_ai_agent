@@ -1159,6 +1159,18 @@ export interface ReviewReplyPrep {
   draftAuthorKind: string | null;
   /** What the head draft was written FROM, in the order the drafter was shown it. Empty on a floor draft. */
   draftEvidence: DraftEvidenceView[];
+  /**
+   * What the head draft was written FROM, as a state — `GROUNDED` or `NO_ANSWER_BASIS`, or null for
+   * a version written before the column existed (or one a person typed).
+   *
+   * Retrieval Runtime Closure v1 §1: the stored version has carried this since Grounded Review
+   * Drafting v1 and nothing read it back, so 「근거 있음 / 기본 문구」 was visible only in the session
+   * that pressed the button. It is read back rather than recomputed — asking the retrieval again on
+   * a read path could answer differently from what the seller was shown.
+   */
+  draftAnswerBasis: string | null;
+  /** The seller-facing sentence for `draftAnswerBasis`, chosen by the backend. Null when it is. */
+  draftAnswerBasisNote: string | null;
 }
 
 /**

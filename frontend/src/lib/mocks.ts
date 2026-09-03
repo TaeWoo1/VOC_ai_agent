@@ -1524,6 +1524,8 @@ export function mockReviewReplyPrep(actionRef: string): ReviewReplyPrep {
     rating: review.rating,
     draftAuthorKind: null,
     draftEvidence: [],
+  draftAnswerBasis: null,
+  draftAnswerBasisNote: null,
   };
 }
 

@@ -39,12 +39,21 @@ export function GroundedReviewDraft({
   accountId,
   actionRef,
   storedEvidence,
+  storedBasis,
+  storedBasisNote,
   onDrafted,
 }: {
   accountId: string;
   actionRef: string;
   /** The head version's stored citations — what 「왜 이렇게 썼어요?」 shows after a reload. */
   storedEvidence: DraftEvidenceView[];
+  /**
+   * The head version's stored basis and its sentence — what 「근거 있음 / 기본 문구」 says after a
+   * reload (Retrieval Runtime Closure v1 §1). Both null when the version recorded no basis, and then
+   * the line is not rendered: "not recorded" is a different statement from either basis.
+   */
+  storedBasis: string | null;
+  storedBasisNote: string | null;
   /** Hand the generated body to the editor. Called synchronously; never awaited. */
   onDrafted: (body: string) => void;
 }) {
@@ -58,6 +67,11 @@ export function GroundedReviewDraft({
   // tomorrow, and it answers from the citations the saved version carries.
   const evidence = result ? result.evidence : storedEvidence;
   const gaps = result?.knowledgeGaps ?? [];
+  // The same rule as the citations above: this session's generation if there is one, else the saved
+  // version's own record. The basis is the fact that decides whether the text in the editor is this
+  // company's knowledge or its safe default, so it has to survive a reload — before this it did not.
+  const basis = result ? result.answerBasis : storedBasis;
+  const basisNote = result ? result.answerBasisNote : storedBasisNote;
 
   async function generate() {
     if (busy) return;
@@ -91,12 +105,12 @@ export function GroundedReviewDraft({
 
       {error ? <p className="break-keep text-sm text-bad" role="alert">{error}</p> : null}
 
-      {result ? (
-        <p className="flex flex-wrap items-center gap-2 text-sm" role="status">
-          <Status tone={result.answerBasis === "GROUNDED" ? "good" : "neutral"}>
-            {result.answerBasis === "GROUNDED" ? "근거 있음" : "기본 문구"}
+      {basis ? (
+        <p className="flex flex-wrap items-center gap-2 text-sm" role="status" data-testid="grounded-review-basis">
+          <Status tone={basis === "GROUNDED" ? "good" : "neutral"}>
+            {basis === "GROUNDED" ? "근거 있음" : "기본 문구"}
           </Status>
-          <span className="break-keep text-muted">{result.answerBasisNote}</span>
+          {basisNote ? <span className="break-keep text-muted">{basisNote}</span> : null}
         </p>
       ) : null}
 

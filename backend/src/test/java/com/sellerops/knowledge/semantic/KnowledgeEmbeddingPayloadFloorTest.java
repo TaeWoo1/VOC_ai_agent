@@ -23,6 +23,10 @@ import org.junit.jupiter.api.Test;
  */
 class KnowledgeEmbeddingPayloadFloorTest {
 
+    /** Any organisation: the id is a LOG field, and the payload floor test's job is that it is not
+     *  a REQUEST field. Every assertion below still checks the serialized bytes for it. */
+    private static final java.util.UUID SOME_ORG = java.util.UUID.randomUUID();
+
     private static KnowledgeEmbeddingGenerator generator() {
         return new KnowledgeEmbeddingGenerator((uri, headers, body) -> new AgentLlmTransport.Response(200, "{}"),
                 new KnowledgeEmbeddingProperties(true, "*", "text-embedding-3-large", "k", 1024));
@@ -51,7 +55,8 @@ class KnowledgeEmbeddingPayloadFloorTest {
         KnowledgeEmbeddingGenerator refused = new KnowledgeEmbeddingGenerator(
                 (uri, headers, body) -> new AgentLlmTransport.Response(429, "slow down"),
                 new KnowledgeEmbeddingProperties(true, "*", "m", "k", 1024));
-        assertThat(refused.embed(List.of("a"))).isEmpty();
+        assertThat(refused
+                .embed(SOME_ORG, KnowledgeEmbeddingGenerator.Kind.PASSAGE, List.of("a"))).isEmpty();
     }
 
     @Test
@@ -61,7 +66,8 @@ class KnowledgeEmbeddingPayloadFloorTest {
         new KnowledgeEmbeddingGenerator((uri, headers, body) -> {
             called.add(uri);
             return new AgentLlmTransport.Response(500, "");
-        }, new KnowledgeEmbeddingProperties(true, "*", "m", "k", 1024)).embed(List.of("a"));
+        }, new KnowledgeEmbeddingProperties(true, "*", "m", "k", 1024))
+                .embed(SOME_ORG, KnowledgeEmbeddingGenerator.Kind.PASSAGE, List.of("a"));
         assertThat(called).containsExactly(URI.create("https://api.openai.com/v1/embeddings"));
     }
 
@@ -146,7 +152,8 @@ class KnowledgeEmbeddingPayloadFloorTest {
         new KnowledgeEmbeddingGenerator((uri, h, body) -> {
             headers.add(h);
             return new AgentLlmTransport.Response(500, "");
-        }, new KnowledgeEmbeddingProperties(true, "*", "m", "secret-value", 1024)).embed(List.of("a"));
+        }, new KnowledgeEmbeddingProperties(true, "*", "m", "secret-value", 1024))
+                .embed(SOME_ORG, KnowledgeEmbeddingGenerator.Kind.PASSAGE, List.of("a"));
         assertThat(headers).singleElement().satisfies(h ->
                 assertThat(h).containsOnlyKeys("Authorization"));
     }

@@ -252,7 +252,8 @@ public class ProductKnowledgeLibraryService {
         // needs. Nothing it does can add a passage, and when every one is refused the outcome is
         // NO_RELEVANT_EVIDENCE — 「관련된 내용은 있지만 이 질문에 답하지 않습니다」, which is what happened.
         if (semantics != null) {
-            hits = new ArrayList<>(eligibility.filter(orgId, question.full(), hits,
+            hits = new ArrayList<>(eligibility.filter(orgId, question.full(),
+                    question.customerWritten(), hits,
                     p -> p.title() + "\n" + p.content()));
         }
         RetrievalOutcome outcome = documents.isEmpty() ? RetrievalOutcome.ABSENT

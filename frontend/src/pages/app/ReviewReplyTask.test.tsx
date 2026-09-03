@@ -49,6 +49,8 @@ function prep(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
     triageDisposition: "RESPONSE_NEEDED",
     draftAuthorKind: null,
     draftEvidence: [],
+    draftAnswerBasis: null,
+    draftAnswerBasisNote: null,
     suggestion: {
       body: "합성 추천 문구",
       category: "positive_reply",

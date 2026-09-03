@@ -72,10 +72,21 @@ function floor(): GeneratedReviewDraftView {
 
 beforeEach(() => generateReviewReplyDraft.mockReset());
 
-function draw(storedEvidence: GeneratedReviewDraftView["evidence"] = [], onDrafted = vi.fn()) {
+function draw(
+  storedEvidence: GeneratedReviewDraftView["evidence"] = [],
+  onDrafted = vi.fn(),
+  stored: { basis: string | null; note: string | null } = { basis: null, note: null },
+) {
   render(
     <MemoryRouter>
-      <GroundedReviewDraft accountId="acc-1" actionRef="review:r-1" storedEvidence={storedEvidence} onDrafted={onDrafted} />
+      <GroundedReviewDraft
+        accountId="acc-1"
+        actionRef="review:r-1"
+        storedEvidence={storedEvidence}
+        storedBasis={stored.basis}
+        storedBasisNote={stored.note}
+        onDrafted={onDrafted}
+      />
     </MemoryRouter>,
   );
   return onDrafted;
@@ -91,6 +102,32 @@ describe("Grounded Review Drafting v1 — the draft first, then why, then what i
     expect(screen.getByText("근거 있음")).toBeInTheDocument();
     // Nothing on this card sends, approves or posts.
     expect(document.body.textContent).not.toMatch(/전송|발송|게시하기/);
+  });
+
+  /**
+   * Retrieval Runtime Closure v1 §1 — the basis survives a reload.
+   *
+   * Before this, 「근거 있음 / 기본 문구」 was rendered from `result`, which exists only in the session
+   * that pressed the button. A seller who reloaded saw the draft and its citations with nothing
+   * saying whether it had been grounded — the one fact that decides whether the text in the editor is
+   * this company's knowledge or its safe default. It is read back from the stored version, never
+   * recomputed: two of the retrieval's three stages are model calls made afresh on every search.
+   */
+  it("shows the stored version's basis on a reopen, and nothing when none was recorded", async () => {
+    draw([], vi.fn(), { basis: "GROUNDED", note: "판매자가 등록한 근거를 사용해 썼습니다." });
+    // No button was pressed and no request was made.
+    expect(generateReviewReplyDraft).not.toHaveBeenCalled();
+    expect(screen.getByTestId("grounded-review-basis")).toHaveTextContent("근거 있음");
+    expect(screen.getByTestId("grounded-review-basis")).toHaveTextContent(
+      "판매자가 등록한 근거를 사용해 썼습니다.",
+    );
+  });
+
+  it("says nothing about the basis when the stored version recorded none", () => {
+    draw();
+    expect(screen.queryByTestId("grounded-review-basis")).toBeNull();
+    // "not recorded" is a third statement, and the card makes none of the three.
+    expect(document.body.textContent).not.toMatch(/근거 있음|기본 문구/);
   });
 
   it("「왜 이렇게 썼어요?」 shows the passage the drafter was actually shown, not just its title", async () => {

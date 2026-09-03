@@ -11,10 +11,13 @@ import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.inquiry.draft.InquiryEvidenceRetriever;
 import com.sellerops.inquiry.draft.InquiryKnowledgeNeed;
 import com.sellerops.knowledge.KnowledgeScope;
+import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.knowledge.memory.AnswerMemoryRepository;
 import com.sellerops.knowledge.org.OrgKnowledgeSourceRepository;
 import com.sellerops.order.ChannelOrderRepository;
+import com.sellerops.product.library.KnowledgeVariantScope;
 import com.sellerops.order.fact.ExactOrderLookupCapability;
+import com.sellerops.order.fact.OrderFactLookup;
 import com.sellerops.order.fact.OrderFactState;
 import java.util.EnumMap;
 import java.util.List;
@@ -27,10 +30,20 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * How much of a real backlog this knowledge architecture can actually reach.
  *
- * <p><b>A measurement, run over the database, touching no marketplace and no model.</b> For each
- * still-unanswered inquiry it asks two independent questions — what would this need to be answered
- * from, and what did the retrieval actually find — and reports the cross-tabulation as counts. No
- * draft is generated, so the number costs nothing and does not move because a model had a good day.
+ * <p><b>A measurement, run over the database, touching no marketplace and spending no per-question
+ * model call.</b> For each still-unanswered inquiry it asks two independent questions — what would
+ * this need to be answered from, and what did the retrieval actually find — and reports the
+ * cross-tabulation as counts. No draft is generated, so the number costs nothing and does not move
+ * because a model had a good day.
+ *
+ * <p><b>That sentence had stopped being true, twice, and Retrieval Runtime Closure v1 §4 made it
+ * true again.</b> Both routes below had drifted onto {@code retrieve(orgId, inquiry)} — the overload
+ * a SCREEN uses — which meant (1) an order fact read with {@code EXACT_ALLOWED}, i.e. up to one
+ * marketplace request per bound inquiry behind an authenticated GET, and (2) once the v2 retrieval
+ * capabilities exist, one question-restatement call and up to two evidence judgements PER ROW of a
+ * backlog with no upper bound. A diagnostic is not a draft: it may not decide to spend a seller's
+ * budget or touch a channel, and it says which retrieval it measured
+ * ({@link CoverageReport#retrieval()}) so nobody reads its number as the shipped configuration's.
  *
  * <p><b>Counts only, and that is a privacy property, not a formatting choice.</b> The corpus is real
  * customer mail containing names, addresses and order numbers. Nothing that leaves this class is
@@ -106,7 +119,16 @@ public class InquiryKnowledgeCoverageService {
                                  int missingProduct, int missingPolicy, int missingOrder,
                                  int orderReferencePresent, int orderBoundToStoredFact,
                                  int orgKnowledgeDocuments, int answerMemories,
-                                 int storedOrders, String exactLookupCapability) {
+                                 int storedOrders, String exactLookupCapability,
+                                 /**
+                                  * Which retrieval produced these counts — always
+                                  * {@link #RETRIEVAL_MEASURED}. Stated rather than assumed: a
+                                  * diagnostic that reads stored facts and spends no per-question
+                                  * model call is not measuring the shipped configuration when the
+                                  * v2 capabilities are on, and a coverage number read as if it
+                                  * were would understate what production reaches.
+                                  */
+                                 String retrieval) {
     }
 
     /**
@@ -129,6 +151,31 @@ public class InquiryKnowledgeCoverageService {
     public record PreviewPassage(String scope, String heading, String locator, double score) {
     }
 
+    /** What this diagnostic measures, and the name it reports for it. */
+    static final String RETRIEVAL_MEASURED = "STORED_FACTS_NO_PER_QUESTION_MODEL";
+
+    /**
+     * The retrieval, as a MEASUREMENT rather than as a draft.
+     *
+     * <p>Two deliberate differences from what a screen does, and both are the same rule — a
+     * diagnostic reads, it does not spend:
+     *
+     * <ul>
+     *   <li>{@code STORED_ONLY}, so a report over a backlog cannot become one marketplace request
+     *       per bound inquiry;</li>
+     *   <li>{@link RetrievalQuery#of}, not {@code ofCustomer}, so neither the question-restatement
+     *       capability nor the evidence-eligibility judgement is charged per row. The lexical
+     *       scorer, the absence gate, the topic table and the cached passage vectors are all
+     *       exactly what production uses.</li>
+     * </ul>
+     */
+    private InquiryEvidenceRetriever.InquiryEvidence measured(UUID orgId, Inquiry inquiry) {
+        RetrievalQuery question = RetrievalQuery.of(null, MarkupText.toPlainText(inquiry.getTitle()),
+                MarkupText.toPlainText(inquiry.getBody()));
+        return retriever.retrieve(orgId, inquiry, question, OrderFactLookup.STORED_ONLY,
+                KnowledgeVariantScope.unresolved());
+    }
+
     /** Preview the evidence for one work item. Reads nothing the seller has not written. */
     @Transactional(readOnly = true)
     public EvidencePreview preview(UUID orgId, UUID workItemId) {
@@ -139,7 +186,7 @@ public class InquiryKnowledgeCoverageService {
                 .filter(i -> orgId.equals(i.getOrgId()))
                 .orElseThrow(() -> ApiException.notFound("문의를 찾을 수 없습니다."));
 
-        InquiryEvidenceRetriever.InquiryEvidence evidence = retriever.retrieve(orgId, inquiry);
+        InquiryEvidenceRetriever.InquiryEvidence evidence = measured(orgId, inquiry);
         return new EvidencePreview(
                 InquiryKnowledgeNeed.of(MarkupText.toPlainText(inquiry.getTitle()),
                         MarkupText.toPlainText(inquiry.getBody())),
@@ -184,7 +231,7 @@ public class InquiryKnowledgeCoverageService {
             Set<InquiryKnowledgeNeed> axes = InquiryKnowledgeNeed.axesOf(title, body);
             axes.forEach(axis -> byAxis.merge(axis, 1, Integer::sum));
 
-            InquiryEvidenceRetriever.InquiryEvidence evidence = retriever.retrieve(orgId, inquiry);
+            InquiryEvidenceRetriever.InquiryEvidence evidence = measured(orgId, inquiry);
             var scopes = evidence.scopes();
             // The axes, not the collapsed label. Before 2026-08-25 this read MULTI_SOURCE as needing
             // all three, which put two product+policy questions into the order-context total.
@@ -251,6 +298,7 @@ public class InquiryKnowledgeCoverageService {
                 (int) orgKnowledge.countByOrgId(orgId), (int) answerMemories.countByOrgId(orgId),
                 (int) stored,
                 ExactOrderLookupCapability.endpointFor(channelCode)
-                        .orElse(ExactOrderLookupCapability.NO_VENDORED_EXACT_LOOKUP));
+                        .orElse(ExactOrderLookupCapability.NO_VENDORED_EXACT_LOOKUP),
+                RETRIEVAL_MEASURED);
     }
 }

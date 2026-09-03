@@ -63,12 +63,18 @@ class KnowledgeQuestionIntentPayloadFloorTest {
         // It is a derived copy of a customer's wording, and this repository keeps exactly one copy of
         // that. Two source facts hold the line: nothing in main persists it, and the only class that
         // holds it hands it to the embedder and drops it.
+        //
+        // Comments are stripped, for the reason AgentDraftBoundaryTest strips them: these files
+        // legitimately DISCUSS each other — the two neighbouring capabilities point at this one's
+        // docblock for the memo rule and the metadata-only log line — and a guard that failed on a
+        // javadoc cross-reference gets deleted rather than fixed. The property is about CODE.
         List<String> offenders = new ArrayList<>();
         Path main = Path.of("src", "main", "java", "com", "sellerops");
         try (Stream<Path> walk = Files.walk(main)) {
             for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
                 String name = source.getFileName().toString();
-                String code = Files.readString(source);
+                String code = Files.readString(source)
+                        .replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("(?m)//.*$", "");
                 if (name.startsWith("KnowledgeQuestionIntent")
                         || name.equals("KnowledgeSemanticSearch.java")) {
                     continue;
@@ -81,8 +87,13 @@ class KnowledgeQuestionIntentPayloadFloorTest {
         assertThat(offenders).as("only the door, its generator and the one search seam know about it")
                 .isEmpty();
         String service = Files.readString(
-                main.resolve("knowledge/semantic/KnowledgeQuestionIntent.java"));
+                main.resolve("knowledge/semantic/KnowledgeQuestionIntent.java"))
+                .replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("(?m)//.*$", "");
         assertThat(service).doesNotContain("Repository").doesNotContain("@Entity")
                 .doesNotContain("save(");
+        // Retrieval Runtime Closure v1: the restatement is now REMEMBERED, and the only place it is
+        // remembered is a bounded in-memory memo that is itself asserted to hold no repository, no
+        // entity and no save (RetrievalRuntimeClosureTest).
+        assertThat(service).contains("SearchMemo");
     }
 }

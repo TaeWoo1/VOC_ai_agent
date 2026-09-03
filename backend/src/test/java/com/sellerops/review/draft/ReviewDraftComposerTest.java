@@ -118,6 +118,41 @@ class ReviewDraftComposerTest {
                 "org-knowledge/SHIPPING_POLICY:판매자", 0.9);
     }
 
+    /**
+     * <b>The sentence a reopen shows is the sentence the generation showed</b> — Retrieval Runtime
+     * Closure v1 §1.
+     *
+     * <p>The stored version has carried {@code answer_basis} since Grounded Review Drafting v1 and
+     * nothing read it back, so 「근거 있음 / 기본 문구」 existed only in the browser session that
+     * pressed the button. It is chosen HERE, by one rule, so the two renderings of one fact cannot
+     * drift: a reopen that recomputed it would have to re-run the retrieval, and two of that
+     * retrieval's three stages are model calls made afresh on every search.
+     */
+    @Test
+    @DisplayName("the basis sentence is one rule, so a reopen says what the generation said")
+    void theBasisSentenceIsReadBackNotRecomputed() {
+        // Exactly what the generation reports, for a grounded draft with citations.
+        retrieval(DraftKnowledgeState.GROUNDED, productPassage("실리콘 표면에는 부착되지 않습니다."));
+        when(model.draftReviewReply(eq(ORG), eq(BODY), any(), eq(TEMPLATE)))
+                .thenReturn(java.util.Optional.of("실리콘 표면에는 부착되지 않습니다. 확인 부탁드립니다."));
+        GeneratedReviewDraftView view = composer.compose(ORG, review(), BODY, "SELLER:u1");
+        assertThat(view.answerBasis()).isEqualTo("GROUNDED");
+        assertThat(view.answerBasisNote())
+                .isEqualTo(ReviewDraftComposer.basisNoteOf("GROUNDED", true))
+                .isEqualTo(ReviewDraftComposer.BASIS_GROUNDED_NOTE);
+
+        // The same rule, applied to what a read path holds: the row's basis and whether the version
+        // recorded any citations.
+        assertThat(ReviewDraftComposer.basisNoteOf("NO_ANSWER_BASIS", false))
+                .isEqualTo(ReviewDraftComposer.BASIS_NONE_NOTE);
+        // GROUNDED with no citation rows is the template floor: a model refused after the retrieval
+        // succeeded, and the sentence has to say what the seller is looking at.
+        assertThat(ReviewDraftComposer.basisNoteOf("GROUNDED", false))
+                .isEqualTo(ReviewDraftComposer.BASIS_NONE_NOTE);
+        // Not recorded is a third statement, and the screen makes none.
+        assertThat(ReviewDraftComposer.basisNoteOf(null, true)).isNull();
+    }
+
     @Test
     @DisplayName("a draft grounded in the company's policy does not then ask for a product standard")
     void groundedIsGroundedWhicheverLaneAnsweredIt() {

@@ -202,6 +202,40 @@ class ReviewReplyServiceTest {
         return service.view(org, account, ref);
     }
 
+    /**
+     * <b>What the head version recorded about its own basis reaches the panel</b> — Retrieval
+     * Runtime Closure v1 §1.
+     *
+     * <p>The column has existed since Grounded Review Drafting v1 and nothing read it back, so a
+     * seller who reloaded the reply-work screen saw the draft and its citations with no statement of
+     * whether it had been grounded — the one fact that decides whether the text in the editor is this
+     * company's knowledge or its safe default. Read back rather than recomputed: recomputing means
+     * re-running a retrieval whose intent and eligibility stages are model calls made afresh on every
+     * search, so the answer could differ from the one the seller was shown.
+     */
+    @Test
+    void theStoredBasisSurvivesAReopen() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        // A version a person typed records no basis, because none was decided.
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        assertThat(view().draftAnswerBasis()).isNull();
+        assertThat(view().draftAnswerBasisNote()).isNull();
+
+        // A version the composer wrote records one, and the panel reads it back.
+        new ReviewReplyDraftService(draftRepo).saveAs(org, review.getId(), "SELLER:" + user,
+                "합성-기본-문구", 1,
+                new ReviewReplyDraftService.Provenance("RULE", "templates-v1", "NO_LIBRARY",
+                        "NO_ANSWER_BASIS", null));
+        ReviewReplyPrepView reopened = view();
+        assertThat(reopened.draftAnswerBasis()).isEqualTo("NO_ANSWER_BASIS");
+        assertThat(reopened.draftAnswerBasisNote())
+                .isEqualTo(com.sellerops.review.draft.ReviewDraftComposer
+                        .basisNoteOf("NO_ANSWER_BASIS", false));
+        // The body and the version are the stored ones — nothing was regenerated to answer this.
+        assertThat(reopened.draft().body()).isEqualTo("합성-기본-문구");
+        assertThat(reopened.draft().version()).isEqualTo(2);
+    }
+
     private void approveHead() {
         int version = service.view(org, account, ref).draft().version();
         service.decideApproval(org, account, ref, "APPROVED", version,

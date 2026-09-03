@@ -199,7 +199,8 @@ public class SellerOperationsKnowledgeService {
         }
         // Same refusal-only judgement the product lane applies, on this lane's own passages.
         if (semantics != null) {
-            hits = new ArrayList<>(eligibility.filter(orgId, question.full(), hits,
+            hits = new ArrayList<>(eligibility.filter(orgId, question.full(),
+                    question.customerWritten(), hits,
                     p -> p.title() + "\n" + p.content()));
         }
         RetrievalOutcome outcome = documents.isEmpty() ? RetrievalOutcome.ABSENT

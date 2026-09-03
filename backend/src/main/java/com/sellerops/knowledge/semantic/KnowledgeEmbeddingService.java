@@ -1,5 +1,6 @@
 package com.sellerops.knowledge.semantic;
 
+import com.sellerops.agent.access.AgentCapabilityAccess;
 import com.sellerops.agent.llm.AgentLlmTransport;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -16,10 +17,13 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * The door to the semantic-retrieval capability: the organisation gate, the cache, and nothing else.
  *
- * <p><b>Vectors are cached by CONTENT, and questions are not cached at all.</b> A passage is embedded
- * once per organisation and reused forever; a customer's question is embedded for the search and
- * dropped. That asymmetry is deliberate — a table of customer questions would be a second copy of
- * customer wording, which this repository refuses everywhere else and would have no reader here.
+ * <p><b>Passage vectors are cached by CONTENT in the database; question vectors only in memory.</b>
+ * A passage is embedded once per organisation and reused forever. A customer's question is never
+ * written down — a table of customer questions would be a second copy of customer wording, which
+ * this repository refuses everywhere else and would have no reader here — but it IS remembered for
+ * the length of one unit of work ({@link SearchMemo}), because one draft searches three lanes with
+ * one question and, since v2, with two phrasings of it. Retrieval Runtime Closure v1 §3 measured
+ * that: the same sentence was leaving as SIX identical embedding requests per grounded draft.
  *
  * <p><b>Writes happen in their own transaction.</b> Caching a vector during a read-only search must
  * not enlist in the caller's transaction, and a vendor failure must not roll back a seller's search.
@@ -29,19 +33,28 @@ public class KnowledgeEmbeddingService {
 
     private final KnowledgeEmbeddingProperties properties;
     private final KnowledgeEmbeddingRepository repository;
+    private final AgentCapabilityAccess access;
     private final KnowledgeEmbeddingGenerator generator;
+    private final SearchMemo<float[]> questions = new SearchMemo<>();
 
     public KnowledgeEmbeddingService(KnowledgeEmbeddingProperties properties,
                                      KnowledgeEmbeddingRepository repository,
+                                     AgentCapabilityAccess access,
                                      AgentLlmTransport transport) {
         this.properties = properties;
         this.repository = repository;
+        this.access = access;
         this.generator = new KnowledgeEmbeddingGenerator(transport, properties);
     }
 
-    /** Whether this organisation may use semantic retrieval at all. */
+    /**
+     * Whether this organisation may use semantic retrieval at all.
+     *
+     * <p>The organisation question is answered by the deployment's one access policy (Retrieval
+     * Runtime Closure v1 §5); the flag, the key and the explicit list stay this capability's own.
+     */
     public boolean enabledFor(UUID orgId) {
-        return properties.isEnabledFor(orgId);
+        return access == null ? properties.isEnabledFor(orgId) : access.allows(properties, orgId);
     }
 
     /**
@@ -75,7 +88,8 @@ public class KnowledgeEmbeddingService {
         for (int i = 0; i < missing.size(); i += KnowledgeEmbeddingGenerator.MAX_BATCH) {
             List<String> batch = missing.subList(i,
                     Math.min(missing.size(), i + KnowledgeEmbeddingGenerator.MAX_BATCH));
-            List<float[]> vectors = generator.embed(batch);
+            List<float[]> vectors = generator.embed(orgId,
+                    KnowledgeEmbeddingGenerator.Kind.PASSAGE, batch);
             if (vectors.size() != batch.size()) {
                 // The vendor refused or answered a shape we do not recognise. What was already cached
                 // still stands; the rest stays missing and the caller falls back.
@@ -106,7 +120,11 @@ public class KnowledgeEmbeddingService {
     }
 
     /**
-     * The vector for one customer question. Embedded, used, and not stored.
+     * The vector for one customer question. Embedded, used, and never written down.
+     *
+     * <p>Remembered in memory for the unit of work, keyed by the model, the dimension count and the
+     * sentence — the three things the answer depends on. A failure is remembered too: three lanes
+     * asking a vendor that just refused would be three refusals for one question.
      *
      * @return null when the capability is off or the vendor did not answer
      */
@@ -114,7 +132,12 @@ public class KnowledgeEmbeddingService {
         if (!enabledFor(orgId) || question == null || question.isBlank()) {
             return null;
         }
-        List<float[]> vectors = generator.embed(List.of(question));
-        return vectors.size() == 1 ? vectors.get(0) : null;
+        String key = Vectors.sha256(orgId + "\n" + properties.model() + "\n"
+                + properties.dimensions() + "\n" + question);
+        return questions.get(key, () -> {
+            List<float[]> vectors = generator.embed(orgId,
+                    KnowledgeEmbeddingGenerator.Kind.QUESTION, List.of(question));
+            return vectors.size() == 1 ? vectors.get(0) : null;
+        });
     }
 }
