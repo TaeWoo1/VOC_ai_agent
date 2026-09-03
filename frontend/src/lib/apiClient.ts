@@ -79,6 +79,8 @@ import type {
   ReviewReplyOutcomeResponse,
   ReviewReplyPrep,
   GeneratedReviewDraftView,
+  KnowledgeCandidateView,
+  KnowledgeDocumentView,
   ReviewReplySubmissionRunResponse,
   ReviewExecutionView,
   ReviewAcquisitionRunResponse,
@@ -1376,6 +1378,77 @@ export const api = {
       `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/draft/generate`,
       {},
       { timeout: MODEL_TIMEOUT_MS },
+    );
+    return data;
+  },
+
+  // --- Knowledge Sources & Acquisition v1 -----------------------------------------
+  //
+  // How knowledge gets IN. Every call here writes into the corpora that already exist and is read
+  // back by the retrieval that already exists; none of them sends, approves or reaches a channel.
+
+  // Bring in one document the seller already has. Multipart, because they have a file.
+  async importKnowledgeDocument(input: {
+    scope: "PRODUCT" | "ORG";
+    productId?: string | null;
+    sourceType?: string | null;
+    orgType?: string | null;
+    file: File;
+  }): Promise<KnowledgeDocumentView> {
+    const form = new FormData();
+    form.append("file", input.file);
+    const params = new URLSearchParams({ scope: input.scope });
+    if (input.productId) params.set("productId", input.productId);
+    if (input.sourceType) params.set("sourceType", input.sourceType);
+    if (input.orgType) params.set("orgType", input.orgType);
+    const { data } = await http.post<KnowledgeDocumentView>(
+      `/api/knowledge/documents?${params.toString()}`,
+      form,
+      // Reading a PDF is server-side work, not a database read: the shared 8s bound is the wrong one.
+      { timeout: MODEL_TIMEOUT_MS, headers: { "Content-Type": "multipart/form-data" } },
+    );
+    return data;
+  },
+
+  async getKnowledgeDocuments(): Promise<KnowledgeDocumentView[]> {
+    const { data } = await http.get<KnowledgeDocumentView[]>("/api/knowledge/documents");
+    return data;
+  },
+
+  // Retire or restore. The row stays, so citations that stood on it still resolve.
+  async setKnowledgeDocumentActive(sourceId: string, active: boolean): Promise<KnowledgeDocumentView> {
+    const { data } = await http.post<KnowledgeDocumentView>(
+      `/api/knowledge/documents/${encodeURIComponent(sourceId)}/active?active=${active}`,
+    );
+    return data;
+  },
+
+  async getKnowledgeCandidates(): Promise<KnowledgeCandidateView[]> {
+    const { data } = await http.get<KnowledgeCandidateView[]>("/api/knowledge/candidates");
+    return data;
+  },
+
+  // Look through this seller's own past answers for sentences they keep writing. A count, not a
+  // judgement: deterministic, idempotent, and it promotes nothing.
+  async proposeKnowledgeCandidates(): Promise<KnowledgeCandidateView[]> {
+    const { data } = await http.post<KnowledgeCandidateView[]>("/api/knowledge/candidates/propose");
+    return data;
+  },
+
+  async acceptKnowledgeCandidate(
+    candidateId: string,
+    body: { title?: string; content?: string; sourceType?: string; orgType?: string },
+  ): Promise<KnowledgeCandidateView> {
+    const { data } = await http.post<KnowledgeCandidateView>(
+      `/api/knowledge/candidates/${encodeURIComponent(candidateId)}/accept`,
+      body,
+    );
+    return data;
+  },
+
+  async dismissKnowledgeCandidate(candidateId: string): Promise<KnowledgeCandidateView> {
+    const { data } = await http.post<KnowledgeCandidateView>(
+      `/api/knowledge/candidates/${encodeURIComponent(candidateId)}/dismiss`,
     );
     return data;
   },

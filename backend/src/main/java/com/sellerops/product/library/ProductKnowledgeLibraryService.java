@@ -154,6 +154,10 @@ public class ProductKnowledgeLibraryService {
         Product product = requireProduct(orgId, productId);
         List<ProductKnowledgeSource> documents =
                 sources.findAllByOrgIdAndProductIdOrderByCreatedAtAsc(orgId, productId).stream()
+                        // A retired source stops grounding new answers (Knowledge Sources & Acquisition
+                        // v1). The row stays, so citations already written still resolve; what changes
+                        // is that a superseded manual can no longer be quoted to a customer.
+                        .filter(ProductKnowledgeSource::isActive)
                         .filter(d -> scope.admits(d.getVariantId()))
                         .toList();
         List<ProductKnowledgeChunk> corpus = chunks.findAllByOrgIdAndProductId(orgId, productId);

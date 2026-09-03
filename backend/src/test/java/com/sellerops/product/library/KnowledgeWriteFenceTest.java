@@ -34,7 +34,16 @@ class KnowledgeWriteFenceTest {
     private static final List<String> ALLOWED_WRITERS = List.of(
             "ProductKnowledgeLibraryService.java",
             "ProductDetailEnrichment.java",
-            "ProductDetailImageKnowledge.java");
+            "ProductDetailImageKnowledge.java",
+            // Knowledge Sources & Acquisition v1 adds two, and both are the same KIND of thing the
+            // three above are — a person's decision, made on purpose, in a place that is about
+            // knowledge rather than about answering a customer:
+            //   the seller handed over a file and said it is their material (the upload);
+            //   the seller read a candidate and pressed 확인 (the inbox).
+            // Neither is reachable from a reply, an approval or an execution — asserted below, so this
+            // list getting longer cannot quietly become this list meaning less.
+            "KnowledgeDocumentService.java",
+            "KnowledgeCandidateService.java");
 
     private static String executable(Path source) throws IOException {
         return Files.readString(source).replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("(?m)//.*$", "");
@@ -60,6 +69,35 @@ class KnowledgeWriteFenceTest {
         assertThat(offenders)
                 .as("a sentence a seller sent is not a fact about the product; promoting it is a decision")
                 .isEmpty();
+    }
+
+    @Test
+    @DisplayName("G — the two acquisition writers are seller decisions, not answer paths")
+    void theAcquisitionWritersAreNotAnswerPaths() throws IOException {
+        // A document is written by an upload; a candidate becomes knowledge only in accept(). What must
+        // stay impossible is either of them writing knowledge because an ANSWER happened, so neither may
+        // name a draft, an approval, an execution or the memory writer.
+        for (String name : List.of("KnowledgeDocumentService.java", "KnowledgeCandidateService.java")) {
+            Path source;
+            try (Stream<Path> walk = Files.walk(MAIN)) {
+                source = walk.filter(f -> f.getFileName().toString().equals(name)).findFirst().orElseThrow();
+            }
+            String code = executable(source);
+            for (String forbidden : List.of("ReplyDraft", "Approval", "Execution", "remember(",
+                    "AnswerMemoryService", "publish", "submission")) {
+                assertThat(code)
+                        .as("%s must not be reachable from an answer path (%s)", name, forbidden)
+                        .doesNotContain(forbidden);
+            }
+        }
+        // The candidate writer reads Answer Memory to COUNT sentences, and that read is the repository
+        // rather than the service: counting what a seller has said is not remembering something new.
+        Path candidate;
+        try (Stream<Path> walk = Files.walk(MAIN)) {
+            candidate = walk.filter(f -> f.getFileName().toString().equals("KnowledgeCandidateService.java"))
+                    .findFirst().orElseThrow();
+        }
+        assertThat(executable(candidate)).contains("AnswerMemoryRepository");
     }
 
     @Test

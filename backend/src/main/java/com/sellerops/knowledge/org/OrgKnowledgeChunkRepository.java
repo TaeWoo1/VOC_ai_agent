@@ -11,4 +11,7 @@ public interface OrgKnowledgeChunkRepository extends JpaRepository<OrgKnowledgeC
 
     @Transactional
     void deleteAllBySourceId(UUID sourceId);
+
+    /** How many passages one document produced — the 자료 list's honest 「찾을 수 있는가」. */
+    int countBySourceId(UUID sourceId);
 }

@@ -2,6 +2,7 @@ package com.sellerops.knowledge.org;
 
 import com.sellerops.common.BaseEntity;
 import com.sellerops.common.DataOrigin;
+import com.sellerops.product.library.KnowledgeAuthorship;
 import com.sellerops.common.RealDataOnly;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -51,6 +52,23 @@ public class OrgKnowledgeSource extends BaseEntity {
 
     @Column(name = "source_url", length = 1000)
     private String sourceUrl;
+
+    /**
+     * How this rule came to exist — typed on the settings screen, or read out of a file the seller
+     * uploaded (Knowledge Sources &amp; Acquisition v1). The product corpus has carried this axis since
+     * the 상세페이지 lane existed; the ORG corpus had one writer and therefore no need for it until now.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "authored_origin", nullable = false, length = 40)
+    private KnowledgeAuthorship authoredOrigin = KnowledgeAuthorship.SELLER_ENTERED_KNOWLEDGE;
+
+    /** The file this rule came from, when the seller uploaded one. Null for a typed rule. */
+    @Column(name = "document_name", length = 260)
+    private String documentName;
+
+    /** Whether this rule still speaks for the company. Retiring is not deleting — see the product corpus. */
+    @Column(nullable = false)
+    private boolean active = true;
 
     @Column(name = "author_user_id")
     private UUID authorUserId;

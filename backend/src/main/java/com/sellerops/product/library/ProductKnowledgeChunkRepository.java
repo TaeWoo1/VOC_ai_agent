@@ -22,4 +22,7 @@ public interface ProductKnowledgeChunkRepository extends JpaRepository<ProductKn
     List<ProductKnowledgeChunk> findAllByOrgId(UUID orgId);
 
     void deleteAllBySourceId(UUID sourceId);
+
+    /** How many passages one document produced — the 자료 list's honest 「찾을 수 있는가」. */
+    int countBySourceId(UUID sourceId);
 }

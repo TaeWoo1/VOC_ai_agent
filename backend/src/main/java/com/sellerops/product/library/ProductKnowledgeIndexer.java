@@ -29,6 +29,11 @@ public class ProductKnowledgeIndexer {
         this.chunks = chunks;
     }
 
+    /** How many passages one document currently has — 0 means nothing about it is findable. */
+    public int countFor(java.util.UUID sourceId) {
+        return chunks.countBySourceId(sourceId);
+    }
+
     /** Rebuild one document's passages. Old passages go first, so a shortened document shrinks. */
     public int index(ProductKnowledgeSource source) {
         chunks.deleteAllBySourceId(source.getId());

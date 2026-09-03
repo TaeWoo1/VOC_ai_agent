@@ -82,6 +82,24 @@ public class ProductKnowledgeSource extends BaseEntity {
     @Column(name = "source_url", length = 1000)
     private String sourceUrl;
 
+    /**
+     * The file this document came from, when the seller uploaded one (Knowledge Sources &amp; Acquisition
+     * v1). Null for a document they typed. It is provenance a citation can print — 「제품 사용설명서.pdf」
+     * says something a derived title cannot.
+     */
+    @Column(name = "document_name", length = 260)
+    private String documentName;
+
+    /**
+     * Whether this source still speaks for the company.
+     *
+     * <p>Retiring is not deleting. A manual that has been superseded stops grounding new answers, and
+     * the drafts that already stood on it keep pointing at a row that exists — which is the difference
+     * between a citation the seller can check and one that reads 「삭제된 자료」.
+     */
+    @Column(nullable = false)
+    private boolean active = true;
+
     @Column(name = "author_user_id")
     private UUID authorUserId;
 

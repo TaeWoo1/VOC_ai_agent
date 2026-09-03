@@ -37,13 +37,29 @@ public enum KnowledgeAuthorship {
      * {@code ActionClass.WRITE} are: a class that is spelled and never produced is one a structural
      * test can prove absent, and the day it acquires a producer the test says so out loud.
      */
-    AI_EXTRACTED_FROM_SELLER_IMAGE;
+    AI_EXTRACTED_FROM_SELLER_IMAGE,
+
+    /**
+     * The seller handed reviewnary a file and said it is their material — a manual, an FAQ, a policy
+     * document (Knowledge Sources &amp; Acquisition v1).
+     *
+     * <p><b>It sits beside {@link #SELLER_ENTERED_KNOWLEDGE}, not below it.</b> The seller wrote the
+     * document and chose to upload it; that is the same act of authorship as typing, performed once for
+     * a hundred sentences. What differs is only that we did not see them choose each sentence — which is
+     * why the FILE is what they activate and retire, and why every citation names it.
+     *
+     * <p>Its figures close sentences: the text is the seller's own, extracted mechanically (a text
+     * layer, a DOCX paragraph), not read out of a picture by a model. The one lane that cannot is still
+     * the one lane that cannot.
+     */
+    SELLER_UPLOADED_DOCUMENT;
 
     /** What the seller reads. Two of the three are the same page, so they read the same. */
     public String labelKo() {
         return switch (this) {
             case SELLER_ENTERED_KNOWLEDGE -> "등록한 상품 지식";
             case SELLER_AUTHORED_CHANNEL_CONTENT, AI_EXTRACTED_FROM_SELLER_IMAGE -> "상품 상세페이지";
+            case SELLER_UPLOADED_DOCUMENT -> "올린 자료";
         };
     }
 
@@ -66,8 +82,11 @@ public enum KnowledgeAuthorship {
     public int tieBreakRank() {
         return switch (this) {
             case SELLER_ENTERED_KNOWLEDGE -> 0;
-            case SELLER_AUTHORED_CHANNEL_CONTENT -> 1;
-            case AI_EXTRACTED_FROM_SELLER_IMAGE -> 2;
+            // A document the seller uploaded is their own writing, chosen once for the whole file
+            // rather than sentence by sentence — so it ties just behind a sentence they typed here.
+            case SELLER_UPLOADED_DOCUMENT -> 1;
+            case SELLER_AUTHORED_CHANNEL_CONTENT -> 2;
+            case AI_EXTRACTED_FROM_SELLER_IMAGE -> 3;
         };
     }
 

@@ -41,6 +41,7 @@ import { ReviewImport } from "./pages/ReviewImport";
 import { OperationsHome } from "./pages/OperationsHome";
 import { Operations } from "./pages/Operations";
 import { AlertSettings } from "./pages/AlertSettings";
+import { KnowledgeHome } from "./pages/app/KnowledgeHome";
 import { OperationsPolicies } from "./pages/app/OperationsPolicies";
 import { AnswerStyle } from "./pages/app/AnswerStyle";
 import { ReviewReplyTemplates } from "./pages/app/ReviewReplyTemplates";
@@ -165,6 +166,7 @@ export function App() {
 
         <Route path="/settings" element={<SettingsHome />} />
         <Route path="/settings/alerts" element={<AlertSettings />} />
+        <Route path="/knowledge" element={<KnowledgeHome />} />
         <Route path="/settings/policies" element={<OperationsPolicies />} />
         <Route path="/settings/style" element={<AnswerStyle />} />
         <Route path="/settings/review-templates" element={<ReviewReplyTemplates />} />

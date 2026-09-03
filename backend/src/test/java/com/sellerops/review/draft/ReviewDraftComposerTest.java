@@ -83,7 +83,8 @@ class ReviewDraftComposerTest {
         when(issueEvidence.findByOrgIdAndReviewId(ORG, REVIEW)).thenReturn(List.of());
 
         composer = new ReviewDraftComposer(retriever, drafts, evidence, templates, model, quota,
-                mock(DraftEvidenceSnippets.class), issueEvidence, issues);
+                mock(DraftEvidenceSnippets.class), issueEvidence, issues,
+                mock(com.sellerops.knowledge.candidate.KnowledgeCandidateService.class));
     }
 
     private static Review review() {
@@ -97,6 +98,8 @@ class ReviewDraftComposerTest {
     }
 
     private void retrieval(DraftKnowledgeState state, ScopedPassage... passages) {
+        // The derived constructor maps NO_LIBRARY to productOutcome ABSENT — an empty library, which is
+        // what 「이 상품에 아직 지식이 없습니다」 means and what §E treats as always worth saying once.
         when(retriever.retrieveFor(eq(ORG), eq(PRODUCT), any(), any()))
                 .thenReturn(new InquiryEvidence(PRODUCT, state, List.of(passages), null, 0));
     }

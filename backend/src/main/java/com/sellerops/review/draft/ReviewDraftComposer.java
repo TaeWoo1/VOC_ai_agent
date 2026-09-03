@@ -19,6 +19,7 @@ import com.sellerops.inquiry.draft.InquiryEvidenceRetriever;
 import com.sellerops.inquiry.draft.InquiryEvidenceRetriever.ScopedPassage;
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.knowledge.KnowledgeScope;
+import com.sellerops.knowledge.candidate.KnowledgeCandidateService;
 import com.sellerops.knowledge.RetrievalQuery;
 import com.sellerops.product.library.KnowledgeVariantScope;
 import com.sellerops.review.Review;
@@ -93,13 +94,14 @@ public class ReviewDraftComposer {
     private final DraftEvidenceSnippets snippets;
     private final ReviewIssueEvidenceRepository issueEvidence;
     private final ReviewIssueRepository issues;
+    private final KnowledgeCandidateService candidates;
 
     public ReviewDraftComposer(InquiryEvidenceRetriever retriever, ReviewReplyDraftService drafts,
                                ReviewDraftEvidenceRepository evidence,
                                ReviewReplyTemplateService templates, AgentDraftService model,
                                AgentQuotaService quota, DraftEvidenceSnippets snippets,
                                ReviewIssueEvidenceRepository issueEvidence,
-                               ReviewIssueRepository issues) {
+                               ReviewIssueRepository issues, KnowledgeCandidateService candidates) {
         this.retriever = retriever;
         this.drafts = drafts;
         this.evidence = evidence;
@@ -109,6 +111,7 @@ public class ReviewDraftComposer {
         this.snippets = snippets;
         this.issueEvidence = issueEvidence;
         this.issues = issues;
+        this.candidates = candidates;
     }
 
     /**
@@ -162,10 +165,31 @@ public class ReviewDraftComposer {
                         retrieved.state().name(), basis, productId));
 
         List<DraftEvidenceView> views = recordEvidence(orgId, review.getId(), saved.version(), cited);
+        List<ReviewKnowledgeGapView> gaps = gapsFor(orgId, review, redactedBody, productId, retrieved, key);
+        // §D: the ask also lands in 확인 필요, so a seller who is not on this screen still sees it once
+        // and can answer it in the one place all of these collect. Idempotent by the question, so a
+        // review drafted five times files one row. Never fails the draft.
+        fileGaps(orgId, gaps);
         return new GeneratedReviewDraftView(saved, authorKind, basis,
                 grounded && !views.isEmpty() ? BASIS_GROUNDED_NOTE : BASIS_NONE_NOTE, views,
-                gapsFor(orgId, review, redactedBody, productId, retrieved, key),
-                key.category(), template.customized() ? "ORG" : "DEFAULT", unavailable);
+                gaps, key.category(), template.customized() ? "ORG" : "DEFAULT", unavailable);
+    }
+
+    /** File each ask in 확인 필요. Best effort: a knowledge inbox must never be able to fail a draft. */
+    private void fileGaps(UUID orgId, List<ReviewKnowledgeGapView> gaps) {
+        if (candidates == null) {
+            return;
+        }
+        for (ReviewKnowledgeGapView gap : gaps) {
+            try {
+                candidates.noteGap(orgId, gap.scope(),
+                        gap.productId() == null ? null : UUID.fromString(gap.productId()),
+                        gap.subject(), gap.question());
+            } catch (RuntimeException e) {
+                // Enum-free and content-free: the draft is the seller's answer, and it is already saved.
+                continue;
+            }
+        }
     }
 
     /** The model's answer, or the reason there is none. A null body means "use the template floor". */
@@ -270,9 +294,14 @@ public class ReviewDraftComposer {
                 retrieved.passages().stream().anyMatch(p -> p.scope() == KnowledgeScope.PRODUCT);
         boolean hasPolicyPassage =
                 retrieved.passages().stream().anyMatch(p -> p.scope() == KnowledgeScope.ORG_OPERATIONS);
+        // §E: a retrieval miss is not by itself a reason to ask the seller for a standard. 「좋아요 아주
+        // 만족합니다」 needs no factual basis, and asking for one reads as «your library is deficient
+        // because a customer was happy». The need is decided by whether an ANSWER WAS OWED.
+        ReviewKnowledgeNeed need = ReviewKnowledgeNeed.of(hasProductPassage, productId != null,
+                retrieved.productOutcome(), review.getRating(), issueTitleFor(orgId, review.getId()) != null);
         List<ReviewKnowledgeGapView> gaps = new ArrayList<>();
         Subject subject = subjectFor(orgId, review, redactedBody);
-        if (productId != null && !hasProductPassage) {
+        if (need.asks() && productId != null && !hasProductPassage) {
             gaps.add(new ReviewKnowledgeGapView("PRODUCT", subject.text(), subject.kind(),
                     "'" + subject.text() + "'에 대해 고객에게 안내하는 공식 기준이 있나요? "
                             + "이 상품에 저장된 지식에서 찾지 못했습니다.",

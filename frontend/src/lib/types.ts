@@ -1162,6 +1162,50 @@ export interface ReviewReplyPrep {
 }
 
 /**
+ * One piece of material the seller handed over (Knowledge Sources & Acquisition v1).
+ *
+ * Three questions and no more, because those are the three a person can answer about a file: what is
+ * it, where does it apply, is it current. `passages` is a count, not an invitation to review chunks —
+ * a document that produced none cannot ground anything, and a list that hid that would be lying.
+ */
+export interface KnowledgeDocumentView {
+  sourceId: string;
+  scope: "PRODUCT" | "ORG" | string;
+  productId: string | null;
+  productName: string | null;
+  /** The file the seller uploaded, verbatim — the provenance a citation can print. */
+  fileName: string | null;
+  title: string;
+  kind: string;
+  /** Whether it still grounds new answers. Retiring is not deleting. */
+  active: boolean;
+  passages: number;
+  uploadedBy: string | null;
+  uploadedAt: string;
+}
+
+/**
+ * One thing reviewnary noticed, waiting for the seller's confirmation.
+ *
+ * `origin` says which producer found it — `REPEATED_ANSWER` (a sentence in this seller's own past
+ * answers) or `DRAFT_GAP` (a draft could not answer something) — because the two call for different
+ * reading. `evidenceCount` is a COUNT of the seller's own answers, never a confidence score.
+ */
+export interface KnowledgeCandidateView {
+  id: string;
+  scope: "PRODUCT" | "ORG" | string;
+  productId: string | null;
+  productName: string | null;
+  subject: string;
+  content: string;
+  origin: "REPEATED_ANSWER" | "DRAFT_GAP" | string;
+  evidenceCount: number;
+  state: string;
+  sourceId: string | null;
+  createdAt: string;
+}
+
+/**
  * One thing reviewnary could not find, said as a question the seller can answer by registering it
  * (Grounded Review Drafting v1). `subjectKind` says which shipped signal named the subject: `ISSUE`
  * (a repeated review problem this review is evidence for) or `REVIEW_TEXT` (the customer's own words,

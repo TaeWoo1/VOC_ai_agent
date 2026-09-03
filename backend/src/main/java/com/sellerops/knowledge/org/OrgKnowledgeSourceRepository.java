@@ -12,5 +12,8 @@ public interface OrgKnowledgeSourceRepository extends JpaRepository<OrgKnowledge
     /** Org-scoped by id — an operating rule is never reachable across a tenant boundary. */
     Optional<OrgKnowledgeSource> findByIdAndOrgId(UUID id, UUID orgId);
 
+    /** Every rule that came from an uploaded file — the 자료 list, org side. */
+    List<OrgKnowledgeSource> findAllByOrgIdAndDocumentNameIsNotNull(UUID orgId);
+
     long countByOrgId(UUID orgId);
 }

@@ -126,7 +126,11 @@ public class SellerOperationsKnowledgeService {
      */
     @Transactional(readOnly = true)
     public OrgKnowledgeSearchResponse search(UUID orgId, RetrievalQuery question, int limit) {
-        List<OrgKnowledgeSource> documents = sources.findAllByOrgIdOrderByCreatedAtAsc(orgId);
+        // Retired rules stop answering (Knowledge Sources & Acquisition v1) — the row stays so the
+        // citations that stood on it still resolve.
+        List<OrgKnowledgeSource> documents = sources.findAllByOrgIdOrderByCreatedAtAsc(orgId).stream()
+                .filter(OrgKnowledgeSource::isActive)
+                .toList();
         List<OrgKnowledgeChunk> corpus = chunks.findAllByOrgId(orgId);
         Map<UUID, OrgKnowledgeSource> byId = new HashMap<>();
         documents.forEach(d -> byId.put(d.getId(), d));
@@ -218,6 +222,19 @@ public class SellerOperationsKnowledgeService {
     }
 
     /** Rebuild one rule's passages. Old passages go first, so a shortened policy shrinks. */
+    /**
+     * Index one rule's passages — the same rebuild the editor performs, exposed for the document
+     * importer (Knowledge Sources &amp; Acquisition v1).
+     *
+     * <p>Public for the reason {@code ProductKnowledgeIndexer} was extracted at all: retrieval reads
+     * chunks, never sources, so a second writer that forgets to index writes a document nothing can
+     * find and nothing complains about.
+     */
+    @Transactional
+    public int index(OrgKnowledgeSource source) {
+        return reindex(source);
+    }
+
     private int reindex(OrgKnowledgeSource source) {
         chunks.deleteAllBySourceId(source.getId());
         List<String> parts = KnowledgeText.chunk(source.getBody());

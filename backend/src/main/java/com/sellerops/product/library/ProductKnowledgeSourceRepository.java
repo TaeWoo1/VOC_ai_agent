@@ -12,5 +12,8 @@ public interface ProductKnowledgeSourceRepository extends JpaRepository<ProductK
     /** Org-scoped by id — a knowledge document is never reachable across a tenant boundary. */
     Optional<ProductKnowledgeSource> findByIdAndOrgId(UUID id, UUID orgId);
 
+    /** Every source that came from an uploaded file — the 자료 list, product side. */
+    List<ProductKnowledgeSource> findAllByOrgIdAndDocumentNameIsNotNull(UUID orgId);
+
     long countByOrgIdAndProductId(UUID orgId, UUID productId);
 }

@@ -20,6 +20,7 @@ import com.sellerops.review.draft.dto.GeneratedReviewDraftView;
 import com.sellerops.common.RedactedBody;
 import com.sellerops.common.ReviewBodyFingerprint;
 import com.sellerops.common.ReviewIdFingerprint;
+import com.sellerops.common.MarkupText;
 import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.identity.ExecutableIdentityResolver;
 import com.sellerops.channel.ChannelRepository;
@@ -190,7 +191,13 @@ public class ReviewReplyService {
             throw ApiException.conflict("AI 초안 기능을 사용할 수 없습니다.");
         }
         RedactedBody body = VocPreviewSanitizer.redactFullBody(review.getBody());
-        return composer.compose(orgId, review, body.text(), ACTOR_PREFIX + actorUserId);
+        // Plain text, the same way the inquiry composer takes its body. Channels hand reviews over
+        // wrapped in markup — measured on this deployment, a NAVER row arrives as
+        // «<p class="word">…</p>» — and every downstream reader of it is worse off for the tags: the
+        // retrieval counts them as content words, the model reads them as part of what the customer
+        // wrote, and a knowledge request that quotes them back is unreadable to the seller.
+        return composer.compose(orgId, review, MarkupText.toPlainText(body.text()),
+                ACTOR_PREFIX + actorUserId);
     }
 
     /**
