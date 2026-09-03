@@ -35,6 +35,11 @@ export interface GuidedFillReplyDriverDeps {
    * reads UNAVAILABLE and nothing is typed.
    */
   reviewIdVerdict?: () => ReviewIdMatchVerdict;
+  /**
+   * Raise the window this run already opened — supplied by the carrier, which owns the browser. Optional:
+   * a driver built without it simply cannot raise anything, and says so (`false`).
+   */
+  raiseSurface?: () => Promise<boolean>;
 }
 
 /** An inner driver that can say whether the review id matched, and can press the open control. */
@@ -53,6 +58,18 @@ export class GuidedFillReplyDriver implements ReplySubmitProbeDriver {
 
   isOpen(): boolean {
     return this.opened !== null;
+  }
+
+  /**
+   * **Raise the EXISTING surface. Never open one.**
+   *
+   * Refuses before the run has opened anything: 「네이버 창 앞으로」 must be a way back to a window the seller
+   * can already see somewhere, never a way to make one appear. The raise itself belongs to the carrier —
+   * this wrapper drives no page, which is why the directory's no-click/no-type guard still covers it whole.
+   */
+  async focusSurface(): Promise<boolean> {
+    if (!this.opened || !this.deps.raiseSurface) return false;
+    return this.deps.raiseSurface();
   }
 
   private async inner(): Promise<ReplySubmitProbeDriver> {

@@ -103,6 +103,56 @@ describe("dev-bridge reply runtime (v2 over an injected transport)", () => {
     });
     expect(await pending).toEqual({ runId: "run_agentabcd12", operatorOutcome: "OPERATOR_REPORTED_SUBMITTED", verification: "UNVERIFIED" });
   });
+
+  /**
+   * Guided Reply UX Smoothing v1 — 「창 앞으로」 rides an EXISTING non-terminal command, and the whole
+   * safety argument for the reply lane rests on which commands this runtime can put on the wire.
+   */
+  it("focusSurface sends FIND_CURRENT_STEP with a fresh revision, resolves on the ack, and terminates nothing", async () => {
+    const { transport, sent, emit } = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport, runId: "run_agentabcd12" });
+    const handle = await startReplySubmission(runtime, { channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" });
+    emit({ protocolVersion: 2, eventId: "run_agentabcd12-e4", runId: "run_agentabcd12", sequence: 4, revision: 4,
+      type: "RUN_STATUS_CHANGED", occurredAt: "2026-01-01T00:00:00.000001Z", payload: { status: "WAITING_FOR_HUMAN" } });
+
+    expect(await handle.focusSurface()).toBe(true);
+    expect(sent[1]!.type).toBe("FIND_CURRENT_STEP");
+    expect(sent[1]!.expectedRevision).toBe(4);
+    expect(sent[1]!.payload).toBeUndefined();
+  });
+
+  it("a refused ask resolves false — the seller is told to find the window, never that it moved", async () => {
+    const sent: CommandEnvelope[] = [];
+    const resultListeners = new Set<(r: { commandId: string; accepted: boolean; reason?: string }) => void>();
+    const transport: ReplyClientTransport = {
+      send: (c) => {
+        sent.push(c);
+        const accepted = c.type === "START_RUN";
+        for (const l of [...resultListeners]) l({ commandId: c.commandId, accepted, ...(accepted ? {} : { reason: "STALE_REVISION" }) });
+      },
+      subscribe: () => () => undefined,
+      subscribeResults: (l) => {
+        resultListeners.add(l);
+        return () => resultListeners.delete(l);
+      },
+    };
+    const runtime = createBridgeReplyRuntime({ transport, runId: "run_agentabcd12" });
+    const handle = await startReplySubmission(runtime, { channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" });
+    expect(await handle.focusSurface()).toBe(false);
+  });
+
+  it("THE WHOLE COMMAND VOCABULARY of the reply lane is three types — a raise added no fourth kind of power", async () => {
+    const { transport, sent, emit } = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport, runId: "run_agentabcd12" });
+    const handle = await startReplySubmission(runtime, { channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" });
+    await handle.focusSurface();
+    const pending = handle.abortSubmission();
+    emit({ protocolVersion: 2, eventId: "run_agentabcd12-e9", runId: "run_agentabcd12", sequence: 9, revision: 9,
+      type: "RUN_OPERATOR_REPORTED", occurredAt: "2026-01-01T00:00:00.000009Z",
+      payload: { status: "OPERATOR_REPORTED", operatorOutcome: "SUBMISSION_ABORTED", verification: "UNVERIFIED" } });
+    await pending;
+    expect(sent.map((c) => c.type)).toEqual(["START_RUN", "FIND_CURRENT_STEP", "SWITCH_TO_MANUAL"]);
+  });
 });
 
 describe("createBridgeReplyRuntime.start — acknowledged, not fire-and-forget", () => {

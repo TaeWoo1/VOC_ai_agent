@@ -1360,6 +1360,26 @@ export function buildNaverReplyLiveConfig(): NaverReplyLiveCarrier {
     createDriver: (target: ReplySubmissionTarget) => {
       driver = new GuidedFillReplyDriver({
         draftBody: target.draftBody,
+        /**
+         * 「네이버 창 앞으로」 — the same closure the three Coupang carriers pass, on this carrier's own
+         * window. It raises what the run already opened and does nothing else: no navigation, no new
+         * page, no second profile, no second NAVER session. `bringToFront()` activates the TAB and
+         * `raiseWindowOf` asks the browser we launched about its own window; neither can touch the page.
+         *
+         * The newest page in the context is the one the run is reading, so it is the one raised.
+         */
+        raiseSurface: async () => {
+          const pages = walkContext?.pages() ?? [];
+          const page = pages.length > 0 ? pages[pages.length - 1] : undefined;
+          if (!page) {
+            log("aw_naver_reply_surface_raise", { raised: false, reason: "NO_PAGE" });
+            return false;
+          }
+          await page.bringToFront().catch(() => undefined);
+          const raised = await raiseWindowOf(page);
+          log("aw_naver_reply_surface_raise", { raised });
+          return raised;
+        },
         open: async () => {
           if (!walkContext) {
             const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel, { followWindow: true });

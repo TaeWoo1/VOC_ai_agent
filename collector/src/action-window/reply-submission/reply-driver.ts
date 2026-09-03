@@ -36,6 +36,19 @@ export interface ReplySubmitProbeDriver {
    * behaviour byte for byte (a recoverable blocker ends the run).
    */
   waitForSurfaceReady?(): Promise<boolean>;
+
+  /**
+   * **Put the window this run already opened back in front of the seller.** Never opens one.
+   *
+   * The same capability the three Coupang carriers expose as `focusSurface` (2026-08-12: the window
+   * reviewnary opened gets lost behind everything else and the screen offered no way back to it). It
+   * raises an EXISTING surface and does nothing else — no navigation, no tab, no click, no keystroke;
+   * the raise itself lives in the carrier, outside this directory, exactly as theirs does.
+   *
+   * Returns whether the raise worked, because a claim that a window came forward has to be a
+   * measurement. A driver that cannot raise anything omits this and the caller learns `false`.
+   */
+  focusSurface?(): Promise<boolean>;
   /**
    * GUIDED only: find the ONE review row matching the target hint, READ-ONLY. `count`/`sig` feed the
    * engine's fail-closed logic. Retains the matched element for {@link highlightRow} (anti-drift).

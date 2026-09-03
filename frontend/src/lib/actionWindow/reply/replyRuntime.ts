@@ -49,6 +49,16 @@ export interface ReplyRuntime {
    * event stream and omits it; a consumer treats absence as "no stage words", never as failure.
    */
   observe?(listener: (signal: ReplySignal) => void): () => void;
+  /**
+   * OPTIONAL: ask the agent to put the window this run already opened back in front of the seller
+   * (Guided Reply UX Smoothing v1). Sends the EXISTING `FIND_CURRENT_STEP` command — allowed in every
+   * non-terminal stage, `effect: "NONE"` — so the run does not advance and nothing terminates.
+   *
+   * Resolves whether the AGENT ACCEPTED the ask, which is not the same claim as "the window came
+   * forward": the acknowledgement carries no such fact, and the surface must not say one. A runtime with
+   * no agent behind it omits this, and the caller treats absence as "cannot ask".
+   */
+  focusSurface?(runId: string): Promise<boolean>;
 }
 
 /** One sanitized event of a guided reply run: its type and, when it names a step, that step's id. */
@@ -62,6 +72,8 @@ export interface ReplyRunHandle {
   runId: string;
   reportSubmitted(): Promise<ReplyTerminal>;
   abortSubmission(): Promise<ReplyTerminal>;
+  /** Ask for the run's own window. Resolves false when the runtime cannot ask — never throws. */
+  focusSurface(): Promise<boolean>;
 }
 
 /**
@@ -77,6 +89,7 @@ export async function startReplySubmission(
     runId,
     reportSubmitted: () => runtime.report(runId, "OPERATOR_REPORTED_SUBMITTED"),
     abortSubmission: () => runtime.report(runId, "SUBMISSION_ABORTED"),
+    focusSurface: () => runtime.focusSurface?.(runId).catch(() => false) ?? Promise.resolve(false),
   };
 }
 
@@ -327,6 +340,41 @@ export function createBridgeReplyRuntime(
           transport.send(startCommand);
         } catch (e) {
           settle(() => reject(e instanceof Error ? e : new Error(String(e))));
+        }
+      });
+    },
+    /**
+     * **The one command this runtime sends that is not START_RUN or a report.**
+     *
+     * `FIND_CURRENT_STEP` is non-terminal by the engine's own table, so the worst a refusal costs is a
+     * seller who walks to their own window. It resolves on the ACK — the agent never reports whether the
+     * OS raised anything, so neither does this.
+     */
+    focusSurface() {
+      if (disposed) return Promise.resolve(false);
+      return new Promise<boolean>((resolve) => {
+        let settled = false;
+        let unsubscribeResults: (() => void) | null = null;
+        const settle = (value: boolean): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          unsubscribeResults?.();
+          resolve(value);
+        };
+        const timer = setTimeout(() => settle(false), startTimeoutMs);
+        const findCommand = command("FIND_CURRENT_STEP");
+        unsubscribeResults = transport.subscribeResults((result) => {
+          if (result.commandId === findCommand.commandId) settle(result.accepted);
+        });
+        if (settled) {
+          unsubscribeResults();
+          return;
+        }
+        try {
+          transport.send(findCommand);
+        } catch {
+          settle(false);
         }
       });
     },

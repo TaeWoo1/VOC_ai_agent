@@ -109,6 +109,32 @@ describe("guided-fill reply driver — fill only on an exact, single target; nev
     expect(await cannot.openComposer()).toEqual({ opened: false, reason: "NOT_SUPPORTED" });
   });
 
+  it("「창 앞으로」 raises only a surface the run ALREADY opened — it can never make one appear", async () => {
+    let raises = 0;
+    let opens = 0;
+    const d = new GuidedFillReplyDriver({
+      draftBody: "x",
+      open: async () => { opens += 1; return { inner: inner(1, 1), page: page() }; },
+      raiseSurface: async () => { raises += 1; return true; },
+    });
+    // Nothing is open yet: refuse, and do NOT open one to have something to raise.
+    expect(await d.focusSurface()).toBe(false);
+    expect(opens).toBe(0);
+    expect(raises).toBe(0);
+
+    await d.prepareSurface();
+    expect(await d.focusSurface()).toBe(true);
+    expect(raises).toBe(1);
+    // The run is where it was: raising a window is not a step.
+    expect(opens).toBe(1);
+  });
+
+  it("a carrier that supplies no raise says so rather than pretending", async () => {
+    const d = new GuidedFillReplyDriver({ draftBody: "x", open: async () => ({ inner: inner(1, 1), page: page() }) });
+    await d.prepareSurface();
+    expect(await d.focusSurface()).toBe(false);
+  });
+
   it("opens the surface lazily — an idle carrier holds no browser", async () => {
     let opened = 0;
     const d = new GuidedFillReplyDriver({ draftBody: "x", open: async () => { opened += 1; return { inner: inner(1, 1), page: page() }; } });

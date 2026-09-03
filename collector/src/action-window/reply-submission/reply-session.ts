@@ -8,6 +8,7 @@
  * a submit the driver reports, and it puts only sanitized v2 contract values on the wire.
  */
 import { validateCommandEnvelope } from "../../../../contracts/action-window/v2/index";
+import { log } from "../../log";
 import type { AwClientFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
 import type { ReplyEffect, ReplyEngine, SurfaceProbeResult } from "./reply-engine";
 import type { ReplySubmitProbeDriver } from "./reply-driver";
@@ -100,6 +101,20 @@ export class ReplySubmitSession {
     });
     this.publishState();
     if (command.type === "START_RUN" && outcome.ok) this.started = true;
+    // 「네이버 창 앞으로」 — the seller asking to see the window this run already opened. `FIND_CURRENT_STEP`
+    // is an EXISTING v2 command, accepted in every non-terminal stage including `WAIT_FOR_SUBMIT`, and the
+    // engine answers it with `effect: "NONE"`: nothing about the run advances, and this raise happens beside
+    // the state machine, not inside it. Byte-for-byte the shape `review-acquisition-run-session.ts`,
+    // `review-locate-session.ts` and `coupang-issuance-session.ts` have shipped since 2026-08-12.
+    //
+    // It cannot become a submit path: the driver's `focusSurface` raises a window and the reply directory's
+    // source guard still forbids every click/type/press token in it.
+    if (command.type === "FIND_CURRENT_STEP" && outcome.ok) {
+      void this.driver
+        .focusSurface?.()
+        .then((raised) => log("aw_reply_surface_focus", { raised }))
+        .catch(() => log("aw_reply_surface_focus", { raised: false }, "warn"));
+    }
     if (outcome.ok && "effect" in outcome && outcome.effect !== "NONE") {
       this.autoBusy = true;
       void this.drive(outcome.effect)

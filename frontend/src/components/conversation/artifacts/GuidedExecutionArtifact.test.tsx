@@ -53,6 +53,10 @@ function fakeRuntime() {
       return { runId: "run_abc", operatorOutcome: outcome, verification: "UNVERIFIED" as const };
     }),
     dispose: vi.fn(),
+    focusSurface: vi.fn(async () => {
+      calls.push("FIND_CURRENT_STEP");
+      return true;
+    }),
     observe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -115,7 +119,39 @@ describe("guided execution artifact — NAVER review reply, seller submits", () 
     }
     // The report controls are a RECOVERY surface: not in the happy path until the seller goes to look.
     expect(screen.queryByRole("button", { name: "등록을 마쳤습니다" })).toBeNull();
-    expect(screen.getByRole("button", { name: "네이버에서 확인" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "네이버 창 앞으로" })).toBeInTheDocument();
+    expect(runtime.calls).toEqual(["START_RUN"]);
+  });
+
+  it("「네이버 창 앞으로」 asks the agent for the run's own window and never terminates the run", async () => {
+    const runtime = fakeRuntime();
+    render(<MemoryRouter><GuidedExecutionArtifact artifact={ARTIFACT} replyRuntime={runtime} /></MemoryRouter>);
+    await userEvent.click(screen.getByRole("button", { name: "네이버에 입력하기" }));
+    await screen.findByTestId("guided-execution-run");
+    act(() => runtime.emit({ type: "COMPOSER_FILLED", stepId: "aw.user_reply_submit" }));
+    await screen.findByTestId("guided-execution-filled");
+
+    await userEvent.click(screen.getByRole("button", { name: "네이버 창 앞으로" }));
+    await waitFor(() => expect(runtime.focusSurface).toHaveBeenCalledWith("run_abc"));
+    // A non-terminal ask: no report was sent, and nothing was recorded as an outcome.
+    expect(runtime.report).not.toHaveBeenCalled();
+    expect(recordReviewReplyOutcome).not.toHaveBeenCalled();
+    expect(runtime.calls).toEqual(["START_RUN", "FIND_CURRENT_STEP"]);
+    // The ask succeeded, so the card claims nothing about the window — it only opens the next step.
+    expect(await screen.findByTestId("guided-execution-report")).toBeInTheDocument();
+    expect(screen.queryByText(/가져오지 못했습니다/)).toBeNull();
+  });
+
+  it("a runtime that cannot ask says the seller must find the window themselves", async () => {
+    const runtime = fakeRuntime();
+    delete (runtime as { focusSurface?: unknown }).focusSurface;
+    render(<MemoryRouter><GuidedExecutionArtifact artifact={ARTIFACT} replyRuntime={runtime} /></MemoryRouter>);
+    await userEvent.click(screen.getByRole("button", { name: "네이버에 입력하기" }));
+    await screen.findByTestId("guided-execution-run");
+    act(() => runtime.emit({ type: "COMPOSER_FILLED", stepId: "aw.user_reply_submit" }));
+    await screen.findByTestId("guided-execution-filled");
+    await userEvent.click(screen.getByRole("button", { name: "네이버 창 앞으로" }));
+    expect(await screen.findByText(/창을 앞으로 가져오지 못했습니다/)).toBeInTheDocument();
     expect(runtime.calls).toEqual(["START_RUN"]);
   });
 
@@ -140,7 +176,7 @@ describe("guided execution artifact — NAVER review reply, seller submits", () 
     await screen.findByTestId("guided-execution-run");
     act(() => runtime.emit({ type: "COMPOSER_FILLED", stepId: "aw.user_reply_submit" }));
     await screen.findByTestId("guided-execution-filled");
-    await userEvent.click(screen.getByRole("button", { name: "네이버에서 확인" }));
+    await userEvent.click(screen.getByRole("button", { name: "네이버 창 앞으로" }));
     await userEvent.click(screen.getByRole("button", { name: "등록하지 않았습니다" }));
     await waitFor(() => expect(runtime.report).toHaveBeenCalledWith("run_abc", "SUBMISSION_ABORTED"));
     expect(await screen.findByText(/등록하지 않고 마쳤습니다/)).toBeInTheDocument();

@@ -62,6 +62,67 @@ function assertFramesValid(frames: AwServerFrame[]) {
   expect(findProhibitedFields(frames)).toEqual([]);
 }
 
+/**
+ * Guided Reply UX Smoothing v1 — 「네이버 창 앞으로」.
+ *
+ * The seller's 「{채널}에서 확인」 asks for the window this run already opened. It rides the EXISTING
+ * `FIND_CURRENT_STEP` command (allowed in every non-terminal stage, `effect: "NONE"`), so the run does
+ * not advance and no new contract value exists: what these tests pin is that the ask reaches the driver,
+ * that it can never open a window, and that the state machine is untouched by it.
+ */
+describe("reply session — 「창 앞으로」 raises the surface the run already opened", () => {
+  it("FIND_CURRENT_STEP at the human barrier asks the driver to raise, and advances nothing", async () => {
+    const driver = new SyntheticReplySubmitDriver();
+    let raises = 0;
+    (driver as unknown as { focusSurface: () => Promise<boolean> }).focusSurface = async () => {
+      raises += 1;
+      return true;
+    };
+    const { client, session, frames, latestView } = harness(driver);
+    client.send({ kind: "aw_command", command: startCommand() });
+    await session.whenSettled();
+    expect(latestView()?.status).toBe("WAITING_FOR_HUMAN");
+    const before = latestView();
+
+    client.send({
+      kind: "aw_command",
+      command: { protocolVersion: 2, commandId: "cmd-find", runId: RUN_ID, expectedRevision: before!.revision, type: "FIND_CURRENT_STEP" },
+    });
+    await session.whenSettled();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(raises).toBe(1);
+    // Accepted, and nothing about the run moved: same stage, same step, still the seller's submit ahead.
+    const results = frames.filter((f) => f.kind === "aw_command_result");
+    expect(results.at(-1)).toMatchObject({ commandId: "cmd-find", accepted: true });
+    expect(latestView()?.status).toBe("WAITING_FOR_HUMAN");
+    // The run itself is byte-identical apart from the two fields every publish bumps: the ask changed
+    // nothing about which step is current, which commands are allowed, or what happens next. Measured
+    // as a whole-view comparison rather than a field list, so a future effect cannot slip past it.
+    const { revision: _r, updatedAt: _u, ...after } = latestView()!;
+    const { revision: _br, updatedAt: _bu, ...was } = before!;
+    expect(after).toEqual(was);
+    expect(after.currentStep.status).toBe("AWAITING_USER");
+    assertFramesValid(frames);
+  });
+
+  it("a driver that cannot raise is not an error — the command is still accepted and the run is unchanged", async () => {
+    const driver = new SyntheticReplySubmitDriver();
+    const { client, session, frames, latestView } = harness(driver);
+    client.send({ kind: "aw_command", command: startCommand() });
+    await session.whenSettled();
+    const before = latestView();
+    client.send({
+      kind: "aw_command",
+      command: { protocolVersion: 2, commandId: "cmd-find", runId: RUN_ID, expectedRevision: before!.revision, type: "FIND_CURRENT_STEP" },
+    });
+    await session.whenSettled();
+    expect(frames.filter((f) => f.kind === "aw_command_result").at(-1)).toMatchObject({ accepted: true });
+    expect(latestView()?.status).toBe("WAITING_FOR_HUMAN");
+    assertFramesValid(frames);
+  });
+});
+
 describe("reply session — end to end over the v2 loopback", () => {
   it("submitted: prep → barrier → operator reports SUBMITTED → OPERATOR_REPORTED", async () => {
     const driver = new SyntheticReplySubmitDriver();

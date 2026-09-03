@@ -142,6 +142,7 @@ function GuidedReplyRun({ target, injected, onDone }: { target: GuidedReplyTarge
   const [phase, setPhase] = useState<Phase>({ kind: "connecting" });
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
   const [reporting, setReporting] = useState(false);
+  const [raiseFailed, setRaiseFailed] = useState(false);
   const handleRef = useRef<ReplyRunHandle | null>(null);
   const submissionRef = useRef<string | null>(null);
   const startedRef = useRef(false);
@@ -221,6 +222,25 @@ function GuidedReplyRun({ target, injected, onDone }: { target: GuidedReplyTarge
       window.clearInterval(timer);
     };
   }, [phase.kind, target.accountId, target.actionRef]);
+
+  /**
+   * **「네이버 창 앞으로」 — the window this run already opened, back in front of the seller.**
+   *
+   * It used to say 「네이버에서 확인」 and do nothing: the browser cannot focus a window the helper owns, so
+   * the seller pressed a primary that changed nothing they could see. The helper CAN raise it — the same
+   * `focusSurface` capability the three Coupang carriers have shipped since 2026-08-12 — so the button is
+   * connected to that rather than renamed away.
+   *
+   * What it never claims: that the window came forward. The agent acknowledges the ask and reports no OS
+   * outcome, so a `true` here means «asked» and prints nothing, while a refusal says plainly that the
+   * seller has to find the window themselves. Either way the next step — telling reviewnary what happened
+   * — is revealed, because the seller is going to look at that window now.
+   */
+  async function raiseAndReport() {
+    setReporting(true);
+    const asked = (await handleRef.current?.focusSurface()) ?? false;
+    setRaiseFailed(!asked);
+  }
 
   async function report(outcome: "submitted" | "aborted") {
     const handle = handleRef.current;
@@ -327,9 +347,14 @@ function GuidedReplyRun({ target, injected, onDone }: { target: GuidedReplyTarge
         </p>
         <p className="break-keep text-sm text-muted">열린 {channel} 창에서 내용을 확인하고, 등록은 판매자님이 눌러 주세요.</p>
         {!reporting ? (
-          <Btn onClick={() => setReporting(true)}>{channel}에서 확인</Btn>
+          <Btn onClick={() => void raiseAndReport()}>{channel} 창 앞으로</Btn>
         ) : (
           <div className="space-y-2" data-testid="guided-execution-report">
+            {raiseFailed ? (
+              <p className="break-keep text-sm text-muted" role="status">
+                창을 앞으로 가져오지 못했습니다. 열려 있는 {channel} 창을 직접 확인해 주세요.
+              </p>
+            ) : null}
             <p className="break-keep text-sm text-muted">확인하셨다면 결과를 기록해 두겠습니다.</p>
             <div className="flex flex-wrap gap-2">
               <Btn variant="outline" size="sm" onClick={() => void report("submitted")}>등록을 마쳤습니다</Btn>
