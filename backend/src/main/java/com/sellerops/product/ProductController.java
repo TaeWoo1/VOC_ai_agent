@@ -35,15 +35,18 @@ import com.sellerops.common.ApiException;
 public class ProductController {
 
     private final ProductQueryService query;
+    private final ProductCatalogService catalogue;
     private final ProductSignalsService signals;
     private final ProductKnowledgeService knowledge;
     private final ProductKnowledgeDerivation derivation;
     private final ReviewProductLinkBackfill reviewLinks;
 
-    public ProductController(ProductQueryService query, ProductSignalsService signals,
+    public ProductController(ProductQueryService query, ProductCatalogService catalogue,
+                             ProductSignalsService signals,
                              ProductKnowledgeService knowledge, ProductKnowledgeDerivation derivation,
                              ReviewProductLinkBackfill reviewLinks) {
         this.query = query;
+        this.catalogue = catalogue;
         this.signals = signals;
         this.knowledge = knowledge;
         this.derivation = derivation;
@@ -56,6 +59,20 @@ public class ProductController {
                                            @RequestParam(name = "q", required = false) String query,
                                            @RequestParam(defaultValue = "10") int limit) {
         return this.query.search(principal.orgId(), query, limit);
+    }
+
+    /**
+     * The 상품 screen's page — heaviest work first, and the org's real total.
+     *
+     * <p>A distinct read from {@code GET /api/products} above, which stays exactly what it is: a
+     * resolver for a seller's own words, alphabetical when asked for nothing. The screen wanted a
+     * worklist and was reading a resolver.
+     */
+    @GetMapping("/catalog")
+    public com.sellerops.product.dto.ProductCatalogView catalog(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @RequestParam(defaultValue = "20") int limit) {
+        return this.catalogue.catalog(principal.orgId(), limit);
     }
 
     /**

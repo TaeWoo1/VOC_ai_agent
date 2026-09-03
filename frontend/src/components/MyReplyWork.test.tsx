@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { MyReplyWork } from "./MyReplyWork";
 import { api } from "../lib/apiClient";
@@ -9,6 +10,13 @@ import type {
   OperatorReplyWorkView,
   OperatorVocItem,
 } from "../lib/types";
+
+// A queue row is a link to the review's reply work surface (/reviews/reply/{id}), so these render
+// inside a router. The rows carry no reply panel of their own any more — see ReplyWorkRow.
+const render = (ui: React.ReactElement) => {
+  const result = rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
+  return { ...result, rerender: (next: React.ReactElement) => result.rerender(<MemoryRouter>{next}</MemoryRouter>) };
+};
 
 // 내 답변 작업 — the operator's OWN committed reply work, with a home that survives a reload.
 // These pin what the surface promises: the to-do is what is still theirs to do, a reported reply
@@ -27,6 +35,7 @@ function item(over: Partial<OperatorVocItem> = {}): OperatorVocItem {
     collectedDate: "2026-05-11",
     signalType: "LOW_RATING_REVIEW",
     safePreview: "합성 미리보기",
+    reviewId: "11111111-1111-1111-1111-111111111111",
     actionRef: "review:11111111-1111-1111-1111-111111111111",
     triageDisposition: "RESPONSE_NEEDED",
     hasReplyPreparation: false,
@@ -66,9 +75,16 @@ describe("MyReplyWork — what the seller is being asked to do (Approval Path v1
     render(<MyReplyWork accountId="acct-1" />);
 
     const todo = await screen.findByTestId("reply-work-todo");
-    const states = within(todo).getAllByTestId("reply-work-state").map((el) => el.textContent);
+    // CONTRACT CHANGED (Operational Workspace UX System v1): a queue row carries ONE state word from
+    // `lib/workState.ts` and no sr-only disambiguating prefix, because there is no longer a row of
+    // four chips to disambiguate it from. The ordering contract is unchanged and is what this asserts.
+    const states = within(todo)
+      .getAllByRole("listitem")
+      .map((li) => (li.textContent ?? "").slice(0, 6));
     // 승인 대기 first; 승인됨 last, because its remaining step is outside this product.
-    expect(states).toEqual(["답변 작업: 승인 대기", "답변 작업: 초안 필요", "답변 작업: 승인됨"]);
+    expect(states[0]).toContain("승인 대기");
+    expect(states[1]).toContain("초안 필요");
+    expect(states[2]).toContain("승인됨");
     // Only what a press finishes is counted — a heading over three rows saying 「3건」 would be a
     // number the seller cannot act on.
     expect(screen.getByTestId("reply-work-waiting")).toHaveTextContent("승인 대기 1건");
@@ -259,66 +275,54 @@ describe("MyReplyWork — 내 답변 작업", () => {
     expect(screen.queryByTestId("reply-work-dismissed-notice")).not.toBeInTheDocument();
   });
 
-  it("offers NO competing triage control — the decision is shown, not editable here", async () => {
-    // The defect this slice closes: a full 처리 상태 toggle beside 작업에서 제외 read as a second
-    // 'take it off my list' control, and moving a drafted row to 지켜보기 silently failed to remove
-    // it. The worklist now SHOWS the decision and sends editing back to the arrival-signal drill-down.
+  it("offers NO triage control — a queue row states the work, it does not re-decide it", async () => {
+    // CONTRACT CHANGED (Operational Workspace UX System v1). This used to assert that the triage
+    // DECISION was shown here as a read-only label. It is not shown here any more, and that is the
+    // point: a row wore four state words at once (승인 대기 · 상태 미상 · 대응 필요 · 기타) and none of
+    // them was the one a seller scanning a worklist asks for. The row keeps the WORK state; the
+    // triage decision is read and edited on the surfaces that own it (the review detail, and the
+    // reply work screen this row opens). The original assertion — no interactive triage affordance
+    // here — is unchanged and is now true by construction.
     vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [item()] }));
 
     render(<MyReplyWork accountId="acct-1" />);
 
-    // The decision is present as a read-only label…
-    const label = await screen.findByTestId("voc-triage-readonly");
-    expect(label).toHaveTextContent("대응 필요");
-    // …and NONE of the interactive triage affordances are.
+    const todo = await screen.findByTestId("reply-work-todo");
+    expect(todo).toHaveTextContent("초안 필요");
     expect(screen.queryByRole("group", { name: "처리 상태" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "지켜보기" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "조치 불필요" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "대응 필요" })).not.toBeInTheDocument();
   });
 
-  it("preserves the reply-preparation flow — a 대응 필요 row still opens 답변 준비", async () => {
-    // Withholding the triage TOGGLE must not withhold the reply flow: a committed 대응 필요 review is
-    // still fully answerable from this home.
+  it("opens the review's reply work surface — and reads nothing per row to do it", async () => {
+    // CONTRACT CHANGED (Operational Workspace UX System v1). This used to assert that the reply
+    // PANEL mounted inside the queue row. It mounted one per row, and four rows of work came to
+    // ~2,300px — the review record itself began 4,000px down the page. The flow is not withheld; it
+    // moved to the screen built for it, which is one viewport tall at every width and where the
+    // approve control sits above the fold.
     vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [item()] }));
-    vi.spyOn(api, "getReviewReplyPrep").mockResolvedValue({
-      actionRef: "review:11111111-1111-1111-1111-111111111111",
-      redactedBody: "합성-리뷰-본문",
-      bodyRedacted: false,
-      triageDisposition: "RESPONSE_NEEDED",
-      suggestion: {
-        body: "합성-추천",
-        category: "general_reply",
-        providerKind: "RULE_BASED",
-        providerName: "review-reply-template",
-        providerVersion: "templates-v1",
-      },
-      draft: null,
-      approval: null,
-      outcome: null,
-      capabilities: {
-        canSave: true,
-        canApprove: false,
-        canWithdraw: false,
-        canCopy: false,
-        canStartSubmissionRun: false,
-      },
-      channelReplyState: null,
-      productName: "합성 상품",
-      reviewDate: "2026-05-10",
-      rating: 1,
-      draftAuthorKind: null,
-      draftEvidence: [],
-  draftAnswerBasis: null,
-  draftAnswerBasisNote: null,
-    });
+    const prep = vi.spyOn(api, "getReviewReplyPrep");
 
     render(<MyReplyWork accountId="acct-1" />);
 
-    // The reply-preparation panel mounts and its editing entry point (초안 저장) is live — the flow
-    // is intact, only the triage toggle is gone.
-    expect(await screen.findByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "초안 저장" })).toBeInTheDocument();
+    const row = await screen.findByRole("link", { name: /합성 미리보기/ });
+    expect(row).toHaveAttribute("href", "/reviews/reply/11111111-1111-1111-1111-111111111111");
+    // The queue costs ONE read. A panel per row is a read per row.
+    expect(prep).not.toHaveBeenCalled();
+  });
+
+  it("a row that is not a review record offers no door, and still reads", async () => {
+    // A Cafe24 community article has no `reviews` row, so there is nothing to open. A capability
+    // limit renders as the absence of an affordance, never as the absence of the row.
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(
+      view({ todo: [item({ reviewId: null, safePreview: "문의글 미리보기" })] }),
+    );
+
+    render(<MyReplyWork accountId="acct-1" />);
+
+    expect(await screen.findByText("문의글 미리보기")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /문의글 미리보기/ })).not.toBeInTheDocument();
   });
 
   it("a dead read never renders as an empty worklist", async () => {

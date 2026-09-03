@@ -115,16 +115,30 @@ export function matchesTopic(topic: WorkloadTopic, texts: readonly (string | nul
   return words.some((w) => haystack.includes(w.toLowerCase()));
 }
 
-/** The classification of one item from its phase and (when read) its draft's answer basis. */
-export function classify(phase: string, detail: InquiryDetail | null): { group: InquiryGroupKey; answerBasis: string | null } {
+/**
+ * The classification of one item from whether a draft EXISTS and (when read) its answer basis.
+ *
+ * <b>A phase is not a draft.</b> This used to read 「a PROPOSED item has an AI draft by the phase's
+ * own meaning」, and that premise is false: `PROPOSED` is written when a PROPOSAL is recorded, and an
+ * `InquiryProposal` states in its own contract that it persists no reply text. Measured on the demo
+ * org 2026-09-04: ten PROPOSED work items, eight with no draft at all. The chat lane was grouping
+ * eight rows under 「초안 준비됨」 with nothing to read, exactly as the 문의 list was.
+ *
+ * The queue row now carries `hasDraft`. A row with no draft is 「아직 초안이 없는 문의」 whatever phase
+ * it sits in; a backend too old to say stays where the detail read leaves it.
+ */
+export function classify(
+  row: { phase: string; hasDraft?: boolean },
+  detail: InquiryDetail | null,
+): { group: InquiryGroupKey; answerBasis: string | null } {
   const draft = detail?.draft ?? null;
-  if (phase === "OPEN" && !draft) {
+  if (!draft && row.hasDraft !== true) {
     return { group: "UNANSWERED", answerBasis: null };
   }
   const basis = draft?.answerBasis ?? null;
   if (basis === "NEEDS_CLARIFICATION") return { group: "NEEDS_CLARIFICATION", answerBasis: basis };
   if (basis === "NO_ANSWER_BASIS") return { group: "KNOWLEDGE_MISSING", answerBasis: basis };
-  // A PROPOSED item has an AI draft by the phase's own meaning; a basis it did not record is a
+  // The draft exists — either read here, or reported by the queue. A basis it did not record is a
   // draft that is ready to be read, not one that is missing.
   return { group: "DRAFT_READY", answerBasis: basis ?? (draft ? "GROUNDED" : null) };
 }
@@ -161,7 +175,9 @@ export async function listInquiryWorkload(
   const items: InquiryWorkloadItem[] = [];
   for (const row of rows) {
     let detail: InquiryDetail | null = null;
-    if (row.phase !== "OPEN") {
+    // Only a row that HAS a draft has a basis to read; spending a detail read on a draftless row
+    // buys nothing and takes the budget from a row that would have said something.
+    if (row.phase !== "OPEN" && row.hasDraft !== false) {
       if (detailReads < cap) {
         detailReads += 1;
         try {
@@ -180,7 +196,7 @@ export async function listInquiryWorkload(
     if (term && !matchesTerm(term, [row.title, row.productName, detail?.title, detail?.details])) {
       continue;
     }
-    const { group, answerBasis } = classify(row.phase, detail);
+    const { group, answerBasis } = classify(row, detail);
     items.push({
       workItemId: row.workItemId,
       inquiryId: row.inquiryId,

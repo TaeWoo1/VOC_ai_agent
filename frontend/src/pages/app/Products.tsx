@@ -22,9 +22,19 @@ import { useAgentSurface } from "../../lib/agentPanel";
  *
  * <b>Ordering is presentation, not semantics.</b> Rows with unanswered inquiries first, then issue
  * evidence, then review volume, then name — so the unattributed placeholder the backend keeps for
- * unlinked rows never leads the catalogue. No backend change; `lib/productRows.ts` owns the rule.
+ * unlinked rows never leads the catalogue. `lib/productRows.ts` owns the rule.
  *
- * Search is server-side and debounced, because the catalogue is not small.
+ * <b>But a screen can only order what it was sent.</b> With no query this used to read the product
+ * RESOLVER, whose empty-query head is alphabetical and capped at ten — so on 2026-09-04 the demo org
+ * showed ten of its 308 products, six of them with no inquiry and no review at all, while the product
+ * carrying 1,761 reviews was not on the page. It reads `/api/products/catalog` now: the same rule this
+ * screen already sorted by, applied to the whole catalogue by the only layer that can see it.
+ *
+ * <b>A page is not a total.</b> The header printed the length of the list it happened to receive as
+ * 「상품 10개」. It says how many the org has, and says when it is showing the head of it.
+ *
+ * Search is server-side and debounced, because the catalogue is not small — and search still asks the
+ * resolver, which is the read that question belongs to.
  */
 const PAGE_SIZE = 20;
 
@@ -32,6 +42,7 @@ export function Products() {
   useAgentSurface({ surface: "products", label: "상품 목록" });
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<ProductSummaryView[] | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
   const [facts, setFacts] = useState<Map<string, ProductRowFacts>>(new Map());
   const [error, setError] = useState(false);
 
@@ -39,11 +50,14 @@ export function Products() {
     let active = true;
     setError(false);
     const timer = setTimeout(() => {
-      void api
-        .searchProductsStrict(query, PAGE_SIZE)
-        .then((list) => {
+      const request = query.trim()
+        ? api.searchProductsStrict(query, PAGE_SIZE).then((list) => ({ rows: list, total: null }))
+        : api.getProductCatalogStrict(PAGE_SIZE).then((page) => ({ rows: page.rows, total: page.total }));
+      void request
+        .then(({ rows: list, total: count }) => {
           if (!active) return;
           setRows(list);
+          setTotal(count);
           void loadFacts(list, (next) => active && setFacts(next));
         })
         .catch(() => active && setError(true));
@@ -60,7 +74,13 @@ export function Products() {
     <div className="space-y-6">
       <PageHead
         title="상품"
-        meta={rows && rows.length > 0 ? <span className="text-sm text-muted">{query ? `찾은 상품 ${rows.length}개` : `${rows.length}개`}</span> : undefined}
+        meta={
+          rows && rows.length > 0 ? (
+            <span className="text-sm text-muted">
+              {query ? `찾은 상품 ${rows.length}개` : total === null ? `${rows.length}개` : `전체 ${count(total)}개`}
+            </span>
+          ) : undefined
+        }
         action={<AgentLaunch context={{ surface: "products" }} label="상품에 대해 물어보기" />}
       />
 
@@ -147,8 +167,14 @@ export function Products() {
           </ul>
         </ListBox>
       )}
-      {rows && rows.length >= PAGE_SIZE ? (
-        <p className="text-sm text-muted">상위 {PAGE_SIZE}개만 보입니다. 이름이나 상품코드로 찾으면 나머지도 열립니다.</p>
+      {/* Said whenever the page is smaller than the catalogue — not when the page happens to be
+          exactly full, which is how the old form (`rows.length >= PAGE_SIZE`, against a head of ten)
+          never rendered at all. */}
+      {rows && total !== null && total > rows.length ? (
+        <p className="text-sm text-muted">
+          지금 확인할 일이 많은 순서로 {rows.length}개를 보여 드립니다. 나머지는 이름이나 상품코드로 찾으면
+          열립니다.
+        </p>
       ) : null}
     </div>
   );

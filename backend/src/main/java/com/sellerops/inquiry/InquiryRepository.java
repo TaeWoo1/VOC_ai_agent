@@ -115,6 +115,20 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
             + "group by q.channelId")
     List<Object[]> countUnansweredOperationalByChannel(@Param("orgId") UUID orgId);
 
+    /**
+     * Unanswered inquiries per product — what the seller still owes, for the whole catalogue at once.
+     *
+     * <p>The 상품 screen ranks by this. Per-product it would be one query per row, which for a
+     * 308-product catalogue is 308 queries to sort twenty. Synthetic rows are excluded here as
+     * everywhere else operational work is counted: ranking a seller's catalogue by manufactured
+     * complaints is how a demo screen came to name an invented product as the shop's worst.
+     */
+    @Query("select q.productId, count(q) from Inquiry q where q.orgId = :orgId"
+            + " and q.productId is not null and q.status = 'UNANSWERED'"
+            + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE
+            + "group by q.productId")
+    List<Object[]> countUnansweredOperationalByProduct(@Param("orgId") UUID orgId);
+
     /** Inquiries linked to one product. Org-scoped in the query — {@code product_id} is a bare FK. */
     @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.productId = :productId" + ACTIVE)
     long countByOrgIdAndProductId(@Param("orgId") UUID orgId, @Param("productId") UUID productId);

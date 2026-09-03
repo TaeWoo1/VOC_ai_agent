@@ -25,6 +25,13 @@ export interface InquiryQueueItem {
   /** transient — the bounded, PII-masked opening of the customer's message the 문의 feed shows. */
   readonly snippet?: string | null;
   readonly receivedAt: string;
+  /**
+   * Whether a reply draft has actually been written for this work item.
+   *
+   * NOT derivable from `phase`: `PROPOSED` is written when a PROPOSAL is recorded, and a proposal
+   * carries no reply text by its own contract. Optional so an older backend simply never claims one.
+   */
+  readonly hasDraft?: boolean;
   /** NAVER: `NAVER_PRODUCT_QNA` | `NAVER_CUSTOMER_INQUIRY`; null for a channel with one source (Lane A, 2026-08-28). */
   readonly sourceSubtype?: string | null;
   /** Backend-decided from stored acquisition provenance — never from the channel label or an id prefix. */

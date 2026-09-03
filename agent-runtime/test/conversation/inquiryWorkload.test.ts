@@ -11,13 +11,24 @@ function detail(basis: string | null): InquiryDetail {
 }
 
 describe("classification", () => {
-  it("OPEN without a draft is UNANSWERED; a PROPOSED draft is grouped by its basis", () => {
-    expect(classify("OPEN", null).group).toBe("UNANSWERED");
-    expect(classify("PROPOSED", detail("GROUNDED")).group).toBe("DRAFT_READY");
-    expect(classify("PROPOSED", detail("NEEDS_CLARIFICATION")).group).toBe("NEEDS_CLARIFICATION");
-    expect(classify("PROPOSED", detail("NO_ANSWER_BASIS")).group).toBe("KNOWLEDGE_MISSING");
-    expect(classify("PROPOSED", detail(null))).toEqual({ group: "DRAFT_READY", answerBasis: "GROUNDED" });
-    expect(classify("PROPOSED", null)).toEqual({ group: "DRAFT_READY", answerBasis: null });
+  // CONTRACT CHANGED (Operational Workspace UX System v1). The last line used to read
+  // `classify("PROPOSED", null) → DRAFT_READY`, on the premise that a PROPOSED item has a draft "by
+  // the phase's own meaning". It does not: `PROPOSED` is written when a PROPOSAL is recorded and a
+  // proposal carries no reply text. Eight of the demo org's ten PROPOSED rows had no draft, and the
+  // chat lane grouped all ten under 「초안 준비됨」.
+  it("a draft is what groups a row — no draft is 아직 초안이 없는 문의, whatever the phase", () => {
+    expect(classify({ phase: "OPEN" }, null).group).toBe("UNANSWERED");
+    expect(classify({ phase: "PROPOSED", hasDraft: false }, null).group).toBe("UNANSWERED");
+    expect(classify({ phase: "PROPOSED", hasDraft: true }, detail("GROUNDED")).group).toBe("DRAFT_READY");
+    expect(classify({ phase: "PROPOSED", hasDraft: true }, detail("NEEDS_CLARIFICATION")).group).toBe("NEEDS_CLARIFICATION");
+    expect(classify({ phase: "PROPOSED", hasDraft: true }, detail("NO_ANSWER_BASIS")).group).toBe("KNOWLEDGE_MISSING");
+    expect(classify({ phase: "PROPOSED", hasDraft: true }, detail(null))).toEqual({ group: "DRAFT_READY", answerBasis: "GROUNDED" });
+    // The queue says a draft exists but the detail read did not happen (budget) or failed: the row is
+    // ready to read, and its basis is honestly unknown.
+    expect(classify({ phase: "PROPOSED", hasDraft: true }, null)).toEqual({ group: "DRAFT_READY", answerBasis: null });
+    // A backend too old to report the fact keeps the old behaviour: the detail read decides.
+    expect(classify({ phase: "PROPOSED" }, detail("GROUNDED")).group).toBe("DRAFT_READY");
+    expect(classify({ phase: "PROPOSED" }, null).group).toBe("UNANSWERED");
   });
 
   it("the topic table is closed and literal; OTHER is what matches nothing", () => {

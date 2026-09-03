@@ -56,7 +56,11 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
   const [items, setItems] = useState<FeedItem[] | null>(null);
   const [analyses, setAnalyses] = useState<ItemAnalysis[]>([]);
   const [workItems, setWorkItems] = useState<Map<string, string>>(new Map());
-  const [phases, setPhases] = useState<Map<string, string>>(new Map());
+  /**
+   * Inquiry ids the queue reported an actual draft for. A SET of a fact, not a map of a lifecycle
+   * phase: 「초안 준비됨」 has to be the draft's own answer (see `InboxList.rowState`).
+   */
+  const [drafted, setDrafted] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const { search } = useLocation();
@@ -146,16 +150,17 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
         api.getInquiryQueueStrict({ phase: "PROPOSED", page: 0, size: 100 }),
       ]);
       const map = new Map<string, string>();
-      const phaseMap = new Map<string, string>();
+      const withDraft = new Set<string>();
       for (const entry of [...open.content, ...proposed.content]) {
         map.set(entry.inquiryId, entry.workItemId);
-        phaseMap.set(entry.inquiryId, entry.phase);
+        if (entry.hasDraft) withDraft.add(entry.inquiryId);
       }
       setWorkItems(map);
-      setPhases(phaseMap);
+      setDrafted(withDraft);
     } catch {
+      // A read that did not happen proves nothing: no row claims a draft.
       setWorkItems(new Map());
-      setPhases(new Map());
+      setDrafted(new Set());
     }
   }, []);
 
@@ -321,7 +326,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
                   basePath={basePath}
                   search={search}
                   showType={!inquiriesOnly}
-                  phases={phases}
+                  drafted={drafted}
                   dense={selection.kind === "FOUND"}
                 />
               )}

@@ -3,14 +3,19 @@ import { ListBox } from "../../components/ui/Section";
 import { ObjectRow } from "../../components/ui/ObjectRow";
 import { Btn, BtnLink } from "../../components/ui/Btn";
 import { useAuth } from "../../lib/auth";
+import { KNOWLEDGE_NOUN } from "../../lib/knowledgeWords";
 
 /**
  * 설정 — a grouped list, not a card wall (docs/reviewnary_design.md §7).
  *
  * Every row is a fact already in the session or a link to a screen that exists; there are no
  * toggles, because a switch that flips nothing is a promise the product does not keep. The difference
- * between AI 답변 스타일 and 운영 정책 is said in one line each: Knowledge decides WHAT is answered,
+ * between AI 답변 스타일 and 운영 기준 is said in one line each: Knowledge decides WHAT is answered,
  * Style decides HOW.
+ *
+ * <b>The names come from `lib/knowledgeWords.ts`.</b> This screen was still calling one row
+ * 「운영 정책 / 답변 기준」 after the screen it opens had become 「운영 기준」 — the same rows under two
+ * names, with neither saying the other existed.
  */
 export function SettingsHome() {
   const { user, logout } = useAuth();
@@ -40,7 +45,7 @@ export function SettingsHome() {
           </li>
           <li>
             <ObjectRow
-              name="운영 정책 / 답변 기준"
+              name={KNOWLEDGE_NOUN.operatingRules}
               facets={<span className="break-keep">무엇을 안내할지 — 배송·취소·교환·증빙처럼 상품과 무관한 답변의 근거</span>}
               action={<BtnLink to="/settings/policies" size="sm" variant="outline">기준 관리</BtnLink>}
             />

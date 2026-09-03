@@ -339,7 +339,11 @@ class OperatorAttentionItemsJsonContractTest {
                 "NAVER", "네이버", "REVIEW", productName, 2, "UNANSWERED",
                 "2026-05-14", "2026-05-15", "LOW_RATING_REVIEW",
                 "배송은 빨랐는데 색이 생각과 달라요",
-                actionRef, triageDisposition, hasReplyPreparation,
+                actionRef,
+                // The review's own id, so a client can open the reply work surface. Null wherever the
+                // row is not a `reviews` record — exercised by the null-actionRef case below.
+                actionRef == null ? null : "5b3b1f8e-0000-4000-8000-000000000001",
+                triageDisposition, hasReplyPreparation,
                 // The state a row with a ref always carries; a ref-less row would carry null, which
                 // the null-actionRef case below already exercises through the same record.
                 actionRef == null ? null : (hasReplyPreparation ? "AWAITING_APPROVAL" : "DRAFT_NEEDED"),

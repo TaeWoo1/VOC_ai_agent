@@ -17,6 +17,7 @@ import type {
   ProductKnowledgeView,
   ProductSignalsView,
   InquiryProductBindingView,
+  ProductCatalogView,
   ProductSummaryView,
   CredentialDiagnosisView,
   AccountDashboardSummary,
@@ -1861,6 +1862,18 @@ export const api = {
   },
 
   /** Product candidates for a seller's own words, or the first page when `q` is empty. */
+  /**
+   * The 상품 screen's page: the heaviest work first, and the org's real total.
+   *
+   * A different question from `searchProductsStrict`, which resolves a seller's own words and whose
+   * empty-query head is alphabetical — right for a resolver, and how the screen came to show ten
+   * products by name over a catalogue of 308.
+   */
+  async getProductCatalogStrict(limit = 20): Promise<ProductCatalogView> {
+    const { data } = await http.get<ProductCatalogView>(`/api/products/catalog?limit=${limit}`);
+    return data;
+  },
+
   async searchProductsStrict(q?: string, limit = 30): Promise<ProductSummaryView[]> {
     const params = new URLSearchParams({ limit: String(limit) });
     if (q && q.trim()) params.set("q", q.trim());

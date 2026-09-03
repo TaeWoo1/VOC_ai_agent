@@ -1,3 +1,4 @@
+import { WORK_STATE, type WorkStateWord } from "./workState";
 import type { OperatorVocItem, ReviewReplyWorkState } from "./types";
 
 /**
@@ -12,10 +13,17 @@ import type { OperatorVocItem, ReviewReplyWorkState } from "./types";
  * The words are instructions, not statuses, and 승인됨 deliberately is not 완료: the next step after
  * an approval happens in the seller center, which this product does not observe.
  */
+export const REPLY_WORK_WORD: Record<ReviewReplyWorkState, WorkStateWord> = {
+  DRAFT_NEEDED: WORK_STATE.DRAFT_NEEDED,
+  AWAITING_APPROVAL: WORK_STATE.AWAITING_APPROVAL,
+  APPROVED: WORK_STATE.APPROVED,
+};
+
+/** Kept for callers that only render text. The words themselves live in `lib/workState.ts`. */
 export const REPLY_WORK_STATE_LABEL: Record<ReviewReplyWorkState, string> = {
-  DRAFT_NEEDED: "초안 필요",
-  AWAITING_APPROVAL: "승인 대기",
-  APPROVED: "승인됨",
+  DRAFT_NEEDED: WORK_STATE.DRAFT_NEEDED.text,
+  AWAITING_APPROVAL: WORK_STATE.AWAITING_APPROVAL.text,
+  APPROVED: WORK_STATE.APPROVED.text,
 };
 
 /**
@@ -34,6 +42,11 @@ const RANK: Record<ReviewReplyWorkState, number> = {
 /** The label for a row, or null when the row cannot carry reply work (a null state is not a state). */
 export function replyWorkStateLabel(state: ReviewReplyWorkState | null | undefined): string | null {
   return state ? REPLY_WORK_STATE_LABEL[state] : null;
+}
+
+/** The word AND its tone, for a row that draws the state rather than just naming it. */
+export function replyWorkStateWord(state: ReviewReplyWorkState | null | undefined): WorkStateWord | null {
+  return state ? REPLY_WORK_WORD[state] : null;
 }
 
 /**

@@ -610,6 +610,7 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                 kstDate(r.getCreatedAt()),  // when SellerOps ingested it
                 signalType.name(), safePreview,
                 actionRef,
+                r.getId().toString(),
                 disposition == null ? null : disposition.name(),
                 replyWork.prepared().contains(r.getId()),
                 // WHERE that work stands. Not derived from the boolean above: that one cannot tell a

@@ -379,6 +379,20 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      * {@code ProductRepository.findAllByOrgIdAndIdIn}), so a product id alone is not proof of
      * same-org ownership.
      */
+    /**
+     * Reviews per product — total and negative — for the whole catalogue at once.
+     *
+     * <p>The second and third keys the 상품 screen ranks by, read the same way and for the same
+     * reason as {@code countUnansweredOperationalByProduct}: one query, not one per row. Synthetic
+     * rows are excluded — a manufactured complaint must never decide which product a seller is told
+     * to look at first.
+     */
+    @Query("select r.productId, count(r), sum(case when r.negative = true then 1 else 0 end)"
+            + " from Review r where r.orgId = :orgId and r.productId is not null"
+            + " and r.dataOrigin = com.sellerops.common.DataOrigin.REAL"
+            + " group by r.productId")
+    List<Object[]> countOperationalByProduct(@Param("orgId") UUID orgId);
+
     long countByOrgIdAndProductId(UUID orgId, UUID productId);
 
     /**

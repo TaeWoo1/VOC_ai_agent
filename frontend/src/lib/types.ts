@@ -965,6 +965,10 @@ export interface OperatorVocItem {
   signalType: string; // the requesting AttentionSignalType
   safePreview: string | null; // sanitized preview, or null when suppressed/empty
   actionRef: string | null; // opaque address, or null when the row is not decidable
+  // This review's own id, so a row can OPEN it — `/reviews/reply/{reviewId}`. It exists because
+  // `actionRef` may not be parsed. Null for a row that is not a `reviews` record (every Cafe24
+  // community article): the absence of an affordance, never an absence of the row.
+  reviewId: string | null;
   triageDisposition: TriageDisposition | null; // null = not yet triaged
   // Whether an operator has already written or approved a reply for this review — batch
   // computed server-side, one query per page rather than a request per row.
@@ -1362,6 +1366,13 @@ export interface CategoryCount {
 
 // Mirrors com.sellerops.inquiry.queue.dto.InquiryQueueItem. Sanitized queue row:
 // carries the seller-visible title but deliberately NO details/body and NO author.
+// Mirrors com.sellerops.product.dto.ProductCatalogView — the 상품 screen's page and the org's real
+// total. Two facts on purpose: a page is not a total, and the screen used to print one as the other.
+export interface ProductCatalogView {
+  total: number;
+  rows: ProductSummaryView[];
+}
+
 export interface InquiryQueueItem {
   workItemId: string;
   inquiryId: string;
@@ -1381,6 +1392,14 @@ export interface InquiryQueueItem {
   status: string; // UNANSWERED | ANSWERED
   title: string | null;
   receivedAt: string; // ISO instant
+  /**
+   * Whether a reply draft has actually been written for this work item.
+   *
+   * NOT derivable from `phase`. `PROPOSED` is written when a proposal is recorded and a proposal
+   * carries no reply text; a row that read the phase and said 「초안 준비됨」 was promising the seller
+   * a sentence nobody wrote — eight of the demo org's ten such rows had no draft.
+   */
+  hasDraft: boolean;
 }
 
 // Mirrors com.sellerops.inquiry.queue.dto.InquiryQueueResponse.

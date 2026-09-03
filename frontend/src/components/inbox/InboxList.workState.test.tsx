@@ -11,11 +11,20 @@ const item = (id: string, over: Partial<FeedItem>): FeedItem => ({
 });
 
 describe("문의 목록 — work-state first (docs/reviewnary_design.md §7)", () => {
-  it("the state word comes from the work item's phase before the feed's status", () => {
-    expect(rowState(item("a", {}), "PROPOSED")).toEqual({ text: "초안 준비됨", tone: "info" });
-    expect(rowState(item("a", {}), "OPEN")).toEqual({ text: "답변 필요", tone: "warn" });
-    expect(rowState(item("a", { status: "ANSWERED" }), null)).toEqual({ text: "답변함", tone: "neutral" });
-    expect(rowState(item("r", { type: "REVIEW", status: "NEGATIVE", rating: 1 }), null)).toEqual({ text: "확인 필요", tone: "bad" });
+  // CONTRACT CHANGED (Operational Workspace UX System v1). This used to read "the state word comes
+  // from the work item's PHASE before the feed's status", and that was the defect: `PROPOSED` is
+  // written when a proposal is recorded, a proposal stores no reply text, and eight of the demo org's
+  // ten 「초안 준비됨」 rows had no draft. The word now needs the draft's own answer.
+  it("초안 준비됨 needs a draft, not a phase", () => {
+    expect(rowState(item("a", {}), true)).toEqual({ text: "초안 준비됨", tone: "info" });
+    expect(rowState(item("a", {}), false)).toEqual({ text: "답변 필요", tone: "warn" });
+    expect(rowState(item("a", { status: "ANSWERED" }), false)).toEqual({ text: "답변함", tone: "neutral" });
+    expect(rowState(item("r", { type: "REVIEW", status: "NEGATIVE", rating: 1 }), false)).toEqual({ text: "확인 필요", tone: "bad" });
+  });
+
+  it("an answered inquiry never claims a draft is waiting", () => {
+    // hasDraft is true and the customer already has their answer: the row is a record, not work.
+    expect(rowState(item("a", { status: "ANSWERED" }), true)).toEqual({ text: "답변함", tone: "neutral" });
   });
 
   it("old open work sits under its own divider, after recent open work and before settled rows", () => {
@@ -35,7 +44,9 @@ describe("문의 목록 — work-state first (docs/reviewnary_design.md §7)", (
     expect(texts[0]).toContain("문의 new");
     expect(texts[1]).toContain("1년 넘게 지난 답변 필요 문의 1건");
     expect(texts[2]).toContain("문의 old");
-    expect(texts[3]).toContain("문의 done");
+    // The work ends and the record begins, and the list says so rather than running them together.
+    expect(texts[3]).toContain("답변한 문의 1건");
+    expect(texts[4]).toContain("문의 done");
     // The divider is not a heading — the detail pane keeps the only h2 on the screen.
     expect(within(list).queryByRole("heading")).toBeNull();
   });

@@ -994,7 +994,9 @@ function TriageSummary({
         </p>
         {needsAttention > 0 && showOnlyAttention ? (
           <Btn size="sm" onClick={showOnlyAttention}>
-            {`이 ${needsAttention}건만 보기`}
+            {/* The number is in the sentence this button sits beside, and again on the 확인 필요
+                filter chip below. Once is enough. */}
+            확인 필요만 보기
           </Btn>
         ) : null}
       </div>

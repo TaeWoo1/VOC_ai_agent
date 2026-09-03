@@ -132,7 +132,9 @@ public class Cafe24VocItemSource implements VocItemSource {
                 kstDate(a.getSourceCreatedAt()), kstDate(a.getCollectedAt()), signalType.name(), safePreview,
                 // No triage anchor → no ref → no decision and no reply work can exist here.
                 // false is a capability limit, not a claim that nobody has prepared anything.
-                null, null, false,
+                // reviewId is null for the same reason: a community article is not a `reviews` row,
+                // so there is no reply work surface to open.
+                null, null, null, false,
                 // No reply work can exist on a row with no ref, so there is no state to name. null is
                 // the absence of a statement, never a fourth state meaning "nothing to do".
                 null,

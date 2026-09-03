@@ -925,6 +925,64 @@ ask 셋 적재(문의 gap + 리뷰의 상품 ask + 리뷰의 배송 ask) → 문
 들고 있고 중복 적재 0. 3폭 × 지식·문의·리뷰 화면 **AA 위반 0** · 가로 스크롤 0 · 콘솔 오류 0 · off-host 0.
 backend **3,777** · frontend **2,730** · 실패 0. 마이그레이션 0 · 마켓플레이스 0 · WRITE 0 · 모델 0.
 
+**`docs/operational_workspace_ux_v1.md`** (Operational Workspace UX System v1 — 2026-09-04.
+페이지별 cosmetic redesign이 아니라 **정보 구조 · 상태 표현 · 행동 문법**을 한 제품으로 정리한다. Calm
+Operational Assistant 시각 방향 · 새 design system · 새 색 · 새 taxonomy · retrieval · approval **전부
+무변경**. **감사가 먼저이고 숫자는 전부 라이브 실측이다**(실제 Demo Org, 1440×900@2×): `/reviews`
+**6,550px** · 컨트롤 65개 · 행 하나에 상태어 **넷**(승인 대기 · 상태 미상 · 대응 필요 · 기타) · 고객
+문장 **두 번** · 행마다 답변 준비 패널 전체(~570px)라 리뷰 기록이 4,000px 아래에서 시작했고, `/inquiries`
+**7,068px** · 제목 **하나**(`h1:문의`)로 업무 큐와 기록 아카이브가 같은 목록이며, `/products`는 카탈로그
+**308개** 위에 **「상품 10개」**를 찍고 그 열 중 여섯이 「문의·리뷰 아직 없음」인데 **리뷰 1,761개짜리
+상품은 페이지에 없었다**(더 있다는 문장도 렌더된 적 없다 — `rows.length >= 20`을 head 10에 대고 물었다),
+설정은 직전 패키지가 **운영 기준**으로 바꾼 화면을 여전히 「운영 정책 / 답변 기준」으로 불렀다.
+**본체는 상태 진실이다** — 문의 목록의 「초안 준비됨」은 work item **phase**(`PROPOSED`)에서 읽고 있었고,
+그 phase는 **proposal**이 기록될 때 쓰이며 `InquiryProposal`은 자기 계약에 **답변 본문을 저장하지 않는다**고
+적어 두었다: 실측 **PROPOSED 10건 중 초안 보유 2건**, 즉 **여덟 행이 아무도 쓰지 않은 문장을 읽으러 가라고
+말하고 있었다**. 같은 전제가 대화 lane에도 주석으로 있었다(「A PROPOSED item has an AI draft by the phase's
+own meaning」 — 그런 뜻은 없다) ⇒ 양쪽이 이제 **사실을 읽는다**(`InquiryQueueItem.hasDraft`, 페이지당
+`select distinct` 1회 · `rowState(item, hasDraft)` · `classify(row, detail)`), **읽지 못했으면 어떤 행도
+초안을 주장하지 않는다**(읽지 않은 사실은 참인 사실이 아니다). 초안 없는 `PROPOSED`는 늘 그랬던 것 —
+답변 필요 — 이고 라이브에서 10 → **2**. **문법은 하나**: 지금 처리할 일 → 전체 기록, 홈/대화는 그대로
+control plane, workspace는 정밀 검사·일괄 처리·검색·복구용이며 **모든 화면에 chat을 복제하지 않는다**;
+**큐 행은 방이 아니라 문**이고 **page는 total이 아니다**. 어휘는 `lib/workState.ts` **한 표**(답변 필요 ·
+확인 필요 · 초안 준비됨 · 초안 필요 · 승인 대기 · 승인됨 · 답변함)이고 **각 단어 옆에 그것을 증명하는
+필드가 적혀 있다**; `good` 톤은 하나도 없고(승인됨은 **완료가 아니다** — 다음 걸음은 판매자센터다),
+**답변 필요와 초안 필요는 일부러 합치지 않았다**(전자는 고객에 대한 사실, 후자는 판매자 자기 작업에 대한
+사실 — 합치면 받은함과 작업 목록의 차이가 사라진다). 지식 명사 다섯도 `KNOWLEDGE_NOUN`으로 같은 이유로
+고정. **Reviews**: `ReplyWorkRow`(기존 `WorkItem` 프리미티브)가 상태어 **하나** · ★ · 상품 · 고객 문장으로
+줄고 행 자체가 **`/reviews/reply/{reviewId}`**(Review Approval Path v1이 지은 화면, 승인 y=**594**)를
+연다 ⇒ **6,550 → 4,022px(−39%)** · 상자 11→7 · pill 3→0 · 행당 상태어 4→**1** · 고객 문장 2→1 ·
+**큐 렌더 읽기 = 행마다 1회 → 전체 1회**; 승인 경계·fingerprint·draft version 무변경이고 이 패키지가
+리뷰 화면에 더한 write는 **0**. 소비자가 사라진 `VocItemCard`는 초록 테스트를 단 죽은 코드로 남기지 않고
+테스트와 함께 삭제했다(`ReplyWorkControls` — 유일한 답변 클러스터 — 는 그대로). **Inquiries**: 목록이
+선택 rail이기도 하므로 한 열을 유지하되 **경계를 보이게** 했다 — `답변한 문의 {n}건` divider(기존 「1년
+넘게 지난…」과 같은 관용구, heading 아님)와 dim 처리, 라이브 22 위 / 72 아래. **Products**: 화면이
+**resolver**에게 worklist를 묻고 있었다(빈 질의 head는 이름순·상한 — resolver로서는 옳다) ⇒
+`ProductCatalogService` · `GET /api/products/catalog`가 **org의 진짜 total**과 **판매자가 빚진 것 → 고객이
+불평한 것** 순서(미답변 문의 → 부정 리뷰 → 리뷰 수 → 이름; `lib/productRows.ts`가 이미 쓰던 그 규칙을
+카탈로그 전체가 볼 수 있는 층으로 옮긴 것)를 돌려준다 — 읽기 **3회**(묶음 count 2 + 카탈로그), 행당 읽기
+0, 페이지 상한 20. **합성 규칙은 둘로 갈린다**: 어느 상품이 나열되는가는 `realDataOnly` 필터를 따라
+`countByOrgId`와 같은 답을 주고, 무엇이 순위를 정하는가는 **항상 REAL만**이다(만들어 낸 불만으로 판매자
+카탈로그를 줄 세우는 것이 데모 화면이 지어낸 상품을 「최악의 상품」이라 부른 그 결함이다). 결과:
+「상품 10개」 → **「전체 300개」**, 첫 행 「코드 15223228019 · 리뷰 7」 → **「선바로 일체형 전선몰딩 ·
+미답변 1 · 문의 8 · 리뷰 1,761」**, `search`는 무변경. **Chat ↔ Workspace continuity 라이브 확인**: 대화
+리뷰 artifact → `/reviews/reply/{id}?from=chat`(계정 해석 · 승인 존재 · 「대화로 돌아가기」), 대화 문의
+artifact → `/inquiries/{inquiryId}`(그 행이 `aria-current`, 다른 객체 오염 0), 그리고 **큐 행이 대화
+artifact와 같은 URL을 연다** — 들어가는 길 둘, 화면 하나. 어떤 workspace에도 standalone chat을 붙이지
+않았고 `conversationWriteFence`·승인 경계 무변경. **Orders/Reports는 감사만 하고 무변경**(없는 workflow를
+만들지 않았다), **Settings는 이름 하나**(Knowledge의 일상 「확인 필요」를 설정으로 밀지 않았다). 브라우저
+QA 1440/1366/1152 — **AA 텍스트 노드 위반 3폭 전부 0** · 가로 스크롤 0 · off-host 0 · 승인 버튼 y=594가
+세 폭 동일. backend **3,781** · runtime **835** · frontend **2,704**/229 files · 실패 0.
+**마켓플레이스 호출 0 · WRITE 0 · 모델 호출 0 · 마이그레이션 0 · DB 행 변경 0** ⇒ evidence 행 없음.
+**계약이 바뀌어 테스트 4건을 다시 썼다**(전부 같은 방향 — 화면이 추론한 사실 대신 들은 사실을 말한다;
+안전 테스트 약화 **0**). **저장소 규칙 충돌 보고**: `frontend/CLAUDE.md`가 그 workstream에 금지한
+`backend/**` 수정을 product-owner 지시(conflict priority 1)에 따라 여섯 파일에 했고 **전부 읽기**이며
+**state semantics 변경 0 · 가짜 상태 0**이다. **고치지 않고 보고**: `/inquiries` 7,100px(제대로 쪼개면
+목록 열이 선택 rail이기를 그만두므로 IA 결정), 합성 행의 `data_origin='REAL'`(세 패키지째 보고), 상품
+상세의 「미답변 문의」가 문이 아닌 것(`/inquiries`에 상품 필터가 없어 오늘 정직하게 링크할 수 없다 —
+product-scoped inquiry read가 필요), total 300 vs 표 308(필터가 설계대로 동작하는 것), 설정 아래의
+고객운영 메모리·리포트(nav에 없어 설정이 유일한 메뉴 집), 숫자 코드가 이름인 상품 행)
+
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은
 `deploy/pilot/`: compose overlay(`ports: !reset []`로 raw port 공개 0, `restart: unless-stopped`, JVM heap 고정, Cafe24

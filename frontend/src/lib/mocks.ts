@@ -1233,6 +1233,7 @@ function toVocItem(review: MockNaverReview, signalType: string): OperatorVocItem
     category: review.category,
     // The demo's own record of a guided reply: true once an outcome was reported as SUBMITTED for
     // the approved version that stands, mirroring the server's rule rather than a separate one.
+    reviewId: null,
     hasReportedSubmission: mockHasReportedSubmission(actionRef),
   };
 }

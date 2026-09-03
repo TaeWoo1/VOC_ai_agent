@@ -138,6 +138,21 @@ public record OperatorVocItem(
         String signalType,
         String safePreview,
         String actionRef,
+        /**
+         * This review's own id, so a client can OPEN it — {@code /reviews/reply/{reviewId}}, the reply
+         * work surface Review Approval Path v1 built.
+         *
+         * <p>It exists because {@code actionRef} may not be parsed: it is an opaque address for
+         * round-tripping a decision, and reading a uuid out of it would be a second, private contract
+         * between two layers. The server names the row instead. {@code null} for any row that is not a
+         * {@code reviews} record (every Cafe24 community article) — the absence of an affordance, never
+         * an absence of the row.
+         *
+         * <p>Exposing it widens nothing: this is SellerOps' own row id, the same one {@code inbox}'s
+         * {@code FeedItem} already carries for these reviews, and it is not an authorization — the
+         * server re-derives org and account scope on every use.
+         */
+        String reviewId,
         String triageDisposition,
         boolean hasReplyPreparation,
         String replyWorkState,

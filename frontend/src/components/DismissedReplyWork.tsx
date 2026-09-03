@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { VocItemCard } from "./VocItemCard";
+import { ReplyWorkRow } from "./reviews/ReplyWorkRow";
 import { api } from "../lib/apiClient";
 import { attentionUncertaintyCopy } from "../lib/attention";
 import type { AttentionCoverage, OperatorVocItem } from "../lib/types";
@@ -125,7 +125,7 @@ export function DismissedReplyWork({
                   <li key={item.actionRef} className="py-3">
                     {/* Read-only triage, like the to-do rows — this is a place to recover from, not a
                         second place to re-decide. */}
-                    <VocItemCard item={item} accountId={accountId} triageMode="readonly" />
+                    <ReplyWorkRow item={item} dim />
                     {item.actionRef ? (
                       <div className="mt-2">
                         <button

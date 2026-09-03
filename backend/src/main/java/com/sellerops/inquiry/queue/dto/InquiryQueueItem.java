@@ -36,6 +36,15 @@ public record InquiryQueueItem(
          */
         String snippet,
         Instant receivedAt,
+        /**
+         * Whether a reply draft has actually been written for this work item.
+         *
+         * <p><b>Not derivable from {@code phase}.</b> {@code PROPOSED} is written when a proposal is
+         * recorded, and a proposal stores no reply text at all ({@code InquiryProposal}); a client that
+         * read the phase and said 「초안 준비됨」 was telling the seller a sentence exists that nobody
+         * wrote. This field is the fact, read from {@code inquiry_reply_draft} in one query per page.
+         */
+        boolean hasDraft,
         /** Which resource of the channel produced the row ({@code InquirySourceSubtype} name), or null. */
         String sourceSubtype,
         /** {@code MARKETPLACE} | {@code NONE} — see {@code InquiryDetail.executableIdentity}. */

@@ -63,23 +63,27 @@ public class InquiryQueueService {
     private final ChannelRepository channels;
     private final ProductRepository products;
     private final com.sellerops.identity.ExecutableIdentityResolver identity;
+    /** Nullable: without it no row can claim a draft, which is the fail-closed answer. */
+    private final com.sellerops.inquiry.reply.InquiryReplyDraftRepository drafts;
 
     @org.springframework.beans.factory.annotation.Autowired
     public InquiryQueueService(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                ChannelRepository channels, ProductRepository products,
-                               com.sellerops.identity.ExecutableIdentityResolver identity) {
+                               com.sellerops.identity.ExecutableIdentityResolver identity,
+                               com.sellerops.inquiry.reply.InquiryReplyDraftRepository drafts) {
         this.workItems = workItems;
         this.inquiries = inquiries;
         this.channels = channels;
         this.products = products;
         this.identity = identity;
+        this.drafts = drafts;
     }
 
     /** Without a resolver every row reads {@code NONE} — the fail-closed identity. Test wiring. */
     public InquiryQueueService(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                ChannelRepository channels, ProductRepository products) {
         this(workItems, inquiries, channels, products,
-                com.sellerops.identity.ExecutableIdentityResolver.unresolved());
+                com.sellerops.identity.ExecutableIdentityResolver.unresolved(), null);
     }
 
     public InquiryQueueResponse queue(UUID orgId, InquiryWorkItemPhase phase, int page, int size) {
@@ -109,12 +113,20 @@ public class InquiryQueueService {
         // One provenance pass for the page — the resolver groups its reads per account.
         Map<UUID, com.sellerops.identity.ExecutableIdentity> identities = identity.forInquiries(orgId, byId.values());
 
+        // Which rows really have a draft — one query for the page. Without the repository (the test
+        // constructor) no row claims one: an unread fact is not a true fact.
+        List<UUID> pageWorkItemIds = workItemPage.getContent().stream().map(InquiryWorkItem::getId).toList();
+        java.util.Set<UUID> drafted = drafts == null || pageWorkItemIds.isEmpty()
+                ? java.util.Set.of()
+                : java.util.Set.copyOf(drafts.findWorkItemIdsWithDraft(pageWorkItemIds));
+
         List<InquiryQueueItem> content = workItemPage.getContent().stream()
                 // A work item whose inquiry is not operational is dropped, not rendered blank: a row
                 // with a null status and no title would still be a clickable task.
                 .filter(w -> byId.containsKey(w.getInquiryId()))
                 .map(w -> toItem(w, byId.get(w.getInquiryId()), channelsById, productNames,
-                        identities.getOrDefault(w.getInquiryId(), com.sellerops.identity.ExecutableIdentity.NONE)))
+                        identities.getOrDefault(w.getInquiryId(), com.sellerops.identity.ExecutableIdentity.NONE),
+                        drafted.contains(w.getId())))
                 .toList();
 
         return new InquiryQueueResponse(content, workItemPage.getNumber(), workItemPage.getSize(),
@@ -133,7 +145,8 @@ public class InquiryQueueService {
     private static InquiryQueueItem toItem(InquiryWorkItem workItem, Inquiry inquiry,
                                            Map<UUID, Channel> channelsById,
                                            Map<UUID, String> productNames,
-                                           com.sellerops.identity.ExecutableIdentity executableIdentity) {
+                                           com.sellerops.identity.ExecutableIdentity executableIdentity,
+                                           boolean hasDraft) {
         // inquiry is always present (FK-consistent), but stay null-safe on the read.
         String status = inquiry == null ? null : inquiry.getStatus();
         String title = inquiry == null ? null : inquiry.getTitle();
@@ -158,6 +171,7 @@ public class InquiryQueueService {
                 title,
                 inquiry == null ? null : com.sellerops.inbox.InboxService.snippet(inquiry.getBody()),
                 receivedAt,
+                hasDraft,
                 inquiry == null ? null : inquiry.getSourceSubtype(),
                 executableIdentity.name());
     }

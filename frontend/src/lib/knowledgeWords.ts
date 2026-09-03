@@ -12,6 +12,19 @@
  */
 import type { KnowledgeSourceType, OrgKnowledgeType } from "./types";
 
+/**
+ * The five nouns this product uses for the parts of what it knows. Named here so a screen cannot
+ * invent a sixth: 설정 was still calling one of them 「운영 정책 / 답변 기준」 after the screen it links
+ * to had become 「운영 기준」, which is the exact drift this module was written to end.
+ */
+export const KNOWLEDGE_NOUN = {
+  needsConfirmation: "확인 필요",
+  productKnowledge: "상품 지식",
+  operatingRules: "운영 기준",
+  documents: "자료",
+  pastAnswers: "과거 고객 응답",
+} as const;
+
 /** A stored type token — one of the two enums, depending on the corpus. */
 export type KnowledgeTopicValue = KnowledgeSourceType | OrgKnowledgeType;
 

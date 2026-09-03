@@ -41,6 +41,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
      */
     long countByOrgId(UUID orgId);
 
+
     Optional<Product> findFirstByOrgIdAndName(UUID orgId, String name);
 
     /**

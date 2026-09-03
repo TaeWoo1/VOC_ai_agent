@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { Section } from "./Section";
-import { VocItemCard } from "./VocItemCard";
+import { ReplyWorkRow } from "./reviews/ReplyWorkRow";
 import { DismissedReplyWork } from "./DismissedReplyWork";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
@@ -149,17 +149,13 @@ export function MyReplyWork({
               아직 답변을 준비하기로 한 리뷰가 없습니다.
             </p>
           ) : (
-            <ul className="divide-y divide-line" data-testid="reply-work-todo">
+            <ul className="divide-y divide-line/70" data-testid="reply-work-todo">
               {todo.map((item) => (
-                <li key={item.actionRef} className="py-3">
-                  {/* Read-only triage here — the decision is shown, editing lives on the
-                      arrival-signal drill-down. See VocItemCard `triageMode`. */}
-                  <VocItemCard
-                    item={item}
-                    accountId={accountId}
-                    onOutcomeRecorded={noteOutcomeRecorded}
-                    triageMode="readonly"
-                  />
+                <li key={item.actionRef}>
+                  {/* A queue row: what the work is, and the door to it. The reply itself — draft,
+                      evidence, approval — happens on /reviews/reply/{id}, which is one screen tall.
+                      See ReplyWorkRow. */}
+                  <ReplyWorkRow item={item} />
                   {item.actionRef ? (
                     confirmingRef === item.actionRef ? (
                       // The confirmation. 작업에서 제외 removes committed work, so the seller is told
@@ -167,7 +163,7 @@ export function MyReplyWork({
                       // list only, the draft and history survive, nothing is recorded as replied,
                       // and the review can be recovered from 제외한 작업 below.
                       <div
-                        className="mt-2 flex flex-col gap-2 rounded-xl bg-canvas p-3"
+                        className="mx-4 mb-3 flex flex-col gap-2 rounded-xl bg-canvas p-3"
                         role="group"
                         aria-label="작업에서 제외 확인"
                         data-testid="reply-work-dismiss-confirm"
@@ -200,7 +196,7 @@ export function MyReplyWork({
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-2">
+                      <div className="-mt-1 mb-2 px-4">
                         <button
                           type="button"
                           className="text-sm text-muted underline underline-offset-2 hover:text-ink disabled:opacity-50"
@@ -227,15 +223,10 @@ export function MyReplyWork({
                 답변했다고 기록한 리뷰예요. reviewnary는 채널에 실제로 등록됐는지 확인하지 않습니다
                 (확인 안 함).
               </p>
-              <ul className="divide-y divide-line">
+              <ul className="divide-y divide-line/70">
                 {data.recentlyReported.map((item) => (
-                  <li key={item.actionRef} className="py-3">
-                    <VocItemCard
-                      item={item}
-                      accountId={accountId}
-                      onOutcomeRecorded={noteOutcomeRecorded}
-                      triageMode="readonly"
-                    />
+                  <li key={item.actionRef}>
+                    <ReplyWorkRow item={item} dim />
                   </li>
                 ))}
               </ul>
