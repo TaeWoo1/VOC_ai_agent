@@ -26,6 +26,7 @@ export type ArtifactType =
   | "EVIDENCE"
   | "CHECKLIST"
   | "HUMAN_ACTION_REQUIRED"
+  | "APPROVAL_REQUIRED"
   | "APPROVAL"
   | "GUIDED_EXECUTION"
   | "EXECUTION_RESULT"
@@ -357,6 +358,28 @@ export interface HumanActionRequiredArtifact extends ArtifactBase {
   autoStart?: boolean;
 }
 
+/**
+ * The seller's own approval of an exact draft version, asked for IN the conversation (Guided Reply UX
+ * Smoothing v1 §1). Carries identity and the head the runtime saw — never the draft body, the customer's
+ * sentence, the rating or the date: the card re-reads all of those from the review's own reply-prep view,
+ * which is what makes it unable to approve something it did not just read.
+ */
+export interface ApprovalRequiredArtifact extends ArtifactBase {
+  type: "APPROVAL_REQUIRED";
+  objectKind: "REVIEW";
+  reviewId: string;
+  accountId: string;
+  actionRef: string;
+  channelCode: string;
+  channelNameKo: string | null;
+  productName: string | null;
+  draftVersion: number;
+  contentFingerprint: string;
+  execution: ExecutionCapability;
+  executableIdentity: ExecutableIdentity;
+  to: string;
+}
+
 export interface ApprovalArtifact extends ArtifactBase {
   type: "APPROVAL";
   objectKind: ObjectKind;
@@ -465,6 +488,7 @@ export type Artifact =
   | EvidenceArtifact
   | ChecklistArtifact
   | HumanActionRequiredArtifact
+  | ApprovalRequiredArtifact
   | ApprovalArtifact
   | ExecutionResultArtifact
   | AcquisitionResultArtifact

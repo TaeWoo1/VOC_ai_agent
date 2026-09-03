@@ -62,6 +62,7 @@ import { urgencySentence } from "../operator/graph/inquiryWorkloadStep";
 import type { ConversationStore } from "./ConversationStore";
 import { DraftPreparer } from "./DraftPreparer";
 import type { DraftTarget, ReviewDraftTarget } from "./DraftPreparer";
+import { replyApprovalStateOf } from "./replyApproval";
 import { ACTIONABILITY_SENTENCE, actionabilityOf } from "./inquiryActionability";
 import type { InquiryActionability } from "./inquiryActionability";
 import { ordinalSelectionOf, toneIntentOf } from "./styleIntent";
@@ -76,7 +77,7 @@ import { Refresher } from "./Refresher";
 import { claimsFor } from "./reviewClaim";
 import { boundedTurns, STAGE_LABEL, WORKING_SET_MAX_IDS } from "./contract";
 import type {
-  AcquisitionResultArtifact, ActiveTask, ApprovalArtifact, Artifact, ConversationSummary, ConversationView, DraftArtifact, EvidenceArtifact,
+  AcquisitionResultArtifact, ActiveTask, ApprovalArtifact, ApprovalRequiredArtifact, Artifact, ConversationSummary, ConversationView, DraftArtifact, EvidenceArtifact,
   ExecutableIdentity, GuidedExecutionArtifact, HumanActionRequiredArtifact, InquiryDetailArtifact, InquiryItem, ReviewDetailArtifact,
   InquiryListArtifact,
   PendingHumanAction,
@@ -511,7 +512,7 @@ export class ConversationService {
     // carried — what was already in flight. A fresh list clears it with the selection.
     const activeTask: ActiveTask | null = composed.activeTask !== undefined ? composed.activeTask
       : pendingCapture ? "CAPTURE_KNOWLEDGE"
-        : composed.artifacts.some((a) => a.type === "APPROVAL" || a.type === "GUIDED_EXECUTION") ? "APPROVE_REPLY"
+        : composed.artifacts.some((a) => a.type === "APPROVAL_REQUIRED" || a.type === "APPROVAL" || a.type === "GUIDED_EXECUTION") ? "APPROVE_REPLY"
           : pendingPrepared && pendingPrepared !== view.pendingPrepared ? "PREPARE_REPLY"
             : workingSet?.selectedInquiry && workingSet.selectedInquiry.inquiryId === view.workingSet?.selectedInquiry?.inquiryId
               ? view.activeTask ?? null : null;
@@ -2308,29 +2309,47 @@ export class ConversationService {
         const line = executionReasonSentence(verdict, name, "리뷰 답글");
         return { artifact: reasonSummary(`a-send-${t.reviewId}`, "리뷰 답글을 채널로 보낼 수 없습니다", [line, COPY_ONLY_SENTENCE]), headline: line, chips: [] };
       }
-      // The draft the action binds to: the one this conversation prepared, else the review's own head.
-      let draftVersion = pendingPrepared?.kind === "REVIEW_DRAFT" && pendingPrepared.workItemId === t.reviewId ? pendingPrepared.draftVersion : null;
-      let contentFingerprint = draftVersion != null ? pendingPrepared!.contentFingerprint : null;
-      if (draftVersion == null) {
-        try {
-          const prep = await bundle.review.getReviewReplyPrep(t.accountId, t.actionRef);
-          if (!prep.draft) return null;
-          draftVersion = prep.draft.version;
-          contentFingerprint = prep.draft.contentFingerprint;
-        } catch {
-          return null;
-        }
+      // The draft the action binds to, and whether an approval already stands for it — ONE read of the
+      // review's own reply-prep view, always (Guided Reply UX Smoothing v1 §1). It used to be skipped when
+      // this conversation had just prepared a draft, which was cheaper and wrong in the one case that
+      // matters: the card would name a version the seller prepared while the standing approval — the thing
+      // that decides whether a run can even be minted — was never looked at.
+      let prep;
+      try {
+        prep = await bundle.review.getReviewReplyPrep(t.accountId, t.actionRef);
+      } catch {
+        return null;
       }
+      const approvalState = replyApprovalStateOf(prep);
+      if (approvalState.kind === "NO_DRAFT") return null;
+      const { version: draftVersion, contentFingerprint } = approvalState.head;
       if (verdict.execution === "GUIDED_BROWSER_EXECUTION") {
+        // The seller has not approved THIS version: the next thing that happens is their decision, not a
+        // browser window. Asking for it here — with the draft in full, in the thread that knows which
+        // review this is — is what replaces 「리뷰 화면에서 승인한 뒤 돌아오세요」.
+        if (approvalState.kind === "NEEDS_APPROVAL") {
+          const needed: ApprovalRequiredArtifact = {
+            artifactId: `a-approval-required-${t.reviewId}`, type: "APPROVAL_REQUIRED", title: "이 답변을 보내도 될까요?",
+            objectKind: "REVIEW", reviewId: t.reviewId, accountId: t.accountId, actionRef: t.actionRef,
+            channelCode: t.channelCode ?? "", channelNameKo: t.channelNameKo, productName: t.productName,
+            draftVersion, contentFingerprint, execution: verdict.execution, executableIdentity: "MARKETPLACE",
+            to: reviewReplyTaskLink(t.reviewId),
+          };
+          return {
+            artifact: needed,
+            headline: `승인하시면 reviewnary가 ${name} 판매자센터에서 이 리뷰의 답글 입력칸에 아래 문장을 그대로 넣어 둡니다. 등록은 판매자님이 누릅니다.`,
+            chips: [],
+          };
+        }
         const guided: GuidedExecutionArtifact = {
-          artifactId: `a-guided-${t.reviewId}`, type: "GUIDED_EXECUTION", title: `${name}에서 답변하기`,
+          artifactId: `a-guided-${t.reviewId}`, type: "GUIDED_EXECUTION", title: `${name}에 입력하기`,
           actionType: "REVIEW_REPLY", objectKind: "REVIEW", channelCode: t.channelCode ?? "", channelNameKo: t.channelNameKo,
           accountId: t.accountId, reviewId: t.reviewId, actionRef: t.actionRef, draftVersion, contentFingerprint,
           requiresLocalAgent: true, to: reviewReplyTaskLink(t.reviewId),
         };
         return {
           artifact: guided,
-          headline: `${name}에서 답글을 등록하려면 판매자님의 확인이 필요합니다. reviewnary가 해당 리뷰를 찾아 초안을 채워 두고, 등록은 판매자님이 누릅니다.`,
+          headline: `승인하신 답변이 있습니다. ${name} 판매자센터에서 이 리뷰의 답글 입력칸에 그대로 넣어 두겠습니다. 등록은 판매자님이 누릅니다.`,
           chips: [],
         };
       }
@@ -2601,7 +2620,7 @@ export function priorLineOf(view: ConversationView): string | null {
 }
 
 const PRIMARY_ORDER: readonly Artifact["type"][] = [
-  "DRAFT", "APPROVAL", "GUIDED_EXECUTION", "REVIEW_LIST", "INQUIRY_LIST", "PRODUCT_LIST", "ORDER_SUMMARY", "ISSUE_LIST",
+  "DRAFT", "APPROVAL_REQUIRED", "APPROVAL", "GUIDED_EXECUTION", "REVIEW_LIST", "INQUIRY_LIST", "PRODUCT_LIST", "ORDER_SUMMARY", "ISSUE_LIST",
   "WORKSPACE_LINK", "CHART", "METRIC", "TABLE", "LIST", "SUMMARY", "CHECKLIST",
 ];
 
@@ -2766,7 +2785,7 @@ const EMPTY_FILTER: VisibleFilter = { channel: null, topic: null, term: null, st
 function workingSetOf(
   artifacts: readonly Artifact[], axis: ReturnType<typeof conversationAxisOf>, view: ConversationView,
 ): WorkingSetView | null {
-  const primary = primaryOf(artifacts.filter((a) => a.type !== "DRAFT" && a.type !== "APPROVAL" && a.type !== "GUIDED_EXECUTION"
+  const primary = primaryOf(artifacts.filter((a) => a.type !== "DRAFT" && a.type !== "APPROVAL_REQUIRED" && a.type !== "APPROVAL" && a.type !== "GUIDED_EXECUTION"
     && a.type !== "WORKSPACE_LINK" && a.type !== "SUMMARY"));
   const bounded = (ids: readonly string[]): string[] => ids.slice(0, WORKING_SET_MAX_IDS);
   switch (primary?.type) {
@@ -3206,7 +3225,7 @@ function suggestionsFor(
   if (primary?.type === "DRAFT" && primary.version) {
     // The draft card carries 「말투 다듬기」 and 「보내기 준비」 as its own controls; a chip row repeating
     // them under the card is the same two actions twice (Conversation UX v2 §D).
-  } else if (primary?.type === "APPROVAL" || primary?.type === "GUIDED_EXECUTION") {
+  } else if (primary?.type === "APPROVAL_REQUIRED" || primary?.type === "APPROVAL" || primary?.type === "GUIDED_EXECUTION") {
     // The next move is the artifact's own control; no prompt competes with it.
   } else if (workingSet) {
     switch (workingSet.kind) {

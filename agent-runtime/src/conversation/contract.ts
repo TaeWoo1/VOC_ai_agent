@@ -46,6 +46,7 @@ export type ArtifactType =
   | "EVIDENCE"
   | "CHECKLIST"
   | "HUMAN_ACTION_REQUIRED"
+  | "APPROVAL_REQUIRED"
   | "APPROVAL"
   | "GUIDED_EXECUTION"
   | "EXECUTION_RESULT"
@@ -520,6 +521,44 @@ export type ExecutableIdentity = "MARKETPLACE" | "NONE";
 export type AcquisitionCapability = "AUTOMATIC" | "GUIDED_HUMAN_ACTION" | "UNSUPPORTED";
 export type ExecutionCapability = "API_EXECUTION" | "GUIDED_BROWSER_EXECUTION" | "NOT_SUPPORTED";
 
+/**
+ * <b>The seller's own approval of an exact draft version, asked for in the conversation.</b>
+ *
+ * Guided Reply UX Smoothing v1 §1. Before this card the guided lane assumed an approval was already
+ * standing and offered a run that the backend refuses without one — so the only way to approve was to
+ * leave the conversation for the reply-work screen and come back. That is not a smaller inconvenience
+ * than it looks: the seller who lands on the work screen has left the thread that knows which review
+ * they were on.
+ *
+ * <b>The card carries identity, not text.</b> The draft body, the customer's sentence, the rating and
+ * the date are NOT on this artifact: the renderer re-reads them from the review's own reply-prep view
+ * when it mounts, which is what makes the card structurally unable to approve something it did not just
+ * read. `draftVersion` / `contentFingerprint` are the head as the runtime saw it at compose time — a
+ * card whose numbers no longer match what the renderer reads says so and binds to what is on screen.
+ *
+ * <b>Nothing here approves.</b> The runtime composes the card; the approval is one HTTP call made by the
+ * seller's own press, through the existing review-reply approval seam, with its existing version binding.
+ * The conversation lane has no path to that call — asserted on the source by `conversationWriteFence`.
+ */
+export interface ApprovalRequiredArtifact extends ArtifactBase {
+  readonly type: "APPROVAL_REQUIRED";
+  readonly objectKind: "REVIEW";
+  readonly reviewId: string;
+  readonly accountId: string;
+  readonly actionRef: string;
+  readonly channelCode: string;
+  readonly channelNameKo: string | null;
+  readonly productName: string | null;
+  /** The head version this card offers for approval, as read at compose time. */
+  readonly draftVersion: number;
+  readonly contentFingerprint: string;
+  /** How an approved reply would reach the channel — what the primary AFTER approval is. */
+  readonly execution: ExecutionCapability;
+  readonly executableIdentity: ExecutableIdentity;
+  /** The precision surface (edit / recover) for this one reply. Never the normal path. */
+  readonly to: string;
+}
+
 export interface ApprovalArtifact extends ArtifactBase {
   readonly type: "APPROVAL";
   readonly objectKind: ObjectKind;
@@ -662,6 +701,7 @@ export type Artifact =
   | EvidenceArtifact
   | ChecklistArtifact
   | HumanActionRequiredArtifact
+  | ApprovalRequiredArtifact
   | ApprovalArtifact
   | ExecutionResultArtifact
   | AcquisitionResultArtifact

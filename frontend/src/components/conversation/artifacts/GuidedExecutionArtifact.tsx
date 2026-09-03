@@ -10,6 +10,7 @@ import { useReplyRuntime } from "../../../lib/actionWindow/reply/useReplyRuntime
 import { useBridge } from "../../../hooks/useBridge";
 import { AgentPairingPanel } from "../../reviewImport/AgentPairingPanel";
 import { Btn } from "../../ui/Btn";
+import { Status } from "../../ui/Status";
 import { ArtifactCard } from "./ArtifactCard";
 import { ExecutionResultView } from "./ExecutionResultArtifact";
 
@@ -20,48 +21,83 @@ import { ExecutionResultView } from "./ExecutionResultArtifact";
  * seller's own seller-center window: the local helper finds the exact review, opens its composer,
  * fills the approved text ONLY when the row and the review fingerprint both match, and then stops —
  * 등록은 판매자님이 누릅니다. There is no submit control here and never will be: the only commands this
- * card can send are the run's own `START_RUN` and the seller's report (「그만두기」 · 「등록을 마쳤습니다」),
- * both of which the contract defines as intent, never as completion.
+ * card can send are the run's own `START_RUN` and the seller's report, both of which the contract
+ * defines as intent, never as completion.
  *
- * What the seller reads is which stage the helper reached (stage words below), and afterwards an
- * EXECUTION_RESULT whose verification is what was actually observed — `SELLER_SUBMISSION_OBSERVED` when
- * the helper saw the submit, otherwise the backend's read-back — never a claim about what was posted.
+ * Guided Reply UX Smoothing v1 §2–§4 moved the action out of this card and left the machinery in it:
+ * {@link GuidedReplyAction} is the whole guided lane (engage → pair → mint → run → filled), and the
+ * in-chat approval card renders the same component once the seller's approval stands. This card stays
+ * as the entry for a review that ALREADY carries a standing approval.
  */
 export function GuidedExecutionArtifact({ artifact, replyRuntime }: { artifact: GuidedExecution; replyRuntime?: ReplyRuntime }) {
-  const [engaged, setEngaged] = useState(false);
-  const [done, setDone] = useState(false);
   const meta = [artifact.channelNameKo, artifact.draftVersion != null ? `답변 버전 ${artifact.draftVersion}` : null].filter(Boolean).join(" · ") || null;
-  const channel = artifact.channelNameKo ?? "네이버";
-
   return (
     <ArtifactCard title={artifact.title} note={meta} testId="guided-execution-artifact" framed>
-      <div className="space-y-3 px-4 pb-3">
-        <p className="break-keep text-sm text-muted">
-          reviewnary가 {channel} 판매자센터에서 이 리뷰의 답변란을 찾아 승인한 초안을 채웁니다. 등록은 판매자님이 직접 누릅니다.
-        </p>
-        {!engaged ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Btn onClick={() => setEngaged(true)}>{channel}에서 답변하기</Btn>
-            <span className="text-sm text-muted">내 PC의 도우미가 필요합니다.</span>
-          </div>
-        ) : (
-          <GuidedReplyRun artifact={artifact} injected={replyRuntime} onDone={() => setDone(true)} />
-        )}
-        {!done ? (
-          <p className="text-sm">
-            {/* The link now opens THIS review's reply work, not the channel's whole record, so it says
-              what it opens. A link named after a screen was accurate when it went to one. */}
-          <Link to={artifact.to} className="font-semibold text-brand-700 hover:underline">이 리뷰의 답변 작업 열기</Link>
-          </p>
-        ) : null}
+      <div className="px-4 pb-3">
+        <GuidedReplyAction
+          target={{ accountId: artifact.accountId, actionRef: artifact.actionRef, channelNameKo: artifact.channelNameKo, to: artifact.to }}
+          replyRuntime={replyRuntime}
+        />
       </div>
     </ArtifactCard>
   );
 }
 
-/** The stage words, in the order the helper reaches them. The last one is the seller's, not ours. */
-export const STAGE_WORDS = ["리뷰 찾는 중", "답변란 준비", "초안 채움", "등록은 판매자님이 누릅니다"] as const;
-type StageIndex = 0 | 1 | 2 | 3;
+/** Everything the guided lane needs about the review it is acting on. Ids and one link — no text. */
+export interface GuidedReplyTarget {
+  accountId: string;
+  actionRef: string;
+  channelNameKo: string | null;
+  /** The precision surface for this one reply (edit / recover). Never the normal path. */
+  to: string;
+}
+
+/**
+ * The one primary that follows a standing approval: 「{채널}에 입력하기」, then the run itself.
+ *
+ * The seller is not sent to another screen and back. The window opens, the helper works, and the same
+ * card reports what happened — in the conversation that already knows which review this is.
+ */
+export function GuidedReplyAction({ target, replyRuntime }: { target: GuidedReplyTarget; replyRuntime?: ReplyRuntime }) {
+  const [engaged, setEngaged] = useState(false);
+  const [done, setDone] = useState(false);
+  const channel = target.channelNameKo ?? "네이버";
+
+  return (
+    <div className="space-y-3">
+      {!engaged ? (
+        <>
+          <p className="break-keep text-sm text-muted">
+            reviewnary가 {channel} 판매자센터에서 이 리뷰의 답글 입력칸을 찾아 승인한 답변을 넣어 둡니다. 등록은 판매자님이 직접 누릅니다.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Btn onClick={() => setEngaged(true)}>{channel}에 입력하기</Btn>
+            <span className="text-sm text-muted">내 PC의 도우미가 필요합니다.</span>
+          </div>
+        </>
+      ) : (
+        <GuidedReplyRun target={target} injected={replyRuntime} onDone={() => setDone(true)} />
+      )}
+      {!done ? (
+        // The precision surface, kept quiet: the normal path is this card, and a seller who needs to
+        // change the text goes there deliberately rather than being routed through it (§2).
+        <p className="text-sm">
+          <Link to={target.to} className="text-muted hover:text-ink hover:underline">이 리뷰의 답변 작업 열기</Link>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The three things the helper does, in the seller's words (Guided Reply UX Smoothing v1 §3).
+ *
+ * There used to be a fourth line, 「등록은 판매자님이 누릅니다」, sitting in the list as a step nobody
+ * could ever tick: it is not something the helper does, it is what is true after it stops. It now has
+ * its own state below, which is where the seller reads it.
+ */
+export const STAGE_WORDS = ["리뷰 확인", "답글창 준비", "승인한 초안 입력"] as const;
+type StageIndex = 0 | 1 | 2;
 
 /** Which stage a sanitized run signal proves reached. Unknown signals prove nothing (null). */
 export function stageOf(signal: ReplySignal): StageIndex | null {
@@ -75,8 +111,6 @@ export function stageOf(signal: ReplySignal): StageIndex | null {
       return step.includes("reply_submit") ? 1 : step.includes("review_row") ? 0 : null;
     case "COMPOSER_FILLED":
       return 2;
-    case "SELLER_SUBMISSION_OBSERVED":
-      return 3;
     default:
       return null;
   }
@@ -92,13 +126,14 @@ type Phase =
   | { kind: "no_runtime" }
   | { kind: "starting" }
   | { kind: "running"; stage: StageIndex }
+  | { kind: "filled" }
   | { kind: "failed"; message: string }
   | { kind: "aborted" }
   | { kind: "done"; phase: string; verification: string | null };
 
 const POLL_MS = 4_000;
 
-function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecution; injected?: ReplyRuntime; onDone: () => void }) {
+function GuidedReplyRun({ target, injected, onDone }: { target: GuidedReplyTarget; injected?: ReplyRuntime; onDone: () => void }) {
   // The helper is asked to pair by the seller's own press (the primary above), once — never on mount of a
   // reloaded conversation, which is why the bridge hook lives inside the engaged branch.
   const bridge = useBridge(!injected, { autoPair: true });
@@ -106,10 +141,13 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
   const paired = !!injected || bridge.state.phase === "paired";
   const [phase, setPhase] = useState<Phase>({ kind: "connecting" });
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
+  const [reporting, setReporting] = useState(false);
   const handleRef = useRef<ReplyRunHandle | null>(null);
   const submissionRef = useRef<string | null>(null);
   const startedRef = useRef(false);
   const stageRef = useRef<StageIndex>(0);
+  const filledRef = useRef<HTMLDivElement>(null);
+  const channel = target.channelNameKo ?? "네이버";
 
   // Paired but nothing hosts the reply carrier: say so, offer the copy path. Not a failure of pairing.
   useEffect(() => {
@@ -126,7 +164,7 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
     setPhase({ kind: "starting" });
     void (async () => {
       try {
-        const run = await api.startReviewReplySubmissionRun(artifact.accountId, artifact.actionRef);
+        const run = await api.startReviewReplySubmissionRun(target.accountId, target.actionRef);
         submissionRef.current = run.submissionRef;
         const handle = await startReplySubmission(runtime, { channelCode: "naver", submissionRef: run.submissionRef });
         if (!live) return;
@@ -139,7 +177,7 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
     return () => {
       live = false;
     };
-  }, [paired, runtime, artifact.accountId, artifact.actionRef]);
+  }, [paired, runtime, target.accountId, target.actionRef]);
 
   // Stage words from the run's own sanitized events. Absent `observe` (simulated runtime) ⇒ no words.
   useEffect(() => {
@@ -152,6 +190,10 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
       const stage = stageOf(signal);
       if (stage == null) return;
       if (stage > stageRef.current) stageRef.current = stage;
+      if (stage === 2) {
+        setPhase({ kind: "filled" });
+        return;
+      }
       setPhase((p) => (p.kind === "running" ? { kind: "running", stage: stageRef.current } : p));
     });
   }, [runtime]);
@@ -162,14 +204,14 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
     let stopped = false;
     const timer = window.setInterval(() => {
       void api
-        .getReviewReplyExecution(artifact.accountId, artifact.actionRef)
+        .getReviewReplyExecution(target.accountId, target.actionRef)
         .then((view: ReviewExecutionView | null) => {
           if (stopped || !view) return;
           if (view.verification === "SELLER_SUBMISSION_OBSERVED" || view.verification === "SUBMISSION_OBSERVED_CONTENT_UNVERIFIED") {
             setPhase({ kind: "done", phase: view.status, verification: view.verification });
-          } else if (view.verification === "COMPOSER_FILLED" && stageRef.current < 2) {
+          } else if (view.verification === "COMPOSER_FILLED") {
             stageRef.current = 2;
-            setPhase((p) => (p.kind === "running" ? { kind: "running", stage: 2 } : p));
+            setPhase({ kind: "filled" });
           }
         })
         .catch(() => undefined);
@@ -178,7 +220,7 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [phase.kind, artifact.accountId, artifact.actionRef]);
+  }, [phase.kind, target.accountId, target.actionRef]);
 
   async function report(outcome: "submitted" | "aborted") {
     const handle = handleRef.current;
@@ -188,7 +230,7 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
       if (submissionRef.current) {
         // The existing operator-reported record (UNVERIFIED by construction) — local, never a channel claim.
         await api
-          .recordReviewReplyOutcome(artifact.accountId, artifact.actionRef, {
+          .recordReviewReplyOutcome(target.accountId, target.actionRef, {
             commandId: newCommandId(),
             submissionRef: submissionRef.current,
             operatorOutcome: terminal.operatorOutcome,
@@ -200,7 +242,7 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
         setPhase({ kind: "aborted" });
         return;
       }
-      const view = await api.getReviewReplyExecution(artifact.accountId, artifact.actionRef).catch(() => null);
+      const view = await api.getReviewReplyExecution(target.accountId, target.actionRef).catch(() => null);
       setPhase({ kind: "done", phase: "OPERATOR_REPORTED", verification: view?.verification ?? null });
     } catch {
       setPhase({ kind: "failed", message: "보고를 기록하지 못했습니다. 리뷰 화면에서 다시 시도해 주세요." });
@@ -208,7 +250,7 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
   }
 
   async function copy() {
-    const prep = await api.getReviewReplyPrep(artifact.accountId, artifact.actionRef).catch(() => null);
+    const prep = await api.getReviewReplyPrep(target.accountId, target.actionRef).catch(() => null);
     const body = prep?.approval?.state === "APPROVED" ? prep.approval.approvedBody : null;
     if (!body) {
       setCopied("failed");
@@ -217,6 +259,19 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
     const result = await copyText(body);
     setCopied(result.ok ? "done" : "failed");
   }
+
+  useEffect(() => {
+    if (phase.kind === "done") onDone();
+  }, [phase.kind, onDone]);
+
+  // The card GROWS when the helper reports the composer filled, and the transcript only re-pins itself
+  // when a turn arrives or the dock resizes (`ConversationTimeline`'s `dockKey`) — neither happens here.
+  // Measured at 1440/1366/1152: the primary 「{채널}에서 확인」 landed under the docked composer. Same
+  // mechanism as the timeline's own trigger, scoped to the one state that changes height.
+  useEffect(() => {
+    if (phase.kind !== "filled") return;
+    filledRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [phase.kind]);
 
   if (!paired) {
     return (
@@ -236,15 +291,10 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
     );
   }
 
-  // The result view carries its own link; tell the card so it does not draw a second one.
-  useEffect(() => {
-    if (phase.kind === "done") onDone();
-  }, [phase.kind, onDone]);
-
   if (phase.kind === "done") {
     return (
       <div data-testid="guided-execution-result">
-        <ExecutionResultView phase={phase.phase} category="" verification={phase.verification} objectKind="REVIEW" to={artifact.to} />
+        <ExecutionResultView phase={phase.phase} category="" verification={phase.verification} objectKind="REVIEW" to={target.to} />
       </div>
     );
   }
@@ -261,8 +311,38 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
       </div>
     );
   }
+
+  // §4 — what is true when the helper stops: the text is in the box and nothing has been posted. The
+  // seller's own report (「등록을 마쳤습니다」 / 「등록하지 않았습니다」) is a RECOVERY surface, so it is not
+  // in front of them until they say they have been to look.
+  if (phase.kind === "filled") {
+    return (
+      <div className="space-y-2" data-testid="guided-execution-filled" ref={filledRef}>
+        <p className="break-keep text-lg leading-relaxed text-ink">
+          {channel} 답글 입력칸에 승인한 답변을 준비했습니다.
+        </p>
+        <p className="flex flex-wrap items-center gap-2 text-base text-ink" role="status">
+          <Status tone="warn">등록 전</Status>
+          <span className="break-keep">아직 등록하지 않았습니다.</span>
+        </p>
+        <p className="break-keep text-sm text-muted">열린 {channel} 창에서 내용을 확인하고, 등록은 판매자님이 눌러 주세요.</p>
+        {!reporting ? (
+          <Btn onClick={() => setReporting(true)}>{channel}에서 확인</Btn>
+        ) : (
+          <div className="space-y-2" data-testid="guided-execution-report">
+            <p className="break-keep text-sm text-muted">확인하셨다면 결과를 기록해 두겠습니다.</p>
+            <div className="flex flex-wrap gap-2">
+              <Btn variant="outline" size="sm" onClick={() => void report("submitted")}>등록을 마쳤습니다</Btn>
+              <Btn variant="ghost" size="sm" onClick={() => void report("aborted")}>등록하지 않았습니다</Btn>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (phase.kind === "connecting" || phase.kind === "starting") {
-    return <p className="text-sm text-muted" role="status">{phase.kind === "starting" ? "답변란을 준비하는 중…" : "도우미와 연결하는 중…"}</p>;
+    return <p className="text-sm text-muted" role="status">{phase.kind === "starting" ? "답글 입력칸을 준비하는 중…" : "도우미와 연결하는 중…"}</p>;
   }
 
   return (
@@ -270,18 +350,26 @@ function GuidedReplyRun({ artifact, injected, onDone }: { artifact: GuidedExecut
       <ol className="space-y-1" aria-label="진행 단계">
         {STAGE_WORDS.map((word, i) => (
           <li key={word} className={`flex items-center gap-2 text-sm ${i <= phase.stage ? "text-ink" : "text-muted"}`}>
-            <span aria-hidden="true" className={i < phase.stage ? "text-good" : i === phase.stage ? "text-brand-700" : "text-line"}>
-              {i < phase.stage ? "✓" : "○"}
+            {/* A finished step keeps its ✓ — that glyph carries meaning, and it reads at AA. The
+                circle never did: it is decoration, and as a text node it failed contrast at every
+                width (measured 2026-09-03). Drawn, it cannot. */}
+            <span aria-hidden="true" className="flex h-4 w-4 items-center justify-center">
+              {i < phase.stage ? (
+                <span className="text-good">✓</span>
+              ) : (
+                <span className={`h-2 w-2 rounded-full ${i === phase.stage ? "bg-brand-700" : "bg-line"}`} />
+              )}
             </span>
             <span>{word}</span>
           </li>
         ))}
       </ol>
-      <p className="break-keep text-sm text-muted">판매자센터 창에서 등록 버튼을 누르면 reviewnary가 그것을 확인합니다.</p>
-      <div className="flex flex-wrap gap-2">
-        <Btn variant="outline" size="sm" onClick={() => void report("submitted")}>등록을 마쳤습니다</Btn>
-        <Btn variant="ghost" size="sm" onClick={() => void report("aborted")}>그만두기</Btn>
-      </div>
+      {/* §3 — a conditional instruction, not a claim about the page. reviewnary cannot see the seller's
+          screen from here, and the run reports nothing while it waits: what IS true is that the window
+          may open on a sign-in screen, and that signing in continues the run by itself. */}
+      <p className="break-keep text-sm text-muted">
+        로그인 화면이 보이면 열린 {channel} 창에서 로그인해 주세요. 로그인하면 자동으로 이어집니다.
+      </p>
     </div>
   );
 }

@@ -17,6 +17,7 @@ import { EvidenceArtifact } from "./artifacts/EvidenceArtifact";
 import { ChecklistArtifact } from "./artifacts/ChecklistArtifact";
 import { HumanActionArtifact } from "./artifacts/HumanActionArtifact";
 import { ApprovalArtifact } from "./artifacts/ApprovalArtifact";
+import { ReplyApprovalArtifact } from "./artifacts/ReplyApprovalArtifact";
 import { GuidedExecutionArtifact } from "./artifacts/GuidedExecutionArtifact";
 import { ExecutionResultArtifact } from "./artifacts/ExecutionResultArtifact";
 import { AcquisitionResultArtifact } from "./artifacts/AcquisitionResultArtifact";
@@ -143,6 +144,8 @@ function ArtifactBody({ artifact, onResume, onPrompt, onCaptureDecision, stepped
       return <ChecklistArtifact artifact={artifact} />;
     case "HUMAN_ACTION_REQUIRED":
       return <HumanActionArtifact artifact={artifact} onResume={onResume} />;
+    case "APPROVAL_REQUIRED":
+      return <ReplyApprovalArtifact artifact={artifact} />;
     case "APPROVAL":
       return <ApprovalArtifact artifact={artifact} />;
     case "GUIDED_EXECUTION":

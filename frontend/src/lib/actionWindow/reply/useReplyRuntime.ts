@@ -9,7 +9,7 @@
 //   3. the resolveReplyRuntime() fallback — simulated in DEV, null in production. Production
 //      therefore still cannot construct a live runtime, and its guided path stays the honest
 //      manual handoff.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { connectGuidedReplyRuntime } from "./replyBridge";
 import { acquireReplyConnection } from "./replyConnection";
 import { resolveReplyRuntime, type ReplyRuntime } from "./replyRuntime";
@@ -22,7 +22,14 @@ export function useReplyRuntime(
   // The offline fallback, created only when nothing is injected. It stays available while the
   // bridge connects, so a DEV operator is never blocked on a round-trip — a guided run started on
   // it keeps its runtime through the handle it returned; only NEW starts pick up the bridge.
-  const fallback = useMemo(() => (injected ? null : resolveReplyRuntime()), [injected]);
+  //
+  // **Created in the effect, not in a memo** (2026-09-03). A memoized value with a disposing cleanup
+  // does not survive React 18 StrictMode: mount → cleanup → mount disposes the object and then hands
+  // the same disposed one back, so every `start()` on the fallback rejected with
+  // `ReplyRuntimeDisposedError` and the card said 「답변 안내를 시작하지 못했습니다」. Measured in a real
+  // dev browser while QA-ing the guided lane; DEV-only, since production resolves no fallback at all.
+  // Creating it here means each mount owns the runtime it disposes.
+  const [fallback, setFallback] = useState<ReplyRuntime | null>(null);
 
   useEffect(() => {
     if (injected) return;
@@ -47,9 +54,14 @@ export function useReplyRuntime(
   }, [injected, connector]);
 
   useEffect(() => {
-    if (!fallback) return;
-    return () => fallback.dispose();
-  }, [fallback]);
+    if (injected) return;
+    const own = resolveReplyRuntime();
+    setFallback(own);
+    return () => {
+      own?.dispose();
+      setFallback(null);
+    };
+  }, [injected]);
 
   return injected ?? bridge ?? fallback;
 }

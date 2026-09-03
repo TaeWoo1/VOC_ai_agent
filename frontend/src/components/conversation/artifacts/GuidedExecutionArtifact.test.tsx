@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { GuidedExecutionArtifact, STAGE_WORDS, stageOf } from "./GuidedExecutionArtifact";
+import { GuidedExecutionArtifact, STAGE_WORDS, stageOf, submissionObserved } from "./GuidedExecutionArtifact";
 import type { GuidedExecutionArtifact as Guided } from "../../../lib/conversation/types";
 import type { ReplyRuntime, ReplySignal } from "../../../lib/actionWindow/reply/replyRuntime";
 
@@ -70,14 +70,20 @@ beforeEach(() => {
 });
 
 describe("stageOf — which stage a sanitized signal proves", () => {
-  it("maps run events to the four stage words and ignores anything else", () => {
+  // Guided Reply UX Smoothing v1 §3: THREE steps, because three is what the helper does. The old
+  // fourth line 「등록은 판매자님이 누릅니다」 was never a step — it is what is true after the helper
+  // stops, and as a list item it could only ever render as pending. It has its own state now.
+  it("maps run events to the three stage words and ignores anything else", () => {
+    expect(STAGE_WORDS).toEqual(["리뷰 확인", "답글창 준비", "승인한 초안 입력"]);
     expect(stageOf({ type: "RUN_STARTED", stepId: null })).toBe(0);
     expect(stageOf({ type: "TARGET_HIGHLIGHTED", stepId: "aw.open_review_row" })).toBe(0);
     expect(stageOf({ type: "HUMAN_ACTION_REQUIRED", stepId: "aw.user_reply_submit" })).toBe(1);
     expect(stageOf({ type: "COMPOSER_FILLED", stepId: "aw.user_reply_submit" })).toBe(2);
-    expect(stageOf({ type: "SELLER_SUBMISSION_OBSERVED", stepId: "aw.user_reply_submit" })).toBe(3);
     expect(stageOf({ type: "RUN_BLOCKED", stepId: null })).toBeNull();
-    expect(STAGE_WORDS[3]).toBe("등록은 판매자님이 누릅니다");
+    // The seller's own submit is not a stage of OUR work; it is the fact that ends the run.
+    expect(stageOf({ type: "SELLER_SUBMISSION_OBSERVED", stepId: "aw.user_reply_submit" })).toBeNull();
+    expect(submissionObserved({ type: "SELLER_SUBMISSION_OBSERVED", stepId: null })).toBe(true);
+    expect(submissionObserved({ type: "COMPOSER_FILLED", stepId: null })).toBe(false);
   });
 });
 
@@ -86,7 +92,7 @@ describe("guided execution artifact — NAVER review reply, seller submits", () 
     const runtime = fakeRuntime();
     render(<MemoryRouter><GuidedExecutionArtifact artifact={ARTIFACT} replyRuntime={runtime} /></MemoryRouter>);
     expect(startReviewReplySubmissionRun).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "네이버에서 답변하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "네이버에 입력하기" }));
     await waitFor(() => expect(startReviewReplySubmissionRun).toHaveBeenCalledWith("acc-nv", "ref-1"));
     await waitFor(() => expect(runtime.start).toHaveBeenCalledWith({ channelCode: "naver", submissionRef: "sub-1" }));
     expect(await screen.findByTestId("guided-execution-run")).toBeInTheDocument();
@@ -94,18 +100,29 @@ describe("guided execution artifact — NAVER review reply, seller submits", () 
     for (const name of ["등록하기", "전송", "발송", "답변 보내기"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
+    // §3: while the helper works, the only other true thing is that the window may be at a sign-in
+    // screen and that signing in continues the run by itself. No 「다시 확인」 anywhere.
+    expect(screen.getByText(/로그인 화면이 보이면/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /다시 확인/ })).toBeNull();
+
     act(() => runtime.emit({ type: "COMPOSER_FILLED", stepId: "aw.user_reply_submit" }));
-    // Stage 2 reached: the first two are checked, the third is current.
-    const items = screen.getAllByRole("listitem");
-    expect(items[0]!.textContent).toContain("✓");
-    expect(items[2]!.textContent).toContain("○");
+    // §4: the filled state says the two facts and NOTHING that reads as sent.
+    const filled = await screen.findByTestId("guided-execution-filled");
+    expect(filled.textContent).toContain("네이버 답글 입력칸에 승인한 답변을 준비했습니다.");
+    expect(filled.textContent).toContain("아직 등록하지 않았습니다.");
+    for (const word of ["전송", "발송", "완료했습니다", "등록했습니다"]) {
+      expect(filled.textContent).not.toContain(word);
+    }
+    // The report controls are a RECOVERY surface: not in the happy path until the seller goes to look.
+    expect(screen.queryByRole("button", { name: "등록을 마쳤습니다" })).toBeNull();
+    expect(screen.getByRole("button", { name: "네이버에서 확인" })).toBeInTheDocument();
     expect(runtime.calls).toEqual(["START_RUN"]);
   });
 
   it("the helper observing the seller's submit ends in EXECUTION_RESULT with SELLER_SUBMISSION_OBSERVED", async () => {
     const runtime = fakeRuntime();
     render(<MemoryRouter><GuidedExecutionArtifact artifact={ARTIFACT} replyRuntime={runtime} /></MemoryRouter>);
-    await userEvent.click(screen.getByRole("button", { name: "네이버에서 답변하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "네이버에 입력하기" }));
     await screen.findByTestId("guided-execution-run");
     act(() => runtime.emit({ type: "SELLER_SUBMISSION_OBSERVED", stepId: "aw.user_reply_submit" }));
     expect(await screen.findByTestId("guided-execution-result")).toBeInTheDocument();
@@ -116,12 +133,15 @@ describe("guided execution artifact — NAVER review reply, seller submits", () 
     expect(runtime.report).not.toHaveBeenCalled();
   });
 
-  it("「그만두기」 reports the abort through the runtime (intent, not completion) and records nothing as sent", async () => {
+  it("「등록하지 않았습니다」 reports the abort through the runtime (intent, not completion) and records nothing as sent", async () => {
     const runtime = fakeRuntime();
     render(<MemoryRouter><GuidedExecutionArtifact artifact={ARTIFACT} replyRuntime={runtime} /></MemoryRouter>);
-    await userEvent.click(screen.getByRole("button", { name: "네이버에서 답변하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "네이버에 입력하기" }));
     await screen.findByTestId("guided-execution-run");
-    await userEvent.click(screen.getByRole("button", { name: "그만두기" }));
+    act(() => runtime.emit({ type: "COMPOSER_FILLED", stepId: "aw.user_reply_submit" }));
+    await screen.findByTestId("guided-execution-filled");
+    await userEvent.click(screen.getByRole("button", { name: "네이버에서 확인" }));
+    await userEvent.click(screen.getByRole("button", { name: "등록하지 않았습니다" }));
     await waitFor(() => expect(runtime.report).toHaveBeenCalledWith("run_abc", "SUBMISSION_ABORTED"));
     expect(await screen.findByText(/등록하지 않고 마쳤습니다/)).toBeInTheDocument();
     expect(recordReviewReplyOutcome.mock.calls[0]![2]).toMatchObject({ submissionRef: "sub-1", operatorOutcome: "SUBMISSION_ABORTED", awRunRef: "run_abc" });
@@ -131,7 +151,7 @@ describe("guided execution artifact — NAVER review reply, seller submits", () 
     startReviewReplySubmissionRun.mockRejectedValue(new Error("409"));
     const runtime = fakeRuntime();
     render(<MemoryRouter><GuidedExecutionArtifact artifact={ARTIFACT} replyRuntime={runtime} /></MemoryRouter>);
-    await userEvent.click(screen.getByRole("button", { name: "네이버에서 답변하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "네이버에 입력하기" }));
     expect(await screen.findByText(/답변 안내를 시작하지 못했습니다/)).toBeInTheDocument();
     expect(runtime.start).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "승인한 답변 복사" })).toBeInTheDocument();

@@ -25,8 +25,14 @@ describe("review action artifacts deep-link to the exact review", () => {
     expect(reviewReplyTaskLink("a/b?c")).toBe("/reviews/reply/a%2Fb%3Fc?from=chat");
   });
 
-  it("both review action artifacts use it — neither ships the bare record link", () => {
-    for (const marker of ['artifactId: `a-guided-${t.reviewId}`', 'artifactId: `a-approval-${t.reviewId}`']) {
+  it("every review action artifact uses it — none ships the bare record link", () => {
+    for (const marker of [
+      'artifactId: `a-guided-${t.reviewId}`',
+      'artifactId: `a-approval-${t.reviewId}`',
+      // Guided Reply UX Smoothing v1 §1: the in-chat approval card's link is the PRECISION surface
+      // (edit / recover), not the normal path — but it still has to name this review.
+      'artifactId: `a-approval-required-${t.reviewId}`',
+    ]) {
       const start = SOURCE.indexOf(marker);
       expect(start, `${marker} not found — the artifact was renamed, so this fence is not reading it`).toBeGreaterThan(-1);
       // The object literal that starts at the marker, to its closing brace.
@@ -39,8 +45,11 @@ describe("review action artifacts deep-link to the exact review", () => {
   it("carries no approve or send path of its own — the link is the whole handoff", () => {
     const start = SOURCE.indexOf("private async routeSend(");
     const block = SOURCE.slice(start, SOURCE.indexOf("\n  private ", start + 10));
-    for (const forbidden of ["decideReviewReplyApproval", "publishReviewReply", "executeReviewReply", "recordReviewReplyOutcome"]) {
+    for (const forbidden of ["decideReviewReplyApproval", "decideReviewApproval", "publishReviewReply", "executeReviewReply", "recordReviewReplyOutcome", "startReviewSubmissionRun"]) {
       expect(block, `routeSend must not reach ${forbidden}`).not.toContain(forbidden);
     }
+    // Guided Reply UX Smoothing v1 §1: the runtime COMPOSES the approval card and never approves. The
+    // seller's press is what calls the approval seam, from the browser, on their own screen.
+    expect(block).toContain("replyApprovalStateOf");
   });
 });
