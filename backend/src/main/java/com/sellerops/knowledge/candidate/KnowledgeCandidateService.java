@@ -146,6 +146,23 @@ public class KnowledgeCandidateService {
     }
 
     /**
+     * Whether this org has already ANSWERED this exact ask.
+     *
+     * <p>The fact {@link #noteGap} decides on and used to swallow. It matters on screen: a seller who
+     * added a 기준 for 「가닥」 and then watched the same inquiry ask them to 「답변 기준을 추가」 again
+     * has been told their work did not happen. It did — it just does not answer THIS question yet, and
+     * those are different sentences.
+     *
+     * <p>Identity only, and the same identity {@code noteGap} uses: the same scope, the same product,
+     * the same question. Nothing is compared by resemblance.
+     */
+    @Transactional(readOnly = true)
+    public boolean alreadyAnswered(UUID orgId, String scope, UUID productId, String question) {
+        return candidates.existsByOrgIdAndDedupeKeyAndState(
+                orgId, dedupeKey(scope, productId, question), STATE_ACCEPTED);
+    }
+
+    /**
      * File a gap a draft ran into, so the ask lives in one place instead of on every screen.
      *
      * <p>Idempotent by the same key: a review drafted five times files one candidate.

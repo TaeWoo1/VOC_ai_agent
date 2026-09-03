@@ -90,7 +90,14 @@ public class InquiryRowsService {
     @Transactional(readOnly = true)
     public InquiryRowsResponse rows(UUID orgId, LocalDate from, LocalDate to, String channel, String status,
                                     String order, Integer limit) {
-        return rows(orgId, from, to, channel, status, order, limit, null);
+        return rows(orgId, from, to, channel, status, order, limit, null, null, null);
+    }
+
+    /** The pre-product signature, kept so existing callers and tests read unchanged. */
+    @Transactional(readOnly = true)
+    public InquiryRowsResponse rows(UUID orgId, LocalDate from, LocalDate to, String channel, String status,
+                                    String order, Integer limit, String subject) {
+        return rows(orgId, from, to, channel, status, order, limit, subject, null, null);
     }
 
     /**
@@ -103,10 +110,17 @@ public class InquiryRowsService {
      * @param subject the seller's own subject word (「현금영수증」), matched against the subject line and the
      *          customer's message; blank or null = no narrowing. Bounded to {@link #MAX_TERM} characters
      *          so a whole sentence can never arrive here as a search
+     * @param productId the product an inquiry is BOUND to; null = every product. A different axis from
+     *          {@code subject}, which also matches a product NAME: this one is the binding, and it is the
+     *          axis a doorway from the 상품 screen uses so that the number it was pressed on and the list
+     *          it opens mean the same rows
+     * @param inquiryId one exact inquiry, for a deep link naming a row that is not on the current page;
+     *          null = every row. Read through the same predicate, so a link opens what the list shows
      */
     @Transactional(readOnly = true)
     public InquiryRowsResponse rows(UUID orgId, LocalDate from, LocalDate to, String channel, String status,
-                                    String order, Integer limit, String subject) {
+                                    String order, Integer limit, String subject, UUID productId,
+                                    UUID inquiryId) {
         LocalDate toDate = to == null ? LocalDate.ofInstant(clock.instant(), SELLER_ZONE) : to;
         if (from != null && from.isAfter(toDate)) {
             throw ApiException.badRequest("조회 기간의 시작일이 종료일보다 늦습니다.");
@@ -132,7 +146,7 @@ public class InquiryRowsService {
             Optional<Channel> found = channels.findByCode(channelCode);
             if (found.isEmpty()) {
                 return new InquiryRowsResponse(from, toDate, channelCode, statusToken, oldest ? "OLDEST" : "NEWEST",
-                        size, term, 0, List.of());
+                        size, term, productId, 0, List.of());
             }
             channelId = found.get().getId();
         }
@@ -140,9 +154,10 @@ public class InquiryRowsService {
         Sort sort = oldest
                 ? Sort.by(Sort.Order.asc("receivedAt"), Sort.Order.asc("id"))
                 : Sort.by(Sort.Order.desc("receivedAt"), Sort.Order.desc("id"));
-        List<Inquiry> page = inquiries.findRowsInWindow(orgId, channelId, statusFilter, pattern, start, end,
-                PageRequest.of(0, size, sort));
-        long total = inquiries.countRowsInWindow(orgId, channelId, statusFilter, pattern, start, end);
+        List<Inquiry> page = inquiries.findRowsInWindow(orgId, channelId, productId, inquiryId, statusFilter,
+                pattern, start, end, PageRequest.of(0, size, sort));
+        long total = inquiries.countRowsInWindow(orgId, channelId, productId, inquiryId, statusFilter, pattern,
+                start, end);
 
         Map<UUID, Channel> channelsById = new HashMap<>();
         for (Channel ch : channels.findAllById(page.stream().map(Inquiry::getChannelId).filter(java.util.Objects::nonNull).distinct().toList())) {
@@ -166,7 +181,7 @@ public class InquiryRowsService {
                         identities.getOrDefault(q.getId(), com.sellerops.identity.ExecutableIdentity.NONE)))
                 .toList();
         return new InquiryRowsResponse(from, toDate, channelCode, statusToken, oldest ? "OLDEST" : "NEWEST",
-                size, term, total, items);
+                size, term, productId, total, items);
     }
 
     private static InquiryRowItem toItem(Inquiry q, Channel channel, Map<UUID, String> productNames,

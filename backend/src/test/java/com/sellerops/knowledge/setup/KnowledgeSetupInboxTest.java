@@ -100,6 +100,40 @@ class KnowledgeSetupInboxTest {
     }
 
     @Test
+    @DisplayName("an answered ask is REPORTED as answered, not merely not-refiled")
+    void anAnsweredAskSaysSo() {
+        String question = "「미끄럼 방지」에 대해 고객에게 안내할 공식 기준이 필요합니다.";
+        UUID candidateId = candidates.noteGap(org, "PRODUCT", productId, "미끄럼 방지", question).getId();
+
+        // Before the seller answers it, nothing claims they did.
+        assertThat(candidates.alreadyAnswered(org, "PRODUCT", productId, question)).isFalse();
+
+        candidates.accept(org, candidateId, "미끄럼 방지 안내", "이 매트는 실리콘 도트로 고정됩니다.",
+                KnowledgeSourceType.USAGE, null, null, null, "판매자");
+
+        // Afterwards it is a FACT the screen can read — the difference between 「정보를 입력하세요」 and
+        // 「기준은 추가하셨지만 이 질문에는 아직 적용되지 않습니다」. Telling a seller to add what they
+        // already added says their work did not happen.
+        assertThat(candidates.alreadyAnswered(org, "PRODUCT", productId, question)).isTrue();
+        // And the ask is still not refiled — the two facts are separate and both hold.
+        assertThat(candidates.noteGap(org, "PRODUCT", productId, "미끄럼 방지", question)).isNull();
+    }
+
+    @Test
+    @DisplayName("a different ask is a different question — identity, never resemblance")
+    void anotherAskIsUntouched() {
+        String answered = "「미끄럼 방지」에 대해 고객에게 안내할 공식 기준이 필요합니다.";
+        String other = "「두께」에 대해 고객에게 안내할 공식 기준이 필요합니다.";
+        UUID id = candidates.noteGap(org, "PRODUCT", productId, "미끄럼 방지", answered).getId();
+        candidates.accept(org, id, "미끄럼 방지 안내", "실리콘 도트로 고정됩니다.",
+                KnowledgeSourceType.USAGE, null, null, null, "판매자");
+
+        assertThat(candidates.alreadyAnswered(org, "PRODUCT", productId, other)).isFalse();
+        // The same words about the COMPANY are a different ask too: the scope is part of the identity.
+        assertThat(candidates.alreadyAnswered(org, "ORG", null, answered)).isFalse();
+    }
+
+    @Test
     @DisplayName("§3 — a drafting gap accepted with nothing written is refused, not filed")
     void aGapIsNeverItsOwnAnswer() {
         UUID candidateId = candidates

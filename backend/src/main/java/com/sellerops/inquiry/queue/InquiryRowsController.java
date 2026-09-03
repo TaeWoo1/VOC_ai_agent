@@ -13,7 +13,10 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Read-only customer inquiry ROWS (Query Accuracy v1). Window, channel, status, order and limit are
  * closed tokens; {@code q} is the seller's own subject word, matched as one bounded LIKE over the
- * subject line and the customer's message. Org-scoped via {@code principal.orgId()}; sanitized rows only.
+ * subject line and the customer's message; {@code productId} is the product an inquiry is BOUND to —
+ * the axis a doorway from the 상품 screen uses, sharing its predicate with the count that screen prints.
+ * Org-scoped via {@code principal.orgId()}; sanitized rows only. Another org's product id is not a probe:
+ * the org clause means it simply matches nothing.
  */
 @RestController
 @RequestMapping("/api/inquiries/rows")
@@ -35,7 +38,9 @@ public class InquiryRowsController {
                                     @RequestParam(required = false) String status,
                                     @RequestParam(required = false) String order,
                                     @RequestParam(required = false) Integer limit,
-                                    @RequestParam(required = false) String q) {
-        return service.rows(principal.orgId(), from, to, channel, status, order, limit, q);
+                                    @RequestParam(required = false) String q,
+                                    @RequestParam(required = false) java.util.UUID productId,
+                                    @RequestParam(required = false) java.util.UUID inquiryId) {
+        return service.rows(principal.orgId(), from, to, channel, status, order, limit, q, productId, inquiryId);
     }
 }

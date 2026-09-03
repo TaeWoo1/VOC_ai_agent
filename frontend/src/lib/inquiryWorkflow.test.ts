@@ -33,6 +33,7 @@ function queueItem(over: Partial<InquiryQueueItem> = {}): InquiryQueueItem {
     phase: "OPEN",
     status: "UNANSWERED",
     title: "배송 문의",
+    snippet: "배송이 언제 오나요",
     hasDraft: false,
     receivedAt: "2026-06-27T09:00:00Z",
     ...over,

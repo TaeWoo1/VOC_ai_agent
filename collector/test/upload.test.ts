@@ -398,6 +398,46 @@ describe("fetchApprovedReplyDraft", () => {
   });
 });
 
+/**
+ * A THROWAWAY organisation for the gated integration tests, created through the product's own signup.
+ *
+ * <b>Why these tests may not use a seller account.</b> Both of them upload manufactured review rows
+ * to a real backend through the production ingest path — `FileParser` → `ReviewRowMapper` →
+ * `IngestionService`, the same path a seller's own export takes. That path records what it is handed,
+ * and it is right to: it cannot know the CSV was written by a test. So the rows land as `REAL`, and
+ * on the demo org 23 of them accumulated over five runs and were still there months later, counted in
+ * 미답변, ranked in 반복되는 문제, and drawn into a review-evaluation sample. The ingest path was never
+ * the defect. Uploading fixtures into an organisation that holds a seller's data was.
+ *
+ * Both tests defaulted to `demo@sellerops.ai`, and the second mints fresh ids every run BY DESIGN
+ * (fixed ids would already be in the dev DB and the insert half of the assertion would pass
+ * vacuously), so it could not stop growing. Signing up here keeps that design and moves its cost
+ * somewhere it belongs: rows still accumulate, in an organisation nobody reads.
+ *
+ * The credential is never taken from the environment — an operator who exported SELLEROPS_EMAIL for
+ * some other purpose must not thereby aim this at their own shop.
+ */
+async function disposableOrg(baseUrl: string): Promise<string> {
+  const nonce = randomUUID().slice(0, 12);
+  const response = await fetch(`${baseUrl}/api/auth/signup`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: `collector-it-${nonce}@example.invalid`,
+      password: `it-${randomUUID()}`,
+      name: "collector integration",
+      orgName: `collector 통합테스트 ${nonce}`,
+      termsAccepted: true,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`disposable org signup failed: ${response.status}`);
+  }
+  const body = (await response.json()) as { token?: string };
+  if (!body.token) throw new Error("disposable org signup returned no token");
+  return body.token;
+}
+
 describe("live-backend integration (gated)", () => {
   it.skipIf(!RUN_INTEGRATION)(
     "uploads twice: first inserts + enriches, second dedups with no new analyses",
@@ -406,11 +446,9 @@ describe("live-backend integration (gated)", () => {
       const sample = process.env.NAVER_SAMPLE_XLSX;
       expect(sample, "set NAVER_SAMPLE_XLSX to a SYNTHETIC review export (not a real one)").toBeTruthy();
 
-      const token = await login(
-        baseUrl,
-        process.env.SELLEROPS_EMAIL ?? "demo@sellerops.ai",
-        process.env.SELLEROPS_PASSWORD ?? "demo1234",
-      );
+      // A fresh organisation, never a seller's — see disposableOrg. The baseline below is therefore
+      // 0, and the deltas this test asserts are its own rows and nothing else's.
+      const token = await disposableOrg(baseUrl);
       const channelId = await resolveChannelId(baseUrl, token, process.env.NAVER_CHANNEL_CODE ?? "NAVER");
 
       // Baseline → upload #1 → measure enrichment delta.
@@ -448,11 +486,7 @@ describe("live-backend integration (gated)", () => {
     "ingest handoff: synthetic CSV inserts then dedups, sanitized to { ok, processed }",
     async () => {
       const baseUrl = process.env.SELLEROPS_BASE_URL ?? "http://localhost:8080";
-      const token = await login(
-        baseUrl,
-        process.env.SELLEROPS_EMAIL ?? "demo@sellerops.ai",
-        process.env.SELLEROPS_PASSWORD ?? "demo1234",
-      );
+      const token = await disposableOrg(baseUrl);
       const channelId = await resolveChannelId(baseUrl, token, process.env.NAVER_CHANNEL_CODE ?? "NAVER");
 
       // Synthetic review CSV with unique external ids (리뷰글번호) so re-upload dedups deterministically.

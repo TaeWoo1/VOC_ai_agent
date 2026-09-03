@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { DataTable, Td, Th } from "../../components/ui/DataTable";
@@ -86,8 +86,26 @@ export function ProductDetail() {
       {/* PRIMARY — what is happening to this product. */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="이 상품의 신호">
         <Figure label="리뷰" value={volume.reviews} />
-        <Figure label="문의" value={volume.inquiries} />
-        <Figure label="미답변 문의" value={volume.unansweredInquiries} emphasis />
+        {/* A number the seller can act on is a door. Both go to the 문의 record scoped to THIS product
+            (`?productId=`), which reads through the same predicate the counts above were computed with —
+            org, this product, ACTIVE, REAL, and the status the label names. A figure and the list it
+            opens that disagree about which rows they mean is worse than no door at all. Zero is not a
+            door: there is nothing behind it, and a control that opens an empty list is a broken promise. */}
+        <Figure
+          label="문의"
+          value={volume.inquiries}
+          to={volume.inquiries > 0 ? `/inquiries?productId=${productId}` : undefined}
+        />
+        <Figure
+          label="미답변 문의"
+          value={volume.unansweredInquiries}
+          emphasis
+          to={
+            volume.unansweredInquiries > 0
+              ? `/inquiries?productId=${productId}&status=UNANSWERED`
+              : undefined
+          }
+        />
         <Figure label="문제 근거" value={volume.issueEvidence} />
       </section>
 
@@ -251,16 +269,44 @@ function CoverageChip({ row }: { row: KnowledgeCoverageView }) {
   );
 }
 
-function Figure({ label, value, emphasis }: { label: string; value: number; emphasis?: boolean }) {
-  return (
-    <div
-      className={`rounded-2xl border px-4 py-3 ${
-        emphasis ? "border-brand/30 bg-brand-50/40" : "border-line bg-surface"
-      }`}
-    >
-      <p className="text-sm font-medium text-muted">{label}</p>
+/**
+ * One of this product's numbers — and, when there is something behind it, the way in.
+ *
+ * `to` is given only for a figure whose list exists and is scoped to this exact product. Without it
+ * the tile is what it always was: a fact, not a control.
+ */
+function Figure({
+  label,
+  value,
+  emphasis,
+  to,
+}: {
+  label: string;
+  value: number;
+  emphasis?: boolean;
+  to?: string;
+}) {
+  const shell = `block rounded-2xl border px-4 py-3 ${
+    emphasis ? "border-brand/30 bg-brand-50/40" : "border-line bg-surface"
+  }`;
+  const body = (
+    <>
+      <p className="text-sm font-medium text-muted">
+        {label}
+        {to ? <span className="ml-1 text-brand-700" aria-hidden="true">›</span> : null}
+      </p>
       <p className="mt-1.5 text-2xl font-bold tabular-nums text-ink">{count(value)}</p>
-    </div>
+    </>
+  );
+  if (!to) return <div className={shell}>{body}</div>;
+  return (
+    <Link
+      to={to}
+      aria-label={`${label} ${count(value)}건 보기`}
+      className={`${shell} transition hover:border-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700`}
+    >
+      {body}
+    </Link>
   );
 }
 

@@ -290,9 +290,17 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
      * customers happened to type the product's name. A product an inquiry is bound to is what that
      * inquiry is about; one axis, one set of fields, and the subquery is org-scoped like every other
      * predicate here.
+     *
+     * <p><b>{@code productId} is the BINDING, not the word.</b> It is the axis a doorway from a
+     * product uses, and it deliberately shares its predicate with
+     * {@link #countByOrgIdAndProductIdAndStatus} — the count the 상품 screen prints. A number and the
+     * door beneath it that disagree about which rows they mean is worse than no door: the seller
+     * presses 「미답변 문의 1」 and reads a list of none, or of three.
      */
     @Query("select q from Inquiry q where q.orgId = :orgId"
             + " and (:channelId is null or q.channelId = :channelId)"
+            + " and (:productId is null or q.productId = :productId)"
+            + " and (:inquiryId is null or q.id = :inquiryId)"
             + " and (:status is null or q.status = :status)"
             + " and (:term is null or lower(q.title) like :term or lower(q.body) like :term"
             + " or exists (select 1 from Product p where p.id = q.productId and p.orgId = q.orgId"
@@ -300,6 +308,7 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
             + " and q.receivedAt >= :from and q.receivedAt < :toExclusive"
             + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE)
     List<Inquiry> findRowsInWindow(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+                                   @Param("productId") UUID productId, @Param("inquiryId") UUID inquiryId,
                                    @Param("status") String status, @Param("term") String term,
                                    @Param("from") Instant from,
                                    @Param("toExclusive") Instant toExclusive, Pageable pageable);
@@ -307,6 +316,8 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
     /** The count that pairs with {@link #findRowsInWindow} — same predicate, so N건 matches the rows. */
     @Query("select count(q) from Inquiry q where q.orgId = :orgId"
             + " and (:channelId is null or q.channelId = :channelId)"
+            + " and (:productId is null or q.productId = :productId)"
+            + " and (:inquiryId is null or q.id = :inquiryId)"
             + " and (:status is null or q.status = :status)"
             + " and (:term is null or lower(q.title) like :term or lower(q.body) like :term"
             + " or exists (select 1 from Product p where p.id = q.productId and p.orgId = q.orgId"
@@ -314,6 +325,7 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
             + " and q.receivedAt >= :from and q.receivedAt < :toExclusive"
             + " and q.dataOrigin = com.sellerops.common.DataOrigin.REAL" + ACTIVE)
     long countRowsInWindow(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+                           @Param("productId") UUID productId, @Param("inquiryId") UUID inquiryId,
                            @Param("status") String status, @Param("term") String term,
                            @Param("from") Instant from, @Param("toExclusive") Instant toExclusive);
 }

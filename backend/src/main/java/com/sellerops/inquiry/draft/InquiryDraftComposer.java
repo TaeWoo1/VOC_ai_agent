@@ -212,14 +212,14 @@ public class InquiryDraftComposer {
      */
     private GeneratedDraftView compose(UUID orgId, UUID workItemId, String actor, ToneHint tone) {
         GeneratedDraftView view = composeDraft(orgId, workItemId, actor, tone);
-        UUID filed = fileGap(orgId, view.knowledgeGap());
+        KnowledgeGapView gap = markGap(orgId, view.knowledgeGap());
         // The id travels back with the gap so that answering THIS ask on THIS screen closes THIS row
-        // (Knowledge Gap Continuity v1). Null when nothing was filed, and the screen then behaves
-        // exactly as it did before the inbox existed.
-        return filed == null ? view : new GeneratedDraftView(view.draft(), view.authorKind(),
+        // (Knowledge Gap Continuity v1). When the seller already answered this exact ask and the draft
+        // still cannot use it, the gap says THAT instead — a different sentence, not a repeated demand.
+        return gap == view.knowledgeGap() ? view : new GeneratedDraftView(view.draft(), view.authorKind(),
                 view.knowledgeState(), view.knowledgeNote(), view.answerBasis(), view.answerBasisNote(),
                 view.answerBasisAction(), view.productId(), view.evidence(), view.companyContextUsed(),
-                view.unavailableMessage(), view.knowledgeGap().filedAs(filed));
+                view.unavailableMessage(), gap);
     }
 
     /**
@@ -231,26 +231,34 @@ public class InquiryDraftComposer {
      * answer. Everything else — a partial hit, an unresolved 규격, a vendor failure — is a different
      * fact and files nothing.
      *
-     * @return the 확인 필요 row's id, or null when nothing was filed
+     * @return the gap, carrying either the 확인 필요 row it was filed as or the fact that this seller
+     *         already answered this exact ask — and unchanged when neither is true
      */
-    private UUID fileGap(UUID orgId, KnowledgeGapView gap) {
+    private KnowledgeGapView markGap(UUID orgId, KnowledgeGapView gap) {
         if (candidates == null || gap == null) {
-            return null;
+            return gap;
         }
         String subject = gap.missingSubject();
         if (subject == null || subject.isBlank()
                 || !ABSENT.equals(gap.productOutcome()) || !ABSENT.equals(gap.policyOutcome())) {
-            return null;
+            return gap;
         }
         String scope = gap.productId() == null ? "ORG" : "PRODUCT";
+        String question = "「" + subject + "」에 대해 고객에게 안내할 공식 기준이 필요합니다.";
         try {
-            // Null when this exact ask has already been answered — nothing filed, nothing to close.
-            KnowledgeCandidate filed = candidates.noteGap(orgId, scope, gap.productId(), subject,
-                    "「" + subject + "」에 대해 고객에게 안내할 공식 기준이 필요합니다.");
-            return filed == null ? null : filed.getId();
+            KnowledgeCandidate filed = candidates.noteGap(orgId, scope, gap.productId(), subject, question);
+            if (filed != null) {
+                return gap.filedAs(filed.getId());
+            }
+            // Nothing was filed. The ONE reason that is worth a different sentence is that this exact
+            // ask was already answered — a fact `noteGap` decides on and used to swallow. Read here so
+            // the screen can stop telling a seller to add what they added (Inquiry Operations
+            // Workspace v1 §6); one extra query, only on the path that filed nothing.
+            return candidates.alreadyAnswered(orgId, scope, gap.productId(), question)
+                    ? gap.answeredBefore() : gap;
         } catch (RuntimeException e) {
             // Enum-free and content-free: the draft is what the seller asked for, and it is already saved.
-            return null;
+            return gap;
         }
     }
 

@@ -35,15 +35,27 @@ import java.util.UUID;
  *                    Continuity v1). It is an id and nothing else: the screen never reads the
  *                    candidate's text, and closing is done by the id rather than by deciding that a
  *                    sentence the seller just wrote resembles an ask.
+ * @param previouslyAnswered whether the seller has ALREADY answered this exact ask and the draft still
+ *                    cannot use it. Two facts that look alike on screen and are not: 「아직 정보가
+ *                    필요합니다」 and 「기준은 추가하셨지만 이 질문에는 아직 적용되지 않습니다」. Telling a
+ *                    seller to add what they already added says their work did not happen. Identity
+ *                    only — the same scope, product and question `noteGap` files by; never resemblance.
  */
 public record KnowledgeGapView(UUID productId, String topic, List<String> topics, String missingSubject,
                                String productOutcome, String policyOutcome, String applicability,
-                               UUID variantId, boolean policyDeclaresTopic, UUID candidateId) {
+                               UUID variantId, boolean policyDeclaresTopic, UUID candidateId,
+                               boolean previouslyAnswered) {
 
     /** The same gap, now carrying the 확인 필요 row it was filed as. */
     public KnowledgeGapView filedAs(UUID candidateId) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
-                policyOutcome, applicability, variantId, policyDeclaresTopic, candidateId);
+                policyOutcome, applicability, variantId, policyDeclaresTopic, candidateId, false);
+    }
+
+    /** The same gap, on a question this seller has already answered once. Nothing is filed for it. */
+    public KnowledgeGapView answeredBefore() {
+        return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
+                policyOutcome, applicability, variantId, policyDeclaresTopic, null, true);
     }
 
     public static KnowledgeGapView of(InquiryEvidenceRetriever.InquiryEvidence retrieved,
@@ -59,7 +71,8 @@ public record KnowledgeGapView(UUID productId, String topic, List<String> topics
                 verdict.applicability() == null ? null : verdict.applicability().name(),
                 verdict.variantId(),
                 asked != null && retrieved.policyDeclares(asked),
-                null);
+                null,
+                false);
     }
 
     private static String name(RetrievalOutcome outcome) {

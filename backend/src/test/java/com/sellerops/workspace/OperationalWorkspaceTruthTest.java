@@ -8,6 +8,8 @@ import com.sellerops.common.DataOrigin;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.queue.InquiryQueueService;
+import com.sellerops.inquiry.queue.InquiryRowsService;
+import com.sellerops.inquiry.queue.dto.InquiryRowsResponse;
 import com.sellerops.inquiry.queue.dto.InquiryQueueItem;
 import com.sellerops.inquiry.reply.InquiryReplyDraft;
 import com.sellerops.inquiry.reply.InquiryReplyDraftRepository;
@@ -63,6 +65,7 @@ class OperationalWorkspaceTruthTest {
     private UUID channelId;
     private final UUID sellerAccountId = UUID.randomUUID();
     private InquiryQueueService queue;
+    private InquiryRowsService rows;
     private ProductCatalogService catalogue;
 
     @BeforeEach
@@ -79,6 +82,8 @@ class OperationalWorkspaceTruthTest {
         });
         queue = new InquiryQueueService(workItems, inquiries, channels, products,
                 com.sellerops.identity.ExecutableIdentityResolver.unresolved(), drafts);
+        rows = new InquiryRowsService(inquiries, workItems, channels, products,
+                com.sellerops.identity.ExecutableIdentityResolver.unresolved());
         catalogue = new ProductCatalogService(products, inquiries, reviews);
     }
 
@@ -104,6 +109,12 @@ class OperationalWorkspaceTruthTest {
         w.setSellerAccountId(sellerAccountId);
         w.setPhase(phase);
         return workItems.save(w).getId();
+    }
+
+    private void answered(UUID inquiryId) {
+        Inquiry i = inquiries.findById(inquiryId).orElseThrow();
+        i.setStatus("ANSWERED");
+        inquiries.save(i);
     }
 
     private UUID product(String name) {
@@ -196,6 +207,54 @@ class OperationalWorkspaceTruthTest {
         assertThat(page.total()).isEqualTo(3);
         // The unanswered inquiry outranks five reviews; the alphabetical head would have led with 가.
         assertThat(page.rows()).extracting(r -> r.id()).containsExactly(owed, loud);
+    }
+
+    @Test
+    @DisplayName("the doorway and the number mean the same rows — 미답변 문의 N opens exactly N")
+    void aNumberAndItsDoorAgree() {
+        UUID watched = product("문의가 몰린 상품");
+        UUID other = product("다른 상품");
+        inquiry("이 상품 미답변 1", watched);
+        inquiry("이 상품 미답변 2", watched);
+        answered(inquiry("이 상품 답변함", watched));
+        inquiry("다른 상품 미답변", other);
+        inquiry("상품 없는 미답변", null);
+
+        long printed = inquiries.countByOrgIdAndProductIdAndStatus(org, watched, "UNANSWERED");
+        InquiryRowsResponse opened = rows.rows(org, null, null, null, "UNANSWERED", "NEWEST", 50, null,
+                watched, null);
+
+        // The figure the 상품 screen prints, and the list pressing it opens.
+        assertThat(printed).isEqualTo(2);
+        assertThat(opened.totalCount()).isEqualTo(printed);
+        assertThat(opened.items()).allSatisfy(r -> assertThat(r.productId()).isEqualTo(watched));
+        // And it echoes the axis it was narrowed by, like every other one.
+        assertThat(opened.productId()).isEqualTo(watched);
+    }
+
+    @Test
+    @DisplayName("a deep link reads ONE exact row through the same predicate — not a page it hopes contains it")
+    void aDeepLinkIsExact() {
+        UUID wanted = inquiry("링크가 가리키는 문의", null);
+        for (int i = 0; i < 5; i++) inquiry("다른 문의 " + i, null);
+
+        InquiryRowsResponse one = rows.rows(org, null, null, null, null, "NEWEST", 50, null, null, wanted);
+
+        assertThat(one.items()).hasSize(1);
+        assertThat(one.items().get(0).inquiryId()).isEqualTo(wanted);
+        assertThat(one.totalCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("another org's product narrows to nothing — never a probe, never the whole record")
+    void aForeignProductIsNotAProbe() {
+        inquiry("우리 문의", product("우리 상품"));
+
+        InquiryRowsResponse foreign = rows.rows(org, null, null, null, null, "NEWEST", 50, null,
+                UUID.randomUUID(), null);
+
+        assertThat(foreign.items()).isEmpty();
+        assertThat(foreign.totalCount()).isZero();
     }
 
     @Test

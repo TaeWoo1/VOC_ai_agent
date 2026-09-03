@@ -40,6 +40,7 @@ export function AnswerBasisQuickAdd({
   productName,
   topic,
   candidateId,
+  label,
   onSaved,
 }: {
   /** Which corpus was missing the answer. PRODUCT needs a `productId`. */
@@ -55,6 +56,13 @@ export function AnswerBasisQuickAdd({
    * source is written and no card is touched.
    */
   candidateId?: string | null;
+  /**
+   * The opener's words, when the caller knows something this component does not.
+   *
+   * Only one caller passes it today: the state card, on a question this seller has already answered
+   * once, where 「답변 기준 추가」 would be asking for what they already gave.
+   */
+  label?: string;
   onSaved: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -62,7 +70,7 @@ export function AnswerBasisQuickAdd({
   if (!open) {
     return (
       <div className="mt-3">
-        <Btn onClick={() => setOpen(true)}>답변 기준 추가</Btn>
+        <Btn onClick={() => setOpen(true)}>{label ?? "답변 기준 추가"}</Btn>
       </div>
     );
   }

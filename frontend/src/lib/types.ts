@@ -1391,6 +1391,11 @@ export interface InquiryQueueItem {
   phase: string; // OPEN | PROPOSED | ... (server lifecycle)
   status: string; // UNANSWERED | ANSWERED
   title: string | null;
+  /**
+   * The SAME bounded, PII-masked opening of the customer's message the 문의 record shows — never the
+   * raw body. A queue row the seller cannot read is a row they must open to triage.
+   */
+  snippet: string | null;
   receivedAt: string; // ISO instant
   /**
    * Whether a reply draft has actually been written for this work item.
@@ -1445,6 +1450,8 @@ export interface InquiryRowsResponse {
   order: string | null;
   limit: number;
   term: string | null;
+  /** The product the read was narrowed to, echoed like every other axis. */
+  productId: string | null;
   totalCount: number;
   items: InquiryRowItem[];
 }
@@ -1680,6 +1687,14 @@ export interface InquiryKnowledgeGapView {
   policyDeclaresTopic: boolean;
   /** The 확인 필요 row this ask was filed as, or null when nothing was filed. An id, never text. */
   candidateId: string | null;
+  /**
+   * Whether the seller has ALREADY answered this exact ask and the draft still cannot use it.
+   *
+   * Two facts that look alike on screen and are not: 「아직 정보가 필요합니다」 and 「기준은 추가하셨지만
+   * 이 질문에는 아직 적용되지 않습니다」. Telling a seller to add what they already added says their
+   * work did not happen. Identity only — never resemblance.
+   */
+  previouslyAnswered?: boolean;
 }
 
 /**

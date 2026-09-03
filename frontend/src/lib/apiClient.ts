@@ -734,7 +734,17 @@ export const api = {
    * rows carry it visibly in their own receipt times.
    */
   async getInquiryRowsStrict(
-    params: { status?: string; order?: string; limit?: number; channel?: string; q?: string } = {},
+    params: {
+      status?: string;
+      order?: string;
+      limit?: number;
+      channel?: string;
+      q?: string;
+      /** The product an inquiry is BOUND to — the axis a doorway from 상품 uses. */
+      productId?: string;
+      /** One exact inquiry, for a deep link naming a row that is not on the current page. */
+      inquiryId?: string;
+    } = {},
   ): Promise<InquiryRowsResponse> {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {

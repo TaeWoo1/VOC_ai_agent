@@ -879,6 +879,9 @@ function storedAnswerState(
     // A reload knows what was decided, not which inbox row a past run created. Guessing one here
     // would let a reload close an ask this screen never established.
     candidateId: null,
+    // Same reason: whether this exact ask was already answered is a fact about the inbox, decided at
+    // draft time. The stored row does not carry it, so a reload does not claim it.
+    previouslyAnswered: false,
   };
 }
 
@@ -902,8 +905,28 @@ function AnswerStateCard({
         good ? "border-good/40 bg-good/5" : "border-warn/40 bg-warn/5"
       }`}
     >
-      <p className="break-keep text-lg font-semibold leading-relaxed text-ink">{state.note}</p>
-      {state.action ? (
+      {/*
+        WHAT ALREADY HAPPENED COMES FIRST (Inquiry Operations Workspace v1 §6).
+
+        A seller who added a 답변 기준 for this exact question, and then watched the same screen say
+        「답변 기준이 필요합니다」 again, has been told their work did not happen. It did — it just does
+        not answer THIS question yet, and those are two different sentences. The distinction is a fact
+        the backend already decided on and used to swallow: `noteGap` returns null for an ask this org
+        has already ACCEPTED, by the same identity it files by. It says so now.
+
+        The way out is unchanged and still offered, because adding more IS the next step. What changes
+        is that the screen stops asking for something it was already given.
+      */}
+      <p className="break-keep text-lg font-semibold leading-relaxed text-ink">
+        {noBasis && state.previouslyAnswered
+          ? "답변 기준은 추가하셨습니다."
+          : state.note}
+      </p>
+      {noBasis && state.previouslyAnswered ? (
+        <p className="mt-1.5 break-keep text-base leading-relaxed text-ink">
+          다만 이 질문에 그대로 적용할 수 있는 내용은 아직 찾지 못했습니다.
+        </p>
+      ) : state.action ? (
         <p className="mt-1.5 break-keep text-base leading-relaxed text-ink">{state.action}</p>
       ) : null}
       {noBasis ? (
@@ -931,6 +954,7 @@ function AnswerStateCard({
           productId={state.productId}
           topic={state.topic}
           candidateId={state.candidateId}
+          label={state.previouslyAnswered ? "답변 기준 더 채우기" : undefined}
           onSaved={onSavedBasis}
         />
       ) : null}

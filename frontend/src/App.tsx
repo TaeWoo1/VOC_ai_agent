@@ -131,8 +131,8 @@ export function App() {
         <Route path="/reviews/:accountId/reply/:reviewId" element={<ReviewReplyTask />} />
         <Route path="/reviews/:accountId" element={<Reviews />} />
         {/* 문의: the customer inbox scoped to inquiries. */}
-        <Route path="/inquiries" element={<CustomerInbox scope="INQUIRY" />} />
-        <Route path="/inquiries/:itemRef" element={<CustomerInbox scope="INQUIRY" />} />
+        <Route path="/inquiries" element={<CustomerInbox />} />
+        <Route path="/inquiries/:itemRef" element={<CustomerInbox />} />
         {/* The mixed 문의+리뷰 queue is absorbed (A2): reviews are on 리뷰, inquiries on 문의. The
             bare path lands on 문의; an item deep link (memory evidence, reports, bookmarks) is
             resolved to the surface that owns the row. */}

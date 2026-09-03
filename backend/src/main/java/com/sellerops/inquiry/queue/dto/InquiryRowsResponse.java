@@ -20,12 +20,20 @@ public record InquiryRowsResponse(
         String order,
         int limit,
         String term,
+        /** The product the read was narrowed to, echoed like every other axis. Null = every product. */
+        java.util.UUID productId,
         long totalCount,
         List<InquiryRowItem> items) {
 
     /** The pre-term shape, kept so existing callers and tests read unchanged. */
     public InquiryRowsResponse(LocalDate from, LocalDate to, String channel, String status, String order,
                                int limit, long totalCount, List<InquiryRowItem> items) {
-        this(from, to, channel, status, order, limit, null, totalCount, items);
+        this(from, to, channel, status, order, limit, null, null, totalCount, items);
+    }
+
+    /** The pre-product shape. */
+    public InquiryRowsResponse(LocalDate from, LocalDate to, String channel, String status, String order,
+                               int limit, String term, long totalCount, List<InquiryRowItem> items) {
+        this(from, to, channel, status, order, limit, term, null, totalCount, items);
     }
 }

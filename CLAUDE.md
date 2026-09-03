@@ -925,6 +925,87 @@ ask 셋 적재(문의 gap + 리뷰의 상품 ask + 리뷰의 배송 ask) → 문
 들고 있고 중복 적재 0. 3폭 × 지식·문의·리뷰 화면 **AA 위반 0** · 가로 스크롤 0 · 콘솔 오류 0 · off-host 0.
 backend **3,777** · frontend **2,730** · 실패 0. 마이그레이션 0 · 마켓플레이스 0 · WRITE 0 · 모델 0.
 
+**`docs/inquiry_operations_workspace_v1.md`** (Data Origin Integrity + Inquiry Operations
+Workspace v1 — 2026-09-04. 두 단계. Chat · Reviews · Knowledge · Retrieval · Guided execution 무변경,
+승인 경계·write path·`DataOrigin` 값·마켓플레이스 semantics **무변경**. **[1] Data Origin** — 세
+패키지째 보고된 「synthetic이 `REAL`로 저장된다」를 **producer 기준**으로 닫았다. 감사 결과 정상 경로는
+전부 옳았고(커넥터 ingest = `REAL`, `MockDataSeeder` = `DEMO_SEED` 명시, V54/55/56 = 구조적 규칙,
+`AnswerMemoryService` = 파생 REAL) 범인은 하나 — `collector/test/upload.test.ts`의 gated integration
+test 둘이 **production ingest path로** 리뷰 CSV를 실제 백엔드에 POST하는데 기본 계정이
+`demo@sellerops.ai`였다. **ingest path는 결함이 아니다**(건네받은 것을 기록하는 것이 옳고, 업로드에는
+「이건 테스트다」가 없다) — 결함은 **판매자 데이터를 가진 org에 fixture를 올린 것**이다. V54가 못 잡은
+이유도 구조적이다: 그 규칙은 external id **부재**를 요구하는데 이 행들은 ingest를 지나 external id를
+가졌다. 두 번째 테스트는 매 실행 `randomUUID()`를 **의도적으로** 쓰므로(고정 id면 dedup 절반이 공허하게
+통과) 멈출 수 없었다 — 실측 5 runs × 3 = **`awfx-` 15** · `SYN-` 3 · `COLLECTOR-SMOKE-` 5 = **23**,
+그리고 이 23은 `contracts/review-eval/naver/v2/synthetic-rows.json`이 **이미 행 단위로 열거**하고
+있었다(`inFrame: 23`) — 없던 것은 DB 안의 사실뿐. **닫은 방법**: producer는 `disposableOrg()`(제품 자신의
+`POST /api/auth/signup` · `@example.invalid` · 매 실행 새 nonce · **환경변수에서 자격을 절대 읽지
+않는다** — 다른 목적으로 `SELLEROPS_EMAIL`을 export한 운영자가 자기 상점을 겨냥하게 되면 안 된다),
+`ingest-fixture-fence.test.ts`가 그 describe 블록에 판매자 자격 0 · token source 1 · signup+`.invalid`+
+nonce를 고정. 분류는 **V93**이 `VERIFY_FIXTURE`(enum이 이미 정의한 값 — 「real in shape, synthetic in
+origin」)로, 새 origin 0 · 계약 확장 0 · 삭제 0이고 패턴은 prefix가 아니라 **문서화된 전체 shape**로
+매칭해 live DB에서 먼저 검증했다(15/3/5 일치 · **10자리 id 0건** — 실제 NAVER 리뷰글번호는 10자리이므로
+export 행을 가리킬 수 없다). **cascade는 원인에만**: V56의 evidence 규칙을 무제한 재실행해 보니 V56이 본
+적 없는 행 둘을 쓸어갔다 — **`(미지정 상품)`**(ingest의 placeholder bucket이고 `ProductService`가
+**이름으로** 조회하므로 필터 뒤로 숨기면 다음 미귀속 ingest가 두 번째를 만든다)과 아직 리뷰가 없는 카페24
+상품코드(판매자가 실제로 파는 상품) ⇒ **fixture 리뷰가 떠받친 행에만** 적용하도록 좁혔고, 전 카탈로그
+재실행 여부는 별개 질문으로 남긴다. **regression은 의도가 아니라 구조로 불가능**(모든 강등 절이
+`VERIFY_FIXTURE` 존재 AND REAL 증거 부재를 요구) — 실측 REAL 증거 있는데 강등된 상품 **0** · 강등된
+10자리 리뷰 **0**. Demo Org: 리뷰 REAL 4,622→**4,599** / FIXTURE 0→**23**, 상품 REAL 300→**294**,
+listing 294→289, 문의 무변경. **「308 vs 300」은 subset label도 mismatch도 아니었다** — 8건이 이미
+`DEMO_SEED`였고 `data_origin`은 auto-enabled 필터라 `countByOrgId`를 포함한 **모든 평범한 읽기**가 300을
+돌려주고 있었다(308은 필터 없는 raw psql count) ⇒ **라벨 변경 0 · 임의 필터 0**, 숫자가 294로 움직인 것은
+위의 다른 이유다. **[2] Inquiry Operations Workspace** — before 실측: 읽기 **1회**(inbox feed
+`limit=500`)를 한 열에 전부 렌더해 **7,100px · 94행 · 제목 하나**, 업무와 기록이 같은 목록(지난주 답변한
+문의가 가장 오래 기다린 미답변 네 줄 아래 같은 무게로), **검색 0**, 상한은 절벽(「최근 500건까지」가 전부
+— 문의 3,000건 판매자는 500행을 받고 나머지에 대해 아무 말도 못 듣는다), deep link가 **500행이 로드돼
+있어야** 풀리고, `scope` prop의 mixed 모드는 A2 이후 caller 0. **IA는 지금 처리할 일 → 전체 문의**이고
+읽기가 둘인 이유는 질문이 둘이며 **엔드포인트가 이미 둘 다 있었기** 때문이다. **큐의 포함 조건은 이 화면이
+정하지 않는다** — `InquiryWorkItemPhase.AWAITING_SELLER`(백엔드가 「판매자가 무언가 결정하기를 기다리는
+phase」라고 한 번 선언하고 모든 추천 surface가 읽는 그것)이고, 상태어는 `lib/workState.ts`에서 오며
+**초안 준비됨은 `hasDraft`**(phase 아님, `11f5274c`에서 닫힌 그 결함). 정렬은 **새 heuristic 0** — 이
+제품이 가진 유일한 urgency 기준(대기 시간)을 **두 그룹 안에서** 적용한다(이 org의 카페24 백로그는 10년을
+거슬러 올라가 순수 worst-first면 2014년 질문이 한 시간 전 질문을 묻는다; 옛 행은 숨기지도 버리지도 않고
+자기 divider 아래). 읽기 실패는 그렇게 말하고(record는 별개 읽기라 무사) **0이면 섹션 자체를 렌더하지
+않는다**. 기록은 `GET /api/inquiries/rows`(이미 window·channel·status·order·limit·subject 축 보유) 50행
+한 페이지 + `totalCount`이고 필터가 곧 URL이며, 「최근 N건」은 **뒤에 더 있을 때만** 말하고 빈 결과는
+「찾는 문의가 없습니다」와 「아직 들어온 문의가 없습니다」를 가른다(table framework·정렬·저장된 뷰·일괄
+선택 **0**). **doorway `/inquiries?productId=`**: `productId`를 rows 쿼리에 축으로 더했고 그것은 `q`(상품
+**이름**도 매치)와 달리 **binding**이며 **상품 화면이 인쇄하는 그 count와 같은 술어**다 — 실측 인쇄 1 →
+열린 `totalCount` 1, 전체 8 → 8. **0은 문이 아니다**(빈 목록을 여는 컨트롤은 지키지 못한 약속). scope는
+문장으로 말하고 해제 가능하며 남의 org id는 매치 0. **그리고 렌더해 보고 찾은 결함 하나 — 업무도
+scope된다**: record만 좁히면 「미답변 문의 1」을 누른 판매자가 **다른 상품 21건이 첫 섹션인** 페이지에
+도착하고 원하던 행은 **1,900px 아래**였다 ⇒ 이미 읽은 행을 필터(두 번째 쿼리 0), 헤딩은 「이 상품의 지금
+처리할 일」, **문 뒤 페이지 1,947px → 900px**(세 폭 모두 뷰포트 안). exact 문의는 라우트·`InboxDetail`
+무변경(side panel 0 · 두 번째 detail surface 0 · 행별 확장 0)이고 **현재 페이지에 없는 deep link는
+`?inquiryId=`로 같은 술어를 통해 1회 색인 조회**(500행을 들고 있던 이유가 사라졌다). Chat continuity:
+런타임 링크 무변경이고 `workItemId`가 큐·기록·링크된 행 어디서든 풀리면 실리므로 「이 문의」는 scope할 수
+있을 때만 약속하며, standalone chat 복제 **0** · `conversationWriteFence`·승인 경계 무변경 · **write 0**.
+**§6 Knowledge gap 상태**: 정확한 gap에 답해 candidate가 ACCEPTED됐는데 재생성된 초안이 아직 그 지식을
+쓰지 못하면 화면이 **「답변 기준이 필요합니다」를 다시** 말했다 — 그 사실은 **이미 있었고 삼켜지고
+있었다**(`noteGap`은 같은 identity로 이미 ACCEPTED면 null을 주는데 composer가 그것을 「할 말 없음」으로
+읽었다) ⇒ `alreadyAnswered`(filed 0인 경로에서만 쿼리 1회)를 읽어 **「답변 기준은 추가하셨습니다 / 다만 이
+질문에 그대로 적용할 수 있는 내용은 아직 찾지 못했습니다」**로 가르고 출구는 「답변 기준 더 채우기」로
+유지(더 채우는 것이 다음 걸음이고, 멈추는 것은 이미 준 것을 다시 요구하는 일이다); **identity only ·
+resemblance 0**이고 reload는 주장하지 않는다(저장된 행은 결정을 적지 받은함 상태를 적지 않는다).
+retrieval·threshold·scorer·Knowledge model **무변경**. 브라우저 QA 1440/1366/1152 — `/inquiries`
+**7,100 → 5,536px**, doorway **900px**, **AA 위반 3폭 전부 0** · 가로 스크롤 0 · off-host 0, click path는
+상품 → 「미답변 문의 1 ›」 → scope된 페이지(두 섹션 다 fold 위) → 행 → 상세로 **클릭 2회 · 스크롤 0**.
+**함께 찾아 고친 semantic defect 셋**: 큐 행의 `snippet`이 wire에는 있는데 FE 타입에 없어 고객 문장 대신
+(scope된 페이지에서 모든 행이 공유하는) 상품명으로 행 제목을 달 뻔한 것, doorway 착지(위), 그리고 모든
+Spring context 기동을 실패시켰을 **JPQL 절 중복**(컴파일되는 종류의 편집이라 기록한다). backend **3,786** ·
+collector **9,417** · runtime **835** · frontend **2,708** · 실패 0. **마켓플레이스 호출 0 · WRITE 0 ·
+모델 호출 0 · 승인 0 · 마이그레이션 1**(V93) ⇒ evidence 행 없음. **계약이 바뀌어 `CustomerInbox.test`를
+다시 썼다**(옛 단언은 client-side 필터 rail · 단일 목록 · mixed 모드에 대한 것이었고, 여전히 참인 것은
+전부 단언한다: 행을 고르기 전에는 목록이 화면 · deep link가 그 행을 연다 · work item이 풀릴 때만 응답
+워크플로 · 기본 자세에서 전송 0 · 빈 상태와 실패 상태 구분); **안전 테스트 약화 0**. **정직 보고**:
+`ReviewReplyTemplates.test`가 전체 실행 1회에서 실패하고 단독·재실행에서 통과했다(이 패키지가 건드리지
+않은 파일, 조사하지 않음). **고치지 않고 보고**: `/inquiries` 5,536px은 큐 21건이 전부 실제 업무라 백로그의
+길이이지 레이아웃 결함이 아니다 · 기록 50행에 「더 보기」 없음(찾기에는 맞고 훑기에는 아니다) · 상품의
+리뷰·문제 근거 figure는 여전히 평범한 타일(`/reviews`에 상품 필터가 없고 issue-evidence에 상품 scope
+라우트가 없어 오늘 정직한 문을 만들 수 없다 — 백엔드 읽기가 필요하다) · Orders/Reports 무변경 · 설정 아래
+메모리·리포트 · `MockDataSeeder`의 8 상품 44 리뷰는 `DEMO_SEED`로 남는다)
+
 **`docs/operational_workspace_ux_v1.md`** (Operational Workspace UX System v1 — 2026-09-04.
 페이지별 cosmetic redesign이 아니라 **정보 구조 · 상태 표현 · 행동 문법**을 한 제품으로 정리한다. Calm
 Operational Assistant 시각 방향 · 새 design system · 새 색 · 새 taxonomy · retrieval · approval **전부

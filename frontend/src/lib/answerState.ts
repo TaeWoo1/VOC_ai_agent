@@ -53,6 +53,13 @@ export interface AnswerStateView {
    * happened to create.
    */
   candidateId: string | null;
+  /**
+   * The seller already answered this exact ask, and the draft still cannot use it.
+   *
+   * Read from the gap, not inferred from `candidateId` being null — that is null for several
+   * reasons, and only one of them is 「이미 답하셨습니다」.
+   */
+  previouslyAnswered: boolean;
 }
 
 /**
@@ -74,6 +81,7 @@ export function answerStateOf(generated: GeneratedDraftView): AnswerStateView | 
     gapScope: generated.productId ? "PRODUCT" : topic ? "ORG" : null,
     topic,
     candidateId: gap?.candidateId ?? null,
+    previouslyAnswered: gap?.previouslyAnswered === true,
   };
 }
 

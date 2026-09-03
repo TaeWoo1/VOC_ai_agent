@@ -5,20 +5,37 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { CustomerInbox } from "./CustomerInbox";
 import { expectNoAxeViolations } from "../../test/axe";
-import type { FeedItem } from "../../lib/types";
+import type { InquiryQueueItem, InquiryRowItem } from "../../lib/types";
 
-const getInboxStrict = vi.fn();
+/**
+ * 문의 — 지금 처리할 일, then 전체 문의 (Inquiry Operations Workspace v1).
+ *
+ * <b>CONTRACT CHANGED, and this file was rewritten for it.</b> The screen used to make ONE read — the
+ * inbox feed at `limit=500` — and render every row it got in a single column, filtering and ordering
+ * on the client. On the demo org that was 94 rows and 7,100px with no way to search; a seller with
+ * three thousand inquiries would have been handed three thousand rows. The old assertions were about
+ * that shape: a client-side 인박스 필터 rail, a single 문의 목록, and a mixed 문의+리뷰 mode no route
+ * had passed since product assembly A2.
+ *
+ * Everything those tests protected that is still true is asserted below — the list is the screen
+ * until a row is chosen, a deep link opens its row, the response workflow appears only when a work
+ * item resolves, nothing offers a send on the default posture, empty and failed states are told
+ * apart. What is new is the split itself, and the two properties it rests on: the queue's membership
+ * comes from the WORK QUEUE read, and the record's filters are the server's.
+ */
+
 const getItemAnalysisStrict = vi.fn();
 const getInquiryQueueStrict = vi.fn();
+const getInquiryRowsStrict = vi.fn();
 const getInquiryDetailStrict = vi.fn();
 const generateInquiryProposal = vi.fn();
 const getInquiryPublishCapability = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
-    getInboxStrict: () => getInboxStrict(),
     getItemAnalysisStrict: () => getItemAnalysisStrict(),
     getInquiryQueueStrict: (params: unknown) => getInquiryQueueStrict(params),
+    getInquiryRowsStrict: (params: unknown) => getInquiryRowsStrict(params),
     getInquiryDetailStrict: (id: string) => getInquiryDetailStrict(id),
     generateInquiryProposal: (id: string) => generateInquiryProposal(id),
     getInquiryPublishCapability: () => getInquiryPublishCapability(),
@@ -26,48 +43,74 @@ vi.mock("../../lib/apiClient", () => ({
   getToken: () => null,
 }));
 
-function feedItem(over: Partial<FeedItem> & Pick<FeedItem, "id" | "type">): FeedItem {
+function row(over: Partial<InquiryRowItem> & Pick<InquiryRowItem, "inquiryId">): InquiryRowItem {
   return {
-    channelNameKo: "채널 가",
-    productName: "상품",
-    snippet: "내용",
-    rating: null,
-    status: "NORMAL",
+    workItemId: null,
+    sellerAccountId: "s1",
+    channelId: "c1",
+    channelCode: "CAFE24",
+    channelNameKo: "카페24 자사몰",
+    productId: null,
+    productName: null,
+    phase: null,
+    status: "ANSWERED",
+    title: "제목",
+    snippet: "고객이 쓴 문장",
     receivedAt: "2026-08-03T10:00:00Z",
+    answeredAt: null,
+    sourceSubtype: null,
+    executableIdentity: "NONE",
     ...over,
-  } as FeedItem;
+  };
 }
 
-const ITEMS = [
-  feedItem({ id: "i1", type: "INQUIRY", status: "UNANSWERED", productName: "케이블 몰딩" }),
-  feedItem({
-    id: "r1",
-    type: "REVIEW",
-    status: "NEGATIVE",
-    rating: 1,
-    productName: "바닥 몰딩",
-    snippet: "접착력이 약합니다",
-    channelNameKo: "채널 나",
-  }),
-];
+function queued(over: Partial<InquiryQueueItem> & Pick<InquiryQueueItem, "workItemId" | "inquiryId">): InquiryQueueItem {
+  return {
+    sellerAccountId: "s1",
+    channelId: "c1",
+    channelCode: "CAFE24",
+    channelNameKo: "카페24 자사몰",
+    productId: null,
+    productName: null,
+    phase: "OPEN",
+    status: "UNANSWERED",
+    title: "제목",
+    snippet: "답을 기다리는 문장",
+    receivedAt: "2026-08-01T10:00:00Z",
+    hasDraft: false,
+    ...over,
+  };
+}
 
-function renderInbox(path = "/inbox") {
+/**
+ * The queue is read once per phase of `AWAITING_SELLER`, so a fixture has to answer per phase — a mock
+ * that returns the same rows twice would silently double the section and hide the ordering rule.
+ */
+function queueOf(rows: InquiryQueueItem[]) {
+  return ({ phase }: { phase?: string }) =>
+    Promise.resolve({ content: rows.filter((r) => r.phase === phase) });
+}
+
+function renderInbox(path = "/inquiries") {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/inbox" element={<CustomerInbox />} />
-        <Route path="/inbox/:itemRef" element={<CustomerInbox />} />
-        <Route path="/inquiries" element={<CustomerInbox scope="INQUIRY" />} />
-        <Route path="/inquiries/:itemRef" element={<CustomerInbox scope="INQUIRY" />} />
+        <Route path="/inquiries" element={<CustomerInbox />} />
+        <Route path="/inquiries/:itemRef" element={<CustomerInbox />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
+const RECORD = [
+  row({ inquiryId: "i1", status: "UNANSWERED", productName: "케이블 몰딩", snippet: "폭이 몇 mm인가요" }),
+  row({ inquiryId: "i2", snippet: "잘 받았습니다", channelCode: "NAVER", channelNameKo: "네이버 스마트스토어" }),
+];
+
 beforeEach(() => {
-  getInboxStrict.mockResolvedValue({ items: ITEMS, total: ITEMS.length, unansweredInquiries: 1 });
   getItemAnalysisStrict.mockResolvedValue([]);
   getInquiryQueueStrict.mockResolvedValue({ content: [] });
+  getInquiryRowsStrict.mockResolvedValue({ items: RECORD, totalCount: RECORD.length, limit: 50, productId: null });
   getInquiryDetailStrict.mockResolvedValue({
     workItemId: "w1",
     inquiryId: "i1",
@@ -86,8 +129,7 @@ beforeEach(() => {
     draft: null,
   });
   // The DEFAULT deployment posture: the send path is off and no channel has a reply adapter. Every
-  // assertion below about "never offers to send" is therefore about the real default, not a mock
-  // convenience — the send only appears when the backend says BOTH are true.
+  // assertion below about "never offers to send" is therefore about the real default.
   getInquiryPublishCapability.mockResolvedValue({ executionEnabled: false, replyAdapterChannelCodes: [] });
 });
 
@@ -95,164 +137,235 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("고객 인박스 — the list is the screen until a row is chosen", () => {
-  it("renders the list and the filters, and NO placeholder pane", async () => {
+describe("지금 처리할 일 — the work queue, from the queue read", () => {
+  it("is the WORK QUEUE, not a slice of the record: it renders what the queue read returned", async () => {
+    getInquiryQueueStrict.mockImplementation(queueOf([queued({ workItemId: "w1", inquiryId: "i1" })]));
     renderInbox();
-    expect(await screen.findByLabelText("인박스 필터")).toBeInTheDocument();
-    expect(screen.getByLabelText("고객 문의·리뷰 목록")).toBeInTheDocument();
-    // With nothing chosen there is no third pane. It used to hold 「왼쪽 목록에서 항목을 고르면 …」 —
-    // forty per cent of a 1440px screen spent explaining the screen instead of showing the work.
-    expect(screen.queryByText(/왼쪽 목록에서 항목을 고르면/)).toBeNull();
+
+    const queue = await screen.findByLabelText("지금 처리할 일");
+    expect(within(queue).getAllByRole("link")).toHaveLength(1);
+    expect(within(queue).getByRole("link")).toHaveAttribute("href", "/inquiries/i1");
+    // Both phases of AWAITING_SELLER are asked for; nothing about membership is decided on screen.
+    expect(getInquiryQueueStrict).toHaveBeenCalledWith(expect.objectContaining({ phase: "OPEN" }));
+    expect(getInquiryQueueStrict).toHaveBeenCalledWith(expect.objectContaining({ phase: "PROPOSED" }));
   });
 
-  it("orders the list worst-first", async () => {
+  it("초안 준비됨 needs a draft — a queued row without one is 답변 필요", async () => {
+    getInquiryQueueStrict.mockImplementation(
+      queueOf([
+        queued({ workItemId: "w1", inquiryId: "i1", phase: "PROPOSED", hasDraft: false }),
+        queued({ workItemId: "w2", inquiryId: "i2", phase: "PROPOSED", hasDraft: true, receivedAt: "2026-08-02T10:00:00Z" }),
+      ]),
+    );
     renderInbox();
-    const list = await screen.findByLabelText("고객 문의·리뷰 목록");
-    const links = within(list).getAllByRole("link");
-    expect(links[0]).toHaveAttribute("href", "/inbox/i1");
+
+    const queue = await screen.findByLabelText("지금 처리할 일");
+    const items = within(queue).getAllByRole("listitem").map((li) => li.textContent ?? "");
+    expect(items[0]).toContain("답변 필요");
+    expect(items[1]).toContain("초안 준비됨");
   });
 
-  it("builds the channel filter from the loaded rows only", async () => {
+  it("longest-waiting first WITHIN recent work — but a decade-old row does not bury this week's", async () => {
+    getInquiryQueueStrict.mockImplementation(
+      queueOf([
+        queued({ workItemId: "w-newest", inquiryId: "newest", receivedAt: new Date(Date.now() - 3_600_000).toISOString() }),
+        queued({ workItemId: "w-ancient", inquiryId: "ancient", receivedAt: "2014-01-04T10:00:00Z" }),
+        queued({ workItemId: "w-week", inquiryId: "week", receivedAt: new Date(Date.now() - 7 * 86_400_000).toISOString() }),
+      ]),
+    );
     renderInbox();
-    const rail = await screen.findByLabelText("인박스 필터");
-    expect(within(rail).getByRole("button", { name: /채널 가/ })).toBeInTheDocument();
-    expect(within(rail).getByRole("button", { name: /채널 나/ })).toBeInTheDocument();
+
+    const queue = await screen.findByLabelText("지금 처리할 일");
+    const hrefs = within(queue).getAllByRole("link").map((a) => a.getAttribute("href"));
+    // Recent work, longest-waiting first; then the year-plus backlog under its own divider.
+    expect(hrefs).toEqual(["/inquiries/week", "/inquiries/newest", "/inquiries/ancient"]);
+    // The divider says what the group is and is not itself a heading or a control.
+    const divider = within(queue).getByText(/1년 넘게 지난 문의 1건/);
+    expect(divider).toHaveAttribute("aria-hidden", "true");
+    expect(divider.closest("a")).toBeNull();
   });
 
-  it("narrows the list when a state filter is chosen", async () => {
-    const user = userEvent.setup();
+  it("renders no section at all when nothing is waiting — never 「0건」", async () => {
     renderInbox();
-    const rail = await screen.findByLabelText("인박스 필터");
-    await user.click(within(rail).getByRole("button", { name: "답변 필요" }));
-    const list = screen.getByLabelText("고객 문의·리뷰 목록");
-    expect(within(list).getAllByRole("link")).toHaveLength(1);
+    await screen.findByLabelText("전체 문의");
+    expect(screen.queryByLabelText("지금 처리할 일")).toBeNull();
+  });
+
+  it("a queue read that FAILED says so — an unread queue is not an empty one", async () => {
+    getInquiryQueueStrict.mockRejectedValue(new Error("down"));
+    renderInbox();
+    expect(await screen.findByText(/지금 처리할 일을 불러오지 못했습니다/)).toBeInTheDocument();
+    // The record is a separate read and is unaffected.
+    expect(screen.getByLabelText("전체 문의")).toBeInTheDocument();
   });
 });
 
-describe("문의 — the inbox scoped to inquiries (/inquiries)", () => {
-  it("shows only inquiries, drops the type filter, and keeps links under /inquiries", async () => {
-    renderInbox("/inquiries");
-    expect(await screen.findByRole("heading", { level: 1, name: "문의" })).toBeInTheDocument();
-    const rail = screen.getByLabelText("인박스 필터");
-    expect(within(rail).queryByText("유형")).toBeNull();
-    // Only the inquiry's channel is offered — the review row is not in play on this surface.
-    expect(within(rail).getByRole("button", { name: /채널 가/ })).toBeInTheDocument();
-    expect(within(rail).queryByRole("button", { name: /채널 나/ })).toBeNull();
-    const list = screen.getByLabelText("문의 목록");
-    const links = within(list).getAllByRole("link");
-    expect(links).toHaveLength(1);
-    expect(links[0]).toHaveAttribute("href", "/inquiries/i1");
-    // A single-kind surface does not repeat its own name on every row (A7).
-    expect(within(list).queryByText("문의")).toBeNull();
+describe("전체 문의 — the record, filtered by the server", () => {
+  it("is one bounded page with the whole set's count, and says when there is more behind it", async () => {
+    getInquiryRowsStrict.mockResolvedValue({ items: RECORD, totalCount: 3120, limit: 50, productId: null });
+    renderInbox();
+    await screen.findByLabelText("전체 문의");
+    expect(screen.getByText(/최근 2건을 보여 드립니다/)).toBeInTheDocument();
+    expect(getInquiryRowsStrict).toHaveBeenCalledWith(expect.objectContaining({ limit: 50 }));
   });
 
-  it("opens an inquiry deep link and offers the response workflow", async () => {
-    getInquiryQueueStrict.mockResolvedValue({ content: [{ inquiryId: "i1", workItemId: "w1" }] });
-    renderInbox("/inquiries/i1");
-    expect(await screen.findByText("폭이 몇 mm인가요")).toBeInTheDocument();
+  it("a page that holds everything says nothing about more", async () => {
+    renderInbox();
+    await screen.findByLabelText("전체 문의");
+    expect(screen.queryByText(/보여 드립니다/)).toBeNull();
   });
 
-  it("?state=NEEDS_REPLY lands filtered to exactly the rows the home counted, keeps the filter on row links, and prints the server count", async () => {
-    getInboxStrict.mockResolvedValue({
-      items: [ITEMS[0], feedItem({ id: "i2", type: "INQUIRY", status: "ANSWERED", productName: "답변한 문의" })],
-      total: 2,
-      unansweredInquiries: 1,
-    });
-    renderInbox("/inquiries?state=NEEDS_REPLY");
-    const list = await screen.findByLabelText("문의 목록");
-    const links = within(list).getAllByRole("link");
-    expect(links).toHaveLength(1);
-    expect(links[0]).toHaveAttribute("href", "/inquiries/i1?state=NEEDS_REPLY");
-    const rail = screen.getByLabelText("인박스 필터");
-    expect(within(rail).getByRole("button", { name: "답변 필요" })).toHaveAttribute("aria-pressed", "true");
-    // Workflow order on the 문의 surface, and no review-only 확인 필요 option.
-    const stateRow = within(rail).getByRole("group", { name: "상태" });
-    expect(within(stateRow).getAllByRole("button").map((b) => b.textContent)).toEqual(["답변 필요", "답변함", "전체"]);
-    expect(screen.getByText(/지금 답변이 필요한 문의/)).toHaveTextContent("1");
-    // 문의 reads inquiries only, up to the ceiling.
-    expect(getInboxStrict).toHaveBeenCalled();
-  });
-
-  it("a rail press rewrites ?state, and an unknown state is scrubbed from the URL", async () => {
+  it("the search box narrows the SERVER read, not the loaded rows", async () => {
     const user = userEvent.setup();
-    renderInbox("/inquiries?state=NOPE");
-    const rail = await screen.findByLabelText("인박스 필터");
-    // Unknown state → treated as 전체 (and scrubbed), so the list is unfiltered.
-    const stateRow = within(rail).getByRole("group", { name: "상태" });
-    expect(within(stateRow).getByRole("button", { name: "전체" })).toHaveAttribute("aria-pressed", "true");
-    await user.click(within(rail).getByRole("button", { name: "답변함" }));
-    expect(within(rail).getByRole("button", { name: "답변함" })).toHaveAttribute("aria-pressed", "true");
-    // Nothing is answered in the fixture: the filtered-empty line, not the empty-record one.
-    expect(screen.getByText("선택한 조건에 해당하는 항목이 없습니다.")).toBeInTheDocument();
-    await user.click(within(rail).getByRole("button", { name: "답변 필요" }));
-    const list = screen.getByLabelText("문의 목록");
-    expect(within(list).getAllByRole("link")[0]).toHaveAttribute("href", "/inquiries/i1?state=NEEDS_REPLY");
+    renderInbox();
+    await screen.findByLabelText("전체 문의");
+    await user.type(screen.getByLabelText("문의 내용 검색"), "세금계산서{Enter}");
+    expect(getInquiryRowsStrict).toHaveBeenLastCalledWith(expect.objectContaining({ q: "세금계산서" }));
   });
 
-  it("says 문의 in its empty state", async () => {
-    getInboxStrict.mockResolvedValue({ items: [ITEMS[1]], total: 1, unansweredInquiries: 0 });
-    renderInbox("/inquiries");
+  it("답변 상태 and 채널 are the server's too", async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    await screen.findByLabelText("전체 문의");
+    await user.selectOptions(screen.getByLabelText("답변 상태"), "UNANSWERED");
+    expect(getInquiryRowsStrict).toHaveBeenLastCalledWith(expect.objectContaining({ status: "UNANSWERED" }));
+    await user.selectOptions(screen.getByLabelText("채널"), "NAVER");
+    expect(getInquiryRowsStrict).toHaveBeenLastCalledWith(expect.objectContaining({ channel: "NAVER" }));
+  });
+
+  it("an answered row is quieter than the work above it, and still readable", async () => {
+    renderInbox();
+    const record = await screen.findByLabelText("전체 문의");
+    expect(within(record).getByText("잘 받았습니다")).toBeInTheDocument();
+  });
+
+  it("tells 「찾는 게 없다」 and 「아무것도 없다」 apart", async () => {
+    getInquiryRowsStrict.mockResolvedValue({ items: [], totalCount: 0, limit: 50, productId: null });
+    const { unmount } = renderInbox();
     expect(await screen.findByText("아직 들어온 문의가 없습니다")).toBeInTheDocument();
+    unmount();
+
+    renderInbox("/inquiries?q=없는말");
+    expect(await screen.findByText("찾는 문의가 없습니다")).toBeInTheDocument();
+  });
+
+  it("says the read failed rather than showing an empty record", async () => {
+    getInquiryRowsStrict.mockRejectedValue(new Error("down"));
+    renderInbox();
+    expect(await screen.findByText("문의를 불러오지 못했습니다")).toBeInTheDocument();
   });
 });
 
-describe("고객 인박스 — deep link", () => {
-  it("opens the requested row", async () => {
-    renderInbox("/inbox/r1");
-    const detail = await screen.findByLabelText("선택한 항목");
-    expect(within(detail).getByRole("heading", { level: 2 })).toHaveTextContent("바닥 몰딩");
-    expect(within(detail).getByText("접착력이 약합니다")).toBeInTheDocument();
+describe("상품 → 문의 doorway", () => {
+  it("?productId narrows the SAME read the product's number was counted with, and says which product", async () => {
+    getInquiryRowsStrict.mockResolvedValue({
+      items: [row({ inquiryId: "i1", status: "UNANSWERED", productId: "p1", productName: "케이블 몰딩" })],
+      totalCount: 1,
+      limit: 50,
+      productId: "p1",
+    });
+    renderInbox("/inquiries?productId=p1&status=UNANSWERED");
+    await screen.findByLabelText("전체 문의");
+
+    expect(getInquiryRowsStrict).toHaveBeenCalledWith(
+      expect.objectContaining({ productId: "p1", status: "UNANSWERED" }),
+    );
+    const scope = screen.getByTestId("record-product-scope");
+    expect(scope).toHaveTextContent("케이블 몰딩");
   });
 
-  it("labels a review's text as an excerpt, never as the full original", async () => {
-    renderInbox("/inbox/r1");
-    const detail = await screen.findByLabelText("선택한 항목");
-    // The feed carries a snippet and nothing more; calling it 원문 would tell the seller they had
-    // read the whole review.
-    expect(within(detail).getByText("리뷰 발췌")).toBeInTheDocument();
-    expect(within(detail).queryByText("리뷰 원문")).toBeNull();
+  it("the WORK is scoped too — a doorway must not land the seller above 21 other products' items", async () => {
+    getInquiryQueueStrict.mockImplementation(
+      queueOf([
+        queued({ workItemId: "w-mine", inquiryId: "mine", productId: "p1", productName: "케이블 몰딩" }),
+        queued({ workItemId: "w-other", inquiryId: "other", productId: "p2", productName: "다른 상품" }),
+        queued({ workItemId: "w-none", inquiryId: "none" }),
+      ]),
+    );
+    getInquiryRowsStrict.mockResolvedValue({
+      items: [row({ inquiryId: "mine", status: "UNANSWERED", productId: "p1", productName: "케이블 몰딩" })],
+      totalCount: 1,
+      limit: 50,
+      productId: "p1",
+    });
+    renderInbox("/inquiries?productId=p1");
+
+    const queue = await screen.findByLabelText("이 상품의 지금 처리할 일");
+    const hrefs = within(queue).getAllByRole("link").map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual(["/inquiries/mine"]);
+    // Scoped from rows already read — the queue is not asked a second time for the product.
+    expect(getInquiryQueueStrict).toHaveBeenCalledTimes(2);
   });
 
-  it("says so honestly when the requested row is not loaded", async () => {
-    renderInbox("/inbox/does-not-exist");
-    expect(await screen.findByText("항목을 찾을 수 없습니다")).toBeInTheDocument();
-    expect(screen.getByText(/목록에서 다시 선택해 주세요/)).toBeInTheDocument();
-  });
-
-  it("resolves a row the active filters would have hidden", async () => {
-    // Deep links are shared; a filter the recipient happens to have set must not blank the page.
-    renderInbox("/inbox/r1");
-    expect(await screen.findByLabelText("선택한 항목")).toBeInTheDocument();
+  it("the scope can be cleared, and clearing it re-reads without the product", async () => {
+    const user = userEvent.setup();
+    getInquiryRowsStrict.mockResolvedValue({
+      items: [row({ inquiryId: "i1", productId: "p1", productName: "케이블 몰딩" })],
+      totalCount: 1,
+      limit: 50,
+      productId: "p1",
+    });
+    renderInbox("/inquiries?productId=p1");
+    await screen.findByTestId("record-product-scope");
+    await user.click(screen.getByRole("button", { name: "전체 문의 보기" }));
+    expect(getInquiryRowsStrict).toHaveBeenLastCalledWith(expect.not.objectContaining({ productId: "p1" }));
   });
 });
 
-describe("고객 인박스 — response workflow", () => {
+describe("deep link and the exact inquiry", () => {
+  it("opens the requested row from the page it is already on", async () => {
+    renderInbox("/inquiries/i1");
+    const detail = await screen.findByLabelText("선택한 항목");
+    // The rail beside it shows the same row, so this asserts the DETAIL holds it, not that it is unique.
+    expect(within(detail).getAllByText("폭이 몇 mm인가요").length).toBeGreaterThan(0);
+  });
+
+  it("a link naming a row the page does not hold is fetched by id — one exact read", async () => {
+    getInquiryRowsStrict.mockImplementation((params: { inquiryId?: string }) =>
+      Promise.resolve(
+        params?.inquiryId === "elsewhere"
+          ? { items: [row({ inquiryId: "elsewhere", snippet: "다른 페이지의 문의" })], totalCount: 1, limit: 1, productId: null }
+          : { items: RECORD, totalCount: RECORD.length, limit: 50, productId: null },
+      ),
+    );
+    renderInbox("/inquiries/elsewhere");
+    const detail = await screen.findByLabelText("선택한 항목");
+    expect(within(detail).getAllByText("다른 페이지의 문의").length).toBeGreaterThan(0);
+    expect(getInquiryRowsStrict).toHaveBeenCalledWith(expect.objectContaining({ inquiryId: "elsewhere" }));
+  });
+
+  it("says so honestly when the row cannot be found at all", async () => {
+    getInquiryRowsStrict.mockImplementation((params: { inquiryId?: string }) =>
+      Promise.resolve(
+        params?.inquiryId
+          ? { items: [], totalCount: 0, limit: 1, productId: null }
+          : { items: RECORD, totalCount: RECORD.length, limit: 50, productId: null },
+      ),
+    );
+    renderInbox("/inquiries/does-not-exist");
+    expect(await screen.findByText("문의를 찾을 수 없습니다")).toBeInTheDocument();
+  });
+});
+
+describe("response workflow", () => {
   it("shows no response panel when no work item resolves", async () => {
-    renderInbox("/inbox/i1");
+    renderInbox("/inquiries/i1");
     await screen.findByLabelText("선택한 항목");
     expect(screen.queryByText("응답 제안")).toBeNull();
     expect(screen.getByText(/답변 방향을 제안할 수 없습니다/)).toBeInTheDocument();
   });
 
   it("shows the customer's question and offers to draft an answer", async () => {
-    getInquiryQueueStrict.mockResolvedValue({
-      content: [{ workItemId: "w1", inquiryId: "i1", phase: "OPEN" }],
-    });
-    renderInbox("/inbox/i1");
+    getInquiryQueueStrict.mockImplementation(queueOf([queued({ workItemId: "w1", inquiryId: "i1" })]));
+    renderInbox("/inquiries/i1");
     expect(await screen.findByText("고객 문의")).toBeInTheDocument();
     expect(screen.getByText("굵은 전선도 들어가나요?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /초안 만들기/ })).toBeInTheDocument();
   });
 
   it("offers no send on the default posture, and never implies one happens by itself", async () => {
-    // Inquiry Action Flow v1 CAN send — after an explicit approval, on a channel that has a
-    // transport, in a deployment where execution is on. None of those hold here, so the assertion is
-    // no longer "this product never sends" but the sharper one: nothing is offered that was not
-    // earned. A send control appearing under this posture would be the defect.
-    getInquiryQueueStrict.mockResolvedValue({
-      content: [{ workItemId: "w1", inquiryId: "i1", phase: "OPEN" }],
-    });
-    renderInbox("/inbox/i1");
+    getInquiryQueueStrict.mockImplementation(queueOf([queued({ workItemId: "w1", inquiryId: "i1" })]));
+    renderInbox("/inquiries/i1");
     await screen.findByText("고객 문의");
     const text = document.body.textContent ?? "";
     for (const banned of ["자동 발송", "대신 답변", "즉시 전송", "바로 보내기"]) {
@@ -263,32 +376,17 @@ describe("고객 인박스 — response workflow", () => {
   });
 
   it("says what a draft is for before it is written — reviewed, then sent on purpose", async () => {
-    getInquiryQueueStrict.mockResolvedValue({
-      content: [{ workItemId: "w1", inquiryId: "i1", phase: "OPEN" }],
-    });
-    renderInbox("/inbox/i1");
+    getInquiryQueueStrict.mockImplementation(queueOf([queued({ workItemId: "w1", inquiryId: "i1" })]));
+    renderInbox("/inquiries/i1");
     await screen.findByText("고객 문의");
     expect(screen.getByText(/보내는 것은 확인 후 따로 누릅니다/)).toBeInTheDocument();
   });
 });
 
-describe("고객 인박스 — empty and failed states", () => {
-  it("invites a connection when nothing has arrived", async () => {
-    getInboxStrict.mockResolvedValue({ items: [], total: 0, unansweredInquiries: 0 });
-    renderInbox();
-    expect(await screen.findByText("아직 들어온 문의와 리뷰가 없습니다")).toBeInTheDocument();
-  });
-
-  it("says the read failed rather than showing an empty queue", async () => {
-    getInboxStrict.mockRejectedValue(new Error("down"));
-    renderInbox();
-    expect(await screen.findByText("목록을 불러오지 못했습니다")).toBeInTheDocument();
-  });
-});
-
-describe("고객 인박스 — accessibility", () => {
-  it("has no axe violations", async () => {
-    const { container } = renderInbox("/inbox/r1");
+describe("accessibility", () => {
+  it("has no axe violations with a row open", async () => {
+    getInquiryQueueStrict.mockImplementation(queueOf([queued({ workItemId: "w1", inquiryId: "i1" })]));
+    const { container } = renderInbox("/inquiries/i1");
     await screen.findByLabelText("선택한 항목");
     await expectNoAxeViolations(container);
   });
