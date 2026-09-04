@@ -12,12 +12,22 @@ import com.sellerops.coverage.ChannelDataState;
  * rule is one sentence and it lives in the service: a channel is counted when its collection is
  * provably current, or when it actually contributed rows we hold. A channel that is merely silent —
  * disconnected, blocked, unsupported — is NOT counted and NOT drawn as a zero.
+ *
+ * <p><b>{@code countedInUnansweredNow} is a second verdict for a second question, and it has to be.</b>
+ * Every other figure on this row is a window figure — what arrived between two dates. 미답변 is not:
+ * it is the backlog standing right now, and this screen's own caption says so
+ * (「현재 미답변」은 기간과 무관한 지금 수치). Asking the window question about it produced the defect this
+ * field exists to close: a channel that received nothing this week had its whole standing backlog
+ * dropped from the headline, so 운영 숫자 said 미답변 1 while 문의 and 리포트 said 22 for the same
+ * words. The rule is not relaxed — it is asked with the operand it was written for: rows we hold,
+ * not rows that arrived.
  */
 public record ChannelMetricRow(String channelCode, String channelNameKo,
                                ChannelDataState orderState, long revenue, long orders,
                                boolean countedInOrders,
                                ChannelDataState inquiryState, long inquiries, long unansweredInquiries,
                                boolean countedInInquiries,
+                               boolean countedInUnansweredNow,
                                ChannelDataState reviewState, long reviews, long negativeReviews,
                                boolean countedInReviews) {
 }

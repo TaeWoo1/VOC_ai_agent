@@ -62,8 +62,15 @@ export function reviewDetailPath(accountId: string, reviewId: string): string {
   return `${reviewRecordPath(accountId)}?review=${encodeURIComponent(reviewId)}`;
 }
 
-/** The 문의 destination that shows exactly the 답변 필요 rows. */
-export const INQUIRY_NEEDS_REPLY_PATH = "/inquiries?state=NEEDS_REPLY";
+/**
+ * The 문의 destination that shows exactly the 답변 필요 rows.
+ *
+ * <b>It is `status`, not `state`.</b> This constant spelled `?state=NEEDS_REPLY` — a parameter no
+ * screen has ever read — so every figure that used it (홈's brief, 리포트's 「답변이 필요한 문의 22건」)
+ * opened the whole record and left the seller to find the 22 among 94. The record's own axis is
+ * `status`, and `UNANSWERED` is the value whose `totalCount` is that same 22.
+ */
+export const INQUIRY_NEEDS_REPLY_PATH = "/inquiries?status=UNANSWERED";
 
 /** One account's read for the home: the page under `tier=NEEDS_ATTENTION`, or null when it failed. */
 export interface ReviewSource {
@@ -141,7 +148,7 @@ export function buildReviewToday(sources: readonly ReviewSource[] | null): Today
  *
  * `feed` is null when the read failed. The count is the server's own `unansweredInquiries` —
  * counted over the whole org, never over the capped rows — which is the number /inquiries prints
- * and whose rows its NEEDS_REPLY filter lists; so the headline is always a link. Rows are the
+ * and whose rows its 답변 필요 filter lists; so the headline is always a link. Rows are the
  * worst-first top few of the rows that came back (urgent analysis first, then newest).
  * "Nothing connected" is a feed with no rows and nothing unanswered.
  */

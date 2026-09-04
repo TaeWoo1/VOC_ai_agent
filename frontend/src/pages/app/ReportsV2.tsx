@@ -7,6 +7,7 @@ import { BtnLink } from "../../components/ui/Btn";
 import { api } from "../../lib/apiClient";
 import { useReviewAttention } from "../../hooks/useReviewAttention";
 import { buildWeeklyReport } from "../../lib/reportView";
+import { INQUIRY_NEEDS_REPLY_PATH } from "../../lib/todayInbox";
 import type { TodayBreakdown } from "../../lib/todayInbox";
 import { SEVERITY_LABEL_KO, changeBadges } from "../../lib/reviewIssuesView";
 import type { FeedItem, ItemAnalysis, ReviewIssueView, TopProductIssue } from "../../lib/types";
@@ -45,7 +46,11 @@ function Figure({
     </>
   );
   const box = "block rounded-xl border border-line p-4";
-  if (to) {
+  // Zero is a fact, not a control: a link that opens an empty list is a promise the screen does not
+  // keep. Same rule the product tiles follow (Product Operations Continuity v1 §2). A figure that could
+  // not be READ keeps its way in — "we could not count this" is not "there is nothing there", and the
+  // screen it opens can still answer.
+  if (to && (!available || value > 0)) {
     return (
       <Link
         to={to}
@@ -60,17 +65,27 @@ function Figure({
       {body}
       {shares.length > 0 ? (
         <ul aria-label={`${label} 채널별`} className="mt-3 flex flex-wrap gap-2">
-          {shares.map((share) => (
-            <li key={share.key}>
-              <Link
-                to={share.to}
-                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-canvas px-3 text-sm font-medium text-ink transition hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
-              >
-                {share.label}
-                <span className="tabular-nums text-muted">{share.count}</span>
-              </Link>
-            </li>
-          ))}
+          {shares.map((share) =>
+            share.count > 0 ? (
+              <li key={share.key}>
+                <Link
+                  to={share.to}
+                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-canvas px-3 text-sm font-medium text-ink transition hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+                >
+                  {share.label}
+                  <span className="tabular-nums text-muted">{share.count}</span>
+                </Link>
+              </li>
+            ) : (
+              // A channel with nothing to check is part of the breakdown and is not a destination.
+              <li key={share.key}>
+                <span className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-muted">
+                  {share.label}
+                  <span className="tabular-nums">{share.count}</span>
+                </span>
+              </li>
+            ),
+          )}
         </ul>
       ) : null}
     </div>
@@ -211,13 +226,17 @@ export function ReportsV2() {
         )}
       </Panel>
 
-      <Panel title="확인이 필요한 문의·리뷰">
+      {/* These two are NOT period figures — they are what is standing right now, and the sections above
+          and below them ARE about a window (an issue's change is judged over a recent surge window
+          against an eight-week baseline). Saying so is the same distinction Executive Readiness Fix v1
+          drew on 홈, where 미답변 문의 had no period and was being read as if it had one. */}
+      <Panel title="확인이 필요한 문의·리뷰" description="기간과 무관한 지금 수치입니다.">
         <div className="grid gap-3 sm:grid-cols-2">
           <Figure
             label="답변이 필요한 문의"
             available={report.unansweredInquiries.available}
             value={report.unansweredInquiries.value}
-            to="/inquiries?state=NEEDS_REPLY"
+            to={INQUIRY_NEEDS_REPLY_PATH}
           />
           <Figure
             label="확인이 필요한 리뷰"
@@ -270,17 +289,33 @@ export function ReportsV2() {
           <p className="text-muted">{UNAVAILABLE}</p>
         ) : productIssues.length > 0 ? (
           <ul className="space-y-1">
-            {productIssues.map((row) => (
-              <li
-                key={`${row.productId}-${row.issueLabel}`}
-                className="flex items-baseline justify-between gap-3 break-keep py-1 leading-relaxed"
-              >
-                <span className="text-ink">
-                  {row.productName ?? "이름을 확인할 수 없는 상품"} — {row.issueLabel}
-                </span>
-                <span className="shrink-0 tabular-nums text-muted">{row.count}건</span>
-              </li>
-            ))}
+            {productIssues.map((row) => {
+              // The row already names a product this product has a screen for, and that screen is where
+              // 「이 상품에서 무엇이 반복되나」 is answered. Without the link these were five numbers with
+              // nowhere to go — the shape Product Operations Continuity v1 closed on 상품 상세.
+              const body = (
+                <>
+                  <span className="min-w-0 flex-1 break-keep text-ink">
+                    {row.productName ?? "이름을 확인할 수 없는 상품"} — {row.issueLabel}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-muted">{row.count}건</span>
+                </>
+              );
+              return (
+                <li key={`${row.productId}-${row.issueLabel}`}>
+                  {row.productId ? (
+                    <Link
+                      to={`/products/${row.productId}`}
+                      className="flex items-baseline justify-between gap-3 rounded-xl px-3 py-2 leading-relaxed transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+                    >
+                      {body}
+                    </Link>
+                  ) : (
+                    <span className="flex items-baseline justify-between gap-3 px-3 py-2 leading-relaxed">{body}</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="text-muted">상품별로 몰린 이슈는 확인되지 않았습니다.</p>

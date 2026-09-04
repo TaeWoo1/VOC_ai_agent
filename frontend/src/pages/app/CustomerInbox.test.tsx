@@ -83,12 +83,17 @@ function queued(over: Partial<InquiryQueueItem> & Pick<InquiryQueueItem, "workIt
 }
 
 /**
- * The queue is read once per phase of `AWAITING_SELLER`, so a fixture has to answer per phase — a mock
- * that returns the same rows twice would silently double the section and hide the ordering rule.
+ * ONE read for the whole of `AWAITING_SELLER` — the endpoint's own default (Secondary Workspaces UX
+ * Closure v1 §1). The fixture used to answer per phase because this screen asked twice and joined the
+ * pages itself, which is what let 홈 and 문의 print different numbers under the same noun. A caller that
+ * names a phase here is now the exception, so the fixture refuses one: an unexpected `phase` would mean
+ * the screen went back to deciding membership on its own.
  */
 function queueOf(rows: InquiryQueueItem[]) {
-  return ({ phase }: { phase?: string }) =>
-    Promise.resolve({ content: rows.filter((r) => r.phase === phase) });
+  return (params: { phase?: string } = {}) => {
+    if (params.phase) throw new Error(`the queue is read as one set, not per phase (got ${params.phase})`);
+    return Promise.resolve({ content: rows, totalElements: rows.length });
+  };
 }
 
 function renderInbox(path = "/inquiries") {
@@ -109,7 +114,7 @@ const RECORD = [
 
 beforeEach(() => {
   getItemAnalysisStrict.mockResolvedValue([]);
-  getInquiryQueueStrict.mockResolvedValue({ content: [] });
+  getInquiryQueueStrict.mockResolvedValue({ content: [], totalElements: 0 });
   getInquiryRowsStrict.mockResolvedValue({ items: RECORD, totalCount: RECORD.length, limit: 50, productId: null });
   getInquiryDetailStrict.mockResolvedValue({
     workItemId: "w1",
@@ -145,9 +150,10 @@ describe("지금 처리할 일 — the work queue, from the queue read", () => {
     const queue = await screen.findByLabelText("지금 처리할 일");
     expect(within(queue).getAllByRole("link")).toHaveLength(1);
     expect(within(queue).getByRole("link")).toHaveAttribute("href", "/inquiries/i1");
-    // Both phases of AWAITING_SELLER are asked for; nothing about membership is decided on screen.
-    expect(getInquiryQueueStrict).toHaveBeenCalledWith(expect.objectContaining({ phase: "OPEN" }));
-    expect(getInquiryQueueStrict).toHaveBeenCalledWith(expect.objectContaining({ phase: "PROPOSED" }));
+    // Membership is not decided on screen: the read names no phase, so the server answers with the
+    // set it declared (`InquiryWorkItemPhase.AWAITING_SELLER`).
+    expect(getInquiryQueueStrict).toHaveBeenCalledTimes(1);
+    expect(getInquiryQueueStrict.mock.calls[0][0]).not.toHaveProperty("phase");
   });
 
   it("초안 준비됨 needs a draft — a queued row without one is 답변 필요", async () => {
@@ -311,7 +317,7 @@ describe("상품 → 문의 doorway", () => {
     const hrefs = within(queue).getAllByRole("link").map((a) => a.getAttribute("href"));
     expect(hrefs).toEqual(["/inquiries/mine"]);
     // Scoped from rows already read — the queue is not asked a second time for the product.
-    expect(getInquiryQueueStrict).toHaveBeenCalledTimes(2);
+    expect(getInquiryQueueStrict).toHaveBeenCalledTimes(1);
   });
 
   it("the scope can be cleared, and clearing it re-reads without the product", async () => {

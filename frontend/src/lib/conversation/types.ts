@@ -154,7 +154,8 @@ export interface InquiryItem {
   channelCode: string | null;
   channelNameKo: string | null;
   receivedAt: string;
-  phase: string;
+  /** Null for the same reason `workItemId` is: a record row that carries no work item carries no phase. */
+  phase: string | null;
   status: string;
   title?: string | null;
   /** transient — the bounded, PII-masked opening of the customer's message. Absent on a reloaded thread. */

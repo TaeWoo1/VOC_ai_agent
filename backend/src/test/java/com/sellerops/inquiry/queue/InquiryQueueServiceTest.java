@@ -89,6 +89,42 @@ class InquiryQueueServiceTest {
         assertThat(proposed.totalElements()).isEqualTo(1);
     }
 
+    /**
+     * 「지금 처리할 일」 is {@link InquiryWorkItemPhase#AWAITING_SELLER}, and asking for it must not require
+     * the caller to spell the set.
+     *
+     * <p><b>The defect.</b> The endpoint's unqualified answer used to be {@code OPEN} alone — half of the
+     * declared set — so 홈, which asks it without naming a phase, printed 「지금 처리할 일 11건」 while 문의,
+     * which asked twice and concatenated the pages itself, printed 21 under the same words with a link
+     * from one to the other. Two screens, one noun, two definitions, neither of them the one the product
+     * declared once and said every recommendation surface would read.
+     */
+    @Test
+    @DisplayName("phase를 말하지 않으면 판매자를 기다리는 일 전부 — 그 절반이 아니라")
+    void noPhaseMeansTheWorkWaitingForTheSeller() {
+        UUID org = UUID.randomUUID();
+        UUID acc = UUID.randomUUID();
+        UUID channel = UUID.randomUUID();
+        UUID openId = seed(org, acc, channel, InquiryWorkItemPhase.OPEN, "열린 문의");
+        UUID proposedId = seed(org, acc, channel, InquiryWorkItemPhase.PROPOSED, "제안된 문의");
+        // Past the seller's decision: already inside the execution lane, so not work waiting on them.
+        seed(org, acc, channel, InquiryWorkItemPhase.APPROVED, "승인된 문의");
+
+        InquiryQueueResponse waiting = service.queue(org, InquiryWorkItemPhase.AWAITING_SELLER, 0, 20);
+
+        assertThat(waiting.content()).extracting(InquiryQueueItem::workItemId)
+                .containsExactlyInAnyOrder(openId, proposedId);
+        // One read, one server total — not a client-side sum of two capped pages.
+        assertThat(waiting.totalElements()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("그 집합은 이 파일이 아니라 제품이 선언한다")
+    void theSetIsTheOneTheProductDeclared() {
+        assertThat(InquiryWorkItemPhase.AWAITING_SELLER)
+                .containsExactlyInAnyOrder(InquiryWorkItemPhase.OPEN, InquiryWorkItemPhase.PROPOSED);
+    }
+
     @Test
     void isTenantIsolatedByOrg() {
         UUID orgA = UUID.randomUUID();

@@ -45,7 +45,7 @@ import org.springframework.stereotype.Service;
  * still see everything they saw before; only the actionable queue is narrowed.
  *
  * <p><b>Every narrowing predicate is in the query, not here.</b> Both the REAL/ACTIVE gate and the
- * answered-elsewhere gate are clauses of {@code findOperationalByOrgIdAndPhase}, so the page's
+ * answered-elsewhere gate are clauses of {@code findOperationalByOrgIdAndPhaseIn}, so the page's
  * {@code totalElements} is a count of the rows this method returns. A predicate applied to the
  * fetched page instead would produce a queue that shows 9 and paginates 12 — which is what the
  * answered-elsewhere rule did for one package, and what Chat-first Agent Shell Completion v1 §4
@@ -86,12 +86,29 @@ public class InquiryQueueService {
                 com.sellerops.identity.ExecutableIdentityResolver.unresolved(), null);
     }
 
+    /** One phase. Kept for the callers that mean exactly one — a phase tab is a real question. */
     public InquiryQueueResponse queue(UUID orgId, InquiryWorkItemPhase phase, int page, int size) {
+        return queue(orgId, java.util.Set.of(phase), page, size);
+    }
+
+    /**
+     * The queue over a set of phases — one read, one server total.
+     *
+     * <p><b>Why a set.</b> 「지금 처리할 일」 is {@link InquiryWorkItemPhase#AWAITING_SELLER}, a set this
+     * product declared once and said every recommendation surface would read. No endpoint served it, so
+     * the two screens that print those words each invented their own: 홈 asked for the default single
+     * phase and printed 11, 문의 asked twice and summed the pages client-side and printed 21 — the same
+     * noun, on two screens that link to each other, off by ten. The client sum had a second defect the
+     * live data did not reach: each call is capped at {@link #MAX_PAGE_SIZE}, so a seller with 300 OPEN
+     * items would have read a page subset as a total.
+     */
+    public InquiryQueueResponse queue(UUID orgId, java.util.Set<InquiryWorkItemPhase> phases,
+                                      int page, int size) {
         int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
         int safePage = Math.max(page, 0);
         Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "createdAt"));
 
-        Page<InquiryWorkItem> workItemPage = workItems.findOperationalByOrgIdAndPhase(orgId, phase, pageable);
+        Page<InquiryWorkItem> workItemPage = workItems.findOperationalByOrgIdAndPhaseIn(orgId, phases, pageable);
 
         // Load the referenced inquiries in one query, then project in page order.
         List<UUID> inquiryIds = workItemPage.map(InquiryWorkItem::getInquiryId).getContent();

@@ -41,15 +41,16 @@ public interface InquiryWorkItemRepository extends JpaRepository<InquiryWorkItem
      * Nothing is written: {@code reconcileConnectorAnswered} still owns closing these on the next
      * collection; this only stops the row being offered, and counted, as a task in the meantime.
      */
-    @Query("select w from InquiryWorkItem w where w.orgId = :orgId and w.phase = :phase "
+    @Query("select w from InquiryWorkItem w where w.orgId = :orgId and w.phase in :phases "
             + "and exists (select 1 from Inquiry i where i.id = w.inquiryId and i.dataOrigin = 'REAL' "
             + "and i.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE "
             + "and (w.phase not in (com.sellerops.inquiry.workitem.InquiryWorkItemPhase.OPEN, "
             + "com.sellerops.inquiry.workitem.InquiryWorkItemPhase.PROPOSED) "
             + "or i.status <> 'ANSWERED'))")
-    Page<InquiryWorkItem> findOperationalByOrgIdAndPhase(@Param("orgId") UUID orgId,
-                                                         @Param("phase") InquiryWorkItemPhase phase,
-                                                         Pageable pageable);
+    Page<InquiryWorkItem> findOperationalByOrgIdAndPhaseIn(
+            @Param("orgId") UUID orgId,
+            @Param("phases") java.util.Collection<InquiryWorkItemPhase> phases,
+            Pageable pageable);
 
     /**
      * The deterministic candidate gate of the Proactive Operations Agent — work the seller has not

@@ -49,7 +49,7 @@ function overview(over: Partial<OverviewResponse["metrics"]> = {}): OverviewResp
       orderCountBasis: "주문 건수 기준",
       kpis: [kpi("orders", "주문", 12), kpi("unansweredInquiries", "미답변 문의", 22, false), kpi("negativeReviews", "부정 리뷰", 3)],
       series: [{ key: "orders", label: "주문", unit: "건", points: [{ date: "2026-08-26", value: 5 }, { date: "2026-08-27", value: 4 }] }],
-      channels: [{ channelCode: "CAFE24", channelNameKo: "카페24", orderState: "OBSERVED_FRESH", revenue: 1, orders: 1, countedInOrders: true, inquiryState: "OBSERVED_FRESH", inquiries: 1, unansweredInquiries: 1, countedInInquiries: true, reviewState: "OBSERVED_FRESH", reviews: 1, negativeReviews: 0, countedInReviews: true }],
+      channels: [{ channelCode: "CAFE24", channelNameKo: "카페24", orderState: "OBSERVED_FRESH", revenue: 1, orders: 1, countedInOrders: true, inquiryState: "OBSERVED_FRESH", inquiries: 1, unansweredInquiries: 1, countedInInquiries: true, countedInUnansweredNow: true, reviewState: "OBSERVED_FRESH", reviews: 1, negativeReviews: 0, countedInReviews: true }],
       exclusions: [],
       exampleDataIncluded: false,
       ...over,
@@ -169,7 +169,10 @@ describe("home — the Agent operating workspace", () => {
     expect(screen.queryByText("지금 기다리는 일")).toBeNull();
     expect(screen.queryByRole("button", { name: "답변 안 한 문의 보여줘" })).toBeNull();
     expect(screen.getByText(/지금 처리할 일이 22건 있습니다/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "처리할 일 22건 전체 보기" })).toHaveAttribute("href", "/inquiries?state=NEEDS_REPLY");
+    // The queue's own screen, whose first section IS this queue. It used to point at
+    // `?state=NEEDS_REPLY` — a parameter no screen reads — so the link opened the whole record and the
+    // seller had to find the 22 among 94 (Secondary Workspaces UX Closure v1 §1).
+    expect(screen.getByRole("link", { name: "처리할 일 22건 전체 보기" })).toHaveAttribute("href", "/inquiries");
     // §5: the strip stops printing the number the brief is already saying one line below.
     expect(screen.queryByText("현재 미답변 문의")).toBeNull();
     expect(screen.getByText(/부정 리뷰/)).toBeInTheDocument();
@@ -208,10 +211,12 @@ describe("home — the Agent operating workspace", () => {
   });
 
   it("an exact shortcut answers locally with an object; no turn is sent", async () => {
-    // The shortcut renders the work queue, so this test states its own row (the suite default is empty).
-    getInquiryQueueStrict.mockResolvedValue({
-      page: 0, size: 5, totalElements: 22, totalPages: 5,
-      content: [{ workItemId: "w1", inquiryId: "i1", sellerAccountId: "s", channelId: "c", channelCode: "CAFE24", channelNameKo: "카페24 자사몰", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "배송 언제 되나요?", receivedAt: "2026-08-26T00:00:00Z" }],
+    // 「답변이 필요한 문의」 is ONE question, so the heading, the count, the rows and the 전체 보기 all come
+    // from the read that answers it — the record under `status=UNANSWERED`. It used to title the answer
+    // with the overview KPI and fill it with the OPEN work queue: two different sets under one sentence.
+    getInquiryRowsStrict.mockResolvedValue({
+      totalCount: 22, limit: 5, productId: null,
+      items: [{ workItemId: "w1", inquiryId: "i1", sellerAccountId: "s", channelId: "c", channelCode: "CAFE24", channelNameKo: "카페24 자사몰", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED", title: "배송 언제 되나요?", receivedAt: "2026-08-26T00:00:00Z" }],
     });
     renderHome();
     await screen.findByText(/좋은 아침입니다/);

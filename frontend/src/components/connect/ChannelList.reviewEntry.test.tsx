@@ -91,6 +91,22 @@ describe("ChannelList — the connection state word (A5)", () => {
     expect(screen.getByRole("button", { name: "연결하기" })).toBeInTheDocument();
   });
 
+  it("a failing row says what its timestamp IS — the last success, and that nothing has landed since", () => {
+    // 「오류」 next to 「마지막 수집 1일 전」 were two sentences that cancel each other out: the time is the
+    // last SUCCESS, and on the measured org there had been seven attempts since that produced nothing.
+    // No vendor message is surfaced — the connectors' own strings carry gateway codes and HTTP statuses.
+    renderList({ health: health({ state: "DEGRADED", consecutiveFailures: 7, lastError: "…" }) });
+    expect(screen.getByText(/마지막 성공 .*그 뒤로 수집되지 않았습니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/마지막 수집/)).toBeNull();
+    expect(screen.queryByText(/GW\.|HTTP/)).toBeNull();
+  });
+
+  it("a healthy row keeps saying 마지막 수집 — nothing about it changed", () => {
+    renderList();
+    expect(screen.getByText(/마지막 수집/)).toBeInTheDocument();
+    expect(screen.queryByText(/그 뒤로 수집되지 않았습니다/)).toBeNull();
+  });
+
   it("shows 오류 with 확인하기 when collection is failing", () => {
     renderList({ health: health({ consecutiveFailures: 1 }) });
     expect(screen.getByTestId("connection-state")).toHaveTextContent("오류");

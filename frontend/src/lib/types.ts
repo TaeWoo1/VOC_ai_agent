@@ -2295,6 +2295,8 @@ export interface ChannelMetricRow {
   inquiries: number;
   unansweredInquiries: number;
   countedInInquiries: boolean;
+  /** 현재 미답변 has no window, so it has its own verdict — see `ChannelMetricRow` on the backend. */
+  countedInUnansweredNow: boolean;
   reviewState: ChannelDataState;
   reviews: number;
   negativeReviews: number;

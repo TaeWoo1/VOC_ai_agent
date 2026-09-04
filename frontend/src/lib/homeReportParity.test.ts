@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { buildWeeklyReport } from "./reportView";
-import { buildInquiryToday } from "./todayInbox";
+import { buildInquiryToday, INQUIRY_NEEDS_REPLY_PATH } from "./todayInbox";
 import type { FeedItem, InboxResponse } from "./types";
 
 /**
@@ -77,9 +77,12 @@ describe("홈과 리포트의 미답변 문의 수", () => {
     const home = buildInquiryToday(response, new Map());
     const report = buildWeeklyReport(null, feed, [], null, undefined, response.unansweredInquiries);
 
-    // The report's Figure links to /inquiries?state=NEEDS_REPLY (ReportsV2.tsx). If the counts ever
-    // diverge again, the seller clicks through from one number to a screen showing the other.
-    expect(home.to).toBe("/inquiries?state=NEEDS_REPLY");
+    // Both link through `INQUIRY_NEEDS_REPLY_PATH`, and it now names the axis the record actually reads.
+    // It spelled `?state=NEEDS_REPLY` — a parameter no screen has ever read — so the agreement this test
+    // pinned was between two numbers and a destination that showed NEITHER of them, just the whole
+    // record (Secondary Workspaces UX Closure v1 §1).
+    expect(home.to).toBe(INQUIRY_NEEDS_REPLY_PATH);
+    expect(home.to).toBe("/inquiries?status=UNANSWERED");
     expect(report.unansweredInquiries.available).toBe(true);
   });
 

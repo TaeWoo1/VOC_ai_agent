@@ -1065,6 +1065,76 @@ evidence 행 없음. **계약이 바뀌어 테스트 1건을 다시 썼다**(「
 `frontend/CLAUDE.md`가 그 workstream에 금지한 `backend/**` 수정을 product-owner 지시(conflict
 priority 1)에 따라 했고 **전부 읽기 · state semantics 변경 0 · write 0**)
 
+**`docs/secondary_workspaces_ux_closure_v1.md`** (Secondary Workspaces UX Closure v1 — 2026-09-04.
+Chat / Reviews / Inquiries / Products / Knowledge는 **freeze**하고 나머지 화면(`/overview` · `/orders` ·
+`/reports` · `/settings` · `/connect` · navigation)이 **어떤 seller job을 하는지**와 **하는 말이 참인지**를
+실제 브라우저로 먼저 감사했다. 감사가 찾은 것은 화면 셋이 아니라 **병 하나가 세 군데 있는 것**이었다 —
+**같은 명사, 다른 정의**: 「지금 처리할 일」이 홈 **11** · 문의 **21**, 「미답변 문의」가 운영 숫자 **1** ·
+리포트/inbox **22**, 그리고 그 화면들은 서로를 링크한다(홈의 「처리할 일 11건 전체 보기」가 「지금 처리할 일
+21」이라 적힌 화면을 열었고, 가장 작고 가장 틀린 숫자가 **숫자가 전부인 페이지**에 있었다). **(A) 기간이 없는
+숫자에 기간의 질문**: `counted(state, rowsInWindow)`의 docblock은 「최신이 증명됐거나 **우리가 들고 있는 행을
+실제로 냈거나**」인데, 미답변 합계가 **창 안에 도착한 행** 수로 그 규칙을 통과한 채널만 더하고 있었다 ⇒
+카페24가 7일간 아무것도 받지 않아 **지금 대기 중인 21건이 통째로 빠졌고**, 채널표는 같은 응답이 싣고 있는
+그 21에 대해 「—」를 찍었다(캡션은 이미 「'현재 미답변'은 기간과 무관한 지금 수치」라고 적혀 있었다). 규칙은
+**완화하지 않고**(증명되지 않은 침묵은 여전히 0이 되지 않는다) 쓰라고 쓰인 피연산자로 물었다 —
+`countedInUnansweredNow` 한 칸, 자기 exclusion 수(`exclusions`에 넣으면 「합계에서 빠진 것」이 카페24를 두 번
+찍는다)와 자기 freshness. 실측 **1 → 22**, 제외 **2 → 1**(쿠팡은 보유 0 + 미증명이라 여전히 빠지고 여전히
+이름이 불린다), 카페24 행은 `문의 —` 옆에 `현재 미답변 21` — 한 행에 참인 판정 둘. **(B) 선언됐지만 아무도
+서브하지 않은 집합**: `InquiryWorkItemPhase.AWAITING_SELLER = {OPEN, PROPOSED}`는 「한 번 선언하고 모든 추천
+surface가 읽는다」고 적혀 있는데 `GET /api/inquiries`의 기본값은 **`OPEN` 하나**였다 ⇒ 홈은 phase를 말하지
+않아 절반을 받아 11을 찍고, 문의는 **두 번 호출해 컴포넌트에서 페이지를 이어붙여** 21을 찍었다(그 client
+sum은 phase당 100 상한이라 백로그가 크면 **페이지 부분집합이 자기 총계로** 그려졌을 모양이다). 쿼리가 집합을
+받고(`phase in :phases` — 두 번째 사본 대신 절 하나), **phase를 말하지 않으면 `AWAITING_SELLER`**이며 phase를
+말하면 바이트 동일. 실측 무-phase **21** · OPEN **11** · PROPOSED **10**, 홈과 문의가 같은 21. 서버 총계가
+페이지보다 크면 제목이 그렇게 말한다. **(C) 아무도 읽지 않는 필터 파라미터**: `INQUIRY_NEEDS_REPLY_PATH`가
+`?state=NEEDS_REPLY`였는데 기록의 축은 `status`다 ⇒ 리포트의 「답변이 필요한 문의 22건」과 홈 브리핑이
+**전체 기록**을 열어 판매자가 94 중 22를 찾아야 했다(상수의 주석은 「NEEDS_REPLY 필터가 그 행들을 보여준다」고
+적고 있었다). `?status=UNANSWERED`로 바꿔 세 폭 모두에서 **전체 문의 22**에 착지함을 클릭으로 확인. 홈의
+「처리할 일 N건 전체 보기」만 `/inquiries`로 — 그 숫자는 **큐**이고 기록 필터는 센 것과 다른 집합에 착지시킨다.
+**(D)** 홈 팔레트의 「미답변 문의 보여줘」가 제목·총계는 KPI에서, 행은 OPEN 큐에서 가져오던 것을 **한 read**로.
+**§1 `/overview`는 유지**(홈이 답하지 않는 셋을 소유한다 — 기간·추이·채널별과 「이 숫자에 대하여」; nav에 넣지
+않는 것도 그대로다. 틀린 것은 존재가 아니라 헤드라인이었고 그것만 고쳤다. **새 KPI 0 · 가짜 insight 0**).
+**§2 `/orders`는 감사 후 무변경** — 브리프가 든 네 job이 **데이터로 답할 수 없다**: 엔드포인트는 집계뿐이고
+(`order_daily_summaries`), per-order 행은 실재하지만(`channel_orders` 450 = NAVER 295 · COUPANG 155)
+**상품이 없고**(엔티티에 product id·line item 0) **배송이 설계상 없으며**(`NormalizedOrderStatus`가 {PAID,
+UNKNOWN}뿐이고 스스로 「관측하지 않은 코드에서 배송·취소 의미를 추측하지 않는다」고 적는다 — 실측 NAVER 295
+PAID · 쿠팡 155 UNKNOWN) 고객도 없다 ⇒ 행 목록은 쿠팡 전 행이 「확인되지 않음」이고 상품 칸이 빈 표가 된다.
+exact order inspection **doorway는 이미 정직한 자리에 있다**(문의 상세의 운영 정보 카드 · `InquiryOrderFactReader`)
+— 다만 채널이 주문을 지목한 문의가 **3,357건 중 1건**이다. 필요한 것은 UI가 아니라 NAVER `lastChangedType`
+확대와 주문↔상품 라인 연결이며 **product-owner 결정**. **§3 `/reports`**: 실제로 생성되고(네 read, 실패한
+source는 0이 아니라 「확인할 수 없음」), 기간은 **섞여 있었다** — 반복 문제의 변화 판정은 진짜 주간
+창(`IssueChangeView`: 최근 surge 창 vs 8주 baseline)이고 세 count는 **지금** 수치인데 페이지가 양쪽에
+「이번 기간」을 적용했다 ⇒ 이름은 그대로 두고 count 패널이 **「기간과 무관한 지금 수치입니다」**라고 말한다.
+그리고 **상품별로 몰린 이슈 5행이 전부 문이 됐다**(`/products/{id}` — 상품 id 없는 행은 읽히되 문 없음),
+**0은 문이 아니다**(「쿠팡 0」 공유 칩이 빈 목록으로 가는 링크였다; **읽지 못한** figure는 링크를 유지한다 —
+「셀 수 없었다」는 「없다」가 아니다). 새 weekly capability 0 · Agent `reportOpsNode` 중복 0. **§4 `/settings`
+무변경**(매일 하는 일 없음, 어휘 충돌 없음 — 행은 이미 `KNOWLEDGE_NOUN`의 「운영 기준」이다; 「더 보기」의
+고객운영 메모리·리포트는 설정이 아니라 **nav 배치 질문**이라 보고만). **§5 `/connect`**: 렌더된 문자열에
+bridge/pairing/token/carrier **0**(식별자·주석뿐)이고 리뷰/상품평은 플랫폼 자기 낱말이라 의도된 것. 실측된
+결함은 **서로를 지우는 문장 둘** — `오류 · 마지막 수집 1일 전`인데 그 시각은 마지막 **성공**이고 뒤에
+`consecutiveFailures: 7`이 있었다 ⇒ 실패 중인 행은 **`마지막 성공 1일 전 · 그 뒤로 수집되지 않았습니다`**
+(둘 다 같은 응답의 사실, 정상 행 무변경, A5 상태 어휘 무변경). **벤더 문자열은 올리지 않았다** — 연결자의
+`lastError`는 행동 가능하지만 `GW.IP_NOT_ALLOWED`·`HTTP 403`을 싣고 있어 그대로 올리면 §5가 없애라는 개발자
+개념을 **더하는** 일이다(필요한 것은 **connector-error → seller-sentence 매핑**이고 코드를 아는 쪽이 소유한다).
+**§6 navigation 무변경** — 위계는 이미 있고 `lib/nav.v2.ts`에 이유가 적혀 있다(운영 5 / 연결·설정 3, 그리고
+`/overview`·`/reports`·`/memory`·`/agent`는 설명하는 대상에서 도달하는 것이라 일부러 메뉴 밖). **§7 GMARKET
+결정 · 코드 변경 0**: 11행은 `REAL`이고 **`external_id`·`acquisition_sync_job_id`가 null** ⇒ 파일 업로드로
+들어온 판매자 실데이터다; 글로벌 스위처는 `ProductChannels`(2026-08-17 product-owner 결정)를 강제하므로
+**「연결 지원 채널」**을 뜻하고 GMARKET 계정도 없다(리뷰는 `(org, channel)` 스코프라 스위처 자리에 놓을 계정이
+없다) ⇒ **총계를 숨기지 않고**(상품 타일 1,761 · 상품 범위 기록에 그 행들이 보인다) 스위처도 넓히지 않는다 —
+연결·수집·답변이 불가능한 채널을 화면에 올리는 것이 그 결정이 금지한 바로 그것이고, 조용히 뒤집는 것은 이
+패키지의 권한이 아니다. **§8** Orders/Reports에는 page-subset-as-total 없음(모든 figure가 한 응답에서 나오고
+자기 scope를 라벨로 단다); 유일한 그 모양이 큐였고 §0-B가 닫았다. **§9** 이름 못 잡은 flake는 재현되지 않았다.
+QA 8 route × 1440/1366/1152 — **AA 위반 0 · 가로 스크롤 0 · 콘솔 오류 0 · off-host 0**. backend **3,798** ·
+frontend **2,729** · 실패 0 · typecheck clean. 새 guard 넷은 **전부 옛 코드에서 빨개지는 것을 확인한 뒤**
+남겼다. **마켓플레이스 호출 0 · WRITE 0 · 모델 0 · 승인 0 · 마이그레이션 0 · DB 행 변경 0** ⇒ evidence 행 없음.
+**계약이 바뀌어 테스트 4건과 타입 1개를 다시 썼다**(무-phase 기본값 · per-phase fixture · parity 목적지 ·
+href · `InquiryItem.phase`를 `workItemId`와 같은 이유로 nullable); **안전 테스트 약화 0**. **고치지 않고 보고**:
+Orders는 UI가 아니라 데이터가 필요하다 · connector-error 매핑 · `/connect`의 겹치는 수집 섹션 셋과 「작업대」 ·
+리포트/메모리가 설정 「더 보기」로만 닿는 것 · GMARKET · `/inquiries` 5,550px는 백로그의 길이 ·
+`frontend/CLAUDE.md`가 금지한 `backend/**`를 product-owner 지시(priority 1)로 8개 파일 수정했고 **전부 읽기와
+술어 · state semantics 변경 0 · write 0**)
+
 **`docs/operational_workspace_ux_v1.md`** (Operational Workspace UX System v1 — 2026-09-04.
 페이지별 cosmetic redesign이 아니라 **정보 구조 · 상태 표현 · 행동 문법**을 한 제품으로 정리한다. Calm
 Operational Assistant 시각 방향 · 새 design system · 새 색 · 새 taxonomy · retrieval · approval **전부

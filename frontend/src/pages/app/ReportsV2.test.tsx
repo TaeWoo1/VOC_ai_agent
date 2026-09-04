@@ -152,8 +152,46 @@ describe("주간 고객운영 리포트 — composition", () => {
     renderReports();
     const unanswered = await screen.findByRole("link", { name: /답변이 필요한 문의/ });
     expect(unanswered).toHaveTextContent("1");
-    expect(unanswered).toHaveAttribute("href", "/inquiries?state=NEEDS_REPLY");
+    // The record filtered to exactly this figure. `?state=NEEDS_REPLY` was a parameter no screen read,
+    // so this link opened the whole record (Secondary Workspaces UX Closure v1 §1).
+    expect(unanswered).toHaveAttribute("href", "/inquiries?status=UNANSWERED");
     expect(screen.getByRole("link", { name: /자주 나오는 질문/ })).toHaveTextContent("1");
+  });
+
+  it("상품별로 몰린 이슈 — every row is a door to that product, because the row already names one", async () => {
+    getDashboardSummary.mockResolvedValue({
+      topProductIssues: [
+        { productId: "p-1", productName: "케이블 몰딩", issueLabel: "부정 리뷰", count: 3 },
+        // No id: the row stays readable and offers no door rather than a dead link.
+        { productId: null, productName: null, issueLabel: "부정 리뷰", count: 1 },
+      ],
+    });
+    renderReports();
+
+    const row = await screen.findByRole("link", { name: /케이블 몰딩/ });
+    expect(row).toHaveAttribute("href", "/products/p-1");
+    expect(screen.getByText(/이름을 확인할 수 없는 상품/).closest("a")).toBeNull();
+  });
+
+  it("0은 문이 아니다 — a share with nothing to check stays readable and stops being a link", async () => {
+    getChannelsStrict.mockResolvedValue([
+      { id: "nv", code: "NAVER", nameKo: "네이버 스마트스토어", status: "CONNECTED", dataBadges: [], lastSyncedAt: null, actionLabel: "", support: { autoCollectSupported: false, autoCollectDataTypes: [], fileUploadSupported: true, fileUploadDataTypes: [], connectionCheckSupported: false, credentialSetupSupported: false } },
+      { id: "cp", code: "COUPANG", nameKo: "쿠팡", status: "CONNECTED", dataBadges: [], lastSyncedAt: null, actionLabel: "", support: { autoCollectSupported: false, autoCollectDataTypes: [], fileUploadSupported: true, fileUploadDataTypes: [], connectionCheckSupported: false, credentialSetupSupported: false } },
+    ]);
+    getSellerAccountsStrict.mockResolvedValue([
+      { id: "acc-nv", channelId: "nv", channelNameKo: "", alias: null, connectionStatus: "CONNECTED", lastSyncedAt: null, fileUpload: false },
+      { id: "acc-cp", channelId: "cp", channelNameKo: "", alias: null, connectionStatus: "CONNECTED", lastSyncedAt: null, fileUpload: false },
+    ]);
+    getChannelReviewsStrict.mockImplementation((accountId: string) =>
+      Promise.resolve({ total: accountId === "acc-nv" ? 7 : 0, items: [] }),
+    );
+    renderReports();
+
+    // The channel with nothing to check is still in the breakdown — the seller learns it is clear —
+    // and it is not a control, because the screen it would open has nothing on it.
+    const zero = await screen.findByText("쿠팡");
+    expect(zero.closest("a")).toBeNull();
+    expect(screen.getByText("네이버 스마트스토어").closest("a")).not.toBeNull();
   });
 
   it("counts 확인이 필요한 리뷰 by triage tier — the same number 홈 and 리뷰 show — not by the feed's rating", async () => {

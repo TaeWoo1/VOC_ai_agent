@@ -134,7 +134,20 @@ function ChannelRow({
               ))}
             </>
           )}
-          <span>{lastCollected ? `마지막 수집 ${relativeTime(lastCollected)}` : "수집 이력 없음"}</span>
+          {/* <b>「마지막 수집 1일 전」 beside 「오류」 was two sentences that cancel each other out.</b> The
+              timestamp is the last SUCCESS, and on a failing account there have been attempts since —
+              seven, on the measured org — that produced nothing. So a failing row names what the time
+              actually is and says the collection has not landed since. Both facts are already in this
+              response (`lastSuccessAt`, `consecutiveFailures`); no vendor message is surfaced, because
+              the strings the connectors write carry gateway codes and HTTP statuses, which is the
+              opposite of what this row is for. */}
+          <span>
+            {lastCollected
+              ? failing
+                ? `마지막 성공 ${relativeTime(lastCollected)} · 그 뒤로 수집되지 않았습니다`
+                : `마지막 수집 ${relativeTime(lastCollected)}`
+              : "수집 이력 없음"}
+          </span>
           {showReviewEntry && account ? (
             <BtnLink
               to={reviewRecordPath(account.id)}

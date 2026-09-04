@@ -268,7 +268,10 @@ function ChannelBreakdown({ rows, days }: { rows: ChannelMetricRow[]; days: numb
             <Td numeric muted={!row.countedInOrders}>{row.countedInOrders ? `${wonShort(row.revenue)}원` : "—"}</Td>
             <Td numeric muted={!row.countedInOrders}>{row.countedInOrders ? count(row.orders) : "—"}</Td>
             <Td numeric muted={!row.countedInInquiries}>{row.countedInInquiries ? count(row.inquiries) : "—"}</Td>
-            <Td numeric muted={!row.countedInInquiries}>{row.countedInInquiries ? count(row.unansweredInquiries) : "—"}</Td>
+            {/* Its own verdict, because it is the one column on this row that is not a window figure
+                (the section hint above says so). Reading the window's verdict here printed 「—」 for a
+                channel whose standing backlog this response was carrying. */}
+            <Td numeric muted={!row.countedInUnansweredNow}>{row.countedInUnansweredNow ? count(row.unansweredInquiries) : "—"}</Td>
             <Td numeric muted={!row.countedInReviews}>
               {row.countedInReviews ? `${count(row.reviews)} / ${count(row.negativeReviews)}` : "—"}
             </Td>

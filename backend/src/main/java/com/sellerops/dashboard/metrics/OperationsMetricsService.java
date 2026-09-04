@@ -149,13 +149,17 @@ public class OperationsMetricsService {
             long[] inquiry = current.inquiries.getOrDefault(id, new long[2]);
             long[] review = current.reviews.getOrDefault(id, new long[2]);
 
+            long unansweredHeld = unansweredNow(coverageRows, code);
             boolean countOrders = counted(orderState, order[0] + order[1]);
             boolean countInquiries = counted(inquiryState, inquiry[0]);
+            // Same rule, the operand it was written for. 미답변 has no window, so the question is not
+            // "did this channel send anything between the dates" but "are we holding work for it now".
+            boolean countUnansweredNow = counted(inquiryState, unansweredHeld);
             boolean countReviews = counted(reviewState, review[0]);
 
             channelRows.add(new ChannelMetricRow(code, channel.getNameKo(),
                     orderState, order[1], order[0], countOrders,
-                    inquiryState, inquiry[0], unansweredNow(coverageRows, code), countInquiries,
+                    inquiryState, inquiry[0], unansweredHeld, countInquiries, countUnansweredNow,
                     reviewState, review[0], review[1], countReviews));
 
             accumulate(totals, countOrders, countInquiries, countReviews, order, inquiry, review);
@@ -176,9 +180,16 @@ public class OperationsMetricsService {
         }
 
         long unansweredNow = channelRows.stream()
-                .filter(ChannelMetricRow::countedInInquiries)
+                .filter(ChannelMetricRow::countedInUnansweredNow)
                 .mapToLong(ChannelMetricRow::unansweredInquiries)
                 .sum();
+        // Its own exclusion count, because it has its own predicate. Reusing the window's would say
+        // 「채널 2곳이 이 숫자에 없습니다」 under a number that now includes one of them. Derived from the
+        // rows rather than added to `exclusions`, which is the 「합계에서 빠진 것」 list and would print
+        // the same channel twice for INQUIRY.
+        int unansweredExcluded = (int) channelRows.stream()
+                .filter(row -> !row.countedInUnansweredNow())
+                .count();
 
         List<MetricKpi> kpis = List.of(
                 kpi("revenue", "매출", totals.revenue, "원", priorTotals.revenue, true,
@@ -189,7 +200,7 @@ public class OperationsMetricsService {
                         excludedCount(exclusions, "INQUIRY"), unproven(channelRows, "INQUIRY")),
                 // Not comparable, and the flag is the whole point: this is today's backlog, not a flow.
                 kpi("unansweredInquiries", "미답변 문의", unansweredNow, "건", null, false,
-                        excludedCount(exclusions, "INQUIRY"), unproven(channelRows, "INQUIRY")),
+                        unansweredExcluded, unprovenNow(channelRows)),
                 kpi("reviews", "리뷰", totals.reviews, "건", priorTotals.reviews, true,
                         excludedCount(exclusions, "REVIEW"), unproven(channelRows, "REVIEW")),
                 kpi("negativeReviews", "부정 리뷰", totals.negativeReviews, "건", priorTotals.negativeReviews, true,
@@ -240,6 +251,17 @@ public class OperationsMetricsService {
     static boolean counted(ChannelDataState state, long rowsInWindow) {
         return state == ChannelDataState.OBSERVED_FRESH || state == ChannelDataState.ZERO
                 || rowsInWindow > 0;
+    }
+
+    /**
+     * The caveat for the standing backlog: a channel whose figure IS counted but whose collection is
+     * not provably current may be holding unanswered inquiries we have not read yet. Same sentence
+     * as {@link #unproven}, over the predicate that actually decided this number.
+     */
+    private static boolean unprovenNow(List<ChannelMetricRow> rows) {
+        return rows.stream().anyMatch(row -> row.countedInUnansweredNow()
+                && row.inquiryState() != ChannelDataState.OBSERVED_FRESH
+                && row.inquiryState() != ChannelDataState.ZERO);
     }
 
     private static long unansweredNow(Map<String, ChannelCoverageRow> rows, String code) {

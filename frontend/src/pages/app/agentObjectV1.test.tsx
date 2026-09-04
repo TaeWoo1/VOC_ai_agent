@@ -55,7 +55,7 @@ function row(over: Partial<ChannelMetricRow> = {}): ChannelMetricRow {
   return {
     channelCode: "CAFE24", channelNameKo: "카페24",
     orderState: "OBSERVED_FRESH", revenue: 1, orders: 1, countedInOrders: true,
-    inquiryState: "OBSERVED_FRESH", inquiries: 1, unansweredInquiries: 1, countedInInquiries: true,
+    inquiryState: "OBSERVED_FRESH", inquiries: 1, unansweredInquiries: 1, countedInInquiries: true, countedInUnansweredNow: true,
     reviewState: "OBSERVED_FRESH", reviews: 1, negativeReviews: 0, countedInReviews: true,
     ...over,
   };

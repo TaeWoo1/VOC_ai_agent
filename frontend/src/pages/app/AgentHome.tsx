@@ -14,6 +14,7 @@ import { delegableSentence, homeFirstUseState, noDataSentence } from "../../lib/
 import { caseTarget, preparedBadge } from "../../lib/proactive";
 import { previewText } from "../../lib/plainText";
 import { matchCommandIntent, INTENT_HEADING } from "../../lib/commandIntents";
+import { INQUIRY_NEEDS_REPLY_PATH } from "../../lib/todayInbox";
 import type { InquiryListArtifact, InquiryListArtifact as InquiryList, ListArtifact } from "../../lib/conversation/types";
 import type { InquiryQueueResponse, MetricKpi, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
 
@@ -116,20 +117,23 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
         return true;
       }
       if (key === "UNANSWERED_INQUIRIES") {
-        const total = data?.metrics.kpis.find((k) => k.key === "unansweredInquiries")?.value ?? null;
+        // 「답변이 필요한 문의」 is ONE question, so the heading, the count, the rows and the destination
+        // all come from ONE read. It used to title the answer with the freshness-qualified KPI and fill
+        // it with the OPEN work queue — two different sets under one sentence, so the number never
+        // described the rows beneath it and neither described the screen the 전체 보기 opened.
         void api
-          .getInquiryQueueStrict({ phase: "OPEN", page: 0, size: 5 })
+          .getInquiryRowsStrict({ status: "UNANSWERED", order: "OLDEST", limit: 5 })
           .then((page) => {
             const artifact: InquiryListArtifact = {
               artifactId: "local-inquiries",
               type: "INQUIRY_LIST",
-              title: total != null ? `${INTENT_HEADING.UNANSWERED_INQUIRIES} ${total}건` : INTENT_HEADING.UNANSWERED_INQUIRIES,
-              totalCount: total ?? page.totalElements,
+              title: `${INTENT_HEADING.UNANSWERED_INQUIRIES} ${page.totalCount}건`,
+              totalCount: page.totalCount,
               groups: [
                 {
                   key: "UNANSWERED",
                   label: "답변 필요",
-                  items: page.content.map((item) => ({
+                  items: page.items.map((item) => ({
                     workItemId: item.workItemId,
                     inquiryId: item.inquiryId,
                     channelCode: item.channelCode,
@@ -145,7 +149,7 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
                   })),
                 },
               ],
-              more: { label: "문의 화면에서 전체 보기", to: "/inquiries" },
+              more: { label: "문의 화면에서 전체 보기", to: INQUIRY_NEEDS_REPLY_PATH },
             };
             conversation.addLocalTurn(text, { message: "바로 보여드립니다.", artifacts: [artifact] });
           })
@@ -328,7 +332,7 @@ export function workloadPriorities(data: OverviewResponse): WorkloadPriority[] {
   const kpis = data.metrics.kpis;
   const out: WorkloadPriority[] = [];
   const unanswered = kpis.find((k) => k.key === "unansweredInquiries");
-  if (unanswered && unanswered.value > 0) out.push({ label: "답변을 기다리는 문의", count: unanswered.value, to: "/inquiries?state=NEEDS_REPLY" });
+  if (unanswered && unanswered.value > 0) out.push({ label: "답변을 기다리는 문의", count: unanswered.value, to: INQUIRY_NEEDS_REPLY_PATH });
   const negative = kpis.find((k) => k.key === "negativeReviews");
   if (negative && negative.value > 0) out.push({ label: `최근 ${data.metrics.period.days}일 부정 리뷰`, count: negative.value, to: "/reviews" });
   return out.slice(0, 3);
@@ -446,7 +450,7 @@ export function proactiveTurn(
         })),
       },
     ],
-    ...(actionable > rows.length ? { more: { label: `처리할 일 ${actionable.toLocaleString("ko-KR")}건 전체 보기`, to: "/inquiries?state=NEEDS_REPLY" } } : {}),
+    ...(actionable > rows.length ? { more: { label: `처리할 일 ${actionable.toLocaleString("ko-KR")}건 전체 보기`, to: "/inquiries" } } : {}),
   };
   // The count read failed or the rows are empty while the count is not — then the brief still has one
   // honest thing to say, and it says it as a line rather than a card.

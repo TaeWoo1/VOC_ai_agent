@@ -78,6 +78,8 @@ export function CustomerInbox() {
   const [recordPages, setRecordPages] = useState(1);
   const [linked, setLinked] = useState<InquiryRowItem | null>(null);
   const [analyses, setAnalyses] = useState<ItemAnalysis[]>([]);
+  /** The server's own total for the queue read — the page below it may be smaller. */
+  const [queueTotal, setQueueTotal] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -112,14 +114,19 @@ export function CustomerInbox() {
   // what the seller owes.
   const loadQueue = useCallback(async () => {
     try {
-      const [open, proposed] = await Promise.all([
-        api.getInquiryQueueStrict({ phase: "OPEN", page: 0, size: 100 }),
-        api.getInquiryQueueStrict({ phase: "PROPOSED", page: 0, size: 100 }),
-      ]);
-      setQueue([...open.content, ...proposed.content]);
+      // ONE read of the phases this product declared as 「waiting for the seller」
+      // (`InquiryWorkItemPhase.AWAITING_SELLER`, now the queue endpoint's own default). This used to be
+      // two reads whose pages were concatenated here, which put the definition of 「지금 처리할 일」 in
+      // this file — and 홈, asking the same endpoint without naming phases, got half of it and printed
+      // 11 while this heading printed 21. The concatenation also capped each phase at 100 separately,
+      // so a large backlog would have been drawn as its own total.
+      const page = await api.getInquiryQueueStrict({ page: 0, size: 100 });
+      setQueue(page.content);
+      setQueueTotal(page.totalElements);
     } catch {
       // A read that did not happen is not an empty queue; the section says so rather than showing none.
       setQueue(null);
+      setQueueTotal(null);
     }
     try {
       setAnalyses(await api.getItemAnalysisStrict());
@@ -291,6 +298,15 @@ export function CustomerInbox() {
             <Section
               title={productId ? "이 상품의 지금 처리할 일" : "지금 처리할 일"}
               count={queueRows.length}
+              // The page is bounded; when the server holds more than it returned, the heading says so
+              // rather than letting the drawn rows be read as the whole of what is owed. Not rendered
+              // under a product scope: that count is this screen's own filter over the page, and the
+              // server total answers a wider question than the heading above it.
+              hint={
+                !productId && queueTotal != null && queueTotal > queueRows.length
+                  ? `처리할 일 ${queueTotal.toLocaleString("ko-KR")}건 중 ${queueRows.length.toLocaleString("ko-KR")}건`
+                  : undefined
+              }
             >
               <ul className="divide-y divide-line/70">
                 {queueGroups.recent.map((row) => queueRow(row, itemRef))}

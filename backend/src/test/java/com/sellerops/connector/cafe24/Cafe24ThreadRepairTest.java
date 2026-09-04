@@ -297,7 +297,7 @@ class Cafe24ThreadRepairTest {
     void theAgentQueueStopsSeeingIt() {
         Inquiry row = storeUnanswered(510L);
         InquiryWorkItem item = openWorkItem(row);
-        assertThat(workItems.findOperationalByOrgIdAndPhase(org, InquiryWorkItemPhase.OPEN,
+        assertThat(workItems.findOperationalByOrgIdAndPhaseIn(org, java.util.Set.of(InquiryWorkItemPhase.OPEN),
                 Pageable.unpaged()).getContent())
                 .as("before the repair it is exactly the row the seller is told to answer")
                 .extracting(InquiryWorkItem::getId).contains(item.getId());
@@ -308,7 +308,7 @@ class Cafe24ThreadRepairTest {
         // Two independent reasons it is gone, and either alone would be enough: the phase is no
         // longer OPEN, and the queue's own gate refuses a row outside current truth. The Agent, the
         // Inbox, the Dashboard and the coverage audit all read through that same gate.
-        assertThat(workItems.findOperationalByOrgIdAndPhase(org, InquiryWorkItemPhase.OPEN,
+        assertThat(workItems.findOperationalByOrgIdAndPhaseIn(org, java.util.Set.of(InquiryWorkItemPhase.OPEN),
                 Pageable.unpaged()).getContent())
                 .extracting(InquiryWorkItem::getId).doesNotContain(item.getId());
         assertThat(inquiries.findActiveUnansweredForAccount(org, account))
