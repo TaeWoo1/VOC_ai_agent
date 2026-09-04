@@ -7,6 +7,7 @@ import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
 import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { ProductKnowledgeLibrary } from "../../components/product/ProductKnowledgeLibrary";
+import { ProductOpportunities } from "../../components/opportunity/ProductOpportunities";
 import {
   KnowledgeDocumentAdd,
   KnowledgeDocumentList,
@@ -181,6 +182,9 @@ export function ProductDetail() {
           </>
         )}
       </section>
+
+      {/* Opportunity Engine v1: the repeated problems above, continued into what can be done about them. */}
+      <ProductOpportunities productId={productId} />
 
       {/* The one place a seller writes rather than reads. */}
       <section className="space-y-3">

@@ -416,6 +416,34 @@ export interface ReviewIssueSummary {
 }
 
 /** One lifecycle transition, note-free (mirror of IssueTransitionView). No operator free-text. */
+/**
+ * Mirror of com.sellerops.opportunity.dto.OpportunityView, quote-free (Opportunity Engine v1). Every row
+ * is DERIVED by the backend from an issue it holds; identity is (issueId, kind). `whyKo` and
+ * `recommendationKo` are the backend's sentences — the runtime cites them and writes none of its own.
+ */
+export interface ImprovementOpportunitySummary {
+  readonly issueId: string;
+  readonly kind: string;
+  readonly kindLabelKo: string;
+  readonly status: string;
+  readonly statusLabelKo: string;
+  readonly issueTitle: string;
+  readonly aspect: string;
+  readonly problem: string;
+  readonly severity: string;
+  readonly evidenceCount: number;
+  readonly firstEvidenceOn: string | null;
+  readonly lastEvidenceOn: string | null;
+  readonly changeLabelsKo: readonly string[];
+  readonly productId: string | null;
+  readonly productName: string | null;
+  readonly whyKo: readonly string[];
+  readonly recommendationKo: string;
+  readonly evidenceTo: string;
+  readonly nextActionKo: string;
+  readonly decidedAt: string | null;
+}
+
 export interface IssueTransition {
   readonly fromState: string | null;
   readonly toState: string;

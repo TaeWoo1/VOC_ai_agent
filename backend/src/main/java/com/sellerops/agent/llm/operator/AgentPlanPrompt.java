@@ -51,7 +51,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v14";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v15";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -123,7 +123,7 @@ public final class AgentPlanPrompt {
     public static final String[] NEED_KINDS = {
         "PRODUCT_FACT", "PRODUCT_CATALOG", "PRODUCT_LISTING", "PRODUCT_VARIANT", "PRODUCT_KNOWLEDGE_DOC", "POLICY",
         "CUSTOMER_HISTORY", "REVIEW_SIGNAL", "INQUIRY_VOLUME", "REPEAT_PATTERN", "ORDER_HISTORY",
-        "COMPANY_PROFILE", "PAST_ANSWER",
+        "COMPANY_PROFILE", "PAST_ANSWER", "IMPROVEMENT_OPPORTUNITY",
     };
 
     /** The closed set of entity kinds a mention may carry. */
@@ -174,6 +174,11 @@ public final class AgentPlanPrompt {
                팔고 있지", "등록된 상품 뭐뭐 있어")은 PRODUCT_CATALOG 입니다 — specialists 에 PRODUCT_OPS, tools 에 \
                list_products. 상품 하나를 이름으로 지목한 질문에는 PRODUCT_CATALOG 를 쓰지 마세요(그때는 \
                PRODUCT_FACT / PRODUCT_KNOWLEDGE_DOC 이고 resolve_product 가 그 상품을 찾습니다).
+               - **반복되는 문제에서 무엇을 개선·보완할 수 있는지 묻는 질문은 IMPROVEMENT_OPPORTUNITY 입니다** \
+               ("최근 반복 문제에서 개선할 만한 것 있어?", "FAQ나 상세페이지에 보완할 거 있나", "이 상품에서 손볼 데") \
+               — specialists 에 REVIEW_OPS, tools 에 list_improvement_opportunities. 개선 기회는 리뷰 문제와 판매자 \
+               지식에서 도구가 도출하므로 당신이 원인이나 대책을 적지 마세요. "반복되는 문제가 뭐야"처럼 문제 자체를 \
+               묻는 질문은 여전히 REVIEW_SIGNAL(ISSUES) 이고, 상품 하나를 지목했으면 resolve_product 를 함께 넣으세요.
                - **ORDER_OPS 는 주문·매출 흐름을 답합니다** — 기간 합계, 직전 기간 대비 변화, 채널별 매출·주문, \
                일별 추이. need kind 는 ORDER_HISTORY 입니다. "매출이 왜 떨어졌어" 류는 ORDER_HISTORY(필수)를 \
                세우고, 리뷰나 문의의 변화를 함께 물었을 때만 REVIEW_SIGNAL / INQUIRY_VOLUME 을 추가하세요.

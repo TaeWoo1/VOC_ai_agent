@@ -23,6 +23,7 @@ import { ExecutionResultArtifact } from "./artifacts/ExecutionResultArtifact";
 import { AcquisitionResultArtifact } from "./artifacts/AcquisitionResultArtifact";
 import { WorkspaceLinkArtifact } from "./artifacts/WorkspaceLinkArtifact";
 import { KnowledgeCaptureArtifact } from "./artifacts/KnowledgeCaptureArtifact";
+import { OpportunityListArtifact } from "./artifacts/OpportunityListArtifact";
 
 /**
  * How many objects a bulk list is carrying, and what to call them — or `null` for an artifact that is not
@@ -38,6 +39,8 @@ function bulkSize(artifact: Artifact): { count: number; noun: string } | null {
       return { count: artifact.items.length, noun: "상품" };
     case "ISSUE_LIST":
       return { count: artifact.items.length, noun: "반복 문제" };
+    case "OPPORTUNITY_LIST":
+      return { count: artifact.items.length, noun: "개선 기회" };
     case "LIST":
       return { count: artifact.items.length, noun: "항목" };
     case "CHECKLIST":
@@ -132,6 +135,8 @@ function ArtifactBody({ artifact, onResume, onPrompt, onCaptureDecision, stepped
       return <ProductListArtifact artifact={artifact} headline={headline} />;
     case "ISSUE_LIST":
       return <IssueListArtifact artifact={artifact} headline={headline} />;
+    case "OPPORTUNITY_LIST":
+      return <OpportunityListArtifact artifact={artifact} headline={headline} />;
     case "ORDER_SUMMARY":
       return <OrderSummaryArtifact artifact={artifact} />;
     case "CHART":

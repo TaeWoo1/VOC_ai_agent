@@ -261,7 +261,10 @@ describe("리뷰 — narrowed to one product", () => {
   it("states the scope, offers the way out, and drops the channel switcher", async () => {
     renderAt("/reviews?productId=p-1");
     expect(await screen.findByText(/의 리뷰만 보고 있습니다/)).toBeInTheDocument();
-    expect(screen.getByText("선바로 일체형 전선몰딩")).toBeInTheDocument();
+    // The product name arrives with the product-scoped record read, which resolves after the scope
+    // sentence — awaited, because under load (two full suites running beside this one, 2026-09-04) the
+    // synchronous lookup ran between the two renders and failed twice in a row while passing alone.
+    expect(await screen.findByText("선바로 일체형 전선몰딩")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "전체 리뷰 보기" })).toHaveAttribute("href", "/reviews");
     expect(screen.queryByRole("navigation", { name: "리뷰 채널" })).toBeNull();
   });

@@ -127,6 +127,7 @@ const GRANULARITY_OF: Record<EvidenceKind, Granularity> = {
   INBOX_COUNT: "COUNT",
   PRODUCT_SIGNAL: "COUNT",
   REVIEW_ISSUE: "ISSUE_SIGNAL",
+  IMPROVEMENT_OPPORTUNITY: "LIST",
   ISSUE_EVIDENCE: "ISSUE_EVIDENCE",
   // A tally of one product's negative reviews. A COUNT in shape — its product-scoping is carried on
   // the entity axis (the locator's `productId`), which is where scope belongs.
@@ -171,6 +172,8 @@ const KIND_FLOOR: Record<InformationNeed["kind"], readonly Granularity[]> = {
   INQUIRY_VOLUME: ["COUNT", "LIST", "DETAIL"],
   REPEAT_PATTERN: ["LIST", "ISSUE_SIGNAL", "ISSUE_EVIDENCE", "COUNT"],
   REVIEW_SIGNAL: ["ISSUE_SIGNAL", "ISSUE_EVIDENCE", "COUNT", "DETAIL", "LIST"],
+  // Opportunity Engine v1: rows derived from issues — a LIST, resting on the issue signal behind each row.
+  IMPROVEMENT_OPPORTUNITY: ["LIST", "ISSUE_SIGNAL", "COUNT", "DETAIL", "GAP"],
   CUSTOMER_HISTORY: ["LIST", "DETAIL"],
   ORDER_HISTORY: ["LIST", "DETAIL", "COUNT"],
   PRODUCT_FACT: ["DETAIL", "GAP"],

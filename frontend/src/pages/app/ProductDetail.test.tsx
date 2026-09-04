@@ -20,6 +20,7 @@ const getProductKnowledgeStrict = vi.fn();
 const getKnowledgeDocuments = vi.fn();
 const getKnowledgeCandidates = vi.fn();
 const listProductKnowledgeSources = vi.fn();
+const getOpportunitiesStrict = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -27,6 +28,7 @@ vi.mock("../../lib/apiClient", () => ({
     getKnowledgeDocuments: (id?: string) => getKnowledgeDocuments(id),
     getKnowledgeCandidates: () => getKnowledgeCandidates(),
     listProductKnowledgeSources: (id: string) => listProductKnowledgeSources(id),
+    getOpportunitiesStrict: (o: unknown) => getOpportunitiesStrict(o),
   },
   getToken: () => "token",
 }));
@@ -93,6 +95,7 @@ beforeEach(() => {
   getKnowledgeDocuments.mockResolvedValue([]);
   getKnowledgeCandidates.mockResolvedValue([]);
   listProductKnowledgeSources.mockResolvedValue([]);
+  getOpportunitiesStrict.mockResolvedValue([]);
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -185,5 +188,44 @@ describe("상품 상세 — accessibility", () => {
     const { container } = renderDetail();
     await screen.findByRole("heading", { level: 1, name: "선바로 일체형 전선몰딩" });
     await expectNoAxeViolations(container);
+  });
+});
+
+describe("상품 상세 — repeated problems continue into opportunities (Opportunity Engine v1)", () => {
+  it("draws a product's opportunities as rows that open the issue's own surface", async () => {
+    getOpportunitiesStrict.mockResolvedValue([
+      {
+        issueId: "issue-1", kind: "FAQ_SUPPLEMENT", kindLabelKo: "FAQ 보완", status: "OPEN", statusLabelKo: "검토 전",
+        issueTitle: "접착 탈락", aspect: "접착", problem: "탈락", severity: "NORMAL", evidenceCount: 19,
+        firstEvidenceOn: "2026-01-02", lastEvidenceOn: "2026-08-18", changeLabelsKo: [],
+        productId: "p-1", productName: "선바로 일체형 전선몰딩",
+        whyKo: ["「접착 탈락」 근거 리뷰 19건."], recommendationKo: "'접착' 관련 안내를 이 상품의 자주 묻는 질문에 추가하는 것을 검토하세요.",
+        evidenceTo: "/memory/issue-1", knowledge: { scope: "PRODUCT", scopeLabelKo: "이 상품의 상품 지식", type: "USAGE", topicLabelKo: "접착", sources: 0, mentions: 0, excerpts: [] },
+        nextActionKo: "FAQ 초안 준비", draft: null, decidedAt: null,
+      },
+      {
+        issueId: "issue-1", kind: "PRODUCT_IMPROVEMENT_REVIEW", kindLabelKo: "제품 개선 검토", status: "DISMISSED", statusLabelKo: "보류",
+        issueTitle: "접착 탈락", aspect: "접착", problem: "탈락", severity: "NORMAL", evidenceCount: 19,
+        firstEvidenceOn: null, lastEvidenceOn: null, changeLabelsKo: [], productId: "p-1", productName: null,
+        whyKo: [], recommendationKo: "제품 자체를 검토하세요.", evidenceTo: "/memory/issue-1", knowledge: null,
+        nextActionKo: "메모 준비", draft: null, decidedAt: "2026-09-04T00:00:00Z",
+      },
+    ]);
+    renderDetail();
+    const section = await screen.findByRole("region", { name: "개선 기회" });
+    // Only what the seller can still act on is counted; the dismissed one is the issue surface's to show.
+    expect(section.textContent).toContain("개선 기회 1건");
+    const row = section.querySelector("a") as HTMLAnchorElement;
+    expect(row.getAttribute("href")).toBe("/memory/issue-1");
+    expect(row.textContent).toContain("FAQ 보완");
+    expect(row.textContent).toContain("자주 묻는 질문에 추가");
+    expect(section.textContent).not.toContain("제품 개선 검토");
+  });
+
+  it("is silent when there are none, and silent when the read failed — neither is a fact about the product", async () => {
+    getOpportunitiesStrict.mockRejectedValue(new Error("down"));
+    renderDetail();
+    await screen.findByText("반복되는 문제");
+    expect(screen.queryByRole("region", { name: "개선 기회" })).toBeNull();
   });
 });

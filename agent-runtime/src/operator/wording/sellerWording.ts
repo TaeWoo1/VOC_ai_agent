@@ -21,7 +21,7 @@ import type { RetrievalOutcome } from "../../spring/types";
  * never the kind's own token.
  */
 export const SOURCE_LABEL: Readonly<Record<string, string>> = {
-  REVIEW_LIST: "리뷰", REVIEW_ISSUE: "반복되는 리뷰 문제", ISSUE_EVIDENCE: "리뷰 근거", NEGATIVE_REVIEW: "부정 리뷰",
+  REVIEW_LIST: "리뷰", REVIEW_ISSUE: "반복되는 리뷰 문제", IMPROVEMENT_OPPORTUNITY: "개선 기회", ISSUE_EVIDENCE: "리뷰 근거", NEGATIVE_REVIEW: "부정 리뷰",
   ORDER_SUMMARY: "주문 정보", ORDER_FACT: "주문 정보",
   INQUIRY: "문의", INBOX_COUNT: "답변이 필요한 문의", REPEATED_INQUIRY: "반복 문의", GROUPING_GAP: "확인 범위",
   CUSTOMER_MEMORY: "과거 사례", CHANNEL_COVERAGE: "채널 수집 상태", HUMAN_ACTION: "필요한 작업",
@@ -37,7 +37,7 @@ export const NEED_KIND_LABEL: Readonly<Record<string, string>> = {
   REVIEW_SIGNAL: "리뷰", INQUIRY_VOLUME: "문의", CUSTOMER_HISTORY: "과거 사례", ORDER_HISTORY: "주문 정보",
   PRODUCT_FACT: "상품 정보", PRODUCT_LISTING: "상품 정보", PRODUCT_VARIANT: "상품 정보", PRODUCT_KNOWLEDGE_DOC: "상품 정보",
   POLICY: "운영 정책", COMPANY_PROFILE: "회사 정보", PAST_ANSWER: "과거 승인 답변", CHANNEL_COVERAGE: "채널 수집 상태",
-  PRODUCT_CATALOG: "상품 목록",
+  PRODUCT_CATALOG: "상품 목록", IMPROVEMENT_OPPORTUNITY: "개선 기회",
 };
 
 /**

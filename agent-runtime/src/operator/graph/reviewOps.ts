@@ -27,9 +27,10 @@ import type { DashboardSummary } from "../../spring/types";
 import { log } from "../../log";
 import { readRecentReviews } from "./reviewRows";
 import { anchoredReviewId, readSelectedReview } from "./reviewDetail";
+import { readOpportunities } from "./reviewOpportunities";
 
 /** The need kinds this specialist answers. */
-export const REVIEW_NEEDS = ["REVIEW_SIGNAL"] as const;
+export const REVIEW_NEEDS = ["REVIEW_SIGNAL", "IMPROVEMENT_OPPORTUNITY"] as const;
 
 export interface ReviewOpsResult extends SpecialistResult {
   readonly needStates: readonly NeedState[];
@@ -59,7 +60,34 @@ const ATTRIBUTION_LIMIT = 6;
 const GROUP_SCAN_LIMIT = 8;
 const GROUP_STATE_LIMIT = 5;
 
+/**
+ * The specialist's entry: the IMPROVEMENT_OPPORTUNITY needs are answered by their own read
+ * (`reviewOpportunities.ts`) and everything else by the signal path below. Split by NEED, not by
+ * sentence — a plan that asked for both gets both, and one that asked for neither reaches nothing.
+ */
 export async function runReviewOps(input: SpecialistInput): Promise<ReviewOpsResult> {
+  const opportunityNeeds = input.needs.filter((n) => n.kind === "IMPROVEMENT_OPPORTUNITY");
+  const signalNeeds = input.needs.filter((n) => n.kind !== "IMPROVEMENT_OPPORTUNITY");
+  if (opportunityNeeds.length === 0) {
+    return runReviewSignal(input);
+  }
+  const opportunities = await readOpportunities({ ...input, needs: opportunityNeeds });
+  if (signalNeeds.length === 0) {
+    return opportunities;
+  }
+  const signal = await runReviewSignal({ ...input, needs: signalNeeds });
+  return {
+    ...signal,
+    findings: [...opportunities.findings, ...signal.findings],
+    evidence: [...opportunities.evidence, ...signal.evidence],
+    artifacts: [...(opportunities.artifacts ?? []), ...(signal.artifacts ?? [])],
+    failures: [...(opportunities.failures ?? []), ...(signal.failures ?? [])],
+    needStates: [...opportunities.needStates, ...signal.needStates],
+    note: [opportunities.note, signal.note].filter(Boolean).join(" ") || undefined,
+  };
+}
+
+async function runReviewSignal(input: SpecialistInput): Promise<ReviewOpsResult> {
   const { registry, budget, evidence, allowedTools } = input;
   const pending = (reason: string): ReviewOpsResult => ({
     specialist: "REVIEW_OPS", findings: [], evidence: [], coverage: [],

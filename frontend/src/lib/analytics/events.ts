@@ -32,6 +32,7 @@ export const ARTIFACT_TYPES = [
   "order_summary", "chart", "draft", "evidence", "checklist", "human_action_required", "approval_required", "approval",
   "execution_result", "workspace_link", "guided_execution", "knowledge_capture", "inquiry_detail", "review_detail",
   "acquisition_result",
+  "opportunity_list",
 ] as const;
 export type ArtifactTypeLabel = (typeof ARTIFACT_TYPES)[number];
 

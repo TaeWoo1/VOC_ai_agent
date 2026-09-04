@@ -41,6 +41,8 @@ export const OPERATOR_TOOL = {
   LIST_REPEATED_INQUIRIES: "list_repeated_inquiries",
   LIST_ITEM_ANALYSIS: "list_item_analysis",
   GET_DASHBOARD_PRODUCT_ISSUES: "get_dashboard_product_issues",
+  /* Opportunity Engine v1 (2026-09-04). READ: what can be done about a repeated problem, derived by the backend. */
+  LIST_IMPROVEMENT_OPPORTUNITIES: "list_improvement_opportunities",
   GET_PRODUCT_KNOWLEDGE: "get_product_knowledge",
   SEARCH_PRODUCT_FACTS: "search_product_facts",
   GET_INQUIRY_CONTEXT: "get_inquiry_thread_context",
@@ -619,6 +621,21 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         "판매자가 설정에 등록한 회사 소개(어떤 회사인지, 주 고객층·업종). '우리 회사는 어떤 곳으로 등록돼 있어', "
         + "'우리 업체 특성을 고려해서' 같은 질문에서만 읽는다. 배송·환불·규격의 근거가 아니다. 필요한 정보: COMPANY_PROFILE.",
       schema: z.object({}),
+    })),
+
+    read(tool(async ({ productId, referenceDate }: { productId?: string; referenceDate?: string }) =>
+      deps.issue.listImprovementOpportunities({
+        ...(productId ? { productId } : {}), ...(referenceDate ? { referenceDate } : {}),
+      }), {
+      name: OPERATOR_TOOL.LIST_IMPROVEMENT_OPPORTUNITIES,
+      description:
+        "반복되는 리뷰 문제에서 판매자가 손볼 수 있는 곳 — FAQ 보완·상품 상세 안내 보완·운영 기준 보완·제품 개선 검토. "
+        + "각 행은 근거 리뷰 수와 대표 상품, 판매자 지식에 그 내용이 있는지, 다음 행동(초안 준비)을 든다. 리뷰 원문 없음. "
+        + "상품이 특정되면 productId 로 좁힌다. 필요한 정보: IMPROVEMENT_OPPORTUNITY.",
+      schema: z.object({
+        productId: z.string().min(1).optional(),
+        referenceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      }),
     })),
 
     read(tool(async () => deps.operator.getChannelCoverage?.() ?? [], {

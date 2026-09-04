@@ -147,6 +147,14 @@ export const TOOL_CAPABILITIES: readonly ToolCapability[] = [
     requires: ["NONE"],
   },
   {
+    // Opportunity Engine v1: the backend derives the rows; a resolved product narrows them, none is
+    // required — the org-wide question 「개선할 만한 것 있어?」 is the common one.
+    specialist: "REVIEW_OPS",
+    tool: OPERATOR_TOOL.LIST_IMPROVEMENT_OPPORTUNITIES,
+    needKinds: ["IMPROVEMENT_OPPORTUNITY"],
+    requires: ["NONE"],
+  },
+  {
     // The A5 connection. Its two preconditions are both real: without the issue list there is no id to
     // ask about, and without a resolved product there is no product row to look for in the answer.
     specialist: "REVIEW_OPS",

@@ -13,6 +13,7 @@
  * scope and is done by the caller.
  */
 import type {
+  ImprovementOpportunitySummary,
   AgentJudgeView,
   AgentPlanView,
   CustomerMemorySearch,
@@ -326,6 +327,14 @@ export class HttpSpringClient
     if (params.dismissed != null) q.set("dismissed", String(params.dismissed));
     const suffix = q.toString() ? `?${q.toString()}` : "";
     return this.request<ReviewIssueSummary[]>("GET", `/api/review-issues${suffix}`);
+  }
+
+  async listImprovementOpportunities(params: { productId?: string; referenceDate?: string }): Promise<ImprovementOpportunitySummary[]> {
+    const q = new URLSearchParams();
+    if (params.productId) q.set("productId", params.productId);
+    if (params.referenceDate) q.set("referenceDate", params.referenceDate);
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<ImprovementOpportunitySummary[]>("GET", `/api/opportunities${suffix}`);
   }
 
   async getIssueContext(issueId: string, referenceDate?: string): Promise<IssueContext> {

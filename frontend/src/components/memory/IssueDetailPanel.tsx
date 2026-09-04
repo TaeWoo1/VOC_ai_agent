@@ -17,6 +17,7 @@ import {
 import { evidenceInboxRef } from "../../lib/memoryView";
 import type { ReviewIssueDetailView, ReviewIssueView } from "../../lib/types";
 import { Btn } from "../ui/Btn";
+import { OpportunityList } from "../opportunity/OpportunityList";
 
 /**
  * Evidence, trend, history and the one action the lifecycle actually allows.
@@ -170,6 +171,17 @@ export function IssueDetailPanel({
             ) : null}
           </>
         )}
+      </section>
+
+      {/*
+        Opportunity Engine v1 — what can be done about this. Drawn between the evidence and the record
+        because that is its place in the seller's reading: what repeated → why → the evidence → what
+        to do → what was done. The list decides its own emptiness sentence; the heading is always
+        drawn so the seller learns the product HAS this layer even on an issue that yields nothing.
+      */}
+      <section aria-label="개선 기회">
+        <h3 className="text-base font-bold text-ink">개선 기회</h3>
+        <OpportunityList issueId={issue.id} />
       </section>
 
       {detail && detail.history.length > 0 ? (

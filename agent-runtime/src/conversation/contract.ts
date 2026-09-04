@@ -40,6 +40,7 @@ export type ArtifactType =
   | "REVIEW_DETAIL"
   | "PRODUCT_LIST"
   | "ISSUE_LIST"
+  | "OPPORTUNITY_LIST"
   | "ORDER_SUMMARY"
   | "CHART"
   | "DRAFT"
@@ -353,6 +354,30 @@ export interface IssueListArtifact extends ArtifactBase {
     readonly evidenceCount: number;
     readonly firstOn: string | null;
     readonly lastOn: string | null;
+    readonly productId: string | null;
+    readonly productName: string | null;
+    readonly to: string;
+  }>;
+}
+
+/**
+ * Improvement opportunities (Opportunity Engine v1) — the same derived objects the product and issue
+ * screens show, as rows into the issue's evidence surface. The conversation decides nothing about them:
+ * accept/dismiss and the prepared draft live where the evidence is. Every sentence is the backend's.
+ */
+export interface OpportunityListArtifact extends ArtifactBase {
+  readonly type: "OPPORTUNITY_LIST";
+  /** Null for the org; the resolved product the rows were read for otherwise. */
+  readonly productId: string | null;
+  readonly items: ReadonlyArray<{
+    readonly issueId: string;
+    readonly kind: string;
+    readonly kindLabelKo: string;
+    readonly status: string;
+    readonly statusLabelKo: string;
+    readonly issueTitle: string;
+    readonly recommendationKo: string;
+    readonly evidenceCount: number;
     readonly productId: string | null;
     readonly productName: string | null;
     readonly to: string;
@@ -695,6 +720,7 @@ export type Artifact =
   | ReviewDetailArtifact
   | ProductListArtifact
   | IssueListArtifact
+  | OpportunityListArtifact
   | OrderSummaryArtifact
   | ChartArtifact
   | DraftArtifact

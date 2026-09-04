@@ -87,6 +87,12 @@ export type NeedKind =
   | "REVIEW_SIGNAL"
   | "INQUIRY_VOLUME"
   | "REPEAT_PATTERN"
+  /**
+   * 반복되는 문제에서 판매자가 손볼 수 있는 곳 (Opportunity Engine v1). Not REVIEW_SIGNAL: that kind
+   * answers "what repeats", this one answers "what can be done about it" — a different object, derived
+   * by the backend from the issue and the seller's own knowledge, never invented by the planner.
+   */
+  | "IMPROVEMENT_OPPORTUNITY"
   | "ORDER_HISTORY"
   /**
    * 판매자가 등록한 회사 소개 — 어떤 회사인지 (Seller Context v1-B). The company's own words about itself,

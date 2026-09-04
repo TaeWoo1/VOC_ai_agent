@@ -87,6 +87,8 @@ const DEMAND_OF: Record<NeedKind, TemporalDemand> = {
   PAST_ANSWER: "CURRENT_STATE",
   REPEAT_PATTERN: "PERIOD_EVENTS",
   REVIEW_SIGNAL: "PERIOD_EVENTS",
+  // An opportunity is what can be done NOW about a problem; the evidence behind it carries its own span.
+  IMPROVEMENT_OPPORTUNITY: "CURRENT_STATE",
   CUSTOMER_HISTORY: "PERIOD_EVENTS",
   ORDER_HISTORY: "PERIOD_EVENTS",
 };

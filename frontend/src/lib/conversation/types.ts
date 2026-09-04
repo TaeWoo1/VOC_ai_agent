@@ -20,6 +20,7 @@ export type ArtifactType =
   | "REVIEW_DETAIL"
   | "PRODUCT_LIST"
   | "ISSUE_LIST"
+  | "OPPORTUNITY_LIST"
   | "ORDER_SUMMARY"
   | "CHART"
   | "DRAFT"
@@ -257,6 +258,26 @@ export interface IssueListArtifact extends ArtifactBase {
   }>;
 }
 
+/** Mirrors the runtime's OpportunityListArtifact — derived improvement opportunities (Opportunity Engine v1). */
+export interface OpportunityListArtifact extends ArtifactBase {
+  type: "OPPORTUNITY_LIST";
+  /** Null for the org; the product the rows were read for otherwise. */
+  productId: string | null;
+  items: Array<{
+    issueId: string;
+    kind: string;
+    kindLabelKo: string;
+    status: string;
+    statusLabelKo: string;
+    issueTitle: string;
+    recommendationKo: string;
+    evidenceCount: number;
+    productId: string | null;
+    productName: string | null;
+    to: string;
+  }>;
+}
+
 export interface OrderSummaryArtifact extends ArtifactBase {
   type: "ORDER_SUMMARY";
   period: DateWindow & { days: number };
@@ -483,6 +504,7 @@ export type Artifact =
   | ReviewDetailArtifact
   | ProductListArtifact
   | IssueListArtifact
+  | OpportunityListArtifact
   | OrderSummaryArtifact
   | ChartArtifact
   | DraftArtifact

@@ -157,7 +157,10 @@ export interface Harness {
   readonly recentReviews: Record<string, RecentReviewsResponse>;
 }
 
-export function harness(seed: Partial<FakeOperatorSeed> = {}, seeds: SeedInquiry[] = inquiries()): Harness {
+export function harness(
+  seed: Partial<FakeOperatorSeed> = {}, seeds: SeedInquiry[] = inquiries(),
+  issue: FakeIssueSpringClient = new FakeIssueSpringClient(fourIssues()),
+): Harness {
   const recentReviews: Record<string, RecentReviewsResponse> = {
     "false:ALL": freshReviews(), "true:ALL": negativeReviews(), ...(seed.recentReviews ?? {}),
   };
@@ -189,7 +192,7 @@ export function harness(seed: Partial<FakeOperatorSeed> = {}, seeds: SeedInquiry
     { id: CAFE24_ACCOUNT, channelId: "chan-cafe24", channelNameKo: "카페24", alias: null, connectionStatus: "CONNECTED", lastSyncedAt: null, fileUpload: false },
   ];
   const clientFactory: SpringClientFactory = () => ({
-    inquiry, review: new FakeReviewSpringClient(twoReviews()), issue: new FakeIssueSpringClient(fourIssues()),
+    inquiry, review: new FakeReviewSpringClient(twoReviews()), issue,
     identity: { whoami: async () => ({ userId: "u-1", orgId: "org-conversation-test" }) }, operator,
   });
   const stores = new RunStoreProvider(CONFIG);

@@ -950,8 +950,14 @@ export class ConversationService {
     // ① the answer, ② its limits: a coverage-limit sentence (「…아직 저장돼 있지 않습니다」) never precedes
     // the finding that actually answers the question (Response Hygiene v1 §2). Stable within each group.
     const ordered = [...answer.findings.filter((f) => !f.claimsCoverageLimit), ...answer.findings.filter((f) => f.claimsCoverageLimit)];
+    // Opportunity Engine v1: a finding whose whole evidence is drawn as a ROW of the object card is not
+    // repeated as prose — the card is the object, and the sentence under the headline would be that
+    // row's own text a second time (live, 2026-09-04: two full recommendations above a card of seven).
+    const rowEvidence = new Set(answer.evidence.filter((e) => e.kind === "IMPROVEMENT_OPPORTUNITY").map((e) => e.evidenceId));
+    const drawnAsRows = artifacts.some((a) => a.type === "OPPORTUNITY_LIST");
     const supported = draftTurn ? [] : ordered
       .filter((f) => f.confidence === "SUPPORTED")
+      .filter((f) => !(drawnAsRows && f.evidenceIds.length > 0 && f.evidenceIds.every((id) => rowEvidence.has(id))))
       .filter((f) => f.statement !== first && (f.claimsCoverageLimit || !redundantWithHeadline(f.statement, first)))
       .map((f) => sellerSentence(f.statement, hints.text ?? ""))
       .filter((line): line is string => line != null)
@@ -2569,7 +2575,7 @@ function channelNameOf(view: ConversationView, channelCode: string): string | nu
 
 /** Same-type list artifacts with the same title collapse to the last one; everything else is kept in order. */
 function dedupeLists(artifacts: readonly Artifact[]): Artifact[] {
-  const LISTS = new Set(["INQUIRY_LIST", "REVIEW_LIST", "PRODUCT_LIST", "ISSUE_LIST", "ORDER_SUMMARY", "CHART"]);
+  const LISTS = new Set(["INQUIRY_LIST", "REVIEW_LIST", "PRODUCT_LIST", "ISSUE_LIST", "OPPORTUNITY_LIST", "ORDER_SUMMARY", "CHART"]);
   const lastIndex = new Map<string, number>();
   artifacts.forEach((a, i) => { if (LISTS.has(a.type)) lastIndex.set(`${a.type}:${a.title}`, i); });
   return artifacts.filter((a, i) => !LISTS.has(a.type) || lastIndex.get(`${a.type}:${a.title}`) === i);
@@ -2621,6 +2627,7 @@ export function priorLineOf(view: ConversationView): string | null {
 
 const PRIMARY_ORDER: readonly Artifact["type"][] = [
   "DRAFT", "APPROVAL_REQUIRED", "APPROVAL", "GUIDED_EXECUTION", "REVIEW_LIST", "INQUIRY_LIST", "PRODUCT_LIST", "ORDER_SUMMARY", "ISSUE_LIST",
+  "OPPORTUNITY_LIST",
   "WORKSPACE_LINK", "CHART", "METRIC", "TABLE", "LIST", "SUMMARY", "CHECKLIST",
 ];
 
@@ -2711,6 +2718,10 @@ function headlineOf(
     }
     case "ISSUE_LIST":
       return `반복되는 문제 ${primary.items.length}건을 확인했습니다.`;
+    case "OPPORTUNITY_LIST":
+      return primary.items.length === 0
+        ? "지금 제안할 개선 기회가 없습니다."
+        : `개선할 만한 기회 ${primary.items.length}건을 확인했습니다.`;
     case "DRAFT":
       return primary.unavailableMessage ?? (primary.version ? "답변 초안을 준비했습니다." : (primary.answerBasisNote ?? "답변 기준이 필요합니다."));
     case "WORKSPACE_LINK":
@@ -3155,7 +3166,7 @@ export function executionReasonSentence(verdict: ChannelCapabilityVerdict, chann
 }
 
 /** Evidence kinds whose locator label is a seller-authored title (a rule, a document, a remembered answer, an issue). */
-const EVIDENCE_DETAIL_KINDS = new Set(["ORG_POLICY", "PRODUCT_KNOWLEDGE_DOC", "PAST_ANSWER", "REVIEW_ISSUE", "ISSUE_EVIDENCE", "REPEATED_INQUIRY"]);
+const EVIDENCE_DETAIL_KINDS = new Set(["ORG_POLICY", "PRODUCT_KNOWLEDGE_DOC", "PAST_ANSWER", "REVIEW_ISSUE", "ISSUE_EVIDENCE", "REPEATED_INQUIRY", "IMPROVEMENT_OPPORTUNITY"]);
 
 function evidenceOf(
   answer: OperatorAnswer, extra: ReadonlyArray<EvidenceArtifact["items"][number]> = [],

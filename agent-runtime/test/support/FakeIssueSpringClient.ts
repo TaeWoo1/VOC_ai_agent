@@ -17,6 +17,7 @@
  * must never reach the graph state or the composed brief.
  */
 import type {
+  ImprovementOpportunitySummary,
   IssueContext,
   IssueEvidenceSummary,
   IssueTrend,
@@ -35,7 +36,9 @@ export interface SeedIssue {
 
 export class FakeIssueSpringClient implements IssueSpringClient {
   private readonly byId = new Map<string, SeedIssue>();
-  readonly reads = { search: 0, context: 0, evidenceSummary: 0, trend: 0 };
+  readonly reads = { search: 0, context: 0, evidenceSummary: 0, trend: 0, opportunities: 0 };
+  /** Opportunity Engine v1: what `listImprovementOpportunities` returns; empty unless a test seeds it. */
+  opportunities: ImprovementOpportunitySummary[] = [];
   private readonly leakInSearch: boolean;
 
   constructor(summaries: readonly ReviewIssueSummary[] = [], opts: { leakInSearch?: boolean } = {}) {
@@ -91,5 +94,12 @@ export class FakeIssueSpringClient implements IssueSpringClient {
   async getIssueTrend(issueId: string, _referenceDate?: string): Promise<IssueTrend> {
     this.reads.trend += 1;
     return this.require(issueId).summary;
+  }
+
+  async listImprovementOpportunities(params: { productId?: string }): Promise<ImprovementOpportunitySummary[]> {
+    this.reads.opportunities += 1;
+    return params.productId
+      ? this.opportunities.filter((o) => o.productId === params.productId)
+      : [...this.opportunities];
   }
 }

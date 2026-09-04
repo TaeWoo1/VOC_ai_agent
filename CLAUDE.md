@@ -1242,6 +1242,34 @@ QA 1440/1366/1152 — **AA 텍스트 노드 위반 3폭 전부 0** · 가로 스
 product-scoped inquiry read가 필요), total 300 vs 표 308(필터가 설계대로 동작하는 것), 설정 아래의
 고객운영 메모리·리포트(nav에 없어 설정이 유일한 메뉴 집), 숫자 코드가 이름인 상품 행)
 
+**`docs/opportunity_engine_v1.md`** (Auth Entry Regression Closure + Opportunity Engine v1 — 2026-09-04.
+**로그인 회귀는 코드가 아니라 배포 자세였다**: `Login.tsx`는 여전히 `SocialSignInButtons`를 렌더하고 그 컴포넌트는
+`GET /api/auth/social/providers`가 `true`인 provider만 그린다 — Spring은 dotenv를 읽지 않으므로 `.env.local`을 소스하지
+않고 `bootRun`한 backend에서는 둘 다 false라 버튼이 0이다(`git log -S`로 제거 커밋 0 확인, 네 변수는 이름·값 모두
+존재하되 값은 읽지 않았다). `tools/dev/local-stack.sh up`으로 띄우면 `{"google":true,"naver":true}`이고 링크는
+`/oauth2/authorization/{provider}` → 302. auth 변경 **0**. **Opportunity Engine v1**: Issue(「접착 불만이 반복됩니다」)와
+Opportunity(「'접착' 안내를 FAQ에 보완하는 것을 검토하세요」)는 다른 객체다 — Opportunity는 **저장하지 않고 매 읽기마다
+도출**하며 정체성은 `(issueId, kind)`, 저장되는 것은 판매자의 **결정과 초안**뿐(V94 `improvement_opportunity`, 행 없음 =
+OPEN, proactive_case의 annotation 규칙). 생성 기준은 **결정론 한 파일**(`OpportunityRules`): 게이트는 추출기 자신의
+`NEW_MIN_EVIDENCE(3)` + dismissed/RESOLVED 제외(그래서 「evidence 없는 제안 0」은 구조), 두 lane — GUIDANCE(고객에게
+말할 수 있는 aspect만: 배송→운영 기준, 접착·설치·설명→사용법, 표면·색상·크기→설명; 포장·가격은 없음; 상품 없으면
+PRODUCT lane 미생성)와 PRODUCT(파손·결함·균열·탈락·부족·오염 → 제품 개선 검토) — 이슈당 최대 하나씩. kind는 판매자
+지식 상태가 가른다: 지식이 aspect를 언급하지 않으면 **FAQ 보완**, 언급하면 **상세·안내 보완**. 그 「언급」은 retrieval이
+아니라 **mention check**(`KnowledgeMentionCheck` — 추출기의 같은 aspect 낱말로 active 지식 substring 검사, 랭킹·임계·
+벤더 0; 이슈마다 retriever를 돌리면 읽기 한 번에 임베딩 19회다). 라이브가 규칙 하나를 고쳤다: `배송×파손` 15건은
+「배송 기준」이 아니라 **교환·반품·환불 기준**이다. 판매자가 보는 네 가지(무엇이 반복 · 왜 · 근거 `/memory/{issueId}` ·
+다음 행동)의 모든 문장은 `OpportunityDraftComposer` 한 파일이고 **원인·효과 0**. 준비된 행동은 **초안까지 · 모델 0**:
+accept가 결정론 scaffold(FAQ는 질문 + 빈 답변 칸, 상세·운영 기준은 판매자 문장 발췌, 검토 메모는 숫자와 항목)를 만들고
+판매자가 고치며, 목적지는 기존 seam — FAQ·운영 기준은 그 `KnowledgeQuickAdd`로 **판매자가 저장**, 나머지는 복사;
+`OpportunitySafetyFenceTest`가 채널·승인·모델·지식 writer 0을 이름으로 고정. 붙은 곳: `/memory/{id}`(결정·초안이 있는
+유일한 곳) · `/products/{id}`(「개선 기회 N건」 행 — 신호 카드와 **같은** product-scoped 이슈 목록에서 시작, 0·실패는 침묵) ·
+Chat(NeedKind `IMPROVEMENT_OPPORTUNITY` · 프롬프트 **v15** · READ tool `list_improvement_opportunities` · artifact
+`OPPORTUNITY_LIST`; 런타임은 도출 0, 대화는 결정 0; 카드 행으로 그려진 finding은 산문에서 반복하지 않는다). 라이브 Demo Org:
+이슈 19 → Opportunity **7** · 근거 없는 행 0 · accept/dismiss/restore가 reload를 넘기고 종료 시 결정 행 **0** · chat 카드 =
+API 집합 · 3폭 AA 0. **고치지 않고 보고**: Opportunity는 이슈만큼만 참이다 — 「배송 파손」 근거 인용이 「파손없이 잘
+도착했네요」였다(규칙 추출기의 부정문 오탐; 어휘는 측정 라벨 없이 손대지 않는다 ⇒ product-owner 결정). 마켓플레이스 0 ·
+WRITE 0 · 승인 0 · 마이그레이션 1 · 플래너 호출 2(QA) ⇒ evidence 행 없음.)
+
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은
 `deploy/pilot/`: compose overlay(`ports: !reset []`로 raw port 공개 0, `restart: unless-stopped`, JVM heap 고정, Cafe24

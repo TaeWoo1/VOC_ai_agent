@@ -17,6 +17,7 @@
  * customer text ever crosses this boundary into the graph.
  */
 import type {
+  ImprovementOpportunitySummary,
   IssueContext,
   IssueEvidenceSummary,
   IssueTrend,
@@ -39,4 +40,9 @@ export interface IssueSpringClient {
   getIssueEvidenceSummary(issueId: string): Promise<IssueEvidenceSummary>;
   /** One issue's current severity/change/concentration signal as of the reference date. */
   getIssueTrend(issueId: string, referenceDate?: string): Promise<IssueTrend>;
+  /**
+   * The org's (or one product's) improvement opportunities — derived by the backend from the issue
+   * memory and the seller's knowledge (Opportunity Engine v1). Open and accepted only; quote-free.
+   */
+  listImprovementOpportunities(params: { productId?: string; referenceDate?: string }): Promise<ImprovementOpportunitySummary[]>;
 }

@@ -36,6 +36,8 @@ export type SpecialistName = "PRODUCT_OPS" | "REVIEW_OPS" | "INQUIRY_OPS" | "ORD
 /** The evidence kinds. Mirrors the backend's `SignalCoverageView` signal names plus the run-only ones. */
 export type EvidenceKind =
   | "REVIEW_ISSUE"
+  /** One improvement opportunity the backend derived from an issue (Opportunity Engine v1). Quote-free. */
+  | "IMPROVEMENT_OPPORTUNITY"
   /* How many of ONE issue's review rows belong to ONE product — the only product-scoped issue fact. */
   | "ISSUE_EVIDENCE"
   /**

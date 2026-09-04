@@ -2391,6 +2391,65 @@ export interface KnowledgeSourceRequest {
   variantId?: string | null;
 }
 
+/**
+ * Mirrors com.sellerops.opportunity.dto.OpportunityView — one improvement opportunity DERIVED from a
+ * repeated issue (Opportunity Engine v1). Identity is `(issueId, kind)`; there is no id of its own.
+ * `whyKo` is fact sentences only; `recommendationKo` names where to act, never a cause.
+ */
+export type OpportunityKind =
+  | "FAQ_SUPPLEMENT"
+  | "PRODUCT_GUIDE_SUPPLEMENT"
+  | "OPERATING_POLICY_SUPPLEMENT"
+  | "PRODUCT_IMPROVEMENT_REVIEW";
+
+export type OpportunityStatus = "OPEN" | "ACCEPTED" | "DISMISSED";
+
+export interface OpportunityKnowledgeView {
+  scope: "PRODUCT" | "ORG";
+  scopeLabelKo: string;
+  /** The stored type an accepted draft is filed under — the backend's decision, never the screen's guess. */
+  type: string;
+  topicLabelKo: string;
+  sources: number;
+  mentions: number;
+  /** The seller's own sentences that name the aspect, bounded. */
+  excerpts: string[];
+}
+
+export interface OpportunityDraftView {
+  title: string;
+  body: string;
+  updatedAt: string;
+}
+
+export interface OpportunityView {
+  issueId: string;
+  kind: OpportunityKind;
+  kindLabelKo: string;
+  status: OpportunityStatus;
+  statusLabelKo: string;
+  issueTitle: string;
+  aspect: string;
+  problem: string;
+  severity: string;
+  evidenceCount: number;
+  firstEvidenceOn: string | null;
+  lastEvidenceOn: string | null;
+  changeLabelsKo: string[];
+  productId: string | null;
+  productName: string | null;
+  whyKo: string[];
+  recommendationKo: string;
+  /** The issue's evidence surface — every quote behind this opportunity lives there. */
+  evidenceTo: string;
+  /** Null for a product improvement review: no sentence to a customer answers it. */
+  knowledge: OpportunityKnowledgeView | null;
+  nextActionKo: string;
+  /** Present only while ACCEPTED. */
+  draft: OpportunityDraftView | null;
+  decidedAt: string | null;
+}
+
 export interface AgentQuotaStatus {
   enabled: boolean;
   date: string;

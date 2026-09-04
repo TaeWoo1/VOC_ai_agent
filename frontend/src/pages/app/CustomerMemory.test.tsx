@@ -11,6 +11,7 @@ const getReviewIssueDetailStrict = vi.fn();
 const getInboxStrict = vi.fn();
 const startReviewIssueAction = vi.fn();
 const markReviewIssueRemediated = vi.fn();
+const getOpportunitiesStrict = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -19,6 +20,7 @@ vi.mock("../../lib/apiClient", () => ({
     getInboxStrict: () => getInboxStrict(),
     startReviewIssueAction: (id: string) => startReviewIssueAction(id),
     markReviewIssueRemediated: (id: string) => markReviewIssueRemediated(id),
+    getOpportunitiesStrict: (o: unknown) => getOpportunitiesStrict(o),
   },
   getToken: () => null,
 }));
@@ -127,6 +129,7 @@ beforeEach(() => {
     items: [{ id: "rev-loaded", type: "REVIEW" }],
     total: 1,
   });
+  getOpportunitiesStrict.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -251,5 +254,33 @@ describe("고객운영 메모리 — accessibility", () => {
     const { container } = renderMemory("/memory/issue-1");
     await screen.findByLabelText("선택한 이슈");
     await expectNoAxeViolations(container);
+  });
+});
+
+describe("고객운영 메모리 — the issue's opportunities live beside its evidence (Opportunity Engine v1)", () => {
+  it("draws the 개선 기회 section for the selected issue, read by that issue's id", async () => {
+    getOpportunitiesStrict.mockResolvedValue([
+      {
+        issueId: SURGING.id, kind: "FAQ_SUPPLEMENT", kindLabelKo: "FAQ 보완", status: "OPEN", statusLabelKo: "검토 전",
+        issueTitle: SURGING.title, aspect: "접착", problem: "탈락", severity: "HIGH", evidenceCount: 12,
+        firstEvidenceOn: null, lastEvidenceOn: null, changeLabelsKo: ["급증"], productId: "p-1", productName: "전선몰딩 1호",
+        whyKo: ["「접착 탈락」 근거 리뷰 12건."], recommendationKo: "'접착' 관련 안내를 자주 묻는 질문에 추가하는 것을 검토하세요.",
+        evidenceTo: `/memory/${SURGING.id}`, knowledge: { scope: "PRODUCT", scopeLabelKo: "이 상품의 상품 지식", type: "USAGE", topicLabelKo: "접착", sources: 2, mentions: 0, excerpts: [] },
+        nextActionKo: "FAQ 초안 준비", draft: null, decidedAt: null,
+      },
+    ]);
+    renderMemory(`/memory/${SURGING.id}`);
+    const section = await screen.findByRole("region", { name: "개선 기회" });
+    expect(getOpportunitiesStrict).toHaveBeenCalledWith({ issueId: SURGING.id, includeDismissed: true });
+    expect(await within(section).findByText(/자주 묻는 질문에 추가/)).toBeTruthy();
+    expect(await within(section).findByRole("button", { name: "FAQ 초안 준비" })).toBeTruthy();
+    // On the evidence surface itself, the card does not link back to the page it is on.
+    expect(within(section).queryByText(/근거 리뷰 12건 보기/)).toBeNull();
+  });
+
+  it("says plainly when the issue yields no opportunity", async () => {
+    renderMemory(`/memory/${SURGING.id}`);
+    const section = await screen.findByRole("region", { name: "개선 기회" });
+    expect(await within(section).findByText(/아직 제안할 개선 기회가 없습니다/)).toBeTruthy();
   });
 });

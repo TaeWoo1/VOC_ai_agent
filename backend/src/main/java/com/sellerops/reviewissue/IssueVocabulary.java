@@ -99,6 +99,16 @@ public final class IssueVocabulary {
         return List.copyOf(PROBLEMS.keySet());
     }
 
+    /**
+     * The surface forms this vocabulary recognises for one aspect — for a caller that must ask
+     * "does the seller's own text mention this aspect at all" with the SAME words the extractor used
+     * (Opportunity Engine v1). Empty for an unknown aspect; never a widened list.
+     */
+    public static List<String> keywordsOf(String aspect) {
+        List<String> words = ASPECTS.get(aspect);
+        return words == null ? List.of() : List.copyOf(words);
+    }
+
     /** First aspect whose keyword appears in {@code unit}, or empty. */
     public static Optional<String> aspectOf(String unit) {
         return firstMatch(ASPECTS, unit);

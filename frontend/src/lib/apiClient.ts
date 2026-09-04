@@ -112,6 +112,8 @@ import type {
   WalkthroughHandshakeResult,
   ReviewIssueView,
   ReviewIssueDetailView,
+  OpportunityView,
+  OpportunityKind,
 } from "./types";
 import {
   mockAccountArticles,
@@ -260,6 +262,11 @@ async function getOrMock<T>(path: string, mock: () => T): Promise<T> {
   }
   const { data } = await http.get<T>(path);
   return data;
+}
+
+/** `(issueId, kind)` is an opportunity's whole identity — the path says so. */
+function opportunityPath(issueId: string, kind: OpportunityKind, action: string): string {
+  return `/api/opportunities/${encodeURIComponent(issueId)}/${encodeURIComponent(kind)}/${action}`;
 }
 
 export const api = {
@@ -1719,6 +1726,49 @@ export const api = {
   },
 
   /** 확인 필요 → 조치 중. The note is the operator's own record of what they are doing. */
+  /**
+   * Improvement opportunities (Opportunity Engine v1) — derived from the issue memory on every read,
+   * scoped to a product or an issue when asked. Never mocked: there is no seeded fixture for a derived
+   * object, and a screen that showed one would be promising a suggestion no evidence produced.
+   */
+  async getOpportunitiesStrict(options: {
+    productId?: string | null;
+    issueId?: string | null;
+    includeDismissed?: boolean;
+  } = {}): Promise<OpportunityView[]> {
+    const params = new URLSearchParams();
+    if (options.productId) params.set("productId", options.productId);
+    if (options.issueId) params.set("issueId", options.issueId);
+    if (options.includeDismissed) params.set("includeDismissed", "true");
+    const query = params.toString();
+    const { data } = await http.get<OpportunityView[]>(`/api/opportunities${query ? `?${query}` : ""}`);
+    return data;
+  },
+
+  async acceptOpportunity(issueId: string, kind: OpportunityKind): Promise<OpportunityView> {
+    const { data } = await http.post<OpportunityView>(opportunityPath(issueId, kind, "accept"), {});
+    return data;
+  },
+
+  async dismissOpportunity(issueId: string, kind: OpportunityKind): Promise<OpportunityView> {
+    const { data } = await http.post<OpportunityView>(opportunityPath(issueId, kind, "dismiss"), {});
+    return data;
+  },
+
+  async restoreOpportunity(issueId: string, kind: OpportunityKind): Promise<OpportunityView> {
+    const { data } = await http.post<OpportunityView>(opportunityPath(issueId, kind, "restore"), {});
+    return data;
+  },
+
+  async updateOpportunityDraft(
+    issueId: string,
+    kind: OpportunityKind,
+    draft: { title: string; body: string },
+  ): Promise<OpportunityView> {
+    const { data } = await http.put<OpportunityView>(opportunityPath(issueId, kind, "draft"), draft);
+    return data;
+  },
+
   async startReviewIssueAction(issueId: string, note?: string): Promise<ReviewIssueView> {
     if (USE_MOCKS) {
       return mockUpdateReviewIssue(issueId, { lifecycleState: "ACTING", lifecycleLabelKo: "조치 중" });

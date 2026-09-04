@@ -158,8 +158,13 @@ public class ProductSignalsService {
         return unlinked == 0 ? AttentionCoverage.COVERED : AttentionCoverage.UNCERTAIN_PRODUCT_UNLINKED;
     }
 
-    /** Issues this product has evidence for, worst-first, each rendered by the issue memory itself. */
-    private List<ReviewIssueView> issuesFor(UUID orgId, UUID productId, LocalDate at) {
+    /**
+     * Issues this product has evidence for, worst-first, each rendered by the issue memory itself.
+     * Public since Opportunity Engine v1: the product-scoped opportunity read starts from exactly this
+     * list, so a product's opportunities can never name an issue its own signal card does not.
+     */
+    @Transactional(readOnly = true)
+    public List<ReviewIssueView> issuesFor(UUID orgId, UUID productId, LocalDate at) {
         List<Object[]> rows = evidence.issueEvidenceCountsByProduct(orgId, productId);
         List<ReviewIssueView> views = new ArrayList<>();
         for (Object[] row : rows) {
