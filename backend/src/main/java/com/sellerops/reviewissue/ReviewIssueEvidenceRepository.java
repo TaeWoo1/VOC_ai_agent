@@ -96,4 +96,36 @@ public interface ReviewIssueEvidenceRepository extends JpaRepository<ReviewIssue
      * every other read here.
      */
     List<ReviewIssueEvidence> findByOrgIdAndReviewId(UUID orgId, UUID reviewId);
+
+    /**
+     * {@code [min, max]} of the issue's remaining evidence dates, or an empty list when it has none —
+     * re-derived after a retraction, because the issue's stored span only ever widened while nothing
+     * could be deleted (Issue Evidence Trust Closure v1).
+     */
+    @Query("""
+            select min(e.occurredOn), max(e.occurredOn) from ReviewIssueEvidence e
+            where e.orgId = :orgId and e.issueId = :issueId
+            """)
+    List<Object[]> evidenceSpanRaw(@Param("orgId") UUID orgId, @Param("issueId") UUID issueId);
+
+    default List<LocalDate> evidenceSpan(UUID orgId, UUID issueId) {
+        List<Object[]> rows = evidenceSpanRaw(orgId, issueId);
+        if (rows.isEmpty() || rows.get(0)[0] == null) {
+            return List.of();
+        }
+        return List.of((LocalDate) rows.get(0)[0], (LocalDate) rows.get(0)[1]);
+    }
+
+    /**
+     * Evidence rows in a date window for every issue of the org at once — the report's per-period
+     * tally (Agentic Report v1). One query per period rather than one per issue.
+     */
+    @Query("""
+            select e.issueId, count(e) from ReviewIssueEvidence e
+            where e.orgId = :orgId and e.occurredOn between :fromInclusive and :toInclusive
+            group by e.issueId
+            """)
+    List<Object[]> issueCountsInWindow(@Param("orgId") UUID orgId,
+                                       @Param("fromInclusive") LocalDate fromInclusive,
+                                       @Param("toInclusive") LocalDate toInclusive);
 }

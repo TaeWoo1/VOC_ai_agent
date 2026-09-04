@@ -119,15 +119,17 @@ public class ReviewIssueController {
         int unknownAdded = 0;
         int issuesCreated = 0;
         int reopened = 0;
+        int evidenceRemoved = 0;
         for (Review review : batch) {
             ReviewIssueExtractionService.ExtractionResult result = extraction.extract(review);
             evidenceAdded += result.evidenceAdded();
             unknownAdded += result.unknownAdded();
             issuesCreated += result.issuesCreated();
             reopened += result.issuesReopened();
+            evidenceRemoved += result.evidenceRemoved();
         }
         return new ExtractionBatchResult(batch.size(), evidenceAdded, unknownAdded, issuesCreated,
-                reopened);
+                reopened, evidenceRemoved);
     }
 
     /**
@@ -192,6 +194,6 @@ public class ReviewIssueController {
      * with nothing behind it is the kind of claim this codebase avoids.
      */
     public record ExtractionBatchResult(int reviewsScanned, int evidenceAdded, int unknownAdded,
-                                        int issuesCreated, int issuesReopened) {
+                                        int issuesCreated, int issuesReopened, int evidenceRemoved) {
     }
 }

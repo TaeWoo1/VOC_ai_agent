@@ -127,6 +127,20 @@ sellerops:
     #     rule judge is withhold-only, so losing the model makes the Operator quieter, never bolder.
     # The asymmetry is deliberate — a missing planner would have to INVENT a plan, while a missing judge
     # only has to refuse more.
+    # ── Agentic Report v1 (2026-09-04): the operating report's narrative ──────────────────────────
+    #
+    # The ninth capability and its own switch. What leaves is the report's FACTS snapshot — counts,
+    # dates, closed-vocabulary issue titles, the seller's own product names, opportunity labels — and
+    # no customer text (AgentReportPayloadFloorTest asserts the bytes). Off ⇒ the deterministic summary
+    # is the whole report; a report is never blank and never wrong for lack of this.
+    report:
+      enabled: ${SELLEROPS_AGENT_REPORT_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_AGENT_REPORT_ORG_IDS:}
+      vendor: ${SELLEROPS_AGENT_REPORT_VENDOR:OPENAI}
+      model: ${SELLEROPS_AGENT_REPORT_MODEL:gpt-5-2025-08-07}
+      api-key: ${SELLEROPS_AGENT_REPORT_API_KEY:}
+      max-output-tokens: ${SELLEROPS_AGENT_REPORT_MAX_OUTPUT_TOKENS:3000}
+      reasoning-effort: ${SELLEROPS_AGENT_REPORT_REASONING_EFFORT:low}
     plan:
       enabled: ${SELLEROPS_AGENT_PLAN_ENABLED:false}
       enabled-org-ids: ${SELLEROPS_AGENT_PLAN_ORG_IDS:}

@@ -1,5 +1,8 @@
 import axios, { isAxiosError } from "axios";
 import type {
+  AgentReportListItem,
+  AgentReportView,
+  ReportKind,
   AgentQuotaStatus,
   AnswerStyleRequest,
   AnswerStyleView,
@@ -1742,6 +1745,32 @@ export const api = {
     if (options.includeDismissed) params.set("includeDismissed", "true");
     const query = params.toString();
     const { data } = await http.get<OpportunityView[]>(`/api/opportunities${query ? `?${query}` : ""}`);
+    return data;
+  },
+
+  // ---- Agentic Report v1 -----------------------------------------------------------------------
+
+  /** The cadence's current report — the stored one, or the period's first generation. */
+  async getCurrentAgentReport(kind: ReportKind): Promise<AgentReportView> {
+    const { data } = await http.get<AgentReportView>(`/api/agent-reports/current?kind=${kind}`);
+    return data;
+  },
+
+  async getAgentReport(id: string): Promise<AgentReportView> {
+    const { data } = await http.get<AgentReportView>(`/api/agent-reports/${encodeURIComponent(id)}`);
+    return data;
+  },
+
+  async listAgentReports(kind: ReportKind): Promise<AgentReportListItem[]> {
+    const { data } = await http.get<AgentReportListItem[]>(`/api/agent-reports?kind=${kind}`);
+    return data;
+  },
+
+  /** A newer reading as a NEW version — explicit, never on open. */
+  async regenerateAgentReport(kind: ReportKind, periodStart?: string | null): Promise<AgentReportView> {
+    const params = new URLSearchParams({ kind });
+    if (periodStart) params.set("periodStart", periodStart);
+    const { data } = await http.post<AgentReportView>(`/api/agent-reports/regenerate?${params.toString()}`, {});
     return data;
   },
 

@@ -1270,6 +1270,27 @@ API 집합 · 3폭 AA 0. **고치지 않고 보고**: Opportunity는 이슈만�
 도착했네요」였다(규칙 추출기의 부정문 오탐; 어휘는 측정 라벨 없이 손대지 않는다 ⇒ product-owner 결정). 마켓플레이스 0 ·
 WRITE 0 · 승인 0 · 마이그레이션 1 · 플래너 호출 2(QA) ⇒ evidence 행 없음.)
 
+**`docs/agentic_report_v1.md`** (Issue Evidence Trust Closure + Agentic Report v1 — 2026-09-04. **[1]** 「파손없이 잘
+도착했네요」가 「배송 파손」 evidence가 되어 Opportunity까지 만들던 결함을 hard-code가 아니라 seam으로 닫았다: 추출기에는
+polarity seam이 **없었고**(`IssueVocabulary`는 substring 표), triage tier는 별점의 순수 함수라 절 단위 판정에 쓸 수 없다(5★
+안의 「배송이 좀 늦었네요」를 살리는 것이 splitter의 존재 이유) ⇒ `NegationScope` — 매치된 **키워드**에 붙은 부정(없·않·못·안+동사·
+「줄 알」, bridge는 조사·정도부사·지/진/하지·곳/것/데/품만; 앞의 안/못, aspect의 미), 부정형 키워드(「안 왔」「없어서」)는 다시
+부정되지 않고, 「배송이 안 왔어요」의 안은 problem 키워드 안에 있으므로 aspect를 지우지 않는다; 「타사 제품」은
+`OTHER_PRODUCT`. 실제 표현 모양의 fixture 35문장: false **14/17 → 0/19**, 실제 불만 손실 **0/16**. 재추출은 append가 아니라
+**reconcile**이 됐고(현재 extractor가 그 리뷰의 모든 unit에 대해 authoritative — 더 나은 추출기가 나쁜 추출기를 되돌릴 수
+있어야 한다), 합성 리뷰는 **write 시점에 거절**(V95가 11 `DEMO_SEED`+1 `VERIFY_FIXTURE` 행 제거), boot runner가 버전이 다른
+org를 한 번 전수 재추출해 `issue-rules-v2`로 stamp. 라이브: evidence **85 → 51**, 배송 파손 **15 → 1**, 접착 탈락 19 → 7, Opportunity **7 → 5**
+(가짜 교환·반품 기준 제안 소멸). **[2]** `/reports`는 4개 읽기를 클라이언트에서 합치던 파생이었고 저장도 버전도 없었다 ⇒
+`ReportFacts`(**id 있는 값들**: 기간 counter·이슈별 기간 근거 수·Opportunity·기존 객체로만 가는 다음 행동) 스냅샷을
+`agent_report`(V96, `(org, kind, period_start, version)`)에 얼리고, **열기 = 읽기 · 재생성 = 새 버전**, 완료된 기간만(지난
+월~일 / 전월, KST). 결정론 `ReportSummaryComposer`가 FACT · INTERPRETATION(「확인할 필요」) · LIMIT(「원인은 리뷰가 말해주지
+않습니다」)을 쓰고, **아홉 번째 LLM capability** `sellerops.agent.report.*`(자기 flag·key·door, boundary 표 행, 바이트
+payload floor — facts JSON만, 고객 문장 0)가 쓴 문장은 `NarrativeClaimGuard`가 **fact id 인용 없으면 버리고** 닫힌 원인·성과
+어휘(때문·원인·탓·나빠졌·매출·만족도…)면 버린다 — 고쳐 쓰지 않는다. **없는 읽기는 0이 아니다**(7월 주문 행이 없어 「전월
+0건에서 317건」이 나왔다 ⇒ `previous=null`·「이전 기간 자료 없음」). 라이브 Demo Org: 주간 23.8s·월간 19.3s, 12줄 전부 trace·
+unsupported 0, 재열람 byte-identical, v2 뒤 v1 id로 읽힘, 일회용 org는 UNAVAILABLE+「달라진 것이 없습니다」, 3폭 AA 0.
+남은 결함: 같은 버전 안의 규칙 변경은 boot 재추출을 다시 돌리지 않는다(VERSION bump 필요), 오타형 1건, KST/UTC 하루 경계, 첫 열기 지연은 narrative 호출 그대로.)
+
 **`docs/pilot_host_provisioning_v1.md`** (Pilot Host Provisioning v1 — PREPARE. 제품 코드 0. HEAD 감사: 루트
 compose는 5432·8080·8787·5173을 전부 호스트에 공개하고 restart 정책·edge·TLS·백업 seam이 없다. 준비물은
 `deploy/pilot/`: compose overlay(`ports: !reset []`로 raw port 공개 0, `restart: unless-stopped`, JVM heap 고정, Cafe24

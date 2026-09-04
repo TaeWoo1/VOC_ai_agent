@@ -1,340 +1,361 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
-import { Section } from "../../components/ui/Section";
-import { Empty } from "../../components/ui/Empty";
-import { BtnLink } from "../../components/ui/Btn";
+import { ListBox, Section } from "../../components/ui/Section";
+import { Disclosure } from "../../components/ui/Disclosure";
+import { WorkItem } from "../../components/ui/WorkItem";
+import { Status } from "../../components/ui/Status";
+import { Btn } from "../../components/ui/Btn";
 import { api } from "../../lib/apiClient";
-import { useReviewAttention } from "../../hooks/useReviewAttention";
-import { buildWeeklyReport } from "../../lib/reportView";
-import { INQUIRY_NEEDS_REPLY_PATH } from "../../lib/todayInbox";
-import type { TodayBreakdown } from "../../lib/todayInbox";
-import { SEVERITY_LABEL_KO, changeBadges } from "../../lib/reviewIssuesView";
-import type { FeedItem, ItemAnalysis, ReviewIssueView, TopProductIssue } from "../../lib/types";
+import type {
+  AgentReportListItem,
+  AgentReportView,
+  ReportFacts,
+  ReportKind,
+  ReportNarrativeLine,
+  ReportSummaryLine,
+} from "../../lib/types";
 
 const UNAVAILABLE = "이 항목은 지금 확인할 수 없습니다.";
 
 /**
- * One figure. It links only where the destination shows exactly this count (`to`); when the count
- * is spread over several screens the figure is a heading and the `shares` under it carry the exact
- * links — the same rule the home follows (`lib/todayInbox.ts`).
+ * A fact id resolved to the object it names — label and, when the object has a screen, where it is.
+ * Every sentence on this page cites ids; this is how a citation becomes a doorway.
  */
-function Figure({
-  label,
-  available,
-  value,
-  to,
-  shares = [],
-}: {
-  label: string;
-  available: boolean;
-  value: number;
-  to: string | null;
-  shares?: readonly TodayBreakdown[];
-}) {
-  const body = (
-    <>
-      <p className="break-keep text-base text-muted">{label}</p>
-      {available ? (
-        <p className="mt-1.5 text-3xl font-bold tabular-nums text-ink">
-          {value}
-          <span className="ml-1 text-lg font-semibold text-muted">건</span>
-        </p>
-      ) : (
-        <p className="mt-2 break-keep text-base text-muted">{UNAVAILABLE}</p>
+function factRef(facts: ReportFacts, id: string): { label: string; to: string | null } | null {
+  const counter = facts.counters.find((c) => c.id === id);
+  if (counter) return { label: counter.labelKo, to: counter.to };
+  const issue = facts.issues.find((i) => i.id === id);
+  if (issue) return { label: issue.title, to: issue.to };
+  const opportunity = facts.opportunities.find((o) => o.id === id);
+  if (opportunity) return { label: `${opportunity.issueTitle} · ${opportunity.kindLabelKo}`, to: opportunity.to };
+  const step = facts.nextSteps.find((n) => n.id === id);
+  if (step) return { label: step.labelKo, to: step.to };
+  return null;
+}
+
+/** The citations under one line: distinct objects, linked where they have a screen. */
+function Citations({ facts, ids }: { facts: ReportFacts; ids: string[] }) {
+  const refs = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { label: string; to: string | null }[] = [];
+    for (const id of ids) {
+      const ref = factRef(facts, id);
+      if (ref && !seen.has(ref.label)) {
+        seen.add(ref.label);
+        out.push(ref);
+      }
+    }
+    return out;
+  }, [facts, ids]);
+  if (refs.length === 0) return null;
+  return (
+    <span className="ml-2 inline-flex flex-wrap gap-x-2 text-xs text-muted">
+      {refs.map((ref) =>
+        ref.to ? (
+          <Link key={ref.label} to={ref.to} className="underline-offset-2 hover:text-brand-700 hover:underline">
+            {ref.label}
+          </Link>
+        ) : (
+          <span key={ref.label}>{ref.label}</span>
+        ),
       )}
-    </>
+    </span>
   );
-  const box = "block rounded-xl border border-line bg-surface p-4";
-  // Zero is a fact, not a control: a link that opens an empty list is a promise the screen does not
-  // keep. Same rule the product tiles follow (Product Operations Continuity v1 §2). A figure that could
-  // not be READ keeps its way in — "we could not count this" is not "there is nothing there", and the
-  // screen it opens can still answer.
-  if (to && (!available || value > 0)) {
+}
+
+function NarrativeBlock({ report }: { report: AgentReportView }) {
+  const { facts } = report;
+  if (report.narrative && report.narrativeStatus === "READY") {
     return (
-      <Link
-        to={to}
-        className={`${box} transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2`}
-      >
-        {body}
-      </Link>
+      <div className="space-y-2" data-testid="report-narrative">
+        {report.narrative.headline ? (
+          <p className="break-keep text-lg font-semibold leading-snug text-ink">{report.narrative.headline}</p>
+        ) : null}
+        <ul className="space-y-1.5">
+          {report.narrative.lines.map((line: ReportNarrativeLine) => (
+            <li key={line.text} className="break-keep leading-relaxed text-ink">
+              {line.text}
+              <Citations facts={facts} ids={line.factIds} />
+            </li>
+          ))}
+        </ul>
+      </div>
     );
   }
+  // The deterministic reading: what the seller gets whether or not the model wrote anything.
   return (
-    <div className={box}>
-      {body}
-      {shares.length > 0 ? (
-        <ul aria-label={`${label} 채널별`} className="mt-3 flex flex-wrap gap-2">
-          {shares.map((share) =>
-            share.count > 0 ? (
-              <li key={share.key}>
-                <Link
-                  to={share.to}
-                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-canvas px-3 text-sm font-medium text-ink transition hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
-                >
-                  {share.label}
-                  <span className="tabular-nums text-muted">{share.count}</span>
-                </Link>
-              </li>
-            ) : (
-              // A channel with nothing to check is part of the breakdown and is not a destination.
-              <li key={share.key}>
-                <span className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-muted">
-                  {share.label}
-                  <span className="tabular-nums">{share.count}</span>
-                </span>
-              </li>
-            ),
-          )}
-        </ul>
-      ) : null}
+    <div className="space-y-2" data-testid="report-summary">
+      <ul className="space-y-1.5">
+        {report.summary.lines.map((line: ReportSummaryLine) => (
+          <li
+            key={line.text}
+            className={`break-keep leading-relaxed ${line.kind === "LIMIT" ? "text-muted" : "text-ink"}`}
+          >
+            {line.kind === "INTERPRETATION" ? (
+              <Status tone="warn" variant="word" className="mr-2">
+                확인 필요
+              </Status>
+            ) : null}
+            {line.text}
+            <Citations facts={facts} ids={line.factIds} />
+          </li>
+        ))}
+      </ul>
+      {report.narrativeNoteKo ? <p className="text-sm text-muted">{report.narrativeNoteKo}</p> : null}
     </div>
   );
 }
 
-function IssueLine({ issue }: { issue: ReviewIssueView }) {
-  const badges = changeBadges(issue.change);
-  return (
-    <li>
-      <Link
-        to={`/memory/${issue.id}`}
-        className="flex flex-wrap items-center gap-2 px-4 py-3 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
-      >
-        <span className="min-w-0 flex-1 break-keep font-medium text-ink">{issue.title}</span>
-        <span className="shrink-0 text-xs text-muted">
-          심각도 {SEVERITY_LABEL_KO[issue.severity]}
-        </span>
-        {badges[0] ? (
-          <span className="shrink-0 rounded-full bg-canvas px-2.5 py-0.5 text-xs font-semibold text-muted">
-            {badges[0].labelKo}
-          </span>
-        ) : null}
-      </Link>
-    </li>
-  );
+function deltaWord(c: { previous: number | null; delta: number | null }): string {
+  // An absent previous reading is not a zero: no comparison is claimed against it.
+  if (c.previous === null) return "이전 기간 자료 없음";
+  if (c.delta === null || c.delta === 0) return `이전 기간과 같음 (${c.previous}건)`;
+  return c.delta > 0 ? `이전 기간보다 ${c.delta}건 늘음 (${c.previous}건)` : `이전 기간보다 ${-c.delta}건 줄음 (${c.previous}건)`;
+}
+
+function formatGeneratedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 /**
- * 주간 고객운영 리포트.
+ * 운영 리포트 — 주간 / 월간.
  *
- * Every figure comes from a source that loaded; a source that failed renders as unavailable rather
- * than as zero. Nothing here claims a business outcome, because nothing in the data measures one —
- * and a single unbacked claim would make the rows that ARE true unreadable. The copy guard in
- * `pages-copy.test.ts` scans this file's raw source, comments included, so the claim vocabulary is
- * described here rather than spelled out.
+ * Reads ONE stored snapshot (`GET /api/agent-reports/current`), so reopening prints what was printed
+ * before; a newer reading is an explicit new version. The top is the AI narrative when one survived
+ * validation, otherwise the deterministic summary; everything below is the facts the sentences cite,
+ * each row a doorway to the object that owns it. The copy guard in `pages-copy.test.ts` scans this
+ * file's raw source, so the claim vocabulary is described here rather than spelled out.
  */
 export function ReportsV2() {
-  const [issues, setIssues] = useState<ReviewIssueView[] | null>(null);
-  const [inbox, setInbox] = useState<FeedItem[] | null>(null);
-  // The SERVER's uncapped 미답변 문의 count, kept separately from the feed rows. The feed is capped by
-  // `limit`; this number is not, and it is the one 홈 prints. Counting the capped rows here is what
-  // made the same words show ≤50 on this page and 3,208 on 홈.
-  const [unansweredInquiries, setUnansweredInquiries] = useState<number | null>(null);
-  const [analyses, setAnalyses] = useState<ItemAnalysis[]>([]);
-  /**
-   * 상품별 이슈 — the consumer restored.
-   *
-   * `DashboardService.buildTopProductIssues()` and `GET /api/dashboard/summary` never stopped working
-   * and `ExportToReportChainTest` has been pinning their values the whole time; what disappeared in the
-   * A1–A7 product assembly was every FRONTEND caller (`getDashboardSummary` was defined once and called
-   * zero times). This is that caller, not a reimplementation.
-   *
-   * Null = the read failed, and the section renders "확인할 수 없음" rather than an empty list, per this
-   * page's standing rule.
-   */
-  const [productIssues, setProductIssues] = useState<TopProductIssue[] | null>(null);
+  const [params, setParams] = useSearchParams();
+  const kind: ReportKind = params.get("kind") === "MONTHLY" ? "MONTHLY" : "WEEKLY";
+  const reportId = params.get("id");
+  const [report, setReport] = useState<AgentReportView | null>(null);
+  const [history, setHistory] = useState<AgentReportListItem[] | null>(null);
   const [loading, setLoading] = useState(true);
-  // 확인이 필요한 리뷰: the shared canonical source (per account, attention-filtered) — same as 홈.
-  const reviewSources = useReviewAttention(1);
+  const [failed, setFailed] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerateFailed, setRegenerateFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
-    void Promise.allSettled([
-      api.getReviewIssuesStrict(),
-      api.getInboxStrict(),
-      api.getItemAnalysisStrict(),
-      api.getDashboardSummary(),
-    ]).then(([issueResult, inboxResult, analysisResult, dashboardResult]) => {
-      if (!active) {
-        return;
+    setLoading(true);
+    setFailed(false);
+    const read = reportId ? api.getAgentReport(reportId) : api.getCurrentAgentReport(kind);
+    void Promise.allSettled([read, api.listAgentReports(kind)]).then(([reportResult, listResult]) => {
+      if (!active) return;
+      if (reportResult.status === "fulfilled") {
+        setReport(reportResult.value);
+      } else {
+        setReport(null);
+        setFailed(true);
       }
-      setIssues(issueResult.status === "fulfilled" ? issueResult.value : null);
-      setInbox(inboxResult.status === "fulfilled" ? inboxResult.value.items : null);
-      setUnansweredInquiries(
-        inboxResult.status === "fulfilled" ? inboxResult.value.unansweredInquiries : null,
-      );
-      setAnalyses(analysisResult.status === "fulfilled" ? analysisResult.value : []);
-      setProductIssues(
-        dashboardResult.status === "fulfilled" ? dashboardResult.value.topProductIssues : null,
-      );
+      setHistory(listResult.status === "fulfilled" ? listResult.value : null);
       setLoading(false);
     });
     return () => {
       active = false;
     };
-  }, []);
+  }, [kind, reportId]);
 
-  const report = buildWeeklyReport(
-    issues,
-    inbox,
-    analyses,
-    reviewSources === undefined ? null : reviewSources,
-    undefined,
-    unansweredInquiries,
+  const switchKind = useCallback(
+    (next: ReportKind) => {
+      const nextParams = new URLSearchParams();
+      if (next === "MONTHLY") nextParams.set("kind", "MONTHLY");
+      setParams(nextParams);
+    },
+    [setParams],
   );
 
-  if (loading || reviewSources === undefined) {
+  const regenerate = useCallback(async () => {
+    if (!report) return;
+    setRegenerating(true);
+    setRegenerateFailed(false);
+    try {
+      const next = await api.regenerateAgentReport(report.kind, report.periodStart);
+      setReport(next);
+      const nextParams = new URLSearchParams(params);
+      nextParams.set("id", next.id);
+      setParams(nextParams);
+      void api.listAgentReports(report.kind).then(setHistory, () => undefined);
+    } catch {
+      setRegenerateFailed(true);
+    } finally {
+      setRegenerating(false);
+    }
+  }, [params, report, setParams]);
+
+  const kindToggle = (
+    <div role="group" aria-label="리포트 기간" className="inline-flex gap-1">
+      {(["WEEKLY", "MONTHLY"] as const).map((k) => (
+        <Btn
+          key={k}
+          size="sm"
+          variant={k === kind ? "solid" : "outline"}
+          aria-pressed={k === kind}
+          onClick={() => switchKind(k)}
+        >
+          {k === "WEEKLY" ? "주간" : "월간"}
+        </Btn>
+      ))}
+    </div>
+  );
+
+  if (loading) {
     return (
       <>
-        <PageHead title="주간 고객운영 리포트" />
+        <PageHead title="운영 리포트" action={kindToggle} />
         <p className="text-muted">불러오는 중…</p>
       </>
     );
   }
 
-  if (!report.hasAnything) {
+  if (!report) {
     return (
       <>
-        <PageHead title="주간 고객운영 리포트" />
-        <Empty
-          title="아직 정리할 자료가 없습니다"
-          body="자료를 연결하면 그 기간의 고객 이슈를 모아 주간 고객운영 리포트를 구성합니다."
-          action={<BtnLink to="/connect">채널 연결하기</BtnLink>}
-        />
+        <PageHead title="운영 리포트" action={kindToggle} />
+        <p className="text-muted">{failed ? "리포트를 불러오지 못했습니다. 잠시 후 다시 열어 주세요." : UNAVAILABLE}</p>
       </>
     );
   }
 
+  const { facts } = report;
+  const periodic = facts.counters.filter((c) => c.periodic);
+  const standing = facts.counters.filter((c) => !c.periodic);
+
   return (
     <div className="space-y-6">
       <PageHead
-        title="주간 고객운영 리포트"
-        description="수집된 문의·리뷰를 기준으로, 이번 기간에 확인할 것을 정리했습니다."
+        title="운영 리포트"
+        description="수집된 문의·리뷰를 기준으로, 지난 기간에 달라진 것과 다음에 할 일을 정리했습니다."
+        meta={
+          <span className="text-sm text-muted">
+            {report.kindLabelKo} · {report.periodLabelKo} · {formatGeneratedAt(report.generatedAt)} 기준
+            {report.version > 1 ? ` · ${report.version}번째 판` : ""}
+          </span>
+        }
+        action={kindToggle}
       />
 
-      <Section title="이번 기간 요약" hint="대표 보고용으로 그대로 옮겨 쓰실 수 있습니다.">
-        {report.summaryLines.length > 0 ? (
-          <ul className="space-y-2">
-            {report.summaryLines.map((line) => (
-              <li key={line} className="break-keep leading-relaxed text-ink">
-                {line}
+      <Section
+        title="AI 운영 요약"
+        action={
+          <Btn size="sm" variant="outline" onClick={() => void regenerate()} disabled={regenerating}>
+            {regenerating ? "다시 만드는 중…" : "최신 자료로 다시 만들기"}
+          </Btn>
+        }
+      >
+        <NarrativeBlock report={report} />
+        {regenerateFailed ? <p className="text-sm text-bad">새 리포트를 만들지 못했습니다.</p> : null}
+      </Section>
+
+      <Section title="이번 기간에 달라진 것" hint={`${facts.period.labelKo} · 이전 기간과 비교`}>
+        <ListBox ariaLabel="기간 수치">
+          {periodic.map((c) => (
+            <div key={c.id} className="flex flex-wrap items-baseline justify-between gap-x-3 px-4 py-3">
+              <span className="text-ink">{c.labelKo}</span>
+              <span className="text-sm text-muted">
+                <span className="mr-2 text-base font-semibold tabular-nums text-ink">{c.current}건</span>
+                {deltaWord(c)}
+              </span>
+            </div>
+          ))}
+          {standing.map((c) => (
+            <div key={c.id} className="flex flex-wrap items-baseline justify-between gap-x-3 px-4 py-3">
+              {/* No period: this is what is waiting NOW, and it links only where exactly this count is shown. */}
+              {c.to && c.current > 0 ? (
+                <Link to={c.to} className="text-ink underline-offset-2 hover:text-brand-700 hover:underline">
+                  {c.labelKo}
+                </Link>
+              ) : (
+                <span className="text-ink">{c.labelKo}</span>
+              )}
+              <span className="text-sm text-muted">
+                <span className="mr-2 text-base font-semibold tabular-nums text-ink">{c.current}건</span>
+                기간과 무관한 지금 수치
+              </span>
+            </div>
+          ))}
+        </ListBox>
+      </Section>
+
+      <Section title="반복된 문제" count={facts.issues.length || null} hint="이 기간이나 직전 기간에 근거 리뷰가 있었던 문제">
+        {facts.issues.length === 0 ? (
+          <p className="text-muted">이 기간에 근거 리뷰가 붙은 반복 문제가 없습니다.</p>
+        ) : (
+          <ListBox ariaLabel="반복된 문제">
+            {facts.issues.map((issue) => (
+              <WorkItem
+                key={issue.id}
+                state={issue.changeLabelsKo[0] ?? (issue.delta > 0 ? "늘어남" : issue.delta < 0 ? "줄어듦" : "그대로")}
+                tone={issue.delta > 0 ? "warn" : "neutral"}
+                title={issue.title}
+                meta={[
+                  `이번 기간 ${issue.current}건 · 이전 ${issue.previous}건`,
+                  `심각도 ${issue.severityLabelKo}`,
+                  issue.productName,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                to={issue.to}
+              />
+            ))}
+          </ListBox>
+        )}
+      </Section>
+
+      <Section title="개선 기회" count={facts.opportunities.length || null} hint="반복 문제와 회사 지식에서 도출">
+        {facts.opportunities.length === 0 ? (
+          <p className="text-muted">지금 제안된 개선 기회가 없습니다.</p>
+        ) : (
+          <ListBox ariaLabel="개선 기회">
+            {facts.opportunities.map((o) => (
+              <WorkItem
+                key={o.id}
+                state={o.kindLabelKo}
+                tone="info"
+                title={o.recommendationKo}
+                meta={[o.issueTitle, o.statusLabelKo, o.productName].filter(Boolean).join(" · ")}
+                to={o.to}
+              />
+            ))}
+          </ListBox>
+        )}
+      </Section>
+
+      <Section title="다음에 할 일" count={facts.nextSteps.length || null}>
+        {facts.nextSteps.length === 0 ? (
+          <p className="text-muted">이 기간의 자료에서 제안할 다음 행동이 없습니다.</p>
+        ) : (
+          <ListBox ariaLabel="다음에 할 일">
+            {facts.nextSteps.map((step) => (
+              <WorkItem key={step.id} title={step.labelKo} to={step.to} />
+            ))}
+          </ListBox>
+        )}
+      </Section>
+
+      {history && history.length > 1 ? (
+        <Disclosure label="이전 리포트" note={`${history.length}건`}>
+          <ul className="mt-2 space-y-1 text-sm">
+            {history.map((item) => (
+              <li key={item.id}>
+                <Link
+                  to={`/reports?kind=${item.kind}&id=${item.id}`}
+                  aria-current={item.id === report.id ? "true" : undefined}
+                  className={`underline-offset-2 hover:text-brand-700 hover:underline ${item.id === report.id ? "font-semibold text-ink" : "text-muted"}`}
+                >
+                  {item.periodLabelKo}
+                  {item.version > 1 ? ` · ${item.version}번째 판` : ""} · {formatGeneratedAt(item.generatedAt)}
+                </Link>
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="text-muted">{UNAVAILABLE}</p>
-        )}
-      </Section>
-
-      {/* These two are NOT period figures — they are what is standing right now, and the sections above
-          and below them ARE about a window (an issue's change is judged over a recent surge window
-          against an eight-week baseline). Saying so is the same distinction Executive Readiness Fix v1
-          drew on 홈, where 미답변 문의 had no period and was being read as if it had one. */}
-      <Section title="확인이 필요한 문의·리뷰" hint="기간과 무관한 지금 수치입니다.">
-        <div className="grid items-start gap-3 sm:grid-cols-2">
-          <Figure
-            label="답변이 필요한 문의"
-            available={report.unansweredInquiries.available}
-            value={report.unansweredInquiries.value}
-            to={INQUIRY_NEEDS_REPLY_PATH}
-          />
-          <Figure
-            label="확인이 필요한 리뷰"
-            available={report.reviewsToCheck.available}
-            value={report.reviewsToCheck.value}
-            to={report.reviewsToCheckTo}
-            shares={report.reviewsToCheckShares}
-          />
-        </div>
-      </Section>
-
-      <Section
-        title="반복되는 고객 문제"
-        hint="같은 이야기가 이어지고 있는 것부터 정리했습니다."
-        action={
-          <BtnLink to="/memory" size="sm" variant="outline">
-            메모리 열기
-          </BtnLink>
-        }
-      >
-        {!report.issuesNeedingReview.available ? (
-          <p className="text-muted">{UNAVAILABLE}</p>
-        ) : report.issuesNeedingReview.value.length > 0 ? (
-          <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
-            {report.issuesNeedingReview.value.map((issue) => (
-              <IssueLine key={issue.id} issue={issue} />
-            ))}
-          </ul>
-        ) : (
-          <p className="text-muted">이번 기간에 새로 확인이 필요한 반복 문제는 없었습니다.</p>
-        )}
-
-        {report.issuesImproved.available && report.issuesImproved.value.length > 0 ? (
-          <div className="mt-5 border-t border-line pt-4">
-            <h3 className="text-base font-bold text-ink">관련 리뷰가 줄어든 문제</h3>
-            <ul className="mt-2 divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
-              {report.issuesImproved.value.map((issue) => (
-                <IssueLine key={issue.id} issue={issue} />
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </Section>
-
-      <Section title="상품별로 몰린 이슈" hint="같은 문제가 특정 상품에 모여 있는지 봅니다.">
-        {productIssues === null ? (
-          <p className="text-muted">{UNAVAILABLE}</p>
-        ) : productIssues.length > 0 ? (
-          <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
-            {productIssues.map((row) => {
-              // The row already names a product this product has a screen for, and that screen is where
-              // 「이 상품에서 무엇이 반복되나」 is answered. Without the link these were five numbers with
-              // nowhere to go — the shape Product Operations Continuity v1 closed on 상품 상세.
-              const body = (
-                <>
-                  <span className="min-w-0 flex-1 break-keep text-ink">
-                    {row.productName ?? "이름을 확인할 수 없는 상품"} — {row.issueLabel}
-                  </span>
-                  <span className="shrink-0 tabular-nums text-muted">{row.count}건</span>
-                </>
-              );
-              return (
-                <li key={`${row.productId}-${row.issueLabel}`}>
-                  {row.productId ? (
-                    <Link
-                      to={`/products/${row.productId}`}
-                      className="flex items-baseline justify-between gap-3 px-4 py-3 leading-relaxed transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
-                    >
-                      {body}
-                    </Link>
-                  ) : (
-                    <span className="flex items-baseline justify-between gap-3 px-4 py-3 leading-relaxed">{body}</span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p className="text-muted">상품별로 몰린 이슈는 확인되지 않았습니다.</p>
-        )}
-      </Section>
-
-      <Section title="FAQ·상세페이지에서 다룰 후보" hint="반복해서 들어오는 내용을 응대 대신 페이지에서 먼저 답하도록 옮길 후보입니다.">
-        <div className="grid items-start gap-3 sm:grid-cols-2">
-          <Figure
-            label="자주 나오는 질문"
-            available={report.faqCandidates.available}
-            value={report.faqCandidates.value}
-            to="/inquiries"
-          />
-          <Figure
-            label="상세페이지에서 다룰 내용"
-            available={report.detailPageCandidates.available}
-            value={report.detailPageCandidates.value}
-            to="/inquiries"
-          />
-        </div>
-      </Section>
+        </Disclosure>
+      ) : null}
     </div>
   );
 }

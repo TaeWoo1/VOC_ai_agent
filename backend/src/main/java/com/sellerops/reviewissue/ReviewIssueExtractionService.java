@@ -4,6 +4,11 @@ import com.sellerops.review.Review;
 import com.sellerops.reviewissue.IssueSignatureExtractor.ExtractedUnit;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +22,22 @@ import org.springframework.transaction.annotation.Transactional;
  * re-running extraction over the same reviews — after a re-import, or to backfill — attaches nothing
  * twice and mints no duplicate issue. That matters because the import path is resumable: the same
  * review legitimately arrives more than once.
+ *
+ * <p><b>And, since Issue Evidence Trust Closure v1 (2026-09-04), a re-run is a RECONCILE, not an
+ * append.</b> The current extractor is authoritative for every unit of the review it is handed: a
+ * stored evidence row whose unit the extractor no longer matches is deleted, and an UNKNOWN row whose
+ * unit is now matched (or now has a different reason) is replaced. Before this, evidence could only
+ * ever be added, so a better extractor could not retract what a worse one had written — the fourteen
+ * 「파손없이 잘 도착했네요」 rows behind the live 「배송 파손」 issue would have stayed evidence forever.
+ * Deleting evidence is therefore a flow now, and the one thing it never touches is the issue's
+ * identity or lifecycle: an issue whose evidence count falls simply reads as small.
+ *
+ * <p><b>Synthetic reviews are refused at the door.</b> A {@code DEMO_SEED} or {@code VERIFY_FIXTURE}
+ * review can chart what a shop did, but it cannot say a problem repeats for this seller — the same rule
+ * {@code countUnansweredOperational} applies to owed replies. Refused here, at the write, rather than
+ * trusted to the read-time filter: the filter is a session property and this service is also called
+ * from listeners and boot runners where no request enabled it (measured: 11 seeded rows had become
+ * evidence for 「접착 탈락」 that way).
  *
  * <p><b>What this service must never do.</b> It writes to the issue tables only. It does not touch
  * {@code item_analyses}, does not change {@code reviews}, and cannot affect who is in the
@@ -52,18 +73,44 @@ public class ReviewIssueExtractionService {
      */
     @Transactional
     public ExtractionResult extract(Review review) {
+        if (review.getDataOrigin() != null && review.getDataOrigin().synthetic()) {
+            return ExtractionResult.NONE;
+        }
         LocalDate occurredOn = occurredOn(review);
         int evidenceAdded = 0;
+        int evidenceRemoved = 0;
         int unknownAdded = 0;
         int issuesCreated = 0;
         int reopened = 0;
 
+        // What is stored for this review today, keyed the way the extractor's verdict is keyed.
+        Map<Integer, List<ReviewIssueEvidence>> storedEvidence = new HashMap<>();
+        for (ReviewIssueEvidence row : evidence.findByOrgIdAndReviewId(review.getOrgId(), review.getId())) {
+            storedEvidence.computeIfAbsent(row.getUnitOrdinal(), k -> new java.util.ArrayList<>()).add(row);
+        }
+        Map<Integer, ReviewIssueUnknownUnit> storedUnknown = new HashMap<>();
+        for (ReviewIssueUnknownUnit row : unknowns.findByOrgIdAndReviewId(review.getOrgId(), review.getId())) {
+            storedUnknown.put(row.getUnitOrdinal(), row);
+        }
+        Set<Integer> seenOrdinals = new HashSet<>();
+        Set<UUID> issuesLosingEvidence = new HashSet<>();
+
         for (ExtractedUnit unit : extractor.extract(review.getBody())) {
+            seenOrdinals.add(unit.ordinal());
             if (!unit.isMatched()) {
-                if (!unknowns.existsByOrgIdAndReviewIdAndUnitOrdinal(
-                        review.getOrgId(), review.getId(), unit.ordinal())) {
+                // A unit that is no longer evidence: retract what an earlier verdict wrote.
+                for (ReviewIssueEvidence stale : storedEvidence.getOrDefault(unit.ordinal(), List.of())) {
+                    evidence.delete(stale);
+                    issuesLosingEvidence.add(stale.getIssueId());
+                    evidenceRemoved++;
+                }
+                ReviewIssueUnknownUnit existing = storedUnknown.get(unit.ordinal());
+                if (existing == null) {
                     unknowns.save(newUnknown(review, occurredOn, unit));
                     unknownAdded++;
+                } else if (existing.getReason() != unit.unknownReason()) {
+                    existing.setReason(unit.unknownReason());
+                    unknowns.save(existing);
                 }
                 continue;
             }
@@ -79,8 +126,22 @@ public class ReviewIssueExtractionService {
                 issuesCreated++;
             }
 
-            if (evidence.existsByOrgIdAndIssueIdAndReviewIdAndUnitOrdinal(
-                    review.getOrgId(), issue.getId(), review.getId(), unit.ordinal())) {
+            // A matched unit is not UNKNOWN, and it is evidence for exactly this issue.
+            ReviewIssueUnknownUnit formerlyUnknown = storedUnknown.remove(unit.ordinal());
+            if (formerlyUnknown != null) {
+                unknowns.delete(formerlyUnknown);
+            }
+            boolean alreadyStored = false;
+            for (ReviewIssueEvidence stored : storedEvidence.getOrDefault(unit.ordinal(), List.of())) {
+                if (stored.getIssueId().equals(issue.getId())) {
+                    alreadyStored = true;
+                } else {
+                    evidence.delete(stored);
+                    issuesLosingEvidence.add(stored.getIssueId());
+                    evidenceRemoved++;
+                }
+            }
+            if (alreadyStored) {
                 continue;
             }
             evidence.save(newEvidence(review, issue, occurredOn, unit));
@@ -100,7 +161,38 @@ public class ReviewIssueExtractionService {
             touchEvidenceDates(issue, occurredOn);
             issues.save(issue);
         }
-        return new ExtractionResult(evidenceAdded, unknownAdded, issuesCreated, reopened);
+
+        // Ordinals the body no longer has (a re-imported review whose text changed): retract those too.
+        for (Map.Entry<Integer, List<ReviewIssueEvidence>> entry : storedEvidence.entrySet()) {
+            if (!seenOrdinals.contains(entry.getKey())) {
+                for (ReviewIssueEvidence stale : entry.getValue()) {
+                    evidence.delete(stale);
+                    issuesLosingEvidence.add(stale.getIssueId());
+                    evidenceRemoved++;
+                }
+            }
+        }
+        for (Map.Entry<Integer, ReviewIssueUnknownUnit> entry : storedUnknown.entrySet()) {
+            if (!seenOrdinals.contains(entry.getKey())) {
+                unknowns.delete(entry.getValue());
+            }
+        }
+        for (UUID issueId : issuesLosingEvidence) {
+            issues.findById(issueId).ifPresent(this::recomputeEvidenceDates);
+        }
+        return new ExtractionResult(evidenceAdded, unknownAdded, issuesCreated, reopened, evidenceRemoved);
+    }
+
+    /**
+     * After a retraction the span may have narrowed, so it is re-derived from what remains rather than
+     * kept — {@link #touchEvidenceDates} only ever widens, which was correct while nothing was deleted.
+     */
+    private void recomputeEvidenceDates(ReviewIssue issue) {
+        evidence.flush();
+        List<LocalDate> span = evidence.evidenceSpan(issue.getOrgId(), issue.getId());
+        issue.setFirstEvidenceOn(span.isEmpty() ? null : span.get(0));
+        issue.setLastEvidenceOn(span.isEmpty() ? null : span.get(1));
+        issues.save(issue);
     }
 
     /**
@@ -182,12 +274,26 @@ public class ReviewIssueExtractionService {
         return event;
     }
 
-    /** What one extraction changed. Zero everywhere is the normal result for a re-run. */
+    /**
+     * What one extraction changed. Zero everywhere is the normal result for a re-run.
+     *
+     * @param evidenceRemoved rows retracted because the current extractor no longer matches their unit
+     *     (or the review is synthetic and was refused) — a change, reported like the additions are
+     */
     public record ExtractionResult(int evidenceAdded, int unknownAdded, int issuesCreated,
-                                   int issuesReopened) {
+                                   int issuesReopened, int evidenceRemoved) {
+
+        /** The empty result: a refused review, or a re-run that found everything already right. */
+        public static final ExtractionResult NONE = new ExtractionResult(0, 0, 0, 0, 0);
+
+        /** Before retraction existed, four numbers were the whole result. Kept for callers that add up. */
+        public ExtractionResult(int evidenceAdded, int unknownAdded, int issuesCreated, int issuesReopened) {
+            this(evidenceAdded, unknownAdded, issuesCreated, issuesReopened, 0);
+        }
 
         public boolean changedAnything() {
-            return evidenceAdded > 0 || unknownAdded > 0 || issuesCreated > 0 || issuesReopened > 0;
+            return evidenceAdded > 0 || unknownAdded > 0 || issuesCreated > 0 || issuesReopened > 0
+                    || evidenceRemoved > 0;
         }
     }
 }

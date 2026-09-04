@@ -69,7 +69,12 @@ class AgentDraftBoundaryTest {
             // passage the scorer already admitted, which is a property of the caller — the door is
             // here so the org gate cannot be walked around.
             new String[] {"KnowledgeEligibilityGenerator", "KnowledgeEvidenceEligibility.java",
-                    "KnowledgeEligibilityGenerator.java"});
+                    "KnowledgeEligibilityGenerator.java"},
+            // The ninth (Agentic Report v1, 2026-09-04): the report's facts snapshot leaves — counts,
+            // dates, vocabulary titles, the seller's product names — and no customer text. Its own
+            // door, because a report narrative is a different exposure from a plan or a draft.
+            new String[] {"AgentReportNarrativeGenerator", "AgentReportNarrativeService.java",
+                    "AgentReportNarrativeGenerator.java"});
 
     /**
      * The classes allowed to name {@code AgentLlmTransport} beside a {@code .post(} call: the three
@@ -80,7 +85,7 @@ class AgentDraftBoundaryTest {
             "AgentDraftGenerator.java", "AgentPlanGenerator.java", "AgentJudgeGenerator.java",
             "InquirySignalGenerator.java", "ImageFactExtractionGenerator.java",
             "KnowledgeEmbeddingGenerator.java", "KnowledgeQuestionIntentGenerator.java",
-            "KnowledgeEligibilityGenerator.java",
+            "KnowledgeEligibilityGenerator.java", "AgentReportNarrativeGenerator.java",
             "JdkAgentLlmTransport.java", "AgentLlmConfiguration.java");
 
     @Test
@@ -139,7 +144,8 @@ class AgentDraftBoundaryTest {
                 // paying for restatements. One file reading two of these keys would end that.
                 new String[] {"sellerops.knowledge.embedding.", "KnowledgeEmbeddingProperties.java"},
                 new String[] {"sellerops.knowledge.intent.", "KnowledgeQuestionIntentProperties.java"},
-                new String[] {"sellerops.knowledge.eligibility.", "KnowledgeEligibilityProperties.java"});
+                new String[] {"sellerops.knowledge.eligibility.", "KnowledgeEligibilityProperties.java"},
+                new String[] {"sellerops.agent.report.", "AgentReportProperties.java"});
         try (Stream<Path> walk = Files.walk(MAIN)) {
             for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
                 String name = source.getFileName().toString();

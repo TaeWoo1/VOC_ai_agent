@@ -31,7 +31,12 @@ import org.springframework.stereotype.Component;
 public class RuleBasedIssueSignatureExtractor implements IssueSignatureExtractor {
 
     static final String KIND = "RULE_BASED";
-    static final String VERSION = "issue-rules-v1";
+    /**
+     * v2 (Issue Evidence Trust Closure v1, 2026-09-04): a keyword inside its own negation is no longer a
+     * hit — see {@link NegationScope}. The signature keys are unchanged, so v1 issues keep their
+     * identity; what changes is which units are evidence, and a full re-extraction re-derives that.
+     */
+    static final String VERSION = "issue-rules-v2";
 
     /**
      * Whether a problem found without any aspect may borrow the aspect of an earlier unit in the
@@ -65,8 +70,15 @@ public class RuleBasedIssueSignatureExtractor implements IssueSignatureExtractor
 
         for (int ordinal = 0; ordinal < units.size(); ordinal++) {
             String unit = units.get(ordinal);
-            Optional<String> aspect = IssueVocabulary.aspectOf(unit);
-            Optional<String> problem = IssueVocabulary.problemOf(unit);
+            List<IssueVocabulary.Hit> problemHits = IssueVocabulary.problemHits(unit);
+            List<IssueVocabulary.Hit> aspectHits = IssueVocabulary.aspectHits(unit);
+            if (!problemHits.isEmpty() && NegationScope.aboutAnotherProduct(unit)) {
+                // 「타사 제품은 금방 떨어졌는데」 — a complaint, and not about this product.
+                out.add(ExtractedUnit.unknown(ordinal, UnknownReason.OTHER_PRODUCT));
+                continue;
+            }
+            Optional<String> problem = affirmedProblem(unit, problemHits);
+            Optional<String> aspect = affirmedAspect(unit, aspectHits, problemHits);
 
             if (aspect.isPresent()) {
                 carriedAspect = aspect.get();
@@ -79,7 +91,11 @@ public class RuleBasedIssueSignatureExtractor implements IssueSignatureExtractor
             } else if (problem.isPresent()) {
                 // A real complaint we cannot attribute. Recorded as such rather than guessed at.
                 out.add(ExtractedUnit.unknown(ordinal, UnknownReason.NO_ASPECT));
-            } else if (aspect.isPresent()) {
+            } else if (!problemHits.isEmpty()) {
+                // A problem word was there and every occurrence was negated: 「파손없이 잘 도착했네요」.
+                // Its own reason, so the pen can show what the negation rule decided.
+                out.add(ExtractedUnit.unknown(ordinal, UnknownReason.NEGATED_PROBLEM));
+            } else if (!aspectHits.isEmpty()) {
                 // Includes all praise about a known aspect ("설치가 간편해요"). 반복 칭찬 is a separate
                 // axis and is NOT in this package — a praise vocabulary would carry the same
                 // measurement problem and needs its own bar.
@@ -89,5 +105,52 @@ public class RuleBasedIssueSignatureExtractor implements IssueSignatureExtractor
             }
         }
         return List.copyOf(out);
+    }
+
+    /**
+     * The first problem hit the customer actually asserts. A hit spelled as a denial (「안 왔」, 「없어서」)
+     * is always asserted; any other hit is dropped when {@link NegationScope} finds a marker attached
+     * to it. Detection order is the vocabulary's, so the first surviving hit is the one v1 would have
+     * chosen whenever v1's choice was not negated.
+     */
+    private static Optional<String> affirmedProblem(String unit, List<IssueVocabulary.Hit> hits) {
+        for (IssueVocabulary.Hit hit : hits) {
+            String keyword = unit.substring(hit.start(), hit.end());
+            if (NegationScope.isNegativeForm(keyword)
+                    || !NegationScope.negated(unit, hit.start(), hit.end(), false)) {
+                return Optional.of(hit.key());
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * The first aspect hit the unit is actually about. 「미설치라」 and 「설치를 안 해봐서」 are not about
+     * installing — the customer has not installed. But 「배송이 안 왔어요」 IS about delivery: the 안 there
+     * belongs to the problem keyword 「안 왔」, so a marker that sits inside a problem hit does not
+     * negate the aspect.
+     */
+    private static Optional<String> affirmedAspect(String unit, List<IssueVocabulary.Hit> aspects,
+                                                   List<IssueVocabulary.Hit> problems) {
+        for (IssueVocabulary.Hit hit : aspects) {
+            if (NegationScope.negatedBefore(unit, hit.start(), true)) {
+                continue;
+            }
+            int marker = NegationScope.negatedAfter(unit, hit.end());
+            if (marker >= 0 && !insideAnyHit(marker, problems)) {
+                continue;
+            }
+            return Optional.of(hit.key());
+        }
+        return Optional.empty();
+    }
+
+    private static boolean insideAnyHit(int position, List<IssueVocabulary.Hit> hits) {
+        for (IssueVocabulary.Hit hit : hits) {
+            if (position >= hit.start() && position < hit.end()) {
+                return true;
+            }
+        }
+        return false;
     }
 }

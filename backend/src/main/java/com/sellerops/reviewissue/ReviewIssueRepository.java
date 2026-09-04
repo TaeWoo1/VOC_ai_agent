@@ -32,4 +32,16 @@ public interface ReviewIssueRepository extends JpaRepository<ReviewIssue, UUID> 
 
     /** Issues by id, org-scoped — the titles behind one review's own evidence links (Agent Object v1). */
     List<ReviewIssue> findByOrgIdAndIdIn(UUID orgId, java.util.Collection<UUID> ids);
+
+    /**
+     * Issues whose evidence was last derived by a DIFFERENT extractor version — the ones a full
+     * re-extraction must revisit (Issue Evidence Trust Closure v1). Empty once the pass has stamped them.
+     */
+    List<ReviewIssue> findByOrgIdAndExtractorVersionNot(UUID orgId, String extractorVersion);
+
+    /** Every org that still has such an issue, so a boot pass visits only where there is work. */
+    @org.springframework.data.jpa.repository.Query(
+            "select distinct i.orgId from ReviewIssue i where i.extractorVersion <> :extractorVersion")
+    List<UUID> orgIdsWithExtractorVersionNot(
+            @org.springframework.data.repository.query.Param("extractorVersion") String extractorVersion);
 }

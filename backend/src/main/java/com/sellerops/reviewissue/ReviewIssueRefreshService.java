@@ -35,13 +35,19 @@ public class ReviewIssueRefreshService {
     private final ReviewRepository reviews;
     private final ReviewIssueExtractionService extraction;
     private final ReviewIssueLifecycleService lifecycle;
+    private final ReviewIssueRepository issues;
+    private final IssueSignatureExtractor extractor;
 
     public ReviewIssueRefreshService(ReviewRepository reviews,
                                      ReviewIssueExtractionService extraction,
-                                     ReviewIssueLifecycleService lifecycle) {
+                                     ReviewIssueLifecycleService lifecycle,
+                                     ReviewIssueRepository issues,
+                                     IssueSignatureExtractor extractor) {
         this.reviews = reviews;
         this.extraction = extraction;
         this.lifecycle = lifecycle;
+        this.issues = issues;
+        this.extractor = extractor;
     }
 
     /**
@@ -53,20 +59,69 @@ public class ReviewIssueRefreshService {
     public IssueRefreshResult refresh(UUID orgId, LocalDate referenceDate, int maxReviews) {
         int limit = Math.max(1, Math.min(maxReviews, MAX_REVIEWS_CEILING));
         List<Review> batch = reviews.findForIssueExtraction(orgId, PageRequest.of(0, limit));
-        int evidenceAdded = 0;
-        int unknownAdded = 0;
-        int issuesCreated = 0;
-        int reopened = 0;
+        Tally tally = new Tally();
         for (Review review : batch) {
-            ExtractionResult result = extraction.extract(review);
+            tally.add(extraction.extract(review));
+        }
+        AutomaticPassResult pass = lifecycle.runAutomaticPass(orgId, referenceDate);
+        return tally.result(batch.size(), pass);
+    }
+
+    /**
+     * The whole corpus, page by page, then stamp every issue with the extractor that now vouches for
+     * its evidence (Issue Evidence Trust Closure v1).
+     *
+     * <p>Exists because {@link #refresh} is bounded to the NEWEST reviews — right for an after-ingest
+     * pass, and useless for the case a better extractor creates: evidence written by the old one sits
+     * on reviews of every age. The stamp is what makes this run once per extractor version rather than
+     * on every boot: {@link ReviewIssueReextractionRunner} visits only orgs that still hold an issue
+     * stamped with another version. Reads and writes the database only.
+     */
+    @Transactional
+    public IssueRefreshResult reextractAll(UUID orgId, LocalDate referenceDate) {
+        Tally tally = new Tally();
+        int scanned = 0;
+        for (int page = 0;; page++) {
+            List<Review> batch = reviews.findForIssueExtraction(orgId, PageRequest.of(page, REEXTRACT_PAGE));
+            for (Review review : batch) {
+                tally.add(extraction.extract(review));
+            }
+            scanned += batch.size();
+            if (batch.size() < REEXTRACT_PAGE) {
+                break;
+            }
+        }
+        AutomaticPassResult pass = lifecycle.runAutomaticPass(orgId, referenceDate);
+        for (ReviewIssue issue : issues.findByOrgIdAndExtractorVersionNot(orgId, extractor.version())) {
+            issue.setExtractorKind(extractor.kind());
+            issue.setExtractorVersion(extractor.version());
+            issues.save(issue);
+        }
+        return tally.result(scanned, pass);
+    }
+
+    /** Page size for the full pass — small enough that one page's rows stay a modest transaction step. */
+    static final int REEXTRACT_PAGE = 500;
+
+    private static final class Tally {
+        int evidenceAdded;
+        int evidenceRemoved;
+        int unknownAdded;
+        int issuesCreated;
+        int reopened;
+
+        void add(ExtractionResult result) {
             evidenceAdded += result.evidenceAdded();
+            evidenceRemoved += result.evidenceRemoved();
             unknownAdded += result.unknownAdded();
             issuesCreated += result.issuesCreated();
             reopened += result.issuesReopened();
         }
-        AutomaticPassResult pass = lifecycle.runAutomaticPass(orgId, referenceDate);
-        return new IssueRefreshResult(batch.size(), evidenceAdded, unknownAdded, issuesCreated, reopened,
-                pass.raisedForReview(), pass.resolved());
+
+        IssueRefreshResult result(int scanned, AutomaticPassResult pass) {
+            return new IssueRefreshResult(scanned, evidenceAdded, unknownAdded, issuesCreated, reopened,
+                    pass.raisedForReview(), pass.resolved(), evidenceRemoved);
+        }
     }
 
     /**
@@ -75,6 +130,13 @@ public class ReviewIssueRefreshService {
      */
     public record IssueRefreshResult(int reviewsScanned, int evidenceAdded, int unknownAdded,
                                      int issuesCreated, int issuesReopened,
-                                     int raisedForReview, int resolved) {
+                                     int raisedForReview, int resolved, int evidenceRemoved) {
+
+        /** The seven-number shape callers built before retraction existed. */
+        public IssueRefreshResult(int reviewsScanned, int evidenceAdded, int unknownAdded,
+                                  int issuesCreated, int issuesReopened, int raisedForReview, int resolved) {
+            this(reviewsScanned, evidenceAdded, unknownAdded, issuesCreated, issuesReopened,
+                    raisedForReview, resolved, 0);
+        }
     }
 }

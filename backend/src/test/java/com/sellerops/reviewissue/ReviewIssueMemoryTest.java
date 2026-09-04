@@ -145,7 +145,7 @@ class ReviewIssueMemoryTest {
     }
 
     @Test
-    void theEvidenceSpanWidensAndNeverNarrows() {
+    void theEvidenceSpanWidensAsEvidenceArrives() {
         extraction.extract(review("배송이 늦었어요", REF.minusDays(10), null));
         extraction.extract(review("배송이 늦었어요 정말", REF, null));
         extraction.extract(review("배송이 늦게 왔어요", REF.minusDays(30), null));
@@ -153,6 +153,86 @@ class ReviewIssueMemoryTest {
         ReviewIssue issue = issueByKey("배송:지연");
         assertThat(issue.getFirstEvidenceOn()).isEqualTo(REF.minusDays(30));
         assertThat(issue.getLastEvidenceOn()).isEqualTo(REF);
+    }
+
+    // ---- reconcile (Issue Evidence Trust Closure v1) ---------------------------------------------
+
+    /**
+     * The case the closure exists for: a unit an earlier extractor called evidence, which the current
+     * one does not. Re-extraction must RETRACT it — before this, evidence could only be added, so a
+     * better extractor could never undo a worse one.
+     */
+    @Test
+    void reExtractionRetractsEvidenceTheCurrentExtractorNoLongerMatches() {
+        Review saved = review("파손없이 잘 도착했네요", REF, null);
+        // Simulate what v1 wrote: the negated unit stored as evidence for 배송:파손.
+        ReviewIssue issue = new ReviewIssue();
+        issue.setOrgId(org);
+        issue.setSignatureKey("배송:파손");
+        issue.setTitle("배송 파손");
+        issue.setAspect("배송");
+        issue.setProblem("파손");
+        issue.setSeverity(IssueSeverity.HIGH);
+        issue.setLifecycleState(IssueLifecycleState.OBSERVING);
+        issue.setExtractorKind("RULE_BASED");
+        issue.setExtractorVersion("issue-rules-v1");
+        issue.setDismissed(false);
+        issue.setFirstEvidenceOn(REF);
+        issue.setLastEvidenceOn(REF);
+        issue = issues.save(issue);
+        ReviewIssueEvidence stale = new ReviewIssueEvidence();
+        stale.setOrgId(org);
+        stale.setIssueId(issue.getId());
+        stale.setReviewId(saved.getId());
+        stale.setUnitOrdinal(0);
+        stale.setOccurredOn(REF);
+        stale.setMatchConfidence(MatchConfidence.EXACT_SIGNATURE);
+        evidence.save(stale);
+
+        var result = extraction.extract(saved);
+
+        assertThat(result.evidenceRemoved()).isEqualTo(1);
+        assertThat(result.evidenceAdded()).isZero();
+        assertThat(evidence.countByOrgIdAndIssueId(org, issue.getId())).isZero();
+        assertThat(unknowns.countByOrgIdAndReason(org, UnknownReason.NEGATED_PROBLEM)).isEqualTo(1);
+        ReviewIssue after = issues.findById(issue.getId()).orElseThrow();
+        // Identity and lifecycle survive; only the span is re-derived from what remains.
+        assertThat(after.getLifecycleState()).isEqualTo(IssueLifecycleState.OBSERVING);
+        assertThat(after.getFirstEvidenceOn()).isNull();
+        assertThat(after.getLastEvidenceOn()).isNull();
+    }
+
+    /** The span narrows when the evidence that held its edge is retracted. */
+    @Test
+    void theEvidenceSpanIsReDerivedAfterARetraction() {
+        Review edge = review("배송이 늦었어요", REF.minusDays(30), null);
+        extraction.extract(edge);
+        extraction.extract(review("배송이 늦게 왔어요", REF, null));
+        assertThat(issueByKey("배송:지연").getFirstEvidenceOn()).isEqualTo(REF.minusDays(30));
+
+        // The same review re-imported with a body that no longer complains.
+        edge.setBody("배송이 늦지 않았어요");
+        reviews.save(edge);
+        extraction.extract(edge);
+
+        ReviewIssue issue = issueByKey("배송:지연");
+        assertThat(evidence.countByOrgIdAndIssueId(org, issue.getId())).isEqualTo(1);
+        assertThat(issue.getFirstEvidenceOn()).isEqualTo(REF);
+        assertThat(issue.getLastEvidenceOn()).isEqualTo(REF);
+    }
+
+    /** A synthetic review is refused at the write, whatever the read-time filter is doing. */
+    @Test
+    void aSyntheticReviewWritesNoEvidenceAndNoUnknownRow() {
+        Review seeded = review("배송이 늦었어요", REF, null);
+        seeded.setDataOrigin(com.sellerops.common.DataOrigin.DEMO_SEED);
+        seeded = reviews.save(seeded);
+
+        var result = extraction.extract(seeded);
+
+        assertThat(result.changedAnything()).isFalse();
+        assertThat(issues.findByOrgIdAndSignatureKey(org, "배송:지연")).isEmpty();
+        assertThat(unknowns.existsByOrgId(org)).isFalse();
     }
 
     /** The date bucket must recover the calendar date the channel displayed, not shift by a day. */

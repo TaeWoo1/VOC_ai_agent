@@ -120,6 +120,39 @@ public final class IssueVocabulary {
     }
 
     /**
+     * One keyword hit with its position, so a caller can ask what surrounds it. {@code key} is the
+     * aspect or problem the keyword belongs to; {@code [start, end)} is where the keyword sits.
+     */
+    public record Hit(String key, int start, int end) {
+    }
+
+    /** Every aspect hit in detection order (table order, first occurrence of each keyword). */
+    public static List<Hit> aspectHits(String unit) {
+        return hits(ASPECTS, unit);
+    }
+
+    /** Every problem hit in detection order (table order, first occurrence of each keyword). */
+    public static List<Hit> problemHits(String unit) {
+        return hits(PROBLEMS, unit);
+    }
+
+    private static List<Hit> hits(Map<String, List<String>> table, String unit) {
+        if (unit == null || unit.isBlank()) {
+            return List.of();
+        }
+        List<Hit> out = new java.util.ArrayList<>();
+        for (Map.Entry<String, List<String>> entry : table.entrySet()) {
+            for (String keyword : entry.getValue()) {
+                int at = unit.indexOf(keyword);
+                if (at >= 0) {
+                    out.add(new Hit(entry.getKey(), at, at + keyword.length()));
+                }
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    /**
      * Severity of a problem. Throws for an unknown problem rather than defaulting: a severity
      * quietly defaulted to NORMAL would let a vocabulary edit downgrade 파손 without anyone
      * noticing, and severity is what an operator triages on.

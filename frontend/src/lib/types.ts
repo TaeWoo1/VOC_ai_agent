@@ -2734,3 +2734,122 @@ export interface ReviewDetailResponse {
   triageTier: string | null;
   issues: Array<{ issueId: string; title: string; severity: string | null; occurredOn: string | null }>;
 }
+
+// ---- Agentic Report v1 (docs/agentic_report_v1.md) -------------------------------------------------
+
+export type ReportKind = "WEEKLY" | "MONTHLY";
+
+/**
+ * One figure over the period. `periodic=false` is a figure with no period (미답변 문의 NOW); on a periodic
+ * figure `previous=null` means the previous window held no reading at all — not a zero, so no delta.
+ */
+export interface ReportCounter {
+  id: string;
+  labelKo: string;
+  periodic: boolean;
+  current: number;
+  previous: number | null;
+  delta: number | null;
+  to: string | null;
+}
+
+export interface ReportIssueFact {
+  id: string;
+  issueId: string;
+  title: string;
+  severity: string;
+  severityLabelKo: string;
+  current: number;
+  previous: number;
+  delta: number;
+  changeLabelsKo: string[];
+  productId: string | null;
+  productName: string | null;
+  to: string;
+}
+
+export interface ReportOpportunityFact {
+  id: string;
+  issueId: string;
+  kind: string;
+  kindLabelKo: string;
+  status: string;
+  statusLabelKo: string;
+  issueTitle: string;
+  productId: string | null;
+  productName: string | null;
+  recommendationKo: string;
+  nextActionKo: string;
+  to: string;
+}
+
+export interface ReportNextStep {
+  id: string;
+  labelKo: string;
+  to: string;
+  factIds: string[];
+}
+
+/**
+ * Mirrors com.sellerops.report.ReportFacts — every value the report may say, each with an id a
+ * sentence can cite. Frozen at generation; reopening reads the same object.
+ */
+export interface ReportFacts {
+  period: {
+    kind: ReportKind;
+    kindLabelKo: string;
+    start: string;
+    end: string;
+    labelKo: string;
+    previousStart: string;
+    previousEnd: string;
+  };
+  counters: ReportCounter[];
+  issues: ReportIssueFact[];
+  opportunities: ReportOpportunityFact[];
+  nextSteps: ReportNextStep[];
+  generatedAt: string;
+}
+
+export type ReportSummaryLineKind = "FACT" | "INTERPRETATION" | "LIMIT";
+
+export interface ReportSummaryLine {
+  text: string;
+  kind: ReportSummaryLineKind;
+  factIds: string[];
+}
+
+export interface ReportNarrativeLine {
+  text: string;
+  factIds: string[];
+}
+
+export type NarrativeStatus = "READY" | "UNAVAILABLE" | "FAILED";
+
+/** Mirrors com.sellerops.report.dto.AgentReportView. */
+export interface AgentReportView {
+  id: string;
+  kind: ReportKind;
+  kindLabelKo: string;
+  periodStart: string;
+  periodEnd: string;
+  periodLabelKo: string;
+  version: number;
+  generatedAt: string;
+  facts: ReportFacts;
+  summary: { lines: ReportSummaryLine[] };
+  narrative: { headline: string | null; lines: ReportNarrativeLine[] } | null;
+  narrativeStatus: NarrativeStatus;
+  narrativeNoteKo: string | null;
+}
+
+export interface AgentReportListItem {
+  id: string;
+  kind: ReportKind;
+  periodStart: string;
+  periodEnd: string;
+  periodLabelKo: string;
+  version: number;
+  generatedAt: string;
+  narrativeStatus: NarrativeStatus;
+}

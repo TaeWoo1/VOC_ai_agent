@@ -60,7 +60,7 @@ describe("v2 app routes", () => {
     // The mixed queue is absorbed: its bare path lands on 문의.
     ["/inbox", "문의"],
     ["/memory", "고객운영 메모리"],
-    ["/reports", "주간 고객운영 리포트"],
+    ["/reports", "운영 리포트"],
     ["/connect", "채널 연결"],
     ["/settings", "설정"],
   ] as const) {

@@ -30,8 +30,10 @@ class ReviewIssueRefreshServiceTest {
     private final ReviewRepository reviews = mock(ReviewRepository.class);
     private final ReviewIssueExtractionService extraction = mock(ReviewIssueExtractionService.class);
     private final ReviewIssueLifecycleService lifecycle = mock(ReviewIssueLifecycleService.class);
+    private final ReviewIssueRepository issues = mock(ReviewIssueRepository.class);
     private final ReviewIssueRefreshService service =
-            new ReviewIssueRefreshService(reviews, extraction, lifecycle);
+            new ReviewIssueRefreshService(reviews, extraction, lifecycle, issues,
+                    new RuleBasedIssueSignatureExtractor(false));
 
     private final UUID org = UUID.randomUUID();
 

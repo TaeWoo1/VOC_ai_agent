@@ -23,5 +23,17 @@ public enum UnknownReason {
      * be attributed — the most interesting rows in the pen, and the first thing a clustering pass
      * should be pointed at.
      */
-    NO_ASPECT
+    NO_ASPECT,
+    /**
+     * A problem word was present and NEGATED — 「파손없이」, 「불량품도 없고」, 「어렵진 않아요」 (Issue
+     * Evidence Trust Closure v1). Kept apart from {@link #NO_PROBLEM} on purpose: a unit that names a
+     * problem to deny it is exactly the row a later audit of {@link NegationScope} needs to find, and
+     * folding it into "nothing was wrong" would make that audit a re-read of the whole pen.
+     */
+    NEGATED_PROBLEM,
+    /**
+     * The unit names ANOTHER product as its subject — 「타사 제품은 금방 떨어졌는데」. A real problem,
+     * somebody else's; not evidence about this seller's product.
+     */
+    OTHER_PRODUCT
 }

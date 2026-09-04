@@ -15,7 +15,7 @@ class RuleBasedIssueSignatureExtractorTest {
     @Test
     void provenanceIsStatedSoALaterExtractorIsTellableApart() {
         assertThat(extractor.kind()).isEqualTo("RULE_BASED");
-        assertThat(extractor.version()).isEqualTo("issue-rules-v1");
+        assertThat(extractor.version()).isEqualTo("issue-rules-v2");
     }
 
     /**

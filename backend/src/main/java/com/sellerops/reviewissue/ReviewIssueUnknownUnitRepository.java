@@ -21,4 +21,7 @@ public interface ReviewIssueUnknownUnitRepository
      * claimed as done here, because it is not.
      */
     long countByOrgIdAndReason(UUID orgId, UnknownReason reason);
+
+    /** The pen rows of one review, so a re-extraction can reconcile them against the current verdict. */
+    java.util.List<ReviewIssueUnknownUnit> findByOrgIdAndReviewId(UUID orgId, UUID reviewId);
 }
