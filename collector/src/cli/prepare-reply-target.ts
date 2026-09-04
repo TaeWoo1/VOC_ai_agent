@@ -33,6 +33,7 @@ import {
   type ReplyTargetRequestBundle,
   type ReplyTargetResultBundle,
 } from "../action-window/reply-submission/reply-target-bundle";
+import { invokedDirectly } from "./invoked-directly";
 
 const CONFIRM_FLAG = "--i-understand-this-mints-a-submission-ref";
 const REQUEST_BUNDLE_REL_PATH = ".reply-target/request.json";
@@ -233,4 +234,4 @@ async function main(): Promise<void> {
 }
 
 // Run ONLY when invoked directly (never on import) so hermetic tests launch nothing.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void main();
+if (process.argv[1] && invokedDirectly(import.meta.url, "prepare-reply-target.ts")) void main();

@@ -1,7 +1,7 @@
 {
   "name": "@sellerops/collector",
   "private": true,
-  "version": "0.0.1-poc",
+  "version": "0.1.0",
   "type": "module",
   "description": "SellerOps NAVER Review Collector POC. Offline core + a live export-discovery layer (Playwright). Live NAVER runs are human-attended and require explicit per-run operator approval; the offline test suite needs no browser.",
   "scripts": {

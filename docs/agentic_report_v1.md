@@ -218,6 +218,6 @@ rewritten for the snapshot contract. Safety tests weakened: **0**.
 - Report figures use REAL rows only, never the demo corpus, so a demo deployment's report can be
   emptier than its dashboard (the dashboard's fallback rule is deliberate and unchanged).
 - The narrative's headline is not required to cite ids (only vocabulary-checked).
-- Evidence `occurred_on` is a UTC date while the report calendar is KST — an evidence row can sit one
-  day across a period edge.
+- ~~Evidence `occurred_on` is a UTC date while the report calendar is KST~~ — closed 2026-09-05
+  (`docs/local_helper_pilot_packaging_v1.md` §10): the issue window now buckets by the review's KST receipt date.
 - First-open latency is the narrative call (19–24 s); the page shows 「불러오는 중…」 without a clock.

@@ -27,6 +27,7 @@ import { FilePairingStore } from "../bridge/pairing-store";
 import { BridgeServer } from "../bridge/bridge-server";
 import { parseAllowedOrigins } from "../bridge/origin-policy";
 import { createStderrApprovalPresenter } from "../bridge/stderr-approval-presenter";
+import { invokedDirectly } from "./invoked-directly";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const collectorRoot = resolve(here, "..", "..");
@@ -120,6 +121,6 @@ async function main(): Promise<void> {
 }
 
 const invokedPath = process.argv[1];
-if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+if (invokedPath !== undefined && invokedDirectly(import.meta.url, "bridge.ts", invokedPath)) {
   void main();
 }

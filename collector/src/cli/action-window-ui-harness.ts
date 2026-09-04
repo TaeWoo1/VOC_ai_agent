@@ -22,6 +22,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { log } from "../log";
 import { resolveSyntheticUiHarnessConfig, startSyntheticUiHarness } from "../agent/synthetic-ui-harness";
+import { invokedDirectly } from "./invoked-directly";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const collectorRoot = resolve(here, "..", "..");
@@ -69,6 +70,6 @@ async function main(): Promise<void> {
 }
 
 const invokedPath = process.argv[1];
-if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+if (invokedPath !== undefined && invokedDirectly(import.meta.url, "action-window-ui-harness.ts", invokedPath)) {
   void main();
 }

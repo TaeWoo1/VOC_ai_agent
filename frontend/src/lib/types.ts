@@ -330,8 +330,17 @@ export interface ConnectionStatusView {
   lastSuccessAt: string | null;
   consecutiveFailures: number;
   lastError: string | null;
+  /** The seller's sentence for `lastError` (backend `ConnectorErrorWording`); `lastError` stays for diagnostics. */
+  lastErrorKo?: string | null;
   lastSyncedAt: string | null;
   nextScheduledAt: string | null;
+  /**
+   * The marketplace session as the helper LAST observed it (`contracts/session-readiness/v1`:
+   * READY · LOGIN_REQUIRED · TWO_FACTOR_REQUIRED · ACCOUNT_AMBIGUOUS · EXPIRED · UNOBSERVED_EXTERNAL) and when.
+   * A different axis from `state`: a channel can be sync-healthy with an expired login.
+   */
+  sessionReadiness?: string | null;
+  sessionObservedAt?: string | null;
   /** Credential-expiry sub-view (Coupang credential-expiry slice). Present only when the backend computes
    *  it for the channel; absent/null for channels without a token-expiry concept. Sanitized primitives
    *  only — no secret, token, or provider body. See {@link CoupangExpiryStatusView}. */

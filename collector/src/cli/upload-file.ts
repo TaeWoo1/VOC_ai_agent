@@ -12,6 +12,7 @@ import { log } from "../log";
 import { decideState, writeStatus, type RunSignals } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
 import { pathToFileURL } from "node:url";
+import { invokedDirectly } from "./invoked-directly";
 
 async function main(): Promise<void> {
   const filePath = process.argv[2];
@@ -56,6 +57,6 @@ async function main(): Promise<void> {
 // Before R2 this called `main()` at module top level, so merely importing the file (a test, a tooling
 // script, an editor's auto-import) ran the whole entrypoint, argv parse and all.
 const invokedPath = process.argv[1];
-if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+if (invokedPath !== undefined && invokedDirectly(import.meta.url, "upload-file.ts", invokedPath)) {
   void main();
 }

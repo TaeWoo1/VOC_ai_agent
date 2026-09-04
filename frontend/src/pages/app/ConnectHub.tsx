@@ -4,6 +4,7 @@ import { Section, ListBox } from "../../components/ui/Section";
 import { Disclosure } from "../../components/ui/Disclosure";
 import { BtnLink } from "../../components/ui/Btn";
 import { ChannelList } from "../../components/connect/ChannelList";
+import { HelperStatusCard } from "../../components/connect/HelperStatusCard";
 import { HomeReviewOpsCard } from "../../components/actionWindow/HomeReviewOpsCard";
 import { useOperationsStore } from "../../hooks/useOperationsStore";
 import { isFixturePreviewEnabled } from "../../lib/actionWindow/devMode";
@@ -151,6 +152,10 @@ export function ConnectHub() {
 
   const ops = useOperationsStore();
   const liveRun = ops.sourceMode === "bridge" || isFixturePreviewEnabled() ? ops.run : null;
+  // The NAVER account's status carries the helper's last login observation; the helper card reads it.
+  const naverChannel = channels.find((channel) => channel.code === "NAVER") ?? null;
+  const naverAccount = naverChannel ? selectChannelAccount(accounts, naverChannel.id) : null;
+  const naverHealth = naverAccount ? (health.get(naverAccount.id) ?? null) : null;
 
   return (
     <>
@@ -186,16 +191,48 @@ export function ConnectHub() {
         </ListBox>
       </Section>
 
+      {/* The helper is the second thing on this screen, after the channels it serves: the seller who
+          arrives here from the installer sees the state and the one control that changes it, and never a
+          port, a token or a pairing word (Local Helper Pilot Packaging v1). */}
       <Section
-        title="정기 자료 가져오기"
-        hint="연결이 어려운 채널은 정해진 주기에 자료를 넘겨주시면 이어서 정리합니다"
+        title="reviewnary 도우미"
+        hint="판매자센터 화면과 함께 일할 때 필요합니다"
         action={
-          <BtnLink to="/connect/upload" size="sm" variant="outline">
-            자료 넘기기
+          <BtnLink to="/connect/helper" size="sm" variant="ghost">
+            설치·업데이트 안내
           </BtnLink>
         }
       >
-        <Disclosure label="어떻게 진행되나요">
+        <ListBox ariaLabel="도우미 상태">
+          <HelperStatusCard naverHealth={naverHealth} />
+        </ListBox>
+      </Section>
+      {/* One section for getting data in, with its two ways side by side. The old pair — 「정기 자료
+          가져오기」 and 「리뷰 수집 실행」 — described the same job twice and pointed at a third screen it
+          called 「작업대」, a word from our side of the desk. */}
+      <Section
+        title="자료 가져오기"
+        hint="연결이 어려운 채널은 파일로, 네이버 리뷰는 판매자센터 화면에서 기간별로"
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <BtnLink to="/connect/upload" size="sm" variant="outline">
+              자료 넘기기
+            </BtnLink>
+            <BtnLink to="/connect/review-history" size="sm" variant="outline">
+              기간별로 가져오기
+            </BtnLink>
+          </div>
+        }
+      >
+        <HomeReviewOpsCard run={liveRun} />
+        <p className="mt-3 break-keep text-sm text-muted">
+          지난 실행과 구간별 이력은{" "}
+          <BtnLink to="/connect/imports" size="sm" variant="ghost">
+            실행 기록
+          </BtnLink>
+          에서 볼 수 있습니다.
+        </p>
+        <Disclosure label="파일로 넘기면 어떻게 진행되나요" className="mt-2">
           <ol className="mt-2 space-y-1.5 text-sm text-muted">
             {[
               "가져올 자료를 고릅니다.",
@@ -209,38 +246,7 @@ export function ConnectHub() {
               </li>
             ))}
           </ol>
-          {/* The link that used to live here moved OUT of this disclosure — see the section below. A path
-              to a screen is not a path if it is folded inside prose in a section about something else. */}
-          <p className="mt-2 break-keep text-sm text-muted">
-            이전 기간의 리뷰는 아래 「리뷰 수집 실행」에서 구간별로 채울 수 있습니다.
-          </p>
         </Disclosure>
-      </Section>
-
-      {/* **The recovery surface has to be reachable by pressing things.**
-
-          `/connect/review-history` is where a seller picks the period, continues a stopped run, and — since
-          the last package — abandons a plan that covers the wrong days. Its ONLY entry point was a ghost link
-          inside the collapsed 「어떻게 진행되나요」 disclosure of a different section, which is not an entry
-          point: on 2026-09-02 the operator reached it by typing the URL, and said so. It is now the action of
-          the section it belongs to, beside the run it repairs. */}
-      <Section
-        title="리뷰 수집 실행"
-        hint="판매자센터에서 리뷰 파일을 내려받는 작업의 상태와 이력"
-        action={
-          <BtnLink to="/connect/review-history" size="sm" variant="outline">
-            기간별로 가져오기
-          </BtnLink>
-        }
-      >
-        <HomeReviewOpsCard run={liveRun} />
-        <p className="mt-3 break-keep text-sm text-muted">
-          지난 실행 기록과 구간별 이력은{" "}
-          <BtnLink to="/connect/imports" size="sm" variant="ghost">
-            작업대
-          </BtnLink>
-          에서 볼 수 있습니다.
-        </p>
       </Section>
     </>
   );

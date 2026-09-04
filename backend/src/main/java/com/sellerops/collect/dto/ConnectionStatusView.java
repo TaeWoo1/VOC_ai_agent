@@ -30,6 +30,11 @@ public record ConnectionStatusView(
         Instant lastSuccessAt,
         int consecutiveFailures,
         String lastError,
+        /**
+         * The seller's sentence for {@code lastError} ({@code ConnectorErrorWording}), or null when there
+         * is none. {@code lastError} stays beside it, verbatim, for the diagnostics fold.
+         */
+        String lastErrorKo,
         Instant lastSyncedAt,
         Instant nextScheduledAt,
         String sessionReadiness,

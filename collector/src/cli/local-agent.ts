@@ -31,7 +31,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig } from "../config";
+import { helperHome, helperVersion, loadConfig } from "../config";
 import {
   createLocalAgentConnectorStartup,
   parseConnectorConnections,
@@ -126,6 +126,7 @@ import { parseAllowedOrigins } from "../bridge/origin-policy";
 import { nullApprovalPresenter, type ApprovalPresenter } from "../bridge/approval-presenter";
 import { createStderrApprovalPresenter } from "../bridge/stderr-approval-presenter";
 import { createMacOsApprovalPresenter } from "../bridge/macos-approval-presenter";
+import { invokedDirectly } from "./invoked-directly";
 
 /**
  * Collector package root — derived ONLY for the local Bridge pairing-file path (`.bridge/pairings.json`).
@@ -1610,7 +1611,7 @@ export function buildReplySubmissionConfig(): AgentReplySubmissionConfig {
     runId: mintReplyRunId(),
     channelCode: "naver",
     createDriver: () => new SyntheticReplySubmitDriver(),
-    persistDir: defaultReplyRunDirFor(collectorRoot),
+    persistDir: defaultReplyRunDirFor(helperHome()),
   };
 }
 
@@ -1778,7 +1779,7 @@ function buildNaverImportCarrierCore(
     });
 
     const proven = new NaverLiveProbeDriver(page, {
-      quarantineDir: defaultQuarantineDirFor(collectorRoot),
+      quarantineDir: defaultQuarantineDirFor(helperHome()),
       // Hand a detected download to a managed, seller-named copy under the gitignored downloads dir, so the
       // operator gets a real, openable file instead of an unnamed GUID temp artifact. The name is sanitized to
       // a basename (no path separators, no traversal) and NEVER logged; the write is best-effort.
@@ -1893,7 +1894,7 @@ function buildNaverImportCarrierCore(
     // adapter is `NAVER_ACTION_WINDOW_IMPORT`, so this always admits and the live path is unchanged; the guard
     // exists so a build with no bound adapter can never start a run whose work has nowhere to go.
     admit: () => coordinator.admitSegment(),
-    persistDir: defaultImportRunDirFor(collectorRoot),
+    persistDir: defaultImportRunDirFor(helperHome()),
     async resolveScope(launchRef: string): Promise<ResolvedLaunchScope | null> {
       try {
         const token = await login(cfg.baseUrl, cfg.email, cfg.password);
@@ -2244,11 +2245,11 @@ export function buildActionWindowConfig(
   env: NodeJS.ProcessEnv,
 ): AgentActionWindowConfig {
   const runId = `run_${randomBytes(6).toString("hex")}`;
-  const persistDir = defaultOperationRunDirFor(collectorRoot);
+  const persistDir = defaultOperationRunDirFor(helperHome());
   if (channel === "naver-fixture") {
     const ingestLocal = args.includes(ACTION_WINDOW_INGEST_LOCAL_FLAG) && env.NODE_ENV !== "production";
     const real: NaverRealDownstreamOptions = {
-      quarantineDir: defaultQuarantineDirFor(collectorRoot),
+      quarantineDir: defaultQuarantineDirFor(helperHome()),
       ...(ingestLocal
         ? (() => {
             const cfg = loadConfig(env);
@@ -2285,8 +2286,8 @@ export function resolveAgentBridgeConfig(
   return {
     port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : DEFAULT_BRIDGE_PORT,
     allowedOrigins: parseAllowedOrigins(env.BRIDGE_ALLOWED_ORIGINS ?? DEV_DEFAULT_BRIDGE_ORIGINS),
-    pairingFile: resolve(collectorRoot, ".bridge", "pairings.json"),
-    agentVersion: "0.0.1-poc",
+    pairingFile: resolve(helperHome(env), ".bridge", "pairings.json"),
+    agentVersion: helperVersion(env),
     refSalt: env.BRIDGE_REF_SALT ?? env.STORAGE_PROBE_SALT ?? "sellerops-bridge",
     autoApprovePairing: args.includes(BRIDGE_DEV_AUTO_APPROVE_FLAG) && env.NODE_ENV !== "production",
   };
@@ -2748,8 +2749,12 @@ async function main(): Promise<void> {
 
 // Run only when executed directly (e.g. `tsx src/cli/local-agent.ts`), NEVER on import — importing
 // must have no side effects (no argv parse, no file read, no browser launch).
-const invokedPath = process.argv[1];
-if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+/**
+ * Boot this module AS the process: install the fail-loud handlers, then run. Called by the guard below when
+ * this file is what node was told to run, and by the packaged helper's entry (`bundle/helper-entry.ts`),
+ * where the guard can never be true because the bundle is not this file.
+ */
+export function runAsProcess(): void {
   // Self-Pilot Runtime v1: a resident agent must FAIL LOUD, not hang. Before this, an unhandled rejection
   // inside a driver / WS handler / Playwright call either killed the process with a bare stack trace or (a
   // rejected promise nobody awaited) left a half-alive agent whose bridge still answered /health. Now both
@@ -2767,4 +2772,9 @@ if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).
     process.exit(9);
   });
   void main();
+}
+
+const invokedPath = process.argv[1];
+if (invokedPath !== undefined && invokedDirectly(import.meta.url, "local-agent.ts", invokedPath)) {
+  runAsProcess();
 }

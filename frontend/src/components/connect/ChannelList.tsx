@@ -108,9 +108,13 @@ function ChannelRow({
 
   // ONE primary action per row (docs/reviewnary_design.md §7 채널 연결): the state decides what it is.
   // The record link is a text link; the health detail folds.
-  const detailLines = [failing ? "최근 수집에서 오류가 있었습니다. 연결 관리에서 확인해 주세요." : null].filter(
-    (line): line is string => !!line,
-  );
+  // The seller's sentence for the failure (backend `ConnectorErrorWording`), and the raw connector string
+  // one fold deeper for whoever is helping them — the seller never reads a gateway code, support never
+  // loses it (Local Helper Pilot Packaging v1 §7).
+  const detailLines = [
+    failing ? (health?.lastErrorKo ?? "최근 수집에서 오류가 있었습니다. 연결 관리에서 확인해 주세요.") : null,
+  ].filter((line): line is string => !!line);
+  const diagnostic = failing && health?.lastError ? health.lastError : null;
 
   return (
     <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
@@ -169,6 +173,13 @@ function ChannelRow({
               {detailLines.map((line) => (
                 <p key={line} className="break-keep text-sm text-warn">{line}</p>
               ))}
+              {diagnostic ? (
+                <Disclosure label="기술 정보" summaryClassName="px-0 text-xs">
+                  <p className="mt-1 break-all font-mono text-xs text-muted" data-testid="connection-diagnostic">
+                    {diagnostic}
+                  </p>
+                </Disclosure>
+              ) : null}
             </div>
           </Disclosure>
         ) : null}

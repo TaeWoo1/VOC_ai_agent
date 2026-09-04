@@ -75,6 +75,6 @@ describe("the service CLI's boundary", () => {
   });
 
   it("is inert on import — loading it starts nothing", () => {
-    expect(code).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");
+    expect(code).toContain('invokedDirectly(import.meta.url, "local-agent-service.ts")');
   });
 });

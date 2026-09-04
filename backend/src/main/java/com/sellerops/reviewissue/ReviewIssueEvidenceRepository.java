@@ -117,14 +117,24 @@ public interface ReviewIssueEvidenceRepository extends JpaRepository<ReviewIssue
     }
 
     /**
-     * Evidence rows in a date window for every issue of the org at once — the report's per-period
+     * Evidence rows in a KST date window for every issue of the org at once — the report's per-period
      * tally (Agentic Report v1). One query per period rather than one per issue.
+     *
+     * <p><b>Bucketed by the review's Asia/Seoul receipt date, not by {@code occurred_on}.</b>
+     * {@code occurred_on} is the review's UTC date by the extraction contract, and every other window in
+     * this package is UTC-consistent with it; the report's periods are the seller's calendar (the one the
+     * Overview series bucket by), and a review received at 00:30 KST is that day's review, not yesterday's.
+     * Measured on the Demo Org, 2026-09-04: 112 REAL reviews and 1,245 inquiries fall on a different day
+     * in UTC than in KST. Native, because the conversion is the database's.
      */
-    @Query("""
-            select e.issueId, count(e) from ReviewIssueEvidence e
-            where e.orgId = :orgId and e.occurredOn between :fromInclusive and :toInclusive
-            group by e.issueId
-            """)
+    @Query(value = """
+            select cast(e.issue_id as varchar), count(*)
+            from review_issue_evidence e
+            join reviews r on r.id = e.review_id
+            where e.org_id = :orgId
+              and (r.received_at at time zone 'Asia/Seoul')::date between :fromInclusive and :toInclusive
+            group by e.issue_id
+            """, nativeQuery = true)
     List<Object[]> issueCountsInWindow(@Param("orgId") UUID orgId,
                                        @Param("fromInclusive") LocalDate fromInclusive,
                                        @Param("toInclusive") LocalDate toInclusive);

@@ -242,7 +242,7 @@ describe("the CLI cannot act on the marketplace", () => {
   });
 
   it("is inert on import — nothing launches unless it is the invoked entrypoint", () => {
-    expect(CLI_SOURCE).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");
+    expect(CLI_SOURCE).toContain('invokedDirectly(import.meta.url, "acquire-coupang-reviews.ts")');
   });
 
   it("screens the backend origin before the browser and before the login", () => {

@@ -59,6 +59,7 @@ import { verifyRepoIdentity } from "./repo-identity";
 // is supposed to approve. Binding both to ONE constant keeps the withdraw path single: set it false and the
 // manifest stops being emittable at the same instant the run stops being executable.
 import { WING_DELETION_SELECTORS_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
+import { invokedDirectly } from "./invoked-directly";
 
 const COLLECTOR_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 /** The repository a destructive run must be reading — derived from this file, never from the environment. */
@@ -415,6 +416,6 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
 }
 
 // Run only when invoked directly (inert on import so tests exercise the pure module).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && invokedDirectly(import.meta.url, "approval-manifest-cli.ts")) {
   process.exit(runApprovalManifestCli());
 }

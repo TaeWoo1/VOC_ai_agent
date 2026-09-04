@@ -270,6 +270,7 @@ public class CollectControlService {
                 health != null ? health.getLastSuccessAt() : null,
                 health != null ? health.getConsecutiveFailures() : 0,
                 health != null ? health.getLastError() : null,
+                ConnectorErrorWording.sellerSentence(health != null ? health.getLastError() : null),
                 account.getLastSyncedAt(),
                 nextScheduledAt,
                 sessionReadiness,

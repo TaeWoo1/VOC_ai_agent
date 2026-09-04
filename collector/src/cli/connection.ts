@@ -42,6 +42,7 @@ import {
   type BindResult,
 } from "../connection/onboarding";
 import type { FingerprintUnresolvableReason } from "../naver/account-fingerprint";
+import { invokedDirectly } from "./invoked-directly";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const collectorRoot = resolve(here, "..", "..");
@@ -321,6 +322,6 @@ function main(): void {
 // Run only when executed directly (e.g. `tsx src/cli/connection.ts`), NOT when
 // imported by tests — importing must have no side effects (no argv parse, no exit).
 const invokedPath = process.argv[1];
-if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+if (invokedPath !== undefined && invokedDirectly(import.meta.url, "connection.ts", invokedPath)) {
   main();
 }

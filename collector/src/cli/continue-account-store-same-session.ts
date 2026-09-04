@@ -37,6 +37,7 @@ import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import { actionBarrierRefusedMessage, barrierRefusedRecord, confirmActionBarrier } from "./operator-action-barrier";
 import { pathToFileURL } from "node:url";
+import { invokedDirectly } from "./invoked-directly";
 
 const HYDRATION_TIMEOUT_MS = 15_000;
 // The human may need to clear 2FA/CAPTCHA and reach the reconnect-continue screen.
@@ -223,6 +224,6 @@ async function main(): Promise<void> {
 // Before R2 this called `main()` at module top level, so merely importing the file (a test, a tooling
 // script, an editor's auto-import) ran the whole entrypoint, argv parse and all.
 const invokedPath = process.argv[1];
-if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+if (invokedPath !== undefined && invokedDirectly(import.meta.url, "continue-account-store-same-session.ts", invokedPath)) {
   void main();
 }

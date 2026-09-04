@@ -1,8 +1,103 @@
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
+
+
+/**
+ * **The helper's state root** (Local Helper Pilot Packaging v1, 2026-09-05).
+ *
+ * Everything the helper keeps between runs — the persistent NAVER profile, the pairings, the status
+ * file, downloads, run records — lived under the git checkout, because the checkout WAS the helper. A
+ * packaged helper is a bundle the installer replaces on update, so its state has to live somewhere
+ * the update does not touch. `REVIEWNARY_HELPER_HOME` names that place (the installer sets it in the
+ * launchd environment; it is a path, never a secret). Unset — the developer checkout — everything is
+ * exactly where it always was: this module's own tree.
+ */
+export const HELPER_HOME_ENV = "REVIEWNARY_HELPER_HOME";
+
+export function helperHome(env: NodeJS.ProcessEnv = process.env): string {
+  const home = env[HELPER_HOME_ENV];
+  return home && home.trim() !== "" ? resolve(home.trim()) : root;
+}
+
+/**
+ * The seller's own SellerOps login for the helper, kept in `<home>/helper.env` (0600, written by the
+ * installer's first run) and loaded by the helper itself — never by launchd. The service planner refuses
+ * a password in a plist for a reason (`local-agent-service.ts`: a plist is world-readable); a 0600 file
+ * under the seller's own home is the same posture `agent-supervisor.sh` has used all along.
+ *
+ * Closed key list: a line the helper did not ask for is ignored, so the file cannot become a way to
+ * reconfigure the process. Process env wins over the file, so an operator's explicit override still holds.
+ */
+export const HELPER_ENV_FILE = "helper.env";
+export const HELPER_ENV_KEYS = [
+  "SELLEROPS_BASE_URL",
+  "SELLEROPS_APP_URL",
+  "SELLEROPS_EMAIL",
+  "SELLEROPS_PASSWORD",
+  "NAVER_REVIEW_URL",
+  "BRIDGE_ALLOWED_ORIGINS",
+] as const;
+
+export function parseHelperEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (!(HELPER_ENV_KEYS as readonly string[]).includes(key)) continue;
+    let value = line.slice(eq + 1).trim();
+    if (value.length >= 2 && ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"')))) {
+      value = value.slice(1, -1);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+/** `env` plus whatever `<home>/helper.env` fills in for keys the env does not set. Pure given the file text. */
+export function withHelperEnvFile(
+  env: NodeJS.ProcessEnv,
+  readFile: (path: string) => string | null = (path) => (existsSync(path) ? readFileSync(path, "utf8") : null),
+): NodeJS.ProcessEnv {
+  const home = env[HELPER_HOME_ENV];
+  if (!home || home.trim() === "") return env;
+  const text = readFile(resolve(home.trim(), HELPER_ENV_FILE));
+  if (text === null) return env;
+  const merged: NodeJS.ProcessEnv = { ...env };
+  for (const [key, value] of Object.entries(parseHelperEnv(text))) {
+    if (merged[key] === undefined || merged[key] === "") merged[key] = value;
+  }
+  return merged;
+}
+
+/**
+ * The helper's own version — the package version, so it moves when the package does, instead of the
+ * literal `"0.0.1-poc"` the bridge used to announce forever. Reported in `/bridge/health`, compared by the
+ * frontend against its minimum, and shown to the seller as 「도우미 업데이트가 필요합니다」 when short.
+ *
+ * `REVIEWNARY_HELPER_VERSION_OVERRIDE` exists so the update path can be REPRODUCED (a helper announcing
+ * an old version) and is honored only outside production — an installed helper cannot lie about itself.
+ */
+export function helperVersion(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.REVIEWNARY_HELPER_VERSION_OVERRIDE;
+  if (override && override.trim() !== "" && env.NODE_ENV !== "production") return override.trim();
+  // Beside the bundle first (dist: app/package.json next to app/helper.mjs), then the package root (checkout).
+  for (const candidate of [resolve(here, "package.json"), resolve(root, "package.json")]) {
+    try {
+      const pkg = JSON.parse(readFileSync(candidate, "utf8")) as { version?: unknown };
+      if (typeof pkg.version === "string" && pkg.version.trim() !== "") return pkg.version;
+    } catch {
+      // try the next
+    }
+  }
+  return "0.0.0";
+}
 
 export interface CollectorConfig {
   /** SellerOps backend base URL (the collector uploads here). */
@@ -18,8 +113,9 @@ export interface CollectorConfig {
    * In-tree base dir under which every connection-owned dedicated ESM profile lives
    * (`${profileBaseDir}/esm-agent-<hash>`). The SINGLE base shared by the local-agent reconnect
    * path and the review-capture path, so both resolve a connection to the identical profile via
-   * `connectionProfileDirFor`. Fixed at `<collectorRoot>/.profile` — deliberately NOT env-overridable
-   * (the profile root is not externalized in this slice).
+   * `connectionProfileDirFor`. Fixed at `<helperHome>/.profile` — the ONE root moves with
+   * `REVIEWNARY_HELPER_HOME` (packaged helper) and is otherwise the collector tree; it is not
+   * separately overridable, so every profile stays under the same guarded root.
    */
   profileBaseDir: string;
   /** Where captured exports land (live layer). */
@@ -126,7 +222,9 @@ function parseHostAllowlist(raw: string | undefined): string[] {
   return [...seen];
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfig {
+export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env): CollectorConfig {
+  const env = withHelperEnvFile(rawEnv);
+  const home = helperHome(env);
   return {
     baseUrl: env.SELLEROPS_BASE_URL ?? "http://localhost:8080",
     email: env.SELLEROPS_EMAIL ?? "demo@sellerops.ai",
@@ -135,12 +233,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     naverExpectedChannelCode: env.NAVER_EXPECTED_CHANNEL_CODE ?? env.NAVER_CHANNEL_CODE ?? "NAVER",
     naverExpectedStoreFingerprint: env.NAVER_EXPECTED_STORE_FINGERPRINT,
     naverExpectedContinueCardFingerprint: env.NAVER_EXPECTED_CONTINUE_CARD_FINGERPRINT,
-    profileDir: env.COLLECTOR_PROFILE_DIR ?? resolve(root, ".profile/naver"),
-    profileBaseDir: resolve(root, ".profile"),
-    esmProfileDir: env.COLLECTOR_ESM_PROFILE_DIR ?? resolve(root, ".profile/esm"),
+    profileDir: env.COLLECTOR_PROFILE_DIR ?? resolve(home, ".profile/naver"),
+    profileBaseDir: resolve(home, ".profile"),
+    esmProfileDir: env.COLLECTOR_ESM_PROFILE_DIR ?? resolve(home, ".profile/esm"),
     esmFrameOriginAllowlist: parseHostAllowlist(env.ESM_FRAME_ORIGIN_ALLOWLIST),
-    downloadDir: env.COLLECTOR_DOWNLOAD_DIR ?? resolve(root, "downloads"),
-    statusFile: env.COLLECTOR_STATUS_FILE ?? resolve(root, ".status/naver.json"),
+    downloadDir: env.COLLECTOR_DOWNLOAD_DIR ?? resolve(home, "downloads"),
+    statusFile: env.COLLECTOR_STATUS_FILE ?? resolve(home, ".status/naver.json"),
     naverReviewUrl: env.NAVER_REVIEW_URL,
     appUrl: env.SELLEROPS_APP_URL ?? "http://localhost:5173",
     esmReviewUrl: env.ESM_REVIEW_URL,

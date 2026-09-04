@@ -97,6 +97,15 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+vi.mock("../../hooks/useBridge", () => ({
+  useBridge: () => ({
+    state: { phase: "unreachable", maybeNeedsLocalNetworkAccess: false },
+    requestPairing: vi.fn(),
+    revoke: vi.fn(),
+    retry: vi.fn(),
+  }),
+}));
+
 function renderHub() {
   return render(
     <MemoryRouter>
@@ -111,7 +120,7 @@ describe("채널 연결 — the hub", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "채널 연결" }),
     ).toBeInTheDocument();
-    for (const section of ["채널", "정기 자료 가져오기", "리뷰 수집 실행"]) {
+    for (const section of ["채널", "reviewnary 도우미", "자료 가져오기"]) {
       expect(screen.getByRole("heading", { name: section })).toBeInTheDocument();
     }
   });
@@ -154,17 +163,18 @@ describe("채널 연결 — the hub", () => {
       "/connect/upload",
     );
     // Runtime Closure v2, blocker 6: this link WAS the ghost inside a collapsed disclosure of another
-    // section, which is how a seller ended up typing the URL to reach the recovery surface (2026-09-02). It is
-    // now the action of the section it belongs to, and the workbench moved to the secondary line — so the
-    // names changed while the destinations, which are what this test is about, did not.
+    // section, which is how a seller ended up typing the URL to reach the recovery surface (2026-09-02).
+    // Local Helper Pilot Packaging v1 then folded the two data sections into one and renamed the
+    // workbench link 「실행 기록」 — the destinations, which are what this test is about, did not move.
     expect(screen.getByRole("link", { name: "기간별로 가져오기" })).toHaveAttribute(
       "href",
       "/connect/review-history",
     );
-    expect(screen.getByRole("link", { name: "작업대" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "실행 기록" })).toHaveAttribute(
       "href",
       "/connect/imports",
     );
+    expect(document.body.textContent).not.toContain("작업대");
   });
 });
 
@@ -286,10 +296,22 @@ describe("채널 연결 — honesty", () => {
     }
   });
 
-  it("says 정기 자료 가져오기, not 엑셀 업로드, for the seller-facing route", async () => {
+  it("says 자료 넘기기, not 엑셀 업로드, for the seller-facing route", async () => {
     renderHub();
     await screen.findByLabelText("채널 목록");
-    expect(screen.getByRole("heading", { name: "정기 자료 가져오기" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "자료 넘기기" })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("엑셀 업로드하기");
+  });
+
+  it("shows the helper's state as a word with one control, and no internal concept", async () => {
+    renderHub();
+    await screen.findByLabelText("채널 목록");
+    expect(await screen.findByTestId("helper-state")).toHaveTextContent("설치 필요");
+    expect(screen.getByRole("link", { name: "설치 안내" })).toHaveAttribute("href", "/connect/helper");
+    const text = (document.body.textContent ?? "").toLowerCase();
+    for (const banned of ["bridge", "carrier", "pairing", "token", "47615"]) {
+      expect(text).not.toContain(banned);
+    }
   });
 });
 

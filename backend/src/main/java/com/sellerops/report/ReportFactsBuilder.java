@@ -166,7 +166,7 @@ public class ReportFactsBuilder {
     private Map<UUID, Long> countsByIssue(UUID orgId, LocalDate from, LocalDate to) {
         Map<UUID, Long> counts = new HashMap<>();
         for (Object[] row : evidence.issueCountsInWindow(orgId, from, to)) {
-            counts.put((UUID) row[0], ((Number) row[1]).longValue());
+            counts.put(UUID.fromString(String.valueOf(row[0])), ((Number) row[1]).longValue());
         }
         return counts;
     }

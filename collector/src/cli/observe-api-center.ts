@@ -37,6 +37,7 @@ import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval
 import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import { pathToFileURL } from "node:url";
+import { invokedDirectly } from "./invoked-directly";
 
 /** Coarse host category, derived from a URL WITHOUT ever logging the raw URL. */
 export type ApiCenterUrlCategory = "api_center_host" | "naver_auth_host" | "other_host" | "unknown";
@@ -750,6 +751,6 @@ async function main(): Promise<void> {
 }
 
 // Run the live path only when invoked directly (never on import — keeps offline build/test inert).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && invokedDirectly(import.meta.url, "observe-api-center.ts")) {
   void main();
 }

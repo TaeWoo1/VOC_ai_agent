@@ -449,8 +449,13 @@ export class BridgeClient {
 }
 
 /** Production factory using the browser globals + a default fixed loopback discovery URL (slice §11). */
+/** Where the helper answers on this machine — the one place the default is written for readers of health. */
+export function bridgeHttpBase(): string {
+  return import.meta.env.VITE_BRIDGE_URL ?? "http://127.0.0.1:47615";
+}
+
 export function makeBridgeClient(overrides: Partial<BridgeClientDeps> = {}): BridgeClient {
-  const httpBase = overrides.httpBase ?? (import.meta.env.VITE_BRIDGE_URL ?? "http://127.0.0.1:47615");
+  const httpBase = overrides.httpBase ?? bridgeHttpBase();
   const wsBase = overrides.wsBase ?? httpBase.replace(/^http/, "ws");
   const loopback = /^(https?:\/\/)?(127\.0\.0\.1|localhost)(:|\/|$)/.test(location.origin);
   return new BridgeClient({

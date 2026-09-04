@@ -70,10 +70,18 @@ export interface LocalAgentServiceInput {
   homeDir: string;
   /** The collector package root. The working directory, and the tree every executable path must stay inside. */
   collectorRoot: string;
+  /**
+   * Where the helper keeps its state and logs — the packaged helper's `REVIEWNARY_HELPER_HOME`. Defaults to
+   * `collectorRoot` (the developer checkout, where it always was).
+   */
+  stateRoot?: string;
   /** Absolute path to the node binary. launchd inherits almost no PATH, so a bare `node` would not resolve. */
   nodePath: string;
-  /** Absolute path to the TS loader CLI (`node_modules/.bin/tsx` resolves to a `.mjs` node runs directly). */
-  loaderPath: string;
+  /**
+   * Absolute path to the TS loader CLI (`node_modules/.bin/tsx` resolves to a `.mjs` node runs directly), or
+   * null for a BUNDLED entrypoint node runs on its own (Local Helper Pilot Packaging v1).
+   */
+  loaderPath: string | null;
   /** Absolute path to the agent entrypoint. */
   entrypoint: string;
   /** Arguments passed to the entrypoint — the connections file, the carrier flag. Never empty. */
@@ -128,7 +136,10 @@ export function buildLocalAgentServicePlan(
   if (input.platform !== "darwin") return { ok: false, refusal: "UNSUPPORTED_PLATFORM" };
   if (input.agentArgs.length === 0) return { ok: false, refusal: "NO_AGENT_ARGUMENTS" };
   if (!isAbsolute(input.nodePath)) return { ok: false, refusal: "NODE_NOT_ABSOLUTE" };
-  if (!isInsideTree(input.collectorRoot, input.loaderPath) || !isInsideTree(input.collectorRoot, input.entrypoint)) {
+  if (
+    (input.loaderPath !== null && !isInsideTree(input.collectorRoot, input.loaderPath)) ||
+    !isInsideTree(input.collectorRoot, input.entrypoint)
+  ) {
     return { ok: false, refusal: "ENTRYPOINT_OUTSIDE_TREE" };
   }
 
@@ -154,13 +165,18 @@ export function buildLocalAgentServicePlan(
     plan: {
       label: LOCAL_AGENT_SERVICE_LABEL,
       plistPath: resolve(input.homeDir, "Library/LaunchAgents", `${LOCAL_AGENT_SERVICE_LABEL}.plist`),
-      programArguments: [input.nodePath, input.loaderPath, input.entrypoint, ...input.agentArgs],
+      programArguments: [
+        input.nodePath,
+        ...(input.loaderPath === null ? [] : [input.loaderPath]),
+        input.entrypoint,
+        ...input.agentArgs,
+      ],
       workingDirectory: resolve(input.collectorRoot),
       env,
       // `.status/` is already the collector's gitignored runtime area, so service logs cannot be staged by
       // accident. The agent's stdout is sanitized JSON by contract.
-      stdoutPath: resolve(input.collectorRoot, ".status", "local-agent-service.out.log"),
-      stderrPath: resolve(input.collectorRoot, ".status", "local-agent-service.err.log"),
+      stdoutPath: resolve(input.stateRoot ?? input.collectorRoot, ".status", "local-agent-service.out.log"),
+      stderrPath: resolve(input.stateRoot ?? input.collectorRoot, ".status", "local-agent-service.err.log"),
       approvalPresenter,
     },
   };

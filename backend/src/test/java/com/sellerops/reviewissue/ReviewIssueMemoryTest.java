@@ -221,6 +221,30 @@ class ReviewIssueMemoryTest {
         assertThat(issue.getLastEvidenceOn()).isEqualTo(REF);
     }
 
+    /**
+     * The report's window is the seller's calendar: a review received at 00:30 KST on the 31st is the
+     * 31st's review even though its UTC date — and therefore {@code occurred_on} — is the 30th.
+     */
+    @Test
+    void theReportWindowCountsEvidenceByKstReceiptDate() {
+        Review review = new Review();
+        review.setOrgId(org);
+        review.setChannelId(channel);
+        review.setBody("배송이 늦었어요");
+        review.setRating(3);
+        review.setReceivedAt(Instant.parse("2026-08-30T15:30:00Z")); // 2026-08-31 00:30 Asia/Seoul
+        extraction.extract(reviews.save(review));
+        ReviewIssue issue = issueByKey("배송:지연");
+        assertThat(issue.getFirstEvidenceOn()).isEqualTo(LocalDate.of(2026, 8, 30));
+
+        List<Object[]> thisWeek = evidence.issueCountsInWindow(org, LocalDate.of(2026, 8, 31), LocalDate.of(2026, 9, 6));
+        List<Object[]> lastWeek = evidence.issueCountsInWindow(org, LocalDate.of(2026, 8, 24), LocalDate.of(2026, 8, 30));
+        assertThat(thisWeek).hasSize(1);
+        assertThat(String.valueOf(thisWeek.get(0)[0])).isEqualTo(issue.getId().toString());
+        assertThat(((Number) thisWeek.get(0)[1]).longValue()).isEqualTo(1);
+        assertThat(lastWeek).isEmpty();
+    }
+
     /** A synthetic review is refused at the write, whatever the read-time filter is doing. */
     @Test
     void aSyntheticReviewWritesNoEvidenceAndNoUnknownRow() {

@@ -59,6 +59,7 @@ import {
 import { resolveWingActionPhase, resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
+import { invokedDirectly } from "./invoked-directly";
 
 const ACQUISITION = PHASE_SPECS.COUPANG_WING_REVIEW_ACQUISITION;
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -442,6 +443,6 @@ async function main(): Promise<void> {
 }
 
 // Inert on import: an offline build, a test, or a re-export launches nothing.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && invokedDirectly(import.meta.url, "acquire-coupang-reviews.ts")) {
   void main();
 }

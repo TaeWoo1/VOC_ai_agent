@@ -1270,6 +1270,20 @@ API 집합 · 3폭 AA 0. **고치지 않고 보고**: Opportunity는 이슈만�
 도착했네요」였다(규칙 추출기의 부정문 오탐; 어휘는 측정 라벨 없이 손대지 않는다 ⇒ product-owner 결정). 마켓플레이스 0 ·
 WRITE 0 · 승인 0 · 마이그레이션 1 · 플래너 호출 2(QA) ⇒ evidence 행 없음.)
 
+**`docs/local_helper_pilot_packaging_v1.md`** (Local Helper Pilot Packaging v1 — 2026-09-05. 도우미는
+`tsx` 체크아웃이었고 두 시작 경로가 서로 배타적이었다(launchd는 비밀번호를 plist에 못 싣고 supervisor는 첫 pairing에
+터미널이 필요) ⇒ `REVIEWNARY_HELPER_HOME` 상태 루트(프로필·pairing·상태·다운로드가 업데이트에 살아남는다) + 도우미가
+스스로 읽는 0600 `helper.env`(닫힌 키 목록, plist는 경로만) + 패키지 버전 `agentVersion`. `tools/helper/build-macos.sh`가
+esbuild 번들·node·Playwright·Chromium·`설치.command`(네이티브 로그인 대화상자 → 검증 → 0600)를 만든다 — **macOS만,
+아키텍처별, 서명 없음(operator-assisted)**. 번들이 드러낸 결함: 한 파일 안에서 모든 CLI의 「직접 실행이면 main」 가드가
+참이 된다 ⇒ `invokedDirectly(import.meta.url, 자기 파일명)`. 화면: `/connect` 상단 「reviewnary 도우미」 카드가 여섯
+단어(연결됨·설치 필요·실행 필요·다시 연결 필요·연결 확인 중·업데이트 필요) + 네이버 로그인 관측(READY/LOGIN_REQUIRED/…)을
+그리고 내부 단어 0(테스트), `/connect/helper` 설치·업데이트 안내, 두 자료 섹션 하나로·「작업대」→「실행 기록」,
+`lastErrorKo`(backend `ConnectorErrorWording`, `GW.IP_NOT_ALLOWED`는 IP를 말하고 자격을 묻지 않는다) + 「기술 정보」
+fold에 원문. 실제 설치된 launchd 도우미에서 복구 재현: 미실행·종료·backend 재시작·구버전(override, dev 전용)·재부트스트랩
+전부 모델과 일치, 3폭 AA 0. **E2E 라이브 leg는 준비만**(사람이 눌러야 하는 허용·네이버 로그인·export + 단일 사용 승인) ·
+KST 경계 debt: 리포트 이슈 창을 리뷰 수신 KST 날짜로(112 리뷰·1,245 문의가 UTC와 다른 날). 마켓플레이스 0 · WRITE 0.)
+
 **`docs/agentic_report_v1.md`** (Issue Evidence Trust Closure + Agentic Report v1 — 2026-09-04. **[1]** 「파손없이 잘
 도착했네요」가 「배송 파손」 evidence가 되어 Opportunity까지 만들던 결함을 hard-code가 아니라 seam으로 닫았다: 추출기에는
 polarity seam이 **없었고**(`IssueVocabulary`는 substring 표), triage tier는 별점의 순수 함수라 절 단위 판정에 쓸 수 없다(5★

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { helperHome } from "./config";
 import { fileURLToPath } from "node:url";
 import { chromium, type BrowserContext } from "playwright";
 import { log } from "./log";
@@ -53,7 +54,7 @@ export interface PwDownload {
  * session inside the collector tree only; refuse any path that escapes it so a
  * misconfiguration cannot scatter session data across the filesystem.
  */
-export function resolveProfileDir(profileDir: string, root: string = collectorRoot): string {
+export function resolveProfileDir(profileDir: string, root: string = helperHome()): string {
   const resolved = resolve(profileDir);
   const base = resolve(root);
   if (resolved !== base && !resolved.startsWith(base + "/")) {

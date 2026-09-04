@@ -28,6 +28,7 @@ import {
   type LocalAgentServicePlan,
 } from "../agent/local-agent-service";
 import { decideApprovalPresenter } from "./local-agent";
+import { invokedDirectly } from "./invoked-directly";
 
 const collectorRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -43,6 +44,7 @@ const DEFAULT_BRIDGE_PORT = 47615;
 export const SERVICE_CLI_USAGE = [
   "Usage:",
   "  local-agent-service install --run-env <path> -- <agent args...>",
+  "  local-agent-service install --run-env <path> --home <dir> --entrypoint <dir>/app/helper.mjs -- <agent args...>",
   "  local-agent-service status",
   "  local-agent-service uninstall",
 ].join("\n");
@@ -155,25 +157,39 @@ function installedServiceEnv(plistPath: string): Record<string, string> {
   return env;
 }
 
-function planFor(agentArgs: readonly string[], runEnv: Record<string, string>): LocalAgentServicePlan {
-  const loaderPath = resolve(collectorRoot, "node_modules/tsx/dist/cli.mjs");
-  const entrypoint = resolve(collectorRoot, "src/cli/local-agent.ts");
-  // Existence is checked HERE and not in the pure builder: the builder decides whether a path is *allowed*, this
-  // decides whether it is *there*. A plist naming a missing loader installs fine and then crash-loops silently
-  // under KeepAlive, which reads to an operator exactly like "the agent does not work".
-  if (!existsSync(loaderPath)) fail("tsx loader not found — run `npm install` in collector/ first.");
-  if (!existsSync(entrypoint)) fail("agent entrypoint not found — collector/src/cli/local-agent.ts is missing.");
-
+/**
+ * The two shapes an install takes.
+ *
+ * - developer checkout (default): node → tsx loader → `src/cli/local-agent.ts`, state under the checkout.
+ * - packaged helper (`--home <dir> --entrypoint <dir>/app/helper.mjs`): node → the bundle, state under
+ *   `<dir>` (the plist carries `REVIEWNARY_HELPER_HOME=<dir>` — a path, never a secret; the seller's login
+ *   is read by the helper itself from `<dir>/helper.env`, 0600). The bundle must sit inside the home so the
+ *   tree guard still applies: an entrypoint outside the tree it claims is the refusal it always was.
+ *
+ * Existence is checked HERE and not in the pure builder: the builder decides whether a path is *allowed*,
+ * this CLI decides whether it is *there*.
+ */
+function planFor(own: readonly string[], agentArgs: readonly string[], runEnv: Record<string, string>): LocalAgentServicePlan {
+  const home = readOption(own, "--home");
+  const bundled = readOption(own, "--entrypoint");
+  if ((home === null) !== (bundled === null)) fail("--home and --entrypoint go together.");
+  const treeRoot = home === null ? collectorRoot : resolve(home);
+  const loaderPath = home === null ? resolve(collectorRoot, "node_modules/tsx/dist/cli.mjs") : null;
+  const entrypoint = home === null ? resolve(collectorRoot, "src/cli/local-agent.ts") : resolve(bundled as string);
+  if (loaderPath !== null && !existsSync(loaderPath)) fail("tsx loader not found — run `npm install` in collector/ first.");
+  if (!existsSync(entrypoint)) fail(`agent entrypoint not found — ${entrypoint} is missing.`);
+  const env = home === null ? runEnv : { ...runEnv, REVIEWNARY_HELPER_HOME: treeRoot };
   const built = buildLocalAgentServicePlan(
     {
       platform: process.platform,
       homeDir: process.env.HOME ?? "",
-      collectorRoot,
+      collectorRoot: treeRoot,
+      stateRoot: treeRoot,
       nodePath: process.execPath,
       loaderPath,
       entrypoint,
       agentArgs,
-      env: runEnv,
+      env,
     },
     decideApprovalPresenter,
   );
@@ -192,9 +208,9 @@ async function install(own: readonly string[], agentArgs: readonly string[]): Pr
   const runEnv = parseServiceEnvFile(readFileSync(runEnvPath, "utf8"));
   if (Object.keys(runEnv).length === 0) fail("--run-env file carried no bindings.");
 
-  const plan = planFor(agentArgs, runEnv);
+  const plan = planFor(own, agentArgs, runEnv);
   mkdirSync(dirname(plan.plistPath), { recursive: true });
-  mkdirSync(resolve(collectorRoot, ".status"), { recursive: true });
+  mkdirSync(dirname(plan.stdoutPath), { recursive: true });
   // 0600: the plist carries no secret by construction (the builder refuses secret-ish keys), but it also carries
   // the exact command the agent runs, and nothing outside this user needs to read or rewrite that.
   writeFileSync(plan.plistPath, renderLaunchAgentPlist(plan), { mode: 0o600 });
@@ -268,4 +284,4 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 }
 
 // Inert on import — the same rule every gated CLI in this package follows, so tests load it without effect.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void main();
+if (process.argv[1] && invokedDirectly(import.meta.url, "local-agent-service.ts")) void main();

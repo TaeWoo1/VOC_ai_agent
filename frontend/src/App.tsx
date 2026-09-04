@@ -29,6 +29,7 @@ import { CustomerInbox } from "./pages/app/CustomerInbox";
 import { InboxItemRedirect } from "./pages/app/InboxItemRedirect";
 import { CustomerMemory } from "./pages/app/CustomerMemory";
 import { ReportsV2 } from "./pages/app/ReportsV2";
+import { ConnectHelper } from "./pages/app/ConnectHelper";
 import { ConnectHub } from "./pages/app/ConnectHub";
 import { SettingsHome } from "./pages/app/SettingsHome";
 
@@ -155,6 +156,7 @@ export function App() {
             `/connect/channels/:accountId/reviews` path redirects via the legacy map below. */}
         <Route path="/connect/upload" element={<Upload />} />
         <Route path="/connect/review-history" element={<ReviewImport />} />
+        <Route path="/connect/helper" element={<ConnectHelper />} />
         <Route path="/connect/imports" element={<OperationsHome />} />
         <Route path="/connect/imports/current" element={<Operations />} />
         <Route path="/connect/cafe24" element={<Cafe24Connect />} />
