@@ -86,11 +86,22 @@ export function SettingsHome() {
       </ListBox>
 
       <ListBox ariaLabel="계정">
-        <ObjectRow
-          name="계정"
-          facets="이 브라우저에서 로그아웃합니다. 수집된 자료는 그대로 남습니다."
-          action={<Btn variant="outline" size="sm" onClick={logout}>로그아웃</Btn>}
-        />
+        <ul className="divide-y divide-line/70">
+          <li>
+            <ObjectRow
+              name="연결된 기기"
+              facets="이 계정에 연결된 reviewnary 도우미 — 비밀번호 대신 쓰는 연결이고, 여기서 해제할 수 있습니다"
+              action={<BtnLink to="/settings/devices" size="sm" variant="outline">기기 보기</BtnLink>}
+            />
+          </li>
+          <li>
+            <ObjectRow
+              name="계정"
+              facets="이 브라우저에서 로그아웃합니다. 수집된 자료는 그대로 남습니다."
+              action={<Btn variant="outline" size="sm" onClick={logout}>로그아웃</Btn>}
+            />
+          </li>
+        </ul>
       </ListBox>
     </div>
   );

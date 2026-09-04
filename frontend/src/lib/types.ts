@@ -19,6 +19,16 @@ export interface UserView {
   orgName: string;
 }
 
+/** A reviewnary 도우미 linked to this organisation (`GET /api/helper-devices`). No token, no hash, no email. */
+export interface HelperDeviceView {
+  id: string;
+  deviceName: string;
+  helperVersion: string | null;
+  linkedAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string;
+}
+
 /** Which social providers this deployment offers (`GET /api/auth/social/providers`). */
 export interface SocialProvidersView {
   google: boolean;

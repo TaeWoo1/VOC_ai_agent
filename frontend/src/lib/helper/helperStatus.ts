@@ -4,9 +4,9 @@
  * The bridge client speaks in phases (`connecting · unreachable · unpaired · pairing_pending · paired ·
  * incompatible_version · revoked …`), the health probe speaks in versions, and the backend speaks in
  * session-readiness states. None of those is a sentence a seller can act on. This module is the one place
- * those axes become the six words the product shows — 연결됨 · 설치 필요 · 실행 필요 · 다시 연결 필요 ·
- * 업데이트 필요 · 네이버 로그인 필요 — each with exactly one next action. No port, token, carrier or
- * pairing word leaves this file.
+ * those axes become the words the product shows — 연결됨 · 설치 필요 · 실행 필요 · 다시 연결 필요 ·
+ * 업데이트 필요 · 기기 연결 필요 · 네이버 로그인 필요 — each with exactly one next action. No port, token,
+ * carrier or pairing word leaves this file.
  *
  * Two honesty rules:
  * - "설치 필요" and "실행 필요" are the SAME socket-level fact (nothing answered on loopback). They are told
@@ -17,12 +17,21 @@
  *   inferred from a successful collection or a stored profile.
  */
 
-export type HelperStateKey = "CHECKING" | "CONNECTED" | "INSTALL" | "START" | "RECONNECT" | "PENDING" | "UPDATE";
+export type HelperStateKey =
+  | "CHECKING" | "CONNECTED" | "INSTALL" | "START" | "RECONNECT" | "PENDING" | "UPDATE"
+  | "LINK" | "LINKING" | "LINK_SERVER";
 
 export interface HelperAction {
-  kind: "install" | "connect" | "retry" | "update";
+  kind: "install" | "connect" | "retry" | "update" | "link";
   label: string;
 }
+
+/**
+ * Whether the paired helper is linked to the seller's ACCOUNT (Helper Device Authentication v1) — a
+ * different axis from pairing: pairing is browser ↔ helper on this machine, the link is helper ↔ reviewnary
+ * account. `undefined` = not asked (a surface that only reads pairing); `unknown` = asked, no answer yet.
+ */
+export type DeviceLinkWord = "linked" | "unlinked" | "linking" | "denied" | "expired" | "unreachable" | "unknown";
 
 export interface HelperState {
   key: HelperStateKey;
@@ -33,8 +42,11 @@ export interface HelperState {
   action: HelperAction | null;
 }
 
-/** The oldest helper this frontend will work with. Older → 업데이트 필요, with the way to update, never a dead end. */
-export const MIN_HELPER_VERSION = "0.1.0";
+/**
+ * The oldest helper this frontend will work with. Older → 업데이트 필요, with the way to update, never a dead end.
+ * 0.2.0: the first helper that links to the account with a device token instead of a stored password.
+ */
+export const MIN_HELPER_VERSION = "0.2.0";
 
 /** Numeric semver compare on the leading `major.minor.patch`; anything unparsable is older than everything. */
 export function compareVersions(a: string, b: string): number {
@@ -63,6 +75,7 @@ export interface HelperStatusInput {
   maybeNeedsLocalNetworkAccess?: boolean;
   pairingHint?: "no_response";
   attestedApproval?: boolean;
+  device?: DeviceLinkWord;
 }
 
 export function helperStatusOf(input: HelperStatusInput): HelperState {
@@ -77,7 +90,37 @@ export function helperStatusOf(input: HelperStatusInput): HelperState {
     };
   }
   if (phase === "paired") {
-    return { key: "CONNECTED", label: "연결됨", tone: "good", note: null, action: null };
+    switch (input.device) {
+      case undefined:
+      case "linked":
+        return { key: "CONNECTED", label: "연결됨", tone: "good", note: null, action: null };
+      case "unknown":
+        return { key: "CHECKING", label: "확인 중", tone: "neutral", note: null, action: null };
+      case "linking":
+        return {
+          key: "LINKING",
+          label: "연결 확인 중",
+          tone: "info",
+          note: "이 계정과 연결하는 중입니다. 잠시만 기다려 주세요.",
+          action: null,
+        };
+      case "unreachable":
+        return {
+          key: "LINK_SERVER",
+          label: "서버 연결 확인 필요",
+          tone: "warn",
+          note: "도우미가 reviewnary 서버에 닿지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
+          action: { kind: "link", label: "다시 시도" },
+        };
+      default: {
+        const note = input.device === "denied"
+          ? "연결이 거부됐습니다. 다시 연결해 주세요."
+          : input.device === "expired"
+            ? "연결 요청 시간이 지났습니다. 다시 연결해 주세요."
+            : "도우미가 아직 이 계정과 연결되지 않았습니다. 연결하면 도우미가 비밀번호 없이 이 계정으로 일합니다.";
+        return { key: "LINK", label: "기기 연결 필요", tone: "warn", note, action: { kind: "link", label: "이 기기 연결" } };
+      }
+    }
   }
   if (phase === "pairing_pending") {
     return {

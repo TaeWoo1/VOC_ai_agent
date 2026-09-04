@@ -24,10 +24,11 @@ export function helperHome(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * The seller's own SellerOps login for the helper, kept in `<home>/helper.env` (0600, written by the
- * installer's first run) and loaded by the helper itself — never by launchd. The service planner refuses
- * a password in a plist for a reason (`local-agent-service.ts`: a plist is world-readable); a 0600 file
- * under the seller's own home is the same posture `agent-supervisor.sh` has used all along.
+ * Non-secret settings the installer leaves for the helper in `<home>/helper.env`, loaded by the helper
+ * itself. **No credential lives here any more** (Helper Device Authentication v1, 2026-09-05): the helper's
+ * backend credential is the device token the seller grants from a browser session, kept by
+ * `auth/helper-session.ts` in `<home>/.auth/`; `SELLEROPS_EMAIL` / `SELLEROPS_PASSWORD` are no longer keys
+ * this file can carry, so an installer or a person cannot put a password back here.
  *
  * Closed key list: a line the helper did not ask for is ignored, so the file cannot become a way to
  * reconfigure the process. Process env wins over the file, so an operator's explicit override still holds.
@@ -36,8 +37,6 @@ export const HELPER_ENV_FILE = "helper.env";
 export const HELPER_ENV_KEYS = [
   "SELLEROPS_BASE_URL",
   "SELLEROPS_APP_URL",
-  "SELLEROPS_EMAIL",
-  "SELLEROPS_PASSWORD",
   "NAVER_REVIEW_URL",
   "BRIDGE_ALLOWED_ORIGINS",
 ] as const;
@@ -102,7 +101,10 @@ export function helperVersion(env: NodeJS.ProcessEnv = process.env): string {
 export interface CollectorConfig {
   /** SellerOps backend base URL (the collector uploads here). */
   baseUrl: string;
-  /** SellerOps login (local dev). NOT a NAVER credential. */
+  /**
+   * Developer-checkout login (env only, never a file). The packaged helper (NODE_ENV=production) never reads
+   * these: its backend credential is the linked device token (`auth/helper-session.ts`).
+   */
   email: string;
   password: string;
   /** Channel code to resolve to a channel id for uploads. */

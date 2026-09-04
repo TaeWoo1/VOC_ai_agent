@@ -38,8 +38,9 @@ opens it once via right-click → 열기; the pilot runbook has the operator on 
 
 - `app/helper.mjs` — the resident helper, one ESM bundle (esbuild, Playwright external, `require` shim for `ws`)
 - `app/service.mjs` — launchd install · status · uninstall
-- `app/first-run.mjs` — the seller's reviewnary login, asked in a **native dialog** (hidden answer), verified
-  with `POST /api/auth/login`, written to `helper.env` **0600** under the seller's own home
+- ~~`app/first-run.mjs` — the seller's reviewnary login, asked in a native dialog, written to `helper.env` 0600~~
+  **retired 2026-09-05** (`docs/helper_device_authentication_v1.md`): the helper holds no password; `app/unlink.mjs`
+  revokes its device token on uninstall
 - `app/bin/node`, `app/node_modules/playwright*`, `browsers/` (the Chromium the helper drives)
 - `reviewnary 도우미 설치.command` · `제거.command` · `읽어주세요.txt`
 
@@ -161,8 +162,9 @@ the entrypoint tree guard, and the production-only presenter are all still asser
 
 - **Signing/notarization**: none — first open is right-click → 열기, operator-assisted.
 - **Two arches, two bundles**: built on arm64; the Intel bundle needs an Intel build machine.
-- The helper's backend login is the seller's reviewnary password in a 0600 file on their Mac (the same
-  posture the supervisor had). A device token would be better and is a backend change.
+- ~~The helper's backend login is the seller's reviewnary password in a 0600 file on their Mac.~~ **Closed
+  2026-09-05** — `docs/helper_device_authentication_v1.md`: a scoped, revocable device token granted from the
+  browser session; helper 0.2.0, password keys removed from `helper.env`.
 - 「네이버 로그인」 goes through the guided-import screen; there is no login-only walk.
 - `BRIDGE_ALLOWED_ORIGINS` is the app origin the installer was told; a pilot host must set `REVIEWNARY_APP_URL`
   / `REVIEWNARY_BASE_URL` when running the installer (defaults are the local stack).

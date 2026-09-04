@@ -32,6 +32,7 @@ import { ReportsV2 } from "./pages/app/ReportsV2";
 import { ConnectHelper } from "./pages/app/ConnectHelper";
 import { ConnectHub } from "./pages/app/ConnectHub";
 import { SettingsHome } from "./pages/app/SettingsHome";
+import { HelperDevices } from "./pages/app/HelperDevices";
 
 // Carried-over working surfaces. These keep their behaviour in Slice 3 and are re-homed under the
 // new IA; the ones scheduled for replacement are rebuilt in Slices 4-6.
@@ -173,6 +174,7 @@ export function App() {
         <Route path="/settings/style" element={<AnswerStyle />} />
         <Route path="/settings/review-templates" element={<ReviewReplyTemplates />} />
         <Route path="/settings/company" element={<CompanyProfile />} />
+        <Route path="/settings/devices" element={<HelperDevices />} />
 
         {/* Operations agent — reachable, but not a navigation destination. It becomes an action
             offered inside 운영 홈 / 인박스 / 메모리 rather than a menu entry of its own. */}

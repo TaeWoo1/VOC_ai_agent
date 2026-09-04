@@ -9,7 +9,7 @@
  * `skipped` so the agent keeps running without a competing bridge instead of crashing.
  */
 
-import { BridgeServer } from "../bridge/bridge-server";
+import { BridgeServer, type DeviceLinkEndpoint } from "../bridge/bridge-server";
 import { FilePairingStore } from "../bridge/pairing-store";
 import type { ApprovalPresenter } from "../bridge/approval-presenter";
 import { settleObserverToPort, refFor } from "../bridge/event-adapter";
@@ -268,6 +268,8 @@ export interface AgentBridgeConfig {
    * seller's marketplace window up at this moment and not earlier or later.
    */
   onSellerOpsConnected?: () => void;
+  /** Helper Device Authentication v1: the link endpoint the paired browser drives. Passed straight through. */
+  deviceLink?: DeviceLinkEndpoint;
 }
 
 export type AgentBridgeListenResult =
@@ -497,6 +499,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     projection,
     actionWindow: carrier,
     ...(cfg.onSellerOpsConnected ? { onSellerOpsConnected: cfg.onSellerOpsConnected } : {}),
+    ...(cfg.deviceLink ? { deviceLink: cfg.deviceLink } : {}),
   });
   const settle = settleObserverToPort(server.events, cfg.refSalt);
   let active = false;

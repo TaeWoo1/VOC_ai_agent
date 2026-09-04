@@ -22,7 +22,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
 import { log } from "../log";
-import { login, startReplySubmissionRun, type SubmissionRunResponse } from "../upload";
+import { startReplySubmissionRun, type SubmissionRunResponse } from "../upload";
+import { backendBearer, type SessionSource } from "../auth/helper-session";
 import type { RecencyBucket } from "../action-window/reply-submission/reply-surface";
 import {
   loadRequestBundle,
@@ -125,7 +126,8 @@ export interface PrepareDeps {
   consume: (path: string) => void;
   finalize: (path: string, bundle: ReplyTargetResultBundle) => void;
   discardReservation: (path: string) => void;
-  login: (baseUrl: string, email: string, password: string) => Promise<string>;
+  /** The helper session (device token, or the dev login in a checkout). */
+  session: (cfg: SessionSource) => Promise<string>;
   startRun: (
     baseUrl: string,
     token: string,
@@ -175,7 +177,7 @@ export async function prepareReplyTarget(cfg: PrepareConfig, deps: PrepareDeps):
 
   // We own the slot. A failure from here releases the reservation so the operator can retry.
   try {
-    const token = await deps.login(cfg.baseUrl, cfg.email, cfg.password);
+    const token = await deps.session(cfg);
     const response = await deps.startRun(cfg.baseUrl, token, request.accountId, request.actionRef, {
       requireTargetHint: true,
     });
@@ -217,7 +219,7 @@ async function main(): Promise<void> {
       finalize: (p, b) => writeResultBundle(p, b, { existsSync, mkdirSync, writeFileSync, chmodSync, renameSync }),
       // Release the reserved slot AND any partial temp from a failed finalize, so a retry starts clean.
       discardReservation: (p) => { consumeBundleFile(p); consumeBundleFile(`${p}.tmp`); },
-      login,
+      session: backendBearer,
       startRun: startReplySubmissionRun,
       onError: (m) => console.error(m),
     },

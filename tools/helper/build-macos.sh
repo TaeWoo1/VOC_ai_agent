@@ -5,7 +5,7 @@
 # What it produces: dist/reviewnary-helper-macos-<arch>/
 #   app/helper.mjs        the resident helper (collector/src/cli/local-agent.ts, one ESM bundle)
 #   app/service.mjs       the launchd install/status/uninstall CLI
-#   app/first-run.mjs     asks the seller for their reviewnary login in a native dialog, verifies it, writes helper.env (0600)
+#   app/unlink.mjs        uninstall companion: revokes this helper's device token on the server, then forgets it
 #   app/bin/node          the node binary of the BUILD machine (same arch only — no cross-build is claimed)
 #   app/node_modules/     playwright + playwright-core (kept external: Playwright locates its driver by package path)
 #   app/package.json      the version the helper announces (`helperVersion()` reads it next to the bundle)
@@ -13,8 +13,8 @@
 #   reviewnary 도우미 설치.command / 제거.command / 읽어주세요.txt
 #
 # What it does NOT do: sign or notarize anything (the pilot is operator-assisted — see 읽어주세요.txt), build
-# for another OS or arch, or bundle a credential. The seller's login is asked for on their own Mac at first
-# run and written 0600 under their own home; nothing in dist/ carries it.
+# for another OS or arch, or bundle a credential. The helper holds NO seller password: it is linked to the
+# seller's account from a browser session (Helper Device Authentication v1) and keeps only a revocable device token.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
@@ -37,7 +37,7 @@ node_modules/.bin/esbuild src/cli/bundle/helper-entry.ts --bundle --platform=nod
   --banner:js="$BANNER" --external:playwright --external:playwright-core --log-level=error --outfile="$OUT/app/helper.mjs"
 node_modules/.bin/esbuild src/cli/bundle/service-entry.ts --bundle --platform=node --format=esm --target=node20 \
   --banner:js="$BANNER" --external:playwright --external:playwright-core --log-level=error --outfile="$OUT/app/service.mjs"
-cp "$HERE/payload/first-run.mjs" "$OUT/app/first-run.mjs"
+cp "$HERE/payload/unlink.mjs" "$OUT/app/unlink.mjs"
 printf '{ "name": "reviewnary-helper", "version": "%s", "type": "module", "private": true }\n' "$VERSION" > "$OUT/app/package.json"
 cp "$(command -v node)" "$OUT/app/bin/node"
 cp -R node_modules/playwright "$OUT/app/node_modules/playwright"

@@ -87,10 +87,24 @@ export function sanitizeBackendIngest(result: IngestResult): AwIngestOutcome {
   return { ok, processed };
 }
 
+async function sessionOf(
+  opts: { baseUrl: string; bearer?: () => Promise<string>; email?: string; password?: string },
+  fetchImpl: typeof fetch,
+): Promise<string> {
+  if (opts.bearer) return opts.bearer();
+  if (opts.email && opts.password) return login(opts.baseUrl, opts.email, opts.password, fetchImpl);
+  throw new Error("no session source");
+}
+
 export interface BackendIngestUploadOpts {
   baseUrl: string;
-  email: string;
-  password: string;
+  /**
+   * The helper's session (Helper Device Authentication v1: the linked device token, or the dev login in a
+   * checkout). When absent the legacy `email`/`password` pair is used — hermetic tests and the dev diagnostic.
+   */
+  bearer?: () => Promise<string>;
+  email?: string;
+  password?: string;
   /** Channel code to resolve (default `"NAVER"`). */
   channelCode?: string;
   /** Source provenance recorded by the backend (default `SELLER_CENTER_EXPORT`). */
@@ -109,7 +123,7 @@ export function buildBackendIngestUpload(opts: BackendIngestUploadOpts): AwInges
   return async (src: AwIngestSource): Promise<AwIngestOutcome> => {
     try {
       const fetchImpl = opts.fetchImpl ?? fetch;
-      const token = await login(opts.baseUrl, opts.email, opts.password, fetchImpl);
+      const token = await sessionOf(opts, fetchImpl);
       const channelId = await resolveChannelId(opts.baseUrl, token, opts.channelCode ?? "NAVER", fetchImpl);
       const result = await uploadReviewBytes(
         opts.baseUrl,
@@ -129,8 +143,9 @@ export function buildBackendIngestUpload(opts: BackendIngestUploadOpts): AwInges
 
 export interface SegmentIngestUploadOpts {
   baseUrl: string;
-  email: string;
-  password: string;
+  bearer?: () => Promise<string>;
+  email?: string;
+  password?: string;
   /** The opaque launch ref this run is authorized by. It, not the runtime, names the target segment. */
   launchRef: string;
   fetchImpl?: typeof fetch;
@@ -150,7 +165,7 @@ export function buildSegmentIngestUpload(opts: SegmentIngestUploadOpts): AwInges
   return async (src: AwIngestSource): Promise<AwIngestOutcome> => {
     try {
       const fetchImpl = opts.fetchImpl ?? fetch;
-      const token = await login(opts.baseUrl, opts.email, opts.password, fetchImpl);
+      const token = await sessionOf(opts, fetchImpl);
       const result = await uploadSegmentReviewBytes(
         opts.baseUrl,
         token,

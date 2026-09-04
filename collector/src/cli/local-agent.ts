@@ -93,7 +93,8 @@ import { checkGuidedPreflight, PREFLIGHT_RECOVERY } from "../action-window/initi
 import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
 import type { ResolvedLaunchScope } from "../action-window/initial-import/import-host";
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
-import { fetchLaunchScope, login, reportSessionReadiness } from "../upload";
+import { fetchLaunchScope, reportSessionReadiness } from "../upload";
+import { backendBearer, DeviceLinker } from "../auth/helper-session";
 import { AW_CARRIER_REPLY } from "../../../contracts/action-window/aw-carrier-kind";
 import { ReplySubmissionEndpoint } from "../bridge/reply-submission-endpoint";
 import { ResidentReplyCarrier } from "../action-window/reply-submission/resident-reply-carrier";
@@ -1073,7 +1074,7 @@ export function buildCoupangReviewLocateLiveConfig(): CoupangReviewLocateLiveCar
     createDriver: () => driver,
     resolveTarget: async (locateRef: string) => {
       try {
-        if (!token) token = await login(cfg.baseUrl, cfg.email, cfg.password);
+        if (!token) token = await backendBearer(cfg);
       } catch {
         // Never the caught error: a login failure can quote the request it failed on. One refusal, no detail.
         token = null;
@@ -1218,7 +1219,7 @@ export function buildCoupangReviewAcquisitionLiveConfig(): CoupangReviewAcquisit
   const session = async (): Promise<string | null> => {
     if (origin === null) return null;
     try {
-      if (!token) token = await login(origin, cfg.email, cfg.password);
+      if (!token) token = await backendBearer({ ...cfg, baseUrl: origin });
       return token;
     } catch {
       token = null;
@@ -1340,7 +1341,7 @@ export function buildNaverReplyLiveConfig(): NaverReplyLiveCarrier {
   const session = async (): Promise<string | null> => {
     if (origin === null) return null;
     try {
-      if (!token) token = await login(origin, cfg.email, cfg.password);
+      if (!token) token = await backendBearer({ ...cfg, baseUrl: origin });
       return token;
     } catch {
       token = null;
@@ -1789,8 +1790,7 @@ function buildNaverImportCarrierCore(
       },
       ingest: buildSegmentIngestUpload({
         baseUrl: cfg.baseUrl,
-        email: cfg.email,
-        password: cfg.password,
+        bearer: () => backendBearer(cfg),
         get launchRef() {
           return boundRef;
         },
@@ -1897,7 +1897,7 @@ function buildNaverImportCarrierCore(
     persistDir: defaultImportRunDirFor(helperHome()),
     async resolveScope(launchRef: string): Promise<ResolvedLaunchScope | null> {
       try {
-        const token = await login(cfg.baseUrl, cfg.email, cfg.password);
+        const token = await backendBearer(cfg);
         const scope = await fetchLaunchScope(cfg.baseUrl, token, launchRef);
         // Both kinds are hostable. A SEGMENT needs its window; a DISCOVERY has none yet — it is the run that
         // finds one out — so requiring dates for both would have made the product's first step unreachable.
@@ -2125,6 +2125,8 @@ export interface BridgeOnlyBootDeps {
   createBridge?: (cfg: Parameters<typeof createAgentBridge>[0]) => ReturnType<typeof createAgentBridge>;
   /** Overrides the resolved bridge config (a test passes `{ port: 0, pairingFile: <tmp> }`). */
   bridgeConfigOverride?: Partial<ReturnType<typeof resolveAgentBridgeConfig>>;
+  /** The device-link flow; defaults to a real `DeviceLinker` against the configured backend. A test injects a fake. */
+  deviceLinker?: DeviceLinker;
   /** Registers signal handlers; defaults to `process.on`. A test passes a recorder instead. */
   onSignal?: (signal: "SIGINT" | "SIGTERM", handler: () => void) => void;
   /** Sanitized JSON printer; defaults to `console.log`. */
@@ -2191,11 +2193,20 @@ export async function runBridgeOnlyBoot(
       return Number.isFinite(raw) && raw >= 5_000 && raw <= 2 * 60 * 60_000 ? { windowGraceMs: raw } : {};
     })(),
   });
+  // Helper Device Authentication v1: the paired browser links THIS helper to the seller's account through the
+  // bridge; the resulting token lives under the helper home and is the only backend credential this process has.
+  const linkCfg = loadConfig(env);
+  const deviceLinker = deps.deviceLinker ?? new DeviceLinker({
+    baseUrl: linkCfg.baseUrl,
+    home: helperHome(env),
+    helperVersion: helperVersion(env),
+  });
   const bridge = createBridge({
     ...resolveAgentBridgeConfig(args, env),
     ...deps.bridgeConfigOverride,
     approvalPresenter: createApprovalPresenterFor(approvalKind),
     carrierEndpoint: carrierHost,
+    deviceLink: deviceLinker,
   });
   const listen = await bridge.listen();
   print(
@@ -2220,6 +2231,7 @@ export async function runBridgeOnlyBoot(
   const stopped = new Promise<void>((r) => (resolveStopped = r));
   const shutdown = createSignalShutdown(async () => {
     bridge.markAgentStopping();
+    deviceLinker.stop();
     // A window the on-demand walk opened must not outlive the helper that opened it.
     await carrierHost.disposeActive().catch(() => {});
     await bridge.close().catch(() => {});
@@ -2253,7 +2265,7 @@ export function buildActionWindowConfig(
       ...(ingestLocal
         ? (() => {
             const cfg = loadConfig(env);
-            return { ingest: { upload: buildBackendIngestUpload({ baseUrl: cfg.baseUrl, email: cfg.email, password: cfg.password, channelCode: "NAVER" }) } };
+            return { ingest: { upload: buildBackendIngestUpload({ baseUrl: cfg.baseUrl, bearer: () => backendBearer(cfg, env), channelCode: "NAVER" }) } };
           })()
         : {}),
     };

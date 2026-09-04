@@ -27,6 +27,7 @@ import type {
   AccountDashboardSummary,
   ArticleListResponse,
   AuthResponse,
+  HelperDeviceView,
   PasswordResetConfigView,
   SocialExchangeResponse,
   SocialProvidersView,
@@ -368,6 +369,20 @@ export const api = {
    * form, which is the true state. `VITE_USE_MOCKS` still works — an explicit demo mode is a choice, not a
    * fallback taken behind the user's back.
    */
+  // ---- Helper Device Authentication v1 — the seller's session approves a helper, lists and revokes them.
+  listHelperDevices: async (): Promise<HelperDeviceView[]> => {
+    if (USE_MOCKS) return [];
+    const { data } = await http.get<HelperDeviceView[]>("/api/helper-devices");
+    return data;
+  },
+  /** The browser forwards the user code it got from its own paired helper; the session is the approval. */
+  approveHelperDevice: async (userCode: string): Promise<void> => {
+    await http.post("/api/helper-devices/approve", { userCode });
+  },
+  revokeHelperDevice: async (id: string): Promise<void> => {
+    await http.delete(`/api/helper-devices/${encodeURIComponent(id)}`);
+  },
+
   getMe: async (): Promise<UserView> => {
     if (USE_MOCKS) {
       return mockMe();

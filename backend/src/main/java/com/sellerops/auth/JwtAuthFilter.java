@@ -51,11 +51,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             @NonNull FilterChain chain) throws ServletException, IOException {
 
         String header = request.getHeader("Authorization");
-        if (header != null && header.startsWith("Bearer ")) {
+        // A request an earlier filter already authenticated (a helper device token — its own filter, its own
+        // prefix) is not parsed again: this parser only ever sees a bearer nobody else has claimed.
+        if (header != null && header.startsWith("Bearer ")
+                && SecurityContextHolder.getContext().getAuthentication() == null) {
             AuthPrincipal principal = tokenProvider.parse(header.substring(7));
-            if (principal != null
-                    && SecurityContextHolder.getContext().getAuthentication() == null
-                    && orgExists(principal)) {
+            if (principal != null && orgExists(principal)) {
                 var auth = new UsernamePasswordAuthenticationToken(principal, null, List.of());
                 auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(auth);

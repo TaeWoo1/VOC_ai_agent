@@ -10,7 +10,8 @@
 import { loadConfig } from "../config";
 import { log } from "../log";
 import { decideState, writeStatus, type RunSignals } from "../status";
-import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
+import { resolveChannelId, uploadReviewFile, UploadError } from "../upload";
+import { backendBearer } from "../auth/helper-session";
 import { pathToFileURL } from "node:url";
 import { invokedDirectly } from "./invoked-directly";
 
@@ -28,7 +29,7 @@ async function main(): Promise<void> {
   const base: RunSignals = { paired: true, session: "LOGGED_IN", exportOutcome: "CAPTURED" };
 
   try {
-    const token = await login(cfg.baseUrl, cfg.email, cfg.password);
+    const token = await backendBearer(cfg);
     const channelId = await resolveChannelId(cfg.baseUrl, token, cfg.naverChannelCode);
     const result = await uploadReviewFile(cfg.baseUrl, token, channelId, filePath);
     const now = new Date().toISOString();

@@ -1284,6 +1284,26 @@ fold에 원문. 실제 설치된 launchd 도우미에서 복구 재현: 미실�
 전부 모델과 일치, 3폭 AA 0. **E2E 라이브 leg는 준비만**(사람이 눌러야 하는 허용·네이버 로그인·export + 단일 사용 승인) ·
 KST 경계 debt: 리포트 이슈 창을 리뷰 수신 KST 날짜로(112 리뷰·1,245 문의가 UTC와 다른 날). 마켓플레이스 0 · WRITE 0.)
 
+**`docs/helper_device_authentication_v1.md`** (Helper Device Authentication v1 — 2026-09-05. 도우미가 판매자
+비밀번호를 0600 `helper.env`에 저장하고 매 실행 `POST /api/auth/login`하던 것을 **B안 — 기존 auth 위의 최소 자체
+device-flow seam**(RFC 8628 모양, 라이브러리 0)으로 대체했다; Spring Authorization Server(STATELESS JWT·SPA와 맞지 않는
+세션 전제 + 표 3개 + 이중 JWT 검증, 제3자 클라이언트 없어 이득 0)와 외부 provider(전체 auth 이전)는 기각. 기존
+Google/NAVER/email 로그인 **무변경**. 흐름: 도우미 `POST /api/auth/device/code`(공개 클라이언트, 비밀 0) → **paired 브라우저가
+bridge로 userCode를 받아 자기 JWT 세션으로** `POST /api/helper-devices/approve`(판매자는 아무것도 치지 않는다) → 도우미
+`POST /api/auth/device/token` 한 번 → `rvh_` 토큰(서버는 SHA-256만, V97 `helper_devices`; 도우미는 `<home>/.auth/device.json`
+0600, origin 바인딩, 180일, 재시작·업데이트 유지). `HelperDeviceAuthFilter`가 `JwtAuthFilter` 앞에서 prefix로 알아보고
+**allow-list 경로만** 연다(도우미의 실제 호출 목록 + 자기 행 `/api/helper-devices/me`; `/api/users/me`·기기 목록·approve·
+문의·리뷰·지식은 **401**, fallback 없음, JWT 파서에 닿지 않음). refresh 없음 — 매 요청 lookup이라 revoke 즉시; pending
+grant는 메모리(5분·100건). 설정 › 계정 › **연결된 기기**(`/settings/devices`)에서 이름·연결 시각·마지막 사용·[연결 해제].
+카드 단어 셋 추가(기기 연결 필요 · 연결 확인 중 · 서버 연결 확인 필요), `MIN_HELPER_VERSION` 0.2.0(비밀번호 모델 도우미는
+업데이트 필요). `HELPER_ENV_KEYS`에서 EMAIL/PASSWORD **삭제**(파일에 있어도 안 읽음), `first-run.mjs` 삭제, installer가 옛
+비밀번호 파일을 지우고 `unlink.mjs`가 제거 시 자기 토큰을 revoke; production 도우미는 device 토큰 **아니면 세션 없음**
+(비밀번호 경로 도달 불가, 테스트). 라이브: curl로 전 경로(승인 재사용 404 · 재상환 400 · 범위 밖 401 · 해제 뒤 401), 실제
+launchd 설치 0.2.0(옛 helper.env 삭제 확인), 브라우저 Playwright(pairing 1.8 s · 연결 3.7 s · 설정 해제 → 카드 복귀 10.1 s,
+내부 단어 0) — 브라우저 leg는 네이티브 허용 창을 사람이 눌러야 해 dev auto-approve 도우미로 같은 코드를 돌렸고 설치 도우미의
+첫 허용·연결은 운영자 몫. 라이브가 결함 하나(연결됨 뒤 폴링 정지)를 찾아 닫았다. backend 3,874 · collector 9,443 · frontend
+2,752 · 실패 0. 마이그레이션 1 · 마켓플레이스 0 · WRITE 0 · 모델 0.)
+
 **`docs/agentic_report_v1.md`** (Issue Evidence Trust Closure + Agentic Report v1 — 2026-09-04. **[1]** 「파손없이 잘
 도착했네요」가 「배송 파손」 evidence가 되어 Opportunity까지 만들던 결함을 hard-code가 아니라 seam으로 닫았다: 추출기에는
 polarity seam이 **없었고**(`IssueVocabulary`는 substring 표), triage tier는 별점의 순수 함수라 절 단위 판정에 쓸 수 없다(5★

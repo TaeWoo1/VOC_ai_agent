@@ -33,7 +33,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
 import { log } from "../log";
-import { login } from "../upload";
+import { backendBearer } from "../auth/helper-session";
 import { launchNaverContext } from "../profile";
 import { CoupangWingReviewReaderDriver } from "../action-window/coupang-review/coupang-wing-review-reader-driver";
 import {
@@ -296,7 +296,7 @@ async function main(): Promise<void> {
   }
   let token: string;
   try {
-    token = await login(backend.origin, cfg.email, cfg.password);
+    token = await backendBearer({ ...cfg, baseUrl: backend.origin });
   } catch {
     // Established BEFORE the operator is asked for anything: a login that fails after a page is read would
     // leave the sitting having read reviews it has nowhere to put.

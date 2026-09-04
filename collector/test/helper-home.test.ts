@@ -39,14 +39,16 @@ describe("helperHome", () => {
 
 describe("helper.env", () => {
   it("reads only the closed key list, and the process env wins", () => {
-    const text = "SELLEROPS_EMAIL=seller@example.invalid\nSELLEROPS_PASSWORD='p w'\nBRIDGE_PORT=1\n# c\nNODE_ENV=development\n";
-    expect(parseHelperEnv(text)).toEqual({ SELLEROPS_EMAIL: "seller@example.invalid", SELLEROPS_PASSWORD: "p w" });
+    const text = "SELLEROPS_BASE_URL=http://127.0.0.1:8080\nSELLEROPS_APP_URL='http://localhost:5173'\nBRIDGE_PORT=1\n# c\nNODE_ENV=development\nSELLEROPS_PASSWORD=never\n";
+    expect(parseHelperEnv(text)).toEqual({ SELLEROPS_BASE_URL: "http://127.0.0.1:8080", SELLEROPS_APP_URL: "http://localhost:5173" });
     const merged = withHelperEnvFile(
       { REVIEWNARY_HELPER_HOME: "/h", SELLEROPS_EMAIL: "operator@example.invalid" },
       (path) => (path === "/h/helper.env" ? text : null),
     );
     expect(merged.SELLEROPS_EMAIL).toBe("operator@example.invalid");
-    expect(merged.SELLEROPS_PASSWORD).toBe("p w");
+    expect(merged.SELLEROPS_BASE_URL).toBe("http://127.0.0.1:8080");
+    // A password line in the file is not a key the helper reads — the file cannot carry a credential.
+    expect(merged.SELLEROPS_PASSWORD).toBeUndefined();
     expect(merged.NODE_ENV).toBeUndefined();
     expect(merged.BRIDGE_PORT).toBeUndefined();
   });
@@ -62,8 +64,9 @@ describe("helper.env", () => {
 
   it("names exactly what the installer writes", () => {
     expect([...HELPER_ENV_KEYS]).toEqual([
-      "SELLEROPS_BASE_URL", "SELLEROPS_APP_URL", "SELLEROPS_EMAIL", "SELLEROPS_PASSWORD", "NAVER_REVIEW_URL", "BRIDGE_ALLOWED_ORIGINS",
+      "SELLEROPS_BASE_URL", "SELLEROPS_APP_URL", "NAVER_REVIEW_URL", "BRIDGE_ALLOWED_ORIGINS",
     ]);
+    for (const key of HELPER_ENV_KEYS) expect(key.toLowerCase()).not.toMatch(/password|email|token|secret/);
   });
 });
 

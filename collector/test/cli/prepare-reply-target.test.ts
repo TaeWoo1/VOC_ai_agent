@@ -70,7 +70,7 @@ describe("prepareReplyTarget — reserve-before-mint (no-clobber orchestration)"
       consume: () => { calls.consume += 1; },
       finalize: () => { calls.finalize += 1; },
       discardReservation: () => { calls.discard += 1; },
-      login: async () => { calls.login += 1; return "tok"; },
+      session: async () => { calls.login += 1; return "tok"; },
       startRun: async () => { calls.startRun += 1; return RESP; },
       onError: () => {},
       ...over,

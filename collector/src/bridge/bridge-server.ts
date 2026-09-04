@@ -112,6 +112,19 @@ export interface BridgeServerDeps {
    * this hook is on the bridge's accept path, and nothing about a hosted browser may break pairing.
    */
   onSellerOpsConnected?: () => void;
+  /**
+   * Helper Device Authentication v1: the paired browser asks THIS helper to link itself to the seller's account
+   * (`POST /bridge/device/link` → the user code the browser then approves with its own session) and reads
+   * whether it is linked (`GET /bridge/device/status`). Both require the pairing bearer + an allowed origin: the
+   * pairing is the trust root, exactly as for tickets. Absent ⇒ both routes are 404.
+   */
+  deviceLink?: DeviceLinkEndpoint;
+}
+
+/** What the bridge needs from the link flow — see `auth/helper-session.ts` for the implementation. */
+export interface DeviceLinkEndpoint {
+  start(): Promise<unknown>;
+  status(): Promise<unknown>;
 }
 
 export class BridgeServer {
@@ -128,6 +141,7 @@ export class BridgeServer {
   private readonly projection: ProjectionEndpoint | undefined;
   private readonly actionWindow: AwCarrierEndpoint | undefined;
   private readonly onSellerOpsConnected: (() => void) | undefined;
+  private readonly deviceLink: DeviceLinkEndpoint | undefined;
   private readonly projectionWss: WebSocketServer | undefined;
   private projectionTimer: NodeJS.Timeout | undefined;
   private heartbeatTimer: NodeJS.Timeout | undefined;
@@ -149,6 +163,7 @@ export class BridgeServer {
     this.projection = deps.projection;
     this.actionWindow = deps.actionWindow;
     this.onSellerOpsConnected = deps.onSellerOpsConnected;
+    this.deviceLink = deps.deviceLink;
     if (this.autoApprovePairing) log("bridge_dev_auto_approve_active", { warning: true });
     this.http = createServer((req, res) => void this.onRequest(req, res));
     // We validate origin + ticket ourselves, THEN hand the raw socket to `ws`. `noServer` = we own upgrade.
@@ -282,6 +297,8 @@ export class BridgeServer {
       if (method === "POST" && path === "/projection/ticket") return await this.handleProjectionTicket(req, res);
       if (method === "POST" && path === "/bridge/revoke") return await this.handleRevoke(req, res);
       if (method === "POST" && path === "/bridge/agent/revoke") return await this.handleAgentRevoke(req, res);
+      if (method === "POST" && path === "/bridge/device/link") return await this.handleDeviceLink(req, res, "start");
+      if (method === "GET" && path === "/bridge/device/status") return await this.handleDeviceLink(req, res, "status");
       sendJson(res, 404, { error: "not_found" });
     } catch {
       sendJson(res, 500, { error: "internal" });
@@ -564,6 +581,22 @@ export class BridgeServer {
     const { ticket, expiresInMs } = this.projection.mintTicket(pairing.pairingId);
     log("projection_ticket_minted", { pairingId: pairing.pairingId });
     sendJson(res, 200, { ticket, expiresInMs });
+  }
+
+  /**
+   * Device link, gated exactly like a ticket: allowed origin + valid pairing bearer, else 403/401. The body the
+   * endpoint returns is the helper-session module's closed shape (booleans, closed words, a user code the
+   * browser forwards to the backend); nothing here inspects or logs it.
+   */
+  private async handleDeviceLink(req: IncomingMessage, res: ServerResponse, op: "start" | "status"): Promise<void> {
+    if (!this.deviceLink) { sendJson(res, 404, { error: "not_found" }); return; }
+    const origin = header(req, "origin");
+    if (!isOriginAllowed(origin, this.allowedOrigins)) { sendJson(res, 403, { error: "bad_origin" }); return; }
+    const token = bearer(req);
+    const pairing = token ? this.store.registry.authenticate(token) : null;
+    if (!pairing) { sendJson(res, 401, { error: "unpaired" }); return; }
+    const body = op === "start" ? await this.deviceLink.start() : await this.deviceLink.status();
+    sendJson(res, 200, body);
   }
 
   private async handleRevoke(req: IncomingMessage, res: ServerResponse): Promise<void> {

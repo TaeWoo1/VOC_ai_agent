@@ -1,6 +1,7 @@
 package com.sellerops.config;
 
 import com.sellerops.auth.JwtAuthFilter;
+import com.sellerops.auth.device.HelperDeviceAuthFilter;
 import com.sellerops.auth.social.SocialLoginFailureHandler;
 import com.sellerops.auth.social.SocialLoginSuccessHandler;
 import java.util.List;
@@ -33,6 +34,7 @@ public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
     private final ObjectProvider<CredentialHandoffCapabilityFilter> credentialHandoffCapabilityFilter;
+    private final ObjectProvider<HelperDeviceAuthFilter> helperDeviceAuthFilter;
     private final String corsOrigin;
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrations;
     private final ObjectProvider<SocialLoginSuccessHandler> socialSuccess;
@@ -40,6 +42,7 @@ public class SecurityConfig {
 
     public SecurityConfig(JwtAuthFilter jwtAuthFilter,
                           ObjectProvider<CredentialHandoffCapabilityFilter> credentialHandoffCapabilityFilter,
+                          ObjectProvider<HelperDeviceAuthFilter> helperDeviceAuthFilter,
                           @Value("${sellerops.cors.origin}") String corsOrigin,
                           ObjectProvider<ClientRegistrationRepository> clientRegistrations,
                           ObjectProvider<SocialLoginSuccessHandler> socialSuccess,
@@ -47,6 +50,7 @@ public class SecurityConfig {
         this.jwtAuthFilter = jwtAuthFilter;
         this.corsOrigin = corsOrigin;
         this.credentialHandoffCapabilityFilter = credentialHandoffCapabilityFilter;
+        this.helperDeviceAuthFilter = helperDeviceAuthFilter;
         this.clientRegistrations = clientRegistrations;
         this.socialSuccess = socialSuccess;
         this.socialFailure = socialFailure;
@@ -98,6 +102,14 @@ public class SecurityConfig {
         CredentialHandoffCapabilityFilter capabilityFilter = credentialHandoffCapabilityFilter.getIfAvailable();
         if (capabilityFilter != null) {
             http.addFilterBefore(capabilityFilter, JwtAuthFilter.class);
+        }
+        // Also before the JWT filter, and it owns every bearer that carries the device-token prefix: a helper token
+        // is admitted on the helper's routes or the request ends 401 — it never reaches a filter that might read it
+        // as something else (docs/helper_device_authentication_v1.md §4). Absent (sliced context) ⇒ a device token
+        // authenticates nothing, which is the safe direction to be missing in.
+        HelperDeviceAuthFilter deviceFilter = helperDeviceAuthFilter.getIfAvailable();
+        if (deviceFilter != null) {
+            http.addFilterBefore(deviceFilter, JwtAuthFilter.class);
         }
         // oauth2Login only when the deployer configured a provider — the existing email/password/JWT system
         // is untouched either way; success mints a one-time code, never a session or a JWT in a URL
