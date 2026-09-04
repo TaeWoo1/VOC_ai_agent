@@ -15,6 +15,7 @@ import { analysisKey, buildAnalysisIndex } from "../../lib/inboxView";
 import { previewText } from "../../lib/plainText";
 import { relativeTime } from "../../lib/format";
 import { productChannelLabel } from "../../lib/productRows";
+import { onlySharedWord } from "../../lib/sharedWord";
 import {
   RECORD_STATUS_OPTIONS,
   asFeedItem,
@@ -247,6 +248,16 @@ export function CustomerInbox() {
     [queue, productId],
   );
   const queueGroups = useMemo(() => queueOrder(queueRows), [queueRows]);
+  /**
+   * A word every row carries is a fact about the LIST, not a mark on the rows (`lib/sharedWord.ts`).
+   * Measured 2026-09-04: all 21 rows printed 「답변 필요」 in warn colour, which made the loudest
+   * repeated element on this screen the one element that told the seller nothing — the screen's content
+   * is what the customers wrote. Said once in the section's own caption instead.
+   */
+  const sharedState = useMemo(
+    () => onlySharedWord(queueRows.map((row) => queueRowState(row).text)),
+    [queueRows],
+  );
   const channels = useMemo(() => {
     const seen = new Map<string, string>();
     for (const row of record ?? []) {
@@ -270,14 +281,8 @@ export function CustomerInbox() {
             label={focused ? "이 문의에 대해 물어보기" : "문의에 대해 물어보기"}
           />
         }
-        meta={
-          itemRef || queue === null || queueRows.length === 0 ? undefined : (
-            <span className="text-sm text-muted">
-              {productId ? "이 상품의 처리할 일 " : "지금 처리할 일 "}
-              <span className="font-semibold tabular-nums text-ink">{queueRows.length}</span>건
-            </span>
-          )
-        }
+        /* No meta: the section below is titled 「지금 처리할 일」 and carries the same count, and the two
+           sat 80px apart saying the same words twice. The section owns it, because it owns the rows. */
       />
 
       {/* 「AI가 먼저 확인한 일」 answers 「무엇부터 볼까」, so it stays above the work — and disappears
@@ -298,18 +303,25 @@ export function CustomerInbox() {
             <Section
               title={productId ? "이 상품의 지금 처리할 일" : "지금 처리할 일"}
               count={queueRows.length}
-              // The page is bounded; when the server holds more than it returned, the heading says so
-              // rather than letting the drawn rows be read as the whole of what is owed. Not rendered
-              // under a product scope: that count is this screen's own filter over the page, and the
-              // server total answers a wider question than the heading above it.
+              // Two clauses, one line, joined the way this product joins facts. The first is the
+              // shared-word caption (every row says the same thing, so the list says it once); the
+              // second is the bound — when the server holds more than it returned, the heading says so
+              // rather than letting the drawn rows be read as the whole of what is owed. The bound is
+              // not rendered under a product scope: that count is this screen's own filter over the
+              // page, and the server total answers a wider question than the heading above it.
               hint={
-                !productId && queueTotal != null && queueTotal > queueRows.length
-                  ? `처리할 일 ${queueTotal.toLocaleString("ko-KR")}건 중 ${queueRows.length.toLocaleString("ko-KR")}건`
-                  : undefined
+                [
+                  sharedState ? `모두 ${sharedState}` : null,
+                  !productId && queueTotal != null && queueTotal > queueRows.length
+                    ? `${queueTotal.toLocaleString("ko-KR")}건 중 ${queueRows.length.toLocaleString("ko-KR")}건`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
               }
             >
               <ul className="divide-y divide-line/70">
-                {queueGroups.recent.map((row) => queueRow(row, itemRef))}
+                {queueGroups.recent.map((row) => queueRow(row, itemRef, false, sharedState))}
                 {/* The decade-old backlog is real work and stays in the queue — under its own quiet
                     divider, because sorted purely by waiting time a 2014 question outranks and buries
                     one from an hour ago. Not a heading: the detail pane keeps the only h2. */}
@@ -318,7 +330,7 @@ export function CustomerInbox() {
                     1년 넘게 지난 문의 {queueGroups.old.length}건
                   </li>
                 ) : null}
-                {queueGroups.old.map((row) => queueRow(row, itemRef, true))}
+                {queueGroups.old.map((row) => queueRow(row, itemRef, true, sharedState))}
               </ul>
             </Section>
           ) : null}
@@ -490,8 +502,10 @@ export function CustomerInbox() {
 }
 
 /** One row of work. The same shape in both groups; only the ink changes. */
-function queueRow(row: InquiryQueueItem, itemRef: string | undefined, dim = false) {
+function queueRow(row: InquiryQueueItem, itemRef: string | undefined, dim = false, sharedState: string | null = null) {
   const state = queueRowState(row);
+  // Dropped only when EVERY row carries it and the caption has already said so.
+  const showState = !sharedState || state.text !== sharedState;
   return (
     <li key={row.workItemId}>
       <WorkItem
@@ -499,7 +513,7 @@ function queueRow(row: InquiryQueueItem, itemRef: string | undefined, dim = fals
         selected={row.inquiryId === itemRef}
         ariaCurrent={row.inquiryId === itemRef ? "true" : undefined}
         dim={dim}
-        state={state.text}
+        state={showState ? state.text : null}
         tone={state.tone}
         title={previewText(row.snippet) || row.title || "문의"}
         meta={

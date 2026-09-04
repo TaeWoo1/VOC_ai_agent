@@ -31,6 +31,7 @@ import { InquiryProductBinder } from "./InquiryProductBinder";
 import { answerStateIsGood, answerStateOf, type AnswerStateView } from "../../lib/answerState";
 import { copyText } from "../../lib/clipboard";
 import { Btn } from "../ui/Btn";
+import { Facts } from "../ui/ObjectRow";
 import { Disclosure } from "../ui/Disclosure";
 import { plainText } from "../../lib/plainText";
 import { Link } from "react-router-dom";
@@ -1027,13 +1028,12 @@ function InquiryMeta({
   const waited = waitedLabel(detail.receivedAt);
   const provenance = bindingLabel(detail);
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+    <Facts className="mt-3 text-sm text-muted">
       {detail.channelNameKo ? <span>{detail.channelNameKo}</span> : null}
       {/* 「상품 미지정」 STAYS (Executive-friendly UX Redesign v1 — considered and rejected). Hiding
           the absence and offering only the control that fixes it reads cleaner and is less honest:
           the missing product is WHY a draft could not be grounded, and the gap line that explains
           that in full does not exist until a draft has been generated. */}
-      <span aria-hidden="true">·</span>
       <span>{productLabel(detail)}</span>
       {provenance ? <span className="text-muted">({provenance})</span> : null}
       {onBind ? (
@@ -1045,19 +1045,14 @@ function InquiryMeta({
           {detail.productId ? "상품 바꾸기" : "상품 지정"}
         </button>
       ) : null}
-      {waited ? (
-        <>
-          <span aria-hidden="true">·</span>
-          <span>{waited}</span>
-        </>
-      ) : null}
+      {waited ? <span>{waited}</span> : null}
       {/* The workflow phase and the proposal's own category used to sit here too, so this one line
           read 「카페24 자사몰 · 상품 미지정 · 상품 지정 · 제안 생성됨 · 1시간째 · 일반 응답」. Neither told
           the seller anything they could act on: what state the work is in is what the 답변 block
           below RENDERS, and 「일반 응답」 is the classifier talking to itself. `phaseLabel` also
           passes unmapped phases through verbatim, so a completed item put a raw APPROVED /
           COMPLETED on screen — removing its only render site removes that leak (Demo UX Polish v1). */}
-    </div>
+    </Facts>
   );
 }
 

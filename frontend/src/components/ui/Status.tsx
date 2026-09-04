@@ -47,8 +47,14 @@ export function Status({
   className?: string;
 }) {
   if (variant === "word") {
+    // <b>Three emphasis carriers for one word was one too many.</b> The dot and the colour already say
+    // "this is a state"; the bold was the third, and on a work queue — where every row is work by
+    // definition — it put twenty identical marks at the same weight as the customer sentences beside
+    // them, which are the content. Measured on `/inquiries`, 2026-09-04: nineteen 「답변 필요」 and two
+    // 「초안 준비됨」. Colour and word are unchanged, so nothing a seller reads is different; the row's
+    // largest, heaviest text is now the thing they came to read.
     return (
-      <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-semibold ${WORD[tone]} ${className}`}>
+      <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium ${WORD[tone]} ${className}`}>
         <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[tone]}`} />
         {children}
       </span>

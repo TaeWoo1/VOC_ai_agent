@@ -105,6 +105,25 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
+  /**
+   * <b>Cleared HERE, not only in `afterEach` — this file's flake.</b> Caught 2026-09-04 with two
+   * different test names on two runs (`points at 채널 연결 when no review-capable channel is connected`
+   * failing with 「expected spy to not be called, but was called once」 for account `acc-nv`, which that
+   * test's own fixture does not contain).
+   *
+   * The account came from the PREVIOUS test. `ChannelReviews` reads the accounts, and only in the
+   * continuation of that promise does it read the record — so a test that finishes as soon as its own
+   * assertion passes leaves that second read queued. RTL's `cleanup` unmounts the component but cannot
+   * un-queue a `.then` that has already been scheduled, and the `active` guard inside it stops the
+   * setState, not the call. The call therefore landed after `afterEach` had cleared the spies, i.e.
+   * inside the next test, and WHICH test it landed in depended on scheduling — which is why the failing
+   * name moved between runs and why it never reproduced in isolation.
+   *
+   * Clearing at the start of each test closes it: hooks are an async boundary, so a continuation queued
+   * during teardown has run by the time this line executes. `afterEach` keeps its clear as well; the two
+   * are not redundant — that one bounds what a failing test leaves behind.
+   */
+  vi.clearAllMocks();
   getChannelsStrict.mockResolvedValue(CHANNELS);
   getSellerAccountsStrict.mockResolvedValue([
     account("acc-cp", "cp", "쿠팡"),

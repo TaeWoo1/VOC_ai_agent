@@ -16,7 +16,9 @@ import { useAgentSurface } from "../../lib/agentPanel";
  * 상품 — an object list, not a SKU table (docs/reviewnary_design.md §7).
  *
  * <b>A product is "what reviewnary knows about this product's operations".</b> The row is the name,
- * then one line of facets — channels · 문의 · 리뷰 · 답변 기준 · 미답변 — and [열기]. The SKU is inside
+ * then one line of facets — channels · 문의 · 리뷰 · 답변 기준 · 미답변. The whole row is the control
+ * (`ObjectRow to=`), so there is no [열기] beside it: a link-coloured word repeated down the right edge
+ * of every row is a second copy of the action the row already is. The SKU is inside
  * the detail. Facets are read per product from `/api/products/{id}/signals` and the knowledge source
  * list, both fail-soft: a row whose reads failed shows `—`, never 0, and the list never waits for them.
  *
@@ -69,6 +71,7 @@ export function Products() {
   }, [query]);
 
   const ordered = rows ? orderProductRows(rows, facts) : [];
+
 
   return (
     <div className="space-y-6">
@@ -159,7 +162,6 @@ export function Products() {
                         <span>운영 정보를 읽지 못했습니다</span>
                       )
                     }
-                    action={<span className="text-sm font-semibold text-brand-700">열기</span>}
                   />
                 </li>
               );

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Children, Fragment, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 /**
@@ -70,4 +70,31 @@ export function Facet({ label, value }: { label: string; value: ReactNode }) {
 export function Dot() {
   // A drawn dot, not a text glyph: a "·" in `line` colour is a text node that fails AA on its own.
   return <span aria-hidden="true" className="inline-block h-[3px] w-[3px] rounded-full bg-muted/50 align-middle" />;
+}
+
+/**
+ * A run of facts on one line, separated by the product's dot.
+ *
+ * <b>Why this exists.</b> The same shape — several unrelated facts about one object, on one muted line
+ * — is drawn on the product row, the review record header, the knowledge source row, the home brief row
+ * and the reply-task header. Three of those printed the facts with nothing between them, so the seller
+ * read 「총 4432개 마지막 수집 시각 기록 없음 답변은 여기서 준비하고…」 as one grey sentence. The ones that
+ * did separate them had to render the dot conditionally beside every optional fact, which is exactly why
+ * the others did not bother.
+ *
+ * `Children.toArray` drops `null` and `false`, so an absent fact takes its separator with it and the
+ * caller writes the facts, not the punctuation between them.
+ */
+export function Facts({ children, className = "" }: { children: ReactNode; className?: string }) {
+  const items = Children.toArray(children);
+  return (
+    <span className={`flex flex-wrap items-center gap-x-1.5 gap-y-0.5 ${className}`}>
+      {items.map((child, index) => (
+        <Fragment key={index}>
+          {index > 0 ? <Dot /> : null}
+          {child}
+        </Fragment>
+      ))}
+    </span>
+  );
 }

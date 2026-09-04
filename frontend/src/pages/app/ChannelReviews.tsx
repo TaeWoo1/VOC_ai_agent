@@ -5,6 +5,7 @@ import { channelDataTypeLabel } from "../../lib/channelVocabulary";
 import { ratingLabel } from "../../lib/reviewRecord";
 import { Section, ListBox } from "../../components/ui/Section";
 import { Status, type StatusTone } from "../../components/ui/Status";
+import { Facts } from "../../components/ui/ObjectRow";
 import { Disclosure } from "../../components/ui/Disclosure";
 import { Empty } from "../../components/ui/Empty";
 import { Chip } from "../../components/ui/Chip";
@@ -306,7 +307,7 @@ export function ChannelReviews({
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
           <h2 className="break-keep text-base font-semibold text-ink">{channelName ?? word}</h2>
           {page ? (
-            <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+            <Facts className="text-sm text-muted">
               <span className="tabular-nums">{`총 ${recordTotal(page)}개`}</span>
               {page.newCount > 0 ? (
                 <span className="font-semibold tabular-nums text-brand-700">{`새로 들어온 ${page.newCount}개`}</span>
@@ -320,7 +321,7 @@ export function ChannelReviews({
               ) : (
                 <span>이 채널에서는 reviewnary가 답변을 작성하지 않습니다</span>
               )}
-            </p>
+            </Facts>
           ) : null}
         </div>
         <BtnLink to={`/connect/channels/${accountId}`} variant="ghost" size="sm">

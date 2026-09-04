@@ -101,7 +101,12 @@ export function ProductDetail() {
         nowhere to go. It now lives on that section's own heading, where each contributing row is a
         door of its own.
       */}
-      <section className="grid grid-cols-3 gap-3" aria-label="이 상품의 신호">
+      {/* Sized to their content, not to a third of the page. As `grid-cols-3` each of these three
+          numbers sat in a ~500px box holding a label and one figure against the left edge — three wide
+          empty surfaces above the section that is actually this screen's subject (반복되는 문제).
+          They are still doors and still the same three facts; only the box stopped being the loudest
+          thing on the page. */}
+      <section className="flex flex-wrap gap-3" aria-label="이 상품의 신호">
         <Figure
           label="리뷰"
           value={volume.reviews}
@@ -363,7 +368,7 @@ function Figure({
   emphasis?: boolean;
   to?: string;
 }) {
-  const shell = `block rounded-2xl border px-4 py-3 ${
+  const shell = `block min-w-[9.5rem] rounded-xl border px-4 py-2.5 ${
     emphasis ? "border-brand/30 bg-brand-50/40" : "border-line bg-surface"
   }`;
   const body = (
@@ -372,7 +377,7 @@ function Figure({
         {label}
         {to ? <span className="ml-1 text-brand-700" aria-hidden="true">›</span> : null}
       </p>
-      <p className="mt-1.5 text-2xl font-bold tabular-nums text-ink">{count(value)}</p>
+      <p className="mt-0.5 text-2xl font-bold tabular-nums text-ink">{count(value)}</p>
     </>
   );
   if (!to) return <div className={shell}>{body}</div>;

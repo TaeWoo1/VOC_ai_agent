@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
+import { Facts } from "../../components/ui/ObjectRow";
 import { Btn, BtnLink } from "../../components/ui/Btn";
 import { Disclosure } from "../../components/ui/Disclosure";
 import { ReplyWorkControls } from "../../components/ReplyWorkControls";
@@ -119,11 +120,11 @@ export function ReviewReplyTask() {
         title="답변 작업"
         compact
         meta={
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm text-muted">
+          <Facts className="text-sm text-muted">
             {detail.productName ? <span className="break-keep text-ink">{detail.productName}</span> : null}
             <span className="tabular-nums">{ratingLabel(detail.rating)}</span>
             <span className="tabular-nums">{detail.writtenOn ?? "날짜 없음"}</span>
-          </span>
+          </Facts>
         }
         action={<BtnLink to={`${reviewRecordPath(accountId)}?review=${detail.id}`} variant="ghost" size="sm">리뷰 기록에서 보기</BtnLink>}
       />

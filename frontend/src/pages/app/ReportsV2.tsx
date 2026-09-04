@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
-import { Panel } from "../../components/ui/Panel";
+import { Section } from "../../components/ui/Section";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
 import { api } from "../../lib/apiClient";
@@ -45,7 +45,7 @@ function Figure({
       )}
     </>
   );
-  const box = "block rounded-xl border border-line p-4";
+  const box = "block rounded-xl border border-line bg-surface p-4";
   // Zero is a fact, not a control: a link that opens an empty list is a promise the screen does not
   // keep. Same rule the product tiles follow (Product Operations Continuity v1 §2). A figure that could
   // not be READ keeps its way in — "we could not count this" is not "there is nothing there", and the
@@ -98,7 +98,7 @@ function IssueLine({ issue }: { issue: ReviewIssueView }) {
     <li>
       <Link
         to={`/memory/${issue.id}`}
-        className="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2.5 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+        className="flex flex-wrap items-center gap-2 px-4 py-3 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
       >
         <span className="min-w-0 flex-1 break-keep font-medium text-ink">{issue.title}</span>
         <span className="shrink-0 text-xs text-muted">
@@ -206,13 +206,13 @@ export function ReportsV2() {
   }
 
   return (
-    <>
+    <div className="space-y-6">
       <PageHead
         title="주간 고객운영 리포트"
         description="수집된 문의·리뷰를 기준으로, 이번 기간에 확인할 것을 정리했습니다."
       />
 
-      <Panel title="이번 기간 요약" description="대표 보고용으로 그대로 옮겨 쓰실 수 있습니다.">
+      <Section title="이번 기간 요약" hint="대표 보고용으로 그대로 옮겨 쓰실 수 있습니다.">
         {report.summaryLines.length > 0 ? (
           <ul className="space-y-2">
             {report.summaryLines.map((line) => (
@@ -224,14 +224,14 @@ export function ReportsV2() {
         ) : (
           <p className="text-muted">{UNAVAILABLE}</p>
         )}
-      </Panel>
+      </Section>
 
       {/* These two are NOT period figures — they are what is standing right now, and the sections above
           and below them ARE about a window (an issue's change is judged over a recent surge window
           against an eight-week baseline). Saying so is the same distinction Executive Readiness Fix v1
           drew on 홈, where 미답변 문의 had no period and was being read as if it had one. */}
-      <Panel title="확인이 필요한 문의·리뷰" description="기간과 무관한 지금 수치입니다.">
-        <div className="grid gap-3 sm:grid-cols-2">
+      <Section title="확인이 필요한 문의·리뷰" hint="기간과 무관한 지금 수치입니다.">
+        <div className="grid items-start gap-3 sm:grid-cols-2">
           <Figure
             label="답변이 필요한 문의"
             available={report.unansweredInquiries.available}
@@ -246,11 +246,11 @@ export function ReportsV2() {
             shares={report.reviewsToCheckShares}
           />
         </div>
-      </Panel>
+      </Section>
 
-      <Panel
+      <Section
         title="반복되는 고객 문제"
-        description="같은 이야기가 이어지고 있는 것부터 정리했습니다."
+        hint="같은 이야기가 이어지고 있는 것부터 정리했습니다."
         action={
           <BtnLink to="/memory" size="sm" variant="outline">
             메모리 열기
@@ -260,7 +260,7 @@ export function ReportsV2() {
         {!report.issuesNeedingReview.available ? (
           <p className="text-muted">{UNAVAILABLE}</p>
         ) : report.issuesNeedingReview.value.length > 0 ? (
-          <ul className="space-y-1">
+          <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
             {report.issuesNeedingReview.value.map((issue) => (
               <IssueLine key={issue.id} issue={issue} />
             ))}
@@ -272,23 +272,20 @@ export function ReportsV2() {
         {report.issuesImproved.available && report.issuesImproved.value.length > 0 ? (
           <div className="mt-5 border-t border-line pt-4">
             <h3 className="text-base font-bold text-ink">관련 리뷰가 줄어든 문제</h3>
-            <ul className="mt-2 space-y-1">
+            <ul className="mt-2 divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
               {report.issuesImproved.value.map((issue) => (
                 <IssueLine key={issue.id} issue={issue} />
               ))}
             </ul>
           </div>
         ) : null}
-      </Panel>
+      </Section>
 
-      <Panel
-        title="상품별로 몰린 이슈"
-        description="같은 문제가 특정 상품에 모여 있는지 봅니다."
-      >
+      <Section title="상품별로 몰린 이슈" hint="같은 문제가 특정 상품에 모여 있는지 봅니다.">
         {productIssues === null ? (
           <p className="text-muted">{UNAVAILABLE}</p>
         ) : productIssues.length > 0 ? (
-          <ul className="space-y-1">
+          <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
             {productIssues.map((row) => {
               // The row already names a product this product has a screen for, and that screen is where
               // 「이 상품에서 무엇이 반복되나」 is answered. Without the link these were five numbers with
@@ -306,12 +303,12 @@ export function ReportsV2() {
                   {row.productId ? (
                     <Link
                       to={`/products/${row.productId}`}
-                      className="flex items-baseline justify-between gap-3 rounded-xl px-3 py-2 leading-relaxed transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+                      className="flex items-baseline justify-between gap-3 px-4 py-3 leading-relaxed transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
                     >
                       {body}
                     </Link>
                   ) : (
-                    <span className="flex items-baseline justify-between gap-3 px-3 py-2 leading-relaxed">{body}</span>
+                    <span className="flex items-baseline justify-between gap-3 px-4 py-3 leading-relaxed">{body}</span>
                   )}
                 </li>
               );
@@ -320,13 +317,10 @@ export function ReportsV2() {
         ) : (
           <p className="text-muted">상품별로 몰린 이슈는 확인되지 않았습니다.</p>
         )}
-      </Panel>
+      </Section>
 
-      <Panel
-        title="FAQ·상세페이지에서 다룰 후보"
-        description="반복해서 들어오는 내용을 응대 대신 페이지에서 먼저 답하도록 옮길 후보입니다."
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
+      <Section title="FAQ·상세페이지에서 다룰 후보" hint="반복해서 들어오는 내용을 응대 대신 페이지에서 먼저 답하도록 옮길 후보입니다.">
+        <div className="grid items-start gap-3 sm:grid-cols-2">
           <Figure
             label="자주 나오는 질문"
             available={report.faqCandidates.available}
@@ -340,7 +334,7 @@ export function ReportsV2() {
             to="/inquiries"
           />
         </div>
-      </Panel>
-    </>
+      </Section>
+    </div>
   );
 }

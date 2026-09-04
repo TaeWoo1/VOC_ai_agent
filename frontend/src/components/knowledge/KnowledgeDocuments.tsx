@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import { Btn } from "../ui/Btn";
 import { Status } from "../ui/Status";
+import { Facts } from "../ui/ObjectRow";
 import { api } from "../../lib/apiClient";
 import { ORG_TOPICS, PRODUCT_TOPICS, scopeLabel, topicLabel } from "../../lib/knowledgeWords";
 import type { KnowledgeDocumentView } from "../../lib/types";
@@ -44,14 +45,14 @@ export function KnowledgeDocumentList({
           <li key={document.sourceId} className="flex flex-wrap items-center justify-between gap-2 py-3">
             <div className="flex min-w-0 flex-col gap-0.5">
               <span className="break-keep text-base text-ink">{document.fileName ?? document.title}</span>
-              <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+              <Facts className="text-sm text-muted">
                 {topicLabel(document.kind) ? <span>{topicLabel(document.kind)}</span> : null}
                 <span>{scopeLabel(document.scope, document.productName)}</span>
                 <span>{document.uploadedAt.slice(0, 10)}</span>
                 {document.uploadedBy ? <span>{document.uploadedBy}</span> : null}
                 {document.passages === 0 ? <span className="text-warn">읽을 내용 없음</span> : null}
                 {document.active ? null : <Status tone="neutral">사용 안 함</Status>}
-              </span>
+              </Facts>
             </div>
             <Btn
               size="sm"

@@ -1065,6 +1065,55 @@ evidence 행 없음. **계약이 바뀌어 테스트 1건을 다시 썼다**(「
 `frontend/CLAUDE.md`가 그 workstream에 금지한 `backend/**` 수정을 product-owner 지시(conflict
 priority 1)에 따라 했고 **전부 읽기 · state semantics 변경 0 · write 0**)
 
+**`docs/visual_qa_product_polish_v1.md`** (Visual QA & Product Polish Closure v1 — 2026-09-04.
+기능 추가 0 · `frontend/` 전용 · backend 0 · 마이그레이션 0. Knowledge/Retrieval · Grounded Drafting ·
+Approval · Guided Browser execution · `workState` semantics · scope semantics는 **freeze**. 코드 수정
+전에 실제 Demo Org 13화면을 1440에서 **스크린샷으로** 감사했고(육안 기준 12항목), 고친 것은 페이지가
+아니라 **반복되는 visual grammar**다. **참조**: `shadcn` skill의 rules(구성·스타일)와 `ai-elements`
+references를 판단 재료로 읽었고 **컴포넌트 import 0 · 새 의존성 0**(레지스트리는 Tailwind v4 + Radix
+전제라 이 저장소에서 조용히 깨진다); 구속력 있는 계약은 `docs/reviewnary_design.md`이고 아래 변경은
+전부 거기 이미 적힌 규칙의 적용이다. Anthropic `frontend-design` 플러그인은 **이 환경에 설치돼 있지
+않다**(가정하지 않고 보고). **공통 문제 다섯**: ① **구분자 없는 사실 나열** — 한 객체에 대한 여러 사실을
+한 줄에 적는 같은 모양이 리뷰 기록 헤더·지식 자료 행·문의 메타·답변 작업 헤더·상품 행에 있는데 상품 행만
+구분자를 썼다(손으로 쓰면 선택적 사실마다 점을 조건부로 그려야 하기 때문). ② **내용보다 시끄러운 반복
+상태어** — `Status variant="word"`가 색 + 점 + semibold **셋**을 지고 있어 「답변 필요」 20개가 옆의 고객
+문장과 같은 무게였다. ③ **거의 아무것도 담지 않은 상자** — 리포트의 카드 5개(그 안에 또 카드), 상품
+상세의 ~500px 타일 3개, grid 행 높이로 늘어나는 figure. ④ **같은 동작을 두 번** — 이미 링크인 행 옆의
+「열기」. ⑤ **한 화면에서 같은 사실을 두 번** — 문의의 page head와 섹션 제목. **바꾼 것 여섯**:
+`Facts`(`Children.toArray`가 null을 버리므로 **없는 사실은 자기 구분자를 데리고 사라진다** — 호출자는
+사실만 쓰고 구두점은 쓰지 않는다, 측정된 5곳 적용) · `Status` word 변형을 **`font-medium`**으로(색·점·
+단어 무변경, 제품의 모든 큐 행에 적용) · `lib/sharedWord.ts`로 규칙 승격(`lib/conversation/`이
+재export) · **리포트 `Panel` → `Section`**(읽는 페이지가 wallpaper 대신 outline이 된다; `Panel`은
+설정 **폼**에는 남는다 — 거기서 상자는 「당신의 손이 필요하다」는 뜻이다) · 상품 상세 타일이 내용
+크기로 · 상품 행의 「열기」와 문의 head의 중복 카운트 제거. **주문과 설정은 감사만 하고 무변경**(가장 잘
+조립된 두 화면이다). **측정**: 리포트 1,400px/14면 → **1,072px/10면**, 상품 상세 반복되는 문제
+y=428 → **y≈330**, 문의 중복 제목 제거, 리뷰 헤더가 구분자를 얻음. **쓰고, 재고, 되돌린 추상화 하나**:
+shared-word 규칙을 `/products`에도 붙였다가 실측이 **혼합 목록**(미답변 2 · 반복 문제 6 · 없음 2)이라
+아무것도 접지 않음을 보고 되돌렸다 — 관측된 반복 없는 추상화는 이 패키지가 하지 않기로 한 것이다.
+**`/inquiries`에서도 발화하지 않으며 그것이 규칙이 작동하는 모습이다**: 큐는 「답변 필요」 19 +
+**「초안 준비됨」 2**라 `onlySharedWord`의 전원 일치 조건이 깨지고, 「거의 전부」로 느슨하게 하면 판매자가
+가장 빨리 처리할 수 있는 그 2행을 숨기게 된다 ⇒ 캡션은 침묵하고, 반복 소음은 **구별을 숨기지 않는 쪽**
+(상태어의 세 번째 강조 제거)으로 답했다. QA **13 route × 1440/1366/1152 — AA 위반 0 · 가로 스크롤 0 ·
+콘솔 오류 0 · off-host 0**, frontend **230 files / 2,730 tests / 실패 0**(전체 실행 3회 연속) · typecheck clean ·
+**테스트 재작성 0**(이 패키지가 바꾼 것 중 테스트가 진술하는 계약이 없다). **직전 패키지가 이름을 잡지
+못했던 flake를 잡아 근본 원인까지 갈랐다** — `Reviews.test.tsx`에서 **실패하는 테스트 이름이 실행마다
+달라졌고**(그것이 단서다), 포착된 메시지는 「spy가 호출되지 않아야 하는데 1회 호출됨」이며 인자가
+`getChannelReviewsStrict("acc-nv", …)`인데 **그 테스트의 fixture에는 `acc-nv`가 없다**. 원인: 그 호출은
+**이전 테스트**의 것이다 — `ChannelReviews`는 계정을 먼저 읽고 기록은 그 promise의 **연속**에서 읽으므로,
+자기 단언만 통과하면 끝나는 테스트가 두 번째 읽기를 큐에 남긴다; RTL `cleanup`은 언마운트하지만 이미
+스케줄된 `.then`을 취소하지 못하고 내부 `active` 가드는 setState를 막을 뿐 호출을 막지
+않는다 ⇒ 그 호출이 `afterEach`의 clear **이후**, 다음 테스트 안에 착지했고 어느 테스트에 착지하는지는
+스케줄링이 정했다(그래서 이름이 옮겨 다녔고 단독 실행에서는 재현되지 않았다). 수정은 **각 테스트
+시작에서도 clear**하는 한 줄(hook은 async 경계라 teardown 중 큐된 연속은 그때 이미 실행됐다) — production
+코드 0, 다른 테스트 0. **정직 보고**: before 스크린샷은
+1440 13장만 진짜이고 1366/1152는 **after 전용**이다(오촬영으로 narrow before가 덮여 조용히 다시 찍지
+않고 삭제했다). **가장 약한 화면 셋**: 리뷰(나란한 통계 상자 둘 · 두 갈래 필터 줄 · 「목록」 제목) ·
+문의 상세(내용보다 320px 긴 카드 · 같은 행의 두 밀도) · 채널 연결(「리뷰 가져오기」를 뜻하는 섹션 셋과
+「작업대」). **디자인 관점의 잔여**: 홈 마지막 행과 composer 사이 ~300px · 「제목 없는 문의」가 행의 가장
+큰 글자 · 리뷰 채널 스위처의 약한 활성 신호 · 화면에 남은 내부 단어(인용 단위 · 작업대 · demo) ·
+설정의 그룹 경계가 간격뿐. **마켓플레이스 0 · WRITE 0 · 모델 0 · 마이그레이션 0 · DB 변경 0** ⇒
+evidence 행 없음)
+
 **`docs/secondary_workspaces_ux_closure_v1.md`** (Secondary Workspaces UX Closure v1 — 2026-09-04.
 Chat / Reviews / Inquiries / Products / Knowledge는 **freeze**하고 나머지 화면(`/overview` · `/orders` ·
 `/reports` · `/settings` · `/connect` · navigation)이 **어떤 seller job을 하는지**와 **하는 말이 참인지**를
