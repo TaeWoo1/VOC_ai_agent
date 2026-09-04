@@ -121,6 +121,24 @@ public class InquiryRowsService {
     public InquiryRowsResponse rows(UUID orgId, LocalDate from, LocalDate to, String channel, String status,
                                     String order, Integer limit, String subject, UUID productId,
                                     UUID inquiryId) {
+        return rows(orgId, from, to, channel, status, order, limit, subject, productId, inquiryId, null);
+    }
+
+    /**
+     * @param page which page of {@code limit} rows, 0-based; null or negative = the first.
+     *
+     * <p><b>It exists because {@code totalCount} was already honest and unreachable.</b> This read is
+     * capped at {@link #MAX_LIMIT} rows and always asked for page 0, so the record showed its first 50
+     * rows, printed the true total beside them, and offered no way to reach row 51 — measured on the
+     * demo org, 94 rows in the record and 44 of them unreachable. A record that names its own size and
+     * cannot be walked is a search box, not an archive (Product Operations Continuity v1 §6). Nothing
+     * else moves: an absent {@code page} is byte-identical to the old read, which is why every existing
+     * caller — the Agent's ROWS lane included — keeps its behaviour.
+     */
+    @Transactional(readOnly = true)
+    public InquiryRowsResponse rows(UUID orgId, LocalDate from, LocalDate to, String channel, String status,
+                                    String order, Integer limit, String subject, UUID productId,
+                                    UUID inquiryId, Integer page) {
         LocalDate toDate = to == null ? LocalDate.ofInstant(clock.instant(), SELLER_ZONE) : to;
         if (from != null && from.isAfter(toDate)) {
             throw ApiException.badRequest("조회 기간의 시작일이 종료일보다 늦습니다.");
@@ -131,6 +149,7 @@ public class InquiryRowsService {
         String statusFilter = "ALL".equals(statusToken) ? null : statusToken;
         boolean oldest = oldestFirst(order);
         int size = limit == null ? DEFAULT_LIMIT : Math.max(1, Math.min(MAX_LIMIT, limit));
+        int pageIndex = page == null || page < 0 ? 0 : page;
         String term = term(subject);
         String pattern = term == null ? null : "%" + term.toLowerCase(Locale.ROOT) + "%";
 
@@ -146,7 +165,7 @@ public class InquiryRowsService {
             Optional<Channel> found = channels.findByCode(channelCode);
             if (found.isEmpty()) {
                 return new InquiryRowsResponse(from, toDate, channelCode, statusToken, oldest ? "OLDEST" : "NEWEST",
-                        size, term, productId, 0, List.of());
+                        size, term, productId, pageIndex, 0, List.of());
             }
             channelId = found.get().getId();
         }
@@ -154,34 +173,34 @@ public class InquiryRowsService {
         Sort sort = oldest
                 ? Sort.by(Sort.Order.asc("receivedAt"), Sort.Order.asc("id"))
                 : Sort.by(Sort.Order.desc("receivedAt"), Sort.Order.desc("id"));
-        List<Inquiry> page = inquiries.findRowsInWindow(orgId, channelId, productId, inquiryId, statusFilter,
-                pattern, start, end, PageRequest.of(0, size, sort));
+        List<Inquiry> rows = inquiries.findRowsInWindow(orgId, channelId, productId, inquiryId, statusFilter,
+                pattern, start, end, PageRequest.of(pageIndex, size, sort));
         long total = inquiries.countRowsInWindow(orgId, channelId, productId, inquiryId, statusFilter, pattern,
                 start, end);
 
         Map<UUID, Channel> channelsById = new HashMap<>();
-        for (Channel ch : channels.findAllById(page.stream().map(Inquiry::getChannelId).filter(java.util.Objects::nonNull).distinct().toList())) {
+        for (Channel ch : channels.findAllById(rows.stream().map(Inquiry::getChannelId).filter(java.util.Objects::nonNull).distinct().toList())) {
             channelsById.put(ch.getId(), ch);
         }
         Map<UUID, String> productNames = new HashMap<>();
-        products.findAllByOrgIdAndIdIn(orgId, page.stream().map(Inquiry::getProductId).filter(java.util.Objects::nonNull).distinct().toList())
+        products.findAllByOrgIdAndIdIn(orgId, rows.stream().map(Inquiry::getProductId).filter(java.util.Objects::nonNull).distinct().toList())
                 .forEach(p -> productNames.put(p.getId(), OperatorProductName.displayNameOrNull(p)));
         // The open/proposed work item per inquiry, when one exists. Terminal work items (answered,
         // dismissed) are not "the seller's next act" and are left off the row.
         Map<UUID, InquiryWorkItem> workable = new HashMap<>();
-        for (InquiryWorkItem w : workItems.findByInquiryIdIn(page.stream().map(Inquiry::getId).toList())) {
+        for (InquiryWorkItem w : workItems.findByInquiryIdIn(rows.stream().map(Inquiry::getId).toList())) {
             if (WORKABLE.contains(w.getPhase())) {
                 workable.put(w.getInquiryId(), w);
             }
         }
-        Map<UUID, com.sellerops.identity.ExecutableIdentity> identities = identity.forInquiries(orgId, page);
+        Map<UUID, com.sellerops.identity.ExecutableIdentity> identities = identity.forInquiries(orgId, rows);
 
-        List<InquiryRowItem> items = page.stream()
+        List<InquiryRowItem> items = rows.stream()
                 .map(q -> toItem(q, channelsById.get(q.getChannelId()), productNames, workable.get(q.getId()),
                         identities.getOrDefault(q.getId(), com.sellerops.identity.ExecutableIdentity.NONE)))
                 .toList();
         return new InquiryRowsResponse(from, toDate, channelCode, statusToken, oldest ? "OLDEST" : "NEWEST",
-                size, term, productId, total, items);
+                size, term, productId, pageIndex, total, items);
     }
 
     private static InquiryRowItem toItem(Inquiry q, Channel channel, Map<UUID, String> productNames,

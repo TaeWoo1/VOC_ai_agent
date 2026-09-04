@@ -210,26 +210,12 @@ public class RecentReviewService {
         return List.of(code);
     }
 
+    /** One row, from the single mapping both review reads share ({@link ReviewRows}). */
     private RecentReviewItemView toItem(Review r, Channel channel, SellerAccount account,
                                         Map<UUID, Product> byProduct,
                                         com.sellerops.identity.ExecutableIdentity executableIdentity) {
         Product product = r.getProductId() == null ? null : byProduct.get(r.getProductId());
-        // A rating-only review has no sentence to preview; the sanitizer's text would be blank.
-        String preview = ReviewTriageRules.isTextless(r.getBody())
-                ? null : VocPreviewSanitizer.sanitize(MarkupText.toPlainText(r.getBody())).text();
-        return new RecentReviewItemView(
-                r.getId(),
-                account == null ? null : account.getId(),
-                channel == null ? null : channel.getCode(),
-                channel == null ? null : channel.getNameKo(),
-                r.getReceivedAt() == null ? null : r.getReceivedAt().atZone(ZoneOffset.UTC).toLocalDate(),
-                r.getRating(),
-                r.isNegative(),
-                preview,
-                r.getProductId(),
-                product == null ? null : product.getName(),
-                r.getReplyState() == null ? null : r.getReplyState().name(),
-                executableIdentity.name());
+        return ReviewRows.row(r, channel, account, product == null ? null : product.getName(), executableIdentity);
     }
 
     /** Org-scoped batch lookup — the same shape {@code ChannelReviewService.productsOf} uses. */

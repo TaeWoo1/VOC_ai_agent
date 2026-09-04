@@ -396,6 +396,25 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     long countByOrgIdAndProductId(UUID orgId, UUID productId);
 
     /**
+     * One page of the reviews {@link #countByOrgIdAndProductId} counted — <b>the same predicate,
+     * deliberately</b>, so the 상품 screen's 리뷰 figure and the list it opens can never mean different
+     * rows (Product Operations Continuity v1 §1).
+     *
+     * <p>Org and product only. It is NOT narrowed to the seller-visible channels the way
+     * {@code findRecentInWindowByChannel} is: that read answers 「what came in」 across the channels the
+     * product screens can show, and this one has to answer for a NUMBER that was computed without that
+     * narrowing. Wiring the door to the narrower read would have opened an empty list under a figure of
+     * 2 — measured, on this repository's own demo data, for eight products whose reviews arrived on a
+     * channel outside {@code ProductChannels.VISIBLE_CODES}.
+     *
+     * <p>Synthetic rows are excluded by the {@code realDataOnly} filter, exactly as they are for the
+     * count; neither statement spells it, so neither can drift from the other.
+     */
+    @Query("select r from Review r where r.orgId = :orgId and r.productId = :productId")
+    List<Review> findByOrgIdAndProductId(@Param("orgId") UUID orgId, @Param("productId") UUID productId,
+                                         Pageable pageable);
+
+    /**
      * Reviews this org holds that carry NO product link at all — the denominator behind
      * {@code UNCERTAIN_PRODUCT_UNLINKED}. Counted rather than inferred, because "this product has no
      * reviews" and "no review in this org was ever linked to a product" are different answers and only
@@ -894,6 +913,7 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     @Query("""
             select r from Review r
             where r.orgId = :orgId and r.channelId = :channelId
+              and (:productId is null or r.productId = :productId)
               and
             """ + COMMITTED_REPLY_WORK_PREDICATE + """
               and
@@ -905,6 +925,7 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             """)
     Page<Review> findCommittedReplyWorkByChannel(@Param("orgId") UUID orgId,
                                                 @Param("channelId") UUID channelId,
+                                                @Param("productId") UUID productId,
                                                 Pageable pageable);
 
     /**

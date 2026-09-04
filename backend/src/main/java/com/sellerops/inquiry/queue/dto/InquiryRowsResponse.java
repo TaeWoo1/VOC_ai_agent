@@ -22,18 +22,30 @@ public record InquiryRowsResponse(
         String term,
         /** The product the read was narrowed to, echoed like every other axis. Null = every product. */
         java.util.UUID productId,
+        /**
+         * Which page of {@code limit} rows these are, 0-based — echoed so a caller can say 「51–100번째」
+         * and walk a record whose {@code totalCount} is larger than one page.
+         */
+        int page,
         long totalCount,
         List<InquiryRowItem> items) {
 
     /** The pre-term shape, kept so existing callers and tests read unchanged. */
     public InquiryRowsResponse(LocalDate from, LocalDate to, String channel, String status, String order,
                                int limit, long totalCount, List<InquiryRowItem> items) {
-        this(from, to, channel, status, order, limit, null, null, totalCount, items);
+        this(from, to, channel, status, order, limit, null, null, 0, totalCount, items);
     }
 
     /** The pre-product shape. */
     public InquiryRowsResponse(LocalDate from, LocalDate to, String channel, String status, String order,
                                int limit, String term, long totalCount, List<InquiryRowItem> items) {
-        this(from, to, channel, status, order, limit, term, null, totalCount, items);
+        this(from, to, channel, status, order, limit, term, null, 0, totalCount, items);
+    }
+
+    /** The pre-page shape. */
+    public InquiryRowsResponse(LocalDate from, LocalDate to, String channel, String status, String order,
+                               int limit, String term, java.util.UUID productId, long totalCount,
+                               List<InquiryRowItem> items) {
+        this(from, to, channel, status, order, limit, term, productId, 0, totalCount, items);
     }
 }

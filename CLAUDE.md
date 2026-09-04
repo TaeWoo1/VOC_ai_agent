@@ -1006,6 +1006,65 @@ collector **9,417** · runtime **835** · frontend **2,708** · 실패 0. **마�
 라우트가 없어 오늘 정직한 문을 만들 수 없다 — 백엔드 읽기가 필요하다) · Orders/Reports 무변경 · 설정 아래
 메모리·리포트 · `MockDataSeeder`의 8 상품 44 리뷰는 `DEMO_SEED`로 남는다)
 
+**`docs/product_operations_continuity_v1.md`** (Product Operations Continuity v1 — 2026-09-04.
+새 dashboard가 아니라 **상품 화면이 이미 말하고 있는 사실을 실제 doorway로 완성**한다. Chat ·
+Grounded Drafting · Knowledge model · Retrieval · Guided execution · 승인 경계는 **freeze**이고 이
+패키지가 더한 write는 **0**. 감사가 먼저였고 결론은 하나 — **상품 화면의 숫자 넷 중 둘이 막다른
+길**이었다(리뷰 1,761과 문제 근거 80은 누를 수 없고, 반복되는 문제 15건은 **5건만 렌더되며 10건이
+더 있다는 말이 없었고** 행은 링크가 아니었다). **§1 리뷰 doorway — 재사용하면 안 되는 이유를
+측정으로 찾았다**: 상품 범위 리뷰 read는 `GET /api/reviews/recent?productId=`로 **이미 있었지만**
+그것은 `ProductChannels.VISIBLE_CODES`로 좁혀져 있고 타일의 숫자(`countByOrgIdAndProductId`)는
+그렇지 않다 ⇒ 실측 `signals.volume.reviews=2` vs `recent total=0`이 **상품 8개**에서 재현됐다
+(원인은 이 org의 **GMARKET 리뷰 11건** — REAL이고 seller-visible 채널이 아니다). 그 read에 문을
+달았다면 판매자는 **「리뷰 2」를 누르고 빈 목록에 착지**했을 것이므로, 브리프가 허용한 **가장 작은
+read capability**를 새로 만들었다: `findByOrgIdAndProductId`를 `countByOrgIdAndProductId` **바로
+옆에 같은 술어로** 두고(둘 다 평범한 JPA라 `realDataOnly`를 똑같이 통과하고 **어느 쪽도 그 조건을
+손으로 적지 않아** 어긋날 자리가 없다) `GET /api/products/{productId}/reviews`가 그 둘을 함께
+돌려준다 — 실측 **1761↔1761 · 2↔2**. 행은 기존 `RecentReviewItemView` 그대로이고 매핑도
+`ReviewRows.row()` **하나**로 합쳐 window read와 공유한다(같은 리뷰가 대화와 화면에서 다르게 읽히는
+두 번째 사본 금지). 목적지 `/reviews?productId=`는 **계정 스위처가 없다** — 한 상품의 리뷰는 한
+계정의 것이 아니고 눌린 숫자도 그렇게 세지지 않았으므로 첫 계정으로 redirect하는 것은 **묻지 않은
+더 좁은 질문에 답하는 것**이다(채널은 탭이 아니라 행의 사실이 된다); 범위는 문장으로 말하고 해제
+가능하며 **work queue와 archive가 같은 범위를 존중**하고 모든 행은 Review Approval Path v1이 지은
+**그 하나의 작업 화면**(`/reviews/reply/{id}`)을 연다(이 컴포넌트의 write **0**). **§1-C 안전
+fence가 옳았다** — 처음엔 `OperatorVocItem`에 `productId`를 실어 화면에서 걸렀고
+`OperatorAttentionItemsJsonContractTest`가 **직렬화된 바이트에서 `productid`를 찾아** 빨개졌다;
+필드를 **되돌리고** 좁히기를 쿼리 안으로 옮겼다(`findCommittedReplyWorkByChannel`에 절 하나, `null`이면
+바이트 동일) — **읽은 뒤 거르면** 계정 to-do가 페이지보다 길 때 이 상품의 일이 조용히 사라지고,
+**`productName`으로 거르는 것**은 display name이라(정직하게 보일 수 없으면 withheld) 두 상품이 같은
+이름을 가질 수 있다. 실측 계정 to-do 3 → 이 상품 **2**, 응답에 `productId` 키 **없음**. **§2 이슈
+근거**: 새 issue detection **0** — 근거 화면은 `/memory/{issueId}`로 이미 있었고 상품 화면이 링크하지
+않았을 뿐이라 **모든 반복 문제 행이 문**이 되고 나머지는 `Disclosure`로 「문제 10건 더 보기」;
+**문제 근거 타일은 사라지고 그 숫자는 섹션 제목으로 옮겼다**(독립된 수가 아니라 아래 이슈들의 근거
+합이었고 갈 곳이 없던 유일한 숫자다 — 사실은 사라지지 않고 자리를 옮겼다) ⇒ **타일의 숫자 셋이 전부
+문**이고 **0은 여전히 문이 아니다**. **§3 위계는 한 번만 옮겼다** — 채널 리스팅(판매자가 이미 아는
+제원)이 신호 바로 아래라 이 페이지에 오는 두 이유가 300px 아래에서 시작했다 ⇒ 반복되는 문제
+y **428 → 234**(fold 위), 채널 리스팅 234 → 1,289. 새 카드·색·컴포넌트 0. **§4 Knowledge continuity**:
+「**회사 전체 지식에서 보기**」 — 문구가 **회사 전체**인 것이 요점이다(그 화면에 상품 필터가 없으므로
+「이 상품의 자료」는 지킬 수 없는 약속이고 **링크는 자기가 가는 곳을 말한다**); **부족한 정보**는 열린
+확인 필요 중 이 상품 것만 세어 한 줄로 말하고 편집기는 `/knowledge`에 그대로 둔다(**두 번째 받은함
+0**, 좁히는 축은 binding, **읽기 실패는 아무 말도 하지 않는다** — 빈 목록과 못 읽은 목록을 구별할 수
+없으므로). **§6 archive completeness**: `GET /api/inquiries/rows`가 `MAX_LIMIT`=50에 **항상 page 0**을
+물어 `totalCount`는 정직하고 **도달 불가능**했다(실측 94행 중 **44행**) — 기록이 자기 크기를 말하면서
+걸어갈 수 없으면 아카이브가 아니라 검색창이다 ⇒ `page` 파라미터 하나(부재 = 예전과 바이트 동일이라
+Agent ROWS lane 포함 모든 caller 무변경)와 「더 보기」(누적, 필터가 바뀌면 page 1로, 더 볼 것이 없으면
+렌더 0); 라이브 50 → **94**. `/reviews` 기록은 이미 정직해 무변경. **거대한 table framework 0**.
+**§7** `ab0caf74`의 data-origin 구분 무변경이고 새 read는 상품 조회와 리뷰 count/list **두 지점**에서
+`realDataOnly`를 물려받는다(합성 상품은 라이브에서 **404** — 남의 org와 같은 메시지라 probe 불가;
+행 단위 배제는 REAL 상품 위의 `VERIFY_FIXTURE` 리뷰로 테스트가 고정해 **figure와 door가 함께 1**).
+**QA 1440/1366/1152 · 8 route**: **AA 위반 0** · 가로 스크롤 0 · off-host 0, **click path 세 폭 동일
+스크롤 0** — 상품 → 이 상품 리뷰 → 정확한 리뷰의 승인 **2클릭**(타일 y=114 → 첫 행 y=191 → 승인
+y=594), 상품 → 반복 문제 → 그 이슈의 근거 **1클릭**(y=307). backend **3,792** · frontend **2,725** ·
+실패 0. **마켓플레이스 호출 0 · WRITE 0 · 모델 0 · 승인 0 · 마이그레이션 0 · DB 행 변경 0** ⇒
+evidence 행 없음. **계약이 바뀌어 테스트 1건을 다시 썼다**(「나머지는 위에서 찾아 주세요」 단언은
+참이었고 막다른 길이었다 — 새 단언은 그때의 전부에 **길**을 더한다); **안전 테스트 약화 0**.
+**고치지 않고 보고**: GMARKET 리뷰 11건은 `/reviews` 채널 스위처에 탭이 없어 이제 **상품 범위 기록이
+보이는 유일한 곳**이다(타일을 좁힐지 채널 집합을 넓힐지는 **product-owner 결정**) · `/memory` 좌측
+목록은 여전히 org 전체 · 이슈 근거 인용은 `/inbox/{reviewId}`로만 링크 · `/inquiries` 5,550px ·
+상품 지식 카드 두 개 세로 적층 · Orders/Reports/Settings 무변경(`/memory`는 주 내비에 없다) ·
+`frontend/CLAUDE.md`가 그 workstream에 금지한 `backend/**` 수정을 product-owner 지시(conflict
+priority 1)에 따라 했고 **전부 읽기 · state semantics 변경 0 · write 0**)
+
 **`docs/operational_workspace_ux_v1.md`** (Operational Workspace UX System v1 — 2026-09-04.
 페이지별 cosmetic redesign이 아니라 **정보 구조 · 상태 표현 · 행동 문법**을 한 제품으로 정리한다. Calm
 Operational Assistant 시각 방향 · 새 design system · 새 색 · 새 taxonomy · retrieval · approval **전부

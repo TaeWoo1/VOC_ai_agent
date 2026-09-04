@@ -15,6 +15,7 @@ import type {
   ProactiveCaseListResponse,
   ProactiveSummaryView,
   ProductKnowledgeView,
+  ProductReviewPage,
   ProductSignalsView,
   InquiryProductBindingView,
   ProductCatalogView,
@@ -744,6 +745,8 @@ export const api = {
       productId?: string;
       /** One exact inquiry, for a deep link naming a row that is not on the current page. */
       inquiryId?: string;
+      /** Which page of `limit` rows, 0-based. Absent = the first, exactly as before. */
+      page?: number;
     } = {},
   ): Promise<InquiryRowsResponse> {
     const search = new URLSearchParams();
@@ -1228,7 +1231,13 @@ export const api = {
   // read must survive a reload, a window change and a new session. Fail-closed like the others.
   async getReplyWork(
     accountId: string,
-    limits?: { todoLimit?: number; recentLimit?: number },
+    /**
+     * `productId` narrows the to-do to one product — the 리뷰 surface scoped by a doorway from 상품.
+     * It is asked of the SERVER rather than filtered here because this surface's rows carry no product
+     * identifier: a fence scans the serialized page for one, and `productName` is a display name that
+     * two products can share.
+     */
+    limits?: { todoLimit?: number; recentLimit?: number; productId?: string },
   ): Promise<OperatorReplyWorkView> {
     if (USE_MOCKS) {
       return mockReplyWork(accountId);
@@ -1236,6 +1245,7 @@ export const api = {
     const search = new URLSearchParams();
     if (limits?.todoLimit != null) search.set("todoLimit", String(limits.todoLimit));
     if (limits?.recentLimit != null) search.set("recentLimit", String(limits.recentLimit));
+    if (limits?.productId) search.set("productId", limits.productId);
     const qs = search.toString();
     const { data } = await http.get<OperatorReplyWorkView>(
       `/api/seller-accounts/${accountId}/reply-work${qs ? `?${qs}` : ""}`,
@@ -1649,6 +1659,28 @@ export const api = {
   // notice whenever that flag is on, so they can. The distinction that matters is
   // preserved: opting into a demo is a choice, silently substituting seeded data
   // for a broken read is not.
+
+  /**
+   * One page of ONE product's reviews — the door behind the 상품 screen's 리뷰 figure.
+   *
+   * STRICT, and deliberately not the window read (`/api/reviews/recent`): that one is scoped to the
+   * seller-visible channels, and the figure this list stands under is not. A door that opened a
+   * narrower set than the number it was pressed on would be a broken promise, so the server answers
+   * with the figure's own predicate and this client asks for nothing more.
+   */
+  async getProductReviews(
+    productId: string,
+    options: { page?: number; size?: number } = {},
+  ): Promise<ProductReviewPage> {
+    const params = new URLSearchParams();
+    if (options.page != null) params.set("page", String(options.page));
+    if (options.size != null) params.set("size", String(options.size));
+    const qs = params.toString();
+    const { data } = await http.get<ProductReviewPage>(
+      `/api/products/${encodeURIComponent(productId)}/reviews${qs ? `?${qs}` : ""}`,
+    );
+    return data;
+  },
 
   /**
    * The working list, or the 중요하지 않음 list when `dismissed` is true. Two calls rather than one

@@ -32,12 +32,19 @@ export function ReplyWorkRow({
   item,
   dim = false,
   action,
+  hideProduct = false,
 }: {
   item: OperatorVocItem;
   /** A settled row (already reported, or set aside): same information, quieter ink. */
   dim?: boolean;
   /** The list's own control for this row, when it has one (작업에서 제외). */
   action?: ReactNode;
+  /**
+   * Drop the product from the meta line. Set only where the SURFACE is already one product and has
+   * said so — every row would carry the same word, which is the shape this product states once in a
+   * caption. On an account-scoped worklist the name is what tells two rows apart, so it stays.
+   */
+  hideProduct?: boolean;
 }) {
   const state = replyWorkStateWord(item.replyWorkState);
   const product = productLabel(item.productName);
@@ -62,7 +69,7 @@ export function ReplyWorkRow({
               {"★".repeat(item.rating)}
             </span>
           ) : null}
-          {product.isPlaceholder ? product.text : product.text}
+          {hideProduct ? null : product.text}
         </>
       }
       time={item.sourceCreatedDate ?? undefined}

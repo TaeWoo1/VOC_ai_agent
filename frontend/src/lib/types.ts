@@ -1452,8 +1452,41 @@ export interface InquiryRowsResponse {
   term: string | null;
   /** The product the read was narrowed to, echoed like every other axis. */
   productId: string | null;
+  /** Which page of `limit` rows these are, 0-based — so a record larger than one page can be walked. */
+  page: number;
   totalCount: number;
   items: InquiryRowItem[];
+}
+
+// Mirrors com.sellerops.review.recent.dto.RecentReviewItemView — one sanitized review row. The same
+// shape the Agent's window read returns, from the same server-side mapping, so a review reads the
+// same in the conversation and on the screen. No buyer identity, no raw body.
+export interface ProductReviewItem {
+  id: string;
+  sellerAccountId: string | null;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  writtenOn: string | null;
+  rating: number | null;
+  negative: boolean;
+  /** Redacted one-liner, or null for a rating-only review. */
+  preview: string | null;
+  productId: string | null;
+  productName: string | null;
+  replyState: string | null;
+  executableIdentity: string | null;
+}
+
+// Mirrors com.sellerops.review.product.dto.ProductReviewPageView. `total` is the whole record for
+// this product — the very number the 상품 screen prints on its 리뷰 tile, read through the same
+// predicate, which is why the tile may be pressed at all.
+export interface ProductReviewPage {
+  productId: string;
+  productName: string | null;
+  total: number;
+  page: number;
+  size: number;
+  items: ProductReviewItem[];
 }
 
 // Mirrors com.sellerops.inquiry.proposal.dto.ProposalView. Coarse decision

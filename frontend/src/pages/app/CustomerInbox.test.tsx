@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { CustomerInbox } from "./CustomerInbox";
@@ -201,18 +201,35 @@ describe("지금 처리할 일 — the work queue, from the queue read", () => {
 });
 
 describe("전체 문의 — the record, filtered by the server", () => {
-  it("is one bounded page with the whole set's count, and says when there is more behind it", async () => {
+  // CONTRACT CHANGE (Product Operations Continuity v1 §6). This used to assert the sentence
+  // 「최근 2건을 보여 드립니다. 나머지는 위에서 찾아 주세요」 — true, and a dead end: the read was capped
+  // at 50 rows and always asked for page 0, so search was the only way out of a record whose own total
+  // said there were 3,120. What is asserted now is what was asserted then plus the way through: the
+  // page is bounded, the whole set's count is shown, a record that holds everything says nothing, and
+  // 더 보기 asks the server for the next page rather than telling the seller to search.
+  it("is one bounded page with the whole set's count, and offers the way to the rest", async () => {
     getInquiryRowsStrict.mockResolvedValue({ items: RECORD, totalCount: 3120, limit: 50, productId: null });
     renderInbox();
     await screen.findByLabelText("전체 문의");
-    expect(screen.getByText(/최근 2건을 보여 드립니다/)).toBeInTheDocument();
-    expect(getInquiryRowsStrict).toHaveBeenCalledWith(expect.objectContaining({ limit: 50 }));
+    expect(screen.getByText(/2 \/ 3120건/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "더 보기" })).toBeInTheDocument();
+    expect(getInquiryRowsStrict).toHaveBeenCalledWith(expect.objectContaining({ limit: 50, page: 0 }));
   });
 
-  it("a page that holds everything says nothing about more", async () => {
+  it("더 보기 asks for the next page of the same question", async () => {
+    getInquiryRowsStrict.mockResolvedValue({ items: RECORD, totalCount: 3120, limit: 50, productId: null });
     renderInbox();
     await screen.findByLabelText("전체 문의");
-    expect(screen.queryByText(/보여 드립니다/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "더 보기" }));
+    await waitFor(() =>
+      expect(getInquiryRowsStrict).toHaveBeenCalledWith(expect.objectContaining({ limit: 50, page: 1 })),
+    );
+  });
+
+  it("a page that holds everything offers no way to more", async () => {
+    renderInbox();
+    await screen.findByLabelText("전체 문의");
+    expect(screen.queryByRole("button", { name: "더 보기" })).toBeNull();
   });
 
   it("the search box narrows the SERVER read, not the loaded rows", async () => {

@@ -112,6 +112,19 @@ public class OperatorAttentionService {
      */
     @Transactional(readOnly = true)
     public OperatorReplyWorkView replyWork(UUID orgId, UUID accountId, int todoLimit, int recentLimit) {
+        return replyWork(orgId, accountId, todoLimit, recentLimit, null);
+    }
+
+    /**
+     * The same worklist, narrowed to one product when the caller names one — the 리뷰 surface scoped by
+     * a doorway from 상품. {@code null} is every product, byte-identical to the read above.
+     *
+     * <p>The narrowing happens in the source's own query. It cannot happen on the client: this
+     * surface's rows carry no product identifier, by a fence that scans the serialized page for one.
+     */
+    @Transactional(readOnly = true)
+    public OperatorReplyWorkView replyWork(UUID orgId, UUID accountId, int todoLimit, int recentLimit,
+                                           UUID productId) {
         SellerAccount account = requireAccount(orgId, accountId);
         Channel channel = channels.findById(account.getChannelId()).orElse(null);
         String channelCode = channel == null ? null : channel.getCode();
@@ -131,7 +144,7 @@ public class OperatorAttentionService {
                 : source
                         .filter(IngestedReviewVocItemSource.class::isInstance)
                         .map(IngestedReviewVocItemSource.class::cast)
-                        .map(s -> s.replyWork(orgId, accountId, channelCode, channelNameKo, safeTodo, safeRecent))
+                        .map(s -> s.replyWork(orgId, accountId, channelCode, channelNameKo, safeTodo, safeRecent, productId))
                         .orElse(ReplyWorkSlice.empty());
 
         return new OperatorReplyWorkView(

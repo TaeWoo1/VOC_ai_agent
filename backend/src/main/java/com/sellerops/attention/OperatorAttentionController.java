@@ -54,8 +54,9 @@ public class OperatorAttentionController {
             @AuthenticationPrincipal AuthPrincipal principal,
             @PathVariable UUID accountId,
             @RequestParam(required = false, defaultValue = "50") int todoLimit,
-            @RequestParam(required = false, defaultValue = "5") int recentLimit) {
-        return service.replyWork(principal.orgId(), accountId, todoLimit, recentLimit);
+            @RequestParam(required = false, defaultValue = "5") int recentLimit,
+            @RequestParam(required = false) UUID productId) {
+        return service.replyWork(principal.orgId(), accountId, todoLimit, recentLimit, productId);
     }
 
     /**

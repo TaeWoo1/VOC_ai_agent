@@ -504,12 +504,36 @@ public class IngestedReviewVocItemSource implements VocItemSource {
      */
     public ReplyWorkSlice replyWork(UUID orgId, UUID accountId, String channelCode, String channelNameKo,
                                     int todoLimit, int recentLimit) {
+        return replyWork(orgId, accountId, channelCode, channelNameKo, todoLimit, recentLimit, null);
+    }
+
+    /**
+     * The same worklist, narrowed to ONE product — what the 리뷰 surface asks for when a doorway from
+     * the 상품 screen scoped it (Product Operations Continuity v1 §1).
+     *
+     * <p><b>The narrowing is done here, in the query, and never on the wire.</b> A row on this surface
+     * may not carry a product identifier — {@code OperatorAttentionItemsJsonContractTest} scans the
+     * serialized bytes for exactly that — so a client cannot be handed the binding and asked to filter
+     * on it. It also must not filter on {@code productName}: that field is a display name, withheld
+     * whenever it cannot be shown honestly, and two products can share one. So the caller passes the id
+     * it already holds and the server answers about that product.
+     *
+     * <p>Filtering inside the statement rather than after the read is what keeps the limit honest: a
+     * post-hoc filter over the first {@code todoLimit} rows would silently drop this product's work
+     * whenever the account's own worklist is longer than the page.
+     *
+     * <p>The recently-reported section is NOT narrowed. It is a bounded record of what the operator
+     * said they posted across this account, and it is presented as such; the product-scoped surface
+     * does not render it.
+     */
+    public ReplyWorkSlice replyWork(UUID orgId, UUID accountId, String channelCode, String channelNameKo,
+                                    int todoLimit, int recentLimit, UUID productId) {
         UUID channelId = unambiguousChannelFor(orgId, accountId);
         if (channelId == null) {
             return ReplyWorkSlice.empty();
         }
         List<Review> todo = reviews
-                .findCommittedReplyWorkByChannel(orgId, channelId, PageRequest.of(0, todoLimit))
+                .findCommittedReplyWorkByChannel(orgId, channelId, productId, PageRequest.of(0, todoLimit))
                 .getContent();
         List<Review> recent = reviews
                 .findRecentlyReportedByChannel(orgId, channelId, PageRequest.of(0, recentLimit))

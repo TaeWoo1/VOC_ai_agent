@@ -40,7 +40,9 @@ public class InquiryRowsController {
                                     @RequestParam(required = false) Integer limit,
                                     @RequestParam(required = false) String q,
                                     @RequestParam(required = false) java.util.UUID productId,
-                                    @RequestParam(required = false) java.util.UUID inquiryId) {
-        return service.rows(principal.orgId(), from, to, channel, status, order, limit, q, productId, inquiryId);
+                                    @RequestParam(required = false) java.util.UUID inquiryId,
+                                    @RequestParam(required = false) Integer page) {
+        return service.rows(principal.orgId(), from, to, channel, status, order, limit, q, productId, inquiryId,
+                page);
     }
 }

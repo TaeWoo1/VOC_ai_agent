@@ -11,6 +11,7 @@ import type { ChannelResponse, ChannelReviewPageView, SellerAccountResponse } fr
 const getSellerAccountsStrict = vi.fn();
 const getChannelsStrict = vi.fn();
 const getChannelReviewsStrict = vi.fn();
+const getProductReviews = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -20,6 +21,7 @@ vi.mock("../../lib/apiClient", () => ({
       getChannelReviewsStrict(accountId, params),
     getChannelReviewStrict: vi.fn(),
     recordChannelReviewTriageBehavior: vi.fn(),
+    getProductReviews: (productId: string, options: unknown) => getProductReviews(productId, options),
     // 내 답변 작업 mounts on a reply-capable (NAVER) account since A6; keep it empty and off the wire here.
     getReplyWork: async (accountId: string) => ({
       sellerAccountId: accountId,
@@ -111,6 +113,43 @@ beforeEach(() => {
   getChannelReviewsStrict.mockImplementation(async (accountId: string) =>
     page(accountId === "acc-cp" ? "COUPANG" : "NAVER"),
   );
+  getProductReviews.mockResolvedValue({
+    productId: "p-1",
+    productName: "선바로 일체형 전선몰딩",
+    total: 2,
+    page: 0,
+    size: 20,
+    items: [
+      {
+        id: "rev-1",
+        sellerAccountId: "acc-nv",
+        channelCode: "NAVER",
+        channelNameKo: "네이버 스마트스토어",
+        writtenOn: "2026-08-14",
+        rating: 1,
+        negative: true,
+        preview: "붙이는 부분이 떨어졌어요",
+        productId: "p-1",
+        productName: "선바로 일체형 전선몰딩",
+        replyState: null,
+        executableIdentity: "MARKETPLACE",
+      },
+      {
+        id: "rev-2",
+        sellerAccountId: "acc-cp",
+        channelCode: "GMARKET",
+        channelNameKo: "G마켓/옥션",
+        writtenOn: "2025-07-10",
+        rating: 5,
+        negative: false,
+        preview: null,
+        productId: "p-1",
+        productName: "선바로 일체형 전선몰딩",
+        replyState: null,
+        executableIdentity: "NONE",
+      },
+    ],
+  });
 });
 
 afterEach(() => {
@@ -188,5 +227,44 @@ describe("리뷰 — the workflow surface", () => {
     await screen.findByRole("navigation", { name: "리뷰 채널" });
     await screen.findByRole("heading", { level: 2, name: "네이버 스마트스토어" });
     await expectNoAxeViolations(container);
+  });
+});
+
+/**
+ * 리뷰, narrowed to a product — the door the 상품 screen's 리뷰 figure opens
+ * (Product Operations Continuity v1 §1).
+ *
+ * What is pinned here is the promise of the door, not its decoration: the scope is stated, it can be
+ * cleared, the account switcher is gone because a product's reviews are not one account's, and every
+ * row opens the exact review rather than a filtered record the seller has to search again.
+ */
+describe("리뷰 — narrowed to one product", () => {
+  it("states the scope, offers the way out, and drops the channel switcher", async () => {
+    renderAt("/reviews?productId=p-1");
+    expect(await screen.findByText(/의 리뷰만 보고 있습니다/)).toBeInTheDocument();
+    expect(screen.getByText("선바로 일체형 전선몰딩")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "전체 리뷰 보기" })).toHaveAttribute("href", "/reviews");
+    expect(screen.queryByRole("navigation", { name: "리뷰 채널" })).toBeNull();
+  });
+
+  it("reads the product's own record — never an account's, and never the window read", async () => {
+    renderAt("/reviews?productId=p-1");
+    await screen.findByText(/의 리뷰만 보고 있습니다/);
+    expect(getProductReviews).toHaveBeenCalledWith("p-1", expect.objectContaining({ page: 0 }));
+    // The per-account record is the OTHER question; asking it here would answer a narrower one.
+    expect(getChannelReviewsStrict).not.toHaveBeenCalled();
+  });
+
+  it("carries a row from a channel the switcher cannot show, and opens the exact review", async () => {
+    renderAt("/reviews?productId=p-1");
+    const first = await screen.findByRole("link", { name: /붙이는 부분이 떨어졌어요/ });
+    expect(first).toHaveAttribute("href", "/reviews/reply/rev-1");
+    // G마켓 is outside the seller-visible channel set, and the figure counted it, so it is here.
+    expect(screen.getByText("G마켓/옥션")).toBeInTheDocument();
+  });
+
+  it("names a rating-only review rather than rendering an empty row", async () => {
+    renderAt("/reviews?productId=p-1");
+    expect(await screen.findByRole("link", { name: /별점 5점만 남긴 리뷰/ })).toBeInTheDocument();
   });
 });

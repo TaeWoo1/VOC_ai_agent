@@ -4,7 +4,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Section } from "../../components/ui/Section";
 import { Empty } from "../../components/ui/Empty";
-import { BtnLink } from "../../components/ui/Btn";
+import { Btn, BtnLink } from "../../components/ui/Btn";
 import { Status } from "../../components/ui/Status";
 import { WorkItem } from "../../components/ui/WorkItem";
 import { AgentLaunch } from "../../components/ui/AgentLaunch";
@@ -72,6 +72,10 @@ export function CustomerInbox() {
   const [queue, setQueue] = useState<InquiryQueueItem[] | null>(null);
   const [record, setRecord] = useState<InquiryRowItem[] | null>(null);
   const [recordTotal, setRecordTotal] = useState<number | null>(null);
+  // How many pages of the record have been asked for. Rows accumulate rather than replace, so 더 보기
+  // lengthens the list a seller is reading instead of moving them to a page they have to navigate back
+  // from. Reset by any change to the filters, because a page number means nothing across two questions.
+  const [recordPages, setRecordPages] = useState(1);
   const [linked, setLinked] = useState<InquiryRowItem | null>(null);
   const [analyses, setAnalyses] = useState<ItemAnalysis[]>([]);
   const [failed, setFailed] = useState(false);
@@ -128,23 +132,34 @@ export function CustomerInbox() {
     setLoading(true);
     setFailed(false);
     try {
-      const page = await api.getInquiryRowsStrict({
-        limit: PAGE_SIZE,
-        order: "NEWEST",
-        ...(status !== "ALL" ? { status } : {}),
-        ...(channel ? { channel } : {}),
-        ...(productId ? { productId } : {}),
-        ...(q.trim() ? { q: q.trim() } : {}),
-      });
-      setRecord(page.items);
-      setRecordTotal(page.totalCount);
+      // Every requested page, through the same predicate — the read echoes its own page, so the rows on
+      // screen and the total beside them are always describing the same question.
+      const pages = await Promise.all(
+        Array.from({ length: recordPages }, (_, page) =>
+          api.getInquiryRowsStrict({
+            limit: PAGE_SIZE,
+            page,
+            order: "NEWEST",
+            ...(status !== "ALL" ? { status } : {}),
+            ...(channel ? { channel } : {}),
+            ...(productId ? { productId } : {}),
+            ...(q.trim() ? { q: q.trim() } : {}),
+          }),
+        ),
+      );
+      setRecord(pages.flatMap((page) => page.items));
+      setRecordTotal(pages[pages.length - 1].totalCount);
     } catch {
       setRecord(null);
       setFailed(true);
     } finally {
       setLoading(false);
     }
-  }, [status, channel, productId, q]);
+  }, [status, channel, productId, q, recordPages]);
+
+  // A new question starts at its first page. Without this, changing a filter would ask for pages 2..n
+  // of a list that no longer exists.
+  useEffect(() => setRecordPages(1), [status, channel, productId, q]);
 
   useEffect(() => {
     void loadQueue();
@@ -400,11 +415,29 @@ export function CustomerInbox() {
                     );
                   })}
                 </ul>
-                {/* Said only when there IS more — a page that holds everything says nothing. */}
+                {/*
+                  Said only when there IS more — a page that holds everything says nothing.
+
+                  It used to end here, at a sentence: 「나머지는 위에서 찾아 주세요」. The read was capped
+                  at 50 rows and always asked for page 0, so the seller was told the true total and given
+                  no way to reach row 51 — 94 rows in this org's record, 44 of them unreachable. Search
+                  was the only door out, which works when you know what you are looking for and not at
+                  all when you are looking through. The server takes a page now, so it can be walked.
+                */}
                 {recordTotal != null && recordTotal > (record ?? []).length ? (
-                  <p className="px-4 pt-3 text-sm text-muted">
-                    최근 {(record ?? []).length}건을 보여 드립니다. 나머지는 위에서 찾아 주세요.
-                  </p>
+                  <div className="flex flex-wrap items-center gap-3 px-4 pt-3">
+                    <Btn
+                      variant="outline"
+                      size="sm"
+                      disabled={loading}
+                      onClick={() => setRecordPages((n) => n + 1)}
+                    >
+                      {loading ? "불러오는 중…" : "더 보기"}
+                    </Btn>
+                    <span className="text-sm tabular-nums text-muted">
+                      {(record ?? []).length} / {recordTotal}건
+                    </span>
+                  </div>
                 ) : null}
               </>
             )}

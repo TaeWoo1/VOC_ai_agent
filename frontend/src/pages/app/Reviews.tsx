@@ -9,6 +9,7 @@ import { reviewAccounts, type ReviewAccount } from "../../lib/reviewAccounts";
 import { reviewRecordPath } from "../../lib/reviewRecord";
 import type { ChannelResponse, SellerAccountResponse } from "../../lib/types";
 import { ChannelReviews } from "./ChannelReviews";
+import { ProductReviews } from "../../components/reviews/ProductReviews";
 import { useAgentSurface } from "../../lib/agentPanel";
 
 /**
@@ -22,6 +23,11 @@ import { useAgentSurface } from "../../lib/agentPanel";
 export function Reviews() {
   const { accountId } = useParams();
   const { search } = useLocation();
+  const [searchParams] = useSearchParams();
+  // The product a doorway narrowed this surface to (Product Operations Continuity v1 §1). It is an
+  // axis, not a destination of its own: with it the page answers 「이 상품의 리뷰」 across the org,
+  // without it it answers 「이 채널의 리뷰」 exactly as before.
+  const productId = searchParams.get("productId");
   const [accounts, setAccounts] = useState<SellerAccountResponse[] | null>(null);
   const [channels, setChannels] = useState<ChannelResponse[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,6 +77,21 @@ export function Reviews() {
           action={<BtnLink to="/connect">채널 연결 확인</BtnLink>}
         />
       </>
+    );
+  }
+  // Scoped to a product, the account switcher has nothing to switch: the figure the seller pressed was
+  // counted across every channel this org holds for that product, so the surface is scoped the same way
+  // and the channel becomes a fact on each row. Redirecting into one account here would silently answer
+  // a narrower question than the one that was asked.
+  if (productId) {
+    return (
+      <div className="space-y-5">
+        <PageHead
+          title="리뷰"
+          action={<AgentLaunch context={{ productId, surface: "reviews" }} label="이 상품 리뷰에 대해 물어보기" />}
+        />
+        <ProductReviews productId={productId} accountIds={targets.map((t) => t.account.id)} />
+      </div>
     );
   }
   if (targets.length === 0) {
