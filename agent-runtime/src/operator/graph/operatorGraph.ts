@@ -40,6 +40,7 @@ import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/Inves
 import { needsInOrder } from "../plan/InvestigationPlan";
 import { instanceMentionsOf, isInstance } from "../plan/EntityRole";
 import { groupingOf } from "../group/ProductGrouping";
+import { senseOf } from "../group/ReviewEvidenceSense";
 import type { EntityScope, NeedScope, RejectedEvidence } from "../scope/EvidenceScope";
 import {
   channelScopeOf, needScopeOf, partitionEvidence, periodNamedIn, planScopeOf, reasonSentence,
@@ -62,7 +63,7 @@ import { runInquiryOps, INQUIRY_NEEDS } from "./inquiryOps";
 import { runReportOps } from "./reportOpsNode";
 import { runOrderOps, ORDER_NEEDS } from "./orderOps";
 import { conversationAxisOf } from "../plan/InvestigationPlan";
-import { effectiveAxisOf } from "../plan/scopeOverride";
+import { effectiveAxisOf, sentenceSubjectOf } from "../plan/scopeOverride";
 import type { Artifact, ProgressStage } from "../../conversation/contract";
 import { READING_LABEL, STAGE_LABEL } from "../../conversation/contract";
 import type { KnowledgeCoverageRow, SignalCoverage } from "../../spring/types";
@@ -113,15 +114,6 @@ export type ProgressSink = (stage: ProgressStage, label: string) => void;
  * also what decides which tools the planner is shown at all. Keeping both readings in one table is the
  * point: a tool a specialist can run is a tool the planner may choose, and nothing else is.
  */
-
-/**
- * The words that mean "write it for me".
- *
- * Tiny and deliberately not clever: it decides only whether one honest sentence about the lane's limit
- * appears. It is not consulted for routing, for tool choice or for status — `goalRoutingFence` guards
- * the place where free text IS interpreted (`parseGoal`), and this is not that place.
- */
-const DRAFT_WORDS = ["초안", "답변 작성", "답장 작성", "답변을 작성", "써줘", "작성해줘"] as const;
 
 export function buildOperatorGraph(deps: OperatorGraphDeps) {
   // <b>Only what something can actually run.</b> A tool with no caller is not advertised: a planner
@@ -206,15 +198,18 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // R7: decided once per dispatch, logged once; every specialist reads the same axis.
     // The thread's channel fills a channel axis the plan left empty — continuity at the READ, not at the
     // renderer (`conversation/channelFocus.ts`). A plan that named a channel is untouched.
-    const subject = {
-      topic: plan.filters?.topic && plan.filters.topic !== "OTHER" ? plan.filters.topic : null,
-      term: plan.filters?.topic && plan.filters.topic !== "OTHER" ? null : subjectTermOf(state.goalText),
-    };
+    // The sentence is read for a subject noun HERE and nowhere downstream (Agent Semantic Ownership v1
+    // §4): a topic family already names the subject, so the two are exclusive, and both the scope
+    // override and the rows/workload reads take the same value from `SpecialistInput.subjectTerm`.
+    const subject = sentenceSubjectOf(plan, state.goalText);
+    const subjectTerm = subject.term;
     const workingSet = state.conversation?.workingSet ?? null;
     const axis = withChannelFocus(
       effectiveAxisOf(plan, workingSet, true, subject, state.goalText),
       focusForAxis(plan, workingSet, subject, state.goalText, state.conversation?.channelFocus ?? null),
     );
+    // Settled once, here, and carried on the state channel: the conversation service reads it back off
+    // the answer instead of re-deriving it from the same sentence (Agent Semantic Ownership v1 §4).
     let knowledge: Record<string, import("../../spring/types").ProductKnowledge> = {};
     let knowledgeCoverage: KnowledgeCoverageRow[] = [];
     const findingsSoFar: Finding[] = [...state.findings];
@@ -237,7 +232,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     for (const specialist of ordered) {
       const specialistStarted = Date.now();
       deps.progress?.("READING", READING_LABEL[specialist] ?? STAGE_LABEL.READING);
-      const outcome = await runSpecialist(specialist, plan, state, resolved, findingsSoFar, seenEvidence, axis);
+      const outcome = await runSpecialist(specialist, plan, state, resolved, findingsSoFar, seenEvidence, subjectTerm, axis);
       log("operator_stage", { stage: `specialist:${specialist}`, ms: Date.now() - specialistStarted });
       seenEvidence.push(...outcome.result.evidence);
       // The gate runs against the entities known AT THIS POINT, which includes whatever this specialist
@@ -266,6 +261,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       scopeRejections: [...state.scopeRejections, ...scopeRejections],
       specialistFailures,
       artifacts,
+      axis,
       trail: [`dispatched:${ordered.join("+")}`],
     };
   }
@@ -385,6 +381,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     resolved: readonly import("../plan/InvestigationPlan").ResolvedEntity[],
     findingsSoFar: readonly Finding[],
     priorEvidence: readonly EvidenceRef[],
+    // Required, and before `axis` for that reason: the dispatch decided it once and there is no honest
+    // default a second caller could take — a silent `null` would mean 「아무것도 좁히지 않았다」 about a
+    // sentence nobody asked.
+    subjectTerm: string | null,
     axis: ReturnType<typeof conversationAxisOf> = conversationAxisOf(plan),
   ): Promise<{
     result: SpecialistResult;
@@ -402,6 +402,10 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       // Decided once for the whole run, from the plan and the seller's own sentence. A specialist that
       // worked this out for itself would be a second place deciding what "상품별" means.
       grouping: groupingOf(plan, state.goalText),
+      // Which review evidence answers this question — the plan named the read, so the plan named the
+      // sense (`group/ReviewEvidenceSense.ts`). Decided here for the same reason `grouping` is.
+      reviewSense: senseOf(plan.candidateTools),
+      subjectTerm,
       periodNamed: periodNamedIn(plan, resolved),
       // The single channel this run is about, or null. Decided here for the same reason `grouping` is:
       // the gate will judge every citation against ONE channel scope, and a specialist that worked out
@@ -671,23 +675,22 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     for (const sentence of new Set(state.specialistFailures.map(failureSentence))) {
       notes.push(sentence);
     }
-    // <b>The lane's own ceiling, said plainly.</b> The Operator catalogue is READ-only by construction
-    // (`OperatorToolRegistry` refuses to register anything else), so a goal that asks for a reply to be
-    // WRITTEN cannot be completed here however the plan is shaped — the draft lane is the inquiry
-    // subgraph, reached by its own intent. This is a capability NOTICE and never a route: it selects no
-    // tool, no specialist and no status, and the same shape of keyword check already decides what the
-    // rule judge refuses to say. Without it a seller who asked for drafts reads an answer that silently
-    // dropped half the request.
-    // Not when the plan itself asked for a draft: the conversation lane prepares one through the
-    // product's own draft path, outside this registry, and saying "not here" would contradict it.
-    if (conversationAxisOf(plan ?? { requestedAction: "NONE" } as InvestigationPlan).requestedAction === "NONE"
-        && DRAFT_WORDS.some((w) => state.goalText.includes(w))) {
-      notes.push("답변 초안 작성은 이 대화 창구에서 하지 않습니다 — 조회만 가능합니다."
-        + " 초안은 문의 화면의 답변 준비에서 만들 수 있습니다.");
-    }
+    // <b>The lane's own ceiling is the planner's to notice, not a word list's.</b> The Operator
+    // catalogue is READ-only by construction (`OperatorToolRegistry` refuses to register anything
+    // else), so a goal asking for a reply to be WRITTEN cannot be completed here — but WHICH goals
+    // those are is `requestedAction`, and this used to ask a second time with a keyword table
+    // (초안·써줘·작성해줘). Traced live 2026-09-06: the planner answered `PREPARE_INQUIRY_DRAFT` for
+    // every reply-draft sentence tried, and the table's only distinct output was a false one —
+    // 「제품 설명 문구 써줘」, planned as `NONE`, printed 「답변 초안 작성은 이 대화 창구에서 하지
+    // 않습니다」 about a request that was not about a reply at all. A second reading that can only
+    // disagree by being wrong is not a safety net.
 
     const answer: OperatorAnswer = {
       goalEcho: state.goalText,
+      // Settled in `dispatch`, not here: re-deriving it would be the second settlement this field exists
+      // to remove. A run that never dispatched (unsupported plan, clarification) carries the plan's own
+      // axis with no override, which is exactly what there was to say about it.
+      axis: state.axis ?? (plan ? conversationAxisOf(plan) : null),
       plannerKind: "LLM",
       plannerVersion: plan?.plannerVersion ?? "unknown",
       needs: answered,
@@ -876,6 +879,7 @@ function answeredNeeds(state: OperatorState): AnsweredNeed[] {
     const found = state.needs.find((n) => n.id === need.id);
     return {
       id: need.id,
+      kind: need.kind,
       question: need.question,
       status: found?.status ?? "PENDING",
       required: need.required,

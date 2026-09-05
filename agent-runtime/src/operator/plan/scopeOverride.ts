@@ -24,6 +24,7 @@ import { conversationAxisOf } from "./InvestigationPlan";
 import type { WorkingSetView } from "../../conversation/contract";
 import { hasRefineExpression, namesOwnObject } from "../../conversation/reference";
 import { isAcquisitionRequest } from "../../conversation/acquisitionRequest";
+import { subjectTermOf } from "../../conversation/subjectTerm";
 import { log } from "../../log";
 
 export type ScopeOverrideReason =
@@ -40,6 +41,19 @@ export interface SentenceSubject {
 }
 
 /** Does the sentence name a subject, and is it a different one from the set's? */
+/**
+ * What the sentence says this question is about — the plan's topic token, and the seller's own word
+ * only when no closed family holds it.
+ *
+ * <b>One definition, because there was nearly two.</b> The graph built this object inline and the
+ * conversation service had its own copy of the same three lines; they agreed, and nothing made them.
+ * It lives beside {@link SentenceSubject} so the type and the way it is built are one file.
+ */
+export function sentenceSubjectOf(plan: InvestigationPlan | null | undefined, text: string): SentenceSubject {
+  const topic = plan?.filters?.topic && plan.filters.topic !== "OTHER" ? plan.filters.topic : null;
+  return { topic, term: topic ? null : subjectTermOf(text) };
+}
+
 function subjectChanged(subject: SentenceSubject | undefined, set: WorkingSetView): boolean {
   if (!subject) return false;
   const setTopic = set.filters.topic ?? null;

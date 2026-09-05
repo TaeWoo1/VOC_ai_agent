@@ -21,7 +21,7 @@ import {
   INTERNAL_TOKEN, clarificationKindOf, clarificationSentence, excerpt, factSourceLabel, isSellerSafeLabel,
   retrievalSentence, unsupportedSentence,
 } from "../../src/operator/wording/sellerWording";
-import { dedupeNear, sellerSentence } from "../../src/conversation/ConversationService";
+import { companyIsTheQuestion, dedupeNear, sellerSentence } from "../../src/conversation/ConversationService";
 
 const V8 = "agent-plan-prompt/v8";
 type Filters = NonNullable<AgentPlanView["filters"]>;
@@ -61,7 +61,17 @@ const PLANS: Record<string, AgentPlanView> = {
     ["PRODUCT_OPS"], ["search_product_knowledge"], { unresolvedEntities: [{ kind: "PRODUCT", mention: MOLDING.name }] }),
   [ROWS_ASK]: plan(ROWS_ASK, { kind: "INQUIRY_VOLUME", question: "최근 문의 3개" }, ["INQUIRY_OPS"], [],
     { filters: { ...NONE, inquiryIntent: "ROWS", order: "NEWEST", limit: 3 } }),
-  [PROFILE_HINT_ASK]: plan(PROFILE_HINT_ASK, { kind: "COMPANY_PROFILE", question: "회사가 어떤 곳인가" }, ["INQUIRY_OPS"], ["get_seller_profile"]),
+  // The measured plan for this sentence (real planner, 2026-09-06): the profile is ONE input beside the
+  // policy and the past answers. That shape is what tells 「고려해서 답해줘」 from 「소개가 뭐야」, and it
+  // is why the fixture carries three needs rather than the one it used to.
+  [PROFILE_HINT_ASK]: { ...plan(PROFILE_HINT_ASK, { kind: "POLICY", question: "회사의 배송 기준" }, ["INQUIRY_OPS"],
+    ["search_org_knowledge", "get_seller_profile", "search_answer_memory"]),
+    informationNeeds: [
+      { id: "n1", question: "회사의 배송 기준", kind: "POLICY", why: "근거", required: true },
+      { id: "n2", question: "회사가 어떤 곳인가", kind: "COMPANY_PROFILE", why: "근거", required: true },
+      { id: "n3", question: "과거 유사 답변", kind: "PAST_ANSWER", why: "근거", required: false },
+    ],
+    retrievalOrder: ["n1", "n2", "n3"] },
   [PROFILE_INTRO_ASK]: plan(PROFILE_INTRO_ASK, { kind: "COMPANY_PROFILE", question: "회사가 어떤 곳으로 등록돼 있는가" }, ["INQUIRY_OPS"], ["get_seller_profile"]),
   [WHICH_ASK]: { ...CLARIFY_PLAN, userGoal: WHICH_ASK, clarificationReason: "어떤 문의를 말씀하시는지 알려주세요.", rationale: "대상 문의가 특정되지 않았습니다." },
   [RAW_REFUSE]: { ...REFUSED_PLAN, userGoal: RAW_REFUSE, rationale: "대상 텍스트나 객체가 지정되지 않아 조사 자체를 수행할 수 없다" },
@@ -207,9 +217,22 @@ describe("§3 — the company profile is referred to, not read back", () => {
     const { turn } = await ask(h, PROFILE_INTRO_ASK);
     expect(turn.message).toContain(SUMMARY);
     expect(turn.message.split(SUMMARY).length - 1).toBe(1);
-    expect(sellerSentence(`회사 정보에는 이렇게 등록돼 있습니다: "${SUMMARY}"`, "회사 소개 뭐야")).toContain(SUMMARY);
-    expect(sellerSentence(`회사 정보에는 이렇게 등록돼 있습니다: "${SUMMARY}"`, "배송 문의 답변")).toBe("등록된 회사 정보를 참고했습니다.");
-    expect(sellerSentence("근거 CUSTOMER_MEMORY 3건", "x")).toBeNull();
+    expect(sellerSentence(`회사 정보에는 이렇게 등록돼 있습니다: "${SUMMARY}"`, true)).toContain(SUMMARY);
+    expect(sellerSentence(`회사 정보에는 이렇게 등록돼 있습니다: "${SUMMARY}"`, false)).toBe("등록된 회사 정보를 참고했습니다.");
+    expect(sellerSentence("근거 CUSTOMER_MEMORY 3건", true)).toBeNull();
+  });
+
+  // Agent Semantic Ownership v1 §3: the two answers are told apart by the PLAN — the profile being the
+  // whole question, not one need among three — and no sentence is read to decide it. The sentences the
+  // deleted regex got wrong are named here because they are the reason it went.
+  it("the company is the question when it is the run's only need, whatever words asked for it", () => {
+    const one = (kinds: string[]) => ({
+      needs: kinds.map((kind, i) => ({ id: `n${i}`, kind, question: "", status: "SATISFIED", required: true, evidenceIds: [] })),
+    } as unknown as Parameters<typeof companyIsTheQuestion>[0]);
+    expect(companyIsTheQuestion(one(["COMPANY_PROFILE"]))).toBe(true);
+    expect(companyIsTheQuestion(one(["POLICY", "COMPANY_PROFILE", "PAST_ANSWER"]))).toBe(false);
+    expect(companyIsTheQuestion(one(["POLICY"]))).toBe(false);
+    expect(companyIsTheQuestion(one([]))).toBe(false);
   });
 });
 

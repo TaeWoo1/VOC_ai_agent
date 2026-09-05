@@ -16,7 +16,7 @@ import { Annotation } from "@langchain/langgraph";
 import type { AgentGoal } from "../../goal/parseGoal";
 import type { SpecialistTerminal, ToolFailure } from "../failure/SpecialistOutcome";
 import type { AttentionCoverage, KnowledgeCoverageRow, ProductKnowledge, SignalCoverage } from "../../spring/types";
-import type { InvestigationPlan, NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
+import type { ConversationAxis, InvestigationPlan, NeedKind, NeedState, ResolvedEntity } from "../plan/InvestigationPlan";
 import { mergeNeedState } from "../plan/needOutcome";
 import type { EventRange } from "../scope/EvidenceTime";
 import type { Artifact, WorkingSetView } from "../../conversation/contract";
@@ -412,6 +412,14 @@ export interface OperatorAnswer {
   readonly nextActions: readonly NextAction[];
   /** Per-facet availability for any product the run resolved. Reported beside, never merged with, coverage. */
   readonly knowledgeCoverage: readonly KnowledgeCoverageRow[];
+  /**
+   * The settled conversation axis this run used — planner tokens, scope override and channel
+   * continuity, decided once in the graph (Agent Semantic Ownership v1 §4).
+   *
+   * <b>Carried so the sentence and the rows cannot disagree.</b> Null only when no plan was settled,
+   * which is the FAILED path a caller returns on before reading this.
+   */
+  readonly axis: ConversationAxis | null;
   /** Present when the plan asked a question back instead of answering. */
   readonly clarification: string | null;
   readonly budget: BudgetReport;
@@ -430,6 +438,15 @@ export interface OperatorAnswer {
 /** One need as the answer reports it — the question, and what became of it. */
 export interface AnsweredNeed {
   readonly id: string;
+  /**
+   * What kind of thing this need asked for — the planner's own closed token, reported rather than
+   * re-inferred (Agent Semantic Ownership v1 §3).
+   *
+   * <b>Not a new meaning: the need already had it.</b> `question` is prose the planner wrote and the
+   * kind is the token it chose beside it; a consumer that wants to know what a turn was ABOUT had, until
+   * this field, only the seller's sentence to read a second time.
+   */
+  readonly kind: NeedKind;
   readonly question: string;
   readonly status: NeedState["status"];
   readonly required: boolean;
@@ -503,6 +520,17 @@ export const OperatorStateAnnotation = Annotation.Root({
   artifacts: Annotation<Artifact[]>({ reducer: (p, n) => [...p, ...n], default: () => [] }),
   /** The conversation's context for this run. Set once by the runtime; the graph only reads it. */
   conversation: Annotation<ConversationRunContext | null>({ reducer: (_p, n) => n, default: () => null }),
+  /**
+   * The run's settled conversation axis — the plan's tokens with the scope override and the thread's
+   * channel already applied (Agent Semantic Ownership v1 §4).
+   *
+   * <b>A channel, so it is decided once and read everywhere.</b> Before this, the dispatch settled it
+   * for the specialists and the conversation service settled it AGAIN for the sentence it wrote about
+   * their rows — the same three sentence reads (subject, override, channel focus) run twice per turn,
+   * with the second call passing `emitLog = false` because it knew it was a repeat. Two settlements of
+   * one question are two chances to scope the rows and the sentence about them differently.
+   */
+  axis: Annotation<ConversationAxis | null>({ reducer: (_p, n) => n, default: () => null }),
 });
 
 export type OperatorState = typeof OperatorStateAnnotation.State;

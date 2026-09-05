@@ -33,8 +33,6 @@ import type { OperatorRunResult } from "../operator/operatorRuntime";
 import type { InvestigationPlan } from "../operator/plan/InvestigationPlan";
 import { conversationAxisOf } from "../operator/plan/InvestigationPlan";
 import type { PlanFilters } from "../operator/plan/InvestigationPlan";
-import { effectiveAxisOf } from "../operator/plan/scopeOverride";
-import type { SentenceSubject } from "../operator/plan/scopeOverride";
 import { subjectTermOf } from "./subjectTerm";
 import { isAcquisitionRequest } from "./acquisitionRequest";
 import { acquisitionArtifacts, acquisitionPlanFor } from "./acquisitionStep";
@@ -42,7 +40,7 @@ import { REFRESH_FAILURE_LABEL } from "../operator/graph/reviewRefresh";
 import { answerFreshnessQuestion, freshnessQuestionOf } from "./freshnessQuestion";
 import { channelInSentence } from "./channelFocus";
 import { acquisitionMeaning, acquisitionResultOf } from "./acquisitionSummary";
-import { channelFocusOf, focusForAxis, withChannelFocus } from "./channelFocus";
+import { channelFocusOf } from "./channelFocus";
 import { isReferenceOnly } from "./reference";
 import { OPERATOR_TOOL, buildOperatorTools } from "../operator/tools/OperatorTools";
 import { OperatorToolRegistry } from "../operator/tools/OperatorToolRegistry";
@@ -631,14 +629,16 @@ export class ConversationService {
       };
     }
     const { answer, plan } = result;
-    // The same override the graph applied (R7) — the headline must not say 「방금 본 N건 중」 about a
-    // set the read did not use.
+    // <b>The axis the run actually used, read back — not settled a second time</b> (Agent Semantic
+    // Ownership v1 §4). The graph decides it once per dispatch from the plan's tokens, the previous
+    // working set and the thread's channel, and the headline must not say 「방금 본 N건 중」 about a set
+    // the read did not use. This used to recompute all of it here — three more reads of the same
+    // sentence, with `emitLog = false` on the second call because it knew it was the repeat — which
+    // made it possible for the rows and the sentence about them to be scoped differently.
     const effective = plan ?? emptyPlan();
-    const subject = sentenceSubjectOf(plan, hints.text ?? "");
-    const axis = withChannelFocus(
-      effectiveAxisOf(effective, view.workingSet, false, subject, hints.text ?? ""),
-      focusForAxis(effective, view.workingSet, subject, hints.text ?? "", channelFocusOf(view.turns, hints.text ?? null)),
-    );
+    const axis = answer.axis ?? conversationAxisOf(effective);
+    // Whether this turn was ABOUT the company — the plan's own answer, read once for both sentences.
+    const aboutCompany = companyIsTheQuestion(answer);
     const budget = {
       toolCalls: answer.budget.toolCalls, llmCalls: answer.budget.llmCalls,
       elapsedMs: answer.budget.elapsedMs, stopReason: answer.budget.stopReason,
@@ -1011,7 +1011,7 @@ export class ConversationService {
     // An offered refresh (`optional`) is a control under the rows, not a reason to wait: the turn is DONE.
     const human = humans.find((h) => !h.optional) ?? null;
     const primary = primaryOf(artifacts);
-    const first = notStarted ?? headline ?? sellerSentence(headlineOf(primary, artifacts, view, axis, answer), hints.text ?? "") ?? "확인한 내용입니다.";
+    const first = notStarted ?? headline ?? sellerSentence(headlineOf(primary, artifacts, view, axis, answer), aboutCompany) ?? "확인한 내용입니다.";
     // R3: a count finding that says what the headline already said (same numbers, same noun) is one
     // fact twice. Dropped from the prose; it stays in the answer's findings with its evidence.
     // A PREPARE turn about one inquiry answers with the draft (or that inquiry's state); whatever the plan
@@ -1035,7 +1035,7 @@ export class ConversationService {
       .filter((f) => f.confidence === "SUPPORTED")
       .filter((f) => !(drawnAsRows && f.evidenceIds.length > 0 && f.evidenceIds.every((id) => rowEvidence.has(id))))
       .filter((f) => f.statement !== first && (f.claimsCoverageLimit || !redundantWithHeadline(f.statement, first)))
-      .map((f) => sellerSentence(f.statement, hints.text ?? ""))
+      .map((f) => sellerSentence(f.statement, aboutCompany))
       .filter((line): line is string => line != null)
       // Response Hygiene v1 §6: a selected inquiry is described by its own card, not again by prose; a
       // 「AI 초안이 준비돼 있습니다」 beside a knowledge gap is two answers to one question.
@@ -2536,12 +2536,6 @@ export class ConversationService {
 
 /* ───────────────────────────── helpers (deterministic composition) ───────────────────────────── */
 
-/** What the sentence says this question is about — the plan's topic token and the seller's own word. */
-function sentenceSubjectOf(plan: InvestigationPlan | null | undefined, text: string): SentenceSubject {
-  const topic = plan?.filters?.topic && plan.filters.topic !== "OTHER" ? plan.filters.topic : null;
-  return { topic, term: topic ? null : subjectTermOf(text) };
-}
-
 function emptyPlan(): InvestigationPlan {
   return {
     supported: false, userGoal: "", entities: { resolved: [], unresolved: [] }, informationNeeds: [],
@@ -3446,17 +3440,34 @@ const NUMBER = /\d[\d,]*/g;
 /** The backend's generic basis note — the card's title already says it, so the prose does not. */
 const GENERIC_BASIS_NOTE = /^답변 기준이 필요합니다\.?$/;
 
-/** The seller asked to see the company introduction itself — the one case its text is read back. */
-const COMPANY_INTRO_ASK = /(회사|우리|저희).{0,12}(어떤 곳|소개|등록돼|등록되어|뭐라고|어떻게 (돼|되어)|뭐야|뭐지)/;
+/**
+ * <b>Was the company profile the whole question, or one input among several?</b> — asked of the plan,
+ * which already answered it (Agent Semantic Ownership v1 §3).
+ *
+ * The 「회사 정보에는…」 finding is produced in exactly one place, the `COMPANY_PROFILE` branch of
+ * InquiryOps, so its existence proves the planner wanted the profile. What it does NOT prove is that
+ * the seller asked to READ it: traced live 2026-09-06, 「우리 회사 특성 고려하면 배송 문의에 어떻게
+ * 답하는 게 좋을까」 declares `COMPANY_PROFILE` beside `POLICY` and `PAST_ANSWER`, and reading the whole
+ * introduction back on that turn is the noise §3 was written to stop. Being the run's ONLY need is the
+ * difference, and it is the planner's own token — no sentence is read.
+ *
+ * <b>It replaces a regex that got this wrong in the seller's favour and against it.</b> The old
+ * `/(회사|우리|저희).{0,12}(어떤 곳|소개|…)/` missed 「우리 회사는 어떤 회사야?」 and 「우리 회사에 대해
+ * 알려줘」 — both planned as the sole `COMPANY_PROFILE` need — and replaced the seller's own summary
+ * with 「등록된 회사 정보를 참고했습니다」 on the two most ordinary ways to ask.
+ */
+export function companyIsTheQuestion(answer: OperatorAnswer): boolean {
+  return answer.needs.length === 1 && answer.needs[0]!.kind === "COMPANY_PROFILE";
+}
 
 /**
  * A finding's statement as the seller reads it (Response Hygiene v1 §3): the registered 회사 정보 is
- * referred to, not read back, unless the seller asked for the introduction itself; a statement that
- * carries an internal token is not shown at all (the trace still has it).
+ * referred to, not read back, unless the company itself was the question; a statement that carries an
+ * internal token is not shown at all (the trace still has it).
  */
-export function sellerSentence(statement: string, userText: string): string | null {
+export function sellerSentence(statement: string, aboutCompany: boolean): string | null {
   if (statement.startsWith("회사 정보에는 이렇게 등록돼 있습니다")) {
-    return COMPANY_INTRO_ASK.test(userText) ? statement : "등록된 회사 정보를 참고했습니다.";
+    return aboutCompany ? statement : "등록된 회사 정보를 참고했습니다.";
   }
   if (INTERNAL_TOKEN.test(statement)) return null;
   return statement;

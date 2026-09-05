@@ -33,7 +33,6 @@ import { periodLabel, windowOf } from "../../conversation/period";
 import { matchesTopic } from "../tools/inquiryWorkload";
 import type { WorkloadTopic } from "../tools/inquiryWorkload";
 import { TOPIC_LABEL } from "../../conversation/taskInterpreter";
-import { subjectTermOf } from "../../conversation/subjectTerm";
 import { log } from "../../log";
 
 /** The most rows a ROWS read fetches when no limit was asked for — the backend page ceiling. */
@@ -95,7 +94,7 @@ export function resolveRowsSpec(input: SpecialistInput): InquiryRowsSpec {
     ?? (previous?.filters.topic && previous.filters.topic !== "OTHER" ? previous.filters.topic : null);
   // A topic family already names the subject; a term beside it would narrow the same noun twice and
   // the seller would read back two words for one question.
-  const term = topic ? null : subjectTermOf(input.goalText) ?? previous?.filters.term ?? null;
+  const term = topic ? null : input.subjectTerm ?? previous?.filters.term ?? null;
   const baseOrder: Order = previous?.filters.order ?? "NEWEST";
   return { window, channel, status, order, limit, topic, term, previousIds: previous ? [...previous.ids] : null, baseOrder };
 }

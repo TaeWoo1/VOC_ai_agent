@@ -16,6 +16,7 @@ import type { OperatorBudget } from "../budget/OperatorBudget";
 import type { InformationNeed, ResolvedEntity } from "../plan/InvestigationPlan";
 import type { EvidenceRef } from "../state/OperatorState";
 import type { GroupingDimension } from "../group/ProductGrouping";
+import type { ReviewEvidenceSense } from "../group/ReviewEvidenceSense";
 import type { PlanFilters, PlanTarget, RequestedAction } from "../plan/InvestigationPlan";
 import type { ProgressStage, SelectedObject, WorkingSetView } from "../../conversation/contract";
 import type { LocalAgentHint } from "../capability/ChannelCapability";
@@ -40,6 +41,25 @@ export interface SpecialistInput {
    * while the ANSWER is grouped; a run about one product has `NONE` whatever words the goal contains.
    */
   readonly grouping: GroupingDimension;
+  /**
+   * Which review evidence this run's answer is about — decided once, in `group/ReviewEvidenceSense.ts`,
+   * from the reads the PLAN named (Agent Semantic Ownership v1 §2).
+   *
+   * <b>Passed for the same reason {@link grouping} is.</b> ReviewOps used to work this out from the
+   * seller's sentence with its own word table, which is the second planner invariant I2 forbids and
+   * which a live trace showed losing to the planner on a sentence neither list contained. It is not an
+   * authorization: {@link allowedTools} holds both reads whatever this says.
+   */
+  readonly reviewSense: ReviewEvidenceSense;
+  /**
+   * The noun the sentence named as its subject, when no closed topic family holds it — decided once in
+   * the graph (`conversation/subjectTerm.ts`) and passed, never re-derived.
+   *
+   * <b>Null means "no subject term", not "not looked".</b> The graph asks on every dispatch: a topic
+   * family already names the subject, so the two are exclusive by construction and a step that asked
+   * again would be a third place deciding what the seller narrowed to.
+   */
+  readonly subjectTerm: string | null;
   /**
    * Whether the seller named a period — the one half of the temporal demand a specialist cannot see.
    *

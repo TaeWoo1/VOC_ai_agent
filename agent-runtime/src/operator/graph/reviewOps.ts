@@ -22,7 +22,7 @@ import { attemptTool } from "../failure/SpecialistOutcome";
 import { eventRange, temporalDemandOf } from "../scope/EvidenceTime";
 import type { GroupedProducts, IssueSlice } from "../group/ProductGrouping";
 import { groupByProduct, namedRows } from "../group/ProductGrouping";
-import { senseDeclaration, senseOf } from "../group/ReviewEvidenceSense";
+import { senseDeclaration } from "../group/ReviewEvidenceSense";
 import type { DashboardSummary } from "../../spring/types";
 import { log } from "../../log";
 import { readRecentReviews } from "./reviewRows";
@@ -271,8 +271,9 @@ async function runReviewSignal(input: SpecialistInput): Promise<ReviewOpsResult>
   // 상품" is the issue split below; "부정적인 리뷰가 있는 상품" is the negative-review roll-up, a
   // different corpus with a different noun (`group/ReviewEvidenceSense.ts`). Neither is renamed into
   // the other, and only the chosen one is bought — the other would cost reads to produce a number
-  // the answer must not use.
-  const sense = senseOf(input.goalText ?? "", input.plannerGoal);
+  // the answer must not use. <b>The choice is the plan's</b>: it named one of the two reads, and this
+  // specialist no longer re-reads the sentence to guess which (Agent Semantic Ownership v1 §2).
+  const sense = input.reviewSense;
   const grouped = groupsBy(input.grouping, "PRODUCT") && sense === "ISSUE_EVIDENCE"
     ? await groupAcrossProducts(input, issues)
     : null;

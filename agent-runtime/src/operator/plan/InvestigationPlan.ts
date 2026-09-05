@@ -223,10 +223,21 @@ export interface InvestigationPlan {
   readonly target?: PlanTarget;
 }
 
-/** The v3 axis of a plan, with defaults filled — the one reader every consumer goes through. */
-export function conversationAxisOf(plan: InvestigationPlan): {
-  requestedAction: RequestedAction; tone: ToneHint | null; filters: PlanFilters; target: PlanTarget;
-} {
+/**
+ * The v3 axis of a plan, with defaults filled — the one reader every consumer goes through.
+ *
+ * Named, because it is now carried rather than re-derived: the graph settles it once per dispatch
+ * (scope override + channel continuity applied) and hands it forward on {@link OperatorAnswer.axis}
+ * (Agent Semantic Ownership v1 §4).
+ */
+export interface ConversationAxis {
+  readonly requestedAction: RequestedAction;
+  readonly tone: ToneHint | null;
+  readonly filters: PlanFilters;
+  readonly target: PlanTarget;
+}
+
+export function conversationAxisOf(plan: InvestigationPlan): ConversationAxis {
   return {
     requestedAction: plan.requestedAction ?? "NONE",
     tone: plan.tone ?? null,

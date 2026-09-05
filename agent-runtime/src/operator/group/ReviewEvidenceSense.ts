@@ -14,10 +14,13 @@
  * evidence kind and its own noun, and `reviewEvidenceSenses.test.ts` asserts the three never cross.
  * A future package adding a third sense adds a row here; it cannot add one by writing a sentence.
  *
- * <b>The choice comes from the seller's words, not from a model.</b> Same shape as
- * {@link asksForAxis}: a short closed table, matched literally. The default is `ISSUE_EVIDENCE`,
- * which is what every grouped run did before this module existed — a sentence that names neither
- * family gets exactly the behaviour it got yesterday.
+ * <b>The choice comes from the plan, because the plan already made it.</b> The two senses name two
+ * different reads, and both are in the catalogue the planner is shown with descriptions that tell them
+ * apart ("리뷰 자체의 수" vs "반복 리뷰 문제의 근거 건수"). Traced live against the real
+ * planner on eight sentences (2026-09-06, `docs/agent_semantic_ownership_v1.md` §2), the plan agreed
+ * with the word table on seven and was RIGHT on the eighth — 「리뷰가 안 좋은 상품 뭐야?」 names no word
+ * in either list and the table fell to its default. So the table was not the authority; it was a
+ * second, weaker planner for a question the first one had already answered, and it lost.
  */
 import type { EvidenceKind } from "../state/OperatorState";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
@@ -60,37 +63,30 @@ export function senseDeclaration(sense: ReviewEvidenceSense): ReviewSenseDeclara
 }
 
 /**
- * Words that name a negative REVIEW — a rating judgement about a whole review.
+ * Which sense this question is asking for — read from the reads the plan named.
  *
- * "별점"/"평점" are here because a low-rating question is a question about the same corpus the
- * negative flag is derived from. "리뷰" alone is not, and must never be: "리뷰 문제가 많은 상품" is
- * the other sense, and a bare noun that appears in both questions cannot discriminate them.
- */
-const NEGATIVE_WORDS = ["부정", "부정적", "악평", "불만족", "낮은 별점", "별점 낮", "낮은 평점", "혹평"] as const;
-
-/**
- * Words that name a repeated / classified ISSUE.
+ * <b>The ladder, and the trace it was fitted to</b> (real planner, Demo Org, 2026-09-06 — eight
+ * sentences, `docs/agent_semantic_ownership_v1.md` §2):
  *
- * Checked FIRST, and that precedence is the conservative direction: "부정적인 리뷰가 반복되는 상품"
- * asks about the issue memory, which is the narrower and better-evidenced claim, and answering it
- * with the issue split labels its number "리뷰 문제 근거" — true whichever way the sentence was meant.
- * The reverse mistake would print a negative-review count under a question about repetition.
- */
-const ISSUE_WORDS = ["반복", "재발", "리뷰 문제", "문제 근거", "이슈"] as const;
-
-/**
- * Which sense this question is asking for.
+ * 1. `get_review_issue_evidence_summary` — this sense's own declared read. Naming it is naming it.
+ * 2. `search_review_issues` — the issue list every repeated-problem answer is built from. A plan that
+ *    asked for it is asking about repetition, and that is the conservative direction this module has
+ *    always taken: labelling a number 「리뷰 문제 근거」 is true whichever way the sentence was meant,
+ *    while the reverse prints a negative-review count under a question about repetition.
+ * 3. `get_dashboard_product_issues` alone — the reviews themselves, per product. `NEGATIVE_REVIEW`.
+ * 4. Neither — `ISSUE_EVIDENCE`, which is what every grouped run did before this module existed.
  *
- * <b>The seller's own sentence decides, and the planner's restatement is only a fallback.</b> Unlike
- * the axis — which the planner often mentions and the seller sometimes does not — both families of
- * word are in the question by construction, because they ARE the question. And a paraphrase drifts:
- * "부정적인 리뷰가 있는 상품" restated as "부정적 리뷰 이슈" would flip the sense on a word the seller
- * never wrote, which is the planner rephrasing the meaning of the answer.
+ * Rung 2 is why this is a ladder and not one lookup: the planner names the dashboard read liberally as
+ * a supporting one, so 「최근 반복적으로 리뷰 문제가 나온 상품은?」 comes back with BOTH names and only the
+ * issue list says what the answer is about.
+ *
+ * <b>`candidateTools`, never `allowedTools`.</b> The allow-list is authorization — it holds every tool
+ * REVIEW_OPS may call, all three of these included — so reading it would make the plan's choice
+ * invisible and answer the same sense every time.
  */
-export function senseOf(goalText: string, plannerGoal?: string): ReviewEvidenceSense {
-  const text = goalText.trim().length > 0 ? goalText : (plannerGoal ?? "");
-  if (ISSUE_WORDS.some((w) => text.includes(w))) {
-    return "ISSUE_EVIDENCE";
-  }
-  return NEGATIVE_WORDS.some((w) => text.includes(w)) ? "NEGATIVE_REVIEW" : "ISSUE_EVIDENCE";
+export function senseOf(candidateTools: readonly string[]): ReviewEvidenceSense {
+  const named = new Set(candidateTools);
+  if (named.has(OPERATOR_TOOL.GET_ISSUE_EVIDENCE_SUMMARY)) return "ISSUE_EVIDENCE";
+  if (named.has(OPERATOR_TOOL.SEARCH_REVIEW_ISSUES)) return "ISSUE_EVIDENCE";
+  return named.has(OPERATOR_TOOL.GET_DASHBOARD_PRODUCT_ISSUES) ? "NEGATIVE_REVIEW" : "ISSUE_EVIDENCE";
 }

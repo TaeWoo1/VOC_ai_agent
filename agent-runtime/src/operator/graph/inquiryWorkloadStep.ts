@@ -28,7 +28,6 @@ import type { ToolFailure } from "../failure/SpecialistOutcome";
 import { eventOn } from "../scope/EvidenceTime";
 import type { Artifact, InquiryGroupKey, InquiryListArtifact } from "../../conversation/contract";
 import type { CustomerMemorySearch } from "../../spring/types";
-import { subjectTermOf } from "../../conversation/subjectTerm";
 import { rankByUrgency, URGENCY_CRITERION, URGENCY_LIMIT, waitingDaysOf, waitingPhrase } from "../../conversation/urgency";
 import { observationDate } from "../scope/EvidenceTime";
 import { log } from "../../log";
@@ -126,9 +125,10 @@ export async function readInquiryWorkload(input: SpecialistInput, needId: string
       : fromInquiries && fromInquiries.productIds.length > 0 && !fromInquiries.workItemIds.length ? [...fromInquiries.productIds] : [];
   const workItemIds = fromInquiries ? [...fromInquiries.workItemIds] : [];
   const topic = filters?.topic ?? null;
-  // The subject the sentence named when no closed family holds it (`subjectTerm.ts`) — the same axis
-  // the ROWS read carries, so 「현금영수증 관련 답해야 할 문의」 narrows here too.
-  const term = topic ? null : subjectTermOf(input.goalText);
+  // The subject the sentence named when no closed family holds it — decided once in the graph
+  // (`subjectTerm.ts`, read there and only there) and the same axis the ROWS read carries, so
+  // 「현금영수증 관련 답해야 할 문의」 narrows here too.
+  const term = topic ? null : input.subjectTerm;
   // Query Accuracy v1: the spec axes reach the tool by name. A work queue has NO receipt window — what is
   // pending is pending whenever it arrived — so `period` is not an axis here; 「어제 온 문의 중 답해야 할
   // 것」 is a ROWS read with status=UNANSWERED (`inquiryRowsStep`). Channel, order and limit apply.

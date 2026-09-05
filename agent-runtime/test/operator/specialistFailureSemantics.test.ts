@@ -108,9 +108,18 @@ describe("Q5 regression — one anchorless call no longer erases a specialist", 
     expect(answer.note ?? "").toContain("대상 상품이나 문의를 먼저 특정");
   });
 
-  it("states the lane's own limit instead of quietly dropping the draft half", async () => {
+  // Agent Semantic Ownership v1 §5. This used to assert a note the graph manufactured from a word list
+  // (초안·써줘·작성해줘) whenever the plan's `requestedAction` was NONE. Two measurements retired it:
+  // the real planner answers `PREPARE_INQUIRY_DRAFT` for THIS very sentence (2026-09-06), which means
+  // the old guard suppressed the note in production and only this fixture's recorded `NONE` ever let it
+  // through; and the list's one distinct output was false — 「제품 설명 문구 써줘」, planned as `NONE`,
+  // was told that reply drafts are not written here. The draft request is the planner's token, read by
+  // the conversation lane's own draft path; the graph does not read the sentence to guess at it.
+  it("does not manufacture a capability notice from the words in the goal", async () => {
     const answer = done(await build().runtime.run("q5-draft", { text: Q5 }));
-    expect(answer.note ?? "").toContain("답변 초안 작성은 이 대화 창구에서 하지 않습니다");
+    expect(answer.note ?? "").not.toContain("답변 초안 작성은 이 대화 창구에서 하지 않습니다");
+    // What still protects the seller is the catalogue itself, asserted below and by the registry.
+    expect(answer.nextActions.every((a) => a.actionClass === "READ")).toBe(true);
   });
 
   it("asserts no WRITE and prepares nothing", async () => {

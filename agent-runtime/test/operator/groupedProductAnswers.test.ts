@@ -543,17 +543,25 @@ describe("a period question is answered by the rows' own dates, or not at all", 
 /* ─────────────────────────── 6. two review evidences, never each other ──────────────────────── */
 
 describe("부정 리뷰 and 리뷰 문제 근거 are different questions with different answers", () => {
-  it("reads the seller's sentence, not the planner's paraphrase, to choose", () => {
-    expect(senseOf(Q2)).toBe("NEGATIVE_REVIEW");
-    expect(senseOf(REPEATED_AXIS)).toBe("ISSUE_EVIDENCE");
-    expect(senseOf(GROUPED_GOAL)).toBe("ISSUE_EVIDENCE");
-    // A sentence naming both families is the issue question: the narrower, better-evidenced claim,
-    // and its noun is true either way.
-    expect(senseOf("부정적인 리뷰가 반복되는 상품이 있어?")).toBe("ISSUE_EVIDENCE");
-    // A paraphrase cannot flip it while the seller's own words are there.
-    expect(senseOf(Q2, "부정적 리뷰 이슈를 알고 싶다")).toBe("NEGATIVE_REVIEW");
-    // With nothing from the seller, the planner's restatement is all there is.
-    expect(senseOf("", "부정적인 리뷰가 있는 상품을 알고 싶다")).toBe("NEGATIVE_REVIEW");
+  // Agent Semantic Ownership v1 §2: the sense is the PLAN's, read from the reads it named. Every case
+  // below is a tool list measured against the real planner on 2026-09-06 for the sentence in its comment.
+  it("reads the plan's own choice of read, not the sentence a second time", () => {
+    // 「최근 부정적인 리뷰가 있는 상품을 알려줘」 / 「별점 낮은 리뷰가 많은 상품이 뭐야?」
+    expect(senseOf(["list_recent_reviews", "get_dashboard_product_issues"])).toBe("NEGATIVE_REVIEW");
+    // 「리뷰가 안 좋은 상품 뭐야?」 — the sentence the deleted word table got WRONG: it names no word in
+    // either list and fell to the issue default, while the planner read it correctly.
+    expect(senseOf(["get_dashboard_product_issues", "list_recent_reviews"])).toBe("NEGATIVE_REVIEW");
+    // 「리뷰 문제가 반복되는 상품 알려줘」 / 「요즘 자꾸 나오는 불만이 뭐야?」
+    expect(senseOf(["search_review_issues"])).toBe("ISSUE_EVIDENCE");
+    // 「최근 반복적으로 리뷰 문제가 나온 상품은?」 / 「부정적인 리뷰가 반복되는 상품이 있어?」 — the planner
+    // names the dashboard read as a supporting one, so a plan holding BOTH is still the issue question.
+    // This is the conservative direction, and it is why rung 2 exists.
+    expect(senseOf(["search_review_issues", "get_dashboard_product_issues"])).toBe("ISSUE_EVIDENCE");
+    // 「상품별로 리뷰 문제가 있는 상품을 알려줘」 — naming the sense's own read settles it outright.
+    expect(senseOf(["search_review_issues", "get_dashboard_product_issues", "get_review_issue_evidence_summary"]))
+      .toBe("ISSUE_EVIDENCE");
+    // A plan that named neither gets what every grouped run got before this module existed.
+    expect(senseOf([])).toBe("ISSUE_EVIDENCE");
   });
 
   it("answers Q2 with negative reviews per product, dated by those reviews", async () => {

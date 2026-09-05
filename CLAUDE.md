@@ -282,6 +282,62 @@ capability 질문이 카드를 통째로 다시 인쇄했다 — said-once를 fi
 `ConversationService.ts:442`의 `/이 상품/`, `checklistOf`가 findings를 읽지 않는 것, plan 단계가 여전히
 turn의 87~98%인 것)
 
+**`docs/agent_semantic_ownership_v1.md`** (Agent Semantic Ownership Closure v1 — 2026-09-06. 직전
+audit이 숫자로만 남겨 둔 「planner 뒤에서 문장을 다시 읽는 곳」을 **전수 분류하고 중복만 제거**한다.
+Planner · NeedKind · specialist · tool(31, 전부 READ) · artifact · ActiveTask · 승인 경계 · 프롬프트
+v15 **무변경**, 새 taxonomy·DSL·두 번째 planner **0**. 소유 계약은 넷 — **Planner = goal의 의미 ·
+WorldState = 가게의 현실 · Procedure = precondition/next step · Composer = 표현**. 분류는 **A**(planner
+전 결정론 lane) · **B**(경계이거나 **planner가 실제로 들고 있지 않은 의미** — 전부 실제 planner trace로
+확인) · **C**(plan이 이미 정한 것을 후단이 다시 판단)이고 **C만** 제거했다. 주석 제거 기준 실측
+**70 reads / 21 files → 61 / 16**. **§2 리뷰 sense는 처음부터 plan의 것이었다** — `ReviewEvidenceSense`가
+한국어 낱말표 둘로 「부정 리뷰」와 「리뷰 문제 근거」를 갈랐는데, 이웃 파일 `specialistInput.ts`가 바로 그
+행위를 「second planner invariant I2가 금지한다」고 적어 두고 있었다. 8문장 실 planner trace(Demo Org,
+09-06): plan의 tool 선택이 낱말표와 **7/8 일치**하고 **8번째에서 plan이 옳았다**
+(「리뷰가 안 좋은 상품 뭐야?」는 어느 목록에도 없어 표가 기본값으로 떨어졌다) ⇒ 표를 지우고 plan의
+`candidateTools`를 읽는다. **한 번의 조회가 아니라 사다리**인 이유도 trace가 정했다 — planner는
+`get_dashboard_product_issues`를 보조 read로 후하게 붙이므로 둘 다 이름 지은 plan은 여전히 이슈 질문이다
+(`get_review_issue_evidence_summary` → ISSUE · `search_review_issues` → ISSUE(보수 방향) ·
+`get_dashboard_product_issues` 단독 → NEGATIVE · 없으면 ISSUE); `allowedTools`는 **인가**라 읽으면 plan의
+선택이 보이지 않는다. graph가 `grouping`·`channelScope` 옆에서 한 번 정해 `SpecialistInput.reviewSense`로
+넘긴다. **라이브 착지**: Demo Org에서 「리뷰가 안 좋은 상품 뭐야?」가 이제 「…에 부정 리뷰가 3건
+있습니다」로 답한다. **§3 정정을 기록한다** — 처음엔 `COMPANY_INTRO_ASK` 정규식을 **그냥 지웠다**(그
+finding은 `COMPANY_PROFILE` 분기에서만 생산되므로 존재 자체가 증거라고 봤다). **trace가 그것이 틀렸다고
+말했다**: 「우리 회사 특성 고려하면 배송 문의에 어떻게 답하는 게 좋을까」는 `COMPANY_PROFILE`을
+`POLICY`·`PAST_ANSWER`와 **나란히** 선언한다 — need는 「이 turn이 프로필을 필요로 한다」이지 「판매자가
+읽어 달라고 했다」가 아니다. 그런데 정규식도 틀렸다(6문장 실측: 「우리 회사는 어떤 회사야?」와 「우리
+회사에 대해 알려줘」를 **놓쳐** 판매자 자신의 소개를 「등록된 회사 정보를 참고했습니다」로 바꿔치기)
+⇒ 신호는 낱말이 아니라 **plan의 모양**이다 — `companyIsTheQuestion` = 「COMPANY_PROFILE이 이 run의
+**유일한** need인가」, 6/6. 그걸 물으려고 답변이 need의 **자기 토큰**을 보고한다(`AnsweredNeed.kind` —
+새로 발명한 의미가 아니라 need가 이미 갖고 있던 것이고, 지금까지는 산문 `question`만 보고돼 하류에 다시
+읽을 문장밖에 없었다). **§4 run의 axis가 두 번 정해지고 있었다** — graph가 dispatch마다 한 번 정해 로그를
+남기고 모든 specialist에게 주는데, `ConversationService`가 같은 plan·같은 working set·같은 문장으로 **다시**
+정했고 두 번째 호출은 `emitLog = false`를 넘겼다(자기가 반복이라는 것을 알고 있었다) ⇒ state 채널
+`OperatorState.axis` → `OperatorAnswer.axis`로 **carry**하고 composer는 읽기만 한다(문장 읽기 3개 소멸).
+같은 모양이 한 단계 아래에도 있어 `subjectTermOf`가 graph + rows step + workload step **셋**에서 돌던 것을
+`SpecialistInput.subjectTerm`으로 옮겼고, `sentenceSubjectOf`는 **정의가 둘**이었다(graph inline +
+ConversationService private) — 서로 맞았지만 맞게 하는 장치가 없었다 ⇒ `scopeOverride.ts` 하나.
+**§5 틀리는 것 말고는 할 수 있는 게 없던 낱말표** — `DRAFT_WORDS`(초안·써줘·작성해줘…)가
+`requestedAction === "NONE"`일 때 「답변 초안 작성은 이 대화 창구에서 하지 않습니다」를 찍었는데, trace상
+planner는 답변 초안 요청 **5/5를 `PREPARE_INQUIRY_DRAFT`로** 읽으므로 그 경우엔 가드가 눌렀고, 표가 낸
+**유일한 고유 출력은 거짓**이었다 — 「제품 설명 문구 써줘」(plan `NONE`, 써줘 포함)가 답변과 무관한 요청에
+그 문장을 받았다. READ 전용 천장은 여전히 `OperatorToolRegistry`가 강제한다. **§6 Scenario eval에 manual
+QA defect 12개를 대화로 추가**(`world` 1급 축 · `never` 1급 · **CI 벤더 호출 0**, 새 plan 2개는 실 planner에서
+녹화): 연결 0의 「할 일 없음」 금지 · 수집 상태 문장 · capability 반복 금지 · 연결된 판매자에게 connect CTA
+금지 · 일을 찾은 turn의 부재 주장 금지 · 새 목록의 직전 축 상속 금지 · 지시 대상 없는 대명사는 모델 0회 ·
+화면 위 refine 유지 · §5 · §4 · 거절에 답변 모양 artifact 금지 · 서수 inspect 모델 0회. **전부 옛 코드에서
+빨개지는 것을 확인**했다(notice 복원 시 3건 red). 구조 guard `semanticOwnership.test.ts`가 sense의 caller
+1개 · 퇴역한 정규식 · axis 읽기 1회 · `subjectTermOf` call site · **후단 모듈의 「goalText 옆 한국어 낱말
+배열」 0** · class B 생존자 목록 · 그리고 read 수 자체(≤61/≤16)를 고정한다. runtime **883** · frontend
+**2,762** · 실패 0 · backend 파일 **0**. 라이브 재확인(스택 재기동 후 실 planner, 1440×900): clean seller
+3-turn은 **이전과 같은 답** · Demo Org에서 §2·§5가 화면에 착지 · **콘솔 오류 0 · off-host 0 · backend
+ERROR 0**. **계약이 바뀌어 테스트 3건과 plan fixture 3건을 다시 썼다**(전부 단언이 늘었고 안전 테스트 약화
+0; fixture의 `tools: []`는 「clarification으로 도구가 0개 돈 run」의 기록이었고 그 docblock이 exact라고 적은
+것은 needs·clarification·period뿐이다). **고치지 않고 보고**: 후단 goalText 모듈은 15 → **13**이지 0이
+아니고 남은 것은 전부 class B이며 `AgentPlanPrompt`의 그 문장은 **여전히 사실과 다르다** · `analyzeIntentOf`는
+작은 closed field로 은퇴시킬 수 있는 유일한 B이지만 consumer가 하나뿐이라 두지 않았다 · 회사 read-back
+분기는 Demo Org에 회사 정보가 없어 **라이브 미관측**(단위 테스트로만 고정) · `groupingOf`는 graph에서 여전히
+두 번 호출된다(같은 순수 함수·같은 입력·소유자 1) · 마켓플레이스 0 · WRITE 0 · 마이그레이션 0)
+
 **`docs/agent_command_center_v1.md`** (Agent Command Center v1 — 제품 방향 수정: reviewnary는
 Dashboard-first + Agent assistant가 아니라 **Agent-first + structured operational workspace**,
 정확히는 **chat-first, object-backed**. Chat은 의도를 나르고 일은 그 일을 이미 소유한 구조화된 UI가

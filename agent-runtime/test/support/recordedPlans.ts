@@ -473,7 +473,10 @@ export const NEGATIVE_REVIEWS_CLARIFY_PLAN: AgentPlanView = {
       kind: "REVIEW_SIGNAL", why: "상품을 지목하려면 귀속이 필요하다", required: true },
   ],
   specialists: ["REVIEW_OPS"],
-  tools: [],
+  // Re-recorded 2026-09-06 against the real planner: the tool list was `[]` because the original run's
+  // clarification meant zero tools ran, and the sense now reads it (`group/ReviewEvidenceSense.ts`).
+  // Measured for this exact sentence: ["list_recent_reviews", "get_dashboard_product_issues"].
+  tools: ["list_recent_reviews", "get_dashboard_product_issues"],
   retrievalOrder: ["n1", "n2"],
   retrievalParallel: [],
   retrievalStopWhen: null,
@@ -647,7 +650,10 @@ export const GROUPED_NO_PERIOD_PLAN: AgentPlanView = {
       why: "상품을 지목하려면 귀속이 필요하다", required: true },
   ],
   specialists: ["REVIEW_OPS"],
-  tools: [],
+  // Re-recorded 2026-09-06 against the real planner: the tool list was `[]` because the original run's
+  // clarification meant zero tools ran, and the sense now reads it (`group/ReviewEvidenceSense.ts`).
+  // Measured for this exact sentence: ["search_review_issues", "get_dashboard_product_issues", "get_review_issue_evidence_summary"].
+  tools: ["search_review_issues", "get_dashboard_product_issues", "get_review_issue_evidence_summary"],
   retrievalOrder: ["n1"],
   retrievalParallel: [],
   retrievalStopWhen: null,
@@ -776,7 +782,10 @@ export const REPEATED_REVIEW_AXIS_PLAN: AgentPlanView = {
       why: "반복 여부와 귀속이 함께 필요하다", required: true },
   ],
   specialists: ["REVIEW_OPS"],
-  tools: [],
+  // Re-recorded 2026-09-06 against the real planner: the tool list was `[]` because the original run's
+  // clarification meant zero tools ran, and the sense now reads it (`group/ReviewEvidenceSense.ts`).
+  // Measured for this exact sentence: ["search_review_issues", "get_dashboard_product_issues"].
+  tools: ["search_review_issues", "get_dashboard_product_issues"],
   retrievalOrder: ["n1"],
   retrievalParallel: [],
   retrievalStopWhen: null,
@@ -994,9 +1003,56 @@ const WHAT_FIRST_PLAN: AgentPlanView = {
   filters: { period: null, rating: null, channel: null, scope: null, topic: null, inquiryIntent: "WORKLOAD" },
 };
 
+/**
+ * 「답변 안 한 문의 보여줘」 — a NEW list of the org, recorded 2026-09-06.
+ *
+ * Its role in the eval is what it does AFTER a narrowed set: no refine expression, so the visible-set
+ * axes must not ride into it (`scopeOverride`'s `NO_REFINE_EXPRESSION`). Note the planner names the
+ * status itself and leaves scope null — it is not asking to filter what is on screen.
+ */
+export const UNANSWERED_ROWS_PLAN: AgentPlanView = {
+  available: true, supported: true, userGoal: "답변 안 한 문의를 보여달라.", unresolvedEntities: [],
+  informationNeeds: [{ id: "n1", question: "미답변(답변 안 한) 상태의 고객 문의 목록을 확인한다.", kind: "INQUIRY_VOLUME", required: true }],
+  specialists: ["INQUIRY_OPS"], tools: ["list_inquiry_rows"], retrievalOrder: ["n1"], retrievalParallel: [],
+  retrievalStopWhen: null, evidenceRequirements: [{ needId: "n1", minEvidence: 1, acceptableKinds: ["INQUIRY_VOLUME"] }],
+  riskClass: "ROUTINE", maxIterations: 2, maxToolCalls: 8, stopWhenEnough: null,
+  clarificationNeeded: false, clarificationReason: null, rationale: null, providerVersion: V3,
+  requestedAction: "NONE", tone: null,
+  filters: { period: null, rating: null, channel: null, scope: null, topic: null, inquiryIntent: "ROWS", status: "UNANSWERED" } as never,
+  target: { selector: "NONE", index: null },
+};
+
+/**
+ * 「제품 설명 문구 써줘」 — recorded 2026-09-06, and the reason it is in the eval at all.
+ *
+ * It contains 「써줘」, which was on the word list the graph used to consult, and the planner answers
+ * `requestedAction: "NONE"` because it is not a request to write a REPLY. Under the old code that pair
+ * printed 「답변 초안 작성은 이 대화 창구에서 하지 않습니다」 at a seller who had asked for something else
+ * entirely (Agent Semantic Ownership v1 §5).
+ */
+export const PRODUCT_COPY_PLAN: AgentPlanView = {
+  available: true, supported: true, userGoal: "특정 상품의 제품 설명 문구를 작성할 수 있도록 근거 자료를 모아줘",
+  unresolvedEntities: [{ kind: "PRODUCT", mention: "제품" }],
+  informationNeeds: [
+    { id: "n1", question: "판매자가 이 상품에 대해 작성해 둔 설명/FAQ/사용법/정책 문서", kind: "PRODUCT_KNOWLEDGE_DOC", required: true },
+    { id: "n2", question: "이 상품의 핵심 사실(규격·용량·재질·원산지·브랜드 등)", kind: "PRODUCT_FACT", required: true },
+    { id: "n3", question: "이 상품의 채널별 리스팅 정보와 옵션 구성", kind: "PRODUCT_LISTING", required: false },
+  ],
+  specialists: ["PRODUCT_OPS", "REVIEW_OPS", "INQUIRY_OPS"],
+  tools: ["resolve_product", "search_product_knowledge", "search_product_facts", "get_product_knowledge"],
+  retrievalOrder: ["n1", "n2", "n3"], retrievalParallel: [], retrievalStopWhen: null,
+  evidenceRequirements: [], riskClass: "ROUTINE", maxIterations: 2, maxToolCalls: 8, stopWhenEnough: null,
+  clarificationNeeded: false, clarificationReason: null, rationale: null, providerVersion: V3,
+  requestedAction: "NONE", tone: null,
+  filters: { period: null, rating: null, channel: null, scope: null, topic: null },
+  target: { selector: "NONE", index: null },
+};
+
 export const SCENARIO_PLANS: Record<string, AgentPlanView> = {
   "이 서비스를 통해 할 수 있는 일이 뭐야?": CAPABILITY_PLAN,
   "아직 쇼핑몰을 연결하지 않았는데 어떻게 시작해?": CAPABILITY_PLAN,
   "뭐부터 하면 되냐고": WHAT_FIRST_PLAN,
   "너는 어떤 일을 도와줄 수 있어?": CAPABILITY_PLAN,
+  "답변 안 한 문의 보여줘": UNANSWERED_ROWS_PLAN,
+  "제품 설명 문구 써줘": PRODUCT_COPY_PLAN,
 };
