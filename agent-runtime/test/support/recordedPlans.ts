@@ -963,3 +963,40 @@ Object.assign(CONVERSATION_PLANS, {
   "현금영수증 관련 문의 중 가장 최근 문의": RECEIPT_ROWS_PLAN,
   "미응답 문의 중 가장 시급한 건?": URGENT_PRIORITY_PLAN,
 });
+
+/* ───────────── Scenario plans (Agent Procedure Layer v1 §4) ─────────────
+ *
+ * Recorded from the LIVE session of 2026-09-05 (`tools/dev/.run/agent-runtime.log`) — the three
+ * sentences the product owner's manual QA sent, in order, to a clean organisation. They are keyed by
+ * the sentence rather than by a test's local name so that ANY scenario can use them and no suite has to
+ * hand-write a plan to the wire schema again.
+ *
+ * <b>The first two are the same plan, and that is the recording's whole point.</b> The trace shows both
+ * capability questions producing `EXPLAIN_CAPABILITY` with `informationNeeds: 0` — identical wire
+ * responses one turn apart. Whatever tells the two answers apart cannot be the planner, and this
+ * fixture is what keeps that true in CI.
+ */
+const CAPABILITY_PLAN: AgentPlanView = {
+  available: true, supported: true, userGoal: "reviewnary가 무엇을 할 수 있는지", unresolvedEntities: [],
+  informationNeeds: [], specialists: [], tools: [], retrievalOrder: [], retrievalParallel: [],
+  retrievalStopWhen: null, evidenceRequirements: [], riskClass: "ROUTINE", maxIterations: 1, maxToolCalls: 4,
+  stopWhenEnough: null, clarificationNeeded: false, clarificationReason: null, rationale: null,
+  providerVersion: "recorded 2026-09-05 (live, clean org)", requestedAction: "EXPLAIN_CAPABILITY", tone: null,
+  filters: { period: null, rating: null, channel: null, scope: null, topic: null },
+  target: { selector: "NONE", index: null },
+};
+
+/** 「뭐부터 하면 되냐고」 — LIST_ACTIONS, two needs, two specialists (live: `needs:2 specialists:2 tools:3`). */
+const WHAT_FIRST_PLAN: AgentPlanView = {
+  ...LIST_ACTIONS_PLAN,
+  userGoal: "지금 무엇부터 하면 되는지 알고 싶다",
+  providerVersion: "recorded 2026-09-05 (live, clean org)",
+  filters: { period: null, rating: null, channel: null, scope: null, topic: null, inquiryIntent: "WORKLOAD" },
+};
+
+export const SCENARIO_PLANS: Record<string, AgentPlanView> = {
+  "이 서비스를 통해 할 수 있는 일이 뭐야?": CAPABILITY_PLAN,
+  "아직 쇼핑몰을 연결하지 않았는데 어떻게 시작해?": CAPABILITY_PLAN,
+  "뭐부터 하면 되냐고": WHAT_FIRST_PLAN,
+  "너는 어떤 일을 도와줄 수 있어?": CAPABILITY_PLAN,
+};

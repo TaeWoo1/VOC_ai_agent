@@ -35,9 +35,35 @@ export interface HomeFirstUseState {
   readonly observed: boolean;
   /** What can be delegated once these channels are connected — data types this product actually collects. */
   readonly delegable: readonly ("ORDER" | "INQUIRY" | "REVIEW")[];
+  /**
+   * Channels on this seller's own table that are not connected yet — the actual options behind
+   * 「어디를 연결하지?」. Derived, so a channel this product cannot connect is never offered and one it
+   * can is never left out by hand.
+   */
+  readonly connectable: readonly string[];
 }
 
 const SILENT: ReadonlySet<ChannelDataState> = new Set<ChannelDataState>(["NOT_CONNECTED", "NOT_SUPPORTED"]);
+
+/**
+ * **Has this seller connected anything yet?** — the same question {@link homeFirstUseState} already
+ * answers, asked by the callers that only need the boolean (Agent Procedure Layer v1 §3).
+ *
+ * It used to live in `firstConnectionState.ts` with its own copy of the predicate. Two files deciding
+ * «is anything connected» from the same rows is one rule that can drift, and this one had already
+ * started to: the copy read the three state fields directly while this module reads them through
+ * {@link typesOf}. One derivation now, two names.
+ *
+ * <b>Two states mean "nothing is arriving from here", and only one of them is about connection.</b>
+ * `NOT_CONNECTED` is the seller not having connected the channel; `NOT_SUPPORTED` is this product
+ * having no collection path for that data type at all (NAVER reviews, Coupang reviews — both true on a
+ * fully connected account). Absence of rows is not proof of absence of connections: an empty list
+ * answers `false` only because a page with no channel table has no channel to speak for, and the caller
+ * uses this to choose a colour — never to tell a seller their channels are disconnected.
+ */
+export function hasAnyConnectedChannel(rows: readonly ChannelMetricRow[]): boolean {
+  return homeFirstUseState(rows).kind !== "NO_CHANNEL";
+}
 const OBSERVED: ReadonlySet<ChannelDataState> = new Set<ChannelDataState>(["OBSERVED_FRESH", "ZERO"]);
 
 /** The three data types of one row, paired with the label the seller reads. */
@@ -56,8 +82,9 @@ export function homeFirstUseState(rows: readonly ChannelMetricRow[]): HomeFirstU
   // review collection this product does not have must not appear as a review promise.
   const delegable = (["ORDER", "INQUIRY", "REVIEW"] as const).filter((type) =>
     rows.some((row) => typesOf(row).some((t) => t.type === type && t.state !== "NOT_SUPPORTED")));
+  const connectable = rows.filter((row) => !connectedRows.includes(row)).map((row) => row.channelNameKo || row.channelCode);
   if (connectedRows.length === 0) {
-    return { kind: "NO_CHANNEL", connected: [], observed: false, delegable };
+    return { kind: "NO_CHANNEL", connected: [], observed: false, delegable, connectable };
   }
   const connected = connectedRows.map((row) => row.channelNameKo || row.channelCode);
   /**
@@ -73,7 +100,7 @@ export function homeFirstUseState(rows: readonly ChannelMetricRow[]): HomeFirstU
     typesOf(row).some((t) => !SILENT.has(t.state) && t.count > 0)
     || (!SILENT.has(row.inquiryState) && (row.unansweredInquiries ?? 0) > 0));
   const observed = connectedRows.some((row) => typesOf(row).some((t) => OBSERVED.has(t.state)));
-  return { kind: held ? "WORKING" : "NO_DATA", connected, observed, delegable };
+  return { kind: held ? "WORKING" : "NO_DATA", connected, observed, delegable, connectable };
 }
 
 /** The seller's word for each data type — what they would say they are handing over. */
@@ -101,4 +128,27 @@ export function noDataSentence(state: HomeFirstUseState): string {
   return state.observed
     ? `${names} 연결은 끝났고, 아직 들어온 주문·문의·리뷰가 없습니다. 새로 들어오면 여기에 먼저 정리해 두겠습니다.`
     : `${names} 연결은 끝났습니다. 첫 수집이 끝나면 확인할 일을 여기에 정리해 두겠습니다.`;
+}
+
+/**
+ * <b>What connecting actually gets them</b> — three steps, for someone who has never seen this product.
+ *
+ * The first-use screen used to be a headline, one sentence and a button: true, and it told a seller who
+ * had just signed up nothing about what they were about to hand over or what happens after they press
+ * it. These are the three things that happen, in order, and only the middle one is a promise — so it is
+ * the only one derived from the table ({@link HomeFirstUseState.delegable}), never a written list.
+ *
+ * <b>The 도우미 is deliberately absent.</b> It matters for one channel's guided lanes; naming a program
+ * to install in front of a seller who has not chosen a channel yet is a step they cannot take and an
+ * obstacle where the product should be showing a path.
+ */
+export function firstUseSteps(state: HomeFirstUseState): ReadonlyArray<{ title: string; detail: string }> {
+  const where = state.connectable.length > 0 ? state.connectable.join(" · ") : "쓰고 계신 판매 채널";
+  return [
+    { title: "1. 판매 채널 연결", detail: `${where} 중 쓰고 계신 곳을 고르시면, 채널별로 필요한 것만 순서대로 안내해 드립니다.` },
+    // The WHAT is {@link delegableSentence}'s, said once, one line above these — a step that repeats
+    // 「주문 · 문의 · 리뷰를 가져옵니다」 is that promise a second time in smaller type.
+    { title: "2. 자동으로 가져오기", detail: "연결이 끝나면 reviewnary가 채널에서 직접 가져와서, 새로 들어오는 것까지 계속 확인합니다." },
+    { title: "3. 먼저 하실 일 정리", detail: "그날 답해야 할 문의와 살펴볼 리뷰를 골라 두고, 답변 초안까지 준비해 둡니다. 보내는 것은 언제나 확인하신 뒤입니다." },
+  ];
 }

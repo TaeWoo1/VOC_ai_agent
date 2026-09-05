@@ -243,6 +243,45 @@ evidence id와 provenance 문자열 제거. **bounded model proof 2회**(합성 
 답변된 `PROPOSED` 1건이 작업 큐에 남음(전송 CTA는 꺼져 있고 다음 수집에서 self-heal). 마켓플레이스 호출
 **0** · 마켓플레이스 WRITE **0** · DB 변경 **0**).
 
+**`docs/agent_runtime_architecture_audit_v1.md` · `docs/agent_procedure_layer_v1.md`**
+(Agent Procedure Layer v1 — 2026-09-06. 반복되는 Agent 품질 defect가 edge-case rule 누적인지 감사한 뒤
+(`src/conversation/` 8일 만에 8파일 2,639줄 → 26파일 7,729줄, `ConversationService` 1,324 → 3,579줄,
+「라이브에서 측정된 결함」 주석 124건) 결론 **B**를 실행했다: architecture rewrite가 아니라 plan과 answer
+사이에 흩어진 **같은 판단**을 한 곳씩으로 모은다. **planner · NeedKind(14) · specialist(5) · tool(31,
+전부 READ) · artifact(24) · `ActiveTask` · 승인 경계 · 프롬프트 무변경.** **WorldState**는 turn당 한 번
+파생되고 필드는 넷뿐(readiness · anchor kind · activeTask · 그 turn의 coverage 스냅샷)이며, planner에게는
+**닫힌 enum 한 줄**(`판매자 상태: NO_CHANNEL|NO_DATA|WORKING`)만 간다 — 채널 이름·숫자·id·고객 문장 0,
+`UNKNOWN`은 아무것도 보내지 않고, **하류는 planner가 그 줄을 존중하는지에 의존하지 않는다**(연결 0인
+판매자의 답은 같은 world에서 procedure가 정한다). **Procedure**는 record 하나(`precondition(world)` +
+next step)이고 여섯이다 — ONBOARD_CHANNEL · DAILY_WORK · ANSWER_INQUIRY · ANSWER_REVIEW ·
+CAPTURE_KNOWLEDGE · IMPROVE_FROM_ISSUES; 새 DSL·graph·workflow engine **0**. `AbsenceReason` 여섯 중
+**`ZERO_MEASURED` 하나만 가게에 대한 주장**이고, 이것이 `ChannelDataState`가 오래 적어 두고 아무도
+강제하지 않던 규칙(「`ZERO`만이 「없습니다」라고 말할 수 있다」)을 실행 가능한 코드로 만든 것이다.
+**제거된 중복 판단**: readiness 4→1 · absence 문장 3→1 · connect step 라벨 2→1 · 문의 초안 전제 3→1 ·
+리뷰 초안 전제 2→1(말투 수정 lane은 **아예 묻지 않고 있었다**) · FE 「연결된 것이 있나」 2→1
+(`firstConnectionState.ts` 삭제). FE↔runtime은 **엔드포인트가 달라 코드를 공유할 수 없으므로 규칙을
+공유**하고 양쪽 테스트가 같은 표를 고정한다(절반 수렴, 그렇게 적는다). **branch는 줄지 않았고 줄 수
+없었다** — compose 44→44 · directLane 37→37 · turnNow 16→17이고, 그 `if`는 판단이 아니라 **dispatch**
+(planner action 6 + 닫힌 intent 17)라 줄이는 것이 곧 금지된 rewrite다; 줄어든 것은 판단 지점이다.
+**Multi-turn Scenario Eval**(`test/scenario/`)은 기존 harness 위의 선언 층이고 **`world`가 1급 축**이라
+같은 문장을 두 가게에 묻고 답이 올바르게 달라지는가를 단언한다; **`never`가 `expect`만큼 1급**이며
+판매자가 볼 수 있는 전부(message·notes·artifact 제목/줄/항목/라벨·칩)를 훑는다; plan 녹화는 문장을 키로
+하는 공유 파일이고 녹화 없는 문장은 **그 문장을 인쇄하며** 실패한다. **CI는 벤더를 부르지 않는다.**
+최소 검증 4개(NO_CHANNEL의 「할 일 없음」 금지 · follow-up capability 반복 금지 · WORKING에 connect CTA
+금지 · exact-object flow 회귀 0) 전부 통과하고 **넷 다 옛 코드에서 빨개지는 것을 확인한 뒤** 남겼다.
+**라이브 브라우저가 결함 둘을 새로 드러냈고 같은 세션에서 닫았다**: (A) 연결된 판매자의 두 번째
+capability 질문이 카드를 통째로 다시 인쇄했다 — said-once를 first-use world에만 쓴 것이 원인이고
+**사실은 어느 가게가 물어도 한 번만 말한다**(`alreadySaidAnswer`, 카드 없이 한 문장과 다음 걸음);
+(B) 「지금 먼저 하실 일은 없습니다」 바로 아래에 「답변이 필요한 문의가 24건」이 있었다 — 체크리스트가
+빈 이유는 그 run이 list artifact 대신 **findings**를 냈기 때문이고 ⇒ `honestZero(items, findings)`,
+**일을 찾은 turn은 그 주장을 하지 않는다**. clean seller 3-turn과 Demo Org 3-turn 라이브 재현 ·
+콘솔 오류 0 · off-host 0. backend **파일 0** · runtime 861 · frontend 2,762 · 실패 0.
+**마켓플레이스 0 · WRITE 0 · 모델 호출은 QA turn뿐 · 마이그레이션 0** ⇒ evidence 행 없음.
+**고치지 않고 보고**: planner 뒤에서 문장을 읽는 15개 모듈과 compose의 8회 재해석은 그대로이고
+(`AgentPlanPrompt`의 「planner is still the only thing that reads the sentence」는 여전히 사실과 다르다),
+`ConversationService.ts:442`의 `/이 상품/`, `checklistOf`가 findings를 읽지 않는 것, plan 단계가 여전히
+turn의 87~98%인 것)
+
 **`docs/agent_command_center_v1.md`** (Agent Command Center v1 — 제품 방향 수정: reviewnary는
 Dashboard-first + Agent assistant가 아니라 **Agent-first + structured operational workspace**,
 정확히는 **chat-first, object-backed**. Chat은 의도를 나르고 일은 그 일을 이미 소유한 구조화된 UI가

@@ -9,6 +9,19 @@ export const HOME_PROMPTS: readonly string[] = [
   "요즘 문제 생기는 상품 있어?",
 ];
 
+/**
+ * What an empty thread offers a seller who has connected NOTHING.
+ *
+ * {@link HOME_PROMPTS} are all questions about rows — 「오늘 리뷰 뭐 들어왔어?」 — and before the first
+ * connection there are no rows and cannot be: every one of them is an example the product would answer
+ * with a zero. These two are the questions that org can actually have answered today, and the connect
+ * step itself is the screen's own primary button, not a sentence to type.
+ */
+export const FIRST_USE_PROMPTS: readonly string[] = [
+  "이 서비스로 뭘 할 수 있어?",
+  "어떻게 시작하면 돼?",
+];
+
 const BY_SURFACE: Record<string, readonly string[]> = {
   product: ["이 상품에 반복되는 문제가 있어?", "이 상품 미답변 문의 정리해줘", "이 상품 리뷰 최근에 어때?"],
   products: ["요즘 문제 생기는 상품 있어?", "미답변 문의가 많은 상품은?"],

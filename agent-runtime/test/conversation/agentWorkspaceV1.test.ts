@@ -23,6 +23,7 @@ import { MOLDING } from "../support/operatorFixtures";
 import {
   assistantCapabilityAnswer, boundarySentence, capabilityDomains,
 } from "../../src/operator/capability/AssistantCapability";
+import { UNKNOWN_READINESS } from "../../src/operator/capability/SellerReadiness";
 
 const V3 = "test-planner/v3";
 
@@ -132,7 +133,7 @@ describe("§B — what reviewnary can do is derived from what it is wired to do"
   });
 
   it("a coverage read that failed costs the channel sentence and nothing else", () => {
-    const answer = assistantCapabilityAnswer([OPERATOR_TOOL.LIST_PRODUCTS], ["READ"], null);
+    const answer = assistantCapabilityAnswer([OPERATOR_TOOL.LIST_PRODUCTS], ["READ"], UNKNOWN_READINESS);
     expect(answer.lines.some((l) => l.includes("연결된 채널"))).toBe(false);
     expect(answer.lines.some((l) => l.includes("직접 채널에 보내거나"))).toBe(true);
   });

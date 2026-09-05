@@ -3,14 +3,14 @@ import { Link } from "react-router-dom";
 import { BtnLink } from "../../components/ui/Btn";
 import { Dot } from "../../components/ui/ObjectRow";
 import { ConversationWorkspace } from "../../components/conversation/ConversationWorkspace";
-import { HOME_PROMPTS } from "../../components/conversation/surfacePrompts";
+import { FIRST_USE_PROMPTS, HOME_PROMPTS } from "../../components/conversation/surfacePrompts";
 import { useConversation, type DisplayTurn } from "../../lib/conversation/ConversationProvider";
 import { useAgentSurface } from "../../lib/agentPanel";
 import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
 import { analytics } from "../../lib/analytics";
 import { DISCONNECTED_HEADLINE } from "../../lib/briefing";
-import { delegableSentence, homeFirstUseState, noDataSentence } from "../../lib/homeFirstUse";
+import { delegableSentence, firstUseSteps, homeFirstUseState, noDataSentence } from "../../lib/homeFirstUse";
 import { caseTarget, preparedBadge } from "../../lib/proactive";
 import { previewText } from "../../lib/plainText";
 import { matchCommandIntent, INTENT_HEADING } from "../../lib/commandIntents";
@@ -181,6 +181,17 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
         <section className="space-y-1" aria-label="오늘의 브리핑" data-testid="first-use-no-channel">
           <p className="break-keep text-xl font-bold leading-tight text-ink" aria-live="polite">{DISCONNECTED_HEADLINE}</p>
           <p className="break-keep text-base text-muted">{delegableSentence(firstUse)}</p>
+          {/* First-use v2 — a headline, one sentence and a button told a seller who had just signed up
+              nothing about what they were handing over. Three steps, in the order they happen; the
+              middle one is the only promise and it is derived from this seller's own channel table. */}
+          <ol className="space-y-2 pt-3">
+            {firstUseSteps(firstUse).map((step) => (
+              <li key={step.title} className="break-keep">
+                <span className="text-sm font-semibold text-ink">{step.title}</span>
+                <span className="text-sm text-muted"> — {step.detail}</span>
+              </li>
+            ))}
+          </ol>
           <div className="pt-3">
             <BtnLink to="/connect">채널 연결하기</BtnLink>
           </div>
@@ -236,7 +247,7 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
       surface="home"
       leadingTurns={leadingTurns}
       lead={lead}
-      chips={HOME_PROMPTS}
+      chips={beforeFirstConnection ? FIRST_USE_PROMPTS : HOME_PROMPTS}
       placeholder="무엇이든 물어보세요"
       onBeforeSend={onBeforeSend}
     />

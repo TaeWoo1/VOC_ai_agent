@@ -17,7 +17,7 @@ import { AgentHome } from "./AgentHome";
 import { ReviewDetailArtifact } from "../../components/conversation/artifacts/ReviewDetailArtifact";
 import { ArtifactCard } from "../../components/conversation/artifacts/ArtifactCard";
 import { currentContext } from "../../lib/conversation/currentContext";
-import { delegableSentence, homeFirstUseState, noDataSentence } from "../../lib/homeFirstUse";
+import { delegableSentence, firstUseSteps, homeFirstUseState, noDataSentence } from "../../lib/homeFirstUse";
 import type { ChannelMetricRow, MetricKpi, OverviewResponse } from "../../lib/types";
 import type { ReviewDetailArtifact as ReviewDetail, TurnView, WorkingSetView } from "../../lib/conversation/types";
 
@@ -174,6 +174,12 @@ describe("§2 — three first-use mornings", () => {
     // A data type this product cannot collect on any channel is never promised.
     const naverOnly = row({ channelCode: "NAVER", channelNameKo: "네이버", reviewState: "NOT_SUPPORTED", reviews: 0 });
     expect(homeFirstUseState([naverOnly]).delegable).toEqual(["ORDER", "INQUIRY"]);
+    // The channels behind 「어디를 연결하지?」 come from the table, and a connected one is not offered again.
+    expect(homeFirstUseState([NOT_CONNECTED]).connectable).toEqual(["카페24"]);
+    expect(homeFirstUseState([CONNECTED_EMPTY]).connectable).toEqual([]);
+    // The steps name the channel to connect; WHAT is handed over is `delegableSentence`, said once.
+    expect(firstUseSteps(homeFirstUseState([NOT_CONNECTED]))[0]!.detail).toContain("카페24");
+    expect(firstUseSteps(homeFirstUseState([NOT_CONNECTED])).map((x) => x.detail).join(" ")).not.toContain("주문 · 문의 · 리뷰");
     expect(delegableSentence(homeFirstUseState([naverOnly]))).toContain("주문 · 문의");
     expect(noDataSentence(homeFirstUseState([CONNECTED_EMPTY]))).toContain("첫 수집이 끝나면");
   });
@@ -188,6 +194,18 @@ describe("§2 — three first-use mornings", () => {
     expect(screen.getByRole("link", { name: "채널 연결하기" })).toHaveAttribute("href", "/connect");
     // The opener never claims there is nothing to check: nothing has been read.
     expect(screen.queryByText(/지금 먼저 확인할 일은 없습니다/)).toBeNull();
+
+    // First-use v2 — the three things that happen, in order, for someone who has never seen this
+    // product. The middle one is the only promise and it names what THIS seller's channels offer.
+    expect(lead).toHaveTextContent("1. 판매 채널 연결");
+    expect(lead).toHaveTextContent("2. 자동으로 가져오기");
+    expect(lead).toHaveTextContent("3. 먼저 하실 일 정리");
+    // A program to install belongs to one channel's guided lanes, not to a seller who has not picked one.
+    expect(lead.textContent ?? "").not.toContain("도우미");
+    // And the empty thread offers only what this org can actually have answered: every HOME_PROMPT is
+    // a question about rows, and before the first connection there are none and there cannot be.
+    expect(screen.getByRole("button", { name: "이 서비스로 뭘 할 수 있어?" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "오늘 리뷰 뭐 들어왔어?" })).toBeNull();
   });
 
   it("connected but empty: says the collection has not landed yet — never 「확인할 일 없음」", async () => {

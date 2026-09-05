@@ -7,7 +7,7 @@ import { DataTable, Td, Th } from "../../components/ui/DataTable";
 import { DataStateBadge } from "../../components/ui/DataState";
 import { Disclosure } from "../../components/ui/Disclosure";
 import { Empty } from "../../components/ui/Empty";
-import { hasAnyConnectedChannel } from "../../lib/firstConnectionState";
+import { hasAnyConnectedChannel } from "../../lib/homeFirstUse";
 import { useAgentSurface } from "../../lib/agentPanel";
 import { PageHead } from "../../components/ui/PageHead";
 import { BtnLink } from "../../components/ui/Btn";

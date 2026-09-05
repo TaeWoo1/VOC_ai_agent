@@ -46,7 +46,13 @@ import { channelFocusOf, focusForAxis, withChannelFocus } from "./channelFocus";
 import { isReferenceOnly } from "./reference";
 import { OPERATOR_TOOL, buildOperatorTools } from "../operator/tools/OperatorTools";
 import { OperatorToolRegistry } from "../operator/tools/OperatorToolRegistry";
-import { assistantCapabilityAnswer } from "../operator/capability/AssistantCapability";
+import { alreadySaidAnswer, assistantCapabilityAnswer, gettingStartedAnswer } from "../operator/capability/AssistantCapability";
+import { worldStateOf, worldTokenFor } from "../operator/state/WorldState";
+import type { WorldState } from "../operator/state/WorldState";
+import {
+  CONNECT_STEP, absenceSentence, honestZero, inquiryDraftPrecondition, nextStepFor, objectRefusalSentence,
+  operationalPrecondition, reviewDraftPrecondition,
+} from "../operator/procedure/Procedure";
 import type { OperatorAnswer } from "../operator/state/OperatorState";
 import type { GoalRequest } from "../goal/parseGoal";
 import type { SpringClientBundle, SpringClientFactory } from "../http/AgentRunService";
@@ -93,7 +99,7 @@ import { listInquiryWorkload, matchesTerm } from "../operator/tools/inquiryWorkl
 import { adviseOnInquiry } from "./advisory";
 import { matchesTopic } from "../operator/tools/inquiryWorkload";
 import type { VisibleRow } from "./visibleSelection";
-import type { GeneratedDraftView, ReviewDetailResponse } from "../spring/types";
+import type { ChannelCoverageRow, GeneratedDraftView, ReviewDetailResponse } from "../spring/types";
 import { issueSentence, reviewLine } from "../operator/graph/reviewDetail";
 import type { ReviewReplyCapability } from "../operator/graph/reviewDetail";
 import { periodLabel } from "./period";
@@ -279,6 +285,26 @@ export class ConversationService {
     const loaded = await store.load(id);
     if (!loaded) throw new HttpError(404, "UNKNOWN_CONVERSATION", "no conversation found for this id");
     const view = this.assertTenant(loaded, orgId);
+    /**
+     * <b>This turn's world, derived once</b> (Agent Procedure Layer v1 §1). Lazy, because a turn that
+     * never asks what this seller can hold — a tone revision, an ordinal — must not buy a read to find
+     * out. Every lane that DOES ask shares this one: the planner's state token, the procedure layer's
+     * preconditions, the acquisition card's channel row, and the capability answer. Before this there
+     * were four independent reads of the same table with four independently-timed answers.
+     */
+    let worldMemo: WorldState | null = null;
+    const world = async (): Promise<WorldState> => {
+      if (worldMemo) return worldMemo;
+      let coverage: ChannelCoverageRow[] | null = null;
+      try {
+        coverage = (await bundle.operator.getChannelCoverage?.()) ?? null;
+      } catch {
+        // A failed read is UNKNOWN, and from UNKNOWN nothing is claimed.
+        coverage = null;
+      }
+      worldMemo = worldStateOf(coverage, { workingSet: view.workingSet, activeTask: view.activeTask ?? null });
+      return worldMemo;
+    };
 
     // ── Agent Interaction Model v2 §3/§9: a click on a shown row. The same focus transition as naming
     // the row — persisted with the conversation, appended to the transcript as nothing.
@@ -389,7 +415,7 @@ export class ConversationService {
     // ── Closed intents about the object already on the table are resolved here, with no planner call and
     // no read (Conversation Object Integrity v1): a tone revision of the draft being viewed, or a bare
     // ordinal over the list just shown. Anything else is the planner's.
-    const direct = resumedFrom ? null : await this.directLane(view, text, hints, bundle, stage);
+    const direct = resumedFrom ? null : await this.directLane(view, text, hints, bundle, stage, world);
     if (direct) {
       const agentTurn = this.agentTurn(view, direct);
       const workingSet = direct.workingSet ? { ...direct.workingSet, turnId: agentTurn.turnId } : null;
@@ -420,6 +446,9 @@ export class ConversationService {
     // <b>The channel the seller last named, decided once for this turn.</b> Both the graph's read and this
     // service's own axis use it, so the rows and the sentence about them can never be scoped differently.
     const channelFocus = channelFocusOf(view.turns, text);
+    // The planner path is the one that needs the world eagerly: its token goes out with the plan
+    // request, and every procedure decision after it reads this same value.
+    const turnWorld = await world();
     const runtime = new OperatorAgentRuntime({
       operator: bundle.operator, inquiry: bundle.inquiry, issue: bundle.issue,
       judgeMemoKey: orgId,
@@ -461,6 +490,9 @@ export class ConversationService {
       ...(hints.referenceDate ? { referenceDate: hints.referenceDate } : {}),
       conversation: {
         workingSet: view.workingSet,
+        // §1: one closed enum about this seller — the axis the planner had no way to see. Never a
+        // channel name, a count or a row; `UNKNOWN` sends nothing.
+        ...(worldTokenFor(turnWorld) ? { worldToken: worldTokenFor(turnWorld)! } : {}),
         ...(priorLineOf(view) ? { priorLine: priorLineOf(view)! } : {}),
         ...(collected ? { collected } : {}),
         ...(pendingHumanWindowOf(view) ? { pendingHumanWindow: pendingHumanWindowOf(view) } : {}),
@@ -485,7 +517,7 @@ export class ConversationService {
       return stopped;
     }
 
-    const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? [], receipts, options.afterCapture);
+    const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? [], receipts, turnWorld, options.afterCapture);
     if (options.afterCapture) composed.artifacts = [options.afterCapture.artifact, ...composed.artifacts];
     if (partialChips.length > 0) {
       composed.suggestedActions = [...partialChips, ...composed.suggestedActions.filter((s) => s.kind !== "RESUME")];
@@ -582,6 +614,7 @@ export class ConversationService {
     bundle: SpringClientBundle, stage: (s: ProgressStage, label: string) => void,
     stillPending: readonly PendingHumanAction[], collected: NonNullable<ConversationRunContext["collected"]>,
     receipts: readonly AcquisitionResultArtifact[],
+    world: WorldState,
     afterCapture?: AfterCapture,
   ): Promise<Composed> {
     // One automatic resume per saved capture: a turn that follows a save never opens another gap, and
@@ -744,21 +777,16 @@ export class ConversationService {
         const preparer = new DraftPreparer(bundle.inquiry, bundle.review);
         for (const resolved of targets) {
           if (resolved.kind === "REVIEW") {
-            // A review nobody can reply to on its channel gets no draft — a draft with no place to
-            // go is a promise. The next moves are prompts about the review, never a CTA.
+            // The ANSWER_REVIEW precondition (Agent Procedure Layer v1 §2) — one door, so the tone
+            // revision cannot skip it. A review nobody can reply to on its channel gets no draft, and
+            // neither does one whose reply semantics could not be read.
             const verdict = await this.reviewCapability(bundle, resolved.target);
-            if (verdict.execution === "NOT_SUPPORTED" && verdict.reason === EXECUTION_REASON.CHANNEL_UNSUPPORTED) {
-              artifacts.push(reviewUnsupportedSummary(resolved.target));
-              headline = headline ?? summaryLineFor(resolved.target.channelCode);
-              extraChips.push(...REVIEW_UNSUPPORTED_CHIPS.map(promptChip));
-              continue;
-            }
-            if (verdict.execution === "NOT_SUPPORTED" && verdict.reason === EXECUTION_REASON.CAPABILITY_UNKNOWN) {
-              // Acceptance Closure §10: a channel whose reply semantics could not be read gets no draft — a
-              // draft for a place that may not exist is the Coupang loophole by another door.
-              const line = `${resolved.target.channelNameKo ?? resolved.target.channelCode ?? "이 채널"}에서 리뷰 답글을 어떻게 처리할 수 있는지 확인하지 못해 초안을 준비하지 않았습니다.`;
-              artifacts.push(reasonSummary(`a-cap-${resolved.target.reviewId}`, "리뷰 답글 초안을 준비하지 않았습니다", [line]));
-              headline = headline ?? line;
+            const gate = reviewDraftPrecondition(verdict);
+            if (!gate.ok) {
+              const refused = this.reviewRefusal(resolved.target, gate.absence);
+              artifacts.push(refused.artifact);
+              headline = headline ?? refused.headline;
+              extraChips.push(...refused.chips);
               continue;
             }
             stage("PREPARING_DRAFT", STAGE_LABEL.PREPARING_DRAFT);
@@ -824,9 +852,9 @@ export class ConversationService {
       // a channel — the planner's own shape, read here rather than the sentence's words.
       const aboutAssistant = (plan?.informationNeeds.length ?? 0) === 0;
       const explained = await this.explainCapability(
-        bundle, view, axis.filters.channel ?? workingSet?.filters.channelCode ?? null, workingSet, aboutAssistant,
+        bundle, view, axis.filters.channel ?? workingSet?.filters.channelCode ?? null, workingSet, aboutAssistant, world,
       );
-      artifacts.push(explained.artifact);
+      if (explained.artifact) artifacts.push(explained.artifact);
       headline = headline ?? explained.headline;
       extraChips.push(...explained.chips);
     }
@@ -840,11 +868,27 @@ export class ConversationService {
 
     // R6: 「내가 해야 할 일 정리해줘」 — a checklist composed from this turn and the conversation, no model.
     if (axis.requestedAction === "LIST_ACTIONS") {
-      const checklist = checklistOf(artifacts, view);
+      /**
+       * <b>An empty checklist is not proof that there is nothing to do</b> — and the DAILY_WORK
+       * procedure is the one place that decides which of the two it is. Live on a clean org
+       * (2026-09-05) 「뭐부터 하면 되냐고」 answered 「지금 먼저 하실 일은 없습니다」 to an organisation with
+       * no connected channel: arithmetic truth over rows that could not exist. Only an empty list asks
+       * the question, so a seller with work is unchanged; and only `ZERO_MEASURED` may say 없습니다.
+       */
+      const found = checklistOf(artifacts, view);
+      const empty = found.items.length === 0;
+      const gate = empty ? operationalPrecondition(world) : { ok: true as const };
+      const step = gate.ok ? null : nextStepFor(gate.absence);
+      const checklist = step ? { ...found, items: [{ label: step.label, to: step.to }] } : found;
       artifacts.push(checklist);
-      headline = checklist.items.length > 0
-        ? `지금 하실 일을 정리했습니다 (${checklist.items.length}건).`
-        : "지금 먼저 하실 일은 없습니다.";
+      // Every sentence below is the procedure's, including the honest zero — so «없습니다» exists in
+      // exactly one place and cannot be said from a state that has not earned it.
+      const said = gate.ok
+        ? (honestZero(checklist.items.length, answer.findings.length)
+            ? absenceSentence("DAILY_WORK", "ZERO_MEASURED", world) : null)
+        : absenceSentence("DAILY_WORK", gate.absence, world);
+      // An empty checklist over a turn that DID find work claims nothing: its findings are the answer.
+      headline = said ?? (checklist.items.length > 0 ? `지금 하실 일을 정리했습니다 (${checklist.items.length}건).` : null);
     }
 
     // ── Selection without an action: the planner's ordinal/「이 문의」 target over the shown list anchors
@@ -932,11 +976,42 @@ export class ConversationService {
         artifacts[i] = { ...a, optional: false, autoStart: true };
       }
     }
+    /**
+     * <b>Nothing found is not the same fact as nothing to find.</b>
+     *
+     * Measured live on a clean org (2026-09-05): every list this turn drew came back with zero rows and
+     * the answer reported them as 문의 0 · 리뷰 0 — true about the read, false about the store, because
+     * NOT ONE CHANNEL was connected and no read could have returned anything. {@code ChannelDataState}
+     * already says which state may say 없습니다 and it is `ZERO` alone; these rows were `NOT_CONNECTED`.
+     *
+     * <b>Contained to first use, and it costs a read only when the answer was empty anyway.</b> The
+     * coverage read happens only when EVERY row-bearing artifact of this turn is empty, and it changes
+     * the answer only for an org that has connected nothing (or connected and collected nothing) — a
+     * seller with rows cannot reach this branch, and a coverage read that FAILED is `UNKNOWN`, from
+     * which nothing is claimed.
+     */
+    const rowBearing = artifacts.filter((a) => ROW_BEARING.has(a.type));
+    const emptyGate = rowBearing.length > 0 && rowBearing.every(isEmptyRowArtifact)
+      ? operationalPrecondition(world) : { ok: true as const };
+    const notStarted = emptyGate.ok ? null : absenceSentence("DAILY_WORK", emptyGate.absence, world);
+    if (notStarted) {
+      // The empty cards go with the sentence: a 「문의 0건」 card under 「아직 연결된 판매 채널이
+      // 없어서…」 is the same disproven claim, drawn.
+      for (let i = artifacts.length - 1; i >= 0; i -= 1) if (ROW_BEARING.has(artifacts[i]!.type)) artifacts.splice(i, 1);
+      // …and an empty set is not a set to point at: 「그중…」 has no referent and the generic chips would
+      // offer 「안 좋은 것만 봐줘」 over rows that do not exist. The prior anchor stands untouched.
+      workingSet = view.workingSet;
+      // …and the one step this state has, when it has one — the procedure's, so the chat card and the
+      // checklist item cannot offer different things for the same reason.
+      const step = emptyGate.ok ? null : nextStepFor(emptyGate.absence);
+      extraChips.push(...(step && !extraChips.some((c) => c.to === step.to)
+        ? [{ label: step.label, kind: "LINK" as const, to: step.to }] : []));
+    }
     const humans = artifacts.filter((a): a is HumanActionRequiredArtifact => a.type === "HUMAN_ACTION_REQUIRED");
     // An offered refresh (`optional`) is a control under the rows, not a reason to wait: the turn is DONE.
     const human = humans.find((h) => !h.optional) ?? null;
     const primary = primaryOf(artifacts);
-    const first = headline ?? sellerSentence(headlineOf(primary, artifacts, view, axis, answer), hints.text ?? "") ?? "확인한 내용입니다.";
+    const first = notStarted ?? headline ?? sellerSentence(headlineOf(primary, artifacts, view, axis, answer), hints.text ?? "") ?? "확인한 내용입니다.";
     // R3: a count finding that says what the headline already said (same numbers, same noun) is one
     // fact twice. Dropped from the prose; it stays in the answer's findings with its evidence.
     // A PREPARE turn about one inquiry answers with the draft (or that inquiry's state); whatever the plan
@@ -955,7 +1030,8 @@ export class ConversationService {
     // row's own text a second time (live, 2026-09-04: two full recommendations above a card of seven).
     const rowEvidence = new Set(answer.evidence.filter((e) => e.kind === "IMPROVEMENT_OPPORTUNITY").map((e) => e.evidenceId));
     const drawnAsRows = artifacts.some((a) => a.type === "OPPORTUNITY_LIST");
-    const supported = draftTurn ? [] : ordered
+    // A turn that has just said WHY it is empty does not then list the zeros it found.
+    const supported = draftTurn || notStarted ? [] : ordered
       .filter((f) => f.confidence === "SUPPORTED")
       .filter((f) => !(drawnAsRows && f.evidenceIds.length > 0 && f.evidenceIds.every((id) => rowEvidence.has(id))))
       .filter((f) => f.statement !== first && (f.claimsCoverageLimit || !redundantWithHeadline(f.statement, first)))
@@ -1009,12 +1085,16 @@ export class ConversationService {
     // <b>These are the answer's LIMITS and they leave the answer's paragraph</b> (Agentic Experience v2).
     // Sentence by sentence, so a fact the findings already said (the per-channel 「언제 기준」) is not read
     // twice, and a limit the answer itself already stated is dropped rather than repeated underneath it.
-    const limits = answer.note && !draftTurn
+    // …and neither does it qualify them. 「지금 확인이 필요한 반복 리뷰 문제는 없습니다」 under 「아직
+    // 연결된 판매 채널이 없어서…」 is the same disproven absence, said as a limit (live, 2026-09-05).
+    const limits = answer.note && !draftTurn && !notStarted
       ? answer.note.split(/(?<=[.!?])\s+/).filter((s) => s.length > 0)
       : [];
     if (trailingQuestion) sentences.push(trailingQuestion);
 
-    const evidenceArtifact = evidenceOf(answer, claimEvidence);
+    // 「확인한 자료 · 문의」 beside 「확인해 드릴 자료가 없습니다」 reads as a contradiction, and it is one:
+    // the claim this turn makes rests on the COVERAGE read, not on the empty queue reads under it.
+    const evidenceArtifact = notStarted ? null : evidenceOf(answer, claimEvidence);
     if (evidenceArtifact) artifacts.push(evidenceArtifact);
 
     const pendingHumanActions: PendingHumanAction[] = humans.map((h) => ({
@@ -1175,7 +1255,8 @@ export class ConversationService {
     let detail: Awaited<ReturnType<typeof bundle.inquiry.getInquiryDetail>> | null = null;
     try { detail = await bundle.inquiry.getInquiryDetail(workItemId); } catch { detail = null; }
     const actionability = actionabilityOf({ workItemId, phase: detail?.phase, status: detail?.status });
-    if (actionability !== "DRAFTABLE" || !detail) {
+    // The ANSWER_INQUIRY precondition again — the resume must not draft for a row the gate refuses.
+    if (!inquiryDraftPrecondition(actionability, detail != null).ok || detail == null) {
       log("conversation_capture_resumed", { resume: "INQUIRY_NOT_ACTIONABLE", actionability });
       return finish(done(`${savedLine} ${CAPTURE_SENTENCE.savedNotActionable}`, [captureArtifact(pending, "SAVED", { content: pending.candidate!.content, resume: "INQUIRY_NOT_ACTIONABLE" })], null, { toolCalls: 1, llmCalls: 0 }));
     }
@@ -1308,7 +1389,7 @@ export class ConversationService {
    */
   private async directLane(
     view: ConversationView, text: string, hints: StartTurnRequest, bundle: SpringClientBundle,
-    stage: (s: ProgressStage, label: string) => void,
+    stage: (s: ProgressStage, label: string) => void, world: () => Promise<WorldState>,
   ): Promise<Composed | null> {
     // Knowledge Capture v1: a gap the agent is holding open listens to this sentence first.
     if (view.pendingCapture) {
@@ -1333,8 +1414,12 @@ export class ConversationService {
     // The channel comes from the sentence or from the thread's focus; with neither, the planner keeps it.
     if (isAcquisitionRequest(text, { reviewsInContext: view.workingSet?.kind === "REVIEWS" })) {
       const channel = channelInSentence(text) ?? channelFocusOf(view.turns, text);
+      // The channel's row comes from THIS turn's world — one snapshot, so the card and any sentence
+      // beside it cannot be timed differently (`acquisitionStep.ts` names the defect that caused).
+      const rows = channel ? (await world()).coverage : null;
+      const known = rows ? rows.find((r) => r.dataType === "REVIEW" && r.channelCode.toUpperCase() === channel!.toUpperCase()) ?? null : null;
       const plan = channel
-        ? await acquisitionPlanFor(bundle, channel, hints.localAgent ?? "UNKNOWN", this.now())
+        ? await acquisitionPlanFor(bundle, channel, hints.localAgent ?? "UNKNOWN", this.now(), known)
         : null;
       // **The same instruction, a different action per channel — decided by CAPABILITY** (§3). An
       // AUTOMATIC channel is the product's own collection: it runs it and says what happened. Asking that
@@ -1976,13 +2061,17 @@ export class ConversationService {
     artifacts: Artifact[]; headline: string | null; pendingPrepared?: PendingPreparedAction;
     pendingCapture?: PendingKnowledgeCapture | null;
   }> {
-    // Actionability gate: an answered, in-flight or unworkable inquiry gets its state said — no
-    // proposal, no retrieval, no model call (found live: READ ×4 + one draft call, then a 409).
-    if (resolved.actionability !== "DRAFTABLE" || !resolved.target) {
-      const line = ACTIONABILITY_SENTENCE[resolved.actionability === "DRAFTABLE" ? "NOT_WORKABLE" : resolved.actionability];
+    // The ANSWER_INQUIRY precondition — asked HERE and nowhere else (Agent Procedure Layer v1 §2).
+    // An answered, in-flight or unworkable inquiry gets its state said: no proposal, no retrieval, no
+    // model call (found live: READ ×4 + one draft call, then a 409).
+    const target = resolved.target;
+    const gate = inquiryDraftPrecondition(resolved.actionability, target != null);
+    // (`target == null` repeats the argument the gate was given — it is the compiler's narrowing, not a
+    // second judgement; the decision is the gate's.)
+    if (!gate.ok || target == null) {
+      const line = objectRefusalSentence("ANSWER_INQUIRY", "NOT_ACTIONABLE", resolved.actionability, "");
       return { artifacts: [inquiryStateSummary(resolved.inquiry, line)], headline: line };
     }
-    const target = resolved.target;
     stage("PREPARING_DRAFT", STAGE_LABEL.PREPARING_DRAFT);
     let draft: DraftArtifact;
     let generated: GeneratedDraftView | null = null;
@@ -2118,6 +2207,30 @@ export class ConversationService {
     return respond(workingSet, "INSPECT");
   }
 
+  /**
+   * What a refused ANSWER_REVIEW precondition looks like on screen — one composer, so the two callers
+   * cannot drift into saying different things about the same channel verdict.
+   */
+  private reviewRefusal(
+    target: ReviewDraftTarget, absence: "NOT_SUPPORTED" | Exclude<ReturnType<typeof reviewDraftPrecondition>, { ok: true }>["absence"],
+  ): { artifact: Artifact; headline: string; chips: SuggestedAction[] } {
+    const channel = target.channelNameKo ?? target.channelCode ?? "이 채널";
+    if (absence === "NOT_SUPPORTED") {
+      return {
+        artifact: reviewUnsupportedSummary(target),
+        headline: objectRefusalSentence("ANSWER_REVIEW", absence, "DRAFTABLE", summaryLineFor(target.channelCode)),
+        chips: REVIEW_UNSUPPORTED_CHIPS.map(promptChip),
+      };
+    }
+    // Acceptance Closure §10: a channel whose reply semantics could not be read gets no draft — a draft
+    // for a place that may not exist is the Coupang loophole by another door.
+    const line = objectRefusalSentence("ANSWER_REVIEW", absence, "DRAFTABLE", channel);
+    return {
+      artifact: reasonSummary(`a-cap-${target.reviewId}`, "리뷰 답글 초안을 준비하지 않았습니다", [line]),
+      headline: line, chips: [],
+    };
+  }
+
   /** The tone-revision lane: the draft on the table, one closed tone token, the same object. No planner, no read. */
   private async reviseTone(
     view: ConversationView, prepared: PendingPreparedAction, tone: ToneHint, bundle: SpringClientBundle,
@@ -2136,6 +2249,13 @@ export class ConversationService {
       const resolved = reviewTargetFromHistory(view, prepared.workItemId);
       if (!resolved || resolved.kind !== "REVIEW") return keep(NO_DRAFT_TO_REVISE_SENTENCE, [], prepared);
       const verdict = await this.reviewCapability(bundle, resolved.target);
+      // The same gate the PREPARE path asks. Before this layer this lane asked nothing and revised the
+      // tone of a draft for a channel that cannot take one.
+      const gate = reviewDraftPrecondition(verdict);
+      if (!gate.ok) {
+        const refused = this.reviewRefusal(resolved.target, gate.absence);
+        return keep(refused.headline, [refused.artifact], prepared);
+      }
       const draft = await preparer.prepareReview(resolved.target, tone, `a-draft-${resolved.target.reviewId}`, verdict);
       if (draft.note && !draft.tone) return keep(draft.note, [draft], prepared);
       return keep("말투를 바꿔 리뷰 답글 초안을 다시 준비했습니다.", [draft], {
@@ -2170,27 +2290,38 @@ export class ConversationService {
    * read, the same one every channel-aware answer makes. A read that fails costs the channel sentence
    * and nothing else: the rest of the answer is about this runtime and is true without it.
    */
-  private async assistantCapability(
-    bundle: SpringClientBundle,
-  ): Promise<{ artifact: SummaryArtifact; headline: string; chips: SuggestedAction[] }> {
+  private assistantCapability(
+    view: ConversationView, bundle: SpringClientBundle, world: WorldState,
+  ): { artifact: SummaryArtifact | null; headline: string; chips: SuggestedAction[] } {
     const registry = new OperatorToolRegistry(
       buildOperatorTools({ operator: bundle.operator, inquiry: bundle.inquiry, issue: bundle.issue }),
     );
-    let channels: string[] | null = null;
-    try {
-      const rows = (await bundle.operator.getChannelCoverage?.()) ?? null;
-      if (rows) {
-        channels = [...new Map(rows.filter((r) => r.connected).map((r) => [r.channelCode, r.channelNameKo ?? r.channelCode])).values()];
-      }
-    } catch {
-      channels = null;
-    }
-    const answer = assistantCapabilityAnswer(registry.names(), registry.actionClasses(), channels);
-    log("assistant_capability", { domains: answer.chips.length, channels: channels?.length ?? -1 });
+    const state = world.readiness;
+    // <b>A fact is said once.</b> The same two plans (`EXPLAIN_CAPABILITY`, no needs) reach here for two
+    // different questions, and this answer takes nothing from the seller's sentence — so a second one
+    // used to be the first one again, word for word (live, clean org, 2026-09-05). What the seller asks
+    // next while nothing is connected is how to start, and that is a different answer, not a re-print.
+    // Told apart by the CONVERSATION's state, never by the words in the sentence.
+    const alreadyExplained = view.turns.some((t) => t.artifacts.some((a) => a.artifactId === ASSISTANT_CAPABILITY_ID));
+    const full = assistantCapabilityAnswer(registry.names(), registry.actionClasses(), state);
+    const answer = !alreadyExplained ? full
+      : state.kind === "NO_CHANNEL" ? gettingStartedAnswer(state)
+        : alreadySaidAnswer(state, full.chips);
+    const artifactId = !alreadyExplained ? ASSISTANT_CAPABILITY_ID
+      : state.kind === "NO_CHANNEL" ? "a-getting-started" : "a-already-said";
+    log("assistant_capability", { readiness: state.kind, connected: state.connected.length, repeat: alreadyExplained });
     return {
-      artifact: reasonSummary("a-assistant-capability", "제가 도와드릴 수 있는 일", [...answer.lines]),
+      // No lines, no card: the follow-up for a connected seller is one sentence and the next move.
+      artifact: answer.lines.length === 0 ? null : reasonSummary(
+        artifactId,
+        artifactId === "a-getting-started" ? "시작하는 방법" : "제가 도와드릴 수 있는 일",
+        [...answer.lines],
+      ),
       headline: answer.headline,
-      chips: answer.chips.map((c) => promptChip(c)),
+      chips: [
+        ...answer.chips.map((c) => promptChip(c)),
+        ...(answer.link ? [{ label: answer.link.label, kind: "LINK" as const, to: answer.link.to }] : []),
+      ],
     };
   }
 
@@ -2201,15 +2332,15 @@ export class ConversationService {
    */
   private async explainCapability(
     bundle: SpringClientBundle, view: ConversationView, channel: string | null, workingSet: WorkingSetView | null,
-    aboutAssistant = false,
-  ): Promise<{ artifact: SummaryArtifact; headline: string; chips: SuggestedAction[] }> {
+    aboutAssistant: boolean, world: WorldState,
+  ): Promise<{ artifact: SummaryArtifact | null; headline: string; chips: SuggestedAction[] }> {
     const objectKind: ObjectKind = workingSet?.kind === "INQUIRIES" ? "INQUIRY" : "REVIEW";
     const code = channel?.toUpperCase() ?? null;
     // 「너는 어떤 일을 도와줄 수 있어?」 — the question is about reviewnary, and it is answerable without
     // asking anything back. The two are told apart by the PLAN's own structure, never by words: a
     // capability question that named no channel AND declared nothing to find out is about the
     // assistant; one that is about a channel either names it or has facts to look up.
-    if (!code && aboutAssistant) return this.assistantCapability(bundle);
+    if (!code && aboutAssistant) return this.assistantCapability(view, bundle, world);
     if (!code) {
       const line = "어느 채널에 대한 질문인지 알려주세요 (네이버 · 쿠팡 · 카페24).";
       return { artifact: reasonSummary("a-capability", "채널을 알려주세요", [line]), headline: line, chips: [] };
@@ -3143,6 +3274,12 @@ function copyOnlySummary(kind: "INQUIRY" | "REVIEW", id: string, to?: string): S
   };
 }
 
+/**
+ * The id of the 「제가 도와드릴 수 있는 일」 card — read back off the thread so the same card is not
+ * drawn twice. An id, not a sentence: what makes it the same card is that it IS the same card.
+ */
+export const ASSISTANT_CAPABILITY_ID = "a-assistant-capability";
+
 function reasonSummary(artifactId: string, title: string, lines: string[]): SummaryArtifact {
   return { artifactId, type: "SUMMARY", title, lines };
 }
@@ -3404,6 +3541,29 @@ export function checklistOf(artifacts: readonly Artifact[], view: ConversationVi
     }
   }
   return { artifactId: "a-checklist", type: "CHECKLIST", title: "지금 하실 일", items };
+}
+
+/**
+ * `CHANNEL_CONNECT` has been in {@code HumanActionType} and in {@link humanItem}'s labels since the
+ * vocabulary was written and NOTHING had ever produced it. It is produced as a checklist ITEM rather
+ * than a `HUMAN_ACTION_REQUIRED` artifact on purpose — that artifact makes the turn `WAITING_HUMAN` and
+ * leaves a pending action later turns try to settle from {@code GET /api/sync-runs}, and connecting a
+ * channel is not a sync run. What the item SAYS, and when it appears, is
+ * {@link import("../operator/procedure/Procedure").nextStepFor}'s — one place, two callers.
+ */
+
+/** Artifacts that report ROWS — the ones whose emptiness is a claim about the seller's store. */
+const ROW_BEARING: ReadonlySet<Artifact["type"]> = new Set<Artifact["type"]>([
+  "INQUIRY_LIST", "REVIEW_LIST", "LIST", "PRODUCT_LIST", "OPPORTUNITY_LIST",
+]);
+
+/** Whether one row-bearing artifact came back with nothing in it. */
+function isEmptyRowArtifact(a: Artifact): boolean {
+  if (a.type === "INQUIRY_LIST") return a.groups.every((g) => g.items.length === 0);
+  if (a.type === "REVIEW_LIST" || a.type === "LIST" || a.type === "PRODUCT_LIST" || a.type === "OPPORTUNITY_LIST") {
+    return a.items.length === 0;
+  }
+  return false;
 }
 
 function humanItem(actionType: string, channel: string | null, to: string | null): { label: string; to?: string } {

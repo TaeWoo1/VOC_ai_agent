@@ -864,6 +864,7 @@ function priorContextFor(state: OperatorState): string | undefined {
     contextLine(state.entities ?? []),
     // Closed tokens built by the conversation service (`직전 작업 집합: REVIEWS (기간:TODAY, …)`) —
     // the same seam a re-plan uses, so the payload floor is unchanged in kind.
+    state.conversation?.worldToken ?? "",
     state.conversation?.priorLine ?? "",
   ].filter((l) => l.length > 0);
   return lines.length > 0 ? lines.join("\n") : undefined;

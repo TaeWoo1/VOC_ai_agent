@@ -37,3 +37,8 @@ export function withTopic(noun: string): string {
 export function withSubject(noun: string): string {
   return noun.trim().length === 0 ? "" : `${noun}${hasFinalConsonant(noun) ? "이" : "가"}`;
 }
+
+/** "주문" → "주문을"; "리뷰" → "리뷰를". Object particle. */
+export function withObject(noun: string): string {
+  return noun.trim().length === 0 ? "" : `${noun}${hasFinalConsonant(noun) ? "을" : "를"}`;
+}

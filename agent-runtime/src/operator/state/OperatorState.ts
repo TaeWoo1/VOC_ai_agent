@@ -352,6 +352,14 @@ export interface ConversationRunContext {
   /** Closed tokens only — `직전 작업 집합: REVIEWS (기간:TODAY, …)`. Built by the conversation service. */
   readonly priorLine?: string;
   /**
+   * One closed enum about this seller's readiness — `판매자 상태: NO_CHANNEL|NO_DATA|WORKING`.
+   *
+   * Agent Procedure Layer v1 §1. The axis the planner had no way to see: an organisation with zero
+   * connected channels and one with three produced the same plan shape for the same sentence, because
+   * nothing on the wire distinguished them. A value and nothing else — no channel name, no count, no id.
+   */
+  readonly worldToken?: string;
+  /**
    * Human steps this conversation itself saw finish (a REVIEW collection the seller ran after being
    * asked). A finished step is a fact about the channel for the window it covers — the coverage row the
    * backend serves cannot know a file upload was a collection, so the runtime carries it.

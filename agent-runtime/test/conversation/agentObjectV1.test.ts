@@ -18,6 +18,11 @@ import type { AgentPlanView, ReviewChannelCapabilityView, ReviewDetailResponse }
 import { OPERATOR_TOOL } from "../../src/operator/tools/OperatorTools";
 import { MOLDING } from "../support/operatorFixtures";
 import { assistantCapabilityAnswer } from "../../src/operator/capability/AssistantCapability";
+import type { SellerReadiness } from "../../src/operator/capability/SellerReadiness";
+
+/** A seller who has started: the capability answer's readiness input, in its ordinary shape. */
+const WORKING = (connected: string[]): SellerReadiness =>
+  ({ kind: "WORKING", connected, connectable: [], delegable: ["INQUIRY", "REVIEW", "ORDER"] });
 import { issueSentence, reviewLine } from "../../src/operator/graph/reviewDetail";
 import { TOOL_CAPABILITIES } from "../../src/operator/tools/ToolReachability";
 
@@ -133,8 +138,8 @@ describe("§1 — the selected review is the object the answer is about", () => 
 describe("§4 — the capability answer follows the catalogue, one read at a time", () => {
   it("the review clause appears only when the exact review read is registered", () => {
     const names = TOOL_CAPABILITIES.map((r) => r.tool);
-    const withDetail = assistantCapabilityAnswer(names, ["READ"], ["카페24"]);
-    const without = assistantCapabilityAnswer(names.filter((n) => n !== OPERATOR_TOOL.GET_REVIEW_DETAIL), ["READ"], ["카페24"]);
+    const withDetail = assistantCapabilityAnswer(names, ["READ"], WORKING(["카페24"]));
+    const without = assistantCapabilityAnswer(names.filter((n) => n !== OPERATOR_TOOL.GET_REVIEW_DETAIL), ["READ"], WORKING(["카페24"]));
 
     expect(withDetail.lines.some((l) => l.includes("리뷰 하나를 고르시면"))).toBe(true);
     expect(without.lines.some((l) => l.includes("리뷰 하나를 고르시면"))).toBe(false);
