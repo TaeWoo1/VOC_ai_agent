@@ -47,6 +47,15 @@ if [[ "${PILOT_GUIDED_HELPER_ENABLED:-false}" == "true" ]]; then
 else
   [[ "$csp" != *"47615"* ]] && ok "guided helper OFF and the CSP does not name it" || bad "guided helper OFF but the bundle names the helper origin"
 fi
+# Runtime topology, read off the served page. The agent-runtime URL is BAKED INTO THE BUNDLE, so an
+# image built without the pilot overlay carries the code default http://127.0.0.1:8787 — which on a
+# remote host is the SELLER'S OWN MACHINE, and the /agent lane fails for everybody with no clue why
+# (Pilot Runtime Foundation v1 §11). The CSP is where that mistake is visible from outside: it names
+# every origin the page may talk to. The only loopback allowed here is the seller's own 도우미.
+[[ "$csp" != *"127.0.0.1:8787"* && "$csp" != *"localhost:8787"* ]] \
+  && ok "no localhost agent-runtime in the served CSP" \
+  || bad "the served bundle points the browser at a local agent-runtime — VITE_AGENT_RUNTIME_URL was not set at build time"
+[[ "$csp" == *"https://$H"* ]] && ok "CSP names this site's own origin for the runtime" || bad "CSP does not name https://$H"
 # Outbound IP == advertised (only meaningful once NAVER is configured).
 "$REPO/deploy/pilot/egress-check.sh" >/dev/null 2>&1 && ok "egress-check: host and container outbound IP agree with ADVERTISED (or NAVER not configured)" || bad "egress-check"
 echo "smoke: $pass ok, $failn failed"

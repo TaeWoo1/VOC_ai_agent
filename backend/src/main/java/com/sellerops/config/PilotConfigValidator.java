@@ -144,9 +144,12 @@ public class PilotConfigValidator {
      *
      * <ul>
      *   <li>enabled with no key — the call cannot be made at all;</li>
-     *   <li>enabled and keyed, but the access policy is the explicit allow-list and the list is
-     *       empty — the call can be made and no organisation may make it. This is exactly the pilot
-     *       trap: the operator turned the Agent on and every seller still sees it off.</li>
+     *   <li>enabled and keyed, but no organisation may make the call — the list is empty and no
+     *       policy widens it. This is exactly the pilot trap: the operator turned the Agent on and
+     *       every seller still sees it off. A capability that declines the widening
+     *       ({@code admitsPolicyWidening() == false} — the three knowledge-retrieval ones) is held
+     *       to its own list under EVERY scope, so this is the only thing that keeps that trap shut
+     *       for them once {@code CONNECTED_SELLERS} stops answering on their behalf.</li>
      * </ul>
      *
      * <p>A capability that is OFF is checked for nothing, for the reason every connector is: the
@@ -163,6 +166,9 @@ public class PilotConfigValidator {
             String name = capability.capabilityName();
             if (!capability.isDeployed()) {
                 problems.add(name + "_API_KEY — 이 AI 기능을 켰지만 호출할 키가 없습니다.");
+            } else if (!capability.admitsPolicyWidening() && !capability.namesAnyOrg()) {
+                problems.add(name + "_ORG_IDS — 이 AI 기능을 켰지만 사용할 수 있는 조직이 하나도 없습니다 "
+                        + "(이 기능은 접근 정책으로 확대되지 않으므로 조직을 직접 나열해야 합니다).");
             } else if (allowList && !capability.namesAnyOrg()) {
                 problems.add(name + "_ORG_IDS / SELLEROPS_AGENT_ACCESS_SCOPE — "
                         + "이 AI 기능을 켰지만 사용할 수 있는 조직이 하나도 없습니다 "

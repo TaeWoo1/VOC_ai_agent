@@ -1340,7 +1340,40 @@ eligibility = 고객 문장 + 순위에 오른 문단 최대 6, 출력은 boolea
 Cafe24 앱 자격 · NAVER 커머스 앱 자격), Cafe24/NAVER 앱이 그 호스트 이름으로 등록돼야 하며, 첫 연결의 라이브 증명은
 여전히 첫 실제 판매자의 첫 연결이다. **마켓플레이스 호출 0 · WRITE 0 · 모델 호출 0 · 마이그레이션 0 · DB 행 변경 0** ⇒
 evidence 행 없음. **계약이 바뀌어 테스트 3건을 다시 썼다**(두 backend 테스트는 identity를 고정한 채 각자의 게이트를
-읽는다 — 약화 0, 단언은 늘었다; FE fixture는 서버가 보내는 이유를 싣는다))
+읽는다 — 약화 0, 단언은 늘었다; FE fixture는 서버가 보내는 이유를 싣는다). **§7 Context Integrity Gate(09-05,
+프로비저닝 직전)**: 넷을 다시 확인해 하나는 증명하고 셋을 고쳤다. **(1) topology** — §6이 인용한
+`connect-src … 127.0.0.1:8787`은 stale allowance도 런타임 의존성도 아니라 **`VITE_AGENT_RUNTIME_URL`을 주지 않은
+빌드의 코드 기본값**이었다: 파일럿 모양으로 실제 production 빌드를 돌리니 `connect-src 'self'
+https://<host> http://127.0.0.1:47615 ws://127.0.0.1:47615`이고 번들 전체에 **8787은 0회**(loopback은 도우미
+47615뿐, `VITE_API_BASE_URL=""`이라 `/api`는 same-origin) ⇒ 코드는 그대로 두고 **검사를 더했다** — 이 실수는 오직
+「overlay 없이 이미지를 빌드」로만 일어나고 그때 증상은 판매자 브라우저가 **자기 컴퓨터**를 runtime으로 부르는
+것이므로, `smoke.sh`가 서빙된 CSP에서 loopback runtime **부재**와 사이트 자신의 origin **존재**를 단언한다.
+**(2) retrieval — `CONNECTED_SELLERS` 자동 확대를 이 셋에서 되돌렸다.** 결함은 진짜였다: 파일럿 scope에서
+`AgentCapabilityAccess`가 일곱 capability **전부**의 org 질문에 답하므로 세 retrieval capability는 flag+key만 있으면
+`*_ORG_IDS`가 비어도 **연결한 모든 판매자**에게 적용됐다 — 즉 **연결했다는 이유만으로** 고객 질문이 벤더로 나간다.
+이것은 `retrieval_runtime_closure_v1.md` §5의 반대이고 이유를 적는다: 그 §5가 닫은 함정(켜졌는데 아무에게도 닿지
+않고 아무 말도 없다)은 진짜였고 seam도 옳았으나 **그 seam이 여기서 낸 답**이 틀렸다 — `CONNECTED_SELLERS`의 뜻은
+「연결한 판매자는 **Agent를** 쓸 수 있다」이고 이 셋은 Agent가 아니며, OAuth 동의를 마친 판매자가 요청한 것은
+**수집**이다 ⇒ `AgentCapabilityGate.admitsPolicyWidening()`(기본 true)을 세 knowledge properties가 **false**로
+override하고 `decide()`가 그 capability에는 scope를 적용하지 않는다(**좁히는 방향으로만** — scope가 admit하지 않을
+org를 여기서 admit할 길은 없다). **함정은 widening이 아니라 거절로 닫는다**: `PilotConfigValidator`가
+「켜짐+키+이름 지은 조직 0」을 **모든 scope에서** 기동 거부하고 조언도 다르다(`…_ORG_IDS`를 말하지
+「CONNECTED_SELLERS로 설정하세요」라고 말하지 않는다 — 여기서는 아무 일도 하지 않는 조언이다); `deploy.sh`가 같은
+것을 변수 이름으로 먼저 잡고 `*_ORG_IDS=*`도 거부한다. global default는 **OFF** 그대로, plan/draft/judge/report는
+**무변경**. **(3) env inventory — 네 이름이 컨테이너에서 보이지 않았다**: `SocialLoginConfiguration`이 읽는
+`SELLEROPS_OAUTH_{GOOGLE,NAVER}_CLIENT_{ID,SECRET}`이 `docker-compose.yml`에도 두 env 예시에도 **없어서**, 호스트
+env에 아무리 정확히 써도 컨테이너가 볼 수 없었다(Agent capability와 같은 결함 종류) ⇒ 이름만 추가(값 없음 = 그
+provider는 존재하지 않음 = 이메일/비밀번호 그대로). 혼동 금지 넷을 표로 적었다 — **Google 소셜 로그인**
+(`/login/oauth2/code/google`) · **NAVER 소셜 로그인**(`/login/oauth2/code/naver`) · **NAVER 커머스**(callback 없음,
+**호출 IP 등록**) · **Cafe24**(`/api/connect/cafe24/callback`, byte-identical); 쿠팡 자격은 판매자가 제품 화면에서
+넣으므로 호스트 env에 없다. **(4) clean data** — 게이트는 있었고(데모 콘텐츠는 데모 조직 **안에** 중첩, 조직 0일
+때만 심어짐, 채널 카탈로그는 참조 데이터라 남는다, `smoke.sh`가 `demo/config enabled:false` 확인) 비어 있던 두 칸을
+`deploy.sh`에 채웠다: `SEED_DEMO_CONTENT=true` 거부와 **mock 커넥터 두 스위치 거부**(mock은 실패하지 않고
+**성공하며** 합성 행을 `data_origin=REAL`로 써서 이후 분리 불가). **로컬 Demo DB를 production으로 복사하는 경로는
+없다** — `backup/restore`는 그 호스트 자신의 볼륨이고 `deploy.sh`는 어떤 덤프도 복원하지 않으며 파일럿 DB는
+**빈 볼륨 + Flyway**로 시작한다. backend **3,880 · 실패 0**, AWS 리소스 생성 **0**, 마켓플레이스 0 · WRITE 0 ·
+모델 0 · 마이그레이션 0. **계약이 바뀌어 테스트 1건을 다시 썼다** — `KnowledgeCapabilityAccessTest`가 이제 반대를
+단언하고 그 이유를 자기 docblock에 적는다; 안전 테스트 약화 0, 단언은 21개로 늘었다)
 
 **`docs/full_pilot_walkthrough_v1.md`** (Full Pilot Walkthrough v1 — 2026-09-05. 기능 개발이 아니라 **처음 쓰는
 판매자 한 명으로서 제품 전체를 로그인부터 재접속까지 걸어 본** sitting. 깨끗한 org(제품 자신의 signup)와 canonical

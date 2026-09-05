@@ -179,3 +179,99 @@ retrieval 파일럿 설정이 이름조차 없던 것 · 실행 불가 리뷰의
 - **마켓플레이스 호출 0 · WRITE 0 · submit 0 · 모델 호출 0 · 마이그레이션 0 · DB 행 변경 0** ⇒ evidence 행 없음.
 - **계약이 바뀌어 테스트 3건을 다시 썼다**: 두 backend 테스트는 이제 identity를 고정한 채 각자의 게이트를 읽고
   (약화 0 — 오히려 새 조건에 대한 단언이 늘었다), FE의 「채널이 이미 답변함」 fixture는 서버가 보내는 이유를 싣는다.
+
+---
+
+## 7. Context Integrity Gate (2026-09-05, 프로비저닝 직전 점검)
+
+과금 리소스를 만들기 전에 네 가지만 다시 확인했다. 하나는 **문제가 아니었고**(증명), 셋은 **진짜 gap이라 고쳤다**.
+
+### 7-1. Runtime topology — `127.0.0.1:8787`은 stale allowance도, 런타임 의존성도 아니었다
+
+§6이 인용한 `connect-src 'self' http://127.0.0.1:8787`은 **`VITE_AGENT_RUNTIME_URL`을 주지 않은 빌드**의
+코드 기본값이다(`agentClient.ts` 한 곳이 그 변수를 읽고, CSP는 같은 값을 미러링한다). 파일럿 overlay는 그것을
+`https://${PILOT_PUBLIC_HOST}/agent-runtime`으로 굽고 edge가 prefix를 떼어 runtime으로 보낸다.
+
+파일럿 모양으로 실제 production 빌드를 돌려 **산출물에서 읽었다**:
+
+```
+connect-src 'self' https://pilot.example.test http://127.0.0.1:47615 ws://127.0.0.1:47615
+번들 전체 grep '127.0.0.1:<port>' → 47615 만 13회, 8787 은 0회
+```
+
+즉 의도한 그래프 그대로다 — 브라우저는 **공개 HTTPS 하나**와, 판매자 자기 컴퓨터의 **도우미 loopback**
+(그 스위치를 켰을 때만)에만 말한다. `VITE_API_BASE_URL=""`이라 `/api`는 same-origin이고 CSP에 별도 origin이
+생기지 않는다. 도우미를 끄면 그 두 줄이 사라진다(번들 문자열에는 기본값이 남지만, 이름을 짓지 않은 origin은
+브라우저가 거부한다 — 그것이 이 게이트의 작동 방식이다).
+
+**고친 것은 코드가 아니라 검사다.** 이 실수는 오직 「overlay 없이 이미지를 빌드했다」로만 일어나고, 그때
+증상은 판매자 브라우저가 **자기 컴퓨터**를 agent-runtime으로 부르는 것이며 화면에는 「AI 도우미를 시작하지
+못했습니다」로만 보인다 ⇒ `smoke.sh`가 **서빙된 페이지의 CSP**에서 두 가지를 단언한다: loopback
+agent-runtime이 **없을 것**, 그리고 이 사이트 자신의 origin을 **이름 지을 것**. 유일하게 허용되는 loopback은
+도우미이고 그 검사는 이미 있었다.
+
+### 7-2. Retrieval rollout — `CONNECTED_SELLERS` 자동 확대를 이 셋에서 **되돌렸다**
+
+감사 결과 결함이 맞았다: `SELLEROPS_AGENT_ACCESS_SCOPE=CONNECTED_SELLERS`(파일럿 값)에서
+`AgentCapabilityAccess.decide()`가 **일곱 capability 전부**의 org 질문에 답하므로, 세 retrieval capability는
+flag+key만 있으면 `*_ORG_IDS`가 비어 있어도 **연결한 모든 판매자**에게 적용된다. 즉 새 판매자가 **연결했다는
+이유만으로** 자기 고객의 질문이 벤더로 나가는 대상이 된다.
+
+이것은 `retrieval_runtime_closure_v1.md` §5가 내린 결정의 **반대**이고, 되돌리는 이유를 그대로 적는다. 그 §5가
+닫은 함정(「켜졌고 키도 있는데 아무에게도 닿지 않고 아무 말도 없다」)은 **진짜였고 seam도 옳았다**. 틀린 것은
+그 seam이 여기서 낸 **답**이다 — `CONNECTED_SELLERS`의 뜻은 「채널을 연결한 판매자는 **Agent를** 쓸 수 있다」이고,
+이 셋은 Agent가 아니다. OAuth 동의를 마친 판매자가 요청한 것은 **수집**이지 고객 문장의 외부 처리가 아니다.
+
+- `AgentCapabilityGate.admitsPolicyWidening()` (기본 `true`) — 세 knowledge properties가 **`false`로 override**.
+  `decide()`는 capability 자신의 목록으로 먼저 판정한 뒤, widening을 거절한 capability에는 scope를 적용하지 않는다.
+  **좁히는 방향으로만 작동한다**: scope가 admit하지 않을 org를 여기서 admit할 방법은 없다.
+- **함정은 widening이 아니라 거절로 닫는다** — `PilotConfigValidator`가 이제 「켜짐 + 키 있음 + 이름 지은 조직 0」을
+  **모든 scope에서** 기동 거부하고, 조언도 다르다(`…_ORG_IDS`를 말하지 `CONNECTED_SELLERS로 설정하세요`라고
+  말하지 않는다 — 이 capability에는 그것이 아무 일도 하지 않는 조언이다). 침묵이 결함이었고, 답은 거절이다.
+- `deploy.sh`가 같은 것을 **변수 이름으로** 먼저 잡고, `*_ORG_IDS=*`도 거부한다(파일럿의 답이 아니다).
+- global default는 그대로 **OFF**. `*` wildcard는 capability **자신의 목록**이 「전부」라고 말하는 것이라 이 변경과
+  무관하고 그대로 동작한다.
+- plan / draft / judge / report는 **무변경** — `CONNECTED_SELLERS`가 계속 답하고, 파일럿 판매자를 추가하는 데
+  env 편집도 재기동도 필요 없다.
+
+### 7-3. Production auth/env inventory — 네 이름이 컨테이너에서 **보이지 않았다**
+
+`SocialLoginConfiguration`은 `SELLEROPS_OAUTH_{GOOGLE,NAVER}_CLIENT_{ID,SECRET}`을 읽는데,
+`docker-compose.yml`의 backend `environment:`에도 두 env 예시에도 **하나도 없었다** — Agent capability가 겪은
+것과 **같은 결함 종류**(Pilot Runtime Foundation v1 §3): 호스트 env 파일에 아무리 정확히 써도 컨테이너가 볼 수
+없다. 이름만 추가했다(값 없음 = 그 provider는 존재하지 않음 = 이메일/비밀번호 로그인 그대로).
+
+혼동하면 안 되는 **네 가지, 서로 다른 것**:
+
+| | 무엇 | 변수 | 콘솔 | callback / 등록 대상 |
+|---|---|---|---|---|
+| A | **Google 소셜 로그인** (판매자 로그인) | `SELLEROPS_OAUTH_GOOGLE_CLIENT_ID` · `_SECRET` | Google Cloud Console | `https://<host>/login/oauth2/code/google` |
+| B | **NAVER 소셜 로그인** (판매자 로그인) | `SELLEROPS_OAUTH_NAVER_CLIENT_ID` · `_SECRET` | NAVER Developers | `https://<host>/login/oauth2/code/naver` |
+| C | **NAVER 커머스 API** (스토어 수집) | `SELLEROPS_CONNECTOR_NAVER_ENABLED` · `_ADVERTISED_EGRESS_IPS` | 네이버 커머스API 센터 | callback 없음 — **호출 IP 등록**(이 호스트의 고정 IPv4) |
+| D | **Cafe24** (연결·수집·답변) | `SELLEROPS_CONNECTOR_CAFE24_ENABLED` · `_CLIENT_ID` · `_CLIENT_SECRET` · `_API_VERSION` | Cafe24 Developers | `https://<host>/api/connect/cafe24/callback` (overlay가 파생, **byte-identical** 등록 필요) |
+
+A·B는 판매자 **로그인**이고 C·D는 판매자 **채널**이다. B와 C는 둘 다 「NAVER」이지만 콘솔·자격·등록 대상이
+전부 다르고, 서로의 값을 넣으면 조용히 실패한다. 쿠팡은 **판매자가 제품 화면에서 직접 입력**하므로 호스트 env에
+자격이 없다(플래그뿐). 값은 이 저장소에 넣지 않는다.
+
+### 7-4. Clean production data — 게이트는 있었고, 두 칸이 비어 있었다
+
+`MockDataSeeder`는 셋으로 나뉘어 있고 데모 콘텐츠는 데모 조직 **안에** 중첩돼 있다(`enabled=false`면 둘 다
+꺼진다). 채널 카탈로그는 자기 플래그(기본 true)로 **제품 참조 데이터**라 남는다 — 그것이 없으면 「채널 연결」
+화면이 설 자리가 없다. 데모 조직은 `organizations.count()==0`에서만 심어지므로 판매자가 있는 DB에는 나타날 수
+없다. compose는 세 이름을 전부 통과시키고, `pilot.env.example`은 셋 다 `false`, `smoke.sh`는 배포된 호스트에서
+`/api/auth/demo/config`가 `enabled:false`인지 확인한다.
+
+비어 있던 두 칸을 `deploy.sh`에 채웠다: **`SELLEROPS_SEED_DEMO_CONTENT=true` 거부**와
+**`SELLEROPS_CONNECTOR_MOCK_ENABLED` / `_MOCK_FALLBACK_ENABLED=true` 거부**. 후자가 중요한 이유는 이미
+기록돼 있다 — mock 커넥터는 실패하지 않고 **성공하며** 합성 행을 `data_origin=REAL`로 써서 이후 판매자 행과
+분리할 수 없다(기동 거부가 둘이 아직 구분 가능한 마지막 순간이다; 실제 커넥터와 **함께** 켜면
+`PilotConfigValidator`가 이미 거부한다).
+
+**로컬 Demo DB를 production으로 복사하는 경로는 만들지 않았다.** `backup.sh`/`restore.sh`는 그 호스트 자신의
+볼륨을 대상으로 하고, `deploy.sh`는 어떤 덤프도 복원하지 않는다. 파일럿 DB는 **빈 볼륨 + Flyway**로 시작한다.
+
+### 7-5. 이 게이트에서 하지 않은 것
+
+AWS 리소스 생성 0(리전·도메인 미확정). 실제 파일럿 호스트가 없으므로 `deploy.sh`/`smoke.sh`는 **문법 검사와
+로컬 dry-run 성격의 확인**까지이고, 그 위에서의 실행은 호스트가 생긴 뒤다.

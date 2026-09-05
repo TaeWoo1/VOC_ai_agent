@@ -43,6 +43,26 @@ public interface AgentCapabilityGate {
     /** Configuration alone admits this org — the explicit allow-list, or the {@code *} wildcard. */
     boolean isConfiguredFor(UUID orgId);
 
+    /**
+     * May a deployment-wide access policy widen THIS capability's org question beyond its own list?
+     *
+     * <p>{@code true} for the capabilities the policy was written for — plan, draft, judge, report —
+     * where «connecting a channel is the admission» is the onboarding sentence and the exposure is
+     * one the seller has already asked for by using the Agent.
+     *
+     * <p>{@code false} is for a capability whose exposure a seller does not ask for by connecting.
+     * The three knowledge-retrieval capabilities send the CUSTOMER'S QUESTION to a vendor on paths
+     * that call no model today; a new seller must not become the subject of that because they
+     * finished an OAuth consent for collection. They are admitted by being written down, and by
+     * nothing else.
+     *
+     * <p>This can only ever narrow: a capability that returns {@code false} is admitted by its own
+     * explicit list under every policy, exactly as {@code ALLOW_LIST} already behaves.
+     */
+    default boolean admitsPolicyWidening() {
+        return true;
+    }
+
     /** The historical conjunction, unchanged: configured deployment AND configured org. */
     default boolean isEnabledFor(UUID orgId) {
         return isDeployed() && orgId != null && isConfiguredFor(orgId);

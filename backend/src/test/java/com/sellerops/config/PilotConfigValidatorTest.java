@@ -69,6 +69,40 @@ class PilotConfigValidatorTest {
                 .isEmpty();
     }
 
+    /**
+     * Pilot Release Closure v1 §2 — a capability that declines the deployment-wide widening (the
+     * three knowledge-retrieval ones) is held to its own list under EVERY scope, so the pilot trap
+     * («on, keyed, and off for everybody, silently») has to be shut here instead. The advice differs
+     * too: telling this operator to set CONNECTED_SELLERS would be advice that does nothing.
+     */
+    @Test
+    void aCapabilityThatDeclinesTheWidening_stillNeedsAWrittenDownOrgList() {
+        PilotConfigValidator narrow = new PilotConfigValidator(false, false, false, "", "", "", "", "",
+                "CONNECTED_SELLERS", false, java.util.List.of(narrowCapability(true, "sk-key", "")));
+        assertThat(narrow.problems()).singleElement().asString()
+                .contains("SELLEROPS_KNOWLEDGE_INTENT_ORG_IDS")
+                .doesNotContain("CONNECTED_SELLERS");
+        assertThatThrownBy(narrow::validate).isInstanceOf(IllegalStateException.class);
+
+        PilotConfigValidator named = new PilotConfigValidator(false, false, false, "", "", "", "", "",
+                "CONNECTED_SELLERS", false,
+                java.util.List.of(narrowCapability(true, "sk-key", "11111111-1111-1111-1111-111111111111")));
+        assertThat(named.problems()).as("named: the correct pilot configuration").isEmpty();
+    }
+
+    /** Same shape as {@link #capability}, but declining the policy widening. */
+    private com.sellerops.agent.access.AgentCapabilityGate narrowCapability(
+            boolean enabled, String key, String orgIds) {
+        return new com.sellerops.agent.access.AgentCapabilityGate() {
+            @Override public String capabilityName() { return "SELLEROPS_KNOWLEDGE_INTENT"; }
+            @Override public boolean isEnabled() { return enabled; }
+            @Override public boolean isDeployed() { return enabled && !key.isBlank(); }
+            @Override public boolean namesAnyOrg() { return !orgIds.isBlank(); }
+            @Override public boolean isConfiguredFor(java.util.UUID orgId) { return !orgIds.isBlank(); }
+            @Override public boolean admitsPolicyWidening() { return false; }
+        };
+    }
+
     /** H — nothing is on, nothing is configured, and that is a correct deployment. */
     @Test
     void everyConnectorOff_bootsWithNoSecretsAtAll() {

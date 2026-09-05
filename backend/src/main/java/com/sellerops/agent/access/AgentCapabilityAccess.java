@@ -41,6 +41,12 @@ import org.springframework.stereotype.Component;
  * policy. Nothing here reads a model, a key, a channel or a seller row's contents — one existence
  * check against this deployment's own database.
  *
+ * <p><b>A capability may decline the widening.</b> {@link AgentCapabilityGate#admitsPolicyWidening()}
+ * is false for the three knowledge-retrieval capabilities, so under every scope they admit exactly
+ * the organisations written into their own lists. That is a narrowing, and it is deliberate: the
+ * exposure those three add is the CUSTOMER'S question leaving on paths that call no model, which is
+ * not something a seller asked for by finishing an OAuth consent for collection.
+ *
  * <p><b>What it is not.</b> Not a per-capability policy — each capability keeps its own flag, key and
  * list, because they are different exposures and a deployment must still be able to run any subset.
  * This answers one question ("is this organisation part of this deployment's audience") once, so the
@@ -112,6 +118,13 @@ public class AgentCapabilityAccess {
         }
         if (gate.isConfiguredFor(orgId)) {
             return Decision.ALLOWED;
+        }
+        // A capability may decline the widening. Pilot Release Closure v1 §2: the three
+        // knowledge-retrieval capabilities send the customer's question to a vendor, and a seller
+        // does not ask for that by connecting a channel — they are admitted by being named, under
+        // every policy. Declining can only narrow; nothing here can admit an org the scope would not.
+        if (!gate.admitsPolicyWidening()) {
+            return Decision.NOT_ADMITTED;
         }
         return switch (scope) {
             case ALL_ORGS -> Decision.ALLOWED;

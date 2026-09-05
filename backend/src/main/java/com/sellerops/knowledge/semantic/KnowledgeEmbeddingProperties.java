@@ -85,6 +85,19 @@ public class KnowledgeEmbeddingProperties implements AgentCapabilityGate {
         return orgId != null && (allOrgs || enabledOrgIds.contains(orgId));
     }
 
+    /**
+     * <b>No deployment-wide policy widens this capability.</b> Pilot Release Closure v1 §2: the
+     * pilot host runs {@code SELLEROPS_AGENT_ACCESS_SCOPE=CONNECTED_SELLERS} so that a seller who
+     * connects a channel can use the Agent without an env edit and a restart. That sentence is right
+     * for the Agent and wrong here — this capability sends the CUSTOMER'S question to a vendor on
+     * paths that call no model today, and a seller who connected a channel asked for collection, not
+     * for that. So it is admitted by {@code SELLEROPS_KNOWLEDGE_EMBEDDING_ORG_IDS} and by nothing else.
+     */
+    @Override
+    public boolean admitsPolicyWidening() {
+        return false;
+    }
+
     public String model() {
         return model;
     }

@@ -25,6 +25,17 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The policy only ever widens, and only the ORGANISATION question. The flag, the key and the
  * explicit list stay each capability's own, so a deployment can still run any subset.
+ *
+ * <p><b>Pilot Release Closure v1 §2 reversed the widening for these three, and the reversal is the
+ * point of the tests below.</b> The trap above was real and the seam is the right one; what was
+ * wrong was the answer it gave here. {@code CONNECTED_SELLERS} means «a seller who connected a
+ * channel may use the Agent», and these three capabilities are not the Agent — they send the
+ * CUSTOMER'S question to a vendor on paths that call no model. A seller who finished an OAuth
+ * consent asked for collection, not for that, so admission stays a written-down decision.
+ *
+ * <p>The trap stays shut by the other half of the change: {@code PilotConfigValidator} now REFUSES
+ * to boot a knowledge capability that is enabled and keyed and names no organisation, under every
+ * scope. Silence was the defect; the fix is a refusal, not a widening.
  */
 class KnowledgeCapabilityAccessTest {
 
@@ -52,19 +63,42 @@ class KnowledgeCapabilityAccessTest {
     }
 
     @Test
-    @DisplayName("under the pilot's policy, a seller who connected a channel is admitted without an env edit")
-    void thePolicyAnswersTheOrganisationQuestion() {
+    @DisplayName("connecting a channel does NOT admit a seller to retrieval — being named does")
+    void thePolicyDoesNotWidenTheseThree() {
         AgentCapabilityAccess policy = connectedSellers();
+        // Enabled, keyed, naming nobody: a connected seller is still not a subject of these calls.
         assertThat(new KnowledgeEmbeddingService(embedding(), null, policy, null)
-                .enabledFor(CONNECTED)).isTrue();
-        assertThat(new KnowledgeQuestionIntent(intent(), policy, null).enabledFor(CONNECTED)).isTrue();
+                .enabledFor(CONNECTED)).isFalse();
+        assertThat(new KnowledgeQuestionIntent(intent(), policy, null).enabledFor(CONNECTED)).isFalse();
         assertThat(new KnowledgeEvidenceEligibility(eligibility(), policy, null)
-                .enabledFor(CONNECTED)).isTrue();
+                .enabledFor(CONNECTED)).isFalse();
 
-        // And a drive-by signup that has connected nothing spends nothing — the hazard the wildcard
-        // cannot fence.
+        // Written down: admitted, under the very same policy.
+        assertThat(new KnowledgeQuestionIntent(
+                new KnowledgeQuestionIntentProperties(true, CONNECTED.toString(), "m", "k", 400, "minimal"),
+                policy, null).enabledFor(CONNECTED)).isTrue();
+
+        // And a drive-by signup that has connected nothing spends nothing — still true, now for the
+        // stronger reason that nothing but the list can admit it.
         assertThat(new KnowledgeQuestionIntent(intent(), policy, null).enabledFor(SIGNED_UP_ONLY))
                 .isFalse();
+    }
+
+    /**
+     * The declaration itself, so the reversal cannot be undone by a quiet edit to one capability:
+     * all three decline the widening, while the Agent's own capabilities keep it (that half is
+     * asserted where the policy lives, {@code AgentCapabilityAccessTest}). The boot refusal that
+     * keeps the original trap shut is asserted in {@code PilotConfigValidatorTest}.
+     */
+    @Test
+    @DisplayName("all three decline the deployment-wide widening")
+    void allThreeDeclineTheWidening() {
+        assertThat(embedding().admitsPolicyWidening()).isFalse();
+        assertThat(intent().admitsPolicyWidening()).isFalse();
+        assertThat(eligibility().admitsPolicyWidening()).isFalse();
+        // Enabled and keyed while naming nobody is the shape the validator refuses.
+        assertThat(intent().isDeployed()).isTrue();
+        assertThat(intent().namesAnyOrg()).isFalse();
     }
 
     /**
@@ -80,7 +114,8 @@ class KnowledgeCapabilityAccessTest {
         KnowledgeQuestionIntentProperties named =
                 new KnowledgeQuestionIntentProperties(true, CONNECTED.toString(), "m", "k", 400, "minimal");
         assertThat(new KnowledgeQuestionIntent(named, allowList, null).enabledFor(CONNECTED)).isTrue();
-        // A named organisation stays admitted under every policy.
+        // A named organisation stays admitted under every policy — and an unnamed one is refused
+        // under every policy, which is what changed.
         assertThat(new KnowledgeQuestionIntent(named, connectedSellers(), null)
                 .enabledFor(SIGNED_UP_ONLY)).isFalse();
         assertThat(new KnowledgeQuestionIntent(named, connectedSellers(), null)
@@ -101,6 +136,11 @@ class KnowledgeCapabilityAccessTest {
         assertThat(new KnowledgeQuestionIntent(
                 new KnowledgeQuestionIntentProperties(false, "*", "m", "k", 400, "minimal"), policy, null)
                 .enabledFor(CONNECTED)).as("no flag").isFalse();
+        // The wildcard is still the wildcard: it is the capability's OWN list saying "everyone",
+        // which no scope had to widen and this change does not touch.
+        assertThat(new KnowledgeQuestionIntent(
+                new KnowledgeQuestionIntentProperties(true, "*", "m", "k", 400, "minimal"), policy, null)
+                .enabledFor(SIGNED_UP_ONLY)).as("explicit wildcard").isTrue();
         assertThat(KnowledgeQuestionIntent.disabled().enabledFor(CONNECTED)).isFalse();
         assertThat(KnowledgeEvidenceEligibility.disabled().enabledFor(CONNECTED)).isFalse();
     }

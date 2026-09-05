@@ -36,6 +36,18 @@ services:
       SELLEROPS_JWT_SECRET: ${SELLEROPS_JWT_SECRET:-change-me-local-dev-only-please-use-a-long-random-string}
       SELLEROPS_JWT_EXP_MINUTES: ${SELLEROPS_JWT_EXP_MINUTES:-720}
       SELLEROPS_CORS_ORIGIN: ${SELLEROPS_CORS_ORIGIN:-http://localhost:5173}
+      # Social sign-in (Google OIDC · NAVER OAuth2) — docs/auth_growth_instrumentation_v1.md.
+      # These are the SELLER'S LOGIN, and have nothing to do with the NAVER COMMERCE connector
+      # (SELLEROPS_CONNECTOR_NAVER_*) that reads the store's reviews and inquiries: different
+      # console, different credential, different callback. A provider without BOTH id and secret
+      # does not exist — no bean, no /oauth2 endpoint, no button — so blank is a posture, not a
+      # broken config. Without these NAMES here the container cannot see them however carefully
+      # an operator writes them into the host env file (same defect class as the AI capabilities
+      # below, Pilot Runtime Foundation v1 §3).
+      SELLEROPS_OAUTH_GOOGLE_CLIENT_ID: ${SELLEROPS_OAUTH_GOOGLE_CLIENT_ID:-}
+      SELLEROPS_OAUTH_GOOGLE_CLIENT_SECRET: ${SELLEROPS_OAUTH_GOOGLE_CLIENT_SECRET:-}
+      SELLEROPS_OAUTH_NAVER_CLIENT_ID: ${SELLEROPS_OAUTH_NAVER_CLIENT_ID:-}
+      SELLEROPS_OAUTH_NAVER_CLIENT_SECRET: ${SELLEROPS_OAUTH_NAVER_CLIENT_SECRET:-}
       # Pilot Runtime Foundation v1 §3 — the environment contract reaches the container.
       # Every one of these is a NAME here and a value only in the operator's own .env; the
       # defaults below are the safe posture (fixture off, every connector off), so a stack
