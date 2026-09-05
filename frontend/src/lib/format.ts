@@ -82,3 +82,22 @@ export function untilTime(iso: string | null): string {
   }
   return `${Math.round(diffHr / 24)}일 후`;
 }
+
+/**
+ * A calendar date the seller would write, from an instant — in the seller's own day, not UTC's.
+ *
+ * `iso.slice(0, 10)` on a stored instant is the UTC date, which is yesterday for anything that happened
+ * before 09:00 in Seoul. Measured on the product knowledge library, 2026-09-05 01:xx KST: a note the
+ * seller had just saved was dated 2026-09-04 (Full Pilot Walkthrough v1). Same day rule as the review
+ * import calendar on the backend (Asia/Seoul, one zone, no setting).
+ */
+export function kstDate(iso: string | null | undefined): string {
+  if (!iso) {
+    return "-";
+  }
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) {
+    return iso.slice(0, 10);
+  }
+  return new Date(ms).toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+}

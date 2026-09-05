@@ -61,10 +61,44 @@ export interface ReplyRuntime {
   focusSurface?(runId: string): Promise<boolean>;
 }
 
-/** One sanitized event of a guided reply run: its type and, when it names a step, that step's id. */
+/**
+ * One sanitized event of a guided reply run: its type, the step it names, and — when the event is the run
+ * saying it stopped — the blocker code and whether a human can still resolve it.
+ *
+ * <b>The code is carried deliberately, and it is the only payload value that is.</b> A guided run that ended
+ * at `TARGET_NOT_FOUND` used to reach the seller as nothing at all: the panel showed the same two report
+ * buttons it shows while a run is healthy, so a run that had already stopped looked like one still waiting
+ * for them (live, 2026-09-05). A surface cannot say what went wrong, or offer the repair, without knowing
+ * which failure it was. What crosses is a value from OUR OWN closed enum ({@link REPLY_BLOCKER_CODES}) —
+ * never a value the marketplace page supplied — and anything outside that list is dropped.
+ */
 export interface ReplySignal {
   type: string;
   stepId: string | null;
+  code?: ReplyBlockerCode | null;
+  recoverable?: boolean | null;
+}
+
+/**
+ * The blocker codes a guided REPLY run can report — the subset of the v2 contract's codes this lane can
+ * actually reach. Kept as a closed list here so an unknown string from the wire is dropped rather than
+ * rendered.
+ */
+export const REPLY_BLOCKER_CODES = [
+  "LOGIN_REQUIRED",
+  "SESSION_EXPIRED",
+  "UNSUPPORTED_STATE",
+  "TARGET_NOT_FOUND",
+  "TARGET_AMBIGUOUS",
+  "RUNTIME_FAULT",
+] as const;
+export type ReplyBlockerCode = (typeof REPLY_BLOCKER_CODES)[number];
+
+/** Narrow an unvalidated wire value to a known blocker code, or null. */
+export function replyBlockerCodeOf(value: unknown): ReplyBlockerCode | null {
+  return typeof value === "string" && (REPLY_BLOCKER_CODES as readonly string[]).includes(value)
+    ? (value as ReplyBlockerCode)
+    : null;
 }
 
 /** A handle over one guided run: the runId, and the two terminal-driving reports. */
@@ -461,8 +495,14 @@ export function createBridgeReplyRuntime(
       if (disposed) return () => undefined;
       return transport.subscribe((event) => {
         if (event.runId !== runId) return;
-        const stepId = (event.payload as { stepId?: unknown } | undefined)?.stepId;
-        listener({ type: event.type, stepId: typeof stepId === "string" ? stepId : null });
+        const payload = event.payload as { stepId?: unknown; code?: unknown; recoverable?: unknown } | undefined;
+        const stepId = payload?.stepId;
+        listener({
+          type: event.type,
+          stepId: typeof stepId === "string" ? stepId : null,
+          code: replyBlockerCodeOf(payload?.code),
+          recoverable: typeof payload?.recoverable === "boolean" ? payload.recoverable : null,
+        });
       });
     },
     dispose() {

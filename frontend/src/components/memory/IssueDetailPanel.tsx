@@ -14,6 +14,7 @@ import {
   surgeLine,
   waitingNoteKo,
 } from "../../lib/reviewIssuesView";
+import { kstDate } from "../../lib/format";
 import { evidenceInboxRef } from "../../lib/memoryView";
 import type { ReviewIssueDetailView, ReviewIssueView } from "../../lib/types";
 import { Btn } from "../ui/Btn";
@@ -194,7 +195,7 @@ export function IssueDetailPanel({
                 {" · "}
                 {event.actor === "OPERATOR" ? "운영자" : "reviewnary"}
                 {" · "}
-                {event.at.slice(0, 10)}
+                {kstDate(event.at)}
                 {event.note ? <span className="block break-keep">{event.note}</span> : null}
               </li>
             ))}

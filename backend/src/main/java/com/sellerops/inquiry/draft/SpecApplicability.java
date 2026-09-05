@@ -196,20 +196,29 @@ public enum SpecApplicability {
      * @param topicWord the property this question is about, quoted from the question itself — null
      *                  when the question named none. It is a REPORTING field: it decides no verdict,
      *                  filters no evidence, and reaches no model.
+     * @param optionsRegistered whether the bound product had ANY option to compare the question
+     *                  against. {@link Applicability#VARIANT_UNRESOLVED} with no options is a
+     *                  different fact from the same verdict with twenty: the first means we could
+     *                  not check, the second means we checked and the customer named none. The
+     *                  seller-facing line reads this apart (Full Pilot Walkthrough v1 — a customer
+     *                  who wrote 「2호」 was told they had not said which 규격).
      */
-    public record Verdict(Applicability applicability, UUID variantId, String topicWord) {
+    public record Verdict(Applicability applicability, UUID variantId, String topicWord,
+                          boolean optionsRegistered) {
     }
 
     /** As {@link #of}, with the options identified, so the matched one can be named. */
     public static Verdict classify(String title, String body, List<Option> options) {
         String text = normalize((title == null ? "" : title) + " " + (body == null ? "" : body));
         String topic = firstPresent(text, TOPIC_WORDS);
+        boolean registered = options != null && options.stream()
+                .anyMatch(o -> o != null && o.name() != null && !o.name().isBlank());
         if (topic == null && !containsAny(text, PHRASING_WORDS)) {
-            return new Verdict(Applicability.NOT_VARIANT_SENSITIVE, null, null);
+            return new Verdict(Applicability.NOT_VARIANT_SENSITIVE, null, null, registered);
         }
         Option named = namedOption(text, options);
-        return named == null ? new Verdict(Applicability.VARIANT_UNRESOLVED, null, topic)
-                : new Verdict(Applicability.VARIANT_NAMED, named.id(), topic);
+        return named == null ? new Verdict(Applicability.VARIANT_UNRESOLVED, null, topic, registered)
+                : new Verdict(Applicability.VARIANT_NAMED, named.id(), topic, registered);
     }
 
     /**

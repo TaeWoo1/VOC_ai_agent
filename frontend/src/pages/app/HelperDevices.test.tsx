@@ -6,7 +6,7 @@ import { HelperDevices } from "./HelperDevices";
 import { expectNoAxeViolations } from "../../test/axe";
 import type { HelperDeviceView } from "../../lib/types";
 
-const list = vi.fn<[], Promise<HelperDeviceView[]>>();
+const list = vi.fn<() => Promise<HelperDeviceView[]>>();
 const revoke = vi.fn(async (_id: string) => {});
 vi.mock("../../lib/apiClient", () => ({
   api: { listHelperDevices: () => list(), revokeHelperDevice: (id: string) => revoke(id) },

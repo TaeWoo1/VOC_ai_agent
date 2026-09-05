@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { answerObjects, answerObjectHref } from "../../lib/answerObjects";
 import type { OperatorAnswer } from "../../lib/agentRuntime/types";
+import { kstDate } from "../../lib/format";
 
 /**
  * The Agent's answer as the objects it cites — shared by the `/agent` page and the contextual panel
@@ -189,7 +190,7 @@ export function OperatorAnswerView({ answer, compact = false }: { answer: Operat
               <li key={c.facet} className="text-xs text-muted">
                 {FACET_LABEL[c.facet] ?? c.facet}:{" "}
                 {c.coverage === "STALE"
-                  ? `마지막으로 확인한 지 오래됐습니다${c.newestObservedAt ? ` (${c.newestObservedAt.slice(0, 10)})` : ""}.`
+                  ? `마지막으로 확인한 지 오래됐습니다${c.newestObservedAt ? ` (${kstDate(c.newestObservedAt)})` : ""}.`
                   : "reviewnary가 이 정보를 갖고 있지 않습니다. 상품에 그 값이 없다는 뜻은 아닙니다."}
               </li>
             ))}

@@ -7,6 +7,7 @@ import type {
   KnowledgeSourceView,
   ProductVariantView,
 } from "../../lib/types";
+import { kstDate } from "../../lib/format";
 
 /**
  * 상품 지식 — what the SELLER wrote about this product.
@@ -90,7 +91,7 @@ export function ProductKnowledgeLibrary({ productId }: { productId: string }) {
                     <p className="mt-1 text-sm text-muted">
                       {source.variantId ? `${source.variantName ?? "특정 규격"} 전용 · ` : ""}
                       {source.authorName ? `${source.authorName} · ` : ""}
-                      {source.updatedAt.slice(0, 10)} · 인용 단위 {source.chunks}개
+                      {kstDate(source.updatedAt)} · 인용 단위 {source.chunks}개
                       {source.chunks === 0 ? " (AI가 인용할 수 없습니다)" : ""}
                     </p>
                   </div>

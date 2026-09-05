@@ -1304,6 +1304,61 @@ launchd 설치 0.2.0(옛 helper.env 삭제 확인), 브라우저 Playwright(pair
 첫 허용·연결은 운영자 몫. 라이브가 결함 하나(연결됨 뒤 폴링 정지)를 찾아 닫았다. backend 3,874 · collector 9,443 · frontend
 2,752 · 실패 0. 마이그레이션 1 · 마켓플레이스 0 · WRITE 0 · 모델 0.)
 
+**`docs/full_pilot_walkthrough_v1.md`** (Full Pilot Walkthrough v1 — 2026-09-05. 기능 개발이 아니라 **처음 쓰는
+판매자 한 명으로서 제품 전체를 로그인부터 재접속까지 걸어 본** sitting. 깨끗한 org(제품 자신의 signup)와 canonical
+Demo Org를 함께 썼다 — 전자는 첫 화면·채널 연결·도우미 기기 연결, 후자는 실제 데이터가 있어야만 보이는 문의·리뷰·
+지식·상품·기회·리포트. walkthrough 중 결함 7종을 같은 sitting에서 고쳤다: **규격 대조를 하지 않았으면서 「고객이 어떤
+규격·옵션인지 밝히지 않았습니다」라고 쓰던 문장**(`SpecApplicability`가 옵션이 **등록돼 있었는지**를 함께 답하게 하고
+`AnswerBasisState`가 셋을 가른다 — 등록된 옵션과 대조해서 못 정한 것 · 옵션 목록 자체가 없는 것 · 판정을 기록하지 않은
+reload) · 첫 판매자에게 「**다시** 연결 필요」(연결한 적 없는 기기에 재연결을 말하던 라벨) · 홈 첫 행이 「제목 없는 문의」
+(제목이 없으면 고객 문장을 쓴다) · **판매자가 등록한 접착 안내를 리뷰 초안이 못 찾던 것 — 코드가 아니라 배포 형상**
+(retrieval v2 세 capability가 기본값 OFF라 「기본 문구」로 떨어졌고, 켜자 판매자 자신의 문장을 인용한 GROUNDED 초안이
+나왔다 ⇒ **파일럿 배포 결정**) · 지식·정책·이슈 화면의 날짜가 UTC(`kstDate` 하나로) · 문구 둘 · 타입 오류 하나.
+**§5가 이 sitting의 본체다 — NAVER Guided Reply가 승인된 리뷰를 찾지 못한 것은 acceptance 실패가 아니라 pilot
+defect였다.** 2026-09-03 LIVE PASS는 **같은 08-28 날짜**의 리뷰를 `locate_sweep step 9`에서 찾았는데, 그때 6일 전이던
+그 날짜가 오늘은 **8일 전**이다. 스윕 로그가 원인을 말한다 — 행 수가 22→33으로 늘다가 **32→22로 줄고**(DOM을 재활용하는
+가상 그리드) 15번째 화면에서 **`atBottom:true`**이며 15개 화면 전부 `recencySpread`가 `TODAY`/`THIS_WEEK`뿐, 즉
+**일주일보다 오래된 행이 하나도 없이 목록이 끝났다**. 화면은 자기 기본 조회 기간을 보여주고 있었고 **스크롤은 필터
+바깥에 닿을 수 없다**; locate는 기간을 한 번도 정하지 않고 화면이 주는 대로 받았다. 그것을 `TARGET_NOT_FOUND`로 보고한
+것은 **거짓**이고(리뷰는 거기 있다) 그 문장이 암시하는 복구(다시 찾기)는 원리적으로 성공할 수 없다. 고친 방법은
+**기존 UI 경로 · 새 클릭 0**: 목록 자신의 기간·페이지 컨트롤을 읽는 **범위 census**(`review-list-range-inpage.ts` —
+나가는 것은 정수뿐: 활성 날짜 입력 수 · 파싱된 값 수 · as-of 기준 **일수 차** · pager 수 · 최대 페이지 번호, 날짜 문자열도
+선택자도 페이지 텍스트도 넘지 않고, 날짜 술어는 acquisition lane이 라이브에서 쓰던 그것), 재활용 그리드에서는 한 스캔이
+전체를 볼 수 없으므로 **화면마다의 recency bucket을 누적**해 세 판정을 가르는 것(`OUT_OF_LISTED_RANGE`(바닥까지 갔고
+대상의 bucket을 한 번도 못 봤다) · `NOT_ON_SURFACE` · `NOT_ESTABLISHED`(step cap — 아무것도 증명하지 못했다)), 그리고
+`OUT_OF_LISTED_RANGE`이면 **로그인을 기다리는 것과 같은 모양으로 읽기 전용 5분을 기다린다** — 판매자가 그 화면의 기간을
+바꾸고 화면 자신의 [조회]를 누르면 census가 창이 바뀐 것을 보고 **목록을 첫 행으로 되감은 뒤**(재조회된 그리드는 1행부터
+그려지므로 이전 스크롤 위치에서 이어 읽으면 그 위의 행들을 「없다」고 말하게 된다) 다시 스윕한다; 기간 컨트롤이 **없는**
+화면에서는 기다리지 않는다. **페이지네이션 자동 클릭은 하지 않았다** — `.click(`은 여전히 `reply-composer-open.ts` 한
+파일에서 정확히 한 번, `.fill(`은 `reply-composer-fill.ts` 한 파일뿐이고, 기간을 넓히는 것은 판매자의 클릭이며 우리는
+결과를 감지한다(Action Window 계약 그대로; census는 pager 구조를 **기록만** 한다). **사라지던 실패도 함께 닫았다**:
+도우미 로그에 `aw_naver_reply_terminal {event, code, recoverable, stage}`가 세션의 단일 publish choke point에 latch하고
+(acquisition의 `aw_acquisition_terminal`과 같은 모양), 리뷰 답변 작업 화면이 run을 **구독해**(`ReplySignal`에 닫힌 어휘의
+`code`·`recoverable` — 페이지에서 온 값은 절대 싣지 않는다) 멈춘 run의 **이유를 문장으로** 말하고(우리 코드명은 화면에
+나오지 않는다) 「답변함으로 기록」·「답변 안 함으로 기록」 대신 **[다시 시도]**를 보이며, 물기 전에 전제를 말한다
+(「네이버 리뷰 목록의 조회 기간에 이 리뷰의 작성일(2026-08-28)이 포함돼 있어야 찾을 수 있어요」). **라이브 확인 — 두 단계**: 고친 번들을
+실제 설치 위치에 다시 빌드해 넣고 같은 대상 `471cf8ef`로 실행했는데, 처음 두 번은 판매자센터 세션이 만료돼 사람이
+로그인하지 않아 10분 뒤 끝났다 — 그 종료가 이제 로그(`LOGIN_REQUIRED`, recoverable)와 화면(「네이버 로그인이
+필요해요…」 + [다시 시도])에 **남는다**(직전 sitting에서 같은 상황이 만든 것은 침묵이었고, 승인 동작은 **0회 소진**됐다).
+세 번째 실행에서 판매자가 로그인하자 **`LIVE PASS`**: census가 목록 기간을 `startDaysBefore 6 / endDaysBefore 0` —
+**최근 7일**로 읽어 8일 된 대상이 구조적으로 목록 밖임을 확정했고(15화면 `atBottom`, 대상 bucket `OLDER` **0행**),
+**`pagerNumberCount 0`** — 숫자 페이저가 아예 없어 **pagination은 답이 될 수 없었고 기간 필터가 유일한 결정론적
+경로임이 관측으로 확정됐다**. 판매자가 기간을 1개월로 바꾸자 `WINDOW_CHANGED`(`startDaysBefore 30`) → 첫 행 되감기 →
+재스윕 **14번째 화면**에서 리뷰 id 지문이 정확히 1행 → `detail_control candidates 1` → `detail_scope matched 1`(후보 2 중
+nested 1 제거, **본문 지문으로 패널 신원 확인**) → `open_composer via detail` → `locate_composer composersInRow 1` →
+**`execution_observed COMPOSER_FILLED`**. DB: `review_reply_execution` **+1행**(`lane GUIDED` · `approved_version 1` ·
+`approved_fingerprint 27d352c5` = 승인된 head · **`provider_ref` 비어 있음**) · outcome **0** · `reply_state` **PENDING** ·
+초안 **v1 그대로** · 09-03 proof 행 무변경 · 그 뒤 submit/보고/terminal 마커 **0**(run은 제출 barrier에 서 있다).
+**마켓플레이스 WRITE 0 · submit 0 · 등록 0 · 마이그레이션 0.** **판매자 추가 수동 동작 1회**(조회 기간 확대)는 숨기지
+않고 friction으로 적었다 — 기간 컨트롤을 우리가 조작하는 것은 이 lane의 클릭·타이핑 fence가 금지하고, URL 파라미터
+경로는 **추측하지 않고** census가 구조만 기록해 둔다. 판정 **`BLOCKED`**(첫 실제 판매자에게 그대로 넘기기 — 리뷰 답변
+lane 자체는 끝까지 돌았다) — 파일럿 전 필수 넷: 고정 공인 IPv4 + 공개 HTTPS 호스트 · retrieval v2 배포에서 켜기 ·
+Guided Reply가 dev bridge 전용인 것(**product-owner 결정**) · 취득 계보 없는 리뷰가 실행 불가임을 화면이 말하기
+(Demo Org 4,455건 중 `MARKETPLACE` identity는 **115건**). 정직 보고: locate가 기간을 기다리는 5분과 로그인을 기다리는
+10분 동안 **판매자 화면은 아무 말도 하지 않는다** — reply engine에 park/recheck 상태가 없어서이고 이 sitting에서 만들지
+않았다. collector **9,468** · frontend **2,755** · backend **3,875** · 실패 0, `reply-guard` 소스 스캔은 새 모듈을
+등록해 **1,006 → 1,024** 단언으로 늘었다(완화 0))
+
 **`docs/agentic_report_v1.md`** (Issue Evidence Trust Closure + Agentic Report v1 — 2026-09-04. **[1]** 「파손없이 잘
 도착했네요」가 「배송 파손」 evidence가 되어 Opportunity까지 만들던 결함을 hard-code가 아니라 seam으로 닫았다: 추출기에는
 polarity seam이 **없었고**(`IssueVocabulary`는 substring 표), triage tier는 별점의 순수 함수라 절 단위 판정에 쓸 수 없다(5★

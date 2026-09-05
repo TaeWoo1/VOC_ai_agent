@@ -6,6 +6,7 @@ import { Empty } from "../../components/ui/Empty";
 import { api } from "../../lib/apiClient";
 import { ORG_TOPICS } from "../../lib/knowledgeWords";
 import type { OrgKnowledgeType, OrgKnowledgeView } from "../../lib/types";
+import { kstDate } from "../../lib/format";
 
 /**
  * 운영 기준 — the rules this company answers by.
@@ -89,7 +90,7 @@ export function OperationsPolicies() {
                       <p className="mt-1 break-keep text-sm text-muted">{preview(source.body)}</p>
                       <p className="mt-1 text-sm text-muted">
                         {source.authorName ? `${source.authorName} · ` : ""}
-                        {source.updatedAt.slice(0, 10)}
+                        {kstDate(source.updatedAt)}
                         {source.version > 1 ? ` · ${source.version}차 개정` : ""} · 인용 단위{" "}
                         {source.passageCount}개
                         {source.passageCount === 0 ? " (답변에 인용할 수 없습니다)" : ""}

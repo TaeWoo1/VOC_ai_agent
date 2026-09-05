@@ -6,9 +6,11 @@ import { SecureRandomUnavailableError, newCommandId } from "../lib/commandId";
 import type { OperatorOutcomeName, ReviewReplyPrep, TriageDisposition } from "../lib/types";
 import {
   startReplySubmission,
+  type ReplyBlockerCode,
   type ReplyRunHandle,
   type ReplyRuntime,
 } from "../lib/actionWindow/reply/replyRuntime";
+import { guidedStopSentence } from "../lib/actionWindow/reply/guidedStopWording";
 import { useReplyRuntime } from "../lib/actionWindow/reply/useReplyRuntime";
 import { plainText } from "../lib/plainText";
 
@@ -163,6 +165,10 @@ export function VocItemReplyPrep({
   // A guided reply-submission run in progress (after 네이버에서 직접 답변하기, before the operator
   // reports). Local and re-enterable: the ref is single-use, so backing out just re-mints on reopen.
   const [guided, setGuided] = useState<GuidedRun | null>(null);
+  // Why the guided run stopped, when it stopped. A run that has ended cannot be reported on, so this also
+  // decides which controls the panel shows: before this slice a stopped run kept offering 답변함/답변 안 함
+  // and said nothing, and a locate that failed on the seller center reached the seller as silence.
+  const [stopped, setStopped] = useState<{ code: ReplyBlockerCode | null; recoverable: boolean } | null>(null);
 
   const attempt = useRef<ApprovalAttempt | null>(null);
   const reportAttempt = useRef<OutcomeAttempt | null>(null);
@@ -178,6 +184,22 @@ export function VocItemReplyPrep({
   // this build cannot guide, and the panel says so rather than simulating a run nobody ran.
   const runtime = useReplyRuntime(replyRuntime);
   const canGuide = runtime != null;
+
+  // Listen to the run this panel started. `observe` carries the run's own sanitized events; a runtime with
+  // no event stream simply has none, and the panel then behaves exactly as it did before.
+  const runId = guided?.handle?.runId ?? null;
+  useEffect(() => {
+    if (runtime?.observe == null || runId == null) return;
+    const unsubscribe = runtime.observe((signal) => {
+      if (signal.type !== "RUN_BLOCKED" && signal.type !== "RUN_FAILED") return;
+      // RUN_BLOCKED carries the recoverability; RUN_FAILED follows it with the code alone. Keep the first
+      // reading rather than letting the second overwrite it with a weaker one.
+      setStopped((current) =>
+        current ?? { code: signal.code ?? null, recoverable: signal.recoverable === true },
+      );
+    });
+    return unsubscribe;
+  }, [runtime, runId]);
 
   const headingId = useId();
   const editorId = useId();
@@ -382,19 +404,26 @@ export function VocItemReplyPrep({
     setFailed("복사하지 못했습니다. 다시 시도해 주세요.");
   }
 
-  async function startHandoff() {
+  async function startHandoff(options?: { restart?: boolean }) {
     // Named for what it does in BOTH modes: it starts a handoff, which is a guided run only when this
     // build has a runtime. Calling it startGuided while it also opened the manual path would be the
     // same overclaim in code that "(가이드)" was in the label.
     //
     // Reuse an UNSPENT handoff: one already in flight keeps its single-use submissionRef rather
     // than minting another. A fresh mint happens only after a terminal report spends it (setGuided(null)).
-    if (inFlight.current || !canStart || guided != null) {
+    // `restart` is the one case that may replace a run already on screen: the run STOPPED, so there is
+    // nothing to preserve, and its single-use ref was spent reaching that stop. Everything else still
+    // reuses an unspent handoff rather than minting a second one.
+    if (inFlight.current || !canStart || (guided != null && options?.restart !== true)) {
       return;
+    }
+    if (options?.restart === true) {
+      setGuided(null);
     }
     inFlight.current = true;
     setBusy("starting");
     setFailed(null);
+    setStopped(null);
     try {
       // The submissionRef is minted by the SERVER either way — a real single-use binding, in both
       // the guided and the manual path. Only the RUN is conditional.
@@ -530,8 +559,8 @@ export function VocItemReplyPrep({
         </label>
         <p className="text-sm text-muted">
           {prep.draftAuthorKind === "MODEL"
-            ? "아래 초안은 저장된 지식을 근거로 AI가 썼습니다. 내용을 확인하고 직접 고쳐 주세요."
-            : "아래 초안은 저장된 문구에서 시작합니다. 내용을 확인하고 직접 고쳐 주세요."}
+            ? `아래 초안은 저장된 지식을 근거로 AI가 썼습니다.${approved ? "" : " 내용을 확인하고 직접 고쳐 주세요."}`
+            : `아래 초안은 저장된 문구에서 시작합니다.${approved ? "" : " 내용을 확인하고 직접 고쳐 주세요."}`}
         </p>
         <textarea
           id={editorId}
@@ -698,30 +727,74 @@ export function VocItemReplyPrep({
               </div>
             ) : null}
           </dl>
+          {/* The precondition the guided locate cannot solve for itself, said BEFORE it bites rather than
+              after. The seller center's review list shows one period at a time, and a review older than
+              that period is not on the page at any scroll position — so a run looking for it waits for the
+              seller to widen the period and press that screen's own 조회. Stated as a fact about the
+              screen, not as a claim about this run's state, because the panel cannot see that state. */}
+          {canGuide && stopped == null ? (
+            <p className="text-sm text-muted">
+              네이버 리뷰 목록의 조회 기간에{" "}
+              {prep.reviewDate != null ? (
+                <strong className="font-semibold">이 리뷰의 작성일({prep.reviewDate})</strong>
+              ) : (
+                <strong className="font-semibold">이 리뷰의 작성일</strong>
+              )}
+              이 포함돼 있어야 찾을 수 있어요. 목록이 최근 기간으로 좁혀져 있으면 기간을 넓히고 조회해
+              주세요.
+            </p>
+          ) : null}
+          {/* A run that stopped says so, says why, and offers the one thing that can follow. Reporting
+              답변함 / 답변 안 함 belongs to a run that is still open, so those controls are not offered
+              here — there is nothing left to report on. */}
+          {stopped != null ? (
+            <p role="alert" className="text-sm text-warn">
+              {guidedStopSentence(stopped.code, prep.reviewDate)}
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
+            {stopped != null ? (
+              <button
+                type="button"
+                aria-disabled={working}
+                aria-busy={busy === "starting"}
+                onClick={() => void startHandoff({ restart: true })}
+                className={`rounded-lg px-2.5 py-1 text-sm font-semibold ${
+                  working ? "bg-canvas text-muted opacity-40" : "bg-brand-700 text-white"
+                }`}
+              >
+                다시 시도
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  aria-disabled={working}
+                  aria-busy={busy === "reporting"}
+                  onClick={() => void report("OPERATOR_REPORTED_SUBMITTED")}
+                  className={`rounded-lg px-2.5 py-1 text-sm font-semibold ${
+                    working ? "bg-canvas text-muted opacity-40" : "bg-brand/10 text-brand-700"
+                  }`}
+                >
+                  답변함으로 기록
+                </button>
+                <button
+                  type="button"
+                  aria-disabled={working}
+                  onClick={() => void report("SUBMISSION_ABORTED")}
+                  className="rounded-lg bg-canvas px-2.5 py-1 text-sm font-semibold text-ink"
+                >
+                  답변 안 함으로 기록
+                </button>
+              </>
+            )}
             <button
               type="button"
               aria-disabled={working}
-              aria-busy={busy === "reporting"}
-              onClick={() => void report("OPERATOR_REPORTED_SUBMITTED")}
-              className={`rounded-lg px-2.5 py-1 text-sm font-semibold ${
-                working ? "bg-canvas text-muted opacity-40" : "bg-brand/10 text-brand-700"
-              }`}
-            >
-              답변함으로 기록
-            </button>
-            <button
-              type="button"
-              aria-disabled={working}
-              onClick={() => void report("SUBMISSION_ABORTED")}
-              className="rounded-lg bg-canvas px-2.5 py-1 text-sm font-semibold text-ink"
-            >
-              답변 안 함으로 기록
-            </button>
-            <button
-              type="button"
-              aria-disabled={working}
-              onClick={() => setGuided(null)}
+              onClick={() => {
+                setGuided(null);
+                setStopped(null);
+              }}
               className="rounded-lg px-2.5 py-1 text-sm text-muted"
             >
               닫기

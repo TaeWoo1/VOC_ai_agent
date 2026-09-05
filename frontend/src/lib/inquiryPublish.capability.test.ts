@@ -90,7 +90,7 @@ describe("publishUnavailableReason", () => {
       detail({ replyCapability: audited({}) }),
       capability({ executionEnabled: false }),
     );
-    expect(reason).toContain("이 환경에서는");
+    expect(reason).toContain("지금은 reviewnary가 답변을 대신 등록하지 않습니다");
   });
 });
 

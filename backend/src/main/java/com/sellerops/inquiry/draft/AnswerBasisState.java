@@ -122,11 +122,39 @@ public enum AnswerBasisState {
                            SpecApplicability.Applicability applicability,
                            RetrievalOutcome productOutcome, RetrievalOutcome policyOutcome,
                            KnowledgeTopic asked, boolean topicDeclared) {
+        return actionKo(knowledge, topicWord, applicability, productOutcome, policyOutcome, asked,
+                topicDeclared, null);
+    }
+
+    /**
+     * @param optionsRegistered what {@link SpecApplicability.Verdict#optionsRegistered()} said, or
+     *                          null when the caller did not classify this time (a reload reads the
+     *                          stored state and re-reads nothing).
+     */
+    public String actionKo(DraftKnowledgeState knowledge, String topicWord,
+                           SpecApplicability.Applicability applicability,
+                           RetrievalOutcome productOutcome, RetrievalOutcome policyOutcome,
+                           KnowledgeTopic asked, boolean topicDeclared, Boolean optionsRegistered) {
         if (this == NEEDS_CLARIFICATION) {
-            // What is missing, and nothing else. The customer has not said which 규격 they mean, so
-            // the reply asks — and this line exists so the seller reads that BEFORE the draft and does
-            // not mistake a question for an incomplete answer. It states no policy and no figure,
-            // which is the same rule the draft itself is under in this state.
+            // What is missing, and nothing else — and only what was actually checked. The line
+            // exists so the seller reads it BEFORE the draft and does not mistake a question for an
+            // incomplete answer. It states no policy and no figure, which is the same rule the draft
+            // itself is under in this state.
+            //
+            // Three sentences because three different things were established (Full Pilot
+            // Walkthrough v1, 2026-09-05): a customer who wrote 「한가닥은 2호 두가닥은 5호」 on a
+            // listing with no stored options was told 「고객이 어떤 규격·옵션인지 밝히지 않았습니다」.
+            // Nothing had compared their words to anything — there was nothing to compare against —
+            // so the sentence was a claim about the customer that nobody had checked. Now: options
+            // exist and none matched ⇒ the customer named none of them; no options ⇒ we could not
+            // check; unknown (reload) ⇒ only the fact that the draft asks.
+            if (optionsRegistered == null) {
+                return "규격이 확정되지 않아 아래 초안은 그 내용을 되묻습니다.";
+            }
+            if (!optionsRegistered) {
+                return "이 상품에 등록된 규격 목록이 없어 고객이 말한 규격을 확인하지 못했습니다. "
+                        + "아래 초안은 규격을 되묻습니다.";
+            }
             return "고객이 어떤 규격·옵션인지 밝히지 않았습니다. 아래 초안은 그 내용을 되묻습니다.";
         }
         if (this != NO_ANSWER_BASIS || knowledge == null) {

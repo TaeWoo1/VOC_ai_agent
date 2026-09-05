@@ -27,9 +27,16 @@ import {
   IN_PAGE_ID_OUTLINE_TEARDOWN,
   IN_PAGE_REVIEW_ROW_COUNT,
   IN_PAGE_SCROLL_REVIEW_LIST,
+  IN_PAGE_SCROLL_REVIEW_LIST_TOP,
   inPageOutlineRowAt,
   inPageReviewIdLadder,
 } from "./review-id-probe-inpage";
+import {
+  UNREAD_RANGE_CENSUS,
+  inPageReviewListRange,
+  parseRangeCensus,
+  type ReviewListRangeCensus,
+} from "./review-list-range-inpage";
 import {
   IN_PAGE_ANNOTATE_SCOPED_COMPOSER,
   IN_PAGE_ARM_OPEN_OBSERVER,
@@ -56,6 +63,12 @@ export interface NaverLadderReplyDriverOptions {
   rowOpenTimeoutMs?: number;
   /** How long to watch for a seller-resolvable precondition (a login) before giving up. */
   loginTimeoutMs?: number;
+  /**
+   * How long to keep watching after the sweep proves the target is OUTSIDE the period the list is showing —
+   * the window in which the seller can widen that period on the page in front of them and have the run
+   * continue. `0` disables the wait (the locate then fails as soon as the sweep does).
+   */
+  rangeWaitMs?: number;
   /**
    * Sanitized run diagnostics. NUMBERS AND VERDICTS ONLY — never a review id, never page text, never the
    * draft. Exists because two live sittings ended with the run gone and no record of what the locate saw:
@@ -109,6 +122,35 @@ const DETAIL_SETTLE_MS = 1_200;
 const LOCATE_SCROLL_STEPS = 24;
 /** Time given to the list to render what a scroll pulled in, before the next scan. */
 const LOCATE_SCROLL_SETTLE_MS = 600;
+/** How often the range wait re-asks the page (cheap: one ladder read, no scrolling). */
+const RANGE_POLL_INTERVAL_MS = 2_500;
+/**
+ * How often the range wait re-sweeps the whole list even when nothing looked like it changed.
+ *
+ * The change signal (the period controls now read a different window) is the normal trigger; this is the
+ * floor under it, for the surface that re-queries without its own inputs reporting anything new.
+ */
+const RANGE_RESWEEP_INTERVAL_MS = 30_000;
+
+/** One ladder read of whatever the list is showing right now: the match, plus what the scan saw. */
+interface LadderScan {
+  count: number;
+  rowIndex: number | null;
+  truncated: boolean;
+  /** Recency buckets present on the scanned rows, by count — how the run knows WHICH slice it is reading. */
+  buckets: Record<string, number>;
+  rowsOnPage: number;
+}
+
+/**
+ * Why a sweep that matched nothing matched nothing — two different facts that were reported as one.
+ *
+ * `OUT_OF_LISTED_RANGE` says the run reached the END of the list and never saw a single row from the target's
+ * own recency bucket: the review is not missing, the screen is not showing that part of the seller's history.
+ * `NOT_ON_SURFACE` is the older claim, and now only made when the sweep actually covered the target's slice.
+ * `NOT_ESTABLISHED` is a sweep that ran out of steps before the bottom — it proved nothing either way.
+ */
+export type LocateMissVerdict = "OUT_OF_LISTED_RANGE" | "NOT_ON_SURFACE" | "NOT_ESTABLISHED";
 
 export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
   private readonly page: LadderReplyPage;
@@ -119,6 +161,7 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
   private readonly submitTimeoutMs: number;
   private readonly rowOpenTimeoutMs: number;
   private readonly loginTimeoutMs: number;
+  private readonly rangeWaitMs: number;
   private readonly onSurfaceRecovered: (() => Promise<void>) | undefined;
   private readonly onDiagnostic: NaverLadderReplyDriverOptions["onDiagnostic"];
   private matchedRowIndex: number | null = null;
@@ -135,6 +178,7 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
     this.submitTimeoutMs = opts.submitTimeoutMs ?? 600_000;
     this.rowOpenTimeoutMs = opts.rowOpenTimeoutMs ?? this.submitTimeoutMs;
     this.loginTimeoutMs = opts.loginTimeoutMs ?? this.submitTimeoutMs;
+    this.rangeWaitMs = opts.rangeWaitMs ?? 0;
     this.onSurfaceRecovered = opts.onSurfaceRecovered;
     this.onDiagnostic = opts.onDiagnostic;
   }
@@ -228,10 +272,10 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
 
 
   /** The ladder: rows carrying the backend's review-id fingerprint. Exactly one, or nothing. */
-  private async ladder(): Promise<{ count: number; rowIndex: number | null; truncated: boolean }> {
-    if (!this.reviewIdFingerprint) return { count: 0, rowIndex: null, truncated: false };
+  private async ladder(): Promise<LadderScan> {
+    if (!this.reviewIdFingerprint) return { count: 0, rowIndex: null, truncated: false, buckets: {}, rowsOnPage: 0 };
     const parts = civilDateParts(this.asOfDate);
-    if (!parts) return { count: 0, rowIndex: null, truncated: false };
+    if (!parts) return { count: 0, rowIndex: null, truncated: false, buckets: {}, rowsOnPage: 0 };
     const raw = await this.page.evaluate<unknown>(inPageReviewIdLadder(parts));
     const parsed = parseLadderResult(raw);
     const hits = parsed.candidates.filter((c) => c.idFingerprints.some((f) => f.fingerprint === this.reviewIdFingerprint));
@@ -263,7 +307,30 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
       count: consistent.length,
       rowIndex: consistent.length === 1 ? consistent[0]!.rowIndex : null,
       truncated: parsed.rowsTruncated || parsed.tokensTruncated,
+      buckets,
+      rowsOnPage: parsed.candidates.length,
     };
+  }
+
+  /**
+   * The review list's own period + paging controls, read once. Numbers only (see
+   * {@link inPageReviewListRange}); a read that throws reports {@link UNREAD_RANGE_CENSUS}, so an unknown
+   * never reads as "there is no period filter".
+   */
+  private async rangeCensus(): Promise<ReviewListRangeCensus> {
+    const parts = civilDateParts(this.asOfDate);
+    if (!parts) return UNREAD_RANGE_CENSUS;
+    try {
+      return parseRangeCensus(await this.page.evaluate<unknown>(inPageReviewListRange(parts)));
+    } catch {
+      return UNREAD_RANGE_CENSUS;
+    }
+  }
+
+  /** Rewind the review list to its first screen. Read-only in the same sense the sweep is. */
+  private async rewindList(): Promise<void> {
+    await this.page.evaluate(IN_PAGE_SCROLL_REVIEW_LIST_TOP).catch(() => undefined);
+    await new Promise<void>((resolve) => setTimeout(resolve, LOCATE_SCROLL_SETTLE_MS));
   }
 
   /** One screen down the review list. Read-only: it moves the viewport, it presses nothing. */
@@ -281,28 +348,152 @@ export class NaverLadderReplyDriver implements ReplySubmitProbeDriver {
     }
   }
 
-  async locateReviewRow(): Promise<LocateRowResult> {
+  /**
+   * One pass down the review list, from wherever the viewport is: scan, scroll a screen, scan again.
+   *
+   * The list renders lazily AND recycles — rows above the viewport are removed from the DOM as rows below it
+   * are added — so no single scan can see the whole list and the sweep has to keep a UNION of what every scan
+   * saw. That union (`bucketsSeen`) is what later separates "the target is not in this list" from "this list
+   * does not reach the target's date".
+   */
+  private async sweep(): Promise<{ scan: LadderScan; atBottom: boolean; screens: number; bucketsSeen: Record<string, number> }> {
     let d = await this.ladder();
-    // The target is not always on the first screen — usually it is not. Sweep DOWN, one screen at a time,
-    // re-scanning after each: the list renders lazily, so rows the first scan could not see appear as the
-    // viewport moves. Stops the moment the row is found (so nothing scrolls out from under the match that
-    // highlight/open/fill are about to use), at the bottom, or at the step cap.
+    const bucketsSeen: Record<string, number> = { ...d.buckets };
+    let atBottom = false;
+    let screens = 0;
+    // Stops the moment the row is found (so nothing scrolls out from under the match that highlight/open/fill
+    // are about to use), at the bottom, or at the step cap.
     for (let step = 0; d.count === 0 && step < LOCATE_SCROLL_STEPS; step++) {
       const s = await this.scrollListOnce();
       if (!s.moved) break;
+      screens = step + 1;
       await new Promise<void>((resolve) => setTimeout(resolve, LOCATE_SCROLL_SETTLE_MS));
       d = await this.ladder();
+      for (const [bucket, n] of Object.entries(d.buckets)) {
+        bucketsSeen[bucket] = Math.max(bucketsSeen[bucket] ?? 0, n);
+      }
       this.diag("aw_naver_reply_locate_sweep", {
         step: step + 1, rowsOnPage: s.rowCount, rowsInPane: s.rowsInPane, matches: d.count, atBottom: s.atBottom,
       });
-      if (d.count > 0 || s.atBottom) break;
+      if (d.count > 0) break;
+      if (s.atBottom) {
+        atBottom = true;
+        break;
+      }
     }
+    return { scan: d, atBottom, screens, bucketsSeen };
+  }
+
+  /**
+   * What a sweep that found nothing actually established.
+   *
+   * The target's own recency bucket is the only thing the run can compare against what it saw, and it is
+   * enough for the distinction that matters: a list the sweep read to the BOTTOM without ever showing a row
+   * from that bucket is not a list the target could have been in. Anything less — the sweep hit its step cap,
+   * or it did see that bucket — stays the old, weaker claim.
+   */
+  private missVerdict(atBottom: boolean, bucketsSeen: Record<string, number>): LocateMissVerdict {
+    const rowsSeen = Object.values(bucketsSeen).reduce((a, b) => a + b, 0);
+    if (!atBottom || rowsSeen === 0) return "NOT_ESTABLISHED";
+    return (bucketsSeen[this.hint.recencyBucket] ?? 0) === 0 ? "OUT_OF_LISTED_RANGE" : "NOT_ON_SURFACE";
+  }
+
+  /**
+   * Find the one row the approved reply targets.
+   *
+   * <b>Observed live 2026-09-05, and the reason this method is no longer just a sweep.</b> A run swept fifteen
+   * screens of the seller center review grid, reached the bottom of the pane, and matched nothing — while
+   * every row it saw was `TODAY` or `THIS_WEEK` and the target was eight days old. Two days earlier the SAME
+   * screen had matched a review of the same date on the ninth screen. Nothing about the grid had changed: the
+   * review had aged past the period the screen shows by default, and scrolling cannot reach outside a filter.
+   * Reporting that as `TARGET_NOT_FOUND` tells the seller their review is not there, which is false, and the
+   * repair it implies (look again) cannot work.
+   *
+   * So a sweep that ends at the bottom of the list without ever showing the target's own recency bucket now
+   * says so — and then WAITS, read-only, the way {@link waitForSurfaceReady} waits for a login: the seller
+   * widens the period on the page in front of them, presses the screen's own 조회, and the run re-sweeps the
+   * new list and continues. Nothing here changes the filter, types a date, or presses anything.
+   */
+  async locateReviewRow(): Promise<LocateRowResult> {
+    let out = await this.sweep();
+    if (out.scan.count === 0) {
+      const verdict = this.missVerdict(out.atBottom, out.bucketsSeen);
+      const census = await this.rangeCensus();
+      this.diag("aw_naver_reply_locate_miss", {
+        verdict,
+        targetBucket: this.hint.recencyBucket,
+        targetBucketRowsSeen: out.bucketsSeen[this.hint.recencyBucket] ?? 0,
+        screensSwept: out.screens,
+        atBottom: out.atBottom,
+        dateInputCount: census.dateInputCount,
+        listStartDaysBefore: census.startDaysBefore,
+        listEndDaysBefore: census.endDaysBefore,
+        pagerNumberCount: census.pagerNumberCount,
+        highestPagerNumber: census.highestPagerNumber,
+      });
+      // The wait is offered only where it can actually be resolved: the screen has to HAVE a period control
+      // for "widen the period" to be a thing the seller can do. Without one, waiting would be waiting for
+      // something nobody was asked for.
+      if (verdict === "OUT_OF_LISTED_RANGE" && census.dateInputCount > 0 && this.rangeWaitMs > 0) {
+        out = await this.waitForListToReachTarget(census);
+      }
+    }
+    const d = out.scan;
     this.matchCount = d.count;
     this.matchedRowIndex = d.rowIndex;
     // A truncated scan that found nothing is "not established", which the engine reads as not found; a
     // truncated scan that found exactly one is still exactly one on what was seen — accepted, like the probe.
     if (d.count === 1 && d.rowIndex !== null) return { count: 1, sig: composerSigFor(["ladder-row", d.rowIndex]) };
     return { count: d.count };
+  }
+
+  /**
+   * Watch — read-only — for the list to start showing the period the target is in, then sweep it again.
+   *
+   * Two triggers, and both are the seller's own act: the period controls now read a different window (the
+   * normal case, detected by re-reading the same census), or enough time passed that a re-sweep is due anyway
+   * (the surface that re-queries without its inputs changing). Every re-sweep starts by rewinding the list,
+   * because a re-queried grid renders from row one and a scan that began at the old scroll position would
+   * read its tail and call the rows above it absent.
+   */
+  private async waitForListToReachTarget(
+    initial: ReviewListRangeCensus,
+  ): Promise<{ scan: LadderScan; atBottom: boolean; screens: number; bucketsSeen: Record<string, number> }> {
+    const deadline = Date.now() + this.rangeWaitMs;
+    let lastSweptAt = Date.now();
+    let last = initial;
+    this.diag("aw_naver_reply_range_wait", { waitMs: this.rangeWaitMs, targetBucket: this.hint.recencyBucket });
+    for (;;) {
+      if (Date.now() >= deadline) {
+        this.diag("aw_naver_reply_range_wait_timeout", { targetBucket: this.hint.recencyBucket });
+        return { scan: { count: 0, rowIndex: null, truncated: false, buckets: {}, rowsOnPage: 0 }, atBottom: true, screens: 0, bucketsSeen: {} };
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, RANGE_POLL_INTERVAL_MS));
+      // Cheap check first: after a re-query the target may simply be on the first screen.
+      const quick = await this.ladder();
+      if (quick.count === 1 && quick.rowIndex !== null) {
+        this.diag("aw_naver_reply_range_resolved", { via: "FIRST_SCREEN" });
+        return { scan: quick, atBottom: false, screens: 0, bucketsSeen: quick.buckets };
+      }
+      const census = await this.rangeCensus();
+      const windowChanged =
+        census.startDaysBefore !== last.startDaysBefore || census.endDaysBefore !== last.endDaysBefore;
+      const due = Date.now() - lastSweptAt >= RANGE_RESWEEP_INTERVAL_MS;
+      if (!windowChanged && !due) continue;
+      last = census;
+      lastSweptAt = Date.now();
+      this.diag("aw_naver_reply_range_resweep", {
+        reason: windowChanged ? "WINDOW_CHANGED" : "PERIODIC",
+        listStartDaysBefore: census.startDaysBefore,
+        listEndDaysBefore: census.endDaysBefore,
+      });
+      await this.rewindList();
+      const out = await this.sweep();
+      if (out.scan.count > 0) {
+        this.diag("aw_naver_reply_range_resolved", { via: "RESWEEP", screens: out.screens });
+        return out;
+      }
+    }
   }
 
   async highlightRow(): Promise<LocateRowResult> {

@@ -6,6 +6,7 @@ import { Facts } from "../ui/ObjectRow";
 import { api } from "../../lib/apiClient";
 import { ORG_TOPICS, PRODUCT_TOPICS, scopeLabel, topicLabel } from "../../lib/knowledgeWords";
 import type { KnowledgeDocumentView } from "../../lib/types";
+import { kstDate } from "../../lib/format";
 
 /**
  * <b>자료 — the material the company already had.</b> (Knowledge Setup &amp; Inbox UX v1 §5, §6)
@@ -48,7 +49,7 @@ export function KnowledgeDocumentList({
               <Facts className="text-sm text-muted">
                 {topicLabel(document.kind) ? <span>{topicLabel(document.kind)}</span> : null}
                 <span>{scopeLabel(document.scope, document.productName)}</span>
-                <span>{document.uploadedAt.slice(0, 10)}</span>
+                <span>{kstDate(document.uploadedAt)}</span>
                 {document.uploadedBy ? <span>{document.uploadedBy}</span> : null}
                 {document.passages === 0 ? <span className="text-warn">읽을 내용 없음</span> : null}
                 {document.active ? null : <Status tone="neutral">사용 안 함</Status>}

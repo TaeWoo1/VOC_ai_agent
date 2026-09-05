@@ -89,11 +89,12 @@ describe("HelperStatusCard — the six words and their one control", () => {
     expect(retry).toHaveBeenCalled();
   });
 
-  it("다시 연결 필요 → 도우미 연결 asks for the pairing — nothing is raised on its own", async () => {
+  it("연결 필요 → 도우미 연결 asks for the pairing — nothing is raised on its own", async () => {
     phase = "unpaired";
     healthBody = { ok: true, agentVersion: MIN_HELPER_VERSION };
     renderCard();
-    expect(await screen.findByTestId("helper-state")).toHaveTextContent("다시 연결 필요");
+    // Never paired from this browser: no 「다시」 for a first-time seller.
+    expect(await screen.findByTestId("helper-state")).toHaveTextContent(/^연결 필요$/);
     expect(requestPairing).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("helper-connect"));
     expect(requestPairing).toHaveBeenCalledTimes(1);

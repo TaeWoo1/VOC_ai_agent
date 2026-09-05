@@ -364,9 +364,35 @@ class InquiryDraftComposerTest {
         // and the screen therefore rendered nothing at all for this state — a seller read a polite
         // request for the 규격 as an answer that had come out short. What the line may contain is
         // still only the missing fact: no policy, no figure, no promise.
+        // This product has no stored options, so nothing compared the customer's words to anything —
+        // the line says what was NOT checked instead of claiming the customer said nothing (Full
+        // Pilot Walkthrough v1: a customer who wrote 「2호」 was being told they had not said which).
+        assertThat(view.answerBasisAction())
+                .isEqualTo("이 상품에 등록된 규격 목록이 없어 고객이 말한 규격을 확인하지 못했습니다. 아래 초안은 규격을 되묻습니다.");
+        assertThat(view.answerBasisNote()).isEqualTo("정확한 답변을 위해 고객에게 확인할 내용이 있습니다.");
+    }
+
+    @Test
+    @DisplayName("NEEDS_CLARIFICATION with options registered: the customer named none of them, and the line says so")
+    void needsClarificationNamesTheCustomerOnlyWhenOptionsWereCompared() {
+        UUID productId = seedProduct();
+        com.sellerops.product.ProductVariant v = new com.sellerops.product.ProductVariant();
+        v.setOrgId(org);
+        v.setProductId(productId);
+        v.setOptionName("그레이 / 3호");
+        v.setSource("TEST");
+        v.setObservedAt(java.time.Instant.now());
+        variants.save(v);
+        InquiryWorkItem wi = seedAsking(productId, "문의", "전선이 몇 가닥까지 들어가나요?");
+        StubModel model = StubModel.writing("[답변] 문의", "사용하실 규격을 알려주시면 정확히 안내드리겠습니다.");
+
+        GeneratedDraftView view = composer(
+                StubLibrary.returning(passage("자주 묻는 질문", "3~4가닥이 들어갑니다.")), model)
+                .generate(org, wi.getId(), user);
+
+        assertThat(view.answerBasis()).isEqualTo(AnswerBasisState.NEEDS_CLARIFICATION.name());
         assertThat(view.answerBasisAction())
                 .isEqualTo("고객이 어떤 규격·옵션인지 밝히지 않았습니다. 아래 초안은 그 내용을 되묻습니다.");
-        assertThat(view.answerBasisNote()).isEqualTo("정확한 답변을 위해 고객에게 확인할 내용이 있습니다.");
     }
 
     @Test

@@ -382,7 +382,7 @@ public class InquiryDraftComposer {
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), applicability,
                         retrieved.productOutcome(), retrieved.policyOutcome(), askedTopic(inquiry),
-                        retrieved.policyDeclares(askedTopic(inquiry))),
+                        retrieved.policyDeclares(askedTopic(inquiry)), verdict.optionsRegistered()),
                 retrieved.productId(), views, company != null, null,
                 KnowledgeGapView.of(retrieved, verdict, askedTopic(inquiry), namedTopics(inquiry)));
     }
@@ -458,7 +458,8 @@ public class InquiryDraftComposer {
                 retrieved.state().name(), retrieved.state().messageKo(retrieved.scopes()),
                 basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
-                        retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked)),
+                        retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked),
+                        verdict.optionsRegistered()),
                 retrieved.productId(), List.of(), false, null,
                 KnowledgeGapView.of(retrieved, verdict, asked, named));
     }
@@ -478,7 +479,8 @@ public class InquiryDraftComposer {
         return new GeneratedDraftView(null, null, retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
-                        retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked)),
+                        retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked),
+                        verdict.optionsRegistered()),
                 retrieved.productId(), List.of(), false, unavailableMessage,
                 KnowledgeGapView.of(retrieved, verdict, asked, named));
     }

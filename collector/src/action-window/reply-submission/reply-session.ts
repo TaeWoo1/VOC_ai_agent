@@ -249,6 +249,20 @@ export class ReplySubmitSession {
     for (const e of this.engine.events()) {
       if (e.sequence > this.publishedSeq) {
         this.transport.send({ kind: "aw_event", event: e });
+        // A run that ends has to leave a record of HOW it ended, in the agent's own log, at the one place
+        // every transition passes through. Two live sittings ended in `TARGET_NOT_FOUND` with the panel
+        // gone and the log silent, so the terminal had to be inferred from source — the same defect the
+        // guided import closed with `aw_acquisition_terminal`. Codes and booleans only; the payload of a
+        // blocker carries no page content.
+        if (e.type === "RUN_BLOCKED" || e.type === "RUN_FAILED") {
+          const p = e.payload as { code?: unknown; recoverable?: unknown };
+          log("aw_naver_reply_terminal", {
+            event: e.type,
+            code: typeof p.code === "string" ? p.code : null,
+            recoverable: typeof p.recoverable === "boolean" ? p.recoverable : null,
+            stage: this.engine.currentStage(),
+          });
+        }
         this.publishedSeq = e.sequence;
       }
     }

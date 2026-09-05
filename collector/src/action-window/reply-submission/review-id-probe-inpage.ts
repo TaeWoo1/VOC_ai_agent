@@ -410,3 +410,44 @@ for (var i = 0; i < marked.length; i++) {
 }
 return marked.length;
 })()`;
+
+/**
+ * Return the review list to its FIRST screen — the same pane {@link IN_PAGE_SCROLL_REVIEW_LIST} moves, moved
+ * back to the top.
+ *
+ * A sweep that ended at the bottom has left the viewport where the last scan put it. When the seller then
+ * changes the list's own period filter and re-queries, the grid renders a NEW list from row one — and a
+ * re-scan that starts wherever the previous sweep stopped would read the middle of it and call the rows above
+ * "not present". Rewinding first is what makes the second sweep a scan of the whole new list rather than of
+ * its tail.
+ *
+ * Read-only in the same sense the sweep is: it moves a viewport, it presses nothing.
+ */
+export const IN_PAGE_SCROLL_REVIEW_LIST_TOP = `(() => {
+${IN_PAGE_ID_HELPERS}
+var rows = __awIdRows();
+function __awScrollablesOf(el) {
+  var out = [];
+  for (var n = el; n && n !== document.body; n = n.parentElement) {
+    var st = window.getComputedStyle(n);
+    if (/auto|scroll|overlay/.test(st.overflowY || '') && n.scrollHeight > n.clientHeight + 8) { out.push(n); }
+  }
+  return out;
+}
+var counts = [];
+var panes = [];
+for (var r = 0; r < rows.length; r++) {
+  var sc = __awScrollablesOf(rows[r]);
+  for (var s = 0; s < sc.length; s++) {
+    var at = panes.indexOf(sc[s]);
+    if (at < 0) { panes.push(sc[s]); counts.push(1); } else { counts[at] = counts[at] + 1; }
+  }
+}
+var best = null;
+var bestN = 0;
+for (var p = 0; p < panes.length; p++) { if (counts[p] > bestN) { bestN = counts[p]; best = panes[p]; } }
+var target = best || document.scrollingElement || document.documentElement;
+var before = target.scrollTop;
+target.scrollTop = 0;
+return { rewound: before > 0, rowCount: rows.length };
+})()`;

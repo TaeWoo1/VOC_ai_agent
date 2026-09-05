@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VocItemReplyPrep } from "./VocItemReplyPrep";
@@ -855,6 +855,78 @@ describe("VocItemReplyPrep — guided submission (v1.6)", () => {
     expect(retry).toHaveAttribute("aria-disabled", "false");
     // And nothing was recorded — a report that never terminated must not look like one that did.
     expect(api.recordReviewReplyOutcome).not.toHaveBeenCalled();
+  });
+
+  it("a guided run that STOPPED says why, offers 다시 시도, and stops offering to report on it", async () => {
+    // The live silence this closes (2026-09-05): the run ended at TARGET_NOT_FOUND on the seller center and
+    // the panel went on showing 답변함/답변 안 함, so a dead run was indistinguishable from a healthy one.
+    const user = userEvent.setup();
+    vi.mocked(api.startReviewReplySubmissionRun).mockResolvedValue({
+      actionRef: REF,
+      submissionRef: "a1b2c3d4e5f60718",
+      approvedVersion: 1,
+    });
+    vi.mocked(api.getReviewReplyPrep).mockResolvedValue({ ...APPROVED, reviewDate: "2026-08-28" });
+    let emit: ((s: { type: string; stepId: string | null; code?: string | null; recoverable?: boolean | null }) => void) | null =
+      null;
+    const runtime = {
+      start: () => Promise.resolve({ runId: "run_stub01" }),
+      report: () => Promise.reject(new Error("not reached")),
+      dispose: () => {},
+      observe: (listener: (s: never) => void) => {
+        emit = listener as never;
+        return () => {
+          emit = null;
+        };
+      },
+    };
+    render(
+      <VocItemReplyPrep accountId={ACCOUNT} actionRef={REF} disposition="RESPONSE_NEEDED" replyRuntime={runtime} />,
+    );
+    await screen.findByRole("heading", { name: "답변 준비" });
+    await user.click(screen.getByRole("button", { name: "네이버에서 직접 답변하기(가이드)" }));
+    await screen.findByRole("group", { name: "네이버에서 직접 답변하기" });
+
+    act(() => {
+      emit?.({ type: "RUN_BLOCKED", stepId: null, code: "TARGET_NOT_FOUND", recoverable: false });
+    });
+
+    // The reason names the repair, with the review's own date in it — never our blocker code.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("2026-08-28");
+    expect(alert.textContent).toContain("조회 기간");
+    expect(document.body.textContent).not.toContain("TARGET_NOT_FOUND");
+    // Nothing left to report on; one thing left to do.
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "답변함으로 기록" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "답변 안 함으로 기록" })).not.toBeInTheDocument();
+
+    // 다시 시도 mints a FRESH single-use binding — the one the stopped run spent is not reused.
+    await user.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(api.startReviewReplySubmissionRun).toHaveBeenCalledTimes(2);
+  });
+
+  it("names the period the guided locate depends on before it can bite", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.startReviewReplySubmissionRun).mockResolvedValue({
+      actionRef: REF,
+      submissionRef: "a1b2c3d4e5f60718",
+      approvedVersion: 1,
+    });
+    vi.mocked(api.getReviewReplyPrep).mockResolvedValue({ ...APPROVED, reviewDate: "2026-08-28" });
+    const runtime = {
+      start: () => Promise.resolve({ runId: "run_stub01" }),
+      report: () => Promise.reject(new Error("not reached")),
+      dispose: () => {},
+    };
+    render(
+      <VocItemReplyPrep accountId={ACCOUNT} actionRef={REF} disposition="RESPONSE_NEEDED" replyRuntime={runtime} />,
+    );
+    await screen.findByRole("heading", { name: "답변 준비" });
+    await user.click(screen.getByRole("button", { name: "네이버에서 직접 답변하기(가이드)" }));
+    const panel = await screen.findByRole("group", { name: "네이버에서 직접 답변하기" });
+    expect(panel.textContent).toContain("조회 기간");
+    expect(panel.textContent).toContain("2026-08-28");
   });
 
   it("shows a distinct outcome for an abort, and never a bare UNVERIFIED or 완료", async () => {

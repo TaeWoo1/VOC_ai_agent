@@ -209,6 +209,10 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     // Acceptance Closure: the resident run's identity-by-ladder driver and its row-scoped in-page seams.
     "naver-ladder-reply-driver.ts": resolve(SRC, "naver-ladder-reply-driver.ts"),
     "reply-row-composer-inpage.ts": resolve(SRC, "reply-row-composer-inpage.ts"),
+    // The list's own period/paging census — how a locate tells "the review is not in this list" from "this
+    // list does not reach the review's date". Reads date inputs and page numbers and returns integers; it is
+    // held to the same no-click, no-type, no-navigate boundary as every other probe here.
+    "review-list-range-inpage.ts": resolve(SRC, "review-list-range-inpage.ts"),
   };
   // The ONE exception, by name: the guided fill helper may call `.fill(` on the composer the driver tagged —
   // and nothing else (Agentic Operating Workspace v2 §13). Submit/click/keyboard tokens stay forbidden there too.

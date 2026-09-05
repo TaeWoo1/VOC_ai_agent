@@ -1400,6 +1400,12 @@ export function buildNaverReplyLiveConfig(): NaverReplyLiveCarrier {
           const inner = new NaverLadderReplyDriver(page as unknown as LadderReplyPage, {
             hint: target.hint, asOfDate: target.asOfDate,
             reviewIdFingerprint: target.channelReviewIdFingerprint, draftBody: target.draftBody,
+            // The period the review list happens to be showing is not the seller's whole history, and a
+            // review ages out of it (live, 2026-09-05). When the sweep proves the target's slice is not in
+            // the list at all, the run waits — read-only — while the seller widens the period on the page
+            // in front of them and presses that screen's own 조회, exactly as it waits for a login. Five
+            // minutes: long enough to change a filter, short enough that an abandoned run still ends.
+            rangeWaitMs: 300_000,
             // Post-login re-observation (2026-09-03): the same review list, re-opened once the seller has
             // signed in. A READ of the seller's own review page — the run still clicks nothing and submits
             // nothing. Without it the locate would scan whatever page the login flow happened to end on.

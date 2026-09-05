@@ -1,5 +1,6 @@
 import type { InquiryQueueItem, ProposalView } from "./types";
 import { elapsedSince } from "./elapsed";
+import { kstDate } from "./format";
 
 // Pure view-model for the seller inquiry workflow. No React, no network — just the
 // display mapping + error classification the /inquiries page relies on, so the
@@ -78,9 +79,9 @@ export function statusLabel(status: string): string {
   }
 }
 
-/** Date-only rendering of an ISO instant — no timezone/clock assumptions. */
+/** Date-only rendering of an ISO instant, in the seller's day (Asia/Seoul) — see `kstDate`. */
 export function receivedDateLabel(receivedAt: string): string {
-  return receivedAt.slice(0, 10);
+  return kstDate(receivedAt);
 }
 
 /**

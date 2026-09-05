@@ -141,7 +141,17 @@ export function helperStatusOf(input: HelperStatusInput): HelperState {
         : phase === "revoked"
           ? "연결이 해제됐습니다. 다시 연결해 주세요."
           : "도우미가 실행 중입니다. 이 브라우저와 연결해 주세요.";
-    return { key: "RECONNECT", label: "다시 연결 필요", tone: "warn", note, action: { kind: "connect", label: "도우미 연결" } };
+    // 「다시」 only when there was a first time. A seller two minutes into the product, whose helper
+    // has never been paired with any browser, read 「다시 연결 필요」 as an instruction about something
+    // they had already done (Full Pilot Walkthrough v1, 2026-09-05). Same key, same action.
+    const firstTime = phase === "unpaired" && !input.pairedBefore && input.pairingHint !== "no_response";
+    return {
+      key: "RECONNECT",
+      label: firstTime ? "연결 필요" : "다시 연결 필요",
+      tone: "warn",
+      note,
+      action: { kind: "connect", label: "도우미 연결" },
+    };
   }
   if (phase === "connecting" || phase === "connecting_ws") {
     return { key: "CHECKING", label: "확인 중", tone: "neutral", note: null, action: null };

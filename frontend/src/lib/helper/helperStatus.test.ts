@@ -25,7 +25,10 @@ describe("helperStatusOf — six words, one action each, no internal concept", (
   });
 
   it("a running helper this browser is not connected to is 다시 연결 필요 — with the reason when there is one", () => {
-    expect(helperStatusOf({ phase: "unpaired", pairedBefore: false, agentVersion: MIN_HELPER_VERSION })).toMatchObject({ key: "RECONNECT", action: { kind: "connect" } });
+    expect(helperStatusOf({ phase: "unpaired", pairedBefore: false, agentVersion: MIN_HELPER_VERSION })).toMatchObject({ key: "RECONNECT", label: "연결 필요", action: { kind: "connect" } });
+    // 「다시」 is earned by a previous pairing, not implied by the state name.
+    expect(helperStatusOf({ phase: "unpaired", pairedBefore: true, agentVersion: MIN_HELPER_VERSION })).toMatchObject({ key: "RECONNECT", label: "다시 연결 필요" });
+    expect(helperStatusOf({ phase: "revoked", pairedBefore: false, agentVersion: MIN_HELPER_VERSION })).toMatchObject({ key: "RECONNECT", label: "다시 연결 필요" });
     expect(helperStatusOf({ phase: "revoked", pairedBefore: true, agentVersion: MIN_HELPER_VERSION }).note).toContain("해제");
     expect(helperStatusOf({ phase: "pairing_denied", pairedBefore: true, agentVersion: MIN_HELPER_VERSION }).note).toContain("거부");
     expect(helperStatusOf({ phase: "unpaired", pairedBefore: true, agentVersion: MIN_HELPER_VERSION, pairingHint: "no_response" }).note).toContain("응답이 없어");

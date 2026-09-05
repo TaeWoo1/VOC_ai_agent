@@ -435,10 +435,13 @@ export function proactiveTurn(
           phase: row.phase ?? "OPEN",
           status: row.status,
           title: row.title,
-          // The queue answers identity, channel, product and time — never the customer's sentence. The
-          // preview belonged to the feed read this card no longer makes, and a brief does not need it:
-          // the title, the shop and the wait are what put a row above the others.
-          snippet: null,
+          // The brief names a row by its title, shop and wait — not by the customer's sentence. But a
+          // NAVER product inquiry has no title, and 「제목 없는 문의」 as the largest text on the home
+          // screen names nothing (Full Pilot Walkthrough v1, 2026-09-05: the oldest waiting row was
+          // that string while the inquiries screen, one click away, showed the customer's words). So
+          // the masked preview the rows read already carries stands in ONLY when there is no title —
+          // the same fallback the inquiries list uses, from the same read.
+          snippet: row.title && row.title.trim() ? null : (row.snippet ?? null),
           productId: row.productId,
           productName: row.productName,
           answerBasis: null,
