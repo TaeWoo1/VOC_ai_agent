@@ -41,6 +41,9 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Review response preparation end to end: the gate, the freeze, the copy contract, and what
@@ -90,6 +93,20 @@ class ReviewReplyServiceTest {
     @Autowired PlatformTransactionManager txManager;
 
     private ReviewReplyService service;
+    /** Same wiring, but the review's channel-side identity is provable (see setUp). */
+    private ReviewReplyService executableService;
+
+    /**
+     * A resolver that answers MARKETPLACE. Written as a method because the test's own field named
+     * {@code org} shadows the {@code org.mockito} package, so the fully-qualified form does not compile
+     * here — a static import is the only spelling that works.
+     */
+    private static com.sellerops.identity.ExecutableIdentityResolver mockResolver() {
+        com.sellerops.identity.ExecutableIdentityResolver r =
+                mock(com.sellerops.identity.ExecutableIdentityResolver.class);
+        when(r.forReview(any())).thenReturn(com.sellerops.identity.ExecutableIdentity.MARKETPLACE);
+        return r;
+    }
     private ReviewTriageService triageService;
 
     private final UUID org = UUID.randomUUID();
@@ -119,6 +136,19 @@ class ReviewReplyServiceTest {
                         new ReviewReplyOutcomeWriter(outcomeRepo, txManager)),
                 new RuleBasedReviewReplyProvider(), FIXED_CLOCK,
                 com.sellerops.identity.ExecutableIdentityResolver.unresolved(), channels);
+        // The same service, for a review whose acquisition CAN prove its channel-side identity. The
+        // default seam above answers NONE for everything, which is the honest default — but it also
+        // means the guided run is unavailable there for a reason that has nothing to do with the gate
+        // under test, so a test about the copy gate has to hold identity constant.
+        com.sellerops.identity.ExecutableIdentityResolver provable =
+                mockResolver();
+        executableService = new ReviewReplyService(reviews, products, sellerAccounts, triages,
+                new ReviewReplyDraftService(draftRepo),
+                new ReviewReplyApprovalService(approvalRepo, approvalAudits,
+                        new ReviewReplyApprovalWriter(approvalRepo, approvalAudits, txManager)),
+                new ReviewReplyOutcomeService(submissionRefRepo, outcomeRepo,
+                        new ReviewReplyOutcomeWriter(outcomeRepo, txManager)),
+                new RuleBasedReviewReplyProvider(), FIXED_CLOCK, provable, channels);
         triageService = new ReviewTriageService(triages, triageAudits, reviews, sellerAccounts,
                 new ReviewTriageWriter(triages, triageAudits, txManager));
         naverChannel = seedChannel("NAVER", "네이버 스마트스토어");
@@ -329,7 +359,9 @@ class ReviewReplyServiceTest {
         approveAndStart();
 
         assertThat(view().channelReplyState()).isEqualTo("UNKNOWN");
-        assertThat(view().capabilities().canStartSubmissionRun()).isTrue();
+        // Held constant: the review's identity is provable, so what is being read here is the CHANNEL
+        // state's effect and nothing else (Pilot Release Closure v1 §4 added the identity condition).
+        assertThat(executableService.view(org, account, ref).capabilities().canStartSubmissionRun()).isTrue();
     }
 
     /** The channel now reports a reply on this review — the state an import would have written. */
@@ -538,9 +570,48 @@ class ReviewReplyServiceTest {
         service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
         assertThat(view().capabilities().canStartSubmissionRun()).isFalse(); // not yet approved
         approveHead();
-        assertThat(view().capabilities().canStartSubmissionRun()).isTrue();
-        assertThat(view().capabilities().canStartSubmissionRun())
-                .isEqualTo(view().capabilities().canCopy());
+        ReviewReplyPrepView provable = executableService.view(org, account, ref);
+        assertThat(provable.capabilities().canStartSubmissionRun()).isTrue();
+        assertThat(provable.capabilities().canStartSubmissionRun())
+                .isEqualTo(provable.capabilities().canCopy());
+        // Nothing is unavailable, so nothing is explained.
+        assertThat(provable.guidedUnavailableReason()).isNull();
+    }
+
+    @Test
+    void aReviewWhoseIdentityCannotBeProvenOffersTheCOPYPATH_AndSaysWhy() {
+        // The dead end this closes: the control was offered, the press minted nothing, and the seller
+        // read 「답변 준비를 시작하지 못했습니다. 다시 시도해 주세요.」 — a retry that could never work.
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        approveHead();
+
+        ReviewReplyPrepView v = view(); // default seam: identity unresolved ⇒ NONE
+        assertThat(v.capabilities().canCopy()).isTrue();          // the reply is ready to be sent by hand
+        assertThat(v.capabilities().canStartSubmissionRun()).isFalse();
+        assertThat(v.guidedUnavailableReason()).isEqualTo("SOURCE_NOT_EXECUTABLE");
+    }
+
+    @Test
+    void anAlreadyAnsweredChannelIsADifferentReasonFromAnUnprovableSource() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        approveHead();
+        markChannelAnswered();
+
+        // Both are "no guided run", and they are not the same thing to a seller: one says the reply is
+        // already public, the other says we cannot find the row.
+        assertThat(executableService.view(org, account, ref).guidedUnavailableReason())
+                .isEqualTo("CHANNEL_ALREADY_ANSWERED");
+    }
+
+    @Test
+    void nothingIsExplainedBeforeThereIsSomethingToSend() {
+        // A seller who has not approved anything is not asking "why is the guided step missing" — the
+        // panel is showing them the approve step. Answering an unasked question is how a screen gets noisy.
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        assertThat(view().guidedUnavailableReason()).isNull();
     }
 
     // --- the gate -------------------------------------------------------------------

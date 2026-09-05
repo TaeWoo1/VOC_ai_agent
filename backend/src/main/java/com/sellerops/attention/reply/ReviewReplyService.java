@@ -22,6 +22,7 @@ import com.sellerops.common.ReviewBodyFingerprint;
 import com.sellerops.common.ReviewIdFingerprint;
 import com.sellerops.common.MarkupText;
 import com.sellerops.common.VocPreviewSanitizer;
+import com.sellerops.identity.ExecutableIdentity;
 import com.sellerops.identity.ExecutableIdentityResolver;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.review.triage.ReviewTriageChannelCapability;
@@ -573,6 +574,14 @@ public class ReviewReplyService {
         // the GUIDED run does not, because that is the step where SellerOps walks a seller to the
         // reply box and a second post becomes an irreversible public double-reply.
         boolean channelAnswered = review.getReplyState() == ReviewReplyState.ANSWERED;
+        // A guided run may only look for a review whose channel-side identity its acquisition can prove.
+        // This is the SAME rule the submission-target mint applies (`ExecutableIdentity.MARKETPLACE`);
+        // asking it here is what stops the surface offering a control the server would refuse. Before
+        // this, a review without that provenance showed 「네이버에서 직접 답변하기」, the press minted
+        // nothing, and the seller read 「답변 준비를 시작하지 못했습니다. 다시 시도해 주세요.」 — an error
+        // that invited a retry which could never succeed. The provenance word itself does not leave the
+        // server; what leaves is the consequence and the next step (copy).
+        boolean sourceExecutable = identity.forReview(review) == ExecutableIdentity.MARKETPLACE;
         ReviewReplyCapabilities capabilities = new ReviewReplyCapabilities(
                 responseNeeded && !approved,
                 responseNeeded && !approved && head != null,
@@ -580,8 +589,13 @@ public class ReviewReplyService {
                 responseNeeded && approved,
                 // canStartSubmissionRun — the same rule as canCopy (a guided post is the copy step
                 // performed in the seller center); it never authorizes a send. Plus: never for a
-                // review the channel already reports as answered.
-                responseNeeded && approved && !channelAnswered);
+                // review the channel already reports as answered, and never for one no run can find.
+                responseNeeded && approved && !channelAnswered && sourceExecutable);
+        // Said only when the seller is otherwise ready to send — that is when the missing control is a
+        // question. `null` while there is nothing approved yet: the panel is already showing them the
+        // approve step, and answering an unasked question is how a screen gets noisy.
+        String guidedUnavailableReason = !capabilities.canCopy() || capabilities.canStartSubmissionRun() ? null
+                : channelAnswered ? "CHANNEL_ALREADY_ANSWERED" : "SOURCE_NOT_EXECUTABLE";
 
         // One indexed read; empty when the version was the template floor, written before V90, or
         // there is no draft at all.
@@ -626,7 +640,8 @@ public class ReviewReplyService {
                 head == null ? null : head.getAnswerBasis(),
                 head == null ? null
                         : ReviewDraftComposer.basisNoteOf(head.getAnswerBasis(),
-                                !storedEvidence.isEmpty()));
+                                !storedEvidence.isEmpty()),
+                guidedUnavailableReason);
     }
 
     /**

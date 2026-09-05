@@ -111,5 +111,25 @@ public record ReviewReplyPrepView(
         String draftAnswerBasis,
         /** The seller-facing sentence for {@code draftAnswerBasis}, chosen by the same rule that
          *  chose it at generation ({@code ReviewDraftComposer#basisNoteOf}). Null when the basis is. */
-        String draftAnswerBasisNote) {
+        String draftAnswerBasisNote,
+        /**
+         * Why the GUIDED reply run is not on offer for a review whose reply is otherwise ready to go —
+         * a closed vocabulary, null when it IS on offer (or when there is nothing approved to send yet,
+         * which the panel already explains by showing the approve step).
+         *
+         * <p>{@code SOURCE_NOT_EXECUTABLE}: the review did not arrive through an acquisition that can
+         * prove its channel-side identity, so no run may look for it on the seller's screen — the
+         * reply is copied and posted by hand instead. Before this field the server simply left
+         * {@code canStartSubmissionRun} true and refused when the run asked for a target: the seller
+         * pressed 「네이버에서 직접 답변하기」 and got 「답변 준비를 시작하지 못했습니다. 다시 시도해
+         * 주세요.」 — an error inviting a retry that could never succeed.
+         *
+         * <p>{@code CHANNEL_ALREADY_ANSWERED}: the channel reports a reply already posted, so guiding
+         * one more is how a public double-reply happens.
+         *
+         * <p>The provenance vocabulary itself ({@code ExecutableIdentity}, MARKETPLACE/NONE) stays on
+         * this side of the wire; what crosses is the consequence, and the surface turns that into a
+         * sentence about what the seller can do next.
+         */
+        String guidedUnavailableReason) {
 }

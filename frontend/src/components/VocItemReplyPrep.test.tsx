@@ -972,6 +972,10 @@ describe("VocItemReplyPrep — the channel already answered", () => {
     ...APPROVED,
     capabilities: { ...APPROVED.capabilities, canStartSubmissionRun: false },
     channelReplyState: "ANSWERED",
+    // The REASON now travels with the withheld capability (Pilot Release Closure v1 §4). The panel used
+    // to re-derive it from `channelReplyState`; it reads the server's decision instead, so the screen
+    // and the mint can never disagree about why the guided step is missing.
+    guidedUnavailableReason: "CHANNEL_ALREADY_ANSWERED",
     productName: "가을 니트 가디건 CHARCOAL",
     reviewDate: "2026-05-10",
     rating: 2,
@@ -984,6 +988,26 @@ describe("VocItemReplyPrep — the channel already answered", () => {
       "채널에 이미 답변이 등록된 리뷰예요",
     );
     expect(screen.queryByRole("button", { name: /네이버에서 직접 답변하기/ })).not.toBeInTheDocument();
+  });
+
+  it("a review the guided run cannot locate says so, and points at the copy that CAN be sent", async () => {
+    // The dead end this closes: the control was offered, the press minted nothing, and the seller read
+    // 「답변 준비를 시작하지 못했습니다. 다시 시도해 주세요.」 — a retry that could never succeed.
+    await renderPanel({
+      ...APPROVED,
+      capabilities: { ...APPROVED.capabilities, canStartSubmissionRun: false, canCopy: true },
+      guidedUnavailableReason: "SOURCE_NOT_EXECUTABLE",
+    });
+
+    const notice = await screen.findByTestId("guided-unavailable-notice");
+    expect(notice).toHaveTextContent("판매자센터 화면에서 찾아 드릴 수 없어요");
+    expect(notice).toHaveTextContent("복사");
+    // The next action is real and still on screen; the dead control is not.
+    expect(screen.getByRole("button", { name: "복사" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /네이버에서 직접 답변하기/ })).not.toBeInTheDocument();
+    // Never the vocabulary the server decided it with.
+    expect(document.body.textContent).not.toContain("SOURCE_NOT_EXECUTABLE");
+    expect(document.body.textContent).not.toMatch(/provenance|MARKETPLACE|계보/);
   });
 
   it("says nothing when the channel state is unknown — absence is not an answer", async () => {

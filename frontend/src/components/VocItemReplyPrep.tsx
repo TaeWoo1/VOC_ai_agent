@@ -10,7 +10,7 @@ import {
   type ReplyRunHandle,
   type ReplyRuntime,
 } from "../lib/actionWindow/reply/replyRuntime";
-import { guidedStopSentence } from "../lib/actionWindow/reply/guidedStopWording";
+import { guidedStopSentence, guidedUnavailableSentence } from "../lib/actionWindow/reply/guidedStopWording";
 import { useReplyRuntime } from "../lib/actionWindow/reply/useReplyRuntime";
 import { plainText } from "../lib/plainText";
 
@@ -265,7 +265,8 @@ export function VocItemReplyPrep({
   // The channel already has a reply on this review. The server has already withheld
   // `canStartSubmissionRun` and would 409 the call anyway; this only lets the panel SAY why, instead
   // of hiding the control with no reason. Copy stays available — the clipboard is the operator's.
-  const channelAnswered = prep.channelReplyState === "ANSWERED";
+  // The one sentence that explains a missing guided step, chosen by the server's own reason.
+  const guidedUnavailable = guidedUnavailableSentence(prep.guidedUnavailableReason);
 
   /**
    * Approving binds the last SAVED version — never what is in the box.
@@ -664,10 +665,20 @@ export function VocItemReplyPrep({
             {canGuide ? "네이버에서 직접 답변하기(가이드)" : "직접 답변하고 기록하기"}
           </button>
         ) : null}
-        {channelAnswered ? (
-          <span className="text-sm text-muted" data-testid="channel-answered-notice">
-            채널에 이미 답변이 등록된 리뷰예요. 같은 리뷰에 답변이 두 번 달리지 않도록 가이드형 답변은
-            제공하지 않아요.
+        {/* WHY the guided step is missing, when the seller has an approved reply and would otherwise
+            be looking for it. The reason is the SERVER's — the same rule that decides whether the run
+            may start — so the screen stops re-deriving it from `channelReplyState` and stops offering
+            a control the mint would refuse. Absent reason ⇒ nothing rendered. */}
+        {guidedUnavailable != null ? (
+          <span
+            className="text-sm text-muted"
+            data-testid={
+              prep.guidedUnavailableReason === "CHANNEL_ALREADY_ANSWERED"
+                ? "channel-answered-notice"
+                : "guided-unavailable-notice"
+            }
+          >
+            {guidedUnavailable}
           </span>
         ) : null}
         {capabilities.canApprove && dirty ? (

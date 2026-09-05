@@ -1175,6 +1175,13 @@ export interface ReviewReplyPrep {
   /** The review's coarse 1..5 rating, already on the wire and on the attention row. */
   rating: number | null;
   /**
+   * Why the guided reply run is not offered for a review whose reply is otherwise ready — a closed
+   * server vocabulary (`SOURCE_NOT_EXECUTABLE` | `CHANNEL_ALREADY_ANSWERED`), null when it IS offered
+   * or when nothing is approved yet. The screen turns it into a sentence about what to do next and
+   * never prints the token.
+   */
+  guidedUnavailableReason?: string | null;
+  /**
    * What wrote the head draft — `MODEL`, `RULE`, or null for a version written before reviewnary
    * recorded an author (Grounded Review Drafting v1). Null is "not recorded", never "a person typed
    * it": the screen says nothing rather than guessing.

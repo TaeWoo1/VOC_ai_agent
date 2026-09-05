@@ -286,8 +286,11 @@ composer open → 승인 초안 fill → `WAIT_FOR_SUBMIT`, 마켓플레이스 W
    (코드 아님, 프로비저닝; `pilot_readiness_gate_v1.md` P0).
 2. **retrieval v2 세 capability를 배포에서 켜기** — 끄면 판매자가 등록한 지식이 있어도 초안이 「기본 문구」로 나온다
    (§3-4에서 라이브로 확인). 코드 변경 0, 배포 결정.
-3. **Guided Reply는 dev bridge 전용이 아니어야 한다** — `VITE_AW_BRIDGE=1` + DEV에서만 런타임이 생기므로 판매자 빌드에서는
-   「직접 답변하고 기록하기」(복사)만 남는다. 파일럿에서 composer fill을 쓸 것인지 자체가 **product-owner 결정**.
+3. ~~**Guided Reply는 dev bridge 전용이 아니어야 한다**~~ — **이 항목은 틀렸다(2026-09-05 정정,
+   `pilot_release_closure_v1.md` §0).** 근거로 삼은 것이 코드가 아니라 낡은 주석이었다: DEV 게이트는 앞선
+   패키지에서 이미 제거됐고 production 빌드 산출물에 reply carrier 연결 경로가 그대로 있다. 진짜 게이트는
+   **빌드가 만드는 CSP**이며(`VITE_ENABLE_AGENT_BRIDGE`), 파일럿에서 그것을 켜는 설정이 없던 것이 실제 결함이다 —
+   `pilot_release_closure_v1.md` §2에서 닫혔다.
 4. **취득 계보 없는 리뷰는 실행 불가**를 화면이 말해야 한다 — Demo Org 기준 4,455건 중 **115건**만 `MARKETPLACE` identity를
    가진다. 나머지는 이유 없이 복사 경로로 떨어진다.
 

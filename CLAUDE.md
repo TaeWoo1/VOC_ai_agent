@@ -1304,6 +1304,44 @@ launchd 설치 0.2.0(옛 helper.env 삭제 확인), 브라우저 Playwright(pair
 첫 허용·연결은 운영자 몫. 라이브가 결함 하나(연결됨 뒤 폴링 정지)를 찾아 닫았다. backend 3,874 · collector 9,443 · frontend
 2,752 · 실패 0. 마이그레이션 1 · 마켓플레이스 0 · WRITE 0 · 모델 0.)
 
+**`docs/pilot_release_closure_v1.md`** (Pilot Release Closure v1 — 2026-09-05. 새 제품 기능 **0**; 첫 외부 판매자
+파일럿을 막는 것만 닫는다. **먼저 직전 패키지의 보고 하나를 정정한다** — 「Guided Reply는 `VITE_AW_BRIDGE=1` + DEV에서만
+런타임이 생긴다」는 **틀렸고**, 근거가 코드가 아니라 **낡은 주석**이었다(DEV 게이트는 앞선 패키지에서 이미 제거됐고
+`replyBridge.ts`가 그 이유까지 적어 두었다). production 빌드 산출물에 reply carrier 연결 경로가 살아 있음을 실제 빌드로
+확인했고, 낡은 주석을 고친 뒤 같은 오독이 다시 「blocker」로 보고되지 않도록 **소스 스캔 테스트**를 남겼다
+(`replyPilotCapability.test.ts` — 문장은 이 질문에 대해 믿을 수 없고 소스는 믿을 수 있다). **진짜 게이트는 빌드가 만드는
+CSP였다**: production 번들의 `connect-src`는 **`VITE_ENABLE_AGENT_BRIDGE=true`일 때만** 도우미 origin(http+ws)을 이름
+짓고, 아니면 브라우저가 도우미와의 통신을 거부해 런타임 코드와 무관하게 가이드 lane이 복사로 떨어진다 ⇒ dev 플래그를
+production에 켜는 대신 **이미 있는 capability 구조**에 얹었다(`frontend/Dockerfile` ARG/ENV 둘 · 파일럿 compose가
+`PILOT_GUIDED_HELPER_ENABLED`/`PILOT_HELPER_BRIDGE_URL`에서 전달 · 기본값 OFF). 실측: 플래그 없이
+`connect-src 'self' http://127.0.0.1:8787`, 플래그와 함께 `… http://127.0.0.1:47615 ws://127.0.0.1:47615`.
+**도우미 패키지는 사이트별 산출물이 됐다** — `build-macos.sh`가 사이트 URL을 `BUILD.txt`에 스탬프하고 `설치.command`가
+그것을 읽는다(이전에는 설치 시점 env만 봐서, 더블클릭한 판매자의 설치본이 전부 **자기 컴퓨터의 localhost**를 가리켰고
+화면에는 「서버 연결 확인 필요」로만 보였다). **Retrieval v2는 global default OFF 그대로**이고 파일럿은 두 줄짜리
+결정이다 — 배포에서 셋을 켜고(키 없으면 `deploy.sh`가 이름을 대고 멈춘다), **어느 조직인가는 이미 있는
+`AgentCapabilityAccess`가 답한다**(`CONNECTED_SELLERS` = 채널을 연결한 조직; UUID를 env에 붙여넣고 재기동하는 온보딩을
+피하려고 만든 정책이고 정책은 조직 질문만·넓히기만 한다). 세 capability의 **벤더 payload 경계**를 표로 적고 각 줄에
+그것을 지키는 바이트 단언 테스트 이름을 붙였다(embedding = 모델·차원·텍스트 배열뿐 / intent = 고객 문장 하나 /
+eligibility = 고객 문장 + 순위에 오른 문단 최대 6, 출력은 boolean); 저장되는 생성물은 **판매자 문단의 벡터뿐**이고
+질문 벡터는 DB에 넣지 않으며, 켜면 **모든 검색에서 고객 질문이 벤더로 나간다**는 것이 이 결정의 실체다(그래서 머지가
+아니라 **배포 결정**). **실행 불가 리뷰의 결함은 「이유가 없다」가 아니라 「막다른 길」이었다** — 취득 계보가 없는
+리뷰에도 `canStartSubmissionRun`이 참이라 가이드 버튼이 그대로 보였고, 누르면 mint 거절로 「답변 준비를 시작하지
+못했습니다. 다시 시도해 주세요」가 떴다(성공할 수 없는 재시도) ⇒ 서버가 mint와 **같은 조건**(`MARKETPLACE`)을 capability에
+넣고 닫힌 어휘 `guidedUnavailableReason`(`SOURCE_NOT_EXECUTABLE`·`CHANNEL_ALREADY_ANSWERED`·null)을 함께 보내며,
+화면은 그것을 **읽고**(이전에는 `channelReplyState`를 클라이언트가 재도출했다) 사실과 다음 걸음을 말한다 — 내부 어휘
+(`provenance`·`MARKETPLACE`·취득 계보) 노출 **0**(테스트), **[복사]는 그 자리에 그대로**. `null`은 「아직 승인 전」이라
+아무 말도 하지 않는다(묻지 않은 질문에 답하는 것이 화면이 시끄러워지는 방식이다). **배포 경로**는 이미 있던
+`deploy/pilot/` 위에 개발/production 자격이 섞이지 않게 하는 검사를 더했다 — 파일럿 env가 체크아웃 **밖**이어야 하고,
+`PILOT_PUBLIC_HOST`가 개발 이름이면 거부하고, 여섯 capability 각각 켜졌으면 키가 있어야 하며(백엔드 validator보다 먼저,
+**변수 이름**으로), 도우미 bridge URL은 **loopback**이어야 하고, 켜져 있으면 이 사이트용 도우미 빌드 명령을 출력한다;
+`smoke.sh`는 **설정과 산출물의 일치**를 본다(켜졌는데 서빙된 번들의 CSP가 도우미를 이름 짓지 않으면 실패 — 프론트
+이미지를 다시 빌드하지 않은 상태이고 다른 어떤 검사도 잡지 못한다). **남은 blocker는 코드가 아니다** — 고정 공인 IPv4 +
+공개 HTTPS 호스트가 없고(과금 리소스·계정 자격 ⇒ **product-owner 입력 다섯**: 리전/계정 · 도메인 · 인증서 이메일 ·
+Cafe24 앱 자격 · NAVER 커머스 앱 자격), Cafe24/NAVER 앱이 그 호스트 이름으로 등록돼야 하며, 첫 연결의 라이브 증명은
+여전히 첫 실제 판매자의 첫 연결이다. **마켓플레이스 호출 0 · WRITE 0 · 모델 호출 0 · 마이그레이션 0 · DB 행 변경 0** ⇒
+evidence 행 없음. **계약이 바뀌어 테스트 3건을 다시 썼다**(두 backend 테스트는 identity를 고정한 채 각자의 게이트를
+읽는다 — 약화 0, 단언은 늘었다; FE fixture는 서버가 보내는 이유를 싣는다))
+
 **`docs/full_pilot_walkthrough_v1.md`** (Full Pilot Walkthrough v1 — 2026-09-05. 기능 개발이 아니라 **처음 쓰는
 판매자 한 명으로서 제품 전체를 로그인부터 재접속까지 걸어 본** sitting. 깨끗한 org(제품 자신의 signup)와 canonical
 Demo Org를 함께 썼다 — 전자는 첫 화면·채널 연결·도우미 기기 연결, 후자는 실제 데이터가 있어야만 보이는 문의·리뷰·
@@ -1353,7 +1391,8 @@ nested 1 제거, **본문 지문으로 패널 신원 확인**) → `open_compose
 않고 friction으로 적었다 — 기간 컨트롤을 우리가 조작하는 것은 이 lane의 클릭·타이핑 fence가 금지하고, URL 파라미터
 경로는 **추측하지 않고** census가 구조만 기록해 둔다. 판정 **`BLOCKED`**(첫 실제 판매자에게 그대로 넘기기 — 리뷰 답변
 lane 자체는 끝까지 돌았다) — 파일럿 전 필수 넷: 고정 공인 IPv4 + 공개 HTTPS 호스트 · retrieval v2 배포에서 켜기 ·
-Guided Reply가 dev bridge 전용인 것(**product-owner 결정**) · 취득 계보 없는 리뷰가 실행 불가임을 화면이 말하기
+Guided Reply가 파일럿 빌드에서 꺼져 있던 것(**정정: dev 전용이 아니었다 — 게이트는 CSP였고
+`pilot_release_closure_v1.md` §0·§2에서 닫혔다**) · 취득 계보 없는 리뷰가 실행 불가임을 화면이 말하기
 (Demo Org 4,455건 중 `MARKETPLACE` identity는 **115건**). 정직 보고: locate가 기간을 기다리는 5분과 로그인을 기다리는
 10분 동안 **판매자 화면은 아무 말도 하지 않는다** — reply engine에 park/recheck 상태가 없어서이고 이 sitting에서 만들지
 않았다. collector **9,468** · frontend **2,755** · backend **3,875** · 실패 0, `reply-guard` 소스 스캔은 새 모듈을

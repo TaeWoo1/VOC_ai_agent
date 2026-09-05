@@ -37,6 +37,29 @@ done
 [[ "$SELLEROPS_JWT_SECRET" != change-me* ]] || fail "SELLEROPS_JWT_SECRET is the repository placeholder"
 [[ ${#SELLEROPS_JWT_SECRET} -ge 32 ]] || fail "SELLEROPS_JWT_SECRET is shorter than 32 characters"
 [[ "${SELLEROPS_SEED_ENABLED:-false}" == "false" ]] || fail "SELLEROPS_SEED_ENABLED must be false on a pilot host (demo account)"
+# Development and production credentials do not share a file, and a pilot env never becomes a commit:
+# the env lives OUTSIDE the checkout (default /etc/sellerops/pilot.env), and the host is a real name.
+case "$ENV_FILE" in "$REPO"/*) fail "$ENV_FILE is inside the repository — keep the pilot env outside the checkout (PILOT_ENV_FILE)";; esac
+case "$PILOT_PUBLIC_HOST" in localhost|127.0.0.1|*.local) fail "PILOT_PUBLIC_HOST is a development name ($PILOT_PUBLIC_HOST)";; esac
+# A model capability that is on but has no key fails the backend's own boot validator; failing here
+# names the variable instead of making an operator read a stack trace.
+for cap in AGENT_PLAN AGENT_DRAFT AGENT_JUDGE KNOWLEDGE_EMBEDDING KNOWLEDGE_INTENT KNOWLEDGE_ELIGIBILITY; do
+  e="SELLEROPS_${cap}_ENABLED"; k="SELLEROPS_${cap}_API_KEY"
+  if [[ "${!e:-false}" == "true" && -z "${!k:-}" ]]; then fail "$e=true but $k is blank"; fi
+done
+if [[ "${PILOT_GUIDED_HELPER_ENABLED:-false}" == "true" ]]; then
+  # The helper runs on the SELLER's machine. A non-loopback bridge URL would point every seller's
+  # browser at one shared helper, which is neither what this is nor something to configure by accident.
+  case "${PILOT_HELPER_BRIDGE_URL:-http://127.0.0.1:47615}" in
+    http://127.0.0.1:*|http://localhost:*) : ;;
+    *) fail "PILOT_HELPER_BRIDGE_URL must be a loopback address on the seller's own machine";;
+  esac
+  printf 'note: guided helper ON — build the seller package FOR THIS SITE:
+'
+  printf '      REVIEWNARY_APP_URL=https://%s REVIEWNARY_BASE_URL=https://%s tools/helper/build-macos.sh
+' \
+    "$PILOT_PUBLIC_HOST" "$PILOT_PUBLIC_HOST"
+fi
 [[ "${SELLEROPS_PROACTIVE_ENABLED:-false}" == "false" ]] || printf 'note: proactive is ON — a deliberate choice, not the pilot default\n'
 for flag in NAVER COUPANG CAFE24; do
   v="SELLEROPS_CONNECTOR_${flag}_ENABLED"

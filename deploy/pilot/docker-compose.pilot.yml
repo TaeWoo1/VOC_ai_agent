@@ -49,6 +49,12 @@ services:
         VITE_AGENT_RUNTIME_URL: https://${PILOT_PUBLIC_HOST}/agent-runtime
         VITE_API_BASE_URL: ""
         VITE_SELLEROPS_ENV: pilot
+        # The seller's own reviewnary 도우미. Local by definition — the helper runs on the seller's
+        # machine, not on this host — so the URL is a loopback one even though the site is remote.
+        # Off unless the pilot asks for it: the CSP names this origin only when enabled, and without
+        # the CSP entry the browser blocks the helper and the guided lanes fall back to copy.
+        VITE_ENABLE_AGENT_BRIDGE: ${PILOT_GUIDED_HELPER_ENABLED:-false}
+        VITE_BRIDGE_URL: ${PILOT_HELPER_BRIDGE_URL:-http://127.0.0.1:47615}
 
   edge:
     image: caddy:2-alpine

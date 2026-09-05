@@ -52,7 +52,14 @@ cp "$HERE/payload/install.command" "$OUT/reviewnary 도우미 설치.command"
 cp "$HERE/payload/uninstall.command" "$OUT/reviewnary 도우미 제거.command"
 cp "$HERE/payload/README.txt" "$OUT/읽어주세요.txt"
 chmod +x "$OUT/reviewnary 도우미 설치.command" "$OUT/reviewnary 도우미 제거.command" "$OUT/app/bin/node"
-printf 'version=%s\narch=%s\nplaywright=%s\nbuilt=%s\n' "$VERSION" "$ARCH" "$PW_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$OUT/BUILD.txt"
+# The site this package is FOR. A helper installed with the wrong site talks to a backend that is not
+# there and accepts pairing from an origin nobody uses, and the seller cannot tell: the card just says
+# 「서버 연결 확인 필요」. Defaults stay local for a developer build; a pilot build is produced by
+# exporting REVIEWNARY_APP_URL / REVIEWNARY_BASE_URL, and the installer reads them back from here.
+PKG_APP_URL="${REVIEWNARY_APP_URL:-http://localhost:5173}"
+PKG_BASE_URL="${REVIEWNARY_BASE_URL:-http://127.0.0.1:8080}"
+printf 'version=%s\narch=%s\nplaywright=%s\nbuilt=%s\napp_url=%s\nbase_url=%s\n' \
+  "$VERSION" "$ARCH" "$PW_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PKG_APP_URL" "$PKG_BASE_URL" > "$OUT/BUILD.txt"
 
 echo "built $OUT"
 du -sh "$OUT" | cut -f1

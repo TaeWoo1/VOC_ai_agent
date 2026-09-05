@@ -9,8 +9,12 @@
 set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOME_DIR="$HOME/Library/Application Support/reviewnary-helper"
-APP_URL="${REVIEWNARY_APP_URL:-http://localhost:5173}"
-BASE_URL="${REVIEWNARY_BASE_URL:-http://127.0.0.1:8080}"
+# The site this package was built for (BUILD.txt), overridable for a developer install. A package with
+# no stamp is an older one: fall back to the local defaults rather than to nothing.
+PKG_APP_URL="$(sed -n 's/^app_url=//p' "$SRC/BUILD.txt" 2>/dev/null || true)"
+PKG_BASE_URL="$(sed -n 's/^base_url=//p' "$SRC/BUILD.txt" 2>/dev/null || true)"
+APP_URL="${REVIEWNARY_APP_URL:-${PKG_APP_URL:-http://localhost:5173}}"
+BASE_URL="${REVIEWNARY_BASE_URL:-${PKG_BASE_URL:-http://127.0.0.1:8080}}"
 
 say() { printf '\n%s\n' "$*"; }
 say "reviewnary 도우미를 설치합니다."

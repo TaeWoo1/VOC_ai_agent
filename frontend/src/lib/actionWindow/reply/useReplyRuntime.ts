@@ -4,8 +4,14 @@
 //
 //   1. an INJECTED runtime (tests) — passed through untouched; its creator owns its lifecycle,
 //      so the hook never disposes it;
-//   2. the BRIDGE runtime — connected here (DEV + VITE_AW_BRIDGE + an agent hosting the REPLY
-//      carrier), closed on unmount: dispose() rejects anything in flight, then the socket goes;
+//   2. the BRIDGE runtime — connected here whenever an agent hosting the REPLY carrier is reachable
+//      and paired, closed on unmount: dispose() rejects anything in flight, then the socket goes.
+//      **Not DEV-gated, and this comment used to say it was** (corrected 2026-09-05): the gate was
+//      removed with `connectGuidedReplyRuntime`'s, and reading the stale sentence instead of the code
+//      is how a walkthrough came to report "Guided Reply is dev-only" as a pilot blocker. What a
+//      SHIPPED build actually needs is the CSP entry for the helper's origin, which the build turns on
+//      with `VITE_ENABLE_AGENT_BRIDGE=true` (`src/lib/security/csp.ts`) — a different flag from the
+//      dev-only `VITE_AW_BRIDGE`, and the one a pilot sets;
 //   3. the resolveReplyRuntime() fallback — simulated in DEV, null in production. Production
 //      therefore still cannot construct a live runtime, and its guided path stays the honest
 //      manual handoff.

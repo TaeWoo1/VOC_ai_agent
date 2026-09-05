@@ -35,6 +35,18 @@ for s in postgres backend agent-runtime frontend edge; do
 done
 # Startup validator: a refused boot never reaches healthy, so healthy == validator green.
 [[ "$("${COMPOSE[@]}" ps --format '{{.Service}} {{.Health}}' | awk '$1=="backend"{print $2}')" == "healthy" ]] && ok "backend validator green (healthy)" || bad "backend not healthy"
+# The guided lanes are a BUILD fact, not a runtime one: the bundle's CSP either names the seller's
+# helper origin or the browser refuses it. This is the one check that catches a pilot.env that says
+# guided-on against an image that was built before it did.
+set -a; [[ -f "$ENV_FILE" ]] && . "$ENV_FILE"; set +a
+csp="$(curl -sS --max-time 15 "https://$H/" | tr -d '\n' | grep -o "Content-Security-Policy[^>]*" || true)"
+if [[ "${PILOT_GUIDED_HELPER_ENABLED:-false}" == "true" ]]; then
+  [[ "$csp" == *"${PILOT_HELPER_BRIDGE_URL:-http://127.0.0.1:47615}"* ]] \
+    && ok "guided helper: CSP names the helper origin" \
+    || bad "guided helper ON but the served bundle's CSP does not name it — rebuild the frontend image"
+else
+  [[ "$csp" != *"47615"* ]] && ok "guided helper OFF and the CSP does not name it" || bad "guided helper OFF but the bundle names the helper origin"
+fi
 # Outbound IP == advertised (only meaningful once NAVER is configured).
 "$REPO/deploy/pilot/egress-check.sh" >/dev/null 2>&1 && ok "egress-check: host and container outbound IP agree with ADVERTISED (or NAVER not configured)" || bad "egress-check"
 echo "smoke: $pass ok, $failn failed"
