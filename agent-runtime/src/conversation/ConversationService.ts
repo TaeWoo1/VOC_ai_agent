@@ -61,6 +61,10 @@ import { capabilityOf, EXECUTION_REASON } from "../operator/capability/ChannelCa
 import type { ChannelCapabilityVerdict } from "../operator/capability/ChannelCapability";
 import { rowsSentence } from "../operator/graph/reviewRows";
 import { log } from "../log";
+import { buildTurnGraph } from "./graph/turnGraph";
+import type { TurnGraphUpdate, TurnRoute } from "./graph/TurnState";
+import { selectProcedure } from "../aop/router";
+import type { Precondition, ProcedureId } from "../operator/procedure/Procedure";
 import { inquiryRowsSentence } from "../operator/graph/inquiryRowsStep";
 import { urgencySentence } from "../operator/graph/inquiryWorkloadStep";
 import type { ConversationStore } from "./ConversationStore";
@@ -203,6 +207,49 @@ interface AfterCapture { readonly message: string; readonly artifact: KnowledgeC
 /** What the thread says where a stopped turn would have answered. Never a claim about what was found. */
 export const CANCELLED_MESSAGE = "요청을 중지했습니다. 이미 시작된 확인은 되돌리지 않습니다.";
 
+/**
+ * <b>One turn's collaborators and its scratch space — the locals of the method the graph replaced.</b>
+ *
+ * LangGraph Orchestration Migration v1 §2. Every field below was a `const` or a `let` in a 290-line
+ * `turnNow`, and the order in which they were assigned WAS the orchestration. The graph decides when
+ * each phase runs; this object is what the phases hand each other.
+ *
+ * <b>It is never checkpointed.</b> It travels in `config.configurable`, which LangGraph does not
+ * serialise — a checkpoint that could hold a bearer token would be a checkpoint that leaks one, and
+ * §5 keeps facts in the database rather than in an execution cursor.
+ */
+interface TurnCtx {
+  readonly token: string;
+  readonly id: string;
+  readonly request: StartTurnRequest;
+  readonly progress: ProgressFn;
+  readonly options: { signal?: AbortSignal; afterCapture?: AfterCapture };
+  readonly started: number;
+  /* filled by hydrate */
+  bundle?: SpringClientBundle;
+  store?: ConversationStore;
+  orgId?: string;
+  view?: ConversationView;
+  world?: () => Promise<WorldState>;
+  stage?: (s: ProgressStage, label: string) => void;
+  /* filled by resume / direct */
+  text: string;
+  hints: StartTurnRequest;
+  resumedFrom?: string;
+  collected?: ConversationRunContext["collected"];
+  receipts: AcquisitionResultArtifact[];
+  prefix: string;
+  remaining: PendingHumanAction[];
+  partialChips: SuggestedAction[];
+  userTurn?: TurnView;
+  /* filled by operator / procedure */
+  result?: OperatorRunResult;
+  turnWorld?: WorldState;
+  procedure?: { id: ProcedureId | null; version: string | null; precondition: Precondition };
+  /** The turn this run produced. The graph ends when it exists. */
+  out: TurnView | null;
+}
+
 export class ConversationService {
   constructor(private readonly deps: ConversationServiceDeps) {}
 
@@ -217,6 +264,29 @@ export class ConversationService {
     const stores = this.deps.storeProvider.storesForRequest({ token, scope: scopeFor(orgId) });
     return { bundle, store: stores.conversations, orgId };
   }
+
+  /**
+   * The turn graph, compiled once.
+   *
+   * No checkpointer is attached in-process: this product's durable turn state is the CONVERSATION —
+   * transcript, working set, pending human actions, pending capture — and {@link ConversationStore}
+   * has owned it since before this migration. A second durable store for the same facts is the
+   * disagreement §5 exists to prevent. The graph's own state is the execution cursor for one turn, and
+   * a turn does not outlive the request that started it; what outlives it is the conversation, and a
+   * resume re-enters through `resumeOfTurnId` against the store's record.
+   */
+  private readonly turnGraph = buildTurnGraph({
+    hydrate: (ctx) => this.phaseHydrate(ctx as unknown as TurnCtx),
+    route: (ctx) => this.phaseRoute(ctx as unknown as TurnCtx),
+    click: (ctx) => this.phaseClick(ctx as unknown as TurnCtx),
+    captureDecision: (ctx) => this.phaseCaptureDecision(ctx as unknown as TurnCtx),
+    resume: (ctx) => this.phaseResume(ctx as unknown as TurnCtx),
+    direct: (ctx) => this.phaseDirect(ctx as unknown as TurnCtx),
+    operator: (ctx) => this.phaseOperator(ctx as unknown as TurnCtx),
+    procedure: (ctx) => this.phaseProcedure(ctx as unknown as TurnCtx),
+    compose: (ctx) => this.phaseCompose(ctx as unknown as TurnCtx),
+    persist: (ctx) => this.phasePersist(ctx as unknown as TurnCtx),
+  });
 
   async create(token: string): Promise<ConversationView> {
     const { store, orgId } = await this.tenant(token);
@@ -274,21 +344,46 @@ export class ConversationService {
     }
   }
 
+  /**
+   * <b>One turn's collaborators and its scratch space.</b>
+   *
+   * LangGraph Orchestration Migration v1 §2. These were the locals of a 290-line method, and the order
+   * in which they were assigned was the orchestration. They are now a context the graph's phases share:
+   * the graph decides WHEN each phase runs, this object is WHAT they pass each other.
+   *
+   * <b>It is never checkpointed.</b> It travels in `config.configurable`, which LangGraph does not
+   * serialise — a checkpoint holding a bearer token or a customer's sentence is the thing §5 forbids.
+   */
   private async turnNow(
     token: string, id: string, request: StartTurnRequest, progress: ProgressFn,
     options: { signal?: AbortSignal; afterCapture?: AfterCapture } = {},
   ): Promise<TurnView> {
-    const started = Date.now();
+    const ctx: TurnCtx = {
+      token, id, request, progress, options, started: Date.now(),
+      text: "", hints: request, receipts: [], prefix: "", remaining: [], partialChips: [], out: null,
+    } as TurnCtx;
+    // The graph owns the turn: which phase runs next, where it stops, what a resume continues.
+    await this.turnGraph.invoke({ conversationId: id }, {
+      configurable: { ctx, thread_id: `conv-${id}` },
+      recursionLimit: 24,
+    } as never);
+    if (!ctx.out) throw new HttpError(500, "TURN_PRODUCED_NOTHING", "the turn graph ended without a turn");
+    return ctx.out;
+  }
+
+  /** hydrate — the tenant, the conversation, and this turn's world (one coverage read, memoised). */
+  private async phaseHydrate(ctx: TurnCtx): Promise<TurnGraphUpdate> {
+    const { token, id } = ctx;
     const { bundle, store, orgId } = await this.tenant(token);
     const loaded = await store.load(id);
     if (!loaded) throw new HttpError(404, "UNKNOWN_CONVERSATION", "no conversation found for this id");
     const view = this.assertTenant(loaded, orgId);
+    ctx.bundle = bundle; ctx.store = store; ctx.orgId = orgId; ctx.view = view;
     /**
      * <b>This turn's world, derived once</b> (Agent Procedure Layer v1 §1). Lazy, because a turn that
      * never asks what this seller can hold — a tone revision, an ordinal — must not buy a read to find
      * out. Every lane that DOES ask shares this one: the planner's state token, the procedure layer's
-     * preconditions, the acquisition card's channel row, and the capability answer. Before this there
-     * were four independent reads of the same table with four independently-timed answers.
+     * preconditions, the acquisition card's channel row, and the capability answer.
      */
     let worldMemo: WorldState | null = null;
     const world = async (): Promise<WorldState> => {
@@ -306,17 +401,52 @@ export class ConversationService {
 
     // ── Agent Interaction Model v2 §3/§9: a click on a shown row. The same focus transition as naming
     // the row — persisted with the conversation, appended to the transcript as nothing.
-    if (request.select) {
-      return this.applyClickSelection(view, request.select, bundle, store, started);
-    }
+    ctx.world = world;
+    ctx.stage = (s: ProgressStage, label: string): void =>
+      ctx.progress({ type: "stage", stage: s, label, at: this.now() });
+    return {};
+  }
 
-    // ── Knowledge Capture v1: the seller's decision on the candidate shown — bound to it, never to text.
-    if (request.captureDecision) {
-      return this.decideCapture(token, id, view, request.captureDecision, bundle, store, progress, options.signal, started);
-    }
+  /**
+   * route — which shape of turn this is.
+   *
+   * These were the first four `if`s of the old method and their ORDER was the answer. A press outranks
+   * a decision outranks a resume, and only then is there a sentence to read at all.
+   */
+  private async phaseRoute(ctx: TurnCtx): Promise<TurnRoute> {
+    if (ctx.request.select) return "CLICK";
+    if (ctx.request.captureDecision) return "CAPTURE_DECISION";
+    if (ctx.request.resumeOfTurnId) return "RESUME";
+    // A resumed turn never re-enters the deterministic lanes; everything else asks them first.
+    return "DIRECT";
+  }
 
-    // ── A resumed turn: the seller (or the watcher) says a human step may be done. Check each step's
-    // own record before spending anything else — no model call, no tool call beyond those reads.
+  private async phaseClick(ctx: TurnCtx): Promise<TurnGraphUpdate> {
+    const { view, request, bundle, store, started } = ctx;
+    ctx.out = await this.applyClickSelection(view!, request.select!, bundle!, store!, started);
+    return { turnId: ctx.out.turnId };
+  }
+
+  private async phaseCaptureDecision(ctx: TurnCtx): Promise<TurnGraphUpdate> {
+    const { token, id, view, request, bundle, store, progress, options, started } = ctx;
+    ctx.out = await this.decideCapture(
+      token, id, view!, request.captureDecision!, bundle!, store!, progress, options.signal, started);
+    return { turnId: ctx.out.turnId };
+  }
+
+  /**
+   * resume — «the human step is done», checked against each step's own record.
+   *
+   * No model call and no tool call beyond those reads. When something is still waiting this is the
+   * turn; when everything is done the original request runs again with what was collected.
+   */
+  private async phaseResume(ctx: TurnCtx): Promise<{ done: boolean; update: TurnGraphUpdate }> {
+    const view = ctx.view!;
+    const request = ctx.request;
+    const options = ctx.options;
+    const bundle = ctx.bundle!;
+    const store = ctx.store!;
+    let finished = false;
     let text = request.text ?? "";
     let hints: StartTurnRequest = request;
     let resumedFrom: string | undefined;
@@ -356,46 +486,67 @@ export class ConversationService {
             resumedFrom,
           });
           await this.persist(store, view, [again], view.workingSet, mine, view.pendingPrepared, view.pendingCapture ?? null);
-          return again;
+          // Still waiting on a person: this IS the turn, and the graph ends here.
+          ctx.out = again;
+          finished = true;
         }
-        collected = done
-          .filter((c) => c.pending.channelCode && c.pending.dataType && c.check.finishedAt)
-          .map((c) => ({
-            channelCode: c.pending.channelCode!, dataType: c.pending.dataType!, finishedAt: c.check.finishedAt!,
-            successRows: c.check.successRows, partial: c.check.partial,
-          }));
-        const names = await channelNamesOf(bundle, target);
-        const nameOf = (p: PendingHumanAction) => (p.channelCode ? names.get(p.channelCode.toUpperCase()) ?? p.channelCode : "채널");
-        const anyPartial = done.some((c) => c.check.partial);
-        if (remaining.length === 0) {
-          // <b>What the run DID, from the record it wrote.</b> The card that drove it knows the run's id and
-          // nothing it may assert; the backend answers the window and the three tallies (§3). A run that is
-          // not a guided acquisition, or a read that fails, falls back to the sentence that was always true.
-          receipts = (await Promise.all(done.map(async (c) => {
-            if (!c.check.runId) return null;
-            const result = await bundle.inquiry.reviewAcquisitionResult(c.check.runId).catch(() => null);
-            return result ? acquisitionResultOf(c.pending.channelCode ?? "", nameOf(c.pending), result) : null;
-          }))).filter((a): a is AcquisitionResultArtifact => a != null);
-          // The prose says what it MEANS; the card beside it says the window and the tallies (§1).
-          const meaning = acquisitionMeaning(receipts);
-          prefix = meaning
-            ? `${meaning} 이어서 확인하겠습니다. `
-            : anyPartial
-              ? "새 리뷰 가져오기가 일부만 끝났습니다. 가져온 만큼 계속 확인하겠습니다. "
-              : "새 리뷰 가져오기가 끝났습니다. 계속 확인하겠습니다. ";
-        } else {
-          // Partial: one channel's step is done, others are still waiting. Say so, show what is
-          // known now, and offer the next step and the rows so far as the two obvious next moves.
-          const doneNames = done.map((c) => nameOf(c.pending)).join("·");
-          const restNames = remaining.map(nameOf).join("·");
-          prefix = `${doneNames} 리뷰 확인이 끝났습니다. ${restNames}도 확인할까요? `;
-          partialChips = [
-            ...remaining.map((p) => ({ label: `${nameOf(p)} 확인`, kind: "RESUME" as const })),
+        if (!finished) {
+          collected = done
+            .filter((c) => c.pending.channelCode && c.pending.dataType && c.check.finishedAt)
+            .map((c) => ({
+              channelCode: c.pending.channelCode!, dataType: c.pending.dataType!, finishedAt: c.check.finishedAt!,
+              successRows: c.check.successRows, partial: c.check.partial,
+            }));
+          const names = await channelNamesOf(bundle, target);
+          const nameOf = (p: PendingHumanAction) => (p.channelCode ? names.get(p.channelCode.toUpperCase()) ?? p.channelCode : "채널");
+          const anyPartial = done.some((c) => c.check.partial);
+          if (remaining.length === 0) {
+            // <b>What the run DID, from the record it wrote.</b> The card that drove it knows the run's id and
+            // nothing it may assert; the backend answers the window and the three tallies (§3). A run that is
+            // not a guided acquisition, or a read that fails, falls back to the sentence that was always true.
+            receipts = (await Promise.all(done.map(async (c) => {
+              if (!c.check.runId) return null;
+              const result = await bundle.inquiry.reviewAcquisitionResult(c.check.runId).catch(() => null);
+              return result ? acquisitionResultOf(c.pending.channelCode ?? "", nameOf(c.pending), result) : null;
+            }))).filter((a): a is AcquisitionResultArtifact => a != null);
+            // The prose says what it MEANS; the card beside it says the window and the tallies (§1).
+            const meaning = acquisitionMeaning(receipts);
+            prefix = meaning
+              ? `${meaning} 이어서 확인하겠습니다. `
+              : anyPartial
+                ? "새 리뷰 가져오기가 일부만 끝났습니다. 가져온 만큼 계속 확인하겠습니다. "
+                : "새 리뷰 가져오기가 끝났습니다. 계속 확인하겠습니다. ";
+          } else {
+            // Partial: one channel's step is done, others are still waiting. Say so, show what is
+            // known now, and offer the next step and the rows so far as the two obvious next moves.
+            const doneNames = done.map((c) => nameOf(c.pending)).join("·");
+            const restNames = remaining.map(nameOf).join("·");
+            prefix = `${doneNames} 리뷰 확인이 끝났습니다. ${restNames}도 확인할까요? `;
+            partialChips = [
+              ...remaining.map((p) => ({ label: `${nameOf(p)} 확인`, kind: "RESUME" as const })),
             { label: "지금까지 보기", kind: "PROMPT" as const, prompt: SEE_SO_FAR_PROMPT },
-          ];
+            ];
+          }
         }
       }
     }
+    ctx.text = text; ctx.hints = hints; ctx.collected = collected; ctx.receipts = receipts;
+    ctx.prefix = prefix; ctx.remaining = remaining; ctx.partialChips = partialChips;
+    if (resumedFrom) ctx.resumedFrom = resumedFrom;
+    return { done: finished, update: {} };
+  }
+
+  /**
+   * The seller's own sentence, as a turn — created once, before either lane runs.
+   *
+   * It sat inside the old method between the resume block and the direct lane, which is exactly where
+   * both paths passed through. The graph gives them separate nodes, so the shared step is named.
+   */
+  private ensureUserTurn(ctx: TurnCtx): TurnView {
+    if (ctx.userTurn) return ctx.userTurn;
+    const view = ctx.view!;
+    const { id, progress } = ctx;
+    const text = ctx.text;
     if (text.trim().length === 0) {
       throw new HttpError(400, "INVALID_REQUEST", "a turn carries text or resumeOfTurnId");
     }
@@ -413,6 +564,23 @@ export class ConversationService {
     // ── Closed intents about the object already on the table are resolved here, with no planner call and
     // no read (Conversation Object Integrity v1): a tone revision of the draft being viewed, or a bare
     // ordinal over the list just shown. Anything else is the planner's.
+    ctx.userTurn = userTurn;
+    return userTurn;
+  }
+
+  /** direct — the closed intents about the object already on the table. No planner call, no read. */
+  private async phaseDirect(ctx: TurnCtx): Promise<{ handled: boolean; update: TurnGraphUpdate }> {
+    const view = ctx.view!;
+    const bundle = ctx.bundle!;
+    const store = ctx.store!;
+    const { id, started, progress } = ctx;
+    const text = ctx.text || (ctx.request.text ?? "");
+    ctx.text = text;
+    const hints = ctx.hints;
+    const resumedFrom = ctx.resumedFrom;
+    const world = ctx.world!;
+    const stage = ctx.stage!;
+    const userTurn = this.ensureUserTurn(ctx);
     const direct = resumedFrom ? null : await this.directLane(view, text, hints, bundle, stage, world);
     if (direct) {
       const agentTurn = this.agentTurn(view, direct);
@@ -439,10 +607,28 @@ export class ConversationService {
         artifactTypes: [...new Set(finalTurn.artifacts.map((a) => a.type))].join(","),
         workingSetKind: workingSet?.kind ?? "NONE", requestedAction: direct.budget?.stopReason ?? (direct.pendingPrepared ? "TONE_REVISION" : "SELECT"),
       });
-      return finalTurn;
+      ctx.out = finalTurn;
+      return { handled: true, update: { turnId: finalTurn.turnId } };
     }
     // <b>The channel the seller last named, decided once for this turn.</b> Both the graph's read and this
     // service's own axis use it, so the rows and the sentence about them can never be scoped differently.
+    return { handled: false, update: {} };
+  }
+
+  /** operator — the planner, the specialists, the tools, the evidence, the judge. */
+  private async phaseOperator(ctx: TurnCtx): Promise<TurnGraphUpdate> {
+    const view = ctx.view!;
+    const bundle = ctx.bundle!;
+    const store = ctx.store!;
+    const orgId = ctx.orgId!;
+    const { id, options, started } = ctx;
+    const text = ctx.text;
+    const hints = ctx.hints;
+    const resumedFrom = ctx.resumedFrom;
+    const world = ctx.world!;
+    const stage = ctx.stage!;
+    const collected = ctx.collected;
+    const userTurn = this.ensureUserTurn(ctx);
     const channelFocus = channelFocusOf(view.turns, text);
     // The planner path is the one that needs the world eagerly: its token goes out with the plan
     // request, and every procedure decision after it reads this same value.
@@ -512,9 +698,71 @@ export class ConversationService {
       });
       await this.persist(store, view, [userTurn, stopped], view.workingSet, pendingActionsOf(view), view.pendingPrepared, view.pendingCapture ?? null);
       log("conversation_turn", { status: "CANCELLED", ms: Date.now() - started });
-      return stopped;
+      ctx.out = stopped;
+      return { terminal: "UNKNOWN" as const, turnId: stopped.turnId };
     }
 
+    ctx.result = result;
+    ctx.turnWorld = turnWorld;
+    return {};
+  }
+
+  /**
+   * procedure — which business procedure claims this turn, and whether it may run.
+   *
+   * <b>The one decision this migration actually moved.</b> Selecting a procedure and settling its
+   * precondition were taken inside the composer, interleaved with writing sentences; they are now taken
+   * by the AOP router — a table over closed tokens — and handed on as a verdict. Same functions, same
+   * inputs, one owner. No sentence is written here.
+   */
+  private async phaseProcedure(ctx: TurnCtx): Promise<TurnGraphUpdate> {
+    const world = ctx.turnWorld!;
+    const result = ctx.result!;
+    const plan = result.status === "DONE" ? result.plan ?? null : null;
+    const set = ctx.view!.workingSet;
+    const anchor = set?.selectedObject?.kind === "PRODUCT" ? "PRODUCT" as const
+      : set?.selectedObject?.kind === "REVIEW" ? "REVIEW" as const
+        : set?.selectedInquiry ? "INQUIRY" as const : null;
+    const selected = selectProcedure({
+      readiness: world.readiness.kind,
+      anchor,
+      requestedAction: plan ? conversationAxisOf(plan).requestedAction : "NONE",
+      needKinds: plan ? plan.informationNeeds.map((n) => n.kind) : [],
+      pendingCapture: Boolean(ctx.view!.pendingCapture),
+    });
+    // The precondition every row-reading procedure shares, evaluated once and handed to the composer.
+    const gate = operationalPrecondition(world);
+    ctx.procedure = selected
+      ? { id: selected.id, version: selected.version, precondition: gate }
+      : { id: null, version: null, precondition: gate };
+    log("conversation_procedure", {
+      procedure: selected?.id ?? "NONE", version: selected?.version ?? "",
+      readiness: world.readiness.kind, ok: gate.ok,
+    });
+    return {
+      procedureId: selected?.id ?? null,
+      procedureVersion: selected?.version ?? null,
+      ...(gate.ok ? {} : { absence: gate.absence }),
+    };
+  }
+
+  /** compose — what the run produced, as artifacts, sentences and chips. */
+  private async phaseCompose(ctx: TurnCtx): Promise<TurnGraphUpdate> {
+    const view = ctx.view!;
+    const bundle = ctx.bundle!;
+    const store = ctx.store!;
+    const { options, started } = ctx;
+    const hints = ctx.hints;
+    const prefix = ctx.prefix;
+    const stage = ctx.stage!;
+    const remaining = ctx.remaining;
+    const collected = ctx.collected;
+    const receipts = ctx.receipts;
+    const partialChips = ctx.partialChips;
+    const resumedFrom = ctx.resumedFrom;
+    const userTurn = ctx.userTurn!;
+    const result = ctx.result!;
+    const turnWorld = ctx.turnWorld!;
     const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? [], receipts, turnWorld, options.afterCapture);
     if (options.afterCapture) composed.artifacts = [options.afterCapture.artifact, ...composed.artifacts];
     if (partialChips.length > 0) {
@@ -562,7 +810,15 @@ export class ConversationService {
       workingSetKind: workingSet?.kind ?? "NONE",
       requestedAction: result.status === "DONE" ? conversationAxisOf(result.plan ?? emptyPlan()).requestedAction : "NONE",
     });
-    return finalTurn;
+    ctx.out = finalTurn;
+    return { turnId: ctx.out!.turnId, terminal: ctx.out!.status === "WAITING_HUMAN" ? "WAITING_HUMAN" : "ANSWERED" };
+  }
+
+  /** persist — the store owns the transcript; the checkpoint owns only where the turn is. */
+  private async phasePersist(_ctx: TurnCtx): Promise<TurnGraphUpdate> {
+    // The composer already saved: the store write and the turn it returns are one unit, and splitting
+    // them would create a window in which the seller has an answer the conversation does not have.
+    return {};
   }
 
   private agentTurn(view: ConversationView, input: {
