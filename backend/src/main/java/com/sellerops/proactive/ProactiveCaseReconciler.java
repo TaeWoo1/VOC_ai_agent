@@ -160,7 +160,9 @@ public class ProactiveCaseReconciler {
      */
     private int remainingDailySlots(UUID orgId) {
         AgentQuotaService.AgentQuotaStatus status = quota.status(orgId);
-        if (status.enabled() && status.llmCallsUsed() >= status.llmCallsLimit()) {
+        // The same ceiling, so the same switch: a deployment that turned enforcement off did not ask
+        // for a second, invisible enforcement point here.
+        if (status.enabled() && status.enforced() && status.llmCallsUsed() >= status.llmCallsLimit()) {
             log.info("proactive: 오늘 AI 예산이 소진되어 신규 준비를 건너뜁니다 org={}", orgId);
             return 0;
         }

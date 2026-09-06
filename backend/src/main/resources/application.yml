@@ -95,6 +95,22 @@ sellerops:
     # for everyone under every value, and an org named in a capability's own list stays admitted.
     access:
       scope: ${SELLEROPS_AGENT_ACCESS_SCOPE:ALLOW_LIST}
+    # ── The daily ceiling, and the two switches it is (LangGraph/AOP v1 §0, 2026-09-06) ─────────
+    #
+    # `enabled` decides whether spend is RECORDED; `enforced` decides whether it may REFUSE. They were
+    # one switch, and that shape had a defect worth naming: turning the ceiling off to run a benchmark
+    # or a manual-QA sitting also turned the METER off, so the sittings that most need usage, latency
+    # and cost numbers were the ones that produced none — and a benchmark that raised the limit was
+    # measuring the quota rather than the model until someone noticed.
+    #
+    # Local, manual-QA and benchmark deployments want enforced=false. Production and pilot leave both
+    # true, and nothing about their behaviour changed. Enforcement without metering is not offered:
+    # a deployment that records nothing has nothing to compare a limit against.
+    quota:
+      enabled: ${SELLEROPS_AGENT_QUOTA_ENABLED:true}
+      enforced: ${SELLEROPS_AGENT_QUOTA_ENFORCED:true}
+      daily-runs-per-org: ${SELLEROPS_AGENT_QUOTA_DAILY_RUNS_PER_ORG:200}
+      daily-llm-calls-per-org: ${SELLEROPS_AGENT_QUOTA_DAILY_LLM_CALLS_PER_ORG:1000}
     draft:
       enabled: ${SELLEROPS_AGENT_DRAFT_ENABLED:false}
       # Comma-separated org UUIDs, or "*" for every org in this backend (local single-user deployment —

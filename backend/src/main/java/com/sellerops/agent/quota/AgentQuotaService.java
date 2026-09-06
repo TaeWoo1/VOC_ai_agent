@@ -21,6 +21,11 @@ import org.springframework.transaction.annotation.Transactional;
  * is switched off for the org: deterministically, with a sentence, and with the dashboard untouched.
  * Nothing here can affect a marketplace call, because nothing here is on that path at all.
  *
+ * <p><b>Counting and refusing are separate.</b> With {@code enforced=false} every call is still
+ * recorded — the row is what usage, latency and cost reporting are built on — and no call is ever
+ * refused. That is the posture a local machine, a manual-QA sitting and a benchmark want, and it is
+ * the opposite of switching the subsystem off, which also stops the meter.
+ *
  * <p><b>A run buys its slot once.</b> The Operator plans up to three times per run; charging a run
  * slot per iteration would make the daily run limit mean a third of what it says.
  */
@@ -52,18 +57,22 @@ public class AgentQuotaService {
         LocalDate today = LocalDate.now(KST);
         long calls = usage.countByOrgIdAndUsageDate(orgId, today);
         if (calls >= properties.llmCalls()) {
-            log.info("에이전트 일일 호출 한도에 도달했습니다. org={} used={} limit={}",
-                    orgId, calls, properties.llmCalls());
-            return QuotaDecision.exhausted(QuotaDecision.Reason.DAILY_LLM_CALLS,
-                    calls, properties.llmCalls());
+            log.info("에이전트 일일 호출 한도에 도달했습니다. org={} used={} limit={} enforced={}",
+                    orgId, calls, properties.llmCalls(), properties.isEnforced());
+            if (properties.isEnforced()) {
+                return QuotaDecision.exhausted(QuotaDecision.Reason.DAILY_LLM_CALLS,
+                        calls, properties.llmCalls());
+            }
         }
         boolean newRun = runId != null && !usage.existsByOrgIdAndUsageDateAndRunId(orgId, today, runId);
         if (newRun) {
             long runs = usage.countDistinctRuns(orgId, today);
             if (runs >= properties.runs()) {
-                log.info("에이전트 일일 실행 한도에 도달했습니다. org={} used={} limit={}",
-                        orgId, runs, properties.runs());
-                return QuotaDecision.exhausted(QuotaDecision.Reason.DAILY_RUNS, runs, properties.runs());
+                log.info("에이전트 일일 실행 한도에 도달했습니다. org={} used={} limit={} enforced={}",
+                        orgId, runs, properties.runs(), properties.isEnforced());
+                if (properties.isEnforced()) {
+                    return QuotaDecision.exhausted(QuotaDecision.Reason.DAILY_RUNS, runs, properties.runs());
+                }
             }
         }
 
@@ -80,13 +89,14 @@ public class AgentQuotaService {
     @Transactional(readOnly = true)
     public AgentQuotaStatus status(UUID orgId) {
         LocalDate today = LocalDate.now(KST);
-        return new AgentQuotaStatus(properties.isEnabled(), today,
+        return new AgentQuotaStatus(properties.isEnabled(), properties.isEnforced(), today,
                 usage.countDistinctRuns(orgId, today), properties.runs(),
                 usage.countByOrgIdAndUsageDate(orgId, today), properties.llmCalls());
     }
 
     /** What today looks like. Percentages are the screen's business, not this record's. */
-    public record AgentQuotaStatus(boolean enabled, LocalDate date, long runsUsed, int runsLimit,
+    public record AgentQuotaStatus(boolean enabled, boolean enforced, LocalDate date,
+                                   long runsUsed, int runsLimit,
                                    long llmCallsUsed, int llmCallsLimit) {
     }
 }

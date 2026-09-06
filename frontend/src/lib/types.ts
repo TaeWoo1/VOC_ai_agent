@@ -2478,6 +2478,8 @@ export interface OpportunityView {
 
 export interface AgentQuotaStatus {
   enabled: boolean;
+  /** Whether the ceiling may refuse, or only counts. Off on local/QA/benchmark deployments. */
+  enforced: boolean;
   date: string;
   runsUsed: number;
   runsLimit: number;

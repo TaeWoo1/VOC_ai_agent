@@ -36,8 +36,10 @@ if [ -z "${SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI:-}" ]; then
   unset _cb
 fi
 
-# The AI budget is raised IDENTICALLY for every arm. Without it the benchmark measures the quota.
-export SPRING_APPLICATION_JSON="{\"sellerops\":{\"agent\":{\"quota\":{\"daily-runs-per-org\":100000,\"daily-llm-calls-per-org\":100000},\"plan\":{\"model\":\"$MODEL\",\"reasoning-effort\":\"$EFFORT\",\"retry-reasoning-effort\":\"low\"}}}}"
+# Enforcement off, metering ON — identically for every arm. Raising the LIMIT was the old way and it
+# was worse: the first pass spent part of itself measuring the quota, and the numbers the benchmark
+# exists to produce (usage, latency, cost) come from the very rows a disabled subsystem stops writing.
+export SPRING_APPLICATION_JSON="{\"sellerops\":{\"agent\":{\"quota\":{\"enforced\":false},\"plan\":{\"model\":\"$MODEL\",\"reasoning-effort\":\"$EFFORT\",\"retry-reasoning-effort\":\"low\"}}}}"
 export SELLEROPS_AGENT_PLAN_PROMPT_VARIANT="$VARIANT"
 
 (
