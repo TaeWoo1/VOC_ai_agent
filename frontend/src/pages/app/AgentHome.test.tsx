@@ -164,7 +164,13 @@ describe("home — the Agent operating workspace", () => {
     // The work itself, not a link that says how much of it there is.
     expect(await screen.findByText("현금영수증 발행 부탁드립니다")).toBeInTheDocument();
     expect(screen.getByText("배송이 너무 늦습니다")).toBeInTheDocument();
-    expect(screen.getByText(/가장 오래 기다린 것부터/)).toBeInTheDocument();
+    // <b>The order the sentence names must be the order the read made</b> (Pilot QA, 2026-09-06).
+    // `getInquiryQueueStrict` returns the queue newest-first (`Sort.DESC createdAt`), and the brief
+    // used to promise 「가장 오래 기다린 것부터」 over it — on the live org that named three inquiries
+    // from the last four days while twenty had waited since 2016. The fixture keeps that shape: i-1
+    // waited LONGER than i-2, and the brief must not claim the rows are ordered by that.
+    expect(screen.getByText(/최근에 들어온 것부터/)).toBeInTheDocument();
+    expect(screen.queryByText(/가장 오래 기다린 것부터/)).toBeNull();
     // The old card said the same number a third time; it is gone, and so is the chip re-asking for it.
     expect(screen.queryByText("지금 기다리는 일")).toBeNull();
     expect(screen.queryByRole("button", { name: "답변 안 한 문의 보여줘" })).toBeNull();

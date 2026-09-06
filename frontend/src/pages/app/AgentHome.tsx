@@ -424,15 +424,17 @@ export function proactiveTurn(
   const waitingRows: InquiryList = {
     artifactId: "home-waiting-rows",
     type: "INQUIRY_LIST",
-    title: "가장 오래 기다린 문의",
-    // The sentence above this card says 「가장 오래 기다린 것부터 보여드릴게요」 — the producer of BOTH
+    title: "최근에 들어온 문의",
+    // The sentence above this card says 「최근에 들어온 것부터 보여드릴게요」 — the producer of BOTH
     // declares the repeat, because no containment test can see it (Agent Object v1 §3).
     titleSaid: true,
     totalCount: actionable,
     // The read this brief actually made. It is what the card uses to know the seller (or, here, the
     // brief's own sentence) already said these are the waiting ones — so the list does not add
     // 「모두 답변이 필요한 문의입니다」 under a sentence that just said exactly that.
-    scope: { period: null, channelCode: null, status: "UNANSWERED", order: "OLDEST", limit: BRIEF_ROWS, rank: null },
+    // NEWEST, because that is what `getInquiryQueueStrict` returns (`Sort.DESC createdAt`). This field
+    // tells the card what the read was; declaring OLDEST here described a read nobody made.
+    scope: { period: null, channelCode: null, status: "UNANSWERED", order: "NEWEST", limit: BRIEF_ROWS, rank: null },
     groups: [
       {
         key: "UNANSWERED",
@@ -456,7 +458,7 @@ export function proactiveTurn(
           productId: row.productId,
           productName: row.productName,
           answerBasis: null,
-          // Why this row is above the others. The brief is ordered OLDEST and says so; without the
+          // How long this customer has waited. The brief is ordered newest-first and says so; without the
           // number beside each row 「1개월 전」 is a receipt date, not a reason — the same wait the
           // ranked answer states, computed the same way (whole days, dates, never clock time).
           waitingDays: waitingDays(row.receivedAt),
@@ -480,7 +482,14 @@ export function proactiveTurn(
     : namedRows
       // The number is said ONCE, and it is said as the reason these particular rows are on top. It is the
       // queue's own total, so it can never disagree with the rows underneath it.
-      ? `지금 처리할 일이 ${actionable.toLocaleString("ko-KR")}건 있습니다. 가장 오래 기다린 것부터 보여드릴게요 — 눌러서 바로 이어가시면 됩니다.`
+      // **The order this sentence names has to be the order the read made** (Pilot QA, 2026-09-06).
+      // It said 「가장 오래 기다린 것부터」 and the queue is `Sort.DESC createdAt` — newest first — so on
+      // the live org it named 2일·2일·4일 while twenty inquiries had waited since 2016. Sorting the
+      // read by the customer's wait instead would put three 2016 현금영수증 requests at the top of
+      // today's work, which is not what 「지금 처리할 일」 means either; the year-old backlog has its
+      // own divider on the 문의 screen. So the sentence says what the read did, and each row still
+      // carries its own wait so nothing about how long they waited is hidden.
+      ? `지금 처리할 일이 ${actionable.toLocaleString("ko-KR")}건 있습니다. 최근에 들어온 것부터 보여드릴게요 — 눌러서 바로 이어가시면 됩니다.`
       // **An empty queue is not an empty shop** (§1). With records held and nothing actionable in them,
       // 「지금 처리할 일은 없습니다」 alone reads as a claim about the records too — so the sentence names
       // which of the two it is talking about, and where the other one lives.
