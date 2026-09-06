@@ -149,6 +149,34 @@ export function inquiries(): SeedInquiry[] {
   ];
 }
 
+/**
+ * Expand each `ALL` review answer into the per-channel answers the read can actually ask for.
+ *
+ * <b>Found by Planner Model & Prompt Benchmark v1 §5, and it was the instrument, not the product.</b>
+ * `listRecentReviews` is keyed `${negativeOnly}:${channel ?? "ALL"}` and 404s on a miss, so a suite
+ * seeded only with `ALL` answered every channel-scoped read with a failure: 「카페24만 봐봐」 — for
+ * which the planner produces exactly the right plan — ended the run FAILED, on every model. One
+ * candidate model "passed" that turn by planning a different question entirely, which is the worst
+ * way for a benchmark to be wrong.
+ *
+ * The rows decide, and an explicit seeding always wins: a channel this world holds no row for gets an
+ * EMPTY page, which is what the backend returns and is a different fact from the read failing.
+ */
+function withChannelKeys(table: Record<string, RecentReviewsResponse>): Record<string, RecentReviewsResponse> {
+  const out: Record<string, RecentReviewsResponse> = { ...table };
+  for (const [key, response] of Object.entries(table)) {
+    const [negative, scope] = key.split(":");
+    if (scope !== "ALL") continue;
+    for (const code of new Set(response.coverage.map((c) => c.channelCode))) {
+      const derived = `${negative}:${code}`;
+      if (out[derived]) continue;
+      const mine = response.items.filter((i) => i.channelCode === code);
+      out[derived] = { ...response, total: mine.length, items: mine };
+    }
+  }
+  return out;
+}
+
 export interface Harness {
   readonly service: ServiceType;
   readonly operator: FakeOperatorSpringClient;
@@ -161,9 +189,9 @@ export function harness(
   seed: Partial<FakeOperatorSeed> = {}, seeds: SeedInquiry[] = inquiries(),
   issue: FakeIssueSpringClient = new FakeIssueSpringClient(fourIssues()),
 ): Harness {
-  const recentReviews: Record<string, RecentReviewsResponse> = {
+  const recentReviews: Record<string, RecentReviewsResponse> = withChannelKeys({
     "false:ALL": freshReviews(), "true:ALL": negativeReviews(), ...(seed.recentReviews ?? {}),
-  };
+  });
   const operator = new FakeOperatorSpringClient({
     inbox: INBOX, products: [MOLDING, CABLE],
     signals: { [MOLDING.id]: coveredSignals(), [CABLE.id]: unlinkedSignals() },

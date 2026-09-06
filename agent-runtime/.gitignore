@@ -5,3 +5,6 @@ dist/
 .runstore/
 .runstore-issue/
 .runstore-review/
+
+# Benchmark arm outputs — measurements of a run, not source (Planner Model & Prompt Benchmark v1).
+bench/.out*/

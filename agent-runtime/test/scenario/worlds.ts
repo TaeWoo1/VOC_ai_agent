@@ -13,10 +13,10 @@
  */
 import type { ChannelCoverageRow, RecentReviewsResponse, ReviewDetailResponse } from "../../src/spring/types";
 import type { SeedInquiry } from "../support/FakeSpringClient";
-import { coverageRow, allFreshCoverage, freshReviews, inquiries, TODAY } from "../conversation/support";
+import { coverageRow, allFreshCoverage, freshReviews, inquiries, staleCoupangCoverage, TODAY } from "../conversation/support";
 import { MOLDING } from "../support/operatorFixtures";
 
-export type WorldName = "NO_CHANNEL" | "CONNECTED_NO_DATA" | "WORKING";
+export type WorldName = "NO_CHANNEL" | "CONNECTED_NO_DATA" | "WORKING" | "STALE";
 
 export interface WorldFixture {
   readonly name: WorldName;
@@ -74,6 +74,20 @@ export const WORLD: Record<WorldName, WorldFixture> = {
     name: "CONNECTED_NO_DATA", coverage: connectedEmptyCoverage(), inquiries: [],
     reviews: noReviews(connectedEmptyCoverage()), inbox: { items: [], total: 0, unansweredInquiries: 0 },
     reviewDetails: {},
+  },
+  /**
+   * Connected and holding rows, but one channel's collection has not run since last week.
+   *
+   * The fourth state the product distinguishes and the three above cannot express: not «nothing», not
+   * «zero», but «we cannot say». A question about TODAY over this shop must say which channel it could
+   * not speak for — reporting the rows it happens to hold as the answer is the freshness defect.
+   */
+  STALE: {
+    name: "STALE", coverage: staleCoupangCoverage(), inquiries: inquiries(), reviews: null, inbox: null,
+    reviewDetails: Object.fromEntries(freshReviews(staleCoupangCoverage()).items.map((r) => [r.id, reviewDetail({
+      id: r.id, rating: r.rating, negative: r.negative, body: r.preview ?? "", productId: r.productId ?? MOLDING.id,
+      productName: r.productName ?? MOLDING.name, triageTier: r.negative ? "NEEDS_ATTENTION" : "ROUTINE",
+    })])),
   },
   // The suite's ordinary seller: connected channels, real inquiries, real reviews.
   WORKING: {

@@ -184,7 +184,16 @@ class AgentOperatorResponseParserTest {
         // planner that hears 「우리 상품 목록 보여줘」 has a kind to put it in and a tool to reach it.
         assertThat(system).contains("PRODUCT_CATALOG");
         assertThat(system).contains("list_products");
-        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v15");
+        // Planner Model & Prompt Benchmark v1: v16 is v15's rules grouped under the decision each one
+        // belongs to. The headings ARE the change, so they are pinned — a later edit that dissolves
+        // them back into one flat run is the thing this assertion is here to catch.
+        for (String heading : new String[] {
+                "[1] 절대 규칙", "[2] 무엇을 알아내야 하는가", "(2-1)", "(2-2)", "(2-3)",
+                "[3] 문장에 있는 말을 그대로 옮겨 적을 값", "[4] 판매자가 시킨 행동",
+                "[5] 이어지는 대화", "[6] 계획을 세울 수 없을 때" }) {
+            assertThat(system).contains(heading);
+        }
+        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v16");
     }
 
     /**

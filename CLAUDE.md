@@ -338,6 +338,37 @@ ERROR 0**. **계약이 바뀌어 테스트 3건과 plan fixture 3건을 다시 �
 분기는 Demo Org에 회사 정보가 없어 **라이브 미관측**(단위 테스트로만 고정) · `groupingOf`는 graph에서 여전히
 두 번 호출된다(같은 순수 함수·같은 입력·소유자 1) · 마켓플레이스 0 · WRITE 0 · 마이그레이션 0)
 
+**`docs/planner_model_prompt_benchmark_v1.md`** (Planner Model & Prompt Benchmark v1 — 2026-09-06.
+Agent Runtime 구조는 **FREEZE**하고, 「플래너의 모델과 프롬프트가 실제로 최선인가」만 잰다. **핵심 설계:
+새 채점기를 만들지 않았다** — 대화는 `test/scenario/cases.ts`에 **데이터로 한 번** 적히고 두 번 실행된다
+(CI는 녹화 plan으로 벤더 호출 0, `bench/`는 arm이 지목한 모델의 **실 plan**으로), 채점은 같은
+`violationsOf()`다. 즉 **모델은 제품 자신의 단언으로 채점된다**(어떤 artifact를 그렸나 · `never`를 어겼나 ·
+결정론 lane이 모델을 안 불렀나 · 어떤 링크 · 어떤 상태). 판매자 데이터는 전부 fake이므로 코퍼스가 arm
+사이에서 흔들리지 않고 마켓플레이스에 닿지 않는다. 셋은 **선택 48 turn**(CI 시나리오 전부 + 벤치 전용
+S1~S12)과 **블라인드 홀드아웃 14 turn**이며 **모든 문장·기대값을 arm 실행 전에 적고 이후 고치지 않았다**.
+arm 다섯: baseline(`gpt-5-2025-08-07`@`minimal`) · luna@none · luna@low · mini@none · **promptB**. **모델은
+바꾸지 않았다** — luna-low는 정확도 동률(93.8%)에 **지연 +33%**(2,677→3,553ms)라 직전 패키지가 12.2초→4.8초로
+되찾은 그 지연을 되돌리고, luna-none(83.3%)·mini-none(79.2%)은 **첫 화면의 첫 질문**(capability·first-use)에
+답하지 못한다. **프롬프트는 바꿨다: `agent-plan-prompt/v15` → `v16`** — v15의 서른 개 대시 한 줄기를 결정
+단위 여섯 절로 묶은 것이고, **규칙을 하나도 더하거나 빼지 않았다는 것이 측정이다**(공백 제거 문자 다중집합
+비교: v16 = v15 + 제목 **178자** + `-`4 − `\`3, keyword 예외·판매자 문구·예문 **0**). 선택 94.4% → **95.8%**,
+홀드아웃 92.9% → **92.9%(동률 — 정직하게 적는다)**, 지연 **중립**(promptB 뒤에 baseline 3번째 pass를 넣어
+시간 교란을 확인했다), 비용 100회당 $1.071 → **$1.069**. **채택 근거는 총점이 아니라 부분집합 관계다** —
+v16이 실패하는 turn은 v15가 실패하는 turn의 **진부분집합**이고, v15가 3 pass 중 2번 놓치던 **「첫 아침의
+질문」**을 v16은 여섯 번의 실행에서 한 번도 놓치지 않았다. **never violation은 다섯 arm 전부 0** — 안전
+성질이 모델이 아니라 런타임·procedure 층에 있다는 관측이다. **벤치마크가 자기 계측기의 결함을 먼저 찾았다**:
+world가 리뷰를 `ALL`로만 심어 **채널 지정 리뷰 읽기가 전부 404**였고, 그래서 plan이 정확한 「카페24만 봐봐」가
+모든 arm에서 `FAILED`였으며 **mini-none만 PASS**했다(리뷰가 아니라 coverage를 계획해 다른 질문에 답했다) —
+계측기가 틀린 방향으로 모델을 칭찬하고 있었으므로 고치고 다섯 arm을 전부 재실행했다. 라이브 브라우저
+12 turn(clean seller 5 + Demo Org 7, 1440×900@2×, 콘솔 오류 0 · off-host 0): 「최근 3일…」이 **`LAST_N_DAYS`
+계약대로** 답하고, 근거 없는 문의에는 초안을 지어내지 않고 기준을 되묻는다. backend **3,880** · runtime
+**883** · 실패 0. **마켓플레이스 0 · WRITE 0 · 승인 0 · DB 행 변경 0 · 마이그레이션 0** ⇒ evidence 행 없음.
+**고치지 않고 보고**: 지시 대상 없는 대명사(「그건 어때?」·「저기 그거」)가 결정론 lane을 통과하지 못해
+clean seller에서 **읽은 적 없는 것에 대한 부재 주장**으로 착지한다(가장 심각한 잔여, procedure 층의 일이며
+낱말 추가로 닫지 않는다) · STALE 채널을 이름으로 부르지 않는다 · 모델 arm은 각 1 pass · 비용 단가는 외부
+사실 · 벤치마크 동안 AI 예산을 모든 arm에 동일하게 올렸다(제품 코드 무변경) · 라이브 QA는 두 조직을
+**명시적으로 allow-list**한 부팅에서 했다(파일 수정 0, `CONNECTED_SELLERS`·전역 활성화 미사용))
+
 **`docs/agent_command_center_v1.md`** (Agent Command Center v1 — 제품 방향 수정: reviewnary는
 Dashboard-first + Agent assistant가 아니라 **Agent-first + structured operational workspace**,
 정확히는 **chat-first, object-backed**. Chat은 의도를 나르고 일은 그 일을 이미 소유한 구조화된 UI가
