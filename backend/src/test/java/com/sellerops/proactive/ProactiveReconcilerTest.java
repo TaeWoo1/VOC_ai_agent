@@ -477,7 +477,7 @@ class ProactiveReconcilerTest {
         return new ProactiveCaseReconciler(
                 new ProactiveProperties(true, dailyCap, 50, 50, List.of(org)),
                 cases, workItems, inquiries, reviews, inquiryStub, reviewStub, organizations,
-                new AgentQuotaService(llmUsage, new AgentQuotaProperties(true, true, 1000, llmCallsLimit)),
+                new AgentQuotaService(llmUsage, new AgentQuotaProperties(true, true, false, 1000, llmCallsLimit)),
                 Clock.fixed(at, ZoneOffset.UTC));
     }
 

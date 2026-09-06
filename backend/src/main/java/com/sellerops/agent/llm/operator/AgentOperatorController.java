@@ -9,6 +9,7 @@ import java.util.Optional;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -37,6 +38,14 @@ public class AgentOperatorController {
 
     private final AgentPlanService planService;
     private final AgentJudgeService judgeService;
+    /**
+     * Who is spending this call — «USER» (the seller), «QA» or «BENCHMARK».
+     *
+     * <p>Believed only where {@code sellerops.agent.quota.trust-actor-header} is on, which is nowhere
+     * by default. Everything metered either way; only USER is enforced against.
+     */
+    static final String ACTOR_HEADER = "X-Reviewnary-Usage-Actor";
+
     private final AgentQuotaService quota;
 
     public AgentOperatorController(AgentPlanService planService, AgentJudgeService judgeService,
@@ -48,9 +57,12 @@ public class AgentOperatorController {
 
     @PostMapping("/plan")
     public PlanView plan(@AuthenticationPrincipal AuthPrincipal principal,
+                         @RequestHeader(value = ACTOR_HEADER, required = false) String actorHeader,
                          @RequestBody PlanRequest request) {
         String version = planService.versionFor(principal.orgId());
-        QuotaDecision decision = quota.consume(principal.orgId(), AgentUsageKind.PLAN, request.runId());
+        // Who is spending this call. Ignored — and therefore USER — unless the deployment opted in.
+        QuotaDecision decision = quota.consume(principal.orgId(), AgentUsageKind.PLAN, request.runId(),
+                quota.actorOf(actorHeader));
         if (!decision.allowed()) {
             return PlanView.quotaExhausted(version, decision.messageKo());
         }
@@ -83,9 +95,11 @@ public class AgentOperatorController {
 
     @PostMapping("/judge")
     public JudgeView judge(@AuthenticationPrincipal AuthPrincipal principal,
+                           @RequestHeader(value = ACTOR_HEADER, required = false) String actorHeader,
                            @RequestBody JudgeRequest request) {
         String version = judgeService.versionFor(principal.orgId());
-        QuotaDecision decision = quota.consume(principal.orgId(), AgentUsageKind.JUDGE, request.runId());
+        QuotaDecision decision = quota.consume(principal.orgId(), AgentUsageKind.JUDGE, request.runId(),
+                quota.actorOf(actorHeader));
         if (!decision.allowed()) {
             return JudgeView.quotaExhausted(version, decision.messageKo());
         }

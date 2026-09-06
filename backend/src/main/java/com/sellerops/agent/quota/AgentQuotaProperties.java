@@ -18,6 +18,12 @@ import org.springframework.stereotype.Component;
  * usage, latency and cost numbers were exactly the ones that produced none. Production and pilot keep
  * {@code enforced=true}; nothing about their behaviour changes.
  *
+ * <p><b>{@code trust-actor-header} is OFF everywhere by default, and that is the safe direction.</b>
+ * It decides whether this deployment will believe a caller that says «this call is QA, not the
+ * seller». Where it is false — production, pilot, and any host nobody configured — every call is the
+ * seller's however it is labelled, so the header cannot be used to walk around a budget. Local, QA
+ * and benchmark hosts turn it on, and their non-USER calls are metered and never enforced against.
+ *
  * <p><b>On by default, and the defaults are generous.</b> The failure mode being prevented is runaway
  * cost, not ordinary use: a seller asking thirty questions in a day never meets this; a loop asking
  * three thousand meets it within minutes. Defaulting the quota OFF would mean the protection exists
@@ -28,16 +34,19 @@ public class AgentQuotaProperties {
 
     private final boolean enabled;
     private final boolean enforced;
+    private final boolean trustActorHeader;
     private final int dailyRunsPerOrg;
     private final int dailyLlmCallsPerOrg;
 
     public AgentQuotaProperties(
             @Value("${sellerops.agent.quota.enabled:true}") boolean enabled,
             @Value("${sellerops.agent.quota.enforced:true}") boolean enforced,
+            @Value("${sellerops.agent.quota.trust-actor-header:false}") boolean trustActorHeader,
             @Value("${sellerops.agent.quota.daily-runs-per-org:200}") int dailyRunsPerOrg,
             @Value("${sellerops.agent.quota.daily-llm-calls-per-org:1000}") int dailyLlmCallsPerOrg) {
         this.enabled = enabled;
         this.enforced = enforced;
+        this.trustActorHeader = trustActorHeader;
         this.dailyRunsPerOrg = dailyRunsPerOrg;
         this.dailyLlmCallsPerOrg = dailyLlmCallsPerOrg;
     }
@@ -53,6 +62,10 @@ public class AgentQuotaProperties {
      * nothing has nothing to compare a limit against — so this is read only where {@code enabled}
      * already holds.
      */
+    public boolean isTrustActorHeader() {
+        return trustActorHeader;
+    }
+
     public boolean isEnforced() {
         return enforced;
     }

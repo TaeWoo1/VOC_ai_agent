@@ -30,4 +30,12 @@ public class AgentLlmUsage extends BaseEntity {
 
     @Column(name = "run_id", length = 200)
     private String runId;
+
+    /**
+     * Who spent it. Recorded for every call; only {@code USER} is compared against the daily limits.
+     * Never null — an unattributable call is charged to the seller (see {@link AgentUsageActor}).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "actor", nullable = false, length = 16)
+    private AgentUsageActor actor = AgentUsageActor.USER;
 }

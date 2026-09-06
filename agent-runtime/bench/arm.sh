@@ -39,7 +39,11 @@ fi
 # Enforcement off, metering ON — identically for every arm. Raising the LIMIT was the old way and it
 # was worse: the first pass spent part of itself measuring the quota, and the numbers the benchmark
 # exists to produce (usage, latency, cost) come from the very rows a disabled subsystem stops writing.
-export SPRING_APPLICATION_JSON="{\"sellerops\":{\"agent\":{\"quota\":{\"enforced\":false},\"plan\":{\"model\":\"$MODEL\",\"reasoning-effort\":\"$EFFORT\",\"retry-reasoning-effort\":\"low\"}}}}"
+# Enforcement off AND the actor header believed: a benchmark's calls are metered like any other and
+# charged to nobody's daily budget (Pilot QA, 2026-09-06). Before this an arm spent the demo seller's
+# quota — 1,211 runs against a limit of 200 — which is only invisible because enforcement was off.
+export SPRING_APPLICATION_JSON="{\"sellerops\":{\"agent\":{\"quota\":{\"enforced\":false,\"trust-actor-header\":true},\"plan\":{\"model\":\"$MODEL\",\"reasoning-effort\":\"$EFFORT\",\"retry-reasoning-effort\":\"low\"}}}}"
+export AGENT_RUNTIME_USAGE_ACTOR=BENCHMARK
 export SELLEROPS_AGENT_PLAN_PROMPT_VARIANT="$VARIANT"
 
 (

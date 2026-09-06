@@ -109,6 +109,9 @@ sellerops:
     quota:
       enabled: ${SELLEROPS_AGENT_QUOTA_ENABLED:true}
       enforced: ${SELLEROPS_AGENT_QUOTA_ENFORCED:true}
+      # Believe a caller that labels its calls QA / BENCHMARK. Off by default everywhere: where it is
+      # off, every call is charged to the seller however it is labelled.
+      trust-actor-header: ${SELLEROPS_AGENT_QUOTA_TRUST_ACTOR_HEADER:false}
       daily-runs-per-org: ${SELLEROPS_AGENT_QUOTA_DAILY_RUNS_PER_ORG:200}
       daily-llm-calls-per-org: ${SELLEROPS_AGENT_QUOTA_DAILY_LLM_CALLS_PER_ORG:1000}
     draft:

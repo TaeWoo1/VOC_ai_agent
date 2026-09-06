@@ -152,6 +152,22 @@ export interface SpringClient {
  * A backend error surfaced without leaking a response body. Carries the HTTP status
  * and a coarse code only — never the raw body, which could contain seller content.
  */
+/**
+ * <b>Who is spending the model calls this process makes.</b>
+ *
+ * Pilot QA, 2026-09-06. A benchmark signs in as a real account, so its planner calls used to land in
+ * that seller's daily budget — 1,211 runs against a limit of 200 on the demo org in one day. The
+ * backend can now tell the seller's calls from a sitting's, and this is where a sitting says so.
+ *
+ * <b>Absent by default, and worthless on its own.</b> No env var ⇒ no header ⇒ the call is the
+ * seller's. And the backend believes the header only where {@code quota.trust-actor-header} is on,
+ * which is nowhere by default — so this cannot be used to walk around a production budget.
+ */
+function usageActorHeader(): Record<string, string> {
+  const actor = process.env.AGENT_RUNTIME_USAGE_ACTOR;
+  return actor && actor.trim() ? { "X-Reviewnary-Usage-Actor": actor.trim() } : {};
+}
+
 export class SpringApiError extends Error {
   constructor(
     readonly status: number,
@@ -665,6 +681,7 @@ export class HttpSpringClient
       headers: {
         Authorization: `Bearer ${this.token}`,
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...usageActorHeader(),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });

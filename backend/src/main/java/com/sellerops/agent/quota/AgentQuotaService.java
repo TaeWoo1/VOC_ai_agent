@@ -51,12 +51,37 @@ public class AgentQuotaService {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public QuotaDecision consume(UUID orgId, AgentUsageKind kind, String runId) {
+        return consume(orgId, kind, runId, AgentUsageActor.USER);
+    }
+
+    /**
+     * The actor this request may be attributed to.
+     *
+     * <p>A header is only believed where the deployment says so ({@code quota.trust-actor-header},
+     * false everywhere by default). On production and pilot the answer is always {@link
+     * AgentUsageActor#USER}, so no caller can label its way past the budget.
+     */
+    public AgentUsageActor actorOf(String headerValue) {
+        return properties.isTrustActorHeader() ? AgentUsageActor.parse(headerValue) : AgentUsageActor.USER;
+    }
+
+    /**
+     * Charge one model call by a named actor, or refuse.
+     *
+     * <p><b>The actor decides whether the limits apply, never whether the row is written.</b> A QA or
+     * benchmark call costs the deployment exactly what a seller's does, so it is metered identically;
+     * what it must not do is spend the seller's day. Before this, a benchmark signing in as a real
+     * account did precisely that — 1,211 runs against a limit of 200 on one org in a day.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public QuotaDecision consume(UUID orgId, AgentUsageKind kind, String runId, AgentUsageActor actor) {
         if (!properties.isEnabled()) {
             return QuotaDecision.pass();
         }
         LocalDate today = LocalDate.now(KST);
-        long calls = usage.countByOrgIdAndUsageDate(orgId, today);
-        if (calls >= properties.llmCalls()) {
+        // The seller's own spend is what the limit is about; the row below is written either way.
+        long calls = usage.countByOrgIdAndUsageDateAndActor(orgId, today, AgentUsageActor.USER);
+        if (actor.enforced() && calls >= properties.llmCalls()) {
             log.info("에이전트 일일 호출 한도에 도달했습니다. org={} used={} limit={} enforced={}",
                     orgId, calls, properties.llmCalls(), properties.isEnforced());
             if (properties.isEnforced()) {
@@ -66,8 +91,8 @@ public class AgentQuotaService {
         }
         boolean newRun = runId != null && !usage.existsByOrgIdAndUsageDateAndRunId(orgId, today, runId);
         if (newRun) {
-            long runs = usage.countDistinctRuns(orgId, today);
-            if (runs >= properties.runs()) {
+            long runs = usage.countDistinctUserRuns(orgId, today);
+            if (actor.enforced() && runs >= properties.runs()) {
                 log.info("에이전트 일일 실행 한도에 도달했습니다. org={} used={} limit={} enforced={}",
                         orgId, runs, properties.runs(), properties.isEnforced());
                 if (properties.isEnforced()) {
@@ -81,17 +106,26 @@ public class AgentQuotaService {
         row.setUsageDate(today);
         row.setKind(kind);
         row.setRunId(runId);
+        row.setActor(actor);
         usage.save(row);
         return QuotaDecision.pass();
     }
 
-    /** Today's spend, for the settings screen. Read-only; charges nothing. */
+    /**
+     * Today's spend, for the settings screen. Read-only; charges nothing.
+     *
+     * <p>The USED figures are the SELLER's, because they sit beside limits that only apply to the
+     * seller — showing a benchmark's calls against the seller's ceiling is how the screen would claim
+     * a budget was nearly spent by work the seller never did. The whole table is still there for
+     * cost reporting, which asks a different question.
+     */
     @Transactional(readOnly = true)
     public AgentQuotaStatus status(UUID orgId) {
         LocalDate today = LocalDate.now(KST);
         return new AgentQuotaStatus(properties.isEnabled(), properties.isEnforced(), today,
-                usage.countDistinctRuns(orgId, today), properties.runs(),
-                usage.countByOrgIdAndUsageDate(orgId, today), properties.llmCalls());
+                usage.countDistinctUserRuns(orgId, today), properties.runs(),
+                usage.countByOrgIdAndUsageDateAndActor(orgId, today, AgentUsageActor.USER),
+                properties.llmCalls());
     }
 
     /** What today looks like. Percentages are the screen's business, not this record's. */
