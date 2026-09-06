@@ -460,6 +460,62 @@ loadObject/prepare는 chat lane에서 도달하지 않는다(리뷰 답글은 �
 붙는다; 다만 **새 handler가 필요하면** 닫힌 `HandlerName` union과 `ProcedureOps`를 함께 고쳐야 하고(정의가
 런타임이 publish하지 않은 행동에 닿을 수 없어야 한다) 새 종류의 화면 출력은 여전히 compose를 건드린다)
 
+**`docs/agent_runtime_production_closure_v1.md`** (Agent Runtime Production Closure v1 — 2026-09-06.
+새 architecture·새 기능 **0**. 질문 하나: 지금 런타임이 **process · container · concurrency 경계**에서도
+옳은가. Planner · WorldState · Procedure semantics · NeedKind · typed tools · Evidence · Draft ·
+Approval · Executor fence · Helper **무변경**. **§1 감사가 찾은 것은 성능이 아니라 caller 0이었다** —
+`procedureCheckpoints` seam은 선언돼 있었지만 `http/main.ts`가 넘기지 않아 **배포된 호스트의 모든
+stopped procedure가 메모리에 있었다**(container replacement에서 소실 · replica 둘이면 서로를 못 본다;
+파일 store는 로컬 restart proof에만 옳고 `.claim`은 `existsSync`+`writeFileSync`라 프로세스 사이의
+lock이 아니다) ⇒ 가장 단순한 것이 **기존 PostgreSQL**이었다: `agent_runs`가 이미 org-scoped identity ·
+version · **진짜 claim**(상태를 RESUMING으로 옮기는 UPDATE + 2분 crash lease)을 갖고 런타임이 이미 그
+표에 말하므로 **새 표·마이그레이션·엔드포인트 0**이고 바뀐 것은 셋(domain `PROCEDURE` 추가 ·
+`WAITING_HUMAN`을 claimable로 만드는 절 하나 · `SpringAopCheckpointStore`). **domain을 나눈 것이 fence**
+— `CONVERSATION`은 자기 것 셋(`text`·`message`·`content`)을 갖지만 **cursor는 자기 것이 없어서**
+STRICT set을 진다(라이브에서 같은 키가 PROCEDURE 400 · CONVERSATION 200). status를 `AWAITING_APPROVAL`로
+재사용하면 lock을 공짜로 얻지만 **컬럼에 거짓말이 남는다**(절차는 지식 답변을 기다리며 멈출 수 있고
+그것은 승인이 아니다). 저장 가능한 것은 여전히 cursor뿐이고 `sanitize()`는 whitelist다. store는 다른
+모든 durable store와 같은 이유로 **요청마다** 해석된다(`RunStores.procedureCursors`,
+`ProcedureRuntime.run`이 store를 호출마다 받는다 — 컴파일된 subgraph는 그대로 한 번만). 로컬 두 store의
+결함도 닫았다: claim이 `delete`에서만 풀려 **두 번째로 멈춘 절차가 영원히 resume 불가**였다. **§2
+conversation은 어디에서도 직렬화되지 않는다** — 그리고 `SpringConversationStore`가 자기 version guard를
+무력화하고 있었다(save 안에서 읽고 바로 쓰므로 **409 한 번 없이 조용히 덮어쓴다**; 실측으로 먼저 쓴
+turn이 사라졌다) ⇒ merge를 409 핸들러가 아니라 **평범한 경로**로 만들었다(어차피 필요한 그 읽기가 지금
+저장된 것을 말하고, transcript는 append-only라 합침이 모호하지 않다; 움직이지 않은 대화에서 merge는
+**항등**). **index가 더 흔한 충돌이었다** — org당 행 하나라 서로 다른 두 대화가 동시에 저장만 해도
+부딪히고, 그 예외는 **대화가 이미 저장된 뒤에** 던져져 판매자의 turn을 실패시켰다. AOP claim은 진짜
+exactly-once(라이브 Postgres에 **동시 4회** → CLAIMED 정확히 1), claim을 잃은 run은 **step 0**.
+**§3 cross-surface: orchestration 중복은 없고**(draft·precondition·approval·execute의 owner는 백엔드
+하나) **한 질문이 두 곳에서 답해지고 chat 쪽이 틀렸다** — 「지금 이 리뷰로 가이드형 답변을 시작할 수
+있는가」를 리뷰 화면은 서버의 `canStartSubmissionRun`을 읽어 답하는데 대화는 **채널 capability만** 보고
+스스로 정해, 채널이 이미 답변한 리뷰에 「판매자센터 입력칸에 넣어 두겠습니다」를 약속했고 **어떤 mint도
+그 약속을 지킬 수 없었다**(mint는 409) ⇒ 화면을 chat 경로에 태우지 않고 **대화가 이미 손에 든 응답을
+읽는다**(닫힌 이유 `CHANNEL_ALREADY_ANSWERED`·`SOURCE_NOT_EXECUTABLE`, 토큰 노출 0, [복사] 유지).
+문장이 두 곳인 것은 중복이 아니라 **register 차이**이고 중복이었던 것은 규칙이다. **§4 compose 잔여
+ANALYZE guard verdict = procedure decision** — 그것은 **어느 business step이 도는가**(advisory냐
+production draft path냐)를 고르므로 `src/aop/answerStep.ts`로 옮기고 **두 lane이 묻는다**; compose에
+남은 것은 렌더링이고 compose 전체 분해는 하지 않았다. 토큰은 **둘**(`PREPARE`·`ADVISE`) — REFUSE가
+없는 이유는 두 caller가 각각 초안도 만들고 거절도 하며 **같은 `inquiryDraftPrecondition`**을 지나기
+때문이다. 부수 효과로 **판매자의 문장은 turn당 정확히 한 번 읽힌다**(`analyzeIntentOf(` 보유 파일 3→**2**,
+구조 테스트가 고정). **§5 proof**: 오프라인은 실제 client + 백엔드 계약 fake 위에서 container
+replacement(빈 version 캐시의 새 client + 새 runtime)와 두 replica의 경주를 재현한다 — production이
+backend store를 해석 · 저장된 cursor의 키 == `CHECKPOINT_KEYS` · 다른 org는 load null/claim CONFLICT ·
+fresh process가 **같은 절차 · 같은 refs**로 이어받음 · 동시 claim ×3 → 1 · replica ×2 → `resume` 1회 ·
+끝난 절차의 두 번째 resume은 그 run에 닿지 못함 · claim 잃은 run step 0 · 다시 저장된 cursor는 다시
+claimable · cursor는 approval **id**만 들고 verdict를 들 자리가 없음 · 서지 않는 승인은 **execute
+이전에** 멈춤. 라이브는 일회용 org의 실제 Postgres(A 저장 200/키 13 · B 동시 4회 → 1 CLAIMED ·
+C 400 · D 200 · E fresh 읽기 + DELETE 204 · F 404/404). **라이브 planner parity**: pass 2에서
+selection **46/48** · holdout **13/14**로 **실패 turn 집합 문자 그대로 동일 · 새로 깨진 것 0**
+(pass 1의 44/48은 숨기지 않고 적는다 — 둘 다 `NO_CHANNEL` world의 planner 변동이고 코드를 한 글자도
+바꾸지 않은 pass 2가 이관 전 집합을 재현했다). 브라우저 4 turn(Demo Org, 콘솔 0 · off-host 0),
+**마켓플레이스 0 · WRITE 0 · 승인 0 · 실행 0 · 신규 draft 행 0 · 마이그레이션 0** ⇒ evidence 행 없음.
+backend **3,886** · runtime **938** · 실패 0. **§6 남은 single-process assumption**: 대화 turn 사이에는
+여전히 lock이 없다(두 동시 turn은 서로를 모르는 답을 낸다 — replica를 넘는 lock 없이는 못 고친다) ·
+AOP claim은 cursor가 **이미 있을 때만** 잡히므로 같은 절차의 첫 실행 둘은 동시에 돈다 · 파일 store의
+`.claim`은 원자적이지 않다 · `scopeCache`는 file/memory 전용 · 로컬 두 conversation store는
+last-write-wins · 파일럿은 런타임 replica 하나다. **§8 Agent runtime architecture FREEZE** — 다음은
+구조 리팩터링이 아니라 manual pilot QA와 실제 workflow 검증이다)
+
 **`docs/agent_command_center_v1.md`** (Agent Command Center v1 — 제품 방향 수정: reviewnary는
 Dashboard-first + Agent assistant가 아니라 **Agent-first + structured operational workspace**,
 정확히는 **chat-first, object-backed**. Chat은 의도를 나르고 일은 그 일을 이미 소유한 구조화된 UI가
