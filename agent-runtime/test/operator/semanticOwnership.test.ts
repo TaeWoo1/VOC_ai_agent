@@ -163,12 +163,10 @@ describe("§E — what stayed, and the reason it is allowed to", () => {
     // AOP Execution Closure v1 moved this reading OUT of the conversation service: the sentence is now
     // read once, in `procedureIntent.ts`, into a closed token that procedure routing takes. The service
     // no longer branches on it — which is the point, and is why the file list changed rather than grew.
+    // Agent Runtime Production Closure v1 §4 closed the residue: the POST-PLAN twin (a plan that routed an
+    // advisory question as PREPARE over a non-draftable target) no longer re-reads the sentence. Both
+    // lanes ask `inquiryAnswerStep`, so the sentence is read exactly once per turn, at route time.
     expect(holding("analyzeIntentOf(")).toEqual([
-      // The one that is left in the service is the POST-PLAN twin of the same rule: a plan that routed
-      // an advisory question as PREPARE over a non-draftable target. AOP Execution Closure v1 moved the
-      // pre-plan half into ANSWER_INQUIRY's `settle` step and reports this one as remaining — moving it
-      // means routing the planner's target loop through the subgraph, which is its own package.
-      "conversation/ConversationService.ts",
       "conversation/procedureIntent.ts", "conversation/taskInterpreter.ts",
     ]);
     // The policy lane is the shape the rest should follow: the planner's token first, the sentence only

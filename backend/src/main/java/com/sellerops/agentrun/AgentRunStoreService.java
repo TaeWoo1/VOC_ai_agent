@@ -42,13 +42,28 @@ public class AgentRunStoreService {
      * and this set did not contain the domain every chat turn writes. So every conversation on every
      * deployed host was a 400 at create: the chat-first product, refused at its first sentence, by a
      * list that had simply not been extended when conversations became durable.
+     *
+     * <p><b>PROCEDURE is the AOP execution cursor</b> — Agent Runtime Production Closure v1 §1.
+     *
+     * <p>A procedure that stopped for a person has to continue in a different process (a container
+     * replacement) and must be continued by exactly one caller (a second replica). The runtime's own
+     * file store answers neither, so the cursor moves here — onto the row that already has an
+     * org-scoped identity, an optimistic-lock version and a real claim.
+     *
+     * <p>It carries the STRICT forbidden set: a cursor is ids, closed tokens and a step name, and
+     * unlike a transcript it has nothing of its own to keep.
      */
-    private static final Set<String> DOMAINS = Set.of("INQUIRY", "REVIEW", "ISSUE", "CONVERSATION");
+    private static final Set<String> DOMAINS = Set.of("INQUIRY", "REVIEW", "ISSUE", "CONVERSATION", "PROCEDURE");
     private static final String DOMAIN_CONVERSATION = "CONVERSATION";
     /**
      * The only statuses a client may WRITE via upsert. RESUMING is set only by the claim lock.
      * OPEN / WAITING_HUMAN are the conversation store's two, and they mean for a conversation what
      * DONE / AWAITING_APPROVAL mean for a run.
+     *
+     * <p>WAITING_HUMAN is also what a stopped PROCEDURE cursor writes, and it is claimable for the
+     * same reason AWAITING_APPROVAL is — see {@code AgentRunRepository.claimForResume}. Naming it
+     * AWAITING_APPROVAL instead would have reused the lock at the cost of a lie in the column: a
+     * procedure can stop for a knowledge answer, which is not an approval.
      */
     private static final Set<String> STATUSES =
             Set.of("AWAITING_APPROVAL", "DONE", "OPEN", "WAITING_HUMAN");

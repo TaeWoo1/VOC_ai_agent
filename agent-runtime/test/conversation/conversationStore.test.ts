@@ -14,8 +14,9 @@ function view(id: string, updatedAt: string, turns: TurnView[] = []): Conversati
   return { conversationId: id, createdAt: "2026-08-27T00:00:00Z", updatedAt, turns, workingSet: null, pendingHumanAction: null, pendingPrepared: null };
 }
 
-function userTurn(id: string, text: string): TurnView {
-  return { turnId: `t-${id}`, conversationId: id, role: "USER", text, message: text, artifacts: [], suggestedActions: [],
+/** Turn ids are unique in the product (`randomUUID`), and the store's merge identifies turns by them. */
+function userTurn(id: string, text: string, turnId = `t-${id}-${text}`): TurnView {
+  return { turnId, conversationId: id, role: "USER", text, message: text, artifacts: [], suggestedActions: [],
     continuation: { workingSet: null, pendingHumanAction: null, pendingPrepared: null }, status: "DONE", createdAt: "2026-08-27T00:00:00Z" };
 }
 
@@ -52,6 +53,48 @@ describe("SpringConversationStore", () => {
 });
 
 describe("persistable form", () => {
+  /**
+   * Agent Runtime Production Closure v1 §2. Nothing serialises two turns of one conversation — not in
+   * this process, and by construction not across replicas. Before this, the second writer's
+   * version-guarded PUT was refused and the seller's turn failed with it; the transcript is
+   * append-only, so the honest repair is to keep both.
+   */
+  it("two turns racing on one conversation keep both — neither is lost, neither fails", async () => {
+    const backend = new FakeAgentRunStateBackend({ "tok-a": "org-a" });
+    const store = () => new SpringConversationStore(new HttpAgentRunStateClient({ baseUrl: "http://fake", token: "tok-a", fetchImpl: backend.fetch }));
+    await store().save(view("c1", "2026-08-27T01:00:00Z", [userTurn("c1", "첫 질문")]));
+
+    // Two requests, each holding the same loaded view, each appending its own turn.
+    const base = (await store().load("c1"))!;
+    const a = { ...base, updatedAt: "2026-08-27T02:00:00Z", turns: [...base.turns, { ...userTurn("c1", "둘째"), turnId: "t-a" }] };
+    const b = { ...base, updatedAt: "2026-08-27T02:00:01Z", turns: [...base.turns, { ...userTurn("c1", "셋째"), turnId: "t-b" }] };
+    const [sA, sB] = [store(), store()];
+    await sA.save(a);
+    await sB.save(b);
+
+    const merged = await store().load("c1");
+    expect(merged?.turns.map((t) => t.turnId)).toEqual(["t-c1-첫 질문", "t-a", "t-b"]);
+  });
+
+  /**
+   * The index is ONE row per org, so any two conversations saving at the same moment contend for it.
+   * Losing that race must not fail a turn whose conversation is already safely stored.
+   */
+  it("a lost index write does not fail the save that already succeeded", async () => {
+    const backend = new FakeAgentRunStateBackend({ "tok-a": "org-a" });
+    const store = () => new SpringConversationStore(new HttpAgentRunStateClient({ baseUrl: "http://fake", token: "tok-a", fetchImpl: backend.fetch }));
+    await store().save(view("c1", "2026-08-27T01:00:00Z"));
+    const [x, y] = [store(), store()];
+    // Warm both clients' index versions, then let them both write it.
+    await Promise.all([x.list(1), y.list(1)]);
+    await expect(Promise.all([
+      x.save(view("c2", "2026-08-27T02:00:00Z")),
+      y.save(view("c3", "2026-08-27T02:00:01Z")),
+    ])).resolves.toBeDefined();
+    expect(await store().load("c2")).not.toBeNull();
+    expect(await store().load("c3")).not.toBeNull();
+  });
+
   it("bounds turns and strips transient fields without touching ids", () => {
     const turns: TurnView[] = Array.from({ length: 45 }, (_, i) => userTurn("c", `q${i}`));
     expect(boundedTurns(turns)).toHaveLength(40);

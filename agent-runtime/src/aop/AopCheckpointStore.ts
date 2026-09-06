@@ -113,13 +113,22 @@ export function forbiddenKeysIn(value: unknown, path = ""): string[] {
   return bad;
 }
 
-/** Same-process store. Lost on restart — use the file store to prove restart-resume. */
+/**
+ * Same-process store. Lost on restart — use the file store to prove restart-resume, and the
+ * backend-owned one (`SpringAopCheckpointStore`) for anything a container replacement can touch.
+ *
+ * <b>A saved cursor is claimable again.</b> Writing the cursor is what says the procedure stopped for
+ * a person; holding the previous claim past that point would make the SECOND pause unresumable
+ * forever. The backend row gets this for free (a claim moves it to RESUMING and the next save moves
+ * it back to WAITING_HUMAN); these two do it by hand so all three stores mean the same thing.
+ */
 export class MemoryAopCheckpointStore implements AopCheckpointStore {
   private readonly byThread = new Map<string, AopCheckpoint>();
   private readonly claimed = new Set<string>();
 
   async save(checkpoint: AopCheckpoint): Promise<void> {
     this.byThread.set(checkpoint.threadId, sanitize(checkpoint));
+    this.claimed.delete(checkpoint.threadId);
   }
 
   async load(threadId: string): Promise<AopCheckpoint | null> {
@@ -141,7 +150,14 @@ export class MemoryAopCheckpointStore implements AopCheckpointStore {
   }
 }
 
-/** File-backed: survives the process, which is what a restart proof needs. */
+/**
+ * File-backed: survives the process, which is what a restart proof needs — and nothing more.
+ *
+ * <b>Single instance only.</b> The `.claim` lock is `existsSync` then `writeFileSync`, which is not
+ * atomic, and the directory goes wherever the container goes. That is why production resolves the
+ * backend-owned store instead (Agent Runtime Production Closure v1 §1) and why `APP_ENV=production`
+ * refuses to boot on this kind at all.
+ */
 export class FileAopCheckpointStore implements AopCheckpointStore {
   private readonly dir: string;
 
@@ -156,7 +172,10 @@ export class FileAopCheckpointStore implements AopCheckpointStore {
   }
 
   async save(checkpoint: AopCheckpoint): Promise<void> {
-    writeFileSync(this.pathOf(checkpoint.threadId), JSON.stringify(sanitize(checkpoint)), "utf8");
+    const path = this.pathOf(checkpoint.threadId);
+    writeFileSync(path, JSON.stringify(sanitize(checkpoint)), "utf8");
+    const lock = `${path}.claim`;
+    if (existsSync(lock)) rmSync(lock);
   }
 
   async load(threadId: string): Promise<AopCheckpoint | null> {

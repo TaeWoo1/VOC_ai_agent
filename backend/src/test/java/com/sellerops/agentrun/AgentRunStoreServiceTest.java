@@ -144,6 +144,28 @@ class AgentRunStoreServiceTest {
         assertThat(service.claim(orgA, "t1").outcome()).isEqualTo("CLAIMED"); // recovered, not wedged
     }
 
+    // -------------------------------------------- PROCEDURE cursor (Production Closure v1 §1/§2)
+
+    @Test
+    void aStoppedProcedureCursorIsClaimableAndOnlyOnce() {
+        // A procedure that stopped for a person rests in WAITING_HUMAN. It has to be continuable by a
+        // process that did not start it (a container replacement) and by exactly one of them (two
+        // replicas), which is the same lock a run waiting on an approval already uses.
+        service.upsert(orgA, "c-1:ANSWER_INQUIRY", insert("PROCEDURE", "WAITING_HUMAN", "{\"step\":\"prepare\"}"));
+        assertThat(service.claim(orgA, "c-1:ANSWER_INQUIRY").outcome()).isEqualTo("CLAIMED");
+        assertThat(service.claim(orgA, "c-1:ANSWER_INQUIRY").outcome()).isEqualTo("CONFLICT");
+    }
+
+    @Test
+    void aProcedureCursorMayNotCarryTheSellersOrACustomersWords() {
+        // Unlike a transcript, a cursor has nothing of its own to keep: it is ids, closed tokens and a
+        // step name, so the STRICT forbidden set applies even to the keys CONVERSATION owns.
+        assertThatThrownBy(() -> service.upsert(orgA, "c-2:ANSWER_INQUIRY",
+                        insert("PROCEDURE", "WAITING_HUMAN", "{\"turns\":[{\"text\":\"안녕하세요\"}]}")))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> assertThat(((ApiException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
     @Test
     void claimOfUnknownThreadIsNotFound() {
         assertThatThrownBy(() -> service.claim(orgA, "ghost"))

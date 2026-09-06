@@ -248,3 +248,58 @@ describe("§11 — a NONE-identity review gets copy only, whatever the channel c
     expect(turn.message).toContain("채널로 보낼 수 없습니다");
   });
 });
+
+/**
+ * <b>Whether a guided run may start is one question with one owner</b> — Agent Runtime Production
+ * Closure v1 §3. The reply screen was taught to read the server's `canStartSubmissionRun` (Pilot
+ * Release Closure v1 §4); the conversation was still deciding it from the CHANNEL's capability alone,
+ * which does not know that this particular review was already answered on the channel. The mint
+ * refuses that with a 409, so the promise 「판매자센터에 넣어 두겠습니다」 was one nobody could keep.
+ */
+describe("§3 — the conversation asks the backend whether a guided run may start", () => {
+  const guided = {
+    reviewChannelCapabilities: {
+      [CAFE24_ACCOUNT]: { replySupported: true, executionKind: "GUIDED_BROWSER_EXECUTION" } as never,
+      [COUPANG_ACCOUNT]: { replySupported: false, executionKind: "NOT_SUPPORTED" } as never,
+    },
+  };
+
+  async function approvedReview(channelReplyState: string) {
+    const rows = freshReviews();
+    const h = harness({
+      plansByGoal: PLANS, ...guided,
+      // A review the acquisition can prove a channel-side identity for — otherwise the copy-only
+      // refusal above answers first and this branch is never reached.
+      recentReviews: { "false:ALL": { ...rows, items: rows.items.map((r) => ({ ...r, executableIdentity: "MARKETPLACE" as const })) } },
+    }, undefined, undefined, [
+      { actionRef: "review:r-1", rating: 5, body: "붙이기 쉽고 깔끔해요", sourceCreatedDate: TODAY,
+        productName: "몰딩", channelReplyState },
+    ]);
+    const view = await h.service.create(TOKEN);
+    const id = view.conversationId;
+    await say(h, id, "오늘 새로 달린 리뷰 보여줘");
+    await say(h, id, "첫 번째 리뷰 답변해줘");
+    const prep = await h.review.getReviewReplyPrep(CAFE24_ACCOUNT, "review:r-1");
+    await h.review.decideReviewApproval(CAFE24_ACCOUNT, "review:r-1", {
+      commandId: "cmd-1", state: "APPROVED", baseVersion: prep.draft!.version,
+    });
+    return { h, id };
+  }
+
+  it("approved + the channel already answered → the server's reason, and no guided promise", async () => {
+    const { h, id } = await approvedReview("ANSWERED");
+    const { turn } = await say(h, id, "좋아 게시해");
+    expect(turn.artifacts.some((a) => a.type === "GUIDED_EXECUTION")).toBe(false);
+    expect(said(turn)).toContain("채널에 이미 답변이 등록돼 있어");
+    // The seller still holds an approved reply, so the card names what they CAN do with it.
+    expect(artifact(turn, "SUMMARY").lines.join(" ")).toContain("초안을 복사해");
+    // Never the server's token, and never a retry that could not succeed.
+    expect(said(turn)).not.toContain("CHANNEL_ALREADY_ANSWERED");
+  });
+
+  it("approved and the server allows it → the guided card, exactly as before", async () => {
+    const { h, id } = await approvedReview("PENDING");
+    const { turn } = await say(h, id, "좋아 게시해");
+    expect(artifact(turn, "GUIDED_EXECUTION").actionType).toBe("REVIEW_REPLY");
+  });
+});

@@ -64,10 +64,10 @@ import { log } from "../log";
 import { buildTurnGraph } from "./graph/turnGraph";
 import type { TurnGraphUpdate, TurnRoute } from "./graph/TurnState";
 import { selectProcedure } from "../aop/router";
+import { inquiryAnswerStep } from "../aop/answerStep";
 import { ProcedureRuntime } from "../aop/ProcedureRuntime";
 import type { ProcedureOps } from "../aop/ProcedureRuntime";
 import type { ProcedureState, ProcedureUpdate } from "../aop/ProcedureState";
-import { MemoryAopCheckpointStore } from "../aop/AopCheckpointStore";
 import type { AopCheckpointStore } from "../aop/AopCheckpointStore";
 import { procedureIntentOf, requestedActionFor } from "./procedureIntent";
 import type { ProcedureIntent } from "./procedureIntent";
@@ -101,7 +101,7 @@ import type {
   KnowledgeCaptureArtifact, PendingKnowledgeCapture,
 } from "./contract";
 import { prepareIntentOf, pronounInspectOf, visibleSelectionOf } from "./visibleSelection";
-import { analyzeIntentOf, TOPIC_LABEL, visibleFilterOf, visiblePriorityOf } from "./taskInterpreter";
+import { TOPIC_LABEL, visibleFilterOf, visiblePriorityOf } from "./taskInterpreter";
 import type { VisibleFilter } from "./taskInterpreter";
 import { rankByUrgency, URGENCY_CRITERION, URGENCY_LIMIT, waitingDaysOf } from "./urgency";
 import { listInquiryWorkload, matchesTerm } from "../operator/tools/inquiryWorkload";
@@ -119,10 +119,12 @@ export interface ConversationServiceDeps {
   /** Injectable clock so a turn's timestamps are deterministic in tests. */
   readonly now?: () => Date;
   /**
-   * Where a stopped procedure's cursor is kept. Absent ⇒ in memory.
+   * An explicit override for where a stopped procedure's cursor is kept.
    *
-   * The seam exists so a restart proof does not need a different service: the same code, a durable
-   * store behind it. What it may hold is fixed by {@link AopCheckpoint} and asserted on a real write.
+   * <b>Absent is the ordinary case, and it is not "in memory" any more</b> (Agent Runtime Production
+   * Closure v1 §1): the cursor is resolved per request from {@link RunStoreProvider}, exactly like the
+   * conversation and the three run stores, so a deployed host keeps it on the backend row that has a
+   * version and a real claim. This override exists for suites that want one store they can inspect.
    */
   readonly procedureCheckpoints?: AopCheckpointStore;
 }
@@ -242,6 +244,8 @@ interface TurnCtx {
   /* filled by hydrate */
   bundle?: SpringClientBundle;
   store?: ConversationStore;
+  /** This request's cursor store — token-bound in production, like every other durable store. */
+  cursors?: AopCheckpointStore;
   orgId?: string;
   view?: ConversationView;
   world?: () => Promise<WorldState>;
@@ -278,11 +282,16 @@ export class ConversationService {
   }
 
   /** Resolve the tenant exactly the way runs do: verify the bearer at the backend, scope the store. */
-  private async tenant(token: string): Promise<{ bundle: SpringClientBundle; store: ConversationStore; orgId: string }> {
+  private async tenant(token: string): Promise<{
+    bundle: SpringClientBundle; store: ConversationStore; cursors: AopCheckpointStore; orgId: string;
+  }> {
     const bundle = this.deps.clientFactory(token);
     const { orgId } = await bundle.identity.whoami();
     const stores = this.deps.storeProvider.storesForRequest({ token, scope: scopeFor(orgId) });
-    return { bundle, store: stores.conversations, orgId };
+    return {
+      bundle, store: stores.conversations, orgId,
+      cursors: this.deps.procedureCheckpoints ?? stores.procedureCursors,
+    };
   }
 
   /**
@@ -307,24 +316,8 @@ export class ConversationService {
   private proceduresMemo: ProcedureRuntime<TurnCtx> | null = null;
 
   private get procedures(): ProcedureRuntime<TurnCtx> {
-    this.proceduresMemo ??= new ProcedureRuntime<TurnCtx>(this.procedureOps(), {
-      checkpoints: this.checkpointStore,
-    });
+    this.proceduresMemo ??= new ProcedureRuntime<TurnCtx>(this.procedureOps());
     return this.proceduresMemo;
-  }
-
-  /**
-   * Where a stopped procedure's cursor lives.
-   *
-   * In memory by default: a chat turn does not outlive its request, so the ordinary deployment has
-   * nothing to keep. A deployment that wants a stopped procedure to survive a restart passes the file
-   * store — the interface is the same and neither of them may hold business truth.
-   */
-  private checkpointStoreMemo: AopCheckpointStore | null = null;
-
-  private get checkpointStore(): AopCheckpointStore {
-    this.checkpointStoreMemo ??= this.deps.procedureCheckpoints ?? new MemoryAopCheckpointStore();
-    return this.checkpointStoreMemo;
   }
 
   private turnGraphMemo: ReturnType<typeof buildTurnGraph> | null = null;
@@ -444,11 +437,11 @@ export class ConversationService {
   /** hydrate — the tenant, the conversation, and this turn's world (one coverage read, memoised). */
   private async phaseHydrate(ctx: TurnCtx): Promise<TurnGraphUpdate> {
     const { token, id } = ctx;
-    const { bundle, store, orgId } = await this.tenant(token);
+    const { bundle, store, cursors, orgId } = await this.tenant(token);
     const loaded = await store.load(id);
     if (!loaded) throw new HttpError(404, "UNKNOWN_CONVERSATION", "no conversation found for this id");
     const view = this.assertTenant(loaded, orgId);
-    ctx.bundle = bundle; ctx.store = store; ctx.orgId = orgId; ctx.view = view;
+    ctx.bundle = bundle; ctx.store = store; ctx.cursors = cursors; ctx.orgId = orgId; ctx.view = view;
     /**
      * <b>This turn's world, derived once</b> (Agent Procedure Layer v1 §1). Lazy, because a turn that
      * never asks what this seller can hold — a tone revision, an ordinal — must not buy a read to find
@@ -841,6 +834,7 @@ export class ConversationService {
       // One thread per conversation and procedure: a stopped ANSWER_INQUIRY and a stopped
       // CAPTURE_KNOWLEDGE on the same conversation are different cursors, and neither resumes the other.
       threadId: `${ctx.id}:${selected.id}`,
+      checkpoints: ctx.cursors,
     });
     ctx.procedure = {
       id: selected.id, version: selected.version,
@@ -895,7 +889,7 @@ export class ConversationService {
     const userTurn = ctx.userTurn!;
     const result = ctx.result!;
     const turnWorld = ctx.turnWorld!;
-    const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? [], receipts, turnWorld, options.afterCapture);
+    const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? [], receipts, turnWorld, ctx.intent ?? "NONE", options.afterCapture);
     if (options.afterCapture) composed.artifacts = [options.afterCapture.artifact, ...composed.artifacts];
     if (partialChips.length > 0) {
       composed.suggestedActions = [...partialChips, ...composed.suggestedActions.filter((s) => s.kind !== "RESUME")];
@@ -1142,7 +1136,8 @@ export class ConversationService {
         };
         return { terminal: "BLOCKED_BY_PRECONDITION", absence: "NOT_ACTIONABLE" };
       }
-      if (ctx.intent === "ADVISE" && target && target.kind === "INQUIRY" && state.absence === "NOT_ACTIONABLE") {
+      if (target && target.kind === "INQUIRY"
+        && inquiryAnswerStep(ctx.intent, target.actionability) === "ADVISE") {
         ctx.composed = await this.adviseOnAnchoredInquiry(ctx, target);
         return { terminal: "ANSWERED" };
       }
@@ -1181,8 +1176,9 @@ export class ConversationService {
         // both prepares a draft and refuses an object that cannot take one, and it reaches that verdict
         // through the SAME `inquiryDraftPrecondition` the gate called. An ADVISE over a non-draftable
         // object is the exception — its answer is the advisory, settled at `settle`.
-        return (ctx.intent === "PREPARE_DRAFT" || (ctx.intent === "ADVISE" && state.absence == null))
-          && ctx.target != null;
+        if (ctx.target == null || ctx.target.kind !== "INQUIRY") return ctx.target != null;
+        return ctx.intent !== "REVISE_TONE"
+          && inquiryAnswerStep(ctx.intent, ctx.target.actionability) === "PREPARE";
       case "revise":
         return ctx.intent === "REVISE_TONE" && ctx.view?.pendingPrepared != null;
       // The approval boundary and the send are reached from the approval surfaces, never from a chat
@@ -1263,6 +1259,8 @@ export class ConversationService {
     stillPending: readonly PendingHumanAction[], collected: NonNullable<ConversationRunContext["collected"]>,
     receipts: readonly AcquisitionResultArtifact[],
     world: WorldState,
+    /** What this sentence asks of the object on the table — read ONCE at route time, never here. */
+    intent: ProcedureIntent,
     afterCapture?: AfterCapture,
   ): Promise<Composed> {
     // One automatic resume per saved capture: a turn that follows a save never opens another gap, and
@@ -1457,14 +1455,18 @@ export class ConversationService {
             }
             continue;
           }
-          // ANALYZE guard (Conversation Core v1): an advisory question the planner routed as PREPARE
-          // (「첫 번째 문의, 뭐라고 답하면 좋을까」) over a non-draftable target is answered with advice,
-          // never with the gate's refusal — the same rule the direct lane applies.
-          if (resolved.actionability !== "DRAFTABLE" && analyzeIntentOf(hints.text ?? "")) {
+          // ANALYZE guard (Conversation Core v1) — now ASKED, not decided (Production Closure v1 §4).
+          // 「첫 번째 문의, 뭐라고 답하면 좋을까」 over a non-draftable target is answered with advice,
+          // never with the gate's refusal; which step that is belongs to the procedure layer, and this
+          // lane no longer re-reads the sentence to work it out.
+          if (inquiryAnswerStep(intent, resolved.actionability) === "ADVISE") {
             stage("READING", STAGE_LABEL.READING);
             const advice = await adviseOnInquiry(bundle, {
               inquiryId: resolved.inquiry.inquiryId, workItemId: resolved.inquiry.workItemId,
-              productId: resolved.inquiry.productId, title: resolved.inquiry.title, actionability: resolved.actionability,
+              productId: resolved.inquiry.productId, title: resolved.inquiry.title,
+              // ADVISE is only ever returned for a non-draftable object — the cast states what the
+              // verdict already guarantees, exactly as the deterministic lane's advisory does.
+              actionability: resolved.actionability as Exclude<InquiryActionability, "DRAFTABLE">,
             });
             artifacts.push(...advice.artifacts);
             headline = headline ?? advice.headline;
@@ -3072,6 +3074,17 @@ export class ConversationService {
       if (approvalState.kind === "NO_DRAFT") return null;
       const { version: draftVersion, contentFingerprint } = approvalState.head;
       if (verdict.execution === "GUIDED_BROWSER_EXECUTION") {
+        // <b>Whether a guided run may start is the BACKEND's question</b> (Agent Runtime Production
+        // Closure v1 §3). The channel verdict above says the channel supports guided reply; it does
+        // not know that this review was already answered on the channel, or that its acquisition
+        // cannot prove a channel-side identity — and the mint refuses both. The reply screen was
+        // taught to read `canStartSubmissionRun` in Pilot Release Closure v1; the conversation was
+        // still deciding for itself, so an approved reply on an already-answered review promised
+        // 「판매자센터에 넣어 두겠습니다」 that no mint could keep.
+        if (approvalState.kind === "APPROVED" && !prep.capabilities.canStartSubmissionRun) {
+          const line = guidedUnavailableSentence(prep.guidedUnavailableReason ?? null, name);
+          return { artifact: reasonSummary(`a-send-${t.reviewId}`, "이 리뷰는 가이드형 답변을 시작할 수 없습니다", [line, COPY_ONLY_SENTENCE]), headline: line, chips: [] };
+        }
         // The seller has not approved THIS version: the next thing that happens is their decision, not a
         // browser window. Asking for it here — with the draft in full, in the thread that knows which
         // review this is — is what replaces 「리뷰 화면에서 승인한 뒤 돌아오세요」.
@@ -3904,6 +3917,24 @@ export function executionReasonSentence(verdict: ChannelCapabilityVerdict, chann
       return `${channelName}에서는 판매자님이 직접 등록하는 방식으로만 ${what}을 보낼 수 있습니다.`;
     default:
       return `${channelName} ${what} 전송 가능 여부를 아직 확인하지 못했습니다.`;
+  }
+}
+
+/**
+ * Why the guided step is not on offer, in this surface's register — from the SERVER's closed reason.
+ *
+ * The reason is decided in exactly one place (`ReviewReplyService`, the same rule the mint applies)
+ * and said in two, because a chat sentence and a panel line are not the same register. Neither prints
+ * the token, and an unknown reason gets the honest fallback rather than a guess.
+ */
+export function guidedUnavailableSentence(reason: string | null, channelName: string): string {
+  switch (reason) {
+    case "CHANNEL_ALREADY_ANSWERED":
+      return "이 리뷰에는 채널에 이미 답변이 등록돼 있어, 답변이 두 번 달리지 않도록 안내를 시작하지 않습니다.";
+    case "SOURCE_NOT_EXECUTABLE":
+      return `이 리뷰는 ${channelName} 판매자센터 화면에서 찾아 드릴 수 없어, 안내를 시작할 수 없습니다.`;
+    default:
+      return `지금은 ${channelName} 판매자센터 안내를 시작할 수 없습니다.`;
   }
 }
 

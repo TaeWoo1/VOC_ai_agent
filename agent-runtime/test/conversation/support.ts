@@ -20,6 +20,7 @@ import { FakeReviewSpringClient } from "../support/FakeReviewSpringClient";
 import { FakeIssueSpringClient } from "../support/FakeIssueSpringClient";
 import { fourIssues } from "../support/issueFixtures";
 import { twoReviews } from "../support/reviewFixtures";
+import type { SeedReview } from "../support/FakeReviewSpringClient";
 import { CONVERSATION_PLANS, RECORDED_PLANS } from "../support/recordedPlans";
 import { CABLE, INBOX, KNOWLEDGE, MEMORY, MOLDING, REPEATS, coveredSignals, unlinkedSignals } from "../support/operatorFixtures";
 
@@ -181,6 +182,8 @@ export interface Harness {
   readonly service: ServiceType;
   readonly operator: FakeOperatorSpringClient;
   readonly inquiry: FakeSpringClient;
+  /** Shared for the whole conversation, so a draft saved in one turn exists in the next. */
+  readonly review: FakeReviewSpringClient;
   readonly stores: RunStoreProvider;
   readonly recentReviews: Record<string, RecentReviewsResponse>;
   /**
@@ -195,6 +198,7 @@ export interface Harness {
 export function harness(
   seed: Partial<FakeOperatorSeed> = {}, seeds: SeedInquiry[] = inquiries(),
   issue: FakeIssueSpringClient = new FakeIssueSpringClient(fourIssues()),
+  reviewSeeds: SeedReview[] = twoReviews(),
 ): Harness {
   const recentReviews: Record<string, RecentReviewsResponse> = withChannelKeys({
     "false:ALL": freshReviews(), "true:ALL": negativeReviews(), ...(seed.recentReviews ?? {}),
@@ -226,13 +230,17 @@ export function harness(
     { id: COUPANG_ACCOUNT, channelId: "chan-coupang", channelNameKo: "쿠팡", alias: null, connectionStatus: "CONNECTED", lastSyncedAt: null, fileUpload: false },
     { id: CAFE24_ACCOUNT, channelId: "chan-cafe24", channelNameKo: "카페24", alias: null, connectionStatus: "CONNECTED", lastSyncedAt: null, fileUpload: false },
   ];
+  // ONE review client for the whole conversation, like `inquiry` and `operator` beside it. A fresh
+  // one per request meant a draft saved in one turn did not exist in the next, so the approval flow —
+  // prepare, approve, send — could not be exercised at all (Production Closure v1 §3).
+  const review = new FakeReviewSpringClient(reviewSeeds);
   const clientFactory: SpringClientFactory = () => ({
-    inquiry, review: new FakeReviewSpringClient(twoReviews()), issue,
+    inquiry, review, issue,
     identity: { whoami: async () => ({ userId: "u-1", orgId: "org-conversation-test" }) }, operator,
   });
   const stores = new RunStoreProvider(CONFIG);
   const service = new ConversationService({ storeProvider: stores, clientFactory });
-  return { service, operator, inquiry, stores, recentReviews, clientFactory };
+  return { service, operator, inquiry, review, stores, recentReviews, clientFactory };
 }
 
 export const TOKEN = "test-token";

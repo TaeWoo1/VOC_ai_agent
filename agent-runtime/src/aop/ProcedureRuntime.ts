@@ -99,12 +99,19 @@ export class ProcedureRuntime<C> {
    */
   async run(id: ProcedureId, ctx: C, options: {
     conversationId: string; threadId: string; initial?: ProcedureUpdate;
+    /**
+     * This request's cursor store. Passed per RUN rather than held per runtime because the durable
+     * one is backend-owned and carries the request's bearer (Agent Runtime Production Closure v1 §1);
+     * the compiled subgraphs, which are the expensive part, stay built once.
+     */
+    checkpoints?: AopCheckpointStore | null;
   }): Promise<ProcedureRunResult> {
     const definition = this.definitionOf(id);
     const graph = this.compiled.get(id)!;
-    const existing = this.checkpoints ? await this.checkpoints.load(options.threadId) : null;
+    const checkpoints = options.checkpoints ?? this.checkpoints;
+    const existing = checkpoints ? await checkpoints.load(options.threadId) : null;
     if (existing) {
-      const claim = await this.checkpoints!.claim(options.threadId);
+      const claim = await checkpoints!.claim(options.threadId);
       if (claim.outcome !== "CLAIMED") {
         log("aop_resume_refused", { procedure: id, outcome: claim.outcome });
         return { state: stateFrom(existing), checkpoint: existing };
@@ -127,7 +134,7 @@ export class ProcedureRuntime<C> {
     });
 
     let checkpoint: AopCheckpoint | null = null;
-    if (this.checkpoints) {
+    if (checkpoints) {
       if (state.terminal === "WAITING_HUMAN") {
         checkpoint = {
           threadId: options.threadId, conversationId: options.conversationId,
@@ -139,11 +146,11 @@ export class ProcedureRuntime<C> {
           terminal: state.terminal, absence: state.absence, interrupt: state.interrupt,
           updatedAt: new Date().toISOString(),
         };
-        await this.checkpoints.save(checkpoint);
+        await checkpoints.save(checkpoint);
       } else if (existing) {
         // The procedure finished: the cursor has nothing left to point at, and a cursor that outlives
         // its run is the thing a later resume would mistake for work still to do.
-        await this.checkpoints.delete(options.threadId);
+        await checkpoints.delete(options.threadId);
       }
     }
     return { state, checkpoint };

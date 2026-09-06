@@ -3,7 +3,7 @@
  * so the REAL {@link HttpAgentRunStateClient} (and the real Spring-backed stores + service) can be
  * exercised offline. It reproduces the backend's contract exactly: org-scoped rows keyed by
  * (org, threadId), an optimistic-lock `version`, insert-if-absent semantics, a version-guarded update,
- * and a claim that bumps the version only while AWAITING_APPROVAL.
+ * and a claim that bumps the version only from a claimable status (AWAITING_APPROVAL / WAITING_HUMAN).
  *
  * Concurrency fidelity: each route handler runs to completion synchronously (no internal await), so a
  * claim/update is an atomic compare-and-swap even when two client requests are in flight — which is
@@ -88,11 +88,13 @@ export class FakeAgentRunStateBackend {
   private claim(key: string): Response {
     const row = this.rows.get(key);
     if (!row) return this.json(404, { error: { code: "NOT_FOUND", message: "absent" } });
+    // The two claimable statuses are the backend's two (`AgentRunRepository.claimForResume`): a run
+    // waiting on an approval, and an AOP procedure cursor waiting on any human step.
     // The claim is a status transition (AWAITING → RESUMING), not a version bump, so a staggered
     // second claimer that reads the post-claim row sees RESUMING and is refused. (Lease-based
     // re-claim of a crashed RESUMING is a backend-only concern, exercised in AgentRunStoreServiceTest;
     // this fake keeps RESUMING held, which is exactly the exactly-once case the runtime relies on.)
-    if (row.status === "AWAITING_APPROVAL") {
+    if (row.status === "AWAITING_APPROVAL" || row.status === "WAITING_HUMAN") {
       row.status = "RESUMING";
       row.version += 1; // atomic transition + version bump
       return this.json(200, { outcome: "CLAIMED", version: row.version, snapshot: row.snapshot });

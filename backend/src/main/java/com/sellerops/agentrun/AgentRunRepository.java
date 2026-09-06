@@ -37,7 +37,11 @@ public interface AgentRunRepository extends JpaRepository<AgentRun, UUID> {
 
     /**
      * Claim a run for resume by transitioning it OUT of the claimable state:
-     * {@code AWAITING_APPROVAL → RESUMING} (bumping the version and stamping {@code claimed_at}). This is
+     * {@code AWAITING_APPROVAL | WAITING_HUMAN → RESUMING} (bumping the version and stamping
+     * {@code claimed_at}). The two claimable statuses are the two ways this product stops for a person —
+     * a run waiting on an approval, and an AOP procedure cursor waiting on any human step (Agent Runtime
+     * Production Closure v1 §1). A conversation row also rests in WAITING_HUMAN and is simply never
+     * claimed: the conversation store has no claim call at all. This is
      * a real lock, not just a version bump — a staggered second resume that reads the row AFTER this
      * commit sees {@code RESUMING}, so it cannot re-claim and the non-idempotent mint runs exactly once.
      * A {@code RESUMING} row whose claimer died is re-claimable once its lease elapses
@@ -47,7 +51,8 @@ public interface AgentRunRepository extends JpaRepository<AgentRun, UUID> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update AgentRun a set a.status = 'RESUMING', a.version = a.version + 1, a.claimedAt = :now, "
             + "a.updatedAt = :now where a.orgId = :orgId and a.threadId = :threadId "
-            + "and (a.status = 'AWAITING_APPROVAL' or (a.status = 'RESUMING' and a.claimedAt < :leaseCutoff))")
+            + "and (a.status = 'AWAITING_APPROVAL' or a.status = 'WAITING_HUMAN' "
+            + "or (a.status = 'RESUMING' and a.claimedAt < :leaseCutoff))")
     int claimForResume(
             @Param("orgId") UUID orgId,
             @Param("threadId") String threadId,

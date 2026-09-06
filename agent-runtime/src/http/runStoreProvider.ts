@@ -26,7 +26,9 @@ import type { ReviewRunStore } from "../checkpoint/ReviewRunStore";
 import type { RunStore } from "../checkpoint/RunStore";
 import { FileIssueRunStore, InMemoryIssueRunStore } from "../checkpoint/IssueRunStore";
 import type { IssueRunStore } from "../checkpoint/IssueRunStore";
-import { SpringIssueRunStore, SpringReviewRunStore, SpringRunStore } from "./springStores";
+import { SpringAopCheckpointStore, SpringIssueRunStore, SpringReviewRunStore, SpringRunStore } from "./springStores";
+import { FileAopCheckpointStore, MemoryAopCheckpointStore } from "../aop/AopCheckpointStore";
+import type { AopCheckpointStore } from "../aop/AopCheckpointStore";
 import { HttpAgentRunStateClient } from "../spring/AgentRunStateClient";
 import {
   FileConversationStore, MemoryConversationStore, SpringConversationStore,
@@ -52,6 +54,15 @@ export interface RunStores {
   readonly issue: IssueRunStore;
   /** Conversations (Agentic Operating Workspace v2) — same kind selection, same tenant scoping. */
   readonly conversations: ConversationStore;
+  /**
+   * Where a stopped AOP procedure's cursor lives (Agent Runtime Production Closure v1 §1).
+   *
+   * Resolved here rather than held by the service, for the reason every other store is: the durable
+   * one is backend-owned and carries the REQUEST's bearer, so it cannot be built once at boot. The
+   * production posture follows the same rule as the rest — only `spring` survives a container
+   * replacement and is safe behind more than one replica.
+   */
+  readonly procedureCursors: AopCheckpointStore;
 }
 
 /** Context a request carries for store resolution: the token (spring) and the org scope (file/memory). */
@@ -97,6 +108,7 @@ export class RunStoreProvider {
         review: new SpringReviewRunStore(client),
         issue: new SpringIssueRunStore(client),
         conversations: new SpringConversationStore(client),
+        procedureCursors: new SpringAopCheckpointStore(client),
       };
     }
     return this.storesForScope(ctx.scope);
@@ -117,6 +129,7 @@ export class RunStoreProvider {
         review: new InMemoryReviewRunStore(),
         issue: new InMemoryIssueRunStore(),
         conversations: new MemoryConversationStore(),
+        procedureCursors: new MemoryAopCheckpointStore(),
       };
     }
     const dir = join(this.config.runStoreDir, scope);
@@ -125,6 +138,7 @@ export class RunStoreProvider {
       review: new FileReviewRunStore(join(dir, "review")),
       issue: new FileIssueRunStore(join(dir, "issue")),
       conversations: new FileConversationStore(join(dir, "conversations")),
+      procedureCursors: new FileAopCheckpointStore(join(dir, "procedures")),
     };
   }
 }

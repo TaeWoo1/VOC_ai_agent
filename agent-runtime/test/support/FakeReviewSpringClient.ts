@@ -201,6 +201,12 @@ export class FakeReviewSpringClient implements ReviewSpringClient {
       draft,
       approval,
       capabilities: this.capabilities(it),
+      // The server's own reason, mirroring `ReviewReplyService`: said only when the seller is
+      // otherwise ready to send, so a surface never answers a question nobody asked.
+      guidedUnavailableReason:
+        !this.capabilities(it).canCopy || this.capabilities(it).canStartSubmissionRun ? null
+          : (it.seed.channelReplyState ?? "PENDING") === "ANSWERED" ? "CHANNEL_ALREADY_ANSWERED"
+            : "SOURCE_NOT_EXECUTABLE",
       channelReviewIdFingerprint: it.seed.channelReviewIdFingerprint ?? "idfp-" + fingerprint(actionRef),
       rating: it.seed.rating,
       channelReplyState: it.seed.channelReplyState ?? "PENDING",

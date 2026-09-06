@@ -15,7 +15,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentRunStateClient } from "../spring/AgentRunStateClient";
-import type { ConversationSummary, ConversationView } from "./contract";
+import { StaleRunVersionError } from "../spring/AgentRunStateClient";
+import { boundedTurns } from "./contract";
+import type { ConversationSummary, ConversationView, TurnView } from "./contract";
 
 export interface ConversationStore {
   load(id: string): Promise<ConversationView | null>;
@@ -107,14 +109,42 @@ export class SpringConversationStore implements ConversationStore {
     return record.snapshot as ConversationView;
   }
 
+  /**
+   * <b>Save, and lose no turn to a concurrent one</b> (Agent Runtime Production Closure v1 §2).
+   *
+   * Nothing serialises two turns of one conversation — not in this process, and by construction not
+   * across replicas. The row has an optimistic-lock version, but <b>this store defeats it</b>: the read
+   * that teaches the client the current version happens inside the save, so the write that follows is
+   * conditional on a version one round-trip old. A turn built on a view someone else has since added to
+   * would therefore have OVERWRITTEN them, silently, without ever seeing a 409.
+   *
+   * So the merge is not the 409 handler — it is the ordinary path. The read this save needs anyway is
+   * also the read that says what is currently stored, and a transcript is append-only, so keeping both
+   * is unambiguous: their turns stay, ours follow, identity is the turn id, and the bound is the one
+   * `persistableTurn` already applies. When the transcript has not moved, the merge is the identity and
+   * the write is byte-for-byte what it was before.
+   *
+   * The continuation fields (working set, pending action, active task) are last-write-wins, which is
+   * what two turns arriving in either order would have produced anyway. A genuinely lost guarded write
+   * is retried ONCE against a fresh read; a second loss is sustained contention, and a write loop is
+   * worse than a failed turn.
+   */
   async save(view: ConversationView): Promise<void> {
-    // Read first so the client learns the current version; a fresh client would otherwise send an
-    // insert for an existing row and be refused with a 409. A read that finds nothing is an insert.
-    await this.client.get(view.conversationId);
+    const stored = await this.load(view.conversationId);
+    try {
+      await this.put(stored ? mergeTurns(stored, view) : view);
+    } catch (err) {
+      if (!(err instanceof StaleRunVersionError)) throw err;
+      const current = await this.load(view.conversationId);
+      await this.put(current ? mergeTurns(current, view) : view);
+    }
+    await this.touchIndex(view.conversationId);
+  }
+
+  private async put(view: ConversationView): Promise<void> {
     await this.client.put({
       threadId: view.conversationId, domain: CONVERSATION_DOMAIN, status: storageStatus(view), snapshot: view,
     });
-    await this.touchIndex(view.conversationId);
   }
 
   async list(limit: number): Promise<ConversationSummary[]> {
@@ -134,8 +164,34 @@ export class SpringConversationStore implements ConversationStore {
     return Array.isArray(snapshot?.ids) ? snapshot!.ids.filter((v): v is string => typeof v === "string") : [];
   }
 
+  /**
+   * <b>The index is a convenience, and it must never fail a saved turn.</b>
+   *
+   * One row per ORG holds it, so ANY two conversations saving at the same moment contend for it — far
+   * likelier than two turns of one conversation. Before this, that collision threw after the
+   * conversation itself had already been written: the seller's answer was safely stored and their turn
+   * failed anyway. A lost touch costs a place in 「지난 대화」 until the next save, which is the smaller
+   * of the two wrongs.
+   */
   private async touchIndex(id: string): Promise<void> {
-    const ids = [id, ...(await this.readIndex()).filter((v) => v !== id)].slice(0, INDEX_MAX);
-    await this.client.put({ threadId: INDEX_THREAD, domain: CONVERSATION_DOMAIN, status: "OPEN", snapshot: { ids } });
+    try {
+      const ids = [id, ...(await this.readIndex()).filter((v) => v !== id)].slice(0, INDEX_MAX);
+      await this.client.put({ threadId: INDEX_THREAD, domain: CONVERSATION_DOMAIN, status: "OPEN", snapshot: { ids } });
+    } catch (err) {
+      if (!(err instanceof StaleRunVersionError)) throw err;
+    }
   }
+}
+
+/**
+ * The stored conversation plus whatever this save adds — turns by identity, continuation from the
+ * newer write. Used only on a lost optimistic write; a transcript is append-only, so no turn that
+ * exists on either side is dropped.
+ */
+function mergeTurns(stored: ConversationView, incoming: ConversationView): ConversationView {
+  const seen = new Set(stored.turns.map((t: TurnView) => t.turnId));
+  return {
+    ...incoming,
+    turns: boundedTurns([...stored.turns, ...incoming.turns.filter((t) => !seen.has(t.turnId))]),
+  };
 }

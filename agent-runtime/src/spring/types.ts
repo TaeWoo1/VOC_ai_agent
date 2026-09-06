@@ -318,6 +318,13 @@ export interface ReviewReplyPrepView {
   readonly channelReplyState: string;
   readonly productName: string | null;
   readonly reviewDate: string | null;
+  /**
+   * Why a guided run cannot start even though everything else is ready — the SERVER's closed
+   * vocabulary (`CHANNEL_ALREADY_ANSWERED` | `SOURCE_NOT_EXECUTABLE`), null when the question does not
+   * arise. Read, never re-derived: the mint applies this rule and a surface that decided it for itself
+   * would offer a control the backend refuses.
+   */
+  readonly guidedUnavailableReason?: string | null;
 }
 
 /** PUT /reply/draft request. */
