@@ -338,8 +338,7 @@ public class ReviewDraftComposer {
         // policy and the same screen then asked whether a PRODUCT standard existed for it — a
         // grounded draft asking for the facts it had just used, about the wrong corpus.
         ReviewKnowledgeNeed need = ReviewKnowledgeNeed.of(hasProductPassage || hasPolicyPassage,
-                productId != null,
-                retrieved.productOutcome(), review.getRating(),
+                productId != null, review.getRating(),
                 issueTitleFor(orgId, review.getId()) != null,
                 com.sellerops.knowledge.QuestionShape.asks(redactedBody));
         List<ReviewKnowledgeGapView> gaps = new ArrayList<>();

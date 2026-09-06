@@ -3,7 +3,6 @@ package com.sellerops.review.draft;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.sellerops.knowledge.QuestionShape;
-import com.sellerops.knowledge.RetrievalOutcome;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +22,7 @@ import org.junit.jupiter.api.Test;
 class ReviewKnowledgeNeedTest {
 
     private static ReviewKnowledgeNeed need(Integer rating, boolean issue, boolean asks) {
-        return ReviewKnowledgeNeed.of(false, true, RetrievalOutcome.NO_RELEVANT_EVIDENCE, rating,
+        return ReviewKnowledgeNeed.of(false, true, rating,
                 issue, asks);
     }
 
@@ -63,26 +62,41 @@ class ReviewKnowledgeNeedTest {
     }
 
     @Test
-    @DisplayName("an empty library is worth saying once, whatever the review says")
-    void anEmptyLibraryIsWorthSayingOnce() {
-        // Removing this was tried while writing §9 and reverted: it loses a ★4 「괜찮긴한데
-        // 잘떨어지네요」 on an empty library, which is a complaint the rating cannot see. One nudge on a
-        // compliment is the cheaper error.
-        assertThat(ReviewKnowledgeNeed.of(false, true, RetrievalOutcome.ABSENT, 5, false, false))
+    @DisplayName("an empty library is not a reason to ask about a compliment")
+    void anEmptyLibraryIsNotAReasonOnItsOwn() {
+        // Pilot QA (2026-09-06). This used to return KNOWLEDGE_NEEDED, and on the live org that put
+        // 「항상 만족하며 잘 사용하고있어요」 — a ★5 compliment — into 확인 필요 as a missing standard.
+        // The clause was defended as protecting ★4 「괜찮긴한데 잘떨어지네요」; the live rows say it never
+        // reached that review (its product has ten registered documents, so the outcome is not
+        // ABSENT), while it did reach 2,747 ★4+ reviews on knowledge-less products.
+        assertThat(ReviewKnowledgeNeed.of(false, true, 5, false, false))
+                .isEqualTo(ReviewKnowledgeNeed.NO_EVIDENCE);
+    }
+
+    @Test
+    @DisplayName("an empty library still asks when the review itself says an answer was owed")
+    void anEmptyLibraryStillAsksForAnOwedReview() {
+        // The three signals are unchanged, and each one alone is enough — so onboarding is not lost
+        // where it matters: the first complaint, question or recorded issue on a bare product asks.
+        assertThat(ReviewKnowledgeNeed.of(false, true, 2, false, false))
+                .isEqualTo(ReviewKnowledgeNeed.KNOWLEDGE_NEEDED);
+        assertThat(ReviewKnowledgeNeed.of(false, true, 5, true, false))
+                .isEqualTo(ReviewKnowledgeNeed.KNOWLEDGE_NEEDED);
+        assertThat(ReviewKnowledgeNeed.of(false, true, 5, false, true))
                 .isEqualTo(ReviewKnowledgeNeed.KNOWLEDGE_NEEDED);
     }
 
     @Test
     @DisplayName("no product means no form to open — the fix is a binding, not a standard")
     void noProductAsksForNothing() {
-        assertThat(ReviewKnowledgeNeed.of(false, false, RetrievalOutcome.ABSENT, 1, true, true))
+        assertThat(ReviewKnowledgeNeed.of(false, false, 1, true, true))
                 .isEqualTo(ReviewKnowledgeNeed.NO_EVIDENCE);
     }
 
     @Test
     @DisplayName("grounded is grounded — nothing is missing and nothing is asked")
     void groundedAsksForNothing() {
-        assertThat(ReviewKnowledgeNeed.of(true, true, RetrievalOutcome.FOUND, 1, true, true))
+        assertThat(ReviewKnowledgeNeed.of(true, true, 1, true, true))
                 .isEqualTo(ReviewKnowledgeNeed.GROUNDED);
         assertThat(ReviewKnowledgeNeed.GROUNDED.asks()).isFalse();
         assertThat(ReviewKnowledgeNeed.NO_EVIDENCE.asks()).isFalse();

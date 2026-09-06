@@ -34,6 +34,7 @@ import { Btn } from "../ui/Btn";
 import { Facts } from "../ui/ObjectRow";
 import { Disclosure } from "../ui/Disclosure";
 import { plainText } from "../../lib/plainText";
+import { draftProvenanceLine, draftSectionHeading } from "../../lib/draftProvenance";
 import { Link } from "react-router-dom";
 
 /**
@@ -475,7 +476,16 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
 
       {/* 2 — THE ANSWER. One section, whatever state it is in. */}
       <section className="rounded-xl border border-line bg-canvas p-4">
-        <h3 className="text-sm font-semibold text-muted">AI가 준비한 답변</h3>
+        {/*
+          <b>The heading names the version's AUTHOR, not the section's intent</b> (Pilot QA, 2026-09-06).
+          It said 「AI가 준비한 답변」 unconditionally, so a version the seller had rewritten was handed
+          back to them as the assistant's work — and on the live org that version carried an
+          operational promise (「전화로 문의 주시면」) no registered knowledge supports. The ledger has
+          always recorded `authorKind`; this screen simply did not read it.
+        */}
+        <h3 className="text-sm font-semibold text-muted">
+          {draftSectionHeading(draft?.authorKind, Boolean(draft))}
+        </h3>
 
         {/*
           Three states, not two. There was no draft and there was a draft; a generate that
@@ -663,6 +673,12 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                 <p className="mt-1.5 whitespace-pre-wrap break-keep text-lg leading-relaxed text-ink">
                   {draft.comments}
                 </p>
+                {/* Which version this is and who wrote it — the ledger is append-only, so both are facts. */}
+                {draftProvenanceLine(draft.authorKind, draft.version) ? (
+                  <p className="mt-2 break-keep text-sm text-muted" data-testid="draft-provenance">
+                    {draftProvenanceLine(draft.authorKind, draft.version)}
+                  </p>
+                ) : null}
                 <DraftEvidence evidence={evidence} />
                 {companyContextUsed ? (
                   <p className="mt-2 break-keep text-sm text-muted" aria-label="회사 정보 참고">

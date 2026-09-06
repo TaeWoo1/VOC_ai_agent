@@ -192,8 +192,14 @@ public class ReportFactsBuilder {
         int n = 1;
         for (ReportFacts.Counter c : counters) {
             if (COUNTER_UNANSWERED_NOW.equals(c.id()) && c.current() > 0) {
+                // <b>The count stays on the counter; the CTA does not carry it</b> (Pilot QA, 2026-09-06).
+                // A report is a frozen edition — it prints its own as-of — but this step's destination
+                // is the LIVE inquiry screen. Baking the snapshot number into the label made the two
+                // disagree in front of the seller: 「답변이 필요한 문의 22건 처리하기」 opened a screen
+                // reading 24, two days after the edition was cut. The number is preserved where it is
+                // true (the counter fact, cited by this step's trace); the label names the destination.
                 out.add(new ReportFacts.NextStep("n-" + n++,
-                        "답변이 필요한 문의 " + c.current() + "건 처리하기", UNANSWERED_PATH, List.of(c.id())));
+                        "답변이 필요한 문의 보기", UNANSWERED_PATH, List.of(c.id())));
             }
         }
         Set<UUID> proposed = new LinkedHashSet<>();

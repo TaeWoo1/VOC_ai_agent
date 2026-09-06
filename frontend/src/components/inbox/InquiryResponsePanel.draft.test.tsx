@@ -456,3 +456,60 @@ describe("InquiryResponsePanel — 초안 복사", () => {
     );
   });
 });
+
+/**
+ * <b>The section names the version's author</b> (Pilot QA, 2026-09-06).
+ *
+ * On the live org the model's v1 was rewritten by the seller as v2, and the panel presented that v2
+ * under 「AI가 준비한 답변」 — the seller's own sentence, including an operational promise no
+ * registered knowledge supports, attributed to the assistant. The ledger recorded `author_kind`
+ * throughout; only the screen was silent.
+ */
+describe("draft provenance — the heading may not attribute a version to the wrong author", () => {
+  it("a SELLER-written version is not called AI, and says which version it is", async () => {
+    getInquiryDetailStrict.mockResolvedValue(
+      detail({
+        draft: {
+          version: 2,
+          answerStatus: 2,
+          title: "[답변] 규격 안내",
+          comments: "전화로 문의 주시면 바로 확인해 드리겠습니다.",
+          contentFingerprint: "b".repeat(64),
+          fingerprintAlgorithm: "SHA-256",
+          createdAt: "2026-09-05T00:00:00Z",
+          authorKind: "SELLER",
+          modelVersion: null,
+          knowledgeState: null,
+          knowledgeNote: null,
+        },
+      }),
+    );
+    render(<InquiryResponsePanel workItemId="w1" />);
+    expect(await screen.findByText("내가 쓴 답변")).toBeInTheDocument();
+    expect(screen.queryByText("AI가 준비한 답변")).toBeNull();
+    expect(screen.getByTestId("draft-provenance")).toHaveTextContent("버전 2 · 판매자 수정");
+  });
+
+  it("a MODEL version keeps the AI heading and says so on its own line", async () => {
+    getInquiryDetailStrict.mockResolvedValue(
+      detail({
+        draft: {
+          version: 1,
+          answerStatus: 2,
+          title: "[답변] 사용 방법",
+          comments: "테이프를 벗기고 벽면에 붙이시면 됩니다.",
+          contentFingerprint: "c".repeat(64),
+          fingerprintAlgorithm: "SHA-256",
+          createdAt: "2026-08-24T00:00:00Z",
+          authorKind: "MODEL",
+          modelVersion: "test-model/v1",
+          knowledgeState: "GROUNDED",
+          knowledgeNote: null,
+        },
+      }),
+    );
+    render(<InquiryResponsePanel workItemId="w1" />);
+    expect(await screen.findByText("AI가 준비한 답변")).toBeInTheDocument();
+    expect(screen.getByTestId("draft-provenance")).toHaveTextContent("버전 1 · AI 작성");
+  });
+});

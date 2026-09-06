@@ -1,7 +1,6 @@
 package com.sellerops.review.draft;
 
 import com.sellerops.knowledge.QuestionShape;
-import com.sellerops.knowledge.RetrievalOutcome;
 
 /**
  * <b>「근거를 못 찾았다」와 「기준이 필요하다」는 다른 말이다.</b>
@@ -18,8 +17,6 @@ import com.sellerops.knowledge.RetrievalOutcome;
  * already see:
  *
  * <ol>
- *   <li><b>The product has no knowledge at all.</b> Worth saying once, whatever the review says — this
- *       is onboarding, not a complaint about this review.</li>
  *   <li><b>This review is recorded evidence for a repeated problem.</b> The issue extractor decided
  *       that; it is on the reviews screen; it means the customer described something that keeps
  *       happening.</li>
@@ -28,6 +25,21 @@ import com.sellerops.knowledge.RetrievalOutcome;
  *       {@code RuleBasedReviewReplyProvider} explains at length why a topic keyword must not overturn
  *       that.</li>
  * </ol>
+ *
+ * <p><b>An empty library is not one of them, and measurement is why</b> (Pilot QA, 2026-09-06). This
+ * used to ask on ANY review of a product with no knowledge registered — «worth saying once, whatever
+ * the review says». On the live org that fired on 「항상 만족하며 잘 사용하고있어요」, a ★5 compliment,
+ * and put it in 확인 필요 as a missing operating standard: half of the seller's highest-intent inbox
+ * was noise. The clause was defended as protecting ★4 「괜찮긴한데 잘떨어지네요」 — a complaint the rating
+ * cannot see — and the live rows say it does not: that review sits on a product with ten registered
+ * documents, so its outcome is never {@code ABSENT} and this clause never reached it. What the clause
+ * did reach was <b>2,747</b> ★4+ reviews on knowledge-less products with no issue binding.
+ *
+ * <p>So whether an answer was owed is decided by the three signals that are ABOUT the review, and an
+ * empty library changes nothing about that. The cost is named rather than hidden: a ★4 complaint that
+ * no issue caught, on a product with no library, now asks for nothing — exactly as the identical
+ * review on a product WITH a library already did. Asking or not asking must not depend on a fact
+ * about the library.
  *
  * <p><b>What this deliberately does NOT do is detect polarity.</b> A ★4 review that is plainly a
  * complaint, on a product whose library is full of unrelated documents, produces no request — the
@@ -60,13 +72,11 @@ public enum ReviewKnowledgeNeed {
     /**
      * @param grounded       whether any current passage reached the drafter
      * @param hasProduct     whether this review resolves to a product knowledge could be registered on
-     * @param productOutcome the product lane's own verdict — {@code ABSENT} means the library is empty
      * @param rating         the review's star rating, or null when the source carried none
      * @param boundToIssue   whether this review is recorded evidence for a repeated problem
      * @param asksSomething  whether the customer put a question to the seller ({@link QuestionShape})
      */
-    public static ReviewKnowledgeNeed of(boolean grounded, boolean hasProduct,
-                                         RetrievalOutcome productOutcome, Integer rating,
+    public static ReviewKnowledgeNeed of(boolean grounded, boolean hasProduct, Integer rating,
                                          boolean boundToIssue, boolean asksSomething) {
         if (grounded) {
             return GROUNDED;
@@ -76,8 +86,10 @@ public enum ReviewKnowledgeNeed {
             // and asking for a standard here would point at a form that cannot be opened.
             return NO_EVIDENCE;
         }
-        boolean owed = productOutcome == RetrievalOutcome.ABSENT
-                || asksSomething
+        // Three signals, and every one of them is about THIS review: the customer asked something, the
+        // issue extractor recorded it as evidence, or the rating is below the praise threshold. The
+        // state of the library is not a fourth — it says nothing about whether an answer was owed.
+        boolean owed = asksSomething
                 || boundToIssue
                 || (rating != null && rating < PRAISE_MIN_RATING);
         return owed ? KNOWLEDGE_NEEDED : NO_EVIDENCE;

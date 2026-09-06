@@ -38,7 +38,7 @@ final class ReportFixtures {
                         "PRODUCT_GUIDE_SUPPLEMENT", "상품 상세·안내 보완", "OPEN", "검토 전", "접착 부족", PRODUCT,
                         "선바로 몰딩", "'접착' 안내를 상세 페이지에 보완하는 것을 검토하세요", "상세페이지 안내문 초안 준비",
                         "/memory/" + ISSUE)),
-                List.of(new ReportFacts.NextStep("n-1", "답변이 필요한 문의 5건 처리하기", "/inquiries?status=UNANSWERED",
+                List.of(new ReportFacts.NextStep("n-1", "답변이 필요한 문의 보기", "/inquiries?status=UNANSWERED",
                         List.of("c-unanswered-now"))),
                 Instant.parse("2026-09-04T03:00:00Z"));
     }

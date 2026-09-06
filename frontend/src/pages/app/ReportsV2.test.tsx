@@ -61,7 +61,7 @@ const BUSY: AgentReportView = {
       },
     ],
     nextSteps: [
-      { id: "n-1", labelKo: "답변이 필요한 문의 5건 처리하기", to: "/inquiries?status=UNANSWERED", factIds: ["c-unanswered-now"] },
+      { id: "n-1", labelKo: "답변이 필요한 문의 보기", to: "/inquiries?status=UNANSWERED", factIds: ["c-unanswered-now"] },
       { id: "n-2", labelKo: "접착 부족 — 상세페이지 안내문 초안 준비", to: `/memory/${ISSUE}`, factIds: [`o-${ISSUE}-PRODUCT_GUIDE_SUPPLEMENT`] },
     ],
     generatedAt: "2026-09-04T03:00:00Z",
@@ -143,7 +143,10 @@ describe("운영 리포트 — one stored snapshot, sentences that cite facts", 
     const links = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
     expect(links.filter((h) => h === `/memory/${ISSUE}`).length).toBeGreaterThanOrEqual(3);
     expect(screen.getByText("'접착' 안내를 상세 페이지에 보완하는 것을 검토하세요")).toBeInTheDocument();
-    expect(screen.getByText("답변이 필요한 문의 5건 처리하기")).toBeInTheDocument();
+    // The CTA names its destination and carries no count: the snapshot number lives on the counter,
+    // and this link opens the live screen (Pilot QA, 2026-09-06).
+    expect(screen.getByText("답변이 필요한 문의 보기")).toBeInTheDocument();
+    expect(screen.queryByText(/답변이 필요한 문의 \d+건 처리하기/)).toBeNull();
     await expectNoAxeViolations(container);
   });
 

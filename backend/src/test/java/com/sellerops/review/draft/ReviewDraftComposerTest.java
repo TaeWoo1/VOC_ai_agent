@@ -26,6 +26,8 @@ import com.sellerops.inquiry.draft.InquiryEvidenceRetriever.ScopedPassage;
 import com.sellerops.knowledge.KnowledgeScope;
 import com.sellerops.review.Review;
 import com.sellerops.review.draft.dto.GeneratedReviewDraftView;
+import com.sellerops.reviewissue.ReviewIssue;
+import com.sellerops.reviewissue.ReviewIssueEvidence;
 import com.sellerops.reviewissue.ReviewIssueEvidenceRepository;
 import com.sellerops.reviewissue.ReviewIssueRepository;
 import java.time.Instant;
@@ -58,6 +60,8 @@ class ReviewDraftComposerTest {
     private AgentDraftService model;
     private AgentQuotaService quota;
     private ReviewDraftComposer composer;
+    private ReviewIssueEvidenceRepository issueEvidenceRepo;
+    private ReviewIssueRepository issueRepo;
 
     @BeforeEach
     void setUp() {
@@ -67,8 +71,10 @@ class ReviewDraftComposerTest {
         templates = mock(ReviewReplyTemplateService.class);
         model = mock(AgentDraftService.class);
         quota = mock(AgentQuotaService.class);
-        ReviewIssueEvidenceRepository issueEvidence = mock(ReviewIssueEvidenceRepository.class);
-        ReviewIssueRepository issues = mock(ReviewIssueRepository.class);
+        issueEvidenceRepo = mock(ReviewIssueEvidenceRepository.class);
+        ReviewIssueEvidenceRepository issueEvidence = issueEvidenceRepo;
+        issueRepo = mock(ReviewIssueRepository.class);
+        ReviewIssueRepository issues = issueRepo;
 
         when(retriever.namedProduct(ORG, PRODUCT)).thenReturn(PRODUCT);
         when(templates.resolve(eq(ORG), any(ReviewReplyTemplateKey.class)))
@@ -185,11 +191,35 @@ class ReviewDraftComposerTest {
         assertThat(view.evidence()).isEmpty();
         assertThat(view.templateSource()).isEqualTo("DEFAULT");
 
+        // <b>No ask</b> (Pilot QA, 2026-09-06). This review is ★4, the issue extractor did not record
+        // it (the repository above returns nothing), and the customer asked nothing — so nothing about
+        // the REVIEW says an answer was owed, and an empty library is a fact about the library. The
+        // draft is still the seller's own template and the screen still says what it used.
+        assertThat(view.knowledgeGaps()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("no evidence + the issue extractor recorded this review: the ask is filed, naming the customer's words")
+    void withoutEvidenceButRecordedAsAnIssueTheAskIsFiled() {
+        // The mechanism this product actually has for «a complaint the rating cannot see»: the issue
+        // extractor. When it caught the review, the ask is exactly the one it always was.
+        retrieval(DraftKnowledgeState.NO_LIBRARY);
+        java.util.UUID issueId = java.util.UUID.randomUUID();
+        ReviewIssueEvidence row = new ReviewIssueEvidence();
+        row.setIssueId(issueId);
+        ReviewIssue issue = new ReviewIssue();
+        issue.setTitle("접착 탈락");
+        when(issueEvidenceRepo.findByOrgIdAndReviewId(ORG, REVIEW)).thenReturn(List.of(row));
+        when(issueRepo.findById(issueId)).thenReturn(Optional.of(issue));
+
+        GeneratedReviewDraftView view = composer.compose(ORG, review(), BODY, "SELLER:u1");
+
         assertThat(view.knowledgeGaps()).hasSize(1);
         assertThat(view.knowledgeGaps().get(0).scope()).isEqualTo("PRODUCT");
-        assertThat(view.knowledgeGaps().get(0).subjectKind()).isEqualTo("REVIEW_TEXT");
-        // Specific without classifying: the seller reads their own customer's sentence.
-        assertThat(view.knowledgeGaps().get(0).question()).contains("괜찮긴한데 잘떨어지네요");
+        // The extractor named what keeps happening, so the ask is about THAT rather than about one
+        // customer's sentence — `subjectFor` has always preferred the issue title when there is one.
+        assertThat(view.knowledgeGaps().get(0).subjectKind()).isEqualTo("ISSUE");
+        assertThat(view.knowledgeGaps().get(0).question()).contains("접착 탈락");
         assertThat(view.knowledgeGaps().get(0).productId()).isEqualTo(PRODUCT.toString());
     }
 
