@@ -369,6 +369,55 @@ clean seller에서 **읽은 적 없는 것에 대한 부재 주장**으로 착�
 사실 · 벤치마크 동안 AI 예산을 모든 arm에 동일하게 올렸다(제품 코드 무변경) · 라이브 QA는 두 조직을
 **명시적으로 allow-list**한 부팅에서 했다(파일 수정 0, `CONNECTED_SELLERS`·전역 활성화 미사용))
 
+**`docs/langgraph_orchestration_aop_v1.md`** (LangGraph Orchestration Migration + AOP Runtime Core v1 —
+2026-09-06. Agent architecture는 **바꾸지 않는다** — WorldState · Planner · Procedure semantics ·
+NeedKind · typed tools · Evidence · Knowledge/RAG · artifacts · Approval · Executor fences · Helper
+그대로이고, 옮긴 것은 **custom conversation orchestration** 하나다. **§0 개발용 quota**: `enabled`는
+「기록하는가」, 새 **`enforced`**는 「거절할 수 있는가」 — 하나였을 때 **한도를 끄면 계량기까지
+꺼져서** usage·latency·cost가 가장 필요한 sitting이 아무 행도 남기지 않았다(대신 한도를 올리면 첫
+pass가 모델이 아니라 할당량을 잰다). local/QA/bench는 `enforced=false`, production/pilot 기본값은
+`true` 그대로, **거절된 호출은 여전히 미기록**(벤더가 청구하지 않은 지출), metering 없는 enforcement는
+제공 안 함, 프로액티브 예산 양보도 같은 스위치를 읽는다(보이지 않는 두 번째 강제점 금지).
+**§1 before**: `turnNow` **292줄** — 지역 변수 할당 순서가 orchestration이었고, 다섯 갈래 `if` 사슬과
+early return 여섯 개가 그 안에 있었다(operator run은 **이미** LangGraph였고 turn 자체가 아니었다).
+**§2 after**: `START → hydrate → chooseRoute ─┬ click / captureDecision / resume / direct
+└ operator → procedure → compose → persist`. 노드 이름이 `chooseRoute`인 것은 LangGraph가 state
+채널과 겹치는 노드를 거절하기 때문이고 operator graph가 자기 `interpretGoal`에 대해 적어 둔 그
+규칙이다. **각 phase는 의미를 이미 소유한 코드에 위임**하므로 이관은 답을 바꿀 수 없다 — `turnNow`
+**292 → 16줄**이고 구조 테스트가 「turnNow는 phase를 직접 부르지 않는다 · 각 phase의 call site는
+정확히 1」을 고정한다. **§3 state는 id·닫힌 토큰·trail뿐**이고 `turnGraph` 모듈에 `token`·`artifact`·
+`body`·`draft`·`approval`·`text`가 **낱말로도 없다**(구조 테스트); 협력자는 `configurable`로 흘러
+직렬화되지 않는다 — **bearer token을 담을 수 있는 checkpoint는 그것을 흘리는 checkpoint다**.
+**§4 AOP Runtime Core**(`src/aop/`): 정의는 **데이터**이고 step은 구현이 아니라 닫힌 `HandlerName`을
+지목한다(데이터로 다시 쓰는 v1은 이관이 아니라 재구현이다); entry도 닫힌 토큰 표라 routing이
+검사·정렬·테스트 가능하고, compile은 정의의 순서를 chain으로 만들며 **분기는 하나**(terminal을 세운
+step이 마지막이다 — precondition 실패와 human interrupt가 공유하는 그 탈출구). publish되지 않은
+handler를 지목한 정의는 **컴파일이 거절**한다. natural-language compiler·visual editor·business-user
+builder는 **만들지 않는다**. **§5 여섯 절차 그대로**(새 절차 0), priority는 전순서라 「파일에서 먼저」가
+계약이 아니며, **router는 두 번째 planner가 아니다**(판매자 문장을 읽지 않는다) — **대부분의 turn은
+어떤 절차에도 속하지 않고 그것이 정직한 답이다**. 이 이관이 실제로 옮긴 판단은 **하나**: 절차 선택과
+precondition이 composer 안에서 문장 쓰기와 뒤섞여 내려지던 것을 router가 정해 verdict로 넘긴다(같은
+함수·같은 입력·소유자 하나; 문장은 여전히 composer의 것). **§6 persistence**: transcript·working set·
+pending은 `ConversationStore`, 초안·승인·실행·지식은 backend DB, graph state는 **한 turn의 execution
+cursor**뿐이다 — **in-process checkpointer를 붙이지 않았고 그것이 결정이다**(같은 사실의 두 번째
+durable store는 resume 뒤 어긋날 수 있고 어느 쪽이 옳은지 말할 사람이 없다). **§7 interrupt는
+일시정지이지 허가가 아니다** — `interrupt → 기존 approval validation → 별도 execute` 순서, 재실행
+방지는 기존 single-use fence, 두 번째 resume은 아무것도 시작하지 않는다(테스트로 sync run 수 불변).
+**§9 parity**: 스위트 **913 통과·실패 0**, 실 planner 라이브 parity **정확히 동일**(selection 46/48 ·
+holdout 13/14 · 실패 turn 집합 문자 그대로 같음 · **새로 깨진 것 0**) ⇒ **dual runtime 없음, 이관
+커밋이 곧 cutover**. 브라우저 4 turn 재확인(콘솔 0 · off-host 0). **§10 남은 custom orchestration을
+정직하게 적는다**: `directLane` 내부(~300줄)는 orchestration이 아니라 **dispatch**라 노드로 쪼개면
+switch문을 그래프로 그리는 일이 된다 · `compose`(~520줄)는 여전히 한 노드이고 procedure **판단**만
+밖으로 나왔지 **표현**은 안에 있다 · **여섯 정의 중 subgraph로 실행되는 것은 아직 없다**(컴파일·
+라우팅·검사는 실재하고, draft·tone·execute step은 여전히 `directLane`/`compose` 안에서 벌어진다 —
+정의가 약속하고 런타임이 하지 않는 것처럼 읽히지 않도록 적어 둔다) · conversation별 직렬화는 그래프
+밖이다. **§11 다음에 full AOP product를 만들 때**: **durable checkpointer가 먼저**이고 나머지 잔여는
+전부 「절차가 turn보다 오래 살 수 있는가」에 걸려 있다(붙일 자리는 이미 있다) · compose를 표현
+노드들로 쪼개기 · handler의 입출력 스키마 · 실행 중 정의 버전이 바뀌면 무엇이 되는가 · 절차별
+텔레메트리(`conversation_procedure` 한 줄이 이번에 생겼다). **Planner prompt/model 무변경**(v16 ·
+`gpt-5-2025-08-07`@`minimal`). backend **3,884** · frontend **2,762** · runtime **913** · 실패 0 ·
+**마켓플레이스 0 · WRITE 0 · 승인 0 · DB 행 변경 0 · 마이그레이션 0** ⇒ evidence 행 없음)
+
 **`docs/agent_command_center_v1.md`** (Agent Command Center v1 — 제품 방향 수정: reviewnary는
 Dashboard-first + Agent assistant가 아니라 **Agent-first + structured operational workspace**,
 정확히는 **chat-first, object-backed**. Chat은 의도를 나르고 일은 그 일을 이미 소유한 구조화된 UI가

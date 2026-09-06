@@ -183,6 +183,13 @@ export interface Harness {
   readonly inquiry: FakeSpringClient;
   readonly stores: RunStoreProvider;
   readonly recentReviews: Record<string, RecentReviewsResponse>;
+  /**
+   * The same factory the service was built with.
+   *
+   * Returned so a suite can build a SECOND service over the SAME store — which is how a process
+   * restart is reproduced without a process (LangGraph Orchestration Migration v1 §9).
+   */
+  readonly clientFactory: SpringClientFactory;
 }
 
 export function harness(
@@ -225,7 +232,7 @@ export function harness(
   });
   const stores = new RunStoreProvider(CONFIG);
   const service = new ConversationService({ storeProvider: stores, clientFactory });
-  return { service, operator, inquiry, stores, recentReviews };
+  return { service, operator, inquiry, stores, recentReviews, clientFactory };
 }
 
 export const TOKEN = "test-token";
