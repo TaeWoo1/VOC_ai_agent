@@ -22,6 +22,7 @@ export function ReplyWorkControls({
   actionRef,
   disposition,
   hasReplyPreparation,
+  channelReplyState,
   triageMode = "edit",
   headingLevel,
   onOutcomeRecorded,
@@ -34,6 +35,17 @@ export function ReplyWorkControls({
   disposition: TriageDisposition | null;
   /** Whether a draft or approval already exists, as the surface last read it. */
   hasReplyPreparation: boolean;
+  /**
+   * What the CHANNEL last said about a reply already posted (`ANSWERED` | `PENDING` | `UNKNOWN` |
+   * null when the surface does not carry it).
+   *
+   * <p>Stated HERE, above the decision, because this cluster is the one thing mounted on every reply
+   * surface from the moment it opens — and the reply panel, which has known this all along, does not
+   * mount until AFTER the response decision has been made. Measured in pilot QA on 2026-09-06: a
+   * review the channel reports as answered opened on 「판단 전」 and three triage buttons and said
+   * nothing, so the operator judged whether to answer without being told an answer already exists.
+   */
+  channelReplyState?: string | null;
   /**
    * Whether this surface offers to CHANGE the decision, or only shows it.
    *
@@ -91,6 +103,7 @@ export function ReplyWorkControls({
 
   return (
     <>
+      <ChannelAnsweredState state={channelReplyState ?? null} />
       {triageMode === "readonly" ? (
         // The decision, shown but not editable here — see `triageMode`. A label, never a disabled toggle:
         // the operator is not being refused an action, the action simply lives elsewhere. The word is the
@@ -137,5 +150,31 @@ export function ReplyWorkControls({
         />
       ) : null}
     </>
+  );
+}
+
+/**
+ * 「이미 답변 완료」 — the channel's own statement, said before anyone decides anything.
+ *
+ * <p><b>It is not the triage decision and it does not make one.</b> The controls below are untouched:
+ * a review answered on the channel may still be one this operator has never looked at, and writing
+ * 「처리 완료」 here would record a decision nobody made. What it does say is that the road to a
+ * SECOND public reply is closed — new draft, new approval and the guided run are all withheld by the
+ * server (`canSave` / `canApprove` / `canStartSubmissionRun`) and refused by it — so this is a
+ * sentence about a real closure rather than a warning the product then walks past.
+ *
+ * <p>Rendered for ANSWERED alone. 「아직 답변이 없습니다」 would be the channel's silence dressed as a
+ * statement: UNKNOWN means no usable answer, which is a different fact from PENDING.
+ */
+function ChannelAnsweredState({ state }: { state: string | null }) {
+  if (state !== "ANSWERED") return null;
+  return (
+    <div className="rounded-xl border border-line bg-canvas p-3" data-testid="channel-answered-state">
+      <p className="break-keep text-sm font-semibold text-ink">채널에 이미 답변이 등록된 리뷰입니다</p>
+      <p className="break-keep text-sm leading-relaxed text-muted">
+        판매자센터에 답변이 있다고 채널이 알려왔습니다. 새 초안·승인·판매자센터 답변하기는 열리지 않습니다.
+        처리 상태는 아래에서 따로 기록할 수 있습니다.
+      </p>
+    </div>
   );
 }

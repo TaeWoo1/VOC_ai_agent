@@ -714,6 +714,7 @@ function ReviewDetail({
             actionRef={detail.replyWork.actionRef}
             disposition={detail.replyWork.triageDisposition}
             hasReplyPreparation={detail.replyWork.hasReplyPreparation}
+            channelReplyState={detail.replyWork.channelReplyState}
             onDecided={onReplyWorkChanged}
             onOutcomeRecorded={onReplyWorkChanged}
           />

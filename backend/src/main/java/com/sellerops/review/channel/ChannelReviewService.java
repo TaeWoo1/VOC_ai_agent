@@ -297,7 +297,11 @@ public class ChannelReviewService {
                 replyWork.forReview(orgId, channelCodeOf(account.getChannelId()), review.getId(),
                                 execution.of(orgId, account.getId(), channelCodeOf(account.getChannelId())).kind())
                         .map(r -> new ChannelReviewDetailView.ReplyWork(
-                                r.actionRef(), r.triageDisposition(), r.hasReplyPreparation()))
+                                r.actionRef(), r.triageDisposition(), r.hasReplyPreparation(),
+                                // The channel's own statement, off the entity already read for this
+                                // response. Never SellerOps' record of a guided reply (that is
+                                // `outcome`), and never a substitute for the operator's decision.
+                                review.getReplyState().name()))
                         .orElse(null),
                 identity.forReview(review).name());
     }

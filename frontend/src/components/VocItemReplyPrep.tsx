@@ -544,6 +544,7 @@ export function VocItemReplyPrep({
           storedEvidence={prep.draftEvidence ?? []}
           storedBasis={prep.draftAnswerBasis ?? null}
           storedBasisNote={prep.draftAnswerBasisNote ?? null}
+          hasStoredDraft={prep.draft !== null}
           onDrafted={(generated) => {
             setBody(generated);
             setDirty(false);
@@ -580,9 +581,16 @@ export function VocItemReplyPrep({
             승인된 초안은 수정할 수 없습니다. 고치려면 승인을 해제하세요.
           </p>
         ) : null}
-        {!approved && !canSave ? (
-          // Why the editor is inert, rather than a dead control with no explanation. The
-          // operator's own decision is what closed it, and they can reverse it.
+        {!approved && !canSave && prep.channelReplyState !== "ANSWERED" ? (
+          // Why the editor is inert, rather than a dead control with no explanation. The operator's
+          // own decision is what closed it, and they can reverse it.
+          //
+          // TWO closures now reach `canSave === false`, and this sentence is only true of one. When
+          // the CHANNEL has already answered, telling someone looking at a review that IS 대응 필요
+          // that only 대응 필요 reviews may be prepared sends them to press a button already pressed.
+          // That closure is stated once, by the cluster above this panel (`ReplyWorkControls`), which
+          // is mounted on every reply surface and mounted BEFORE this panel is. Saying it twice on
+          // one screen is the other way to get it wrong.
           <p className="text-sm text-muted">
             '대응 필요'로 기록된 리뷰만 답변을 준비할 수 있습니다.
           </p>

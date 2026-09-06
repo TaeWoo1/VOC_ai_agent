@@ -57,7 +57,22 @@ public record ChannelReviewDetailView(
             /** The operator's current decision ({@code TriageDisposition} name), or null when none was recorded. */
             String triageDisposition,
             /** A draft or an approval already exists — the panel must stay reachable whatever the decision. */
-            boolean hasReplyPreparation) {
+            boolean hasReplyPreparation,
+            /**
+             * What the CHANNEL last said about a reply already posted ({@code ReviewReplyState}:
+             * {@code PENDING} | {@code ANSWERED} | {@code UNKNOWN}).
+             *
+             * <p>Carried here, on the read that opens the screen, because the panel that already knew
+             * it ({@code ReviewReplyPrepView.channelReplyState}) does not mount until the operator has
+             * already made the response decision. Measured in pilot QA on 2026-09-06: a review the
+             * channel reports as answered opened on 「판단 전」 and three triage buttons and said nothing
+             * — the operator decided whether to answer without being told an answer already exists.
+             *
+             * <p>It is the channel's statement and NOTHING else. It is not the operator's decision, it
+             * does not stand in for one, and no surface may read it as triage having been done: a
+             * review answered on the channel may still be one this operator has not looked at.
+             */
+            String channelReplyState) {
     }
 
     /** The channel-side identifiers this review carries — nothing that names a person. */

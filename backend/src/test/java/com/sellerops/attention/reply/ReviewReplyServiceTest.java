@@ -336,9 +336,9 @@ class ReviewReplyServiceTest {
     }
 
     @Test
-    void aChannelAnsweredReviewWithholdsTheGuidedCapabilityButKeepsTheRest() {
-        // Copy, approval and withdrawal stay open: the harm being prevented is specifically the
-        // guided double-post, not the operator's own record or their clipboard.
+    void aChannelAnsweredReviewKeepsTheExitAndTheClipboardAndNothingElse() {
+        // Copy and withdrawal stay open, and they are the only two that do: an approval recorded
+        // before the import landed must always have an exit, and the text is already the operator's.
         triage(TriageDisposition.RESPONSE_NEEDED);
         service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
         approveHead();
@@ -349,6 +349,49 @@ class ReviewReplyServiceTest {
         assertThat(caps.canCopy()).isTrue();
         assertThat(caps.canWithdraw()).isTrue();
         // …and the surface is told WHY, rather than being left with a control that vanished.
+        assertThat(view().channelReplyState()).isEqualTo("ANSWERED");
+    }
+
+    /**
+     * <b>Every step toward a SECOND public reply is closed, not just the last one</b> (pilot QA
+     * 2026-09-06).
+     *
+     * <p>Before this, a review the channel had already answered kept 초안 저장, AI 초안 준비 and 승인
+     * open and refused only at the guided run — so a seller could write, read and approve a reply and
+     * meet the sign at the end of the road. The flag and the guard are the same rule, so both are
+     * asserted here: the capability object describes, and the service refuses.
+     */
+    @Test
+    void aChannelAnsweredReviewClosesEveryStepTowardASecondReply() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        markChannelAnswered();
+
+        var caps = view().capabilities();
+        assertThat(caps.canSave()).isFalse();
+        assertThat(caps.canApprove()).isFalse();
+        assertThat(caps.canStartSubmissionRun()).isFalse();
+
+        assertThatThrownBy(() -> service.saveDraft(org, account, ref, "두 번째 공개 답변", 0, user))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+        assertThatThrownBy(() -> service.generateDraft(org, account, ref, user))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    /**
+     * The decision is the OPERATOR's and the channel does not make it for them.
+     *
+     * <p>An answered review is not a triaged review: the disposition is whatever the operator
+     * recorded, and nothing about the channel's statement writes one.
+     */
+    @Test
+    void theChannelsAnswerIsNotTheOperatorsDecision() {
+        markChannelAnswered();
+        assertThat(view().triageDisposition()).isNull();
+
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        assertThat(view().triageDisposition()).isEqualTo(TriageDisposition.RESPONSE_NEEDED.name());
         assertThat(view().channelReplyState()).isEqualTo("ANSWERED");
     }
 

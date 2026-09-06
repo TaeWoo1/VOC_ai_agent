@@ -36,7 +36,12 @@ function detail(over: Partial<ChannelReviewDetailView> = {}): ChannelReviewDetai
     triage: { tier: "FYI", reason: "같은 분류가 늘어나는지 지켜보세요.", tags: ["설치"], recommendedAction: null },
     aiMark: null,
     locateTarget: { productId: null, vendorItemId: null, writtenOn: null, rating: null },
-    replyWork: { actionRef: `review:${REVIEW}`, triageDisposition: "RESPONSE_NEEDED", hasReplyPreparation: true },
+    replyWork: {
+      actionRef: `review:${REVIEW}`,
+      triageDisposition: "RESPONSE_NEEDED",
+      hasReplyPreparation: true,
+      channelReplyState: "PENDING",
+    },
     ...over,
   };
 }
@@ -180,6 +185,80 @@ describe("답변 작업 — one review's reply task", () => {
     await waitFor(() => expect(screen.getByText("합성 전선몰딩")).toBeInTheDocument());
     await expectNoAxeViolations(container);
   });
+
+  /**
+   * <b>The channel's answer is stated before the operator decides whether to answer</b> (pilot QA
+   * 2026-09-06). The panel that has always known this does not mount until AFTER that decision, so
+   * the fact was invisible at the only moment it changes what a person would do.
+   */
+  it("says the channel already answered, at 판단 전, without deciding anything for the operator", async () => {
+    getChannelReviewStrict.mockResolvedValue(
+      detail({
+        replyWork: {
+          actionRef: `review:${REVIEW}`,
+          triageDisposition: null,
+          hasReplyPreparation: false,
+          channelReplyState: "ANSWERED",
+        },
+      }),
+    );
+    renderTask();
+    expect(await screen.findByText("채널에 이미 답변이 등록된 리뷰입니다")).toBeInTheDocument();
+    // The channel's statement is NOT the operator's decision. The triage control still asks, and
+    // nothing on the page claims the review has been handled.
+    expect(screen.getByRole("button", { name: /대응 필요/ })).toBeInTheDocument();
+    expect(screen.queryByText(/처리 완료/)).toBeNull();
+  });
+
+  /**
+   * The road to a second public reply is closed by the SERVER (`canSave` false), and the screen says
+   * so once — in the state line — never by telling someone looking at a 대응 필요 review that only
+   * 대응 필요 reviews may be prepared.
+   */
+  it("closes the draft controls on an answered review and does not blame the decision for it", async () => {
+    getChannelReviewStrict.mockResolvedValue(
+      detail({
+        replyWork: {
+          actionRef: `review:${REVIEW}`,
+          triageDisposition: "RESPONSE_NEEDED",
+          hasReplyPreparation: true,
+          channelReplyState: "ANSWERED",
+        },
+      }),
+    );
+    getReviewReplyPrep.mockResolvedValue(
+      prep({
+        channelReplyState: "ANSWERED",
+        capabilities: { canSave: false, canApprove: false, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
+      }),
+    );
+    renderTask();
+
+    expect(await screen.findByTestId("channel-answered-state")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("괜찮긴한데 자꾸 떨어져요")).toBeInTheDocument());
+    // No way forward is offered, and the one sentence that would be false is not printed.
+    expect(screen.queryByTestId("grounded-review-draft")).toBeNull();
+    expect(screen.queryByText(/'대응 필요'로 기록된 리뷰만/)).toBeNull();
+    // Said once. The state line is the only place this fact appears.
+    expect(screen.getAllByText(/채널에 이미 답변이 등록된/)).toHaveLength(1);
+  });
+
+  it("says nothing when the channel has not said a reply exists — silence is not 「아직 답변이 없습니다」", async () => {
+    getChannelReviewStrict.mockResolvedValue(
+      detail({
+        replyWork: {
+          actionRef: `review:${REVIEW}`,
+          triageDisposition: null,
+          hasReplyPreparation: false,
+          channelReplyState: "UNKNOWN",
+        },
+      }),
+    );
+    renderTask();
+    await screen.findByText("답변 작업");
+    expect(screen.queryByTestId("channel-answered-state")).toBeNull();
+  });
+
 });
 
 /**

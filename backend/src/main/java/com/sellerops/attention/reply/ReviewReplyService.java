@@ -169,6 +169,7 @@ public class ReviewReplyService {
         Review review = authorize(orgId, accountId, actionRef);
         requireResponseNeeded(orgId, review.getId());
         requireNotFrozen(orgId, review.getId());
+        requireChannelNotAnswered(review);
         return drafts.save(orgId, review.getId(), ACTOR_PREFIX + actorUserId, body, baseVersion);
     }
 
@@ -188,6 +189,7 @@ public class ReviewReplyService {
         Review review = authorize(orgId, accountId, actionRef);
         requireResponseNeeded(orgId, review.getId());
         requireNotFrozen(orgId, review.getId());
+        requireChannelNotAnswered(review);
         if (composer == null) {
             throw ApiException.conflict("AI 초안 기능을 사용할 수 없습니다.");
         }
@@ -260,6 +262,9 @@ public class ReviewReplyService {
             // false — and the capability object's promise that the server enforces the rules it
             // reports is only worth anything if the flag and the guard are the same rule.
             requireNotFrozen(orgId, reviewId);
+            // Same reason, for the same rule: approving is the last step before a reply is meant
+            // to be posted, and the channel says one already is.
+            requireChannelNotAnswered(review);
             // Approve the version you actually saw. If the head moved on, binding to the newer
             // text would approve words the operator never read.
             //
@@ -519,6 +524,20 @@ public class ReviewReplyService {
     }
 
     /**
+     * Refuse forward motion on a review the CHANNEL already reports as answered.
+     *
+     * <p>The mirror of {@code canSave} / {@code canApprove} in {@link #compose}, stated here so the
+     * flag and the guard are the same rule — the capability object only describes, and a client that
+     * ignores it must still be refused. It is not applied to withdrawal (an approval recorded before
+     * the import landed must keep its exit) nor to copying (the text is already the operator's).
+     */
+    private void requireChannelNotAnswered(Review review) {
+        if (review.getReplyState() == ReviewReplyState.ANSWERED) {
+            throw ApiException.conflict("채널에 이미 답변이 등록된 리뷰입니다. 새 답변은 준비하지 않습니다.");
+        }
+    }
+
+    /**
      * Whether an approval currently STANDS — the single predicate behind {@code canApprove},
      * {@code canWithdraw}, {@code canCopy}, and both guards below.
      *
@@ -569,10 +588,19 @@ public class ReviewReplyService {
         boolean responseNeeded = triage == TriageDisposition.RESPONSE_NEEDED;
         boolean approved = approval != null
                 && approval.getState() == ReviewReplyApprovalState.APPROVED;
-        // The channel says this review already has a reply. Draft, approval and copy stay open —
-        // an operator may still want the internal record, and the clipboard is theirs to use — but
-        // the GUIDED run does not, because that is the step where SellerOps walks a seller to the
-        // reply box and a second post becomes an irreversible public double-reply.
+        // The channel says this review already has a reply.
+        //
+        // <b>Every step TOWARD a second public reply is closed</b> — writing a new draft version,
+        // generating one, and approving one — not only the guided run at the end of that road
+        // (product-owner decision, pilot QA 2026-09-06). Until now only the guided run was closed,
+        // on the reasoning that an operator might still want the internal record; what the pilot
+        // walk showed is that the road stays fully lit and the sign only appears at the last step,
+        // after the seller has written, read and approved a reply they cannot post. Preparing an
+        // answer to an answered review is work with no destination.
+        //
+        // Two things stay open, and deliberately: `canWithdraw`, because an approval recorded
+        // before the import landed must always have an exit, and `canCopy`, because the text is
+        // already theirs and copying posts nothing.
         boolean channelAnswered = review.getReplyState() == ReviewReplyState.ANSWERED;
         // A guided run may only look for a review whose channel-side identity its acquisition can prove.
         // This is the SAME rule the submission-target mint applies (`ExecutableIdentity.MARKETPLACE`);
@@ -583,8 +611,8 @@ public class ReviewReplyService {
         // server; what leaves is the consequence and the next step (copy).
         boolean sourceExecutable = identity.forReview(review) == ExecutableIdentity.MARKETPLACE;
         ReviewReplyCapabilities capabilities = new ReviewReplyCapabilities(
-                responseNeeded && !approved,
-                responseNeeded && !approved && head != null,
+                responseNeeded && !approved && !channelAnswered,
+                responseNeeded && !approved && !channelAnswered && head != null,
                 approved,
                 responseNeeded && approved,
                 // canStartSubmissionRun — the same rule as canCopy (a guided post is the copy step

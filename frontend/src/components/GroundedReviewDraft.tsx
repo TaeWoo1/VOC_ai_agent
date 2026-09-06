@@ -40,6 +40,7 @@ export function GroundedReviewDraft({
   storedEvidence,
   storedBasis,
   storedBasisNote,
+  hasStoredDraft,
   onDrafted,
 }: {
   accountId: string;
@@ -53,6 +54,20 @@ export function GroundedReviewDraft({
    */
   storedBasis: string | null;
   storedBasisNote: string | null;
+  /**
+   * Whether a draft version is already SAVED for this review — the persisted head, not this session.
+   *
+   * <p>The label used to read this session's `result` alone, so the same review said 「다시 준비하기」
+   * before a reload and 「AI 초안 준비」 after one, over an editor that still held the saved draft
+   * (pilot QA, 2026-09-06). Pressing it replaces what is in the editor; a control that offers to
+   * prepare a first draft over an existing one is the wrong promise, and it is wrong precisely at the
+   * moment the seller has forgotten what is there.
+   *
+   * <p>Any author counts. The question this word answers is 「is there already a draft here that this
+   * press would replace?」, and a version the seller typed themselves answers it just as much as a
+   * generated one. What WROTE the head is a separate fact, and the panel above states it.
+   */
+  hasStoredDraft: boolean;
   /** Hand the generated body to the editor. Called synchronously; never awaited. */
   onDrafted: (body: string) => void;
 }) {
@@ -96,7 +111,7 @@ export function GroundedReviewDraft({
     <section aria-label="AI 답변 준비" className="flex flex-col gap-2" data-testid="grounded-review-draft">
       <div className="flex flex-wrap items-center gap-2">
         <Btn size="sm" onClick={() => void generate()} disabled={busy} data-testid="grounded-review-generate">
-          {busy ? "준비하는 중…" : result ? "다시 준비하기" : "AI 초안 준비"}
+          {busy ? "준비하는 중…" : result || hasStoredDraft ? "다시 준비하기" : "AI 초안 준비"}
         </Btn>
         {/* Said where the button is: a draft is a draft, and this one is not sent by pressing it. */}
         <span className="text-sm text-muted">저장된 지식을 근거로 초안만 만듭니다.</span>

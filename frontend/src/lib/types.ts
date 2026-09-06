@@ -2144,6 +2144,18 @@ export interface ChannelReviewReplyWork {
   actionRef: string;
   triageDisposition: TriageDisposition | null;
   hasReplyPreparation: boolean;
+  /**
+   * What the CHANNEL last said about a reply already posted (`PENDING` | `ANSWERED` | `UNKNOWN`),
+   * carried on the read that OPENS the screen.
+   *
+   * The reply panel has known this for a long time (`ReviewReplyPrep.channelReplyState`), but it does
+   * not mount until the response decision has been made — so a review the channel already answered
+   * showed 「판단 전」 and three triage buttons and said nothing about it (pilot QA, 2026-09-06).
+   *
+   * A statement about the channel, never about this operator: it is not the triage decision, it does
+   * not substitute for one, and no surface may render it as 「처리 완료」.
+   */
+  channelReplyState: string | null;
 }
 
 // ── Review triage feedback — RUBRIC v2 §13.7's spine ─────────────────────────────────────────

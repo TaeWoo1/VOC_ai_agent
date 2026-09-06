@@ -163,7 +163,7 @@ describe("reply work on the 리뷰 screen (A6)", () => {
   };
   const NAVER_DETAIL: ChannelReviewDetailView = {
     ...DETAIL,
-    replyWork: { actionRef: "review:r1", triageDisposition: null, hasReplyPreparation: false },
+    replyWork: { actionRef: "review:r1", triageDisposition: null, hasReplyPreparation: false, channelReplyState: "PENDING" },
   };
 
   it("NAVER: the detail offers the decision (대응 필요 …) and the page opens with 내 답변 작업", async () => {

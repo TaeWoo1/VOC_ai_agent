@@ -144,6 +144,7 @@ export function ReviewReplyTask() {
             actionRef={detail.replyWork.actionRef}
             disposition={detail.replyWork.triageDisposition}
             hasReplyPreparation={detail.replyWork.hasReplyPreparation}
+            channelReplyState={detail.replyWork.channelReplyState}
             triageMode={
               detail.replyWork.triageDisposition === "RESPONSE_NEEDED" || detail.replyWork.hasReplyPreparation
                 ? "readonly"

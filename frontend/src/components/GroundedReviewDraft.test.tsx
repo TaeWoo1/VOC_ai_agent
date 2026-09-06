@@ -77,6 +77,7 @@ function draw(
   storedEvidence: GeneratedReviewDraftView["evidence"] = [],
   onDrafted = vi.fn(),
   stored: { basis: string | null; note: string | null } = { basis: null, note: null },
+  hasStoredDraft = false,
 ) {
   render(
     <MemoryRouter>
@@ -86,6 +87,7 @@ function draw(
         storedEvidence={storedEvidence}
         storedBasis={stored.basis}
         storedBasisNote={stored.note}
+        hasStoredDraft={hasStoredDraft}
         onDrafted={onDrafted}
       />
     </MemoryRouter>,
@@ -186,4 +188,23 @@ describe("Grounded Review Drafting v1 — the draft first, then why, then what i
     expect(generateFailureMessage(undefined)).toContain("잠시 후 다시 시도해 주세요");
   });
 
+});
+
+/**
+ * <b>The word on the button is a fact about the review, not about this browser tab</b> (pilot QA
+ * 2026-09-06). It read this session's generation alone, so the same review offered 「다시 준비하기」
+ * before a reload and 「AI 초안 준비」 after one — over an editor that still held the saved draft the
+ * press would replace.
+ */
+describe("the prepare control names what is already there", () => {
+  it("offers a FIRST draft only when none is saved", () => {
+    draw([], vi.fn(), { basis: null, note: null }, false);
+    expect(screen.getByTestId("grounded-review-generate")).toHaveTextContent("AI 초안 준비");
+  });
+
+  it("offers to prepare AGAIN when a draft is already saved — before anything is pressed", () => {
+    draw([], vi.fn(), { basis: null, note: null }, true);
+    expect(screen.getByTestId("grounded-review-generate")).toHaveTextContent("다시 준비하기");
+    expect(screen.getByTestId("grounded-review-generate")).not.toHaveTextContent("AI 초안 준비");
+  });
 });
