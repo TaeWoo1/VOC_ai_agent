@@ -10,6 +10,10 @@
  * {@link HandlerName} and the handler table is supplied by the runtime, so this file has no idea what
  * preparing a draft means — which is exactly why moving orchestration here could not change semantics.
  *
+ * <b>A step id may not collide with a state channel.</b> LangGraph refuses it, which is why the step
+ * that settles the outcome is called `settle` rather than `terminal` — the same rule the turn graph's
+ * `chooseRoute` and the operator graph's `interpretGoal` record about their own names.
+ *
  * <b>Why a subgraph and not a function.</b> Three things follow from being a real graph and none of
  * them follows from a loop: the checkpointer records which step it stopped after, an interrupt can
  * suspend inside it and resume there, and the trail it writes is the same shape the parent's is.
@@ -20,18 +24,26 @@ import type { HandlerName, ProcedureDefinition } from "./ProcedureDefinition";
 import { ProcedureStateAnnotation } from "./ProcedureState";
 import type { ProcedureState, ProcedureUpdate } from "./ProcedureState";
 
-/** What a handler does: read the state, do the work, return the part of the state it changed. */
-export type ProcedureHandler = (state: ProcedureState) => Promise<ProcedureUpdate> | ProcedureUpdate;
+/**
+ * What a handler does: read the state and the run's context, do the work, return the part of the state
+ * it changed.
+ *
+ * <b>The context is not checkpointed.</b> It travels in `config.configurable`, the same seam the turn
+ * graph uses, and it is where the turn's collaborators and its scratch space live. The STATE is the
+ * execution cursor; the CONTEXT is the process.
+ */
+export type ProcedureHandler<C = unknown> =
+  (state: ProcedureState, ctx: C) => Promise<ProcedureUpdate> | ProcedureUpdate;
 
-export interface ProcedureHandlers {
-  readonly handlers: Readonly<Partial<Record<HandlerName, ProcedureHandler>>>;
+export interface ProcedureHandlers<C = unknown> {
+  readonly handlers: Readonly<Partial<Record<HandlerName, ProcedureHandler<C>>>>;
   /**
    * Whether an OPTIONAL step runs on this state.
    *
    * Only consulted for steps the definition marks optional — a required step that could be skipped is
    * not required, and a definition that said so would be lying about its own shape.
    */
-  readonly shouldRun?: (stepId: string, state: ProcedureState) => boolean;
+  readonly shouldRun?: (stepId: string, state: ProcedureState, ctx: C) => boolean;
 }
 
 /** A step whose handler the runtime did not publish. Named loudly: a silent no-op would pass tests. */
@@ -54,8 +66,11 @@ export type CompiledProcedure = CompiledStateGraph<
  * returns a `terminal` ends the run there, and the trail records what actually ran — which is not the
  * same list as the definition's steps, and that difference is the point of recording it.
  */
-export function compileProcedure(
-  definition: ProcedureDefinition, table: ProcedureHandlers, checkpointer?: BaseCheckpointSaver,
+const ctxOf = <C>(config: unknown): C =>
+  ((config as { configurable?: { ctx?: C } } | undefined)?.configurable?.ctx ?? {}) as C;
+
+export function compileProcedure<C = unknown>(
+  definition: ProcedureDefinition, table: ProcedureHandlers<C>, checkpointer?: BaseCheckpointSaver,
 ): CompiledProcedure {
   for (const step of definition.steps) {
     if (!table.handlers[step.handler]) {
@@ -66,11 +81,12 @@ export function compileProcedure(
   const graph = new StateGraph(ProcedureStateAnnotation);
   for (const step of definition.steps) {
     const handler = table.handlers[step.handler]!;
-    graph.addNode(step.id, async (state: ProcedureState): Promise<ProcedureUpdate> => {
-      if (step.optional && table.shouldRun && !table.shouldRun(step.id, state)) {
+    graph.addNode(step.id, async (state: ProcedureState, config: unknown): Promise<ProcedureUpdate> => {
+      const ctx = ctxOf<C>(config);
+      if (step.optional && table.shouldRun && !table.shouldRun(step.id, state, ctx)) {
         return {};
       }
-      const update = await handler(state);
+      const update = await handler(state, ctx);
       return { ...update, stepTrail: [step.id] };
     });
   }
@@ -98,8 +114,8 @@ export function compileProcedure(
 }
 
 /** Compile the whole catalogue against one handler table. */
-export function compileAll(
-  definitions: readonly ProcedureDefinition[], table: ProcedureHandlers, checkpointer?: BaseCheckpointSaver,
+export function compileAll<C = unknown>(
+  definitions: readonly ProcedureDefinition[], table: ProcedureHandlers<C>, checkpointer?: BaseCheckpointSaver,
 ): Map<string, CompiledProcedure> {
   return new Map(definitions.map((d) => [d.id, compileProcedure(d, table, checkpointer)]));
 }

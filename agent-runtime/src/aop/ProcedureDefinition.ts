@@ -124,30 +124,36 @@ export interface ProcedureStep {
 export type HandlerName =
   /** Derive this turn's {@code WorldState} (one coverage read, memoised for the turn). */
   | "hydrateWorld"
-  /** Evaluate the procedure's precondition and, when it fails, settle the absence and next step. */
+  /**
+   * <b>Exact object load.</b> Read the one inquiry or review this procedure acts on, by id, once.
+   *
+   * It is a step rather than an argument because it can FAIL — the row may be gone, may belong to
+   * another organisation, or may never have been resolvable from what the turn holds — and a
+   * procedure that could not load its object has a terminal, not an exception.
+   */
+  | "loadObject"
+  /** Evaluate the precondition and, when it fails, settle the absence and the next step. */
   | "checkPrecondition"
-  /** Run the Operator graph for this turn's plan — specialists, tools, evidence, judge. */
-  | "runOperator"
-  /** Resolve the object this procedure acts on, from the anchor or the sentence's own narrowing. */
-  | "resolveTarget"
+  /** Read what the question needs: the Operator graph's specialists, tools and evidence. */
+  | "investigate"
+  /** Assemble what was found into the evidence this procedure may cite. */
+  | "evidence"
   /** Prepare a reply draft through the backend's production draft path. */
-  | "prepareDraft"
+  | "prepare"
   /** Re-run the draft with a tone hint, over the SAME evidence and a new version. */
-  | "reviseDraft"
-  /** Ask the seller for a missing answer basis, and stop. */
-  | "askKnowledge"
-  /** Store the seller's answer through the seller-write seam, then resume the original work once. */
-  | "storeKnowledge"
+  | "revise"
+  /** Stop and put a question or a step to the seller. The turn ends here. */
+  | "humanWait"
+  /** Continue after the person acted — re-reading their record, never replaying the effect. */
+  | "resume"
   /** Read the improvement opportunities derived from a repeated problem. */
   | "readOpportunities"
-  /** Turn what the run produced into artifacts, sentences and chips. */
-  | "compose"
-  /** Publish the human step the seller must perform, and stop. */
-  | "requestHumanAction"
   /** Validate a standing approval against its own record — never against the fact of a resume. */
   | "validateApproval"
   /** Perform the approved side effect, once, behind the existing single-use fence. */
-  | "execute";
+  | "execute"
+  /** Settle how this run ended. Writes no sentence. */
+  | "terminal";
 
 /**
  * The entry condition, as data.

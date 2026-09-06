@@ -35,7 +35,7 @@ const ONBOARD_CHANNEL: ProcedureDefinition = {
   steps: [
     { id: "world", does: "coverage 한 번 읽어 readiness를 정한다", handler: "hydrateWorld" },
     { id: "gate", does: "NO_CHANNEL 부재 이유와 연결 단계를 확정한다", handler: "checkPrecondition" },
-    { id: "answer", does: "부재 문장과 다음 걸음 하나를 그린다", handler: "compose" },
+    { id: "settle", does: "BLOCKED_BY_PRECONDITION으로 닫는다", handler: "terminal" },
   ],
   allowedTools: [T.GET_CHANNEL_COVERAGE, T.GET_CONNECTION_GUIDANCE, T.GET_CHANNEL_CAPABILITY],
   references: ["CHANNEL_CODE"],
@@ -63,8 +63,8 @@ const DAILY_WORK: ProcedureDefinition = {
   steps: [
     { id: "world", does: "coverage 한 번 읽어 readiness를 정한다", handler: "hydrateWorld" },
     { id: "gate", does: "읽을 수 있는 출처가 있는지 본다", handler: "checkPrecondition" },
-    { id: "read", does: "plan이 세운 need를 specialist가 읽는다", handler: "runOperator" },
-    { id: "answer", does: "체크리스트를 그리고, 비었을 때만 그 사실을 말한다", handler: "compose" },
+    { id: "investigate", does: "plan이 세운 need를 specialist가 읽는다", handler: "investigate" },
+    { id: "settle", does: "비었을 때 「없습니다」를 말할 자격이 있는지 정한다", handler: "terminal" },
   ],
   allowedTools: [
     T.GET_TODAY_INBOX, T.LIST_INQUIRY_WORKLOAD, T.LIST_INQUIRY_ROWS, T.LIST_RECENT_REVIEWS,
@@ -93,13 +93,13 @@ const ANSWER_INQUIRY: ProcedureDefinition = {
     priority: 30,
   },
   steps: [
-    { id: "target", does: "anchor 또는 문장이 좁힌 대상을 exact READ 한 번으로 확인한다", handler: "resolveTarget" },
+    { id: "loadObject", does: "그 문의 하나를 id로 exact READ 한 번", handler: "loadObject" },
     { id: "gate", does: "그 문의가 지금 초안을 받을 수 있는지 본다", handler: "checkPrecondition" },
-    { id: "draft", does: "백엔드의 production draft path로 초안을 만든다", handler: "prepareDraft" },
-    { id: "tone", does: "말투 요청이 있으면 같은 근거로 새 버전을 만든다", handler: "reviseDraft", optional: true },
-    { id: "answer", does: "초안과 근거를 그린다", handler: "compose" },
-    { id: "approval", does: "전송을 요청했으면 승인 경계를 확인한다", handler: "validateApproval", optional: true },
-    { id: "send", does: "승인된 것만, 한 번만 보낸다", handler: "execute", optional: true },
+    { id: "prepare", does: "백엔드의 production draft path로 초안을 만든다", handler: "prepare", optional: true },
+    { id: "revise", does: "말투 요청이면 같은 근거로 새 버전을 만든다", handler: "revise", optional: true },
+    { id: "approval", does: "전송을 요청했으면 승인 경계를 그 기록에 대고 확인한다", handler: "validateApproval", optional: true },
+    { id: "execute", does: "승인된 것만, 한 번만 보낸다", handler: "execute", optional: true },
+    { id: "settle", does: "ANSWERED / BLOCKED / WAITING_HUMAN 중 하나로 닫는다", handler: "terminal" },
   ],
   allowedTools: [
     T.GET_INQUIRY_DETAIL, T.GET_INQUIRY_CONTEXT, T.LIST_INQUIRY_WORKLOAD, T.LIST_INQUIRY_ROWS,
@@ -112,7 +112,9 @@ const ANSWER_INQUIRY: ProcedureDefinition = {
     "RESUME_IS_IDEMPOTENT", "NO_MARKETPLACE_WRITE",
   ],
   completion: ["ANSWERED", "BLOCKED_BY_PRECONDITION", "WAITING_HUMAN"],
-  humanInterrupt: ["SEND_APPROVAL"],
+  // Two ways this procedure stops for a person: the approval boundary, and the question the draft step
+  // puts to the seller when the library cannot answer this customer (`CAPTURE_KNOWLEDGE` resumes it).
+  humanInterrupt: ["SEND_APPROVAL", "KNOWLEDGE_ANSWER"],
 };
 
 /**
@@ -132,14 +134,14 @@ const ANSWER_REVIEW: ProcedureDefinition = {
     priority: 40,
   },
   steps: [
-    { id: "target", does: "리뷰 하나를 exact READ 한 번으로 확인한다", handler: "resolveTarget" },
+    { id: "loadObject", does: "리뷰 하나를 id로 exact READ 한 번", handler: "loadObject" },
     { id: "gate", does: "이 채널이 답글을 받을 수 있는지 본다", handler: "checkPrecondition" },
-    { id: "draft", does: "회사 문구와 근거로 답글 초안을 만든다", handler: "prepareDraft" },
-    { id: "tone", does: "말투 요청이 있으면 같은 근거로 새 버전을 만든다", handler: "reviseDraft", optional: true },
-    { id: "answer", does: "초안과 답변 작업 화면으로 가는 길을 그린다", handler: "compose" },
-    { id: "approval", does: "게시를 요청했으면 승인 경계를 확인한다", handler: "validateApproval", optional: true },
-    { id: "guided", does: "가이드 채널이면 판매자가 할 단계를 알리고 멈춘다", handler: "requestHumanAction", optional: true },
-    { id: "send", does: "승인된 것만, 한 번만 실행한다", handler: "execute", optional: true },
+    { id: "prepare", does: "회사 문구와 근거로 답글 초안을 만든다", handler: "prepare", optional: true },
+    { id: "revise", does: "말투 요청이면 같은 근거로 새 버전을 만든다", handler: "revise", optional: true },
+    { id: "approval", does: "게시를 요청했으면 승인 경계를 그 기록에 대고 확인한다", handler: "validateApproval", optional: true },
+    { id: "humanWait", does: "가이드 채널이면 판매자가 할 단계를 알리고 멈춘다", handler: "humanWait", optional: true },
+    { id: "execute", does: "승인된 것만, 한 번만 실행한다", handler: "execute", optional: true },
+    { id: "settle", does: "ANSWERED / BLOCKED / WAITING_HUMAN / UNKNOWN 중 하나로 닫는다", handler: "terminal" },
   ],
   allowedTools: [
     T.LIST_RECENT_REVIEWS, T.GET_CHANNEL_EXECUTION_CAPABILITY, T.GET_CHANNEL_CAPABILITY,
@@ -169,11 +171,13 @@ const CAPTURE_KNOWLEDGE: ProcedureDefinition = {
     pendingCapture: true,
     priority: 5,
   },
+  // Two steps, and the missing third is the point: the WAIT is not something this procedure performs.
+  // The question was put to the seller by the draft step of ANSWER_INQUIRY, which is why that procedure
+  // declares `KNOWLEDGE_ANSWER` too; this one is what runs when the seller answers it. A sentence that
+  // turns out not to be an answer is not this procedure's turn at all, and it hands the turn back.
   steps: [
-    { id: "ask", does: "무엇이 빠졌는지 닫힌 템플릿으로 묻고 멈춘다", handler: "askKnowledge" },
-    { id: "store", does: "판매자 문장을 seller-write seam으로 저장한다", handler: "storeKnowledge" },
-    { id: "redo", does: "원래 하던 일을 정확히 한 번 다시 한다", handler: "prepareDraft" },
-    { id: "answer", does: "저장했다는 사실과 다시 만든 결과를 그린다", handler: "compose" },
+    { id: "resume", does: "판매자가 답한 문장을 seller-write seam으로 저장하고 하던 일을 한 번 다시 한다", handler: "resume" },
+    { id: "settle", does: "ANSWERED로 닫거나, 답이 아니었으면 이 turn을 놓아 준다", handler: "terminal" },
   ],
   allowedTools: [T.SEARCH_ORG_KNOWLEDGE, T.SEARCH_PRODUCT_KNOWLEDGE, T.GET_INQUIRY_DETAIL],
   references: ["CANDIDATE_ID", "WORK_ITEM_ID", "INQUIRY_ID", "PRODUCT_ID"],
@@ -198,8 +202,9 @@ const IMPROVE_FROM_ISSUES: ProcedureDefinition = {
     priority: 50,
   },
   steps: [
-    { id: "read", does: "그 이슈의 개선 기회를 백엔드에서 읽는다", handler: "readOpportunities" },
-    { id: "answer", does: "무엇이 반복되는지·근거·다음 행동을 그린다", handler: "compose" },
+    { id: "investigate", does: "plan이 세운 need를 specialist가 읽는다", handler: "investigate" },
+    { id: "evidence", does: "그 이슈의 개선 기회와 근거를 확인한다", handler: "readOpportunities" },
+    { id: "settle", does: "ANSWERED / UNKNOWN 중 하나로 닫는다", handler: "terminal" },
   ],
   allowedTools: [
     T.LIST_IMPROVEMENT_OPPORTUNITIES, T.SEARCH_REVIEW_ISSUES, T.GET_ISSUE_EVIDENCE_SUMMARY,

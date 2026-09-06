@@ -29,6 +29,11 @@ export type TurnRoute =
   | "CAPTURE_DECISION"
   /** «the human step is done» — recheck each pending action's own record before spending anything. */
   | "RESUME"
+  /**
+   * A business procedure claims this turn before any planning — the object is on the table and the
+   * sentence asks for a step of that procedure (AOP Execution Closure v1).
+   */
+  | "PROCEDURE"
   /** A closed intent about the object already on the table. No planner call and no read. */
   | "DIRECT"
   /** Everything else: the LLM planner, the specialists, the evidence, the judge. */

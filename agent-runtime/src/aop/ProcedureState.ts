@@ -42,6 +42,13 @@ export const ProcedureStateAnnotation = Annotation.Root({
   absence: Annotation<AbsenceReason | null>({ reducer: last, default: () => null }),
   /** What this procedure is waiting for a person to do. */
   interrupt: Annotation<InterruptKind | null>({ reducer: last, default: () => null }),
+  /**
+   * The standing approval this run is waiting on, by id.
+   *
+   * <b>An id, never a decision.</b> The approval's validity is read from its own record every time
+   * (§6); carrying the verdict here would let a resume inherit a yes nobody gave twice.
+   */
+  approvalId: Annotation<string | null>({ reducer: last, default: () => null }),
   /** Which steps actually ran, in order — the trace, and what a resume continues after. */
   stepTrail: Annotation<string[]>({
     reducer: (prev, next) => [...prev, ...next], default: () => [],

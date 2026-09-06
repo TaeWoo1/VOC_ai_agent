@@ -66,7 +66,7 @@ describe("§A — the definitions describe this product, not a target state", ()
     // These three, and nothing else, can stop a turn — the approval boundary, a guided marketplace
     // step, and the knowledge question. A procedure that listed a fourth would be claiming a pause
     // this runtime has no way to publish.
-    expect(PROCEDURES.ANSWER_INQUIRY.humanInterrupt).toEqual(["SEND_APPROVAL"]);
+    expect(PROCEDURES.ANSWER_INQUIRY.humanInterrupt).toEqual(["SEND_APPROVAL", "KNOWLEDGE_ANSWER"]);
     expect(PROCEDURES.ANSWER_REVIEW.humanInterrupt).toEqual(["SEND_APPROVAL", "HUMAN_ACTION_ON_CHANNEL"]);
     expect(PROCEDURES.CAPTURE_KNOWLEDGE.humanInterrupt).toEqual(["KNOWLEDGE_ANSWER"]);
     expect(PROCEDURES.DAILY_WORK.humanInterrupt).toEqual([]);
@@ -141,7 +141,7 @@ describe("§C — the compiler turns a definition into that definition's graph",
   it("runs the steps in the definition's own order", async () => {
     const graph = compileProcedure(PROCEDURES.DAILY_WORK, table());
     const out = await graph.invoke({} as never);
-    expect(out.stepTrail).toEqual(["world", "gate", "read", "answer"]);
+    expect(out.stepTrail).toEqual(["world", "gate", "investigate", "settle"]);
   });
 
   it("a step that ends the run is the last step that runs", async () => {
@@ -158,10 +158,10 @@ describe("§C — the compiler turns a definition into that definition's graph",
     const graph = compileProcedure(PROCEDURES.ANSWER_INQUIRY, {
       ...table(),
       // 말투 요청도, 전송 요청도 없는 평범한 초안 준비.
-      shouldRun: (stepId) => !["tone", "approval", "send"].includes(stepId),
+      shouldRun: (stepId) => !["revise", "approval", "execute"].includes(stepId),
     });
     const out = await graph.invoke({} as never);
-    expect(out.stepTrail).toEqual(["target", "gate", "draft", "answer"]);
+    expect(out.stepTrail).toEqual(["loadObject", "gate", "prepare", "settle"]);
   });
 
   it("refuses to compile a step whose handler the runtime does not publish", () => {
@@ -179,6 +179,6 @@ describe("§C — the compiler turns a definition into that definition's graph",
     expect(out.refs).toEqual({ issueId: "iss-1", productId: "p-1" });
     const state = await graph.getState(config);
     expect(state.values.refs).toEqual({ issueId: "iss-1", productId: "p-1" });
-    expect(state.values.stepTrail).toEqual(["read", "answer"]);
+    expect(state.values.stepTrail).toEqual(["investigate", "evidence", "settle"]);
   });
 });

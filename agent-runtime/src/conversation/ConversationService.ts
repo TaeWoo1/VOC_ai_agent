@@ -45,7 +45,7 @@ import { isReferenceOnly } from "./reference";
 import { OPERATOR_TOOL, buildOperatorTools } from "../operator/tools/OperatorTools";
 import { OperatorToolRegistry } from "../operator/tools/OperatorToolRegistry";
 import { alreadySaidAnswer, assistantCapabilityAnswer, gettingStartedAnswer } from "../operator/capability/AssistantCapability";
-import { worldStateOf, worldTokenFor } from "../operator/state/WorldState";
+import { UNKNOWN_WORLD, worldStateOf, worldTokenFor } from "../operator/state/WorldState";
 import type { WorldState } from "../operator/state/WorldState";
 import {
   CONNECT_STEP, absenceSentence, honestZero, inquiryDraftPrecondition, nextStepFor, objectRefusalSentence,
@@ -64,6 +64,13 @@ import { log } from "../log";
 import { buildTurnGraph } from "./graph/turnGraph";
 import type { TurnGraphUpdate, TurnRoute } from "./graph/TurnState";
 import { selectProcedure } from "../aop/router";
+import { ProcedureRuntime } from "../aop/ProcedureRuntime";
+import type { ProcedureOps } from "../aop/ProcedureRuntime";
+import type { ProcedureState, ProcedureUpdate } from "../aop/ProcedureState";
+import { MemoryAopCheckpointStore } from "../aop/AopCheckpointStore";
+import type { AopCheckpointStore } from "../aop/AopCheckpointStore";
+import { procedureIntentOf, requestedActionFor } from "./procedureIntent";
+import type { ProcedureIntent } from "./procedureIntent";
 import type { Precondition, ProcedureId } from "../operator/procedure/Procedure";
 import { inquiryRowsSentence } from "../operator/graph/inquiryRowsStep";
 import { urgencySentence } from "../operator/graph/inquiryWorkloadStep";
@@ -111,6 +118,13 @@ export interface ConversationServiceDeps {
   readonly clientFactory: SpringClientFactory;
   /** Injectable clock so a turn's timestamps are deterministic in tests. */
   readonly now?: () => Date;
+  /**
+   * Where a stopped procedure's cursor is kept. Absent ⇒ in memory.
+   *
+   * The seam exists so a restart proof does not need a different service: the same code, a durable
+   * store behind it. What it may hold is fixed by {@link AopCheckpoint} and asserted on a real write.
+   */
+  readonly procedureCheckpoints?: AopCheckpointStore;
 }
 
 type ProgressFn = (e: ProgressEvent) => void;
@@ -246,6 +260,12 @@ interface TurnCtx {
   result?: OperatorRunResult;
   turnWorld?: WorldState;
   procedure?: { id: ProcedureId | null; version: string | null; precondition: Precondition };
+  /** What this sentence asks of the object on the table — a closed token, decided once. */
+  intent?: ProcedureIntent;
+  /** The object a procedure loaded, kept for its later steps. Never checkpointed. */
+  target?: ResolvedTarget | null;
+  /** What a procedure produced. The pre-plan lanes end the turn with it. */
+  composed?: Composed | null;
   /** The turn this run produced. The graph ends when it exists. */
   out: TurnView | null;
 }
@@ -275,7 +295,42 @@ export class ConversationService {
    * a turn does not outlive the request that started it; what outlives it is the conversation, and a
    * resume re-enters through `resumeOfTurnId` against the store's record.
    */
-  private readonly turnGraph = buildTurnGraph({
+  /**
+   * The AOP runtime — the six definitions, compiled once, with the durable cursor store behind them.
+   *
+   * <b>The cursor is not the truth.</b> It carries conversation id, procedure id + version, the step
+   * it stopped at, object refs, the draft version and the approval id — and the backend keeps every
+   * one of the facts those point at. The in-memory store is the default because a chat turn does not
+   * outlive its request; a deployment that wants a stopped procedure to survive a restart passes the
+   * file store, and {@code AopCheckpointStore} is the seam either way.
+   */
+  private proceduresMemo: ProcedureRuntime<TurnCtx> | null = null;
+
+  private get procedures(): ProcedureRuntime<TurnCtx> {
+    this.proceduresMemo ??= new ProcedureRuntime<TurnCtx>(this.procedureOps(), {
+      checkpoints: this.checkpointStore,
+    });
+    return this.proceduresMemo;
+  }
+
+  /**
+   * Where a stopped procedure's cursor lives.
+   *
+   * In memory by default: a chat turn does not outlive its request, so the ordinary deployment has
+   * nothing to keep. A deployment that wants a stopped procedure to survive a restart passes the file
+   * store — the interface is the same and neither of them may hold business truth.
+   */
+  private checkpointStoreMemo: AopCheckpointStore | null = null;
+
+  private get checkpointStore(): AopCheckpointStore {
+    this.checkpointStoreMemo ??= this.deps.procedureCheckpoints ?? new MemoryAopCheckpointStore();
+    return this.checkpointStoreMemo;
+  }
+
+  private turnGraphMemo: ReturnType<typeof buildTurnGraph> | null = null;
+
+  private get turnGraph(): ReturnType<typeof buildTurnGraph> {
+    this.turnGraphMemo ??= buildTurnGraph({
     hydrate: (ctx) => this.phaseHydrate(ctx as unknown as TurnCtx),
     route: (ctx) => this.phaseRoute(ctx as unknown as TurnCtx),
     click: (ctx) => this.phaseClick(ctx as unknown as TurnCtx),
@@ -284,9 +339,11 @@ export class ConversationService {
     direct: (ctx) => this.phaseDirect(ctx as unknown as TurnCtx),
     operator: (ctx) => this.phaseOperator(ctx as unknown as TurnCtx),
     procedure: (ctx) => this.phaseProcedure(ctx as unknown as TurnCtx),
-    compose: (ctx) => this.phaseCompose(ctx as unknown as TurnCtx),
-    persist: (ctx) => this.phasePersist(ctx as unknown as TurnCtx),
-  });
+      compose: (ctx) => this.phaseCompose(ctx as unknown as TurnCtx),
+      persist: (ctx) => this.phasePersist(ctx as unknown as TurnCtx),
+    });
+    return this.turnGraphMemo;
+  }
 
   async create(token: string): Promise<ConversationView> {
     const { store, orgId } = await this.tenant(token);
@@ -371,6 +428,19 @@ export class ConversationService {
     return ctx.out;
   }
 
+  /**
+   * Which object this conversation is standing on, as the closed token routing takes.
+   *
+   * <b>`focusInquiryOf` decides it, not the presence of a `selectedInquiry`.</b> A one-row set has
+   * exactly one referent and has counted as the focus since Conversation Contract Correctness v2 §E;
+   * asking a narrower question here would send 「이 고객한테 뭐라고 답해야 해?」 to the planner, which is
+   * the defect that section closed.
+   */
+  private anchorKindOf(view: ConversationView): "INQUIRY" | "REVIEW" | null {
+    if (view.workingSet?.selectedObject?.kind === "REVIEW") return "REVIEW";
+    return focusInquiryOf(pickSet(null, view)) || view.pendingPrepared ? "INQUIRY" : null;
+  }
+
   /** hydrate — the tenant, the conversation, and this turn's world (one coverage read, memoised). */
   private async phaseHydrate(ctx: TurnCtx): Promise<TurnGraphUpdate> {
     const { token, id } = ctx;
@@ -417,6 +487,28 @@ export class ConversationService {
     if (ctx.request.select) return "CLICK";
     if (ctx.request.captureDecision) return "CAPTURE_DECISION";
     if (ctx.request.resumeOfTurnId) return "RESUME";
+    // ── Does a business procedure claim this turn? (AOP Execution Closure v1)
+    //
+    // The sentence is read HERE, once, into a closed token; the router downstream sees only tokens.
+    // These were the first branches of the direct lane, and being branches is what made them
+    // invisible: nothing could say which business procedure a turn had run.
+    const view = ctx.view!;
+    const text = ctx.text || (ctx.request.text ?? "");
+    ctx.text = text;
+    // The seller's sentence becomes a turn HERE, before either lane runs, because that is where the
+    // old method created it and where `UNDERSTANDING` was reported. A click and a capture decision
+    // returned above: neither of them is a sentence.
+    this.ensureUserTurn(ctx);
+    const intent = procedureIntentOf(view, text);
+    ctx.intent = intent;
+    if (intent !== "NONE") {
+      const claimed = selectProcedure({
+        readiness: "WORKING", anchor: this.anchorKindOf(view),
+        requestedAction: requestedActionFor(intent),
+        needKinds: [], pendingCapture: Boolean(view.pendingCapture),
+      });
+      if (claimed) return "PROCEDURE";
+    }
     // A resumed turn never re-enters the deterministic lanes; everything else asks them first.
     return "DIRECT";
   }
@@ -583,6 +675,23 @@ export class ConversationService {
     const userTurn = this.ensureUserTurn(ctx);
     const direct = resumedFrom ? null : await this.directLane(view, text, hints, bundle, stage, world);
     if (direct) {
+      const finalTurn = await this.finishDirect(ctx, direct);
+      return { handled: true, update: { turnId: finalTurn.turnId } };
+    }
+    return { handled: false, update: {} };
+  }
+
+  /**
+   * A deterministic answer, persisted and returned — the tail both the direct lanes and a pre-plan
+   * procedure share.
+   *
+   * It was the body of one `if`; two callers reach it now, so it has a name. Nothing in it changed.
+   */
+  private async finishDirect(ctx: TurnCtx, direct: Composed): Promise<TurnView> {
+    const view = ctx.view!;
+    const store = ctx.store!;
+    const { started } = ctx;
+    const userTurn = this.ensureUserTurn(ctx);
       const agentTurn = this.agentTurn(view, direct);
       const workingSet = direct.workingSet ? { ...direct.workingSet, turnId: agentTurn.turnId } : null;
       const pendingPrepared = direct.pendingPrepared ? { ...direct.pendingPrepared, turnId: agentTurn.turnId } : null;
@@ -608,11 +717,9 @@ export class ConversationService {
         workingSetKind: workingSet?.kind ?? "NONE", requestedAction: direct.budget?.stopReason ?? (direct.pendingPrepared ? "TONE_REVISION" : "SELECT"),
       });
       ctx.out = finalTurn;
-      return { handled: true, update: { turnId: finalTurn.turnId } };
-    }
+      return finalTurn;
     // <b>The channel the seller last named, decided once for this turn.</b> Both the graph's read and this
     // service's own axis use it, so the rows and the sentence about them can never be scoped differently.
-    return { handled: false, update: {} };
   }
 
   /** operator — the planner, the specialists, the tools, the evidence, the judge. */
@@ -716,34 +823,59 @@ export class ConversationService {
    * inputs, one owner. No sentence is written here.
    */
   private async phaseProcedure(ctx: TurnCtx): Promise<TurnGraphUpdate> {
-    const world = ctx.turnWorld!;
+    const view = ctx.view!;
+    const prePlan = ctx.result == null;
+    const selected = prePlan
+      ? selectProcedure({
+        readiness: "WORKING", anchor: this.anchorKindOf(view),
+        requestedAction: requestedActionFor(ctx.intent ?? "NONE"),
+        needKinds: [], pendingCapture: Boolean(view.pendingCapture),
+      })
+      : this.selectPostPlanProcedure(ctx);
+    if (!selected) {
+      ctx.procedure = { id: null, version: null, precondition: { ok: true } };
+      return { procedureId: null, procedureVersion: null };
+    }
+    const { state } = await this.procedures.run(selected.id, ctx, {
+      conversationId: ctx.id,
+      // One thread per conversation and procedure: a stopped ANSWER_INQUIRY and a stopped
+      // CAPTURE_KNOWLEDGE on the same conversation are different cursors, and neither resumes the other.
+      threadId: `${ctx.id}:${selected.id}`,
+    });
+    ctx.procedure = {
+      id: selected.id, version: selected.version,
+      precondition: ctx.procedure?.precondition ?? { ok: true },
+    };
+    if (prePlan && ctx.composed) {
+      const finalTurn = await this.finishDirect(ctx, ctx.composed);
+      return { turnId: finalTurn.turnId, terminal: state.terminal, procedureId: selected.id, procedureVersion: selected.version };
+    }
+    return {
+      procedureId: selected.id, procedureVersion: selected.version,
+      ...(state.absence ? { absence: state.absence } : {}),
+      // A pre-plan procedure that could not act hands the turn back to the ordinary lanes. The route
+      // is NOT rewritten: it records how this turn started, and the graph tells the two visits apart
+      // by the trail.
+      ...(prePlan ? { terminal: null } : {}),
+    };
+  }
+
+  /** Which procedure the PLAN's own tokens select, once the operator has run. */
+  private selectPostPlanProcedure(ctx: TurnCtx): { id: ProcedureId; version: string } | null {
     const result = ctx.result!;
     const plan = result.status === "DONE" ? result.plan ?? null : null;
     const set = ctx.view!.workingSet;
     const anchor = set?.selectedObject?.kind === "PRODUCT" ? "PRODUCT" as const
       : set?.selectedObject?.kind === "REVIEW" ? "REVIEW" as const
         : set?.selectedInquiry ? "INQUIRY" as const : null;
-    const selected = selectProcedure({
-      readiness: world.readiness.kind,
+    const found = selectProcedure({
+      readiness: (ctx.turnWorld ?? UNKNOWN_WORLD).readiness.kind,
       anchor,
       requestedAction: plan ? conversationAxisOf(plan).requestedAction : "NONE",
       needKinds: plan ? plan.informationNeeds.map((n) => n.kind) : [],
       pendingCapture: Boolean(ctx.view!.pendingCapture),
     });
-    // The precondition every row-reading procedure shares, evaluated once and handed to the composer.
-    const gate = operationalPrecondition(world);
-    ctx.procedure = selected
-      ? { id: selected.id, version: selected.version, precondition: gate }
-      : { id: null, version: null, precondition: gate };
-    log("conversation_procedure", {
-      procedure: selected?.id ?? "NONE", version: selected?.version ?? "",
-      readiness: world.readiness.kind, ok: gate.ok,
-    });
-    return {
-      procedureId: selected?.id ?? null,
-      procedureVersion: selected?.version ?? null,
-      ...(gate.ok ? {} : { absence: gate.absence }),
-    };
+    return found ? { id: found.id, version: found.version } : null;
   }
 
   /** compose — what the run produced, as artifacts, sentences and chips. */
@@ -819,6 +951,268 @@ export class ConversationService {
     // The composer already saved: the store write and the turn it returns are one unit, and splitting
     // them would create a window in which the seller has an answer the conversation does not have.
     return {};
+  }
+
+
+  /* ══════════════════════ AOP Runtime — the six procedures' actual execution ══════════════════════
+   *
+   * AOP Execution Closure v1. Every method below is a STEP of a compiled subgraph, and each one
+   * delegates to the code that already owned that step. The transitions between them — which step is
+   * next, where the run stops, what a resume continues — belong to the graph, not to this class.
+   *
+   * <b>Nothing here writes a sentence about a procedure's outcome.</b> `terminal` settles a token;
+   * composition stays where it lives.
+   */
+
+  /** One coverage read, memoised for the turn — the same one every other lane shares. */
+  private async opHydrateWorld(_state: ProcedureState, ctx: TurnCtx): Promise<ProcedureUpdate> {
+    const world = await ctx.world!();
+    ctx.turnWorld = world;
+    return {};
+  }
+
+  /**
+   * <b>Exact object load.</b> The one inquiry or review this procedure acts on, by id, once.
+   *
+   * A load that finds nothing does not throw and does not guess: it leaves the run without a terminal,
+   * and the graph hands the turn back to the ordinary lanes exactly as the `if` that used to sit here
+   * fell through to them.
+   */
+  private async opLoadObject(state: ProcedureState, ctx: TurnCtx): Promise<ProcedureUpdate> {
+    const view = ctx.view!;
+    const bundle = ctx.bundle!;
+    if (state.procedureId === "ANSWER_REVIEW") {
+      const object = view.workingSet?.selectedObject;
+      if (object?.kind !== "REVIEW") return {};
+      ctx.target = null;
+      return { refs: { reviewId: object.id, ...(object.productId ? { productId: object.productId } : {}) } };
+    }
+    const prepared = view.pendingPrepared;
+    if (ctx.intent === "REVISE_TONE" && prepared) {
+      return { refs: { workItemId: prepared.workItemId, ...(prepared.draftVersion != null ? { draftVersion: prepared.draftVersion } : {}) } };
+    }
+    let anchor = focusInquiryOf(pickSet(null, view));
+    if (anchor && ctx.hints.workItemId && ctx.hints.workItemId !== anchor.workItemId) anchor = null;
+    if (!anchor) return {};
+    const resolved = inquiryTargetFromHistory(view, anchor.inquiryId)
+      ?? await this.verifiedTarget(anchor.workItemId, bundle);
+    if (!resolved || resolved.kind !== "INQUIRY") return {};
+    ctx.target = resolved;
+    return {
+      refs: {
+        workItemId: resolved.inquiry.workItemId, inquiryId: resolved.inquiry.inquiryId,
+        ...(resolved.inquiry.productId ? { productId: resolved.inquiry.productId } : {}),
+      },
+    };
+  }
+
+  /**
+   * The precondition, in the procedure that owns it.
+   *
+   * These were four separate judgements in the conversation service — the operational gate in two
+   * places in the composer, the inquiry gate in the direct lane, the review gate in its own branch.
+   * They are one step now, and the run stops here when it fails.
+   */
+  private async opCheckPrecondition(state: ProcedureState, ctx: TurnCtx): Promise<ProcedureUpdate> {
+    const world = ctx.turnWorld ?? await ctx.world!();
+    ctx.turnWorld = world;
+    if (state.procedureId === "ONBOARD_CHANNEL" || state.procedureId === "DAILY_WORK") {
+      const gate = operationalPrecondition(world);
+      ctx.procedure = { id: state.procedureId, version: state.version, precondition: gate };
+      return gate.ok ? {} : { absence: gate.absence };
+    }
+    if (state.procedureId === "ANSWER_REVIEW") {
+      const object = ctx.view!.workingSet?.selectedObject;
+      if (object?.kind !== "REVIEW") return {};
+      return {};
+    }
+    // ANSWER_INQUIRY — the object is in hand, so the world is not asked (holding the row proves the source).
+    const target = ctx.target;
+    const actionability = target && target.kind === "INQUIRY" ? target.actionability : null;
+    if (!target || actionability == null) return {};
+    const gate = inquiryDraftPrecondition(actionability, true);
+    return gate.ok ? {} : { absence: gate.absence };
+  }
+
+  /** The Operator graph already ran for this turn; the procedure records that it did. */
+  private async opInvestigate(_state: ProcedureState, _ctx: TurnCtx): Promise<ProcedureUpdate> {
+    return {};
+  }
+
+  private async opEvidence(_state: ProcedureState, _ctx: TurnCtx): Promise<ProcedureUpdate> {
+    return {};
+  }
+
+  private async opReadOpportunities(_state: ProcedureState, _ctx: TurnCtx): Promise<ProcedureUpdate> {
+    return {};
+  }
+
+  /** The production draft path — the same call the inquiry screen makes. */
+  private async opPrepare(state: ProcedureState, ctx: TurnCtx): Promise<ProcedureUpdate> {
+    const target = ctx.target;
+    if (!target || target.kind !== "INQUIRY") return {};
+    const composed = await this.directPrepare(ctx.view!, target, ctx.bundle!, ctx.stage!);
+    ctx.composed = composed;
+    return {
+      terminal: "ANSWERED",
+      ...(composed.pendingPrepared?.draftVersion != null
+        ? { refs: { draftVersion: composed.pendingPrepared.draftVersion } } : {}),
+    };
+  }
+
+  /** A new version over the SAME evidence. The old version is not touched — the ledger is append-only. */
+  private async opRevise(_state: ProcedureState, ctx: TurnCtx): Promise<ProcedureUpdate> {
+    const view = ctx.view!;
+    const prepared = view.pendingPrepared;
+    const tone = toneIntentOf(ctx.text);
+    if (!prepared || !tone) return {};
+    const composed = await this.reviseTone(view, prepared, tone, ctx.bundle!, ctx.stage!);
+    ctx.composed = composed;
+    return {
+      terminal: "ANSWERED",
+      ...(composed.pendingPrepared?.draftVersion != null
+        ? { refs: { draftVersion: composed.pendingPrepared.draftVersion } } : {}),
+    };
+  }
+
+  /**
+   * The seller is answering the question this conversation put to them.
+   *
+   * The write goes through the seller-write seam, bound to the candidate it answers, and the original
+   * work is redone exactly once — {@code captureAnswerLane} has owned both since Knowledge Capture v1.
+   */
+  private async opResume(_state: ProcedureState, ctx: TurnCtx): Promise<ProcedureUpdate> {
+    const view = ctx.view!;
+    if (!view.pendingCapture) return {};
+    const composed = await this.captureAnswerLane(view, view.pendingCapture, ctx.text, ctx.bundle!);
+    if (!composed) return {};
+    ctx.composed = composed;
+    return { terminal: "ANSWERED", refs: { candidateId: view.pendingCapture.captureId } };
+  }
+
+  /**
+   * Stop and put the question or the step to the seller.
+   *
+   * <b>A pause, never a permission.</b> Reaching it records a cursor; it approves nothing, and the
+   * approval boundary is a different step that reads a different record.
+   */
+  private async opHumanWait(state: ProcedureState, ctx: TurnCtx): Promise<ProcedureUpdate> {
+    if (state.procedureId !== "CAPTURE_KNOWLEDGE") return {};
+    // The question is already standing on the conversation; this run adds nothing and waits.
+    ctx.composed = null;
+    return { terminal: "WAITING_HUMAN", interrupt: "KNOWLEDGE_ANSWER" };
+  }
+
+  /** The approval boundary is unchanged: it is validated against its own record, by its own owner. */
+  private async opValidateApproval(_state: ProcedureState, _ctx: TurnCtx): Promise<ProcedureUpdate> {
+    return {};
+  }
+
+  /** The side effect, once, behind the existing single-use fence. Not reachable from a chat turn. */
+  private async opExecute(_state: ProcedureState, _ctx: TurnCtx): Promise<ProcedureUpdate> {
+    return {};
+  }
+
+  /**
+   * How the run ended — a token, never a sentence.
+   *
+   * The one place that decides whether this procedure earned its absence claim. For ANSWER_INQUIRY it
+   * is also where an ADVICE request over a non-draftable object becomes the advisory: the DECISION
+   * («draftable ⇒ the draft is the advice») is the procedure's, and the advisory itself is composed by
+   * the function that has always composed it.
+   */
+  private async opTerminal(state: ProcedureState, ctx: TurnCtx): Promise<ProcedureUpdate> {
+    if (state.terminal) return {};
+    // ONBOARD_CHANNEL only runs when nothing is connected, so its precondition cannot pass and
+    // `BLOCKED_BY_PRECONDITION` is the only terminal it declares. DAILY_WORK can go either way.
+    if (state.procedureId === "ONBOARD_CHANNEL") return { terminal: "BLOCKED_BY_PRECONDITION" };
+    if (state.procedureId === "DAILY_WORK") {
+      return { terminal: state.absence ? "BLOCKED_BY_PRECONDITION" : "ANSWERED" };
+    }
+    if (state.procedureId === "IMPROVE_FROM_ISSUES") return { terminal: "ANSWERED" };
+    if (state.procedureId === "CAPTURE_KNOWLEDGE") return {};
+    if (state.procedureId === "ANSWER_INQUIRY") {
+      const target = ctx.target;
+      if (ctx.intent === "REVISE_TONE" && !ctx.view!.pendingPrepared) {
+        ctx.composed = {
+          status: "DONE", message: NO_DRAFT_TO_REVISE_SENTENCE, artifacts: [],
+          suggestedActions: [promptChip("답변 준비해줘")],
+          workingSet: ctx.view!.workingSet, pendingHumanActions: [], pendingPrepared: null,
+          budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "TONE_REVISION" },
+        };
+        return { terminal: "BLOCKED_BY_PRECONDITION", absence: "NOT_ACTIONABLE" };
+      }
+      if (ctx.intent === "ADVISE" && target && target.kind === "INQUIRY" && state.absence === "NOT_ACTIONABLE") {
+        ctx.composed = await this.adviseOnAnchoredInquiry(ctx, target);
+        return { terminal: "ANSWERED" };
+      }
+    }
+    return {};
+  }
+
+  /** The advisory over an object that cannot take a draft — composed where it always was. */
+  private async adviseOnAnchoredInquiry(
+    ctx: TurnCtx, resolved: Extract<ResolvedTarget, { kind: "INQUIRY" }>,
+  ): Promise<Composed> {
+    const view = ctx.view!;
+    const started = Date.now();
+    ctx.stage!("READING", STAGE_LABEL.READING);
+    const advice = await adviseOnInquiry(ctx.bundle!, {
+      inquiryId: resolved.inquiry.inquiryId, workItemId: resolved.inquiry.workItemId,
+      productId: resolved.inquiry.productId, title: resolved.inquiry.title,
+      actionability: resolved.actionability as Exclude<InquiryActionability, "DRAFTABLE">,
+    });
+    const workingSet = anchoredSet(resolved.inquiry, view.workingSet, [
+      ...(view.workingSet?.productIds ?? []), ...(resolved.inquiry.productId ? [resolved.inquiry.productId] : []),
+    ]);
+    return {
+      status: "DONE", message: advice.headline, artifacts: advice.artifacts, suggestedActions: advice.suggestedActions,
+      workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: "INSPECT",
+      budget: { toolCalls: advice.toolCalls, llmCalls: 0, elapsedMs: Date.now() - started, stopReason: "ADVISORY" },
+    };
+  }
+
+  /** Which optional steps apply to this run. Required steps are never asked. */
+  private opShouldRun(stepId: string, state: ProcedureState, ctx: TurnCtx): boolean {
+    if (state.terminal) return false;
+    switch (stepId) {
+      case "prepare":
+        // The absence recorded by `gate` does not skip this step: `directPrepare` is the one path that
+        // both prepares a draft and refuses an object that cannot take one, and it reaches that verdict
+        // through the SAME `inquiryDraftPrecondition` the gate called. An ADVISE over a non-draftable
+        // object is the exception — its answer is the advisory, settled at `settle`.
+        return (ctx.intent === "PREPARE_DRAFT" || (ctx.intent === "ADVISE" && state.absence == null))
+          && ctx.target != null;
+      case "revise":
+        return ctx.intent === "REVISE_TONE" && ctx.view?.pendingPrepared != null;
+      // The approval boundary and the send are reached from the approval surfaces, never from a chat
+      // turn: a sentence has never been able to send anything, and this migration does not change that.
+      case "approval": case "execute": return false;
+      case "humanWait":
+        // ANSWER_REVIEW's guided step. Reached from the review surfaces, never from a chat sentence.
+        return false;
+      default: return true;
+    }
+  }
+
+  /** The handler table this service publishes to the AOP runtime. */
+  private procedureOps(): ProcedureOps<TurnCtx> {
+    return {
+      hydrateWorld: (s, c) => this.opHydrateWorld(s, c),
+      loadObject: (s, c) => this.opLoadObject(s, c),
+      checkPrecondition: (s, c) => this.opCheckPrecondition(s, c),
+      investigate: (s, c) => this.opInvestigate(s, c),
+      evidence: (s, c) => this.opEvidence(s, c),
+      prepare: (s, c) => this.opPrepare(s, c),
+      revise: (s, c) => this.opRevise(s, c),
+      humanWait: (s, c) => this.opHumanWait(s, c),
+      resume: (s, c) => this.opResume(s, c),
+      readOpportunities: (s, c) => this.opReadOpportunities(s, c),
+      validateApproval: (s, c) => this.opValidateApproval(s, c),
+      execute: (s, c) => this.opExecute(s, c),
+      terminal: (s, c) => this.opTerminal(s, c),
+      shouldRun: (id, s, c) => this.opShouldRun(id, s, c),
+    };
   }
 
   private agentTurn(view: ConversationView, input: {
@@ -1647,22 +2041,11 @@ export class ConversationService {
     view: ConversationView, text: string, hints: StartTurnRequest, bundle: SpringClientBundle,
     stage: (s: ProgressStage, label: string) => void, world: () => Promise<WorldState>,
   ): Promise<Composed | null> {
-    // Knowledge Capture v1: a gap the agent is holding open listens to this sentence first.
-    if (view.pendingCapture) {
-      const captured = await this.captureAnswerLane(view, view.pendingCapture, text, bundle);
-      if (captured) return captured;
-    }
-    const prepared = view.pendingPrepared;
-    const tone = prepared || view.workingSet?.selectedInquiry ? toneIntentOf(text) : null;
-    if (prepared && tone) return this.reviseTone(view, prepared, tone, bundle, stage);
-    if (tone) {
-      // A selected inquiry with no draft on the table: nothing to revise, and a plan would only read.
-      return {
-        status: "DONE", message: NO_DRAFT_TO_REVISE_SENTENCE, artifacts: [], suggestedActions: [promptChip("답변 준비해줘")],
-        workingSet: view.workingSet, pendingHumanActions: [], pendingPrepared: null,
-        budget: { toolCalls: 0, llmCalls: 0, elapsedMs: 0, stopReason: "TONE_REVISION" },
-      };
-    }
+    // ── The knowledge answer, the tone revision and the two draft intents used to be the first four
+    // branches of this lane. They are procedure TRANSITIONS — CAPTURE_KNOWLEDGE's resume step and
+    // ANSWER_INQUIRY's revise/prepare steps — and they now run as those procedures' subgraphs, chosen
+    // by the AOP router before this lane is asked (AOP Execution Closure v1 §3). What is left here is
+    // dispatch: closed intents about the object on the table that no business procedure owns.
     // ── ACQUISITION (Chat-first Completion & Continuity v1 §1). An instruction to collect is a closed
     // action on a channel the conversation is already about — no plan can improve it and, measured live,
     // every plan made it worse: 「그럼 최신화해줘」 came back as a re-print of the same rows on one attempt
@@ -1775,37 +2158,9 @@ export class ConversationService {
     // the existing planner path resolves and verifies the hint (Contextual Agent Contract Completion v1).
     if (anchor && hints.workItemId && hints.workItemId !== anchor.workItemId) anchor = null;
 
-    // ── ANALYZE (Conversation Core v1): 「이 고객한테 뭐라고 답하면 좋을까?」 over the anchored inquiry
-    // is a request for ADVICE, never gated by actionability. A DRAFTABLE anchor gets the draft — the
-    // strongest advice — through the same step as before; any other state gets an advisory composed
-    // from the seller's own corpus (state fact + grounded direction), so the conversation continues.
-    if (anchor && analyzeIntentOf(text)) {
-      const resolved = inquiryTargetFromHistory(view, anchor.inquiryId) ?? await this.verifiedTarget(anchor.workItemId, bundle);
-      if (resolved && resolved.kind === "INQUIRY") {
-        if (resolved.actionability === "DRAFTABLE") return this.directPrepare(view, resolved, bundle, stage);
-        const started = Date.now();
-        stage("READING", STAGE_LABEL.READING);
-        const advice = await adviseOnInquiry(bundle, {
-          inquiryId: resolved.inquiry.inquiryId, workItemId: resolved.inquiry.workItemId,
-          productId: resolved.inquiry.productId, title: resolved.inquiry.title, actionability: resolved.actionability,
-        });
-        const workingSet = anchoredSet(resolved.inquiry, view.workingSet, [
-          ...(view.workingSet?.productIds ?? []), ...(resolved.inquiry.productId ? [resolved.inquiry.productId] : []),
-        ]);
-        return {
-          status: "DONE", message: advice.headline, artifacts: advice.artifacts, suggestedActions: advice.suggestedActions,
-          workingSet, pendingHumanActions: [], pendingPrepared: view.pendingPrepared, activeTask: "INSPECT",
-          budget: { toolCalls: advice.toolCalls, llmCalls: 0, elapsedMs: Date.now() - started, stopReason: "ADVISORY" },
-        };
-      }
-    }
-
-    // 「답변 준비해줘」 over the anchored inquiry — the product's own draft path, no planner. The
-    // actionability gate applies HERE (an instruction to produce a draft), not to advisory questions.
-    if (anchor && prepareIntentOf(text)) {
-      const resolved = inquiryTargetFromHistory(view, anchor.inquiryId) ?? await this.verifiedTarget(anchor.workItemId, bundle);
-      if (resolved && resolved.kind === "INQUIRY") return this.directPrepare(view, resolved, bundle, stage);
-    }
+    // ANALYZE and PREPARE over the anchored inquiry are ANSWER_INQUIRY's steps and run as that
+    // procedure's subgraph. The judgement they carried — «a draftable object's advice IS the draft,
+    // anything else gets the advisory» — is the procedure's terminal, not a branch here.
 
     // 「이 문의」 / 「이 고객」 / 「아까 그 문의」 — the anchored object, inspected. Zero planner, ≤1 read.
     if (anchor && pronounInspectOf(text)) {

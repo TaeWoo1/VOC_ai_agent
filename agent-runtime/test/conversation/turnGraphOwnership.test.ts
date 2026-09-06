@@ -146,12 +146,19 @@ describe("§C — the checkpoint is an execution cursor, not a second source of 
 });
 
 describe("§D — procedure selection is the graph's, through the AOP router", () => {
-  it("the router is called from the procedure node and nowhere else in the service", () => {
-    expect(SERVICE.split("selectProcedure(").length - 1).toBe(1);
-    const node = SERVICE.slice(SERVICE.indexOf("private async phaseProcedure("), SERVICE.indexOf("private async phaseCompose("));
-    expect(node).toContain("selectProcedure(");
-    expect(node).toContain("operationalPrecondition(");
-    // The node settles a verdict; it does not write a sentence. Composition stays where it lives.
+  it("the router is asked in three named places and nowhere else", () => {
+    // AOP Execution Closure v1: routing (does a procedure claim this turn at all), the pre-plan run,
+    // and the post-plan run. Three, and each one is inside a method whose name says which.
+    expect(SERVICE.split("selectProcedure(").length - 1).toBe(3);
+    for (const method of ["phaseRoute", "phaseProcedure", "selectPostPlanProcedure"]) {
+      const from = SERVICE.indexOf(`private async ${method}(`) >= 0
+        ? SERVICE.indexOf(`private async ${method}(`) : SERVICE.indexOf(`private ${method}(`);
+      const body = SERVICE.slice(from, from + 2600);
+      expect(body, `${method} asks the router`).toContain("selectProcedure(");
+    }
+    // The procedure's own steps settle the verdict; nothing here writes a sentence about it.
+    const node = SERVICE.slice(SERVICE.indexOf("private async phaseProcedure("), SERVICE.indexOf("private selectPostPlanProcedure("));
     expect(node).not.toContain("absenceSentence(");
+    expect(node).not.toContain("operationalPrecondition(");
   });
 });

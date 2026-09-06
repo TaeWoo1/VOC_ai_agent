@@ -104,7 +104,10 @@ export function buildTurnGraph(phases: TurnPhases, checkpointer?: BaseCheckpoint
     .addConditionalEdges(
       "chooseRoute" as never,
       (state: TurnGraphState) => state.route ?? "OPERATOR",
-      { CLICK: "click", CAPTURE_DECISION: "captureDecision", RESUME: "resume", DIRECT: "direct", OPERATOR: "operator" } as never,
+      {
+        CLICK: "click", CAPTURE_DECISION: "captureDecision", RESUME: "resume",
+        PROCEDURE: "procedure", DIRECT: "direct", OPERATOR: "operator",
+      } as never,
     )
     .addEdge("click" as never, END)
     .addEdge("captureDecision" as never, END)
@@ -126,7 +129,25 @@ export function buildTurnGraph(phases: TurnPhases, checkpointer?: BaseCheckpoint
       (state: TurnGraphState) => (state.terminal === "UNKNOWN" ? "__end__" : "procedure"),
       { __end__: END, procedure: "procedure" } as never,
     )
-    .addEdge("procedure" as never, "compose" as never)
+    /**
+     * The procedure node is reached from two places and they end differently.
+     *
+     * Before the planner it IS the turn: a procedure that reached a terminal answered, and one that
+     * could not load its object hands the turn back to the ordinary lanes — which is what the `if`
+     * that used to sit in the direct lane did when it fell through. After the planner it settles the
+     * precondition and the composer draws the answer.
+     */
+    .addConditionalEdges(
+      "procedure" as never,
+      (state: TurnGraphState) => {
+        // The FIRST visit is the pre-plan one; the trail is what distinguishes them, because a node
+        // cannot tell where it was entered from and the route must keep saying how this turn started.
+        const firstVisit = state.trail.filter((t) => t === "procedure").length <= 1;
+        if (state.route !== "PROCEDURE" || !firstVisit) return "compose";
+        return state.terminal ? "__end__" : "direct";
+      },
+      { __end__: END, direct: "direct", compose: "compose" } as never,
+    )
     .addEdge("compose" as never, "persist" as never)
     .addEdge("persist" as never, END);
 

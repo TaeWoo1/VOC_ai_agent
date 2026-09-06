@@ -102,8 +102,10 @@ describe("§B — one place decides whether an object can take a draft", () => {
     }
     // The refusal wording is reached through the procedure layer, never read off the table directly.
     expect(holding("ACTIONABILITY_SENTENCE[")).toEqual(["operator/procedure/Procedure.ts"]);
-    // Three callers: the shared PREPARE step, and the knowledge-capture resume that re-checks the row.
-    expect(countIn("conversation/ConversationService.ts", "inquiryDraftPrecondition(")).toBe(2);
+    // Three callers, and the third is the one AOP Execution Closure v1 added: ANSWER_INQUIRY's own
+    // `gate` step. It RECORDS the verdict for the procedure's state; the draft path still ENFORCES it,
+    // through this same function — one definition, three call sites, and no second opinion.
+    expect(countIn("conversation/ConversationService.ts", "inquiryDraftPrecondition(")).toBe(3);
   });
 
   it("the review gate refuses BOTH «cannot» and «could not tell», and nothing else compares the verdict", () => {
