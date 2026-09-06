@@ -418,6 +418,48 @@ switch문을 그래프로 그리는 일이 된다 · `compose`(~520줄)는 여�
 `gpt-5-2025-08-07`@`minimal`). backend **3,884** · frontend **2,762** · runtime **913** · 실패 0 ·
 **마켓플레이스 0 · WRITE 0 · 승인 0 · DB 행 변경 0 · 마이그레이션 0** ⇒ evidence 행 없음)
 
+**`docs/aop_execution_closure_v1.md`** (AOP Execution Closure v1 — 2026-09-06. 직전 패키지에서 AOP 정의는
+**데이터**가 됐지만 실행은 여전히 `directLane`/`compose` 안에 있었다. 이 패키지가 그 간격을 닫는다 —
+**steps · precondition · terminal · interrupt가 설명 metadata가 아니라 실제 runtime path**가 된다. 새
+Procedure 0 · 새 기능 0 · Planner/WorldState/tools/Evidence/Draft/Approval/Executor semantics 무변경.
+**여섯이 실제로 도는 subgraph다**: `loadObject`(exact object load) · `gate` · *prepare* · *revise* ·
+*approval* · *execute* · `settle`(ANSWER_INQUIRY) 등, 어휘 자체를 실행 모델로 다시 썼다(investigate ·
+evidence · humanWait · resume 포함). step id가 state 채널과 겹치면 LangGraph가 거절하므로 outcome을 정하는
+step은 `terminal`이 아니라 **`settle`**이다(turn graph의 `chooseRoute`, operator graph의 `interpretGoal`과
+같은 규칙). **`CAPTURE_KNOWLEDGE`에 wait step이 없는 것이 요점** — 질문을 put하는 것은 `ANSWER_INQUIRY`의
+draft step이고(그래서 그 절차가 `KNOWLEDGE_ANSWER`를 함께 선언한다) 이 절차는 판매자가 **답했을 때** 도는
+쪽이며, 답이 아니었던 문장은 이 절차의 turn이 아니므로 놓아 준다. **directLane에서 제거한 procedure
+transition 넷**: pendingCapture→capture resume · tone→revise와 그 precondition · ANALYZE의 「draftable이면
+초안, 아니면 advisory」 판단 · prepareIntent→prepare. **남긴 것은 dispatch**(acquisition · freshness ·
+referentless · ordinal · filter · prioritize · label select) — 노드로 쪼개면 LangGraph가 아니라 switch문을
+그래프로 그리는 일이다. 문장은 `procedureIntent.ts`에서 **한 번** 닫힌 토큰으로 읽히고 그 아래로는 아무도
+판매자의 말을 보지 않는다(router는 여전히 두 번째 planner가 아니다). turn graph는 라우트 하나를 얻었고
+(계획 이전 `procedure`는 terminal이면 그 turn이 끝, 대상을 못 실었으면 ordinary lane으로 **놓아 준다**),
+두 방문은 **trail로 구분**한다(노드는 자기가 어디서 들어왔는지 모르고 `route`는 turn이 어떻게 시작했는지를
+계속 말해야 한다). **Durable checkpoint `AopCheckpointStore`**: conversationId · procedureId+version · step ·
+object refs · draftId · approvalId · terminal뿐이고 `sanitize()`가 **whitelist**라 선언되지 않은 필드는
+통과하지 못하며 `forbiddenKeysIn()`이 실제 write에 대고 body·text·draft·token류 부재를 단언한다. Memory
+기본 · File은 프로세스를 넘고 · **`claim()`이 exactly-once 게이트**여서 claim을 잃은 resume은 **step을
+하나도 실행하지 않는다**(duplicate side effect 0의 구조적 근거); 끝난 절차는 cursor를 지운다(자기 run보다
+오래 사는 cursor는 나중 resume이 「아직 할 일」로 오인할 물건이다). thread id는 `${conversationId}:${procedureId}`라
+멈춘 두 절차가 서로를 resume하지 않는다. **interrupt는 허가가 아니다** — cursor의 `approvalId`는 **id**이고
+유효성은 매번 그 기록에서 읽는다(verdict를 담으면 resume이 아무도 두 번 주지 않은 「예」를 물려받는다);
+`approval`·`execute` step은 chat 문장에서 **도달 불가**다. parity: 스위트 **922 통과·실패 0**, 라이브 실
+planner selection **46/48** · holdout **13/14**로 **실패 turn 집합 동일 · 새로 깨진 것 0**, 브라우저 4 turn
+동일이며 「조금 더 부드럽게 써줘」가 이제 `ANSWER_INQUIRY.settle`의 precondition으로 답한다(콘솔 0 ·
+off-host 0). **마켓플레이스 0 · WRITE 0 · 승인 0 · DB 행 변경 0 · 마이그레이션 0** ⇒ evidence 행 없음.
+**계약이 바뀌어 테스트 4건을 다시 썼다**(aopCore의 step 목록 · procedureLayer의 gate call site 2→3 —
+세 번째가 절차 자신의 gate이고 **같은 함수**다 · semanticOwnership의 `analyzeIntentOf` 파일 목록 ·
+turnGraphOwnership의 router call site 1→3, 각각 이름 있는 메서드 안); 안전 테스트 약화 0. **아직 legacy에
+남은 business decision을 정직하게 적는다**: compose의 **post-plan ANALYZE 가드**(pre-plan 쌍둥이만 옮겼다 —
+옮기려면 플래너의 target 루프를 subgraph로 보내야 하고 그것은 별도 패키지다; 구조 테스트가 이 잔여를 이름으로
+고정한다) · `compose`는 여전히 한 노드이고 **판단은 나왔으나 표현은 안에 있다** · `ANSWER_REVIEW`의
+loadObject/prepare는 chat lane에서 도달하지 않는다(리뷰 답글은 작업 화면이 소유한다) · `approval`·`execute`는
+아직 chat에서 실행되지 않으며 그것을 옮기려면 승인 계약을 건드려야 한다 · conversation별 직렬화는 그래프
+밖이다. **성공 기준**: 새 workflow는 정의 추가 + 기존 handler 안이면 `directLane`·`compose`에 새 `if` 없이
+붙는다; 다만 **새 handler가 필요하면** 닫힌 `HandlerName` union과 `ProcedureOps`를 함께 고쳐야 하고(정의가
+런타임이 publish하지 않은 행동에 닿을 수 없어야 한다) 새 종류의 화면 출력은 여전히 compose를 건드린다)
+
 **`docs/agent_command_center_v1.md`** (Agent Command Center v1 — 제품 방향 수정: reviewnary는
 Dashboard-first + Agent assistant가 아니라 **Agent-first + structured operational workspace**,
 정확히는 **chat-first, object-backed**. Chat은 의도를 나르고 일은 그 일을 이미 소유한 구조화된 UI가
