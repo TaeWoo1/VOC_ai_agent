@@ -1765,9 +1765,19 @@ export const api = {
 
   // ---- Agentic Report v1 -----------------------------------------------------------------------
 
-  /** The cadence's current report — the stored one, or the period's first generation. */
+  /**
+   * The cadence's current report — the stored one, or the period's first generation.
+   *
+   * <b>A model call's budget, because on a period's first open it IS one.</b> "열기 = 읽기" is true
+   * from the second open onward; the first one builds the edition, and building it narrates. Measured
+   * on the demo org 2026-09-06: the backend logged `narrated=true … ms=15533` in the same second the
+   * screen said 「리포트를 불러오지 못했습니다」 — the report existed, and the default 8s ceiling had
+   * already given up on it. It self-heals on reload (0.005s off the snapshot), which is exactly why
+   * it survived: every seller meets it once, on the open that is supposed to introduce the feature.
+   */
   async getCurrentAgentReport(kind: ReportKind): Promise<AgentReportView> {
-    const { data } = await http.get<AgentReportView>(`/api/agent-reports/current?kind=${kind}`);
+    const { data } = await http.get<AgentReportView>(`/api/agent-reports/current?kind=${kind}`,
+      { timeout: MODEL_TIMEOUT_MS });
     return data;
   },
 
@@ -1781,11 +1791,17 @@ export const api = {
     return data;
   },
 
-  /** A newer reading as a NEW version — explicit, never on open. */
+  /**
+   * A newer reading as a NEW version — explicit, never on open.
+   *
+   * Always narrates, by definition, so the ceiling above applies here with no "first time" about it:
+   * under the default this control could only ever report failure over a version it had just written.
+   */
   async regenerateAgentReport(kind: ReportKind, periodStart?: string | null): Promise<AgentReportView> {
     const params = new URLSearchParams({ kind });
     if (periodStart) params.set("periodStart", periodStart);
-    const { data } = await http.post<AgentReportView>(`/api/agent-reports/regenerate?${params.toString()}`, {});
+    const { data } = await http.post<AgentReportView>(`/api/agent-reports/regenerate?${params.toString()}`, {},
+      { timeout: MODEL_TIMEOUT_MS });
     return data;
   },
 

@@ -22,4 +22,21 @@ public record ReviewIssueView(UUID id, String title, String aspect, String probl
                               LocalDate lastEvidenceOn, UUID dominantProductId,
                               String dominantProductName, boolean dismissed,
                               String extractorKind, IssueChangeView change) {
+
+    /**
+     * The same issue, counted for ONE product.
+     *
+     * <p>{@code evidenceCount} is org-wide, which is what the 고객운영 메모리 list means by it and is
+     * right there. On a PRODUCT screen it is the wrong denominator: 「접착 부족 · 근거 18건」 under a
+     * product heading is read as eighteen pieces of evidence about that product, and on this
+     * deployment two of them were about others (measured 2026-09-06: 16 for the product, 18 for the
+     * issue; 배송 지연 4 and 6). The count is replaced rather than added beside it — a row cannot show
+     * two numbers for one word without saying which is which, and on a product page the product's own
+     * number is the one that answers the question being asked.
+     */
+    public ReviewIssueView scopedTo(long evidenceForProduct) {
+        return new ReviewIssueView(id, title, aspect, problem, severity, lifecycleState, lifecycleLabelKo,
+                evidenceForProduct, firstEvidenceOn, lastEvidenceOn, dominantProductId,
+                dominantProductName, dismissed, extractorKind, change);
+    }
 }

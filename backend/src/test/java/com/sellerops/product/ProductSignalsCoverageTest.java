@@ -189,6 +189,38 @@ class ProductSignalsCoverageTest {
                 .isEqualTo(1);
     }
 
+
+    /**
+     * <b>A product screen counts this product's evidence, not the issue's</b> (pilot QA 2026-09-06).
+     *
+     * <p>{@code ReviewIssueView.evidenceCount} is org-wide, which is exactly right on the 고객운영
+     * 메모리 list and exactly wrong under a product heading: 「접착 부족 · 근거 18건」 there is read as
+     * eighteen pieces of evidence about that product. Measured on the demo org's top product: the row
+     * said 18 where 16 were the product's, 배송 지연 said 6 where 4 were, and the section header stood
+     * at 「근거 46건」 over 42 stored rows. The query this list is built from already returns the
+     * product's own count; the code was discarding it.
+     */
+    @Test
+    @DisplayName("an issue on a product page carries the product's evidence count, not the org-wide one")
+    void issueCountsOnAProductAreTheProductsOwn() {
+        Product mine = product("합성-몰딩-1호", "SKU-1");
+        Product other = product("합성-몰딩-2호", "SKU-2");
+        UUID issueId = issue("접착", "부족");
+        evidenceRow(issueId, mine.getId());
+        evidenceRow(issueId, mine.getId());
+        evidenceRow(issueId, other.getId());
+
+        ProductSignalsView view = signals.signals(org, mine.getId(), null);
+
+        assertThat(view.issues()).singleElement()
+                .extracting(com.sellerops.reviewissue.dto.ReviewIssueView::evidenceCount)
+                .as("two of the three rows are this product's")
+                .isEqualTo(2L);
+        assertThat(view.volume().issueEvidence())
+                .as("and the header that sums the rows sums the same numbers the rows show")
+                .isEqualTo(2);
+    }
+
     @Test
     @DisplayName("another org's product id is not found, and cannot be probed")
     void productLookupIsOrgScoped() {
@@ -240,6 +272,35 @@ class ProductSignalsCoverageTest {
         inquiry.setStatus(status);
         inquiry.setReceivedAt(Instant.parse("2026-08-18T00:00:00Z"));
         return inquiries.save(inquiry);
+    }
+
+    private UUID issue(String aspect, String problem) {
+        com.sellerops.reviewissue.ReviewIssue row = new com.sellerops.reviewissue.ReviewIssue();
+        row.setOrgId(org);
+        row.setSignatureKey(aspect + ":" + problem);
+        row.setTitle(aspect + " " + problem);
+        row.setAspect(aspect);
+        row.setProblem(problem);
+        row.setSeverity(com.sellerops.reviewissue.IssueSeverity.NORMAL);
+        row.setLifecycleState(com.sellerops.reviewissue.IssueLifecycleState.OBSERVING);
+        row.setExtractorKind("RULE_BASED");
+        row.setExtractorVersion("issue-rules-v2");
+        row.setFirstEvidenceOn(java.time.LocalDate.parse("2026-08-14"));
+        row.setLastEvidenceOn(java.time.LocalDate.parse("2026-08-14"));
+        return issues.save(row).getId();
+    }
+
+    private void evidenceRow(UUID issueId, UUID productId) {
+        Review source = review(productId, "붙이는 부분이 떨어졌어요", 1);
+        com.sellerops.reviewissue.ReviewIssueEvidence row = new com.sellerops.reviewissue.ReviewIssueEvidence();
+        row.setOrgId(org);
+        row.setIssueId(issueId);
+        row.setReviewId(source.getId());
+        row.setUnitOrdinal(0);
+        row.setProductId(productId);
+        row.setOccurredOn(java.time.LocalDate.parse("2026-08-14"));
+        row.setMatchConfidence(com.sellerops.reviewissue.MatchConfidence.EXACT_SIGNATURE);
+        evidence.save(row);
     }
 
     private UUID seedChannel() {

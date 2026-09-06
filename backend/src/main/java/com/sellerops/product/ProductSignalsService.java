@@ -169,8 +169,12 @@ public class ProductSignalsService {
         List<ReviewIssueView> views = new ArrayList<>();
         for (Object[] row : rows) {
             UUID issueId = (UUID) row[0];
+            // The query already counted this product's evidence; the issue view carries the org-wide
+            // total, which is the right number on the issue memory and the wrong one here. Discarding
+            // the count we asked for and printing the other is how 「근거 46건」 stood over 42 rows.
+            long forProduct = ((Number) row[1]).longValue();
             try {
-                views.add(issueQuery.issueView(orgId, issueId, at));
+                views.add(issueQuery.issueView(orgId, issueId, at).scopedTo(forProduct));
             } catch (IllegalArgumentException gone) {
                 // The issue was removed between the evidence read and this one. Skipping is correct:
                 // reporting a product signal for an issue that no longer exists would be a finding
