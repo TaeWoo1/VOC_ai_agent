@@ -551,16 +551,26 @@ class ReviewIssueMemoryTest {
         assertThat(queries.list(org, REF, true)).isEmpty();
     }
 
-    /** Severity outranks a firing judgement: minor friction rising must not displace broken product. */
+    /**
+     * <b>The most-repeated problem is first; severity decides between problems seen equally often.</b>
+     *
+     * <p>This test asserted the opposite until 2026-09-07, with a reason that was written down and was
+     * genuine: minor friction rising must not displace broken product. Pilot QA measured what it did to
+     * the surface built to FIND repetition — the demo org's product page showed five rows carrying 6
+     * evidence and folded eight carrying 40, because every HIGH issue there has one or two rows.
+     * Product-owner decision: severity becomes the first tie-break rather than the first key
+     * ({@link IssueOrdering}). It is still on every row and still decides a tie, and the ordering test
+     * that proves so is {@code IssueOrderingTest}.
+     */
     @Test
-    void theListIsOrderedBySeverityBeforeChange() {
-        extraction.extract(review("포장이 깨져서 왔어요", REF.minusDays(60), null));   // HIGH, quiet
+    void theListLeadsWithTheProblemSeenMostOften() {
+        extraction.extract(review("포장이 깨져서 왔어요", REF.minusDays(60), null));   // HIGH, 1 row
         for (int day = 0; day < 3; day++) {
-            extraction.extract(review("설치가 어려워요 " + day, REF.minusDays(day), null)); // LOW, NEW
+            extraction.extract(review("설치가 어려워요 " + day, REF.minusDays(day), null)); // LOW, 3 rows
         }
 
         assertThat(queries.list(org, REF, false)).extracting(v -> v.severity())
-                .containsExactly("HIGH", "LOW");
+                .containsExactly("LOW", "HIGH");
     }
 
     /** The quote is re-derived and masked at read time; the evidence table stores no text. */

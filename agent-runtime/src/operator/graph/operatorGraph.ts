@@ -203,6 +203,9 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // override and the rows/workload reads take the same value from `SpecialistInput.subjectTerm`.
     const subject = sentenceSubjectOf(plan, state.goalText);
     const subjectTerm = subject.term;
+    // Which repeated problem the sentence named, if it named one. Read in the SAME place and carried the
+    // same way — ReviewOps matches it against the titles it read and never re-reads the sentence.
+    const issueSubject = subject.issueName ?? null;
     const workingSet = state.conversation?.workingSet ?? null;
     const axis = withChannelFocus(
       effectiveAxisOf(plan, workingSet, true, subject, state.goalText),
@@ -232,7 +235,8 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     for (const specialist of ordered) {
       const specialistStarted = Date.now();
       deps.progress?.("READING", READING_LABEL[specialist] ?? STAGE_LABEL.READING);
-      const outcome = await runSpecialist(specialist, plan, state, resolved, findingsSoFar, seenEvidence, subjectTerm, axis);
+      const outcome = await runSpecialist(specialist, plan, state, resolved, findingsSoFar, seenEvidence,
+        subjectTerm, issueSubject, axis);
       log("operator_stage", { stage: `specialist:${specialist}`, ms: Date.now() - specialistStarted });
       seenEvidence.push(...outcome.result.evidence);
       // The gate runs against the entities known AT THIS POINT, which includes whatever this specialist
@@ -385,6 +389,8 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
     // default a second caller could take — a silent `null` would mean 「아무것도 좁히지 않았다」 about a
     // sentence nobody asked.
     subjectTerm: string | null,
+    // Same reason, same dispatch: the problem NAME the sentence marked, read once beside `subjectTerm`.
+    issueSubject: string | null,
     axis: ReturnType<typeof conversationAxisOf> = conversationAxisOf(plan),
   ): Promise<{
     result: SpecialistResult;
@@ -406,6 +412,7 @@ export function buildOperatorGraph(deps: OperatorGraphDeps) {
       // sense (`group/ReviewEvidenceSense.ts`). Decided here for the same reason `grouping` is.
       reviewSense: senseOf(plan.candidateTools),
       subjectTerm,
+      issueSubject,
       periodNamed: periodNamedIn(plan, resolved),
       // The single channel this run is about, or null. Decided here for the same reason `grouping` is:
       // the gate will judge every citation against ONE channel scope, and a specialist that worked out

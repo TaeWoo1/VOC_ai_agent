@@ -6,6 +6,8 @@ import { Disclosure } from "../../components/ui/Disclosure";
 import { WorkItem } from "../../components/ui/WorkItem";
 import { Status } from "../../components/ui/Status";
 import { Btn } from "../../components/ui/Btn";
+import { AgentLaunch } from "../../components/ui/AgentLaunch";
+import { useAgentSurface } from "../../lib/agentPanel";
 import { api } from "../../lib/apiClient";
 import type {
   AgentReportListItem,
@@ -140,6 +142,27 @@ export function ReportsV2() {
   const [regenerating, setRegenerating] = useState(false);
   const [regenerateFailed, setRegenerateFailed] = useState(false);
 
+  /*
+    The report is a place a seller reads and then WANTS TO ASK — and until now it was the only
+    operational screen with no way to (measured in pilot QA, 2026-09-06: `/reports` registered no
+    surface and rendered no launcher, so a follow-up meant leaving, finding the chat, and re-typing
+    what they had just read the name of).
+
+    <b>What travels is which screen this is, and nothing else.</b> There is no report READ in the
+    runtime's tool catalogue, so a report id or a fact ref would be a hint no tool could turn into a
+    fact — the repository's rule everywhere else is that an id means nothing until a read verifies it,
+    and here there is no read. The report's own text does not travel either; a follow-up is answered
+    from the same operational objects the report itself cites.
+
+    It opens the SAME panel and the same conversation every other screen uses. No second chat lives
+    here, and nothing on this page sends, approves or writes.
+  */
+  useAgentSurface(
+    report
+      ? { surface: "report", label: `${report.kindLabelKo} 리포트 · ${report.periodLabelKo}` }
+      : null,
+  );
+
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -237,7 +260,12 @@ export function ReportsV2() {
             {report.version > 1 ? ` · ${report.version}번째 판` : ""}
           </span>
         }
-        action={kindToggle}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            {kindToggle}
+            <AgentLaunch context={{ surface: "report" }} label="이 내용으로 물어보기" />
+          </div>
+        }
       />
 
       <Section

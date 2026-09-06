@@ -605,6 +605,76 @@ export const HUMAN_PRODUCT_NAME_PLAN: AgentPlanView = {
 };
 
 /** The goal → plan table the recorded-plan suites seed the transport fake with. */
+
+/**
+ * <b>「접착 부족 문제 근거 보여줘」 — one problem, named.</b>
+ *
+ * Live recording, 2026-09-07, on the demo org's own catalogue. The plan is right and always was: it
+ * names `search_review_issues`, marks the mention as an `ISSUE`, and sets `reviewIntent: "ISSUES"`.
+ * What the answer used to do with it was return the head of the org's list, because the tool had no
+ * subject axis (pilot QA, 2026-09-06).
+ */
+export const ISSUE_BY_NAME_PLAN: AgentPlanView = {
+  available: true,
+  supported: true,
+  userGoal: "리뷰에서 제기된 '접착 부족' 문제의 근거를 보여 달라",
+  unresolvedEntities: [{ kind: "ISSUE", mention: "접착 부족" }],
+  informationNeeds: [
+    { id: "n1", question: "'접착 부족'으로 명명된 반복 리뷰 이슈가 실제로 있는지와 그 이슈의 근거 건수를 확인한다",
+      kind: "REVIEW_SIGNAL", required: true },
+    { id: "n2", question: "'접착 부족' 이슈의 근거 집계(총 근거 수, 상품별 분포, 별점 분포, 기간 범위)를 확인한다",
+      kind: "REVIEW_SIGNAL", required: true },
+  ],
+  specialists: ["REVIEW_OPS"],
+  tools: ["search_review_issues", "get_review_issue_evidence_summary"],
+  retrievalOrder: ["n1", "n2"],
+  retrievalParallel: [],
+  retrievalStopWhen: null,
+  evidenceRequirements: [
+    { needId: "n1", minEvidence: 1, acceptableKinds: ["REVIEW_SIGNAL"] },
+    { needId: "n2", minEvidence: 1, acceptableKinds: ["REVIEW_SIGNAL"] },
+  ],
+  riskClass: "ROUTINE",
+  maxIterations: 2,
+  maxToolCalls: 8,
+  stopWhenEnough: null,
+  clarificationNeeded: false,
+  clarificationReason: null,
+  rationale: null,
+  requestedAction: "NONE",
+  filters: { period: null, periodDays: null, rating: null, channel: null, scope: null, topic: null,
+    reviewIntent: "ISSUES", inquiryIntent: null, limit: null, order: null, status: null },
+  target: { selector: "NONE", index: null },
+  providerVersion: "openai:gpt-5-2025-08-07+agent-plan-prompt/v16 · 2026-09-07",
+};
+
+/** <b>「접착 문제 근거 보여줘」 — half a name.</b> Same plan shape; the org holds four such problems. */
+export const ISSUE_BY_PARTIAL_NAME_PLAN: AgentPlanView = {
+  ...ISSUE_BY_NAME_PLAN,
+  userGoal: "리뷰에서 제기된 접착 문제의 근거를 보여 달라",
+  unresolvedEntities: [{ kind: "ISSUE", mention: "접착 문제" }],
+  informationNeeds: [
+    { id: "n1", question: "리뷰에서 반복 보고된 '접착 문제' 이슈를 찾고 그 이슈의 증거 집계를 확인한다",
+      kind: "REVIEW_SIGNAL", required: true },
+  ],
+  retrievalOrder: ["n1"],
+  evidenceRequirements: [{ needId: "n1", minEvidence: 1, acceptableKinds: ["REVIEW_SIGNAL"] }],
+};
+
+/** <b>「색상 불량 문제 근거 보여줘」 — a name this shop does not have.</b> The plan cannot know that. */
+export const ISSUE_BY_UNKNOWN_NAME_PLAN: AgentPlanView = {
+  ...ISSUE_BY_NAME_PLAN,
+  userGoal: "색상 불량 문제의 근거를 보여 달라",
+  unresolvedEntities: [{ kind: "ISSUE", mention: "색상 불량" }],
+  informationNeeds: [
+    { id: "n1", question: "리뷰에서 '색상 불량' 이슈가 반복되는지와 그 근거(증거 수, 대표 상품, 분포)를 확인한다",
+      kind: "REVIEW_SIGNAL", required: true },
+    { id: "n2", question: "'색상 불량' 이슈의 근거 집계를 확인한다(총계, 상품별 분포, 별점 분포, 기간)",
+      kind: "REVIEW_SIGNAL", required: false },
+  ],
+  evidenceRequirements: [{ needId: "n1", minEvidence: 1, acceptableKinds: ["ISSUE_LIST"] }],
+};
+
 export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "폭이 몇 mm인가요?": SPEC_QUESTION_PLAN,
   "케이블타이 폭이 몇 mm인가요?": SPEC_QUESTION_UNKNOWN_PRODUCT_PLAN,
@@ -629,6 +699,9 @@ export const RECORDED_PLANS: Record<string, AgentPlanView> = {
   "지난 주문에서 무슨 일이 있었어?": ORDER_HISTORY_CLARIFY_PLAN,
   "판도리 일체형 종이컵 수거함 상품의 리뷰와 문의를 같이 보고 고객 불만이나 반복 이슈가 있는지 알려줘.":
     HUMAN_PRODUCT_NAME_PLAN,
+  "접착 부족 문제 근거 보여줘": ISSUE_BY_NAME_PLAN,
+  "접착 문제 근거 보여줘": ISSUE_BY_PARTIAL_NAME_PLAN,
+  "색상 불량 문제 근거 보여줘": ISSUE_BY_UNKNOWN_NAME_PLAN,
 };
 
 /**

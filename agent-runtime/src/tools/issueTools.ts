@@ -22,6 +22,7 @@ import { tool } from "@langchain/core/tools";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { z } from "zod";
 import type { IssueSpringClient } from "../spring/IssueSpringClient";
+import { narrowIssuesBySubject } from "./issueSubjectMatch";
 
 export const ISSUE_TOOL = {
   SEARCH_ISSUES: "search_review_issues",
@@ -35,17 +36,32 @@ export type IssueToolName = (typeof ISSUE_TOOL)[keyof typeof ISSUE_TOOL];
 /** ISO date-only (YYYY-MM-DD) reproducibility anchor; optional (backend defaults to today). */
 const referenceDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "referenceDate must be YYYY-MM-DD");
 
+/** The list read's arguments. `subject`/`issueId` narrow it; neither invents a row. */
+interface SearchArgs {
+  referenceDate?: string;
+  dismissed?: boolean;
+  subject?: string;
+  issueId?: string;
+}
+
 export function buildIssueTools(client: IssueSpringClient): StructuredToolInterface[] {
   const search = tool(
-    async ({ referenceDate: ref, dismissed }: { referenceDate?: string; dismissed?: boolean }) =>
-      client.searchReviewIssues({ referenceDate: ref, dismissed: dismissed ?? false }),
+    async ({ referenceDate: ref, dismissed, subject, issueId }: SearchArgs) => {
+      // An id names one issue exactly; the trend read returns the same row shape as a list entry, so
+      // 「이 문제 하나」 costs one call and needs no filtering.
+      if (issueId) return [await client.getIssueTrend(issueId, ref)];
+      const rows = await client.searchReviewIssues({ referenceDate: ref, dismissed: dismissed ?? false });
+      return narrowIssuesBySubject(rows, subject);
+    },
     {
       name: ISSUE_TOOL.SEARCH_ISSUES,
       description:
-        "List the org's active operations issues, worst-first (severity, then whether a change judgement fired, then recency). Each row is a closed-vocabulary signal with severity, trend, evidence count, and dominant product — no review text. dismissed=true returns the set-aside list instead.",
+        "List the org's active operations issues, most-repeated first (evidence count, then severity, then whether a change judgement fired, then recency). Each row is a closed-vocabulary signal with severity, trend, evidence count, and dominant product — no review text. Pass issueId for exactly one issue, or subject to keep only the issues whose title the seller named — an empty result means this org has no such issue and must NOT be answered with the rest of the list. dismissed=true returns the set-aside list instead.",
       schema: z.object({
         referenceDate: referenceDate.optional(),
         dismissed: z.boolean().optional(),
+        subject: z.string().min(1).max(40).optional(),
+        issueId: z.string().min(1).optional(),
       }),
     },
   );

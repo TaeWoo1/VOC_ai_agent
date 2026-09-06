@@ -63,12 +63,11 @@ public class ReviewIssueQueryService {
     }
 
     /**
-     * Every non-dismissed issue, worst-first.
+     * Every non-dismissed issue that still has evidence, most-repeated first.
      *
-     * <p>Ordering is severity, then whether anything fired, then recency — so a HIGH issue that is
-     * quiet still outranks a LOW one that is surging. That is a deliberate choice: severity is a
-     * property of what went wrong, and a rising count of minor friction should not displace a report
-     * that customers are receiving broken product.
+     * <p>Ordering and the zero-evidence exclusion are both {@link IssueOrdering}'s, shared with the
+     * product page so the two lists a person scans cannot disagree about which problem is the biggest.
+     * The earlier severity-first rule and why it was reversed are recorded there.
      */
     @Transactional(readOnly = true)
     public List<ReviewIssueView> list(UUID orgId, LocalDate referenceDate) {
@@ -89,12 +88,12 @@ public class ReviewIssueQueryService {
         for (ReviewIssue issue : rows) {
             views.add(view(orgId, issue, referenceDate));
         }
-        views.sort(Comparator
-                .comparingInt((ReviewIssueView v) -> IssueSeverity.valueOf(v.severity()).rank())
-                .thenComparing(v -> v.change().kinds().isEmpty())
-                .thenComparing(ReviewIssueView::lastEvidenceOn,
-                        Comparator.nullsLast(Comparator.reverseOrder())));
-        return List.copyOf(views);
+        views.sort(IssueOrdering.ACTIVE_FIRST);
+        // The set-aside list keeps everything the operator put there — it is a record of decisions, so
+        // a row losing its last evidence must not make the decision disappear too. The working list is
+        // the one that must only hold live work.
+        return dismissed ? List.copyOf(views)
+                : views.stream().filter(IssueOrdering::hasLiveEvidence).toList();
     }
 
     @Transactional(readOnly = true)

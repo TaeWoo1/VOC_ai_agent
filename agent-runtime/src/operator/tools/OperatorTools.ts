@@ -26,6 +26,7 @@ import type {
   OrgKnowledgeSearchResult, SellerProfileView, PublishCapabilityView, RecentReviewsResponse, ReviewChannelCapabilityView, SellerAccountSummary,
 } from "../../spring/types";
 import { listInquiryWorkload, WORKLOAD_DETAIL_CAP } from "./inquiryWorkload";
+import { narrowIssuesBySubject } from "../../tools/issueSubjectMatch";
 
 /** Tool names, as one closed table. A plan naming anything else is refused before it runs. */
 export const OPERATOR_TOOL = {
@@ -160,13 +161,26 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
       schema: z.object({}),
     })),
 
-    read(tool(async ({ referenceDate }: { referenceDate?: string }) =>
-      deps.issue.searchReviewIssues({ referenceDate, dismissed: false }), {
+    read(tool(async ({ referenceDate, subject, issueId }:
+      { referenceDate?: string; subject?: string; issueId?: string }) => {
+      // One issue, exactly, when the caller holds its id: the trend read returns the same row shape.
+      if (issueId) return [await deps.issue.getIssueTrend(issueId, referenceDate)];
+      const rows = await deps.issue.searchReviewIssues({ referenceDate, dismissed: false });
+      // The seller's own problem NAME, when the sentence marked one (`conversation/issueSubject.ts`),
+      // matched literally against the titles this org has (`tools/issueSubjectMatch.ts`). An empty
+      // result is the answer 「그런 이름의 반복 문제는 없습니다」 — never a reason to return the rest.
+      return narrowIssuesBySubject(rows, subject);
+    }, {
       name: OPERATOR_TOOL.SEARCH_REVIEW_ISSUES,
       description:
-        "반복되는 고객 문제 목록, 심각한 것부터. 각 행은 닫힌 어휘의 신호(심각도·추세·근거 수·대표 상품)"
-        + "이며 리뷰 원문은 없다. 필요한 정보: REVIEW_SIGNAL.",
-      schema: z.object({ referenceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
+        "반복되는 고객 문제 목록, 많이 반복된 것부터. 각 행은 닫힌 어휘의 신호(심각도·추세·근거 수·대표 상품)"
+        + "이며 리뷰 원문은 없다. subject를 주면 판매자가 이름을 댄 문제만, issueId를 주면 그 문제 하나만"
+        + " 돌려준다. 필요한 정보: REVIEW_SIGNAL.",
+      schema: z.object({
+        referenceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        subject: z.string().min(1).max(40).optional(),
+        issueId: z.string().min(1).optional(),
+      }),
     })),
 
     read(tool(async ({ issueId, referenceDate }: { issueId: string; referenceDate?: string }) =>

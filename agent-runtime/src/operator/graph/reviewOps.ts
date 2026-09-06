@@ -232,11 +232,22 @@ async function runReviewSignal(input: SpecialistInput): Promise<ReviewOpsResult>
 
   // The one read this specialist makes, isolated the same way InquiryOps' are: a failing issue-memory
   // call loses this specialist's contribution and nothing else, and it says so instead of throwing.
+  //
+  // <b>And when the sentence named ONE problem, that is what is read.</b> 「접착 부족 문제 근거 보여줘」
+  // used to come back as 접착 파손 · 배송 파손 · 표면 누락: the plan was right, the tool had no subject
+  // axis, and the head of the org's list was returned as if it were the answer. The name is the
+  // seller's own word, read once in the graph (`conversation/issueSubject.ts`) and matched literally
+  // against the titles this org holds — so an empty result means 「그런 문제는 없습니다」 and is said as
+  // such, never widened back to the biggest problem that does exist.
+  const named = input.issueSubject;
   const attempt = await attemptTool(
     { specialist: "REVIEW_OPS", tool: OPERATOR_TOOL.SEARCH_REVIEW_ISSUES, needId: input.needs[0]?.id },
     () => registry.invoke<ReviewIssueSummary[]>(
       OPERATOR_TOOL.SEARCH_REVIEW_ISSUES,
-      { ...(input.referenceDate ? { referenceDate: input.referenceDate } : {}) },
+      {
+        ...(input.referenceDate ? { referenceDate: input.referenceDate } : {}),
+        ...(named ? { subject: named } : {}),
+      },
       allowedTools,
     ),
   );
@@ -248,6 +259,32 @@ async function runReviewSignal(input: SpecialistInput): Promise<ReviewOpsResult>
     };
   }
   const issues = attempt.value;
+
+  // <b>A named problem is settled BEFORE anything else runs.</b> Nothing downstream can attribute,
+  // group or brief a problem that this shop does not have, and the branches below have their own
+  // sentences: measured live on 2026-09-07, 「색상 불량 문제 근거 보여줘」 fell through to the product
+  // attribution path and came back 「지금 열려 있는 반복 리뷰 문제가 없어…」 — a claim about a shop that
+  // holds seventeen of them.
+  //
+  // <b>Ambiguity is settled here too, and it produces no findings.</b> Answering about three of the
+  // four problems that carry the name — with the fourth silently past the brief's cap — is the same
+  // substitution one step later. The candidates are all named in the question instead.
+  if (named && issues.length !== 1) {
+    return {
+      ...pending(noteOf(issues, null, named) ?? ""),
+      terminal: "OK" as const,
+      needStates: input.needs.map((n) => ({
+        id: n.id,
+        status: "UNSATISFIABLE" as const,
+        evidenceIds: [],
+        complete: true,
+        settledBy: "REVIEW_OPS" as const,
+        reason: issues.length === 0
+          ? `"${named}"이라고 부를 만한 반복 문제는 기록에 없습니다.`
+          : `"${named}"이 들어간 반복 문제가 여러 건이라 어느 것인지 확인이 필요합니다.`,
+      })),
+    };
+  }
 
   // <b>A resolved product changes what this read is FOR.</b> The list has no product parameter (B1), so
   // for a product question it is a candidate list and nothing else — never the evidence. What is
@@ -326,9 +363,11 @@ async function runReviewSignal(input: SpecialistInput): Promise<ReviewOpsResult>
     });
   }
 
-  const note = noteOf(issues, grouped);
+  const note = noteOf(issues, grouped, named);
   log("review_ops", {
     issues: issues.length, surfaced: findings.length, needs: input.needs.length,
+    // Whether the run was narrowed, not to what: the value is the seller's own words.
+    namedIssue: named !== null,
     grouping: input.grouping, sense, groupedProducts: (grouped?.rows ?? 0) + (negatives?.rows ?? 0),
     scanned: grouped?.checked ?? 0, terminal: "OK",
   });
@@ -349,7 +388,13 @@ async function runReviewSignal(input: SpecialistInput): Promise<ReviewOpsResult>
       // ranking of nineteen, and the merge must be able to see that without reading the sentence.
       complete: grouped ? grouped.checked >= issues.length : issues.length <= DEFAULT_LIMIT,
       settledBy: "REVIEW_OPS" as const,
-      ...(cited.length === 0 ? { reason: "지금 확인이 필요한 반복 리뷰 문제가 없습니다." } : {}),
+      // A named problem that does not exist is a different reason from a shop with no repeated
+      // problems, and the composer reads this string.
+      ...(cited.length === 0
+        ? { reason: named
+          ? `"${named}"이라고 부를 만한 반복 문제는 기록에 없습니다.`
+          : "지금 확인이 필요한 반복 리뷰 문제가 없습니다." }
+        : {}),
     })),
     ...(note ? { note } : {}),
   };
@@ -368,8 +413,27 @@ function wantsRows(input: SpecialistInput): boolean {
   return f.scope === "WORKING_SET" && input.workingSet?.kind === "REVIEWS";
 }
 
-/** The note this specialist adds: what the grouped scan left unread, or that there is nothing to read. */
-function noteOf(issues: readonly ReviewIssueSummary[], grouped: GroupedAnswer | null): string | null {
+/**
+ * The note this specialist adds: what a named problem turned out to be, what the grouped scan left
+ * unread, or that there is nothing to read.
+ *
+ * <b>An empty list means two different things and they may not share a sentence.</b> With no name, it
+ * is 「반복 문제가 없습니다」 — true of the shop. With a name, the shop may be full of repeated problems
+ * and simply not have THAT one, so the sentence has to say which question came back empty.
+ */
+function noteOf(issues: readonly ReviewIssueSummary[], grouped: GroupedAnswer | null,
+                named: string | null): string | null {
+  if (named) {
+    if (issues.length === 0) {
+      return `"${named}"이라고 부를 만한 반복 문제는 기록에 없습니다. 고객운영 메모리에서 이름을 확인해 주세요.`;
+    }
+    if (issues.length > 1) {
+      // Several problems carry the name. Asking is the honest move: picking the biggest would be the
+      // same silent substitution this lane exists to stop, one step later.
+      return `"${named}"이 들어간 반복 문제가 ${issues.length}건입니다. 어느 것을 보시겠습니까? — `
+        + issues.map((i) => `"${i.title}"`).join(" · ");
+    }
+  }
   if (issues.length === 0) {
     return "지금 확인이 필요한 반복 리뷰 문제는 없습니다.";
   }

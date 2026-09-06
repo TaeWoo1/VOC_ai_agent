@@ -31,8 +31,13 @@ const SUBJECT_TERM_MIN = 2;
 /**
  * Words that already have their own axis, or that name no subject at all. A term equal to one of these
  * would either duplicate a token the spec carries or narrow by a word that means nothing on a row.
+ *
+ * <b>Exported, because the same words cannot be a name on any surface.</b> A channel, a period, a work
+ * state or a quantifier is not a repeated PROBLEM either, and `issueSubject.ts` reads this set rather
+ * than starting a second copy that would drift — 「상품별 최근 문제를 알려줘」 was read as the problem
+ * named 「상품별 최근」 while this table was one import away from saying otherwise.
  */
-const NOT_A_SUBJECT: ReadonlySet<string> = new Set([
+export const NOT_A_SUBJECT: ReadonlySet<string> = new Set([
   // channels — `filters.channel`
   "네이버", "스마트스토어", "쿠팡", "카페24", "자사몰",
   // order / period — `filters.order`, `filters.period`

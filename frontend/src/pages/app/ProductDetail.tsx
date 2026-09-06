@@ -154,9 +154,18 @@ export function ProductDetail() {
         with nowhere to go: a number the screen knows and does not tell.
       */}
       <section className="space-y-3">
+        {/*
+          The scope is said, because the number CHANGES when you follow the row.
+
+          Every count here is this product's own (`ProductSignalsService.issuesFor` asks the evidence
+          table for this product and `ReviewIssueView.scopedTo` replaces the org-wide total with it), and
+          the issue memory the rows link to counts the same problem across every product — 16 here, 18
+          there, both correct. Two right numbers one click apart read as one wrong number unless the
+          narrower one says what it is narrower BY.
+        */}
         <SectionHeader
           title="반복되는 문제"
-          hint={`리뷰에서 같은 문제가 반복해 나타난 것 · 근거 ${count(volume.issueEvidence)}건`}
+          hint={`리뷰에서 같은 문제가 반복해 나타난 것 · 이 상품에서 나온 근거 ${count(volume.issueEvidence)}건`}
         />
         {data.signals.issues.length === 0 ? (
           <p className="text-muted">이 상품에서 반복 문제로 잡힌 것이 없습니다.</p>
@@ -306,7 +315,7 @@ function IssueRow({ issue }: { issue: ReviewIssueView }) {
       >
         <span className="break-keep font-medium text-ink">{issue.title}</span>
         <span className="text-sm tabular-nums text-muted">
-          근거 {count(issue.evidenceCount)}건
+          이 상품에서 {count(issue.evidenceCount)}건
           <span className="ml-1 text-brand-700" aria-hidden="true">›</span>
         </span>
       </Link>

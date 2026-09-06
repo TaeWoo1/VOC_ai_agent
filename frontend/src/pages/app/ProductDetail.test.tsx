@@ -140,7 +140,9 @@ describe("상품 상세 — repeated problems lead to their evidence", () => {
     renderDetail();
     const row = await screen.findByRole("link", { name: /접착 탈락/ });
     expect(row).toHaveAttribute("href", "/memory/issue-1");
-    expect(row).toHaveTextContent("근거 19건");
+    // Scoped, and it says so: the memory this row opens counts the same problem across every product,
+    // so the narrower figure has to name what it is narrower by.
+    expect(row).toHaveTextContent("이 상품에서 19건");
   });
 
   it("does not stop at five problems without saying so", async () => {

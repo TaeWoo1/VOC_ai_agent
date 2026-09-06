@@ -61,6 +61,15 @@ export interface SpecialistInput {
    */
   readonly subjectTerm: string | null;
   /**
+   * The repeated-problem NAME the sentence marked, or null — read once in the graph
+   * (`conversation/issueSubject.ts`) and passed, exactly like {@link subjectTerm}.
+   *
+   * <b>Null means the question was about the list, not about one problem.</b> ReviewOps then reads the
+   * whole list as it always did. A non-null value is matched against the titles it read; a name that
+   * matches nothing is said as such, and never widened back to the top of the list.
+   */
+  readonly issueSubject: string | null;
+  /**
    * Whether the seller named a period — the one half of the temporal demand a specialist cannot see.
    *
    * <b>Passed, not derived.</b> A specialist needs it only to SAY what it could not date; the gate

@@ -25,6 +25,7 @@ import type { WorkingSetView } from "../../conversation/contract";
 import { hasRefineExpression, namesOwnObject } from "../../conversation/reference";
 import { isAcquisitionRequest } from "../../conversation/acquisitionRequest";
 import { subjectTermOf } from "../../conversation/subjectTerm";
+import { issueSubjectOf } from "../../conversation/issueSubject";
 import { log } from "../../log";
 
 export type ScopeOverrideReason =
@@ -38,6 +39,14 @@ export type ScopeOverrideReason =
 export interface SentenceSubject {
   readonly topic: PlanFilters["topic"];
   readonly term: string | null;
+  /**
+   * The repeated-problem NAME the sentence marked, when it marked one (`conversation/issueSubject.ts`).
+   *
+   * <p>Separate from {@link term} because the two narrow different corpora and their word tables differ
+   * by design: 「문제」 is a subject marker on the issue memory and a customer's word on an inquiry row.
+   * Read here, with the rest of the sentence, and carried as a value — never re-read downstream.
+   */
+  readonly issueName?: string | null;
 }
 
 /** Does the sentence name a subject, and is it a different one from the set's? */
@@ -51,7 +60,7 @@ export interface SentenceSubject {
  */
 export function sentenceSubjectOf(plan: InvestigationPlan | null | undefined, text: string): SentenceSubject {
   const topic = plan?.filters?.topic && plan.filters.topic !== "OTHER" ? plan.filters.topic : null;
-  return { topic, term: topic ? null : subjectTermOf(text) };
+  return { topic, term: topic ? null : subjectTermOf(text), issueName: issueSubjectOf(text) };
 }
 
 function subjectChanged(subject: SentenceSubject | undefined, set: WorkingSetView): boolean {

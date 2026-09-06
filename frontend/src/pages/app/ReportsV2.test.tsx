@@ -195,4 +195,22 @@ describe("운영 리포트 — one stored snapshot, sentences that cite facts", 
     expect(getAgentReport).toHaveBeenCalledWith("rep-1");
     expect(getCurrentAgentReport).not.toHaveBeenCalled();
   });
+
+  /**
+   * <b>A report is read and then asked about</b> (pilot QA, 2026-09-06). This was the one operational
+   * screen with no way through to the Agent: a follow-up meant leaving the page, finding the chat and
+   * re-typing the name of the thing that had just been on screen.
+   */
+  it("offers the same Agent conversation every other screen does — and hands it no report text", async () => {
+    const { container } = renderReports();
+    await screen.findByTestId("report-narrative");
+    const launcher = screen.getByRole("link", { name: /이 내용으로 물어보기/ });
+    // The panel is the destination when the shell provides one; bare (as here) it is the /agent route.
+    // Either way the only thing that travels is WHICH SCREEN this is.
+    const href = launcher.getAttribute("href") ?? "";
+    expect(href).toContain("from=report");
+    expect(href).not.toMatch(/goal=|productId=|id=rep-/);
+    // No second chat lives on this page.
+    expect(container.querySelectorAll("textarea")).toHaveLength(0);
+  });
 });

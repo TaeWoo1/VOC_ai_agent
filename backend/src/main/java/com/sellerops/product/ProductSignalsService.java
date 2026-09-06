@@ -14,6 +14,7 @@ import com.sellerops.product.dto.ProductVolumeView;
 import com.sellerops.product.dto.RecommendedActionCountView;
 import com.sellerops.product.dto.SignalCoverageView;
 import com.sellerops.review.ReviewRepository;
+import com.sellerops.reviewissue.IssueOrdering;
 import com.sellerops.reviewissue.ReviewIssueEvidenceRepository;
 import com.sellerops.reviewissue.ReviewIssueQueryService;
 import com.sellerops.reviewissue.dto.ReviewIssueView;
@@ -181,20 +182,17 @@ public class ProductSignalsService {
                 // with no drill-down behind it.
             }
         }
+        // Most-repeated first, then severity — `IssueOrdering`, the same rule the issue memory reads by,
+        // applied to THIS product's counts. Before it, the five rows this page shows were the five most
+        // severe: on the demo org that was 6 evidence on screen and 40 folded away, with the largest
+        // repeated problem hidden behind 「문제 8건 더 보기」 directly above an opportunity card about it.
+        //
+        // The local severity rank this replaced also mapped an enum value that does not exist ("MEDIUM"),
+        // so NORMAL and LOW sorted equal; the shared comparator asks the enum.
         return views.stream()
                 .filter(v -> !v.dismissed())
-                .sorted(Comparator.comparing((ReviewIssueView v) -> severityRank(v.severity()))
-                        .thenComparing(Comparator.comparingLong(ReviewIssueView::evidenceCount).reversed())
-                        .thenComparing(v -> v.id().toString()))
+                .sorted(IssueOrdering.ACTIVE_FIRST)
                 .toList();
-    }
-
-    private static int severityRank(String severity) {
-        return switch (severity == null ? "" : severity) {
-            case "HIGH" -> 0;
-            case "MEDIUM" -> 1;
-            default -> 2;
-        };
     }
 
     /** Provenance of the issue signal, read off the stored extractor rather than hardcoded. */
