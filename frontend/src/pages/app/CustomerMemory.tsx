@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
+import { AgentLaunch } from "../../components/ui/AgentLaunch";
+import { useAgentSurface } from "../../lib/agentPanel";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
 import { IssueList } from "../../components/memory/IssueList";
@@ -26,6 +28,12 @@ export function CustomerMemory() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [inboxIds, setInboxIds] = useState<Set<string>>(new Set());
+
+  // The same conversation every other screen opens — the panel, not a second chat (Reports v1 §3).
+  // ONLY THE SCREEN TRAVELS. The label deliberately does not name the opened issue: `AgentContext`
+  // has no issue field, so a header saying 「접착 부족」 would promise a scope nothing carries, and
+  // the follow-up would be answered by whatever problem the sentence itself names.
+  useAgentSurface({ surface: "memory", label: "고객운영 메모리" });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,6 +88,7 @@ export function CustomerMemory() {
       <PageHead
         title="고객운영 메모리"
         description="반복되는 고객 문제와 그 근거를 기록으로 남깁니다."
+        action={<AgentLaunch context={{ surface: "memory" }} label="이 내용으로 물어보기" />}
       />
 
       {loading ? (

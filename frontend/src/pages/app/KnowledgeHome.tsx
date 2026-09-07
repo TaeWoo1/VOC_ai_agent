@@ -7,6 +7,8 @@ import type {
 } from "../../lib/types";
 import { api } from "../../lib/apiClient";
 import { PageHead } from "../../components/ui/PageHead";
+import { AgentLaunch } from "../../components/ui/AgentLaunch";
+import { useAgentSurface } from "../../lib/agentPanel";
 import { Section } from "../../components/ui/Section";
 import { Btn } from "../../components/ui/Btn";
 import { KnowledgeInbox } from "../../components/knowledge/KnowledgeInbox";
@@ -40,6 +42,12 @@ export function KnowledgeHome() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // The same conversation every other screen opens — the panel, not a second chat (Reports v1 §3).
+  // WHAT TRAVELS IS THE SCREEN, and only the screen: there is no knowledge READ tool in the runtime's
+  // catalogue, so a document id would be a hint no tool could turn into a fact. Registered
+  // unconditionally so the header names this page while it is still loading.
+  useAgentSurface({ surface: "knowledge", label: "reviewnary가 알고 있는 정보" });
 
   const load = useCallback(async () => {
     const [docs, cands, sum] = await Promise.all([
@@ -89,6 +97,7 @@ export function KnowledgeHome() {
       <PageHead
         title="reviewnary가 알고 있는 정보"
         description="고객에게 답할 때 근거로 쓰는 회사의 기준과 자료입니다."
+        action={<AgentLaunch context={{ surface: "knowledge" }} label="이 내용으로 물어보기" />}
       />
 
       {error ? <p className="break-keep text-sm text-bad" role="alert">{error}</p> : null}

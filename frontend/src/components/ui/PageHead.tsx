@@ -31,7 +31,14 @@ export function PageHead({
         {meta ? <div className="flex flex-wrap items-center gap-2">{meta}</div> : null}
         {description ? <p className="w-full break-keep text-sm text-muted">{description}</p> : null}
       </div>
-      {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
+      {/*
+        Wraps rather than widens. Measured at 390px in pilot QA (2026-09-07): 리뷰's head holds a
+        three-segment channel switcher beside its launcher, and `shrink-0` on a row that could not wrap
+        was as wide as its content — so on a phone the head decided the width of the page and the seller
+        read the screen sideways. `max-w-full` keeps the cap; `flex-wrap` spends the second line instead
+        of the reader's width.
+      */}
+      {action ? <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
     </header>
   );
 }

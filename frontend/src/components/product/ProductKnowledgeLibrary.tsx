@@ -91,8 +91,10 @@ export function ProductKnowledgeLibrary({ productId }: { productId: string }) {
                     <p className="mt-1 text-sm text-muted">
                       {source.variantId ? `${source.variantName ?? "특정 규격"} 전용 · ` : ""}
                       {source.authorName ? `${source.authorName} · ` : ""}
-                      {kstDate(source.updatedAt)} · 인용 단위 {source.chunks}개
-                      {source.chunks === 0 ? " (AI가 인용할 수 없습니다)" : ""}
+                      {/* The zero is the fact; 「인용 단위」 is our word for a chunk and the count is
+                          not something a seller can act on (pilot QA 2026-09-07). */}
+                      {kstDate(source.updatedAt)}
+                      {source.chunks === 0 ? " · AI가 인용할 수 없습니다" : ""}
                     </p>
                   </div>
                   <button

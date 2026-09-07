@@ -26,9 +26,11 @@ import { kstDate } from "../../lib/format";
  * what is on screen is 배송, 주문 취소, 교환·반품·환불. A settings page that asks a shop owner to pick
  * between two English constants is asking them to read the schema.
  *
- * <b>인용 단위 is shown for the same reason the product library shows it.</b> A rule saved with zero
- * passages is a rule an answer can never quote, and the seller should learn that here rather than
- * from a reply that quietly did not use it.
+ * <b>The fact is shown; the internal unit is not.</b> A rule saved with zero passages is a rule an
+ * answer can never quote, and the seller should learn that here rather than from a reply that quietly
+ * did not use it — but 「인용 단위 1개」 is our word for a chunk, and the count changes nothing the
+ * seller can act on. The 자료 list settled this once already (Knowledge Setup & Inbox UX v1: the count
+ * appears "as one honest outcome only"); found still printed here in pilot QA 2026-09-07.
  */
 const TYPES = ORG_TOPICS;
 
@@ -91,9 +93,8 @@ export function OperationsPolicies() {
                       <p className="mt-1 text-sm text-muted">
                         {source.authorName ? `${source.authorName} · ` : ""}
                         {kstDate(source.updatedAt)}
-                        {source.version > 1 ? ` · ${source.version}차 개정` : ""} · 인용 단위{" "}
-                        {source.passageCount}개
-                        {source.passageCount === 0 ? " (답변에 인용할 수 없습니다)" : ""}
+                        {source.version > 1 ? ` · ${source.version}차 개정` : ""}
+                        {source.passageCount === 0 ? " · 답변에 인용할 수 없습니다" : ""}
                       </p>
                     </div>
                     <button

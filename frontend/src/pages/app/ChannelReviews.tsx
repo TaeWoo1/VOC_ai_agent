@@ -470,10 +470,14 @@ export function ChannelReviews({
              heading and two grey sentences explaining that a panel would appear — a fifth of the
              screen spent describing the screen. The list takes the width until there is something to
              put in the other column. */
+          // `minmax(0,…)` on the single column too, not only on the two-column one. A grid track
+          // defaults to a min of MIN-CONTENT, and a row's min-content includes the product name, which
+          // is a `truncate` span (nowrap by definition): at 390px the track grew to 481 and the list
+          // scrolled sideways inside the page instead of ellipsising. Measured in pilot QA 2026-09-07.
           className={
             selectedId
-              ? "grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]"
-              : "grid gap-6"
+              ? "grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]"
+              : "grid grid-cols-[minmax(0,1fr)] gap-6"
           }
         >
           <Section title="목록" hint={shownRangeLabel(page)}>

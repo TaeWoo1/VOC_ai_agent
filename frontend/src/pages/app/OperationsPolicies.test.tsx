@@ -66,6 +66,15 @@ describe("운영 정책 / 답변 기준", () => {
     expect(await screen.findByText(/답변에 인용할 수 없습니다/)).toBeInTheDocument();
   });
 
+  it("never prints our word for a chunk beside the rule", async () => {
+    const { container } = (listOrgKnowledge.mockResolvedValue([policy()]), renderScreen());
+    await screen.findByText("현금영수증 발급 안내");
+
+    // 「인용 단위 1개」 is the storage vocabulary and the number changes nothing a seller can do; the
+    // zero case already says the one thing they can act on. Found on screen in pilot QA 2026-09-07.
+    expect(container.textContent ?? "").not.toContain("인용 단위");
+  });
+
   it("shows the revision count only once a rule has actually been revised", async () => {
     listOrgKnowledge.mockResolvedValue([policy({ version: 3 })]);
     renderScreen();

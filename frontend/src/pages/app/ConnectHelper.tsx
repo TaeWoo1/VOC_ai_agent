@@ -40,8 +40,10 @@ export function ConnectHelper() {
           {[
             "담당자에게 받은 「reviewnary 도우미」 폴더를 엽니다.",
             "「reviewnary 도우미 설치.command」를 더블클릭합니다. 처음 열 때 Mac이 막으면 파일을 마우스 오른쪽 클릭 → 열기 → 열기.",
-            "창이 뜨면 reviewnary 이메일과 비밀번호를 입력합니다. 이 Mac에만 저장되고 다른 곳으로 보내지 않습니다.",
-            "이 화면(채널 연결)이 다시 열리면 「도우미 연결」을 누르고, Mac에 뜨는 창에서 「허용」을 누릅니다.",
+            // 비밀번호를 묻는 단계는 없습니다. 설치 파일은 그것을 묻지 않고(Helper Device Authentication v1이
+            // 그 모델을 없앴습니다), 이 문장은 판매자가 뜨지 않는 창을 기다리게 만들던 안내였습니다.
+            "이 화면(채널 연결)이 저절로 열립니다. 「도우미 연결」을 누르고, Mac에 뜨는 창에서 「허용」을 누릅니다.",
+            "「이 기기 연결」을 누르면 끝입니다. 도우미에 비밀번호를 입력하지 않습니다 — 이 브라우저에서 이미 로그인한 계정에 이 Mac이 연결됩니다.",
           ].map((step, index) => (
             <li key={step} className="flex gap-2 break-keep">
               <span className="tabular-nums text-brand-700">{index + 1}.</span>
@@ -57,14 +59,21 @@ export function ConnectHelper() {
       <Section title="실행 필요라고 나올 때">
         <p className="break-keep text-ink">
           도우미가 꺼져 있다는 뜻입니다. Mac을 다시 시작했거나 로그아웃했다면 다시 로그인하면 시작됩니다. 그래도 그대로면
-          설치 파일을 한 번 더 실행해 주세요 — 로그인 정보와 네이버 로그인 상태는 그대로 유지됩니다.
+          설치 파일을 한 번 더 실행해 주세요 — 기기 연결과 네이버 로그인 상태는 그대로 유지됩니다.
         </p>
       </Section>
 
       <Section title="업데이트 필요라고 나올 때">
         <p className="break-keep text-ink">
           설치된 도우미가 이 화면보다 오래된 버전입니다. 담당자에게 새 버전 폴더를 받아 같은 「설치.command」를 다시 실행하면
-          됩니다. 다시 로그인하거나 다시 연결할 필요는 없습니다.
+          됩니다. 다시 연결할 필요는 없습니다.
+        </p>
+      </Section>
+
+      <Section title="기기 연결 필요라고 나올 때">
+        <p className="break-keep text-ink">
+          도우미는 켜져 있지만 아직 이 계정에 연결되지 않았다는 뜻입니다. 채널 연결 화면에서 「이 기기 연결」을 한 번
+          누르면 됩니다. 설정 › 연결된 기기에서 해제했거나, 다른 계정으로 로그인했을 때 나옵니다.
         </p>
       </Section>
 

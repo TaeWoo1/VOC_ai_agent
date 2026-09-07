@@ -181,6 +181,24 @@ const EMPTY_WORDS: readonly string[] = [
 const REFINE_MARKERS = /그중|그 중|이중|이 중|중에서|여기서|거기서|방금\s?본|위에서|앞에서/u;
 
 /**
+ * Is this token, whole, one of the refine expressions this file already owns?
+ *
+ * <b>Derived from the same table, so there is one.</b> {@link REFINE_MARKERS} says 「그중」 points at the
+ * rows on screen; nothing said it therefore names nothing, and a lane that reads tokens read it as a
+ * word. Measured live 2026-09-07 on the product panel: 「그중 접착 문제 근거 보여줘」 was read as the
+ * problem named 「그중 접착」, which no shop has, and the seller was told their own repeated problem is
+ * not in the record.
+ *
+ * <b>Offered, not folded into {@link namesContent}.</b> That was tried first and measured: dropping
+ * 「그중」 from the shared predicate let the row-SELECTION lane match 「그중 배송 얘기만 볼래」 against the
+ * rows and answer 「하나를 골라 주세요」 — a refine turned into a pick-one. The lanes that name an OBJECT
+ * ask for this; the lanes that point at rows keep reading the marker their own way.
+ */
+export function isRefineWord(token: string): boolean {
+  return new RegExp(`^(?:${REFINE_MARKERS.source})$`, "u").test(token.trim().toLowerCase());
+}
+
+/**
  * 「~만」 is a refine marker only on words that can point at the rows on screen.
  *
  * The delimitative particle attaches to anything, and the noun it attaches to decides what it means:

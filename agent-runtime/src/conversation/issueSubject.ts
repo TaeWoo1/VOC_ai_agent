@@ -21,7 +21,7 @@
  * list is read whole, exactly as before. What must not happen — and is what this closes — is narrowing
  * to the wrong problem, or answering about the top problem when the named one does not exist.
  */
-import { namesContent } from "./reference";
+import { isRefineWord, namesContent } from "./reference";
 import { NOT_A_SUBJECT } from "./subjectTerm";
 
 /** The longest span accepted as a problem name. Issue titles are two words (「접착 부족」). */
@@ -52,8 +52,16 @@ const NOT_A_PROBLEM_NAME: ReadonlySet<string> = new Set([
   "구매자", "후기", "운영", "지금", "현재", "새로운",
 ]);
 
-/** Either table refuses it, and for the same reason: it is not the name of a problem. */
-const notAName = (token: string) => NOT_A_SUBJECT.has(token) || NOT_A_PROBLEM_NAME.has(token);
+/**
+ * Either table refuses it, and for the same reason: it is not the name of a problem.
+ *
+ * <b>And so does a refine expression</b> — 「그중」·「여기서」 point at rows already on screen
+ * ({@link ../conversation/reference#isRefineWord}, the table that lane has always had). Measured live
+ * 2026-09-07: 「그중 접착 문제 근거 보여줘」 was read as the problem named 「그중 접착」, no issue carries
+ * that name, and the seller was told a problem they had just been shown is not in the record.
+ */
+const notAName = (token: string) =>
+  NOT_A_SUBJECT.has(token) || NOT_A_PROBLEM_NAME.has(token) || isRefineWord(token);
 
 /**
  * The markers that say the span before them is the thing being asked about.

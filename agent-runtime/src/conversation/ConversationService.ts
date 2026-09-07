@@ -35,6 +35,7 @@ import { conversationAxisOf } from "../operator/plan/InvestigationPlan";
 import type { PlanFilters } from "../operator/plan/InvestigationPlan";
 import { subjectTermOf } from "./subjectTerm";
 import { isAcquisitionRequest } from "./acquisitionRequest";
+import { namesEveryProduct } from "./productFocus";
 import { acquisitionArtifacts, acquisitionPlanFor } from "./acquisitionStep";
 import { REFRESH_FAILURE_LABEL } from "../operator/graph/reviewRefresh";
 import { answerFreshnessQuestion, freshnessQuestionOf } from "./freshnessQuestion";
@@ -750,13 +751,18 @@ export class ConversationService {
     // (Conversation Object Integrity v1's case). Found live in this package's own QA: sent on every
     // turn, the anchor's product turned 「최근 문의 8개 보여줘」 into a product-scoped read that answered
     // 「이 상품의 근거로는 쓸 수 없습니다」 about a product the sentence never named.
-    const saysThisProduct = /이 상품/.test(text);
+    // …and NOTHING product-scoped travels when the sentence puts the question to the whole catalogue
+    // (`conversation/productFocus.ts`). This gate is above both sources for the same reason it exists:
+    // 「이 상품은 됐고 전체에서 …」 contains 「이 상품」, so the pointer test below reads it as pointing at
+    // the very product the sentence set aside.
+    const widened = namesEveryProduct(text);
+    const saysThisProduct = !widened && /이 상품/.test(text);
     // A product the seller SELECTED is the object the conversation is standing on — the same statement
     // as a one-product list, made more deliberately, and the context bar shows it with a 「해제」 beside
     // it. A REVIEW anchor's product is a side fact about that review, so it travels under the same rule
     // an anchored inquiry's product does: only when the sentence says 「이 상품」.
     const anchoredObject = set?.selectedObject ?? null;
-    const anchoredProduct = !hints.productId
+    const anchoredProduct = widened ? undefined : !hints.productId
       ? anchoredObject?.kind === "PRODUCT" ? anchoredObject.productId ?? undefined
         // A REVIEW anchor's product is a fact ABOUT the review, so it travels only when the sentence
         // names the PRODUCT. Tried and measured the other way in this package: letting 「이 리뷰」 resolve
@@ -769,7 +775,8 @@ export class ConversationService {
       : undefined;
     const goal: GoalRequest = {
       text,
-      ...(hints.productId ? { productId: hints.productId } : anchoredProduct ? { productId: anchoredProduct } : {}),
+      ...(!widened && hints.productId ? { productId: hints.productId }
+        : anchoredProduct ? { productId: anchoredProduct } : {}),
       ...(hints.workItemId ? { workItemId: hints.workItemId } : {}),
       ...(hints.referenceDate ? { referenceDate: hints.referenceDate } : {}),
       conversation: {

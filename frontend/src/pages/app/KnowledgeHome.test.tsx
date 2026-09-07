@@ -99,7 +99,7 @@ beforeEach(() => {
 });
 
 function draw() {
-  render(<MemoryRouter><KnowledgeHome /></MemoryRouter>);
+  return render(<MemoryRouter><KnowledgeHome /></MemoryRouter>);
 }
 
 describe("reviewnary가 알고 있는 정보", () => {
@@ -119,6 +119,19 @@ describe("reviewnary가 알고 있는 정보", () => {
     expect(screen.getByText(/상품 정보 142개를 이미 읽고 있습니다/)).toBeInTheDocument();
     // Past answers are consulted, never official, and the screen says so in words.
     expect(screen.getByText(/공식 기준으로는 쓰지 않습니다/)).toBeInTheDocument();
+  });
+
+  it("offers the same Agent conversation every other screen does — and hands it no document", async () => {
+    const { container } = draw();
+    await screen.findByTestId("knowledge-summary");
+    const launcher = screen.getByRole("link", { name: /이 내용으로 물어보기/ });
+    // The panel is the destination when the shell provides one; bare (as here) it is the /agent route.
+    // Either way the only thing that travels is WHICH SCREEN this is — no document id, no passage.
+    const href = launcher.getAttribute("href") ?? "";
+    expect(href).toContain("from=knowledge");
+    expect(href).not.toMatch(/goal=|productId=|d-1/);
+    // No second chat lives on this page.
+    expect(container.querySelectorAll("textarea")).toHaveLength(0);
   });
 
   it("shows what was noticed with the seller's own count, and never promotes it", async () => {
