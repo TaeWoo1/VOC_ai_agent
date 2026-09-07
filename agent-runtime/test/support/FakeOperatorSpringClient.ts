@@ -14,6 +14,7 @@
  */
 import type {
   AnswerMemorySearchParams, AnswerMemorySearchResult,
+  AgentConverseView,
   AgentJudgeView,
   AgentPlanView,
   CustomerMemorySearch,
@@ -120,6 +121,13 @@ export interface FakeOperatorSeed {
   readonly repairedPlansByGoal?: Record<string, AgentPlanView>;
   /** When absent, the client has NO judgeFinding method at all. */
   readonly judge?: AgentJudgeView;
+  /**
+   * Grounded Conversation Lane v1: when absent, the client has NO `converse` method at all — which is
+   * the shipped CI posture and the reason the recorded-answer suites are untouched by that lane. A
+   * seeded value replays one model answer; `answersByQuestion` replays per question.
+   */
+  readonly converse?: AgentConverseView;
+  readonly converseByQuestion?: Record<string, AgentConverseView>;
   /* ── Agentic Operating Workspace v2 ── */
   /**
    * `GET /api/reviews/recent` answers keyed by `${negativeOnly}:${channel ?? "ALL"}`; `"*"` is the
@@ -149,7 +157,7 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
 
   readonly calls = {
     inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
-    plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0, channelCoverage: 0,
+    plan: 0, judge: 0, converse: 0, knowledge: 0, facts: 0, inquiryContext: 0, channelCoverage: 0,
     knowledgeSearch: 0, orgKnowledgeSearch: 0, answerMemorySearch: 0, recentReviews: 0, overview: 0, ordersSummary: 0, channels: 0,
     channelOverview: 0, transports: 0, reviewChannelCapability: 0, sellerProfile: 0, reviewDetail: 0,
   };
@@ -230,6 +238,14 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
         // other plan would make the suite measure this fake's improvisation rather than a model's.
         return { available: false, supported: false, specialists: [], tools: [],
           rationale: null, providerVersion: null };
+      };
+    }
+    if (seed.converse || seed.converseByQuestion) {
+      (this as OperatorSpringClient).converse = async (request) => {
+        this.calls.converse += 1;
+        this.converseRequests.push(request);
+        return seed.converseByQuestion?.[request.question] ?? seed.converse
+          ?? { available: false, answer: null, providerVersion: null };
       };
     }
     if (seed.judge) {
@@ -401,6 +417,10 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
   readonly orgKnowledgeQueries: string[] = [];
   /** Every finding sentence handed to the model judge — what leaves for the vendor. */
   readonly judgeFindings: string[] = [];
+  /** Every grounded-conversation request this fake received — the payload a floor test reads. */
+  readonly converseRequests: {
+    question: string; facts: string[]; context: string[]; recentTurns: string[];
+  }[] = [];
 
   async getSellerProfile(): Promise<SellerProfileView> {
     this.calls.sellerProfile += 1;

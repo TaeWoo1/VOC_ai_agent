@@ -74,7 +74,13 @@ class AgentDraftBoundaryTest {
             // dates, vocabulary titles, the seller's product names — and no customer text. Its own
             // door, because a report narrative is a different exposure from a plan or a draft.
             new String[] {"AgentReportNarrativeGenerator", "AgentReportNarrativeService.java",
-                    "AgentReportNarrativeGenerator.java"});
+                    "AgentReportNarrativeGenerator.java"},
+            // The tenth (Grounded Conversation Lane v1, 2026-09-07): the seller's own sentence, the
+            // sentences WE wrote earlier in the same thread, and this deployment's fact sheet about
+            // itself. No customer content — and its own door, because it is the only capability whose
+            // output is prose a seller reads rather than a token the runtime routes on.
+            new String[] {"AgentConverseGenerator", "AgentConverseService.java",
+                    "AgentConverseGenerator.java"});
 
     /**
      * The classes allowed to name {@code AgentLlmTransport} beside a {@code .post(} call: the three
@@ -86,6 +92,7 @@ class AgentDraftBoundaryTest {
             "InquirySignalGenerator.java", "ImageFactExtractionGenerator.java",
             "KnowledgeEmbeddingGenerator.java", "KnowledgeQuestionIntentGenerator.java",
             "KnowledgeEligibilityGenerator.java", "AgentReportNarrativeGenerator.java",
+            "AgentConverseGenerator.java",
             "JdkAgentLlmTransport.java", "AgentLlmConfiguration.java");
 
     @Test

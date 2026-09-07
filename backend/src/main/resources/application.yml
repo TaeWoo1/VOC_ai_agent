@@ -200,6 +200,19 @@ sellerops:
       api-key: ${SELLEROPS_AGENT_JUDGE_API_KEY:}
       max-output-tokens: ${SELLEROPS_AGENT_JUDGE_MAX_OUTPUT_TOKENS:2000}
       reasoning-effort: ${SELLEROPS_AGENT_JUDGE_REASONING_EFFORT:low}
+    # ── Grounded Conversation (Grounded Conversation Lane v1, 2026-09-07) ────────────────────────
+    #
+    # 열 번째 스위치이자 열 번째 키. 나가는 것은 판매자 자신의 문장, 이 스레드에서 우리가 쓴 문장,
+    # 그리고 이 배포가 자기 자신에 대해 조립한 사실 목록뿐이다 — 고객 본문은 포함되지 않는다.
+    # 꺼져 있으면 결정론 composer가 그대로 답한다(이 패키지 이전과 바이트 동일).
+    converse:
+      enabled: ${SELLEROPS_AGENT_CONVERSE_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_AGENT_CONVERSE_ORG_IDS:}
+      vendor: ${SELLEROPS_AGENT_CONVERSE_VENDOR:OPENAI}
+      model: ${SELLEROPS_AGENT_CONVERSE_MODEL:gpt-5-2025-08-07}
+      api-key: ${SELLEROPS_AGENT_CONVERSE_API_KEY:}
+      max-output-tokens: ${SELLEROPS_AGENT_CONVERSE_MAX_OUTPUT_TOKENS:2000}
+      reasoning-effort: ${SELLEROPS_AGENT_CONVERSE_REASONING_EFFORT:minimal}
     # ── Inquiry semantic signature (Operator Graph v2, 2026-08-21) ───────────────────────────────
     #
     # A FOURTH separate switch and separate key. This is the heaviest of the four exposures: it sends ONE

@@ -366,6 +366,52 @@ runtime **975** · backend **3,898** · frontend **2,779** · 실패 0. **마켓
 「어떤 동작인가」 축이 없어 네 능력을 전부 답한다 · recorded plan은 v17 실측이지만 CI는 벤더를 부르지 않으므로
 프롬프트가 다섯을 구분하지 못하게 되어도 단언은 통과한다 — 그 검사는 라이브 재녹화뿐이다)
 
+**`docs/grounded_conversation_lane_v1.md`** (Grounded Conversation Lane v1 + Cross-Lane Context
+Continuity — 2026-09-07. **AOP/LangGraph 실행 구조 FREEZE**(WorldState · Procedure · NeedKind · tool ·
+Evidence · Approval · Executor · Checkpoint 무변경, 새 procedure·tool·marketplace WRITE 0). 바꾼 것은
+하나 — **ASK/EXPLAIN에는 LLM의 reasoning을 돌려주고, DO/CHANGE는 지금의 결정론 구조 그대로 둔다.**
+**결함은 다섯 개의 답이 틀려서가 아니라 다섯 개뿐이어서다** — `capabilityAspect`는 닫힌 토큰이고 여섯 번째
+질문은 그 값이 아니므로, 새 informational 질문을 지원하는 유일한 길이 「토큰 하나 + composer 하나 추가」였다.
+같은 커밋·같은 스택에서 capability만 껐다 켜서 잰 before/after: 「너랑 사방넷이랑 뭐가 달라?」는 네 도메인
+카드였고 이제 「그 서비스는 제가 정확히 알지 못합니다」 + 우리가 하는 일이며, 「세 군데 연결하면 문의가 중복으로
+보여?」는 채널 매트릭스였고 이제 채널별 저장·원본 글 단위 dedupe를 답한다. **§1 감사 결과 새 store는 필요
+없었다** — 맥락은 이미 일곱 곳(transcript · selectedInquiry/selectedObject · workingSet ids · activeTask/
+pendingPrepared · AOP cursor · surface hint · priorLine)에 정확히 있었고 이름이 없었을 뿐이라
+`ContextEnvelope`는 **projection**이다(영속 0 · 캐시 0 · 조정 0; durable envelope를 만들었다면 anchor의 두
+번째 사본이 생기고 어긋났을 때 어느 쪽이 대화의 것인지 말할 사람이 없다). refs만 담고 사실은 소유 surface에서
+다시 읽으며, **id는 모델로 나가지 않는다**(닫힌 `key=value` 줄뿐이고 floor가 그 줄에 이름·본문이 나타나는 날
+거절한다). **§3 열 번째 LLM capability** `sellerops.agent.converse.*`(`POST /api/agent/converse`, 자기 flag·
+key·prompt·parser·quota kind·바이트 payload floor, **기본값 OFF**). grounding source는 전부 기존 진실 —
+등록된 tool catalogue · action class · **그 turn의 coverage 스냅샷(추가 읽기 0)** · 모든 실행 경로가 쓰는
+`capabilityOf` 판정 · `routineEnabled` · `SellerReadiness`, 그리고 손으로 쓴 것은 **구조 사실 4줄뿐이고 그
+개수를 테스트가 고정한다**. 즉 `ProductSelfKnowledge`는 ASK lane에서 문장 생성기이기를 그만두고 **grounding
+source**가 되며, 다섯 composed 답은 **fallback으로 남는다**. **모든 실패가 이전 답으로 착지한다** — capability
+off · quota · floor 거절 · 모델 거절 · 도달 불가 · 출력 guard 거절 전부 결정론 composer가 문장을 쓴다(그래서
+CI 스위트는 무변경: fake client에 `converse` 메서드가 아예 없어 이 lane은 CI에서 돌지 않고 녹화된 답을 **바꿀
+수 없다**). **payload floor: 고객 콘텐츠 0** — 판매자 자신의 문장 · 이 스레드에서 우리가 쓴 문장 ≤6 · 사실
+시트 · 닫힌 토큰이 전부이고 `Input` record는 칸이 넷이라 object id를 실을 자리가 없다. 「한 사실은 한 번」
+suppression은 **삭제가 아니라 fallback으로 축소**했다. **§4 continuity 실결함 하나** — 진행 중 단계의 carry가
+`selectedInquiry`만 봐서 REVIEW·PRODUCT anchor 스레드는 첫 대화 turn에 `activeTask`를 잃었다(`sameAnchor`,
+옛 규칙에서 빨개지는 것 확인). fence 셋: 대화 turn은 **어떤 procedure도 진행시키지 않고**(router는 문장을 읽지
+않으며 draft·approval·execute를 든 procedure는 전부 DO 토큰을 요구 — readiness×anchor×action 전수 단언),
+**멈춘 procedure는 질문 뒤에도 멈춰 있으며**(`WAITING_HUMAN` cursor의 `approvalId` 불변 — interrupt는 허가가
+아니고 「이 답변 괜찮아?」는 그 허가가 아니다), **lane은 READ only**(세 모듈에 writer·approval·channel 호출
+이름 0, 소스 스캔). **§6 실측 비용**: converse 왕복 **≈2,200ms** · prompt **1,288~1,427 토큰** · completion
+98~128 · reasoning 0, capability turn 전체 **2,501~3,027ms → 4,190~5,681ms**(모델 호출 1 → 2), 판매자 일일
+예산에 `AgentUsageKind.CONVERSE`로 청구(enum 값 하나, 마이그레이션 0). **§7 라이브**: clean seller 실브라우저
+8문장 → 8개의 서로 다른 답(사방넷·판매자센터·「그냥 문의 AI야?」·매일 들어와야 하나·할 수 없는 것·중복·쿠팡
+리뷰 답글·네이버 리뷰 등록), **콘솔 오류 0 · off-host 0 · 가로 스크롤 0**; 연결된 Demo Org에서 같은 두 문장이
+**그 가게의 사실로 다르게** 답한다(연결된 세 채널·정기 수집·네이버/쿠팡의 최초 1회 확인). grounded turn 10건
+전부 응답 · guard 거절 0 · capability를 뺀 org에서는 `answered=false`로 옛 답이 그대로. backend **3,903** ·
+frontend **2,779** · runtime **994** · 실패 0 · **테스트 재작성 0**(안전 테스트 약화 0, boundary 표가 열 번째
+행을 얻었다) · **마켓플레이스 0 · WRITE 0 · 승인 0 · 실행 0 · 마이그레이션 0 · DB 행 변경 0** ⇒ evidence 행
+없음. **고치지 않고 보고**: 객체에 대한 「왜」 질문(「왜 이 리뷰가 문제야?」)은 여전히 객체를 그려서 답한다 —
+확장하려면 이 capability의 payload에 객체의 사실과 결국 고객 문장을 넣어야 하고 그것은 **floor 결정**이지 문구
+결정이 아니다(seam은 준비돼 있다) · per-object capability lane 무변경 · `capabilityAspect`는 fallback이 계속
+쓴다 · grounded 답은 결정론이 아니다(사실은 고정, 문장은 아니다) · 구조 사실 4줄은 아무도 재도출하지 않는다 ·
+제품 질문마다 왕복 한 번(**≈2.2s**)이 늘어나는 것과 **판매자 문장·스레드가 매 제품 질문마다 벤더로 나가는
+것**은 머지가 아니라 **배포 결정**이다)
+
 **`docs/planner_model_prompt_benchmark_v1.md`** (Planner Model & Prompt Benchmark v1 — 2026-09-06.
 Agent Runtime 구조는 **FREEZE**하고, 「플래너의 모델과 프롬프트가 실제로 최선인가」만 잰다. **핵심 설계:
 새 채점기를 만들지 않았다** — 대화는 `test/scenario/cases.ts`에 **데이터로 한 번** 적히고 두 번 실행된다

@@ -14,6 +14,7 @@
  */
 import type {
   ImprovementOpportunitySummary,
+  AgentConverseView,
   AgentJudgeView,
   AgentPlanView,
   CustomerMemorySearch,
@@ -673,6 +674,20 @@ export class HttpSpringClient
     runId?: string;
   }): Promise<AgentJudgeView> {
     return this.request<AgentJudgeView>("POST", `/api/agent/judge`, request);
+  }
+
+  /**
+   * The Grounded Conversation seam. Reads nothing, writes nothing, stores nothing — like the two
+   * above it, and unlike them it returns a sentence a seller reads rather than a token we route on.
+   */
+  async converse(request: {
+    question: string;
+    facts: string[];
+    context: string[];
+    recentTurns: string[];
+    runId?: string;
+  }): Promise<AgentConverseView> {
+    return this.request<AgentConverseView>("POST", `/api/agent/converse`, request);
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {

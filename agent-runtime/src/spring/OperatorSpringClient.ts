@@ -16,6 +16,7 @@
 import type {
   AnswerMemorySearchParams,
   AnswerMemorySearchResult,
+  AgentConverseView,
   AgentJudgeView,
   AgentPlanView,
   CustomerMemorySearch,
@@ -255,4 +256,21 @@ export interface OperatorSpringClient {
 
   /** Ask the backend's judge seam to check one finding. OPTIONAL for the same reason. */
   judgeFinding?(request: { finding: string; evidenceDigest: string }): Promise<AgentJudgeView>;
+
+  /**
+   * Ask the backend's conversation seam to answer one question from the facts given.
+   *
+   * <b>Optional on the type AND in effect</b>, unlike {@link planGoal}: a client without it — or a
+   * deployment with the capability off — falls back to the deterministic composer, which is what this
+   * product shipped before the lane existed. That is why every failure of this seam is one value.
+   */
+  converse?(request: {
+    question: string;
+    /** What this deployment can prove about ITSELF. Sentences we composed; never a customer's. */
+    facts: string[];
+    /** Where the conversation is standing, as closed `key=value` tokens. */
+    context: string[];
+    /** The last few sentences of this thread — the seller's and ours. */
+    recentTurns: string[];
+  }): Promise<AgentConverseView>;
 }

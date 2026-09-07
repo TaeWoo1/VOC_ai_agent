@@ -50,6 +50,11 @@ import {
   afterConnectAnswer, channelActionAnswer, channelActionFacts, channelOffers, howToConnectAnswer,
   fallbackAspect, overviewAnswer, shortenRepeat, supportedChannelsAnswer,
 } from "../operator/capability/ProductSelfKnowledge";
+import { productFactSheet } from "../operator/capability/ProductFactSheet";
+import { CONNECT_ACTION } from "../operator/capability/AssistantCapability";
+import { envelopeOf, envelopeTokens, envelopeTurnLines } from "./ContextEnvelope";
+import type { ContextEnvelope } from "./ContextEnvelope";
+import { checkGroundedAnswer } from "./groundedAnswer";
 import { UNKNOWN_WORLD, worldStateOf, worldTokenFor } from "../operator/state/WorldState";
 import type { WorldState } from "../operator/state/WorldState";
 import {
@@ -900,7 +905,7 @@ export class ConversationService {
     const userTurn = ctx.userTurn!;
     const result = ctx.result!;
     const turnWorld = ctx.turnWorld!;
-    const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? [], receipts, turnWorld, ctx.intent ?? "NONE", options.afterCapture);
+    const composed = await this.compose(view, result, hints, prefix, bundle, stage, remaining, collected ?? [], receipts, turnWorld, ctx.intent ?? "NONE", ctx.text ?? "", options.afterCapture);
     if (options.afterCapture) composed.artifacts = [options.afterCapture.artifact, ...composed.artifacts];
     if (partialChips.length > 0) {
       composed.suggestedActions = [...partialChips, ...composed.suggestedActions.filter((s) => s.kind !== "RESUME")];
@@ -929,8 +934,7 @@ export class ConversationService {
       : pendingCapture ? "CAPTURE_KNOWLEDGE"
         : composed.artifacts.some((a) => a.type === "APPROVAL_REQUIRED" || a.type === "APPROVAL" || a.type === "GUIDED_EXECUTION") ? "APPROVE_REPLY"
           : pendingPrepared && pendingPrepared !== view.pendingPrepared ? "PREPARE_REPLY"
-            : workingSet?.selectedInquiry && workingSet.selectedInquiry.inquiryId === view.workingSet?.selectedInquiry?.inquiryId
-              ? view.activeTask ?? null : null;
+            : sameAnchor(workingSet, view.workingSet) ? view.activeTask ?? null : null;
     const finalTurn: TurnView = {
       ...agentTurn,
       continuation: {
@@ -1272,6 +1276,15 @@ export class ConversationService {
     world: WorldState,
     /** What this sentence asks of the object on the table — read ONCE at route time, never here. */
     intent: ProcedureIntent,
+    /**
+     * The seller's own sentence, for the ONE lane that answers it rather than routing on it.
+     *
+     * <b>This is not a second reading of the sentence.</b> Nothing in `compose` branches on these
+     * words: they travel to the Grounded Conversation seam as the question a model answers from the
+     * fact sheet, which is the whole point of that lane. The ownership contract is unchanged — the
+     * planner is still the only thing that decides what the sentence MEANS.
+     */
+    said: string,
     afterCapture?: AfterCapture,
   ): Promise<Composed> {
     // One automatic resume per saved capture: a turn that follows a save never opens another gap, and
@@ -1514,6 +1527,8 @@ export class ConversationService {
       const explained = await this.explainCapability(
         bundle, view, axis.filters.channel ?? workingSet?.filters.channelCode ?? null, workingSet,
         axis.filters.capabilityAspect, world,
+        envelopeOf({ conversationId: view.conversationId, view, readiness: world.readiness.kind, surface: hints.surface ?? null }),
+        said,
       );
       if (explained.artifact) artifacts.push(explained.artifact);
       headline = headline ?? explained.headline;
@@ -2914,7 +2929,7 @@ export class ConversationService {
    */
   private async productSelfAnswer(
     view: ConversationView, bundle: SpringClientBundle, world: WorldState,
-    aspect: CapabilityAspect, channel: string | null,
+    aspect: CapabilityAspect, channel: string | null, envelope: ContextEnvelope, said: string,
   ): Promise<{ artifact: SummaryArtifact | null; headline: string; chips: SuggestedAction[] }> {
     const registry = new OperatorToolRegistry(
       buildOperatorTools({ operator: bundle.operator, inquiry: bundle.inquiry, issue: bundle.issue }),
@@ -2923,6 +2938,23 @@ export class ConversationService {
       registeredTools: registry.names(), actionClasses: registry.actionClasses(),
       readiness: world.readiness, coverage: world.coverage,
     };
+    /**
+     * <b>The Grounded Conversation lane answers first, and the composer below is its fallback.</b>
+     *
+     * Grounded Conversation Lane v1 §3. The five composed answers under this line are correct for the
+     * five questions they were written for, and that is exactly the ceiling this package removes: a
+     * sixth question — 「너랑 사방넷이랑 뭐가 달라?」, 「내가 매일 여기 들어와야 돼?」 — needed a sixth
+     * token and a sixth composer. Here the same derivations become a FACT SHEET and a model answers
+     * whatever was actually asked.
+     *
+     * <b>Every failure lands on the old answer.</b> Capability off, quota met, floor refused, model
+     * declined, guard rejected the prose — all five return null, and what a seller reads is what
+     * shipped before this lane. That is also why the scenario suite is unchanged: its client has no
+     * `converse` method at all, so this lane does not run in CI and CANNOT change a recorded answer.
+     */
+    const grounded = await this.groundedProductAnswer(bundle, input, world, envelope, said, channel);
+    if (grounded) return grounded;
+
     // A named channel narrows the two aspects that have a per-channel truth; the other three are about
     // the product and take none. The reads are made only on the turn that needs them.
     const scoped = channel && (aspect === "AFTER_CONNECT" || aspect === "CHANNEL_ACTION")
@@ -2958,6 +2990,62 @@ export class ConversationService {
         ...answer.chips.map((c) => promptChip(c)),
         ...(answer.link ? [{ label: answer.link.label, kind: "LINK" as const, to: answer.link.to }] : []),
       ],
+    };
+  }
+
+  /**
+   * <b>Answer the question that was asked, from facts this deployment can prove.</b>
+   *
+   * The inputs are the ones §3 names and nothing else: the seller's own sentence, the last few
+   * sentences of this thread, the context envelope as closed tokens, and the product fact sheet — the
+   * tool catalogue, the action classes, the coverage snapshot this turn already holds, and the
+   * per-channel verdicts from the same resolver the execution paths read.
+   *
+   * <b>Context engineering, not a decision tree.</b> The only routing done here is WHICH facts to
+   * fetch: a sentence that named a channel gets that channel's verdicts, one that named none gets the
+   * table's. Nothing about the ANSWER is decided by that choice — the selection is of facts, never of
+   * wording, which is the line §6 draws.
+   *
+   * <b>READ only, structurally.</b> The seam it calls looks nothing up and stores nothing; the reads
+   * it makes are the capability overviews and this deployment's own wiring. There is no path from here
+   * to a draft, an approval or a channel.
+   */
+  private async groundedProductAnswer(
+    bundle: SpringClientBundle, input: SelfKnowledgeInputs, world: WorldState,
+    envelope: ContextEnvelope, said: string, channel: string | null,
+  ): Promise<{ artifact: null; headline: string; chips: SuggestedAction[] } | null> {
+    const question = said.trim();
+    if (!bundle.operator.converse || question.length === 0) return null;
+    const matrix = await this.channelMatrix(bundle, input, channel);
+    const facts = productFactSheet(input, matrix);
+    let answered: string | null = null;
+    try {
+      const result = await bundle.operator.converse({
+        question,
+        facts,
+        context: envelopeTokens(envelope),
+        recentTurns: envelopeTurnLines(envelope),
+      });
+      answered = result.available ? result.answer : null;
+    } catch {
+      // A seam that is unreachable is a seam that is off. Same consequence, same branch.
+      answered = null;
+    }
+    const verdict = checkGroundedAnswer(answered);
+    log("grounded_conversation", {
+      answered: verdict.ok, reason: verdict.reason ?? "OK", facts: facts.length,
+      turns: envelope.recentTurns.length, channels: matrix.length,
+      focus: envelope.focus?.kind ?? "NONE", readiness: envelope.readiness,
+    });
+    if (!verdict.ok) return null;
+    return {
+      artifact: null,
+      headline: verdict.text!,
+      // The one action a seller with nothing connected has. The model writes the sentence; the runtime
+      // still owns which button exists — a link is a product decision, not a phrase.
+      chips: world.readiness.kind === "NO_CHANNEL"
+        ? [{ label: CONNECT_ACTION.label, kind: "LINK" as const, to: CONNECT_ACTION.to }]
+        : [],
     };
   }
 
@@ -3015,6 +3103,7 @@ export class ConversationService {
   private async explainCapability(
     bundle: SpringClientBundle, view: ConversationView, channel: string | null, workingSet: WorkingSetView | null,
     plannedAspect: CapabilityAspect | null, world: WorldState,
+    envelope: ContextEnvelope, said: string,
   ): Promise<{ artifact: SummaryArtifact | null; headline: string; chips: SuggestedAction[] }> {
     const objectKind: ObjectKind = workingSet?.kind === "INQUIRIES" ? "INQUIRY" : "REVIEW";
     const code = channel?.toUpperCase() ?? null;
@@ -3036,7 +3125,7 @@ export class ConversationService {
     // its answer is that object's verdict — read below, unchanged. Everything else about capability is
     // a question about the product, and `ProductSelfKnowledge` is the one place that answers those.
     const aboutThisObject = code != null && workingSet != null;
-    if (!aboutThisObject) return this.productSelfAnswer(view, bundle, world, aspect, code);
+    if (!aboutThisObject) return this.productSelfAnswer(view, bundle, world, aspect, code, envelope, said);
     const name = channelNameOf(view, code!) ?? code!;
     const what = objectKind === "REVIEW" ? "리뷰 답글" : "문의 답변";
     let verdict: ChannelCapabilityVerdict;
@@ -3293,6 +3382,25 @@ function focusInquiryOf(set: WorkingSetView | null): SelectedInquiry | null {
  * a PREPARE plan that also read the org queue made 「첫 번째 거」 the first row of that queue, not of the
  * three rows on screen (Conversation Object Integrity v1).
  */
+/**
+ * <b>Is the conversation still standing on the same object it was?</b>
+ *
+ * Grounded Conversation Lane v1 §4. The step in flight is carried when the anchor did not move, and
+ * the test for that used to read {@code selectedInquiry} alone — so a thread anchored on a REVIEW or a
+ * PRODUCT lost its task on the first conversational turn: 「답글 준비해줘」 leaves PREPARE_REPLY on a
+ * review, 「왜 이렇게 썼어?」 answers about that same review, and the context bar stops saying what the
+ * conversation is doing with it. The anchor is one of three kinds — {@code selectedObject} clears
+ * {@code selectedInquiry} and back — so the comparison has to be over the ANCHOR, not over one of its
+ * shapes.
+ */
+function sameAnchor(next: WorkingSetView | null, previous: WorkingSetView | null): boolean {
+  const key = (set: WorkingSetView | null): string | null =>
+    set?.selectedObject ? `${set.selectedObject.kind}:${set.selectedObject.id}`
+      : set?.selectedInquiry ? `INQUIRY:${set.selectedInquiry.inquiryId}` : null;
+  const a = key(next);
+  return a != null && a === key(previous);
+}
+
 function pickSet(workingSet: WorkingSetView | null, view: ConversationView): WorkingSetView | null {
   const candidates = [view.workingSet, workingSet];
   return candidates.find((s) => s?.kind === "INQUIRIES" || s?.kind === "REVIEWS") ?? null;

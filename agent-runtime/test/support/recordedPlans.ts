@@ -1135,7 +1135,7 @@ export const PRODUCT_COPY_PLAN: AgentPlanView = {
  * about the answers go on passing while the product regresses. The live re-record is the check on that,
  * and it is written in the package's own docs.
  */
-const capabilityPlan = (goal: string, aspect: string, channel: string | null): AgentPlanView => ({
+export const capabilityPlan = (goal: string, aspect: string, channel: string | null): AgentPlanView => ({
   available: true, supported: true, userGoal: goal, unresolvedEntities: [],
   informationNeeds: [], specialists: [], tools: [], retrievalOrder: [], retrievalParallel: [],
   retrievalStopWhen: null, evidenceRequirements: [], riskClass: "ROUTINE", maxIterations: 1, maxToolCalls: 4,

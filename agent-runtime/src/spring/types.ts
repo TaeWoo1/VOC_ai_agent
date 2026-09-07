@@ -854,6 +854,22 @@ export interface AgentJudgeView {
   readonly quotaMessage?: string | null;
 }
 
+/**
+ * The Grounded Conversation seam's answer (Grounded Conversation Lane v1) — prose, or nothing.
+ *
+ * <b>One boolean for every kind of no.</b> The capability being off, the daily budget being met, the
+ * request floor refusing, the model declining and the model being unreachable are five different
+ * events with ONE consequence here: the deterministic composer writes the sentence instead. Giving
+ * them separate fields would invite a caller to treat them differently, and there is nothing different
+ * to do.
+ */
+export interface AgentConverseView {
+  readonly available: boolean;
+  /** Seller-facing prose. Present only when `available`. */
+  readonly answer: string | null;
+  readonly providerVersion: string | null;
+}
+
 /* ─────────────── Cross-Channel Operational Reasoning v1 (2026-08-24) ─────────────── */
 
 /**
