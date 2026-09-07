@@ -338,6 +338,34 @@ ERROR 0**. **계약이 바뀌어 테스트 3건과 plan fixture 3건을 다시 �
 분기는 Demo Org에 회사 정보가 없어 **라이브 미관측**(단위 테스트로만 고정) · `groupingOf`는 graph에서 여전히
 두 번 호출된다(같은 순수 함수·같은 입력·소유자 1) · 마켓플레이스 0 · WRITE 0 · 마이그레이션 0)
 
+**`docs/agent_product_self_knowledge_v1.md`** (Agent Product Self-Knowledge v1 — 2026-09-07. Agent
+architecture **FREEZE**(AOP/Procedure 추가 0). Clean seller에서 「연동하고 나면 뭐가 되냐고」가 앞 turn과
+거의 같은 onboarding 답을 반복하던 defect. **trace가 planner를 무죄로 만들었다** — 여섯 문장 전부
+`EXPLAIN_CAPABILITY`로 맞게 읽혔고, 못 한 것은 「어떤 종류의 capability 질문인가」를 말하는 것이며 그럴 축이
+없었다. 그래서 런타임의 판별자가 proxy(`informationNeeds.length === 0`)였고 양방향으로 틀렸다: need를 붙인
+문장은 채널 lane으로 떨어져 **「어느 채널에 대한 질문인지 알려주세요 (네이버 · 쿠팡 · 카페24)」** — 거절문의
+괄호 안에 답이 든 되물음 — 이 됐고, need 0인 서로 다른 네 질문은 카드 하나와 getting-started 하나로 합쳐졌다.
+**축 하나**(`filters.capabilityAspect`, 프롬프트 v16→**v17**, `reviewIntent`·`inquiryIntent`와 같은 가족)와
+**factual source 하나**(`operator/capability/ProductSelfKnowledge.ts`)로 닫는다 — 중복 작성 0이고 입력은 전부
+기존 source of truth다(tool catalogue · action class · 그 turn의 coverage 스냅샷 **추가 읽기 0** · 모든 실행
+경로가 쓰는 `capabilityOf` · 여섯 Procedure). `AssistantCapability.ts`는 파생만 남기고 문장은 옮겼다(같은 문장의
+두 번째 사본 금지). **연결 전에 답할 수 있는 것이 요점** — 채널 capability 읽기는 채널-keyed거나 org 범위라
+계정이 필요 없고, 연결을 **결정하려는** 판매자가 그 답을 가장 필요로 한다. `null` aspect는 여섯 번째 값이 아니라
+**필드 이전 동작의 재현**(`fallbackAspect`)이라 v17 이전 backend에서 바이트 동일. **「모른다」·「안 된다」·「이
+배포에서 꺼져 있다」는 다른 문장**(연결된 Demo Org가 「연결하신 뒤에 확인해 드릴 수 있습니다」를 듣고 있었다;
+내부 플래그 이름 노출 0), **읽을 수 있는 사실은 withhold하지 않는다**(연결된 채널은 그 계정의 review capability를
+실제로 읽고, subtype 둘이 같은 답이면 그것이 채널의 답 — per-object lane 무변경). **capability 질문은 채널을
+상속하지 않는다**(`focusForAxis` 한 줄, 넓히는 방향으로만 — 「리뷰 답글도 자동으로 보내?」가 직전 NAVER를 물고
+와 좁혀지고 그래서 반복으로 눌렸다: `productFocus.ts`가 닫은 것과 같은 모양), **「한 사실은 한 번」은 사실 단위**
+(키에 채널이 들어간다; 재질문의 답이 직전 문장 그대로에 카드만 뗀 것이면 첫 답보다 적다), 렌더링은 채널 수만큼
+반복하지 않고 **사실로 묶는다**(실측 12→5줄). 라이브(clean seller 실브라우저 1440×900@2×): 여섯 질문이 여섯
+답을 받고 **콘솔 오류 0 · off-host 0 · 가로 스크롤 0**; 연결된 Demo Org 매트릭스는 이 org의 진짜 상태를 말한다.
+runtime **975** · backend **3,898** · frontend **2,779** · 실패 0. **마켓플레이스 0 · WRITE 0 · 승인 0 ·
+마이그레이션 0 · DB 행 변경 0** ⇒ evidence 행 없음. **계약이 바뀌어 테스트 3건을 다시 썼다**(안전 테스트 약화 0).
+**고치지 않고 보고**: AFTER_CONNECT vs CHANNEL_ACTION은 채널을 지목한 문장에서 실행마다 갈릴 수 있다 · 매트릭스는
+「어떤 동작인가」 축이 없어 네 능력을 전부 답한다 · recorded plan은 v17 실측이지만 CI는 벤더를 부르지 않으므로
+프롬프트가 다섯을 구분하지 못하게 되어도 단언은 통과한다 — 그 검사는 라이브 재녹화뿐이다)
+
 **`docs/planner_model_prompt_benchmark_v1.md`** (Planner Model & Prompt Benchmark v1 — 2026-09-06.
 Agent Runtime 구조는 **FREEZE**하고, 「플래너의 모델과 프롬프트가 실제로 최선인가」만 잰다. **핵심 설계:
 새 채점기를 만들지 않았다** — 대화는 `test/scenario/cases.ts`에 **데이터로 한 번** 적히고 두 번 실행된다

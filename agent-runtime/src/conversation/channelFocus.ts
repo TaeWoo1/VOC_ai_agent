@@ -96,6 +96,22 @@ export function focusForAxis(
   goalText: string | null | undefined, focus: string | null,
 ): string | null {
   if (!focus) return null;
+  /**
+   * <b>A question about what the PRODUCT can do inherits no channel.</b>
+   *
+   * The focus exists to carry the subject of a conversation about the seller's data: 「리뷰 보여줘」
+   * after a NAVER list is a NAVER question. A capability question has no such subject — «which channel»
+   * is part of what is being asked, and the answer is about this deployment, not about rows.
+   *
+   * Measured live 2026-09-07 on a clean seller: 「네이버 연결하면 정확히 뭘 해줘?」 then 「리뷰 답글도
+   * 자동으로 보내?」. The second sentence names no channel and is a question about every channel; it
+   * arrived carrying `channel: NAVER`, was answered about NAVER alone, and — because that made it the
+   * same fact as the turn before — was answered 「말씀드린 것까지가…」 instead. Same shape as the product
+   * anchor that outlived its question (`conversation/productFocus.ts`): an inherited scope narrowing a
+   * sentence that had left it. This can only WIDEN — a capability sentence that names a channel still
+   * carries it, because the planner put it in `filters.channel`.
+   */
+  if (plan.requestedAction === "EXPLAIN_CAPABILITY") return null;
   const reason = scopeOverrideOf(plan, workingSet, subject, goalText ?? undefined);
   return reason == null || FOCUS_SURVIVES.has(reason) ? focus : null;
 }

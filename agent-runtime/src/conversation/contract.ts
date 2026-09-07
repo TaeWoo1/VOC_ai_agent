@@ -765,6 +765,20 @@ export interface PlanFilters {
    * (`WORKLOAD`), or one number (`COUNT`). Absent ⇒ derived from the other spec fields, never from words.
    */
   readonly inquiryIntent: "ROWS" | "WORKLOAD" | "COUNT" | "PRIORITY" | null;
+  /**
+   * <b>What an `EXPLAIN_CAPABILITY` request is FOR</b> — the same shape as the two intents above, and
+   * for the same reason: the action says the seller asked about capability, and the aspect says WHICH
+   * capability question it is. Without it every product question collapsed onto one answer, because
+   * the runtime's only way to tell them apart was «did the plan declare any needs» (measured live
+   * 2026-09-07 — `capability/ProductSelfKnowledge.ts` holds the trace).
+   *
+   * Not a filter over the seller's rows; neither are `reviewIntent` and `inquiryIntent`, and this
+   * field sits beside them because it answers the same kind of question about the same plan.
+   * Absent ⇒ resolved from the plan the runtime already has, so a backend predating the field behaves
+   * exactly as before.
+   */
+  readonly capabilityAspect:
+    | "PRODUCT_OVERVIEW" | "SUPPORTED_CHANNELS" | "AFTER_CONNECT" | "CHANNEL_ACTION" | "HOW_TO_CONNECT" | null;
   /** How many rows the seller asked for (「1개만」, 「3개」). Clamped by the parser; null = the read's default page. */
   readonly limit: number | null;
   /** Which end of the window comes first. Absent ⇒ NEWEST. */

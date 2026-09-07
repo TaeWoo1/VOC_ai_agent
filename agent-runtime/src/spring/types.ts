@@ -826,6 +826,7 @@ export interface AgentPlanView {
     topic?: string | null;
     reviewIntent?: string | null;
     inquiryIntent?: string | null;
+    capabilityAspect?: string | null;
     limit?: number | null;
     order?: string | null;
     status?: string | null;

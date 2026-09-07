@@ -17,7 +17,7 @@ import { TOKEN, artifact, harness, say } from "./support";
 import type { AgentPlanView, ReviewChannelCapabilityView, ReviewDetailResponse } from "../../src/spring/types";
 import { OPERATOR_TOOL } from "../../src/operator/tools/OperatorTools";
 import { MOLDING } from "../support/operatorFixtures";
-import { assistantCapabilityAnswer } from "../../src/operator/capability/AssistantCapability";
+import { overviewAnswer } from "../../src/operator/capability/ProductSelfKnowledge";
 import type { SellerReadiness } from "../../src/operator/capability/SellerReadiness";
 
 /** A seller who has started: the capability answer's readiness input, in its ordinary shape. */
@@ -138,13 +138,16 @@ describe("§1 — the selected review is the object the answer is about", () => 
 describe("§4 — the capability answer follows the catalogue, one read at a time", () => {
   it("the review clause appears only when the exact review read is registered", () => {
     const names = TOOL_CAPABILITIES.map((r) => r.tool);
-    const withDetail = assistantCapabilityAnswer(names, ["READ"], WORKING(["카페24"]));
-    const without = assistantCapabilityAnswer(names.filter((n) => n !== OPERATOR_TOOL.GET_REVIEW_DETAIL), ["READ"], WORKING(["카페24"]));
+    const answerFor = (tools: readonly string[]) => overviewAnswer({
+      registeredTools: tools, actionClasses: ["READ"], readiness: WORKING(["카페24"]), coverage: null,
+    });
+    const withDetail = answerFor(names);
+    const without = answerFor(names.filter((n) => n !== OPERATOR_TOOL.GET_REVIEW_DETAIL));
 
-    expect(withDetail.lines.some((l) => l.includes("리뷰 하나를 고르시면"))).toBe(true);
-    expect(without.lines.some((l) => l.includes("리뷰 하나를 고르시면"))).toBe(false);
+    expect(withDetail.lines.some((l: string) => l.includes("리뷰 하나를 고르시면"))).toBe(true);
+    expect(without.lines.some((l: string) => l.includes("리뷰 하나를 고르시면"))).toBe(false);
     // The domain itself survives: ReviewOps owns other tools, and the clause is the only thing that moved.
-    expect(without.lines.some((l) => l.includes("반복해서 올라오는 문제"))).toBe(true);
+    expect(without.lines.some((l: string) => l.includes("반복해서 올라오는 문제"))).toBe(true);
   });
 });
 

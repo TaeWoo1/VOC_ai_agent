@@ -1121,6 +1121,39 @@ export const PRODUCT_COPY_PLAN: AgentPlanView = {
   target: { selector: "NONE", index: null },
 };
 
+/**
+ * The six product questions, as `agent-plan-prompt/v17` actually planned them.
+ *
+ * <b>Recorded live 2026-09-07</b> against the QA clean organisation, one call per sentence
+ * (`.qa-tmp/plantrace.ts` → `POST /api/agent/plan`). Every one is `EXPLAIN_CAPABILITY` with NO needs —
+ * which is what closes the older hazard the prompt warns about (「쿠팡은 어디까지 가능해?」 used to
+ * declare POLICY and ORDER_HISTORY, so a question about this product was answered from the seller's own
+ * operating rules) — and each carries the aspect that tells it from the others.
+ *
+ * They are kept because they are the CONTRACT between the planner and the answer: if the prompt ever
+ * stops distinguishing these five questions, the fixtures still name five aspects and the assertions
+ * about the answers go on passing while the product regresses. The live re-record is the check on that,
+ * and it is written in the package's own docs.
+ */
+const capabilityPlan = (goal: string, aspect: string, channel: string | null): AgentPlanView => ({
+  available: true, supported: true, userGoal: goal, unresolvedEntities: [],
+  informationNeeds: [], specialists: [], tools: [], retrievalOrder: [], retrievalParallel: [],
+  retrievalStopWhen: null, evidenceRequirements: [], riskClass: "ROUTINE", maxIterations: 1, maxToolCalls: 4,
+  stopWhenEnough: null, clarificationNeeded: false, clarificationReason: null, rationale: null,
+  providerVersion: "recorded 2026-09-07 (live, agent-plan-prompt/v17)",
+  requestedAction: "EXPLAIN_CAPABILITY", tone: null,
+  filters: { period: null, rating: null, channel, scope: null, topic: null, capabilityAspect: aspect } as never,
+  target: { selector: "NONE", index: null },
+});
+
+export const SUPPORTED_CHANNELS_PLAN = capabilityPlan("지원하는 판매 채널 종류", "SUPPORTED_CHANNELS", null);
+export const AFTER_CONNECT_PLAN = capabilityPlan("연동 후 무엇이 가능한지", "AFTER_CONNECT", null);
+export const AFTER_CONNECT_NAVER_PLAN = capabilityPlan("네이버 연결 후 무엇을 해 주는지", "AFTER_CONNECT", "NAVER");
+export const REVIEW_REPLY_SEND_PLAN = capabilityPlan("리뷰 답글 자동 전송 가능 여부", "CHANNEL_ACTION", null);
+export const COUPANG_ACTION_PLAN = capabilityPlan("쿠팡에서 가능한 범위", "CHANNEL_ACTION", "COUPANG");
+export const HOW_TO_CONNECT_PLAN = capabilityPlan("시작하는 방법", "HOW_TO_CONNECT", null);
+export const PRODUCT_OVERVIEW_PLAN = capabilityPlan("reviewnary가 무엇을 할 수 있는지", "PRODUCT_OVERVIEW", null);
+
 export const SCENARIO_PLANS: Record<string, AgentPlanView> = {
   "이 서비스를 통해 할 수 있는 일이 뭐야?": CAPABILITY_PLAN,
   "아직 쇼핑몰을 연결하지 않았는데 어떻게 시작해?": CAPABILITY_PLAN,
@@ -1128,4 +1161,12 @@ export const SCENARIO_PLANS: Record<string, AgentPlanView> = {
   "너는 어떤 일을 도와줄 수 있어?": CAPABILITY_PLAN,
   "답변 안 한 문의 보여줘": UNANSWERED_ROWS_PLAN,
   "제품 설명 문구 써줘": PRODUCT_COPY_PLAN,
+  "지원하는 이커머스 종류가 뭐가 있지?": SUPPORTED_CHANNELS_PLAN,
+  "연동하고 나면 어떻게 가능한거지?": AFTER_CONNECT_PLAN,
+  "연동하고 나면 뭐가 되냐고": AFTER_CONNECT_PLAN,
+  "네이버 연결하면 정확히 뭘 해줘?": AFTER_CONNECT_NAVER_PLAN,
+  "리뷰 답글도 자동으로 보내?": REVIEW_REPLY_SEND_PLAN,
+  "쿠팡은 어디까지 가능해?": COUPANG_ACTION_PLAN,
+  "어떻게 시작해?": HOW_TO_CONNECT_PLAN,
+  "뭘 할 수 있어?": PRODUCT_OVERVIEW_PLAN,
 };

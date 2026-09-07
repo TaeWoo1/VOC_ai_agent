@@ -193,7 +193,13 @@ class AgentOperatorResponseParserTest {
                 "[5] 이어지는 대화", "[6] 계획을 세울 수 없을 때" }) {
             assertThat(system).contains(heading);
         }
-        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v16");
+        // v17 (2026-09-07): the aspect axis for EXPLAIN_CAPABILITY. Every value is offered by the
+        // prompt and accepted by the parser, so a plan cannot name one the runtime would drop.
+        for (String token : AgentPlanPrompt.CAPABILITY_ASPECTS) {
+            assertThat(system).contains(token);
+        }
+        assertThat(system).contains("filters.capabilityAspect");
+        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v17");
     }
 
     /**

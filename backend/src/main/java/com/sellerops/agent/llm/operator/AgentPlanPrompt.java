@@ -68,7 +68,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v16";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v17";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -122,6 +122,21 @@ public final class AgentPlanPrompt {
      * plan token, so 「최근 문의 3개」 and 「내가 답해야 할 문의」 never share a path by accident.
      */
     public static final String[] INQUIRY_INTENTS = {"ROWS", "WORKLOAD", "COUNT", "PRIORITY"};
+    /**
+     * v17 (2026-09-07): what an {@code EXPLAIN_CAPABILITY} request is FOR — the third member of the
+     * family {@link #REVIEW_INTENTS} and {@link #INQUIRY_INTENTS} belong to.
+     *
+     * <p>Measured live on a clean seller: six different questions about the product all planned as
+     * EXPLAIN_CAPABILITY (correctly), and four of them arrived with no needs, because there was no axis
+     * on which 「어떤 채널을 지원해?」 and 「연동하고 나면 뭐가 되냐고」 differ. The runtime's only way to
+     * tell product questions apart was «did this plan declare any needs», so they collapsed onto one
+     * fixed answer and the follow-up repeated it. The repair is an axis, not a longer instruction and
+     * not a phrase list: the runtime answers each aspect from what the tool catalogue, the coverage
+     * table and the channel capability reads actually say.
+     */
+    public static final String[] CAPABILITY_ASPECTS = {
+        "PRODUCT_OVERVIEW", "SUPPORTED_CHANNELS", "AFTER_CONNECT", "CHANNEL_ACTION", "HOW_TO_CONNECT",
+    };
     /** Row order — the newest first, or the oldest first. Absent ⇒ NEWEST. */
     public static final String[] ORDERS = {"NEWEST", "OLDEST"};
     /** Which inquiries: still unanswered, already answered, or all. Absent ⇒ ROWS reads ALL, WORKLOAD is by nature UNANSWERED. */
@@ -256,14 +271,20 @@ public final class AgentPlanPrompt {
                API 로 보낼지, 판매자센터에서 이어서 할지, 지원하지 않는지는 런타임이 정하므로 당신은 채널을 판단하지 \
                마세요. 문의 집합 위에서의 초안·말투 요청은 런타임이 대상을 찾을 수 있도록 INQUIRY_VOLUME(scope \
                WORKING_SET) need 를 함께 세우세요.
-               - 판매자가 **왜 어떤 채널에서는 답변/전송/수집이 안 되는지, 되는지**를 물으면("쿠팡 건은 왜 답변 못 해?", \
-               "네이버 리뷰는 왜 자동으로 안 가져와?") EXPLAIN_CAPABILITY 입니다 — 조사가 아니라 설명이므로 need 는 \
-               비워도 되고, 채널을 말했으면 filters.channel 에 적으세요.
-               - 판매자가 **reviewnary(=당신) 자체가 무엇을 할 수 있는지**를 물으면("너는 어떤 일을 도와줄 수 있어?", \
-               "뭘 할 수 있어?", "어떻게 쓰는 거야?") 역시 EXPLAIN_CAPABILITY 이고, 이때는 **informationNeeds 를 \
-               반드시 비우고 filters.channel 도 null 로 두세요** — 판매자의 데이터를 조회할 질문이 아니므로 POLICY \
-               나 PRODUCT 같은 need 를 만들면 회사의 운영 정책이 답으로 나갑니다. 런타임이 등록된 기능과 연결된 \
-               채널로 답합니다.
+               - 판매자가 **이 제품(reviewnary) 자체나 채널 지원 범위**에 대해 물으면 EXPLAIN_CAPABILITY 입니다. \
+               판매자의 데이터를 조회하는 질문이 아니므로 **informationNeeds 는 반드시 비우세요** — POLICY 나 \
+               ORDER_HISTORY 같은 need 를 만들면 이 회사의 운영 정책이나 주문 자료가 제품 설명의 답으로 나갑니다. \
+               대신 **filters.capabilityAspect 로 어떤 질문인지 정하세요**(다섯 값 중 하나, 이것이 이 질문의 축입니다):
+                 · PRODUCT_OVERVIEW — 제품이 전반적으로 무엇을 해 주는지("뭘 할 수 있어?", "어떻게 쓰는 거야?")
+                 · SUPPORTED_CHANNELS — 어떤 판매 채널·쇼핑몰을 지원하는지("지원하는 이커머스가 뭐가 있어?")
+                 · AFTER_CONNECT — 연결한 뒤에 무엇이 일어나는지, 무엇이 되는지("연동하고 나면 뭐가 되지?")
+                 · CHANNEL_ACTION — 특정 채널이나 특정 동작(수집·답변 전송·답글 등록)이 어디까지 되는지 \
+               ("쿠팡은 어디까지 가능해?", "리뷰 답글도 자동으로 보내?", "쿠팡 건은 왜 답변 못 해?")
+                 · HOW_TO_CONNECT — 시작하는 방법, 연결 절차("어떻게 시작해?", "연결은 어떻게 해?")
+               문장에 채널 이름이 있으면 filters.channel 에도 적으세요. 위 예시는 각 값이 무엇을 뜻하는지 보이기 \
+               위한 것이지 문구 목록이 아닙니다 — 판매자가 어떻게 말하든 **무엇을 알고 싶어 하는지**로 고르세요. \
+               같은 대화에서 이어지는 질문이면 앞 질문과 다른 값이 되는 것이 정상입니다. 런타임이 등록된 기능·연결 \
+               가능한 채널·채널별 실제 수집/전송 능력을 읽어서 그 축에 맞게 답합니다.
                - 판매자가 **자신이 해야 할 행동의 목록**을 요청하면("내가 해야 할 일 정리해줘", "오늘 뭐 해야 해") \
                LIST_ACTIONS 입니다 — 이때 INQUIRY_VOLUME / REVIEW_SIGNAL / ORDER_HISTORY need 를 함께 세울 수 \
                있습니다. LIST_ACTIONS 는 목록을 만들라는 뜻이지 무엇을 실행하라는 뜻이 아닙니다.
@@ -311,6 +332,7 @@ public final class AgentPlanPrompt {
                filters.topic: %s | null
                filters.reviewIntent: %s | null
                filters.inquiryIntent: %s | null
+               filters.capabilityAspect: %s | null
                filters.limit: 1 이상의 정수 | null
                filters.order: %s | null
                filters.status: %s | null
@@ -336,7 +358,7 @@ public final class AgentPlanPrompt {
                 "requestedAction":"NONE",
                 "tone":null,
                 "filters":{"period":null,"periodDays":null,"rating":null,"channel":null,"scope":null,"topic":null,"reviewIntent":null,
-                           "inquiryIntent":null,"limit":null,"order":null,"status":null},
+                           "inquiryIntent":null,"capabilityAspect":null,"limit":null,"order":null,"status":null},
                 "target":{"selector":"NONE","index":null}}
                """
                 .formatted(String.join(", ", SPECIALISTS), String.join(", ", NEED_KINDS),
@@ -344,6 +366,7 @@ public final class AgentPlanPrompt {
                         String.join(" | ", TONES), String.join(" | ", PERIODS), String.join(" | ", RATINGS),
                         String.join(" | ", CHANNELS), String.join(" | ", SCOPES), String.join(" | ", TOPICS),
                         String.join(" | ", REVIEW_INTENTS), String.join(" | ", INQUIRY_INTENTS),
+                        String.join(" | ", CAPABILITY_ASPECTS),
                         String.join(" | ", ORDERS), String.join(" | ", STATUSES), String.join(" | ", TARGET_SELECTORS));
     }
 

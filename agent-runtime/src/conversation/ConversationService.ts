@@ -45,7 +45,11 @@ import { channelFocusOf } from "./channelFocus";
 import { isReferenceOnly } from "./reference";
 import { OPERATOR_TOOL, buildOperatorTools } from "../operator/tools/OperatorTools";
 import { OperatorToolRegistry } from "../operator/tools/OperatorToolRegistry";
-import { alreadySaidAnswer, assistantCapabilityAnswer, gettingStartedAnswer } from "../operator/capability/AssistantCapability";
+import type { CapabilityAspect, ChannelActionFacts, SelfKnowledgeInputs } from "../operator/capability/ProductSelfKnowledge";
+import {
+  afterConnectAnswer, channelActionAnswer, channelActionFacts, channelOffers, howToConnectAnswer,
+  fallbackAspect, overviewAnswer, shortenRepeat, supportedChannelsAnswer,
+} from "../operator/capability/ProductSelfKnowledge";
 import { UNKNOWN_WORLD, worldStateOf, worldTokenFor } from "../operator/state/WorldState";
 import type { WorldState } from "../operator/state/WorldState";
 import {
@@ -1505,13 +1509,11 @@ export class ConversationService {
       }
     }
 
-    // ── EXPLAIN_CAPABILITY: 「쿠팡 건은 왜 답변 못 해?」 — the capability verdict, said in the seller's words.
+    // ── EXPLAIN_CAPABILITY: what this product can do — for the ASPECT the plan named.
     if (axis.requestedAction === "EXPLAIN_CAPABILITY") {
-      // A capability question that asked for nothing to be looked up is about the assistant, not about
-      // a channel — the planner's own shape, read here rather than the sentence's words.
-      const aboutAssistant = (plan?.informationNeeds.length ?? 0) === 0;
       const explained = await this.explainCapability(
-        bundle, view, axis.filters.channel ?? workingSet?.filters.channelCode ?? null, workingSet, aboutAssistant, world,
+        bundle, view, axis.filters.channel ?? workingSet?.filters.channelCode ?? null, workingSet,
+        axis.filters.capabilityAspect, world,
       );
       if (explained.artifact) artifacts.push(explained.artifact);
       headline = headline ?? explained.headline;
@@ -2910,39 +2912,99 @@ export class ConversationService {
    * read, the same one every channel-aware answer makes. A read that fails costs the channel sentence
    * and nothing else: the rest of the answer is about this runtime and is true without it.
    */
-  private assistantCapability(
+  private async productSelfAnswer(
     view: ConversationView, bundle: SpringClientBundle, world: WorldState,
-  ): { artifact: SummaryArtifact | null; headline: string; chips: SuggestedAction[] } {
+    aspect: CapabilityAspect, channel: string | null,
+  ): Promise<{ artifact: SummaryArtifact | null; headline: string; chips: SuggestedAction[] }> {
     const registry = new OperatorToolRegistry(
       buildOperatorTools({ operator: bundle.operator, inquiry: bundle.inquiry, issue: bundle.issue }),
     );
-    const state = world.readiness;
-    // <b>A fact is said once.</b> The same two plans (`EXPLAIN_CAPABILITY`, no needs) reach here for two
-    // different questions, and this answer takes nothing from the seller's sentence — so a second one
-    // used to be the first one again, word for word (live, clean org, 2026-09-05). What the seller asks
-    // next while nothing is connected is how to start, and that is a different answer, not a re-print.
-    // Told apart by the CONVERSATION's state, never by the words in the sentence.
-    const alreadyExplained = view.turns.some((t) => t.artifacts.some((a) => a.artifactId === ASSISTANT_CAPABILITY_ID));
-    const full = assistantCapabilityAnswer(registry.names(), registry.actionClasses(), state);
-    const answer = !alreadyExplained ? full
-      : state.kind === "NO_CHANNEL" ? gettingStartedAnswer(state)
-        : alreadySaidAnswer(state, full.chips);
-    const artifactId = !alreadyExplained ? ASSISTANT_CAPABILITY_ID
-      : state.kind === "NO_CHANNEL" ? "a-getting-started" : "a-already-said";
-    log("assistant_capability", { readiness: state.kind, connected: state.connected.length, repeat: alreadyExplained });
+    const input: SelfKnowledgeInputs = {
+      registeredTools: registry.names(), actionClasses: registry.actionClasses(),
+      readiness: world.readiness, coverage: world.coverage,
+    };
+    // A named channel narrows the two aspects that have a per-channel truth; the other three are about
+    // the product and take none. The reads are made only on the turn that needs them.
+    const scoped = channel && (aspect === "AFTER_CONNECT" || aspect === "CHANNEL_ACTION")
+      ? await this.channelMatrix(bundle, input, channel)
+      : [];
+    const offer = channel ? channelOffers(input.coverage).find((o) => o.code === channel.toUpperCase()) ?? null : null;
+    const composed = aspect === "SUPPORTED_CHANNELS" ? supportedChannelsAnswer(input)
+      : aspect === "AFTER_CONNECT"
+        ? afterConnectAnswer(input, offer ? { offer, facts: scoped[0] ?? null } : undefined)
+        : aspect === "HOW_TO_CONNECT" ? howToConnectAnswer(input)
+          : aspect === "CHANNEL_ACTION"
+            ? channelActionAnswer(channel ? scoped : await this.channelMatrix(bundle, input, null), world.readiness)
+            : overviewAnswer(input);
+    // <b>A fact is said once — per aspect.</b> The rule already existed and was written per
+    // CONVERSATION, which is what produced the reported repeat: after the overview card, every later
+    // product question returned one fixed getting-started answer whatever it asked. The same aspect
+    // asked twice is a repeat; a different aspect is a different fact.
+    const artifactId = saidOnceId(aspect, channel);
+    const repeat = view.turns.some((t) => t.artifacts.some((a) => a.artifactId === artifactId));
+    const answer = repeat ? shortenRepeat(composed, world.readiness) : composed;
+    // `channel` is a closed token (NAVER|COUPANG|CAFE24), and it is what tells one CHANNEL_ACTION turn
+    // from another — a trace without it cannot explain why a turn was read as a repeat.
+    log("assistant_capability", {
+      readiness: world.readiness.kind, connected: world.readiness.connected.length,
+      aspect, channel: channel ?? "NONE", repeat,
+    });
     return {
-      // No lines, no card: the follow-up for a connected seller is one sentence and the next move.
-      artifact: answer.lines.length === 0 ? null : reasonSummary(
-        artifactId,
-        artifactId === "a-getting-started" ? "시작하는 방법" : "제가 도와드릴 수 있는 일",
-        [...answer.lines],
-      ),
+      artifact: answer.lines.length === 0
+        ? null
+        : reasonSummary(artifactId, ASPECT_TITLE[aspect], [...answer.lines]),
       headline: answer.headline,
       chips: [
         ...answer.chips.map((c) => promptChip(c)),
         ...(answer.link ? [{ label: answer.link.label, kind: "LINK" as const, to: answer.link.to }] : []),
       ],
     };
+  }
+
+  /**
+   * What each channel can actually do — one channel when the sentence named one, otherwise every
+   * channel the coverage table lists.
+   *
+   * <b>Answerable before the first connection, and that is the point.</b> Every read here is
+   * CHANNEL-keyed (`/api/channels/{code}/capabilities/overview`) or org-wide (the audited inquiry
+   * transports, this deployment's publish wiring) — none needs a seller account — so the one seller
+   * who most needs this answer, the one deciding whether to connect, can have it. The review-reply
+   * verdict is the exception: it is read from a connected account, so before connection its source is
+   * absent and {@link ProductSelfKnowledge} renders that as 「연결하신 뒤에 확인해 드릴 수 있습니다」
+   * rather than as 「안 됩니다」. Bounded: at most three overviews plus two org reads, on this turn only.
+   */
+  private async channelMatrix(
+    bundle: SpringClientBundle, input: SelfKnowledgeInputs, channel: string | null,
+  ): Promise<ChannelActionFacts[]> {
+    const offers = channelOffers(input.coverage);
+    const wanted = channel ? offers.filter((o) => o.code === channel.toUpperCase()) : offers;
+    if (wanted.length === 0) return [];
+    const [transports, publish, accounts, channels] = await Promise.all([
+      bundle.operator.listInquiryReplyTransports?.().catch(() => null) ?? Promise.resolve(null),
+      bundle.inquiry.getPublishCapability().catch(() => null),
+      // The review-reply verdict lives on the seller's own account. A CONNECTED shop can be told it;
+      // withholding a readable fact is how 「연결하신 뒤에 확인해 드릴 수 있습니다」 reached a seller whose
+      // channel had been connected for months. A shop with no account for a channel reads nothing here
+      // and gets the honest 「연결하신 뒤에」 — the same sentence, now only where it is true.
+      wanted.some((o) => o.connected) ? bundle.inquiry.listSellerAccounts().catch(() => []) : Promise.resolve([]),
+      wanted.some((o) => o.connected) ? bundle.operator.listChannels().catch(() => []) : Promise.resolve([]),
+    ]);
+    const accountFor = (code: string) => {
+      const channelId = channels.find((c) => c.code.toUpperCase() === code)?.id ?? null;
+      return channelId ? accounts.find((a) => a.channelId === channelId && !a.fileUpload)?.id ?? null : null;
+    };
+    const overviews = await Promise.all(wanted.map((o) =>
+      bundle.operator.getChannelCapabilityOverview?.(o.code).catch(() => null) ?? Promise.resolve(null)));
+    const reviewChannels = await Promise.all(wanted.map((o) => {
+      const accountId = o.connected ? accountFor(o.code) : null;
+      return accountId
+        ? bundle.operator.getReviewChannelCapability?.(accountId).catch(() => null) ?? Promise.resolve(null)
+        : Promise.resolve(null);
+    }));
+    return wanted.map((o, i) => channelActionFacts(o.code, o.name, {
+      overview: overviews[i] ?? null, transports, publish,
+      reviewChannel: reviewChannels[i] ?? null, localAgent: "UNKNOWN",
+    }, o.connected));
   }
 
   /** The execution capability of a review's channel, read for its own API-mode account. Fail closed. */
@@ -2952,24 +3014,35 @@ export class ConversationService {
    */
   private async explainCapability(
     bundle: SpringClientBundle, view: ConversationView, channel: string | null, workingSet: WorkingSetView | null,
-    aboutAssistant: boolean, world: WorldState,
+    plannedAspect: CapabilityAspect | null, world: WorldState,
   ): Promise<{ artifact: SummaryArtifact | null; headline: string; chips: SuggestedAction[] }> {
     const objectKind: ObjectKind = workingSet?.kind === "INQUIRIES" ? "INQUIRY" : "REVIEW";
     const code = channel?.toUpperCase() ?? null;
-    // 「너는 어떤 일을 도와줄 수 있어?」 — the question is about reviewnary, and it is answerable without
-    // asking anything back. The two are told apart by the PLAN's own structure, never by words: a
-    // capability question that named no channel AND declared nothing to find out is about the
-    // assistant; one that is about a channel either names it or has facts to look up.
-    if (!code && aboutAssistant) return this.assistantCapability(view, bundle, world);
-    if (!code) {
-      const line = "어느 채널에 대한 질문인지 알려주세요 (네이버 · 쿠팡 · 카페24).";
-      return { artifact: reasonSummary("a-capability", "채널을 알려주세요", [line]), headline: line, chips: [] };
-    }
-    const name = channelNameOf(view, code) ?? code;
+    /**
+     * <b>Which product question this is — the plan's own axis.</b>
+     *
+     * It used to be `informationNeeds.length === 0`, a proxy that failed in both directions and is the
+     * defect this closes: 「지원하는 이커머스 종류가 뭐가 있지?」 planned WITH a need, so it fell to the
+     * channel branch and was answered 「어느 채널에 대한 질문인지 알려주세요 (네이버 · 쿠팡 · 카페24)」 —
+     * a question whose own refusal contains its answer. `null` (a backend predating the field) resolves
+     * to what the plan already carries, so the shapes that worked before are byte-identical.
+     */
+    const aspect: CapabilityAspect = plannedAspect ?? fallbackAspect(
+      code != null,
+      view.turns.some((t) => t.artifacts.some((a) => a.artifactId === ASSISTANT_CAPABILITY_ID)),
+      world.readiness,
+    );
+    // A named channel + an object on screen is the per-OBJECT question 「쿠팡 건은 왜 답변 못 해?」, and
+    // its answer is that object's verdict — read below, unchanged. Everything else about capability is
+    // a question about the product, and `ProductSelfKnowledge` is the one place that answers those.
+    const aboutThisObject = code != null && workingSet != null;
+    if (!aboutThisObject) return this.productSelfAnswer(view, bundle, world, aspect, code);
+    const name = channelNameOf(view, code!) ?? code!;
     const what = objectKind === "REVIEW" ? "리뷰 답글" : "문의 답변";
     let verdict: ChannelCapabilityVerdict;
+    const channelCode = code!;
     if (objectKind === "REVIEW") {
-      const item = lastReviewItemOf(view, code);
+      const item = lastReviewItemOf(view, channelCode);
       const target = item ? reviewTargetFromHistory(view, item.reviewId) : null;
       if (target && target.kind === "REVIEW") {
         verdict = await this.reviewCapability(bundle, target.target);
@@ -3904,6 +3977,44 @@ function copyOnlySummary(kind: "INQUIRY" | "REVIEW", id: string, to?: string): S
  * drawn twice. An id, not a sentence: what makes it the same card is that it IS the same card.
  */
 export const ASSISTANT_CAPABILITY_ID = "a-assistant-capability";
+
+/**
+ * One artifact id per product-question ASPECT — which is also what «said once» is keyed on.
+ *
+ * The overview keeps {@link ASSISTANT_CAPABILITY_ID} so a conversation that has already drawn that
+ * card still counts as having drawn it.
+ */
+const ASPECT_ARTIFACT_ID: Readonly<Record<CapabilityAspect, string>> = {
+  PRODUCT_OVERVIEW: ASSISTANT_CAPABILITY_ID,
+  SUPPORTED_CHANNELS: "a-supported-channels",
+  AFTER_CONNECT: "a-after-connect",
+  CHANNEL_ACTION: "a-channel-action",
+  HOW_TO_CONNECT: "a-getting-started",
+};
+
+/**
+ * The «said once» key — the aspect, and the channel when the aspect has one.
+ *
+ * <b>Found live 2026-09-07, one level below the defect this package opened on.</b> With the aspect
+ * alone as the key, 「네이버 연결하면 정확히 뭘 해줘?」 · 「리뷰 답글도 자동으로 보내?」 · 「쿠팡은 어디까지
+ * 가능해?」 are three CHANNEL_ACTION turns, so the second and third were answered 「말씀드린 것까지가…」 —
+ * three different questions collapsed onto one answer, which is the shape this whole package exists to
+ * remove. NAVER's matrix and Coupang's are different FACTS, and a fact is said once means once per
+ * fact.
+ */
+function saidOnceId(aspect: CapabilityAspect, channel: string | null): string {
+  const base = ASPECT_ARTIFACT_ID[aspect];
+  const scoped = aspect === "CHANNEL_ACTION" || aspect === "AFTER_CONNECT";
+  return scoped && channel ? `${base}-${channel.toUpperCase()}` : base;
+}
+
+const ASPECT_TITLE: Readonly<Record<CapabilityAspect, string>> = {
+  PRODUCT_OVERVIEW: "제가 도와드릴 수 있는 일",
+  SUPPORTED_CHANNELS: "연결할 수 있는 판매 채널",
+  AFTER_CONNECT: "연결한 뒤에 하는 일",
+  CHANNEL_ACTION: "채널별로 되는 것과 안 되는 것",
+  HOW_TO_CONNECT: "시작하는 방법",
+};
 
 function reasonSummary(artifactId: string, title: string, lines: string[]): SummaryArtifact {
   return { artifactId, type: "SUMMARY", title, lines };

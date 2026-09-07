@@ -157,6 +157,7 @@ public final class AgentOperatorResponseParser {
                 closedOr(node, "topic", AgentPlanPrompt.TOPICS, null),
                 closedOr(node, "reviewIntent", AgentPlanPrompt.REVIEW_INTENTS, null),
                 closedOr(node, "inquiryIntent", AgentPlanPrompt.INQUIRY_INTENTS, null),
+                closedOr(node, "capabilityAspect", AgentPlanPrompt.CAPABILITY_ASPECTS, null),
                 limitOr(node, "limit"),
                 closedOr(node, "order", AgentPlanPrompt.ORDERS, null),
                 closedOr(node, "status", AgentPlanPrompt.STATUSES, null));
@@ -387,10 +388,11 @@ public final class AgentOperatorResponseParser {
      * "over what the previous turn produced"; the runtime, not this parser, knows what that was.
      */
     public record PlanFilters(String period, Integer periodDays, String rating, String channel, String scope,
-                              String topic, String reviewIntent, String inquiryIntent, Integer limit,
+                              String topic, String reviewIntent, String inquiryIntent, String capabilityAspect,
+                              Integer limit,
                               String order, String status) {
         public static PlanFilters none() {
-            return new PlanFilters(null, null, null, null, null, null, null, null, null, null, null);
+            return new PlanFilters(null, null, null, null, null, null, null, null, null, null, null, null);
         }
     }
 

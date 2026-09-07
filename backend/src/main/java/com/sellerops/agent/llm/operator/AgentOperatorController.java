@@ -87,7 +87,8 @@ public class AgentOperatorController {
                         p.requestedAction(), p.tone(),
                         new PlanFiltersView(p.filters().period(), p.filters().periodDays(), p.filters().rating(), p.filters().channel(),
                                 p.filters().scope(), p.filters().topic(), p.filters().reviewIntent(),
-                                p.filters().inquiryIntent(), p.filters().limit(), p.filters().order(),
+                                p.filters().inquiryIntent(), p.filters().capabilityAspect(),
+                                p.filters().limit(), p.filters().order(),
                                 p.filters().status()),
                         new PlanTargetView(p.target().selector(), p.target().index()), version, null, null))
                 .orElseGet(() -> PlanView.unavailable(version, planService.accessMessageFor(principal.orgId())));
@@ -151,10 +152,10 @@ public class AgentOperatorController {
 
     /** Closed filter tokens (v3). Every field nullable; null means "not narrowed". */
     public record PlanFiltersView(String period, Integer periodDays, String rating, String channel, String scope,
-                                  String topic, String reviewIntent, String inquiryIntent, Integer limit,
-                                  String order, String status) {
+                                  String topic, String reviewIntent, String inquiryIntent, String capabilityAspect,
+                                  Integer limit, String order, String status) {
         static PlanFiltersView none() {
-            return new PlanFiltersView(null, null, null, null, null, null, null, null, null, null, null);
+            return new PlanFiltersView(null, null, null, null, null, null, null, null, null, null, null, null);
         }
     }
 

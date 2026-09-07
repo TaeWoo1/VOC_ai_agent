@@ -12,7 +12,7 @@
  * different questions one turn apart — 「이 서비스를 통해 할 수 있는 일이 뭐야?」 and 「아직 쇼핑몰을
  * 연결하지 않았는데 어떻게 시작해?」 — came back with the SAME eight-line brochure. The trace says why and
  * it is not history, not a fallback and not the planner misreading: both plans were
- * `EXPLAIN_CAPABILITY` with `informationNeeds: 0`, and {@link assistantCapabilityAnswer} was a pure
+ * `EXPLAIN_CAPABILITY` with `informationNeeds: 0`, and the one answer this file composed was a pure
  * function of the tool catalogue plus a coverage read — it took no input from the seller's sentence and
  * no input from what the conversation had already said, so identical inputs produced an identical
  * answer. Two things follow, and both are structural rather than a wording exception:
@@ -22,9 +22,9 @@
  *       connecting hands over and given the one action that exists; the chips stop being 「답변 안 한
  *       문의 보여줘」, which that seller cannot ask.</li>
  *   <li><b>A fact is said once</b> (the rule this repository already applies to titles, shared words and
- *       collection state). The capability card is drawn once per conversation; asking again while
- *       nothing is connected is answered with {@link gettingStartedAnswer} — the next step — instead of
- *       the same list a second time.</li>
+ *       collection state). The capability card is drawn once; asking again is answered with the next
+ *       step instead of the same list. <b>Narrowed on 2026-09-07</b> — see the closing note: keyed per
+ *       conversation, this rule made every later product question return one fixed answer.</li>
  * </ul>
  *
  * <b>Derived, not written down.</b> A domain is said only when a REGISTERED tool serves it
@@ -38,17 +38,19 @@
  *
  * <b>What it must never become.</b> A hand-maintained feature list, or a canned reply keyed to an
  * example sentence. Both were available and both are the thing that goes stale the first time the
- * product changes. Nothing here reads the seller's words: the two answers are told apart by the
- * conversation's own state and this org's own readiness.
+ * product changes. Nothing here reads the seller's words.
+ *
+ * <b>Where the sentences went (2026-09-07).</b> This file is now the DERIVATION only — which domains
+ * are real, and what the boundary is. The answers themselves live in
+ * {@link ../capability/ProductSelfKnowledge}, because 「뭘 할 수 있어?」 turned out to be one of five
+ * different product questions and this file could only ever answer it as one. Keeping a second copy of
+ * 「연결부터 하시면 됩니다」 here would be the same defect the split closes.
  */
 import type { SpecialistName } from "../state/OperatorState";
 import type { ActionClass } from "../state/OperatorState";
 import { TOOL_CAPABILITIES } from "../tools/ToolReachability";
 import { OPERATOR_TOOL } from "../tools/OperatorTools";
 import type { OperatorToolName } from "../tools/OperatorTools";
-import type { SellerReadiness } from "./SellerReadiness";
-import { delegableWords } from "./SellerReadiness";
-import { withObject, withSubject } from "../../korean";
 import { CONNECT_STEP } from "../procedure/Procedure";
 
 interface Domain {
@@ -138,104 +140,4 @@ export function boundarySentence(actionClasses: readonly ActionClass[]): string 
   return readOnly
     ? "제가 직접 채널에 보내거나 고치는 일은 없습니다 — 초안까지 준비해 두고, 보내는 것은 확인하신 뒤에 진행합니다."
     : "채널로 나가는 일은 확인하신 뒤에만 진행합니다.";
-}
-
-export interface AssistantCapabilityAnswer {
-  readonly headline: string;
-  readonly lines: readonly string[];
-  readonly chips: readonly string[];
-  /** The one screen this answer's next step lives on, when there is one. Never a prompt. */
-  readonly link?: { readonly label: string; readonly to: string };
-}
-
-/** One scannable item per domain: the noun the seller looks for, then what is done with it. */
-function itemOf(d: Domain, registered: ReadonlySet<string>): string {
-  const extra = d.extra && registered.has(d.extra.tool) ? ` ${d.extra.line}` : "";
-  return `${d.short} — ${d.line}${extra}`;
-}
-
-/**
- * The whole answer, composed.
- *
- * `readiness` is the one part that is a claim about the seller's business, and it comes from a real
- * org-scoped read. `UNKNOWN` = that read was not made or failed, and then the answer simply does not
- * mention channels — an assistant that invents which channels are connected is worse than one that
- * talks only about itself.
- */
-export function assistantCapabilityAnswer(
-  registeredTools: readonly string[],
-  actionClasses: readonly ActionClass[],
-  readiness: SellerReadiness,
-): AssistantCapabilityAnswer {
-  const domains = capabilityDomains(registeredTools);
-  const registered = new Set(registeredTools);
-  const words = delegableWords(readiness);
-  const notStarted = readiness.kind === "NO_CHANNEL";
-  const headline = domains.length === 0
-    ? "지금은 확인해 드릴 수 있는 항목이 없습니다."
-    : notStarted
-      // Before the first connection the intro is a promise about what connecting buys, and it names the
-      // types THIS seller's own channels offer — never a channel's review path this product does not have.
-      ? `판매 채널을 연결하시면 ${withObject(words ?? domains.map((d) => d.short).join(" · "))} 대신 확인하고, 다음에 하실 일까지 준비해 드립니다.`
-      : `${withObject(domains.map((d) => d.short).join(" · "))} 대신 확인하고, 다음에 하실 일까지 준비해 드립니다.`;
-  const state = readiness.kind === "UNKNOWN"
-    ? []
-    : notStarted
-      ? ["아직 연결된 판매 채널이 없어, 지금은 가져와 둔 자료가 없습니다."]
-      : [`지금 연결된 채널은 ${readiness.connected.join(" · ")}입니다.`];
-  return {
-    headline,
-    lines: [...domains.map((d) => itemOf(d, registered)), ...state, boundarySentence(actionClasses)],
-    // A chip is a sentence the seller sends. Before the first connection every one of these asks about
-    // rows this org cannot have, so the answer offers none of them and offers the action instead.
-    chips: notStarted ? [] : domains.map((d) => d.chip),
-    ...(notStarted ? { link: CONNECT_ACTION } : {}),
-  };
-}
-
-/**
- * 「어떻게 시작해?」 — the next step, for a seller who has already been told what this product does.
- *
- * Not a second brochure and not a copy of the connect screen: the channels are the ones the coverage
- * table says this deployment can connect, the screen that walks through each one is named once, and
- * <b>the local 도우미 is deliberately absent</b> — it matters for one channel's guided lanes and naming
- * it here puts a program to install in front of a seller who has not chosen a channel yet.
- */
-/**
- * The follow-up for a seller who has ALREADY been told what this product does and has already
- * connected — 「어떻게 시작해?」 asked by someone who has started.
- *
- * Measured live on the Demo organisation (2026-09-06): the second capability question re-printed the
- * whole card, because the «said once» rule was written for the first-use world alone. A fact is said
- * once whatever shop is asking. There is no card here at all — `lines` is empty and the caller draws
- * nothing — because the only new thing to say is one sentence and the next move.
- */
-export function alreadySaidAnswer(readiness: SellerReadiness, chips: readonly string[]): AssistantCapabilityAnswer {
-  const names = readiness.connected.join(" · ");
-  return {
-    headline: names.length > 0
-      ? `${withSubject(names)} 이미 연결돼 있습니다. 오늘 하실 일부터 정리해 드릴 수 있습니다.`
-      : "오늘 하실 일부터 정리해 드릴 수 있습니다.",
-    lines: [],
-    chips: ["내가 해야 할 일 정리해줘", ...chips],
-  };
-}
-
-export function gettingStartedAnswer(readiness: SellerReadiness): AssistantCapabilityAnswer {
-  const words = delegableWords(readiness);
-  const channels = readiness.connectable.length > 0
-    ? [`지금 연결할 수 있는 채널은 ${readiness.connectable.join(" · ")}입니다.`]
-    : [];
-  return {
-    headline: "판매 채널을 연결하는 것부터 하시면 됩니다.",
-    lines: [
-      ...channels,
-      "연결 화면에서 채널을 고르시면, 그 채널에 필요한 것만 순서대로 안내해 드립니다.",
-      words
-        ? `연결이 끝나면 ${withObject(words)} 가져와서, 먼저 보셔야 할 일부터 여기에 정리해 두겠습니다.`
-        : "연결이 끝나면 확인하실 일을 여기에 정리해 두겠습니다.",
-    ],
-    chips: [],
-    link: CONNECT_ACTION,
-  };
 }

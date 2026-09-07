@@ -21,6 +21,7 @@
  */
 import type { GoalRequest } from "../../goal/parseGoal";
 import type { AgentPlanView } from "../../spring/types";
+import { capabilityAspectOf } from "../capability/ProductSelfKnowledge";
 import type { InvestigationPlan, PlanFilters, PlanTarget, RiskClass } from "./InvestigationPlan";
 import { MAX_PERIOD_DAYS } from "../../conversation/period";
 import { NO_FILTERS, NO_TARGET } from "./InvestigationPlan";
@@ -399,6 +400,7 @@ function filtersOf(raw: AgentPlanView["filters"]): PlanFilters {
     topic: oneOf(raw.topic, ["SHIPPING", "EXCHANGE_RETURN", "PRODUCT_SPEC", "USAGE", "OTHER"] as const),
     reviewIntent: oneOf(raw.reviewIntent, ["ROWS", "ISSUES"] as const),
     inquiryIntent: oneOf(raw.inquiryIntent, ["ROWS", "WORKLOAD", "COUNT", "PRIORITY"] as const),
+    capabilityAspect: capabilityAspectOf(raw.capabilityAspect),
     limit: typeof raw.limit === "number" && Number.isInteger(raw.limit) && raw.limit >= 1 ? Math.min(raw.limit, MAX_LIMIT) : null,
     order: oneOf(raw.order, ["NEWEST", "OLDEST"] as const),
     status: oneOf(raw.status, ["UNANSWERED", "ANSWERED", "ALL"] as const),

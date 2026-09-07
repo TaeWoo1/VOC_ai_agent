@@ -338,7 +338,72 @@ export const QA_DEFECT_CASES: readonly NamedScenario[] = [
   },
 ];
 
+/* ────────────────────────── product self-knowledge (2026-09-07) ────────────────────────── */
+
+/**
+ * <b>Six product questions from one clean seller, in the order they were asked.</b>
+ *
+ * Measured live 2026-09-07. Before this package the first three came back as: a request to name a
+ * channel, the four-domain card, and 「판매 채널을 연결하는 것부터 하시면 됩니다」 — three different
+ * questions and two fixed answers, with the third repeating an answer to a question nobody asked.
+ *
+ * The guarantees, one `never` each, and every one of them is about a DIFFERENT ANSWER rather than a
+ * better sentence:
+ *   1. 「어떤 채널을 지원해?」 is never answered by asking which channel.
+ *   2. A follow-up on a different aspect never returns the onboarding step.
+ *   3. Two channels' capabilities are two facts — the second is never swallowed as a repeat.
+ *   4. NO_CHANNEL never blocks a product answer: 「연결부터 하세요」 is one aspect's answer, not the
+ *      answer to every question a shop with nothing connected can ask.
+ */
+export const SELF_KNOWLEDGE_CASES: readonly NamedScenario[] = [
+  {
+    name: "[NO_CHANNEL] six product questions get six answers, not two",
+    world: "NO_CHANNEL",
+    turns: [
+      { say: "지원하는 이커머스 종류가 뭐가 있지?", expect: {
+        artifacts: ["SUMMARY"], says: ["지원합니다"],
+        // The refusal whose own parenthesis held the answer.
+        never: ["어느 채널에 대한 질문인지"],
+      } },
+      { say: "연동하고 나면 어떻게 가능한거지?", expect: {
+        artifacts: ["SUMMARY"], says: ["정기적으로 가져옵니다", "답변 초안까지 준비해"], differsFrom: 0,
+        // The onboarding step is HOW_TO_CONNECT's answer, and this is not that question.
+        never: ["판매 채널을 연결하는 것부터 하시면 됩니다"],
+      } },
+      { say: "네이버 연결하면 정확히 뭘 해줘?", expect: {
+        artifacts: ["SUMMARY"], says: ["네이버 스마트스토어"], differsFrom: 1,
+        never: ["판매 채널을 연결하는 것부터 하시면 됩니다"],
+      } },
+      { say: "리뷰 답글도 자동으로 보내?", expect: {
+        // The sentence names no channel, so the answer may not be about NAVER alone — the previous
+        // turn's channel focus must not ride in (`conversation/channelFocus.ts`).
+        artifacts: ["SUMMARY"], says: ["리뷰 답글 보내기"], differsFrom: 2,
+      } },
+      { say: "쿠팡은 어디까지 가능해?", expect: {
+        artifacts: ["SUMMARY"], says: ["쿠팡"], differsFrom: 3,
+        // NAVER's matrix and Coupang's are different facts; «said once» is per fact.
+        never: ["말씀드린 것까지가"],
+      } },
+      { say: "어떻게 시작해?", expect: {
+        artifacts: ["SUMMARY"], says: ["판매 채널을 연결하는 것부터"], link: "/connect", differsFrom: 4,
+      } },
+    ],
+  },
+  {
+    name: "[NO_CHANNEL] the same question twice is not the same sentence twice",
+    world: "NO_CHANNEL",
+    turns: [
+      { say: "연동하고 나면 어떻게 가능한거지?", expect: { artifacts: ["SUMMARY"], says: ["정기적으로 가져옵니다"] } },
+      { say: "연동하고 나면 뭐가 되냐고", expect: {
+        // The items are not re-printed, and the sentence that replaces them is new information —
+        // not the previous headline with the card removed.
+        noArtifacts: ["SUMMARY"], differsFrom: 0, says: ["연결 전에 드릴 수 있는 전부"], link: "/connect",
+      } },
+    ],
+  },
+];
+
 /** Every conversation CI replays, in one list — the benchmark's selection core. */
 export const CI_SCENARIO_CASES: readonly NamedScenario[] = [
-  ...FIRST_USE_CASES, ...OBJECT_FLOW_CASES, ...QA_DEFECT_CASES,
+  ...FIRST_USE_CASES, ...OBJECT_FLOW_CASES, ...QA_DEFECT_CASES, ...SELF_KNOWLEDGE_CASES,
 ];
