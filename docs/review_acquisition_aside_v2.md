@@ -284,6 +284,15 @@ ExecutionProvider (TARGET — PD-3로 axis 이름은 채택, 계약 모양은 �
 **HYPOTHESIS H-4.** 이 계약이 Aside의 실제 실행 모델(동기/비동기, 콜백/폴링)과 맞는지는 Aside capability를 확인해야
 안다. PoC 전 read-only capability 조사가 선행 단계다(§16).
 
+**IMPLEMENTED EXPERIMENT (2026-09-12, `experiment/aside-executor`, `docs/aside_execution_provider_v1.md`).** H-4는
+답했다: Aside의 `repl`은 요청-응답 동기이고, 계약은 위 가안과 **모양이 다르게** 코드가 됐다. 공유 계약은
+`SegmentExecutionProvider.start(request, ctx) → HostedSegmentRun`(ImportSegmentHost의 `HOST_SEGMENT` 결정 뒤,
+outcome은 ingest 이후)이다 — `execute(run) → {artifact bytes}`는 LOCAL_HELPER가 구현할 수 없기 때문이다(그 run은
+세션·판매자 클릭·in-session ingest·delete-after-validate와 분리되지 않는다). "파일을 돌려주는" 계약은 ASIDE 내부의
+executor 층에만 있다. `LOCAL_HELPER`는 WRAP(내부 변경 0, 기존 스위트 무수정 green), `ASIDE`는 로컬 fixture에서
+실제 Aside 브라우저로 download → host path → SHA-256 → validate → delete → (simulated) ingest까지 증명됐다.
+NAVER workflow·실제 export·FE wire는 M3.
+
 ## 15. 첫 PoC 성공 기준 (측정 가능한 것만)
 
 1. explicit run 1회로 `review_import_segment_attempt` 1행 `SUCCEEDED`, `scope_evidence` 기록.

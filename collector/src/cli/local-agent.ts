@@ -87,6 +87,7 @@ import { LazyImportDriver } from "../action-window/initial-import/lazy-import-dr
 import { ReadinessObservingImportDriver } from "../action-window/initial-import/readiness-observing-driver";
 import { ImportAcquisitionCoordinator } from "../action-window/initial-import/import-acquisition-coordinator";
 import { ImportSegmentHost } from "../action-window/initial-import/import-host";
+import { assertExecutionProviderBootable } from "../action-window/initial-import/execution-provider-selection";
 import { isSettledImportRunStatus } from "../action-window/initial-import/import-stages";
 import { InitialImportEndpoint } from "../bridge/initial-import-endpoint";
 import { checkGuidedPreflight, PREFLIGHT_RECOVERY } from "../action-window/initial-import/guided-preflight";
@@ -1527,11 +1528,12 @@ export function activateNaverReviewImport(
     // is. Safe for the same reason: the host only considers releasing once no tab is attached, and a seller
     // working through their months holds the socket.
     isSettled: () => {
-      const session = host.activeSession();
-      if (!session) return true;
+      const run = host.activeRun();
+      if (!run) return true;
       // The SAME definition the host releases its slot on. Two hand-written copies of "is this run over?" is
-      // how the carrier and the host disagreed on 2026-09-02.
-      return isSettledImportRunStatus(session.runStatus());
+      // how the carrier and the host disagreed on 2026-09-02. Read off the hosted RUN, whichever execution
+      // provider carries it — a deterministic provider has no interactive session to ask.
+      return isSettledImportRunStatus(run.runStatus());
     },
     isSurfaceOpen: () => core.isSurfaceOpen(),
     dispose: async () => {
@@ -1708,6 +1710,13 @@ async function raiseWindowOf(page: Page): Promise<boolean> {
  * window comes up on {@link LazyImportDriver}'s first call, which happens only after a run's scope has
  * resolved an account slot.
  */
+/**
+ * Export workflows this build binds to the Aside provider for NAVER. EMPTY in M2 by design: the NAVER workflow
+ * (selectors, identity read, export control) is Aside Acquisition Track M3 and is not invented here. While this
+ * is empty, `REVIEWNARY_EXECUTION_PROVIDER=ASIDE` refuses to boot.
+ */
+const NAVER_ASIDE_WORKFLOWS_BOUND: readonly string[] = [];
+
 function buildNaverImportCarrierCore(
   cfg: ReturnType<typeof loadConfig>,
   reviewUrl: string,
@@ -1720,6 +1729,10 @@ function buildNaverImportCarrierCore(
   warmUpSurface: () => Promise<void>;
   onAgentStart: () => void;
 } {
+  // **Execution provider gate (Aside Acquisition Track M2).** `LOCAL_HELPER` is the default and the only provider
+  // this build can carry for NAVER: no NAVER export workflow is bound to the Aside provider yet (M3). Selecting
+  // `ASIDE` here is refused loudly rather than downgraded — see `execution-provider-selection.ts`.
+  assertExecutionProviderBootable(cfg.executionProvider, NAVER_ASIDE_WORKFLOWS_BOUND);
   // The launch ref is only known per run, long after this capability is built — it arrives in START_RUN.
   // `buildSegmentIngestUpload` reads it inside the returned upload function via a getter, so the answer is
   // read at ingest time, which is when it exists. The scope evidence is NOT read here: the session passes the

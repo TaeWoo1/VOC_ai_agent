@@ -32,6 +32,7 @@ import { InitialImportEndpoint } from "../bridge/initial-import-endpoint";
 import { makeImportRunMarker, recoverImportRuns } from "../action-window/initial-import/import-dispatch";
 import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
 import { ImportSegmentHost, type ResolvedLaunchScope, type SegmentAdmission } from "../action-window/initial-import/import-host";
+import type { SegmentExecutionProvider } from "../action-window/initial-import/execution-provider";
 import { ApiIssuanceEndpoint } from "../bridge/api-issuance-endpoint";
 import { ReviewLocateEndpoint } from "../bridge/review-locate-endpoint";
 import { ReviewLocateEngine } from "../action-window/coupang-review/review-locate-engine";
@@ -152,6 +153,11 @@ export interface AgentImportConfig {
    * exactly as before.
    */
   admit?: () => SegmentAdmission;
+  /**
+   * OPTIONAL execution provider (Aside Acquisition Track M1). Passed straight through to {@link ImportSegmentHost};
+   * absent ⇒ `LOCAL_HELPER` over `driver`, byte-identical to the pre-seam host.
+   */
+  execution?: SegmentExecutionProvider;
   /** Gitignored `.import-runs/` persistence dir. Restart recovery ABANDONS; it never re-drives. */
   persistDir?: string;
 }
@@ -419,6 +425,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
       resolveScope: im.resolveScope,
       driver: im.driver,
       ...(im.admit ? { admit: im.admit } : {}),
+      ...(im.execution ? { execution: im.execution } : {}),
       ...(im.persistDir ? { persistDir: im.persistDir } : {}),
     });
     importHost.attach();

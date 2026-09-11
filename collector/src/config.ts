@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ExecutionProviderKind } from "./action-window/initial-import/execution-provider";
+import { EXECUTION_PROVIDER_ENV, parseExecutionProvider } from "./action-window/initial-import/execution-provider-selection";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -122,6 +124,17 @@ export interface CollectorConfig {
   profileBaseDir: string;
   /** Where captured exports land (live layer). */
   downloadDir: string;
+  /**
+   * **Execution provider (Aside Acquisition Track, experiment switch).** Which executor carries a guided
+   * review-import segment: `LOCAL_HELPER` (the default — the seller clicks, the helper observes) or `ASIDE`
+   * (deterministic Aside execution on the seller's PC). The default is never changed by this switch being
+   * absent; `ASIDE` is refused at boot by any build that binds no export workflow for the channel.
+   */
+  executionProvider: ExecutionProviderKind;
+  /** The Aside CLI executable (default `aside` on PATH). A path, never a secret. */
+  asideCli: string;
+  /** `--account <id>` for the Aside CLI when the seller's Aside holds several accounts. Opaque; optional. */
+  asideAccount: string | undefined;
   /** Local status file the collector writes after each run. */
   statusFile: string;
   /** Review-management/export URL (live layer; unknown until milestone 1). */
@@ -240,6 +253,9 @@ export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env): CollectorCo
     esmProfileDir: env.COLLECTOR_ESM_PROFILE_DIR ?? resolve(home, ".profile/esm"),
     esmFrameOriginAllowlist: parseHostAllowlist(env.ESM_FRAME_ORIGIN_ALLOWLIST),
     downloadDir: env.COLLECTOR_DOWNLOAD_DIR ?? resolve(home, "downloads"),
+    executionProvider: parseExecutionProvider(env[EXECUTION_PROVIDER_ENV]),
+    asideCli: env.ASIDE_CLI && env.ASIDE_CLI.trim() !== "" ? env.ASIDE_CLI.trim() : "aside",
+    asideAccount: env.ASIDE_ACCOUNT && env.ASIDE_ACCOUNT.trim() !== "" ? env.ASIDE_ACCOUNT.trim() : undefined,
     statusFile: env.COLLECTOR_STATUS_FILE ?? resolve(home, ".status/naver.json"),
     naverReviewUrl: env.NAVER_REVIEW_URL,
     appUrl: env.SELLEROPS_APP_URL ?? "http://localhost:5173",

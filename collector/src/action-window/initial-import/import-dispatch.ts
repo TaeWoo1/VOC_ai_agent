@@ -54,6 +54,11 @@ export interface ImportDispatchConfig {
   /** Synthetic monotonic marker source for the persisted `updatedAt` (never wall-clock). */
   now?: () => string;
   clock?: ImportClock;
+  /**
+   * Fires after every published transition, AFTER the run marker has been persisted (when `persistDir` is set).
+   * The execution-provider wrap uses it to notice the run reaching a terminal stage; absent, nothing changes.
+   */
+  onStatePublished?: () => void;
 }
 
 function recordFrom(engine: ImportSegmentEngine, now: () => string): ImportRunRecord {
@@ -102,12 +107,22 @@ export function assembleImportRun(
   const persistDir = cfg.persistDir;
   // Back to this driver's own default: a preceding discovery run in the same sitting set its own.
   setBadgeTotalSteps(cfg.driver, null);
+  const afterPublish = cfg.onStatePublished;
+  // The marker save keeps its place (persisted after the wire, before any observer): an observer that ran first
+  // could read a terminal stage the marker did not yet record.
+  const onStatePublished =
+    persistDir || afterPublish
+      ? () => {
+          if (persistDir) saveImportRun(persistDir, recordFrom(engine, now));
+          afterPublish?.();
+        }
+      : undefined;
   const session = new ImportSegmentSession(
     engine,
     cfg.driver,
     transport,
     cfg.required,
-    persistDir ? { onStatePublished: () => saveImportRun(persistDir, recordFrom(engine, now)) } : undefined,
+    onStatePublished ? { onStatePublished } : undefined,
   );
   return { runId: cfg.runId, engine, session };
 }

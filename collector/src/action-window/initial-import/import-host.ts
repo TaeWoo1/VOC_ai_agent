@@ -40,10 +40,12 @@ import {
 } from "../../../../contracts/review-import-journey/v1/index";
 import type { InitialImportEndpoint } from "../../bridge/initial-import-endpoint";
 import { log } from "../../log";
-import { assembleImportRun, makeImportRunMarker, mintImportRunId } from "./import-dispatch";
+import { makeImportRunMarker, mintImportRunId } from "./import-dispatch";
 import { isRetriableAfterImportRunStatus } from "./import-stages";
 import type { ImportProbeDriver, RequiredRange } from "./import-driver";
 import type { ImportSegmentSession } from "./import-session";
+import type { HostedSegmentRun, SegmentExecutionProvider } from "./execution-provider";
+import { LocalHelperSegmentExecution } from "./local-helper-execution";
 
 /** What the server says a launch ref authorizes. Identity-free by design — no plan or segment id. */
 export interface ResolvedLaunchScope {
@@ -86,8 +88,18 @@ export interface ImportHostDeps {
    * collector's `upload.ts` `fetchLaunchScope` is the only place that speaks to the backend.
    */
   resolveScope: (launchRef: string) => Promise<ResolvedLaunchScope | null>;
-  /** The driver for each hosted run. On the product path, the LIVE one. */
-  driver: ImportProbeDriver;
+  /**
+   * The driver for each hosted run. On the product path, the LIVE one. Required when no `execution` provider is
+   * given (the default, `LOCAL_HELPER`, is built over it); ignored by a provider that drives its own executor.
+   */
+  driver?: ImportProbeDriver;
+  /**
+   * **Execution provider (Aside Acquisition Track M1).** Which executor carries a segment once the host has
+   * decided it is hostable. ABSENT (the default, and every pre-existing caller) ⇒ `LOCAL_HELPER` over `driver`,
+   * which is the pre-seam host byte-for-byte. The host's ticket handling — resolve, entry decision, admission,
+   * slot, replay — is the same for every provider; only what is assembled after `HOST_SEGMENT` differs.
+   */
+  execution?: SegmentExecutionProvider;
   /**
    * OPTIONAL acquisition admission gate (BEFORE_WORK). Consulted after the server has resolved a hostable
    * SEGMENT and immediately before the run is assembled. A refusal means no adapter can carry this segment, so
@@ -168,22 +180,30 @@ const REFUSAL_LOG: Record<SegmentEntryRefusal, { key: string; meta: Record<strin
 
 export class ImportSegmentHost {
   private readonly deps: ImportHostDeps;
-  private session: ImportSegmentSession | null = null;
+  private readonly execution: SegmentExecutionProvider;
   /**
-   * The hosted session's own transport subscription.
+   * The hosted run, holding its own transport subscription.
    *
    * Held so it can be RELEASED when the next run is hosted. Without this, every session a sequence built
    * stayed subscribed to the endpoint for the agent's whole life: the finished run kept answering commands and
    * publishing its own views, so a frontend part-way through segment two would receive interleaved state from
    * segment one — with the older run winning whenever its revision happened to be higher.
    */
-  private sessionDetach: (() => void) | null = null;
+  private run: HostedSegmentRun | null = null;
   private hostedRef: string | null = null;
   private detach: (() => void) | null = null;
   private building = false;
 
   constructor(deps: ImportHostDeps) {
     this.deps = deps;
+    if (deps.execution) {
+      this.execution = deps.execution;
+    } else if (deps.driver) {
+      this.execution = new LocalHelperSegmentExecution({ driver: deps.driver });
+    } else {
+      // Fail closed at construction: a host with nothing to carry a segment would accept tickets it cannot honour.
+      throw new Error("import-host: either a driver (LOCAL_HELPER) or an execution provider is required");
+    }
   }
 
   /** Begin listening for the first segment's `START_RUN`. */
@@ -195,9 +215,22 @@ export class ImportSegmentHost {
     log("aw_import_host_attached", {});
   }
 
-  /** The currently hosted segment session, if a segment run has been started. */
+  /**
+   * The currently hosted segment session, if a segment run has been started AND its provider has an interactive
+   * session (`LOCAL_HELPER`). A deterministic provider's run has none — read {@link activeRun} for it.
+   */
   activeSession(): ImportSegmentSession | null {
-    return this.session;
+    return this.run?.session() ?? null;
+  }
+
+  /** The currently hosted run, whichever provider carries it. */
+  activeRun(): HostedSegmentRun | null {
+    return this.run;
+  }
+
+  /** Which provider this host carries segments with. Sanitized enum. */
+  executionProvider(): SegmentExecutionProvider["kind"] {
+    return this.execution.kind;
   }
 
   async close(): Promise<void> {
@@ -221,8 +254,8 @@ export class ImportSegmentHost {
    * `isRetriableAfterImportRunStatus` — so a spent ticket can never host a second ingest of the same segment.
    */
   private releaseIfSettled(): void {
-    if (!this.session) return;
-    const status = this.session.runStatus();
+    if (!this.run) return;
+    const status = this.run.runStatus();
     if (!isRetriableAfterImportRunStatus(status)) return;
     // Sanitized: the status enum and nothing else — never the ref, never the run id.
     log("aw_import_host_slot_released", { status });
@@ -230,11 +263,10 @@ export class ImportSegmentHost {
     this.hostedRef = null;
   }
 
-  /** Detach whatever run is hosted, so exactly one session is ever subscribed to the endpoint. */
+  /** Detach whatever run is hosted, so exactly one run is ever subscribed to the endpoint. */
   private releaseHostedSession(): void {
-    this.sessionDetach?.();
-    this.sessionDetach = null;
-    this.session = null;
+    this.run?.detach();
+    this.run = null;
   }
 
   private async onFrame(frame: AwClientFrame): Promise<void> {
@@ -301,20 +333,25 @@ export class ImportSegmentHost {
       this.releaseHostedSession();
 
       const required: RequiredRange = { start: decision.required.start, end: decision.required.end };
-      const assembly = assembleImportRun(this.deps.endpoint.transport, {
-        runId,
-        channelCode,
-        importRef: ref,
-        required,
-        driver: this.deps.driver,
-        ...(this.deps.persistDir ? { persistDir: this.deps.persistDir } : {}),
-        now: makeImportRunMarker(),
-      });
-      this.session = assembly.session;
+      // The execution-provider seam: the provider receives an identity-free request (run id, channel, opaque
+      // account slot, window) and the host-owned context (transport, the ingest authorization, the start frame).
+      // For LOCAL_HELPER this is the pre-seam `assembleImportRun` + `attach()`, unchanged.
+      const run = this.execution.start(
+        { runId, channelCode, accountSlot: scope?.accountSlot ?? "", required },
+        {
+          transport: this.deps.endpoint.transport,
+          importRef: ref,
+          startFrame: frame,
+          ...(this.deps.persistDir ? { persistDir: this.deps.persistDir } : {}),
+          now: makeImportRunMarker(),
+        },
+      );
+      this.run = run;
       this.hostedRef = ref;
-      this.sessionDetach = assembly.session.attach();
       // Neither the ref nor the dates — the ref authorizes an ingest and the dates are the run's business.
       log("aw_import_host_run_hosted", { kind: "SEGMENT" });
+      // The execution axis, as its own line so the pre-existing line above stays byte-identical.
+      log("aw_import_host_execution_provider", { provider: run.provider });
 
       // Replay the command that triggered this into the new session. The client sent START_RUN once and
       // must not have to send it twice just because the runtime needed to build a session first.
