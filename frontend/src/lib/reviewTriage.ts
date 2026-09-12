@@ -59,12 +59,36 @@ export const AI_TRIAGE_DISCLOSURE =
   "별점·본문 유무 기준으로는 확인 필요가 아니지만, AI 분류가 판매자가 확인할 내용이 있다고 판단한 상품평입니다. 틀렸다면 아래에서 바로잡아 주세요.";
 
 /**
- * The feedback controls' words. Binary on purpose — 확인 필요, or 필요 없음. The seller is not asked
- * to choose between 지켜보기 and 참고; that split is the rule's and the pilot does not own it.
+ * The correction controls' words — the seller's own judgment, in the same three words the tier chips
+ * use.
+ *
+ * **Three, since T-07.** This was two ("확인 필요가 맞아요" / "확인할 필요 없어요") on the reasoning
+ * that the WATCH/FYI split is the rule's and the pilot does not own it. That was right about the
+ * PILOT and wrong about the SELLER: a seller looking at a 지켜보기 chip and disagreeing has no way to
+ * say whether they meant 참고, and the product answered for them.
+ *
+ * The words are `TRIAGE_TIER_LABEL`'s, deliberately — the seller is choosing among the things the
+ * screen already calls these reviews, and a second vocabulary for the same three states would make
+ * "확인할 필요 없어요" and "참고" look like different answers.
  */
+export const TRIAGE_CORRECTION_LABEL: Record<ReviewTriageTier, string> = TRIAGE_TIER_LABEL;
+
+/** What the correction block asks, and what it says once the seller has answered. */
+export const TRIAGE_CORRECTION_COPY = {
+  prompt: "판매자님 판단은 어떠신가요?",
+  withdraw: "수정 되돌리기",
+  systemPrefix: "시스템 판단",
+  sellerPrefix: "판매자 수정",
+  /**
+   * The one sentence that keeps the control honest. A seller who corrects a review and watches the
+   * list stay exactly as it was deserves to know that is the design, not a failure.
+   */
+  disclosure:
+    "판매자님 판단은 시스템 판단을 덮어쓰지 않고 함께 기록됩니다. 목록 순서는 바뀌지 않으며, 다음 분류 기준을 검토할 때 근거로 씁니다. 마켓플레이스에는 아무것도 전송되지 않습니다.",
+} as const;
+
+/** The action controls' words. Unchanged — these are statements about what the seller did off-screen. */
 export const TRIAGE_FEEDBACK_LABEL = {
-  needsAttention: "확인 필요가 맞아요",
-  notNeeded: "확인할 필요 없어요",
   started: "조치 시작",
   completed: "조치 완료",
   actionNotNeeded: "조치 불필요",

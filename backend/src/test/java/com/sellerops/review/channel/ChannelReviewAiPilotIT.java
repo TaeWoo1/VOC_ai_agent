@@ -60,6 +60,8 @@ class ChannelReviewAiPilotIT {
     @Autowired SyncJobRepository syncJobs;
     @Autowired ItemAnalysisRepository analyses;
     @Autowired AiTriageCurrentRepository aiCurrent;
+    @Autowired com.sellerops.review.triage.feedback.TriageCorrectionRepository triageCorrections;
+    @Autowired com.sellerops.review.triage.feedback.TriageCorrectionAuditRepository triageCorrectionAudit;
     @Autowired ReviewTriageRepository triages;
     @Autowired ReviewReplyDraftRepository drafts;
     @Autowired ReviewReplyApprovalRepository approvals;
@@ -105,7 +107,7 @@ class ChannelReviewAiPilotIT {
                             @Override public Result classify(Input input) { throw new AssertionError("never called"); }
                         }) : null);
         return new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent, pilot, channels,
-                new ReviewReplyWorkLookup(triages, drafts, approvals));
+                new ReviewReplyWorkLookup(triages, drafts, approvals), triageCorrections, triageCorrectionAudit);
     }
 
     private Review review(Integer rating, String body) {

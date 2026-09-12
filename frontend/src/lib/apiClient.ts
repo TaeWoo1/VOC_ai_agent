@@ -40,6 +40,7 @@ import type {
   ChannelReviewDetailView,
   TriageActionKind,
   TriageBehaviorEvent,
+  TriageCorrectionHistoryView,
   TriageCorrectionRequest,
   TriageCorrectionView,
   TriageEventView,
@@ -1945,6 +1946,27 @@ export const api = {
     const { data } = await http.post<TriageCorrectionView>(
       `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/correction`,
       request,
+    );
+    return data;
+  },
+
+  /**
+   * 되돌리기 — the seller takes their correction back. The review reads as the system's judgment
+   * alone again; the row and its trail are kept server-side.
+   */
+  async withdrawChannelReviewTriageCorrection(accountId: string, reviewId: string): Promise<void> {
+    await http.delete(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/correction`,
+    );
+  },
+
+  /** The review's correction trail, oldest first — what the seller said and when they changed it. */
+  async getChannelReviewCorrectionHistory(
+    accountId: string,
+    reviewId: string,
+  ): Promise<TriageCorrectionHistoryView[]> {
+    const { data } = await http.get<TriageCorrectionHistoryView[]>(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/correction/history`,
     );
     return data;
   },

@@ -26,6 +26,17 @@ import lombok.Setter;
  * It is still not gold (draft §3), and it still says nothing about WHY until a human dispositions it
  * as {@code CLASSIFIER_ERROR} or {@code SELLER_PREFERENCE}.
  *
+ * <p><b>One live row per review, and it is no longer deleted from.</b> {@link #state} says whether the
+ * seller's word currently stands ({@link SellerCorrectionState}); the append-only
+ * {@link TriageCorrectionAudit} says what it said before. Withdrawing is a state change rather than a
+ * delete because a delete would cascade into {@link CorrectionDisposition} and could take a row out of
+ * a frozen evaluation snapshot.
+ *
+ * <p><b>The seller chooses among all three tiers.</b> Until 2026-09-11 the write path took a boolean
+ * and derived the rest, so a seller who meant 참고 had 지켜보기 recorded for them. The column always
+ * held three values; only the caller was binary. See {@code V99__seller_triage_correction.sql} for the
+ * decision this reverses and why.
+ *
  * <p><b>No free-text note, deliberately.</b> A note here is customer-adjacent prose in a table an
  * evaluation harness reads, and the reason for a correction that matters is the disposition
  * ({@link CorrectionDisposition}), which is a closed judgment about the classifier rather than about the
@@ -69,4 +80,14 @@ public class TriageCorrection extends BaseEntity {
 
     @Column(name = "corrected_at", nullable = false)
     private Instant correctedAt;
+
+    /** Whether this correction currently stands. Only {@code STANDING} may be acted on. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "state", nullable = false, length = 16)
+    private SellerCorrectionState state = SellerCorrectionState.STANDING;
+
+    /** True when the seller's word stands — the one question every read path here asks. */
+    public boolean stands() {
+        return state == SellerCorrectionState.STANDING;
+    }
 }

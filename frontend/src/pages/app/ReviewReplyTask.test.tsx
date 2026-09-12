@@ -35,6 +35,7 @@ function detail(over: Partial<ChannelReviewDetailView> = {}): ChannelReviewDetai
     isNew: false,
     triage: { tier: "FYI", reason: "같은 분류가 늘어나는지 지켜보세요.", tags: ["설치"], recommendedAction: null },
     aiMark: null,
+    sellerCorrection: null,
     locateTarget: { productId: null, vendorItemId: null, writtenOn: null, rating: null },
     replyWork: {
       actionRef: `review:${REVIEW}`,

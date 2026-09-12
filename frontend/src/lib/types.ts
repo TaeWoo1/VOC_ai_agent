@@ -2002,6 +2002,13 @@ export interface ChannelReviewItemView {
    * both rather than merging them.
    */
   aiMark: AiTriageMarkView | null;
+  /**
+   * The seller's own standing judgment for this row, or null when they have not corrected it.
+   *
+   * Shown beside `triage` and `aiMark`, never in place of either, and it does not move the row: the
+   * server's ordering does not read the correction table.
+   */
+  sellerCorrection: TriageCorrectionView | null;
 }
 
 /**
@@ -2146,6 +2153,8 @@ export interface ChannelReviewDetailView {
   triage: ReviewTriageNote;
   /** The same pilot mark the list row carried, or null. */
   aiMark: AiTriageMarkView | null;
+  /** The seller's own standing judgment, read back on every open, or null when none stands. */
+  sellerCorrection: TriageCorrectionView | null;
   locateTarget: ChannelReviewLocateTarget;
   /**
    * The reply work this review can carry, or null when the channel has no reply flow (capability
@@ -2180,19 +2189,46 @@ export interface ChannelReviewReplyWork {
 // Three shapes of decreasing evidential weight. None carries free text, and none asserts what the
 // seller was SHOWN — the backend computes that from its own store.
 
-/** The seller's binary answer to the product question — 확인 필요, or not. */
+/**
+ * The seller's own judgment for one review — one of the three tiers the screen shows them.
+ *
+ * Three since 2026-09-11 (T-07). It was a boolean, and 필요 없음 was stored as whatever the RULE
+ * would have said, so a seller who meant 참고 had 지켜보기 recorded under their name.
+ */
 export interface TriageCorrectionRequest {
-  needsAttention: boolean;
+  tier: ReviewTriageTier;
   /** An optional closed-vocabulary reason, or null. */
   reasonCode: string | null;
 }
 
+/**
+ * The seller's STANDING correction, carried on every read of the review — not just echoed back on
+ * write. Before T-07 it lived in one React state variable, so the write reached the database and a
+ * refresh erased it from the screen.
+ *
+ * `systemTier`/`systemSource` are what the system was saying when the seller disagreed. What it says
+ * NOW is `triage.tier` plus `aiMark` on the same object, unchanged: two judgments, side by side.
+ */
 export interface TriageCorrectionView {
   reviewId: string;
-  needsAttention: boolean;
+  correctedTier: ReviewTriageTier;
   reasonCode: string | null;
+  systemTier: ReviewTriageTier | null;
   /** RULES or AI — which mechanism produced the tier the seller corrected. */
-  shownSource: "RULES" | "AI" | null;
+  systemSource: "RULES" | "AI" | null;
+  correctedAt: string;
+  /** How many times the seller has set or withdrawn this correction. 0 on list rows, which do not ask. */
+  changeCount: number;
+}
+
+/** One entry in a review's correction trail. Closed vocabulary; no actor name, no prose. */
+export interface TriageCorrectionHistoryView {
+  kind: "SET" | "WITHDRAWN";
+  tierFrom: ReviewTriageTier | null;
+  tierTo: ReviewTriageTier | null;
+  systemTier: ReviewTriageTier | null;
+  systemSource: "RULES" | "AI" | null;
+  at: string;
 }
 
 /**

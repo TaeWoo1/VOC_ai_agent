@@ -10,6 +10,7 @@ import com.sellerops.review.triage.llm.TriagePrompt;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,7 @@ public class TriageFeedbackService {
     private final AiTriageCurrentRepository current;
     private final TriageActionRepository actions;
     private final TriageBehaviorEventRepository behavior;
+    private final TriageCorrectionAuditRepository correctionAudit;
     private final Clock clock;
 
     @Autowired
@@ -51,8 +53,9 @@ public class TriageFeedbackService {
                                  CorrectionDispositionRepository dispositions,
                                  AiTriageCurrentRepository current,
                                  TriageActionRepository actions,
-                                 TriageBehaviorEventRepository behavior) {
-        this(predictions, corrections, dispositions, current, actions, behavior, Clock.systemUTC());
+                                 TriageBehaviorEventRepository behavior,
+                                 TriageCorrectionAuditRepository correctionAudit) {
+        this(predictions, corrections, dispositions, current, actions, behavior, correctionAudit, Clock.systemUTC());
     }
 
     /** Test seam: an explicit {@link Clock}, the same shape {@code ReviewReplyService} uses. */
@@ -62,6 +65,7 @@ public class TriageFeedbackService {
                           AiTriageCurrentRepository current,
                           TriageActionRepository actions,
                           TriageBehaviorEventRepository behavior,
+                          TriageCorrectionAuditRepository correctionAudit,
                           Clock clock) {
         this.predictions = predictions;
         this.corrections = corrections;
@@ -69,6 +73,7 @@ public class TriageFeedbackService {
         this.current = current;
         this.actions = actions;
         this.behavior = behavior;
+        this.correctionAudit = correctionAudit;
         this.clock = clock;
     }
 
@@ -155,7 +160,9 @@ public class TriageFeedbackService {
         if (reasonCode != null && TriageReasonCode.parse(reasonCode).isEmpty()) {
             throw ApiException.badRequest("알 수 없는 분류 사유입니다.");
         }
-        TriageCorrection row = corrections.findByReviewId(prediction.getReviewId()).orElseGet(TriageCorrection::new);
+        TriageCorrection row = corrections.findByReviewIdForUpdate(prediction.getReviewId())
+                .orElseGet(TriageCorrection::new);
+        ReviewTriageTier from = row.getId() != null && row.stands() ? row.getCorrectedTier() : null;
         row.setOrgId(orgId);
         row.setReviewId(prediction.getReviewId());
         row.setPredictionId(predictionId);
@@ -165,41 +172,117 @@ public class TriageFeedbackService {
         row.setCorrectedReasonCode(reasonCode);
         row.setCorrectedTags(tags == null || tags.isEmpty() ? null : String.join(",", tags));
         row.setCorrectedAt(Instant.now(clock));
-        return corrections.save(row);
+        row.setState(SellerCorrectionState.STANDING);
+        TriageCorrection saved = corrections.save(row);
+        // Audited on the same terms as every other correction write. This path has no production
+        // caller today, and a write path that could produce a correction with no trail would make
+        // "every correction has a history" false the day one appeared.
+        audit(saved, TriageCorrectionAudit.Kind.SET, from, tier, null);
+        return saved;
     }
 
     /**
-     * The seller's correction on a REVIEW — the pilot's write path.
+     * The seller's correction on a REVIEW — and after 2026-09-11 the SELLER's write path, not the
+     * pilot's.
      *
-     * <p>Where the pilot has a current prediction for the review it is linked; where it does not,
-     * the correction is of the rule's own tier and says so ({@link TriageShownSource#RULES}). Both
-     * are strong evidence, neither is gold, and neither says why until dispositioned.
+     * <p>Where the pilot has a current prediction for the review it is linked; where it does not, the
+     * correction is of the rule's own tier and says so ({@link TriageShownSource#RULES}). Both are
+     * strong evidence, neither is gold, and neither says why until dispositioned.
      *
-     * <p>{@code tier} is the seller's binary answer, {@code NEEDS_ATTENTION} or not. A seller does
-     * not choose between {@code WATCH} and {@code FYI} here — that split is the rule's and the pilot
-     * does not own it (§13.7 item 1) — so "필요 없음" is stored as the rule's own non-attention tier
-     * for the row rather than as a tier the seller never saw.
+     * <p><b>{@code correctedTier} is the seller's own choice among all three tiers.</b> It used to be
+     * a boolean, and 필요 없음 was stored as whatever the RULE would have said for that row — so a
+     * seller who meant 참고 had 지켜보기 written down under their name, and the two were
+     * indistinguishable afterwards. The reversed decision and its reasoning are recorded in
+     * {@code V99__seller_triage_correction.sql}; it is a product-owner decision, not a drift.
+     *
+     * <p><b>The system's judgment is not overwritten.</b> {@code shownTier}/{@code shownSource} keep
+     * what the system said, the rules tier is still recomputed at read time, and
+     * {@link AiTriageCurrent} is untouched. Nothing here re-ranks a queue: {@code FINAL_TIER_RANK}
+     * does not read this table, so a correction changes what the seller SEES about a review and not
+     * where the review sits.
+     *
+     * <p>Writes one {@link TriageCorrectionAudit} row per press, under a row lock, so the trail's
+     * {@code tierFrom} names the real predecessor.
      */
     @Transactional
     public TriageCorrection correctReview(UUID orgId, UUID reviewId, Integer rating, String body,
-                                          boolean needsAttention, String reasonCode, boolean aiSurfaceOn) {
+                                          ReviewTriageTier correctedTier, String reasonCode,
+                                          boolean aiSurfaceOn, UUID actorId) {
+        if (correctedTier == null) {
+            throw ApiException.badRequest("판매자 판단을 선택해 주세요.");
+        }
         if (reasonCode != null && TriageReasonCode.parse(reasonCode).isEmpty()) {
             throw ApiException.badRequest("알 수 없는 분류 사유입니다.");
         }
         ReviewTriageTier ruleTier = ReviewTriageRules.tier(rating, body);
-        TriageDisplayDecision shown = TriageDisplayDecision.resolve(ruleTier, current.findByReviewId(reviewId).orElse(null), aiSurfaceOn);
-        TriageCorrection row = corrections.findByReviewId(reviewId).orElseGet(TriageCorrection::new);
+        TriageDisplayDecision shown = TriageDisplayDecision.resolve(ruleTier,
+                current.findByReviewId(reviewId).orElse(null), aiSurfaceOn);
+        TriageCorrection row = corrections.findByReviewIdForUpdate(reviewId).orElseGet(TriageCorrection::new);
+        // The predecessor is the tier that STOOD. A withdrawn row left no standing judgment, so the
+        // next correction is a first correction again and its trail says so with a null tierFrom.
+        ReviewTriageTier from = row.getId() != null && row.stands() ? row.getCorrectedTier() : null;
         row.setOrgId(orgId);
         row.setReviewId(reviewId);
         row.setPredictionId(shown.predictionId());
         row.setShownTier(shown.tier());
         row.setShownSource(shown.source());
-        row.setCorrectedTier(needsAttention ? ReviewTriageTier.NEEDS_ATTENTION
-                : ruleTier == ReviewTriageTier.NEEDS_ATTENTION ? ReviewTriageTier.WATCH : ruleTier);
+        row.setCorrectedTier(correctedTier);
         row.setCorrectedReasonCode(reasonCode);
         row.setCorrectedTags(null);
         row.setCorrectedAt(Instant.now(clock));
-        return corrections.save(row);
+        row.setState(SellerCorrectionState.STANDING);
+        TriageCorrection saved = corrections.save(row);
+        audit(saved, TriageCorrectionAudit.Kind.SET, from, correctedTier, actorId);
+        return saved;
+    }
+
+    /**
+     * The seller takes their correction back. The review reads as the system's judgment alone again.
+     *
+     * <p><b>Not a delete.</b> Deleting would cascade into {@link CorrectionDisposition} and could
+     * remove a row from a FROZEN evaluation snapshot, which is the one thing that spine exists to
+     * prevent. A snapshot keeps what it took; this only stops the row from being read as the seller's
+     * current word.
+     *
+     * <p>Withdrawing something already withdrawn is a no-op and writes no trail row — a trail of
+     * presses that changed nothing is not a history.
+     */
+    @Transactional
+    public Optional<TriageCorrection> withdrawCorrection(UUID orgId, UUID reviewId, UUID actorId) {
+        TriageCorrection row = corrections.findByReviewIdForUpdate(reviewId)
+                .filter(c -> c.getOrgId().equals(orgId))
+                .orElseThrow(() -> ApiException.notFound("되돌릴 수정 내역이 없습니다."));
+        if (!row.stands()) {
+            return Optional.of(row);
+        }
+        ReviewTriageTier from = row.getCorrectedTier();
+        row.setState(SellerCorrectionState.WITHDRAWN);
+        row.setCorrectedAt(Instant.now(clock));
+        TriageCorrection saved = corrections.save(row);
+        audit(saved, TriageCorrectionAudit.Kind.WITHDRAWN, from, null, actorId);
+        return Optional.of(saved);
+    }
+
+    /** One review's correction trail, oldest first. Append-only; nothing here is ever rewritten. */
+    public List<TriageCorrectionAudit> correctionHistory(UUID reviewId) {
+        return correctionAudit.findByReviewIdOrderByDecidedAtAsc(reviewId);
+    }
+
+    private void audit(TriageCorrection row, TriageCorrectionAudit.Kind kind, ReviewTriageTier from,
+                       ReviewTriageTier to, UUID actorId) {
+        TriageCorrectionAudit entry = new TriageCorrectionAudit();
+        entry.setOrgId(row.getOrgId());
+        entry.setReviewId(row.getReviewId());
+        entry.setCorrectionId(row.getId());
+        entry.setKind(kind);
+        entry.setTierFrom(from);
+        entry.setTierTo(to);
+        entry.setShownTier(row.getShownTier());
+        entry.setShownSource(row.getShownSource());
+        entry.setReasonCode(kind == TriageCorrectionAudit.Kind.SET ? row.getCorrectedReasonCode() : null);
+        entry.setActorId(actorId);
+        entry.setDecidedAt(row.getCorrectedAt());
+        correctionAudit.save(entry);
     }
 
     /** An explicit act. Append-only; see {@link TriageActionKind}. */

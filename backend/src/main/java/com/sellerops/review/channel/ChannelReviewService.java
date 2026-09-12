@@ -21,6 +21,11 @@ import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.review.triage.ReviewTriageTier;
 import com.sellerops.review.triage.feedback.AiTriageCurrent;
 import com.sellerops.review.triage.feedback.AiTriageCurrentRepository;
+import com.sellerops.review.channel.dto.TriageFeedbackRequests;
+import com.sellerops.review.triage.feedback.SellerCorrectionState;
+import com.sellerops.review.triage.feedback.TriageCorrection;
+import com.sellerops.review.triage.feedback.TriageCorrectionAuditRepository;
+import com.sellerops.review.triage.feedback.TriageCorrectionRepository;
 import com.sellerops.review.triage.feedback.TriageDisplayDecision;
 import com.sellerops.review.channel.dto.ReviewChannelCapabilityView;
 import com.sellerops.channel.ChannelRepository;
@@ -120,6 +125,8 @@ public class ChannelReviewService {
     private final ReviewReplyWorkLookup replyWork;
     private final com.sellerops.identity.ExecutableIdentityResolver identity;
     private final com.sellerops.review.publish.ReviewExecutionCapability execution;
+    private final TriageCorrectionRepository corrections;
+    private final TriageCorrectionAuditRepository correctionAudit;
 
     @org.springframework.beans.factory.annotation.Autowired
     public ChannelReviewService(ReviewRepository reviews, ProductRepository products,
@@ -128,7 +135,11 @@ public class ChannelReviewService {
                                 AiTriagePilotService pilot, ChannelRepository channels,
                                 ReviewReplyWorkLookup replyWork,
                                 com.sellerops.identity.ExecutableIdentityResolver identity,
-                                com.sellerops.review.publish.ReviewExecutionCapability execution) {
+                                com.sellerops.review.publish.ReviewExecutionCapability execution,
+                                TriageCorrectionRepository corrections,
+                                TriageCorrectionAuditRepository correctionAudit) {
+        this.corrections = corrections;
+        this.correctionAudit = correctionAudit;
         this.identity = identity;
         this.execution = execution;
         this.channels = channels;
@@ -150,10 +161,13 @@ public class ChannelReviewService {
                                 SellerAccountRepository accounts, SyncJobRepository syncJobs,
                                 ItemAnalysisRepository analyses, AiTriageCurrentRepository aiCurrent,
                                 AiTriagePilotService pilot, ChannelRepository channels,
-                                ReviewReplyWorkLookup replyWork) {
+                                ReviewReplyWorkLookup replyWork,
+                                TriageCorrectionRepository corrections,
+                                TriageCorrectionAuditRepository correctionAudit) {
         this(reviews, products, accounts, syncJobs, analyses, aiCurrent, pilot, channels, replyWork,
                 com.sellerops.identity.ExecutableIdentityResolver.unresolved(),
-                com.sellerops.review.publish.ReviewExecutionCapability.disabled());
+                com.sellerops.review.publish.ReviewExecutionCapability.disabled(),
+                corrections, correctionAudit);
     }
 
     public ChannelReviewPageView list(UUID orgId, UUID accountId, String sort, String tier, int page, int size) {
@@ -179,12 +193,13 @@ public class ChannelReviewService {
         Map<UUID, String> categories = categoriesOf(orgId, found.getContent());
         Map<String, Long> categoryCounts = categoryCounts(orgId, channelId);
         Map<UUID, AiTriageMarkView> marks = marksOf(orgId, found.getContent());
+        Map<UUID, TriageFeedbackRequests.CorrectionView> sellerCorrections = correctionsOf(orgId, found.getContent());
         Map<UUID, com.sellerops.identity.ExecutableIdentity> identities =
                 identity.forReviews(orgId, found.getContent());
 
         List<ChannelReviewItemView> items = found.getContent().stream()
                 .map(r -> item(r, productOf(byProduct, r), newSince, note(r, categories, categoryCounts),
-                        marks.get(r.getId()),
+                        marks.get(r.getId()), sellerCorrections.get(r.getId()),
                         identities.getOrDefault(r.getId(), com.sellerops.identity.ExecutableIdentity.NONE)))
                 .toList();
 
@@ -228,6 +243,35 @@ public class ChannelReviewService {
             }
         }
         return marks;
+    }
+
+    /**
+     * The seller's STANDING corrections for the rows on this page — one org-scoped batch query, the
+     * same shape as {@link #marksOf}.
+     *
+     * <p><b>Not gated on the pilot.</b> A correction is the seller's own judgment; it exists whether
+     * or not a classifier ever looked at the review, and hiding it when the pilot is off would make it
+     * vanish from the screen while staying in the database — which is the T-07 defect one level down.
+     *
+     * <p><b>It does not re-rank anything.</b> {@code FINAL_TIER_RANK} does not read this table. A
+     * corrected review sits exactly where the system put it and says, on the row, that the seller
+     * disagreed. Moving it would be the overwrite this design exists to avoid.
+     */
+    private Map<UUID, TriageFeedbackRequests.CorrectionView> correctionsOf(UUID orgId, List<Review> page) {
+        if (page.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, TriageFeedbackRequests.CorrectionView> out = new java.util.HashMap<>();
+        for (TriageCorrection c : corrections.findByOrgIdAndStateAndReviewIdIn(orgId,
+                SellerCorrectionState.STANDING, page.stream().map(Review::getId).toList())) {
+            // changeCount 0 on the list: the row shows THAT the seller corrected it, and the trail's
+            // length is a second query this page has no use for. The detail read pays for it.
+            TriageFeedbackRequests.CorrectionView view = ChannelReviewFeedbackService.viewOf(c, 0);
+            if (view != null) {
+                out.put(c.getReviewId(), view);
+            }
+        }
+        return out;
     }
 
     /**
@@ -287,6 +331,12 @@ public class ChannelReviewService {
                 // opening one review scan the channel's whole analysis join to read a single entry.
                 detailNote(orgId, account.getChannelId(), review),
                 marksOf(orgId, List.of(review)).get(review.getId()),
+                // The seller's own judgment, read back on every open — so a correction survives a
+                // refresh on the screen as well as in the database. Null when none stands.
+                ChannelReviewFeedbackService.viewOf(
+                        corrections.findByReviewId(review.getId())
+                                .filter(c -> c.getOrgId().equals(orgId)).orElse(null),
+                        (int) correctionAudit.countByReviewId(review.getId())),
                 new ChannelReviewDetailView.LocateTarget(
                         product == null ? null : product.getSku(),
                         review.getSourceOptionId(),
@@ -308,6 +358,7 @@ public class ChannelReviewService {
 
     private ChannelReviewItemView item(Review review, Product product, Instant newSince,
                                        ReviewTriageNote triage, AiTriageMarkView aiMark,
+                                       TriageFeedbackRequests.CorrectionView sellerCorrection,
                                        com.sellerops.identity.ExecutableIdentity executableIdentity) {
         SafePreviewResult preview = VocPreviewSanitizer.sanitize(review.getBody());
         return new ChannelReviewItemView(
@@ -324,6 +375,7 @@ public class ChannelReviewService {
                 isNew(review, newSince),
                 triage,
                 aiMark,
+                sellerCorrection,
                 executableIdentity.name());
     }
 

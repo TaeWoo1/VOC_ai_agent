@@ -45,6 +45,16 @@ public record ChannelReviewDetailView(
         ReviewTriageNote triage,
         /** The same pilot mark the list row carried, or null — see {@link ChannelReviewItemView#aiMark()}. */
         AiTriageMarkView aiMark,
+        /**
+         * The seller's own standing judgment for this review, or null when none stands.
+         *
+         * <p>Read back on every open. Before T-07 a correction lived in one React state variable: the
+         * write reached the database and the screen forgot it on the next refresh, so the seller could
+         * not tell whether their correction had been recorded. It carries what the SYSTEM was saying
+         * when the seller disagreed; what the system says NOW is {@code triage} and {@code aiMark},
+         * unchanged and still computed at read time.
+         */
+        TriageFeedbackRequests.CorrectionView sellerCorrection,
         LocateTarget locateTarget,
         /** The reply work this review can carry, or null when the channel has no reply flow (capability §1). */
         ReplyWork replyWork,

@@ -75,26 +75,78 @@ public class ChannelReviewFeedbackService {
         String code = channels.findById(account.getChannelId()).map(Channel::getCode).orElse(null);
         ReviewTriageChannelCapability capability = ReviewTriageChannelCapability.of(code);
         if (!capability.inContract()) {
-            throw ApiException.notFound("이 채널은 AI 분류 파일럿 대상이 아닙니다.");
+            // Not "the pilot does not cover this channel" any more: these routes now carry the
+            // seller's own corrections, which have nothing to do with the pilot. Same 404, same
+            // reason (§1), a sentence that is true of what is actually being refused.
+            throw ApiException.notFound("이 채널은 상품평 분류 기록을 지원하지 않습니다.");
         }
         return capability;
     }
 
+    /**
+     * The seller states their own judgment for one review.
+     *
+     * <p><b>Not gated on the AI pilot.</b> {@code pilot.isEnabledFor} is passed to the feedback
+     * service for one purpose only — resolving what was on SCREEN, so the row can say whether the
+     * seller was disagreeing with the rule or with the pilot's mark. It is not permission. A
+     * rule-tiered review on an org with no pilot has always been correctable here; what was missing
+     * was a control on the screen, and that is where the coupling actually was.
+     */
     public TriageFeedbackRequests.CorrectionView correct(UUID orgId, UUID accountId, UUID reviewId,
-                                                         TriageFeedbackRequests.Correction request) {
-        if (request == null || request.needsAttention() == null) {
+                                                         TriageFeedbackRequests.Correction request, UUID actorId) {
+        if (request == null || request.tier() == null || request.tier().isBlank()) {
             // A strong-evidence row from an absent field would be evidence of nothing.
-            throw ApiException.badRequest("확인 필요 여부가 필요합니다.");
+            throw ApiException.badRequest("판매자 판단을 선택해 주세요.");
         }
         SellerAccount account = requireAccount(orgId, accountId);
         requireCapability(account);
         Review review = requireReview(orgId, account, reviewId);
         TriageCorrection row = feedback.correctReview(orgId, reviewId, review.getRating(), review.getBody(),
-                request.needsAttention(), request.reasonCode(), pilot.isEnabledFor(orgId));
-        return new TriageFeedbackRequests.CorrectionView(reviewId,
-                row.getCorrectedTier() == ReviewTriageTier.NEEDS_ATTENTION,
-                row.getCorrectedReasonCode(),
-                row.getShownSource() == null ? null : row.getShownSource().name());
+                ReviewTriageTier.parse(request.tier()), request.reasonCode(), pilot.isEnabledFor(orgId), actorId);
+        return viewOf(row, feedback.correctionHistory(reviewId).size());
+    }
+
+    /**
+     * The seller takes their correction back — 되돌리기.
+     *
+     * <p>Returns null, which is the whole answer: there is no standing seller judgment for this
+     * review any more and the screen reads as the system's alone. The row and its trail survive; see
+     * {@code TriageFeedbackService.withdrawCorrection} for why a withdrawal is not a delete.
+     */
+    public TriageFeedbackRequests.CorrectionView withdraw(UUID orgId, UUID accountId, UUID reviewId, UUID actorId) {
+        SellerAccount account = requireAccount(orgId, accountId);
+        requireCapability(account);
+        Review review = requireReview(orgId, account, reviewId);
+        feedback.withdrawCorrection(orgId, review.getId(), actorId);
+        return null;
+    }
+
+    /** One review's correction trail, oldest first. */
+    public List<TriageFeedbackRequests.CorrectionHistoryView> correctionHistory(UUID orgId, UUID accountId,
+                                                                                UUID reviewId) {
+        SellerAccount account = requireAccount(orgId, accountId);
+        requireCapability(account);
+        Review review = requireReview(orgId, account, reviewId);
+        return feedback.correctionHistory(review.getId()).stream()
+                .map(a -> new TriageFeedbackRequests.CorrectionHistoryView(a.getKind().name(),
+                        name(a.getTierFrom()), name(a.getTierTo()), name(a.getShownTier()),
+                        name(a.getShownSource()), a.getDecidedAt()))
+                .toList();
+    }
+
+    /**
+     * A standing correction as the surface reads it, or null when none stands.
+     *
+     * <p>One mapper, shared by the write echo and both read paths, so "what the seller corrected this
+     * to" cannot be two different sentences depending on which request rendered it.
+     */
+    public static TriageFeedbackRequests.CorrectionView viewOf(TriageCorrection row, int changeCount) {
+        if (row == null || !row.stands()) {
+            return null;
+        }
+        return new TriageFeedbackRequests.CorrectionView(row.getReviewId(),
+                row.getCorrectedTier().name(), row.getCorrectedReasonCode(),
+                name(row.getShownTier()), name(row.getShownSource()), row.getCorrectedAt(), changeCount);
     }
 
     public void act(UUID orgId, UUID accountId, UUID reviewId, TriageActionKind kind, UUID actorId) {
@@ -169,8 +221,12 @@ public class ChannelReviewFeedbackService {
             out.add(new TriageFeedbackRequests.EventView(TriageEventKind.of(a.getKind()), name(a.getShownSource()),
                     name(a.getShownTier()), a.getActedAt()));
         }
-        corrections.findByReviewId(review.getId()).ifPresent(c -> out.add(new TriageFeedbackRequests.EventView(
-                TriageEventKind.of(c), name(c.getShownSource()), name(c.getShownTier()), c.getCorrectedAt())));
+        // STANDING only. A withdrawn correction is not an event: contract §2.3 already says absence is
+        // not one, and a taken-back answer is an absence of an answer rather than a weaker kind of one.
+        // The withdrawal itself is in the correction trail, which is Decision Data and not this list.
+        corrections.findByReviewId(review.getId()).filter(TriageCorrection::stands)
+                .ifPresent(c -> out.add(new TriageFeedbackRequests.EventView(
+                        TriageEventKind.of(c), name(c.getShownSource()), name(c.getShownTier()), c.getCorrectedAt())));
         out.sort(java.util.Comparator.comparing(TriageFeedbackRequests.EventView::at,
                 java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())));
         return out;

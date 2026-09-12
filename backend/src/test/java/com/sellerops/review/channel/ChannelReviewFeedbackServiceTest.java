@@ -92,15 +92,21 @@ class ChannelReviewFeedbackServiceTest {
     void outsideChannelsHaveNoRoute() {
         Review r = onChannel("GMARKET");
         assertThatThrownBy(() -> service.correct(ORG, ACCOUNT, r.getId(),
-                new TriageFeedbackRequests.Correction(true, null))).isInstanceOf(ApiException.class)
-                .hasMessageContaining("대상이 아닙니다");
+                new TriageFeedbackRequests.Correction("NEEDS_ATTENTION", null), null))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("지원하지 않습니다");
+        assertThatThrownBy(() -> service.withdraw(ORG, ACCOUNT, r.getId(), null))
+                .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.correctionHistory(ORG, ACCOUNT, r.getId()))
+                .isInstanceOf(ApiException.class);
         assertThatThrownBy(() -> service.act(ORG, ACCOUNT, r.getId(), TriageActionKind.ACTION_STARTED, null))
                 .isInstanceOf(ApiException.class);
         assertThatThrownBy(() -> service.observe(ORG, ACCOUNT, new TriageFeedbackRequests.Behavior(List.of(
                 new TriageFeedbackRequests.Behavior.Event(r.getId(), TriageBehaviorKind.REVIEW_OPENED)))))
                 .isInstanceOf(ApiException.class);
         assertThatThrownBy(() -> service.events(ORG, ACCOUNT, r.getId())).isInstanceOf(ApiException.class);
-        verify(feedback, never()).correctReview(any(), any(), any(), any(), anyBoolean(), any(), anyBoolean());
+        verify(feedback, never()).correctReview(any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        verify(feedback, never()).withdrawCorrection(any(), any(), any());
         verify(feedback, never()).act(any(), any(), any(), any(), any(), any(), anyBoolean());
         verify(feedback, never()).observe(any(), any(), anyBoolean());
     }

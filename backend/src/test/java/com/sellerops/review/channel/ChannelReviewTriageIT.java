@@ -64,6 +64,8 @@ class ChannelReviewTriageIT {
     @Autowired SyncJobRepository syncJobs;
     @Autowired ItemAnalysisRepository analyses;
     @Autowired AiTriageCurrentRepository aiCurrent;
+    @Autowired com.sellerops.review.triage.feedback.TriageCorrectionRepository triageCorrections;
+    @Autowired com.sellerops.review.triage.feedback.TriageCorrectionAuditRepository triageCorrectionAudit;
     @Autowired ReviewTriageRepository triages;
     @Autowired ReviewReplyDraftRepository drafts;
     @Autowired ReviewReplyApprovalRepository approvals;
@@ -86,7 +88,8 @@ class ChannelReviewTriageIT {
     @BeforeEach
     void setUp() {
         service = new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent,
-                pilotOff(), channels, new ReviewReplyWorkLookup(triages, drafts, approvals));
+                pilotOff(), channels, new ReviewReplyWorkLookup(triages, drafts, approvals),
+                triageCorrections, triageCorrectionAudit);
         Channel ch = new Channel();
         ch.setCode("COUPANG");
         ch.setNameKo("쿠팡");

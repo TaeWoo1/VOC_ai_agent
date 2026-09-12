@@ -138,7 +138,10 @@ public class AiTriagePilotService {
         var shown = com.sellerops.review.triage.feedback.TriageShownSource.AI;
         long agree = 0;
         long disagree = 0;
-        for (var c : corrections.findByOrgIdAndShownSourceAndReviewIdIn(orgId, shown, marked)) {
+        // STANDING only. A withdrawn correction is not a weaker answer — it is the absence of one,
+        // and counting it would report a disagreement the seller has taken back.
+        for (var c : corrections.findByOrgIdAndShownSourceAndStateAndReviewIdIn(orgId, shown,
+                com.sellerops.review.triage.feedback.SellerCorrectionState.STANDING, marked)) {
             if (c.getCorrectedTier() == com.sellerops.review.triage.ReviewTriageTier.NEEDS_ATTENTION) {
                 agree++;
             } else {

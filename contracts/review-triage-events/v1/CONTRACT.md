@@ -80,7 +80,13 @@ flag. Cafe24: refused until a reply flow exists and this table changes.
 - **A weight.** No event row carries one. Weighting is a policy applied when a silver snapshot is cut
   (§4), versioned with the snapshot, so it can be revised without rewriting history and so no reader
   can consume a weight without its policy.
-- **A tier change.** No event moves a review, hides it, or marks it done on any surface.
+- **A tier change.** No event moves a review, hides it, or marks it done on any surface. A seller
+  correction is not one either: it is displayed beside the system's tier and the list ordering does not
+  read it.
+- **A withdrawn correction.** A seller who takes their answer back has left no answer, and the rule
+  directly above applies — absence is not an event. The withdrawal itself is in the correction audit,
+  which is Decision Data and not this list. `AI_AGREE` / `RULE_AGREE` and their disagreements are
+  emitted for `STANDING` corrections only.
 
 ---
 
@@ -93,7 +99,7 @@ these four things are stored in four places and joined only by ids:
 |---|---|---|---|
 | **classifier prediction** | `review_triage_predictions` | what the frozen classifier said: model tier, guarded tier, reason, version, prompt hash, status | immutable history, one row per classification |
 | **display decision** | `review_triage_ai_current` + `shown_tier` / `shown_source` on every event | what the seller was actually shown: `RULES` (the rating rule's tier) or `AI` (the pilot's additive mark). Resolved **server-side** by one function from (rule tier, current AI row, org opt-in) — never asserted by the client | `ai_current` rewritten per re-classification; the `shown_*` columns are frozen on each event at the moment it was written |
-| **explicit feedback** | `review_triage_corrections` (+ `review_triage_correction_dispositions`) | the seller's binary answer, then a person's reading of it as `CLASSIFIER_ERROR` or `SELLER_PREFERENCE` | one live answer per review; disposition frozen once snapshotted |
+| **explicit feedback** | `review_triage_corrections` (+ `review_correction_dispositions`, + `review_triage_correction_audit`) | the seller's answer — **one of the three tiers**, not a boolean — then a person's reading of it as `CLASSIFIER_ERROR` or `SELLER_PREFERENCE` | one live answer per review, `STANDING` or `WITHDRAWN`; every set and withdrawal appended to the audit; disposition frozen once snapshotted |
 | **action events** | `review_triage_actions`, `review_triage_behavior_events` | what the seller did — explicit acts and silver traces | append-only |
 
 When a seller-specific policy layer exists, it will add a **third `shownSource`** (a policy-shaped
@@ -133,3 +139,4 @@ under a policy display will say so. Model judgment and display judgment are neve
 | date | change |
 |---|---|
 | 2026-08-17 | v1 created, before implementation. Kinds, strengths, channel table, four-record separation, silver rules. |
+| 2026-09-11 | **T-07 seller triage correction.** §3: the seller's answer is one of the three tiers, not a boolean — a reversal, recorded with its reasoning in `V99__seller_triage_correction.sql`; the correction row gains `STANDING`/`WITHDRAWN` and an append-only `review_triage_correction_audit`; the disposition table's real name corrected. §2.3: a withdrawn correction is not an event, and a correction is not a tier change. **Event kinds unchanged**, and a correction is still not gold. |

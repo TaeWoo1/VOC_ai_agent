@@ -10,10 +10,13 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -92,13 +95,40 @@ public class ChannelReviewController {
     // Three write routes of decreasing evidential weight, and one operator-triggered run. None of
     // them touches a marketplace, changes a tier, hides a row or marks anything done. They record.
 
-    /** The seller's answer: 확인 필요, or 필요 없음. Strong evidence; supersedes their previous answer. */
+    /**
+     * The seller's own judgment for this review — one of the three tiers. Strong evidence; supersedes
+     * their previous answer and keeps it in the trail.
+     *
+     * <p>Available whether or not the AI pilot is on for the org: a rule-tiered review is the seller's
+     * to correct too, and the pilot only decides what {@code shownSource} the row records.
+     */
     @PostMapping("/{reviewId}/triage-feedback/correction")
     public TriageFeedbackRequests.CorrectionView correct(@AuthenticationPrincipal AuthPrincipal principal,
                                                          @PathVariable UUID accountId,
                                                          @PathVariable UUID reviewId,
                                                          @RequestBody TriageFeedbackRequests.Correction request) {
-        return feedback.correct(principal.orgId(), accountId, reviewId, request);
+        return feedback.correct(principal.orgId(), accountId, reviewId, request, principal.userId());
+    }
+
+    /**
+     * 되돌리기 — the seller takes their correction back. 204, and the review reads as the system's
+     * judgment alone again. The row and its trail are kept: see {@code SellerCorrectionState}.
+     */
+    @DeleteMapping("/{reviewId}/triage-feedback/correction")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void withdrawCorrection(@AuthenticationPrincipal AuthPrincipal principal,
+                                   @PathVariable UUID accountId,
+                                   @PathVariable UUID reviewId) {
+        feedback.withdraw(principal.orgId(), accountId, reviewId, principal.userId());
+    }
+
+    /** The review's correction trail, oldest first — what the seller said, and when they changed it. */
+    @GetMapping("/{reviewId}/triage-feedback/correction/history")
+    public List<TriageFeedbackRequests.CorrectionHistoryView> correctionHistory(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable UUID accountId,
+            @PathVariable UUID reviewId) {
+        return feedback.correctionHistory(principal.orgId(), accountId, reviewId);
     }
 
     /**

@@ -58,6 +58,7 @@ const PAGE: ChannelReviewPageView = {
       isNew: false,
       triage: { tier: "FYI", reason: "5점", tags: [], recommendedAction: null },
     aiMark: null,
+    sellerCorrection: null,
     },
   ],
 };
@@ -75,6 +76,7 @@ const DETAIL: ChannelReviewDetailView = {
   isNew: false,
   triage: { tier: "FYI", reason: "5점", tags: [], recommendedAction: null },
   aiMark: null,
+  sellerCorrection: null,
   locateTarget: {
     productId: "15411270785",
     vendorItemId: "81234567890",

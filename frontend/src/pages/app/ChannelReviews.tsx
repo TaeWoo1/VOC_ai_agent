@@ -24,6 +24,8 @@ import {
   AI_TRIAGE_DISCLOSURE,
   AI_TRIAGE_MARK_CLASS,
   AI_TRIAGE_MARK_LABEL,
+  TRIAGE_CORRECTION_COPY,
+  TRIAGE_CORRECTION_LABEL,
   TRIAGE_FEEDBACK_LABEL,
   TRIAGE_TAG_DISCLOSURE,
   TRIAGE_TIERS,
@@ -498,6 +500,11 @@ export function ChannelReviews({
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <TriageTierChip tier={item.triage.tier} />
                       {item.aiMark ? <AiMarkChip /> : null}
+                      {/* The seller's own answer, beside the system's and quiet: the list is ordered
+                          by the tier, and a correction does not reorder anything. */}
+                      {item.sellerCorrection ? (
+                        <SellerCorrectionChip tier={item.sellerCorrection.correctedTier} />
+                      ) : null}
                       <span className="text-sm font-semibold tabular-nums text-ink">{ratingLabel(item.rating)}</span>
                       <span className="text-sm text-muted">{item.writtenOn ?? "날짜 없음"}</span>
                       {item.isNew ? <Chip tone="accent">새 {word}</Chip> : null}
@@ -725,7 +732,10 @@ function ReviewDetail({
         </section>
       ) : null}
 
-      {pilotOn ? <TriageFeedbackControls accountId={accountId} detail={detail} word={word} /> : null}
+      {/* The seller's own judgment — always. The pilot decides what the SYSTEM says about a review,
+          not whether the seller may disagree with it (T-07). */}
+      <SellerCorrectionControls accountId={accountId} detail={detail} word={word} />
+      {pilotOn ? <TriageFeedbackControls accountId={accountId} detail={detail} /> : null}
 
       {/*
         **[쿠팡에서 보기] — the one thing a seller can ask SellerOps to DO with a 상품평.**
@@ -797,6 +807,22 @@ function ReviewDetail({
 }
 
 /** The pilot's mark — beside the rules tier, never in its place. */
+/**
+ * The seller's own tier on a queue row — quiet, and prefixed so it cannot be mistaken for the
+ * system's chip beside it.
+ *
+ * Deliberately not `TRIAGE_TIER_CLASS`: 확인 필요 is emphasised there because it is what the worklist
+ * is ordered by, and a correction does not reorder anything. Emphasising it would make the row look
+ * like it had moved.
+ */
+function SellerCorrectionChip({ tier }: { tier: ReviewTriageTier }) {
+  return (
+    <span className="inline-flex items-center rounded-full bg-canvas px-2 py-0.5 text-xs font-medium text-muted">
+      {TRIAGE_CORRECTION_COPY.sellerPrefix} {TRIAGE_CORRECTION_LABEL[tier]}
+    </span>
+  );
+}
+
 function AiMarkChip() {
   return (
     <span
@@ -809,20 +835,23 @@ function AiMarkChip() {
 }
 
 /**
- * The feedback spine's controls — RUBRIC v2 §13.7, feedback draft §7–§8.
+ * The seller's own judgment for one review — T-07.
  *
- * **What these do: record.** A correction changes no tier on this screen, hides no row, and trains
- * nothing; it becomes evidence a person later reads as CLASSIFIER_ERROR or SELLER_PREFERENCE, and a
- * frozen snapshot the NEXT classifier version is measured against. The copy says so, once, because a
- * seller pressing "확인할 필요 없어요" and watching the row stay put deserves to know why.
+ * <b>Available whether or not the AI pilot is on.</b> This block used to render only under `pilotOn`,
+ * which made "correct the classifier" the only correction the product had: a seller looking at a
+ * rule-tiered review on an org with no pilot had no control at all, even though the endpoint has
+ * accepted rules corrections since V43. The coupling was here, on the screen.
  *
- * **Binary on purpose.** 확인 필요, or not. The seller is not asked to pick 지켜보기 vs 참고 — that
- * split is the rule's and the pilot does not own it.
+ * <b>Three choices, the same three words the chips use.</b> 확인 필요 / 지켜보기 / 참고. It was two, and
+ * 필요 없음 was stored as whatever the rule would have said — so a seller who meant 참고 had 지켜보기
+ * recorded under their name.
  *
- * **Actions are three, and none of them submits anything anywhere.** 조치 시작 / 조치 완료 / 조치 불필요
- * are statements about what the seller did off this screen; the marketplace is not touched.
+ * <b>Both judgments stay on screen.</b> The system's chip is above, unchanged; this block says what the
+ * seller said, and 되돌리기 removes only the seller's half.
+ *
+ * <b>What this does: record.</b> It changes no tier, moves no row, hides nothing and trains nothing.
  */
-function TriageFeedbackControls({
+function SellerCorrectionControls({
   accountId,
   detail,
   word,
@@ -831,30 +860,115 @@ function TriageFeedbackControls({
   detail: ChannelReviewDetailView;
   word: string;
 }) {
-  const [answer, setAnswer] = useState<boolean | null>(null);
-  const [lastAction, setLastAction] = useState<TriageActionKind | null>(null);
+  // Seeded from the READ, not from a press. Before T-07 this was `useState<boolean | null>(null)`
+  // reset on every review change, so a refresh showed nothing pressed on a review the database knew
+  // had been corrected.
+  const [answer, setAnswer] = useState<ReviewTriageTier | null>(detail.sellerCorrection?.correctedTier ?? null);
+  const [changes, setChanges] = useState(detail.sellerCorrection?.changeCount ?? 0);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // A new review, a clean slate — the previous review's answer must not appear pressed on this one.
   useEffect(() => {
-    setAnswer(null);
-    setLastAction(null);
+    setAnswer(detail.sellerCorrection?.correctedTier ?? null);
+    setChanges(detail.sellerCorrection?.changeCount ?? 0);
     setFailed(false);
-  }, [detail.id]);
+  }, [detail.id, detail.sellerCorrection]);
 
-  const correct = async (needsAttention: boolean) => {
+  const correct = async (tier: ReviewTriageTier) => {
     setBusy(true);
     setFailed(false);
     try {
-      const view = await api.correctChannelReviewTriage(accountId, detail.id, { needsAttention, reasonCode: null });
-      setAnswer(view.needsAttention);
+      const view = await api.correctChannelReviewTriage(accountId, detail.id, { tier, reasonCode: null });
+      setAnswer(view.correctedTier);
+      setChanges(view.changeCount);
     } catch {
       setFailed(true);
     } finally {
       setBusy(false);
     }
   };
+
+  const withdraw = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      await api.withdrawChannelReviewTriageCorrection(accountId, detail.id);
+      setAnswer(null);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 border-t border-line pt-4" aria-label="판매자 판단">
+      <p className="text-sm font-semibold text-ink">
+        이 {word}, {TRIAGE_CORRECTION_COPY.prompt}
+      </p>
+      {/* The two judgments, named. Without this the seller sees three buttons and cannot tell which of
+          them is the machine's answer and which is their own. */}
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+        <span>{TRIAGE_CORRECTION_COPY.systemPrefix}</span>
+        <TriageTierChip tier={detail.triage.tier} />
+        {detail.aiMark ? <AiMarkChip /> : null}
+        {answer ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>{TRIAGE_CORRECTION_COPY.sellerPrefix}</span>
+            <TriageTierChip tier={answer} />
+            {changes > 1 ? <span className="text-xs">{changes}번 수정</span> : null}
+          </>
+        ) : null}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {TRIAGE_TIERS.map((tier) => (
+          <Btn
+            key={tier}
+            size="sm"
+            variant={answer === tier ? "solid" : "outline"}
+            aria-pressed={answer === tier}
+            disabled={busy}
+            onClick={() => void correct(tier)}
+          >
+            {TRIAGE_CORRECTION_LABEL[tier]}
+          </Btn>
+        ))}
+        {answer ? (
+          <Btn size="sm" variant="ghost" disabled={busy} onClick={() => void withdraw()}>
+            {TRIAGE_CORRECTION_COPY.withdraw}
+          </Btn>
+        ) : null}
+      </div>
+      <p className="text-sm leading-relaxed text-muted">{TRIAGE_CORRECTION_COPY.disclosure}</p>
+      {failed ? <p className="text-sm text-bad">기록하지 못했습니다. 잠시 후 다시 시도해 주세요.</p> : null}
+    </div>
+  );
+}
+
+/**
+ * The pilot's ACTION controls — RUBRIC v2 §13.7, feedback draft §7–§8.
+ *
+ * Still behind the pilot, deliberately: T-07 decoupled the seller's CORRECTION, and widening what
+ * else gets recorded was not part of it. 조치 시작 / 조치 완료 / 조치 불필요 are statements about what
+ * the seller did off this screen; the marketplace is not touched.
+ */
+function TriageFeedbackControls({
+  accountId,
+  detail,
+}: {
+  accountId: string;
+  detail: ChannelReviewDetailView;
+}) {
+  const [lastAction, setLastAction] = useState<TriageActionKind | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setLastAction(null);
+    setFailed(false);
+  }, [detail.id]);
+
   const act = async (kind: TriageActionKind) => {
     setBusy(true);
     setFailed(false);
@@ -869,28 +983,7 @@ function TriageFeedbackControls({
   };
 
   return (
-    <div className="space-y-3 border-t border-line pt-4" aria-label="분류 피드백">
-      <p className="text-sm font-semibold text-ink">이 {word}, 확인이 필요한가요?</p>
-      <div className="flex flex-wrap gap-2">
-        <Btn
-          size="sm"
-          variant={answer === true ? "solid" : "outline"}
-          aria-pressed={answer === true}
-          disabled={busy}
-          onClick={() => void correct(true)}
-        >
-          {TRIAGE_FEEDBACK_LABEL.needsAttention}
-        </Btn>
-        <Btn
-          size="sm"
-          variant={answer === false ? "solid" : "outline"}
-          aria-pressed={answer === false}
-          disabled={busy}
-          onClick={() => void correct(false)}
-        >
-          {TRIAGE_FEEDBACK_LABEL.notNeeded}
-        </Btn>
-      </div>
+    <div className="space-y-3 border-t border-line pt-4" aria-label="조치 기록">
       <div className="flex flex-wrap gap-2">
         {(["ACTION_STARTED", "ACTION_COMPLETED", "ACTION_NOT_NEEDED"] as const).map((kind) => (
           <Btn
@@ -909,10 +1002,6 @@ function TriageFeedbackControls({
           </Btn>
         ))}
       </div>
-      <p className="text-sm leading-relaxed text-muted">
-        답변은 기록만 됩니다. 이 화면의 분류가 바로 바뀌거나 {josa(word, "이", "가")} 숨겨지지는 않으며, 다음 분류 기준을 검토할 때
-        근거로 씁니다. 마켓플레이스에는 아무것도 전송되지 않습니다.
-      </p>
       {failed ? (
         <p className="text-sm text-ink" role="status">
           기록하지 못했습니다. 잠시 후 다시 눌러 주세요.

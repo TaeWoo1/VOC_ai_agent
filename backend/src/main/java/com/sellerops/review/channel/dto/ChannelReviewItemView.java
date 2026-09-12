@@ -45,6 +45,14 @@ public record ChannelReviewItemView(
          * says what the RULE decided, and the two are shown side by side rather than merged.
          */
         AiTriageMarkView aiMark,
+        /**
+         * The seller's own standing judgment for this row, or null when they have not corrected it.
+         *
+         * <p>Shown BESIDE {@code triage} and {@code aiMark}, never in place of either, and it does not
+         * move the row: the ordering rank does not read the correction table, so a corrected review
+         * sits where the system put it and says on its face that the seller disagreed.
+         */
+        TriageFeedbackRequests.CorrectionView sellerCorrection,
         /** {@code MARKETPLACE} | {@code NONE} — see {@code RecentReviewItemView.executableIdentity}. */
         String executableIdentity) {
 }

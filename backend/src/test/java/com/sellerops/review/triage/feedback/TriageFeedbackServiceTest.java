@@ -32,6 +32,7 @@ class TriageFeedbackServiceTest {
 
     private static final UUID ORG = UUID.randomUUID();
     private static final UUID REVIEW = UUID.randomUUID();
+    private static final UUID ACTOR = UUID.randomUUID();
     private static final Clock FIXED = Clock.fixed(Instant.parse("2026-08-17T00:00:00Z"), ZoneOffset.UTC);
 
     private FakePredictions predictions;
@@ -40,6 +41,7 @@ class TriageFeedbackServiceTest {
     private FakeCurrent current;
     private FakeActions actions;
     private FakeBehavior behavior;
+    private FakeCorrectionAudit correctionAudit;
     private TriageFeedbackService service;
 
     @BeforeEach
@@ -50,8 +52,9 @@ class TriageFeedbackServiceTest {
         current = new FakeCurrent();
         actions = new FakeActions();
         behavior = new FakeBehavior();
+        correctionAudit = new FakeCorrectionAudit();
         service = new TriageFeedbackService(predictions.repo, corrections.repo, dispositions.repo,
-                current.repo, actions.repo, behavior.repo, FIXED);
+                current.repo, actions.repo, behavior.repo, correctionAudit.repo, FIXED);
     }
 
     private TriagePrediction recordOk() {
@@ -230,26 +233,31 @@ class TriageFeedbackServiceTest {
         TriagePrediction p = service.record(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", "m",
                 ReviewTriageClassifier.Result.ok(ReviewTriageTier.NEEDS_ATTENTION, "PRAISE_WITH_CONCESSION",
                         List.of(), TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
-        TriageCorrection c = service.correctReview(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", false, null, true);
+        TriageCorrection c = service.correctReview(ORG, REVIEW, 5, "좋은데 하나 아쉬워요",
+                ReviewTriageTier.WATCH, null, true, ACTOR);
 
         assertThat(c.getPredictionId()).isEqualTo(p.getId());
         assertThat(c.getShownSource()).isEqualTo(TriageShownSource.AI);
         assertThat(c.getShownTier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
-        // "필요 없음" is stored as the RULE's own non-attention tier for the row — the seller never
-        // chose between WATCH and FYI, and the pilot does not own that split.
-        assertThat(c.getCorrectedTier()).isEqualTo(ReviewTriageTier.FYI);
+        // The seller's OWN tier is stored. This assertion used to read FYI — not because the seller
+        // said 참고 but because the rule would have, and the boolean write path had nothing else to
+        // put in the column. WATCH and FYI are now different answers and are recorded as different
+        // answers (product-owner decision, 2026-09-11; V99).
+        assertThat(c.getCorrectedTier()).isEqualTo(ReviewTriageTier.WATCH);
+        assertThat(c.stands()).isTrue();
     }
 
     @Test
     @DisplayName("a correction on a review no classifier saw is a correction of the RULE, and says so")
     void aReviewCorrectionAgainstTheRule() {
-        // 1★ with text, no prediction anywhere: the seller says 필요 없음 to a rules 확인 필요.
-        TriageCorrection c = service.correctReview(ORG, REVIEW, 1, "별로", false, "CRITIQUE_NO_REQUEST", true);
+        // 1★ with text, no prediction anywhere: the seller says 참고 to a rules 확인 필요.
+        TriageCorrection c = service.correctReview(ORG, REVIEW, 1, "별로", ReviewTriageTier.FYI,
+                "CRITIQUE_NO_REQUEST", true, ACTOR);
 
         assertThat(c.getPredictionId()).isNull();
         assertThat(c.getShownSource()).isEqualTo(TriageShownSource.RULES);
         assertThat(c.getShownTier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
-        assertThat(c.getCorrectedTier()).isEqualTo(ReviewTriageTier.WATCH);
+        assertThat(c.getCorrectedTier()).isEqualTo(ReviewTriageTier.FYI);
         assertThat(c.getCorrectedReasonCode()).isEqualTo("CRITIQUE_NO_REQUEST");
     }
 
@@ -265,7 +273,8 @@ class TriageFeedbackServiceTest {
         // Pilot switched OFF for the org after the run: the seller saw the rules chip alone, so the
         // evidence is RULES — an org switched off must not keep producing AI-shown rows for a mark
         // nobody could see (independent review, D2). The prediction is still linked: history is history.
-        TriageCorrection off = service.correctReview(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", false, null, false);
+        TriageCorrection off = service.correctReview(ORG, REVIEW, 5, "좋은데 하나 아쉬워요",
+                ReviewTriageTier.FYI, null, false, ACTOR);
         assertThat(off.getShownSource()).isEqualTo(TriageShownSource.RULES);
         assertThat(off.getShownTier()).isEqualTo(ReviewTriageTier.FYI);
         assertThat(off.getPredictionId()).isEqualTo(p.getId());
@@ -496,6 +505,27 @@ class TriageFeedbackServiceTest {
             org.mockito.Mockito.when(repo.findByReviewId(org.mockito.ArgumentMatchers.any()))
                     .thenAnswer(i -> rows.stream()
                             .filter(r -> i.getArgument(0).equals(r.getReviewId())).findFirst());
+            // The locking finder answers the same row; the lock is a database fact, not a fake's.
+            org.mockito.Mockito.when(repo.findByReviewIdForUpdate(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> rows.stream()
+                            .filter(r -> i.getArgument(0).equals(r.getReviewId())).findFirst());
+        }
+    }
+
+    private static class FakeCorrectionAudit {
+        final List<TriageCorrectionAudit> rows = new ArrayList<>();
+        final TriageCorrectionAuditRepository repo =
+                org.mockito.Mockito.mock(TriageCorrectionAuditRepository.class);
+
+        FakeCorrectionAudit() {
+            org.mockito.Mockito.when(repo.save(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> store(rows, i.getArgument(0)));
+            org.mockito.Mockito.when(repo.findByReviewIdOrderByDecidedAtAsc(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> rows.stream()
+                            .filter(r -> i.getArgument(0).equals(r.getReviewId())).toList());
+            org.mockito.Mockito.when(repo.countByReviewId(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> rows.stream()
+                            .filter(r -> i.getArgument(0).equals(r.getReviewId())).count());
         }
     }
 
