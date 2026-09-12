@@ -294,3 +294,139 @@ It is credential-free and WRITE-free by design, so the first Cafe24 OAuth consen
 proves a real mall's token endpoint accepts this host's request — remains the **first pilot seller's
 first connection**. That has been the standing verdict since Pilot Readiness Gate v1 and this package
 does not change it.
+
+
+---
+
+## 5. Core loop pilot smoke
+
+Run at this commit against the local stack (backend, agent-runtime, frontend), connectors **off**,
+no marketplace call, no credential, no model call. Two legs, because one of them turned out to be
+impossible on the other's data — and the reason is a finding, not an accident.
+
+### 5.1 Leg A — acquisition → Home → Repeated Issue → decision → Home
+
+On a **disposable organisation** created through the product's own `POST /api/auth/signup`
+(`@example.invalid`, random nonce, never a value read from the environment). The canonical Demo Org
+was not written to in this leg.
+
+| step | how | observed |
+|---|---|---|
+| **acquisition** | `POST /api/uploads?uploadType=REVIEW` — the product's own ingest path, 8-row CSV | `PARTIAL`, **7 stored, 1 rejected**: the blank-body 5★ row, because the review mapper requires a body |
+| **Home** | `GET /api/operations/home` | 확인 필요 **5** undecided, 관찰 **0** problems, three rows carrying the customer's own sentence |
+| **extraction** | `POST /api/review-issues/extract` | scanned 7 → **3 issues**, 6 evidence, 9 unknown units |
+| **Home** | again | problems **decidable 0 / observing 3** — OBSERVING is present and is *not* presented as urgent |
+| **Repeated Issue** | `GET /api/review-issues/{id}/repeat-context` | 「리뷰 **6건 중 3건**이 이 문제를 말했습니다」 · ★ spread **1★×1, 2★×2** as counts · change `NEW`, surge 3 / baseline 0 |
+| **issue decision** | `POST /api/review-issues/{id}/acting` from **OBSERVING** | `ACTING` — the 2026-09-12 decision, exercised live |
+| **Home** | again | problems **decidable 1 / observing 2**, ACTING sorted first |
+
+The rendered page was checked in a real browser (1440×900@2×): the denominator pair is a pair and
+never a rate, the rating bands render zeros, the evidence quotes carry 「이 리뷰 처리하기」, and the
+issue reads 조치 중. **Console errors 0, off-host requests 0.**
+
+**The 1 rejected row is worth keeping.** The blank-body review could not even be *ingested* by CSV,
+which is the same shape as the denominator honesty the Repeated Issue screen already states: the
+extractor only reads reviews with a body, so a review it never read sits in the denominator and
+cannot reach the numerator. Here it does not reach the denominator either — a narrower fact, and one
+the pair on screen does not claim otherwise.
+
+### 5.2 Two findings, reported and not fixed
+
+Both are the same shape: **the product treats "a connected channel" as the precondition for having
+work**, and a file-upload-only organisation has work without one. Neither affects a Cafe24 pilot,
+where OAuth creates the account — which is exactly why they are reported rather than fixed here.
+
+1. **A CSV-ingested review has no seller account, and the Decision Workspace is account-addressed.**
+   `/api/seller-accounts/{accountId}/channel-reviews/{reviewId}/decision-context` has no address to
+   go to. The product already says so deliberately and does not crash — the page renders
+   「이 리뷰의 판매 계정을 확인하지 못했습니다 · 리뷰 처리는 계정 단위로 열립니다」, observed live. The
+   `/api/uploads` lane creates reviews owned by a channel but by no account.
+2. **Home shows the first-use screen to an organisation that has 7 reviews and 3 repeated problems.**
+   `homeFirstUseState` derives `NO_CHANNEL` from connection state, and `AgentHome` gates the four
+   operations areas on `!beforeFirstConnection`. So the areas the API had already filled were not
+   drawn, and the page said 「판매 채널을 연결하면 시작할 수 있습니다」. Changing that gate is a
+   first-use semantics decision, not a bug fix, and this package does not make product decisions.
+
+### 5.3 Leg B — Home → Decision Workspace → decision → Home (real data, browser)
+
+On the canonical Demo Org, where a seller account exists, in a real browser at 1440×900@2×:
+
+```
+Home        「아직 판단하지 않은 리뷰가 12건 있습니다」
+            → click the first row (/reviews/reply/{reviewId})
+Workspace   /reviews/{accountId}/reply/{reviewId}
+            customer's sentence · ★1 · 확인 필요 · 「채널에 이미 답변이 등록된 리뷰입니다」
+            · 반복 신호 · 이 상품에 대해 우리가 아는 것 (리뷰 1,761건 · 부정 3건 · 지식 3 · 기준 2)
+            · 판매자 판단 [확인 필요 / 지켜보기 / 참고]  · 조치 [대응 필요 / 지켜보기 / 조치 불필요]
+            → 「대응 필요」
+Home        「아직 판단하지 않은 리뷰가 11건 있습니다」
+```
+
+**12 → 11.** That is the whole point of the loop: a judgement made in the workspace moves the number
+the Home leads with. Console errors 0, off-host 0, marketplace calls 0, model calls 0.
+
+### 5.4 The return-visit signal, live
+
+- three `POST /api/usage/home-opened` in one day → **one row**;
+- across both organisations and every browser run of this session → **one row each**;
+- anonymous `POST` → **401**;
+- the row is dated **2026-09-13** while the server's own clock read `2026-09-12T18:0x` UTC — the
+  Asia/Seoul rule, observed rather than asserted;
+- the cohort query returns the pilot organisation only; the Demo Org is not in the list.
+
+`tools/dev/org-cleanup.sh` found `home_open_day` by itself (it enumerates tables carrying `org_id`),
+and deleting the disposable organisation removed its usage day with everything else: **48 rows in one
+transaction**, Demo Org untouched.
+
+### 5.5 What this smoke does not prove
+
+- **a live Cafe24 acquisition.** Connectors are off and a live run needs a fresh single-use approval
+  that this milestone did not grant. The acquisition leg above is the product's own ingest path;
+- the first Cafe24 OAuth consent against a real mall — still the first pilot seller's first
+  connection, as it has been since Pilot Readiness Gate v1;
+- anything about latency or cost under load.
+
+---
+
+## 6. Remaining external values
+
+Nothing in this list is code, and none of it can be produced from inside this repository.
+
+| # | Value | Who provides it | What is blocked without it |
+|---|---|---|---|
+| 1 | Region / account, and an instance | product owner (billable) | everything |
+| 2 | **A domain name**, with an A record to that host | product owner | TLS, CORS, the callback — `preflight.sh` refuses to proceed without it |
+| 3 | ACME contact email | product owner | certificate issuance notices |
+| 4 | **Cafe24 app** (client id + secret) registered with the redirect URI `preflight.sh` prints | product owner, in the Cafe24 developer console | the only connector this pilot turns on |
+| 5 | `/etc/sellerops/pilot.env` at mode 0600, outside the checkout, with the secrets generated **on the host** | operator | boot |
+| 6 | :80 / :443 reachable from the internet | operator (security group) | ACME HTTP-01, and the callback |
+
+**A fixed public IPv4 is not on this list.** It is NAVER's requirement and NAVER is off.
+
+---
+
+## 7. Verdict
+
+**READY TO DEPLOY PILOT — pending the six external values in §6.**
+
+No code-side blocker remains. The change from the previous package's `READY_PENDING_HOST` is not that
+the host appeared; it is that the three things that were still only true in a test are now true on a
+running host and enforced on the way there:
+
+- the schema is proven against PostgreSQL in CI, from empty, with `validate`;
+- the deploy takes its own rollback point before it migrates, and refuses to continue without one;
+- the one hypothesis the product could not answer about itself now has an answer, in a table that
+  cannot hold anything else.
+
+### PRODUCT_DECISION_NEEDED
+
+1. **Pilot host provisioning** — the six values in §6. Items 1 and 4 cost money.
+2. **First-use semantics for an organisation with data but no connected channel** (§5.2). Today Home
+   shows 「판매 채널을 연결하면 시작할 수 있습니다」 to a seller who has reviews and repeated problems,
+   because the gate reads connection state rather than whether there is work. It does not affect a
+   Cafe24 pilot; it does affect any file-upload-only seller.
+3. **Whether a file-upload lane should bind reviews to a seller account** (§5.2). Without one, the
+   review Decision Workspace is unreachable for those rows — honestly, but unreachably.
+4. **The Demo Org's QA rows stay** (2026-09-13 decision) and are excluded by cohort. This session's
+   smoke added one more: a `대응 필요` disposition on review `e9900db2`. Metrics are unaffected — the
+   Demo Org is not in the cohort — and nothing was deleted.
