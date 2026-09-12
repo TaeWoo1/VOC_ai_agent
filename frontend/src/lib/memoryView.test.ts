@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   evidenceCountLabel,
-  evidenceInboxRef,
   groupIssues,
   lastSeenLabel,
   resolveIssueSelection,
@@ -93,18 +92,6 @@ describe("deep-link selection", () => {
       change: { kinds: ["IMPROVED"] } as ReviewIssueView["change"],
     });
     expect(resolveIssueSelection([...all, improved], "good").kind).toBe("FOUND");
-  });
-});
-
-describe("evidence → inbox linking", () => {
-  it("links only when the row is actually loaded in the inbox", () => {
-    expect(evidenceInboxRef("rev-1", new Set(["rev-1"]))).toBe("/inbox/rev-1");
-  });
-
-  it("returns null rather than a link that would land on 'not found'", () => {
-    // A link that reliably fails is worse than no link.
-    expect(evidenceInboxRef("rev-9", new Set(["rev-1"]))).toBeNull();
-    expect(evidenceInboxRef("rev-1", new Set())).toBeNull();
   });
 });
 

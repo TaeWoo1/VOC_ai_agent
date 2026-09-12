@@ -119,6 +119,7 @@ import type {
   WalkthroughHandshakeResult,
   ReviewIssueView,
   ReviewIssueDetailView,
+  RepeatedIssueContext,
   OpportunityView,
   OpportunityKind,
 } from "./types";
@@ -1742,6 +1743,25 @@ export const api = {
     const query = referenceDate ? `?referenceDate=${encodeURIComponent(referenceDate)}` : "";
     const { data } = await http.get<ReviewIssueDetailView>(
       `/api/review-issues/${encodeURIComponent(issueId)}${query}`,
+    );
+    return data;
+  },
+
+  /**
+   * Where a repeated problem repeats, against what, and what this company has already written about
+   * it — the Repeated Issue workspace's second read.
+   *
+   * <b>Never mocked, deliberately.</b> A mock here would invent a denominator: a made-up 「리뷰 300건
+   * 중 12건」 is a claim about a seller's catalogue that no row supports, and it is exactly the number
+   * a person would act on. A failed read renders nothing rather than a fixture.
+   */
+  async getRepeatedIssueContextStrict(
+    issueId: string,
+    referenceDate?: string,
+  ): Promise<RepeatedIssueContext> {
+    const query = referenceDate ? `?referenceDate=${encodeURIComponent(referenceDate)}` : "";
+    const { data } = await http.get<RepeatedIssueContext>(
+      `/api/review-issues/${encodeURIComponent(issueId)}/repeat-context${query}`,
     );
     return data;
   },

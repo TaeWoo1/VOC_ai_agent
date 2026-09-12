@@ -52,21 +52,6 @@ export function groupIssues(issues: readonly ReviewIssueView[]): IssueGroup[] {
   ].filter((group) => group.issues.length > 0) as IssueGroup[];
 }
 
-/**
- * The inbox row an evidence quote came from, or null.
- *
- * Returns a link ONLY when that row is actually loaded in the inbox. The evidence carries a
- * `reviewId` from the review store and the inbox carries its own rows; when the two do not overlap
- * a link would land on "항목을 찾을 수 없습니다". A link that reliably fails is worse than no link,
- * so the check is membership, not optimism.
- */
-export function evidenceInboxRef(
-  reviewId: string,
-  loadedInboxIds: ReadonlySet<string>,
-): string | null {
-  return loadedInboxIds.has(reviewId) ? `/inbox/${reviewId}` : null;
-}
-
 /** "마지막 확인 2026-08-02", or null when nothing has been seen. */
 export function lastSeenLabel(issue: ReviewIssueView): string | null {
   return issue.lastEvidenceOn ? `마지막 확인 ${issue.lastEvidenceOn}` : null;

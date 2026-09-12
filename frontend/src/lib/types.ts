@@ -1967,6 +1967,72 @@ export interface ReviewIssueDetailView {
   history: IssueStateEventView[];
 }
 
+/* ─────────────────────── repeated issue workspace ─────────────────────── */
+
+/**
+ * One product behind a repeated problem: how many of its reviews said this, and how many reviews it
+ * has at all.
+ *
+ * **The pair is not a rate.** `evidenceCount` counts reviews that named this problem;
+ * `productReviews` counts every review of the product, including ones the extractor never read
+ * (a review with no body cannot produce evidence but is still in the total). A percentage computed
+ * from the two would assert an examined population nobody measured, so surfaces render both numbers
+ * and say what each counts.
+ */
+export interface IssueProductEvidenceView {
+  productId: string;
+  productName: string | null;
+  evidenceCount: number;
+  productReviews: number;
+  firstOccurredOn: string | null;
+  lastOccurredOn: string | null;
+}
+
+export interface IssueRatingDistributionView {
+  rating1: number;
+  rating2: number;
+  rating3: number;
+  rating4: number;
+  rating5: number;
+  unrated: number;
+}
+
+export interface IssueEvidenceSummaryView {
+  totalEvidence: number;
+  byProduct: IssueProductEvidenceView[];
+  /** Evidence whose review resolved to no product — it has no denominator, so it stands apart. */
+  unattributedEvidence: number;
+  ratingDistribution: IssueRatingDistributionView;
+  firstEvidenceOn: string | null;
+  lastEvidenceOn: string | null;
+}
+
+/**
+ * What the company has already written that names this problem.
+ *
+ * `productSources` / `orgSources` are what the library HOLDS; `productMentions` / `orgMentions` are
+ * how many of those name this problem. The two are separate because 「3건 중 0건이 이 문제를
+ * 다룹니다」 and 「등록된 지식이 없습니다」 are different sentences with different next steps.
+ */
+export interface IssueKnowledgeOnHand {
+  /** Which product's library was read — null when the issue's evidence resolves to no product. */
+  productId: string | null;
+  productName: string | null;
+  productSources: number;
+  productMentions: number;
+  orgSources: number;
+  orgMentions: number;
+  /** The seller's own sentences that named it, bounded. Empty is a fact about the library. */
+  excerpts: string[];
+}
+
+export interface RepeatedIssueContext {
+  issueId: string;
+  aspect: string;
+  evidence: IssueEvidenceSummaryView;
+  knowledge: IssueKnowledgeOnHand;
+}
+
 /* ─────────────────────── channel review record (Coupang WING 상품평) ─────────────────────── */
 
 /**

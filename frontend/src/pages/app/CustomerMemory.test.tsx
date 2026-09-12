@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { CustomerMemory } from "./CustomerMemory";
 import { expectNoAxeViolations } from "../../test/axe";
-import type { ReviewIssueDetailView, ReviewIssueView } from "../../lib/types";
+import type { RepeatedIssueContext, ReviewIssueDetailView, ReviewIssueView } from "../../lib/types";
 
 const getReviewIssuesStrict = vi.fn();
 const getReviewIssueDetailStrict = vi.fn();
-const getInboxStrict = vi.fn();
+const getRepeatedIssueContextStrict = vi.fn();
 const startReviewIssueAction = vi.fn();
 const markReviewIssueRemediated = vi.fn();
 const getOpportunitiesStrict = vi.fn();
@@ -17,9 +17,9 @@ vi.mock("../../lib/apiClient", () => ({
   api: {
     getReviewIssuesStrict: () => getReviewIssuesStrict(),
     getReviewIssueDetailStrict: (id: string) => getReviewIssueDetailStrict(id),
-    getInboxStrict: () => getInboxStrict(),
-    startReviewIssueAction: (id: string) => startReviewIssueAction(id),
-    markReviewIssueRemediated: (id: string) => markReviewIssueRemediated(id),
+    getRepeatedIssueContextStrict: (id: string) => getRepeatedIssueContextStrict(id),
+    startReviewIssueAction: (id: string, note?: string) => startReviewIssueAction(id, note),
+    markReviewIssueRemediated: (id: string, note?: string) => markReviewIssueRemediated(id, note),
     getOpportunitiesStrict: (o: unknown) => getOpportunitiesStrict(o),
   },
   getToken: () => null,
@@ -66,6 +66,45 @@ const IMPROVED = issue({
     surgeBaselineWeekly: 0,
   } as ReviewIssueView["change"],
 });
+
+const REPEAT_CONTEXT: RepeatedIssueContext = {
+  issueId: "surge",
+  aspect: "접착",
+  evidence: {
+    totalEvidence: 19,
+    byProduct: [
+      {
+        productId: "prod-1",
+        productName: "전선몰딩 1호",
+        evidenceCount: 16,
+        productReviews: 1761,
+        firstOccurredOn: "2026-06-18",
+        lastOccurredOn: "2026-08-02",
+      },
+      {
+        productId: "prod-2",
+        productName: "종이컵 보관함",
+        evidenceCount: 1,
+        productReviews: 416,
+        firstOccurredOn: "2026-07-01",
+        lastOccurredOn: "2026-07-01",
+      },
+    ],
+    unattributedEvidence: 2,
+    ratingDistribution: { rating1: 9, rating2: 6, rating3: 2, rating4: 1, rating5: 1, unrated: 0 },
+    firstEvidenceOn: "2026-06-18",
+    lastEvidenceOn: "2026-08-02",
+  },
+  knowledge: {
+    productId: "prod-1",
+    productName: "전선몰딩 1호",
+    productSources: 3,
+    productMentions: 1,
+    orgSources: 2,
+    orgMentions: 0,
+    excerpts: ["접착 면의 먼지를 닦고 30초간 눌러 주세요."],
+  },
+};
 
 const DETAIL: ReviewIssueDetailView = {
   issue: SURGING,
@@ -125,10 +164,7 @@ function renderMemory(path = "/memory") {
 beforeEach(() => {
   getReviewIssuesStrict.mockResolvedValue([SURGING, IMPROVED]);
   getReviewIssueDetailStrict.mockResolvedValue(DETAIL);
-  getInboxStrict.mockResolvedValue({
-    items: [{ id: "rev-loaded", type: "REVIEW" }],
-    total: 1,
-  });
+  getRepeatedIssueContextStrict.mockResolvedValue(REPEAT_CONTEXT);
   getOpportunitiesStrict.mockResolvedValue([]);
 });
 
@@ -195,15 +231,147 @@ describe("고객운영 메모리 — deep link", () => {
   });
 });
 
-describe("고객운영 메모리 — evidence links into the inbox", () => {
-  it("links a quote only when that row is actually loaded in the inbox", async () => {
+/**
+ * <b>Rewritten when the destination changed.</b> The claim this replaced was 「link a quote only when
+ * that row is actually loaded in the inbox」, and it was right about its own destination: an inbox
+ * page could only open a row it already held, so an unconditional link there would reliably land on
+ * 「찾을 수 없습니다」. The cost was that whether a seller could reach the review behind a quote
+ * depended on what a different screen had fetched — on this org most evidence is older than any
+ * loaded inbox page, so most quotes were dead ends.
+ *
+ * The destination is now the review's own processing surface, which resolves its account from the
+ * review id with an org-scoped read. It needs nothing loaded, so the condition that made the old
+ * claim true is gone and the honest claim is stronger: EVERY quote reaches the review behind it, and
+ * it reaches the one surface where that review is judged and answered.
+ */
+describe("고객운영 메모리 — evidence links back to the review", () => {
+  it("links every rendered quote to that review's own processing surface", async () => {
     renderMemory("/memory/issue-1");
     const detail = await screen.findByLabelText("선택한 이슈");
-    const links = await within(detail).findAllByRole("link", { name: "인박스에서 보기" });
-    // Exactly one: the row whose id the inbox actually holds. A link that reliably fails is worse
-    // than no link.
-    expect(links).toHaveLength(1);
-    expect(links[0]).toHaveAttribute("href", "/inbox/rev-loaded");
+    const links = await within(detail).findAllByRole("link", { name: "이 리뷰 처리하기" });
+    // One per rendered quote — not one per quote the inbox happened to hold.
+    expect(links).toHaveLength(2);
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/reviews/reply/rev-loaded",
+      "/reviews/reply/rev-not-loaded",
+    ]);
+    // And nothing still points at the inbox, which could not open most of these rows.
+    expect(within(detail).queryByRole("link", { name: "인박스에서 보기" })).toBeNull();
+  });
+});
+
+describe("고객운영 메모리 — 어디서 얼마나 반복되나", () => {
+  it("shows each product's evidence count beside that product's own review total", async () => {
+    renderMemory("/memory/issue-1");
+    const detail = await screen.findByLabelText("선택한 이슈");
+    const section = await within(detail).findByLabelText("어디서 반복되나");
+    expect(within(section).getByText(/리뷰 1,761건 중 16건이 이 문제를 말했습니다/)).toBeInTheDocument();
+    expect(within(section).getByText(/리뷰 416건 중 1건이 이 문제를 말했습니다/)).toBeInTheDocument();
+  });
+
+  /**
+   * The workspace's whole failure mode in one assertion. A ratio drawn from these two numbers would
+   * describe an examined population nobody measured — the denominator counts reviews the extractor
+   * never read.
+   */
+  it("never prints a rate computed from the pair", async () => {
+    renderMemory("/memory/issue-1");
+    const section = await screen.findByLabelText("어디서 반복되나");
+    expect(section.textContent ?? "").not.toMatch(/%|퍼센트|비율/);
+  });
+
+  it("opens the product behind each row", async () => {
+    renderMemory("/memory/issue-1");
+    const section = await screen.findByLabelText("어디서 반복되나");
+    expect(within(section).getByRole("link", { name: /전선몰딩 1호/ }))
+      .toHaveAttribute("href", "/products/prod-1");
+  });
+
+  it("states the evidence that belongs to no product rather than losing it", async () => {
+    renderMemory("/memory/issue-1");
+    const section = await screen.findByLabelText("어디서 반복되나");
+    expect(within(section).getByText(/확인되지 않은 근거가 2건/)).toBeInTheDocument();
+  });
+
+  /**
+   * A read that failed renders nothing at all. 「0개 상품」 would be this screen reporting a fact it
+   * could not see — and on a workspace whose job is deciding, an invented zero is the worst output.
+   */
+  it("renders nothing about repetition when that read failed", async () => {
+    getRepeatedIssueContextStrict.mockRejectedValue(new Error("down"));
+    renderMemory("/memory/issue-1");
+    const detail = await screen.findByLabelText("선택한 이슈");
+    // The problem and its evidence still render — the two reads fail apart.
+    expect(within(detail).getByText("근거")).toBeInTheDocument();
+    expect(within(detail).queryByLabelText("어디서 반복되나")).toBeNull();
+    expect(within(detail).queryByLabelText("우리가 써 둔 것")).toBeNull();
+  });
+});
+
+describe("고객운영 메모리 — 우리가 써 둔 것", () => {
+  it("counts what the library holds against what names this problem, and quotes the seller", async () => {
+    renderMemory("/memory/issue-1");
+    const section = await screen.findByLabelText("우리가 써 둔 것");
+    expect(within(section).getByText("등록된 안내 5건 가운데 1건이 이 문제를 다룹니다.")).toBeInTheDocument();
+    expect(within(section).getByText(/접착 면의 먼지를 닦고/)).toBeInTheDocument();
+    // Something already answers it, so the screen does not ask for work that is done.
+    expect(within(section).queryByRole("link", { name: /답변 기준 채우기/ })).toBeNull();
+  });
+
+  it("offers the way to fill a gap only when nothing names this problem", async () => {
+    getRepeatedIssueContextStrict.mockResolvedValue({
+      ...REPEAT_CONTEXT,
+      knowledge: { ...REPEAT_CONTEXT.knowledge, productMentions: 0, excerpts: [] },
+    });
+    renderMemory("/memory/issue-1");
+    const section = await screen.findByLabelText("우리가 써 둔 것");
+    expect(within(section).getByText(/이 문제를 다루는 내용은 찾지 못했습니다/)).toBeInTheDocument();
+    expect(within(section).getByRole("link", { name: /답변 기준 채우기/ }))
+      .toHaveAttribute("href", "/knowledge");
+  });
+});
+
+describe("고객운영 메모리 — 판단과 조치", () => {
+  /**
+   * The note is why this section exists. Both transitions have accepted an operator note since the
+   * lifecycle was built and no screen ever sent one, so every decision a seller made was recorded as
+   * a state change by someone who said nothing about it.
+   */
+  it("sends the seller's own sentence with the transition", async () => {
+    startReviewIssueAction.mockResolvedValue(SURGING);
+    renderMemory("/memory/issue-1");
+    await screen.findByLabelText("선택한 이슈");
+
+    fireEvent.change(screen.getByLabelText(/무엇을 하기로 하셨나요/), {
+      target: { value: "접착 테이프 공급처를 바꿉니다." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "조치 시작" }));
+
+    await waitFor(() =>
+      expect(startReviewIssueAction).toHaveBeenCalledWith("issue-1", "접착 테이프 공급처를 바꿉니다."),
+    );
+  });
+
+  /**
+   * Optional on purpose: a decision without a sentence is still a decision, and demanding prose
+   * before a state change makes the record worse by making people skip the change.
+   */
+  it("records the decision with no note rather than blocking it", async () => {
+    startReviewIssueAction.mockResolvedValue(SURGING);
+    renderMemory("/memory/issue-1");
+    await screen.findByLabelText("선택한 이슈");
+
+    fireEvent.click(screen.getByRole("button", { name: "조치 시작" }));
+
+    await waitFor(() => expect(startReviewIssueAction).toHaveBeenCalledWith("issue-1", undefined));
+  });
+
+  it("says what reviewnary is waiting for where the seller has no move", async () => {
+    getReviewIssueDetailStrict.mockResolvedValue({ ...DETAIL, issue: IMPROVED });
+    renderMemory("/memory/issue-2");
+    const section = await screen.findByLabelText("판단과 조치");
+    expect(within(section).queryByRole("button")).toBeNull();
+    expect(within(section).queryByLabelText(/무엇을 하기로 하셨나요/)).toBeNull();
   });
 });
 

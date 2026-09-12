@@ -7,13 +7,13 @@ import type { ReviewIssueView } from "../../lib/types";
 
 const getReviewIssuesStrict = vi.fn();
 const getReviewIssueDetailStrict = vi.fn();
-const getInboxStrict = vi.fn();
+const getRepeatedIssueContextStrict = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
     getReviewIssuesStrict: () => getReviewIssuesStrict(),
     getReviewIssueDetailStrict: (id: string) => getReviewIssueDetailStrict(id),
-    getInboxStrict: () => getInboxStrict(),
+    getRepeatedIssueContextStrict: (id: string) => getRepeatedIssueContextStrict(id),
     startReviewIssueAction: vi.fn(),
     markReviewIssueRemediated: vi.fn(),
   },
@@ -57,7 +57,19 @@ function renderMemory(path = "/memory") {
 
 beforeEach(() => {
   getReviewIssuesStrict.mockResolvedValue([ISSUE]);
-  getInboxStrict.mockResolvedValue({ items: [], total: 0 });
+  getRepeatedIssueContextStrict.mockResolvedValue({
+    issueId: ISSUE.id,
+    aspect: "접착",
+    evidence: {
+      totalEvidence: 0, byProduct: [], unattributedEvidence: 0,
+      ratingDistribution: { rating1: 0, rating2: 0, rating3: 0, rating4: 0, rating5: 0, unrated: 0 },
+      firstEvidenceOn: null, lastEvidenceOn: null,
+    },
+    knowledge: {
+      productId: null, productName: null, productSources: 0, productMentions: 0,
+      orgSources: 0, orgMentions: 0, excerpts: [],
+    },
+  });
   getReviewIssueDetailStrict.mockResolvedValue({ issue: ISSUE, evidence: [], history: [] });
 });
 
@@ -116,7 +128,18 @@ describe("고객운영 메모리 — v1 scope fence", () => {
     const href = launcher.getAttribute("href") ?? "";
     expect(href).toContain("from=memory");
     expect(href).not.toMatch(/goal=|productId=|issue-1/);
-    expect(container.querySelectorAll("textarea")).toHaveLength(0);
+
+    // This used to assert zero textareas, as a proxy for 「no second chat composer here」. The proxy
+    // stopped meaning that when the workspace gained a place to write down what the seller decided
+    // to do about the problem — a field that posts one note to one issue's own record, and can no
+    // more ask a question than the 기록 list below it can. Asserting the proxy would now forbid the
+    // seller from writing anything at all on a screen whose purpose is deciding, so the claim is
+    // made directly instead: the only writable field here is that record, and it is not a composer.
+    const fields = Array.from(container.querySelectorAll("textarea"));
+    expect(fields).toHaveLength(1);
+    expect(fields[0].getAttribute("id")).toBe("issue-decision-note");
+    expect(screen.getByLabelText(/무엇을 하기로 하셨나요/)).toBe(fields[0]);
+    expect(fields[0].getAttribute("placeholder") ?? "").not.toMatch(/검색|찾기|물어|질문/);
   });
 
   it("describes what the surface holds without promising unbuilt capability", async () => {

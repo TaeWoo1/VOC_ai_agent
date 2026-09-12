@@ -1648,7 +1648,43 @@ spine에 쓴다 — 한 press가 두 spine에 두 강도로 들어가는 것이 
 pilot 컨트롤은 기록 화면에 잔존 · `frontend/CLAUDE.md`가 금지한 `backend/**` 수정을
 product-owner 지시(priority 1)로 했고 **전부 읽기 전용**)
 
-**`docs/local_helper_pilot_packaging_v1.md`** (Local Helper Pilot Packaging v1 — 2026-09-05. 도우미는
+**`docs/repeated_issue_v1.md`** (Repeated Issue v1 — 2026-09-13. 개별 리뷰가 아니라 **반복되는 문제 하나**를
+판단하고 추적한다. **마이그레이션 0 · 새 테이블 0 · 새 enum 0 · 새 classifier 0 · 새 LLM capability 0 ·
+마켓플레이스 0 · WRITE 0 · 모델 0 · DB 행 변경 0.** 감사 결과 최소 UX 열 항목 중 **여섯이 이미 있었고 이미
+렌더되고 있었다** — lifecycle 5값 · `IssueChangeView` 추세 · 대표 근거 · `/acting`·`/remediated`·`/dismiss`·
+`/restore` · `review_issue_state_events` 기록. 없던 것은 **분모 하나**와 **읽는 쪽 하나**다. `byProduct`는
+`IssueEvidenceSummaryView`에 있었으나 **프론트 소비자가 0**이었다. **본체는 분모이고 그것이 가장 위험한
+숫자다**: `IssueProductEvidenceView`에 `productReviews` 칸을 **분자 옆에** 더했고(따로 다니는 분모는 언젠가
+다른 모집단을 가리킨다), **쌍을 렌더하되 비율을 만들지 않는다** — 추출기는 본문 있는 리뷰만 읽으므로 읽은 적
+없는 리뷰가 분모에는 있고 분자에는 구조적으로 들어갈 수 없어, 퍼센트는 **아무도 측정하지 않은 「검사된
+모집단」에 대한 주장**이 되고 하필 사람이 보고 행동할 그 숫자다(테스트가 `%`·퍼센트·비율 부재를 단언).
+어느 상품에도 닿지 않은 근거는 **자기 줄로** 말한다(말하지 않으면 합계가 모자란 이유를 알 길이 없다).
+「우리가 써 둔 것」은 `KnowledgeMentionCheck` 재사용이고 **세 상태를 가른다**(빈 라이브러리 · 가졌으나 이
+문제를 다루지 않음 · 답함) — 합치면 **이미 답을 써 둔 판매자에게 가서 쓰라고 말하게 된다**; 「답변 기준
+채우기」는 빠진 것이 있을 때만 렌더된다. `OpportunityRules.guidanceTargetOf`를 순수 함수로 재사용해
+**「배송 파손」은 교환·반품 규칙이 답한다**는 측정된 정정을 두 번 정하지 않는다. **판단 어휘는 새로 만들지
+않았다** — `IssueLifecycleState`가 lifecycle이 생긴 이래 그 어휘이고 per-review 축과 겹치지 않는다; 없던 것은
+**판매자의 문장**이었다(두 transition은 처음부터 operator note를 받는데 화면이 하나도 보내지 않아, 모든 결정이
+**아무 말도 하지 않은 사람의 상태 변경**으로 기록됐다). 칸은 **선택**이고 **해결 처리 컨트롤은 어느 상태에도
+없다**(무변경). 양방향 연결 완성 — 근거 인용마다 **`/reviews/reply/{reviewId}`**로, 그리고 **조건이
+사라졌다**(옛 인박스 링크는 그 페이지가 이미 들고 있는 행만 열 수 있어 membership 검사가 붙어 있었고, 그래서
+판매자가 인용 뒤의 리뷰에 닿을 수 있는지가 **다른 화면이 무엇을 fetch했는지**에 달려 있었다); 소비자 0이 된
+`evidenceInboxRef`와 `/memory`의 매 로드 인박스 조회는 삭제. 읽기는 둘이고 `allSettled`로 **따로 실패한다**
+(못 읽은 블록은 아무것도 그리지 않는다 — 「0개 상품」은 보지 못한 사실에 대한 주장이다). **컨트롤러에 write
+0**(결정의 두 번째 문 금지) · **열 때 모델 0**(retrieval 두 단계는 검색마다 새 모델 호출이라 여는 값이 돈이
+된다). backend **4,045** · frontend **240 files / 2,844** · 실패 0 · **실제 Demo Org 브라우저 QA 통과**
+(1440/1366/1152 · axe 0 · 콘솔 0 · off-host 0 · 채널 0 · 모델 0 · DB 행 변경 0; 접착 부족 = 전선몰딩
+**1,761건 중 16건** · 종이컵보관함 416건 중 1건 · 세모금컵 786건 중 1건). **계약이 바뀌어 테스트 2건을 다시
+썼다**(`memoryScope`의 「textarea 0」은 「두 번째 composer 없음」의 proxy였는데 판단을 적는 칸이 생기며
+**판단하는 화면에서 아무것도 못 쓰게 하는 규칙**이 됐다 ⇒ 주장을 직접 한다; 링크 테스트는 더 강한 주장으로).
+**고치지 않고 보고**: 판매자 결정 컨트롤은 **오늘 이 org에서 도달 불가**(`startActing`은 `NEEDS_REVIEW`를
+요구하고 25/25가 `OBSERVING`이며, 어떤 7일 창에도 근거 4건 이상이 **없다** — 13개월에 18건으로 퍼져 임계가
+전제하는 밀도에 못 미친다; **과거 날짜로 lifecycle-pass를 돌려 상태를 올리지 않았다** ⇒ note 경로는 단위
+테스트만, 라이브 미관측) · 「우리가 써 둔 것」 인용 3건이 바로 아래 개선 기회 rationale과 **중복**(정본은 새
+블록이나 중복은 확장 금지된 패키지 안에 있다) · 접착 부족의 별점 분포가 **3★3 · 4★5 · 5★10 · 1~2★ 0**으로
+이 반복 문제는 전부 **칭찬 속에서** 이야기된다(분포는 아직 안 그린다). **PRODUCT_DECISION_NEEDED**: 판매자가
+시스템이 올리지 않은 문제에 조치를 기록할 수 있어야 하는가(`requireState` 확대 = 새 semantics) · 별점 분포를
+그릴 것인가(읽기는 이미 있다)) · **`docs/local_helper_pilot_packaging_v1.md`** (Local Helper Pilot Packaging v1 — 2026-09-05. 도우미는
 `tsx` 체크아웃이었고 두 시작 경로가 서로 배타적이었다(launchd는 비밀번호를 plist에 못 싣고 supervisor는 첫 pairing에
 터미널이 필요) ⇒ `REVIEWNARY_HELPER_HOME` 상태 루트(프로필·pairing·상태·다운로드가 업데이트에 살아남는다) + 도우미가
 스스로 읽는 0600 `helper.env`(닫힌 키 목록, plist는 경로만) + 패키지 버전 `agentVersion`. `tools/helper/build-macos.sh`가

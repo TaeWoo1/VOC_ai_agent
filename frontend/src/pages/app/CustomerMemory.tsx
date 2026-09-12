@@ -19,15 +19,17 @@ import type { ReviewIssueView } from "../../lib/types";
  * retrieval-backed work outside v1 and gated on a separate scope decision. Rendering a search box
  * before that capability exists would promise it. `memoryScope.test.tsx` holds this fence.
  *
- * The inbox is loaded alongside the issues for exactly one purpose: deciding whether an evidence
- * quote may link into it. A link that lands on "찾을 수 없습니다" is worse than no link.
+ * The inbox is no longer read here. It used to be loaded for exactly one purpose — deciding whether
+ * an evidence quote was allowed to link anywhere — because the only destination was an inbox page
+ * that had to already hold the row. The evidence quote now links to the review's own processing
+ * surface, which resolves itself from the review id, so whether a seller can reach the review behind
+ * a quote no longer depends on what another screen happened to have fetched.
  */
 export function CustomerMemory() {
   const { issueId } = useParams();
   const [issues, setIssues] = useState<ReviewIssueView[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [inboxIds, setInboxIds] = useState<Set<string>>(new Set());
 
   // The same conversation every other screen opens — the panel, not a second chat (Reports v1 §3).
   // ONLY THE SCREEN TRAVELS. The label deliberately does not name the opened issue: `AgentContext`
@@ -51,26 +53,6 @@ export function CustomerMemory() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    let active = true;
-    void api
-      .getInboxStrict()
-      .then((res) => {
-        if (active) {
-          setInboxIds(new Set(res.items.map((item) => item.id)));
-        }
-      })
-      .catch(() => {
-        // No inbox → no evidence links. The panel simply omits them.
-        if (active) {
-          setInboxIds(new Set());
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const all = issues ?? [];
   const selection = resolveIssueSelection(all, issueId);
@@ -123,7 +105,6 @@ export function CustomerMemory() {
               <IssueDetailPanel
                 key={selection.issue.id}
                 issue={selection.issue}
-                loadedInboxIds={inboxIds}
                 onIssueChanged={onIssueChanged}
               />
             ) : selection.kind === "MISSING" ? (

@@ -199,9 +199,15 @@ public class ReviewIssueQueryService {
             ratingBuckets[rating != null && rating >= 1 && rating <= 5 ? rating : 0]++;
         }
 
+        // The denominator is read per product that actually carries evidence — bounded by the number
+        // of products this one issue reaches (three on the largest issue measured), never by the
+        // catalogue. It is the same count the product page and the Decision Workspace print, from the
+        // same repository method, so the three surfaces cannot disagree about how many reviews a
+        // product has.
         List<IssueProductEvidenceView> byProduct = perProduct.entrySet().stream()
                 .map(e -> new IssueProductEvidenceView(e.getKey(), productNames.get(e.getKey()),
-                        e.getValue(), firstOn.get(e.getKey()), lastOn.get(e.getKey())))
+                        e.getValue(), reviews.countByOrgIdAndProductId(orgId, e.getKey()),
+                        firstOn.get(e.getKey()), lastOn.get(e.getKey())))
                 .sorted(Comparator.comparingLong(IssueProductEvidenceView::evidenceCount).reversed()
                         .thenComparing(v -> v.productId().toString()))
                 .toList();
