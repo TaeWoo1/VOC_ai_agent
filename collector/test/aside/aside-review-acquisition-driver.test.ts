@@ -63,6 +63,17 @@ describe("Aside acquisition driver — the store gate decides whether a page is 
     expect(JSON.stringify(getLogSink())).not.toContain(BODY);
   });
 
+  it("the read line carries the body evidence in counts, and a hidden body would be visible in it", async () => {
+    const withBody = rows() as { rows: Record<string, unknown>[] };
+    withBody.rows.push({ rowIndex: 1, dateText: "2026-09-02", ratingText: "5", ratingAria: null, bodyText: "", bodyTruncated: false, bodyExpandable: true, productText: "15411270785 (81234567890)", productNameText: null, mediaCount: 0 });
+    const d = driverOver({ ok: true, workflow: WORKFLOW, identity: { labelHits: 2, distinct: 1, values: [CODE] }, rows: withBody, observed: OBSERVED });
+    await d.readCurrentPage();
+    const line = getLogSink().find((e) => e.event === "aw_coupang_review_aside_read")!;
+    expect(line.meta).toMatchObject({ rows: 2, textless: 1, bodyExpandable: 1, textlessExpandable: 1 });
+    expect(line.meta).toMatchObject({ pagerPages: 2, pagerHasNext: true });
+    expect(JSON.stringify(getLogSink())).not.toContain(BODY);
+  });
+
   it("MISMATCH: the rows are in hand and are dropped unread", async () => {
     const d = driverOver({ ok: true, workflow: WORKFLOW, identity: { labelHits: 2, distinct: 1, values: [OTHER] }, rows: rows(), observed: OBSERVED });
     const reading = await d.readCurrentPage();

@@ -23,7 +23,7 @@
  */
 import type { BlockerCode } from "../../../contracts/action-window/v2/index";
 import type { ReviewAcquisitionProbeDriver } from "../action-window/coupang-review/review-acquisition-driver";
-import { sanitizeReviewPageReading, type CoupangReviewPageReading } from "../action-window/coupang-review/review-rows";
+import { bodyEvidenceOf, sanitizeReviewPageReading, type CoupangReviewPageReading } from "../action-window/coupang-review/review-rows";
 import { sanitizeWingIdentityReading } from "../action-window/coupang-review/wing-identity-inpage";
 import { assertWingStore, type WingStoreVerdict } from "../action-window/coupang-review/wing-store-identity";
 import { log } from "../log";
@@ -106,6 +106,9 @@ export class AsideReviewAcquisitionDriver implements ReviewAcquisitionProbeDrive
     }
 
     const reading = sanitizeReviewPageReading(result.rows);
+    // Counts only, and one of them is load-bearing: `textlessExpandable` above zero is the list hiding a body
+    // from the reader, which is the difference between a quiet store and a broken read.
+    const bodies = bodyEvidenceOf(reading.rows);
     log("aw_coupang_review_aside_read", {
       workflow: `${workflow.id}/${workflow.version}`,
       ok: true,
@@ -115,6 +118,14 @@ export class AsideReviewAcquisitionDriver implements ReviewAcquisitionProbeDrive
       excludedColumns: reading.excludedColumns,
       rolesResolved: reading.rolesResolved.length,
       pagerResolved: reading.pager.resolved,
+      // What the list says about its own size. Read on every page already; reported so the question
+      // "is one page enough for this seller" is answered by measurement instead of by argument.
+      pagerPages: reading.pager.pageNumbers.length,
+      pagerHasNext: reading.pager.hasNext,
+      textless: bodies.textless,
+      bodyExpandable: bodies.expandable,
+      bodyTruncated: bodies.truncated,
+      textlessExpandable: bodies.textlessExpandable,
       llmCalls: result.observed.llmCalls,
       durationMs: result.observed.durationMs,
     });

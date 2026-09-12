@@ -558,3 +558,42 @@ export function localBoundaryKey(review: CoupangAcquiredReview): string {
   const parts = [review.productId, review.vendorItemId ?? "", review.writtenOn, String(review.rating), review.bodyFingerprint];
   return parts.map((p) => `${p.length}:${p}`).join("");
 }
+
+/**
+ * What a page said about REVIEW TEXT, in counts only.
+ *
+ * Every Coupang review this branch has ever acquired through the Aside lane came back textless, and the M3
+ * report could not say whether that is a fact about this store or a fault in the read. The reading already
+ * held the answer and nobody was counting it: `bodyExpandable` is the cell's own offer to show more, so a row
+ * that is textless AND expandable is a body the list is hiding from us, while textless with no expander is a
+ * buyer who rated and wrote nothing. {@link textlessExpandable} is therefore the only number here that can
+ * accuse the reader, and it is the reason this function exists.
+ *
+ * <p>Counts, never text — a log line has no business holding a customer's words
+ * (`docs/coupang_review_policy_gate_v1.md` D3/D4). It reads a reading and touches nothing.
+ */
+export interface ReviewBodyEvidence {
+  /** Rows whose body cell printed nothing. */
+  readonly textless: number;
+  /** Rows whose body cell offered to show more than it printed. */
+  readonly expandable: number;
+  /** Rows the reader cut at its own character bound. */
+  readonly truncated: number;
+  /** Textless rows that nonetheless offered an expander — a hidden body, if it is ever above zero. */
+  readonly textlessExpandable: number;
+}
+
+export function bodyEvidenceOf(rows: readonly CoupangReviewRowReading[]): ReviewBodyEvidence {
+  let textless = 0;
+  let expandable = 0;
+  let truncated = 0;
+  let textlessExpandable = 0;
+  for (const row of rows) {
+    const empty = row.bodyText.trim().length === 0;
+    if (empty) textless += 1;
+    if (row.bodyExpandable) expandable += 1;
+    if (row.bodyTruncated) truncated += 1;
+    if (empty && row.bodyExpandable) textlessExpandable += 1;
+  }
+  return { textless, expandable, truncated, textlessExpandable };
+}
