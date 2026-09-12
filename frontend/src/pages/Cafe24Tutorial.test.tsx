@@ -48,6 +48,7 @@ const syncRun = (over: Partial<SyncRunView> = {}): SyncRunView => ({
   id: "run", sellerAccountId: "acc-1", channelId: "ch", dataType: "ORDER_SUMMARY", trigger: "MANUAL",
   attempt: 1, rateLimited: false, nextRetryAt: null, jobType: "SYNC", uploadType: null, status: "SUCCESS",
   totalRows: 1, successRows: 1, skippedRows: 0, failedRows: 0, errorMessage: null, startedAt: null, finishedAt: null,
+  coverage: null,
   ...over,
 });
 

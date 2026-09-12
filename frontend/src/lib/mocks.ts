@@ -1721,6 +1721,7 @@ export function mockSyncRuns(): SyncRunView[] {
       errorMessage: null,
       startedAt: hoursAgoISO(4),
       finishedAt: hoursAgoISO(4),
+      coverage: null,
     },
     {
       id: "mock-run-2",
@@ -1741,6 +1742,7 @@ export function mockSyncRuns(): SyncRunView[] {
       errorMessage: null,
       startedAt: hoursAgoISO(8),
       finishedAt: hoursAgoISO(8),
+      coverage: null,
     },
   ];
 }

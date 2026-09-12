@@ -2297,6 +2297,12 @@ export async function runBridgeOnlyBoot(
       marketplaceOpened: false,
       // What this resident helper can bring up when a SellerOps tab asks — names only.
       onDemandCarriers: RESIDENT_ON_DEMAND_CARRIERS,
+      // **Which executor will perform a Coupang review read on this machine.** An operator adopting the
+      // deterministic lane needs to see that it is actually bound, and the alternative places are both worse:
+      // `/bridge/health` is unauthenticated and says in its own contract that it carries no connection
+      // detail, and the Action Window view is a shared v2 contract. This line is local, operator-facing, and
+      // costs nothing. Every run also names it again (`aw_coupang_review_acquisition_execution_provider`).
+      reviewAcquisitionProvider: linkCfg.executionProvider,
     }),
   );
   if (!listen.ok) {

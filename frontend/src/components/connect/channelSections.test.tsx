@@ -323,6 +323,82 @@ describe("수집 이력 섹션", () => {
     finishedAt: "2026-08-03T00:00:05Z",
   } as unknown as SyncRunView;
 
+  /**
+   * The bounded screen-read lane writes a run row on every press, and before this it rendered two internal
+   * words at the seller: the trigger `ACTION_WINDOW` as its own token, and the stop reason
+   * `PAGE_LIMIT_REACHED` in red, as though a read that did exactly what it was bounded to do had failed.
+   */
+  const screenRead = (over: Partial<SyncRunView>) =>
+    ({
+      ...run,
+      trigger: "ACTION_WINDOW",
+      dataType: "REVIEW",
+      status: "PARTIAL",
+      totalRows: 9,
+      successRows: 0,
+      skippedRows: 9,
+      failedRows: 0,
+      errorMessage: "PAGE_LIMIT_REACHED",
+      coverage: "REACHED_KNOWN_GROUND",
+      ...over,
+    }) as unknown as SyncRunView;
+
+  it("says what a bounded read could not see, and never says the list is finished", () => {
+    const { rerender } = wrap(
+      <CollectionHistorySection runs={[screenRead({})]} loading={false} error={false} onChanged={vi.fn()} onReport={vi.fn()} />,
+    );
+    expect(screen.getByTestId("coverage-note")).toHaveTextContent("신호는 이번 수집에서 없었습니다");
+    expect(document.body.textContent).not.toMatch(/모두 수집|전체 리뷰를 수집|수집 완료/);
+
+    rerender(
+      <MemoryRouter>
+        <CollectionHistorySection
+          runs={[screenRead({ coverage: "BACKLOG_POSSIBLE", skippedRows: 0, successRows: 10, totalRows: 10 })]}
+          loading={false}
+          error={false}
+          onChanged={vi.fn()}
+          onReport={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("coverage-note")).toHaveTextContent("더 이전 리뷰가 남아 있을 수 있습니다");
+
+    rerender(
+      <MemoryRouter>
+        <CollectionHistorySection
+          runs={[screenRead({ coverage: "UNDETERMINED" })]}
+          loading={false}
+          error={false}
+          onChanged={vi.fn()}
+          onReport={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("coverage-note")).toHaveTextContent("알 수 없습니다");
+  });
+
+  it("prints no internal word: the stop reason is replaced by the coverage sentence, the trigger by a label", () => {
+    wrap(<CollectionHistorySection runs={[screenRead({})]} loading={false} error={false} onChanged={vi.fn()} onReport={vi.fn()} />);
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain("PAGE_LIMIT_REACHED");
+    expect(text).not.toContain("ACTION_WINDOW");
+    expect(text).toContain("화면에서 실행");
+  });
+
+  it("a run with no coverage question keeps showing its real error", () => {
+    wrap(
+      <CollectionHistorySection
+        runs={[screenRead({ coverage: null, trigger: "SCHEDULED", errorMessage: "GW.IP_NOT_ALLOWED" })]}
+        loading={false}
+        error={false}
+        onChanged={vi.fn()}
+        onReport={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("GW.IP_NOT_ALLOWED")).toBeInTheDocument();
+    expect(screen.queryByTestId("coverage-note")).toBeNull();
+  });
+
   it("keeps loading, failed, empty and loaded as four distinct renders", () => {
     const { rerender } = wrap(
       <CollectionHistorySection

@@ -486,12 +486,18 @@ export interface ConnectorAlertView {
   acknowledgedAt: string | null;
 }
 
+/**
+ * The backend's `ReviewCoverageSignal`. `REACHED_KNOWN_GROUND` means nothing in that run indicated reviews
+ * were left behind it — **never** that every review is collected.
+ */
+export type ReviewCoverageSignal = "REACHED_KNOWN_GROUND" | "BACKLOG_POSSIBLE" | "UNDETERMINED";
+
 export interface SyncRunView {
   id: string;
   sellerAccountId: string | null;
   channelId: string | null;
   dataType: string | null;
-  trigger: string; // SCHEDULED | MANUAL | RETRY | UPLOAD
+  trigger: string; // SCHEDULED | MANUAL | RETRY | UPLOAD | ACTION_WINDOW
   attempt: number;
   rateLimited: boolean;
   nextRetryAt: string | null;
@@ -505,6 +511,11 @@ export interface SyncRunView {
   errorMessage: string | null;
   startedAt: string | null;
   finishedAt: string | null;
+  /**
+   * What a screen-read run could say about reviews it did not read. `null` on every other kind of run —
+   * the question is not asked of an API pull or an upload, and a sentence on such a row would be invented.
+   */
+  coverage: ReviewCoverageSignal | null;
 }
 
 /**

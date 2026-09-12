@@ -46,6 +46,7 @@ function run(dataType: string, successRows: number, status = "SUCCESS", finished
     errorMessage: null,
     startedAt: "2026-08-27T00:59:00Z",
     finishedAt,
+    coverage: null,
   };
 }
 

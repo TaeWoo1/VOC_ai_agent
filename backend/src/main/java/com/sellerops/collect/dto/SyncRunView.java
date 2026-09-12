@@ -1,5 +1,6 @@
 package com.sellerops.collect.dto;
 
+import com.sellerops.collect.ReviewCoverageSignal;
 import com.sellerops.sync.SyncJob;
 import java.time.Instant;
 import java.util.UUID;
@@ -28,12 +29,18 @@ public record SyncRunView(
         int failedRows,
         String errorMessage,
         Instant startedAt,
-        Instant finishedAt) {
+        Instant finishedAt,
+        /**
+         * What this run could say about reviews it did not read — {@code null} unless it was a screen read.
+         * Derived from the counts already on the row; see {@link com.sellerops.collect.ReviewCoverageSignal}.
+         */
+        ReviewCoverageSignal coverage) {
 
     public static SyncRunView from(SyncJob j) {
         return new SyncRunView(j.getId(), j.getSellerAccountId(), j.getChannelId(), j.getDataType(),
                 j.getTrigger(), j.getAttempt(), j.isRateLimited(), j.getNextRetryAt(),
                 j.getJobType(), j.getUploadType(), j.getStatus(), j.getTotalRows(), j.getSuccessRows(),
-                j.getSkippedRows(), j.getFailedRows(), j.getErrorMessage(), j.getStartedAt(), j.getFinishedAt());
+                j.getSkippedRows(), j.getFailedRows(), j.getErrorMessage(), j.getStartedAt(), j.getFinishedAt(),
+                ReviewCoverageSignal.of(j));
     }
 }

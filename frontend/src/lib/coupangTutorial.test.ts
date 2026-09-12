@@ -35,6 +35,7 @@ function run(overrides: Partial<SyncRunView>): SyncRunView {
     errorMessage: null,
     startedAt: "2026-08-06T00:00:00Z",
     finishedAt: "2026-08-06T00:01:00Z",
+    coverage: null,
     ...overrides,
   };
 }

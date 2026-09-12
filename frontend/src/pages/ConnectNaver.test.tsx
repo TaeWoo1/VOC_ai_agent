@@ -79,6 +79,7 @@ const syncRun = (accountId: string, over: Partial<SyncRunView> = {}): SyncRunVie
   id: "run", sellerAccountId: accountId, channelId: "ch-naver", dataType: "ORDER_SUMMARY", trigger: "MANUAL",
   attempt: 1, rateLimited: false, nextRetryAt: null, jobType: "SYNC", uploadType: null, status: "SUCCESS",
   totalRows: 0, successRows: 0, skippedRows: 0, failedRows: 0, errorMessage: null, startedAt: null, finishedAt: null,
+  coverage: null,
   ...over,
 });
 

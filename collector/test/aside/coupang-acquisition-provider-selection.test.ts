@@ -51,6 +51,32 @@ describe("coupang acquisition — execution provider selection", () => {
     }
   });
 
+  /**
+   * **The lane never quietly becomes the other lane.** A deterministic run whose executor is down must end as
+   * a run that could not read, never as a run the seated helper picked up: the seller pressed once, nobody is
+   * standing at that browser, and a seated walk that nobody turns pages for would sit open forever while the
+   * record read as an ordinary read. Every call, not just the first — a carrier is asked for a driver once
+   * per run, and a fallback on the second run is the same defect a beat later.
+   */
+  it("ASIDE stays ASIDE — every driver this carrier hands out is the deterministic one", () => {
+    const carrier = withProvider("ASIDE", buildCoupangReviewAcquisitionLiveConfig);
+    for (let i = 0; i < 5; i++) {
+      expect(carrier.createDriver()).toBeInstanceOf(AsideReviewAcquisitionDriver);
+    }
+    // And the seated driver is not reachable from it by any name it exposes.
+    const driver = carrier.createDriver() as unknown as Record<string, unknown>;
+    for (const value of Object.values(driver)) {
+      expect(value).not.toBeInstanceOf(LazyReviewAcquisitionDriver);
+    }
+  });
+
+  it("the bound is one page on every driver the ASIDE carrier hands out, not just the first", () => {
+    const carrier = withProvider("ASIDE", buildCoupangReviewAcquisitionLiveConfig);
+    carrier.createDriver();
+    carrier.createDriver();
+    expect(carrier.maxPages).toBe(1);
+  });
+
   it("an unknown provider is a configuration error, never a downgrade", () => {
     expect(() => withProvider("PLAYWRIGHT", buildCoupangReviewAcquisitionLiveConfig)).toThrow(/unknown execution provider/);
   });

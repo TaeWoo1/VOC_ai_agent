@@ -12,23 +12,32 @@ import { describe, expect, it } from "vitest";
 import {
   bodyEvidenceOf,
   canonicalizeReviewRows,
+  sanitizeReviewPageReading,
   type CoupangReviewPageReading,
   type CoupangReviewRowReading,
 } from "../../src/action-window/coupang-review/review-rows";
 
-/** A page whose structure is fine, so only the bodies are under test. */
-const OK_PAGE: CoupangReviewPageReading = {
-  reason: "OK",
-  tablesScanned: 1,
-  headerWidth: 7,
-  excludedColumns: 1,
-  unmappedColumns: 0,
-  duplicateRoles: 0,
-  rolesResolved: ["date", "rating", "product", "body", "media"],
-  widthMismatchRows: 0,
-  rows: [],
-  pager: { found: true, resolved: true, currentPage: 1, pageNumbers: [1], hasNext: false, nextEnabled: false },
-};
+/**
+ * A page whose structure is fine, so only the bodies are under test. Built through the production sanitizer
+ * rather than written out, because the pager reading has a dozen diagnostic fields and a hand-made literal
+ * drifts from it silently — which is exactly what happened when this fixture was first written.
+ */
+function okPage(rows: readonly CoupangReviewRowReading[]): CoupangReviewPageReading {
+  return {
+    ...sanitizeReviewPageReading({
+      reason: "OK",
+      tablesScanned: 1,
+      headerWidth: 7,
+      excludedColumns: 1,
+      unmappedColumns: 0,
+      duplicateRoles: 0,
+      rolesResolved: ["date", "rating", "product", "body", "media"],
+      widthMismatchRows: 0,
+      rows,
+      pager: { found: true, resolved: true, currentPage: 1, pageNumbers: [1], hasNext: false, nextEnabled: false },
+    }),
+  };
+}
 
 function row(over: Partial<CoupangReviewRowReading> = {}): CoupangReviewRowReading {
   return {
@@ -80,7 +89,7 @@ describe("bodyEvidenceOf", () => {
     const reading = [row({ bodyText: "등록된 내용이 없습니다." }), row({ bodyText: "내용 없음" })];
     expect(bodyEvidenceOf(reading).textless).toBe(2);
     // The counter and the canonicalizer must say the same thing, which is the whole point of the fix.
-    expect(canonicalizeReviewRows({ ...OK_PAGE, rows: reading }).textlessCount).toBe(2);
+    expect(canonicalizeReviewRows(okPage(reading)).textlessCount).toBe(2);
   });
 
   it("a cell holding only the expander control is not a body either", () => {

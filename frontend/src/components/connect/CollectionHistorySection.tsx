@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Section } from "../Section";
 import { api } from "../../lib/apiClient";
 import { relativeTime, untilTime } from "../../lib/format";
-import type { SyncRunView } from "../../lib/types";
+import type { ReviewCoverageSignal, SyncRunView } from "../../lib/types";
 import { backendMessage } from "./channelShared";
 
 /** 수집 이력 — the runs the server recorded, newest first, each retryable. */
@@ -102,9 +102,10 @@ function RunRow({
           ) : null}
         </div>
       </div>
-      {run.errorMessage || run.nextRetryAt ? (
+      {run.coverage ? <CoverageNote coverage={run.coverage} /> : null}
+      {(run.errorMessage && !run.coverage) || run.nextRetryAt ? (
         <div className="flex flex-col gap-1 text-sm">
-          {run.errorMessage ? <span className="text-bad">{run.errorMessage}</span> : null}
+          {run.errorMessage && !run.coverage ? <span className="text-bad">{run.errorMessage}</span> : null}
           {run.nextRetryAt ? (
             <span className="text-muted">다음 재시도 가능: {untilTime(run.nextRetryAt)}</span>
           ) : null}
@@ -114,14 +115,51 @@ function RunRow({
   );
 }
 
+/**
+ * What the run could say about reviews it did not read.
+ *
+ * The sentence for `REACHED_KNOWN_GROUND` is deliberately about the ABSENCE OF A SIGNAL, not about totality:
+ * it is true both when the read ran into reviews already stored and when the pager said this was the last
+ * page, and it is false in neither. "전체 리뷰를 모두 수집했습니다" is a claim no bounded read can make and
+ * this screen does not make it.
+ */
+function CoverageNote({ coverage }: { coverage: ReviewCoverageSignal }) {
+  if (coverage === "REACHED_KNOWN_GROUND") {
+    return (
+      <p data-testid="coverage-note" className="text-sm text-muted">
+        읽지 못하고 남은 리뷰가 있다는 신호는 이번 수집에서 없었습니다.
+      </p>
+    );
+  }
+  if (coverage === "BACKLOG_POSSIBLE") {
+    return (
+      <p data-testid="coverage-note" className="text-sm text-warn">
+        읽기 한도에서 멈췄고, 읽은 리뷰가 모두 새 리뷰였습니다. 더 이전 리뷰가 남아 있을 수 있습니다.
+      </p>
+    );
+  }
+  return (
+    <p data-testid="coverage-note" className="text-sm text-muted">
+      이번 수집만으로는 남은 리뷰가 있는지 알 수 없습니다.
+    </p>
+  );
+}
+
 function TriggerChip({ trigger }: { trigger: string }) {
   const map: Record<string, { label: string; cls: string }> = {
     SCHEDULED: { label: "자동", cls: "bg-brand/10 text-brand-700" },
     MANUAL: { label: "수동", cls: "bg-ink/5 text-ink" },
     RETRY: { label: "재시도", cls: "bg-warn/10 text-warn" },
     UPLOAD: { label: "업로드", cls: "bg-canvas text-muted" },
+    // The seller pressed 「지금 동기화」 and reviewnary read the seller-center screen. It is a manual run,
+    // but not the same manual as an API pull, and it has been on this screen as the raw token ACTION_WINDOW.
+    ACTION_WINDOW: { label: "화면에서 실행", cls: "bg-ink/5 text-ink" },
   };
-  const { label, cls } = map[trigger] ?? { label: trigger, cls: "bg-canvas text-muted" };
+  // An unmapped trigger renders as nothing rather than as its own token: an internal word on this screen is
+  // the defect this map exists to prevent, and a missing chip costs the seller less than a raw enum.
+  const known = map[trigger];
+  if (!known) return null;
+  const { label, cls } = known;
   return (
     <span className={`inline-flex items-center rounded-lg px-2.5 py-1 text-sm font-semibold ${cls}`}>
       {label}

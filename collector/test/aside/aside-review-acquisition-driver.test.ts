@@ -71,6 +71,9 @@ describe("Aside acquisition driver — the store gate decides whether a page is 
     const line = getLogSink().find((e) => e.event === "aw_coupang_review_aside_read")!;
     expect(line.meta).toMatchObject({ rows: 2, textless: 1, bodyExpandable: 1, textlessExpandable: 1 });
     expect(line.meta).toMatchObject({ pagerPages: 2, pagerHighest: 2, pagerCurrent: 1, pagerHasNext: true });
+    // The lane's standing claim, on the record of every read: a `repl` program cannot call a model, and the
+    // run says so in the same line that says what it read.
+    expect(line.meta).toMatchObject({ llmCalls: 0 });
     expect(JSON.stringify(getLogSink())).not.toContain(BODY);
   });
 
