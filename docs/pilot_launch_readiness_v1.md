@@ -214,3 +214,83 @@ seller's mornings are not another's.
 In `pilot_usage_loop_v1.md` §6-F, with the cohort applied the way §4 already specifies — an explicit
 org list, and the canonical Demo Org is not in it. The product carries no "is this real" flag,
 because a flag like that is always missing from exactly one place.
+
+
+---
+
+## 3. Pilot deployment checklist
+
+The checklist is `deploy/pilot/preflight.sh`, because a checklist an operator reads is a checklist an
+operator believes they completed. It is read-only — starts nothing, writes nothing, creates no cloud
+resource — and for every secret it prints only whether the **name** has a value.
+
+It runs **before the first deploy**, when its answers are still cheap: a wrong host name costs a
+Let's Encrypt rate-limit, and a wrong Cafe24 redirect URI is not discovered until a real seller is
+standing in front of a consent screen.
+
+| # | Checks | Why it is here rather than in the deploy |
+|---|---|---|
+| 1 | env file exists, mode 0600, **outside the checkout** | a pilot secret must never be one `git add` away |
+| 2 | host, ACME email, DB password, JWT secret present; JWT not the placeholder and ≥ 32 chars | values a deploy cannot invent |
+| 3 | **DNS resolves, and resolves to THIS host**; :80/:443 free | ACME rate-limits failures, and a callback that arrives somewhere else arrives nowhere |
+| 4 | Cafe24-only posture, and it **prints the exact redirect URI to register** | byte-identical is the whole requirement; printing it turns a class of failure into a copy-paste |
+| 5 | seed / demo content / both mock switches off; mail mode is not the developer outbox | nothing on this host may manufacture rows, or log a password-reset link |
+| 6 | `baseline-on-migrate=false`; the backup directory exists; daily cron noted | §1 — the deploy takes the pre-migration dump *there* |
+| 7 | docker, compose plugin, RAM | the overlay needs compose ≥ 2.24 for `!reset`; the Gradle build stage peaks above 2 GB |
+
+Two things it deliberately does **not** claim:
+
+- **whether :80/:443 are reachable from the internet.** That is a security-group fact this script
+  cannot see from inside the host, and a check that guessed would be worse than the note it prints;
+- **that the Cafe24 app is registered.** It prints the string; whether someone pasted it into the
+  Cafe24 developer console is outside this repository, and §5 lists it as an external value.
+
+Exit code is non-zero when anything failed, so it can gate a deploy in a script.
+
+---
+
+## 4. Cafe24-only deployment smoke
+
+### 4.1 Why "Cafe24-only" is a posture worth naming
+
+The previous package proved by test that the two remaining blockers were **two requirements pointing
+in opposite directions**, not one: the HTTPS host is *inbound* (Cafe24's redirect URI), the fixed
+IPv4 is *outbound* (NAVER's registered call IP). A Cafe24-only pilot therefore needs **no fixed
+public IPv4**, and an Elastic IP is a prerequisite of *adding NAVER*, not of starting.
+
+That was true in a test. What it was not, until now, was visible on a running host — so
+`smoke.sh` says it out loud, and `pilot.env.example` opens with it.
+
+### 4.2 What the smoke adds
+
+Everything that was there stays (HTTPS, redirect, health via edge, demo entry off, anonymous refusal,
+raw ports closed, volume, restart policies, validator green, CSP naming the helper and this site's own
+runtime origin, egress). New, and each of them is a deploy that would otherwise look fine:
+
+**Cafe24 posture**
+- the backend's **actual** `SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI`, read out of the running
+  container, equals `https://<host>/api/connect/cafe24/callback`. The token exchange reads that very
+  property, so a mismatch is not a 404 — it is a consent that cannot complete anywhere;
+- Cafe24 app credentials present when the connector is on;
+- with NAVER off, the smoke states that **no fixed outbound IPv4 is required for this pilot**. An
+  operator reading a green smoke should not still be wondering whether they are missing an Elastic IP.
+
+**Schema state, right after the deploy that migrated it**
+- applied count equals the number of `V*.sql` files **in this checkout** — a host running an older
+  image against a newer checkout is exactly the state nothing else notices;
+- zero failed migrations;
+- **zero baseline rows** — a baseline row means the migrations before it never ran here, and nothing
+  else in the system would ever say so.
+
+**Pilot measurement**
+- `POST /api/usage/home-opened` refuses anonymous. It is the one endpoint whose whole purpose is to be
+  measured, so an anonymous POST reaching it would be an anonymous row.
+
+The env file is now sourced once at the top, so every check reads the same file the deploy validated.
+
+### 4.3 What the smoke still cannot do
+
+It is credential-free and WRITE-free by design, so the first Cafe24 OAuth consent — the one that
+proves a real mall's token endpoint accepts this host's request — remains the **first pilot seller's
+first connection**. That has been the standing verdict since Pilot Readiness Gate v1 and this package
+does not change it.

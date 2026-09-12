@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Pilot preflight — Pilot Launch Readiness v1 §3. Run BEFORE the first deploy, on the host.
+#
+#   PILOT_ENV_FILE=/etc/sellerops/pilot.env deploy/pilot/preflight.sh
+#
+# The checklist as something that runs, rather than something an operator reads and believes they did.
+# It checks only what is checkable WITHOUT the stack being up, because that is when its answers are
+# still cheap: a wrong host name costs a certificate rate-limit, and a wrong Cafe24 redirect URI is
+# not discovered until a real seller is standing in front of a consent screen.
+#
+# Read-only. Starts nothing, writes nothing, creates no cloud resource, prints no secret — for every
+# secret it prints only whether the NAME has a value.
+set -uo pipefail
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ENV_FILE="${PILOT_ENV_FILE:-/etc/sellerops/pilot.env}"
+pass=0; failn=0; warn=0
+ok()   { printf '  ok    %s\n' "$*"; pass=$((pass+1)); }
+bad()  { printf '  FAIL  %s\n' "$*"; failn=$((failn+1)); }
+note() { printf '  note  %s\n' "$*"; warn=$((warn+1)); }
+set_() { [[ -n "${!1:-}" ]]; }
+
+echo "preflight: $ENV_FILE"
+
+# ── 1. the env file itself ───────────────────────────────────────────────────────────────────────
+if [[ -f "$ENV_FILE" ]]; then ok "env file exists"; else bad "env file not found (copy deploy/pilot/pilot.env.example)"; fi
+perm="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE" 2>/dev/null)"
+[[ "$perm" == "600" || "$perm" == "400" ]] && ok "env file mode $perm" || bad "env file must be 0600 (is ${perm:-unknown})"
+case "$ENV_FILE" in "$REPO"/*) bad "env file is INSIDE the checkout — a pilot secret must never be one git add away";; *) ok "env file is outside the checkout";; esac
+set -a; [[ -f "$ENV_FILE" ]] && . "$ENV_FILE"; set +a
+
+# ── 2. the values a deploy cannot invent ─────────────────────────────────────────────────────────
+for n in PILOT_PUBLIC_HOST PILOT_ACME_EMAIL POSTGRES_PASSWORD SELLEROPS_JWT_SECRET; do
+  set_ "$n" && ok "$n is set" || bad "$n is blank"
+done
+[[ "${SELLEROPS_JWT_SECRET:-}" != change-me* ]] && ok "JWT secret is not the repository placeholder" || bad "JWT secret is the repository placeholder"
+[[ ${#SELLEROPS_JWT_SECRET} -ge 32 ]] && ok "JWT secret length ≥ 32" || bad "JWT secret shorter than 32 characters"
+
+# ── 3. the public name — DNS before ACME ─────────────────────────────────────────────────────────
+# Let's Encrypt rate-limits failures. Resolving the name first is the difference between "fix a typo"
+# and "wait an hour to try again".
+H="${PILOT_PUBLIC_HOST:-}"
+if [[ -n "$H" ]]; then
+  case "$H" in localhost|127.0.0.1|*.local) bad "PILOT_PUBLIC_HOST is a development name ($H)";; *) ok "PILOT_PUBLIC_HOST is a real name";; esac
+  [[ "$H" != *"://"* && "$H" != *"/"* ]] && ok "PILOT_PUBLIC_HOST is a bare host name" || bad "PILOT_PUBLIC_HOST must have no scheme and no path"
+  dns="$(getent hosts "$H" 2>/dev/null | awk '{print $1}' | head -1)"
+  [[ -z "$dns" ]] && dns="$(dig +short A "$H" 2>/dev/null | tail -1)"
+  if [[ -n "$dns" ]]; then
+    ok "DNS: $H → $dns"
+    mine="$(curl -4 -sS --max-time 10 https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]')"
+    if [[ -n "$mine" ]]; then
+      [[ "$dns" == "$mine" ]] && ok "DNS points at THIS host ($mine)" \
+        || bad "DNS points at $dns but this host leaves through $mine — ACME will fail and the Cafe24 callback will not arrive here"
+    else
+      note "could not determine this host's outbound address; DNS target unverified"
+    fi
+  else
+    bad "DNS does not resolve $H — create the A record before deploying (ACME rate-limits failures)"
+  fi
+  # :80 and :443 must be free for the edge, and reachable from outside for the HTTP-01 challenge.
+  for p in 80 443; do
+    if command -v ss >/dev/null && ss -ltn "( sport = :$p )" 2>/dev/null | grep -q ":$p"; then
+      bad "port $p is already in use on this host — the edge cannot bind it"
+    else ok "port $p is free for the edge"; fi
+  done
+  note "reachability of :80 / :443 FROM THE INTERNET is a security-group/firewall fact this script cannot see; confirm it before the first deploy"
+fi
+
+# ── 4. Cafe24-only posture (2026-09-13 decision) ─────────────────────────────────────────────────
+if [[ "${SELLEROPS_CONNECTOR_NAVER_ENABLED:-false}" == "true" ]]; then
+  note "NAVER is ON — this is no longer a Cafe24-only pilot; a fixed outbound IPv4 IS required (run egress-check.sh)"
+  set_ SELLEROPS_CONNECTOR_NAVER_ADVERTISED_EGRESS_IPS && ok "advertised call IP is set" || bad "NAVER on but no advertised call IP"
+else
+  ok "NAVER OFF — a fixed outbound IPv4 is NOT a prerequisite of this pilot"
+fi
+if [[ "${SELLEROPS_CONNECTOR_CAFE24_ENABLED:-false}" == "true" ]]; then
+  set_ SELLEROPS_CONNECTOR_CAFE24_CLIENT_ID && set_ SELLEROPS_CONNECTOR_CAFE24_CLIENT_SECRET \
+    && ok "Cafe24 app credentials are set" || bad "Cafe24 on but CLIENT_ID / CLIENT_SECRET blank"
+  set_ SELLEROPS_VAULT_MASTER_KEY && ok "vault master key is set" || bad "a connector is on but SELLEROPS_VAULT_MASTER_KEY is blank"
+  uri="${SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI:-https://$H/api/connect/cafe24/callback}"
+  [[ "$uri" == "https://$H/api/connect/cafe24/callback" ]] && ok "redirect URI is this host's callback" \
+    || bad "redirect URI ($uri) is not this host's callback"
+  printf '\n  ── REGISTER THIS EXACT STRING in the Cafe24 app (byte-identical, no trailing slash):\n     %s\n\n' "$uri"
+else
+  note "Cafe24 connector is OFF — turn it on once the app is registered with the URI printed by this script"
+fi
+
+# ── 5. clean data: nothing on this host may manufacture rows ─────────────────────────────────────
+for n in SELLEROPS_SEED_ENABLED SELLEROPS_SEED_DEMO_CONTENT SELLEROPS_CONNECTOR_MOCK_ENABLED SELLEROPS_CONNECTOR_MOCK_FALLBACK_ENABLED; do
+  [[ "${!n:-false}" == "false" ]] && ok "$n=false" || bad "$n must be false on a pilot host"
+done
+[[ "${SELLEROPS_MAIL_MODE:-off}" != "dev-outbox" ]] && ok "mail mode is not the developer outbox" || bad "SELLEROPS_MAIL_MODE=dev-outbox logs password-reset links"
+
+# ── 6. schema safety (§1) ────────────────────────────────────────────────────────────────────────
+[[ "${SELLEROPS_FLYWAY_BASELINE_ON_MIGRATE:-false}" == "false" ]] && ok "baseline-on-migrate is false" \
+  || bad "SELLEROPS_FLYWAY_BASELINE_ON_MIGRATE must be false (a half-restored schema must fail the boot, not be assumed current)"
+d="${PILOT_BACKUP_DIR:-/var/backups/sellerops}"
+[[ -d "$d" ]] && ok "backup directory $d exists" || bad "backup directory $d does not exist (host-bootstrap.sh creates it) — deploy.sh takes the pre-migration dump there"
+[[ -w "$d" ]] 2>/dev/null && ok "backup directory is writable" || note "backup directory not writable as this user (deploy.sh runs as root)"
+grep -rqs 'backup.sh' /etc/cron.d /etc/crontab 2>/dev/null && ok "daily backup cron installed" \
+  || note "daily backup cron is NOT installed — the pre-migration dump still runs, but nothing else does"
+
+# ── 7. the host can actually build and run this ──────────────────────────────────────────────────
+command -v docker >/dev/null && ok "docker present" || bad "docker not installed (host-bootstrap.sh)"
+docker compose version >/dev/null 2>&1 && ok "docker compose plugin present" || bad "docker compose plugin missing (the overlay needs ≥ 2.24 for '!reset')"
+free_kb="$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null)"
+if [[ -z "$free_kb" ]]; then note "could not read total RAM (not a Linux host?) — unverified"
+elif [[ "$free_kb" -ge 3500000 ]]; then ok "RAM ≥ 4 GB"
+else note "less than 4 GB RAM — the Gradle image build peaks above 2 GB; keep the swap host-bootstrap.sh adds"; fi
+
+printf '\npreflight: %s ok, %s failed, %s notes\n' "$pass" "$failn" "$warn"
+echo "next: deploy/pilot/deploy.sh   (env → pre-migration dump → build → migrate → health → smoke)"
+[[ $failn -eq 0 ]]

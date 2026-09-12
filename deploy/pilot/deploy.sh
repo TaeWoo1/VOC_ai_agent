@@ -6,6 +6,10 @@
 #   deploy/pilot/deploy.sh --no-backup # retry a failed deploy without a second dump of unchanged data
 #
 # Idempotent and boring on purpose. It never prints an env value; it prints which NAMES are missing.
+#
+# Before the FIRST deploy on a host, run deploy/pilot/preflight.sh — it checks the things that are
+# only cheap to check while nothing is running yet (DNS, free ports, the exact Cafe24 redirect URI to
+# register, the backup directory). This script re-checks the env it needs and nothing beyond it.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
