@@ -29,13 +29,21 @@ export const MAX_ANSWER_CHARS = 1200;
  * deliberately does not match {@code AI}, {@code API} or {@code URL}, which are ordinary Korean-business
  * loanwords.
  */
-const INTERNAL_PATTERNS: readonly RegExp[] = [
+export const INTERNAL_PATTERNS: readonly RegExp[] = [
   /[A-Z][A-Z0-9]*_[A-Z0-9_]+/,
   /\b(?:get|list|search|resolve)_[a-z_]{3,}/,
   /\bsellerops\b/i,
   /\bcapabilityAspect\b|\bWorldState\b|\bartifact\b|\bworking ?set\b/i,
   /\bLangGraph\b|\bplanner\b|\bprompt\b/i,
 ];
+
+/**
+ * Bare screaming-case words that are ours even without an underscore — {@code UNKNOWN},
+ * {@code PARTIAL}. The output guard does not reject these (a seller writing 「API」 must not fail), but
+ * an INPUT line containing one is a line written for an engineer, and sending it as a 「제품 사실」 invites
+ * the model to repeat a word this product refuses to print.
+ */
+export const INTERNAL_WORD = /\b(?!API|HTTPS?|HTML|JSON|CSV|URL|FAQ|OAUTH|AI|CS|KPI)[A-Z][A-Z0-9]{3,}\b/;
 
 /** Document furniture. A chat answer that draws a table or a heading is answering the wrong question. */
 const DOCUMENT_PATTERNS: readonly RegExp[] = [/^#{1,6}\s/m, /\|\s*-{3,}/, /^\s*\|.*\|\s*$/m];

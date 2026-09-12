@@ -26,6 +26,22 @@ import java.util.List;
  *
  * <p>They are the two halves of one answer, and both have to survive a flagged-off connector. The
  * first arrived without the second, and the badge overclaimed for exactly as long as that lasted.
+ *
+ * <p><b>{@code backgroundDataTypes} (Product Self-Knowledge Truth Closure v1).</b> The knowledge-layer
+ * types — today PRODUCT — computed from the same live connector as {@code dataTypes} but kept in their
+ * own list rather than appended to it. The operator badge row is the seller-visible contract of
+ * {@code dataTypes} and widening it would change a screen nobody asked to change; the Agent's product
+ * truth needs the fact regardless, because PRODUCT is one of the four operating objects and had no
+ * per-channel answer anywhere. SALES is deliberately absent: it is not an operating object.
+ *
+ * <p><b>{@code dataTypes[].declaredSupport} / {@code declaredVerificationStatus}.</b> What the
+ * {@code connector_capabilities} reference table says, beside what the live connector says —
+ * {@code SUPPORTED} / {@code UNSUPPORTED} / {@code UNDECLARED}, and the table's own verification word.
+ * Both are carried, never folded in: the two sources genuinely disagree today, and they disagree on
+ * BOTH axes. Coupang PRODUCT is {@code CONFIRMED} in the table and {@code NEEDS_VERIFICATION} in the
+ * connector; Coupang INQUIRY is the other way round; NAVER SALES is {@code CONFIRMED} in the table and
+ * not served at all by the connector. A reader that silently picked the stronger of two disagreeing
+ * sources would state a capability nobody proved. Whoever reads this pair must go the conservative way.
  */
 public record ChannelCapabilityOverview(
         String channelCode,
@@ -33,7 +49,8 @@ public record ChannelCapabilityOverview(
         String connectorClass,
         boolean autoCollectSupported,
         List<DataTypeCapability> dataTypes,
-        List<ScopeNote> unsupportedScopes) {
+        List<ScopeNote> unsupportedScopes,
+        List<DataTypeCapability> backgroundDataTypes) {
 
     /**
      * One data type, with the pull connector's answer and — separately — how SellerOps actually
@@ -50,7 +67,9 @@ public record ChannelCapabilityOverview(
             String label,
             boolean supported,
             String verificationStatus,
-            List<AcquisitionPath> acquisitionPaths) {
+            List<AcquisitionPath> acquisitionPaths,
+            String declaredSupport,
+            String declaredVerificationStatus) {
     }
 
     /**

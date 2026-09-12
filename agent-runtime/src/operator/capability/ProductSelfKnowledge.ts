@@ -46,20 +46,31 @@
  * every fact above is a fact about the deployment. Only the sentences that describe THIS shop's rows
  * are withheld, and they are the ones {@link SellerReadiness} already gates.
  */
-import type { ChannelCoverageRow } from "../../spring/types";
-import type { ActionClass } from "../state/OperatorState";
 import type { ChannelCapabilitySources, ChannelCapabilityVerdict } from "./ChannelCapability";
 import { EXECUTION_REASON, capabilityOf, inquiryExecutionOf } from "./ChannelCapability";
 import { capabilityDomains, boundarySentence, CONNECT_ACTION } from "./AssistantCapability";
 import type { SellerReadiness } from "./SellerReadiness";
 import { delegableWords } from "./SellerReadiness";
+import type { ChannelOffer, SelfKnowledgeInputs } from "./ProductTruth";
+import { channelOffers } from "./ProductTruth";
 import { withObject, withSubject } from "../../korean";
+
+/**
+ * <b>Moved to {@link ./ProductTruth} (Product Self-Knowledge Truth Closure v1) and re-exported here.</b>
+ *
+ * The five composed answers below are now the FALLBACK for the Grounded Conversation lane, and the
+ * per-(channel × object) truth they used to own is what that lane grounds on. Keeping one owner of
+ * `channelOffers` / `SelfKnowledgeInputs` is the same rule this file already applies to sentences: a
+ * second copy is a second answer waiting to disagree.
+ */
+export type { ChannelOffer, SelfKnowledgeInputs } from "./ProductTruth";
+export { channelOffers } from "./ProductTruth";
 
 /**
  * <b>Which question about the product this is.</b> A closed token, chosen by the planner.
  *
- * Five, because five different questions were measured and each wants different FACTS — not because
- * five phrasings were collected. `null` is not a sixth value: the caller resolves it from what the
+ * Eleven, because eleven different questions were measured and each wants different FACTS — not because
+ * eleven phrasings were collected. `null` is not a twelfth value: the caller resolves it from what the
  * plan already carries (a named channel ⇒ CHANNEL_ACTION, otherwise PRODUCT_OVERVIEW), so a backend
  * that predates the field produces byte-identical answers for the shapes that worked before it.
  */
@@ -73,10 +84,25 @@ export type CapabilityAspect =
   /** 채널·행동별로 어디까지 되는가 — 「쿠팡은 어디까지 가능해?」·「리뷰 답글도 자동으로 보내?」 */
   | "CHANNEL_ACTION"
   /** 어떻게 시작하는가 — 「어떻게 시작해?」 */
-  | "HOW_TO_CONNECT";
+  | "HOW_TO_CONNECT"
+  /** 지금 하던 방식과 무엇이 다른가 — 「판매자센터랑 뭐가 달라?」 */
+  | "PRODUCT_DIFFERENCE"
+  /** 아직 없는 것이 언제·무엇이 되는가 — 「앞으로 뭐 할 거야?」 */
+  | "FUTURE_DIRECTION"
+  /** 지금 자동으로 돌고 있는가 — 「지금 자동으로 가져오고 있어?」 */
+  | "COLLECTION_STATE"
+  /** 어떻게·얼마나 자주 쓰게 되는가 — 「내가 매일 들어와야 해?」 */
+  | "DAILY_OPERATION"
+  /** 여러 사람이 함께 쓸 수 있는가 — 「직원이랑 같이 써도 돼?」 */
+  | "TEAM_ACCESS"
+  /** 자료를 어떻게 보관하고 지키는가 — 「우리 회사 자료는 안전하게 관리돼?」 */
+  | "SECURITY_AND_DATA";
 
-export const CAPABILITY_ASPECTS: readonly CapabilityAspect[] =
-  ["PRODUCT_OVERVIEW", "SUPPORTED_CHANNELS", "AFTER_CONNECT", "CHANNEL_ACTION", "HOW_TO_CONNECT"];
+export const CAPABILITY_ASPECTS: readonly CapabilityAspect[] = [
+  "PRODUCT_OVERVIEW", "SUPPORTED_CHANNELS", "AFTER_CONNECT", "CHANNEL_ACTION", "HOW_TO_CONNECT",
+  "PRODUCT_DIFFERENCE", "FUTURE_DIRECTION", "COLLECTION_STATE", "DAILY_OPERATION",
+  "TEAM_ACCESS", "SECURITY_AND_DATA",
+];
 
 export function capabilityAspectOf(value: string | null | undefined): CapabilityAspect | null {
   return CAPABILITY_ASPECTS.find((a) => a === value) ?? null;
@@ -109,48 +135,7 @@ export interface SelfAnswer {
   readonly link?: { readonly label: string; readonly to: string };
 }
 
-/* ─────────────────────────── channels, from the coverage snapshot ─────────────────────────── */
-
-const WORK_WORD: Readonly<Record<string, string>> = { INQUIRY: "문의", REVIEW: "리뷰", ORDER_SUMMARY: "주문" };
-
-export interface ChannelOffer {
-  readonly code: string;
-  readonly name: string;
-  readonly connected: boolean;
-  /** The seller-facing names of the data types THIS channel declares — never a written list. */
-  readonly works: readonly string[];
-}
-
-/**
- * Which channels this deployment can work with, and what each one offers.
- *
- * The rows are the turn's own coverage snapshot, so this costs nothing and cannot disagree with the
- * connection screen. A channel with no offered type is still listed: 「지원한다」 and 「이 채널에서 리뷰를
- * 가져올 수 있다」 are different claims and the second is per-type.
- */
-export function channelOffers(coverage: readonly ChannelCoverageRow[] | null): readonly ChannelOffer[] {
-  if (!coverage || coverage.length === 0) return [];
-  const byCode = new Map<string, { name: string; connected: boolean; works: string[] }>();
-  for (const row of coverage) {
-    const code = row.channelCode.toUpperCase();
-    const entry = byCode.get(code)
-      ?? { name: row.channelNameKo ?? row.channelCode, connected: false, works: [] };
-    if (row.connected) entry.connected = true;
-    const word = WORK_WORD[row.dataType.toUpperCase()];
-    if (row.supported && word && !entry.works.includes(word)) entry.works.push(word);
-    byCode.set(code, entry);
-  }
-  return [...byCode.entries()].map(([code, e]) => ({ code, name: e.name, connected: e.connected, works: e.works }));
-}
-
 /* ─────────────────────────────── the five answers ─────────────────────────────── */
-
-export interface SelfKnowledgeInputs {
-  readonly registeredTools: readonly string[];
-  readonly actionClasses: readonly ActionClass[];
-  readonly readiness: SellerReadiness;
-  readonly coverage: readonly ChannelCoverageRow[] | null;
-}
 
 /** 「어떤 채널을 지원해?」 — the deployment's own table, said as channels rather than as a refusal. */
 export function supportedChannelsAnswer(input: SelfKnowledgeInputs): SelfAnswer {
@@ -202,8 +187,8 @@ export function afterConnectAnswer(
   const steps: string[] = [];
   const source = scoped ? scoped.offer.name : "채널";
   steps.push(words
-    ? `1. ${source}에서 ${withObject(words)} 정기적으로 가져옵니다 — 판매자님이 매번 누르지 않아도 됩니다.`
-    : `1. ${source}에서 자료를 정기적으로 가져옵니다.`);
+    ? `1. ${source}에서 ${withObject(words)} 정기적으로 가져올 수 있습니다 — 자동 수집이 켜져 있으면 매번 누르지 않으셔도 됩니다.`
+    : `1. ${source}에서 자료를 정기적으로 가져올 수 있습니다.`);
   if (has("문의")) steps.push("2. 답변이 필요한 문의를 골라, 등록해 두신 기준으로 답변 초안까지 준비해 둡니다.");
   if (has("리뷰")) steps.push(`${steps.length + 1}. 리뷰에서 반복되는 문제를 찾아 모으고, 답글 초안을 준비합니다.`);
   if (has("상품")) steps.push(`${steps.length + 1}. 상품별로 무엇이 쌓이는지, 어떤 답변 기준이 비어 있는지 정리합니다.`);
@@ -269,8 +254,11 @@ function acrossSubtypes(
 }
 
 const ACQUISITION_SENTENCE = (verdict: ChannelCapabilityVerdict): string =>
+  // Potential mood, not present tense (Product Self-Knowledge Truth Closure v1 §4): AUTOMATIC is what
+  // the CHANNEL allows. Whether it is happening needs the deployment's posture and this seller's
+  // connection too, and `ProductTruth.runtimeCollectionFact` / `sellerCollectionFact` say that once.
   verdict.acquisition === "AUTOMATIC"
-    ? "자동으로 가져옵니다"
+    ? "자동으로 가져올 수 있습니다"
     : verdict.acquisition === "GUIDED_HUMAN_ACTION"
       ? "판매자님이 판매자센터에서 한 번 확인해 주시면 이어서 가져옵니다"
       : "아직 가져올 경로가 없습니다";
@@ -297,13 +285,13 @@ const ACQUISITION_SENTENCE = (verdict: ChannelCapabilityVerdict): string =>
  */
 const EXECUTION_SENTENCE = (verdict: ChannelCapabilityVerdict, connected: boolean): string =>
   verdict.execution === "API_EXECUTION"
-    ? "승인하시면 reviewnary가 채널에 바로 게시하고 결과를 확인합니다"
+    ? "판매자님이 확인하고 승인하시면 reviewnary가 채널에 등록하고 결과를 확인합니다"
     : verdict.execution === "GUIDED_BROWSER_EXECUTION"
       ? "reviewnary가 그 자리를 찾아 초안을 채워 두고, 등록 버튼은 판매자님이 누릅니다"
       : verdict.reason === EXECUTION_REASON.CHANNEL_UNSUPPORTED
-        ? "이 채널은 외부에서 보내는 길이 없어, 초안을 복사해 판매자센터에 올리시게 됩니다"
+        ? "이 채널에는 판매자가 답을 남기는 기능이 없어, 답변 초안도 준비하지 않습니다"
         : verdict.reason === EXECUTION_REASON.EXECUTION_DISABLED
-          ? "지금은 초안을 복사해 판매자센터에 올리시게 됩니다"
+          ? "초안까지 준비해 드리고, 채널에 올리는 마지막 단계는 판매자님이 하십니다"
           : connected
             ? "지금은 가능한지 확인하지 못했습니다"
             : "연결하신 뒤에 확인해 드릴 수 있습니다";

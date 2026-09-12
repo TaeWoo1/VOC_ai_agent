@@ -45,7 +45,17 @@ public final class ChannelApiGapRegistry {
      * two surfaces cannot drift apart into two slightly different sentences about one fact.
      */
     private static final Map<String, List<UnsupportedScope>> GAPS = Map.of(
-            "COUPANG", List.of(new UnsupportedScope("REVIEW_API", "리뷰 API 없음 (쿠팡 미제공)")),
+            // REVIEW_REPLY is a SECOND, separate Coupang fact and not a restatement of the first: NAVER
+            // also publishes no review API and a NAVER seller can still answer a review in the seller
+            // center, so "no API" does not imply "no reply". Coupang gives sellers no reply feature at
+            // all (policy gate D8) — the same fact `ReviewTriageChannelCapability.replyFlowExists` and
+            // `ReviewExecutionCapability`'s default branch already assert, registered here because those
+            // two are ORG/ACCOUNT-scoped and this one has to be answerable for a channel nobody has
+            // connected. Without it, a seller deciding whether to connect reads "확인하지 못했습니다"
+            // about a limitation the marketplace has published, and a Coupang review falls into the
+            // "초안을 복사해 올리시면 됩니다" group where there is nothing to copy it into.
+            "COUPANG", List.of(new UnsupportedScope("REVIEW_API", "리뷰 API 없음 (쿠팡 미제공)"),
+                    new UnsupportedScope("REVIEW_REPLY", "판매자 리뷰 답글 기능 없음 (쿠팡 미제공)")),
             // NAVER: stated by the official 스마트스토어 maintainer on 2024-08-30 and carried in
             // connector_capabilities as UNSUPPORTED ever since. Registered here so the absence
             // survives the connector being off, exactly as it must for Coupang — the demo org's 3,858

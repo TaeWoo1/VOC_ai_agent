@@ -45,9 +45,21 @@ const OTHER_OBJECT_WORDS = ["문의", "주문", "상품", "정책", "지식", "�
  */
 const QUESTION_CUES = ["있어", "있나", "있을까", "있는지", "왔어", "왔나", "들어왔", "어때", "어떤가", "몇 건", "몇건"];
 
-/** Words that make it a different question about the same rows — a rating, a product, a ranking, a set. */
+/**
+ * Words that make it a different question about the same rows — a rating, a product, a ranking, a set.
+ *
+ * <b>The ability and experience constructions are here because 「있어」 is two questions.</b>
+ * 「쿠팡 리뷰에도 답글 달아줄 수 있어?」 and 「카페24 리뷰에 답글 실제로 보낸 적 있어?」 both name reviews
+ * and both end in an existence cue, and this lane answered them with a row count in 40ms without the
+ * planner ever seeing them — a question about what the PRODUCT can do, answered with how many rows the
+ * SELLER has. 「-ㄹ 수 있」 asks about ability and 「-ㄴ 적 있」 asks whether it has ever happened; neither
+ * is an existence question about rows, and both belong to the planner's semantic intent. This is the
+ * list that already exists for exactly this purpose, not a new one — and the failure direction is
+ * unchanged: a sentence dropped here costs a planner call, never a wrong answer.
+ */
 const NOT_RECOGNISED = [
   "안 좋", "나쁜", "낮은", "별점", "부정", "상품별", "그중", "여기서", "방금", "왜", "이유", "비교", "반복", "문제",
+  "수 있", "수있", "적 있", "적있", "가능",
 ];
 
 /**

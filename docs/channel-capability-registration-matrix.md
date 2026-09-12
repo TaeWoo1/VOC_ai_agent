@@ -185,5 +185,5 @@ NAVER 가이드 연결 `docs/slices/naver-guided-connection.md`.
 - 자율 모드·사업자 결정·운영 루프: `docs/product-scope-v1.md` §1.2·§1.3·§1.4·§1.5
 - Action Window: `docs/slices/action-window-v1.md`
 - NAVER 가이드 연결: `docs/slices/naver-guided-connection.md`
-- 라이브 검증 기록: `docs/sellerops_phase3c_live_smoke.md`, `docs/sellerops_cafe24_live_verification.md`,
+- 라이브 검증 기록: `docs/archive/sellerops_phase3c_live_smoke.md`, `docs/sellerops_cafe24_live_verification.md`,
   `docs/sellerops_phase0_esm_inquiry_gate1_findings.md`, `docs/esm/live-capture-plan.md`

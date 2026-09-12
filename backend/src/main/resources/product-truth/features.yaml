@@ -1,0 +1,255 @@
+# CURRENT_PRODUCT_TRUTH — 채널×객체가 아닌 제품 전체 기능
+#
+# capabilities.yaml 의 행은 channel 과 object 를 요구한다. 그래서 파일 업로드, 회사 지식,
+# 과거 답변 기억, 리포트, 개선 기회, 답변 스타일처럼 채널을 가로지르는 기능은 그 파일에 담을
+# 자리가 구조적으로 없었고, 결과적으로 원장에서 보이지 않았다 — 불변식의 notThis 한 줄에만
+# 언급되고 status 도 evidence 도 없었다. 원장이 보지 못하는 기능은 답변이 주장할 수도, 정직하게
+# 거절할 수도 없는 기능이다.
+#
+# 읽는 법은 capabilities.yaml 과 같다. 다만 mode 가 없다 — mode 는 축(axis)의 어휘이고 기능에는
+# 축이 없다. mode 를 달면 채널을 잊은 채널 행처럼 읽힌다.
+#
+# 코드가 있다는 것은 제품 capability 라는 증거가 아니다. 패키지가 컴파일된다는 것뿐인 항목은
+# IMPLEMENTED 로 적고 그렇다고 말한다.
+version: v1
+features:
+
+  - id: FEATURE.MANUAL_FILE_ACQUISITION
+    title: 파일로 직접 올리기 (리뷰 · 문의 · 주문 요약)
+    status: SUPPORTED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/multi-channel-connector-roadmap.md §4.1 「공통(전 채널) · MANUAL(파일 업로드)」 행 —
+      구현·라이브 검증(E2E 스모크) 둘 다 ✅ · com.sellerops.upload.UploadController
+      (POST /api/uploads, UploadType REVIEW·INQUIRY·ORDER_SUMMARY) · 실제 판매자 데이터가 이
+      경로로 저장돼 있다(canonical Demo Org 의 GMARKET 리뷰 11건 — 채널 식별자도 수집 작업 id 도
+      없다)
+    sellerFacingNotes:
+      - 채널 연결과 별개로, 리뷰·문의·주문 요약을 파일로 직접 올릴 수 있습니다.
+      - 자동 수집이 없는 채널에서도 파일 업로드로 자료를 넣을 수 있습니다.
+    limitations:
+      - 양식은 채널마다 다르고, 올린 자료의 최신성은 판매자님이 언제 올리셨는지에 달려 있습니다.
+      - 파일로 올린 리뷰는 판매자센터 화면에서 찾을 대상이 없어, 가이드형 답변 실행의 대상이 되지
+        않습니다.
+    sourceRefs:
+      - com.sellerops.ingest.UploadType
+      - com.sellerops.connector.FileUploadConnector
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: FEATURE.KNOWLEDGE
+    title: 회사가 등록한 지식과 답변 기준
+    status: SUPPORTED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/knowledge_setup_inbox_ux_v1.md (라이브 QA A~J — 상품 자료가 PRODUCT 범위로 저장돼
+      검색되고, 사용 중지하면 근거에서 빠지고, 복구하면 다시 찾힌다) ·
+      docs/knowledge_gap_resolution_v1.md · docs/knowledge_retrieval_quality_v2.md §12
+      (한 번도 보지 않은 44문항 holdout — 근거 검색 97.2% · 엉뚱한 출처 0)
+    sellerFacingNotes:
+      - 회사의 운영 기준과 상품 지식을 등록해 두시면 답변의 근거로 씁니다.
+      - 답변에 필요한데 등록되지 않은 것이 있으면 무엇이 빠졌는지 말하고 그 자리에서 채우실 수
+        있게 합니다.
+      - 등록한 지식을 근거로 쓴 답변은 어느 문서에서 왔는지 함께 보여 드립니다.
+    limitations:
+      - 지식을 하나 넣었다고 모든 질문이 답변 가능해지지 않습니다. 그 질문에 적용할 수 있는
+        내용이어야 합니다.
+      - 판매자님이 직접 쓰신 답변이 자동으로 회사 지식이 되지는 않습니다. 별도 결정입니다.
+    sourceRefs:
+      - docs/seller_operations_knowledge_and_answer_memory_v1.md
+      - INVARIANT.KNOWLEDGE_SCOPE
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: FEATURE.ANSWER_MEMORY
+    title: 판매자가 실제로 했던 과거 답변 기억
+    status: SUPPORTED
+    evidence: IMPLEMENTED
+    evidenceRef: >-
+      docs/seller_operations_knowledge_and_answer_memory_v1.md (3-lane retrieval 의 한 lane) ·
+      com.sellerops.inquiry.memory.InquiryAnswerMemoryHook — 실제 org 에 과거 답변 행이 쌓여 있으나,
+      그 lane 이 근거로 인용된 GROUNDED 초안은 라이브에서 관측된 적이 없다
+      (docs/retrieval_runtime_closure_v1.md 「고치지 않고 보고」)
+    sellerFacingNotes:
+      - 판매자님이 예전에 실제로 하신 답변을 참고해 비슷한 질문의 초안을 준비할 수 있습니다.
+    limitations:
+      - 과거 답변은 참고이지 회사의 공식 기준이 아닙니다.
+      - AI가 만든 초안은 과거 답변 기억에 들어가지 않습니다. 구조적으로 들어가지 않습니다.
+      - 과거 답변을 근거로 인용한 초안이 실제 판매자 계정에서 관측된 적은 아직 없습니다.
+    sourceRefs:
+      - INVARIANT.KNOWLEDGE_SCOPE
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: FEATURE.ANSWER_STYLE
+    title: 회사가 정하는 답변 말투
+    status: SUPPORTED
+    evidence: TEST_PROVEN
+    evidenceRef: >-
+      docs/organization_answer_style_v1.md (V80 · /settings/style · 같은 근거에 두 스타일을 넣어
+      사실 부분이 바이트 단위로 같고 스타일 절만 달라짐을 payload 로 검증) ·
+      docs/core_daily_loop_ux_v1.md (bounded model proof 2회 — 합성 fixture)
+    sellerFacingNotes:
+      - 인사말·호칭·길이·말투를 회사가 정하면 그 말투를 답변 초안에 반영할 수 있습니다.
+      - 아무것도 설정하지 않으셔도 기본 말투로 답변합니다.
+    limitations:
+      - 말투는 사실을 이기지 못합니다. 근거가 없으면 말투 설정이 있어도 초안을 지어내지 않습니다.
+      - 「꼭 포함할 표현」에는 사실을 담을 수 없습니다. 모든 답변에 무조건 들어가는 문장이기 때문입니다.
+      - 실제 판매자 계정에서 말투 설정이 적용된 초안이 관측된 적은 아직 없습니다.
+    sourceRefs:
+      - com.sellerops.knowledge.style.AnswerStyleProfile
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: FEATURE.REVIEW_REPLY_TEMPLATES
+    title: 회사가 정하는 리뷰 답변 문구
+    status: SUPPORTED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/review_reply_template_settings_v1.md §8 (V89 · /settings/review-templates ·
+      canonical Demo Org 라이브 — 회사가 저장한 문구가 다음 초안의 시작 문장이 되고, 다른 조직은
+      기본값 그대로이며 승인된 초안은 움직이지 않는다)
+    sellerFacingNotes:
+      - 리뷰 답변에 쓰는 기본 문구를 유형별로 회사가 직접 정할 수 있습니다.
+      - 정하지 않으시면 기본 문구를 씁니다.
+    limitations:
+      - 유형은 별점과 후기에 나온 낱말로 고릅니다. 후기가 칭찬인지 불만인지 판정하지 않습니다.
+      - 문구는 문장 전체이고, 그 안에 사실을 끼워 넣는 자리를 만들지 않습니다.
+    sourceRefs:
+      - com.sellerops.attention.reply.ReviewReplyTemplateKey
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: FEATURE.REPORTING
+    title: 주간 · 월간 운영 리포트
+    status: SUPPORTED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/agentic_report_v1.md (V96 `agent_report` · 라이브 canonical Demo Org 주간 23.8s ·
+      월간 19.3s · 12줄 전부 fact id 를 인용 · 근거 없는 문장 0 · 재열람 byte-identical)
+    sellerFacingNotes:
+      - 끝난 기간에 대해 무엇이 반복됐는지, 무엇이 달라졌는지 리포트를 만듭니다.
+      - 리포트의 문장은 전부 그 리포트가 세어 둔 숫자를 인용합니다.
+    limitations:
+      - 끝난 기간만 만듭니다. 진행 중인 이번 주는 아직 리포트의 대상이 아닙니다.
+      - 원인은 말하지 않습니다. 리뷰와 문의가 원인을 말해 주지 않기 때문입니다.
+      - 읽지 못한 자료는 0이 아니라 "확인할 수 없음"으로 남습니다.
+    sourceRefs:
+      - INVARIANT.ABSENCE
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: FEATURE.IMPROVEMENT_OPPORTUNITY
+    title: 반복되는 문제에서 개선 기회 제안
+    status: SUPPORTED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/opportunity_engine_v1.md (V94 · 라이브 canonical Demo Org 이슈 19 → 기회 7 ·
+      근거 없는 행 0 · 판매자의 결정과 초안만 저장) · docs/agentic_report_v1.md
+      (부정문 오탐 수정 후 기회 7 → 5)
+    sellerFacingNotes:
+      - 리뷰에서 같은 문제가 반복되면, 무엇을 보완하면 좋을지와 그 근거를 함께 제안합니다.
+      - 제안을 받아들이시면 등록할 내용의 초안까지 준비합니다.
+    limitations:
+      - 제안은 반복 문제만큼만 정확합니다. 근거가 되는 리뷰를 직접 확인하실 수 있게 함께 보여 드립니다.
+      - 제안을 저장하거나 반영하는 것은 판매자님의 결정이고, reviewnary가 대신 등록하지 않습니다.
+      - 원인이나 효과를 말하지 않습니다.
+    sourceRefs:
+      - com.sellerops.opportunity.OpportunityRules
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: FEATURE.PROACTIVE_OPERATIONS
+    title: 판매자가 찾기 전에 오늘 할 일을 미리 조사해 두기
+    status: SUPPORTED
+    evidence: IMPLEMENTED
+    evidenceRef: >-
+      docs/proactive_operations_agent_v1.md (V75/V76 `proactive_case` — 기본값 OFF · 라이브
+      미실행으로 기록됨) · 다만 docs/agent_command_center_v1.md 와
+      docs/executive_readiness_fix_v1.md 는 canonical Demo Org 의 실제 문의로 만들어진 케이스를
+      화면에서 관측했다고 적는다. 두 기록이 어긋나므로 evidence 를 올리지 않는다.
+    sellerFacingNotes:
+      - 판매자님이 찾아보시기 전에 오늘 확인할 일을 미리 조사해서 준비해 두는 기능이 있습니다.
+    limitations:
+      - 이 기능이 지금 이 판매자에게 켜져 있는지는 현재 제품 기준이 답하지 않습니다. 배포와 조직 설정이
+        정하는 사실이고, 실행 시점에 따로 말해야 합니다.
+      - 일의 수명은 문의와 리뷰가 소유합니다. 이 층은 그 위에 붙는 주석이고 별도의 작업 목록이
+        아닙니다.
+      - 문의는 초안까지만 준비하고 멈춥니다. 승인과 전송은 판매자님의 결정입니다.
+      - 리뷰는 답변을 준비하지 않고 무엇을 확인하면 좋을지까지만 말합니다.
+      - 실제 판매자 계정에서 이 기능이 계속 돌아간 기록이 제품 기록끼리 서로 엇갈립니다.
+        아직 확인 중인 항목입니다.
+    sourceRefs:
+      - com.sellerops.proactive.ProactiveSafetyFenceTest
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: FEATURE.ACCOUNT_AND_ORGANIZATION
+    title: 계정과 회사 — 가입하면 회사가 하나 만들어진다
+    status: SUPPORTED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      com.sellerops.auth.AuthService#signup 과 com.sellerops.auth.social.SocialAuthService 둘 다
+      가입 시 조직을 새로 만들고 가입자를 소유자로 기록한다 · 이미 등록된 이메일은 두 경로 모두
+      거절한다(소셜 로그인은 이메일이 같아도 기존 계정에 자동으로 붙지 않는다) · 이 저장소의 QA
+      세션들이 제품 자신의 가입 경로로 조직을 반복해서 만들어 왔다
+    sellerFacingNotes:
+      - 가입하시면 회사가 하나 만들어지고, 가입하신 분이 그 회사의 소유자가 됩니다.
+      - 회사에 등록된 자료는 그 회사에 로그인한 계정만 볼 수 있습니다.
+      - 이미 가입된 이메일로는 계정이 하나 더 만들어지지 않습니다.
+    limitations:
+      - 지금은 직원을 초대하거나 이미 있는 회사에 다른 계정으로 합류하는 경로가 제품에 없습니다.
+        가입하시면 언제나 새 회사가 만들어집니다.
+      - 한 회사에 계정이 여럿 있을 수 없다는 뜻은 아닙니다. 판매자님이 화면에서 하실 수 있는 일이
+        아직 없다는 뜻입니다.
+    sourceRefs:
+      - com.sellerops.auth.AuthService
+      - com.sellerops.auth.social.SocialAuthService
+      - ROADMAP.TEAM_ACCESS
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: FEATURE.CHANNEL_CREDENTIAL_STORAGE
+    title: 판매 채널 연결 자격의 보관 방식
+    status: SUPPORTED
+    evidence: IMPLEMENTED
+    evidenceRef: >-
+      com.sellerops.credential.CredentialVault 가 connector_credentials 의 유일한 읽기·쓰기이고,
+      com.sellerops.credential.EnvelopeCipher 가 자격별 키를 따로 만들어 봉투 방식으로 암호화한다
+      (AES-256-GCM) · 마스킹 조회는 메타데이터만 돌려준다 · 암호화 키가 설정되지 않은 배포에서는
+      저장과 복호화가 실패로 닫힌다 · 라이브 채널 연결에서 이 경로로 봉인된 자격이 쓰이고 있으나,
+      암호화 자체를 대상으로 한 별도의 라이브 증명 기록은 없다
+    sellerFacingNotes:
+      - 판매 채널에 연결할 때 쓰는 자격은 암호화해서 보관합니다.
+      - 그 자격의 원래 값은 화면에도 기록에도 나오지 않습니다.
+    limitations:
+      - 이것은 채널 연결 자격에 대한 사실입니다. 회사의 자료 전체가 암호화되어 보관된다는 뜻이
+        아닙니다.
+      - 문의·리뷰 본문처럼 판매자님이 화면에서 읽으셔야 하는 자료는 이 방식으로 보관하지 않습니다.
+    sourceRefs:
+      - com.sellerops.credential.CredentialVault
+      - INVARIANT.SECURITY_CLAIM_LIMIT
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: FEATURE.HELPER_DEVICE_ACCESS
+    title: 내 컴퓨터의 도우미가 연결되는 방식
+    status: SUPPORTED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/helper_device_authentication_v1.md (실제 설치된 도우미로 연결·요청·해제까지 라이브
+      확인) · helper_devices 는 연결 값의 해시만 보관하고 만료·해제 시각을 가진다 ·
+      com.sellerops.auth.device.HelperDeviceAuthFilter 가 도우미가 실제로 부르는 경로 목록만
+      통과시키고 그 밖은 거절한다
+    sellerFacingNotes:
+      - 내 컴퓨터의 도우미는 그 컴퓨터에만 발급된 별도의 연결로 붙습니다. 판매자님의 비밀번호를
+        보관하지 않습니다.
+      - 그 연결로는 도우미가 실제로 필요한 요청만 할 수 있습니다.
+      - 설정 화면에서 연결된 컴퓨터를 확인하고 연결을 끊으실 수 있습니다.
+    limitations:
+      - 이 연결은 판매자님이 도우미를 설치하고 브라우저에서 허용하셔야 만들어집니다.
+    sourceRefs:
+      - com.sellerops.auth.device.HelperDeviceAuthFilter
+      - docs/helper_device_authentication_v1.md
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"

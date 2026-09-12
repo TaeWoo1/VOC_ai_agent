@@ -16,9 +16,13 @@ import { CONVERSATION_PLANS, RECORDED_PLANS, SCENARIO_PLANS, capabilityPlan } fr
 import { checkGroundedAnswer, MAX_ANSWER_CHARS } from "../../src/conversation/groundedAnswer";
 import { productFactSheet, STRUCTURAL_FACTS } from "../../src/operator/capability/ProductFactSheet";
 import { envelopeTokens } from "../../src/conversation/ContextEnvelope";
+import { OPERATOR_TOOL } from "../../src/operator/tools/OperatorTools";
 import type { AgentConverseView } from "../../src/spring/types";
 
 const PLANS = { ...RECORDED_PLANS, ...CONVERSATION_PLANS, ...SCENARIO_PLANS };
+
+/** Every registered tool name — the catalogue a real run builds, so a derived list is fully derived. */
+const ALL_TOOLS: readonly string[] = Object.values(OPERATOR_TOOL);
 
 /** The eight sentences pilot QA put to a clean seller. None of them is one of the five aspects. */
 const COMPARISON = "너랑 사방넷 같은 솔루션이랑 뭐가 달라?";
@@ -92,8 +96,8 @@ describe("what the lane is grounded on", () => {
     const facts = h.operator.converseRequests[0]!.facts.join("\n");
     expect(facts).toContain("카페24");
     expect(facts).toContain("리뷰 가져오기");
-    expect(facts).toContain("확인하신 뒤에");
-    for (const structural of STRUCTURAL_FACTS) expect(facts).toContain(structural);
+    expect(facts).toContain("확인하시기 전에는");
+    for (const structural of STRUCTURAL_FACTS) expect(facts).toContain(structural.text);
   });
 
   it("the envelope travels as closed tokens — no id, no name, no customer sentence", async () => {
@@ -120,14 +124,33 @@ describe("what the lane is grounded on", () => {
     expect(perChannel.every((f) => f.startsWith("쿠팡"))).toBe(true);
   });
 
-  it("the sheet says what is NOT done from the same list that says what is", () => {
+  /**
+   * <b>Re-written in Product Self-Knowledge Truth Closure v1 §8.</b> The old assertion pinned the
+   * ABSENCE of 「이 목록에 없는 판매자센터 작업은 하지 않습니다」 when nothing was registered. That sentence
+   * is gone in every case now, because it turned a derived list into a denial — this runtime holds
+   * registered reads for capabilities that are not one of the four nouns, and the denial covered them.
+   */
+  it("the areas line is a summary that defers, never an exclusion", () => {
     const sheet = productFactSheet({
       registeredTools: [], actionClasses: ["READ"],
       readiness: { kind: "NO_CHANNEL", connected: [], connectable: ["네이버"], delegable: [] },
       coverage: null,
     }, []);
-    // No registered tool ⇒ no domain claimed, and therefore no 「이 목록에 없는」 sentence promising one.
-    expect(sheet.some((f) => f.includes("이 목록에 없는"))).toBe(false);
+    // No registered tool ⇒ no domain claimed, and therefore no summary line promising one either.
+    expect(sheet.some((f) => f.key === "PRODUCT.AREAS")).toBe(false);
+
+    const wired = productFactSheet({
+      registeredTools: [...ALL_TOOLS], actionClasses: ["READ"],
+      readiness: { kind: "NO_CHANNEL", connected: [], connectable: ["네이버"], delegable: [] },
+      coverage: null,
+    }, []);
+    const areas = wired.find((f) => f.key === "PRODUCT.AREAS")!;
+    expect(areas.text).toContain("핵심 운영 데이터");
+    // The two things that made the old line wrong: exclusivity, and standing above the channel rows.
+    expect(areas.text).not.toContain("뿐");
+    expect(areas.text).toContain("채널별 사실이 이 요약보다 우선합니다");
+    // …and the capabilities the four nouns do not name are said, derived from their own reads.
+    expect(wired.some((f) => f.key === "PRODUCT.SUPPORTING_AREAS")).toBe(true);
   });
 });
 

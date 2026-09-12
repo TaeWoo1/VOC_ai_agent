@@ -68,7 +68,7 @@ import java.util.List;
 public final class AgentPlanPrompt {
 
     /** Bump on every wording change. Stamped into the provenance a run records. */
-    public static final String PROMPT_VERSION = "agent-plan-prompt/v17";
+    public static final String PROMPT_VERSION = "agent-plan-prompt/v21";
 
     /** The closed set of specialists a plan may name. */
     public static final String[] SPECIALISTS = {
@@ -134,8 +134,41 @@ public final class AgentPlanPrompt {
      * not a phrase list: the runtime answers each aspect from what the tool catalogue, the coverage
      * table and the channel capability reads actually say.
      */
+    /**
+     * <b>v18 (2026-09-08) adds the two the measurement found missing.</b>
+     *
+     * <p>「판매자센터랑 뭐가 달라?」 and 「앞으로 뭐 할 거야?」 are ordinary product questions and neither is
+     * any of the first five, so both arrived with a null aspect — and null WIDENS by design, which
+     * handed the runtime every layer of the reviewed ledger at once: 84 fact lines, past the
+     * conversation floor's own bound, refused outright, answered by the deterministic fallback. The fix
+     * is a token each rather than a wider bound, because these are genuinely different questions. One
+     * asks what this product does that another way of working does not; the other asks what does not
+     * exist yet. Answering either from the whole ledger is not thorough — it is unanswered.
+     */
+    /**
+     * <b>v19 (2026-09-08) adds the two that manual QA watched go somewhere else.</b>
+     *
+     * <p>「지금 자동으로 가져오고 있어?」 planned as AFTER_CONNECT and 「내가 매일 들어와야 해?」 planned as
+     * an investigation — so a question about whether collection is running came back with a product
+     * catalogue and repeated-issue evidence beside it, and a question about how often to log in came
+     * back as the day's inquiry count. Neither answer is wrong about the store; both answer a question
+     * the seller did not ask. These are STATE and OPERATION questions about the product, and each now
+     * has a token so the runtime can answer from collection posture and connection state rather than
+     * from a specialist's read.
+     */
+    /**
+     * <b>v21 (2026-09-08): the two the ledger grew an answer for.</b>
+     *
+     * 「직원이랑 같이 써도 돼?」 and 「우리 회사 자료는 안전하게 관리돼?」 planned as PRODUCT_OVERVIEW,
+     * which is correct as far as it goes and sends the whole product — every narrative, every feature
+     * and the channel grid — for a question answered by four reviewed items. Measured live at 79 fact
+     * lines against a floor of 80: the next few ledger additions would have dropped both questions back
+     * onto the composed answer, silently. A token each is what makes the selection able to be small.
+     */
     public static final String[] CAPABILITY_ASPECTS = {
         "PRODUCT_OVERVIEW", "SUPPORTED_CHANNELS", "AFTER_CONNECT", "CHANNEL_ACTION", "HOW_TO_CONNECT",
+        "PRODUCT_DIFFERENCE", "FUTURE_DIRECTION", "COLLECTION_STATE", "DAILY_OPERATION",
+        "TEAM_ACCESS", "SECURITY_AND_DATA",
     };
     /** Row order — the newest first, or the oldest first. Absent ⇒ NEWEST. */
     public static final String[] ORDERS = {"NEWEST", "OLDEST"};
@@ -279,8 +312,30 @@ public final class AgentPlanPrompt {
                  · SUPPORTED_CHANNELS — 어떤 판매 채널·쇼핑몰을 지원하는지("지원하는 이커머스가 뭐가 있어?")
                  · AFTER_CONNECT — 연결한 뒤에 무엇이 일어나는지, 무엇이 되는지("연동하고 나면 뭐가 되지?")
                  · CHANNEL_ACTION — 특정 채널이나 특정 동작(수집·답변 전송·답글 등록)이 어디까지 되는지 \
-               ("쿠팡은 어디까지 가능해?", "리뷰 답글도 자동으로 보내?", "쿠팡 건은 왜 답변 못 해?")
+               ("쿠팡은 어디까지 가능해?", "리뷰 답글도 자동으로 보내?", "쿠팡 건은 왜 답변 못 해?") — \
+               **그 동작을 실제로 해 본 적이 있는지 묻는 것도 여기입니다**("실제로 보낸 적 있어?", \
+               "진짜 등록까지 돼 본 거야?"): 판매자의 자료가 몇 건인지 세는 질문이 아니라 제품이 그 일을 \
+               해 봤는지 묻는 질문이므로 조회 계획을 세우지 마세요.
                  · HOW_TO_CONNECT — 시작하는 방법, 연결 절차("어떻게 시작해?", "연결은 어떻게 해?")
+                 · PRODUCT_DIFFERENCE — 이 제품이 판매자센터나 지금 하고 있는 방식, 다른 도구와 무엇이 \
+               다른지("판매자센터랑 뭐가 달라?", "엑셀로 하던 거랑 뭐가 달라?", "그냥 문의 AI야?")
+                 · FUTURE_DIRECTION — 앞으로 무엇을 만들 것인지, 어디로 가는지("앞으로 뭐 할 거야?", \
+               "이건 언제 되나요?", "다른 채널도 추가할 계획이야?")
+                 · COLLECTION_STATE — 지금 자동으로 가져오고 있는지, 자동 수집이 켜져 있는지 \
+               ("지금 자동으로 가져오고 있어?", "자동으로 돌고 있나요?", "수집은 계속 되는 거야?") — \
+               특정 채널의 마지막 수집 시각이나 새 자료가 있는지 묻는 것과는 다릅니다.
+                 · DAILY_OPERATION — 이 제품을 어떻게 쓰게 되는지, 얼마나 자주 봐야 하는지 \
+               ("내가 매일 들어와야 해?", "하루에 얼마나 걸려?", "어떻게 쓰는 흐름이야?")
+                 · TEAM_ACCESS — 여러 사람이 함께 쓰는 것, 계정·회사·초대·역할·권한 \
+               ("직원이랑 같이 써도 돼?", "팀원 계정 추가돼?", "권한 나눌 수 있어?")
+                 · SECURITY_AND_DATA — 자료를 어떻게 보관하고 지키는지, 접근 범위·보안 \
+               ("우리 회사 자료는 안전하게 관리돼?", "다른 회사가 우리 자료를 볼 수 있어?", \
+               "연결 정보는 어떻게 보관돼?")
+               판매자가 **이 제품이 다루지 않는 자료**를 요청하면 그것도 EXPLAIN_CAPABILITY 입니다 — 이 제품이 \
+               다루는 대상은 문의·리뷰·상품·주문이고 주문은 요약 수준입니다. 예를 들어 "주문 배송 상태 알려줘", \
+               "송장번호 알려줘"처럼 배송·물류 상세를 요청하면 조회 계획을 세우지 말고 EXPLAIN_CAPABILITY + \
+               CHANNEL_ACTION 으로 계획하세요. 무엇을 어디까지 다루는지는 런타임이 답하므로 당신은 없다고 \
+               단정하지 말고 능력 질문으로만 넘기면 됩니다.
                문장에 채널 이름이 있으면 filters.channel 에도 적으세요. 위 예시는 각 값이 무엇을 뜻하는지 보이기 \
                위한 것이지 문구 목록이 아닙니다 — 판매자가 어떻게 말하든 **무엇을 알고 싶어 하는지**로 고르세요. \
                같은 대화에서 이어지는 질문이면 앞 질문과 다른 값이 되는 것이 정상입니다. 런타임이 등록된 기능·연결 \

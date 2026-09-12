@@ -29,7 +29,8 @@ import type {
   RepeatedInquiry,
 } from "./types";
 import type {
-  ChannelCapabilityOverview, ChannelCoverageRow, ChannelSummary, DashboardOverview, InquiryReplyTransportRow,
+  CanonicalProductTruth, ChannelCapabilityOverview, ChannelCoverageRow, ChannelSummary, CollectionPostureView,
+  DashboardOverview, InquiryReplyTransportRow,
   KnowledgeSearchResult, OrgKnowledgeSearchResult, SellerProfileView, OrderSummaryParams, OrderSummaryResponse, RecentReviewsParams, RecentReviewsResponse, ReviewDetailResponse,
   ReviewChannelCapabilityView,
 } from "./types";
@@ -194,6 +195,23 @@ export interface OperatorSpringClient {
    * review rows are dropped at the transport.
    */
   getReviewChannelCapability?(accountId: string): Promise<ReviewChannelCapabilityView>;
+  /**
+   * Whether this DEPLOYMENT collects on its own (`GET /api/collect/posture`) — the runtime layer a
+   * 「자동으로 가져오고 있습니다」 sentence needs and could not previously read (Product Self-Knowledge
+   * Truth Closure v1). Optional: an older backend has no such endpoint, and its absence is UNKNOWN.
+   */
+  getCollectionPosture?(): Promise<CollectionPostureView>;
+  /**
+   * The Canonical Product Source (`GET /api/product-truth`) — the reviewed ledger of what this PRODUCT
+   * does, per channel × object × axis, plus its product-wide features, invariants, narrative,
+   * directions and roadmap.
+   *
+   * <b>Authority, not another opinion.</b> What the product can do is answered here; whether it is
+   * switched on, connected or running is answered by the reads beside this one, and the two are said as
+   * two sentences rather than resolved into one. Optional for the same reason as the posture read: an
+   * older backend has none, and its absence costs breadth rather than correctness.
+   */
+  getProductTruth?(): Promise<CanonicalProductTruth>;
 
   /**
    * Search platform knowledge about how a sales channel works.

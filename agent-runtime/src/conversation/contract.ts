@@ -778,7 +778,9 @@ export interface PlanFilters {
    * exactly as before.
    */
   readonly capabilityAspect:
-    | "PRODUCT_OVERVIEW" | "SUPPORTED_CHANNELS" | "AFTER_CONNECT" | "CHANNEL_ACTION" | "HOW_TO_CONNECT" | null;
+    | "PRODUCT_OVERVIEW" | "SUPPORTED_CHANNELS" | "AFTER_CONNECT" | "CHANNEL_ACTION" | "HOW_TO_CONNECT"
+    | "PRODUCT_DIFFERENCE" | "FUTURE_DIRECTION" | "COLLECTION_STATE" | "DAILY_OPERATION"
+    | "TEAM_ACCESS" | "SECURITY_AND_DATA" | null;
   /** How many rows the seller asked for (「1개만」, 「3개」). Clamped by the parser; null = the read's default page. */
   readonly limit: number | null;
   /** Which end of the window comes first. Absent ⇒ NEWEST. */

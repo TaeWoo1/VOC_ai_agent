@@ -1,0 +1,1200 @@
+# CURRENT_PRODUCT_TRUTH — reviewnary가 제품으로서 실제 제공하는 것
+#
+# 이 파일이 seller-facing capability 문장의 authority다. 코드/registry/runtime env에서 매번
+# 역추론하지 않는다. 역추론이 만든 회귀가 이 파일이 존재하는 이유다 — stale registry 하나가
+# 라이브 검증된 Coupang 문의 경로를 PARTIAL로 되돌렸고, QA 환경의 실행 플래그 OFF가
+# "reviewnary는 직접 전송하지 못합니다"라는 제품 사양처럼 설명됐다.
+#
+# 여기 없는 것: 지금 이 배포에서 켜져 있는가 · 이 판매자가 연결했는가 · 지금 수집 중인가.
+# 그 셋은 runtime overlay(CURRENT_STATE)이고 실행 시점에 계산한다. 이 파일은 플래그를 읽지 않는다.
+#
+# 읽는 법
+#   status  제품이 이 축을 제공하는가          SUPPORTED / PARTIAL / NOT_SUPPORTED / UNKNOWN
+#   mode    제공한다면 어떤 모양인가            축마다 허용 값이 다르다 (ProductCapabilityMode)
+#   evidence 무엇이 그 주장을 받치는가          LIVE_PROVEN > TEST_PROVEN > IMPLEMENTED > DECLARED > UNKNOWN
+#
+#   status와 evidence는 다른 축이다. SUPPORTED + IMPLEMENTED는 "제품이 제공하지만 아직 실제
+#   판매자 계정에서 돌려 본 적은 없다"이고, NOT_SUPPORTED + DECLARED는 "감사한 벤더 문서가
+#   그 기능이 없다고 말한다"이다. 여기 적었다는 이유로 evidence가 올라가지 않는다.
+#
+#   mode LIMITED_READ는 "부분만 지원"이 아니라 "명시된 경계 안에서 완전히 지원"이다.
+#   경계는 limitations에 적는다. 능력 자체가 반쪽이면 status가 PARTIAL이 된다.
+#
+#   limitations는 절대 주장하면 안 되는 것의 목록이다. 문장을 넓히기 전에 이 줄들을 읽는다.
+#
+#   requirements 는 EXECUTION 축에만 붙는 실행 전제조건이다. "제품이 이걸 할 수 있다"와
+#   "지금 이 판매자·이 배포에서 실행할 수 있다"는 다른 사실이고, 뒤의 것을 앞의 것에 섞으면
+#   capability 가 배포 자세로 읽힌다. 전제조건이 안 채워졌다고 status 가 내려가지 않는다.
+#
+#   subtypes 는 한 채널의 한 객체가 사실은 여러 계약일 때의 세분화다. 판매자에게 보이는 운영
+#   객체는 여전히 상위 객체 하나이고, subtype 은 channel/object/axis 를 갖지 않아 3×4×4 격자에
+#   들어가지 않는다.
+#
+# 채널×객체가 아닌 제품 기능은 features.yaml 이 소유한다. 이 파일은 channel 과 object 를
+# 요구하므로 파일 업로드·지식·리포트 같은 제품 전체 기능을 구조적으로 담을 수 없다.
+#
+# review: TODO_REVIEW 는 "사람이 아직 확인하지 않았다"는 뜻이다. 프로그램만 주장한 사실은
+# 아직 제품 결정이 아니다.
+version: v2
+capabilities:
+
+  # ==========================================================================================
+  # NAVER · 스마트스토어
+  # ==========================================================================================
+
+  - id: NAVER.INQUIRY.ACQUISITION
+    channel: NAVER
+    object: INQUIRY
+    axis: ACQUISITION
+    status: PARTIAL
+    mode: AUTOMATIC
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/naver_inquiry_api_audit_v1.md §8·§9·§16 · docs/evidence/INDEX.md (2026-08-24 —
+      source 획득 + routine recurrence 둘 다 CONFIRMED)
+    sellerFacingNotes:
+      - 네이버 상품 문의와 고객 문의(네이버페이)를 공식 API로 가져올 수 있습니다.
+      - 사람이 조작하지 않아도 정해진 주기로 다시 읽는 자동 수집 경로가 있는 채널입니다.
+    limitations:
+      - 이 행은 세 문의 종류를 묶어 말한 요약입니다. 실제 사실은 subtype 이 정합니다 —
+        상품 문의와 고객 문의는 가져오고 톡톡은 가져오지 않으므로, 이 채널의 문의 전체를
+        "가져옵니다"라고 말할 수 없습니다.
+      - 톡톡 문의는 네이버가 공식 API를 제공하지 않아 가져오지 않습니다. 0건과 같은 뜻이 아닙니다.
+      - 2026-06-01 이전 구간은 관측된 적이 없습니다.
+      - 라이브에서 관측된 18건이 전부 답변 완료였으므로, 미답변 문의가 큐에 올라오는 경로는
+        아직 실제로 확인되지 않았습니다.
+    subtypes:
+      - key: PRODUCT_INQUIRY
+        label: 상품 문의
+        status: SUPPORTED
+        mode: AUTOMATIC
+        evidence: LIVE_PROVEN
+        evidenceRef: >-
+          docs/naver_inquiry_api_audit_v1.md §8·§16 (2026-08-24 — 13건 수집 · 오류 0 ·
+          채널상품번호 13/13 일치) · routine recurrence CONFIRMED
+        sellerFacingNotes:
+          - 상품 문의는 공식 API로 가져오고 정기 수집도 가능합니다.
+      - key: CUSTOMER_INQUIRY
+        label: 고객 문의 (네이버페이)
+        status: SUPPORTED
+        mode: AUTOMATIC
+        evidence: LIVE_PROVEN
+        evidenceRef: docs/naver_inquiry_api_audit_v1.md §9 (2026-08-24 — 5건 수집 · 오류 0)
+        sellerFacingNotes:
+          - 네이버페이 고객 문의도 공식 API로 가져옵니다.
+        limitations:
+          - 상품 문의와 식별자 공간이 겹치지 않는 별개 계약입니다.
+      - key: TALKTALK
+        label: 톡톡 문의
+        status: NOT_SUPPORTED
+        mode: NONE
+        evidence: DECLARED
+        evidenceRef: >-
+          네이버 커머스 API에 판매자용 톡톡 조회 계약이 없음 (감사 결과, 우회 경로도 만들지 않음)
+        sellerFacingNotes:
+          - 톡톡 문의는 가져오지 않습니다. 톡톡에 온 문의가 0건이라는 뜻이 아닙니다.
+    sourceRefs:
+      - docs/multi-channel-connector-roadmap.md §4.1 (NAVER INQUIRY 두 행)
+      - com.sellerops.connector.naver.NaverProductQnaClient
+      - com.sellerops.connector.naver.NaverCustomerInquiriesClient
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.INQUIRY.READ
+    channel: NAVER
+    object: INQUIRY
+    axis: READ
+    status: PARTIAL
+    mode: LIMITED_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: docs/naver_inquiry_api_audit_v1.md §8·§9 (2026-08-24, 18건 · 오류 0)
+    sellerFacingNotes:
+      - 문의 내용과 등록일, 답변 여부, 어떤 상품에 대한 문의인지를 읽습니다.
+      - 문의는 채널상품번호로 판매자님의 상품에 정확히 연결됩니다(라이브 18/18 일치).
+    limitations:
+      - 비밀글 여부 필드가 응답에 없습니다. 비밀글 구분을 주장하지 않습니다.
+      - 주문 식별자가 응답에 없습니다. 네이버 문의를 특정 주문에 결합하지 않습니다.
+      - 고객 식별 정보는 응답에 오더라도 저장하지 않습니다.
+      - 이 행은 세 문의 종류를 묶어 말한 요약입니다. 실제 사실은 subtype 이 정합니다 —
+        톡톡 문의는 가져오지 않으므로 읽을 것도 없습니다.
+    subtypes:
+      - key: PRODUCT_INQUIRY
+        label: 상품 문의
+        status: SUPPORTED
+        mode: LIMITED_READ
+        evidence: LIVE_PROVEN
+        evidenceRef: docs/naver_inquiry_api_audit_v1.md §8 (13건 · 채널상품번호 13/13)
+        sellerFacingNotes:
+          - 상품 문의는 어떤 상품에 대한 문의인지 정확히 연결됩니다.
+      - key: CUSTOMER_INQUIRY
+        label: 고객 문의 (네이버페이)
+        status: SUPPORTED
+        mode: LIMITED_READ
+        evidence: LIVE_PROVEN
+        evidenceRef: docs/naver_inquiry_api_audit_v1.md §9 (5건)
+        sellerFacingNotes:
+          - 고객 문의의 본문과 답변 여부를 읽습니다.
+        limitations:
+          - 상품 결합은 상품 문의와 같은 방식으로 보장되지 않습니다.
+      - key: TALKTALK
+        label: 톡톡 문의
+        status: NOT_SUPPORTED
+        mode: NONE
+        evidence: DECLARED
+        evidenceRef: 수집 경로가 없으므로 읽기 경로도 없음 (NAVER.INQUIRY.ACQUISITION.TALKTALK)
+        sellerFacingNotes:
+          - 톡톡 문의는 읽지 않습니다.
+    sourceRefs:
+      - docs/operational_fact_binding_v1.md (주문 참조는 채널이 지목한 것만 저장)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.INQUIRY.DRAFT
+    channel: NAVER
+    object: INQUIRY
+    axis: DRAFT
+    status: PARTIAL
+    mode: DRAFT_PREPARED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/evidence/INDEX.md (2026-08-26, `apr-ce092e823017`) — AI 초안 v1(MODEL) 생성 후
+      판매자가 v2(SELLER)로 고쳐 승인
+    sellerFacingNotes:
+      - 등록된 상품 정보·운영 기준·과거 답변을 근거로 답변 초안을 준비합니다.
+      - 근거를 찾지 못하면 초안을 지어내지 않고 무엇이 빠졌는지 말합니다.
+    limitations:
+      - 초안은 답변이 아닙니다. 판매자님이 확인하고 승인하기 전에는 아무 데도 가지 않습니다.
+      - 실제로 나간 문장은 AI 초안이 아니라 판매자님이 고쳐 쓴 문장일 수 있습니다.
+      - 이 행은 세 문의 종류를 묶어 말한 요약입니다. 실제 사실은 subtype 이 정합니다 —
+        가져오지 않는 톡톡 문의에는 초안도 없습니다.
+    subtypes:
+      - key: PRODUCT_INQUIRY
+        label: 상품 문의
+        status: SUPPORTED
+        mode: DRAFT_PREPARED
+        evidence: LIVE_PROVEN
+        evidenceRef: docs/evidence/INDEX.md (2026-08-26, `apr-ce092e823017`)
+        sellerFacingNotes:
+          - 상품 문의 답변 초안을 준비합니다.
+      - key: CUSTOMER_INQUIRY
+        label: 고객 문의 (네이버페이)
+        status: SUPPORTED
+        mode: DRAFT_PREPARED
+        evidence: TEST_PROVEN
+        evidenceRef: com.sellerops.inquiry.draft.InquiryDraftComposer (문의 종류와 무관한 단일 초안 경로)
+        sellerFacingNotes:
+          - 고객 문의 답변 초안도 같은 방식으로 준비합니다.
+        limitations:
+          - 고객 문의에 대한 초안은 실제 스토어에서 관측된 적이 없습니다.
+      - key: TALKTALK
+        label: 톡톡 문의
+        status: NOT_SUPPORTED
+        mode: NONE
+        evidence: DECLARED
+        evidenceRef: 수집하지 않는 문의에는 초안 대상이 없음
+        sellerFacingNotes:
+          - 톡톡 문의에는 초안을 준비하지 않습니다.
+    sourceRefs:
+      - docs/answer_applicability_v1.md §9 (GROUNDED / NEEDS_CLARIFICATION / NO_ANSWER_BASIS)
+      - com.sellerops.inquiry.draft.InquiryDraftComposer
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.INQUIRY.EXECUTION
+    channel: NAVER
+    object: INQUIRY
+    axis: EXECUTION
+    status: PARTIAL
+    mode: DIRECT_WITH_APPROVAL
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      상품 문의: `LIVE_VERIFIED` 2026-08-26, commit 692c5a78, 승인 `apr-ce092e823017`
+      (PUT /external/v1/contents/qnas/{questionId} 1회 · 재시도 0 · 판정은 NaverAnsweredStateReader
+      의 read-back) · docs/pilot_runtime_foundation_v1.md §0-A
+    sellerFacingNotes:
+      - 판매자님이 승인하시면 reviewnary가 네이버에 답변을 직접 등록하고 등록됐는지 다시 읽어
+        확인합니다.
+    limitations:
+      - 이 행은 세 문의 종류를 묶어 말한 요약입니다. 실제 사실은 subtype 이 정합니다 —
+        답변 계약이 종류마다 다르고 톡톡에는 답변 경로가 없습니다.
+      - 고객 문의(네이버페이) 답변 경로는 구현돼 있지만 실제 스토어에서 실행된 적이 없습니다.
+      - 상품 문의는 같은 문의에 다시 보내면 등록이 아니라 수정으로 동작합니다. 그래서 대상의
+        현재 상태를 증명하지 못하면 전송을 경고가 아니라 거절로 막습니다.
+      - 두 문의 종류는 식별자 공간이 겹치지 않는 별개 계약이라, 한쪽 승인이 다른 쪽 승인이 되지
+        않습니다.
+    requirements:
+      - kind: VALID_APPROVAL
+        description: >-
+          판매자님이 그 문의 하나에 대해 승인하신 기록이 있어야 하고, 승인은 한 번만 쓰입니다.
+      - kind: CHANNEL_PRECONDITION
+        description: >-
+          상품 문의는 보내기 직전에 대상의 현재 답변 상태를 다시 읽어 확인할 수 있어야 합니다.
+          확인하지 못하면 보내지 않습니다.
+    subtypes:
+      - key: PRODUCT_INQUIRY
+        label: 상품 문의
+        status: SUPPORTED
+        mode: DIRECT_WITH_APPROVAL
+        evidence: LIVE_PROVEN
+        evidenceRef: >-
+          `LIVE_VERIFIED` 2026-08-26, commit 692c5a78, 승인 `apr-ce092e823017` — 등록 1회 ·
+          재시도 0 · 판정은 read-back
+        sellerFacingNotes:
+          - 상품 문의는 승인 후 reviewnary가 직접 등록하고 다시 읽어 확인합니다.
+        limitations:
+          - 같은 문의에 다시 보내면 새 답변이 아니라 기존 답변의 수정이 됩니다.
+      - key: CUSTOMER_INQUIRY
+        label: 고객 문의 (네이버페이)
+        status: SUPPORTED
+        mode: DIRECT_WITH_APPROVAL
+        evidence: IMPLEMENTED
+        evidenceRef: >-
+          공식 계약 사본 post-v1-pay-merchant-inquiries-inquiryNo-answer.md ·
+          NaverCustomerInquiryReplyAdapter — 구현됨, 실제 스토어 미실행
+        sellerFacingNotes:
+          - 고객 문의 답변 등록 경로가 있습니다.
+        limitations:
+          - 실제 스토어에서 실행된 적이 없습니다.
+          - 중복 답변은 채널이 거부합니다.
+      - key: TALKTALK
+        label: 톡톡 문의
+        status: NOT_SUPPORTED
+        mode: NONE
+        evidence: DECLARED
+        evidenceRef: 톡톡 답변 계약 없음 · 수집 경로도 없음
+        sellerFacingNotes:
+          - 톡톡 문의에는 답변을 등록하지 않습니다.
+    sourceRefs:
+      - com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry
+      - docs/inquiry_workflow_completion_v2.md (OVERWRITE_WITHOUT_PROOF)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.REVIEW.ACQUISITION
+    channel: NAVER
+    object: REVIEW
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: SELLER_GUIDED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/evidence/INDEX.md (2026-09-02 NAVER Guided Acquisition E2E — 채팅 → 판매자센터 → 기간 →
+      조회 → 판매자 다운로드 → 자동 감지 → ingest → 같은 대화까지 완주)
+    sellerFacingNotes:
+      - 네이버 리뷰는 판매자센터에서 한 번 확인해 주시면 이어서 가져옵니다.
+      - 판매자님이 하실 일은 판매자센터 화면에서 조회하고 내려받는 것까지이고, 그 다음은
+        reviewnary가 이어받습니다.
+      - 파일로 직접 올리는 방법도 있습니다(FEATURE.MANUAL_FILE_ACQUISITION).
+    limitations:
+      - 네이버는 판매자용 리뷰 API를 제공하지 않습니다(공식 스마트스토어 관리자 확인, 2024-08-30).
+        그래서 사람이 없어도 도는 정기 수집이 이 채널의 리뷰에는 존재하지 않습니다.
+      - 판매자센터 목록의 조회 기간 밖에 있는 리뷰는 스크롤로 닿을 수 없습니다. 기간을 넓히는 것은
+        판매자님의 조작이고 reviewnary는 그 결과를 감지할 뿐입니다.
+    sourceRefs:
+      - com.sellerops.collect.AcquisitionPathRegistry (NAVER/REVIEW = EXPORT · LIVE_PROVEN · SELLER_REPEATED)
+      - com.sellerops.connector.ChannelApiGapRegistry (NAVER REVIEW_API 없음)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.REVIEW.READ
+    channel: NAVER
+    object: REVIEW
+    axis: READ
+    status: SUPPORTED
+    mode: FULL_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/multi-channel-connector-roadmap.md §4.1 (NAVER REVIEW — 2026-08-23 canonical Demo Org
+      refresh: 리뷰 4,340건 · 중복 0 · attribution 100%)
+    sellerFacingNotes:
+      - 가져온 리뷰의 별점과 본문, 어떤 상품의 리뷰인지를 읽고 반복되는 문제를 찾습니다.
+    limitations:
+      - 읽을 수 있는 것은 가져온 구간의 리뷰뿐입니다. 판매자센터에 있는데 아직 가져오지 않은
+        리뷰는 "없다"가 아니라 "아직 안 봤다"입니다.
+    sourceRefs:
+      - docs/agent_procedure_layer_v1.md (AbsenceReason — ZERO_MEASURED만이 부재를 주장한다)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.REVIEW.DRAFT
+    channel: NAVER
+    object: REVIEW
+    axis: DRAFT
+    status: SUPPORTED
+    mode: DRAFT_PREPARED
+    evidence: IMPLEMENTED
+    evidenceRef: >-
+      템플릿 lane 은 라이브 관측됨 — canonical Demo Org 리뷰 c329471c 초안 v3 `44627df4`
+      (provider `templates-v1+org`, 회사가 정한 문구, 승인 0건 · docs/review_approval_path_v1.md §6 ·
+      docs/review_reply_template_settings_v1.md §8). 등록된 지식을 근거로 쓰는 grounded lane 은
+      일회용 QA org before/after 만 있고 실제 판매자 계정에서 관측된 적이 없다
+      (docs/knowledge_retrieval_quality_v1.md)
+    sellerFacingNotes:
+      - 리뷰 답변 초안을 준비합니다. 회사가 정한 답변 문구를 시작점으로 씁니다.
+      - 등록된 지식에서 근거를 찾으면 그 근거를 인용해 초안을 씁니다.
+    limitations:
+      - 초안은 승인 전까지 판매자님 화면 밖으로 나가지 않습니다.
+      - 라이브에서 관측된 초안은 회사가 정한 문구에서 나온 것이고, 등록된 지식을 근거로 쓴 리뷰
+        초안은 실제 판매자 계정에서 아직 관측되지 않았습니다.
+      - 근거를 찾지 못하면 지어내지 않고 회사가 정한 기본 문구로 남습니다.
+    sourceRefs:
+      - com.sellerops.review.draft.ReviewDraftComposer
+      - docs/review_reply_template_settings_v1.md
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.REVIEW.EXECUTION
+    channel: NAVER
+    object: REVIEW
+    axis: EXECUTION
+    status: SUPPORTED
+    mode: GUIDED_WITH_APPROVAL
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/evidence/INDEX.md (2026-09-03 Guided Reply Phase 2 — 승인된 초안이 정확한 리뷰의
+      composer에 채워짐 · 2026-09-05 첫 페이지 밖의 리뷰도 정확히 찾아 채움, `COMPOSER_FILLED`)
+    sellerFacingNotes:
+      - 판매자님이 승인하시면 reviewnary가 네이버 판매자센터의 그 리뷰 답글 입력칸을 열어 승인된
+        문장을 채워 둡니다.
+      - 마지막 등록 버튼은 판매자님이 누르십니다.
+    limitations:
+      - 입력칸이 채워진 것은 등록된 것이 아닙니다(`COMPOSER_FILLED` ≠ 게시됨).
+      - 취득 계보가 마켓플레이스인 리뷰만 실행할 수 있습니다. 파일로 올린 리뷰는 화면에서 찾을
+        대상이 없습니다.
+      - 대상 리뷰의 작성일이 판매자센터 목록의 조회 기간 안에 있어야 찾을 수 있습니다.
+    requirements:
+      - kind: VALID_APPROVAL
+        description: 그 리뷰 하나에 대한 승인된 초안이 있어야 하고, 승인은 한 번만 쓰입니다.
+      - kind: GUIDED_EXECUTION_PREREQUISITE
+        description: >-
+          판매자님 컴퓨터에서 도우미 프로그램이 켜져 있고 판매자센터에 로그인돼 있어야 합니다.
+      - kind: GUIDED_EXECUTION_PREREQUISITE
+        description: >-
+          판매자센터 리뷰 목록의 조회 기간이 그 리뷰의 작성일을 포함해야 합니다. 기간을 넓히는 것은
+          판매자님의 조작이고 reviewnary는 그 결과를 감지할 뿐입니다.
+      - kind: CHANNEL_PRECONDITION
+        description: >-
+          채널에서 가져온 리뷰여야 합니다. 파일로 올린 리뷰는 판매자센터 화면에서 찾을 대상이
+          없습니다.
+    sourceRefs:
+      - com.sellerops.review.publish.ReviewExecutionCapability (NAVER → GUIDED_BROWSER_EXECUTION)
+      - docs/full_pilot_walkthrough_v1.md §5
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.PRODUCT.ACQUISITION
+    channel: NAVER
+    object: PRODUCT
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: AUTOMATIC
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/demo_org_and_channel_knowledge_v1.md §4c (2026-08-22 라이브 1회 — 69 리스팅 · 2페이지 ·
+      오류 0)
+    sellerFacingNotes:
+      - 등록하신 상품 목록을 공식 API로 가져올 수 있습니다.
+    limitations:
+      - 목록 리소스에 상품 URL·옵션조합·상세설명·판매자관리코드가 들어 있지 않습니다. 그 넷은
+        상품별 별도 읽기가 필요합니다.
+      - 변경분만 받아 오는 계약이 없어 매 주기 전체를 다시 읽습니다.
+      - 판매자 애플리케이션에 상품 API 권한이 필요합니다.
+    sourceRefs:
+      - com.sellerops.connector.naver.NaverProductsClient
+      - docs/multi-channel-connector-roadmap.md §4.1 (NAVER PRODUCT 행)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.PRODUCT.READ
+    channel: NAVER
+    object: PRODUCT
+    axis: READ
+    status: SUPPORTED
+    mode: LIMITED_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: docs/demo_org_and_channel_knowledge_v1.md §4c (필드 범위 실측)
+    sellerFacingNotes:
+      - 상품 이름·판매가·판매상태·카테고리·최종수정일을 읽습니다.
+    limitations:
+      - 브랜드·제조사는 69개 중 44개에만 있었습니다.
+      - 상품 URL·옵션조합·상세설명·판매자관리코드는 목록 응답에 없습니다.
+      - 상세페이지의 글과 그림에서 규격 지식을 읽는 것은 현재 제품 기능이 아닙니다
+        (ROADMAP.PRODUCT_DETAIL_KNOWLEDGE — 판매자 화면에 반영된 것이 0건입니다).
+    sourceRefs:
+      - docs/demo_org_and_channel_knowledge_v1.md §4c
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.PRODUCT.DRAFT
+    channel: NAVER
+    object: PRODUCT
+    axis: DRAFT
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: DECLARED
+    evidenceRef: INVARIANT.READ_ONLY_OBJECTS (제품 결정 — 상품은 읽고 근거로 쓰는 대상이다)
+    sellerFacingNotes:
+      - 상품 정보는 읽고 답변의 근거로 씁니다. 상품 글을 대신 써 드리는 기능은 없습니다.
+    limitations: []
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.PRODUCT.EXECUTION
+    channel: NAVER
+    object: PRODUCT
+    axis: EXECUTION
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: TEST_PROVEN
+    evidenceRef: >-
+      agent-runtime/test/operator/operatorToolRegistry.test.ts (READ 아닌 도구는 등록 자체가 거부됨)
+      · 채널 상품 WRITE adapter 없음
+    sellerFacingNotes:
+      - reviewnary는 판매 채널의 상품 정보를 고치지 않습니다.
+    limitations: []
+    sourceRefs:
+      - INVARIANT.APPROVAL_BOUNDARY
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.ORDER.ACQUISITION
+    channel: NAVER
+    object: ORDER
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: AUTOMATIC
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/archive/sellerops_phase3c_live_smoke.md §0 (2026-06-14) ·
+      2026-08-22 재검증(bounded 최근 14일 창) · docs/evidence/INDEX.md
+    sellerFacingNotes:
+      - 주문을 공식 API로 자동으로 가져올 수 있습니다.
+    limitations:
+      - 정기 수집 커서가 14일 넘게 뒤처지면 이어서 따라잡지 않고 최근 14일에서 다시 시작합니다.
+    sourceRefs:
+      - docs/demo_org_and_channel_knowledge_v1.md §4d (routine semantics)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.ORDER.READ
+    channel: NAVER
+    object: ORDER
+    axis: READ
+    status: SUPPORTED
+    mode: LIMITED_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: docs/multi-channel-connector-roadmap.md §4.1 (NAVER ORDER_SUMMARY 행)
+    sellerFacingNotes:
+      - 기간별·채널별 주문 건수와 매출 흐름을 읽습니다.
+    limitations:
+      - 상품 구성(주문 라인)·배송 상세·고객 정보는 제공하지 않습니다.
+      - 주문 단건 정확 조회 계약을 네이버에 대해서는 보유하지 않습니다.
+      - 주문 상태는 관측된 값만 씁니다. 관측되지 않은 코드에서 배송·취소 의미를 추측하지 않습니다.
+    sourceRefs:
+      - com.sellerops.order.NormalizedOrderStatus
+      - INVARIANT.ORDER_SCOPE
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.ORDER.DRAFT
+    channel: NAVER
+    object: ORDER
+    axis: DRAFT
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: DECLARED
+    evidenceRef: INVARIANT.READ_ONLY_OBJECTS
+    sellerFacingNotes:
+      - 주문은 읽고 답변의 근거로 씁니다. 주문에 대한 초안을 만드는 기능은 없습니다.
+    limitations: []
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: NAVER.ORDER.EXECUTION
+    channel: NAVER
+    object: ORDER
+    axis: EXECUTION
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: TEST_PROVEN
+    evidenceRef: agent-runtime/test/operator/operatorToolRegistry.test.ts · 주문 WRITE adapter 없음
+    sellerFacingNotes:
+      - reviewnary는 주문을 수정하거나 취소하거나 발송 처리하지 않습니다.
+    limitations: []
+    sourceRefs:
+      - INVARIANT.ORDER_SCOPE
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  # ==========================================================================================
+  # CAFE24 · 자사몰
+  # ==========================================================================================
+
+  - id: CAFE24.INQUIRY.ACQUISITION
+    channel: CAFE24
+    object: INQUIRY
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: AUTOMATIC
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/sellerops_cafe24_inquiry_read_live_proof.md (2026-07-31, PR #382 — 게시판 6 exact-window
+      계약 · 멱등 replay)
+    sellerFacingNotes:
+      - 쇼핑몰 문의 게시판의 글을 공식 API로 가져올 수 있습니다.
+      - 사람이 조작하지 않아도 정해진 주기로 다시 읽는 자동 수집 경로가 있는 채널입니다.
+    limitations:
+      - 문의사항 게시판(기본 6번)만 가져옵니다. 게시판 번호는 몰마다 다르게 쓸 수 있습니다.
+      - 게시판의 답글은 고객 문의가 아니라 답변이므로 문의로 수집하지 않습니다.
+      - 비밀글도 가져오지만 대시보드 집계와 분석에서는 제외합니다. 누락이 아니라 의도된 경계입니다.
+      - 응답에서 사라진 글을 삭제로 판정하지 않습니다.
+    sourceRefs:
+      - docs/inquiry_thread_semantics_v1.md
+      - docs/inquiry_operational_truth_v1.md
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.INQUIRY.READ
+    channel: CAFE24
+    object: INQUIRY
+    axis: READ
+    status: SUPPORTED
+    mode: FULL_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/cafe24_comment_answer_observation_v1.md (2026-08-26 `apr-c24-a3674-reproof` —
+      판매자 댓글 답변을 읽어 부모를 ANSWERED로 옮김)
+    sellerFacingNotes:
+      - 문의 본문과 등록일, 답변 여부를 읽습니다.
+      - 판매자님이 쇼핑몰 관리자에서 댓글로 답변하신 것도 알아보고 답변됨으로 옮깁니다.
+    limitations:
+      - 답변 상태 토큰 가운데 계약이 스스로 모순되는 값(P)은 답변으로 읽지 않고 미답변으로 둡니다.
+      - 판매자님이 뭐라고 답하셨는지 본문은 저장하지 않습니다. "답변했다"와 "이렇게 답했다"는
+        다른 주장입니다.
+    sourceRefs:
+      - com.sellerops.connector.cafe24.Cafe24InquiryAnswerObserver
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.INQUIRY.DRAFT
+    channel: CAFE24
+    object: INQUIRY
+    axis: DRAFT
+    status: SUPPORTED
+    mode: DRAFT_PREPARED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/inquiry_answer_execution_v1.md §30 (2026-08-25 — 초안 v1 MODEL 보존, 판매자가 고친
+      v2 SELLER가 승인·전송·검증 대상)
+    sellerFacingNotes:
+      - 등록된 상품 정보·운영 기준·과거 답변을 근거로 답변 초안을 준비합니다.
+      - 근거를 찾지 못하면 초안을 지어내지 않고 무엇이 빠졌는지 말합니다.
+    limitations:
+      - 초안은 답변이 아닙니다. 승인 전에는 아무 데도 가지 않습니다.
+    sourceRefs:
+      - docs/answer_applicability_v1.md §9
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.INQUIRY.EXECUTION
+    channel: CAFE24
+    object: INQUIRY
+    axis: EXECUTION
+    status: SUPPORTED
+    mode: DIRECT_WITH_APPROVAL
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      `VERIFIED` 2026-08-25, commit b0bfb022, docs/inquiry_answer_execution_v1.md §30 —
+      POST /boards/6/articles 1회 · 재시도 0 · 판정은 2xx가 아니라 exact READ(자식 존재 · 부모 일치 ·
+      답글 구조 · 본문 해시 == 승인 초안 · 부모 reply_status=C)
+    sellerFacingNotes:
+      - 판매자님이 승인하시면 reviewnary가 카페24 문의 게시판에 답변을 직접 등록하고, 등록됐는지
+        다시 읽어 확인합니다.
+    limitations:
+      - 같은 문의에 다시 보내면 덮어쓰지 않고 두 번째 답변 글이 생깁니다. 그래서 재전송하지 않습니다.
+      - 답변이 게시됐는데 완료 표시가 붙지 않는 경우가 있습니다. 그때는 재전송하지 않고
+        "답변은 나갔고 완료 표시만 미확정"으로 남깁니다.
+      - 판매자님이 뭐라고 쓰셨는지 제목은 질문 제목을 그대로 씁니다. 길이가 맞지 않으면 자르지 않고
+        보내지 않습니다.
+    requirements:
+      - kind: WRITE_PERMISSION
+        description: >-
+          판매자님이 쇼핑몰 게시판 글쓰기 권한에 별도로 동의하셔야 합니다. 동의 전에는 초안까지만
+          가능합니다.
+      - kind: DEPLOYMENT_PREREQUISITE
+        description: >-
+          reviewnary를 운영하는 쪽에서 카페24가 요구하는 호출 정보를 설정해 두어야 합니다.
+          관측된 값을 재사용하지 않습니다.
+      - kind: VALID_APPROVAL
+        description: >-
+          그 문의 하나에 대해 판매자님이 승인하신 기록이 있어야 하고, 승인은 한 번만 쓰입니다.
+    sourceRefs:
+      - com.sellerops.inquiry.publish.cafe24.Cafe24ChannelReplyAdapter
+      - com.sellerops.connector.cafe24.onboarding.Cafe24ScopeContract
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  # CAFE24 REVIEW — 이 네 행이 Grounded Conversation QA에서 잃어버린 사실이다.
+  # 카페24는 세 채널 중 유일하게 리뷰를 공식 API로 읽는다. 그 사실이 QA 답변에서 사라졌고,
+  # 그것이 Canonical Source를 만드는 계기가 됐다.
+  - id: CAFE24.REVIEW.ACQUISITION
+    channel: CAFE24
+    object: REVIEW
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: AUTOMATIC
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/sellerops_cafe24_review_acquisition_completion_live_proof.md (2026-07-30, PR #375 —
+      게시판 4 공개 리뷰 fresh insert + 동일창 replay 멱등)
+    sellerFacingNotes:
+      - 카페24 구매후기는 공식 API로 자동으로 가져올 수 있습니다.
+      - 세 채널 가운데 리뷰를 판매자 조작 없이 가져올 수 있는 유일한 채널입니다.
+    limitations:
+      - 구매후기 게시판(기본 4번)에서 읽습니다. 게시판 번호는 몰마다 다르게 쓸 수 있어, 0건은
+        실패가 아니라 그 게시판에 글이 없다는 응답입니다.
+      - 비밀글은 fail-closed로 제외합니다.
+    sourceRefs:
+      - com.sellerops.connector.cafe24.Cafe24BoardArticlesClient
+      - backend/src/main/resources/channel-knowledge/cafe24.yaml (cafe24-cap-review-board4)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.REVIEW.READ
+    channel: CAFE24
+    object: REVIEW
+    axis: READ
+    status: SUPPORTED
+    mode: FULL_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: docs/sellerops_cafe24_review_acquisition_completion_live_proof.md (2026-07-31 완료 v1)
+    sellerFacingNotes:
+      - 별점과 후기 본문을 읽고 반복되는 문제를 찾습니다.
+    limitations:
+      - 답변 상태 토큰이 예상과 다르면 그럴듯한 값으로 바꾸지 않고 UNKNOWN으로 둡니다.
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.REVIEW.DRAFT
+    channel: CAFE24
+    object: REVIEW
+    axis: DRAFT
+    status: SUPPORTED
+    mode: DRAFT_PREPARED
+    evidence: TEST_PROVEN
+    evidenceRef: >-
+      com.sellerops.review.draft.ReviewDraftComposer · ReviewReplyTemplateDefaultsTest ·
+      docs/review_reply_template_settings_v1.md (회사가 정한 문구 → 초안)
+    sellerFacingNotes:
+      - 리뷰 답변 초안을 준비합니다. 회사가 정한 답변 문구와 등록된 지식을 근거로 씁니다.
+    limitations:
+      - 카페24 리뷰에 대한 초안 생성은 실제 몰에서 관측된 적이 없습니다. 초안 경로는 채널과
+        무관하게 같은 코드입니다.
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.REVIEW.EXECUTION
+    channel: CAFE24
+    object: REVIEW
+    axis: EXECUTION
+    status: SUPPORTED
+    mode: DIRECT_WITH_APPROVAL
+    evidence: IMPLEMENTED
+    evidenceRef: >-
+      docs/cafe24_review_comment_execution_v1.md (`IMPLEMENTED` · `LOCAL_PROVEN` ·
+      **`LIVE_UNPROVEN`** — 어떤 몰에도 댓글을 게시한 적 없음, 마켓플레이스 WRITE 0)
+    sellerFacingNotes:
+      - 판매자님이 승인하시면 reviewnary가 카페24 후기에 답글을 직접 등록할 수 있습니다.
+    limitations:
+      - 실제 몰에 댓글을 게시한 적이 없습니다. 구현됐다는 것과 라이브에서 증명됐다는 것은 다른
+        주장이고, 여기서 하는 것은 앞의 것뿐입니다.
+      - 댓글마다 1회용 임시 비밀번호를 만들어 쓰고 저장하지 않습니다. reviewnary는 댓글을 수정하거나
+        삭제하지 않습니다.
+      - 같은 후기에 두 번 등록하지 않습니다.
+    requirements:
+      - kind: WRITE_PERMISSION
+        description: >-
+          판매자님이 쇼핑몰 게시판 글쓰기 권한에 별도로 동의하셔야 합니다. 동의 전에는 초안까지만
+          가능합니다.
+      - kind: DEPLOYMENT_PREREQUISITE
+        description: reviewnary를 운영하는 쪽에서 대상 쇼핑몰 번호를 설정해 두어야 합니다.
+      - kind: VALID_APPROVAL
+        description: >-
+          그 후기 하나에 대해 판매자님이 승인하신 기록이 있어야 하고, 승인은 한 번만 쓰입니다.
+      - kind: CHANNEL_PRECONDITION
+        description: >-
+          이 답글 경로는 후기 게시판에 댓글을 다는 방식이라, 게시판을 쓰지 않는 몰에서는 대상이
+          없습니다.
+    sourceRefs:
+      - com.sellerops.review.publish.cafe24.Cafe24ReviewCommentAdapter
+      - com.sellerops.review.publish.ReviewExecutionCapability (CAFE24 → API_EXECUTION, 조건부)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.PRODUCT.ACQUISITION
+    channel: CAFE24
+    object: PRODUCT
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: AUTOMATIC
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/evidence/INDEX.md (2026-08-22 Cafe24 PRODUCT one-shot READ, `PASS`, run `44bea7b3` —
+      2페이지(100+44) · **144 리스팅** · 오류 0 · 2.1s, 후속으로 미해결 리뷰 124/124 relink) ·
+      com.sellerops.connector.cafe24.Cafe24ProductsClient (offset 페이징)
+    sellerFacingNotes:
+      - 카페24 상품 목록을 공식 API로 가져올 수 있습니다.
+      - 사람이 조작하지 않아도 정해진 주기로 다시 읽는 자동 수집 경로가 있는 채널입니다.
+    limitations:
+      - 상품 읽기 권한이 없는 상태로 만들어진 오래된 연결은 판매자님의 재동의가 필요합니다.
+        연결 자체는 정상인데 상품만 실패하는 경우입니다.
+    sourceRefs:
+      - backend/src/main/resources/channel-knowledge/cafe24.yaml (cafe24-cap-product)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.PRODUCT.READ
+    channel: CAFE24
+    object: PRODUCT
+    axis: READ
+    status: SUPPORTED
+    mode: LIMITED_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/evidence/INDEX.md (2026-08-22, run `44bea7b3` — 이름·판매가·판매상태·통화 144/144 ·
+      URL 0 · 옵션조합 0 · 카테고리/브랜드 0) · com.sellerops.connector.cafe24.Cafe24ProductRow
+    sellerFacingNotes:
+      - 상품 이름·판매가·판매상태·통화를 읽습니다.
+    limitations:
+      - 상품 URL·옵션조합·카테고리·브랜드는 목록 응답에 들어 있지 않습니다. 그 넷은 읽지 않습니다.
+      - 상품 번호는 몰 안에서만 유효합니다. 다른 몰의 같은 번호는 전혀 다른 상품입니다.
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.PRODUCT.DRAFT
+    channel: CAFE24
+    object: PRODUCT
+    axis: DRAFT
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: DECLARED
+    evidenceRef: INVARIANT.READ_ONLY_OBJECTS
+    sellerFacingNotes:
+      - 상품 정보는 읽고 답변의 근거로 씁니다. 상품 글을 대신 써 드리는 기능은 없습니다.
+    limitations: []
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.PRODUCT.EXECUTION
+    channel: CAFE24
+    object: PRODUCT
+    axis: EXECUTION
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: TEST_PROVEN
+    evidenceRef: >-
+      채널 상품 WRITE adapter 없음 · agent-runtime/test/operator/operatorToolRegistry.test.ts
+      (READ 아닌 도구는 등록 자체가 거부됨)
+    sellerFacingNotes:
+      - reviewnary는 판매 채널의 상품 정보를 고치지 않습니다.
+    limitations: []
+    sourceRefs:
+      - INVARIANT.APPROVAL_BOUNDARY
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.ORDER.ACQUISITION
+    channel: CAFE24
+    object: ORDER
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: AUTOMATIC
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/sellerops_cafe24_live_verification.md (E2E PASS — 토큰 회전과 금액 대사 포함, 2026-06-25)
+    sellerFacingNotes:
+      - 주문을 공식 API로 자동으로 가져올 수 있습니다.
+    limitations:
+      - 카페24 리프레시 토큰은 1회용이라 오래 쓰지 않으면 만료됩니다. 오래 멈춰 있던 연결은 다시
+        켜는 것만으로 살아나지 않을 수 있습니다.
+    sourceRefs:
+      - backend/src/main/resources/channel-knowledge/cafe24.yaml (cafe24-conn-refresh-token-rotates)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.ORDER.READ
+    channel: CAFE24
+    object: ORDER
+    axis: READ
+    status: SUPPORTED
+    mode: LIMITED_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: docs/sellerops_cafe24_live_verification.md · docs/exact_operational_context_v1.md
+    sellerFacingNotes:
+      - 기간별·채널별 주문 건수와 매출 흐름을 읽습니다.
+      - 고객이 문의에서 주문을 지목한 경우에 한해, 그 주문 하나를 정확히 조회하는 경로가 있습니다.
+    limitations:
+      - 단건 정확 조회는 카페24에만 있고, 문의 상세와 답변 초안에서만 실행됩니다. 일반 기능처럼
+        "주문을 조회해 드립니다"라고 말하지 않습니다.
+      - 단건 정확 조회는 실제로 실행된 적이 없습니다. 문의가 지목한 주문 참조를 가진 실제 문의가
+        아직 0건이기 때문입니다.
+      - 상품 구성(주문 라인)·배송 상세·고객 정보는 제공하지 않습니다.
+    sourceRefs:
+      - com.sellerops.order.fact.ExactOrderLookupCapability
+      - com.sellerops.connector.cafe24.Cafe24ExactOrderReader
+      - INVARIANT.ORDER_SCOPE
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.ORDER.DRAFT
+    channel: CAFE24
+    object: ORDER
+    axis: DRAFT
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: DECLARED
+    evidenceRef: INVARIANT.READ_ONLY_OBJECTS
+    sellerFacingNotes:
+      - 주문은 읽고 답변의 근거로 씁니다. 주문에 대한 초안을 만드는 기능은 없습니다.
+    limitations: []
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: CAFE24.ORDER.EXECUTION
+    channel: CAFE24
+    object: ORDER
+    axis: EXECUTION
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: TEST_PROVEN
+    evidenceRef: >-
+      주문 WRITE adapter 없음 · agent-runtime/test/operator/operatorToolRegistry.test.ts
+      (READ 아닌 도구는 등록 자체가 거부됨)
+    sellerFacingNotes:
+      - reviewnary는 주문을 수정하거나 취소하거나 발송 처리하지 않습니다.
+    limitations: []
+    sourceRefs:
+      - INVARIANT.ORDER_SCOPE
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  # ==========================================================================================
+  # COUPANG
+  # ==========================================================================================
+
+  - id: COUPANG.INQUIRY.ACQUISITION
+    channel: COUPANG
+    object: INQUIRY
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: AUTOMATIC
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/coupang_inquiry_live_proof_v1.md (2026-08-14 — 실계정 수집 2건, 동일 창 재수집
+      insert 0 / skip 2 / 중복 0)
+    sellerFacingNotes:
+      - 상품별 고객문의를 공식 API로 가져올 수 있습니다.
+      - 사람이 조작하지 않아도 정해진 주기로 다시 읽는 자동 수집 경로가 있는 채널입니다.
+    limitations:
+      - 고객센터 문의는 개인정보를 담고 있어 호출하지 않습니다. 수집 대상이 아닙니다.
+    sourceRefs:
+      - com.sellerops.connector.coupang.CoupangApiConnector
+      - docs/coupang_routine_operations_v1.md
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.INQUIRY.READ
+    channel: COUPANG
+    object: INQUIRY
+    axis: READ
+    status: SUPPORTED
+    mode: FULL_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: docs/coupang_inquiry_live_proof_v1.md (2026-08-14)
+    sellerFacingNotes:
+      - 문의 본문과 등록일, 답변 여부, 어떤 상품에 대한 문의인지를 읽습니다.
+    limitations: []
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.INQUIRY.DRAFT
+    channel: COUPANG
+    object: INQUIRY
+    axis: DRAFT
+    status: SUPPORTED
+    mode: DRAFT_PREPARED
+    evidence: TEST_PROVEN
+    evidenceRef: com.sellerops.inquiry.draft.InquiryDraftComposer (채널과 무관한 단일 초안 경로)
+    sellerFacingNotes:
+      - 등록된 상품 정보·운영 기준·과거 답변을 근거로 답변 초안을 준비합니다.
+    limitations:
+      - 쿠팡 문의에 대한 초안 생성은 실제 계정에서 관측된 적이 없습니다.
+    sourceRefs:
+      - docs/answer_applicability_v1.md §9
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.INQUIRY.EXECUTION
+    channel: COUPANG
+    object: INQUIRY
+    axis: EXECUTION
+    status: SUPPORTED
+    mode: DIRECT_WITH_APPROVAL
+    evidence: IMPLEMENTED
+    evidenceRef: >-
+      com.sellerops.inquiry.publish.CoupangChannelReplyAdapter →
+      POST .../onlineInquiries/{id}/replies · docs/pilot_runtime_foundation_v1.md §9
+      (`OPERATOR_ASSISTED` — 구현됨, 라이브 미실행)
+    sellerFacingNotes:
+      - 판매자님이 승인하시면 reviewnary가 쿠팡에 문의 답변을 직접 등록할 수 있습니다.
+    limitations:
+      - 실제 쿠팡 계정에서 실행된 적이 없습니다. 구현됐다는 것과 라이브에서 증명됐다는 것은 다른
+        주장이고, 여기서 하는 것은 앞의 것뿐입니다.
+      - 중복 답변은 채널이 거부합니다.
+    requirements:
+      - kind: VALID_APPROVAL
+        description: >-
+          그 문의 하나에 대해 판매자님이 승인하신 기록이 있어야 하고, 승인은 한 번만 쓰입니다.
+    sourceRefs:
+      - com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  # COUPANG REVIEW — 답변 채널이 아니다. 수집하고 읽고 분석하지만, 판매자가 답을 남기는 기능
+  # 자체가 쿠팡에 없다. 그래서 초안도 만들지 않고, "복사해서 판매자센터에 올리시면 됩니다"
+  # 그룹에 절대 들어가지 않는다 — 올릴 곳이 없다.
+  - id: COUPANG.REVIEW.ACQUISITION
+    channel: COUPANG
+    object: REVIEW
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: SELLER_GUIDED
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/coupang_review_acquisition_v1.md §6.6 (2026-08-15, commit 533cafc2 — 3페이지 · 24행 ·
+      빈 DB에 22건 저장 → 동일 범위 재수집 stored=0 / skipped=22) · docs/evidence/INDEX.md
+      (2026-08-23 재증명)
+    sellerFacingNotes:
+      - 쿠팡 상품평은 판매자님이 WING 화면에서 확인해 주시면 그 결과를 읽어 가져옵니다.
+      - 파일로 직접 올리는 방법도 있습니다(FEATURE.MANUAL_FILE_ACQUISITION).
+    limitations:
+      - 쿠팡은 판매자용 리뷰 API를 제공하지 않습니다(문서 카테고리 11개 전수 확인, 2026-08-14).
+        그래서 사람이 없어도 도는 정기 수집이 이 채널의 리뷰에는 존재하지 않습니다.
+      - 페이지 넘김은 판매자님이 하십니다. reviewnary는 마켓플레이스에서 클릭·입력·전송을 하지
+        않습니다.
+      - 작성자 정보는 저장하지 않습니다(중복 판정 키에도 쓰지 않습니다).
+      - 별점만 남긴 리뷰에는 본문이 없습니다. 쿠팡이 그 자리에 찍는 안내 문장을 본문으로 저장하지
+        않습니다.
+      - 같은 옵션·같은 날·같은 별점의 별점만 리뷰는 하나로 합쳐집니다.
+    sourceRefs:
+      - com.sellerops.collect.AcquisitionPathRegistry (COUPANG/REVIEW = ACTION_WINDOW · LIVE_PROVEN · SELLER_REPEATED)
+      - docs/coupang_review_policy_gate_v1.md (D1~D8)
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.REVIEW.READ
+    channel: COUPANG
+    object: REVIEW
+    axis: READ
+    status: SUPPORTED
+    mode: LIMITED_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: docs/coupang_review_locate_ux_v1.md §5.1 (저장된 리뷰를 실화면에서 다시 찾음)
+    sellerFacingNotes:
+      - 별점과 후기 본문을 읽고 반복되는 문제를 찾습니다.
+      - 저장된 리뷰를 쿠팡 화면에서 다시 찾아 보여 드릴 수 있습니다.
+    limitations:
+      - 작성자 정보는 읽지도 저장하지도 않습니다.
+      - 노출상품ID가 등록상품과 1:1이 아닌 경우가 있어, 그때는 상품을 추측하지 않고 연결하지
+        않습니다.
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.REVIEW.DRAFT
+    channel: COUPANG
+    object: REVIEW
+    axis: DRAFT
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: DECLARED
+    evidenceRef: >-
+      com.sellerops.connector.ChannelApiGapRegistry (COUPANG `REVIEW_REPLY` — 판매자 리뷰 답글 기능
+      없음) · docs/coupang_review_policy_gate_v1.md (operator 확인, 2026-08-14)
+    sellerFacingNotes:
+      - 쿠팡은 판매자가 리뷰에 답을 남기는 기능이 없어, 답변 초안도 준비하지 않습니다.
+    limitations:
+      - 준비할 수 없는 초안을 "복사해서 판매자센터에 올리시면 됩니다"라고 안내하지 않습니다.
+        올릴 곳이 없습니다.
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.REVIEW.EXECUTION
+    channel: COUPANG
+    object: REVIEW
+    axis: EXECUTION
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: DECLARED
+    evidenceRef: >-
+      com.sellerops.connector.ChannelApiGapRegistry (COUPANG `REVIEW_REPLY`) ·
+      com.sellerops.review.publish.ReviewExecutionCapability (기본 분기 → CHANNEL_UNSUPPORTED) ·
+      docs/multi-channel-connector-roadmap.md §4.1 (Coupang REVIEW — 답변 채널 아님)
+    sellerFacingNotes:
+      - 쿠팡에는 판매자가 리뷰에 답을 남기는 기능이 없습니다. 이것은 설정이 꺼져 있어서가 아니라
+        채널에 그 기능이 없기 때문입니다.
+    limitations:
+      - 나중에 켤 수 있는 스위치가 아닙니다. "아직 지원하지 않습니다"라고 말하지 않습니다.
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.PRODUCT.ACQUISITION
+    channel: COUPANG
+    object: PRODUCT
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: AUTOMATIC
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/demo_org_and_channel_knowledge_v1.md §5h·§5j (2026-08-23 라이브 2회 — 68상품 · 405옵션 ·
+      69요청, 동일 범위 재수집 SUCCESS 68/68/0/0 · 신규 0)
+    sellerFacingNotes:
+      - 등록하신 상품과 옵션을 공식 API로 가져올 수 있습니다.
+    limitations:
+      - 노출상품ID는 등록상품과 1:1이 아닙니다. 겹치는 경우 리뷰를 상품에 연결하지 않고 멈춥니다.
+    sourceRefs:
+      - com.sellerops.connector.coupang.CoupangSellerProductsClient
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.PRODUCT.READ
+    channel: COUPANG
+    object: PRODUCT
+    axis: READ
+    status: PARTIAL
+    mode: LIMITED_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: docs/demo_org_and_channel_knowledge_v1.md §5h (wire shape 실측 2026-08-23)
+    sellerFacingNotes:
+      - 상품 이름과 옵션 구성을 읽습니다.
+    limitations:
+      - 판매상태가 관측 68건 전부 UNKNOWN으로 저장됩니다(매퍼가 한글 상태명을 영문 사전에 넘기는
+        알려진 결함, 미수정). 쿠팡 상품의 판매상태를 주장하지 않습니다.
+      - 제조사 정보와 상세 콘텐츠 블록이 같은 응답에 들어오지만 읽지 않습니다.
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.PRODUCT.DRAFT
+    channel: COUPANG
+    object: PRODUCT
+    axis: DRAFT
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: DECLARED
+    evidenceRef: INVARIANT.READ_ONLY_OBJECTS
+    sellerFacingNotes:
+      - 상품 정보는 읽고 답변의 근거로 씁니다. 상품 글을 대신 써 드리는 기능은 없습니다.
+    limitations: []
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.PRODUCT.EXECUTION
+    channel: COUPANG
+    object: PRODUCT
+    axis: EXECUTION
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: TEST_PROVEN
+    evidenceRef: >-
+      agent-runtime/test/operator/operatorToolRegistry.test.ts · 채널 상품 WRITE adapter 없음
+    sellerFacingNotes:
+      - reviewnary는 판매 채널의 상품 정보를 고치지 않습니다.
+    limitations: []
+    sourceRefs:
+      - INVARIANT.APPROVAL_BOUNDARY
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.ORDER.ACQUISITION
+    channel: COUPANG
+    object: ORDER
+    axis: ACQUISITION
+    status: SUPPORTED
+    mode: AUTOMATIC
+    evidence: LIVE_PROVEN
+    evidenceRef: >-
+      docs/coupang_final_main_first_connection_order_routine_proof_v1.md (2026-08-06, 승인
+      `apr-01212e2da29a`) · docs/evidence/INDEX.md (2026-08-23 canonical Demo Org 첫 연결 + 첫
+      automatic cycle)
+    sellerFacingNotes:
+      - 주문을 공식 API로 자동으로 가져올 수 있습니다.
+    limitations:
+      - 쿠팡 키는 유효기간이 있고, 호출하는 서버의 IP를 판매자님이 쿠팡에 등록해 두셔야 합니다.
+    sourceRefs:
+      - com.sellerops.connector.coupang.CoupangOrdersClient
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.ORDER.READ
+    channel: COUPANG
+    object: ORDER
+    axis: READ
+    status: SUPPORTED
+    mode: LIMITED_READ
+    evidence: LIVE_PROVEN
+    evidenceRef: docs/coupang_final_main_first_connection_order_routine_proof_v1.md
+    sellerFacingNotes:
+      - 기간별·채널별 주문 건수와 매출 흐름을 읽습니다.
+    limitations:
+      - 주문 상태는 관측된 값만 씁니다. 로컬에서 확인된 쿠팡 주문 155건은 전부 "확인되지 않음"이며,
+        배송·취소 의미를 코드에서 추측하지 않습니다.
+      - 상품 구성(주문 라인)·배송 상세·고객 정보는 제공하지 않습니다.
+      - 주문 단건 정확 조회 계약을 쿠팡에 대해서는 보유하지 않습니다.
+    sourceRefs:
+      - com.sellerops.order.NormalizedOrderStatus
+      - INVARIANT.ORDER_SCOPE
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.ORDER.DRAFT
+    channel: COUPANG
+    object: ORDER
+    axis: DRAFT
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: DECLARED
+    evidenceRef: INVARIANT.READ_ONLY_OBJECTS
+    sellerFacingNotes:
+      - 주문은 읽고 답변의 근거로 씁니다. 주문에 대한 초안을 만드는 기능은 없습니다.
+    limitations: []
+    sourceRefs: []
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"
+
+  - id: COUPANG.ORDER.EXECUTION
+    channel: COUPANG
+    object: ORDER
+    axis: EXECUTION
+    status: NOT_SUPPORTED
+    mode: NONE
+    evidence: TEST_PROVEN
+    evidenceRef: agent-runtime/test/operator/operatorToolRegistry.test.ts · 주문 WRITE adapter 없음
+    sellerFacingNotes:
+      - reviewnary는 주문을 수정하거나 취소하거나 발송 처리하지 않습니다.
+    limitations: []
+    sourceRefs:
+      - INVARIANT.ORDER_SCOPE
+    review: HUMAN_REVIEWED
+    lastReviewed: "2026-09-08"

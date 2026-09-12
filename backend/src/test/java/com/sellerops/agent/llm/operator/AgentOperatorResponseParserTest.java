@@ -194,12 +194,27 @@ class AgentOperatorResponseParserTest {
             assertThat(system).contains(heading);
         }
         // v17 (2026-09-07): the aspect axis for EXPLAIN_CAPABILITY. Every value is offered by the
-        // prompt and accepted by the parser, so a plan cannot name one the runtime would drop.
+        // prompt and accepted by the parser, so a plan cannot name one the runtime would drop — which
+        // is why v18's two new values needed no edit here: the loop reads the vocabulary itself.
         for (String token : AgentPlanPrompt.CAPABILITY_ASPECTS) {
             assertThat(system).contains(token);
         }
         assertThat(system).contains("filters.capabilityAspect");
-        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v17");
+        // v18 (2026-09-08): PRODUCT_DIFFERENCE and FUTURE_DIRECTION. 「판매자센터랑 뭐가 달라?」 and
+        // 「앞으로 뭐 할 거야?」 had no value of their own, arrived with a null aspect, and null widens —
+        // so the runtime sent every layer of the reviewed ledger and the conversation floor refused the
+        // request. v19 (same day) adds COLLECTION_STATE and DAILY_OPERATION, which manual QA watched go
+        // elsewhere: 「지금 자동으로 가져오고 있어?」 planned as AFTER_CONNECT and 「내가 매일 들어와야
+        // 해?」 as an investigation, so both answered with the seller's rows instead of the product's
+        // state. The version moves because the vocabulary moved, and a plan recorded against an older
+        // one does not carry these values.
+        // v21 (same day): TEAM_ACCESS and SECURITY_AND_DATA. Both questions planned as
+        // PRODUCT_OVERVIEW, which sends the whole product for an answer made of four reviewed items —
+        // measured at 79 lines against a floor of 80, one addition from breaking silently.
+        // v20 (same day): 「카페24 리뷰에 답글 실제로 보낸 적 있어?」 planned twice, once with an aspect
+        // and once with none at all, and the run without one answered with the store's review count —
+        // a question about whether the PRODUCT has ever done it, answered by counting the SELLER's rows.
+        assertThat(AgentPlanPrompt.PROMPT_VERSION).isEqualTo("agent-plan-prompt/v21");
     }
 
     /**

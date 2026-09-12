@@ -13,10 +13,16 @@ import java.util.Map;
  * {@link #OUTSIDE}: nothing is permitted, and the answer is the same from every reader.
  *
  * <p>The values are facts about the product as built, not about the marketplaces in the abstract:
- * NAVER "reply" is the attention surface's guided copy-and-paste flow (never a verified post); Cafe24
- * has no reply flow built; Coupang has no reply feature at all (policy gate D8) and no reply event may
- * ever be written for it. "See the original" is a Coupang locate run and nothing else — no channel has
- * a per-review URL SellerOps could honestly link.
+ * NAVER "reply" is the attention surface's guided composer flow (filled is never posted); Coupang has
+ * no reply feature at all (policy gate D8) and no reply event may ever be written for it. "See the
+ * original" is a Coupang locate run and nothing else — no channel has a per-review URL SellerOps could
+ * honestly link.
+ *
+ * <p><b>{@code replySupported} is not "does a reply flow exist".</b> It is the triage contract's own
+ * older column, and it is NAVER-only. Cafe24 is {@code false} here and nonetheless has a built reply
+ * lane — the board-comment API adapter — which is what {@link #replyFlowExists()} answers. This
+ * docblock used to say "Cafe24 has no reply flow built", contradicting the method two screens below
+ * it; it was written before that lane existed and nobody came back.
  */
 public record ReviewTriageChannelCapability(String channelCode, boolean aiTriage, OriginalLocate originalLocate,
                                             boolean replySupported) {

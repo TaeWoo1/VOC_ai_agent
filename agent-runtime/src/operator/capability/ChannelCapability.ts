@@ -27,7 +27,41 @@ import type {
 /** What the frontend knows about the paired local agent (`ai.sellerops.local-agent`). Closed. */
 export type LocalAgentHint = "PAIRED" | "ABSENT" | "UNKNOWN";
 
-export type CapabilityDataType = "REVIEW" | "INQUIRY" | "ORDER_SUMMARY";
+export type CapabilityDataType = "REVIEW" | "INQUIRY" | "ORDER_SUMMARY" | "PRODUCT";
+
+/**
+ * <b>How strongly this deployment can claim a channel serves a data type.</b>
+ *
+ * Four values because two sources answer the question and they disagree today (Product Self-Knowledge
+ * Truth Closure v1 §9): the live connector (`overview.dataTypes[].supported` / `verificationStatus`)
+ * and the reference table (`declaredSupport`). Where they differ the answer is `PARTIAL`, never the
+ * stronger of the two — picking the stronger states a capability nobody proved, and picking the weaker
+ * erases rows the product is holding. `UNKNOWN` is for a question nobody answered at all: no row, or
+ * a backend that does not serve the field.
+ */
+export type SupportLevel = "SUPPORTED" | "PARTIAL" | "NOT_SUPPORTED" | "UNKNOWN";
+
+/** Why a support level is not `SUPPORTED`. Closed, diagnostic — never rendered to a seller verbatim. */
+export const SUPPORT_REASON = {
+  /** Live connector and reference table disagree. */
+  SOURCE_DIVERGENCE: "SOURCE_DIVERGENCE",
+  /** Both agree it is served, but nobody has proven the wire shape live. */
+  NEEDS_VERIFICATION: "NEEDS_VERIFICATION",
+  /** No API, but a seller-completable acquisition path exists. */
+  NON_API_PATH_ONLY: "NON_API_PATH_ONLY",
+  /** The channel offers no path of any kind for this type. */
+  NO_PATH: "NO_PATH",
+  /** Nobody answered — no row, or the field is absent. */
+  UNREAD: "UNREAD",
+} as const;
+
+export interface SupportVerdict {
+  readonly support: SupportLevel;
+  readonly reason: string | null;
+  /** Kept for the diagnostic log; both words, so a divergence can be read back without a second call. */
+  readonly live: "SUPPORTED" | "UNSUPPORTED" | "UNREAD";
+  readonly declared: "SUPPORTED" | "UNSUPPORTED" | "UNDECLARED";
+}
 
 /** Everything the resolver may look at. Every field nullable: an absent source is a fact, not an error. */
 export interface ChannelCapabilitySources {
@@ -84,9 +118,74 @@ const GUIDED_PATH_OF: Readonly<Record<string, GuidedPath>> = {
   "COUPANG:ACTION_WINDOW": "WING_READ_ACTION_WINDOW",
 };
 
+/**
+ * The capability row for a data type, wherever the overview keeps it.
+ *
+ * PRODUCT lives in `backgroundDataTypes` rather than in the operator badge row (the backend's own
+ * split, so a screen nobody asked to change does not change). One lookup so no caller has to know
+ * which list a type is in — and `null` when neither answered, which is UNKNOWN, not unsupported.
+ */
+export function capabilityRowOf(dataType: CapabilityDataType, sources: ChannelCapabilitySources) {
+  const inMain = sources.overview?.dataTypes.find((d) => d.dataType.toUpperCase() === dataType) ?? null;
+  if (inMain) return inMain;
+  return sources.overview?.backgroundDataTypes?.find((d) => d.dataType.toUpperCase() === dataType) ?? null;
+}
+
+/**
+ * <b>How strongly this channel can be said to serve this data type — the two sources, read together.</b>
+ *
+ * The rule is «never the stronger of two disagreeing sources» (§9). Coupang PRODUCT is CONFIRMED in the
+ * reference table and NEEDS_VERIFICATION in the connector; Coupang INQUIRY is the other way round. Both
+ * come back `PARTIAL` with `SOURCE_DIVERGENCE`, and the seller-facing sentence for PARTIAL says the
+ * range is not fully confirmed rather than choosing a side.
+ *
+ * A type with no API but a proven seller-completable path (NAVER/Coupang REVIEW) is `PARTIAL` too, for
+ * a different recorded reason: it IS collected, and calling it NOT_SUPPORTED erases the rows.
+ */
+export function supportOf(
+  channelCode: string, dataType: CapabilityDataType, sources: ChannelCapabilitySources,
+): SupportVerdict {
+  const row = capabilityRowOf(dataType, sources);
+  const declared = ((row?.declaredSupport ?? "UNDECLARED").toUpperCase() === "SUPPORTED"
+    ? "SUPPORTED"
+    : (row?.declaredSupport ?? "").toUpperCase() === "UNSUPPORTED" ? "UNSUPPORTED" : "UNDECLARED") as
+    SupportVerdict["declared"];
+  if (!row) {
+    return { support: "UNKNOWN", reason: SUPPORT_REASON.UNREAD, live: "UNREAD", declared };
+  }
+  const live: SupportVerdict["live"] = row.supported ? "SUPPORTED" : "UNSUPPORTED";
+  const diverges = declared !== "UNDECLARED" && declared !== live;
+  if (diverges) {
+    return { support: "PARTIAL", reason: SUPPORT_REASON.SOURCE_DIVERGENCE, live, declared };
+  }
+  if (row.supported) {
+    // The two sources diverge on the VERIFICATION word independently of the boolean — Coupang INQUIRY
+    // is supported in both while the table still says NEEDS_VERIFICATION and the connector says
+    // CONFIRMED, because a live proof promoted one and not the other. Taking the connector's word here
+    // is picking the stronger of two disagreeing sources, which is the thing §9 forbids.
+    const liveConfirmed = (row.verificationStatus ?? "").toUpperCase() === "CONFIRMED";
+    const declaredWord = (row.declaredVerificationStatus ?? "").toUpperCase();
+    const declaredConfirmed = declaredWord.length === 0 || declaredWord === "CONFIRMED";
+    if (liveConfirmed && declaredConfirmed) {
+      return { support: "SUPPORTED", reason: null, live, declared };
+    }
+    return {
+      support: "PARTIAL",
+      reason: liveConfirmed === declaredConfirmed
+        ? SUPPORT_REASON.NEEDS_VERIFICATION
+        : SUPPORT_REASON.SOURCE_DIVERGENCE,
+      live, declared,
+    };
+  }
+  // Not served by the connector — but a registered non-API path is still a way this type arrives.
+  return (row.acquisitionPaths ?? []).length > 0
+    ? { support: "PARTIAL", reason: SUPPORT_REASON.NON_API_PATH_ONLY, live, declared }
+    : { support: "NOT_SUPPORTED", reason: SUPPORT_REASON.NO_PATH, live, declared };
+}
+
 export function acquisitionOf(channelCode: string, dataType: CapabilityDataType, sources: ChannelCapabilitySources): AcquisitionVerdict {
   const code = channelCode.toUpperCase();
-  const row = sources.overview?.dataTypes.find((d) => d.dataType.toUpperCase() === dataType) ?? null;
+  const row = capabilityRowOf(dataType, sources);
   const none = (verification: string, source: string): AcquisitionVerdict =>
     ({ acquisition: "UNSUPPORTED", guidedPath: null, requiresLocalAgent: false, fallback: null, acquisitionEvidence: { verification, source } });
   if (!row) return none("NEEDS_VERIFICATION", "overview:absent");

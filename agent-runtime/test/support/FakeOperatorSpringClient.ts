@@ -27,6 +27,8 @@ import type {
   ProductSummary,
   RepeatedInquiry,
   ChannelCapabilityOverview,
+  CanonicalProductTruth,
+  CollectionPostureView,
   ChannelCoverageRow,
   ChannelSummary,
   DashboardOverview,
@@ -147,6 +149,18 @@ export interface FakeOperatorSeed {
   readonly inquiryReplyTransports?: InquiryReplyTransportRow[];
   /** The `channel` block of `GET /api/seller-accounts/{accountId}/channel-reviews`, by account id. */
   readonly reviewChannelCapabilities?: Record<string, ReviewChannelCapabilityView>;
+  /**
+   * `GET /api/collect/posture` — does THIS deployment collect on its own. Attached only when seeded,
+   * so an un-seeded client is exactly a backend predating the endpoint: the product truth then reads
+   * UNKNOWN rather than claiming either answer.
+   */
+  readonly collectionPosture?: CollectionPostureView;
+  /**
+   * The Canonical Product Source. Un-seeded is a backend that predates the endpoint or one whose
+   * ledger failed to load, and the runtime then stands on its derived facts — which is why almost
+   * every existing test can leave this alone and keep asserting what it always asserted.
+   */
+  readonly productTruth?: CanonicalProductTruth;
 }
 
 export class FakeOperatorSpringClient implements OperatorSpringClient {
@@ -160,6 +174,8 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
     plan: 0, judge: 0, converse: 0, knowledge: 0, facts: 0, inquiryContext: 0, channelCoverage: 0,
     knowledgeSearch: 0, orgKnowledgeSearch: 0, answerMemorySearch: 0, recentReviews: 0, overview: 0, ordersSummary: 0, channels: 0,
     channelOverview: 0, transports: 0, reviewChannelCapability: 0, sellerProfile: 0, reviewDetail: 0,
+    collectionPosture: 0,
+    productTruth: 0,
   };
   /** Every recent-reviews request, so a test can assert the window and filters the read was made with. */
   readonly recentReviewParams: RecentReviewsParams[] = [];
@@ -203,6 +219,18 @@ export class FakeOperatorSpringClient implements OperatorSpringClient {
       (this as OperatorSpringClient).listInquiryReplyTransports = async () => {
         this.calls.transports += 1;
         return [...seed.inquiryReplyTransports!];
+      };
+    }
+    if (seed.collectionPosture) {
+      (this as OperatorSpringClient).getCollectionPosture = async () => {
+        this.calls.collectionPosture += 1;
+        return seed.collectionPosture!;
+      };
+    }
+    if (seed.productTruth) {
+      (this as OperatorSpringClient).getProductTruth = async () => {
+        this.calls.productTruth += 1;
+        return seed.productTruth!;
       };
     }
     if (seed.reviewChannelCapabilities) {

@@ -75,8 +75,10 @@ describe("what happens after connecting is the loop this runtime actually runs",
   it("describes the steps and the write boundary, and offers the one action", () => {
     const answer = afterConnectAnswer(inputs(COVERAGE));
 
-    expect(answer.lines.some((l) => l.includes("정기적으로 가져옵니다"))).toBe(true);
-    expect(answer.lines.some((l) => l.includes("직접 채널에 보내거나"))).toBe(true);
+    // Truth Closure v1 §4: step 1 states what the CHANNEL allows, not what is happening — the
+    // deployment's posture and this seller's connection are said by their own facts, once each.
+    expect(answer.lines.some((l) => l.includes("정기적으로 가져올 수 있습니다"))).toBe(true);
+    expect(answer.lines.some((l) => l.includes("이 대화 창구에서는"))).toBe(true);
     expect(answer.link?.to).toBe("/connect");
     // 「연결부터 하세요」 answers a different question and must not stand in for this one.
     expect(answer.headline).not.toContain("연결하는 것부터");
@@ -117,14 +119,17 @@ describe("a channel's capability is read, and 「모른다」 is not said as 「
     const reviewSend = answer.lines.find((l) => l.includes("리뷰 답글 보내기"))!;
     expect(reviewSend).toContain("연결하신 뒤에 확인해 드릴 수 있습니다");
     expect(reviewSend).not.toContain("길이 없어");
-    // The inquiry transport IS audited and wired, so that one is a real promise.
-    expect(answer.lines.find((l) => l.includes("문의 답변 보내기"))).toContain("바로 게시하고");
+    // The inquiry transport IS audited and wired, so that one is a real promise — and it names the
+    // approval, because that is what makes it true (Truth Closure v1 §5).
+    const inquirySend = answer.lines.find((l) => l.includes("문의 답변 보내기"))!;
+    expect(inquirySend).toContain("승인하시면");
+    expect(inquirySend).toContain("채널에 등록하고");
   });
 
   it("a channel with no path for a type says so, per type", () => {
     const answer = channelActionAnswer([facts(false)], sellerReadinessOf(COVERAGE));
     expect(answer.lines.find((l) => l.includes("리뷰 가져오기"))).toContain("아직 가져올 경로가 없습니다");
-    expect(answer.lines.find((l) => l.includes("문의 가져오기"))).toContain("자동으로 가져옵니다");
+    expect(answer.lines.find((l) => l.includes("문의 가져오기"))).toContain("자동으로 가져올 수 있습니다");
   });
 
   it("names the reasons apart — a channel that cannot, and a verdict not yet read", () => {
@@ -150,7 +155,9 @@ describe("a channel's capability is read, and 「모른다」 is not said as 「
     }, true);
     const line = channelActionAnswer([disabled], sellerReadinessOf(COVERAGE))
       .lines.find((l) => l.includes("문의 답변 보내기"))!;
-    expect(line).toContain("초안을 복사해");
+    // The route runs through the seller's own hands, and the sentence says whose the last step is —
+    // it no longer prescribes «복사», because for a guided channel the last step is a button press.
+    expect(line).toContain("마지막 단계는 판매자님이 하십니다");
     // The seller's remedy is not connecting, and no internal word for the switch appears.
     expect(line).not.toContain("연결하신 뒤에");
     expect(line.toLowerCase()).not.toContain("execution");
@@ -179,10 +186,10 @@ describe("a channel's capability is read, and 「모른다」 is not said as 「
     const lineOf = (f: ReturnType<typeof naver>) =>
       channelActionAnswer([f], sellerReadinessOf(COVERAGE)).lines.find((l) => l.includes("문의 답변 보내기"))!;
 
-    expect(lineOf(naver("DIRECT_API"))).toContain("바로 게시하고");
+    expect(lineOf(naver("DIRECT_API"))).toContain("채널에 등록하고");
     // Disagreeing subtypes stay unknown: the per-object lane refuses to pick one for a reason, and
     // this answer must not pick one either.
-    expect(lineOf(naver("UNSUPPORTED"))).not.toContain("바로 게시하고");
+    expect(lineOf(naver("UNSUPPORTED"))).not.toContain("채널에 등록하고");
   });
 
   it("an unread coverage table produces no channel claims at all", () => {
@@ -212,10 +219,21 @@ describe("a fact is said once — per fact", () => {
 });
 
 describe("the aspect axis", () => {
-  it("accepts exactly the five the planner is offered, and nothing else", () => {
-    expect([...CAPABILITY_ASPECTS]).toEqual(
-      ["PRODUCT_OVERVIEW", "SUPPORTED_CHANNELS", "AFTER_CONNECT", "CHANNEL_ACTION", "HOW_TO_CONNECT"]);
-    // Half-convergence, stated: `AgentPlanPrompt.CAPABILITY_ASPECTS` pins the same five on the backend
+  it("accepts exactly the eleven the planner is offered, and nothing else", () => {
+    expect([...CAPABILITY_ASPECTS]).toEqual([
+      "PRODUCT_OVERVIEW", "SUPPORTED_CHANNELS", "AFTER_CONNECT", "CHANNEL_ACTION", "HOW_TO_CONNECT",
+      // v18 (2026-09-08). Both were arriving as a null aspect, and null widens: the runtime sent every
+      // layer of the reviewed ledger and the conversation floor refused the request outright.
+      "PRODUCT_DIFFERENCE", "FUTURE_DIRECTION",
+      // v19 (2026-09-08). Manual QA watched 「지금 자동으로 가져오고 있어?」 answer with a product
+      // catalogue and 「내가 매일 들어와야 해?」 answer with today's inquiry count — both true about the
+      // store, neither the question asked.
+      "COLLECTION_STATE", "DAILY_OPERATION",
+      // v21 (2026-09-08). Both planned as PRODUCT_OVERVIEW and arrived at 79 fact lines against a
+      // floor of 80 — correct answers one ledger addition away from silently reverting.
+      "TEAM_ACCESS", "SECURITY_AND_DATA",
+    ]);
+    // Half-convergence, stated: `AgentPlanPrompt.CAPABILITY_ASPECTS` pins the same eleven on the backend
     // side and its own test asserts the prompt offers each. A value added on one side only is dropped
     // here — the failure direction is the fallback, never a token the runtime cannot read.
     for (const a of CAPABILITY_ASPECTS) expect(capabilityAspectOf(a)).toBe(a);

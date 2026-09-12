@@ -26,8 +26,11 @@ import org.springframework.stereotype.Service;
  * material ({@link #store}, {@link #open}) throws — {@link #readMasked} serves
  * metadata only and needs no key.
  *
- * <p>Slice 5 is service-layer only — the intake/read API endpoints are Slice 6,
- * and nothing calls {@link #open} yet (real connectors are Phase 3C).
+ * <p><b>Both halves are in use.</b> That last sentence used to read 「nothing calls {@code open()} yet
+ * — real connectors are Phase 3C」, and it stopped being true when the connectors landed: every live
+ * NAVER, Cafe24 and Coupang call opens its credential through here, and the intake endpoints exist.
+ * A stale docblock on the one class that owns secret material is worth correcting on sight — it is
+ * read by whoever is deciding what this product may claim about how credentials are kept.
  */
 @Service
 public class CredentialVault {

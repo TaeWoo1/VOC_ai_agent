@@ -366,7 +366,7 @@ export const SELF_KNOWLEDGE_CASES: readonly NamedScenario[] = [
         never: ["어느 채널에 대한 질문인지"],
       } },
       { say: "연동하고 나면 어떻게 가능한거지?", expect: {
-        artifacts: ["SUMMARY"], says: ["정기적으로 가져옵니다", "답변 초안까지 준비해"], differsFrom: 0,
+        artifacts: ["SUMMARY"], says: ["정기적으로 가져올 수 있습니다", "답변 초안까지 준비해"], differsFrom: 0,
         // The onboarding step is HOW_TO_CONNECT's answer, and this is not that question.
         never: ["판매 채널을 연결하는 것부터 하시면 됩니다"],
       } },
@@ -393,7 +393,7 @@ export const SELF_KNOWLEDGE_CASES: readonly NamedScenario[] = [
     name: "[NO_CHANNEL] the same question twice is not the same sentence twice",
     world: "NO_CHANNEL",
     turns: [
-      { say: "연동하고 나면 어떻게 가능한거지?", expect: { artifacts: ["SUMMARY"], says: ["정기적으로 가져옵니다"] } },
+      { say: "연동하고 나면 어떻게 가능한거지?", expect: { artifacts: ["SUMMARY"], says: ["정기적으로 가져올 수 있습니다"] } },
       { say: "연동하고 나면 뭐가 되냐고", expect: {
         // The items are not re-printed, and the sentence that replaces them is new information —
         // not the previous headline with the card removed.

@@ -868,6 +868,16 @@ export interface AgentConverseView {
   /** Seller-facing prose. Present only when `available`. */
   readonly answer: string | null;
   readonly providerVersion: string | null;
+  /**
+   * Why there is no answer, as the backend's own closed token — `NOT_ENABLED`, `REQUEST_REFUSED`,
+   * `NO_BASIS`, `UNAVAILABLE`, or `OK` when there is one.
+   *
+   * <b>Only `NO_BASIS` is a fact about the product.</b> It means the model read the whole selected fact
+   * sheet and said those facts do not answer this question — a sentence a seller can act on. The others
+   * mean we did not really ask, and they keep landing on the deterministic composer exactly as before.
+   * Absent on a backend that predates the field, which reads as "we did not ask".
+   */
+  readonly reason?: string | null;
 }
 
 /* ─────────────── Cross-Channel Operational Reasoning v1 (2026-08-24) ─────────────── */
@@ -1361,15 +1371,138 @@ export interface ChannelCapabilityOverview {
   readonly channelNameKo: string | null;
   readonly connectorClass: string | null;
   readonly autoCollectSupported: boolean;
-  readonly dataTypes: ReadonlyArray<{
-    readonly dataType: string;
-    readonly label: string | null;
-    readonly supported: boolean;
-    readonly verificationStatus: string | null;
-    /** `method` ∈ API | ACTION_WINDOW | EXPORT | MANUAL; `recurrence` ∈ SCHEDULED | SELLER_REPEATED | ONE_OFF. */
-    readonly acquisitionPaths: ReadonlyArray<{ readonly method: string; readonly verificationStatus: string; readonly recurrence: string }>;
-  }>;
+  readonly dataTypes: ReadonlyArray<ChannelDataTypeCapability>;
   readonly unsupportedScopes: ReadonlyArray<{ readonly code: string; readonly label: string }>;
+  /**
+   * The knowledge-layer types — today PRODUCT — computed from the same live connector but kept out of
+   * the operator badge row (Product Self-Knowledge Truth Closure v1). Optional: a backend predating
+   * the field simply omits it, and an absent list means "nobody answered", never "not supported".
+   */
+  readonly backgroundDataTypes?: ReadonlyArray<ChannelDataTypeCapability>;
+}
+
+/** One data type's capability, as the live connector answers it — plus what the reference table says. */
+export interface ChannelDataTypeCapability {
+  readonly dataType: string;
+  readonly label: string | null;
+  readonly supported: boolean;
+  readonly verificationStatus: string | null;
+  /** `method` ∈ API | ACTION_WINDOW | EXPORT | MANUAL; `recurrence` ∈ SCHEDULED | SELLER_REPEATED | ONE_OFF. */
+  readonly acquisitionPaths: ReadonlyArray<{ readonly method: string; readonly verificationStatus: string; readonly recurrence: string }>;
+  /**
+   * What `connector_capabilities` declares — SUPPORTED | UNSUPPORTED | UNDECLARED. Carried beside the
+   * live answer, never folded into it: the two disagree today, and a reader that picked the stronger
+   * of the two would state a capability nobody proved.
+   */
+  readonly declaredSupport?: string | null;
+  /** The reference table's own verification word, which diverges from the live one independently. */
+  readonly declaredVerificationStatus?: string | null;
+}
+
+/**
+ * Mirror of `CollectionPostureView` (`GET /api/collect/posture`) — does THIS DEPLOYMENT collect on its
+ * own right now.
+ *
+ * The runtime layer of the three a 「자동」 sentence needs. `schedulerRunning` is bean presence, not a
+ * flag re-read; `routineProvisioning` is whether a newly connected account would ever get a routine
+ * schedule. Two booleans, no key names, no org.
+ */
+export interface CollectionPostureView {
+  readonly schedulerRunning: boolean;
+  readonly routineProvisioning: boolean;
+  /**
+   * Whether the layer that prepares work BEFORE the seller asks is running here. Bean presence, like
+   * the two above. Optional because a backend that predates the field sends none — and absent must
+   * stay «we did not read it», which is why nothing is said at all in that case.
+   */
+  readonly proactiveRunning?: boolean;
+}
+
+/* ───────────────────────── Canonical Product Source ───────────────────────── */
+
+/**
+ * Mirror of `ProductTruthView` (`GET /api/product-truth`) — the reviewed product ledger.
+ *
+ * <b>This is the authority for what the PRODUCT does.</b> Every item was read and approved by a person
+ * (`review: HUMAN_REVIEWED`), which is the difference between it and everything else this file mirrors:
+ * the rest are live reads that answer "what is true of this deployment / this seller right now", and
+ * those remain the overlay. A runtime flag being off does not move a line in here.
+ *
+ * <b>`evidence` never becomes a sentence.</b> It is carried so the runtime can refuse to send a
+ * capability whose strength is not also stated in Korean — an `IMPLEMENTED` row that lost its
+ * 「실제로 실행된 적이 없습니다」 is exactly how implemented gets read as proven. The token itself stays
+ * in this process.
+ */
+export interface CanonicalProductTruth {
+  readonly capabilities: CanonicalCapability[];
+  readonly features: CanonicalFeature[];
+  readonly invariants: CanonicalStatement[];
+  readonly narratives: CanonicalStatement[];
+  readonly directions: CanonicalStatement[];
+  readonly roadmap: CanonicalRoadmapItem[];
+}
+
+/** `CHANNEL.OBJECT.AXIS` — one reviewed row. */
+export interface CanonicalCapability {
+  readonly id: string;
+  readonly channel: string;
+  readonly object: string;
+  /** ACQUISITION | READ | DRAFT | EXECUTION */
+  readonly axis: string;
+  /** SUPPORTED | PARTIAL | NOT_SUPPORTED | UNKNOWN */
+  readonly status: string;
+  readonly mode: string;
+  /** LIVE_PROVEN | TEST_PROVEN | IMPLEMENTED | DECLARED | UNKNOWN — never rendered. */
+  readonly evidence: string;
+  readonly sellerFacingNotes: string[];
+  readonly limitations: string[];
+  readonly requirements: CanonicalRequirement[];
+  readonly subtypes: CanonicalSubtype[];
+}
+
+/** A precondition on an execution path. Never demotes the row it sits on. */
+export interface CanonicalRequirement {
+  readonly kind: string;
+  readonly description: string;
+}
+
+/** A refinement of a row — NAVER 문의 is three contracts, not one. */
+export interface CanonicalSubtype {
+  readonly id: string;
+  readonly key: string;
+  readonly label: string;
+  readonly status: string;
+  readonly mode: string;
+  readonly evidence: string;
+  readonly sellerFacingNotes: string[];
+  readonly limitations: string[];
+}
+
+/** A product-wide capability — no channel, no object, no mode. */
+export interface CanonicalFeature {
+  readonly id: string;
+  readonly title: string;
+  readonly status: string;
+  readonly evidence: string;
+  readonly sellerFacingNotes: string[];
+  readonly limitations: string[];
+}
+
+/** An invariant, a narrative or a direction: a sentence with an id and no capability claim. */
+export interface CanonicalStatement {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly notThis: string[];
+}
+
+/** A future item. `qualifier` is the hedge any mention must carry; the ledger refuses a blank one. */
+export interface CanonicalRoadmapItem {
+  readonly id: string;
+  readonly title: string;
+  readonly status: string;
+  readonly summary: string;
+  readonly qualifier: string;
 }
 
 /** Mirror of `InquiryReplyCapabilityView` (`GET /api/inquiry-publish/transports`) — the audited transport per (channel, subtype). */

@@ -3,7 +3,7 @@
 Written at HEAD `027a2ca`. This document prepares the **local environment
 structure only** — it does not authorize or perform any live API call.
 Running the actual Naver live smoke requires separate explicit operator
-authorization and follows `docs/sellerops_phase3c_live_smoke.md`.
+authorization and follows `docs/archive/sellerops_phase3c_live_smoke.md`.
 
 ---
 
@@ -127,7 +127,7 @@ and there is no read-back API by design.
 
 ## 7. Triggering the live smoke (later — separate authorization required)
 
-Follow `docs/sellerops_phase3c_live_smoke.md` end to end. In env terms:
+Follow `docs/archive/sellerops_phase3c_live_smoke.md` end to end. In env terms:
 
 1. Set `SELLEROPS_CONNECTOR_NAVER_ENABLED=true` in `backend/.env.local`,
    re-source, restart the backend (scheduler stays `false`).

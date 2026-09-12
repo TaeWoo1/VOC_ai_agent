@@ -51,6 +51,11 @@ import {
   fallbackAspect, overviewAnswer, shortenRepeat, supportedChannelsAnswer,
 } from "../operator/capability/ProductSelfKnowledge";
 import { productFactSheet } from "../operator/capability/ProductFactSheet";
+import type { CanonicalSelection } from "../operator/capability/CanonicalProductTruth";
+import { planSelection, selectCanonicalFacts } from "../operator/capability/CanonicalProductTruth";
+import type { ChannelObjectTruth, ChannelOffer, OperatingObject } from "../operator/capability/ProductTruth";
+import { channelObjectTruths } from "../operator/capability/ProductTruth";
+import type { ChannelCapabilitySources } from "../operator/capability/ChannelCapability";
 import { CONNECT_ACTION } from "../operator/capability/AssistantCapability";
 import { envelopeOf, envelopeTokens, envelopeTurnLines } from "./ContextEnvelope";
 import type { ContextEnvelope } from "./ContextEnvelope";
@@ -118,7 +123,9 @@ import { listInquiryWorkload, matchesTerm } from "../operator/tools/inquiryWorkl
 import { adviseOnInquiry } from "./advisory";
 import { matchesTopic } from "../operator/tools/inquiryWorkload";
 import type { VisibleRow } from "./visibleSelection";
-import type { ChannelCoverageRow, GeneratedDraftView, ReviewDetailResponse } from "../spring/types";
+import type {
+  CanonicalProductTruth, ChannelCoverageRow, GeneratedDraftView, ReviewDetailResponse,
+} from "../spring/types";
 import { issueSentence, reviewLine } from "../operator/graph/reviewDetail";
 import type { ReviewReplyCapability } from "../operator/graph/reviewDetail";
 import { periodLabel } from "./period";
@@ -284,7 +291,36 @@ interface TurnCtx {
   out: TurnView | null;
 }
 
+/**
+ * How long a cached ledger stays fresh. The files cannot change without a deploy; this covers the one
+ * case that is not that — a backend redeployed under a runtime that was not restarted with it.
+ */
+const CANONICAL_TTL_MS = 5 * 60_000;
+
+/**
+ * The operating object this thread is standing on, when the ledger has rows for it.
+ *
+ * {@code ISSUE} and {@code REPORT} are focus kinds with no channel × object row — an issue is derived
+ * from reviews and a report from everything — so they resolve to `null` rather than to a guess. The
+ * effect of a null is a slightly wider selection, which is the safe direction.
+ */
+function focusObjectOf(envelope: ContextEnvelope): OperatingObject | null {
+  const kind = envelope.focus?.kind ?? null;
+  return kind === "INQUIRY" || kind === "REVIEW" || kind === "PRODUCT" ? kind : null;
+}
+
 export class ConversationService {
+  /**
+   * The Canonical Product Source, cached for the life of this service.
+   *
+   * <b>Per instance rather than static, deliberately.</b> The ledger is not tenant data — it is the
+   * same files for every organization — so a static would be correct in production, where
+   * `http/main.ts` builds exactly one service. It would also be wrong everywhere else: a cache that
+   * outlives the object that filled it makes one test's seeded ledger the next test's backend, and a
+   * suite that can pass because of what a neighbour seeded is not a suite.
+   */
+  private canonicalCache: { ledger: CanonicalProductTruth | null; until: number } | null = null;
+
   constructor(private readonly deps: ConversationServiceDeps) {}
 
   private now(): string {
@@ -1523,15 +1559,42 @@ export class ConversationService {
     }
 
     // ── EXPLAIN_CAPABILITY: what this product can do — for the ASPECT the plan named.
-    if (axis.requestedAction === "EXPLAIN_CAPABILITY") {
+    //
+    // <b>An aspect is the planner saying this is a product question.</b> That field exists for exactly
+    // one action and nothing else reads it, so a plan that fills it in has already answered the routing
+    // question — whatever it then put in `requestedAction`. Measured live: 「카페24 리뷰에 답글 실제로
+    // 보낸 적 있어?」 planned as `NONE` with `capabilityAspect: CHANNEL_ACTION`, and the seller was
+    // answered 「확인 가능한 리뷰가 134건입니다」. Trusting the aspect costs nothing when the action is
+    // NONE — there is no other action to lose — and it is a closed token, not the sentence.
+    const capabilityTurn = axis.requestedAction === "EXPLAIN_CAPABILITY"
+      || (axis.requestedAction === "NONE" && axis.filters.capabilityAspect != null);
+    if (capabilityTurn) {
+      // <b>The plan owns this turn, not what is still on the table.</b> A working set used to be enough
+      // to send a capability question down the per-OBJECT lane and to lend it a channel the sentence
+      // never named — so after any turn that drew a list, 「네이버 문의는 다 가져와?」 was answered about
+      // the reviews still on screen. The per-object question is the one that POINTS at a row
+      // (「이 건은 왜 답변 못 해?」), and the plan says so in its own target selector.
+      const pointsAtRow = axis.target.selector !== "NONE";
       const explained = await this.explainCapability(
-        bundle, view, axis.filters.channel ?? workingSet?.filters.channelCode ?? null, workingSet,
+        bundle, view,
+        axis.filters.channel ?? (pointsAtRow ? workingSet?.filters.channelCode ?? null : null),
+        pointsAtRow ? workingSet : null,
         axis.filters.capabilityAspect, world,
         envelopeOf({ conversationId: view.conversationId, view, readiness: world.readiness.kind, surface: hints.surface ?? null }),
         said,
       );
+      // <b>A question about the product does not get the store's rows underneath it.</b> The prompt
+      // asks the planner to declare no needs for these turns; when it declares them anyway, the
+      // specialists run and their catalogue and evidence cards land beside an answer about what
+      // reviewnary does. Measured live: 「지금 자동으로 가져오고 있어?」 answered correctly and then
+      // printed two repeated-issue evidence cards, and 「내가 매일 들어와야 해?」 answered with the day's
+      // inquiry count. Both are true about this store and neither was asked, so the rule the prompt
+      // requests is enforced here rather than hoped for. The capability card itself is kept.
+      for (let i = artifacts.length - 1; i >= 0; i -= 1) {
+        if (DOMAIN_ARTIFACT_TYPES.has(artifacts[i]!.type)) artifacts.splice(i, 1);
+      }
       if (explained.artifact) artifacts.push(explained.artifact);
-      headline = headline ?? explained.headline;
+      headline = explained.headline;
       extraChips.push(...explained.chips);
     }
 
@@ -2952,7 +3015,7 @@ export class ConversationService {
      * shipped before this lane. That is also why the scenario suite is unchanged: its client has no
      * `converse` method at all, so this lane does not run in CI and CANNOT change a recorded answer.
      */
-    const grounded = await this.groundedProductAnswer(bundle, input, world, envelope, said, channel);
+    const grounded = await this.groundedProductAnswer(bundle, input, world, envelope, said, channel, aspect);
     if (grounded) return grounded;
 
     // A named channel narrows the two aspects that have a per-channel truth; the other three are about
@@ -2994,6 +3057,37 @@ export class ConversationService {
   }
 
   /**
+   * <b>The Canonical Product Source, read once per process.</b>
+   *
+   * The ledger is files compiled into the backend's jar — it cannot change without a deploy — so the
+   * honest cache lifetime is "until something restarts". A short TTL rather than forever is the guard
+   * for the one case that is not that: a backend redeployed under a runtime that was not.
+   *
+   * <b>A failed read is `null`, not an empty ledger.</b> The two are different answers and only one of
+   * them is honest: an empty ledger would say the product has no reviewed capabilities, which would
+   * make the sheet narrower than it was before this wiring existed. `null` means "stand on the derived
+   * facts", which is what shipped before.
+   */
+  private async canonicalTruth(bundle: SpringClientBundle): Promise<CanonicalProductTruth | null> {
+    if (!bundle.operator.getProductTruth) return null;
+    const now = Date.now();
+    if (this.canonicalCache && now < this.canonicalCache.until) {
+      return this.canonicalCache.ledger;
+    }
+    try {
+      const ledger = await bundle.operator.getProductTruth();
+      // An empty ledger is a backend that could not read its own files. It is not a product with no
+      // capabilities, and caching it as one would be this runtime repeating the mistake.
+      const usable = ledger && ledger.capabilities.length > 0 ? ledger : null;
+      this.canonicalCache = { ledger: usable, until: now + CANONICAL_TTL_MS };
+      return usable;
+    } catch {
+      this.canonicalCache = { ledger: null, until: now + CANONICAL_TTL_MS };
+      return null;
+    }
+  }
+
+  /**
    * <b>Answer the question that was asked, from facts this deployment can prove.</b>
    *
    * The inputs are the ones §3 names and nothing else: the seller's own sentence, the last few
@@ -3012,20 +3106,56 @@ export class ConversationService {
    */
   private async groundedProductAnswer(
     bundle: SpringClientBundle, input: SelfKnowledgeInputs, world: WorldState,
-    envelope: ContextEnvelope, said: string, channel: string | null,
+    envelope: ContextEnvelope, said: string, channel: string | null, aspect: CapabilityAspect | null,
   ): Promise<{ artifact: null; headline: string; chips: SuggestedAction[] } | null> {
     const question = said.trim();
     if (!bundle.operator.converse || question.length === 0) return null;
-    const matrix = await this.channelMatrix(bundle, input, channel);
-    const facts = productFactSheet(input, matrix);
+    // Three reads, and each answers a different layer of the same sentence. The CANONICAL ledger says
+    // what the product does — reviewed and approved by a person, and the authority here. The channel
+    // truths and the posture say what this deployment and this seller can do right now. They are
+    // composed side by side and neither overwrites the other; that is `INVARIANT.CAPABILITY_VS_STATE`
+    // as code rather than as a sentence in a file.
+    const [truths, posture, ledger] = await Promise.all([
+      this.channelTruths(bundle, input, channel),
+      bundle.operator.getCollectionPosture?.().catch(() => null) ?? Promise.resolve(null),
+      this.canonicalTruth(bundle),
+    ]);
+    // Selection reads the planner's closed tokens and the thread's focus — never the seller's words.
+    // A question the planner could not place widens rather than narrows: see `planSelection`.
+    const plan = planSelection({
+      aspect,
+      channel,
+      focusObject: focusObjectOf(envelope),
+    });
+    // Selected once. The ids are what makes the log's two layers distinguishable afterwards, and
+    // selecting twice to recover them would be two chances for the trace to describe a different
+    // payload than the one that was sent.
+    const names: Record<string, string> = {};
+    for (const o of channelOffers(input.coverage)) names[o.code] = o.name;
+    const canonical = ledger
+      ? { facts: selectCanonicalFacts(ledger, plan, names), runtimeOverlay: plan.runtimeOverlay }
+      : null;
+    const facts = productFactSheet({ ...input, posture }, truths, canonical);
+    const canonicalIds = new Set((canonical?.facts ?? []).map((f) => f.id));
     let answered: string | null = null;
+    // <b>Did the model DECLINE, or was the lane simply not there?</b> Two different facts that used to
+    // land on one branch. A capability that is off, a floor that refused and a seam that threw are all
+    // 「we did not ask」; a model that answered {"answered":false} on a full fact sheet is 「we asked and
+    // the reviewed facts do not contain it」, and only the second is something to tell a seller.
+    let noBasis = false;
     try {
       const result = await bundle.operator.converse({
         question,
-        facts,
+        // Only the TEXT crosses the boundary. The keys are ours — they exist so this turn can be traced
+        // back to the lines it was allowed to stand on, and adding them to the payload would widen the
+        // floor by a set of internal tokens for no seller-facing gain.
+        facts: facts.map((f) => f.text),
         context: envelopeTokens(envelope),
         recentTurns: envelopeTurnLines(envelope),
       });
+      // The backend's own token, not an inference from `available`: a model that declined and a
+      // capability that is off both arrive as `available:false`.
+      noBasis = result.reason === "NO_BASIS";
       answered = result.available ? result.answer : null;
     } catch {
       // A seam that is unreachable is a seam that is off. Same consequence, same branch.
@@ -3034,10 +3164,37 @@ export class ConversationService {
     const verdict = checkGroundedAnswer(answered);
     log("grounded_conversation", {
       answered: verdict.ok, reason: verdict.reason ?? "OK", facts: facts.length,
-      turns: envelope.recentTurns.length, channels: matrix.length,
+      // <b>Traceability, split by layer.</b> A reported sentence has to be checkable against the
+      // reviewed items it was allowed to stand on AND against the live state it was allowed to qualify
+      // them with — one merged list cannot answer "did the ledger say that, or did this deployment".
+      // Closed tokens only: no channel data, no seller text, no configuration key name.
+      knowledge: canonical ? plan.categories.join("+") : "DERIVED_ONLY",
+      // Deduplicated: a reviewed item too long for one line of the backend's floor is sent as several
+      // facts under the SAME id, and the trace answers "which items did this turn stand on" — an item
+      // counted twice because of a line break would make that question harder to read, not easier.
+      canonicalIds: [...new Set(facts.filter((f) => canonicalIds.has(f.key)).map((f) => f.key))].join(","),
+      runtimeKeys: facts.filter((f) => !canonicalIds.has(f.key)).map((f) => f.key).join(","),
+      depth: canonical ? plan.capabilityDepth : "NONE",
+      turns: envelope.recentTurns.length, channels: new Set(truths.map((t) => t.channelCode)).size,
+      posture: posture == null ? "UNKNOWN" : posture.schedulerRunning ? "COLLECTING" : "IDLE",
       focus: envelope.focus?.kind ?? "NONE", readiness: envelope.readiness,
     });
-    if (!verdict.ok) return null;
+    if (!verdict.ok) {
+      // <b>The bounded gap answer, and why it is not the overview card.</b> When the model was asked
+      // over the whole selected sheet and still had nothing, the honest sentence is that the product
+      // facts we hold do not answer this — not a summary of what the product does, which is what a
+      // seller got for 「직원이랑 같이 써도 돼?」 and read as an answer to their question. It states the
+      // limit and nothing else: guessing the detail, or inventing a capability to cover it, is the
+      // failure this whole ledger exists to prevent.
+      //
+      // Only the model's own refusal takes this path. A guard rejection (too long, our own words, a
+      // document shape) is OUR failure on a sentence that may well have been right, and it keeps
+      // landing on the composer exactly as before.
+      if (noBasis) {
+        return { artifact: null, headline: PRODUCT_KNOWLEDGE_GAP_SENTENCE, chips: [] };
+      }
+      return null;
+    }
     return {
       artifact: null,
       headline: verdict.text!,
@@ -3061,9 +3218,9 @@ export class ConversationService {
    * absent and {@link ProductSelfKnowledge} renders that as 「연결하신 뒤에 확인해 드릴 수 있습니다」
    * rather than as 「안 됩니다」. Bounded: at most three overviews plus two org reads, on this turn only.
    */
-  private async channelMatrix(
+  private async channelSources(
     bundle: SpringClientBundle, input: SelfKnowledgeInputs, channel: string | null,
-  ): Promise<ChannelActionFacts[]> {
+  ): Promise<Array<{ offer: ChannelOffer; sources: ChannelCapabilitySources }>> {
     const offers = channelOffers(input.coverage);
     const wanted = channel ? offers.filter((o) => o.code === channel.toUpperCase()) : offers;
     if (wanted.length === 0) return [];
@@ -3089,10 +3246,34 @@ export class ConversationService {
         ? bundle.operator.getReviewChannelCapability?.(accountId).catch(() => null) ?? Promise.resolve(null)
         : Promise.resolve(null);
     }));
-    return wanted.map((o, i) => channelActionFacts(o.code, o.name, {
-      overview: overviews[i] ?? null, transports, publish,
-      reviewChannel: reviewChannels[i] ?? null, localAgent: "UNKNOWN",
-    }, o.connected));
+    return wanted.map((o, i) => ({
+      offer: o,
+      sources: {
+        overview: overviews[i] ?? null, transports, publish,
+        reviewChannel: reviewChannels[i] ?? null, localAgent: "UNKNOWN" as const,
+      },
+    }));
+  }
+
+  /** The composed lane's shape — two objects, four labels. Kept for the deterministic fallback. */
+  private async channelMatrix(
+    bundle: SpringClientBundle, input: SelfKnowledgeInputs, channel: string | null,
+  ): Promise<ChannelActionFacts[]> {
+    const read = await this.channelSources(bundle, input, channel);
+    return read.map((r) => channelActionFacts(r.offer.code, r.offer.name, r.sources, r.offer.connected));
+  }
+
+  /**
+   * The grounded lane's shape — every operating object, per channel (Product Self-Knowledge Truth
+   * Closure v1). Same reads, same resolver; what differs is that PRODUCT and ORDER get a row instead of
+   * being asserted at product level with nothing to check them against.
+   */
+  private async channelTruths(
+    bundle: SpringClientBundle, input: SelfKnowledgeInputs, channel: string | null,
+  ): Promise<ChannelObjectTruth[]> {
+    const read = await this.channelSources(bundle, input, channel);
+    return read.flatMap((r) =>
+      [...channelObjectTruths(r.offer.code, r.offer.name, r.sources, r.offer.connected)]);
   }
 
   /** The execution capability of a review's channel, read for its own API-mode account. Fail closed. */
@@ -4092,12 +4273,36 @@ export const ASSISTANT_CAPABILITY_ID = "a-assistant-capability";
  * The overview keeps {@link ASSISTANT_CAPABILITY_ID} so a conversation that has already drawn that
  * card still counts as having drawn it.
  */
+/**
+ * What a product question gets when the reviewed facts do not answer it.
+ *
+ * One sentence, and deliberately without a next step: this lane does not know what the seller would
+ * have to do, and offering a guess would be the same overclaim in a friendlier shape.
+ */
+/**
+ * The artifacts that show the SELLER's rows. None of them belongs on a turn that asked what the
+ * product does — they answer a question about this store, and the turn asked about reviewnary.
+ */
+const DOMAIN_ARTIFACT_TYPES: ReadonlySet<string> = new Set([
+  "INQUIRY_LIST", "REVIEW_LIST", "PRODUCT_LIST", "ISSUE_LIST", "OPPORTUNITY_LIST", "ORDER_SUMMARY",
+  "CHART", "EVIDENCE", "INQUIRY_DETAIL", "REVIEW_DETAIL",
+]);
+
+const PRODUCT_KNOWLEDGE_GAP_SENTENCE =
+  "현재 확인된 제품 정보만으로는 이 질문에 정확히 답할 수 없습니다.";
+
 const ASPECT_ARTIFACT_ID: Readonly<Record<CapabilityAspect, string>> = {
   PRODUCT_OVERVIEW: ASSISTANT_CAPABILITY_ID,
   SUPPORTED_CHANNELS: "a-supported-channels",
   AFTER_CONNECT: "a-after-connect",
   CHANNEL_ACTION: "a-channel-action",
   HOW_TO_CONNECT: "a-getting-started",
+  PRODUCT_DIFFERENCE: "a-product-difference",
+  FUTURE_DIRECTION: "a-future-direction",
+  COLLECTION_STATE: "a-collection-state",
+  DAILY_OPERATION: "a-daily-operation",
+  TEAM_ACCESS: "a-team-access",
+  SECURITY_AND_DATA: "a-security-and-data",
 };
 
 /**
@@ -4122,6 +4327,15 @@ const ASPECT_TITLE: Readonly<Record<CapabilityAspect, string>> = {
   AFTER_CONNECT: "연결한 뒤에 하는 일",
   CHANNEL_ACTION: "채널별로 되는 것과 안 되는 것",
   HOW_TO_CONNECT: "시작하는 방법",
+  // The deterministic fallback draws the overview card for these two — the grounded lane is what
+  // answers them, and a card titled 「앞으로의 방향」 built from CURRENT truth would be a worse answer
+  // than the honest overview.
+  PRODUCT_DIFFERENCE: "제가 도와드릴 수 있는 일",
+  FUTURE_DIRECTION: "제가 도와드릴 수 있는 일",
+  COLLECTION_STATE: "제가 도와드릴 수 있는 일",
+  DAILY_OPERATION: "제가 도와드릴 수 있는 일",
+  TEAM_ACCESS: "제가 도와드릴 수 있는 일",
+  SECURITY_AND_DATA: "제가 도와드릴 수 있는 일",
 };
 
 function reasonSummary(artifactId: string, title: string, lines: string[]): SummaryArtifact {

@@ -71,6 +71,8 @@ import type {
   ReviewAcquisitionResult,
   SyncRunSummary,
   ChannelCapabilityOverview,
+  CanonicalProductTruth,
+  CollectionPostureView,
   InquiryReplyTransportRow,
   ReviewChannelCapabilityView,
   ManualSyncRequest,
@@ -618,6 +620,14 @@ export class HttpSpringClient
 
   async listInquiryReplyTransports(): Promise<InquiryReplyTransportRow[]> {
     return this.request<InquiryReplyTransportRow[]>("GET", `/api/inquiry-publish/transports`);
+  }
+
+  async getCollectionPosture(): Promise<CollectionPostureView> {
+    return this.request<CollectionPostureView>("GET", `/api/collect/posture`);
+  }
+
+  async getProductTruth(): Promise<CanonicalProductTruth> {
+    return this.request<CanonicalProductTruth>("GET", `/api/product-truth`);
   }
 
   async getReviewChannelCapability(accountId: string): Promise<ReviewChannelCapabilityView> {

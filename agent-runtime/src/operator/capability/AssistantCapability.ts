@@ -130,14 +130,48 @@ export function capabilityDomains(registeredTools: readonly string[]): Domain[] 
 }
 
 /**
- * The boundary, from the catalogue's action classes.
+ * The boundary of THIS CONVERSATION LANE, from the catalogue's action classes.
  *
  * READ-only is the shipped state and the registry enforces it; the other branch exists so that a
  * catalogue which ever held anything else could not go on saying this one.
+ *
+ * <b>It describes the lane, and it used to be phrased as though it described the product</b>
+ * (Product Self-Knowledge Truth Closure v1 §5). 「제가 직접 채널에 보내거나 고치는 일은 없습니다」 was true
+ * about the chat window and false about reviewnary: an approved Cafe24 inquiry answer and an approved
+ * NAVER 상품문의 answer have both been posted live by this repository. A seller who read the old
+ * sentence would conclude the product is read-only, which is the opposite of the thing they are
+ * deciding about. The approval invariant — and what happens AFTER the approval, which differs per
+ * channel — is `ProductTruth`'s, said once beside the per-channel rows.
  */
 export function boundarySentence(actionClasses: readonly ActionClass[]): string {
   const readOnly = actionClasses.length > 0 && actionClasses.every((c) => c === "READ");
   return readOnly
-    ? "제가 직접 채널에 보내거나 고치는 일은 없습니다 — 초안까지 준비해 두고, 보내는 것은 확인하신 뒤에 진행합니다."
+    ? "이 대화 창구에서는 읽고 확인하고 정리하고 초안을 준비하는 것까지 합니다 — 여기에서 바로 채널에 등록하지는 않습니다."
     : "채널로 나가는 일은 확인하신 뒤에만 진행합니다.";
+}
+
+/**
+ * <b>What else this runtime is wired to do, beside the four operating objects.</b>
+ *
+ * The domain list is derived from the specialists that own tools, and the four specialists own every
+ * tool — so capabilities that are real and registered (the answer-basis library, past answers, repeat
+ * problems worth acting on, connection guidance) had no way to appear, and the sheet's summary line
+ * said 「이 네 가지뿐」 about them. Derived per TOOL for the same reason {@link Domain.extra} is: a
+ * capability arrives with its read, and a sentence that outlives its read is the stale feature list
+ * this file exists to refuse.
+ *
+ * It is deliberately NOT exhaustive, and the sentence built from it must not claim to be: this runtime
+ * cannot see the parts of the product it holds no tool for.
+ */
+const SUPPORTING_CAPABILITY: ReadonlyArray<{ readonly tool: OperatorToolName; readonly line: string }> = [
+  { tool: OPERATOR_TOOL.SEARCH_ORG_KNOWLEDGE, line: "회사의 운영 기준·답변 기준" },
+  { tool: OPERATOR_TOOL.SEARCH_ANSWER_MEMORY, line: "판매자님이 예전에 보내신 답변" },
+  { tool: OPERATOR_TOOL.LIST_IMPROVEMENT_OPPORTUNITIES, line: "반복되는 문제에서 나온 개선 거리" },
+  { tool: OPERATOR_TOOL.GET_CONNECTION_GUIDANCE, line: "판매 채널 연결 안내" },
+];
+
+/** The supporting areas whose read is actually registered, in catalogue order. Empty when none are. */
+export function supportingCapabilities(registeredTools: readonly string[]): readonly string[] {
+  const names = new Set(registeredTools);
+  return SUPPORTING_CAPABILITY.filter((row) => names.has(row.tool)).map((row) => row.line);
 }

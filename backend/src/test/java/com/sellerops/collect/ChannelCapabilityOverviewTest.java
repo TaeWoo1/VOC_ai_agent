@@ -155,14 +155,19 @@ class ChannelCapabilityOverviewTest {
                     assertThat(path.verificationStatus()).isEqualTo("LIVE_PROVEN");
                 });
         // The missing official API is an asserted fact, not something inferred from the boolean —
-        // that is what the badge is meant to render for it. Exactly once: the connector and the
-        // channel registry both name it, and an operator must not read one fact twice.
+        // that is what the badge is meant to render for it. Exactly once each: the connector and the
+        // channel registry both name them, and an operator must not read one fact twice.
+        //
+        // TWO gaps since Product Self-Knowledge Truth Closure v1, and they are separate facts rather
+        // than one restated: NAVER also publishes no review API and a NAVER seller can still answer a
+        // review in the seller center, so "no API" does not imply "no reply". REVIEW_REPLY is the
+        // second, and it is what lets a channel question be answered before anyone connects.
         assertThat(overview.unsupportedScopes())
                 .extracting(ChannelCapabilityOverview.ScopeNote::code)
-                .containsExactly("REVIEW_API");
+                .containsExactly("REVIEW_API", "REVIEW_REPLY");
         assertThat(overview.unsupportedScopes())
                 .extracting(ChannelCapabilityOverview.ScopeNote::label)
-                .containsExactly("리뷰 API 없음 (쿠팡 미제공)");
+                .containsExactly("리뷰 API 없음 (쿠팡 미제공)", "판매자 리뷰 답글 기능 없음 (쿠팡 미제공)");
     }
 
     /**
@@ -187,7 +192,7 @@ class ChannelCapabilityOverviewTest {
 
         assertThat(overview.unsupportedScopes())
                 .extracting(ChannelCapabilityOverview.ScopeNote::code)
-                .containsExactly("REVIEW_API");
+                .containsExactly("REVIEW_API", "REVIEW_REPLY");
         // And the two halves are both on the screen: what the channel never offered, beside how
         // SellerOps gets 상품평 regardless.
         ChannelCapabilityOverview.DataTypeCapability review = overview.dataTypes().stream()

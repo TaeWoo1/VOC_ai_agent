@@ -55,19 +55,22 @@ entries:
 
   - id: cafe24-cap-product
     topic: CAPABILITY
-    kind: LIMITATION
-    title: 상품 조회에는 mall.read_product 재동의가 필요합니다
+    kind: FACT
+    title: 상품 조회는 동작하며, 오래된 연결만 재동의가 필요합니다
     summary: >-
-      Cafe24 상품 API는 구현되어 있지만, mall.read_product 스코프가 없는 기존 연결에서는
-      insufficient_scope가 돌아옵니다. 판매자의 재동의가 필요하며 우회하지 않습니다.
+      Cafe24 상품 API는 mall.read_product 스코프를 가진 연결에서 정상 동작합니다 — 2026-08-22
+      라이브에서 144개 상품을 이름·판매가·판매상태·통화까지 읽었습니다. 그 스코프 없이 만들어진
+      오래된 연결에서만 insufficient_scope가 돌아오고, 그때는 판매자의 재동의가 필요하며
+      우회하지 않습니다.
     body: >-
-      Operator Graph v2 이전에 만들어진 연결은 mall.read_community, mall.read_order 두 개만
-      가지고 있습니다. 그 연결의 토큰은 정상적으로 발급되므로 "연결됨"으로 보이지만 상품 읽기만
-      실패합니다 — 연결 상태를 보고 원인을 찾으면 안 되는 대표적인 경우입니다.
+      현재 요청하는 스코프에는 mall.read_product가 포함되어 있으므로 새로 만드는 연결은 처음부터
+      상품을 읽습니다. 그 스코프가 없던 시기에 만들어진 연결은 토큰이 정상 발급되어 "연결됨"으로
+      보이지만 상품 읽기만 실패합니다 — 연결 상태를 보고 원인을 찾으면 안 되는 대표적인
+      경우입니다. 목록 응답에 URL·옵션조합·카테고리·브랜드는 들어 있지 않습니다.
     capabilities: [PRODUCT]
     tags: [상품, 스코프, 재동의, insufficient_scope]
-    source: SELLEROPS_EVIDENCE
-    sourceRef: com.sellerops.connector.cafe24.Cafe24ProductsClient
+    source: LIVE_OBSERVATION
+    sourceRef: docs/evidence/INDEX.md (2026-08-22 Cafe24 PRODUCT one-shot READ, run 44bea7b3)
     verifiedAt: "2026-08-21"
 
   # ---------------------------------------------------------------- CONNECTION
@@ -264,15 +267,20 @@ entries:
   - id: cafe24-workflow-inquiry-answer
     topic: WORKFLOW
     kind: FACT
-    title: 문의 답변은 쇼핑몰 관리자에서 판매자가 게시합니다
+    title: 문의 답변은 판매자 승인 후 SellerOps가 직접 등록합니다
     summary: >-
-      SellerOps의 Cafe24 스코프는 전부 읽기 전용입니다. 답변 초안은 만들지만 SellerOps가 글을
-      쓰지는 않습니다.
+      Cafe24 문의 답변은 판매자가 승인하면 SellerOps가 게시판에 직접 등록하고, 등록됐는지 다시
+      읽어 확인합니다(2026-08-25 라이브 검증). 연결 시 요청하는 스코프는 읽기 전용이므로 글쓰기는
+      판매자가 별도로 동의한 뒤에만 가능하고, 동의 전에는 초안까지만 만듭니다.
+    body: >-
+      답변은 질문 글에 달리는 자식 글입니다. 같은 문의에 다시 보내면 덮어쓰지 않고 두 번째 답변
+      글이 생기므로 재전송하지 않습니다. 판매자가 쇼핑몰 관리자에서 댓글로 답변한 것도 알아보고
+      답변됨으로 옮깁니다.
     capabilities: [INQUIRY]
-    tags: [문의, 답변, 읽기전용, 워크플로]
-    source: SELLEROPS_EVIDENCE
-    sourceRef: sellerops.connector.cafe24.oauth.scopes (READ-ONLY 계약)
-    verifiedAt: "2026-08-22"
+    tags: [문의, 답변, 승인, 워크플로]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/inquiry_answer_execution_v1.md §30 (VERIFIED 2026-08-25, commit b0bfb022)
+    verifiedAt: "2026-08-25"
 
   # ---------------------------------------------------------------- OPERATIONS
   - id: cafe24-ops-reconnect-cost

@@ -19,6 +19,7 @@ import com.sellerops.connector.ChannelConnectionStatusRepository;
 import com.sellerops.connector.ConnectionVerifier;
 import com.sellerops.connector.ConnectorAlertService;
 import com.sellerops.connector.ConnectorCapabilities;
+import com.sellerops.connector.ConnectorCapability;
 import com.sellerops.connector.ConnectorCapabilityRepository;
 import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
@@ -51,6 +52,7 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
@@ -327,6 +329,18 @@ public class CollectControlService {
     private static final List<DataType> OVERVIEW_DATA_TYPES =
             List.of(DataType.ORDER_SUMMARY, DataType.REVIEW, DataType.INQUIRY);
 
+    /**
+     * The knowledge-layer types, answered in their own list (Product Self-Knowledge Truth Closure v1).
+     *
+     * <p>PRODUCT is one of the four operating objects and had no per-channel answer anywhere: it is
+     * absent from {@code ChannelCoverageService.DATA_TYPES}, from {@link #OVERVIEW_DATA_TYPES}, from
+     * {@code AcquisitionPathRegistry} and from {@code SelfPilotReconciler.ROUTINE_TYPES}. So the Agent
+     * asserted a domain it could not check against any channel. It is computed here, from the same
+     * live connector, and kept out of {@link #OVERVIEW_DATA_TYPES} so the operator badge row does not
+     * change. SALES is not here: it is a derived measure of ORDER, not an operating object.
+     */
+    private static final List<DataType> BACKGROUND_DATA_TYPES = List.of(DataType.PRODUCT);
+
     private static String dataTypeLabel(DataType dataType) {
         return switch (dataType) {
             case ORDER_SUMMARY -> "주문·매출";
@@ -352,11 +366,25 @@ public class CollectControlService {
         PullConnector connector = registry.resolvePullConnector(channelCode).orElse(null);
         if (connector == null) {
             return new ChannelCapabilityOverview(
-                    channelCode, channelNameKo, null, false, List.of(), List.of());
+                    channelCode, channelNameKo, null, false, List.of(), List.of(), List.of());
         }
 
         ConnectorCapabilities caps = connector.capabilities(channelCode);
-        List<ChannelCapabilityOverview.DataTypeCapability> dataTypes = OVERVIEW_DATA_TYPES.stream()
+        Map<String, String> declared = declaredSupport(channelCode);
+        Map<String, String> declaredVerification = declaredVerification(channelCode);
+        List<ChannelCapabilityOverview.DataTypeCapability> dataTypes =
+                capabilityRows(channelCode, caps, declared, declaredVerification, OVERVIEW_DATA_TYPES);
+        List<ChannelCapabilityOverview.DataTypeCapability> background =
+                capabilityRows(channelCode, caps, declared, declaredVerification, BACKGROUND_DATA_TYPES);
+        List<ChannelCapabilityOverview.ScopeNote> scopes = unsupportedScopes(connector, channelCode);
+        return new ChannelCapabilityOverview(
+                channelCode, channelNameKo, caps.connectorClass(), true, dataTypes, scopes, background);
+    }
+
+    private List<ChannelCapabilityOverview.DataTypeCapability> capabilityRows(
+            String channelCode, ConnectorCapabilities caps, Map<String, String> declared,
+            Map<String, String> declaredVerification, List<DataType> types) {
+        return types.stream()
                 .map(dt -> new ChannelCapabilityOverview.DataTypeCapability(
                         dt.name(),
                         dataTypeLabel(dt),
@@ -366,11 +394,43 @@ public class CollectControlService {
                                 : "UNSUPPORTED",
                         // Read beside the connector's answer, never folded into it: a type the
                         // connector cannot serve may still be one SellerOps collects another way.
-                        AcquisitionPathRegistry.pathsFor(channelCode, dt)))
+                        AcquisitionPathRegistry.pathsFor(channelCode, dt),
+                        declared.getOrDefault(dt.name(), UNDECLARED),
+                        declaredVerification.get(dt.name())))
                 .toList();
-        List<ChannelCapabilityOverview.ScopeNote> scopes = unsupportedScopes(connector, channelCode);
-        return new ChannelCapabilityOverview(
-                channelCode, channelNameKo, caps.connectorClass(), true, dataTypes, scopes);
+    }
+
+    /** The reference table's word per data type — {@code UNDECLARED} where it has no row, or no repo. */
+    static final String UNDECLARED = "UNDECLARED";
+
+    private Map<String, String> declaredSupport(String channelCode) {
+        if (capabilities == null) {
+            return Map.of();
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        for (ConnectorCapability row : capabilities.findByChannelCode(channelCode)) {
+            out.put(row.getDataType(), row.isSupported() ? "SUPPORTED" : "UNSUPPORTED");
+        }
+        return out;
+    }
+
+    /**
+     * The reference table's own verification word, which diverges from the connector's independently of
+     * the boolean: Coupang INQUIRY is supported in both and {@code NEEDS_VERIFICATION} in the table
+     * while the connector calls it {@code CONFIRMED} (it was promoted by a live proof the table never
+     * caught up with). Carried so a reader can take the weaker of the two rather than the first it saw.
+     */
+    private Map<String, String> declaredVerification(String channelCode) {
+        if (capabilities == null) {
+            return Map.of();
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        for (ConnectorCapability row : capabilities.findByChannelCode(channelCode)) {
+            if (row.getVerificationStatus() != null) {
+                out.put(row.getDataType(), row.getVerificationStatus());
+            }
+        }
+        return out;
     }
 
     /**

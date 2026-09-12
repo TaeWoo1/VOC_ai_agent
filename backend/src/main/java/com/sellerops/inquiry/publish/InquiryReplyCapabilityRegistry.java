@@ -146,6 +146,16 @@ public class InquiryReplyCapabilityRegistry {
      *       construction if the configured scope string contains {@code write}.</li>
      *   <li><b>COUPANG · GMARKET</b> — unchanged: implemented, never live-proven.</li>
      * </ul>
+     *
+     * <p><b>Two of these rows have since been live-proven, and the evidence strings say so.</b> They
+     * are not comments: {@code evidence} is carried on {@link InquiryReplyCapabilityView} and reaches
+     * the frontend through {@code PublishCapabilityController.transports()}, so "구현됨, 라이브 미실행"
+     * left standing after the send landed is a stale sentence in reachable data, not a stale note.
+     * Cafe24 was verified on 2026-08-25 ({@code b0bfb022}) and NAVER 상품 문의 on 2026-08-26
+     * ({@code apr-ce092e823017}); NAVER 고객 문의, COUPANG and GMARKET are still implemented-only.
+     *
+     * <ul>
+     * </ul>
      */
     private static final List<Row> ROWS = List.of(
             new Row("COUPANG", null, InquiryReplyTransport.DIRECT_API, false,
@@ -156,7 +166,8 @@ public class InquiryReplyCapabilityRegistry {
                     "네이버 상품 문의는 공식 답변 등록 API로 보낼 수 있습니다.",
                     "공식 계약 사본: put-v1-contents-qnas-questionId.md (body: commentContent) · "
                             + "NaverProductQnaAnswerClient · NaverProductQnaReplyAdapter "
-                            + "(구현됨, 라이브 미실행) · 같은 questionId 재호출은 덮어쓰기"),
+                            + "(구현됨 · LIVE_VERIFIED 2026-08-26, 승인 apr-ce092e823017, "
+                            + "PUT 1회 · 재시도 0 · read-back 검증) · 같은 questionId 재호출은 덮어쓰기"),
             new Row("NAVER", InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY,
                     InquiryReplyTransport.DIRECT_API, false,
                     "네이버 고객 문의는 공식 답변 등록 API로 보낼 수 있습니다.",
@@ -178,7 +189,8 @@ public class InquiryReplyCapabilityRegistry {
                             + "43/44가 member_id=mall_id(계약이 문서화한 상점명 렌더링 조건), "
                             + "제목은 SAME_AS_PARENT 43/44, reply_status·담당자ID는 부모에만 존재 · "
                             + "Cafe24ReplyRequestShape · Cafe24ReplyArticleClient · "
-                            + "Cafe24ChannelReplyAdapter (구현됨, 라이브 미실행) · "
+                            + "Cafe24ChannelReplyAdapter (구현됨 · VERIFIED 2026-08-25, commit b0bfb022, "
+                            + "POST 1회 · 본문 해시 == 승인 초안 · 부모 reply_status=C) · "
                             + "중복 답변은 덮어쓰지 않고 두 번째 자식 글이 되므로 재전송 금지 · "
                             + "전송 전 필수 조건 셋: mall.write_community 부여 · client_ip 배포 설정 · "
                             + "승인된 라이브 실행 ID · 미확정: POST의 reply_status=C가 부모에 붙는지 "

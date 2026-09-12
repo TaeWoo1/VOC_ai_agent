@@ -50,12 +50,13 @@ public class AgentConverseController {
         QuotaDecision decision = quota.consume(principal.orgId(), AgentUsageKind.CONVERSE, request.runId(),
                 quota.actorOf(actorHeader));
         if (!decision.allowed()) {
-            return ConverseView.unavailable(version);
+            return ConverseView.unavailable(version, AgentConverseService.Reason.UNAVAILABLE);
         }
-        Optional<String> answer = converseService.converse(principal.orgId(), request.question(),
+        AgentConverseService.Outcome outcome = converseService.converse(principal.orgId(), request.question(),
                 orEmpty(request.facts()), orEmpty(request.context()), orEmpty(request.recentTurns()));
-        return answer.map(a -> new ConverseView(true, a, version))
-                .orElseGet(() -> ConverseView.unavailable(version));
+        return outcome.answer()
+                .map(a -> new ConverseView(true, a, version, outcome.reason().name()))
+                .orElseGet(() -> ConverseView.unavailable(version, outcome.reason()));
     }
 
     private static List<String> orEmpty(List<String> values) {
@@ -75,10 +76,16 @@ public class AgentConverseController {
      *     refused the request, or the model declined. The caller treats all of them identically — it
      *     composes the deterministic answer — which is why they are one field.
      */
-    public record ConverseView(boolean available, String answer, String providerVersion) {
+    /**
+     * @param reason a closed token saying WHY when {@code available} is false. The caller treats most of
+     *     them identically — it composes the deterministic answer — but {@code NO_BASIS} is the model
+     *     having read the whole fact sheet and found nothing, which is a different sentence to a seller
+     *     than a capability that is switched off.
+     */
+    public record ConverseView(boolean available, String answer, String providerVersion, String reason) {
 
-        static ConverseView unavailable(String version) {
-            return new ConverseView(false, null, version);
+        static ConverseView unavailable(String version, AgentConverseService.Reason reason) {
+            return new ConverseView(false, null, version, reason.name());
         }
     }
 }

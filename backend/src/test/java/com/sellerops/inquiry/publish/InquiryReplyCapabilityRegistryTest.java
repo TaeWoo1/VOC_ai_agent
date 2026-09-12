@@ -34,9 +34,14 @@ class InquiryReplyCapabilityRegistryTest {
             var view = registry.capability("NAVER", subtype);
             assertThat(view.transport()).isEqualTo(InquiryReplyTransport.DIRECT_API.name());
             assertThat(view.sourceSubtype()).isEqualTo(subtype);
-            // Implemented is not live-proven, and the row must not let the two be read as one claim.
-            assertThat(view.evidence()).contains("라이브 미실행");
         }
+        // Implemented is not live-proven, and the row must not let the two be read as one claim — in
+        // EITHER direction. 상품 문의 landed on 2026-08-26 and 고객 문의 has still never been run, so
+        // a row that says the same thing about both is wrong whichever sentence it picks.
+        assertThat(registry.capability("NAVER", InquirySourceSubtype.NAVER_PRODUCT_QNA).evidence())
+                .contains("LIVE_VERIFIED 2026-08-26").doesNotContain("라이브 미실행");
+        assertThat(registry.capability("NAVER", InquirySourceSubtype.NAVER_CUSTOMER_INQUIRY).evidence())
+                .contains("라이브 미실행");
         // The two bodies are different field names on different endpoints. A row that did not say so
         // would make "a generic NAVER write" look like a thing that exists.
         var qna = registry.capability("NAVER", InquirySourceSubtype.NAVER_PRODUCT_QNA);
@@ -57,18 +62,23 @@ class InquiryReplyCapabilityRegistryTest {
     }
 
     @Test
-    @DisplayName("CAFE24 is DIRECT_API, and the row says what a send still needs before it can happen")
-    void cafe24IsImplementedButNotUnconditional() {
-        // It moved on 2026-08-25 after two approved READs — one proving an answer here is a child
-        // article, one proving what a real seller answer carries. Implemented, never live-run, and
-        // unlike every other DIRECT_API row it names preconditions a deployment/seller must satisfy.
+    @DisplayName("CAFE24 is live-verified, and the row still says what a send needs before it happens")
+    void cafe24IsLiveVerifiedButNotUnconditional() {
+        // It moved on 2026-08-25 after two approved READs and then an actual send verified by an
+        // exact read-back. Live-proven, and unlike every other DIRECT_API row it names preconditions a
+        // deployment/seller must satisfy — being proven once did not make those go away.
+        //
+        // This assertion used to require "라이브 미실행", which stayed true in the string for two weeks
+        // after it stopped being true in the world. The field is not a comment: it reaches the browser
+        // through PublishCapabilityController.transports().
         var view = registry.capability("CAFE24", null);
         assertThat(view.transport()).isEqualTo(InquiryReplyTransport.DIRECT_API.name());
         assertThat(view.reasonKo())
                 .as("a seller must be told the permission is a separate agreement")
                 .contains("동의");
         assertThat(view.evidence())
-                .contains("라이브 미실행")
+                .contains("VERIFIED 2026-08-25")
+                .doesNotContain("라이브 미실행")
                 .contains("mall.write_community")
                 .contains("client_ip")
                 .contains("ANSWER_POSTED_STATUS_UNRESOLVED");

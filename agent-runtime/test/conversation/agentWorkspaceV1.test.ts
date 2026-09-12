@@ -126,9 +126,23 @@ describe("§B — what reviewnary can do is derived from what it is wired to do"
     expect(only.map((d) => d.short)).toEqual(["상품"]);
   });
 
-  it("the boundary sentence comes from the catalogue's action classes", () => {
-    expect(boundarySentence(["READ"])).toContain("직접 채널에 보내거나 고치는 일은 없습니다");
-    expect(boundarySentence(["READ", "WRITE"])).not.toContain("직접 채널에 보내거나 고치는 일은 없습니다");
+  /**
+   * <b>Re-written in Product Self-Knowledge Truth Closure v1 §5, and the assertion got stronger.</b>
+   *
+   * The old expectation pinned 「직접 채널에 보내거나 고치는 일은 없습니다」, which was true about this
+   * conversation lane and false about reviewnary — an approved Cafe24 inquiry answer and an approved
+   * NAVER 상품문의 answer have both been posted live by this repository. So the sentence now names the
+   * LANE, and the test pins both halves of what made the old one wrong: the derivation from action
+   * classes (unchanged) AND that the read-only branch does not deny the product a send.
+   */
+  it("the boundary sentence comes from the catalogue's action classes, and speaks for the lane", () => {
+    expect(boundarySentence(["READ"])).toContain("이 대화 창구에서는");
+    expect(boundarySentence(["READ"])).toContain("바로 채널에 등록하지는 않습니다");
+    expect(boundarySentence(["READ", "WRITE"])).not.toContain("이 대화 창구에서는");
+    // The product-wide read-only claim must not come back under any action classes.
+    for (const classes of [["READ"], ["READ", "WRITE"]] as const) {
+      expect(boundarySentence([...classes])).not.toContain("보내거나 고치는 일은 없습니다");
+    }
   });
 
   it("a coverage read that failed costs the channel sentence and nothing else", () => {
@@ -137,7 +151,7 @@ describe("§B — what reviewnary can do is derived from what it is wired to do"
       readiness: UNKNOWN_READINESS, coverage: null,
     });
     expect(answer.lines.some((l: string) => l.includes("연결된 채널"))).toBe(false);
-    expect(answer.lines.some((l: string) => l.includes("직접 채널에 보내거나"))).toBe(true);
+    expect(answer.lines.some((l: string) => l.includes("이 대화 창구에서는"))).toBe(true);
   });
 
   it("「너는 어떤 일을 도와줄 수 있어?」 is answered without asking which channel", async () => {
@@ -152,8 +166,8 @@ describe("§B — what reviewnary can do is derived from what it is wired to do"
     // The catalogue this runtime builds serves all four domains, so all four are said.
     expect(summary.lines.some((l) => l.includes("고객 문의"))).toBe(true);
     expect(summary.lines.some((l) => l.includes("주문과 매출"))).toBe(true);
-    // The boundary is stated, and it is the registry's own property.
-    expect(summary.lines.some((l) => l.includes("보내는 것은 확인하신 뒤에"))).toBe(true);
+    // The boundary is stated, and it is the registry's own property — about this lane, not the product.
+    expect(summary.lines.some((l) => l.includes("바로 채널에 등록하지는 않습니다"))).toBe(true);
     // The connected channels come from the real org-scoped read.
     expect(summary.lines.some((l) => l.includes("연결된 채널"))).toBe(true);
     expect(turn.suggestedActions.length).toBeGreaterThan(0);

@@ -153,8 +153,13 @@ class CoupangApiConnectorTest {
         assertThat(capabilities.supports(DataType.REVIEW)).isFalse();
         assertThat(connector.dedicatedChannels()).containsExactly("COUPANG");
         assertThat(connector.kind()).isEqualTo("COUPANG_API");
-        // Honest boundary: no Coupang review API.
-        assertThat(connector.unsupportedScopes("COUPANG")).extracting("code").containsExactly("REVIEW_API");
+        // Honest boundaries, and they are TWO separate marketplace facts rather than one restated
+        // (Product Self-Knowledge Truth Closure v1): NAVER also publishes no review API and a NAVER
+        // seller can still answer a review in the seller center, so "no API" does not imply "no reply".
+        // Coupang gives sellers no reply feature at all, and registering that channel-side lets the
+        // question be answered for a shop that has not connected anything.
+        assertThat(connector.unsupportedScopes("COUPANG")).extracting("code")
+                .containsExactly("REVIEW_API", "REVIEW_REPLY");
     }
 
     @Test
