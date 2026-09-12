@@ -146,11 +146,32 @@ The 12 screen-read runs this deployment holds were classified by the derivation 
 ## 6. Live proof status
 
 - **Read, repeat, idempotency, identity, LLM-zero** — `LIVE PASS`, 5/5 (M4, `apr-cp-aside-m4-f767f6`).
-- **The stamp fix on a marketplace-sourced NEW ingest** — **still unobserved.** It has been proven offline at
-  the production transaction condition and live against the deployed backend on a disposable org, but no run
-  has yet ingested rows that came off the marketplace and were new. It needs a review to arrive at this store
-  between two runs. **Forcing it is not allowed** — not by changing the seller's list filter on their behalf,
-  not by pagination, not by deleting rows to make them new again — so it waits for the store.
+- **M5 itself performed no marketplace read.** Everything in this document was built and checked offline or
+  against the local database; the one screen render in §5-A opened no marketplace and the helper was never
+  started for it.
+- **The stamp fix on a marketplace-sourced NEW ingest — `OUTSTANDING_NON_BLOCKING_EVIDENCE`.**
+
+### 6.1 What is outstanding, and why it stays outstanding
+
+The transaction fix is proven twice: **offline at the production condition** (`StampAcquisitionHandoffTest` —
+a committing, non-transactional Spring context; removing the annotation reproduces the seller's own
+exception) and **live against the deployed backend** (real HTTP handoff on a disposable org: 200, `stored 2`,
+both rows stamped). What has never been observed is the same fixed path ingesting rows that **came off the
+marketplace and were new**, because every page read since the fix has been a page this organisation already
+held.
+
+A manifest for one more bounded page-1 read (`apr-cp-aside-m5-newrow`) was prepared and **displayed, and the
+operator declined it** — correctly, on the odds: this store produces roughly one review every two days, so a
+read taken to find out would almost certainly have re-read the same nine rows and spent a marketplace request
+to learn nothing.
+
+**It is closed unapproved and must not be reused.** The evidence is deferred to the next approved run that
+happens to meet new reviews, and the three ways of manufacturing that condition stay forbidden: changing the
+seller's own list filter on their behalf, pagination, and deleting stored rows so they arrive again as new.
+
+**It does not block adoption.** The defect it would exercise is fixed, tested at the condition that produced
+it, and exercised end to end against the deployed backend; what remains unproven is the marketplace's half of
+a path whose other half is proven, and no part of the lane depends on it being proven to be safe to run.
 
 ---
 
@@ -161,3 +182,6 @@ machine, and every claim this document makes is held by a test named in §5.
 
 **Not ready, and not proposed:** unattended or scheduled execution, ASIDE as a default, backlog through this
 lane, and any marketplace write. Those are separate decisions and none of them is asked here.
+
+**Marketplace cost of this package: 0.** No read, no click, no write, no download — and one prepared manifest
+deliberately not spent.
