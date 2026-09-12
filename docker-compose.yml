@@ -35,6 +35,10 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sellerops_local_pw}
       SELLEROPS_JWT_SECRET: ${SELLEROPS_JWT_SECRET:-change-me-local-dev-only-please-use-a-long-random-string}
       SELLEROPS_JWT_EXP_MINUTES: ${SELLEROPS_JWT_EXP_MINUTES:-720}
+      # Forward-only schema. `false` (the shipped default) means a non-empty database with no Flyway
+      # history FAILS the boot instead of being assumed current — the shape a partial restore leaves.
+      # Reachable by name only so an existing pre-Flyway database can be adopted deliberately.
+      SELLEROPS_FLYWAY_BASELINE_ON_MIGRATE: ${SELLEROPS_FLYWAY_BASELINE_ON_MIGRATE:-false}
       SELLEROPS_CORS_ORIGIN: ${SELLEROPS_CORS_ORIGIN:-http://localhost:5173}
       # Social sign-in (Google OIDC · NAVER OAuth2) — docs/auth_growth_instrumentation_v1.md.
       # These are the SELLER'S LOGIN, and have nothing to do with the NAVER COMMERCE connector

@@ -1,0 +1,125 @@
+# Migration CI — the one thing backend-ci could not say (Pilot Launch Readiness, 2026-09-13).
+#
+# backend-ci is H2 with Flyway DISABLED. That is the right trade for 4,000 fast tests, and it means
+# no automated run had ever applied these 97 migrations to PostgreSQL — the engine they are written
+# for and the only engine any deployment uses. A syntax error H2 never sees, a constraint Postgres
+# rejects, an edited migration whose checksum no longer matches: all of it was found by a human
+# starting the local stack, or by the deploy itself, on the host that has a seller's data on it.
+#
+# So this job does exactly what a first deploy does, and nothing else:
+#   empty database  →  every migration in order  →  flyway validate
+#
+# It runs the Postgres proofs' own opt-in switch (SELLEROPS_PG_PROOF=1) against a fresh service
+# container. "Empty" is therefore a property of the runner: a brand-new container per run, never a
+# database anything else has touched. Only the migration proof is selected — the other
+# SELLEROPS_PG_PROOF classes stay opt-in and are somebody's local tool, not a gate.
+name: migration-ci
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # Anything that can change the schema, how it is applied, or the rules about applying it.
+      - 'backend/src/main/resources/db/migration/**'
+      - 'backend/src/main/resources/application.yml'
+      - 'backend/src/test/java/com/sellerops/migration/**'
+      - 'backend/build.gradle'
+      - '.github/workflows/migration-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/src/main/resources/db/migration/**'
+      - 'backend/src/main/resources/application.yml'
+      - 'backend/src/test/java/com/sellerops/migration/**'
+      - 'backend/build.gradle'
+      - '.github/workflows/migration-ci.yml'
+
+concurrency:
+  group: migration-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        # Same major as the deployment (docker-compose.yml: postgres:16-alpine). A migration that
+        # passes on a different major is not the proof this job exists to give.
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sellerops
+          POSTGRES_USER: sellerops
+          # Throwaway container, reachable only from this job's network. Nothing here is a secret,
+          # and nothing in this job reads one: no vendor key, no vault key, no seller data.
+          POSTGRES_PASSWORD: sellerops_ci_pw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sellerops -d sellerops"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+          cache-dependency-path: |
+            backend/*.gradle*
+            backend/gradle/wrapper/gradle-wrapper.properties
+
+      # The file-level contract (forward-only, burned versions, expand/migrate/contract) runs with no
+      # database at all, so a bad migration FILE fails before a container is even asked to apply it.
+      - name: Migration file contract
+        run: ./gradlew test --tests 'com.sellerops.migration.MigrationContractTest' --no-daemon
+
+      # Prove the database is empty before the run, so "migrated from empty" is observed rather than
+      # assumed. A leftover history table here would mean this job proves a lesser claim.
+      - name: Assert the database is empty
+        run: |
+          count=$(PGPASSWORD=sellerops_ci_pw psql -h 127.0.0.1 -U sellerops -d sellerops -tAc \
+            "select count(*) from information_schema.tables where table_schema='public'")
+          echo "public tables before migrate: $count"
+          [ "$count" = "0" ] || { echo "FAIL: database is not empty"; exit 1; }
+
+      - name: Migrate and validate
+        env:
+          SELLEROPS_PG_PROOF: '1'
+          SELLEROPS_PG_URL: jdbc:postgresql://127.0.0.1:5432/sellerops
+          SELLEROPS_PG_USER: sellerops
+          SELLEROPS_PG_PASSWORD: sellerops_ci_pw
+        run: ./gradlew test --tests 'com.sellerops.migration.FlywayMigrationIntegrityPostgresProofIT' --no-daemon
+
+      # The history as the run left it — the artefact an operator compares a host against.
+      - name: Applied migrations
+        if: always()
+        run: |
+          PGPASSWORD=sellerops_ci_pw psql -h 127.0.0.1 -U sellerops -d sellerops -c \
+            "select count(*) as applied, max(cast(version as integer)) as latest,
+                    count(*) filter (where not success) as failed,
+                    count(*) filter (where type='BASELINE') as baselined
+             from flyway_schema_history" || true
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-ci-reports
+          path: |
+            backend/build/reports/tests/test/
+            backend/build/test-results/test/
+          retention-days: 7
+          if-no-files-found: warn

@@ -15,7 +15,24 @@ spring:
         format_sql: false
   flyway:
     enabled: true
-    baseline-on-migrate: true
+    # Forward-only, and a non-empty schema with no history is a REFUSAL, not a baseline.
+    #
+    # `baseline-on-migrate: true` says: if this database already has tables but no flyway history,
+    # assume everything up to now was applied and start from here. On an empty database that is a
+    # no-op; on a hand-built or half-restored one it SKIPS every earlier migration and then reports
+    # success — the schema is wrong and nothing says so. That is exactly the database a pilot host
+    # can end up with after a partial restore, so the default is now `false` and a boot against such
+    # a schema fails loudly with the version it expected.
+    #
+    # It stays overridable by name for the one case that legitimately needs it: adopting an existing
+    # database whose history genuinely predates Flyway. `deploy/pilot/deploy.sh` refuses `true`.
+    baseline-on-migrate: ${SELLEROPS_FLYWAY_BASELINE_ON_MIGRATE:false}
+    # Both are Flyway defaults; they are written down because they are the properties the schema's
+    # safety rests on. `validate-on-migrate` catches an edited migration (checksum drift) before it
+    # runs; `out-of-order: false` is why a reused version number — V29, V35 — fails the deploy
+    # (MigrationContractTest keeps them burned so it fails in CI instead).
+    validate-on-migrate: true
+    out-of-order: false
 
   servlet:
     multipart:

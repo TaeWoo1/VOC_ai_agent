@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Pilot deploy — Pilot Host Provisioning v1 §12. Run on the host, from the repo checkout.
 #
-#   deploy/pilot/deploy.sh            # pull → validate env → build → migrate (boot) → health → smoke
+#   deploy/pilot/deploy.sh            # pull → validate env → backup → build → migrate (boot) → health → smoke
 #   deploy/pilot/deploy.sh --no-pull  # same, on the checkout as it is
+#   deploy/pilot/deploy.sh --no-backup # retry a failed deploy without a second dump of unchanged data
 #
 # Idempotent and boring on purpose. It never prints an env value; it prints which NAMES are missing.
 set -euo pipefail
@@ -15,14 +16,14 @@ step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 # 1. code
-if [[ "${1:-}" != "--no-pull" ]]; then
-  step "1/6 code: git pull --ff-only"
+if [[ " $* " != *" --no-pull "* ]]; then
+  step "1/7 code: git pull --ff-only"
   git -C "$REPO" pull --ff-only
 fi
 printf 'commit: %s\n' "$(git -C "$REPO" rev-parse --short HEAD)"
 
 # 2. env validation — names and shapes only
-step "2/6 env: $ENV_FILE"
+step "2/7 env: $ENV_FILE"
 [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found (copy deploy/pilot/pilot.env.example)"
 perm="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE")"
 [[ "$perm" == "600" || "$perm" == "400" ]] || fail "$ENV_FILE must be mode 0600 (is $perm)"
@@ -79,6 +80,15 @@ case "${SELLEROPS_AGENT_ACCESS_SCOPE:-ALLOW_LIST}" in
   *) fail "SELLEROPS_AGENT_ACCESS_SCOPE must be ALLOW_LIST or CONNECTED_SELLERS" ;;
 esac
 
+# Forward-only schema, and the rollback is the dump taken below — never an undo script, which this
+# repository has never had. `baseline-on-migrate: true` would let a half-restored or hand-built
+# database be ASSUMED current: Flyway writes a baseline row, skips every earlier migration, and
+# reports success. The shipped default is false; a pilot host does not turn it back on.
+case "${SELLEROPS_FLYWAY_BASELINE_ON_MIGRATE:-false}" in
+  false) ;;
+  *) fail "SELLEROPS_FLYWAY_BASELINE_ON_MIGRATE must be false on a pilot host (a non-empty schema with no history must fail the boot, not be assumed current)" ;;
+esac
+
 # The mail mode that writes the whole message — including a password-reset link — into the log at
 # INFO. It is a developer outbox, and a pilot host keeps real sellers' reset links out of its logs.
 case "${SELLEROPS_MAIL_MODE:-off}" in
@@ -110,16 +120,39 @@ if [[ "${SELLEROPS_CONNECTOR_NAVER_ENABLED:-false}" == "true" ]]; then
 fi
 printf 'env: ok (host=%s)\n' "$PILOT_PUBLIC_HOST"
 
-# 3. images
-step "3/6 build"
+# 3. pre-migration backup — the rollback plan, taken before the thing it rolls back.
+#
+# Step 5 boots the backend, and the backend runs Flyway. The schema is FORWARD-ONLY: there is no undo
+# script for any of the 97 migrations and none will be written after the fact, so "roll back the
+# deploy" means "restore this dump and check out the previous commit". A dump taken after the
+# migration ran would restore the new schema — i.e. it would not be a rollback at all. The window in
+# which it must be taken is therefore exactly here.
+#
+# Skipped on a host whose database has not been created yet (a first deploy has nothing to lose), and
+# on an explicit --no-backup, which exists so a failed deploy can be retried without a second dump of
+# the same unchanged data. A dump that FAILS stops the deploy: proceeding would be migrating without
+# the rollback the operator thinks they have.
+step "3/7 backup (pre-migration)"
+if [[ " $* " == *" --no-backup "* ]]; then
+  printf 'skipped: --no-backup\n'
+elif ! "${COMPOSE[@]}" ps --format '{{.Service}} {{.State}}' 2>/dev/null | grep -q '^postgres running'; then
+  printf 'skipped: postgres is not running yet (first deploy — no data to lose)\n'
+else
+  PILOT_ENV_FILE="$ENV_FILE" "$REPO/deploy/pilot/backup.sh" || fail "pre-migration backup failed — not migrating without a rollback point"
+  printf 'restore with: deploy/pilot/restore.sh <that file>   (then: git checkout %s && deploy/pilot/deploy.sh --no-pull --no-backup)\n' \
+    "$(git -C "$REPO" rev-parse --short HEAD)"
+fi
+
+# 4. images
+step "4/7 build"
 "${COMPOSE[@]}" build --pull
 
-# 4. start — Flyway runs the migrations inside the backend boot; PilotConfigValidator refuses a bad env.
-step "4/6 up (migrations run on backend boot)"
+# 5. start — Flyway runs the migrations inside the backend boot; PilotConfigValidator refuses a bad env.
+step "5/7 up (migrations run on backend boot)"
 "${COMPOSE[@]}" up -d --remove-orphans
 
-# 5. health
-step "5/6 health"
+# 6. health
+step "6/7 health"
 for i in $(seq 1 60); do
   sleep 5
   b="$("${COMPOSE[@]}" ps --format '{{.Service}} {{.Health}}' 2>/dev/null | awk '$1=="backend"{print $2}')"
@@ -132,6 +165,6 @@ done
 "${COMPOSE[@]}" ps
 printf 'migrations: '; "${COMPOSE[@]}" logs backend 2>/dev/null | grep -c "Migrating schema\|Successfully applied\|Schema .* is up to date" || true
 
-# 6. smoke
-step "6/6 smoke"
+# 7. smoke
+step "7/7 smoke"
 PILOT_PUBLIC_HOST="$PILOT_PUBLIC_HOST" "$REPO/deploy/pilot/smoke.sh"
