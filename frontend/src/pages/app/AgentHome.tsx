@@ -52,6 +52,18 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
 
   useMemo(() => analytics.track("today_inbox_viewed"), []);
 
+  /**
+   * The pilot's one return-visit signal (Pilot Launch Readiness §2) — 「이 조직이 오늘 홈을 열었다」.
+   *
+   * Deliberately NOT routed through `analytics` above: that module is for vendor sinks, is a no-op
+   * without vendor env, and is gated on 분석 consent. This one leaves no deployment, names no person,
+   * and is recorded once per organisation per Asia/Seoul day by the server. Fire and forget — nothing
+   * awaits it, nothing renders from it, and a failure is silence.
+   */
+  useEffect(() => {
+    void api.recordHomeOpened().catch(() => {});
+  }, []);
+
   useEffect(() => {
     let live = true;
     api

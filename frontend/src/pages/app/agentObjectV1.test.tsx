@@ -44,6 +44,8 @@ vi.mock("../../lib/apiClient", () => ({
     })),
     getSyncRunsStrict: vi.fn(async () => []),
     markProactiveCaseOpened: vi.fn(),
+    // The return-visit signal: fire-and-forget, awaited by nothing, rendered by nothing.
+    recordHomeOpened: vi.fn(async () => {}),
   },
   getToken: () => null,
 }));

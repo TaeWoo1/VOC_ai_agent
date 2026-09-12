@@ -314,8 +314,11 @@ select org_id, count(distinct day) as active_days, min(day) as first_day, max(da
 
 **그 빈칸을 메우는 유일한 기존 경로는 외부 analytics sink**(`today_inbox_viewed` 등)인데
 `frontend/src/lib/analytics/`는 **env가 없으면 sink가 없고 `track`은 no-op**이며 sink는 분석 동의
-뒤에만 시작한다. 즉 **오늘 아무것도 측정되지 않는다**. 이것은 결함이 아니라 기본 자세이고,
-바꾸는 것은 §7의 product-owner 결정이다.
+뒤에만 시작한다. 즉 이 문장이 쓰일 당시 **아무것도 측정되지 않았다**.
+
+**2026-09-13 product-owner 결정으로 그 빈칸은 §6-F가 메운다 — 외부 analytics는 쓰지 않는다.**
+위 union은 그대로 유효하고(그날 **무언가를 한** 날), §6-F는 그것이 답할 수 없는 것 — **열어서 보기만
+한 날** — 만 더한다. 둘은 같은 질문의 다른 절반이라 합치지 않는다.
 
 ### D. BYO Aside 없이도 Core를 쓰는가
 
@@ -334,6 +337,54 @@ group by 1 order by 2 desc;
 `SELLER_CENTER_EXPORT`가 Aside lane이고 나머지(API · FILE_UPLOAD · 기록 없음)는 아니다.
 이 비율이 Aside lane에서만 0이 아니면 Core는 Aside의 부속이다. (실측: 기록 없음 4,494/10 ·
 `SELLER_CENTER_EXPORT` 115/3 — 즉 이 org에서는 Aside 밖에서도 쓰이고 있다.)
+
+### F. 다시 여는가 — 열어서 보기만 한 날 (2026-09-13)
+
+**결정: 외부 analytics를 쓰지 않는다. first-party minimal signal 하나만 쓰고, 목적은 Home 재방문
+여부 하나다.** 그래서 `home_open_day`(V100)는 칸이 둘이고 **둘 다 기본 키**다.
+
+```sql
+create table home_open_day (
+    org_id    uuid not null references organizations (id) on delete cascade,
+    opened_on date not null,
+    primary key (org_id, opened_on)
+);
+```
+
+**표가 곧 privacy statement다.** user id · IP · user agent · clickstream · referrer · 경로 ·
+시각 · 고객이나 판매자가 쓴 글자 — 어느 것도 **넣을 자리가 없다**. 규칙으로 금지한 것이 아니라
+없는 칸은 나중에 아무도 자세히 읽지 않은 변경이 채울 수 없기 때문이고, `HomeOpenDayShapeTest`가
+엔티티 필드 수 · 마이그레이션 컬럼 수 · 패키지가 그 낱말들을 **언급조차 하지 않는다**를 고정한다.
+
+**같은 org의 같은 날 여러 방문은 한 usage day다** — 질의가 조심해서가 아니라 기본 키가 그렇게
+정한다. 화요일에 아홉 번 열면 아홉 번째는 아무것도 쓰지 않으므로, 이 표는 세션도 방문 빈도도 체류
+시간도 **표현할 수 없다**. §6-E가 「Home 열람 수 그 자체」를 KPI에서 뺀 것과 모순되지 않는 이유가
+그것이다 — 열람 수는 애초에 저장되지 않는다.
+
+날짜는 **Asia/Seoul이고 서버가 정한다**. 브라우저가 말한 날짜는 브라우저가 말한 사실이고, 세는
+것은 판매자의 화요일이다.
+
+쓰는 곳은 홈 mount의 `POST /api/usage/home-opened` **하나**이고 본문이 없다 — org는 토큰의 것,
+날짜는 서버 시계의 것이라 요청이 누구·언제를 주장할 자리가 없다(그래서 흘릴 것도 없다).
+`GET /api/operations/home`의 부수 효과로 두지 않은 이유는 그 GET을 health check·prefetch·재시도·
+smoke 스크립트도 지나가기 때문이다 — 그러면 이 저장소 자신의 probe가 판매자의 아침으로 세어진다.
+실패는 침묵이고 화면은 측정됐다는 사실을 보이지 않는다.
+
+```sql
+-- 파일럿 org별 재방문: 며칠 열었나, 처음·마지막은 언제인가
+select org_id, count(*) as usage_days, min(opened_on) as first_day, max(opened_on) as last_day
+from home_open_day where org_id in (:pilot_orgs) group by org_id order by usage_days desc;
+
+-- 열기만 한 날 vs 무언가를 한 날 (§6-C의 union과 대조)
+select h.org_id, count(*) filter (where d.day is null) as opened_only,
+                 count(*) filter (where d.day is not null) as opened_and_acted
+from home_open_day h
+  left join ( /* §6-C의 union */ ) d on d.org_id = h.org_id and d.day = h.opened_on
+where h.org_id in (:pilot_orgs) group by 1;
+```
+
+**코호트는 이 표에 없다** — §4 그대로 명시적 org 목록이고 canonical Demo Org는 거기 없다. 제품이
+「이건 진짜인가」 플래그를 들고 다니지 않는 이유는 그 플래그가 언제나 한 군데에서 빠지기 때문이다.
 
 ### E. KPI로 올리지 않는 것 (§5 승계 + 추가)
 

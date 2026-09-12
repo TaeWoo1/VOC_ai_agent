@@ -141,3 +141,76 @@ credentials in the dump — a different key opens nothing, by fingerprint — an
 contains **no env secret**, so the key file is the operator's to keep.
 
 Daily backups are the same script on cron (`17 3 * * *`), 0700, 14 days.
+
+
+---
+
+## 2. Return-visit instrumentation
+
+### 2.1 The decision, and what it rules out
+
+The previous package left this as the one unanswered business hypothesis: *does the seller reopen
+Home*. Four of the five read from tables the product already keeps for its own work; this one had no
+source — no login record, no session row, and a frontend analytics module that is a no-op without
+vendor env and gated on 분석 consent besides.
+
+Product-owner decision, 2026-09-13:
+
+- **no external analytics.** The vendor module is untouched and stays untouched;
+- a **first-party minimal signal**, whose purpose is exactly one question: did they come back;
+- **`HOME_OPENED` at org/day granularity only**;
+- **no** user id, IP, user agent, clickstream, or review content;
+- several visits by one org on one day are **one usage day**;
+- the Demo Org is **out of the pilot metrics** — by cohort, as §4 of the usage-loop doc already says.
+
+### 2.2 The table is the privacy statement
+
+`V100__home_open_day.sql` has two columns and **both of them are the primary key**:
+
+```sql
+create table home_open_day (
+    org_id    uuid not null references organizations (id) on delete cascade,
+    opened_on date not null,
+    primary key (org_id, opened_on)
+);
+```
+
+There is nowhere to put a user, a session, an address, a path or a word anybody wrote. That is not a
+rule someone has to keep: a column that does not exist cannot be filled in by a later change nobody
+read closely. `HomeOpenDayShapeTest` pins the entity's field count, the migration's column count,
+and — the check that would actually catch the drift — that the package does not so much as **name**
+any of the things it promised not to store.
+
+"One usage day" is the key, not a careful query. Opening 홈 nine times on a Tuesday writes one row
+and the ninth open writes nothing, so the table **cannot express** a visit count, a session, or a
+dwell time even if someone later wanted it to. That is also why this does not contradict
+`pilot_usage_loop_v1.md` §6-E, which excludes "Home 열람 수 그 자체" from the KPIs: the open count is
+not stored anywhere.
+
+The date is **Asia/Seoul and the server decides it**. A client-supplied date is a client-supplied
+fact, and the day being counted is the seller's.
+
+### 2.3 One writer, and it is a POST
+
+`POST /api/usage/home-opened` — no body, `204`, called once from the Home's mount.
+
+Not a side effect of `GET /api/operations/home`, because a GET that writes is also written through by
+a health check, a prefetch, a retry and the smoke script — and the number would then count this
+repository's own probes as a seller's morning. One explicit call with one caller is a number somebody
+can still explain in a month.
+
+The write is `REQUIRES_NEW` (never joins the caller's transaction) and both the service and the
+controller swallow failure. On the page it is `void api.recordHomeOpened().catch(() => {})`: awaited
+by nothing, rendered by nothing. A measurement that can break a seller's morning eventually will, and
+what it protects — one day in a denominator — is not worth that.
+
+`HomeOpenSignalTest` holds the four ways the number could quietly become a different number: a page
+that mounts twice must not double a day; two days are two days; **22:00Z is the 14th in Seoul**, not
+the 13th (the one error that changes no total and moves visits across every weekly boundary); and one
+seller's mornings are not another's.
+
+### 2.4 The query
+
+In `pilot_usage_loop_v1.md` §6-F, with the cohort applied the way §4 already specifies — an explicit
+org list, and the canonical Demo Org is not in it. The product carries no "is this real" flag,
+because a flag like that is always missing from exactly one place.

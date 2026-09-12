@@ -1768,6 +1768,21 @@ export const api = {
     return data;
   },
 
+  /**
+   * The pilot's return-visit signal — 「이 조직이 오늘 홈을 열었다」, and nothing else.
+   *
+   * <b>Fire and forget, and that is the design.</b> It is awaited by nobody, its failure is swallowed
+   * by the caller, and the page never shows that it happened. A measurement that can delay or break a
+   * seller's morning is a measurement that will one day break a seller's morning, and the number it
+   * protects — how many days they came back — is not worth one broken screen.
+   *
+   * Sends no body: the organisation comes from the bearer token and the day from the server's clock in
+   * Asia/Seoul. There is nothing here for a request to claim about who, when, or from where.
+   */
+  async recordHomeOpened(): Promise<void> {
+    await http.post("/api/usage/home-opened");
+  },
+
   async getRepeatedIssueContextStrict(
     issueId: string,
     referenceDate?: string,

@@ -15,6 +15,7 @@ const getInquiryQueueStrict = vi.fn();
 const getInquiryRowsStrict = vi.fn();
 const getReviewIssuesStrict = vi.fn();
 const getOperationsHomeStrict = vi.fn();
+const recordHomeOpened = vi.fn();
 vi.mock("../../../lib/bridge/localAgentHint", () => ({ probeLocalAgent: async () => "PAIRED" }));
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -26,6 +27,8 @@ vi.mock("../../lib/apiClient", () => ({
     getOperationsHomeStrict: () => getOperationsHomeStrict(),
     getSyncRunsStrict: vi.fn(async () => []),
     markProactiveCaseOpened: vi.fn(),
+    // The return-visit signal: fire-and-forget, awaited by nothing, rendered by nothing.
+    recordHomeOpened: () => recordHomeOpened(),
   },
   getToken: () => null,
 }));
@@ -166,6 +169,7 @@ beforeEach(() => {
   // §1: the home brief reads the WORK QUEUE. Empty by default — a test that is about waiting work says so.
   getInquiryQueueStrict.mockResolvedValue({ content: [], page: 0, size: 5, totalElements: 0, totalPages: 0 });
   getOperationsHomeStrict.mockResolvedValue(HOME);
+  recordHomeOpened.mockResolvedValue(undefined);
   getReviewIssuesStrict.mockResolvedValue([]);
   // Working Context v1 §2: the brief names the oldest waiting inquiries. Empty by default —
   // the tests that care about the named rows set their own.
@@ -450,5 +454,28 @@ describe("Operations Home — 지금 확인할 것", () => {
     renderHome();
     await screen.findByRole("heading", { name: "오늘의 운영" });
     await waitFor(() => expect(screen.queryByLabelText("오늘 확인할 것")).toBeNull());
+  });
+});
+
+/**
+ * The pilot's return-visit signal (Pilot Launch Readiness §2). Both properties are about the seller,
+ * not the number: they must not be able to tell it happened, and it must not be able to hurt them.
+ */
+describe("return-visit signal", () => {
+  it("is sent once when 홈 opens, with nothing in it", async () => {
+    renderHome();
+    await screen.findByRole("heading", { name: "오늘의 운영" });
+    await waitFor(() => expect(recordHomeOpened).toHaveBeenCalledTimes(1));
+    // No argument: the organisation is the token's and the day is the server's, so the page has no
+    // way to claim who opened it or when — which is also why it has nothing to leak.
+    expect(recordHomeOpened).toHaveBeenCalledWith();
+  });
+
+  it("renders the whole morning when the signal fails", async () => {
+    recordHomeOpened.mockRejectedValue(new Error("measurement down"));
+    renderHome();
+    await screen.findByRole("heading", { name: "오늘의 운영" });
+    // The areas the seller came for are drawn exactly as they are when the signal succeeds.
+    expect(await screen.findByLabelText("지금 확인할 리뷰")).toBeTruthy();
   });
 });
