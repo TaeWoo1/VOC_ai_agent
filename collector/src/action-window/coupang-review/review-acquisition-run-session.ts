@@ -34,9 +34,26 @@ export type ReviewAcquisitionTargetResolver = (acquisitionRef: string) => Promis
 /** The ONE bounded POST. Injected so the session is testable with no network; throws or refuses ⇒ rejected. */
 export type ReviewAcquisitionHandoff = (request: ReviewHandoffRequest) => Promise<ReviewHandoffResponse>;
 
+/**
+ * Record that this run ended without storing anything, so the press leaves a row after the window closes.
+ *
+ * Injected like the handoff and for the same reason. Returns whether the row was written; the session does not
+ * act on the answer — a run that already failed does not get a second failure because our bookkeeping did.
+ */
+export type ReviewAcquisitionFailureReport = (report: {
+  accountSlot: string;
+  channelCode: string;
+  failureCode: string;
+}) => Promise<boolean>;
+
 export interface ReviewAcquisitionRunSessionDeps {
   resolveTarget: ReviewAcquisitionTargetResolver;
   handoff: ReviewAcquisitionHandoff;
+  /**
+   * Where a run that stored nothing gets written down. Optional: a session constructed without it behaves
+   * exactly as it did before this existed, which is what keeps the seated CLI and the fixtures untouched.
+   */
+  reportFailure?: ReviewAcquisitionFailureReport;
   /** Channel the handoff is posted under; the resolved binding must agree or the run ends unresolved. */
   channelCode?: string;
   onStatePublished?: () => void;
@@ -62,6 +79,17 @@ export class ReviewAcquisitionRunSession {
   private busyCount = 0;
   private surfaceCloseToken = 0;
   private unsubscribe: (() => void) | null = null;
+  /**
+   * At most one failure row per run — the unit the seller pressed is the run, so the history entry is about
+   * the run: one press, one line.
+   */
+  private failureSettled = false;
+  /**
+   * Whether anything was ever handed over. It is what makes the failure row a statement about the RUN rather
+   * than about a moment inside it: a read the seller repaired and re-pressed is not a failed sync, and
+   * recording it the instant a page refused would have said it was.
+   */
+  private handedOver = false;
 
   constructor(
     engine: ReviewAcquisitionEngine,
@@ -258,11 +286,17 @@ export class ReviewAcquisitionRunSession {
           complete: result.complete,
           stopReason: result.stopReason,
         });
+        if (ok) this.handedOver = true;
         const next = this.engine.onHandoff({ ok, stored: ok ? response!.stored : 0 });
         this.publishState();
         return this.drive(next);
       }
       case "CLEANUP": {
+        // Before the target is dropped: this is the one ending the engine reaches by itself (an unresolved
+        // binding, a refused handoff, a cancel, a finished walk), and after this line there is no account to
+        // attribute anything to. The other ending — the seller closes the window on a parked run — arrives as
+        // the carrier's dispose, which calls the same method and finds it already settled.
+        await this.settleRun();
         this.walk = null;
         this.target = null;
         await this.driver.cleanup();
@@ -272,6 +306,39 @@ export class ReviewAcquisitionRunSession {
       default:
         return;
     }
+  }
+
+  /**
+   * **The press ended. Write it down if it stored nothing.**
+   *
+   * Called once when the run is released — which is where the seller's question ("I pressed 지금 동기화 and
+   * nothing happened") actually gets its answer. Doing it the moment a page refused would have been earlier
+   * and wrong: a seller who is told the list is not up, brings it up, and presses again has not had a failed
+   * sync, and a row saying otherwise would sit in their history forever beside the successful one.
+   *
+   * Four conditions, and each rules out a different thing that is not a failure:
+   *
+   * - **nothing was handed over** — a run that stored is not a failed run, whatever went wrong on the way;
+   * - **a blocker stands** — the engine drops it on `completed` and on a seller's own cancel, so an empty
+   *   list and a deliberate 취소 write nothing. A cancel is a decision, not a fault;
+   * - **a binding was resolved** — otherwise the account slot IS what failed, and there is no seller account
+   *   whose history the row could belong to. Filing it against a guess is worse than the gap;
+   * - **once**.
+   *
+   * The word is the engine's, not the driver's: a driver that cannot explain itself leaves the default, and
+   * what the seller was shown is what the run should be remembered by. Never throws — the run has already
+   * failed and a bookkeeping error must not become a second one.
+   */
+  async settleRun(): Promise<void> {
+    if (this.failureSettled) return;
+    this.failureSettled = true;
+    if (this.handedOver) return;
+    const code = this.engine.view().blocker?.code;
+    const report = this.deps.reportFailure;
+    const target = this.target;
+    if (!code || !report || !target) return;
+    await report({ accountSlot: target.accountSlot, channelCode: this.channelCode, failureCode: code })
+      .catch(() => false);
   }
 
   private watchSurfaceClose(): void {

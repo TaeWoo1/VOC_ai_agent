@@ -26,6 +26,8 @@ import java.util.Set;
  *       there may well be more behind it. <b>{@link #BACKLOG_POSSIBLE}</b>.</li>
  *   <li>anything else — a page that could not be read, a pager that would not resolve, a run that received
  *       nothing. <b>{@link #UNDETERMINED}</b>, which is a real answer and the most common honest one.</li>
+ *   <li>a run that <b>failed</b> — it never read, so it is asked nothing and answers {@code null}. The reason
+ *       it failed is on the same row and is what the seller needs from it.</li>
  * </ul>
  *
  * <p><b>What {@link #REACHED_KNOWN_GROUND} does not mean.</b> It does not mean every review is collected. It
@@ -55,6 +57,13 @@ public enum ReviewCoverageSignal {
      */
     public static ReviewCoverageSignal of(SyncJob job) {
         if (job == null || !CollectionMethod.SELLER_CENTER_READ.name().equals(job.getMethod())) {
+            return null;
+        }
+        // A run that FAILED never read a page, so it is not in a position to answer this question at all —
+        // not even with "undeterminable", which reads as a statement ABOUT the list rather than about a read
+        // that did not happen. Its row carries the reason it failed instead, and putting a coverage sentence
+        // beside that would push the one thing the seller needs down the row behind a hedge.
+        if ("FAILED".equals(job.getStatus())) {
             return null;
         }
         if (job.getTotalRows() <= 0) {

@@ -283,6 +283,33 @@ class CollectControlServiceTest {
                 .hasMessageContaining("파일 업로드");
     }
 
+    /**
+     * A screen read is not a pull, and this is the only method that would have tried to re-run one.
+     *
+     * <p>Before the fence, the acquisition lane's own run rows — PARTIAL by design whenever the bounded walk
+     * did not reach the end of the list — satisfied every condition the retry offered, and pressing it sent
+     * the connector at an API that does not carry these reviews. The result would have been reported to the
+     * seller under the row they asked to retry.
+     */
+    @Test
+    void retryRefusesAScreenRead() {
+        SellerAccount acc = account("GMARKET");
+        SyncJob read = new SyncJob();
+        read.setOrgId(org);
+        read.setSellerAccountId(acc.getId());
+        read.setChannelId(acc.getChannelId());
+        read.setDataType("REVIEW");
+        read.setJobType("AGENT_HANDOFF");
+        read.setMethod(com.sellerops.collect.runtime.CollectionMethod.SELLER_CENTER_READ.name());
+        read.setTrigger("ACTION_WINDOW");
+        read.setStatus("FAILED");
+        syncJobs.save(read);
+
+        assertThatThrownBy(() -> service.retry(org, read.getId()))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("화면에서 실행한 수집");
+    }
+
     @Test
     void connectionStatusReflectsHealthAndNextSchedule() {
         SellerAccount acc = account("GMARKET");

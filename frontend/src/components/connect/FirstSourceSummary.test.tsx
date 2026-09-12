@@ -49,6 +49,7 @@ function run(dataType: string, successRows: number): SyncRunView {
     errorMessage: null,
     startedAt: "2026-08-27T00:59:00Z",
     finishedAt: "2026-08-27T01:00:00Z",
+    method: "API",
     coverage: null,
   };
 }

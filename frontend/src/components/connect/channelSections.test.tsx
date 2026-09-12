@@ -339,6 +339,7 @@ describe("수집 이력 섹션", () => {
       skippedRows: 9,
       failedRows: 0,
       errorMessage: "PAGE_LIMIT_REACHED",
+      method: "SELLER_CENTER_READ",
       coverage: "REACHED_KNOWN_GROUND",
       ...over,
     }) as unknown as SyncRunView;
@@ -383,6 +384,44 @@ describe("수집 이력 섹션", () => {
     expect(text).not.toContain("PAGE_LIMIT_REACHED");
     expect(text).not.toContain("ACTION_WINDOW");
     expect(text).toContain("화면에서 실행");
+  });
+
+  /**
+   * The gap M5 named and left open: a press that failed before storing wrote no row at all, so once the window
+   * closed the history was indistinguishable from a press that never happened.
+   */
+  it("a failed screen read says why, in the seller's words, and offers no retry that cannot work", () => {
+    wrap(
+      <CollectionHistorySection
+        runs={[screenRead({ status: "FAILED", totalRows: 0, skippedRows: 0, errorMessage: "LOGIN_REQUIRED", coverage: null })]}
+        loading={false}
+        error={false}
+        onChanged={vi.fn()}
+        onReport={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("acquisition-failure-note")).toHaveTextContent("로그인");
+    const text = document.body.textContent ?? "";
+    // Not the runtime's word, and not the name of whatever carried the read.
+    expect(text).not.toContain("LOGIN_REQUIRED");
+    expect(text).not.toMatch(/ASIDE|Aside|LOCAL_HELPER|SELLER_CENTER_READ/);
+    // The backend refuses to re-run a screen read through the pull path; the screen must not offer it.
+    expect(screen.queryByRole("button", { name: /다시 시도/ })).toBeNull();
+    // A failed run read nothing, so it makes no claim about what it did not read.
+    expect(screen.queryByTestId("coverage-note")).toBeNull();
+  });
+
+  it("a failure word with no sentence is not rendered as itself", () => {
+    wrap(
+      <CollectionHistorySection
+        runs={[screenRead({ status: "FAILED", totalRows: 0, errorMessage: "SOMETHING_NEW", coverage: null })]}
+        loading={false}
+        error={false}
+        onChanged={vi.fn()}
+        onReport={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("acquisition-failure-note")).toBeNull();
   });
 
   it("a run with no coverage question keeps showing its real error", () => {

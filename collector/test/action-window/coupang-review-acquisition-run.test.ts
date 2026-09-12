@@ -72,6 +72,8 @@ interface Harness {
   session: ReviewAcquisitionRunSession;
   link: ReturnType<typeof loopback>;
   handoffs: ReviewHandoffRequest[];
+  /** Every run that stored nothing and said so, in order. Empty is the normal case. */
+  failures: { accountSlot: string; channelCode: string; failureCode: string }[];
 }
 
 function harness(
@@ -82,9 +84,14 @@ function harness(
   const driver = new ReviewAcquisitionFixtureDriver(script);
   const link = loopback();
   const handoffs: ReviewHandoffRequest[] = [];
+  const failures: { accountSlot: string; channelCode: string; failureCode: string }[] = [];
   const resolved = opts.resolved === undefined ? { accountSlot: SLOT, channelCode: "COUPANG" } : opts.resolved;
   const session = new ReviewAcquisitionRunSession(engine, driver, link.transport, {
     resolveTarget: async () => resolved,
+    reportFailure: async (r) => {
+      failures.push(r);
+      return true;
+    },
     handoff:
       opts.handoff ??
       (async (r) => {
@@ -93,7 +100,7 @@ function harness(
       }),
   });
   session.attach();
-  return { engine, driver, session, link, handoffs };
+  return { engine, driver, session, link, handoffs, failures };
 }
 
 function latestView(frames: readonly AwServerFrame[]) {
@@ -177,6 +184,83 @@ describe("REVIEW_ACQUISITION — the run", () => {
     view = latestView(h.link.frames);
     expect(view.status).toBe("COMPLETED");
     expect(view.runCopyParams).toEqual({ pagesRead: 1, collected: 1, stored: 1, coverageComplete: true });
+  });
+
+  /**
+   * The gap M5 named: a press that failed before storing said so in the window and then the window closed,
+   * and the seller's collection history could not tell it from a press that never happened.
+   */
+  it("a press the seller gave up on is written down — once, with the word they were shown", async () => {
+    const h = harness([{ unreadable: true }, { unreadable: true }]);
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+
+    // Two refusals of the same screen are one fact about one press, and nothing is written while the window
+    // is still open — the seller can still repair it.
+    await pressRead(h);
+    await pressRead(h);
+    expect(h.failures).toEqual([]);
+
+    // They close the window instead. NOW the press has an ending, and it is the one they were shown.
+    await h.session.settleRun();
+    expect(h.failures).toEqual([{ accountSlot: SLOT, channelCode: "COUPANG", failureCode: "UNSUPPORTED_STATE" }]);
+    await h.session.settleRun();
+    expect(h.failures).toHaveLength(1);
+  });
+
+  /**
+   * The reason the row is written at the END of the press rather than the moment a page refuses: a seller who
+   * is told the list is not up, brings it up, and presses again has not had a failed sync.
+   */
+  it("a refusal the seller repaired is not a failed sync", async () => {
+    const h = harness([{ unreadable: true }, { bodies: [CANARY], page: 1, last: 1 }]);
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+    await pressRead(h);
+    await pressRead(h);
+    expect(latestView(h.link.frames).status).toBe("COMPLETED");
+    expect(h.handoffs).toHaveLength(1);
+    await h.session.settleRun();
+    expect(h.failures).toEqual([]);
+  });
+
+  it("a walk the seller cancelled writes nothing — a decision is not a fault", async () => {
+    const h = harness([{ unreadable: true }]);
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+    await pressRead(h);
+    h.link.client({ kind: "aw_command", command: command("CANCEL_RUN", h.engine.view().revision) });
+    await h.session.whenSettled();
+    expect(latestView(h.link.frames).status).toBe("CANCELLED");
+    expect(h.failures).toEqual([]);
+  });
+
+  it("a refused handoff is written down too — nothing was stored and the row has to say so", async () => {
+    const h = harness([{ bodies: [CANARY], page: 1, last: 1 }], {
+      handoff: async (r) => ({ ok: false, received: r.reviews.length, stored: 0, skipped: 0, failed: 0, reason: "HTTP_500" }),
+    });
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+    await pressRead(h);
+
+    expect(latestView(h.link.frames).status).toBe("FAILED");
+    // The engine reaches this ending itself, so the row is written without waiting for the window to close.
+    expect(h.failures).toEqual([{ accountSlot: SLOT, channelCode: "COUPANG", failureCode: "HANDOFF_REJECTED" }]);
+    // The failure word travels; the reviews do not.
+    expect(JSON.stringify(h.failures)).not.toContain(CANARY);
+  });
+
+  /**
+   * The one failure this cannot record, and not for want of trying: the account slot IS what failed to
+   * resolve, so there is no seller account whose history the row could belong to. Filing it against a guess
+   * would be worse than the gap.
+   */
+  it("an unresolved binding writes nothing — there is no account to write it against", async () => {
+    const h = harness([{ bodies: [CANARY], page: 1, last: 1 }], { resolved: null });
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+    expect(latestView(h.link.frames).status).toBe("FAILED");
+    expect(h.failures).toEqual([]);
   });
 
   it("a pager it cannot read ends the walk as the CLI does — stored, coverage unclaimed", async () => {

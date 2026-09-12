@@ -87,11 +87,18 @@ Reused surfaces, no new screen:
   `/bridge/health` is unauthenticated and its own contract says it carries no connection detail, and the
   Action Window run view is a shared v2 contract. Putting it in front of a seller is a product decision with
   a wire change behind it, and M5 does not take it.
+  **RESOLVED (M6), the other way:** the product decision was taken and it was *not* to surface it —
+  `execution_strategy_v1.md` §5. Technical provider names stay off ordinary seller screens and stay
+  identifiable to whoever operates the machine.
 - **A read that failed before it stored anything.** `AUTH_REQUIRED`, `STORE_MISMATCH`, `STORE_UNRESOLVED`,
   `EXECUTOR_UNAVAILABLE` are shown **live**, in the window, in seller words — but they produce no `sync_jobs`
   row, because nothing was collected. So after the window closes there is no record of why a press did
   nothing. That is a real gap; closing it means a failure record, which is a new kind of row and not this
   package's to invent.
+  **RESOLVED (M6):** `execution_strategy_v1.md` §6. It did not need a new kind of row — an ordinary
+  `sync_jobs` row with the same method and trigger, `FAILED`, zero counts, and the closed failure word where
+  this path already records its named ending. No migration. The one failure it still cannot record is an
+  unresolved binding, because the account slot is what failed to resolve.
 
 ---
 

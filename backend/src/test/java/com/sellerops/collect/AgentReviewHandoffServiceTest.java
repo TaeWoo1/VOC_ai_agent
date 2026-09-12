@@ -192,6 +192,85 @@ class AgentReviewHandoffServiceTest {
                 complete ? "FINAL_PAGE_REACHED" : "PAGE_UNREADABLE", rows);
     }
 
+    /* ──────────────────────── a run that stored nothing ──────────────────────── */
+
+    /**
+     * The gap M5 named and closed here: a press that failed before storing wrote no row at all, so once the
+     * Action Window closed the seller's history was indistinguishable from a press that never happened.
+     *
+     * <p>The row it writes is ordinary on purpose — the same method and trigger the successful handoff writes,
+     * three zero counts, and the closed failure word where that path already records its named ending. What
+     * this asserts is that it is a run row at all, that it says nothing it did not observe, and that a word
+     * outside the lane's vocabulary writes nothing.
+     */
+    @Test
+    void a_read_that_stored_nothing_still_leaves_the_seller_a_run_row() {
+        SellerAccount acc = account(org, "COUPANG");
+        String slot = slotFor(acc);
+
+        var result = service.recordFailure(org,
+                new com.sellerops.collect.dto.AgentReviewAcquisitionFailureRequest(slot, "COUPANG", "LOGIN_REQUIRED"));
+
+        assertThat(result.importId()).isNotBlank();
+        SyncJob row = syncJobs.findById(UUID.fromString(result.importId())).orElseThrow();
+        assertThat(row.getOrgId()).isEqualTo(org);
+        assertThat(row.getSellerAccountId()).isEqualTo(acc.getId());
+        assertThat(row.getStatus()).isEqualTo("FAILED");
+        assertThat(row.getMethod()).isEqualTo("SELLER_CENTER_READ");
+        assertThat(row.getTrigger()).isEqualTo("ACTION_WINDOW");
+        assertThat(row.getDataType()).isEqualTo("REVIEW");
+        assertThat(row.getErrorMessage()).isEqualTo("LOGIN_REQUIRED");
+        assertThat(row.getTotalRows()).isZero();
+        assertThat(row.getSuccessRows()).isZero();
+        assertThat(row.getSkippedRows()).isZero();
+        assertThat(row.getFailedRows()).isZero();
+        // A run that never read is asked nothing about what it did not read.
+        assertThat(ReviewCoverageSignal.of(row)).isNull();
+        // And it stored nothing, which is the claim the row is making.
+        assertThat(reviews.count()).isZero();
+    }
+
+    /**
+     * The vocabulary is closed and checked BEFORE anything is written. Storing an unrecognised string and
+     * letting a screen decide what to do with it is how an internal token ends up rendered at a seller — the
+     * exact defect the coverage sentence was built to undo.
+     */
+    @Test
+    void an_unknown_failure_word_writes_no_row() {
+        SellerAccount acc = account(org, "COUPANG");
+        String slot = slotFor(acc);
+        long before = syncJobs.count();
+
+        assertThatThrownBy(() -> service.recordFailure(org,
+                new com.sellerops.collect.dto.AgentReviewAcquisitionFailureRequest(slot, "COUPANG", "DOWNLOAD_TIMEOUT")))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(AgentReviewHandoffService.REASON_UNKNOWN_FAILURE_CODE);
+        assertThat(syncJobs.count()).isEqualTo(before);
+    }
+
+    /**
+     * Same gates, same order as the storing path. A run row filed against the wrong account is worse than the
+     * gap this route was added to fill, so both of the ways it could be wrong fail before anything is written.
+     */
+    @Test
+    void the_failure_route_is_scoped_and_guarded_like_the_handoff() {
+        SellerAccount mine = account(org, "COUPANG");
+        String slot = slotFor(mine);
+        long before = syncJobs.count();
+
+        // The slot is resolved INSIDE the caller's org: the same opaque value read by another org is nothing.
+        assertThatThrownBy(() -> service.recordFailure(UUID.randomUUID(),
+                new com.sellerops.collect.dto.AgentReviewAcquisitionFailureRequest(slot, "COUPANG", "RUNTIME_FAULT")))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(AgentReviewHandoffService.REASON_UNKNOWN_SLOT);
+        // The declared channel is a guard against a mixed-up slot, never a routing key.
+        assertThatThrownBy(() -> service.recordFailure(org,
+                new com.sellerops.collect.dto.AgentReviewAcquisitionFailureRequest(slot, "NAVER", "RUNTIME_FAULT")))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(AgentReviewHandoffService.REASON_CHANNEL_MISMATCH);
+        assertThat(syncJobs.count()).isEqualTo(before);
+    }
+
     /* ───────────────────────────── storing ───────────────────────────── */
 
     @Test

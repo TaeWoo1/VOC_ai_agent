@@ -138,3 +138,45 @@ export async function postCoupangReviewHandoff(
   });
   return result;
 }
+
+/**
+ * **The other ending.** A read that never got as far as rows still has to leave the seller a row.
+ *
+ * A separate function from the handoff above and deliberately a separate ENDPOINT, because an empty handoff
+ * already means something — a walk that read a page and found nothing new — and a route told apart by the
+ * emptiness of its payload will eventually be told apart wrongly.
+ *
+ * What crosses is three closed values: the opaque account slot, the channel guard, and the runtime's own
+ * failure word. No page, no store, no credential, no review, and — unlike the handoff — nothing that could
+ * carry one, which is why this call is allowed to be best-effort. A failure to record a failure is logged as a
+ * count and swallowed: the run has already failed, and turning "we could not write the history row" into a
+ * second visible fault would put the seller in front of an error about our bookkeeping.
+ */
+export async function postCoupangReviewAcquisitionFailure(
+  baseUrl: string,
+  token: string,
+  request: { accountSlot: string; channelCode: string; failureCode: string },
+  fetchImpl: FetchImpl = fetch,
+): Promise<boolean> {
+  let res: Response;
+  try {
+    res = await fetchImpl(`${baseUrl}/api/agent/review-handoff/failure`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        accountSlot: request.accountSlot,
+        channelCode: request.channelCode,
+        failureCode: request.failureCode,
+      }),
+    });
+  } catch {
+    log("aw_coupang_review_acquisition_failure_unrecorded", { reason: "TRANSPORT" }, "warn");
+    return false;
+  }
+  if (!res.ok) {
+    log("aw_coupang_review_acquisition_failure_unrecorded", { httpStatus: res.status }, "warn");
+    return false;
+  }
+  log("aw_coupang_review_acquisition_failure_recorded", { code: request.failureCode });
+  return true;
+}

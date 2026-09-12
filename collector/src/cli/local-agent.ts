@@ -58,7 +58,12 @@ import { ReviewAcquisitionEngine } from "../action-window/coupang-review/review-
 import { ReviewAcquisitionRunSession } from "../action-window/coupang-review/review-acquisition-run-session";
 import { ReviewAcquisitionEndpoint } from "../bridge/review-acquisition-endpoint";
 import { fetchReviewAcquisitionTarget, type ReviewAcquisitionTarget } from "../action-window/coupang-review/review-acquisition-target-client";
-import { postCoupangReviewHandoff, type ReviewHandoffRequest, type ReviewHandoffResponse } from "../action-window/coupang-review/review-handoff-client";
+import {
+  postCoupangReviewAcquisitionFailure,
+  postCoupangReviewHandoff,
+  type ReviewHandoffRequest,
+  type ReviewHandoffResponse,
+} from "../action-window/coupang-review/review-handoff-client";
 import { screenCredentialBackendOrigin } from "../credential/backend-origin";
 import type { ReviewLocateTarget } from "../action-window/coupang-review/review-locate";
 import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
@@ -1191,6 +1196,11 @@ export interface CoupangReviewAcquisitionLiveCarrier {
   resolveTarget: (acquisitionRef: string) => Promise<ReviewAcquisitionTarget | null>;
   /** The ONE bounded POST of everything the walk read. */
   handoff: (request: ReviewHandoffRequest) => Promise<ReviewHandoffResponse>;
+  /**
+   * Write down a run that stored nothing, so the press survives the window closing. Optional so a carrier
+   * built without it behaves exactly as carriers did before this route existed.
+   */
+  reportFailure?: (report: { accountSlot: string; channelCode: string; failureCode: string }) => Promise<boolean>;
   closeSurface: () => Promise<void>;
   isSurfaceOpen: () => boolean;
 }
@@ -1303,6 +1313,11 @@ export function buildCoupangReviewAcquisitionLiveConfig(): CoupangReviewAcquisit
       }
       return postCoupangReviewHandoff(origin, t, request);
     },
+    reportFailure: async (report: { accountSlot: string; channelCode: string; failureCode: string }) => {
+      const t = await session();
+      if (t === null || origin === null) return false;
+      return postCoupangReviewAcquisitionFailure(origin, t, report);
+    },
     closeSurface: async () => {
       const ctx = walkContext;
       walkContext = null;
@@ -1335,6 +1350,7 @@ export function activateCoupangReviewAcquisition(
   const session = new ReviewAcquisitionRunSession(engine, live.createDriver(), endpoint.transport, {
     resolveTarget: live.resolveTarget,
     handoff: live.handoff,
+    ...(live.reportFailure === undefined ? {} : { reportFailure: live.reportFailure }),
     channelCode: "COUPANG",
     ...(live.maxPages === undefined ? {} : { maxPages: live.maxPages }),
   });
@@ -1353,6 +1369,10 @@ export function activateCoupangReviewAcquisition(
     dispose: async () => {
       if (disposed) return;
       disposed = true;
+      // The press is over. A run parked on a blocker never reaches a terminal stage on its own — the seller
+      // closes the window and the helper releases the carrier — so this is where that ending gets written
+      // down. A run the engine already settled finds the latch closed and does nothing.
+      await session.settleRun().catch(() => undefined);
       endpoint.close();
       await live.closeSurface();
     },

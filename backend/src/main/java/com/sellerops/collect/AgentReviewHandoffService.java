@@ -2,6 +2,8 @@ package com.sellerops.collect;
 
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
+import com.sellerops.collect.dto.AgentReviewAcquisitionFailureRequest;
+import com.sellerops.collect.dto.AgentReviewAcquisitionFailureResultView;
 import com.sellerops.collect.dto.AgentReviewHandoffRequest;
 import com.sellerops.collect.dto.AgentReviewHandoffResultView;
 import com.sellerops.collect.runtime.CollectionMethod;
@@ -508,6 +510,86 @@ public class AgentReviewHandoffService {
      * strictly smaller harm than turning a successful import into a 500 the agent would report as a failure —
      * the same reasoning the credential handoff applies to its post-store verification.
      */
+    /**
+     * **The failure words this lane can actually produce**, and the reason the set is written out rather than
+     * deferred to the whole Action Window blocker vocabulary.
+     *
+     * <p>An acquisition run ends without storing in exactly two places: a page the reader refused (the runtime
+     * parks with the driver's own word, or the engine's default when the driver cannot explain itself) and a
+     * handoff the backend refused. Every other blocker in that vocabulary belongs to an export, a reply, or an
+     * issuance walk, and accepting one here would let a mis-wired carrier file a download timeout against a
+     * read that never downloads anything.
+     *
+     * <p>A word outside this set is refused and nothing is written. The alternative — storing the string and
+     * letting a screen decide — is how an internal token ends up rendered to a seller, which is the defect this
+     * whole lane's coverage sentence was built to undo.
+     */
+    static final Set<String> ACQUISITION_FAILURE_CODES = Set.of(
+            "LOGIN_REQUIRED",
+            "STORE_MISMATCH",
+            "STORE_UNRESOLVED",
+            "EXECUTOR_UNAVAILABLE",
+            "UNSUPPORTED_STATE",
+            "RUNTIME_FAULT",
+            "HANDOFF_REJECTED");
+
+    static final String REASON_UNKNOWN_FAILURE_CODE = "UNKNOWN_FAILURE_CODE";
+
+    /**
+     * Record a screen read that ended without storing anything.
+     *
+     * <p>Same gates, same order, same fail-closed posture as {@link #handOff}: slot → org → account → channel
+     * guard → supported channel → known failure word. A request that fails any of them has written nothing,
+     * which is the correct outcome — a run row attributed to the wrong account is worse than no run row.
+     *
+     * <p>The row it writes is deliberately an ordinary one. {@code FAILED} with three zero counts is already
+     * what this history means by "it ran and stored nothing", the method and trigger are the same two words the
+     * successful handoff writes, and the failure code goes where that path already puts its named ending. The
+     * only thing that makes this row different from a failed API pull is the method — and that is exactly the
+     * distinction the screen needs to explain it.
+     */
+    public AgentReviewAcquisitionFailureResultView recordFailure(UUID orgId,
+                                                                 AgentReviewAcquisitionFailureRequest request) {
+        UUID sellerAccountId = resolveAccount(orgId, request.accountSlot());
+        SellerAccount account = requireAccount(orgId, sellerAccountId);
+        Channel channel = channels.findById(account.getChannelId())
+                .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
+        if (!channel.getCode().equals(request.channelCode())) {
+            throw ApiException.badRequest("수집하려는 채널이 이 판매 계정의 채널과 다릅니다. (" + REASON_CHANNEL_MISMATCH + ")");
+        }
+        if (!SUPPORTED_CHANNEL.equals(channel.getCode())) {
+            throw ApiException.badRequest(
+                    "이 채널은 화면 기반 상품평 수집을 지원하지 않습니다. (" + REASON_UNSUPPORTED_CHANNEL + ")");
+        }
+        if (!ACQUISITION_FAILURE_CODES.contains(request.failureCode())) {
+            throw ApiException.badRequest("알 수 없는 실패 코드입니다. (" + REASON_UNKNOWN_FAILURE_CODE + ")");
+        }
+
+        SyncJob job = new SyncJob();
+        job.setOrgId(orgId);
+        job.setChannelId(channel.getId());
+        job.setSellerAccountId(sellerAccountId);
+        job.setDataType("REVIEW");
+        job.setUploadType("REVIEW");
+        job.setJobType("AGENT_HANDOFF");
+        job.setMethod(CollectionMethod.SELLER_CENTER_READ.name());
+        job.setTrigger("ACTION_WINDOW");
+        Instant now = Instant.now();
+        job.setStartedAt(now);
+        job.setFinishedAt(now);
+        job.setTotalRows(0);
+        job.setSuccessRows(0);
+        job.setSkippedRows(0);
+        job.setFailedRows(0);
+        job.setStatus("FAILED");
+        job.setErrorMessage(request.failureCode());
+        SyncJob saved = syncJobs.save(job);
+        // A closed word and nothing else. The page, the store and the credential are not in this method's hands
+        // and could not be logged from here even by mistake.
+        log.info("Coupang review acquisition failed: code={}", request.failureCode());
+        return new AgentReviewAcquisitionFailureResultView(saved.getId().toString());
+    }
+
     private SyncJob recordImport(UUID orgId, UUID channelId, UUID sellerAccountId,
                                  AgentReviewHandoffRequest request, int received, int failed,
                                  IngestOutcome outcome, Instant startedAt) {

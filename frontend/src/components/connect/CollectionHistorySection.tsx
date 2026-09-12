@@ -53,12 +53,16 @@ function RunRow({
   onReport: (message: string, isError: boolean) => void;
 }) {
   const [retrying, setRetrying] = useState(false);
-  // The backend retries only FAILED/PARTIAL pull runs — uploads are re-uploaded.
+  // The backend retries only FAILED/PARTIAL pull runs — uploads are re-uploaded, and a screen read is not a
+  // pull: re-running one here would send the connector at an API that does not carry these reviews and report
+  // the result under this row. The backend refuses it; this keeps the seller from being offered it.
   const retryable =
     (run.status === "FAILED" || run.status === "PARTIAL") &&
     run.trigger !== "UPLOAD" &&
+    run.method !== "SELLER_CENTER_READ" &&
     run.sellerAccountId !== null &&
     run.dataType !== null;
+  const failureNote = acquisitionFailureNote(run);
 
   async function retry() {
     setRetrying(true);
@@ -103,9 +107,16 @@ function RunRow({
         </div>
       </div>
       {run.coverage ? <CoverageNote coverage={run.coverage} /> : null}
-      {(run.errorMessage && !run.coverage) || run.nextRetryAt ? (
+      {failureNote ? (
+        <p data-testid="acquisition-failure-note" className="text-sm text-bad">
+          {failureNote}
+        </p>
+      ) : null}
+      {(run.errorMessage && !run.coverage && !failureNote) || run.nextRetryAt ? (
         <div className="flex flex-col gap-1 text-sm">
-          {run.errorMessage && !run.coverage ? <span className="text-bad">{run.errorMessage}</span> : null}
+          {run.errorMessage && !run.coverage && !failureNote ? (
+            <span className="text-bad">{run.errorMessage}</span>
+          ) : null}
           {run.nextRetryAt ? (
             <span className="text-muted">다음 재시도 가능: {untilTime(run.nextRetryAt)}</span>
           ) : null}
@@ -113,6 +124,33 @@ function RunRow({
       ) : null}
     </li>
   );
+}
+
+/**
+ * **Why a 지금 동기화 stored nothing, in the seller's words.**
+ *
+ * The run row carries the runtime's own closed word (the backend validates it against the set this lane can
+ * produce and refuses the rest). This table is the only place it becomes a sentence, and the sentences say
+ * what happened and what the seller can do — never what carried the read. Which executor runs on this machine
+ * is a deployment fact and does not belong on a screen about the seller's reviews.
+ *
+ * An unmapped value renders nothing here and falls through to the row's ordinary error line, the same posture
+ * `TriggerChip` takes: a word nobody wrote a sentence for is not shown as itself.
+ */
+const ACQUISITION_FAILURE_WORDS: Record<string, string> = {
+  LOGIN_REQUIRED: "쿠팡 판매자 화면에 로그인이 되어 있지 않아 상품평을 읽지 못했습니다. 로그인한 뒤 다시 동기화해 주세요.",
+  STORE_MISMATCH: "화면에 열려 있던 스토어가 이 판매 계정과 달라서 아무것도 읽지 않았습니다.",
+  STORE_UNRESOLVED: "화면의 스토어가 이 판매 계정과 같은지 확인하지 못해 아무것도 읽지 않았습니다.",
+  EXECUTOR_UNAVAILABLE: "상품평을 읽는 프로그램에 연결하지 못했습니다. 잠시 뒤 다시 동기화해 주세요.",
+  UNSUPPORTED_STATE: "상품평 목록 화면이 아니어서 읽지 못했습니다. 쿠팡 상품평 목록을 연 뒤 다시 동기화해 주세요.",
+  RUNTIME_FAULT: "상품평을 읽는 도중 오류가 나서 아무것도 저장하지 않았습니다.",
+  HANDOFF_REJECTED: "읽은 상품평을 저장하지 못했습니다. 저장된 상품평은 없습니다.",
+};
+
+/** The sentence for a failed screen read, or null when this row is not one (or its word has no sentence). */
+function acquisitionFailureNote(run: SyncRunView): string | null {
+  if (run.method !== "SELLER_CENTER_READ" || run.status !== "FAILED" || !run.errorMessage) return null;
+  return ACQUISITION_FAILURE_WORDS[run.errorMessage] ?? null;
 }
 
 /**

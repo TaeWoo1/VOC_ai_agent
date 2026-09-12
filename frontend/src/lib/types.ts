@@ -512,6 +512,12 @@ export interface SyncRunView {
   startedAt: string | null;
   finishedAt: string | null;
   /**
+   * How the rows were obtained — `API` | `FILE_UPLOAD` | `SELLER_CENTER_READ`. Read, never rendered: a screen
+   * read cannot be re-run through the API pull path, and the screen that offers 다시 시도 has to know that as
+   * a fact rather than guess it from the trigger.
+   */
+  method: string | null;
+  /**
    * What a screen-read run could say about reviews it did not read. `null` on every other kind of run —
    * the question is not asked of an API pull or an upload, and a sentence on such a row would be invented.
    */

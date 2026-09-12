@@ -31,6 +31,12 @@ public record SyncRunView(
         Instant startedAt,
         Instant finishedAt,
         /**
+         * How the rows were obtained — {@code API}, {@code FILE_UPLOAD}, {@code SELLER_CENTER_READ}. Carried
+         * because a screen read cannot be re-run through the API pull path, and the screen that offers 다시
+         * 시도 must read that fact rather than infer it from the trigger. It is not rendered.
+         */
+        String method,
+        /**
          * What this run could say about reviews it did not read — {@code null} unless it was a screen read.
          * Derived from the counts already on the row; see {@link com.sellerops.collect.ReviewCoverageSignal}.
          */
@@ -41,6 +47,6 @@ public record SyncRunView(
                 j.getTrigger(), j.getAttempt(), j.isRateLimited(), j.getNextRetryAt(),
                 j.getJobType(), j.getUploadType(), j.getStatus(), j.getTotalRows(), j.getSuccessRows(),
                 j.getSkippedRows(), j.getFailedRows(), j.getErrorMessage(), j.getStartedAt(), j.getFinishedAt(),
-                ReviewCoverageSignal.of(j));
+                j.getMethod(), ReviewCoverageSignal.of(j));
     }
 }

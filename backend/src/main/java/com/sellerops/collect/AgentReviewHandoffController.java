@@ -1,6 +1,8 @@
 package com.sellerops.collect;
 
 import com.sellerops.auth.AuthPrincipal;
+import com.sellerops.collect.dto.AgentReviewAcquisitionFailureRequest;
+import com.sellerops.collect.dto.AgentReviewAcquisitionFailureResultView;
 import com.sellerops.collect.dto.AgentReviewHandoffRequest;
 import com.sellerops.collect.dto.AgentReviewHandoffResultView;
 import jakarta.validation.Valid;
@@ -35,5 +37,20 @@ public class AgentReviewHandoffController {
     public AgentReviewHandoffResultView handOff(@AuthenticationPrincipal AuthPrincipal principal,
                                                 @Valid @RequestBody AgentReviewHandoffRequest request) {
         return service.handOff(principal.orgId(), request);
+    }
+
+    /**
+     * The same lane's other ending: a read that stored nothing, so that it leaves a row the seller can find
+     * after the window has closed.
+     *
+     * <p>A sibling route rather than an empty handoff, because an empty handoff already means something else —
+     * a walk that read a page and found nothing new — and a route that has to be told apart by the emptiness of
+     * its payload is a route that will eventually be told apart wrongly.
+     */
+    @PostMapping("/review-handoff/failure")
+    public AgentReviewAcquisitionFailureResultView recordFailure(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @Valid @RequestBody AgentReviewAcquisitionFailureRequest request) {
+        return service.recordFailure(principal.orgId(), request);
     }
 }

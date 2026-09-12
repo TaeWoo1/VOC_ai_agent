@@ -11,6 +11,7 @@ import com.sellerops.collect.dto.CredentialReplaceResultView;
 import com.sellerops.collect.dto.SchedulePutRequest;
 import com.sellerops.collect.dto.ScheduleView;
 import com.sellerops.collect.dto.SyncRunView;
+import com.sellerops.collect.runtime.CollectionMethod;
 import com.sellerops.common.ApiException;
 import com.sellerops.connector.ChannelApiGapRegistry;
 import com.sellerops.connector.ChannelConnectionStatus;
@@ -218,6 +219,13 @@ public class CollectControlService {
         }
         if (original.getSellerAccountId() == null || original.getDataType() == null) {
             throw ApiException.badRequest("파일 업로드 이력은 다시 시도할 수 없습니다. 파일을 다시 업로드해 주세요.");
+        }
+        // A screen read is not a pull, and this method only knows how to pull. Re-running one here would send
+        // the connector at the marketplace API for a channel whose reviews have no API to pull — a different
+        // collection entirely, reported to the seller under the row they asked to retry. The repair for a
+        // screen read is to press 지금 동기화 again, where the seller is and with the window in front of them.
+        if (CollectionMethod.SELLER_CENTER_READ.name().equals(original.getMethod())) {
+            throw ApiException.badRequest("화면에서 실행한 수집은 여기서 다시 시도할 수 없습니다. 다시 동기화해 주세요.");
         }
         SyncJob rerun = executor.execute(orgId, original.getSellerAccountId(),
                 parseDataType(original.getDataType()), "RETRY");
