@@ -78,6 +78,69 @@ class ReviewIssueMemoryTest {
         return issues.findByOrgIdAndSignatureKey(org, signatureKey).orElseThrow();
     }
 
+    // ---- seller-started remediation -----------------------------------------------------------
+
+    /**
+     * <b>A seller may start work on a problem reviewnary has not raised</b> (product-owner decision,
+     * 2026-09-13).
+     *
+     * <p>Before this, starting required NEEDS_REVIEW, which only an automatic change judgement
+     * produces — so on evidence too sparse to fire one, a seller could see a problem repeating and
+     * had no way to record that they were fixing it. Measured on the demo org: no issue met any
+     * threshold at today's date and all 25 sat in OBSERVING.
+     */
+    @Test
+    void aSellerMayStartActingOnAnObservedIssue() {
+        extraction.extract(review("배송이 너무 늦었어요", REF, null));
+        ReviewIssue issue = issueByKey("배송:지연");
+        assertThat(issue.getLifecycleState()).isEqualTo(IssueLifecycleState.OBSERVING);
+
+        lifecycle.startActing(org, issue.getId(), "택배사를 바꿉니다");
+
+        assertThat(issueByKey("배송:지연").getLifecycleState()).isEqualTo(IssueLifecycleState.ACTING);
+        ReviewIssueStateEvent event = stateEvents
+                .findByOrgIdAndIssueIdOrderByCreatedAtAsc(org, issue.getId())
+                .stream().reduce((a, b) -> b).orElseThrow();
+        assertThat(event.getFromState()).isEqualTo(IssueLifecycleState.OBSERVING);
+        assertThat(event.getToState()).isEqualTo(IssueLifecycleState.ACTING);
+        assertThat(event.getActor()).isEqualTo(IssueStateActor.OPERATOR);
+        assertThat(event.getNote()).isEqualTo("택배사를 바꿉니다");
+    }
+
+    /**
+     * <b>And the automated pass still may not.</b> Widening what a PERSON may say must not widen what
+     * SellerOps concludes — an automatic OBSERVING → ACTING would be the system declaring that work
+     * had begun, which it cannot know. The two actors' powers are declared side by side on
+     * {@link IssueLifecycleState} so this stays checkable.
+     */
+    @Test
+    void theSystemStillMayNotDeclareThatWorkStarted() {
+        assertThat(IssueLifecycleState.OBSERVING.sellerMayStartActing()).isTrue();
+        assertThat(IssueLifecycleState.OBSERVING.systemMayTransitionTo(IssueLifecycleState.ACTING))
+                .isFalse();
+        assertThat(IssueLifecycleState.NEEDS_REVIEW.systemMayTransitionTo(IssueLifecycleState.ACTING))
+                .isFalse();
+    }
+
+    /**
+     * Remediation is already recorded in VERIFYING and RESOLVED, so re-entering ACTING from either
+     * would overwrite an evidence-backed conclusion with an assertion.
+     */
+    @Test
+    void aSellerMayNotRestartWorkAfterRemediationWasRecorded() {
+        assertThat(IssueLifecycleState.VERIFYING.sellerMayStartActing()).isFalse();
+        assertThat(IssueLifecycleState.RESOLVED.sellerMayStartActing()).isFalse();
+
+        extraction.extract(review("배송이 너무 늦었어요", REF, null));
+        ReviewIssue issue = issueByKey("배송:지연");
+        lifecycle.startActing(org, issue.getId(), null);
+        lifecycle.markRemediated(org, issue.getId(), null);
+
+        assertThatThrownBy(() -> lifecycle.startActing(org, issue.getId(), null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("VERIFYING");
+    }
+
     // ---- extraction --------------------------------------------------------------------------
 
     @Test
@@ -327,15 +390,30 @@ class ReviewIssueMemoryTest {
                 .contains("테이프 공급처 확인", "공급처 변경 완료");
     }
 
+    /**
+     * <b>Rewritten when OBSERVING became a state a seller may start from</b> (product-owner decision,
+     * 2026-09-13). The half this replaced asserted that 조치 시작 requires 확인 필요 first, and that
+     * is no longer the contract: a seller may act on a problem reviewnary has not raised, because on
+     * sparse evidence reviewnary never raises one.
+     *
+     * <p>The half that survives is the one that was always the point — <b>완료 cannot be claimed
+     * without 시작</b>. Recording remediation is a claim that work happened, and it must rest on a
+     * recorded start rather than on someone jumping to the end. Asserted here from both states a
+     * seller can be standing in when they have not started.
+     */
     @Test
-    void statesCannotBeSkipped() {
+    void completionCannotBeClaimedWithoutARecordedStart() {
         ReviewIssue issue = seedNewIssueThatFires();
 
-        // Still OBSERVING — 조치 중 requires 확인 필요 first.
-        assertThatThrownBy(() -> lifecycle.startActing(org, issue.getId(), null))
+        // OBSERVING — nothing has been started.
+        assertThatThrownBy(() -> lifecycle.markRemediated(org, issue.getId(), null))
                 .isInstanceOf(IllegalStateException.class);
 
+        // And still not once reviewnary has raised it: 확인 필요 is a request to look, not a record
+        // that work began.
         lifecycle.runAutomaticPass(org, REF);
+        assertThat(issues.findById(issue.getId()).orElseThrow().getLifecycleState())
+                .isEqualTo(IssueLifecycleState.NEEDS_REVIEW);
         assertThatThrownBy(() -> lifecycle.markRemediated(org, issue.getId(), null))
                 .isInstanceOf(IllegalStateException.class);
     }

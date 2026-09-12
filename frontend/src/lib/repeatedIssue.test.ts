@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  hasRatingEvidence,
   knowledgeGapAction,
   knowledgeLine,
   knowledgeScopeLine,
   productSpanLine,
+  ratingBands,
   repeatLine,
   unattributedLine,
 } from "./repeatedIssue";
-import type { IssueKnowledgeOnHand, IssueProductEvidenceView } from "./types";
+import type {
+  IssueKnowledgeOnHand,
+  IssueProductEvidenceView,
+  IssueRatingDistributionView,
+} from "./types";
 
 function row(over: Partial<IssueProductEvidenceView> = {}): IssueProductEvidenceView {
   return {
@@ -98,5 +104,48 @@ describe("우리가 써 둔 것", () => {
     expect(knowledgeGapAction(knowledge({ productSources: 3 }))).toBe("답변 기준 채우기");
     expect(knowledgeGapAction(knowledge({ productSources: 3, productMentions: 1 }))).toBeNull();
     expect(knowledgeGapAction(knowledge({ orgSources: 1, orgMentions: 1 }))).toBeNull();
+  });
+});
+
+function spread(over: Partial<IssueRatingDistributionView> = {}): IssueRatingDistributionView {
+  return { rating1: 0, rating2: 0, rating3: 3, rating4: 5, rating5: 10, unrated: 0, ...over };
+}
+
+describe("어떤 별점에서 나왔나", () => {
+  it("reports counts of evidence, worst-rating last, and keeps empty bands", () => {
+    const bands = ratingBands(spread());
+    expect(bands.map((b) => b.labelKo)).toEqual(["5점", "4점", "3점", "2점", "1점", "별점 없음"]);
+    expect(bands.map((b) => b.count)).toEqual([10, 5, 3, 0, 0, 0]);
+  });
+
+  /**
+   * The whole reason empty bands survive: 접착 부족 on this org is raised entirely inside good
+   * ratings. A table that dropped its zero rows would hide exactly that.
+   */
+  it("keeps a zero band so 'nobody is angry and it keeps happening' is visible", () => {
+    const bands = ratingBands(spread());
+    const angry = bands.filter((b) => b.key === "1" || b.key === "2");
+    expect(angry).toHaveLength(2);
+    expect(angry.every((b) => b.count === 0)).toBe(true);
+  });
+
+  /**
+   * No share, no average, no importance. A mean star over the units that happened to match this
+   * problem describes the extractor's matching, not the product — and severity comes from the
+   * problem vocabulary, deliberately never from a rating.
+   */
+  it("derives no rate, mean or ranking from the counts", () => {
+    const bands = ratingBands(spread());
+    for (const band of bands) {
+      expect(Number.isInteger(band.count)).toBe(true);
+      expect(band).not.toHaveProperty("share");
+      expect(band).not.toHaveProperty("average");
+      expect(band).not.toHaveProperty("weight");
+    }
+  });
+
+  it("says there is nothing to spread rather than drawing six zeroes", () => {
+    expect(hasRatingEvidence(spread())).toBe(true);
+    expect(hasRatingEvidence(spread({ rating3: 0, rating4: 0, rating5: 0 }))).toBe(false);
   });
 });

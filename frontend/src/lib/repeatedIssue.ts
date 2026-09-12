@@ -1,4 +1,8 @@
-import type { IssueKnowledgeOnHand, IssueProductEvidenceView } from "./types";
+import type {
+  IssueKnowledgeOnHand,
+  IssueProductEvidenceView,
+  IssueRatingDistributionView,
+} from "./types";
 
 /**
  * The sentences the Repeated Issue workspace is allowed to say about counts it did not compute.
@@ -87,4 +91,50 @@ export function knowledgeScopeLine(knowledge: IssueKnowledgeOnHand): string | nu
 export function knowledgeGapAction(knowledge: IssueKnowledgeOnHand): string | null {
   const mentions = knowledge.productMentions + knowledge.orgMentions;
   return mentions === 0 ? "답변 기준 채우기" : null;
+}
+
+/** One bar of the rating breakdown: a star band and how many pieces of evidence carried it. */
+export interface RatingBand {
+  key: string;
+  labelKo: string;
+  count: number;
+}
+
+/**
+ * How the evidence behind this problem spreads across star ratings — **counts, and nothing else**.
+ *
+ * <b>No percentage, no average, no "importance".</b> An average star over evidence units is a number
+ * about a sample nobody drew: the units here are the ones that named this problem, so their mean
+ * says nothing about the product and everything about which sentences the extractor matched. A share
+ * would be a rate over that same sample. And ranking a problem by its stars would be an importance
+ * judgement no measurement in this repository supports — severity already comes from the problem
+ * vocabulary, deliberately never from a rating.
+ *
+ * <b>It counts 근거, not 리뷰.</b> The grain of evidence is `(review, unit_ordinal)`, so one review
+ * that says the same thing twice contributes twice, and the six buckets sum to the issue's evidence
+ * total rather than to a number of reviews. The label says 근거 for that reason.
+ *
+ * <b>Empty bands are kept.</b> A missing 1★ row and a 1★ row reading 0 are the same fact, but only
+ * the second one lets a seller see that the problem is being raised entirely inside good ratings —
+ * which is exactly what 접착 부족 does on this org (1–2★: 0, 5★: 10).
+ */
+export function ratingBands(distribution: IssueRatingDistributionView): RatingBand[] {
+  return [
+    { key: "5", labelKo: "5점", count: distribution.rating5 },
+    { key: "4", labelKo: "4점", count: distribution.rating4 },
+    { key: "3", labelKo: "3점", count: distribution.rating3 },
+    { key: "2", labelKo: "2점", count: distribution.rating2 },
+    { key: "1", labelKo: "1점", count: distribution.rating1 },
+    { key: "unrated", labelKo: "별점 없음", count: distribution.unrated },
+  ];
+}
+
+/**
+ * Whether the breakdown is worth drawing at all — false when there is nothing to spread.
+ *
+ * A table of six zeroes is not a finding; it is a read that has no evidence yet, and the section
+ * simply does not render.
+ */
+export function hasRatingEvidence(distribution: IssueRatingDistributionView): boolean {
+  return ratingBands(distribution).some((band) => band.count > 0);
 }

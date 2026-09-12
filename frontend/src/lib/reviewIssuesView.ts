@@ -116,22 +116,36 @@ export function surgeLine(change: IssueChangeView): string | null {
  */
 export function nextActionKo(state: IssueLifecycleState): string | null {
   switch (state) {
+    // OBSERVING joined NEEDS_REVIEW by product-owner decision (2026-09-13). Starting work used to
+    // require that SellerOps had raised the problem first, which meant a seller could only act on
+    // problems an automatic rule had noticed — and on sparse evidence no rule ever fires. The rules
+    // did not change; what a PERSON may say did. `IssueLifecycleState.sellerMayStartActing()` is the
+    // server's half of this and refuses anything these two do not allow.
+    case "OBSERVING":
     case "NEEDS_REVIEW":
       return "조치 시작";
     case "ACTING":
       return "조치 완료로 기록";
-    case "OBSERVING":
     case "VERIFYING":
     case "RESOLVED":
       return null;
   }
 }
 
-/** What SellerOps is doing while the operator has nothing to do. */
+/**
+ * Where reviewnary itself stands on this issue — rendered beside whatever the seller may do, not
+ * instead of it.
+ *
+ * <p>This used to mean 「what SellerOps is doing while the operator has nothing to do」, and for
+ * OBSERVING that framing stopped being true when a seller gained the ability to start work there.
+ * The sentence is now a statement about reviewnary's own judgement, which is still worth saying —
+ * a seller deciding to act on a problem the system has not raised should be able to see that they
+ * are ahead of it — and it no longer implies that waiting is their only option.
+ */
 export function waitingNoteKo(state: IssueLifecycleState): string | null {
   switch (state) {
     case "OBSERVING":
-      return "아직 확인을 권할 만큼 근거가 모이지 않았어요.";
+      return "reviewnary가 먼저 확인을 권할 만큼 근거가 모이지는 않았습니다.";
     case "VERIFYING":
       return "조치 이후 리뷰 변화를 지켜보고 있어요.";
     case "RESOLVED":

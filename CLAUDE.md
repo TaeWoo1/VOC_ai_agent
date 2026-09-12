@@ -1682,9 +1682,23 @@ product-owner 지시(priority 1)로 했고 **전부 읽기 전용**)
 전제하는 밀도에 못 미친다; **과거 날짜로 lifecycle-pass를 돌려 상태를 올리지 않았다** ⇒ note 경로는 단위
 테스트만, 라이브 미관측) · 「우리가 써 둔 것」 인용 3건이 바로 아래 개선 기회 rationale과 **중복**(정본은 새
 블록이나 중복은 확장 금지된 패키지 안에 있다) · 접착 부족의 별점 분포가 **3★3 · 4★5 · 5★10 · 1~2★ 0**으로
-이 반복 문제는 전부 **칭찬 속에서** 이야기된다(분포는 아직 안 그린다). **PRODUCT_DECISION_NEEDED**: 판매자가
-시스템이 올리지 않은 문제에 조치를 기록할 수 있어야 하는가(`requireState` 확대 = 새 semantics) · 별점 분포를
-그릴 것인가(읽기는 이미 있다)) · **`docs/local_helper_pilot_packaging_v1.md`** (Local Helper Pilot Packaging v1 — 2026-09-05. 도우미는
+이 반복 문제는 전부 **칭찬 속에서** 이야기된다(분포는 아직 안 그린다). **v1.1 closeout(09-13, product-owner decision 둘)**: **판매자는 `OBSERVING`에서도 명시적으로 조치를 시작할 수
+있다** — `sellerMayStartActing()`이 `OBSERVING`+`NEEDS_REVIEW`를 허용하되 **자동 rule/threshold는 무변경**이고
+`systemMayTransitionTo`는 여전히 `OBSERVING → ACTING`을 거부한다(두 행위자의 권한을 enum에 **나란히** 둔 이유 —
+한쪽을 넓히는 편집이 다른 쪽을 조용히 넓힐 수 없다); `VERIFYING`·`RESOLVED`는 이미 조치가 기록돼 있어 제외한다.
+화면은 조치가 가능해도 reviewnary의 입장을 함께 말한다(「먼저 확인을 권할 만큼 근거가 모이지는 않았습니다」).
+**이 변경이 결함 하나를 드러냈고 테스트가 잡았다** — start/complete 분기가 `=== "NEEDS_REVIEW"`였고 나머지를
+「조치 완료」로 흘려보내, `OBSERVING` 합류 순간 **「조치 시작」 버튼이 「조치 완료로 기록」을 호출**했다(상수 비교
+대신 상태에 묻는다). 그리고 **근거의 별점 분포를 count로** 그린다 — percentage·average·importance 추론 **0**
+(이 단위들은 **이 문제를 말한** 근거라 평균 별점은 상품이 아니라 **추출기가 무엇을 매치했는가**에 대한 숫자이고,
+severity는 problem vocabulary에서 오지 별점에서 오지 않는다); **근거를 세지 리뷰를 세지 않으며**(grain이
+`(review, unit_ordinal)`) **0인 칸을 지우지 않는다** — 실측 접착 부족 **5★ 10 · 4★ 5 · 3★ 3 · 1~2★ 0**,
+즉 별점으로 정렬하는 어떤 화면도 이 문제를 보여 줄 수 없다. append-only trail 그대로(새 이벤트 표 0).
+라이브 QA: 관찰 중 → 「조치 시작」 + 메모 → **조치 중**, 기록에 「운영자 · 메모」 착지, reload 유지, 다음 행동이
+「조치 완료로 기록」으로 바뀜; axe 0 · 콘솔 0 · off-host 0 · 3폭 가로 스크롤 0. backend **4,048** ·
+frontend **240 files / 2,853** · 실패 0. **계약이 바뀌어 테스트 3건을 더 다시 썼다**(「조치 시작 only from 확인
+필요」·waiting note·`statesCannotBeSkipped` → 살아남는 주장은 **시작 없이 완료를 주장할 수 없다**이고 그것이
+원래 요점이었다). **남은 PRODUCT_DECISION_NEEDED 없음**) · **`docs/local_helper_pilot_packaging_v1.md`** (Local Helper Pilot Packaging v1 — 2026-09-05. 도우미는
 `tsx` 체크아웃이었고 두 시작 경로가 서로 배타적이었다(launchd는 비밀번호를 plist에 못 싣고 supervisor는 첫 pairing에
 터미널이 필요) ⇒ `REVIEWNARY_HELPER_HOME` 상태 루트(프로필·pairing·상태·다운로드가 업데이트에 살아남는다) + 도우미가
 스스로 읽는 0600 `helper.env`(닫힌 키 목록, plist는 경로만) + 패키지 버전 `agentVersion`. `tools/helper/build-macos.sh`가

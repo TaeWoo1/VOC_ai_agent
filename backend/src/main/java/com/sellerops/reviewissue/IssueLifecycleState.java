@@ -49,4 +49,30 @@ public enum IssueLifecycleState {
                 || (this == VERIFYING && target == RESOLVED)
                 || (this == RESOLVED && target == OBSERVING);
     }
+
+    /**
+     * Whether a SELLER may start remediation from this state (product-owner decision, 2026-09-13).
+     *
+     * <p><b>{@link #OBSERVING} is here, and that is the decision.</b> Starting work used to require
+     * {@link #NEEDS_REVIEW} — so a seller could only act on a problem SellerOps had raised first, and
+     * SellerOps raises one only when a change judgement fires. Measured on the demo org, no issue met
+     * any threshold at today's date (no 7-day window anywhere held 4 evidence), so 25 of 25 sat in
+     * OBSERVING and the decision control was unreachable on every one of them. A seller looking at a
+     * problem with 18 occurrences across 3 products can see it is worth fixing whether or not an
+     * automatic rule agrees, and a product that refuses to record that is telling them they may only
+     * act on problems it noticed.
+     *
+     * <p><b>What did NOT change: the automatic rules.</b> {@code IssueChangeRules} and
+     * {@code ReviewIssueThresholds} are untouched — this widens what a PERSON may say, not what
+     * SellerOps concludes. {@link #systemMayTransitionTo} still refuses OBSERVING → ACTING, so the
+     * automated pass can no more declare work started than it could before; the two actors' powers
+     * sit side by side here precisely so widening one cannot silently widen the other.
+     *
+     * <p>{@link #RESOLVED} and {@link #VERIFYING} are absent on purpose. Remediation is already
+     * recorded in both, and re-entering ACTING from them would overwrite an evidence-backed
+     * conclusion with an assertion — the same reason there is no 해결 처리 control anywhere.
+     */
+    public boolean sellerMayStartActing() {
+        return this == OBSERVING || this == NEEDS_REVIEW;
+    }
 }

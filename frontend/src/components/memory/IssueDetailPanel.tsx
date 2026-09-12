@@ -13,6 +13,7 @@ import {
 } from "../../lib/reviewIssuesView";
 import { kstDate } from "../../lib/format";
 import type {
+  IssueLifecycleState,
   RepeatedIssueContext,
   ReviewIssueDetailView,
   ReviewIssueView,
@@ -20,6 +21,7 @@ import type {
 import { OpportunityList } from "../opportunity/OpportunityList";
 import { IssueDecision } from "./repeat/IssueDecision";
 import { IssueGrounding } from "./repeat/IssueGrounding";
+import { RatingSpread } from "./repeat/RatingSpread";
 import { RepeatByProduct } from "./repeat/RepeatByProduct";
 
 /**
@@ -44,6 +46,14 @@ import { RepeatByProduct } from "./repeat/RepeatByProduct";
  * package added is the seller's own sentence beside the transition, which the API has always
  * accepted and no screen had ever sent. There is still no 해결 처리 control at any state.
  */
+/**
+ * The states a seller may START remediation from — the client's half of
+ * `IssueLifecycleState.sellerMayStartActing()`, which refuses anything this set does not allow. Kept
+ * as a set beside the call that branches on it so widening one state cannot silently turn a start
+ * into a completion.
+ */
+const ACTING_STATES = new Set<IssueLifecycleState>(["OBSERVING", "NEEDS_REVIEW"]);
+
 export function IssueDetailPanel({
   issue,
   onIssueChanged,
@@ -97,10 +107,14 @@ export function IssueDetailPanel({
     setActionError(null);
     try {
       const trimmed = note.trim();
-      const next =
-        issue.lifecycleState === "NEEDS_REVIEW"
-          ? await api.startReviewIssueAction(issue.id, trimmed || undefined)
-          : await api.markReviewIssueRemediated(issue.id, trimmed || undefined);
+      // Which transition this is, asked of the STATE rather than compared to one constant. It used
+      // to test `=== "NEEDS_REVIEW"` and fall through to 조치 완료 for everything else, which was
+      // correct only while NEEDS_REVIEW was the single state a seller could start from: the moment
+      // OBSERVING joined it, an observed problem's 조치 시작 button called 조치 완료로 기록 — the
+      // screen recording that work had FINISHED because it had not been told work could begin here.
+      const next = ACTING_STATES.has(issue.lifecycleState)
+        ? await api.startReviewIssueAction(issue.id, trimmed || undefined)
+        : await api.markReviewIssueRemediated(issue.id, trimmed || undefined);
       onIssueChanged(next);
       await load();
     } catch {
@@ -148,6 +162,11 @@ export function IssueDetailPanel({
           as a single dominant name; a problem that reaches three products was describing itself with
           one of them. */}
       <RepeatByProduct evidence={context?.evidence ?? null} failed={contextFailed} />
+
+      {/* Drawn right after WHERE it repeats because it answers the next question about the same
+          evidence set — in what kind of review. It sits before the quotes so a seller reads the
+          shape of the evidence before three examples of it. */}
+      <RatingSpread distribution={context?.evidence.ratingDistribution ?? null} failed={contextFailed} />
 
       <section aria-label="근거">
         <h3 className="text-base font-bold text-ink">근거</h3>

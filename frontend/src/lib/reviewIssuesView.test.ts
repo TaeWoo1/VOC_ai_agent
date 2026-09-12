@@ -110,9 +110,23 @@ describe("the quantified surge line", () => {
 });
 
 describe("what the operator can do next", () => {
-  it("offers 조치 시작 only from 확인 필요", () => {
+  /**
+   * <b>Rewritten when OBSERVING became a state a seller may start from</b> (product-owner decision,
+   * 2026-09-13). The claim this replaced — 조치 시작 only from 확인 필요 — was the contract, and it
+   * made a seller's ability to record a decision depend on an automatic rule having fired first. On
+   * evidence too sparse for any rule, that meant never: measured on the demo org, all 25 issues sat
+   * in OBSERVING and the control appeared on none of them.
+   *
+   * What survives is the shape of the fence: the two states a person may start from are stated here
+   * and refused server-side by `IssueLifecycleState.sellerMayStartActing()`, and the two where
+   * remediation is already recorded stay closed.
+   */
+  it("offers 조치 시작 from the two states before work has been recorded", () => {
+    expect(nextActionKo("OBSERVING")).toBe("조치 시작");
     expect(nextActionKo("NEEDS_REVIEW")).toBe("조치 시작");
-    expect(nextActionKo("OBSERVING")).toBeNull();
+    // Remediation is already recorded in both; restarting would overwrite it with an assertion.
+    expect(nextActionKo("VERIFYING")).toBeNull();
+    expect(nextActionKo("RESOLVED")).toBeNull();
   });
 
   it("offers 조치 완료로 기록 only from 조치 중", () => {
@@ -130,8 +144,14 @@ describe("what the operator can do next", () => {
     expect(actions.some((a) => a.includes("해결"))).toBe(false);
   });
 
-  it("explains what reviewnary is doing when there is nothing for the operator to do", () => {
-    expect(waitingNoteKo("OBSERVING")).toContain("근거가 모이지 않았");
+  /**
+   * The note is now reviewnary's own position, rendered BESIDE whatever the seller may do rather
+   * than instead of it — so on OBSERVING both a sentence and a button appear, and the seller can see
+   * they are acting ahead of the system rather than being told to wait.
+   */
+  it("states reviewnary's own position, including where the seller may still act", () => {
+    expect(waitingNoteKo("OBSERVING")).toContain("먼저 확인을 권할 만큼");
+    expect(nextActionKo("OBSERVING")).not.toBeNull();
     expect(waitingNoteKo("VERIFYING")).toContain("지켜보고 있어요");
     expect(waitingNoteKo("NEEDS_REVIEW")).toBeNull();
   });

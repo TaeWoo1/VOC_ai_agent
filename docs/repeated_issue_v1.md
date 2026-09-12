@@ -1,6 +1,6 @@
 # Repeated Issue v1 — 반복되는 문제 하나를 판단하고 추적하는 화면
 
-**날짜:** 2026-09-13 · **상태:** `IMPLEMENTED · LOCAL_BROWSER_QA_PASS`
+**날짜:** 2026-09-13 · **상태:** `IMPLEMENTED · LOCAL_BROWSER_QA_PASS` · **v1.1 closeout 2026-09-13**
 **마이그레이션 0 · 새 테이블 0 · 새 enum 0 · 새 classifier 0 · 새 LLM capability 0 ·
 마켓플레이스 호출 0 · WRITE 0 · 모델 호출 0 · DB 행 변경 0**
 
@@ -101,6 +101,43 @@ vocabulary」를 말한다. **필요하지 않았다** — `IssueLifecycleState`
 **해결 처리 컨트롤은 어느 상태에도 없다**(무변경). 해결됨은 기록된 조치 뒤의 조용한 기간을 관측해 닿는
 자리이고, 버튼은 그 증거 자리에 단언을 앉히는 일이다.
 
+### 5-1. v1.1 — 관찰 중에서도 조치를 시작할 수 있다 (product-owner decision, 2026-09-13)
+
+v1은 §9에 「판매자 결정 컨트롤이 오늘 이 org에서 도달 불가」라고 적었다 — `startActing`이 `NEEDS_REVIEW`를
+요구했고 그 상태는 자동 변화 판정만이 만드는데, 이 org의 근거 밀도로는 어떤 판정도 발화하지 않아 25개가
+전부 `OBSERVING`이었다. 즉 **판매자는 시스템이 알아챈 문제에만 조치를 기록할 수 있었다.**
+
+`IssueLifecycleState.sellerMayStartActing()`이 그 집합을 **`OBSERVING` + `NEEDS_REVIEW`**로 넓힌다.
+
+- **자동 규칙은 건드리지 않았다.** `IssueChangeRules`·`ReviewIssueThresholds` 무변경. 넓어진 것은
+  **사람이 말할 수 있는 것**이지 reviewnary가 결론짓는 것이 아니다.
+- **`systemMayTransitionTo`는 여전히 `OBSERVING → ACTING`을 거부한다.** 두 행위자의 권한을 enum에
+  **나란히** 선언한 이유가 이것이다 — 한쪽을 넓히는 편집이 다른 쪽을 조용히 넓힐 수 없다.
+- **`VERIFYING`·`RESOLVED`는 일부러 뺐다.** 두 상태에는 이미 조치가 기록돼 있고, 거기서 ACTING으로
+  되돌아가는 것은 증거가 받치는 결론을 단언으로 덮는 일이다(해결 처리 버튼이 없는 것과 같은 이유).
+- 화면은 조치가 가능해도 **reviewnary의 입장을 함께 말한다** — 「reviewnary가 먼저 확인을 권할 만큼
+  근거가 모이지는 않았습니다」. 판매자는 자기가 시스템보다 앞서 결정하고 있다는 것을 볼 수 있어야 한다.
+
+**이 변경이 결함 하나를 드러냈고 테스트가 잡았다.** 화면의 start/complete 분기가 `=== "NEEDS_REVIEW"`
+였고 나머지를 전부 「조치 완료」로 흘려보내고 있었다 — `OBSERVING`이 합류하는 순간 관찰 중 문제의
+**「조치 시작」 버튼이 「조치 완료로 기록」을 호출**했다. 상수 비교 대신 **상태에 묻는다**(`ACTING_STATES`).
+
+### 5-2. v1.1 — 어떤 별점에서 나왔나 (product-owner decision, 2026-09-13)
+
+`ratingDistribution`은 `evidence-summary`에 이미 있었고 화면이 읽지 않았다. **count만** 그린다 —
+percentage·average·importance 추론 **0**.
+
+- **비율도 평균도 만들지 않는다.** 이 단위들은 **이 문제를 말한** 근거이므로 그 평균 별점은 상품이 아니라
+  **추출기가 무엇을 매치했는가**에 대한 숫자이고, 점유율은 그 표본 위의 rate다. 별점으로 문제의 중요도를
+  매기는 것은 이 저장소의 어떤 측정도 받치지 않는다 — severity는 problem vocabulary에서 오고 **의도적으로
+  별점에서 오지 않는다**.
+- **근거를 세지 리뷰를 세지 않는다.** 근거의 grain은 `(review, unit_ordinal)`이라 한 리뷰가 같은 말을 두 번
+  하면 두 번 세어지고, 여섯 칸의 합은 리뷰 수가 아니라 **이슈의 근거 총계**다. 라벨이 「근거」인 이유다.
+- **0인 칸을 지우지 않는다.** 1★ 행이 없는 것과 1★ 0건인 것은 같은 사실이지만, 뒤의 것만이 판매자에게
+  **아무도 화내지 않았는데 계속 일어나고 있다**를 보여 준다. 실측 접착 부족 = 5★ 10 · 4★ 5 · 3★ 3 ·
+  **1~2★ 0**. 별점으로 정렬하는 어떤 화면도 이 문제를 보여 줄 수 없다.
+- 근거가 하나도 없으면 여섯 개의 0 대신 **아무것도 그리지 않는다**.
+
 ## 6. 양방향 연결
 
 - 리뷰 → 문제: Decision Workspace의 **반복 신호**가 `/memory/{issueId}`로 (기존)
@@ -127,7 +164,7 @@ vocabulary」를 말한다. **필요하지 않았다** — `IssueLifecycleState`
 
 ## 8. 검증
 
-backend **4,045** · frontend **240 files / 2,844** · 실패 0 · `tsc` clean.
+backend **4,048** · frontend **240 files / 2,853** · 실패 0 · `tsc` clean.
 
 **실제 Demo Org 로컬 브라우저 QA**(커넥터·스케줄러·프로액티브·시드·모든 AI capability OFF):
 
@@ -153,13 +190,11 @@ backend **4,045** · frontend **240 files / 2,844** · 실패 0 · `tsc` clean.
 
 ## 9. 고치지 않고 보고
 
-- **판매자 결정 컨트롤은 오늘 이 org에서 도달 불가**다. `startActing`은 `NEEDS_REVIEW`를 요구하고,
-  Demo Org의 **25개 이슈가 전부 `OBSERVING`**이다. 데이터를 재 보니 우연이 아니다 — 어떤 이슈의 어떤
-  7일 창에도 근거가 4건(`SURGE_MIN_CURRENT`) 이상인 곳이 **없고**, 임계에 닿는 것은 접착 부족이
-  **2026-03-19 기준으로 28일 6건**(CONCENTRATED)뿐이다. 즉 이 org의 근거는 13개월에 18건으로 퍼져 있어
-  임계가 전제하는 밀도에 미치지 않는다. **고의로 과거 날짜로 lifecycle-pass를 돌려 상태를 올리지
-  않았다** — 그것은 실제 규칙을 합성된 「오늘」로 발화시키는 일이다. 그래서 note 경로는 단위 테스트가
-  정확한 인자로 고정하고(2건), **라이브 관측은 없다**. → §10 결정 1.
+- ~~판매자 결정 컨트롤 도달 불가~~ · ~~별점 분포 미렌더~~ → **v1.1에서 닫혔다**(§5-1 · §5-2).
+  그 측정은 그대로 기록해 둔다: 어떤 이슈의 어떤 7일 창에도 근거 4건(`SURGE_MIN_CURRENT`) 이상인 곳이
+  **없었고**, 임계에 닿는 것은 접착 부족이 2026-03-19 기준 28일 6건(CONCENTRATED)뿐이었다 —
+  이 org의 근거는 13개월에 18건으로 퍼져 있어 임계가 전제하는 밀도에 미치지 않는다.
+  **과거 날짜로 lifecycle-pass를 돌려 상태를 올리지 않았다**(실제 규칙을 합성된 「오늘」로 발화시키는 일).
 - **같은 문장이 화면에 두 번.** 「우리가 써 둔 것」의 인용 3건과 바로 아래 개선 기회의 「왜 이 기회인가」
   인용 3건이 같다. 정본은 새 블록이지만 중복은 개선 기회의 rationale 안에 있고, 이 브리프가 그 패키지를
   **확장 금지**로 막아 두었으므로 손대지 않았다.
@@ -171,11 +206,15 @@ backend **4,045** · frontend **240 files / 2,844** · 실패 0 · `tsc` clean.
 - `frontend/CLAUDE.md`가 그 workstream에 금지한 `backend/**` 수정을 product-owner 지시(conflict priority 1)에
   따라 했고 **전부 읽기 전용 · state semantics 변경 0 · write 0**이다.
 
-## 10. PRODUCT_DECISION_NEEDED
+## 10. 결정된 것 (2026-09-13) · 남은 PRODUCT_DECISION_NEEDED
 
-1. **판매자가, 시스템이 올리지 않은 문제에 대해 조치를 기록할 수 있어야 하는가.**
-   오늘은 불가능하다(위 측정). 허용하려면 `startActing`의 `requireState(NEEDS_REVIEW)`를 넓혀야 하고,
-   그것은 **어떤 transition이 합법인가**를 바꾸는 일이라 새 product semantics다. 대안은 임계를 낮추는
-   것인데 그것은 `contracts/review-issue/v1/THRESHOLDS.md`의 측정된 값을 바꾸는 별개의 결정이다.
-2. **반복 문제의 별점 분포를 화면에 그릴 것인가.** 읽기는 이미 있다(`ratingDistribution`).
-   접착 부족처럼 **칭찬 속 불만**인 문제는 이것 없이는 정확히 읽히지 않는다.
+v1이 올린 두 질문은 **product-owner가 답했고 v1.1에 반영됐다**:
+
+1. **판매자는 `OBSERVING` 이슈에서도 명시적으로 조치를 시작할 수 있다.** `OBSERVING → ACTING`은
+   **SELLER explicit action에서만** 허용되고, 자동 lifecycle rule/threshold는 변경하지 않는다 (§5-1).
+2. **반복 문제에 근거의 별점 분포를 count로 표시한다.** percentage/average/importance 추론은 만들지
+   않는다 (§5-2).
+
+ACTION/decision event는 기존 append-only trail(`review_issue_state_events`) 그대로다 — 새 이벤트 표 0.
+
+**남은 것**: 없음. 이 패키지에서 새로 필요해진 product decision은 없다.

@@ -91,7 +91,7 @@ const REPEAT_CONTEXT: RepeatedIssueContext = {
       },
     ],
     unattributedEvidence: 2,
-    ratingDistribution: { rating1: 9, rating2: 6, rating3: 2, rating4: 1, rating5: 1, unrated: 0 },
+    ratingDistribution: { rating1: 0, rating2: 0, rating3: 3, rating4: 5, rating5: 10, unrated: 1 },
     firstEvidenceOn: "2026-06-18",
     lastEvidenceOn: "2026-08-02",
   },
@@ -372,6 +372,75 @@ describe("고객운영 메모리 — 판단과 조치", () => {
     const section = await screen.findByLabelText("판단과 조치");
     expect(within(section).queryByRole("button")).toBeNull();
     expect(within(section).queryByLabelText(/무엇을 하기로 하셨나요/)).toBeNull();
+  });
+
+  /**
+   * <b>A seller may start work on a problem reviewnary has not raised</b> (product-owner decision,
+   * 2026-09-13). Before this the control existed only in NEEDS_REVIEW, which an automatic judgement
+   * produces — and on sparse evidence none ever fires, so on the demo org all 25 issues sat in
+   * OBSERVING with no way to record a decision at all.
+   */
+  it("offers 조치 시작 on an observed problem, and still says reviewnary has not raised it", async () => {
+    const observing = { ...SURGING, lifecycleState: "OBSERVING" as const, lifecycleLabelKo: "관찰 중" };
+    getReviewIssuesStrict.mockResolvedValue([observing, IMPROVED]);
+    getReviewIssueDetailStrict.mockResolvedValue({ ...DETAIL, issue: observing });
+    startReviewIssueAction.mockResolvedValue(observing);
+
+    renderMemory("/memory/issue-1");
+    const section = await screen.findByLabelText("판단과 조치");
+    // Both, not one instead of the other: the seller is acting ahead of reviewnary and can see that.
+    expect(within(section).getByText(/먼저 확인을 권할 만큼 근거가 모이지는 않았습니다/)).toBeInTheDocument();
+
+    fireEvent.change(within(section).getByLabelText(/무엇을 하기로 하셨나요/), {
+      target: { value: "공급처를 바꿉니다." },
+    });
+    fireEvent.click(within(section).getByRole("button", { name: "조치 시작" }));
+    await waitFor(() =>
+      expect(startReviewIssueAction).toHaveBeenCalledWith("issue-1", "공급처를 바꿉니다."),
+    );
+  });
+});
+
+describe("고객운영 메모리 — 어떤 별점에서 나왔나", () => {
+  it("reports each star band as a count of evidence", async () => {
+    renderMemory("/memory/issue-1");
+    const section = await screen.findByLabelText("어떤 별점에서 나왔나");
+    expect(within(section).getByText("5점")).toBeInTheDocument();
+    expect(within(section).getByText("근거 10건")).toBeInTheDocument();
+    expect(within(section).getByText("근거 5건")).toBeInTheDocument();
+    expect(within(section).getByText("별점 없음")).toBeInTheDocument();
+  });
+
+  /**
+   * A problem raised entirely inside good ratings is invisible to every screen that sorts by star.
+   * The zero bands are what make it visible, so they are asserted present rather than tolerated.
+   */
+  it("keeps the bands nobody complained in, and derives no rate from them", async () => {
+    getRepeatedIssueContextStrict.mockResolvedValue({
+      ...REPEAT_CONTEXT,
+      evidence: {
+        ...REPEAT_CONTEXT.evidence,
+        ratingDistribution: { rating1: 0, rating2: 0, rating3: 3, rating4: 5, rating5: 10, unrated: 0 },
+      },
+    });
+    renderMemory("/memory/issue-1");
+    const section = await screen.findByLabelText("어떤 별점에서 나왔나");
+    expect(within(section).getByText("1점")).toBeInTheDocument();
+    expect(within(section).getAllByText("근거 0건").length).toBeGreaterThanOrEqual(2);
+    expect(section.textContent ?? "").not.toMatch(/%|퍼센트|비율|평균/);
+  });
+
+  it("renders nothing at all when there is no evidence to spread", async () => {
+    getRepeatedIssueContextStrict.mockResolvedValue({
+      ...REPEAT_CONTEXT,
+      evidence: {
+        ...REPEAT_CONTEXT.evidence,
+        ratingDistribution: { rating1: 0, rating2: 0, rating3: 0, rating4: 0, rating5: 0, unrated: 0 },
+      },
+    });
+    renderMemory("/memory/issue-1");
+    await screen.findByLabelText("선택한 이슈");
+    expect(screen.queryByLabelText("어떤 별점에서 나왔나")).toBeNull();
   });
 });
 

@@ -77,11 +77,22 @@ public class ReviewIssueLifecycleService {
                         "확인이 필요한 판정이 없는데 상태를 올리려고 했습니다."));
     }
 
-    /** 확인 필요 → 조치 중. The note is the operator's own record of what they are doing. */
+    /**
+     * 관찰 중 또는 확인 필요 → 조치 중. The note is the operator's own record of what they are doing.
+     *
+     * <p><b>OBSERVING is allowed since 2026-09-13</b> — see
+     * {@link IssueLifecycleState#sellerMayStartActing()} for what that decision is and what it
+     * deliberately does not change. The gate is asked of the STATE rather than compared to one
+     * constant, so the set of states a person may start from is stated once, beside the set the
+     * system may move through.
+     */
     @Transactional
     public ReviewIssue startActing(UUID orgId, UUID issueId, String note) {
         ReviewIssue issue = require(orgId, issueId);
-        requireState(issue, IssueLifecycleState.NEEDS_REVIEW);
+        if (!issue.getLifecycleState().sellerMayStartActing()) {
+            throw new IllegalStateException(
+                    "현재 상태에서 수행할 수 없습니다: " + issue.getLifecycleState());
+        }
         transition(issue, IssueLifecycleState.ACTING, IssueStateActor.OPERATOR,
                 IssueStateReason.OPERATOR, note);
         return issue;
