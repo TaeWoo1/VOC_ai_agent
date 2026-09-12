@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { activeAlerts } from "./connectorAlerts";
 import type { ConnectorAlertView } from "./types";
 import { api } from "./apiClient";
 
@@ -19,7 +20,7 @@ interface OpenAlertsState {
 const OpenAlertsContext = createContext<OpenAlertsState | undefined>(undefined);
 
 function countOpen(alerts: ConnectorAlertView[]): number {
-  return alerts.filter((a) => a.acknowledgedAt == null).length;
+  return activeAlerts(alerts).length;
 }
 
 export function OpenAlertsProvider({ children }: { children: ReactNode }) {

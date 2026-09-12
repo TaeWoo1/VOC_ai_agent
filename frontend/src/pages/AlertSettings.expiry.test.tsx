@@ -35,6 +35,7 @@ function expiring(over: Partial<ConnectorAlertView> = {}): ConnectorAlertView {
     message: "쿠팡 API 키 유효기간이 14일 남았습니다.",
     createdAt: "2026-08-06T00:00:00Z",
     acknowledgedAt: null,
+    recoveredAt: null,
     ...over,
   };
 }

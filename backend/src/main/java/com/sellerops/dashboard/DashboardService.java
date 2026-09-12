@@ -75,9 +75,7 @@ public class DashboardService {
                 inquiries.countByOrgIdAndReceivedAtAfter(orgId, since),
                 unanswered,
                 reviews.countByOrgIdAndReceivedAtAfter(orgId, since),
-                negative,
-                unanswered + negative,
-                unanswered);
+                negative);
 
         OrderSummaryResponse orderSummary = orderService.summary(orgId);
 

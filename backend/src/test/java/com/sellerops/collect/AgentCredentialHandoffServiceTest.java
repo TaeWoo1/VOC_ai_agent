@@ -116,7 +116,7 @@ class AgentCredentialHandoffServiceTest {
                 new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
                 new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
                         sellerAccounts, channels, txManager),
-                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels));
+                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels, syncJobs));
         this.collect = collect;
         this.arming = armedForThisRun();
         this.authorizations = new CredentialHandoffAuthorizations();
@@ -140,7 +140,7 @@ class AgentCredentialHandoffServiceTest {
                 new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
                 new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
                         sellerAccounts, channels, txManager),
-                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels)) {
+                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels, syncJobs)) {
             @Override
             public ConnectionTestResultView testConnection(UUID orgId, UUID sellerAccountId) {
                 throw new IllegalStateException("쿠팡 라이브 API 호출이 승인 없이 시도되었습니다.");

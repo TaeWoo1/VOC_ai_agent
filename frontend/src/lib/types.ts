@@ -196,6 +196,13 @@ export interface SellerAccountResponse {
   fileUpload: boolean;
 }
 
+/**
+ * The legacy dashboard's summary cards.
+ *
+ * `urgentCount` and `unhandledCount` were removed (2026-09-13): the first added unanswered inquiries
+ * to negative reviews and called the sum urgent — a number describing no set of rows a seller could
+ * open — and the second was a second name for `unansweredInquiries`. Neither had a consumer.
+ */
 export interface DashboardCards {
   todayOrders: number;
   todaySales: number;
@@ -203,8 +210,6 @@ export interface DashboardCards {
   unansweredInquiries: number;
   newReviews: number;
   negativeReviews: number;
-  urgentCount: number;
-  unhandledCount: number;
 }
 
 export interface TopProductIssue {
@@ -484,6 +489,14 @@ export interface ConnectorAlertView {
   message: string;
   createdAt: string;
   acknowledgedAt: string | null;
+  /**
+   * When collection on this account demonstrably started working again, or null.
+   *
+   * Derived at read time from the first successful sync after the alert — the row itself is never
+   * touched, so the history of what went wrong survives. A different fact from `acknowledgedAt`:
+   * that one says a person saw it, this one says the condition ended.
+   */
+  recoveredAt: string | null;
 }
 
 /**

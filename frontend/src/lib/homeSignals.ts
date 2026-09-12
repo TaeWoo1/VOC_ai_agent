@@ -8,6 +8,7 @@
 // The three Today items (리뷰 · 문의 · 연결) live in `todayInbox.ts`; this file keeps the shared
 // signal vocabulary, the recurring-issue signal and the connection summary.
 
+import { activeAlerts } from "./connectorAlerts";
 import type { ChannelResponse, ConnectorAlertView } from "./types";
 
 /** A number the screen is allowed to show, or an honest absence. */
@@ -103,7 +104,7 @@ export function summarizeConnections(
   const list = channels ?? [];
   return {
     needsAttention: list.filter((channel) => ATTENTION_STATUSES.has(channel.status)),
-    openAlerts: (alerts ?? []).filter((alert) => alert.acknowledgedAt == null),
+    openAlerts: activeAlerts(alerts),
     nothingConnected: channels !== null && list.length === 0,
   };
 }

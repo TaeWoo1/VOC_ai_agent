@@ -3,6 +3,7 @@ package com.sellerops.connector;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
+import com.sellerops.sync.SyncJobRepository;
 import com.sellerops.connector.coupang.CoupangCredentialExpiryStatus;
 import com.sellerops.connector.dto.ConnectorAlertView;
 import com.sellerops.selleraccount.SellerAccount;
@@ -38,13 +39,16 @@ public class ConnectorAlertService {
     private final ConnectorAlertRepository alerts;
     private final SellerAccountRepository sellerAccounts;
     private final ChannelRepository channels;
+    private final SyncJobRepository syncJobs;
 
     public ConnectorAlertService(ConnectorAlertRepository alerts,
                                  SellerAccountRepository sellerAccounts,
-                                 ChannelRepository channels) {
+                                 ChannelRepository channels,
+                                 SyncJobRepository syncJobs) {
         this.alerts = alerts;
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
+        this.syncJobs = syncJobs;
     }
 
     @Transactional(readOnly = true)
@@ -54,13 +58,68 @@ public class ConnectorAlertService {
         Map<UUID, String> channelNames = channels.findAll().stream()
                 .collect(Collectors.toMap(Channel::getId, Channel::getNameKo, (a, b) -> a));
 
-        return alerts.findTop200ByOrgIdOrderByCreatedAtDesc(orgId).stream()
-                .map(a -> toView(a, accountsById.get(a.getSellerAccountId()), channelNames))
-                // Open (unacknowledged) first, then newest. createdAt is never null.
+        List<ConnectorAlert> rows = alerts.findTop200ByOrgIdOrderByCreatedAtDesc(orgId);
+        Map<UUID, Instant> recoveredBy = recoveryTimes(rows);
+
+        return rows.stream()
+                .map(a -> toView(a, accountsById.get(a.getSellerAccountId()), channelNames,
+                        recoveryOf(a, recoveredBy)))
+                // Current problems first, then newest. createdAt is never null.
                 .sorted(Comparator
-                        .comparing((ConnectorAlertView v) -> v.acknowledgedAt() != null)
+                        .comparing((ConnectorAlertView v) -> !v.active())
                         .thenComparing(ConnectorAlertView::createdAt, Comparator.reverseOrder()))
                 .toList();
+    }
+
+    /**
+     * <b>Alert types a later successful collection disproves.</b>
+     *
+     * <p>Each of these reports that collection is NOT getting through right now, so a sync that
+     * finished successfully afterwards is direct evidence the condition ended. A credential-expiry
+     * warning is deliberately absent: it is a statement about a future date, and a sync that worked
+     * today does not refute it — those alerts keep their own lifecycle
+     * ({@link #clearCoupangExpiryAlerts}).
+     */
+    private static final java.util.Set<String> RECOVERABLE_BY_SUCCESS =
+            java.util.Set.of("REPEATED_FAILURE", "AUTH_EXPIRED", "RATE_LIMITED");
+
+    /**
+     * The most recent successful collection per account, for the accounts that carry a recoverable
+     * alert. One query for the whole page.
+     */
+    private Map<UUID, Instant> recoveryTimes(List<ConnectorAlert> rows) {
+        List<ConnectorAlert> recoverable = rows.stream()
+                .filter(a -> a.getAcknowledgedAt() == null)
+                .filter(a -> RECOVERABLE_BY_SUCCESS.contains(a.getType()))
+                .toList();
+        if (recoverable.isEmpty()) {
+            return Map.of();
+        }
+        java.util.Set<UUID> accountIds = recoverable.stream()
+                .map(ConnectorAlert::getSellerAccountId)
+                .collect(Collectors.toSet());
+
+        Map<UUID, Instant> out = new java.util.HashMap<>();
+        for (Object[] row : syncJobs.latestSuccessByAccount(accountIds)) {
+            out.put((UUID) row[0], (Instant) row[1]);
+        }
+        return out;
+    }
+
+    /**
+     * When this particular alert stopped describing the present, or null.
+     *
+     * <p>The batched answer is the account's LATEST success, so it still has to be checked against
+     * this alert's own timestamp: a success that predates the alert is what was happening before
+     * things broke, not evidence that they were fixed.
+     */
+    private static Instant recoveryOf(ConnectorAlert alert, Map<UUID, Instant> recoveredBy) {
+        if (alert.getAcknowledgedAt() != null || !RECOVERABLE_BY_SUCCESS.contains(alert.getType())) {
+            return null;
+        }
+        Instant success = recoveredBy.get(alert.getSellerAccountId());
+        return success != null && alert.getCreatedAt() != null && success.isAfter(alert.getCreatedAt())
+                ? success : null;
     }
 
     /**
@@ -174,9 +233,14 @@ public class ConnectorAlertService {
      *  the seller account behind the alert no longer exists. */
     private ConnectorAlertView toView(ConnectorAlert alert, SellerAccount account,
                                       Map<UUID, String> channelNames) {
+        return toView(alert, account, channelNames, null);
+    }
+
+    private ConnectorAlertView toView(ConnectorAlert alert, SellerAccount account,
+                                      Map<UUID, String> channelNames, Instant recoveredAt) {
         UUID channelId = account == null ? null : account.getChannelId();
         String channelNameKo = channelId == null ? null : channelNames.get(channelId);
         String alias = account == null ? null : account.getAlias();
-        return ConnectorAlertView.from(alert, channelId, channelNameKo, alias);
+        return ConnectorAlertView.from(alert, channelId, channelNameKo, alias, recoveredAt);
     }
 }

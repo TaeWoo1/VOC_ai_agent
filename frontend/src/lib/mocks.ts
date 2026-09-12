@@ -195,8 +195,6 @@ export function mockDashboard(): DashboardSummaryResponse {
       unansweredInquiries: 6,
       newReviews: 7,
       negativeReviews: 11,
-      urgentCount: 17,
-      unhandledCount: 6,
     },
     todoItems: ["미답변 문의 6건을 확인하세요.", "부정 리뷰 11건을 확인하세요."],
     topProductIssues: [
@@ -607,6 +605,7 @@ export function mockConnectorAlerts(): ConnectorAlertView[] {
       message: "인증 토큰이 만료되어 자동 수집이 중단되었습니다. 채널에서 재연결해 주세요.",
       createdAt: hoursAgoISO(30),
       acknowledgedAt: null,
+    recoveredAt: null,
     },
     {
       id: "mock-alert-2",
@@ -619,6 +618,7 @@ export function mockConnectorAlerts(): ConnectorAlertView[] {
       message: "채널 속도 제한으로 수집이 지연되고 있습니다. 잠시 후 예약된 시각에 자동으로 다시 시도합니다.",
       createdAt: hoursAgoISO(6),
       acknowledgedAt: null,
+    recoveredAt: null,
     },
   ];
 }

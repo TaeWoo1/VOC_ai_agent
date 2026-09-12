@@ -109,7 +109,7 @@ class CollectControlServiceSingleFlightTest {
                 new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
                 new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
                         sellerAccounts, channels, txManager),
-                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels));
+                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels, syncJobs));
     }
 
     @Test

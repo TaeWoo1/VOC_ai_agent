@@ -1,5 +1,7 @@
 package com.sellerops.sync;
 
+import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -86,4 +88,33 @@ public interface SyncJobRepository extends JpaRepository<SyncJob, UUID> {
             + "and j.dataType = :dataType and j.status = 'RUNNING' order by j.startedAt asc")
     List<SyncJob> findRunningBySellerAccountIdAndDataType(
             @Param("sellerAccountId") UUID sellerAccountId, @Param("dataType") String dataType);
+
+    /**
+     * <b>The most recent successful collection for each account</b> — the evidence that a recorded
+     * failure has since ended.
+     *
+     * <p>Returns {@code (sellerAccountId, max(finishedAt))} over runs that SUCCEEDED (or partially
+     * did). One org-scoped query for every alert on the page rather than one per alert.
+     *
+     * <p><b>{@code max}, not {@code min}, and the difference is a bug this had.</b> The first version
+     * asked for the EARLIEST success after the oldest alert on the page, then compared that one
+     * timestamp against each alert's own time. On the live org that silently failed: Coupang's first
+     * success after the oldest alert (2026-08-18) predated Coupang's own alert (08-23), so the account
+     * read as never recovered — while it had in fact collected successfully on 09-12. The latest
+     * success is the only per-account figure a single grouped query can produce that answers
+     * 「has collection worked since THIS alert」 correctly for every alert on the page.
+     *
+     * <p><b>{@code PARTIAL} counts.</b> A run that brought some rows back reached the channel and was
+     * answered; the condition a failure alert reports — that collection is not getting through — has
+     * ended. Treating it as still-failing would keep a resolved alert on a seller's screen for a
+     * channel that is demonstrably reachable.
+     */
+    @Query("""
+            select j.sellerAccountId, max(j.finishedAt) from SyncJob j
+            where j.sellerAccountId in :accountIds
+              and j.status in ('SUCCESS', 'PARTIAL')
+              and j.finishedAt is not null
+            group by j.sellerAccountId
+            """)
+    List<Object[]> latestSuccessByAccount(@Param("accountIds") Collection<UUID> accountIds);
 }

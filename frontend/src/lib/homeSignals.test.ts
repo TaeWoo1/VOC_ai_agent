@@ -54,6 +54,7 @@ describe("connection summary — action-needed only", () => {
     message: "연결을 다시 확인해 주세요",
     createdAt: "2026-08-01T00:00:00Z",
     acknowledgedAt: null,
+    recoveredAt: null,
     ...over,
   });
 

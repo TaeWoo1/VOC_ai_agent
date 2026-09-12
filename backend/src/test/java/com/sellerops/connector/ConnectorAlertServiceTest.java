@@ -28,6 +28,7 @@ class ConnectorAlertServiceTest {
     @Autowired ConnectorAlertRepository alerts;
     @Autowired SellerAccountRepository sellerAccounts;
     @Autowired ChannelRepository channels;
+    @Autowired com.sellerops.sync.SyncJobRepository syncJobs;
 
     private ConnectorAlertService service;
 
@@ -40,7 +41,7 @@ class ConnectorAlertServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ConnectorAlertService(alerts, sellerAccounts, channels);
+        service = new ConnectorAlertService(alerts, sellerAccounts, channels, syncJobs);
 
         Channel channel = new Channel();
         channel.setCode("COUPANG");
@@ -142,5 +143,131 @@ class ConnectorAlertServiceTest {
         Instant original = Instant.parse("2026-06-11T01:00:00Z");
         ConnectorAlertView v = service.acknowledge(orgA, acknowledgedAlertA);
         assertThat(v.acknowledgedAt()).isEqualTo(original);
+    }
+
+    // ---- recovery: a failure a later success disproves ----------------------------------------
+
+    private void syncRun(UUID orgId, UUID accountId, String status, Instant finishedAt) {
+        com.sellerops.sync.SyncJob job = new com.sellerops.sync.SyncJob();
+        job.setOrgId(orgId);
+        job.setSellerAccountId(accountId);
+        job.setDataType("REVIEW");
+        job.setJobType("SCHEDULED");
+        job.setStatus(status);
+        job.setFinishedAt(finishedAt);
+        syncJobs.save(job);
+    }
+
+    private ConnectorAlertView viewOf(UUID alertId) {
+        return service.list(orgA).stream().filter(v -> v.id().equals(alertId)).findFirst().orElseThrow();
+    }
+
+    /**
+     * <b>A failure that a later successful collection disproves is no longer a current problem.</b>
+     *
+     * <p>Measured on the live org: three alerts raised 2026-08-18..23 were still counted as
+     * 「연결 문제 3건」 while every channel was CONNECTED with zero consecutive failures and had
+     * collected successfully on 09-05 and 09-08. The badge was reporting a condition that had ended
+     * three weeks earlier.
+     */
+    @Test
+    void aLaterSuccessfulSyncEndsTheAlertsClaimOnThePresent() {
+        syncRun(orgA, accountA, "SUCCESS", Instant.parse("2026-06-12T00:00:00Z"));
+
+        ConnectorAlertView view = viewOf(openAlertA);
+        assertThat(view.recoveredAt()).isEqualTo(Instant.parse("2026-06-12T00:00:00Z"));
+        assertThat(view.active()).isFalse();
+    }
+
+    /**
+     * <b>A newer alert is not blinded by an older one on the same account</b> — the bug the live org
+     * caught.
+     *
+     * <p>The first implementation asked for the EARLIEST success after the OLDEST alert on the page
+     * and compared that single timestamp against every alert. Here the older alert (06-09) is followed
+     * by a success on 06-09T12:00, which predates the newer alert (06-10) — so the newer one read as
+     * never recovered even though the account collected successfully again afterwards. On the demo org
+     * that left Coupang counted as a current connection problem while it had collected on 09-12.
+     */
+    @Test
+    void aNewerAlertIsJudgedByItsOwnTimeline() {
+        // A success between the two alerts, and another after both.
+        syncRun(orgA, accountA, "SUCCESS", Instant.parse("2026-06-09T12:00:00Z"));
+        syncRun(orgA, accountA, "SUCCESS", Instant.parse("2026-06-20T00:00:00Z"));
+
+        // openAlertA was raised 06-10 — after the first success, before the second.
+        ConnectorAlertView view = viewOf(openAlertA);
+        assertThat(view.recoveredAt()).isEqualTo(Instant.parse("2026-06-20T00:00:00Z"));
+        assertThat(view.active()).isFalse();
+    }
+
+    /**
+     * <b>The row is never touched.</b> History is the point of an alert log — what changes is only
+     * whether the alert counts as current, and {@code acknowledgedAt} keeps meaning 「a person saw
+     * this」 rather than quietly becoming 「it fixed itself」.
+     */
+    @Test
+    void recoveryIsDerivedAndLeavesTheRecordAsItWasWritten() {
+        syncRun(orgA, accountA, "SUCCESS", Instant.parse("2026-06-12T00:00:00Z"));
+        service.list(orgA);
+
+        ConnectorAlert stored = alerts.findById(openAlertA).orElseThrow();
+        assertThat(stored.getAcknowledgedAt()).isNull();
+        assertThat(service.list(orgA)).extracting(ConnectorAlertView::id).contains(openAlertA);
+    }
+
+    /**
+     * A success that predates the alert is what was happening BEFORE things broke — it is not
+     * evidence that anything resolved.
+     */
+    @Test
+    void aSuccessFromBeforeTheFailureProvesNothing() {
+        syncRun(orgA, accountA, "SUCCESS", Instant.parse("2026-06-01T00:00:00Z"));
+
+        assertThat(viewOf(openAlertA).recoveredAt()).isNull();
+        assertThat(viewOf(openAlertA).active()).isTrue();
+    }
+
+    /** A run that failed is not recovery, however recent. */
+    @Test
+    void aLaterFailedRunIsNotRecovery() {
+        syncRun(orgA, accountA, "FAILED", Instant.parse("2026-06-20T00:00:00Z"));
+
+        assertThat(viewOf(openAlertA).recoveredAt()).isNull();
+        assertThat(viewOf(openAlertA).active()).isTrue();
+    }
+
+    /**
+     * <b>PARTIAL counts.</b> A run that brought some rows back reached the channel and was answered,
+     * so the condition a failure alert reports — that collection is not getting through — has ended.
+     */
+    @Test
+    void aPartialRunCountsAsCollectionGettingThrough() {
+        syncRun(orgA, accountA, "PARTIAL", Instant.parse("2026-06-12T00:00:00Z"));
+
+        assertThat(viewOf(openAlertA).recoveredAt()).isEqualTo(Instant.parse("2026-06-12T00:00:00Z"));
+    }
+
+    /**
+     * <b>A credential expiring next month is not refuted by a sync that worked today.</b> Expiry
+     * warnings are statements about a future date and keep their own lifecycle.
+     */
+    @Test
+    void aCredentialExpiryWarningIsNotDisprovedByASuccessfulSync() {
+        UUID expiring = save(orgA, accountA, ConnectorAlertService.TYPE_COUPANG_CREDENTIAL_EXPIRING,
+                "WARNING", "곧 만료", Instant.parse("2026-06-10T00:00:00Z"), null);
+        syncRun(orgA, accountA, "SUCCESS", Instant.parse("2026-06-12T00:00:00Z"));
+
+        assertThat(viewOf(expiring).recoveredAt()).isNull();
+        assertThat(viewOf(expiring).active()).isTrue();
+    }
+
+    /** An already-acknowledged alert is not re-described as recovered; it was already not current. */
+    @Test
+    void anAcknowledgedAlertIsLeftAlone() {
+        syncRun(orgA, accountA, "SUCCESS", Instant.parse("2026-06-12T00:00:00Z"));
+
+        assertThat(viewOf(acknowledgedAlertA).recoveredAt()).isNull();
+        assertThat(viewOf(acknowledgedAlertA).active()).isFalse();
     }
 }

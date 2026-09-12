@@ -1,3 +1,4 @@
+import { recoveredNote } from "../lib/connectorAlerts";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { EmptyState } from "../components/EmptyState";
@@ -182,9 +183,12 @@ function AlertCard({
   const channel = alert.channelNameKo ?? "채널";
   const where = alert.accountAlias ? `${channel} · ${alert.accountAlias}` : channel;
   const acknowledged = alert.acknowledgedAt != null;
+  // A failure that ended on its own. Stated rather than hidden: an alert log is history, and a
+  // resolved warning left looking unresolved is the same defect the badge had.
+  const recovered = recoveredNote(alert);
 
   return (
-    <div className={`card flex flex-col gap-3 p-5 ${acknowledged ? "opacity-70" : ""}`}>
+    <div className={`card flex flex-col gap-3 p-5 ${acknowledged || recovered ? "opacity-70" : ""}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <span
@@ -197,13 +201,20 @@ function AlertCard({
               확인됨 · {relativeTime(alert.acknowledgedAt!)}
             </span>
           ) : null}
+          {recovered ? (
+            <span className="ml-2 inline-flex items-center rounded-full bg-ink/5 px-3 py-1 text-sm font-semibold text-muted">
+              해결됨
+            </span>
+          ) : null}
           <p className="mt-2 text-lg font-bold text-ink">{where}</p>
         </div>
         <span className="shrink-0 text-sm text-muted">{relativeTime(alert.createdAt)}</span>
       </div>
 
       <p className="text-base text-ink">{alert.message}</p>
-      <p className="text-sm text-muted">{meta.action}</p>
+      {/* Once collection has worked again, telling the seller to go fix the connection is asking for
+          work that is already done — so the recovery replaces the instruction rather than joining it. */}
+      <p className="text-sm text-muted">{recovered ?? meta.action}</p>
 
       <div className="mt-auto flex justify-end gap-2">
         {!acknowledged ? (

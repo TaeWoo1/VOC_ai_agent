@@ -62,7 +62,7 @@ class CoupangCredentialExpiryAlertTest {
     @BeforeEach
     void setUp() {
         vault = new CredentialVault(credentials, new ObjectMapper(), randomKeyBase64(), "local-test-1");
-        alertService = new ConnectorAlertService(alerts, sellerAccounts, channels);
+        alertService = new ConnectorAlertService(alerts, sellerAccounts, channels, syncJobs);
         // connectionStatus() never touches capabilities/registry/executor/lifecycles — pass null.
         service = new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
                 connectionStatus, null, null, null, vault,
