@@ -2,6 +2,7 @@ package com.sellerops.attention.reply;
 
 import com.sellerops.common.ApiException;
 import com.sellerops.attention.reply.dto.ReviewReplyDraftView;
+import com.sellerops.inquiry.draft.DraftAuthorKind;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -73,13 +74,32 @@ public class ReviewReplyDraftService {
      * and «it has evidence rows» is not the same fact as «a model wrote it» — the template floor has
      * an author and no evidence.
      *
-     * @param authorKind   {@code MODEL} or {@code RULE}
+     * @param authorKind   {@code SELLER}, {@code MODEL} or {@code RULE}
      * @param modelVersion the vendor model id, or the template provenance string for a RULE draft
      * @param basis        {@code GROUNDED} / {@code NO_ANSWER_BASIS}
      * @param productId    the product the retrieval was scoped to, or null
      */
     public record Provenance(String authorKind, String modelVersion, String knowledgeState,
                              String basis, UUID productId) {
+
+        /**
+         * What a hand-typed save records — the same sentence the inquiry lane's
+         * {@code InquiryReplyDraftService.Provenance.seller()} states.
+         *
+         * <p><b>A seller edit is {@code SELLER} whatever the version before it was</b>, and it
+         * carries no model version, no knowledge state and no basis: the moment a person changes a
+         * word the draft is theirs, and inheriting the previous version's «a model wrote this, from
+         * these passages» would put a machine's name on a human's sentence.
+         *
+         * <p>Before this existed the seller path passed {@code null} here, so a hand-typed version
+         * was stored with {@code author_kind IS NULL} — byte-identical to a row written before V90
+         * recorded authorship at all. That made the one question this column exists to answer —
+         * «did the seller keep what the model wrote, or rewrite it?» — unanswerable on the review
+         * lane while the inquiry lane answered it from the same shape of column.
+         */
+        public static Provenance seller() {
+            return new Provenance(DraftAuthorKind.SELLER.name(), null, null, null, null);
+        }
     }
 
     /** Save a new version and stamp what wrote it. A replayed identical save stamps nothing. */
@@ -88,9 +108,13 @@ public class ReviewReplyDraftService {
         return save(orgId, reviewId, actor, body, baseVersion, provenance);
     }
 
+    /**
+     * Save a hand-typed version. Stamps {@link Provenance#seller()} — the caller is a person
+     * editing in the reply screen, and {@link ReviewReplyService} is the only one of them.
+     */
     public ReviewReplyDraftView save(UUID orgId, UUID reviewId, String actor, String body,
                                      Integer baseVersion) {
-        return save(orgId, reviewId, actor, body, baseVersion, null);
+        return save(orgId, reviewId, actor, body, baseVersion, Provenance.seller());
     }
 
     private ReviewReplyDraftView save(UUID orgId, UUID reviewId, String actor, String body,

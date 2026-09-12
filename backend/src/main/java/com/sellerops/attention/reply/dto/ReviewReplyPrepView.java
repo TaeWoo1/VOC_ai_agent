@@ -84,9 +84,21 @@ public record ReviewReplyPrepView(
         String productName,
         String reviewDate,
         /**
-         * What wrote the head draft — {@code MODEL}, {@code RULE}, or null for a version written
-         * before reviewnary recorded an author (Grounded Review Drafting v1). Null is «not recorded»,
-         * never «a person typed it»: the screen says nothing rather than guessing.
+         * What wrote the head draft — {@code SELLER}, {@code MODEL}, {@code RULE}, or null for a
+         * version written before reviewnary recorded an author (Grounded Review Drafting v1). Null is
+         * «not recorded», never «a person typed it»: the screen says nothing rather than guessing.
+         *
+         * <p><b>{@code SELLER} became reachable when the hand-typed path began stamping
+         * {@code ReviewReplyDraftService.Provenance#seller()}.</b> Before that a person's version was
+         * stored with {@code author_kind IS NULL} and arrived here as null, so this field could only
+         * ever carry the two machine authors and said so. It now carries three, and the distinction
+         * that matters to the screen is between {@code SELLER} and the other two: a draft the seller
+         * wrote is not one they have to check.
+         *
+         * <p><b>Null and {@code RULE} are different reports and the screen must not merge them.</b>
+         * {@code RULE} says a stored template produced this text; null says nobody recorded an author.
+         * The template sentence spoken over a null draft is a claim about authorship that no row
+         * supports — which is exactly the shape of error this column exists to make impossible.
          */
         String draftAuthorKind,
         /**

@@ -8,9 +8,13 @@ import java.time.Instant;
  * fingerprint (+ algorithm) so the client can pass a {@code baseVersion} on the next save and
  * bind an approval to an exact version.
  *
- * <p>Carries no provenance triple, because the row carries none — once an operator has edited,
- * the text is theirs (see {@link ReviewReplyDraft}). The suggestion reports its provenance at
- * the moment it is offered, which is when the claim is true.
+ * <p><b>Carries no provenance, though the row now does.</b> Since V90 the row records what wrote
+ * each version — {@code SELLER}, {@code MODEL} or {@code RULE} — and this view deliberately does not
+ * repeat it: the panel reads authorship and answer basis through {@code ReviewReplyPrepView}, which
+ * is the read the screen actually renders, and a second copy here is a second thing to keep in step.
+ * (An earlier version of this note said the row carried none. That stopped being true when V90 added
+ * the columns, and stopped being true for hand-typed saves when the seller path began stamping
+ * {@code ReviewReplyDraftService.Provenance#seller()} — see {@link ReviewReplyDraft}.)
  */
 public record ReviewReplyDraftView(
         int version,

@@ -233,6 +233,54 @@ class ReviewReplyServiceTest {
     }
 
     /**
+     * A hand-typed version records that a PERSON wrote it (T-02).
+     *
+     * <p>Before this, the seller path passed no provenance at all, so a version someone typed was
+     * stored with {@code author_kind IS NULL} — byte-identical to a row written before V90 recorded
+     * authorship. That made 「AI 초안을 그대로 뒀나, 고쳐 썼나」 unanswerable on the review lane, while the
+     * inquiry lane answered it from a column of the same shape.
+     *
+     * <p>The other four provenance fields stay null on purpose: a person's edit has no model
+     * version, no knowledge state and no answer basis, and inheriting the previous version's would
+     * claim a model wrote a sentence a human typed.
+     */
+    @Test
+    void aHandTypedVersionIsStampedSeller() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-판매자가 직접 쓴 답변", 0, user);
+
+        ReviewReplyDraft head = draftRepo.findTopByReviewIdOrderByVersionDesc(review.getId()).orElseThrow();
+        assertThat(head.getAuthorKind()).isEqualTo("SELLER");
+        assertThat(head.getModelVersion()).isNull();
+        assertThat(head.getKnowledgeState()).isNull();
+        assertThat(head.getAnswerBasis()).isNull();
+        assertThat(head.getProductId()).isNull();
+    }
+
+    /**
+     * And a seller EDIT of a model draft takes the authorship with it — the moment a person changes a
+     * word the sentence is theirs, whatever wrote the version before.
+     */
+    @Test
+    void editingAModelDraftMovesAuthorshipToTheSeller() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        new ReviewReplyDraftService(draftRepo).saveAs(org, review.getId(), "SELLER:" + user,
+                "합성-모델이 쓴 초안", 0,
+                new ReviewReplyDraftService.Provenance("MODEL", "gpt-합성", "GROUNDED", "GROUNDED", null));
+        assertThat(draftRepo.findTopByReviewIdOrderByVersionDesc(review.getId()).orElseThrow()
+                .getAuthorKind()).isEqualTo("MODEL");
+
+        service.saveDraft(org, account, ref, "합성-판매자가 고쳐 쓴 답변", 1, user);
+
+        ReviewReplyDraft head = draftRepo.findTopByReviewIdOrderByVersionDesc(review.getId()).orElseThrow();
+        assertThat(head.getVersion()).isEqualTo(2);
+        assertThat(head.getAuthorKind()).isEqualTo("SELLER");
+        // Not inherited from the version it was edited from.
+        assertThat(head.getModelVersion()).isNull();
+        assertThat(head.getAnswerBasis()).isNull();
+    }
+
+    /**
      * <b>What the head version recorded about its own basis reaches the panel</b> — Retrieval
      * Runtime Closure v1 §1.
      *

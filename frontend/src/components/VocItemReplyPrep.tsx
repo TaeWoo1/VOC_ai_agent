@@ -57,6 +57,32 @@ interface OutcomeAttempt {
   commandId: string;
 }
 
+/**
+ * What the panel says about who wrote the draft sitting in the editor, or null to say nothing.
+ *
+ * Four author states reach this screen and they are four different reports:
+ *
+ * - `MODEL` — a model wrote it from the company's own stored knowledge, so it needs reading.
+ * - `SELLER` — a person typed or edited it. **No "확인하고 고쳐 주세요" follows**: telling someone to
+ *   check a sentence they just wrote is the screen not knowing who it is talking to.
+ * - `RULE` — the stored template floor produced it.
+ * - `null` — nobody recorded an author. **This says nothing at all.**
+ *
+ * The null branch is the one worth stating. Until the hand-typed path began stamping SELLER, every
+ * author but MODEL fell into one `else` that spoke the template sentence — so a version a person
+ * wrote, and a version written before reviewnary recorded authors at all, were both announced as
+ * "저장된 문구에서 시작합니다". That is a claim about authorship no row supports, and an empty editor
+ * (no stored draft, so no author) got it too. Silence is the honest report for an unrecorded author,
+ * and `ReviewReplyPrepView.draftAuthorKind` says the same thing on its own side of the wire.
+ */
+export function draftProvenanceNote(authorKind: string | null, approved: boolean): string | null {
+  const check = approved ? "" : " 내용을 확인하고 직접 고쳐 주세요.";
+  if (authorKind === "MODEL") return `아래 초안은 저장된 지식을 근거로 AI가 썼습니다.${check}`;
+  if (authorKind === "SELLER") return "아래 초안은 판매자가 직접 쓴 문장입니다.";
+  if (authorKind === "RULE") return `아래 초안은 저장된 문구에서 시작합니다.${check}`;
+  return null;
+}
+
 export function VocItemReplyPrep({
   accountId,
   actionRef,
@@ -559,11 +585,9 @@ export function VocItemReplyPrep({
         <label htmlFor={editorId} className="text-sm font-semibold text-muted">
           답변 초안
         </label>
-        <p className="text-sm text-muted">
-          {prep.draftAuthorKind === "MODEL"
-            ? `아래 초안은 저장된 지식을 근거로 AI가 썼습니다.${approved ? "" : " 내용을 확인하고 직접 고쳐 주세요."}`
-            : `아래 초안은 저장된 문구에서 시작합니다.${approved ? "" : " 내용을 확인하고 직접 고쳐 주세요."}`}
-        </p>
+        {draftProvenanceNote(prep.draftAuthorKind, approved) ? (
+          <p className="text-sm text-muted">{draftProvenanceNote(prep.draftAuthorKind, approved)}</p>
+        ) : null}
         <textarea
           id={editorId}
           value={body}

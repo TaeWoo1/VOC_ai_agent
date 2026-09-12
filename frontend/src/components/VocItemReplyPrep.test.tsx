@@ -169,16 +169,47 @@ describe("VocItemReplyPrep", () => {
    * <p>The claim this test used to make was 「never says AI」, which was right while no model could
    * reach a review reply. One can now, so the honest rule is narrower and stronger: the panel says
    * AI wrote the draft ONLY when the saved version records that a model did.
+   *
+   * <p><b>Rewritten again when SELLER became reachable.</b> The version it replaced asserted that an
+   * UNRECORDED author (`draftAuthorKind: null`, the default fixture) is announced as
+   * 「저장된 문구에서 시작합니다」. That was the one `else` branch speaking for three different states,
+   * and it was a claim about authorship that no row supported. The guarantee that survives — the
+   * panel never calls a draft AI unless a model is recorded — is asserted here unchanged; what the
+   * template sentence is now allowed to describe is asserted below, by author.
    */
-  it("never calls a template draft AI — the author is read from the saved version", async () => {
+  it("never calls a draft AI unless the saved version records a model", async () => {
     await renderPanel();
-    expect(screen.getByText(/저장된 문구에서 시작합니다/)).toBeTruthy();
     expect(screen.queryByText(/AI가 썼습니다/)).toBeNull();
   });
 
   it("says a model wrote it when the saved version says a model wrote it", async () => {
     await renderPanel(prepView({ draftAuthorKind: "MODEL" }));
     expect(screen.getByText(/저장된 지식을 근거로 AI가 썼습니다/)).toBeTruthy();
+  });
+
+  it("says the seller wrote it, and does not ask them to check their own sentence", async () => {
+    await renderPanel(prepView({ draftAuthorKind: "SELLER" }));
+    expect(screen.getByText(/판매자가 직접 쓴 문장입니다/)).toBeTruthy();
+    expect(screen.queryByText(/AI가 썼습니다/)).toBeNull();
+    expect(screen.queryByText(/저장된 문구에서 시작합니다/)).toBeNull();
+    expect(screen.queryByText(/내용을 확인하고 직접 고쳐 주세요/)).toBeNull();
+  });
+
+  it("keeps the template sentence for a draft the template floor actually wrote", async () => {
+    await renderPanel(prepView({ draftAuthorKind: "RULE" }));
+    expect(screen.getByText(/저장된 문구에서 시작합니다/)).toBeTruthy();
+  });
+
+  /**
+   * The whole point of the rewrite above: an author nobody recorded is reported as nothing, not as a
+   * template. Pre-V90 versions arrive this way, and so does an editor with no stored draft at all.
+   */
+  it("claims no author at all when the saved version records none", async () => {
+    await renderPanel(prepView({ draftAuthorKind: null }));
+    expect(screen.queryByText(/저장된 문구에서 시작합니다/)).toBeNull();
+    expect(screen.queryByText(/AI가 썼습니다/)).toBeNull();
+    expect(screen.queryByText(/판매자가 직접 쓴 문장입니다/)).toBeNull();
+    expect(screen.getByLabelText("답변 초안")).toBeTruthy();
   });
 
   it("says so when something was hidden, so a token is not a mystery", async () => {
