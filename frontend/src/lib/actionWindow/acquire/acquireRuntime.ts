@@ -16,12 +16,24 @@
 // the result. The completion signal the artifact acts on is the view's `COMPLETED` status (or the backend's
 // SyncJob watcher in the conversation provider) — never a client-side guess.
 import {
-  ACTION_WINDOW_PROTOCOL_VERSION,
   type ActionWindowRunView,
   type AwClientTransport,
   type CommandEnvelope,
   type CommandType,
 } from "../contract";
+// **The version number comes from v2, deliberately, while the TYPES stay on the `../contract` bridge.**
+//
+// The acquisition ENGINE validates with the v2 envelope validator, and `isActionWindowProtocolCompatible` is
+// exact equality — so a v1-stamped command is refused `INVALID_ENVELOPE` before it starts anything. Measured
+// live 2026-09-12: mint 200, `START_RUN` sent, `accepted:false reason:INVALID_ENVELOPE`, and the seller was
+// told 「판매자센터 화면을 준비하지 못했습니다」 — which is why no WING read had ever started from the
+// conversation (`agentic_operating_workspace_v2.md` recorded this lane as LIVE_UNPROVEN).
+//
+// Every sibling runtime (import / locate / issuance / reply) imports v2 wholesale for this reason, and
+// `replyRuntime` writes down why `contract.ts` stays v1. Only the CONSTANT is taken here: the view and
+// transport types are a structural subset the render tree already reads, and re-typing them would ripple
+// through components this defect has nothing to do with.
+import { ACTION_WINDOW_PROTOCOL_VERSION } from "../../../../../contracts/action-window/v2/index";
 import { newCommandId } from "../../commandId";
 
 /** What a `START_RUN` binds to. `EXPORT` binds to nothing (v1); `REVIEW_ACQUISITION` spends a single-use ref. */

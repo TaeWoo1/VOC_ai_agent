@@ -199,7 +199,16 @@ public class IngestionService {
      * handoff records its {@code sync_jobs} row AFTER ingesting (so the row can carry the counts), and
      * this is how those rows still get their provenance in the same request. Idempotent and bounded to
      * the ids the ingest itself returned; an empty list or a null job writes nothing.
+     *
+     * <p><b>Its own transaction, because the update is a modifying query that flushes.</b> The caller
+     * ({@code AgentReviewHandoffService.handOff}) is not transactional — deliberately, so a failure late in a
+     * handoff cannot roll back reviews that were already stored — and a {@code flushAutomatically} update with
+     * no transaction throws {@code InvalidDataAccessApiUsageException}, which the seller receives as a 500 on
+     * a handoff whose rows were already ingested. Measured live 2026-09-12 on the first WING read this branch
+     * ever carried: read OK, 9 reviews collected, handoff 500, stored 0. One bounded statement, so its own
+     * transaction is also the smallest one that can be correct.
      */
+    @org.springframework.transaction.annotation.Transactional
     public int stampAcquisition(UUID orgId, List<UUID> insertedIds, UUID acquisitionSyncJobId) {
         if (acquisitionSyncJobId == null || insertedIds == null || insertedIds.isEmpty()) {
             return 0;
