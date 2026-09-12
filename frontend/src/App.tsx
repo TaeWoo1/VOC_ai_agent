@@ -24,7 +24,7 @@ import { AgentHome } from "./pages/app/AgentHome";
 import { Products } from "./pages/app/Products";
 import { ProductDetail } from "./pages/app/ProductDetail";
 import { Reviews } from "./pages/app/Reviews";
-import { ReviewReplyTask, ReviewReplyTaskEntry } from "./pages/app/ReviewReplyTask";
+import { ReviewReplyTask, ReviewReplyTaskLegacyEntry } from "./pages/app/ReviewReplyTask";
 import { CustomerInbox } from "./pages/app/CustomerInbox";
 import { InboxItemRedirect } from "./pages/app/InboxItemRedirect";
 import { CustomerMemory } from "./pages/app/CustomerMemory";
@@ -126,11 +126,13 @@ export function App() {
         {/* 리뷰: one surface over the per-account review records; the account is a switcher, not a
             destination. `/reviews` alone opens the first review-capable account. */}
         <Route path="/reviews" element={<Reviews />} />
-        {/* ONE review's reply preparation, addressed by the pair every reply endpoint takes. Declared
-            BEFORE `/reviews/:accountId` so `reply` is never read as an account id. The id-only form is
-            what a conversation links to: it knows the review and resolves the account itself. */}
-        <Route path="/reviews/reply/:reviewId" element={<ReviewReplyTaskEntry />} />
-        <Route path="/reviews/:accountId/reply/:reviewId" element={<ReviewReplyTask />} />
+        {/* 리뷰 처리 — ONE review's Decision Workspace, addressed by the REVIEW. Declared BEFORE
+            `/reviews/:accountId` so `reply` is never read as an account id. The account-scoped form is
+            the address this screen used to live at and redirects here: the account was never the
+            authorization, and a review nobody acquired through a connected account — every manual
+            upload — has no account id to put in a path. */}
+        <Route path="/reviews/reply/:reviewId" element={<ReviewReplyTask />} />
+        <Route path="/reviews/:accountId/reply/:reviewId" element={<ReviewReplyTaskLegacyEntry />} />
         <Route path="/reviews/:accountId" element={<Reviews />} />
         {/* 문의: the customer inbox scoped to inquiries. */}
         <Route path="/inquiries" element={<CustomerInbox />} />

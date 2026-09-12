@@ -36,8 +36,6 @@ import com.sellerops.reviewissue.ReviewIssue;
 import com.sellerops.reviewissue.ReviewIssueEvidence;
 import com.sellerops.reviewissue.ReviewIssueEvidenceRepository;
 import com.sellerops.reviewissue.ReviewIssueRepository;
-import com.sellerops.selleraccount.SellerAccount;
-import com.sellerops.selleraccount.SellerAccountRepository;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -73,9 +71,13 @@ import org.springframework.transaction.annotation.Transactional;
  * most {@link #MAX_SIMILAR_PER_PROBLEM} other reviews each, four counts, and at most
  * {@link #MAX_LOG_ENTRIES} trail rows. <b>Marketplace calls: 0. Model calls: 0.</b>
  *
- * <p><b>An id from outside is not a fact.</b> The review is fetched with the caller's org and the
- * account's channel, exactly as {@code ChannelReviewService.detail} does, and a miss is a 404 — a
- * review belonging to another org is indistinguishable from one that does not exist.
+ * <p><b>An id from outside is not a fact.</b> The review is fetched with the caller's org and a miss is
+ * a 404 — a review belonging to another org is indistinguishable from one that does not exist.
+ *
+ * <p><b>There is no seller account here.</b> Deciding a review is something an ORG does about its own
+ * record; replying is something an ACCOUNT does on a channel. Both reads below are the first kind, so
+ * both are addressed by the review alone — which is also the only way a review nobody acquired through
+ * a connected account (a manual upload, a seller-center export) can be decided at all.
  */
 @Service
 public class ReviewDecisionWorkspaceService {
@@ -101,7 +103,6 @@ public class ReviewDecisionWorkspaceService {
     private final ReviewRepository reviews;
     private final ChannelRepository channels;
     private final ProductRepository products;
-    private final SellerAccountRepository accounts;
     private final ReviewIssueEvidenceRepository issueEvidence;
     private final ReviewIssueRepository issues;
     private final ProductKnowledgeSourceRepository productKnowledge;
@@ -117,7 +118,6 @@ public class ReviewDecisionWorkspaceService {
 
     public ReviewDecisionWorkspaceService(ReviewRepository reviews, ChannelRepository channels,
                                           ProductRepository products,
-                                          SellerAccountRepository accounts,
                                           ReviewIssueEvidenceRepository issueEvidence,
                                           ReviewIssueRepository issues,
                                           ProductKnowledgeSourceRepository productKnowledge,
@@ -133,7 +133,6 @@ public class ReviewDecisionWorkspaceService {
         this.reviews = reviews;
         this.channels = channels;
         this.products = products;
-        this.accounts = accounts;
         this.issueEvidence = issueEvidence;
         this.issues = issues;
         this.productKnowledge = productKnowledge;
@@ -150,8 +149,8 @@ public class ReviewDecisionWorkspaceService {
 
     /** What stands behind this review — repeated problems, what else said the same, and what is written down. */
     @Transactional(readOnly = true)
-    public ReviewDecisionContextView context(UUID orgId, UUID accountId, UUID reviewId) {
-        Review review = requireReview(orgId, accountId, reviewId);
+    public ReviewDecisionContextView context(UUID orgId, UUID reviewId) {
+        Review review = requireReview(orgId, reviewId);
         Product product = review.getProductId() == null ? null
                 : products.findAllByOrgIdAndIdIn(orgId, List.of(review.getProductId()))
                         .stream().findFirst().orElse(null);
@@ -179,8 +178,8 @@ public class ReviewDecisionWorkspaceService {
      * still reads oldest-first where it is the subject rather than the footnote.
      */
     @Transactional(readOnly = true)
-    public List<ReviewDecisionLogEntryView> log(UUID orgId, UUID accountId, UUID reviewId) {
-        Review review = requireReview(orgId, accountId, reviewId);
+    public List<ReviewDecisionLogEntryView> log(UUID orgId, UUID reviewId) {
+        Review review = requireReview(orgId, reviewId);
         List<ReviewDecisionLogEntryView> entries = new ArrayList<>();
 
         for (TriageCorrectionAudit row : correctionAudit.findByReviewIdOrderByDecidedAtAsc(review.getId())) {
@@ -377,13 +376,17 @@ public class ReviewDecisionWorkspaceService {
                         KnowledgeCandidateService.STATE_OPEN));
     }
 
-    /** The same scoping {@code ChannelReviewService.detail} uses — org, then the account's channel. */
-    private Review requireReview(UUID orgId, UUID accountId, UUID reviewId) {
-        SellerAccount account = accounts.findById(accountId)
-                .filter(a -> orgId.equals(a.getOrgId()))
-                .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
+    /**
+     * The whole authorization: this org's review, by id.
+     *
+     * <p>It used to resolve an account first and then require the review's channel to equal that
+     * account's. Nothing in either method reads the account — the org and the review answer every
+     * question asked here — so what the extra hop actually did was refuse a review this org owns
+     * because of the address the caller used to ask for it, and refuse outright every review acquired
+     * without an account. {@code (reviewId, orgId)} was always the real check; now it is the only one.
+     */
+    private Review requireReview(UUID orgId, UUID reviewId) {
         return reviews.findByIdAndOrgId(reviewId, orgId)
-                .filter(r -> account.getChannelId().equals(r.getChannelId()))
                 .orElseThrow(() -> ApiException.notFound("상품평을 찾을 수 없습니다."));
     }
 }

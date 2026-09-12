@@ -20,12 +20,15 @@ import org.springframework.web.bind.annotation.RestController;
  * write on this controller would be a second door into a decision whose first door already carries
  * the locking, the idempotency key and the trail — and the two doors would eventually disagree.
  *
- * <p>Mounted beside {@code ChannelReviewController} on the same account-scoped path rather than
- * inside it, so the record's endpoints and the workspace's stay separable: one is what a channel
- * holds, the other is what a person concluded.
+ * <p><b>Addressed by the review alone.</b> These used to hang off {@code /api/seller-accounts/\{id\}},
+ * which read as scoping and was not: the service authorized on {@code (reviewId, orgId)} and used the
+ * account for one channel-equality check. The cost of the extra segment was that a review acquired
+ * without an account — every manual upload, every seller-center export — had no address at which its
+ * context or its trail could be read. The account boundary that is real (who a reply is FROM) lives on
+ * the reply routes, which are unchanged.
  */
 @RestController
-@RequestMapping("/api/seller-accounts/{accountId}/channel-reviews/{reviewId}")
+@RequestMapping("/api/reviews/{reviewId}")
 public class ReviewDecisionWorkspaceController {
 
     private final ReviewDecisionWorkspaceService service;
@@ -37,16 +40,14 @@ public class ReviewDecisionWorkspaceController {
     /** What stands behind this review: repeated problems, what else said the same, what is written down. */
     @GetMapping("/decision-context")
     public ReviewDecisionContextView context(@AuthenticationPrincipal AuthPrincipal principal,
-                                             @PathVariable UUID accountId,
                                              @PathVariable UUID reviewId) {
-        return service.context(principal.orgId(), accountId, reviewId);
+        return service.context(principal.orgId(), reviewId);
     }
 
     /** What has already been decided about this review, newest first. */
     @GetMapping("/decision-log")
     public List<ReviewDecisionLogEntryView> log(@AuthenticationPrincipal AuthPrincipal principal,
-                                                @PathVariable UUID accountId,
                                                 @PathVariable UUID reviewId) {
-        return service.log(principal.orgId(), accountId, reviewId);
+        return service.log(principal.orgId(), reviewId);
     }
 }

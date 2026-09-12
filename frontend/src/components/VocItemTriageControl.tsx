@@ -8,10 +8,11 @@ import type { TriageDisposition } from "../lib/types";
 // drafts no reply, sends nothing, and touches no marketplace — "대응 필요" states a
 // judgement, it does not promise an answer.
 //
-// Rendered only for a row that HAS an actionRef (see VocItemCard). A row without one is
-// not decidable at all, and the honest rendering of that is no control — not a disabled
-// one, which would read as "you may not", when the truth is "this row cannot carry a
-// decision".
+// Addressed by the review alone (Agent-native Core Boundary v1). It used to take an account
+// and an opaque `actionRef`; the ref decoded to exactly this review id, and the account
+// contributed a check that its channel equalled the review's — so the two segments together
+// made the control unusable for a review no account acquired, which is every manual upload.
+// Deciding is not replying, and only replying is something an account does.
 
 /** One user intent: a disposition plus the command id that identifies it to the server. */
 interface Attempt {
@@ -20,13 +21,11 @@ interface Attempt {
 }
 
 export function VocItemTriageControl({
-  accountId,
-  actionRef,
+  reviewId,
   disposition,
   onRecorded,
 }: {
-  accountId: string;
-  actionRef: string;
+  reviewId: string;
   disposition: TriageDisposition | null;
   /**
    * The server-CONFIRMED decision, announced to whoever owns the row.
@@ -113,7 +112,7 @@ export function VocItemTriageControl({
     setPending(next);
     setFailed(null);
     try {
-      const result = await api.recordVocItemTriage(accountId, actionRef, {
+      const result = await api.recordReviewDecision(reviewId, {
         commandId,
         disposition: next,
       });

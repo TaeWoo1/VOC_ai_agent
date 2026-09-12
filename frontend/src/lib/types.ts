@@ -2313,13 +2313,29 @@ export interface ChannelReviewDetailView {
   sellerCorrection: TriageCorrectionView | null;
   locateTarget: ChannelReviewLocateTarget;
   /**
-   * The reply work this review can carry, or null when the channel has no reply flow (capability
-   * `replySupported = false`: Coupang, Cafe24). Server-minted (product assembly A6): `actionRef` is the
-   * client-opaque address the reply endpoints take, `triageDisposition` the operator's current decision,
+   * The reply work this review can carry, or null — `replyUnavailableReason` says which of two
+   * different absences. Server-minted (product assembly A6): `actionRef` is the client-opaque address
+   * the reply endpoints take, `triageDisposition` the operator's current decision,
    * `hasReplyPreparation` whether a draft or approval already exists — the same three facts a worklist row
    * carries, so the 리뷰 detail can mount the one reply panel the product has.
    */
   replyWork: ChannelReviewReplyWork | null;
+  /**
+   * The single account this org holds on this review's channel, or null when there is none — or more
+   * than one, which a review id cannot disambiguate.
+   *
+   * Not an address the client supplies: reading and deciding a review are org-scoped. It exists so
+   * the workspace can reach the lanes that ARE account-bound (the reply panel, the channel's own
+   * record) without a second read, and so it can offer neither when there is no account.
+   */
+  sellerAccountId: string | null;
+  /**
+   * Why `replyWork` is null, or null when reply work exists. `CHANNEL_HAS_NO_REPLY_FLOW` — the channel
+   * gives sellers no way to answer at all. `NO_SELLER_ACCOUNT` — this org has no single connected
+   * account on this channel, so there is nobody for a reply to be from. The two read as the same
+   * absence and are not the same sentence to a seller.
+   */
+  replyUnavailableReason: "CHANNEL_HAS_NO_REPLY_FLOW" | "NO_SELLER_ACCOUNT" | null;
 }
 
 export interface ChannelReviewReplyWork {

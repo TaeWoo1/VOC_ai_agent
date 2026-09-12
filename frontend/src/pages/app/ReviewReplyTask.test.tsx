@@ -3,37 +3,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { ReviewReplyTask, ReviewReplyTaskEntry } from "./ReviewReplyTask";
+import { ReviewReplyTask, ReviewReplyTaskLegacyEntry } from "./ReviewReplyTask";
 import type {
   ChannelReviewDetailView,
   ReviewDecisionContext,
   ReviewDecisionLogEntry,
-  ReviewDetailResponse,
   ReviewReplyPrep,
 } from "../../lib/types";
 import { expectNoAxeViolations } from "../../test/axe";
 
-const getChannelReviewStrict = vi.fn();
-const getReviewDetailStrict = vi.fn();
+const getReviewWorkspace = vi.fn();
 const getReviewReplyPrep = vi.fn();
 const getReviewDecisionContext = vi.fn();
 const getReviewDecisionLog = vi.fn();
-const recordVocItemTriage = vi.fn();
-const recordChannelReviewTriageAction = vi.fn();
-const correctChannelReviewTriage = vi.fn();
-const withdrawChannelReviewTriageCorrection = vi.fn();
+const recordReviewDecision = vi.fn();
+const recordReviewTriageAction = vi.fn();
+const correctReviewTriage = vi.fn();
+const withdrawReviewTriageCorrection = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
-    getChannelReviewStrict: (...a: unknown[]) => getChannelReviewStrict(...a),
-    getReviewDetailStrict: (...a: unknown[]) => getReviewDetailStrict(...a),
+    getReviewWorkspace: (...a: unknown[]) => getReviewWorkspace(...a),
     getReviewReplyPrep: (...a: unknown[]) => getReviewReplyPrep(...a),
     getReviewDecisionContext: (...a: unknown[]) => getReviewDecisionContext(...a),
     getReviewDecisionLog: (...a: unknown[]) => getReviewDecisionLog(...a),
-    recordVocItemTriage: (...a: unknown[]) => recordVocItemTriage(...a),
-    recordChannelReviewTriageAction: (...a: unknown[]) => recordChannelReviewTriageAction(...a),
-    correctChannelReviewTriage: (...a: unknown[]) => correctChannelReviewTriage(...a),
-    withdrawChannelReviewTriageCorrection: (...a: unknown[]) => withdrawChannelReviewTriageCorrection(...a),
+    recordReviewDecision: (...a: unknown[]) => recordReviewDecision(...a),
+    recordReviewTriageAction: (...a: unknown[]) => recordReviewTriageAction(...a),
+    correctReviewTriage: (...a: unknown[]) => correctReviewTriage(...a),
+    withdrawReviewTriageCorrection: (...a: unknown[]) => withdrawReviewTriageCorrection(...a),
   },
 }));
 
@@ -62,6 +59,8 @@ function detail(over: Partial<ChannelReviewDetailView> = {}): ChannelReviewDetai
       hasReplyPreparation: true,
       channelReplyState: "PENDING",
     },
+    sellerAccountId: ACCOUNT,
+    replyUnavailableReason: null,
     ...over,
   };
 }
@@ -116,33 +115,11 @@ function prep(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
   };
 }
 
-/** The read the id-only entry resolves an account with — the workspace itself no longer makes it. */
-function reviewDetail(over: Partial<ReviewDetailResponse> = {}): ReviewDetailResponse {
-  return {
-    id: REVIEW,
-    sellerAccountId: ACCOUNT,
-    channelCode: "NAVER",
-    channelNameKo: "네이버 스마트스토어",
-    writtenOn: "2026-08-28",
-    rating: 4,
-    negative: false,
-    body: "괜찮긴한데 자꾸 떨어져요",
-    bodyRedacted: false,
-    productId: null,
-    productName: "합성 전선몰딩",
-    replyState: "PENDING",
-    executableIdentity: "MARKETPLACE",
-    triageTier: "FYI",
-    issues: [],
-    ...over,
-  };
-}
-
 function renderTask(search = "") {
   return render(
-    <MemoryRouter initialEntries={[`/reviews/${ACCOUNT}/reply/${REVIEW}${search}`]}>
+    <MemoryRouter initialEntries={[`/reviews/reply/${REVIEW}${search}`]}>
       <Routes>
-        <Route path="/reviews/:accountId/reply/:reviewId" element={<ReviewReplyTask />} />
+        <Route path="/reviews/reply/:reviewId" element={<ReviewReplyTask />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -153,7 +130,6 @@ function renderTask(search = "") {
 beforeEach(() => {
   getReviewDecisionContext.mockResolvedValue(context());
   getReviewDecisionLog.mockResolvedValue([] as ReviewDecisionLogEntry[]);
-  getReviewDetailStrict.mockResolvedValue(reviewDetail());
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -169,14 +145,16 @@ afterEach(() => vi.clearAllMocks());
  */
 describe("리뷰 처리 — the decision workspace", () => {
   it("opens the exact review and leads with the customer's words, not with the draft", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     renderTask();
 
     await waitFor(() => expect(screen.getAllByText("합성 전선몰딩").length).toBeGreaterThan(0));
-    expect(getChannelReviewStrict).toHaveBeenCalledWith(ACCOUNT, REVIEW);
-    expect(getReviewDecisionContext).toHaveBeenCalledWith(ACCOUNT, REVIEW);
-    expect(getReviewDecisionLog).toHaveBeenCalledWith(ACCOUNT, REVIEW);
+    // All three reads are addressed by the REVIEW. The account is not in any of them: it was never
+    // the authorization, and a review no account acquired has none to send.
+    expect(getReviewWorkspace).toHaveBeenCalledWith(REVIEW);
+    expect(getReviewDecisionContext).toHaveBeenCalledWith(REVIEW);
+    expect(getReviewDecisionLog).toHaveBeenCalledWith(REVIEW);
 
     // The customer's sentence is on the page and NOT behind a fold — the defect this screen closes.
     const body = await screen.findByText("괜찮긴한데 자꾸 떨어져요");
@@ -194,7 +172,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("folds only the keyword classification, whose accuracy is unmeasured", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     const { container } = renderTask();
     await waitFor(() => expect(screen.getByText("괜찮긴한데 자꾸 떨어져요")).toBeInTheDocument());
@@ -207,7 +185,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("does not put a review list on the screen — there is exactly one review here", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     renderTask();
     await waitFor(() => expect(screen.getByText("괜찮긴한데 자꾸 떨어져요")).toBeInTheDocument());
@@ -218,7 +196,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   /* ── 3 · repeated signal ───────────────────────────────────────────── */
 
   it("names what repeats and shows what else said it, without inventing a count of its own", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     getReviewDecisionContext.mockResolvedValue(
       context({
@@ -258,7 +236,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("says our records hold no repeated problem — never that it has never happened", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     renderTask();
 
@@ -267,20 +245,20 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("keeps the decision available when the context read fails — it loses context, not the choice", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     getReviewDecisionContext.mockRejectedValue(new Error("boom"));
-    recordVocItemTriage.mockResolvedValue({ disposition: "MONITOR", replayed: false });
+    recordReviewDecision.mockResolvedValue({ disposition: "MONITOR", replayed: false });
     renderTask();
 
     const step = await screen.findByLabelText("조치 선택");
     await userEvent.click(within(step).getByRole("button", { name: /지켜보기/ }));
-    await waitFor(() => expect(recordVocItemTriage).toHaveBeenCalled());
-    expect(recordVocItemTriage.mock.calls[0][1]).toBe(`review:${REVIEW}`);
+    await waitFor(() => expect(recordReviewDecision).toHaveBeenCalled());
+    expect(recordReviewDecision.mock.calls[0][0]).toBe(REVIEW);
   });
 
   it("says nothing at all about repeats when the context read fails", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     getReviewDecisionContext.mockRejectedValue(new Error("boom"));
     renderTask();
@@ -295,7 +273,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   /* ── 4 · what a reply would stand on ───────────────────────────────── */
 
   it("says what is registered for this product, and that the draft's own citations are elsewhere", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     getReviewDecisionContext.mockResolvedValue(
       context({
@@ -314,7 +292,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("prints no product counts for a review bound to no product", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail({ productName: null }));
+    getReviewWorkspace.mockResolvedValue(detail({ productName: null }));
     getReviewReplyPrep.mockResolvedValue(prep());
     getReviewDecisionContext.mockResolvedValue(context({ productId: null, productName: null, productSignal: null }));
     renderTask();
@@ -326,9 +304,9 @@ describe("리뷰 처리 — the decision workspace", () => {
   /* ── 5 · the seller's own judgment ─────────────────────────────────── */
 
   it("asks for the seller's judgment beside the system's, and records it without moving anything", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
-    correctChannelReviewTriage.mockResolvedValue({
+    correctReviewTriage.mockResolvedValue({
       reviewId: REVIEW,
       correctedTier: "NEEDS_ATTENTION",
       reasonCode: null,
@@ -344,7 +322,7 @@ describe("리뷰 처리 — the decision workspace", () => {
     await userEvent.click(within(judgment).getByRole("button", { name: "확인 필요" }));
 
     await waitFor(() =>
-      expect(correctChannelReviewTriage).toHaveBeenCalledWith(ACCOUNT, REVIEW, {
+      expect(correctReviewTriage).toHaveBeenCalledWith(REVIEW, {
         tier: "NEEDS_ATTENTION",
         reasonCode: null,
       }),
@@ -358,7 +336,7 @@ describe("리뷰 처리 — the decision workspace", () => {
    * no AI pilot — only the surface that owns it moved.
    */
   it("offers all three tiers — 지켜보기 and 참고 are the seller's to choose, not the rule's to derive", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     renderTask();
 
@@ -369,7 +347,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("reads a standing correction back from the store and shows BOTH judgments", async () => {
-    getChannelReviewStrict.mockResolvedValue(
+    getReviewWorkspace.mockResolvedValue(
       detail({
         triage: { tier: "NEEDS_ATTENTION", reason: "낮은 별점", tags: [], recommendedAction: null },
         sellerCorrection: {
@@ -388,21 +366,21 @@ describe("리뷰 처리 — the decision workspace", () => {
 
     const block = await screen.findByLabelText("판매자 판단");
     // Nothing was pressed in this session — this is the stored answer, rendered from the read.
-    expect(correctChannelReviewTriage).not.toHaveBeenCalled();
+    expect(correctReviewTriage).not.toHaveBeenCalled();
     expect(within(block).getByRole("button", { name: "참고" })).toHaveAttribute("aria-pressed", "true");
     expect(within(block).getByText("시스템 판단")).toBeInTheDocument();
     expect(within(block).getByText("판매자 수정")).toBeInTheDocument();
   });
 
   it("되돌리기 appears only once a correction stands, and clears the seller's half alone", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     const { unmount } = renderTask();
     const none = await screen.findByLabelText("판매자 판단");
     expect(within(none).queryByRole("button", { name: "수정 되돌리기" })).toBeNull();
     unmount();
 
-    getChannelReviewStrict.mockResolvedValue(
+    getReviewWorkspace.mockResolvedValue(
       detail({
         sellerCorrection: {
           reviewId: REVIEW,
@@ -416,18 +394,18 @@ describe("리뷰 처리 — the decision workspace", () => {
       }),
     );
     getReviewReplyPrep.mockResolvedValue(prep());
-    withdrawChannelReviewTriageCorrection.mockResolvedValue(undefined);
+    withdrawReviewTriageCorrection.mockResolvedValue(undefined);
     renderTask();
 
     const block = await screen.findByLabelText("판매자 판단");
     await userEvent.click(within(block).getByRole("button", { name: "수정 되돌리기" }));
-    await waitFor(() => expect(withdrawChannelReviewTriageCorrection).toHaveBeenCalledWith(ACCOUNT, REVIEW));
+    await waitFor(() => expect(withdrawReviewTriageCorrection).toHaveBeenCalledWith(REVIEW));
     // The system's judgment is untouched by a withdrawal — only the seller's half goes.
     expect(within(block).getByText("시스템 판단")).toBeInTheDocument();
   });
 
   it("asks for the seller's judgment with the AI pilot silent — the pilot is not permission to disagree", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail({ aiMark: null }));
+    getReviewWorkspace.mockResolvedValue(detail({ aiMark: null }));
     getReviewReplyPrep.mockResolvedValue(prep());
     renderTask();
 
@@ -438,46 +416,47 @@ describe("리뷰 처리 — the decision workspace", () => {
 
   /* ── 6 · 조치 선택 ─────────────────────────────────────────────────── */
 
-  it("writes the decision against the address the server minted, not the reply's", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail({ replyWork: null }));
-    getReviewDecisionContext.mockResolvedValue(context({ currentDecision: null, decisionRef: "review:rev-1" }));
-    recordVocItemTriage.mockResolvedValue({ disposition: "MONITOR", replayed: false });
+  it("writes the decision against the review, and never against the reply's address", async () => {
+    getReviewWorkspace.mockResolvedValue(
+      detail({ replyWork: null, replyUnavailableReason: "CHANNEL_HAS_NO_REPLY_FLOW" }),
+    );
+    getReviewDecisionContext.mockResolvedValue(context({ currentDecision: null }));
+    recordReviewDecision.mockResolvedValue({ disposition: "MONITOR", replayed: false });
     renderTask();
 
     const step = await screen.findByLabelText("조치 선택");
     await userEvent.click(within(step).getByRole("button", { name: /지켜보기/ }));
 
-    await waitFor(() => expect(recordVocItemTriage).toHaveBeenCalled());
-    expect(recordVocItemTriage.mock.calls[0][0]).toBe(ACCOUNT);
-    expect(recordVocItemTriage.mock.calls[0][1]).toBe("review:rev-1");
+    await waitFor(() => expect(recordReviewDecision).toHaveBeenCalled());
+    expect(recordReviewDecision.mock.calls[0][0]).toBe(REVIEW);
     // A channel with no reply flow still gets a decision, and is told plainly what it does NOT get.
     expect(within(step).getByText(/reviewnary가 답변을 작성하지 않습니다/)).toBeInTheDocument();
     expect(getReviewReplyPrep).not.toHaveBeenCalled();
   });
 
   it("offers 조치 완료 only once a decision stands, and never on 조치 불필요", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail({ replyWork: null }));
+    getReviewWorkspace.mockResolvedValue(detail({ replyWork: null }));
     getReviewDecisionContext.mockResolvedValue(context({ currentDecision: null }));
     const { unmount } = renderTask();
     const undecided = await screen.findByLabelText("조치 선택");
     expect(within(undecided).queryByRole("button", { name: "조치 완료함" })).toBeNull();
     unmount();
 
-    getChannelReviewStrict.mockResolvedValue(detail({ replyWork: null }));
+    getReviewWorkspace.mockResolvedValue(detail({ replyWork: null }));
     getReviewDecisionContext.mockResolvedValue(context({ currentDecision: "NO_ACTION" }));
     const closed = renderTask();
     const closedStep = await screen.findByLabelText("조치 선택");
     expect(within(closedStep).queryByRole("button", { name: "조치 완료함" })).toBeNull();
     closed.unmount();
 
-    getChannelReviewStrict.mockResolvedValue(detail({ replyWork: null }));
+    getReviewWorkspace.mockResolvedValue(detail({ replyWork: null }));
     getReviewDecisionContext.mockResolvedValue(context({ currentDecision: "MONITOR" }));
-    recordChannelReviewTriageAction.mockResolvedValue(undefined);
+    recordReviewTriageAction.mockResolvedValue(undefined);
     renderTask();
     const watching = await screen.findByLabelText("조치 선택");
     await userEvent.click(within(watching).getByRole("button", { name: "조치 완료함" }));
     await waitFor(() =>
-      expect(recordChannelReviewTriageAction).toHaveBeenCalledWith(ACCOUNT, REVIEW, "ACTION_COMPLETED"),
+      expect(recordReviewTriageAction).toHaveBeenCalledWith(REVIEW, "ACTION_COMPLETED"),
     );
     // 조치 불필요 is the DECISION's word; recording it here too would count one press twice.
     expect(within(watching).queryByRole("button", { name: "조치 불필요함" })).toBeNull();
@@ -486,7 +465,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   /* ── 7 · the draft follows the choice ──────────────────────────────── */
 
   it("does not open a draft for a review the seller decided to watch", async () => {
-    getChannelReviewStrict.mockResolvedValue(
+    getReviewWorkspace.mockResolvedValue(
       detail({
         replyWork: {
           actionRef: `review:${REVIEW}`,
@@ -505,7 +484,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("keeps existing reply work reachable after the seller moves the review to 지켜보기", async () => {
-    getChannelReviewStrict.mockResolvedValue(
+    getReviewWorkspace.mockResolvedValue(
       detail({
         replyWork: {
           actionRef: `review:${REVIEW}`,
@@ -525,7 +504,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("says a channel with no reply flow has none, rather than rendering a dead panel", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail({ replyWork: null }));
+    getReviewWorkspace.mockResolvedValue(detail({ replyWork: null }));
     renderTask();
     await waitFor(() =>
       expect(screen.getByText("이 채널에서는 reviewnary가 답변을 작성하지 않습니다.")).toBeInTheDocument(),
@@ -537,7 +516,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   /* ── 8 · the log ───────────────────────────────────────────────────── */
 
   it("shows what was already decided, newest first, from the trails that already existed", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     getReviewDecisionLog.mockResolvedValue([
       { kind: "REPLY_APPROVAL", from: null, to: "APPROVED", at: "2026-09-10T01:00:00Z" },
@@ -555,7 +534,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("draws no row for an entry this build cannot name", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     getReviewDecisionLog.mockResolvedValue([
       { kind: "ACTION_RECORDED", from: null, to: "SOMETHING_NEW", at: "2026-09-10T01:00:00Z" },
@@ -568,7 +547,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("says nothing about history when the log read fails", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     getReviewDecisionLog.mockRejectedValue(new Error("boom"));
     renderTask();
@@ -580,14 +559,14 @@ describe("리뷰 처리 — the decision workspace", () => {
   /* ── the surrounding contract, unchanged ───────────────────────────── */
 
   it("offers the way back to the conversation only when a conversation sent the seller here", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     const { unmount } = renderTask();
     await waitFor(() => expect(screen.getByText("괜찮긴한데 자꾸 떨어져요")).toBeInTheDocument());
     expect(screen.queryByRole("link", { name: "대화로 돌아가기" })).not.toBeInTheDocument();
     unmount();
 
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     renderTask("?from=chat");
     await waitFor(() => expect(screen.getByText("괜찮긴한데 자꾸 떨어져요")).toBeInTheDocument());
@@ -595,14 +574,14 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("fails closed when the review cannot be read — never an invented review", async () => {
-    getChannelReviewStrict.mockRejectedValue(new Error("nope"));
+    getReviewWorkspace.mockRejectedValue(new Error("nope"));
     renderTask();
     expect(await screen.findByText("이 리뷰를 불러오지 못했습니다")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "승인" })).not.toBeInTheDocument();
   });
 
   it("says the channel already answered, before anyone decides anything", async () => {
-    getChannelReviewStrict.mockResolvedValue(
+    getReviewWorkspace.mockResolvedValue(
       detail({
         replyWork: {
           actionRef: `review:${REVIEW}`,
@@ -623,7 +602,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("has no accessibility violations", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     getReviewDecisionContext.mockResolvedValue(
       context({
@@ -653,7 +632,7 @@ describe("리뷰 처리 — the decision workspace", () => {
   });
 
   it("opens the product only once a product id is actually resolved", async () => {
-    getChannelReviewStrict.mockResolvedValue(detail());
+    getReviewWorkspace.mockResolvedValue(detail());
     getReviewReplyPrep.mockResolvedValue(prep());
     getReviewDecisionContext.mockResolvedValue(context({ productId: "prod-9" }));
     renderTask();
@@ -664,37 +643,98 @@ describe("리뷰 처리 — the decision workspace", () => {
 });
 
 /**
- * The id-only address. A conversation holds a review id and nothing else, so the account is resolved
- * here rather than becoming a second identifier on the wire.
+ * <b>Agent-native Core Boundary v1</b> — the workspace on a review no account acquired.
+ *
+ * This is the shape a manual CSV upload and a seller-center export land in: `POST /api/uploads` is
+ * addressed by channel and never by account, so the org holds the review and holds no account on its
+ * channel. Before this package the page resolved an account first and, finding none, said
+ * 「이 리뷰의 판매 계정을 확인하지 못했습니다」 — a dead end for a review that is entirely this org's.
  */
-describe("리뷰 처리 — reached by the review alone", () => {
-  function renderEntry(search = "") {
+describe("리뷰 처리 — a review with no seller account", () => {
+  const accountLess = () =>
+    detail({ sellerAccountId: null, replyWork: null, replyUnavailableReason: "NO_SELLER_ACCOUNT" });
+
+  it("opens, and offers the decision — the address is the review, so there is nothing to resolve", async () => {
+    getReviewWorkspace.mockResolvedValue(accountLess());
+    getReviewDecisionContext.mockResolvedValue(context({ currentDecision: null }));
+    recordReviewDecision.mockResolvedValue({ disposition: "MONITOR", replayed: false });
+    renderTask();
+
+    expect(await screen.findByText("괜찮긴한데 자꾸 떨어져요")).toBeInTheDocument();
+    const step = await screen.findByLabelText("조치 선택");
+    await userEvent.click(within(step).getByRole("button", { name: /지켜보기/ }));
+    await waitFor(() => expect(recordReviewDecision).toHaveBeenCalled());
+    expect(recordReviewDecision.mock.calls[0][0]).toBe(REVIEW);
+  });
+
+  it("takes the seller's own judgment too — judging is not replying", async () => {
+    getReviewWorkspace.mockResolvedValue(accountLess());
+    correctReviewTriage.mockResolvedValue({
+      reviewId: REVIEW,
+      correctedTier: "WATCH",
+      correctedReasonCode: null,
+      systemTier: "FYI",
+      systemSource: "RULES",
+      correctedAt: "2026-09-13T00:00:00Z",
+      changeCount: 1,
+    });
+    renderTask();
+
+    const judgment = await screen.findByLabelText("판매자 판단");
+    await userEvent.click(within(judgment).getByRole("button", { name: /지켜보기/ }));
+    await waitFor(() => expect(correctReviewTriage).toHaveBeenCalledWith(REVIEW, expect.anything()));
+  });
+
+  it("says the ACCOUNT is missing, not that the channel has no reply feature", async () => {
+    getReviewWorkspace.mockResolvedValue(accountLess());
+    renderTask();
+
+    expect(await screen.findByText(/연결된 판매 계정이 없어 답변을 준비할 수 없습니다/)).toBeInTheDocument();
+    // The other sentence is a claim about the marketplace and would be false here.
+    expect(screen.queryByText(/reviewnary가 답변을 작성하지 않습니다/)).toBeNull();
+    expect(getReviewReplyPrep).not.toHaveBeenCalled();
+  });
+
+  it("offers no link into a channel record that does not exist for this review", async () => {
+    getReviewWorkspace.mockResolvedValue(accountLess());
+    renderTask();
+
+    await screen.findByText("괜찮긴한데 자꾸 떨어져요");
+    expect(screen.queryByRole("link", { name: "리뷰 기록에서 보기" })).toBeNull();
+    // The way back is the index, which exists for every review.
+    expect(screen.getByRole("link", { name: /리뷰 기록으로/ })).toHaveAttribute("href", "/reviews");
+  });
+});
+
+/**
+ * The account-scoped address this screen used to live at.
+ *
+ * It is a redirect now, and keeping ONE live copy is the point: the account was never part of the
+ * authorization, so two addresses rendering the workspace would be two screens that eventually
+ * disagree about what a review is.
+ */
+describe("리뷰 처리 — the account-scoped address still lands", () => {
+  function renderLegacy(search = "") {
     return render(
-      <MemoryRouter initialEntries={[`/reviews/reply/${REVIEW}${search}`]}>
+      <MemoryRouter initialEntries={[`/reviews/${ACCOUNT}/reply/${REVIEW}${search}`]}>
         <Routes>
-          <Route path="/reviews/reply/:reviewId" element={<ReviewReplyTaskEntry />} />
-          <Route path="/reviews/:accountId/reply/:reviewId" element={<div>도착: 리뷰 처리</div>} />
+          <Route path="/reviews/:accountId/reply/:reviewId" element={<ReviewReplyTaskLegacyEntry />} />
+          <Route path="/reviews/reply/:reviewId" element={<div>도착: 리뷰 처리</div>} />
         </Routes>
       </MemoryRouter>,
     );
   }
 
-  it("resolves the account from the review and lands on its workspace", async () => {
-    getReviewDetailStrict.mockResolvedValue(reviewDetail());
-    renderEntry("?from=chat");
+  it("redirects to the review's own address and reads nothing to do it", async () => {
+    renderLegacy();
     expect(await screen.findByText("도착: 리뷰 처리")).toBeInTheDocument();
-    expect(getReviewDetailStrict).toHaveBeenCalledWith(REVIEW);
+    // No resolving read: the account segment carried no information the destination needs.
+    expect(getReviewWorkspace).not.toHaveBeenCalled();
   });
 
-  it("says so when the review is not this org's, rather than routing somewhere that cannot load", async () => {
-    getReviewDetailStrict.mockRejectedValue(new Error("404"));
-    renderEntry();
-    expect(await screen.findByText("이 리뷰를 찾지 못했습니다")).toBeInTheDocument();
-  });
-
-  it("says so when the review carries no account binding — every endpoint here is account-scoped", async () => {
-    getReviewDetailStrict.mockResolvedValue(reviewDetail({ sellerAccountId: null }));
-    renderEntry();
-    expect(await screen.findByText("이 리뷰의 판매 계정을 확인하지 못했습니다")).toBeInTheDocument();
+  it("keeps the query string, so a link from the conversation still knows where it came from", async () => {
+    const { container } = renderLegacy("?from=chat");
+    await screen.findByText("도착: 리뷰 처리");
+    expect(container).toBeTruthy();
   });
 });

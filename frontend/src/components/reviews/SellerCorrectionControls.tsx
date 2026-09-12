@@ -18,6 +18,10 @@ import type { ReviewTriageTier, TriageCorrectionView } from "../../lib/types";
  * 어떠신가요?」 is what the 조치 선택 stands on — so the control is one component with two callers
  * rather than two components that agree today.
  *
+ * <b>Addressed by the review alone.</b> A judgment is what this org thinks about its own record; it is
+ * not from an account and it is not sent anywhere. Taking the account out of the signature is what
+ * lets a seller judge a review they uploaded rather than connected.
+ *
  * <b>Available whether or not the AI pilot is on.</b> The pilot decides what the SYSTEM says about a
  * review, not whether the seller may disagree with it.
  *
@@ -29,7 +33,6 @@ import type { ReviewTriageTier, TriageCorrectionView } from "../../lib/types";
  * to know that is the design.
  */
 export function SellerCorrectionControls({
-  accountId,
   reviewId,
   word,
   systemTier,
@@ -38,7 +41,6 @@ export function SellerCorrectionControls({
   onCorrected,
   headingLevel = 3,
 }: {
-  accountId: string;
   reviewId: string;
   /** What this channel calls one review — 리뷰 / 상품평. */
   word: string;
@@ -71,7 +73,7 @@ export function SellerCorrectionControls({
     setBusy(true);
     setFailed(false);
     try {
-      const view = await api.correctChannelReviewTriage(accountId, reviewId, { tier, reasonCode: null });
+      const view = await api.correctReviewTriage(reviewId, { tier, reasonCode: null });
       setAnswer(view.correctedTier);
       setChanges(view.changeCount);
       onCorrected();
@@ -86,7 +88,7 @@ export function SellerCorrectionControls({
     setBusy(true);
     setFailed(false);
     try {
-      await api.withdrawChannelReviewTriageCorrection(accountId, reviewId);
+      await api.withdrawReviewTriageCorrection(reviewId);
       setAnswer(null);
       onCorrected();
     } catch {

@@ -19,15 +19,20 @@ import { TRIAGE_OPTIONS } from "./vocItems";
  * <b>No second label vocabulary.</b> The three buttons keep the words they already had
  * (`TRIAGE_OPTIONS`: 대응 필요 / 지켜보기 / 조치 불필요) — a workspace that renamed them would leave the
  * worklist, the record and the audit trail describing the same three values in different words. What
- * the workspace adds is the sentence UNDER them, and that sentence is channel-aware because the
- * promise is: on a channel with a reply flow 「대응 필요」 opens a draft, and on one without it
- * (Coupang 상품평, per the capability table) it opens nothing and must not pretend to.
+ * the workspace adds is the sentence UNDER them, and that sentence depends on why a draft is or is
+ * not on offer. There are three reasons and they are three different facts: the channel has a reply
+ * flow; the channel has none at all (Coupang 상품평, per the capability table); or the channel has one
+ * and this org has no account on it, which is a fact about this seller's setup and not about the
+ * marketplace. Saying the second when the third is true tells a seller their channel cannot do
+ * something it can — which is exactly the sentence they would stop trying to fix.
  */
 export const DECISION_ACTION_NOTE = {
   withReply:
     "「대응 필요」로 정하면 아래에서 답변 초안을 준비하고 승인할 수 있습니다. 승인한 답변은 판매자님이 판매자센터에 직접 올리십니다.",
   withoutReply:
     "이 채널에서는 reviewnary가 답변을 작성하지 않습니다. 조치는 판매자님이 직접 하시고, 여기에는 무엇으로 정했는지만 기록됩니다.",
+  withoutAccount:
+    "이 채널에 연결된 판매 계정이 없어 답변 초안은 준비할 수 없습니다. 조치는 판매자님이 직접 하시고, 여기에는 무엇으로 정했는지만 기록됩니다.",
 } as const;
 
 /** The short word for a recorded decision — the same three the worklist and the record use. */

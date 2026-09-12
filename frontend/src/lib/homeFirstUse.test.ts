@@ -79,4 +79,33 @@ describe("the three-state rule, shared with agent-runtime's SellerReadiness", ()
     expect(homeFirstUseState([{ ...row("ZERO", "OBSERVED_FRESH", "NOT_SUPPORTED"), unansweredInquiries: 3 }]).kind)
       .toBe("WORKING");
   });
+
+  /**
+   * Agent-native Core Boundary v1 — a review can arrive without a connection.
+   *
+   * `POST /api/uploads` is addressed by channel and takes no seller account, so a manual CSV and a
+   * seller-center export land on a channel whose coverage row truthfully says `NOT_CONNECTED` while
+   * carrying rows. Measured 2026-09-13: an org with two uploaded Cafe24 reviews reported
+   * `reviews=2, reviewState=NOT_CONNECTED` and this derivation answered `NO_CHANNEL`, so the home
+   * told a seller with work waiting that they had not started.
+   */
+  /** A channel nobody connected, carrying rows this org uploaded — the measured shape. */
+  const uploadedOnto = (reviews: number): ChannelMetricRow =>
+    ({ ...row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_CONNECTED"), reviews }) as ChannelMetricRow;
+
+  it("is WORKING when rows are held and nothing is connected — an upload is not a connection", () => {
+    const state = homeFirstUseState([uploadedOnto(2), row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_SUPPORTED")]);
+    expect(state.kind).toBe("WORKING");
+    // And still no connections: the list is of connections, and there are none to name.
+    expect(state.connected).toEqual([]);
+  });
+
+  it("still says NO_CHANNEL when nothing is connected AND nothing is held", () => {
+    expect(homeFirstUseState([uploadedOnto(0)]).kind).toBe("NO_CHANNEL");
+  });
+
+  it("keeps 「연결된 채널이 없습니다」 truthful — holding uploads is not having connected", () => {
+    // The two questions came apart here, so the boolean stops borrowing the first-use kind.
+    expect(hasAnyConnectedChannel([uploadedOnto(2)])).toBe(false);
+  });
 });

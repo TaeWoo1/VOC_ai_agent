@@ -24,10 +24,18 @@ import java.util.UUID;
  * <p><b>{@code replyWork} is the one place this record touches the reply flow</b> (product assembly A6). It is
  * the server-minted address of the review's reply work plus the two facts the panel mounts on — the operator's
  * current decision and whether a draft or approval already exists — and it is {@code null} for every channel
- * whose capability says {@code replySupported = false}. Coupang gives sellers no way to answer a 상품평 and
- * Cafe24 has no reply flow built, so on those channels there is still no reply field, no draft, and no submit
- * affordance: the surface renders no control the server would refuse. There is never a body here — the draft's
- * text and the approval's state come from the reply read, addressed by {@code actionRef}.
+ * whose capability says {@code replySupported = false}. Coupang gives sellers no way to answer a 상품평, so
+ * there is still no reply field, no draft, and no submit affordance: the surface renders no control the server
+ * would refuse. There is never a body here — the draft's text and the approval's state come from the reply
+ * read, addressed by {@code actionRef}.
+ *
+ * <p><b>{@code sellerAccountId} and {@code replyUnavailableReason} carry the account boundary.</b> Reading and
+ * deciding a review is org-scoped — the review's own {@code (id, orgId)} is the authorization, and that is
+ * true for a review nobody acquired through a connected account. Replying is not: a reply is something an
+ * ACCOUNT does, on a channel, with a credential. So the account rides here as a FACT about the review's
+ * channel rather than as the address the caller had to know, and when there is no reply work the reason says
+ * which of two different things is true — the channel has no reply flow at all, or this org has no single
+ * account on it. They read as the same {@code null} and they are not the same sentence to a seller.
  */
 public record ChannelReviewDetailView(
         UUID id,
@@ -56,8 +64,25 @@ public record ChannelReviewDetailView(
          */
         TriageFeedbackRequests.CorrectionView sellerCorrection,
         LocateTarget locateTarget,
-        /** The reply work this review can carry, or null when the channel has no reply flow (capability §1). */
+        /** The reply work this review can carry, or null — see {@code replyUnavailableReason} for which. */
         ReplyWork replyWork,
+        /**
+         * The single account this org holds on this review's channel, or null when there is none — or
+         * when there is more than one, which is an ambiguity a review id cannot resolve.
+         *
+         * <p>Not an address the caller supplies: every route that produced this view is org-scoped.
+         * It exists so a surface can reach the lanes that ARE account-bound (the reply panel, the
+         * channel's own review record) without a second read, and so it can say nothing about them
+         * when there is no account.
+         */
+        UUID sellerAccountId,
+        /**
+         * Why {@code replyWork} is null, as a closed token, or null when reply work exists:
+         * {@code CHANNEL_HAS_NO_REPLY_FLOW} — the channel gives sellers no way to answer at all;
+         * {@code NO_SELLER_ACCOUNT} — this org has no single connected account on this channel, so
+         * there is nobody for a reply to be from.
+         */
+        String replyUnavailableReason,
         /** {@code MARKETPLACE} | {@code NONE} — see {@code RecentReviewItemView.executableIdentity}. */
         String executableIdentity) {
 

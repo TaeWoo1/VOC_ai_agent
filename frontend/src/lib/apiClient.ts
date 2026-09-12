@@ -1374,6 +1374,27 @@ export const api = {
     return data;
   },
 
+  /**
+   * The same decision, addressed by the review alone.
+   *
+   * No `actionRef`: the path already names the review, and a ref that decodes to the same id would be
+   * a second address for one object. Idempotency is unchanged — same `commandId` contract, same
+   * replay/409 semantics — because the write underneath is the same one.
+   */
+  async recordReviewDecision(
+    reviewId: string,
+    body: { commandId: string; disposition: TriageDisposition },
+  ): Promise<TriageDecisionResponse> {
+    if (USE_MOCKS) {
+      return mockVocItemTriage(`review:${reviewId}`, body.disposition);
+    }
+    const { data } = await http.post<TriageDecisionResponse>(
+      `/api/reviews/${encodeURIComponent(reviewId)}/decision`,
+      body,
+    );
+    return data;
+  },
+
   // --- Review response preparation ------------------------------------------------
   //
   // All three round-trip `actionRef` percent-encoded, for the reason recordVocItemTriage
@@ -1960,7 +1981,22 @@ export const api = {
     return data;
   },
 
-  /** One review in full. No mock fallback, as above. */
+  /**
+   * One review in full, addressed by the review alone — the read the Decision Workspace opens on.
+   *
+   * Org-scoped from the JWT. The account segment the sibling below carries was never the
+   * authorization (that is `(reviewId, orgId)`); all it did was make the address unreachable for a
+   * review no account acquired — every manual upload, every seller-center export. No mock fallback:
+   * a silent fallback here would show a seller a decision belonging to a review that is not theirs.
+   */
+  async getReviewWorkspace(reviewId: string): Promise<ChannelReviewDetailView> {
+    const { data } = await http.get<ChannelReviewDetailView>(
+      `/api/reviews/${encodeURIComponent(reviewId)}/workspace`,
+    );
+    return data;
+  },
+
+  /** The same review at the channel record's own account-scoped address. No mock fallback, as above. */
   async getChannelReviewStrict(accountId: string, reviewId: string): Promise<ChannelReviewDetailView> {
     const { data } = await http.get<ChannelReviewDetailView>(
       `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}`,
@@ -1987,14 +2023,16 @@ export const api = {
   //
   // Records; never changes a tier, hides a row, marks anything done, or touches a marketplace.
 
-  /** The seller's answer — 확인 필요 or 필요 없음. Strong evidence; supersedes their previous answer. */
-  async correctChannelReviewTriage(
-    accountId: string,
-    reviewId: string,
-    request: TriageCorrectionRequest,
-  ): Promise<TriageCorrectionView> {
+  /**
+   * The seller's own judgment for one review — one of the three tiers. Strong evidence; supersedes
+   * their previous answer and keeps it in the trail.
+   *
+   * Org-scoped: what a seller thinks about their own record is not addressed through an account, and
+   * is never sent anywhere.
+   */
+  async correctReviewTriage(reviewId: string, request: TriageCorrectionRequest): Promise<TriageCorrectionView> {
     const { data } = await http.post<TriageCorrectionView>(
-      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/correction`,
+      `/api/reviews/${encodeURIComponent(reviewId)}/triage-feedback/correction`,
       request,
     );
     return data;
@@ -2004,10 +2042,8 @@ export const api = {
    * 되돌리기 — the seller takes their correction back. The review reads as the system's judgment
    * alone again; the row and its trail are kept server-side.
    */
-  async withdrawChannelReviewTriageCorrection(accountId: string, reviewId: string): Promise<void> {
-    await http.delete(
-      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/correction`,
-    );
+  async withdrawReviewTriageCorrection(reviewId: string): Promise<void> {
+    await http.delete(`/api/reviews/${encodeURIComponent(reviewId)}/triage-feedback/correction`);
   },
 
   /**
@@ -2016,38 +2052,32 @@ export const api = {
    * A SECOND read, deliberately separate from the one that opens the screen: none of it is needed to
    * answer a customer, so it must not be able to delay or fail the panel that does.
    */
-  async getReviewDecisionContext(accountId: string, reviewId: string): Promise<ReviewDecisionContext> {
+  async getReviewDecisionContext(reviewId: string): Promise<ReviewDecisionContext> {
     const { data } = await http.get<ReviewDecisionContext>(
-      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/decision-context`,
+      `/api/reviews/${encodeURIComponent(reviewId)}/decision-context`,
     );
     return data;
   },
 
   /** What has already been decided about this review, newest first. Read from existing trails only. */
-  async getReviewDecisionLog(accountId: string, reviewId: string): Promise<ReviewDecisionLogEntry[]> {
+  async getReviewDecisionLog(reviewId: string): Promise<ReviewDecisionLogEntry[]> {
     const { data } = await http.get<ReviewDecisionLogEntry[]>(
-      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/decision-log`,
+      `/api/reviews/${encodeURIComponent(reviewId)}/decision-log`,
     );
     return data;
   },
 
   /** The review's correction trail, oldest first — what the seller said and when they changed it. */
-  async getChannelReviewCorrectionHistory(
-    accountId: string,
-    reviewId: string,
-  ): Promise<TriageCorrectionHistoryView[]> {
+  async getReviewCorrectionHistory(reviewId: string): Promise<TriageCorrectionHistoryView[]> {
     const { data } = await http.get<TriageCorrectionHistoryView[]>(
-      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/correction/history`,
+      `/api/reviews/${encodeURIComponent(reviewId)}/triage-feedback/correction/history`,
     );
     return data;
   },
 
-  /** The seller acted on the review. Append-only. */
-  async recordChannelReviewTriageAction(accountId: string, reviewId: string, kind: TriageActionKind): Promise<void> {
-    await http.post(
-      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/actions`,
-      { kind },
-    );
+  /** The seller acted on the review. Append-only; nothing is sent anywhere. */
+  async recordReviewTriageAction(reviewId: string, kind: TriageActionKind): Promise<void> {
+    await http.post(`/api/reviews/${encodeURIComponent(reviewId)}/triage-feedback/actions`, { kind });
   },
 
   /**

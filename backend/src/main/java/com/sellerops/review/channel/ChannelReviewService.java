@@ -30,6 +30,7 @@ import com.sellerops.review.triage.feedback.TriageDisplayDecision;
 import com.sellerops.review.channel.dto.ReviewChannelCapabilityView;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.Channel;
+import com.sellerops.review.publish.ReviewExecutionKind;
 import com.sellerops.review.triage.ReviewTriageChannelCapability;
 import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import com.sellerops.attention.reply.ReviewReplyWorkLookup;
@@ -294,22 +295,83 @@ public class ChannelReviewService {
     }
 
     /**
-     * One review in full, with the target that finds it on the seller's own screen. Org-scoped at the query
-     * boundary, then checked against the account's channel: a review id from another of the org's channels is
-     * a wrong answer, not merely an odd one, because the locate target would send the agent looking for it on
-     * a screen it was never written on.
+     * One review in full, addressed by the review alone — org-scoped, and nothing else.
+     *
+     * <p><b>This is the canonical read.</b> {@code (reviewId, orgId)} was always the authorization; the
+     * account contributed one channel-equality check, and that check was a statement about the ADDRESS
+     * the caller happened to use rather than about who may read the row. A review acquired by no
+     * account — a manual upload, a seller-center export — is still this org's review, and until this
+     * overload existed there was no address at which it could be read in full.
+     *
+     * <p>The account is still resolved, because the reply lane is genuinely account-bound; it is
+     * resolved FROM the review's channel instead of being supplied, and its absence costs the caller
+     * the reply panel and nothing else.
+     */
+    public ChannelReviewDetailView detail(UUID orgId, UUID reviewId) {
+        Review review = reviews.findByIdAndOrgId(reviewId, orgId)
+                .orElseThrow(() -> ApiException.notFound("상품평을 찾을 수 없습니다."));
+        return detail(orgId, review, replyAccountFor(orgId, review));
+    }
+
+    /**
+     * The same review, addressed through one of the org's accounts — the record screen's address.
+     *
+     * <p>Kept because the channel record IS account-shaped: it lists what one connected account holds.
+     * The channel-equality filter stays for the same reason it was written — a review from another of
+     * the org's channels is a wrong answer at this address, not merely an odd one, because the locate
+     * target would send the agent looking for it on a screen it was never written on.
      */
     public ChannelReviewDetailView detail(UUID orgId, UUID accountId, UUID reviewId) {
         SellerAccount account = requireAccount(orgId, accountId);
         Review review = reviews.findByIdAndOrgId(reviewId, orgId)
                 .filter(r -> account.getChannelId().equals(r.getChannelId()))
                 .orElseThrow(() -> ApiException.notFound("상품평을 찾을 수 없습니다."));
+        return detail(orgId, review, account);
+    }
 
+    /**
+     * The single account this org holds on this review's channel, or null.
+     *
+     * <p>Null for none AND for more than one: with two accounts on one channel there is no way to say
+     * from a review which of them a reply would be from, and picking the older one would answer a
+     * question nobody asked. Fail-closed, exactly as the ingested-review attention source does.
+     */
+    private SellerAccount replyAccountFor(UUID orgId, Review review) {
+        if (review.getChannelId() == null) {
+            return null;
+        }
+        List<SellerAccount> found = accounts.findAllByOrgIdAndChannelId(orgId, review.getChannelId());
+        return found.size() == 1 ? found.get(0) : null;
+    }
+
+    /**
+     * The body both addresses share. Every channel-derived fact comes from the REVIEW's own channel —
+     * which is what it always meant, even when it was read off an account that had been checked equal
+     * to it — and the account is used for exactly one thing: whether a reply can be executed.
+     */
+    private ChannelReviewDetailView detail(UUID orgId, Review review, SellerAccount account) {
+        UUID channelId = review.getChannelId();
+        String channelCode = channelId == null ? null : channelCodeOf(channelId);
         Product product = review.getProductId() == null ? null
                 : products.findAllByOrgIdAndIdIn(orgId, List.of(review.getProductId()))
                         .stream().findFirst().orElse(null);
         RedactedBody body = VocPreviewSanitizer.redactFullBody(review.getBody());
-        Instant newSince = lastReviewImport(orgId, account.getChannelId()).map(SyncJob::getStartedAt).orElse(null);
+        Instant newSince = channelId == null ? null
+                : lastReviewImport(orgId, channelId).map(SyncJob::getStartedAt).orElse(null);
+        // No account, no reply work — and it is refused HERE rather than inside the lookup, which
+        // answers a question about the CHANNEL. NAVER's capability says a reply flow exists whether or
+        // not this seller has connected anything; handing out its ref with no account would put a
+        // draft panel on screen that every account-addressed reply endpoint would then refuse.
+        ChannelReviewDetailView.ReplyWork work = account == null ? null
+                : replyWork.forReview(orgId, channelCode, review.getId(),
+                                execution.of(orgId, account.getId(), channelCode).kind())
+                        .map(r -> new ChannelReviewDetailView.ReplyWork(
+                                r.actionRef(), r.triageDisposition(), r.hasReplyPreparation(),
+                                // The channel's own statement, off the entity already read for this
+                                // response. Never SellerOps' record of a guided reply (that is
+                                // `outcome`), and never a substitute for the operator's decision.
+                                review.getReplyState().name()))
+                        .orElse(null);
 
         return new ChannelReviewDetailView(
                 review.getId(),
@@ -329,7 +391,7 @@ public class ChannelReviewService {
                 //
                 // The count is for THIS review's category alone. Reusing the grouped breakdown made
                 // opening one review scan the channel's whole analysis join to read a single entry.
-                detailNote(orgId, account.getChannelId(), review),
+                detailNote(orgId, channelId, review),
                 marksOf(orgId, List.of(review)).get(review.getId()),
                 // The seller's own judgment, read back on every open — so a correction survives a
                 // refresh on the screen as well as in the database. Null when none stands.
@@ -342,18 +404,28 @@ public class ChannelReviewService {
                         review.getSourceOptionId(),
                         writtenOn(review),
                         review.getRating()),
-                // The reply flow's address, only where the channel has one (A6). Same capability row as
-                // `capabilityOf`, so the detail never carries a ref the reply endpoints would refuse.
-                replyWork.forReview(orgId, channelCodeOf(account.getChannelId()), review.getId(),
-                                execution.of(orgId, account.getId(), channelCodeOf(account.getChannelId())).kind())
-                        .map(r -> new ChannelReviewDetailView.ReplyWork(
-                                r.actionRef(), r.triageDisposition(), r.hasReplyPreparation(),
-                                // The channel's own statement, off the entity already read for this
-                                // response. Never SellerOps' record of a guided reply (that is
-                                // `outcome`), and never a substitute for the operator's decision.
-                                review.getReplyState().name()))
-                        .orElse(null),
+                work,
+                account == null ? null : account.getId(),
+                replyUnavailableReason(work, account, channelCode),
                 identity.forReview(review).name());
+    }
+
+    /**
+     * Which of two different absences produced a null {@code replyWork}, or null when it is present.
+     *
+     * <p>Derived, never stored: the channel's own capability answers first, because 「쿠팡은 상품평에
+     * 답변하는 기능이 없습니다」 is true whether or not this seller has connected anything. Only where a
+     * reply flow does exist is a missing account the reason.
+     */
+    private static String replyUnavailableReason(ChannelReviewDetailView.ReplyWork work,
+                                                 SellerAccount account, String channelCode) {
+        if (work != null) {
+            return null;
+        }
+        if (!ReviewTriageChannelCapability.of(channelCode).replyFlowExists()) {
+            return "CHANNEL_HAS_NO_REPLY_FLOW";
+        }
+        return account == null ? "NO_SELLER_ACCOUNT" : "CHANNEL_HAS_NO_REPLY_FLOW";
     }
 
     private ChannelReviewItemView item(Review review, Product product, Instant newSince,

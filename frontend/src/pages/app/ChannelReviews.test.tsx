@@ -103,6 +103,8 @@ function correctionView(tier: "NEEDS_ATTENTION" | "WATCH" | "FYI") {
 
 const DETAIL: ChannelReviewDetailView = {
   id: "r1",
+  sellerAccountId: "acc-1",
+  replyUnavailableReason: null,
   writtenOn: "2026-08-11",
   rating: 5,
   negative: false,

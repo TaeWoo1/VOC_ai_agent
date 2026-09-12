@@ -16,7 +16,16 @@ import type { ChannelDataState, ChannelMetricRow } from "./types";
  * channel this product has no review path for is not a channel waiting to deliver reviews.
  */
 export type HomeFirstUseKind =
-  /** No channel is connected: the only thing to do is connect one. */
+  /**
+   * No channel is connected AND this org holds nothing: the only thing to do is connect one.
+   *
+   * Both halves, because they are different facts. A review can arrive without a connection —
+   * `POST /api/uploads` is addressed by channel and takes no account, so a manual CSV and a
+   * seller-center export land on a channel whose coverage row truthfully reads `NOT_CONNECTED` while
+   * carrying rows. Measured 2026-09-13 on an org with two uploaded Cafe24 reviews: the row said
+   * `reviews=2, reviewState=NOT_CONNECTED`, this state said `NO_CHANNEL`, and the home told a seller
+   * with work waiting that they had not started yet.
+   */
   | "NO_CHANNEL"
   /** Connected, and this org holds nothing yet — either not collected, or collected and empty. */
   | "NO_DATA"
@@ -52,7 +61,12 @@ const SILENT: ReadonlySet<ChannelDataState> = new Set<ChannelDataState>(["NOT_CO
  * It used to live in `firstConnectionState.ts` with its own copy of the predicate. Two files deciding
  * «is anything connected» from the same rows is one rule that can drift, and this one had already
  * started to: the copy read the three state fields directly while this module reads them through
- * {@link typesOf}. One derivation now, two names.
+ * {@link typesOf}. One derivation now ({@link connectedRowsOf}), two names.
+ *
+ * <b>It asks its own question and no longer borrows the first-use kind.</b> Those were the same
+ * question until an org could hold rows with nothing connected; now «is anything connected» and «has
+ * this seller got anything at all» have different answers for an org that uploads its reviews, and
+ * the sentence this boolean chooses (「아직 연결된 채널이 없습니다」) is about the first one.
  *
  * <b>Two states mean "nothing is arriving from here", and only one of them is about connection.</b>
  * `NOT_CONNECTED` is the seller not having connected the channel; `NOT_SUPPORTED` is this product
@@ -62,7 +76,7 @@ const SILENT: ReadonlySet<ChannelDataState> = new Set<ChannelDataState>(["NOT_CO
  * uses this to choose a colour — never to tell a seller their channels are disconnected.
  */
 export function hasAnyConnectedChannel(rows: readonly ChannelMetricRow[]): boolean {
-  return homeFirstUseState(rows).kind !== "NO_CHANNEL";
+  return connectedRowsOf(rows).length > 0;
 }
 const OBSERVED: ReadonlySet<ChannelDataState> = new Set<ChannelDataState>(["OBSERVED_FRESH", "ZERO"]);
 
@@ -75,8 +89,24 @@ function typesOf(row: ChannelMetricRow): ReadonlyArray<{ type: "ORDER" | "INQUIR
   ];
 }
 
+/** The rows this seller has actually connected something on. One derivation, two readers. */
+function connectedRowsOf(rows: readonly ChannelMetricRow[]): readonly ChannelMetricRow[] {
+  return rows.filter((row) => typesOf(row).some((t) => !SILENT.has(t.state)));
+}
+
+/**
+ * **Is anything here?** — counted across EVERY row, connected or not.
+ *
+ * A count on a coverage row is rows this org holds; there is no other way for one to be non-zero. It
+ * used to be read only off connected rows, which silently discarded everything a seller uploaded.
+ */
+function holdsAnything(rows: readonly ChannelMetricRow[]): boolean {
+  return rows.some((row) =>
+    typesOf(row).some((t) => t.count > 0) || (row.unansweredInquiries ?? 0) > 0);
+}
+
 export function homeFirstUseState(rows: readonly ChannelMetricRow[]): HomeFirstUseState {
-  const connectedRows = rows.filter((row) => typesOf(row).some((t) => !SILENT.has(t.state)));
+  const connectedRows = connectedRowsOf(rows);
   // What this product can take off the seller's hands, across every channel on the table — a data type
   // is delegable when at least one channel offers a path for it. Never a written list: a channel whose
   // review collection this product does not have must not appear as a review promise.
@@ -84,7 +114,12 @@ export function homeFirstUseState(rows: readonly ChannelMetricRow[]): HomeFirstU
     rows.some((row) => typesOf(row).some((t) => t.type === type && t.state !== "NOT_SUPPORTED")));
   const connectable = rows.filter((row) => !connectedRows.includes(row)).map((row) => row.channelNameKo || row.channelCode);
   if (connectedRows.length === 0) {
-    return { kind: "NO_CHANNEL", connected: [], observed: false, delegable, connectable };
+    // Nothing connected is not the same as nothing here. With rows in hand the honest home is the
+    // ordinary one — the work is real and reachable, and every surface it links to is org-scoped.
+    // `connected` stays empty because it is a list of connections and there are none.
+    return holdsAnything(rows)
+      ? { kind: "WORKING", connected: [], observed: false, delegable, connectable }
+      : { kind: "NO_CHANNEL", connected: [], observed: false, delegable, connectable };
   }
   const connected = connectedRows.map((row) => row.channelNameKo || row.channelCode);
   /**
@@ -96,9 +131,7 @@ export function homeFirstUseState(rows: readonly ChannelMetricRow[]): HomeFirstU
    * measures are not added (they count different things); either one being non-zero is enough to say the
    * shop is not empty.
    */
-  const held = connectedRows.some((row) =>
-    typesOf(row).some((t) => !SILENT.has(t.state) && t.count > 0)
-    || (!SILENT.has(row.inquiryState) && (row.unansweredInquiries ?? 0) > 0));
+  const held = holdsAnything(rows);
   const observed = connectedRows.some((row) => typesOf(row).some((t) => OBSERVED.has(t.state)));
   return { kind: held ? "WORKING" : "NO_DATA", connected, observed, delegable, connectable };
 }

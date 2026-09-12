@@ -103,7 +103,7 @@ class ReviewDecisionWorkspaceServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ReviewDecisionWorkspaceService(reviews, channels, products, accounts, evidence, issues,
+        service = new ReviewDecisionWorkspaceService(reviews, channels, products, evidence, issues,
                 productKnowledge, orgKnowledge, candidates, correctionAudit, actions, triages,
                 triageAudit, approvals, approvalAudit, outcomes);
         account = account(org);
@@ -121,7 +121,7 @@ class ReviewDecisionWorkspaceServiceTest {
         link(issue, subject, product);
         link(issue, other, product);
 
-        ReviewDecisionContextView view = service.context(org, account.getId(), subject.getId());
+        ReviewDecisionContextView view = service.context(org, subject.getId());
 
         assertThat(view.repeatedProblems()).hasSize(1);
         ReviewDecisionContextView.RepeatedProblem problem = view.repeatedProblems().get(0);
@@ -143,7 +143,7 @@ class ReviewDecisionWorkspaceServiceTest {
         // resemblance is not this service's judgment to make.
         review("색이 진합니다", 3, product);
 
-        ReviewDecisionContextView view = service.context(org, account.getId(), subject.getId());
+        ReviewDecisionContextView view = service.context(org, subject.getId());
 
         assertThat(view.repeatedProblems()).isEmpty();
     }
@@ -155,14 +155,14 @@ class ReviewDecisionWorkspaceServiceTest {
         review("떨어집니다", 1, product);
         Review unbound = review("상품 미지정 리뷰", 2, null);
 
-        ReviewDecisionContextView boundView = service.context(org, account.getId(), bound.getId());
+        ReviewDecisionContextView boundView = service.context(org, bound.getId());
         assertThat(boundView.productSignal()).isNotNull();
         assertThat(boundView.productSignal().reviews()).isEqualTo(2);
         assertThat(boundView.productSignal().negativeReviews()).isEqualTo(1);
 
         // Null, not zeros: "this product has no other reviews" and "this review is bound to no
         // product" are different statements and 0건 would answer a question nobody could ask.
-        ReviewDecisionContextView unboundView = service.context(org, account.getId(), unbound.getId());
+        ReviewDecisionContextView unboundView = service.context(org, unbound.getId());
         assertThat(unboundView.productSignal()).isNull();
         assertThat(unboundView.productId()).isNull();
     }
@@ -177,7 +177,7 @@ class ReviewDecisionWorkspaceServiceTest {
         orgSource("폐기된 반품 기준", false);
         openAsk(product);
 
-        ReviewDecisionContextView view = service.context(org, account.getId(), subject.getId());
+        ReviewDecisionContextView view = service.context(org, subject.getId());
 
         assertThat(view.knowledge().productSources()).isEqualTo(1);
         assertThat(view.knowledge().orgSources()).isEqualTo(1);
@@ -195,7 +195,7 @@ class ReviewDecisionWorkspaceServiceTest {
     void the_decision_address_is_handed_out_even_where_the_channel_has_no_reply_flow() {
         Review subject = review("본문", 2, null);
 
-        ReviewDecisionContextView view = service.context(org, account.getId(), subject.getId());
+        ReviewDecisionContextView view = service.context(org, subject.getId());
 
         assertThat(view.decisionRef()).isEqualTo("review:" + subject.getId());
         assertThat(view.channelCode()).isEqualTo("COUPANG");
@@ -207,7 +207,7 @@ class ReviewDecisionWorkspaceServiceTest {
         Review subject = review("본문", 2, null);
         dispositionEvent(subject, null, TriageDisposition.MONITOR, Instant.parse("2026-09-01T00:00:00Z"));
 
-        assertThat(service.context(org, account.getId(), subject.getId()).currentDecision())
+        assertThat(service.context(org, subject.getId()).currentDecision())
                 .isEqualTo(TriageDisposition.MONITOR.name());
     }
 
@@ -215,9 +215,9 @@ class ReviewDecisionWorkspaceServiceTest {
     void another_orgs_review_is_indistinguishable_from_one_that_does_not_exist() {
         Review subject = review("본문", 2, null);
 
-        assertThatThrownBy(() -> service.context(UUID.randomUUID(), account.getId(), subject.getId()))
+        assertThatThrownBy(() -> service.context(UUID.randomUUID(), subject.getId()))
                 .isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> service.log(UUID.randomUUID(), account.getId(), subject.getId()))
+        assertThatThrownBy(() -> service.log(UUID.randomUUID(), subject.getId()))
                 .isInstanceOf(ApiException.class);
     }
 
@@ -233,7 +233,7 @@ class ReviewDecisionWorkspaceServiceTest {
         actionEvent(subject, TriageActionKind.ACTION_COMPLETED, t0.plus(2, ChronoUnit.HOURS));
         approvalEvent(subject, null, ReviewReplyApprovalState.APPROVED, t0.plus(3, ChronoUnit.HOURS));
 
-        List<ReviewDecisionLogEntryView> log = service.log(org, account.getId(), subject.getId());
+        List<ReviewDecisionLogEntryView> log = service.log(org, subject.getId());
 
         assertThat(log).extracting(ReviewDecisionLogEntryView::kind).containsExactly(
                 ReviewDecisionLogKind.REPLY_APPROVAL.name(),
@@ -252,7 +252,7 @@ class ReviewDecisionWorkspaceServiceTest {
         correctionEvent(subject, TriageCorrectionAudit.Kind.WITHDRAWN, ReviewTriageTier.FYI, null,
                 t0.plus(1, ChronoUnit.HOURS));
 
-        List<ReviewDecisionLogEntryView> log = service.log(org, account.getId(), subject.getId());
+        List<ReviewDecisionLogEntryView> log = service.log(org, subject.getId());
 
         assertThat(log).hasSize(2);
         assertThat(log.get(0).kind()).isEqualTo(ReviewDecisionLogKind.SELLER_JUDGMENT_WITHDRAWN.name());
@@ -264,7 +264,7 @@ class ReviewDecisionWorkspaceServiceTest {
     void a_review_nobody_has_decided_has_an_empty_log_rather_than_an_invented_event() {
         Review subject = review("본문", 5, null);
 
-        assertThat(service.log(org, account.getId(), subject.getId())).isEmpty();
+        assertThat(service.log(org, subject.getId())).isEmpty();
     }
 
     /* ───────────────────────────── fixtures ───────────────────────────── */

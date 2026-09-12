@@ -130,6 +130,28 @@ public class ReviewTriageService {
      */
     public TriageDecisionResponse decide(UUID orgId, UUID accountId, String actionRef,
                                          String disposition, String commandId, UUID actorUserId) {
+        return decide(orgId, accountId, VocItemRef.parseReviewId(actionRef), actionRef,
+                disposition, commandId, actorUserId);
+    }
+
+    /**
+     * The same decision, addressed by the review alone — no account, and no ref to parse.
+     *
+     * <p><b>This is what deciding always was.</b> The write below is keyed on
+     * {@code (orgId, reviewId)} and stamps the REVIEW's channel; the account contributed a check that
+     * its channel equalled that one. Every idempotency, locking and race guarantee in this class is
+     * unchanged, because none of them ever read the account. What changes is that a review acquired
+     * without a connected account — a manual upload, a seller-center export — can now be decided,
+     * which is the point: deciding is not replying, and only replying is something an account does.
+     */
+    public TriageDecisionResponse decide(UUID orgId, UUID reviewId, String disposition,
+                                         String commandId, UUID actorUserId) {
+        return decide(orgId, null, reviewId, VocItemRef.forReview(reviewId),
+                disposition, commandId, actorUserId);
+    }
+
+    private TriageDecisionResponse decide(UUID orgId, UUID accountId, UUID reviewId, String actionRef,
+                                          String disposition, String commandId, UUID actorUserId) {
         // Validate the payload before touching the database: a caller who sends nonsense
         // learns only that it was nonsense, not whether any row exists.
         if (commandId == null || commandId.isBlank()) {
@@ -140,16 +162,18 @@ public class ReviewTriageService {
             throw ApiException.badRequest("commandId가 너무 깁니다.");
         }
         TriageDisposition target = TriageDisposition.parse(disposition);
-        UUID reviewId = VocItemRef.parseReviewId(actionRef);
 
-        SellerAccount account = sellerAccounts.findByIdAndOrgId(accountId, orgId)
-                .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
         Review review = reviews.findByIdAndOrgId(reviewId, orgId)
                 .orElseThrow(ReviewTriageService::unaddressable);
-        // The account's channel is the scope; a review on another channel is not addressable
-        // from this account. Same 404 as an absent review, on purpose (see the class note).
-        if (account.getChannelId() == null || !account.getChannelId().equals(review.getChannelId())) {
-            throw unaddressable();
+        if (accountId != null) {
+            SellerAccount account = sellerAccounts.findByIdAndOrgId(accountId, orgId)
+                    .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
+            // At an ACCOUNT-addressed entry the account's channel is the scope; a review on another
+            // channel is not addressable from this account. Same 404 as an absent review, on purpose
+            // (see the class note).
+            if (account.getChannelId() == null || !account.getChannelId().equals(review.getChannelId())) {
+                throw unaddressable();
+            }
         }
 
         // Fast path only — NOT the correctness boundary. A concurrent caller can commit

@@ -20,7 +20,6 @@ import type {
   ChannelReviewDetailView,
   ReviewDecisionContext,
   ReviewDecisionLogEntry,
-  ReviewDetailResponse,
   TriageDisposition,
 } from "../../lib/types";
 
@@ -58,11 +57,17 @@ import type {
  * delay or fail the panel that does. A failed context or log renders nothing rather than an absence
  * claim about something the screen never saw.
  *
+ * <p><b>Addressed by the review alone</b> (Agent-native Core Boundary v1). `/reviews/reply/:reviewId`
+ * IS this page now — it used to resolve an account and redirect, and a review with no account to
+ * resolve hit a dead end that said so in as many words. Every read and write above is org-scoped; the
+ * account arrives as a FACT on the detail (`sellerAccountId`) and is used for exactly the two things
+ * that are genuinely account-shaped: the reply panel, and the link back to that channel's record.
+ *
  * <p><b>Nothing on this page posts to a marketplace.</b> The only writes are the ones the product
  * already had, and every one of them lands in reviewnary's own database.
  */
 export function ReviewReplyTask() {
-  const { accountId = "", reviewId = "" } = useParams();
+  const { reviewId = "" } = useParams();
   const [params] = useSearchParams();
   const cameFromConversation = params.get("from") === "chat";
 
@@ -93,11 +98,11 @@ export function ReviewReplyTask() {
   const [localWork, setLocalWork] = useState(false);
 
   useEffect(() => {
-    if (!accountId || !reviewId) return;
+    if (!reviewId) return;
     let live = true;
     setLoading(true);
     api
-      .getChannelReviewStrict(accountId, reviewId)
+      .getReviewWorkspace(reviewId)
       .then((view) => {
         if (!live) return;
         setDetail(view);
@@ -116,13 +121,13 @@ export function ReviewReplyTask() {
     return () => {
       live = false;
     };
-  }, [accountId, reviewId, version]);
+  }, [reviewId, version]);
 
   useEffect(() => {
-    if (!accountId || !reviewId) return;
+    if (!reviewId) return;
     let live = true;
     api
-      .getReviewDecisionContext(accountId, reviewId)
+      .getReviewDecisionContext(reviewId)
       .then((view) => {
         if (!live) return;
         setContext(view);
@@ -139,13 +144,13 @@ export function ReviewReplyTask() {
     return () => {
       live = false;
     };
-  }, [accountId, reviewId, version]);
+  }, [reviewId, version]);
 
   useEffect(() => {
-    if (!accountId || !reviewId) return;
+    if (!reviewId) return;
     let live = true;
     api
-      .getReviewDecisionLog(accountId, reviewId)
+      .getReviewDecisionLog(reviewId)
       .then((rows) => {
         if (!live) return;
         setLog(rows);
@@ -159,13 +164,19 @@ export function ReviewReplyTask() {
     return () => {
       live = false;
     };
-  }, [accountId, reviewId, version]);
+  }, [reviewId, version]);
 
   const word = reviewWord(context?.channelCode ?? null);
 
+  // The channel record is an ACCOUNT-shaped surface: it lists what one connected account holds. A
+  // review this org uploaded has no such page, so the way back is the index rather than a link into a
+  // record that does not exist. Read from the detail, so it is right on both kinds of review and is
+  // simply the index while the detail is still loading.
+  const recordPath = detail?.sellerAccountId ? reviewRecordPath(detail.sellerAccountId) : "/reviews";
+
   const back = (
     <div className="flex flex-wrap items-center gap-3">
-      <Link to={reviewRecordPath(accountId)} className="text-sm font-semibold text-muted hover:text-ink hover:underline">
+      <Link to={recordPath} className="text-sm font-semibold text-muted hover:text-ink hover:underline">
         ← 리뷰 기록으로
       </Link>
       {/* The conversation that sent the seller here is still the one at `/` — the pointer is stored per
@@ -210,9 +221,10 @@ export function ReviewReplyTask() {
   // withdraw it. Both operands are free — the decision is local and `prepared` starts from a flag this
   // page already read — so the rule costs no request of its own.
   const showDraft = replyWork !== null && (decision === "RESPONSE_NEEDED" || prepared || localWork);
-  // The decision's address: the context read's, or the reply lane's, which is the same address minted
-  // by the same server for the same review. Neither is composed here.
-  const decisionRef = context?.decisionRef ?? replyWork?.actionRef ?? null;
+  // The reply lane's own address. Reply work is only ever handed out with an account behind it, so
+  // this is non-null exactly when the panel below mounts; the `?? ""` is a type narrowing, not a
+  // fallback that could send a request.
+  const replyAccountId = detail.sellerAccountId ?? "";
 
   return (
     <div className="space-y-6">
@@ -235,7 +247,13 @@ export function ReviewReplyTask() {
             <span className="tabular-nums">{detail.writtenOn ?? "날짜 없음"}</span>
           </Facts>
         }
-        action={<BtnLink to={`${reviewRecordPath(accountId)}?review=${detail.id}`} variant="ghost" size="sm">리뷰 기록에서 보기</BtnLink>}
+        action={
+          detail.sellerAccountId ? (
+            <BtnLink to={`${reviewRecordPath(detail.sellerAccountId)}?review=${detail.id}`} variant="ghost" size="sm">
+              리뷰 기록에서 보기
+            </BtnLink>
+          ) : undefined
+        }
       />
 
       {/* 1 · 2 — what the problem is, and why it is here. */}
@@ -255,7 +273,6 @@ export function ReviewReplyTask() {
       {/* 5 — the seller's own judgment, which does not replace the system's. */}
       <Section title="판매자 판단" ariaLabel="판매자 판단 영역">
         <SellerCorrectionControls
-          accountId={accountId}
           reviewId={detail.id}
           word={word}
           systemTier={detail.triage.tier}
@@ -266,25 +283,21 @@ export function ReviewReplyTask() {
         />
       </Section>
 
-      {/* 6 — what to do. The address is the decision's own, so a channel with no reply flow can still
-          record one; where the reply lane exists its ref addresses the same decision, so a failed
-          context read costs the seller the CONTEXT and not the ability to decide. Both are minted by
-          the server — this page composes neither. With no ref at all there is no control, because a
-          control that could not write is worse than none. */}
-      {decisionRef ? (
-        <DecisionActionStep
-          accountId={accountId}
-          reviewId={detail.id}
-          decisionRef={decisionRef}
-          decision={decision}
-          replySupported={replyWork !== null}
-          onDecided={(next) => {
-            setDecision(next);
-            bump();
-          }}
-          onRecorded={bump}
-        />
-      ) : null}
+      {/* 6 — what to do. The address is the review, so this control stands on every review the
+          workspace can open: a channel with no reply flow, and a review no account acquired. It used
+          to be gated on a server-minted ref, which meant a failed context read could cost the seller
+          the ability to decide as well as the context. */}
+      <DecisionActionStep
+        reviewId={detail.id}
+        decision={decision}
+        replySupported={replyWork !== null}
+        replyUnavailableReason={detail.replyUnavailableReason}
+        onDecided={(next) => {
+          setDecision(next);
+          bump();
+        }}
+        onRecorded={bump}
+      />
 
       {/* 7 — the draft that follows from 대응 필요. The same panel as every other reply surface: no
           second reply flow, no write this page owns, and the approval boundary untouched. */}
@@ -292,7 +305,7 @@ export function ReviewReplyTask() {
         <Section title="답변 준비" ariaLabel="답변 준비 영역">
           <VocItemReplyPrep
             key={`prep-${replyWork.actionRef}`}
-            accountId={accountId}
+            accountId={replyAccountId}
             actionRef={replyWork.actionRef}
             disposition={decision}
             onPrepared={() => setPrepared(true)}
@@ -303,13 +316,19 @@ export function ReviewReplyTask() {
         </Section>
       ) : null}
 
+      {/* Why there is no draft — and the two reasons are not the same sentence. 「이 채널은 답변 기능이
+          없습니다」 is a fact about the marketplace; 「연결된 판매 계정이 없습니다」 is a fact about this
+          seller's setup, and only the second has something they can do about it. The server decides
+          which; this page does not infer it from the channel code. */}
       {replyWork === null ? (
         <div className="space-y-1">
           <p className="break-keep text-sm leading-relaxed text-muted">
-            이 채널에서는 reviewnary가 답변을 작성하지 않습니다.
+            {detail.replyUnavailableReason === "NO_SELLER_ACCOUNT"
+              ? "이 채널에 연결된 판매 계정이 없어 답변을 준비할 수 없습니다."
+              : "이 채널에서는 reviewnary가 답변을 작성하지 않습니다."}
           </p>
           <p className="break-keep text-sm leading-relaxed text-muted">
-            판단과 조치는 위에 기록되고, 원문은 리뷰 기록에서 읽을 수 있습니다.
+            판단과 조치는 위에 기록됩니다.
           </p>
         </div>
       ) : null}
@@ -321,75 +340,20 @@ export function ReviewReplyTask() {
 }
 
 /**
- * `/reviews/reply/:reviewId` — the same workspace, addressed by the review ALONE.
+ * `/reviews/:accountId/reply/:reviewId` — the address this page used to live at.
  *
- * The conversation knows a review by its id and nothing else; the account is ours, not the seller's,
- * and asking a chat artifact to carry it would put a second identifier in the wire contract to save
- * one org-scoped read. So the id resolves here, through the exact read the review anchor already
- * stands on (`GET /api/reviews/{reviewId}`), and the page redirects to the account-scoped address.
- * Another org's id is a 404 there, so it lands on the same honest failure as a deleted review.
+ * <b>A redirect, and nothing else.</b> The canonical address is `/reviews/reply/:reviewId`: the
+ * account was never part of the authorization, and keeping two live copies of one screen is how the
+ * two eventually disagree about what a review is. Links that already exist — a bookmark, a record
+ * screen, an old chat artifact — land on the same workspace with their query string intact.
+ *
+ * The account id is not checked and not passed on. If it named an account this org does not own, the
+ * page it used to open answered 404; now the review it names decides, which is the same answer for an
+ * id from another org and a better one for every id that was simply redundant.
  */
-export function ReviewReplyTaskEntry() {
+export function ReviewReplyTaskLegacyEntry() {
   const { reviewId = "" } = useParams();
   const [params] = useSearchParams();
-  const [resolved, setResolved] = useState<ReviewDetailResponse | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    if (!reviewId) return;
-    let live = true;
-    api
-      .getReviewDetailStrict(reviewId)
-      .then((view) => {
-        if (live) setResolved(view);
-      })
-      .catch(() => {
-        if (live) setFailed(true);
-      });
-    return () => {
-      live = false;
-    };
-  }, [reviewId]);
-
-  if (failed) {
-    return (
-      <div className="space-y-4">
-        <PageHead title="리뷰 처리" compact />
-        <Empty
-          title="이 리뷰를 찾지 못했습니다"
-          body="리뷰가 삭제되었거나 이 계정에서 볼 수 없는 리뷰입니다."
-          action={<BtnLink to="/reviews" size="sm">리뷰 기록 열기</BtnLink>}
-        />
-      </div>
-    );
-  }
-  if (!resolved) {
-    return (
-      <div className="space-y-4">
-        <PageHead title="리뷰 처리" compact />
-        <p className="text-sm text-muted">불러오는 중…</p>
-      </div>
-    );
-  }
-  if (!resolved.sellerAccountId) {
-    // A review with no account binding has no workspace to open — every endpoint this page uses is
-    // addressed by the account. Say that, rather than routing to a path that cannot resolve.
-    return (
-      <div className="space-y-4">
-        <PageHead title="리뷰 처리" compact />
-        <Empty
-          title="이 리뷰의 판매 계정을 확인하지 못했습니다"
-          body="리뷰 처리는 계정 단위로 열립니다. 리뷰 기록에서 채널을 고른 뒤 다시 시도해 주세요."
-          action={<BtnLink to="/reviews" size="sm">리뷰 기록 열기</BtnLink>}
-        />
-      </div>
-    );
-  }
   const search = params.toString();
-  return (
-    <Navigate
-      replace
-      to={`${reviewRecordPath(resolved.sellerAccountId)}/reply/${resolved.id}${search ? `?${search}` : ""}`}
-    />
-  );
+  return <Navigate replace to={`/reviews/reply/${reviewId}${search ? `?${search}` : ""}`} />;
 }

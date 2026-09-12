@@ -13,11 +13,13 @@ import type { TriageDecisionResponse, TriageDisposition } from "../lib/types";
 // through styling — which is the right assertion anyway: `aria-pressed` is what conveys
 // the current choice to a screen reader; a background colour conveys nothing.
 
-const ACTION_REF = "review:6f1c8b1e-0000-4000-8000-000000000001";
+const REVIEW_ID = "6f1c8b1e-0000-4000-8000-000000000001";
+/** Still on the RESPONSE: the server keeps echoing the address it minted. The request no longer carries one. */
+const ACTION_REF = `review:${REVIEW_ID}`;
 
 function renderControl(disposition: TriageDisposition | null = null) {
   render(
-    <VocItemTriageControl accountId="acct-1" actionRef={ACTION_REF} disposition={disposition} />,
+    <VocItemTriageControl reviewId={REVIEW_ID} disposition={disposition} />,
   );
 }
 
@@ -67,7 +69,7 @@ describe("VocItemTriageControl", () => {
     ["지켜보기", "MONITOR"],
     ["조치 불필요", "NO_ACTION"],
   ])("records %s as %s and shows it only after the server confirms", async (label, value) => {
-    const spy = vi.spyOn(api, "recordVocItemTriage").mockResolvedValue({
+    const spy = vi.spyOn(api, "recordReviewDecision").mockResolvedValue({
       actionRef: ACTION_REF,
       disposition: value as TriageDisposition,
       replayed: false,
@@ -79,7 +81,7 @@ describe("VocItemTriageControl", () => {
     await waitFor(() => expect(current()).toBe(label));
     // Every disposition reaches the wire as the enum NAME the backend contract defines —
     // the Korean label is this layer's, and must never travel.
-    expect(spy).toHaveBeenCalledWith("acct-1", ACTION_REF, {
+    expect(spy).toHaveBeenCalledWith(REVIEW_ID, {
       commandId: expect.any(String),
       disposition: value,
     });
@@ -103,7 +105,7 @@ describe("VocItemTriageControl", () => {
   it("reports the server's CURRENT decision, not the one that was asked for", async () => {
     // A replay of a command a later one superseded: the server answers with where things
     // actually stand. Rendering the requested value would show a decision that is not live.
-    vi.spyOn(api, "recordVocItemTriage").mockResolvedValue({
+    vi.spyOn(api, "recordReviewDecision").mockResolvedValue({
       actionRef: ACTION_REF,
       disposition: "NO_ACTION",
       replayed: true,
@@ -122,7 +124,7 @@ describe("VocItemTriageControl", () => {
     // makes the browser blur it to <body>; on success it would stay disabled, so focus
     // would never come back — and in a 10-row list that costs a keyboard operator their
     // place on every single decision.
-    vi.spyOn(api, "recordVocItemTriage").mockResolvedValue({
+    vi.spyOn(api, "recordReviewDecision").mockResolvedValue({
       actionRef: ACTION_REF,
       disposition: "MONITOR",
       replayed: false,
@@ -151,7 +153,7 @@ describe("VocItemTriageControl", () => {
   });
 
   it("keeps focus on a failed option so the retry is one keypress away", async () => {
-    vi.spyOn(api, "recordVocItemTriage").mockRejectedValue(new Error("network"));
+    vi.spyOn(api, "recordReviewDecision").mockRejectedValue(new Error("network"));
     renderControl();
 
     const target = option("대응 필요");
@@ -171,9 +173,9 @@ describe("VocItemTriageControl", () => {
     // go. The button's name is held stable on purpose, the ellipsis is aria-hidden, and
     // aria-busy on a focused button is not reliably announced.
     const { promise, release } = deferred();
-    vi.spyOn(api, "recordVocItemTriage").mockReturnValue(promise);
+    vi.spyOn(api, "recordReviewDecision").mockReturnValue(promise);
     const { container } = render(
-      <VocItemTriageControl accountId="acct-1" actionRef={ACTION_REF} disposition={null} />,
+      <VocItemTriageControl reviewId={REVIEW_ID} disposition={null} />,
     );
 
     const region = container.querySelector('[aria-live="polite"]');
@@ -199,7 +201,7 @@ describe("VocItemTriageControl", () => {
     // reader announces as a different button and which makes the element unfindable by the
     // name it had a moment ago. aria-busy carries the state instead.
     const { promise, release } = deferred();
-    vi.spyOn(api, "recordVocItemTriage").mockReturnValue(promise);
+    vi.spyOn(api, "recordReviewDecision").mockReturnValue(promise);
     renderControl();
 
     await userEvent.click(option("대응 필요"));
@@ -213,7 +215,7 @@ describe("VocItemTriageControl", () => {
 
   it("marks every option inert while a write is in flight", async () => {
     const { promise, release } = deferred();
-    vi.spyOn(api, "recordVocItemTriage").mockReturnValue(promise);
+    vi.spyOn(api, "recordReviewDecision").mockReturnValue(promise);
     renderControl();
 
     await userEvent.click(option("대응 필요"));
@@ -232,7 +234,7 @@ describe("VocItemTriageControl", () => {
     // handler's own guard is the only thing between a double click and a double write,
     // and it has to be tested through a real click rather than assumed from the attribute.
     const { promise, release } = deferred();
-    const spy = vi.spyOn(api, "recordVocItemTriage").mockReturnValue(promise);
+    const spy = vi.spyOn(api, "recordReviewDecision").mockReturnValue(promise);
     renderControl();
 
     await userEvent.click(option("대응 필요"));
@@ -249,7 +251,7 @@ describe("VocItemTriageControl", () => {
     // the next render, so three clicks in one tick would all read `busy === false` and all
     // fire. Dispatched directly to bypass userEvent's per-click settling.
     const { promise, release } = deferred();
-    const spy = vi.spyOn(api, "recordVocItemTriage").mockReturnValue(promise);
+    const spy = vi.spyOn(api, "recordReviewDecision").mockReturnValue(promise);
     renderControl();
 
     const target = option("조치 불필요");
@@ -265,7 +267,7 @@ describe("VocItemTriageControl", () => {
   // --- the confirmed choice is inert ------------------------------------------
 
   it("does not re-submit the decision the server already holds", async () => {
-    const spy = vi.spyOn(api, "recordVocItemTriage");
+    const spy = vi.spyOn(api, "recordReviewDecision");
     renderControl("MONITOR");
 
     const currentOption = option("지켜보기");
@@ -279,7 +281,7 @@ describe("VocItemTriageControl", () => {
   });
 
   it("keeps the other options actionable while one is current", async () => {
-    vi.spyOn(api, "recordVocItemTriage").mockResolvedValue({
+    vi.spyOn(api, "recordReviewDecision").mockResolvedValue({
       actionRef: ACTION_REF,
       disposition: "NO_ACTION",
       replayed: false,
@@ -299,7 +301,7 @@ describe("VocItemTriageControl", () => {
   // --- error + retry ---------------------------------------------------------
 
   it("preserves the prior decision on failure and announces a retryable error", async () => {
-    vi.spyOn(api, "recordVocItemTriage").mockRejectedValue(new Error("network"));
+    vi.spyOn(api, "recordReviewDecision").mockRejectedValue(new Error("network"));
     renderControl("MONITOR");
 
     await userEvent.click(option("대응 필요"));
@@ -313,7 +315,7 @@ describe("VocItemTriageControl", () => {
   });
 
   it("leaks no server or network detail into the error", async () => {
-    vi.spyOn(api, "recordVocItemTriage").mockRejectedValue(
+    vi.spyOn(api, "recordReviewDecision").mockRejectedValue(
       new Error("Request failed with status code 409 at http://localhost:8080/api/..."),
     );
     renderControl();
@@ -331,7 +333,7 @@ describe("VocItemTriageControl", () => {
     // number of retries can produce one, so telling the operator to try again would be a
     // lie that costs them clicks to disprove.
     vi.stubGlobal("crypto", {});
-    const spy = vi.spyOn(api, "recordVocItemTriage");
+    const spy = vi.spyOn(api, "recordReviewDecision");
     renderControl();
 
     await userEvent.click(option("대응 필요"));
@@ -351,7 +353,7 @@ describe("VocItemTriageControl", () => {
     // handler has to enforce what the attribute advertises. Without the guard, each click
     // re-mints, re-throws, and re-sets the same state: harmless only by accident.
     vi.stubGlobal("crypto", {});
-    const spy = vi.spyOn(api, "recordVocItemTriage");
+    const spy = vi.spyOn(api, "recordReviewDecision");
     renderControl();
 
     await userEvent.click(option("대응 필요"));
@@ -376,7 +378,7 @@ describe("VocItemTriageControl", () => {
     // A 200 with a body the client cannot name is the worst kind of success: the value
     // would land in state and render as 판단 전 — no decision — so the operator concludes
     // their click did nothing. The TypeScript type is a claim about the code, not the bytes.
-    vi.spyOn(api, "recordVocItemTriage").mockResolvedValue(body as never);
+    vi.spyOn(api, "recordReviewDecision").mockResolvedValue(body as never);
     renderControl("MONITOR");
 
     await userEvent.click(option("대응 필요"));
@@ -392,7 +394,7 @@ describe("VocItemTriageControl", () => {
     // The write may well have landed — a 200 came back. So the retry has to be the same
     // command, which the server replays, rather than a second decision recorded on top.
     const spy = vi
-      .spyOn(api, "recordVocItemTriage")
+      .spyOn(api, "recordReviewDecision")
       .mockResolvedValueOnce({ actionRef: ACTION_REF, disposition: "???" } as never)
       .mockResolvedValueOnce({ actionRef: ACTION_REF, disposition: "RESPONSE_NEEDED", replayed: true });
     renderControl();
@@ -403,7 +405,7 @@ describe("VocItemTriageControl", () => {
     await waitFor(() => expect(current()).toBe("대응 필요"));
 
     const [first, second] = spy.mock.calls;
-    expect(second[2].commandId).toBe(first[2].commandId);
+    expect(second[1].commandId).toBe(first[1].commandId);
   });
 
   it("still works on an insecure origin that has getRandomValues", async () => {
@@ -411,7 +413,7 @@ describe("VocItemTriageControl", () => {
     // path that makes the control usable at all over plain http.
     const real = globalThis.crypto;
     vi.stubGlobal("crypto", { getRandomValues: (a: Uint8Array) => real.getRandomValues(a) });
-    const spy = vi.spyOn(api, "recordVocItemTriage").mockResolvedValue({
+    const spy = vi.spyOn(api, "recordReviewDecision").mockResolvedValue({
       actionRef: ACTION_REF,
       disposition: "MONITOR",
       replayed: false,
@@ -421,7 +423,7 @@ describe("VocItemTriageControl", () => {
     await userEvent.click(option("지켜보기"));
 
     await waitFor(() => expect(current()).toBe("지켜보기"));
-    expect(spy.mock.calls[0][2].commandId).toMatch(
+    expect(spy.mock.calls[0][1].commandId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
   });
@@ -430,7 +432,7 @@ describe("VocItemTriageControl", () => {
 
   it("reuses the command id when retrying the SAME decision", async () => {
     const spy = vi
-      .spyOn(api, "recordVocItemTriage")
+      .spyOn(api, "recordReviewDecision")
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValueOnce({ actionRef: ACTION_REF, disposition: "RESPONSE_NEEDED", replayed: true });
     renderControl();
@@ -445,12 +447,12 @@ describe("VocItemTriageControl", () => {
     // and append a duplicate to the audit trail.
     expect(spy).toHaveBeenCalledTimes(2);
     const [first, second] = spy.mock.calls;
-    expect(second[2].commandId).toBe(first[2].commandId);
+    expect(second[1].commandId).toBe(first[1].commandId);
   });
 
   it("mints a NEW command id when the operator changes their mind", async () => {
     const spy = vi
-      .spyOn(api, "recordVocItemTriage")
+      .spyOn(api, "recordReviewDecision")
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValueOnce({ actionRef: ACTION_REF, disposition: "MONITOR", replayed: false });
     renderControl();
@@ -463,7 +465,7 @@ describe("VocItemTriageControl", () => {
     // A different disposition is a different intent. Reusing the id would be a 409 — the
     // backend refuses one command id spent on two decisions.
     const [first, second] = spy.mock.calls;
-    expect(second[2].commandId).not.toBe(first[2].commandId);
+    expect(second[1].commandId).not.toBe(first[1].commandId);
   });
 
   it("mints a NEW id when switching away from a failed attempt and back again", async () => {
@@ -471,7 +473,7 @@ describe("VocItemTriageControl", () => {
     // for B in between, so A is a fresh intent and reusing its old id would conflate two
     // decisions the trail should see separately.
     const spy = vi
-      .spyOn(api, "recordVocItemTriage")
+      .spyOn(api, "recordReviewDecision")
       .mockRejectedValueOnce(new Error("network"))
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValueOnce({ actionRef: ACTION_REF, disposition: "RESPONSE_NEEDED", replayed: false });
@@ -485,21 +487,21 @@ describe("VocItemTriageControl", () => {
     await waitFor(() => expect(current()).toBe("대응 필요"));
 
     const [first, , third] = spy.mock.calls;
-    expect(third[2].commandId).not.toBe(first[2].commandId);
+    expect(third[1].commandId).not.toBe(first[1].commandId);
   });
 
-  // --- the ref is round-tripped, never parsed --------------------------------
+  // --- the address is the review ---------------------------------------------
 
-  it("round-trips the opaque ref verbatim", async () => {
+  it("sends the review id and never an address of its own", async () => {
     const spy = vi
-      .spyOn(api, "recordVocItemTriage")
+      .spyOn(api, "recordReviewDecision")
       .mockResolvedValue({ actionRef: ACTION_REF, disposition: "MONITOR", replayed: false });
     renderControl();
 
     await userEvent.click(option("지켜보기"));
 
-    // Handed back byte-for-byte: it is an address the server minted, and this layer has no
-    // business interpreting or reshaping it.
-    await waitFor(() => expect(spy.mock.calls[0][1]).toBe(ACTION_REF));
+    // The route names the review, so there is no ref to round-trip and none to compose. The server
+    // still echoes the address it minted; this layer neither reads it nor sends it back.
+    await waitFor(() => expect(spy.mock.calls[0][0]).toBe(REVIEW_ID));
   });
 });

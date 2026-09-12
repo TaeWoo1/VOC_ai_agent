@@ -25,9 +25,17 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 /**
- * The channel review record's feedback write path: resolves the review the seller is looking at,
- * org- and channel-scoped exactly as {@link ChannelReviewService#detail} does, and hands the rating
- * and body — the same two things the classifier saw — to {@link TriageFeedbackService}.
+ * The review feedback write path: resolves the review the seller is looking at — org-scoped, by its own
+ * id — and hands the rating and body, the same two things the classifier saw, to
+ * {@link TriageFeedbackService}.
+ *
+ * <p><b>No seller account is involved.</b> What the seller judges and what the seller did are
+ * statements this ORG makes about its own record, and they are never sent anywhere; the account used
+ * to sit in these signatures only to assert that its channel equalled the review's, which is a fact
+ * the review already carries. The channel contract of §1 is still enforced — asked of the review's
+ * channel — so a channel outside the three is still a 404 and a kind it cannot produce is still a 400.
+ * The one route that keeps an account is {@link #observe}, because it batches what one account's
+ * record screen displayed.
  *
  * <p><b>The body passes through this class in memory and lands nowhere.</b> The feedback service
  * needs it to compute the rule's own tier for the row (what was SHOWN); it is not stored, not
@@ -67,12 +75,17 @@ public class ChannelReviewFeedbackService {
     }
 
     /**
-     * The contract-§1 door, once, for every route here: an account on a channel outside the three
-     * gets a 404 — the same answer as a review that is not there — and the channel's capability row
-     * for everything inside, so each route can refuse the kinds this channel cannot produce.
+     * The contract-§1 door, once, for every route here: a review on a channel outside the three gets a
+     * 404 — the same answer as a review that is not there — and the channel's capability row for
+     * everything inside, so each route can refuse the kinds this channel cannot produce.
+     *
+     * <p>Asked of the REVIEW's channel, not of an account's. The two were always required equal, and
+     * the review's own is the one the contract is about: the capability is a fact about the channel a
+     * customer wrote on, and it does not become a different fact because nobody connected an account.
      */
-    private ReviewTriageChannelCapability requireCapability(SellerAccount account) {
-        String code = channels.findById(account.getChannelId()).map(Channel::getCode).orElse(null);
+    private ReviewTriageChannelCapability requireCapability(UUID channelId) {
+        String code = channelId == null ? null
+                : channels.findById(channelId).map(Channel::getCode).orElse(null);
         ReviewTriageChannelCapability capability = ReviewTriageChannelCapability.of(code);
         if (!capability.inContract()) {
             // Not "the pilot does not cover this channel" any more: these routes now carry the
@@ -92,15 +105,14 @@ public class ChannelReviewFeedbackService {
      * rule-tiered review on an org with no pilot has always been correctable here; what was missing
      * was a control on the screen, and that is where the coupling actually was.
      */
-    public TriageFeedbackRequests.CorrectionView correct(UUID orgId, UUID accountId, UUID reviewId,
+    public TriageFeedbackRequests.CorrectionView correct(UUID orgId, UUID reviewId,
                                                          TriageFeedbackRequests.Correction request, UUID actorId) {
         if (request == null || request.tier() == null || request.tier().isBlank()) {
             // A strong-evidence row from an absent field would be evidence of nothing.
             throw ApiException.badRequest("판매자 판단을 선택해 주세요.");
         }
-        SellerAccount account = requireAccount(orgId, accountId);
-        requireCapability(account);
-        Review review = requireReview(orgId, account, reviewId);
+        Review review = requireReview(orgId, reviewId);
+        requireCapability(review.getChannelId());
         TriageCorrection row = feedback.correctReview(orgId, reviewId, review.getRating(), review.getBody(),
                 ReviewTriageTier.parse(request.tier()), request.reasonCode(), pilot.isEnabledFor(orgId), actorId);
         return viewOf(row, feedback.correctionHistory(reviewId).size());
@@ -113,20 +125,17 @@ public class ChannelReviewFeedbackService {
      * review any more and the screen reads as the system's alone. The row and its trail survive; see
      * {@code TriageFeedbackService.withdrawCorrection} for why a withdrawal is not a delete.
      */
-    public TriageFeedbackRequests.CorrectionView withdraw(UUID orgId, UUID accountId, UUID reviewId, UUID actorId) {
-        SellerAccount account = requireAccount(orgId, accountId);
-        requireCapability(account);
-        Review review = requireReview(orgId, account, reviewId);
+    public TriageFeedbackRequests.CorrectionView withdraw(UUID orgId, UUID reviewId, UUID actorId) {
+        Review review = requireReview(orgId, reviewId);
+        requireCapability(review.getChannelId());
         feedback.withdrawCorrection(orgId, review.getId(), actorId);
         return null;
     }
 
     /** One review's correction trail, oldest first. */
-    public List<TriageFeedbackRequests.CorrectionHistoryView> correctionHistory(UUID orgId, UUID accountId,
-                                                                                UUID reviewId) {
-        SellerAccount account = requireAccount(orgId, accountId);
-        requireCapability(account);
-        Review review = requireReview(orgId, account, reviewId);
+    public List<TriageFeedbackRequests.CorrectionHistoryView> correctionHistory(UUID orgId, UUID reviewId) {
+        Review review = requireReview(orgId, reviewId);
+        requireCapability(review.getChannelId());
         return feedback.correctionHistory(review.getId()).stream()
                 .map(a -> new TriageFeedbackRequests.CorrectionHistoryView(a.getKind().name(),
                         name(a.getTierFrom()), name(a.getTierTo()), name(a.getShownTier()),
@@ -149,18 +158,17 @@ public class ChannelReviewFeedbackService {
                 name(row.getShownTier()), name(row.getShownSource()), row.getCorrectedAt(), changeCount);
     }
 
-    public void act(UUID orgId, UUID accountId, UUID reviewId, TriageActionKind kind, UUID actorId) {
+    public void act(UUID orgId, UUID reviewId, TriageActionKind kind, UUID actorId) {
         if (kind == null) {
             throw ApiException.badRequest("조치 종류가 필요합니다.");
         }
-        SellerAccount account = requireAccount(orgId, accountId);
-        if (!requireCapability(account).permits(kind)) {
+        Review review = requireReview(orgId, reviewId);
+        if (!requireCapability(review.getChannelId()).permits(kind)) {
             // Contract §2.2: a REPLY_* on a channel with no reply flow is refused, not stored with a
             // flag. Coupang has no reply feature at all; recording one would be the fake the contract
             // forbids by name.
             throw ApiException.badRequest("이 채널에서는 기록할 수 없는 조치 종류입니다.");
         }
-        Review review = requireReview(orgId, account, reviewId);
         TriageAction ignored = feedback.act(orgId, reviewId, review.getRating(), review.getBody(), kind, actorId,
                 pilot.isEnabledFor(orgId));
     }
@@ -179,7 +187,7 @@ public class ChannelReviewFeedbackService {
             throw ApiException.badRequest("한 번에 기록할 수 있는 항목 수를 넘었습니다.");
         }
         SellerAccount account = requireAccount(orgId, accountId);
-        ReviewTriageChannelCapability capability = requireCapability(account);
+        ReviewTriageChannelCapability capability = requireCapability(account.getChannelId());
         // One org-scoped batch read for the whole request, then filter to this account's channel.
         List<UUID> ids = request.events().stream()
                 .filter(e -> e != null && e.reviewId() != null && e.kind() != null)
@@ -208,10 +216,9 @@ public class ChannelReviewFeedbackService {
      * §3 read together for one review, and nothing that would let a reader distinguish "unanswered"
      * from anything else: absence stays absence.
      */
-    public List<TriageFeedbackRequests.EventView> events(UUID orgId, UUID accountId, UUID reviewId) {
-        SellerAccount account = requireAccount(orgId, accountId);
-        requireCapability(account);
-        Review review = requireReview(orgId, account, reviewId);
+    public List<TriageFeedbackRequests.EventView> events(UUID orgId, UUID reviewId) {
+        Review review = requireReview(orgId, reviewId);
+        requireCapability(review.getChannelId());
         List<TriageFeedbackRequests.EventView> out = new ArrayList<>();
         for (var e : behavior.findByReviewIdOrderByOccurredAtAsc(review.getId())) {
             out.add(new TriageFeedbackRequests.EventView(TriageEventKind.of(e.getKind()), name(e.getShownSource()),
@@ -232,13 +239,68 @@ public class ChannelReviewFeedbackService {
         return out;
     }
 
+    // ── Compatibility: the account-addressed entries ────────────────────────────────────────────
+    //
+    // The record screen and anything still holding an account-scoped URL keep the address they had,
+    // and keep the answer they had: a review that is not on this account's channel is still a 404 at
+    // THIS address. What the guard no longer does is decide whether the review may be judged at all —
+    // that question is answered org-scoped, one screen up, by the same methods these delegate to.
+
+    public TriageFeedbackRequests.CorrectionView correct(UUID orgId, UUID accountId, UUID reviewId,
+                                                         TriageFeedbackRequests.Correction request, UUID actorId) {
+        requireAddressableFrom(orgId, accountId, reviewId);
+        return correct(orgId, reviewId, request, actorId);
+    }
+
+    public TriageFeedbackRequests.CorrectionView withdraw(UUID orgId, UUID accountId, UUID reviewId, UUID actorId) {
+        requireAddressableFrom(orgId, accountId, reviewId);
+        return withdraw(orgId, reviewId, actorId);
+    }
+
+    public List<TriageFeedbackRequests.CorrectionHistoryView> correctionHistory(UUID orgId, UUID accountId,
+                                                                                UUID reviewId) {
+        requireAddressableFrom(orgId, accountId, reviewId);
+        return correctionHistory(orgId, reviewId);
+    }
+
+    public void act(UUID orgId, UUID accountId, UUID reviewId, TriageActionKind kind, UUID actorId) {
+        requireAddressableFrom(orgId, accountId, reviewId);
+        act(orgId, reviewId, kind, actorId);
+    }
+
+    public List<TriageFeedbackRequests.EventView> events(UUID orgId, UUID accountId, UUID reviewId) {
+        requireAddressableFrom(orgId, accountId, reviewId);
+        return events(orgId, reviewId);
+    }
+
+    /**
+     * The old address's own precondition, unchanged: the account exists in this org, its channel is in
+     * the contract, and the review is on that channel. Kept whole so no account-addressed caller sees a
+     * different answer than it did before the org-scoped entries existed.
+     */
+    private void requireAddressableFrom(UUID orgId, UUID accountId, UUID reviewId) {
+        SellerAccount account = requireAccount(orgId, accountId);
+        requireCapability(account.getChannelId());
+        Review review = requireReview(orgId, reviewId);
+        if (!account.getChannelId().equals(review.getChannelId())) {
+            throw ApiException.notFound("상품평을 찾을 수 없습니다.");
+        }
+    }
+
     private static String name(Enum<?> e) {
         return e == null ? null : e.name();
     }
 
-    private Review requireReview(UUID orgId, SellerAccount account, UUID reviewId) {
+    /**
+     * This org's review, by id — the whole authorization for everything a seller records ABOUT a
+     * review.
+     *
+     * <p>What the account used to add was a channel-equality check, and the channel it checked against
+     * is the one already on the review. The org owns the record; a judgment and an act are statements
+     * that org makes about it, and neither of them is sent anywhere.
+     */
+    private Review requireReview(UUID orgId, UUID reviewId) {
         return reviews.findByIdAndOrgId(reviewId, orgId)
-                .filter(r -> account.getChannelId().equals(r.getChannelId()))
                 .orElseThrow(() -> ApiException.notFound("상품평을 찾을 수 없습니다."));
     }
 

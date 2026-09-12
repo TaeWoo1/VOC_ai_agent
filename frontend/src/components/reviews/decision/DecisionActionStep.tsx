@@ -14,12 +14,14 @@ import type { TriageDisposition } from "../../../lib/types";
  * the append-only trail since it was built. This component adds a heading, a sentence and a place —
  * not a second decision store, and not a second set of words for the three values.
  *
- * <b>The address comes from the server, and it is not the reply's.</b> Until now the only ref a
- * review-shaped surface could get was `ChannelReviewDetailView.replyWork.actionRef`, which is null on
- * every channel with no reply flow — so on Coupang a seller could not record a decision at all, even
- * though the decision endpoint has never been capability-gated and `TriageDisposition` says in its own
- * contract that deciding is not replying. The workspace reads `decisionRef` from the decision context,
- * which is handed out for every review it can open.
+ * <b>The address is the review.</b> Until Review Decision Workspace v1 the only ref a review-shaped
+ * surface could get was `ChannelReviewDetailView.replyWork.actionRef`, which is null on every channel
+ * with no reply flow — so on Coupang a seller could not record a decision at all, even though the
+ * decision endpoint has never been capability-gated and `TriageDisposition` says in its own contract
+ * that deciding is not replying. That was fixed with a server-minted `decisionRef`; Agent-native Core
+ * Boundary v1 then removed the ref as well, because a path segment that decodes to the review id is a
+ * second address for the object the route already names. The endpoint is org-scoped, so a review no
+ * account acquired can be decided too.
  *
  * <b>완료 기록 offers two acts, not three.</b> 조치 불필요 exists in `TriageActionKind` and the pilot's
  * controls still write it on the record screen — but the step above already records exactly that
@@ -30,22 +32,24 @@ import type { TriageDisposition } from "../../../lib/types";
  * something they did on their own side of the counter, stored as one.
  */
 export function DecisionActionStep({
-  accountId,
   reviewId,
-  decisionRef,
   decision,
   replySupported,
+  replyUnavailableReason,
   onDecided,
   onRecorded,
 }: {
-  accountId: string;
   reviewId: string;
-  /** Server-minted, client-opaque address of this review's decision. */
-  decisionRef: string;
   /** The decision that stands, as the last read saw it. */
   decision: TriageDisposition | null;
-  /** Whether this channel has a reply flow — decides what the note under the control may promise. */
+  /** Whether a draft can be prepared here — decides what the note under the control may promise. */
   replySupported: boolean;
+  /**
+   * When it cannot, the server's own reason. 「이 채널은 답변 기능이 없습니다」 and 「연결된 계정이
+   * 없습니다」 are different facts and only one of them is something the seller can act on; this
+   * component never infers which from the channel code.
+   */
+  replyUnavailableReason: "CHANNEL_HAS_NO_REPLY_FLOW" | "NO_SELLER_ACCOUNT" | null;
   onDecided: (next: TriageDisposition) => void;
   /** An act was recorded, so the log below can re-read. */
   onRecorded: () => void;
@@ -63,7 +67,7 @@ export function DecisionActionStep({
     setBusy(true);
     setFailed(false);
     try {
-      await api.recordChannelReviewTriageAction(accountId, reviewId, kind);
+      await api.recordReviewTriageAction(reviewId, kind);
       setDone(kind);
       onRecorded();
     } catch {
@@ -77,14 +81,17 @@ export function DecisionActionStep({
     <Section title="무엇을 하시겠어요?" ariaLabel="조치 선택">
       <div className="space-y-3">
         <VocItemTriageControl
-          key={`decide-${decisionRef}`}
-          accountId={accountId}
-          actionRef={decisionRef}
+          key={`decide-${reviewId}`}
+          reviewId={reviewId}
           disposition={decision}
           onRecorded={onDecided}
         />
         <p className="break-keep text-sm leading-relaxed text-muted">
-          {replySupported ? DECISION_ACTION_NOTE.withReply : DECISION_ACTION_NOTE.withoutReply}
+          {replySupported
+            ? DECISION_ACTION_NOTE.withReply
+            : replyUnavailableReason === "NO_SELLER_ACCOUNT"
+              ? DECISION_ACTION_NOTE.withoutAccount
+              : DECISION_ACTION_NOTE.withoutReply}
         </p>
 
         {/* Only after a decision stands. Before one, 「조치 완료함」 would be a record of finishing work

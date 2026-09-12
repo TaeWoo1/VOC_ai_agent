@@ -78,6 +78,17 @@ public interface SellerAccountRepository extends JpaRepository<SellerAccount, UU
      */
     long countByOrgIdAndChannelId(UUID orgId, UUID channelId);
 
+    /**
+     * Every account this org holds on one channel, in no particular order.
+     *
+     * <p>Exists because {@link #findByOrgIdAndChannelId} throws on a non-unique result, and the
+     * review workspace's question — «is there exactly one account that could reply for this
+     * review's channel» — has three answers, not two: none, one, or an ambiguity nobody can
+     * resolve from a review id. A read that throws cannot say the third, and a read that picks
+     * the oldest would answer a question the caller did not ask.
+     */
+    List<SellerAccount> findAllByOrgIdAndChannelId(UUID orgId, UUID channelId);
+
     /** Org-scoped lookup — a cross-org id reads as absent. */
     Optional<SellerAccount> findByIdAndOrgId(UUID id, UUID orgId);
 }
