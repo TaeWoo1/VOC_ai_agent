@@ -304,6 +304,24 @@ NAVER workflow·실제 export·FE wire는 M3.
 7. Local Helper 경로 회귀 green(교체 가능성의 증거).
 8. 승인 1건 = run 1건: 같은 승인으로 두 번째 실행 불가, 다른 store/기간으로 실행 불가(PD-7).
 
+## 15-A. 실행 상태 (2026-09-12 갱신 — 이 절만 갱신, 나머지 재작성 0)
+
+- **M1+M2 — DONE.** Execution provider seam + Aside adapter, 로컬 fixture E2E green
+  (`docs/aside_execution_provider_v1.md`).
+- **NAVER one-explicit-run PoC — `DEFERRED_BY_ENVIRONMENT`** (operator 환경, 2026-09-12). Seller Center 접근
+  **0**(tab·click·login·observation·export·download 전부 0). 준비했던 manifest `apr-nv-aside-obs-r1`은
+  **미승인 종료**. 따라서 **§6 H-3(NAVER store identity)은 OPEN/DEFERRED** — 이 날짜의 어떤 관측도 H-3의
+  근거가 아니다.
+- **M3-C Coupang WING — Phase A(read-only observation) DONE**(승인 `apr-cp-aside-obs-64cdf0`).
+  **C-H3 = `C_H3_CONFIRMED`**: 채널 고유 식별자 **업체코드**가 리뷰 목록 화면 자체에서 관측되고, 같은 값이
+  이미 `vendor_id`로 봉인돼 있어 expected/observed 비교가 성립한다. §6이 요구한 「expected store identity
+  fingerprint」는 **새 컬럼 없이** 기존 credential에서 파생된다.
+  **Phase B(실제 acquisition + ingest)는 실행되지 않았다** — 별도 manifest + grant 대기.
+  증거: `docs/coupang_aside_review_acquisition_poc_v1.md`.
+- **§7 file lifecycle은 Coupang lane에 해당 없음**: WING에는 공식 export가 없어 이 lane의 산출물은 파일이
+  아니라 **정규화된 row**이고, 기존 `POST /api/agent/review-handoff` 1회 · `SELLER_CENTER_READ` ·
+  content-based dedup(v2)을 그대로 쓴다. NAVER의 file contract를 Coupang에 재사용하지 않았다.
+
 ## 16. 다음 단계 (제안 — 실행은 product-owner 확인 후)
 
 1. ~~PD-1 ~ PD-7 답변~~ — **2026-09-12 결정됨(§17)**. 남은 것: Q-1뿐(PD-8도 2026-09-12 결정됨).
