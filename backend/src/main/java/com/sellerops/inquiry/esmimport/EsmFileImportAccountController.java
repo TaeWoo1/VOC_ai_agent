@@ -31,6 +31,12 @@ import org.springframework.web.bind.annotation.RestController;
         "sellerops.inquiry-import.esm.account-provisioning.enabled"}, havingValue = "true")
 public class EsmFileImportAccountController {
 
+    /**
+     * Every account this product creates is {@code OWNER} (the two sign-up paths and the demo seeder
+     * are the column's only writers and all three set that one value), so this check refuses nobody
+     * today. It is not a role model and must not be
+     * read as one — multi-user roles are out of v1 scope (`docs/product-scope-v1.md`).
+     */
     private static final String REQUIRED_ROLE = "OWNER";
 
     private final EsmFileImportAccountService service;
