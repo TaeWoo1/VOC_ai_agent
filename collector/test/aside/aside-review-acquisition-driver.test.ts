@@ -70,7 +70,7 @@ describe("Aside acquisition driver — the store gate decides whether a page is 
     await d.readCurrentPage();
     const line = getLogSink().find((e) => e.event === "aw_coupang_review_aside_read")!;
     expect(line.meta).toMatchObject({ rows: 2, textless: 1, bodyExpandable: 1, textlessExpandable: 1 });
-    expect(line.meta).toMatchObject({ pagerPages: 2, pagerHasNext: true });
+    expect(line.meta).toMatchObject({ pagerPages: 2, pagerHighest: 2, pagerCurrent: 1, pagerHasNext: true });
     expect(JSON.stringify(getLogSink())).not.toContain(BODY);
   });
 

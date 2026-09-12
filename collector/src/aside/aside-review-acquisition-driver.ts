@@ -121,6 +121,10 @@ export class AsideReviewAcquisitionDriver implements ReviewAcquisitionProbeDrive
       // What the list says about its own size. Read on every page already; reported so the question
       // "is one page enough for this seller" is answered by measurement instead of by argument.
       pagerPages: reading.pager.pageNumbers.length,
+      // The highest number the pager prints is the one that says how much sits behind page 1; the COUNT of
+      // printed numbers is a fact about the control's width, which is not the same question.
+      pagerHighest: reading.pager.pageNumbers.length > 0 ? Math.max(...reading.pager.pageNumbers) : 0,
+      pagerCurrent: reading.pager.currentPage,
       pagerHasNext: reading.pager.hasNext,
       textless: bodies.textless,
       bodyExpandable: bodies.expandable,

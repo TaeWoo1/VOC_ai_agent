@@ -569,6 +569,11 @@ export function localBoundaryKey(review: CoupangAcquiredReview): string {
  * buyer who rated and wrote nothing. {@link textlessExpandable} is therefore the only number here that can
  * accuse the reader, and it is the reason this function exists.
  *
+ * <p><b>Textless means what the canonicalizer means by it</b> — the channel's placeholder sentence and the
+ * expander's own label are not a body — so this reuses `stripExpanderChrome` and `isEmptyReviewBody` rather
+ * than testing the raw cell. A second, looser definition of "empty" beside the one that decides storage is
+ * how a diagnostic ends up contradicting the ingest it was written to explain.
+ *
  * <p>Counts, never text — a log line has no business holding a customer's words
  * (`docs/coupang_review_policy_gate_v1.md` D3/D4). It reads a reading and touches nothing.
  */
@@ -589,7 +594,10 @@ export function bodyEvidenceOf(rows: readonly CoupangReviewRowReading[]): Review
   let truncated = 0;
   let textlessExpandable = 0;
   for (const row of rows) {
-    const empty = row.bodyText.trim().length === 0;
+    // The SAME two transforms canonicalization applies, and applying anything less is how this counter lied
+    // the first time it ran live: WING prints `등록된 내용이 없습니다.` where a buyer wrote nothing, so a raw
+    // blank test reported `textless: 0` for a page whose ten rows were every one of them rating-only.
+    const empty = isEmptyReviewBody(stripExpanderChrome(row.bodyText));
     if (empty) textless += 1;
     if (row.bodyExpandable) expandable += 1;
     if (row.bodyTruncated) truncated += 1;

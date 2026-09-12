@@ -1,6 +1,7 @@
 # Coupang Aside PoC Hardening (M4) v1
 
-**Status — offline phase complete, live phase awaiting approval.** M3-C proved the spine once
+**Status — DONE.** Offline proofs landed first; five live bounded reads and one deployed-backend ingest
+proof followed under approval `apr-cp-aside-m4-f767f6` (2026-09-12). §7 is the live record. M3-C proved the spine once
 (`docs/coupang_aside_review_acquisition_poc_v1.md`): one Coupang WING page read by a deterministic executor,
 handed to the existing ingestion, deduped, visible in Review Core, with 0 marketplace clicks, 0 writes, 0 LLM
 calls inside the execution. M4 does not extend that reach. It asks whether the three things M3 left standing —
@@ -205,13 +206,13 @@ the same needs without a new verb or a click:
 
 | suite | files | tests | failed |
 |---|---|---|---|
-| collector | 405 | 9,599 | 0 |
+| collector | 405 | 9,601 | 0 |
 | frontend | 238 | 2,784 | 0 |
 | backend | — | 3,911 | 0 |
 
 New this package: `StampAcquisitionHandoffTest` (2), `protocolVersion.source.test.ts` (3),
-`coupang-review-body-evidence.test.ts` (7), plus one case in `aside-review-acquisition-driver.test.ts`. No test
-was rewritten and no safety test was weakened.
+`coupang-review-body-evidence.test.ts` (9 — two of them added after §7.2), plus one case in
+`aside-review-acquisition-driver.test.ts`. No test was rewritten and no safety test was weakened.
 
 ---
 
@@ -234,3 +235,107 @@ M3 already ran — same page, same cap, same zero clicks.
 Two routes were considered for (3) and rejected: deleting the 9 PoC rows from the Demo Org to force re-insertion
 (a mutation of the canonical org with derived state hanging off those rows, to prove something the offline test
 already proves at the same condition), and reaching pages 4–5 (pagination, §4).
+
+---
+
+## 7. The live sitting — `apr-cp-aside-m4-f767f6`, 2026-09-12
+
+Five presses of 지금 동기화, each its own single-use `acquisitionRef`, each one page. **0 marketplace clicks,
+0 downloads, 0 marketplace writes, 0 LLM calls inside any execution**, and the helper log holds no review text.
+Background producers were forced off for the sitting (scheduler, self-pilot, proactive), and NAVER was not
+reached by anything: 0 NAVER lines in the backend log, NAVER review count unchanged at 4,543.
+
+### 7.1 Repetition — five runs, and they are the same run five times
+
+| # | verdict | reason | rows | textless | expandable | textless+expandable | roles | excluded | pager | LLM | read ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | MATCH | OK | 10 | *(instrument defective — §7.2)* | | | 5 | 1 | — | 0 | 4,155 |
+| 2 | MATCH | OK | 10 | 10 | 0 | **0** | 5 | 1 | 1 of 3 | 0 | 4,114 |
+| 3 | MATCH | OK | 10 | 10 | 0 | **0** | 5 | 1 | 1 of 3 | 0 | 3,618 |
+| 4 | MATCH | OK | 10 | 10 | 0 | **0** | 5 | 1 | 1 of 3 | 0 | 3,363 |
+| 5 | MATCH | OK | 10 | 10 | 0 | **0** | 5 | 1 | 1 of 3 | 0 | 3,993 |
+
+Every run's walk: `rows 10 · fresh 9 · known 1 · PAGE_LIMIT_REACHED · pages 1`. Every run's handoff:
+`received 9 · stored 0 · skipped 9 · failed 0`.
+
+- **success 5/5** · **identity mismatch 0** · **wrong or ambiguous action 0** · **LLM in execution 0**
+- read wall-clock **3,363–4,155 ms, mean 3,849** (n = 5; M3's two reads were 3,475 and 3,949, so seven
+  consecutive reads now sit inside one second of spread)
+- **idempotency held on every one of them**: five re-reads of a stored page stored nothing and said so.
+
+The `known: 1` is the same one row every time, and §4 explains what it is — an intra-page pair the screen
+prints identically, not a row already in the database.
+
+### 7.2 The instrument was wrong, and the first live run is what caught it
+
+Run 1 reported **`textless: 0`** on a page whose handoff then skipped nine rows as textless duplicates. Both
+statements cannot be true. `bodyEvidenceOf` was testing the raw cell, and WING does not leave a rating-only
+cell empty — it prints `등록된 내용이 없습니다.` there, which is precisely the discovery `EMPTY_BODY_PLACEHOLDERS`
+exists to record. A second, looser definition of "empty" standing beside the one that decides storage is how a
+diagnostic ends up contradicting the ingest it was written to explain.
+
+Fixed to reuse `stripExpanderChrome` + `isEmptyReviewBody` — the canonicalizer's own two transforms — with two
+regression cases, one of which asserts the counter and the canonicalizer return the same number for the same
+page. Runs 2–5 used the corrected instrument.
+
+This is written down rather than quietly amended because it is the second time in two milestones that a thing
+which only runs live was wrong in a way no green suite could see, and because the defect was in the very
+instrument that was supposed to keep §3 honest.
+
+### 7.3 Bodies — the verdict survived the instrument that could have overturned it
+
+**`textless 10 · bodyExpandable 0 · textlessExpandable 0`, four runs out of four.**
+
+Not one cell on this page offers to show more than it prints. The list is not hiding bodies from the reader;
+there are no bodies. §3's `STORE_PROPERTY` verdict stands, and it now stands on a live measurement that was
+free to contradict it — which is a different and better thing than standing on an argument.
+
+### 7.4 The stamp fix, live on the deployed backend
+
+Run 6 as written in the manifest — a marketplace-sourced ingest of genuinely new rows — **did not occur**: no
+review arrived at this store during the sitting (all five pages identical, newest review unchanged), and the
+operator did not widen the WING filter. That condition was not forced and is not reported as met.
+
+What was proven instead, without a marketplace and without touching the Demo Org: the **running backend**, over
+real HTTP, on a genuinely new ingest.
+
+```
+POST /api/agent/review-handoff   → HTTP 200
+{"received":2,"stored":2,"skipped":0,"failed":0,"complete":false,"importId":"57861058-…"}
+
+body_len | rating | dedup v | stamped | acquisition_sync_job_id
+      11 |      5 |       2 | t       | 57861058-…
+       0 |      3 |       3 | t       | 57861058-…
+```
+
+Its historical counterpart is exact: the same endpoint, the same service, rows inserted — and on 2026-09-12 an
+HTTP 500 with `stored: 0` and no stamp. Now 200, the count reported, both rows stamped, and the two rows keyed
+on the two different formulas (v2 with a body, v3 textless) that a real page mixes.
+
+**What this proof is and is not.** It ran on a **disposable org** created through the product's own signup, with
+a seller-account row inserted by hand and synthetic bodies — so what it establishes is that the ingest-and-stamp
+path in the *deployed* backend is correct at the production transaction condition, not that a marketplace-sourced
+new ingest has been observed end to end. The org was deleted afterwards (12 scoped rows, single transaction).
+The cleanup tool refused it at first because the hand-inserted account read as `CONNECTED`; that fence is right,
+and the account was demoted to the status it should have carried before the org was removed.
+
+### 7.5 The Demo Org, before and after
+
+| | before | after |
+|---|---|---|
+| COUPANG `REAL` reviews | 46 | **46** |
+| stamped | 0 | **0** |
+| newest review | 2026-09-12 09:00 | **unchanged** |
+| `SELLER_CENTER_READ` sync jobs | 7 | 12 (+1 per run) |
+| NAVER reviews | 4,543 | **4,543** |
+
+Five runs, and the only thing they wrote to the seller's org is five honest records of having read a page whose
+contents it already had.
+
+### 7.6 One measurement disagrees with a Phase A number, and it is not resolved
+
+The acquisition reader saw the pager as **current 1, highest 3, next available** on every run. The Phase A census
+recorded `highestPagerNumber 5` for the same list earlier the same day. They are different instruments reading
+the same control, and this sitting did not determine which is right or whether the list's own state changed
+between them. §4's recommendation does not depend on which it is — 1 of 3 and 1 of 5 are both "most of the list
+is behind page 1" — but the number is reported as the disagreement it is rather than as a fact.

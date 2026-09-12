@@ -9,7 +9,26 @@
  * The tests are about that boundary, not about arithmetic.
  */
 import { describe, expect, it } from "vitest";
-import { bodyEvidenceOf, type CoupangReviewRowReading } from "../../src/action-window/coupang-review/review-rows";
+import {
+  bodyEvidenceOf,
+  canonicalizeReviewRows,
+  type CoupangReviewPageReading,
+  type CoupangReviewRowReading,
+} from "../../src/action-window/coupang-review/review-rows";
+
+/** A page whose structure is fine, so only the bodies are under test. */
+const OK_PAGE: CoupangReviewPageReading = {
+  reason: "OK",
+  tablesScanned: 1,
+  headerWidth: 7,
+  excludedColumns: 1,
+  unmappedColumns: 0,
+  duplicateRoles: 0,
+  rolesResolved: ["date", "rating", "product", "body", "media"],
+  widthMismatchRows: 0,
+  rows: [],
+  pager: { found: true, resolved: true, currentPage: 1, pageNumbers: [1], hasNext: false, nextEnabled: false },
+};
 
 function row(over: Partial<CoupangReviewRowReading> = {}): CoupangReviewRowReading {
   return {
@@ -50,6 +69,22 @@ describe("bodyEvidenceOf", () => {
 
   it("whitespace is not a body", () => {
     expect(bodyEvidenceOf([row({ bodyText: "   \n  " })]).textless).toBe(1);
+  });
+
+  /**
+   * The first live run of this counter reported `textless: 0` for a page on which the handoff then skipped
+   * nine rows as textless duplicates. WING prints a sentence where a buyer wrote nothing, and a counter that
+   * tests the raw cell disagrees with the canonicalizer that decides what is stored.
+   */
+  it("the channel's placeholder sentence is not a body, because storage does not treat it as one", () => {
+    const reading = [row({ bodyText: "등록된 내용이 없습니다." }), row({ bodyText: "내용 없음" })];
+    expect(bodyEvidenceOf(reading).textless).toBe(2);
+    // The counter and the canonicalizer must say the same thing, which is the whole point of the fix.
+    expect(canonicalizeReviewRows({ ...OK_PAGE, rows: reading }).textlessCount).toBe(2);
+  });
+
+  it("a cell holding only the expander control is not a body either", () => {
+    expect(bodyEvidenceOf([row({ bodyText: "더보기" })]).textless).toBe(1);
   });
 
   it("the reader's own cut is reported apart from the cell's offer", () => {
