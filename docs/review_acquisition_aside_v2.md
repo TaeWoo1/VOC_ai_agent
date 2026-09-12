@@ -316,8 +316,10 @@ NAVER workflow·실제 export·FE wire는 M3.
   **C-H3 = `C_H3_CONFIRMED`**: 채널 고유 식별자 **업체코드**가 리뷰 목록 화면 자체에서 관측되고, 같은 값이
   이미 `vendor_id`로 봉인돼 있어 expected/observed 비교가 성립한다. §6이 요구한 「expected store identity
   fingerprint」는 **새 컬럼 없이** 기존 credential에서 파생된다.
-  **Phase B(실제 acquisition + ingest)는 실행되지 않았다** — 별도 manifest + grant 대기.
-  증거: `docs/coupang_aside_review_acquisition_poc_v1.md`.
+  **Phase B 실행됨 · `LIVE PASS`**(승인 `apr-cp-aside-acq-128151`, 1페이지 bounded read): identity MATCH ·
+  `llmCalls 0` · 마켓플레이스 클릭 0 · 기존 handoff → ingestion → **dedup(received 9 · stored 0 · skipped 9)**
+  → canonical reviews → Review Core 읽기까지 확인. COUPANG `REAL` 23 → 32.
+  증거: `docs/coupang_aside_review_acquisition_poc_v1.md`, `docs/evidence/INDEX.md` 2026-09-12 행.
 - **§7 file lifecycle은 Coupang lane에 해당 없음**: WING에는 공식 export가 없어 이 lane의 산출물은 파일이
   아니라 **정규화된 row**이고, 기존 `POST /api/agent/review-handoff` 1회 · `SELLER_CENTER_READ` ·
   content-based dedup(v2)을 그대로 쓴다. NAVER의 file contract를 Coupang에 재사용하지 않았다.

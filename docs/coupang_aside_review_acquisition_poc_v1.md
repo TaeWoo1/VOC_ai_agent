@@ -1,8 +1,8 @@
 # Coupang WING Review Acquisition over Aside — PoC v1
 
 **Track:** Aside Acquisition — M3-C. **Baseline:** `reviewnary-pre-aside-v1` (`de1838f6`); M1+M2 at `1109e9ef`.
-**Status:** **Phase A (read-only observation) — DONE.** **Phase B (one explicit run + ingest) — NOT RUN, awaiting
-its own displayed manifest and grant.**
+**Status:** **Phase A (read-only observation) — DONE. Phase B (explicit run → ingest → dedup → Review Core) —
+DONE.** M3-C verdict: **DONE**, with four corrections to my own earlier statements recorded in §11.
 
 > **NAVER stands untouched.** The NAVER one-explicit-run PoC is **`DEFERRED_BY_ENVIRONMENT`** (operator
 > environment, 2026-09-12). The manifest prepared for it — `apr-nv-aside-obs-r1` — was **closed unapproved**.
@@ -213,9 +213,9 @@ forbid the fail-closed check.
 
 | suite | result |
 |---|---|
-| collector | **403 files · 9,586 passed · 0 failed** (21 files / 160 skipped) |
-| frontend | **236 files · 2,779 passed · 0 failed** |
-| backend | **3,907 tests · 0 failed** (25 skipped) |
+| collector | **404 files · 9,591 passed · 0 failed** (21 files / 160 skipped) |
+| frontend | **2,781 passed · 0 failed** |
+| backend | **3,909 tests · 0 failed** (25 skipped) |
 | `tsc --noEmit` (collector) | clean apart from the pre-existing baseline error in `reply-session.test.ts` |
 | aside guard | 14 → **28** assertions |
 
@@ -233,10 +233,71 @@ needed to express "this element's own text".
 processes that never meet. Both pin the same literal; a drifted domain string would otherwise make every real
 store read as `MISMATCH`, which looks exactly like a seller signed into the wrong account.
 
+## 8-A. Phase B — the live run (`apr-cp-aside-acq-128151` / `wt-0d19d3c6`)
+
+**Two marketplace reads, both inside the approved cap of two.** Four presses happened; the first two never
+reached Coupang (see §8-B), so only two opened a tab.
+
+| | press 3 (16:59) | press 4 (17:02) |
+|---|---|---|
+| ticket | own single-use `acquisitionRef` | own single-use `acquisitionRef` |
+| provider | `ASIDE`, `coupang-wing-review-read/1` | same |
+| identity | **MATCH** | **MATCH** |
+| read | `OK`, **10 rows**, `excludedColumns 1`, `rolesResolved 5`, pager resolved | `OK`, 10 rows, same |
+| duration / LLM | 3,475 ms / **`llmCalls 0`** | 3,949 ms / **`llmCalls 0`** |
+| walk | fresh 9 · known 1 · `PAGE_LIMIT_REACHED` · **pages 1** | identical |
+| handoff | **HTTP 500** (§8-B defect 2) | **ok** — received 9 · **stored 0** · skipped 9 · failed 0 |
+| marketplace clicks | **0** | **0** |
+
+**Dedup is proven by the pair, and the proof is stronger than a replay would have been.** Press 3's ingest
+committed 9 rows before the 500; press 4 re-read the same page and the ingestion spine skipped **9 of 9**
+with 0 stored and 0 duplicates created — content-hash identity (`ReviewDedupKey` v2) holding against rows
+inserted minutes earlier by a different run. Measured in the DB: REAL Coupang reviews **23 → 32 → 32**.
+
+**Review Core reads them.** `GET /api/reviews/recent` returns today's acquisition at the top of the org's
+review list — `COUPANG · ★3 · 2026-09-12 · 컵수거함 당겨바일체형 블랙` — with the product binding resolved by
+the same canonicalizer the seated path uses. `reply-work` is **0**, which is correct and not a gap: WING
+offers sellers no reply, so D8 means there is no reply work to have. Attention items **0** is likewise the
+triage contract behaving — the nine are ★3/★4/★5 with no body, and `3★ 무조치 → 확인 필요 아님` is a
+tie-breaker the contract states.
+
+**Sync jobs:** two `SELLER_CENTER_READ` rows, `success_rows` 9 and 0 — the provenance the CollectionMethod
+was already built to carry. No new method, no new column.
+
+**File lifecycle: not applicable, and that is the finding.** WING has no export, so this lane never produces
+a file. `~/Downloads` matched 0, the helper home holds no artifact, the repo holds none. NAVER's
+quarantine/TTL question (PD-5) does not arise here at all.
+
+## 8-B. Two defects the run found, both older than this package
+
+Neither is in the Aside code. `git diff de1838f6..HEAD` shows this track had touched neither file.
+
+**1. The conversation could never start a WING read.** `frontend/src/lib/actionWindow/acquire/acquireRuntime.ts`
+imported `ACTION_WINDOW_PROTOCOL_VERSION` from the `../contract` bridge — which is **v1** — while the
+acquisition engine validates with the **v2** envelope validator, and `isActionWindowProtocolCompatible` is
+exact equality. Measured on the wire: mint `200`, `START_RUN` sent, `accepted:false reason:"INVALID_ENVELOPE"`,
+and the seller told 「판매자센터 화면을 준비하지 못했습니다」. Every sibling runtime (import · locate · issuance ·
+reply) already imports v2 for exactly this reason and `replyRuntime` writes down why `contract.ts` stays v1 —
+this one runtime missed it, which is precisely why the lane was recorded `LOCAL_PROVEN · LIVE_UNPROVEN`.
+**Fix:** take the constant from v2, leave every type on the bridge (re-typing the view rippled into components
+this defect has nothing to do with — tried, reverted). **Regression:** the real v2 validator over the envelope
+the real runtime emits — the one assertion a fake transport cannot make. Verified red on the old code.
+
+**2. A handoff that stored the rows and reported failure.** `IngestionService.stampAcquisition` runs a
+`@Modifying(flushAutomatically = true)` update, and its caller `AgentReviewHandoffService.handOff` is
+deliberately non-transactional so a late failure cannot roll back reviews already stored. With no transaction
+the flush throws `InvalidDataAccessApiUsageException` → HTTP 500 — **after** the ingest committed. Press 3 is
+what that looks like to a seller: nine reviews written, `stored=0` reported, rows left unstamped. **Fix:** the
+stamp carries its own transaction — one bounded statement, the smallest scope that can be correct.
+**Why no test caught it:** every ingestion test is a `@DataJpaTest`, which wraps each method in a transaction,
+so the production condition is the one condition the suite cannot reproduce. The new guard asserts the
+annotation and says plainly that it is weaker than a behavioural test, which would need a non-transactional
+Spring context this suite does not have.
+
 ## 9. What is still open
 
-- **Phase B has not run.** No ingest, no dedup proof, no Review Core proof, no live row count.
-- **`unitsWithRatingAria = 0`** — the first counter to read in Phase B.
+- **`unitsWithRatingAria = 0`** was the number Phase A said to watch; ratings came through anyway
+  (★3/★4/★5 all recorded), so `parseReviewRating` reading printed text as well as aria is what carried it.
 - **`tabs` semantics are unresolved**: it was empty on a freshly launched Aside and filled by `openTab`, so
   whether it can see tabs the operator opened is unknown. Not needed by this design (the run opens its own
   tab) and therefore not chased.
@@ -245,6 +306,25 @@ store read as `MISMATCH`, which looks exactly like a seller signed into the wron
 - **PILOT_ALLOWED / GA POLICY_GATED is unchanged** (`docs/coupang_review_policy_gate_v1.md`). D1–D8 hold; this
   package stores nothing new and sends nothing to a model.
 
+## 11. Corrections to my own earlier statements
+
+Recorded as they happened rather than reworded to look satisfied.
+
+1. **「모델 호출 0」 in the Phase B manifest was wrong.** I based it on triage and self-pilot being off and
+   overlooked that the product's own press arrives through a **conversation turn**, which plans with the LLM.
+   Measured: **2 `agent_plan` calls** (in 6,796 / out 348 and 333, reasoning 0) — the operator's own typed
+   sentence plus the static tool catalogue, no seller row. **0** draft, **0** judge, **0** triage, and
+   **`llmCalls 0` inside both acquisition executions**. The acquisition is deterministic; the doorway to it is
+   not, and the manifest should have said so.
+2. **Four presses, not two.** Two were refused by defect 1 before any tab opened (marketplace untouched);
+   press 3 read and hit defect 2; press 4 is the clean run. Marketplace reads: **2**, the approved cap.
+3. **The first live ingest arrived through a failed run.** The nine rows exist because press 3's ingest
+   committed before the 500. They are real, correctly deduped against afterwards, and **unstamped** — as is
+   every earlier Coupang batch on this deployment, because the stamp has never once succeeded here.
+4. **The transaction fix is not live-proven.** Press 4 inserted nothing, so `stampAcquisition` short-circuited
+   on an empty id list and the fixed path never ran against a real insert. It is compile- and guard-verified
+   only; the next run that stores a row is what proves it.
+
 ## 10. Product decisions raised (not taken)
 
 1. **Deterministic pagination.** The PoC reads one page and clicks nothing. Turning pages under an Aside run
@@ -252,4 +332,10 @@ store read as `MISMATCH`, which looks exactly like a seller signed into the wron
    2026-08-15 evidence row both state the opposite property. Raised, not taken.
 2. **The digest's enumerability.** Accepted for a comparison that never leaves the machine pair. If the
    expectation is ever exposed more widely, it needs a server-held salt.
+3. **Nine of nine reviews were textless.** The body role resolved and the canonicalizer kept them as
+   rating-only. This store's August batch was also mostly textless (19 of 23, average body 5.7 characters), so
+   this is consistent with the store rather than with a body-read regression — **but this run did not prove
+   the distinction**, and proving it costs another read.
+4. **Demo Org now carries nine more REAL Coupang reviews.** Approved in advance, and named again here because
+   the canonical demo org is where other packages' evidence lives.
 
