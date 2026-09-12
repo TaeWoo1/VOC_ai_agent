@@ -8,6 +8,11 @@ Companion to `docs/review_acquisition_baseline_v1.md`, which owns the architectu
 the runtime boundaries. That document is not restated here. This one adds the axis it does not have:
 **field-level truth per path, and media as five separate questions instead of one.**
 
+**Superseded on media by `docs/review_media_presence_audit_v1.md` (2026-09-13).** That audit measured
+what this one could only describe, and two numbers here are corrected there: the Coupang rows that
+reached the database through a counter are **32**, not 34, and `OperatorVocItem` has **24** record
+components, not 17. The conclusion both agree on — every path lands on `MEDIA_UNKNOWN` — is unchanged.
+
 ## 0. Method — what counts as evidence here
 
 Every cell below is one of three things, and they are never mixed:
