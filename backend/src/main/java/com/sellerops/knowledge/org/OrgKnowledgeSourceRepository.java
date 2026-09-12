@@ -17,6 +17,9 @@ public interface OrgKnowledgeSourceRepository extends JpaRepository<OrgKnowledge
 
     long countByOrgId(UUID orgId);
 
+    /** The same count, narrowed to what can actually ground an answer — see the product-scoped twin. */
+    long countByOrgIdAndActiveTrue(UUID orgId);
+
     /** How many operating rules a person wrote — the 운영 기준 number. See the product repository's note. */
     long countByOrgIdAndDocumentNameIsNull(UUID orgId);
 

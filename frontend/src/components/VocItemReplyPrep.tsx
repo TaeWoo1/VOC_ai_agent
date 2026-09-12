@@ -588,7 +588,7 @@ export function VocItemReplyPrep({
           // TWO closures now reach `canSave === false`, and this sentence is only true of one. When
           // the CHANNEL has already answered, telling someone looking at a review that IS 대응 필요
           // that only 대응 필요 reviews may be prepared sends them to press a button already pressed.
-          // That closure is stated once, by the cluster above this panel (`ReplyWorkControls`), which
+          // That closure is stated once, above this panel by `ChannelAnsweredState`, which
           // is mounted on every reply surface and mounted BEFORE this panel is. Saying it twice on
           // one screen is the other way to get it wrong.
           <p className="text-sm text-muted">

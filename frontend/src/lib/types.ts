@@ -2221,6 +2221,98 @@ export interface TriageCorrectionView {
   changeCount: number;
 }
 
+// ── Review Decision Workspace v1 ─────────────────────────────────────────────────────────────
+//
+// Two reads, both GET, both bounded, both org-scoped. Nothing here is a new store: the context is
+// assembled from the issue memory, the product's own counts and the knowledge library, and the log is
+// read from audit trails this product has been writing for months and nobody was reading.
+
+/**
+ * What stands behind one review — the four things a seller had to leave the review to find.
+ *
+ * `productSignal` is null when the review is bound to no product, and that is not the same as zeros:
+ * one says «this product has no other reviews», the other says «nobody knows which product this is».
+ */
+export interface ReviewDecisionContext {
+  reviewId: string;
+  /**
+   * The server-minted address of this review's DECISION (`review:<uuid>`), round-tripped to the triage
+   * endpoint and never minted here.
+   *
+   * Handed out for every review the workspace can open — including channels with no reply flow, where
+   * the only other source of a ref (`ChannelReviewDetailView.replyWork`) is null. Deciding and
+   * replying are different things, and only the address was ever gated on the second.
+   */
+  decisionRef: string;
+  /** The decision that currently stands, or null when nobody has made one. */
+  currentDecision: TriageDisposition | null;
+  /** The channel this review arrived on — so the workspace uses its word for it without a second read. */
+  channelCode: string | null;
+  productId: string | null;
+  productName: string | null;
+  repeatedProblems: ReviewDecisionProblem[];
+  productSignal: { reviews: number; negativeReviews: number } | null;
+  knowledge: ReviewDecisionKnowledge;
+}
+
+/**
+ * One repeated problem this review is recorded evidence FOR, with what else said the same.
+ *
+ * `evidenceCount` is org-wide and all-time — the same number 고객운영 메모리 means by it. `similar`
+ * never contains the review being decided, and it is capped: the issue page is where they all live.
+ */
+export interface ReviewDecisionProblem {
+  issueId: string;
+  title: string;
+  severity: IssueSeverity | null;
+  lifecycleState: string | null;
+  evidenceCount: number;
+  firstEvidenceOn: string | null;
+  lastEvidenceOn: string | null;
+  dismissed: boolean;
+  similar: ReviewDecisionSimilarReview[];
+}
+
+/** Another review that backs the same problem. `quote` is masked, and null when masking suppressed it. */
+export interface ReviewDecisionSimilarReview {
+  reviewId: string;
+  occurredOn: string | null;
+  rating: number | null;
+  quote: string | null;
+  productName: string | null;
+  sameProduct: boolean;
+}
+
+/**
+ * What this company has written down that a reply could stand on — counts and titles, never bodies.
+ *
+ * Bodies are deliberately absent: this answers «is there anything registered about this», while what a
+ * DRAFT actually stood on is the draft's own citations (`ReviewReplyPrep.draftEvidence`).
+ */
+export interface ReviewDecisionKnowledge {
+  productSources: number;
+  orgSources: number;
+  productTitles: string[];
+  /** 확인 필요 rows still waiting for this product — why a draft may say less than expected. */
+  openAsks: number;
+}
+
+/** One thing that was decided about this review. Closed vocabulary; the Korean is chosen on screen. */
+export interface ReviewDecisionLogEntry {
+  kind: ReviewDecisionLogKind;
+  from: string | null;
+  to: string | null;
+  at: string;
+}
+
+export type ReviewDecisionLogKind =
+  | "SELLER_JUDGMENT_SET"
+  | "SELLER_JUDGMENT_WITHDRAWN"
+  | "ACTION_CHOSEN"
+  | "ACTION_RECORDED"
+  | "REPLY_APPROVAL"
+  | "REPLY_OUTCOME";
+
 /** One entry in a review's correction trail. Closed vocabulary; no actor name, no prose. */
 export interface TriageCorrectionHistoryView {
   kind: "SET" | "WITHDRAWN";

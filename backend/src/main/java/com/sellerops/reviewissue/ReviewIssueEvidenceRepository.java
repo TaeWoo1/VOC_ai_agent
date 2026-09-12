@@ -3,6 +3,7 @@ package com.sellerops.reviewissue;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -87,6 +88,17 @@ public interface ReviewIssueEvidenceRepository extends JpaRepository<ReviewIssue
 
     /** Evidence for one issue, newest first, for the drill-down that renders 대표 고객 표현. */
     List<ReviewIssueEvidence> findByOrgIdAndIssueIdOrderByOccurredOnDesc(UUID orgId, UUID issueId);
+
+    /**
+     * The same evidence, capped — for a surface that wants «what else said this», not the whole file.
+     *
+     * <p>The Decision Workspace opens on ONE review and shows a handful of others that back the same
+     * problem. Reading every evidence row to keep three of them would make opening a review cost more
+     * the longer the seller has been running, and the issue page — which exists to show them all — is
+     * one click away.
+     */
+    List<ReviewIssueEvidence> findByOrgIdAndIssueIdOrderByOccurredOnDesc(UUID orgId, UUID issueId,
+                                                                        Pageable page);
 
     /**
      * The other direction: which repeated problems ONE review is evidence for.

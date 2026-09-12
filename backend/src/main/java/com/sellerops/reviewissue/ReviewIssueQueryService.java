@@ -263,15 +263,7 @@ public class ReviewIssueQueryService {
      * never evidence for.
      */
     private static String quoteFor(Review review, int unitOrdinal) {
-        if (review == null) {
-            return null;
-        }
-        List<String> units = OpinionUnitSplitter.split(review.getBody());
-        if (unitOrdinal < 0 || unitOrdinal >= units.size()) {
-            return null;
-        }
-        SafePreviewResult preview = VocPreviewSanitizer.sanitize(units.get(unitOrdinal));
-        return preview.text();
+        return IssueEvidenceQuote.of(review, unitOrdinal);
     }
 
     private Map<UUID, Review> loadReviews(List<ReviewIssueEvidence> rows) {

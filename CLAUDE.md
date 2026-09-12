@@ -1617,6 +1617,37 @@ API 집합 · 3폭 AA 0. **고치지 않고 보고**: Opportunity는 이슈만�
 도착했네요」였다(규칙 추출기의 부정문 오탐; 어휘는 측정 라벨 없이 손대지 않는다 ⇒ product-owner 결정). 마켓플레이스 0 ·
 WRITE 0 · 승인 0 · 마이그레이션 1 · 플래너 호출 2(QA) ⇒ evidence 행 없음.)
 
+**`docs/review_decision_workspace_v1.md`** (Review Decision Workspace v1 — 2026-09-12. 새 기능이 아니라
+**배치와 도달성**: 판매자가 리뷰 하나를 열었을 때 「왜 봐야 하는지 → 무엇을 판단할지 → 무엇을 할지」를 한 화면에서
+끝낸다. **마이그레이션 0 · 새 테이블 0 · 새 enum 0 · 새 classifier 0 · 새 LLM capability 0 · 마켓플레이스 0 ·
+WRITE 0 · 모델 0.** 감사 결과 **여덟 정보 중 일곱이 이미 있었고 다섯이 이 화면에 없었다** — 고객 문장과 tier·이유는
+「이 리뷰의 자동 분류」 아래 **접혀 있었고**(승인 화면에는 옳고 판단 화면에는 틀린 접기), T-07 판매자 판단은 **다른
+화면에만** 있었으며, 반복 문제는 **제목 한 줄뿐 예시 0**, 회사 지식은 **언급 0**, 그리고 결정 trail **다섯 개**가
+몇 달째 쓰이면서 **읽는 코드가 0**이었다. 그래서 만든 것은 새 진실이 아니라 **읽는 쪽** — GET 둘
+(`decision-context` · `decision-log`)이고 이 컨트롤러에 **write는 없다**(결정의 두 번째 문은 언젠가 첫 문과 다른 말을
+한다). context는 **모델 0**이다: 열 때마다 retrieval을 돌리면 아직 아무도 요구하지 않은 문단을 위해 **여는 값이
+돈이 된다** ⇒ 이 블록은 「라이브러리에 무엇이 있는가」만 답하고 「초안이 무엇 위에 섰는가」는 초안 자신의 인용이 답한다.
+**유사 리뷰는 추출기가 이미 같은 문제의 근거로 묶은 리뷰뿐** — 두 번째 유사도 메커니즘은 아무도 측정하지 않은
+classifier가 판매자의 읽는 순서를 정하는 일이다. §5-C가 남긴 「Decision Workspace 때 다시 정한다」를 여기서 정했다:
+조치 선택 = **기존 `TriageDisposition` 그대로**(새 enum 0·낱말 0, 채널을 아는 것은 버튼 아래 한 줄뿐), 완료 기록은
+`ACTION_STARTED`/`ACTION_COMPLETED` **둘만**이고 **`ACTION_NOT_NEEDED` 제외**(그 진술은 `NO_ACTION`이 이미 결정
+spine에 쓴다 — 한 press가 두 spine에 두 강도로 들어가는 것이 §5-C가 금지한 모양), 조치 기록의 **pilot 게이트 해제**
+(T-07이 correction에 대해 한 논증). **결함 하나를 찾아 고쳤다 — 판단과 답변은 다른 능력인데 주소가 하나였다**:
+`decide()`는 채널 capability를 보지 않는데 리뷰 화면이 얻을 수 있는 유일한 ref는 **답변 flow가 있는 채널에만**
+발급돼, **쿠팡 상품평에는 판단 컨트롤이 존재할 수 없었다** ⇒ `decisionRef`를 워크스페이스가 열 수 있는 모든 리뷰에
+서버가 mint해 돌려준다(클라이언트는 여전히 round-trip만; 답변 lane의 ref가 같은 결정을 가리키므로 context 읽기가
+실패해도 **맥락만 잃고 판단 능력은 잃지 않는다**). 사본을 늘리지 않으려고 다섯을 끌어올리고
+`ReplyWorkControls`는 **지웠다**(`SellerCorrectionControls` · `TriageTierChip`/`AiMarkChip` · `ChannelAnsweredState` ·
+`reviewWord` · `IssueEvidenceQuote` — 마지막은 **마스킹 규칙**의 두 번째 사본이 바뀔 때 잊히는 쪽이기 때문). **그리고
+이 화면이 review 처리의 canonical mutation surface가 된다**(product-owner decision): 기록 화면의 상세는 서 있는 것을
+**읽고** 문 하나를 낼 뿐 아무것도 쓰지 않으며, 그 삭제로 `ACTION_NOT_NEEDED` vs `NO_ACTION` 이중 경로가 닫힌다. 승인 경계·append-only
+버전·fingerprint·복사 후 판매자 직접 등록 handoff **무변경**. backend **3,942** · frontend **239 files / 2,822** · 실패 0 · axe 위반 0 ·
+**실제 Demo Org 로컬 브라우저 QA 통과**(커넥터 전부 OFF · 1440/1366/1152 · 콘솔 오류 0 · off-host 0 · 채널 호출 0; 쿠팡 상품평에서 판단 컨트롤이 서는 것을 라이브로 확인). **계약이 바뀌어 테스트 1건을 다시 썼다**(14 → 26 단언, 안전 테스트 약화 0). **고치지 않고 보고**:
+`ACTION_NOT_NEEDED` enum 값은 남기고 그 컨트롤만 지웠다(production caller 0) · tier 낱말이 한 화면에 두 번(대조가 읽히려면 필요) ·
+`decision-context`는 bounded read 약 10회 · 반복 신호는 추출기만큼만 참(부정문 오탐 잔존) · `ACTION_NOT_NEEDED`를 쓰는
+pilot 컨트롤은 기록 화면에 잔존 · `frontend/CLAUDE.md`가 금지한 `backend/**` 수정을
+product-owner 지시(priority 1)로 했고 **전부 읽기 전용**)
+
 **`docs/local_helper_pilot_packaging_v1.md`** (Local Helper Pilot Packaging v1 — 2026-09-05. 도우미는
 `tsx` 체크아웃이었고 두 시작 경로가 서로 배타적이었다(launchd는 비밀번호를 plist에 못 싣고 supervisor는 첫 pairing에
 터미널이 필요) ⇒ `REVIEWNARY_HELPER_HOME` 상태 루트(프로필·pairing·상태·다운로드가 업데이트에 살아남는다) + 도우미가

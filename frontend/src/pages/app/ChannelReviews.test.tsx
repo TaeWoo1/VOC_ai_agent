@@ -88,7 +88,7 @@ const PAGE: ChannelReviewPageView = {
   ],
 };
 
-/** The seller's standing answer, as the read carries it back. */
+/** A standing seller correction, as the read carries it. */
 function correctionView(tier: "NEEDS_ATTENTION" | "WATCH" | "FYI") {
   return {
     reviewId: "r1",
@@ -184,60 +184,46 @@ describe("reply work on the 리뷰 screen (A6)", () => {
     replyWork: { actionRef: "review:r1", triageDisposition: null, hasReplyPreparation: false, channelReplyState: "PENDING" },
   };
 
-  it("NAVER: the detail offers the decision (대응 필요 …) and the page opens with 내 답변 작업", async () => {
+  it("NAVER: the detail READS the decision and offers the door — it no longer records one", async () => {
     getChannelReviewsStrict.mockResolvedValue(NAVER_PAGE);
     getChannelReviewStrict.mockResolvedValue(NAVER_DETAIL);
     renderPage("/reviews/acc-1?review=r1");
 
-    // The workflow sentence says the screen prepares replies here — and that posting stays with the seller.
+    // The workflow sentence says the screen prepares replies — and that posting stays with the seller.
     expect(await screen.findByText(/올리는 일은 판매자센터에서 직접 합니다/)).toBeInTheDocument();
-    const reply = await screen.findByRole("region", { name: "답변" });
-    expect(within(reply).getByRole("button", { name: "대응 필요" })).toBeInTheDocument();
-    // Undecided and no work yet: the preparation panel stays off (it would open a read for nothing).
-    expect(within(reply).queryByRole("heading", { name: "답변 준비" })).toBeNull();
+    const block = await screen.findByRole("region", { name: "판단과 조치" });
+    // What stands, as facts. No control that writes: the record is a record.
+    expect(within(block).getByText(/시스템 판단/)).toBeInTheDocument();
+    expect(within(block).getByText("처리 상태 판단 전")).toBeInTheDocument();
+    expect(within(block).queryByRole("button", { name: "대응 필요" })).toBeNull();
+    expect(within(block).queryByRole("button", { name: "확인 필요" })).toBeNull();
+    expect(within(block).queryByRole("heading", { name: "답변 준비" })).toBeNull();
     expect(getReviewReplyPrep).not.toHaveBeenCalled();
-    // The operator's committed work has its home on this page now, for this account.
+    // One door, to the one place the decision is made.
+    expect(within(block).getByRole("link", { name: "이 리뷰 처리하기" }))
+      .toHaveAttribute("href", "/reviews/acc-1/reply/r1");
+
+    // The operator's committed work still has its home on this page, above the record it follows on.
     const worklist = await screen.findByRole("heading", { name: "내 답변 작업" });
-    expect(worklist).toBeInTheDocument();
     expect(getReplyWork).toHaveBeenCalledWith("acc-1", expect.anything());
-    // And it comes BEFORE the record it follows through on: what the seller is being asked to do is
-    // above the material they might read, not under 4,455 rows of it.
     const list = await screen.findByRole("heading", { name: "목록" });
     expect(worklist.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("NAVER: a review already marked 대응 필요 mounts the preparation panel — the same flow, entered from here", async () => {
+  it("NAVER: a review already marked 대응 필요 opens no draft here — the panel lives in 리뷰 처리", async () => {
     getChannelReviewsStrict.mockResolvedValue(NAVER_PAGE);
     getChannelReviewStrict.mockResolvedValue({
       ...NAVER_DETAIL,
-      replyWork: { actionRef: "review:r1", triageDisposition: "RESPONSE_NEEDED", hasReplyPreparation: false },
-    });
-    getReviewReplyPrep.mockResolvedValue({
-      actionRef: "review:r1",
-      redactedBody: "합성-리뷰-본문",
-      bodyRedacted: false,
-      triageDisposition: "RESPONSE_NEEDED",
-      suggestion: {
-        body: "합성-추천-초안",
-        category: "delivery_reply",
-        providerKind: "RULE_BASED",
-        providerName: "review-reply-template",
-        providerVersion: "templates-v1",
-      },
-      draft: null,
-      approval: null,
-      outcome: null,
-      capabilities: { canSave: true, canApprove: false, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
-      channelReplyState: "UNKNOWN",
-      productName: "무선 이어폰",
-      reviewDate: "2026-08-11",
-      rating: 5,
+      replyWork: { actionRef: "review:r1", triageDisposition: "RESPONSE_NEEDED", hasReplyPreparation: true, channelReplyState: "PENDING" },
     });
     renderPage("/reviews/acc-1?review=r1");
 
-    const reply = await screen.findByRole("region", { name: "답변" });
-    expect(await within(reply).findByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
-    expect(getReviewReplyPrep).toHaveBeenCalledWith("acc-1", "review:r1");
+    const block = await screen.findByRole("region", { name: "판단과 조치" });
+    // The decision is READ back, so the record still says where the review stands.
+    expect(within(block).getByText("처리 상태 대응 필요")).toBeInTheDocument();
+    // …and the draft is not mounted here. Two rooms preparing one reply is how they drift apart.
+    expect(within(block).queryByRole("heading", { name: "답변 준비" })).toBeNull();
+    expect(getReviewReplyPrep).not.toHaveBeenCalled();
   });
 
   it("Coupang: no decision, no preparation, no 내 답변 작업 — the channel has no reply flow", async () => {
@@ -748,59 +734,50 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
     expect(screen.queryByText(/AI 분류가/)).toBeNull();
   });
 
-  it("records a correction and an action, and changes nothing on screen — no tier moves, no row hides", async () => {
-    correctTriage.mockResolvedValue(correctionView("FYI"));
+  it("records nothing — the record reads the decision and hands the seller the door", async () => {
     getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: true });
     renderPage();
     await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
-    await screen.findByText("이 상품평, 판매자님 판단은 어떠신가요?");
+    const block = await screen.findByRole("region", { name: "판단과 조치" });
 
-    await userEvent.click(within(screen.getByLabelText("판매자 판단")).getByRole("button", { name: "참고" }));
-    await waitFor(() =>
-      expect(correctTriage).toHaveBeenCalledWith("acc-1", "r1", { tier: "FYI", reasonCode: null }));
-    // The answer is shown as pressed — and the row and the tier are exactly where they were.
-    expect(within(screen.getByLabelText("판매자 판단")).getByRole("button", { name: "참고" }))
-      .toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("배송도 빠르고 포장도 꼼꼼했어요")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "조치 완료" }));
-    await waitFor(() => expect(recordAction).toHaveBeenCalledWith("acc-1", "r1", "ACTION_COMPLETED"));
-    // The copy says what happens: recorded, not applied, and nothing sent to a marketplace.
-    expect(screen.getByText(/시스템 판단을 덮어쓰지 않고/)).toBeInTheDocument();
-  });
-
-  it("offers all three tiers — 지켜보기 and 참고 are the seller's to choose, not the rule's to derive", async () => {
-    // This test used to assert the OPPOSITE ("offers a binary answer only"), on the reasoning that the
-    // WATCH/FYI split is the rule's and the pilot does not own it. That was right about the pilot and
-    // wrong about the seller: with two buttons, a seller who meant 참고 had 지켜보기 recorded under
-    // their name, because 필요 없음 was stored as whatever the rule would have said. Reversed by
-    // product-owner decision (T-07, 2026-09-11).
-    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: true });
-    renderPage();
-    await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
-    await screen.findByText("이 상품평, 판매자님 판단은 어떠신가요?");
-    const block = screen.getByLabelText("판매자 판단");
-    expect(within(block).getByRole("button", { name: "확인 필요" })).toBeInTheDocument();
-    expect(within(block).getByRole("button", { name: "지켜보기" })).toBeInTheDocument();
-    expect(within(block).getByRole("button", { name: "참고" })).toBeInTheDocument();
-  });
-
-  it("the correction control is there with the AI pilot OFF — the pilot is not permission to disagree", async () => {
-    // The endpoint has accepted rules corrections since V43; the coupling was this screen, which
-    // rendered the whole block only under `pilotOn`. A seller on an org with no pilot had no control.
-    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: false });
-    renderPage();
-    await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
-    await screen.findByText("이 상품평, 판매자님 판단은 어떠신가요?");
-    expect(screen.getByLabelText("판매자 판단")).toBeInTheDocument();
-    // The ACTION controls stay behind the pilot: T-07 decoupled the correction, and widening what
-    // else gets recorded was not part of it.
+    // Every mutation this panel used to own now lives on 리뷰 처리: the decision, the seller's own
+    // tier, the recorded act, the draft. Two rooms for one decision is how a product gets two answers
+    // — and it is also how ACTION_NOT_NEEDED and NO_ACTION both existed for the same sentence.
+    expect(screen.queryByText("이 상품평, 판매자님 판단은 어떠신가요?")).toBeNull();
+    expect(screen.queryByLabelText("판매자 판단")).toBeNull();
     expect(screen.queryByLabelText("조치 기록")).toBeNull();
+    expect(screen.queryByRole("button", { name: "조치 완료" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "조치 불필요" })).toBeNull();
+    expect(correctTriage).not.toHaveBeenCalled();
+    expect(recordAction).not.toHaveBeenCalled();
+    expect(within(block).getByRole("link", { name: "이 리뷰 처리하기" })).toBeInTheDocument();
+    expect(within(block).getByText(/판단·조치·답변 준비는 리뷰 처리 화면에서 합니다/)).toBeInTheDocument();
   });
 
-  it("a correction survives a refresh — the screen reads it back and shows BOTH judgments", async () => {
-    // Requirement 4. Before T-07 the answer lived in one React state variable: the write reached the
-    // database and the next read forgot it, so the seller could not tell it had been recorded.
+  it("offers no tier controls at all — choosing among the three is the workspace's job", async () => {
+    // The three-way choice itself is unchanged and still pinned, on the surface that now owns it
+    // (`ReviewReplyTask.test.tsx`). What moved is WHERE it is offered, not WHAT it offers.
+    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: true });
+    renderPage();
+    await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
+    await screen.findByRole("region", { name: "판단과 조치" });
+    expect(screen.queryByRole("button", { name: "지켜보기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "수정 되돌리기" })).toBeNull();
+  });
+
+  it("reads the seller's standing answer whether or not the pilot is on — reading is not the pilot's either", async () => {
+    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: false });
+    getChannelReviewStrict.mockResolvedValue({ ...DETAIL, sellerCorrection: correctionView("FYI") });
+    renderPage();
+    await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
+    const block = await screen.findByRole("region", { name: "판단과 조치" });
+    expect(within(block).getByText(/판매자 수정/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("판매자 판단")).toBeNull();
+  });
+
+  it("shows BOTH judgments as facts — the system's is not overwritten and the seller's is not lost", async () => {
+    // Requirement 4, on the read side. The pressing half moved to 리뷰 처리; what the record owes the
+    // seller is that a correction they made is visible here too, from the READ rather than a session.
     getChannelReviewStrict.mockResolvedValue({
       ...DETAIL,
       triage: { tier: "NEEDS_ATTENTION", reason: "낮은 별점", tags: [], recommendedAction: null },
@@ -808,12 +785,13 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
     });
     renderPage();
     await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
-    const block = await screen.findByLabelText("판매자 판단");
-    // Nothing was pressed in this session — this is the stored answer, rendered from the read.
+    const block = await screen.findByRole("region", { name: "판단과 조치" });
     expect(correctTriage).not.toHaveBeenCalled();
-    expect(within(block).getByRole("button", { name: "참고" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(block).getByText("시스템 판단")).toBeInTheDocument();
-    expect(within(block).getByText("판매자 수정")).toBeInTheDocument();
+    expect(within(block).getByText(/시스템 판단/)).toBeInTheDocument();
+    expect(within(block).getByText(/판매자 수정/)).toBeInTheDocument();
+    // Both words are on the line, and neither replaced the other.
+    expect(within(block).getByText("확인 필요")).toBeInTheDocument();
+    expect(within(block).getByText("참고")).toBeInTheDocument();
   });
 
   it("a corrected row says so in the queue, and does not move", async () => {
@@ -831,16 +809,13 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
       .toBeLessThan(rows.findIndex((t) => t.includes(PAGE.items[1].preview ?? "")));
   });
 
-  it("되돌리기 appears only once a correction stands, and clears the seller's half alone", async () => {
+  it("offers no 되돌리기 — withdrawing is a write, and writes are the workspace's", async () => {
     getChannelReviewStrict.mockResolvedValue({ ...DETAIL, sellerCorrection: correctionView("WATCH") });
     renderPage();
     await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
-    const block = await screen.findByLabelText("판매자 판단");
-
-    await userEvent.click(within(block).getByRole("button", { name: "수정 되돌리기" }));
-    await waitFor(() => expect(withdrawCorrection).toHaveBeenCalledWith("acc-1", "r1"));
-    // The system's judgment is untouched by a withdrawal — only the seller's half goes.
-    expect(within(block).getByText("시스템 판단")).toBeInTheDocument();
+    await screen.findByRole("region", { name: "판단과 조치" });
+    expect(screen.queryByRole("button", { name: "수정 되돌리기" })).toBeNull();
+    expect(withdrawCorrection).not.toHaveBeenCalled();
   });
 
   it("reports exposure and opening as silver, only for rows something raised, and never fails the list on it", async () => {

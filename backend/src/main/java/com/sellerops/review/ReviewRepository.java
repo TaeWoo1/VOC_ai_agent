@@ -396,6 +396,13 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     long countByOrgIdAndProductId(UUID orgId, UUID productId);
 
     /**
+     * The negative half of the same count, over the same predicate — the Decision Workspace's answer
+     * to «is this one review the only one». Derived, so it inherits {@code realDataOnly} exactly as
+     * its sibling does and the two figures can never disagree about which rows they counted.
+     */
+    long countByOrgIdAndProductIdAndNegativeTrue(UUID orgId, UUID productId);
+
+    /**
      * One page of the reviews {@link #countByOrgIdAndProductId} counted — <b>the same predicate,
      * deliberately</b>, so the 상품 screen's 리뷰 figure and the list it opens can never mean different
      * rows (Product Operations Continuity v1 §1).

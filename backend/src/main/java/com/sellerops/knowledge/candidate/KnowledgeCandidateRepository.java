@@ -17,6 +17,13 @@ public interface KnowledgeCandidateRepository extends JpaRepository<KnowledgeCan
     long countByOrgIdAndState(UUID orgId, String state);
 
     /**
+     * How many asks are still waiting for ONE product — the Decision Workspace's «why the draft may
+     * say less than you expect» number. A count, so the workspace never loads the org's whole inbox
+     * to show a figure beside one review.
+     */
+    long countByOrgIdAndProductIdAndState(UUID orgId, UUID productId, String state);
+
+    /**
      * Whether this org has already ANSWERED this exact ask.
      *
      * <p>Knowledge Gap Continuity v1: a regenerate re-runs the gap detection, so without this a

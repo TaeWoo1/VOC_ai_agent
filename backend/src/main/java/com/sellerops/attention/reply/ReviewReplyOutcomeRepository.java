@@ -33,6 +33,15 @@ public interface ReviewReplyOutcomeRepository extends JpaRepository<ReviewReplyO
             UUID orgId, UUID reviewId, Integer recordedVersion);
 
     /**
+     * Every outcome ever reported for one review, newest first — the Decision Workspace's log.
+     *
+     * <p>Unversioned on purpose: the prep panel asks about the version that STANDS, and the log asks
+     * what the seller has said over the life of the review, including reports against a version they
+     * have since replaced. Bounded by the review (a person reports a handful of times, not a stream).
+     */
+    List<ReviewReplyOutcome> findAllByOrgIdAndReviewIdOrderByCreatedAtDesc(UUID orgId, UUID reviewId);
+
+    /**
      * Which of these reviews carry a REPORTED submission for the reply version that currently
      * stands — one org-scoped batch query per drill-down page, never a per-row lookup (same shape as
      * {@code ReviewReplyDraftRepository.findReviewIdsWithDraft}).

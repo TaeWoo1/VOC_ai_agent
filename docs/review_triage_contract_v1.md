@@ -463,6 +463,12 @@ binary지만, 판매자는 화면이 보여 주는 어휘 **전체**를 소유�
 | **Decision Data** | silver `review_triage_behavior_events`와 섞지 않는다 — 같은 press가 두 강도로 두 번 세어지면 안 된다 |
 | **rule vs LLM 구분** | `shown_source`가 V43부터 이미 답한다. 이번에 trail에도 얼린다 |
 | **분리 범위** | **correction만.** 조치 시작·완료·불필요 버튼은 pilot 뒤에 그대로 둔다 — 무엇이 더 기록되는지 넓히는 것은 이 결정이 아니고, **Recommended Action / Decision Workspace 작업 때 다시 정한다** (product-owner decision, 2026-09-11) |
+> **후속 (2026-09-12).** 그 「다시 정한다」는 `docs/review_decision_workspace_v1.md` §3에서 정해졌다 —
+> 조치 선택은 **기존 `TriageDisposition`을 그대로 쓰고**(새 enum 0, 낱말 0), 완료 기록은
+> `ACTION_STARTED`/`ACTION_COMPLETED` **둘만** 두며 `ACTION_NOT_NEEDED`는 워크스페이스에서 제외한다
+> (그 진술은 `NO_ACTION`이 이미 결정 spine에 기록하므로, 한 press가 두 spine에 두 강도로 들어가는 것을 막는다).
+> 워크스페이스에서는 조치 기록의 pilot 게이트도 해제한다 — 판매자가 자기가 한 일을 적는 것은 pilot의 것이 아니다.
+> 기록 화면의 pilot 컨트롤은 무변경.
 
 **새 generic event platform은 만들지 않았다.** `review_reply_approval`(STANDING/WITHDRAWN + `*_audit`)과
 `review_triage`/`review_triage_audit`이 이 저장소가 「바뀔 수 있고 답변 가능해야 하는 사람의 결정」에 이미

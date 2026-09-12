@@ -28,3 +28,18 @@ export function channelDataTypeLabel(
   }
   return CHANNEL_DATA_TYPE_LABEL[channelCode]?.[dataType] ?? genericLabel;
 }
+
+/**
+ * What one review is called here.
+ *
+ * The product's word is 리뷰 (the nav item, the workflow); a channel with its own word for the same
+ * thing (Coupang: 상품평) keeps it. Before a channel is known there is no channel yet, so the generic
+ * word — which is also the honest answer while a read is in flight.
+ *
+ * It lived inside `ChannelReviews.tsx` while the record was the only screen that named a review. The
+ * Decision Workspace names one in six places, and a second copy of this two-line function is how one
+ * screen ends up calling a Coupang row 상품평 while the screen it links to calls it 리뷰.
+ */
+export function reviewWord(channelCode: string | null | undefined): string {
+  return channelDataTypeLabel(channelCode, "REVIEW", "리뷰");
+}
