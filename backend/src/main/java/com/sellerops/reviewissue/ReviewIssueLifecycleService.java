@@ -1,5 +1,6 @@
 package com.sellerops.reviewissue;
 
+import com.sellerops.common.ApiException;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -165,7 +166,8 @@ public class ReviewIssueLifecycleService {
         // Same message for "not this org's" and "does not exist", so an id cannot be probed for
         // existence across orgs.
         if (issue == null || !issue.getOrgId().equals(orgId)) {
-            throw new IllegalArgumentException("이슈를 찾을 수 없습니다.");
+            // 404, not 500 — see ReviewIssueQueryService.requireIssue for the measurement.
+            throw ApiException.notFound("이슈를 찾을 수 없습니다.");
         }
         return issue;
     }

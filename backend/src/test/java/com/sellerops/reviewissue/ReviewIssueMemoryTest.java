@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
 
 /**
@@ -507,10 +508,16 @@ class ReviewIssueMemoryTest {
         UUID otherOrg = UUID.randomUUID();
 
         assertThatThrownBy(() -> lifecycle.startActing(otherOrg, issue.getId(), null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("이슈를 찾을 수 없습니다.");
+                // 404, not 500. The name of this test was already the contract — 「absent rather than
+                // forbidden」 — and IllegalArgumentException is neither: no handler maps it, so the
+                // route answered with a server error. Measured against a second org's token on
+                // 2026-09-13, this read returned 500 while its neighbours returned 404.
+                .isInstanceOf(com.sellerops.common.ApiException.class)
+                .hasMessage("이슈를 찾을 수 없습니다.")
+                .extracting(e -> ((com.sellerops.common.ApiException) e).getStatus())
+                .isEqualTo(HttpStatus.NOT_FOUND);
         assertThatThrownBy(() -> lifecycle.dismiss(otherOrg, UUID.randomUUID()))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(com.sellerops.common.ApiException.class)
                 .hasMessage("이슈를 찾을 수 없습니다.");
     }
 
@@ -669,8 +676,10 @@ class ReviewIssueMemoryTest {
         ReviewIssue issue = seedNewIssueThatFires();
 
         assertThatThrownBy(() -> queries.detail(UUID.randomUUID(), issue.getId(), REF))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("이슈를 찾을 수 없습니다.");
+                .isInstanceOf(com.sellerops.common.ApiException.class)
+                .hasMessage("이슈를 찾을 수 없습니다.")
+                .extracting(e -> ((com.sellerops.common.ApiException) e).getStatus())
+                .isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     // ---- the agent-facing read side (context / evidence-summary / trend) ------------------------
@@ -797,11 +806,11 @@ class ReviewIssueMemoryTest {
         UUID other = UUID.randomUUID();
 
         assertThatThrownBy(() -> queries.context(other, issue.getId(), REF))
-                .isInstanceOf(IllegalArgumentException.class).hasMessage("이슈를 찾을 수 없습니다.");
+                .isInstanceOf(com.sellerops.common.ApiException.class).hasMessage("이슈를 찾을 수 없습니다.");
         assertThatThrownBy(() -> queries.evidenceSummary(other, issue.getId()))
-                .isInstanceOf(IllegalArgumentException.class).hasMessage("이슈를 찾을 수 없습니다.");
+                .isInstanceOf(com.sellerops.common.ApiException.class).hasMessage("이슈를 찾을 수 없습니다.");
         assertThatThrownBy(() -> queries.issueView(other, issue.getId(), REF))
-                .isInstanceOf(IllegalArgumentException.class).hasMessage("이슈를 찾을 수 없습니다.");
+                .isInstanceOf(com.sellerops.common.ApiException.class).hasMessage("이슈를 찾을 수 없습니다.");
     }
 
     @Test

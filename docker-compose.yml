@@ -57,6 +57,13 @@ services:
       SELLEROPS_SEED_DEMO_ENTRY: ${SELLEROPS_SEED_DEMO_ENTRY:-}
       SELLEROPS_VAULT_MASTER_KEY: ${SELLEROPS_VAULT_MASTER_KEY:-}
       SELLEROPS_VAULT_KEY_ID: ${SELLEROPS_VAULT_KEY_ID:-}
+      # The retired keys a rotation still has to open rows with. CredentialVault and VaultKeyRing
+      # support rotation fully; without this name reaching the container, a deployed host cannot
+      # perform one — every row sealed by the old key reads KEY_MISMATCH the moment the id changes.
+      SELLEROPS_VAULT_KEY_RING: ${SELLEROPS_VAULT_KEY_RING:-}
+      # Password reset delivery. Default off (the link is not sent and not logged). `dev-outbox`
+      # writes the whole message to the log and deploy.sh refuses it on a pilot host.
+      SELLEROPS_MAIL_MODE: ${SELLEROPS_MAIL_MODE:-off}
       SELLEROPS_CONNECTOR_MOCK_ENABLED: ${SELLEROPS_CONNECTOR_MOCK_ENABLED:-false}
       SELLEROPS_CONNECTOR_MOCK_FALLBACK_ENABLED: ${SELLEROPS_CONNECTOR_MOCK_FALLBACK_ENABLED:-false}
       SELLEROPS_CONNECTOR_NAVER_ENABLED: ${SELLEROPS_CONNECTOR_NAVER_ENABLED:-false}

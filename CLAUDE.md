@@ -1648,7 +1648,40 @@ spine에 쓴다 — 한 press가 두 spine에 두 강도로 들어가는 것이 
 pilot 컨트롤은 기록 화면에 잔존 · `frontend/CLAUDE.md`가 금지한 `backend/**` 수정을
 product-owner 지시(priority 1)로 했고 **전부 읽기 전용**)
 
-**`docs/operations_home_v1.md`** (Operations Home v1 — 2026-09-13. 로그인하면 「지금 확인할 것」이 화면에 있다;
+**`docs/pilot_readiness_v2.md`** (Pilot Readiness v2 — 2026-09-13. 판정 **`READY_PENDING_HOST`**.
+v1이 남긴 blocker 「고정 공인 IPv4 + 공개 HTTPS callback」은 **하나가 아니라 둘이었고 서로 다른 방향의
+요구**다 — HTTPS 호스트는 **인바운드**(Cafe24가 도달할 redirect URI), 고정 IPv4는 **아웃바운드**(NAVER가
+등록을 요구하는 호출 IP). 코드가 그렇게 말한다(`PilotConfigValidator`의 IP 조건은 `naverEnabled &&`,
+`deploy.sh`도 같다) ⇒ **Cafe24-only 파일럿에는 고정 IP가 필요 없고**, 그것을 논증이 아니라 테스트로
+증명했다(`cafe24OnlyPilotStartsWithoutAnyAdvertisedEgressIp` 문제 0개 · `addingNaverToThatSame…` 거부).
+PRIMARY 온보딩이 Cafe24라는 기존 결정과 맞고, **EIP는 파일럿 시작의 전제가 아니라 NAVER 추가의 전제**다.
+설정 표면 결함 **넷**을 닫았다(제품 의미 변경 0): `AGENT_{PLAN,DRAFT,JUDGE,CONVERSE,REPORT}_ORG_IDS=*`가
+거부되지 않던 것(세 retrieval capability에는 이미 거부가 있었고 **그 비대칭은 결정이 아니었다**) ·
+`ACCESS_SCOPE=ALL_ORGS`(application.yml 스스로 공유 백엔드에서 쓰지 말라고 적어 둔 자세) ·
+**`SELLEROPS_VAULT_KEY_RING`이 컨테이너 env에 도달하지 못해 배포된 호스트에서 키 교체가 불가능**했던 것 ·
+**`SELLEROPS_MAIL_MODE=dev-outbox`가 비밀번호 재설정 링크를 포함한 메일 전문을 INFO 로그에 쓰는데 막는 것이
+없던** 것(+ `AGENT_REPORT_*`가 검증 대상인데 템플릿에 없던 것). **org isolation 실측**: 새 org의 토큰으로
+6개 경로를 찔러 데이터 0 — 다만 **두 경로가 404가 아니라 500**이었다(`IllegalArgumentException`을 매핑하는
+핸들러가 없다). 샌 것은 없고 대가는 다른 데 있었다 — **자기 것이 아닌 페이지를 연 판매자가 크래시를 보고,
+ERROR 수를 지켜보는 운영자가 일어나지 않은 장애를 본다**; 삭제된 이슈로 가는 북마크도 같다 ⇒
+`ApiException.notFound`로 고쳤고 이미 「absent rather than forbidden」이라 이름 붙어 있던 테스트가 이제
+**상태 코드까지** 단언한다(실측 500 → 404, 자기 org 200, ERROR 0). demo 전제는 **이미 안전한 기본값**
+(seed/demo-content/demo-entry/mock/mock-fallback 전부 false; 기본 ON은 채널 카탈로그뿐이고 그것은 참조
+데이터다). **Core loop E2E 실행** — acquisition은 제외(커넥터 OFF · 라이브는 단일 사용 승인이 필요하고
+취득은 자기 증거를 갖는다): Home 13 → Decision Workspace → 판단 기록 → 반복 신호 → Repeated Issue(분모 3행 ·
+별점 분포 · 기록) → 이슈↔리뷰 왕복 → **Home 12**. **7번이 요점이다 — 워크스페이스의 판단이 Home의 숫자를
+움직였고 고리가 닫힌다**(콘솔 0 · off-host 0). Instrumentation은 `docs/pilot_usage_loop_v1.md` §6으로
+확장했고 **네 가설은 새 계측 0**(durable audit 표에서 읽는다; `review_issue_state_events`는 `actor='OPERATOR'`
+필수 — 그 표의 대부분은 추출기의 `SYSTEM/CREATED`라 그것을 세면 파이프라인이 돈 횟수를 센다),
+**다섯 번째(재방문)만 답이 없다** — 서버에 로그인/세션 기록이 없고 analytics는 env 없으면 `track`이 no-op이라
+**오늘 측정되지 않는다**; 외부 sink를 켜는 것과 서버에 신호를 만드는 것 **둘 다 프라이버시 결정이라 아무것도
+만들지 않았다**. backend **4,066** · frontend **242 files / 2,890** · 실패 0. **고치지 않고 보고**:
+마이그레이션 롤백 경로 0 · undo 스크립트 0 · **CI가 마이그레이션을 검증하지 않는다**(H2 + Flyway disabled) ·
+`baseline-on-migrate:true`가 손으로 만든 DB에서 마이그레이션을 **조용히 건너뛸 수 있다** · validator가 Cafe24
+redirect 호스트가 `PILOT_PUBLIC_HOST`와 같은지는 보지 않는다 · **mock connector가 여전히 설정되지 않은 모든
+채널의 기본 resolution 대상**이고 그 행들은 `DEMO_SEED`가 아니라 `REAL`로 들어와 되돌릴 수 없다 ·
+DB에 일반적인 화면 열람 계측이 없다. **PRODUCT_DECISION_NEEDED**: 마이그레이션 정책(forward-only를 명시할
+것인가 / CI 검증) · 재방문 측정 방법 · 파일럿 호스트 프로비저닝 · Demo Org QA 잔여 상태) · **`docs/operations_home_v1.md`** (Operations Home v1 — 2026-09-13. 로그인하면 「지금 확인할 것」이 화면에 있다;
 **chat-first는 유지하되 chat-only가 아니다** — 네 영역이 대화 **위에** 서고 대화는 그대로 아래에 있다.
 **마이그레이션 0 · 새 테이블 0 · 새 enum 0 · 모델 호출 0 · 마켓플레이스 0 · WRITE 0 · DB 행 변경 0.** 감사 결과
 네 영역 중 **셋이 이미 org-wide**였다(`/api/review-issues` · `ChannelCoverageService` · work item phase + 초안 존재);

@@ -64,6 +64,27 @@ for cap in KNOWLEDGE_EMBEDDING KNOWLEDGE_INTENT KNOWLEDGE_ELIGIBILITY; do
     [[ "${!o}" != "*" ]] || fail "$o=* would send every organisation's customer questions to the vendor"
   fi
 done
+# `*` means "every organisation on this backend". The three retrieval capabilities above are already
+# refused it; the five model capabilities were not, and the asymmetry was not a decision — on a
+# multi-tenant pilot host a `*` here points one seller's paid capability at every other seller's data.
+# The same hole one level up is SELLEROPS_AGENT_ACCESS_SCOPE=ALL_ORGS, which application.yml itself
+# describes as the local single-user posture and warns against on a shared backend.
+for cap in AGENT_PLAN AGENT_DRAFT AGENT_JUDGE AGENT_CONVERSE AGENT_REPORT; do
+  o="SELLEROPS_${cap}_ORG_IDS"
+  [[ "${!o:-}" != "*" ]] || fail "$o=* would admit every organisation on this host"
+done
+case "${SELLEROPS_AGENT_ACCESS_SCOPE:-ALLOW_LIST}" in
+  ALLOW_LIST|CONNECTED_SELLERS) ;;
+  ALL_ORGS) fail "SELLEROPS_AGENT_ACCESS_SCOPE=ALL_ORGS is the single-user posture — not a pilot answer" ;;
+  *) fail "SELLEROPS_AGENT_ACCESS_SCOPE must be ALLOW_LIST or CONNECTED_SELLERS" ;;
+esac
+
+# The mail mode that writes the whole message — including a password-reset link — into the log at
+# INFO. It is a developer outbox, and a pilot host keeps real sellers' reset links out of its logs.
+case "${SELLEROPS_MAIL_MODE:-off}" in
+  dev-outbox) fail "SELLEROPS_MAIL_MODE=dev-outbox logs full mail bodies (password reset links)" ;;
+esac
+
 if [[ "${PILOT_GUIDED_HELPER_ENABLED:-false}" == "true" ]]; then
   # The helper runs on the SELLER's machine. A non-loopback bridge URL would point every seller's
   # browser at one shared helper, which is neither what this is nor something to configure by accident.

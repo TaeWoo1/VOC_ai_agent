@@ -191,4 +191,37 @@ class PilotConfigValidatorTest {
         assertThat(message).contains("SELLEROPS_");
         assertThat(message).doesNotContain("localhost:8080");
     }
+
+    /**
+     * <b>A Cafe24-only pilot needs no fixed public IPv4</b> (Pilot Readiness, 2026-09-13).
+     *
+     * <p>The readiness blocker had been carried as one item — 「고정 공인 IPv4 + 공개 HTTPS 호스트」 —
+     * and it is two independent requirements belonging to two different channels. The fixed egress IP
+     * is what NAVER Commerce refuses calls without, and it is asked for only when the NAVER connector
+     * is on. Cafe24 needs an address Cafe24 can REACH: app credentials and a non-loopback HTTPS
+     * redirect URI, which a stable hostname with TLS satisfies and which says nothing about the
+     * address this deployment calls out from.
+     *
+     * <p>That matters because Cafe24 is the PRIMARY onboarding channel by product decision (a mall id
+     * is all the seller supplies, no local helper, and the whole grant is revocable). So the first
+     * pilot can start on a stable HTTPS hostname alone, and provisioning an elastic IP becomes a
+     * prerequisite of adding NAVER rather than of starting at all.
+     */
+    @Test
+    void cafe24OnlyPilotStartsWithoutAnyAdvertisedEgressIp() {
+        PilotConfigValidator validator = v(false, false, true, "key", "",
+                "app-id", "app-secret", HTTPS);
+
+        assertThat(validator.problems()).isEmpty();
+    }
+
+    /** And the moment NAVER joins, the same deployment is refused until it can name that address. */
+    @Test
+    void addingNaverToThatSamePilotIsRefusedUntilTheCallIpIsKnown() {
+        PilotConfigValidator validator = v(true, false, true, "key", "",
+                "app-id", "app-secret", HTTPS);
+
+        assertThat(validator.problems())
+                .anySatisfy(p -> assertThat(p).contains("NAVER_ADVERTISED_EGRESS_IPS"));
+    }
 }

@@ -239,3 +239,118 @@ from (
 새 이벤트 테이블, 새 analytics 추상, `organizations`의 데모 플래그, 로그인 세션 기록,
 "AI 채택률" 전용 테이블, dashboard 재설계, proactive architecture 확장. 전부 §1의 감사에서
 **기존 행으로 계산 가능**하다는 결론이 났기 때문이다.
+
+---
+
+## 6. 리뷰·판단·반복 문제 lane (2026-09-13 추가)
+
+§1~§5는 **문의 lane**(proactive · 초안 · 전송)의 계약이다. 그 뒤로 Review Decision Workspace ·
+Repeated Issue · Operations Home이 생겼고, 사업 가설 다섯 개가 그 lane을 향한다. **코드 변경 0** —
+아래는 전부 이미 쓰이고 있는 durable row에 대한 읽기이고, 새 이벤트 스트림도 새 표도 만들지 않는다.
+
+**코호트 규칙은 §4 그대로다** — 아래 모든 질의의 `org_id in (…)`는 명시적 파일럿 org 목록이고
+canonical Demo Org는 거기 없다. 아래 숫자는 2026-09-13에 Demo Org로 **실행 검증**한 것이므로
+지표가 아니라 질의가 도는지에 대한 증거다.
+
+### 가설과 그것을 답하는 행
+
+| 가설 | 답하는 durable row | 새 계측 필요? |
+|---|---|---|
+| seller가 NEEDS_ATTENTION을 실제 처리하는가 | `review_triage` × tier 식 | **아니오** |
+| seller correction을 남기는가 | `review_triage_correction_audit` | **아니오** |
+| decision을 남기는가 | `review_triage_audit` | **아니오** |
+| action을 남기는가 | `review_triage_actions` | **아니오** |
+| repeated issue를 확인하는가 | `review_issue_state_events` (`actor='OPERATOR'`) | **아니오** |
+| **Home을 다시 여는가** | — | **예 — 아래 참조** |
+
+### A. NEEDS_ATTENTION 처리율
+
+```sql
+with tiered as (
+  select r.id, case
+     when r.rating is null then 1
+     when r.rating <= 2 and (r.body is null or trim(r.body) = '') then 1
+     when r.rating <= 2 then 0
+     when r.rating >= 4 then 2 else 1 end as rank
+  from reviews r where r.org_id in (:pilot_orgs) and r.data_origin = 'REAL')
+select count(*) filter (where t.rank = 0)                                  as needs_attention,
+       count(*) filter (where t.rank = 0 and tr.review_id is not null)     as decided
+from tiered t left join review_triage tr on tr.review_id = t.id;
+```
+
+**tier 식은 `ReviewRepository.TRIAGE_TIER_RANK`의 사본이고 그것이 이 질의의 약점이다** — 제품이
+식을 바꾸면 여기도 바꿔야 한다. 대안은 분류를 저장하는 것인데, tier는 리뷰의 read-time 함수이고
+저장하면 리뷰가 바뀔 때 낡는 두 번째 사본이 생긴다. 질의 쪽 사본은 사람이 고칠 수 있고 저장된 사본은
+조용히 틀린다. (실측 Demo Org: 15 / 3)
+
+### B. 판단을 남기는가
+
+```sql
+select 'decision' k, count(*) n, max(created_at)::date last_on from review_triage_audit            where org_id in (:pilot_orgs)
+union all select 'correction', count(*), max(decided_at)::date from review_triage_correction_audit where org_id in (:pilot_orgs)
+union all select 'action',     count(*), max(acted_at)::date   from review_triage_actions          where org_id in (:pilot_orgs)
+union all select 'issue decision', count(*), max(created_at)::date from review_issue_state_events
+   where org_id in (:pilot_orgs) and actor = 'OPERATOR';
+```
+
+`review_issue_state_events`에서 **`actor='OPERATOR'`가 필수다** — 그 표의 대부분은 추출기가 이슈를
+만들 때 쓰는 `SYSTEM/CREATED`이고, 그것을 세면 판매자가 한 일이 아니라 파이프라인이 돈 횟수를 센다.
+(실측: 14 / 4 / 3 / 1)
+
+### C. 다시 여는가 — §2-D의 union에 리뷰 lane을 더한다
+
+```sql
+select org_id, count(distinct day) as active_days, min(day) as first_day, max(day) as last_day from (
+  select org_id, (created_at at time zone 'Asia/Seoul')::date as day from review_triage_audit            where org_id in (:pilot_orgs)
+  union all select org_id, (decided_at at time zone 'Asia/Seoul')::date from review_triage_correction_audit where org_id in (:pilot_orgs)
+  union all select org_id, (acted_at   at time zone 'Asia/Seoul')::date from review_triage_actions          where org_id in (:pilot_orgs)
+  union all select org_id, (created_at at time zone 'Asia/Seoul')::date from review_issue_state_events      where org_id in (:pilot_orgs) and actor = 'OPERATOR'
+) d group by org_id;
+```
+
+**§2-D의 정의를 그대로 승계한다 — active day는 그날 운영상 무언가를 한 날이지 로그인한 날이 아니다.**
+그리고 그 한계도 그대로다: **서버에 로그인/세션 기록이 없다**(`users`에 `last_login_at`이 없고 세션
+표도 없다). 읽기만 하고 아무것도 안 한 날은 durable row를 남기지 않는다.
+
+**그 빈칸을 메우는 유일한 기존 경로는 외부 analytics sink**(`today_inbox_viewed` 등)인데
+`frontend/src/lib/analytics/`는 **env가 없으면 sink가 없고 `track`은 no-op**이며 sink는 분석 동의
+뒤에만 시작한다. 즉 **오늘 아무것도 측정되지 않는다**. 이것은 결함이 아니라 기본 자세이고,
+바꾸는 것은 §7의 product-owner 결정이다.
+
+### D. BYO Aside 없이도 Core를 쓰는가
+
+```sql
+select coalesce(j.method, '(no run recorded)') as acquired_by,
+       count(distinct r.id)          as reviews,
+       count(distinct tr.review_id)  as reviews_decided
+from reviews r
+  left join sync_jobs j     on j.id = r.acquisition_sync_job_id
+  left join review_triage tr on tr.review_id = r.id
+where r.org_id in (:pilot_orgs) and r.data_origin = 'REAL'
+group by 1 order by 2 desc;
+```
+
+가설을 그대로 옮긴 질의다 — **Aside가 가져오지 않은 리뷰에서도 판단이 기록되는가**.
+`SELLER_CENTER_EXPORT`가 Aside lane이고 나머지(API · FILE_UPLOAD · 기록 없음)는 아니다.
+이 비율이 Aside lane에서만 0이 아니면 Core는 Aside의 부속이다. (실측: 기록 없음 4,494/10 ·
+`SELLER_CENTER_EXPORT` 115/3 — 즉 이 org에서는 Aside 밖에서도 쓰이고 있다.)
+
+### E. KPI로 올리지 않는 것 (§5 승계 + 추가)
+
+화면 렌더 수 · Home 열람 수 그 자체 · 확인 필요 **분류** 수(판매자가 한 일이 아니다) ·
+관찰 중 반복 문제 수 · 대화 turn 수.
+
+## 7. 남은 PRODUCT_DECISION — 「다시 여는가」를 무엇으로 잴 것인가
+
+네 가설은 durable row로 **새 계측 없이** 답해진다. 다섯 번째(재방문)만 답이 없고, 선택지는 둘이다.
+
+1. **외부 analytics sink를 파일럿에 켠다.** 이미 만들어져 있고 동의 게이트도 있다. 대가는
+   **판매자의 화면 행동이 제3자 벤더로 나간다**는 것이고, 그것은 문구 결정이 아니라 배포·프라이버시
+   결정이다.
+2. **서버에 최소 신호 하나를 만든다** (예: org별 마지막 활동 일자). 새 사실을 저장하는 일이고,
+   사람의 행동에 대한 기록이므로 역시 product-owner 결정이다.
+
+**아무것도 만들지 않았다.** 둘 다 「무엇을 기록해도 되는가」에 대한 결정이고 이 유닛의 권한이 아니다.
+그때까지 재방문은 **active day(운영 행위가 있은 날)**로만 보이며, 그 정의가 무엇을 빠뜨리는지는 §6-C에
+적혀 있다.
+

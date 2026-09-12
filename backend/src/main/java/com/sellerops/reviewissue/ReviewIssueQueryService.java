@@ -1,5 +1,6 @@
 package com.sellerops.reviewissue;
 
+import com.sellerops.common.ApiException;
 import com.sellerops.common.SafePreviewResult;
 import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.product.Product;
@@ -225,7 +226,14 @@ public class ReviewIssueQueryService {
         return issues.findById(issueId)
                 .filter(i -> i.getOrgId().equals(orgId))
                 // Same message whether it is missing or another org's, so an id cannot be probed.
-                .orElseThrow(() -> new IllegalArgumentException("이슈를 찾을 수 없습니다."));
+                // <b>404, not 500.</b> Both this and the lifecycle service used to raise
+                // IllegalArgumentException, which no handler maps — so a stale bookmark to a deleted
+                // issue, and a cross-org id, both came back as a server error. Measured against a
+                // second org's token on 2026-09-13: GET /api/review-issues/{id} answered 500 while
+                // every neighbouring read answered 404. Nothing leaked either way; what it cost was a
+                // seller shown a crash for a page that simply is not theirs, and a pilot operator
+                // watching ERROR counts shown an incident that never happened.
+                .orElseThrow(() -> ApiException.notFound("이슈를 찾을 수 없습니다."));
     }
 
     private ReviewIssueView view(UUID orgId, ReviewIssue issue, LocalDate referenceDate) {
