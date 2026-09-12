@@ -1648,7 +1648,43 @@ spine에 쓴다 — 한 press가 두 spine에 두 강도로 들어가는 것이 
 pilot 컨트롤은 기록 화면에 잔존 · `frontend/CLAUDE.md`가 금지한 `backend/**` 수정을
 product-owner 지시(priority 1)로 했고 **전부 읽기 전용**)
 
-**`docs/repeated_issue_v1.md`** (Repeated Issue v1 — 2026-09-13. 개별 리뷰가 아니라 **반복되는 문제 하나**를
+**`docs/operations_home_v1.md`** (Operations Home v1 — 2026-09-13. 로그인하면 「지금 확인할 것」이 화면에 있다;
+**chat-first는 유지하되 chat-only가 아니다** — 네 영역이 대화 **위에** 서고 대화는 그대로 아래에 있다.
+**마이그레이션 0 · 새 테이블 0 · 새 enum 0 · 모델 호출 0 · 마켓플레이스 0 · WRITE 0 · DB 행 변경 0.** 감사 결과
+네 영역 중 **셋이 이미 org-wide**였다(`/api/review-issues` · `ChannelCoverageService` · work item phase + 초안 존재);
+없던 하나는 **확인 필요 리뷰**로, 모든 tier read가 채널별이라 프론트가 계정마다 하나씩 **N번 읽어 흉내내고**
+있었다 ⇒ org-wide 질의 셋(`countByOrgGroupedByFinalTierRank`/`…TierRank` 쌍 · `findUndecidedByOrgAndTier` ·
+`countUndecidedByOrgAndTier`, 전부 `TRIAGE_TIER_RANK`·`NOT_DISMISSED_PREDICATE` 재사용)과 그것들을 모으는
+`GET /api/operations/home` **하나**. **읽기가 하나인 이유**: Home은 채널의 기록도 계정의 큐도 아닌 유일한
+화면이고, 클라이언트에서 합치면 채널 셋을 가진 판매자가 **더할 수 없는 숫자 셋**을 본다. **컨트롤러에 write 0**
+(결정으로 가는 두 번째 문은 언젠가 첫 문과 다른 말을 한다). **urgency를 발명하지 않는 장치 셋**: ① **어떤 칸도 두
+숫자의 합이 아니다** — 기존 대시보드의 `urgentCount = 미답변 + 부정 리뷰`(실측 24+19=**43**)는 서로 다른 두
+모집단을 더해 아무도 세지 않은 셋째를 만들고 urgent라 부르며, 43으로 행동하는 판매자는 **어떤 행 집합도 설명하지
+않는 숫자**로 행동한다 ⇒ 이 view엔 그런 칸이 없고 `OperationsHomeContractTest`가 이름으로 막는다(단, 정확히 한
+모집단을 세고 이름에 그것이 적힌 `needsAttentionTotal`·`watchTotal`은 **보호 대상이지 위반이 아니다**);
+② **「분류된 수」와 「지금 결정 필요한 수」가 다른 칸** — tier는 리뷰의 read-time 함수라 결정을 기록해도 바뀌지
+않으므로 tier만 세면 끝낸 일을 계속 요구하고 미결정만 세면 tier의 크기를 잃는다(실측 **확인 필요 15 중 미결정
+13**), `WATCH`는 **관찰**이라 자기 칸으로 보고되고 아무것에도 더해지지 않는다(실측 **122**);
+③ **관찰 중 문제를 일처럼 그리지 않는다**(실측 **관찰 중 16 · 누군가의 차례 1** — 「반복 문제 17건」이 할 일 목록
+옆에 서면 관측 열여섯이 일 열여섯으로 보인다). 반복 문제 행은 workspace의 맥락을 그대로 들고 오고(severity ·
+trend · 근거 수 · **상품별 분모** · 별점 분포) 분모는 여기서도 **쌍이지 비율이 아니다**; 행마다 자기 context read를
+사므로 **가장 세게 상한**(3). 「준비된 작업」은 **어떤 기록이 존재한다고 말하는 것만** 담는다 — **phase는 초안이
+아니다**(`InquiryProposal`은 답변 본문을 저장하지 않는다; 실측 PROPOSED 10 대 초안 2), 그리고 비었을 때 **자라지
+않는다**. 라이브가 결함 하나를 드러냈다 — 한 문자열이던 행 제목이 **「승인된 리뷰 답변」 네 줄**로 나와 열어 보지
+않고는 고를 수 없었다 ⇒ `label`(일의 종류)과 `detail`(상품·리뷰 날짜, 문의는 그 제목)을 나눴다. 수집 상태는
+`ChannelCoverageRow`를 **통째 재사용**하고 채널당 한 줄로 접되 **평균 내지 않는다**(가장 나쁜 상태가 말한다 —
+세 상태의 평균은 아무도 계산하지 않은 넷째다), **provider 기술명 0**(테스트가 렌더된 문자열로 확인). **읽기 실패 ⇒
+아무것도 그리지 않는다**(질의가 죽어서 「확인 필요 0건」을 그리는 것은 **오류를 근거로 아침이 한가하다고 말하는
+일**이고, 대화는 별개 읽기라 그대로 돈다). backend **4,054** · frontend **241 files / 2,883** · 실패 0 ·
+**실제 Demo Org 브라우저 QA 통과**(비율 0 · 합산 숫자 0 · 기술명 0 · composer 유지 · **1440×900에서 네 영역 전부
+fold 위** · axe 0 · 콘솔 0 · off-host 0 · 채널 0 · 모델 0 · DB 행 변경 0). **고치지 않고 보고**: 레거시
+`/api/dashboard/summary`의 `urgentCount`는 그대로 43을 낸다(이 패키지는 쓰지 않는다) · **사이드바의 「연결 문제
+3건」은 stale**(열린 `REPEATED_FAILURE` 셋은 08-18~23의 것이고 세 채널 모두 지금 `CONNECTED`·연속 실패 0이며 그
+**뒤에** 성공 수집했다 ⇒ Home의 수집 영역은 **연결 상태와 마지막 성공 수집에서 읽고 알림 행에서 읽지 않는다** —
+회복된 실패를 현재 문제로 그리는 것이 금지된 urgency 발명이다) · 1366/1152에서 아래 두 영역은 스크롤(720px에 네
+영역과 docked composer를 함께 넣는 것은 내용을 깎지 않고는 안 된다 ⇒ 일하는 두 영역을 위에 뒀다) ·
+`observing` 16은 근거 있는 이슈만 센다(전체 20 중 3은 근거 0). **PRODUCT_DECISION_NEEDED**: stale 알림의 수명 ·
+`urgentCount` 은퇴 여부) · **`docs/repeated_issue_v1.md`** (Repeated Issue v1 — 2026-09-13. 개별 리뷰가 아니라 **반복되는 문제 하나**를
 판단하고 추적한다. **마이그레이션 0 · 새 테이블 0 · 새 enum 0 · 새 classifier 0 · 새 LLM capability 0 ·
 마켓플레이스 0 · WRITE 0 · 모델 0 · DB 행 변경 0.** 감사 결과 최소 UX 열 항목 중 **여섯이 이미 있었고 이미
 렌더되고 있었다** — lifecycle 5값 · `IssueChangeView` 추세 · 대표 근거 · `/acting`·`/remediated`·`/dismiss`·

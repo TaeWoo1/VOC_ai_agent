@@ -15,8 +15,10 @@ import { caseTarget, preparedBadge } from "../../lib/proactive";
 import { previewText } from "../../lib/plainText";
 import { matchCommandIntent, INTENT_HEADING } from "../../lib/commandIntents";
 import { INQUIRY_NEEDS_REPLY_PATH } from "../../lib/todayInbox";
+import { OperationsAreas } from "../../components/home/OperationsAreas";
+import { hasAnythingToShow } from "../../lib/operationsHome";
 import type { InquiryListArtifact, InquiryListArtifact as InquiryList, ListArtifact } from "../../lib/conversation/types";
-import type { InquiryQueueResponse, MetricKpi, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
+import type { InquiryQueueResponse, MetricKpi, OperationsHome, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
 
 /**
  * 홈 — the Agent operating workspace (Agentic Operating Workspace v2 §3-C).
@@ -37,9 +39,33 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   useAgentSurface({ surface: "home", label: "오늘의 운영" });
   const conversation = useConversation();
   const overview = useApiData<OverviewResponse>(() => api.getOverviewStrict(7), []);
+  /**
+   * Operations Home's own read — the four areas above the thread.
+   *
+   * <b>Fail-soft, and that is the whole failure design.</b> When this read does not land the areas are
+   * simply not drawn and the conversation below is untouched: a Home that rendered 「확인 필요 0건」
+   * because a query timed out would be telling a seller their morning is clear on the strength of a
+   * failure. The overview strip and the proactive turn are separate reads and keep working.
+   */
+  const [home, setHome] = useState<OperationsHome | null | undefined>(undefined);
   const [cases, setCases] = useState<ProactiveCaseListResponse | null | undefined>(undefined);
 
   useMemo(() => analytics.track("today_inbox_viewed"), []);
+
+  useEffect(() => {
+    let live = true;
+    api
+      .getOperationsHomeStrict()
+      .then((r) => {
+        if (live) setHome(r);
+      })
+      .catch(() => {
+        if (live) setHome(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -238,6 +264,25 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
         <p className="text-sm text-muted">
           운영 숫자를 읽지 못했습니다. <Link to="/overview" className="font-semibold text-brand-700 hover:underline">자세한 숫자 보기</Link>
         </p>
+      ) : null}
+
+      {/*
+        Operations Home v1 — 지금 확인할 것, as objects rather than as a sentence to ask for.
+
+        Drawn under the greeting and the numbers and ABOVE the thread: the Home is chat-first and it is
+        not chat-only, so what needs looking at is on screen before anyone types. The conversation is
+        unchanged below it.
+
+        Not drawn at all when the read failed (`null`), when it has not landed (`undefined`), or when
+        the seller has nothing yet — four empty headings on a fresh account would be describing a
+        product they have not started using, and an area rendering 0 from a failed read would be
+        reporting a clear morning on the strength of an error.
+      */}
+      {home && !beforeFirstConnection
+        && hasAnythingToShow(home.reviews, home.problems, home.prepared, home.collection) ? (
+        <div className="pt-2">
+          <OperationsAreas home={home} />
+        </div>
       ) : null}
     </div>
   );

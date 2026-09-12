@@ -112,6 +112,37 @@ public interface InquiryWorkItemRepository extends JpaRepository<InquiryWorkItem
 
     long countByOrgIdAndPhase(UUID orgId, InquiryWorkItemPhase phase);
 
+    /**
+     * <b>Work items waiting on the seller that actually HAVE a draft</b> — Operations Home's 준비된 작업.
+     *
+     * <p><b>A phase is not a draft.</b> {@code PROPOSED} is written when a proposal is recorded and
+     * {@code InquiryProposal} stores no answer body, so a Home that counted the phase would send a
+     * seller to read a sentence nobody had written — measured once on this org at 10 PROPOSED against
+     * 2 drafts. The existence check is the same fact the queue's {@code hasDraft} reports, asked here
+     * as a predicate instead of a per-page lookup.
+     *
+     * <p>Synthetic rows are excluded the way every other 「일이 기다린다」 number excludes them: seeded
+     * content may appear in a chart of what the shop did, never in a count of what the seller owes.
+     */
+    @Query("select w from InquiryWorkItem w, Inquiry q "
+            + "where q.id = w.inquiryId and w.orgId = :orgId "
+            + "and w.phase in :phases "
+            + "and q.dataOrigin = com.sellerops.common.DataOrigin.REAL "
+            + "and exists (select 1 from InquiryReplyDraft d where d.workItemId = w.id) "
+            + "order by q.receivedAt asc, w.id asc")
+    List<InquiryWorkItem> findAwaitingSellerWithDraft(@Param("orgId") UUID orgId,
+                                                      @Param("phases") Collection<InquiryWorkItemPhase> phases,
+                                                      Pageable pageable);
+
+    /** The count behind {@link #findAwaitingSellerWithDraft}, same predicate. */
+    @Query("select count(w) from InquiryWorkItem w, Inquiry q "
+            + "where q.id = w.inquiryId and w.orgId = :orgId "
+            + "and w.phase in :phases "
+            + "and q.dataOrigin = com.sellerops.common.DataOrigin.REAL "
+            + "and exists (select 1 from InquiryReplyDraft d where d.workItemId = w.id)")
+    long countAwaitingSellerWithDraft(@Param("orgId") UUID orgId,
+                                      @Param("phases") Collection<InquiryWorkItemPhase> phases);
+
     /** The work items for a bounded set of inquiries — the projection backfill's join. */
     List<InquiryWorkItem> findByInquiryIdIn(Collection<UUID> inquiryIds);
 

@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -74,4 +75,27 @@ public interface ReviewReplyApprovalRepository extends JpaRepository<ReviewReply
             + "and a.state = com.sellerops.attention.reply.ReviewReplyApprovalState.APPROVED")
     List<UUID> findReviewIdsWithStandingApproval(@Param("orgId") UUID orgId,
                                                  @Param("reviewIds") Collection<UUID> reviewIds);
+
+    /**
+     * <b>Every standing approval in the org, newest decision first</b> — Operations Home's 준비된 작업.
+     *
+     * <p>Its neighbours above take a bounded id set because their caller already has the page of
+     * reviews it is describing. The Home has no such page: its question is «what did I approve that is
+     * still waiting», which is asked OF the org rather than of a list, so the approvals lead and the
+     * reviews are looked up from them.
+     *
+     * <p>{@code APPROVED} only, for the reason stated above — a withdrawn approval is the operator's
+     * work but not a thing waiting to be sent.
+     */
+    @Query("select a from ReviewReplyApproval a "
+            + "where a.orgId = :orgId "
+            + "and a.state = com.sellerops.attention.reply.ReviewReplyApprovalState.APPROVED "
+            + "order by a.decidedAt desc, a.reviewId asc")
+    List<ReviewReplyApproval> findStandingByOrgId(@Param("orgId") UUID orgId, Pageable pageable);
+
+    /** The count behind {@link #findStandingByOrgId}, same predicate. */
+    @Query("select count(a) from ReviewReplyApproval a "
+            + "where a.orgId = :orgId "
+            + "and a.state = com.sellerops.attention.reply.ReviewReplyApprovalState.APPROVED")
+    long countStandingByOrgId(@Param("orgId") UUID orgId);
 }

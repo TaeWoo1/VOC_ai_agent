@@ -120,6 +120,7 @@ import type {
   ReviewIssueView,
   ReviewIssueDetailView,
   RepeatedIssueContext,
+  OperationsHome,
   OpportunityView,
   OpportunityKind,
 } from "./types";
@@ -1755,6 +1756,18 @@ export const api = {
    * 중 12건」 is a claim about a seller's catalogue that no row supports, and it is exactly the number
    * a person would act on. A failed read renders nothing rather than a fixture.
    */
+  /**
+   * Operations Home's one read — what to check now, org-wide and bounded.
+   *
+   * <b>Never mocked.</b> A fixture here would invent a seller's morning: a made-up 「확인 필요 4건」 is
+   * the number a person acts on first, and it would be the first thing they saw. A failed read leaves
+   * the areas unrendered and the conversation below untouched.
+   */
+  async getOperationsHomeStrict(): Promise<OperationsHome> {
+    const { data } = await http.get<OperationsHome>("/api/operations/home");
+    return data;
+  },
+
   async getRepeatedIssueContextStrict(
     issueId: string,
     referenceDate?: string,

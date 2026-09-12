@@ -14,6 +14,7 @@ const getProactiveCases = vi.fn();
 const getInquiryQueueStrict = vi.fn();
 const getInquiryRowsStrict = vi.fn();
 const getReviewIssuesStrict = vi.fn();
+const getOperationsHomeStrict = vi.fn();
 vi.mock("../../../lib/bridge/localAgentHint", () => ({ probeLocalAgent: async () => "PAIRED" }));
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -22,6 +23,7 @@ vi.mock("../../lib/apiClient", () => ({
     getInquiryQueueStrict: (p: unknown) => getInquiryQueueStrict(p),
     getInquiryRowsStrict: (p: unknown) => getInquiryRowsStrict(p),
     getReviewIssuesStrict: () => getReviewIssuesStrict(),
+    getOperationsHomeStrict: () => getOperationsHomeStrict(),
     getSyncRunsStrict: vi.fn(async () => []),
     markProactiveCaseOpened: vi.fn(),
   },
@@ -78,12 +80,92 @@ function renderHome(now = MORNING) {
   );
 }
 
+/**
+ * Operations Home's four areas, shaped like the live Demo Org: 15 reviews in 확인 필요 of which 13 are
+ * undecided, 122 in 지켜보기, 20 repeated problems of which one is anybody's move.
+ */
+const HOME = {
+  reviews: {
+    needsAttentionUndecided: 13,
+    needsAttentionTotal: 15,
+    watchTotal: 122,
+    rows: [
+      {
+        reviewId: "rev-1",
+        accountId: "acc-1",
+        channelCode: "NAVER",
+        rating: 1,
+        occurredOn: "2026-07-23",
+        productName: "선바로 전선몰딩",
+        quote: "상품페이지 설명에 혼선을 줍니다.",
+      },
+    ],
+  },
+  problems: {
+    decidable: 1,
+    observing: 19,
+    rows: [
+      {
+        issue: {
+          id: "iss-1",
+          title: "접착 부족",
+          aspect: "접착",
+          problem: "부족",
+          severity: "NORMAL",
+          lifecycleState: "ACTING",
+          lifecycleLabelKo: "조치 중",
+          evidenceCount: 18,
+          firstEvidenceOn: "2025-07-29",
+          lastEvidenceOn: "2026-08-19",
+          dominantProductId: "prod-1",
+          dominantProductName: "선바로 전선몰딩",
+          dismissed: false,
+          extractorKind: "RULE_BASED",
+          change: { kinds: [], labelsKo: [], highSurge: false, surgeWindowCount: 0, surgeBaselineWeekly: 0 },
+        },
+        context: {
+          issueId: "iss-1",
+          aspect: "접착",
+          evidence: {
+            totalEvidence: 18,
+            byProduct: [{
+              productId: "prod-1", productName: "선바로 전선몰딩", evidenceCount: 16,
+              productReviews: 1761, firstOccurredOn: "2025-07-29", lastOccurredOn: "2026-08-19",
+            }],
+            unattributedEvidence: 0,
+            ratingDistribution: { rating1: 0, rating2: 0, rating3: 3, rating4: 5, rating5: 10, unrated: 0 },
+            firstEvidenceOn: "2025-07-29",
+            lastEvidenceOn: "2026-08-19",
+          },
+          knowledge: {
+            productId: "prod-1", productName: "선바로 전선몰딩", productSources: 3, productMentions: 2,
+            orgSources: 2, orgMentions: 0, excerpts: [],
+          },
+        },
+      },
+    ],
+  },
+  collection: [{
+    channelCode: "NAVER", channelNameKo: "네이버 스마트스토어", dataType: "REVIEW",
+    state: "OBSERVED_FRESH", supported: true, verificationStatus: null, connected: true,
+    connectionStatus: "CONNECTED", routineEnabled: true, routinePausedBy: null,
+    lastSuccessfulSyncAt: "2026-09-08T03:06:57Z", rows: 100, openRows: 3,
+    newestObservedAt: "2026-09-08T03:00:00Z",
+  }],
+  prepared: {
+    reviewRepliesApproved: 4,
+    inquiryDraftsReady: 2,
+    rows: [{ kind: "REVIEW_REPLY", id: "rev-9", label: "승인된 리뷰 답변", detail: "선바로 전선몰딩", channelCode: "NAVER", to: "/reviews/reply/rev-9" }],
+  },
+} as never;
+
 beforeEach(() => {
   window.localStorage.clear();
   getOverviewStrict.mockResolvedValue(overview());
   getProactiveCases.mockResolvedValue({ items: [CASE, { ...CASE, id: "case-2", subjectId: "i-2", snippet: "교환 가능한가요?" }], total: 2, high: 2 });
   // §1: the home brief reads the WORK QUEUE. Empty by default — a test that is about waiting work says so.
   getInquiryQueueStrict.mockResolvedValue({ content: [], page: 0, size: 5, totalElements: 0, totalPages: 0 });
+  getOperationsHomeStrict.mockResolvedValue(HOME);
   getReviewIssuesStrict.mockResolvedValue([]);
   // Working Context v1 §2: the brief names the oldest waiting inquiries. Empty by default —
   // the tests that care about the named rows set their own.
@@ -260,5 +342,113 @@ describe("home — the Agent operating workspace", () => {
     await screen.findByText("이 상품에 미답변 문의는 없습니다.");
     expect(screen.queryByLabelText("예시 질문")).toBeNull();
     expect(screen.queryByLabelText("오늘의 브리핑")).toBeNull();
+  });
+});
+
+describe("Operations Home — 지금 확인할 것", () => {
+  it("draws the four areas above the conversation", async () => {
+    renderHome();
+    const areas = await screen.findByLabelText("오늘 확인할 것");
+    expect(within(areas).getByLabelText("지금 확인할 리뷰")).toBeInTheDocument();
+    expect(within(areas).getByLabelText("반복 문제")).toBeInTheDocument();
+    expect(within(areas).getByLabelText("최근 수집 상태")).toBeInTheDocument();
+    expect(within(areas).getByLabelText("준비된 작업")).toBeInTheDocument();
+  });
+
+  /**
+   * The distinction the whole screen turns on. 13 is what asks for work; 15 is the size of the tier;
+   * 122 is an observation. None of them is added to another — 13+122 and 15+122 describe nothing.
+   */
+  it("asks with the undecided count and keeps 지켜보기 as a separate observation", async () => {
+    renderHome();
+    const area = await screen.findByLabelText("지금 확인할 리뷰");
+    expect(within(area).getByText(/판단하지 않은 리뷰가 13건/)).toBeInTheDocument();
+    expect(within(area).getByText(/지켜보는 리뷰가 122건/)).toBeInTheDocument();
+    expect(area.textContent ?? "").not.toContain("135");
+    expect(area.textContent ?? "").not.toContain("137");
+  });
+
+  it("opens each review in the decision workspace", async () => {
+    renderHome();
+    const area = await screen.findByLabelText("지금 확인할 리뷰");
+    expect(within(area).getByText(/상품페이지 설명에 혼선을 줍니다/)).toBeInTheDocument();
+    expect(within(area).getByRole("link", { name: /상품페이지 설명에 혼선을 줍니다/ }))
+      .toHaveAttribute("href", "/reviews/reply/rev-1");
+  });
+
+  /**
+   * 관찰 중 problems are counted but never drawn as tasks: the sentence asks about the one that is
+   * somebody's move, not the nineteen that are not.
+   */
+  it("asks only about repeated problems that are somebody's move", async () => {
+    renderHome();
+    const area = await screen.findByLabelText("반복 문제");
+    expect(within(area).getByText(/판단이 필요한 반복 문제가 1건/)).toBeInTheDocument();
+    expect(area.textContent ?? "").not.toContain("20건");
+  });
+
+  it("carries the denominator into the Home as a pair, never a rate", async () => {
+    renderHome();
+    const area = await screen.findByLabelText("반복 문제");
+    expect(within(area).getByText(/리뷰 1,761건 중 16건이 이 문제를 말했습니다/)).toBeInTheDocument();
+    expect(area.textContent ?? "").not.toMatch(/%|퍼센트|비율/);
+    expect(within(area).getByRole("link", { name: /접착 부족/ })).toHaveAttribute("href", "/memory/iss-1");
+  });
+
+  /**
+   * The collection area may say when a channel last collected and never how — no connector class, no
+   * data-type token, no error code reaches a seller sentence.
+   */
+  it("reports collection without a provider technical name", async () => {
+    renderHome();
+    const area = await screen.findByLabelText("최근 수집 상태");
+    expect(within(area).getByText(/마지막 수집 2026-09-08/)).toBeInTheDocument();
+    expect(area.textContent ?? "").not.toMatch(/NAVER|ORDER_SUMMARY|REVIEW|GW\./);
+  });
+
+  it("names each prepared record separately and totals nothing", async () => {
+    renderHome();
+    const area = await screen.findByLabelText("준비된 작업");
+    expect(within(area).getByText(/승인하신 리뷰 답변 4건/)).toBeInTheDocument();
+    expect(within(area).getByText(/초안이 준비된 문의 2건/)).toBeInTheDocument();
+    expect(area.textContent ?? "").not.toContain("6건");
+  });
+
+  /**
+   * Four rows reading 「승인된 리뷰 답변」 are four links a seller cannot choose between — measured on
+   * the live org before the row carried what distinguishes it.
+   */
+  it("tells one prepared row from the next", async () => {
+    renderHome();
+    const area = await screen.findByLabelText("준비된 작업");
+    const link = within(area).getByRole("link", { name: /선바로 전선몰딩/ });
+    expect(link).toHaveAttribute("href", "/reviews/reply/rev-9");
+    expect(link.textContent ?? "").toContain("승인된 리뷰 답변");
+  });
+
+  /**
+   * <b>A failed read draws nothing.</b> Rendering 「확인 필요 0건」 because a query timed out would tell
+   * a seller their morning is clear on the strength of an error — and the conversation below, which is
+   * a different read, must keep working.
+   */
+  it("draws no area when the read failed, and leaves the conversation alone", async () => {
+    getOperationsHomeStrict.mockRejectedValue(new Error("down"));
+    renderHome();
+    await screen.findByRole("heading", { name: "오늘의 운영" });
+    await waitFor(() => expect(screen.queryByLabelText("오늘 확인할 것")).toBeNull());
+    expect(screen.queryByLabelText("지금 확인할 리뷰")).toBeNull();
+  });
+
+  /** Four empty headings would describe a product the seller has not started using. */
+  it("draws nothing for an account with no work and nothing connected", async () => {
+    getOperationsHomeStrict.mockResolvedValue({
+      reviews: { needsAttentionUndecided: 0, needsAttentionTotal: 0, watchTotal: 0, rows: [] },
+      problems: { decidable: 0, observing: 0, rows: [] },
+      collection: [],
+      prepared: { reviewRepliesApproved: 0, inquiryDraftsReady: 0, rows: [] },
+    });
+    renderHome();
+    await screen.findByRole("heading", { name: "오늘의 운영" });
+    await waitFor(() => expect(screen.queryByLabelText("오늘 확인할 것")).toBeNull());
   });
 });

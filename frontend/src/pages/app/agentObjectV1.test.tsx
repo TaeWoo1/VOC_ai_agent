@@ -33,6 +33,15 @@ vi.mock("../../lib/apiClient", () => ({
     getReviewDetailStrict: (id: string) => getReviewDetailStrict(id),
     getInquiryQueueStrict: vi.fn(async () => ({ content: [], page: 0, size: 5, totalElements: 0, totalPages: 0 })),
     getReviewIssuesStrict: vi.fn(async () => []),
+    // Operations Home's read. Empty on purpose: these three cases are about the FIRST-USE mornings,
+    // where the areas are not drawn at all, so an empty read keeps each assertion about exactly the
+    // lead sentence it was written for.
+    getOperationsHomeStrict: vi.fn(async () => ({
+      reviews: { needsAttentionUndecided: 0, needsAttentionTotal: 0, watchTotal: 0, rows: [] },
+      problems: { decidable: 0, observing: 0, rows: [] },
+      collection: [],
+      prepared: { reviewRepliesApproved: 0, inquiryDraftsReady: 0, rows: [] },
+    })),
     getSyncRunsStrict: vi.fn(async () => []),
     markProactiveCaseOpened: vi.fn(),
   },

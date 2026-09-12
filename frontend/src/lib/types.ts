@@ -2026,6 +2026,83 @@ export interface IssueKnowledgeOnHand {
   excerpts: string[];
 }
 
+/* ─────────────────────── operations home ─────────────────────── */
+
+/**
+ * One review on the Home. `accountId` rides along so the row can link straight into the decision
+ * workspace without a second read to learn which account it belongs to.
+ */
+export interface HomeAttentionReview {
+  reviewId: string;
+  accountId: string | null;
+  channelCode: string | null;
+  rating: number | null;
+  occurredOn: string | null;
+  productName: string | null;
+  /** Masked opening of what the customer wrote; null when masking left nothing to show. */
+  quote: string | null;
+}
+
+/**
+ * **Two different facts about the same rows, plus an observation.**
+ *
+ * `needsAttentionUndecided` is the only number that asks for work. `needsAttentionTotal` includes
+ * reviews already decided — a tier is a read-time function of the review, so recording a decision
+ * does not change it. `watchTotal` is an observation signal and is never added to anything.
+ */
+export interface HomeReviewAttention {
+  needsAttentionUndecided: number;
+  needsAttentionTotal: number;
+  watchTotal: number;
+  rows: HomeAttentionReview[];
+}
+
+export interface HomeProblem {
+  issue: ReviewIssueView;
+  context: RepeatedIssueContext;
+}
+
+/**
+ * `observing` is counted apart from `decidable` and must not be drawn as work: 관찰 중 means
+ * reviewnary has concluded nothing needs doing. A Home presenting every observed problem as a pending
+ * task would manufacture urgency out of an evidence trickle.
+ */
+export interface HomeRepeatedProblems {
+  decidable: number;
+  observing: number;
+  rows: HomeProblem[];
+}
+
+/**
+ * `kind` is a closed token — `REVIEW_REPLY` or `INQUIRY_REPLY`. `to` is the surface that owns it.
+ *
+ * `label` is the kind of work and repeats on every row of that kind; `detail` is what tells one row
+ * from the next (the product, the inquiry's subject) and is null when neither exists.
+ */
+export interface HomePreparedItem {
+  kind: "REVIEW_REPLY" | "INQUIRY_REPLY";
+  id: string;
+  label: string;
+  detail: string | null;
+  channelCode: string | null;
+  to: string;
+}
+
+/** Each count is named after the record behind it — an approval that stands, a draft that exists. */
+export interface HomePreparedWork {
+  reviewRepliesApproved: number;
+  inquiryDraftsReady: number;
+  rows: HomePreparedItem[];
+}
+
+export interface OperationsHome {
+  reviews: HomeReviewAttention;
+  problems: HomeRepeatedProblems;
+  /** `ChannelCoverageRowView` reused whole — the Home adds no field to the freshness contract. */
+  collection: ChannelCoverageRowView[];
+  prepared: HomePreparedWork;
+}
+
 export interface RepeatedIssueContext {
   issueId: string;
   aspect: string;

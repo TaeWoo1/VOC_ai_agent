@@ -882,6 +882,102 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      * bumping {@code reviews.updated_at}), moves neither, so it can never reactivate a dismissed review.
      * Likewise a restore moves only the seq order, never a draft or a disposition.
      */
+    /**
+     * <b>How many reviews sit in each attention tier across the WHOLE org</b> — Operations Home's
+     * headline, as {@code (tierRank, count)} pairs.
+     *
+     * <p>Every other tier read on this repository is per-channel, because every other surface is: the
+     * record screen is a channel's record and the queue is an account's queue. The Home is the one
+     * screen that is neither, and composing it in the client from three channel reads would let a
+     * seller with three channels see three numbers that cannot be added — the rank expression is the
+     * same, but "how many need me" is one question and it deserves one answer.
+     *
+     * <p>Uses {@link #AI_FINAL_TIER_RANK} rather than {@link #FINAL_TIER_RANK} for the reason the
+     * per-channel grouped count does: a bound parameter inside a GROUP BY expression breaks
+     * PostgreSQL, so the org's opt-in is decided in Java and passed as the already-resolved rank.
+     */
+    @Query("""
+            select
+            """ + AI_FINAL_TIER_RANK + """
+              , count(r) from Review r
+            """ + AI_JOIN + """
+            where r.orgId = :orgId
+            group by
+            """ + AI_FINAL_TIER_RANK + """
+            """)
+    List<Object[]> countByOrgGroupedByFinalTierRank(@Param("orgId") UUID orgId);
+
+    /**
+     * {@link #countByOrgGroupedByFinalTierRank} for an org that has not opted into the pilot — the
+     * rules rank alone, with no join to the pilot's marks.
+     *
+     * <p>A pair rather than a parameter, exactly as the per-channel summary does it: the opt-in cannot
+     * live inside a GROUP BY expression on PostgreSQL, so the caller chooses the query. Two queries
+     * that differ only by the pilot mean an org switched OFF reads exactly as it did before the pilot
+     * existed — the marks are not merely hidden, the grouping never sees them.
+     */
+    @Query("""
+            select
+            """ + TRIAGE_TIER_RANK + """
+              , count(r) from Review r
+            where r.orgId = :orgId
+            group by
+            """ + TRIAGE_TIER_RANK + """
+            """)
+    List<Object[]> countByOrgGroupedByTierRank(@Param("orgId") UUID orgId);
+
+    /**
+     * <b>Reviews in one attention tier that nobody has decided yet</b> — org-wide, newest first.
+     *
+     * <p><b>«분류된 수»와 «지금 결정 필요한 수»는 다른 사실이다.</b> A review a seller has already
+     * dispositioned is still 확인 필요 by the rank expression — the tier is a read-time function of the
+     * review, and recording a decision does not rewrite the review. So a Home that counted the tier
+     * would keep asking for work already done, and one that counted only the undecided would lose the
+     * tier's own total. Both are read, separately, and the screen says which is which.
+     *
+     * <p>«Decided» is the standing {@link com.sellerops.attention.triage.TriageDisposition} row and
+     * nothing else — not a draft, not an approval. Those say work is under way on a decision already
+     * taken; this asks whether the decision exists.
+     *
+     * <p>{@link #NOT_DISMISSED_PREDICATE} applies for the same reason it does on the work queue: a
+     * seller who put a review away has decided about it, and a Home that raised it again would be
+     * overruling them.
+     */
+    @Query("""
+            select r from Review r
+            """ + AI_JOIN + """
+            where r.orgId = :orgId
+              and
+            """ + FINAL_TIER_RANK + """
+              = :tierRank
+              and not exists (select 1 from ReviewTriage t
+                              where t.orgId = r.orgId and t.reviewId = r.id)
+              and
+            """ + NOT_DISMISSED_PREDICATE + """
+            order by r.receivedAt desc, r.id asc
+            """)
+    List<Review> findUndecidedByOrgAndTier(@Param("orgId") UUID orgId,
+                                           @Param("tierRank") int tierRank,
+                                           @Param("aiEnabled") boolean aiEnabled,
+                                           Pageable pageable);
+
+    /** The count behind {@link #findUndecidedByOrgAndTier}, same predicate. */
+    @Query("""
+            select count(r) from Review r
+            """ + AI_JOIN + """
+            where r.orgId = :orgId
+              and
+            """ + FINAL_TIER_RANK + """
+              = :tierRank
+              and not exists (select 1 from ReviewTriage t
+                              where t.orgId = r.orgId and t.reviewId = r.id)
+              and
+            """ + NOT_DISMISSED_PREDICATE + """
+            """)
+    long countUndecidedByOrgAndTier(@Param("orgId") UUID orgId,
+                                    @Param("tierRank") int tierRank,
+                                    @Param("aiEnabled") boolean aiEnabled);
+
     String NOT_DISMISSED_PREDICATE = """
             (not exists (select 1 from ReviewReplyWorkDismissal dis
                          where dis.orgId = r.orgId and dis.reviewId = r.id)
