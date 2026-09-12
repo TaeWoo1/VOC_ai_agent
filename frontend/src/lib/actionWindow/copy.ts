@@ -393,6 +393,32 @@ const V2_ONLY_BLOCKER_VIEW: Record<string, BlockerView> = {
     title: "도우미가 이 요청을 받지 못했어요",
     body: "'다시 시도'를 눌러 주세요.",
   },
+  /**
+   * The browser is signed into a DIFFERENT store than the one connected here. Named as a fact about the
+   * account rather than about our software, because the repair is entirely the seller's: sign in as the store
+   * they connected. Never "오류" — nothing is broken.
+   */
+  STORE_MISMATCH: {
+    title: "연결한 판매자 계정과 다른 계정으로 로그인되어 있어요",
+    body: "브라우저에서 이 채널에 연결한 판매자 계정으로 로그인한 뒤 '다시 시도'를 눌러 주세요.",
+  },
+  /**
+   * We could not tell which store the screen belongs to — and "모른다" is not "틀렸다". So the copy asks them
+   * to confirm rather than accusing them of being in the wrong place, and the run stopped before reading
+   * anything either way.
+   */
+  STORE_UNRESOLVED: {
+    title: "어느 판매자 계정인지 확인하지 못했어요",
+    body: "안전을 위해 리뷰를 가져오지 않고 멈췄어요. 판매자 화면이 정상적으로 열려 있는지 확인한 뒤 '다시 시도'를 눌러 주세요.",
+  },
+  /**
+   * The deterministic executor is not running. Nothing about the marketplace is wrong, and saying so matters:
+   * the seller must not go looking at Coupang for a problem that is on their own machine.
+   */
+  EXECUTOR_UNAVAILABLE: {
+    title: "가져오기 프로그램이 실행되고 있지 않아요",
+    body: "판매자 화면에는 문제가 없어요. 프로그램을 실행한 뒤 '다시 시도'를 눌러 주세요.",
+  },
   CREDENTIAL_STATE_UNKNOWN: {
     title: "발급된 키가 있는지 확인하지 못했어요",
     // Points at the WING window, because that is where the answer is and where the button now is. SellerOps

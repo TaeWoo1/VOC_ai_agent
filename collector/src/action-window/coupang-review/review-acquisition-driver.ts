@@ -5,6 +5,7 @@
  * no `nextPage`, no `click`, no `navigate` — the pager is the seller's, and a seam that cannot express a page
  * turn is the structural form of that rule.
  */
+import type { BlockerCode } from "../../../../contracts/action-window/v2/index";
 import type { CoupangReviewPageReading } from "./review-rows";
 
 export interface ReviewAcquisitionProbeDriver {
@@ -16,4 +17,10 @@ export interface ReviewAcquisitionProbeDriver {
   focusSurface?(): Promise<boolean>;
   /** OPTIONAL: resolves once the seller closed the window the run was reading. */
   whenSurfaceClosed?(): Promise<void>;
+  /**
+   * OPTIONAL: why the LAST read returned an unreadable page, when this driver knows something better than
+   * "not a list" — a signed-out browser, or one signed into a different store. Seller-driven drivers do not
+   * implement it and the run parks exactly as it always has.
+   */
+  lastBlocker?(): BlockerCode | null;
 }

@@ -68,6 +68,11 @@ export interface ReviewAcquisitionPageReport {
   readonly readable: boolean;
   /** The walk took the page (readable, pager resolved, page advanced, within bounds). */
   readonly accepted: boolean;
+  /**
+   * OPTIONAL, and only meaningful with `readable: false`: why. Absent ⇒ `UNSUPPORTED_STATE`, which is what
+   * every seller-driven read has always parked on and stays byte-identical.
+   */
+  readonly blocker?: BlockerCode;
   /** The walk is still open after this page — another page may follow. */
   readonly open: boolean;
   /** Reviews collected so far across the walk (integer; never the reviews). */
@@ -211,9 +216,13 @@ export class ReviewAcquisitionEngine {
   onPageRead(report: ReviewAcquisitionPageReport): ReviewAcquisitionEffect {
     if (this.stage !== "reading") return "NONE";
     if (!report.readable) {
-      // Not a 상품평 list: the seller is on another WING page, or the page was mid-navigation. Park with the
+      // Not a 리뷰 list: the seller is on another WING page, or the page was mid-navigation. Park with the
       // one repair — bring the list up and press again. Nothing about the walk changes.
-      return this.park("UNSUPPORTED_STATE");
+      //
+      // A driver that knows something better than "not a list" says so on the report, and that word is used
+      // instead: a deterministic executor can establish that the browser is signed out, or signed into a
+      // different store, and reporting either of those as "bring the list up" would be a false instruction.
+      return this.park(report.blocker ?? "UNSUPPORTED_STATE");
     }
     this.collected = report.collected;
     if (report.accepted) {

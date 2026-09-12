@@ -330,6 +330,24 @@ export const BLOCKER_CODES = [
    * names a FILE the seller uploaded; there is no file on this path.
    */
   "HANDOFF_REJECTED",
+  /**
+   * The authenticated browser is a DIFFERENT seller/store than the binding this run was minted for
+   * (`docs/review_acquisition_aside_v2.md` §6, PD-4). Recoverable in the only way that matters: sign the
+   * browser into the store that was connected and start again. Deliberately not `UNSUPPORTED_STATE`, which
+   * reads as "this screen is not supported" and would send the seller to fix a page that is fine.
+   */
+  "STORE_MISMATCH",
+  /**
+   * No usable store identity was on the screen — none read, or two that disagree. **Not** `STORE_MISMATCH`:
+   * "we do not know" and "it is the wrong one" have different repairs, and a run may never treat the first as
+   * proof of the second (nor as success).
+   */
+  "STORE_UNRESOLVED",
+  /**
+   * The deterministic executor this run is configured to use (the Aside browser) is not running or did not
+   * answer. Nothing about the marketplace is wrong; the tool that would read it is absent.
+   */
+  "EXECUTOR_UNAVAILABLE",
 ] as const;
 export type BlockerCode = (typeof BLOCKER_CODES)[number];
 

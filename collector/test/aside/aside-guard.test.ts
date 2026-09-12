@@ -19,6 +19,8 @@ import { runInNewContext } from "node:vm";
 import { ASIDE_ALLOWED_INVOCATIONS } from "../../src/aside/aside-cli";
 import { buildRuntimePlan, buildRuntimeProgram, RUNTIME_PREAMBLE } from "../../src/aside/aside-export-executor";
 import { EXPORT_STEP_KINDS, validateExportWorkflow } from "../../src/aside/export-workflow";
+import { buildReviewRuntimePlan, buildReviewRuntimeProgram } from "../../src/aside/coupang-review-executor";
+import { COUPANG_REVIEW_READ_WORKFLOW } from "../../src/aside/coupang-review-workflow";
 import { fixtureWorkflow } from "../support/aside-fixture";
 
 const HERE = resolve(fileURLToPath(import.meta.url), "..");
@@ -75,10 +77,19 @@ const FORBIDDEN_TOKENS = [
   ".press(",
 ] as const;
 
+/**
+ * `.evaluate(` is forbidden EXCEPT in the one file whose job is to forward this repository's own page
+ * scripts — a review list cannot be read without running a reader in the page. The exemption is narrower
+ * than the ban it replaces: that file may not AUTHOR page code, which the dedicated describe below asserts,
+ * so "arbitrary evaluate" remains structurally impossible rather than merely unused.
+ */
+const EVALUATE_FORWARDER = "coupang-review-runtime.ts";
+
 describe("aside provider — forbidden capability tokens are absent from every source file", () => {
   it.each(FILES)("%s", (file) => {
     const code = codeOnly(resolve(SRC, file));
     for (const token of FORBIDDEN_TOKENS) {
+      if (token === ".evaluate(" && file === EVALUATE_FORWARDER) continue;
       // `aside-cli.ts` legitimately names `process.execPath`? It does not — it uses child_process.spawn only.
       // `host-file-handoff.ts` reads a file, but through `node:fs` named imports (`readFileSync`), not `fs.`.
       expect(code, `${file} contains ${token}`).not.toContain(token);
@@ -173,5 +184,118 @@ describe("aside provider — the serialized runtime is self-contained", () => {
         expect(line, line).toMatch(/\b(loc|ex\.loc)\b/);
       }
     }
+  });
+});
+
+
+describe("aside provider — the evaluate forwarder forwards, and cannot author page code", () => {
+  const code = codeOnly(resolve(SRC, EVALUATE_FORWARDER));
+
+  it("names no DOM API and no selector of its own", () => {
+    for (const token of ["document.", "querySelector", "getElementById", "innerHTML", "innerText", "window."]) {
+      expect(code, `${EVALUATE_FORWARDER} contains ${token}`).not.toContain(token);
+    }
+  });
+
+  it("holds no string literal long enough to be a script — page code lives in the reviewed in-page modules", () => {
+    const literals = code.match(/"[^"\n]*"|'[^'\n]*'/g) ?? [];
+    for (const lit of literals) expect(lit.length, lit.slice(0, 40)).toBeLessThan(40);
+  });
+
+  it("every evaluate argument is a named plan field, never an expression", () => {
+    const args = [...code.matchAll(/\.evaluate\(([^)]*)\)/g)].map((m) => m[1]!.trim());
+    expect(args.length).toBeGreaterThan(0);
+    for (const a of args) expect(a, a).toMatch(/^plan\.[a-zA-Z]+Script$/);
+  });
+
+  it("cannot turn a page: no click, no pager, no second navigation", () => {
+    for (const token of [".click(", ".fill(", ".press(", ".goto(", "nextPage", "pager"]) {
+      expect(code, `${EVALUATE_FORWARDER} contains ${token}`).not.toContain(token);
+    }
+  });
+});
+
+describe("aside provider — the Coupang runtime is self-contained and fails closed in order", () => {
+  const plan = buildReviewRuntimePlan(COUPANG_REVIEW_READ_WORKFLOW);
+
+  /** Run the serialized program in an empty VM against a described page. */
+  async function runInVm(page: {
+    auth: { signedIn: boolean };
+    identity?: unknown;
+    rows?: unknown;
+    throwOn?: string;
+  }): Promise<{ calls: string[]; result: Record<string, unknown> }> {
+    const program = buildReviewRuntimeProgram(plan);
+    const body = program.replace(/console\.log\("ASIDE_RESULT " \+ JSON\.stringify\(__result\)\);$/, "return __result;");
+    const calls: string[] = [];
+    const tab = {
+      waitForLoadState: async () => undefined,
+      evaluate: async (script: string) => {
+        const which = script === plan.authScript ? "auth" : script === plan.identityScript ? "identity" : script === plan.readerScript ? "rows" : "UNKNOWN";
+        calls.push(which);
+        if (which === "UNKNOWN") throw new Error("a script that is not one of the three plan fields reached the page");
+        if (page.throwOn === which) throw new Error("page moved");
+        return which === "auth" ? page.auth : which === "identity" ? page.identity : page.rows;
+      },
+    };
+    const sandbox = { openTab: async () => (calls.push("openTab"), tab), closeTab: async () => void calls.push("closeTab"), Date, JSON, Object };
+    const result = (await runInNewContext(`(async () => { ${body} })()`, sandbox)) as Record<string, unknown>;
+    return { calls, result };
+  }
+
+  it("references no free helper beyond the esbuild name helper", () => {
+    const program = buildReviewRuntimeProgram(plan);
+    const fnText = program.slice(program.indexOf("const __run = ("));
+    const free = [...new Set(fnText.match(/\b__[a-zA-Z]+\b/g) ?? [])].filter((id) => !["__run", "__plan", "__result"].includes(id));
+    expect(free.every((id) => id === "__name")).toBe(true);
+  });
+
+  it("carries no forbidden token into Aside", () => {
+    // Two exemptions, both narrower than the ban they replace:
+    //  - `.evaluate(` — the forwarder's whole job, and the describe above proves it can only forward.
+    //  - the `input[type="password"]` SELECTOR inside the auth script. The banned capability is Aside's
+    //    `password` global (auto-login); this is the opposite act — COUNTING a sign-in field in order to
+    //    REFUSE. A guard that could not tell those apart would forbid the fail-closed check.
+    const program = buildReviewRuntimeProgram(plan);
+    // The two allowed forms, both from the sign-in-wall check: the FIELD SELECTOR, and the COUNT it reports.
+    // Everything else named `password` is the banned capability (Aside's auto-login global), so removing
+    // exactly these two and re-scanning is the whole test.
+    const allowed = ['input[type=\\"password\\"]', "passwordInputs"];
+    let scrubbed = program;
+    for (const form of allowed) {
+      expect(scrubbed, form).toContain(form);
+      scrubbed = scrubbed.split(form).join("SIGNIN_FIELD");
+    }
+    expect(scrubbed).not.toContain("password");
+    for (const token of FORBIDDEN_TOKENS) {
+      if (token === ".evaluate(") continue;
+      expect(scrubbed, token).not.toContain(token);
+    }
+  });
+
+  it("the one password mention is counted, never read or filled", () => {
+    const program = buildReviewRuntimeProgram(plan);
+    for (const line of program.split("\n").filter((l) => l.includes("password"))) {
+      expect(line, line).toContain(".length");
+      expect(line, line).not.toMatch(/\.(fill|type|value\s*=)/);
+    }
+  });
+
+  it("happy path: auth, then identity, then rows — in that order, and the tab is closed", async () => {
+    const { calls, result } = await runInVm({ auth: { signedIn: true }, identity: { labelHits: 2, distinct: 1, values: ["A00000001"] }, rows: { reason: "OK", rows: [] } });
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual(["openTab", "auth", "identity", "rows", "closeTab"]);
+  });
+
+  it("a signed-out browser stops at AUTH — no identity read, no row read", async () => {
+    const { calls, result } = await runInVm({ auth: { signedIn: false } });
+    expect(result).toMatchObject({ ok: false, code: "AUTH_REQUIRED", stage: "AUTH" });
+    expect(calls).toEqual(["openTab", "auth", "closeTab"]);
+  });
+
+  it("an identity read that throws stops before the rows", async () => {
+    const { calls, result } = await runInVm({ auth: { signedIn: true }, throwOn: "identity" });
+    expect(result).toMatchObject({ ok: false, code: "RUNTIME_FAULT", stage: "IDENTITY" });
+    expect(calls).toEqual(["openTab", "auth", "identity", "closeTab"]);
   });
 });

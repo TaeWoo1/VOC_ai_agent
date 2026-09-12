@@ -24,6 +24,14 @@ export interface ReviewAcquisitionTarget {
   readonly accountSlot: string;
   /** The channel the binding was minted for — `COUPANG` today; checked by the session, never assumed. */
   readonly channelCode: string;
+  /**
+   * OPTIONAL: the digest of the 업체코드 this binding's account holds, as the backend derived it from the
+   * sealed credential (PD-4). A deterministic executor compares the store on the screen against it BEFORE any
+   * review is read. Absent on a server that predates it, and on an account with no vendor code — a run that
+   * needs an expectation and has none stops at `STORE_UNRESOLVED`, which is the honest ending for a store
+   * nobody can name. Seller-driven runs do not read it: the seller IS the assertion there.
+   */
+  readonly expectedStoreFingerprint?: string;
 }
 
 export async function fetchReviewAcquisitionTarget(
@@ -71,5 +79,9 @@ export function parseAcquisitionTarget(body: unknown): ReviewAcquisitionTarget |
   const channelCode = r.channelCode;
   if (typeof accountSlot !== "string" || !SLOT.test(accountSlot)) return null;
   if (typeof channelCode !== "string" || !/^[A-Z][A-Z0-9_]{1,31}$/.test(channelCode)) return null;
-  return { accountSlot, channelCode };
+  // An off-shape expectation is DROPPED, not refused: the binding itself is still good, and a run that needs
+  // the expectation will stop on its absence rather than on a malformed one it half-believed.
+  const fp = r.expectedStoreFingerprint;
+  const expectedStoreFingerprint = typeof fp === "string" && /^[0-9a-f]{64}$/.test(fp) ? fp : undefined;
+  return { accountSlot, channelCode, ...(expectedStoreFingerprint === undefined ? {} : { expectedStoreFingerprint }) };
 }

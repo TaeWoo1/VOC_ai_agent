@@ -68,6 +68,17 @@ export class El {
     return this;
   }
 
+  /**
+   * A real DOM distinguishes an element's OWN text from its descendants', and a probe that wants "the label
+   * this element prints itself" walks text nodes to get it. The fake had only `textContent`, so a script
+   * written that way could not be tested here at all — which is the shape of a second fake being born.
+   * Additive: nothing that reads `textContent` changes.
+   */
+  get childNodes(): ({ nodeType: number; nodeValue: string } | El)[] {
+    const own = this.ownText.length > 0 ? [{ nodeType: 3, nodeValue: this.ownText }] : [];
+    return [...own, ...this.children];
+  }
+
   get textContent(): string {
     return this.ownText + this.children.map((c) => c.textContent).join("");
   }
@@ -181,7 +192,11 @@ export function select(els: El[], sel: string): El[] {
     }
     const attrMatch = /^([a-zA-Z]*)\[([a-zA-Z-]+)(?:=([^\]]+))?\]$/.exec(part);
     if (attrMatch) {
-      const [, tag, name, value] = attrMatch;
+      const [, tag, name, rawValue] = attrMatch;
+      // A real browser accepts `[type=password]` and `[type="password"]` alike. The fake compared the raw
+      // text, so a quoted selector matched nothing and the test went green for the wrong reason — the exact
+      // failure this file's own docblock warns about.
+      const value = rawValue === undefined ? undefined : rawValue.replace(/^["']|["']$/g, "");
       out.push(
         ...els.filter(
           (e) =>

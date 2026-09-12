@@ -3,6 +3,7 @@ package com.sellerops.review.channel;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
+import com.sellerops.credential.CredentialVault;
 import com.sellerops.review.channel.dto.AgentReviewAcquisitionTargetView;
 import com.sellerops.review.channel.dto.ChannelReviewAcquisitionRunResponse;
 import com.sellerops.selleraccount.AccountSessionSlot;
@@ -42,14 +43,17 @@ public class ChannelReviewAcquisitionService {
     private final ChannelRepository channels;
     private final AccountSessionSlotRepository slots;
     private final ChannelReviewAcquisitionRefRepository refs;
+    private final CredentialVault vault;
 
     public ChannelReviewAcquisitionService(SellerAccountRepository accounts, ChannelRepository channels,
                                            AccountSessionSlotRepository slots,
-                                           ChannelReviewAcquisitionRefRepository refs) {
+                                           ChannelReviewAcquisitionRefRepository refs,
+                                           CredentialVault vault) {
         this.accounts = accounts;
         this.channels = channels;
         this.slots = slots;
         this.refs = refs;
+        this.vault = vault;
     }
 
     @Transactional
@@ -96,7 +100,16 @@ public class ChannelReviewAcquisitionService {
                 .filter(s -> orgId.equals(s.getOrgId()))
                 .map(AccountSessionSlot::getAccountSlot)
                 .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
-        return new AgentReviewAcquisitionTargetView(COUPANG, slot);
+        // The expectation, read from the sealed credential this org already gave us. A vault that cannot be
+        // opened (no key, no credential) yields no expectation — and no expectation is a stop downstream, not
+        // a pass: `assertWingStore` answers UNRESOLVED, never MATCH.
+        String expected = null;
+        try {
+            expected = WingStoreIdentity.fingerprint(vault.open(orgId, accountId).secrets().get("vendor_id"));
+        } catch (RuntimeException e) {
+            expected = null;
+        }
+        return new AgentReviewAcquisitionTargetView(COUPANG, slot, expected);
     }
 
     private static String newRef() {

@@ -188,7 +188,16 @@ export class ReviewAcquisitionRunSession {
         if (isReviewAcquisitionTerminal(this.engine.currentStage())) return;
         if (reading.reason !== "OK") {
           log("aw_coupang_review_acquisition_page", { readReason: reading.reason, accepted: false });
-          const next = this.engine.onPageRead({ readable: false, accepted: false, open: walk.open, collected: walk.result().reviews.length, coverageComplete: false });
+          // A driver that can explain the refusal does; one that cannot leaves the engine's own default.
+          const blocker = this.driver.lastBlocker?.() ?? null;
+          const next = this.engine.onPageRead({
+            readable: false,
+            accepted: false,
+            open: walk.open,
+            collected: walk.result().reviews.length,
+            coverageComplete: false,
+            ...(blocker === null ? {} : { blocker }),
+          });
           this.publishState();
           return this.drive(next);
         }

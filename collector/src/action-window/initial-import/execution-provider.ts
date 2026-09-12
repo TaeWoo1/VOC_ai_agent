@@ -128,6 +128,8 @@ export type ExecutionStage =
   | "AUTH"
   | "IDENTITY"
   | "NAVIGATE"
+  /** Reading what the surface printed — the acquisition lane's own work (Coupang WING 리뷰 목록). */
+  | "READ"
   | "SCOPE"
   | "EXPORT"
   | "DOWNLOAD"

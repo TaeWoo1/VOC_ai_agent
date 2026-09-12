@@ -88,6 +88,11 @@ import { ReadinessObservingImportDriver } from "../action-window/initial-import/
 import { ImportAcquisitionCoordinator } from "../action-window/initial-import/import-acquisition-coordinator";
 import { ImportSegmentHost } from "../action-window/initial-import/import-host";
 import { assertExecutionProviderBootable } from "../action-window/initial-import/execution-provider-selection";
+import type { ExecutionProviderKind } from "../action-window/initial-import/execution-provider";
+import { AsideReviewAcquisitionDriver } from "../aside/aside-review-acquisition-driver";
+import { AsideCoupangReviewExecutor } from "../aside/coupang-review-executor";
+import { COUPANG_REVIEW_READ_WORKFLOW } from "../aside/coupang-review-workflow";
+import type { ReviewAcquisitionProbeDriver } from "../action-window/coupang-review/review-acquisition-driver";
 import { isSettledImportRunStatus } from "../action-window/initial-import/import-stages";
 import { InitialImportEndpoint } from "../bridge/initial-import-endpoint";
 import { checkGuidedPreflight, PREFLIGHT_RECOVERY } from "../action-window/initial-import/guided-preflight";
@@ -1145,10 +1150,43 @@ export function activateCoupangReviewLocate(
 }
 
 /** The live acquisition carrier: its lazy driver, the binding spend, the ONE handoff, and the window teardown. */
+/**
+ * Workflows this build binds to the Aside provider for Coupang. Non-empty since M3-C: the WING 리뷰 read
+ * workflow is one observed route and three page reads, so `REVIEWNARY_EXECUTION_PROVIDER=ASIDE` boots this
+ * carrier. NAVER's list is still empty and its carrier still refuses — one env var, two readinesses, and the
+ * one that is not ready says so instead of pretending.
+ */
+const COUPANG_ASIDE_WORKFLOWS_BOUND: readonly string[] = [COUPANG_REVIEW_READ_WORKFLOW.id];
+
+/**
+ * **The PoC walk bound for the deterministic path — one page.**
+ *
+ * The seated path's bound is the seller: they turn pages and stop when they choose. There is nobody at that
+ * browser on this path, so the bound is stated in code, and it is the smallest one that still proves the
+ * whole spine: identity → read → handoff → dedup → Review Core. At one page the run also performs **zero
+ * marketplace clicks** — it opens an official route and reads — which keeps the property the live-proven
+ * seated runs have always had while the executor changes underneath. Turning pages deterministically is a
+ * separate decision and is not taken here.
+ */
+const ASIDE_ACQUISITION_MAX_PAGES = 1;
+
 export interface CoupangReviewAcquisitionLiveCarrier {
   runId: string;
   channelCode: string;
-  createDriver: () => LazyReviewAcquisitionDriver;
+  /**
+   * The probe seam the run reads through. `LOCAL_HELPER` builds the seated {@link LazyReviewAcquisitionDriver}
+   * over the seller's own window; `ASIDE` builds the deterministic one. Neither can turn a page — the seam has
+   * no verb for it.
+   */
+  createDriver: () => ReviewAcquisitionProbeDriver;
+  /** Which executor carries this run. `LOCAL_HELPER` unless the deployment explicitly selected otherwise. */
+  executionProvider: ExecutionProviderKind;
+  /**
+   * OPTIONAL walk bound. The seated path leaves it at the proven default (the seller decides when to stop);
+   * the deterministic path pins it, because a bound nobody is watching is the difference between a read and a
+   * crawl.
+   */
+  maxPages?: number;
   /** Spend the run's opaque binding for the account slot it collects under. One backend call, every refusal `null`. */
   resolveTarget: (acquisitionRef: string) => Promise<ReviewAcquisitionTarget | null>;
   /** The ONE bounded POST of everything the walk read. */
@@ -1174,6 +1212,14 @@ export interface CoupangReviewAcquisitionLiveCarrier {
  */
 export function buildCoupangReviewAcquisitionLiveConfig(): CoupangReviewAcquisitionLiveCarrier {
   const cfg = loadConfig();
+  // **Execution provider gate (Aside Acquisition Track M3-C).** LOCAL_HELPER is the default and the seated
+  // path is untouched by this branch. Selecting ASIDE with no bound workflow is refused loudly rather than
+  // downgraded — the same rule the NAVER import carrier applies at its own boot.
+  assertExecutionProviderBootable(cfg.executionProvider, COUPANG_ASIDE_WORKFLOWS_BOUND);
+  const aside = cfg.executionProvider === "ASIDE";
+  // The store this run's binding belongs to, learned at resolve time and read by the deterministic driver
+  // immediately before it decides whether a page may be read at all. Never logged.
+  let boundStoreFingerprint: string | null = null;
   let walkContext: BrowserContext | null = null;
   let navigated = false;
   const driver = new LazyReviewAcquisitionDriver({
@@ -1228,15 +1274,26 @@ export function buildCoupangReviewAcquisitionLiveConfig(): CoupangReviewAcquisit
       return null;
     }
   };
+  const asideDriver = aside
+    ? new AsideReviewAcquisitionDriver({
+        executor: new AsideCoupangReviewExecutor({
+          cli: { command: cfg.asideCli, ...(cfg.asideAccount ? { account: cfg.asideAccount } : {}) },
+        }),
+        expectedStoreFingerprint: () => boundStoreFingerprint,
+      })
+    : null;
   return {
     runId: `run_${randomBytes(6).toString("hex")}`,
     channelCode: "coupang",
-    createDriver: () => driver,
+    executionProvider: cfg.executionProvider,
+    ...(aside ? { maxPages: ASIDE_ACQUISITION_MAX_PAGES } : {}),
+    createDriver: () => asideDriver ?? driver,
     resolveTarget: async (acquisitionRef: string) => {
       const t = await session();
       if (t === null || origin === null) return null;
       const target = await fetchReviewAcquisitionTarget(origin, t, acquisitionRef);
       if (!target) token = null;
+      boundStoreFingerprint = target?.expectedStoreFingerprint ?? null;
       return target;
     },
     handoff: async (request: ReviewHandoffRequest) => {
@@ -1279,9 +1336,11 @@ export function activateCoupangReviewAcquisition(
     resolveTarget: live.resolveTarget,
     handoff: live.handoff,
     channelCode: "COUPANG",
+    ...(live.maxPages === undefined ? {} : { maxPages: live.maxPages }),
   });
   session.attach();
   log("aw_coupang_review_acquisition_run_hosted", { onDemand: true });
+  log("aw_coupang_review_acquisition_execution_provider", { provider: live.executionProvider });
   let disposed = false;
   return {
     endpoint,
