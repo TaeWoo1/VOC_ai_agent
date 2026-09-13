@@ -295,6 +295,10 @@ public class AgentReviewHandoffService {
                     null,
                     row.vendorItemId(),
                     row.mediaCount(),
+                    // The WING reading counted — this 0 is an answer, not a silence. What it could
+                    // NOT see is a separate limitation, recorded where the counter lives
+                    // (`mediaCountOf` looks inside the body cell only).
+                    true,
                     row.textless()));
         }
         if (unresolved > 0) {

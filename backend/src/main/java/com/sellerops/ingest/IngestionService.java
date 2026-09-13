@@ -183,6 +183,9 @@ public class IngestionService {
                 // deliberately allowed to change reply state and nothing else.
                 entity.setSourceOptionId(row.sourceOptionId());
                 entity.setMediaCount(row.mediaCount());
+                // Carried, never derived from the count: `0 / false` is the file-upload path saying
+                // nobody asked about media, and `0 / true` would be a reader saying there is none.
+                entity.setMediaCountObserved(row.mediaObserved());
                 entity.setAcquisitionSyncJobId(acquisitionSyncJobId);
                 trySave(tally, row.sourceRow(),
                         () -> reviews.save(entity).getId(),

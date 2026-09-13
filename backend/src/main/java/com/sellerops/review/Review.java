@@ -92,9 +92,31 @@ public class Review extends BaseEntity {
     @Column(name = "source_option_id")
     private String sourceOptionId;
 
-    /** Photos/videos on the review itself, never the product thumbnail beside it. 0 when unreported. */
+    /**
+     * Photos/videos on the review itself, never the product thumbnail beside it.
+     *
+     * <p><b>Read it with {@link #mediaCountObserved}.</b> This field alone cannot say whether a 0 is
+     * an answer: until Media Semantics Closeout v1 it meant «none» and «nobody counted» at once, and
+     * 4,800 of the 4,832 zeros in the database were the second one wearing the first one's clothes.
+     */
     @Column(name = "media_count", nullable = false)
     private int mediaCount;
+
+    /**
+     * Whether {@link #mediaCount} is a reading rather than a default (V101).
+     *
+     * <p>{@code false} is UNKNOWN — nobody looked, or the reader that ran could not have seen media
+     * if it were there. {@code true} with 0 is «we looked and there is none»; {@code true} with a
+     * count is «we looked and here is how many». Only the middle case may ever be rendered as an
+     * absence, which is the same rule {@code ChannelDataState} states for collection.
+     *
+     * <p><b>No product surface reads this yet, and that is the design.</b> The first reader is
+     * whatever consumes media; until then the field exists so a measurement can tell a zero apart
+     * from a silence — which is precisely what no measurement could do before it. It holds no URL,
+     * no filename and no reference.
+     */
+    @Column(name = "media_count_observed", nullable = false)
+    private boolean mediaCountObserved;
 
     /** When the channel says the reply was posted. Date-granular (the shared DateParse path
      *  quantises to UTC start-of-day) and diagnostic only — nothing gates on it. */

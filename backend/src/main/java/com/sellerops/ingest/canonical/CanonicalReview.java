@@ -23,6 +23,15 @@ public record CanonicalReview(
         String sourceOptionId,
         int mediaCount,
         /**
+         * Whether {@link #mediaCount} is a READING rather than a default (Media Semantics Closeout v1).
+         *
+         * <p>False means UNKNOWN: this source was not asked about media, or the reader that ran could
+         * not have seen it. It is carried rather than derived from {@code mediaCount > 0} because that
+         * derivation is the defect being closed — «0» and «nobody counted» are different claims and a
+         * count alone cannot separate them. Only a source that actually looked may pass true.
+         */
+        boolean mediaObserved,
+        /**
          * The buyer rated and wrote nothing. {@code body} is then blank — never a channel's placeholder
          * sentence, which is UI text and not a customer's words. It is carried rather than derived from a
          * blank body because the two are different claims: a blank body could be a reader defect, while this
@@ -51,15 +60,15 @@ public record CanonicalReview(
                            Instant receivedAt, String externalId, int sourceRow,
                            ReviewReplyState replyState, Instant repliedAt) {
         this(productName, sku, rating, body, receivedAt, externalId, sourceRow, replyState, repliedAt,
-                null, 0, false);
+                null, 0, false, false);
     }
 
-    /** A source that reports an option and media but does not distinguish a textless review. */
+    /** A source that reports an option and a COUNTED media figure but no textless distinction. */
     public CanonicalReview(String productName, String sku, Integer rating, String body,
                            Instant receivedAt, String externalId, int sourceRow,
                            ReviewReplyState replyState, Instant repliedAt,
                            String sourceOptionId, int mediaCount) {
         this(productName, sku, rating, body, receivedAt, externalId, sourceRow, replyState, repliedAt,
-                sourceOptionId, mediaCount, false);
+                sourceOptionId, mediaCount, true, false);
     }
 }
