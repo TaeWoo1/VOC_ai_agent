@@ -11,7 +11,14 @@ the runtime boundaries. That document is not restated here. This one adds the ax
 **Superseded on media by `docs/review_media_presence_audit_v1.md` (2026-09-13).** That audit measured
 what this one could only describe, and two numbers here are corrected there: the Coupang rows that
 reached the database through a counter are **32**, not 34, and `OperatorVocItem` has **24** record
-components, not 17. The conclusion both agree on — every path lands on `MEDIA_UNKNOWN` — is unchanged.
+components, not 17.
+
+**And its Cafe24 conclusion is now overturned by measurement.** An approved bounded READ (3 requests,
+integers out, nothing stored) found **1 of 7 board-4 articles in the last 365 days carrying 1
+attachment** — so Cafe24 is `MEDIA_PRESENT`, not unknown, and this document's «contract says YES,
+nobody has looked» is closed. Coupang and NAVER are unchanged. `reviews.media_count` also gained
+`media_count_observed` (V101) so a zero can be told apart from a silence; the account/channel half of
+the same milestone is `docs/core_channel_boundary_v1.md`.
 
 ## 0. Method — what counts as evidence here
 
