@@ -591,6 +591,11 @@ public class IngestionService {
                         // `inquiries.last_seen_at`); leaving it stale on a no-op made "unchanged" and
                         // "gone" indistinguishable here for the same reason it did there.
                         entity.setCollectedAt(Instant.now());
+                        // The attachment length is an observation of THIS read, on the same footing as
+                        // `collected_at` — not a backfill and not an estimate. It is outside the hash
+                        // on purpose (see the entity): an attachment count is not article content, and
+                        // folding it in would report every unchanged article as edited.
+                        entity.setAttachmentCount(row.attachmentCount());
                         communityArticles.save(entity);
                         tally.skip();
                         continue;
@@ -631,6 +636,7 @@ public class IngestionService {
         entity.setRating(row.rating());
         entity.setSourceUpdatedAt(row.sourceUpdatedAt());
         entity.setSourceHash(hash);
+        entity.setAttachmentCount(row.attachmentCount());
         entity.setCollectedAt(Instant.now());
     }
 

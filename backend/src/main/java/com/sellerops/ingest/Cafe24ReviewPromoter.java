@@ -90,6 +90,26 @@ public class Cafe24ReviewPromoter {
      */
     public Outcome promote(UUID orgId, UUID channelId, String sourceKind, int boardNo, long articleNo,
                            String content, Integer rating, Instant sourceCreatedAt, Long productNo) {
+        return promote(orgId, channelId, sourceKind, boardNo, articleNo, content, rating,
+                sourceCreatedAt, productNo, null);
+    }
+
+    /**
+     * As above, carrying how many files the source said were attached — or null when it did not say.
+     *
+     * <p><b>Null is not zero.</b> It lands as {@code media_count = 0, media_count_observed = false},
+     * which is the review saying «nobody counted» rather than «there are none». A number lands as an
+     * observation. Nothing about the FILES travels: the count is a length the connector measured at
+     * the parse boundary, and no URL or filename exists anywhere on this path to be stored.
+     *
+     * <p>Written on INSERT only, like every other source fact on a review
+     * ({@code IngestionService}'s rule): a re-promotion of an article already promoted returns
+     * {@code ALREADY_PRESENT} and changes nothing, so the 134 reviews promoted before this existed
+     * keep their unobserved state rather than acquiring a retroactive one.
+     */
+    public Outcome promote(UUID orgId, UUID channelId, String sourceKind, int boardNo, long articleNo,
+                           String content, Integer rating, Instant sourceCreatedAt, Long productNo,
+                           Integer attachmentCount) {
         if (CommunitySourceKind.normalize(sourceKind) != CommunitySourceKind.REVIEW) {
             return Outcome.SKIPPED_NOT_REVIEW;
         }
@@ -112,6 +132,8 @@ public class Cafe24ReviewPromoter {
         review.setNegative(rating != null && rating <= 2);
         review.setReceivedAt(sourceCreatedAt != null ? sourceCreatedAt : Instant.now());
         review.setExternalId(externalId);
+        review.setMediaCount(attachmentCount == null ? 0 : attachmentCount);
+        review.setMediaCountObserved(attachmentCount != null);
         review.setContentHash(null); // dedup is by the stable external id, not a content hash
         review.setDedupKeyVersion(ReviewDedupKey.V1);
         review.setReplyState(ReviewReplyState.UNKNOWN);

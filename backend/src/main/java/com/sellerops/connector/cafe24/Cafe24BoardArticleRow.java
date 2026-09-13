@@ -53,6 +53,18 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * review (구매후기, board 4) path stores a post only when {@link #isPublicPost()}
  * positively confirms it is public, so a private post's title/content never reach the
  * mapper, storage, or any log. The value itself is never persisted.
+ *
+ * <p><b>{@code attachmentCount} is a LENGTH, and the array it came from has no field here.</b>
+ * {@code attach_file_urls} has ridden on every response this connector has ever received and was
+ * being discarded; an approved bounded READ measured 1 of 7 board-4 articles carrying 1 file
+ * ({@code docs/review_media_presence_audit_v1.md} §2-A), so the field is real and populated. What is
+ * projected is {@code size()} and nothing else — the {@code name} and {@code url} inside each element
+ * reach the {@link #fromJson} factory's parameter and die there, exactly as this file's own rule
+ * requires: <em>a field that is not projected cannot be persisted later by accident.</em>
+ *
+ * <p><b>{@code null} is not zero.</b> An absent or null key means the response did not tell us, and
+ * that travels all the way to {@code reviews.media_count_observed = false}. An empty array is a
+ * reading, and it means zero.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record Cafe24BoardArticleRow(
@@ -68,14 +80,43 @@ public record Cafe24BoardArticleRow(
         @JsonProperty("order_id") String orderId,
         @JsonProperty("parent_article_no") Long parentArticleNo,
         @JsonProperty("reply_depth") Integer replyDepth,
-        @JsonProperty("reply_sequence") Integer replySequence) {
+        @JsonProperty("reply_sequence") Integer replySequence,
+        /**
+         * How many files {@code attach_file_urls} held, or null when the response did not say.
+         *
+         * <p>{@code @JsonIgnore} because this component is not a wire property: {@link #fromJson}
+         * computes it from {@code attach_file_urls}, which is a creator parameter and not a field.
+         * Without it Jackson looks for a creator property called {@code attachmentCount} and refuses
+         * the whole type.
+         */
+        @JsonProperty("attach_file_urls") AttachmentCount attachments) {
+
+    /**
+     * How many files were attached, or null when the response did not carry the key.
+     *
+     * <p>{@code @JsonIgnore} because it is derived: {@link #attachments} is the wire property, and a
+     * second one under this name would make Jackson look for a creator parameter that does not exist.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public Integer attachmentCount() {
+        return attachments == null ? null : attachments.value();
+    }
 
     /** Back-compat for callers written before the thread-structure fields were projected. */
     public Cafe24BoardArticleRow(Long articleNo, String title, String content, Long productNo,
                                  Integer rating, String createdDate, String updatedDate,
                                  String replyStatus, String secret, String orderId) {
         this(articleNo, title, content, productNo, rating, createdDate, updatedDate, replyStatus,
-                secret, orderId, null, null, null);
+                secret, orderId, null, null, null, null);
+    }
+
+    /** Back-compat for callers written before the attachment length was projected. */
+    public Cafe24BoardArticleRow(Long articleNo, String title, String content, Long productNo,
+                                 Integer rating, String createdDate, String updatedDate,
+                                 String replyStatus, String secret, String orderId,
+                                 Long parentArticleNo, Integer replyDepth, Integer replySequence) {
+        this(articleNo, title, content, productNo, rating, createdDate, updatedDate, replyStatus,
+                secret, orderId, parentArticleNo, replyDepth, replySequence, null);
     }
 
     /** Back-compat for fixtures/tests written before {@code order_id} was projected. */

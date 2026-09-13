@@ -56,7 +56,9 @@ final class Cafe24BoardArticleMapper {
                 row.replyStatus(),
                 parseOffsetInstant(row.createdDate()),
                 parseOffsetInstant(row.updatedDate()),
-                sourceRow);
+                sourceRow,
+                // The LENGTH the response carried, or null when it carried no key. Never the files.
+                row.attachmentCount());
     }
 
     static String sourceKindForBoard(int boardNo) {

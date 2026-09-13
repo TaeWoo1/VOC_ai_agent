@@ -75,6 +75,20 @@ public class Cafe24CommunityArticle extends BaseEntity {
     private Instant sourceUpdatedAt;
 
     /** Fingerprint over the mutable fields; an unchanged value means a no-op upsert. */
+    /**
+     * How many files {@code attach_file_urls} held when this article was last read (V102).
+     *
+     * <p><b>Null is not zero</b> — it means the length was never observed for this row, and it
+     * reaches {@code reviews.media_count_observed = false} through the promoter. No backfill wrote a
+     * number here, and no URL or filename can: the array has no field anywhere in the connector.
+     *
+     * <p>Deliberately NOT part of {@code source_hash}. The hash decides whether an article's mutable
+     * CONTENT changed; folding an attachment count into it would make the first sweep after V102
+     * report 134 articles as edited, which is a claim about the seller's board that nothing observed.
+     */
+    @Column(name = "attachment_count")
+    private Integer attachmentCount;
+
     @Column(name = "source_hash", nullable = false)
     private String sourceHash;
 
