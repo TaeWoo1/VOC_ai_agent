@@ -8,6 +8,58 @@ This document is a scope statement, not an architecture. Each line points at the
 
 ---
 
+## §0 — The five layers (product-owner statement, 2026-09-13)
+
+This is the canonical shape. Each line is enforced somewhere in the code, and the sections below say
+where.
+
+### Core
+- account/provider-independent Review domain
+- Rules tier
+- seller judgment / decision / action / history
+- Issue memory
+- Operations Home
+
+### Acquisition
+- NAVER guided Seller Center export
+- Cafe24 official API
+- Manual/File upload
+- Coupang Aside optional
+- **NAVER media interpretation only** is DEFERRED
+
+### Attention
+- capability-gated to validated channels
+- AI mark / silver behaviour / event vocabulary
+- unsupported channels remain RULES-only
+- never invent AI judgment outside the channel contract
+
+### Media
+- canonical presence/count semantics only
+- Cafe24 can produce observed presence/count going forward
+- Coupang `MEDIA_UNKNOWN`
+- NAVER media DEFERRED
+- Manual/File `MEDIA_UNKNOWN`
+- no media reference / raw media / multimodal inference
+
+### Execution
+- `SellerAccount` + channel capability required
+- reply / draft / submission stays capability-gated
+- **Core availability never implies execution availability**
+
+> **Attention sits on the capability side of the line, not inside Core.** That is the distinction the
+> whole boundary rests on: §1 of the triage contract is a table of what a CHANNEL can produce, and an
+> AI mark is one of those things. A person's judgment is not. Two independent mechanisms keep
+> «RULES-only» true rather than merely intended — the pilot refuses an out-of-contract channel with a
+> 404 before it can write anything (`AiTriagePilotService`), and `TriageDisplayDecision` reports `AI`
+> only where a pilot row exists. No row, no AI mark.
+>
+> **And NAVER is deferred on media alone.** NAVER acquisition is this product's largest working path
+> (4,498 REAL reviews in the reference database, through the guided export and file upload). What is
+> unobserved is column E `포토/영상` of the 25-column export, which the mapper does not read and whose
+> real shape this repository has never seen.
+
+---
+
 ## In scope
 
 | | state | owner |
