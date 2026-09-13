@@ -56,7 +56,14 @@ function pairingBearer(): string | null {
 export function HelperStatusCard({
   naverHealth,
   enabled = true,
+  onState,
 }: {
+  /**
+   * Report the helper word upward. There is exactly ONE derivation of this state — the probes and the
+   * device link that feed it live here — and a caller that needs to gate a control on it reads the
+   * answer rather than computing a second one that can disagree with the card beside it.
+   */
+  onState?: (state: HelperState) => void;
   /** The NAVER account's connection status (carries `sessionReadiness`), or null when there is none. */
   naverHealth: ConnectionStatusView | null;
   enabled?: boolean;
@@ -209,6 +216,10 @@ export function HelperStatusCard({
     naverHealth?.sessionReadiness ?? null,
     naverHealth?.sessionObservedAt ? relativeTime(naverHealth.sessionObservedAt) : null,
   );
+
+  useEffect(() => {
+    onState?.(helper);
+  }, [helper, onState]);
 
   const tone = (t: HelperState["tone"]): StatusTone => t;
 

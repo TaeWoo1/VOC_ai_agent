@@ -5,6 +5,7 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.review.channel.dto.AgentReviewAcquisitionTargetView;
+import com.sellerops.review.channel.dto.ChannelReviewAcquisitionReadinessView;
 import com.sellerops.review.channel.dto.ChannelReviewAcquisitionRunResponse;
 import com.sellerops.selleraccount.AccountSessionSlot;
 import com.sellerops.selleraccount.AccountSessionSlotRepository;
@@ -56,20 +57,89 @@ public class ChannelReviewAcquisitionService {
         this.vault = vault;
     }
 
+    /**
+     * Whether a screen read can be started for this account, without minting anything.
+     *
+     * <p>The seller's own screen asks this before drawing a 지금 동기화 they may not be able to press.
+     * It is the SAME predicate {@link #mint} enforces — {@link #readinessOf} is the one place the three
+     * conditions live, so a panel cannot say 준비됨 over a mint that would refuse.
+     */
+    @Transactional(readOnly = true)
+    public ChannelReviewAcquisitionReadinessView readiness(UUID orgId, UUID accountId) {
+        SellerAccount account = accounts.findByIdAndOrgId(accountId, orgId)
+                .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
+        Channel channel = channels.findById(account.getChannelId())
+                .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
+        boolean linked = slots.findBySellerAccountId(account.getId()).isPresent();
+        return new ChannelReviewAcquisitionReadinessView(
+                readinessOf(account, channel, linked, expectedStoreFingerprint(orgId, account.getId()) != null)
+                        .name(),
+                channel.getCode());
+    }
+
+    /**
+     * The three preconditions, in one place and in one order.
+     *
+     * <p>They were written as a throwing sequence inside {@link #mint} and stayed correct there; what
+     * they could not do was answer the same question to a screen. A second copy for the read would be
+     * two statements of one rule, and the copy is the one that goes stale — so the rule became a pure
+     * function and both callers ask it. {@code linked} and {@code storeIdentityKnown} are passed rather
+     * than looked up here so the function stays a statement of the rule instead of a set of queries.
+     */
+    static ScreenReadReadiness readinessOf(SellerAccount account, Channel channel, boolean linked,
+                                           boolean storeIdentityKnown) {
+        if (!COUPANG.equals(channel.getCode())) {
+            return ScreenReadReadiness.CHANNEL_NOT_SUPPORTED;
+        }
+        if (account.isFileUpload()) {
+            return ScreenReadReadiness.FILE_UPLOAD_ACCOUNT;
+        }
+        if (!linked) {
+            return ScreenReadReadiness.HELPER_NOT_LINKED;
+        }
+        if (!storeIdentityKnown) {
+            return ScreenReadReadiness.STORE_IDENTITY_UNKNOWN;
+        }
+        return ScreenReadReadiness.READY;
+    }
+
+    /**
+     * The store this account is expected to be, as a fingerprint — or null when we cannot say.
+     *
+     * <p>One method, two callers: {@link #resolve} hands it to the run as the thing the screen must
+     * match, and {@link #readiness} asks only whether it exists. A vault that cannot be opened (no key,
+     * no credential) and a credential with no {@code vendor_id} are the same answer here — we cannot
+     * state the expectation — and the difference between them is an operator's diagnosis, not a
+     * seller's.
+     */
+    private String expectedStoreFingerprint(UUID orgId, UUID accountId) {
+        try {
+            return WingStoreIdentity.fingerprint(vault.open(orgId, accountId).secrets().get("vendor_id"));
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     @Transactional
     public ChannelReviewAcquisitionRunResponse mint(UUID orgId, UUID accountId, UUID userId) {
         SellerAccount account = accounts.findByIdAndOrgId(accountId, orgId)
                 .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
         Channel channel = channels.findById(account.getChannelId())
                 .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
-        if (!COUPANG.equals(channel.getCode())) {
-            throw ApiException.badRequest("이 채널에는 화면에서 상품평을 가져오는 기능이 없습니다.");
-        }
-        if (account.isFileUpload()) {
-            throw ApiException.badRequest("파일 업로드 계정에서는 화면 기반 수집을 사용할 수 없습니다.");
-        }
-        if (slots.findBySellerAccountId(account.getId()).isEmpty()) {
-            throw ApiException.conflict("이 계정은 아직 도우미에 연결되지 않아 화면에서 가져올 수 없습니다.");
+        // Same three conditions, same order, same sentences — now stated once and thrown here. The
+        // HTTP status per condition is unchanged: a channel or account that can never do this is a 400,
+        // an account that is merely not linked yet is a 409.
+        switch (readinessOf(account, channel, slots.findBySellerAccountId(account.getId()).isPresent(),
+                expectedStoreFingerprint(orgId, account.getId()) != null)) {
+            case CHANNEL_NOT_SUPPORTED ->
+                    throw ApiException.badRequest("이 채널에는 화면에서 상품평을 가져오는 기능이 없습니다.");
+            case FILE_UPLOAD_ACCOUNT ->
+                    throw ApiException.badRequest("파일 업로드 계정에서는 화면 기반 수집을 사용할 수 없습니다.");
+            case HELPER_NOT_LINKED ->
+                    throw ApiException.conflict("이 계정은 아직 도우미에 연결되지 않아 화면에서 가져올 수 없습니다.");
+            case STORE_IDENTITY_UNKNOWN ->
+                    throw ApiException.conflict("이 계정의 쿠팡 연결 정보를 확인할 수 없어 어느 스토어인지 대조할 수 없습니다.");
+            case READY -> { }
         }
         ChannelReviewAcquisitionRef row = new ChannelReviewAcquisitionRef();
         row.setOrgId(orgId);
@@ -103,13 +173,7 @@ public class ChannelReviewAcquisitionService {
         // The expectation, read from the sealed credential this org already gave us. A vault that cannot be
         // opened (no key, no credential) yields no expectation — and no expectation is a stop downstream, not
         // a pass: `assertWingStore` answers UNRESOLVED, never MATCH.
-        String expected = null;
-        try {
-            expected = WingStoreIdentity.fingerprint(vault.open(orgId, accountId).secrets().get("vendor_id"));
-        } catch (RuntimeException e) {
-            expected = null;
-        }
-        return new AgentReviewAcquisitionTargetView(COUPANG, slot, expected);
+        return new AgentReviewAcquisitionTargetView(COUPANG, slot, expectedStoreFingerprint(orgId, accountId));
     }
 
     private static String newRef() {

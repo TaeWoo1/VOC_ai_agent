@@ -1368,6 +1368,19 @@ export interface ReviewAcquisitionRunResponse {
   expiresAt?: string | null;
 }
 
+/**
+ * Mirrors com.sellerops.review.channel.dto.ChannelReviewAcquisitionReadinessView — whether this account
+ * can START a screen read, asked without minting anything and without touching a marketplace.
+ *
+ * `state` is the backend's closed token; `lib/acquisitionReadiness.ts` is the only place it becomes a
+ * sentence. `READY` means 「시작할 수 있습니다」 and never 「성공할 것입니다」: whether the marketplace is
+ * logged in is not knowable from here and is the run's to discover.
+ */
+export interface ReviewAcquisitionReadinessResponse {
+  state: "READY" | "CHANNEL_NOT_SUPPORTED" | "FILE_UPLOAD_ACCOUNT" | "HELPER_NOT_LINKED" | "STORE_IDENTITY_UNKNOWN";
+  channelCode: string;
+}
+
 // Mirrors dto.ReviewReplyOutcomeResponse. Deliberately carries no body and no channel claim.
 // `replayed` distinguishes an idempotent retry from a fresh record; both are successes.
 export interface ReviewReplyOutcomeResponse {

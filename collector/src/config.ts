@@ -41,6 +41,12 @@ export const HELPER_ENV_KEYS = [
   "SELLEROPS_APP_URL",
   "NAVER_REVIEW_URL",
   "BRIDGE_ALLOWED_ORIGINS",
+  // Which executor carries a screen read on THIS machine (`execution-provider-selection.ts`). It was
+  // reachable only as a process env var, which a developer sets and an installed helper never sees —
+  // so the BYO lane the product documents was, on a packaged install, unreachable by configuration.
+  // A declared key rather than a new mechanism: the list is still closed, the default is still
+  // LOCAL_HELPER, an unknown value still refuses to boot, and process env still wins over the file.
+  EXECUTION_PROVIDER_ENV,
 ] as const;
 
 export function parseHelperEnv(text: string): Record<string, string> {

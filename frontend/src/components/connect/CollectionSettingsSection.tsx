@@ -166,7 +166,7 @@ function ScheduleRow({
       ) : unsupported ? (
         <p className="text-sm text-muted">
           {operatorRunPath
-            ? "Action Window는 판매자가 직접 실행하는 수집 경로라 자동 수집 주기 대상이 아닙니다."
+            ? "판매자가 직접 실행하는 수집 경로라 자동 수집 주기 대상이 아닙니다. 위 「상품평 가져오기」에서 실행할 수 있습니다."
             : sellerRepeatedPath?.method === "EXPORT"
               ? "이 채널은 리뷰 API를 제공하지 않습니다. 판매자 센터에서 내려받은 파일을 올리는 방식이 정식 수집 경로이며, 새 데이터는 다시 올릴 때 들어옵니다."
               : capability?.notes ?? "이 데이터는 파일 업로드로 채울 수 있습니다."}

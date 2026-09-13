@@ -15,6 +15,7 @@ import {
 } from "../../components/connect/ChannelStatusSection";
 import { CollectionSettingsSection } from "../../components/connect/CollectionSettingsSection";
 import { CollectionHistorySection } from "../../components/connect/CollectionHistorySection";
+import { ReviewAcquisitionSection } from "../../components/connect/ReviewAcquisitionSection";
 import { ReviewRecordPanel } from "../../components/connect/ReviewRecordPanel";
 import { nextActionFor, type ScrollTarget } from "../../components/connect/channelShared";
 import { api } from "../../lib/apiClient";
@@ -275,6 +276,12 @@ export function ChannelWorkspace() {
           refreshKey={refreshKey}
         />
       ) : null}
+
+      {/* 상품평 가져오기 — directly under the record it feeds, for the same reason the record is at the
+          top: on this channel the screen read IS how reviews arrive, and everything below is about
+          keeping a connection healthy. The section decides for itself whether this account has a
+          screen read at all and renders nothing when it does not, so no channel gate is repeated. */}
+      {accountId ? <ReviewAcquisitionSection accountId={accountId} onCompleted={reload} /> : null}
 
       {accountId ? (
         <>

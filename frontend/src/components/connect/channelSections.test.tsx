@@ -216,7 +216,7 @@ describe("수집 설정 섹션", () => {
       overviewWithReviewPaths([{ method: "ACTION_WINDOW", verificationStatus: "LIVE_PROVEN" }]),
     );
     renderSection("COUPANG");
-    expect(await screen.findByText(/Action Window는 판매자가 직접 실행하는/)).toBeInTheDocument();
+    expect(await screen.findByText(/판매자가 직접 실행하는 수집 경로라/)).toBeInTheDocument();
     // The sentence is an explanation, never a gate: the row still offers no cadence and no controls.
     // Coupang's row is labelled 상품평, the same word as the badge and the record panel.
     expect(reviewRow("상품평").querySelector("select")).toBeNull();
@@ -248,8 +248,8 @@ describe("수집 설정 섹션", () => {
   it("drops the previous channel's route the moment the account changes", async () => {
     // `useApiData` keeps the last successful payload across a deps change, so between an account
     // switch and the new read landing, the OLD channel's overview is still in state. If the row read
-    // it, a channel with no Action Window would be told it has one — a claim about the wrong channel,
-    // which is the one thing "read strictly to explain" must not produce.
+    // it, a channel with no operator-run path would be told it has one — a claim about the wrong
+    // channel, which is the one thing "read strictly to explain" must not produce.
     let landNaver: (v: unknown) => void = () => {};
     const naverPending = new Promise((resolve) => {
       landNaver = resolve;
@@ -262,7 +262,7 @@ describe("수집 설정 섹션", () => {
         : naverPending,
     );
     const { rerender } = renderSection("COUPANG");
-    await screen.findByText(/Action Window는 판매자가 직접 실행하는/);
+    await screen.findByText(/판매자가 직접 실행하는 수집 경로라/);
 
     rerender(
       <MemoryRouter>

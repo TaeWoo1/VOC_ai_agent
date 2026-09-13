@@ -65,8 +65,25 @@ describe("helper.env", () => {
   it("names exactly what the installer writes", () => {
     expect([...HELPER_ENV_KEYS]).toEqual([
       "SELLEROPS_BASE_URL", "SELLEROPS_APP_URL", "NAVER_REVIEW_URL", "BRIDGE_ALLOWED_ORIGINS",
+      // Which executor carries a screen read on this machine. Added deliberately: the BYO lane was
+      // selectable only by a process env var, which an installed helper never sees, so the product's
+      // one opt-in execution mode could not be opted into on a packaged install.
+      "REVIEWNARY_EXECUTION_PROVIDER",
     ]);
     for (const key of HELPER_ENV_KEYS) expect(key.toLowerCase()).not.toMatch(/password|email|token|secret/);
+  });
+
+  it("carries the execution provider from the file, and the process env still wins over it", () => {
+    const merged = withHelperEnvFile(
+      { REVIEWNARY_HELPER_HOME: "/h" },
+      () => "REVIEWNARY_EXECUTION_PROVIDER=ASIDE\n",
+    );
+    expect(merged.REVIEWNARY_EXECUTION_PROVIDER).toBe("ASIDE");
+    const overridden = withHelperEnvFile(
+      { REVIEWNARY_HELPER_HOME: "/h", REVIEWNARY_EXECUTION_PROVIDER: "LOCAL_HELPER" },
+      () => "REVIEWNARY_EXECUTION_PROVIDER=ASIDE\n",
+    );
+    expect(overridden.REVIEWNARY_EXECUTION_PROVIDER).toBe("LOCAL_HELPER");
   });
 });
 

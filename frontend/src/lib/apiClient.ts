@@ -93,6 +93,7 @@ import type {
   KnowledgeSummaryView,
   ReviewReplySubmissionRunResponse,
   ReviewExecutionView,
+  ReviewAcquisitionReadinessResponse,
   ReviewAcquisitionRunResponse,
   TriageDecisionResponse,
   TriageDisposition,
@@ -1627,6 +1628,15 @@ export const api = {
 
   // v2: mint a single-use `acquisitionRef` for a Coupang WING review read run (Action Window
   // `START_RUN(REVIEW_ACQUISITION)`). COUPANG only server-side; the ref carries no review identity.
+  // Can this account start a screen read at all — the three preconditions the mint enforces, asked
+  // without minting. No marketplace request is made by this call, on this path or behind it.
+  async getReviewAcquisitionReadiness(accountId: string): Promise<ReviewAcquisitionReadinessResponse> {
+    const { data } = await http.get<ReviewAcquisitionReadinessResponse>(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/review-acquisition-readiness`,
+    );
+    return data;
+  },
+
   async startReviewAcquisitionRun(accountId: string): Promise<ReviewAcquisitionRunResponse> {
     const { data } = await http.post<ReviewAcquisitionRunResponse>(
       `/api/seller-accounts/${encodeURIComponent(accountId)}/review-acquisition-runs`,
