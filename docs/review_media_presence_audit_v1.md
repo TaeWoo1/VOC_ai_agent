@@ -4,9 +4,12 @@
 Marketplace calls **3** (one approved bounded READ, §2-A) · marketplace WRITE **0** ·
 model calls **0** · migrations **1** (V101, §6-A).
 
-**Revised 2026-09-13 (Media Semantics Closeout v1).** The first version of this document closed with
-Cafe24 as `MEDIA_UNKNOWN` and a prepared manifest. The measurement has since been approved and run,
-and §6-A's semantics fix has landed. Both sections are rewritten below; the rest stands.
+**Revised twice on 2026-09-13.** The first version closed with Cafe24 as `MEDIA_UNKNOWN` and a
+prepared manifest; the measurement has since been approved and run (§2-A), and the semantics fix
+landed (§6-A). **Media Presence Projection v1 then acted on it**: Cafe24's `attach_file_urls` LENGTH
+is now projected on the sweep the connector already runs, so a Cafe24 review acquired from here on
+carries a real `media_count` and `media_count_observed = true` (§2-B). **The media track is frozen at
+that point** — see `docs/agent_native_text_first_pilot_scope_v1.md`.
 
 Companion to `docs/review_acquisition_capability_matrix_v1.md`, which separated media into five
 stages (source → parser → canonical → DB → Attention) and found each channel blocked at a different
@@ -136,6 +139,26 @@ window, no second window, no write of any kind. The single state change was the 
 token rotation the shared `Cafe24Authorizer` performs on every authorize — verified afterwards as
 **1 credential row, rotated once, connection intact**, with the Demo Org's 134 reviews and 134
 board-4 articles unchanged.
+
+### §2-B — Projected (2026-09-13)
+
+`attach_file_urls` is now read by the ordinary sweep — **no new request, no new endpoint, no new
+scope**, because the field has always ridden on the response the connector already receives.
+
+- The wire row carries an `AttachmentCount`, a record whose only state is an `int`. Its deserializer
+  walks the array with `skipChildren()` and counts, so a `url` is never even materialized as a Java
+  string. There is no field anywhere on this path that could hold a filename.
+- `cafe24_community_articles.attachment_count` (V102) is nullable with **no backfill**: null means
+  «never observed», and all 1,175 existing rows stayed null when the migration applied.
+- `Cafe24ReviewPromoter` carries it onto the review at promotion — an array of N gives
+  `media_count = N, observed = true`; an **empty** array gives `0, true`; an **absent key** gives
+  `0, false`, which is the review saying nobody counted.
+- **Source facts stay INSERT-only.** A re-promotion of an already promoted article returns
+  `ALREADY_PRESENT` and changes nothing, so the 134 Cafe24 reviews promoted before this exist keep
+  their unobserved state instead of acquiring a retroactive one. New rows start observed.
+
+Verified end to end through the real wire row, mapper, upsert and promoter with vendor-shaped JSON —
+including that a filename present in the JSON appears nowhere on the stored review.
 
 ## §3 — Coupang · **`MEDIA_UNKNOWN`**, and the census the brief asked for **has no caller**
 

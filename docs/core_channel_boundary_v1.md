@@ -73,7 +73,15 @@ The two sentences stay apart: the GMARKET workspace says 「이 채널에서는 
 작성하지 않습니다」 (true of the marketplace) and the account-less Cafe24 one says 「이 채널에 연결된
 판매 계정이 없어…」 (true of this seller's setup).
 
-## §5 — Reported, not fixed
+## §5 — Reported, then closed (2026-09-13, Data-bearing Channel Home v1)
+
+**Closed.** `OrgChannelVisibility` now answers «what does this org hold» separately from
+«what can this org connect», the overview's channel table is built from the union, and
+`ChannelCoverageService.stateOf` stopped erasing held rows at the connection branch. A GMARKET-only
+org renders its work, keeps its connect CTA, and is told nothing about connecting GMARKET. See
+`docs/agent_native_text_first_pilot_scope_v1.md` §2 for the four questions this separated.
+
+The original finding, for the record:
 
 **A GMARKET-only org still sees the first-use screen.** `metrics.channels` carries the
 seller-visible channel set — NAVER · Cafe24 · Coupang, the 2026-08-17 product-owner decision — so a
@@ -87,10 +95,11 @@ than taken.
 
 ## PRODUCT_DECISION_NEEDED
 
-1. **Should a channel outside the visible three appear in `metrics.channels` when the org holds rows
-   on it?** Until it does, a seller whose only reviews are GMARKET uploads has a working Decision
-   Workspace they cannot reach from the Home. The alternative — leaving it — is defensible: the
-   channel genuinely cannot be connected, and the screen says so honestly to everyone else.
+1. ~~Should a channel outside the visible three appear in `metrics.channels` when the org holds rows
+   on it?~~ **Decided yes** (2026-09-13) and implemented — the figures account for it, the connect
+   catalogue does not list it, and the 최근 수집 상태 section deliberately still does not (a widened
+   list rendered 「G마켓/옥션 · 아직 연결되지 않았습니다」, which is a connect affordance for a connection
+   that does not exist).
 2. **`ACTION_NOT_NEEDED` now reachable on any channel.** The Decision Workspace does not offer it
    (the decision spine's `NO_ACTION` already says it, and one press in two spines is what §5-C of the
    triage contract forbids), but the record screen's pilot control still writes it. Unchanged here.
