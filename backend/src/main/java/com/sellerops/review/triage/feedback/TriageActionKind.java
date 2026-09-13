@@ -13,11 +13,28 @@ package com.sellerops.review.triage.feedback;
  * says the product has a reply flow (NAVER's guided one). Coupang has no reply feature and a
  * {@code REPLY_*} on a Coupang review is refused, not stored with a flag. Neither is ever a verified
  * post — SellerOps has no review API to verify one — they are the seller's own statement, stored as one.
+ *
+ * <p><b>The three {@code ACTION_*} are not channel-gated, and {@link #isSellerAct()} is where that is
+ * said once</b> (Core Channel Boundary v1). They record something the seller did on their own side of
+ * the counter — started, finished, decided it was unnecessary — and none of them is a claim about a
+ * marketplace. A channel outside the triage contract's three cannot produce an AI mark or a behaviour
+ * event, which is why those stay gated; it has no bearing on whether a person may write down what
+ * they did about their own review. Before this, a GMARKET review the seller had uploaded themselves
+ * refused all five kinds with the same 404.
  */
 public enum TriageActionKind {
     ACTION_STARTED,
     ACTION_COMPLETED,
     ACTION_NOT_NEEDED,
     REPLY_DRAFTED,
-    REPLY_SUBMITTED
+    REPLY_SUBMITTED;
+
+    /**
+     * Whether this is a statement about what the SELLER did, rather than a claim that a reply exists
+     * on a channel. The first kind is Core and travels with the review; the second needs the channel
+     * to have a reply flow at all, and {@code ReviewTriageChannelCapability.permits} still answers that.
+     */
+    public boolean isSellerAct() {
+        return this == ACTION_STARTED || this == ACTION_COMPLETED || this == ACTION_NOT_NEEDED;
+    }
 }

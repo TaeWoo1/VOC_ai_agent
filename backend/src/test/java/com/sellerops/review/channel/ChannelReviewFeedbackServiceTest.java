@@ -61,6 +61,18 @@ class ChannelReviewFeedbackServiceTest {
     private final ChannelReviewFeedbackService service = new ChannelReviewFeedbackService(reviews, accounts,
             channels, feedback, pilot, corrections, actions, behavior);
 
+    /** A standing correction row, for the calls whose echo maps one. */
+    private static TriageCorrection standingCorrection(UUID reviewId) {
+        TriageCorrection row = new TriageCorrection();
+        row.setOrgId(ORG);
+        row.setReviewId(reviewId);
+        row.setCorrectedTier(ReviewTriageTier.NEEDS_ATTENTION);
+        row.setShownTier(ReviewTriageTier.FYI);
+        row.setShownSource(TriageShownSource.RULES);
+        row.setCorrectedAt(Instant.parse("2026-09-13T00:00:00Z"));
+        return row;
+    }
+
     private Review onChannel(String code) {
         SellerAccount acc = new SellerAccount();
         acc.setOrgId(ORG);
@@ -88,27 +100,53 @@ class ChannelReviewFeedbackServiceTest {
     }
 
     @Test
-    @DisplayName("outside the three channels every route is a 404, and nothing is written")
-    void outsideChannelsHaveNoRoute() {
+    @DisplayName("outside the three channels the ATTENTION routes are a 404, and nothing is written")
+    void outsideChannelsHaveNoAttentionRoute() {
         Review r = onChannel("GMARKET");
-        assertThatThrownBy(() -> service.correct(ORG, ACCOUNT, r.getId(),
-                new TriageFeedbackRequests.Correction("NEEDS_ATTENTION", null), null))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("지원하지 않습니다");
-        assertThatThrownBy(() -> service.withdraw(ORG, ACCOUNT, r.getId(), null))
-                .isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> service.correctionHistory(ORG, ACCOUNT, r.getId()))
-                .isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> service.act(ORG, ACCOUNT, r.getId(), TriageActionKind.ACTION_STARTED, null))
-                .isInstanceOf(ApiException.class);
+        // §1 is a table of what a CHANNEL can produce. Silver behaviour and the event vocabulary built
+        // on it are exactly that, and a channel outside the three can produce neither.
         assertThatThrownBy(() -> service.observe(ORG, ACCOUNT, new TriageFeedbackRequests.Behavior(List.of(
                 new TriageFeedbackRequests.Behavior.Event(r.getId(), TriageBehaviorKind.REVIEW_OPENED)))))
-                .isInstanceOf(ApiException.class);
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("지원하지 않습니다");
         assertThatThrownBy(() -> service.events(ORG, ACCOUNT, r.getId())).isInstanceOf(ApiException.class);
-        verify(feedback, never()).correctReview(any(), any(), any(), any(), any(), any(), anyBoolean(), any());
-        verify(feedback, never()).withdrawCorrection(any(), any(), any());
-        verify(feedback, never()).act(any(), any(), any(), any(), any(), any(), anyBoolean());
         verify(feedback, never()).observe(any(), any(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("outside the three channels the seller can still judge and still record what they did")
+    void outsideChannelsKeepTheCoreStatements() {
+        // Core Channel Boundary v1, and this test is the reversal of the one above it. Judging a review
+        // and recording an act are things a PERSON does about their own record — they touch no
+        // marketplace and assert nothing about one — so a GMARKET review the seller uploaded
+        // themselves is theirs to decide. It used to answer 404 to all five.
+        Review r = onChannel("GMARKET");
+        when(feedback.correctReview(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(standingCorrection(r.getId()));
+
+        service.correct(ORG, r.getId(), new TriageFeedbackRequests.Correction("NEEDS_ATTENTION", null), null);
+        service.withdraw(ORG, r.getId(), null);
+        service.correctionHistory(ORG, r.getId());
+        for (TriageActionKind kind : List.of(TriageActionKind.ACTION_STARTED,
+                TriageActionKind.ACTION_COMPLETED, TriageActionKind.ACTION_NOT_NEEDED)) {
+            service.act(ORG, r.getId(), kind, null);
+        }
+
+        verify(feedback).correctReview(any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        verify(feedback).withdrawCorrection(any(), any(), any());
+        verify(feedback, org.mockito.Mockito.times(3))
+                .act(any(), any(), any(), any(), any(), any(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("outside the three channels a REPLY_* act is still refused — no channel has a reply flow there")
+    void outsideChannelsStillRefuseReplyClaims() {
+        Review r = onChannel("GMARKET");
+        for (TriageActionKind kind : List.of(TriageActionKind.REPLY_DRAFTED, TriageActionKind.REPLY_SUBMITTED)) {
+            assertThatThrownBy(() -> service.act(ORG, r.getId(), kind, null))
+                    .as("%s", kind).isInstanceOf(ApiException.class).hasMessageContaining("기록할 수 없는");
+        }
+        verify(feedback, never()).act(any(), any(), any(), any(), any(), any(), anyBoolean());
     }
 
     @Test

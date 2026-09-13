@@ -32,10 +32,17 @@ import org.springframework.stereotype.Service;
  * <p><b>No seller account is involved.</b> What the seller judges and what the seller did are
  * statements this ORG makes about its own record, and they are never sent anywhere; the account used
  * to sit in these signatures only to assert that its channel equalled the review's, which is a fact
- * the review already carries. The channel contract of §1 is still enforced — asked of the review's
- * channel — so a channel outside the three is still a 404 and a kind it cannot produce is still a 400.
- * The one route that keeps an account is {@link #observe}, because it batches what one account's
- * record screen displayed.
+ * the review already carries. The one route that keeps an account is {@link #observe}, because it
+ * batches what one account's record screen displayed.
+ *
+ * <p><b>And no CHANNEL is involved either, for the two Core statements</b> (Core Channel Boundary
+ * v1). Judging a review and recording that you acted on it are things a seller does about their own
+ * record; they touch no marketplace and assert nothing about one. The triage contract's §1 table is
+ * about what a CHANNEL can produce — an AI mark, a behaviour event, a reply — and it still gates
+ * exactly those: {@link #observe} and {@link #events} keep the 404, {@code REPLY_*} acts keep the
+ * 400, and the AI pilot is unchanged. What it no longer gates is a person writing down what they
+ * thought. Before this, a GMARKET review the seller had uploaded themselves — this org's own row,
+ * on this org's own screen — refused every judgment and every act with the same 404.
  *
  * <p><b>The body passes through this class in memory and lands nowhere.</b> The feedback service
  * needs it to compute the rule's own tier for the row (what was SHOWN); it is not stored, not
@@ -75,18 +82,20 @@ public class ChannelReviewFeedbackService {
     }
 
     /**
-     * The contract-§1 door, once, for every route here: a review on a channel outside the three gets a
-     * 404 — the same answer as a review that is not there — and the channel's capability row for
-     * everything inside, so each route can refuse the kinds this channel cannot produce.
+     * The contract-§1 door for the ATTENTION lanes — {@link #observe} and {@link #events}.
      *
-     * <p>Asked of the REVIEW's channel, not of an account's. The two were always required equal, and
-     * the review's own is the one the contract is about: the capability is a fact about the channel a
-     * customer wrote on, and it does not become a different fact because nobody connected an account.
+     * <p>It used to guard every route here, including the seller's own judgment, and that was the
+     * coupling Core Channel Boundary v1 removed: §1 is a table of what a CHANNEL can produce, and a
+     * person's judgment is not something a channel produces. What it still guards is exactly what it
+     * describes — silver behaviour a channel cannot emit, and the event vocabulary built on it.
+     *
+     * <p>Asked of the REVIEW's channel, not of an account's. The capability is a fact about the
+     * channel a customer wrote on, and it does not become a different fact because nobody connected
+     * an account.
      */
     private ReviewTriageChannelCapability requireCapability(UUID channelId) {
-        String code = channelId == null ? null
-                : channels.findById(channelId).map(Channel::getCode).orElse(null);
-        ReviewTriageChannelCapability capability = ReviewTriageChannelCapability.of(code);
+        ReviewTriageChannelCapability capability =
+                ReviewTriageChannelCapability.of(channelCodeOf(channelId));
         if (!capability.inContract()) {
             // Not "the pilot does not cover this channel" any more: these routes now carry the
             // seller's own corrections, which have nothing to do with the pilot. Same 404, same
@@ -111,8 +120,11 @@ public class ChannelReviewFeedbackService {
             // A strong-evidence row from an absent field would be evidence of nothing.
             throw ApiException.badRequest("판매자 판단을 선택해 주세요.");
         }
+        // No capability gate: see the class note. The rules tier below is computed from the rating
+        // and the body, which every channel has, and `TriageDisplayDecision` can only report AI where
+        // a pilot row exists — so an unsupported channel records what it actually showed (RULES) and
+        // invents no system judgment.
         Review review = requireReview(orgId, reviewId);
-        requireCapability(review.getChannelId());
         TriageCorrection row = feedback.correctReview(orgId, reviewId, review.getRating(), review.getBody(),
                 ReviewTriageTier.parse(request.tier()), request.reasonCode(), pilot.isEnabledFor(orgId), actorId);
         return viewOf(row, feedback.correctionHistory(reviewId).size());
@@ -127,7 +139,6 @@ public class ChannelReviewFeedbackService {
      */
     public TriageFeedbackRequests.CorrectionView withdraw(UUID orgId, UUID reviewId, UUID actorId) {
         Review review = requireReview(orgId, reviewId);
-        requireCapability(review.getChannelId());
         feedback.withdrawCorrection(orgId, review.getId(), actorId);
         return null;
     }
@@ -135,7 +146,6 @@ public class ChannelReviewFeedbackService {
     /** One review's correction trail, oldest first. */
     public List<TriageFeedbackRequests.CorrectionHistoryView> correctionHistory(UUID orgId, UUID reviewId) {
         Review review = requireReview(orgId, reviewId);
-        requireCapability(review.getChannelId());
         return feedback.correctionHistory(review.getId()).stream()
                 .map(a -> new TriageFeedbackRequests.CorrectionHistoryView(a.getKind().name(),
                         name(a.getTierFrom()), name(a.getTierTo()), name(a.getShownTier()),
@@ -163,10 +173,12 @@ public class ChannelReviewFeedbackService {
             throw ApiException.badRequest("조치 종류가 필요합니다.");
         }
         Review review = requireReview(orgId, reviewId);
-        if (!requireCapability(review.getChannelId()).permits(kind)) {
-            // Contract §2.2: a REPLY_* on a channel with no reply flow is refused, not stored with a
-            // flag. Coupang has no reply feature at all; recording one would be the fake the contract
-            // forbids by name.
+        // Two questions, and only the second is the channel's. 조치 시작/완료/불필요 are statements
+        // about what this seller did and are recordable for any review this org holds. A REPLY_* is a
+        // claim that a reply exists on a channel — contract §2.2 refuses it where no reply flow does,
+        // rather than storing it with a flag, because that is the fake the contract forbids by name.
+        if (!kind.isSellerAct()
+                && !ReviewTriageChannelCapability.of(channelCodeOf(review.getChannelId())).permits(kind)) {
             throw ApiException.badRequest("이 채널에서는 기록할 수 없는 조치 종류입니다.");
         }
         TriageAction ignored = feedback.act(orgId, reviewId, review.getRating(), review.getBody(), kind, actorId,
@@ -280,7 +292,6 @@ public class ChannelReviewFeedbackService {
      */
     private void requireAddressableFrom(UUID orgId, UUID accountId, UUID reviewId) {
         SellerAccount account = requireAccount(orgId, accountId);
-        requireCapability(account.getChannelId());
         Review review = requireReview(orgId, reviewId);
         if (!account.getChannelId().equals(review.getChannelId())) {
             throw ApiException.notFound("상품평을 찾을 수 없습니다.");
@@ -299,6 +310,10 @@ public class ChannelReviewFeedbackService {
      * is the one already on the review. The org owns the record; a judgment and an act are statements
      * that org makes about it, and neither of them is sent anywhere.
      */
+    private String channelCodeOf(UUID channelId) {
+        return channelId == null ? null : channels.findById(channelId).map(Channel::getCode).orElse(null);
+    }
+
     private Review requireReview(UUID orgId, UUID reviewId) {
         return reviews.findByIdAndOrgId(reviewId, orgId)
                 .orElseThrow(() -> ApiException.notFound("상품평을 찾을 수 없습니다."));

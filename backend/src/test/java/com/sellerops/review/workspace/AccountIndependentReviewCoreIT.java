@@ -272,6 +272,49 @@ class AccountIndependentReviewCoreIT {
         assertThat(read.detail(org, acquired.getId()).sellerAccountId()).isNull();
     }
 
+    // ── Core Channel Boundary v1: the channel does not gate what a person concluded ──────────────
+
+    @Test
+    @DisplayName("a GMARKET review — no account AND outside the triage contract — still judges and acts")
+    void theUnsupportedChannelKeepsTheCoreStatements() {
+        UUID gmarket = channel("GMARKET", "G마켓").getId();
+        Review uploaded = review(gmarket, 2, "포장이 찢어진 채로 왔습니다");
+        assertThat(accounts.findAllByOrgIdAndChannelId(org, gmarket)).isEmpty();
+
+        // It opens.
+        assertThat(read.detail(org, uploaded.getId()).body()).isEqualTo("포장이 찢어진 채로 왔습니다");
+        assertThat(workspace.context(org, uploaded.getId()).decisionRef())
+                .isEqualTo("review:" + uploaded.getId());
+
+        // The seller's own judgment, the response decision, and the act they took.
+        assertThat(write.correct(org, uploaded.getId(),
+                new TriageFeedbackRequests.Correction("WATCH", null), SELLER).correctedTier())
+                .isEqualTo("WATCH");
+        assertThat(decide.decide(org, uploaded.getId(), "MONITOR",
+                        "cmd-" + UUID.randomUUID(), SELLER).disposition())
+                .isEqualTo(TriageDisposition.MONITOR.name());
+        write.act(org, uploaded.getId(), TriageActionKind.ACTION_COMPLETED, SELLER);
+
+        assertThat(workspace.log(org, uploaded.getId()))
+                .extracting(e -> ReviewDecisionLogKind.valueOf(e.kind()))
+                .containsExactlyInAnyOrder(ReviewDecisionLogKind.SELLER_JUDGMENT_SET,
+                        ReviewDecisionLogKind.ACTION_CHOSEN,
+                        ReviewDecisionLogKind.ACTION_RECORDED);
+    }
+
+    @Test
+    @DisplayName("and the channel still gates what a CHANNEL produces — a reply claim on GMARKET is refused")
+    void theUnsupportedChannelStillRefusesAChannelClaim() {
+        UUID gmarket = channel("GMARKET", "G마켓").getId();
+        Review uploaded = review(gmarket, 2, "본문");
+
+        assertThatThrownBy(() -> write.act(org, uploaded.getId(), TriageActionKind.REPLY_SUBMITTED, SELLER))
+                .isInstanceOf(ApiException.class);
+        // No reply work either: the channel has no reply flow and this org has no account on it.
+        assertThat(read.detail(org, uploaded.getId()).replyWork()).isNull();
+        assertThat(actions.findByReviewIdOrderByActedAtDesc(uploaded.getId())).isEmpty();
+    }
+
     // ── the old address still answers exactly as it did ──────────────────────────────────────────
 
     @Test
