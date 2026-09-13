@@ -2656,6 +2656,23 @@ export interface ChannelMetricRow {
   reviews: number;
   negativeReviews: number;
   countedInReviews: boolean;
+  /**
+   * Whether this org holds a CONNECTED account on the channel — the account fact, from the server.
+   *
+   * Read rather than inferred. `hasAnyConnectedChannel` used to derive it from the three data states,
+   * a proxy that held only while a row could not exist without a connection — which stopped being
+   * true the moment an org uploaded its reviews (`POST /api/uploads` takes a channel and no account).
+   */
+  connected: boolean;
+  /**
+   * Whether this channel is one the product offers to connect at all (`ProductChannels`).
+   *
+   * A data-bearing channel outside that set appears in this table so its rows are not erased, and
+   * this flag is how a surface avoids offering a connection that does not exist. It is NOT a
+   * capability claim: Attention support and reply/execution capability are separate questions with
+   * separate gates, and neither is answered here.
+   */
+  connectable: boolean;
 }
 
 /** A channel left out of a total, with the seller-facing reason the backend chose. */

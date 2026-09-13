@@ -21,6 +21,15 @@ import com.sellerops.coverage.ChannelDataState;
  * dropped from the headline, so 운영 숫자 said 미답변 1 while 문의 and 리포트 said 22 for the same
  * words. The rule is not relaxed — it is asked with the operand it was written for: rows we hold,
  * not rows that arrived.
+ *
+ * <p><b>{@code connected} and {@code connectable} are two facts, and neither is a data state.</b>
+ * Until Data-bearing Channel Home v1 the frontend derived «has this seller connected anything» from
+ * the three enums above — a proxy that worked only while a row could not exist without a connection,
+ * which stopped being true the moment an org uploaded its reviews. {@code connected} is the account
+ * fact, read from the coverage row that already carries it. {@code connectable} is whether this
+ * channel is one the product offers to connect at all ({@code ProductChannels}); a data-bearing
+ * channel outside that set appears here so its rows are not erased, and this flag is how a surface
+ * avoids offering a connection that does not exist.
  */
 public record ChannelMetricRow(String channelCode, String channelNameKo,
                                ChannelDataState orderState, long revenue, long orders,
@@ -29,5 +38,7 @@ public record ChannelMetricRow(String channelCode, String channelNameKo,
                                boolean countedInInquiries,
                                boolean countedInUnansweredNow,
                                ChannelDataState reviewState, long reviews, long negativeReviews,
-                               boolean countedInReviews) {
+                               boolean countedInReviews,
+                               boolean connected,
+                               boolean connectable) {
 }

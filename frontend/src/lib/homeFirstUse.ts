@@ -52,7 +52,6 @@ export interface HomeFirstUseState {
   readonly connectable: readonly string[];
 }
 
-const SILENT: ReadonlySet<ChannelDataState> = new Set<ChannelDataState>(["NOT_CONNECTED", "NOT_SUPPORTED"]);
 
 /**
  * **Has this seller connected anything yet?** — the same question {@link homeFirstUseState} already
@@ -63,10 +62,13 @@ const SILENT: ReadonlySet<ChannelDataState> = new Set<ChannelDataState>(["NOT_CO
  * started to: the copy read the three state fields directly while this module reads them through
  * {@link typesOf}. One derivation now ({@link connectedRowsOf}), two names.
  *
- * <b>It asks its own question and no longer borrows the first-use kind.</b> Those were the same
- * question until an org could hold rows with nothing connected; now «is anything connected» and «has
- * this seller got anything at all» have different answers for an org that uploads its reviews, and
- * the sentence this boolean chooses (「아직 연결된 채널이 없습니다」) is about the first one.
+ * <b>It asks the server, and no longer infers.</b> This used to read the three data-state enums,
+ * which answered the question only while a row could not exist without a connection — an assumption
+ * that stopped being true the moment an org uploaded its reviews, and stopped being true in the enums
+ * themselves once a held row survived the connection branch of `ChannelCoverageService.stateOf`.
+ * `connected` is the account fact, computed once on the server from the coverage row that already
+ * carries it, so the sentence this boolean chooses (「아직 연결된 채널이 없습니다」) is about connections
+ * and nothing else.
  *
  * <b>Two states mean "nothing is arriving from here", and only one of them is about connection.</b>
  * `NOT_CONNECTED` is the seller not having connected the channel; `NOT_SUPPORTED` is this product
@@ -76,7 +78,7 @@ const SILENT: ReadonlySet<ChannelDataState> = new Set<ChannelDataState>(["NOT_CO
  * uses this to choose a colour — never to tell a seller their channels are disconnected.
  */
 export function hasAnyConnectedChannel(rows: readonly ChannelMetricRow[]): boolean {
-  return connectedRowsOf(rows).length > 0;
+  return rows.some((row) => row.connected);
 }
 const OBSERVED: ReadonlySet<ChannelDataState> = new Set<ChannelDataState>(["OBSERVED_FRESH", "ZERO"]);
 
@@ -87,11 +89,6 @@ function typesOf(row: ChannelMetricRow): ReadonlyArray<{ type: "ORDER" | "INQUIR
     { type: "INQUIRY", state: row.inquiryState, count: row.inquiries },
     { type: "REVIEW", state: row.reviewState, count: row.reviews },
   ];
-}
-
-/** The rows this seller has actually connected something on. One derivation, two readers. */
-function connectedRowsOf(rows: readonly ChannelMetricRow[]): readonly ChannelMetricRow[] {
-  return rows.filter((row) => typesOf(row).some((t) => !SILENT.has(t.state)));
 }
 
 /**
@@ -106,13 +103,19 @@ function holdsAnything(rows: readonly ChannelMetricRow[]): boolean {
 }
 
 export function homeFirstUseState(rows: readonly ChannelMetricRow[]): HomeFirstUseState {
-  const connectedRows = connectedRowsOf(rows);
-  // What this product can take off the seller's hands, across every channel on the table — a data type
-  // is delegable when at least one channel offers a path for it. Never a written list: a channel whose
-  // review collection this product does not have must not appear as a review promise.
+  const connectedRows = rows.filter((row) => row.connected);
+  // Both of the lists below answer «what could you connect, and what would that get you», so both are
+  // asked of CONNECTABLE channels only. A channel that carries rows because the seller uploaded them
+  // is not an option behind 「어디를 연결하지?」 and its data types are not a promise this product can
+  // make — Core data presence is not connector availability, and this is where the two would blur.
+  const offerable = rows.filter((row) => row.connectable);
+  // What this product can take off the seller's hands — a data type is delegable when at least one
+  // connectable channel offers a path for it. Never a written list: a channel whose review collection
+  // this product does not have must not appear as a review promise.
   const delegable = (["ORDER", "INQUIRY", "REVIEW"] as const).filter((type) =>
-    rows.some((row) => typesOf(row).some((t) => t.type === type && t.state !== "NOT_SUPPORTED")));
-  const connectable = rows.filter((row) => !connectedRows.includes(row)).map((row) => row.channelNameKo || row.channelCode);
+    offerable.some((row) => typesOf(row).some((t) => t.type === type && t.state !== "NOT_SUPPORTED")));
+  const connectable = offerable.filter((row) => !row.connected)
+    .map((row) => row.channelNameKo || row.channelCode);
   if (connectedRows.length === 0) {
     // Nothing connected is not the same as nothing here. With rows in hand the honest home is the
     // ordinary one — the work is real and reachable, and every surface it links to is org-scoped.

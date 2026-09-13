@@ -114,6 +114,12 @@ public class OperationsHomeService {
         return new OperationsHomeView(
                 reviewAttention(orgId),
                 repeatedProblems(orgId, on),
+                // Deliberately NOT widened to data-bearing channels. This feeds 최근 수집 상태, which
+                // is about channels a seller connects and can act on — and a widened list rendered
+                // 「G마켓/옥션 · 아직 연결되지 않았습니다」 on an org holding an uploaded G마켓 review,
+                // which is a connect affordance for a connection that does not exist. Core data
+                // presence belongs in the figures (the overview's channel table); it does not belong
+                // in a collection status a seller cannot change.
                 coverage.coverage(orgId, ProductChannels.VISIBLE_CODES),
                 preparedWork(orgId));
     }

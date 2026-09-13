@@ -250,12 +250,14 @@ public class ChannelCoverageService implements OrderStoreFreshness {
      * report {@link ChannelDataState#ZERO} — which is the single value that lets an answer say
      * "없습니다".
      *
-     * <p><b>Two refusals are built into the first step.</b> An UNDECLARED capability never produces
+     * <p><b>Three refusals are built in, and two of them are the same refusal.</b> An UNDECLARED capability never produces
      * {@code NOT_SUPPORTED} — it falls through and is answered by connection and freshness like any
      * other. And an UNSUPPORTED capability we nonetheless hold rows for is NOT reported as
      * "제공하지 않습니다" either: NAVER has no review API and this org holds 4,340 NAVER reviews,
      * acquired through an approved export path, and a sentence that erases them to state a true fact
-     * about the API is a worse answer than the one it replaced.
+     * about the API is a worse answer than the one it replaced. The third is the connection branch
+     * saying the same thing about the same rows: an org that uploaded its reviews holds them whether
+     * or not it ever connected anything.
      */
     static ChannelDataState stateOf(Support support, boolean connected, SellerAccount account,
                                     boolean routineEnabled, Instant lastSuccess, SyncSchedule schedule,
@@ -265,7 +267,15 @@ public class ChannelCoverageService implements OrderStoreFreshness {
                     : ChannelDataState.NOT_SUPPORTED;
         }
         if (account == null) {
-            return ChannelDataState.NOT_CONNECTED;
+            // The SAME refusal as the branch above, one step later, and it was missing. Rows can reach
+            // this org without a connection at all — `POST /api/uploads` is addressed by channel and
+            // takes no account, so every manual CSV and every seller-center export lands here. Measured
+            // 2026-09-13: an org holding two uploaded Cafe24 reviews reported `REVIEW NOT_CONNECTED`,
+            // and the Home read that as «this seller has nothing» and showed them the first-use screen.
+            // A sentence that erases rows we hold to state a true fact about connection is the worse
+            // answer, which is exactly what the paragraph above already says about capability.
+            return rows > 0 ? ChannelDataState.OBSERVED_FRESHNESS_UNPROVEN
+                    : ChannelDataState.NOT_CONNECTED;
         }
         if (!connected) {
             return ChannelDataState.BLOCKED;

@@ -1210,4 +1210,14 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
                                       @Param("productId") UUID productId,
                                       @Param("from") Instant from,
                                       @Param("toExclusive") Instant toExclusive);
+
+    /**
+     * Every channel id this org holds a review row on — the Core-data-presence question
+     * ({@code OrgChannelVisibility}).
+     *
+     * <p>Ids rather than codes so the caller resolves names through the catalogue it already
+     * reads, and distinct because the question is «which channels», not «how many rows».
+     */
+    @Query("select distinct r.channelId from Review r where r.orgId = :orgId and r.channelId is not null")
+    List<UUID> findDistinctChannelIdsByOrgId(@Param("orgId") UUID orgId);
 }

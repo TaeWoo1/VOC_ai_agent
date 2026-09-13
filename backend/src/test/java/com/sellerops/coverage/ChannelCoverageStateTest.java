@@ -67,6 +67,25 @@ class ChannelCoverageStateTest {
     }
 
     @Test
+    @DisplayName("rows we hold survive the connection branch — an upload is not a connection, and not nothing")
+    void heldRowsSurviveTheConnectionBranch() {
+        // The same refusal the UNSUPPORTED branch already makes, one step later. `POST /api/uploads` is
+        // addressed by channel and takes no account, so a manual CSV lands here. Measured 2026-09-13:
+        // an org holding two uploaded Cafe24 reviews reported REVIEW NOT_CONNECTED, and the Home read
+        // that as «this seller has nothing» and showed them the first-use screen.
+        assertThat(ChannelCoverageService.stateOf(ChannelCoverageService.Support.SUPPORTED, false, null,
+                false, null, null, 2, NOW))
+                .isEqualTo(ChannelDataState.OBSERVED_FRESHNESS_UNPROVEN);
+        // And with nothing held it is still the connection answer — the remedy is still 「연결해 주세요」.
+        assertThat(ChannelCoverageService.stateOf(ChannelCoverageService.Support.SUPPORTED, false, null,
+                false, null, null, 0, NOW))
+                .isEqualTo(ChannelDataState.NOT_CONNECTED);
+        // What it must never become is a measured absence: nobody collected anything here.
+        assertThat(ChannelCoverageService.stateOf(ChannelCoverageService.Support.SUPPORTED, false, null,
+                false, null, null, 2, NOW).cannotProveAbsence()).isTrue();
+    }
+
+    @Test
     @DisplayName("ZERO is the only measured absence, and it takes a live routine to earn")
     void zeroMustBeEarned() {
         assertThat(ChannelCoverageService.stateOf(ChannelCoverageService.Support.SUPPORTED, true, account(ChannelStatus.CONNECTED),

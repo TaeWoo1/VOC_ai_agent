@@ -2,10 +2,19 @@ import { describe, expect, it } from "vitest";
 import { hasAnyConnectedChannel, homeFirstUseState } from "./homeFirstUse";
 import type { ChannelMetricRow } from "./types";
 
-function row(orderState: string, inquiryState: string, reviewState: string): ChannelMetricRow {
+/**
+ * One channel row. `connected` is the SERVER's account fact and is now a parameter rather than
+ * something these states imply — Data-bearing Channel Home v1 separated the two, because a row can
+ * exist with nothing connected (an uploaded review) and a connection can exist with no rows.
+ * `connectable` defaults true: these fixtures are the product's own three unless a test says otherwise.
+ */
+function row(orderState: string, inquiryState: string, reviewState: string,
+             connected = true): ChannelMetricRow {
   return {
     channelCode: "X",
     channelNameKo: "채널",
+    connected,
+    connectable: true,
     orderState,
     revenue: 0,
     orders: 0,
@@ -21,13 +30,12 @@ function row(orderState: string, inquiryState: string, reviewState: string): Cha
   } as unknown as ChannelMetricRow;
 }
 
-describe("hasAnyConnectedChannel — one derivation, shared with homeFirstUseState (Pilot Readiness Gate v1 §4)", () => {
-  it("a brand-new account — every row NOT_CONNECTED — has connected nothing", () => {
+describe("hasAnyConnectedChannel — the account fact, not an inference from data states", () => {
+  it("a brand-new account has connected nothing", () => {
     expect(
       hasAnyConnectedChannel([
-        row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_SUPPORTED"),
-        row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_CONNECTED"),
-        row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_SUPPORTED"),
+        row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_SUPPORTED", false),
+        row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_CONNECTED", false),
       ]),
     ).toBe(false);
   });
@@ -42,6 +50,18 @@ describe("hasAnyConnectedChannel — one derivation, shared with homeFirstUseSta
 
   it("BLOCKED is a connection with a problem, not an absent connection", () => {
     expect(hasAnyConnectedChannel([row("BLOCKED", "NOT_CONNECTED", "NOT_SUPPORTED")])).toBe(true);
+  });
+
+  /**
+   * The reason this stopped being derived from the enums. A held row now survives the connection
+   * branch of `ChannelCoverageService.stateOf` (an uploaded review is real whether or not anything
+   * was connected), so `OBSERVED_FRESHNESS_UNPROVEN` no longer implies an account — and reading it as
+   * one would tell a seller they had connected a channel they never connected.
+   */
+  it("rows without a connection are rows, not a connection", () => {
+    expect(hasAnyConnectedChannel([
+      { ...row("NOT_CONNECTED", "NOT_CONNECTED", "OBSERVED_FRESHNESS_UNPROVEN", false), reviews: 2 },
+    ])).toBe(false);
   });
 
   it("no rows answers false — and the caller uses it only to pick a colour", () => {
@@ -66,7 +86,8 @@ describe("hasAnyConnectedChannel — one derivation, shared with homeFirstUseSta
  */
 describe("the three-state rule, shared with agent-runtime's SellerReadiness", () => {
   it("nothing connected ⇒ NO_CHANNEL", () => {
-    expect(homeFirstUseState([row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_SUPPORTED")]).kind).toBe("NO_CHANNEL");
+    expect(homeFirstUseState([row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_SUPPORTED", false)]).kind)
+      .toBe("NO_CHANNEL");
   });
 
   it("connected and holding nothing ⇒ NO_DATA — and NOT_SUPPORTED alone is not disconnection", () => {
@@ -89,12 +110,20 @@ describe("the three-state rule, shared with agent-runtime's SellerReadiness", ()
    * `reviews=2, reviewState=NOT_CONNECTED` and this derivation answered `NO_CHANNEL`, so the home
    * told a seller with work waiting that they had not started.
    */
-  /** A channel nobody connected, carrying rows this org uploaded — the measured shape. */
+  /**
+   * A channel nobody connected, carrying rows this org uploaded — the measured shape.
+   *
+   * The review state is `OBSERVED_FRESHNESS_UNPROVEN` because that is now what the server says for
+   * rows held without a connection: they are real and their freshness cannot be proven. `connected`
+   * is false, which is the separate fact.
+   */
   const uploadedOnto = (reviews: number): ChannelMetricRow =>
-    ({ ...row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_CONNECTED"), reviews }) as ChannelMetricRow;
+    ({ ...row("NOT_CONNECTED", "NOT_CONNECTED",
+              reviews > 0 ? "OBSERVED_FRESHNESS_UNPROVEN" : "NOT_CONNECTED", false),
+       reviews }) as ChannelMetricRow;
 
   it("is WORKING when rows are held and nothing is connected — an upload is not a connection", () => {
-    const state = homeFirstUseState([uploadedOnto(2), row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_SUPPORTED")]);
+    const state = homeFirstUseState([uploadedOnto(2), row("NOT_CONNECTED", "NOT_CONNECTED", "NOT_SUPPORTED", false)]);
     expect(state.kind).toBe("WORKING");
     // And still no connections: the list is of connections, and there are none to name.
     expect(state.connected).toEqual([]);

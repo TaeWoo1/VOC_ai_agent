@@ -5,6 +5,7 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
 import com.sellerops.common.SyntheticDataVisibility;
 import com.sellerops.coverage.ChannelCoverageService;
+import com.sellerops.channel.ProductChannels;
 import com.sellerops.coverage.ChannelDataState;
 import com.sellerops.coverage.dto.ChannelCoverageRow;
 import com.sellerops.dashboard.metrics.dto.ChannelMetricRow;
@@ -160,7 +161,12 @@ public class OperationsMetricsService {
             channelRows.add(new ChannelMetricRow(code, channel.getNameKo(),
                     orderState, order[1], order[0], countOrders,
                     inquiryState, inquiry[0], unansweredHeld, countInquiries, countUnansweredNow,
-                    reviewState, review[0], review[1], countReviews));
+                    reviewState, review[0], review[1], countReviews,
+                    // Two facts, neither of them a data state. `connected` is read from the coverage
+                    // rows that already carry it rather than inferred from the three enums above —
+                    // that inference held only while a row could not exist without a connection.
+                    connectedOn(coverageRows, code),
+                    ProductChannels.isVisible(code)));
 
             accumulate(totals, countOrders, countInquiries, countReviews, order, inquiry, review);
             accumulate(priorTotals, countOrders, countInquiries, countReviews,
@@ -262,6 +268,17 @@ public class OperationsMetricsService {
         return rows.stream().anyMatch(row -> row.countedInUnansweredNow()
                 && row.inquiryState() != ChannelDataState.OBSERVED_FRESH
                 && row.inquiryState() != ChannelDataState.ZERO);
+    }
+
+    /** Whether this org holds a CONNECTED account on the channel, per the coverage rows already read. */
+    private static boolean connectedOn(Map<String, ChannelCoverageRow> rows, String code) {
+        for (String dataType : new String[] {"ORDER_SUMMARY", "INQUIRY", "REVIEW"}) {
+            ChannelCoverageRow row = rows.get(key(code, dataType));
+            if (row != null && row.connected()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static long unansweredNow(Map<String, ChannelCoverageRow> rows, String code) {

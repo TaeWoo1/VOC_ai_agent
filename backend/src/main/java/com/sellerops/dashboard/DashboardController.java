@@ -3,7 +3,7 @@ package com.sellerops.dashboard;
 import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.channel.ChannelResponse;
 import com.sellerops.channel.ChannelService;
-import com.sellerops.channel.ProductChannels;
+import com.sellerops.channel.OrgChannelVisibility;
 import com.sellerops.dashboard.dto.DashboardSummaryResponse;
 import com.sellerops.dashboard.dto.OverviewResponse;
 import com.sellerops.dashboard.insights.OperationsInsightsService;
@@ -24,14 +24,17 @@ public class DashboardController {
     private final ChannelService channelService;
     private final OperationsMetricsService metricsService;
     private final OperationsInsightsService insightsService;
+    private final OrgChannelVisibility visibleChannels;
 
     public DashboardController(DashboardService dashboardService, ChannelService channelService,
                                OperationsMetricsService metricsService,
-                               OperationsInsightsService insightsService) {
+                               OperationsInsightsService insightsService,
+                               OrgChannelVisibility visibleChannels) {
         this.dashboardService = dashboardService;
         this.channelService = channelService;
         this.metricsService = metricsService;
         this.insightsService = insightsService;
+        this.visibleChannels = visibleChannels;
     }
 
     /**
@@ -42,7 +45,10 @@ public class DashboardController {
     public OverviewResponse overview(@AuthenticationPrincipal AuthPrincipal principal,
                                      @RequestParam(required = false) Integer days) {
         OperationsMetricsResponse metrics =
-                metricsService.metrics(principal.orgId(), ProductChannels.VISIBLE_CODES, days);
+                // The connectable three PLUS any channel this org actually holds rows on. A manual
+                // upload can land on a channel the product cannot connect, and a screen that answers
+                // «does this seller have anything» from the connectable list alone cannot see it.
+                metricsService.metrics(principal.orgId(), visibleChannels.codesFor(principal.orgId()), days);
         return new OverviewResponse(metrics,
                 insightsService.insights(principal.orgId(), metrics,
                         dashboardService.topProductIssues(principal.orgId())));

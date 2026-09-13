@@ -68,6 +68,7 @@ function row(over: Partial<ChannelMetricRow> = {}): ChannelMetricRow {
     orderState: "OBSERVED_FRESH", revenue: 1, orders: 1, countedInOrders: true,
     inquiryState: "OBSERVED_FRESH", inquiries: 1, unansweredInquiries: 1, countedInInquiries: true, countedInUnansweredNow: true,
     reviewState: "OBSERVED_FRESH", reviews: 1, negativeReviews: 0, countedInReviews: true,
+    connected: true, connectable: true,
     ...over,
   };
 }
@@ -75,7 +76,7 @@ function row(over: Partial<ChannelMetricRow> = {}): ChannelMetricRow {
 /** Every data type unconnected — a brand-new account's table. */
 const NOT_CONNECTED = row({
   orderState: "NOT_CONNECTED", orders: 0, revenue: 0, inquiryState: "NOT_CONNECTED", inquiries: 0,
-  unansweredInquiries: 0, reviewState: "NOT_CONNECTED", reviews: 0,
+  unansweredInquiries: 0, reviewState: "NOT_CONNECTED", reviews: 0, connected: false,
 });
 /** Connected this morning: nothing collected yet on any type. */
 const CONNECTED_EMPTY = row({
