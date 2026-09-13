@@ -69,6 +69,7 @@ where.
 | **Coupang Aside** | optional execution provider behind the same driver interface; acquisition `IMPLEMENTED / LIVE_UNPROVEN` | `docs/agentic_operating_workspace_v2.md` |
 | **Media presence awareness** | `reviews.media_count` + `media_count_observed`; Cafe24 projects `attach_file_urls.length` on the sweep it already runs | `docs/review_media_presence_audit_v1.md` |
 | **Core data presence ≠ connector availability** | a channel this org holds rows on is accounted for on the operations figures whether or not it can be connected | §2 below |
+| **Issue → ActionCandidate** | a repeated problem yields derived action candidates; the seller accepts, edits or defers one, and that decision is recorded as an append-only trail | `docs/issue_action_candidate_v0.md` |
 
 ## NOT implemented, and deliberately so
 
@@ -85,6 +86,40 @@ where.
 - **Cafe24 historical attachments.** The 127 board-4 articles older than the measured window are not
   re-read. There is no backfill: `attachment_count` is null for every row that existed before V102,
   and `media_count_observed` is false for every review promoted before it.
+
+---
+
+## §0-A — IssueActionCandidate, and what it is not (product-owner statement, 2026-09-14)
+
+A repeated problem is a **fact** the extractor holds. What a seller can do about it is a **candidate**
+— derived from that issue on every read, never stored, and carrying no claim about why customers
+complained or what an action would achieve. The seller's answer to a candidate is a **decision**, kept
+apart from the issue's own lifecycle; how they arrived at it is a **trail**, append-only. Execution is
+outside this boundary entirely: a candidate stops at a draft and the draft leaves only by the seller's
+hand.
+
+Four boundaries fix what that means for the pilot.
+
+1. **`IssueActionCandidate` is the canonical product term, and it names the object already shipped as
+   `ImprovementOpportunity`.** One object, one table, one API. The implementation names
+   (`improvement_opportunity`, `OpportunityKind`, `/api/opportunities`, the screen's 「개선 기회」) stay
+   as legacy implementation names and are **not renamed or migrated in this pilot** — renaming would
+   move the schema, the API, the screen and the frozen planner vocabulary while changing no product
+   behaviour.
+2. **This is not the Opportunity Engine.** What is in scope is «the candidate actions for one repeated
+   problem in front of a seller». A future engine that goes looking for opportunities is a different
+   concept that happens to share a word, and nothing here reserves that name for it.
+3. **The Operations Home surfaces a prepared candidate as 준비된 작업, and ranks nothing.** An accepted
+   candidate with a draft is a record somebody wrote, which is the same test the other two prepared
+   kinds already pass. A repeated problem nobody has decided about is **not** prepared work and stays
+   under 반복 문제. When the bounded list is trimmed, each non-empty kind keeps one representative row
+   and the remaining slots follow the existing deterministic order — there is no priority score.
+4. **A candidate's draft has no version history in this pilot.** The current draft plus the
+   decision/edit trail is what is kept; a decision can no longer destroy the seller's text, but an
+   earlier wording is not recoverable. Revisited if the pilot produces evidence that sellers need it.
+
+`actor_id` is recorded on every decision and is not shown on any screen until team/member identity
+exists.
 
 ---
 

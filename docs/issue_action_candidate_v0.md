@@ -13,6 +13,23 @@
 
 ---
 
+## 이름 — product-owner decision (2026-09-14)
+
+**ActionCandidate와 현재의 `ImprovementOpportunity`는 v0에서 같은 객체다.**
+
+- Product canonical term은 **`IssueActionCandidate`**. 제품·기획 문서에서 이 계층을 부르는 이름이다.
+- `ImprovementOpportunity` · `OpportunityKind` · `improvement_opportunity` · `/api/opportunities` ·
+  `opportunity/` 패키지 · 화면의 「개선 기회」는 **legacy implementation name으로 유지**한다.
+- **지금 rename/migration 하지 않는다.** 개명은 스키마 · API · 화면 · 그리고 얼린 planner 어휘
+  (artifact `OPPORTUNITY_LIST` · tool `list_improvement_opportunities` · prompt v15)를 건드리면서
+  제품 행동을 하나도 바꾸지 않는다.
+- 새 domain · table · API를 만들지 않는다. v0의 표면은 이미 있는 그것 하나뿐이다.
+- **미래의 Opportunity Engine과는 별개 개념이다.** 여기서 말하는 것은 「반복 문제 하나에 대해 지금
+  판매자가 할 수 있는 일의 후보」이고, 그 이름이 언젠가 가리킬 수 있는 「기회를 발굴하는 엔진」이 아니다.
+  이름이 같다는 것이 두 개념을 같게 만들지 않으며, 그쪽을 짓게 되는 날 이 문단이 구분선이다.
+
+---
+
 ## 0. 인벤토리 — 이미 있던 것
 
 | 브리프가 물은 것 | 저장소에 있는 것 |
@@ -200,6 +217,23 @@ ActionCandidate        제안   — 저장되지 않는다. (issue, kind)로 매
 - `id`는 **결정 행의 id**다(목적지의 것이 아니라). 한 반복 문제가 두 개의 채택된 초안을 낳으면 둘 다
   같은 이슈로 링크되고, 목적지 id를 쓰면 한 행이 두 번 그려진다.
 
+### type coverage — product-owner decision (2026-09-14)
+
+수는 언제나 총계였고 행은 언제나 bounded sample이었다. 결함은 **잘리는 자리가 build 순서**여서 마지막에
+붙는 종류가 가장 먼저 사라진다는 것이었다 — 실측 4 + 3 + 1에서 그려진 다섯은 리뷰 넷과 문의 하나였고,
+바로 위 문장이 「준비하신 개선 초안 1건」이라고 말하고 있었다. **있다고 말해 놓고 없는 목록을 보여준 것이다.**
+
+**urgency weighting은 하지 않는다.** 리뷰 하나가 반복 문제 하나보다 위라고 정하는 것이 `OperationsHomeView`가
+들지 않기로 한 바로 그 가중치다. 대신 **행이 하나라도 있는 종류는 각각 첫 행을 지키고**, 남은 slot은
+**기존 deterministic ordering** 그대로 채운다. 새 priority score **0**.
+
+- coverage는 **어느 행이 살아남는가**만 정하고 **어디에 서는가**는 정하지 않는다 — 출력은 여전히
+  리뷰 → 문의 → 개선이다.
+- 없는 종류는 만들어 내지 않는다. 채택된 초안이 0인 org의 목록은 이전과 **바이트 동일**하다
+  (실측: 4 + 3 + 0 → `REVIEW_REPLY` ×4 + `INQUIRY_REPLY` ×1, 변경 전과 같다).
+- 상한보다 종류가 많아지면 coverage 자체가 상한에서 멈춘다 — 목록은 자라지 않는다.
+- 종류가 하나뿐이면 예전과 같은 평범한 절단이다.
+
 ---
 
 ## 6. 검증
@@ -231,7 +265,9 @@ trail은 무엇이 append됐는지 잊는 mock으로 단언할 수 없다) 5건 
   (되돌린 뒤의 `status_from`이 다시 null인 것은 규칙대로다 — 되돌림 뒤에는 떠날 standing decision이 없다.)
 - 보류 뒤 다시 채택했을 때 돌아온 것은 새 scaffold가 아니라 **판매자가 고친 제목·본문**.
 - 되돌린 기회는 `검토 전` + `decidedAt: null`.
-- Home: `{reviewRepliesApproved: 4, inquiryDraftsReady: 3, improvementDraftsReady: 1}`.
+- Home: `{reviewRepliesApproved: 4, inquiryDraftsReady: 3, improvementDraftsReady: 1}`이고 type
+  coverage 이후 그려지는 다섯 행은 리뷰 3 · 문의 1 · **개선 1**(순서는 그대로). 채택 0일 때의 목록은
+  리뷰 4 · 문의 1로 변경 전과 동일하다.
 - 브라우저 1440×900@2×: 결정 기록 5행이 순서대로 렌더, **AA 7.11 / 16.56 @13px**, 가로 스크롤 0,
   off-host 0, 실패 요청은 미기동 agent-runtime(8787) 하나뿐.
 - **issue lifecycle 무변경**(ACTING 1 · OBSERVING 24) — 결정은 그것을 건드리지 않는다.
@@ -272,19 +308,20 @@ SQL은 자명하지만 관측되지 않았다고 적어 둔다.
 
 ## 9. 남은 한계 (고치지 않고 보고)
 
-1. **초안의 버전 history는 없다.** trail은 「수정했다 · 언제 · 무엇 위에서」를 남기고 **이전 텍스트는
-   남기지 않는다**. 현재 텍스트는 파괴되지 않으므로 「덮어쓰지 않는다」는 지켜지지만, 세 번 고친 초안의
-   첫 번째 문장은 되살릴 수 없다. reply draft의 append-only version 패턴이 그 답이고 v0에 넣지 않았다.
-2. **Home 행은 5개에서 잘리고 개선 초안이 마지막이다.** 실측에서 4 + 3 + 1 = 8행 중 5행만 그려져
-   `IMPROVEMENT_DRAFT` 행이 잘렸다(수치는 문장에 그대로 나온다). 순서를 바꾸는 것은 리뷰 하나와 반복
-   문제 하나 사이에 가중치를 두는 일이고, `OperationsHomeView`가 명시적으로 금지한 바로 그것이다 ⇒
-   **product-owner 결정**.
+1. **초안의 버전 history는 없다 — product-owner decision으로 v0에서 추가하지 않는다** (2026-09-14).
+   유지되는 것은 **현재 초안 + append-only decision/edit event**뿐이다. 현재 텍스트는 더는 파괴되지
+   않으므로 「덮어쓰지 않는다」는 지켜지고, 수정이 있었다는 사실과 시점도 남는다. 남지 않는 것은 세 번
+   고친 초안의 첫 번째 문장이다. reply draft의 append-only version 패턴이 그 답이고, **파일럿에서
+   edit/recovery가 실제로 필요하다는 evidence가 생기면 재검토**한다.
+2. **Home 목록의 잘림은 type coverage로 닫혔다**(§5). 남는 것은 한 종류 안에서의 절단이다 — 승인된
+   리뷰 답변이 20건이어도 몇 건만 그려지고, 그 「몇 건」을 고르는 것은 여전히 build 순서다.
 3. **첫 실행 잠금은 없다.** 같은 기회의 **첫** 결정 두 개가 동시에 오면 둘 다 잠글 행이 없고,
    직렬화는 unique index가 한다(한쪽이 제약 위반으로 실패). 이후의 모든 결정은 잠금 아래다.
 4. **agent-runtime의 `ImprovementOpportunitySummary`는 `history`를 싣지 않는다.** 의도적이다 —
    Agent lane의 일은 기회를 나열하는 것이지 판매자의 결정 기록을 읽어 주는 것이 아니고, 아무도 묻지
    않은 질문을 위해 payload를 넓히지 않는다.
-5. **`actor_id`는 저장되지만 화면에 나오지 않는다.** 한 org에 사람이 여럿일 때 「누가」가 답이 되며,
-   그때 이름을 보여줄지는 UX 결정이다.
+5. **`actor_id`는 저장되지만 화면에 나오지 않는다 — product-owner decision** (2026-09-14). 저장은
+   유지하고 UI에는 **아직 표시하지 않는다**. team/member identity가 생기는 날 actor display를 연다:
+   그전까지 「누가」의 답은 언제나 그 판매자 자신이고, 자기 이름을 자기에게 돌려주는 줄이다.
 6. **이슈 추출기의 부정문 오탐은 그대로다**(`agentic_report_v1.md`가 닫은 뒤 잔존분). ActionCandidate는
    issue만큼만 참이다.

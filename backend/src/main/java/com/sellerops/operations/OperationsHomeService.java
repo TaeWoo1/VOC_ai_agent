@@ -295,6 +295,50 @@ public class OperationsHomeService {
 
         return new OperationsHomeView.PreparedWork(
                 approvedCount, inquiryReady, improvements.size(),
-                rows.stream().limit(MAX_PREPARED).toList());
+                withTypeCoverage(rows, MAX_PREPARED));
+    }
+
+    /**
+     * Trim the prepared list to {@code limit} rows without letting a whole kind of work disappear.
+     *
+     * <p><b>Why this is not a ranking.</b> The list is built in one fixed order — approved replies,
+     * then inquiry drafts, then improvement drafts — and a plain {@code limit} cut whatever fell past
+     * the cap, which is a weight: measured on the live org at 4 + 3 + 1 rows, the five drawn were four
+     * replies and one inquiry, and the improvement draft the seller had prepared was invisible on the
+     * screen whose sentence above it said the draft existed. Fixing that by reordering would mean
+     * deciding whether one review outranks one repeated problem, and {@link OperationsHomeView} says
+     * that weight does not exist.
+     *
+     * <p>So nothing is ranked. Each kind that has ANY row keeps its first one, and every remaining
+     * slot goes to the same deterministic order as before. The result is emitted in that order too —
+     * coverage decides WHICH rows survive, never where they sit. With fewer rows than the cap this is
+     * the identity, and with more kinds than slots the coverage pass itself stops at the cap rather
+     * than growing the list.
+     *
+     * <p>The counts above are unaffected: they were always totals and the rows were always a bounded
+     * sample. What changes is that the sample can no longer be silent about a kind the sentence names.
+     */
+    static List<OperationsHomeView.PreparedItem> withTypeCoverage(
+            List<OperationsHomeView.PreparedItem> rows, int limit) {
+        if (rows.size() <= limit) {
+            return List.copyOf(rows);
+        }
+        java.util.Set<Integer> chosen = new java.util.LinkedHashSet<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (int i = 0; i < rows.size() && chosen.size() < limit; i++) {
+            if (seen.add(rows.get(i).kind())) {
+                chosen.add(i);
+            }
+        }
+        for (int i = 0; i < rows.size() && chosen.size() < limit; i++) {
+            chosen.add(i);
+        }
+        List<OperationsHomeView.PreparedItem> out = new java.util.ArrayList<>(chosen.size());
+        for (int i = 0; i < rows.size(); i++) {
+            if (chosen.contains(i)) {
+                out.add(rows.get(i));
+            }
+        }
+        return List.copyOf(out);
     }
 }
