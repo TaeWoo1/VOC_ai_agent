@@ -18,6 +18,8 @@ import java.util.UUID;
  * @param evidenceTo the issue's evidence surface — every quote behind this opportunity lives there
  * @param knowledge null for a product improvement review (no sentence to a customer answers it)
  * @param draft present only while ACCEPTED
+ * @param history what the seller has done about this opportunity, oldest first. Empty means nothing
+ *     has been done — the decision itself is {@code status}, and this is how it got there.
  */
 public record OpportunityView(UUID issueId, String kind, String kindLabelKo,
                               String status, String statusLabelKo,
@@ -30,5 +32,6 @@ public record OpportunityView(UUID issueId, String kind, String kindLabelKo,
                               OpportunityKnowledgeView knowledge,
                               String nextActionKo,
                               OpportunityDraftView draft,
+                              List<OpportunityEventView> history,
                               Instant decidedAt) {
 }

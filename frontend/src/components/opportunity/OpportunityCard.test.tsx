@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { OpportunityCard } from "./OpportunityCard";
 import type { OpportunityView } from "../../lib/types";
@@ -35,7 +35,7 @@ function opportunity(over: Partial<OpportunityView> = {}): OpportunityView {
     recommendationKo: "'접착' 관련 안내를 이 상품의 자주 묻는 질문에 추가하는 것을 검토하세요.",
     evidenceTo: "/memory/issue-1",
     knowledge: { scope: "PRODUCT", scopeLabelKo: "이 상품의 상품 지식", type: "USAGE", topicLabelKo: "접착", sources: 2, mentions: 0, excerpts: [] },
-    nextActionKo: "FAQ 초안 준비", draft: null, decidedAt: null,
+    nextActionKo: "FAQ 초안 준비", draft: null, history: [], decidedAt: null,
     ...over,
   };
 }
@@ -132,5 +132,29 @@ describe("개선 기회 카드 — what repeated, why, the evidence, the next ac
     expect(screen.getByRole("button", { name: "되돌리기" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "FAQ 초안 준비" })).toBeNull();
     expect(screen.getByText("보류")).toBeTruthy();
+  });
+
+  it("what the seller decided is drawn in order, with what it rested on", () => {
+    renderCard(opportunity({
+      status: "OPEN", statusLabelKo: "검토 전",
+      history: [
+        { event: "ACCEPTED", eventLabelKo: "채택", statusFrom: null, statusTo: "ACCEPTED", evidenceCount: 5, decidedAt: "2026-09-10T01:00:00Z" },
+        { event: "DISMISSED", eventLabelKo: "보류", statusFrom: "ACCEPTED", statusTo: "DISMISSED", evidenceCount: 6, decidedAt: "2026-09-12T01:00:00Z" },
+        { event: "REOPENED", eventLabelKo: "되돌림", statusFrom: "DISMISSED", statusTo: "OPEN", evidenceCount: null, decidedAt: "2026-09-13T01:00:00Z" },
+      ],
+    }));
+    const items = within(screen.getByLabelText("결정 기록")).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual([
+      "채택 · 2026-09-10 · 근거 리뷰 5건",
+      "보류 · 2026-09-12 · 근거 리뷰 6건",
+      // A decision taken before the trail existed says WHEN, not on what — today's count would be a
+      // measurement dressed as a memory.
+      "되돌림 · 2026-09-13",
+    ]);
+  });
+
+  it("an opportunity nobody has decided about draws no record at all", () => {
+    renderCard(opportunity());
+    expect(screen.queryByLabelText("결정 기록")).toBeNull();
   });
 });

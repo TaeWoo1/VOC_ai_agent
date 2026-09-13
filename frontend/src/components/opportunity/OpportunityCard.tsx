@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/apiClient";
 import { copyText } from "../../lib/clipboard";
-import { count } from "../../lib/format";
+import { count, kstDate } from "../../lib/format";
 import type { OpportunityView } from "../../lib/types";
 import { KnowledgeQuickAdd } from "../knowledge/KnowledgeQuickAdd";
 import { Btn } from "../ui/Btn";
@@ -240,6 +240,38 @@ export function OpportunityCard({
       ) : null}
 
       {error ? <p className="mt-2 text-sm text-bad">{error}</p> : null}
+
+      {/*
+        무엇을 하기로 했나 — the seller's own decisions about this suggestion, oldest first.
+
+        It sits last because it is a record rather than a control, and it is here rather than in the
+        issue's 기록 section because a decision belongs beside the thing it was about: the issue's
+        record is about the PROBLEM (관찰 중 → 조치 중 → …) and this is about one suggestion, and two
+        different subjects in one list is how a seller comes to believe they resolved something they
+        only deferred.
+
+        Nothing is drawn when nothing was decided: an empty trail is the status chip's job.
+      */}
+      {o.history.length > 0 ? (
+        <section className="mt-4 border-t border-line pt-3" aria-label="결정 기록">
+          <h4 className="text-xs font-semibold text-muted">결정 기록</h4>
+          <ul className="mt-1.5 space-y-0.5">
+            {o.history.map((e) => (
+              <li key={`${e.event}-${e.decidedAt}`} className="text-xs text-muted">
+                <span className="font-medium text-ink">{e.eventLabelKo}</span>
+                {" · "}
+                {kstDate(e.decidedAt)}
+                {/*
+                  What the suggestion rested on when the seller decided. Null on decisions taken
+                  before this trail existed — and then the row says when and not on what, rather than
+                  printing today's count as if it had been read back then.
+                */}
+                {e.evidenceCount != null ? ` · 근거 리뷰 ${count(e.evidenceCount)}건` : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </article>
   );
 }

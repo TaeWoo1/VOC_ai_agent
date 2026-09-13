@@ -118,13 +118,30 @@ public record OperationsHomeView(
             long reviewRepliesApproved,
             /** Inquiries awaiting the seller that actually HAVE a draft — phase alone is not a draft. */
             long inquiryDraftsReady,
+            /**
+             * Improvement drafts the seller asked for and that still have an opportunity behind them.
+             *
+             * <p>This is the same test as the other two, applied to a third record: the seller pressed
+             * 채택 (a decision row exists) and a draft body exists. Nothing is derived from 「이 문제는
+             * 조치가 필요해 보인다」 — a repeated problem nobody has decided about is counted under
+             * {@link RepeatedProblems}, never here.
+             *
+             * <p>It is also re-derived before it is counted, so an accepted opportunity whose issue was
+             * since resolved or fell under the repeat threshold drops out rather than asking a seller
+             * to finish work its own workspace no longer offers.
+             */
+            long improvementDraftsReady,
             List<PreparedItem> rows) {
     }
 
     /**
-     * One prepared item. {@code kind} is a closed token — {@code REVIEW_REPLY} or {@code INQUIRY_REPLY} —
-     * and {@code to} is the surface that owns finishing it, so the Home hands work over rather than
-     * becoming a second place to do it.
+     * One prepared item. {@code kind} is a closed token — {@code REVIEW_REPLY}, {@code INQUIRY_REPLY}
+     * or {@code IMPROVEMENT_DRAFT} — and {@code to} is the surface that owns finishing it, so the Home
+     * hands work over rather than becoming a second place to do it.
+     *
+     * <p>{@code id} is the id of the record behind the row, not of the destination: two accepted
+     * opportunities on one repeated problem link to the same issue and would otherwise be one row
+     * twice.
      *
      * <p><b>{@code label} and {@code detail} are separate because one of them repeats.</b> The label is
      * the kind of work and reads the same on every row of that kind; the detail is what tells one row

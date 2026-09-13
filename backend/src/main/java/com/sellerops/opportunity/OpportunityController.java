@@ -23,6 +23,10 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>Identity in the path is {@code (issueId, kind)}: an opportunity has no id of its own. Every
  * mutation re-derives before it writes, so a decision can only be recorded about an opportunity the
  * evidence supports right now. Nothing here sends, publishes, or approves anything.
+ *
+ * <p>Each mutation also appends one row to the opportunity's decision trail, which rides back on the
+ * view — there is no separate history endpoint, because a screen that can render the decision can
+ * always render how it got there and should never be able to show one without the other.
  */
 @RestController
 @RequestMapping("/api/opportunities")
@@ -47,21 +51,21 @@ public class OpportunityController {
     public OpportunityView accept(@AuthenticationPrincipal AuthPrincipal principal,
                                   @PathVariable UUID issueId, @PathVariable OpportunityKind kind,
                                   @RequestParam(required = false) LocalDate referenceDate) {
-        return service.accept(principal.orgId(), issueId, kind, orToday(referenceDate));
+        return service.accept(principal.orgId(), principal.userId(), issueId, kind, orToday(referenceDate));
     }
 
     @PostMapping("/{issueId}/{kind}/dismiss")
     public OpportunityView dismiss(@AuthenticationPrincipal AuthPrincipal principal,
                                    @PathVariable UUID issueId, @PathVariable OpportunityKind kind,
                                    @RequestParam(required = false) LocalDate referenceDate) {
-        return service.dismiss(principal.orgId(), issueId, kind, orToday(referenceDate));
+        return service.dismiss(principal.orgId(), principal.userId(), issueId, kind, orToday(referenceDate));
     }
 
     @PostMapping("/{issueId}/{kind}/restore")
     public OpportunityView restore(@AuthenticationPrincipal AuthPrincipal principal,
                                    @PathVariable UUID issueId, @PathVariable OpportunityKind kind,
                                    @RequestParam(required = false) LocalDate referenceDate) {
-        return service.restore(principal.orgId(), issueId, kind, orToday(referenceDate));
+        return service.restore(principal.orgId(), principal.userId(), issueId, kind, orToday(referenceDate));
     }
 
     @PutMapping("/{issueId}/{kind}/draft")
@@ -69,7 +73,7 @@ public class OpportunityController {
                                        @PathVariable UUID issueId, @PathVariable OpportunityKind kind,
                                        @RequestParam(required = false) LocalDate referenceDate,
                                        @RequestBody OpportunityDraftRequest request) {
-        return service.updateDraft(principal.orgId(), issueId, kind, orToday(referenceDate), request);
+        return service.updateDraft(principal.orgId(), principal.userId(), issueId, kind, orToday(referenceDate), request);
     }
 
     private static LocalDate orToday(LocalDate date) {

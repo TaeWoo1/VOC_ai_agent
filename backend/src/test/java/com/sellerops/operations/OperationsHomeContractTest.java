@@ -85,14 +85,20 @@ class OperationsHomeContractTest {
     }
 
     /**
-     * The prepared list may only describe work some record says exists. Its two counts are named after
-     * the records behind them — an approval that stands, a draft that was written — rather than after
-     * a judgement like 「보낼 준비가 된 것」, which no table answers.
+     * The prepared list may only describe work some record says exists. Its counts are named after the
+     * records behind them — an approval that stands, a draft that was written, an improvement the
+     * seller asked to have prepared — rather than after a judgement like 「보낼 준비가 된 것」, which no
+     * table answers.
+     *
+     * <p>{@code improvementDraftsReady} joined them for exactly that reason and not because repeated
+     * problems needed a place on the Home: an undecided repeated problem is counted under
+     * {@link OperationsHomeView.RepeatedProblems} and must never appear here, because nobody has
+     * prepared anything about it.
      */
     @Test
     void preparedWorkIsNamedAfterTheRecordsBehindIt() {
         assertThat(componentsOf(OperationsHomeView.PreparedWork.class))
-                .contains("reviewRepliesApproved", "inquiryDraftsReady");
+                .contains("reviewRepliesApproved", "inquiryDraftsReady", "improvementDraftsReady");
     }
 
     /**

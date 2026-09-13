@@ -503,7 +503,7 @@ describe("고객운영 메모리 — the issue's opportunities live beside its e
         firstEvidenceOn: null, lastEvidenceOn: null, changeLabelsKo: ["급증"], productId: "p-1", productName: "전선몰딩 1호",
         whyKo: ["「접착 탈락」 근거 리뷰 12건."], recommendationKo: "'접착' 관련 안내를 자주 묻는 질문에 추가하는 것을 검토하세요.",
         evidenceTo: `/memory/${SURGING.id}`, knowledge: { scope: "PRODUCT", scopeLabelKo: "이 상품의 상품 지식", type: "USAGE", topicLabelKo: "접착", sources: 2, mentions: 0, excerpts: [] },
-        nextActionKo: "FAQ 초안 준비", draft: null, decidedAt: null,
+        nextActionKo: "FAQ 초안 준비", draft: null, history: [], decidedAt: null,
       },
     ]);
     renderMemory(`/memory/${SURGING.id}`);

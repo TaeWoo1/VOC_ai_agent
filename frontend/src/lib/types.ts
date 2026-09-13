@@ -2087,13 +2087,14 @@ export interface HomeRepeatedProblems {
 }
 
 /**
- * `kind` is a closed token — `REVIEW_REPLY` or `INQUIRY_REPLY`. `to` is the surface that owns it.
+ * `kind` is a closed token — `REVIEW_REPLY`, `INQUIRY_REPLY` or `IMPROVEMENT_DRAFT`. `to` is the
+ * surface that owns it.
  *
  * `label` is the kind of work and repeats on every row of that kind; `detail` is what tells one row
  * from the next (the product, the inquiry's subject) and is null when neither exists.
  */
 export interface HomePreparedItem {
-  kind: "REVIEW_REPLY" | "INQUIRY_REPLY";
+  kind: "REVIEW_REPLY" | "INQUIRY_REPLY" | "IMPROVEMENT_DRAFT";
   id: string;
   label: string;
   detail: string | null;
@@ -2105,6 +2106,11 @@ export interface HomePreparedItem {
 export interface HomePreparedWork {
   reviewRepliesApproved: number;
   inquiryDraftsReady: number;
+  /**
+   * Improvement drafts the seller accepted and whose opportunity the evidence still supports. Never
+   * a repeated problem nobody has decided about — that is `problems`, and it is not prepared work.
+   */
+  improvementDraftsReady: number;
   rows: HomePreparedItem[];
 }
 
@@ -2794,6 +2800,25 @@ export interface OpportunityDraftView {
   updatedAt: string;
 }
 
+/**
+ * One thing the seller did about this opportunity — 채택 · 수정 · 보류 · 되돌림.
+ *
+ * These are decisions, never outcomes: `ACCEPTED` means the seller asked for a draft, not that the
+ * FAQ was written or that anything reached a customer. What happened to the PROBLEM is the issue
+ * lifecycle's to say, and this vocabulary has no word that could be read as it.
+ *
+ * `evidenceCount` is what the suggestion rested on at that moment, and is null for decisions taken
+ * before the trail existed — then the row says when, not on what.
+ */
+export interface OpportunityEventView {
+  event: "ACCEPTED" | "EDITED" | "DISMISSED" | "REOPENED";
+  eventLabelKo: string;
+  statusFrom: OpportunityStatus | null;
+  statusTo: OpportunityStatus;
+  evidenceCount: number | null;
+  decidedAt: string;
+}
+
 export interface OpportunityView {
   issueId: string;
   kind: OpportunityKind;
@@ -2819,6 +2844,9 @@ export interface OpportunityView {
   nextActionKo: string;
   /** Present only while ACCEPTED. */
   draft: OpportunityDraftView | null;
+  /** Oldest first. Empty means nothing has been decided — `status` is where it ended up. */
+  history: OpportunityEventView[];
+  /** Null while OPEN — whether nothing was ever decided, or a decision was taken back. */
   decidedAt: string | null;
 }
 

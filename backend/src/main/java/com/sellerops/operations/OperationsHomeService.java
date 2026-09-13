@@ -12,6 +12,8 @@ import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.operations.dto.OperationsHomeView;
+import com.sellerops.opportunity.OpportunityService;
+
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.channel.ProductChannels;
@@ -86,6 +88,7 @@ public class OperationsHomeService {
     private final ReviewReplyApprovalRepository replyApprovals;
     private final InquiryWorkItemRepository workItems;
     private final InquiryRepository inquiryRepo;
+    private final OpportunityService opportunities;
 
     public OperationsHomeService(ReviewRepository reviews, ProductRepository products,
                                  SellerAccountRepository accounts, ChannelRepository channels,
@@ -94,7 +97,8 @@ public class OperationsHomeService {
                                  ChannelCoverageService coverage,
                                  ReviewReplyApprovalRepository replyApprovals,
                                  InquiryWorkItemRepository workItems,
-                                 InquiryRepository inquiryRepo) {
+                                 InquiryRepository inquiryRepo,
+                                 OpportunityService opportunities) {
         this.reviews = reviews;
         this.products = products;
         this.accounts = accounts;
@@ -106,6 +110,7 @@ public class OperationsHomeService {
         this.replyApprovals = replyApprovals;
         this.workItems = workItems;
         this.inquiryRepo = inquiryRepo;
+        this.opportunities = opportunities;
     }
 
     @Transactional(readOnly = true)
@@ -121,7 +126,7 @@ public class OperationsHomeService {
                 // presence belongs in the figures (the overview's channel table); it does not belong
                 // in a collection status a seller cannot change.
                 coverage.coverage(orgId, ProductChannels.VISIBLE_CODES),
-                preparedWork(orgId));
+                preparedWork(orgId, on));
     }
 
     // ---- 지금 확인할 리뷰 --------------------------------------------------------------------
@@ -227,7 +232,7 @@ public class OperationsHomeService {
 
     // ---- 준비된 작업 ------------------------------------------------------------------------
 
-    private OperationsHomeView.PreparedWork preparedWork(UUID orgId) {
+    private OperationsHomeView.PreparedWork preparedWork(UUID orgId, LocalDate on) {
         List<ReviewReplyApproval> approved =
                 replyApprovals.findStandingByOrgId(orgId, PageRequest.of(0, MAX_PREPARED));
         long approvedCount = replyApprovals.countStandingByOrgId(orgId);
@@ -257,9 +262,10 @@ public class OperationsHomeService {
             // choose between three rows that said only its name.
             String product = review.getProductId() == null ? null
                     : products.findById(review.getProductId()).map(Product::getName).orElse(null);
-            String on = review.getReceivedAt() == null ? null
+            String receivedOn = review.getReceivedAt() == null ? null
                     : review.getReceivedAt().atZone(ZoneOffset.UTC).toLocalDate().toString();
-            String detail = product == null ? on : (on == null ? product : product + " · " + on);
+            String detail = product == null ? receivedOn
+                    : (receivedOn == null ? product : product + " · " + receivedOn);
             rows.add(new OperationsHomeView.PreparedItem(
                     "REVIEW_REPLY", review.getId(), "승인된 리뷰 답변", detail,
                     channelCodes.get(review.getChannelId()),
@@ -274,7 +280,21 @@ public class OperationsHomeService {
                     "INQUIRY_REPLY", item.getId(), "초안이 준비된 문의", subject, null,
                     "/inquiries/" + item.getInquiryId()));
         }
+        // An improvement draft the seller asked for. Re-derived by the opportunity service before it
+        // gets here, so a draft whose problem stopped repeating is not counted — and an org that has
+        // accepted nothing pays one indexed query for this whole block.
+        List<OpportunityService.PreparedDraft> improvements = opportunities.preparedDrafts(orgId, on);
+        for (OpportunityService.PreparedDraft prepared : improvements.stream().limit(MAX_PREPARED).toList()) {
+            // The repeated problem's own title is what tells one improvement draft from the next, and
+            // it is extractor vocabulary (「접착 · 탈락」) rather than anything a customer wrote.
+            rows.add(new OperationsHomeView.PreparedItem(
+                    "IMPROVEMENT_DRAFT", prepared.decisionId(),
+                    prepared.opportunity().kindLabelKo() + " 초안", prepared.opportunity().issueTitle(),
+                    null, "/memory/" + prepared.opportunity().issueId()));
+        }
+
         return new OperationsHomeView.PreparedWork(
-                approvedCount, inquiryReady, rows.stream().limit(MAX_PREPARED).toList());
+                approvedCount, inquiryReady, improvements.size(),
+                rows.stream().limit(MAX_PREPARED).toList());
     }
 }

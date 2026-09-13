@@ -21,7 +21,7 @@ function problems(over: Partial<HomeRepeatedProblems> = {}): HomeRepeatedProblem
   return { decidable: 1, observing: 19, rows: [], ...over };
 }
 function prepared(over: Partial<HomePreparedWork> = {}): HomePreparedWork {
-  return { reviewRepliesApproved: 4, inquiryDraftsReady: 2, rows: [], ...over };
+  return { reviewRepliesApproved: 4, inquiryDraftsReady: 2, improvementDraftsReady: 0, rows: [], ...over };
 }
 function row(over: Partial<ChannelCoverageRowView> = {}): ChannelCoverageRowView {
   return {
@@ -111,14 +111,28 @@ describe("준비된 작업", () => {
    * 셋째다.
    */
   it("names each prepared record separately and never totals them", () => {
-    const line = preparedLine(prepared()) ?? "";
+    const line = preparedLine(prepared({ improvementDraftsReady: 3 })) ?? "";
     expect(line).toContain("승인하신 리뷰 답변 4건");
     expect(line).toContain("초안이 준비된 문의 2건");
+    expect(line).toContain("준비하신 개선 초안 3건");
     expect(line).not.toContain("6건");
+    // 4 + 2 + 3. A third record joins the sentence; it does not join the arithmetic.
+    expect(line).not.toContain("9건");
+  });
+
+  /**
+   * An accepted improvement is prepared work for the same reason the other two are — the seller
+   * decided and a draft exists. A repeated problem nobody has decided about is NOT: it is counted
+   * under 반복 문제, and counting it here would turn an evidence trickle into a task list.
+   */
+  it("says nothing about improvements until the seller has prepared one", () => {
+    expect(preparedLine(prepared({ reviewRepliesApproved: 0, inquiryDraftsReady: 0 }))).toBeNull();
   });
 
   it("returns nothing when nothing is prepared, so the area cannot grow to fill space", () => {
-    expect(preparedLine(prepared({ reviewRepliesApproved: 0, inquiryDraftsReady: 0 }))).toBeNull();
+    expect(preparedLine(prepared({
+      reviewRepliesApproved: 0, inquiryDraftsReady: 0, improvementDraftsReady: 0,
+    }))).toBeNull();
   });
 });
 

@@ -56,21 +56,44 @@ class OpportunitySafetyFenceTest {
                 "ProductKnowledgeLibraryService", "SellerOperationsKnowledgeService", "KnowledgeCandidate",
                 "ProductKnowledgeIndexer", "KnowledgeSourceRequest", "OrgKnowledgeRequest", "AnswerMemory");
         assertAbsent(forbidden, "the draft reaches the library only through the quick-add the seller presses");
-        // And the only repository this package may SAVE to is its own decision table.
+        // And the only repositories this package may SAVE to are its own two: the seller's decision
+        // and the trail of how it got there. Both are named, and the counts must add up — a third
+        // writer would show as a `.save(` this arithmetic cannot account for.
         for (Path source : javaFiles()) {
             String text = code(source);
             if (text.contains(".save(")) {
                 assertThat(source.getFileName().toString()).isEqualTo("OpportunityService.java");
-                assertThat(text).contains("decisions.save(");
-                assertThat(text.split("\\.save\\(").length - 1).isEqualTo(text.split("decisions\\.save\\(").length - 1);
+                assertThat(text).contains("decisions.save(").contains("trail.save(");
+                assertThat(occurrences(text, ".save("))
+                        .isEqualTo(occurrences(text, "decisions.save(") + occurrences(text, "trail.save("));
             }
         }
     }
 
     @Test
-    @DisplayName("the decision table exists as one migration")
+    @DisplayName("nothing here can delete a decision or a trail row — a seller cannot erase their own decision history by pressing a button")
+    void itDeletesNothing() throws IOException {
+        // Restore used to delete the decision row. Once the trail hangs off that row, deleting it
+        // takes the history with it, so 되돌리기 became a way to erase the record of having decided.
+        // Restore now moves the row to OPEN instead, and this is the guard that keeps it that way.
+        assertAbsent(List.of(".delete(", ".deleteAll", "deleteBy"),
+                "a decision can be taken back; it cannot be unhappened");
+    }
+
+    private static int occurrences(String text, String needle) {
+        int n = 0;
+        for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + needle.length())) {
+            n++;
+        }
+        return n;
+    }
+
+    @Test
+    @DisplayName("the decision table and its trail exist as migrations")
     void migrationExists() {
         assertThat(Files.exists(Paths.get("src/main/resources/db/migration/V94__improvement_opportunity.sql"))).isTrue();
+        assertThat(Files.exists(Paths.get(
+                "src/main/resources/db/migration/V103__improvement_opportunity_decision_trail.sql"))).isTrue();
     }
 
     private static void assertAbsent(List<String> forbidden, String because) throws IOException {

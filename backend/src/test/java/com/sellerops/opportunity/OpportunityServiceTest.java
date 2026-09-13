@@ -32,12 +32,15 @@ class OpportunityServiceTest {
 
     private static final UUID ORG = UUID.randomUUID();
     private static final LocalDate TODAY = LocalDate.of(2026, 9, 4);
+    private static final UUID ACTOR = UUID.randomUUID();
 
     private final ReviewIssueQueryService issues = mock(ReviewIssueQueryService.class);
     private final ProductSignalsService signals = mock(ProductSignalsService.class);
     private final KnowledgeMentionCheck knowledge = mock(KnowledgeMentionCheck.class);
     private final ImprovementOpportunityRepository decisions = mock(ImprovementOpportunityRepository.class);
-    private final OpportunityService service = new OpportunityService(issues, signals, knowledge, decisions);
+    private final OpportunityDecisionEventRepository trail = mock(OpportunityDecisionEventRepository.class);
+    private final OpportunityService service =
+            new OpportunityService(issues, signals, knowledge, decisions, trail);
 
     private final ReviewIssueView adhesion = issue("접착", "탈락", 5, PRODUCT);
 
@@ -47,8 +50,11 @@ class OpportunityServiceTest {
         when(issues.issueView(ORG, adhesion.id(), TODAY)).thenReturn(adhesion);
         when(knowledge.product(ORG, PRODUCT, "접착")).thenReturn(KnowledgeMention.none(2));
         when(decisions.findByOrgIdAndIssueIdIn(eq(ORG), anyCollection())).thenReturn(List.of());
-        when(decisions.findByOrgIdAndIssueIdAndKind(any(), any(), any())).thenReturn(Optional.empty());
+        when(decisions.findWithLockByOrgIdAndIssueIdAndKind(any(), any(), any())).thenReturn(Optional.empty());
         when(decisions.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(trail.findByOrgIdAndOpportunityIdInOrderByDecidedAtAsc(any(), anyCollection()))
+                .thenReturn(List.of());
+        when(trail.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     @Test
@@ -86,7 +92,7 @@ class OpportunityServiceTest {
     @Test
     @DisplayName("accept prepares a draft from facts and remembers it; accepting again keeps the seller's edits")
     void acceptPreparesDraftOnce() {
-        OpportunityView accepted = service.accept(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY);
+        OpportunityView accepted = service.accept(ORG, ACTOR, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY);
         assertThat(accepted.status()).isEqualTo("ACCEPTED");
         assertThat(accepted.draft().title()).startsWith("Q. 접착");
         assertThat(accepted.draft().body()).contains("근거 리뷰 5건").contains("판매자님이 채워 주세요");
@@ -95,16 +101,22 @@ class OpportunityServiceTest {
         verify(decisions).save(saved.capture());
         ImprovementOpportunity row = saved.getValue();
         row.setDraftBody("판매자가 고친 본문");
-        when(decisions.findByOrgIdAndIssueIdAndKind(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT))
+        when(decisions.findWithLockByOrgIdAndIssueIdAndKind(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT))
                 .thenReturn(Optional.of(row));
 
-        OpportunityView again = service.accept(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY);
+        OpportunityView again = service.accept(ORG, ACTOR, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY);
         assertThat(again.draft().body()).isEqualTo("판매자가 고친 본문");
     }
 
     @Test
-    @DisplayName("dismiss drops the draft and hides the row from the default list; restore forgets the decision")
+    @DisplayName("dismiss hides the row from the default list but does not erase what the seller wrote; restore reopens without deleting")
     void dismissAndRestore() {
+        // Rewritten for the V103 contract. Everything this test asserted about what the SELLER SEES is
+        // unchanged and still asserted: dismissed carries no prepared action, drops out of the default
+        // list, appears with includeDismissed, and restore reads as OPEN. What changed is what happens
+        // to the record underneath, and both changes exist so a decision cannot destroy evidence of
+        // itself: the draft text survives a dismissal, and restore no longer deletes the row (which
+        // would cascade the trail away with it).
         ImprovementOpportunity row = new ImprovementOpportunity();
         row.setOrgId(ORG);
         row.setIssueId(adhesion.id());
@@ -113,13 +125,14 @@ class OpportunityServiceTest {
         row.setDraftTitle("t");
         row.setDraftBody("b");
         row.setDecidedAt(Instant.now());
-        when(decisions.findByOrgIdAndIssueIdAndKind(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT))
+        when(decisions.findWithLockByOrgIdAndIssueIdAndKind(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT))
                 .thenReturn(Optional.of(row));
 
-        OpportunityView dismissed = service.dismiss(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY);
+        OpportunityView dismissed = service.dismiss(ORG, ACTOR, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY);
         assertThat(dismissed.status()).isEqualTo("DISMISSED");
         assertThat(dismissed.draft()).isNull();
-        assertThat(row.getDraftBody()).isNull();
+        // 「지금은 보류」 is a decision about the suggestion, not a request to delete sentences.
+        assertThat(row.getDraftBody()).isEqualTo("b");
 
         when(decisions.findByOrgIdAndIssueIdIn(eq(ORG), anyCollection())).thenReturn(List.of(row));
         assertThat(service.list(ORG, TODAY, null, null, false)).extracting(OpportunityView::kind)
@@ -127,16 +140,19 @@ class OpportunityServiceTest {
         assertThat(service.list(ORG, TODAY, null, null, true)).extracting(OpportunityView::status)
                 .containsExactly("DISMISSED", "OPEN");
 
-        OpportunityView restored = service.restore(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY);
+        OpportunityView restored = service.restore(ORG, ACTOR, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY);
         assertThat(restored.status()).isEqualTo("OPEN");
-        verify(decisions).delete(row);
+        // No decision stands, so no date is reported beside one.
+        assertThat(restored.decidedAt()).isNull();
+        assertThat(row.getStatus()).isEqualTo(OpportunityStatus.OPEN);
+        verify(decisions, never()).delete(any());
     }
 
     @Test
     @DisplayName("a decision about a kind the evidence does not yield right now is refused, not recorded")
     void undeliverableKindIsRefused() {
         // 접착 × 탈락 with nothing written yields FAQ, not 상세 보완 — so 상세 보완 cannot be accepted.
-        assertThatThrownBy(() -> service.accept(ORG, adhesion.id(), OpportunityKind.PRODUCT_GUIDE_SUPPLEMENT, TODAY))
+        assertThatThrownBy(() -> service.accept(ORG, ACTOR, adhesion.id(), OpportunityKind.PRODUCT_GUIDE_SUPPLEMENT, TODAY))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("지금 제안되지 않습니다");
         verify(decisions, never()).save(any());
@@ -145,7 +161,7 @@ class OpportunityServiceTest {
     @Test
     @DisplayName("editing a draft needs an accepted row and a non-empty, bounded text")
     void draftEdits() {
-        assertThatThrownBy(() -> service.updateDraft(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY,
+        assertThatThrownBy(() -> service.updateDraft(ORG, ACTOR, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY,
                 new OpportunityDraftRequest("t", "b")))
                 .isInstanceOf(ApiException.class).hasMessageContaining("초안이 준비된 기회");
 
@@ -154,15 +170,15 @@ class OpportunityServiceTest {
         row.setDraftTitle("t");
         row.setDraftBody("b");
         row.setDecidedAt(Instant.now());
-        when(decisions.findByOrgIdAndIssueIdAndKind(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT))
+        when(decisions.findWithLockByOrgIdAndIssueIdAndKind(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT))
                 .thenReturn(Optional.of(row));
-        assertThatThrownBy(() -> service.updateDraft(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY,
+        assertThatThrownBy(() -> service.updateDraft(ORG, ACTOR, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY,
                 new OpportunityDraftRequest("t", "   ")))
                 .isInstanceOf(ApiException.class).hasMessageContaining("모두 적어");
-        assertThatThrownBy(() -> service.updateDraft(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY,
+        assertThatThrownBy(() -> service.updateDraft(ORG, ACTOR, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY,
                 new OpportunityDraftRequest("t", "x".repeat(OpportunityService.BODY_MAX + 1))))
                 .isInstanceOf(ApiException.class).hasMessageContaining("너무 깁니다");
-        OpportunityView edited = service.updateDraft(ORG, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY,
+        OpportunityView edited = service.updateDraft(ORG, ACTOR, adhesion.id(), OpportunityKind.FAQ_SUPPLEMENT, TODAY,
                 new OpportunityDraftRequest(" 새 제목 ", " 새 본문 "));
         assertThat(edited.draft().title()).isEqualTo("새 제목");
         assertThat(edited.draft().body()).isEqualTo("새 본문");
@@ -173,11 +189,11 @@ class OpportunityServiceTest {
     void draftsAreSellerWordsOrFacts() {
         when(knowledge.product(ORG, PRODUCT, "접착"))
                 .thenReturn(new KnowledgeMention(3, 1, List.of("먼지를 닦고 붙이세요.")));
-        OpportunityView guide = service.accept(ORG, adhesion.id(), OpportunityKind.PRODUCT_GUIDE_SUPPLEMENT, TODAY);
+        OpportunityView guide = service.accept(ORG, ACTOR, adhesion.id(), OpportunityKind.PRODUCT_GUIDE_SUPPLEMENT, TODAY);
         assertThat(guide.draft().body()).contains("- 먼지를 닦고 붙이세요.");
         assertThat(guide.recommendationKo()).contains("상품 지식에는 있습니다");
 
-        OpportunityView memo = service.accept(ORG, adhesion.id(), OpportunityKind.PRODUCT_IMPROVEMENT_REVIEW, TODAY);
+        OpportunityView memo = service.accept(ORG, ACTOR, adhesion.id(), OpportunityKind.PRODUCT_IMPROVEMENT_REVIEW, TODAY);
         assertThat(memo.draft().body()).contains("근거 리뷰: 5건").contains("원인을 판단하지 않습니다");
     }
 }

@@ -65,6 +65,9 @@ export function preparedLine(prepared: HomePreparedWork): string | null {
   if (prepared.inquiryDraftsReady > 0) {
     parts.push(`초안이 준비된 문의 ${prepared.inquiryDraftsReady.toLocaleString("ko-KR")}건`);
   }
+  if (prepared.improvementDraftsReady > 0) {
+    parts.push(`준비하신 개선 초안 ${prepared.improvementDraftsReady.toLocaleString("ko-KR")}건`);
+  }
   // Deliberately joined with 「과」 rather than summed: 「4건」과 「2건」은 사실 둘이고, 「6건」은
   // 아무도 읽지 않은 셋째다.
   return parts.length === 0 ? null : `${parts.join(" · ")}이 기다리고 있습니다.`;
