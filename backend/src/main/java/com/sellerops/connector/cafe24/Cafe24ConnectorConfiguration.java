@@ -128,6 +128,29 @@ public class Cafe24ConnectorConfiguration {
         return new Cafe24AnswerSemanticProbe(http);
     }
 
+    /**
+     * The attachment-prevalence probe — three read-only requests that measure whether this mall's
+     * review articles actually carry {@code attach_file_urls}, and how many. Triple-gated exactly like
+     * the answer-semantics probe above: the connector flag, this bean's own flag, and an account id.
+     * Writes nothing anywhere and is on no collection path.
+     */
+    @Bean
+    Cafe24AttachmentPrevalenceProbe cafe24AttachmentPrevalenceProbe(Cafe24HttpClient http) {
+        return new Cafe24AttachmentPrevalenceProbe(http);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.attachment-prevalence.enabled",
+            havingValue = "true")
+    Cafe24AttachmentPrevalenceRunner cafe24AttachmentPrevalenceRunner(
+            Cafe24Authorizer authorizer, Cafe24AttachmentPrevalenceProbe probe,
+            SellerAccountRepository accounts,
+            @Value("${sellerops.connector.cafe24.diagnostic.attachment-prevalence.account-id:}") String accountId,
+            @Value("${sellerops.connector.cafe24.diagnostic.attachment-prevalence.board-no:4}") int boardNo,
+            @Value("${sellerops.connector.cafe24.diagnostic.attachment-prevalence.window-days:365}") int windowDays) {
+        return new Cafe24AttachmentPrevalenceRunner(authorizer, probe, accounts, accountId, boardNo, windowDays);
+    }
+
     @Bean
     @ConditionalOnProperty(name = "sellerops.connector.cafe24.diagnostic.answer-semantics.enabled",
             havingValue = "true")
