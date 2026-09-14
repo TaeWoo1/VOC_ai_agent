@@ -8,7 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useEffect } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { ActionWindowRunView } from "../../lib/actionWindow/contract";
 import { expectNoAxeViolations } from "../../test/axe";
@@ -188,6 +188,22 @@ describe("리뷰 수집 셋업 — 한 걸음, 한 컨트롤", () => {
     await waitFor(() =>
       expect(screen.getByTestId("flow-done")).toHaveTextContent("새로 가져올 상품평이 없었습니다."),
     );
+  });
+
+  it("「그만두기」는 실제로 그만둔다 — 돌고 있는 읽기를 두고 화면만 나가지 않는다", async () => {
+    h.injected = { view: run({ status: "RUNNING", allowedCommands: ["CANCEL_RUN", "FIND_CURRENT_STEP"] }) };
+    view();
+    await screen.findByTestId("flow-busy");
+    fireEvent.click(screen.getByTestId("flow-exit"));
+    expect(h.send).toHaveBeenCalledWith("CANCEL_RUN");
+  });
+
+  it("넘기는 중에는 취소를 보내지 않는다 — 이미 나간 POST는 되돌릴 수 없다", async () => {
+    h.injected = { view: run({ status: "PROCESSING", allowedCommands: ["FIND_CURRENT_STEP"] }) };
+    view();
+    await screen.findByTestId("flow-busy");
+    fireEvent.click(screen.getByTestId("flow-exit"));
+    expect(h.send).not.toHaveBeenCalled();
   });
 
   it("주소로 들어오면 시작은 판매자에게 돌아간다 — 새로고침이 수집이 되지 않는다", async () => {

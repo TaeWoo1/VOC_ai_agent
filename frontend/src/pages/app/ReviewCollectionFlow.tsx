@@ -211,6 +211,17 @@ export function ReviewCollectionFlow() {
 
   const done = step.step === "DONE";
   const back = () => navigate(`/connect/channels/${accountId}`);
+  /**
+   * 「그만두기」가 실제로 그만둔다.
+   *
+   * 누르고 나가면 읽기는 계속 돌고 있었고, 화면만 사라졌다 — 라벨이 하지 않는 일을 말하고 있었던 것이다.
+   * 이제 run이 받을 수 있을 때 취소를 보낸다. 넘기는 중(`handing_off`)에는 취소가 허용되지 않는데, 그것은
+   * 이 계약이 정한 바 그대로다: 이미 나간 POST는 되돌릴 수 없고, 되돌린 척하지도 않는다.
+   */
+  const leave = () => {
+    if (!done && surface.view?.allowedCommands.includes("CANCEL_RUN")) sendRef.current?.("CANCEL_RUN");
+    back();
+  };
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
@@ -221,7 +232,7 @@ export function ReviewCollectionFlow() {
             로그인된 쿠팡 판매자 화면에서 상품평을 가져옵니다. API 키는 필요하지 않습니다.
           </p>
         </div>
-        <Btn variant="ghost" size="sm" onClick={back} data-testid="flow-exit">
+        <Btn variant="ghost" size="sm" onClick={leave} data-testid="flow-exit">
           {done ? "닫기" : "그만두기"}
         </Btn>
       </div>
