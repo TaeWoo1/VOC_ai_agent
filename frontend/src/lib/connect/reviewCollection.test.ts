@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { reviewCardOf } from "./coupangCapabilities";
 import {
   collectedSentence,
   lastScreenRead,
@@ -220,5 +221,50 @@ describe("완료 문장 — 수를 지어내지 않는다", () => {
     const said = collectedSentence({ kind: "UNKNOWN" });
     expect(said).not.toMatch(/\d/);
     expect(said).not.toContain("없었습니다");
+  });
+});
+
+/**
+ * <b>두 종류의 판매자, 두 개의 첫 걸음</b>(product-owner 확인, 2026-09-14).
+ *
+ * 이 화면의 첫 CTA가 판매자의 의도와 맞는지는 두 상태에서만 물으면 된다 — 아직 아무것도 연결하지 않은
+ * 사람과, 계정은 연결돼 있는데 <b>이 브라우저</b>가 처음인 사람. 둘은 같은 화면에서 다른 문장을 받아야 하고,
+ * 그 차이는 문구가 아니라 backend가 보내는 readiness 하나에서 나온다.
+ *
+ * 마켓플레이스 호출 없이 고정한다: 여기서 단언하는 것은 전부 순수 함수의 답이다.
+ */
+describe("첫 화면의 첫 걸음 — 두 종류의 판매자", () => {
+  it("아무것도 연결하지 않은 판매자에게는 「연결」이 첫 걸음이다", () => {
+    // 완전 신규: 도우미도 기기도 없고, 어느 스토어인지도 모르고, 가져온 상품평도 0이다.
+    const card = reviewCardOf({ state: "HELPER_NOT_LINKED", channelCode: "COUPANG" });
+    expect(card).toMatchObject({ kind: "SETUP", primaryLabel: "리뷰 수집 연결하기" });
+    expect(card?.status.label).toBe("연결 필요");
+
+    const first = reviewCollectionStateOf(
+      input({ readiness: { state: "HELPER_NOT_LINKED", channelCode: "COUPANG" }, helperKey: "INSTALL", run: null }),
+    );
+    expect(first.step).toBe("HELPER");
+    expect(first.primary).toEqual({ kind: "HELPER" });
+  });
+
+  it("계정은 연결됐고 이 브라우저만 처음인 판매자에게는 「가져오기」가 첫 걸음이고, 준비는 그 뒤에서 스스로 붙는다", () => {
+    // 카드는 계정의 사실을 말한다 — 이 계정은 연결돼 있다. 브라우저가 처음이라는 것은 카드가 아는 일이
+    // 아니고(그것은 이 PC의 사실이다), 눌렀을 때 흐름의 첫 걸음이 스스로 밝힌다.
+    const card = reviewCardOf({ state: "READY", channelCode: "COUPANG" });
+    expect(card).toMatchObject({ kind: "READY", primaryLabel: "지금 가져오기" });
+
+    const afterPress = reviewCollectionStateOf(
+      input({ readiness: { state: "READY", channelCode: "COUPANG" }, helperKey: "INSTALL", run: null }),
+    );
+    // 복구는 처음부터 다시 하는 것이 아니라, 막힌 그 걸음에서 시작한다.
+    expect(afterPress.step).toBe("HELPER");
+    expect(afterPress.primary).toEqual({ kind: "HELPER" });
+    expect(afterPress.failure).toBeNull();
+  });
+
+  it("도우미가 준비된 뒤에는 두 판매자가 같은 자리에 선다", () => {
+    const ready = reviewCollectionStateOf(input({ helperKey: "CONNECTED", run: null }));
+    expect(ready.step).toBe("SURFACE");
+    expect(ready.busy).toBe(true);
   });
 });
