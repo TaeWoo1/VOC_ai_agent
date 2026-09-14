@@ -3,11 +3,15 @@ package com.sellerops.review.channel;
 import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.review.channel.dto.ChannelReviewAcquisitionReadinessView;
 import com.sellerops.review.channel.dto.ChannelReviewAcquisitionRunResponse;
+import com.sellerops.review.channel.dto.StoreIdentityRequest;
 import java.util.UUID;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -35,6 +39,18 @@ public class ChannelReviewAcquisitionController {
     public ChannelReviewAcquisitionReadinessView readiness(@AuthenticationPrincipal AuthPrincipal principal,
                                                            @PathVariable UUID accountId) {
         return service.readiness(principal.orgId(), accountId);
+    }
+
+    /**
+     * Which store this account is. A PUT because it states a fact about the account, and it answers with
+     * the readiness that fact changed — so a screen that just supplied the missing piece learns whether
+     * anything else is still missing without a second call.
+     */
+    @PutMapping("/store-identity")
+    public ChannelReviewAcquisitionReadinessView setStoreIdentity(@AuthenticationPrincipal AuthPrincipal principal,
+                                                                  @PathVariable UUID accountId,
+                                                                  @Valid @RequestBody StoreIdentityRequest request) {
+        return service.setStoreIdentity(principal.orgId(), accountId, request);
     }
 
     @PostMapping("/review-acquisition-runs")

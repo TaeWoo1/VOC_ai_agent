@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useEffect } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { HelperState } from "../../lib/helper/helperStatus";
 
 const getReviewAcquisitionReadiness = vi.fn();
+const setStoreIdentity = vi.fn();
 vi.mock("../../lib/apiClient", () => ({
-  api: { getReviewAcquisitionReadiness: (id: string) => getReviewAcquisitionReadiness(id) },
+  api: {
+    getReviewAcquisitionReadiness: (id: string) => getReviewAcquisitionReadiness(id),
+    setStoreIdentity: (id: string, v: string) => setStoreIdentity(id, v),
+  },
   getToken: () => "token",
 }));
 
@@ -90,6 +94,30 @@ describe("상품평 가져오기 — the press the channel screen never offered"
     renderSection();
     expect(await screen.findByTestId("acquisition-blocked")).toHaveTextContent("도우미가 준비되면");
     expect((screen.getByTestId("acquisition-start") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  /**
+   * <b>업체코드 is not an API key, and the screen stops asking for one.</b> The vendor code lived only in
+   * the OpenAPI credential form, whose three fields are all required, so browser collection used to
+   * require issuing API keys. The field that answers it is now here.
+   */
+  it("asks for the store code itself when that is what is missing — and offers no API-key detour", async () => {
+    getReviewAcquisitionReadiness.mockResolvedValue({ state: "STORE_IDENTITY_UNKNOWN", channelCode: "COUPANG" });
+    setStoreIdentity.mockResolvedValue({ state: "READY", channelCode: "COUPANG" });
+    renderSection();
+
+    const form = await screen.findByTestId("store-identity-form");
+    expect((screen.getByTestId("acquisition-start") as HTMLButtonElement).disabled).toBe(true);
+    // No trip to the credential wizard, and nothing on screen asks for a key or a secret.
+    expect(screen.queryByRole("link", { name: /쿠팡 연결/ })).toBeNull();
+    expect(document.body.textContent ?? "").not.toMatch(/액세스 키|시크릿|API 키/);
+
+    fireEvent.change(screen.getByLabelText("쿠팡 업체코드"), { target: { value: " A00123456 " } });
+    fireEvent.click(within(form).getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(setStoreIdentity).toHaveBeenCalledWith("acct-1", "A00123456"));
+    // The answer it returns is the readiness it changed — the press becomes available with no reload.
+    await waitFor(() => expect((screen.getByTestId("acquisition-start") as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByTestId("store-identity-form")).toBeNull();
   });
 
   it("says what must be open before the press, and never names what carries the read", async () => {

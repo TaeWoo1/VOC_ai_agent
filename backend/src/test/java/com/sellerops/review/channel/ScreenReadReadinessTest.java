@@ -12,6 +12,7 @@ import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
 import com.sellerops.credential.CredentialVault;
+import com.sellerops.review.channel.dto.StoreIdentityRequest;
 import com.sellerops.selleraccount.AccountSessionSlot;
 import com.sellerops.selleraccount.AccountSessionSlotRepository;
 import com.sellerops.selleraccount.SellerAccount;
@@ -132,6 +133,78 @@ class ScreenReadReadinessTest {
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("화면에서 상품평을 가져오는 기능이 없습니다");
         verify(refs, never()).save(any());
+    }
+
+    /**
+     * <b>업체코드 is not an API key, and this is where the product stops treating them as one thing.</b>
+     *
+     * <p>The only form carrying a vendor code was the OpenAPI credential form, whose three fields are all
+     * required — so a seller who wanted browser collection had to obtain API keys to tell us their store
+     * code. The store identity now lives on the account, and an account that has one is ready with no
+     * credential at all.
+     */
+    @Test
+    @DisplayName("a browser-only account is READY from its store identity alone — no vault, no API keys")
+    void storeIdentityAloneIsEnough() {
+        Channel coupang = channel("COUPANG");
+        SellerAccount a = account(coupang, false);
+        when(accounts.findByIdAndOrgId(a.getId(), ORG)).thenReturn(Optional.of(a));
+        when(channels.findById(coupang.getId())).thenReturn(Optional.of(coupang));
+        when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.of(new AccountSessionSlot()));
+        // No credential anywhere: opening the vault throws, exactly as it does for an account that never
+        // registered one.
+        when(vault.open(ORG, a.getId())).thenThrow(new IllegalStateException("no credential"));
+
+        assertThat(service.readiness(ORG, a.getId()).state()).isEqualTo("STORE_IDENTITY_UNKNOWN");
+
+        assertThat(service.setStoreIdentity(ORG, a.getId(), new StoreIdentityRequest("A00123456")).state())
+                .isEqualTo("READY");
+        assertThat(a.getStoreIdentity()).isEqualTo("A00123456");
+        assertThat(service.readiness(ORG, a.getId()).state()).isEqualTo("READY");
+    }
+
+    @Test
+    @DisplayName("the account's own identity is preferred; the credential stays the fallback for accounts that predate it")
+    void accountIdentityWinsAndTheVaultRemainsTheFallback() {
+        Channel coupang = channel("COUPANG");
+        SellerAccount a = account(coupang, false);
+        when(accounts.findByIdAndOrgId(a.getId(), ORG)).thenReturn(Optional.of(a));
+        when(channels.findById(coupang.getId())).thenReturn(Optional.of(coupang));
+        when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.of(new AccountSessionSlot()));
+        when(vault.open(ORG, a.getId())).thenThrow(new IllegalStateException("not opened"));
+
+        a.setStoreIdentity("A00123456");
+        assertThat(service.readiness(ORG, a.getId()).state()).isEqualTo("READY");
+        // The account answered, so the vault was never asked — an account that declares its own store
+        // does not need a credential to be opened on every render.
+        verify(vault, never()).open(ORG, a.getId());
+    }
+
+    @Test
+    @DisplayName("a store identity is refused when blank or pasted with whitespace, and on a channel with no screen read")
+    void storeIdentityIsValidatedWithoutInventingAFormat() {
+        Channel coupang = channel("COUPANG");
+        SellerAccount a = account(coupang, false);
+        when(accounts.findByIdAndOrgId(a.getId(), ORG)).thenReturn(Optional.of(a));
+        when(channels.findById(coupang.getId())).thenReturn(Optional.of(coupang));
+        when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.of(new AccountSessionSlot()));
+
+        assertThatThrownBy(() -> service.setStoreIdentity(ORG, a.getId(), new StoreIdentityRequest("   ")))
+                .isInstanceOf(ApiException.class).hasMessageContaining("업체코드를 입력");
+        assertThatThrownBy(() -> service.setStoreIdentity(ORG, a.getId(), new StoreIdentityRequest("A001 23456")))
+                .isInstanceOf(ApiException.class).hasMessageContaining("공백");
+        // No format rule is invented — a wrong-but-well-formed code is accepted here and fails closed at
+        // the identity check, which is where the screen can actually be compared.
+        assertThat(service.setStoreIdentity(ORG, a.getId(), new StoreIdentityRequest(" A99999999 ")).state())
+                .isEqualTo("READY");
+        assertThat(a.getStoreIdentity()).isEqualTo("A99999999");
+
+        Channel naver = channel("NAVER");
+        SellerAccount n = account(naver, false);
+        when(accounts.findByIdAndOrgId(n.getId(), ORG)).thenReturn(Optional.of(n));
+        when(channels.findById(naver.getId())).thenReturn(Optional.of(naver));
+        assertThatThrownBy(() -> service.setStoreIdentity(ORG, n.getId(), new StoreIdentityRequest("X1")))
+                .isInstanceOf(ApiException.class).hasMessageContaining("화면에서 상품평을 가져오는 기능이 없습니다");
     }
 
     @Test

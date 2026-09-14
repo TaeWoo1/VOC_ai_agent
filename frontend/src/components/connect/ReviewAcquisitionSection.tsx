@@ -42,6 +42,11 @@ export function ReviewAcquisitionSection({
   // Each press is its own run. The key remounts the runner, which is what mints a new single-use ref;
   // 0 means nobody has pressed yet on this visit.
   const [runKey, setRunKey] = useState(0);
+  // The 업체코드 the seller types when we cannot yet say which store this account is. It is the only
+  // thing browser collection needs that the product had no place to receive without an API key.
+  const [storeIdentity, setStoreIdentity] = useState("");
+  const [savingIdentity, setSavingIdentity] = useState(false);
+  const [identityError, setIdentityError] = useState<string | null>(null);
 
   // Reported by the card below — the one place this state is derived. Null until it has answered,
   // and null blocks the press: a button that fails is worse than one that is briefly disabled.
@@ -100,6 +105,49 @@ export function ReviewAcquisitionSection({
               </BtnLink>
             ) : null}
           </div>
+        ) : null}
+
+        {/*
+          **The one fact browser collection needs, asked for where it is needed.**
+
+          업체코드 says WHICH STORE this account is; an API key says we may call the API as it. They were
+          in one form, and its three fields are all required — so a seller who wanted only screen
+          collection had to go and issue OpenAPI keys to tell us their store code. This asks for the
+          fact itself. Nothing here sends, validates against, or implies an API credential.
+        */}
+        {readiness?.state === "STORE_IDENTITY_UNKNOWN" ? (
+          <form
+            className="flex flex-wrap items-end gap-2"
+            data-testid="store-identity-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (savingIdentity || storeIdentity.trim() === "") return;
+              setSavingIdentity(true);
+              setIdentityError(null);
+              api
+                .setStoreIdentity(accountId, storeIdentity.trim())
+                .then((next) => setReadiness(next))
+                .catch(() => setIdentityError("업체코드를 저장하지 못했습니다. 다시 확인해 주세요."))
+                .finally(() => setSavingIdentity(false));
+            }}
+          >
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-semibold text-ink">쿠팡 업체코드</span>
+              <input
+                className="min-h-[40px] w-56 rounded-lg border border-line px-3 text-base"
+                value={storeIdentity}
+                onChange={(e) => setStoreIdentity(e.target.value)}
+                placeholder="쿠팡 판매자 화면에 표시되는 코드"
+                aria-label="쿠팡 업체코드"
+              />
+            </label>
+            <Btn type="submit" size="sm" disabled={savingIdentity || storeIdentity.trim() === ""}>
+              저장
+            </Btn>
+            {identityError ? (
+              <p className="basis-full break-keep text-sm text-bad" role="alert">{identityError}</p>
+            ) : null}
+          </form>
         ) : null}
 
         {runKey === 0 ? (

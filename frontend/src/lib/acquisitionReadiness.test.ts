@@ -51,13 +51,16 @@ describe("지금 동기화 — can it be pressed, and if not, the one thing to d
     expect(acquisitionReadinessOf(ready("READY"), null)).toEqual({ canStart: false, blockedKo: null, action: null });
   });
 
-  it("names OUR missing record when the store cannot be matched — not the seller's window", () => {
+  it("names the missing FACT when the store cannot be matched — not the seller's window, and not an API wizard", () => {
     const gate = acquisitionReadinessOf(ready("STORE_IDENTITY_UNKNOWN"), CONNECTED);
     expect(gate.canStart).toBe(false);
-    expect(gate.blockedKo).toContain("쿠팡 연결 정보를 확인할 수 없어");
+    expect(gate.blockedKo).toContain("어느 스토어인지 아직 알려주지");
     // Explicitly NOT 「판매자 화면이 정상적으로 열려 있는지 확인」 — the screen was fine when this fired.
     expect(gate.blockedKo).not.toMatch(/화면이 정상|다시 시도/);
-    expect(gate.action).toEqual({ to: "/connect/coupang", label: "쿠팡 연결 확인하기" });
+    // And no trip to the OpenAPI wizard: the field that answers this is under the sentence, and browser
+    // collection needs no API key.
+    expect(gate.action).toBeNull();
+    expect(gate.blockedKo).not.toMatch(/연결 정보|API|키/);
   });
 
   it("never claims the run will succeed — nothing here is about the marketplace login", () => {

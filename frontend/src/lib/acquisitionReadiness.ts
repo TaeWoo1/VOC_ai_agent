@@ -53,9 +53,13 @@ const ACCOUNT_BLOCKERS: Record<Exclude<ScreenReadReadinessState, "READY">, strin
   // Ours, not theirs. Live on 2026-09-14 this arrived mid-run as 「어느 판매자 계정인지 확인하지
   // 못했어요 … 판매자 화면이 정상적으로 열려 있는지 확인한 뒤 다시 시도해 주세요」 — while the seller's
   // screen was open and its store label was read successfully. The missing half was our record of
-  // which store this account is, so the sentence points at the connection, not at their window.
+  // which store this account is.
+  //
+  // It names the missing FACT, not a place to go and get it. It used to send the seller to the Coupang
+  // OpenAPI wizard, because the vendor code could only be told to us inside a credential form — the
+  // requirement this package removed. The next step is now the field under this sentence.
   STORE_IDENTITY_UNKNOWN:
-    "이 계정의 쿠팡 연결 정보를 확인할 수 없어, 화면에 열린 스토어가 이 계정의 것인지 대조할 수 없습니다.",
+    "어느 스토어인지 아직 알려주지 않으셔서, 화면에 열린 스토어가 이 계정의 것인지 대조할 수 없습니다.",
 };
 
 /**
@@ -81,12 +85,13 @@ export function acquisitionReadinessOf(
       // The only one of the three the seller can act on from here. The other two are facts about the
       // channel and the account, and offering a next step for them would be offering a way to change
       // something that is not changeable.
+      // STORE_IDENTITY_UNKNOWN deliberately has none: the field that answers it is drawn directly under
+      // this sentence, and a button beside it would be a second way to do the same thing — pointing, in
+      // the old case, at an API-key wizard the seller does not need.
       action:
         readiness.state === "HELPER_NOT_LINKED"
           ? { to: "/connect/helper", label: "도우미 연결하기" }
-          : readiness.state === "STORE_IDENTITY_UNKNOWN"
-            ? { to: "/connect/coupang", label: "쿠팡 연결 확인하기" }
-            : null,
+          : null,
     };
   }
   if (helper.key !== "CONNECTED") {

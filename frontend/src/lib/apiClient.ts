@@ -1628,6 +1628,17 @@ export const api = {
 
   // v2: mint a single-use `acquisitionRef` for a Coupang WING review read run (Action Window
   // `START_RUN(REVIEW_ACQUISITION)`). COUPANG only server-side; the ref carries no review identity.
+  // Which store this account IS (Coupang 업체코드) — a non-secret fact about the account, never a
+  // credential. Answers with the readiness it changed, so a screen that just supplied the missing piece
+  // learns whether anything else is still missing without a second call.
+  async setStoreIdentity(accountId: string, storeIdentity: string): Promise<ReviewAcquisitionReadinessResponse> {
+    const { data } = await http.put<ReviewAcquisitionReadinessResponse>(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/store-identity`,
+      { storeIdentity },
+    );
+    return data;
+  },
+
   // Can this account start a screen read at all — the three preconditions the mint enforces, asked
   // without minting. No marketplace request is made by this call, on this path or behind it.
   async getReviewAcquisitionReadiness(accountId: string): Promise<ReviewAcquisitionReadinessResponse> {
