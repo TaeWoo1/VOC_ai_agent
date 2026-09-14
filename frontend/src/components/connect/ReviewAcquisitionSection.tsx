@@ -4,6 +4,7 @@ import { Btn, BtnLink } from "../ui/Btn";
 import { api } from "../../lib/apiClient";
 import type { HelperState } from "../../lib/helper/helperStatus";
 import { acquisitionReadinessOf, type AcquisitionReadinessView } from "../../lib/acquisitionReadiness";
+import { readStoreIdentityBootstrap, type StoreIdentityBootstrap } from "../../lib/storeIdentityBootstrap";
 import { GuidedAcquisitionRun } from "../acquisition/GuidedAcquisitionRun";
 import { HelperStatusCard } from "./HelperStatusCard";
 
@@ -47,6 +48,11 @@ export function ReviewAcquisitionSection({
   const [storeIdentity, setStoreIdentity] = useState("");
   const [savingIdentity, setSavingIdentity] = useState(false);
   const [identityError, setIdentityError] = useState<string | null>(null);
+  /**
+   * What the helper saw on the screen the seller had open, read over authenticated loopback after a run
+   * that had no expectation to compare against. Null = we could not ask (no pairing, helper not there).
+   */
+  const [bootstrap, setBootstrap] = useState<StoreIdentityBootstrap | null>(null);
 
   // Reported by the card below — the one place this state is derived. Null until it has answered,
   // and null blocks the press: a button that fails is worse than one that is briefly disabled.
@@ -73,6 +79,48 @@ export function ReviewAcquisitionSection({
   const completed = useCallback(() => {
     onCompleted();
   }, [onCompleted]);
+
+  /**
+   * A run that could not say which store it was looking at is not a failure to report — it is the first
+   * half of telling us. Ask the helper what it saw, once the run has finished and only while the account
+   * still has no identity of its own.
+   */
+  useEffect(() => {
+    if (runKey === 0 || readiness?.state !== "STORE_IDENTITY_UNKNOWN") return;
+    let live = true;
+    // Ask at once and then keep asking: the run may still be closing its tab when this mounts, and a
+    // seller who has just watched it finish should not wait out a poll interval to be asked one question.
+    const ask = () => {
+      void readStoreIdentityBootstrap().then((b) => {
+        if (live && b) setBootstrap(b);
+      });
+    };
+    ask();
+    const timer = window.setInterval(ask, 2000);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, [runKey, readiness?.state]);
+
+  /** Confirm the store, save it, and start a fresh run — one explicit press, never a silent retry. */
+  const confirmStore = useCallback(
+    (value: string) => {
+      setSavingIdentity(true);
+      setIdentityError(null);
+      api
+        .setStoreIdentity(accountId, value)
+        .then((next) => {
+          setReadiness(next);
+          setBootstrap(null);
+          // A new run, because the ref the last one spent is single-use and this is a new decision.
+          setRunKey((k) => k + 1);
+        })
+        .catch(() => setIdentityError("스토어를 저장하지 못했습니다. 다시 확인해 주세요."))
+        .finally(() => setSavingIdentity(false));
+    },
+    [accountId],
+  );
 
   // A channel with no screen read has nothing to say here at all. Drawing the section and then
   // explaining why it is empty would put a 「가져오기」 heading on every channel that cannot.
@@ -115,7 +163,37 @@ export function ReviewAcquisitionSection({
           collection had to go and issue OpenAPI keys to tell us their store code. This asks for the
           fact itself. Nothing here sends, validates against, or implies an API credential.
         */}
-        {readiness?.state === "STORE_IDENTITY_UNKNOWN" ? (
+        {/*
+          **스토어 확인 필요 — not a failure.** The first bounded run had nothing to compare against, so it
+          read no row and stopped; what it did establish is which store was on the screen. One explicit
+          press confirms it, saves it, and starts a fresh single-use run. There is no silent retry and no
+          schedule: the press is the decision.
+        */}
+        {readiness?.state === "STORE_IDENTITY_UNKNOWN" && bootstrap?.state === "CANDIDATE" ? (
+          <div className="rounded-xl border border-line bg-canvas p-4" data-testid="store-confirm">
+            <p className="break-keep text-sm text-ink">
+              열려 있던 쿠팡 판매자 화면에서 <span className="font-semibold">{bootstrap.value}</span> 스토어를
+              확인했습니다. 이 스토어의 상품평을 가져올까요?
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Btn
+                disabled={savingIdentity}
+                onClick={() => confirmStore(bootstrap.value)}
+                data-testid="store-confirm-cta"
+              >
+                이 스토어를 연결하고 리뷰 가져오기
+              </Btn>
+              <Btn size="sm" variant="ghost" onClick={() => setBootstrap({ state: "NONE" })}>
+                다른 스토어입니다
+              </Btn>
+            </div>
+            {identityError ? (
+              <p className="mt-2 break-keep text-sm text-bad" role="alert">{identityError}</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {readiness?.state === "STORE_IDENTITY_UNKNOWN" && bootstrap?.state !== "CANDIDATE" ? (
           <form
             className="flex flex-wrap items-end gap-2"
             data-testid="store-identity-form"
@@ -131,6 +209,15 @@ export function ReviewAcquisitionSection({
                 .finally(() => setSavingIdentity(false));
             }}
           >
+            {/*
+              Ambiguity is said out loud rather than guessed at. Two codes on one screen means we could not
+              read it cleanly, and a picker would hand that failure to the seller as a choice.
+            */}
+            {bootstrap?.state === "AMBIGUOUS" ? (
+              <p className="basis-full break-keep text-sm text-muted" data-testid="store-ambiguous">
+                화면에서 스토어 코드를 하나로 확정하지 못했습니다. 업체코드를 직접 입력해 주세요.
+              </p>
+            ) : null}
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-semibold text-ink">쿠팡 업체코드</span>
               <input
@@ -150,13 +237,17 @@ export function ReviewAcquisitionSection({
           </form>
         ) : null}
 
+        {gate.noteKo ? (
+          <p className="break-keep text-sm text-muted" data-testid="acquisition-note">{gate.noteKo}</p>
+        ) : null}
+
         {runKey === 0 ? (
           <Btn
             disabled={!gate.canStart}
             onClick={() => setRunKey(1)}
             data-testid="acquisition-start"
           >
-            지금 동기화
+            {gate.startLabelKo ?? "지금 동기화"}
           </Btn>
         ) : (
           <div className="space-y-3">

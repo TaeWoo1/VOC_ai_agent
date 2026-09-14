@@ -51,20 +51,30 @@ describe("지금 동기화 — can it be pressed, and if not, the one thing to d
     expect(acquisitionReadinessOf(ready("READY"), null)).toEqual({ canStart: false, blockedKo: null, action: null });
   });
 
-  it("names the missing FACT when the store cannot be matched — not the seller's window, and not an API wizard", () => {
+  /**
+   * **An unknown store does not block the press — the press is what finds it out.** Refusing here would
+   * make the bootstrap circular: identity needed to start the run that establishes identity.
+   */
+  it("lets the bootstrap run start, says what it will do, and names it honestly", () => {
     const gate = acquisitionReadinessOf(ready("STORE_IDENTITY_UNKNOWN"), CONNECTED);
-    expect(gate.canStart).toBe(false);
-    expect(gate.blockedKo).toContain("어느 스토어인지 아직 알려주지");
-    // Explicitly NOT 「판매자 화면이 정상적으로 열려 있는지 확인」 — the screen was fine when this fired.
-    expect(gate.blockedKo).not.toMatch(/화면이 정상|다시 시도/);
-    // And no trip to the OpenAPI wizard: the field that answers this is under the sentence, and browser
-    // collection needs no API key.
+    expect(gate.canStart).toBe(true);
+    expect(gate.blockedKo).toBeNull();
+    expect(gate.noteKo).toContain("어느 스토어인지 아직 모릅니다");
+    // The press does not promise collection it is not going to do.
+    expect(gate.startLabelKo).toBe("스토어 확인하기");
+    // No trip to the OpenAPI wizard: browser collection needs no API key.
     expect(gate.action).toBeNull();
-    expect(gate.blockedKo).not.toMatch(/연결 정보|API|키/);
+    expect(gate.noteKo).not.toMatch(/API|액세스|시크릿/);
+  });
+
+  it("still waits for the machine before a bootstrap run", () => {
+    const gate = acquisitionReadinessOf(ready("STORE_IDENTITY_UNKNOWN"), STOPPED);
+    expect(gate.canStart).toBe(false);
+    expect(gate.blockedKo).toContain("도우미가 준비되면");
   });
 
   it("never claims the run will succeed — nothing here is about the marketplace login", () => {
-    const sentences = (["CHANNEL_NOT_SUPPORTED", "FILE_UPLOAD_ACCOUNT", "HELPER_NOT_LINKED", "STORE_IDENTITY_UNKNOWN"] as const).map(
+    const sentences = (["CHANNEL_NOT_SUPPORTED", "FILE_UPLOAD_ACCOUNT", "HELPER_NOT_LINKED"] as const).map(
       (s) => acquisitionReadinessOf(ready(s), CONNECTED).blockedKo ?? "",
     );
     for (const line of sentences) {

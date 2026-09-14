@@ -110,12 +110,13 @@ class ScreenReadReadinessTest {
         verify(refs, never()).save(any());
 
         when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.of(new AccountSessionSlot()));
-        // Linked, and still not startable: we cannot say which store this account is.
+        // Linked, and the read still says truthfully that we cannot name the store...
         assertThat(service.readiness(ORG, a.getId()).state()).isEqualTo("STORE_IDENTITY_UNKNOWN");
-        assertThatThrownBy(() -> service.mint(ORG, a.getId(), UUID.randomUUID()))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("어느 스토어인지 대조할 수 없습니다");
-        verify(refs, never()).save(any());
+        // ...but the press is NOT refused, because that run is how the store gets established. It reads
+        // the identity off the seller's open screen and drops every row unread, so it can collect nothing.
+        // Refusing here would make the bootstrap circular.
+        when(refs.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        assertThat(service.mint(ORG, a.getId(), UUID.randomUUID()).acquisitionRef()).isNotBlank();
     }
 
     @Test

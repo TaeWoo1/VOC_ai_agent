@@ -9,7 +9,8 @@
  * `skipped` so the agent keeps running without a competing bridge instead of crashing.
  */
 
-import { BridgeServer, type DeviceLinkEndpoint } from "../bridge/bridge-server";
+import { BridgeServer, type DeviceLinkEndpoint,
+  type StoreIdentityBootstrapEndpoint } from "../bridge/bridge-server";
 import { FilePairingStore } from "../bridge/pairing-store";
 import type { ApprovalPresenter } from "../bridge/approval-presenter";
 import { settleObserverToPort, refFor } from "../bridge/event-adapter";
@@ -276,6 +277,8 @@ export interface AgentBridgeConfig {
   onSellerOpsConnected?: () => void;
   /** Helper Device Authentication v1: the link endpoint the paired browser drives. Passed straight through. */
   deviceLink?: DeviceLinkEndpoint;
+  /** See `StoreIdentityBootstrapEndpoint`. Absent ⇒ the loopback bootstrap route is 404. */
+  storeIdentityBootstrap?: StoreIdentityBootstrapEndpoint;
 }
 
 export type AgentBridgeListenResult =
@@ -507,6 +510,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     actionWindow: carrier,
     ...(cfg.onSellerOpsConnected ? { onSellerOpsConnected: cfg.onSellerOpsConnected } : {}),
     ...(cfg.deviceLink ? { deviceLink: cfg.deviceLink } : {}),
+    ...(cfg.storeIdentityBootstrap ? { storeIdentityBootstrap: cfg.storeIdentityBootstrap } : {}),
   });
   const settle = settleObserverToPort(server.events, cfg.refSalt);
   let active = false;

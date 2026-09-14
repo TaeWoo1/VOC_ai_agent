@@ -25,6 +25,11 @@ vi.mock("./HelperStatusCard", () => ({
   },
 }));
 
+const readStoreIdentityBootstrap = vi.fn();
+vi.mock("../../lib/storeIdentityBootstrap", () => ({
+  readStoreIdentityBootstrap: () => readStoreIdentityBootstrap(),
+}));
+
 vi.mock("../acquisition/GuidedAcquisitionRun", () => ({
   GuidedAcquisitionRun: ({ accountId, path }: { accountId: string; path: string }) => (
     <div data-testid="run">{`${path}:${accountId}`}</div>
@@ -36,6 +41,7 @@ import { ReviewAcquisitionSection } from "./ReviewAcquisitionSection";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  readStoreIdentityBootstrap.mockResolvedValue(null);
   helperState = { key: "CONNECTED", label: "연결됨", tone: "good", note: null, action: null };
 });
 
@@ -107,7 +113,10 @@ describe("상품평 가져오기 — the press the channel screen never offered"
     renderSection();
 
     const form = await screen.findByTestId("store-identity-form");
-    expect((screen.getByTestId("acquisition-start") as HTMLButtonElement).disabled).toBe(true);
+    // The press is NOT blocked here: a run with no expectation is how the store gets established, and it
+    // reads no row. It just does not promise collection it is not going to do.
+    expect((screen.getByTestId("acquisition-start") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByTestId("acquisition-start").textContent).toContain("스토어 확인하기");
     // No trip to the credential wizard, and nothing on screen asks for a key or a secret.
     expect(screen.queryByRole("link", { name: /쿠팡 연결/ })).toBeNull();
     expect(document.body.textContent ?? "").not.toMatch(/액세스 키|시크릿|API 키/);
@@ -118,6 +127,45 @@ describe("상품평 가져오기 — the press the channel screen never offered"
     // The answer it returns is the readiness it changed — the press becomes available with no reload.
     await waitFor(() => expect((screen.getByTestId("acquisition-start") as HTMLButtonElement).disabled).toBe(false));
     expect(screen.queryByTestId("store-identity-form")).toBeNull();
+  });
+
+  /**
+   * **스토어 확인 필요 is not a failure.** The first bounded run had nothing to compare against, so it read
+   * no row — but it did see which store was on the screen. One explicit press confirms it, saves it, and
+   * starts a fresh run. The raw code reached this browser over authenticated loopback and never over the
+   * shared run contract.
+   */
+  it("offers the observed store for confirmation, and one press saves it and starts a new run", async () => {
+    getReviewAcquisitionReadiness.mockResolvedValue({ state: "STORE_IDENTITY_UNKNOWN", channelCode: "COUPANG" });
+    readStoreIdentityBootstrap.mockResolvedValue({ state: "CANDIDATE", value: "A00123456" });
+    setStoreIdentity.mockResolvedValue({ state: "READY", channelCode: "COUPANG" });
+    renderSection();
+
+    // Nothing is offered before a run: there is nothing to have seen yet.
+    await screen.findByTestId("store-identity-form");
+    expect(screen.queryByTestId("store-confirm")).toBeNull();
+
+    screen.getByTestId("acquisition-start").click();
+    const card = await screen.findByTestId("store-confirm", {}, { timeout: 5000 });
+    expect(card.textContent).toContain("A00123456");
+    // The manual input steps aside while a candidate stands.
+    expect(screen.queryByTestId("store-identity-form")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("store-confirm-cta"));
+    await waitFor(() => expect(setStoreIdentity).toHaveBeenCalledWith("acct-1", "A00123456"));
+    await waitFor(() => expect(screen.getByTestId("run")).toBeTruthy());
+  });
+
+  it("says so and falls back to typing when the screen did not resolve to one store", async () => {
+    getReviewAcquisitionReadiness.mockResolvedValue({ state: "STORE_IDENTITY_UNKNOWN", channelCode: "COUPANG" });
+    readStoreIdentityBootstrap.mockResolvedValue({ state: "AMBIGUOUS" });
+    renderSection();
+    await screen.findByTestId("store-identity-form");
+    screen.getByTestId("acquisition-start").click();
+    expect(await screen.findByTestId("store-ambiguous", {}, { timeout: 5000 })).toBeTruthy();
+    // No chooser, ever: the seller types it.
+    expect(screen.queryByTestId("store-confirm")).toBeNull();
+    expect(screen.getByLabelText("쿠팡 업체코드")).toBeTruthy();
   });
 
   it("says what must be open before the press, and never names what carries the read", async () => {

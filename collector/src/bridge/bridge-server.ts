@@ -119,12 +119,32 @@ export interface BridgeServerDeps {
    * pairing is the trust root, exactly as for tickets. Absent ⇒ both routes are 404.
    */
   deviceLink?: DeviceLinkEndpoint;
+  /** See {@link StoreIdentityBootstrapEndpoint}. Absent ⇒ the route is 404. */
+  storeIdentityBootstrap?: StoreIdentityBootstrapEndpoint;
 }
 
 /** What the bridge needs from the link flow — see `auth/helper-session.ts` for the implementation. */
 export interface DeviceLinkEndpoint {
   start(): Promise<unknown>;
   status(): Promise<unknown>;
+}
+
+/**
+ * **Store identity bootstrap read** — the one route over which a raw 업체코드 may reach the seller's
+ * browser, and only theirs.
+ *
+ * Same trust root as every other authenticated bridge route: the pairing is the credential and the origin
+ * must be an allowed one, so this is reachable from the seller's own paired tab on their own machine and
+ * from nothing else. The value it returns exists only because a bounded run just read it off the screen
+ * the seller had open, it lives in memory with a short TTL, and it is never put on the shared run view
+ * (`contracts/action-window/v2` carries no store identity) and never logged.
+ *
+ * Absent ⇒ 404, exactly like the device routes: a helper that is not hosting a bootstrap has no answer,
+ * not an empty one.
+ */
+export interface StoreIdentityBootstrapEndpoint {
+  /** The live candidate, or a state saying why there is none. Shape is the bootstrap module's. */
+  read(): unknown;
 }
 
 export class BridgeServer {
@@ -142,6 +162,7 @@ export class BridgeServer {
   private readonly actionWindow: AwCarrierEndpoint | undefined;
   private readonly onSellerOpsConnected: (() => void) | undefined;
   private readonly deviceLink: DeviceLinkEndpoint | undefined;
+  private readonly storeIdentityBootstrap: StoreIdentityBootstrapEndpoint | undefined;
   private readonly projectionWss: WebSocketServer | undefined;
   private projectionTimer: NodeJS.Timeout | undefined;
   private heartbeatTimer: NodeJS.Timeout | undefined;
@@ -164,6 +185,7 @@ export class BridgeServer {
     this.actionWindow = deps.actionWindow;
     this.onSellerOpsConnected = deps.onSellerOpsConnected;
     this.deviceLink = deps.deviceLink;
+    this.storeIdentityBootstrap = deps.storeIdentityBootstrap;
     if (this.autoApprovePairing) log("bridge_dev_auto_approve_active", { warning: true });
     this.http = createServer((req, res) => void this.onRequest(req, res));
     // We validate origin + ticket ourselves, THEN hand the raw socket to `ws`. `noServer` = we own upgrade.
@@ -299,6 +321,7 @@ export class BridgeServer {
       if (method === "POST" && path === "/bridge/agent/revoke") return await this.handleAgentRevoke(req, res);
       if (method === "POST" && path === "/bridge/device/link") return await this.handleDeviceLink(req, res, "start");
       if (method === "GET" && path === "/bridge/device/status") return await this.handleDeviceLink(req, res, "status");
+      if (method === "GET" && path === "/bridge/store-identity/bootstrap") return this.handleStoreIdentityBootstrap(req, res);
       sendJson(res, 404, { error: "not_found" });
     } catch {
       sendJson(res, 500, { error: "internal" });
@@ -597,6 +620,24 @@ export class BridgeServer {
     if (!pairing) { sendJson(res, 401, { error: "unpaired" }); return; }
     const body = op === "start" ? await this.deviceLink.start() : await this.deviceLink.status();
     sendJson(res, 200, body);
+  }
+
+  /**
+   * The bootstrap candidate, to the paired seller browser and nowhere else.
+   *
+   * Same three gates as the device routes, in the same order — endpoint present, origin allowed, pairing
+   * authenticated — because this is the same trust root and a value that may cross to the browser must not
+   * have a weaker one. Nothing is logged here: the state belongs to the run's own line and the value
+   * belongs nowhere.
+   */
+  private handleStoreIdentityBootstrap(req: IncomingMessage, res: ServerResponse): void {
+    if (!this.storeIdentityBootstrap) { sendJson(res, 404, { error: "not_found" }); return; }
+    const origin = header(req, "origin");
+    if (!isOriginAllowed(origin, this.allowedOrigins)) { sendJson(res, 403, { error: "bad_origin" }); return; }
+    const token = bearer(req);
+    const pairing = token ? this.store.registry.authenticate(token) : null;
+    if (!pairing) { sendJson(res, 401, { error: "unpaired" }); return; }
+    sendJson(res, 200, this.storeIdentityBootstrap.read());
   }
 
   private async handleRevoke(req: IncomingMessage, res: ServerResponse): Promise<void> {

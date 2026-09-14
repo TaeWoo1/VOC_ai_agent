@@ -95,6 +95,14 @@ import { ImportSegmentHost } from "../action-window/initial-import/import-host";
 import { assertExecutionProviderBootable } from "../action-window/initial-import/execution-provider-selection";
 import type { ExecutionProviderKind } from "../action-window/initial-import/execution-provider";
 import { AsideReviewAcquisitionDriver } from "../aside/aside-review-acquisition-driver";
+import { StoreIdentityBootstrapStore } from "../action-window/coupang-review/store-identity-bootstrap";
+
+/**
+ * The helper's bootstrap candidates — written by an acquisition run that had no expectation to compare
+ * against, read by the paired seller browser over loopback, and by nothing else. In memory, short-lived,
+ * never logged, never written to disk (`store-identity-bootstrap.ts`).
+ */
+const STORE_IDENTITY_BOOTSTRAP = new StoreIdentityBootstrapStore();
 import { AsideCoupangReviewExecutor } from "../aside/coupang-review-executor";
 import { COUPANG_REVIEW_READ_WORKFLOW } from "../aside/coupang-review-workflow";
 import type { ReviewAcquisitionProbeDriver } from "../action-window/coupang-review/review-acquisition-driver";
@@ -1284,12 +1292,18 @@ export function buildCoupangReviewAcquisitionLiveConfig(): CoupangReviewAcquisit
       return null;
     }
   };
+  // The slot the run resolved — what a bootstrap candidate is ABOUT. Set by `resolveTarget`, so a candidate
+  // can never be filed against an account this run did not bind to.
+  let boundAcquisitionSlot: string | null = null;
   const asideDriver = aside
     ? new AsideReviewAcquisitionDriver({
         executor: new AsideCoupangReviewExecutor({
           cli: { command: cfg.asideCli, ...(cfg.asideAccount ? { account: cfg.asideAccount } : {}) },
         }),
         expectedStoreFingerprint: () => boundStoreFingerprint,
+        onBootstrap: (outcome) => {
+          if (boundAcquisitionSlot) STORE_IDENTITY_BOOTSTRAP.put(boundAcquisitionSlot, outcome);
+        },
       })
     : null;
   return {
@@ -1304,6 +1318,7 @@ export function buildCoupangReviewAcquisitionLiveConfig(): CoupangReviewAcquisit
       const target = await fetchReviewAcquisitionTarget(origin, t, acquisitionRef);
       if (!target) token = null;
       boundStoreFingerprint = target?.expectedStoreFingerprint ?? null;
+      boundAcquisitionSlot = target?.accountSlot ?? null;
       return target;
     },
     handoff: async (request: ReviewHandoffRequest) => {
@@ -2305,6 +2320,12 @@ export async function runBridgeOnlyBoot(
     approvalPresenter: createApprovalPresenterFor(approvalKind),
     carrierEndpoint: carrierHost,
     deviceLink: deviceLinker,
+    storeIdentityBootstrap: {
+      // The newest live candidate. The browser knows it just ran; it does not know the opaque account slot
+      // the server resolved, so the helper answers with the most recent one rather than making the browser
+      // learn an identifier it has no other use for.
+      read: () => STORE_IDENTITY_BOOTSTRAP.latest()?.outcome ?? { state: "NONE" },
+    },
   });
   const listen = await bridge.listen();
   print(

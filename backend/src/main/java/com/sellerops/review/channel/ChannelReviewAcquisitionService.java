@@ -186,8 +186,12 @@ public class ChannelReviewAcquisitionService {
                     throw ApiException.badRequest("파일 업로드 계정에서는 화면 기반 수집을 사용할 수 없습니다.");
             case HELPER_NOT_LINKED ->
                     throw ApiException.conflict("이 계정은 아직 도우미에 연결되지 않아 화면에서 가져올 수 없습니다.");
-            case STORE_IDENTITY_UNKNOWN ->
-                    throw ApiException.conflict("이 계정의 쿠팡 연결 정보를 확인할 수 없어 어느 스토어인지 대조할 수 없습니다.");
+            // NOT refused. A run with no expectation is how a seller first tells us which store this is:
+            // it reads the identity off the screen they have open and drops every row unread
+            // (`assertWingStore` answers UNRESOLVED and the driver returns UNREADABLE), so it can collect
+            // nothing and prove nothing it should not. Refusing it here would make the bootstrap
+            // circular — identity needed to start the run that establishes identity.
+            case STORE_IDENTITY_UNKNOWN -> { }
             case READY -> { }
         }
         ChannelReviewAcquisitionRef row = new ChannelReviewAcquisitionRef();

@@ -26,6 +26,7 @@ import type { ReviewAcquisitionProbeDriver } from "../action-window/coupang-revi
 import { bodyEvidenceOf, sanitizeReviewPageReading, type CoupangReviewPageReading } from "../action-window/coupang-review/review-rows";
 import { sanitizeWingIdentityReading } from "../action-window/coupang-review/wing-identity-inpage";
 import { assertWingStore, type WingStoreVerdict } from "../action-window/coupang-review/wing-store-identity";
+import { bootstrapOf, type StoreIdentityBootstrap } from "../action-window/coupang-review/store-identity-bootstrap";
 import { log } from "../log";
 import { AsideCoupangReviewExecutor } from "./coupang-review-executor";
 
@@ -52,6 +53,16 @@ export interface AsideReviewAcquisitionDriverDeps {
    * store is never read.
    */
   expectedStoreFingerprint: () => string | null;
+  /**
+   * Where a bootstrap outcome goes when the backend had NO expectation to compare against — the one
+   * situation in which this run may report which store it saw. Absent ⇒ nothing is reported, which is the
+   * behaviour every other caller has always had.
+   *
+   * The value is handed to the helper's own in-memory bootstrap store and read back by the paired seller
+   * browser over loopback. It is never put on the run view, never logged, and never written to disk
+   * (`store-identity-bootstrap.ts`).
+   */
+  onBootstrap?: (outcome: StoreIdentityBootstrap) => void;
 }
 
 export class AsideReviewAcquisitionDriver implements ReviewAcquisitionProbeDriver {
@@ -94,12 +105,18 @@ export class AsideReviewAcquisitionDriver implements ReviewAcquisitionProbeDrive
     this.lastVerdict = assertion.verdict;
     if (assertion.verdict !== "MATCH") {
       this.blocker = assertion.verdict === "MISMATCH" ? "STORE_MISMATCH" : "STORE_UNRESOLVED";
+      // Bootstrap: only when there was nothing to compare against. The STATE is logged, never the value.
+      const bootstrap = bootstrapOf(assertion, identity);
+      if (bootstrap) {
+        this.deps.onBootstrap?.(bootstrap);
+      }
       log("aw_coupang_review_aside_identity", {
         workflow: `${workflow.id}/${workflow.version}`,
         verdict: assertion.verdict,
         reason: assertion.reason,
         observedCount: assertion.observedCount,
         labelHits: identity.labelHits,
+        ...(bootstrap ? { bootstrap: bootstrap.state } : {}),
       });
       // The rows came back in the same answer and are dropped here, unread: an unproven store is not read.
       return UNREADABLE;

@@ -42,6 +42,17 @@ export interface AcquisitionReadiness {
   blockedKo: string | null;
   /** Where the seller goes to unblock it, or null when the sentence is the whole answer. */
   action: { to: string; label: string } | null;
+  /**
+   * What this press will do, when that is not simply "collect".
+   *
+   * The bootstrap case: we cannot yet say which store this account is, and the press is what finds out.
+   * It is not a blocker — refusing it would make the bootstrap circular — and it is not silence either,
+   * because a seller pressing 지금 동기화 deserves to know this run establishes the store rather than
+   * collecting from it.
+   */
+  noteKo?: string;
+  /** The press's label, when the ordinary one would promise the wrong thing. */
+  startLabelKo?: string;
 }
 
 const ACCOUNT_BLOCKERS: Record<Exclude<ScreenReadReadinessState, "READY">, string> = {
@@ -59,7 +70,7 @@ const ACCOUNT_BLOCKERS: Record<Exclude<ScreenReadReadinessState, "READY">, strin
   // OpenAPI wizard, because the vendor code could only be told to us inside a credential form — the
   // requirement this package removed. The next step is now the field under this sentence.
   STORE_IDENTITY_UNKNOWN:
-    "어느 스토어인지 아직 알려주지 않으셔서, 화면에 열린 스토어가 이 계정의 것인지 대조할 수 없습니다.",
+    "어느 스토어인지 아직 모릅니다. 쿠팡 판매자 화면을 열어 둔 채로 누르면, 그 화면의 스토어를 확인해 여쭤봅니다.",
 };
 
 /**
@@ -77,6 +88,20 @@ export function acquisitionReadinessOf(
 ): AcquisitionReadiness {
   if (!readiness || !helper) {
     return { canStart: false, blockedKo: null, action: null };
+  }
+  // Startable, deliberately. The run reads the identity off the seller's open screen and drops every row
+  // unread; it is the first half of telling us which store this is.
+  if (readiness.state === "STORE_IDENTITY_UNKNOWN") {
+    if (helper.key !== "CONNECTED") {
+      return { canStart: false, blockedKo: "도우미가 준비되면 스토어를 확인할 수 있습니다.", action: null };
+    }
+    return {
+      canStart: true,
+      blockedKo: null,
+      action: null,
+      noteKo: ACCOUNT_BLOCKERS.STORE_IDENTITY_UNKNOWN,
+      startLabelKo: "스토어 확인하기",
+    };
   }
   if (readiness.state !== "READY") {
     return {
