@@ -15,15 +15,22 @@ export function CollectionHistorySection({
   error,
   onChanged,
   onReport,
+  heading,
 }: {
   runs: SyncRunView[];
   loading: boolean;
   error: boolean;
   onChanged: () => void;
   onReport: (message: string, isError: boolean) => void;
+  /**
+   * `null`이면 제목 없이 본문만. 이 블록이 <b>이미 이름이 붙은 자리</b>(접힌 영역 · capability 카드) 안에서
+   * 열릴 때를 위한 것이다 — 한 사실에 화면 위 이름이 둘이면 어느 쪽이 그것인지 말할 사람이 없다. 생략하면
+   * 예전과 바이트 동일하다.
+   */
+  heading?: string | null;
 }) {
-  return (
-    <Section title="수집 이력">
+  const body = (
+    <>
       {loading ? (
         <p className="text-base text-muted">불러오는 중…</p>
       ) : error ? (
@@ -39,8 +46,10 @@ export function CollectionHistorySection({
           ))}
         </ul>
       )}
-    </Section>
+    </>
   );
+  if (heading === null) return <div className="space-y-3">{body}</div>;
+  return <Section title={heading ?? "수집 이력"}>{body}</Section>;
 }
 
 function RunRow({

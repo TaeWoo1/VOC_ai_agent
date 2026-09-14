@@ -38,6 +38,7 @@ import { HelperDevices } from "./pages/app/HelperDevices";
 // new IA; the ones scheduled for replacement are rebuilt in Slices 4-6.
 import { Orders } from "./pages/Orders";
 import { ChannelWorkspace } from "./pages/app/ChannelWorkspace";
+import { ReviewCollectionFlow } from "./pages/app/ReviewCollectionFlow";
 import { Upload } from "./pages/Upload";
 import { ReviewImport } from "./pages/ReviewImport";
 import { OperationsHome } from "./pages/OperationsHome";
@@ -155,6 +156,10 @@ export function App() {
             except "the list is over there". */}
         <Route path="/connect/channels" element={<Navigate to="/connect" replace />} />
         <Route path="/connect/channels/:accountId" element={<ChannelWorkspace />} />
+        {/* 한 번의 리뷰 수집을, 한 화면에 한 걸음씩. 셋업이자 수집이다 — 이미 연결된 계정에서는 준비
+            걸음이 스스로 지나가고 스토어 확인은 렌더되지 않으므로, 「리뷰 수집 연결하기」와 「지금
+            가져오기」가 같은 곳에 도착한다. */}
+        <Route path="/connect/channels/:accountId/review-collection" element={<ReviewCollectionFlow />} />
         {/* The channel's review record moved to the 리뷰 surface (`/reviews/:accountId`); the old
             `/connect/channels/:accountId/reviews` path redirects via the legacy map below. */}
         <Route path="/connect/upload" element={<Upload />} />

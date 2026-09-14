@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../lib/apiClient";
+import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
+import type { AgentAvailability } from "../../lib/reviewImport";
 import { resolveCopy } from "../../lib/actionWindow/copy";
 import { isTerminalRunStatus } from "../../lib/actionWindow/homeFixtures";
 import { type AcquireRuntime } from "../../lib/actionWindow/acquire/acquireRuntime";
@@ -30,18 +32,42 @@ import { HumanCheckpointCard, CHECKPOINT_COMMANDS } from "../actionWindow/HumanC
  * never by a reloaded conversation. Order: pair → attach (carrier by path) → mint the ref (Coupang) → ONE
  * `START_RUN` → controls from `allowedCommands` → the run's own `COMPLETED` resumes the turn.
  */
+/**
+ * What a caller that draws its own surface is handed.
+ *
+ * <b>The run machine is not duplicated to get a second look.</b> The channel screen's review-collection
+ * flow narrates the same run in the seller's own steps, and the one thing it must NOT do is start a
+ * second one: the `startedRef`/`committedRef` dance below is the reason a single-use ref is spent exactly
+ * once, and a copy of it is a copy of that guarantee. So the run stays here and the surface moves out.
+ */
+export interface AcquisitionRunSurface {
+  paired: boolean;
+  view: ActionWindowRunView | null;
+  unavailable: AgentAvailability | null;
+  /** The mint/attach/START_RUN attempt failed. Distinct from `unavailable` (the attach was refused). */
+  startFailed: boolean;
+  starting: boolean;
+  send: (type: CommandType) => void;
+}
+
 export function GuidedAcquisitionRun({
   path,
   accountId,
   onCompleted,
   inject,
   connect,
+  renderSurface,
 }: {
   path: GuidedAcquisitionPath;
   accountId: string;
   onCompleted: () => void;
   inject?: AcquireRuntime;
   connect?: AcquisitionConnect;
+  /**
+   * Draw the run yourself. Given, this component renders nothing of its own — no pairing panel, no
+   * checkpoint card, no control rail — and only reports. Absent, the chat artifact's chrome is unchanged.
+   */
+  renderSurface?: (surface: AcquisitionRunSurface) => ReactNode;
 }) {
   const bridge = useBridge(!inject, { autoPair: true });
   const paired = !!inject || bridge.state.phase === "paired";
@@ -115,6 +141,10 @@ export function GuidedAcquisitionRun({
       onCompleted();
     }
   }, [view?.status, onCompleted]);
+
+  if (renderSurface) {
+    return <>{renderSurface({ paired, view, unavailable, startFailed: error !== null, starting, send })}</>;
+  }
 
   if (!paired) {
     return (

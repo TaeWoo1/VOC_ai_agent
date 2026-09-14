@@ -85,6 +85,16 @@ const COPY: Record<string, string> = {
   "actionWindow.coupangInquiryReply.openWing": "쿠팡 윙 창 열기",
   "actionWindow.coupangInquiryReply.reachScreen": "고객문의 화면으로 직접 이동",
   "actionWindow.coupangInquiryReply.userReply": "답변을 직접 등록",
+
+  // Coupang WING 상품평 읽기 (Action Window). **이 네 키에는 FE 매핑이 없었다** — 그래서 이 lane의 모든
+  // 단계가 `COPY_FALLBACK`, 즉 「안내를 준비하고 있어요」로 렌더됐고, 체크포인트 카드는 그 문장을 20px
+  // 굵은 지시문으로 올려 놓고 그 아래 [확인 완료]를 놓았다(실측 2026-09-14). 판매자가 수집 내내 읽은
+  // 것은 안내가 아니라 안내가 없다는 말이었다. 문장은 판매자가 <b>직접 하는 일</b>로 적는다 —
+  // reviewnary는 이 화면에서 로그인·클릭·입력을 하지 않는다.
+  "actionWindow.reviewAcquisition.run": "쿠팡 상품평 가져오기",
+  "actionWindow.reviewAcquisition.openList": "쿠팡 창에서 상품평 목록 열기",
+  "actionWindow.reviewAcquisition.confirmPage": "열린 상품평 목록 확인",
+  "actionWindow.reviewAcquisition.handoff": "가져온 상품평 저장",
 };
 
 // Per-step FULL instruction for the guided issuance walkthrough — so the SellerOps screen is self-sufficient
@@ -517,16 +527,18 @@ export const REVIEW_WORK_COPY = {
   actionLabel: "내려받기 시작",
 } as const;
 
-// "리뷰 수집" activity strip (Home 참고 panel · 채널 연결 hub). A read-only summary of the
-// current review acquisition run that deep-links into the collection workbench
-// (`/connect/imports`) — it never starts or commands a run. "리뷰 수집" matches the
-// workbench's page title so the surface name never drifts (product assembly A6: the
-// workbench collects; review work lives on the 리뷰 screen). The empty body is a calm
-// honest state (shown when there is no live run).
+// 네이버 리뷰를 기간별로 내려받는 작업의 activity strip (Home 참고 panel · 채널 연결 hub). A read-only
+// summary of the current run that deep-links into the collection workbench (`/connect/imports`) — it never
+// starts or commands a run. The name matches the workbench's page title so the surface name never drifts
+// (product assembly A6: the workbench collects; review work lives on the 리뷰 screen).
+//
+// **이름이 바뀐 이유**(Coupang Connection UX v2, 2026-09-14): 쿠팡 채널 화면의 브라우저 수집 카드가
+// 「리뷰 수집」이라는 이름을 갖는다. 같은 제품 안에서 한 이름이 두 대상을 가리키면, 판매자는 자기가 어느
+// 것을 보고 있는지 화면으로 알 수 없다. 이 lane은 <b>네이버의</b> 기간별 내려받기이므로 그렇게 부른다.
 export const HOME_REVIEW_OPS_COPY = {
-  sectionTitle: "리뷰 수집",
-  emptyBody: "진행 중인 리뷰 수집 작업이 없어요.",
-  open: "리뷰 수집 열기",
+  sectionTitle: "네이버 리뷰 기간별 가져오기",
+  emptyBody: "진행 중인 네이버 리뷰 가져오기 작업이 없어요.",
+  open: "작업 화면 열기",
   goToCheckpoint: "확인하러 가기",
 } as const;
 

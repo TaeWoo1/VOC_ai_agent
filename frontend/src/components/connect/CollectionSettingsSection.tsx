@@ -17,6 +17,7 @@ export function CollectionSettingsSection({
   capabilities,
   onChanged,
   onReport,
+  heading,
 }: {
   accountId: string;
   /** Optional: without it the rows simply say less, never something untrue. */
@@ -25,6 +26,12 @@ export function CollectionSettingsSection({
   capabilities: CapabilityView[] | null;
   onChanged: () => void;
   onReport: (message: string, isError: boolean) => void;
+  /**
+   * `null`이면 제목 없이 본문만. 이 블록이 <b>이미 이름이 붙은 자리</b>(접힌 영역 · capability 카드) 안에서
+   * 열릴 때를 위한 것이다 — 한 사실에 화면 위 이름이 둘이면 어느 쪽이 그것인지 말할 사람이 없다. 생략하면
+   * 예전과 바이트 동일하다.
+   */
+  heading?: string | null;
 }) {
   // A row that cannot be scheduled still owes the seller a reason, and the honest reason is
   // sometimes "SellerOps collects this — just not on a cadence". Only the capability OVERVIEW knows
@@ -40,8 +47,8 @@ export function CollectionSettingsSection({
   // what stops one channel's route being described on another channel's row.
   const overview = loading || error ? null : data;
 
-  return (
-    <Section title="수집 설정">
+  const body = (
+    <>
       <ul className="divide-y divide-line">
         {DATA_TYPES.map((t) => (
           <ScheduleRow
@@ -60,8 +67,10 @@ export function CollectionSettingsSection({
           />
         ))}
       </ul>
-    </Section>
+    </>
   );
+  if (heading === null) return <div className="space-y-3">{body}</div>;
+  return <Section title={heading ?? "수집 설정"}>{body}</Section>;
 }
 
 function ScheduleRow({
@@ -165,11 +174,17 @@ function ScheduleRow({
         <p className="text-sm text-muted">수집 지원 정보 확인 중…</p>
       ) : unsupported ? (
         <p className="text-sm text-muted">
+          {/*
+            **커넥터의 `notes`는 판매자 문장이 아니다.** 그 칸은 우리끼리 쓰는 영문 기록이고, 이 자리에서
+            그대로 렌더돼 쿠팡 채널 화면이 판매자에게 「No review-retrieval endpoint in the official seller
+            API.」라고 말하고 있었다(실측 2026-09-14). 알 수 없는 종류에는 이 제품이 아는 문장 하나만 쓴다 —
+            읽지 못한 사실을 문장으로 바꾸는 것보다 적게 말하는 편이 옳다.
+          */}
           {operatorRunPath
-            ? "판매자가 직접 실행하는 수집 경로라 자동 수집 주기 대상이 아닙니다. 위 「상품평 가져오기」에서 실행할 수 있습니다."
+            ? "판매자가 직접 실행하는 수집 경로라 자동 수집 주기 대상이 아닙니다."
             : sellerRepeatedPath?.method === "EXPORT"
               ? "이 채널은 리뷰 API를 제공하지 않습니다. 판매자 센터에서 내려받은 파일을 올리는 방식이 정식 수집 경로이며, 새 데이터는 다시 올릴 때 들어옵니다."
-              : capability?.notes ?? "이 데이터는 파일 업로드로 채울 수 있습니다."}
+              : "이 데이터는 파일 업로드로 채울 수 있습니다."}
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-3">

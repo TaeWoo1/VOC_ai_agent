@@ -33,7 +33,7 @@ const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
 };
 
 /**
- * 리뷰 수집 workbench (`/connect/imports`) — where the seller runs a review acquisition (Action Window:
+ * 네이버 리뷰 기간별 가져오기 workbench (`/connect/imports`) — where the seller runs a review acquisition (Action Window:
  * the seller clicks export in their own seller-center window, SellerOps detects and ingests) and sees
  * what each import brought, before drilling into the run detail (`/connect/imports/current`). Shares
  * state with the detail page via the operations store.
@@ -66,7 +66,7 @@ export function OperationsHome() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        title="리뷰 수집"
+        title="네이버 리뷰 기간별 가져오기"
         description="판매자센터에서 리뷰 파일을 내려받는 작업을 단계별로 안내하고, 지금까지 가져온 기록을 보여 줍니다. 리뷰를 읽고 답변하는 일은 리뷰 화면에서 합니다."
         action={
           <Link

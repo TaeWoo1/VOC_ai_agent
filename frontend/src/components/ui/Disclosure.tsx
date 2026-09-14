@@ -19,6 +19,8 @@ export function Disclosure({
   children,
   className = "",
   summaryClassName = "",
+  open,
+  onOpenChange,
 }: {
   /** What is behind the fold. Always a noun phrase a seller would use. */
   label: ReactNode;
@@ -27,9 +29,21 @@ export function Disclosure({
   children: ReactNode;
   className?: string;
   summaryClassName?: string;
+  /**
+   * 접힘 상태를 바깥이 가질 때만. 생략하면 예전 그대로 브라우저가 소유한다.
+   *
+   * 이 칸이 생긴 이유는 <b>아무 일도 일어나지 않는 컨트롤</b>이었다: 쿠팡 카드의 「API 연결하기」가 접힌
+   * 영역으로 가는 앵커라, 누르면 화면이 조금 움직이고 열려야 할 것은 접힌 채였다.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <details className={`group ${className}`}>
+    <details
+      className={`group ${className}`}
+      open={open}
+      onToggle={(e) => onOpenChange?.((e.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary
         className={`inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-semibold text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 ${summaryClassName}`}
       >

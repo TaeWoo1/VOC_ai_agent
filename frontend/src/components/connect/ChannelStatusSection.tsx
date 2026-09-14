@@ -138,6 +138,7 @@ export function ConnectionInfoSection({
   onViewRuns,
   onReport,
   onChanged,
+  heading,
 }: {
   accountId: string;
   info: ConnectionInfoView | null;
@@ -149,6 +150,12 @@ export function ConnectionInfoSection({
   onViewRuns: () => void;
   onReport: (message: string, isError: boolean) => void;
   onChanged: () => void;
+  /**
+   * `null`이면 제목 없이 본문만. 이 블록이 <b>이미 이름이 붙은 자리</b> 안에서 열릴 때를 위한 것이다 —
+   * 쿠팡 채널 화면에서는 「문의·주문 자동 수집」 카드가 그 이름을 갖고 있고, 그 안에서 같은 제목을 한 번 더
+   * 그리면 한 사실에 소유자가 둘이 된다. 생략하면 예전과 바이트 동일하다.
+   */
+  heading?: string | null;
 }) {
   const guidance = (channelCode && CHANNEL_GUIDANCE[channelCode]) ?? GENERIC_GUIDANCE;
   /**
@@ -166,9 +173,9 @@ export function ConnectionInfoSection({
   // null) get the guidance text only, never a form.
   const canEnter = template !== null && template.fields.length > 0;
 
-  return (
-    <Section title={isCoupang ? "문의·주문 자동 수집" : "연결 정보"}>
-      {isCoupang ? (
+  const body = (
+    <>
+      {isCoupang && heading !== null ? (
         <p className="mb-3 break-keep text-sm text-muted">
           쿠팡 문의와 주문은 API로 자동 수집합니다. 상품평은 위 「상품평 가져오기」에서 따로 가져오며, 둘은
           서로 필요하지 않습니다.
@@ -207,8 +214,12 @@ export function ConnectionInfoSection({
         />
       )}
       <CredentialTemplateBlock template={template} error={templateError} />
-    </Section>
+    </>
   );
+  if (heading === null) {
+    return <div className="space-y-3">{body}</div>;
+  }
+  return <Section title={heading ?? (isCoupang ? "문의·주문 자동 수집" : "연결 정보")}>{body}</Section>;
 }
 
 // Read-only 연결에 필요한 정보 block: the backend-owned credential field shape for

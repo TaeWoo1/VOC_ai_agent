@@ -70,7 +70,9 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
     // with its own count, which is exactly what the assembly removed.
     seedHome("home-empty");
     renderWithRouter(<OperationsHome />);
-    expect(screen.getByRole("heading", { name: "리뷰 수집" })).toBeInTheDocument();
+    // 「리뷰 수집」은 쿠팡 채널 화면의 브라우저 수집 카드가 가져갔다(Coupang Connection UX v2). 이 화면은
+    // 네이버의 기간별 내려받기이고, 한 이름이 두 대상을 가리키지 않도록 그렇게 부른다.
+    expect(screen.getByRole("heading", { name: "네이버 리뷰 기간별 가져오기" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "리뷰 화면으로" })).toHaveAttribute("href", "/reviews");
     expect(screen.queryByRole("region", { name: "오늘 확인할 일" })).toBeNull();
     expect(screen.queryByText("내 답변 작업")).toBeNull();

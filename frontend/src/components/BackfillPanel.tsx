@@ -37,13 +37,33 @@ const TYPE_LABEL: Record<string, string> = Object.fromEntries(
 export function BackfillPanel({
   accountId,
   onCompleted,
+  dataTypes,
+  heading,
 }: {
   accountId: string;
   onCompleted?: () => void;
+  /**
+   * 이 화면이 실제로 기간 수집할 수 있는 종류. 생략하면 예전과 바이트 동일하다(전 종류).
+   *
+   * <b>이 칸이 생긴 이유.</b> 쿠팡 채널 화면에서 이 패널은 기본값으로 ✓리뷰를 켠 채 [이 기간 수집하기]를
+   * 제공했는데, 쿠팡 리뷰에는 API 수집 경로가 없다(`supported:false`). 될 수 없는 수집을 시작하게 하는
+   * 컨트롤은 없는 것보다 나쁘다 — 판매자는 실패를 자기 설정 문제로 읽는다.
+   */
+  dataTypes?: readonly string[];
+  /**
+   * `null`이면 제목 없이 본문만 — 이미 이름이 붙은 자리(접힌 영역) 안에서 열릴 때. 생략하면 예전과 동일하다.
+   */
+  heading?: string | null;
 }) {
+  const offered = useMemo(
+    () => (dataTypes ? BACKFILL_DATA_TYPES.filter((t) => dataTypes.includes(t.value)) : BACKFILL_DATA_TYPES),
+    [dataTypes],
+  );
   const [preset, setPreset] = useState<PresetKey>("recent7");
   const [custom, setCustom] = useState({ from: "", to: "" });
-  const [selected, setSelected] = useState<string[]>(["REVIEW", "INQUIRY"]);
+  const [selected, setSelected] = useState<string[]>(() =>
+    ["REVIEW", "INQUIRY"].filter((v) => !dataTypes || dataTypes.includes(v)),
+  );
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<RunResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +88,7 @@ export function BackfillPanel({
     setRunning(true);
     setResults(null);
     // Order the runs by the panel's display order for a stable result list.
-    const ordered = BACKFILL_DATA_TYPES.filter((t) => selected.includes(t.value));
+    const ordered = offered.filter((t) => selected.includes(t.value));
     const collected: RunResult[] = [];
     for (const t of ordered) {
       try {
@@ -97,8 +117,8 @@ export function BackfillPanel({
     onCompleted?.();
   }
 
-  return (
-    <Section title="기간 지정 수집">
+  const body = (
+    <>
       <div className="space-y-5">
         <div>
           <p className="mb-2 text-sm font-semibold text-muted">수집 기간</p>
@@ -142,7 +162,7 @@ export function BackfillPanel({
         <div>
           <p className="mb-2 text-sm font-semibold text-muted">수집할 데이터</p>
           <div className="flex flex-wrap gap-2">
-            {BACKFILL_DATA_TYPES.map((t) => {
+            {offered.map((t) => {
               const on = selected.includes(t.value);
               return (
                 <button
@@ -180,6 +200,8 @@ export function BackfillPanel({
           </ul>
         ) : null}
       </div>
-    </Section>
+    </>
   );
+  if (heading === null) return <div className="space-y-3">{body}</div>;
+  return <Section title={heading ?? "기간 지정 수집"}>{body}</Section>;
 }

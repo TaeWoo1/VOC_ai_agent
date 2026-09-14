@@ -15,7 +15,7 @@ import {
 } from "../../components/connect/ChannelStatusSection";
 import { CollectionSettingsSection } from "../../components/connect/CollectionSettingsSection";
 import { CollectionHistorySection } from "../../components/connect/CollectionHistorySection";
-import { ReviewAcquisitionSection } from "../../components/connect/ReviewAcquisitionSection";
+import { CoupangChannelView } from "../../components/connect/coupang/CoupangChannelView";
 import { ReviewRecordPanel } from "../../components/connect/ReviewRecordPanel";
 import { nextActionFor, type ScrollTarget } from "../../components/connect/channelShared";
 import { api } from "../../lib/apiClient";
@@ -230,6 +230,40 @@ export function ChannelWorkspace() {
   }
 
 
+  /**
+   * <b>쿠팡은 자기 화면을 갖는다</b>(Coupang Connection UX v2, product-owner decision 2026-09-14).
+   *
+   * 이 페이지가 지금까지 그리던 열세 개의 제목은 「연결이 살아 있는가」를 관리하는 화면의 것이고, 쿠팡
+   * 판매자가 이 주소에서 물어보는 것은 「리뷰는 어떻게 들어오고, 문의·주문은 어떻게 들어오는가」 둘뿐이다.
+   * 아래의 분기가 그 둘을 가른다 — <b>다른 채널의 화면은 한 글자도 바뀌지 않는다</b>(NAVER·Cafe24 IA 고정).
+   * 이 화면이 이미 읽어 둔 것을 그대로 넘기므로, 쿠팡 화면이 추가로 사는 읽기는 둘(취득 준비 상태 ·
+   * capability 개요)뿐이다.
+   */
+  if (channel?.code === "COUPANG" && accountId) {
+    return (
+      <>
+        {notice ? <div className="rounded-xl bg-brand-50 px-4 py-3 text-brand-700">{notice}</div> : null}
+        {error ? <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">{error}</div> : null}
+        <CoupangChannelView
+          accountId={accountId}
+          channelCode={channel.code}
+          title={account?.alias ?? account?.channelNameKo ?? "쿠팡"}
+          status={collectionError ? null : status}
+          connectionInfo={connectionInfo}
+          infoLoading={loadingInfo}
+          infoError={infoError}
+          credentialTemplate={credentialTemplate}
+          templateError={templateError}
+          schedules={schedules}
+          capabilities={capabilities}
+          runs={runs}
+          onReport={report}
+          onChanged={reload}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <PageHead
@@ -276,12 +310,6 @@ export function ChannelWorkspace() {
           refreshKey={refreshKey}
         />
       ) : null}
-
-      {/* 상품평 가져오기 — directly under the record it feeds, for the same reason the record is at the
-          top: on this channel the screen read IS how reviews arrive, and everything below is about
-          keeping a connection healthy. The section decides for itself whether this account has a
-          screen read at all and renders nothing when it does not, so no channel gate is repeated. */}
-      {accountId ? <ReviewAcquisitionSection accountId={accountId} onCompleted={reload} /> : null}
 
       {accountId ? (
         <>
