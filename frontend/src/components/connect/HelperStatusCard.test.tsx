@@ -172,7 +172,7 @@ describe("HelperStatusCard — 이 기기 연결 (Helper Device Authentication v
     for (const b of bodies) expect(b.toLowerCase()).not.toMatch(/password|email/);
   });
 
-  it("a refused approval says so and offers the link again; an old helper without the route is not called 연결됨", async () => {
+  it("a refused approval says so and offers a way out; an old helper without the route is not called 연결됨", async () => {
     deviceStatus = { linked: false, linking: null, verified: "UNVERIFIED" };
     linkStart = { ok: true, userCode: "BCDFGHJK", expiresAt: "2026-09-05T00:05:00Z" };
     approve.mockRejectedValueOnce(new Error("404"));
@@ -180,12 +180,62 @@ describe("HelperStatusCard — 이 기기 연결 (Helper Device Authentication v
     await waitFor(() => expect(screen.getByTestId("helper-state")).toHaveTextContent("기기 연결 필요"));
     fireEvent.click(screen.getByTestId("helper-link"));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("승인하지 못했습니다"));
-    expect(screen.getByTestId("helper-link")).toBeInTheDocument();
+    // Two ways out, and neither of them is "watch this forever".
+    expect(screen.getByTestId("helper-link-retry")).toBeInTheDocument();
+    expect(screen.getByTestId("helper-link-cancel")).toBeInTheDocument();
     unmount();
     deviceStatus = null;
     renderCard();
     await waitFor(() => expect(screen.getByTestId("helper-state")).toHaveTextContent("확인 중"));
     expect(screen.queryByTestId("helper-link")).toBeNull();
+  });
+
+  /**
+   * **The wedge, and it needed the helper to be genuinely pending to reproduce.**
+   *
+   * The helper reports `linking: "pending"` from the moment it mints a grant until that grant expires.
+   * When the approve failed, the card set its own error word and the next status poll two seconds later
+   * replaced it with the helper's truthful `pending` — so the seller read 「연결 확인 중」 forever with no
+   * control to finish or stop it. Observed live 2026-09-14 on the Coupang acquisition flow.
+   */
+  it("a failed approve against a still-pending helper does not become an endless 연결 확인 중", async () => {
+    deviceStatus = { linked: false, linking: null, verified: "UNVERIFIED" };
+    linkStart = { ok: true, userCode: "BCDFGHJK", expiresAt: "2026-09-05T00:05:00Z" };
+    approve.mockRejectedValueOnce(new Error("403"));
+    renderCard();
+    await waitFor(() => expect(screen.getByTestId("helper-state")).toHaveTextContent("기기 연결 필요"));
+    fireEvent.click(screen.getByTestId("helper-link"));
+    // From here the helper legitimately reports a pending grant, exactly as it did live.
+    deviceStatus = { linked: false, linking: "pending", verified: "UNVERIFIED" };
+    await waitFor(() => expect(screen.getByTestId("helper-state")).toHaveTextContent("연결하지 못했습니다"));
+    // And it stays said: the poll no longer overwrites the browser's own outcome.
+    await new Promise((r) => setTimeout(r, 2600));
+    expect(screen.getByTestId("helper-state")).toHaveTextContent("연결하지 못했습니다");
+
+    // 다시 시도 re-approves the code THIS browser minted — no new grant, no helper call.
+    const callsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/bridge/device/link")).length;
+    approve.mockResolvedValueOnce(undefined);
+    fireEvent.click(screen.getByTestId("helper-link-retry"));
+    await waitFor(() => expect(approve).toHaveBeenCalledWith("BCDFGHJK"));
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/bridge/device/link")).length)
+      .toBe(callsBefore);
+  });
+
+  it("연결 취소 stops presenting a grant the seller no longer wants, without withdrawing it", async () => {
+    deviceStatus = { linked: false, linking: null, verified: "UNVERIFIED" };
+    linkStart = { ok: true, userCode: "BCDFGHJK", expiresAt: "2026-09-05T00:05:00Z" };
+    approve.mockRejectedValueOnce(new Error("403"));
+    renderCard();
+    await waitFor(() => expect(screen.getByTestId("helper-state")).toHaveTextContent("기기 연결 필요"));
+    fireEvent.click(screen.getByTestId("helper-link"));
+    deviceStatus = { linked: false, linking: "pending", verified: "UNVERIFIED" };
+    await waitFor(() => expect(screen.getByTestId("helper-state")).toHaveTextContent("연결하지 못했습니다"));
+
+    fireEvent.click(screen.getByTestId("helper-link-cancel"));
+    // Back to the ordinary state with its ordinary control — the helper's grant is left to expire, and
+    // nothing here asks the bridge to withdraw one (it offers no such route and this package adds none).
+    await waitFor(() => expect(screen.getByTestId("helper-state")).toHaveTextContent("기기 연결 필요"));
+    expect(screen.getByTestId("helper-link")).toBeInTheDocument();
   });
 
   it("a helper that cannot reach the server says which side is unreachable", async () => {

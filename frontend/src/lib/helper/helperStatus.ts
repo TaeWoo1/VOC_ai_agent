@@ -19,12 +19,31 @@
 
 export type HelperStateKey =
   | "CHECKING" | "CONNECTED" | "INSTALL" | "START" | "RECONNECT" | "PENDING" | "UPDATE"
-  | "LINK" | "LINKING" | "LINK_SERVER";
+  | "LINK" | "LINKING" | "LINK_SERVER" | "LINK_FAILED";
 
 export interface HelperAction {
-  kind: "install" | "connect" | "retry" | "update" | "link";
+  kind: "install" | "connect" | "retry" | "update" | "link" | "linkRetry" | "linkCancel";
   label: string;
 }
+
+/**
+ * What THIS browser's own attempt to link the helper to the account is doing.
+ *
+ * <b>A separate axis from {@link DeviceLinkWord}, and the reason the card used to wedge.</b> The helper
+ * reports `linking: "pending"` from the moment it has a grant until that grant expires — which is true,
+ * and says nothing about whether the browser's half succeeded. When the approve call failed, the card set
+ * its own error word and the next status poll (two seconds later) overwrote it with the helper's
+ * `pending`, so the seller watched 「연결 확인 중」 forever with no control to finish or stop it. Observed
+ * live 2026-09-14.
+ *
+ * - `approving` — the browser is mid-attempt.
+ * - `failed` — the approve did not go through. The helper is still legitimately pending, and this browser
+ *   still holds the user code it minted, so a retry needs no new grant and no helper call.
+ * - `abandoned` — the seller cancelled. The helper's pending grant is left to expire on its own (the
+ *   bridge deliberately offers no way to cancel one, and this package does not add one); the card simply
+ *   stops presenting it as work in progress.
+ */
+export type DeviceAttempt = "none" | "approving" | "failed" | "abandoned";
 
 /**
  * Whether the paired helper is linked to the seller's ACCOUNT (Helper Device Authentication v1) — a
@@ -40,6 +59,11 @@ export interface HelperState {
   /** One sentence under the word, or null when the word is enough. */
   note: string | null;
   action: HelperAction | null;
+  /**
+   * A second control, used only where a seller genuinely has two ways out — retry, or stop. Every other
+   * state keeps the card's rule of one next step.
+   */
+  secondary?: HelperAction | null;
 }
 
 /**
@@ -76,6 +100,8 @@ export interface HelperStatusInput {
   pairingHint?: "no_response";
   attestedApproval?: boolean;
   device?: DeviceLinkWord;
+  /** This browser's own link attempt. Absent behaves exactly as before this axis existed. */
+  attempt?: DeviceAttempt;
 }
 
 export function helperStatusOf(input: HelperStatusInput): HelperState {
@@ -90,7 +116,23 @@ export function helperStatusOf(input: HelperStatusInput): HelperState {
     };
   }
   if (phase === "paired") {
-    switch (input.device) {
+    // The browser's own attempt outranks the helper's `pending`, because it knows something the helper
+    // cannot: whether the half that runs in this browser succeeded. Only while the helper is NOT linked —
+    // a link that landed (here or anywhere else) ends every attempt.
+    if (input.device !== "linked" && input.attempt === "failed") {
+      return {
+        key: "LINK_FAILED",
+        label: "연결하지 못했습니다",
+        tone: "warn",
+        note: "이 계정으로 도우미를 연결하지 못했습니다. 다시 시도하거나, 연결을 취소할 수 있습니다.",
+        action: { kind: "linkRetry", label: "다시 시도" },
+        secondary: { kind: "linkCancel", label: "연결 취소" },
+      };
+    }
+    // A cancelled attempt stops being drawn as work in progress. The helper may still hold its grant for
+    // a few minutes; that is the helper's business and the seller is not made to watch it.
+    const device = input.attempt === "abandoned" && input.device === "linking" ? "unlinked" : input.device;
+    switch (device) {
       case undefined:
       case "linked":
         return { key: "CONNECTED", label: "연결됨", tone: "good", note: null, action: null };
@@ -113,9 +155,9 @@ export function helperStatusOf(input: HelperStatusInput): HelperState {
           action: { kind: "link", label: "다시 시도" },
         };
       default: {
-        const note = input.device === "denied"
+        const note = device === "denied"
           ? "연결이 거부됐습니다. 다시 연결해 주세요."
-          : input.device === "expired"
+          : device === "expired"
             ? "연결 요청 시간이 지났습니다. 다시 연결해 주세요."
             : "도우미가 아직 이 계정과 연결되지 않았습니다. 연결하면 도우미가 비밀번호 없이 이 계정으로 일합니다.";
         return { key: "LINK", label: "기기 연결 필요", tone: "warn", note, action: { kind: "link", label: "이 기기 연결" } };

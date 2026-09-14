@@ -5,7 +5,13 @@ import { Status, type StatusTone } from "../ui/Status";
 import { useBridge } from "../../hooks/useBridge";
 import { BRIDGE_TOKEN_KEY, bridgeHttpBase } from "../../lib/bridge/bridgeClient";
 import { api } from "../../lib/apiClient";
-import { helperStatusOf, naverSessionOf, type DeviceLinkWord, type HelperState } from "../../lib/helper/helperStatus";
+import {
+  helperStatusOf,
+  naverSessionOf,
+  type DeviceAttempt,
+  type DeviceLinkWord,
+  type HelperState,
+} from "../../lib/helper/helperStatus";
 import { relativeTime } from "../../lib/format";
 import type { ConnectionStatusView } from "../../lib/types";
 
@@ -130,6 +136,18 @@ export function HelperStatusCard({
   // forwards a code and waits.
   const deviceRef = useRef<DeviceLinkWord | undefined>(undefined);
   deviceRef.current = device;
+  /**
+   * This browser's own attempt, and the user code it minted.
+   *
+   * The helper refuses to mint a second code while one is pending and says so in its own source: "the
+   * browser gets the same one back only if it kept it". It was not kept, so a failed approve had no way
+   * back — which is the other half of the wedge. It is kept now, and a retry is one backend call with no
+   * helper request and no new grant.
+   */
+  const [attempt, setAttempt] = useState<DeviceAttempt>("none");
+  const codeRef = useRef<string | null>(null);
+  const attemptRef = useRef<DeviceAttempt>("none");
+  attemptRef.current = attempt;
   useEffect(() => {
     if (!paired) {
       setDevice(undefined);
@@ -148,7 +166,12 @@ export function HelperStatusCard({
     const interval = setInterval(() => {
       beat += 1;
       const word = deviceRef.current;
-      if (word === "linking" || word === "unknown") tick();
+      // Fast only while something is actually in flight. A failed or cancelled attempt is NOT in flight:
+      // the helper stays `pending` until its grant expires, and polling that every two seconds forever is
+      // exactly what made the card unable to say anything else. The slow beat stays, so a link that lands
+      // elsewhere still turns this card green without a reload.
+      const settled = attemptRef.current === "failed" || attemptRef.current === "abandoned";
+      if (!settled && (word === "linking" || word === "unknown")) tick();
       else if (beat % 5 === 0) tick();
     }, 2000);
     return () => {
@@ -157,10 +180,50 @@ export function HelperStatusCard({
     };
   }, [paired, readDevice]);
 
+  /** Approve a code this browser minted. Shared by the first attempt and by 다시 시도. */
+  async function approveCode(userCode: string): Promise<boolean> {
+    try {
+      await api.approveHelperDevice(userCode);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function retryLink() {
+    const code = codeRef.current;
+    setLinkError(null);
+    if (!code) {
+      // Nothing to re-approve — the grant was never ours or has been forgotten. Start over; if the
+      // helper's own grant is still pending it answers `busy` and the state below says so.
+      setAttempt("none");
+      await linkThisDevice();
+      return;
+    }
+    setAttempt("approving");
+    if (await approveCode(code)) {
+      if (!mounted.current) return;
+      setAttempt("none");
+      return;
+    }
+    if (!mounted.current) return;
+    setLinkError("이 계정으로 연결을 승인하지 못했습니다. 다시 로그인한 뒤 시도해 주세요.");
+    setAttempt("failed");
+  }
+
+  function cancelLink() {
+    // The bridge offers no way to withdraw a pending grant and this package does not add one; it expires
+    // on its own. What the seller is asking for is to stop being shown work they no longer want.
+    codeRef.current = null;
+    setLinkError(null);
+    setAttempt("abandoned");
+  }
+
   async function linkThisDevice() {
     const bearer = pairingBearer();
     if (!bearer) return;
     setLinkError(null);
+    setAttempt("approving");
     setDevice("linking");
     type LinkStart = { ok?: unknown; userCode?: unknown; reason?: unknown };
     let start: LinkStart | null = null;
@@ -176,27 +239,43 @@ export function HelperStatusCard({
     }
     if (!mounted.current) return;
     if (!start) {
+      setAttempt("none");
       setDevice("unreachable");
       return;
     }
     if (start.ok !== true) {
-      // busy: a grant is already pending — keep watching; already_linked: re-read; unreachable: say so.
-      setDevice(start.reason === "unreachable" ? "unreachable" : start.reason === "already_linked" ? "unknown" : "linking");
+      if (start.reason === "unreachable") {
+        setAttempt("none");
+        setDevice("unreachable");
+        return;
+      }
+      if (start.reason === "already_linked") {
+        setAttempt("none");
+        setDevice("unknown");
+        return;
+      }
+      // busy: the helper is holding a grant this browser does not have the code for — an earlier attempt
+      // in another tab, or one this browser forgot. It cannot be approved and it cannot be withdrawn, so
+      // it is a failure with a wait, not an in-flight link.
+      setLinkError("이전 연결 요청이 아직 남아 있습니다. 잠시 뒤 다시 시도해 주세요.");
+      setAttempt("failed");
       return;
     }
     if (typeof start.userCode !== "string") {
+      setAttempt("none");
       setDevice("unreachable");
       return;
     }
-    try {
-      await api.approveHelperDevice(start.userCode);
-    } catch {
+    codeRef.current = start.userCode;
+    if (await approveCode(start.userCode)) {
       if (!mounted.current) return;
-      setLinkError("이 계정으로 연결을 승인하지 못했습니다. 다시 로그인한 뒤 시도해 주세요.");
-      setDevice("expired");
+      setAttempt("none");
+      // The helper collects its token on its next poll; the status loop above notices.
       return;
     }
-    // The helper collects its token on its next poll; the status loop above notices.
+    if (!mounted.current) return;
+    setLinkError("이 계정으로 연결을 승인하지 못했습니다. 다시 로그인한 뒤 시도해 주세요.");
+    setAttempt("failed");
   }
 
   const helper: HelperState = useMemo(
@@ -209,9 +288,18 @@ export function HelperStatusCard({
         pairingHint: bridge.state.pairingHint,
         attestedApproval: bridge.state.attestedApproval,
         device: paired ? device ?? "unknown" : undefined,
+        attempt,
       }),
-    [bridge.state, pairedBefore, agentVersion, device, paired],
+    [bridge.state, pairedBefore, agentVersion, device, paired, attempt],
   );
+
+  // A link that landed — here, in another tab, or from 설정 — ends every attempt this browser was making.
+  useEffect(() => {
+    if (device === "linked" && attempt !== "none") {
+      codeRef.current = null;
+      setAttempt("none");
+    }
+  }, [device, attempt]);
   const naver = naverSessionOf(
     naverHealth?.sessionReadiness ?? null,
     naverHealth?.sessionObservedAt ? relativeTime(naverHealth.sessionObservedAt) : null,
@@ -245,6 +333,21 @@ export function HelperStatusCard({
             {helper.action.label}
           </Btn>
         );
+      case "linkRetry":
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            <Btn size="sm" onClick={() => void retryLink()} data-testid="helper-link-retry">
+              {helper.action.label}
+            </Btn>
+            {helper.secondary ? (
+              <Btn size="sm" variant="ghost" onClick={cancelLink} data-testid="helper-link-cancel">
+                {helper.secondary.label}
+              </Btn>
+            ) : null}
+          </div>
+        );
+      case "linkCancel":
+        return null;
       case "retry":
         return (
           <div className="flex flex-wrap items-center gap-2">

@@ -65,12 +65,22 @@ describe("helper.env", () => {
   it("names exactly what the installer writes", () => {
     expect([...HELPER_ENV_KEYS]).toEqual([
       "SELLEROPS_BASE_URL", "SELLEROPS_APP_URL", "NAVER_REVIEW_URL", "BRIDGE_ALLOWED_ORIGINS",
-      // Which executor carries a screen read on this machine. Added deliberately: the BYO lane was
-      // selectable only by a process env var, which an installed helper never sees, so the product's
-      // one opt-in execution mode could not be opted into on a packaged install.
+      // Which executor carries a screen read on this machine, and where its CLI is. Added deliberately:
+      // the BYO lane was selectable only by process env vars, which an installed helper never sees, so
+      // the product's one opt-in execution mode could not be opted into on a packaged install — and a
+      // launchd agent's PATH would not have found the CLI even if it had been.
       "REVIEWNARY_EXECUTION_PROVIDER",
+      "ASIDE_CLI",
     ]);
     for (const key of HELPER_ENV_KEYS) expect(key.toLowerCase()).not.toMatch(/password|email|token|secret/);
+  });
+
+  it("carries the executor's path from the file — a launchd agent has no PATH to find it on", () => {
+    const merged = withHelperEnvFile(
+      { REVIEWNARY_HELPER_HOME: "/h" },
+      () => "ASIDE_CLI=/Users/x/.local/bin/aside\n",
+    );
+    expect(merged.ASIDE_CLI).toBe("/Users/x/.local/bin/aside");
   });
 
   it("carries the execution provider from the file, and the process env still wins over it", () => {

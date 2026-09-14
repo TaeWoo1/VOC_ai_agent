@@ -209,3 +209,128 @@ attach되지 않았다. 제품 코드가 아니라 관측 도구의 문제이고
 2. **재빌드한 패키지 도우미로 BYO 라이브를 한 번 더 증명할 것인가** — 오늘의 증명은 개발 체크아웃
    도우미다.
 3. **`linking: pending` 복구 컨트롤**(취소/다시 시도)을 이 lane에 붙일 것인가.
+
+---
+
+# Closeout (2026-09-14)
+
+세 결정을 반영하고 `PARTIAL` → **`DONE`**으로 닫는다. Aside 기능 확장 **0** — scheduler/unattended ·
+auto login/MFA/CAPTCHA · pagination · marketplace write/reply · NAVER · 새 execution provider 추상화 전부
+손대지 않았다. 마이그레이션 **0** · backend 소스 **무변경**.
+
+## C-1. execution provider는 일반 seller UI에 노출하지 않는다 (product-owner decision)
+
+- `ASIDE` · `LOCAL_HELPER` 같은 기술명은 seller UI **금지 유지**(`execution_strategy_v1.md` §5).
+- 파일럿에서 BYO browser runtime 설정은 **operator-assisted provisioning**으로 허용한다 — §C-3의 두 줄.
+- 장기 방향은 installer/setup이 「브라우저 수집 사용」 **opt-in**을 받아 내부 runtime config를 쓰는 것이고,
+  **self-service installer 전체 구현은 지금 하지 않는다.**
+- 그래서 이 closeout은 스위치를 화면에 만들지 않았다. 만든 것은 그 스위치가 **존재할 수 있는 자리**뿐이다.
+
+## C-2. packaged vs checkout helper — 실제로 다른 것 둘
+
+| | checkout helper | packaged helper |
+|---|---|---|
+| 기동 | `npx tsx src/cli/local-agent.ts --bridge-only` | launchd user agent, `app/bin/node app/helper.mjs --bridge-only` |
+| 승인 대화상자 | `dev_tty_stderr`(+`--dev-insecure-auto-approve`) | **`macos_native`** — 판매자가 실제로 [허용]을 누른다 |
+| 설정 | 프로세스 env | `service.env`(launchd가 주입) + **`helper.env`**(도우미가 스스로 읽는 닫힌 키 목록) |
+| provider 선택 | env 한 줄 | `helper.env`의 선언된 키 — **v1에서 추가** |
+| **`aside` 실행 파일** | 개발자 셸의 PATH에 있다 | **PATH에 없다** |
+
+**두 번째가 이번 closeout이 찾은 것이다.** launchd agent는 「PATH를 거의 물려받지 않는다」 — 이 저장소가
+node 바이너리를 절대경로로 두는 이유로 자기 코드에 적어 둔 사실이다. `ASIDE_CLI`는 오래전부터 있었지만
+`HELPER_ENV_KEYS`에 없었으므로, 설치된 도우미는 provider를 `ASIDE`로 고를 수는 있어도 **아무것도 실행할 수
+없었다**. 그래서 키를 하나 더 선언했다(경로이지 비밀이 아니다). `ASIDE_ACCOUNT`는 **추가하지 않았다** —
+이 파일럿에서 필요해진 적이 없고, 쓰이지 않는 키를 미리 여는 것은 설정 표면을 넓히는 일이다.
+
+**실측 before/after**(설치된 도우미 자신의 로그):
+`reviewAcquisitionProvider: LOCAL_HELPER` → **`ASIDE`**, `approvalPresenter: macos_native`.
+
+## C-3. pilot provisioning steps (operator-assisted)
+
+1. `tools/helper/build-macos.sh` — 사이트 URL을 `REVIEWNARY_APP_URL`/`REVIEWNARY_BASE_URL`로 굽는다.
+2. 판매자 Mac에서 **`reviewnary 도우미 설치.command`** 더블클릭(앱·브라우저 교체, 상태 보존).
+3. **운영자가** `<helper home>/helper.env`에 두 줄:
+   ```
+   REVIEWNARY_EXECUTION_PROVIDER=ASIDE
+   ASIDE_CLI=<aside 실행 파일 절대경로>
+   ```
+   `chmod 600`, 그리고 `launchctl stop/start ai.sellerops.local-agent`.
+4. 판매자: **도우미 연결**(native [허용]) → **이 기기 연결** → 쿠팡 로그인 + 상품평 목록 → **지금 동기화**.
+
+3번이 self-service가 아니라는 것이 §C-1이 명시적으로 허용한 상태이고, §9-1이 올린 결정의 대상이다.
+
+## C-4. pairing recovery — `linking: pending` wedge
+
+**결함.** 도우미는 grant를 발급한 순간부터 만료까지 `linking: "pending"`을 보고한다 — 참이고, 브라우저
+쪽 절반이 성공했는지에 대해서는 아무 말도 하지 않는다. approve가 실패하면 카드는 자기 오류 낱말을 적었고
+**2초 뒤 status poll이 그것을 도우미의 `pending`으로 덮었다**. 판매자는 「연결 확인 중」을 계속 읽었고
+끝낼 컨트롤도 멈출 컨트롤도 없었다. 2026-09-14 라이브 관측.
+
+**수정 — 기존 generic device-link 컴포넌트 안에서, pairing/token/security contract 변경 0.**
+
+- 브라우저의 **자기 시도**가 별도 축이 된다(`DeviceAttempt`: `none · approving · failed · abandoned`).
+  도우미가 `linked`가 **아닐 때만** 이 축이 도우미의 `pending`을 이긴다 — 어디서든 링크가 성사되면 모든
+  시도가 끝난다.
+- **시도가 끝나면 빠른 polling을 멈춘다.** 느린 beat는 남아, 다른 탭이나 설정에서 성사된 링크는 새로고침
+  없이 여전히 카드를 초록으로 만든다.
+- **[다시 시도]** — 이 브라우저가 **자기가 발급받은 userCode를 들고 있다**가 그대로 다시 승인한다. 도우미
+  소스가 이미 「the browser gets the same one back only if it kept it」이라고 적어 둔 그 조건이다. 새 grant
+  0 · 도우미 호출 0.
+- **[연결 취소]** — 도우미의 grant를 **철회하지 않는다**(bridge에 그런 경로가 없고 이 패키지는 만들지
+  않는다). 판매자가 더는 원하지 않는 일을 진행 중인 것처럼 그리는 것을 멈출 뿐이고, 남은 grant는 스스로
+  만료된다.
+- `busy`(다른 탭이 발급받아 이 브라우저에 코드가 없는 grant)는 **in-flight이 아니라 기다림이 있는 실패**로
+  다룬다 — 승인할 수도 철회할 수도 없으므로.
+
+**라이브**(패키지 도우미, 실제 grant, production 페이지 코드; 강제한 것은 approve 응답 403 **한 번**뿐이고
+그것이 관측된 원인 그대로다): 「**연결하지 못했습니다**」 + [다시 시도] + [연결 취소] → **8초의 polling을
+지나도 그대로**(옛 동작은 2초 안에 「연결 확인 중」으로 뒤집혔다) → [다시 시도] → **연결됨**.
+
+**정직 보고**: [연결 취소]의 라이브 증명은 하지 않았다 — 취소하면 도우미의 grant가 만료될 때까지 몇 분간
+재연결이 막히고, 그 상태로 운영자의 기계를 두고 싶지 않았다. 단위 테스트가 그 경로를 고정한다.
+그리고 **새로고침으로 컴포넌트 상태를 잃으면** 카드는 다시 「연결 확인 중」을 보이지만 **무한은 아니다** —
+도우미 자신이 grant 만료 시 `expired`를 보고하고 카드는 다시 [이 기기 연결]을 그린다(≤ grant TTL).
+
+## C-5. Live E2E — packaged helper, `LIVE PASS`
+
+승인 `apr-cp-aside-pkg-afaaf3` / run `wt-ead9510d`.
+
+```
+packaged install (launchd, macos_native) → helper.env 두 줄 → 재기동: provider ASIDE
+  → 도우미 연결(판매자가 native [허용]) → 이 기기 연결 → device_link_result outcome=linked
+  → 도우미 「연결됨」 → readiness READY → ONE PRESS 04:49:14Z
+  → provider ASIDE · target/binding resolved
+  → aside read: verdict MATCH · readReason OK · rows 10 · rolesResolved 5 · pager 1/3 · llmCalls 0 · 4,523ms
+  → walk: fresh 9 · known 1 · PAGE_LIMIT_REACHED · pages 1
+  → handoff: received 9 · stored 0 · skipped 9 · failed 0
+  → sync_jobs PARTIAL 0/9/0 · Home lastSuccessfulSyncAt 04:49:23Z
+```
+
+- **COUPANG REAL 69 → 69.** 아침 run 이후 새 리뷰가 없었고 **9행 전부 dedup으로 걸러졌다** — 같은
+  ingestion spine이 패키지 경로에서도 idempotent임을 보인 것이고, 만들어 낸 조건이 아니다.
+- device link는 **이 run에서 새로 맺혔다**(양쪽 기존 링크를 먼저 revoke해 링크 단계가 증명에 포함되도록 했다).
+- **마켓플레이스 클릭 0 · 키 입력 0 · 다운로드 0 · WRITE 0 · pagination 0 · 실행 LLM 0.** off-host 0.
+
+## C-6. Aside Acquisition Productization v1 — **DONE**
+
+| 완료 판정 | 상태 |
+|---|---|
+| packaged helper 기준 seller-facing acquisition E2E | **PASS** (§C-5) |
+| failed pairing self-recovery | **PASS** (§C-4, 취소 경로는 테스트) |
+
+## C-7. 실제 seller pilot 전에 남은 gap
+
+1. **provisioning 3단계가 사람 손이다**(§C-3). 판매자가 켜는 방법은 없고, 그것이 §C-1의 장기 방향이다.
+2. **패키지가 서명·공증되지 않았다** — 판매자 Mac에서 Gatekeeper를 지나야 하고, 그 절차는 운영자 동반이다.
+3. **`연결 취소` 라이브 미관측** · **새로고침 후에는 grant TTL까지 「연결 확인 중」**(무한은 아님).
+4. **pagination/backlog 없음** · **바인딩 미해결 실패는 기록 불가** · **스케줄/무인 없음** — v1 그대로.
+5. **호스트가 없다** — 고정 공인 IPv4 + 공개 HTTPS(`pilot_runtime_foundation_v1.md` §10). 이번 증명은
+   `localhost` 사이트로 구운 패키지다.
+6. `collector/test/action-window/reply-submission/reply-session.test.ts` 타입 오류 1건은 **선행 결함**.
+
+## C-8. PRODUCT_DECISION_NEEDED
+
+1. **installer opt-in의 모양** — 「브라우저 수집 사용」 체크 하나가 `helper.env`를 쓰게 할 것인가, 그리고
+   그 체크박스가 execution 개념을 화면에 올리지 않고 무엇이라고 불릴 것인가.
+2. **패키지 서명/공증** — 파일럿을 운영자 동반으로 갈 것인가, 배포 채널을 만들 것인가.
+3. **`ASIDE_ACCOUNT`** — Aside가 여러 계정을 들 때 필요해지면 그때 키를 열 것인가(지금은 열지 않았다).

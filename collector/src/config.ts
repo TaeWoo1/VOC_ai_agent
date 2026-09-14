@@ -47,6 +47,12 @@ export const HELPER_ENV_KEYS = [
   // A declared key rather than a new mechanism: the list is still closed, the default is still
   // LOCAL_HELPER, an unknown value still refuses to boot, and process env still wins over the file.
   EXECUTION_PROVIDER_ENV,
+  // Where that executor's CLI is. A path, never a secret — and on a packaged install the only way to
+  // name it: the helper runs as a launchd user agent, which "inherits almost no PATH" (this repo's own
+  // note on why the node binary is absolute), so a bare `aside` resolves in a developer shell and
+  // nowhere else. Without this key the provider above can be selected on an installed helper and then
+  // cannot spawn anything.
+  "ASIDE_CLI",
 ] as const;
 
 export function parseHelperEnv(text: string): Record<string, string> {
