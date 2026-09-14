@@ -22,10 +22,14 @@ COLLECTOR="$REPO_ROOT/collector"
 ARCH="$(uname -m)"
 VERSION="$(node -p "require('$COLLECTOR/package.json').version")"
 OUT="${1:-$REPO_ROOT/dist/reviewnary-helper-macos-$ARCH}"
-PW_VERSION="$(node -p "require('$COLLECTOR/node_modules/playwright/package.json').version")"
 
+# The dependency checks come BEFORE anything that reads node_modules: a checkout without it used to fail
+# on the Playwright version lookup with a raw MODULE_NOT_FOUND stack, two lines above the message that
+# says what to do about it.
 [ "$(uname -s)" = "Darwin" ] || { echo "macOS only: the pilot supports the platform its launchd adapter supports." >&2; exit 2; }
 [ -x "$COLLECTOR/node_modules/.bin/esbuild" ] || { echo "run npm install in collector/ first" >&2; exit 2; }
+[ -f "$COLLECTOR/node_modules/playwright/package.json" ] || { echo "run npm install in collector/ first" >&2; exit 2; }
+PW_VERSION="$(node -p "require('$COLLECTOR/node_modules/playwright/package.json').version")"
 
 # The app half is rebuilt every time; the browser half (≈550 MB) is kept when it is already there.
 rm -rf "$OUT/app"; mkdir -p "$OUT/app/bin" "$OUT/app/node_modules" "$OUT/browsers"

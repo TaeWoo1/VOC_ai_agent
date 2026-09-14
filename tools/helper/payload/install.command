@@ -16,6 +16,21 @@ PKG_BASE_URL="$(sed -n 's/^base_url=//p' "$SRC/BUILD.txt" 2>/dev/null || true)"
 APP_URL="${REVIEWNARY_APP_URL:-${PKG_APP_URL:-http://localhost:5173}}"
 BASE_URL="${REVIEWNARY_BASE_URL:-${PKG_BASE_URL:-http://127.0.0.1:8080}}"
 
+# A package built for a developer's own machine must not install silently on a seller's. The site is
+# baked at build time; when the stamp is missing or local, every URL above resolves to this Mac, the
+# helper talks to a backend that is not there, and the only thing the seller ever sees is
+# 「서버 연결 확인 필요」 — a symptom with no cause on screen. Refuse instead, and name the fix in the
+# seller's words. A developer install says so out loud.
+case "$APP_URL$BASE_URL" in
+  *localhost*|*127.0.0.1*|*0.0.0.0*)
+    if [ -z "${REVIEWNARY_ALLOW_LOCAL_INSTALL:-}" ]; then
+      printf '\n%s\n' "이 설치 파일은 개발용입니다 (내 컴퓨터 주소로 만들어졌습니다). 담당자에게 파일럿용 설치 파일을 받아 주세요."
+      exit 2
+    fi
+    printf '\n%s\n' "개발용 설치입니다 (REVIEWNARY_ALLOW_LOCAL_INSTALL)."
+    ;;
+esac
+
 say() { printf '\n%s\n' "$*"; }
 say "reviewnary 도우미를 설치합니다."
 

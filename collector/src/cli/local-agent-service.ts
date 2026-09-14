@@ -19,6 +19,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { EXECUTION_PROVIDER_ENV } from "../action-window/initial-import/execution-provider-selection";
+import { withHelperEnvFile } from "../config";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   buildLocalAgentServicePlan,
@@ -247,17 +249,40 @@ async function install(own: readonly string[], agentArgs: readonly string[]): Pr
   }
 }
 
+/**
+ * What an operator can ask a stuck seller for, in one command.
+ *
+ * <b>Which site and which collection mode, because those are what a stuck pilot is usually about.</b>
+ * `loaded` + `healthy` + a version say the helper is running; they cannot tell apart a helper that is
+ * fine from one that is pointed at the wrong deployment or was never provisioned for browser collection
+ * — and both of those present to the seller as the same 「서버 연결 확인 필요」 or a 지금 동기화 that
+ * never became available. Both facts are already world-readable on this Mac (the plist and the helper's
+ * own config file); this only saves an operator from walking a seller through opening them.
+ *
+ * <b>Nothing here is a secret, a credential, personal, or marketplace data.</b> The site is a public URL,
+ * the mode is a closed token, and the executor path is a path. The plist's own planner refuses to hold a
+ * secret at all, and `helper.env` is a closed key list that cannot carry a password.
+ */
 async function status(): Promise<void> {
   const plistPath = resolve(process.env.HOME ?? "", "Library/LaunchAgents", `${LOCAL_AGENT_SERVICE_LABEL}.plist`);
-  const port = bridgePort(installedServiceEnv(plistPath));
+  const serviceEnv = installedServiceEnv(plistPath);
+  const port = bridgePort(serviceEnv);
   const loaded = launchctl("print", `${domainTarget()}/${LOCAL_AGENT_SERVICE_LABEL}`).ok;
   const health = await probeHealth(port);
+  const home = serviceEnv.REVIEWNARY_HELPER_HOME ?? "";
+  const merged = home === "" ? serviceEnv : withHelperEnvFile({ ...serviceEnv, REVIEWNARY_HELPER_HOME: home });
   emit({
     action: "status",
     label: LOCAL_AGENT_SERVICE_LABEL,
     loaded,
     healthy: health !== null,
     ...(health ? { agentVersion: health.agentVersion, protocolVersion: health.protocolVersion } : {}),
+    appUrl: serviceEnv.SELLEROPS_APP_URL ?? null,
+    baseUrl: serviceEnv.SELLEROPS_BASE_URL ?? null,
+    // The closed token, never the vendor name of whatever carries it — and `configured: false` says the
+    // difference between "browser collection is off here" and "we could not read the file".
+    browserCollection: (merged[EXECUTION_PROVIDER_ENV] ?? "") !== "" ? "CONFIGURED" : "NOT_CONFIGURED",
+    executorPathSet: (merged.ASIDE_CLI ?? "") !== "",
   });
 }
 
