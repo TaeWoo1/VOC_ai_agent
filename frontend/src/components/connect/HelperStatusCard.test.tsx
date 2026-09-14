@@ -27,7 +27,13 @@ let deviceStatus: unknown = null;
 /** The helper's `POST /bridge/device/link` answer. */
 let linkStart: unknown = null;
 const approve = vi.fn(async (_code: string) => {});
-vi.mock("../../lib/apiClient", () => ({ api: { approveHelperDevice: (code: string) => approve(code) } }));
+const listHelperDevices = vi.fn();
+vi.mock("../../lib/apiClient", () => ({
+  api: {
+    approveHelperDevice: (code: string) => approve(code),
+    listHelperDevices: () => listHelperDevices(),
+  },
+}));
 const fetchMock = vi.fn((url: string, init?: RequestInit) => {
   const answer = (body: unknown) =>
     Promise.resolve(body === null ? { ok: false, json: () => Promise.resolve(null) } : { ok: true, json: () => Promise.resolve(body) });
@@ -71,6 +77,10 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+});
+
+beforeEach(() => {
+  listHelperDevices.mockResolvedValue([{ id: "dev-1" }]);
 });
 
 describe("HelperStatusCard — the six words and their one control", () => {
@@ -236,6 +246,30 @@ describe("HelperStatusCard — 이 기기 연결 (Helper Device Authentication v
     // nothing here asks the bridge to withdraw one (it offers no such route and this package adds none).
     await waitFor(() => expect(screen.getByTestId("helper-state")).toHaveTextContent("기기 연결 필요"));
     expect(screen.getByTestId("helper-link")).toBeInTheDocument();
+  });
+
+  /**
+   * **A token is valid or it is not; it does not say whose.** A helper linked to another Reviewnary
+   * account answered `linked: true` in front of this account's screen and the card called it 연결됨 — then
+   * the seller pressed a control that could only fail, with nothing on screen saying why. Observed live
+   * 2026-09-14 (`target_refused 404`).
+   */
+  it("a link that belongs to another account is not 연결됨", async () => {
+    deviceStatus = { linked: true, linking: null, verified: "OK", deviceId: "dev-elsewhere" };
+    listHelperDevices.mockResolvedValue([{ id: "dev-1" }]);
+    renderCard();
+    await waitFor(() => expect(screen.getByTestId("helper-state")).toHaveTextContent("기기 연결 필요"));
+    expect(screen.getByText(/다른 Reviewnary 계정에 연결된 기기입니다/)).toBeTruthy();
+    expect(screen.getByTestId("helper-link")).toBeTruthy();
+    // Seller words only: no org, no token, no device id anywhere on screen.
+    expect(document.body.textContent ?? "").not.toMatch(/org|token|dev-elsewhere|조직/i);
+  });
+
+  it("claims nothing when this account's device list cannot be read — an unread list is not evidence", async () => {
+    deviceStatus = { linked: true, linking: null, verified: "OK", deviceId: "dev-elsewhere" };
+    listHelperDevices.mockRejectedValue(new Error("offline"));
+    renderCard();
+    await waitFor(() => expect(screen.getByTestId("helper-state")).toHaveTextContent("연결됨"));
   });
 
   it("a helper that cannot reach the server says which side is unreachable", async () => {

@@ -50,7 +50,14 @@ export type DeviceAttempt = "none" | "approving" | "failed" | "abandoned";
  * different axis from pairing: pairing is browser ↔ helper on this machine, the link is helper ↔ reviewnary
  * account. `undefined` = not asked (a surface that only reads pairing); `unknown` = asked, no answer yet.
  */
-export type DeviceLinkWord = "linked" | "unlinked" | "linking" | "denied" | "expired" | "unreachable" | "unknown";
+/**
+ * `foreign` — the helper holds a token that this Reviewnary account cannot use, because it belongs to a
+ * different one. A token is valid or it is not; it does not say whose, so a helper linked elsewhere used to
+ * answer `linked` in front of this account's screen and the card called it 연결됨. The seller then pressed a
+ * control that could only fail, with nothing on screen saying why. Observed 2026-09-14.
+ */
+export type DeviceLinkWord =
+  | "linked" | "unlinked" | "linking" | "denied" | "expired" | "unreachable" | "unknown" | "foreign";
 
 export interface HelperState {
   key: HelperStateKey;
@@ -145,6 +152,16 @@ export function helperStatusOf(input: HelperStatusInput): HelperState {
           tone: "info",
           note: "이 계정과 연결하는 중입니다. 잠시만 기다려 주세요.",
           action: null,
+        };
+      case "foreign":
+        return {
+          key: "LINK",
+          label: "기기 연결 필요",
+          tone: "warn",
+          // The seller's words for it, and no further: which account, which token, which organisation are
+          // all facts about our plumbing. What they can act on is the one button beside this sentence.
+          note: "다른 Reviewnary 계정에 연결된 기기입니다. 이 계정에 다시 연결해 주세요.",
+          action: { kind: "link", label: "이 기기 연결" },
         };
       case "unreachable":
         return {

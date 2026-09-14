@@ -122,6 +122,20 @@ export interface DeviceLinkStatus {
   linked: boolean;
   linking: DeviceLinking;
   verified: DeviceVerification;
+  /**
+   * The id of the device row this token belongs to, as the server just reported it — or null when the
+   * token could not be verified.
+   *
+   * <b>Why the browser needs it.</b> A token is valid or it is not; it does not say WHOSE. A helper
+   * linked to one Reviewnary account answers `linked: true` in front of another account's screen, which
+   * then tells the seller they are connected and hands them a run that dies at target resolution with
+   * nothing on screen explaining it. The browser can settle that itself — the account's own device list
+   * is a page it may already read — but only if it knows which row to look for.
+   *
+   * Not a secret and not the token: a row id the org owner can already list. It travels over the same
+   * authenticated loopback as the rest of this status.
+   */
+  deviceId: string | null;
   helperVersion: string;
 }
 
@@ -265,10 +279,21 @@ export class DeviceLinker {
   /** Linked or not, and — at most every 10 s — whether the backend still honours the token. */
   async status(): Promise<DeviceLinkStatus> {
     const link = readDeviceLink(this.home);
-    if (!link) return { linked: false, linking: this.linking, verified: "UNVERIFIED", helperVersion: this.helperVersion };
+    if (!link) {
+      return { linked: false, linking: this.linking, verified: "UNVERIFIED", helperVersion: this.helperVersion, deviceId: null };
+    }
     const verdict = await this.verify(link);
-    return { linked: verdict !== "REVOKED", linking: null, verified: verdict, helperVersion: this.helperVersion };
+    return {
+      linked: verdict !== "REVOKED",
+      linking: null,
+      verified: verdict,
+      helperVersion: this.helperVersion,
+      deviceId: verdict === "OK" ? this.lastDeviceId : null,
+    };
   }
+
+  /** The row id the last successful verification reported. Reset whenever the token stops being honoured. */
+  private lastDeviceId: string | null = null;
 
   private async verify(link: DeviceLink): Promise<DeviceVerification> {
     if (this.lastVerify && this.now() - this.lastVerify.atMs < VERIFY_INTERVAL_MS) return this.lastVerify.verdict;
@@ -277,11 +302,21 @@ export class DeviceLinker {
       const res = await this.fetchImpl(`${this.baseUrl}/api/helper-devices/me`, {
         headers: { authorization: `Bearer ${link.token}` },
       });
-      if (res.ok) verdict = "OK";
-      else if (res.status === 401) {
+      if (res.ok) {
+        verdict = "OK";
+        // The same response that proves the token is honoured says which row honours it. One read, no
+        // extra request, and the value is a row id the account owner can already list.
+        try {
+          const body = (await res.json()) as { id?: unknown };
+          this.lastDeviceId = typeof body.id === "string" ? body.id : null;
+        } catch {
+          this.lastDeviceId = null;
+        }
+      } else if (res.status === 401) {
         // The seller revoked this helper (or the token expired): the file is now a dead credential — drop it.
         clearDeviceLink(this.home);
         log("device_link_revoked", {});
+        this.lastDeviceId = null;
         verdict = "REVOKED";
       } else verdict = "UNREACHABLE";
     } catch {

@@ -151,12 +151,29 @@ export function ConnectionInfoSection({
   onChanged: () => void;
 }) {
   const guidance = (channelCode && CHANNEL_GUIDANCE[channelCode]) ?? GENERIC_GUIDANCE;
+  /**
+   * **One channel, two capabilities — and they are not one status.**
+   *
+   * On Coupang this section is specifically the API connection that collects 문의 and 주문; reviews arrive
+   * by a different route entirely (the seller's own screen, in 「상품평 가져오기」 above) and neither one
+   * needs the other. Calling this 「연결 정보」 made a seller who had not filled it in read the whole channel
+   * as unconnected while their reviews were being collected. Named by the capability it actually serves.
+   *
+   * What carries either one — an executor, a provider, a helper — stays off this screen as always.
+   */
+  const isCoupang = channelCode === "COUPANG";
   // The entry form needs an API template; manual / file-upload channels (404 →
   // null) get the guidance text only, never a form.
   const canEnter = template !== null && template.fields.length > 0;
 
   return (
-    <Section title="연결 정보">
+    <Section title={isCoupang ? "문의·주문 자동 수집" : "연결 정보"}>
+      {isCoupang ? (
+        <p className="mb-3 break-keep text-sm text-muted">
+          쿠팡 문의와 주문은 API로 자동 수집합니다. 상품평은 위 「상품평 가져오기」에서 따로 가져오며, 둘은
+          서로 필요하지 않습니다.
+        </p>
+      ) : null}
       {loading ? (
         <p className="text-base text-muted">불러오는 중…</p>
       ) : error ? (

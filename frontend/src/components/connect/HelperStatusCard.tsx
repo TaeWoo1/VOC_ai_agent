@@ -19,10 +19,24 @@ export const HELPER_GUIDE_PATH = "/connect/helper";
 /** Where 「네이버 로그인」 goes: the guided run whose first step opens the seller's own NAVER window. */
 export const NAVER_LOGIN_PATH = "/connect/review-history";
 
-/** The helper's own answer about its account link (`GET /bridge/device/status`), reduced to one word. */
-function deviceWordOf(body: { linked?: unknown; linking?: unknown } | null): DeviceLinkWord {
+/**
+ * The helper's own answer about its account link (`GET /bridge/device/status`), reduced to one word.
+ *
+ * `ownDeviceIds` is this account's device list. A helper that holds a live token whose row is not in it is
+ * linked to a DIFFERENT Reviewnary account — valid, and useless here. Null means the list could not be read,
+ * and then nothing is claimed: an unread list is not evidence of a foreign token.
+ */
+function deviceWordOf(
+  body: { linked?: unknown; linking?: unknown; deviceId?: unknown } | null,
+  ownDeviceIds: readonly string[] | null,
+): DeviceLinkWord {
   if (!body) return "unknown";
-  if (body.linked === true) return "linked";
+  if (body.linked === true) {
+    if (ownDeviceIds && typeof body.deviceId === "string" && !ownDeviceIds.includes(body.deviceId)) {
+      return "foreign";
+    }
+    return "linked";
+  }
   switch (body.linking) {
     case "pending":
       return "linking";
@@ -125,7 +139,13 @@ export function HelperStatusCard({
     try {
       const r = await fetch(`${bridgeHttpBase()}/bridge/device/status`, { headers: { Authorization: `Bearer ${bearer}` } });
       if (!r.ok) return "unknown";
-      return deviceWordOf((await r.json()) as { linked?: unknown; linking?: unknown });
+      const body = (await r.json()) as { linked?: unknown; linking?: unknown; deviceId?: unknown };
+      // Only asked when the helper claims a link — the account's own list, which this screen may read.
+      let own: string[] | null = null;
+      if (body.linked === true) {
+        own = await api.listHelperDevices().then((d) => d.map((x) => x.id)).catch(() => null);
+      }
+      return deviceWordOf(body, own);
     } catch {
       return "unknown";
     }
