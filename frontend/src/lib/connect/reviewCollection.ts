@@ -29,6 +29,16 @@ import type { SyncRunView } from "../types";
 
 export type ReviewCollectionStepId = "HELPER" | "SURFACE" | "STORE" | "COLLECTING" | "DONE";
 
+/**
+ * <b>이 방문이 수집을 시작해도 되는가.</b>
+ *
+ * `PRESSED`는 판매자가 방금 [지금 가져오기]를 눌러서 이 화면에 왔다는 뜻이고, `VISITED`는 주소로 왔다는
+ * 뜻이다(북마크 · 새로고침 · 뒤로가기). 이 구분이 필요한 이유는 <b>이 화면이 이제 스스로 읽기 때문</b>이다 —
+ * 수집이 press가 아니라 <b>도착</b>으로 시작하면, 새로고침 한 번이 판매자가 요청하지 않은 마켓플레이스
+ * 읽기가 된다. 명시적 개시는 이 lane이 약화시키지 않기로 한 성질이다.
+ */
+export type ReviewCollectionArrival = "PRESSED" | "VISITED";
+
 /** 화면 위의 걸음. `STORE`는 이미 아는 계정에서는 건너뛰므로 진행 표시에서도 빠진다. */
 export const REVIEW_COLLECTION_STEPS: readonly { id: ReviewCollectionStepId; label: string }[] = [
   { id: "HELPER", label: "수집 준비" },
@@ -44,6 +54,7 @@ export const REVIEW_COLLECTION_STEPS: readonly { id: ReviewCollectionStepId; lab
  * `RECHECK`는 그 press가 보내는 커맨드의 이름이지 라벨이 아니다 — 라벨은 판매자가 방금 한 일을 말한다.
  */
 export type ReviewCollectionControl =
+  | { kind: "START"; label: string }
   | { kind: "RECHECK"; label: string }
   | { kind: "CONFIRM_STORE"; label: string }
   | { kind: "HELPER" }
@@ -91,6 +102,8 @@ export interface ReviewCollectionInput {
   bootstrap: StoreIdentityBootstrap | null;
   /** 이 화면이 run을 띄우는 중에 실패했는가. */
   startFailed: boolean;
+  /** 판매자가 눌러서 왔는가, 주소로 왔는가. */
+  arrival: ReviewCollectionArrival;
 }
 
 const OPENED_LIST = "상품평 목록을 열었습니다";
@@ -152,13 +165,25 @@ function surfaceBlocker(code: string): {
         label: "다시 시도",
         failure: true,
       };
-    default:
-      // UNSUPPORTED_STATE · UI_DRIFT · TARGET_* — 전부 같은 하나의 수리: 목록을 띄우는 것.
+    case "RUNTIME_FAULT":
       return {
         step: "SURFACE",
-        title: "상품평 목록 화면이 아닙니다",
-        body: "쿠팡 창에서 상품평 목록을 연 뒤 아래를 눌러 주세요.",
-        label: OPENED_LIST,
+        title: "가져오는 중 문제가 생겼습니다",
+        body: "저장된 상품평은 없습니다. 잠시 뒤 다시 시도해 주세요.",
+        label: "다시 시도",
+        failure: true,
+      };
+    default:
+      // UNSUPPORTED_STATE · UI_DRIFT · TARGET_* — 전부 같은 하나의 수리: 다시 읽는 것.
+      //
+      // **문장이 양쪽 공급자에 대해 참이어야 한다.** 화면을 직접 여는 공급자에서는 「목록을 열어 주세요」가
+      // 이미 연 창에 대한 지시가 되고, 판매자가 걸어가는 공급자에서는 여전히 옳다. 그래서 무엇을 확인할지만
+      // 말하고, 누가 열었는지는 말하지 않는다.
+      return {
+        step: "SURFACE",
+        title: "상품평 목록을 읽지 못했습니다",
+        body: "쿠팡 창에 상품평 목록이 열려 있는지 확인한 뒤 다시 시도해 주세요.",
+        label: "다시 시도",
         failure: false,
       };
   }
@@ -187,7 +212,7 @@ const BLANK = {
  * 아직 답하지 않은 읽기는 걸음을 <b>주장하지 않는다</b> — 읽지 못한 사실은 참인 사실이 아니다.
  */
 export function reviewCollectionStateOf(input: ReviewCollectionInput): ReviewCollectionState {
-  const { readiness, helperKey, run, bootstrap, unavailable, startFailed } = input;
+  const { readiness, helperKey, run, bootstrap, unavailable, startFailed, arrival } = input;
 
   if (!readiness || !helperKey) {
     return state("HELPER", { ...BLANK, title: "수집 준비", body: "준비 상태를 확인하고 있습니다.", busy: true });
@@ -198,7 +223,9 @@ export function reviewCollectionStateOf(input: ReviewCollectionInput): ReviewCol
     return state("HELPER", {
       ...BLANK,
       title: "브라우저 수집 준비",
-      body: "쿠팡 상품평은 열어 둔 판매자 화면에서 읽어 옵니다. 그 화면과 함께 일할 도우미를 준비해 주세요.",
+      // 「열어 둔 판매자 화면」은 판매자가 연다는 뜻이었고, 이 공급자에서는 제품이 연다. 시스템이 하는 일을
+      // 판매자에게 시키는 문장은 이 lane에서 고쳐야 하는 바로 그 종류다.
+      body: "쿠팡 판매자센터 화면을 열어 상품평을 읽어 옵니다. 그 화면과 함께 일할 도우미가 필요합니다.",
       primary: { kind: "HELPER" },
     });
   }
@@ -227,12 +254,22 @@ export function reviewCollectionStateOf(input: ReviewCollectionInput): ReviewCol
     });
   }
 
+  // 주소로 들어온 방문은 아무것도 시작하지 않는다. 시작은 언제나 판매자의 press다.
+  if (arrival === "VISITED" && !run) {
+    return state("SURFACE", {
+      ...BLANK,
+      title: "상품평을 가져올 준비가 됐습니다",
+      body: "누르시면 쿠팡 판매자센터의 상품평 목록을 열어 이번 페이지를 읽어 옵니다.",
+      primary: { kind: "START", label: "지금 가져오기" },
+    });
+  }
+
   // 2) run이 아직 없다 = 창을 여는 중.
   if (!run) {
     return state("SURFACE", {
       ...BLANK,
-      title: "쿠팡 판매자 화면을 여는 중입니다",
-      body: "잠시만 기다려 주세요.",
+      title: "쿠팡 판매자센터를 여는 중입니다",
+      body: "상품평 목록을 열어 이번 페이지를 읽어 옵니다.",
       busy: true,
     });
   }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Btn, BtnLink } from "../../components/ui/Btn";
 import { Empty } from "../../components/ui/Empty";
 import { HelperStatusCard } from "../../components/connect/HelperStatusCard";
@@ -13,6 +13,7 @@ import {
   lastScreenRead,
   reviewCollectionStateOf,
   type CollectionReceipt,
+  type ReviewCollectionArrival,
   type ReviewCollectionState,
 } from "../../lib/connect/reviewCollection";
 import { reviewRecordPath } from "../../lib/reviewRecord";
@@ -40,6 +41,25 @@ import type { SellerAccountResponse } from "../../lib/types";
 export function ReviewCollectionFlow() {
   const { accountId = "" } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  /**
+   * <b>눌러서 왔는가, 주소로 왔는가</b> — 그리고 그 답은 한 번만 유효하다.
+   *
+   * 이 화면은 이제 스스로 읽으므로, 도착이 곧 수집이면 새로고침 한 번이 판매자가 요청하지 않은 마켓플레이스
+   * 읽기가 된다. 그래서 press가 실어 보낸 의도를 <b>읽자마자 소비</b>한다(history state를 비운다): 같은 주소를
+   * 다시 열면 그때는 시작 버튼이 있는 화면이고, 시작은 다시 판매자의 것이다.
+   */
+  const [arrival] = useState<ReviewCollectionArrival>(() =>
+    (location.state as { start?: boolean } | null)?.start === true ? "PRESSED" : "VISITED",
+  );
+  useEffect(() => {
+    if ((location.state as { start?: boolean } | null)?.start === true) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // 한 번만. 의도는 도착의 성질이지 렌더의 성질이 아니다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [account, setAccount] = useState<SellerAccountResponse | null | undefined>(undefined);
   const [readiness, setReadiness] = useState<AcquisitionReadinessView | null>(null);
@@ -106,8 +126,9 @@ export function ReviewCollectionFlow() {
         unavailable: surface.unavailable,
         bootstrap,
         startFailed: surface.startFailed,
+        arrival,
       }),
-    [readiness, helperKey, surface, bootstrap],
+    [readiness, helperKey, surface, bootstrap, arrival],
   );
 
   /**
@@ -130,10 +151,13 @@ export function ReviewCollectionFlow() {
     };
   }, [readiness?.state, runKey]);
 
-  /** Start the walk as soon as the helper is ready — the press that brought the seller here was the decision. */
+  /**
+   * 도우미가 준비되는 대로 시작한다 — <b>판매자의 press로 들어온 방문에 한해서</b>. 그 press가 결정이었고,
+   * 그 뒤로 물어볼 것은 없다. 주소로 들어온 방문은 시작하지 않고 시작 버튼을 보여 준다.
+   */
   useEffect(() => {
-    if (helperReady && runKey === 0) setRunKey(1);
-  }, [helperReady, runKey]);
+    if (helperReady && runKey === 0 && arrival === "PRESSED") setRunKey(1);
+  }, [helperReady, runKey, arrival]);
 
   const confirmStore = useCallback(
     (value: string) => {
@@ -202,7 +226,9 @@ export function ReviewCollectionFlow() {
         </Btn>
       </div>
 
-      <StepRail current={step.step} skipStore={readiness?.state !== "STORE_IDENTITY_UNKNOWN"} />
+      {/* 끝난 화면에는 걸음이 없다. 완료 카드가 결과 전부이고, 그 위에 아무 칸도 굵지 않은 진행 표시가
+          남아 있으면 「아무 일도 일어나지 않았다」처럼 읽힌다. */}
+      {done ? null : <StepRail current={step.step} skipStore={readiness?.state !== "STORE_IDENTITY_UNKNOWN"} />}
 
       {done ? (
         <section className="space-y-4 rounded-2xl border border-line bg-surface p-6" data-testid="flow-done">
@@ -287,7 +313,8 @@ export function ReviewCollectionFlow() {
             <div>
               <Btn
                 onClick={() => {
-                  if (step.primary?.kind === "RECHECK") sendRef.current?.("REQUEST_STEP_RECHECK");
+                  if (step.primary?.kind === "START") setRunKey((k) => k + 1);
+                  else if (step.primary?.kind === "RECHECK") sendRef.current?.("REQUEST_STEP_RECHECK");
                   else if (step.primary?.kind === "CONFIRM_STORE" && step.confirmStore) confirmStore(step.confirmStore);
                 }}
                 disabled={savingIdentity}
@@ -308,11 +335,7 @@ export function ReviewCollectionFlow() {
             </div>
           ) : null}
 
-          {step.busy ? (
-            <p className="break-keep text-sm text-muted" role="status" data-testid="flow-busy">
-              확인하는 중…
-            </p>
-          ) : null}
+          {step.busy ? <Waiting /> : null}
         </section>
       )}
 
@@ -330,6 +353,29 @@ export function ReviewCollectionFlow() {
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * 기다리는 동안 화면이 말할 수 있는 것은 <b>시계뿐</b>이다.
+ *
+ * 실측된 한 번의 수집은 창을 열고 세션을 확인하고 한 페이지를 읽는 데 20초대가 걸린다. 그동안 아무 말도
+ * 없으면 판매자는 멈춘 화면을 본다. 그래서 지나간 초를 적되 남은 시간을 약속하지 않는다 — 이 저장소는 아무도
+ * 재지 않은 진행률을 그리지 않기로 했고, 경과 시간은 우리가 실제로 가진 유일한 사실이다.
+ */
+function Waiting() {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setSeconds((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  // 제목과 본문이 이미 「가져오는 중」이라고 말했다. 여기서 같은 말을 세 번째로 하지 않는다 — 이 줄이 더할
+  // 수 있는 사실은 시계뿐이고, 그 시계는 기다림이 길어졌을 때만 사실이 된다.
+  if (seconds < 5) return <span className="sr-only" role="status" data-testid="flow-busy">가져오는 중</span>;
+  return (
+    <p className="break-keep text-sm tabular-nums text-muted" role="status" data-testid="flow-busy">
+      {seconds}초 경과
+    </p>
   );
 }
 

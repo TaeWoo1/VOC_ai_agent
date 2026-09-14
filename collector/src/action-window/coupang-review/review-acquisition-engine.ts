@@ -49,6 +49,32 @@ export interface ReviewAcquisitionRunConfig {
   runId: string;
   /** Sanitized channel identity (SEMANTIC_CODE) — `coupang`. */
   channelCode: string;
+  /**
+   * <b>Does the execution provider open the 상품평 page itself?</b>
+   *
+   * <p>This is a fact about the provider, not a preference, and it decides whether the FIRST read needs a
+   * human press at all.
+   *
+   * <p><b>LOCAL_HELPER (`false`, the default) — the barrier is real.</b> That provider lands the window on
+   * WING's front door (「no 상품평 deep link has ever been observed」) and the seller walks to the list and
+   * turns every page. The run has no idea what is on screen, so it rests and the seller says when a page
+   * they want read is up.
+   *
+   * <p><b>ASIDE (`true`) — the barrier gated nothing.</b> That provider opens the review-list route itself
+   * (`COUPANG_WING_REVIEW_LIST_URL`), checks the session, reads identity, reads ONE page and closes the tab;
+   * the seller neither navigates nor turns anything. Measured live on 2026-09-14: at the moment the barrier
+   * was raised <b>no tab existed yet</b> — the screen asked the seller to 「open the 상품평 list」 in a window
+   * the product had not opened, and the press they gave was a second consent for the read they had already
+   * asked for one press earlier.
+   *
+   * <p><b>What does NOT change when this is true.</b> A run still starts only on `START_RUN` carrying a
+   * single-use `acquisitionRef` the seller's own press minted — that is the explicit initiation, and it is
+   * the same one it always was. Every blocker still parks (`AUTH_REQUIRED` · `STORE_MISMATCH` ·
+   * `STORE_UNRESOLVED` · unreadable page), a walk still cannot turn a page (`report.open` parks, exactly as
+   * before), the page bound is untouched, and the effect vocabulary gains nothing — this flag chooses
+   * between two effects that already exist.
+   */
+  opensTargetPageItself?: boolean;
 }
 
 export type ReviewAcquisitionClock = () => string;
@@ -91,6 +117,7 @@ const PARK_BLOCKER_NONE: BlockerCode | null = null;
 export class ReviewAcquisitionEngine {
   private readonly runId: string;
   private readonly channelCode: string;
+  private readonly opensTargetPageItself: boolean;
   private readonly clock: ReviewAcquisitionClock;
 
   private started = false;
@@ -112,6 +139,7 @@ export class ReviewAcquisitionEngine {
   constructor(config: ReviewAcquisitionRunConfig, opts?: { clock?: ReviewAcquisitionClock }) {
     this.runId = config.runId;
     this.channelCode = config.channelCode;
+    this.opensTargetPageItself = config.opensTargetPageItself === true;
     this.clock = opts?.clock ?? makeReviewAcquisitionClock();
   }
 
@@ -174,8 +202,18 @@ export class ReviewAcquisitionEngine {
     return this.start();
   }
 
+  /** The seller's press at the barrier. Only from the barrier — nothing else may ask for a page. */
   private readPage(): ReviewAcquisitionEffect {
     if (this.stage !== "awaiting_page") return "NONE";
+    return this.beginRead();
+  }
+
+  /**
+   * Read the page. Reached from the barrier (a press) or, for a provider that opens the page itself,
+   * straight from a resolved binding — and from nowhere else.
+   */
+  private beginRead(): ReviewAcquisitionEffect {
+    if (this.stage !== "awaiting_page" && this.stage !== "opening") return "NONE";
     this.clearBlocker();
     this.stage = "reading";
     this.activeStepIndex = 2;
@@ -209,6 +247,9 @@ export class ReviewAcquisitionEngine {
       return "CLEANUP";
     }
     this.completedSteps = 1;
+    // A provider that opens the page itself has nothing to wait for: the seller's press already happened,
+    // one command ago, and it is what minted the single-use binding this run is holding.
+    if (this.opensTargetPageItself) return this.beginRead();
     return this.park(PARK_BLOCKER_NONE);
   }
 

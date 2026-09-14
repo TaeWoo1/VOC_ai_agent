@@ -78,9 +78,21 @@ interface Harness {
 
 function harness(
   script: readonly ScriptedPage[],
-  opts: { resolved?: { accountSlot: string; channelCode: string } | null; handoff?: (r: ReviewHandoffRequest) => Promise<ReviewHandoffResponse> } = {},
+  opts: {
+    resolved?: { accountSlot: string; channelCode: string } | null;
+    handoff?: (r: ReviewHandoffRequest) => Promise<ReviewHandoffResponse>;
+    /** The ASIDE provider's fact: it opens the 상품평 route itself. Absent = LOCAL_HELPER, byte-identical. */
+    opensTargetPageItself?: boolean;
+  } = {},
 ): Harness {
-  const engine = new ReviewAcquisitionEngine({ runId: "run_acq1", channelCode: "coupang" }, { clock: makeReviewAcquisitionClock() });
+  const engine = new ReviewAcquisitionEngine(
+    {
+      runId: "run_acq1",
+      channelCode: "coupang",
+      ...(opts.opensTargetPageItself === undefined ? {} : { opensTargetPageItself: opts.opensTargetPageItself }),
+    },
+    { clock: makeReviewAcquisitionClock() },
+  );
   const driver = new ReviewAcquisitionFixtureDriver(script);
   const link = loopback();
   const handoffs: ReviewHandoffRequest[] = [];
@@ -420,5 +432,88 @@ describe("the acquire carrier, as a thing a frontend can attach to", () => {
     endpoint.transport.subscribe((frame) => seen.push(frame));
     endpoint.onClientPayload(ws, "{not json");
     expect(seen).toEqual([]);
+  });
+});
+
+/**
+ * **The provider that opens the page itself (ASIDE).**
+ *
+ * The barrier below is not removed — it is not RAISED, and only where it was gating nothing. Everything that
+ * stops a run still stops it, and the run still cannot start without the seller's own single-use binding.
+ */
+describe("REVIEW_ACQUISITION — a provider that opens the 상품평 page itself", () => {
+  it("reads and hands off on the seller's ONE press, with no second confirmation", async () => {
+    const h = harness([{ bodies: [`${CANARY} 1`, `${CANARY} 2`], page: 1, last: 1 }], { opensTargetPageItself: true });
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+    expect(h.driver.reads).toBe(1);
+    expect(h.handoffs).toHaveLength(1);
+    expect(latestView(h.link.frames).status).toBe("COMPLETED");
+    // No barrier was ever raised, so nothing asked the seller for a second press.
+    expect(eventTypes(h.link.frames)).not.toContain("HUMAN_ACTION_REQUIRED");
+  });
+
+  it("the other provider is untouched: it still rests until the seller says a page is up", async () => {
+    const h = harness([{ bodies: [`${CANARY} 1`], page: 1, last: 1 }]);
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+    expect(h.driver.reads).toBe(0);
+    expect(latestView(h.link.frames).status).toBe("WAITING_FOR_HUMAN");
+  });
+
+  it("still cannot start without the seller's own single-use binding", async () => {
+    const h = harness([{ bodies: [`${CANARY} 1`], page: 1, last: 1 }], { opensTargetPageItself: true });
+    // Nothing sent: nothing read.
+    await h.session.whenSettled();
+    expect(h.driver.reads).toBe(0);
+    // A start with no acquisitionRef is refused, and still reads nothing.
+    h.link.client({ kind: "aw_command", command: startRun(0, null) });
+    await h.session.whenSettled();
+    expect(h.driver.reads).toBe(0);
+    expect(h.handoffs).toHaveLength(0);
+  });
+
+  it("an unreadable page still parks fail-closed, and the seller's press is what re-reads it", async () => {
+    const h = harness(
+      [{ unreadable: true }, { bodies: [`${CANARY} 1`], page: 1, last: 1 }],
+      { opensTargetPageItself: true },
+    );
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+    expect(h.driver.reads).toBe(1);
+    const parked = latestView(h.link.frames);
+    expect(parked.status).toBe("WAITING_FOR_HUMAN");
+    expect(parked.blocker?.code).toBeDefined();
+    expect(h.handoffs).toHaveLength(0);
+    await pressRead(h);
+    expect(latestView(h.link.frames).status).toBe("COMPLETED");
+    expect(h.handoffs).toHaveLength(1);
+  });
+
+  it("never turns a page: a walk with another page available parks instead of reading on", async () => {
+    const h = harness(
+      [
+        { bodies: [`${CANARY} 1`], page: 1, last: 3 },
+        { bodies: [`${CANARY} 2`], page: 2, last: 3 },
+      ],
+      { opensTargetPageItself: true },
+    );
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+    // One page read automatically; the SECOND is a page turn, and that is the seller's.
+    expect(h.driver.reads).toBe(1);
+    expect(latestView(h.link.frames).status).toBe("WAITING_FOR_HUMAN");
+    expect(h.handoffs).toHaveLength(0);
+  });
+
+  it("a binding that resolves to nothing fails before anything is read", async () => {
+    const h = harness([{ bodies: [`${CANARY} 1`], page: 1, last: 1 }], {
+      opensTargetPageItself: true,
+      resolved: null,
+    });
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+    expect(h.driver.reads).toBe(0);
+    expect(latestView(h.link.frames).status).toBe("FAILED");
   });
 });

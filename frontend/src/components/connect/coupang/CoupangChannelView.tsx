@@ -157,6 +157,9 @@ export function CoupangChannelView({
               <BtnLink
                 to={reviewCollectionPath(accountId)}
                 variant={lead === "REVIEW" ? "solid" : "outline"}
+                // 이 press가 곧 시작이다. 도착한 화면은 이 표시를 읽자마자 지우므로, 같은 주소를 새로고침해도
+                // 수집이 다시 일어나지 않는다.
+                state={{ start: true }}
               >
                 {review.primaryLabel}
               </BtnLink>

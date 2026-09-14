@@ -105,19 +105,86 @@ aw_coupang_review_handoff  received=9 stored=9 skipped=0 failed=0 unlinked=9
 - **금지 동작 0** — click/fill/download/pagination 로그 0(`pagerHasNext:true`인데 `pages:1`) ·
   `llmCalls:0` · OpenAPI 0 · 자격 읽기 0 · 마켓플레이스 WRITE 0. backend ERROR 0.
 
-## 6. 고치지 않고 보고한 것
+## 6. Final Pass — barrier 감사와 1-click routine (2026-09-14)
 
-1. **S2 문구가 제품이 이미 하는 일을 판매자에게 시킨다.** ASIDE 실행기는 `openTab(entryUrl)`으로
-   **상품평 목록 URL을 스스로 연다**(`COUPANG_WING_REVIEW_LIST_URL`). 그런데 S2는 「쿠팡 창에서 상품평
-   목록을 열어 주세요」라고 말한다 — 옛 장벽 문구를 그대로 옮긴 결과다. 그 press가 실제로 뜻하는 것은
-   **「내 판매자센터를 열어 읽어도 된다」는 승낙**이고, 남는 사람의 일은 **로그인**뿐이다
-   (`authScript` → `signedIn` false면 `AUTH_REQUIRED`로 fail closed). 문구 한 줄의 문제가 아니라 press의
-   **의미**를 다시 이름 붙이는 일이라 product-owner 결정으로 올린다.
+### 6-1. 감사: 이 장벽은 무엇을 막고 있었나
+
+취득 엔진은 대상이 해석된 뒤 `park(null)`로 멈추고 사람의 press를 기다렸다. 그 근거는 stage 표에 적혀
+있었다 — *"the window comes up on WING's **front door**, the seller brings the 상품평 list up and turns every
+page themselves"*. **그 문장은 CLI 시절의 관측이고, 지금 이 배포에서는 참이 아니다.**
+
+`asideCoupangReviewRuntime`은 `openTab(COUPANG_WING_REVIEW_LIST_URL)`로 **상품평 목록을 스스로 열고**,
+세션을 확인하고, 신원을 읽고, 한 페이지를 읽고, 탭을 닫는다. 판매자는 걸어가지도 넘기지도 않는다. 그리고
+장벽이 올라가는 시점에는 **탭이 아직 존재하지도 않는다** — 화면은 제품이 열지도 않은 창에서 「상품평
+목록을 열어 주세요」라고 말하고 있었고, 그 press는 한 press 전에 이미 받은 승낙을 두 번째로 받는 것이었다.
+
+그래서 이 장벽은 **공급자에 따라 달라지는 사실**이고, 엔진에 그 사실을 준다 —
+`ReviewAcquisitionRunConfig.opensTargetPageItself`. LOCAL_HELPER는 `false`(기본값)로 **바이트 동일**하고,
+ASIDE만 첫 장벽을 올리지 않는다.
+
+**약화되지 않은 것**(전부 테스트로 고정):
+
+| 성질 | 어떻게 유지되는가 |
+|---|---|
+| 명시적 개시 | run은 판매자의 press가 mint한 **단일 사용 `acquisitionRef`**를 실은 `START_RUN`으로만 시작한다. ref 없는 start는 거절 |
+| 페이지를 넘기지 않는다 | `report.open`이면 여전히 park — 자동으로 읽는 것은 **이미 열린 그 한 페이지**뿐 |
+| `AUTH_REQUIRED` fail closed | 로그인 벽은 park, 판매자의 「로그인했습니다」가 다시 읽는다 |
+| `STORE_MISMATCH` · `STORE_UNRESOLVED` fail closed | 그대로 park |
+| page bound · WRITE 0 · pagination · LLM 0 · OpenAPI 독립 | 손대지 않음. 효과 어휘도 그대로(`RESOLVE`/`READ`/`HANDOFF`/`CLEANUP`/`NONE`) |
+
+**그리고 새 fence 하나를 더했다.** 이 화면이 스스로 읽게 된 순간, <b>도착이 곧 수집</b>이 되면 새로고침
+한 번이 판매자가 요청하지 않은 마켓플레이스 읽기가 된다. 그래서 press가 실어 보낸 의도를 화면이 읽자마자
+소비한다(`ReviewCollectionArrival` · history state) — 북마크·새로고침으로 들어온 방문은 시작하지 않고
+시작 버튼을 보여 준다.
+
+### 6-2. 실측 — 판매자 press 횟수
+
+| | before | after |
+|---|---|---|
+| **routine 수집** (로그인·페어링된 상태) | **2** ([지금 가져오기] → [상품평 목록을 열었습니다]) | **1** ([지금 가져오기]) |
+| **first setup** (이 브라우저 첫 페어링) | 3 | **2** ([지금 가져오기] → [도우미 연결]) |
+| 스토어 확인이 필요한 첫 연결 | 4 | **3** (위 + [이 스토어를 연결하고 가져오기]) |
+
+라이브 검증(실제 WING · 실제 도우미 · 1440·1366·1152 각 1회 이상): routine `seller presses = 1`,
+`HUMAN_ACTION_REQUIRED` 로그 **0**, axe 위반 **0**, 가로 스크롤 **0**, off-host **0**.
+
+### 6-3. 함께 고친 seller-facing 결함
+
+- **S1이 제품이 하는 일을 판매자에게 시켰다** — 「열어 둔 판매자 화면에서 읽어 옵니다」 →
+  「쿠팡 판매자센터 화면을 열어 상품평을 읽어 옵니다」.
+- **한 상태를 세 문장이 말했다** — 「상품평을 가져오는 중입니다」 + 「잠시만 기다려 주세요」 +
+  「확인하는 중…」. 세 번째 줄은 5초가 지나면 **경과 시간**만 말한다(측정된 사실이고, 남은 시간은
+  약속하지 않는다).
+- **완료 화면에 아무 칸도 굵지 않은 진행 표시**가 남아 「아무 일도 없었다」처럼 읽혔다 → 완료 화면은
+  진행 표시를 그리지 않는다.
+- `UNSUPPORTED_STATE` 문구가 「목록을 열어 주세요」였다 → 누가 열었는지 말하지 않고 **무엇을 확인할지만**
+  말한다(양쪽 공급자에 대해 참).
+- `RUNTIME_FAULT`에 문장이 없어 기본 문구로 떨어졌다 → 자기 문장을 갖는다.
+
+### 6-4. recovery 증명
+
+- **도우미 미실행 — 라이브**: 서비스를 내리고 [지금 가져오기]를 누르면 흐름은 **1단계에서 멈추고**,
+  도우미 카드가 「실행 필요」와 자기 컨트롤을 갖는다. 흐름 자신의 primary는 렌더되지 않는다(경쟁 0).
+  서비스를 올리면 **페어링이 남아 있어** 다음 수집은 다시 **1 press**다 — 처음부터 다시 하지 않는다.
+- **`AUTH_REQUIRED` · `STORE_MISMATCH` · unreadable page — 결정론 증명**: 엔진 테스트(park fail-closed,
+  press가 다시 읽음, 페이지를 넘기지 않음, binding 없으면 시작 안 함)와 ASIDE 드라이버의 코드→단어 매핑
+  테스트, 그리고 화면 테스트(실패는 그 걸음에 붙고 정상 걸음에는 복구 UI가 **없다**).
+
+### 6-5. dedup 안정성 — 라이브
+
+같은 페이지를 **반복해서** 읽었다(총 13회 이상): 매번 `received=9 stored=0 skipped=9`,
+`reviews` 테이블은 **9행 그대로**, `product_id IS NULL` 9, `source_product_ref` 9, `products` 0.
+reconcile 경계가 실물에서 유지된다.
+
+## 7. 고치지 않고 보고한 것
+
+1. **(닫힘 — §6)** S2 문구와 두 번째 press는 Final Pass에서 제거됐다.
 2. **자동 로그인은 하지 않는다.** 쿠팡 비밀번호는 저장하지 않고(도우미는 device token만 보유,
    `HELPER_ENV_KEYS`에서 EMAIL/PASSWORD 삭제됨), OpenAPI access/secret은 **API 인증**이라 WING 웹 세션을
    만들 수 없다. 다만 도우미 브라우저 프로필은 영속이라 **로그인은 보통 1회**다.
-3. **error/recovery 라이브 미관측** — 라이브 blocker를 만들려면 마켓플레이스 run이 한 번 더 필요하다.
-   테스트로 고정(`STORE_MISMATCH`가 스토어 걸음의 실패로 붙고, 정상 걸음에는 복구 UI가 **없다**).
-4. **dedup 안정성 라이브 미관측** — 같은 페이지 재수집이 중복을 만들지 않는다는 것은
-   `CatalogueIndependentReviewIngestTest`가 고정하고, 라이브에서는 run 1회만 썼다.
-5. NAVER·Cafe24 채널 화면은 옛 레이아웃 그대로(product-owner decision: 공통화는 파일럿 증거 후).
+3. **(닫힘 — §6-4)** 도우미 미실행 recovery는 라이브로, 나머지는 결정론으로 증명됐다.
+4. **(닫힘 — §6-5)** dedup 안정성은 반복 수집으로 라이브 증명됐다.
+5. **`AUTH_REQUIRED`는 여전히 press 1회를 쓴다.** 자동 재시도는 「로그인했나」를 묻기 위해 판매자의
+   세션으로 마켓플레이스를 반복해서 여는 일이고, 이 lane은 그 비용을 화면을 꾸미는 데 쓰지 않는다.
+   판매자가 로그인한 뒤 누르는 한 번이 그 사실을 아는 가장 싼 방법이다.
+6. NAVER·Cafe24 채널 화면은 옛 레이아웃 그대로(product-owner decision: 공통화는 파일럿 증거 후).

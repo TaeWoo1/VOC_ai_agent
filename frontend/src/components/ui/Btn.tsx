@@ -62,6 +62,7 @@ export function BtnLink({
   className,
   ariaLabel,
   onClick,
+  state,
   children,
 }: {
   to: string;
@@ -76,6 +77,11 @@ export function BtnLink({
   ariaLabel?: string;
   /** Side effect that must happen as the seller leaves — telemetry, never navigation of its own. */
   onClick?: () => void;
+  /**
+   * What the destination should know about how it was reached. Carried on the history entry, so a screen
+   * that must not act on a bare visit can tell a press from a bookmark. Never data — a closed flag.
+   */
+  state?: unknown;
   children: ReactNode;
 }) {
   return (
@@ -84,6 +90,7 @@ export function BtnLink({
       className={classes(variant, size, className)}
       aria-label={ariaLabel}
       onClick={onClick}
+      {...(state === undefined ? {} : { state })}
     >
       {children}
     </Link>

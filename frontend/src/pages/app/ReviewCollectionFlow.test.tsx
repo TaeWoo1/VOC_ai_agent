@@ -98,9 +98,17 @@ function run(partial: Partial<ActionWindowRunView>): ActionWindowRunView {
   } as ActionWindowRunView;
 }
 
-function view() {
+/** 기본은 판매자가 눌러서 도착한 방문 — 그것이 이 화면의 정상 진입이다. */
+function view(arrival: "PRESSED" | "VISITED" = "PRESSED") {
   return render(
-    <MemoryRouter initialEntries={["/connect/channels/acc-1/review-collection"]}>
+    <MemoryRouter
+      initialEntries={[
+        {
+          pathname: "/connect/channels/acc-1/review-collection",
+          ...(arrival === "PRESSED" ? { state: { start: true } } : {}),
+        },
+      ]}
+    >
       <Routes>
         <Route path="/connect/channels/:accountId/review-collection" element={<ReviewCollectionFlow />} />
       </Routes>
@@ -180,6 +188,11 @@ describe("리뷰 수집 셋업 — 한 걸음, 한 컨트롤", () => {
     await waitFor(() =>
       expect(screen.getByTestId("flow-done")).toHaveTextContent("새로 가져올 상품평이 없었습니다."),
     );
+  });
+
+  it("주소로 들어오면 시작은 판매자에게 돌아간다 — 새로고침이 수집이 되지 않는다", async () => {
+    view("VISITED");
+    expect(await screen.findByTestId("flow-primary")).toHaveTextContent("지금 가져오기");
   });
 
   it("접근성 위반 0", async () => {

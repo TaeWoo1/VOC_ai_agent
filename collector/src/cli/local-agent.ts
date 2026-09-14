@@ -1224,9 +1224,13 @@ export interface CoupangReviewAcquisitionLiveCarrier {
  * not be able to send a page of what customers wrote to an arbitrary host. A refused origin makes every
  * binding unresolvable, which ends the run before a page is read.
  *
- * The window lands on WING's front door and no deeper (no 상품평 deep link has ever been observed); the seller
- * reaches 상품평 목록 themselves and turns every page. The reader clicks nothing, types nothing, submits
- * nothing, and never presses the pager.
+ * <b>Two providers, and they put the window in different places.</b> LOCAL_HELPER lands on WING's front door
+ * and no deeper (no 상품평 deep link had been observed when it was written); the seller reaches 상품평 목록
+ * themselves and turns every page, and the per-page barrier is how the run knows a page is up. ASIDE opens the
+ * 상품평 route itself, reads ONE page and closes the tab — so nothing is waiting on the seller between their
+ * press and the read, and the engine is told that fact (`opensTargetPageItself`).
+ *
+ * Either way the reader clicks nothing, types nothing, submits nothing, and never presses the pager.
  */
 export function buildCoupangReviewAcquisitionLiveConfig(): CoupangReviewAcquisitionLiveCarrier {
   const cfg = loadConfig();
@@ -1369,7 +1373,14 @@ export function activateCoupangReviewAcquisition(
   const live = (deps.buildCarrier ?? buildCoupangReviewAcquisitionLiveConfig)();
   const { runId, channelCode } = live;
   const endpoint = new ReviewAcquisitionEndpoint({ runId, channelCode });
-  const engine = new ReviewAcquisitionEngine({ runId, channelCode });
+  // The provider decides whether the first read needs a press: ASIDE opens the 상품평 route itself, so there
+  // is no page for the seller to bring up and nothing for the run to rest on. LOCAL_HELPER lands on WING's
+  // front door and the seller walks — that barrier stays exactly as it was.
+  const engine = new ReviewAcquisitionEngine({
+    runId,
+    channelCode,
+    opensTargetPageItself: live.executionProvider === "ASIDE",
+  });
   const session = new ReviewAcquisitionRunSession(engine, live.createDriver(), endpoint.transport, {
     resolveTarget: live.resolveTarget,
     handoff: live.handoff,

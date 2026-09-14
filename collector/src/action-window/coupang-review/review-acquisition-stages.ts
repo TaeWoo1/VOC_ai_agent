@@ -7,15 +7,22 @@
  * from each other: the audited runtimes stay untouched.
  *
  * **What an acquisition run is.** The Action Window shape of the seated CLI that live-proved this read
- * (`cli/acquire-coupang-reviews.ts`): the window comes up on WING's front door, the seller brings the 상품평
- * list up and turns every page themselves, and at each page they confirm — the runtime then reads the rows in
- * front of them. When the pager shows its last page, or the seller ends the walk early, everything read is
- * handed to the backend in ONE bounded POST. The run **never turns a page**: the pager is a marketplace control
- * and `CLAUDE.md` forbids hidden or chained platform clicks.
+ * (`cli/acquire-coupang-reviews.ts`): the window comes up, the runtime reads the 상품평 rows that are on it,
+ * and when the pager shows its last page — or the seller ends the walk early — everything read is handed to
+ * the backend in ONE bounded POST. The run **never turns a page**: the pager is a marketplace control and
+ * `CLAUDE.md` forbids hidden or chained platform clicks.
  *
- * **Three steps.** 1 — the binding is resolved and the window is up (automatic); 2 — the per-page barrier the
- * seller lifts as many times as they have pages (`aw.user_target_action`, the same step id the export walk
- * uses for "the seller acts on the marketplace"); 3 — the handoff (automatic). Step 2 is re-entered after
+ * **Who brings the page up depends on the provider, and the engine is told which.** LOCAL_HELPER lands on
+ * WING's front door, so the seller walks to 상품평 목록 and confirms at each page — the barrier below is that
+ * confirmation. ASIDE opens the 상품평 route itself and reads one page, so between the seller's press and the
+ * read there is nobody to wait for; `opensTargetPageItself` says so and the first barrier is not raised.
+ * Everything that parks a run — no session, a store that is not this account's, an unreadable page, another
+ * page available — parks under both.
+ *
+ * **Three steps.** 1 — the binding is resolved and the window is up (automatic); 2 — the page read, which
+ * under LOCAL_HELPER is a barrier the seller lifts once per page (`aw.user_target_action`, the same step id
+ * the export walk uses for "the seller acts on the marketplace") and under ASIDE is automatic until something
+ * parks it; 3 — the handoff (automatic). Step 2 is re-entered after
  * every read, so the progress counter does not count pages — the run's `runCopyParams` do.
  *
  * **Two commands at the barrier, and what each means here.** `REQUEST_STEP_RECHECK` = "read the page I am on

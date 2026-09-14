@@ -34,6 +34,7 @@ function input(over: Partial<ReviewCollectionInput> = {}): ReviewCollectionInput
     unavailable: null,
     bootstrap: null,
     startFailed: false,
+    arrival: "PRESSED",
     ...over,
   };
 }
@@ -121,6 +122,29 @@ describe("리뷰 수집 — 한 번에 한 걸음", () => {
     expect(reviewCollectionStateOf(input({ unavailable: "ready" })).step).toBe("SURFACE");
     expect(reviewCollectionStateOf(input({ unavailable: "ready" })).failure).toBeNull();
     expect(reviewCollectionStateOf(input({ unavailable: "not_running" })).failure).not.toBeNull();
+  });
+
+  it("주소로 들어온 방문은 아무것도 시작하지 않고, 시작을 판매자에게 돌려준다", () => {
+    // 이 화면은 스스로 읽는다. 도착이 곧 수집이면 새로고침 한 번이 요청하지 않은 마켓플레이스 읽기가 된다.
+    const s = reviewCollectionStateOf(input({ arrival: "VISITED", run: null }));
+    expect(s.step).toBe("SURFACE");
+    expect(s.primary).toEqual({ kind: "START", label: "지금 가져오기" });
+    expect(s.busy).toBe(false);
+  });
+
+  it("눌러서 들어온 방문은 묻지 않는다", () => {
+    const s = reviewCollectionStateOf(input({ arrival: "PRESSED", run: null }));
+    expect(s.step).toBe("SURFACE");
+    expect(s.busy).toBe(true);
+    expect(s.primary).toBeNull();
+  });
+
+  it("읽는 중에는 판매자에게 아무것도 묻지 않는다 — 정상 흐름의 press는 0회다", () => {
+    for (const status of ["PREPARING", "RUNNING", "PROCESSING"] as const) {
+      const s = reviewCollectionStateOf(input({ run: run({ status }) }));
+      expect(s.primary).toBeNull();
+      expect(s.failure).toBeNull();
+    }
   });
 
   it("끝난 run은 완료 걸음이다", () => {
