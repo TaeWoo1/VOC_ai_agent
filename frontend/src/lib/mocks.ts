@@ -154,6 +154,7 @@ function mockSupport(code: string): ChannelSupport {
     autoCollectDataTypes: autoCollect ? ["주문"] : [],
     connectionCheckSupported: autoCollect,
     credentialSetupSupported: TEMPLATED_CHANNELS.has(code),
+    screenReadReviews: code === "COUPANG",
   };
 }
 

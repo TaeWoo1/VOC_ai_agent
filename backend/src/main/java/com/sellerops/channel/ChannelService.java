@@ -1,5 +1,7 @@
 package com.sellerops.channel;
 
+import com.sellerops.review.channel.ChannelReviewAcquisitionService;
+
 import com.sellerops.connector.ConnectionVerifier;
 import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
@@ -99,7 +101,10 @@ public class ChannelService {
                 autoCollectSupported,
                 autoCollectDataTypes,
                 connectionCheckSupported,
-                credentialSetupSupported);
+                credentialSetupSupported,
+                // Not a connector fact: this channel's reviews are read off the seller's own open screen.
+                // The rule is asked, never restated — one comparison, two callers.
+                ChannelReviewAcquisitionService.readsReviewsFromScreen(code));
     }
 
     /**

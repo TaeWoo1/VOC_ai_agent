@@ -17,7 +17,7 @@ function channel(id: string, code: string, nameKo: string): ChannelResponse {
       fileUploadSupported: true,
       fileUploadDataTypes: [],
       connectionCheckSupported: false,
-      credentialSetupSupported: false,
+      credentialSetupSupported: false, screenReadReviews: false,
     },
   } as ChannelResponse;
 }

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Section, ListBox } from "../../components/ui/Section";
 import { Disclosure } from "../../components/ui/Disclosure";
@@ -12,6 +13,9 @@ import { useOpenAlerts } from "../../lib/openAlerts";
 import { api } from "../../lib/apiClient";
 import { selectChannelAccount } from "../../lib/channelConnection";
 import { hasReviewRecord } from "../../lib/reviewRecord";
+import { lastScreenRead } from "../../lib/connect/reviewCollection";
+import { reviewCollectionPath } from "../../lib/connect/coupangCapabilities";
+import type { ScreenReadReadinessState } from "../../lib/acquisitionReadiness";
 import type {
   ChannelResponse,
   ConnectionStatusView,
@@ -42,6 +46,18 @@ export function ConnectHub() {
   const [accountsError, setAccountsError] = useState(false);
   const [health, setHealth] = useState<Map<string, ConnectionStatusView>>(new Map());
   const [reviewCounts, setReviewCounts] = useState<Map<string, number>>(new Map());
+  /**
+   * <b>브라우저 상품평 수집의 사실</b> — 계정별로.
+   *
+   * 이 행은 오랫동안 API 연결 하나만 읽었고, 그래서 상품평을 방금 가져온 판매자에게 「연결 중 · 수집 이력
+   * 없음 · [연결 계속하기]」라고 말했다. 두 사실을 여기서 읽어 행에 준다: 이 계정이 화면 수집을 쓸 수 있는가
+   * (backend readiness)와 그 lane의 마지막 성공이 언제인가(`SELLER_CENTER_READ` 실행). 둘 다 fail-soft —
+   * 읽지 못한 계정은 이 map에 없고, 행은 예전처럼 행동한다.
+   */
+  const [reviewLanes, setReviewLanes] = useState<
+    Map<string, { readiness: ScreenReadReadinessState | null; lastReadAt: string | null }>
+  >(new Map());
+  const navigate = useNavigate();
   const [notice, setNotice] = useState<string | null>(null);
   const { openCount } = useOpenAlerts();
 
@@ -150,6 +166,67 @@ export function ConnectHub() {
     };
   }, [channels, accounts]);
 
+  // 화면 수집을 갖는 채널의 계정만. 두 읽기 모두 계정당 1회이고, 실패한 쪽은 그냥 빠진다.
+  useEffect(() => {
+    const targets = channels
+      .filter((channel) => channel.support?.screenReadReviews === true)
+      .map((channel) => selectChannelAccount(accounts, channel.id))
+      .filter((account): account is SellerAccountResponse => account !== null);
+    if (targets.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    void Promise.allSettled(
+      targets.map(async (account) => {
+        const [readiness, runs] = await Promise.all([
+          api.getReviewAcquisitionReadiness(account.id).catch(() => null),
+          api.getSyncRunsStrict({ sellerAccountId: account.id }).catch(() => []),
+        ]);
+        return [
+          account.id,
+          {
+            readiness: (readiness?.state ?? null) as ScreenReadReadinessState | null,
+            lastReadAt: lastScreenRead(runs)?.finishedAt ?? null,
+          },
+        ] as const;
+      }),
+    ).then((results) => {
+      if (cancelled) {
+        return;
+      }
+      const map = new Map<string, { readiness: ScreenReadReadinessState | null; lastReadAt: string | null }>();
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          map.set(result.value[0], result.value[1]);
+        }
+      }
+      setReviewLanes(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [channels, accounts]);
+
+  /**
+   * <b>상품평 수집을 시작한다 — 자격 없이.</b>
+   *
+   * 쿠팡 계정 행을 만드는 코드는 오랫동안 하나뿐이었고, 그것은 판매자가 Access Key·Secret Key·업체코드를
+   * <b>제출하는 순간</b>에만 돌았다. 그래서 API 키가 필요 없는 lane을 쓰려는 판매자도 키 발급 화면을 지나야
+   * 계정이 생겼다. 여기서 쓰는 것은 그 화면이 쓰던 <b>같은 find-or-create</b>이고(멱등, PENDING, 자격 0),
+   * 바뀐 것은 그것을 부르는 순간뿐이다 — 자격 제출이 아니라 판매자의 press.
+   */
+  const startReviewSetup = useCallback(
+    async (channel: ChannelResponse, account: SellerAccountResponse | null) => {
+      try {
+        const id = account?.id ?? (await api.createApiChannelAccount(channel.id)).id;
+        navigate(reviewCollectionPath(id), { state: { start: true } });
+      } catch {
+        setNotice("상품평 수집을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    },
+    [navigate],
+  );
+
   const ops = useOperationsStore();
   const liveRun = ops.sourceMode === "bridge" || isFixturePreviewEnabled() ? ops.run : null;
   // The NAVER account's status carries the helper's last login observation; the helper card reads it.
@@ -184,7 +261,9 @@ export function ConnectHub() {
             health={health}
             statusLoading={accountsLoading}
             reviewCounts={reviewCounts}
+            reviewLanes={reviewLanes}
             onNotice={setNotice}
+            onStartReviewSetup={(channel, account) => void startReviewSetup(channel, account)}
             channelsLoading={channelsLoading}
             channelsError={channelsError}
           />

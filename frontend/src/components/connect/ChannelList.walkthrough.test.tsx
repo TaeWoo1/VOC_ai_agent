@@ -50,7 +50,8 @@ function renderList() {
               accounts={null}
               health={new Map<string, ConnectionStatusView>()}
               statusLoading={false}
-              onNotice={() => {}}
+              onStartReviewSetup={() => undefined}
+          onNotice={() => {}}
             />
           }
         />

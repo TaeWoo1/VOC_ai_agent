@@ -96,7 +96,7 @@ public class ChannelReviewAcquisitionService {
      */
     static ScreenReadReadiness readinessOf(SellerAccount account, Channel channel, boolean linked,
                                            boolean storeIdentityKnown) {
-        if (!COUPANG.equals(channel.getCode())) {
+        if (!readsReviewsFromScreen(channel.getCode())) {
             return ScreenReadReadiness.CHANNEL_NOT_SUPPORTED;
         }
         if (account.isFileUpload()) {
@@ -109,6 +109,18 @@ public class ChannelReviewAcquisitionService {
             return ScreenReadReadiness.STORE_IDENTITY_UNKNOWN;
         }
         return ScreenReadReadiness.READY;
+    }
+
+    /**
+     * <b>Does this channel's reviews come off the seller's own screen?</b>
+     *
+     * <p>The first condition of {@link #readinessOf}, asked of a channel instead of an account — and it
+     * is the SAME comparison, not a copy. The channel list needs it because a seller who has connected
+     * nothing yet has no account to ask about, and the screen that lists channels is exactly where they
+     * are standing when they need to be told this lane exists (First External Seller Gate, 2026-09-14).
+     */
+    public static boolean readsReviewsFromScreen(String channelCode) {
+        return COUPANG.equals(channelCode);
     }
 
     /**

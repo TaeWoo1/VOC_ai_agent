@@ -97,17 +97,16 @@ REVIEWNARY_APP_URL=https://$HOST REVIEWNARY_BASE_URL=https://$HOST \
 1. 가입 — 이메일·비밀번호 (소셜 로그인은 이 파일럿에서 꺼짐)
 2. 도우미 설치 — 패키지 전달 → `설치.command` → 계정 비밀번호는 **설치 권한용**이고 reviewnary는 보지 않음
 3. reviewnary에서 도우미 연결 — `연결 · 설정 › 채널 연결`의 도우미 카드 → [도우미 연결] → macOS 승인 창 → [이 기기 연결]
-4. **쿠팡 계정 만들기 — §3-B1을 먼저 읽을 것** (오늘은 API 키 입력 화면을 지나야 한다)
-5. 쿠팡 윙에 로그인 (도우미 브라우저 프로필에 유지됨 — 보통 1회)
-6. `채널 연결 › 쿠팡` → **[리뷰 수집 연결하기]** → 스토어 확인 **1회** → 수집 → 완료
-7. 이후 루틴: **[지금 가져오기] 한 번** (라이브 측정: 1440·1366·1152 전부 press 1)
-8. 결과 확인: `리뷰` 화면에 수집된 상품평, `홈`에 리뷰 수
+4. 쿠팡 윙에 로그인 (도우미 브라우저 프로필에 유지됨 — 보통 1회)
+5. `채널 연결`의 쿠팡 행 → **[리뷰 수집 연결하기]** (계정은 이 press가 만든다 — 자격 0) → 스토어 확인 **1회** → 수집 → 완료
+6. 이후 루틴: 쿠팡 행의 **[관리] → [지금 가져오기] 한 번** (라이브 측정: 세 폭 전부 press 1)
+7. 결과 확인: `리뷰` 화면에 수집된 상품평, `홈`에 리뷰 수
 
 **판매자가 하지 않아도 되는 것**: API 키 발급 · 상품 등록 · 고정 IP · 기간 선택 · 페이지 넘기기.
 
 ## 3. 첫 판매자 전에 결정해야 하는 것 (freeze 준수 — 고치지 않고 보고)
 
-### B1 · BLOCKING — 브라우저 수집만 원하는 판매자가 계정을 만들 방법이 없다
+### B1 · **닫힘** (2026-09-14) — 자격 없이 계정을 만든다
 
 쿠팡 `seller_account` 행을 만드는 코드는 **하나뿐**이고(`ConnectCoupang.onSubmitCredentials` →
 `ensureAccountId` → `createApiChannelAccount`), 그것은 판매자가 **Access Key·Secret Key·업체코드를
@@ -115,10 +114,18 @@ REVIEWNARY_APP_URL=https://$HOST REVIEWNARY_BASE_URL=https://$HOST \
 **`/connect/coupang`(OpenAPI 키 발급 안내)** 이고, 키를 넣기 전에는 `/connect/channels/{account}`가
 존재하지 않는다 — 그 화면의 「리뷰 수집」 카드가 **「API 키는 필요하지 않습니다」**라고 말하는데도.
 
-**결정 필요**: 자격 없이 계정 행을 만드는 최소 진입(예: 쿠팡 행의 「상품평만 먼저 가져오기」)을 만들 것인가,
-아니면 첫 판매자에 한해 **운영자가 계정을 만들어 주고** 시작할 것인가.
+**수정됨.** `/connect`의 쿠팡 행이 **[리뷰 수집 연결하기]**를 내밀고, 그 press가 계정을 **find-or-create**한 뒤
+상품평 수집 화면을 연다. 새 엔드포인트도 마이그레이션도 없다 — `POST /api/seller-accounts/api-channel`은
+이미 멱등이고 PENDING·자격 0으로 행을 만든다(자격 제출 화면이 쓰던 바로 그 호출). **바뀐 것은 그것을 부르는
+순간뿐이다**: 자격 제출이 아니라 판매자의 press.
 
-### B2 · BLOCKING(범위에 따라) — 브라우저 전용 판매자는 `CONNECTED`가 되지 않는다
+**라이브 아닌 결정론 QA**(제품 자신의 가입 → 실브라우저, 마켓플레이스 호출 0): 가입 직후 계정 **0** →
+행에 「연결 필요 … [리뷰 수집 연결하기]」 → press 1회 → 계정 **1**(`PENDING` · `fileUpload=false`) →
+`/connect/channels/{id}/review-collection` 착지 → **`connection-info` HTTP 404 = 자격 없음** ·
+readiness `HELPER_NOT_LINKED` · 콘솔 오류 0. 자격은 요구되지도 저장되지도 않았고 가짜 자격도 만들지 않았다.
+기존 OpenAPI 자격 흐름은 **「문의·주문 자동 수집」 capability 안에 그대로** 있다.
+
+### B2 · **보류**(product-owner decision, 코드 변경 금지) — 브라우저 전용 판매자는 `CONNECTED`가 되지 않는다
 
 `connectionStatus=CONNECTED`는 **OAuth 동의나 자격 입력**으로만 도달한다
 (`SellerAccountRepository.findOrgIdsWithConnectedApiAccount`의 정의). 브라우저 수집만 하는 판매자는
@@ -126,10 +133,11 @@ REVIEWNARY_APP_URL=https://$HOST REVIEWNARY_BASE_URL=https://$HOST \
 않는다** — Agent 대화 lane이 그에게는 꺼져 있다(정기 수집 스케줄이 안 잡히는 것은 이 lane이 판매자
 주도이므로 의도된 결과다).
 
-**결정 필요**: 첫 파일럿에 Agent를 포함할 것인가. 포함한다면 그 org UUID를 각 capability의
-`*_ORG_IDS`에 **이름으로** 넣는 방식이 오늘 가능한 유일한 길이다.
+**이번 closeout의 blocker가 아니다.** 첫 operator-assisted 파일럿에서 Agent/Attention이 필요하면 기존
+capability별 `*_ORG_IDS` allowlist에 파일럿 org를 **이름으로** admit한다. `CONNECTED_SELLERS`의 의미
+재설계는 파일럿 증거 뒤에 한다.
 
-### B3 · BLOCKING — 첫 화면(채널 목록)이 이 lane을 「미완성 API 연결」로 설명한다
+### B3 · **닫힘** (2026-09-14) — 행이 capability의 사실을 말한다
 
 실측(상품평 9건을 수집한 QA 계정, `/connect`):
 
@@ -139,7 +147,26 @@ REVIEWNARY_APP_URL=https://$HOST REVIEWNARY_BASE_URL=https://$HOST \
 화면으로 보낸다. 원인은 하나다: 허브 행은 **`connectionStatus`와 API lane의 `lastSyncedAt`만** 읽고,
 브라우저 lane은 그 둘 중 무엇도 쓰지 않는다. 바로 옆의 「상품평 9개 보기」가 같은 행을 반박한다.
 
-**결정 필요**: 허브 행이 채널의 **어느 capability라도** 살아 있으면 그렇게 말하도록 할 것인가.
+**수정됨.** 행의 판단은 순수 함수 하나(`lib/connect/channelRow.ts`)가 하고, 두 lane의 사실을 받는다 —
+API 연결 상태와, 이 계정의 브라우저 수집 준비 상태 · `SELLER_CENTER_READ` 마지막 성공. 규칙은 셋이다:
+브라우저 lane이 쓸 수 있으면 그것이 이 채널에 대한 참이고(API가 꺼져 있다는 사실이 덮지 못한다) ·
+API lane이 스스로 할 말이 있으면(연결됨·재연결 필요·오류) 그 단어를 지우지 않으며 · 어느 lane도 서 있지
+않으면 다음 걸음은 키 발급이 아니라 상품평 수집 연결이다.
+
+채널 사실 `screenReadReviews`는 `ChannelReviewAcquisitionService.readinessOf`가 열던 **그 비교 하나**를
+채널 단위로 노출한 것이다(`readsReviewsFromScreen`, 규칙의 사본 아님) — 아직 계정이 없는 판매자에게도
+이 lane이 있다고 말해야 하기 때문이다.
+
+**before → after**(같은 계정, 커넥터 OFF, 1440·1366·1152 동일):
+
+```
+before  쿠팡 | 연결 중 | 수집 이력 없음 | 상품평 9개 보기 | 연결 계속하기
+after   쿠팡 | 연결됨  | 리뷰 수집 · 마지막 수집 2시간 전 | 상품평 9개 보기 | 관리
+```
+
+금지어 셋(「연결 중」·「수집 이력 없음」·「연결 계속하기」) 전부 사라졌고, 시각은 `SELLER_CENTER_READ`에서
+온다. NAVER·카페24 행은 **한 글자도 바뀌지 않는다**(`screenReadReviews=false` → 예전 경로 그대로).
+axe 0 · 가로 스크롤 0 · 콘솔 오류 0.
 
 ### N1 · NICE_TO_HAVE
 

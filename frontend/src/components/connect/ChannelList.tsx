@@ -7,6 +7,8 @@ import { relativeTime } from "../../lib/format";
 import { expiryNeedsAttention, shouldOfferRenewal } from "../../lib/coupangExpiry";
 import { hasReviewRecord, reviewEntryLabel, reviewRecordPath } from "../../lib/reviewRecord";
 import { connectionState, type ConnectionState } from "../../lib/connectionState";
+import { channelRowOf } from "../../lib/connect/channelRow";
+import type { ScreenReadReadinessState } from "../../lib/acquisitionReadiness";
 import { ExpiryChip, RENEW_CTA_LABEL } from "../coupang/CoupangExpiryPanel";
 import type {
   ChannelResponse,
@@ -35,14 +37,20 @@ function ChannelRow({
   health,
   statusLoading,
   reviewCount,
+  reviewLane,
   onNotice,
+  onStartReviewSetup,
 }: {
   channel: ChannelResponse;
   account: SellerAccountResponse | null;
   health: ConnectionStatusView | null;
   statusLoading: boolean;
   reviewCount: number | null;
+  /** 이 계정의 브라우저 수집 사실. 계정이 없거나 아직 읽지 못했으면 null. */
+  reviewLane: { readiness: ScreenReadReadinessState | null; lastReadAt: string | null } | null;
   onNotice: (message: string) => void;
+  /** 계정이 없으면 만들고 상품평 수집 화면을 연다. 자격은 받지 않는다. */
+  onStartReviewSetup: (channel: ChannelResponse, account: SellerAccountResponse | null) => void;
 }) {
   const navigate = useNavigate();
   const canUpload =
@@ -52,7 +60,19 @@ function ChannelRow({
   const failing = !!health && (health.consecutiveFailures > 0 || !!health.lastError);
   const action = channelCardAction(channel, account, canUpload, failing);
   // One word for how this channel stands (A5): 연결됨 · 연결 필요 · 연결 중 · 재연결 필요 · 오류.
-  const state = connectionState(account, health);
+  const apiState = connectionState(account, health);
+  /**
+   * 이 행은 두 lane을 갖는다. 한 capability가 꺼져 있다고 채널 전체를 미완성으로 부르지 않는다
+   * (`lib/connect/channelRow.ts`) — 그 판단은 순수 함수 하나가 하고, 여기서는 그 답을 그린다.
+   */
+  const row = channelRowOf({
+    api: apiState,
+    screenReadReviews: channel.support?.screenReadReviews === true,
+    reviewReadiness: reviewLane?.readiness ?? null,
+    lastScreenReadAt: reviewLane?.lastReadAt ?? null,
+    hasAccount: !!account,
+  });
+  const state = row.state ?? apiState;
 
   // Credential-expiry surfacing (Coupang). The backend supplies the expiry sub-view on the health read;
   // WARN_* / DATE_PASSED / EXPIRED flag "만료 예정·조치 필요", and from WARN_14 (renewRecommended) the row
@@ -145,13 +165,22 @@ function ChannelRow({
               response (`lastSuccessAt`, `consecutiveFailures`); no vendor message is surfaced, because
               the strings the connectors write carry gateway codes and HTTP statuses, which is the
               opposite of what this row is for. */}
-          <span>
-            {lastCollected
-              ? failing
-                ? `마지막 성공 ${relativeTime(lastCollected)} · 그 뒤로 수집되지 않았습니다`
-                : `마지막 수집 ${relativeTime(lastCollected)}`
-              : "수집 이력 없음"}
-          </span>
+          {row.reviewLine ? (
+            <span data-testid="channel-review-lane">
+              {reviewLane?.lastReadAt
+                ? `${row.reviewLine} ${relativeTime(reviewLane.lastReadAt)}`
+                : row.reviewLine}
+            </span>
+          ) : null}
+          {row.showApiCollectionLine ? (
+            <span>
+              {lastCollected
+                ? failing
+                  ? `마지막 성공 ${relativeTime(lastCollected)} · 그 뒤로 수집되지 않았습니다`
+                  : `마지막 수집 ${relativeTime(lastCollected)}`
+                : "수집 이력 없음"}
+            </span>
+          ) : null}
           {showReviewEntry && account ? (
             <BtnLink
               to={reviewRecordPath(account.id)}
@@ -190,14 +219,34 @@ function ChannelRow({
             {RENEW_CTA_LABEL}
           </Btn>
         ) : null}
-        <Btn
-          size="sm"
-          variant={action.intent === "manage" ? "outline" : "solid"}
-          onClick={handleAction}
-          disabled={action.disabled || statusLoading}
-        >
-          {action.label}
-        </Btn>
+        {row.primary.kind === "DEFER" ? (
+          <Btn
+            size="sm"
+            variant={action.intent === "manage" ? "outline" : "solid"}
+            onClick={handleAction}
+            disabled={action.disabled || statusLoading}
+          >
+            {action.label}
+          </Btn>
+        ) : row.primary.kind === "MANAGE" ? (
+          <Btn
+            size="sm"
+            variant="outline"
+            onClick={() => account && navigate(`/connect/channels/${account.id}`)}
+            data-testid="channel-manage"
+          >
+            {row.primary.label}
+          </Btn>
+        ) : (
+          <Btn
+            size="sm"
+            onClick={() => onStartReviewSetup(channel, account)}
+            disabled={statusLoading}
+            data-testid="channel-review-setup"
+          >
+            {row.primary.label}
+          </Btn>
+        )}
       </div>
     </li>
   );
@@ -223,7 +272,9 @@ export function ChannelList({
   statusLoading,
   /** Collected 상품평 per account, for the rows that have a record. Absent = unknown, never zero. */
   reviewCounts,
+  reviewLanes,
   onNotice,
+  onStartReviewSetup,
   /** True while the catalog itself is still loading (as opposed to loaded-and-empty or failed). */
   channelsLoading = false,
   /** True when the catalog read failed — the list then says so instead of rendering nothing. */
@@ -234,7 +285,10 @@ export function ChannelList({
   health: Map<string, ConnectionStatusView>;
   statusLoading: boolean;
   reviewCounts?: Map<string, number>;
+  /** 계정별 브라우저 수집 사실(준비 상태 · 화면 수집의 마지막 성공). 읽지 못한 계정은 목록에 없다. */
+  reviewLanes?: Map<string, { readiness: ScreenReadReadinessState | null; lastReadAt: string | null }>;
   onNotice: (message: string) => void;
+  onStartReviewSetup: (channel: ChannelResponse, account: SellerAccountResponse | null) => void;
   channelsLoading?: boolean;
   channelsError?: boolean;
 }) {
@@ -263,7 +317,9 @@ export function ChannelList({
             health={account ? health.get(account.id) ?? null : null}
             statusLoading={statusLoading}
             reviewCount={account ? reviewCounts?.get(account.id) ?? null : null}
+            reviewLane={account ? reviewLanes?.get(account.id) ?? null : null}
             onNotice={onNotice}
+            onStartReviewSetup={onStartReviewSetup}
           />
         );
       })}

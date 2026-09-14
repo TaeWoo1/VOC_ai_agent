@@ -33,7 +33,7 @@ const COUPANG: ChannelResponse = {
     autoCollectSupported: true,
     autoCollectDataTypes: ["ORDER_SUMMARY"],
     connectionCheckSupported: true,
-    credentialSetupSupported: true,
+    credentialSetupSupported: true, screenReadReviews: false,
   },
 };
 
@@ -72,7 +72,8 @@ function renderList(h: ConnectionStatusView) {
         accounts={[ACCOUNT]}
         health={new Map([["acc-cp", h]])}
         statusLoading={false}
-        onNotice={vi.fn()}
+        onStartReviewSetup={() => undefined}
+          onNotice={vi.fn()}
       />
     </MemoryRouter>,
   );
@@ -111,6 +112,7 @@ describe("ChannelList — Coupang credential expiry", () => {
           accounts={[ACCOUNT]}
           health={new Map([["acc-cp", health(null)]])}
           statusLoading={false}
+          onStartReviewSetup={() => undefined}
           onNotice={vi.fn()}
         />
       </MemoryRouter>,

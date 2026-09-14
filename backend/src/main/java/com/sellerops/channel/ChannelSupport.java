@@ -19,6 +19,11 @@ import java.util.List;
  *       export FORMAT is verified — the frontend keeps that wording conservative.</li>
  *   <li>Data-type lists carry only operator-collectable types (리뷰/문의/주문);
  *       SALES/PRODUCT are never emitted as collectable (no ingestion path).</li>
+ *   <li>{@code screenReadReviews} is NOT about a connector at all — it says the channel's reviews are
+ *       read off the seller's own open 판매자센터 screen. It is the same one condition
+ *       {@code ChannelReviewAcquisitionService.readinessOf} opens with, asked of a channel rather than
+ *       of an account, because a seller who has not connected anything yet has no account to ask about
+ *       and still needs to be told this lane exists.</li>
  * </ul>
  */
 public record ChannelSupport(
@@ -27,5 +32,6 @@ public record ChannelSupport(
         boolean autoCollectSupported,
         List<String> autoCollectDataTypes,
         boolean connectionCheckSupported,
-        boolean credentialSetupSupported) {
+        boolean credentialSetupSupported,
+        boolean screenReadReviews) {
 }

@@ -15,7 +15,7 @@ function channel(id: string, code: string, nameKo: string, status: ChannelRespon
   return {
     id, code, nameKo, status,
     dataBadges: [], lastSyncedAt: null, actionLabel: status === "RECONNECT_REQUIRED" ? "다시 연결하기" : "연결 관리",
-    support: { autoCollectSupported: false, autoCollectDataTypes: [], fileUploadSupported: true, fileUploadDataTypes: [], connectionCheckSupported: false, credentialSetupSupported: false },
+    support: { autoCollectSupported: false, autoCollectDataTypes: [], fileUploadSupported: true, fileUploadDataTypes: [], connectionCheckSupported: false, credentialSetupSupported: false, screenReadReviews: false },
   } as ChannelResponse;
 }
 function reviewAccount(id: string, code: string, nameKo: string): ReviewAccount {

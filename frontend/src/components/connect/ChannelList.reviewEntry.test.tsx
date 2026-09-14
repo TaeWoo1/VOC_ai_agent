@@ -31,7 +31,7 @@ const COUPANG: ChannelResponse = {
     autoCollectSupported: true,
     autoCollectDataTypes: ["ORDER_SUMMARY"],
     connectionCheckSupported: true,
-    credentialSetupSupported: true,
+    credentialSetupSupported: true, screenReadReviews: false,
   },
 } as ChannelResponse;
 
@@ -75,7 +75,8 @@ function renderList(options: {
         health={new Map([["acc-cp", options.health ?? health()]])}
         statusLoading={false}
         reviewCounts={options.reviewCounts}
-        onNotice={vi.fn()}
+        onStartReviewSetup={() => undefined}
+          onNotice={vi.fn()}
       />
     </MemoryRouter>,
   );

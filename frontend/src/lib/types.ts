@@ -61,6 +61,14 @@ export interface ChannelSupport {
   autoCollectDataTypes: string[];
   connectionCheckSupported: boolean;
   credentialSetupSupported: boolean;
+  /**
+   * 이 채널의 리뷰는 판매자 자신의 열린 판매자센터 화면에서 읽어 온다.
+   *
+   * 커넥터 사실이 아니다 — API도 자격도 없이 성립하는 lane이고, 그래서 `autoCollectSupported`가 false여도
+   * 참일 수 있다. `ChannelReviewAcquisitionService.readsReviewsFromScreen`과 <b>같은 비교</b>이며, 아직
+   * 아무것도 연결하지 않아 물어볼 계정이 없는 판매자에게 이 lane이 있다는 것을 말하기 위해 채널 단위로 온다.
+   */
+  screenReadReviews: boolean;
 }
 
 export interface ChannelResponse {
