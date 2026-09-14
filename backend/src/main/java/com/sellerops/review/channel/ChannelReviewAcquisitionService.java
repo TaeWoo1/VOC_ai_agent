@@ -8,8 +8,10 @@ import com.sellerops.review.channel.dto.AgentReviewAcquisitionTargetView;
 import com.sellerops.review.channel.dto.ChannelReviewAcquisitionReadinessView;
 import com.sellerops.review.channel.dto.ChannelReviewAcquisitionRunResponse;
 import com.sellerops.review.channel.dto.StoreIdentityRequest;
+import com.sellerops.auth.device.HelperDeviceRepository;
 import com.sellerops.selleraccount.AccountSessionSlot;
 import com.sellerops.selleraccount.AccountSessionSlotRepository;
+import com.sellerops.selleraccount.AccountSessionSlotService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import java.security.SecureRandom;
@@ -44,16 +46,22 @@ public class ChannelReviewAcquisitionService {
     private final SellerAccountRepository accounts;
     private final ChannelRepository channels;
     private final AccountSessionSlotRepository slots;
+    private final AccountSessionSlotService slotService;
+    private final HelperDeviceRepository helperDevices;
     private final ChannelReviewAcquisitionRefRepository refs;
     private final CredentialVault vault;
 
     public ChannelReviewAcquisitionService(SellerAccountRepository accounts, ChannelRepository channels,
                                            AccountSessionSlotRepository slots,
+                                           AccountSessionSlotService slotService,
+                                           HelperDeviceRepository helperDevices,
                                            ChannelReviewAcquisitionRefRepository refs,
                                            CredentialVault vault) {
         this.accounts = accounts;
         this.channels = channels;
         this.slots = slots;
+        this.slotService = slotService;
+        this.helperDevices = helperDevices;
         this.refs = refs;
         this.vault = vault;
     }
@@ -71,10 +79,9 @@ public class ChannelReviewAcquisitionService {
                 .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
         Channel channel = channels.findById(account.getChannelId())
                 .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
-        boolean linked = slots.findBySellerAccountId(account.getId()).isPresent();
         return new ChannelReviewAcquisitionReadinessView(
-                readinessOf(account, channel, linked, expectedStoreFingerprint(orgId, account) != null)
-                        .name(),
+                readinessOf(account, channel, helperLinked(orgId),
+                        expectedStoreFingerprint(orgId, account) != null).name(),
                 channel.getCode());
     }
 
@@ -102,6 +109,29 @@ public class ChannelReviewAcquisitionService {
             return ScreenReadReadiness.STORE_IDENTITY_UNKNOWN;
         }
         return ScreenReadReadiness.READY;
+    }
+
+    /**
+     * Is a helper linked to this org — the fact this condition's NAME has always claimed.
+     *
+     * <p><b>It used to ask whether the account had a session slot, and that was a dead end.</b> A slot is
+     * an opaque per-account identifier that is minted on FIRST USE (`AccountSessionSlotService.getOrCreate`,
+     * find-or-create, and the session-slot GET mints one just by being read) — so its absence says nothing
+     * about a helper and everything about whether some other screen has happened to ask for it yet. On a
+     * seller who connected a browser and nothing else it never had: measured live 2026-09-14 on a fresh
+     * account whose helper card read 연결됨 while this same service answered {@code HELPER_NOT_LINKED},
+     * under a sentence that told them to connect the helper they had just connected, beside a button that
+     * went to a page which cannot mint a slot. The screen held two answers to one question and showed the
+     * one that was not about the helper at all.
+     *
+     * <p>It is also the same circularity this package's sibling closed for the store identity: a gate must
+     * not require a value that only the gated action produces.
+     *
+     * <p>Org-scoped, because a helper device is linked to an ACCOUNT of reviewnary, not to one marketplace
+     * connection — which is exactly what the seller sees on the card above the button.
+     */
+    private boolean helperLinked(UUID orgId) {
+        return helperDevices.existsByOrgIdAndRevokedAtIsNull(orgId);
     }
 
     /**
@@ -163,9 +193,9 @@ public class ChannelReviewAcquisitionService {
         }
         account.setStoreIdentity(value);
         accounts.save(account);
-        boolean linked = slots.findBySellerAccountId(account.getId()).isPresent();
         return new ChannelReviewAcquisitionReadinessView(
-                readinessOf(account, channel, linked, expectedStoreFingerprint(orgId, account) != null).name(),
+                readinessOf(account, channel, helperLinked(orgId),
+                        expectedStoreFingerprint(orgId, account) != null).name(),
                 channel.getCode());
     }
 
@@ -178,7 +208,7 @@ public class ChannelReviewAcquisitionService {
         // Same three conditions, same order, same sentences — now stated once and thrown here. The
         // HTTP status per condition is unchanged: a channel or account that can never do this is a 400,
         // an account that is merely not linked yet is a 409.
-        switch (readinessOf(account, channel, slots.findBySellerAccountId(account.getId()).isPresent(),
+        switch (readinessOf(account, channel, helperLinked(orgId),
                 expectedStoreFingerprint(orgId, account) != null)) {
             case CHANNEL_NOT_SUPPORTED ->
                     throw ApiException.badRequest("이 채널에는 화면에서 상품평을 가져오는 기능이 없습니다.");
@@ -194,6 +224,14 @@ public class ChannelReviewAcquisitionService {
             case STORE_IDENTITY_UNKNOWN -> { }
             case READY -> { }
         }
+        // The run identifies its account to the helper by SLOT, so the slot has to exist by the time
+        // `resolve` looks for one. Minting it here is find-or-create and grants nothing — the slot is not a
+        // capability (`AccountSessionSlotController`), the org still comes from the JWT everywhere it is
+        // accepted, and a caller who reaches this line is already authorized for this account. It is minted
+        // at the moment the seller asks for a run rather than required beforehand, which is the whole of
+        // the repair above.
+        slotService.resolveSlot(orgId, account.getId(), account.getChannelId());
+
         ChannelReviewAcquisitionRef row = new ChannelReviewAcquisitionRef();
         row.setOrgId(orgId);
         row.setSellerAccountId(account.getId());

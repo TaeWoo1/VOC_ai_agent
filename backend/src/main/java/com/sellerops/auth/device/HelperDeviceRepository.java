@@ -15,6 +15,12 @@ public interface HelperDeviceRepository extends JpaRepository<HelperDevice, UUID
 
     List<HelperDevice> findByOrgIdAndRevokedAtIsNullOrderByCreatedAtDesc(UUID orgId);
 
+    /**
+     * Does this org have a helper linked at all? The existence question, asked by surfaces that need to
+     * know whether a screen read can happen — never which device, and never the token.
+     */
+    boolean existsByOrgIdAndRevokedAtIsNull(UUID orgId);
+
     Optional<HelperDevice> findByIdAndOrgId(UUID id, UUID orgId);
 
     /**

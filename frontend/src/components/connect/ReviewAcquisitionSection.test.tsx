@@ -83,12 +83,14 @@ describe("상품평 가져오기 — the press the channel screen never offered"
     expect(screen.queryByText("상품평 가져오기")).toBeNull();
   });
 
-  it("blocks the press and names the one next step when the account has no helper link", async () => {
+  it("blocks the press and points at the 도우미 card, without a second button beside it", async () => {
     getReviewAcquisitionReadiness.mockResolvedValue({ state: "HELPER_NOT_LINKED", channelCode: "COUPANG" });
     renderSection();
-    expect(await screen.findByTestId("acquisition-blocked")).toHaveTextContent("도우미와 연결되지 않았습니다");
+    expect(await screen.findByTestId("acquisition-blocked")).toHaveTextContent("도우미 카드");
     expect((screen.getByTestId("acquisition-start") as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByRole("link", { name: "도우미 연결하기" })).toBeTruthy();
+    // The card above already offers 이 기기 연결. A second control for the same action, fifteen
+    // centimetres below the first, makes the seller choose which one is real.
+    expect(screen.queryByRole("link", { name: "도우미 연결하기" })).toBeNull();
   });
 
   it("blocks on a stopped 도우미 using the card's own sentence, not a second diagnosis", async () => {

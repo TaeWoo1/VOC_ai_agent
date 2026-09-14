@@ -60,7 +60,10 @@ const ACCOUNT_BLOCKERS: Record<Exclude<ScreenReadReadinessState, "READY">, strin
   // export the seller downloads; neither has a screen to read here.
   CHANNEL_NOT_SUPPORTED: "이 채널은 화면에서 상품평을 가져오는 방식이 아닙니다.",
   FILE_UPLOAD_ACCOUNT: "파일로 올린 계정에는 읽어올 판매자 화면이 없습니다.",
-  HELPER_NOT_LINKED: "이 판매 계정이 아직 내 PC의 도우미와 연결되지 않았습니다.",
+  // The card directly above this sentence is the one place this is acted on, and it says the same thing
+  // in its own words with its own button. So this explains why the press is disabled and points AT the
+  // card — it does not offer a second way to do the same thing fifteen centimetres below the first.
+  HELPER_NOT_LINKED: "위의 도우미 카드에서 이 계정에 도우미를 연결하면 상품평을 가져올 수 있습니다.",
   // Ours, not theirs. Live on 2026-09-14 this arrived mid-run as 「어느 판매자 계정인지 확인하지
   // 못했어요 … 판매자 화면이 정상적으로 열려 있는지 확인한 뒤 다시 시도해 주세요」 — while the seller's
   // screen was open and its store label was read successfully. The missing half was our record of
@@ -113,10 +116,10 @@ export function acquisitionReadinessOf(
       // STORE_IDENTITY_UNKNOWN deliberately has none: the field that answers it is drawn directly under
       // this sentence, and a button beside it would be a second way to do the same thing — pointing, in
       // the old case, at an API-key wizard the seller does not need.
-      action:
-        readiness.state === "HELPER_NOT_LINKED"
-          ? { to: "/connect/helper", label: "도우미 연결하기" }
-          : null,
+      // None of the three offers one any more. Two are facts about the channel and the account, which a
+      // next step cannot change; the third is acted on by the 도우미 card above, and it used to send the
+      // seller to an install page that could not fix what this state actually reported.
+      action: null,
     };
   }
   if (helper.key !== "CONNECTED") {

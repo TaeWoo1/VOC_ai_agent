@@ -13,8 +13,9 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.review.channel.dto.StoreIdentityRequest;
-import com.sellerops.selleraccount.AccountSessionSlot;
+import com.sellerops.auth.device.HelperDeviceRepository;
 import com.sellerops.selleraccount.AccountSessionSlotRepository;
+import com.sellerops.selleraccount.AccountSessionSlotService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import java.util.Optional;
@@ -42,10 +43,17 @@ class ScreenReadReadinessTest {
     private final SellerAccountRepository accounts = mock(SellerAccountRepository.class);
     private final ChannelRepository channels = mock(ChannelRepository.class);
     private final AccountSessionSlotRepository slots = mock(AccountSessionSlotRepository.class);
+    private final AccountSessionSlotService slotService = mock(AccountSessionSlotService.class);
+    private final HelperDeviceRepository helperDevices = mock(HelperDeviceRepository.class);
     private final ChannelReviewAcquisitionRefRepository refs = mock(ChannelReviewAcquisitionRefRepository.class);
     private final CredentialVault vault = mock(CredentialVault.class);
     private final ChannelReviewAcquisitionService service =
-            new ChannelReviewAcquisitionService(accounts, channels, slots, refs, vault);
+            new ChannelReviewAcquisitionService(accounts, channels, slots, slotService, helperDevices, refs, vault);
+
+    /** The one fact the third condition reads: is a helper linked to this reviewnary account. */
+    private void helperLinked(boolean linked) {
+        when(helperDevices.existsByOrgIdAndRevokedAtIsNull(ORG)).thenReturn(linked);
+    }
 
     private static Channel channel(String code) {
         Channel c = new Channel();
@@ -96,7 +104,7 @@ class ScreenReadReadinessTest {
         SellerAccount a = account(coupang, false);
         when(accounts.findByIdAndOrgId(a.getId(), ORG)).thenReturn(Optional.of(a));
         when(channels.findById(coupang.getId())).thenReturn(Optional.of(coupang));
-        when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.empty());
+        helperLinked(false);
         // A vault that cannot be opened is exactly the live condition of 2026-09-14 — and it is not what
         // this account is missing FIRST, which is the point of asking the conditions in one order.
         when(vault.open(ORG, a.getId())).thenThrow(new IllegalStateException("no key"));
@@ -109,7 +117,7 @@ class ScreenReadReadinessTest {
         // A refused press spends nothing, and a readiness read never mints even when it answers READY.
         verify(refs, never()).save(any());
 
-        when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.of(new AccountSessionSlot()));
+        helperLinked(true);
         // Linked, and the read still says truthfully that we cannot name the store...
         assertThat(service.readiness(ORG, a.getId()).state()).isEqualTo("STORE_IDENTITY_UNKNOWN");
         // ...but the press is NOT refused, because that run is how the store gets established. It reads
@@ -119,6 +127,50 @@ class ScreenReadReadinessTest {
         assertThat(service.mint(ORG, a.getId(), UUID.randomUUID()).acquisitionRef()).isNotBlank();
     }
 
+    /**
+     * <b>The dead end, named and closed.</b>
+     *
+     * <p>A seller who linked their helper and did nothing else has no session slot — a slot is minted on
+     * first use by whoever first needs one. The readiness gate used to read that absence as «no helper»,
+     * so it refused the only press that would ever have produced a slot, under a sentence telling the
+     * seller to connect a helper their own card said was connected. Live on 2026-09-14, on a fresh
+     * browser-only account.
+     */
+    @Test
+    @DisplayName("a linked helper with no session slot is READY, and the press mints the slot the run needs")
+    void aLinkedHelperWithNoSlotIsNotADeadEnd() {
+        Channel coupang = channel("COUPANG");
+        SellerAccount a = account(coupang, false);
+        a.setStoreIdentity("A00123456");
+        when(accounts.findByIdAndOrgId(a.getId(), ORG)).thenReturn(Optional.of(a));
+        when(channels.findById(coupang.getId())).thenReturn(Optional.of(coupang));
+        helperLinked(true);
+        // No slot anywhere — the state this gate used to read as «no helper».
+        when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.empty());
+        when(refs.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(service.readiness(ORG, a.getId()).state()).isEqualTo("READY");
+        assertThat(service.mint(ORG, a.getId(), UUID.randomUUID()).acquisitionRef()).isNotBlank();
+        // …and the run can hand its reading somewhere: the slot is created by the press that needs it,
+        // find-or-create, rather than demanded before it.
+        verify(slotService).resolveSlot(ORG, a.getId(), coupang.getId());
+    }
+
+    /** The read still mints nothing — only the press does. */
+    @Test
+    @DisplayName("a readiness read never mints a session slot")
+    void theReadMintsNoSlot() {
+        Channel coupang = channel("COUPANG");
+        SellerAccount a = account(coupang, false);
+        a.setStoreIdentity("A00123456");
+        when(accounts.findByIdAndOrgId(a.getId(), ORG)).thenReturn(Optional.of(a));
+        when(channels.findById(coupang.getId())).thenReturn(Optional.of(coupang));
+        helperLinked(true);
+
+        assertThat(service.readiness(ORG, a.getId()).state()).isEqualTo("READY");
+        verify(slotService, never()).resolveSlot(any(), any(), any());
+    }
+
     @Test
     @DisplayName("a channel with no screen read refuses both the read's verdict and the press")
     void unsupportedChannelIsRefusedBothWays() {
@@ -126,7 +178,7 @@ class ScreenReadReadinessTest {
         SellerAccount a = account(naver, false);
         when(accounts.findByIdAndOrgId(a.getId(), ORG)).thenReturn(Optional.of(a));
         when(channels.findById(naver.getId())).thenReturn(Optional.of(naver));
-        when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.of(new AccountSessionSlot()));
+        helperLinked(true);
         when(vault.open(ORG, a.getId())).thenThrow(new IllegalStateException("no key"));
 
         assertThat(service.readiness(ORG, a.getId()).state()).isEqualTo("CHANNEL_NOT_SUPPORTED");
@@ -151,7 +203,7 @@ class ScreenReadReadinessTest {
         SellerAccount a = account(coupang, false);
         when(accounts.findByIdAndOrgId(a.getId(), ORG)).thenReturn(Optional.of(a));
         when(channels.findById(coupang.getId())).thenReturn(Optional.of(coupang));
-        when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.of(new AccountSessionSlot()));
+        helperLinked(true);
         // No credential anywhere: opening the vault throws, exactly as it does for an account that never
         // registered one.
         when(vault.open(ORG, a.getId())).thenThrow(new IllegalStateException("no credential"));
@@ -171,7 +223,7 @@ class ScreenReadReadinessTest {
         SellerAccount a = account(coupang, false);
         when(accounts.findByIdAndOrgId(a.getId(), ORG)).thenReturn(Optional.of(a));
         when(channels.findById(coupang.getId())).thenReturn(Optional.of(coupang));
-        when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.of(new AccountSessionSlot()));
+        helperLinked(true);
         when(vault.open(ORG, a.getId())).thenThrow(new IllegalStateException("not opened"));
 
         a.setStoreIdentity("A00123456");
@@ -188,7 +240,7 @@ class ScreenReadReadinessTest {
         SellerAccount a = account(coupang, false);
         when(accounts.findByIdAndOrgId(a.getId(), ORG)).thenReturn(Optional.of(a));
         when(channels.findById(coupang.getId())).thenReturn(Optional.of(coupang));
-        when(slots.findBySellerAccountId(a.getId())).thenReturn(Optional.of(new AccountSessionSlot()));
+        helperLinked(true);
 
         assertThatThrownBy(() -> service.setStoreIdentity(ORG, a.getId(), new StoreIdentityRequest("   ")))
                 .isInstanceOf(ApiException.class).hasMessageContaining("업체코드를 입력");

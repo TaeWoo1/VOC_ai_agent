@@ -26,8 +26,18 @@ public enum ScreenReadReadiness {
     /** A file-upload account has no marketplace session to read. */
     FILE_UPLOAD_ACCOUNT,
     /**
-     * No session slot: the account has never been bound to a helper. The handoff resolves the account
-     * by slot, so a run started here would read the screen and then have nowhere to hand its reading.
+     * No helper is linked to this reviewnary account, so there is nothing on the seller's machine that
+     * could open their 판매자 화면.
+     *
+     * <p><b>It used to mean «this account has no session slot», and that was a different fact wearing
+     * this name.</b> A slot is an opaque identifier minted on first use, so its absence reported that no
+     * other screen had happened to ask for one yet — never anything about a helper. Live on 2026-09-14 a
+     * seller whose 도우미 card read 연결됨 was told by this state that their helper was not connected, and
+     * sent to a page that cannot mint a slot: a dead end, and two answers to one question on one screen.
+     * The slot is now minted where it is needed, by {@code mint}, which is the only place that needs it.
+     *
+     * <p>Org-scoped, because a helper is linked to a reviewnary ACCOUNT rather than to one marketplace
+     * connection — the same fact, and now the same answer, as the 도우미 card above the button.
      */
     HELPER_NOT_LINKED,
     /**

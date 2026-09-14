@@ -31,10 +31,18 @@ describe("지금 동기화 — can it be pressed, and if not, the one thing to d
     expect(gate.action).toBeNull();
   });
 
-  it("sends an unlinked account to the 도우미, which is the one blocker the seller can act on here", () => {
+  /**
+   * The rule the case below already stated, now applied to this state too — because the state itself
+   * changed meaning. It used to report «this account has no session slot», a fact about an identifier
+   * minted on first use and nothing to do with a helper; live on 2026-09-14 it told a seller whose card
+   * read 연결됨 to go and connect their helper, at a page that could not have fixed it. It now reports
+   * what its name says, so the card above is both the diagnosis and the only place to act.
+   */
+  it("points at the 도우미 card rather than offering a second button to the same action", () => {
     const gate = acquisitionReadinessOf(ready("HELPER_NOT_LINKED"), CONNECTED);
     expect(gate.canStart).toBe(false);
-    expect(gate.action).toEqual({ to: "/connect/helper", label: "도우미 연결하기" });
+    expect(gate.blockedKo).toContain("도우미 카드");
+    expect(gate.action).toBeNull();
   });
 
   it("does not repeat the 도우미 card's diagnosis — it says only what the press is waiting on", () => {

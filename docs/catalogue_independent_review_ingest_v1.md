@@ -148,6 +148,33 @@ ending down as it always did.
 
 **No scheduler, no retry semantics, no wire change.**
 
+## 5-A · The readiness dead end (found live, 2026-09-14, mid-sitting)
+
+The first live attempt on a genuinely fresh browser-only account never reached the marketplace. The
+seller linked their helper — card 연결됨, `device_link_result {"outcome":"linked"}` — and the same
+service answered **`HELPER_NOT_LINKED`**, under a sentence telling them to connect the helper they had
+just connected, beside a button going to a page that could not have changed the answer.
+
+**The state was reading a different fact than its name.** `linked` was
+`slots.findBySellerAccountId(...).isPresent()` — whether this account has an **AccountSessionSlot**,
+which is an opaque identifier **minted on first use** (`getOrCreate`; the session-slot GET mints one
+just by being read). Its absence says nothing about a helper and everything about whether some other
+screen has happened to ask for one yet. A seller who connected a browser and nothing else never had one.
+
+So the gate required a value that only the gated action produces — **the same circularity this package's
+sibling closed for the store identity**, in a second place, and this time it was a dead end rather than a
+detour.
+
+**Fix.** `linked` now asks the fact its name claims: does this org have a live helper device
+(`existsByOrgIdAndRevokedAtIsNull`). The slot is minted where it is actually needed — by `mint`, at the
+moment the seller asks for a run — which is find-or-create and grants nothing (the slot is not a
+capability; the org still comes from the JWT everywhere it is accepted).
+
+**And the screen stops holding two answers to one question.** With the corrected predicate, the 도우미
+card and this sentence agree. The duplicate `[도우미 연결하기]` beside the blocked sentence is gone: the
+card above already offers `[이 기기 연결]`, and the file's own neighbouring rule already said so —
+«the card directly above owns the next step; a second button to the same page is not a choice».
+
 ## 6 · Live harness
 
 `tools/helper/live-redact.sh` — a stdin filter for harness output, masking the 업체코드 shape and any
