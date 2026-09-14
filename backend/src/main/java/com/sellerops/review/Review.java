@@ -93,6 +93,32 @@ public class Review extends BaseEntity {
     private String sourceOptionId;
 
     /**
+     * The channel's own product identifier for this review (Coupang 노출상품ID), verbatim (V105).
+     *
+     * <p><b>It sits BESIDE {@link #productId}, never instead of it.</b> A review whose ref names a listing
+     * this org holds carries both; one whose ref names nothing this org holds carries this and a null
+     * product — and that is the point: the review is stored, readable and decidable, and the single thing
+     * we cannot say is which catalogue product it belongs to. Two such reviews with different refs stay
+     * two different unresolved products; nothing rounds them up into one shared bucket.
+     *
+     * <p>It is also the reconcile key. When a catalogue arrives later, {@code channel_products} joined on
+     * {@code (channel_id, source_product_ref)} answers the question without re-reading the marketplace.
+     */
+    @Column(name = "source_product_ref")
+    private String sourceProductRef;
+
+    /**
+     * The product name the channel printed beside this review (V105).
+     *
+     * <p>Kept because it is the only thing by which a seller can recognise an unresolved review. It is a
+     * SOURCE fact and not a product: nothing resolves by it, nothing creates a product from it, and it is
+     * never promoted into {@code products.name} — the channel's label and the seller's catalogue entry are
+     * different objects, and matching them by name is exactly what merged two sellers' products before.
+     */
+    @Column(name = "source_product_name")
+    private String sourceProductName;
+
+    /**
      * Photos/videos on the review itself, never the product thumbnail beside it.
      *
      * <p><b>Read it with {@link #mediaCountObserved}.</b> This field alone cannot say whether a 0 is

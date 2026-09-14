@@ -62,6 +62,26 @@ export interface ActivatedCarrier {
   isSurfaceOpen(): boolean;
   /** Tear everything down: close the session and the window (if any). Idempotent. */
   dispose(): Promise<void>;
+  /**
+   * **This carrier is built for exactly ONE run, and cannot serve a second.**
+   *
+   * <p>A declaration about the carrier's kind, not about its state. The acquisition carrier mints its
+   * `runId` at activation and binds a single-use acquisition ref to it, so once that run has started
+   * there is nothing a later asker can be given: a second `START_RUN` on the same engine is refused,
+   * and the seller reads 「판매자센터 화면을 준비하지 못했습니다」 about a helper that is working fine.
+   *
+   * <p>Measured live 2026-09-13. The store-identity bootstrap run ends UNRESOLVED and PARKS (blocker
+   * `STORE_UNRESOLVED`, which is `WAITING_FOR_HUMAN`, not settled), so `maybeRelease` correctly kept it
+   * — for the fifteen-minute window grace. The seller pressed 「이 스토어를 연결하고 리뷰 가져오기」
+   * two seconds later, the card remounted asking for the SAME carrier, and the host re-announced the
+   * parked run it could no longer use. Two runs in a row were refused; a helper restart was the only
+   * way out.
+   *
+   * <p>Absent or false means what every carrier meant before: a returning tab is re-announced the live
+   * run. That is right for the guided walks, whose window outlives their run on purpose — WING shows
+   * the secret key once and the seller goes back to the SAME screen to copy it.
+   */
+  readonly servesOneRun?: boolean;
 }
 
 export interface OnDemandCarrierHostDeps {
@@ -123,6 +143,29 @@ export class OnDemandCarrierHost implements AwCarrierEndpoint {
     if (this.active) {
       const same = this.active.request.carrier === request.carrier && this.active.request.channelCode === request.channelCode;
       if (same) {
+        /**
+         * **A one-run carrier nobody is on cannot be re-announced — it is rebuilt.**
+         *
+         * The two preconditions are the same two the handover below reads, and they mean the same
+         * things here. NO ATTACHED TAB is what says nobody is mid-walk on this run: the frontend is
+         * the only thing that sends commands, so a run with no tab on it is not being driven. And
+         * `servesOneRun` is what says a re-announcement would be useless rather than merely
+         * redundant — a spent single-use run has nothing left to offer the asking tab.
+         *
+         * Both are required. A tab still attached always re-announces (that is a refresh, or a
+         * second tab of the same run), and a carrier whose window outlives its run — every guided
+         * walk — always re-announces, which is what keeps the key-copying return working.
+         */
+        if (this.canRecycle()) {
+          log("aw_on_demand_carrier_recycled", { carrier: request.carrier, channelCode: request.channelCode });
+          // Sequenced exactly as the handover is: the spent run is settled and torn down BEFORE the
+          // next one is built, so two carriers never hold a browser at the same moment.
+          void this.release("RUN_SPENT").then(() => {
+            if (this.closed || this.active) return;
+            this.activateFor(ws, request);
+          });
+          return;
+        }
         this.markAttached(ws);
         // Re-announce to this socket (a refresh, or a second tab of the same walk). Idempotent on the endpoint.
         this.active.carrier.endpoint.onClientConnected(ws);
@@ -197,6 +240,17 @@ export class OnDemandCarrierHost implements AwCarrierEndpoint {
   private canHandOver(): boolean {
     if (!this.active || this.releasing) return false;
     return this.attached.size === 0;
+  }
+
+  /**
+   * May the active carrier be replaced by a fresh one for the SAME request?
+   *
+   * Only when it serves a single run and nobody is attached to it. See the `same` branch above for
+   * why both readings are needed and what each one protects.
+   */
+  private canRecycle(): boolean {
+    if (!this.active || this.releasing) return false;
+    return this.active.carrier.servesOneRun === true && this.attached.size === 0;
   }
 
   /** Build, announce and start polling a carrier for `request`. Refuses (logging why) when unservable. */

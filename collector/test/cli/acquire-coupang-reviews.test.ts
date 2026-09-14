@@ -130,7 +130,7 @@ describe("the exit code says what actually happened", () => {
 
 describe("what the run prints", () => {
   it("summarizes in counts and enums, and never in review text", () => {
-    const line = summarize(result(), { ok: true, received: 4, stored: 3, skipped: 1, failed: 0, reason: null });
+    const line = summarize(result(), { ok: true, received: 4, stored: 3, skipped: 1, failed: 0, unlinked: 0, reason: null });
 
     expect(line).toContain("pages=2");
     expect(line).toContain("complete=true");

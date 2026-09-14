@@ -1324,7 +1324,15 @@ export function buildCoupangReviewAcquisitionLiveConfig(): CoupangReviewAcquisit
     handoff: async (request: ReviewHandoffRequest) => {
       const t = await session();
       if (t === null || origin === null) {
-        return { ok: false, received: request.reviews.length, stored: 0, skipped: 0, failed: 0, reason: "NO_SESSION" };
+        return {
+          ok: false,
+          received: request.reviews.length,
+          stored: 0,
+          skipped: 0,
+          failed: 0,
+          unlinked: 0,
+          reason: "NO_SESSION",
+        };
       }
       return postCoupangReviewHandoff(origin, t, request);
     },
@@ -1375,6 +1383,11 @@ export function activateCoupangReviewAcquisition(
   let disposed = false;
   return {
     endpoint,
+    // The runId is minted at activation and the acquisition ref bound to it is single-use, so this carrier
+    // IS its run: once that run has started there is nothing a later asker can be handed. The store-identity
+    // confirmation makes that ordinary rather than exceptional — the first run ends UNRESOLVED with a
+    // candidate, the seller confirms, and the next press is by contract a NEW single-use run.
+    servesOneRun: true,
     isSettled: () => {
       if (!engine.isStarted()) return true;
       const status = engine.view().status;

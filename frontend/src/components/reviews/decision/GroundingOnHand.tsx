@@ -25,6 +25,13 @@ import type { ReviewDecisionContext } from "../../../lib/types";
  */
 export function GroundingOnHand({ context }: { context: ReviewDecisionContext }) {
   const { knowledge, productSignal } = context;
+  /**
+   * <b>이름은 있는데 상품이 없다</b> — the review arrived with the channel's own product name and this
+   * org holds no catalogue product for it yet. The only producer of a name without an id is that
+   * fallback (`ReviewProductLabel`), so the two fields say it between them and no third field is
+   * needed. It is the ordinary state of a seller who connected the browser and no product API.
+   */
+  const unlinked = context.productId == null && context.productName != null;
   return (
     <Section title="이 상품에 대해 우리가 아는 것">
       <div className="space-y-2 rounded-2xl border border-line bg-surface p-4">
@@ -33,6 +40,11 @@ export function GroundingOnHand({ context }: { context: ReviewDecisionContext })
             <Link to={`/products/${context.productId}`} className="break-keep font-medium text-ink hover:underline">
               {context.productName}
             </Link>
+          ) : context.productName ? (
+            // The channel's own label, and deliberately NOT a link: there is no product screen to open.
+            // «상품 미지정» would be wrong twice — the channel did name it, and that phrase is this
+            // product's word for the shared bucket that unresolved rows must never be folded into.
+            <span className="break-keep font-medium text-ink">{context.productName}</span>
           ) : (
             <span className="break-keep text-muted">상품 미지정</span>
           )}
@@ -43,6 +55,16 @@ export function GroundingOnHand({ context }: { context: ReviewDecisionContext })
             <span className="tabular-nums">부정 {productSignal.negativeReviews}건</span>
           ) : null}
         </Facts>
+
+        {unlinked ? (
+          // Why the figures above are absent. Without this the seller reads a review whose product
+          // counts are simply missing and has no way to learn that the answer is «not yet linked»
+          // rather than «zero».
+          <p className="break-keep text-sm leading-relaxed text-muted">
+            판매 채널에서 읽은 상품명입니다. 아직 상품 목록의 상품과 연결되지 않아 상품별 수치는 표시하지
+            않습니다.
+          </p>
+        ) : null}
 
         <Facts className="text-sm text-muted">
           <span className="tabular-nums">등록된 상품 지식 {knowledge.productSources}건</span>

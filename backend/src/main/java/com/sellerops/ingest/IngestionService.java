@@ -138,11 +138,18 @@ public class IngestionService {
         String channelCode = channels.findById(channelId).map(Channel::getCode).orElse(null);
         for (CanonicalReview row : rows) {
             try {
-                Product product = productService.resolveOrCreate(orgId, row.productName(), row.sku());
+                // **Two lanes, and the row chooses — the same rule inquiries have had since
+                // ChannelProductRef, now available to reviews.** A row that declares identifier
+                // attribution is attributed by what the CALLER already resolved against the channel's
+                // own identifiers, find-only: never resolve-or-create, never a name fallback, never the
+                // shared "(미지정 상품)" bucket. Its product may be null, and a null product is a
+                // storable review — that is the whole of catalogue independence.
+                Product product = attributeReviewProduct(orgId, row);
+                UUID productId = product == null ? null : product.getId();
                 boolean hasExternal = isPresent(row.externalId());
                 int keyVersion = ReviewDedupKey.versionForRow(channelCode, row.textless());
                 String hash = hasExternal ? null
-                        : ReviewDedupKey.contentHash(keyVersion, channelId, product.getId(),
+                        : ReviewDedupKey.contentHash(keyVersion, channelId, reviewProductKey(row, productId),
                         datePart(row.receivedAt()), row.body(), row.rating(), row.sourceOptionId());
                 String token = hasExternal ? "ext:" + row.externalId() : "hash:" + hash;
 
@@ -164,11 +171,20 @@ public class IngestionService {
                     tally.skip();
                     continue;
                 }
+                // The same review, stored before this source declared a product ref and therefore keyed on
+                // our resolved product id. Checked only where it can exist — a declaring source whose row
+                // DID resolve — so it costs one bounded lookup on that lane and nothing anywhere else. It
+                // exists because the formula change above is deliberate and this is its whole cost: without
+                // it, re-reading a store whose 상품평 are already stored would file every one of them twice.
+                if (!hasExternal && legacyKeyedDuplicate(orgId, channelId, keyVersion, row, productId)) {
+                    tally.skip();
+                    continue;
+                }
 
                 Review entity = new Review();
                 entity.setOrgId(orgId);
                 entity.setChannelId(channelId);
-                entity.setProductId(product.getId());
+                entity.setProductId(productId);
                 entity.setBody(row.body());
                 entity.setRating(row.rating());
                 entity.setNegative(row.rating() != null && row.rating() <= 2);
@@ -182,6 +198,13 @@ public class IngestionService {
                 // must not be able to rewrite them either — see refreshReplyState for why a re-import is
                 // deliberately allowed to change reply state and nothing else.
                 entity.setSourceOptionId(row.sourceOptionId());
+                // What the CHANNEL said, kept whether or not it resolved (V105). Written on the declaring
+                // lane only: a file upload names a product of the seller's own making, and recording that
+                // as a channel identifier would make a later reconcile join on a value no channel published.
+                if (row.productRef() != null) {
+                    entity.setSourceProductRef(row.productRef().externalProductId());
+                    entity.setSourceProductName(blankToNull(row.productName()));
+                }
                 entity.setMediaCount(row.mediaCount());
                 // Carried, never derived from the count: `0 / false` is the file-upload path saying
                 // nobody asked about media, and `0 / true` would be a reader saying there is none.
@@ -664,6 +687,67 @@ public class IngestionService {
                 tally.fail(sourceRow, "저장 실패: 제약 조건 위반");
             }
         }
+    }
+
+    /**
+     * Which product this REVIEW is about — or nothing, when nothing this org holds proves it.
+     *
+     * <p><b>The declaring lane is find-only.</b> A row carrying a {@link ChannelProductRef} has already
+     * been attributed by its caller against the channel's own identifiers (for Coupang WING: 옵션ID
+     * first, then 노출상품ID with an option tie-break — {@code AgentReviewHandoffService}), and the SKU
+     * that arrives here was read OUT of this database by that resolution. So ingest looks it up and
+     * never creates: a review must not be able to bring a product into the catalogue, which is exactly
+     * what passing a channel identifier through as a SKU used to do — one parallel product per listing.
+     *
+     * <p>Not finding one is an answer, not a failure. The review is stored with a null product and the
+     * channel's own identity beside it; every read path already null-guards a review's product, because
+     * promoted Cafe24 reviews have carried a null one for as long as they have existed.
+     *
+     * <p>The non-declaring lane is untouched: name/SKU resolve-or-create, exactly as every file-upload
+     * source has always used it.
+     */
+    private Product attributeReviewProduct(UUID orgId, CanonicalReview row) {
+        if (row.productRef() == null) {
+            return productService.resolveOrCreate(orgId, row.productName(), row.sku());
+        }
+        return productService.findBySku(orgId, row.sku()).orElse(null);
+    }
+
+    /**
+     * The product slot of this row's dedup key: the CHANNEL's identifier where the source declares one,
+     * our resolved product id otherwise.
+     *
+     * <p>A declaring row keys on a value no resolution of ours can move, so a review stored today
+     * unresolved and linked to a product tomorrow still hashes to the same thing — which is what makes
+     * the reconcile boundary safe to cross. See {@link ReviewDedupKey#contentHash(int, UUID, String,
+     * String, String, Integer, String)}.
+     */
+    private static String reviewProductKey(CanonicalReview row, UUID productId) {
+        if (row.productRef() != null) {
+            return row.productRef().externalProductId();
+        }
+        return productId == null ? null : productId.toString();
+    }
+
+    /**
+     * Is this review already stored under the pre-V105 formula (keyed on our resolved product id)?
+     *
+     * <p>Only ever asked on the declaring lane for a row that DID resolve, because that is the only place
+     * such a row can exist. Both answers are honest: true means we have this review and must not store a
+     * second copy of it under the new key; false means we do not.
+     */
+    private boolean legacyKeyedDuplicate(UUID orgId, UUID channelId, int keyVersion, CanonicalReview row,
+                                         UUID productId) {
+        if (row.productRef() == null || productId == null) {
+            return false;
+        }
+        String legacy = ReviewDedupKey.contentHash(keyVersion, channelId, productId,
+                datePart(row.receivedAt()), row.body(), row.rating(), row.sourceOptionId());
+        return reviews.existsByOrgIdAndChannelIdAndContentHash(orgId, channelId, legacy);
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     private boolean existsReview(UUID orgId, UUID channelId, boolean hasExternal,

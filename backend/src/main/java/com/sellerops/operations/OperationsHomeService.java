@@ -19,6 +19,7 @@ import com.sellerops.product.ProductRepository;
 import com.sellerops.channel.ProductChannels;
 import com.sellerops.repeatedissue.RepeatedIssueWorkspaceService;
 import com.sellerops.review.Review;
+import com.sellerops.review.ReviewProductLabel;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import com.sellerops.reviewissue.IssueLifecycleState;
@@ -188,7 +189,8 @@ public class OperationsHomeService {
                     review.getRating(),
                     review.getReceivedAt() == null ? null
                             : review.getReceivedAt().atZone(ZoneOffset.UTC).toLocalDate(),
-                    review.getProductId() == null ? null : productNames.get(review.getProductId()),
+                    ReviewProductLabel.displayName(review,
+                            review.getProductId() == null ? null : productNames.get(review.getProductId())),
                     quote);
         }).toList();
     }
@@ -260,8 +262,8 @@ public class OperationsHomeService {
             // name, already printed on every review surface — not a new disclosure — and the review's
             // date joins it because a shop with three approved replies on one product still could not
             // choose between three rows that said only its name.
-            String product = review.getProductId() == null ? null
-                    : products.findById(review.getProductId()).map(Product::getName).orElse(null);
+            String product = ReviewProductLabel.displayName(review, review.getProductId() == null ? null
+                    : products.findById(review.getProductId()).map(Product::getName).orElse(null));
             String receivedOn = review.getReceivedAt() == null ? null
                     : review.getReceivedAt().atZone(ZoneOffset.UTC).toLocalDate().toString();
             String detail = product == null ? receivedOn

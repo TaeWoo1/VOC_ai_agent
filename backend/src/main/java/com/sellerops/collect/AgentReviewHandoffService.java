@@ -13,6 +13,7 @@ import com.sellerops.ingest.IngestOutcome;
 import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.ingest.canonical.CanonicalReview;
+import com.sellerops.ingest.canonical.ChannelProductRef;
 import com.sellerops.product.ChannelProduct;
 import com.sellerops.product.ChannelProductRepository;
 import com.sellerops.product.Product;
@@ -141,12 +142,14 @@ public class AgentReviewHandoffService {
     }
 
     /**
-     * A mapped batch: the rows that resolved to a product this org already holds, and how many did not.
+     * A mapped batch: every row of the handoff, and how many of them no product of this org claimed.
      *
-     * <p>The two travel together because the caller must report a received count that covers both — a
-     * handoff of 24 reviews that stored 22 and could not place 2 must not report 22 received.
+     * <p><b>`rows` now holds the unclaimed ones too.</b> They used to be dropped here and counted as
+     * failures, which made a seller's own 상품평 conditional on a product catalogue that arrives down a
+     * different pipe. The count still travels because it is a real and reportable fact about the batch —
+     * these reviews are stored and not yet linked to a product — it is simply no longer a failure.
      */
-    private record MappedBatch(List<CanonicalReview> rows, int unresolved) {
+    private record MappedBatch(List<CanonicalReview> rows, int unlinked) {
     }
 
     /**
@@ -214,10 +217,12 @@ public class AgentReviewHandoffService {
         // memory (audit defect C) and never produced an analysis row (defect B). Best-effort inside.
         followUp.afterReviewIngest(orgId, channel.getId(), outcome.insertedIds());
 
-        // Received is what the operator's sitting handed over, not what happened to be placeable — a row
-        // this org could not resolve was still read off the screen and must be visible in the count.
+        // Received is what the operator's sitting handed over. Every one of them now reaches ingest, so
+        // this is also the number of rows the spine was asked to write.
         int received = request.reviews().size();
-        int failed = outcome.failed() + batch.unresolved();
+        // Only what the ingestion spine could not WRITE. A row nobody's catalogue claimed is stored, so it
+        // is not a failure and is reported on its own axis.
+        int failed = outcome.failed();
         SyncJob record = recordImport(orgId, channel.getId(), sellerAccountId, request, received, failed,
                 outcome, startedAt);
         // The run row exists only now (it carries the counts), so the provenance stamp (V83) follows it.
@@ -227,13 +232,13 @@ public class AgentReviewHandoffService {
             ingestion.stampAcquisition(orgId, outcome.insertedIds(), record.getId());
         }
         // Counts and enums only. The bodies are in hand at this point, which is exactly why they are not here.
-        log.info("Coupang review handoff: received={} stored={} skipped={} failed={} unresolved={} "
+        log.info("Coupang review handoff: received={} stored={} skipped={} failed={} unlinked={} "
                         + "complete={} stopReason={}",
-                received, outcome.success(), outcome.skipped(), failed, batch.unresolved(),
+                received, outcome.success(), outcome.skipped(), failed, batch.unlinked(),
                 request.complete(), request.stopReason());
 
         return new AgentReviewHandoffResultView(received, outcome.success(), outcome.skipped(),
-                failed, request.complete(),
+                failed, batch.unlinked(), request.complete(),
                 record == null ? null : record.getId().toString());
     }
 
@@ -279,7 +284,10 @@ public class AgentReviewHandoffService {
                 } else {
                     unplaced.add(new Unplaced(row.productId(), row.vendorItemId()));
                 }
-                continue;
+                // …and the row goes on. It used to `continue` here and never be stored, which made a
+                // seller's own 상품평 conditional on a product catalogue that arrives down a DIFFERENT
+                // pipe (the OpenAPI product sync). A browser-only seller holds zero products, so the
+                // first live run of that shape read ten reviews and stored none of them.
             }
             String sku = resolution.sku();
             out.add(new CanonicalReview(
@@ -299,7 +307,13 @@ public class AgentReviewHandoffService {
                     // NOT see is a separate limitation, recorded where the counter lives
                     // (`mediaCountOf` looks inside the body cell only).
                     true,
-                    row.textless()));
+                    row.textless(),
+                    // **The declaration, and it is made for every row.** Its presence — not its value —
+                    // is what tells ingest to attribute by what this service already resolved against
+                    // Coupang's own identifiers and to invent nothing when that came to nothing. A row
+                    // whose screen printed no 노출상품ID declares `absent()`: this source attributes by
+                    // identifier and this row has none, and the answer to that is no attribution.
+                    ChannelProductRef.of(row.productId())));
         }
         if (unresolved > 0) {
             // The two reasons are counted apart because they mean opposite things to whoever reads this. A
@@ -307,9 +321,12 @@ public class AgentReviewHandoffService {
             // catalogue that covers it twice. The first live sitting logged 11 rows under the first sentence
             // when one of them was the second, which is the kind of small untruth that sends someone looking
             // in the wrong place. Counts and reason names only — never the ids themselves.
-            log.warn("Coupang review handoff: {} row(s) unplaced — {} matched no 옵션ID and no 노출상품ID this "
-                            + "org holds ({}), {} matched more than one product and the 옵션ID did not choose "
-                            + "exactly one ({}), {} named an 옵션ID this catalogue holds TWICE ({})",
+            // Stored, every one of them, with the channel's own identity beside them (V105). The reasons
+            // stay counted apart because they still mean opposite things to whoever reads this.
+            log.warn("Coupang review handoff: {} row(s) stored WITHOUT a product link — {} matched no 옵션ID "
+                            + "and no 노출상품ID this org holds ({}), {} matched more than one product and the "
+                            + "옵션ID did not choose exactly one ({}), {} named an 옵션ID this catalogue holds "
+                            + "TWICE ({})",
                     unresolved, unresolved - ambiguous - duplicateOption, REASON_UNRESOLVED_PRODUCT,
                     ambiguous, REASON_AMBIGUOUS_PRODUCT,
                     duplicateOption, REASON_AMBIGUOUS_OPTION);

@@ -17,8 +17,9 @@ function fakeWs(): WebSocket {
   return { readyState: 1, send: () => undefined } as unknown as WebSocket;
 }
 
-function fakeCarrier(): ActivatedCarrier & { connected: WebSocket[]; payloads: string[]; closed: number; disposed: number; settled: boolean; surface: boolean } {
+function fakeCarrier(): ActivatedCarrier & { connected: WebSocket[]; payloads: string[]; closed: number; disposed: number; settled: boolean; surface: boolean; servesOneRun: boolean } {
   const c = {
+    servesOneRun: false,
     connected: [] as WebSocket[],
     payloads: [] as string[],
     closed: 0,
@@ -109,6 +110,94 @@ describe("OnDemandCarrierHost", () => {
     // Another world asks while this one is BUSY and WATCHED: one slot, refused.
     h.onClientAttachRequest(fakeWs(), { carrier: "import", channelCode: "naver" });
     expect(h.state().carrier).toBe("issuance");
+  });
+
+  /**
+   * **The one-run carrier is rebuilt, not re-announced** — the store-identity confirmation's whole shape.
+   *
+   * Live on 2026-09-13: the bootstrap run ended UNRESOLVED with a candidate and PARKED (blocker
+   * `STORE_UNRESOLVED`, which is `WAITING_FOR_HUMAN` and therefore not settled), so the release rule was
+   * correctly keeping it. Two seconds later the seller pressed 「이 스토어를 연결하고 리뷰 가져오기」, the
+   * card remounted asking for the same carrier, and the host re-announced the parked run — whose engine
+   * refuses a second `START_RUN`. The seller read 「판매자센터 화면을 준비하지 못했습니다」 twice and only
+   * a helper restart got past it.
+   *
+   * Note what is NOT required here: the run is deliberately left un-settled, because that was the live
+   * shape and because a spent single-use run does not have to reach a terminal stage to be spent.
+   */
+  it("a one-run carrier with no tab on it is released and rebuilt for the same pair", async () => {
+    const first = fakeCarrier();
+    const second = fakeCarrier();
+    first.servesOneRun = true;
+    second.servesOneRun = true;
+    let built = 0;
+    const h = new OnDemandCarrierHost({
+      activate: (req) =>
+        req.carrier === "acquire" && req.channelCode === "coupang" ? (built++, built === 1 ? first : second) : null,
+      windowGraceMs: 1_000,
+      pollMs: 10_000,
+      setTimer: () => ({}),
+      clearTimer: () => undefined,
+      now: () => 0,
+    });
+    const tab = fakeWs();
+    h.onClientConnected(tab);
+    h.onClientAttachRequest(tab, { carrier: "acquire", channelCode: "coupang" });
+    expect(built).toBe(1);
+
+    // The card remounts: the old socket goes, a new one asks for the same pair.
+    h.onClientDisconnected(tab);
+    const tab2 = fakeWs();
+    h.onClientConnected(tab2);
+    h.onClientAttachRequest(tab2, { carrier: "acquire", channelCode: "coupang" });
+    await flush();
+
+    expect(built).toBe(2);
+    // The spent run was settled and torn down BEFORE the new one was built — never two at once.
+    expect(first.disposed).toBe(1);
+    expect(first.closed).toBe(1);
+    expect(h.state()).toEqual({ active: true, carrier: "acquire", channelCode: "coupang", attachedClients: 1 });
+    expect(second.connected).toContain(tab2);
+  });
+
+  it("a one-run carrier with a tab still on it re-announces, exactly as before", () => {
+    const carrier = fakeCarrier();
+    carrier.servesOneRun = true;
+    let built = 0;
+    const h = new OnDemandCarrierHost({
+      activate: () => (built++, carrier),
+      windowGraceMs: 1_000,
+      pollMs: 10_000,
+      setTimer: () => ({}),
+      clearTimer: () => undefined,
+      now: () => 0,
+    });
+    const tab = fakeWs();
+    h.onClientConnected(tab);
+    h.onClientAttachRequest(tab, { carrier: "acquire", channelCode: "coupang" });
+    // A SECOND tab of the same run, while the first is still attached: one slot, one run, re-announced.
+    const tab2 = fakeWs();
+    h.onClientConnected(tab2);
+    h.onClientAttachRequest(tab2, { carrier: "acquire", channelCode: "coupang" });
+    expect(built).toBe(1);
+    expect(carrier.disposed).toBe(0);
+    expect(h.state().attachedClients).toBe(2);
+  });
+
+  it("a carrier that does NOT serve one run is re-announced even with no tab on it — the key-copying return", () => {
+    const carrier = fakeCarrier();
+    const { h, activations } = host(carrier, { t: 0 });
+    const tab = fakeWs();
+    h.onClientConnected(tab);
+    h.onClientAttachRequest(tab, { carrier: "issuance", channelCode: "coupang" });
+    carrier.settled = true;
+    carrier.surface = true;   // WING is showing the secret key
+    h.onClientDisconnected(tab);
+    const tab2 = fakeWs();
+    h.onClientConnected(tab2);
+    h.onClientAttachRequest(tab2, { carrier: "issuance", channelCode: "coupang" });
+    expect(activations()).toBe(1);
+    expect(carrier.disposed).toBe(0);
   });
 
   /**

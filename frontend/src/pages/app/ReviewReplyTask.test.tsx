@@ -301,6 +301,27 @@ describe("리뷰 처리 — the decision workspace", () => {
     expect(screen.queryByText(/^리뷰 \d+건$/)).toBeNull();
   });
 
+  /**
+   * A browser-acquired review whose product this org does not hold yet. The channel DID name it, so the
+   * screen names it too — without a product doorway, which would be a link to nothing, and without
+   * 「상품 미지정」, which is this product's word for the shared bucket such rows must never be folded into.
+   * And it says why the product figures are absent: not zero, not yet linked.
+   */
+  it("names the channel's product and says it is not linked yet, for a review the catalogue does not claim", async () => {
+    getReviewWorkspace.mockResolvedValue(detail({ productName: "쿠팡 무선 이어폰" }));
+    getReviewReplyPrep.mockResolvedValue(prep());
+    getReviewDecisionContext.mockResolvedValue(
+      context({ productId: null, productName: "쿠팡 무선 이어폰", productSignal: null }),
+    );
+    renderTask();
+
+    expect(await screen.findAllByText("쿠팡 무선 이어폰")).not.toHaveLength(0);
+    expect(screen.queryByText("상품 미지정")).toBeNull();
+    expect(screen.queryByRole("link", { name: "상품 화면 열기" })).toBeNull();
+    expect(screen.getByText(/아직 상품 목록의 상품과 연결되지 않아/)).toBeInTheDocument();
+    expect(screen.queryByText(/^리뷰 \d+건$/)).toBeNull();
+  });
+
   /* ── 5 · the seller's own judgment ─────────────────────────────────── */
 
   it("asks for the seller's judgment beside the system's, and records it without moving anything", async () => {

@@ -593,12 +593,17 @@ class AgentReviewHandoffServiceTest {
     }
 
     /**
-     * A display id this org holds no listing for is a counted failure — not a new product, and not a
-     * silent drop. The rest of the batch still stores, because an unknown listing is an ordinary state of
-     * the world and the operator turned those pages by hand.
+     * A display id this org holds no listing for is STORED, unlinked — not a new product, not a silent
+     * drop, and no longer a failure.
+     *
+     * <p>It used to be dropped and counted as failed, which made a seller's own 상품평 conditional on a
+     * product catalogue that arrives down a different pipe (the OpenAPI product sync). A seller who
+     * connected a browser and nothing else holds zero products, so every row of their first read was
+     * refused — measured live 2026-09-13: received 9, stored 0. The one thing that was ever unknown here
+     * is WHICH product, and that is now what the row says.
      */
     @Test
-    void a_display_id_with_no_listing_fails_the_row_and_creates_nothing() {
+    void a_display_id_with_no_listing_is_stored_unlinked_and_creates_nothing() {
         SellerAccount acc = account(org, "COUPANG");
         long productsBefore = products.count();
         AgentReviewHandoffRequest.Review stranger = new AgentReviewHandoffRequest.Review(
@@ -608,16 +613,59 @@ class AgentReviewHandoffServiceTest {
                 List.of(review(BODY_A, 5, "2026-08-11"), stranger)));
 
         assertThat(result.received()).isEqualTo(2);
-        assertThat(result.stored()).isEqualTo(1);
-        assertThat(result.failed()).isEqualTo(1);
+        assertThat(result.stored()).isEqualTo(2);
+        assertThat(result.failed()).isZero();
+        assertThat(result.unlinked()).isEqualTo(1);
+        // The invariant that has not moved, and the reason this row is unlinked rather than placed: no
+        // product was invented from a value the channel published.
         assertThat(products.count()).isEqualTo(productsBefore);
         assertThat(products.findByOrgIdAndSku(org, "99999999999")).isEmpty();
-        assertThat(reviews.findAll()).hasSize(1);
+        assertThat(reviews.findAll()).hasSize(2);
+        Review unlinked = reviews.findAll().stream()
+                .filter(r -> r.getProductId() == null).findFirst().orElseThrow();
+        // What the channel said, kept verbatim — the reconcile key, and the only name a seller can
+        // recognise this review by until a catalogue arrives.
+        assertThat(unlinked.getSourceProductRef()).isEqualTo("99999999999");
+        assertThat(unlinked.getSourceProductName()).isEqualTo("모르는 상품");
+        assertThat(unlinked.getSourceOptionId()).isEqualTo(OPTION);
     }
 
-    /** An unplaceable row makes the import record PARTIAL, so the operator's history says so. */
+    /**
+     * Two unresolved rows naming DIFFERENT products stay two different things.
+     *
+     * <p>The rule the product owner stated in one line: unresolved rows are never rounded up into a
+     * single «(미지정 상품)» object. Here that is structural rather than policed — there is no object to
+     * round them into, because nothing is created — and what keeps them apart afterwards is that each
+     * carries the channel's own id.
+     */
     @Test
-    void an_unresolved_row_makes_the_import_partial_even_on_a_completed_walk() {
+    void two_unresolved_rows_for_different_products_are_not_merged() {
+        SellerAccount acc = account(org, "COUPANG");
+        long productsBefore = products.count();
+        AgentReviewHandoffRequest.Review one = new AgentReviewHandoffRequest.Review(
+                "2026-08-11", 4, "첫 상품 후기", "99999999991", "81111111111", "상품 하나", 0, false);
+        AgentReviewHandoffRequest.Review two = new AgentReviewHandoffRequest.Review(
+                "2026-08-11", 4, "둘째 상품 후기", "99999999992", "81111111112", "상품 둘", 0, false);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(one, two)));
+
+        assertThat(result.stored()).isEqualTo(2);
+        assertThat(result.unlinked()).isEqualTo(2);
+        assertThat(products.count()).isEqualTo(productsBefore);
+        assertThat(reviews.findAll().stream().map(Review::getSourceProductRef))
+                .containsExactlyInAnyOrder("99999999991", "99999999992");
+    }
+
+    /**
+     * A row nobody's catalogue claimed no longer makes the import PARTIAL — because it was stored.
+     *
+     * <p>PARTIAL still means what it has always meant: something the operator handed over is not in the
+     * seller's record, or the walk never reached the end of the list. An unlinked review is neither. It
+     * is reported on its own axis, and it is a fact about the catalogue rather than about the import.
+     */
+    @Test
+    void an_unlinked_row_does_not_make_a_completed_walk_partial() {
         SellerAccount acc = account(org, "COUPANG");
         AgentReviewHandoffRequest.Review stranger = new AgentReviewHandoffRequest.Review(
                 "2026-08-11", 4, "다른 상품 후기", "99999999999", OPTION, null, 0, false);
@@ -626,10 +674,10 @@ class AgentReviewHandoffServiceTest {
                 List.of(review(BODY_A, 5, "2026-08-11"), stranger)));
 
         SyncJob job = syncJobs.findAll().get(0);
-        assertThat(job.getStatus()).isEqualTo("PARTIAL");
+        assertThat(job.getStatus()).isEqualTo("SUCCESS");
         assertThat(job.getTotalRows()).isEqualTo(2);
-        assertThat(job.getSuccessRows()).isEqualTo(1);
-        assertThat(job.getFailedRows()).isEqualTo(1);
+        assertThat(job.getSuccessRows()).isEqualTo(2);
+        assertThat(job.getFailedRows()).isZero();
     }
 
     /**
@@ -669,9 +717,15 @@ class AgentReviewHandoffServiceTest {
         AgentReviewHandoffResultView result =
                 service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
 
-        assertThat(result.stored()).isZero();
-        assertThat(result.failed()).isEqualTo(1);
-        assertThat(reviews.findAll()).isEmpty();
+        // Stored, and bound to NO product: the resolution refused to guess, which is the invariant, and
+        // the refusal costs the seller their review no longer.
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        assertThat(result.unlinked()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isNull();
+        // …and emphatically not adopted by the synthetic listing, which is what this test is about.
+        assertThat(reviews.findAll().get(0).getProductId()).isNotEqualTo(seeded.getId());
     }
 
     /**
@@ -689,9 +743,13 @@ class AgentReviewHandoffServiceTest {
                 service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
 
         assertThat(result.received()).isEqualTo(1);
-        assertThat(result.stored()).isZero();
-        assertThat(result.failed()).isEqualTo(1);
-        assertThat(reviews.findAll()).isEmpty();
+        // Stored, and bound to NO product: the resolution refused to guess, which is the invariant, and
+        // the refusal costs the seller their review no longer.
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        assertThat(result.unlinked()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isNull();
     }
 
     /** The same product listed twice behind one exposure page is NOT ambiguous — it is one answer. */
@@ -746,8 +804,13 @@ class AgentReviewHandoffServiceTest {
         AgentReviewHandoffResultView result =
                 service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
 
-        assertThat(result.stored()).isZero();
-        assertThat(result.failed()).isEqualTo(1);
+        // Stored, and bound to NO product: the resolution refused to guess, which is the invariant, and
+        // the refusal costs the seller their review no longer.
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        assertThat(result.unlinked()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isNull();
     }
 
     /** The screen printed no 옵션ID. Nothing breaks the tie, so nothing is chosen. */
@@ -761,8 +824,13 @@ class AgentReviewHandoffServiceTest {
         AgentReviewHandoffResultView result =
                 service.handOff(org, request(slotFor(acc), true, List.of(noOption)));
 
-        assertThat(result.stored()).isZero();
-        assertThat(result.failed()).isEqualTo(1);
+        // Stored, and bound to NO product: the resolution refused to guess, which is the invariant, and
+        // the refusal costs the seller their review no longer.
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        assertThat(result.unlinked()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isNull();
     }
 
     /**
@@ -952,9 +1020,13 @@ class AgentReviewHandoffServiceTest {
         AgentReviewHandoffResultView result =
                 service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
 
-        assertThat(result.stored()).isZero();
-        assertThat(result.failed()).isEqualTo(1);
-        assertThat(reviews.findAll()).isEmpty();
+        // Stored, and bound to NO product: the resolution refused to guess, which is the invariant, and
+        // the refusal costs the seller their review no longer.
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        assertThat(result.unlinked()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isNull();
     }
 
     /** Another org's variant carrying the same option id is not this org's product. */
@@ -974,8 +1046,13 @@ class AgentReviewHandoffServiceTest {
         AgentReviewHandoffResultView result =
                 service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
 
-        assertThat(result.stored()).isZero();
-        assertThat(result.failed()).isEqualTo(1);
+        // Stored, and bound to NO product: the resolution refused to guess, which is the invariant, and
+        // the refusal costs the seller their review no longer.
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        assertThat(result.unlinked()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isNull();
     }
 
     /**
@@ -993,9 +1070,13 @@ class AgentReviewHandoffServiceTest {
         AgentReviewHandoffResultView result =
                 service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
 
-        assertThat(result.stored()).isZero();
-        assertThat(result.failed()).isEqualTo(1);
-        assertThat(reviews.findAll()).isEmpty();
+        // Stored, and bound to NO product: the resolution refused to guess, which is the invariant, and
+        // the refusal costs the seller their review no longer.
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        assertThat(result.unlinked()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isNull();
     }
 
     /**
@@ -1034,7 +1115,12 @@ class AgentReviewHandoffServiceTest {
         AgentReviewHandoffResultView result =
                 service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
 
-        assertThat(result.stored()).isZero();
-        assertThat(result.failed()).isEqualTo(1);
+        // Stored, and bound to NO product: the resolution refused to guess, which is the invariant, and
+        // the refusal costs the seller their review no longer.
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        assertThat(result.unlinked()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isNull();
     }
 }

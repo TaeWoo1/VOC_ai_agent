@@ -23,6 +23,7 @@ import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
+import com.sellerops.review.ReviewProductLabel;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -618,7 +619,8 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         // Display name only, straight from the batch map — never the SKU (상품번호, i.e.
         // the channel's productNo), which stays excluded as an identifier. Absent from the
         // map (no link, cross-org, deleted, or blank-named) → null, never a guess.
-        String productName = r.getProductId() == null ? null : productNames.get(r.getProductId());
+        String productName = ReviewProductLabel.displayName(r,
+                r.getProductId() == null ? null : productNames.get(r.getProductId()));
         // This store IS the triage anchor, so every row it serves is addressable. The ref
         // carries SellerOps' own reviews.id — not a channel-side identifier, and not a
         // capability (see VocItemRef).

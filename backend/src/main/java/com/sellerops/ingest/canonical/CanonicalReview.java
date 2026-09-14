@@ -38,7 +38,21 @@ public record CanonicalReview(
          * is the source saying it saw a rating with no text. {@link com.sellerops.ingest.ReviewDedupKey}
          * keys these rows on the purchased option.
          */
-        boolean textless) {
+        boolean textless,
+        /**
+         * «이 행의 상품은 채널이 준 식별자로만 정한다» — the declaration, exactly as
+         * {@link CanonicalInquiry#productRef()} means it, now available to reviews.
+         *
+         * <p><b>Its presence IS the rule.</b> Non-null and ingest attributes by this identifier against
+         * {@code channel_products}, or not at all: no name fallback, no {@code (미지정 상품)} bucket, no
+         * product created from a value the channel published. Null keeps the legacy name/SKU
+         * resolve-or-create every file-upload source has always used, byte for byte.
+         *
+         * <p>It exists because the Coupang WING 상품평 screen prints a 노출상품ID for a catalogue this
+         * org may not hold at all — a seller who connected only the browser has zero products — and the
+         * honest record of such a review is «stored, and not yet linked», not «dropped».
+         */
+        ChannelProductRef productRef) {
 
     /**
      * A source that carries no reply statement. Kept so every connector and test that predates
@@ -70,5 +84,19 @@ public record CanonicalReview(
                            String sourceOptionId, int mediaCount) {
         this(productName, sku, rating, body, receivedAt, externalId, sourceRow, replyState, repliedAt,
                 sourceOptionId, mediaCount, true, false);
+    }
+
+    /**
+     * A source that does not declare identifier attribution — every source that predates V105. Same
+     * reasoning as the overloads above: the absence of a declaration is the default, so it is written
+     * once here rather than as a {@code null} at each call site.
+     */
+    public CanonicalReview(String productName, String sku, Integer rating, String body,
+                           Instant receivedAt, String externalId, int sourceRow,
+                           ReviewReplyState replyState, Instant repliedAt,
+                           String sourceOptionId, int mediaCount, boolean mediaObserved,
+                           boolean textless) {
+        this(productName, sku, rating, body, receivedAt, externalId, sourceRow, replyState, repliedAt,
+                sourceOptionId, mediaCount, mediaObserved, textless, null);
     }
 }

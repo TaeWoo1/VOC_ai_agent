@@ -96,7 +96,7 @@ function harness(
       opts.handoff ??
       (async (r) => {
         handoffs.push(r);
-        return { ok: true, received: r.reviews.length, stored: r.reviews.length, skipped: 0, failed: 0, reason: null };
+        return { ok: true, received: r.reviews.length, stored: r.reviews.length, skipped: 0, failed: 0, unlinked: 0, reason: null };
       }),
   });
   session.attach();
@@ -237,7 +237,7 @@ describe("REVIEW_ACQUISITION — the run", () => {
 
   it("a refused handoff is written down too — nothing was stored and the row has to say so", async () => {
     const h = harness([{ bodies: [CANARY], page: 1, last: 1 }], {
-      handoff: async (r) => ({ ok: false, received: r.reviews.length, stored: 0, skipped: 0, failed: 0, reason: "HTTP_500" }),
+      handoff: async (r) => ({ ok: false, received: r.reviews.length, stored: 0, skipped: 0, failed: 0, unlinked: 0, reason: "HTTP_500" }),
     });
     h.link.client({ kind: "aw_command", command: startRun() });
     await h.session.whenSettled();
@@ -288,7 +288,7 @@ describe("REVIEW_ACQUISITION — the run", () => {
 
   it("a refused handoff fails the run as HANDOFF_REJECTED — nothing stored, nothing re-read", async () => {
     const h = harness([{ bodies: [CANARY], page: 1, last: 1 }], {
-      handoff: async () => ({ ok: false, received: 1, stored: 0, skipped: 0, failed: 0, reason: "HTTP_500" }),
+      handoff: async () => ({ ok: false, received: 1, stored: 0, skipped: 0, failed: 0, unlinked: 0, reason: "HTTP_500" }),
     });
     h.link.client({ kind: "aw_command", command: startRun() });
     await h.session.whenSettled();

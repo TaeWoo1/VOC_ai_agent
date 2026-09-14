@@ -27,6 +27,15 @@ export interface ReviewHandoffResponse {
   readonly stored: number;
   readonly skipped: number;
   readonly failed: number;
+  /**
+   * Stored, and not yet linked to a product of this org (V105).
+   *
+   * <p>Not a failure and not a subset of `failed`: the review is in the seller's record, readable and
+   * decidable. It is on its own axis because it is a fact about the CATALOGUE — a seller who connected a
+   * browser and no product API holds no products at all, so every row lands here, and a run that reported
+   * that as failure would be telling them their reviews did not arrive when they did.
+   */
+  readonly unlinked: number;
   /** `HTTP_<status>` when the backend refused. Null on success. */
   readonly reason: string | null;
 }
@@ -110,16 +119,16 @@ export async function postCoupangReviewHandoff(
   }
   if (!res.ok) {
     log("aw_coupang_review_handoff_rejected", { httpStatus: res.status, received });
-    return { ok: false, received, stored: 0, skipped: 0, failed: 0, reason: `HTTP_${res.status}` };
+    return { ok: false, received, stored: 0, skipped: 0, failed: 0, unlinked: 0, reason: `HTTP_${res.status}` };
   }
-  let body: { received?: unknown; stored?: unknown; skipped?: unknown; failed?: unknown };
+  let body: { received?: unknown; stored?: unknown; skipped?: unknown; failed?: unknown; unlinked?: unknown };
   try {
     body = (await res.json()) as typeof body;
   } catch {
     // A non-JSON 200 (a proxy page, an HTML redirect) must not surface as a SyntaxError whose message quotes
     // that page — and it cannot be read as a successful store. Fail closed.
     log("aw_coupang_review_handoff_rejected", { httpStatus: res.status, received, reason: "MALFORMED_RESPONSE" });
-    return { ok: false, received, stored: 0, skipped: 0, failed: 0, reason: "MALFORMED_RESPONSE" };
+    return { ok: false, received, stored: 0, skipped: 0, failed: 0, unlinked: 0, reason: "MALFORMED_RESPONSE" };
   }
   const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
   const result: ReviewHandoffResponse = {
@@ -128,6 +137,7 @@ export async function postCoupangReviewHandoff(
     stored: num(body.stored),
     skipped: num(body.skipped),
     failed: num(body.failed),
+    unlinked: num(body.unlinked),
     reason: null,
   };
   log("aw_coupang_review_handoff", {
@@ -135,6 +145,7 @@ export async function postCoupangReviewHandoff(
     stored: result.stored,
     skipped: result.skipped,
     failed: result.failed,
+    unlinked: result.unlinked,
   });
   return result;
 }

@@ -5,6 +5,7 @@ import com.sellerops.common.MarkupText;
 import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.identity.ExecutableIdentity;
 import com.sellerops.review.Review;
+import com.sellerops.review.ReviewProductLabel;
 import com.sellerops.review.recent.dto.RecentReviewItemView;
 import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.selleraccount.SellerAccount;
@@ -42,7 +43,9 @@ public final class ReviewRows {
                 r.isNegative(),
                 preview,
                 r.getProductId(),
-                productName,
+                // Linked catalogue name, else what the channel called it — the one rule, so the record and
+                // the conversation cannot disagree about what this review is about.
+                ReviewProductLabel.displayName(r, productName),
                 r.getReplyState() == null ? null : r.getReplyState().name(),
                 executableIdentity.name());
     }

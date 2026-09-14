@@ -23,6 +23,7 @@ import com.sellerops.product.ProductRepository;
 import com.sellerops.product.library.ProductKnowledgeSource;
 import com.sellerops.product.library.ProductKnowledgeSourceRepository;
 import com.sellerops.review.Review;
+import com.sellerops.review.ReviewProductLabel;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.review.decision.dto.ReviewDecisionContextView;
 import com.sellerops.review.decision.dto.ReviewDecisionLogEntryView;
@@ -164,7 +165,7 @@ public class ReviewDecisionWorkspaceService {
                         .map(ReviewTriage::getDisposition).map(Enum::name).orElse(null),
                 channelCode,
                 product == null ? null : product.getId(),
-                product == null ? null : product.getName(),
+                ReviewProductLabel.displayName(review, product == null ? null : product.getName()),
                 repeatedProblems(orgId, review),
                 signalOf(orgId, product),
                 knowledgeOnHand(orgId, product));
@@ -325,7 +326,9 @@ public class ReviewDecisionWorkspaceService {
                     row.getOccurredOn(),
                     other == null ? null : other.getRating(),
                     IssueEvidenceQuote.of(other, row.getUnitOrdinal()),
-                    row.getProductId() == null ? null : productNames.get(row.getProductId()),
+                    // The evidence row carries the product; the review carries what the channel called it.
+                    ReviewProductLabel.displayName(other,
+                            row.getProductId() == null ? null : productNames.get(row.getProductId())),
                     row.getProductId() != null && row.getProductId().equals(subject.getProductId())));
             if (out.size() == MAX_SIMILAR_PER_PROBLEM) {
                 break;

@@ -11,6 +11,7 @@ import com.sellerops.identity.ExecutableIdentityResolver;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
+import com.sellerops.review.ReviewProductLabel;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.review.recent.dto.ReviewDetailView;
 import com.sellerops.review.triage.ReviewTriageRules;
@@ -93,7 +94,7 @@ public class ReviewDetailService {
                 body.text(),
                 body.redacted(),
                 review.getProductId(),
-                product == null ? null : product.getName(),
+                ReviewProductLabel.displayName(review, product == null ? null : product.getName()),
                 review.getReplyState() == null ? null : review.getReplyState().name(),
                 executable.name(),
                 ReviewTriageRules.tier(review.getRating(), review.getBody()).name(),

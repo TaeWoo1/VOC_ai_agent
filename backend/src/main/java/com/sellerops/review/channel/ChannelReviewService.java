@@ -10,6 +10,7 @@ import com.sellerops.itemanalysis.ItemAnalysisRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
+import com.sellerops.review.ReviewProductLabel;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.review.channel.dto.AiTriageMarkView;
 import com.sellerops.review.channel.dto.ChannelReviewDetailView;
@@ -380,7 +381,7 @@ public class ChannelReviewService {
                 review.isNegative(),
                 body.text(),
                 body.redacted(),
-                product == null ? null : product.getName(),
+                ReviewProductLabel.displayName(review, product == null ? null : product.getName()),
                 review.getMediaCount(),
                 isTextless(review),
                 isNew(review, newSince),
@@ -439,7 +440,9 @@ public class ChannelReviewService {
                 review.getRating(),
                 review.isNegative(),
                 preview.text(),
-                product == null ? null : product.getName(),
+                ReviewProductLabel.displayName(review, product == null ? null : product.getName()),
+                // The SKU stays strictly the catalogue's. A channel identifier is not a SKU — passing one
+                // through as if it were is what created a parallel product per listing.
                 product == null ? null : product.getSku(),
                 review.getSourceOptionId(),
                 review.getMediaCount(),

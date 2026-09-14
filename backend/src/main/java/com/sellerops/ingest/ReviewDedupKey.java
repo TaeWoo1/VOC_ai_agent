@@ -100,14 +100,40 @@ public final class ReviewDedupKey {
      */
     public static String contentHash(int version, UUID channelId, UUID productId, String datePart,
             String body, Integer rating, String optionId) {
+        return contentHash(version, channelId, productId == null ? null : productId.toString(), datePart,
+                body, rating, optionId);
+    }
+
+    /**
+     * The content hash over an explicit PRODUCT KEY rather than a resolved product id.
+     *
+     * <p><b>Why the slot had to become a string.</b> Every formula above folds in «which product is this
+     * review about», and until V105 the only available answer was our own {@code products.id} — which
+     * cannot be computed for a review whose product this org does not hold, and, worse, CHANGES when a
+     * catalogue arrives later and the row is reconciled. A key that changes on reconcile means the next
+     * read of that same review hashes to something new and is stored twice, which is the one outcome a
+     * dedup key exists to prevent.
+     *
+     * <p>So a source that declares identifier attribution ({@link
+     * com.sellerops.ingest.canonical.CanonicalReview#productRef()}) keys on the identifier the CHANNEL
+     * published, which no resolution of ours can move. Sources that do not declare one keep passing their
+     * resolved product id and hash byte-for-byte as before — the overload above is that path.
+     *
+     * <p>A null key hashes as the empty part, exactly as {@link ContentHash} treats any absent value. It
+     * is reachable only for a declaring source whose row printed no identifier at all, and it is the
+     * honest reading: that row can be separated from its neighbours by date, body, rating and option and
+     * by nothing else.
+     */
+    public static String contentHash(int version, UUID channelId, String productKey, String datePart,
+            String body, Integer rating, String optionId) {
         if (version >= V3) {
-            return ContentHash.of(channelId.toString(), productId.toString(), datePart, body,
+            return ContentHash.of(channelId.toString(), productKey, datePart, body,
                     rating == null ? null : rating.toString(), optionId);
         }
         if (version >= V2) {
-            return ContentHash.of(channelId.toString(), productId.toString(), datePart, body,
+            return ContentHash.of(channelId.toString(), productKey, datePart, body,
                     rating == null ? null : rating.toString());
         }
-        return ContentHash.of(channelId.toString(), productId.toString(), datePart, body);
+        return ContentHash.of(channelId.toString(), productKey, datePart, body);
     }
 }

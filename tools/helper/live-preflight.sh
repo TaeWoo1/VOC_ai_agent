@@ -40,7 +40,9 @@ grep -q 'store-identity/bootstrap' "$HOME_DIR/app/helper.mjs" || fail "bundle ha
 
 # 3./4. Provider and device state, from the helper's own diagnostic line.
 STATUS="$("$HOME_DIR/app/bin/node" "$HOME_DIR/app/service.mjs" status 2>/dev/null)" || fail "helper did not answer status"
-echo "$STATUS"
+# Through the filter even though this line carries no identity today — the point of a harness discipline is
+# that it does not depend on remembering which line is safe.
+echo "$STATUS" | "$REPO_ROOT/tools/helper/live-redact.sh"
 printf '%s' "$STATUS" | grep -q '"healthy":true' || fail "helper is not healthy"
 printf '%s' "$STATUS" | grep -q '"browserCollection":"CONFIGURED"' || fail "browser collection is not provisioned (tools/helper/browser-collection.sh on)"
 printf '%s' "$STATUS" | grep -q '"executorPathSet":true' || fail "no executor path — a launchd agent cannot resolve a bare name"
