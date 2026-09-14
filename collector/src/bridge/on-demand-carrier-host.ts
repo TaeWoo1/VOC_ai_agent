@@ -132,9 +132,24 @@ export class OnDemandCarrierHost implements AwCarrierEndpoint {
 
   onClientConnected(ws: WebSocket): void {
     this.sockets.add(ws);
-    // Idle: say nothing. A tab that wants a carrier asks for it; one that does not must see bridge-only as it
-    // always was (no `aw_session`). Active: the real endpoint announces its run to every socket, as a
-    // fixed-carrier agent does — a refreshed tab resyncs on that.
+    /**
+     * Idle: say nothing. A tab that wants a carrier asks for it; one that does not must see bridge-only as
+     * it always was (no `aw_session`). Active: the real endpoint announces its run to every socket, as a
+     * fixed-carrier agent does — a refreshed tab resyncs on that.
+     *
+     * **A recyclable one-run carrier is idle as far as a NEW socket is concerned, and saying otherwise
+     * loses the socket's first command.** Measured live 2026-09-14, on the run this recycling was written
+     * for: the confirmation remounted the card, the fresh socket connected, the SPENT carrier announced
+     * its run to it, the frontend adopted that session and sent `START_RUN` — and the recycle swapped the
+     * carrier out from under it, so the command reached a host whose `active` was momentarily null and was
+     * dropped. The seller read 「판매자센터 화면을 준비하지 못했습니다」 about a helper that had just
+     * correctly rebuilt itself.
+     *
+     * The tab is not owed a stale run. It is owed the announcement of the carrier it is about to get, and
+     * it gets exactly that a few milliseconds later from `activateFor`. Sockets already attached to this
+     * carrier are unaffected — they are why `attached.size` is in the reading.
+     */
+    if (this.recyclable()) return;
     this.active?.carrier.endpoint.onClientConnected(ws);
   }
 
@@ -249,7 +264,19 @@ export class OnDemandCarrierHost implements AwCarrierEndpoint {
    * why both readings are needed and what each one protects.
    */
   private canRecycle(): boolean {
-    if (!this.active || this.releasing) return false;
+    if (this.releasing) return false;
+    return this.recyclable();
+  }
+
+  /**
+   * Is the active carrier one that serves a single run, with nobody on it?
+   *
+   * The state in which it can be replaced and in which it has nothing to tell a new socket. Both readings
+   * ask it — the attach that rebuilds, and the connect that stays quiet — so the two cannot drift into
+   * announcing a carrier that the next moment replaces.
+   */
+  private recyclable(): boolean {
+    if (!this.active) return false;
     return this.active.carrier.servesOneRun === true && this.attached.size === 0;
   }
 

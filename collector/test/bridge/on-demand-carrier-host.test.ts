@@ -160,6 +160,44 @@ describe("OnDemandCarrierHost", () => {
     expect(second.connected).toContain(tab2);
   });
 
+  /**
+   * **A spent one-run carrier says nothing to a socket that has just arrived.**
+   *
+   * Live on 2026-09-14, this is what turned a correct recycle into a failure on screen: the fresh socket
+   * was announced the SPENT run, the frontend adopted that session and sent its `START_RUN` against it,
+   * and the swap dropped the command. The tab is owed the announcement of the carrier it is about to get,
+   * which arrives from `activateFor` a few milliseconds later — not the one being torn down.
+   */
+  it("does not announce a spent one-run carrier to a newly connected socket", async () => {
+    const first = fakeCarrier();
+    const second = fakeCarrier();
+    first.servesOneRun = true;
+    second.servesOneRun = true;
+    let built = 0;
+    const h = new OnDemandCarrierHost({
+      activate: () => (built++, built === 1 ? first : second),
+      windowGraceMs: 1_000,
+      pollMs: 10_000,
+      setTimer: () => ({}),
+      clearTimer: () => undefined,
+      now: () => 0,
+    });
+    const tab = fakeWs();
+    h.onClientConnected(tab);
+    h.onClientAttachRequest(tab, { carrier: "acquire", channelCode: "coupang" });
+    h.onClientDisconnected(tab);
+
+    const tab2 = fakeWs();
+    h.onClientConnected(tab2);
+    // Nothing from the carrier that is about to be replaced.
+    expect(first.connected).not.toContain(tab2);
+
+    h.onClientAttachRequest(tab2, { carrier: "acquire", channelCode: "coupang" });
+    await flush();
+    // …and everything from the one it actually got.
+    expect(second.connected).toContain(tab2);
+  });
+
   it("a one-run carrier with a tab still on it re-announces, exactly as before", () => {
     const carrier = fakeCarrier();
     carrier.servesOneRun = true;
