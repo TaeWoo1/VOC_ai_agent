@@ -76,7 +76,7 @@ public class SyncRunExecutor {
      * The <b>routine</b> collection lane: where ongoing sync keeps its place. The connector owns the
      * value's meaning; this class owns which lane it is written to.
      */
-    static final String CURSOR_KEY = "primary";
+    public static final String CURSOR_KEY = "primary";
 
     /**
      * The <b>historical backfill</b> lane, and the reason there are two.
@@ -371,6 +371,11 @@ public class SyncRunExecutor {
         String firstError = null;
         boolean hasMore = true;
         int guard = 0;
+        // Responsibility Runtime v1: what a caller needs to state the observation honestly — rows that were new
+        // (success also counts in-place updates), and whether an error was the channel not answering in time.
+        int inserted = 0;
+        boolean timedOut = false;
+        boolean pageLimited = false;
 
         try {
             while (hasMore && guard++ < MAX_PAGES) {
@@ -389,6 +394,7 @@ public class SyncRunExecutor {
                 success += outcome.success();
                 skipped += outcome.skipped();
                 failed += outcome.failed();
+                inserted += outcome.insertedIds() == null ? 0 : outcome.insertedIds().size();
                 if (firstError == null && !outcome.errors().isEmpty()) {
                     firstError = outcome.errors().get(0).message();
                 }
@@ -417,12 +423,14 @@ public class SyncRunExecutor {
             //  - a missing live/read approval → a configuration state, not a channel that failed.
             authFailure = classifyAuthFailure(e);
             approvalMissing = e instanceof CoupangLiveApprovalRequiredException;
+            timedOut = isTimeout(e);
         }
 
         if (hasMore && !rateLimited && !errored) {
             // The page guard, not completion, ended the loop — a silently
             // truncated collection must not read as a clean run.
             errored = true;
+            pageLimited = true;
             if (firstError == null) {
                 firstError = "수집이 실행당 페이지 한도(" + MAX_PAGES + ")에 도달해 중단되었습니다.";
             }
@@ -437,6 +445,9 @@ public class SyncRunExecutor {
             // Record the hint as an earliest-retry timestamp for the scheduler.
             job.setNextRetryAt(Instant.now().plusSeconds(retryAfterSeconds));
         }
+        job.setInsertedRows(inserted);
+        job.setFailureCode(failureCodeOf(authFailure != null, approvalMissing, rateLimited, pageLimited,
+                timedOut, errored, failed));
         finishJob(job, success, skipped, failed, status, errorMessage, rateLimited);
         if (authFailure != null) {
             // Health is owned by the reauth path: NEEDS_REAUTH + paused schedules + AUTH_EXPIRED alert,
@@ -607,6 +618,45 @@ public class SyncRunExecutor {
         return null;
     }
 
+    /** Whether a collection failure was the channel not answering in time, anywhere in the cause chain. */
+    static boolean isTimeout(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof com.sellerops.connector.ConnectorTimeoutException
+                    || t instanceof java.net.http.HttpTimeoutException
+                    || t instanceof java.net.SocketTimeoutException) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    /** The closed classification carried on the returned job ({@link SyncJob#getFailureCode()}); null when clean. */
+    static String failureCodeOf(boolean auth, boolean approvalMissing, boolean rateLimited, boolean pageLimited,
+                                boolean timedOut, boolean errored, int failedRows) {
+        if (auth) {
+            return "AUTH_REQUIRED";
+        }
+        if (approvalMissing) {
+            return "CONFIGURATION_REQUIRED";
+        }
+        if (rateLimited) {
+            return "RATE_LIMITED";
+        }
+        if (pageLimited) {
+            return "PAGE_LIMIT_REACHED";
+        }
+        if (errored && timedOut) {
+            return "TIMEOUT";
+        }
+        if (errored || failedRows > 0) {
+            return "EXECUTION_FAILED";
+        }
+        return null;
+    }
+
     private String resolveStatus(int success, int skipped, int failed, boolean rateLimited, boolean errored) {
         // Any abnormal condition (mid-run error, rate limit, or row failures) is
         // PARTIAL when some data already landed, otherwise a clean FAILED.
@@ -661,6 +711,7 @@ public class SyncRunExecutor {
     private SyncJob recordConfigFailure(UUID orgId, SellerAccount account, DataType dataType,
                                         String trigger, String kind, String message) {
         SyncJob job = startJob(orgId, account, dataType, trigger, kind);
+        job.setFailureCode("CONNECTOR_UNAVAILABLE");
         finishJob(job, 0, 0, 0, "FAILED", message, false);
         return job;
     }

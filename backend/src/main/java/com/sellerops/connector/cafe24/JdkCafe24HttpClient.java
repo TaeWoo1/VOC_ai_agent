@@ -103,6 +103,9 @@ public class JdkCafe24HttpClient implements Cafe24HttpClient {
         try {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             return new Response(response.statusCode(), response.body(), firstValueHeaders(response));
+        } catch (java.net.http.HttpTimeoutException e) {
+            // A subtype of IOException, caught first so a timeout is not reported as a refusal.
+            throw new com.sellerops.connector.ConnectorTimeoutException("카페24 API 호출 시간이 초과되었습니다.");
         } catch (IOException e) {
             throw new IllegalStateException("카페24 API 호출에 실패했습니다 (네트워크 오류).");
         } catch (InterruptedException e) {

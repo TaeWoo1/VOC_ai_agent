@@ -109,4 +109,33 @@ public class SyncRunGate {
             return new RunStart(newRun.get(), false);
         });
     }
+
+    /**
+     * Close one RUNNING job whose owner is <b>known</b> to be gone — not guessed from its age.
+     *
+     * <p>{@link #beginRunOrCoalesce} can only reclaim by elapsed time, because it cannot know whether the process
+     * that started a run is alive. The responsibility runtime can: its runs hold a heartbeat lease, and a lease that
+     * expired says the holder stopped. Without this, the reclaiming attempt would coalesce onto its own dead
+     * predecessor's job and wait up to the stale threshold for a run nobody is executing. Under the same account row
+     * lock as admission; a job that is no longer RUNNING is left untouched.
+     */
+    public boolean failOrphan(UUID jobId, String message) {
+        Boolean closed = tx.execute(status -> {
+            SyncJob job = syncJobs.findById(jobId).orElse(null);
+            if (job == null || job.getSellerAccountId() == null) {
+                return false;
+            }
+            accounts.findByIdForUpdate(job.getSellerAccountId());
+            SyncJob locked = syncJobs.findById(jobId).orElse(null);
+            if (locked == null || !"RUNNING".equals(locked.getStatus())) {
+                return false;
+            }
+            locked.setStatus("FAILED");
+            locked.setErrorMessage(message);
+            locked.setFinishedAt(Instant.now());
+            syncJobs.save(locked);
+            return true;
+        });
+        return Boolean.TRUE.equals(closed);
+    }
 }

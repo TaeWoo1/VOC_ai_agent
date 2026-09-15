@@ -195,6 +195,8 @@ function CoverageNote({ coverage }: { coverage: ReviewCoverageSignal }) {
 function TriggerChip({ trigger }: { trigger: string }) {
   const map: Record<string, { label: string; cls: string }> = {
     SCHEDULED: { label: "자동", cls: "bg-brand/10 text-brand-700" },
+    // 「고객 운영 관리」가 정해진 시간에 수집한 실행. 판매자에게는 예약 수집과 같은 뜻이라 같은 낱말을 쓴다.
+    RESPONSIBILITY: { label: "자동", cls: "bg-brand/10 text-brand-700" },
     MANUAL: { label: "수동", cls: "bg-ink/5 text-ink" },
     RETRY: { label: "재시도", cls: "bg-warn/10 text-warn" },
     UPLOAD: { label: "업로드", cls: "bg-canvas text-muted" },

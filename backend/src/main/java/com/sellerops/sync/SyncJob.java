@@ -4,6 +4,7 @@ import com.sellerops.common.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
@@ -80,4 +81,20 @@ public class SyncJob extends BaseEntity {
 
     @Column(name = "error_message", columnDefinition = "text")
     private String errorMessage;
+
+    /**
+     * Closed classification of why the run that just finished was not clean — set by {@code SyncRunExecutor} on
+     * the instance it returns, <b>not persisted</b>. AUTH_REQUIRED / TIMEOUT / RATE_LIMITED / PAGE_LIMIT_REACHED /
+     * CONNECTOR_UNAVAILABLE / CONFIGURATION_REQUIRED / EXECUTION_FAILED; null for a clean run or a job read back
+     * from the database.
+     */
+    @Transient
+    private String failureCode;
+
+    /**
+     * Rows this run inserted as new — set by {@code SyncRunExecutor} on the instance it returns, not persisted.
+     * {@code successRows} also counts in-place updates, so it cannot answer «how many were new». Null when unknown.
+     */
+    @Transient
+    private Integer insertedRows;
 }

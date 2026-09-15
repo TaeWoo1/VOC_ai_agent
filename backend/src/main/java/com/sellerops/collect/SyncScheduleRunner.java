@@ -4,6 +4,7 @@ import com.sellerops.connector.ChannelConnectionStatusRepository;
 import com.sellerops.connector.ConnectorAlert;
 import com.sellerops.connector.ConnectorAlertRepository;
 import com.sellerops.connector.DataType;
+import com.sellerops.responsibility.ResponsibilitySourceOwnership;
 import com.sellerops.sync.SyncJob;
 import com.sellerops.sync.SyncJobRepository;
 import com.sellerops.sync.SyncSchedule;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -60,17 +62,31 @@ public class SyncScheduleRunner {
     private final SyncJobRepository syncJobs;
     private final ChannelConnectionStatusRepository connectionStatus;
     private final ConnectorAlertRepository alerts;
+    /**
+     * Responsibility Runtime v1: a source an ACTIVE responsibility owns is collected by that runtime, not here —
+     * one owner per source, so no double collection. Null in the older test wiring (nothing is owned).
+     */
+    private final ResponsibilitySourceOwnership ownership;
 
     public SyncScheduleRunner(SyncScheduleClaimer claimer, SyncRunExecutor executor,
                               SyncScheduleRepository schedules, SyncJobRepository syncJobs,
                               ChannelConnectionStatusRepository connectionStatus,
                               ConnectorAlertRepository alerts) {
+        this(claimer, executor, schedules, syncJobs, connectionStatus, alerts, null);
+    }
+
+    @Autowired
+    public SyncScheduleRunner(SyncScheduleClaimer claimer, SyncRunExecutor executor,
+                              SyncScheduleRepository schedules, SyncJobRepository syncJobs,
+                              ChannelConnectionStatusRepository connectionStatus,
+                              ConnectorAlertRepository alerts, ResponsibilitySourceOwnership ownership) {
         this.claimer = claimer;
         this.executor = executor;
         this.schedules = schedules;
         this.syncJobs = syncJobs;
         this.connectionStatus = connectionStatus;
         this.alerts = alerts;
+        this.ownership = ownership;
     }
 
     /**
@@ -91,6 +107,13 @@ public class SyncScheduleRunner {
     }
 
     private SyncJob runOne(SyncSchedule claimed, Instant now) {
+        if (ownership != null && ownership.ownsScheduledCollection(
+                claimed.getOrgId(), claimed.getSellerAccountId(), claimed.getDataType())) {
+            // Deferred, not run: the claim already moved next_run_at one cadence out, and no job is created.
+            log.info("Scheduled run for schedule {} deferred: the source is owned by an active responsibility",
+                    claimed.getId());
+            return null;
+        }
         SyncJob job = null;
         try {
             DataType dataType = DataType.valueOf(claimed.getDataType());
