@@ -1,11 +1,13 @@
 # Responsibility Runtime v1
 
-**날짜:** 2026-09-15 · **상태:** `CANONICAL MILESTONE DEFINITION` · **Package A `IMPLEMENTED`** (§21)
+**날짜:** 2026-09-15 · **상태:** `CANONICAL MILESTONE DEFINITION` · **Package A `IMPLEMENTED`** (§21) ·
+**Package B `IMPLEMENTED`** (§22, 2026-09-16)
 **Baseline:** `feat/review-decision-workspace-v1` @ `c43e3f4d` (clean — main `2491f1ab`, `de1838f6`,
 `experiment/aside-executor`, `feat/aside-integration-v1`를 전부 포함하는 유일한 clean checkpoint)
 **§0–§19:** 목표 · 경계 · 불변식 · 재사용 계획 · 3-package 계획 · product-owner 결정 목록 (설계, 2026-09-15 확정 커밋
 `7057e9f9`). §16의 스키마는 설계 시점의 **제안**이었고, Package A가 실제로 만든 스키마는 §21-2다.
 **§20:** 「No unattended or scheduled collection」 canonical 문구 정정 기록. **§21:** Package A 구현·증명 기록.
+**§22:** Package B (Case Intelligence + Exception UX) 구현·증명 기록.
 
 ---
 
@@ -520,10 +522,10 @@ decision memory가 다음 조사 provenance에 나타남 + policy 행 무변경 
 |---|---|---|---|
 | **PD-1** | v1 template의 sources · Coupang REVIEW(브라우저)를 넣을지 · 판매자가 채널을 뺄 수 있는지 | 무인 불가 source를 넣으면 ③이 영구 소음; 빼면 「고객 운영」이 쿠팡 리뷰를 맡지 않는다 | **결정됨 (2026-09-15):** Package A의 scheduled source는 **Cafe24 Inquiry · Cafe24 Review 두 official API source만**. Coupang Review / NAVER guided acquisition은 scheduled obligation에 넣지 않는다 — 무인으로 볼 수 없는 source를 매 run 「확인하지 못함」으로 만드는 것은 잘못된 제품 의미다. Scheduled Aside architecture proof는 C에서 owned/allowed surface로, marketplace 무인 브라우저는 별도 capability gate |
 | **PD-2** | cadence 닫힌 집합 · 기본값 · 창 경계(KST) | R1의 key가 창이다 | **결정됨 (2026-09-15):** v1 cadence **2시간 고정** — arbitrary cron 0 · cadence picker 0 · 활성화 시 initial run 1회 · 이후 nextRunAt 기준 2시간마다 · 창 semantics 명시 고정 · 재시작이 논리 창을 바꾸지 않음 (§21-3) |
-| **PD-3** | OperationsCase 물리 저장소: `proactive_case` 확장 vs 새 테이블 | 같은 책임의 두 테이블은 두 권위 | 확장(§16-4). 인덱스 의미 변경 리뷰 포함 |
-| **PD-4** | `PREPARE_DRAFT`를 AUTO로 둘지 · 모델 비용/일일 예산 · 고객 문장이 매 run 벤더로 나가는 폭 | 무인 run이 판매자 예산과 payload를 쓴다 (proactive는 기본 OFF였다) | AUTO + 기존 `AgentQuotaService` 카운터 공유 + per-run 상한 |
-| **PD-5** | Investigation 실행 위치: backend(기존 production draft path) vs agent-runtime(스케줄 run용 system principal 필요) | 후자는 **새 자격 경로 = security boundary 변경** | v1은 backend 위치 + contract는 runtime 교체 가능하게 |
-| **PD-6** | 예외 알림 채널(이메일/푸시/없음) | 「평소 보지 않는다」는 알림 없이는 「가끔 연다」가 된다; mailer는 현재 off | v1 non-goal로 명시하거나 이메일 1종 — **결정 필요** |
+| **PD-3** | OperationsCase 물리 저장소: `proactive_case` 확장 vs 새 테이블 | 같은 책임의 두 테이블은 두 권위 | **결정됨 (2026-09-16):** 기존 `proactive_case`를 EXTEND한 backing store, 코드 개념은 `OperationsCase`. 대규모 rename·migration 없음, `uq_proactive_case_open_subject` 무변경 (§22-1) |
+| **PD-4** | `PREPARE_DRAFT`를 AUTO로 둘지 · 모델 비용/일일 예산 · 고객 문장이 매 run 벤더로 나가는 폭 | 무인 run이 판매자 예산과 payload를 쓴다 (proactive는 기본 OFF였다) | **결정됨 (2026-09-16):** 자동 조사·Action/Draft 준비 허용, 자동 고객 전송 금지. 모델 호출은 rollout 허용 org × 조사가 필요한 Case만, 기존 PII sanitization·quota 재사용, 새 billing 0 (§22-0) |
+| **PD-5** | Investigation 실행 위치: backend(기존 production draft path) vs agent-runtime(스케줄 run용 system principal 필요) | 후자는 **새 자격 경로 = security boundary 변경** | **결정됨 (2026-09-16):** backend 내부 Investigator. 사용자 bearer·device token·자기 HTTP API 호출 금지, run이 확정한 orgId가 권한 경계, org-scoped READ domain tools만 (§22-3) |
+| **PD-6** | 예외 알림 채널(이메일/푸시/없음) | 「평소 보지 않는다」는 알림 없이는 「가끔 연다」가 된다; mailer는 현재 off | **결정됨 (2026-09-16):** EMAIL 1종, 기존 mailer, run 종료 후 요약 1통으로 coalesce·dedup, 고객 문장 0 (§22-4) |
 | **PD-7** | Scheduled Aside 「owned/allowed surface」의 정의 · helper allow-list에 lease route 추가 승인 | device token 권한 확대 · 새 backend→helper 작업 채널 | Reviewnary가 호스팅하는 fixture surface(WING 모양, 실제 WING 아님) + route 1개 |
 | **PD-8** | Cafe24 real write의 대상 문의(실고객 무접촉 원칙) · live 승인 · client_ip/shop_no/scope | 2026-08-25 증명 대상은 소진됨 | 판매자(운영자)가 만든 REAL 테스트 문의 1건 + 새 manifest |
 | **PD-9** | canonical 문서 충돌 정리 시점: `sellerops_canonical_reference.md`「No unattended or scheduled collection」· Coupang lane「NOT APPROVED」 | C가 architecture proof를 넣는 순간 문장이 부분적으로 거짓이 된다 | **처리됨 (A, 2026-09-15 product-owner 지시):** 「Unattended browser collection is not approved by default.」의 뜻으로 좁힘, 원문 보존 — §20 |
@@ -832,4 +834,150 @@ stub 요청 기록이 같은 이야기를 한다: 00:00:28 문의·리뷰 읽기
 | PD-7 · PD-8 | Scheduled Aside surface · Cafe24 real write 대상 | C 착수 전 |
 
 **Package B 진입:** runtime 쪽 전제(창 · run · source 완결성 · crash 회수 · 소유권)는 닫혔고 B가 새로 요구하는 runtime 변경은 없다.
-B 착수를 막는 것은 **PD-3 · PD-4 · PD-5 · PD-6**이다.
+B 착수를 막는 것은 **PD-3 · PD-4 · PD-5 · PD-6**이다. *(2026-09-16: 넷 모두 결정됨 → §22.)*
+
+---
+
+## 22. Package B — Case Intelligence + Exception UX 구현·증명 기록 (2026-09-16)
+
+Baseline `3d2fad09`(Package A). 커밋 `7a30ed58`(구현) · `9cd653a5`(첫 라이브 run이 드러낸 결함 수정). 마켓플레이스 WRITE 0 ·
+자동 고객 전송 0 · 브라우저 0 · Bridge 권한 확대 0.
+
+### 22-0. 결정이 설계를 바꾼 곳 (2026-09-16 product-owner 결정)
+
+| 결정 | 설계 제안 (§16-4 · §18) | 구현 |
+|---|---|---|
+| **Activation** (NEW-A2) | 409와 그 문구가 열려 있었다 | eligible(= CONNECTED 계정 위의 필수 source)이 0이면 `409 NO_ELIGIBLE_SOURCE`. 화면 문장 「고객 운영 관리를 시작하려면 Cafe24를 먼저 연결해 주세요.」 + [카페24 연결하기]. 개별 source 실패는 run PARTIAL/FAILED 그대로 |
+| **Rollout** (PD-10 잔여) | allow-list vs CONNECTED_SELLERS | `RESPONSIBILITY_RUNTIME_ORG_IDS` 명시 UUID allow-list **AND** 판매자 ACTIVE. 빈 값 = 아무도 아님 · 와일드카드 없음 · 오타는 기동 거부. 목록 밖 org: 활성화 `409 RESPONSIBILITY_NOT_AVAILABLE` · 창 materialize 0 · claim 0 · Case 0 · 화면은 아무것도 그리지 않는다. generic entitlement 0 |
+| **PD-3** | `proactive_case` 가산 확장 | 그대로 — §22-1 |
+| **PD-4** | AUTO + quota 공유 + per-run 상한 | 조사·초안 준비 AUTO, 자동 전송 금지. 모델 호출은 rollout org × 조사가 필요한 Case만, run당 `max-per-run`(기본 5), `AgentQuotaService`에 `INVESTIGATE`로 사전 청구. 넘친 후보는 **아무것도 쓰지 않고** 다음 run의 후보로 남는다 |
+| **PD-5** | backend 위치 | backend 내부 Investigator — §22-3 |
+| **PD-6** | 이메일 1종 or non-goal | EMAIL 1종 · 기존 `Mailer` — §22-4 |
+
+### 22-1. `proactive_case` 확장 (V107)
+
+**가산 칸 14개, 전부 nullable** — `responsibility_id` · `origin_run_id` · `last_run_id` · `case_kind`
+(`CUSTOMER_WORK`|`OBSERVATION_GAP`) · `required_authority`(`AUTO`|`HUMAN`) · `disposition`(`AUTO_RESOLVED`|`MONITORING`|
+`NEEDS_DECISION`) · `decided_by`(`RULE`|`AGENT`) · `summary` · `recommended_action_type` · `missing_information`(JSON 배열) ·
+`confidence` · `resolution_reason` · `reconciled_at` · `notified_at`. 기존 칸(`subject_*` · `signature` · `source_state` · `status` ·
+`priority` · `reason` · `reason_note` · `prepared_action` · `draft_version` · `recommendation`)은 **같은 뜻으로** 재사용한다.
+
+- **두 절반:** proactive 행은 `responsibility_id is null`, OperationsCase 행은 not null. `ProactiveCase`와 `OperationsCase`
+  두 엔티티가 같은 테이블을 각자의 `@SQLRestriction`으로 읽는다 — proactive loop는 책임 행을 보지도, supersede하지도, 세지도 않는다.
+  **기존 proactive 행의 의미 변화 0.**
+- **check 제약:** 소유 모양(책임 행은 kind · origin run · authority 필수, proactive 행은 새 칸 전부 null) · kind↔subject
+  (`OBSERVATION_GAP`은 `subject_kind='SOURCE'`만) · `AUTO_RESOLVED`는 열린 상태 불가 · gap은 disposition 없음 · 닫힌 토큰.
+- **인덱스:** `uq_proactive_case_open_subject`(`where status='PREPARED'`) **무변경** → subject당 열린 카드 1개가 두 producer에 걸쳐
+  DB로 보장된다. 소유 규칙: 판매자의 `CUSTOMER_OPERATIONS_V1`이 ACTIVE인 org는 proactive scheduler 대상에서 빠진다.
+- **`operations_case_event`:** append-only(UPDATE/DELETE 거부 트리거). actor `SYSTEM`|`AGENT`|`SELLER`, 닫힌 kind 12종,
+  provenance는 **메타데이터만**(모델 · prompt/schema/tool/evidence 버전 · 도구 이름과 인자 digest · 짧은 근거 ref · 토큰 · ms).
+- **`responsibility_run`:** `notification_state`(`NONE_NEEDED`|`SENT`|`UNDELIVERABLE`|`FAILED`) · `notified_at`.
+- 구현 중 발견: H2 스키마 생성에서 Hibernate가 `@Enumerated` 칸을 엔티티별 **H2 ENUM**으로 만들어 두 매핑이 서로의 토큰을 거절했다 →
+  공유 enum 칸 6개를 `columnDefinition = "varchar(n)"`로 고정(Postgres는 V75 그대로 varchar, 운영 영향 0).
+
+### 22-2. Case lifecycle · reconciliation
+
+한 run attempt의 관측이 끝나고 **lease를 쥔 채로** `OperationsCaseProcessor.process(runId)`가 네 단계를 돈다(재시작 안전, 자기 원장 없음):
+
+1. **Reconcile 먼저** — 열린 Case를 캐노니컬 기록에서 재도출. 문의: 채널에서 답변되어 커넥터가 work item을 닫음 →
+   `CLOSED · ANSWERED_ELSEWHERE` · work item이 판매자 워크플로로 대기 phase를 벗어남 → `ACTED · SELLER_ACTED`(DISMISSED는
+   `CLOSED · NOT_OPERATIONAL`) · 제외된 문의 → `NOT_OPERATIONAL` · 답변됨 → `ANSWERED_ELSEWHERE`. 리뷰: 채널 답글 →
+   `ACTED · ANSWERED_ON_CHANNEL` · Case 이후 판매자 triage 결정 → `ACTED · SELLER_ACTED` · 지켜보기 14일 경과 →
+   `CLOSED · MONITORING_ENDED`. **실행 상태는 만들지 않는다** — resolution 어휘에 SENT/EXECUTED/VERIFIED가 없다(테스트).
+2. **Gap** — run의 source별 최신 사실 중 판매자만 고칠 수 있는 실패(`AUTH_REQUIRED`·`NOT_CONNECTED`)는 **계정당 열린 Case 1개**.
+   같은 family로 다음 run에 또 실패 → 같은 Case의 `OBSERVED_AGAIN`(메일 0). 모든 source 완전 관측 → `CLOSED · OBSERVED_AGAIN`(`RECOVERED`).
+   family가 바뀌면 옛 Case `SUPERSEDED` + 새 Case. 복구 뒤 재발은 새 episode(서명에 첫 run id). 일시적 실패(TIMEOUT 등)는 Case가 아니라
+   ③의 source health로만 보인다.
+3. **Discover** — 후보는 **책임이 그 source를 처음 끝까지 읽은 시각**(COMPLETE/BOUNDED 관측의 최소 `observed_at`) 이후 들어온 행.
+   위임 전·첫 확인에 이미 있던 일은 기존 문의·리뷰 화면이 소유한다. 스캔은 수집이 다시 읽는 범위(15일) 안, run당 200행.
+   **서명 = 고객 쪽 상태**(문의: 내용 digest · 상품 · 스레드 / 리뷰: 별점 · 본문 digest · 상품). **답변 상태·work phase는 서명에
+   없다** — 판매자가 답한 것은 「새 signal」이 아니라 기존 Case의 reconcile이다.
+   같은 서명 존재 → 쓰기 0(`UNCHANGED`). 열린 Case 있음 → **같은 Case 갱신**(`CONTEXT_UPDATED`). 없으면 새 Case.
+4. **Decide** — `OperationsCaseRules`(기존 `ReviewTriageRules.tier` · 스레드 · 제외 · 답변 상태의 순수 함수):
+   답변된/스레드 답글/제외 문의 · 4–5★ 리뷰 → `AUTO_RESOLVED · RULE` · 3★/무본문 저별점 → `MONITORING · RULE`.
+   답변 필요 문의 · 1–2★ 본문 리뷰만 조사 대상 → 먼저 `NEEDS_DECISION · RULE`로 저장(조사 실패·crash 시에도 판매자 앞에 남는다) →
+   Investigator → guard → 결론 저장. `NEEDS_DECISION + REPLY_TO_CUSTOMER` 문의는 production draft path(`proposeAs`→`generateAs`)로
+   초안 준비 — **PROPOSED에서 멈추고 승인·전송 경로 도달 불가**. 근거가 없으면(`NO_ANSWER_BASIS`) 모델 0 · 초안 0 그대로.
+
+### 22-3. Agent tool boundary
+
+- **실행 위치:** backend 프로세스 안 `CaseInvestigator`. 사용자 bearer · helper device token · `SecurityContextHolder` ·
+  자기 `/api/` 호출 · `http(s)://` 리터럴 **0**(`OperationsCaseSafetyFenceTest`가 소스로 고정).
+- **권한 경계:** Case의 orgId(= run이 확정한 org). `CaseInvestigationTools.forOrg(orgId)`가 한 번 묶고 **어떤 도구도 org를
+  인자로 받지 않는다**(구조 테스트). 다른 org의 subject id는 빈 결과(H2 테스트: 문의·리뷰·주문·유사 Case·과거 결정·반복 문제 전부).
+- **도구 7종(READ):** `getSubject`(`redactFullBody` · 1,200자) · `getProductContext`(판매자 카탈로그명 + 상품 지식 발췌 2) ·
+  `getOrderContext`(`STORED_ONLY` — 배경 run의 exact 채널 조회 0) · `searchKnowledge`(운영 기준 발췌 2) · `getRelatedIssues` ·
+  `getRecentSimilarCases`(같은 상품의 최근 Case 토큰만) · `getPastSellerDecisions`(triage 결정 · 초안 작성자 분포 — **읽기만**,
+  정책 writer 0). 브라우저 click/fill/navigate 0 · `requestObservation` 미구현(Package B는 새 관측을 스케줄하지 않는다).
+- **payload:** 근거는 `[subject]`·`[k1]`·`[i1]` 같은 로컬 ref로만 이름 붙고 UUID·연락처·주문번호·주문 참조가 나가지 않는다
+  (`CaseInvestigationPayloadFloorTest`가 직렬화 바이트로 단언). 모델이 댄 ref 중 주어지지 않은 것은 버리고, 남는 것이 없으면 실패.
+- **strict schema:** `caseKind` · `disposition` · `summary` · `recommendedActionType`(8종, 각 authority) · `recommendedAction` ·
+  `missingInformation` · `evidenceRefs` · `confidence` — 하나라도 빠지거나 모르는 토큰이면 조사 아님.
+- **guard(`CaseDecisionGuard`):** 사람 권한 제안(고객 답변·연락·환불/보상·취소/교환·지식 추가·상세 점검) · LOW confidence ·
+  답을 기다리는 문의 → `NEEDS_DECISION`으로만 이동. `AUTO_RESOLVED`는 `NO_ACTION`만. 완료 주장 문장(「보냈습니다」·「환불했습니다」…)은
+  화면에 도달하지 않는다. **어떤 규칙도 판매자 쪽에서 멀어지게 하지 못한다.**
+- **capability:** `sellerops.responsibility.investigation.*` — 11번째 LLM capability. 자기 flag · key · org list · door
+  (`AgentDraftBoundaryTest` 표 행) · 기본 OFF · `admitsPolicyWidening=false` · `AgentQuotaService`에 `INVESTIGATE` 사전 청구 ·
+  run당 상한. provenance에 model · prompt/schema/tool/evidence 버전 · 도구 호출 · usage를 남긴다.
+
+### 22-4. Notification
+
+`OperationsCaseNotifier.afterFinish(run)` — run 상태 확정 뒤 한 번. 대상은 **아직 메일에 포함된 적 없는** 열린 `NEEDS_DECISION`
+고객 Case와 열린 gap. 없으면 `NONE_NEEDED`. 수신자는 책임을 활성화한 사용자(같은 org). `Mailer`가 전달 불가면 `UNDELIVERABLE`이고
+Case는 미표시로 남아 다음 요약에 포함된다. 보내기 **전에** run에 `SENT`를 기록(발송 후 crash가 두 번째 메일을 만들지 않게), 발송 뒤 Case마다
+`notified_at` + `NOTIFIED` event. 본문은 **개수와 채널 이름**뿐(`ExceptionSummaryMail`, 소스 스캔으로 case text getter 0). 실제 provider
+발송은 이 저장소의 SMTP mode이고 새 provider 0 — QA는 dev-outbox sink로 증명했다.
+
+### 22-5. 실제 scheduled run — 전용 QA org (진행 중인 기록)
+
+**구성:** Package A의 QA org `997b87b2…`(Demo Org 아님 · 외부 판매자 아님 · Demo Org OAuth 무접촉) · loopback 카페24 stub ·
+`RESPONSIBILITY_RUNTIME_ORG_IDS` = QA org 하나 · investigation·draft capability = QA org, `gpt-5-2025-08-07` effort low ·
+mail `dev-outbox` · 합성 운영 기준 2건(배송 · 파손/교환). 고객 문장은 전부 `(QA 합성 …)` 표기를 단 합성 데이터. 사람의 trigger 0 —
+창은 실제 scheduler가 연다.
+
+| 창 (KST) | 관측 | Case | 모델 | 메일 |
+|---|---|---|---|---|
+| **09-16 04:00** SCHEDULED SUCCESS | 문의 COMPLETE 6 · 신규 2 / 리뷰 COMPLETE 7 · 신규 3 | 새 6: 규칙 3(이미 답변된 문의 `AUTO_RESOLVED` · 5★ `AUTO_RESOLVED` · 3★ `MONITORING`) + 조사 대상 3 | 3회 시도 → 전부 `INVESTIGATION_FAILED · transport`(0–1ms) → 3건 모두 `NEEDS_DECISION · RULE`로 판매자 앞에 남음 | 1통 「확인할 일 3건」 |
+| **09-16 06:00** SCHEDULED SUCCESS | 문의 COMPLETE 7 · 신규 1 / 리뷰 COMPLETE 9 · 신규 2 | **변화 없음 6(쓰기 0)** · 새 3 · 재확인 1(채널에서 답변된 파손 문의 종료) | **실제 3회 `CONCLUDED`**: 10,270 / 7,203 / 10,917ms · prompt 633 / 650 / 627 · completion 769 / 596 / 835(reasoning 512 / 448 / 448) · guard 발동 0 · 전부 `NEEDS_DECISION`·`REPLY_TO_CUSTOMER`(HIGH/HIGH/MEDIUM) | 1통 「확인할 일 3건」(새 3건만 — 04:00의 3건은 이미 메일에 포함) |
+
+- **04:00 transport 실패는 제품이 아니라 QA 하네스였다:** stub을 가리키려고 준 `-Djdk.net.hosts.file`은 파일에 없는 호스트를
+  시스템 DNS로 넘기지 않고, `-Djavax.net.ssl.trustStore`는 JDK CA를 대체했다 → 벤더에 닿을 수 없었다(`ConnectException` 재현).
+  JDK cacerts + stub 인증서의 truststore와 벤더 주소를 넣은 hosts 파일로 바꾸자 같은 probe가 `HTTP 401`(키 없음 = 도달). **그 실패가
+  보여준 것:** 조사가 실패해도 Case는 판매자에게 남고(`RULE` fallback) 메일에 포함되며, 이미 청구된 quota 3건이 원장에 기록된다.
+- **06:00 초안:** 교환 문의는 `REPLY_TO_CUSTOMER` 결론 뒤 draft path를 탔고 `NO_PRODUCT`로 composer가 **쓰지 않았다**
+  (`DRAFT_NOT_PREPARED · NO_DRAFT` — 근거 없는 초안 0 규칙, 모델 0). work item은 제안 기록으로 `PROPOSED`. 리뷰는 초안 경로가 없다.
+  → 라이브에서 **초안이 실제로 준비된 run은 아직 없다**(합성 문의가 상품에 묶이지 않음). 준비된 경로는 H2 테스트가 증명한다.
+- **비용(추정):** 06:00의 3회 합계 prompt 1,910 · completion 2,200 토큰. 벤더 공시 단가(입력 $1.25/1M · 출력 $10/1M — 저장소가 검증할 수
+  없는 외부 사실)로 ≈ **$0.024, Case당 ≈ $0.008**. 지연은 Case당 7–11초로 run 길이에 더해진다(lease heartbeat가 흡수).
+- **rule vs Agent:** 지금까지 Case 9 — 규칙 결론 3 · 조사 대상 6(실제 결론 3, 하네스 실패 3) · **변화 없는 signal 6개에 모델 0**.
+- 중복 검사: subject당 열린 Case >1 **0** · (subject, 서명) 중복 **0** · QA org의 proactive 행 **0** · backend ERROR **0**.
+
+### 22-6. 첫 라이브 run이 드러낸 결함 (`9cd653a5`에서 수정)
+
+1. **근거에 없는 권장 내용.** v1 prompt의 결론 둘이 근거 목록에 없는 상품 부착 요령(「30초 이상 압착·24시간 고정」)·플랫폼 기능
+   (「리뷰 수정 메뉴에서 변경」)·약속(「재발 방지 노력도 약속」)을 권했다. guard는 권한을 지키지만 문장의 근거는 보지 않는다 →
+   prompt **v2**: 권장 조치는 판매자의 다음 한 걸음(120자)이고 근거 없는 사용법·기능·일정·보상 조건과 고객에게 하는 약속을 권하지
+   않으며 빠진 사실은 `missingInformation`으로. 과도하게 긴 권장 조치는 240자 안에서 **문장 경계**로 자른다(300자에서 문장 중간이
+   잘린 「교체·후속 조치 가능 」이 실제로 저장됐다).
+2. **채널에서 답변된 문의가 `SELLER_ACTED`로 기록됐다.** 커넥터의 answered-elsewhere 경로가 work item을 COMPLETED로 닫았고
+   reconciler가 phase를 이유보다 먼저 읽었다 → 커넥터 audit(actor `SYSTEM:CONNECTOR_INGEST` · phaseTo COMPLETED)로 가르고,
+   그 표식이 writer와 어긋나지 않게 fence 테스트로 고정. 화면에는 영향이 없었다(열린 Case가 아니므로) — 기록의 정직성 문제다.
+3. (하네스) 위 22-5의 transport.
+
+### 22-7. DB 보장 — 실제 Postgres (QA DB, 롤백 트랜잭션)
+
+같은 subject에 proactive 카드(`responsibility_id null`)를 여는 insert → `uq_proactive_case_open_subject` 위반 · 소유 모양이 빠진
+책임 행 → `ck_proactive_case_owner_shape` 위반 · `AUTO_RESOLVED` 행을 다시 열기 → `ck_proactive_case_auto_resolved_closed` 위반 ·
+`operations_case_event` UPDATE·DELETE → 「append-only」 거부. 롤백 후 행 수 불변(9 / 23). V107은 실제 Postgres에 Flyway로 적용(0.1초).
+
+### 22-8. Exception UX
+
+Home(`/`)은 기존 Operations Home을 **확장**한다 — 대화 위, 기존 네 영역 앞에 「고객 운영 관리 · 운영 중」 한 줄(확인 주기 · 마지막 확인 ·
+다음 확인)과 세 영역: **① 내 결정 필요** · **② Reviewnary가 정리하거나 준비한 일**(접힘) · **③ Reviewnary가 제대로 확인하지 못한 곳**
+(다시 연결할 계정 + 지난 확인의 source별 사실). `/customer-operations`는 surface 카드(설명 · 확인 주기/마지막/다음 · 확인 대상 ·
+제가 하는 일 · 내 확인이 필요한 일 · 시작/일시정지/다시 시작/중지(확인 후)) + 같은 세 영역 + 최근 확인 기록. 모든 문장은
+`lib/customerOperations.ts` 한 곳이고 네 불변식을 테스트가 고정한다 — observed ≠ processed · prepared ≠ executed(초안은 늘
+「아직 보내지 않았습니다」와 함께) · 0건 ≠ 확인하지 못함(NONE은 숫자를 찍지 않는다) · PARTIAL ≠ 정상. 읽기 실패 · rollout 밖 ·
+카페24 미연결은 Home에 **아무것도 그리지 않는다**. 브라우저 QA(실제 QA org · 1440/1366/1152 · `/`와 `/customer-operations` ·
+`<details>` 전부 연 뒤): axe(WCAG 2 A/AA) 위반 **0** · 가로 스크롤 **0** · off-host 요청 **0** · 04:00 데이터에서 「처리했습니다·
+보냈습니다·정상·0건 관측」 **0**. 콘솔 오류는 이 QA 스택에서 꺼 둔 agent-runtime(8787)과 기존 `home-opened` 403뿐.
