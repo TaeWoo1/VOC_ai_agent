@@ -190,6 +190,13 @@ class CaseInvestigationPayloadFloorTest {
         assertThat(CaseInvestigationGenerator.parse(modelOutput.replace("[\"subject\",\"k9\"]", "[]")))
                 .as("a conclusion that cites nothing").isEmpty();
         assertThat(CaseInvestigationGenerator.parse("not json")).isEmpty();
+
+        String twoSentences = "리뷰에 사과를 남겨 주세요. " + "부착면과 사용 환경을 고객에게 물어봐 주세요. ".repeat(12);
+        String fitted = CaseInvestigationGenerator.fitSentences(twoSentences, CaseInvestigationGenerator.MAX_ACTION);
+        assertThat(fitted).as("an overlong recommendation ends on a whole sentence").endsWith("주세요.")
+                .hasSizeLessThanOrEqualTo(CaseInvestigationGenerator.MAX_ACTION);
+        assertThat(CaseInvestigationGenerator.fitSentences("가".repeat(300), 240)).endsWith("…").hasSize(241);
+        assertThat(CaseInvestigationPrompt.system()).contains("지어내지 않습니다").contains("약속하라고 권하지 않습니다");
         assertThat(RecommendedActionType.valueOf("REPLY_TO_CUSTOMER").authority().name()).isEqualTo("HUMAN");
         assertThat(OperationsCaseKind.values()).hasSize(2);
     }

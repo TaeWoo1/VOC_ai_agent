@@ -100,6 +100,19 @@ public interface OperationsCaseRepository extends JpaRepository<OperationsCase, 
     boolean reviewDecidedSince(@Param("orgId") UUID orgId, @Param("reviewId") UUID reviewId,
                                @Param("since") Instant since);
 
+    /**
+     * Did the connector's answered-elsewhere reconciliation complete this work item? That path writes an audit row whose
+     * actor is the ingest connector and whose phase moves to COMPLETED ({@code InquiryWorkItemWriter}); a COMPLETED
+     * phase without one came from the seller's own workflow.
+     */
+    @Query("""
+            select count(a) > 0 from InquiryWorkItemAudit a
+            where a.orgId = :orgId and a.workItemId = :workItemId and a.actor = :actor
+              and a.phaseTo = com.sellerops.inquiry.workitem.InquiryWorkItemPhase.COMPLETED
+            """)
+    boolean completedByActor(@Param("orgId") UUID orgId, @Param("workItemId") UUID workItemId,
+                             @Param("actor") String actor);
+
     @Query("""
             select t.disposition, count(t) from ReviewTriage t, Review r
             where r.id = t.reviewId and t.orgId = :orgId and r.orgId = :orgId and r.productId = :productId

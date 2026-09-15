@@ -46,6 +46,8 @@ public class OperationsCaseReconciler {
     /** How long Reviewnary keeps watching a review nobody decided about. */
     static final Duration MONITORING_WINDOW = Duration.ofDays(14);
     static final int RECONCILE_PAGE = 500;
+    /** The audit actor {@code InquiryWorkItemWriter.reconcileConnectorAnswered} writes; pinned by the fence test. */
+    static final String CONNECTOR_INGEST_ACTOR = "SYSTEM:CONNECTOR_INGEST";
 
     private final OperationsCaseRepository cases;
     private final OperationsCaseEventRepository events;
@@ -142,6 +144,13 @@ public class OperationsCaseReconciler {
                 .filter(w -> c.getOrgId().equals(w.getOrgId()));
         if (workItem.isPresent()) {
             InquiryWorkItemPhase phase = workItem.get().getPhase();
+            if (phase == InquiryWorkItemPhase.COMPLETED && !"UNANSWERED".equals(inquiry.getStatus())
+                    && cases.completedByActor(c.getOrgId(), workItem.get().getId(), CONNECTOR_INGEST_ACTOR)) {
+                // Answered on the channel; the connector closed the work item. The first live run labelled this
+                // SELLER_ACTED because the phase was read before the reason — the phase says done, not who did it.
+                return new Derived(OperationsCaseStatus.CLOSED, CaseResolution.ANSWERED_ELSEWHERE,
+                        CaseEventActor.SYSTEM, "INQUIRY_ANSWERED_ON_CHANNEL");
+            }
             if (!InquiryWorkItemPhase.AWAITING_SELLER.contains(phase)) {
                 return phase == InquiryWorkItemPhase.DISMISSED
                         ? new Derived(OperationsCaseStatus.CLOSED, CaseResolution.NOT_OPERATIONAL,

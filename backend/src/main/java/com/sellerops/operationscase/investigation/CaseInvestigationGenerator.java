@@ -24,7 +24,8 @@ import java.util.Optional;
 public class CaseInvestigationGenerator {
 
     static final int MAX_SUMMARY = 400;
-    static final int MAX_ACTION = 300;
+    /** Twice the prompt's 120 — room for a model that overruns a little, never room for a paragraph. */
+    static final int MAX_ACTION = 240;
     static final int MAX_MISSING_ITEMS = 5;
     static final int MAX_MISSING_LENGTH = 120;
 
@@ -154,7 +155,24 @@ public class CaseInvestigationGenerator {
         if (!node.isTextual() || node.asText().isBlank()) {
             return null;
         }
-        String value = node.asText().strip();
-        return value.length() > max ? value.substring(0, max) : value;
+        return fitSentences(node.asText().strip(), max);
+    }
+
+    /**
+     * Cut an overlong text at the last sentence end inside the limit. A sentence cut in half («교체·후속 조치 가능 »,
+     * seen on the first live run) reads as a promise with its condition missing; when no sentence ends inside the
+     * limit, the text is cut and marked with an ellipsis so it cannot pass for complete.
+     */
+    static String fitSentences(String value, int max) {
+        if (value.length() <= max) {
+            return value;
+        }
+        String head = value.substring(0, max);
+        int end = Math.max(head.lastIndexOf(". "), Math.max(head.lastIndexOf("다."), head.lastIndexOf(".")));
+        if (end > max / 3) {
+            int stop = head.startsWith("다.", end) ? end + 2 : end + 1;
+            return head.substring(0, stop).strip();
+        }
+        return head.strip() + "…";
     }
 }

@@ -19,6 +19,9 @@ import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.InquiryOrderFactReader;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAudit;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemEvent;
 import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
@@ -112,6 +115,7 @@ class OperationsCaseProcessorTest {
     @Autowired ProductRepository products;
     @Autowired ReviewIssueRepository issues;
     @Autowired ReviewIssueEvidenceRepository issueEvidence;
+    @Autowired InquiryWorkItemAuditRepository audits;
 
     private final CaseInvestigator investigator = mock(CaseInvestigator.class);
     private final CaseInvestigationService investigation = mock(CaseInvestigationService.class);
@@ -329,6 +333,33 @@ class OperationsCaseProcessorTest {
         assertThat(casesOf()).hasSize(1);
         assertThat(only().getStatus()).isEqualTo(OperationsCaseStatus.CLOSED);
         assertThat(only().getResolutionReason()).isEqualTo(CaseResolution.ANSWERED_ELSEWHERE);
+    }
+
+    @Test
+    void anInquiryTheConnectorClosedAsAnsweredElsewhereIsNotCalledASellerAction() {
+        Inquiry inquiry = inquiry("받은 몰딩이 파손되어 왔어요", Instant.now());
+        InquiryWorkItem item = workItem(inquiry);
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        // What InquiryWorkItemWriter.reconcileConnectorAnswered leaves behind when a collection sees the answer.
+        inquiry.setStatus("ANSWERED");
+        inquiries.save(inquiry);
+        item.setPhase(InquiryWorkItemPhase.COMPLETED);
+        workItems.save(item);
+        InquiryWorkItemAudit audit = new InquiryWorkItemAudit();
+        audit.setOrgId(org);
+        audit.setWorkItemId(item.getId());
+        audit.setCommandId("connector-reconcile:" + item.getId());
+        audit.setEventType(InquiryWorkItemEvent.VERIFICATION_RECORDED);
+        audit.setPhaseFrom(InquiryWorkItemPhase.OPEN);
+        audit.setPhaseTo(InquiryWorkItemPhase.COMPLETED);
+        audit.setActor("SYSTEM:CONNECTOR_INGEST");
+        audits.save(audit);
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        OperationsCase c = caseFor(inquiry.getId());
+        assertThat(c.getStatus()).isEqualTo(OperationsCaseStatus.CLOSED);
+        assertThat(c.getResolutionReason()).isEqualTo(CaseResolution.ANSWERED_ELSEWHERE);
     }
 
     @Test

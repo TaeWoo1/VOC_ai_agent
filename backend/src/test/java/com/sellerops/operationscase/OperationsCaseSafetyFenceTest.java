@@ -138,6 +138,17 @@ class OperationsCaseSafetyFenceTest {
     }
 
     @Test
+    @DisplayName("the answered-elsewhere marker the reconciler reads is the one the work item writer writes")
+    void theAnsweredElsewhereMarkerCannotDrift() throws IOException {
+        assertThat(Files.readString(Paths.get("src/main/java/com/sellerops/inquiry/workitem/InquiryWorkItemWriter.java")))
+                .as("if this actor or phase changes, every inquiry answered on the channel reads as a seller action")
+                .contains("CONNECTOR_ACTOR = \"SYSTEM:CONNECTOR_INGEST\"")
+                .contains("audit.setPhaseTo(InquiryWorkItemPhase.COMPLETED)");
+        assertThat(code(PACKAGE.resolve("OperationsCaseReconciler.java")))
+                .contains("CONNECTOR_INGEST_ACTOR = \"SYSTEM:CONNECTOR_INGEST\"");
+    }
+
+    @Test
     @DisplayName("the tools bind the organisation once, and no tool takes one")
     void theToolsBindTheOrganisationOnce() throws IOException {
         String tools = code(PACKAGE.resolve("investigation/CaseInvestigationTools.java"));
