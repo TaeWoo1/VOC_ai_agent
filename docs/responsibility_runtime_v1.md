@@ -1,11 +1,11 @@
 # Responsibility Runtime v1
 
-**날짜:** 2026-09-15 · **상태:** `DESIGN — CANONICAL MILESTONE DEFINITION · 구현 0`
+**날짜:** 2026-09-15 · **상태:** `CANONICAL MILESTONE DEFINITION` · **Package A `IMPLEMENTED`** (§21)
 **Baseline:** `feat/review-decision-workspace-v1` @ `c43e3f4d` (clean — main `2491f1ab`, `de1838f6`,
 `experiment/aside-executor`, `feat/aside-integration-v1`를 전부 포함하는 유일한 clean checkpoint)
-**이 문서가 한 일:** 목표 · 경계 · 불변식 · 재사용 계획 · 3-package 계획 · product-owner 결정 목록.
-**이 문서가 하지 않은 일:** 코드 0 · 마이그레이션 0 · 스키마 생성 0 · 마켓플레이스 호출 0 · 모델 호출 0.
-§12의 스키마는 **제안**이고 PD(§15)가 닫히기 전에는 migration 번호도 받지 않는다.
+**§0–§19:** 목표 · 경계 · 불변식 · 재사용 계획 · 3-package 계획 · product-owner 결정 목록 (설계, 2026-09-15 확정 커밋
+`7057e9f9`). §16의 스키마는 설계 시점의 **제안**이었고, Package A가 실제로 만든 스키마는 §21-2다.
+**§20:** 「No unattended or scheduled collection」 canonical 문구 정정 기록. **§21:** Package A 구현·증명 기록.
 
 ---
 
@@ -518,17 +518,17 @@ decision memory가 다음 조사 provenance에 나타남 + policy 행 무변경 
 
 | # | 결정 | 왜 필요한가 | 이 문서의 권고 (결정 아님) |
 |---|---|---|---|
-| **PD-1** | v1 template의 sources · Coupang REVIEW(브라우저)를 넣을지 · 판매자가 채널을 뺄 수 있는지 | 무인 불가 source를 넣으면 ③이 영구 소음; 빼면 「고객 운영」이 쿠팡 리뷰를 맡지 않는다 | API source 전부 포함 · Coupang REVIEW는 **「판매자가 가져오는 source」**로 표시하고 마지막 관측 나이가 임계를 넘을 때만 ③ |
-| **PD-2** | cadence 닫힌 집합 · 기본값 · 창 경계(KST) | R1의 key가 창이다 | 1h / 3h / 1d, 기본 3h |
+| **PD-1** | v1 template의 sources · Coupang REVIEW(브라우저)를 넣을지 · 판매자가 채널을 뺄 수 있는지 | 무인 불가 source를 넣으면 ③이 영구 소음; 빼면 「고객 운영」이 쿠팡 리뷰를 맡지 않는다 | **결정됨 (2026-09-15):** Package A의 scheduled source는 **Cafe24 Inquiry · Cafe24 Review 두 official API source만**. Coupang Review / NAVER guided acquisition은 scheduled obligation에 넣지 않는다 — 무인으로 볼 수 없는 source를 매 run 「확인하지 못함」으로 만드는 것은 잘못된 제품 의미다. Scheduled Aside architecture proof는 C에서 owned/allowed surface로, marketplace 무인 브라우저는 별도 capability gate |
+| **PD-2** | cadence 닫힌 집합 · 기본값 · 창 경계(KST) | R1의 key가 창이다 | **결정됨 (2026-09-15):** v1 cadence **2시간 고정** — arbitrary cron 0 · cadence picker 0 · 활성화 시 initial run 1회 · 이후 nextRunAt 기준 2시간마다 · 창 semantics 명시 고정 · 재시작이 논리 창을 바꾸지 않음 (§21-3) |
 | **PD-3** | OperationsCase 물리 저장소: `proactive_case` 확장 vs 새 테이블 | 같은 책임의 두 테이블은 두 권위 | 확장(§16-4). 인덱스 의미 변경 리뷰 포함 |
 | **PD-4** | `PREPARE_DRAFT`를 AUTO로 둘지 · 모델 비용/일일 예산 · 고객 문장이 매 run 벤더로 나가는 폭 | 무인 run이 판매자 예산과 payload를 쓴다 (proactive는 기본 OFF였다) | AUTO + 기존 `AgentQuotaService` 카운터 공유 + per-run 상한 |
 | **PD-5** | Investigation 실행 위치: backend(기존 production draft path) vs agent-runtime(스케줄 run용 system principal 필요) | 후자는 **새 자격 경로 = security boundary 변경** | v1은 backend 위치 + contract는 runtime 교체 가능하게 |
 | **PD-6** | 예외 알림 채널(이메일/푸시/없음) | 「평소 보지 않는다」는 알림 없이는 「가끔 연다」가 된다; mailer는 현재 off | v1 non-goal로 명시하거나 이메일 1종 — **결정 필요** |
 | **PD-7** | Scheduled Aside 「owned/allowed surface」의 정의 · helper allow-list에 lease route 추가 승인 | device token 권한 확대 · 새 backend→helper 작업 채널 | Reviewnary가 호스팅하는 fixture surface(WING 모양, 실제 WING 아님) + route 1개 |
 | **PD-8** | Cafe24 real write의 대상 문의(실고객 무접촉 원칙) · live 승인 · client_ip/shop_no/scope | 2026-08-25 증명 대상은 소진됨 | 판매자(운영자)가 만든 REAL 테스트 문의 1건 + 새 manifest |
-| **PD-9** | canonical 문서 충돌 정리 시점: `sellerops_canonical_reference.md`「No unattended or scheduled collection」· Coupang lane「NOT APPROVED」 | C가 architecture proof를 넣는 순간 문장이 부분적으로 거짓이 된다 | C 착지 PR에서 「marketplace surface에 대해」로 좁혀 갱신 |
-| **PD-10** | Responsibility 대상 org scope (allow-list vs CONNECTED_SELLERS) · 수락 필수 여부 | 파일럿 운영 | 명시적 판매자 수락 필수 + 배포 allow-list |
-| **PD-11** | seller-facing 이름 (「고객 운영 맡기기」 등) | 화면 어휘 | — |
+| **PD-9** | canonical 문서 충돌 정리 시점: `sellerops_canonical_reference.md`「No unattended or scheduled collection」· Coupang lane「NOT APPROVED」 | C가 architecture proof를 넣는 순간 문장이 부분적으로 거짓이 된다 | **처리됨 (A, 2026-09-15 product-owner 지시):** 「Unattended browser collection is not approved by default.」의 뜻으로 좁힘, 원문 보존 — §20 |
+| **PD-10** | Responsibility 대상 org scope (allow-list vs CONNECTED_SELLERS) · 수락 필수 여부 | 파일럿 운영 | **결정됨 (acceptance 한정, 2026-09-15):** acceptance 대상은 **전용 Responsibility Runtime QA org** — Demo Org 금지 · external pilot seller 금지 · 가능하면 실제 READ 가능한 Cafe24 QA connection · WRITE 0 · model 0 · unit/integration green만으로 완료 불가, 사람 trigger 없이 실제 scheduler가 연속 2회 이상 run. 파일럿 org scope(allow-list vs CONNECTED_SELLERS)는 **여전히 열려 있다** (§21-11) |
+| **PD-11** | seller-facing 이름 (「고객 운영 맡기기」 등) | 화면 어휘 | **결정됨 (2026-09-15):** 「고객 운영 관리」 |
 
 ### 18-2. Risks
 
@@ -559,3 +559,277 @@ decision memory가 다음 조사 provenance에 나타남 + policy 행 무변경 
   못하고, 그것이 이 milestone이 고치려는 결함 자체다.
 - A는 **마켓플레이스 WRITE 0 · 모델 0 · 새 security surface 0**으로 끝낼 수 있는 유일한 package다.
 - A를 시작하는 데 필요한 결정은 **PD-1 · PD-2 · PD-10**뿐이다. PD-3/4/5/6은 B 전, PD-7/8/9는 C 전에 필요하다.
+
+---
+
+## 20. Canonical 문구 정정 기록 — 「No unattended or scheduled collection」 (2026-09-15)
+
+**지시:** 이 표현을 inventory하고, 의도가 browser automation 제한이면 canonical wording을
+**"Unattended browser collection is not approved by default."** 의 뜻으로 좁힌다. official API 기반 scheduled
+ResponsibilityRun까지 금지하는 뜻으로 남기지 않는다. 기존 문장은 삭제하지 않고 무엇을 어떤 뜻으로 정정했는지 적는다.
+
+### 20-1. Inventory
+
+| 위치 | 원문 | 그 문장이 막던 것 — 문맥이 말하는 근거 | 조치 |
+|---|---|---|---|
+| `sellerops_canonical_reference.md` §4.2 | 「No unattended or scheduled collection. No seller-facing release.」 | §4의 제목이 「What NAVER v1 proved — and did not prove」이고 NAVER v1은 **Action Window(브라우저) runtime**이다; 같은 목록의 B4(cold restart 재로그인)·B5(auto-relogin)·B7(bridge pairing)이 전부 브라우저 세션 이야기다 | **좁힘** → 「Unattended browser collection is not approved by default. No seller-facing release.」, 원문과 이유를 바로 아래 이탤릭 주석으로 보존 |
+| 같은 문서 §6.2 | 「Unattended / scheduled collection — supervised only.」 | §6.2 gated deferrals — 이웃 항목이 Browser Projection · auto-relogin · Device Vault · Windows/cloud managed runtime, 즉 브라우저 runtime의 연기 목록이다 | **좁힘** → 「Unattended browser collection — not approved by default; supervised only」 + 마켓플레이스에서 여는 것은 자기 capability gate, 원문 보존 |
+| `multi-channel-connector-roadmap.md` 비목표 | 「모든 채널의 무인(unattended) 자동 수집. export 경로는 사람 감독을 전제로 시작한다.」 | 같은 항목의 둘째 문장이 export(브라우저) 경로를 말한다 | **좁힘** → 「무인 **브라우저·export** 자동 수집(기본값 미승인)」, 원문 보존 |
+| `execution_strategy_v1.md` §0·§3·§6 | 「Unattended / scheduled BYO — NOT APPROVED」 · 「Scheduled or unattended BYO execution — NOT APPROVED」 · 「Unattended execution — NOT APPROVED」 | 전부 BYO(브라우저 executor) 절 안에 있다 | **무변경** — 이미 브라우저 실행으로 좁다 |
+| `coupang_aside_operator_run_lane_v1.md` | 「unattended / scheduled — NOT APPROVED」 | 그 lane(쿠팡 WING 브라우저 읽기) 자신의 상태 | **무변경** — lane 한정 서술 |
+| `review_acquisition_baseline_v1.md` | 「unattended 실행은 코드에도 정책에도 없다」 | NAVER 리뷰 착석 walk | **무변경** — 브라우저 lane 한정 |
+| `sellerops_completion_checkpoint_v1.md` | 「never unattended」 | 과거 라이브 증명들에 대한 사실 | **무변경** — 역사적 사실 |
+
+### 20-2. 정정의 뜻
+
+1. **공식 API 정기 수집은 이 문장들이 금지한 적이 없다.** Self-Pilot Runtime v1(2026-08-18)이 이미 routine READ를
+   자동으로 돌리고 있었고, 두 canonical 문장은 그 사실보다 넓게 남아 있었다. 정정은 새 허가가 아니라 **표현을 실제
+   계약에 맞춘 것**이다.
+2. **Responsibility Runtime의 scheduled run은 공식 API source만 연다**(PD-1). 브라우저를 열지 않고, 도우미를 부르지
+   않으며, 판매자 세션을 쓰지 않는다.
+3. **무인 브라우저 수집은 여전히 기본값 미승인이다.** 마켓플레이스에서 그것을 여는 일은 별도 capability gate이고,
+   Package C의 Scheduled Aside는 owned/allowed surface에서의 architecture proof만 한다(§11).
+
+---
+
+## 21. Package A — Runtime + Observation Reliability 구현·증명 기록 (2026-09-15)
+
+**목표:** Reviewnary가 정해진 시간에 실제로 근무했고, 각 source를 어디까지 확인했는지 신뢰할 수 있게 만든다.
+**마켓플레이스 WRITE 0 · 모델 호출 0 · 무인 브라우저 실행 0 · `proactive_case` 무접촉 · Bridge device-token 권한 무변경.**
+
+### 21-0. 결정이 설계를 바꾼 곳
+
+| 설계(§0–§19) | Package A가 한 것 | 이유 |
+|---|---|---|
+| §17-A 「브라우저 source는 seller-run 관측만 채택」 | **폐기** — template source는 Cafe24 INQUIRY · REVIEW 두 개뿐 | PD-1 |
+| §16-1 `responsibility.cadence` 칼럼 | **만들지 않음** — 창은 코드 상수(2시간, Asia/Seoul) | PD-2: 저장할 선택이 없다 |
+| §4 Responsibility surface (최소 화면) | **API만** — `GET /api/responsibilities/customer-operations` · `POST …/activate · pause · resume · stop`. `displayName` = 「고객 운영 관리」 | 「Home UX 확장」이 이 package의 non-scope이고 acceptance가 화면을 요구하지 않는다 ⇒ 화면은 §17-B로 |
+| — | **「Run Now」 없음** | 사람이 일으키는 run은 activation/resume이 여는 현재 창 하나뿐이다 |
+| — | 카페24 API 계정이 하나도 없는 org의 activation은 **409** | required source 0인 책임은 매 창 FAILED만 만든다. 문구와 화면 흐름은 §17-B에서 다시 정한다 |
+
+### 21-1. Commits
+
+- `7057e9f9` — canonical milestone definition (설계, 구현 0)
+- `a1ba4812` — Package A 구현 (V106 · `responsibility/` · 기존 코드 가산 변경 · 테스트)
+- 이 문서 커밋 — §20 정정 기록 · §21 · canonical 문구 정정 3곳
+
+### 21-2. Schema / state (V106 — 테이블 셋, 기존 테이블 변경 0)
+
+| 테이블 | 핵심 | DB가 강제하는 것 |
+|---|---|---|
+| `responsibility` | org × template 하나 · `ACTIVE/PAUSED/STOPPED` · `next_run_at` · 수락자·시각 | `unique(org_id, template_code)` · `ACTIVE`가 아니면 `next_run_at is null` |
+| `responsibility_run` | 논리 창 하나 · `window_start/end` · `run_trigger ACTIVATION/SCHEDULED/RESUME` · `PENDING/RUNNING/SUCCESS/PARTIAL/FAILED/CANCELLED` · `attempt` · `lease_owner/lease_until` · `next_attempt_at` · run-level `failure_reason` | **R1** `unique(responsibility_id, window_start)` · **R2** partial unique `(responsibility_id) where status='RUNNING'` · RUNNING이면 lease 필수 · retry 시각은 PARTIAL/FAILED에만 |
+| `responsibility_run_source` | attempt별 관측 사실 · source · method · `recipe_version` · 창 · `cursor_from/to` · `observed_at` · `completeness` · `observed/new/changed_count` · `failure_reason` · `identity_verdict` · `sync_job_id` | `unique(run, account, data_type, attempt)` · **NONE이면 count 전부 null이고 reason 필수** · COMPLETE면 reason 없음 |
+
+`PENDING`은 브리프의 다섯 상태에 하나를 더한 것이다: 창은 열렸는데 같은 책임의 앞선 run이 아직 RUNNING이면(R2) 줄을 서야
+하고, 그 사실을 RUNNING으로 적는 것은 거짓이다. Run-level reason: `MISSED · NO_REQUIRED_SOURCE · RESPONSIBILITY_PAUSED ·
+RESPONSIBILITY_STOPPED`. Source-level reason: `AUTH_REQUIRED · NOT_CONNECTED · TIMEOUT · RATE_LIMITED · CONNECTOR_UNAVAILABLE ·
+CONFIGURATION_REQUIRED · EXECUTION_FAILED · INTERRUPTED · CANCELLED`(+ 브라우저 source용 `DEVICE_OFFLINE · STORE_MISMATCH ·
+STORE_UNRESOLVED`, A에서는 생산자 0).
+
+### 21-3. 창 semantics (PD-2 고정)
+
+- 창 = **Asia/Seoul 짝수 정시에 정렬된 2시간** `[00:00,02:00) · [02:00,04:00) …` — `ResponsibilityWindows.slotStart(instant)`는
+  순간의 **순수 함수**다. Asia/Seoul에는 서머타임이 없어 모든 창이 정확히 2시간이다.
+- 창 W의 run은 **W가 시작할 때** due다 (창은 Reviewnary가 책임지는 시간대의 이름이고, 그 시작에 일을 시작한다).
+- **활성화:** 활성화 시각이 속한 창의 run 1회(`ACTIVATION`) + `next_run_at` = 그 창의 끝.
+- **재시작:** `next_run_at`은 DB에 있고 창은 시각의 함수라, 어떤 프로세스가 언제 떠도 같은 순간은 같은 창을 가리킨다.
+- **놓친 창:** scheduler가 창 전체에 걸쳐 돌지 않았으면 그 창은 `CANCELLED · MISSED`로 **기록된다** — 조용히 건너뛰지도,
+  늦게 「근무한 척」 채우지도 않는다. 수집은 incremental이라 다음 창의 run이 그 사이 들어온 것을 가져온다.
+
+### 21-4. Scheduling / claim 알고리즘
+
+`ResponsibilityScheduler`(기본 OFF, `sellerops.responsibility.scheduler-enabled`)가 30초마다 `ResponsibilityRunCoordinator.tick()`을
+부른다 — 30초는 **얼마나 자주 보는가**이지 근무 주기가 아니다.
+
+1. **Materialize** (한 트랜잭션): `status='ACTIVE' and next_run_at <= now` 책임을 `FOR UPDATE SKIP LOCKED` → 그 행을 잠근 채
+   `next_run_at`부터 now까지 창마다 run이 없으면 생성(끝난 창은 MISSED) → `next_run_at`을 다음 경계로. 판매자 동작
+   (activate/pause/resume/stop)도 같은 행을 `PESSIMISTIC_WRITE`로 잠그므로 pause와 창 생성은 경주하지 않는다.
+2. **Claim** (run 하나당 한 트랜잭션): `PENDING` · lease 만료 `RUNNING` · retry 시각이 온 `PARTIAL/FAILED`를 창 오래된 순으로
+   `FOR UPDATE SKIP LOCKED` → 책임이 ACTIVE가 아니면 은퇴 · 시작 전 창이 끝난 PENDING은 MISSED · 창이 끝난 retry는 retry 취소 ·
+   같은 책임의 살아 있는 RUNNING이 있으면 건너뜀 → `RUNNING`, `attempt+1`, `lease_owner`=이 인스턴스, `lease_until`=now+180s,
+   `saveAndFlush`. 두 인스턴스가 같은 책임의 서로 다른 run을 동시에 잡으면 **partial unique index가 둘째를 거절**하고 그
+   트랜잭션은 아무것도 바꾸지 않는다.
+3. **Execute:** heartbeat(30초)가 `lease_owner = me`일 때만 lease를 연장한다. source마다 먼저 책임이 여전히 ACTIVE인지 보고,
+   관측 행을 열고(completeness null), 기존 acquisition을 돌리고, 결과를 적는다. **run과 source에 대한 모든 쓰기는 lease 소유를
+   다시 확인한 뒤에만** 일어난다.
+
+**`SyncScheduleClaimer`를 재사용하지 않은 이유:** 그 claimer는 실행 전에 claim을 커밋하고 crash 시 그 회차를 잃는다고 스스로
+적는다(at-most-once). 책임 runtime에게 그것은 금지된 「조용한 skip」 그 자체다.
+
+### 21-5. Crash / retry semantics
+
+- **Crash:** holder가 죽으면 heartbeat가 멈추고 lease가 지나간 다음 tick이 **같은 run 행을 `attempt+1`로 회수**한다. 죽은
+  attempt가 열어 둔 관측은 그 attempt가 시작한 sync job(trigger `RESPONSIBILITY` · 계정 · 타입 · 관측 시작 이후)으로 판정한다:
+  끝났으면 **그 읽기를 채택**(다시 읽지 않는다), 아직 `RUNNING`이면 살아 있는 소유자가 없으므로 `SyncRunGate.failOrphan`으로 닫고
+  관측을 `NONE · INTERRUPTED`로 적은 뒤 새 attempt에서 다시 관측한다. `COMPLETE/BOUNDED`로 settled된 source는 **다시 수집하지
+  않는다**(R6).
+- **Fencing:** lease를 잃은 holder의 renew는 0행을 갱신하고 실행을 멈춘다; `finish`도 소유 확인에서 아무것도 쓰지 않는다.
+- **Retry:** `PARTIAL/FAILED`이고 settled되지 않은 source 중 하나라도 retryable(`TIMEOUT · RATE_LIMITED · EXECUTION_FAILED ·
+  INTERRUPTED`)이면 `next_attempt_at` = +10분(두 번째는 +30분), 최대 3 attempt, **창이 끝나기 전일 때만**. 같은 행, settled되지
+  않은 source만. `AUTH_REQUIRED · NOT_CONNECTED · CONNECTOR_UNAVAILABLE · CONFIGURATION_REQUIRED`는 창 안에서 다시 물어도 답이
+  바뀌지 않으므로 retry하지 않는다.
+- **Pause / stop:** 줄 선 `PENDING`은 `CANCELLED · RESPONSIBILITY_PAUSED/STOPPED`, 기다리던 retry는 취소, 실행 중인 holder는 다음
+  source 전에 스스로 멈춘다. **Resume**은 현재 창의 run이 pause로 취소됐으면 **같은 run을 다시 열고**, 없으면 `RESUME` run을 만든다.
+  멈춰 있던 동안의 창은 run이 아니다 — 그 시간에는 아무도 책임지지 않았다.
+
+### 21-6. 기존 acquisition 재사용 · 소유권
+
+| 기존 | 판정 | 무엇이 바뀌었나 |
+|---|---|---|
+| `SyncRunExecutor` | **WRAP** | 호출은 그대로(`execute(org, account, type, "RESPONSIBILITY")`). 반환하는 job 인스턴스에 **transient** `failureCode`·`insertedRows`를 싣는다(칼럼 0) |
+| `Cafe24ApiConnector` · token refresh · board reads · `IngestionService` dedup | **KEEP** | 무변경 |
+| `sync_jobs` · `sync_cursors` | **KEEP** | source 행이 `sync_job_id`를 가리키고 cursor 전후를 읽는다 |
+| `SyncRunGate` | **KEEP + EXTEND** | single-flight 그대로; `failOrphan(jobId)` — lease가 증명한 죽은 소유자의 job만 닫는다 |
+| `SyncScheduleRunner` | **EXTEND** | 소유된 source의 schedule을 **defer**(job 0) |
+| `SelfPilotReconciler` | **KEEP** | 여전히 schedule을 만든다; 실행 여부는 소유권이 정한다 |
+| `JdkCafe24HttpClient` | **EXTEND** | `HttpTimeoutException` → `ConnectorTimeoutException`(여전히 `IllegalStateException`) — 「응답이 늦었다」와 「거절했다」를 구분 |
+| `proactive_case` · `agent_runs` · ActionCandidate | **무접촉** | PD-3 전; `agent_runs`는 창 unique·source 행을 표현할 수 없어 쓰지 않았다 |
+
+**소유권 규칙 (source 하나에 주인 하나):** org의 책임이 `ACTIVE`인 동안, 그 책임의 required source(CUSTOMER_OPERATIONS_V1:
+그 org의 카페24 API 계정의 INQUIRY·REVIEW) 정기 수집은 **responsibility runtime의 것**이고 `SyncScheduleRunner`는 그 schedule을
+defer한다. 소유하지 않은 것 — 다른 데이터 타입(ORDER_SUMMARY·PRODUCT), 다른 채널, 책임이 PAUSED/STOPPED/없는 org — 은 기존
+schedule이 그대로 수집한다. 판매자의 「지금 동기화」는 막지 않는다: 같은 single-flight gate를 지나고, 그것과 마주친 run은 **그
+결과를 채택**한다(job을 기다려 읽음, 두 번째 수집 0).
+
+### 21-7. 완결성 계약 — 구현된 규칙
+
+| 관측 | completeness | observed | new | changed | reason |
+|---|---|---|---|---|---|
+| job SUCCESS | COMPLETE | 이번 읽기의 행 수 | inserted 행 | 내용이 바뀐 행 | — |
+| job SUCCESS, 새것 없음 | COMPLETE | 0 | 0 | 0 | — **「확인했고 새로 없음」** |
+| job PARTIAL (속도 제한·중간 오류) | PARTIAL | 이번 읽기의 행 수 | inserted | changed | RATE_LIMITED / TIMEOUT / EXECUTION_FAILED |
+| job FAILED, 행은 받았으나 저장 실패 | PARTIAL | 받은 행 수 | … | … | EXECUTION_FAILED |
+| job FAILED, 0행 | **NONE** | **null** | **null** | **null** | AUTH_REQUIRED / TIMEOUT / … |
+| executor page guard | BOUNDED | 이번 읽기의 행 수 | … | … | — |
+| 계정이 이미 재연결 필요 | NONE (호출 0) | null | null | null | AUTH_REQUIRED |
+| 계정 미연결 | NONE (호출 0) | null | null | null | NOT_CONNECTED |
+| 다른 trigger의 수집을 채택 | 그 job 기준 | 그 job의 행 수 | **null** | **null** | 그 job 기준 |
+
+- **new는 `success_rows`가 아니다.** ingest는 in-place update도 success로 세므로, 새로 들어온 것은 inserted id 수로만 말한다.
+  **changed**는 ingest가 내용 해시가 달라졌을 때만 update로 세는 것을 확인한 뒤에야 `success − inserted`로 쓴다(Cafe24 문의·
+  community article 모두 해시 비교 후 update). 이 runtime이 직접 돌리지 않은 job은 둘 다 **null**이다 — 측정하지 않은 숫자다.
+- **observed는 이번 읽기의 사실이다.** BOUNDED/PARTIAL의 observed=10은 「이 읽기에서 10」이지 「source 전체 10」이 아니다.
+- `SourceObservation`의 생성자와 V106 check 제약이 같은 규칙을 **두 번** 강제한다: 잘못된 관측은 만들어지는 자리에서, 그래도
+  새어 나오면 DB에서 실패한다.
+
+### 21-8. Deterministic tests · fault injection
+
+| 스위트 | 수 | 무엇 위에서 |
+|---|---|---|
+| `ResponsibilityWindowsTest` | 4 | 순수 — KST 경계 · 재시작 불변 · template source 둘 |
+| `SourceObservationContractTest` | 11 | 순수 — 완결성 매핑 · NONE에 count 거절 · run outcome 규칙 |
+| `ResponsibilityRuntimeTest` | 15 | H2(전용 DB) · **실제** `SyncRunExecutor`+`SyncRunGate`+ingest · Cafe24-coded scripted connector(timeout/auth/fail) · 테스트가 움직이는 clock |
+| `ResponsibilityPostgresProofIT` | 5 | disposable PostgreSQL(`sellerops_rr_proof`, Flyway V106) — 두 세션의 경주 |
+
+| 불변식 | 증명 |
+|---|---|
+| 같은 창 중복 run 0 | `theNextWindowRunsAtItsBoundary…andRepeatedTicksCreateNothing` · PG `concurrentTicksMaterializeEachWindowExactlyOnce`(8 스레드, 10개 놓친 창 + 열린 창 = 11행, 중복 0) |
+| 활성 overlap 0 | PG `concurrentClaimsAcrossInstancesLeaveExactlyOneRunningRun`(8 인스턴스 → RUNNING 1) · `theDatabaseRefusesASecondRunningRunOfOneResponsibility` |
+| concurrent claim 안전 | 위 둘 + PG `concurrentFirstActivations…`(8 스레드 → 책임 1 · initial run 1) |
+| crash 후 창 silent skip 금지 | `aCrashedHolderLosesTheRunToTheNextTick…` · `aCrashAfterTheReadFinishedAdoptsThatRead…` · `windowsThatPassedWhileNothingRanAreRecordedMissed…` · PG `anExpiredLeaseMovesTheSameRun…andTheOldHolderIsFenced` |
+| retry가 새 논리 작업을 만들지 않음 | `oneSourceFailingIsPartial_andTheRetryIsTheSameRun…`(행 1, attempt 2, REVIEW 재수집 0) |
+| 한 source 실패 + 한 성공 → PARTIAL | 같은 테스트 · contract `runOutcomeRule` |
+| 전부 실패 → FAILED | `everySourceFailingIsFailed_andAnAuthorizationFailureIsNeverAZero` |
+| AUTH/timeout을 성공한 0으로 표시 금지 | 같은 테스트 · contract `authFailure…`·`timeout…` · V106 check |
+| restart 후 next window 유지 | `aRestartedSchedulerKeepsTheSameNextWindow` |
+| PAUSED/STOPPED는 새 run 0 | `aPausedResponsibilityCreatesNoRun…` · `pausingBeforeTheQueuedRunStartsCancelsIt…` · `aStoppedResponsibilityCreatesNoRun…` |
+| 이중 수집 0 | `aCollectionAlreadyInFlightIsAdopted…` · `theCollectionSchedulerDefersSourcesAnActiveResponsibilityOwns` |
+
+전체: backend **4,190 tests · 0 failures** (skipped 34 — Postgres-gated IT 포함) · frontend **2,991 tests / 249 files** · `tsc` clean.
+**정직하게 적는다:** 첫 전체 실행은 **19 failures**였다 — 새 H2 테스트가 커밋한 CAFE24 채널·계정·수집 행이 공유 in-memory 테스트
+DB로 새어 다른 스위트의 unique·count 단언을 깼다. 제품 결함이 아니라 테스트 격리 결함이었고, 그 클래스에 전용 H2 URL을 주어
+닫았다(재실행 0 failures).
+
+### 21-9. 실제 scheduled proof — 전용 QA org
+
+**구성.** disposable DB `sellerops_rr_qa`(빈 볼륨 + Flyway 1→106) · backend jar = `a1ba4812`의 main 코드 · 포트 18080 · 제품 자신의
+`POST /api/auth/signup`으로 만든 org `997b87b2…`(Demo Org 아님, 외부 파일럿 판매자 아님) · 카페24는 **제품 자신의 OAuth**
+(`/api/connect/cafe24/start` → callback)로 연결 → `CONNECTED`, 봉인된 자격 1. responsibility scheduler ON, 나머지 백그라운드
+생산자 기본 OFF(ownership 증명 구간에서만 self-pilot ALLOW_LIST + collection scheduler ON).
+
+**카페24는 loopback stub이다.** `rrqa.cafe24api.com`을 backend JVM이 hosts 파일로 127.0.0.1에 풀고 stub의 self-signed 인증서를
+신뢰한다 — 제품 코드 변경 0, connector · token refresh(단일 사용 회전) · board 요청 · 파싱 · ingest는 전부 제품 코드다. stub은
+loopback 클라이언트만 받고, 동작(timeout·오류·새 글)을 창 사이에 파일로 바꾼다. **실제 카페24 READ가 아닌 이유:** READ 가능한
+mall은 Demo Org의 것 하나뿐이고, 같은 (app, mall)에 대한 두 번째 OAuth 승인이 기존 refresh token을 살려 두는지는 이 저장소에서
+증명할 수 없는 벤더 동작이며(`pilot_readiness_gate_v1.md`가 이미 product-owner 결정으로 올린 그 질문), 토큰을 두 org가 나누면 단일
+사용 회전이 깨지고, 마켓플레이스 READ에는 새 단일 사용 승인이 필요하다 ⇒ **§21-11에 남긴다.**
+
+**(a) 활성화 + 실행 중 `kill -9` (22:18–22:22 KST).**
+활성화 22:18:31 → 창 22:00 `ACTIVATION PENDING`, `next_run_at` 00:00. stub이 문의 읽기를 15초 붙잡은 사이 kill 직전 상태:
+run `RUNNING · attempt 1 · lease 유효`, INQUIRY 관측 `(open)`, sync job `RESPONSIBILITY · INQUIRY · RUNNING`. 22:18:59 `kill -9`.
+재기동 22:19:18(새 owner). 죽은 holder의 lease 22:21:55 만료 → **22:21:59 tick이 같은 run을 회수**:
+
+```
+run      22:00 | ACTIVATION | SUCCESS | attempt 2 | started 22:18:55 | finished 22:21:59
+source   attempt 1 | INQUIRY | NONE     | observed - | new - | changed - | INTERRUPTED | job 0f4a0daa
+source   attempt 2 | INQUIRY | COMPLETE | observed 3 | new 3 | changed 0 |             | job 67b44725
+source   attempt 2 | REVIEW  | COMPLETE | observed 4 | new 4 | changed 0 |             | job fc785db5
+sync_job 0f4a0daa  RESPONSIBILITY INQUIRY FAILED  「이 수집을 맡았던 실행이 중간에 멈춰 정리되었습니다.」
+duplicate checks: runs per window >1 = 0 · RUNNING now = 0 · NONE with a count = 0
+```
+backend ERROR 0 · WARN 0.
+
+**(b) 소유권 — 기존 scheduler와 함께 (22:25–22:27 KST).** 재기동(self-pilot ALLOW_LIST=QA org, collection scheduler ON):
+self-pilot이 schedule 셋(INQUIRY · REVIEW · ORDER_SUMMARY, 60분)을 만들었고, collection scheduler는 22:26:32에
+**INQUIRY · REVIEW 둘을 `deferred: the source is owned by an active responsibility`로 넘기고(job 0)** ORDER_SUMMARY만
+`SCHEDULED SUCCESS`로 수집했다. 이 재기동을 넘어 `next_run_at`은 **00:00 그대로**였다.
+
+**(c) 사람 trigger 없는 연속 scheduled run (2026-09-16 00:00 · 02:00 KST).** 활성화 이후 run API 호출 0 · 「Run Now」 0.
+창 사이에 바꾼 것은 **stub의 동작뿐**이다(QA orchestrator — backend를 호출하지 않는다): 00:00 전 새 문의 1건, 00:30에 문의
+게시판 timeout(25초 보류 > 클라이언트 20초), 02:00 run이 끝난 직후 복구. 도중 23:12에 호스트 메모리 압박으로 backend가
+**정상 종료**됐다가 23:13에 재기동됐다 — 실행 중인 run이 없던 때였고 `next_run_at` 00:00은 그대로였다(세 번째 재기동).
+
+```
+run   09-15 22:00 | ACTIVATION | SUCCESS | attempt 2 | 22:18:55 → 22:21:59          (a의 crash 회수)
+run   09-16 00:00 | SCHEDULED  | SUCCESS | attempt 1 | 00:00:27 → 00:00:28
+run   09-16 02:00 | SCHEDULED  | SUCCESS | attempt 2 | 02:00:02 → 02:10:51          (PARTIAL → 같은 run retry)
+
+00:00  INQUIRY a1 | COMPLETE | observed 4 | new 1 | changed 0 |          | job d22ce481 (success 1 · skipped 3)
+00:00  REVIEW  a1 | COMPLETE | observed 4 | new 0 | changed 0 |          | job c8ed9fa8 (skipped 4)   ← 정상 0
+02:00  INQUIRY a1 | NONE     | observed - | new - | changed - | TIMEOUT  | job d6c49342 「카페24 API 호출 시간이 초과되었습니다.」
+02:00  REVIEW  a1 | COMPLETE | observed 4 | new 0 | changed 0 |          | job 1bdd6ee1
+       → run PARTIAL · next_attempt_at 02:10:23 (+10분, 창 안)
+02:00  INQUIRY a2 | COMPLETE | observed 4 | new 0 | changed 0 |          | job 57c2941e
+       → 같은 run attempt 2 SUCCESS · REVIEW는 재수집 0 (02:00 REVIEW job은 1bdd6ee1 하나)
+
+responsibility next_run_at: 04:00 · runs per window >1: 0 · RUNNING now: 0 · NONE with a count: 0
+backend(23:13 이후) ERROR 0 · WARN 2 (둘 다 HikariPool 「Retrograde clock change detected」 — 호스트 시계, runtime 무관)
+```
+
+stub 요청 기록이 같은 이야기를 한다: 00:00:28 문의·리뷰 읽기 각 1회, 02:00:02 문의 읽기가 timeout으로 보류되는 동안 02:00:22
+리뷰 읽기 1회, 02:10:51 문의 읽기 1회 — **창마다 source당 한 번, retry는 실패한 source만.**
+
+| acceptance | 결과 |
+|---|---|
+| CUSTOMER_OPERATIONS_V1 ACTIVE | ✅ 22:18:31부터 |
+| 사람이 Run Now를 누르지 않음 | ✅ 활성화 1회 이후 run 관련 호출 0 (00:00·02:00 run의 trigger는 `SCHEDULED`) |
+| scheduler가 연속 2회 이상 실행 | ✅ 00:00 · 02:00 (+ 02:10 같은 run의 retry) |
+| Cafe24 Inquiry + Review source result 기록 | ✅ 창마다 두 source 행, sync job 연결 |
+| duplicate run 0 · overlap 0 | ✅ runs per window >1 = 0 · 동시 RUNNING 0 |
+| completeness 정직 · new=0이면 COMPLETE 0 | ✅ 00:00 REVIEW `COMPLETE · observed 4 · new 0` |
+| 실패 source를 0으로 위장하지 않음 | ✅ 02:00 INQUIRY `NONE · TIMEOUT · observed/new/changed null` |
+| WRITE 0 · model 0 · browser unattended 0 | ✅ stub 요청은 token·GET뿐 · 모델 capability 전부 OFF · 브라우저 source 없음 |
+
+### 21-10. 이 package가 증명하지 않은 것
+
+- **실제 카페24 mall에 대한 READ** — §21-9의 이유로 stub. 커넥터 경로는 제품 코드지만 벤더 응답은 아니다.
+- **서로 다른 호스트의 두 backend 인스턴스** — DB 수준의 경주는 PG IT가, 프로세스 교대(kill → 재기동)는 라이브가 증명했다;
+  동시에 떠 있는 두 프로세스의 scheduler는 실행하지 않았다.
+- **lease보다 오래 멈췄다 깨어난 holder**(예: 3분 넘는 GC 정지)는 회수된 뒤에도 진행 중이던 source 하나를 끝까지 수집할 수 있다 —
+  그 쓰기는 fencing으로 버려지지만, 그 사이 새 holder가 `failOrphan`한 sync job의 status를 옛 holder의 `finishJob`이 덮어쓸 수 있다.
+  run·source 기록의 정확성에는 영향이 없고 sync job 한 행의 status만 흔들린다.
+- 판매자 화면 · Case · 예외 알림 · 브라우저 source — 설계대로 B·C.
+
+### 21-11. 남은 PRODUCT_DECISION_NEEDED · Package B 진입
+
+| # | 결정 | 필요한 시점 |
+|---|---|---|
+| **NEW-A1** | 실제 카페24 READ proof를 어떤 mall·어떤 승인으로 할 것인가 (Demo Org 연결을 건드리지 않는 전용 QA mall 또는 명시적 운영 판단 + 단일 사용 manifest) | 파일럿 전 |
+| **NEW-A2** | activation 전제(카페24 미연결 org 409)와 그 문구 · 「고객 운영 관리」 화면 흐름 | B |
+| **PD-10 (잔여)** | 파일럿에서 책임 runtime을 켤 org 범위: allow-list vs CONNECTED_SELLERS — 지금은 판매자 수락이 유일한 게이트이고 scheduler 스위치는 배포 전역이다 | 파일럿 전 |
+| PD-3 · PD-4 · PD-5 · PD-6 | Case 저장소 · 초안 자동 준비 비용/payload · 조사 실행 위치 · 예외 알림 | **B 착수 전** |
+| PD-7 · PD-8 | Scheduled Aside surface · Cafe24 real write 대상 | C 착수 전 |
+
+**Package B 진입:** runtime 쪽 전제(창 · run · source 완결성 · crash 회수 · 소유권)는 닫혔고 B가 새로 요구하는 runtime 변경은 없다.
+B 착수를 막는 것은 **PD-3 · PD-4 · PD-5 · PD-6**이다.

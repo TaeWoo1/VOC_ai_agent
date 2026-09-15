@@ -110,7 +110,10 @@ SellerOps를 NAVER 단일 collector에서 **multi-commerce connector platform**�
 - **정직한 capability 표기**: "구조적으로 가능"과 "실제로 검증됨"을 절대 혼동하지 않는다(§6).
 
 **비목표 (이번 로드맵 범위 밖)**
-- 모든 채널의 무인(unattended) 자동 수집. export 경로는 사람 감독을 전제로 시작한다.
+- 모든 채널의 무인(unattended) **브라우저·export** 자동 수집(기본값 미승인). export 경로는 사람 감독을 전제로 시작한다.
+  *(2026-09-15 문구 좁힘. 원문: 「모든 채널의 무인(unattended) 자동 수집.」 공식 API의 정기 수집 —
+  Self-Pilot routine READ, Responsibility Runtime v1의 고정 창 실행 — 은 이 비목표가 아니었다.
+  기록: `docs/responsibility_runtime_v1.md` §20)*
 - 채널별 마케팅/광고/정산 데이터. 범위는 review/inquiry/order로 한정.
 - 실시간 스트리밍. 배치/cursor 기반 유지.
 

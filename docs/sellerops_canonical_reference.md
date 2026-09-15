@@ -356,7 +356,12 @@ All of the following are **human-driven / operator-supervised**, on the **dev se
 - **B5** — auto-relogin / Device Vault / credential autofill are **missing**. Do not advertise
   autofill.
 - **B7** — bridge pairing is production-ready on **macOS only**; Windows / Linux fail closed.
-- **No unattended or scheduled collection. No seller-facing release.**
+- **Unattended browser collection is not approved by default. No seller-facing release.**
+  *Wording narrowed 2026-09-15 (Responsibility Runtime v1). Original line: 「No unattended or scheduled
+  collection.」 In this section it recorded what the NAVER v1 **Action Window (browser) runtime** did not
+  prove; it never described official-API collection, which Self-Pilot Runtime v1 made routine on
+  2026-08-18 and Responsibility Runtime v1 schedules as fixed windows. Record of the correction:
+  `docs/responsibility_runtime_v1.md` §20.*
 
 ### 4.3 Epistemics worth preserving
 
@@ -471,7 +476,12 @@ partner access is verified. See §4.1 and §5.2.
 - **Browser Projection against a real marketplace** — §20 gate: marketplace terms-permissibility
   clarification **and** customer-PC security review. Projection stays a **non-default renderer**,
   production-runtime **unwired (State B)**, and is **never a v1 dependency**.
-- **Unattended / scheduled collection** — supervised only.
+- **Unattended browser collection** — not approved by default; supervised only (a person starts every
+  browser run). Opening it on a marketplace is its own capability gate.
+  *Narrowed 2026-09-15 from 「Unattended / scheduled collection — supervised only」. The fence sits among
+  browser-runtime deferrals (Projection, auto-relogin, Device Vault, managed runtime) and held browser runs;
+  scheduled official-API collection (Self-Pilot routine READ, Responsibility Runtime runs) is not a browser
+  run and was never what it held. Record: `docs/responsibility_runtime_v1.md` §20.*
 - **Auto-relogin, Device Vault, credential autofill** — deferred.
 - **Windows / cloud managed runtime** — macOS pilot only.
 
