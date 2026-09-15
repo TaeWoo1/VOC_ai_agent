@@ -165,6 +165,7 @@ import {
   mockVocItemTriage,
 } from "./mocks";
 import { visibleChannels } from "./productChannels";
+import type { CustomerOperationsHome, ResponsibilityView } from "./customerOperationsTypes";
 import { captureApiError } from "./telemetry/sentry";
 
 // Default to a SAME-ORIGIN relative base ("") so `/api/*` requests go through the Vite dev proxy (see
@@ -1807,6 +1808,36 @@ export const api = {
    */
   async getOperationsHomeStrict(): Promise<OperationsHome> {
     const { data } = await http.get<OperationsHome>("/api/operations/home");
+    return data;
+  },
+
+  /**
+   * 「고객 운영 관리」 (Responsibility Runtime v1) — the job, its recent checks, and whether this organisation may take
+   * it on at all. Never mocked: a fixture here would claim a job is running for a seller who never delegated one.
+   */
+  async getCustomerOperations(): Promise<ResponsibilityView> {
+    const { data } = await http.get<ResponsibilityView>("/api/responsibilities/customer-operations");
+    return data;
+  },
+  async activateCustomerOperations(): Promise<ResponsibilityView> {
+    const { data } = await http.post<ResponsibilityView>("/api/responsibilities/customer-operations/activate");
+    return data;
+  },
+  async pauseCustomerOperations(): Promise<ResponsibilityView> {
+    const { data } = await http.post<ResponsibilityView>("/api/responsibilities/customer-operations/pause");
+    return data;
+  },
+  async resumeCustomerOperations(): Promise<ResponsibilityView> {
+    const { data } = await http.post<ResponsibilityView>("/api/responsibilities/customer-operations/resume");
+    return data;
+  },
+  async stopCustomerOperations(): Promise<ResponsibilityView> {
+    const { data } = await http.post<ResponsibilityView>("/api/responsibilities/customer-operations/stop");
+    return data;
+  },
+  /** The Home's three exception areas. A failed read draws nothing — never a clear morning. */
+  async getCustomerOperationsHome(): Promise<CustomerOperationsHome> {
+    const { data } = await http.get<CustomerOperationsHome>("/api/responsibilities/customer-operations/home");
     return data;
   },
 

@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -87,6 +88,8 @@ public class ResponsibilityRunCoordinator {
     private final Clock clock;
     private final Duration lease;
     private final Duration heartbeat;
+    private final ResponsibilityRollout rollout;
+    private final ResponsibilityRunFollowUp followUp;
     private final String owner = "rr-" + UUID.randomUUID();
     private volatile ScheduledExecutorService heartbeatPool;
 
@@ -95,17 +98,36 @@ public class ResponsibilityRunCoordinator {
                                         ResponsibilityRunSourceRepository sourceRows, ResponsibilitySources sources,
                                         ResponsibilitySourceObserver observer, SyncRunGate runGate,
                                         SellerAccountRepository accounts, PlatformTransactionManager txManager,
+                                        ResponsibilityRollout rollout,
+                                        ObjectProvider<ResponsibilityRunFollowUp> followUps,
                                         @Value("${sellerops.responsibility.lease-seconds:180}") long leaseSeconds,
                                         @Value("${sellerops.responsibility.heartbeat-seconds:30}") long heartbeatSeconds) {
         this(responsibilities, runs, sourceRows, sources, observer, runGate, accounts, txManager, Clock.systemUTC(),
-                Duration.ofSeconds(leaseSeconds), Duration.ofSeconds(heartbeatSeconds));
+                Duration.ofSeconds(leaseSeconds), Duration.ofSeconds(heartbeatSeconds), rollout,
+                followUps.getIfAvailable());
     }
 
+    /** Package A wiring: no rollout gate and no follow-up — every ACTIVE responsibility is worked, nothing else. */
     public ResponsibilityRunCoordinator(ResponsibilityRepository responsibilities, ResponsibilityRunRepository runs,
                                         ResponsibilityRunSourceRepository sourceRows, ResponsibilitySources sources,
                                         ResponsibilitySourceObserver observer, SyncRunGate runGate,
                                         SellerAccountRepository accounts, PlatformTransactionManager txManager,
                                         Clock clock, Duration lease, Duration heartbeat) {
+        this(responsibilities, runs, sourceRows, sources, observer, runGate, accounts, txManager, clock, lease,
+                heartbeat, null, null);
+    }
+
+    /**
+     * @param rollout  which organisations this deployment runs the job for; {@code null} only in test wiring that
+     *                 predates the rollout gate (production always injects the component, and blank means nobody)
+     * @param followUp what the observation means (Package B cases); {@code null} = observation only
+     */
+    public ResponsibilityRunCoordinator(ResponsibilityRepository responsibilities, ResponsibilityRunRepository runs,
+                                        ResponsibilityRunSourceRepository sourceRows, ResponsibilitySources sources,
+                                        ResponsibilitySourceObserver observer, SyncRunGate runGate,
+                                        SellerAccountRepository accounts, PlatformTransactionManager txManager,
+                                        Clock clock, Duration lease, Duration heartbeat,
+                                        ResponsibilityRollout rollout, ResponsibilityRunFollowUp followUp) {
         if (lease.isNegative() || lease.isZero()) {
             throw new IllegalStateException("sellerops.responsibility.lease-seconds는 1 이상이어야 합니다.");
         }
@@ -124,6 +146,8 @@ public class ResponsibilityRunCoordinator {
         this.clock = clock;
         this.lease = lease;
         this.heartbeat = heartbeat;
+        this.rollout = rollout;
+        this.followUp = followUp;
     }
 
     public String owner() {
@@ -165,6 +189,11 @@ public class ResponsibilityRunCoordinator {
             int created = 0;
             int missed = 0;
             for (Responsibility r : responsibilities.lockDueActive(now, CLAIM_SCAN)) {
+                if (!rolledOutFor(r.getOrgId())) {
+                    // Seller accepted, deployment has not opened the runtime for them: no window is worked and none
+                    // is written. The schedule is left where it is.
+                    continue;
+                }
                 Instant window = ResponsibilityWindows.slotStart(r.getNextRunAt());
                 int steps = 0;
                 while (!window.isAfter(now) && steps++ < MAX_WINDOWS_PER_RESPONSIBILITY_PER_TICK) {
@@ -198,7 +227,7 @@ public class ResponsibilityRunCoordinator {
                     continue;
                 }
                 Responsibility responsibility = responsibilities.findById(run.getResponsibilityId()).orElse(null);
-                if (responsibility == null) {
+                if (responsibility == null || !rolledOutFor(run.getOrgId())) {
                     continue;
                 }
                 if (responsibility.getStatus() != ResponsibilityStatus.ACTIVE) {
@@ -276,7 +305,23 @@ public class ResponsibilityRunCoordinator {
                     return;
                 }
             }
+            if (followUp != null && !beat.lost()) {
+                try {
+                    // While the lease is held: a crash here is reclaimed like any other and this is called again.
+                    followUp.afterObservation(runId, beat::lost);
+                } catch (RuntimeException e) {
+                    // What the observation means must never change what was observed.
+                    log.warn("responsibility: run {} 후속 처리 실패 {}", runId, e.getClass().getSimpleName());
+                }
+            }
             finish(runId, null, required);
+            if (followUp != null) {
+                try {
+                    followUp.afterFinish(runId);
+                } catch (RuntimeException e) {
+                    log.warn("responsibility: run {} 종료 후 처리 실패 {}", runId, e.getClass().getSimpleName());
+                }
+            }
         } catch (RuntimeException e) {
             log.warn("responsibility: run {} 실행 중 예외 {}", runId, e.getClass().getSimpleName());
             try {
@@ -410,7 +455,12 @@ public class ResponsibilityRunCoordinator {
         });
     }
 
-    static Map<String, ResponsibilityRunSource> latestPerSource(List<ResponsibilityRunSource> rows) {
+    private boolean rolledOutFor(UUID orgId) {
+        return rollout == null || rollout.allows(orgId);
+    }
+
+    /** The latest attempt's row per (account, data type) — the run's current observation fact per source. */
+    public static Map<String, ResponsibilityRunSource> latestPerSource(List<ResponsibilityRunSource> rows) {
         Map<String, ResponsibilityRunSource> latest = new LinkedHashMap<>();
         for (ResponsibilityRunSource row : rows) {
             ResponsibilityRunSource seen = latest.get(row.sourceKey());

@@ -15,13 +15,19 @@ import java.util.UUID;
  *
  * <p>Counts are nullable on purpose: a source with {@code completeness = NONE} has {@code observedCount = null},
  * and a reader must not render that as 0.
+ *
+ * <p>{@code available}: this deployment runs the job for this organisation (rollout). {@code eligible}: at least one
+ * required source is on a connected account — without one the job cannot start (NO_ELIGIBLE_SOURCE).
  */
 public record ResponsibilityView(
         String templateCode,
         String displayName,
+        boolean available,
+        boolean eligible,
         String status,
         int cadenceMinutes,
         String timezone,
+        List<String> sourcesInScope,
         Instant nextRunAt,
         Instant activatedAt,
         Instant pausedAt,
@@ -64,23 +70,30 @@ public record ResponsibilityView(
             UUID syncJobId) {
     }
 
-    public static ResponsibilityView notActivated(ResponsibilityTemplate template) {
-        return new ResponsibilityView(template.name(), template.displayName(), null, windowMinutes(),
-                ResponsibilityWindows.ZONE.getId(), null, null, null, null, List.of());
+    public static ResponsibilityView notActivated(ResponsibilityTemplate template, boolean available,
+                                                  boolean eligible) {
+        return new ResponsibilityView(template.name(), template.displayName(), available, eligible, null,
+                windowMinutes(), ResponsibilityWindows.ZONE.getId(), scope(template), null, null, null, null,
+                List.of());
     }
 
     public static ResponsibilityView of(ResponsibilityTemplate template, Responsibility r,
                                         List<ResponsibilityRun> runs,
-                                        Map<UUID, List<ResponsibilityRunSource>> sourcesByRun) {
+                                        Map<UUID, List<ResponsibilityRunSource>> sourcesByRun,
+                                        boolean available, boolean eligible) {
         List<RunView> views = runs.stream().map(run -> new RunView(
                 run.getId(), run.getWindowStart(), run.getWindowEnd(), run.getRunTrigger().name(),
                 run.getStatus().name(), run.getAttempt(), run.getStartedAt(), run.getFinishedAt(),
                 run.getFailureReason() == null ? null : run.getFailureReason().name(), run.getNextAttemptAt(),
                 sourcesByRun.getOrDefault(run.getId(), List.of()).stream().map(ResponsibilityView::source).toList()))
                 .toList();
-        return new ResponsibilityView(template.name(), template.displayName(), r.getStatus().name(),
-                windowMinutes(), ResponsibilityWindows.ZONE.getId(), r.getNextRunAt(), r.getActivatedAt(),
-                r.getPausedAt(), r.getStoppedAt(), views);
+        return new ResponsibilityView(template.name(), template.displayName(), available, eligible,
+                r.getStatus().name(), windowMinutes(), ResponsibilityWindows.ZONE.getId(), scope(template),
+                r.getNextRunAt(), r.getActivatedAt(), r.getPausedAt(), r.getStoppedAt(), views);
+    }
+
+    private static List<String> scope(ResponsibilityTemplate template) {
+        return template.sources().stream().map(s -> s.channelCode() + ":" + s.dataType().name()).toList();
     }
 
     private static SourceView source(ResponsibilityRunSource s) {

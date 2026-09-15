@@ -1,6 +1,8 @@
 package com.sellerops.proactive;
 
+import com.sellerops.responsibility.ResponsibilitySourceOwnership;
 import com.sellerops.selfpilot.SelfPilotProperties;
+import org.springframework.beans.factory.ObjectProvider;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -38,12 +40,23 @@ public class ProactiveScheduler {
     private final ProactiveCaseReconciler reconciler;
     private final ProactiveProperties properties;
     private final SelfPilotProperties selfPilot;
+    private final ResponsibilitySourceOwnership ownership;
 
     public ProactiveScheduler(ProactiveCaseReconciler reconciler, ProactiveProperties properties,
-                              SelfPilotProperties selfPilot) {
+                              SelfPilotProperties selfPilot,
+                              ObjectProvider<ResponsibilitySourceOwnership> ownership) {
         this.reconciler = reconciler;
         this.properties = properties;
         this.selfPilot = selfPilot;
+        this.ownership = ownership.getIfAvailable();
+    }
+
+    /**
+     * An organisation that delegated 「고객 운영 관리」 is the responsibility's to investigate. Two loops preparing the
+     * same inquiry would spend the seller's budget twice and race for the one open card per subject.
+     */
+    private boolean notDelegated(UUID orgId) {
+        return ownership == null || !ownership.ownsCustomerWork(orgId);
     }
 
     @Scheduled(fixedDelayString = "${sellerops.proactive.interval-ms:600000}",
@@ -74,6 +87,6 @@ public class ProactiveScheduler {
      * loop running for someone else's shop.
      */
     private List<UUID> targetOrgs() {
-        return properties.orgIds().stream().filter(selfPilot::isEnabledFor).toList();
+        return properties.orgIds().stream().filter(selfPilot::isEnabledFor).filter(this::notDelegated).toList();
     }
 }

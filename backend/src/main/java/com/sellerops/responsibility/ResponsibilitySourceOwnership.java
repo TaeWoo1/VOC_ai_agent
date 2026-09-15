@@ -35,6 +35,16 @@ public class ResponsibilitySourceOwnership {
         this.channels = channels;
     }
 
+    /**
+     * Whether this organisation has delegated customer work to a responsibility. While it has, the Proactive Operations
+     * Agent yields the organisation: the same inquiries and reviews must not be investigated by two loops, and the one
+     * open card per subject belongs to the responsibility's case.
+     */
+    public boolean ownsCustomerWork(UUID orgId) {
+        return orgId != null && responsibilities.existsByOrgIdAndTemplateCodeAndStatus(orgId,
+                ResponsibilityTemplate.CUSTOMER_OPERATIONS_V1, ResponsibilityStatus.ACTIVE);
+    }
+
     public boolean ownsScheduledCollection(UUID orgId, UUID sellerAccountId, String dataTypeName) {
         DataType dataType;
         try {

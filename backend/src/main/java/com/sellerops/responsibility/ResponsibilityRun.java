@@ -71,6 +71,16 @@ public class ResponsibilityRun extends BaseEntity {
     @Column(name = "failure_reason", length = 40)
     private RunFailureReason failureReason;
 
+    /**
+     * What happened to this run's exception summary (V107): NONE_NEEDED · SENT · UNDELIVERABLE · FAILED. Null until
+     * the run is final and the summary is decided; once set, the run is never summarised again.
+     */
+    @Column(name = "notification_state", length = 16)
+    private String notificationState;
+
+    @Column(name = "notified_at")
+    private Instant notifiedAt;
+
     static ResponsibilityRun materialized(Responsibility responsibility, Instant windowStart, RunTrigger trigger) {
         ResponsibilityRun run = new ResponsibilityRun();
         run.setOrgId(responsibility.getOrgId());

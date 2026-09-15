@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.SQLRestriction;
 
 /**
  * One thing SellerOps looked into before the seller asked.
@@ -29,13 +30,18 @@ import lombok.Setter;
 @Setter
 @Entity
 @Table(name = "proactive_case")
+// Responsibility Runtime v1 Package B stores its OperationsCase rows in this same table (PD-3). This loop reads, counts
+// and reconciles only its own half — a row a responsibility owns is never a proactive card, never superseded here,
+// and never counted in this loop's telemetry. The columns the two mappings share are pinned to varchar (what V75 created)
+// so a schema generated from both entities cannot narrow one half's tokens to the other half's enum.
+@SQLRestriction("responsibility_id is null")
 public class ProactiveCase extends BaseEntity {
 
     @Column(name = "org_id", nullable = false)
     private UUID orgId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "subject_kind", nullable = false, length = 16)
+    @Column(name = "subject_kind", nullable = false, length = 16, columnDefinition = "varchar(16)")
     private ProactiveSubjectKind subjectKind;
 
     /** The {@code inquiries.id} or {@code reviews.id} this case is about — {@link #subjectKind} says which. */
@@ -68,15 +74,15 @@ public class ProactiveCase extends BaseEntity {
     private String sourceState;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 16)
+    @Column(name = "status", nullable = false, length = 16, columnDefinition = "varchar(16)")
     private ProactiveCaseStatus status;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "priority", nullable = false, length = 16)
+    @Column(name = "priority", nullable = false, length = 16, columnDefinition = "varchar(16)")
     private ProactivePriority priority;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "reason", nullable = false, length = 48)
+    @Column(name = "reason", nullable = false, length = 48, columnDefinition = "varchar(48)")
     private ProactiveReason reason;
 
     @Column(name = "reason_note", nullable = false, columnDefinition = "text")
@@ -94,7 +100,7 @@ public class ProactiveCase extends BaseEntity {
     private String knowledgeGap;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "prepared_action", nullable = false, length = 32)
+    @Column(name = "prepared_action", nullable = false, length = 32, columnDefinition = "varchar(32)")
     private ProactivePreparedAction preparedAction;
 
     /** The version of {@code inquiry_reply_draft} this preparation produced, when it produced one. */
@@ -121,6 +127,6 @@ public class ProactiveCase extends BaseEntity {
     private Instant closedAt;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "close_reason", length = 32)
+    @Column(name = "close_reason", length = 32, columnDefinition = "varchar(32)")
     private ProactiveCloseReason closeReason;
 }

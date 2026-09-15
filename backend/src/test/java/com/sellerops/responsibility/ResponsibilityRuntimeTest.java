@@ -47,6 +47,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
+import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -506,6 +508,78 @@ class ResponsibilityRuntimeTest {
         schedules.save(s);
         List<SyncJob> afterPause = runner.runDueSchedules(now, 20);
         assertThat(afterPause).extracting(SyncJob::getDataType).containsExactly("INQUIRY");
+    }
+
+    // ── Package B: eligibility, rollout, follow-up ──────────────────────────────────────────────────────────
+
+    @Test
+    void activationNeedsAConnectedSource() {
+        account.setConnectionStatus(ChannelStatus.RECONNECT_REQUIRED);
+        sellerAccounts.save(account);
+        assertThatThrownBy(() -> service.activate(org, user)).isInstanceOfSatisfying(ApiException.class,
+                e -> assertThat(e.getCode()).isEqualTo("NO_ELIGIBLE_SOURCE"));
+        assertThat(responsibilities.findByOrgIdAndTemplateCode(org, ResponsibilityTemplate.CUSTOMER_OPERATIONS_V1))
+                .isEmpty();
+        assertThat(service.view(org).eligible()).isFalse();
+    }
+
+    @Test
+    void theRolloutGateRefusesActivationAndWorksNoWindowForAnOrganisationItDoesNotName() {
+        ResponsibilityService gated = new ResponsibilityService(responsibilities, runs, sourceRows, sources, txManager,
+                clock, ResponsibilityRollout.of(List.of()), null);
+        assertThatThrownBy(() -> gated.activate(org, user)).isInstanceOfSatisfying(ApiException.class,
+                e -> assertThat(e.getCode()).isEqualTo("RESPONSIBILITY_NOT_AVAILABLE"));
+        assertThat(gated.view(org).available()).isFalse();
+
+        service.activate(org, user); // the seller accepted while the organisation was rolled out
+        ResponsibilityRunCoordinator closed = new ResponsibilityRunCoordinator(responsibilities, runs, sourceRows,
+                sources, observer, gate, sellerAccounts, txManager, clock, LEASE, Duration.ZERO,
+                ResponsibilityRollout.of(List.of()), null);
+        closed.tick();
+        assertThat(runsOf().get(0).getStatus()).isEqualTo(RunStatus.PENDING);
+        assertThat(jobsFor(DataType.INQUIRY)).isEmpty();
+
+        clock.set(W22.plusSeconds(5));
+        closed.tick();
+        assertThat(runsOf()).as("no window is materialized while the deployment has not opened it").hasSize(1);
+
+        clock.set(BASE);
+        new ResponsibilityRunCoordinator(responsibilities, runs, sourceRows, sources, observer, gate, sellerAccounts,
+                txManager, clock, LEASE, Duration.ZERO, ResponsibilityRollout.of(List.of(org)), null).tick();
+        assertThat(runsOf().get(0).getStatus()).isEqualTo(RunStatus.SUCCESS);
+    }
+
+    @Test
+    void theFollowUpRunsWhileTheLeaseIsHeld_thenOnceTheRunIsFinal_andAStopIsHandedOn() {
+        List<String> seen = new ArrayList<>();
+        ResponsibilityRunFollowUp recorder = new ResponsibilityRunFollowUp() {
+            @Override
+            public void afterObservation(UUID runId, BooleanSupplier leaseLost) {
+                ResponsibilityRun run = runs.findById(runId).orElseThrow();
+                seen.add("observation:" + run.getStatus() + ":" + leaseLost.getAsBoolean()
+                        + ":" + sourceRows.findByRunIdOrderByAttemptAscCreatedAtAsc(runId).size());
+            }
+
+            @Override
+            public void afterFinish(UUID runId) {
+                seen.add("finish:" + runs.findById(runId).orElseThrow().getStatus());
+            }
+
+            @Override
+            public void afterStopped(UUID orgId, UUID responsibilityId) {
+                seen.add("stopped");
+            }
+        };
+        ResponsibilityRollout rollout = ResponsibilityRollout.of(List.of(org));
+        ResponsibilityService withFollowUp = new ResponsibilityService(responsibilities, runs, sourceRows, sources,
+                txManager, clock, rollout, recorder);
+        withFollowUp.activate(org, user);
+        new ResponsibilityRunCoordinator(responsibilities, runs, sourceRows, sources, observer, gate, sellerAccounts,
+                txManager, clock, LEASE, Duration.ZERO, rollout, recorder).tick();
+
+        assertThat(seen).containsExactly("observation:RUNNING:false:2", "finish:SUCCESS");
+        withFollowUp.stop(org);
+        assertThat(seen).last().isEqualTo("stopped");
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────

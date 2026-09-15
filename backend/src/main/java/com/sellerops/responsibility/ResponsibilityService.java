@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import com.sellerops.channel.ChannelStatus;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -43,29 +45,56 @@ public class ResponsibilityService {
     private final ResponsibilitySources sources;
     private final TransactionTemplate tx;
     private final Clock clock;
+    private final ResponsibilityRollout rollout;
+    private final ResponsibilityRunFollowUp followUp;
 
     @Autowired
     public ResponsibilityService(ResponsibilityRepository responsibilities, ResponsibilityRunRepository runs,
                                  ResponsibilityRunSourceRepository sourceRows, ResponsibilitySources sources,
-                                 PlatformTransactionManager txManager) {
-        this(responsibilities, runs, sourceRows, sources, txManager, Clock.systemUTC());
+                                 PlatformTransactionManager txManager, ResponsibilityRollout rollout,
+                                 ObjectProvider<ResponsibilityRunFollowUp> followUps) {
+        this(responsibilities, runs, sourceRows, sources, txManager, Clock.systemUTC(), rollout,
+                followUps.getIfAvailable());
+    }
+
+    /** Package A wiring: no rollout gate, no case follow-up. */
+    public ResponsibilityService(ResponsibilityRepository responsibilities, ResponsibilityRunRepository runs,
+                                 ResponsibilityRunSourceRepository sourceRows, ResponsibilitySources sources,
+                                 PlatformTransactionManager txManager, Clock clock) {
+        this(responsibilities, runs, sourceRows, sources, txManager, clock, null, null);
     }
 
     public ResponsibilityService(ResponsibilityRepository responsibilities, ResponsibilityRunRepository runs,
                                  ResponsibilityRunSourceRepository sourceRows, ResponsibilitySources sources,
-                                 PlatformTransactionManager txManager, Clock clock) {
+                                 PlatformTransactionManager txManager, Clock clock, ResponsibilityRollout rollout,
+                                 ResponsibilityRunFollowUp followUp) {
         this.responsibilities = responsibilities;
         this.runs = runs;
         this.sourceRows = sourceRows;
         this.sources = sources;
         this.tx = new TransactionTemplate(txManager);
         this.clock = clock;
+        this.rollout = rollout;
+        this.followUp = followUp;
+    }
+
+    /** Whether this deployment runs the job for this organisation at all (rollout, Package B §1-2). */
+    public boolean availableFor(UUID orgId) {
+        return rollout == null || rollout.allows(orgId);
+    }
+
+    /** At least one required source is on a CONNECTED account — the activation precondition (Package B §1-1). */
+    public boolean eligible(UUID orgId) {
+        return sources.resolve(orgId, TEMPLATE).stream()
+                .anyMatch(s -> s.account().getConnectionStatus() == ChannelStatus.CONNECTED);
     }
 
     public ResponsibilityView view(UUID orgId) {
         Optional<Responsibility> found = responsibilities.findByOrgIdAndTemplateCode(orgId, TEMPLATE);
+        boolean available = availableFor(orgId);
+        boolean eligible = eligible(orgId);
         if (found.isEmpty()) {
-            return ResponsibilityView.notActivated(TEMPLATE);
+            return ResponsibilityView.notActivated(TEMPLATE, available, eligible);
         }
         Responsibility r = found.get();
         List<ResponsibilityRun> recent = runs.findTop20ByResponsibilityIdOrderByWindowStartDesc(r.getId());
@@ -73,15 +102,22 @@ public class ResponsibilityService {
                 : sourceRows.findByRunIdInOrderByAttemptAscCreatedAtAsc(
                                 recent.stream().map(ResponsibilityRun::getId).toList())
                         .stream().collect(Collectors.groupingBy(ResponsibilityRunSource::getRunId));
-        return ResponsibilityView.of(TEMPLATE, r, recent, byRun);
+        return ResponsibilityView.of(TEMPLATE, r, recent, byRun, available, eligible);
     }
 
     public ResponsibilityView activate(UUID orgId, UUID userId) {
         Instant now = now();
         try {
             tx.executeWithoutResult(status -> {
-                if (sources.resolve(orgId, TEMPLATE).isEmpty()) {
-                    throw ApiException.conflict("카페24를 먼저 연결해 주세요. 고객 운영 관리는 카페24 문의와 리뷰를 확인합니다.");
+                if (!availableFor(orgId)) {
+                    // Not opened for this organisation by the deployment. The screen does not offer activation then;
+                    // this is the fail-closed answer for a caller that asks anyway.
+                    throw ApiException.conflict("RESPONSIBILITY_NOT_AVAILABLE",
+                            "이 계정에서는 아직 고객 운영 관리를 시작할 수 없습니다.");
+                }
+                if (!eligible(orgId)) {
+                    throw ApiException.conflict("NO_ELIGIBLE_SOURCE",
+                            "고객 운영 관리를 시작하려면 Cafe24를 먼저 연결해 주세요.");
                 }
                 Responsibility r = responsibilities.findForUpdate(orgId, TEMPLATE).orElse(null);
                 RunTrigger trigger = RunTrigger.ACTIVATION;
@@ -132,11 +168,15 @@ public class ResponsibilityService {
 
     private ResponsibilityView handBack(UUID orgId, ResponsibilityStatus target) {
         Instant now = now();
+        UUID[] stopped = new UUID[1];
         tx.executeWithoutResult(status -> {
             Responsibility r = responsibilities.findForUpdate(orgId, TEMPLATE)
                     .orElseThrow(() -> ApiException.notFound("맡긴 고객 운영 관리가 없습니다."));
             if (r.getStatus() == target || r.getStatus() == ResponsibilityStatus.STOPPED) {
                 return;
+            }
+            if (target == ResponsibilityStatus.STOPPED) {
+                stopped[0] = r.getId();
             }
             r.setStatus(target);
             r.setNextRunAt(null);
@@ -160,6 +200,15 @@ public class ResponsibilityService {
             }
             // A RUNNING run is left to its holder, which checks the status before each source and cancels itself.
         });
+        if (stopped[0] != null && followUp != null) {
+            try {
+                followUp.afterStopped(orgId, stopped[0]);
+            } catch (RuntimeException e) {
+                // The stop itself is committed; open cases are closed again by nothing else, so say so in the log.
+                org.slf4j.LoggerFactory.getLogger(ResponsibilityService.class)
+                        .warn("responsibility: 중지 후 case 정리 실패 org={} {}", orgId, e.getClass().getSimpleName());
+            }
+        }
         return view(orgId);
     }
 

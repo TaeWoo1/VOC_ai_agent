@@ -7,4 +7,4 @@ package com.sellerops.agent.quota;
  * model once, on the seller's behalf, exactly as a plan does. The column is {@code varchar(16)} and
  * nothing switches exhaustively over this enum, so the value is the whole change.
  */
-public enum AgentUsageKind { PLAN, JUDGE, DRAFT, CONVERSE }
+public enum AgentUsageKind { PLAN, JUDGE, DRAFT, CONVERSE, INVESTIGATE }

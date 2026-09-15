@@ -16,6 +16,7 @@ import { previewText } from "../../lib/plainText";
 import { matchCommandIntent, INTENT_HEADING } from "../../lib/commandIntents";
 import { INQUIRY_NEEDS_REPLY_PATH } from "../../lib/todayInbox";
 import { OperationsAreas } from "../../components/home/OperationsAreas";
+import { CustomerOperationsHomeBlock } from "../../components/customerOperations/CustomerOperationsHomeBlock";
 import { hasAnythingToShow } from "../../lib/operationsHome";
 import type { InquiryListArtifact, InquiryListArtifact as InquiryList, ListArtifact } from "../../lib/conversation/types";
 import type { InquiryQueueResponse, MetricKpi, OperationsHome, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
@@ -290,6 +291,13 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
         product they have not started using, and an area rendering 0 from a failed read would be
         reporting a clear morning on the strength of an error.
       */}
+      {/*
+        Responsibility Runtime v1 — 「고객 운영 관리」, first among the areas because it is the job the seller handed
+        over: what needs their decision, what Reviewnary settled or prepared, and where it could not look. It reads its
+        own endpoint and draws nothing when that read fails, when the deployment has not opened the job for this
+        organisation, or before the first connection (the first-use briefing above owns that morning).
+      */}
+      {!beforeFirstConnection ? <CustomerOperationsHomeBlock now={now} /> : null}
       {home && !beforeFirstConnection
         && hasAnythingToShow(home.reviews, home.problems, home.prepared, home.collection) ? (
         <div className="pt-2">

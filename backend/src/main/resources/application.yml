@@ -396,6 +396,22 @@ sellerops:
     heartbeat-seconds: ${SELLEROPS_RESPONSIBILITY_HEARTBEAT_SECONDS:30}
     # How long a run waits for a collection another trigger already has in flight before recording TIMEOUT.
     adopt-wait-seconds: ${SELLEROPS_RESPONSIBILITY_ADOPT_WAIT_SECONDS:900}
+    # Package B rollout. A window is worked only for an organisation named here AND whose responsibility is ACTIVE —
+    # seller acceptance alone opens nothing. Explicit organisation UUIDs, comma-separated; blank = nobody; no wildcard.
+    runtime-org-ids: ${RESPONSIBILITY_RUNTIME_ORG_IDS:}
+    # The case investigator (Package B §4): the eleventh LLM capability. Its payload is one REDACTED customer inquiry
+    # or review plus closed facts and short excerpts of the seller's own knowledge. Off three ways, never widened by
+    # the Agent access policy, and reached only for a case the deterministic rules could not settle.
+    investigation:
+      enabled: ${SELLEROPS_RESPONSIBILITY_INVESTIGATION_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_RESPONSIBILITY_INVESTIGATION_ORG_IDS:}
+      vendor: ${SELLEROPS_RESPONSIBILITY_INVESTIGATION_VENDOR:OPENAI}
+      model: ${SELLEROPS_RESPONSIBILITY_INVESTIGATION_MODEL:gpt-5-2025-08-07}
+      api-key: ${SELLEROPS_RESPONSIBILITY_INVESTIGATION_API_KEY:}
+      max-output-tokens: ${SELLEROPS_RESPONSIBILITY_INVESTIGATION_MAX_OUTPUT_TOKENS:2500}
+      reasoning-effort: ${SELLEROPS_RESPONSIBILITY_INVESTIGATION_REASONING_EFFORT:low}
+      # At most this many investigations per run; further candidates wait for the next run with nothing written.
+      max-per-run: ${SELLEROPS_RESPONSIBILITY_INVESTIGATION_MAX_PER_RUN:5}
   collect:
     # Scheduled collection poller (Phase 3B Slice 4). Off by default — nothing
     # polls until ops flips this; the file-upload path is unaffected either way.
