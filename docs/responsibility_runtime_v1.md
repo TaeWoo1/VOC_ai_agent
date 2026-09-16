@@ -928,7 +928,7 @@ Case는 미표시로 남아 다음 요약에 포함된다. 보내기 **전에** 
 `notified_at` + `NOTIFIED` event. 본문은 **개수와 채널 이름**뿐(`ExceptionSummaryMail`, 소스 스캔으로 case text getter 0). 실제 provider
 발송은 이 저장소의 SMTP mode이고 새 provider 0 — QA는 dev-outbox sink로 증명했다.
 
-### 22-5. 실제 scheduled run — 전용 QA org (진행 중인 기록)
+### 22-5. 실제 scheduled run — 전용 QA org (04:00 – 12:00 KST, 사람 trigger 0)
 
 **구성:** Package A의 QA org `997b87b2…`(Demo Org 아님 · 외부 판매자 아님 · Demo Org OAuth 무접촉) · loopback 카페24 stub ·
 `RESPONSIBILITY_RUNTIME_ORG_IDS` = QA org 하나 · investigation·draft capability = QA org, `gpt-5-2025-08-07` effort low ·
@@ -939,6 +939,9 @@ mail `dev-outbox` · 합성 운영 기준 2건(배송 · 파손/교환). 고객 
 |---|---|---|---|---|
 | **09-16 04:00** SCHEDULED SUCCESS | 문의 COMPLETE 6 · 신규 2 / 리뷰 COMPLETE 7 · 신규 3 | 새 6: 규칙 3(이미 답변된 문의 `AUTO_RESOLVED` · 5★ `AUTO_RESOLVED` · 3★ `MONITORING`) + 조사 대상 3 | 3회 시도 → 전부 `INVESTIGATION_FAILED · transport`(0–1ms) → 3건 모두 `NEEDS_DECISION · RULE`로 판매자 앞에 남음 | 1통 「확인할 일 3건」 |
 | **09-16 06:00** SCHEDULED SUCCESS | 문의 COMPLETE 7 · 신규 1 / 리뷰 COMPLETE 9 · 신규 2 | **변화 없음 6(쓰기 0)** · 새 3 · 재확인 1(채널에서 답변된 파손 문의 종료) | **실제 3회 `CONCLUDED`**: 10,270 / 7,203 / 10,917ms · prompt 633 / 650 / 627 · completion 769 / 596 / 835(reasoning 512 / 448 / 448) · guard 발동 0 · 전부 `NEEDS_DECISION`·`REPLY_TO_CUSTOMER`(HIGH/HIGH/MEDIUM) | 1통 「확인할 일 3건」(새 3건만 — 04:00의 3건은 이미 메일에 포함) |
+| **09-16 08:00** SCHEDULED **FAILED** | 두 source 모두 `NONE · AUTH_REQUIRED` · **관측/신규 수 전부 null** | 기존 9건 변화 없음(쓰기 0) · **`OBSERVATION_GAP` 1건** 열림 | 0 (관측이 없으면 조사할 signal도 없다) | 1통 — 「제대로 확인하지 못한 곳이 있습니다 / 카페24 자사몰은 연결이 만료되어 문의·리뷰를 확인하지 못했습니다」(**결정 건수 주장 없음**) |
+| **09-16 10:00** SCHEDULED **FAILED** | 같은 실패 | **같은 gap Case**(`OBSERVED_AGAIN`) · 새 Case 0 · 변화 없음 9 | 0 | **0통** (`NONE_NEEDED` — 같은 장애는 두 번 알리지 않는다) |
+| **09-16 12:00** SCHEDULED SUCCESS *(판매자가 제품 OAuth로 재연결한 뒤)* | 문의 COMPLETE 8 · 신규 1 / 리뷰 COMPLETE 10 · 신규 1 | gap **복구 종료**(`CLOSED · OBSERVED_AGAIN`) · 새 2 · 변화 없음 9 | 실제 2회 `CONCLUDED`(prompt **v2**): 16,701 / 14,909ms · prompt 803 / 725 · completion 828 / 652(reasoning 640 / 448) · guard 0 · 근거 ref에 판매자 운영 기준(`k1`) 포함 | 1통 「확인할 일 2건」 |
 
 - **04:00 transport 실패는 제품이 아니라 QA 하네스였다:** stub을 가리키려고 준 `-Djdk.net.hosts.file`은 파일에 없는 호스트를
   시스템 DNS로 넘기지 않고, `-Djavax.net.ssl.trustStore`는 JDK CA를 대체했다 → 벤더에 닿을 수 없었다(`ConnectException` 재현).
@@ -949,8 +952,21 @@ mail `dev-outbox` · 합성 운영 기준 2건(배송 · 파손/교환). 고객 
   → 라이브에서 **초안이 실제로 준비된 run은 아직 없다**(합성 문의가 상품에 묶이지 않음). 준비된 경로는 H2 테스트가 증명한다.
 - **비용(추정):** 06:00의 3회 합계 prompt 1,910 · completion 2,200 토큰. 벤더 공시 단가(입력 $1.25/1M · 출력 $10/1M — 저장소가 검증할 수
   없는 외부 사실)로 ≈ **$0.024, Case당 ≈ $0.008**. 지연은 Case당 7–11초로 run 길이에 더해진다(lease heartbeat가 흡수).
-- **rule vs Agent:** 지금까지 Case 9 — 규칙 결론 3 · 조사 대상 6(실제 결론 3, 하네스 실패 3) · **변화 없는 signal 6개에 모델 0**.
-- 중복 검사: subject당 열린 Case >1 **0** · (subject, 서명) 중복 **0** · QA org의 proactive 행 **0** · backend ERROR **0**.
+- **장애 Case의 생애(실측):** `OPENED`(08:00) → `NOTIFIED`(08:00) → `OBSERVED_AGAIN`(10:01) → `RECOVERED`(12:03), 그리고
+  `CLOSED · OBSERVED_AGAIN`. **두 번 열리지 않았고 두 번 알리지 않았다.** 복구는 판매자가 제품의 OAuth 흐름으로 다시 연결한 뒤
+  (start 200 → callback 302 `connected` → 계정 `CONNECTED`) **완전한 재관측**이 한 것이지, 계정 상태를 보고 추정한 것이 아니다.
+- **초안:** 12:00의 배송 문의는 `REPLY_TO_CUSTOMER` 결론 뒤 production draft path에서 **초안 v1이 실제로 준비**됐고
+  (`DRAFT_PREPARED` · `evidence_state = GROUNDED` — 판매자가 등록한 배송 기준이 근거), work item은 `PROPOSED`에서 멈춘다.
+  승인·전송은 그대로 판매자의 것이고 이 run이 보낸 고객 메시지는 **0**이다. 06:00의 교환 문의는 상품이 없어 composer가 쓰지 않았다
+  (`NO_DRAFT · NO_PRODUCT`, 모델 0) — 근거 없는 초안 0 규칙 그대로.
+- **prompt v2 결과(같은 라이브 환경):** 권장 조치 길이 **59자 · 60자**, 근거에 없는 사용법·플랫폼 기능·약속 **0**, 문장 중간 잘림 **0**.
+  모르는 것은 전부 `missingInformation`으로 갔다(주문번호 · 결제 일시 · 부착 환경 · 사진 …). v1의 같은 자리에는 부착 요령과 약속이 있었다.
+- **rule vs Agent (전체):** Case 11 — 규칙 결론 3 · 조사 대상 8(실제 결론 **5**, 하네스 실패 3) · 변화 없는 signal(창별 6·9·9·9)에 **모델 0**.
+  모델 호출 8회 전부 `INVESTIGATE`로 판매자 일일 예산 원장에 기록(+ 초안 `DRAFT` 1회).
+- **비용(추정, 실측 토큰 기반):** 결론 5회 합계 prompt 3,438 · completion 3,680 토큰 → 벤더 공시 단가(입력 $1.25/1M · 출력 $10/1M,
+  저장소가 검증할 수 없는 외부 사실)로 ≈ **$0.041**, 조사 1건 ≈ **$0.008**. 지연은 Case당 7–17초.
+- 중복 검사(모든 창): subject당 열린 Case >1 **0** · (subject, 서명) 중복 **0** · QA org의 proactive 행 **0** · backend ERROR **0** ·
+  마켓플레이스 WRITE **0** · 고객 메시지 전송 **0**.
 
 ### 22-6. 첫 라이브 run이 드러낸 결함 (`9cd653a5`에서 수정)
 
@@ -962,6 +978,8 @@ mail `dev-outbox` · 합성 운영 기준 2건(배송 · 파손/교환). 고객 
 2. **채널에서 답변된 문의가 `SELLER_ACTED`로 기록됐다.** 커넥터의 answered-elsewhere 경로가 work item을 COMPLETED로 닫았고
    reconciler가 phase를 이유보다 먼저 읽었다 → 커넥터 audit(actor `SYSTEM:CONNECTOR_INGEST` · phaseTo COMPLETED)로 가르고,
    그 표식이 writer와 어긋나지 않게 fence 테스트로 고정. 화면에는 영향이 없었다(열린 Case가 아니므로) — 기록의 정직성 문제다.
+   **이미 닫힌 행은 고치지 않았다**(`6c616dec`는 지금도 `SELLER_ACTED`로 남아 있다): 지나간 판단을 소급해 다시 쓰는 것은 이 기록이
+   하지 않기로 한 일이고, 규칙은 다음 reconcile부터 적용된다.
 3. (하네스) 위 22-5의 transport.
 
 ### 22-7. DB 보장 — 실제 Postgres (QA DB, 롤백 트랜잭션)
@@ -980,4 +998,22 @@ Home(`/`)은 기존 Operations Home을 **확장**한다 — 대화 위, 기존 �
 「아직 보내지 않았습니다」와 함께) · 0건 ≠ 확인하지 못함(NONE은 숫자를 찍지 않는다) · PARTIAL ≠ 정상. 읽기 실패 · rollout 밖 ·
 카페24 미연결은 Home에 **아무것도 그리지 않는다**. 브라우저 QA(실제 QA org · 1440/1366/1152 · `/`와 `/customer-operations` ·
 `<details>` 전부 연 뒤): axe(WCAG 2 A/AA) 위반 **0** · 가로 스크롤 **0** · off-host 요청 **0** · 04:00 데이터에서 「처리했습니다·
-보냈습니다·정상·0건 관측」 **0**. 콘솔 오류는 이 QA 스택에서 꺼 둔 agent-runtime(8787)과 기존 `home-opened` 403뿐.
+보냈습니다·정상·0건 관측」 **0**. 콘솔 오류는 이 QA 스택에서 꺼 둔 agent-runtime(8787)과 기존 `home-opened` 403뿐 — 이 패키지가 만든 것은 없다.
+브라우저 pass는 **세 번**(첫 데이터 전 · 장애가 열려 있는 동안 · 복구 뒤) 돌렸고 세 번 모두 같은 결과다. 장애 중 화면은
+「다시 연결해야 확인할 수 있는 곳이 1곳 있습니다」 + 계정 행 + [다시 연결하기] + 「Cafe24 문의 — 확인하지 못했습니다 · 연결이
+만료되어 다시 연결이 필요합니다」를 그렸고 **어디에도 0건이 없었다**; 복구 뒤 같은 자리는 다시 「지난 확인에서 모든 대상을 끝까지
+확인했습니다」와 읽은 건수가 된다.
+
+### 22-9. 이 package가 증명하지 않은 것 · 남은 결정
+
+- **실제 카페24 mall READ는 여전히 stub이다**(NEW-A1, §21-10과 같은 이유). 커넥터·ingest·초안·조사는 제품 코드이고 벤더 응답만 합성이다.
+- **초안이 승인·전송까지 가는 경로는 이 package에서 실행되지 않았다** — 설계대로 PROPOSED에서 멈춘다(Package C · PD-8).
+- **리뷰 답변 초안은 없다** — 증명된 리뷰 답글 WRITE adapter가 없어 리뷰 Case는 `RECOMMENDATION_ONLY`가 천장이다.
+- **모델이 쓴 문장은 결정론이 아니다.** guard·payload floor·스키마는 코드의 성질이지만, 같은 Case를 다시 조사하면 다른 문장이 나온다.
+  v2가 막는 것은 「근거에 없는 내용을 권하는 모양」이고, 그 검사는 prompt 규칙 + 라이브 재확인이지 단위 테스트가 아니다.
+- **한 org·한 채널·두 source**에서만 돌았다. 여러 계정·여러 채널이 한 책임에 붙었을 때의 gap 묶음(계정당 1건)은 단위 테스트만 있다.
+- **운영 중 실패 알림의 실제 provider 발송**은 dev-outbox sink로만 증명했다(SMTP mode는 기존 경로, 자격은 배포 결정).
+- 남은 PRODUCT_DECISION_NEEDED: **NEW-A1**(실제 mall READ 승인) · **PD-7**(Scheduled Aside surface) · **PD-8**(Cafe24 real write 대상) ·
+  **PD-10 잔여**(파일럿에서 어느 org까지 rollout 목록에 넣을지 — 이제 목록은 명시 UUID이고 그 목록을 누가 채우는가가 운영 결정이다) ·
+  **신규**: 조사 모델·effort(현재 `gpt-5-2025-08-07`/low, Case당 7–17초)와 판매자 일일 예산에 조사를 청구할지(현재 청구한다).
+- **Package C 진입:** B가 남긴 runtime·Case·권한 경계는 닫혔다. C를 막는 것은 **PD-7 · PD-8**이다.
