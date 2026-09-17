@@ -90,6 +90,17 @@ public class OperationsCaseProcessor {
     private final InquiryWorkItemRepository workItems;
     private final ChannelRepository channels;
     private final Clock clock;
+    /**
+     * Which store a device-carried marketplace review read covers, when this deployment has that lane. Set by the
+     * container, absent in wiring that predates it — and absent means discovery looks at the template's official
+     * sources only, exactly as before.
+     */
+    private com.sellerops.responsibility.aside.AsideMarketplaceTarget marketplaceTargets;
+
+    @Autowired(required = false)
+    void setMarketplaceTargets(List<com.sellerops.responsibility.aside.AsideMarketplaceTarget> resolvers) {
+        this.marketplaceTargets = com.sellerops.responsibility.aside.AsideMarketplaceTarget.firstOf(resolvers);
+    }
 
     @Autowired
     public OperationsCaseProcessor(ResponsibilityRunRepository runs, ResponsibilityRepository responsibilities,
@@ -286,6 +297,77 @@ public class OperationsCaseProcessor {
                     }
                     handleReview(run, responsibility, review, k);
                 }
+            }
+        }
+        discoverDeviceReviews(run, responsibility, stop, k, reach, reviewChannels);
+    }
+
+    /**
+     * <b>Reviews and inquiries a scheduled browser read brought in — by the same rule, and only from the same boundary.</b>
+     *
+     * <p>A marketplace device read (NAVER Seller Center 리뷰) is deliberately NOT one of the template's sources: it
+     * must not fail a run or report 「확인하지 못함」 about the seller's owed data. What it stores, though, is ordinary
+     * canonical reviews, and a new one deserves the same case as a new review from any other source. So discovery
+     * asks the same two questions of it: has this responsibility settled a read of that store yet (its first
+     * {@code BOUNDED} observation is the hand-over boundary — reviews stored by that first read were already there
+     * and belong to the existing screens), and what arrived after. Same candidate query, same rules, same dedup.
+     */
+    private void discoverDeviceReviews(ResponsibilityRun run, Responsibility responsibility, BooleanSupplier stop,
+                                       Counters k, Instant reach, Set<UUID> reviewChannels) {
+        if (marketplaceTargets == null) {
+            return;
+        }
+        UUID orgId = run.getOrgId();
+        for (String declared : responsibility.getTemplateCode().deviceRecipes()) {
+            com.sellerops.responsibility.aside.AsideRecipe recipe;
+            try {
+                recipe = com.sellerops.responsibility.aside.AsideRecipe.valueOf(declared);
+            } catch (IllegalArgumentException unknown) {
+                continue;
+            }
+            DataType recipeType = recipe.dataType().orElse(null);
+            if (!recipe.readsMarketplace() || (recipeType != DataType.REVIEW && recipeType != DataType.INQUIRY)) {
+                continue;
+            }
+            Optional<com.sellerops.responsibility.aside.AsideMarketplaceTarget.Target> target =
+                    marketplaceTargets.resolve(orgId, recipe);
+            if (target.isEmpty()) {
+                continue;
+            }
+            if (recipeType == DataType.INQUIRY) {
+                // Inquiries are scoped by the ACCOUNT they were read for (the same candidate query the template's
+                // inquiry sources use), and the boundary is this account's first settled inquiry read.
+                UUID accountId = target.get().sellerAccountId();
+                Instant inquiryBaseline = cases.firstSettledObservation(orgId, responsibility.getId(), accountId,
+                        DataType.INQUIRY.name());
+                if (inquiryBaseline == null) {
+                    continue;
+                }
+                Instant inquirySince = inquiryBaseline.isAfter(reach) ? inquiryBaseline : reach;
+                for (Inquiry inquiry : cases.inquiryCandidates(orgId, accountId, inquirySince,
+                        PageRequest.of(0, CANDIDATE_SCAN))) {
+                    if (stop.getAsBoolean()) {
+                        return;
+                    }
+                    handleInquiry(run, responsibility, inquiry, k);
+                }
+                continue;
+            }
+            UUID channelId = channels.findByCode(recipe.channelCode().orElseThrow()).map(Channel::getId).orElse(null);
+            if (channelId == null || !reviewChannels.add(channelId)) {
+                continue;
+            }
+            Instant baseline = cases.firstSettledObservation(orgId, responsibility.getId(),
+                    target.get().sellerAccountId(), DataType.REVIEW.name());
+            if (baseline == null) {
+                continue;
+            }
+            Instant since = baseline.isAfter(reach) ? baseline : reach;
+            for (Review review : cases.reviewCandidates(orgId, channelId, since, PageRequest.of(0, CANDIDATE_SCAN))) {
+                if (stop.getAsBoolean()) {
+                    return;
+                }
+                handleReview(run, responsibility, review, k);
             }
         }
     }

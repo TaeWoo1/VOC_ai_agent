@@ -71,6 +71,17 @@ describe("helper.env", () => {
       // launchd agent's PATH would not have found the CLI even if it had been.
       "REVIEWNARY_EXECUTION_PROVIDER",
       "ASIDE_CLI",
+      // WHICH browser profile that CLI drives. The same reason a third time, and found the same way: the config
+      // already read this value and this filter already dropped it, so on a packaged install a machine whose
+      // Aside holds more than one account had no way to say which one — and «the default account» is not a safe
+      // guess when the thing being opened is the seller's own store. Opaque, never logged, not a credential.
+      "ASIDE_ACCOUNT",
+      // Which owned observation surface this helper hosts, if any (Scheduled Aside v1). Added deliberately, for
+      // the same reason as the two above: the scheduled proof needs an INSTALLED helper to host the page, and a
+      // packaged helper only ever sees the keys named here. Unset — the default, and the value of anything
+      // unrecognized — hosts nothing and leaves the route 404, so an ordinary install is untouched by its
+      // presence. It names a dataset, never a URL, a target or a credential.
+      "REVIEWNARY_CO_FIXTURE_DATASET",
     ]);
     for (const key of HELPER_ENV_KEYS) expect(key.toLowerCase()).not.toMatch(/password|email|token|secret/);
   });

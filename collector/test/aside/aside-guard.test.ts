@@ -78,18 +78,21 @@ const FORBIDDEN_TOKENS = [
 ] as const;
 
 /**
- * `.evaluate(` is forbidden EXCEPT in the one file whose job is to forward this repository's own page
- * scripts — a review list cannot be read without running a reader in the page. The exemption is narrower
- * than the ban it replaces: that file may not AUTHOR page code, which the dedicated describe below asserts,
- * so "arbitrary evaluate" remains structurally impossible rather than merely unused.
+ * `.evaluate(` is forbidden EXCEPT in the files whose job is to forward this repository's own page scripts — a
+ * review list cannot be read without running a reader in the page. The exemption is narrower than the ban it
+ * replaces: a forwarder may not AUTHOR page code, which the dedicated describe below asserts OF EVERY FORWARDER, so
+ * "arbitrary evaluate" remains structurally impossible rather than merely unused.
+ *
+ * The list is explicit and each entry is a decision: the NAVER Seller Center review runtime was added with the
+ * operator's single-file approval (2026-09-17) for exactly this shape — wait for the grid, read rows, close the tab.
  */
-const EVALUATE_FORWARDER = "coupang-review-runtime.ts";
+const EVALUATE_FORWARDERS = ["coupang-review-runtime.ts", "naver-review-runtime.ts"] as const;
 
 describe("aside provider — forbidden capability tokens are absent from every source file", () => {
   it.each(FILES)("%s", (file) => {
     const code = codeOnly(resolve(SRC, file));
     for (const token of FORBIDDEN_TOKENS) {
-      if (token === ".evaluate(" && file === EVALUATE_FORWARDER) continue;
+      if (token === ".evaluate(" && (EVALUATE_FORWARDERS as readonly string[]).includes(file)) continue;
       // `aside-cli.ts` legitimately names `process.execPath`? It does not — it uses child_process.spawn only.
       // `host-file-handoff.ts` reads a file, but through `node:fs` named imports (`readFileSync`), not `fs.`.
       expect(code, `${file} contains ${token}`).not.toContain(token);
@@ -188,7 +191,7 @@ describe("aside provider — the serialized runtime is self-contained", () => {
 });
 
 
-describe("aside provider — the evaluate forwarder forwards, and cannot author page code", () => {
+describe.each(EVALUATE_FORWARDERS)("aside provider — the evaluate forwarder %s forwards, and cannot author page code", (EVALUATE_FORWARDER) => {
   const code = codeOnly(resolve(SRC, EVALUATE_FORWARDER));
 
   it("names no DOM API and no selector of its own", () => {
@@ -209,7 +212,8 @@ describe("aside provider — the evaluate forwarder forwards, and cannot author 
   });
 
   it("cannot turn a page: no click, no pager, no second navigation", () => {
-    for (const token of [".click(", ".fill(", ".press(", ".goto(", "nextPage", "pager"]) {
+    for (const token of [".click(", ".fill(", ".press(", ".goto(", ".type(", "setInputFiles", "waitForEvent",
+      "nextPage", "pager"]) {
       expect(code, `${EVALUATE_FORWARDER} contains ${token}`).not.toContain(token);
     }
   });

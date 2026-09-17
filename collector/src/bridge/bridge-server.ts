@@ -36,6 +36,14 @@ import { nullApprovalPresenter, type ApprovalPresenter } from "./approval-presen
 import type { PairingRequestRejection, SweepResult } from "./pairing";
 import type { FilePairingStore, PairingStorePersistResult } from "./pairing-store";
 import { renderConfirmationPage } from "./confirmation-page";
+import {
+  isFixtureDataset,
+  renderCustomerOperationsFixture,
+  type FixtureDataset,
+} from "./customer-operations-fixture";
+// The route and the recipe read the same constant, so the page a scheduled run opens and the page this
+// server hosts cannot drift apart into a 404 nobody notices until an unattended run reports nothing.
+import { FIXTURE_OBSERVE_PATH } from "../aside/fixture-observe-workflow";
 import type { BridgeEventPort } from "./event-adapter";
 import { PROJECTION_CLIENT_MAX_BYTES } from "./projection-protocol";
 import type { ProjectionEndpoint } from "./projection-endpoint";
@@ -121,6 +129,21 @@ export interface BridgeServerDeps {
   deviceLink?: DeviceLinkEndpoint;
   /** See {@link StoreIdentityBootstrapEndpoint}. Absent ⇒ the route is 404. */
   storeIdentityBootstrap?: StoreIdentityBootstrapEndpoint;
+  /**
+   * Scheduled Aside v1: the page an unattended recipe is allowed to open — one this repository authors and
+   * serves, never a marketplace. Absent ⇒ the route is 404, so an ordinary install hosts no such surface and
+   * hosting one is a deliberate act rather than a default. See {@link CustomerOperationsFixtureEndpoint}.
+   */
+  customerOperationsFixture?: CustomerOperationsFixtureEndpoint;
+}
+
+/**
+ * What the bridge needs in order to host the owned observation surface: which of the three datasets is live
+ * right now. The endpoint owns that choice — the page itself is a pure render, and the HTTP layer never
+ * decides what the surface currently says.
+ */
+export interface CustomerOperationsFixtureEndpoint {
+  dataset(): FixtureDataset;
 }
 
 /** What the bridge needs from the link flow — see `auth/helper-session.ts` for the implementation. */
@@ -163,6 +186,7 @@ export class BridgeServer {
   private readonly onSellerOpsConnected: (() => void) | undefined;
   private readonly deviceLink: DeviceLinkEndpoint | undefined;
   private readonly storeIdentityBootstrap: StoreIdentityBootstrapEndpoint | undefined;
+  private readonly customerOperationsFixture: CustomerOperationsFixtureEndpoint | undefined;
   private readonly projectionWss: WebSocketServer | undefined;
   private projectionTimer: NodeJS.Timeout | undefined;
   private heartbeatTimer: NodeJS.Timeout | undefined;
@@ -186,6 +210,7 @@ export class BridgeServer {
     this.onSellerOpsConnected = deps.onSellerOpsConnected;
     this.deviceLink = deps.deviceLink;
     this.storeIdentityBootstrap = deps.storeIdentityBootstrap;
+    this.customerOperationsFixture = deps.customerOperationsFixture;
     if (this.autoApprovePairing) log("bridge_dev_auto_approve_active", { warning: true });
     this.http = createServer((req, res) => void this.onRequest(req, res));
     // We validate origin + ticket ourselves, THEN hand the raw socket to `ws`. `noServer` = we own upgrade.
@@ -322,6 +347,7 @@ export class BridgeServer {
       if (method === "POST" && path === "/bridge/device/link") return await this.handleDeviceLink(req, res, "start");
       if (method === "GET" && path === "/bridge/device/status") return await this.handleDeviceLink(req, res, "status");
       if (method === "GET" && path === "/bridge/store-identity/bootstrap") return this.handleStoreIdentityBootstrap(req, res);
+      if (method === "GET" && path === FIXTURE_OBSERVE_PATH) return this.handleCustomerOperationsFixture(url, res);
       sendJson(res, 404, { error: "not_found" });
     } catch {
       sendJson(res, 500, { error: "internal" });
@@ -638,6 +664,41 @@ export class BridgeServer {
     const pairing = token ? this.store.registry.authenticate(token) : null;
     if (!pairing) { sendJson(res, 401, { error: "unpaired" }); return; }
     sendJson(res, 200, this.storeIdentityBootstrap.read());
+  }
+
+  /**
+   * The owned observation surface, to a browser on this machine.
+   *
+   * Unauthenticated on purpose, and that is the narrower choice rather than the looser one: the reader is a
+   * scheduled Aside tab, which carries no pairing bearer, so requiring one would mean minting a credential for
+   * an automated browser — a far larger thing than serving a synthetic page. What protects it instead is that
+   * there is nothing here to protect (no seller, customer, order or credential data ever reaches this page) and
+   * that the server binds loopback, so the page is not addressable from off this machine at all.
+   *
+   * Absent endpoint ⇒ 404, like the device routes. An unknown dataset ⇒ 404 as well, never a default: silently
+   * serving «initial» for a mistyped name would make a changed surface read as unchanged, which is precisely
+   * the observation this proof has to be able to trust.
+   */
+  private handleCustomerOperationsFixture(url: URL, res: ServerResponse): void {
+    if (!this.customerOperationsFixture) {
+      res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+      res.end("<!doctype html><meta charset=utf-8><p>이 도우미는 점검용 화면을 제공하지 않습니다.</p>");
+      return;
+    }
+    const requested = url.searchParams.get("dataset");
+    const dataset = requested === null ? this.customerOperationsFixture.dataset() : requested;
+    if (!isFixtureDataset(dataset)) {
+      res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+      res.end("<!doctype html><meta charset=utf-8><p>알 수 없는 점검용 자료입니다.</p>");
+      return;
+    }
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      // A synthetic page that needs no outside resource says so, so a mistake cannot quietly load one.
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+    });
+    res.end(renderCustomerOperationsFixture(dataset));
   }
 
   private async handleRevoke(req: IncomingMessage, res: ServerResponse): Promise<void> {

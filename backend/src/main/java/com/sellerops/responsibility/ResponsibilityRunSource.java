@@ -110,6 +110,38 @@ public class ResponsibilityRunSource extends BaseEntity {
         return row;
     }
 
+    /**
+     * A source observed by an installed helper rather than by a channel's API (Scheduled Aside v1).
+     *
+     * <p>The row is shaped like any other observation on purpose: the completeness contract, the «NONE carries
+     * no count» rule and the seller-facing reading are the same whether a read came from an official API or from
+     * a browser on someone's desk. What differs is recorded, not hidden — {@code method} says the helper carried
+     * it and {@code recipe_version} says which published recipe did.
+     *
+     * <p>It hangs off the organisation's own account because {@code seller_account_id} is a real foreign key and
+     * this row belongs to that seller's run; the surface read is Reviewnary's own, which is what {@code dataType}
+     * names. {@link IdentityVerdict#NOT_APPLICABLE} is the honest verdict: there is no store identity to match on
+     * a page we serve ourselves.
+     */
+    static ResponsibilityRunSource openDevice(ResponsibilityRun run, java.util.UUID sellerAccountId,
+                                              String channelCode, String dataType, String recipeVersion,
+                                              Instant now) {
+        ResponsibilityRunSource row = new ResponsibilityRunSource();
+        row.setOrgId(run.getOrgId());
+        row.setRunId(run.getId());
+        row.setAttempt(run.getAttempt());
+        row.setSellerAccountId(sellerAccountId);
+        row.setChannelCode(channelCode);
+        row.setDataType(dataType);
+        row.setMethod(ResponsibilitySources.METHOD_DEVICE);
+        row.setRecipeVersion(recipeVersion);
+        row.setWindowFrom(run.getWindowStart());
+        row.setWindowTo(run.getWindowEnd());
+        row.setStartedAt(now);
+        row.setIdentityVerdict(IdentityVerdict.NOT_APPLICABLE);
+        return row;
+    }
+
     void record(SourceObservation observation) {
         completeness = observation.completeness();
         observedCount = observation.observedCount();

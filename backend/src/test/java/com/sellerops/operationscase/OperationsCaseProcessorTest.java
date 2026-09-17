@@ -679,6 +679,217 @@ class OperationsCaseProcessorTest {
                         "getRelatedIssues");
     }
 
+    // ── a scheduled browser read (NAVER Seller Center 리뷰) ───────────────────────────────────────────────────
+
+    /**
+     * The device lane is not one of the template's sources, and its reviews still become cases by the same rule:
+     * nothing stored before this responsibility's first settled read of that store, a case for what arrived after,
+     * and an unchanged rerun writes nothing. Without a resolver (a deployment without the lane) it opens nothing.
+     */
+    @Test
+    void reviewsABrowserReadBroughtInBecomeCasesByTheSameRule_andOnlyAfterItsFirstSettledRead() {
+        Channel naver = channels.findByCode("NAVER").orElseGet(() -> {
+            Channel c = new Channel();
+            c.setCode("NAVER");
+            c.setNameKo("네이버 스마트스토어");
+            c.setStatus(ChannelStatus.AVAILABLE);
+            c.setSupportsInquiry(true);
+            c.setSupportsReview(true);
+            c.setSupportsOrder(true);
+            c.setSupportsSales(true);
+            c.setSupportsProduct(true);
+            c.setSortOrder(1);
+            return channels.save(c);
+        });
+        SellerAccount store = new SellerAccount();
+        store.setOrgId(org);
+        store.setChannelId(naver.getId());
+        store.setConnectionStatus(ChannelStatus.CONNECTED);
+        store.setFileUpload(false);
+        store = accounts.save(store);
+        Instant firstRead = Instant.now().minus(Duration.ofMinutes(30));
+
+        ResponsibilityRun read = new ResponsibilityRun();
+        read.setOrgId(org);
+        read.setResponsibilityId(responsibility.getId());
+        read.setTemplateVersion(1);
+        Instant window = Instant.parse("2026-01-01T00:00:00Z").plus(Duration.ofHours(2L * windows++));
+        read.setWindowStart(window);
+        read.setWindowEnd(window.plus(Duration.ofHours(2)));
+        read.setRunTrigger(RunTrigger.SCHEDULED);
+        read.setAttempt(1);
+        read.setStatus(RunStatus.PARTIAL);
+        read = runs.save(read);
+        ResponsibilityRunSource device = new ResponsibilityRunSource();
+        device.setOrgId(org);
+        device.setRunId(read.getId());
+        device.setAttempt(1);
+        device.setSellerAccountId(store.getId());
+        device.setChannelCode("NAVER");
+        device.setDataType("REVIEW");
+        device.setMethod(ResponsibilitySources.METHOD_DEVICE);
+        device.setRecipeVersion("NAVER_REVIEW_OBSERVE_V1");
+        device.setWindowFrom(read.getWindowStart());
+        device.setWindowTo(read.getWindowEnd());
+        device.setStartedAt(firstRead);
+        device.setObservedAt(firstRead);
+        device.setCompleteness(SourceCompleteness.BOUNDED);
+        device.setObservedCount(52);
+        device.setNewCount(52);
+        device.setChangedCount(0);
+        device.setIdentityVerdict(IdentityVerdict.MATCH);
+        sourceRows.save(device);
+
+        Review handedOver = new Review();
+        handedOver.setOrgId(org);
+        handedOver.setChannelId(naver.getId());
+        handedOver.setRating(1);
+        handedOver.setBody("첫 확인 때 이미 있던 리뷰");
+        handedOver.setReceivedAt(firstRead.minus(Duration.ofDays(2)));
+        handedOver.setReplyState(ReviewReplyState.PENDING);
+        handedOver.setCreatedAt(firstRead.minus(Duration.ofSeconds(5)));
+        reviews.save(handedOver);
+        Review arrived = new Review();
+        arrived.setOrgId(org);
+        arrived.setChannelId(naver.getId());
+        arrived.setRating(1);
+        arrived.setBody("한 달 만에 떨어졌어요.");
+        arrived.setReceivedAt(Instant.now());
+        arrived.setReplyState(ReviewReplyState.PENDING);
+        arrived = reviews.save(arrived);
+
+        processor.process(run(Instant.now(), null, null), () -> false);
+        assertThat(casesOf()).as("a deployment without the lane opens nothing for it").isEmpty();
+
+        UUID storeId = store.getId();
+        processor.setMarketplaceTargets(List.of((orgId, recipe) ->
+                recipe == com.sellerops.responsibility.aside.AsideRecipe.NAVER_REVIEW_OBSERVE_V1 && org.equals(orgId)
+                        ? java.util.Optional.of(new com.sellerops.responsibility.aside.AsideMarketplaceTarget.Target(
+                                storeId, null, null))
+                        : java.util.Optional.empty()));
+        OperationsCaseProcessor.Report first = processor.process(run(Instant.now(), null, null), () -> false);
+
+        assertThat(first.opened()).isEqualTo(1);
+        assertThat(only().getSubjectId()).as("only what arrived after the first settled read").isEqualTo(arrived.getId());
+
+        OperationsCaseProcessor.Report rerun = processor.process(run(Instant.now(), null, null), () -> false);
+        assertThat(rerun.opened() + rerun.updated()).isZero();
+        assertThat(rerun.unchanged()).isEqualTo(1);
+        assertThat(casesOf()).hasSize(1);
+    }
+
+    /**
+     * The inquiry sibling of the test above: a NAVER Seller Center 상품 문의 read brought an inquiry in, and it becomes a
+     * case by the same rule — scoped to the account that was read, only after that account's first SETTLED inquiry
+     * read (a PARTIAL page, which could not rule out a gap behind it, is no boundary), and an unchanged rerun writes
+     * nothing.
+     */
+    @Test
+    void inquiriesABrowserReadBroughtInBecomeCases_andOnlyAfterASettledReadOfThatAccount() {
+        when(investigation.isEnabledFor(org)).thenReturn(false);
+        Channel naver = channels.findByCode("NAVER").orElseGet(() -> {
+            Channel c = new Channel();
+            c.setCode("NAVER");
+            c.setNameKo("네이버 스마트스토어");
+            c.setStatus(ChannelStatus.AVAILABLE);
+            c.setSupportsInquiry(true);
+            c.setSupportsReview(true);
+            c.setSupportsOrder(true);
+            c.setSupportsSales(true);
+            c.setSupportsProduct(true);
+            c.setSortOrder(1);
+            return channels.save(c);
+        });
+        SellerAccount store = new SellerAccount();
+        store.setOrgId(org);
+        store.setChannelId(naver.getId());
+        store.setConnectionStatus(ChannelStatus.CONNECTED);
+        store.setFileUpload(false);
+        store = accounts.save(store);
+        Instant firstRead = Instant.now().minus(Duration.ofMinutes(30));
+
+        UUID storeId = store.getId();
+        processor.setMarketplaceTargets(List.of((orgId, recipe) ->
+                recipe == com.sellerops.responsibility.aside.AsideRecipe.NAVER_PRODUCT_INQUIRY_OBSERVE_V1
+                        && org.equals(orgId)
+                        ? java.util.Optional.of(new com.sellerops.responsibility.aside.AsideMarketplaceTarget.Target(
+                                storeId, null, null))
+                        : java.util.Optional.empty()));
+
+        ResponsibilityRunSource partial = deviceInquiryRead(storeId, firstRead.minus(Duration.ofMinutes(5)),
+                SourceCompleteness.PARTIAL);
+
+        Inquiry handedOver = new Inquiry();
+        handedOver.setOrgId(org);
+        handedOver.setChannelId(naver.getId());
+        handedOver.setSellerAccountId(storeId);
+        handedOver.setBody("첫 확인 때 이미 있던 문의");
+        handedOver.setStatus("UNANSWERED");
+        handedOver.setReceivedAt(firstRead.minus(Duration.ofDays(2)));
+        handedOver.setExternalId("naver-qna:1");
+        handedOver.setSourceSubtype("NAVER_PRODUCT_QNA");
+        handedOver.setCreatedAt(firstRead.minus(Duration.ofSeconds(5)));
+        inquiries.save(handedOver);
+        Inquiry arrived = new Inquiry();
+        arrived.setOrgId(org);
+        arrived.setChannelId(naver.getId());
+        arrived.setSellerAccountId(storeId);
+        arrived.setBody("몇 가닥까지 들어가나요?");
+        arrived.setStatus("UNANSWERED");
+        arrived.setReceivedAt(Instant.now());
+        arrived.setExternalId("naver-qna:2");
+        arrived.setSourceSubtype("NAVER_PRODUCT_QNA");
+        arrived = inquiries.save(arrived);
+
+        processor.process(run(Instant.now(), null, null), () -> false);
+        assertThat(casesOf()).as("a PARTIAL page is no boundary: nothing is «new since» it").isEmpty();
+
+        deviceInquiryRead(storeId, firstRead, SourceCompleteness.BOUNDED);
+        OperationsCaseProcessor.Report first = processor.process(run(Instant.now(), null, null), () -> false);
+
+        assertThat(first.opened()).isEqualTo(1);
+        assertThat(only().getSubjectId()).as("only what arrived after the first settled read").isEqualTo(arrived.getId());
+        assertThat(only().getSubjectKind()).isEqualTo(OperationsSubjectKind.INQUIRY);
+
+        OperationsCaseProcessor.Report rerun = processor.process(run(Instant.now(), null, null), () -> false);
+        assertThat(rerun.opened() + rerun.updated()).isZero();
+        assertThat(casesOf()).hasSize(1);
+        assertThat(partial.getCompleteness()).isEqualTo(SourceCompleteness.PARTIAL);
+    }
+
+    private ResponsibilityRunSource deviceInquiryRead(UUID storeId, Instant at, SourceCompleteness completeness) {
+        ResponsibilityRun read = new ResponsibilityRun();
+        read.setOrgId(org);
+        read.setResponsibilityId(responsibility.getId());
+        read.setTemplateVersion(1);
+        Instant window = Instant.parse("2026-01-01T00:00:00Z").plus(Duration.ofHours(2L * windows++));
+        read.setWindowStart(window);
+        read.setWindowEnd(window.plus(Duration.ofHours(2)));
+        read.setRunTrigger(RunTrigger.SCHEDULED);
+        read.setAttempt(1);
+        read.setStatus(RunStatus.PARTIAL);
+        read = runs.save(read);
+        ResponsibilityRunSource device = new ResponsibilityRunSource();
+        device.setOrgId(org);
+        device.setRunId(read.getId());
+        device.setAttempt(1);
+        device.setSellerAccountId(storeId);
+        device.setChannelCode("NAVER");
+        device.setDataType("INQUIRY");
+        device.setMethod(ResponsibilitySources.METHOD_DEVICE);
+        device.setRecipeVersion("NAVER_PRODUCT_INQUIRY_OBSERVE_V1");
+        device.setWindowFrom(read.getWindowStart());
+        device.setWindowTo(read.getWindowEnd());
+        device.setStartedAt(at);
+        device.setObservedAt(at);
+        device.setCompleteness(completeness);
+        device.setObservedCount(8);
+        device.setNewCount(8);
+        device.setChangedCount(0);
+        device.setIdentityVerdict(IdentityVerdict.MATCH);
+        return sourceRows.save(device);
+    }
+
     // ── the Home read ───────────────────────────────────────────────────────────────────────────────────────
 
     @Test

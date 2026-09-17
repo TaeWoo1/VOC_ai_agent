@@ -8,6 +8,23 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ChannelProductRepository extends JpaRepository<ChannelProduct, UUID> {
 
+    /**
+     * How many of these listing ids this organisation holds on this channel.
+     *
+     * <p>The store fence for a browser-read NAVER review list. A listing id is unique per channel across every
+     * organisation ({@code uq_channel_products_external}), and this org's NAVER listings were collected by the
+     * official API with this org's own credential — so a page whose every product number is counted here is a
+     * page of this org's store, and a page with even one that is not cannot be proved to be. Counted, not
+     * returned: the caller needs the verdict, not the catalogue.
+     */
+    @org.springframework.data.jpa.repository.Query("""
+            select count(distinct cp.externalProductId) from ChannelProduct cp
+            where cp.orgId = :orgId and cp.channelId = :channelId and cp.externalProductId in :externalIds
+            """)
+    long countOwnedListings(@org.springframework.data.repository.query.Param("orgId") UUID orgId,
+                            @org.springframework.data.repository.query.Param("channelId") UUID channelId,
+                            @org.springframework.data.repository.query.Param("externalIds") Collection<String> externalIds);
+
     /** The listing identity — {@code uq_channel_products_external}. */
     Optional<ChannelProduct> findByChannelIdAndExternalProductId(UUID channelId, String externalProductId);
 

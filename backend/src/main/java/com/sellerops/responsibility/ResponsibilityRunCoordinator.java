@@ -90,6 +90,12 @@ public class ResponsibilityRunCoordinator {
     private final Duration heartbeat;
     private final ResponsibilityRollout rollout;
     private final ResponsibilityRunFollowUp followUp;
+    /** Scheduled Aside v1: the device-carried observation, or {@code null} where this runtime has none. */
+    private final com.sellerops.responsibility.aside.AsideSourceObserver aside;
+    /** Whether a device read may name a real store for this organisation. Null in wiring that predates the lane. */
+    private final com.sellerops.responsibility.aside.AsideMarketplaceAccess marketplaceAccess;
+    /** Which store it would be. Null is «cannot say», which reads nothing rather than guessing. */
+    private final com.sellerops.responsibility.aside.AsideMarketplaceTarget marketplaceTargets;
     private final String owner = "rr-" + UUID.randomUUID();
     private volatile ScheduledExecutorService heartbeatPool;
 
@@ -100,11 +106,16 @@ public class ResponsibilityRunCoordinator {
                                         SellerAccountRepository accounts, PlatformTransactionManager txManager,
                                         ResponsibilityRollout rollout,
                                         ObjectProvider<ResponsibilityRunFollowUp> followUps,
+                                        com.sellerops.responsibility.aside.AsideSourceObserver aside,
+                                        com.sellerops.responsibility.aside.AsideMarketplaceAccess marketplaceAccess,
+                                        ObjectProvider<com.sellerops.responsibility.aside.AsideMarketplaceTarget>
+                                                marketplaceTargets,
                                         @Value("${sellerops.responsibility.lease-seconds:180}") long leaseSeconds,
                                         @Value("${sellerops.responsibility.heartbeat-seconds:30}") long heartbeatSeconds) {
         this(responsibilities, runs, sourceRows, sources, observer, runGate, accounts, txManager, Clock.systemUTC(),
                 Duration.ofSeconds(leaseSeconds), Duration.ofSeconds(heartbeatSeconds), rollout,
-                followUps.getIfAvailable());
+                followUps.getIfAvailable(), aside, marketplaceAccess,
+                com.sellerops.responsibility.aside.AsideMarketplaceTarget.firstOf(marketplaceTargets.orderedStream().toList()));
     }
 
     /** Package A wiring: no rollout gate and no follow-up — every ACTIVE responsibility is worked, nothing else. */
@@ -114,7 +125,7 @@ public class ResponsibilityRunCoordinator {
                                         SellerAccountRepository accounts, PlatformTransactionManager txManager,
                                         Clock clock, Duration lease, Duration heartbeat) {
         this(responsibilities, runs, sourceRows, sources, observer, runGate, accounts, txManager, clock, lease,
-                heartbeat, null, null);
+                heartbeat, null, null, null, null, null);
     }
 
     /**
@@ -128,6 +139,23 @@ public class ResponsibilityRunCoordinator {
                                         SellerAccountRepository accounts, PlatformTransactionManager txManager,
                                         Clock clock, Duration lease, Duration heartbeat,
                                         ResponsibilityRollout rollout, ResponsibilityRunFollowUp followUp) {
+        this(responsibilities, runs, sourceRows, sources, observer, runGate, accounts, txManager, clock, lease,
+                heartbeat, rollout, followUp, null, null, null);
+    }
+
+    /**
+     * @param aside the device-carried observation (Scheduled Aside v1), or {@code null} for a runtime that does
+     *              not open one. Null is the ordinary case: existing wiring keeps observing channels only.
+     */
+    public ResponsibilityRunCoordinator(ResponsibilityRepository responsibilities, ResponsibilityRunRepository runs,
+                                        ResponsibilityRunSourceRepository sourceRows, ResponsibilitySources sources,
+                                        ResponsibilitySourceObserver observer, SyncRunGate runGate,
+                                        SellerAccountRepository accounts, PlatformTransactionManager txManager,
+                                        Clock clock, Duration lease, Duration heartbeat,
+                                        ResponsibilityRollout rollout, ResponsibilityRunFollowUp followUp,
+                                        com.sellerops.responsibility.aside.AsideSourceObserver aside,
+                                        com.sellerops.responsibility.aside.AsideMarketplaceAccess marketplaceAccess,
+                                        com.sellerops.responsibility.aside.AsideMarketplaceTarget marketplaceTargets) {
         if (lease.isNegative() || lease.isZero()) {
             throw new IllegalStateException("sellerops.responsibility.lease-seconds는 1 이상이어야 합니다.");
         }
@@ -148,6 +176,9 @@ public class ResponsibilityRunCoordinator {
         this.heartbeat = heartbeat;
         this.rollout = rollout;
         this.followUp = followUp;
+        this.aside = aside;
+        this.marketplaceAccess = marketplaceAccess;
+        this.marketplaceTargets = marketplaceTargets;
     }
 
     public String owner() {
@@ -305,6 +336,9 @@ public class ResponsibilityRunCoordinator {
                     return;
                 }
             }
+            if (!beat.lost()) {
+                observeDeviceSource(run, responsibility, required);
+            }
             if (followUp != null && !beat.lost()) {
                 try {
                     // While the lease is held: a crash here is reclaimed like any other and this is called again.
@@ -332,6 +366,105 @@ public class ResponsibilityRunCoordinator {
         } finally {
             beat.stop();
         }
+    }
+
+    /**
+     * <b>The observations an installed helper carries (Scheduled Aside v1, Marketplace Scheduled Operations).</b>
+     *
+     * <p>Runs after the channel sources and outside {@code required} on purpose, and that stays true for both
+     * kinds of recipe. These are not sources the seller is owed: a helper that is asleep must not make a run
+     * report 「확인하지 못함」 about the seller's own data, must not fail the run, and must not schedule a retry.
+     * Each recipe's own row still says exactly what happened, including that nothing was read.
+     *
+     * <p>Every recipe is gated independently, so turning one lane on opens nothing about the other — the loopback
+     * read asks {@code AsideSourceObserver#enabledFor}, and a marketplace read asks {@code AsideMarketplaceAccess}
+     * for the organisation and (when it resolves the store) for the exact seller account. A settled row for this
+     * window is never re-observed: the same window asks once, per recipe.
+     */
+    private void observeDeviceSource(ResponsibilityRun run, Responsibility responsibility,
+                                     List<ResponsibilitySources.ResolvedSource> required) {
+        if (aside == null || required.isEmpty()) {
+            return;
+        }
+        for (String declared : responsibility.getTemplateCode().deviceRecipes()) {
+            com.sellerops.responsibility.aside.AsideRecipe recipe;
+            try {
+                recipe = com.sellerops.responsibility.aside.AsideRecipe.valueOf(declared);
+            } catch (IllegalArgumentException unknown) {
+                // A template naming a recipe this build does not publish opens nothing. Refusing beats improvising.
+                log.warn("responsibility: 알 수 없는 device recipe 선언 template={}", responsibility.getTemplateCode());
+                continue;
+            }
+            observeDeviceRecipe(run, recipe, required);
+        }
+    }
+
+    /**
+     * One device-carried recipe, from «is this open for this seller» to a recorded row.
+     *
+     * <p>The two kinds differ only in what the row is ABOUT, and that is decided here rather than downstream: a
+     * loopback read is recorded against the run's anchor account under a data type no channel uses, while a
+     * marketplace read is recorded against the named seller account under the channel and data type the recipe
+     * itself declares — so a surface reading these rows sees a Coupang review read for what it is.
+     */
+    private void observeDeviceRecipe(ResponsibilityRun run, com.sellerops.responsibility.aside.AsideRecipe recipe,
+                                     List<ResponsibilitySources.ResolvedSource> required) {
+        UUID accountId;
+        String channelCode;
+        String dataType;
+        if (recipe.readsMarketplace()) {
+            if (marketplaceAccess == null || !marketplaceAccess.allows(recipe, run.getOrgId())) {
+                return;
+            }
+            // Which store — and it is the resolver, not this method, that decides there is exactly one named
+            // candidate. No target is «we cannot say which store this would read», and we do not read one.
+            Optional<com.sellerops.responsibility.aside.AsideMarketplaceTarget.Target> target =
+                    marketplaceTargets == null ? Optional.empty() : marketplaceTargets.resolve(run.getOrgId(), recipe);
+            if (target.isEmpty()) {
+                return;
+            }
+            accountId = target.get().sellerAccountId();
+            channelCode = recipe.channelCode().orElseThrow();
+            dataType = recipe.dataType().orElseThrow().name();
+        } else {
+            if (!aside.enabledFor(run.getOrgId())) {
+                return;
+            }
+            ResponsibilitySources.ResolvedSource anchor = required.get(0);
+            accountId = anchor.account().getId();
+            channelCode = anchor.channelCode();
+            dataType = com.sellerops.responsibility.aside.AsideSourceObserver.DATA_TYPE;
+        }
+        List<ResponsibilityRunSource> history =
+                sourceRows.findByRunIdAndSellerAccountIdAndDataTypeOrderByAttemptDesc(run.getId(), accountId, dataType);
+        if (!history.isEmpty() && history.get(0).getCompleteness() != null
+                && history.get(0).getCompleteness().settled()) {
+            return; // R6, for this lane too: a settled source is not read again in the same window
+        }
+        ResponsibilityRun held = runs.findById(run.getId()).orElse(null);
+        if (held == null || !held.heldBy(owner)) {
+            return;
+        }
+        ResponsibilityRunSource row = ResponsibilityRunSource.openDevice(held, accountId, channelCode,
+                dataType, recipe.name(), now());
+        if (!guardedSave(run.getId(), row)) {
+            return;
+        }
+        // The baseline is scoped to THIS account read by THIS method: an unattended Coupang review read records
+        // REVIEW, and so does the Cafe24 API collection beside it, so an org-and-data-type baseline would compare
+        // one store's digest against another store's row.
+        List<ResponsibilityRunSource> earlier = sourceRows.latestSettledDeviceRead(run.getOrgId(), accountId,
+                dataType, ResponsibilitySources.METHOD_DEVICE, run.getId(),
+                org.springframework.data.domain.PageRequest.of(0, 1));
+        com.sellerops.responsibility.aside.AsideSourceObserver.Prior prior = earlier.isEmpty()
+                ? com.sellerops.responsibility.aside.AsideSourceObserver.Prior.NONE
+                : new com.sellerops.responsibility.aside.AsideSourceObserver.Prior(
+                        earlier.get(0).getCursorTo(), earlier.get(0).getObservedCount());
+        // The recipe tag keeps two recipes in one run from colliding on an id that is idempotent by design.
+        String clientJobId = "rr-run:" + run.getId() + ":" + recipe.jobTag();
+        SourceObservation observation = aside.observe(run.getOrgId(), run.getId(), clientJobId, recipe, prior);
+        row.record(observation);
+        guardedSave(run.getId(), row);
     }
 
     /** @return false when this instance no longer holds the run. */

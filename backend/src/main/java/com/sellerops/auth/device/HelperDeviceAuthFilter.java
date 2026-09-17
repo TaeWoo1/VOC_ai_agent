@@ -67,7 +67,13 @@ public class HelperDeviceAuthFilter extends OncePerRequestFilter {
             new Route(HttpMethod.POST, "/api/agent/review-acquisition-targets"),
             new Route(HttpMethod.POST, "/api/agent/reply-submission-targets"),
             new Route(HttpMethod.GET, "/api/helper-devices/me"),
-            new Route(HttpMethod.DELETE, "/api/helper-devices/me"));
+            new Route(HttpMethod.DELETE, "/api/helper-devices/me"),
+            // Scheduled Aside v1 — the one thing an installed helper may do with nobody watching: ask whether a
+            // job is queued for IT, and report what that job came to. Deliberately narrow. The helper cannot
+            // name the work (the recipe is an allowlisted enum on the row), cannot name a target (no job column
+            // holds a URL), cannot reach another device's job (the device id comes from its own validated token,
+            // never from the request) and cannot run twice (the claim is single-use).
+            new Route(HttpMethod.POST, "/api/helper-devices/jobs"));
 
     private final ObjectProvider<HelperDeviceService> devices;
     private final OrganizationRepository organizations;

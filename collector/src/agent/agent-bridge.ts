@@ -9,7 +9,7 @@
  * `skipped` so the agent keeps running without a competing bridge instead of crashing.
  */
 
-import { BridgeServer, type DeviceLinkEndpoint,
+import { BridgeServer, type CustomerOperationsFixtureEndpoint, type DeviceLinkEndpoint,
   type StoreIdentityBootstrapEndpoint } from "../bridge/bridge-server";
 import { FilePairingStore } from "../bridge/pairing-store";
 import type { ApprovalPresenter } from "../bridge/approval-presenter";
@@ -279,6 +279,11 @@ export interface AgentBridgeConfig {
   deviceLink?: DeviceLinkEndpoint;
   /** See `StoreIdentityBootstrapEndpoint`. Absent ⇒ the loopback bootstrap route is 404. */
   storeIdentityBootstrap?: StoreIdentityBootstrapEndpoint;
+  /**
+   * Scheduled Aside v1: the owned observation surface this helper hosts, if any. Absent ⇒ the route is 404,
+   * so a helper hosts no such page unless it was configured to — see `CustomerOperationsFixtureEndpoint`.
+   */
+  customerOperationsFixture?: CustomerOperationsFixtureEndpoint;
 }
 
 export type AgentBridgeListenResult =
@@ -511,6 +516,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     ...(cfg.onSellerOpsConnected ? { onSellerOpsConnected: cfg.onSellerOpsConnected } : {}),
     ...(cfg.deviceLink ? { deviceLink: cfg.deviceLink } : {}),
     ...(cfg.storeIdentityBootstrap ? { storeIdentityBootstrap: cfg.storeIdentityBootstrap } : {}),
+    ...(cfg.customerOperationsFixture ? { customerOperationsFixture: cfg.customerOperationsFixture } : {}),
   });
   const settle = settleObserverToPort(server.events, cfg.refSalt);
   let active = false;

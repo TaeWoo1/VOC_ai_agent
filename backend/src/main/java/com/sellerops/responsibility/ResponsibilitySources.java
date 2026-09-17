@@ -27,6 +27,13 @@ public class ResponsibilitySources {
 
     public static final String METHOD_API = "API";
 
+    /**
+     * A read carried by an installed helper on the seller's own machine rather than by a channel's API
+     * (Scheduled Aside v1). Recorded rather than hidden: how a row was observed is part of what it means, and a
+     * device-carried observation must never be indistinguishable from one an official API answered.
+     */
+    public static final String METHOD_DEVICE = "BRIDGE_ASIDE";
+
     public record ResolvedSource(SellerAccount account, String channelCode, DataType dataType) {
     }
 

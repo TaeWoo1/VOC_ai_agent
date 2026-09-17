@@ -399,6 +399,39 @@ sellerops:
     # Package B rollout. A window is worked only for an organisation named here AND whose responsibility is ACTIVE —
     # seller acceptance alone opens nothing. Explicit organisation UUIDs, comma-separated; blank = nobody; no wildcard.
     runtime-org-ids: ${RESPONSIBILITY_RUNTIME_ORG_IDS:}
+    # Scheduled Aside v1 (Package C §3): a run may additionally ask this organisation's INSTALLED helper to read one
+    # surface Reviewnary itself serves on loopback. Off by default and named per organisation, exactly like the
+    # rollout above — a helper never runs anything unattended because a build happened to contain this code. The
+    # job carries no URL, prompt, script or credential: the recipe is an allow-listed enum and the helper resolves
+    # it to its own fixture route, refusing any other target locally. Never a marketplace.
+    aside:
+      enabled: ${SELLEROPS_RESPONSIBILITY_ASIDE_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_RESPONSIBILITY_ASIDE_ORG_IDS:}
+      # How long a run waits for the helper to take the job and report. Bounded: a helper that never answers
+      # leaves NONE + DEVICE_OFFLINE, never a zero.
+      #
+      # PILOT_ACCEPTED_LIMITATION: this wait is spent INSIDE the run thread (the same shape as adopt-wait-seconds
+      # for a channel collection). Accepted for the first pilot — one organisation, one device, one recipe — and
+      # deliberately far under lease-seconds so a waiting run never loses its own lease. A deployment with many
+      # organisations should move to an asynchronous hand-off rather than a longer wait.
+      wait-seconds: ${SELLEROPS_RESPONSIBILITY_ASIDE_WAIT_SECONDS:120}
+      # Marketplace Scheduled Operations: the same lane, pointed at the seller's OWN store screen instead of a
+      # surface we serve ourselves. Its own switch and its own two lists, because it is its own decision — the
+      # loopback lane above never consults these, and turning these on widens nothing that was already running.
+      #
+      # The account list is what makes this different from every other rollout in this file. An organisation is
+      # not enough: a deployment must name the exact seller account whose store may be read while nobody is
+      # watching. Blank is nobody on both lines, there is no wildcard, and an unparsable id fails at boot rather
+      # than quietly becoming «nobody» (which would read as «off» while being a misconfiguration).
+      #
+      # What the job still cannot carry: a URL, a prompt, a script, a credential. The recipe name is the whole
+      # instruction; the helper resolves it to one route its own bound workflow publishes, screens that route
+      # with the product's WING classifier before opening anything, reads ONE page, and performs zero clicks,
+      # zero keystrokes, zero downloads and zero writes.
+      marketplace:
+        enabled: ${SELLEROPS_RESPONSIBILITY_ASIDE_MARKETPLACE_ENABLED:false}
+        enabled-org-ids: ${SELLEROPS_RESPONSIBILITY_ASIDE_MARKETPLACE_ORG_IDS:}
+        enabled-account-ids: ${SELLEROPS_RESPONSIBILITY_ASIDE_MARKETPLACE_ACCOUNT_IDS:}
     # The case investigator (Package B §4): the eleventh LLM capability. Its payload is one REDACTED customer inquiry
     # or review plus closed facts and short excerpts of the seller's own knowledge. Off three ways, never widened by
     # the Agent access policy, and reached only for a case the deterministic rules could not settle.

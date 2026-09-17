@@ -47,8 +47,11 @@ class ScreenReadReadinessTest {
     private final HelperDeviceRepository helperDevices = mock(HelperDeviceRepository.class);
     private final ChannelReviewAcquisitionRefRepository refs = mock(ChannelReviewAcquisitionRefRepository.class);
     private final CredentialVault vault = mock(CredentialVault.class);
+    /** The unattended lane is off here, which is its shipped value — these tests are about the pressed one. */
     private final ChannelReviewAcquisitionService service =
-            new ChannelReviewAcquisitionService(accounts, channels, slots, slotService, helperDevices, refs, vault);
+            new ChannelReviewAcquisitionService(accounts, channels, slots, slotService, helperDevices, refs, vault,
+                    new com.sellerops.responsibility.aside.AsideMarketplaceAccess(false, java.util.Set.of(),
+                            java.util.Set.of()));
 
     /** The one fact the third condition reads: is a helper linked to this reviewnary account. */
     private void helperLinked(boolean linked) {

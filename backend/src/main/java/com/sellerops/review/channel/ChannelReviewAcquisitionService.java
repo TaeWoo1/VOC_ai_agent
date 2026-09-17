@@ -9,6 +9,9 @@ import com.sellerops.review.channel.dto.ChannelReviewAcquisitionReadinessView;
 import com.sellerops.review.channel.dto.ChannelReviewAcquisitionRunResponse;
 import com.sellerops.review.channel.dto.StoreIdentityRequest;
 import com.sellerops.auth.device.HelperDeviceRepository;
+import com.sellerops.responsibility.aside.AsideMarketplaceAccess;
+import com.sellerops.responsibility.aside.AsideMarketplaceTarget;
+import com.sellerops.responsibility.aside.AsideRecipe;
 import com.sellerops.selleraccount.AccountSessionSlot;
 import com.sellerops.selleraccount.AccountSessionSlotRepository;
 import com.sellerops.selleraccount.AccountSessionSlotService;
@@ -18,7 +21,11 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,7 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
  * turning the pages. Nothing here touches a marketplace.
  */
 @Service
-public class ChannelReviewAcquisitionService {
+public class ChannelReviewAcquisitionService implements AsideMarketplaceTarget {
 
     static final String COUPANG = "COUPANG";
     static final Duration REF_TTL = Duration.ofMinutes(10);
@@ -50,13 +57,15 @@ public class ChannelReviewAcquisitionService {
     private final HelperDeviceRepository helperDevices;
     private final ChannelReviewAcquisitionRefRepository refs;
     private final CredentialVault vault;
+    private final AsideMarketplaceAccess marketplaceAccess;
 
     public ChannelReviewAcquisitionService(SellerAccountRepository accounts, ChannelRepository channels,
                                            AccountSessionSlotRepository slots,
                                            AccountSessionSlotService slotService,
                                            HelperDeviceRepository helperDevices,
                                            ChannelReviewAcquisitionRefRepository refs,
-                                           CredentialVault vault) {
+                                           CredentialVault vault,
+                                           AsideMarketplaceAccess marketplaceAccess) {
         this.accounts = accounts;
         this.channels = channels;
         this.slots = slots;
@@ -64,6 +73,57 @@ public class ChannelReviewAcquisitionService {
         this.helperDevices = helperDevices;
         this.refs = refs;
         this.vault = vault;
+        this.marketplaceAccess = marketplaceAccess;
+    }
+
+    /**
+     * <b>Which store an unattended run reads, for a recipe that reads a marketplace at all.</b>
+     *
+     * <p>This class implements the seam rather than a new one being written beside it, and that is the point:
+     * {@link #expectedStoreFingerprint} is the single statement of «which store is this account», and a second
+     * copy for the scheduled lane is the copy that would go stale. The scheduled run therefore gets the SAME
+     * expectation the seller-pressed run gets, derived the same way, from the same two places in the same order.
+     *
+     * <p><b>Exactly one named account, or nothing.</b> The candidates are this org's non-file-upload accounts on
+     * the recipe's channel, filtered by the deployment's account allow-list. Anything but a single survivor is
+     * empty — no account, none named, or two named — because a run that cannot say WHICH store it would read
+     * must not read one, and picking the oldest would answer a question nobody asked.
+     *
+     * <p>Connection status is deliberately not a condition. This lane reads the seller's own authenticated
+     * screen and calls no Coupang API, which was measured on an account that never completed an OpenAPI
+     * connection (evidence 2026-09-14); requiring CONNECTED here would refuse a read that demonstrably works.
+     * The expectation may then be absent, and absent is a stop downstream rather than a pass.
+     */
+    @Override
+    @Transactional
+    public Optional<Target> resolve(UUID orgId, AsideRecipe recipe) {
+        if (orgId == null || recipe == null || !recipe.readsMarketplace()) {
+            return Optional.empty();
+        }
+        String channelCode = recipe.channelCode().orElse(null);
+        if (!readsReviewsFromScreen(channelCode)) {
+            // A recipe naming a channel this service does not read from a screen resolves to nothing, rather
+            // than to this service's own channel. Refusing beats substituting.
+            return Optional.empty();
+        }
+        if (!marketplaceAccess.allows(recipe, orgId)) {
+            return Optional.empty();
+        }
+        Map<UUID, String> codeByChannel = channels.findAll().stream()
+                .collect(Collectors.toMap(Channel::getId, Channel::getCode, (a, b) -> a));
+        List<SellerAccount> named = accounts.findAllByOrgId(orgId).stream()
+                .filter(a -> !a.isFileUpload())
+                .filter(a -> channelCode.equals(codeByChannel.get(a.getChannelId())))
+                .filter(a -> marketplaceAccess.allowsAccount(a.getId()))
+                .toList();
+        if (named.size() != 1) {
+            return Optional.empty();
+        }
+        SellerAccount account = named.get(0);
+        // Find-or-create, exactly as the pressed lane does at mint: the handoff resolves the account BY slot, so
+        // a run whose account has never been given one would read a page and have no route to hand it back.
+        String slot = slotService.resolveSlot(orgId, account.getId(), account.getChannelId());
+        return Optional.of(new Target(account.getId(), slot, expectedStoreFingerprint(orgId, account)));
     }
 
     /**

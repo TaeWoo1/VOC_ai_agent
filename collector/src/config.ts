@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExecutionProviderKind } from "./action-window/initial-import/execution-provider";
 import { EXECUTION_PROVIDER_ENV, parseExecutionProvider } from "./action-window/initial-import/execution-provider-selection";
+import { isFixtureDataset, type FixtureDataset } from "./bridge/customer-operations-fixture";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -53,7 +54,28 @@ export const HELPER_ENV_KEYS = [
   // nowhere else. Without this key the provider above can be selected on an installed helper and then
   // cannot spawn anything.
   "ASIDE_CLI",
+  // WHICH browser profile that CLI drives. Declared for exactly the reason above and found the same way: the
+  // config already read it and `parseHelperEnv` already filtered it out, so on a packaged install a machine
+  // whose Aside holds more than one account had no way to say which one — and the default account is not a
+  // safe guess when the thing being opened is the seller's own store. Opaque, never logged, never a secret.
+  "ASIDE_ACCOUNT",
+  // Scheduled Aside v1: which owned observation surface this helper hosts, if any. Declared for the same
+  // reason as the two above — `parseHelperEnv` filters to this list, so an undeclared key is invisible to a
+  // packaged install and the switch would exist only in a developer shell. Unset means the helper hosts no
+  // such page at all (the route is 404); it never means "host the default one".
+  "REVIEWNARY_CO_FIXTURE_DATASET",
 ] as const;
+
+/**
+ * Unset, blank or unrecognized all mean the same thing: host nothing. Deliberately NOT fail-closed-by-throwing
+ * like `parseExecutionProvider` — that switch changes how a real seller's screen is read, while this one only
+ * decides whether a synthetic page is served, and refusing to boot the whole helper over it would be a worse
+ * trade than simply not hosting it.
+ */
+function fixtureDatasetOf(raw: string | undefined): FixtureDataset | undefined {
+  const value = (raw ?? "").trim();
+  return isFixtureDataset(value) ? value : undefined;
+}
 
 export function parseHelperEnv(text: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -147,6 +169,14 @@ export interface CollectorConfig {
   asideCli: string;
   /** `--account <id>` for the Aside CLI when the seller's Aside holds several accounts. Opaque; optional. */
   asideAccount: string | undefined;
+  /**
+   * **The owned observation surface this helper hosts (Scheduled Aside v1).** `undefined` — the default and
+   * the value of anything unrecognized — means the helper hosts nothing and the route stays 404. A page that
+   * exists to be read by an unattended job should be brought up deliberately, so there is no default dataset:
+   * a typo hosts nothing rather than quietly serving «initial», which would make a changed surface read as
+   * unchanged. Synthetic by construction; it carries no seller, customer or order data.
+   */
+  customerOperationsFixture: FixtureDataset | undefined;
   /** Local status file the collector writes after each run. */
   statusFile: string;
   /** Review-management/export URL (live layer; unknown until milestone 1). */
@@ -268,6 +298,7 @@ export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env): CollectorCo
     executionProvider: parseExecutionProvider(env[EXECUTION_PROVIDER_ENV]),
     asideCli: env.ASIDE_CLI && env.ASIDE_CLI.trim() !== "" ? env.ASIDE_CLI.trim() : "aside",
     asideAccount: env.ASIDE_ACCOUNT && env.ASIDE_ACCOUNT.trim() !== "" ? env.ASIDE_ACCOUNT.trim() : undefined,
+    customerOperationsFixture: fixtureDatasetOf(env.REVIEWNARY_CO_FIXTURE_DATASET),
     statusFile: env.COLLECTOR_STATUS_FILE ?? resolve(home, ".status/naver.json"),
     naverReviewUrl: env.NAVER_REVIEW_URL,
     appUrl: env.SELLEROPS_APP_URL ?? "http://localhost:5173",

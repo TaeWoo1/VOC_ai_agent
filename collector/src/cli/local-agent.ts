@@ -114,6 +114,7 @@ import type { ResolvedLaunchScope } from "../action-window/initial-import/import
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
 import { fetchLaunchScope, reportSessionReadiness } from "../upload";
 import { backendBearer, DeviceLinker } from "../auth/helper-session";
+import { startFixtureObserveLoop, type FixtureObserveLoop } from "../aside/fixture-observe-runner";
 import { AW_CARRIER_REPLY } from "../../../contracts/action-window/aw-carrier-kind";
 import { ReplySubmissionEndpoint } from "../bridge/reply-submission-endpoint";
 import { ResidentReplyCarrier } from "../action-window/reply-submission/resident-reply-carrier";
@@ -2350,6 +2351,12 @@ export async function runBridgeOnlyBoot(
       // learn an identifier it has no other use for.
       read: () => STORE_IDENTITY_BOOTSTRAP.latest()?.outcome ?? { state: "NONE" },
     },
+    // Scheduled Aside v1: host the owned observation surface only when this helper was configured to. An
+    // unset switch hosts nothing — the route stays 404 — so a page that exists to be read unattended is
+    // never brought up by an ordinary install that merely happens to run this build.
+    ...(linkCfg.customerOperationsFixture
+      ? { customerOperationsFixture: { dataset: () => linkCfg.customerOperationsFixture! } }
+      : {}),
   });
   const listen = await bridge.listen();
   print(
@@ -2376,11 +2383,61 @@ export async function runBridgeOnlyBoot(
   }
   bridge.markAgentStarted();
 
+  // Scheduled Aside: offer to run the published recipes. Two conditions, both required — this helper was
+  // explicitly configured for one of the unattended lanes, and it is linked to the backend that would hand out
+  // the work. Neither is a default, so an ordinary resident helper starts no loop, claims nothing, and runs
+  // nothing unattended. The loop only ever ASKS; when an observation happens is the backend's window, not this
+  // timer's, and WHAT may be asked for is the backend's gate, not this flag.
+  //
+  // The marketplace lane additionally requires `REVIEWNARY_EXECUTION_PROVIDER=ASIDE` on THIS machine — the same
+  // explicit per-machine opt-in the seller-pressed Coupang read already uses. Without it `reviewHandoff` is
+  // absent and a marketplace recipe is refused here without opening anything.
+  let fixtureLoop: FixtureObserveLoop | null = null;
+  const marketplaceLane = linkCfg.executionProvider === "ASIDE";
+  if (linkCfg.customerOperationsFixture || marketplaceLane) {
+    try {
+      const token = await backendBearer(linkCfg, env);
+      // The same screen the credential handoff and the pressed acquisition apply, and for the same reason: a
+      // stale environment value must not be able to send a page of what customers wrote to an arbitrary host.
+      const screened = screenCredentialBackendOrigin(linkCfg.baseUrl);
+      const handoffOrigin = marketplaceLane && screened.ok ? screened.origin : null;
+      if (marketplaceLane && !screened.ok) {
+        log("aside_marketplace_handoff_refused", { reason: screened.reason }, "warn");
+      }
+      fixtureLoop = startFixtureObserveLoop({
+        baseUrl: linkCfg.baseUrl,
+        token,
+        bridgePort: listen.port,
+        asideCli: linkCfg.asideCli,
+        ...(linkCfg.asideAccount ? { asideAccount: linkCfg.asideAccount } : {}),
+        ...(handoffOrigin
+          ? { reviewHandoff: (request) => postCoupangReviewHandoff(handoffOrigin, token, request) }
+          : {}),
+        // The NAVER Seller Center review lane rides the same explicit per-machine opt-in. Its rows go only to
+        // this loop's own origin, with its own device token, for the job it holds.
+        naverReviewLane: marketplaceLane,
+        // The NAVER Seller Center 상품 문의 lane rides the same explicit per-machine opt-in.
+        naverProductInquiryLane: marketplaceLane,
+        // Closed tokens only: what an operator reads, never what a page said.
+        onCycle: (r) =>
+          log("aside_fixture_cycle", r.kind === "REPORTED" ? { kind: r.kind, outcome: r.outcome } : { kind: r.kind }),
+      });
+      log("aside_fixture_loop_started", {
+        ...(linkCfg.customerOperationsFixture ? { dataset: linkCfg.customerOperationsFixture } : {}),
+        marketplace: handoffOrigin !== null,
+      });
+    } catch {
+      // Not linked to this backend: there is nobody to ask for work, and that is not an error to crash on.
+      log("aside_fixture_loop_skipped", { linked: false });
+    }
+  }
+
   let resolveStopped: () => void = () => {};
   const stopped = new Promise<void>((r) => (resolveStopped = r));
   const shutdown = createSignalShutdown(async () => {
     bridge.markAgentStopping();
     deviceLinker.stop();
+    fixtureLoop?.stop();
     // A window the on-demand walk opened must not outlive the helper that opened it.
     await carrierHost.disposeActive().catch(() => {});
     await bridge.close().catch(() => {});
