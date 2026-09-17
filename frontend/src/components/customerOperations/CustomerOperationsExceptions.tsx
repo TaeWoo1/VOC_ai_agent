@@ -13,6 +13,7 @@ import {
   subjectFallback,
   subjectKindKo,
   unobservedLine,
+  VERIFYING_WORD,
 } from "../../lib/customerOperations";
 import type { CustomerOperationsDecisionRow, CustomerOperationsHome } from "../../lib/customerOperationsTypes";
 
@@ -68,7 +69,7 @@ export function CustomerOperationsExceptions({
           <Disclosure label="정리한 일 보기" note={`${home.handled.rows.length}건`} className="mt-2">
             <ul className="mt-2 divide-y divide-line rounded-xl border border-line bg-surface">
               {home.handled.rows.map((row) => {
-                const word = dispositionWord(row.disposition);
+                const word = row.verifying || row.disposition === "NEEDS_DECISION" ? VERIFYING_WORD : dispositionWord(row.disposition);
                 return (
                   <li key={row.caseId} className="p-3">
                     <Link
@@ -84,6 +85,8 @@ export function CustomerOperationsExceptions({
                         {row.rating !== null ? <span>별점 {row.rating}점</span> : null}
                       </p>
                       <p className="mt-1 break-keep text-ink">{row.title ?? subjectFallback(row.subjectKind)}</p>
+                      {/* The area's headline already states what «처리 확인 중» means; a row repeating that
+                          sentence would say one fact twice. The row says what the case is about instead. */}
                       <p className="mt-1 break-keep text-sm text-muted">{row.summary ?? row.reasonNote}</p>
                     </Link>
                   </li>

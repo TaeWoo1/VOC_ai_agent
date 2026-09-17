@@ -173,8 +173,18 @@ export function handledLine(handled: CustomerOperationsHome["handled"]): string 
   if (handled.draftsPrepared > 0) {
     parts.push(`답변 초안 ${handled.draftsPrepared.toLocaleString("ko-KR")}건을 준비했습니다(아직 보내지 않았습니다)`);
   }
+  if (handled.verifying > 0) {
+    // Never «보냈습니다» or «처리했습니다»: the execution record owns that sentence, and it has not said it yet.
+    parts.push("승인한 작업의 처리 결과를 확인하고 있습니다");
+  }
   return parts.length === 0 ? "최근 24시간 동안 정리하거나 준비한 일은 없습니다." : `${parts.join(" · ")}.`;
 }
+
+/**
+ * The row's own word while the result is being read back. It reports what Reviewnary is doing — reading — and
+ * says nothing about what the channel did, because at this moment nobody knows that yet.
+ */
+export const VERIFYING_WORD: { label: string; tone: StatusTone } = { label: "처리 확인 중", tone: "info" };
 
 /** ③ — gaps the seller can fix, then what the last check could not finish on its own. */
 export function unobservedLine(home: Pick<CustomerOperationsHome, "gaps" | "sources" | "lastCheckedAt">): string {

@@ -8,6 +8,7 @@ import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.InquiryOrderFactReader;
+import com.sellerops.inquiry.publish.ReplyDecisionHistoryReader;
 import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
 import com.sellerops.knowledge.org.dto.OrgKnowledgeSearchResponse;
 import com.sellerops.operationscase.OperationsCase;
@@ -27,6 +28,7 @@ import com.sellerops.reviewissue.ReviewIssueEvidenceRepository;
 import com.sellerops.reviewissue.ReviewIssueRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -39,6 +41,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
 /**
@@ -61,6 +64,8 @@ public class CaseInvestigationTools {
 
     static final int MAX_BODY = 1200;
     static final int MAX_EXCERPT = 300;
+    /** Past decisions are evidence, not a corpus: a few per kind, newest first. */
+    static final int MAX_DECISIONS = 3;
     static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final InquiryRepository inquiries;
@@ -73,12 +78,15 @@ public class CaseInvestigationTools {
     private final ReviewIssueRepository issues;
     private final ReviewIssueEvidenceRepository issueEvidence;
     private final OperationsCaseRepository cases;
+    /** The inquiry-side decisions, read through the package that owns them — this one may not name an approval. */
+    private final ReplyDecisionHistoryReader replyDecisions;
 
     public CaseInvestigationTools(InquiryRepository inquiries, ReviewRepository reviews, ChannelRepository channels,
                                   ProductRepository products, ProductKnowledgeLibraryService productKnowledge,
                                   SellerOperationsKnowledgeService orgKnowledge, InquiryOrderFactReader orderFacts,
                                   ReviewIssueRepository issues, ReviewIssueEvidenceRepository issueEvidence,
-                                  OperationsCaseRepository cases) {
+                                  OperationsCaseRepository cases, ReplyDecisionHistoryReader replyDecisions) {
+        this.replyDecisions = replyDecisions;
         this.inquiries = inquiries;
         this.reviews = reviews;
         this.channels = channels;
@@ -123,10 +131,18 @@ public class CaseInvestigationTools {
     public record SimilarCase(String kind, String disposition, String recommendedActionType, String resolution) {
     }
 
-    public record PastDecisions(Map<String, Long> reviewDispositions, Map<String, Long> inquiryDraftAuthors) {
+    /**
+     * One decision this seller actually made, reduced to what may be shown to an investigation: which kind of
+     * decision it was, the closed token they chose, and the day they chose it. No identifier, no approver, no text.
+     */
+    public record SellerDecision(String kind, String what, LocalDate on) {
+    }
+
+    public record PastDecisions(Map<String, Long> reviewDispositions, Map<String, Long> inquiryDraftAuthors,
+                                List<SellerDecision> decisions) {
 
         boolean isEmpty() {
-            return reviewDispositions.isEmpty() && inquiryDraftAuthors.isEmpty();
+            return reviewDispositions.isEmpty() && inquiryDraftAuthors.isEmpty() && decisions.isEmpty();
         }
     }
 
@@ -249,6 +265,7 @@ public class CaseInvestigationTools {
         public PastDecisions getPastSellerDecisions(UUID productId) {
             Map<String, Long> reviewDispositions = new LinkedHashMap<>();
             Map<String, Long> draftAuthors = new LinkedHashMap<>();
+            List<SellerDecision> made = new ArrayList<>();
             if (productId != null) {
                 for (Object[] row : cases.reviewDecisionsForProduct(orgId, productId)) {
                     reviewDispositions.put(String.valueOf(row[0]), ((Number) row[1]).longValue());
@@ -258,11 +275,34 @@ public class CaseInvestigationTools {
                         draftAuthors.put(String.valueOf(row[0]), ((Number) row[1]).longValue());
                     }
                 }
+                // What this company decided, one decision at a time. Counts say how often; these say what.
+                for (ReplyDecisionHistoryReader.ReplyDecision approved
+                        : replyDecisions.onProduct(orgId, productId, MAX_DECISIONS)) {
+                    made.add(new SellerDecision("REPLY_APPROVED", "v" + approved.approvedDraftVersion(),
+                            day(approved.decidedAt())));
+                }
+                for (Object[] row : cases.recentReviewDecisionsForProduct(orgId, productId,
+                        PageRequest.of(0, MAX_DECISIONS))) {
+                    made.add(new SellerDecision("REVIEW_TRIAGED", String.valueOf(row[0]), day((Instant) row[1])));
+                }
+                for (Object[] row : cases.recentTriageCorrectionsForProduct(orgId, productId,
+                        PageRequest.of(0, MAX_DECISIONS))) {
+                    made.add(new SellerDecision("TRIAGE_CORRECTED",
+                            nullSafeToken(row[0]) + "→" + nullSafeToken(row[1]), day((Instant) row[2])));
+                }
             }
-            PastDecisions decisions = new PastDecisions(reviewDispositions, draftAuthors);
+            PastDecisions decisions = new PastDecisions(reviewDispositions, draftAuthors, List.copyOf(made));
             record("getPastSellerDecisions", String.valueOf(productId),
-                    reviewDispositions.size() + draftAuthors.size());
+                    reviewDispositions.size() + draftAuthors.size() + made.size());
             return decisions;
+        }
+
+        private static String nullSafeToken(Object token) {
+            return token == null ? "-" : String.valueOf(token);
+        }
+
+        private static LocalDate day(Instant at) {
+            return at == null ? null : at.atZone(KST).toLocalDate();
         }
 
         private SubjectFacts inquiryFacts(Inquiry inquiry) {

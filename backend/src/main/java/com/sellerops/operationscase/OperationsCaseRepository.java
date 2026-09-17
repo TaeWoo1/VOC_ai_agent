@@ -128,6 +128,32 @@ public interface OperationsCaseRepository extends JpaRepository<OperationsCase, 
             """)
     List<Object[]> inquiryDraftAuthorsForProduct(@Param("orgId") UUID orgId, @Param("productId") UUID productId);
 
+    /**
+     * The individual review judgements this seller recorded on a product, newest first — the decisions themselves,
+     * where {@link #reviewDecisionsForProduct} only counts them. Evidence for the next investigation; nothing reads
+     * these to change a threshold or a policy.
+     */
+    @Query("""
+            select t.disposition, t.decidedAt from ReviewTriage t, Review r
+            where r.id = t.reviewId and t.orgId = :orgId and r.orgId = :orgId and r.productId = :productId
+            order by t.decidedAt desc
+            """)
+    List<Object[]> recentReviewDecisionsForProduct(@Param("orgId") UUID orgId, @Param("productId") UUID productId,
+                                                   Pageable page);
+
+    /**
+     * Where the seller disagreed with the system's own judgement and said so, newest first. Only
+     * {@code STANDING} corrections are read: a withdrawn one is a trail entry, not this company's word.
+     */
+    @Query("""
+            select c.shownTier, c.correctedTier, c.correctedAt from TriageCorrection c, Review r
+            where r.id = c.reviewId and c.orgId = :orgId and r.orgId = :orgId and r.productId = :productId
+              and c.state = com.sellerops.review.triage.feedback.SellerCorrectionState.STANDING
+            order by c.correctedAt desc
+            """)
+    List<Object[]> recentTriageCorrectionsForProduct(@Param("orgId") UUID orgId, @Param("productId") UUID productId,
+                                                     Pageable page);
+
     @Query("""
             select c from OperationsCase c
             where c.orgId = :orgId and c.responsibilityId in :responsibilityIds and c.status = :status

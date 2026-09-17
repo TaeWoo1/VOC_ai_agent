@@ -41,12 +41,22 @@ public record CustomerOperationsHomeView(
                               String decidedBy, Instant openedAt, String to) {
     }
 
-    public record Handled(Instant since, long autoResolved, long monitoring, long draftsPrepared,
+    /**
+     * @param verifying open cases the seller already decided, whose result the canonical record has not yet
+     *                  settled. They are neither waiting for the seller nor finished — and a case that vanishes
+     *                  between those two moments reads as «gone», which is the one thing it is not.
+     */
+    public record Handled(Instant since, long autoResolved, long monitoring, long draftsPrepared, long verifying,
                           List<HandledRow> rows) {
     }
 
+    /**
+     * @param verifying the seller acted and Reviewnary is reading the result back. Never «sent» or «done»: that
+     *                  sentence belongs to the execution record, and only after it says so.
+     */
     public record HandledRow(UUID caseId, String subjectKind, String channelNameKo, String title, Integer rating,
-                             String disposition, String decidedBy, String reasonNote, String summary, String to) {
+                             String disposition, String decidedBy, String reasonNote, String summary,
+                             boolean verifying, String to) {
     }
 
     public record Gaps(long total, List<GapRow> rows) {
@@ -58,6 +68,6 @@ public record CustomerOperationsHomeView(
 
     public static CustomerOperationsHomeView unavailable(int cadenceMinutes) {
         return new CustomerOperationsHomeView(false, false, null, cadenceMinutes, null, null, null, List.of(),
-                new Decisions(0, List.of()), new Handled(null, 0, 0, 0, List.of()), new Gaps(0, List.of()));
+                new Decisions(0, List.of()), new Handled(null, 0, 0, 0, 0, List.of()), new Gaps(0, List.of()));
     }
 }

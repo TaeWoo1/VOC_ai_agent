@@ -46,14 +46,27 @@ describe("고객 운영 관리 — copy invariants", () => {
   });
 
   it("observed is not processed, and prepared is said with not-sent", () => {
-    expect(handledLine({ since: null, autoResolved: 0, monitoring: 0, draftsPrepared: 0, rows: [] })).toBe(
-      "최근 24시간 동안 정리하거나 준비한 일은 없습니다.",
-    );
-    const line = handledLine({ since: null, autoResolved: 2, monitoring: 1, draftsPrepared: 1, rows: [] });
+    expect(
+      handledLine({ since: null, autoResolved: 0, monitoring: 0, draftsPrepared: 0, verifying: 0, rows: [] }),
+    ).toBe("최근 24시간 동안 정리하거나 준비한 일은 없습니다.");
+    const line = handledLine({
+      since: null, autoResolved: 2, monitoring: 1, draftsPrepared: 1, verifying: 0, rows: [],
+    });
     expect(line).toContain("2건을 정리했습니다");
     expect(line).toContain("1건을 지켜보고 있습니다");
     expect(line).toContain("아직 보내지 않았습니다");
     expect(line).not.toMatch(/4건|처리했습니다|보냈습니다/);
+  });
+
+  it("a decided case being read back is said as reading, never as sent", () => {
+    const line = handledLine({
+      since: null, autoResolved: 0, monitoring: 0, draftsPrepared: 0, verifying: 2, rows: [],
+    });
+    expect(line).toContain("승인한 작업의 처리 결과를 확인하고 있습니다");
+    // The execution record owns delivery. Until it speaks, this area may not.
+    expect(line).not.toMatch(/보냈습니다|전송했습니다|처리 완료|처리했습니다|등록했습니다/);
+    // Nothing is summed across populations: two being verified is not two of anything else.
+    expect(line).not.toMatch(/2건을 정리했습니다|2건을 지켜보고/);
   });
 
   it("the three areas speak of their own population only", () => {

@@ -18,6 +18,14 @@ import com.sellerops.channel.ChannelStatus;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.InquiryOrderFactReader;
+import com.sellerops.inquiry.publish.AnswerDeliveryTruthReader;
+import com.sellerops.inquiry.publish.InquiryApprovalRepository;
+import com.sellerops.inquiry.publish.InquiryExecution;
+import com.sellerops.inquiry.publish.InquiryExecutionRepository;
+import com.sellerops.inquiry.publish.InquiryExecutionStatus;
+import com.sellerops.inquiry.publish.InquiryVerification;
+import com.sellerops.inquiry.publish.InquiryVerificationRepository;
+import com.sellerops.inquiry.publish.ReplyDecisionHistoryReader;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAudit;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
@@ -116,6 +124,9 @@ class OperationsCaseProcessorTest {
     @Autowired ReviewIssueRepository issues;
     @Autowired ReviewIssueEvidenceRepository issueEvidence;
     @Autowired InquiryWorkItemAuditRepository audits;
+    @Autowired InquiryExecutionRepository executions;
+    @Autowired InquiryVerificationRepository verifications;
+    @Autowired InquiryApprovalRepository approvals;
 
     private final CaseInvestigator investigator = mock(CaseInvestigator.class);
     private final CaseInvestigationService investigation = mock(CaseInvestigationService.class);
@@ -154,7 +165,7 @@ class OperationsCaseProcessorTest {
         run(baseline, null, null); // the first complete read — everything before it was already there
 
         reconciler = new OperationsCaseReconciler(cases, events, inquiries, workItems, reviews, accounts,
-                Clock.systemUTC());
+                new AnswerDeliveryTruthReader(executions, verifications), Clock.systemUTC());
         processor = processor(ResponsibilityRollout.of(List.of(org)));
         notifier = new OperationsCaseNotifier(runs, responsibilities, ResponsibilityRollout.of(List.of(org)), cases,
                 events, channels, users, mailer, "https://app.example", Clock.systemUTC());
@@ -392,11 +403,79 @@ class OperationsCaseProcessorTest {
     }
 
     @Test
+    void anExecutedReplyIsResolvedByQuotingTheAnswerLifecycle_notByTheCaseClaimingASend() {
+        Inquiry inquiry = inquiry("교환 가능한가요?", Instant.now());
+        InquiryWorkItem item = workItem(inquiry);
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        // The seller approved on the owning screen and the answer lifecycle ran. Those rows are the only place
+        // in this product allowed to state that an answer reached a customer; the case may read them, never mint
+        // its own word for them.
+        item.setPhase(InquiryWorkItemPhase.COMPLETED);
+        workItems.save(item);
+        InquiryExecution execution = new InquiryExecution();
+        execution.setOrgId(org);
+        execution.setWorkItemId(item.getId());
+        execution.setActionIntentId(UUID.randomUUID());
+        execution.setDispatchKey("dispatch-" + item.getId());
+        execution.setStatus(InquiryExecutionStatus.COMPLETED);
+        execution = executions.save(execution);
+        InquiryVerification verification = new InquiryVerification();
+        verification.setOrgId(org);
+        verification.setWorkItemId(item.getId());
+        verification.setExecutionId(execution.getId());
+        verification.setVerified(true);
+        verification.setObservedStatus("ANSWERED");
+        verifications.save(verification);
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        OperationsCase c = caseFor(inquiry.getId());
+        assertThat(c.getStatus()).isEqualTo(OperationsCaseStatus.ACTED);
+        assertThat(c.getResolutionReason())
+                .as("the loop closes on canonical truth, and the case still says only that the seller acted")
+                .isEqualTo(CaseResolution.SELLER_ACTED);
+        String provenance = events.findAll().stream()
+                .filter(e -> c.getId().equals(e.getCaseId()))
+                .map(OperationsCaseEvent::getProvenance)
+                .filter(p -> p != null && p.contains("delivery="))
+                .reduce((a, b) -> b)
+                .orElseThrow();
+        assertThat(provenance)
+                .as("the answer lifecycle's own tokens are quoted into the history, never re-invented here")
+                .contains("delivery=COMPLETED")
+                .contains("outcome=COMPLETED")
+                .contains("verified=true")
+                .contains("observed=ANSWERED");
+    }
+
+    @Test
+    void anInquiryTheSellerMovedOnWithoutAnExecution_quotesNoDeliveryAtAll() {
+        Inquiry inquiry = inquiry("색상 문의드려요", Instant.now());
+        InquiryWorkItem item = workItem(inquiry);
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        item.setPhase(InquiryWorkItemPhase.APPROVED);
+        workItems.save(item);
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        OperationsCase c = caseFor(inquiry.getId());
+        assertThat(c.getStatus()).isEqualTo(OperationsCaseStatus.ACTED);
+        assertThat(events.findAll().stream()
+                .filter(e -> c.getId().equals(e.getCaseId()))
+                .map(OperationsCaseEvent::getProvenance)
+                .filter(p -> p != null)
+                .toList())
+                .as("absence of an execution row is not a delivery state, so nothing is said about one")
+                .noneMatch(p -> p.contains("delivery="));
+    }
+
+    @Test
     void aWatchedReviewStopsBeingWatchedAfterItsWindow_andAStopClosesWhatIsOpen() {
         Review middling = review(3, "보통입니다.");
         processor.process(run(Instant.now(), null, null), () -> false);
         OperationsCaseReconciler later = new OperationsCaseReconciler(cases, events, inquiries, workItems, reviews,
-                accounts, Clock.offset(Clock.systemUTC(), Duration.ofDays(15)));
+                accounts, new AnswerDeliveryTruthReader(executions, verifications),
+                Clock.offset(Clock.systemUTC(), Duration.ofDays(15)));
         later.reconcile(org, responsibility.getId(), null);
         assertThat(caseFor(middling.getId()).getResolutionReason()).isEqualTo(CaseResolution.MONITORING_ENDED);
 
@@ -576,7 +655,7 @@ class OperationsCaseProcessorTest {
         InquiryOrderFactReader orderFacts = mock(InquiryOrderFactReader.class);
         CaseInvestigationTools tools = new CaseInvestigationTools(inquiries, reviews, channels, products,
                 mock(ProductKnowledgeLibraryService.class), mock(SellerOperationsKnowledgeService.class), orderFacts,
-                issues, issueEvidence, cases);
+                issues, issueEvidence, cases, new ReplyDecisionHistoryReader(approvals));
 
         CaseInvestigationTools.OrgTools mine = tools.forOrg(org);
         assertThat(mine.getSubject(OperationsSubjectKind.INQUIRY, theirs.getId())).isEmpty();
@@ -585,6 +664,9 @@ class OperationsCaseProcessorTest {
         verify(orderFacts, never()).read(any(), any(), any());
         assertThat(mine.getRecentSimilarCases(OperationsSubjectKind.INQUIRY, product, UUID.randomUUID())).isEmpty();
         assertThat(mine.getPastSellerDecisions(product).reviewDispositions()).isEmpty();
+        assertThat(mine.getPastSellerDecisions(product).decisions())
+                .as("another organisation's explicit decisions are not evidence for this one's investigation")
+                .isEmpty();
         assertThat(mine.getRelatedIssues(theirReview.getId(), product)).isEmpty();
 
         CaseInvestigationTools.OrgTools theirsTools = tools.forOrg(other);
@@ -635,7 +717,8 @@ class OperationsCaseProcessorTest {
     private OperationsCaseProcessor processor(ResponsibilityRollout rollout) {
         return new OperationsCaseProcessor(runs, responsibilities, sourceRows,
                 new ResponsibilitySources(accounts, channels), rollout, cases, events,
-                new OperationsCaseReconciler(cases, events, inquiries, workItems, reviews, accounts, Clock.systemUTC()),
+                new OperationsCaseReconciler(cases, events, inquiries, workItems, reviews, accounts,
+                        new AnswerDeliveryTruthReader(executions, verifications), Clock.systemUTC()),
                 investigator, investigation, drafts, workItems, channels, Clock.systemUTC());
     }
 

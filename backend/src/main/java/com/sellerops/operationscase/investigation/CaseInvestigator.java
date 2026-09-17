@@ -186,7 +186,27 @@ public class CaseInvestigator {
             text.append("[d1] 판매자의 과거 결정 — 이 상품 리뷰 판단: ").append(counts(decisions.reviewDispositions()))
                     .append(" / 이 상품 문의 초안 작성자: ").append(counts(decisions.inquiryDraftAuthors())).append('\n');
         }
+        // Each decision the seller actually made, as its own citable line. It is context for this investigation
+        // and nothing more: no rule is derived from it, and a case that cites one still needs the seller.
+        int d = 2;
+        for (CaseInvestigationTools.SellerDecision decision : decisions.decisions()) {
+            String ref = "d" + d++;
+            refs.add(ref);
+            text.append('[').append(ref).append("] 지난 비슷한 건에서 판매자는 ")
+                    .append(decisionKo(decision.kind())).append(": ").append(decision.what())
+                    .append(decision.on() == null ? "" : " (" + decision.on() + ")").append('\n');
+        }
         return new Context(text.toString(), refs);
+    }
+
+    /** The seller's own words for what they did. An unknown kind is not narrated into something it might be. */
+    private static String decisionKo(String kind) {
+        return switch (kind) {
+            case "REPLY_APPROVED" -> "답변을 직접 승인했습니다";
+            case "REVIEW_TRIAGED" -> "리뷰를 이렇게 판단했습니다";
+            case "TRIAGE_CORRECTED" -> "시스템 판단을 이렇게 고쳤습니다";
+            default -> "이렇게 결정했습니다";
+        };
     }
 
     private static String question(CaseInvestigationTools.SubjectFacts subject) {

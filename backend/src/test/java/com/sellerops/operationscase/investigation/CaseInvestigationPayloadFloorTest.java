@@ -20,6 +20,7 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.InquiryOrderFactReader;
+import com.sellerops.inquiry.publish.ReplyDecisionHistoryReader;
 import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
 import com.sellerops.knowledge.org.dto.OrgKnowledgeSearchResponse;
 import com.sellerops.operationscase.CaseDisposition;
@@ -62,6 +63,7 @@ class CaseInvestigationPayloadFloorTest {
     private final SellerOperationsKnowledgeService orgKnowledge = mock(SellerOperationsKnowledgeService.class);
     private final ReviewIssueRepository issues = mock(ReviewIssueRepository.class);
     private final OperationsCaseRepository cases = mock(OperationsCaseRepository.class);
+    private final ReplyDecisionHistoryReader replyDecisions = mock(ReplyDecisionHistoryReader.class);
     private final AgentQuotaService quota = mock(AgentQuotaService.class);
     private final List<String> sentBodies = new ArrayList<>();
     private CaseInvestigationTools tools;
@@ -89,7 +91,8 @@ class CaseInvestigationPayloadFloorTest {
         when(issues.findByOrgIdAndDismissedFalse(org)).thenReturn(List.of());
         tools = new CaseInvestigationTools(inquiries, mock(ReviewRepository.class), channels,
                 mock(ProductRepository.class), mock(ProductKnowledgeLibraryService.class), orgKnowledge,
-                mock(InquiryOrderFactReader.class), issues, mock(ReviewIssueEvidenceRepository.class), cases);
+                mock(InquiryOrderFactReader.class), issues, mock(ReviewIssueEvidenceRepository.class), cases,
+                replyDecisions);
         subjectCase = new OperationsCase();
         subjectCase.setId(UUID.randomUUID());
         subjectCase.setOrgId(org);
@@ -143,6 +146,37 @@ class CaseInvestigationPayloadFloorTest {
                 .doesNotContain("20260916123456").doesNotContain("ORD-99").doesNotContain("sk-secret-test");
         assertThat(UUID_SHAPE.matcher(body).find()).as("no identifier of any kind leaves").isFalse();
         assertThat(context.refs()).contains("subject", "product", "order");
+    }
+
+    @Test
+    void pastSellerDecisionsTravelAsClosedTokensAndADate_neverAsAnApproverFingerprintOrText() {
+        UUID productId = UUID.randomUUID();
+        Inquiry withProduct = inquiries.findById(inquiryId).orElseThrow();
+        withProduct.setProductId(productId);
+        when(replyDecisions.onProduct(eq(org), eq(productId), anyInt())).thenReturn(List.of(
+                new ReplyDecisionHistoryReader.ReplyDecision(3, Instant.parse("2026-09-10T02:00:00Z"))));
+        when(cases.recentReviewDecisionsForProduct(eq(org), eq(productId), any()))
+                .thenReturn(List.<Object[]>of(new Object[] {"NO_ACTION", Instant.parse("2026-09-11T02:00:00Z")}));
+        when(cases.recentTriageCorrectionsForProduct(eq(org), eq(productId), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[] {"NEEDS_ATTENTION", "WATCH", Instant.parse("2026-09-12T02:00:00Z")}));
+
+        CaseInvestigator investigator = new CaseInvestigator(tools, service(true), quota);
+        CaseInvestigationTools.OrgTools bound = tools.forOrg(org);
+        CaseInvestigationTools.SubjectFacts subject =
+                bound.getSubject(OperationsSubjectKind.INQUIRY, inquiryId).orElseThrow();
+        CaseInvestigator.Context context = investigator.gather(bound, subjectCase, subject);
+        String body = new CaseInvestigationGenerator(transport(), AgentLlmWireFormat.Vendor.OPENAI, "gpt-test",
+                "sk-secret-test", 2500, "low").requestBody(context.text());
+
+        assertThat(context.refs()).as("each decision is citable on its own").contains("d2", "d3", "d4");
+        assertThat(body).contains("지난 비슷한 건에서 판매자는")
+                .contains("답변을 직접 승인했습니다").contains("NO_ACTION").contains("NEEDS_ATTENTION→WATCH")
+                .contains("2026-09-11");
+        assertThat(body).as("a decision is a token and a day — never who, never the words they approved")
+                .doesNotContain("SELLER:").doesNotContain("approver").doesNotContain("fingerprint");
+        assertThat(UUID_SHAPE.matcher(body).find())
+                .as("reading past decisions must not put a product or review id on the wire").isFalse();
     }
 
     @Test

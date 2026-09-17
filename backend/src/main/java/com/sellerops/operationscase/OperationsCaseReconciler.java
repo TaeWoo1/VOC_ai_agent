@@ -3,6 +3,7 @@ package com.sellerops.operationscase;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryOperationalState;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.publish.AnswerDeliveryTruthReader;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
@@ -28,7 +29,8 @@ import org.springframework.stereotype.Component;
  *
  * <ul>
  *   <li>An inquiry case follows its work item and the inquiry: a work item past waiting-for-seller is the seller
- *   having acted (which phase it reached is on the work item's own audit — this never says «sent» or «verified»); an
+ *   having acted (which phase it reached is on the work item's own audit — this never says «sent» or «verified» in
+ *   a word of its own; where an execution exists, the answer lifecycle's own tokens are quoted into the event); an
  *   excluded or answered inquiry closes the case.</li>
  *   <li>A review case follows the review: a reply on the channel or a seller triage decision after the case opened is
  *   the seller acting; a watched review stops being watched after {@link #MONITORING_WINDOW}.</li>
@@ -55,24 +57,28 @@ public class OperationsCaseReconciler {
     private final InquiryWorkItemRepository workItems;
     private final ReviewRepository reviews;
     private final SellerAccountRepository accounts;
+    private final AnswerDeliveryTruthReader deliveries;
     private final Clock clock;
 
     @Autowired
     public OperationsCaseReconciler(OperationsCaseRepository cases, OperationsCaseEventRepository events,
                                     InquiryRepository inquiries, InquiryWorkItemRepository workItems,
-                                    ReviewRepository reviews, SellerAccountRepository accounts) {
-        this(cases, events, inquiries, workItems, reviews, accounts, Clock.systemUTC());
+                                    ReviewRepository reviews, SellerAccountRepository accounts,
+                                    AnswerDeliveryTruthReader deliveries) {
+        this(cases, events, inquiries, workItems, reviews, accounts, deliveries, Clock.systemUTC());
     }
 
     public OperationsCaseReconciler(OperationsCaseRepository cases, OperationsCaseEventRepository events,
                                     InquiryRepository inquiries, InquiryWorkItemRepository workItems,
-                                    ReviewRepository reviews, SellerAccountRepository accounts, Clock clock) {
+                                    ReviewRepository reviews, SellerAccountRepository accounts,
+                                    AnswerDeliveryTruthReader deliveries, Clock clock) {
         this.cases = cases;
         this.events = events;
         this.inquiries = inquiries;
         this.workItems = workItems;
         this.reviews = reviews;
         this.accounts = accounts;
+        this.deliveries = deliveries;
         this.clock = clock;
     }
 
@@ -152,11 +158,12 @@ public class OperationsCaseReconciler {
                         CaseEventActor.SYSTEM, "INQUIRY_ANSWERED_ON_CHANNEL");
             }
             if (!InquiryWorkItemPhase.AWAITING_SELLER.contains(phase)) {
-                return phase == InquiryWorkItemPhase.DISMISSED
-                        ? new Derived(OperationsCaseStatus.CLOSED, CaseResolution.NOT_OPERATIONAL,
-                                CaseEventActor.SELLER, "WORK_ITEM_" + phase.name())
-                        : new Derived(OperationsCaseStatus.ACTED, CaseResolution.SELLER_ACTED,
-                                CaseEventActor.SELLER, "WORK_ITEM_" + phase.name());
+                if (phase == InquiryWorkItemPhase.DISMISSED) {
+                    return new Derived(OperationsCaseStatus.CLOSED, CaseResolution.NOT_OPERATIONAL,
+                            CaseEventActor.SELLER, "WORK_ITEM_" + phase.name());
+                }
+                return new Derived(OperationsCaseStatus.ACTED, CaseResolution.SELLER_ACTED, CaseEventActor.SELLER,
+                        "WORK_ITEM_" + phase.name() + delivery(c.getOrgId(), workItem.get().getId()));
             }
         }
         if (inquiry.getOperationalState() != null && inquiry.getOperationalState() != InquiryOperationalState.ACTIVE) {
@@ -168,6 +175,24 @@ public class OperationsCaseReconciler {
                     "INQUIRY_ANSWERED");
         }
         return Derived.UNCHANGED;
+    }
+
+    /**
+     * What the answer lifecycle observed for this work item, <b>quoted</b>.
+     *
+     * <p>The case still says only that the seller acted. Whether anything reached the customer is owned by the
+     * package that writes the execution and verification rows, so its tokens are recorded here verbatim rather
+     * than translated into a resolution of this vocabulary — which is why {@link CaseResolution} still has no
+     * word for sent, executed or verified. An inquiry the seller moved on without an execution adds nothing:
+     * absence of a row is not a delivery state.
+     */
+    private String delivery(UUID orgId, UUID workItemId) {
+        return deliveries.observe(orgId, workItemId)
+                .map(truth -> ";delivery=" + truth.status()
+                        + ";outcome=" + truth.category()
+                        + (truth.verified() == null ? "" : ";verified=" + truth.verified())
+                        + (truth.observedSignal() == null ? "" : ";observed=" + truth.observedSignal()))
+                .orElse("");
     }
 
     private Derived deriveReview(OperationsCase c) {

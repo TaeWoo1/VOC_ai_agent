@@ -114,7 +114,7 @@ public class CustomerOperationsHomeService {
         if (found.isEmpty()) {
             return new CustomerOperationsHomeView(true, eligible, null, cadence, null, null, null, List.of(),
                     new CustomerOperationsHomeView.Decisions(0, List.of()),
-                    new CustomerOperationsHomeView.Handled(null, 0, 0, 0, List.of()),
+                    new CustomerOperationsHomeView.Handled(null, 0, 0, 0, 0, List.of()),
                     new CustomerOperationsHomeView.Gaps(0, List.of()));
         }
         Responsibility r = found.get();
@@ -173,17 +173,28 @@ public class CustomerOperationsHomeService {
         Instant since = clock.instant().minus(HANDLED_PERIOD);
         long autoResolved = cases.countByOrgIdAndResponsibilityIdAndDispositionAndCreatedAtGreaterThanEqual(
                 orgId, r.getId(), CaseDisposition.AUTO_RESOLVED, since);
-        List<OperationsCase> monitoring = cases.findByOrgIdAndResponsibilityIdAndCaseKindAndStatusOrderByCreatedAtDesc(
-                        orgId, r.getId(), OperationsCaseKind.CUSTOMER_WORK, OperationsCaseStatus.PREPARED,
-                        PageRequest.of(0, 200)).stream()
+        List<OperationsCase> openCases = cases.findByOrgIdAndResponsibilityIdAndCaseKindAndStatusOrderByCreatedAtDesc(
+                orgId, r.getId(), OperationsCaseKind.CUSTOMER_WORK, OperationsCaseStatus.PREPARED,
+                PageRequest.of(0, 200));
+        List<OperationsCase> monitoring = openCases.stream()
                 .filter(c -> c.getDisposition() == CaseDisposition.MONITORING)
                 .toList();
+        // The seller already decided; the record that owns the result has not settled it yet. Without this the
+        // case leaves 「직접 판단하실 일」 the moment they act and appears nowhere until verification lands — which
+        // reads as «gone». It is not gone, and it is not done either: only the execution record may say that.
+        List<OperationsCase> verifying = openCases.stream()
+                .filter(c -> c.getDisposition() == CaseDisposition.NEEDS_DECISION)
+                .filter(c -> !stillWaitingOnCanonicalRecord(c))
+                .toList();
+        java.util.Set<UUID> verifyingIds = verifying.stream().map(OperationsCase::getId)
+                .collect(java.util.stream.Collectors.toSet());
         long drafts = cases.countByOrgIdAndResponsibilityIdAndPreparedActionAndCreatedAtGreaterThanEqual(
                 orgId, r.getId(), CasePreparedAction.DRAFT_PREPARED, since);
         List<OperationsCase> shown = new ArrayList<>(cases
                 .findByOrgIdAndResponsibilityIdAndDispositionAndCreatedAtGreaterThanEqualOrderByCreatedAtDesc(
                         orgId, r.getId(), CaseDisposition.AUTO_RESOLVED, since, PageRequest.of(0, MAX_ROWS)));
         monitoring.stream().limit(MAX_ROWS).forEach(shown::add);
+        verifying.stream().limit(MAX_ROWS).forEach(shown::add);
         List<CustomerOperationsHomeView.HandledRow> rows = shown.stream()
                 .sorted(Comparator.comparing(OperationsCase::getCreatedAt, Comparator.reverseOrder()))
                 .limit(MAX_ROWS)
@@ -192,9 +203,10 @@ public class CustomerOperationsHomeService {
                     return new CustomerOperationsHomeView.HandledRow(c.getId(), c.getSubjectKind().name(),
                             channelName(channelById, c.getChannelId()), subject.title(), subject.rating(),
                             c.getDisposition().name(), c.getDecidedBy() == null ? null : c.getDecidedBy().name(),
-                            c.getReasonNote(), c.getSummary(), linkOf(c));
+                            c.getReasonNote(), c.getSummary(), verifyingIds.contains(c.getId()), linkOf(c));
                 }).toList();
-        return new CustomerOperationsHomeView.Handled(since, autoResolved, monitoring.size(), drafts, rows);
+        return new CustomerOperationsHomeView.Handled(since, autoResolved, monitoring.size(), drafts,
+                verifying.size(), rows);
     }
 
     private CustomerOperationsHomeView.Gaps gaps(UUID orgId, Responsibility r, Map<UUID, Channel> channelById) {

@@ -65,9 +65,9 @@ function home(over: Partial<CustomerOperationsHome> = {}): CustomerOperationsHom
       ],
     },
     handled: {
-      since: "2026-09-15T05:30:00Z", autoResolved: 2, monitoring: 1, draftsPrepared: 1,
+      since: "2026-09-15T05:30:00Z", autoResolved: 2, monitoring: 1, draftsPrepared: 1, verifying: 0,
       rows: [
-        { caseId: "h-1", subjectKind: "REVIEW", channelNameKo: "카페24", title: "잘 받았습니다", rating: 5, disposition: "AUTO_RESOLVED", decidedBy: "RULE", reasonNote: "별점 4~5점 리뷰라 따로 대응할 일이 없습니다.", summary: null, to: "/reviews/reply/r-1" },
+        { caseId: "h-1", subjectKind: "REVIEW", channelNameKo: "카페24", title: "잘 받았습니다", rating: 5, disposition: "AUTO_RESOLVED", decidedBy: "RULE", reasonNote: "별점 4~5점 리뷰라 따로 대응할 일이 없습니다.", summary: null, verifying: false, to: "/reviews/reply/r-1" },
       ],
     },
     gaps: {
@@ -114,6 +114,41 @@ describe("고객 운영 관리 page", () => {
     expect(api.activateCustomerOperations).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("운영 중")).toBeInTheDocument();
     expect(screen.getByText("오늘 16:00")).toBeInTheDocument();
+  });
+
+  it("a case the seller decided stays visible while its result is read back, and claims nothing", async () => {
+    api.getCustomerOperations.mockResolvedValue(view({ status: "ACTIVE", nextRunAt: "2026-09-16T07:00:00Z" }));
+    api.getCustomerOperationsHome.mockResolvedValue(
+      home({
+        decisions: { total: 0, rows: [] },
+        handled: {
+          since: "2026-09-15T05:30:00Z", autoResolved: 0, monitoring: 0, draftsPrepared: 0, verifying: 1,
+          rows: [
+            {
+              caseId: "v-1", subjectKind: "INQUIRY", channelNameKo: "카페24", title: "교환 문의", rating: null,
+              disposition: "NEEDS_DECISION", decidedBy: "AGENT", reasonNote: "답변이 필요합니다.",
+              summary: null, verifying: true, to: "/inquiries/i-9",
+            },
+          ],
+        },
+      }),
+    );
+    renderPage();
+
+    // It left 「내 결정 필요」 the moment they acted; without this it would appear nowhere at all. The sentence is
+    // the area's, said once — the row carries the word and what the case is about.
+    expect(await screen.findByText("승인한 작업의 처리 결과를 확인하고 있습니다.")).toBeInTheDocument();
+    // The rows sit inside a native <details>; they are in the document whether or not it is open, so this
+    // asserts what the seller can reach rather than simulating a disclosure toggle.
+    expect(screen.getByText("처리 확인 중")).toBeInTheDocument();
+    expect(screen.getByText("교환 문의")).toBeInTheDocument();
+    expect(screen.getByText("답변이 필요합니다.")).toBeInTheDocument();
+
+    // The execution record owns delivery, and it has not spoken yet.
+    const page = document.body.textContent ?? "";
+    for (const claim of ["보냈습니다", "전송했습니다", "처리 완료", "처리했습니다", "등록했습니다"]) {
+      expect(page, `the page claims ${claim} before the record said so`).not.toContain(claim);
+    }
   });
 
   it("an active job shows its three areas and asks before stopping", async () => {

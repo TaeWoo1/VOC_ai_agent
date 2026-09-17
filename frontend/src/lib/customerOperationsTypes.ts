@@ -100,10 +100,17 @@ export interface CustomerOperationsHandledRow {
   channelNameKo: string | null;
   title: string | null;
   rating: number | null;
-  disposition: "AUTO_RESOLVED" | "MONITORING";
+  /** `NEEDS_DECISION` only on a `verifying` row: the seller decided, and the result is still being read back. */
+  disposition: "AUTO_RESOLVED" | "MONITORING" | "NEEDS_DECISION";
   decidedBy: "RULE" | "AGENT" | null;
   reasonNote: string;
   summary: string | null;
+  /**
+   * The seller decided, and the record that owns the result has not settled it yet. Deliberately NOT a third
+   * `disposition`: what Reviewnary judged and what the channel has done with it are two different facts, and
+   * this row is only allowed to state the second one as «still being read back».
+   */
+  verifying: boolean;
   to: string;
 }
 
@@ -133,6 +140,8 @@ export interface CustomerOperationsHome {
     autoResolved: number;
     monitoring: number;
     draftsPrepared: number;
+    /** Cases the seller decided whose result is still being read back from the record that owns it. */
+    verifying: number;
     rows: CustomerOperationsHandledRow[];
   };
   gaps: { total: number; rows: CustomerOperationsGapRow[] };
