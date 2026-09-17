@@ -73,6 +73,8 @@ public class KnowledgeCandidateService {
     public static final String STATE_DISMISSED = "DISMISSED";
     public static final String ORIGIN_REPEATED_ANSWER = "REPEATED_ANSWER";
     public static final String ORIGIN_DRAFT_GAP = "DRAFT_GAP";
+    /** The seller answered a case's knowledge gap on the case screen ([정보 알려주기]). */
+    public static final String ORIGIN_CASE_TEACH = "CASE_TEACH";
 
     private final KnowledgeCandidateRepository candidates;
     private final AnswerMemoryRepository memories;
@@ -313,6 +315,54 @@ public class KnowledgeCandidateService {
     }
 
     /** Not this — and deliberately not "never": the same sentence may be noticed again later. */
+    /**
+     * <b>The seller answered a customer-operations case's knowledge gap</b> (Knowledge &amp; Intelligence Closure v1).
+     *
+     * <p>The same act as accepting a gap in the Knowledge Inbox — a person, on purpose, writing what the company
+     * tells customers — so it goes through {@link #accept} and writes {@code SELLER_ENTERED_KNOWLEDGE} in the scope
+     * the seller chose. A {@code CASE_TEACH} candidate row records the act. When the case's gap had already been
+     * filed as an inbox ask, that ask is closed against the same source: the question was answered once, here.
+     *
+     * @param askId the inbox ask the draft path filed for this gap, or null
+     */
+    @Transactional
+    public KnowledgeCandidateView teach(UUID orgId, String scope, UUID productId, String subject, UUID askId,
+                                        String content, OrgKnowledgeType orgType, UUID actorUserId,
+                                        String actorName) {
+        if (content == null || content.isBlank()) {
+            throw ApiException.badRequest("고객에게 안내할 내용을 적어 주세요.");
+        }
+        boolean product = "PRODUCT".equals(scope);
+        if (product && productId == null) {
+            throw ApiException.badRequest("상품이 연결되지 않은 건은 회사 전체 기준으로만 저장할 수 있습니다.");
+        }
+        String heading = subject == null || subject.isBlank() ? "고객 안내 기준" : subject.strip() + " 안내";
+        KnowledgeCandidate row = new KnowledgeCandidate();
+        row.setOrgId(orgId);
+        row.setScope(product ? "PRODUCT" : "ORG");
+        row.setProductId(product ? productId : null);
+        row.setSubject(bounded(heading, 300));
+        row.setContent(content.strip());
+        row.setOrigin(ORIGIN_CASE_TEACH);
+        row.setEvidenceCount(0);
+        row.setDedupeKey(bounded("case-teach:" + UUID.randomUUID(), 120));
+        KnowledgeCandidate filed = candidates.save(row);
+        KnowledgeCandidateView taught = accept(orgId, filed.getId(), heading, content, KnowledgeSourceType.FAQ,
+                orgType, null, actorUserId, actorName);
+        if (askId != null) {
+            candidates.findByIdAndOrgId(askId, orgId)
+                    .filter(ask -> STATE_OPEN.equals(ask.getState()))
+                    .ifPresent(ask -> {
+                        ask.setState(STATE_ACCEPTED);
+                        ask.setSourceId(taught.sourceId());
+                        ask.setDecidedAt(Instant.now());
+                        ask.setDecidedBy(actorName);
+                        candidates.save(ask);
+                    });
+        }
+        return taught;
+    }
+
     @Transactional
     public KnowledgeCandidateView dismiss(UUID orgId, UUID candidateId, String actorName) {
         KnowledgeCandidate row = candidates.findByIdAndOrgId(candidateId, orgId)

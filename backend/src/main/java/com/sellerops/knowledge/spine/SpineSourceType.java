@@ -36,5 +36,8 @@ public enum SpineSourceType {
     REVIEW_DECISION,
 
     /** {@code review_triage_corrections} — 판매자가 시스템의 리뷰 판단을 고친 기록. */
-    TRIAGE_CORRECTION
+    TRIAGE_CORRECTION,
+
+    /** {@code seller_guidance} — 판매자가 초안·추천을 고치며 「다음에도 참고」로 남긴 지침. */
+    SELLER_GUIDANCE
 }

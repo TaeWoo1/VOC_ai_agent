@@ -1,6 +1,7 @@
 package com.sellerops.knowledge.spine.dto;
 
 import com.sellerops.knowledge.RetrievalOutcome;
+import com.sellerops.knowledge.spine.KnowledgeConflict;
 import com.sellerops.knowledge.spine.KnowledgeEntry;
 import java.util.List;
 import java.util.UUID;
@@ -14,7 +15,8 @@ import java.util.UUID;
  *                   different declared topic; NO_RELEVANT_EVIDENCE otherwise when nothing matched
  */
 public record KnowledgeSpineSearchResponse(String query, String matchedBy, UUID productId, int corpusSize,
-                                           RetrievalOutcome outcome, List<Hit> hits) {
+                                           RetrievalOutcome outcome, List<Hit> hits,
+                                           List<KnowledgeConflict> conflicts) {
 
     /** An entry and how much of the question it covers. Authority breaks ties; it never outranks coverage. */
     public record Hit(KnowledgeEntry entry, double score) {

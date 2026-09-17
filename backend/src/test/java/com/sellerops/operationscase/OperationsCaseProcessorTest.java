@@ -654,7 +654,8 @@ class OperationsCaseProcessorTest {
 
         InquiryOrderFactReader orderFacts = mock(InquiryOrderFactReader.class);
         CaseInvestigationTools tools = new CaseInvestigationTools(inquiries, reviews, channels, products,
-                mock(ProductKnowledgeLibraryService.class), mock(SellerOperationsKnowledgeService.class), orderFacts,
+                mock(com.sellerops.inquiry.draft.InquiryKnowledgeAssessor.class),
+                mock(com.sellerops.knowledge.spine.KnowledgeSpineService.class), orderFacts,
                 issues, issueEvidence, cases, new ReplyDecisionHistoryReader(approvals));
 
         CaseInvestigationTools.OrgTools mine = tools.forOrg(org);

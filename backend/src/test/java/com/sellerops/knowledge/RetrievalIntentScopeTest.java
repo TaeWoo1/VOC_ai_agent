@@ -43,8 +43,8 @@ class RetrievalIntentScopeTest {
     }
 
     @Test
-    @DisplayName("the two callers that claim it are the two that have a customer's sentence")
-    void onlyTwoCallersClaimIt() throws IOException {
+    @DisplayName("every caller that claims it is holding a customer's sentence")
+    void onlyCallersWithACustomerSentenceClaimIt() throws IOException {
         List<String> callers = new ArrayList<>();
         try (Stream<Path> walk = Files.walk(MAIN)) {
             for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
@@ -53,9 +53,13 @@ class RetrievalIntentScopeTest {
                 }
             }
         }
-        // An inquiry a customer sent, and a review a customer left. A planner's need sentence, a
-        // seller's search box and the knowledge library screen are deliberately not on this list.
+        // An inquiry a customer sent, and a review a customer left — now asked in four places because the same
+        // question is asked once per work unit (Knowledge & Intelligence Closure v1): the retriever's own
+        // convenience, the shared inquiry assessment the draft and the investigation both read, the review draft,
+        // and the investigation of a review. Each of the four is holding the customer's own words; a planner's need
+        // sentence, a seller's search box and the knowledge library screen are still deliberately not on this list.
         assertThat(callers).containsExactlyInAnyOrder(
-                "InquiryEvidenceRetriever.java", "ReviewDraftComposer.java");
+                "InquiryEvidenceRetriever.java", "InquiryKnowledgeAssessor.java", "ReviewDraftComposer.java",
+                "CaseInvestigationTools.java");
     }
 }

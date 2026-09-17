@@ -5,7 +5,13 @@ import com.sellerops.knowledge.KnowledgeRetriever;
 import com.sellerops.knowledge.KnowledgeTopic;
 import com.sellerops.knowledge.RetrievalOutcome;
 import com.sellerops.knowledge.RetrievalQuery;
+import com.sellerops.inquiry.Inquiry;
+import com.sellerops.inquiry.draft.InquiryEvidenceRetriever;
 import com.sellerops.knowledge.spine.adapter.KnowledgeSourceAdapter;
+import com.sellerops.knowledge.spine.adapter.ProductFactAdapter;
+import com.sellerops.knowledge.spine.adapter.SellerKnowledgeAdapter;
+import com.sellerops.order.fact.OrderFactLookup;
+import com.sellerops.product.library.KnowledgeVariantScope;
 import com.sellerops.knowledge.spine.dto.CompiledKnowledgeView;
 import com.sellerops.knowledge.spine.dto.KnowledgeSpineSearchResponse;
 import com.sellerops.knowledge.spine.dto.KnowledgeTraceView;
@@ -37,15 +43,14 @@ import org.springframework.transaction.annotation.Transactional;
  * and states each as a {@link KnowledgeEntry} with its scope, authority, freshness, provenance and the refs back
  * to its rows. Nothing is copied, so nothing goes stale and there is no second place to correct.
  *
- * <p><b>Not a replacement for the draft lanes.</b> Inquiry and review drafting keep their own retrieval
- * ({@code InquiryEvidenceRetriever}, {@code ReviewDraftComposer}) with its lane rules and payload floors, and this
- * class does not touch them. The spine is the read an operator surface or agent uses to ask "what does this
- * company know about this", across sources the draft lanes deliberately keep apart.
- *
- * <p><b>The same matcher, and nothing a vendor sees.</b> Matching is {@link KnowledgeRetriever}'s lexical scorer
- * over the same bounded question ladder, with the same topic applicability refusal. It calls no model: the
- * semantic lanes send the customer's question to a vendor and are a deployment decision per organisation, and a
- * new read path is not the place to widen that.
+ * <p><b>The one retrieval (Knowledge &amp; Intelligence Closure v1).</b> {@link #retrieveForInquiry} and
+ * {@link #retrieveForProduct} are what the case investigator, the inquiry draft and the review draft all read, so the
+ * three cannot disagree about what the company knows because they asked different code. The grounding lanes are
+ * {@link InquiryEvidenceRetriever}'s — its scorer, semantic lane when an org has it, applicability refusals, current-
+ * over-historical merge — unchanged; the spine attributes every passage (authority, provenance, freshness, refs),
+ * adds the seller-confirmed context those lanes never carried (guidance, review decisions, approved review replies,
+ * channel attributes) and resolves conflicting figures toward the higher authority ({@link KnowledgeConflict}).
+ * The earlier parallel lexical search over the whole corpus is gone.
  *
  * <p><b>Scope is a fence, not a filter preference.</b> A product that does not belong to the caller's organisation
  * is a 404 before any adapter runs; every adapter reads with the organisation in its predicate; and a product
@@ -71,79 +76,202 @@ public class KnowledgeSpineService {
             .thenComparing(KnowledgeEntry::capturedAt, Comparator.nullsLast(Comparator.reverseOrder()))
             .thenComparing(KnowledgeEntry::entryId);
 
+    /** Context entries per question. Context informs; it is not a second evidence window. */
+    static final int MAX_CONTEXT = 4;
+
+    private static final Set<SpineSourceType> CONTEXT_TYPES = EnumSet.of(SpineSourceType.SELLER_GUIDANCE,
+            SpineSourceType.REVIEW_DECISION, SpineSourceType.TRIAGE_CORRECTION, SpineSourceType.REVIEW_REPLY,
+            SpineSourceType.PRODUCT_FACT);
+
     private final List<KnowledgeSourceAdapter> adapters;
     private final ProductRepository products;
     private final SourceRefResolver resolver;
+    private final InquiryEvidenceRetriever retriever;
     private final Clock clock;
 
     @Autowired
     public KnowledgeSpineService(List<KnowledgeSourceAdapter> adapters, ProductRepository products,
-                                 SourceRefResolver resolver) {
-        this(adapters, products, resolver, Clock.systemUTC());
+                                 SourceRefResolver resolver, InquiryEvidenceRetriever retriever) {
+        this(adapters, products, resolver, retriever, Clock.systemUTC());
     }
 
-    KnowledgeSpineService(List<KnowledgeSourceAdapter> adapters, ProductRepository products,
-                          SourceRefResolver resolver, Clock clock) {
+    public KnowledgeSpineService(List<KnowledgeSourceAdapter> adapters, ProductRepository products,
+                                 SourceRefResolver resolver, InquiryEvidenceRetriever retriever, Clock clock) {
         this.adapters = List.copyOf(adapters);
         this.products = products;
         this.resolver = resolver;
+        this.retriever = retriever;
         this.clock = clock;
     }
 
     /** Every entry in scope — ORG, plus the product's own when one is named — in authority order. */
     @Transactional(readOnly = true)
     public List<KnowledgeEntry> entries(UUID orgId, UUID productId) {
-        return corpus(orgId, requireProduct(orgId, productId)).stream()
+        requireProduct(orgId, productId);
+        return corpus(orgId, productId).stream()
                 .map(KnowledgeSourceAdapter.Indexed::entry)
                 .toList();
     }
 
+    /**
+     * The REST read: one scoped search over every source, through the same retrieval the drafts and the investigator
+     * use. There is no second scorer here — the lanes are {@link InquiryEvidenceRetriever}'s, and the context entries
+     * are matched by the same lexical scorer, question ladder and topic refusal.
+     */
     @Transactional(readOnly = true)
     public KnowledgeSpineSearchResponse search(UUID orgId, UUID productId, String query, int limit) {
         if (query == null || query.isBlank()) {
             throw ApiException.badRequest("찾을 내용을 입력해 주세요.");
         }
-        Product product = requireProduct(orgId, productId);
-        List<KnowledgeSourceAdapter.Indexed> corpus = corpus(orgId, product);
-        List<KnowledgeRetriever.Candidate<KnowledgeSourceAdapter.Indexed>> candidates = corpus.stream()
-                .map(i -> new KnowledgeRetriever.Candidate<>(i, i.searchable()))
-                .toList();
+        requireProduct(orgId, productId);
         RetrievalQuery question = RetrievalQuery.ofText(query);
-        Set<KnowledgeTopic> asked = KnowledgeTopic.of(question.text());
-        String productName = OperatorProductName.displayNameOrNull(product);
+        SpineRetrieval found = retrieveForProduct(orgId, productId, question, KnowledgeVariantScope.unresolved());
+        int cap = Math.max(1, Math.min(limit <= 0 ? DEFAULT_LIMIT : limit, MAX_LIMIT));
+        Map<String, Double> scores = new LinkedHashMap<>();
+        for (InquiryEvidenceRetriever.ScopedPassage p : found.lanes().passages()) {
+            scores.put(unitKey(p), p.score());
+        }
+        List<KnowledgeSpineSearchResponse.Hit> hits = found.all().stream()
+                .limit(cap)
+                .map(e -> new KnowledgeSpineSearchResponse.Hit(e, scores.getOrDefault(unitOf(e.entryId()), 0.0)))
+                .toList();
+        RetrievalOutcome outcome = !hits.isEmpty() ? RetrievalOutcome.FOUND
+                : found.lanes().productOutcome() == RetrievalOutcome.ABSENT
+                        && found.lanes().policyOutcome() == RetrievalOutcome.ABSENT
+                        && corpus(orgId, productId).isEmpty() ? RetrievalOutcome.ABSENT
+                : found.lanes().policyOutcome() == RetrievalOutcome.NOT_APPLICABLE ? RetrievalOutcome.NOT_APPLICABLE
+                : RetrievalOutcome.NO_RELEVANT_EVIDENCE;
+        return new KnowledgeSpineSearchResponse(query, question.full(), productId,
+                corpus(orgId, productId).size(), outcome, hits, found.conflicts());
+    }
 
-        List<KnowledgeSpineSearchResponse.Hit> hits = List.of();
-        String matchedBy = question.full();
-        int rejected = 0;
-        for (RetrievalQuery.Candidate form : question.candidates()) {
-            List<KnowledgeSpineSearchResponse.Hit> found = new ArrayList<>();
-            for (KnowledgeRetriever.Hit<KnowledgeSourceAdapter.Indexed> hit
-                    : KnowledgeRetriever.rank(form.text(), candidates, productName)) {
-                KnowledgeEntry entry = hit.ref().entry();
-                // Refusal only: an entry whose title declares a different topic does not answer this one.
-                if (!KnowledgeTopic.applicable(asked, KnowledgeTopic.of(entry.title()))) {
-                    rejected++;
-                    continue;
-                }
-                found.add(new KnowledgeSpineSearchResponse.Hit(entry, Math.round(hit.coverage() * 1000) / 1000.0));
-            }
-            if (!found.isEmpty()) {
-                hits = found;
-                matchedBy = form.text();
-                break;
+    /** The retrieval for one inquiry: its product, its 규격 scope, its order fact reach — the draft path's question. */
+    @Transactional(readOnly = true)
+    public SpineRetrieval retrieveForInquiry(UUID orgId, Inquiry inquiry, RetrievalQuery question,
+                                             OrderFactLookup lookup, KnowledgeVariantScope scope) {
+        InquiryEvidenceRetriever.InquiryEvidence lanes = retriever.retrieve(orgId, inquiry, question, lookup, scope);
+        return assemble(orgId, lanes, question);
+    }
+
+    /** The retrieval for a question about a product that is not an inquiry — a review, or a seller's search. */
+    @Transactional(readOnly = true)
+    public SpineRetrieval retrieveForProduct(UUID orgId, UUID productId, RetrievalQuery question,
+                                             KnowledgeVariantScope scope) {
+        InquiryEvidenceRetriever.InquiryEvidence lanes = retriever.retrieveFor(orgId, productId, question, scope);
+        return assemble(orgId, lanes, question);
+    }
+
+    private SpineRetrieval assemble(UUID orgId, InquiryEvidenceRetriever.InquiryEvidence lanes,
+                                    RetrievalQuery question) {
+        UUID productId = lanes.productId();
+        List<KnowledgeSourceAdapter.Indexed> corpus = corpus(orgId, productId);
+        Map<String, KnowledgeEntry> byUnit = new LinkedHashMap<>();
+        for (KnowledgeSourceAdapter.Indexed indexed : corpus) {
+            byUnit.put(unitOf(indexed.entry().entryId()), indexed.entry());
+        }
+        Map<InquiryEvidenceRetriever.ScopedPassage, KnowledgeEntry> evidence = new LinkedHashMap<>();
+        for (InquiryEvidenceRetriever.ScopedPassage passage : lanes.passages()) {
+            evidence.put(passage, byUnit.getOrDefault(unitKey(passage), entryOf(passage, productId)));
+        }
+        Set<String> used = new java.util.HashSet<>();
+        evidence.values().forEach(e -> used.add(e.entryId()));
+
+        List<KnowledgeSourceAdapter.Indexed> candidates = corpus.stream()
+                .filter(i -> CONTEXT_TYPES.contains(i.entry().sourceType()))
+                .filter(i -> i.entry().sourceType() != SpineSourceType.PRODUCT_FACT
+                        || ProductFactAdapter.isAttribute(i.entry()))
+                .filter(i -> !used.contains(i.entry().entryId()))
+                .toList();
+        List<KnowledgeEntry> context = matchContext(candidates, question,
+                productId == null || products == null ? null : products.findById(productId)
+                        .map(OperatorProductName::displayNameOrNull).orElse(null));
+
+        List<KnowledgeEntry> all = new ArrayList<>(evidence.values());
+        all.addAll(context);
+        List<KnowledgeConflict> conflicts = KnowledgeConflict.detect(all);
+        Set<String> losers = new java.util.HashSet<>();
+        conflicts.forEach(c -> losers.add(c.loserEntryId()));
+
+        List<InquiryEvidenceRetriever.ScopedPassage> kept = new ArrayList<>();
+        for (Map.Entry<InquiryEvidenceRetriever.ScopedPassage, KnowledgeEntry> e : evidence.entrySet()) {
+            if (!losers.contains(e.getValue().entryId())) {
+                kept.add(e.getKey());
             }
         }
-        int cap = Math.max(1, Math.min(limit <= 0 ? DEFAULT_LIMIT : limit, MAX_LIMIT));
-        List<KnowledgeSpineSearchResponse.Hit> ranked = hits.stream()
-                .sorted(Comparator.comparingDouble(KnowledgeSpineSearchResponse.Hit::score).reversed()
-                        .thenComparing(KnowledgeSpineSearchResponse.Hit::entry, AUTHORITY_ORDER))
-                .limit(cap)
+        // Conservative: a conflict never takes away the only current basis. The figure is not trusted — the
+        // conflict is shown — but grounding that existed before the check still exists after it.
+        if (kept.stream().noneMatch(p -> p.scope().current())
+                && lanes.passages().stream().anyMatch(p -> p.scope().current())) {
+            kept = new ArrayList<>(lanes.passages());
+        }
+        InquiryEvidenceRetriever.InquiryEvidence resolved = kept.size() == lanes.passages().size() ? lanes
+                : new InquiryEvidenceRetriever.InquiryEvidence(lanes.productId(), lanes.state(), List.copyOf(kept),
+                        lanes.order(), lanes.supersededMemories(), lanes.productOutcome(), lanes.policyOutcome(),
+                        lanes.policyTopicsDeclared());
+        List<KnowledgeEntry> keptEvidence = new ArrayList<>();
+        for (InquiryEvidenceRetriever.ScopedPassage passage : resolved.passages()) {
+            keptEvidence.add(evidence.get(passage));
+        }
+        List<KnowledgeEntry> keptContext = context.stream().filter(e -> !losers.contains(e.entryId())).toList();
+        return new SpineRetrieval(resolved, keptEvidence, keptContext, conflicts);
+    }
+
+    /** Context entries that cover the question, best first, at most {@link #MAX_CONTEXT}. */
+    private static List<KnowledgeEntry> matchContext(List<KnowledgeSourceAdapter.Indexed> candidates,
+                                                     RetrievalQuery question, String productName) {
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+        List<KnowledgeRetriever.Candidate<KnowledgeSourceAdapter.Indexed>> scored = candidates.stream()
+                .map(i -> new KnowledgeRetriever.Candidate<>(i, i.searchable()))
                 .toList();
-        RetrievalOutcome outcome = corpus.isEmpty() ? RetrievalOutcome.ABSENT
-                : !ranked.isEmpty() ? RetrievalOutcome.FOUND
-                : rejected > 0 ? RetrievalOutcome.NOT_APPLICABLE
-                : RetrievalOutcome.NO_RELEVANT_EVIDENCE;
-        return new KnowledgeSpineSearchResponse(query, matchedBy, productId, corpus.size(), outcome, ranked);
+        Set<KnowledgeTopic> asked = KnowledgeTopic.of(question.text());
+        for (RetrievalQuery.Candidate form : question.candidates()) {
+            List<KnowledgeRetriever.Hit<KnowledgeSourceAdapter.Indexed>> hits =
+                    KnowledgeRetriever.rank(form.text(), scored, productName).stream()
+                            .filter(h -> KnowledgeTopic.applicable(asked, KnowledgeTopic.of(h.ref().entry().title())))
+                            .toList();
+            if (!hits.isEmpty()) {
+                return hits.stream()
+                        .sorted(Comparator.comparingDouble(
+                                        (KnowledgeRetriever.Hit<KnowledgeSourceAdapter.Indexed> h) -> -h.coverage())
+                                .thenComparing(h -> h.ref().entry(), AUTHORITY_ORDER))
+                        .limit(MAX_CONTEXT)
+                        .map(h -> h.ref().entry())
+                        .toList();
+            }
+        }
+        return List.of();
+    }
+
+    /** The id of the citable unit an entry id names — the part after the source type. */
+    static String unitOf(String entryId) {
+        int at = entryId == null ? -1 : entryId.indexOf(':');
+        return at < 0 ? String.valueOf(entryId) : entryId.substring(at + 1);
+    }
+
+    private static String unitKey(InquiryEvidenceRetriever.ScopedPassage passage) {
+        return String.valueOf(passage.chunkId() != null ? passage.chunkId() : passage.sourceId());
+    }
+
+    /** A passage the corpus did not list (a row written between the two reads): attributed from the passage alone. */
+    private static KnowledgeEntry entryOf(InquiryEvidenceRetriever.ScopedPassage p, UUID productId) {
+        return switch (p.scope()) {
+            case PRODUCT -> new KnowledgeEntry(SellerKnowledgeAdapter.typeOf(p.authoredOrigin()) + ":" + p.chunkId(),
+                    SellerKnowledgeAdapter.typeOf(p.authoredOrigin()), KnowledgeSpineScope.PRODUCT, productId, null,
+                    SellerKnowledgeAdapter.authorityOf(p.authoredOrigin()), p.heading(), p.text(), null,
+                    "상품 지식", List.of(SourceRef.of(SourceRef.Kind.PRODUCT_KNOWLEDGE_SOURCE, p.sourceId()),
+                            SourceRef.of(SourceRef.Kind.PRODUCT_KNOWLEDGE_CHUNK, p.chunkId())));
+            case ORG_OPERATIONS -> new KnowledgeEntry(SpineSourceType.ORG_KNOWLEDGE + ":" + p.chunkId(),
+                    SpineSourceType.ORG_KNOWLEDGE, KnowledgeSpineScope.ORG, null, null, KnowledgeAuthority.SELLER_POLICY,
+                    p.heading(), p.text(), null, "판매자가 등록한 운영 기준",
+                    List.of(SourceRef.of(SourceRef.Kind.ORG_KNOWLEDGE_SOURCE, p.sourceId()),
+                            SourceRef.of(SourceRef.Kind.ORG_KNOWLEDGE_CHUNK, p.chunkId())));
+            default -> new KnowledgeEntry(SpineSourceType.INQUIRY_ANSWER + ":" + p.sourceId(),
+                    SpineSourceType.INQUIRY_ANSWER, KnowledgeSpineScope.ORG, null, null,
+                    KnowledgeAuthority.PAST_SELLER_ANSWER, p.heading(), p.text(), null, "과거 문의 답변",
+                    List.of(SourceRef.of(SourceRef.Kind.ANSWER_MEMORY, p.sourceId())));
+        };
     }
 
     /**
@@ -155,7 +283,7 @@ public class KnowledgeSpineService {
     @Transactional(readOnly = true)
     public CompiledKnowledgeView compiled(UUID orgId, UUID productId) {
         Product product = requireProduct(orgId, productId);
-        List<KnowledgeEntry> entries = corpus(orgId, product).stream()
+        List<KnowledgeEntry> entries = corpus(orgId, productId).stream()
                 .map(KnowledgeSourceAdapter.Indexed::entry)
                 .sorted(AUTHORITY_ORDER)
                 .toList();
@@ -191,8 +319,7 @@ public class KnowledgeSpineService {
                 .toList());
     }
 
-    private List<KnowledgeSourceAdapter.Indexed> corpus(UUID orgId, Product product) {
-        UUID productId = product == null ? null : product.getId();
+    private List<KnowledgeSourceAdapter.Indexed> corpus(UUID orgId, UUID productId) {
         List<KnowledgeSourceAdapter.Indexed> all = new ArrayList<>();
         for (KnowledgeSourceAdapter adapter : adapters) {
             for (KnowledgeSourceAdapter.Indexed indexed : adapter.read(orgId, productId)) {

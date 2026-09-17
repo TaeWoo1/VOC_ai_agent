@@ -80,7 +80,7 @@ public class ReviewReplyAdapter implements KnowledgeSourceAdapter {
         UUID productId = review.getProductId();
         String question = VocPreviewSanitizer.redactFullBody(MarkupText.toPlainText(review.getBody())).text();
         return new Indexed(new KnowledgeEntry(
-                SpineSourceType.REVIEW_REPLY + ":" + approval.getId() + ":" + draft.getVersion(),
+                SpineSourceType.REVIEW_REPLY + ":" + approval.getId(),
                 SpineSourceType.REVIEW_REPLY,
                 productId == null ? KnowledgeSpineScope.ORG : KnowledgeSpineScope.PRODUCT, productId, null,
                 KnowledgeAuthority.PAST_SELLER_ANSWER,

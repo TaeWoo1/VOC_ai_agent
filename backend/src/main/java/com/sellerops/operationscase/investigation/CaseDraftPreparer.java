@@ -38,7 +38,11 @@ public class CaseDraftPreparer {
      * @param reason         a closed token when nothing was written: PROPOSAL_REFUSED, COMPOSER_FAILED, NO_DRAFT
      */
     public record Prepared(boolean written, Integer version, String knowledgeState, int evidenceCount,
-                           String reason) {
+                           String reason, String answerBasis, com.sellerops.inquiry.draft.dto.KnowledgeGapView gap) {
+
+        public Prepared(boolean written, Integer version, String knowledgeState, int evidenceCount, String reason) {
+            this(written, version, knowledgeState, evidenceCount, reason, null, null);
+        }
     }
 
     public Prepared prepare(UUID orgId, UUID workItemId) {
@@ -57,8 +61,10 @@ public class CaseDraftPreparer {
         }
         int evidence = written.evidence() == null ? 0 : written.evidence().size();
         if (written.draft() == null) {
-            return new Prepared(false, null, written.knowledgeState(), evidence, "NO_DRAFT");
+            return new Prepared(false, null, written.knowledgeState(), evidence, "NO_DRAFT", written.answerBasis(),
+                    written.knowledgeGap());
         }
-        return new Prepared(true, written.draft().version(), written.knowledgeState(), evidence, null);
+        return new Prepared(true, written.draft().version(), written.knowledgeState(), evidence, null,
+                written.answerBasis(), written.knowledgeGap());
     }
 }

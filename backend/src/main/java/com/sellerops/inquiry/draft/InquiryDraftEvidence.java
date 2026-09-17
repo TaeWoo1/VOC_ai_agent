@@ -94,6 +94,14 @@ public class InquiryDraftEvidence {
      */
     public static final String KIND_ORDER_FACT = "ORDER_FACT";
 
+    /** 판매자가 초안·판단을 고치며 「다음에도 참고」로 남긴 지침 — 사실의 근거가 아니라 처리 방향. */
+    public static final String KIND_SELLER_GUIDANCE = "SELLER_GUIDANCE";
+
+    /** 채널이 밝힌 상품 속성(규격·원산지 등). */
+    public static final String KIND_PRODUCT_FACT = "PRODUCT_FACT";
+
+    public static final String LABEL_SELLER_GUIDANCE = "판매자 지침";
+
     /**
      * The stored kind for a RETRIEVED scope.
      *
@@ -139,6 +147,12 @@ public class InquiryDraftEvidence {
 
     /** The seller-facing group for a stored kind; the raw value when it predates this vocabulary. */
     public static String scopeLabelOf(String kind) {
+        if (KIND_SELLER_GUIDANCE.equals(kind)) {
+            return LABEL_SELLER_GUIDANCE;
+        }
+        if (KIND_PRODUCT_FACT.equals(kind)) {
+            return KnowledgeScope.PRODUCT.labelKo();
+        }
         KnowledgeScope scope = scopeOf(kind);
         return scope == null ? kind : scope.labelKo();
     }

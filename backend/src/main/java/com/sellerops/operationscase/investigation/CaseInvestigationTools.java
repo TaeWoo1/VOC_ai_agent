@@ -9,8 +9,15 @@ import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.InquiryOrderFactReader;
 import com.sellerops.inquiry.publish.ReplyDecisionHistoryReader;
-import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
-import com.sellerops.knowledge.org.dto.OrgKnowledgeSearchResponse;
+import com.sellerops.inquiry.draft.AnswerBasisState;
+import com.sellerops.inquiry.draft.InquiryKnowledgeAssessor;
+import com.sellerops.knowledge.RetrievalQuery;
+import com.sellerops.knowledge.spine.KnowledgeConflict;
+import com.sellerops.knowledge.spine.KnowledgeEntry;
+import com.sellerops.knowledge.spine.KnowledgeSpineService;
+import com.sellerops.knowledge.spine.SpineRetrieval;
+import com.sellerops.knowledge.spine.SpineSourceType;
+import com.sellerops.product.library.KnowledgeVariantScope;
 import com.sellerops.operationscase.OperationsCase;
 import com.sellerops.operationscase.OperationsCaseRepository;
 import com.sellerops.operationscase.OperationsSubjectKind;
@@ -18,8 +25,6 @@ import com.sellerops.order.fact.OrderFact;
 import com.sellerops.order.fact.OrderFactLookup;
 import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.ProductRepository;
-import com.sellerops.product.library.ProductKnowledgeLibraryService;
-import com.sellerops.product.library.dto.KnowledgeSearchResponse;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.reviewissue.ReviewIssue;
@@ -72,8 +77,9 @@ public class CaseInvestigationTools {
     private final ReviewRepository reviews;
     private final ChannelRepository channels;
     private final ProductRepository products;
-    private final ProductKnowledgeLibraryService productKnowledge;
-    private final SellerOperationsKnowledgeService orgKnowledge;
+    /** The one knowledge assessment the inquiry draft also reads — never a second search of our own. */
+    private final InquiryKnowledgeAssessor assessor;
+    private final KnowledgeSpineService spine;
     private final InquiryOrderFactReader orderFacts;
     private final ReviewIssueRepository issues;
     private final ReviewIssueEvidenceRepository issueEvidence;
@@ -82,8 +88,8 @@ public class CaseInvestigationTools {
     private final ReplyDecisionHistoryReader replyDecisions;
 
     public CaseInvestigationTools(InquiryRepository inquiries, ReviewRepository reviews, ChannelRepository channels,
-                                  ProductRepository products, ProductKnowledgeLibraryService productKnowledge,
-                                  SellerOperationsKnowledgeService orgKnowledge, InquiryOrderFactReader orderFacts,
+                                  ProductRepository products, InquiryKnowledgeAssessor assessor,
+                                  KnowledgeSpineService spine, InquiryOrderFactReader orderFacts,
                                   ReviewIssueRepository issues, ReviewIssueEvidenceRepository issueEvidence,
                                   OperationsCaseRepository cases, ReplyDecisionHistoryReader replyDecisions) {
         this.replyDecisions = replyDecisions;
@@ -91,8 +97,8 @@ public class CaseInvestigationTools {
         this.reviews = reviews;
         this.channels = channels;
         this.products = products;
-        this.productKnowledge = productKnowledge;
-        this.orgKnowledge = orgKnowledge;
+        this.assessor = assessor;
+        this.spine = spine;
         this.orderFacts = orderFacts;
         this.issues = issues;
         this.issueEvidence = issueEvidence;
@@ -116,10 +122,38 @@ public class CaseInvestigationTools {
                                UUID productId, boolean orderReferenced, UUID inquiryId) {
     }
 
-    public record KnowledgeHit(String kindLabel, String title, String excerpt) {
+    /**
+     * One piece of company knowledge as an investigation sees it. {@code entryId} stays server-side (it names a row);
+     * the context sent to the model carries the authority, provenance, title, excerpt and date only.
+     */
+    public record KnowledgeUse(String entryId, SpineSourceType sourceType, String authority, int authorityRank,
+                               String scope, String provenance, String title, String excerpt, LocalDate capturedOn) {
     }
 
-    public record ProductContext(String name, List<KnowledgeHit> knowledge) {
+    /**
+     * What the company knows about this case, and whether it is enough — for an inquiry, exactly the assessment the
+     * draft writer makes.
+     *
+     * @param basis           {@code GROUNDED}, {@code NEEDS_CLARIFICATION}, {@code NO_ANSWER_BASIS}, or
+     *                        {@code CONTEXT_ONLY} for a review (a review asks nothing, so it has no answer basis)
+     * @param missingSubject  the thing the seller has not told Reviewnary, in the customer's own noun, when the basis
+     *                        is missing; null otherwise
+     * @param suggestedScope  where the seller's answer would belong: {@code PRODUCT} or {@code ORG}
+     */
+    public record KnowledgeAssessment(String basis, String missingSubject, String suggestedScope, String topic,
+                                      List<KnowledgeUse> evidence, List<KnowledgeUse> context,
+                                      List<KnowledgeConflict> conflicts) {
+
+        public static KnowledgeAssessment none() {
+            return new KnowledgeAssessment("CONTEXT_ONLY", null, null, null, List.of(), List.of(), List.of());
+        }
+
+        public boolean missing() {
+            return AnswerBasisState.NO_ANSWER_BASIS.name().equals(basis);
+        }
+    }
+
+    public record ProductContext(String name) {
     }
 
     public record OrderContext(boolean available, String sentence) {
@@ -175,22 +209,61 @@ public class CaseInvestigationTools {
             return facts;
         }
 
-        public Optional<ProductContext> getProductContext(UUID productId, String question) {
+        public Optional<ProductContext> getProductContext(UUID productId) {
             Optional<ProductContext> context = products.findById(productId)
                     .filter(p -> orgId.equals(p.getOrgId()))
-                    .map(product -> {
-                        List<KnowledgeHit> hits = new ArrayList<>();
-                        try {
-                            KnowledgeSearchResponse found = productKnowledge.search(orgId, productId, question, 2);
-                            found.passages().forEach(p -> hits.add(
-                                    new KnowledgeHit("상품 지식", p.title(), excerpt(p.content()))));
-                        } catch (RuntimeException unreadable) {
-                            // A product whose library cannot be searched still has a name worth stating.
-                        }
-                        return new ProductContext(OperatorProductName.displayNameOrNull(product), hits);
-                    });
-            record("getProductContext", String.valueOf(productId), context.map(c -> 1 + c.knowledge().size()).orElse(0));
+                    .map(product -> new ProductContext(OperatorProductName.displayNameOrNull(product)));
+            record("getProductContext", String.valueOf(productId), context.isPresent() ? 1 : 0);
             return context;
+        }
+
+        /**
+         * The company's knowledge for this case, through the Knowledge Spine. For an inquiry this is the draft writer's
+         * own assessment, with stored order facts only (a background run never reads a channel for it).
+         */
+        public KnowledgeAssessment assessKnowledge(OperationsSubjectKind kind, UUID subjectId) {
+            KnowledgeAssessment assessment;
+            try {
+                assessment = switch (kind) {
+                    case INQUIRY -> inquiries.findById(subjectId).filter(i -> orgId.equals(i.getOrgId()))
+                            .map(this::assessInquiry).orElse(KnowledgeAssessment.none());
+                    case REVIEW -> reviews.findById(subjectId).filter(r -> orgId.equals(r.getOrgId()))
+                            .map(this::assessReview).orElse(KnowledgeAssessment.none());
+                    case SOURCE -> KnowledgeAssessment.none();
+                };
+            } catch (RuntimeException unreadable) {
+                // An unreadable library is reported as nothing found; the prompt then asks rather than asserts.
+                assessment = KnowledgeAssessment.none();
+            }
+            record("assessKnowledge", kind + ":" + subjectId,
+                    assessment.evidence().size() + assessment.context().size());
+            return assessment;
+        }
+
+        private KnowledgeAssessment assessInquiry(Inquiry inquiry) {
+            InquiryKnowledgeAssessor.Assessment a = assessor.assess(orgId, inquiry, OrderFactLookup.STORED_ONLY);
+            boolean missing = a.basis() == AnswerBasisState.NO_ANSWER_BASIS;
+            String subject = missing ? a.missingSubject() : null;
+            // A question about 배송·교환·결제·증빙 is answered by a company rule; anything else about a named product
+            // is that product's knowledge. The seller can still choose the other scope when they answer.
+            String scope = !missing ? null : a.productId() == null || a.asked() != null ? "ORG" : "PRODUCT";
+            return new KnowledgeAssessment(a.basis().name(), subject, scope,
+                    a.asked() == null ? null : a.asked().name(), uses(a.spine().evidence()),
+                    uses(investigationContext(a.spine())), a.spine().conflicts());
+        }
+
+        private KnowledgeAssessment assessReview(Review review) {
+            if (review.getProductId() == null) {
+                return KnowledgeAssessment.none();
+            }
+            RedactedBody body = VocPreviewSanitizer.redactFullBody(MarkupText.toPlainText(review.getBody()));
+            if (body.text() == null || body.text().isBlank()) {
+                return KnowledgeAssessment.none();
+            }
+            SpineRetrieval found = spine.retrieveForProduct(orgId, review.getProductId(),
+                    RetrievalQuery.ofCustomer(null, body.text()), KnowledgeVariantScope.unresolved());
+            return new KnowledgeAssessment("CONTEXT_ONLY", null, null, null, uses(found.evidence()),
+                    uses(investigationContext(found)), found.conflicts());
         }
 
         /** Stored order facts only — never an exact channel lookup from a background run. */
@@ -210,18 +283,6 @@ public class CaseInvestigationTools {
                     .orElse(new OrderContext(false, "이 문의에 연결된 주문 정보는 없습니다."));
             record("getOrderContext", String.valueOf(inquiryId), context.available() ? 1 : 0);
             return context;
-        }
-
-        public List<KnowledgeHit> searchKnowledge(String question) {
-            List<KnowledgeHit> hits = new ArrayList<>();
-            try {
-                OrgKnowledgeSearchResponse found = orgKnowledge.search(orgId, question, 2);
-                found.passages().forEach(p -> hits.add(new KnowledgeHit("운영 기준", p.title(), excerpt(p.content()))));
-            } catch (RuntimeException unreadable) {
-                // An unsearchable library is reported as no hit; the prompt then asks rather than asserts.
-            }
-            record("searchKnowledge", question, hits.size());
-            return hits;
         }
 
         public List<RelatedIssue> getRelatedIssues(UUID reviewId, UUID productId) {
@@ -330,6 +391,22 @@ public class CaseInvestigationTools {
         private void record(String name, String args, int results) {
             calls.add(new ToolCall(name, digest(args), results));
         }
+    }
+
+    /** Review decisions already reach an investigation through {@code getPastSellerDecisions}; not twice. */
+    private static List<KnowledgeEntry> investigationContext(SpineRetrieval found) {
+        return found.context().stream()
+                .filter(e -> e.sourceType() != SpineSourceType.REVIEW_DECISION
+                        && e.sourceType() != SpineSourceType.TRIAGE_CORRECTION)
+                .toList();
+    }
+
+    private static List<KnowledgeUse> uses(List<KnowledgeEntry> entries) {
+        return entries.stream()
+                .map(e -> new KnowledgeUse(e.entryId(), e.sourceType(), e.authority().labelKo(), e.authority().rank(),
+                        e.scope().name(), e.provenance(), e.title(), excerpt(e.text()),
+                        e.capturedAt() == null ? null : e.capturedAt().atZone(KST).toLocalDate()))
+                .toList();
     }
 
     private static SimilarCase similar(OperationsCase c) {

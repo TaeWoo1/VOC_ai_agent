@@ -44,18 +44,31 @@ import java.util.UUID;
 public record KnowledgeGapView(UUID productId, String topic, List<String> topics, String missingSubject,
                                String productOutcome, String policyOutcome, String applicability,
                                UUID variantId, boolean policyDeclaresTopic, UUID candidateId,
-                               boolean previouslyAnswered) {
+                               boolean previouslyAnswered, String askedSubject) {
+
+    /**
+     * The noun the customer asked about, for a gap the seller can close.
+     *
+     * <p>Separate from {@link #missingSubject()}, which is the 규격 classifier's own word and drives the sentence the
+     * inquiry screen already shows. This one is filled by {@code InquiryKnowledgeAssessor} from the question's
+     * remaining topic words when the classifier named none, so a customer-operations case can ask for exactly the
+     * thing that is missing («방수») without changing what any existing screen says.
+     */
+    public KnowledgeGapView asking(String subject) {
+        return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome, policyOutcome,
+                applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, subject);
+    }
 
     /** The same gap, now carrying the 확인 필요 row it was filed as. */
     public KnowledgeGapView filedAs(UUID candidateId) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
-                policyOutcome, applicability, variantId, policyDeclaresTopic, candidateId, false);
+                policyOutcome, applicability, variantId, policyDeclaresTopic, candidateId, false, askedSubject);
     }
 
     /** The same gap, on a question this seller has already answered once. Nothing is filed for it. */
     public KnowledgeGapView answeredBefore() {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
-                policyOutcome, applicability, variantId, policyDeclaresTopic, null, true);
+                policyOutcome, applicability, variantId, policyDeclaresTopic, null, true, askedSubject);
     }
 
     public static KnowledgeGapView of(InquiryEvidenceRetriever.InquiryEvidence retrieved,
@@ -72,7 +85,8 @@ public record KnowledgeGapView(UUID productId, String topic, List<String> topics
                 verdict.variantId(),
                 asked != null && retrieved.policyDeclares(asked),
                 null,
-                false);
+                false,
+                null);
     }
 
     private static String name(RetrievalOutcome outcome) {

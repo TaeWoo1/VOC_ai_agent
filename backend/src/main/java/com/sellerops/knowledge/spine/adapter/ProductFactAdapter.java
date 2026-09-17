@@ -61,6 +61,16 @@ public class ProductFactAdapter implements KnowledgeSourceAdapter {
                 .toList();
     }
 
+    /**
+     * Whether this fact is a short stated attribute (spec, attribute, taxonomy) rather than the long description.
+     * Only attributes are offered as retrieval context: the description is the detail page's text, which the product
+     * lane already reads, and a paragraph matched on one shared word is not evidence about the question.
+     */
+    public static boolean isAttribute(KnowledgeEntry entry) {
+        String key = entry.sourceRefs().isEmpty() ? null : entry.sourceRefs().get(0).locator();
+        return key != null && !FactKeys.DESC.equals(FactKeys.namespaceOf(key));
+    }
+
     /** {@code spec:길이} reads as 「길이」; the four SellerOps-named keys read as what they are. */
     static String titleOf(String factKey) {
         if (FactKeys.DESC_SUMMARY.equals(factKey)) {

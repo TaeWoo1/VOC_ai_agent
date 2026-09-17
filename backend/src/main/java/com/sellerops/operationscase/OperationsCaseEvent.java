@@ -50,7 +50,7 @@ public class OperationsCaseEvent extends BaseEntity {
     @Column(name = "provenance", columnDefinition = "text")
     private String provenance;
 
-    static OperationsCaseEvent of(OperationsCase c, UUID runId, CaseEventActor actor, CaseEventKind kind,
+    public static OperationsCaseEvent of(OperationsCase c, UUID runId, CaseEventActor actor, CaseEventKind kind,
                                   String provenance) {
         OperationsCaseEvent event = new OperationsCaseEvent();
         event.setOrgId(c.getOrgId());

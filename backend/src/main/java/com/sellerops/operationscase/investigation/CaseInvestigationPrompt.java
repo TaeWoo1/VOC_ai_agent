@@ -16,10 +16,15 @@ public final class CaseInvestigationPrompt {
      * (「재발 방지 노력도 약속」). None was in the evidence. v2 keeps the recommendation to the seller's next step and
      * sends every missing fact to {@code missingInformation}.
      */
-    public static final String PROMPT_VERSION = "case-investigation-prompt/v2";
+    /**
+     * v3 (2026-09-18, Knowledge &amp; Intelligence Closure v1): the knowledge lines now come from the Knowledge Spine —
+     * the draft writer's own retrieval — carrying authority and provenance, with a [basis] verdict and [x] conflicts.
+     * v3 tells the model how to weigh them. The rules of v2 are unchanged.
+     */
+    public static final String PROMPT_VERSION = "case-investigation-prompt/v3";
     public static final String SCHEMA_VERSION = "case-investigation-schema/v1";
-    public static final String TOOL_VERSION = "case-tools/v1";
-    public static final String EVIDENCE_VERSION = "case-evidence/v1";
+    public static final String TOOL_VERSION = "case-tools/v2";
+    public static final String EVIDENCE_VERSION = "case-evidence/v2";
 
     private CaseInvestigationPrompt() {
     }
@@ -40,12 +45,16 @@ public final class CaseInvestigationPrompt {
                "보냈습니다", "처리했습니다", "환불했습니다" 같은 완료 표현을 쓰지 않습니다.
                2. 근거 목록에 없는 사실(정책, 재고, 배송 일정, 주문 상태)을 만들지 않습니다. 모르면 missingInformation에 적습니다.
                3. 고객이 답을 기다리거나 돈이 걸린 건은 항상 NEEDS_DECISION입니다.
-               4. evidenceRefs에는 판단에 쓴 근거의 대괄호 이름(예: subject, k1, i1)만 적습니다.
+               4. evidenceRefs에는 판단에 쓴 근거의 대괄호 이름(예: subject, basis, e1, g1, i1)만 적습니다.
                5. summary는 판매자가 10초 안에 읽을 한두 문장, recommendedAction은 판매자가 할 다음 한 걸음 한 문장(120자 이내)입니다. \
                존댓말로 씁니다. 고객의 연락처·주소·주문번호를 옮겨 적지 않습니다.
                6. recommendedAction에 근거 목록에 없는 내용을 넣지 않습니다: 상품 사용법·부착 요령, 플랫폼 기능, 배송·교환 일정, \
                보상 조건을 지어내지 않습니다. 판매자가 답하려면 필요한데 근거에 없는 사실은 missingInformation에 적습니다.
                7. 고객에게 무엇을 약속하라고 권하지 않습니다. 교환·환불·보상·재발 방지 약속은 판매자가 정합니다.
+               8. 판매자·회사 지식 줄([e], [g])에는 권한이 적혀 있습니다. 높은 순서는 판매자 운영 기준, 판매자가 확정한 상품 지식, \
+               판매자 판단, 상품 상세·설명서, 과거 판매자 답변입니다. 서로 다르면 높은 쪽을 따릅니다. [x] 지식 충돌이 있으면 NEEDS_DECISION입니다.
+               9. [basis]가 「부족합니다」이면 근거 없이 답하라고 권하지 않습니다. 판매자에게 그 안내 기준을 알려 달라고 하고, \
+               그 항목을 missingInformation에 적습니다. [g] 판매자 지침은 처리 방향을 알려 주지만 사실의 근거는 아닙니다.
 
                recommendedActionType: NO_ACTION, MONITOR_REPEAT_ISSUE, REPLY_TO_CUSTOMER, CONTACT_CUSTOMER, \
                REFUND_OR_COMPENSATION, CANCEL_OR_EXCHANGE, ADD_KNOWLEDGE, REVIEW_PRODUCT_LISTING 중 하나.

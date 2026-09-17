@@ -115,6 +115,20 @@ public class ReviewDraftComposer {
     private final ReviewIssueEvidenceRepository issueEvidence;
     private final ReviewIssueRepository issues;
     private final KnowledgeCandidateService candidates;
+    private com.sellerops.knowledge.spine.KnowledgeSpineService spine;
+
+    /** Production wiring: the review draft reads the Knowledge Spine retrieval the case investigator reads. */
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReviewDraftComposer(InquiryEvidenceRetriever retriever,
+                               com.sellerops.knowledge.spine.KnowledgeSpineService spine,
+                               ReviewReplyDraftService drafts, ReviewDraftEvidenceRepository evidence,
+                               ReviewReplyTemplateService templates, AgentDraftService model,
+                               AgentQuotaService quota, DraftEvidenceSnippets snippets,
+                               ReviewIssueEvidenceRepository issueEvidence,
+                               ReviewIssueRepository issues, KnowledgeCandidateService candidates) {
+        this(retriever, drafts, evidence, templates, model, quota, snippets, issueEvidence, issues, candidates);
+        this.spine = spine;
+    }
 
     public ReviewDraftComposer(InquiryEvidenceRetriever retriever, ReviewReplyDraftService drafts,
                                ReviewDraftEvidenceRepository evidence,
@@ -132,6 +146,7 @@ public class ReviewDraftComposer {
         this.issueEvidence = issueEvidence;
         this.issues = issues;
         this.candidates = candidates;
+        this.spine = new com.sellerops.knowledge.spine.KnowledgeSpineService(List.of(), null, null, retriever);
     }
 
     /**
@@ -153,7 +168,7 @@ public class ReviewDraftComposer {
         // it narrows a forwarded mail thread.
         RetrievalQuery question = RetrievalQuery.ofCustomer(null, redactedBody);
         InquiryEvidenceRetriever.InquiryEvidence retrieved =
-                retriever.retrieveFor(orgId, productId, question, KnowledgeVariantScope.unresolved());
+                spine.retrieveForProduct(orgId, productId, question, KnowledgeVariantScope.unresolved()).lanes();
 
         ReviewReplyTemplateKey key = RuleBasedReviewReplyProvider.keyFor(
                 new ReviewReplyContext(orgId, review.getId(), redactedBody, review.getRating()));

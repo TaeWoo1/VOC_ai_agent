@@ -37,6 +37,14 @@ public final class CaseDecisionGuard {
     }
 
     public static Applied apply(CaseInvestigationOutput output, boolean customerWaiting) {
+        return apply(output, customerWaiting, false);
+    }
+
+    /**
+     * @param knowledgeConflict the company's own knowledge states different figures about this case's topic. Which
+     *                          one is right is the seller's to say, so nothing is closed or parked on it.
+     */
+    public static Applied apply(CaseInvestigationOutput output, boolean customerWaiting, boolean knowledgeConflict) {
         List<String> guards = new ArrayList<>();
         CaseDisposition disposition = output.disposition();
         RecommendedActionType action = output.recommendedActionType();
@@ -49,6 +57,8 @@ public final class CaseDecisionGuard {
                 guards.add("CUSTOMER_WAITING");
             } else if (disposition == CaseDisposition.AUTO_RESOLVED && action != RecommendedActionType.NO_ACTION) {
                 guards.add("RESOLVE_REQUIRES_NO_ACTION");
+            } else if (knowledgeConflict) {
+                guards.add("KNOWLEDGE_CONFLICT");
             }
             if (!guards.isEmpty()) {
                 disposition = CaseDisposition.NEEDS_DECISION;

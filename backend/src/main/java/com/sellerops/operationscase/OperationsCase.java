@@ -85,8 +85,17 @@ public class OperationsCase extends BaseEntity {
     @Column(name = "evidence_count", nullable = false)
     private int evidenceCount;
 
+    /**
+     * JSON: what company knowledge this case is missing ({@code basis}, {@code missingSubject}, {@code suggestedScope},
+     * {@code topic}, {@code candidateId}) — written when the shared knowledge assessment found no answer basis, cleared
+     * when a grounded draft is prepared. The subject is the customer's noun, never their sentence.
+     */
     @Column(name = "knowledge_gap", columnDefinition = "text")
     private String knowledgeGap;
+
+    /** JSON: the knowledge entries the investigation was shown and cited — ids and labels, no knowledge text. */
+    @Column(name = "knowledge_used", columnDefinition = "text")
+    private String knowledgeUsed;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "prepared_action", nullable = false, length = 32, columnDefinition = "varchar(32)")

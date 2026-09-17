@@ -21,8 +21,23 @@ import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.draft.InquiryOrderFactReader;
 import com.sellerops.inquiry.publish.ReplyDecisionHistoryReader;
-import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
-import com.sellerops.knowledge.org.dto.OrgKnowledgeSearchResponse;
+import com.sellerops.inquiry.draft.AnswerBasisState;
+import com.sellerops.inquiry.draft.DraftKnowledgeState;
+import com.sellerops.inquiry.draft.InquiryEvidenceRetriever;
+import com.sellerops.inquiry.draft.InquiryKnowledgeAssessor;
+import com.sellerops.inquiry.draft.SpecApplicability;
+import com.sellerops.inquiry.draft.dto.KnowledgeGapView;
+import com.sellerops.knowledge.KnowledgeScope;
+import com.sellerops.knowledge.spine.KnowledgeAuthority;
+import com.sellerops.knowledge.spine.KnowledgeConflict;
+import com.sellerops.knowledge.spine.KnowledgeEntry;
+import com.sellerops.knowledge.spine.KnowledgeSpineScope;
+import com.sellerops.knowledge.spine.KnowledgeSpineService;
+import com.sellerops.knowledge.spine.SourceRef;
+import com.sellerops.knowledge.spine.SpineRetrieval;
+import com.sellerops.knowledge.spine.SpineSourceType;
+import com.sellerops.order.fact.OrderFact;
+import com.sellerops.order.fact.OrderFactState;
 import com.sellerops.operationscase.CaseDisposition;
 import com.sellerops.operationscase.OperationsCase;
 import com.sellerops.operationscase.OperationsCaseKind;
@@ -30,7 +45,6 @@ import com.sellerops.operationscase.OperationsCaseRepository;
 import com.sellerops.operationscase.OperationsSubjectKind;
 import com.sellerops.operationscase.RecommendedActionType;
 import com.sellerops.product.ProductRepository;
-import com.sellerops.product.library.ProductKnowledgeLibraryService;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.reviewissue.ReviewIssueEvidenceRepository;
 import com.sellerops.reviewissue.ReviewIssueRepository;
@@ -60,7 +74,7 @@ class CaseInvestigationPayloadFloorTest {
     private final UUID channelId = UUID.randomUUID();
     private final InquiryRepository inquiries = mock(InquiryRepository.class);
     private final ChannelRepository channels = mock(ChannelRepository.class);
-    private final SellerOperationsKnowledgeService orgKnowledge = mock(SellerOperationsKnowledgeService.class);
+    private final InquiryKnowledgeAssessor assessor = mock(InquiryKnowledgeAssessor.class);
     private final ReviewIssueRepository issues = mock(ReviewIssueRepository.class);
     private final OperationsCaseRepository cases = mock(OperationsCaseRepository.class);
     private final ReplyDecisionHistoryReader replyDecisions = mock(ReplyDecisionHistoryReader.class);
@@ -86,11 +100,10 @@ class CaseInvestigationPayloadFloorTest {
         Channel channel = new Channel();
         channel.setNameKo("카페24");
         when(channels.findById(channelId)).thenReturn(Optional.of(channel));
-        when(orgKnowledge.search(eq(org), anyString(), anyInt()))
-                .thenReturn(new OrgKnowledgeSearchResponse("q", 0, 0, List.of()));
+        when(assessor.assess(eq(org), any(), any())).thenReturn(assessment(List.of(), List.of()));
         when(issues.findByOrgIdAndDismissedFalse(org)).thenReturn(List.of());
         tools = new CaseInvestigationTools(inquiries, mock(ReviewRepository.class), channels,
-                mock(ProductRepository.class), mock(ProductKnowledgeLibraryService.class), orgKnowledge,
+                mock(ProductRepository.class), assessor, mock(KnowledgeSpineService.class),
                 mock(InquiryOrderFactReader.class), issues, mock(ReviewIssueEvidenceRepository.class), cases,
                 replyDecisions);
         subjectCase = new OperationsCase();
@@ -104,6 +117,60 @@ class CaseInvestigationPayloadFloorTest {
                 + "\"summary\":\"고객에게 답변을 보냈습니다.\",\"recommendedActionType\":\"REPLY_TO_CUSTOMER\","
                 + "\"recommendedAction\":\"배송 예정일을 안내해 주세요.\",\"missingInformation\":[\"출고 예정일\"],"
                 + "\"evidenceRefs\":[\"subject\",\"k9\"],\"confidence\":\"HIGH\"}";
+    }
+
+    /** An assessment as the shared assessor returns it, with the given evidence entries and conflicts. */
+    private InquiryKnowledgeAssessor.Assessment assessment(List<KnowledgeEntry> evidence,
+                                                          List<KnowledgeConflict> conflicts) {
+        List<InquiryEvidenceRetriever.ScopedPassage> passages = evidence.stream()
+                .map(e -> new InquiryEvidenceRetriever.ScopedPassage(KnowledgeScope.ORG_OPERATIONS, e.title(), e.text(),
+                        e.sourceRefs().get(0).id(), e.sourceRefs().get(0).id(), "org-policy", 0.9))
+                .toList();
+        InquiryEvidenceRetriever.InquiryEvidence lanes = new InquiryEvidenceRetriever.InquiryEvidence(null,
+                passages.isEmpty() ? DraftKnowledgeState.NO_PRODUCT : DraftKnowledgeState.GROUNDED, passages,
+                OrderFact.unavailable(OrderFactState.NO_ORDER_REFERENCE, null, null), 0);
+        SpecApplicability.Verdict verdict = new SpecApplicability.Verdict(
+                SpecApplicability.Applicability.NOT_VARIANT_SENSITIVE, null, "배송", false);
+        AnswerBasisState basis = AnswerBasisState.of(lanes.state(), verdict.applicability());
+        return new InquiryKnowledgeAssessor.Assessment(null, verdict,
+                new SpineRetrieval(lanes, evidence, List.of(), conflicts), basis, null, java.util.Set.of(),
+                KnowledgeGapView.of(lanes, verdict, null, java.util.Set.of()), null);
+    }
+
+    private static KnowledgeEntry policy(String title, String text) {
+        UUID id = UUID.randomUUID();
+        return new KnowledgeEntry("ORG_KNOWLEDGE:" + id, SpineSourceType.ORG_KNOWLEDGE, KnowledgeSpineScope.ORG, null,
+                null, KnowledgeAuthority.SELLER_POLICY, title, text, Instant.parse("2026-09-01T00:00:00Z"),
+                "판매자가 등록한 운영 기준", List.of(SourceRef.of(SourceRef.Kind.ORG_KNOWLEDGE_SOURCE, id)));
+    }
+
+    private static KnowledgeEntry pastAnswer(String title, String text) {
+        UUID id = UUID.randomUUID();
+        return new KnowledgeEntry("INQUIRY_ANSWER:" + id, SpineSourceType.INQUIRY_ANSWER, KnowledgeSpineScope.ORG,
+                null, null, KnowledgeAuthority.PAST_SELLER_ANSWER, title, text, Instant.parse("2026-08-01T00:00:00Z"),
+                "문의 답변 · 채널에 등록된 답변", List.of(SourceRef.of(SourceRef.Kind.ANSWER_MEMORY, id)));
+    }
+
+    @Test
+    void knowledgeTravelsWithAuthorityProvenanceBasisAndConflict_butNeverAnEntryId() {
+        KnowledgeEntry rule = policy("배송 안내", "평일 오후 2시까지 결제하면 당일 출고, 도착까지 2일 걸립니다.");
+        KnowledgeEntry old = pastAnswer("배송 문의 답변", "보통 5일 걸립니다.");
+        when(assessor.assess(eq(org), any(), any())).thenReturn(assessment(List.of(rule, old),
+                KnowledgeConflict.detect(List.of(rule, old))));
+        CaseInvestigator investigator = new CaseInvestigator(tools, service(true), quota);
+        CaseInvestigationTools.OrgTools bound = tools.forOrg(org);
+        CaseInvestigationTools.SubjectFacts subject =
+                bound.getSubject(OperationsSubjectKind.INQUIRY, inquiryId).orElseThrow();
+        CaseInvestigator.Context context = investigator.gather(bound, subjectCase, subject);
+        String body = new CaseInvestigationGenerator(transport(), AgentLlmWireFormat.Vendor.OPENAI, "gpt-test",
+                "sk-secret-test", 2500, "low").requestBody(context.text());
+
+        assertThat(context.refs()).contains("basis", "e1", "e2", "x1");
+        assertThat(body).contains("[basis] 답변 근거: 판매자가 등록한 근거로 답할 수 있습니다.")
+                .contains("판매자 운영 기준 · 판매자가 등록한 운영 기준 「배송 안내」")
+                .contains("과거 판매자 답변 · 문의 답변").contains("지식 충돌").contains("2026-09-01 기준");
+        assertThat(UUID_SHAPE.matcher(body).find()).as("entry ids stay on the server").isFalse();
+        assertThat(context.knowledgeRefs()).containsKeys("e1", "e2");
     }
 
     private AgentLlmTransport transport() {

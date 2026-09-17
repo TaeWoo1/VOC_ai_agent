@@ -23,7 +23,7 @@ package com.sellerops.agent.llm;
 public final class AgentDraftPrompt {
 
     /** Bump on every wording change. It is stamped into the provenance the run records. */
-    public static final String PROMPT_VERSION = "agent-draft-prompt/v8";
+    public static final String PROMPT_VERSION = "agent-draft-prompt/v9";
 
     /**
      * The closed set of reply categories, in the rule drafter's own order.
@@ -71,6 +71,7 @@ public final class AgentDraftPrompt {
                답변이며, 지금 이 고객의 사실이 아닙니다 -- 표현을 맞추는 데 쓰고 사실의 출처로 쓰지 마세요. \
                특히 [과거 답변]에 있는 "오늘 출고", "내일 도착" 같은 문장은 그때 그 주문의 사정이지 \
                이 주문의 사정도, 회사의 기준도 아닙니다.
+               - [판매자 지침]은 판매자가 비슷한 건의 초안이나 판단을 고치며 「다음에도 참고」하라고 남긴                문장입니다. 처리 방향과 말투는 따르되, 기간·금액·규격 같은 사실은 [상품 정보]·[운영 정책]에                있을 때만 쓰세요.
                - 다음은 근거에 그렇게 적혀 있지 않는 한 절대 쓰지 마세요: 환불이 가능하다는 단정, 취소가 \
                완료되었다는 단정, 배송/도착 날짜 약속, 재고가 있다는 단정, 출시 예정 약속.
                - 「주문 상태」는 이 주문에 대해 채널이 말해 준 사실이며, 정책과 다른 종류의 근거입니다. \

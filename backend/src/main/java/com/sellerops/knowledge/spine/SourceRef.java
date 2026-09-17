@@ -28,7 +28,8 @@ public record SourceRef(Kind kind, UUID id, String locator) {
         REVIEW_REPLY_APPROVAL,
         REVIEW_REPLY_DRAFT,
         REVIEW_TRIAGE,
-        TRIAGE_CORRECTION
+        TRIAGE_CORRECTION,
+        SELLER_GUIDANCE
     }
 
     public static SourceRef of(Kind kind, UUID id) {

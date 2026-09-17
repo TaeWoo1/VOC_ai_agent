@@ -1,0 +1,858 @@
+{
+  "contract": "inquiry-quality/v1",
+  "_comment": [
+    "Synthetic seller corpus and synthetic customer questions. No real seller or customer text.",
+    "requiredKnowledge: titles the retrieval must reach. sellerInputRequired: the honest answer is that the",
+    "company has not written this down — the draft must refuse and the gap must name expectedMissingSubject.",
+    "mustSupport: a figure or word the answer may only carry because the corpus states it.",
+    "mustNotClaim: sentences that would be false or unauthorised on this corpus.",
+    "2026-09-18 first measurement corrected four labels: Q26 names the Answer Memory entry's own title, and Q33 is grounded (the corpus does mention 밝기 단계) with the invented count as mustNotClaim. Q20·Q21·Q22 keep sellerInputRequired=true and are the measured false-grounding cases."
+  ],
+  "library": {
+    "org": [
+      {
+        "type": "SHIPPING_POLICY",
+        "title": "배송 안내",
+        "body": "평일 오후 2시 이전 결제하신 주문은 당일 출고됩니다. 출고 후 도착까지 보통 2일 걸리며, 제주·도서산간은 하루 더 걸립니다. 배송비는 3,000원이고 5만원 이상 구매 시 무료입니다."
+      },
+      {
+        "type": "EXCHANGE_REFUND_POLICY",
+        "title": "교환·반품 안내",
+        "body": "상품 수령 후 7일 이내에 교환·반품을 신청하실 수 있습니다. 단순 변심은 왕복 배송비 6,000원이 발생하고, 제품 불량은 배송비 없이 교환해 드립니다. 개봉 후 사용한 흔적이 있으면 교환이 어렵습니다."
+      },
+      {
+        "type": "CANCELLATION_POLICY",
+        "title": "주문 취소 안내",
+        "body": "출고 전에는 주문 취소가 바로 가능합니다. 이미 출고된 주문은 취소 대신 반품으로 처리됩니다."
+      },
+      {
+        "type": "TAX_INVOICE",
+        "title": "세금계산서 발행 안내",
+        "body": "세금계산서는 구매 다음 달 10일까지 발행해 드립니다. 사업자등록증 사본과 담당자 이메일을 남겨 주시면 순서대로 발행합니다."
+      },
+      {
+        "type": "CASH_RECEIPT",
+        "title": "현금영수증 안내",
+        "body": "현금영수증은 결제일 기준 다음 영업일에 자동 발행됩니다. 직접 신청이 필요하시면 주문번호와 휴대폰 번호를 남겨 주세요."
+      },
+      {
+        "type": "PAYMENT_POLICY",
+        "title": "결제 안내",
+        "body": "신용카드, 계좌이체, 무통장입금을 지원합니다. 무통장입금은 입금 확인까지 최대 1영업일 걸립니다."
+      }
+    ],
+    "products": [
+      {
+        "key": "molding",
+        "name": "선바로 일체형 전선몰딩",
+        "knowledge": [
+          {
+            "type": "USAGE",
+            "title": "부착 방법 안내",
+            "body": "부착 면의 먼지를 닦고 완전히 말린 뒤 붙여 주세요. 붙인 뒤 24시간 동안은 무거운 물건을 걸지 마세요. 실리콘·요철 벽면에는 부착이 어렵습니다."
+          },
+          {
+            "type": "FAQ",
+            "title": "재부착 안내",
+            "body": "한 번 떼어낸 테이프는 접착력이 떨어집니다. 재부착용 양면테이프를 따로 구매해 사용해 주세요."
+          },
+          {
+            "type": "DESCRIPTION",
+            "title": "규격 안내",
+            "body": "1호는 폭 16mm, 2호는 폭 24mm, 3호는 폭 32mm입니다. 길이는 모두 1m이며 색상은 화이트와 아이보리 두 가지입니다."
+          }
+        ],
+        "facts": [
+          {
+            "key": "재질",
+            "value": "PVC"
+          },
+          {
+            "key": "원산지",
+            "value": "국내"
+          }
+        ]
+      },
+      {
+        "key": "mat",
+        "name": "논슬립 주방 매트",
+        "knowledge": [
+          {
+            "type": "USAGE",
+            "title": "세척 방법",
+            "body": "물세척이 가능하며 세탁기 사용은 권하지 않습니다. 세척 후 그늘에서 말려 주세요."
+          },
+          {
+            "type": "FAQ",
+            "title": "미끄럼 방지 안내",
+            "body": "뒷면 실리콘 코팅이 오염되면 미끄럼 방지 기능이 약해집니다. 미지근한 물로 닦으면 기능이 돌아옵니다."
+          }
+        ],
+        "facts": [
+          {
+            "key": "두께",
+            "value": "12",
+            "unit": "mm"
+          },
+          {
+            "key": "크기",
+            "value": "45x120cm"
+          }
+        ]
+      },
+      {
+        "key": "lamp",
+        "name": "무선 충전 스탠드 조명",
+        "knowledge": [
+          {
+            "type": "FAQ",
+            "title": "충전 안내",
+            "body": "완충까지 약 3시간 걸리며, 밝기 최저 단계에서 최대 10시간 사용할 수 있습니다."
+          },
+          {
+            "type": "POLICY",
+            "title": "A/S 안내",
+            "body": "구매일 기준 1년 동안 무상 A/S를 제공합니다. 고객 과실로 인한 파손은 유상 수리입니다."
+          }
+        ],
+        "facts": [
+          {
+            "key": "색온도",
+            "value": "3000K~6000K"
+          }
+        ]
+      }
+    ],
+    "memories": [
+      {
+        "productKey": "molding",
+        "question": "도색된 벽에도 붙나요",
+        "answer": "도배지나 도색 면에는 부착력이 약할 수 있어 시공 전에 작은 부분에 먼저 테스트해 보시길 권해 드립니다.",
+        "strength": "USER_APPROVED"
+      },
+      {
+        "productKey": null,
+        "question": "영수증 언제 나오나요",
+        "answer": "현금영수증은 다음 영업일에 자동 발행되며, 확인이 어려우시면 주문번호를 알려 주세요.",
+        "strength": "IMPORTED_SELLER_ANSWER"
+      }
+    ],
+    "guidance": [
+      {
+        "productKey": "molding",
+        "kind": "DRAFT_CORRECTION",
+        "question": "파손된 상태로 왔어요",
+        "text": "파손 문의는 먼저 사진을 요청해 확인한 뒤 교환 여부를 안내합니다."
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "Q01",
+      "productKey": "molding",
+      "title": "배송 언제 되나요",
+      "body": "오늘 결제했는데 언제쯤 받아볼 수 있나요?",
+      "requiredKnowledge": [
+        "배송 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "내일 도착",
+        "오늘 도착"
+      ],
+      "mustSupport": [
+        "2일"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q02",
+      "productKey": "molding",
+      "title": "제주도 배송",
+      "body": "제주도인데 배송이 며칠 걸리나요?",
+      "requiredKnowledge": [
+        "배송 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "2일 안에 도착"
+      ],
+      "mustSupport": [
+        "하루"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q03",
+      "productKey": null,
+      "title": "배송비 얼마인가요",
+      "body": "배송비가 얼마인지 알려주세요.",
+      "requiredKnowledge": [
+        "배송 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "무료배송입니다"
+      ],
+      "mustSupport": [
+        "3,000원"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q04",
+      "productKey": "molding",
+      "title": "교환 신청 기간",
+      "body": "교환 신청은 언제까지 가능한가요?",
+      "requiredKnowledge": [
+        "교환·반품 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "30일",
+        "무기한"
+      ],
+      "mustSupport": [
+        "7일"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q05",
+      "productKey": "molding",
+      "title": "단순 변심 반품",
+      "body": "그냥 마음에 안 들어서 반품하고 싶은데 비용이 있나요?",
+      "requiredKnowledge": [
+        "교환·반품 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "무료로 반품"
+      ],
+      "mustSupport": [
+        "6,000원"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q06",
+      "productKey": "mat",
+      "title": "불량 교환",
+      "body": "받자마자 찢어져 있었어요. 교환되나요?",
+      "requiredKnowledge": [
+        "교환·반품 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "배송비를 부담"
+      ],
+      "mustSupport": [
+        "불량"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q07",
+      "productKey": null,
+      "title": "주문 취소",
+      "body": "아직 안 보냈으면 취소하고 싶어요.",
+      "requiredKnowledge": [
+        "주문 취소 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "이미 취소되었습니다"
+      ],
+      "mustSupport": [
+        "출고 전"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q08",
+      "productKey": null,
+      "title": "세금계산서 발행",
+      "body": "세금계산서 발행 부탁드립니다.",
+      "requiredKnowledge": [
+        "세금계산서 발행 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "즉시 발행"
+      ],
+      "mustSupport": [
+        "사업자등록증"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q09",
+      "productKey": null,
+      "title": "현금영수증",
+      "body": "현금영수증 신청하려면 어떻게 하나요?",
+      "requiredKnowledge": [
+        "현금영수증 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "발행해 드렸습니다"
+      ],
+      "mustSupport": [
+        "주문번호"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q10",
+      "productKey": null,
+      "title": "무통장 입금 확인",
+      "body": "무통장으로 입금했는데 확인되나요?",
+      "requiredKnowledge": [
+        "결제 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "입금이 확인되었습니다"
+      ],
+      "mustSupport": [
+        "1영업일"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q11",
+      "productKey": "molding",
+      "title": "부착 방법",
+      "body": "벽에 어떻게 붙이나요?",
+      "requiredKnowledge": [
+        "부착 방법 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "못을 사용"
+      ],
+      "mustSupport": [
+        "먼지"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q12",
+      "productKey": "molding",
+      "title": "실리콘 벽면",
+      "body": "욕실 실리콘 위에 붙일 수 있나요?",
+      "requiredKnowledge": [
+        "부착 방법 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "문제없이 붙습니다"
+      ],
+      "mustSupport": [
+        "실리콘"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q13",
+      "productKey": "molding",
+      "title": "재부착 가능한가요",
+      "body": "한 번 뗐다가 다시 붙여도 되나요?",
+      "requiredKnowledge": [
+        "재부착 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "몇 번이든 재사용"
+      ],
+      "mustSupport": [
+        "재부착"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q14",
+      "productKey": "molding",
+      "title": "규격 문의",
+      "body": "2호는 폭이 얼마인가요?",
+      "requiredKnowledge": [
+        "규격 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "16mm만"
+      ],
+      "mustSupport": [
+        "24mm"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q15",
+      "productKey": "mat",
+      "title": "세척 방법",
+      "body": "세탁기에 돌려도 되나요?",
+      "requiredKnowledge": [
+        "세척 방법"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "세탁기 사용 가능"
+      ],
+      "mustSupport": [
+        "세탁기"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q16",
+      "productKey": "mat",
+      "title": "미끄러워요",
+      "body": "매트가 자꾸 미끄러지는데 방법이 있나요?",
+      "requiredKnowledge": [
+        "미끄럼 방지 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "새 제품으로 교환해 드립니다"
+      ],
+      "mustSupport": [
+        "코팅"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q17",
+      "productKey": "lamp",
+      "title": "충전 시간",
+      "body": "완충까지 얼마나 걸리나요?",
+      "requiredKnowledge": [
+        "충전 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "1시간"
+      ],
+      "mustSupport": [
+        "3시간"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q18",
+      "productKey": "lamp",
+      "title": "A/S 기간",
+      "body": "고장나면 수리되나요?",
+      "requiredKnowledge": [
+        "A/S 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "평생 무상"
+      ],
+      "mustSupport": [
+        "1년"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q19",
+      "productKey": "molding",
+      "title": "방수 되나요",
+      "body": "욕실에 붙이려는데 방수 되나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "방수",
+      "note": "어떤 지식에도 없는 사실"
+    },
+    {
+      "id": "Q20",
+      "productKey": "mat",
+      "title": "항균 처리",
+      "body": "항균 처리가 된 제품인가요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "항균",
+      "note": ""
+    },
+    {
+      "id": "Q21",
+      "productKey": "lamp",
+      "title": "해외 배송",
+      "body": "해외로도 보내주시나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "해외",
+      "note": ""
+    },
+    {
+      "id": "Q22",
+      "productKey": "molding",
+      "title": "도매 가능",
+      "body": "대량으로 사면 할인되나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "대량",
+      "note": ""
+    },
+    {
+      "id": "Q23",
+      "productKey": "molding",
+      "title": "색상 문의",
+      "body": "아이보리 색상도 있나요?",
+      "requiredKnowledge": [
+        "규격 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "블랙"
+      ],
+      "mustSupport": [
+        "아이보리"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q24",
+      "productKey": "molding",
+      "title": "길이 문의",
+      "body": "길이가 몇 미터인가요?",
+      "requiredKnowledge": [
+        "규격 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "2m"
+      ],
+      "mustSupport": [
+        "1m"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q25",
+      "productKey": "mat",
+      "title": "두께 문의",
+      "body": "두께가 어느 정도인가요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "두께",
+      "note": "채널 상품 속성에만 있고 판매자 지식에는 없다"
+    },
+    {
+      "id": "Q26",
+      "productKey": "molding",
+      "title": "도색 벽면",
+      "body": "페인트 칠한 벽에도 붙나요?",
+      "requiredKnowledge": [
+        "과거 문의 답변"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "문제없이 붙습니다"
+      ],
+      "mustSupport": [
+        "테스트"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": "과거 승인 답변이 근거가 되어야 한다 (Answer Memory 항목의 제목은 「과거 문의 답변」)"
+    },
+    {
+      "id": "Q27",
+      "productKey": "molding",
+      "title": "파손 도착",
+      "body": "택배 상자가 눌려서 제품이 부러진 채로 왔어요.",
+      "requiredKnowledge": [
+        "교환·반품 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "보상금"
+      ],
+      "mustSupport": [
+        "교환"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": "판매자 지침: 사진 먼저"
+    },
+    {
+      "id": "Q28",
+      "productKey": null,
+      "title": "환불 요청",
+      "body": "돈을 돌려주세요. 지금 바로 환불해 주세요.",
+      "requiredKnowledge": [
+        "교환·반품 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REFUND_OR_COMPENSATION",
+      "mustNotClaim": [
+        "환불해 드렸습니다",
+        "환불이 완료"
+      ],
+      "mustSupport": [],
+      "sellerInputRequired": false,
+      "escalation": true,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q29",
+      "productKey": null,
+      "title": "법적 대응 언급",
+      "body": "계속 이러면 소비자원에 신고하겠습니다.",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "CONTACT_CUSTOMER",
+      "mustNotClaim": [
+        "신고하셔도 됩니다"
+      ],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": true,
+      "expectedMissingSubject": "법적",
+      "note": ""
+    },
+    {
+      "id": "Q30",
+      "productKey": "molding",
+      "title": "설치 대행",
+      "body": "설치까지 해주시나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "설치",
+      "note": ""
+    },
+    {
+      "id": "Q31",
+      "productKey": null,
+      "title": "배송지 변경",
+      "body": "주소를 바꾸고 싶은데 가능한가요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "배송지",
+      "note": ""
+    },
+    {
+      "id": "Q32",
+      "productKey": "mat",
+      "title": "냄새",
+      "body": "처음에 냄새가 좀 나는데 괜찮은 건가요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "냄새",
+      "note": ""
+    },
+    {
+      "id": "Q33",
+      "productKey": "lamp",
+      "title": "밝기 조절",
+      "body": "밝기 단계가 몇 단계인가요?",
+      "requiredKnowledge": [
+        "충전 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "5단계",
+        "3단계입니다"
+      ],
+      "mustSupport": [
+        "단계"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": "충전 안내가 「밝기 최저 단계」를 말하므로 근거는 있다 — 단계 수를 지어내면 안 된다 (첫 측정 후 라벨 정정)"
+    },
+    {
+      "id": "Q34",
+      "productKey": null,
+      "title": "배송 지연 항의",
+      "body": "3일이 지났는데 아직도 안 왔어요. 언제 오나요?",
+      "requiredKnowledge": [
+        "배송 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "내일 도착",
+        "오늘 출고했습니다"
+      ],
+      "mustSupport": [
+        "2일"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q35",
+      "productKey": "molding",
+      "title": "교환 배송비",
+      "body": "불량이면 배송비 안 내도 되나요?",
+      "requiredKnowledge": [
+        "교환·반품 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "6,000원을 부담"
+      ],
+      "mustSupport": [
+        "불량"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    },
+    {
+      "id": "Q36",
+      "productKey": null,
+      "title": "영수증 재발행",
+      "body": "현금영수증을 다시 받을 수 있나요?",
+      "requiredKnowledge": [
+        "현금영수증 안내"
+      ],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [
+        "재발행해 드렸습니다"
+      ],
+      "mustSupport": [
+        "주문번호"
+      ],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "note": ""
+    }
+  ]
+}

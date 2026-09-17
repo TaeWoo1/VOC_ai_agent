@@ -464,23 +464,38 @@ public class OperationsCaseProcessor {
         }
         k.investigationsStarted++;
         CaseInvestigator.Outcome outcome = investigator.investigate(saved, run.getId());
+        OperationsCase concluded = recordInvestigation(saved, run.getId(), outcome);
         switch (outcome.kind()) {
-            case SKIPPED -> {
-                events.save(OperationsCaseEvent.of(saved, run.getId(), CaseEventActor.SYSTEM,
-                        CaseEventKind.INVESTIGATION_SKIPPED, outcome.provenance()));
-                k.skipped++;
-            }
-            case FAILED -> {
-                events.save(OperationsCaseEvent.of(saved, run.getId(), CaseEventActor.AGENT,
-                        CaseEventKind.INVESTIGATION_FAILED, outcome.provenance()));
-                k.failed++;
-            }
+            case SKIPPED -> k.skipped++;
+            case FAILED -> k.failed++;
             case CONCLUDED -> {
-                OperationsCase concluded = applyInvestigation(saved, outcome);
-                events.save(OperationsCaseEvent.of(concluded, run.getId(), CaseEventActor.AGENT,
-                        CaseEventKind.INVESTIGATED, outcome.provenance()));
                 k.investigated++;
                 prepareDraftIfAsked(run, concluded, outcome.output(), k);
+            }
+        }
+    }
+
+    /**
+     * Write one investigation outcome onto its case and history. Shared with the Teach loop, which re-investigates a
+     * case after the seller supplies missing knowledge — so a re-investigation means exactly what a first one does.
+     */
+    public OperationsCase recordInvestigation(OperationsCase c, UUID runId, CaseInvestigator.Outcome outcome) {
+        switch (outcome.kind()) {
+            case SKIPPED -> {
+                events.save(OperationsCaseEvent.of(c, runId, CaseEventActor.SYSTEM,
+                        CaseEventKind.INVESTIGATION_SKIPPED, outcome.provenance()));
+                return c;
+            }
+            case FAILED -> {
+                events.save(OperationsCaseEvent.of(c, runId, CaseEventActor.AGENT,
+                        CaseEventKind.INVESTIGATION_FAILED, outcome.provenance()));
+                return c;
+            }
+            default -> {
+                OperationsCase concluded = applyInvestigation(c, outcome);
+                events.save(OperationsCaseEvent.of(concluded, runId, CaseEventActor.AGENT,
+                        CaseEventKind.INVESTIGATED, outcome.provenance()));
+                return concluded;
             }
         }
     }
@@ -497,6 +512,9 @@ public class OperationsCaseProcessor {
         c.setConfidence(output.confidence());
         c.setEvidenceCount(output.evidenceRefs().size());
         c.setPreparedAction(CasePreparedAction.RECOMMENDATION_ONLY);
+        c.setKnowledgeUsed(json(outcome.usedKnowledge()));
+        c.setKnowledgeGap(outcome.knowledge() == null || !outcome.knowledge().missing() ? null
+                : json(CaseKnowledgeGap.fromInvestigation(outcome.knowledge())));
         if (outcome.applied().disposition() == CaseDisposition.AUTO_RESOLVED) {
             markClosed(c, CaseResolution.AGENT_NO_ACTION);
         }
@@ -510,25 +528,43 @@ public class OperationsCaseProcessor {
                 || output.recommendedActionType() != RecommendedActionType.REPLY_TO_CUSTOMER) {
             return;
         }
-        CaseDraftPreparer.Prepared prepared = drafts.prepare(c.getOrgId(), c.getWorkItemId());
+        if (recordPrepared(c, run.getId(), drafts.prepare(c.getOrgId(), c.getWorkItemId()))) {
+            k.drafts++;
+        }
+    }
+
+    /**
+     * Write what the production draft path produced onto the case: the draft version or the knowledge gap, and the
+     * event. Shared with the Teach loop ({@code CaseTeachService}), which re-runs the same path after the seller
+     * supplies the missing knowledge — one place decides what a prepared or refused draft means for a case.
+     *
+     * @return whether a draft was written
+     */
+    public boolean recordPrepared(OperationsCase c, UUID runId, CaseDraftPreparer.Prepared prepared) {
         Map<String, Object> provenance = new LinkedHashMap<>();
         provenance.put("path", "InquiryDraftComposer");
         provenance.put("knowledgeState", prepared.knowledgeState());
+        provenance.put("answerBasis", prepared.answerBasis());
         provenance.put("evidenceCount", prepared.evidenceCount());
         if (prepared.written()) {
+            c.setKnowledgeGap(null);
             c.setPreparedAction(CasePreparedAction.DRAFT_PREPARED);
             c.setDraftVersion(prepared.version());
             c.setEvidenceState(prepared.knowledgeState());
             OperationsCase saved = cases.saveAndFlush(c);
             provenance.put("draftVersion", prepared.version());
-            event(saved, run.getId(), CaseEventActor.SYSTEM, CaseEventKind.DRAFT_PREPARED, provenance);
-            k.drafts++;
-        } else {
-            c.setEvidenceState(prepared.knowledgeState());
-            OperationsCase saved = cases.saveAndFlush(c);
-            provenance.put("reason", prepared.reason());
-            event(saved, run.getId(), CaseEventActor.SYSTEM, CaseEventKind.DRAFT_NOT_PREPARED, provenance);
+            event(saved, runId, CaseEventActor.SYSTEM, CaseEventKind.DRAFT_PREPARED, provenance);
+            return true;
         }
+        c.setEvidenceState(prepared.knowledgeState());
+        CaseKnowledgeGap gap = CaseKnowledgeGap.fromDraft(prepared);
+        if (gap != null) {
+            c.setKnowledgeGap(json(gap));
+        }
+        OperationsCase saved = cases.saveAndFlush(c);
+        provenance.put("reason", prepared.reason());
+        event(saved, runId, CaseEventActor.SYSTEM, CaseEventKind.DRAFT_NOT_PREPARED, provenance);
+        return false;
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────

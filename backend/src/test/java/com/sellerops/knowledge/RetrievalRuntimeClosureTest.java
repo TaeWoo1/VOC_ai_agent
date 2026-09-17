@@ -49,27 +49,43 @@ class RetrievalRuntimeClosureTest {
     }
 
     /**
-     * The three callers, and why each is allowed to spend a retrieval.
+     * Who may run the lanes, and why.
      *
-     * <p>Two of them WRITE a draft version, which is the unit of work retrieval belongs to. The
-     * third is the coverage diagnostic, which measures and never drafts — and pays for that
-     * privilege by asking with a query that is not customer-written and an order lookup that is
-     * stored-only, so a report over a backlog can neither reach a channel nor charge a per-question
-     * model call per row ({@code InquiryKnowledgeCoverageService#measured}).
+     * <p>Since Knowledge &amp; Intelligence Closure v1 there is ONE retrieval and the Knowledge Spine owns it: it runs
+     * the lanes, attributes them and adds the seller-confirmed context, so the draft writers and the case
+     * investigator cannot disagree about what the company knows. The coverage diagnostic keeps its own call because
+     * it measures and never drafts — and pays for that by asking with a query that is not customer-written and an
+     * order lookup that is stored-only, so a report over a backlog can neither reach a channel nor charge a
+     * per-question model call per row ({@code InquiryKnowledgeCoverageService#measured}).
      */
-    private static final List<String> MAY_RETRIEVE = List.of(
-            "InquiryDraftComposer.java", "ReviewDraftComposer.java",
-            "InquiryKnowledgeCoverageService.java");
+    private static final List<String> MAY_RUN_THE_LANES = List.of(
+            "KnowledgeSpineService.java", "InquiryKnowledgeCoverageService.java");
+
+    /**
+     * Who may ask the Spine: the unit of work a retrieval belongs to.
+     *
+     * <p>Two of them WRITE a draft version (the inquiry assessment the composer reads, and the review composer); the
+     * third is the case investigation, which reads the SAME assessment the inquiry draft reads rather than searching
+     * on its own — the defect this package closed.
+     */
+    private static final List<String> MAY_ASK_THE_SPINE = List.of(
+            "InquiryKnowledgeAssessor.java", "ReviewDraftComposer.java", "CaseInvestigationTools.java");
 
     @Test
-    @DisplayName("only a draft generation — and one diagnostic that spends nothing — runs a retrieval")
+    @DisplayName("one retrieval: the Spine runs the lanes, and only a work unit asks the Spine")
     void retrievalBelongsToGeneration() throws IOException {
-        List<String> callers = filesWhere(code ->
+        List<String> laneCallers = filesWhere(code ->
                 code.contains("InquiryEvidenceRetriever")
                         && (code.contains(".retrieve(") || code.contains(".retrieveFor(")));
-        assertThat(callers)
+        assertThat(laneCallers)
                 .as("a read path that re-ran the retrieval could contradict the saved version")
-                .containsExactlyInAnyOrderElementsOf(MAY_RETRIEVE);
+                .containsExactlyInAnyOrderElementsOf(MAY_RUN_THE_LANES);
+
+        List<String> spineCallers = filesWhere(code ->
+                code.contains(".retrieveForInquiry(") || code.contains(".retrieveForProduct("));
+        assertThat(spineCallers)
+                .as("the investigator and the draft read one assessment; a second asker is a second answer")
+                .containsExactlyInAnyOrderElementsOf(MAY_ASK_THE_SPINE);
     }
 
     /**

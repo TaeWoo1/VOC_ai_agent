@@ -296,6 +296,13 @@ A row here records **what was true of the code at one commit**. It never moves a
 
 ---
 
+## 2026-09-18 · Knowledge & Intelligence Closure v1 — 품질 측정 (마켓플레이스 호출 0)
+
+| Date | Channel · capability | What it established | Env | Approval | Outcome | Evidence |
+|---|---|---|---|---|---|---|
+| **2026-09-18** | **리뷰 처리 판단 · 현재 규칙 + 에이전트 경로**(마켓플레이스 아님 — 저장된 실제 리뷰) | **사람이 라벨한 218건에서 오늘의 제품이 무엇을 자동 종결하는가, 그리고 그중 몇 건이 오탐인가** | 규칙 leg: dev `sellerops` **읽기 전용 SELECT 1회**(`db.setReadOnly(true)`, 화면 출력은 수치만). 에이전트 leg: **일회용 clone `sellerops_review_quality`**(`createdb -T`), worktree backend, 조사 capability만 ON | 승인 불필요 — 채널 호출 0 · WRITE 0. 실제 고객 리뷰 문장이 조사 모델로 나가는 것은 2026-09-18 product-owner 결정(현재 Case 입력) 범위 | **측정 완료** — 규칙: AUTO_RESOLVED 114 · MONITORING 91 · 조사로 넘김 13, **오탐 자동 종결 18(전부 「확인 필요」 라벨)** · 확인 필요인데 MONITORING 33. 에이전트: 넘어온 11건 전부 **NEEDS_DECISION**(guard 0 · **오탐 자동 종결 0**), 조사 11/11 CONCLUDED. 모델 호출 11 · DB 쓰기는 clone의 usage 행뿐 · dev DB 무접촉 | `docs/knowledge_intelligence_closure_v1.md` §6 |
+| **2026-09-18** | **문의 초안 품질 · 합성 코퍼스**(고객·판매자 실데이터 0) | **36건 세트에서 근거 없는 주장을 쓰는가, 근거가 있을 때 실제로 그 수치를 쓰는가** | worktree backend · H2 test DB · 실제 초안 모델(`gpt-5-2025-08-07`), 코퍼스와 질문 전부 합성 | 승인 불필요 — 채널 0 · 실판매자 데이터 0 | **`PASS` + 결함 3건 기록** — 초안 26/27 · **코퍼스에 없는 주장 0** · 수치 반영 24/25 · 근거 없는데 초안 3(Q20·Q21·Q22, lexical admission). 모델 호출 26 | `docs/knowledge_intelligence_closure_v1.md` §5-2 |
+
 ## Known gaps in this index (recorded, not hidden)
 
 - Rows before 2026-08 carry no approval id, because the Approval Manifest ceremony

@@ -138,9 +138,14 @@ export function CustomerOperationsExceptions({
 
 function DecisionItem({ row }: { row: CustomerOperationsDecisionRow }) {
   const action = actionKo(row.recommendedActionType);
+  // The case screen is where this row's whole story is — what was investigated, which company knowledge was used,
+  // and the [정보 알려주기] when knowledge is what is missing. The owning inquiry/review screen is one link inside it.
   return (
     <li className="p-3">
-      <Link to={row.to} className="block rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
+      <Link
+        to={`/customer-operations/cases/${row.caseId}`}
+        className="block rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+      >
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
           <span>{subjectKindKo(row.subjectKind)}</span>
           {row.channelNameKo ? <span>{row.channelNameKo}</span> : null}

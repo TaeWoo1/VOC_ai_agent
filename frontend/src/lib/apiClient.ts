@@ -165,7 +165,7 @@ import {
   mockVocItemTriage,
 } from "./mocks";
 import { visibleChannels } from "./productChannels";
-import type { CustomerOperationsHome, ResponsibilityView } from "./customerOperationsTypes";
+import type { CustomerOperationsHome, OperationsCaseDetail, ResponsibilityView } from "./customerOperationsTypes";
 import { captureApiError } from "./telemetry/sentry";
 
 // Default to a SAME-ORIGIN relative base ("") so `/api/*` requests go through the Vite dev proxy (see
@@ -1835,6 +1835,42 @@ export const api = {
     const { data } = await http.post<ResponsibilityView>("/api/responsibilities/customer-operations/stop");
     return data;
   },
+  /**
+   * One customer-operations case, and the three things a seller may do on it: teach the missing knowledge, rewrite
+   * the prepared draft, correct the recommendation. Never mocked — a fixture here would invent a seller's case.
+   */
+  async getOperationsCase(caseId: string): Promise<OperationsCaseDetail> {
+    const { data } = await http.get<OperationsCaseDetail>(`/api/responsibilities/customer-operations/cases/${caseId}`);
+    return data;
+  },
+  async teachOperationsCase(caseId: string, input: { content: string; scope: string }): Promise<OperationsCaseDetail> {
+    const { data } = await http.post<OperationsCaseDetail>(
+      `/api/responsibilities/customer-operations/cases/${caseId}/teach`,
+      input,
+    );
+    return data;
+  },
+  async editOperationsCaseDraft(
+    caseId: string,
+    input: { body: string; remember: boolean; scope: string },
+  ): Promise<OperationsCaseDetail> {
+    const { data } = await http.post<OperationsCaseDetail>(
+      `/api/responsibilities/customer-operations/cases/${caseId}/draft`,
+      input,
+    );
+    return data;
+  },
+  async correctOperationsCase(
+    caseId: string,
+    input: { correctedActionType: string | null; note: string; remember: boolean; scope: string },
+  ): Promise<OperationsCaseDetail> {
+    const { data } = await http.post<OperationsCaseDetail>(
+      `/api/responsibilities/customer-operations/cases/${caseId}/correction`,
+      input,
+    );
+    return data;
+  },
+
   /** The Home's three exception areas. A failed read draws nothing — never a clear morning. */
   async getCustomerOperationsHome(): Promise<CustomerOperationsHome> {
     const { data } = await http.get<CustomerOperationsHome>("/api/responsibilities/customer-operations/home");

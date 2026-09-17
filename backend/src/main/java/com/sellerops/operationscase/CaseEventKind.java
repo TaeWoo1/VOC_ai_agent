@@ -25,5 +25,13 @@ public enum CaseEventKind {
     /** The reconciler closed the case from canonical truth (answered elsewhere, gone, excluded, watch ended). */
     RECONCILED_CLOSED,
     /** The case was included in the run's one exception summary mail. */
-    NOTIFIED
+    NOTIFIED,
+    /** The seller supplied the company knowledge this case was missing ([정보 알려주기]); provenance names scope only. */
+    KNOWLEDGE_TAUGHT,
+    /** The seller rewrote the prepared draft on the case screen. */
+    SELLER_EDITED_DRAFT,
+    /** The seller said a different action was right for this case. */
+    SELLER_CORRECTED,
+    /** The seller asked Reviewnary to keep a correction in mind for similar cases («다음에도 참고»). */
+    SELLER_GUIDANCE_RECORDED
 }

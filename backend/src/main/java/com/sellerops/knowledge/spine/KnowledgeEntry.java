@@ -16,7 +16,8 @@ import java.util.UUID;
  * where a past answer or decision came from, and it is reachable through {@link #sourceRefs()}, but its text
  * does not travel in the entry.
  *
- * @param entryId    stable within the raw row's identity: {@code <sourceType>:<uuid>[:<n>]}
+ * @param entryId    the citable unit's identity: {@code <sourceType>:<uuid>} — a passage (chunk), a fact, a memory,
+ *                   an approval, a decision or a guidance row
  * @param scope      ORG for knowledge that holds for the whole company, PRODUCT for one product
  * @param productId  the product for PRODUCT scope, null for ORG
  * @param capturedAt when the raw source last changed or was decided — the entry's freshness

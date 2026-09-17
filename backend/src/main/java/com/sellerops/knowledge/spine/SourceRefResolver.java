@@ -5,6 +5,7 @@ import com.sellerops.attention.reply.ReviewReplyDraft;
 import com.sellerops.attention.triage.ReviewTriage;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
+import com.sellerops.knowledge.guidance.SellerGuidance;
 import com.sellerops.knowledge.memory.AnswerMemory;
 import com.sellerops.knowledge.org.OrgKnowledgeChunk;
 import com.sellerops.knowledge.org.OrgKnowledgeSource;
@@ -48,6 +49,7 @@ public class SourceRefResolver {
         TABLES.put(SourceRef.Kind.REVIEW_REPLY_DRAFT, ReviewReplyDraft.class);
         TABLES.put(SourceRef.Kind.REVIEW_TRIAGE, ReviewTriage.class);
         TABLES.put(SourceRef.Kind.TRIAGE_CORRECTION, TriageCorrection.class);
+        TABLES.put(SourceRef.Kind.SELLER_GUIDANCE, SellerGuidance.class);
     }
 
     private final EntityManager em;

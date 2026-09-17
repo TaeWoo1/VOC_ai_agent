@@ -74,7 +74,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 
 /**
@@ -92,16 +91,16 @@ import org.springframework.test.context.ActiveProfiles;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ActiveProfiles("test")
-@Import({SellerKnowledgeAdapter.class, ProductFactAdapter.class, InquiryAnswerAdapter.class,
-        ReviewReplyAdapter.class, SellerDecisionAdapter.class, SourceRefResolver.class, KnowledgeSpineService.class})
 class KnowledgeSpineTest {
 
     static final Instant T0 = Instant.parse("2026-09-10T00:00:00Z");
     static final String CUSTOMER_SENTENCE = "벽에 붙였는데 이틀 만에 접착이 떨어졌어요 너무 속상하네요";
 
-    @Autowired KnowledgeSpineService spine;
-    @Autowired SourceRefResolver resolver;
-    @Autowired List<KnowledgeSourceAdapter> adapters;
+    @Autowired jakarta.persistence.EntityManager em;
+    @Autowired com.sellerops.knowledge.guidance.SellerGuidanceRepository guidanceRows;
+    KnowledgeSpineService spine;
+    SourceRefResolver resolver;
+    List<KnowledgeSourceAdapter> adapters;
 
     @Autowired OrganizationRepository organizations;
     @Autowired ProductRepository products;
@@ -130,6 +129,16 @@ class KnowledgeSpineTest {
 
     @BeforeEach
     void seed() {
+        adapters = List.of(new SellerKnowledgeAdapter(orgSources, orgChunks, productSources, productChunks),
+                new ProductFactAdapter(facts), new InquiryAnswerAdapter(memories), new ReviewReplyAdapter(em),
+                new SellerDecisionAdapter(em), new com.sellerops.knowledge.spine.adapter.SellerGuidanceAdapter(guidanceRows));
+        resolver = new SourceRefResolver(em);
+        com.sellerops.inquiry.draft.InquiryEvidenceRetriever retriever = new com.sellerops.inquiry.draft.InquiryEvidenceRetriever(
+                products, new ProductKnowledgeLibraryService(products, productSources, productChunks, variants),
+                new SellerOperationsKnowledgeService(orgSources, orgChunks),
+                new AnswerMemoryService(memories, orgChunks, productChunks),
+                org.mockito.Mockito.mock(com.sellerops.inquiry.draft.InquiryOrderFactReader.class));
+        spine = new KnowledgeSpineService(adapters, products, resolver, retriever);
         orgA = org("상점 A");
         orgB = org("상점 B");
         Channel ch = new Channel();
@@ -160,6 +169,7 @@ class KnowledgeSpineTest {
                 "B 상점: 접착이 떨어지면 드라이어로 데워 다시 붙여 주세요.", null), UUID.randomUUID(), "B 운영자");
 
         fact(orgA, molding, FactKeys.DESC_SUMMARY, "강력 접착 테이프가 미리 부착된 일체형 전선몰딩입니다. 떨어짐 없이 깔끔하게 정리됩니다.");
+        fact(orgA, molding, FactKeys.of(FactKeys.SPEC, "접착 방식"), "양면 접착 테이프 (떨어짐 방지)");
         fact(orgA, molding, FactKeys.of(FactKeys.SPEC, "두께"), "1.2");
 
         AnswerMemoryService memory = new AnswerMemoryService(memories, orgChunks, productChunks);
@@ -199,7 +209,7 @@ class KnowledgeSpineTest {
     @Test
     @DisplayName("one scoped search returns the product's policy, note, detail, past answer, review reply and decision — each attributed")
     void oneScopedSearchCoversEveryRawSource() {
-        KnowledgeSpineSearchResponse found = spine.search(orgA, molding, "접착이 떨어져요", 20);
+        KnowledgeSpineSearchResponse found = spine.search(orgA, molding, "접착", 20);
 
         assertThat(found.outcome()).isEqualTo(RetrievalOutcome.FOUND);
         Set<SpineSourceType> types = found.hits().stream().map(h -> h.entry().sourceType()).collect(Collectors.toSet());
@@ -236,7 +246,7 @@ class KnowledgeSpineTest {
     @DisplayName("another product's knowledge never appears — in the search, the corpus, or the compiled view")
     void anotherProductsKnowledgeNeverMixesIn() {
         for (KnowledgeEntry e : Stream.concat(
-                spine.search(orgA, molding, "접착이 떨어져요", 20).hits().stream().map(KnowledgeSpineSearchResponse.Hit::entry),
+                spine.search(orgA, molding, "접착", 20).hits().stream().map(KnowledgeSpineSearchResponse.Hit::entry),
                 spine.entries(orgA, molding).stream()).toList()) {
             assertThat(e.scope() == KnowledgeSpineScope.ORG || molding.equals(e.productId())).as(e.entryId()).isTrue();
             assertThat(e.productId()).as(e.entryId()).isNotEqualTo(mat);
@@ -263,7 +273,7 @@ class KnowledgeSpineTest {
         List<KnowledgeEntry> mine = Stream.concat(spine.entries(orgA, molding).stream(),
                 spine.entries(orgA, null).stream()).toList();
         assertThat(mine).noneMatch(e -> e.text().contains("B 상점") || e.text().contains("다른 상점"));
-        assertThat(spine.search(orgA, molding, "접착이 떨어져요", 20).hits())
+        assertThat(spine.search(orgA, molding, "접착", 20).hits())
                 .noneMatch(h -> h.entry().text().contains("B 상점") || h.entry().text().contains("다른 상점"));
         assertThat(spine.entries(orgB, foreign)).isNotEmpty()
                 .noneMatch(e -> e.text().contains("알코올") || e.text().contains("7일"));

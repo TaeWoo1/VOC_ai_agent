@@ -133,6 +133,7 @@ public class InquiryDraftComposer {
      * must never be able to fail a draft, and a context without one drafts exactly as before.
      */
     private final KnowledgeCandidateService candidates;
+    private InquiryKnowledgeAssessor assessor;
 
     public InquiryDraftComposer(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
                                 InquiryReplyDraftService drafts, InquiryDraftEvidenceRepository evidence,
@@ -148,6 +149,7 @@ public class InquiryDraftComposer {
         this.drafts = drafts;
         this.evidence = evidence;
         this.retriever = retriever;
+        this.assessor = InquiryKnowledgeAssessor.withoutContext(retriever, variants);
         this.model = model;
         this.quota = quota;
         this.variants = variants;
@@ -168,6 +170,23 @@ public class InquiryDraftComposer {
      * seller is told that the budget — not their knowledge library — is what stopped it
      * ({@code unavailableMessage}). The dashboard, the queue and the send path are unaffected.
      */
+    /**
+     * The production wiring: the knowledge verdict comes from {@link InquiryKnowledgeAssessor}, the same assessment
+     * the case investigator reads (Knowledge &amp; Intelligence Closure v1).
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    public InquiryDraftComposer(InquiryWorkItemRepository workItems, InquiryRepository inquiries,
+                                InquiryReplyDraftService drafts, InquiryDraftEvidenceRepository evidence,
+                                InquiryEvidenceRetriever retriever, InquiryKnowledgeAssessor assessor,
+                                AgentDraftService model, AgentQuotaService quota, ProductVariantRepository variants,
+                                DraftEvidenceSnippets snippets, ProductDetailEnrichmentTrigger detail,
+                                ProductDetailImageKnowledge images, AnswerStyleService styles,
+                                SellerProfileService profiles, KnowledgeCandidateService candidates) {
+        this(workItems, inquiries, drafts, evidence, retriever, model, quota, variants, snippets, detail, images,
+                styles, profiles, candidates);
+        this.assessor = assessor;
+    }
+
     public GeneratedDraftView generate(UUID orgId, UUID workItemId, UUID sellerUserId) {
         return generate(orgId, workItemId, sellerUserId, null);
     }
@@ -287,20 +306,16 @@ public class InquiryDraftComposer {
         // It runs BEFORE the retrieval rather than after it, which is the 2026-08-27 change: a
         // document written about 2호 is not weak evidence about a customer who said 3호, and a filter
         // applied to the results would already have let it take one of the four slots.
-        UUID productId = retriever.resolveProductId(orgId, inquiry);
-        SpecApplicability.Verdict verdict =
-                SpecApplicability.classify(title, details, optionsFor(orgId, productId));
+        // Computed ONCE, by the assessment the case investigator also reads: the 규격 verdict (before retrieval), the
+        // Knowledge Spine retrieval, and the basis. Two computations of the same classification would be two chances
+        // for the screen, the prompt and the investigation to disagree.
+        InquiryKnowledgeAssessor.Assessment assessment =
+                assessor.assess(orgId, inquiry, com.sellerops.order.fact.OrderFactLookup.EXACT_ALLOWED);
+        SpecApplicability.Verdict verdict = assessment.verdict();
         SpecApplicability.Applicability applicability = verdict.applicability();
-        InquiryEvidenceRetriever.InquiryEvidence retrieved =
-                retriever.retrieve(orgId, inquiry, KnowledgeVariantScope.of(verdict.variantId()));
-        AnswerBasisState basis = AnswerBasisState.of(retrieved.state(), applicability);
-        // The org's wording, read ONCE per draft. Everything downstream — the prompt section, the
-        // forbidden-phrase check, the fallback, the provenance stamp — reads this same snapshot, so
-        // a save that lands mid-compose cannot produce a draft written under one style and recorded
-        // under another.
-        // A conversation hint is applied HERE, to the snapshot, so the prompt section, the forbidden
-        // check and the stamp all see the same overridden profile — and the fallback sentence below,
-        // which is the seller's own words and takes no tone, is read from the same object unchanged.
+        InquiryEvidenceRetriever.InquiryEvidence retrieved = assessment.retrieved();
+        List<com.sellerops.knowledge.spine.KnowledgeEntry> context = assessment.spine().draftContext();
+        AnswerBasisState basis = assessment.basis();
         AnswerStyleProfile style = tone == null ? styleFor(orgId) : tone.applyTo(styleFor(orgId));
         if (!basis.mayGenerate()) {
             // No model call and no saved version. Nothing here is a refusal to help — the seller
@@ -318,10 +333,11 @@ public class InquiryDraftComposer {
             // do not know there is no basis, and answering "확인 후 안내드리겠습니다" to a question we
             // may be seconds from being able to answer is the deferral this product deleted.
             if (operational == null && style.hasUnknownFallback()) {
-                return approvedFallback(orgId, workItemId, actor, title, retrieved, basis, verdict, askedTopic(inquiry),
-                        namedTopics(inquiry), style);
+                return approvedFallback(orgId, workItemId, actor, title, retrieved, basis, verdict, assessment.asked(),
+                        assessment.named(), style, assessment.gap());
             }
-            return noBasis(retrieved, basis, verdict, askedTopic(inquiry), namedTopics(inquiry), operational);
+            return noBasis(retrieved, basis, verdict, assessment.asked(), assessment.named(), operational,
+                    assessment.gap());
         }
 
         // Each branch names its own reason, because the three are not interchangeable to the person
@@ -339,7 +355,7 @@ public class InquiryDraftComposer {
         } else {
             QuotaDecision decision = quota.consume(orgId, AgentUsageKind.DRAFT, null);
             if (decision.allowed()) {
-                written = model.draft(orgId, title, details, passagesFor(retrieved.passages()),
+                written = model.draft(orgId, title, details, passagesFor(retrieved.passages(), context),
                         retrieved.order().messageKo(),
                         applicability.messageKo(retrieved.figuresUnaided(),
                                 retrieved.variantSpecific()),
@@ -362,7 +378,8 @@ public class InquiryDraftComposer {
             // is a promise with no author. The BASIS is reported as it was actually computed — this
             // question IS grounded, and overwriting that with NO_ANSWER_BASIS would be a second
             // false statement laid on top of the first — and the operational reason travels beside it.
-            return noBasis(retrieved, basis, verdict, askedTopic(inquiry), namedTopics(inquiry), unavailable);
+            return noBasis(retrieved, basis, verdict, assessment.asked(), assessment.named(), unavailable,
+                    assessment.gap());
         }
 
         AgentDraftResponseParser.ParsedDraft parsed = written.get();
@@ -377,14 +394,13 @@ public class InquiryDraftComposer {
                         basis));
 
         List<DraftEvidenceView> views = recordEvidence(orgId, workItemId, saved.version(),
-                retrieved.passages(), retrieved.order());
+                retrieved.passages(), context, retrieved.order());
         return new GeneratedDraftView(saved, DraftAuthorKind.MODEL.name(), retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), applicability,
-                        retrieved.productOutcome(), retrieved.policyOutcome(), askedTopic(inquiry),
-                        retrieved.policyDeclares(askedTopic(inquiry)), verdict.optionsRegistered()),
-                retrieved.productId(), views, company != null, null,
-                KnowledgeGapView.of(retrieved, verdict, askedTopic(inquiry), namedTopics(inquiry)));
+                        retrieved.productOutcome(), retrieved.policyOutcome(), assessment.asked(),
+                        retrieved.policyDeclares(assessment.asked()), verdict.optionsRegistered()),
+                retrieved.productId(), views, company != null, null, assessment.gap());
     }
 
     /**
@@ -446,7 +462,8 @@ public class InquiryDraftComposer {
                                                 SpecApplicability.Verdict verdict,
                                                 KnowledgeTopic asked,
                                                 java.util.Set<KnowledgeTopic> named,
-                                                AnswerStyleProfile style) {
+                                                AnswerStyleProfile style,
+                                                com.sellerops.inquiry.draft.dto.KnowledgeGapView gap) {
         int base = drafts.currentVersion(workItemId);
         ReplyDraftView saved = drafts.saveAs(orgId, workItemId, actor, defaultTitle(inquiryTitle),
                 style.unknownFallback(), base,
@@ -460,8 +477,7 @@ public class InquiryDraftComposer {
                 basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
                         retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked),
                         verdict.optionsRegistered()),
-                retrieved.productId(), List.of(), false, null,
-                KnowledgeGapView.of(retrieved, verdict, asked, named));
+                retrieved.productId(), List.of(), false, null, gap);
     }
 
     /**
@@ -475,14 +491,14 @@ public class InquiryDraftComposer {
                                               SpecApplicability.Verdict verdict,
                                               KnowledgeTopic asked,
                                               java.util.Set<KnowledgeTopic> named,
-                                              String unavailableMessage) {
+                                              String unavailableMessage,
+                                              com.sellerops.inquiry.draft.dto.KnowledgeGapView gap) {
         return new GeneratedDraftView(null, null, retrieved.state().name(),
                 retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
                         retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked),
                         verdict.optionsRegistered()),
-                retrieved.productId(), List.of(), false, unavailableMessage,
-                KnowledgeGapView.of(retrieved, verdict, asked, named));
+                retrieved.productId(), List.of(), false, unavailableMessage, gap);
     }
 
     /**
@@ -540,21 +556,27 @@ public class InquiryDraftComposer {
     }
 
     private static List<AgentDraftGenerator.Passage> passagesFor(
-            List<InquiryEvidenceRetriever.ScopedPassage> passages) {
-        return passages.stream()
+            List<InquiryEvidenceRetriever.ScopedPassage> passages,
+            List<com.sellerops.knowledge.spine.KnowledgeEntry> context) {
+        List<AgentDraftGenerator.Passage> out = new ArrayList<>(passages.stream()
                 .map(p -> new AgentDraftGenerator.Passage(p.scope().labelKo(), p.heading(), p.text()))
-                .toList();
+                .toList());
+        // Seller guidance and the channel's stated attributes, after the grounding passages. They inform the reply;
+        // whether a reply may be written at all was already decided from the passages alone.
+        for (com.sellerops.knowledge.spine.KnowledgeEntry entry : context) {
+            out.add(new AgentDraftGenerator.Passage(contextLabel(entry), entry.title(), entry.text()));
+        }
+        return out;
     }
 
-    /**
-     * Record what the drafter was shown, one row per passage, with its scope.
-     *
-     * <p>The scope is stored in {@code kind}, which is a string column precisely so a new kind of
-     * evidence does not need a migration to be recordable. Three kinds exist now; before this package
-     * there was one, and the column already anticipated the rest.
-     */
+    static String contextLabel(com.sellerops.knowledge.spine.KnowledgeEntry entry) {
+        return entry.sourceType() == com.sellerops.knowledge.spine.SpineSourceType.SELLER_GUIDANCE
+                ? InquiryDraftEvidence.LABEL_SELLER_GUIDANCE : KnowledgeScope.PRODUCT.labelKo();
+    }
+
     private List<DraftEvidenceView> recordEvidence(UUID orgId, UUID workItemId, int version,
                                                    List<InquiryEvidenceRetriever.ScopedPassage> passages,
+                                                   List<com.sellerops.knowledge.spine.KnowledgeEntry> context,
                                                    OrderFact order) {
         List<DraftEvidenceView> views = new ArrayList<>(passages.size() + 1);
         int ordinal = 0;
@@ -575,6 +597,22 @@ public class InquiryDraftComposer {
             views.add(new DraftEvidenceView(row.getKind(), passage.scope().labelKo(), row.getTitle(),
                     row.getLocator(), row.getSourceId(), row.getChunkId(),
                     DraftEvidenceView.snippetOf(passage.text())));
+        }
+        for (com.sellerops.knowledge.spine.KnowledgeEntry entry : context) {
+            InquiryDraftEvidence row = new InquiryDraftEvidence();
+            row.setOrgId(orgId);
+            row.setWorkItemId(workItemId);
+            row.setDraftVersion(version);
+            row.setOrdinal(ordinal++);
+            row.setKind(entry.sourceType() == com.sellerops.knowledge.spine.SpineSourceType.SELLER_GUIDANCE
+                    ? InquiryDraftEvidence.KIND_SELLER_GUIDANCE : InquiryDraftEvidence.KIND_PRODUCT_FACT);
+            row.setSourceId(entry.sourceRefs().isEmpty() ? null : entry.sourceRefs().get(0).id());
+            row.setTitle(entry.title());
+            row.setLocator(entry.entryId().substring(0, entry.entryId().indexOf(':')).toLowerCase(java.util.Locale.ROOT)
+                    + "/" + (entry.channelCode() == null ? "판매자" : entry.channelCode()));
+            evidence.save(row);
+            views.add(new DraftEvidenceView(row.getKind(), contextLabel(entry), row.getTitle(), row.getLocator(),
+                    row.getSourceId(), null, DraftEvidenceView.snippetOf(entry.text())));
         }
         // Last, and only when an order was actually resolved. A row for "주문 번호가 없었습니다" would
         // be a citation of an absence, and the screen already says that in the state sentence.

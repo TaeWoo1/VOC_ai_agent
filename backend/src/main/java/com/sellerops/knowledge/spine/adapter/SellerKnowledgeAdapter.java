@@ -77,7 +77,7 @@ public class SellerKnowledgeAdapter implements KnowledgeSourceAdapter {
             String provenance = source.getAuthoredOrigin() == KnowledgeAuthorship.SELLER_UPLOADED_DOCUMENT
                     ? "판매자가 올린 운영 기준 자료" : "판매자가 등록한 운영 기준";
             entries.add(new Indexed(new KnowledgeEntry(
-                    SpineSourceType.ORG_KNOWLEDGE + ":" + source.getId() + ":" + chunk.getOrdinal(),
+                    SpineSourceType.ORG_KNOWLEDGE + ":" + chunk.getId(),
                     SpineSourceType.ORG_KNOWLEDGE, KnowledgeSpineScope.ORG, null, null,
                     KnowledgeAuthority.SELLER_POLICY, source.getTitle(), chunk.getContent(), source.getUpdatedAt(),
                     provenance,
@@ -107,7 +107,7 @@ public class SellerKnowledgeAdapter implements KnowledgeSourceAdapter {
                     source.getVariantId() == null ? null : "variant"));
             refs.add(new SourceRef(SourceRef.Kind.PRODUCT_KNOWLEDGE_CHUNK, chunk.getId(), "#" + chunk.getOrdinal()));
             entries.add(new Indexed(new KnowledgeEntry(
-                    type + ":" + source.getId() + ":" + chunk.getOrdinal(),
+                    type + ":" + chunk.getId(),
                     type, KnowledgeSpineScope.PRODUCT, productId, null, authorityOf(source.getAuthoredOrigin()),
                     source.getTitle(), chunk.getContent(), source.getUpdatedAt(), provenanceOf(source), refs),
                     KnowledgeText.normalize(source.getTitle()) + chunk.getNormalized()));
@@ -115,7 +115,7 @@ public class SellerKnowledgeAdapter implements KnowledgeSourceAdapter {
         return entries;
     }
 
-    static SpineSourceType typeOf(KnowledgeAuthorship authorship) {
+    public static SpineSourceType typeOf(KnowledgeAuthorship authorship) {
         return switch (authorship == null ? KnowledgeAuthorship.SELLER_ENTERED_KNOWLEDGE : authorship) {
             case SELLER_ENTERED_KNOWLEDGE -> SpineSourceType.PRODUCT_KNOWLEDGE;
             case SELLER_UPLOADED_DOCUMENT -> SpineSourceType.PRODUCT_DOCUMENT;
@@ -125,7 +125,7 @@ public class SellerKnowledgeAdapter implements KnowledgeSourceAdapter {
         };
     }
 
-    static KnowledgeAuthority authorityOf(KnowledgeAuthorship authorship) {
+    public static KnowledgeAuthority authorityOf(KnowledgeAuthorship authorship) {
         return typeOf(authorship) == SpineSourceType.PRODUCT_KNOWLEDGE
                 ? KnowledgeAuthority.SELLER_CONFIRMED_PRODUCT_KNOWLEDGE : KnowledgeAuthority.PRODUCT_DETAIL;
     }

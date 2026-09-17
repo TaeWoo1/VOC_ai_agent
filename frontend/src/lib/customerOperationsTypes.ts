@@ -146,3 +146,49 @@ export interface CustomerOperationsHome {
   };
   gaps: { total: number; rows: CustomerOperationsGapRow[] };
 }
+
+/**
+ * One case as the case screen reads it (Knowledge & Intelligence Closure v1): what happened, what Reviewnary looked
+ * at, which company knowledge it used, what it recommends, and — when knowledge is missing — exactly what to teach.
+ */
+export interface OperationsCaseDetail {
+  caseId: string;
+  open: boolean;
+  subjectKind: "INQUIRY" | "REVIEW";
+  channelNameKo: string | null;
+  productName: string | null;
+  /** Whether 「이 상품에만」 is a real choice: an inquiry with no named product can only teach company-wide. */
+  productScopeAvailable: boolean;
+  receivedOn: string | null;
+  rating: number | null;
+  title: string | null;
+  body: string | null;
+  reasonNote: string;
+  disposition: string | null;
+  decidedBy: string | null;
+  summary: string | null;
+  recommendedActionType: string | null;
+  recommendedAction: string | null;
+  missingInformation: string[];
+  whyDecisionNeeded: string | null;
+  investigated: { label: string; results: number }[];
+  knowledgeUsed: {
+    authority: string;
+    provenance: string;
+    title: string;
+    excerpt: string;
+    capturedOn: string | null;
+    cited: boolean;
+    scope: string;
+  }[];
+  gap: { missingSubject: string | null; sentence: string; suggestedScope: string } | null;
+  draft: {
+    version: number;
+    title: string | null;
+    body: string;
+    authorKind: string | null;
+    answerBasis: string | null;
+    evidence: { kind: string; scopeLabel: string; title: string | null; snippet: string | null }[];
+  } | null;
+  to: string;
+}
