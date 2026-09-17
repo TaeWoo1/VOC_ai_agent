@@ -1301,3 +1301,17 @@ retrieval ON 실측(metadata 로그): embedding passage 12건 4,368ms + 5건 167
 
 종료 상태: 세 DB(`sellerops_nv_live` · `…_draft_proof` · `…_draft_proof_r2`) 모두 `PAUSED` · next run 없음 · backend/helper 정지 ·
 evidence 보존. dev `sellerops` 무접촉(migration 105; 지식 12행·봉인 credential 1행을 승인 하에 **읽기 전용 export**한 것 외 접촉 0).
+
+## 26. Customer Operations Manager Demo v1 — canonical product goal (2026-09-18)
+
+**Product-owner decision.** 이 vertical의 canonical product goal은 **Customer Operations Manager Demo v1**이다: 판매자가 고객 운영을
+맡기면 Reviewnary가 **Observe → Understand → Knowledge → Decide → Prepare → Ask/Execute → Learn**을 수행하고, 책임질 수 없는 예외만
+판매자에게 가져온다.
+
+- Responsibility Runtime과 NAVER scheduled observe는 **충분히 증명됐다**(§21–§25). 다음 우선순위는 Runtime 확장이 아니라
+  **Knowledge · Judgment · UX 품질**이다.
+- `CUSTOMER_OPERATIONS_V1` vertical만 깊게 만든다. 새 Store Health · Money Ops · Listing Agent · Procedure platform **금지**.
+
+| 단계 | 문서 | 상태 |
+|---|---|---|
+| Q1 Knowledge Spine v1 | `docs/knowledge_spine_v1.md` | 구현 · 테스트 증명(라이브 0) — 판매자 운영 흔적 6종을 scope·authority·freshness·provenance·원천 ref와 함께 **하나의 scoped 읽기**로; 저장 0 · 기존 초안/검색 경로 변경 0 |
