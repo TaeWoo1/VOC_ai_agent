@@ -4,17 +4,26 @@
 list, reads **one page**, and hands it to the ingestion the product already had. It is bounded, it is started
 by a person, and it writes nothing to the marketplace.
 
-**What this lane is not, and will not become without a separate decision.** It is not scheduled, not
-unattended, not the production default, and not a backfill. `LOCAL_HELPER` remains the default and the
-fallback; `ASIDE` is selected by explicit configuration on one machine.
+**What this lane is not, and will not become without a separate decision.** It is not the production default and
+not a backfill. `LOCAL_HELPER` remains the default and the fallback; `ASIDE` is selected by explicit
+configuration on one machine.
+
+> **Superseded, 2026-09-17 — «unattended / scheduled: NOT APPROVED» was the right line and it has now been
+> answered, not ignored.** That row said this lane would not become scheduled *without a separate decision*.
+> The separate decision was taken (product-owner, Marketplace Scheduled Operations Proof) and it is recorded in
+> `docs/responsibility_runtime_v1.md` §24, which owns the scheduled lane's status from here. **Nothing in §1–§7
+> below changed**: the read is the same bounded one-page read, by the same frozen runtime, through the same
+> store-identity fence, with the same zero clicks and zero writes. What moved is *who authorises a run* — a
+> seller's press, or the seller's activated responsibility plus a deployment naming this organisation AND this
+> seller account. Both lanes exist; neither is on by default.
 
 | | |
 |---|---|
 | status | **operator-run incremental lane — READY** (M3 built it, M4 measured it, M5 finishes it as a product) |
 | default | `LOCAL_HELPER` (unchanged) |
 | selection | `REVIEWNARY_EXECUTION_PROVIDER=ASIDE`, explicit, per machine |
-| unattended / scheduled | **NOT APPROVED** |
-| pagination | **not implemented** — §3 |
+| unattended / scheduled | **IMPLEMENTED, default OFF** — recipe `COUPANG_REVIEW_OBSERVE_V1`, gated per organisation **and per seller account** (`AsideMarketplaceAccess`). Live status is owned by `responsibility_runtime_v1.md` §24, not by this row |
+| pagination | **not implemented** — §3 (unchanged, and it bounds the scheduled lane too: one window asks for one page) |
 | NAVER | `DEFERRED_BY_ENVIRONMENT`, untouched |
 | Cafe24 | unchanged — it has a working API and this lane is not for it |
 

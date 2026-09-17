@@ -1017,3 +1017,287 @@ Home(`/`)은 기존 Operations Home을 **확장**한다 — 대화 위, 기존 �
   **PD-10 잔여**(파일럿에서 어느 org까지 rollout 목록에 넣을지 — 이제 목록은 명시 UUID이고 그 목록을 누가 채우는가가 운영 결정이다) ·
   **신규**: 조사 모델·effort(현재 `gpt-5-2025-08-07`/low, Case당 7–17초)와 판매자 일일 예산에 조사를 청구할지(현재 청구한다).
 - **Package C 진입:** B가 남긴 runtime·Case·권한 경계는 닫혔다. C를 막는 것은 **PD-7 · PD-8**이다.
+
+## 23. Scheduled Aside — 실제 브라우저 3-run LIVE (2026-09-16)
+
+§11의 architecture proof와 failure contract는 이미 라이브였고, 남아 있던 것은 **실제 브라우저가 실제로 화면을 읽는 3-run**
+하나였다. 이 절이 그것을 기록한다.
+
+**자세(posture).** worktree `decision-workspace` `90e62627` · 일회용 DB **`sellerops_aside_live`** · backend 8090 ·
+helper는 `--bridge-only`로 포트 **47620** · helper home은 scratchpad(설치된 launchd 도우미 `ai.sellerops.local-agent`는
+**무접촉**) · device token은 V97 경로로 이미 연결돼 있던 그 행 · Aside CLI 1.26.906.1630 · 계정 **u0 / Profile 0**.
+dev `sellerops`는 전후 **90 tables · migration 105 · `scheduled_aside_job` 없음**으로 확인했다.
+
+**사람이 한 일은 정확히 하나** — Aside 프로필 u0에 **브라우저 창 하나를 열어 둔 것**(운영자 초기 setup으로 인정된 행위;
+CLI에는 창을 만드는 명령이 없고 앱은 `--no-startup-window`로 떠 있었다). 그 뒤 run trigger·버튼·키 입력 **0**.
+
+**한 sitting에 세 창(window)을 만들 수 없다는 제약을 어떻게 다뤘는가.** `uq_responsibility_run_window`는 책임당 한 창에 run
+하나이고 창은 2시간 고정이므로, 세 번의 관측은 원래 6시간에 걸쳐서만 일어난다 ⇒ **일회용 DB에 run row만** 직접 넣었다
+(2026-09-17 KST 00:00 · 02:00 · 04:00 · 06:00 · 08:00, `PENDING` · `SCHEDULED`). 대체한 것은 **materialize 한 단계뿐**이고
+claim → lease → 채널 source → device source → job enqueue → helper claim → Aside repl → report → settle → 관측 기록은 전부
+제품 코드가 했다. 실제 판매자 DB에는 아무것도 넣지 않았다.
+
+| # | window (KST) | dataset | completeness | observed | new | changed | digest |
+|---|---|---|---|---|---|---|---|
+| Run 1 | 00:00 | `initial` | COMPLETE | **3** | **3** | 3 | `b231749081754a71` |
+| Run 2 | 02:00 | `unchanged` | COMPLETE | **3** | **0** | **0** | `b231749081754a71` (동일) |
+| Run 3 | 04:00 | `changed` | COMPLETE | **4** | **1** | **1** | `158ecb2229f42b46` |
+| 장애 | 06:00 | (helper 종료) | **NONE** | **null** | **null** | **null** | — (`DEVICE_OFFLINE`) |
+| 복구 | 08:00 | `changed` | COMPLETE | 4 | 0 | 0 | `158ecb2229f42b46` |
+
+Run 1의 `changed=3`은 이전 관측이 아예 없는 상태(prior `NONE`)에서의 값이고, 「정확히 한 건이 바뀌었다」를 말하는 것은 **Run 3**이다
+(`co-0004` 한 줄이 늘었고 new·changed 모두 1). 모든 행의 `method`는 **`BRIDGE_ASIDE`**, `recipe_version`은
+**`CUSTOMER_OPERATIONS_FIXTURE_OBSERVE_V1`**이다.
+
+**장애와 복구.** helper를 내리고 다음 run을 넣으면 job은 enqueue되지만 아무도 가져가지 않고, 120초 bounded wait 뒤 관측은
+**`NONE` + count 3개 전부 null + `DEVICE_OFFLINE`**로 기록됐다 — 이 lane이 존재하는 이유인 「확인하지 못함 ≠ 0건」이 라이브에서
+한 번 더 성립했다. helper를 다시 올린 뒤 다음 관측은 곧바로 `COMPLETE`로 돌아왔다.
+
+**정직 보고 둘.** (1) 장애 leg에서 `QUEUED`로 남아 있던 job은 helper가 복구되자 그 helper가 집어 `OBSERVED 4`로 settle했다 —
+**run의 관측은 소급해 바뀌지 않는다**(그 source row는 지금도 `NONE`/`DEVICE_OFFLINE`이다). 다만 `enqueue`가 「한 device에 live work
+하나」를 강제하므로, 복구 뒤 그 stale job을 먼저 비운 다음 복구 run을 넣었다. (2) run 자체의 status는 `PARTIAL`(장애 leg는 `FAILED`)
+인데, 이 QA org의 카페24 채널 source가 여전히 stub(`CONNECTOR_UNAVAILABLE`)이기 때문이다 — device source는 `required` 밖이므로
+run을 실패시키지 않고, 반대로 device 관측이 성공했다고 run이 SUCCESS가 되지도 않는다.
+
+**계수.** 마켓플레이스 호출 **0** · WRITE **0** · 모델 호출 **0** · 마이그레이션 **0** · backend ERROR 로그 **0** ·
+코드 변경 **0**(이 절의 문서 기록 외). 열린 surface는 `http://127.0.0.1:47620/fixture/customer-operations` 하나뿐이고,
+`?dataset=marketplace`는 라이브에서 **404**로 거절됐다.
+
+---
+
+## 24. Scheduled Aside — 실제 NAVER Seller Center 리뷰 무인 관측 (experimental/QA rollout, 2026-09-17)
+
+**자세.** PD-1은 **그대로다** — `CUSTOMER_OPERATIONS_V1`의 scheduled obligation(`sources()`)은 여전히 Cafe24 Inquiry · Cafe24 Review
+두 official API source뿐이다. NAVER 리뷰는 obligation이 아니라 **device recipe**(`deviceRecipes()`)로 그 옆에 선다: run을
+실패시키지도, 「확인하지 못함」을 판매자 obligation으로 보고하지도, retry를 강제하지도 않는다. 켜려면 배포가 **조직과 판매 계정을 둘 다
+이름으로** 적어야 한다(`sellerops.responsibility.aside.marketplace.{enabled,enabled-org-ids,enabled-account-ids}`, 기본 OFF ·
+와일드카드 없음 · 오타는 기동 실패). 즉 이것은 **명시적 experimental/QA rollout capability**이지 seller-facing scope 변경이 아니다.
+
+### 24-1. READ-ONLY discovery가 먼저 확정한 것 (추측 selector 0)
+
+운영자가 로그인해 둔 Aside u0에서 `https://sell.smartstore.naver.com/#/review/search`만 열고 닫았다. 클릭·입력·스크롤·다운로드 0,
+고객 문장은 페이지 밖으로 나오지 않았다(구조·개수·shape만).
+
+| 사실 | 관측 |
+|---|---|
+| route · 로그인 | host `sell.smartstore.naver.com`, hash `#/review/search`, password input 0, 로그아웃 표시 존재 |
+| 목록 구조 | ag-Grid, **row model type `infinite`**, 기본 기간(7일) **52행 전부 loaded · missing 0 · 1 page(pageSize 500)**. DOM에는 ~15행만(가상 그리드 재활용) ⇒ 스크롤 없이 **model**을 읽는다 |
+| **stable source id** | row model의 `id`(10자리) = 그 행 상세 링크 `openReviewDetailModal(<id>)`의 id — **렌더된 15/15행 일치**. 이 id가 가이드 답글 lane이 2026-09-03·09-05 라이브에서 export 리뷰글번호와 대조해 행을 찾은 바로 그 id다. DOM `row-id`는 grid index("0".."14")라 **쓰지 않는다** |
+| 필드 | `reviewScore` · `reviewContent` · `createDate`(ISO+offset) · `productNo`(채널상품번호) · `productName` · `hasComment`(답글 여부) · `reviewAttaches`(미디어). **같은 row model에 `maskedWriterId` · `writerIdNo` · `productOrderNo`가 있고 한 번도 읽어내지 않는다** |
+| store fence | 화면의 채널상품번호 **11/11이 이 org의 NAVER catalogue**(official API로 이 계정 자격이 수집)에 있고 **다른 org에는 0**; org의 NAVER API 계정 정확히 1개. 채널상품번호는 NAVER 전역 유일 |
+| cross-acquisition identity | 화면 id 범위 `5062084137…5066448224`(09-10~09-17), 저장된 export id `4745070536…5055683531`(~09-02) — **같은 단조 증가 수열의 연속**이지만 **겹치는 리뷰는 관측되지 않았다** ⇒ `LIVE_PROOF_PENDING`(아래 24-6) |
+| 네트워크 | 목록은 `/api/v3/contents/reviews/search`로 채워진다(performance entry로 경로만 확인). Aside repl에서 `page.on('response')`는 발화하지 않았고, 우리가 그 endpoint를 직접 호출하지도 않았다 |
+
+### 24-2. 구현 (재사용 우선)
+
+- **backend**: `AsideRecipe.NAVER_REVIEW_OBSERVE_V1("NAVER", REVIEW)` + V109(recipe CHECK 확장, job에 `inserted_count` ·
+  `changed_count` · `identity_verdict` — 전달 count는 **store가 증명된 경우에만** 존재할 수 있다는 CHECK 포함) ·
+  `NaverReviewObservationService`(`AsideMarketplaceTarget` 구현 + 전달) · `POST /api/helper-devices/jobs/{jobId}/naver-reviews`
+  (이미 device-token allow-list인 job prefix 아래 — **allow-list 확대 0**, device와 org는 토큰에서, **claim 1개에 전달 1회**) ·
+  `AsideSourceObserver`가 marketplace recipe를 **`BOUNDED`**로, new/changed를 **ingest가 job에 기록한 값**으로(digest 추정 아님),
+  실패를 `AUTH_REQUIRED` / `STORE_UNRESOLVED`·`STORE_MISMATCH`로 이름 붙여 기록(count null) · `OperationsCaseProcessor`가 device review
+  source도 **같은 규칙**(첫 settled read가 hand-over 경계)으로 discovery.
+- **canonical ingest**: 새 경로 없음 — `IngestionService.ingestReviews`에 `externalId = 리뷰글번호`, `ChannelProductRef = 채널상품번호`,
+  SKU는 **이 DB의 listing → product에서 읽은 값**(find-only), `replyState`는 `hasComment`, `mediaCountObserved = true`. 모든 행이
+  이해되지 않으면 **전체 거절**. store 판정: 모든 채널상품번호가 우리 것 ⇒ `MATCH` · 하나라도 **다른 org** 것 ⇒ `MISMATCH` · 아무도
+  모르는 번호(catalogue lag)나 **빈 페이지** ⇒ `UNRESOLVED` — MATCH가 아니면 **ingest 0**.
+- **helper**: `src/naver/review-list-observe-inpage.ts`(page script, 8개 필드만 명시적으로 복사 · 매 run id↔상세링크 재대조 · 미로드 노드
+  있으면 거절) · `naver-review-workflow.ts`(route를 파싱 후 **정확히 한 URL**과 동일해야 통과) · `naver-review-runtime.ts`(**운영자
+  단일 파일 승인 2026-09-17**: 탭 열기 → grid 로드 대기 → 행 READ → 기간 census → 탭 닫기) · `naver-review-observe-runner.ts`
+  (기간이 **오늘로 끝나고** 모든 행이 기간 안일 때만 전달) · dispatch는 기존 unattended loop, `REVIEWNARY_EXECUTION_PROVIDER=ASIDE`
+  per-machine opt-in 재사용. 기간 census는 가이드 답글 lane의 live-proven `inPageReviewListRange` 재사용.
+- **guard**: `aside-guard.test.ts`의 evaluate forwarder 예외를 **목록**으로 바꾸고 새 runtime을 넣었다 — 「forwarder는 page code를
+  작성하지 못한다」 4개 단언이 **두 forwarder 모두**에 적용되고, 금지 토큰에 `.type(` · `setInputFiles` · `waitForEvent`를 더했다.
+
+### 24-3. 라이브 proof (일회용 DB, 실제 로그인된 Aside u0, run trigger·클릭 0)
+
+**환경.** worktree `decision-workspace`, 일회용 DB **`sellerops_nv_live`**(dev `sellerops` 무접촉 — 끝난 뒤 migration 105 · 90 tables
+재확인), backend 8091(커넥터 전부 OFF · 모델 capability 전부 OFF · marketplace gate가 Demo Org와 NAVER 계정 `bdccb7a7`만 명시),
+helper `--bridge-only` 47621(scratchpad helper home · scratch device token; 설치된 launchd 도우미 무접촉). 일회용 DB에는 Demo Org 1행 ·
+사용자 1행 · NAVER/Cafe24 계정 행 · NAVER listing 77 + product 77만 복사했고 **리뷰는 복사하지 않았다**.
+
+**「scheduled」의 정확한 의미.** Scheduler/Run 경로(tick → claim → lease → sources → device job → retry)는 §21·§23에서 이미
+LIVE_PROVEN이다. 여기서는 NAVER browser observation leg를 **일회용 DB에 넣은 run row**(PENDING·SCHEDULED)로 반복 검증했다 —
+대체한 것은 materialize 한 단계뿐이고 **2시간 scheduler가 여섯 번 실제로 돈 것이 아니다.** 단, 장애 창의 attempt 2는 **제품의 retry가
+스스로** 수행했다(아래).
+
+| leg | 결과 | observed | new | changed | identity | 비고 |
+|---|---|---|---|---|---|---|
+| **Run A** | `BOUNDED` | **52** | **52** | 0 | MATCH | reviews 52 · distinct external_id 52 · **product 연결 52/52** · provenance(sync job) 52/52 · `data_origin=REAL` · Case **0**(hand-over 경계) |
+| **Run B** (동일 상태) | `BOUNDED` | **52** | **0** | **0** | MATCH | ingest `0 inserted / 52 skipped` · 중복 external_id **0** · Case **0** |
+| **장애** (helper 종료) | **`NONE`** | **null** | **null** | **null** | — | `DEVICE_OFFLINE`, job `QUEUED`로 남음 |
+| 장애 창 **attempt 2** (제품 retry, 10분 뒤) | `BOUNDED` | 52 | 0 | 0 | MATCH | helper 복구 후 stale job이 claim·전달·settle됐고, retry가 **같은 clientJobId로 그 job을 다시 찾아** 기록. attempt 1 행은 `NONE` 그대로 |
+| **복구 run** | `BOUNDED` | 52 | 0 | 0 | MATCH | `cursor_from = cursor_to`(직전 관측과 digest 동일) |
+| **Run C** | `BOUNDED` | 52 | 0 | 0 | MATCH | 실제 새 리뷰가 아직 없음 ⇒ **exact NEW 1 = `LIVE_PROOF_PENDING`** |
+
+모든 device 행 `method=BRIDGE_ASIDE` · `recipe_version=NAVER_REVIEW_OBSERVE_V1`. 도우미 로그 6건 모두
+`{"windowDays":7,"identity":"MATCH","llmCalls":0}`, 1회 4.0–5.4초. backend ERROR 0.
+
+**라이브가 찾아 같은 sitting에서 닫은 결함 둘.** (1) 첫 Run A에서 52건이 **전부 product 미연결**로 저장됐다 — declaring row는 호출자가
+준 SKU로만 연결되는데 SKU를 넘기지 않았다(listing 77건은 전부 있었다). listing → product → SKU find-only 조회를 넣고, 일회용 DB의 run
+산출물만 지운 뒤 Run A를 재실행해 **52/52 연결**. (2) Run B의 `cursor_from`이 비었다 — device baseline 쿼리가 `COMPLETE`만 settled로
+봤는데 marketplace read는 설계상 `BOUNDED`다. `BOUNDED` 포함으로 고친 뒤 복구·Run C에서 prior digest가 실린다.
+
+### 24-4. 무엇이 Case / Agent / Draft까지 갔나
+
+Run A가 저장한 52건은 **첫 settled read 이전부터 있던 것**(hand-over 경계)이라 Case 0이 정답이고, 이후 새 리뷰가 오지 않아
+**라이브 Case 0 · Agent 호출 0 · draft 0**이다. device review source의 discovery 규칙(경계 이전 0 · 경계 이후 1 · 불변 재실행 0 · lane 없는
+배포 0)은 `OperationsCaseProcessorTest.reviewsABrowserReadBroughtInBecomeCasesByTheSameRule_andOnlyAfterItsFirstSettledRead`가 고정한다.
+NAVER 리뷰 답글은 공식 API가 없고 guided composer fill(`COMPOSER_FILLED ≠ posted`)뿐이므로 이 lane의 천장은 `RECOMMENDATION_ONLY`이다.
+
+### 24-5. 안전 계수
+
+marketplace WRITE **0** · click/type/fill/scroll/download/export **0** · password/MFA/CAPTCHA 처리 **0** · 임의 URL **0**(route는 파싱 후
+정확 일치) · 모델 호출 **0** · 판매자 dev DB 변경 **0** · 설치된 도우미 변경 **0** · 추가 permission 확대 **0**(운영자 단일 파일 승인만).
+READ-ONLY discovery 탭 열기 ~11회 + 무인 관측 6회(첫 결함 run 포함), 전부 같은 route.
+
+### 24-6. 남은 것 (정직하게)
+
+| 항목 | 상태 | 이유 |
+|---|---|---|
+| NAVER Review Browser Acquisition (실제 READ + 반복 dedup) | **LIVE_PROVEN** | Run A/B |
+| NAVER Review Responsibility Slice (BRIDGE_ASIDE 반복 관측 · 장애 NONE · 복구 · retry) | **LIVE_PROVEN** (experimental/QA rollout, 일회용 DB run row) | 위 표 |
+| exact NEW 1 → Case → Agent | **LIVE_PROOF_PENDING** | 관측 동안 실제 새 리뷰 없음. 합성 리뷰를 만들지 않았다 |
+| AUTH_REQUIRED 라이브 → 재로그인 복구 | **LIVE_PROOF_PENDING** | 로그아웃이 자연 발생하지 않았고 세션을 인위적으로 파괴하지 않았다. mapping은 단위 테스트(`AsideMarketplaceObservationTest`, `naver-review-observe-guard.test.ts`)로 고정 |
+| export ↔ browser cross-acquisition dedup | **LIVE_PROOF_PENDING** | 같은 id 수열의 연속이지만 겹치는 리뷰 미관측 |
+| 빈 기간(리뷰 0건) | 설계상 `NONE · STORE_UNRESOLVED`(빈 페이지는 store를 증명하지 못한다) + grid 행이 없으면 `GRID_NOT_FOUND` — **「0건」으로 기록되지 않지만 진짜 0건도 COMPLETE/BOUNDED로 말할 수 없다**는 알려진 한계 |
+| NAVER 리뷰 WRITE | **LIVE_PROOF_PENDING** | 이번 slice 필수 아님, 테스트 리뷰·승인 없음 |
+| Coupang `COUPANG_REVIEW_OBSERVE_V1` | 구현·기본 OFF · **LIVE_PROOF_PENDING** | 2026-09-17 WING 세션 로그아웃(`AUTH_REQUIRED` 5회), 이후 범위 제외 |
+
+### 24-7. 실제 scheduler가 만든 연속 2개 window (2026-09-17 14:00 · 16:00 KST)
+
+24-3의 run은 일회용 DB에 넣은 row였다. 여기서는 **run row를 하나도 넣지 않았다.** 코드 변경 0.
+
+**준비(한 번).** 24-3에서 넣었던 synthetic run 5개(14:00~22:00 KST 창을 점유)를 일회용 DB에서 **지웠고**(리뷰 52건은 유지), 일정
+포인터는 SQL이 아니라 **제품 API**로 다시 세웠다 — 일회용 DB에 복사된 Demo 계정(저장소에 문서화된 데모 자격)으로 로그인해
+`POST …/customer-operations/pause` → `…/activate`. 그 결과 제품이 `next_run_at = 14:00 KST`를 쓰고 현재 창(12:00)의 `RESUME` run을
+스스로 만들었다. backend(8091)와 helper(47621)를 띄운 뒤 **이후 사람 행위 0**(버튼·trigger·DB insert 0).
+
+| window (KST) | 누가 run을 만들었나 | run 생성 → 종료 | job (자동 enqueue · 자동 claim) | NAVER read | completeness | observed | new | changed | identity |
+|---|---|---|---|---|---|---|---|---|---|
+| 12:00 | 제품 `activate`(RESUME) | 12:52 | 자동 | 실제 | BOUNDED | 52 | 0 | 0 | MATCH |
+| **14:00** | **scheduler** (`tick 생성=1`, trigger `SCHEDULED`) | 14:00:27 → 14:00:53 | `rr-run:a0d6516e…:nr` claim 14:00:47 · `OBSERVED` | 실제, 4.3초 | **BOUNDED** | **52** | **0** | **0** | MATCH (prior digest 동일) |
+| **16:00** | **scheduler** (`tick 생성=1`, trigger `SCHEDULED`) | 16:00:26 → 16:00:54 | `rr-run:6d50655c…:nr` claim 16:00:47 · `OBSERVED` | 실제, 4.0초 | **BOUNDED** | **53** | **1** | **0** | MATCH (digest 변경) |
+
+**exact NEW 1이 실제로 일어났다.** 15:11 KST에 실제 고객이 새 리뷰를 남겼고, 16:00 run이 그것 하나만 넣었다(`received 53 · inserted 1 ·
+skipped 52`). canonical review: 10자리 리뷰글번호 external_id · ★5 · 본문 있음 · `reply_state PENDING` · 미디어 0(관측값) · **product
+연결됨** · acquisition sync job stamp · `data_origin REAL` · 중복 external_id 0(총 53/53). 같은 tick의 case 처리:
+`새Case=1 · 규칙=1 · 조사=0 · 초안=0` — `REVIEW · CUSTOMER_WORK · AUTO_RESOLVED · decided_by RULE · REVIEW_ROUTINE ·
+required_authority AUTO`로 **규칙이 닫았다**(★5 루틴 리뷰, 모델 호출 0). 즉 새 리뷰 → Case까지 사람 없이 이어졌고, 이 리뷰는 판매자
+결정이 필요 없는 것으로 판정됐다.
+
+**계수.** backend ERROR 0 · 모델 0 · marketplace WRITE 0 · click/type/scroll/download 0 · dev `sellerops` 무접촉(migration 105 · 90 tables
+재확인) · 코드 변경 0. 두 프로세스는 종료했다.
+
+**분류.**
+
+| 항목 | 상태 |
+|---|---|
+| SCHEDULED_NAVER_OBSERVATION | **LIVE_PROVEN** (14:00 KST, scheduler 생성) |
+| SCHEDULED_NAVER_REPEATED_OPERATION | **LIVE_PROVEN** (14:00 → 16:00 연속 창) |
+| exact NEW 1 → canonical Review → Case | **LIVE_PROVEN** (실제 새 리뷰 1건 → Case 1, 규칙 종결) |
+| **NAVER Review Responsibility Slice** | **LIVE_PROVEN** (experimental/QA rollout, PD-1 불변) |
+| Agent 조사가 필요한 새 리뷰 · AUTH_REQUIRED 라이브 · export↔browser dedup · NAVER 리뷰 WRITE | **LIVE_PROOF_PENDING** (24-6 그대로) |
+
+## 25. NAVER 상품 문의 Responsibility Slice (experimental/QA rollout, 2026-09-17 – 09-18)
+
+§24(리뷰)의 문의 짝이다. 판매자가 네이버 문의 화면에 들어가지 않아도 Reviewnary가 정해진 시간에 상품 문의를 읽고, 새 문의는
+Case → 조사 → 근거 있는 답변 초안까지 준비하며, **보내는 것은 판매자의 승인 뒤 기존 실행 경로**다. PD-1(template source 범위)
+불변 — 이 lane도 `deviceRecipes()` 옆자리이고 required source가 아니다.
+
+### 25-1. READ-ONLY discovery가 먼저 확정한 것
+
+- **화면:** Seller Center 자체 메뉴의 「문의 관리」가 가리키는 `#/comment/`(AngularJS, debug info off). 행은
+  `comment in ::vm.commentList`이고 `angular.element(el).controller()`가 그 `vm`을 돌려준다(요소 data라 debug info와 무관).
+- **source identity = 공식 API의 `questionId`.** API가 이미 저장한 7건에서 id · 생성 시각(ms) · 질문 본문 SHA-256이 **7/7 일치**.
+  그래서 browser read와 API read는 같은 canonical 행(`naver-qna:<id>`)이고 서로를 덮어쓰지 않는다 — 비밀글 플래그는 API가
+  싣지 않으므로 canonical에 쓰지 않는다(두 경로가 다르게 쓰는 칸은 서로를 「변경」으로 만든다; 관측값은 개수로만 로그).
+- **store fence:** 행의 상품 링크 = `channelProductNo` **8/8**(옛 `productNo`는 7/8 불일치라 쓰지 않는다). 리뷰 recipe와 같은
+  채널상품번호 fence를 `AsideCatalogueFence` 하나로 공유한다.
+- **coverage:** 한 페이지 8행 · 기본 기간 3개월 · 페이지 이동은 클릭이다. 그래서 읽기는 **최신 페이지**이고, 그 페이지의 가장
+  오래된 행이 이미 저장돼 있을 때(또는 페이지가 기간 전체일 때)만 `BOUNDED`, 아니면 `PARTIAL`(행은 저장하되 baseline이 아니다).
+  판정은 저장 이전을 아는 backend가 delivery 시점에 한다(V110 `delivery_completeness`).
+- 같은 행 객체의 구매자 마스킹 id · 회원번호 · 작성자 IP 감사 블록은 **읽어내지 않는다**(reader가 필드 여섯 개를 이름으로 만든다).
+
+### 25-2. 구현 (재사용 우선)
+
+recipe `NAVER_PRODUCT_INQUIRY_OBSERVE_V1`(job tag `ni`) · V110(recipe CHECK + `delivery_completeness`) ·
+`NaverProductInquiryObservationService`(`POST /api/helper-devices/jobs/{jobId}/naver-product-inquiries`, 기존 device-token 경로 prefix) —
+검증 → fence → coverage → **기존 `IngestionService.ingestInquiries`**(연결 계정 전달 ⇒ 미답변 신규는 기존대로 work item) →
+`afterInquiryIngest` → SyncJob(`SELLER_CENTER_READ`, `PARTIAL`, `NEWEST_PAGE_n_OF_m_<coverage>`) → new = ingest insert, changed = ingest
+update. Case discovery는 §24의 device-review 경로를 문의로 넓혔다(계정 범위 candidate, 그 계정의 첫 settled 문의 read가 경계).
+helper는 **리뷰 recipe의 승인된 runtime(`naver-review-runtime.ts`)을 그대로** 쓰고 plan만 다르다 — 새 runtime · 새 evaluate forwarder ·
+새 browser 권한 **0**. 테스트: backend 신규 10 + processor 1 + observer 1, collector guard 27(실제 page script를 VM에서 실행).
+
+### 25-3. 실제 scheduler 관측 (일회용 DB `sellerops_nv_live`, run row 삽입 0)
+
+backend 8091 · helper 47621 · Aside u0. 준비는 제품 API `activate`뿐이고 이후 사람 trigger 0.
+
+| window (KST) | run (scheduler 생성) | 문의 read | observed | new | changed | identity |
+|---|---|---|---|---|---|---|
+| 09-17 18:00 | 18:00:05 → 18:00:50 | `PARTIAL`(저장 이력 0) | 8 / 11 | 8 | 0 | MATCH |
+| 09-17 20:00 | 20:00:22 → 20:01:19 | **`BOUNDED` — Case 경계** | 8 / 11 | 0 | 0 | MATCH |
+| 09-17 22:00 | 22:00:21 → 22:01:19 | `BOUNDED` | 8 / 11 | 0 | 0 | MATCH |
+| **09-18 00:00** | 00:00:19 → 00:01:30 | `BOUNDED` | 8 / 12 | **1** | 0 | MATCH |
+
+00:00의 신규 1건(`naver-qna:689256548`, 23:08 작성, 운영자 테스트 문의이나 **다른 상품 6355372669**에 작성됨) → canonical 1 · 중복 0 →
+work item → **Case 1**(`NEEDS_DECISION · AGENT`) → **조사 1회**(prompt v2 · 13.0s · 724/541 토큰 · guard 0 · `REPLY_TO_CUSTOMER`)
+→ 초안 **미작성**(`NO_LIBRARY` — 그 상품에는 판매자 지식이 없다). 10:52의 실고객 비밀글 문의는 경계 이전 history로 저장됐고
+Case 0 · 초안 0 · 답변 0.
+
+### 25-4. 근거 있는 초안 — QA_ACCELERATED_PRODUCT_RUN (scheduler 생성 run이 **아니다**)
+
+올바른 상품(6473457702)의 테스트 문의(`naver-qna:689260413`, 00:17, 「부착했는데 잘 떨어지면 어떻게 하나요? (테스트)」)는
+02:00 창을 기다리지 않고 **일회용 clone**에서 가속했다: clone에서만 00:00 run의 source 4 · job 2를 지우고 `CANCELLED`로 둔 뒤
+제품 API `activate`가 **같은 run을 reopen**(attempt 2). run row 생성·삽입 0, 원본 proof DB 무접촉.
+
+| 구성 | clone | 검색 결과 | 초안 |
+|---|---|---|---|
+| **retrieval OFF**(기본값 · 단어 일치) | `sellerops_naver_inquiry_draft_proof` | `NO_MATCH` · evidence 0 | **거절**(`DRAFT_NOT_PREPARED · NO_DRAFT`) — 근거 없는 초안 0 규칙 유지 |
+| **retrieval ON**(embedding + 질문 재진술 + 적합성 판정, 이 org만) | `sellerops_naver_inquiry_draft_proof_r2` | **판매자 작성 지식 2건** — 「부착이 잘 떨어질 때 안내」·「자주 묻는 질문 - 잘떨어지네요」(`SELLER_ENTERED_KNOWLEDGE`) | **`DRAFT_PREPARED` · `GROUNDED` · v1** (fingerprint `b82f40ad…`) |
+
+두 run 모두 같은 inquiry → canonical 1(중복 0) → Case 1 → 조사 1회(prompt v2, guard 0)까지 동일했고 달라진 것은 검색뿐이다.
+retrieval ON 실측(metadata 로그): embedding passage 12건 4,368ms + 5건 167ms, question 2회(원문 · 재진술) · 재진술 `restated=true`
+3,123ms · 적합성 판정 passage 2 `answered=true` 2,163ms · 초안 `grounded=2` 6,956ms. 초안의 사실 주장(먼지·기름기·습기 제거 ·
+마른 천 · 완전 건조 · 30초 이상 압착 · 벽지·요철면 접착 약함 · 실리콘/보조 양면테이프)은 **전부 두 판매자 문단에 있다** —
+근거 없는 사실 0. 끝 문장은 추가 정보 요청이다. 승인 0 · 실행 0 · marketplace WRITE 0 · live approval id 비어 있음.
+
+### 25-5. 실행 leg는 이미 증명돼 있다
+
+답변 전송은 이 slice에서 다시 증명하지 않았다: **2026-08-26 `LIVE_VERIFIED`** — `naver-qna:686514802`, 승인
+`apr-ce092e823017`(WRITE max 1, 소진), `PUT /external/v1/contents/qnas/{questionId}` 1회 · 재시도 0 · 판정은 시스템 read-back
+(`docs/evidence/naver_inquiry_answer_live_proof_v1.md`, commit `692c5a78`).
+
+### 25-6. 알려진 gap (기록만, 이번 closeout에서 수정 0)
+
+- **INVESTIGATOR_RETRIEVAL_GAP** — r2에서 조사자의 `searchKnowledge` tool은 **0건**을 돌려줬고 같은 run의 초안 검색은 판매자 지식
+  **2건**을 찾았다. 조사 요약은 상품 문맥(`getProductContext` 3)에서 같은 안내를 인용했지만, 두 검색 경로가 같은 질문에 다른 답을 낸다.
+- **KNOWN_RECONCILIATION_GAP** — 08-26 테스트 문의는 NAVER에서 삭제됐지만 canonical `inquiries.status`는 `UNANSWERED`로 남는다
+  (부재를 삭제로 판정하는 경로 없음).
+- 첫 read는 저장 이력이 없으면 설계상 `PARTIAL`이라 Case 경계는 **두 번째** read부터 선다. 한 창에 8건 넘게 새 문의가 오면 다음 read가
+  `PARTIAL`로 정직하게 떨어진다(페이지 클릭 없음). 비밀글 여부는 canonical에 없다.
+- 관측을 기다리던 백그라운드 대기 셸이 세 번 **메모리 부족으로 종료**됐다(backend·helper·scheduler는 무사했고 run은 영향 없음) — QA 하네스의 한계이지 제품 결함이 아니다.
+
+### 25-7. 배포 권고 — FIRST_PILOT_RECOMMENDATION
+
+**retrieval 세 capability(embedding · 질문 재진술 · 적합성 판정)를 global default로 켜지 않는다. 첫 pilot org의 allowlist에서만 켠다.**
+근거: 같은 판매자 지식·같은 문의에서 단어 일치 구성은 `NO_MATCH`로 초안을 거절했고, retrieval 구성은 판매자 문장 2건에 근거한
+초안을 준비했다(25-4). **대가를 명시한다:** 켜면 **모든 지식 검색마다 고객의 질문(과 재진술)이 모델 벤더로 나가고**, 적합성 판정은
+고객 문장과 순위에 오른 판매자 문단을 한 요청에 싣는다(`docs/knowledge_retrieval_quality_v2.md`, payload floor 테스트) · 검색 turn당
+왕복 3~4회가 늘어 지연(이번 실측 합계 ≈10s)과 비용이 붙고 이 셋은 판매자 일일 AI 예산 **밖**이다
+(`docs/retrieval_runtime_closure_v1.md` §5). 켤지는 **DEPLOYMENT_DECISION_PENDING** — 이 proof는 default를 바꾸지 않았다.
+
+### 25-8. 분류
+
+| 항목 | 상태 |
+|---|---|
+| NAVER Product Inquiry Browser Acquisition | **LIVE_PROVEN** |
+| NAVER Product Inquiry Scheduled Observation | **LIVE_PROVEN** (18:00 · 20:00 · 22:00 · 00:00 scheduler 생성) |
+| New Inquiry → Case → Investigation | **LIVE_PROVEN** (00:00 scheduler run) |
+| Knowledge-grounded Draft Preparation | **LIVE_PRODUCT_PATH_PROVEN** (QA_ACCELERATED_PRODUCT_RUN, retrieval-enabled) |
+| NAVER Product Inquiry Execution | **LIVE_PROVEN** (2026-08-26) |
+| **NAVER Product Inquiry Responsibility Slice** | **LIVE_PROVEN under retrieval-enabled configuration** (experimental/QA, PD-1 불변) |
+| FIRST_PILOT_RETRIEVAL | **ORG_ALLOWLIST_RECOMMENDED** · DEPLOYMENT_DECISION_PENDING |
+
+종료 상태: 세 DB(`sellerops_nv_live` · `…_draft_proof` · `…_draft_proof_r2`) 모두 `PAUSED` · next run 없음 · backend/helper 정지 ·
+evidence 보존. dev `sellerops` 무접촉(migration 105; 지식 12행·봉인 credential 1행을 승인 하에 **읽기 전용 export**한 것 외 접촉 0).
