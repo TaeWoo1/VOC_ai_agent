@@ -1289,6 +1289,67 @@ export interface KnowledgeSummaryView {
   needsConfirmation: number;
 }
 
+/** 「Reviewnary가 배운 것」 — `GET /api/knowledge/learned`. */
+export interface LearnedKnowledgeExample {
+  title: string | null;
+  excerpt: string | null;
+  provenance: string;
+  productName: string | null;
+  capturedOn: string | null;
+}
+
+export interface LearnedKnowledgeSource {
+  key: string;
+  labelKo: string;
+  count: number;
+  latestOn: string | null;
+  examples: LearnedKnowledgeExample[];
+}
+
+export type HistoryAvailability = "LEARNED" | "NOT_PROMOTED" | "NOT_WIRED" | "SCREEN_UNPROVEN" | "NOT_AVAILABLE";
+
+export interface LearnedKnowledgeChannelLine {
+  channelNameKo: string;
+  source: string;
+  sourceLabelKo: string;
+  availability: HistoryAvailability;
+  sentenceKo: string;
+}
+
+export interface LearnedKnowledgeView {
+  sources: LearnedKnowledgeSource[];
+  channels: LearnedKnowledgeChannelLine[];
+  historyReads: { channelNameKo: string; readOn: string | null; rowsRead: number }[];
+  canLearnHistory: boolean;
+}
+
+export interface KnowledgeBootstrapReport {
+  ranAt: string;
+  inquiryHistory: {
+    channelNameKo: string | null;
+    from: string;
+    to: string;
+    status: "READ" | "ALREADY_READ" | "IN_PROGRESS" | "FAILED";
+    rowsRead: number;
+  }[];
+  answersRemembered: number;
+  productDetail: {
+    enabled: boolean;
+    considered: number;
+    indexed: number;
+    imageOnly: number;
+    empty: number;
+    alreadyFresh: number;
+    noListing: number;
+    failed: number;
+  };
+}
+
+export interface LearnedKnowledgeResponse {
+  learned: LearnedKnowledgeView;
+  lastRun: KnowledgeBootstrapReport | null;
+}
+
 export interface KnowledgeCandidateView {
   id: string;
   scope: "PRODUCT" | "ORG" | string;

@@ -49,7 +49,25 @@ class ReviewDispositionQualityIT {
     private static final Path LABELS =
             Path.of("..", "contracts", "review-eval", "naver", "v2", "labels.json");
 
-    private record Row(ReviewTriageTier gold, CaseDisposition rules, boolean investigate) {
+    private record Row(ReviewTriageTier gold, CaseDisposition rules, boolean investigate, String band,
+                       boolean asserted) {
+    }
+
+    private static final com.sellerops.reviewissue.RuleBasedIssueSignatureExtractor EXTRACTOR =
+            new com.sellerops.reviewissue.RuleBasedIssueSignatureExtractor(false);
+
+    /** Whether the issue extractor finds a problem the customer asserts in this body. */
+    static boolean asserted(String body) {
+        return EXTRACTOR.extract(body == null ? "" : body).stream().anyMatch(u -> u.signature() != null
+                || u.unknownReason() == com.sellerops.reviewissue.UnknownReason.NO_ASPECT);
+    }
+
+    static String band(Integer rating, String body) {
+        boolean text = body != null && !body.isBlank();
+        if (rating == null) {
+            return "null";
+        }
+        return (rating >= 4 ? "4-5" : rating == 3 ? "3" : "1-2") + (text ? "+text" : "+blank");
     }
 
     @Test
@@ -78,7 +96,9 @@ class ReviewDispositionQualityIT {
                     ReviewReplyState replyState = parse(rs.getString("reply_state"));
                     OperationsCaseRules.Conclusion conclusion =
                             OperationsCaseRules.forReview(rating, rs.getString("body"), replyState);
-                    rows.add(new Row(gold, conclusion.disposition(), conclusion.needsInvestigation()));
+                    String body = rs.getString("body");
+                    rows.add(new Row(gold, conclusion.disposition(), conclusion.needsInvestigation(),
+                            band(rating, body), asserted(body)));
                 }
             }
         }
@@ -107,6 +127,11 @@ class ReviewDispositionQualityIT {
             }
         }
 
+        Map<String, Integer> breakdown = new java.util.TreeMap<>();
+        for (Row row : rows) {
+            breakdown.merge(row.band() + (row.asserted() ? " problem" : " none") + " " + row.gold(), 1, Integer::sum);
+        }
+        System.out.printf("%n  breakdown (band · extractor · gold): %s%n", breakdown);
         System.out.printf("%n  review-disposition/v1 — rules path against %d labelled reviews%n"
                         + "    human labels           %s%n"
                         + "    rules decided          %s%n"

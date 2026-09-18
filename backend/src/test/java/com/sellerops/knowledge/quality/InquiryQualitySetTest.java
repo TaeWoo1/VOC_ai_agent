@@ -150,6 +150,7 @@ class InquiryQualitySetTest {
     @Autowired InquiryDraftEvidenceRepository evidenceRows;
     @Autowired ChannelRepository channels;
     @Autowired com.sellerops.order.ChannelOrderRepository channelOrders;
+    @Autowired com.sellerops.knowledge.semantic.KnowledgeEmbeddingRepository embeddingRows;
 
     private UUID org;
     private final Map<String, UUID> productIds = new LinkedHashMap<>();
@@ -218,20 +219,82 @@ class InquiryQualitySetTest {
         retriever = new InquiryEvidenceRetriever(products, library, policies, memory,
                 com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels,
                         (orgId, channelCode, accountId, rows) -> com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH));
-        List<KnowledgeSourceAdapter> adapters = List.of(
-                new SellerKnowledgeAdapter(orgSources, orgChunks, productSources, productChunks),
-                new ProductFactAdapter(facts), new InquiryAnswerAdapter(memories), new ReviewReplyAdapter(em),
-                new SellerDecisionAdapter(em), new SellerGuidanceAdapter(guidanceRows));
-        spine = new KnowledgeSpineService(adapters, products, new SourceRefResolver(em), retriever);
+        spine = new KnowledgeSpineService(adapters(), products, new SourceRefResolver(em), retriever);
         assessor = new InquiryKnowledgeAssessor(retriever, spine, variants, products);
         candidates = new KnowledgeCandidateService(candidateRows, memories, productSources,
                 new ProductKnowledgeIndexer(productChunks), products, orgSources, policies, variants);
         draftService = new InquiryReplyDraftService(workItems, draftRows);
     }
 
+    /** What one retrieval configuration decided over the whole set. */
+    record Axes(int total, int withRequired, int retrievalHits, int wrongProduct, int wrongPolicy, int basisCorrect,
+                int falseGrounding, int gapNamed, int gapExpected, List<String> misses) {
+
+        void print(String label) {
+            System.out.printf("%n  inquiry-quality/v1 — %s%n"
+                            + "    cases                  %d%n"
+                            + "    retrieval hit          %d/%d (%.2f)%n"
+                            + "    wrong-product usage    %d%n"
+                            + "    wrong-policy usage     %d%n"
+                            + "    answer-basis correct   %d/%d (%.2f)%n"
+                            + "    false grounding        %d%n"
+                            + "    gap named correctly    %d/%d%n"
+                            + "    misses: %s%n%n",
+                    label, total, retrievalHits, withRequired, ratio(retrievalHits, withRequired), wrongProduct,
+                    wrongPolicy, basisCorrect, total, ratio(basisCorrect, total), falseGrounding, gapNamed,
+                    gapExpected, misses);
+        }
+    }
+
     @Test
     @DisplayName("retrieval, source isolation, answer basis and the named gap — measured per case, no model")
     void theDeterministicAxes() throws Exception {
+        Axes a = measure();
+        a.print("deterministic axes (lexical retrieval, no model)");
+
+        assertThat(ratio(a.retrievalHits(), a.withRequired())).isGreaterThanOrEqualTo(MIN_RETRIEVAL_HIT);
+        assertThat(a.wrongProduct()).as("another product's knowledge is never evidence")
+                .isLessThanOrEqualTo(MAX_WRONG_PRODUCT);
+        assertThat(a.wrongPolicy()).as("another rule is not this question's rule").isLessThanOrEqualTo(MAX_WRONG_POLICY);
+        assertThat(a.falseGrounding()).as("a question nothing was written about")
+                .isLessThanOrEqualTo(MAX_FALSE_GROUNDING);
+        assertThat(ratio(a.basisCorrect(), a.total())).isGreaterThanOrEqualTo(MIN_BASIS_ACCURACY);
+    }
+
+    /**
+     * The same axes with the production-candidate retrieval: the semantic lane, the question-intent restatement and
+     * the rejection-only eligibility judge ({@code docs/knowledge_retrieval_quality_v2.md}, arm F5) — the configuration
+     * a pilot organisation is given. Needs the three capabilities' own keys and calls their vendor, so it is gated:
+     * {@code RUN_INQUIRY_QUALITY_SEMANTIC=true} with {@code SELLEROPS_KNOWLEDGE_EMBEDDING_API_KEY},
+     * {@code SELLEROPS_KNOWLEDGE_INTENT_API_KEY} and {@code SELLEROPS_KNOWLEDGE_ELIGIBILITY_API_KEY}.
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(named = "RUN_INQUIRY_QUALITY_SEMANTIC",
+            matches = "true")
+    @DisplayName("live: the same axes with the production-candidate semantic retrieval")
+    void theAxesWithSemanticRetrieval() throws Exception {
+        Axes lexical = measure();
+        wireSemantic();
+        Axes semantic = measure();
+        lexical.print("deterministic axes (lexical retrieval, no model)");
+        boolean judged = !"false".equals(System.getenv("INQUIRY_QUALITY_SEMANTIC_JUDGE"));
+        semantic.print(judged ? "semantic retrieval (embedding + intent + eligibility)"
+                : "semantic retrieval WITHOUT the eligibility judge (diagnostic)");
+        if (!judged) {
+            return;  // a diagnostic arm: it attributes misses to a step and defends nothing
+        }
+
+        // Measured 2026-09-18 (text-embedding-3-large@1024, gpt-5-2025-08-07@minimal): wrong-product 0, wrong-policy
+        // 1 → 0, false grounding 3 → 0; retrieval 25/27 → 23/27. Every question it stops answering fails toward
+        // asking the seller (Q26 Q27 Q28 Q33 Q36), none toward a borrowed rule.
+        assertThat(semantic.wrongProduct()).as("another product's knowledge is never evidence").isZero();
+        assertThat(semantic.wrongPolicy()).as("the semantic lane must not admit more wrong rules")
+                .isLessThanOrEqualTo(lexical.wrongPolicy());
+        assertThat(semantic.falseGrounding()).as("the semantic lane must not ground more unsupported questions")
+                .isLessThanOrEqualTo(lexical.falseGrounding());
+    }
+
+    private Axes measure() throws Exception {
         JsonNode doc = MAPPER.readTree(Files.readString(CASES));
         int withRequired = 0;
         int retrievalHits = 0;
@@ -300,25 +363,58 @@ class InquiryQualitySetTest {
                 }
             }
         }
+        return new Axes(doc.path("cases").size(), withRequired, retrievalHits, wrongProduct, wrongPolicy,
+                basisCorrect, falseGrounding, gapNamed, gapExpected, misses);
+    }
 
-        int total = doc.path("cases").size();
-        System.out.printf("%n  inquiry-quality/v1 — deterministic axes (lexical retrieval, no model)%n"
-                        + "    cases                  %d%n"
-                        + "    retrieval hit          %d/%d (%.2f)%n"
-                        + "    wrong-product usage    %d%n"
-                        + "    wrong-policy usage     %d%n"
-                        + "    answer-basis correct   %d/%d (%.2f)%n"
-                        + "    false grounding        %d%n"
-                        + "    gap named correctly    %d/%d%n"
-                        + "    misses: %s%n%n",
-                total, retrievalHits, withRequired, ratio(retrievalHits, withRequired), wrongProduct, wrongPolicy,
-                basisCorrect, total, ratio(basisCorrect, total), falseGrounding, gapNamed, gapExpected, misses);
+    /** Rebuild the three lanes with the production-candidate semantic retrieval, over the same seeded corpus. */
+    private void wireSemantic() {
+        com.sellerops.agent.llm.AgentLlmTransport transport = new JdkAgentLlmTransport();
+        com.sellerops.knowledge.semantic.KnowledgeEmbeddingService embedder =
+                new com.sellerops.knowledge.semantic.KnowledgeEmbeddingService(
+                        new com.sellerops.knowledge.semantic.KnowledgeEmbeddingProperties(true, "*",
+                                "text-embedding-3-large", requireKey("SELLEROPS_KNOWLEDGE_EMBEDDING_API_KEY"), 1024),
+                        embeddingRows, null, transport);
+        com.sellerops.knowledge.semantic.KnowledgeQuestionIntent intent =
+                new com.sellerops.knowledge.semantic.KnowledgeQuestionIntent(
+                        new com.sellerops.knowledge.semantic.KnowledgeQuestionIntentProperties(true, "*",
+                                "gpt-5-2025-08-07", requireKey("SELLEROPS_KNOWLEDGE_INTENT_API_KEY"), 400, "minimal"),
+                        null, transport);
+        // INQUIRY_QUALITY_SEMANTIC_JUDGE=false isolates the eligibility judge: the same arm with only the semantic lane
+        // and the restatement, so a question the configuration stops answering can be attributed to one step.
+        com.sellerops.knowledge.semantic.KnowledgeEvidenceEligibility judge =
+                "false".equals(System.getenv("INQUIRY_QUALITY_SEMANTIC_JUDGE"))
+                        ? com.sellerops.knowledge.semantic.KnowledgeEvidenceEligibility.disabled()
+                        : new com.sellerops.knowledge.semantic.KnowledgeEvidenceEligibility(
+                        new com.sellerops.knowledge.semantic.KnowledgeEligibilityProperties(true, "*",
+                                "gpt-5-2025-08-07", requireKey("SELLEROPS_KNOWLEDGE_ELIGIBILITY_API_KEY"), 600,
+                                "minimal"),
+                        null, transport);
+        com.sellerops.knowledge.semantic.KnowledgeSemanticSearch semantic =
+                new com.sellerops.knowledge.semantic.KnowledgeSemanticSearch(embedder, intent);
+        ProductKnowledgeLibraryService library = new ProductKnowledgeLibraryService(products, productSources,
+                productChunks, variants, semantic, judge);
+        SellerOperationsKnowledgeService policies =
+                new SellerOperationsKnowledgeService(orgSources, orgChunks, semantic, judge);
+        AnswerMemoryService memory = new AnswerMemoryService(memories, orgChunks, productChunks, semantic, judge);
+        retriever = new InquiryEvidenceRetriever(products, library, policies, memory,
+                com.sellerops.order.fact.StoredOnlyOrderFacts.reader(channelOrders, channels,
+                        (orgId, channelCode, accountId, rows) -> com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH));
+        spine = new KnowledgeSpineService(adapters(), products, new SourceRefResolver(em), retriever);
+        assessor = new InquiryKnowledgeAssessor(retriever, spine, variants, products);
+    }
 
-        assertThat(ratio(retrievalHits, withRequired)).isGreaterThanOrEqualTo(MIN_RETRIEVAL_HIT);
-        assertThat(wrongProduct).as("another product's knowledge is never evidence").isLessThanOrEqualTo(MAX_WRONG_PRODUCT);
-        assertThat(wrongPolicy).as("another rule is not this question's rule").isLessThanOrEqualTo(MAX_WRONG_POLICY);
-        assertThat(falseGrounding).as("a question nothing was written about").isLessThanOrEqualTo(MAX_FALSE_GROUNDING);
-        assertThat(ratio(basisCorrect, total)).isGreaterThanOrEqualTo(MIN_BASIS_ACCURACY);
+    private static String requireKey(String name) {
+        String key = System.getenv(name);
+        assertThat(key).as(name + " is required for the semantic arm").isNotBlank();
+        return key;
+    }
+
+    private List<KnowledgeSourceAdapter> adapters() {
+        return List.of(
+                new SellerKnowledgeAdapter(orgSources, orgChunks, productSources, productChunks),
+                new ProductFactAdapter(facts), new InquiryAnswerAdapter(memories), new ReviewReplyAdapter(em),
+                new SellerDecisionAdapter(em), new SellerGuidanceAdapter(guidanceRows));
     }
 
     @Test
@@ -353,6 +449,10 @@ class InquiryQualitySetTest {
     @DisplayName("live: unsupported claims, draft usability and refusal correctness")
     void theLiveAxes() throws Exception {
         JsonNode doc = MAPPER.readTree(Files.readString(CASES));
+        boolean semantic = "true".equals(System.getenv("RUN_INQUIRY_QUALITY_SEMANTIC"));
+        if (semantic) {
+            wireSemantic();  // the production-candidate retrieval, so the drafts are the ones a pilot seller would get
+        }
         AgentDraftService model = liveModel();
         InquiryDraftComposer composer = new InquiryDraftComposer(workItems, inquiries, draftService, evidenceRows,
                 retriever, assessor, model, allowingQuota(), variants,
@@ -392,9 +492,12 @@ class InquiryQualitySetTest {
             drafted++;
             String body = view.draft().comments() == null ? "" : view.draft().comments();
             for (String claim : strings(c.path("mustNotClaim"))) {
-                if (body.contains(claim)) {
+                java.util.regex.Matcher m = claimPattern(claim).matcher(body);
+                if (m.find()) {
                     unsupported++;
-                    findings.add(id + " claimed 「" + claim + "」");
+                    int from = Math.max(0, m.start() - 30);
+                    int to = Math.min(body.length(), m.end() + 30);
+                    findings.add(id + " claimed 「" + claim + "」 in …" + body.substring(from, to) + "…");
                 }
             }
             List<String> support = strings(c.path("mustSupport"));
@@ -408,7 +511,8 @@ class InquiryQualitySetTest {
             }
         }
 
-        System.out.printf("%n  inquiry-quality/v1 — live axes (model: %s)%n"
+        System.out.printf("%n  inquiry-quality/v1 — live axes (model: %s, retrieval: " + (semantic ? "semantic" : "lexical")
+                        + ")%n"
                         + "    drafts written         %d/%d%n"
                         + "    refusals correct       %d/%d%n"
                         + "    unsupported claims     %d%n"
@@ -459,6 +563,16 @@ class InquiryQualitySetTest {
         wi.setChannelId(q.getChannelId());
         wi.setPhase(InquiryWorkItemPhase.PROPOSED);
         return workItems.save(wi);
+    }
+
+    /**
+     * A forbidden figure as a figure, not as a substring: 「2m」 is not claimed by 「32mm」, which states another
+     * number the corpus does say. A claim that does not start with a digit is matched as written.
+     */
+    static java.util.regex.Pattern claimPattern(String claim) {
+        String quoted = java.util.regex.Pattern.quote(claim);
+        return java.util.regex.Pattern.compile(Character.isDigit(claim.charAt(0))
+                ? "(?<![0-9.])" + quoted + "(?![A-Za-z])" : quoted);
     }
 
     private static List<String> strings(JsonNode array) {

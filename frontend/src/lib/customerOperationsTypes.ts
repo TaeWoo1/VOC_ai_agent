@@ -180,6 +180,10 @@ export interface OperationsCaseDetail {
     capturedOn: string | null;
     cited: boolean;
     scope: string;
+    /** An answer or reply the seller gave before — precedent, never today's basis on its own. */
+    pastAnswer: boolean;
+    /** That past answer whole, so the seller can confirm it as today's basis. Null otherwise. */
+    reusableText: string | null;
   }[];
   gap: { missingSubject: string | null; sentence: string; suggestedScope: string } | null;
   draft: {

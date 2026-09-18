@@ -23,9 +23,16 @@ public record CaseDetailView(UUID caseId, boolean open, String subjectKind, Stri
     public record Investigated(String label, int results) {
     }
 
-    /** Company knowledge the investigation or the draft used, with its authority and provenance. */
+    /**
+     * Company knowledge the investigation or the draft used, with its authority and provenance.
+     *
+     * @param pastAnswer   an answer or reply the seller actually gave before — precedent, never a current basis alone
+     * @param reusableText the whole of that past answer, so the seller can confirm it as today's basis in one step;
+     *                     null for every other kind of knowledge (it already is a basis, or is not the seller's words)
+     */
     public record KnowledgeUsed(String authority, String provenance, String title, String excerpt,
-                                LocalDate capturedOn, boolean cited, String scope) {
+                                LocalDate capturedOn, boolean cited, String scope, boolean pastAnswer,
+                                String reusableText) {
     }
 
     /**

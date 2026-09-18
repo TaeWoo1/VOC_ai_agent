@@ -220,26 +220,39 @@ class OperationsCaseProcessorTest {
 
     @Test
     void obviousReviewsAreSettledByTheRules_andOnlyTheOneThatNeedsJudgementReachesTheModel() {
+        Review starsOnly = review(5, "");
         Review praise = review(5, "잘 받았습니다. 튼튼해요.");
         Review middling = review(3, "그냥 그래요.");
         Review complaint = review(1, "한 달 만에 떨어졌어요. 교환 원합니다.");
+        Review highRatingComplaint = review(5, "배송은 빨랐는데 한쪽이 금방 떨어졌어요.");
 
         OperationsCaseProcessor.Report report = processor.process(run(Instant.now(), null, null), () -> false);
 
-        assertThat(report.ruleDecided()).isEqualTo(2);
-        assertThat(report.investigated()).isEqualTo(1);
-        verify(investigator, times(1)).investigate(any(), any());
-        OperationsCase routine = caseFor(praise.getId());
+        assertThat(report.ruleDecided()).isEqualTo(3);
+        assertThat(report.investigated()).isEqualTo(2);
+        verify(investigator, times(2)).investigate(any(), any());
+        // Only a high rating with nothing to read is closed by a rule.
+        OperationsCase routine = caseFor(starsOnly.getId());
         assertThat(routine.getDisposition()).isEqualTo(CaseDisposition.AUTO_RESOLVED);
         assertThat(routine.getStatus()).isEqualTo(OperationsCaseStatus.CLOSED);
         assertThat(routine.getResolutionReason()).isEqualTo(CaseResolution.RULE_NO_ACTION);
         assertThat(routine.getDecidedBy()).isEqualTo(CaseDecider.RULE);
+        // A high rating with words in it stays open: the rating cannot read them (Product Quality Closure v1 —
+        // 18 of the labelled corpus's 114 rule-closed 4–5★ reviews were 확인 필요).
+        OperationsCase worded = caseFor(praise.getId());
+        assertThat(worded.getDisposition()).isEqualTo(CaseDisposition.MONITORING);
+        assertThat(worded.getStatus()).isEqualTo(OperationsCaseStatus.PREPARED);
+        assertThat(worded.getReason()).isEqualTo(CaseReason.REVIEW_HIGH_RATING_WITH_TEXT);
         OperationsCase watched = caseFor(middling.getId());
         assertThat(watched.getDisposition()).isEqualTo(CaseDisposition.MONITORING);
         assertThat(watched.getStatus()).isEqualTo(OperationsCaseStatus.PREPARED);
         assertThat(watched.getRequiredAuthority()).isEqualTo(RequiredAuthority.AUTO);
         OperationsCase decision = caseFor(complaint.getId());
         assertThat(decision.getDisposition()).isEqualTo(CaseDisposition.NEEDS_DECISION);
+        // A 5★ review that says something broke reaches the investigator, never a rule's auto-close.
+        OperationsCase flagged = caseFor(highRatingComplaint.getId());
+        assertThat(flagged.getReason()).isEqualTo(CaseReason.REVIEW_HIGH_RATING_PROBLEM);
+        assertThat(flagged.getDisposition()).isNotEqualTo(CaseDisposition.AUTO_RESOLVED);
         verify(drafts, never()).prepare(any(), any());
     }
 
@@ -897,7 +910,7 @@ class OperationsCaseProcessorTest {
     void theHomeShowsWhatStillWaitsOnTheCanonicalRecord_andNeverRendersAnUnobservedSourceAsZero() {
         Inquiry inquiry = inquiry("배송은 언제 되나요?", Instant.now());
         workItem(inquiry);
-        review(5, "좋아요");
+        review(5, "");
         processor.process(run(Instant.now(), SourceFailureReason.TIMEOUT, null), () -> false);
         CustomerOperationsHomeService home = new CustomerOperationsHomeService(responsibilities, runs, sourceRows,
                 new ResponsibilitySources(accounts, channels), ResponsibilityRollout.of(List.of(org)), cases,

@@ -62,6 +62,8 @@ function taught(): OperationsCaseDetail {
         capturedOn: "2026-09-18",
         cited: true,
         scope: "PRODUCT",
+        pastAnswer: false,
+        reusableText: null,
       },
     ],
     draft: {
@@ -132,6 +134,43 @@ describe("OperationsCase", () => {
     expect(screen.getByText("준비된 답변")).toBeTruthy();
     expect(screen.queryByText("「방수」에 대해 고객에게 안내할 기준이 없습니다.")).toBeNull();
     expect((screen.getByLabelText("답변 초안") as HTMLTextAreaElement).value).toContain("생활 방수");
+  });
+
+  it("a past answer on a similar question is shown as precedent and can be confirmed as today's basis", async () => {
+    api.getOperationsCase.mockResolvedValue(
+      detail({
+        knowledgeUsed: [
+          {
+            authority: "과거 판매자 답변",
+            provenance: "문의 답변 · 채널에 등록된 답변",
+            title: "[답변] 욕실 사용",
+            excerpt: "욕실 벽면에도 붙이실 수 있습니다.",
+            capturedOn: "2026-07-02",
+            cited: false,
+            scope: "PRODUCT",
+            pastAnswer: true,
+            reusableText: "욕실 벽면에도 붙이실 수 있습니다. 다만 물이 직접 닿는 곳은 피해 주세요.",
+          },
+        ],
+      }),
+    );
+    api.teachOperationsCase.mockResolvedValue(taught());
+    const user = userEvent.setup();
+
+    renderCase();
+    expect(await screen.findByText("지난 답변")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "지난 답변을 기준으로 쓰기" }));
+    expect((screen.getByLabelText("고객에게 안내할 내용") as HTMLTextAreaElement).value).toBe(
+      "욕실 벽면에도 붙이실 수 있습니다. 다만 물이 직접 닿는 곳은 피해 주세요.",
+    );
+    await user.click(screen.getByRole("button", { name: "저장하고 다시 준비" }));
+
+    await waitFor(() =>
+      expect(api.teachOperationsCase).toHaveBeenCalledWith("case-1", {
+        content: "욕실 벽면에도 붙이실 수 있습니다. 다만 물이 직접 닿는 곳은 피해 주세요.",
+        scope: "PRODUCT",
+      }),
+    );
   });
 
   it("an inquiry with no named product can only be taught company-wide", async () => {

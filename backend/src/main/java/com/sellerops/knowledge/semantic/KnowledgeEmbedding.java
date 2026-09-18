@@ -27,7 +27,12 @@ public class KnowledgeEmbedding {
     @Column(nullable = false)
     private int dimensions;
 
-    @Column(name = "vector", nullable = false)
+    /**
+     * Four bytes per dimension. The length only shapes a Hibernate-generated schema (the offline test database):
+     * production runs Flyway's {@code bytea} with {@code ddl-auto: none}, and the default 255 cannot hold one
+     * 1024-dimension vector.
+     */
+    @Column(name = "vector", nullable = false, length = 16384)
     private byte[] vector;
 
     @Column(name = "created_at", nullable = false)

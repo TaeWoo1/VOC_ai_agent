@@ -106,6 +106,7 @@ export function OperationsCase() {
                   <span>{used.provenance}</span>
                   {used.capturedOn ? <span>{used.capturedOn} 기준</span> : null}
                   {used.cited ? <Status tone="info">판단에 사용</Status> : null}
+                  {used.pastAnswer ? <Status tone="neutral">지난 답변</Status> : null}
                 </p>
                 <p className="mt-1 break-keep font-medium text-ink">{used.title}</p>
                 <p className="mt-1 break-keep text-sm leading-relaxed text-muted">{used.excerpt}</p>
@@ -162,6 +163,9 @@ function TeachCard({ caseId, detail, onApplied, onFailed }: CardProps) {
   const [scope, setScope] = useState(detail.productScopeAvailable ? gap?.suggestedScope ?? "ORG" : "ORG");
   const [busy, setBusy] = useState(false);
   if (!gap) return null;
+  // A past answer the seller gave on a similar question is precedent, not today's basis; confirming it here is how it
+  // becomes one — the seller reads it, may edit it, and saves it as their own current knowledge.
+  const precedent = detail.knowledgeUsed.find((used) => used.pastAnswer && used.reusableText);
 
   const submit = async () => {
     setBusy(true);
@@ -219,7 +223,20 @@ function TeachCard({ caseId, detail, onApplied, onFailed }: CardProps) {
           </div>
         </div>
       ) : (
-        <Btn onClick={() => setOpen(true)}>정보 알려주기</Btn>
+        <div className="flex flex-wrap gap-2">
+          <Btn onClick={() => setOpen(true)}>정보 알려주기</Btn>
+          {precedent ? (
+            <Btn
+              variant="outline"
+              onClick={() => {
+                setContent(precedent.reusableText ?? "");
+                setOpen(true);
+              }}
+            >
+              지난 답변을 기준으로 쓰기
+            </Btn>
+          ) : null}
+        </div>
       )}
     </Section>
   );

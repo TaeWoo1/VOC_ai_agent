@@ -42,6 +42,11 @@ import org.springframework.stereotype.Component;
  * is turned on for a bounded, approved live proof only; raising the Demo/Pilot default is a separate
  * decision that comes after that proof rather than with it.
  *
+ * <p><b>A second caller, with the same bounds</b> (Customer Ops Product Quality Closure v1, product-owner 2026-09-18).
+ * {@code KnowledgeBootstrapService} asks for the products a new seller's customers already wrote about, so their
+ * listing is learned before the next question arrives. It goes through this method unchanged: one request per product,
+ * the staleness gate, the attempt memory and the same switch — and it names a bounded list, never the catalogue.
+ *
  * <p><b>It never throws at its caller.</b> A draft must be produced whether or not a channel
  * answered — a 403, a rate limit, a missing credential and a rebuilt listing all end as an
  * {@link Outcome}, logged, with the draft path continuing on whatever knowledge already existed.
@@ -141,6 +146,11 @@ public class ProductDetailEnrichmentTrigger {
             return enriched != null
                     && enriched.outcome() == ProductDetailEnrichment.Outcome.IMAGE_ONLY;
         }
+    }
+
+    /** Whether this deployment reads 상세페이지 at all — the switch, and at least one channel that publishes one. */
+    public boolean enabled() {
+        return enabled && !sources.isEmpty();
     }
 
     /**

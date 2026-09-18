@@ -21,6 +21,7 @@ import com.sellerops.knowledge.guidance.SellerGuidance;
 import com.sellerops.knowledge.guidance.SellerGuidanceService;
 import com.sellerops.knowledge.org.OrgKnowledgeType;
 import com.sellerops.knowledge.spine.KnowledgeEntry;
+import com.sellerops.knowledge.spine.SpineSourceType;
 import com.sellerops.knowledge.spine.KnowledgeSpineService;
 import com.sellerops.knowledge.teach.dto.CaseCorrectionRequest;
 import com.sellerops.knowledge.teach.dto.CaseDetailView;
@@ -364,10 +365,13 @@ public class CaseKnowledgeService {
                 continue;
             }
             String flat = entry.text() == null ? "" : entry.text().replaceAll("\\s+", " ").strip();
+            boolean pastAnswer = entry.sourceType() == SpineSourceType.INQUIRY_ANSWER
+                    || entry.sourceType() == SpineSourceType.REVIEW_REPLY;
             out.add(new CaseDetailView.KnowledgeUsed(entry.authority().labelKo(), entry.provenance(), entry.title(),
                     flat.length() > 200 ? flat.substring(0, 200) + "…" : flat,
                     entry.capturedAt() == null ? null : entry.capturedAt().atZone(KST).toLocalDate(), u.cited(),
-                    entry.scope().name()));
+                    entry.scope().name(), pastAnswer,
+                    pastAnswer && entry.text() != null ? entry.text().strip() : null));
         }
         return out;
     }

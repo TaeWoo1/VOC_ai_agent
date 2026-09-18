@@ -113,7 +113,7 @@ public class ReviewReplyAdapter implements KnowledgeSourceAdapter {
     }
 
     /** A sentence the seller wrote or a model wrote from evidence — never a template. Null is a manual save. */
-    static boolean isAnswer(String authorKind) {
+    public static boolean isAnswer(String authorKind) {
         return authorKind == null || authorKind.isBlank()
                 || DraftAuthorKind.SELLER.name().equals(authorKind)
                 || DraftAuthorKind.MODEL.name().equals(authorKind);

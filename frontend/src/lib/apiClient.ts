@@ -91,6 +91,7 @@ import type {
   KnowledgeCandidateView,
   KnowledgeDocumentView,
   KnowledgeSummaryView,
+  LearnedKnowledgeResponse,
   ReviewReplySubmissionRunResponse,
   ReviewExecutionView,
   ReviewAcquisitionReadinessResponse,
@@ -1499,6 +1500,18 @@ export const api = {
   // What reviewnary knows, as numbers — the 「알고 있는 정보」 line.
   async getKnowledgeSummary(): Promise<KnowledgeSummaryView> {
     const { data } = await http.get<KnowledgeSummaryView>("/api/knowledge/summary");
+    return data;
+  },
+
+  // What reviewnary learned from the company's operating history, per source and per channel.
+  async getLearnedKnowledge(): Promise<LearnedKnowledgeResponse> {
+    const { data } = await http.get<LearnedKnowledgeResponse>("/api/knowledge/learned");
+    return data;
+  },
+
+  // Read the seller's own channel history now (bounded READ) and learn from it. Never writes to a channel.
+  async learnFromHistory(): Promise<LearnedKnowledgeResponse> {
+    const { data } = await http.post<LearnedKnowledgeResponse>("/api/knowledge/learned/bootstrap");
     return data;
   },
 

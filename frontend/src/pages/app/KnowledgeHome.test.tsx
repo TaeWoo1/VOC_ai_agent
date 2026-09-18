@@ -19,6 +19,8 @@ const dismissKnowledgeCandidate = vi.fn();
 const setKnowledgeDocumentActive = vi.fn();
 const importKnowledgeDocument = vi.fn();
 const getProductKnowledgeStrict = vi.fn();
+const getLearnedKnowledge = vi.fn();
+const learnFromHistory = vi.fn();
 vi.mock("../../lib/apiClient", () => ({
   api: {
     getKnowledgeDocuments: (...a: unknown[]) => getKnowledgeDocuments(...a),
@@ -30,6 +32,8 @@ vi.mock("../../lib/apiClient", () => ({
     setKnowledgeDocumentActive: (...a: unknown[]) => setKnowledgeDocumentActive(...a),
     importKnowledgeDocument: (...a: unknown[]) => importKnowledgeDocument(...a),
     getProductKnowledgeStrict: (...a: unknown[]) => getProductKnowledgeStrict(...a),
+    getLearnedKnowledge: (...a: unknown[]) => getLearnedKnowledge(...a),
+    learnFromHistory: (...a: unknown[]) => learnFromHistory(...a),
   },
   getToken: () => null,
 }));
@@ -90,6 +94,10 @@ beforeEach(() => {
   getKnowledgeDocuments.mockReset().mockResolvedValue([DOCUMENT]);
   getKnowledgeCandidates.mockReset().mockResolvedValue([CANDIDATE]);
   getKnowledgeSummary.mockReset().mockResolvedValue(SUMMARY);
+  getLearnedKnowledge.mockReset().mockResolvedValue({
+    learned: { sources: [], channels: [], historyReads: [], canLearnHistory: false },
+    lastRun: null,
+  });
   proposeKnowledgeCandidates.mockReset().mockResolvedValue([CANDIDATE]);
   acceptKnowledgeCandidate.mockReset().mockResolvedValue({ ...CANDIDATE, state: "ACCEPTED" });
   dismissKnowledgeCandidate.mockReset().mockResolvedValue({ ...CANDIDATE, state: "DISMISSED" });

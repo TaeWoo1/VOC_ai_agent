@@ -12,6 +12,7 @@ import { useAgentSurface } from "../../lib/agentPanel";
 import { Section } from "../../components/ui/Section";
 import { Btn } from "../../components/ui/Btn";
 import { KnowledgeInbox } from "../../components/knowledge/KnowledgeInbox";
+import { LearnedKnowledge } from "../../components/knowledge/LearnedKnowledge";
 import {
   KnowledgeDocumentAdd,
   KnowledgeDocumentList,
@@ -169,6 +170,14 @@ export function KnowledgeHome() {
             ) : null}
           </>
         )}
+      </Section>
+
+      {/*
+        What the company's operating history already taught — the answers it gave, the listing it wrote — and, per
+        channel, what cannot be learned and why. Beside 알고 있는 정보 because it is the same question asked by source.
+      */}
+      <Section title="Reviewnary가 배운 것">
+        <LearnedKnowledge />
       </Section>
 
       <Section title="자료" action={<KnowledgeDocumentAdd scope="ORG" onImported={load} />}>
