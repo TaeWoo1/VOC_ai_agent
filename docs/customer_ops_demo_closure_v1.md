@@ -116,3 +116,17 @@ each with exactly one detail control naming its own id (no direct URL). One deta
 clicks). The committed reader found **no AngularJS scope** on the detail pop-up, so the reply cannot be read from a view
 model there; the other targets were not opened. Next: a READ-only structure census of the open detail (DOM section
 names/lengths only) to identify the reply element, then a reader change and a fresh approval.
+
+**M5 (resumed) — PASS.** Discovery (2 clicks, structure only): the detail pop-up exposes no view data, shows neither the
+review id nor a reply date, and pre-fills the existing reply in its reply textarea under 「판매자답글」. The reader now
+reads that field, fail-closed on six checks (one pop-up; the pop-up's review text equals that id's row-model text,
+compared in the page; one label; one bound field; untouched form; non-blank). Three replied reviews read in 6 clicks,
+stored on their canonical reviews with the export's 답글등록일시 and source `NAVER_REVIEW_DETAIL_V1`; a repeat
+recorded nothing; the Spine finds a reply for the same product as 「리뷰 답글 · 채널에 등록된 답글」 and not for
+another product; another organisation gets 404 for the product, nothing company-wide, and cannot write onto the review.
+
+**M4-R — no draft, correctly.** The only unanswered NAVER product question is `naver-qna:689162087` (2026-09-17,
+「종이컵 9oz 크기도 디스펜서 제품 판매하시나요?」, product 「종이컵보관함 수거함 디스펜서 컵 홀더」). The product has no
+company knowledge, so the draft path returned `NO_ANSWER_BASIS` and made no model call. The second read could not
+re-see the question (the list is filtered by posting time), so «unanswered» stands as of 15:30:08 KST; the send path
+re-reads the answer state immediately before any write.
