@@ -54,7 +54,7 @@ case "$ENV_FILE" in "$REPO"/*) fail "$ENV_FILE is inside the repository — keep
 case "$PILOT_PUBLIC_HOST" in localhost|127.0.0.1|*.local) fail "PILOT_PUBLIC_HOST is a development name ($PILOT_PUBLIC_HOST)";; esac
 # A model capability that is on but has no key fails the backend's own boot validator; failing here
 # names the variable instead of making an operator read a stack trace.
-for cap in AGENT_PLAN AGENT_DRAFT AGENT_JUDGE AGENT_CONVERSE AGENT_REPORT KNOWLEDGE_EMBEDDING KNOWLEDGE_INTENT KNOWLEDGE_ELIGIBILITY; do
+for cap in AGENT_PLAN AGENT_DRAFT AGENT_JUDGE AGENT_CONVERSE AGENT_REPORT KNOWLEDGE_EMBEDDING KNOWLEDGE_INTENT KNOWLEDGE_ELIGIBILITY REVIEW_MEDIA_VISION; do
   e="SELLEROPS_${cap}_ENABLED"; k="SELLEROPS_${cap}_API_KEY"
   if [[ "${!e:-false}" == "true" && -z "${!k:-}" ]]; then fail "$e=true but $k is blank"; fi
 done
@@ -62,7 +62,8 @@ done
 # customer's question to a vendor, and a seller does not ask for that by connecting a channel. So an
 # organisation list is not optional for them, and `*` is not a pilot answer. (The backend refuses the
 # same shape at boot; failing here names the variable instead of a stack trace.)
-for cap in KNOWLEDGE_EMBEDDING KNOWLEDGE_INTENT KNOWLEDGE_ELIGIBILITY; do
+# A customer's own review photo is the widest payload of all; it is held to the same named-org rule.
+for cap in KNOWLEDGE_EMBEDDING KNOWLEDGE_INTENT KNOWLEDGE_ELIGIBILITY REVIEW_MEDIA_VISION; do
   e="SELLEROPS_${cap}_ENABLED"; o="SELLEROPS_${cap}_ORG_IDS"
   if [[ "${!e:-false}" == "true" ]]; then
     [[ -n "${!o:-}" ]] || fail "$e=true but $o is blank — name the pilot organisation explicitly"
