@@ -309,3 +309,26 @@ model calls 1. Dev database unchanged.
 Seen, not fixed: the investigated case's fact line 「별점은 높지만 불편을 말하는 내용이 있습니다」 stands beside an Agent summary
 calling it positive, and the model's recommendation text says 「모니터링만 하시면 됩니다」 on a case it closed.
 
+## §9 B/D/E/F by QA replay — `QA_REPLAY_PROVEN`, not LIVE (2026-09-19)
+
+Historical REAL rows of a disposable clone (`sellerops_qa_replay`, from `sellerops_ah_live`, at `030200b4`) handed back
+to the current ingest and Case path by `CustomerOpsQaReplayIT` (gated `RUN_QA_REPLAY=true`). The harness only plays the
+device: it queues, claims, delivers and settles an observation job through the production `ScheduledAsideJobService`
+and the production NAVER review / product-inquiry `deliver` — the entry the helper calls with a page it read. Everything
+after is the product: identity fence, ingest and follow-up, photo references, `OperationsCaseProcessor#process`
+(discovery since the settled baseline, rules, investigation, draft), `CaseKnowledgeService#teach`. Replayed rows carry
+fresh `9…` ids so dedup does not skip them; their content (rating, words, product, photos, receipt time) is the
+original's. The clone's answer memory was seeded with the Demo Org's 23 rows imported by M1 (the seller's real channel
+answers). Marketplace 0 · CDN 0 · model calls 8 (investigation 6, draft 2).
+
+| | Replayed real row | Result |
+|---|---|---|
+| B | 4★ «접착력이 아쉽지만 만족합니다» | **QA_REPLAY_PROVEN** — new case, rule `MONITORING` («별점은 높지만 글이 있어 바로 닫지 않고 지켜봅니다»); the words did not assert a problem to the extractor, so no investigation |
+| D | «종이컵 9oz 크기도 디스펜서 제품 판매하시나요?», then «10온스컵 사용 디스펜서는 없나요?» | **QA_REPLAY_PROVEN** — both investigated → `NEEDS_DECISION` with a gap («「…디스펜서」에 대해 고객에게 안내할 기준이 없습니다»). The 10온스 case was taught with **the answer the seller gave that exact question on the channel** («아쉽게도 10온스에 맞는 제품은 생산하고 있지 않습니다…», company-wide) → saved as 운영 기준 «10온스 디스펜서 안내» → re-investigated → missing cleared → draft `GROUNDED` citing it |
+| E | the 10온스 question again, from a later customer | **QA_REPLAY_PROVEN** — the new case cites the taught standard (회사·상품 지식 1, 판매자의 지난 결정 1), asks nothing, draft `GROUNDED`: «아쉽게도 현재 10온스 컵에 맞는 디스펜서는 생산하고 있지 않습니다…». The 9oz question replayed after the teach did **not** take the 10온스 standard and still asks — correct: the seller said nothing about 9oz |
+| F | 5★ with 1 photo, «…불량이면 말씀 드리겠습니다» | **investigation path QA_REPLAY_PROVEN, vision not run** — the words sent it to investigation; with vision off the photo is recorded «보지 못한 사진 1» / «사진 확인 기능이 꺼져 있어…» and the Agent closed it `AUTO_RESOLVED` / `NO_ACTION`. Looking at the photo needs one CDN fetch and one vision call — an external read left for its own approval |
+
+Seen, not fixed: before the teach, neither dispenser case surfaced the seller's own past channel answer from answer
+memory — not even for the 10온스 question it answers verbatim — so no precedent was offered on the case screen. Lexical
+retrieval misses «10온스컵» against «10온스에» (the pilot semantic retrieval was off, as in M1).
+
