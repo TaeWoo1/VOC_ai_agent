@@ -86,7 +86,7 @@ basis·모델 호출 여부·gap 적재·Knowledge Inbox는 한 글자도 바뀌
 아래쪽 보라색 부분은 어떻게 분리하나요?」, 과거 답변 `17dd221a`)을 오늘 도착한 문의로 다시 넣었다. 판정 `NO_ANSWER_BASIS`
 (상품 `ABSENT` · 운영기준 `NO_RELEVANT_EVIDENCE` · 근거는 과거 답변뿐) → Case [정보 입력]이 그 답변으로 채워져 열림 → 판매자가
 고쳐 저장 → `KNOWLEDGE_TAUGHT`(`precedentUnchanged=false`) → 재조사 → **GROUNDED 초안**(근거 상품 정보 1 · 과거 답변 1).
-모델 3 · 마켓플레이스 0 · WRITE 0. 이 증명이 드러낸 것 셋:
+모델 3 · 마켓플레이스 0 · WRITE 0 · evidence `docs/evidence/INDEX.md`. 이 증명이 드러낸 것 넷:
 
 - **고쳐 쓴 문장만 GROUNDED에 닿았다.** 사전 점검(모델 0)에서 인사말만 지운 답변을 저장하면 상품 lane은
   `NO_RELEVANT_EVIDENCE`에 머문다 — 과거 답변은 **저장된 질문 서명**(「제품의 부분과 부분은」) 덕에 잡혔고, Teach로 만든 지식에는
@@ -101,8 +101,8 @@ basis·모델 호출 여부·gap 적재·Knowledge Inbox는 한 글자도 바뀌
 
 테스트: `KnowledgeIntelligenceClosureTest`(과거 답변만 → basis 불변·모델 0·두 경로 같은 id · 미리 채움을 고쳐 저장 →
 GROUNDED·근거는 판매자 지식·메모리 불변 · 과거 답변 없음 → null · 현재 근거 있음 → null · 표시 시 펜스 · 옛 JSON 호환),
-`OperationsCase.test.tsx`(미리 채움 표시·고쳐 저장·그대로 한 번에 저장·axe 0). 마켓플레이스 0 · 모델 0 ·
-마이그레이션 0 ⇒ evidence 행 없음.
+`OperationsCase.test.tsx`(미리 채움 표시·고쳐 저장·그대로 한 번에 저장·axe 0). 구현 커밋 자체는 마켓플레이스 0 ·
+모델 0 · 마이그레이션 0이고, evidence 행은 위의 브라우저 증명 하나다.
 
 ## 3. 판매자 정정 → 기억 (「다음에도 참고」)
 
