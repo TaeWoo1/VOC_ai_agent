@@ -503,6 +503,8 @@ public class OperationsCaseProcessor {
     private OperationsCase applyInvestigation(OperationsCase c, CaseInvestigator.Outcome outcome) {
         CaseInvestigationOutput output = outcome.output();
         c.setDecidedBy(CaseDecider.AGENT);
+        // The rule's sentence said what the rule concluded; the agent's conclusion replaces it, the fact stays.
+        c.setReasonNote(c.getReason() == null ? c.getReasonNote() : c.getReason().factKo());
         c.setDisposition(outcome.applied().disposition());
         c.setRequiredAuthority(outcome.applied().authority());
         c.setSummary(outcome.applied().summary());

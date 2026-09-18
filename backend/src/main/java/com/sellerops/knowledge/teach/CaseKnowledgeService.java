@@ -131,7 +131,8 @@ public class CaseKnowledgeService {
         CaseKnowledgeGap gap = gapOf(c);
         return new CaseDetailView(c.getId(), c.isOpen(), c.getSubjectKind().name(), channelName, productName,
                 namedProduct != null, subject.receivedOn(), subject.rating(), subject.title(), subject.body(),
-                c.getReasonNote(), c.getDisposition() == null ? null : c.getDisposition().name(),
+                com.sellerops.operationscase.CaseReason.noteFor(c),
+                c.getDisposition() == null ? null : c.getDisposition().name(),
                 c.getDecidedBy() == null ? null : c.getDecidedBy().name(), c.getSummary(),
                 c.getRecommendedActionType() == null ? null : c.getRecommendedActionType().name(),
                 c.getRecommendedAction(), strings(c.getMissingInformation()), whyDecisionNeeded(c, gap),
@@ -377,7 +378,12 @@ public class CaseKnowledgeService {
             List<CaseDetailView.Investigated> out = new ArrayList<>();
             try {
                 for (JsonNode call : MAPPER.readTree(e.getProvenance()).path("tools")) {
-                    String label = toolKo(call.path("tool").asText());
+                    String tool = call.path("tool").asText();
+                    if ("getReviewMedia".equals(tool)) {
+                        out.addAll(photosLooked(orgId, c));
+                        continue;
+                    }
+                    String label = toolKo(tool);
                     if (label != null) {
                         out.add(new CaseDetailView.Investigated(label, call.path("results").asInt()));
                     }
@@ -388,6 +394,30 @@ public class CaseKnowledgeService {
             return out;
         }
         return List.of();
+    }
+
+    /**
+     * The photos, as the canonical media rows say now: how many a vision model actually looked at, and — separately —
+     * how many it did not. A photo only counted or only addressed is never listed as looked at.
+     */
+    private List<CaseDetailView.Investigated> photosLooked(UUID orgId, OperationsCase c) {
+        if (reviewMedia == null || c.getSubjectKind() != OperationsSubjectKind.REVIEW) {
+            return List.of();
+        }
+        return photoLines(reviewMedia.findByOrgIdAndReviewIdOrderByOrdinalAsc(orgId, c.getSubjectId()));
+    }
+
+    static List<CaseDetailView.Investigated> photoLines(List<com.sellerops.review.media.ReviewMedia> rows) {
+        long seen = rows.stream().filter(m -> m.getInspectionStatus()
+                == com.sellerops.review.media.ReviewMedia.InspectionStatus.INSPECTED).count();
+        List<CaseDetailView.Investigated> out = new ArrayList<>();
+        if (seen > 0) {
+            out.add(new CaseDetailView.Investigated("고객이 올린 사진", (int) seen));
+        }
+        if (rows.size() > seen) {
+            out.add(new CaseDetailView.Investigated("보지 못한 사진", (int) (rows.size() - seen)));
+        }
+        return out;
     }
 
     private static String toolKo(String tool) {

@@ -64,12 +64,60 @@ public class ReviewReplyAdapter implements KnowledgeSourceAdapter {
                 .setMaxResults(MAX_REPLIES)
                 .getResultList();
         Set<String> reported = reportedVersions(orgId, rows);
-        return rows.stream()
+        List<Indexed> out = new java.util.ArrayList<>(rows.stream()
                 .map(row -> indexed((ReviewReplyApproval) row[0], (ReviewReplyDraft) row[1], (Review) row[2],
                         reported))
                 .filter(java.util.Objects::nonNull)
-                .toList();
+                .toList());
+        Set<UUID> approved = new HashSet<>();
+        rows.forEach(row -> approved.add(((Review) row[2]).getId()));
+        out.addAll(channelReplies(orgId, productId, approved));
+        return out;
     }
+
+    /**
+     * Replies the seller published on the channel, read onto the canonical review by the reply enrichment
+     * ({@code NaverReviewReplyEnrichmentService}). A review whose approved reply is already an entry above is not
+     * listed twice. Same authority as an approved reply: it is what the seller said, not what is currently true.
+     */
+    private List<Indexed> channelReplies(UUID orgId, UUID productId, Set<UUID> alreadyListed) {
+        List<Review> replied = em.createQuery("""
+                        select r from Review r
+                        where r.orgId = :orgId and r.sellerReplyBody is not null
+                          and (r.productId is null or r.productId = :productId)
+                          and r.dataOrigin = :real
+                        order by r.sellerReplyObservedAt desc
+                        """, Review.class)
+                .setParameter("orgId", orgId)
+                .setParameter("productId", productId == null ? UUID.randomUUID() : productId)
+                .setParameter("real", com.sellerops.common.DataOrigin.REAL)
+                .setMaxResults(MAX_REPLIES)
+                .getResultList();
+        List<Indexed> out = new java.util.ArrayList<>();
+        for (Review review : replied) {
+            if (alreadyListed.contains(review.getId())) {
+                continue;
+            }
+            UUID bound = review.getProductId();
+            String question = VocPreviewSanitizer.redactFullBody(MarkupText.toPlainText(review.getBody())).text();
+            out.add(new Indexed(new KnowledgeEntry(
+                    SpineSourceType.REVIEW_REPLY + ":" + review.getId(),
+                    SpineSourceType.REVIEW_REPLY,
+                    bound == null ? KnowledgeSpineScope.ORG : KnowledgeSpineScope.PRODUCT, bound, null,
+                    KnowledgeAuthority.PAST_SELLER_ANSWER,
+                    review.getRating() == null ? "리뷰 답글" : "리뷰 답글 · 별점 " + review.getRating() + "점",
+                    review.getSellerReplyBody(),
+                    review.getSellerReplyAt() != null ? review.getSellerReplyAt() : review.getSellerReplyObservedAt(),
+                    CHANNEL_REPLY_PROVENANCE,
+                    List.of(SourceRef.of(SourceRef.Kind.REVIEW, review.getId()))),
+                    KnowledgeText.normalize(question == null ? "" : question)
+                            + KnowledgeText.normalize(review.getSellerReplyBody())));
+        }
+        return out;
+    }
+
+    /** The provenance sentence of a reply read off the channel. */
+    public static final String CHANNEL_REPLY_PROVENANCE = "리뷰 답글 · 채널에 등록된 답글";
 
     private Indexed indexed(ReviewReplyApproval approval, ReviewReplyDraft draft, Review review, Set<String> reported) {
         if (!isAnswer(draft.getAuthorKind()) || approval.getApprovedFingerprint() == null

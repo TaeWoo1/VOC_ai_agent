@@ -158,4 +158,24 @@ public class Review extends BaseEntity {
      */
     @Column(name = "acquisition_sync_job_id")
     private UUID acquisitionSyncJobId;
+
+    /**
+     * The seller's own published reply, as the channel shows it — read by a bounded enrichment, because the export
+     * says only that a reply exists. Null means «not read», never «no reply»; {@link #replyState} says whether one
+     * exists. Never a draft, never AI text: only what was read off the channel.
+     */
+    @Column(name = "seller_reply_body", columnDefinition = "text")
+    private String sellerReplyBody;
+
+    /** When the channel says the reply was posted, if the reading carried it. */
+    @Column(name = "seller_reply_at")
+    private Instant sellerReplyAt;
+
+    /** When the reply text was read. */
+    @Column(name = "seller_reply_observed_at")
+    private Instant sellerReplyObservedAt;
+
+    /** Which reading produced it — e.g. {@code NAVER_REVIEW_DETAIL_V1}. */
+    @Column(name = "seller_reply_source", length = 60)
+    private String sellerReplySource;
 }

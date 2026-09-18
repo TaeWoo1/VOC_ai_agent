@@ -142,13 +142,39 @@ public class LearnedKnowledgeService {
                 .filter(r -> ReviewReplyAdapter.isAnswer((String) r[2]) && r[3] != null && r[3].equals(r[4]))
                 .filter(r -> !synthetic(orgId, (UUID) r[5]))
                 .toList();
-        List<Example> examples = rows.stream().limit(EXAMPLES)
+        // Replies read off the channel onto the canonical review (NAVER Review Reply Enrichment), the same set the
+        // Spine lists — a review whose approved reply is already counted is not counted twice.
+        java.util.Set<UUID> approvedReviews = new java.util.HashSet<>(em.createQuery("""
+                        select a.reviewId from ReviewReplyApproval a where a.orgId = :org and a.state = :approved
+                        """, UUID.class)
+                .setParameter("org", orgId).setParameter("approved", ReviewReplyApprovalState.APPROVED)
+                .getResultList());
+        List<Object[]> channel = em.createQuery("""
+                        select r.id, r.sellerReplyBody, r.productId, r.rating,
+                               coalesce(r.sellerReplyAt, r.sellerReplyObservedAt)
+                        from Review r where r.orgId = :org and r.sellerReplyBody is not null
+                        order by r.sellerReplyObservedAt desc
+                        """, Object[].class)
+                .setParameter("org", orgId).getResultList().stream()
+                .filter(r -> !approvedReviews.contains((UUID) r[0]) && !synthetic(orgId, (UUID) r[2]))
+                .toList();
+        List<Example> examples = new java.util.ArrayList<>(rows.stream().limit(EXAMPLES)
                 .map(r -> new Example(r[6] == null ? "리뷰 답글" : "리뷰 답글 · 별점 " + r[6] + "점",
                         excerpt((String) r[1]), "리뷰 답글 · 판매자가 승인한 답글", productName(orgId, (UUID) r[5]),
                         dateOf((Instant) r[0])))
-                .toList();
+                .toList());
+        channel.stream().limit(Math.max(0, EXAMPLES - examples.size()))
+                .forEach(r -> examples.add(new Example(r[3] == null ? "리뷰 답글" : "리뷰 답글 · 별점 " + r[3] + "점",
+                        excerpt((String) r[1]),
+                        com.sellerops.knowledge.spine.adapter.ReviewReplyAdapter.CHANNEL_REPLY_PROVENANCE,
+                        productName(orgId, (UUID) r[2]), dateOf((Instant) r[4]))));
+        Instant latest = rows.isEmpty() ? null : (Instant) rows.get(0)[0];
+        if (!channel.isEmpty() && channel.get(0)[4] != null
+                && (latest == null || ((Instant) channel.get(0)[4]).isAfter(latest))) {
+            latest = (Instant) channel.get(0)[4];
+        }
         return new Source(HistorySource.PAST_REVIEW_REPLY.name(), HistorySource.PAST_REVIEW_REPLY.labelKo(),
-                rows.size(), rows.isEmpty() ? null : dateOf((Instant) rows.get(0)[0]), examples);
+                rows.size() + channel.size(), dateOf(latest), List.copyOf(examples));
     }
 
     /** Products the channel told us about: a read 상세페이지, or stated facts. Counted by product, not by row. */

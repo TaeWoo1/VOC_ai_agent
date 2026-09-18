@@ -63,7 +63,7 @@ public final class ChannelHistoryCapability {
             new Row("NAVER", HistorySource.PAST_INQUIRY_ANSWER, Availability.LEARNED,
                     "네이버에 등록하신 문의 답변을 가져와 비슷한 문의에 참고합니다."),
             new Row("NAVER", HistorySource.PAST_REVIEW_REPLY, Availability.SCREEN_UNPROVEN,
-                    "네이버는 리뷰 답글 내용을 API나 내려받기 파일로 주지 않아 아직 가져오지 못합니다."),
+                    "네이버는 리뷰 답글 내용을 API나 내려받기 파일로 주지 않아, 판매자센터의 리뷰 상세에서 읽어 옵니다."),
             new Row("NAVER", HistorySource.PRODUCT_DETAIL, Availability.LEARNED,
                     "상품 상세페이지의 글과 옵션을 상품별로 읽어 둡니다. 글 대신 이미지로 된 상세페이지는 읽지 못합니다."),
             new Row("CAFE24", HistorySource.PAST_INQUIRY_ANSWER, Availability.NOT_PROMOTED,

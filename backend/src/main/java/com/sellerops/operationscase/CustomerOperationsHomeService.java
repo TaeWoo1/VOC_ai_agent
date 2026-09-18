@@ -159,7 +159,7 @@ public class CustomerOperationsHomeService {
         List<CustomerOperationsHomeView.DecisionRow> rows = waiting.stream().limit(MAX_ROWS).map(c -> {
             Subject subject = subject(c);
             return new CustomerOperationsHomeView.DecisionRow(c.getId(), c.getSubjectKind().name(),
-                    channelName(channelById, c.getChannelId()), subject.title(), subject.rating(), c.getReasonNote(),
+                    channelName(channelById, c.getChannelId()), subject.title(), subject.rating(), CaseReason.noteFor(c),
                     c.getSummary(),
                     c.getRecommendedActionType() == null ? null : c.getRecommendedActionType().name(),
                     c.getRecommendedAction(), missing(c.getMissingInformation()),
@@ -203,7 +203,7 @@ public class CustomerOperationsHomeService {
                     return new CustomerOperationsHomeView.HandledRow(c.getId(), c.getSubjectKind().name(),
                             channelName(channelById, c.getChannelId()), subject.title(), subject.rating(),
                             c.getDisposition().name(), c.getDecidedBy() == null ? null : c.getDecidedBy().name(),
-                            c.getReasonNote(), c.getSummary(), verifyingIds.contains(c.getId()), linkOf(c));
+                            CaseReason.noteFor(c), c.getSummary(), verifyingIds.contains(c.getId()), linkOf(c));
                 }).toList();
         long checked = cases.countByOrgIdAndResponsibilityIdAndCaseKindAndCreatedAtGreaterThanEqual(
                 orgId, r.getId(), OperationsCaseKind.CUSTOMER_WORK, since);
