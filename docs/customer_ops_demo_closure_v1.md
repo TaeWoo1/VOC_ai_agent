@@ -82,3 +82,20 @@ still be registered with the NAVER app (it was for the 08-22/08-26 proofs).
 - M1–M4 above: not run — each needs a fresh approval.
 - NAVER review reply text: not implemented — whether it can be read at all is exactly what M2 answers.
 - Decision Memory on a second similar case: covered offline (E); a live second case would come from M1's history.
+
+## 5. Live results (2026-09-18)
+
+**M1 — PASS.** One press of the seller path on a disposable clone: 2 NAVER list GETs (+ token exchange), 17 inquiries in
+the 90-day window (5 new/changed, 12 unchanged), remembered past answers 23 → 27. A later question sharing the stored
+question's key nouns («난연 소재 맞나요? 주방 쪽에 쓰려고 합니다») retrieves the 09-05 seller answer with provenance
+「문의 답변 · 채널에 등록된 답변」; the same question on another product retrieves nothing. Looser paraphrases sharing
+one noun are `NO_RELEVANT_EVIDENCE` under lexical retrieval (M1 made no model calls, so the pilot semantic retrieval
+was off). The three NAVER inquiries that were unanswered on 09-03/09-05 are now answered on the channel — M4 needs a
+new candidate.
+
+**M2 — PASS.** Row model of the default period: 48 rows, 24 attachments on 23 rows. Each attachment entry carries
+`attachUrl` and `attachPath` (https, `phinf.pstatic.net`, jpg/jpeg), `reviewAttachmentType` (`I` on all 24), and
+size/name/description keys. No row in the period had `hasComment = true`, and no row key holds reply text — the list
+model exposes only the boolean. Implemented: `NAVER_REVIEW_ATTACH_URL_KEY = "attachUrl"`, `I` → IMAGE, anything else
+UNKNOWN. **NAVER past review reply text: UNAVAILABLE from the list surface** (API: none; export: flag and date only;
+list model: flag only). Unobserved: whether an answered row adds a field, and the detail modal (a click, out of scope).

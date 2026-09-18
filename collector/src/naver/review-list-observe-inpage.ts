@@ -38,13 +38,16 @@ export const NAVER_REVIEW_MAX_ROWS = 500;
 /**
  * The property of one `reviewAttaches` entry that holds the attachment's own address.
  *
- * **Null until a READ-ONLY census of the live row model names it** (Customer Ops Demo Closure v1). The 2026-09-17
- * discovery recorded that `reviewAttaches` is the row's media list and counted it; it never recorded an entry's
- * shape. A guessed key would store whatever string sat there as if it were the photo, so while this is null the
- * reader projects no addresses at all — the rows carry the count exactly as before and the backend treats the
- * addresses as «not read», which is what they are.
+ * **Named by the READ-ONLY census of the live row model (M2, 2026-09-18, approved; 48 rows, 24 attachments).** Every
+ * entry carried `attachUrl` and `attachPath`, both https on `phinf.pstatic.net` with a jpg/jpeg path; `attachUrl` is
+ * the one this reader projects. The same census found `reviewAttachmentType = "I"` on all 24 — so `I` reads as an
+ * image and any other value as UNKNOWN (a video code was never observed, so none is assumed). No row in that period
+ * had `hasComment = true`, and the row model carries no reply-text field at all; seller reply text is not read here.
  */
-export const NAVER_REVIEW_ATTACH_URL_KEY: string | null = null;
+export const NAVER_REVIEW_ATTACH_URL_KEY: string | null = "attachUrl";
+
+/** The census-observed value of `reviewAttachmentType` that means a photo. */
+export const NAVER_REVIEW_ATTACH_IMAGE_TYPE = "I";
 
 /**
  * Signed in, on the Seller Center host, with no password field on the page. Host first: a sign-in redirect lands on
@@ -118,8 +121,7 @@ export function buildNaverReviewListReadScript(): string {
       var entry = list[a];
       var url = entry && typeof entry[ATTACH_URL_KEY] === 'string' ? entry[ATTACH_URL_KEY] : null;
       if (!url || url.indexOf('https://') !== 0) { return null; }
-      var path = url.split('?')[0].toLowerCase();
-      var kind = /\.(jpe?g|png|gif|webp)$/.test(path) ? 'IMAGE' : /\.(mp4|mov|m3u8)$/.test(path) ? 'VIDEO' : 'UNKNOWN';
+      var kind = entry.reviewAttachmentType === ${JSON.stringify(NAVER_REVIEW_ATTACH_IMAGE_TYPE)} ? 'IMAGE' : 'UNKNOWN';
       out.push({ url: url, kind: kind });
     }
     return out;
