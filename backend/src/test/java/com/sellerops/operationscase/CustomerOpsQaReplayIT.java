@@ -206,6 +206,82 @@ class CustomerOpsQaReplayIT {
         System.out.println();
     }
 
+    /**
+     * <b>Past Answer Prefill v1 — one historical question arrives again.</b> 「기존 원터치 디스펜서 제품의 투명한 부분과 아래쪽
+     * 보라색 부분은 어떻게 분리하나요?」 was answered on the channel, and that answer is in answer memory. Its product has no
+     * product knowledge and no company rule speaks to it, so the case should still ask — starting from that answer.
+     *
+     * <p>{@code QA_REPLAY_PREFILL_DRY=true} stops after the assessment (no model, no case processing): the same
+     * assessor the investigation and the draft read, printed as its basis and precedent. The Teach step itself is done
+     * by the seller in the browser, not here.
+     */
+    @Test
+    @EnabledIfEnvironmentVariable(named = "QA_REPLAY_STEP", matches = "prefill")
+    void pastAnswerPrefill() {
+        UUID runId = jdbc.queryForObject("""
+                select r.id from responsibility_run r join responsibility s on s.id = r.responsibility_id
+                where s.org_id = ? order by r.window_start desc, r.created_at desc limit 1
+                """, UUID.class, ORG);
+        UUID device = jdbc.queryForObject("""
+                select id from helper_devices where org_id = ? and revoked_at is null order by created_at desc limit 1
+                """, UUID.class, ORG);
+        // The original row is not in every clone, and it was bound to its product after the fact (no source ref), so
+        // the question arrives as a customer would send it today: its words — read from the source database into a
+        // local file, never committed — on the product's NAVER listing.
+        String body;
+        try {
+            body = java.nio.file.Files.readString(java.nio.file.Path.of(System.getenv("QA_REPLAY_PREFILL_BODY_FILE"))).strip();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+        String listing = jdbc.queryForObject("""
+                select cp.external_product_id from channel_products cp join channels c on c.id = cp.channel_id
+                join answer_memory m on m.product_id = cp.product_id
+                where m.org_id = ? and m.id::text like '17dd221a%' and c.code = 'NAVER'
+                """, String.class, ORG);
+        deliverInquiry(device, runId, new NaverProductInquiryObservationRequest.Inquiry(PREFILL_REPLAY_ID,
+                java.time.OffsetDateTime.now(KST).toString(), body, false, false, listing));
+        UUID replayed = jdbc.queryForObject("select id from inquiries where org_id = ? and external_id = ?",
+                UUID.class, ORG, "naver-qna:" + PREFILL_REPLAY_ID);
+        com.sellerops.inquiry.draft.InquiryKnowledgeAssessor.Assessment a = assessor.assess(ORG,
+                inquiries.findById(replayed).orElseThrow(), com.sellerops.order.fact.OrderFactLookup.STORED_ONLY);
+        System.out.printf("%n  PREFILL assessment: basis=%s productLane=%s policyLane=%s passages=%s precedent=%s subject=%s%n",
+                a.basis(), a.retrieved().productOutcome(), a.retrieved().policyOutcome(),
+                a.retrieved().passages().stream().map(p -> p.scope().name()).toList(),
+                a.gap() == null ? null : a.gap().precedentMemoryId(), a.missingSubject());
+        if ("true".equals(System.getenv("QA_REPLAY_PREFILL_DRY"))) {
+            String taught = System.getenv("QA_REPLAY_PREFILL_DRY_TEACH");
+            if (taught != null && !taught.isBlank()) {
+                candidates.teach(ORG, "PRODUCT", a.productId(), a.missingSubject(), null, taught,
+                        com.sellerops.knowledge.org.OrgKnowledgeType.GENERAL_CS_FAQ, null, "QA dry teach");
+                var after = assessor.assess(ORG, inquiries.findById(replayed).orElseThrow(),
+                        com.sellerops.order.fact.OrderFactLookup.STORED_ONLY);
+                System.out.printf("  PREFILL after dry teach: basis=%s productLane=%s passages=%s precedent=%s%n",
+                        after.basis(), after.retrieved().productOutcome(),
+                        after.retrieved().passages().stream().map(x -> x.scope().name()).toList(),
+                        after.gap() == null ? null : after.gap().precedentMemoryId());
+            }
+            return;
+        }
+        OperationsCaseProcessor.Report p = processor.process(runId, () -> false);
+        System.out.printf("  PREFILL process: opened=%d investigated=%d failed=%d drafts=%d%n", p.opened(),
+                p.investigated(), p.investigationFailed(), p.draftsPrepared());
+        CaseDetailView v = print("PREFILL " + PREFILL_REPLAY_ID,
+                caseFor("INQUIRY", "inquiries", "naver-qna:" + PREFILL_REPLAY_ID));
+        if (v != null && v.gap() != null) {
+            System.out.printf("    prefill: %s%n", v.gap().prefill() == null ? null
+                    : v.gap().prefill().strengthKo() + " · " + v.gap().prefill().answeredOn() + " · "
+                            + v.gap().prefill().text().length() + " chars");
+        }
+        System.out.println();
+    }
+
+    static final String PREFILL_REPLAY_ID = "900000000005";
+
+    @Autowired com.sellerops.inquiry.draft.InquiryKnowledgeAssessor assessor;
+    @Autowired com.sellerops.inquiry.InquiryRepository inquiries;
+    @Autowired com.sellerops.knowledge.candidate.KnowledgeCandidateService candidates;
+
     // ── the device's side of the job, through the production services ───────────────────────────────────────────
 
     private void deliverReviews(UUID device, UUID runId, List<NaverReviewObservationRequest.Review> rows) {
