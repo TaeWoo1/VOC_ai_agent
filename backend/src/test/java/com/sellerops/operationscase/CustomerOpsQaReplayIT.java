@@ -184,6 +184,28 @@ class CustomerOpsQaReplayIT {
         System.out.println();
     }
 
+    /**
+     * <b>Step 4 — F with vision.</b> The photo review arrives again under a fresh id with the vision capability on for
+     * this run: one CDN fetch and one vision call for its one photo, then the investigation that reads what was seen.
+     */
+    @Test
+    @EnabledIfEnvironmentVariable(named = "QA_REPLAY_STEP", matches = "vision")
+    void photoReviewWithVision() {
+        UUID runId = jdbc.queryForObject("""
+                select r.id from responsibility_run r join responsibility s on s.id = r.responsibility_id
+                where s.org_id = ? order by r.window_start desc, r.created_at desc limit 1
+                """, UUID.class, ORG);
+        UUID device = jdbc.queryForObject("""
+                select id from helper_devices where org_id = ? and revoked_at is null order by created_at desc limit 1
+                """, UUID.class, ORG);
+        deliverReviews(device, runId, List.of(reviewRow("fba04785-6ad0-441c-8076-791c63b6429c", "9000000003")));
+        OperationsCaseProcessor.Report p = processor.process(runId, () -> false);
+        System.out.printf("%n  F vision process: opened=%d ruleDecided=%d investigated=%d failed=%d%n", p.opened(),
+                p.ruleDecided(), p.investigated(), p.investigationFailed());
+        print("F vision 9000000003", caseFor("REVIEW", "reviews", "9000000003"));
+        System.out.println();
+    }
+
     // ── the device's side of the job, through the production services ───────────────────────────────────────────
 
     private void deliverReviews(UUID device, UUID runId, List<NaverReviewObservationRequest.Review> rows) {
