@@ -110,6 +110,12 @@ public class KnowledgeBootstrapService {
     private final Clock clock;
     private final int historyDays;
     private final int maxProducts;
+    /**
+     * On-sale catalogue products whose 상세페이지 is learned after the discussed ones (Catalogue Investigation v1,
+     * product-owner 2026-09-18: a connected seller's active catalogue should have its detail before a customer's
+     * catalogue question depends on it). 0 when unset — a hand-wired service learns exactly what it did before.
+     */
+    private int maxCatalogueProducts;
 
     @Autowired
     public KnowledgeBootstrapService(SellerAccountRepository accounts, ChannelRepository channels,
@@ -135,6 +141,12 @@ public class KnowledgeBootstrapService {
         this.clock = clock;
         this.historyDays = Math.max(1, historyDays);
         this.maxProducts = Math.max(0, maxProducts);
+    }
+
+    @Autowired
+    void setMaxCatalogueProducts(
+            @Value("${sellerops.knowledge.bootstrap.max-catalogue-products:60}") int maxCatalogueProducts) {
+        this.maxCatalogueProducts = Math.max(0, maxCatalogueProducts);
     }
 
     /** Learn what this organisation's channel history can teach. Every step is best-effort; none throws. */
@@ -218,7 +230,12 @@ public class KnowledgeBootstrapService {
         if (detail == null || !detail.enabled()) {
             return new ProductDetail(false, 0, 0, 0, 0, 0, 0, 0);
         }
-        List<UUID> candidates = discussedProducts(orgId);
+        List<UUID> candidates = new java.util.ArrayList<>(discussedProducts(orgId));
+        for (UUID id : onSaleWithoutDetail(orgId)) {
+            if (!candidates.contains(id)) {
+                candidates.add(id);
+            }
+        }
         int indexed = 0;
         int imageOnly = 0;
         int empty = 0;
@@ -258,6 +275,43 @@ public class KnowledgeBootstrapService {
             }
         }
         return new ProductDetail(true, considered, indexed, imageOnly, empty, fresh, noListing, failed);
+    }
+
+    /**
+     * The seller's on-sale catalogue that has no 상세페이지 text yet — named products with a listing the channel says is
+     * on sale, in name order, at most {@code max-catalogue-products}. Not a sweep: the trigger's own staleness gate and
+     * attempt memory still decide whether each one is read, and a product whose detail exists is not listed at all.
+     */
+    List<UUID> onSaleWithoutDetail(UUID orgId) {
+        if (maxCatalogueProducts <= 0) {
+            return List.of();
+        }
+        List<UUID> withDetail = em.createQuery(
+                        "select s.productId from ProductKnowledgeSource s where s.orgId = :org and s.authoredOrigin = :origin",
+                        UUID.class)
+                .setParameter("org", orgId)
+                .setParameter("origin", com.sellerops.product.library.KnowledgeAuthorship.SELLER_AUTHORED_CHANNEL_CONTENT)
+                .getResultList();
+        List<com.sellerops.product.ChannelProduct> listings = em.createQuery(
+                        "select cp from ChannelProduct cp where cp.orgId = :org",
+                        com.sellerops.product.ChannelProduct.class)
+                .setParameter("org", orgId).getResultList();
+        java.util.Set<UUID> onSale = new java.util.HashSet<>();
+        for (com.sellerops.product.ChannelProduct l : listings) {
+            if (com.sellerops.product.SellingStatus.normalize(l.getSellingStatus())
+                    == com.sellerops.product.SellingStatus.SELLING) {
+                onSale.add(l.getProductId());
+            }
+        }
+        return onSale.stream()
+                .filter(id -> !withDetail.contains(id))
+                .map(id -> products.findById(id).filter(p -> orgId.equals(p.getOrgId())).orElse(null))
+                .filter(p -> p != null && OperatorProductName.displayNameOrNull(p) != null)
+                .sorted(java.util.Comparator.comparing((com.sellerops.product.Product p) -> p.getName())
+                        .thenComparing(p -> p.getId().toString()))
+                .map(com.sellerops.product.Product::getId)
+                .limit(maxCatalogueProducts)
+                .toList();
     }
 
     /**

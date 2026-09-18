@@ -311,8 +311,15 @@ public class CaseInvestigationTools {
             // A question about 배송·교환·결제·증빙 is answered by a company rule; anything else about a named product
             // is that product's knowledge. The seller can still choose the other scope when they answer.
             String scope = !missing ? null : a.productId() == null || a.asked() != null ? "ORG" : "PRODUCT";
+            // A catalogue question the catalogue answered cites the product that answers it, labelled as ANOTHER
+            // product; a catalogue question it could not answer is asked of the seller as a catalogue fact.
+            List<KnowledgeUse> evidence = new java.util.ArrayList<>(catalogueUses(a.catalogue()));
+            evidence.addAll(uses(a.spine().evidence()));
+            if (missing && a.catalogue() != null) {
+                scope = "ORG";
+            }
             return new KnowledgeAssessment(a.basis().name(), subject, scope,
-                    a.asked() == null ? null : a.asked().name(), uses(a.spine().evidence()),
+                    a.asked() == null ? null : a.asked().name(), evidence,
                     uses(investigationContext(a.spine())), a.spine().conflicts());
         }
 
@@ -462,6 +469,22 @@ public class CaseInvestigationTools {
         return found.context().stream()
                 .filter(e -> e.sourceType() != SpineSourceType.REVIEW_DECISION
                         && e.sourceType() != SpineSourceType.TRIAGE_CORRECTION)
+                .toList();
+    }
+
+    /** The catalogue statements that answered a catalogue question, as knowledge the investigator may cite. */
+    static List<KnowledgeUse> catalogueUses(com.sellerops.product.catalogue.CatalogueInvestigator.Finding finding) {
+        if (finding == null || !finding.grounds()) {
+            return List.of();
+        }
+        return finding.matches().stream().limit(3)
+                .map(m -> new KnowledgeUse("CATALOGUE:" + m.sourceId(), SpineSourceType.PRODUCT_FACT,
+                        com.sellerops.knowledge.spine.KnowledgeAuthority.PRODUCT_DETAIL.labelKo(),
+                        com.sellerops.knowledge.spine.KnowledgeAuthority.PRODUCT_DETAIL.rank(),
+                        m.current() ? "PRODUCT" : "CATALOGUE",
+                        m.current() ? "채널 상품 정보" : "판매 중인 다른 상품 · " + m.productName(),
+                        m.productName(), excerpt(m.text()),
+                        m.capturedAt() == null ? null : m.capturedAt().atZone(KST).toLocalDate()))
                 .toList();
     }
 

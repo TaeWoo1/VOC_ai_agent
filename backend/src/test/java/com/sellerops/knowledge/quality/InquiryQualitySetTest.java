@@ -63,6 +63,7 @@ import com.sellerops.product.ProductFact;
 import com.sellerops.product.ProductFactRepository;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductVariantRepository;
+import com.sellerops.product.catalogue.CatalogueInvestigator;
 import com.sellerops.product.library.KnowledgeSourceType;
 import com.sellerops.product.library.ProductKnowledgeChunkRepository;
 import com.sellerops.product.library.ProductKnowledgeIndexer;
@@ -151,6 +152,7 @@ class InquiryQualitySetTest {
     @Autowired ChannelRepository channels;
     @Autowired com.sellerops.order.ChannelOrderRepository channelOrders;
     @Autowired com.sellerops.knowledge.semantic.KnowledgeEmbeddingRepository embeddingRows;
+    @Autowired com.sellerops.product.ChannelProductRepository listingRows;
 
     private UUID org;
     private final Map<String, UUID> productIds = new LinkedHashMap<>();
@@ -189,11 +191,23 @@ class InquiryQualitySetTest {
                         KnowledgeSourceType.valueOf(note.path("type").asText()), note.path("title").asText(),
                         note.path("body").asText(), null), UUID.randomUUID(), "판매자");
             }
+            for (JsonNode listing : product.path("listings")) {
+                com.sellerops.product.ChannelProduct cp = new com.sellerops.product.ChannelProduct();
+                cp.setOrgId(org);
+                cp.setProductId(productId);
+                cp.setChannelId(channelId(listing.path("channel").asText()));
+                cp.setExternalProductId("quality-" + product.path("key").asText());
+                cp.setChannelProductName(product.path("name").asText());
+                cp.setSellingStatus(listing.path("status").asText());
+                cp.setObservedAt(Instant.parse("2026-09-15T00:00:00Z"));
+                cp.setLastSeenAt(Instant.parse("2026-09-15T00:00:00Z"));
+                listingRows.save(cp);
+            }
             for (JsonNode fact : product.path("facts")) {
                 ProductFact f = new ProductFact();
                 f.setOrgId(org);
                 f.setProductId(productId);
-                f.setFactKey(FactKeys.of(FactKeys.SPEC, fact.path("key").asText()));
+                f.setFactKey(FactKeys.of(fact.path("ns").asText(FactKeys.SPEC), fact.path("key").asText()));
                 f.setFactValue(fact.path("value").asText());
                 f.setUnit(fact.hasNonNull("unit") ? fact.path("unit").asText() : null);
                 f.setSource("NAVER:PRODUCT_API:v1");
@@ -221,6 +235,7 @@ class InquiryQualitySetTest {
                         (orgId, channelCode, accountId, rows) -> com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH));
         spine = new KnowledgeSpineService(adapters(), products, new SourceRefResolver(em), retriever);
         assessor = new InquiryKnowledgeAssessor(retriever, spine, variants, products);
+        assessor.setCatalogue(new CatalogueInvestigator(em, channels, null));
         candidates = new KnowledgeCandidateService(candidateRows, memories, productSources,
                 new ProductKnowledgeIndexer(productChunks), products, orgSources, policies, variants);
         draftService = new InquiryReplyDraftService(workItems, draftRows);
@@ -228,7 +243,8 @@ class InquiryQualitySetTest {
 
     /** What one retrieval configuration decided over the whole set. */
     record Axes(int total, int withRequired, int retrievalHits, int wrongProduct, int wrongPolicy, int basisCorrect,
-                int falseGrounding, int gapNamed, int gapExpected, List<String> misses) {
+                int falseGrounding, int gapNamed, int gapExpected, int catalogueExpected, int catalogueCorrect,
+                int catalogueLeak, List<String> misses) {
 
         void print(String label) {
             System.out.printf("%n  inquiry-quality/v1 — %s%n"
@@ -239,10 +255,12 @@ class InquiryQualitySetTest {
                             + "    answer-basis correct   %d/%d (%.2f)%n"
                             + "    false grounding        %d%n"
                             + "    gap named correctly    %d/%d%n"
+                            + "    catalogue source exact %d/%d%n"
+                            + "    catalogue leakage      %d%n"
                             + "    misses: %s%n%n",
                     label, total, retrievalHits, withRequired, ratio(retrievalHits, withRequired), wrongProduct,
                     wrongPolicy, basisCorrect, total, ratio(basisCorrect, total), falseGrounding, gapNamed,
-                    gapExpected, misses);
+                    gapExpected, catalogueCorrect, catalogueExpected, catalogueLeak, misses);
         }
     }
 
@@ -259,6 +277,9 @@ class InquiryQualitySetTest {
         assertThat(a.falseGrounding()).as("a question nothing was written about")
                 .isLessThanOrEqualTo(MAX_FALSE_GROUNDING);
         assertThat(ratio(a.basisCorrect(), a.total())).isGreaterThanOrEqualTo(MIN_BASIS_ACCURACY);
+        assertThat(a.catalogueCorrect()).as("a catalogue question is answered from exactly the product that states it")
+                .isEqualTo(a.catalogueExpected());
+        assertThat(a.catalogueLeak()).as("another listing never answers a question it does not answer").isZero();
     }
 
     /**
@@ -304,6 +325,9 @@ class InquiryQualitySetTest {
         int gapNamed = 0;
         int gapExpected = 0;
         int falseGrounding = 0;
+        int catalogueExpected = 0;
+        int catalogueCorrect = 0;
+        int catalogueLeak = 0;
         List<String> misses = new ArrayList<>();
 
         for (JsonNode c : doc.path("cases")) {
@@ -353,6 +377,22 @@ class InquiryQualitySetTest {
             } else {
                 misses.add(id + " basis:" + a.basis());
             }
+            // The catalogue axis: exactly the named product answers, or nothing from the catalogue grounds at all.
+            String expectedCatalogue = c.path("expectCatalogueProduct").asText(null);
+            java.util.Set<UUID> answeredBy = a.catalogue() == null || !a.catalogue().grounds() ? java.util.Set.of()
+                    : a.catalogue().matches().stream().map(CatalogueInvestigator.Statement::productId)
+                            .collect(java.util.stream.Collectors.toSet());
+            if (expectedCatalogue != null) {
+                catalogueExpected++;
+                if (answeredBy.equals(java.util.Set.of(productIds.get(expectedCatalogue)))) {
+                    catalogueCorrect++;
+                } else {
+                    misses.add(id + " catalogue:" + answeredBy);
+                }
+            } else if (!answeredBy.isEmpty()) {
+                catalogueLeak++;
+                misses.add(id + " catalogue-leak:" + answeredBy);
+            }
             String expectedSubject = c.path("expectedMissingSubject").asText(null);
             if (expectedSubject != null) {
                 gapExpected++;
@@ -364,7 +404,8 @@ class InquiryQualitySetTest {
             }
         }
         return new Axes(doc.path("cases").size(), withRequired, retrievalHits, wrongProduct, wrongPolicy,
-                basisCorrect, falseGrounding, gapNamed, gapExpected, misses);
+                basisCorrect, falseGrounding, gapNamed, gapExpected, catalogueExpected, catalogueCorrect, catalogueLeak,
+                misses);
     }
 
     /** Rebuild the three lanes with the production-candidate semantic retrieval, over the same seeded corpus. */
@@ -402,6 +443,7 @@ class InquiryQualitySetTest {
                         (orgId, channelCode, accountId, rows) -> com.sellerops.coverage.ChannelDataState.OBSERVED_FRESH));
         spine = new KnowledgeSpineService(adapters(), products, new SourceRefResolver(em), retriever);
         assessor = new InquiryKnowledgeAssessor(retriever, spine, variants, products);
+        assessor.setCatalogue(new CatalogueInvestigator(em, channels, null));
     }
 
     private static String requireKey(String name) {
@@ -491,6 +533,11 @@ class InquiryQualitySetTest {
             }
             drafted++;
             String body = view.draft().comments() == null ? "" : view.draft().comments();
+            if (c.hasNonNull("expectCatalogueProduct")) {
+                // Printed, not asserted: what a catalogue-grounded reply actually says, beside what it cited.
+                findings.add(id + " catalogue draft 「" + body + "」 cites "
+                        + view.evidence().stream().map(e -> e.scopeLabel() + ":" + e.title()).toList());
+            }
             for (String claim : strings(c.path("mustNotClaim"))) {
                 java.util.regex.Matcher m = claimPattern(claim).matcher(body);
                 if (m.find()) {
@@ -539,6 +586,16 @@ class InquiryQualitySetTest {
                 System.getenv().getOrDefault("SELLEROPS_AGENT_DRAFT_MODEL", "gpt-5-2025-08-07"), key, 4000, "low");
         return new AgentDraftService(properties, new JdkAgentLlmTransport(),
                 new AgentCapabilityAccess("ALLOW_LIST", mock(com.sellerops.selleraccount.SellerAccountRepository.class)));
+    }
+
+    private UUID channelId(String code) {
+        return channels.findByCode(code).map(com.sellerops.channel.Channel::getId).orElseGet(() -> {
+            com.sellerops.channel.Channel c = new com.sellerops.channel.Channel();
+            c.setCode(code);
+            c.setNameKo(code);
+            c.setStatus(com.sellerops.channel.ChannelStatus.CONNECTED);
+            return channels.save(c).getId();
+        });
     }
 
     private Inquiry seedInquiry(UUID productId, String title, String body) {

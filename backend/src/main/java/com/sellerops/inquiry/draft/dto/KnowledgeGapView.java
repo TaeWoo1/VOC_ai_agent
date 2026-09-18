@@ -44,7 +44,21 @@ import java.util.UUID;
 public record KnowledgeGapView(UUID productId, String topic, List<String> topics, String missingSubject,
                                String productOutcome, String policyOutcome, String applicability,
                                UUID variantId, boolean policyDeclaresTopic, UUID candidateId,
-                               boolean previouslyAnswered, String askedSubject) {
+                               boolean previouslyAnswered, String askedSubject, String catalogueChecked) {
+
+    public KnowledgeGapView(UUID productId, String topic, List<String> topics, String missingSubject,
+                            String productOutcome, String policyOutcome, String applicability, UUID variantId,
+                            boolean policyDeclaresTopic, UUID candidateId, boolean previouslyAnswered,
+                            String askedSubject) {
+        this(productId, topic, topics, missingSubject, productOutcome, policyOutcome, applicability, variantId,
+                policyDeclaresTopic, candidateId, previouslyAnswered, askedSubject, null);
+    }
+
+    /** What the seller's catalogue was checked for and did not state, when this was a catalogue question. */
+    public KnowledgeGapView catalogueChecked(String sentence) {
+        return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome, policyOutcome,
+                applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, askedSubject, sentence);
+    }
 
     /**
      * The noun the customer asked about, for a gap the seller can close.
@@ -56,19 +70,21 @@ public record KnowledgeGapView(UUID productId, String topic, List<String> topics
      */
     public KnowledgeGapView asking(String subject) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome, policyOutcome,
-                applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, subject);
+                applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, subject, catalogueChecked);
     }
 
     /** The same gap, now carrying the 확인 필요 row it was filed as. */
     public KnowledgeGapView filedAs(UUID candidateId) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
-                policyOutcome, applicability, variantId, policyDeclaresTopic, candidateId, false, askedSubject);
+                policyOutcome, applicability, variantId, policyDeclaresTopic, candidateId, false, askedSubject,
+                catalogueChecked);
     }
 
     /** The same gap, on a question this seller has already answered once. Nothing is filed for it. */
     public KnowledgeGapView answeredBefore() {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
-                policyOutcome, applicability, variantId, policyDeclaresTopic, null, true, askedSubject);
+                policyOutcome, applicability, variantId, policyDeclaresTopic, null, true, askedSubject,
+                catalogueChecked);
     }
 
     public static KnowledgeGapView of(InquiryEvidenceRetriever.InquiryEvidence retrieved,

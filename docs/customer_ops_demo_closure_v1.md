@@ -130,3 +130,65 @@ another product; another organisation gets 404 for the product, nothing company-
 company knowledge, so the draft path returned `NO_ANSWER_BASIS` and made no model call. The second read could not
 re-see the question (the list is filtered by posting time), so «unanswered» stands as of 15:30:08 KST; the send path
 re-reads the answer state immediately before any write.
+
+## §6 Catalogue Investigation v1 — ASK_SELLER only after the seller's own catalogue (2026-09-18)
+
+**Why.** Inquiry `naver-qna:689162087` (「종이컵 9oz 크기도 디스펜서 제품 판매하시나요?」) went straight to
+`NO_ANSWER_BASIS`. The draft path only read the listing the question was asked on. But the customer was asking what the
+seller *sells*, and that answer lives in the rest of the catalogue. Product-owner decision: ASK_SELLER is the last resort.
+
+**Investigation order.** `InquiryKnowledgeAssessor` is the one assessment the draft writer and the case investigator
+both use. It now runs these steps in order:
+1. the product's own knowledge, facts, options and detail (unchanged);
+2. for a **catalogue question** only, a seller-wide catalogue search (`product/catalogue/CatalogueInvestigator`, read-only);
+3. the matching products' names, listing names, facts, options and indexed detail text, plus up to 3 missing detail-page
+   reads when the detail switch is on and the caller is the draft path;
+4. policy and past answers (unchanged);
+5. ASK_SELLER when nothing grounds.
+
+**What counts as a catalogue question** (`CatalogueQuestion`, deterministic, no model). All three must be present:
+- an availability verb from a closed list (판매·팔·구매·있나요·따로·별도·다른…);
+- a head noun that occurs in this seller's product names;
+- a target: a measure (9oz ≡ 9온스, compared numerically; 19oz ≠ 9oz), a colour from a closed list, or 「다른 크기/색상」.
+
+「이 디스펜서에 9온스 컵도 들어가나요?」 is a question about *this* product. It has no availability verb, so it is never
+answered from another listing.
+
+**What grounds.** Only a statement that meets all of these:
+- it is on a product whose own name contains the head;
+- the product states every catalogue word written directly before the head (「하향식 디스펜서」);
+- the statement names the asked value and does not negate it;
+- a listing of that product is **on sale now**.
+
+Statements on products not on sale, or with unknown status, are reported but never ground. The same goes for negated
+mentions (「9온스 컵은 사용할 수 없습니다」) and other values (「6.5온스 종이컵전용」). Organisation isolation holds in every
+predicate. A grounded draft shows the model `[판매 중인 다른 상품]` passages; prompt v10 forbids moving their figures onto
+the product the inquiry is about. Each citation is stored as `CATALOGUE_PRODUCT`, with the product as source and a
+`catalogue/{channel}/{field}@{date}` locator. A miss files one ORG 확인 필요 item, 「「9oz 디스펜서」를 판매하시는지 알려
+주세요.」, and the screen says what was checked.
+
+**Bootstrap.** `max-catalogue-products` (default 60) extends product-detail learning. It now covers on-sale catalogue
+products with no detail text yet, as well as the products customers wrote about. It uses the same one-request-per-product
+trigger and the same switch (still OFF by default).
+
+**Measured.**
+- Inquiry-quality set: 36 → 42 cases (Q37–Q42 are catalogue questions). Deterministic basis accuracy 38/42; before this
+  change it was 32/36 on the old set, and every earlier miss is unchanged.
+- Catalogue source exact 3/3, catalogue leakage 0, wrong-product 0.
+- Semantic arm: false grounding 0, catalogue exact, no leakage.
+- Live drafts (semantic): unsupported claims 0, refusals 12/12. The three catalogue-grounded drafts name the exact
+  on-sale product and promise no stock, price or delivery.
+- Real data (disposable clone of the dev DB, every connector OFF, draft model OFF, 0 marketplace calls): 689162087 checked
+  31 on-sale 「디스펜서」 products. None states 9oz; the only 6.5온스-only dispensers are ENDED Cafe24 listings. Result:
+  `NO_ANSWER_BASIS`, no model call, one ORG ask filed.
+- A second probe (「하향식 디스펜서도 판매하시나요? 블랙 색상으로요.」) first matched a black **cup collector** filed under
+  the 종이컵디스펜서 category. That defect is fixed: the head must be in the product name, and adjacent qualifiers must be
+  stated. After the fix it correctly asks the seller about 「블랙 하향식 디스펜서」.
+- Backend 4,358 tests, 0 failures. Marketplace calls 0 · WRITE 0 · migrations 0 ⇒ no evidence row.
+
+**Limits (not fixed).**
+- Colours and units come from closed lists. The head is one word; product-type synonyms are not bridged.
+- A size stated only in a picture is not read (image lane OFF).
+- Coupang listings have no selling status (`UNKNOWN`), so they never ground availability.
+- The 60-product bootstrap and lazy detail reads do nothing while `SELLEROPS_PRODUCT_DETAIL_ENRICHMENT_ENABLED` is OFF.
+  Turning it on means NAVER product-detail READs and needs its own approval.

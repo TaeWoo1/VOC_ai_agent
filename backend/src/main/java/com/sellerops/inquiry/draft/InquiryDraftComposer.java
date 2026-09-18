@@ -28,6 +28,7 @@ import com.sellerops.knowledge.style.AnswerStyleService;
 import com.sellerops.order.fact.OrderFact;
 import com.sellerops.organization.profile.SellerProfileService;
 import com.sellerops.product.ProductVariantRepository;
+import com.sellerops.product.catalogue.CatalogueInvestigator;
 import com.sellerops.product.detail.ProductDetailEnrichmentTrigger;
 import com.sellerops.product.detail.image.ProductDetailImageKnowledge;
 import com.sellerops.product.library.KnowledgeVariantScope;
@@ -257,15 +258,24 @@ public class InquiryDraftComposer {
         if (candidates == null || gap == null) {
             return gap;
         }
-        String subject = gap.missingSubject();
-        if (subject == null || subject.isBlank()
-                || !ABSENT.equals(gap.productOutcome()) || !ABSENT.equals(gap.policyOutcome())) {
+        // A catalogue question asks the seller a catalogue fact — whether they sell it — once their on-sale catalogue
+        // has been read and states nothing about it. The operating-rule lane has no say in that: a shipping policy
+        // that did not mention a 9oz dispenser is not why the seller is being asked about one.
+        boolean catalogue = gap.catalogueChecked() != null;
+        String subject = catalogue ? gap.askedSubject() : gap.missingSubject();
+        if (subject == null || subject.isBlank()) {
             return gap;
         }
-        String scope = gap.productId() == null ? "ORG" : "PRODUCT";
-        String question = "「" + subject + "」에 대해 고객에게 안내할 공식 기준이 필요합니다.";
+        if (!catalogue && (!ABSENT.equals(gap.productOutcome()) || !ABSENT.equals(gap.policyOutcome()))) {
+            return gap;
+        }
+        String scope = catalogue || gap.productId() == null ? "ORG" : "PRODUCT";
+        String question = catalogue
+                ? "「" + subject + "」" + objectParticle(subject) + " 판매하시는지 알려 주세요."
+                : "「" + subject + "」에 대해 고객에게 안내할 공식 기준이 필요합니다.";
         try {
-            KnowledgeCandidate filed = candidates.noteGap(orgId, scope, gap.productId(), subject, question);
+            UUID scopedProduct = "ORG".equals(scope) ? null : gap.productId();
+            KnowledgeCandidate filed = candidates.noteGap(orgId, scope, scopedProduct, subject, question);
             if (filed != null) {
                 return gap.filedAs(filed.getId());
             }
@@ -273,12 +283,21 @@ public class InquiryDraftComposer {
             // ask was already answered — a fact `noteGap` decides on and used to swallow. Read here so
             // the screen can stop telling a seller to add what they added (Inquiry Operations
             // Workspace v1 §6); one extra query, only on the path that filed nothing.
-            return candidates.alreadyAnswered(orgId, scope, gap.productId(), question)
+            return candidates.alreadyAnswered(orgId, scope, scopedProduct, question)
                     ? gap.answeredBefore() : gap;
         } catch (RuntimeException e) {
             // Enum-free and content-free: the draft is what the seller asked for, and it is already saved.
             return gap;
         }
+    }
+
+    /** 을/를 for a Korean noun phrase; 를 for anything that does not end in a Hangul syllable. */
+    static String objectParticle(String word) {
+        char last = word.charAt(word.length() - 1);
+        if (last < 0xAC00 || last > 0xD7A3) {
+            return "를";
+        }
+        return (last - 0xAC00) % 28 == 0 ? "를" : "을";
     }
 
     /** The retrieval outcome that means "this lane has nothing about it" — {@code RetrievalOutcome.ABSENT}. */
@@ -355,7 +374,8 @@ public class InquiryDraftComposer {
         } else {
             QuotaDecision decision = quota.consume(orgId, AgentUsageKind.DRAFT, null);
             if (decision.allowed()) {
-                written = model.draft(orgId, title, details, passagesFor(retrieved.passages(), context),
+                written = model.draft(orgId, title, details,
+                        passagesFor(assessment.catalogue(), retrieved.passages(), context),
                         retrieved.order().messageKo(),
                         applicability.messageKo(retrieved.figuresUnaided(),
                                 retrieved.variantSpecific()),
@@ -390,13 +410,14 @@ public class InquiryDraftComposer {
         int base = drafts.currentVersion(workItemId);
         ReplyDraftView saved = drafts.saveAs(orgId, workItemId, actor, replyTitle, replyBody, base,
                 new InquiryReplyDraftService.Provenance(DraftAuthorKind.MODEL,
-                        stamped(modelVersion, style), retrieved.state(), retrieved.productId(),
+                        stamped(modelVersion, style), knowledgeStateOf(assessment), retrieved.productId(),
                         basis));
 
         List<DraftEvidenceView> views = recordEvidence(orgId, workItemId, saved.version(),
-                retrieved.passages(), context, retrieved.order());
-        return new GeneratedDraftView(saved, DraftAuthorKind.MODEL.name(), retrieved.state().name(),
-                retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
+                catalogueMatches(assessment.catalogue()), retrieved.passages(), context, retrieved.order());
+        return new GeneratedDraftView(saved, DraftAuthorKind.MODEL.name(), knowledgeStateOf(assessment).name(),
+                assessment.groundedByCatalogue() ? CATALOGUE_GROUNDED
+                        : retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
                 basis.actionKo(retrieved.state(), verdict.topicWord(), applicability,
                         retrieved.productOutcome(), retrieved.policyOutcome(), assessment.asked(),
                         retrieved.policyDeclares(assessment.asked()), verdict.optionsRegistered()),
@@ -474,7 +495,8 @@ public class InquiryDraftComposer {
         return new GeneratedDraftView(saved, DraftAuthorKind.SELLER_APPROVED_FALLBACK.name(),
                 retrieved.state().name(), retrieved.state().messageKo(retrieved.scopes()),
                 basis.name(), basis.messageKo(),
-                basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
+                gap != null && gap.catalogueChecked() != null ? gap.catalogueChecked()
+                        : basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
                         retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked),
                         verdict.optionsRegistered()),
                 retrieved.productId(), List.of(), false, null, gap);
@@ -493,11 +515,13 @@ public class InquiryDraftComposer {
                                               java.util.Set<KnowledgeTopic> named,
                                               String unavailableMessage,
                                               com.sellerops.inquiry.draft.dto.KnowledgeGapView gap) {
-        return new GeneratedDraftView(null, null, retrieved.state().name(),
-                retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(),
-                basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
+        String action = gap != null && gap.catalogueChecked() != null && basis == AnswerBasisState.NO_ANSWER_BASIS
+                ? gap.catalogueChecked()
+                : basis.actionKo(retrieved.state(), verdict.topicWord(), verdict.applicability(),
                         retrieved.productOutcome(), retrieved.policyOutcome(), asked, retrieved.policyDeclares(asked),
-                        verdict.optionsRegistered()),
+                        verdict.optionsRegistered());
+        return new GeneratedDraftView(null, null, retrieved.state().name(),
+                retrieved.state().messageKo(retrieved.scopes()), basis.name(), basis.messageKo(), action,
                 retrieved.productId(), List.of(), false, unavailableMessage, gap);
     }
 
@@ -555,10 +579,43 @@ public class InquiryDraftComposer {
                 evidence.findAllByWorkItemIdAndDraftVersionOrderByOrdinalAsc(workItemId, version));
     }
 
+    /** The catalogue statements that ground this draft; empty unless this was a catalogue question it answered. */
+    static List<CatalogueInvestigator.Statement> catalogueMatches(CatalogueInvestigator.Finding finding) {
+        return finding == null || !finding.grounds() ? List.of() : finding.matches().stream()
+                .limit(CATALOGUE_PASSAGES).toList();
+    }
+
+    /** The knowledge note when the seller's catalogue, and nothing in this product's own library, answered. */
+    static final String CATALOGUE_GROUNDED = "판매자가 지금 판매 중인 상품 정보를 근거로 썼습니다.";
+
+    /** The draft's knowledge state: GROUNDED when the catalogue answered, the lanes' own state otherwise. */
+    private static DraftKnowledgeState knowledgeStateOf(InquiryKnowledgeAssessor.Assessment assessment) {
+        return assessment.groundedByCatalogue() ? DraftKnowledgeState.GROUNDED : assessment.retrieved().state();
+    }
+
+    /** Catalogue statements a draft is shown. Enough to name what is on sale; not a product list. */
+    static final int CATALOGUE_PASSAGES = 3;
+
+    /**
+     * A statement from the seller's own catalogue, labelled for what it is: the product the inquiry is on
+     * ({@code 상품 정보}), or another product the seller sells ({@code 판매 중인 다른 상품}) — the one label the prompt
+     * forbids moving a figure out of.
+     */
+    static String catalogueLabel(CatalogueInvestigator.Statement s) {
+        return s.current() ? KnowledgeScope.PRODUCT.labelKo() : InquiryDraftEvidence.LABEL_CATALOGUE_PRODUCT;
+    }
+
     private static List<AgentDraftGenerator.Passage> passagesFor(
+            CatalogueInvestigator.Finding catalogue,
             List<InquiryEvidenceRetriever.ScopedPassage> passages,
             List<com.sellerops.knowledge.spine.KnowledgeEntry> context) {
-        List<AgentDraftGenerator.Passage> out = new ArrayList<>(passages.stream()
+        // The catalogue first when it answered: for what is on sale now it is the current authority, ahead of any
+        // past answer the lanes carried.
+        List<AgentDraftGenerator.Passage> out = new ArrayList<>();
+        for (CatalogueInvestigator.Statement s : catalogueMatches(catalogue)) {
+            out.add(new AgentDraftGenerator.Passage(catalogueLabel(s), s.productName(), s.text()));
+        }
+        out.addAll(passages.stream()
                 .map(p -> new AgentDraftGenerator.Passage(p.scope().labelKo(), p.heading(), p.text()))
                 .toList());
         // Seller guidance and the channel's stated attributes, after the grounding passages. They inform the reply;
@@ -575,11 +632,29 @@ public class InquiryDraftComposer {
     }
 
     private List<DraftEvidenceView> recordEvidence(UUID orgId, UUID workItemId, int version,
+                                                   List<CatalogueInvestigator.Statement> catalogue,
                                                    List<InquiryEvidenceRetriever.ScopedPassage> passages,
                                                    List<com.sellerops.knowledge.spine.KnowledgeEntry> context,
                                                    OrderFact order) {
         List<DraftEvidenceView> views = new ArrayList<>(passages.size() + 1);
         int ordinal = 0;
+        // The exact product source for every catalogue statement the draft was shown: which product (source id), where
+        // on it and when it was captured (locator). The excerpt is the statement itself.
+        for (CatalogueInvestigator.Statement s : catalogue) {
+            InquiryDraftEvidence row = new InquiryDraftEvidence();
+            row.setOrgId(orgId);
+            row.setWorkItemId(workItemId);
+            row.setDraftVersion(version);
+            row.setOrdinal(ordinal++);
+            row.setKind(s.current() ? InquiryDraftEvidence.KIND_PRODUCT_FACT
+                    : InquiryDraftEvidence.KIND_CATALOGUE_PRODUCT);
+            row.setSourceId(s.productId());
+            row.setTitle(s.productName());
+            row.setLocator(s.locator());
+            evidence.save(row);
+            views.add(new DraftEvidenceView(row.getKind(), catalogueLabel(s), row.getTitle(), row.getLocator(),
+                    row.getSourceId(), null, DraftEvidenceView.snippetOf(s.text())));
+        }
         for (InquiryEvidenceRetriever.ScopedPassage passage : passages) {
             InquiryDraftEvidence row = new InquiryDraftEvidence();
             row.setOrgId(orgId);

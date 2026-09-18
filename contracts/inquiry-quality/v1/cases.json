@@ -6,7 +6,8 @@
     "company has not written this down — the draft must refuse and the gap must name expectedMissingSubject.",
     "mustSupport: a figure or word the answer may only carry because the corpus states it.",
     "mustNotClaim: sentences that would be false or unauthorised on this corpus.",
-    "2026-09-18 first measurement corrected four labels: Q26 names the Answer Memory entry's own title, and Q33 is grounded (the corpus does mention 밝기 단계) with the invented count as mustNotClaim. Q20·Q21·Q22 keep sellerInputRequired=true and are the measured false-grounding cases."
+    "2026-09-18 first measurement corrected four labels: Q26 names the Answer Memory entry's own title, and Q33 is grounded (the corpus does mention 밝기 단계) with the invented count as mustNotClaim. Q20·Q21·Q22 keep sellerInputRequired=true and are the measured false-grounding cases.",
+    "Q37–Q42 (2026-09-18) are catalogue questions: products carry listings (selling status), and each case names the one product whose catalogue text may answer it (expectCatalogueProduct), or none — in which case the seller is asked."
   ],
   "library": {
     "org": [
@@ -119,6 +120,114 @@
           {
             "key": "색온도",
             "value": "3000K~6000K"
+          }
+        ]
+      },
+      {
+        "key": "cupholder",
+        "name": "종이컵보관함 수거함 디스펜서 컵 홀더",
+        "knowledge": [],
+        "facts": [
+          {
+            "ns": "taxonomy",
+            "key": "category",
+            "value": "생활/건강>주방용품>주방잡화>종이컵디스펜서"
+          }
+        ],
+        "listings": [
+          {
+            "channel": "NAVER",
+            "status": "SALE"
+          }
+        ]
+      },
+      {
+        "key": "disp65",
+        "name": "원터치 디스펜서 종이컵 보관함",
+        "knowledge": [],
+        "facts": [
+          {
+            "ns": "desc",
+            "key": "summary",
+            "value": "6.5온스 종이컵전용입니다."
+          }
+        ],
+        "listings": [
+          {
+            "channel": "NAVER",
+            "status": "SALE"
+          }
+        ]
+      },
+      {
+        "key": "disp13",
+        "name": "대용량 종이컵 디스펜서",
+        "knowledge": [
+          {
+            "type": "DESCRIPTION",
+            "title": "규격",
+            "body": "13온스 종이컵 전용 디스펜서입니다. 벽걸이형입니다."
+          }
+        ],
+        "facts": [],
+        "listings": [
+          {
+            "channel": "NAVER",
+            "status": "SALE"
+          }
+        ]
+      },
+      {
+        "key": "disp12",
+        "name": "12온스 컵 디스펜서",
+        "knowledge": [],
+        "facts": [],
+        "listings": [
+          {
+            "channel": "NAVER",
+            "status": "CLOSE"
+          }
+        ]
+      },
+      {
+        "key": "dispslim",
+        "name": "슬림 컵 디스펜서",
+        "knowledge": [
+          {
+            "type": "FAQ",
+            "title": "사용 가능한 컵",
+            "body": "6.5온스 컵용입니다. 9온스 컵은 사용할 수 없습니다."
+          }
+        ],
+        "facts": [],
+        "listings": [
+          {
+            "channel": "NAVER",
+            "status": "SALE"
+          }
+        ]
+      },
+      {
+        "key": "cup9",
+        "name": "아이러브 9온스 종이컵",
+        "knowledge": [],
+        "facts": [],
+        "listings": [
+          {
+            "channel": "NAVER",
+            "status": "SALE"
+          }
+        ]
+      },
+      {
+        "key": "moldingblack",
+        "name": "선바로 일체형 전선몰딩 블랙",
+        "knowledge": [],
+        "facts": [],
+        "listings": [
+          {
+            "channel": "NAVER",
+            "status": "SALE"
           }
         ]
       }
@@ -853,6 +962,102 @@
       "escalation": false,
       "expectedMissingSubject": null,
       "note": ""
+    },
+    {
+      "id": "Q37",
+      "productKey": "cupholder",
+      "title": "디스펜서 문의",
+      "body": "종이컵 9oz 크기도 디스펜서 제품 판매하시나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "ASK_SELLER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "9oz 디스펜서",
+      "expectCatalogueProduct": null,
+      "note": "inquiry 689162087 shape: 6.5oz-only and 9oz-refused dispensers, a 9oz CUP — none answers; ask the seller"
+    },
+    {
+      "id": "Q38",
+      "productKey": "cupholder",
+      "title": "디스펜서 문의",
+      "body": "13온스 종이컵에 맞는 디스펜서도 판매하시나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "expectCatalogueProduct": "disp13",
+      "note": "another on-sale product states the value in its detail text"
+    },
+    {
+      "id": "Q39",
+      "productKey": "cupholder",
+      "title": "디스펜서",
+      "body": "12온스용 디스펜서 파나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "ASK_SELLER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "12온스 디스펜서",
+      "expectCatalogueProduct": null,
+      "note": "the only product stating it is not on sale"
+    },
+    {
+      "id": "Q40",
+      "productKey": "cupholder",
+      "title": "사이즈",
+      "body": "이 디스펜서에 13온스 컵도 들어가나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "ASK_SELLER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "expectCatalogueProduct": null,
+      "note": "about THIS product: another listing's 13온스 must not answer it"
+    },
+    {
+      "id": "Q41",
+      "productKey": "molding",
+      "title": "색상 문의",
+      "body": "블랙 색상 몰딩도 판매하시나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "expectCatalogueProduct": "moldingblack",
+      "note": "a colour this listing does not have, on another on-sale listing"
+    },
+    {
+      "id": "Q42",
+      "productKey": null,
+      "title": "컵 문의",
+      "body": "9온스 종이컵도 판매하시나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "expectCatalogueProduct": "cup9",
+      "note": "no bound product: discovery over the catalogue alone"
     }
   ]
 }

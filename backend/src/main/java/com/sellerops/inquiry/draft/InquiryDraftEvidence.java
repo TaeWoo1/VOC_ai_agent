@@ -103,6 +103,14 @@ public class InquiryDraftEvidence {
     public static final String LABEL_SELLER_GUIDANCE = "판매자 지침";
 
     /**
+     * 판매 중인 다른 상품 — a statement in the seller's own catalogue about ANOTHER product, cited for a question about
+     * what the seller sells. Its source is that product; it is never evidence about the product the inquiry is on.
+     */
+    public static final String KIND_CATALOGUE_PRODUCT = "CATALOGUE_PRODUCT";
+
+    public static final String LABEL_CATALOGUE_PRODUCT = "판매 중인 다른 상품";
+
+    /**
      * The stored kind for a RETRIEVED scope.
      *
      * <p>The two are separate vocabularies on purpose: {@link KnowledgeScope} is what the product
@@ -152,6 +160,9 @@ public class InquiryDraftEvidence {
         }
         if (KIND_PRODUCT_FACT.equals(kind)) {
             return KnowledgeScope.PRODUCT.labelKo();
+        }
+        if (KIND_CATALOGUE_PRODUCT.equals(kind)) {
+            return LABEL_CATALOGUE_PRODUCT;
         }
         KnowledgeScope scope = scopeOf(kind);
         return scope == null ? kind : scope.labelKo();

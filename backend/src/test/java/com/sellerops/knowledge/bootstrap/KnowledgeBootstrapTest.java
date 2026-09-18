@@ -266,6 +266,32 @@ class KnowledgeBootstrapTest {
     }
 
     @Test
+    @DisplayName("the on-sale catalogue without 상세페이지 text is learned too — never ended listings, never learned ones")
+    void onSaleCatalogueDetailIsLearnedBeforeItIsAskedAbout() {
+        UUID org = org("카탈로그 상점");
+        UUID onSale = listed(org, "판매 중 디스펜서", "SALE");
+        UUID ended = listed(org, "판매 종료 디스펜서", "CLOSE");
+        UUID learned = listed(org, "상세 읽은 디스펜서", "SALE");
+        com.sellerops.product.library.ProductKnowledgeSource doc = new com.sellerops.product.library.ProductKnowledgeSource();
+        doc.setOrgId(org);
+        doc.setProductId(learned);
+        doc.setSourceType(com.sellerops.product.library.KnowledgeSourceType.DESCRIPTION);
+        doc.setAuthoredOrigin(com.sellerops.product.library.KnowledgeAuthorship.SELLER_AUTHORED_CHANNEL_CONTENT);
+        doc.setTitle("상품 상세페이지");
+        doc.setBody("본문");
+        productSources.save(doc);
+        UUID foreign = listed(org("다른 상점"), "다른 판매자 디스펜서", "SALE");
+        KnowledgeBootstrapService bootstrap = service(mock(SyncRunExecutor.class),
+                mock(ProductDetailEnrichmentTrigger.class));
+
+        assertThat(bootstrap.onSaleWithoutDetail(org)).as("off unless configured").isEmpty();
+        bootstrap.setMaxCatalogueProducts(60);
+
+        assertThat(bootstrap.onSaleWithoutDetail(org)).containsExactly(onSale)
+                .doesNotContain(ended, learned, foreign);
+    }
+
+    @Test
     @DisplayName("product detail is read for the products customers wrote about, most-discussed first, capped")
     void productDetailFollowsCustomerActivity() {
         UUID org = org("상세 상점");
@@ -313,6 +339,24 @@ class KnowledgeBootstrapTest {
     }
 
     // ── fixtures ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    @Autowired com.sellerops.product.ChannelProductRepository listingRows;
+
+    private UUID listed(UUID orgId, String name, String status) {
+        com.sellerops.product.Product p = new com.sellerops.product.Product();
+        p.setOrgId(orgId);
+        p.setName(name);
+        p.setStatus("ACTIVE");
+        UUID id = products.save(p).getId();
+        com.sellerops.product.ChannelProduct cp = new com.sellerops.product.ChannelProduct();
+        cp.setOrgId(orgId);
+        cp.setProductId(id);
+        cp.setChannelId(naver.getId());
+        cp.setExternalProductId("ext-" + id);
+        cp.setSellingStatus(status);
+        listingRows.save(cp);
+        return id;
+    }
 
     private KnowledgeBootstrapService service(SyncRunExecutor executor, ProductDetailEnrichmentTrigger detail) {
         return new KnowledgeBootstrapService(sellerAccounts, channels, executor, importer, detail, products, em,

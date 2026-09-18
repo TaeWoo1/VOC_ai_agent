@@ -9,6 +9,7 @@ import com.sellerops.knowledge.spine.KnowledgeSpineService;
 import com.sellerops.knowledge.spine.SpineRetrieval;
 import com.sellerops.order.fact.OrderFactLookup;
 import com.sellerops.product.ProductVariantRepository;
+import com.sellerops.product.catalogue.CatalogueInvestigator;
 import com.sellerops.product.library.KnowledgeVariantScope;
 import java.util.List;
 import java.util.Set;
@@ -36,6 +37,7 @@ public class InquiryKnowledgeAssessor {
     private final KnowledgeSpineService spine;
     private final ProductVariantRepository variants;
     private final com.sellerops.product.ProductRepository products;
+    private CatalogueInvestigator catalogue;
 
     public InquiryKnowledgeAssessor(InquiryEvidenceRetriever retriever, KnowledgeSpineService spine,
                                     ProductVariantRepository variants,
@@ -53,11 +55,32 @@ public class InquiryKnowledgeAssessor {
      */
     public record Assessment(UUID productId, SpecApplicability.Verdict verdict, SpineRetrieval spine,
                              AnswerBasisState basis, KnowledgeTopic asked, Set<KnowledgeTopic> named,
-                             KnowledgeGapView gap, String missingSubject) {
+                             KnowledgeGapView gap, String missingSubject, CatalogueInvestigator.Finding catalogue) {
+
+        public Assessment(UUID productId, SpecApplicability.Verdict verdict, SpineRetrieval spine,
+                          AnswerBasisState basis, KnowledgeTopic asked, Set<KnowledgeTopic> named,
+                          KnowledgeGapView gap, String missingSubject) {
+            this(productId, verdict, spine, basis, asked, named, gap, missingSubject, null);
+        }
+
+        /** Whether the only current basis is another product in the seller's catalogue. */
+        public boolean groundedByCatalogue() {
+            return catalogue != null && catalogue.grounds()
+                    && !AnswerBasisState.of(spine.lanes().state(), verdict.applicability()).mayGenerate();
+        }
 
         public InquiryEvidenceRetriever.InquiryEvidence retrieved() {
             return spine.lanes();
         }
+    }
+
+    /**
+     * Seller-wide catalogue discovery for catalogue questions. Optional: a context without it assesses exactly as
+     * before, and a catalogue read that throws is a catalogue that said nothing.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setCatalogue(CatalogueInvestigator catalogue) {
+        this.catalogue = catalogue;
     }
 
     /**
@@ -82,10 +105,39 @@ public class InquiryKnowledgeAssessor {
         AnswerBasisState basis = AnswerBasisState.of(found.lanes().state(), verdict.applicability());
         Set<KnowledgeTopic> named = namedTopics(inquiry);
         KnowledgeTopic asked = named.size() == 1 ? named.iterator().next() : null;
-        String subject = basis == AnswerBasisState.NO_ANSWER_BASIS
-                ? subjectOf(verdict, title, details, productName(orgId, productId), asked) : null;
-        return new Assessment(productId, verdict, found, basis, asked, named,
-                KnowledgeGapView.of(found.lanes(), verdict, asked, named).asking(subject), subject);
+        // Seller-wide catalogue discovery, for a question about what the seller sells (「9oz 디스펜서도 판매하시나요」).
+        // It runs after the product's own knowledge and before anything is declared missing: a question whose answer
+        // is on another listing of this seller is not a gap in this seller's knowledge. It never widens a basis that
+        // the lanes already settled — it only turns NO_ANSWER_BASIS into GROUNDED, and only on a product the channel
+        // says is on sale now, stating the asked value in the seller's own catalogue text.
+        CatalogueInvestigator.Finding catalogueFinding = investigateCatalogue(orgId, productId, title, details,
+                lookup == OrderFactLookup.EXACT_ALLOWED);
+        if (basis == AnswerBasisState.NO_ANSWER_BASIS && catalogueFinding != null && catalogueFinding.grounds()) {
+            basis = AnswerBasisState.GROUNDED;
+        }
+        String subject = basis != AnswerBasisState.NO_ANSWER_BASIS ? null
+                : catalogueFinding != null ? catalogueFinding.question().subject()
+                : subjectOf(verdict, title, details, productName(orgId, productId), asked);
+        KnowledgeGapView gap = KnowledgeGapView.of(found.lanes(), verdict, asked, named).asking(subject);
+        if (basis == AnswerBasisState.NO_ANSWER_BASIS && catalogueFinding != null) {
+            gap = gap.catalogueChecked(catalogueFinding.checkedKo());
+        }
+        return new Assessment(productId, verdict, found, basis, asked, named, gap, subject, catalogueFinding);
+    }
+
+    /** The catalogue's answer for a catalogue question; null for any other question, or when the read failed. */
+    private CatalogueInvestigator.Finding investigateCatalogue(UUID orgId, UUID productId, String title,
+                                                               String details, boolean mayReadDetail) {
+        if (catalogue == null) {
+            return null;
+        }
+        try {
+            return catalogue.question(orgId, title, details)
+                    .map(q -> catalogue.investigate(orgId, productId, q, mayReadDetail))
+                    .orElse(null);
+        } catch (RuntimeException unreadable) {
+            return null;
+        }
     }
 
     /**
