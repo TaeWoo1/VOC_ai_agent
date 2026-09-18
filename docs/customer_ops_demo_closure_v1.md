@@ -110,3 +110,9 @@ Substituted: opening the case (reviews present at a source's first settled read 
 processor). The rule classifies this review MONITORING; the investigation was invoked explicitly for the proof.
 Defects seen, not fixed: the photo tool has no label in 「Reviewnary가 확인한 것」; an agent-closed case keeps the rule's
 「지켜봅니다」 reason sentence.
+
+**M5 — BLOCKED_AT_READ, nothing stored.** All 5 candidates (2026-08-21) were in the list model, marked replied, rendered,
+each with exactly one detail control naming its own id (no direct URL). One detail was opened and closed (2 of 6
+clicks). The committed reader found **no AngularJS scope** on the detail pop-up, so the reply cannot be read from a view
+model there; the other targets were not opened. Next: a READ-only structure census of the open detail (DOM section
+names/lengths only) to identify the reply element, then a reader change and a fresh approval.
