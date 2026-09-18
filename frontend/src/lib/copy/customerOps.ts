@@ -68,6 +68,8 @@ export const COPY = {
   used: "사용됨",
   pastAnswer: "과거 답변",
   closed: "처리됨",
+  resolved: "정리함",
+  monitoring: "지켜보는 중",
   // Knowledge
   knowledgeTitle: "지식",
   held: "보유 정보",

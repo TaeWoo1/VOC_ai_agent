@@ -295,4 +295,46 @@ describe("OperationsCase", () => {
       }),
     );
   });
+
+  it("a case the Agent closed shows its final state and the Agent's judgement — not the rule's detection or the model's advice", async () => {
+    api.getOperationsCase.mockResolvedValue(
+      detail({
+        open: false, subjectKind: "REVIEW", rating: 5, title: null, gap: null, missingInformation: [],
+        body: "구형주택이라 전선 정리가 힘들었는데 깨끗하게 마무리 했습니다",
+        disposition: "AUTO_RESOLVED", decidedBy: "AGENT",
+        reasonNote: "별점은 높지만 불편을 말하는 내용이 있습니다.",
+        summary: "5점 긍정 리뷰로 제품 만족도가 높습니다.",
+        recommendedActionType: "NO_ACTION",
+        recommendedAction: "이번 건은 추가 조치 없이 모니터링만 하시면 됩니다.",
+        whyDecisionNeeded: null,
+      }),
+    );
+    renderCase();
+    const card = await screen.findByTestId("work-flow-card");
+    expect(card).toHaveTextContent("정리함");
+    expect(card).toHaveTextContent("5점 긍정 리뷰로 제품 만족도가 높습니다.");
+    expect(card).toHaveTextContent("내 확인 필요없음");
+    // Earlier-stage text that the final state overruled is not shown anywhere on the screen.
+    expect(screen.queryByText(/불편을 말하는 내용이 있습니다/)).toBeNull();
+    expect(screen.queryByText(/모니터링만 하시면/)).toBeNull();
+    expect(screen.queryByText("처리됨")).toBeNull();
+  });
+
+  it("a case the rule is watching says so and asks the seller for nothing", async () => {
+    api.getOperationsCase.mockResolvedValue(
+      detail({
+        subjectKind: "REVIEW", rating: 5, title: null, gap: null, missingInformation: [], summary: null,
+        body: "좋아요. 마감도 괜찮네요", disposition: "MONITORING", decidedBy: "RULE",
+        reasonNote: "별점은 높지만 글이 있어 바로 닫지 않고 지켜봅니다.",
+        recommendedActionType: null, recommendedAction: null, whyDecisionNeeded: null, investigated: [],
+      }),
+    );
+    renderCase();
+    const card = await screen.findByTestId("work-flow-card");
+    expect(card).toHaveTextContent("지켜보는 중");
+    expect(card).toHaveTextContent("별점은 높지만 글이 있어 바로 닫지 않고 지켜봅니다.");
+    expect(card).not.toHaveTextContent("판단 필요");
+    // The note is said once, in the card.
+    expect(screen.getAllByText("별점은 높지만 글이 있어 바로 닫지 않고 지켜봅니다.")).toHaveLength(1);
+  });
 });

@@ -66,7 +66,6 @@ export function OperationsCase() {
   const wait = waitLabel(detail.receivedOn);
   const index = queue ? queue.indexOf(caseId) : -1;
   const showTeach = Boolean(detail.gap) && !receipt;
-  const why = detail.whyDecisionNeeded ?? detail.recommendedAction;
 
   return (
     <div className="mx-auto w-full max-w-[1080px] space-y-5">
@@ -108,23 +107,7 @@ export function OperationsCase() {
         </Link>
       </header>
 
-      <WorkFlowCard
-        ariaLabel="자동 확인과 내 확인 필요"
-        done={{
-          label: COPY.caseChecked,
-          value: doneHeadline(detail, receipt !== null),
-          phrase: true,
-          line: detail.summary ? <span>{detail.summary}</span> : undefined,
-        }}
-        mine={{
-          label: COPY.mineLabel,
-          value: detail.open
-            ? decisionOf(detail.recommendedActionType) ?? actionKo(detail.recommendedActionType) ?? "판단 필요"
-            : COPY.closed,
-          phrase: true,
-          line: detail.open && why ? <span>{why}</span> : undefined,
-        }}
-      />
+      <WorkFlowCard ariaLabel="자동 확인과 내 확인 필요" {...flowCells(detail, receipt !== null)} />
 
       {error ? (
         <p className="break-keep text-sm text-bad" role="alert">
@@ -178,7 +161,7 @@ export function OperationsCase() {
         <div className="min-w-0 xl:col-start-1 xl:row-start-2">
           <Block title={COPY.checks}>
             <Checks detail={detail} gapOpen={showTeach} />
-            {!detail.summary && detail.reasonNote ? (
+            {!detail.summary && detail.reasonNote && !settled(detail) ? (
               <p className="mt-3 break-keep text-sm text-muted">{detail.reasonNote}</p>
             ) : null}
           </Block>
@@ -190,6 +173,50 @@ export function OperationsCase() {
       </div>
     </div>
   );
+}
+
+/**
+ * <b>The final case state is the canonical truth of the two top cells.</b> A case that Reviewnary settled — closed as
+ * needing nothing, or put under watch — says so, with the latest judgement under it: the Agent's summary when the Agent
+ * decided, otherwise the note of the rule that stands. Text written at an earlier stage (the rule's detection before
+ * the Agent overruled it, the model's recommendation on a case it then closed) is not shown in its place, and the
+ * seller's cell says there is nothing for them to do rather than asking for a decision nobody needs.
+ */
+function settled(detail: OperationsCaseDetail): "AUTO_RESOLVED" | "MONITORING" | null {
+  return detail.disposition === "AUTO_RESOLVED" || detail.disposition === "MONITORING" ? detail.disposition : null;
+}
+
+function flowCells(detail: OperationsCaseDetail, taught: boolean) {
+  const state = settled(detail);
+  if (state) {
+    const judgement = detail.decidedBy === "AGENT" ? detail.summary ?? detail.reasonNote : detail.reasonNote ?? detail.summary;
+    return {
+      done: {
+        label: COPY.caseChecked,
+        value: state === "AUTO_RESOLVED" ? COPY.resolved : COPY.monitoring,
+        phrase: true,
+        line: judgement ? <span>{judgement}</span> : undefined,
+      },
+      mine: { label: COPY.mineLabel, value: COPY.none, phrase: true },
+    };
+  }
+  const why = detail.whyDecisionNeeded ?? detail.recommendedAction;
+  return {
+    done: {
+      label: COPY.caseChecked,
+      value: doneHeadline(detail, taught),
+      phrase: true,
+      line: detail.summary ? <span>{detail.summary}</span> : undefined,
+    },
+    mine: {
+      label: COPY.mineLabel,
+      value: detail.open
+        ? decisionOf(detail.recommendedActionType) ?? actionKo(detail.recommendedActionType) ?? "판단 필요"
+        : COPY.closed,
+      phrase: true,
+      line: detail.open && why ? <span>{why}</span> : undefined,
+    },
+  };
 }
 
 /** The left cell's headline, from the state the case is in — never a sentence Reviewnary writes about itself. */
