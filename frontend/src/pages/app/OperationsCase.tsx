@@ -458,7 +458,13 @@ function TeachCard({
   onFailed: (e: unknown) => void;
 }) {
   const gap = detail.gap;
-  const [content, setContent] = useState("");
+  // Found where nothing current was, the seller's own past answer is where their answer starts. It is only text in a
+  // box until they save it — as it is, or edited — through the same Teach path an empty box uses.
+  const prefill = gap?.prefill ?? null;
+  const [content, setContent] = useState(prefill?.text ?? "");
+  useEffect(() => {
+    setContent(prefill?.text ?? "");
+  }, [caseId, prefill?.text]);
   const [scope, setScope] = useState(detail.productScopeAvailable ? gap?.suggestedScope ?? "ORG" : "ORG");
   const [busy, setBusy] = useState(false);
   if (!gap) return null;
@@ -483,11 +489,22 @@ function TeachCard({
     <ActionCard primary ariaLabel={COPY.needInfo}>
       <h2 className="text-base font-extrabold text-ink">{COPY.needInfo}</h2>
       <p className="mt-2 break-keep text-[17px] font-bold leading-snug tracking-tight text-ink">{gap.sentence}</p>
+      {prefill ? (
+        <div id="teach-prefill" className="mt-3 rounded-xl bg-[#F4F7FB] px-3.5 py-3 text-sm leading-relaxed text-ink">
+          <p className="break-keep">{COPY.prefillNote}</p>
+          {prefill.strengthKo || prefill.answeredOn ? (
+            <p className="mt-1 text-xs text-muted">
+              {[COPY.pastAnswer, prefill.strengthKo, prefill.answeredOn].filter(Boolean).join(" · ")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <label className="mt-4 block text-xs font-semibold text-muted" htmlFor="teach-content">
         {COPY.guidance}
       </label>
       <textarea
         id="teach-content"
+        aria-describedby={prefill ? "teach-prefill" : undefined}
         className="mt-1 min-h-28 w-full rounded-[10px] border border-[#D5DAE1] p-3 text-[15px] leading-relaxed text-ink focus:border-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-700/20"
         value={content}
         onChange={(e) => setContent(e.target.value)}
@@ -504,7 +521,7 @@ function TeachCard({
       <Btn className="mt-4 min-h-[46px] w-full" onClick={submit} disabled={busy || content.trim().length === 0}>
         {busy ? "저장 중…" : COPY.saveAndRedraft}
       </Btn>
-      {precedent ? (
+      {precedent && !prefill ? (
         <Btn variant="ghost" size="sm" className="mt-2 w-full" onClick={() => setContent(precedent.reusableText ?? "")}>
           {COPY.loadPastAnswer}
         </Btn>

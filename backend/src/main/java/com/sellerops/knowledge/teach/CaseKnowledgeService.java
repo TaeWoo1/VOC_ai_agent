@@ -19,6 +19,8 @@ import com.sellerops.knowledge.KnowledgeTopic;
 import com.sellerops.knowledge.candidate.KnowledgeCandidateService;
 import com.sellerops.knowledge.guidance.SellerGuidance;
 import com.sellerops.knowledge.guidance.SellerGuidanceService;
+import com.sellerops.knowledge.memory.AnswerMemory;
+import com.sellerops.knowledge.memory.AnswerMemoryRepository;
 import com.sellerops.knowledge.org.OrgKnowledgeType;
 import com.sellerops.knowledge.spine.KnowledgeEntry;
 import com.sellerops.knowledge.spine.SpineSourceType;
@@ -93,6 +95,7 @@ public class CaseKnowledgeService {
     private final KnowledgeSpineService spine;
     private final InquiryReplyDraftService drafts;
     private final InquiryDraftComposer composer;
+    private final AnswerMemoryRepository memories;
 
     public CaseKnowledgeService(OperationsCaseRepository cases, OperationsCaseEventRepository events,
                                 OperationsCaseProcessor processor, CaseInvestigator investigator,
@@ -100,7 +103,8 @@ public class CaseKnowledgeService {
                                 ChannelRepository channels, ProductRepository products,
                                 InquiryEvidenceRetriever retriever, KnowledgeCandidateService candidates,
                                 SellerGuidanceService guidance, KnowledgeSpineService spine,
-                                InquiryReplyDraftService drafts, InquiryDraftComposer composer) {
+                                InquiryReplyDraftService drafts, InquiryDraftComposer composer,
+                                AnswerMemoryRepository memories) {
         this.cases = cases;
         this.events = events;
         this.processor = processor;
@@ -116,6 +120,7 @@ public class CaseKnowledgeService {
         this.spine = spine;
         this.drafts = drafts;
         this.composer = composer;
+        this.memories = memories;
     }
 
     // ── read ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -138,7 +143,8 @@ public class CaseKnowledgeService {
                 c.getRecommendedAction(), strings(c.getMissingInformation()), whyDecisionNeeded(c, gap),
                 investigated(orgId, c), knowledgeUsed(orgId, c, namedProduct),
                 gap == null ? null : new CaseDetailView.Gap(gap.missingSubject(), gapSentence(gap),
-                        namedProduct == null ? "ORG" : gap.suggestedScope()),
+                        namedProduct == null ? "ORG" : gap.suggestedScope(),
+                        prefillOf(orgId, c, namedProduct, gap)),
                 draft(orgId, c), c.getSubjectKind() == OperationsSubjectKind.INQUIRY
                         ? "/inquiries/" + c.getSubjectId() : "/reviews/reply/" + c.getSubjectId(),
                 media(orgId, c));
@@ -223,6 +229,14 @@ public class CaseKnowledgeService {
         Map<String, Object> taught = new LinkedHashMap<>();
         taught.put("scope", scope);
         taught.put("topic", gap.topic());
+        // Which past answer the seller started from, and whether they kept it word for word — an id and a boolean,
+        // never the text. The knowledge itself is the seller's: it was saved because they confirmed it.
+        CaseDetailView.Prefill offered = prefillOf(orgId, c, namedProduct, gap);
+        if (offered != null) {
+            taught.put("precedentMemoryId", gap.precedentMemoryId().toString());
+            taught.put("precedentUnchanged",
+                    KnowledgeText.normalize(offered.text()).equals(KnowledgeText.normalize(request.content())));
+        }
         events.save(OperationsCaseEvent.of(c, c.getLastRunId(), CaseEventActor.SELLER, CaseEventKind.KNOWLEDGE_TAUGHT,
                 json(taught)));
         rerun(orgId, c);
@@ -346,6 +360,36 @@ public class CaseKnowledgeService {
         } catch (Exception unreadable) {
             return null;
         }
+    }
+
+    /**
+     * The past answer the retrieval found for this gap, re-read now (Past Answer Prefill v1). Null — the empty box, as
+     * before — when there was none, when it is gone, or when it no longer passes the fences it was found under.
+     */
+    private CaseDetailView.Prefill prefillOf(UUID orgId, OperationsCase c, UUID namedProduct, CaseKnowledgeGap gap) {
+        if (!c.isOpen() || c.getSubjectKind() != OperationsSubjectKind.INQUIRY || gap.precedentMemoryId() == null
+                || memories == null) {
+            return null;
+        }
+        return memories.findById(gap.precedentMemoryId())
+                .map(m -> prefill(orgId, c.getSubjectId(), namedProduct, m))
+                .orElse(null);
+    }
+
+    /**
+     * The fences a precedent is re-checked against when it is shown: this organisation's, not another product's (an
+     * unbound answer names no product, so it is about none in particular), not this inquiry's own answer, and not
+     * empty. The retrieval applied all of these when it found the answer; the case outlives that retrieval.
+     */
+    static CaseDetailView.Prefill prefill(UUID orgId, UUID inquiryId, UUID namedProduct, AnswerMemory m) {
+        if (m == null || !orgId.equals(m.getOrgId()) || m.getAnswerBody() == null || m.getAnswerBody().isBlank()
+                || (m.getProductId() != null && !m.getProductId().equals(namedProduct))
+                || (inquiryId != null && inquiryId.equals(m.getOriginInquiryId()))) {
+            return null;
+        }
+        return new CaseDetailView.Prefill(m.getAnswerBody().strip(),
+                m.getStrength() == null ? null : m.getStrength().labelKo(),
+                m.getUpdatedAt() == null ? null : m.getUpdatedAt().atZone(KST).toLocalDate());
     }
 
     static String gapSentence(CaseKnowledgeGap gap) {

@@ -161,13 +161,22 @@ public class CaseInvestigationTools {
      *
      * @param basis           {@code GROUNDED}, {@code NEEDS_CLARIFICATION}, {@code NO_ANSWER_BASIS}, or
      *                        {@code CONTEXT_ONLY} for a review (a review asks nothing, so it has no answer basis)
+ * @param precedentMemoryId the seller's own past answer found when nothing current was — server-side only, never
+ *                        part of the investigation text; the case screen starts the seller's answer from it
      * @param missingSubject  the thing the seller has not told Reviewnary, in the customer's own noun, when the basis
      *                        is missing; null otherwise
      * @param suggestedScope  where the seller's answer would belong: {@code PRODUCT} or {@code ORG}
      */
     public record KnowledgeAssessment(String basis, String missingSubject, String suggestedScope, String topic,
                                       List<KnowledgeUse> evidence, List<KnowledgeUse> context,
-                                      List<KnowledgeConflict> conflicts) {
+                                      List<KnowledgeConflict> conflicts, UUID precedentMemoryId) {
+
+        /** The assessment without a past-answer precedent — every caller before Past Answer Prefill v1. */
+        public KnowledgeAssessment(String basis, String missingSubject, String suggestedScope, String topic,
+                                   List<KnowledgeUse> evidence, List<KnowledgeUse> context,
+                                   List<KnowledgeConflict> conflicts) {
+            this(basis, missingSubject, suggestedScope, topic, evidence, context, conflicts, null);
+        }
 
         public static KnowledgeAssessment none() {
             return new KnowledgeAssessment("CONTEXT_ONLY", null, null, null, List.of(), List.of(), List.of());
@@ -320,7 +329,8 @@ public class CaseInvestigationTools {
             }
             return new KnowledgeAssessment(a.basis().name(), subject, scope,
                     a.asked() == null ? null : a.asked().name(), evidence,
-                    uses(investigationContext(a.spine())), a.spine().conflicts());
+                    uses(investigationContext(a.spine())), a.spine().conflicts(),
+                    missing && a.gap() != null ? a.gap().precedentMemoryId() : null);
         }
 
         private KnowledgeAssessment assessReview(Review review) {

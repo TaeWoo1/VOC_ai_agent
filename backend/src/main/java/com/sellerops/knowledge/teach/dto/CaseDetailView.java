@@ -64,7 +64,24 @@ public record CaseDetailView(UUID caseId, boolean open, String subjectKind, Stri
      *
      * @param sentence the one line the screen shows: 「방수」에 대해 고객에게 안내할 기준이 없습니다.
      */
-    public record Gap(String missingSubject, String sentence, String suggestedScope) {
+    public record Gap(String missingSubject, String sentence, String suggestedScope, Prefill prefill) {
+
+        public Gap(String missingSubject, String sentence, String suggestedScope) {
+            this(missingSubject, sentence, suggestedScope, null);
+        }
+    }
+
+    /**
+     * The seller's own past answer, offered as the starting text of their answer to the gap (Past Answer Prefill v1).
+     *
+     * <p>It is not knowledge yet and the case does not treat it as a basis: it becomes company knowledge only when the
+     * seller saves it — as it is or edited — through the same Teach path an empty box uses.
+     *
+     * @param text       the whole past answer, re-read from its source; never stored on the case
+     * @param strengthKo how that answer came to be remembered — 「채널에 등록된 답변」, 「판매자가 승인한 답변」…
+     * @param answeredOn when it was remembered, in KST
+     */
+    public record Prefill(String text, String strengthKo, LocalDate answeredOn) {
     }
 
     public record Draft(int version, String title, String body, String authorKind, String answerBasis,

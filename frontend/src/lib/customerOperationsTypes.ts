@@ -187,7 +187,16 @@ export interface OperationsCaseDetail {
     /** That past answer whole, so the seller can confirm it as today's basis. Null otherwise. */
     reusableText: string | null;
   }[];
-  gap: { missingSubject: string | null; sentence: string; suggestedScope: string } | null;
+  gap: {
+    missingSubject: string | null;
+    sentence: string;
+    suggestedScope: string;
+    /**
+     * The seller's own past answer, found where no product or company knowledge was — the starting text of their
+     * answer. Not knowledge until they save it. Absent or null when there was none: the box starts empty.
+     */
+    prefill?: { text: string; strengthKo: string | null; answeredOn: string | null } | null;
+  } | null;
   /** The review's photos, and whether Reviewnary actually looked at each one. */
   media?: {
     ordinal: number;

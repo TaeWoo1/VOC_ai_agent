@@ -195,6 +195,68 @@ describe("OperationsCase", () => {
     );
   });
 
+  it("a past answer found where no knowledge was starts the seller's answer — saved as it is or edited, it is taught", async () => {
+    const past = "제품 표면은 생활 방수가 되어 욕실 벽면에도 부착하실 수 있습니다.";
+    api.getOperationsCase.mockResolvedValue(
+      detail({
+        gap: {
+          missingSubject: "방수",
+          sentence: "「방수」에 대해 고객에게 안내할 기준이 없습니다.",
+          suggestedScope: "PRODUCT",
+          prefill: { text: past, strengthKo: "채널에 등록된 답변", answeredOn: "2026-07-02" },
+        },
+      }),
+    );
+    api.teachOperationsCase.mockResolvedValue(taught());
+    const user = userEvent.setup();
+
+    const { container } = renderCase();
+    const box = (await screen.findByLabelText("안내 내용")) as HTMLTextAreaElement;
+    // The ask is still an ask: the gap sentence stands, and the past answer is offered as the seller's starting text.
+    expect(screen.getByText("「방수」에 대해 고객에게 안내할 기준이 없습니다.")).toBeTruthy();
+    expect(box.value).toBe(past);
+    expect(screen.getByText(/예전에 비슷한 문의에 이렇게 답하셨습니다/)).toBeTruthy();
+    expect(screen.getByText("과거 답변 · 채널에 등록된 답변 · 2026-07-02")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "과거 답변 불러오기" })).toBeNull();
+    await expectNoAxeViolations(container);
+
+    await user.clear(box);
+    await user.type(box, "생활 방수가 되어 욕실 벽면과 주방에도 부착하실 수 있습니다.");
+    await user.click(screen.getByRole("button", { name: "저장 후 초안 재작성" }));
+
+    await waitFor(() =>
+      expect(api.teachOperationsCase).toHaveBeenCalledWith("case-1", {
+        content: "생활 방수가 되어 욕실 벽면과 주방에도 부착하실 수 있습니다.",
+        scope: "PRODUCT",
+      }),
+    );
+    expect(await screen.findByRole("status", { name: "저장됨" })).toBeTruthy();
+  });
+
+  it("confirming the prefilled past answer unchanged is one press", async () => {
+    const past = "제품 표면은 생활 방수가 되어 욕실 벽면에도 부착하실 수 있습니다.";
+    api.getOperationsCase.mockResolvedValue(
+      detail({
+        gap: {
+          missingSubject: "방수",
+          sentence: "「방수」에 대해 고객에게 안내할 기준이 없습니다.",
+          suggestedScope: "PRODUCT",
+          prefill: { text: past, strengthKo: null, answeredOn: null },
+        },
+      }),
+    );
+    api.teachOperationsCase.mockResolvedValue(taught());
+    const user = userEvent.setup();
+
+    renderCase();
+    await screen.findByLabelText("안내 내용");
+    await user.click(screen.getByRole("button", { name: "저장 후 초안 재작성" }));
+
+    await waitFor(() =>
+      expect(api.teachOperationsCase).toHaveBeenCalledWith("case-1", { content: past, scope: "PRODUCT" }),
+    );
+  });
+
   it("a review's photos show what Reviewnary saw — and a photo it did not look at is never described", async () => {
     api.getOperationsCase.mockResolvedValue(
       detail({

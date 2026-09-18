@@ -56,6 +56,37 @@ NO_ANSWER_BASIS → Case에 「부족한 정보」(고객이 쓴 명사) → [�
 - **판매자 입력 경로는 `operationscase` 밖에 있다**(`knowledge/teach`). 그 패키지의 안전 펜스(지식·정책 writer 0,
   GET 전용 컨트롤러, 승인 경계 불가침)는 그대로 유지된다 — 책임 런타임은 여전히 스스로 지식을 쓰지 않는다.
 
+### 2-A. Past Answer Prefill v1 (2026-09-19) — 이미 한 답을 빈 칸으로 다시 묻지 않는다
+
+**결함.** 과거 답변 lane이 판매자의 예전 답을 찾아도 Case는 빈 [정보 입력]으로 다시 물었다. 묻는 판정은 상품·운영
+기준 두 lane만 보고(`markGap`·`KnowledgeGapView.of`), `NO_ANSWER_BASIS` 화면은 찾은 과거 답변을 근거 목록에서도
+버렸다. 측정(Demo Org 과거 답변 23건 · 합성 질문 42 · 로컬 읽기 전용): 현재 lexical은 **같은 질문을 그대로 넣어도
+7/21**, 바꿔 쓴 질문은 **5/25**만 찾는다 — 찾은 것조차 판매자에게 닿지 않았다.
+
+**바꾼 것 — 승격이 아니라 시작 문장.** 「과거 답변 하나만으로는 근거가 될 수 없다」(2026-08-26)는 **그대로다**:
+basis·모델 호출 여부·gap 적재·Knowledge Inbox는 한 글자도 바뀌지 않는다.
+
+- `InquiryKnowledgeAssessor`가 `NO_ANSWER_BASIS`이고 **현재 근거 passage가 0개**일 때만, 과거 답변 lane이 찾은 첫
+  답변의 **id**를 gap에 싣는다(`KnowledgeGapView.precedentMemoryId`). 조사 경로와 초안 경로가 같은 assessor를 읽으므로
+  둘 다 같은 id를 낸다(`CaseKnowledgeGap.precedentMemoryId`).
+- Case에는 **id만** 저장된다. 화면을 열 때 원본(`answer_memory`)에서 다시 읽고 펜스를 다시 확인한다 — 같은 조직 ·
+  다른 상품에 묶인 답변 아님 · 이 문의 자신의 답변 아님 · 빈 본문 아님(`CaseKnowledgeService#prefill`). 하나라도
+  어긋나면 예전처럼 빈 칸이다.
+- 화면(`TeachCard`)은 입력칸을 그 답변으로 **미리 채우고**, 「예전에 비슷한 문의에 이렇게 답하셨습니다…」와
+  `과거 답변 · {강도} · {날짜}`를 보인다. 부족한 정보 문장은 그대로 서 있다 — 여전히 묻는 것이다.
+- 판매자가 **그대로 또는 고쳐서** 저장하면 기존 Teach 경로(`KnowledgeCandidateService#teach`,
+  `SELLER_ENTERED_KNOWLEDGE`) → 같은 Case 재조사·재초안. 근거가 되는 것은 판매자가 확인한 지식이고 과거 답변 행은
+  바뀌지 않는다. `KNOWLEDGE_TAUGHT` 이벤트는 `precedentMemoryId`와 `precedentUnchanged`(boolean)만 남긴다 — 텍스트 0.
+- 과거 답변이 없으면 **지금과 같다**(빈 칸, 조사 지식에서 온 「과거 답변 불러오기」 보조 버튼 유지). 미리 채움이 있을
+  때만 그 버튼을 숨긴다(같은 일을 하는 컨트롤 두 개).
+- **하지 않은 것**: 검색 범위 확대(리스팅 → 제품군/회사), F5 semantic 활성화, lexical 조정. 그래서 이 변경이 발동하는
+  빈도는 여전히 위의 lexical 적중률에 묶여 있다.
+
+테스트: `KnowledgeIntelligenceClosureTest`(과거 답변만 → basis 불변·모델 0·두 경로 같은 id · 미리 채움을 고쳐 저장 →
+GROUNDED·근거는 판매자 지식·메모리 불변 · 과거 답변 없음 → null · 현재 근거 있음 → null · 표시 시 펜스 · 옛 JSON 호환),
+`OperationsCase.test.tsx`(미리 채움 표시·고쳐 저장·그대로 한 번에 저장·axe 0). 마켓플레이스 0 · 모델 0 ·
+마이그레이션 0 ⇒ evidence 행 없음.
+
 ## 3. 판매자 정정 → 기억 (「다음에도 참고」)
 
 - 초안을 **실제로 고쳤을 때**(공백 차이가 아니라 내용이 달라졌을 때)와 추천을 다르게 판단했을 때, 판매자가 명시적으로

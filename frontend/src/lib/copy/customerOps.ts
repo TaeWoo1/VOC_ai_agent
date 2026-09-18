@@ -61,6 +61,7 @@ export const COPY = {
   wholeCompany: "회사 전체",
   saveAndRedraft: "저장 후 초안 재작성",
   loadPastAnswer: "과거 답변 불러오기",
+  prefillNote: "예전에 비슷한 문의에 이렇게 답하셨습니다. 그대로 두거나 고쳐서 저장하면 회사 지식이 되고, 이 문의의 초안을 다시 만듭니다.",
   saved: "저장됨",
   redrafted: "초안 재작성 완료",
   sameQuestionUses: "같은 질문에 이 기준 사용",

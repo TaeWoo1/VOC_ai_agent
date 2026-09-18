@@ -122,7 +122,30 @@ public class InquiryKnowledgeAssessor {
         if (basis == AnswerBasisState.NO_ANSWER_BASIS && catalogueFinding != null) {
             gap = gap.catalogueChecked(catalogueFinding.checkedKo());
         }
+        if (basis == AnswerBasisState.NO_ANSWER_BASIS) {
+            gap = gap.withPrecedent(precedentOf(found.lanes()));
+        }
         return new Assessment(productId, verdict, found, basis, asked, named, gap, subject, catalogueFinding);
+    }
+
+    /**
+     * The seller's own past answer the memory lane found, when that is ALL that was found (Past Answer Prefill v1).
+     *
+     * <p>Only when no current passage — product knowledge or company rule — came back: a question the company's own
+     * knowledge already speaks to is not one the seller should be asked to restate from memory. The past answer
+     * stays what it was; it does not change the basis, and nothing here promotes it. It is handed to the one place
+     * that asks the seller for knowledge, so that ask can start from what the seller already said.
+     */
+    static UUID precedentOf(InquiryEvidenceRetriever.InquiryEvidence lanes) {
+        if (lanes == null || lanes.passages().stream().anyMatch(p -> p.scope().current())) {
+            return null;
+        }
+        return lanes.passages().stream()
+                .filter(p -> p.scope() == com.sellerops.knowledge.KnowledgeScope.PAST_ANSWER)
+                .map(InquiryEvidenceRetriever.ScopedPassage::sourceId)
+                .filter(java.util.Objects::nonNull)
+                .findFirst()
+                .orElse(null);
     }
 
     /** The catalogue's answer for a catalogue question; null for any other question, or when the read failed. */

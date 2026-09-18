@@ -51,8 +51,11 @@ import com.sellerops.knowledge.spine.adapter.ReviewReplyAdapter;
 import com.sellerops.knowledge.spine.adapter.SellerDecisionAdapter;
 import com.sellerops.knowledge.spine.adapter.SellerGuidanceAdapter;
 import com.sellerops.knowledge.spine.adapter.SellerKnowledgeAdapter;
+import com.sellerops.knowledge.teach.dto.CaseDetailView;
+import com.sellerops.operationscase.CaseKnowledgeGap;
 import com.sellerops.operationscase.OperationsCaseRepository;
 import com.sellerops.operationscase.OperationsSubjectKind;
+import com.sellerops.operationscase.investigation.CaseDraftPreparer;
 import com.sellerops.operationscase.investigation.CaseInvestigationTools;
 import com.sellerops.order.fact.OrderFactLookup;
 import com.sellerops.organization.Organization;
@@ -330,6 +333,138 @@ class KnowledgeIntelligenceClosureTest {
                 .contains(SpineSourceType.ORG_KNOWLEDGE, SpineSourceType.SELLER_GUIDANCE);
         assertThat(spine.entries(otherOrg, null)).isEmpty();
         assertThat(spine.search(otherOrg, null, "방수", 10).hits()).isEmpty();
+    }
+
+    // ── Past Answer Prefill v1 ──────────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a past answer found where no product or policy knowledge was starts the ask — and grounds nothing")
+    void aPastAnswerStartsTheAskButGroundsNothing() {
+        UUID remembered = rememberAnswer(productId, "방수 되나요",
+                "제품 표면은 생활 방수가 되어 욕실 벽면에도 부착하실 수 있습니다.");
+        InquiryWorkItem work = seedInquiry("방수 되나요?", "욕실에 붙이려는데 방수 되는지 궁금합니다.");
+        Inquiry inquiry = inquiries.findById(work.getInquiryId()).orElseThrow();
+        StubModel model = StubModel.writing("[답변] 방수", "방수 됩니다.");
+
+        GeneratedDraftView view = composer(model).generateAs(org, work.getId(), "SYSTEM:RESPONSIBILITY");
+
+        assertThat(view.answerBasis()).as("a past answer alone is not a basis").isEqualTo("NO_ANSWER_BASIS");
+        assertThat(view.draft()).isNull();
+        assertThat(model.calls).isZero();
+        assertThat(view.knowledgeGap().precedentMemoryId()).isEqualTo(remembered);
+        CaseKnowledgeGap fromDraft = CaseKnowledgeGap.fromDraft(new CaseDraftPreparer.Prepared(false, null,
+                view.knowledgeState(), 0, "NO_DRAFT", view.answerBasis(), view.knowledgeGap()));
+        assertThat(fromDraft.precedentMemoryId()).isEqualTo(remembered);
+
+        CaseInvestigationTools.KnowledgeAssessment investigated =
+                tools().forOrg(org).assessKnowledge(OperationsSubjectKind.INQUIRY, inquiry.getId());
+        assertThat(investigated.basis()).isEqualTo("NO_ANSWER_BASIS");
+        assertThat(CaseKnowledgeGap.fromInvestigation(investigated).precedentMemoryId())
+                .as("the investigation path offers the same precedent").isEqualTo(remembered);
+
+        CaseDetailView.Prefill prefill = CaseKnowledgeService.prefill(org, inquiry.getId(), productId,
+                memories.findById(remembered).orElseThrow());
+        assertThat(prefill.text()).isEqualTo("제품 표면은 생활 방수가 되어 욕실 벽면에도 부착하실 수 있습니다.");
+        assertThat(prefill.strengthKo()).isEqualTo("채널에 등록된 답변");
+        assertThat(productSources.findAllByOrgIdAndProductIdOrderByCreatedAtAsc(org, productId))
+                .as("offering it wrote no knowledge").isEmpty();
+    }
+
+    @Test
+    @DisplayName("confirming the prefilled past answer teaches it, and the same inquiry then drafts from the knowledge")
+    void confirmingThePrefillTeachesAndTheCaseAnswers() {
+        UUID remembered = rememberAnswer(productId, "방수 되나요",
+                "제품 표면은 생활 방수가 되어 욕실 벽면에도 부착하실 수 있습니다.");
+        InquiryWorkItem work = seedInquiry("방수 되나요?", "욕실에 붙이려는데 방수 되는지 궁금합니다.");
+        StubModel model = StubModel.writing("[답변] 방수", "생활 방수가 되어 욕실에도 쓰실 수 있습니다.");
+        GeneratedDraftView before = composer(model).generateAs(org, work.getId(), "SYSTEM:RESPONSIBILITY");
+        String offered = memories.findById(before.knowledgeGap().precedentMemoryId()).orElseThrow().getAnswerBody();
+
+        // The seller edits a few words and saves — the same Teach path an empty box uses.
+        candidates.teach(org, "PRODUCT", productId, before.knowledgeGap().askedSubject(),
+                before.knowledgeGap().candidateId(), offered.replace("벽면에도", "벽면과 주방에도"),
+                OrgKnowledgeType.GENERAL_CS_FAQ, user, "판매자");
+
+        GeneratedDraftView after = composer(model).generateAs(org, work.getId(), "SYSTEM:RESPONSIBILITY");
+        assertThat(after.answerBasis()).isEqualTo("GROUNDED");
+        assertThat(after.draft()).isNotNull();
+        assertThat(after.knowledgeGap().precedentMemoryId()).as("a grounded case offers nothing to confirm").isNull();
+        assertThat(model.sawKnowledge).filteredOn(p -> p.text().contains("벽면과 주방에도")).isNotEmpty();
+        assertThat(productSources.findAllByOrgIdAndProductIdOrderByCreatedAtAsc(org, productId))
+                .singleElement().extracting(ProductKnowledgeSource::getAuthoredOrigin)
+                .as("what grounds it is the seller's confirmed knowledge, not the memory")
+                .isEqualTo(KnowledgeAuthorship.SELLER_ENTERED_KNOWLEDGE);
+        assertThat(memories.findById(remembered).orElseThrow().getAnswerBody())
+                .as("the memory itself is untouched").isEqualTo(offered);
+    }
+
+    @Test
+    @DisplayName("with no past answer the ask is exactly as before: an empty box")
+    void noPastAnswerNoPrefill() {
+        InquiryWorkItem work = seedInquiry("방수 되나요?", "욕실에 붙이려는데 방수 되는지 궁금합니다.");
+
+        GeneratedDraftView view = composer(StubModel.writing("제목", "본문"))
+                .generateAs(org, work.getId(), "SYSTEM:RESPONSIBILITY");
+
+        assertThat(view.answerBasis()).isEqualTo("NO_ANSWER_BASIS");
+        assertThat(view.knowledgeGap().askedSubject()).isEqualTo("방수");
+        assertThat(view.knowledgeGap().precedentMemoryId()).isNull();
+    }
+
+    @Test
+    @DisplayName("current knowledge beside a past answer: nothing is offered, because nothing is missing")
+    void currentKnowledgeMeansNoPrefill() {
+        seedPolicy("교환 안내", "상품 수령 후 7일 이내에 교환 신청을 하실 수 있습니다.");
+        rememberAnswer(null, "교환 신청", "교환은 수령 후 7일 안에 신청해 주시면 됩니다.");
+        InquiryWorkItem work = seedInquiry("교환 신청", "교환 신청하려면 어떻게 하나요?");
+
+        GeneratedDraftView view = composer(StubModel.writing("[답변] 교환", "7일 이내 신청해 주세요."))
+                .generateAs(org, work.getId(), "SYSTEM:RESPONSIBILITY");
+
+        assertThat(view.answerBasis()).isEqualTo("GROUNDED");
+        assertThat(view.knowledgeGap().precedentMemoryId()).isNull();
+    }
+
+    @Test
+    @DisplayName("a precedent is re-checked when shown: another org, another product, this inquiry's own answer, blank")
+    void thePrefillIsFencedWhenShown() {
+        UUID inquiryId = UUID.randomUUID();
+        com.sellerops.knowledge.memory.AnswerMemory m = memories.findById(
+                rememberAnswer(productId, "방수 되나요", "생활 방수가 됩니다.")).orElseThrow();
+
+        assertThat(CaseKnowledgeService.prefill(org, inquiryId, productId, m)).isNotNull();
+        assertThat(CaseKnowledgeService.prefill(UUID.randomUUID(), inquiryId, productId, m)).isNull();
+        assertThat(CaseKnowledgeService.prefill(org, inquiryId, UUID.randomUUID(), m)).isNull();
+        assertThat(CaseKnowledgeService.prefill(org, inquiryId, null, m)).isNull();
+        m.setOriginInquiryId(inquiryId);
+        assertThat(CaseKnowledgeService.prefill(org, inquiryId, productId, m)).isNull();
+        m.setOriginInquiryId(null);
+        m.setProductId(null);
+        assertThat(CaseKnowledgeService.prefill(org, inquiryId, UUID.randomUUID(), m))
+                .as("an unbound answer names no product, so it is about none in particular").isNotNull();
+        m.setAnswerBody("  ");
+        assertThat(CaseKnowledgeService.prefill(org, inquiryId, productId, m)).isNull();
+    }
+
+    @Test
+    @DisplayName("a case stored before the precedent existed still reads, and a new one round-trips its id")
+    void theStoredGapReadsWithAndWithoutAPrecedent() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        CaseKnowledgeGap old = mapper.readValue("""
+                {"basis":"NO_ANSWER_BASIS","missingSubject":"방수","suggestedScope":"PRODUCT","topic":null,
+                 "candidateId":null,"source":"DRAFT"}""", CaseKnowledgeGap.class);
+        assertThat(old.missingSubject()).isEqualTo("방수");
+        assertThat(old.precedentMemoryId()).isNull();
+
+        UUID id = UUID.randomUUID();
+        CaseKnowledgeGap now = new CaseKnowledgeGap("NO_ANSWER_BASIS", "방수", "PRODUCT", null, null, "DRAFT", id);
+        assertThat(mapper.readValue(mapper.writeValueAsString(now), CaseKnowledgeGap.class)).isEqualTo(now);
+    }
+
+    private UUID rememberAnswer(UUID boundProduct, String question, String answer) {
+        return memory.remember(new AnswerMemoryService.RememberCommand(org, "inquiry-answer:" + UUID.randomUUID(),
+                AnswerMemoryStrength.IMPORTED_SELLER_ANSWER, question, null, answer, boundProduct, "NAVER", null,
+                null, UUID.randomUUID(), null, null, null, null, null)).orElseThrow().getId();
     }
 
     // ── fixtures ────────────────────────────────────────────────────────────────────────────────────────────────

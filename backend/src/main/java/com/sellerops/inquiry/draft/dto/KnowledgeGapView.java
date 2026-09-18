@@ -40,11 +40,25 @@ import java.util.UUID;
  *                    필요합니다」 and 「기준은 추가하셨지만 이 질문에는 아직 적용되지 않습니다」. Telling a
  *                    seller to add what they already added says their work did not happen. Identity
  *                    only — the same scope, product and question `noteGap` files by; never resemblance.
+ * @param precedentMemoryId the seller's own past answer that the retrieval found for this question when the product
+ *                    and policy lanes found nothing current — an id, never the text. It is <b>not</b> a basis (a past
+ *                    answer alone never grounds a draft) and changes nothing about the verdict; a screen that asks
+ *                    the seller for the missing knowledge may start the seller's answer from it instead of from an
+ *                    empty box. Null when there was none, or when current evidence answered.
  */
 public record KnowledgeGapView(UUID productId, String topic, List<String> topics, String missingSubject,
                                String productOutcome, String policyOutcome, String applicability,
                                UUID variantId, boolean policyDeclaresTopic, UUID candidateId,
-                               boolean previouslyAnswered, String askedSubject, String catalogueChecked) {
+                               boolean previouslyAnswered, String askedSubject, String catalogueChecked,
+                               UUID precedentMemoryId) {
+
+    public KnowledgeGapView(UUID productId, String topic, List<String> topics, String missingSubject,
+                            String productOutcome, String policyOutcome, String applicability, UUID variantId,
+                            boolean policyDeclaresTopic, UUID candidateId, boolean previouslyAnswered,
+                            String askedSubject, String catalogueChecked) {
+        this(productId, topic, topics, missingSubject, productOutcome, policyOutcome, applicability, variantId,
+                policyDeclaresTopic, candidateId, previouslyAnswered, askedSubject, catalogueChecked, null);
+    }
 
     public KnowledgeGapView(UUID productId, String topic, List<String> topics, String missingSubject,
                             String productOutcome, String policyOutcome, String applicability, UUID variantId,
@@ -57,7 +71,8 @@ public record KnowledgeGapView(UUID productId, String topic, List<String> topics
     /** What the seller's catalogue was checked for and did not state, when this was a catalogue question. */
     public KnowledgeGapView catalogueChecked(String sentence) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome, policyOutcome,
-                applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, askedSubject, sentence);
+                applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, askedSubject, sentence,
+                precedentMemoryId);
     }
 
     /**
@@ -70,21 +85,29 @@ public record KnowledgeGapView(UUID productId, String topic, List<String> topics
      */
     public KnowledgeGapView asking(String subject) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome, policyOutcome,
-                applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, subject, catalogueChecked);
+                applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, subject, catalogueChecked,
+                precedentMemoryId);
+    }
+
+    /** The same gap, carrying the seller's own past answer the retrieval found — see {@link #precedentMemoryId()}. */
+    public KnowledgeGapView withPrecedent(UUID memoryId) {
+        return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome, policyOutcome,
+                applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, askedSubject,
+                catalogueChecked, memoryId);
     }
 
     /** The same gap, now carrying the 확인 필요 row it was filed as. */
     public KnowledgeGapView filedAs(UUID candidateId) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
                 policyOutcome, applicability, variantId, policyDeclaresTopic, candidateId, false, askedSubject,
-                catalogueChecked);
+                catalogueChecked, precedentMemoryId);
     }
 
     /** The same gap, on a question this seller has already answered once. Nothing is filed for it. */
     public KnowledgeGapView answeredBefore() {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
                 policyOutcome, applicability, variantId, policyDeclaresTopic, null, true, askedSubject,
-                catalogueChecked);
+                catalogueChecked, precedentMemoryId);
     }
 
     public static KnowledgeGapView of(InquiryEvidenceRetriever.InquiryEvidence retrieved,

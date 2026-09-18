@@ -18,13 +18,22 @@ import java.util.UUID;
  *                       anything else about a named product to that product. The seller may choose otherwise.
  * @param candidateId    the Knowledge Inbox row filed for this ask, when the draft path filed one — answering here
  *                       closes it
+ * @param precedentMemoryId the seller's own past answer the retrieval found when no product or policy knowledge did —
+ *                       an id only, so the case never holds a second copy of the text; the case screen re-reads it and
+ *                       starts the seller's answer from it. Never a basis: the gap stays a gap until the seller confirms.
  */
 public record CaseKnowledgeGap(String basis, String missingSubject, String suggestedScope, String topic,
-                               UUID candidateId, String source) {
+                               UUID candidateId, String source, UUID precedentMemoryId) {
+
+    /** A gap with no past-answer precedent — and the shape every case stored before Past Answer Prefill v1 reads as. */
+    public CaseKnowledgeGap(String basis, String missingSubject, String suggestedScope, String topic,
+                            UUID candidateId, String source) {
+        this(basis, missingSubject, suggestedScope, topic, candidateId, source, null);
+    }
 
     public static CaseKnowledgeGap fromInvestigation(CaseInvestigationTools.KnowledgeAssessment knowledge) {
         return new CaseKnowledgeGap(knowledge.basis(), knowledge.missingSubject(), knowledge.suggestedScope(),
-                knowledge.topic(), null, "INVESTIGATION");
+                knowledge.topic(), null, "INVESTIGATION", knowledge.precedentMemoryId());
     }
 
     /** Null unless the draft path refused for lack of an answer basis — a switched-off model is not a knowledge gap. */
@@ -40,6 +49,6 @@ public record CaseKnowledgeGap(String basis, String missingSubject, String sugge
                 : topic != null ? KnowledgeTopic.valueOf(topic).labelKo() : null;
         String scope = gap == null || gap.productId() == null || topic != null ? "ORG" : "PRODUCT";
         return new CaseKnowledgeGap(prepared.answerBasis(), subject, scope, topic,
-                gap == null ? null : gap.candidateId(), "DRAFT");
+                gap == null ? null : gap.candidateId(), "DRAFT", gap == null ? null : gap.precedentMemoryId());
     }
 }
