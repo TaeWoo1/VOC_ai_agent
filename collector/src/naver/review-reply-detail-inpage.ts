@@ -9,10 +9,9 @@
  *  - {@link buildNaverReviewDetailLocateScript}: find the EXACT review in the list's row model by its own id, require
  *    the page to say it has a reply, and mark that row's detail-open control — only when the control's own
  *    `openReviewDetailModal(<id>` call names the same id and its words are not a reply/write/edit/delete control.
- *  - {@link buildNaverReviewReplyReadScript}: with the detail open, read from the detail's own view model the one
- *    reply text (and date) of the object whose id is that review's id. Buyer identifiers are never read; the review's
- *    own text never leaves. When the model does not hold one unambiguous reply, it refuses and reports only key
- *    NAMES, so the gap is exact rather than guessed.
+ *  - {@link buildNaverReviewReplyReadScript}: with the detail open, read the one reply the pop-up pre-fills in its
+ *    reply field, after proving in the page that the pop-up is this review's. Buyer fields are never read; the
+ *    review's own text never leaves.
  *  - {@link buildNaverReviewDetailCloseLocateScript}: mark the detail's close control — a control whose words or
  *    label say close, and nothing that could write.
  *
@@ -35,7 +34,7 @@ export const DETAIL_LOCATE_REASONS = [
   "OK", "ROUTE_MISMATCH", "GRID_NOT_FOUND", "NOT_IN_MODEL", "NOT_REPLIED", "NOT_RENDERED",
   "NO_DETAIL_CONTROL", "REFUSED_CONTROL", "AMBIGUOUS_CONTROL",
 ] as const;
-export const REPLY_READ_REASONS = ["OK", "NO_DETAIL_OPEN", "AMBIGUOUS_DETAIL", "NOT_IN_DETAIL_MODEL", "NO_REPLY_IN_MODEL", "AMBIGUOUS_REPLY"] as const;
+export const REPLY_READ_REASONS = ["OK", "NO_DETAIL_OPEN", "AMBIGUOUS_DETAIL", "NOT_THIS_REVIEW", "NO_REPLY_SECTION", "NO_REPLY_FIELD", "AMBIGUOUS_REPLY", "FORM_NOT_PRISTINE", "NO_REPLY_IN_FIELD"] as const;
 
 function idLiteral(reviewId: string): string {
   if (!/^\d{6,20}$/.test(reviewId)) throw new Error("review id must be digits");
@@ -103,80 +102,74 @@ export function buildNaverReviewDetailLocateScript(reviewId: string): string {
 })()`;
 }
 
+/** The reply field the detail pop-up pre-fills with the seller's existing reply (READ-ONLY census, 2026-09-18). */
+export const REPLY_FIELD_MODEL = "vm.viewData.inputCommentContent";
+/** The pop-up's own label over that field. */
+export const REPLY_LABEL = "판매자답글";
+
+/**
+ * Read the seller's existing reply from the ONE open review-detail pop-up.
+ *
+ * Measured on the live pop-up (2026-09-18, structure only): it is `.modal.data-target-review-detail`; its view data is
+ * not reachable (AngularJS debug info off), and it shows neither the review id nor a reply date. The existing reply is
+ * pre-filled into the reply form's textarea (`ng-model="vm.viewData.inputCommentContent"`), under the label
+ * 「판매자답글」. Reading a field's value is a read; nothing is typed.
+ *
+ * Fail-closed checks, all required:
+ *  - exactly one visible detail pop-up;
+ *  - it is this review's: its review text equals, after whitespace normalisation, the row model's `reviewContent` for
+ *    the id the pop-up was opened from — compared in the page, only the boolean leaves;
+ *  - exactly one 「판매자답글」 label, its form holds exactly one field bound to {@link REPLY_FIELD_MODEL};
+ *  - the form is untouched (`ng-pristine`), so the value is what the channel loaded, never an edit in progress;
+ *  - the value is not blank.
+ * The review text and every buyer field stay in the page. Only the reply text leaves.
+ */
 export function buildNaverReviewReplyReadScript(reviewId: string): string {
   return `(function () {
   var ID = ${idLiteral(reviewId)};
-  var DENY = ${BUYER_KEY_DENY.toString()};
+  var LABEL = ${JSON.stringify(REPLY_LABEL)};
+  var MODEL = ${JSON.stringify(REPLY_FIELD_MODEL)};
   function visible(el) { var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; }
+  function norm(t) { return String(t || '').replace(/\\s+/g, ' ').trim(); }
   var roots = [];
-  var cands = document.querySelectorAll('.modal, [role="dialog"], [uib-modal-window], .modal-dialog');
-  for (var i = 0; i < cands.length; i++) {
-    if (!visible(cands[i])) { continue; }
-    var nested = false;
-    for (var j = 0; j < roots.length; j++) { if (roots[j].contains(cands[i])) { nested = true; } }
-    if (!nested) { roots.push(cands[i]); }
-  }
+  var cands = document.querySelectorAll('.modal.data-target-review-detail');
+  for (var i = 0; i < cands.length; i++) { if (visible(cands[i])) { roots.push(cands[i]); } }
   if (roots.length === 0) { return { reason: 'NO_DETAIL_OPEN' }; }
   if (roots.length > 1) { return { reason: 'AMBIGUOUS_DETAIL', detailCount: roots.length }; }
-  var ng = window.angular;
-  if (!ng || typeof ng.element !== 'function') { return { reason: 'NOT_IN_DETAIL_MODEL', scopes: 0 }; }
-  var scopes = [];
-  var els = [roots[0]].concat(Array.prototype.slice.call(roots[0].querySelectorAll('*'), 0, 400));
-  for (var e = 0; e < els.length; e++) {
-    var sc = null;
-    try { sc = ng.element(els[e]).scope(); } catch (x) { sc = null; }
-    if (sc && scopes.indexOf(sc) < 0) { scopes.push(sc); }
-  }
-  var seen = [];
-  var found = null;
-  function search(obj, depth) {
-    if (found || !obj || typeof obj !== 'object' || depth > 4 || seen.indexOf(obj) >= 0 || seen.length > 3000) { return; }
-    seen.push(obj);
-    if (String(obj.id) === ID || String(obj.reviewId) === ID) { found = obj; return; }
-    var keys = Object.keys(obj);
-    for (var k = 0; k < keys.length; k++) {
-      if (keys[k].charAt(0) === '$') { continue; }
-      var v; try { v = obj[keys[k]]; } catch (x) { continue; }
-      if (v && typeof v === 'object') { search(v, depth + 1); }
+  var root = roots[0];
+  // Which review is this? The row model's text for the id we opened, compared with the pop-up's text in the page.
+  var rows = document.querySelectorAll('.ag-center-cols-container .ag-row');
+  var api = null;
+  for (var r = 0; r < rows.length && !api; r++) {
+    var names = Object.getOwnPropertyNames(rows[r]);
+    for (var n = 0; n < names.length; n++) {
+      if (names[n].indexOf('__AG_') !== 0) { continue; }
+      var st = rows[r][names[n]];
+      if (st && st.renderedRow && st.renderedRow.rowNode) { api = st.renderedRow.rowNode.gridApi; break; }
     }
   }
-  for (var s = 0; s < scopes.length && !found; s++) { search(scopes[s], 0); }
-  if (!found) { return { reason: 'NOT_IN_DETAIL_MODEL', scopes: scopes.length }; }
-  var texts = [];
-  var dates = [];
-  function collect(obj, path, depth, inReply) {
-    if (!obj || typeof obj !== 'object' || depth > 3) { return; }
-    var keys = Object.keys(obj);
-    for (var k = 0; k < keys.length; k++) {
-      var key = keys[k];
-      if (key.charAt(0) === '$' || DENY.test(key)) { continue; }
-      var v; try { v = obj[key]; } catch (x) { continue; }
-      var here = path ? path + '.' + key : key;
-      var replyish = inReply || /comment|reply|answer/i.test(key);
-      if (typeof v === 'string' && v.trim().length > 0) {
-        if (replyish && /date|at$|dt$|dttm|time/i.test(key)) { dates.push({ path: here, value: v }); }
-        else if (replyish && !/type|status|yn$|flag|code|id$/i.test(key) && key !== 'reviewContent') {
-          texts.push({ path: here, value: v });
-        }
-      } else if (v && typeof v === 'object') {
-        collect(v, here, depth + 1, replyish);
-      }
-    }
+  var expected = null;
+  if (api && typeof api.forEachNode === 'function') {
+    api.forEachNode(function (node) { if (node && node.data && String(node.data.id) === ID) { expected = node.data.reviewContent; } });
   }
-  collect(found, '', 0, false);
-  var distinct = [];
-  for (var t = 0; t < texts.length; t++) {
-    if (distinct.indexOf(texts[t].value.trim()) < 0) { distinct.push(texts[t].value.trim()); }
+  var shown = root.querySelectorAll('.txt-detail');
+  if (expected === null || shown.length !== 1 || norm(shown[0].textContent) !== norm(expected)) {
+    return { reason: 'NOT_THIS_REVIEW' };
   }
-  if (distinct.length === 0) {
-    // Key NAMES only, so the gap is exact: where the model keeps things, never what it holds.
-    return { reason: 'NO_REPLY_IN_MODEL', keys: Object.keys(found).filter(function (k) { return !DENY.test(k); }) };
-  }
-  if (distinct.length > 1) { return { reason: 'AMBIGUOUS_REPLY', paths: texts.map(function (x) { return x.path; }) }; }
-  var textPath = null;
-  for (var p = 0; p < texts.length; p++) { if (texts[p].value.trim() === distinct[0]) { textPath = texts[p].path; break; } }
-  return { reason: 'OK', replyText: distinct[0], repliedAt: dates.length ? dates[0].value : null, textPath: textPath,
-    datePath: dates.length ? dates[0].path : null };
+  var labels = [];
+  var strongs = root.querySelectorAll('strong');
+  for (var s = 0; s < strongs.length; s++) { if (norm(strongs[s].textContent).replace(/ /g, '') === LABEL) { labels.push(strongs[s]); } }
+  if (labels.length !== 1) { return { reason: labels.length ? 'AMBIGUOUS_REPLY' : 'NO_REPLY_SECTION' }; }
+  var form = labels[0].closest('form');
+  if (!form) { return { reason: 'NO_REPLY_SECTION' }; }
+  var fields = form.querySelectorAll('textarea');
+  var bound = [];
+  for (var f = 0; f < fields.length; f++) { if (fields[f].getAttribute('ng-model') === MODEL) { bound.push(fields[f]); } }
+  if (bound.length !== 1) { return { reason: bound.length ? 'AMBIGUOUS_REPLY' : 'NO_REPLY_FIELD' }; }
+  if (!/(^|\\s)ng-pristine(\\s|$)/.test(String(form.className || ''))) { return { reason: 'FORM_NOT_PRISTINE' }; }
+  var value = String(bound[0].value || '');
+  if (value.trim().length === 0) { return { reason: 'NO_REPLY_IN_FIELD' }; }
+  return { reason: 'OK', replyText: value.trim(), repliedAt: null, textPath: MODEL, datePath: null };
 })()`;
 }
 

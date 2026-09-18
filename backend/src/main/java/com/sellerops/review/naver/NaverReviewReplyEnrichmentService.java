@@ -125,7 +125,10 @@ public class NaverReviewReplyEnrichmentService {
                 continue;
             }
             r.setSellerReplyBody(text);
-            r.setSellerReplyAt(parse(o.repliedAt()));
+            // The detail pop-up shows no reply date (census 2026-09-18); the export's 답글등록일시, already on this row, is
+            // the channel's own statement of when the reply was posted.
+            Instant stated = parse(o.repliedAt());
+            r.setSellerReplyAt(stated != null ? stated : r.getRepliedAt());
             r.setSellerReplyObservedAt(now);
             r.setSellerReplySource(SOURCE);
             reviews.save(r);

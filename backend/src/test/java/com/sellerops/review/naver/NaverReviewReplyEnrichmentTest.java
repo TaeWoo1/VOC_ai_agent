@@ -151,6 +151,12 @@ class NaverReviewReplyEnrichmentTest {
         assertThat(service.record(other, List.of(new NaverReviewReplyEnrichmentService.Observation(
                 "5055683531", "침입", null))).refused()).as("another org cannot write onto it").isEqualTo(1);
         assertThat(reviews.findById(replied.getId()).orElseThrow().getSellerReplyBody()).isEqualTo(reply);
+
+        // A reading without a date keeps the export's 답글등록일시 — the pop-up states none.
+        Review undated = review(org, molding.getId(), "5055683533", ReviewReplyState.ANSWERED, "배송 빨라요");
+        service.record(org, List.of(new NaverReviewReplyEnrichmentService.Observation("5055683533", "감사합니다.", null)));
+        assertThat(reviews.findById(undated.getId()).orElseThrow().getSellerReplyAt())
+                .isEqualTo(Instant.parse("2026-08-19T00:00:00Z"));
     }
 
     private Product product(UUID orgId, String name) {
@@ -171,6 +177,9 @@ class NaverReviewReplyEnrichmentTest {
         r.setBody(body);
         r.setReplyState(state);
         r.setReceivedAt(Instant.parse("2026-08-18T00:00:00Z"));
+        if (state == ReviewReplyState.ANSWERED) {
+            r.setRepliedAt(Instant.parse("2026-08-19T00:00:00Z"));
+        }
         return reviews.save(r);
     }
 }

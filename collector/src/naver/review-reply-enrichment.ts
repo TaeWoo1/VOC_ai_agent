@@ -79,7 +79,7 @@ export async function enrichNaverReviewReplies(
     for (let i = 0; i < attempts; i += 1) {
       await page.waitForTimeout(settleMs);
       read = await page.evaluate<ReadOut>(buildNaverReviewReplyReadScript(id));
-      if (read.reason !== "NO_DETAIL_OPEN" && read.reason !== "NOT_IN_DETAIL_MODEL") break;
+      if (read.reason !== "NO_DETAIL_OPEN") break;
     }
     if (read.reason === "OK" && read.replyText) {
       observations.push({ sourceReviewId: id, replyText: read.replyText, repliedAt: read.repliedAt ?? null });

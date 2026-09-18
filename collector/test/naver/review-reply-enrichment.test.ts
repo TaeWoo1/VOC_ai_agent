@@ -137,3 +137,42 @@ describe("NAVER review reply enrichment — source fence", () => {
     }
   });
 });
+
+describe("NAVER review reply enrichment — reply read script (DOM surface, census 2026-09-18)", () => {
+  function el(props: Record<string, unknown>) {
+    return { getBoundingClientRect: () => ({ width: 10, height: 10 }), ...props } as Record<string, unknown>;
+  }
+  function run(opts: { modals?: number; shownText?: string; rowText?: string; pristine?: boolean; value?: string; fields?: number }) {
+    const textarea = el({ value: opts.value ?? "안녕하세요 고객님, 감사합니다.", getAttribute: (k: string) => (k === "ng-model" ? "vm.viewData.inputCommentContent" : null) });
+    const form = el({ className: opts.pristine === false ? "ng-dirty" : "ng-pristine ng-valid",
+      querySelectorAll: () => Array.from({ length: opts.fields ?? 1 }, () => textarea) });
+    const label = el({ textContent: "판매자답글", closest: (sel: string) => (sel === "form" ? form : null) });
+    const detail = el({ textContent: opts.shownText ?? "좋아요 잘 쓰고 있어요" });
+    const modal = el({ querySelectorAll: (sel: string) => (sel === ".txt-detail" ? [detail] : sel === "strong" ? [label] : []) });
+    const node = { data: { id: 5047160668, reviewContent: opts.rowText ?? "좋아요  잘 쓰고 있어요" }, gridApi: undefined as unknown };
+    node.gridApi = { forEachNode: (fn: (n: unknown) => void) => fn(node) };
+    const row = { __AG_0: { renderedRow: { rowNode: node } } };
+    const document = {
+      querySelectorAll: (sel: string) => (sel === ".modal.data-target-review-detail"
+        ? Array.from({ length: opts.modals ?? 1 }, () => modal) : sel.includes("ag-row") ? [row] : []),
+    };
+    return new Function("document", "window", `return (${buildNaverReviewReplyReadScript("5047160668")});`)(document, {}) as {
+      reason: string; replyText?: string;
+    };
+  }
+
+  it("reads the pre-filled reply only when the pop-up is provably this review's and untouched", () => {
+    expect(run({})).toMatchObject({ reason: "OK", replyText: "안녕하세요 고객님, 감사합니다." });
+    expect(run({ shownText: "다른 리뷰 글" }).reason).toBe("NOT_THIS_REVIEW");
+    expect(run({ pristine: false }).reason).toBe("FORM_NOT_PRISTINE");
+    expect(run({ value: "   " }).reason).toBe("NO_REPLY_IN_FIELD");
+    expect(run({ fields: 2 }).reason).toBe("AMBIGUOUS_REPLY");
+    expect(run({ modals: 2 }).reason).toBe("AMBIGUOUS_DETAIL");
+    expect(run({ modals: 0 }).reason).toBe("NO_DETAIL_OPEN");
+  });
+
+  it("the review's own text never leaves — only the reply does", () => {
+    const out = run({});
+    expect(JSON.stringify(out)).not.toContain("잘 쓰고 있어요");
+  });
+});
