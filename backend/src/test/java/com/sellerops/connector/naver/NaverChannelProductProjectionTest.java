@@ -70,6 +70,8 @@ class NaverChannelProductProjectionTest {
                 .containsEntry("판매자 태그", "컵디스펜서, 종이컵");
         assertThat(d.facts().values()).as("legal clauses, codes and phone numbers are not product statements")
                 .noneMatch(v -> v.equals("0") || v.equals("1") || v.contains("010-") || v.contains("02-"));
+        assertThat(d.facts()).as("a 고시 field that only points at the page states nothing")
+                .doesNotContainValue("상세페이지 참조");
         assertThat(d.attributes()).hasSize(2);
         assertThat(d.effectiveStatus()).isEqualTo("SALE");
         assertThat(d.leafCategoryId()).isEqualTo("50003307");

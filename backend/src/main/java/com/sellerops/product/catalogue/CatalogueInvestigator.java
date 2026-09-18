@@ -142,15 +142,23 @@ public class CatalogueInvestigator {
      * @param detailReads      상세페이지 reads made for this question
      * @param detailUnread     on-sale candidates whose 상세페이지 has never been read — what «checked» did NOT cover
      * @param detailImageOnly  on-sale candidates whose 상세페이지 was read and is pictures — its text could not be checked
+     * @param detailNoticeStated on-sale candidates whose detail read left at least one 상품정보제공고시 statement — a
+     *                         read whose 고시 fields were all «상품상세참조» checked the page, not the product's 고시 (spec facts of
+     *                         the detail read: 고시, 모델명, named attributes)
      */
     public record Finding(CatalogueQuestion question, int candidates, int onSale, List<Statement> matches,
                           List<Statement> notOnSale, List<Statement> otherValue, List<Statement> negated,
-                          int detailReads, int detailUnread, int detailImageOnly) {
+                          int detailReads, int detailUnread, int detailImageOnly, int detailNoticeStated) {
 
         public Finding(CatalogueQuestion question, int candidates, int onSale, List<Statement> matches,
                        List<Statement> notOnSale, List<Statement> otherValue, List<Statement> negated,
                        int detailReads) {
-            this(question, candidates, onSale, matches, notOnSale, otherValue, negated, detailReads, 0, 0);
+            this(question, candidates, onSale, matches, notOnSale, otherValue, negated, detailReads, 0, 0, 0);
+        }
+
+        /** On-sale candidates whose 상세페이지 was read, now or before — the only ones whose 추가상품·고시 were checked. */
+        public int detailRead() {
+            return Math.max(0, onSale - detailUnread);
         }
 
         public Finding {
@@ -177,17 +185,33 @@ public class CatalogueInvestigator {
                 sb.append("이 상품에 등록된 다른 옵션을 찾지 못했습니다.");
             } else {
                 sb.append("판매 중인 「").append(question.head()).append("」 상품 ").append(onSale)
-                        .append("개의 상품명·옵션·추가상품·상품 정보를 확인했지만 「").append(question.target())
+                        .append("개의 상품명·옵션을 확인했지만 「").append(question.target())
                         .append("」에 맞는다고 적힌 상품은 없었습니다.");
             }
-            // What «checked» did not cover, said as such: not reading a page and reading it and finding nothing are
-            // different claims.
-            if (detailUnread > 0) {
-                sb.append(" 그중 ").append(detailUnread).append("개는 상세페이지를 아직 읽지 못했습니다.");
-            }
-            if (detailImageOnly > 0) {
-                sb.append(" 상세페이지가 이미지로만 된 상품 ").append(detailImageOnly)
-                        .append("개는 이미지 속 내용을 확인하지 못했습니다.");
+            // What was read, and what was not, as separate claims: 추가상품 and 고시 come only from a detail read, a 고시
+            // made of «상품상세참조» states nothing, and a page made of pictures was read without its content being seen.
+            // Not reading a page and reading it and finding nothing are different claims.
+            int read = detailRead();
+            if (question.kind() != CatalogueQuestion.Kind.OTHER_OPTION && onSale > 0) {
+                if (read == 0) {
+                    sb.append(" 상세 정보(추가상품·상품정보제공고시)는 읽지 못했습니다.");
+                } else {
+                    sb.append(" 상세 정보(추가상품·상품정보제공고시)는 ")
+                            .append(read == onSale ? "모두" : "그중 " + read + "개에서").append(" 읽었");
+                    if (detailNoticeStated < read) {
+                        sb.append("고, 상품정보제공고시·속성에 실제 내용이 적힌 상품은 ").append(detailNoticeStated)
+                                .append("개였습니다.");
+                    } else {
+                        sb.append("습니다.");
+                    }
+                    if (detailImageOnly > 0) {
+                        sb.append(detailImageOnly == read ? " 읽은 상품의 상세페이지는 모두" : " 그중 " + detailImageOnly + "개는 상세페이지가")
+                                .append(" 이미지로만 되어 있어 이미지 속 내용은 확인하지 못했습니다.");
+                    }
+                    if (detailUnread > 0) {
+                        sb.append(" 나머지 ").append(detailUnread).append("개는 상세 정보를 읽지 못했습니다.");
+                    }
+                }
             }
             if (!notOnSale.isEmpty()) {
                 sb.append(" 「").append(question.target()).append("」")
@@ -267,7 +291,7 @@ public class CatalogueInvestigator {
                     .ifPresent(p -> candidates.put(p.getId(), p));
         }
         if (candidates.isEmpty()) {
-            return new Finding(question, 0, 0, List.of(), List.of(), List.of(), List.of(), 0, 0, 0);
+            return new Finding(question, 0, 0, List.of(), List.of(), List.of(), List.of(), 0, 0, 0, 0);
         }
 
         Map<UUID, List<ChannelProduct>> listings = listingsOf(orgId, candidates.keySet());
@@ -356,18 +380,20 @@ public class CatalogueInvestigator {
                 .filter(id -> squash(candidates.get(id).getName()).contains(head))
                 .toList());
         return new Finding(question, checked, onSale, onePerProduct(matches), onePerProduct(notOnSale),
-                onePerProduct(otherValue), onePerProduct(negated), reads, coverage[0], coverage[1]);
+                onePerProduct(otherValue), onePerProduct(negated), reads, coverage[0], coverage[1], coverage[2]);
     }
 
     /**
-     * {never read, read and pictures} among these products — from the page-shape marker every detail read writes and
-     * the indexed document an older read left. A database read only.
+     * {never read, read and pictures, read with a 고시 statement} among these products — from the page-shape marker
+     * every detail read writes, the indexed document an older read left, and the {@code spec:} facts stated under the
+     * marker's own source (the detail read's). A database read only.
      */
     private int[] coverage(UUID orgId, List<UUID> ids) {
         if (ids.isEmpty()) {
-            return new int[] {0, 0};
+            return new int[] {0, 0, 0};
         }
         Map<UUID, String> shape = new HashMap<>();
+        Map<UUID, String> detailSource = new HashMap<>();
         for (ProductFact f : em.createQuery("""
                         select f from ProductFact f
                         where f.orgId = :org and f.productId in :ids and f.factKey = :key
@@ -375,6 +401,22 @@ public class CatalogueInvestigator {
                 .setParameter("org", orgId).setParameter("ids", ids).setParameter("key", FactKeys.DETAIL_PAGE)
                 .getResultList()) {
             shape.put(f.getProductId(), f.getFactValue());
+            detailSource.put(f.getProductId(), f.getSource());
+        }
+        Set<UUID> noticeStated = new java.util.HashSet<>();
+        if (!detailSource.isEmpty()) {
+            for (ProductFact f : em.createQuery("""
+                            select f from ProductFact f
+                            where f.orgId = :org and f.productId in :ids and f.factKey like :spec
+                            """, ProductFact.class)
+                    .setParameter("org", orgId).setParameter("ids", List.copyOf(detailSource.keySet()))
+                    .setParameter("spec", FactKeys.SPEC + ":%")
+                    .getResultList()) {
+                if (f.getSource() != null && f.getSource().equals(detailSource.get(f.getProductId()))
+                        && !com.sellerops.product.NoticePlaceholder.isPlaceholder(f.getFactValue())) {
+                    noticeStated.add(f.getProductId());
+                }
+            }
         }
         Set<UUID> documented = em.createQuery("""
                         select s.productId from ProductKnowledgeSource s
@@ -393,7 +435,7 @@ public class CatalogueInvestigator {
                 images++;
             }
         }
-        return new int[] {unread, images};
+        return new int[] {unread, images, noticeStated.size()};
     }
 
     /** Products with an offered 추가상품 whose label names the head. */

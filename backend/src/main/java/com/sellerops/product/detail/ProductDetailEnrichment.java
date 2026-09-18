@@ -150,6 +150,11 @@ public class ProductDetailEnrichment {
      * When this product's detail was last read: the later of the indexed document's update and the page-shape marker
      * every read writes. Null when it never was.
      */
+    /** Remove stored 고시 pointers («상품상세참조») written before they were refused. Local; see the writer. */
+    public int dropPlaceholderSpecs(UUID orgId) {
+        return catalogue == null ? 0 : catalogue.dropPlaceholderSpecs(orgId);
+    }
+
     @Transactional(readOnly = true)
     public Instant lastRead(UUID orgId, UUID productId) {
         Instant doc = existingDocument(orgId, productId).map(ProductKnowledgeSource::getUpdatedAt).orElse(null);

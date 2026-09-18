@@ -305,6 +305,7 @@ class KnowledgeBootstrapTest {
         assertThat(detail.onSaleCatalogue()).isEqualTo(3);
         assertThat(detail.remaining()).isEqualTo(1);
         assertThat(detail.covered()).as("only a has ever been read").isEqualTo(1);
+        verify(trigger).dropPlaceholderSpecs(org);  // stored 고시 pointers go on every bootstrap
     }
 
     @Test

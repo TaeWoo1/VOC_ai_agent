@@ -280,6 +280,46 @@ at the first one; the report carries `stoppedBy` and counts the rest as `remaini
 why; the draft screen treats it as «detail not finished». Attribute-catalogue failures are cached for the TTL so a refused
 category is not re-asked per listing. Backend 4,375 tests, 0 failures.
 
+**§7 live read, retried on the registered IP (2026-09-19, `apr-649defa8` / `wt-37fd820a`, READ_ONLY).** Same clone,
+HEAD `693ea27d`, egress 211.222.138.6 (the registered address). NAVER product lanes only; both inquiry lanes, Cafe24,
+Coupang, every scheduler and the draft model off; the clone's schedules paused for the run and restored after. One
+`POST /api/knowledge/learned/bootstrap`, 45 s. **Not refused.** Requests: catalogue list `POST /external/v1/products/search`
+×2 pages (67 rows — a POST, and a read on NAVER's contract; it is on `NaverReadOnlyFenceTest`'s READ allowlist),
+channel-product detail GET ×36 (on sale went 37 → 36 since 09-05), attribute-catalogue GET ×7 (3 categories × 2 + units
+×1), cached token mints. Failed 0, `stoppedBy` none, WRITE 0. The inquiry-history step ended locally as «not supported on
+this channel» with both lanes off — no request.
+
+What was learned (clone): detail 36/36 applied — **35 IMAGE_ONLY**, 1 TEXT_INDEXED; facts 509 → 1,195, variants 425 →
+997; 추가상품 facts 286; 상품정보제공고시 facts 332.
+
+**Follow-up (same day): findings 1 and 3 fixed; finding 2 is waiting on a payload check.**
+
+1. **고시 pointers are not facts.** 286 of the 332 고시 values were 「상품상세참조」/「상품상세 참조」: the field title was
+   projected, but the value says nothing about the product. `NoticePlaceholder` is a closed grammar: optional 상품, then
+   상세, an optional 페이지/설명/정보/이미지/내용, then 참조/참고, matched with spaces and punctuation removed. A real value that only
+   mentions the page («…참조, 2m») is kept. Pointers are refused at three points:
+   - the projection (`NoticeLabels`);
+   - the writer's single write path for `spec:` facts, which covers every source;
+   - `replaceFacts`, where a refused pointer is not «kept», so a stored one under that key is deleted.
+
+   Facts stored before the rule are removed on every bootstrap by `dropPlaceholderSpecs` (local, no request), because an
+   unchanged listing is not re-read. On the clone the rebootstrap removed **286**, leaving 46 NAVER detail `spec:`
+   facts, **0** of them pointers.
+2. **Named category attributes: 0 facts.** Not changed. Seven catalogue reads returned 200, but no listing's attribute
+   ids came out as a named fact. Where the attribute, value and category ids actually sit in the payload must be seen in
+   2–3 real payloads before the projection is touched. That needs its own READ approval.
+3. **The coverage sentence separates what was read from what was not.** It used to say
+   「…상품명·옵션·추가상품·상품 정보를 확인했지만」 over every candidate, although add-ons and 고시 exist only where a
+   detail page was read. It now claims names and options for all candidates, and says separately how many detail pages
+   were read, how many of those state real 고시·attribute content, how many are pictures, and how many were not read.
+
+**689162087 after the fix** (clone, connectors off, model off; 0 marketplace calls, 0 model calls): still
+`NO_ANSWER_BASIS`. The sentence is now 「판매 중인 「디스펜서」 상품 31개의 상품명·옵션을 확인했지만 「9oz」에 맞는다고
+적힌 상품은 없었습니다. 상세 정보(추가상품·상품정보제공고시)는 그중 15개에서 읽었고, 상품정보제공고시·속성에 실제 내용이
+적힌 상품은 10개였습니다. 읽은 상품의 상세페이지는 모두 이미지로만 되어 있어 이미지 속 내용은 확인하지 못했습니다. 나머지
+16개는 상세 정보를 읽지 못했습니다.」. The 15 read are the NAVER dispensers. The 16 not read are Cafe24 listings, which
+have no detail source. Backend 4,383 tests, 0 failures.
+
 ## §8 A–H product-path re-check at HEAD (2026-09-18/19)
 
 **Offline leg — `sellerops_ah_verify`, every connector OFF, marketplace 0, model 0.** A: the auto-resolved review shows under

@@ -14,6 +14,8 @@ public interface ProductFactRepository extends JpaRepository<ProductFact, UUID> 
 
     List<ProductFact> findByOrgIdAndProductId(UUID orgId, UUID productId);
 
+    List<ProductFact> findByOrgIdAndFactKeyStartingWith(UUID orgId, String prefix);
+
     /** The targeted read behind {@code search_product_facts} — a need asks for a few keys, not all. */
     List<ProductFact> findByOrgIdAndProductIdAndFactKeyIn(
             UUID orgId, UUID productId, Collection<String> factKeys);

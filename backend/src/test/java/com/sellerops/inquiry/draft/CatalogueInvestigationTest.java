@@ -341,10 +341,24 @@ class CatalogueInvestigationTest {
         assertThat(a.catalogue().detailUnread()).as("the holder's page was never read").isEqualTo(1);
         assertThat(a.catalogue().detailImageOnly()).isEqualTo(1);
         assertThat(a.gap().catalogueChecked())
-                .contains("그중 1개는 상세페이지를 아직 읽지 못했습니다.")
-                .contains("상세페이지가 이미지로만 된 상품 1개는 이미지 속 내용을 확인하지 못했습니다.");
+                .as("names and options are claimed for every candidate; 추가상품·고시 only for the one whose page was read")
+                .contains("상품명·옵션을 확인했지만")
+                .doesNotContain("상품명·옵션·추가상품·상품 정보를 확인")
+                .contains("상세 정보(추가상품·상품정보제공고시)는 그중 1개에서 읽었고, 상품정보제공고시·속성에 실제 내용이 적힌 상품은 0개였습니다.")
+                .contains("읽은 상품의 상세페이지는 모두 이미지로만 되어 있어 이미지 속 내용은 확인하지 못했습니다.")
+                .contains("나머지 1개는 상세 정보를 읽지 못했습니다.");
         assertThat(allStatements(a.catalogue())).as("the page-shape marker is never quoted")
                 .noneMatch(s -> s.text().contains("IMAGE_ONLY"));
+
+        detailFact(org, only65, "spec:크기", "상품상세참조");
+        assertThat(assess(holder, QUESTION).catalogue().detailNoticeStated())
+                .as("a 고시 of pointers checked the page, not the product").isZero();
+        detailFact(org, only65, "spec:제조국", "대한민국");
+        InquiryKnowledgeAssessor.Assessment stated = assess(holder, QUESTION);
+        assertThat(stated.catalogue().detailNoticeStated()).isEqualTo(1);
+        assertThat(stated.gap().catalogueChecked())
+                .contains("상세 정보(추가상품·상품정보제공고시)는 그중 1개에서 읽었습니다.")
+                .doesNotContain("실제 내용이 적힌");
     }
 
     @Test

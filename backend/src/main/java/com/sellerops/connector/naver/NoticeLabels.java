@@ -23,7 +23,8 @@ import java.util.Set;
  * <p><b>Not projected:</b> the five legal-notice clauses every type repeats (청약철회·환불·보증·분쟁 처리 조항) and the
  * contact fields — they describe the store's policy and a phone number, not the product, and a phone number is not a
  * thing a catalogue answer should ever quote. A value of {@code "0"}/{@code "1"} is the schema's code for «관련 법령에
- * 따름 / 상품상세 참조», i.e. not a statement, and is skipped.
+ * 따름 / 상품상세 참조», i.e. not a statement, and is skipped — and so is the same pointer written out in words
+ * («상품상세참조», {@link com.sellerops.product.NoticePlaceholder}), which is how most sellers fill the field.
  */
 final class NoticeLabels {
 
@@ -57,7 +58,8 @@ final class NoticeLabels {
                     continue;
                 }
                 String text = value.asText().strip();
-                if (text.isEmpty() || text.equals("0") || text.equals("1")) {
+                if (text.isEmpty() || text.equals("0") || text.equals("1")
+                        || com.sellerops.product.NoticePlaceholder.isPlaceholder(text)) {
                     continue;
                 }
                 into.putIfAbsent(label(type.getKey(), name), text);

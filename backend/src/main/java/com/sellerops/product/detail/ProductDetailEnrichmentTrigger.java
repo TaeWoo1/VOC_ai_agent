@@ -172,6 +172,14 @@ public class ProductDetailEnrichmentTrigger {
         return enrichment.lastRead(orgId, productId);
     }
 
+    /**
+     * Remove stored 고시 values that only point at the detail page. A database write; never a channel call, and not
+     * gated by the switch — a fact that states nothing is wrong whether or not this deployment reads detail today.
+     */
+    public int dropPlaceholderSpecs(UUID orgId) {
+        return enrichment == null ? 0 : enrichment.dropPlaceholderSpecs(orgId);
+    }
+
     /** Whether this deployment reads 상세페이지 at all — the switch, and at least one channel that publishes one. */
     public boolean enabled() {
         return enabled && !sources.isEmpty();

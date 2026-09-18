@@ -220,7 +220,7 @@ public class ProductKnowledgeWriter {
 
     private int fact(UUID orgId, UUID productId, String key, String value, String unit,
                      CanonicalProduct row, Instant observed) {
-        if (!isPresent(value)) {
+        if (!isPresent(value) || NoticePlaceholder.isPlaceholderSpec(key, value)) {
             // The whole contract in one line: no source statement ⇒ no fact ⇒ UNAVAILABLE coverage.
             return 0;
         }
@@ -276,8 +276,8 @@ public class ProductKnowledgeWriter {
         for (Map.Entry<String, String> e : keyed.entrySet()) {
             String value = e.getValue();
             if (!isPresent(e.getKey()) || !isPresent(value) || value.length() > MAX_ATTRIBUTE_CHARS
-                    || e.getKey().length() > 120) {
-                continue;
+                    || e.getKey().length() > 120 || NoticePlaceholder.isPlaceholderSpec(e.getKey(), value)) {
+                continue;  // not kept ⇒ a stored pointer under this key is removed below
             }
             written += fact(orgId, productId, e.getKey(), value, null, row, observedAt);
             kept.add(e.getKey());
@@ -288,6 +288,23 @@ public class ProductKnowledgeWriter {
             }
         }
         return written;
+    }
+
+    /**
+     * Remove every {@code spec:} fact of this organisation whose value is only a pointer to the detail page
+     * ({@link NoticePlaceholder}). Facts written before the rule existed are not re-read until their listing changes, so
+     * the rule would otherwise hold for new reads only. Local, no channel request. Returns the number removed.
+     */
+    @Transactional
+    public int dropPlaceholderSpecs(UUID orgId) {
+        int removed = 0;
+        for (ProductFact f : facts.findByOrgIdAndFactKeyStartingWith(orgId, FactKeys.SPEC + ":")) {
+            if (NoticePlaceholder.isPlaceholderSpec(f.getFactKey(), f.getFactValue())) {
+                facts.delete(f);
+                removed++;
+            }
+        }
+        return removed;
     }
 
     /**

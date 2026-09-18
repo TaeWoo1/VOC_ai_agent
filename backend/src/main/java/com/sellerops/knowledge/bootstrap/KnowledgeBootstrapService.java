@@ -204,10 +204,19 @@ public class KnowledgeBootstrapService {
         // API-first: the channel's own list says what is on sale NOW before any listing's detail is read — a detail
         // pass over yesterday's catalogue would read ended listings and miss new ones.
         List<CatalogueRead> catalogue = readCatalogue(orgId, now);
+        // A listing read before 고시 pointers («상품상세참조») were refused keeps them until the channel changes it; they
+        // go now, with no request, so a re-bootstrap leaves no «spec that states nothing» behind.
+        int pointersRemoved = 0;
+        try {
+            pointersRemoved = detail == null ? 0 : detail.dropPlaceholderSpecs(orgId);
+        } catch (RuntimeException e) {
+            log.warn("knowledge bootstrap: placeholder cleanup failed org={} cause={}", orgId,
+                    e.getClass().getSimpleName());
+        }
         ProductDetail details = readProductDetail(orgId);
-        log.info("knowledge bootstrap org={} histories={} answers={} catalogue={} detail={}", orgId,
-                history.stream().map(h -> h.channelCode() + ":" + h.status()).toList(), remembered,
-                catalogue.stream().map(c -> c.channelCode() + ":" + c.status()).toList(), details);
+        log.info("knowledge bootstrap org={} histories={} answers={} catalogue={} placeholderSpecsRemoved={} detail={}",
+                orgId, history.stream().map(h -> h.channelCode() + ":" + h.status()).toList(), remembered,
+                catalogue.stream().map(c -> c.channelCode() + ":" + c.status()).toList(), pointersRemoved, details);
         return new Report(now, history, remembered, catalogue, details);
     }
 
