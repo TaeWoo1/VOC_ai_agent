@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { isAxiosError } from "axios";
 import { Btn } from "../ui/Btn";
-import { Status } from "../ui/Status";
+import { DecisionList, DecisionRow } from "../ui/DecisionRow";
 import { KnowledgeQuickAdd } from "./KnowledgeQuickAdd";
 import { api } from "../../lib/apiClient";
 import { scopeLabel } from "../../lib/knowledgeWords";
+import { COPY, shortDate } from "../../lib/copy/customerOps";
 import type { KnowledgeCandidateView, KnowledgeDocumentView } from "../../lib/types";
 
 /**
@@ -41,55 +42,32 @@ export function KnowledgeInbox({
   const [error, setError] = useState<string | null>(null);
   const gaps = candidates.filter((c) => c.origin === "DRAFT_GAP");
   const repeats = candidates.filter((c) => c.origin !== "DRAFT_GAP");
-  // Only ACTIVE documents: a seller who already retired a file has answered this question.
   const unusable = documents.filter((d) => d.active && d.passages === 0);
 
   if (gaps.length === 0 && repeats.length === 0 && unusable.length === 0) {
-    return <p className="break-keep text-sm text-muted">지금 확인하실 항목은 없습니다.</p>;
+    return <p className="break-keep px-1 text-sm text-muted">{COPY.toEnter} {COPY.none}</p>;
   }
 
   return (
-    <div className="flex flex-col gap-5" data-testid="knowledge-inbox">
+    <div className="flex flex-col gap-2" data-testid="knowledge-inbox">
       {error ? <p className="break-keep text-sm text-bad" role="alert">{error}</p> : null}
-
-      {gaps.length > 0 ? (
-        <Group
-          title="정보 필요"
-          hint="답변을 만들다가 회사의 기준을 찾지 못한 것입니다."
-          testId="knowledge-inbox-gaps"
-        >
-          {gaps.map((candidate) => (
-            <CandidateRow key={candidate.id} candidate={candidate} onChanged={onChanged} onError={setError} />
-          ))}
-        </Group>
-      ) : null}
-
-      {repeats.length > 0 ? (
-        <Group
-          title="확인할 후보"
-          hint="과거 고객 응답에서 반복된 문장입니다. 운영 기준으로 등록할지 확인해 주세요."
-          testId="knowledge-inbox-candidates"
-        >
-          {repeats.map((candidate) => (
-            <CandidateRow key={candidate.id} candidate={candidate} onChanged={onChanged} onError={setError} />
-          ))}
-        </Group>
-      ) : null}
-
-      {unusable.length > 0 ? (
-        <Group
-          title="자료 문제"
-          hint="읽을 내용이 없어 답변에 인용할 수 없는 자료입니다."
-          testId="knowledge-inbox-documents"
-        >
-          {unusable.map((document) => (
-            <li key={document.sourceId} className="flex flex-wrap items-center justify-between gap-2 py-3">
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="break-keep text-base text-ink">{document.fileName ?? document.title}</span>
-                <span className="break-keep text-sm text-muted">
-                  {scopeLabel(document.scope, document.productName)} · 읽을 내용 없음
-                </span>
-              </div>
+      <DecisionList ariaLabel={COPY.toEnter}>
+        {gaps.map((candidate, i) => (
+          <CandidateRow key={candidate.id} candidate={candidate} primary={i === 0} onChanged={onChanged} onError={setError} />
+        ))}
+        {repeats.map((candidate) => (
+          <CandidateRow key={candidate.id} candidate={candidate} primary={false} onChanged={onChanged} onError={setError} />
+        ))}
+        {unusable.map((document) => (
+          <DecisionRow
+            key={document.sourceId}
+            tone="amber"
+            icon="box"
+            tag="자료 문제"
+            source={scopeLabel(document.scope, document.productName)}
+            title={document.fileName ?? document.title}
+            line={COPY.noContent}
+            action={
               <Btn
                 size="sm"
                 variant="outline"
@@ -98,55 +76,28 @@ export function KnowledgeInbox({
                     await api.setKnowledgeDocumentActive(document.sourceId, false);
                     await onChanged();
                   } catch {
-                    setError("자료 상태를 바꾸지 못했습니다.");
+                    setError("상태 변경 실패 · 다시 시도");
                   }
                 }}
               >
-                사용 중지
+                {COPY.stopUsing}
               </Btn>
-            </li>
-          ))}
-        </Group>
-      ) : null}
+            }
+          />
+        ))}
+      </DecisionList>
     </div>
   );
 }
 
-function Group({
-  title,
-  hint,
-  testId,
-  children,
-}: {
-  title: string;
-  hint: string;
-  testId: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <p className="break-keep text-sm font-semibold text-ink">{title}</p>
-      <p className="break-keep text-sm text-muted">{hint}</p>
-      <ul className="mt-1 flex flex-col divide-y divide-line" data-testid={testId}>
-        {children}
-      </ul>
-    </div>
-  );
-}
-
-/**
- * One thing waiting, with the way to settle it right there.
- *
- * <p>A gap's text is a question and a repeat's text is an answer, so the same row reads them
- * differently: the question is stated and the editor opens empty; the sentence is quoted and the
- * editor opens holding it.
- */
 function CandidateRow({
   candidate,
+  primary,
   onChanged,
   onError,
 }: {
   candidate: KnowledgeCandidateView;
+  primary: boolean;
   onChanged: () => Promise<void> | void;
   onError: (message: string | null) => void;
 }) {
@@ -154,32 +105,55 @@ function CandidateRow({
   const [busy, setBusy] = useState(false);
   const isGap = candidate.origin === "DRAFT_GAP";
   const scope = candidate.scope === "PRODUCT" && candidate.productId ? "PRODUCT" : "ORG";
+  const source = [scopeLabel(candidate.scope, candidate.productName), shortDate(candidate.createdAt)].filter(Boolean).join(" · ");
 
   return (
-    <li className="flex flex-col gap-1 py-3">
-      <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
-        <Status tone="neutral">{scopeLabel(candidate.scope, candidate.productName)}</Status>
-        {candidate.evidenceCount > 0 ? <span>과거 답변 {candidate.evidenceCount}건에서 반복</span> : null}
-      </p>
-      <p className="whitespace-pre-wrap break-keep text-base leading-relaxed text-ink">
-        {candidate.content}
-      </p>
-
+    <DecisionRow
+      tone={isGap ? "blue" : "gray"}
+      icon={isGap ? "question" : "chat"}
+      tag={isGap ? "정보 부족" : "기준 후보"}
+      source={source}
+      title={candidate.content}
+      line={!isGap && candidate.evidenceCount > 0 ? `과거 답변 ${candidate.evidenceCount}건` : null}
+      action={
+        open ? null : (
+          <span className="flex items-center gap-1.5">
+            <Btn size="sm" variant="ghost" disabled={busy} onClick={async () => {
+              setBusy(true);
+              onError(null);
+              try {
+                await api.dismissKnowledgeCandidate(candidate.id);
+                await onChanged();
+              } catch (e) {
+                onError(
+                  isAxiosError(e) && e.response?.status === 409
+                    ? "이미 처리한 항목"
+                    : "처리 실패 · 다시 시도",
+                );
+              } finally {
+                setBusy(false);
+              }
+            }}>
+              {COPY.defer}
+            </Btn>
+            <Btn size="sm" variant={primary ? "solid" : "outline"} onClick={() => { onError(null); setOpen(true); }} disabled={busy}>
+              {isGap ? COPY.enter : COPY.registerRule}
+            </Btn>
+          </span>
+        )
+      }
+    >
       {open ? (
         <KnowledgeQuickAdd
           scope={scope}
           productId={candidate.productId}
           productName={candidate.productName}
-          // A gap opens EMPTY: its stored text is the question, and a question is never an answer.
           body={isGap ? "" : candidate.content}
-          saveLabel="답변 기준으로 등록"
+          saveLabel={COPY.registerRule}
           onSave={async (value) => {
             await api.acceptKnowledgeCandidate(candidate.id, {
               title: value.title,
               content: value.body,
-              // Carried since Knowledge Gap Continuity v1 — `accept` is the one write that files the
-              // fact and closes this exact row, so it has to be able to carry everything the editor
-              // asks for. Before that the 규격 control was hidden here rather than dropped silently.
               variantId: value.variantId,
               ...(scope === "PRODUCT"
                 ? { sourceType: value.topic as string }
@@ -190,36 +164,7 @@ function CandidateRow({
           }}
           onCancel={() => setOpen(false)}
         />
-      ) : (
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Btn size="sm" onClick={() => { onError(null); setOpen(true); }} disabled={busy}>
-            {isGap ? "답변 기준 추가" : "답변 기준으로 등록"}
-          </Btn>
-          <Btn
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              onError(null);
-              try {
-                await api.dismissKnowledgeCandidate(candidate.id);
-                await onChanged();
-              } catch (e) {
-                onError(
-                  isAxiosError(e) && e.response?.status === 409
-                    ? "이미 처리한 항목입니다."
-                    : "처리하지 못했습니다. 잠시 후 다시 시도해 주세요.",
-                );
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            아니요
-          </Btn>
-        </div>
-      )}
-    </li>
+      ) : null}
+    </DecisionRow>
   );
 }

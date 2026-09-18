@@ -53,7 +53,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // Knowledge Sources & Acquisition v1: what reviewnary knows is SETUP, not a daily destination —
       // a seller visits it when they have material to hand over or something to confirm, and the rest
       // of the time the knowledge reaches them inside the draft that used it.
-      { to: "/knowledge", label: "알고 있는 정보", short: "지식", icon: "settings" },
+      { to: "/knowledge", label: "지식", short: "지식", icon: "settings" },
       { to: "/connect", label: "채널 연결", short: "연결", icon: "link" },
       { to: "/settings", label: "설정", short: "설정", icon: "settings" },
     ],

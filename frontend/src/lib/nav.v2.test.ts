@@ -13,7 +13,7 @@ describe("nav.v2 — structure", () => {
     expect(NAV_GROUPS.map((group) => group.heading)).toEqual(["운영", "연결·설정"]);
   });
 
-  it("declares the workflow destinations, in order — 홈 / 상품 / 리뷰 / 문의 / 주문, then 알고 있는 정보 / 채널 연결 / 설정", () => {
+  it("declares the workflow destinations, in order — 홈 / 상품 / 리뷰 / 문의 / 주문, then 지식 / 채널 연결 / 설정", () => {
     expect(NAV_ITEMS.map((item) => item.to)).toEqual([
       "/",
       "/products",
@@ -35,7 +35,7 @@ describe("nav.v2 — structure", () => {
       "리뷰",
       "문의",
       "주문",
-      "알고 있는 정보",
+      "지식",
       "채널 연결",
       "설정",
     ]);

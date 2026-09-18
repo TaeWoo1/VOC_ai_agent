@@ -16,6 +16,7 @@ const getInquiryRowsStrict = vi.fn();
 const getReviewIssuesStrict = vi.fn();
 const getOperationsHomeStrict = vi.fn();
 const recordHomeOpened = vi.fn();
+const getCustomerOperationsHome = vi.fn();
 vi.mock("../../../lib/bridge/localAgentHint", () => ({ probeLocalAgent: async () => "PAIRED" }));
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -29,6 +30,7 @@ vi.mock("../../lib/apiClient", () => ({
     markProactiveCaseOpened: vi.fn(),
     // The return-visit signal: fire-and-forget, awaited by nothing, rendered by nothing.
     recordHomeOpened: () => recordHomeOpened(),
+    getCustomerOperationsHome: () => getCustomerOperationsHome(),
   },
   getToken: () => null,
 }));
@@ -170,6 +172,8 @@ beforeEach(() => {
   getInquiryQueueStrict.mockResolvedValue({ content: [], page: 0, size: 5, totalElements: 0, totalPages: 0 });
   getOperationsHomeStrict.mockResolvedValue(HOME);
   recordHomeOpened.mockResolvedValue(undefined);
+  // 고객 운영 관리 not opened for the org by default: the Home stays the conversation-first Home these suites describe.
+  getCustomerOperationsHome.mockResolvedValue({ available: false });
   getReviewIssuesStrict.mockResolvedValue([]);
   // Working Context v1 §2: the brief names the oldest waiting inquiries. Empty by default —
   // the tests that care about the named rows set their own.
@@ -479,3 +483,47 @@ describe("return-visit signal", () => {
     expect(await screen.findByLabelText("지금 확인할 리뷰")).toBeTruthy();
   });
 });
+
+describe("Customer Operations v3.1 — the job's Home", () => {
+  const CO = {
+    available: true, eligible: true, status: "ACTIVE", cadenceMinutes: 120,
+    lastCheckedAt: "2026-08-27T00:02:00Z", lastRunStatus: "SUCCESS", nextCheckAt: "2026-08-27T02:00:00Z",
+    sources: [],
+    decisions: { total: 1, rows: [{
+      caseId: "k-1", subjectKind: "INQUIRY", channelNameKo: "카페24", title: "배송은 언제 되나요?", rating: null,
+      reasonNote: "답변 대기", summary: "출고 기준이 등록돼 있습니다.", recommendedActionType: "REPLY_TO_CUSTOMER",
+      recommendedAction: null, missingInformation: [], draftPrepared: true, decidedBy: "AGENT",
+      openedAt: "2026-08-27T00:02:00Z", to: "/inquiries/i-1",
+    }] },
+    handled: { since: null, autoResolved: 5, monitoring: 1, draftsPrepared: 2, verifying: 0, rows: [], checked: 9 },
+    gaps: { total: 0, rows: [] },
+  };
+
+  it("replaces the numbers line, the opener turn and the four areas — one list, no second copy of the same inquiry", async () => {
+    getCustomerOperationsHome.mockResolvedValue(CO);
+    getInquiryQueueStrict.mockResolvedValue({
+      content: [{ workItemId: "w-1", inquiryId: "i-1", sellerAccountId: "a", channelId: "c", channelCode: "CAFE24", channelNameKo: "카페24",
+        productId: null, productName: null, phase: "PROPOSED", status: "UNANSWERED", title: "배송은 언제 되나요?", snippet: null,
+        receivedAt: "2026-08-26T23:00:00Z", hasDraft: true }],
+      page: 0, size: 50, totalElements: 1, totalPages: 1,
+    });
+    renderHome();
+
+    const card = await screen.findByTestId("work-flow-card");
+    expect(card).toHaveTextContent("자동 확인 · 24시간");
+    expect(card).toHaveTextContent("9건");
+    expect(screen.getByRole("heading", { level: 1, name: "홈" })).toBeInTheDocument();
+    // The case and the queue row are the same inquiry: drawn once, as the case.
+    const list = await screen.findByRole("list", { name: "확인 필요" });
+    const hrefs = within(list).getAllByRole("link").map((a) => a.getAttribute("href"));
+    expect(hrefs).toContain("/customer-operations/cases/k-1");
+    expect(hrefs).not.toContain("/inquiries/i-1");
+    expect(within(list).getAllByText("배송은 언제 되나요?")).toHaveLength(1);
+    // Nothing of the other Home is drawn beside it.
+    expect(screen.queryByRole("region", { name: "오늘 상태" })).toBeNull();
+    expect(screen.queryByText("AI가 먼저 확인한 일")).toBeNull();
+    expect(screen.queryByText("지금 확인할 리뷰")).toBeNull();
+    expect(screen.getByPlaceholderText("질문이나 지시를 입력하세요")).toBeInTheDocument();
+  });
+});
+

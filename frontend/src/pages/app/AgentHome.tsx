@@ -16,7 +16,9 @@ import { previewText } from "../../lib/plainText";
 import { matchCommandIntent, INTENT_HEADING } from "../../lib/commandIntents";
 import { INQUIRY_NEEDS_REPLY_PATH } from "../../lib/todayInbox";
 import { OperationsAreas } from "../../components/home/OperationsAreas";
-import { CustomerOperationsHomeBlock } from "../../components/customerOperations/CustomerOperationsHomeBlock";
+import { CustomerOpsHome, coHomeApplies } from "../../components/customerOperations/CustomerOpsHome";
+import { COPY } from "../../lib/copy/customerOps";
+import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
 import { hasAnythingToShow } from "../../lib/operationsHome";
 import type { InquiryListArtifact, InquiryListArtifact as InquiryList, ListArtifact } from "../../lib/conversation/types";
 import type { InquiryQueueResponse, MetricKpi, OperationsHome, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
@@ -80,6 +82,23 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
     };
   }, []);
 
+  /**
+   * 고객 운영 관리's own read (Customer Operations v3.1). When the job is open for this org the Home IS its
+   * 「자동 확인 → 내 확인 필요」 and one 「확인 필요」 list; otherwise the Home stays what it was. `undefined` = not
+   * read yet — nothing is drawn in its place, so the page does not flash the other Home first.
+   */
+  const [co, setCo] = useState<CustomerOperationsHome | null | undefined>(undefined);
+  const loadCo = useCallback(() => {
+    // Through a resolved promise so a client without this call (an older test double) is a failed read, not a crash.
+    return Promise.resolve()
+      .then(() => api.getCustomerOperationsHome())
+      .then((r) => setCo(r))
+      .catch(() => setCo(null));
+  }, []);
+  useEffect(() => {
+    void loadCo();
+  }, [loadCo]);
+
   useEffect(() => {
     let live = true;
     api
@@ -137,13 +156,19 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   // — prepared cases when there are any, and the waiting workload (from the same strict overview the
   // numbers line reads) when there are none. 「없습니다」 only when the same reads came back empty.
   const workload = useMemo(() => (data ? workloadPriorities(data) : null), [data]);
+  // Customer Operations v3.1: the job's Home replaces the numbers line, the opener turn and the four areas —
+  // its 「확인 필요」 list already names what the opener used to, and drawing both would list the same inquiry twice.
+  const coHome = !beforeFirstConnection && coHomeApplies(co) ? co : null;
   const leadingTurns = useMemo<DisplayTurn[]>(
     // §2: the opener speaks only when there is something to speak about. Before the first connection,
     // and on the morning after one when nothing has arrived, the lead sentence above IS the briefing —
     // an opener saying 「지금 먼저 확인할 일은 없습니다」 under it would be the same morning explained twice,
     // and the weaker explanation would be the one that sounds like a verdict on the store.
-    () => (cases && firstUse?.kind === "WORKING" && queue !== undefined ? [proactiveTurn(cases, workload, queue, storedInquiries(data))] : []),
-    [cases, workload, queue, firstUse, data],
+    () =>
+      co !== undefined && !coHome && cases && firstUse?.kind === "WORKING" && queue !== undefined
+        ? [proactiveTurn(cases, workload, queue, storedInquiries(data))]
+        : [],
+    [co, coHome, cases, workload, queue, firstUse, data],
   );
 
   const onBeforeSend = useCallback(
@@ -210,7 +235,7 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   // there is a brief, the greeting joins the numbers as one quiet line and the brief is the headline.
   // Before the first connection there is no brief and nothing else to say, so the headline stays.
   const briefed = leadingTurns.length > 0 && !beforeFirstConnection;
-  const lead = (
+  const legacyLead = (
     <div className="space-y-2">
       <h1 className="sr-only">오늘의 운영</h1>
       {beforeFirstConnection && firstUse ? (
@@ -291,13 +316,6 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
         product they have not started using, and an area rendering 0 from a failed read would be
         reporting a clear morning on the strength of an error.
       */}
-      {/*
-        Responsibility Runtime v1 — 「고객 운영 관리」, first among the areas because it is the job the seller handed
-        over: what needs their decision, what Reviewnary settled or prepared, and where it could not look. It reads its
-        own endpoint and draws nothing when that read fails, when the deployment has not opened the job for this
-        organisation, or before the first connection (the first-use briefing above owns that morning).
-      */}
-      {!beforeFirstConnection ? <CustomerOperationsHomeBlock now={now} /> : null}
       {home && !beforeFirstConnection
         && hasAnythingToShow(home.reviews, home.problems, home.prepared, home.collection) ? (
         <div className="pt-2">
@@ -307,13 +325,22 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
     </div>
   );
 
+  const lead = coHome ? (
+    <CustomerOpsHome co={coHome} ops={home} now={now} onChanged={() => void loadCo()} />
+  ) : co === undefined && firstUse?.kind === "WORKING" ? (
+    // The job's read has not landed: draw nothing in its place rather than the other Home for a moment.
+    <h1 className="sr-only">{COPY.homeTitle}</h1>
+  ) : (
+    legacyLead
+  );
+
   return (
     <ConversationWorkspace
       surface="home"
       leadingTurns={leadingTurns}
       lead={lead}
       chips={beforeFirstConnection ? FIRST_USE_PROMPTS : HOME_PROMPTS}
-      placeholder="무엇이든 물어보세요"
+      placeholder={coHome ? COPY.composer : "무엇이든 물어보세요"}
       onBeforeSend={onBeforeSend}
     />
   );

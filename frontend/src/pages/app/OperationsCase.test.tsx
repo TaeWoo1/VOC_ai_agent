@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { OperationsCaseDetail } from "../../lib/customerOperationsTypes";
@@ -78,6 +78,13 @@ function taught(): OperationsCaseDetail {
   });
 }
 
+/** The folded evidence's own control — a native <summary>, which carries no button role in jsdom. */
+function evidenceToggle(): HTMLElement {
+  const summary = [...document.querySelectorAll("summary")].find((el) => el.textContent?.startsWith("근거"));
+  if (!summary) throw new Error("no evidence disclosure");
+  return summary as HTMLElement;
+}
+
 function renderCase() {
   return render(
     <MemoryRouter initialEntries={["/customer-operations/cases/case-1"]}>
@@ -102,13 +109,18 @@ describe("OperationsCase", () => {
 
     const { container } = renderCase();
 
-    expect(await screen.findByText("방수 되나요?")).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "방수 되나요?" })).toBeTruthy();
     expect(screen.getByText(/욕실에 붙이려는데/)).toBeTruthy();
-    expect(screen.getByText(/회사·상품 지식 0건/)).toBeTruthy();
-    expect(screen.getByText("이 건에 쓸 수 있는 회사 지식을 찾지 못했습니다.")).toBeTruthy();
+    // 자동 확인 → 내 확인 필요: what was found, then what is left and why.
+    expect(screen.getByText("방수 정보 없음")).toBeTruthy();
+    expect(screen.getByText("답변 확인 후 발송")).toBeTruthy();
+    expect(screen.getByText("답변에 필요한 회사 정보가 없어 Reviewnary가 답을 만들 수 없습니다.")).toBeTruthy();
+    // A check that found nothing says so instead of printing 0.
+    expect(screen.getByText("회사·상품 지식 없음")).toBeTruthy();
+    expect(screen.getByText("고객이 남긴 내용 1")).toBeTruthy();
+    expect(screen.getByText("사용한 근거 없음")).toBeTruthy();
     expect(screen.getByText("「방수」에 대해 고객에게 안내할 기준이 없습니다.")).toBeTruthy();
-    expect(screen.getByText(/판매자 확인이 필요한 이유/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "문의 화면에서 보기" }).getAttribute("href")).toBe("/inquiries/inq-1");
+    expect(screen.getByRole("link", { name: /원문 보기/ }).getAttribute("href")).toBe("/inquiries/inq-1");
     await expectNoAxeViolations(container);
   });
 
@@ -118,12 +130,11 @@ describe("OperationsCase", () => {
     const user = userEvent.setup();
 
     renderCase();
-    await user.click(await screen.findByRole("button", { name: "정보 알려주기" }));
     await user.type(
-      screen.getByLabelText("고객에게 안내할 내용"),
+      await screen.findByLabelText("안내 내용"),
       "제품 표면은 생활 방수가 되어 욕실 벽면에도 부착하실 수 있습니다.",
     );
-    await user.click(screen.getByRole("button", { name: "저장하고 다시 준비" }));
+    await user.click(screen.getByRole("button", { name: "저장 후 초안 재작성" }));
 
     await waitFor(() =>
       expect(api.teachOperationsCase).toHaveBeenCalledWith("case-1", {
@@ -131,10 +142,18 @@ describe("OperationsCase", () => {
         scope: "PRODUCT",
       }),
     );
-    expect(await screen.findByText("판매자가 확정한 상품 지식")).toBeTruthy();
-    expect(screen.getByText("준비된 답변")).toBeTruthy();
+    // The ask is replaced by what was saved, where, and that the answer was re-drafted from it.
+    const receipt = await screen.findByRole("status", { name: "저장됨" });
+    expect(within(receipt).getByText("저장됨 · 이 상품")).toBeTruthy();
+    expect(within(receipt).getByText("제품 표면은 생활 방수가 되어 욕실 벽면에도 부착하실 수 있습니다.")).toBeTruthy();
+    expect(within(receipt).getByText(/초안 재작성 완료/)).toBeTruthy();
     expect(screen.queryByText("「방수」에 대해 고객에게 안내할 기준이 없습니다.")).toBeNull();
-    expect((screen.getByLabelText("답변 초안") as HTMLTextAreaElement).value).toContain("생활 방수");
+    const draft = screen.getByRole("region", { name: "답변 초안" });
+    expect(within(draft).getByText(/생활 방수가 되어 욕실에도/)).toBeTruthy();
+    expect(within(draft).getByText("미발송")).toBeTruthy();
+    expect(within(draft).getByText("상품 정보 1")).toBeTruthy();
+    await user.click(evidenceToggle());
+    expect(screen.getByText("판매자가 확정한 상품 지식")).toBeTruthy();
   });
 
   it("a past answer on a similar question is shown as precedent and can be confirmed as today's basis", async () => {
@@ -159,12 +178,14 @@ describe("OperationsCase", () => {
     const user = userEvent.setup();
 
     renderCase();
-    expect(await screen.findByText("지난 답변")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "지난 답변을 기준으로 쓰기" }));
-    expect((screen.getByLabelText("고객에게 안내할 내용") as HTMLTextAreaElement).value).toBe(
+    await screen.findByLabelText("안내 내용");
+    await user.click(evidenceToggle());
+    expect(screen.getByText("과거 답변")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "과거 답변 불러오기" }));
+    expect((screen.getByLabelText("안내 내용") as HTMLTextAreaElement).value).toBe(
       "욕실 벽면에도 붙이실 수 있습니다. 다만 물이 직접 닿는 곳은 피해 주세요.",
     );
-    await user.click(screen.getByRole("button", { name: "저장하고 다시 준비" }));
+    await user.click(screen.getByRole("button", { name: "저장 후 초안 재작성" }));
 
     await waitFor(() =>
       expect(api.teachOperationsCase).toHaveBeenCalledWith("case-1", {
@@ -200,24 +221,27 @@ describe("OperationsCase", () => {
 
     const { container } = renderCase();
 
-    expect(await screen.findByText("고객이 올린 사진")).toBeTruthy();
+    expect(await screen.findByRole("list", { name: "고객이 올린 사진" })).toBeTruthy();
     expect(await screen.findByAltText("고객이 올린 사진 1")).toBeTruthy();
-    expect(screen.getByText("사진에 보이는 것: 모서리가 깨진 흰색 몰딩")).toBeTruthy();
-    expect(screen.getByText("문제가 보임")).toBeTruthy();
+    expect(screen.getByText("분석: 모서리가 깨진 흰색 몰딩")).toBeTruthy();
+    expect(screen.getByText("문제 보임")).toBeTruthy();
     expect(screen.getByText("사진 확인 기능이 꺼져 있어 사진 내용은 보지 않았습니다.")).toBeTruthy();
-    expect(screen.getAllByText(/사진에 보이는 것:/)).toHaveLength(1);
+    // The photo nobody looked at gets no description and no verdict.
+    expect(screen.getAllByText(/^분석:/)).toHaveLength(1);
+    expect(screen.getAllByText(/문제 보임|이상 없음|판단 어려움/)).toHaveLength(1);
+    // A review with no title is named by its first line.
+    expect(screen.getByRole("heading", { level: 1, name: "별은 5개인데 모서리가 깨져서 왔어요." })).toBeTruthy();
     await expectNoAxeViolations(container);
   });
 
   it("an inquiry with no named product can only be taught company-wide", async () => {
     api.getOperationsCase.mockResolvedValue(detail({ productScopeAvailable: false, productName: null }));
-    const user = userEvent.setup();
 
     renderCase();
-    await user.click(await screen.findByRole("button", { name: "정보 알려주기" }));
+    await screen.findByLabelText("안내 내용");
 
-    expect(screen.queryByText(/이 상품에만/)).toBeNull();
-    expect(screen.getByLabelText("회사 전체 기준으로")).toBeTruthy();
+    expect(screen.queryByLabelText("이 상품")).toBeNull();
+    expect((screen.getByLabelText("회사 전체") as HTMLInputElement).checked).toBe(true);
   });
 
   it("rewriting the draft asks whether to keep it, and nothing on this screen sends it", async () => {
@@ -226,11 +250,15 @@ describe("OperationsCase", () => {
     const user = userEvent.setup();
 
     renderCase();
-    const editor = (await screen.findByLabelText("답변 초안")) as HTMLTextAreaElement;
+    // The draft is read first; 「유사 건에 재사용」 is offered only while editing.
+    const card = await screen.findByRole("region", { name: "답변 초안" });
+    expect(within(card).queryByLabelText("유사 건에 재사용")).toBeNull();
+    await user.click(within(card).getByRole("button", { name: "수정" }));
+    const editor = within(card).getByLabelText("답변 초안") as HTMLTextAreaElement;
     await user.clear(editor);
     await user.type(editor, "생활 방수가 되지만 물에 잠기는 곳은 피해 주세요.");
-    await user.click(screen.getByLabelText(/다음에도 참고하기 \(비슷한 건에서/));
-    await user.click(screen.getByRole("button", { name: "고쳐 쓰기 저장" }));
+    await user.click(within(card).getByLabelText("유사 건에 재사용"));
+    await user.click(within(card).getByRole("button", { name: "저장" }));
 
     await waitFor(() =>
       expect(api.editOperationsCaseDraft).toHaveBeenCalledWith("case-1", {
@@ -239,9 +267,10 @@ describe("OperationsCase", () => {
         scope: "PRODUCT",
       }),
     );
-    expect(screen.getByText(/아직 보내지 않았습니다/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "문의 화면에서 답변 보내기" }).getAttribute("href")).toBe("/inquiries/inq-1");
-    expect(screen.queryByRole("button", { name: /보내기/ })).toBeNull();
+    expect(within(card).getByText("미발송")).toBeTruthy();
+    expect(within(card).getByRole("link", { name: /발송 화면으로/ }).getAttribute("href")).toBe("/inquiries/inq-1");
+    // Nothing on this screen sends: no button says it sends.
+    expect(screen.queryByRole("button", { name: /발송|보내기|전송/ })).toBeNull();
   });
 
   it("a correction records what the seller thinks, with 「다음에도 참고」 as their choice", async () => {
@@ -250,10 +279,12 @@ describe("OperationsCase", () => {
     const user = userEvent.setup();
 
     renderCase();
-    await user.click(await screen.findByRole("button", { name: "다르게 처리해야 해요" }));
-    await user.selectOptions(screen.getByLabelText("맞는 처리 방법"), "REFUND_OR_COMPENSATION");
-    await user.type(screen.getByLabelText("이렇게 처리하는 이유 (선택)"), "이런 건은 환불로 처리합니다.");
-    await user.click(screen.getByRole("button", { name: "저장" }));
+    await user.click(await screen.findByRole("button", { name: "처리 변경" }));
+    const form = screen.getByRole("region", { name: "처리 변경" });
+    await user.selectOptions(within(form).getByLabelText("처리 방법"), "REFUND_OR_COMPENSATION");
+    await user.type(within(form).getByLabelText("메모 (선택)"), "이런 건은 환불로 처리합니다.");
+    expect((within(form).getByLabelText("유사 건에 재사용") as HTMLInputElement).checked).toBe(true);
+    await user.click(within(form).getByRole("button", { name: "저장" }));
 
     await waitFor(() =>
       expect(api.correctOperationsCase).toHaveBeenCalledWith("case-1", {

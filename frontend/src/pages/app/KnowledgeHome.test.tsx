@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { KnowledgeHome } from "./KnowledgeHome";
@@ -110,59 +110,58 @@ function draw() {
   return render(<MemoryRouter><KnowledgeHome /></MemoryRouter>);
 }
 
-describe("reviewnary가 알고 있는 정보", () => {
-  it("keeps its own title — it says what it knows, not only what was handed over", async () => {
+describe("지식", () => {
+  it("opens with what it holds and what it still needs — separate counts, never a sum", async () => {
     draw();
-    const summary = await screen.findByTestId("knowledge-summary");
-    for (const [label, value] of [
-      ["상품 지식", "38"],
-      ["운영 기준", "6"],
-      ["연결된 자료", "4"],
-      ["과거 고객 응답", "23"],
-    ]) {
-      expect(summary).toHaveTextContent(label);
-      expect(summary).toHaveTextContent(value);
-    }
-    // What reviewnary read WITHOUT being taught — the answer to 「처음부터 다 입력해야 하나요」.
-    expect(screen.getByText(/상품 정보 142개를 이미 읽고 있습니다/)).toBeInTheDocument();
-    // Past answers are consulted, never official, and the screen says so in words.
-    expect(screen.getByText(/공식 기준으로는 쓰지 않습니다/)).toBeInTheDocument();
+    const card = await screen.findByTestId("work-flow-card");
+    // What reviewnary read WITHOUT being taught is the headline — the answer to 「처음부터 다 입력해야 하나요」.
+    expect(card).toHaveTextContent("보유 정보");
+    expect(card).toHaveTextContent("142개 상품 정보");
+    for (const part of ["상품 지식 38", "운영 기준 6", "자료 4"]) expect(card).toHaveTextContent(part);
+    // Past answers are consulted, never official, and the card says so.
+    expect(card).toHaveTextContent("과거 응답 23 (참고용)");
+    expect(card).toHaveTextContent("입력 필요");
+    expect(card).toHaveTextContent("1건");
+    // The count is broken down by kind — 「답변 근거 없음」 would be untrue of a repeated answer.
+    await waitFor(() => expect(card).toHaveTextContent("기준 후보 1"));
+    expect(card).not.toHaveTextContent("답변 근거 없음");
+    // 142 + 38 + 6 + 4 is nobody's number.
+    expect(card).not.toHaveTextContent("190");
+    expect(screen.getByRole("heading", { level: 1, name: "지식" })).toBeInTheDocument();
   });
 
-  it("offers the same Agent conversation every other screen does — and hands it no document", async () => {
+  it("carries no second chat and no ask-link of its own — the shell's panel is the conversation", async () => {
     const { container } = draw();
-    await screen.findByTestId("knowledge-summary");
-    const launcher = screen.getByRole("link", { name: /이 내용으로 물어보기/ });
-    // The panel is the destination when the shell provides one; bare (as here) it is the /agent route.
-    // Either way the only thing that travels is WHICH SCREEN this is — no document id, no passage.
-    const href = launcher.getAttribute("href") ?? "";
-    expect(href).toContain("from=knowledge");
-    expect(href).not.toMatch(/goal=|productId=|d-1/);
-    // No second chat lives on this page.
+    await screen.findByTestId("work-flow-card");
+    expect(screen.queryByRole("link", { name: /물어보기/ })).toBeNull();
     expect(container.querySelectorAll("textarea")).toHaveLength(0);
+    // The two writing screens are under one control, as links.
+    await userEvent.click(screen.getByText("+ 추가"));
+    expect(screen.getByRole("link", { name: "상품 지식" })).toHaveAttribute("href", "/products");
+    expect(screen.getByRole("link", { name: "운영 기준" })).toHaveAttribute("href", "/settings/policies");
   });
 
   it("shows what was noticed with the seller's own count, and never promotes it", async () => {
     draw();
-    const candidates = await screen.findByTestId("knowledge-inbox-candidates");
-    expect(candidates).toHaveTextContent("부착 전 표면의 먼지와 기름기를 제거해 주세요.");
+    const inbox = await screen.findByTestId("knowledge-inbox");
+    expect(inbox).toHaveTextContent("부착 전 표면의 먼지와 기름기를 제거해 주세요.");
     // The fact that makes it worth a glance is a COUNT of the seller's own answers — not a score.
-    expect(candidates).toHaveTextContent("과거 답변 18건에서 반복");
-    expect(screen.getByText("확인할 후보")).toBeInTheDocument();
+    expect(inbox).toHaveTextContent("과거 답변 18건");
+    expect(screen.getByText("기준 후보")).toBeInTheDocument();
     // Nothing was written by rendering it.
     expect(acceptKnowledgeCandidate).not.toHaveBeenCalled();
   });
 
   it("the seller's press is what turns a candidate into knowledge, and it writes what they wrote", async () => {
     draw();
-    await screen.findByTestId("knowledge-inbox-candidates");
+    await screen.findByTestId("knowledge-inbox");
     getKnowledgeCandidates.mockResolvedValue([]);
-    await userEvent.click(screen.getByRole("button", { name: "답변 기준으로 등록" }));
+    await userEvent.click(screen.getByRole("button", { name: "기준 등록" }));
     // A repeated sentence is the SELLER's own, so the editor opens holding it.
     expect(await screen.findByTestId("knowledge-quick-add")).toBeInTheDocument();
     expect((screen.getByLabelText("고객에게 안내할 내용") as HTMLTextAreaElement).value)
       .toBe("부착 전 표면의 먼지와 기름기를 제거해 주세요.");
-    await userEvent.click(screen.getByRole("button", { name: "답변 기준으로 등록" }));
+    await userEvent.click(screen.getByRole("button", { name: "기준 등록" }));
     await waitFor(() =>
       expect(acceptKnowledgeCandidate).toHaveBeenCalledWith("c-1", {
         title: "부착 전 표면의 먼지와 기름기를 제거해 주세요.",
@@ -176,19 +175,19 @@ describe("reviewnary가 알고 있는 정보", () => {
   it("a drafting gap is a QUESTION — the editor opens empty and the question is never saved as an answer", async () => {
     getKnowledgeCandidates.mockResolvedValue([GAP]);
     draw();
-    const gaps = await screen.findByTestId("knowledge-inbox-gaps");
-    expect(gaps).toHaveTextContent("「미끄럼 방지」에 대해 고객에게 안내할 공식 기준이 필요합니다.");
-    expect(screen.getByText("정보 필요")).toBeInTheDocument();
+    const inbox = await screen.findByTestId("knowledge-inbox");
+    expect(inbox).toHaveTextContent("「미끄럼 방지」에 대해 고객에게 안내할 공식 기준이 필요합니다.");
+    expect(screen.getByText("정보 부족")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "답변 기준 추가" }));
+    await userEvent.click(screen.getByRole("button", { name: "입력" }));
     const body = (await screen.findByLabelText("고객에게 안내할 내용")) as HTMLTextAreaElement;
     // EMPTY. Accepting a gap unedited used to file the question itself as the company's knowledge.
     expect(body.value).toBe("");
     // And with nothing written there is nothing to save.
-    expect(screen.getByRole("button", { name: "답변 기준으로 등록" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "기준 등록" })).toBeDisabled();
 
     await userEvent.type(body, "실리콘 매트는 물기를 닦은 평평한 바닥에서 밀리지 않습니다.");
-    await userEvent.click(screen.getByRole("button", { name: "답변 기준으로 등록" }));
+    await userEvent.click(screen.getByRole("button", { name: "기준 등록" }));
     await waitFor(() =>
       expect(acceptKnowledgeCandidate).toHaveBeenCalledWith("c-2", expect.objectContaining({
         content: "실리콘 매트는 물기를 닦은 평평한 바닥에서 밀리지 않습니다.",
@@ -196,11 +195,11 @@ describe("reviewnary가 알고 있는 정보", () => {
     );
   });
 
-  it("「아니요」 dismisses without writing anything", async () => {
+  it("「보류」 dismisses without writing anything", async () => {
     draw();
-    await screen.findByTestId("knowledge-inbox-candidates");
+    await screen.findByTestId("knowledge-inbox");
     getKnowledgeCandidates.mockResolvedValue([]);
-    await userEvent.click(screen.getByRole("button", { name: "아니요" }));
+    await userEvent.click(screen.getByRole("button", { name: "보류" }));
     await waitFor(() => expect(dismissKnowledgeCandidate).toHaveBeenCalledWith("c-1"));
     expect(acceptKnowledgeCandidate).not.toHaveBeenCalled();
   });
@@ -213,25 +212,35 @@ describe("reviewnary가 알고 있는 정보", () => {
     expect(documents).toHaveTextContent("회사 전체");
     expect(documents).toHaveTextContent("2026-09-03");
     expect(documents).toHaveTextContent("demo");
+    expect(screen.getByRole("tab", { name: "자료 1", selected: true })).toBeInTheDocument();
     // The seller's screen never says chunk, embedding, source id, score — or a stored constant.
     for (const word of ["chunk", "embedding", "sourceId", "score", "s-1", "GENERAL_CS_FAQ"]) {
       expect(document.body.textContent).not.toContain(word);
     }
   });
 
-  it("a document that produced nothing says so, and 확인 필요 offers the way out", async () => {
+  it("the other tab is what was collected from the channels", async () => {
+    draw();
+    await screen.findByTestId("knowledge-documents");
+    await userEvent.click(screen.getByRole("tab", { name: "채널 수집" }));
+    expect(await screen.findByTestId("learned-knowledge")).toBeInTheDocument();
+    expect(screen.queryByTestId("knowledge-documents")).toBeNull();
+  });
+
+  it("a document that produced nothing says so, and 입력 필요 offers the way out", async () => {
     getKnowledgeDocuments.mockResolvedValue([{ ...DOCUMENT, passages: 0 }]);
     getKnowledgeCandidates.mockResolvedValue([]);
     draw();
-    const problems = await screen.findByTestId("knowledge-inbox-documents");
-    expect(problems).toHaveTextContent("읽을 내용 없음");
+    const inbox = await screen.findByTestId("knowledge-inbox");
+    expect(inbox).toHaveTextContent("내용 없음");
     expect(screen.getByText("자료 문제")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "사용 중지" }).length).toBeGreaterThan(0);
   });
 
   it("retiring is offered as retiring — the row stays and the wording says so", async () => {
     draw();
-    await screen.findByTestId("knowledge-documents");
-    await userEvent.click(screen.getByRole("button", { name: "사용 중지" }));
+    const documents = await screen.findByTestId("knowledge-documents");
+    await userEvent.click(within(documents).getByRole("button", { name: "사용 중지" }));
     await waitFor(() => expect(setKnowledgeDocumentActive).toHaveBeenCalledWith("s-1", false));
     // Never 삭제: the citations that stood on it must keep resolving.
     expect(document.body.textContent).not.toContain("삭제");
@@ -241,9 +250,9 @@ describe("reviewnary가 알고 있는 정보", () => {
     getKnowledgeCandidates.mockResolvedValue([]);
     proposeKnowledgeCandidates.mockResolvedValue([]);
     draw();
-    await screen.findByText("지금 확인하실 항목은 없습니다.");
-    await userEvent.click(screen.getByRole("button", { name: "과거 답변에서 찾아보기" }));
-    expect(await screen.findByText("과거 답변에서 반복되는 문장을 찾지 못했습니다.")).toBeInTheDocument();
+    await screen.findByText("입력 필요 없음");
+    await userEvent.click(screen.getByRole("button", { name: "과거 답변에서 찾기" }));
+    expect(await screen.findByText("반복 문장 없음")).toBeInTheDocument();
   });
 
   it("a company that has written nothing is told what has already been read, not that it is empty", async () => {
@@ -254,8 +263,9 @@ describe("reviewnary가 알고 있는 정보", () => {
       needsConfirmation: 0,
     });
     draw();
-    expect(await screen.findByText(/상품 정보 142개를 이미 읽고 있습니다/)).toBeInTheDocument();
-    expect(screen.getByText(/이미 쓰고 계신 것부터 올려 주세요/)).toBeInTheDocument();
+    const card = await screen.findByTestId("work-flow-card");
+    expect(card).toHaveTextContent("142개 상품 정보");
+    expect(screen.getByText(/이미 쓰고 계신 자료를 올리면/)).toBeInTheDocument();
   });
 
   it("a first day says what has not been read yet, and offers no control that can only find nothing", async () => {
@@ -266,10 +276,13 @@ describe("reviewnary가 알고 있는 정보", () => {
       needsConfirmation: 0,
     });
     draw();
-    expect(await screen.findByText(/채널에서 가져온 정보가 아직 없습니다/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "채널 연결" })).toHaveAttribute("href", "/connect");
+    const card = await screen.findByTestId("work-flow-card");
+    expect(card).toHaveTextContent("수집된 정보 없음");
+    expect(within(card).getByRole("link", { name: "채널 연결" })).toHaveAttribute("href", "/connect");
+    // Nothing unread is printed as 0.
+    expect(card).not.toHaveTextContent("0개 상품 정보");
     // With no past answers, looking through them can only report that there were none.
-    expect(screen.queryByRole("button", { name: "과거 답변에서 찾아보기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "과거 답변에서 찾기" })).toBeNull();
   });
 
   it("the upload asks what the file is, and the refusal is the backend's own sentence", async () => {
@@ -282,7 +295,7 @@ describe("reviewnary가 알고 있는 정보", () => {
     );
     draw();
     await screen.findByTestId("knowledge-documents");
-    await userEvent.click(screen.getByRole("button", { name: "자료 추가" }));
+    await userEvent.click(screen.getByRole("button", { name: "+ 자료" }));
     // The one question the file cannot answer, asked once — never a review of its passages.
     expect(await screen.findByLabelText("어떤 자료인가요")).toBeInTheDocument();
     // The input is visually hidden behind its own button, so the change is fired directly rather

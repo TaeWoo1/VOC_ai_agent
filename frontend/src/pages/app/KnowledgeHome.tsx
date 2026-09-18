@@ -6,11 +6,10 @@ import type {
   KnowledgeSummaryView,
 } from "../../lib/types";
 import { api } from "../../lib/apiClient";
-import { PageHead } from "../../components/ui/PageHead";
-import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { useAgentSurface } from "../../lib/agentPanel";
-import { Section } from "../../components/ui/Section";
 import { Btn } from "../../components/ui/Btn";
+import { WorkFlowCard } from "../../components/ui/WorkFlowCard";
+import { COPY } from "../../lib/copy/customerOps";
 import { KnowledgeInbox } from "../../components/knowledge/KnowledgeInbox";
 import { LearnedKnowledge } from "../../components/knowledge/LearnedKnowledge";
 import {
@@ -33,6 +32,11 @@ import {
  * (상품 정보), which is what makes 「이미 사용 중인 자료를 연결해 주세요」 a true sentence rather
  * than a slogan. Then 자료, then the two places a person writes.
  *
+ * <p><b>v3.1 layout</b> (Customer Operations v3.1): 「보유 정보 → 입력 필요」, then the 입력 필요 list, then one
+ * 「출처」 surface whose two tabs are the files handed over and what was collected from the channels. The four-count
+ * section and the 「직접 등록」 links are gone from the page — the counts are in the first card and the two writing
+ * screens are under 「+ 추가」.
+ *
  * <p><b>Internal vocabulary stays out.</b> No chunk, no embedding, no source id, no score, no enum —
  * `lib/knowledgeWords.ts` owns every word, and a token it has no name for renders as nothing.
  */
@@ -48,7 +52,7 @@ export function KnowledgeHome() {
   // WHAT TRAVELS IS THE SCREEN, and only the screen: there is no knowledge READ tool in the runtime's
   // catalogue, so a document id would be a hint no tool could turn into a fact. Registered
   // unconditionally so the header names this page while it is still loading.
-  useAgentSurface({ surface: "knowledge", label: "reviewnary가 알고 있는 정보" });
+  useAgentSurface({ surface: "knowledge", label: COPY.knowledgeTitle });
 
   const load = useCallback(async () => {
     const [docs, cands, sum] = await Promise.all([
@@ -74,154 +78,208 @@ export function KnowledgeHome() {
       setCandidates(next);
       setNotice(
         next.length === 0
-          ? "과거 답변에서 반복되는 문장을 찾지 못했습니다."
-          : `확인하실 항목이 ${next.length}건입니다.`,
+          ? "반복 문장 없음"
+          : `기준 후보 ${next.length}건`,
       );
       setSummary(await api.getKnowledgeSummary().catch(() => summary));
     } catch {
-      setError("과거 답변을 살펴보지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      setError("과거 답변 확인 실패 · 다시 시도");
     } finally {
       setBusy(false);
     }
   }
 
   const loading = documents === null || candidates === null;
-  // Nothing written, nothing uploaded, nothing waiting — the state a seller is in on their first day.
-  const nothingWritten =
-    summary !== null
-    && summary.productKnowledge === 0
-    && summary.operatingRules === 0
-    && summary.documents === 0;
+  const pending = summary?.needsConfirmation ?? 0;
+  // What the 입력 필요 count is made of, from the rows this page actually drew — 「답변 근거 없음」 is only true of
+  // the drafting gaps, so the line names each kind instead of one sentence for all of them.
+  const pendingKinds: string[] = loading
+    ? []
+    : ([
+        ["정보 부족", candidates.filter((c) => c.origin === "DRAFT_GAP").length],
+        ["기준 후보", candidates.filter((c) => c.origin !== "DRAFT_GAP").length],
+        ["자료 문제", documents.filter((d) => d.active && d.passages === 0).length],
+      ] as const)
+        .filter(([, n]) => n > 0)
+        .map(([label, n]) => `${label} ${n}`);
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHead
-        title="reviewnary가 알고 있는 정보"
-        description="고객에게 답할 때 근거로 쓰는 회사의 기준과 자료입니다."
-        action={<AgentLaunch context={{ surface: "knowledge" }} label="이 내용으로 물어보기" />}
-      />
+    <div className="mx-auto flex w-full max-w-[900px] flex-col gap-5">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-[25px] font-extrabold leading-tight tracking-tight text-ink">{COPY.knowledgeTitle}</h1>
+        <AddMenu />
+      </header>
 
       {error ? <p className="break-keep text-sm text-bad" role="alert">{error}</p> : null}
       {notice ? <p className="break-keep text-sm text-muted" role="status">{notice}</p> : null}
 
-      <Section
-        title="확인 필요"
-        count={summary && summary.needsConfirmation > 0 ? summary.needsConfirmation : null}
-        action={
-          // Offered only when there is something to look through. A company with no past answers
-          // pressing this can only be told that nothing was found — a control whose one outcome is
-          // 「없습니다」 is not an action, and on a first day it is the loudest thing on the screen.
-          summary && summary.pastAnswers > 0 ? (
-            <Btn size="sm" variant="outline" onClick={() => void propose()} disabled={busy}>
-              {busy ? "살펴보는 중…" : "과거 답변에서 찾아보기"}
+      {summary ? (
+        <WorkFlowCard
+          ariaLabel={`${COPY.held}, ${COPY.toEnter}`}
+          done={
+            summary.products > 0
+              ? {
+                  label: COPY.held,
+                  value: summary.products.toLocaleString("ko-KR"),
+                  unit: "개 상품 정보",
+                  line: <HeldLine summary={summary} />,
+                }
+              : {
+                  label: COPY.held,
+                  value: COPY.nothingCollected,
+                  phrase: true,
+                  line: <HeldLine summary={summary} />,
+                  action:
+                    summary.pastAnswers === 0 ? (
+                      <Link to="/connect" className="text-sm font-semibold text-brand-700 hover:underline">
+                        {COPY.connectChannel}
+                      </Link>
+                    ) : undefined,
+                }
+          }
+          mine={
+            pending > 0
+              ? {
+                  label: COPY.toEnter,
+                  value: pending.toLocaleString("ko-KR"),
+                  unit: "건",
+                  line: pendingKinds.length > 0 ? <span>{pendingKinds.join(" · ")}</span> : undefined,
+                }
+              : { label: COPY.toEnter, value: COPY.none }
+          }
+        />
+      ) : null}
+
+      <section aria-label={COPY.toEnter} className="flex flex-col gap-3">
+        <div className="mt-3 flex items-center gap-2">
+          <h2 className="text-[17px] font-bold tracking-tight text-ink">{COPY.toEnter}</h2>
+          {summary && summary.pastAnswers > 0 ? (
+            // Offered only when there is something to look through: a control whose one outcome is 「없음」 is not
+            // an action, and on a first day it would be the loudest thing on the screen.
+            <Btn size="sm" variant="ghost" className="ml-auto" onClick={() => void propose()} disabled={busy}>
+              {busy ? "확인 중…" : COPY.findInPastAnswers}
             </Btn>
-          ) : null
-        }
-      >
+          ) : null}
+        </div>
         {loading ? (
-          <p className="text-sm text-muted">확인하는 중…</p>
+          <p className="text-sm text-muted">확인 중…</p>
         ) : (
           <KnowledgeInbox candidates={candidates} documents={documents} onChanged={load} />
         )}
-      </Section>
+      </section>
 
-      <Section title="알고 있는 정보">
-        {summary === null ? (
-          <p className="text-sm text-muted">확인하는 중…</p>
-        ) : (
-          <>
-            <dl className="flex flex-wrap gap-x-8 gap-y-3" data-testid="knowledge-summary">
-              <Count label="상품 지식" value={summary.productKnowledge} to="/products" />
-              <Count label="운영 기준" value={summary.operatingRules} to="/settings/policies" />
-              <Count label="연결된 자료" value={summary.documents} />
-              <Count label="과거 고객 응답" value={summary.pastAnswers} />
-            </dl>
-            {/*
-              What reviewnary read WITHOUT being taught, and the one line that says past answers are
-              not official. Both exist so a seller does not read this screen as an empty form.
-            */}
-            <p className="break-keep text-sm text-muted">
-              {summary.products > 0
-                ? `채널에서 가져온 상품 정보 ${summary.products}개를 이미 읽고 있습니다. `
-                : ""}
-              {summary.pastAnswers > 0
-                ? "과거 고객 응답은 참고만 하고, 공식 기준으로는 쓰지 않습니다."
-                : ""}
-              {/*
-                Nothing has been read at all — the state a seller is in before a first collection.
-                It says the fact and the next step, and it does NOT claim to know whether a channel
-                is connected: this screen holds no channel read, and inventing one to phrase a
-                sentence would put a second, drifting answer beside the home screen's.
-              */}
-              {summary.products === 0 && summary.pastAnswers === 0 ? (
-                <>
-                  채널에서 가져온 정보가 아직 없습니다.{" "}
-                  <Link to="/connect" className="font-semibold text-brand-700 hover:underline">
-                    채널 연결
-                  </Link>
-                </>
-              ) : null}
-            </p>
-            {nothingWritten ? (
-              <p className="break-keep text-sm text-muted">
-                자료를 연결하면 답변이 더 정확해집니다. 매뉴얼·FAQ·배송/교환 정책처럼 이미 쓰고 계신
-                것부터 올려 주세요.
-              </p>
-            ) : null}
-          </>
-        )}
-      </Section>
-
-      {/*
-        What the company's operating history already taught — the answers it gave, the listing it wrote — and, per
-        channel, what cannot be learned and why. Beside 알고 있는 정보 because it is the same question asked by source.
-      */}
-      <Section title="Reviewnary가 배운 것">
-        <LearnedKnowledge />
-      </Section>
-
-      <Section title="자료" action={<KnowledgeDocumentAdd scope="ORG" onImported={load} />}>
-        {loading ? (
-          <p className="text-sm text-muted">확인하는 중…</p>
-        ) : (
-          <KnowledgeDocumentList documents={documents} onChanged={load} />
-        )}
-      </Section>
-
-      {/*
-        The two places a person writes. Links rather than a form: each of these is a screen that owns
-        its own list, and an index that also edits is two screens fighting over one truth.
-      */}
-      <Section title="직접 등록">
-        <ul className="flex flex-col gap-2 text-sm">
-          <li>
-            <Link to="/products" className="font-semibold text-brand-700 hover:underline">상품 지식</Link>
-            <span className="text-muted"> · 상품마다 설치·부착·규격 같은 사실을 등록합니다.</span>
-          </li>
-          <li>
-            <Link to="/settings/policies" className="font-semibold text-brand-700 hover:underline">운영 기준</Link>
-            <span className="text-muted"> · 배송·교환·환불처럼 회사 전체에 적용되는 기준입니다.</span>
-          </li>
-        </ul>
-      </Section>
+      <Sources documents={documents} loading={loading} onChanged={load} />
     </div>
   );
 }
 
-/** One number, and the screen that owns it when there is one. */
-function Count({ label, value, to }: { label: string; value: number; to?: string }) {
+/** 「상품 지식 12 · 운영 기준 5 · 자료 4 · 과거 응답 23 (참고용)」 — separate counts, never a sum. */
+function HeldLine({ summary }: { summary: KnowledgeSummaryView }) {
+  const parts: [string, number][] = [
+    ["상품 지식", summary.productKnowledge],
+    ["운영 기준", summary.operatingRules],
+    ["자료", summary.documents],
+  ];
   return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="break-keep text-sm text-muted">{label}</dt>
-      <dd className="text-xl font-semibold tabular-nums text-ink">
-        {to ? (
-          <Link to={to} className="hover:underline">
-            {value}
-          </Link>
-        ) : (
-          value
-        )}
-      </dd>
-    </div>
+    <>
+      {parts.map(([label, n], i) => (
+        <span key={label} className="flex items-center gap-1.5">
+          {i > 0 ? <span aria-hidden="true">·</span> : null}
+          {label} {n.toLocaleString("ko-KR")}
+        </span>
+      ))}
+      {summary.pastAnswers > 0 ? (
+        <span className="flex items-center gap-1.5 text-muted">
+          <span aria-hidden="true">·</span>
+          과거 응답 {summary.pastAnswers.toLocaleString("ko-KR")} (참고용)
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/** The two places a person writes knowledge, under one control. Links, not forms: each screen owns its list. */
+function AddMenu() {
+  return (
+    <details className="group relative">
+      <summary className="inline-flex min-h-[36px] cursor-pointer list-none items-center rounded-lg border border-line bg-surface px-3 text-sm font-semibold text-ink hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
+        {COPY.add}
+      </summary>
+      <div className="absolute right-0 z-10 mt-1.5 w-48 overflow-hidden rounded-xl bg-surface py-1 shadow-[0_0_0_1px_#E4E7EC,0_12px_28px_-12px_rgba(15,25,45,0.35)]">
+        <Link to="/products" className="block px-3.5 py-2.5 text-sm text-ink hover:bg-canvas focus:bg-canvas focus:outline-none">
+          상품 지식
+        </Link>
+        <Link to="/settings/policies" className="block px-3.5 py-2.5 text-sm text-ink hover:bg-canvas focus:bg-canvas focus:outline-none">
+          운영 기준
+        </Link>
+      </div>
+    </details>
+  );
+}
+
+/** 「출처」: the files handed over, and what was collected from the channels — the same question asked by source. */
+function Sources({
+  documents,
+  loading,
+  onChanged,
+}: {
+  documents: KnowledgeDocumentView[] | null;
+  loading: boolean;
+  onChanged: () => Promise<void>;
+}) {
+  const [tab, setTab] = useState<"DOCUMENTS" | "LEARNED">("DOCUMENTS");
+  const tabs: { key: "DOCUMENTS" | "LEARNED"; label: string }[] = [
+    { key: "DOCUMENTS", label: `${COPY.documentsTab}${documents ? ` ${documents.length}` : ""}` },
+    { key: "LEARNED", label: COPY.learnedTab },
+  ];
+  return (
+    <section aria-label={COPY.sources} className="flex flex-col gap-3">
+      <h2 className="mt-3 text-[17px] font-bold tracking-tight text-ink">{COPY.sources}</h2>
+      <div className="rounded-[14px] bg-surface shadow-[0_0_0_1px_#E4E7EC]">
+        <div className="flex flex-wrap items-center gap-1 border-b border-[#EEF0F3] p-1.5">
+          <div role="tablist" aria-label={COPY.sources} className="flex flex-wrap items-center gap-1">
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                id={`knowledge-tab-${t.key}`}
+                aria-selected={tab === t.key}
+                aria-controls={`knowledge-panel-${t.key}`}
+                onClick={() => setTab(t.key)}
+                className={`rounded-[9px] px-3 py-1.5 text-sm font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 ${
+                  tab === t.key ? "bg-[#F1F3F5] text-ink" : "text-muted hover:text-ink"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {tab === "DOCUMENTS" ? (
+            <span className="ml-auto pr-1">
+              <KnowledgeDocumentAdd scope="ORG" onImported={onChanged} label={COPY.addDocument} />
+            </span>
+          ) : null}
+        </div>
+        <div
+          role="tabpanel"
+          id={`knowledge-panel-${tab}`}
+          aria-labelledby={`knowledge-tab-${tab}`}
+          className="px-5 py-2"
+        >
+          {tab === "DOCUMENTS" ? (
+            loading || !documents ? (
+              <p className="py-2 text-sm text-muted">확인 중…</p>
+            ) : (
+              <KnowledgeDocumentList documents={documents} onChanged={onChanged} />
+            )
+          ) : (
+            <div className="py-3">
+              <LearnedKnowledge />
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }

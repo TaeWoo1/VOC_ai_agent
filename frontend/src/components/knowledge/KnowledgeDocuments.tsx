@@ -51,7 +51,7 @@ export function KnowledgeDocumentList({
                 <span>{scopeLabel(document.scope, document.productName)}</span>
                 <span>{kstDate(document.uploadedAt)}</span>
                 {document.uploadedBy ? <span>{document.uploadedBy}</span> : null}
-                {document.passages === 0 ? <span className="text-warn">읽을 내용 없음</span> : null}
+                {document.passages === 0 ? <span className="text-warn">내용 없음</span> : null}
                 {document.active ? null : <Status tone="neutral">사용 안 함</Status>}
               </Facts>
             </div>
@@ -98,10 +98,13 @@ export function KnowledgeDocumentAdd({
   scope,
   productId,
   onImported,
+  label = "자료 추가",
 }: {
   scope: "PRODUCT" | "ORG";
   productId?: string | null;
   onImported: () => void | Promise<void>;
+  /** The closed control's words — 「+ 자료」 where a tab already says what it adds to. */
+  label?: string;
 }) {
   const topics = scope === "PRODUCT" ? PRODUCT_TOPICS : ORG_TOPICS;
   const input = useRef<HTMLInputElement>(null);
@@ -137,7 +140,7 @@ export function KnowledgeDocumentAdd({
   if (!open) {
     return (
       <Btn size="sm" variant="outline" onClick={() => setOpen(true)}>
-        자료 추가
+        {label}
       </Btn>
     );
   }

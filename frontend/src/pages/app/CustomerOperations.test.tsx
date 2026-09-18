@@ -17,7 +17,6 @@ const api = vi.hoisted(() => ({
 vi.mock("../../lib/apiClient", () => ({ api, getToken: () => null }));
 
 import { CustomerOperations } from "./CustomerOperations";
-import { CustomerOperationsHomeBlock } from "../../components/customerOperations/CustomerOperationsHomeBlock";
 
 const NOW = new Date("2026-09-16T05:30:00Z"); // 14:30 KST
 
@@ -178,32 +177,5 @@ describe("고객 운영 관리 page", () => {
     renderPage();
     expect(await screen.findByText("이 계정에서는 아직 고객 운영 관리를 사용할 수 없습니다.")).toBeInTheDocument();
     expect(screen.queryByRole("button")).toBeNull();
-  });
-});
-
-describe("고객 운영 관리 on the Home", () => {
-  beforeEach(() => Object.values(api).forEach((fn) => fn.mockReset()));
-
-  it("draws nothing from a failed read or an unavailable job", async () => {
-    api.getCustomerOperationsHome.mockRejectedValue(new Error("down"));
-    const failed = render(<MemoryRouter><CustomerOperationsHomeBlock now={NOW} /></MemoryRouter>);
-    await waitFor(() => expect(api.getCustomerOperationsHome).toHaveBeenCalled());
-    expect(failed.container).toBeEmptyDOMElement();
-    failed.unmount();
-
-    api.getCustomerOperationsHome.mockResolvedValue(home({ available: false }));
-    const unavailable = render(<MemoryRouter><CustomerOperationsHomeBlock now={NOW} /></MemoryRouter>);
-    await waitFor(() => expect(api.getCustomerOperationsHome).toHaveBeenCalledTimes(2));
-    expect(unavailable.container).toBeEmptyDOMElement();
-  });
-
-  it("an active job leads with its state and its three areas", async () => {
-    api.getCustomerOperationsHome.mockResolvedValue(home());
-    const { container } = render(<MemoryRouter><CustomerOperationsHomeBlock now={NOW} /></MemoryRouter>);
-    expect(await screen.findByRole("heading", { name: /고객 운영 관리/ })).toBeInTheDocument();
-    expect(screen.getByText(/2시간마다 확인 · 마지막 확인 오늘 14:02\(일부만 확인\) · 다음 확인 오늘 16:00/)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Reviewnary가 제대로 확인하지 못한 곳" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "다시 연결하기" })).toHaveAttribute("href", "/connect/cafe24");
-    await expectNoAxeViolations(container);
   });
 });
