@@ -16,7 +16,16 @@ public enum CaseReason {
     REVIEW_WATCH_PROBLEM("별점 3점 리뷰에 불편을 말하는 내용이 있어 살펴봅니다.", "별점 3점 리뷰에 불편을 말하는 내용이 있습니다."),
     REVIEW_HIGH_RATING_PROBLEM("별점은 높지만 불편을 말하는 내용이 있어 살펴봅니다.", "별점은 높지만 불편을 말하는 내용이 있습니다."),
     REVIEW_HIGH_RATING_WITH_TEXT("별점은 높지만 글이 있어 바로 닫지 않고 지켜봅니다.", "별점이 높고 글이 있는 새 리뷰입니다."),
-    REVIEW_ROUTINE("글 없이 별점 4~5점만 남긴 리뷰라 따로 대응할 일이 없습니다.", "글 없이 별점 4~5점만 남긴 리뷰입니다."),
+    /**
+     * <b>Kept for the cases it already names.</b> Before Customer Ops Product Quality Closure v1 (d6a98b09) the rule
+     * closed every 4–5★ review under this code, text or not; that commit narrowed the rule to textless reviews and
+     * rewrote this sentence to say «글 없이» — which every stored case under this code then displayed, including the
+     * ones with words in them. A stored code must keep meaning what it meant when it was written, so this sentence
+     * is the original one again and the narrowed rule has its own code, {@link #REVIEW_TEXTLESS_HIGH_RATING}. No new
+     * case is written under this code.
+     */
+    REVIEW_ROUTINE("별점 4~5점 리뷰라 따로 대응할 일이 없습니다.", "별점 4~5점 리뷰입니다."),
+    REVIEW_TEXTLESS_HIGH_RATING("글 없이 별점 4~5점만 남긴 리뷰라 따로 대응할 일이 없습니다.", "글 없이 별점 4~5점만 남긴 리뷰입니다."),
     REVIEW_ALREADY_ANSWERED("이미 답글이 달린 리뷰라 따로 할 일이 없습니다.", "이미 답글이 달린 리뷰입니다."),
     SOURCE_AUTH_REQUIRED("연결이 만료되어 확인하지 못했습니다. 다시 연결해 주세요.", null),
     SOURCE_NOT_CONNECTED("연결이 끊겨 확인하지 못했습니다. 다시 연결해 주세요.", null);

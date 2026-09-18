@@ -199,11 +199,13 @@ describe("CustomerOpsHome", () => {
     expect(card).not.toHaveTextContent("부분 집계");
   });
 
-  it("a failed run shows no number", async () => {
+  it("a failed latest run keeps the 24-hour tally and names the check it does not include", async () => {
     draw(co({ lastRunStatus: "FAILED" }));
     const card = await screen.findByTestId("work-flow-card");
-    expect(card).toHaveTextContent("수집 실패");
-    expect(card).not.toHaveTextContent("47");
+    // What earlier runs checked in the window is still checked.
+    expect(card).toHaveTextContent("47건");
+    expect(card).toHaveTextContent("정리 31");
+    expect(card).toHaveTextContent("마지막 확인 실패 (오늘 14:02) · 이번 확인분 집계 제외 · 다음 확인 오늘 16:00");
   });
 
   it("nothing waiting is 「없음」 with the next check — and no list", async () => {

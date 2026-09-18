@@ -51,4 +51,21 @@ class OperationsCaseReviewRulesTest {
         assertThat(OperationsCaseRules.forReview(5, "떨어졌어요", ReviewReplyState.ANSWERED).disposition())
                 .isEqualTo(CaseDisposition.AUTO_RESOLVED);
     }
+
+    @Test
+    @DisplayName("a textless 4–5★ closes under its own code; the old code keeps its old meaning for the cases it names")
+    void aStoredCodeKeepsItsMeaning() {
+        assertThat(rule(5, null).reason()).isEqualTo(CaseReason.REVIEW_TEXTLESS_HIGH_RATING);
+        assertThat(CaseReason.REVIEW_TEXTLESS_HIGH_RATING.noteKo()).contains("글 없이");
+        // Cases written before the rule was narrowed closed worded reviews under REVIEW_ROUTINE; the sentence they
+        // show must not claim the review had no text.
+        assertThat(CaseReason.REVIEW_ROUTINE.noteKo()).doesNotContain("글 없이");
+        assertThat(CaseReason.REVIEW_ROUTINE.factKo()).doesNotContain("글 없이");
+        for (int rating = 1; rating <= 5; rating++) {
+            for (String body : new String[] {null, "", "빠른배송 굿굿입니다", "한쪽이 떨어졌어요"}) {
+                assertThat(OperationsCaseRules.forReview(rating, body, ReviewReplyState.UNKNOWN).reason())
+                        .isNotEqualTo(CaseReason.REVIEW_ROUTINE);
+            }
+        }
+    }
 }

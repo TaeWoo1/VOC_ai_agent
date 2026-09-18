@@ -24,7 +24,7 @@ export const COPY = {
   listOrder: "오래된 순",
   none: "없음",
   firstCheck: "첫 확인 중",
-  collectFailed: "수집 실패",
+  lastCheckFailed: "마지막 확인 실패",
   reconnect: "재연결",
   observing: "관찰 중",
   view: "보기",

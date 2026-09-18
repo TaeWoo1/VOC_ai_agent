@@ -106,7 +106,7 @@ export function CustomerOpsHome({
       {running && co.status === "ACTIVE" ? (
         <WorkFlowCard
           ariaLabel="자동 확인과 내 확인 필요"
-          done={doneCell(co, now)}
+          done={doneCell(co)}
           mine={
             work.rows.length > 0
               ? {
@@ -117,7 +117,7 @@ export function CustomerOpsHome({
                 }
               : { label: COPY.mineLabel, value: COPY.none, line: next ? <span>다음 확인 {next}</span> : undefined }
           }
-          warnings={[...warningLines(co, now), ...failedReads(ops, queue)]}
+          warnings={[...lastRunLines(co, now), ...warningLines(co, now), ...failedReads(ops, queue)]}
         />
       ) : (
         <section
@@ -213,14 +213,14 @@ function cadenceShort(minutes: number): string {
   return minutes > 0 && minutes % 60 === 0 ? `${minutes / 60}시간 주기` : `${minutes}분 주기`;
 }
 
-/** The left cell. 「확인」 counts what was read — never what was processed. A failed or unfinished run shows no number. */
-function doneCell(co: CustomerOperationsHome, now: Date) {
+/**
+ * The left cell. 「확인」 counts what was read — never what was processed. It is the last 24 hours, not the last run:
+ * a failed latest run does not un-check what earlier runs checked, so the tally stays and the failure is said beside it
+ * ({@link lastRunLines}) — what that run could not read is the part the number does not cover.
+ */
+function doneCell(co: CustomerOperationsHome) {
   const label = COPY.checkedLabel;
   if (!co.lastCheckedAt) return { label, value: COPY.firstCheck, phrase: true };
-  if (co.lastRunStatus === "FAILED") {
-    const next = kstClock(co.nextCheckAt, now);
-    return { label, value: COPY.collectFailed, phrase: true, line: next ? <span>다음 확인 {next}</span> : undefined };
-  }
   const h = co.handled;
   const parts: React.ReactNode[] = [
     `정리 ${h.autoResolved.toLocaleString("ko-KR")}`,
@@ -233,6 +233,19 @@ function doneCell(co: CustomerOperationsHome, now: Date) {
   return h.checked != null
     ? { label, value: h.checked.toLocaleString("ko-KR"), unit: "건", line: <Items parts={parts} /> }
     : { label, value: "확인 완료", phrase: true, line: <Items parts={parts} /> };
+}
+
+/** The latest run failed: the 24-hour tally above stands, and this names the check it does not include. */
+function lastRunLines(co: CustomerOperationsHome, now: Date): React.ReactNode[] {
+  if (co.lastRunStatus !== "FAILED") return [];
+  const at = kstClock(co.lastCheckedAt, now);
+  const next = kstClock(co.nextCheckAt, now);
+  return [
+    <span className="break-keep">
+      {COPY.lastCheckFailed}
+      {at ? ` (${at})` : ""} · 이번 확인분 집계 제외{next ? ` · 다음 확인 ${next}` : ""}
+    </span>,
+  ];
 }
 
 /**

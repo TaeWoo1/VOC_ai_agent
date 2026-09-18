@@ -74,7 +74,7 @@ public final class OperationsCaseRules {
         ReviewTriageTier tier = ReviewTriageRules.tier(rating, body);
         boolean text = !ReviewTriageRules.isTextless(body);
         return switch (tier) {
-            case FYI -> !text ? Conclusion.noAction(CaseReason.REVIEW_ROUTINE)
+            case FYI -> !text ? Conclusion.noAction(CaseReason.REVIEW_TEXTLESS_HIGH_RATING)
                     : assertsProblem(body)
                             ? Conclusion.investigate(CaseReason.REVIEW_HIGH_RATING_PROBLEM, CasePriority.NORMAL)
                             : watch(CaseReason.REVIEW_HIGH_RATING_WITH_TEXT);
