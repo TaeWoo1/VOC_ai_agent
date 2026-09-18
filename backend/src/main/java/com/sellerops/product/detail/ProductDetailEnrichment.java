@@ -3,6 +3,10 @@ package com.sellerops.product.detail;
 import com.sellerops.connector.naver.NaverProductDetail;
 import com.sellerops.ingest.canonical.CanonicalProduct;
 import com.sellerops.ingest.canonical.CanonicalProductVariant;
+import com.sellerops.product.ChannelProductRepository;
+import com.sellerops.product.FactKeys;
+import com.sellerops.product.ProductFact;
+import com.sellerops.product.ProductFactRepository;
 import com.sellerops.product.ProductKnowledgeWriter;
 import com.sellerops.product.library.KnowledgeAuthorship;
 import com.sellerops.product.library.KnowledgeSourceType;
@@ -18,24 +22,32 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Turn ONE listing's 상세페이지 into knowledge a reply can be grounded in.
  *
- * <p><b>Never the whole catalogue.</b> The structure this class exists to forbid is "read every
- * product's detail on every sweep": 69 listings × a daily sweep is 25,000 requests a year to
- * re-observe pages that mostly did not change, and it would put a per-product marketplace read on the
- * critical path of routine collection. So enrichment is per-product, gated by
- * {@link #isStale(ProductKnowledgeSource, Instant)}, and the caller passes one product id.
+ * <p><b>One product per call, never a sweep inside this class.</b> The structure this class was written to forbid is
+ * "read every product's detail on every routine sweep". That still holds: enrichment is per-product, gated by
+ * {@link #needsEnrichment}, and the caller passes one product id. What changed (Catalogue Knowledge Bootstrap v1,
+ * product-owner 2026-09-18) is WHO may ask for many: the knowledge bootstrap now asks for every on-sale listing once,
+ * and after that a listing is read again only when the channel's own {@code modifiedDate} (carried by the catalogue
+ * LIST read) is newer than our last read, or after {@link #STALE_AFTER}. So the steady-state cost is the listings the
+ * seller changed, not the catalogue.
  *
  * <p><b>The three triggers are equals, not a priority order</b> (product-owner, 2026-08-26): a new or
  * changed product, an actionable inquiry whose product is exactly attributed, or product detail
  * knowledge that is missing or stale. Any one of them is reason enough, and none of them is reason to
  * read a second product.
  *
- * <p><b>What it writes, and the one copy rule.</b> The detail TEXT becomes a
+ * <p><b>What it writes.</b> Besides the text and options below, the channel's structured statements — 상품정보제공고시
+ * fields, model name, named category attributes, seller tags, each offered 추가상품 — and a page-shape marker
+ * ({@link FactKeys#DETAIL_PAGE}) that says this listing WAS read, even when the page was pictures. All of them live under
+ * the detail read's own source and are replaced as a set; options the listing no longer offers are retired.
+ *
+ * <p><b>The one copy rule.</b> The detail TEXT becomes a
  * {@link ProductKnowledgeSource} — the retrievable corpus, marked
  * {@link KnowledgeAuthorship#SELLER_AUTHORED_CHANNEL_CONTENT} because the seller wrote it on their own
  * listing. It is deliberately NOT also written as a {@code desc:summary} product fact: the same
@@ -66,13 +78,27 @@ public class ProductDetailEnrichment {
     private final ProductKnowledgeSourceRepository sources;
     private final ProductKnowledgeWriter catalogue;
     private final ProductKnowledgeIndexer indexer;
+    private final ProductFactRepository facts;
+    private final ChannelProductRepository listings;
 
+    /** Text, options and images only — no structured facts, and staleness judged by the document alone. */
     public ProductDetailEnrichment(ProductKnowledgeSourceRepository sources,
                                    ProductKnowledgeWriter catalogue,
                                    ProductKnowledgeIndexer indexer) {
+        this(sources, catalogue, indexer, null, null);
+    }
+
+    @Autowired
+    public ProductDetailEnrichment(ProductKnowledgeSourceRepository sources,
+                                   ProductKnowledgeWriter catalogue,
+                                   ProductKnowledgeIndexer indexer,
+                                   ProductFactRepository facts,
+                                   ChannelProductRepository listings) {
         this.sources = sources;
         this.catalogue = catalogue;
         this.indexer = indexer;
+        this.facts = facts;
+        this.listings = listings;
     }
 
     /** Why an enrichment ended the way it did. A closed set, so a caller can report without prose. */
@@ -92,7 +118,12 @@ public class ProductDetailEnrichment {
      * trust it, and the option count because that is the other half of what this read is for.
      */
     public record Result(Outcome outcome, DetailContentShape.Measurement measurement,
-                         int optionsWritten, int imageCount) {
+                         int optionsWritten, int imageCount, int factsWritten, int supplementsOffered) {
+
+        public Result(Outcome outcome, DetailContentShape.Measurement measurement, int optionsWritten,
+                      int imageCount) {
+            this(outcome, measurement, optionsWritten, imageCount, 0, 0);
+        }
     }
 
     /**
@@ -104,7 +135,32 @@ public class ProductDetailEnrichment {
      */
     @Transactional(readOnly = true)
     public boolean needsEnrichment(UUID orgId, UUID productId, Instant now) {
-        return isStale(existingDocument(orgId, productId).orElse(null), now);
+        Instant lastRead = lastRead(orgId, productId);
+        if (lastRead == null || lastRead.isBefore(now.minus(STALE_AFTER))) {
+            return true;
+        }
+        // The catalogue sweep carries the channel's own modifiedDate: a listing the seller changed after we last read
+        // its detail is stale today, not in 30 days. API-first freshness — the list says what changed, and only that
+        // one listing is read again.
+        return listings != null && listings.findByOrgIdAndProductId(orgId, productId).stream()
+                .anyMatch(l -> l.getSourceUpdatedAt() != null && l.getSourceUpdatedAt().isAfter(lastRead));
+    }
+
+    /**
+     * When this product's detail was last read: the later of the indexed document's update and the page-shape marker
+     * every read writes. Null when it never was.
+     */
+    @Transactional(readOnly = true)
+    public Instant lastRead(UUID orgId, UUID productId) {
+        Instant doc = existingDocument(orgId, productId).map(ProductKnowledgeSource::getUpdatedAt).orElse(null);
+        Instant marker = facts == null ? null : facts
+                .findByOrgIdAndProductIdAndFactKeyIn(orgId, productId, List.of(FactKeys.DETAIL_PAGE)).stream()
+                .map(ProductFact::getObservedAt).filter(java.util.Objects::nonNull)
+                .max(Instant::compareTo).orElse(null);
+        if (doc == null) {
+            return marker;
+        }
+        return marker == null || doc.isAfter(marker) ? doc : marker;
     }
 
     static boolean isStale(ProductKnowledgeSource existing, Instant now) {
@@ -123,15 +179,30 @@ public class ProductDetailEnrichment {
     @Transactional
     public Result apply(UUID orgId, UUID channelId, UUID productId, String externalProductId,
                         String sourceKind, NaverProductDetail detail, Instant observedAt) {
+        return apply(orgId, channelId, productId, externalProductId, sourceKind, sourceKind + "/detail", detail,
+                observedAt);
+    }
+
+    /**
+     * @param detailSourceKind the provenance of the facts this read states — owned as a set: a re-read replaces them
+     */
+    @Transactional
+    public Result apply(UUID orgId, UUID channelId, UUID productId, String externalProductId,
+                        String sourceKind, String detailSourceKind, NaverProductDetail detail, Instant observedAt) {
         DetailContentShape.Measurement measurement =
                 DetailContentShape.classify(detail == null ? null : detail.detailContent());
         int imageCount = detail == null || detail.imageUrls() == null ? 0 : detail.imageUrls().size();
-        int options = writeOptions(orgId, channelId, externalProductId, sourceKind, detail, observedAt);
+        int options = writeOptions(orgId, channelId, productId, externalProductId, sourceKind, detail, observedAt);
+        String shape = measurement.shape() == DetailContentShape.Shape.EMPTY ? "EMPTY"
+                : measurement.textIsEnough() ? "TEXT" : "IMAGE_ONLY";
+        int[] stated = writeFacts(orgId, productId, externalProductId, detailSourceKind, detail, shape, observedAt);
+        int factCount = stated[0];
+        int offered = stated[1];
 
         if (measurement.shape() == DetailContentShape.Shape.EMPTY) {
             log.info("product-detail enrichment org={} outcome=EMPTY {} images={} options={}",
                     orgId, DetailContentShape.describe(measurement), imageCount, options);
-            return new Result(Outcome.EMPTY, measurement, options, imageCount);
+            return new Result(Outcome.EMPTY, measurement, options, imageCount, factCount, offered);
         }
         if (!measurement.textIsEnough()) {
             // The honest stop. The page's answers are in its pictures, and reading pictures is a
@@ -139,7 +210,7 @@ public class ProductDetailEnrichment {
             // 40 characters of shop notice that surround the images.
             log.info("product-detail enrichment org={} outcome=IMAGE_ONLY {} images={} options={}",
                     orgId, DetailContentShape.describe(measurement), imageCount, options);
-            return new Result(Outcome.IMAGE_ONLY, measurement, options, imageCount);
+            return new Result(Outcome.IMAGE_ONLY, measurement, options, imageCount, factCount, offered);
         }
 
         String body = DetailContentShape.plainText(detail.detailContent());
@@ -151,7 +222,7 @@ public class ProductDetailEnrichment {
         log.info("product-detail enrichment org={} outcome=TEXT_INDEXED {} images={} options={} "
                         + "truncated={}",
                 orgId, DetailContentShape.describe(measurement), imageCount, options, truncated);
-        return new Result(Outcome.TEXT_INDEXED, measurement, options, imageCount);
+        return new Result(Outcome.TEXT_INDEXED, measurement, options, imageCount, factCount, offered);
     }
 
     /**
@@ -194,23 +265,73 @@ public class ProductDetailEnrichment {
      * id's presence is doc-inferred, and a variant that gets a fresh identity on every read is silent
      * duplication.
      */
-    private int writeOptions(UUID orgId, UUID channelId, String externalProductId, String sourceKind,
+    private int writeOptions(UUID orgId, UUID channelId, UUID productId, String externalProductId, String sourceKind,
                              NaverProductDetail detail, Instant observedAt) {
-        if (detail == null || detail.options() == null || detail.options().isEmpty()) {
+        if (detail == null) {
             return 0;
         }
         List<CanonicalProductVariant> variants = new ArrayList<>();
+        java.util.Set<String> listed = new java.util.HashSet<>();
         for (NaverProductDetail.Option option : detail.options()) {
+            // Status is the channel's: not usable ⇒ SUSPENSION, a managed stock of zero ⇒ OUTOFSTOCK, otherwise SALE.
+            // A variant with no id is skipped by the writer, and so is not counted as listed.
+            String status = option.usable() == null && option.stockQuantity() == null ? null
+                    : Boolean.FALSE.equals(option.usable()) ? "SUSPENSION"
+                    : option.purchasable(detail.stockManaged()) ? "SALE" : "OUTOFSTOCK";
             variants.add(new CanonicalProductVariant(option.externalId(), option.optionName(),
-                    null, null, null));
+                    null, null, status));
+            if (option.externalId() != null) {
+                listed.add(option.externalId());
+            }
         }
-        // Only identity + variants travel. Name, price, status and the description are deliberately
-        // absent so this write cannot restate — or contradict — what the catalogue sweep owns, and
-        // the detail TEXT has exactly one home (the knowledge library, above).
+        // Identity, the listing's own status as the detail states it, and variants. Name, price and the description
+        // are deliberately absent so this write cannot restate what the catalogue sweep owns, and the detail TEXT has
+        // exactly one home (the knowledge library, above). The status is the one exception, and it is the same field
+        // of the same listing from the same channel, read later — present overwrites, absent preserves.
         CanonicalProduct row = new CanonicalProduct(externalProductId, null, null, null, null, null,
-                null, null, null, null, null, Map.of(), variants, observedAt, null, sourceKind, 1,
+                detail.effectiveStatus(), null, null, null, null, Map.of(), variants, observedAt, null, sourceKind, 1,
                 null);
-        return catalogue.write(orgId, channelId, List.of(row)).variants();
+        int written = catalogue.write(orgId, channelId, List.of(row)).variants();
+        if (detail.statusType() != null && productId != null) {
+            // A complete read of THIS listing's options: whatever this channel listed before and no longer lists is
+            // no longer offered. Guarded on a read that actually carried the listing (its status is 필수 in the
+            // schema), never on the empty projection of a partial one.
+            catalogue.retireVariantsNotIn(orgId, productId, channelId, listed);
+        }
+        return written;
+    }
+
+    /**
+     * The channel's structured statements about the product — 고시 fields, model name, named attributes, tags — as
+     * {@code spec:}/{@code attr:} facts, the 추가상품 on offer, and the page-shape marker; all under the detail read's own
+     * source, replaced as a set. Returns {facts written, 추가상품 offered}.
+     */
+    private int[] writeFacts(UUID orgId, UUID productId, String externalProductId, String detailSourceKind,
+                             NaverProductDetail detail, String shape, Instant observedAt) {
+        if (detail == null || productId == null) {
+            return new int[] {0, 0};
+        }
+        Map<String, String> keyed = new java.util.LinkedHashMap<>();
+        detail.facts().forEach((label, value) -> {
+            if (label == null || label.isBlank()) {
+                return;
+            }
+            String key = label.equals("판매자 태그") ? FactKeys.of(FactKeys.ATTR, label) : FactKeys.of(FactKeys.SPEC, label);
+            keyed.putIfAbsent(key, value);
+        });
+        int offered = 0;
+        for (NaverProductDetail.Supplement s : detail.supplements()) {
+            // Only what a buyer can add today. A 추가상품 switched off is not something the seller sells now.
+            if (!s.offered() || s.label().isBlank()) {
+                continue;
+            }
+            String id = s.externalId() != null ? s.externalId() : Integer.toString(offered + 1);
+            keyed.put(FactKeys.SUPPLEMENT_PREFIX + id, s.label());
+            offered++;
+        }
+        keyed.put(FactKeys.DETAIL_PAGE, shape);
+        return new int[] {catalogue.replaceFacts(orgId, productId, detailSourceKind, externalProductId, keyed,
+                observedAt, null), offered};
     }
 
     /** {@code NAVER:PRODUCT_API:v1|13250364547} — the listing this document was read from. */

@@ -3,6 +3,7 @@ package com.sellerops.product.catalogue;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.product.ChannelProduct;
+import com.sellerops.product.FactKeys;
 import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductFact;
@@ -52,6 +53,13 @@ import org.springframework.stereotype.Component;
  *       "is there a 9oz one" — another product might be — and it is shown to the seller, not to the customer.</li>
  * </ul>
  *
+ * <p><b>What a detail read added</b> (Catalogue Knowledge Bootstrap v1). A 추가상품 offered on a listing answers «do you
+ * sell X» in its own label — head, qualifiers and value all in that label — and is quoted as an add-on so it can never
+ * read as the listing's own spec. An option the channel says is switched off, sold out or no longer listed is not on
+ * sale, whatever its listing's status. And the Finding counts what «checked» did not cover — on-sale candidates whose
+ * 상세페이지 was never read, and those whose page is pictures — so an ask to the seller never implies a search that did
+ * not happen.
+ *
  * <p><b>Organisation isolation</b> is in every predicate: products, listings, facts, options and passages are all read
  * with {@code orgId}, and the real-data filter on products and listings keeps seeded rows out.
  *
@@ -77,7 +85,11 @@ public class CatalogueInvestigator {
                     + "들어가지\\s*않|지원하지\\s*않|제외|아닙니다|없습니다");
     private static final Pattern SENTENCE = Pattern.compile("(?<=[.!?。])\\s+|\\n+|(?<=다)\\s+");
 
-    public enum Field { PRODUCT_NAME, LISTING_NAME, OPTION, FACT, DETAIL }
+    public enum Field {
+        PRODUCT_NAME, LISTING_NAME, OPTION, FACT, DETAIL,
+        /** A 추가상품 a listing offers — a separately purchasable item, named in its own label. */
+        SUPPLEMENT
+    }
 
     public enum Availability {
         /** The channel says a listing of this product is on sale now. */
@@ -110,6 +122,7 @@ public class CatalogueInvestigator {
                 case OPTION -> "option";
                 case FACT -> factKey == null ? "fact" : factKey;
                 case DETAIL -> "detail";
+                case SUPPLEMENT -> "supplement";
             };
             String day = capturedAt == null ? "미상"
                     : capturedAt.atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate().toString();
@@ -127,10 +140,18 @@ public class CatalogueInvestigator {
      * @param otherValue       statements that name the kind with a DIFFERENT value, for the seller
      * @param negated          statements that name the asked value and negate it
      * @param detailReads      상세페이지 reads made for this question
+     * @param detailUnread     on-sale candidates whose 상세페이지 has never been read — what «checked» did NOT cover
+     * @param detailImageOnly  on-sale candidates whose 상세페이지 was read and is pictures — its text could not be checked
      */
     public record Finding(CatalogueQuestion question, int candidates, int onSale, List<Statement> matches,
                           List<Statement> notOnSale, List<Statement> otherValue, List<Statement> negated,
-                          int detailReads) {
+                          int detailReads, int detailUnread, int detailImageOnly) {
+
+        public Finding(CatalogueQuestion question, int candidates, int onSale, List<Statement> matches,
+                       List<Statement> notOnSale, List<Statement> otherValue, List<Statement> negated,
+                       int detailReads) {
+            this(question, candidates, onSale, matches, notOnSale, otherValue, negated, detailReads, 0, 0);
+        }
 
         public Finding {
             matches = matches == null ? List.of() : List.copyOf(matches);
@@ -156,8 +177,17 @@ public class CatalogueInvestigator {
                 sb.append("이 상품에 등록된 다른 옵션을 찾지 못했습니다.");
             } else {
                 sb.append("판매 중인 「").append(question.head()).append("」 상품 ").append(onSale)
-                        .append("개의 상품명·옵션·상품 정보를 확인했지만 「").append(question.target())
+                        .append("개의 상품명·옵션·추가상품·상품 정보를 확인했지만 「").append(question.target())
                         .append("」에 맞는다고 적힌 상품은 없었습니다.");
+            }
+            // What «checked» did not cover, said as such: not reading a page and reading it and finding nothing are
+            // different claims.
+            if (detailUnread > 0) {
+                sb.append(" 그중 ").append(detailUnread).append("개는 상세페이지를 아직 읽지 못했습니다.");
+            }
+            if (detailImageOnly > 0) {
+                sb.append(" 상세페이지가 이미지로만 된 상품 ").append(detailImageOnly)
+                        .append("개는 이미지 속 내용을 확인하지 못했습니다.");
             }
             if (!notOnSale.isEmpty()) {
                 sb.append(" 「").append(question.target()).append("」")
@@ -223,12 +253,21 @@ public class CatalogueInvestigator {
                 candidates.put(p.getId(), p);
             }
         }
+        // A 추가상품 is sold on another product's listing: a cup listing that offers 「9oz 컵 뚜껑」 sells a 뚜껑.
+        if (question.kind() == CatalogueQuestion.Kind.VALUE) {
+            Set<UUID> bySupplement = supplementsNaming(orgId, head);
+            for (Product p : all) {
+                if (bySupplement.contains(p.getId())) {
+                    candidates.putIfAbsent(p.getId(), p);
+                }
+            }
+        }
         if (currentProductId != null && candidates.containsKey(currentProductId) == false) {
             all.stream().filter(p -> p.getId().equals(currentProductId)).findFirst()
                     .ifPresent(p -> candidates.put(p.getId(), p));
         }
         if (candidates.isEmpty()) {
-            return new Finding(question, 0, 0, List.of(), List.of(), List.of(), List.of(), 0);
+            return new Finding(question, 0, 0, List.of(), List.of(), List.of(), List.of(), 0, 0, 0);
         }
 
         Map<UUID, List<ChannelProduct>> listings = listingsOf(orgId, candidates.keySet());
@@ -254,12 +293,34 @@ public class CatalogueInvestigator {
         for (UUID id : ordered) {
             boolean ofHead = squash(candidates.get(id).getName()).contains(head);
             List<Statement> own = stated.getOrDefault(id, List.of());
+            if (question.kind() == CatalogueQuestion.Kind.VALUE) {
+                // A 추가상품 is its own item: it answers only in its own label — the head, every qualifier and the value.
+                for (Statement s : own) {
+                    if (s.field() != Field.SUPPLEMENT || !squash(s.text()).contains(head)
+                            || !statesAll(List.of(s), question.qualifiers())) {
+                        continue;
+                    }
+                    switch (verdictOf(s.text(), question)) {
+                        case STATES -> (s.availability() == Availability.ON_SALE ? matches : notOnSale).add(s);
+                        case NEGATES -> negated.add(s);
+                        case OTHER_VALUE -> {
+                            if (s.availability() == Availability.ON_SALE) {
+                                otherValue.add(s);
+                            }
+                        }
+                        case SILENT -> { }
+                    }
+                }
+            }
             if (ofHead && question.kind() == CatalogueQuestion.Kind.VALUE && !statesAll(own, question.qualifiers())) {
                 continue;  // it is of the asked kind, but not the kind the customer described
             }
             for (Statement s : own) {
+                if (s.field() == Field.SUPPLEMENT) {
+                    continue;  // judged above, on its own label
+                }
                 if (question.kind() == CatalogueQuestion.Kind.OTHER_OPTION) {
-                    if (s.current() && s.field() == Field.OPTION) {
+                    if (s.current() && s.field() == Field.OPTION && s.availability() == Availability.ON_SALE) {
                         matches.add(s);
                     }
                     continue;
@@ -290,8 +351,61 @@ public class CatalogueInvestigator {
         int checked = (int) ordered.stream()
                 .filter(id -> squash(candidates.get(id).getName()).contains(head))
                 .count();
+        int[] coverage = coverage(orgId, ordered.stream()
+                .filter(id -> availability.get(id) == Availability.ON_SALE)
+                .filter(id -> squash(candidates.get(id).getName()).contains(head))
+                .toList());
         return new Finding(question, checked, onSale, onePerProduct(matches), onePerProduct(notOnSale),
-                onePerProduct(otherValue), onePerProduct(negated), reads);
+                onePerProduct(otherValue), onePerProduct(negated), reads, coverage[0], coverage[1]);
+    }
+
+    /**
+     * {never read, read and pictures} among these products — from the page-shape marker every detail read writes and
+     * the indexed document an older read left. A database read only.
+     */
+    private int[] coverage(UUID orgId, List<UUID> ids) {
+        if (ids.isEmpty()) {
+            return new int[] {0, 0};
+        }
+        Map<UUID, String> shape = new HashMap<>();
+        for (ProductFact f : em.createQuery("""
+                        select f from ProductFact f
+                        where f.orgId = :org and f.productId in :ids and f.factKey = :key
+                        """, ProductFact.class)
+                .setParameter("org", orgId).setParameter("ids", ids).setParameter("key", FactKeys.DETAIL_PAGE)
+                .getResultList()) {
+            shape.put(f.getProductId(), f.getFactValue());
+        }
+        Set<UUID> documented = em.createQuery("""
+                        select s.productId from ProductKnowledgeSource s
+                        where s.orgId = :org and s.productId in :ids and s.authoredOrigin = :origin
+                        """, UUID.class)
+                .setParameter("org", orgId).setParameter("ids", ids)
+                .setParameter("origin", KnowledgeAuthorship.SELLER_AUTHORED_CHANNEL_CONTENT)
+                .getResultList().stream().collect(Collectors.toSet());
+        int unread = 0;
+        int images = 0;
+        for (UUID id : ids) {
+            String s = shape.get(id);
+            if (s == null && !documented.contains(id)) {
+                unread++;
+            } else if ("IMAGE_ONLY".equals(s)) {
+                images++;
+            }
+        }
+        return new int[] {unread, images};
+    }
+
+    /** Products with an offered 추가상품 whose label names the head. */
+    private Set<UUID> supplementsNaming(UUID orgId, String head) {
+        return em.createQuery("""
+                        select f from ProductFact f where f.orgId = :org and f.factKey like :prefix
+                        """, ProductFact.class)
+                .setParameter("org", orgId).setParameter("prefix", FactKeys.SUPPLEMENT_PREFIX + "%")
+                .getResultList().stream()
+                .filter(f -> squash(f.getFactValue()).contains(head))
+                .map(ProductFact::getProductId)
+                .collect(Collectors.toSet());
     }
 
     /** Whether a product's statements, together, name every qualifier the customer used. */
@@ -359,20 +473,15 @@ public class CatalogueInvestigator {
         if (detail == null || !detail.enabled()) {
             return 0;
         }
-        Set<UUID> withDetail = em.createQuery("""
-                        select s.productId from ProductKnowledgeSource s
-                        where s.orgId = :org and s.productId in :ids and s.authoredOrigin = :origin
-                        """, UUID.class)
-                .setParameter("org", orgId).setParameter("ids", ordered)
-                .setParameter("origin", KnowledgeAuthorship.SELLER_AUTHORED_CHANNEL_CONTENT)
-                .getResultList().stream().collect(Collectors.toSet());
+        // Never-read listings first; then the trigger's own gate decides whether a read one changed since (by the
+        // channel's modifiedDate) or aged out. A NOT_NEEDED answer costs no request and is not counted.
+        List<UUID> onSale = ordered.stream().filter(id -> availability.get(id) == Availability.ON_SALE).toList();
+        List<UUID> queue = new ArrayList<>(onSale.stream().filter(id -> detail.lastRead(orgId, id) == null).toList());
+        onSale.stream().filter(id -> !queue.contains(id)).forEach(queue::add);
         int reads = 0;
-        for (UUID id : ordered) {
+        for (UUID id : queue) {
             if (reads >= MAX_DETAIL_READS) {
                 break;
-            }
-            if (availability.get(id) != Availability.ON_SALE || withDetail.contains(id)) {
-                continue;
             }
             try {
                 ProductDetailEnrichmentTrigger.Result r = detail.enrichIfNeeded(orgId, id);
@@ -419,12 +528,21 @@ public class CatalogueInvestigator {
         for (ProductFact f : em.createQuery(
                         "select f from ProductFact f where f.orgId = :org and f.productId in :ids", ProductFact.class)
                 .setParameter("org", orgId).setParameter("ids", ids).getResultList()) {
-            if (f.getFactValue() == null || f.getFactValue().isBlank()) {
+            if (f.getFactValue() == null || f.getFactValue().isBlank()
+                    || FactKeys.DETAIL_PAGE.equals(f.getFactKey())) {
+                continue;  // the page-shape marker is bookkeeping about the page, never a statement
+            }
+            String channel = channelOf(f.getSource());
+            if (f.getFactKey() != null && f.getFactKey().startsWith(FactKeys.SUPPLEMENT_PREFIX)) {
+                // Said as what it is — an add-on sold with this listing — so the drafter can never read the 추가상품's
+                // figures as this product's own.
+                add(out, products, currentProductId, availability, f.getProductId(), channel, Field.SUPPLEMENT,
+                        f.getFactKey(), "추가상품으로 판매: " + f.getFactValue().strip(),
+                        f.getSourceUpdatedAt() != null ? f.getSourceUpdatedAt() : f.getObservedAt(), f.getId());
                 continue;
             }
             String value = f.getUnit() == null || f.getUnit().isBlank() ? f.getFactValue().strip()
                     : f.getFactValue().strip() + " " + f.getUnit().strip();
-            String channel = channelOf(f.getSource());
             for (String sentence : sentences(value)) {
                 add(out, products, currentProductId, availability, f.getProductId(), channel, Field.FACT,
                         f.getFactKey(), sentence,
@@ -438,7 +556,15 @@ public class CatalogueInvestigator {
             if (v.getOptionName() == null || v.getOptionName().isBlank()) {
                 continue;
             }
-            add(out, products, currentProductId, availability, v.getProductId(), code(codes, v.getChannelId()),
+            // An option the channel says is switched off, sold out or no longer listed is not on sale, whatever its
+            // listing is; an option with no stated status inherits the listing's.
+            SellingStatus optionStatus = SellingStatus.normalize(v.getSellingStatus());
+            Map<UUID, Availability> optionAvailability = availability;
+            if (optionStatus == SellingStatus.SUSPENDED || optionStatus == SellingStatus.ENDED) {
+                optionAvailability = new HashMap<>(availability);
+                optionAvailability.put(v.getProductId(), Availability.NOT_ON_SALE);
+            }
+            add(out, products, currentProductId, optionAvailability, v.getProductId(), code(codes, v.getChannelId()),
                     Field.OPTION, null, trim(v.getOptionName()),
                     v.getSourceUpdatedAt() != null ? v.getSourceUpdatedAt() : v.getObservedAt(), v.getId());
         }

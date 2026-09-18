@@ -7,7 +7,8 @@
     "mustSupport: a figure or word the answer may only carry because the corpus states it.",
     "mustNotClaim: sentences that would be false or unauthorised on this corpus.",
     "2026-09-18 first measurement corrected four labels: Q26 names the Answer Memory entry's own title, and Q33 is grounded (the corpus does mention 밝기 단계) with the invented count as mustNotClaim. Q20·Q21·Q22 keep sellerInputRequired=true and are the measured false-grounding cases.",
-    "Q37–Q42 (2026-09-18) are catalogue questions: products carry listings (selling status), and each case names the one product whose catalogue text may answer it (expectCatalogueProduct), or none — in which case the seller is asked."
+    "Q37–Q42 (2026-09-18) are catalogue questions: products carry listings (selling status), and each case names the one product whose catalogue text may answer it (expectCatalogueProduct), or none — in which case the seller is asked.",
+    "Q43–Q44 (Catalogue Knowledge Bootstrap v1): what a NAVER detail read adds — an offered 추가상품 grounds, a switched-off option does not."
   ],
   "library": {
     "org": [
@@ -228,6 +229,44 @@
           {
             "channel": "NAVER",
             "status": "SALE"
+          }
+        ]
+      },
+      {
+        "key": "cup16",
+        "name": "무형광 종이컵 1000개",
+        "knowledge": [],
+        "facts": [
+          {
+            "ns": "attr",
+            "key": "추가상품 21",
+            "value": "디스펜서: 16온스 컵 디스펜서 벽걸이형"
+          }
+        ],
+        "listings": [
+          {
+            "channel": "NAVER",
+            "status": "SALE"
+          }
+        ],
+        "options": []
+      },
+      {
+        "key": "dispstand",
+        "name": "스탠드 컵 디스펜서",
+        "knowledge": [],
+        "facts": [],
+        "listings": [
+          {
+            "channel": "NAVER",
+            "status": "SALE"
+          }
+        ],
+        "options": [
+          {
+            "id": "stand-20",
+            "name": "용량: 20온스",
+            "status": "SUSPENSION"
           }
         ]
       }
@@ -1058,6 +1097,38 @@
       "expectedMissingSubject": null,
       "expectCatalogueProduct": "cup9",
       "note": "no bound product: discovery over the catalogue alone"
+    },
+    {
+      "id": "Q43",
+      "productKey": "cupholder",
+      "title": "디스펜서 문의",
+      "body": "16온스 컵 디스펜서도 판매하시나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "REPLY_TO_CUSTOMER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": false,
+      "escalation": false,
+      "expectedMissingSubject": null,
+      "expectCatalogueProduct": "cup16",
+      "note": "the only 16온스 dispenser is a 추가상품 offered on a cup listing (detail read: supplementProducts)"
+    },
+    {
+      "id": "Q44",
+      "productKey": "cupholder",
+      "title": "디스펜서 문의",
+      "body": "20온스 디스펜서도 판매하시나요?",
+      "requiredKnowledge": [],
+      "expectedDisposition": "NEEDS_DECISION",
+      "expectedAction": "ASK_SELLER",
+      "mustNotClaim": [],
+      "mustSupport": [],
+      "sellerInputRequired": true,
+      "escalation": false,
+      "expectedMissingSubject": "20온스 디스펜서",
+      "expectCatalogueProduct": null,
+      "note": "the only 20온스 statement is an option the channel says is switched off (usable=false) — not on sale"
     }
   ]
 }

@@ -19,12 +19,23 @@ public class NaverProductDetailSource implements ProductDetailSource {
     private final NaverTokenClient tokens;
     private final NaverChannelProductClient detail;
     private final CredentialVault vault;
+    private final NaverProductAttributeClient attributes;
 
     public NaverProductDetailSource(NaverTokenClient tokens, NaverChannelProductClient detail,
                                     CredentialVault vault) {
+        this(tokens, detail, vault, null);
+    }
+
+    /**
+     * @param attributes names the listing's category attributes; null reads the listing only and its attributes stay
+     *                   unnamed (and so unstated)
+     */
+    public NaverProductDetailSource(NaverTokenClient tokens, NaverChannelProductClient detail,
+                                    CredentialVault vault, NaverProductAttributeClient attributes) {
         this.tokens = tokens;
         this.detail = detail;
         this.vault = vault;
+        this.attributes = attributes;
     }
 
     @Override
@@ -51,6 +62,17 @@ public class NaverProductDetailSource implements ProductDetailSource {
         DecryptedCredential credential = vault.open(orgId, sellerAccountId);
         String token = tokens.accessToken(credential.secrets().get("client_id"),
                 credential.secrets().get("client_secret"));
-        return detail.fetch(token, channelProductNo);
+        NaverProductDetail read = detail.fetch(token, channelProductNo);
+        if (read == null || attributes == null || read.attributes().isEmpty()) {
+            return read;
+        }
+        // Catalogue metadata, cached per category — a failed read here leaves the attributes unnamed and the rest of
+        // the listing intact.
+        return read.withFacts(attributes.name(token, read.leafCategoryId(), read.attributes()));
+    }
+
+    @Override
+    public String detailSourceKind() {
+        return NaverChannelProductClient.SOURCE;
     }
 }

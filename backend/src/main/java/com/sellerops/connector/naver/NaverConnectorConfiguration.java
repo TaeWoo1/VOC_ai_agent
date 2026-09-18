@@ -190,8 +190,16 @@ public class NaverConnectorConfiguration {
     @Bean
     com.sellerops.product.detail.ProductDetailSource naverProductDetailSource(
             NaverTokenClient tokenClient, NaverChannelProductClient detailClient,
-            CredentialVault vault) {
-        return new NaverProductDetailSource(tokenClient, detailClient, vault);
+            CredentialVault vault, NaverProductAttributeClient attributeClient) {
+        return new NaverProductDetailSource(tokenClient, detailClient, vault, attributeClient);
+    }
+
+    /** Names a listing's category attributes — catalogue metadata, cached per category. READ only. */
+    @Bean
+    NaverProductAttributeClient naverProductAttributeClient(
+            NaverHttpClient http,
+            @Value("${sellerops.connector.naver.base-url:https://api.commerce.naver.com}") String baseUrl) {
+        return new NaverProductAttributeClient(http, baseUrl, Clock.systemUTC());
     }
 
     @Bean

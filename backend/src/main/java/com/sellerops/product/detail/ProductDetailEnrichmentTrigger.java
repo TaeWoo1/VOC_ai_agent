@@ -148,6 +148,20 @@ public class ProductDetailEnrichmentTrigger {
         }
     }
 
+    /** The channels whose 상세페이지 this deployment can read ({@code NAVER}), upper-case. */
+    public java.util.Set<String> channelCodes() {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        for (ProductDetailSource source : sources) {
+            out.add(source.channelCode().toUpperCase(java.util.Locale.ROOT));
+        }
+        return out;
+    }
+
+    /** When this product's detail was last read, or null. A database read; never a channel call. */
+    public Instant lastRead(UUID orgId, UUID productId) {
+        return enrichment.lastRead(orgId, productId);
+    }
+
     /** Whether this deployment reads 상세페이지 at all — the switch, and at least one channel that publishes one. */
     public boolean enabled() {
         return enabled && !sources.isEmpty();
@@ -203,7 +217,7 @@ public class ProductDetailEnrichmentTrigger {
             return Result.of(Outcome.NOT_FOUND);
         }
         ProductDetailEnrichment.Result applied = enrichment.apply(orgId, found.channelId(), productId,
-                found.externalProductId(), found.source().sourceKind(), detail, now);
+                found.externalProductId(), found.source().sourceKind(), found.source().detailSourceKind(), detail, now);
         log.info("product-detail trigger org={} outcome=APPLIED enrichment={} images={} options={}",
                 orgId, applied.outcome(), applied.imageCount(), applied.optionsWritten());
         return new Result(Outcome.APPLIED, applied);

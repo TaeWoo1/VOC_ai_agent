@@ -56,7 +56,7 @@ class ProductDetailEnrichmentTriggerTest {
         source = new RecordingSource();
 
         when(enrichment.needsEnrichment(any(), any(), any())).thenReturn(true);
-        when(enrichment.apply(any(), any(), any(), any(), any(), any(), any()))
+        when(enrichment.apply(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new ProductDetailEnrichment.Result(
                         ProductDetailEnrichment.Outcome.TEXT_INDEXED,
                         DetailContentShape.classify("<p>" + "가".repeat(400) + "</p>"), 20, 26));
@@ -95,7 +95,7 @@ class ProductDetailEnrichmentTriggerTest {
         assertThat(result.outcome()).isEqualTo(ProductDetailEnrichmentTrigger.Outcome.APPLIED);
         assertThat(source.reads).containsExactly("13250364547");
         verify(enrichment, times(1)).apply(eq(org), eq(channelId), eq(productId), eq("13250364547"),
-                eq("NAVER:PRODUCT_API:v1"), any(), any());
+                eq("NAVER:PRODUCT_API:v1"), eq("NAVER:PRODUCT_API:v1/detail"), any(), any());
     }
 
     @Test
@@ -160,7 +160,7 @@ class ProductDetailEnrichmentTriggerTest {
 
         assertThat(trigger().enrichIfNeeded(org, productId).outcome())
                 .isEqualTo(ProductDetailEnrichmentTrigger.Outcome.READ_FAILED);
-        verify(enrichment, never()).apply(any(), any(), any(), any(), any(), any(), any());
+        verify(enrichment, never()).apply(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -170,13 +170,13 @@ class ProductDetailEnrichmentTriggerTest {
 
         assertThat(trigger().enrichIfNeeded(org, productId).outcome())
                 .isEqualTo(ProductDetailEnrichmentTrigger.Outcome.NOT_FOUND);
-        verify(enrichment, never()).apply(any(), any(), any(), any(), any(), any(), any());
+        verify(enrichment, never()).apply(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("a page that is pictures writes nothing — and is not re-read on the next draft")
     void imageOnlyPagesAreNotReReadImmediately() {
-        when(enrichment.apply(any(), any(), any(), any(), any(), any(), any()))
+        when(enrichment.apply(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new ProductDetailEnrichment.Result(
                         ProductDetailEnrichment.Outcome.IMAGE_ONLY,
                         DetailContentShape.classify("<img src=\"https://cdn/a.jpg\">"), 20, 26));

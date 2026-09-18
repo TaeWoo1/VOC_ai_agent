@@ -25,6 +25,15 @@ public interface ProductDetailSource {
     String sourceKind();
 
     /**
+     * The provenance of the FACTS a detail read states (notice fields, attributes, 추가상품, the page's shape) —
+     * distinct from {@link #sourceKind()} so the detail read can own its facts as a set: what a re-read no longer
+     * states is removed, and the catalogue sweep's facts are never touched.
+     */
+    default String detailSourceKind() {
+        return sourceKind() + "/detail";
+    }
+
+    /**
      * Read one listing.
      *
      * @return the detail, or {@code null} when the channel does not have this listing — absence is a

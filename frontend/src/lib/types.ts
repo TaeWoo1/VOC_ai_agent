@@ -1342,7 +1342,15 @@ export interface KnowledgeBootstrapReport {
     alreadyFresh: number;
     noListing: number;
     failed: number;
+    onSaleCatalogue: number;
+    covered: number;
+    remaining: number;
   };
+  catalogue?: {
+    channelNameKo: string | null;
+    status: "READ" | "FRESH" | "IN_PROGRESS" | "FAILED";
+    rowsRead: number;
+  }[];
 }
 
 export interface LearnedKnowledgeResponse {

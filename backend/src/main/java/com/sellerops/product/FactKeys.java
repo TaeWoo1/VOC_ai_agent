@@ -26,6 +26,16 @@ public final class FactKeys {
     public static final String TAXONOMY_MANUFACTURER = TAXONOMY + ":manufacturer";
     public static final String TAXONOMY_CATEGORY = TAXONOMY + ":category";
 
+    /**
+     * The shape of the 상세페이지 the last detail read found — {@code TEXT}, {@code IMAGE_ONLY} or {@code EMPTY}. Written
+     * by every detail read, with that read's time, so «was this listing's detail read, and when» has an answer even
+     * when the page was pictures and no document was indexed. Bookkeeping about the page, never a statement about the
+     * product: catalogue investigation reads it for coverage and never quotes it.
+     */
+    public static final String DETAIL_PAGE = ATTR + ":상세페이지";
+    /** One 추가상품 the listing offers — {@code attr:추가상품 <id>} = 「그룹: 이름」. */
+    public static final String SUPPLEMENT_PREFIX = ATTR + ":추가상품 ";
+
     private FactKeys() {
     }
 

@@ -192,3 +192,74 @@ trigger and the same switch (still OFF by default).
 - Coupang listings have no selling status (`UNKNOWN`), so they never ground availability.
 - The 60-product bootstrap and lazy detail reads do nothing while `SELLEROPS_PRODUCT_DETAIL_ENRICHMENT_ENABLED` is OFF.
   Turning it on means NAVER product-detail READs and needs its own approval.
+
+## §7 Catalogue Knowledge Bootstrap v1 — the NAVER catalogue, API-first, before a customer asks (2026-09-18)
+
+**Why.** §6 made ASK_SELLER the last resort, but its real-data check could only search names, options and facts: not one
+NAVER 상세페이지 had been read, and the detail read itself projected text, bare option labels and images only. The
+product-owner instruction: bootstrap the whole on-sale catalogue — detail, options, attributes — from NAVER's official
+Commerce API into Knowledge, and let the catalogue investigation use all of it before asking the seller.
+
+**Contract first.** The endpoint document vendored in August elides `originProduct.detailAttribute` («OAS 참조»). The
+sub-structure was extracted from NAVER's published API reference bundle and vendored:
+`docs/vendor/naver-commerce-api/get-v2-products-channel-products-channelProductNo.detailAttribute.md`, the 36
+상품정보제공고시 types' field titles (`backend/src/main/resources/naver/product-info-notice-labels.tsv`), and the three
+attribute-catalogue endpoints (`get-v1-product-attributes-{attributes,attribute-values,attribute-value-units}.md`).
+Nothing is projected from a path those documents do not publish.
+
+**What one detail read now states** (`NaverChannelProductClient.project`, one listing per call, READ only):
+- every option under its seller-given axis label (「용량: 9oz / 색상: 블랙」) with the channel's `usable` and stock —
+  stored as variant status SALE / OUTOFSTOCK (managed stock 0) / SUSPENSION (not usable); options a complete read no
+  longer lists are **retired to ENDED, never deleted** (knowledge may be scoped to a variant);
+- each offered 추가상품 (`supplementProducts`, `usable=false` omitted) as `attr:추가상품 <id>` = 「그룹: 이름」;
+- 상품정보제공고시 fields under the schema's Korean titles (`spec:크기`, `spec:재질`, `spec:구성품`…) — the five legal
+  clauses, «0/1» codes and phone/A/S-contact fields are not product statements and are not projected;
+- NAVER-shopping model name, seller tags, and category attributes named through `NaverProductAttributeClient`
+  (attributes + values + units, cached 24 h per category; an id the catalogue does not name produces no fact);
+- listing status as a buyer meets it — a SmartStore display `SUSPENSION` overrides origin `SALE`;
+- a page-shape marker `attr:상세페이지` = TEXT / IMAGE_ONLY / EMPTY, written on every read, so «read and nothing
+  there» is distinguishable from «never read».
+
+All of these carry the detail read's own source (`NAVER:PRODUCT_DETAIL_API:v2`) and are **replaced as a set**
+(`ProductKnowledgeWriter.replaceFacts`); the catalogue sweep's facts are never touched. The text lane is unchanged
+(one document per listing, `SELLER_AUTHORED_CHANNEL_CONTENT`).
+
+**Freshness is API-first.** `ProductDetailEnrichment.needsEnrichment`: never read, older than 30 days, **or the channel's
+own `modifiedDate` (carried by the LIST sweep) is newer than our last read**. Steady-state cost is the listings the
+seller changed, not the catalogue.
+
+**Bootstrap order** (`KnowledgeBootstrapService`): inquiry history → answer memory → **the catalogue LIST read** (routine
+PRODUCT path, skipped while a finished one is < `catalogue-refresh-hours` = 24) → detail for discussed products, then
+**every on-sale listing on a channel that publishes detail** (NAVER), never-read first. `max-catalogue-products` is now
+500 — a per-run ceiling reported as `remaining`, not a sample. The report carries `onSaleCatalogue` and `covered`; the
+Learned Knowledge screen says 「판매 중인 상품 N개 중 M개의 상세·옵션·속성을 알고 있습니다」. Same one-request-per-product
+trigger and the same switch (`SELLEROPS_PRODUCT_DETAIL_ENRICHMENT_ENABLED`, still OFF by default).
+
+**Investigation additions** (`CatalogueInvestigator`):
+- an offered 추가상품 answers «do you sell X» **in its own label** (head, qualifiers and value all in the label) and is
+  quoted as 「추가상품으로 판매: …」 so the drafter cannot read its figures as the listing's own;
+- an option the channel says is switched off, sold out or no longer listed is **not on sale**, whatever its listing is;
+- lazy detail reads (≤3, draft path only) take never-read listings first, then let the trigger's changed-since gate decide;
+- the ASK says what «checked» did not cover: 「그중 N개는 상세페이지를 아직 읽지 못했습니다」 and pages made of pictures.
+
+**Measured (offline).**
+- Inquiry-quality set 42 → 44 (Q43 add-on grounds, Q44 switched-off option asks). Basis 40/44 — the only misses are the
+  pre-existing Q16/Q20/Q21/Q22; catalogue source exact 4/4; leakage 0; wrong-product 0.
+- New tests: projection from a schema-shaped body, attribute naming + per-category cache, enrichment facts / marker /
+  retirement / changed-since staleness, investigator add-on / sold-out option / coverage sentence / replace-as-set.
+- Backend 4,372 tests, 0 failures. NAVER read-only fence: the three attribute paths added to the READ allowlist.
+
+**689162087 re-verified on a disposable clone** (`sellerops_catkb_proof`, every connector OFF, draft model OFF,
+marketplace calls 0, ERROR 0): still `NO_ANSWER_BASIS`, no model call, one ORG ask — but the sentence is now honest
+about coverage: 「판매 중인 「디스펜서」 상품 31개의 상품명·옵션·추가상품·상품 정보를 확인했지만 「9oz」에 맞는다고 적힌
+상품은 없었습니다. 그중 31개는 상세페이지를 아직 읽지 못했습니다.」 Of the 31, 15 are NAVER listings (readable by this
+package) and 16 are Cafe24 listings (no detail source here). The last NAVER catalogue LIST read is 2026-09-05.
+
+**Not done — needs a fresh approval.** The live bootstrap on the clone: 1 NAVER catalogue LIST sweep (~2 pages), ≤37
+channel-product detail GETs, ≤23 attribute-catalogue GETs, token mints; WRITE 0; local writes to the clone only. Then
+689162087 is re-assessed against the learned detail. Until then «no 9oz dispenser» is a statement about names, options
+and facts only.
+
+**Limits.** Cafe24 detail is out of scope (no detail source). Attribute values are rendered from the catalogue's
+`minAttributeValue`/`maxAttributeValue` as published — confirmed or refuted by the first live read. Images are still not
+read. Coupang statuses remain `UNKNOWN`.

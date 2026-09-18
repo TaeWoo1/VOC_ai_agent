@@ -260,6 +260,56 @@ public class ProductKnowledgeWriter {
         return value != null && !value.isBlank();
     }
 
+    /**
+     * Replace the facts ONE source states about one product with {@code keyed} (full fact key → value): each is upserted,
+     * and every other fact this source had stated about this product is removed. For a source that re-reads the whole
+     * statement set each time (a listing's detail) — what it no longer says, it no longer claims. Facts from every
+     * other source are untouched. Returns the number written.
+     */
+    @Transactional
+    public int replaceFacts(UUID orgId, UUID productId, String source, String sourceRef, Map<String, String> keyed,
+                            Instant observedAt, Instant sourceUpdatedAt) {
+        CanonicalProduct row = new CanonicalProduct(sourceRef, null, null, null, null, null, null, null, null, null,
+                null, Map.of(), List.of(), observedAt, sourceUpdatedAt, source, 1, null);
+        int written = 0;
+        java.util.Set<String> kept = new java.util.HashSet<>();
+        for (Map.Entry<String, String> e : keyed.entrySet()) {
+            String value = e.getValue();
+            if (!isPresent(e.getKey()) || !isPresent(value) || value.length() > MAX_ATTRIBUTE_CHARS
+                    || e.getKey().length() > 120) {
+                continue;
+            }
+            written += fact(orgId, productId, e.getKey(), value, null, row, observedAt);
+            kept.add(e.getKey());
+        }
+        for (ProductFact existing : facts.findByOrgIdAndProductId(orgId, productId)) {
+            if (source.equals(existing.getSource()) && !kept.contains(existing.getFactKey())) {
+                facts.delete(existing);
+            }
+        }
+        return written;
+    }
+
+    /**
+     * Mark this channel's variants of one product that a complete option read no longer lists as {@code ENDED}. Never a
+     * delete: a seller's knowledge may be scoped to a variant ({@code variant_id} is a foreign key), and a 규격 that
+     * stopped being sold is still the 규격 that knowledge was written about. Returns the number retired.
+     */
+    @Transactional
+    public int retireVariantsNotIn(UUID orgId, UUID productId, UUID channelId, java.util.Set<String> listedIds) {
+        int retired = 0;
+        for (ProductVariant v : variants.findByOrgIdAndProductId(orgId, productId)) {
+            if (channelId.equals(v.getChannelId()) && v.getExternalVariantId() != null
+                    && !listedIds.contains(v.getExternalVariantId())
+                    && SellingStatus.normalize(v.getSellingStatus()) != SellingStatus.ENDED) {
+                v.setSellingStatus(SellingStatus.ENDED.name());
+                variants.save(v);
+                retired++;
+            }
+        }
+        return retired;
+    }
+
     /** Sanitized tally — ids the caller may need for follow-up, and counts. Never a title. */
     public record WriteResult(List<UUID> productIds, int newListings, int variants, int facts) {
     }

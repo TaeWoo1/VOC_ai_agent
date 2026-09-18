@@ -167,6 +167,14 @@ function RunSummary({ run }: { run: KnowledgeBootstrapReport }) {
     }
   }
   lines.push(`기억하고 있는 지난 문의 답변은 ${run.answersRemembered}건입니다.`);
+  for (const read of run.catalogue ?? []) {
+    const channel = read.channelNameKo ?? "채널";
+    if (read.status === "READ") {
+      lines.push(`${channel}: 판매 상품 목록을 새로 읽었습니다.`);
+    } else if (read.status === "FAILED") {
+      lines.push(`${channel}: 판매 상품 목록을 읽지 못해 저장된 목록으로 진행했습니다.`);
+    }
+  }
   if (!run.productDetail.enabled) {
     lines.push("상품 상세 읽기는 지금 꺼져 있습니다.");
   } else if (run.productDetail.considered > 0) {
@@ -175,6 +183,13 @@ function RunSummary({ run }: { run: KnowledgeBootstrapReport }) {
       parts.push(`이미지로만 된 상세페이지 ${run.productDetail.imageOnly}개는 읽지 못했습니다`);
     }
     lines.push(`${parts.join(" · ")}.`);
+  }
+  if (run.productDetail.enabled && (run.productDetail.onSaleCatalogue ?? 0) > 0) {
+    let line = `판매 중인 상품 ${run.productDetail.onSaleCatalogue}개 중 ${run.productDetail.covered}개의 상세·옵션·속성을 알고 있습니다.`;
+    if ((run.productDetail.remaining ?? 0) > 0) {
+      line += ` 나머지 ${run.productDetail.remaining}개는 다음 번에 읽습니다.`;
+    }
+    lines.push(line);
   }
   return (
     <ul className="space-y-1 rounded-xl border border-line bg-surface p-3 text-sm text-ink" aria-live="polite">

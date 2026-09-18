@@ -332,10 +332,13 @@ sellerops:
     bootstrap:
       history-days: ${SELLEROPS_KNOWLEDGE_BOOTSTRAP_HISTORY_DAYS:90}
       max-products: ${SELLEROPS_KNOWLEDGE_BOOTSTRAP_MAX_PRODUCTS:30}
-      # On-sale catalogue products with no 상세페이지 yet, learned after the discussed ones so a catalogue question
-      # («9oz 디스펜서도 판매하시나요») finds the answer on the seller's other listings. Same one-request-per-product
-      # trigger and the same product-detail switch; nothing is read while that switch is off.
-      max-catalogue-products: ${SELLEROPS_KNOWLEDGE_BOOTSTRAP_MAX_CATALOGUE_PRODUCTS:60}
+      # Catalogue Knowledge Bootstrap v1: API-first — the channel's product LIST is read first (skipped while a
+      # finished one is younger than `catalogue-refresh-hours`), then the detail/options/attributes of EVERY on-sale
+      # listing on a channel that publishes them (NAVER), never-read first. `max-catalogue-products` is a per-run
+      # ceiling reported as `remaining`, not a sample. Same one-request-per-product trigger and the same product-detail
+      # switch; nothing is read while that switch is off.
+      max-catalogue-products: ${SELLEROPS_KNOWLEDGE_BOOTSTRAP_MAX_CATALOGUE_PRODUCTS:500}
+      catalogue-refresh-hours: ${SELLEROPS_KNOWLEDGE_BOOTSTRAP_CATALOGUE_REFRESH_HOURS:24}
       auto:
         enabled: ${SELLEROPS_KNOWLEDGE_BOOTSTRAP_AUTO_ENABLED:false}
     embedding:

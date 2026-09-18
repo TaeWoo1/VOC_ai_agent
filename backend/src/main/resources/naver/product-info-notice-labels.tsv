@@ -1,0 +1,588 @@
+# NAVER 상품정보제공고시 상품군별 필드 제목. type<TAB>field<TAB>title. 출처: NAVER 커머스API 공개 레퍼런스(v2 채널 상품 조회 스키마), 2026-09-18 추출.
+wear	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+wear	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+wear	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+wear	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+wear	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+wear	material	제품 소재
+wear	color	색상
+wear	size	치수
+wear	manufacturer	제조자(사)
+wear	caution	세탁 방법 및 취급 시 주의사항
+wear	packDate	제조연월
+wear	packDateText	제조연월 직접 입력
+wear	warrantyPolicy	품질 보증 기준
+wear	afterServiceDirector	A/S 책임자와 전화번호
+shoes	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+shoes	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+shoes	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+shoes	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+shoes	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+shoes	material	제품의 주 소재
+shoes	color	색상
+shoes	size	발길이
+shoes	height	굽높이
+shoes	manufacturer	제조자(사)
+shoes	caution	취급 시 주의사항
+shoes	warrantyPolicy	품질 보증 기준
+shoes	afterServiceDirector	A/S 책임자와 전화번호
+bag	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+bag	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+bag	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+bag	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+bag	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+bag	type	종류
+bag	material	소재
+bag	color	색상
+bag	size	크기
+bag	manufacturer	제조자
+bag	caution	취급 시 주의사항
+bag	warrantyPolicy	품질 보증 기준
+bag	afterServiceDirector	A/S 책임자와 전화번호
+fashionItems	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+fashionItems	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+fashionItems	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+fashionItems	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+fashionItems	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+fashionItems	type	종류
+fashionItems	material	소재
+fashionItems	size	치수
+fashionItems	manufacturer	제조자(사)
+fashionItems	caution	취급 시 주의사항
+fashionItems	warrantyPolicy	품질 보증 기준
+fashionItems	afterServiceDirector	A/S 책임자와 전화번호
+sleepingGear	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+sleepingGear	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+sleepingGear	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+sleepingGear	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+sleepingGear	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+sleepingGear	material	제품 소재
+sleepingGear	color	색상
+sleepingGear	size	치수
+sleepingGear	components	제품 구성
+sleepingGear	manufacturer	제조자(사)
+sleepingGear	caution	세탁 방법 및 취급 시 주의사항
+sleepingGear	warrantyPolicy	품질 보증 기준
+sleepingGear	afterServiceDirector	A/S 책임자와 전화번호
+furniture	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+furniture	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+furniture	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+furniture	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+furniture	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+furniture	itemName	품명
+furniture	certificationType	KC 인증정보
+furniture	color	색상
+furniture	components	구성품
+furniture	material	주요 소재
+furniture	manufacturer	제조자(사)
+furniture	importer	수입자
+furniture	producer	제조국
+furniture	size	크기
+furniture	installedCharge	배송 설치 비용
+furniture	warrantyPolicy	품질 보증 기준
+furniture	refurb	재공급 사유 및 하자
+furniture	afterServiceDirector	A/S 책임자와 전화번호
+imageAppliances	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+imageAppliances	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+imageAppliances	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+imageAppliances	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+imageAppliances	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+imageAppliances	itemName	품명
+imageAppliances	modelName	모델명
+imageAppliances	certificationType	KC 인증정보
+imageAppliances	ratedVoltage	정격전압
+imageAppliances	powerConsumption	소비전력
+imageAppliances	energyEfficiencyRating	에너지소비효율등급
+imageAppliances	releaseDate	동일 모델의 출시연월
+imageAppliances	releaseDateText	동일 모델 출시연월일 직접 입력
+imageAppliances	manufacturer	제조자(사)
+imageAppliances	size	크기, 형태
+imageAppliances	additionalCost	추가 설치 비용
+imageAppliances	displaySpecification	화면 사양
+imageAppliances	warrantyPolicy	품질 보증 기준
+imageAppliances	afterServiceDirector	A/S 책임자와 전화번호
+homeAppliances	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+homeAppliances	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+homeAppliances	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+homeAppliances	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+homeAppliances	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+homeAppliances	itemName	품명
+homeAppliances	modelName	모델명
+homeAppliances	certificationType	KC 인증정보
+homeAppliances	ratedVoltage	정격전압
+homeAppliances	powerConsumption	소비전력
+homeAppliances	energyEfficiencyRating	에너지소비효율등급
+homeAppliances	releaseDate	동일 모델의 출시연월
+homeAppliances	releaseDateText	동일 모델 출시연월일 직접 입력
+homeAppliances	manufacturer	제조자(사)
+homeAppliances	size	크기, 용량, 형태
+homeAppliances	additionalCost	추가 설치 비용
+homeAppliances	warrantyPolicy	품질 보증 기준
+homeAppliances	afterServiceDirector	A/S 책임자와 전화번호
+seasonAppliances	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+seasonAppliances	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+seasonAppliances	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+seasonAppliances	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+seasonAppliances	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+seasonAppliances	itemName	품명
+seasonAppliances	modelName	모델명
+seasonAppliances	certificationType	KC 인증정보
+seasonAppliances	ratedVoltage	정격전압
+seasonAppliances	powerConsumption	소비전력
+seasonAppliances	energyEfficiencyRating	에너지소비효율등급
+seasonAppliances	releaseDateText	동일 모델 출시연월 직접 입력
+seasonAppliances	manufacturer	제조자(사)
+seasonAppliances	size	크기, 형태
+seasonAppliances	area	냉난방 면적
+seasonAppliances	installedCharge	추가 설치 비용
+seasonAppliances	warrantyPolicy	품질 보증 기준
+seasonAppliances	afterServiceDirector	A/S 책임자와 전화번호
+officeAppliances	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+officeAppliances	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+officeAppliances	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+officeAppliances	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+officeAppliances	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+officeAppliances	itemName	품명
+officeAppliances	modelName	모델명
+officeAppliances	certificationType	KC 인증정보
+officeAppliances	ratedVoltage	정격전압
+officeAppliances	powerConsumption	소비전력
+officeAppliances	energyEfficiencyRating	에너지소비효율등급
+officeAppliances	releaseDateText	동일 모델 출시연월 직접 입력
+officeAppliances	manufacturer	제조자(사)
+officeAppliances	size	크기
+officeAppliances	weight	무게
+officeAppliances	specification	주요 사양
+officeAppliances	warrantyPolicy	품질 보증 기준
+officeAppliances	afterServiceDirector	A/S 책임자와 전화번호
+opticsAppliances	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+opticsAppliances	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+opticsAppliances	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+opticsAppliances	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+opticsAppliances	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+opticsAppliances	itemName	품명
+opticsAppliances	modelName	모델명
+opticsAppliances	certificationType	KC 인증정보
+opticsAppliances	releaseDate	동일 모델의 출시연월
+opticsAppliances	releaseDateText	동일 모델 출시연월 직접 입력
+opticsAppliances	manufacturer	제조자(사)
+opticsAppliances	size	크기
+opticsAppliances	weight	무게
+opticsAppliances	specification	주요 사양
+opticsAppliances	warrantyPolicy	품질 보증 기준
+opticsAppliances	afterServiceDirector	A/S 책임자와 전화번호
+microElectronics	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+microElectronics	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+microElectronics	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+microElectronics	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+microElectronics	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+microElectronics	itemName	품명
+microElectronics	modelName	모델명
+microElectronics	certificationType	KC 인증정보
+microElectronics	ratedVoltage	정격전압
+microElectronics	powerConsumption	소비전력
+microElectronics	releaseDate	출시연월
+microElectronics	releaseDateText	동일 모델 출시연월 직접 입력
+microElectronics	manufacturer	제조자(사)
+microElectronics	size	크기
+microElectronics	weight	무게
+microElectronics	specification	주요 사양
+microElectronics	warrantyPolicy	품질 보증 기준
+microElectronics	afterServiceDirector	A/S 책임자와 전화번호
+navigation	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+navigation	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+navigation	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+navigation	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+navigation	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+navigation	itemName	품명
+navigation	modelName	모델명
+navigation	certificationType	KC 인증정보
+navigation	ratedVoltage	정격전압
+navigation	powerConsumption	소비전력
+navigation	releaseDate	동일 모델의 출시연월
+navigation	releaseDateText	동일 모델 출시연월 직접 입력
+navigation	manufacturer	제조자(사)
+navigation	size	크기
+navigation	weight	무게
+navigation	specification	주요 사양
+navigation	updateCost	맵 업데이트 비용
+navigation	freeCostPeriod	무상 기간
+navigation	warrantyPolicy	품질 보증 기준
+navigation	afterServiceDirector	A/S 책임자와 전화번호
+carArticles	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+carArticles	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+carArticles	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+carArticles	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+carArticles	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+carArticles	itemName	품명
+carArticles	modelName	모델명
+carArticles	releaseDate	동일 모델 출시연월
+carArticles	releaseDateText	동일 모델 출시연월 직접 입력
+carArticles	certificationType	KC 인증정보
+carArticles	caution	제품 사용으로 인한 위험 및 유의사항
+carArticles	manufacturer	제조자
+carArticles	size	크기
+carArticles	applyModel	적용 차종
+carArticles	warrantyPolicy	품질 보증 기준
+carArticles	roadWorthyCertification	검사합격증 번호
+carArticles	afterServiceDirector	A/S 책임자와 전화번호
+medicalAppliances	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+medicalAppliances	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+medicalAppliances	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+medicalAppliances	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+medicalAppliances	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+medicalAppliances	itemName	품명
+medicalAppliances	modelName	모델명
+medicalAppliances	licenceNo	허가·인증·신고번호
+medicalAppliances	advertisingCertificationType	광고사전심의 필 유무
+medicalAppliances	ratedVoltage	정격전압
+medicalAppliances	powerConsumption	소비전력
+medicalAppliances	releaseDate	출시연월
+medicalAppliances	releaseDateText	동일 모델 출시연월 직접 입력
+medicalAppliances	manufacturer	제조자(사)
+medicalAppliances	purpose	제품의 사용 목적
+medicalAppliances	usage	사용 방법
+medicalAppliances	caution	취급 시 주의사항
+medicalAppliances	warrantyPolicy	품질 보증 기준
+medicalAppliances	afterServiceDirector	A/S 책임자와 전화번호
+kitchenUtensils	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+kitchenUtensils	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+kitchenUtensils	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+kitchenUtensils	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+kitchenUtensils	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+kitchenUtensils	itemName	품명
+kitchenUtensils	modelName	모델명
+kitchenUtensils	material	재질
+kitchenUtensils	component	구성품
+kitchenUtensils	size	크기
+kitchenUtensils	releaseDate	출시연월
+kitchenUtensils	releaseDateText	동일 모델 출시연월 직접 입력
+kitchenUtensils	manufacturer	제조자(사)
+kitchenUtensils	producer	제조국
+kitchenUtensils	warrantyPolicy	품질 보증 기준
+kitchenUtensils	afterServiceDirector	A/S 책임자와 전화번호
+cosmetic	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+cosmetic	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+cosmetic	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+cosmetic	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+cosmetic	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+cosmetic	capacity	내용물의 용량 및 중량
+cosmetic	specification	제품 주요 사양
+cosmetic	expirationDate	사용기한 또는 개봉 후 사용기간
+cosmetic	expirationDateText	사용기한 또는 개봉 후 사용기간 직접 입력
+cosmetic	usage	사용 방법
+cosmetic	manufacturer	화장품 제조업자
+cosmetic	producer	제조국
+cosmetic	distributor	화장품책임판매업자
+cosmetic	customizedDistributor	맞춤형 화장품판매업자
+cosmetic	mainIngredient	｢화장품법｣에 따라 기재ㆍ표시하여야 하는 모든 성분
+cosmetic	certificationType	｢화장품법｣에 따른 기능성 화장품(미백, 주름개선, 자외선 차단제품 등)의 경우
+cosmetic	caution	사용할 때의 주의사항
+cosmetic	warrantyPolicy	품질 보증 기준
+cosmetic	customerServicePhoneNumber	소비자 상담 관련 전화번호
+jewellery	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+jewellery	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+jewellery	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+jewellery	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+jewellery	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+jewellery	material	소재
+jewellery	purity	순도
+jewellery	bandMaterial	밴드 재질
+jewellery	weight	중량
+jewellery	manufacturer	제조자(사)
+jewellery	producer	제조국(원산지, 가공지 등이 다를 경우)
+jewellery	size	치수
+jewellery	caution	착용 시 주의사항
+jewellery	specification	주요 사양
+jewellery	provideWarranty	보증서 제공 여부
+jewellery	warrantyPolicy	품질 보증 기준
+jewellery	afterServiceDirector	A/S 책임자와 전화번호
+food	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+food	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+food	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+food	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+food	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+food	foodItem	품목 또는 명칭
+food	weight	포장 단위별 용량(중량), 수량, 크기
+food	amount	포장 단위별 수량
+food	size	포장 단위별 크기
+food	packDate	제조연월일
+food	packDateText	제조연월일 직접 입력
+food	expirationDate	유통기한
+food	expirationDateText	유통기한 직접 입력
+food	consumptionDate	소비기한 또는 품질유지기한
+food	consumptionDateText	소비기한 또는 품질유지기한 직접 입력
+food	producer	생산자
+food	relevantLawContent	세부 품목군별 표시사항
+food	productComposition	상품 구성
+food	keep	보관 방법 또는 취급 방법
+food	adCaution	소비자 안전을 위한 주의사항
+food	customerServicePhoneNumber	소비자 상담 관련 전화번호
+generalFood	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+generalFood	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+generalFood	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+generalFood	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+generalFood	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+generalFood	productName	제품명
+generalFood	foodType	식품의 유형
+generalFood	producer	생산자
+generalFood	location	소재지
+generalFood	packDate	제조연월일
+generalFood	packDateText	제조연월일 직접 입력
+generalFood	expirationDate	유통기한
+generalFood	expirationDateText	유통기한 직접 입력
+generalFood	consumptionDate	소비기한 또는 품질유지기한
+generalFood	consumptionDateText	소비기한 또는 품질유지기한 직접 입력
+generalFood	weight	포장 단위별 내용물의 용량(중량), 수량
+generalFood	amount	포장 단위별 수량
+generalFood	ingredients	원재료명(｢농수산물의 원산지 표시 등에 관한 법률｣에 따른 원산지 표시 포함) 및 함량
+generalFood	nutritionFacts	영양 성분
+generalFood	consumerSafetyCaution	소비자안전을 위한 주의사항
+generalFood	customerServicePhoneNumber	소비자 상담 관련 전화번호
+dietFood	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+dietFood	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+dietFood	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+dietFood	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+dietFood	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+dietFood	productName	제품명
+dietFood	producer	제조업소
+dietFood	location	소재지
+dietFood	expirationDate	유통기한
+dietFood	expirationDateText	유통기한 직접 입력
+dietFood	consumptionDate	소비기한
+dietFood	consumptionDateText	소비기한 직접 입력
+dietFood	storageMethod	보관방법
+dietFood	weight	포장 단위별 내용물의 용량(중량), 수량
+dietFood	amount	포장 단위별 수량
+dietFood	ingredients	원료명 및 함량
+dietFood	nutritionFacts	영양 정보
+dietFood	specification	기능 정보
+dietFood	cautionAndSideEffect	섭취량, 섭취 방법 및 섭취 시 주의사항
+dietFood	nonMedicinalUsesMessage	질병의 예방 및 치료를 위한 의약품이 아니라는 내용의 문구
+dietFood	consumerSafetyCaution	소비자안전을 위한 주의사항
+dietFood	customerServicePhoneNumber	소비자 상담 관련 전화번호
+kids	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+kids	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+kids	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+kids	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+kids	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+kids	itemName	품명
+kids	modelName	모델명
+kids	certificationType	KC 인증정보
+kids	size	크기
+kids	weight	중량
+kids	color	색상
+kids	material	재질
+kids	recommendedAge	사용 연령 또는 권장 사용 연령
+kids	releaseDate	동일 모델의 출시연월
+kids	releaseDateText	동일 모델 출시연월 직접 입력
+kids	manufacturer	제조자(사)
+kids	caution	취급방법 및 취급 시 주의사항, 안전표시(주의, 경고 등)
+kids	warrantyPolicy	품질 보증 기준
+kids	afterServiceDirector	A/S 책임자와 전화번호
+kids	numberLimit	크기·체중의 한계
+musicalInstrument	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+musicalInstrument	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+musicalInstrument	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+musicalInstrument	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+musicalInstrument	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+musicalInstrument	itemName	품명
+musicalInstrument	modelName	모델명
+musicalInstrument	size	크기
+musicalInstrument	color	색상
+musicalInstrument	material	재질
+musicalInstrument	components	제품 구성
+musicalInstrument	releaseDate	동일 모델의 출시연월
+musicalInstrument	releaseDateText	동일 모델 출시연월 직접 입력
+musicalInstrument	manufacturer	제조자(사)
+musicalInstrument	detailContent	상품별 세부 사양
+musicalInstrument	warrantyPolicy	품질 보증 기준
+musicalInstrument	afterServiceDirector	A/S 책임자와 전화번호
+sportsEquipment	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+sportsEquipment	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+sportsEquipment	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+sportsEquipment	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+sportsEquipment	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+sportsEquipment	itemName	품명
+sportsEquipment	modelName	모델명
+sportsEquipment	certificationType	KC 인증정보
+sportsEquipment	size	크기
+sportsEquipment	weight	중량
+sportsEquipment	color	색상
+sportsEquipment	material	재질
+sportsEquipment	components	제품 구성
+sportsEquipment	releaseDateText	동일 모델 출시연월 직접 입력
+sportsEquipment	manufacturer	제조자(사)
+sportsEquipment	detailContent	상품별 세부 사양
+sportsEquipment	warrantyPolicy	품질 보증 기준
+sportsEquipment	afterServiceDirector	A/S 책임자와 전화번호
+books	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+books	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+books	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+books	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+books	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+books	title	도서명
+books	author	저자
+books	publisher	출판사
+books	size	크기
+books	pages	쪽수
+books	components	제품 구성(전집 또는 세트일 경우 낱권 구성, CD 등)
+books	publishDate	발행일
+books	publishDateText	발행일 직접 입력
+books	description	목차 또는 책 소개
+rentalEtc	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+rentalEtc	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+rentalEtc	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+rentalEtc	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+rentalEtc	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+rentalEtc	itemName	품명
+rentalEtc	modelName	모델명
+rentalEtc	ownershipTransferCondition	소유권 이전 조건
+rentalEtc	payingForLossOrDamage	상품의 고장, 분실, 훼손 시 소비자 책임
+rentalEtc	refundPolicyForCancel	중도 해약 시 환불 기준
+rentalEtc	customerServicePhoneNumber	소비자 상담 관련 전화번호
+rentalHa	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+rentalHa	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+rentalHa	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+rentalHa	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+rentalHa	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+rentalHa	itemName	품명
+rentalHa	modelName	모델명
+rentalHa	ownershipTransferCondition	소유권 이전 조건
+rentalHa	payingForLossOrDamage	상품의 고장, 분실, 훼손 시 소비자 책임
+rentalHa	refundPolicyForCancel	중도 해약 시 환불 기준
+rentalHa	customerServicePhoneNumber	소비자 상담 관련 전화번호
+rentalHa	maintenance	유지 보수 조건
+rentalHa	specification	제품 사양
+digitalContents	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+digitalContents	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+digitalContents	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+digitalContents	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+digitalContents	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+digitalContents	producer	제작자 또는 공급자
+digitalContents	termsOfUse	이용 조건
+digitalContents	usePeriod	이용 기간
+digitalContents	medium	상품 제공 방식
+digitalContents	requirement	최소 시스템 사양, 필수 소프트웨어
+digitalContents	cancelationPolicy	청약철회 및 계약의 해제, 해지에 따른 효과
+digitalContents	customerServicePhoneNumber	소비자 상담 관련 전화번호
+giftCard	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+giftCard	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+giftCard	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+giftCard	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+giftCard	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+giftCard	issuer	발행자
+giftCard	periodStartDate	유효기간 시작일
+giftCard	periodEndDate	유효기간 종료일
+giftCard	termsOfUse	이용 조건
+giftCard	useStorePlace	이용 가능 매장(장소)
+giftCard	useStoreUrl	이용 가능 매장(URL)
+giftCard	refundPolicy	잔액 환급 조건
+giftCard	customerServicePhoneNumber	소비자 상담 관련 전화번호
+mobileCoupon	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+mobileCoupon	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+mobileCoupon	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+mobileCoupon	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+mobileCoupon	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+mobileCoupon	issuer	발행자
+mobileCoupon	usableCondition	유효기간, 이용 조건
+mobileCoupon	usableStore	이용 가능 매장
+mobileCoupon	cancelationPolicy	환불 조건 및 방법
+mobileCoupon	customerServicePhoneNumber	소비자 상담 관련 전화번호
+movieShow	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+movieShow	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+movieShow	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+movieShow	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+movieShow	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+movieShow	sponsor	주최 또는 기획
+movieShow	actor	주연
+movieShow	rating	관람 등급
+movieShow	showTime	상영ㆍ공연 시간
+movieShow	showPlace	상영ㆍ공연 장소
+movieShow	cancelationCondition	예매 취소 조건
+movieShow	cancelationPolicy	취소ㆍ환불 방법
+movieShow	customerServicePhoneNumber	소비자 상담 관련 전화번호
+etcService	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+etcService	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+etcService	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+etcService	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+etcService	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+etcService	serviceProvider	서비스 제공 사업자
+etcService	certificateDetails	법에 의한 인증ㆍ허가 등을 받았음을 확인할 수 있는 경우 그에 대한 사항
+etcService	usableCondition	이용 조건
+etcService	cancelationStandard	취소ㆍ중도해약ㆍ해지 조건 및 환불 기준
+etcService	cancelationPolicy	취소ㆍ환불 방법
+etcService	customerServicePhoneNumber	소비자 상담 관련 전화번호
+biochemistry	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+biochemistry	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+biochemistry	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+biochemistry	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+biochemistry	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+biochemistry	productName	품목 및 제품명
+biochemistry	dosageForm	용도 및 제형
+biochemistry	packDate	제조연월
+biochemistry	packDateText	제조연월 직접 입력
+biochemistry	expirationDate	유통기한
+biochemistry	expirationDateText	유통기한 직접 입력
+biochemistry	weight	중량·용량·매수·크기
+biochemistry	effect	효능ㆍ효과
+biochemistry	importer	수입자
+biochemistry	producer	제조국
+biochemistry	manufacturer	제조자(사)
+biochemistry	childProtection	어린이보호포장 대상 제품 여부
+biochemistry	chemicals	제품에 사용된 화학 물질 명칭
+biochemistry	caution	사용상 주의사항
+biochemistry	safeCriterionNo	안전기준적합확인신고번호 또는 안전확인대상 생활화학제품승인번호
+biochemistry	customerServicePhoneNumber	소비자 상담 관련 전화번호
+biocidal	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+biocidal	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+biocidal	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+biocidal	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+biocidal	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+biocidal	productName	제품명 및 살생물제품유형
+biocidal	weight	중량 또는 용량 및 표준 사용량
+biocidal	effect	효능ㆍ효과
+biocidal	rangeOfUse	사용 대상자 및 사용 범위
+biocidal	importer	수입자
+biocidal	producer	제조국
+biocidal	manufacturer	제조자(사)
+biocidal	childProtection	어린이보호포장 대상 제품 여부
+biocidal	harmfulChemicalSubstance	살생물물질, 나노물질, 유해화학물질(또는 중점관리물질)의 명칭
+biocidal	maleficence	제품 유해성ㆍ위해성 표시
+biocidal	caution	사용 방법 및 사용상 주의사항
+biocidal	approvalNumber	승인번호
+biocidal	customerServicePhoneNumber	소비자상담 전화번호
+biocidal	expirationDate	유통기한
+biocidal	expirationDateText	유통기한 직접 입력
+cellPhone	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+cellPhone	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+cellPhone	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+cellPhone	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+cellPhone	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+cellPhone	itemName	품목
+cellPhone	modelName	모델명
+cellPhone	certificationType	KC 인증정보
+cellPhone	releaseDate	동일 모델의 출시연월
+cellPhone	releaseDateText	동일 모델 출시연월일 직접 입력
+cellPhone	manufacturer	제조자(사)
+cellPhone	importer	수입자
+cellPhone	producer	제조국
+cellPhone	size	크기
+cellPhone	weight	무게
+cellPhone	telecomType	이동통신사
+cellPhone	joinProcess	가입절차
+cellPhone	extraBurden	소비자의 추가적인 부담사항
+cellPhone	specification	주요 사양
+cellPhone	warrantyPolicy	품질 보증 기준
+cellPhone	afterServiceDirector	A/S 책임자와 전화번호
+etc	returnCostReason	제품하자/오배송에 따른 청약철회 조항
+etc	noRefundReason	제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거
+etc	qualityAssuranceStandard	재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준
+etc	compensationProcedure	대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차
+etc	troubleShootingContents	소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항
+etc	itemName	품명
+etc	modelName	모델명
+etc	certificateDetails	법에 의한 인증, 허가 등을 받았음을 확인할 수 있는 경우 그에 대한 사항
+etc	manufacturer	제조자(사)
+etc	afterServiceDirector	A/S 책임자
+etc	customerServicePhoneNumber	소비자 상담 관련 전화번호

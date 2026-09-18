@@ -1,6 +1,7 @@
 package com.sellerops.inquiry.draft;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.sellerops.agent.quota.AgentQuotaService;
 import com.sellerops.agent.quota.AgentUsageKind;
@@ -35,6 +36,7 @@ import com.sellerops.product.Product;
 import com.sellerops.product.ProductFact;
 import com.sellerops.product.ProductFactRepository;
 import com.sellerops.product.ProductRepository;
+import com.sellerops.product.ProductVariant;
 import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.product.catalogue.CatalogueInvestigator;
 import com.sellerops.product.catalogue.CatalogueQuestion;
@@ -276,6 +278,104 @@ class CatalogueInvestigationTest {
         assertThat(filed.getContent()).isEqualTo("「9oz 디스펜서」를 판매하시는지 알려 주세요.");
     }
 
+    // ── Catalogue Knowledge Bootstrap v1: what a detail read adds ─────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a 추가상품 offered on another listing grounds «do you sell it» — said as an add-on, citing that listing")
+    void anOfferedSupplementGrounds() {
+        UUID cups = product(org, "무형광 9온스 종이컵 1000개", "SALE");
+        detailFact(org, cups, FactKeys.SUPPLEMENT_PREFIX + "7", "디스펜서: 9oz 컵 디스펜서");
+
+        InquiryKnowledgeAssessor.Assessment a = assess(holder, QUESTION);
+
+        assertThat(a.basis()).isEqualTo(AnswerBasisState.GROUNDED);
+        assertThat(a.catalogue().matches()).singleElement().satisfies(s -> {
+            assertThat(s.productId()).isEqualTo(cups);
+            assertThat(s.field()).isEqualTo(CatalogueInvestigator.Field.SUPPLEMENT);
+            assertThat(s.text()).isEqualTo("추가상품으로 판매: 디스펜서: 9oz 컵 디스펜서");
+            assertThat(s.locator()).startsWith("catalogue/NAVER/supplement@");
+        });
+    }
+
+    @Test
+    @DisplayName("a 추가상품 that names the value but not the asked kind is not an answer")
+    void aSupplementOfAnotherKindDoesNotGround() {
+        UUID cups = product(org, "무형광 종이컵 1000개", "SALE");
+        detailFact(org, cups, FactKeys.SUPPLEMENT_PREFIX + "8", "뚜껑: 9oz 컵 뚜껑");
+
+        InquiryKnowledgeAssessor.Assessment a = assess(holder, QUESTION);
+
+        assertThat(a.catalogue().grounds()).isFalse();
+        assertThat(allStatements(a.catalogue())).noneMatch(s -> s.productId().equals(cups));
+    }
+
+    @Test
+    @DisplayName("an option the channel says is sold out or switched off does not ground, whatever its listing's status")
+    void aSuspendedOptionIsNotOnSale() {
+        UUID stand = product(org, "스탠드형 컵 디스펜서", "SALE");
+        variant(org, stand, "901", "용량: 9oz", "SUSPENDED");
+
+        InquiryKnowledgeAssessor.Assessment a = assess(holder, QUESTION);
+
+        assertThat(a.catalogue().grounds()).isFalse();
+        assertThat(a.catalogue().notOnSale()).extracting(CatalogueInvestigator.Statement::productId)
+                .containsExactly(stand);
+
+        variant(org, stand, "902", "용량: 9oz 대용량", "SELLING");
+        InquiryKnowledgeAssessor.Assessment again = assess(holder, QUESTION);
+        assertThat(again.catalogue().matches()).singleElement().satisfies(s -> {
+            assertThat(s.productId()).isEqualTo(stand);
+            assertThat(s.field()).isEqualTo(CatalogueInvestigator.Field.OPTION);
+        });
+    }
+
+    @Test
+    @DisplayName("ASK_SELLER says what «checked» did not cover: never-read pages and pages made of pictures")
+    void theAskNamesWhatWasNotRead() {
+        UUID only65 = products.findAll().stream().filter(p -> p.getName().startsWith("원터치")).findFirst()
+                .orElseThrow().getId();
+        detailFact(org, only65, FactKeys.DETAIL_PAGE, "IMAGE_ONLY");
+
+        InquiryKnowledgeAssessor.Assessment a = assess(holder, QUESTION);
+
+        assertThat(a.catalogue().detailUnread()).as("the holder's page was never read").isEqualTo(1);
+        assertThat(a.catalogue().detailImageOnly()).isEqualTo(1);
+        assertThat(a.gap().catalogueChecked())
+                .contains("그중 1개는 상세페이지를 아직 읽지 못했습니다.")
+                .contains("상세페이지가 이미지로만 된 상품 1개는 이미지 속 내용을 확인하지 못했습니다.");
+        assertThat(allStatements(a.catalogue())).as("the page-shape marker is never quoted")
+                .noneMatch(s -> s.text().contains("IMAGE_ONLY"));
+    }
+
+    @Test
+    @DisplayName("a detail read owns its facts as a set: a re-read replaces them, and never touches the sweep's facts")
+    void aDetailReadReplacesOnlyItsOwnFacts() {
+        UUID p = product(org, "교체 테스트 디스펜서", "SALE");
+        fact(org, p, FactKeys.TAXONOMY_BRAND, "브랜드");  // the sweep's
+        com.sellerops.product.ProductKnowledgeWriter writer = new com.sellerops.product.ProductKnowledgeWriter(
+                products, null, listings, variants, facts);
+        Instant t1 = Instant.parse("2026-09-16T00:00:00Z");
+        writer.replaceFacts(org, p, "NAVER:PRODUCT_DETAIL_API:v2", "ext", java.util.Map.of(
+                "spec:크기", "지름 75mm", FactKeys.SUPPLEMENT_PREFIX + "7", "뚜껑: 9oz 뚜껑",
+                FactKeys.DETAIL_PAGE, "TEXT"), t1, null);
+        writer.replaceFacts(org, p, "NAVER:PRODUCT_DETAIL_API:v2", "ext", java.util.Map.of(
+                "spec:크기", "지름 80mm", FactKeys.DETAIL_PAGE, "TEXT"), t1.plusSeconds(60), null);
+        em.flush();
+
+        assertThat(facts.findByOrgIdAndProductId(org, p))
+                .extracting(ProductFact::getFactKey, ProductFact::getFactValue)
+                .containsExactlyInAnyOrder(
+                        tuple(FactKeys.TAXONOMY_BRAND, "브랜드"),
+                        tuple("spec:크기", "지름 80mm"),
+                        tuple(FactKeys.DETAIL_PAGE, "TEXT"));
+
+        variant(org, p, "1", "용량: 9oz", "SELLING");
+        variant(org, p, "2", "용량: 13oz", "SELLING");
+        assertThat(writer.retireVariantsNotIn(org, p, naver(), Set.of("1"))).isEqualTo(1);
+        assertThat(variants.findByOrgIdAndProductId(org, p)).extracting(ProductVariant::getSellingStatus)
+                .containsExactlyInAnyOrder("SELLING", "ENDED");
+    }
+
     // ── fixtures ────────────────────────────────────────────────────────────────────────────────────────────────
 
     private InquiryKnowledgeAssessor.Assessment assess(UUID productId, String body) {
@@ -342,6 +442,31 @@ class CatalogueInvestigationTest {
         f.setObservedAt(Instant.parse("2026-09-15T00:00:00Z"));
         f.setConfidence(FactConfidence.SOURCE_STATED);
         facts.save(f);
+    }
+
+    private void detailFact(UUID orgId, UUID productId, String key, String value) {
+        ProductFact f = new ProductFact();
+        f.setOrgId(orgId);
+        f.setProductId(productId);
+        f.setFactKey(key);
+        f.setFactValue(value);
+        f.setSource("NAVER:PRODUCT_DETAIL_API:v2");
+        f.setObservedAt(Instant.parse("2026-09-18T00:00:00Z"));
+        f.setConfidence(FactConfidence.SOURCE_STATED);
+        facts.save(f);
+    }
+
+    private void variant(UUID orgId, UUID productId, String id, String name, String status) {
+        ProductVariant v = new ProductVariant();
+        v.setOrgId(orgId);
+        v.setProductId(productId);
+        v.setChannelId(naver());
+        v.setExternalVariantId(id);
+        v.setOptionName(name);
+        v.setSellingStatus(status);
+        v.setSource("NAVER:PRODUCT_API:v1");
+        v.setObservedAt(Instant.parse("2026-09-18T00:00:00Z"));
+        variants.save(v);
     }
 
     private UUID naver() {

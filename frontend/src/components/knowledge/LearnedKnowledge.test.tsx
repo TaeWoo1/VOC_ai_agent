@@ -86,6 +86,7 @@ describe("LearnedKnowledge", () => {
         answersRemembered: 22,
         productDetail: {
           enabled: false, considered: 0, indexed: 0, imageOnly: 0, empty: 0, alreadyFresh: 0, noListing: 0, failed: 0,
+          onSaleCatalogue: 0, covered: 0, remaining: 0,
         },
       },
     });

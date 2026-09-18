@@ -203,6 +203,18 @@ class InquiryQualitySetTest {
                 cp.setLastSeenAt(Instant.parse("2026-09-15T00:00:00Z"));
                 listingRows.save(cp);
             }
+            for (JsonNode option : product.path("options")) {
+                com.sellerops.product.ProductVariant v = new com.sellerops.product.ProductVariant();
+                v.setOrgId(org);
+                v.setProductId(productId);
+                v.setChannelId(channelId("NAVER"));
+                v.setExternalVariantId(option.path("id").asText());
+                v.setOptionName(option.path("name").asText());
+                v.setSellingStatus(com.sellerops.product.SellingStatus.normalize(option.path("status").asText()).name());
+                v.setSource("NAVER:PRODUCT_API:v1");
+                v.setObservedAt(Instant.parse("2026-09-15T00:00:00Z"));
+                variants.save(v);
+            }
             for (JsonNode fact : product.path("facts")) {
                 ProductFact f = new ProductFact();
                 f.setOrgId(org);

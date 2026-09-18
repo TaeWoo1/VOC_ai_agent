@@ -90,14 +90,41 @@ public class KnowledgeBootstrapService {
                                  LocalDate to, HistoryStatus status, int rowsRead) {
     }
 
-    /** What the product-detail step did, counted. {@code enabled=false} means this deployment reads no detail. */
+    /**
+     * What the product-detail step did, counted. {@code enabled=false} means this deployment reads no detail.
+     *
+     * @param onSaleCatalogue on-sale products with a listing on a channel whose detail this deployment can read
+     * @param covered         of those, how many have had their detail read (now or before)
+     * @param remaining       of those, how many are still unread because this run's ceiling was reached
+     */
     public record ProductDetail(boolean enabled, int considered, int indexed, int imageOnly, int empty,
-                                int alreadyFresh, int noListing, int failed) {
+                                int alreadyFresh, int noListing, int failed, int onSaleCatalogue, int covered,
+                                int remaining) {
+
+        static ProductDetail off() {
+            return new ProductDetail(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+    }
+
+    /** How one account's catalogue LIST read ended — the API sweep that says what is on sale before any detail is read. */
+    public enum CatalogueStatus {
+        /** The channel's product list was read by this run. */
+        READ,
+        /** A finished list read is recent enough; no request. */
+        FRESH,
+        /** A collection for this account was already running. */
+        IN_PROGRESS,
+        /** The channel refused or the run failed; the stored catalogue is used as it is. */
+        FAILED
+    }
+
+    public record CatalogueRead(UUID sellerAccountId, String channelCode, String channelNameKo, CatalogueStatus status,
+                                int rowsRead) {
     }
 
     /** @param answersRemembered past answers remembered after this run, in total */
     public record Report(Instant ranAt, List<InquiryHistory> inquiryHistory, int answersRemembered,
-                         ProductDetail productDetail) {
+                         List<CatalogueRead> catalogue, ProductDetail productDetail) {
     }
 
     private final SellerAccountRepository accounts;
@@ -111,9 +138,10 @@ public class KnowledgeBootstrapService {
     private final int historyDays;
     private final int maxProducts;
     /**
-     * On-sale catalogue products whose 상세페이지 is learned after the discussed ones (Catalogue Investigation v1,
-     * product-owner 2026-09-18: a connected seller's active catalogue should have its detail before a customer's
-     * catalogue question depends on it). 0 when unset — a hand-wired service learns exactly what it did before.
+     * The ceiling on on-sale catalogue products whose detail one run may read after the discussed ones (Catalogue
+     * Knowledge Bootstrap v1, product-owner 2026-09-18: the seller's whole on-sale catalogue — detail, options,
+     * attributes — is learned before a customer's catalogue question depends on it). A ceiling, not a sample: what it
+     * leaves is reported and read next run. 0 when unset — a hand-wired service learns exactly what it did before.
      */
     private int maxCatalogueProducts;
 
@@ -143,10 +171,19 @@ public class KnowledgeBootstrapService {
         this.maxProducts = Math.max(0, maxProducts);
     }
 
+    /** Hours a finished catalogue LIST read stays fresh for the bootstrap. */
+    private int catalogueRefreshHours = 24;
+
     @Autowired
     void setMaxCatalogueProducts(
-            @Value("${sellerops.knowledge.bootstrap.max-catalogue-products:60}") int maxCatalogueProducts) {
+            @Value("${sellerops.knowledge.bootstrap.max-catalogue-products:500}") int maxCatalogueProducts) {
         this.maxCatalogueProducts = Math.max(0, maxCatalogueProducts);
+    }
+
+    @Autowired
+    void setCatalogueRefreshHours(
+            @Value("${sellerops.knowledge.bootstrap.catalogue-refresh-hours:24}") int catalogueRefreshHours) {
+        this.catalogueRefreshHours = Math.max(1, catalogueRefreshHours);
     }
 
     /** Learn what this organisation's channel history can teach. Every step is best-effort; none throws. */
@@ -162,10 +199,14 @@ public class KnowledgeBootstrapService {
         // What is remembered now, not how many rows this import touched — the seller reads it as the former.
         int remembered = em.createQuery("select count(m) from AnswerMemory m where m.orgId = :org", Long.class)
                 .setParameter("org", orgId).getSingleResult().intValue();
+        // API-first: the channel's own list says what is on sale NOW before any listing's detail is read — a detail
+        // pass over yesterday's catalogue would read ended listings and miss new ones.
+        List<CatalogueRead> catalogue = readCatalogue(orgId, now);
         ProductDetail details = readProductDetail(orgId);
-        log.info("knowledge bootstrap org={} histories={} answers={} detail={}", orgId,
-                history.stream().map(h -> h.channelCode() + ":" + h.status()).toList(), remembered, details);
-        return new Report(now, history, remembered, details);
+        log.info("knowledge bootstrap org={} histories={} answers={} catalogue={} detail={}", orgId,
+                history.stream().map(h -> h.channelCode() + ":" + h.status()).toList(), remembered,
+                catalogue.stream().map(c -> c.channelCode() + ":" + c.status()).toList(), details);
+        return new Report(now, history, remembered, catalogue, details);
     }
 
     /** Accounts whose past inquiry answers this product can learn — connected, API, on a channel that proves authorship. */
@@ -226,16 +267,83 @@ public class KnowledgeBootstrapService {
                 .getResultList().stream().findFirst().orElse(null);
     }
 
-    private ProductDetail readProductDetail(UUID orgId) {
+    /**
+     * The catalogue LIST read for every connected API account on a channel whose detail this deployment can read —
+     * through the routine PRODUCT collection path (same admission, cursor and writer), skipped when a finished one is
+     * younger than {@code catalogue-refresh-hours}. Nothing when detail reads are off: the list alone teaches no more
+     * than the routine collection already does.
+     */
+    List<CatalogueRead> readCatalogue(UUID orgId, Instant now) {
+        List<CatalogueRead> out = new ArrayList<>();
         if (detail == null || !detail.enabled()) {
-            return new ProductDetail(false, 0, 0, 0, 0, 0, 0, 0);
+            return out;
         }
-        List<UUID> candidates = new java.util.ArrayList<>(discussedProducts(orgId));
-        for (UUID id : onSaleWithoutDetail(orgId)) {
-            if (!candidates.contains(id)) {
-                candidates.add(id);
+        java.util.Set<String> capable = detail.channelCodes();
+        for (SellerAccount account : accounts.findAllByOrgId(orgId)) {
+            if (account.getConnectionStatus() != ChannelStatus.CONNECTED || account.isFileUpload()) {
+                continue;
+            }
+            Channel channel = channels.findById(account.getChannelId()).orElse(null);
+            if (channel == null || channel.getCode() == null
+                    || !capable.contains(channel.getCode().toUpperCase(java.util.Locale.ROOT))) {
+                continue;
+            }
+            SyncJob recent = lastCatalogueRead(account.getId());
+            if (recent != null && recent.getFinishedAt() != null
+                    && recent.getFinishedAt().isAfter(now.minus(java.time.Duration.ofHours(catalogueRefreshHours)))) {
+                out.add(new CatalogueRead(account.getId(), channel.getCode(), channel.getNameKo(),
+                        CatalogueStatus.FRESH, recent.getSuccessRows()));
+                continue;
+            }
+            try {
+                SyncJob run = executor.execute(orgId, account.getId(), com.sellerops.connector.DataType.PRODUCT,
+                        TRIGGER);
+                CatalogueStatus status = "RUNNING".equals(run.getStatus()) ? CatalogueStatus.IN_PROGRESS
+                        : "SUCCESS".equals(run.getStatus()) ? CatalogueStatus.READ : CatalogueStatus.FAILED;
+                out.add(new CatalogueRead(account.getId(), channel.getCode(), channel.getNameKo(), status,
+                        run.getSuccessRows()));
+            } catch (RuntimeException e) {
+                log.warn("knowledge bootstrap: catalogue read failed org={} channel={} cause={}", orgId,
+                        channel.getCode(), e.getClass().getSimpleName());
+                out.add(new CatalogueRead(account.getId(), channel.getCode(), channel.getNameKo(),
+                        CatalogueStatus.FAILED, 0));
             }
         }
+        return out;
+    }
+
+    /** The newest finished PRODUCT read of this account, by any trigger — the routine sweep counts. */
+    SyncJob lastCatalogueRead(UUID sellerAccountId) {
+        return em.createQuery("""
+                        select j from SyncJob j
+                        where j.sellerAccountId = :account and j.dataType = 'PRODUCT' and j.status = 'SUCCESS'
+                        order by j.finishedAt desc
+                        """, SyncJob.class)
+                .setParameter("account", sellerAccountId)
+                .setMaxResults(1)
+                .getResultList().stream().findFirst().orElse(null);
+    }
+
+    private ProductDetail readProductDetail(UUID orgId) {
+        if (detail == null || !detail.enabled()) {
+            return ProductDetail.off();
+        }
+        List<UUID> onSale = onSaleCatalogue(orgId);
+        // Discussed products first (a customer already asked about them), then the rest of the on-sale catalogue with
+        // never-read listings ahead of read ones. The trigger's own staleness gate decides whether each is read: a
+        // listing read recently and unchanged since (by the channel's modifiedDate) costs no request.
+        List<UUID> candidates = new ArrayList<>(discussedProducts(orgId));
+        List<UUID> unread = new ArrayList<>();
+        List<UUID> read = new ArrayList<>();
+        for (UUID id : onSale) {
+            if (!candidates.contains(id)) {
+                (detail.lastRead(orgId, id) == null ? unread : read).add(id);
+            }
+        }
+        List<UUID> catalogue = new ArrayList<>(unread);
+        catalogue.addAll(read);
+        int remaining = Math.max(0, catalogue.size() - maxCatalogueProducts);
+        candidates.addAll(catalogue.subList(0, Math.min(catalogue.size(), maxCatalogueProducts)));
         int indexed = 0;
         int imageOnly = 0;
         int empty = 0;
@@ -252,7 +360,7 @@ public class KnowledgeBootstrapService {
                 continue;
             }
             if (result.outcome() == ProductDetailEnrichmentTrigger.Outcome.DISABLED) {
-                return new ProductDetail(false, 0, 0, 0, 0, 0, 0, 0);
+                return ProductDetail.off();
             }
             considered++;
             switch (result.outcome()) {
@@ -274,43 +382,40 @@ public class KnowledgeBootstrapService {
                 default -> { }
             }
         }
-        return new ProductDetail(true, considered, indexed, imageOnly, empty, fresh, noListing, failed);
+        int covered = (int) onSale.stream().filter(id -> detail.lastRead(orgId, id) != null).count();
+        return new ProductDetail(true, considered, indexed, imageOnly, empty, fresh, noListing, failed, onSale.size(),
+                covered, remaining);
     }
 
     /**
-     * The seller's on-sale catalogue that has no 상세페이지 text yet — named products with a listing the channel says is
-     * on sale, in name order, at most {@code max-catalogue-products}. Not a sweep: the trigger's own staleness gate and
-     * attempt memory still decide whether each one is read, and a product whose detail exists is not listed at all.
+     * The seller's on-sale catalogue on a channel whose 상세페이지 this deployment can read — every named product with a
+     * listing there the channel says is on sale, in name order. The WHOLE on-sale catalogue (Catalogue Knowledge
+     * Bootstrap v1, product-owner 2026-09-18); the bound on a single run is {@code max-catalogue-products}, a ceiling
+     * reported as {@code remaining} when reached, not a sample.
      */
-    List<UUID> onSaleWithoutDetail(UUID orgId) {
-        if (maxCatalogueProducts <= 0) {
-            return List.of();
-        }
-        List<UUID> withDetail = em.createQuery(
-                        "select s.productId from ProductKnowledgeSource s where s.orgId = :org and s.authoredOrigin = :origin",
-                        UUID.class)
-                .setParameter("org", orgId)
-                .setParameter("origin", com.sellerops.product.library.KnowledgeAuthorship.SELLER_AUTHORED_CHANNEL_CONTENT)
-                .getResultList();
-        List<com.sellerops.product.ChannelProduct> listings = em.createQuery(
-                        "select cp from ChannelProduct cp where cp.orgId = :org",
-                        com.sellerops.product.ChannelProduct.class)
-                .setParameter("org", orgId).getResultList();
+    List<UUID> onSaleCatalogue(UUID orgId) {
+        java.util.Set<String> capable = detail == null ? java.util.Set.of() : detail.channelCodes();
+        Map<UUID, String> codes = new HashMap<>();
         java.util.Set<UUID> onSale = new java.util.HashSet<>();
-        for (com.sellerops.product.ChannelProduct l : listings) {
+        for (com.sellerops.product.ChannelProduct l : em.createQuery(
+                        "select cp from ChannelProduct cp where cp.orgId = :org", com.sellerops.product.ChannelProduct.class)
+                .setParameter("org", orgId).getResultList()) {
             if (com.sellerops.product.SellingStatus.normalize(l.getSellingStatus())
-                    == com.sellerops.product.SellingStatus.SELLING) {
+                    != com.sellerops.product.SellingStatus.SELLING) {
+                continue;
+            }
+            String code = codes.computeIfAbsent(l.getChannelId(),
+                    id -> channels.findById(id).map(Channel::getCode).orElse(""));
+            if (capable.contains(code.toUpperCase(java.util.Locale.ROOT))) {
                 onSale.add(l.getProductId());
             }
         }
         return onSale.stream()
-                .filter(id -> !withDetail.contains(id))
                 .map(id -> products.findById(id).filter(p -> orgId.equals(p.getOrgId())).orElse(null))
                 .filter(p -> p != null && OperatorProductName.displayNameOrNull(p) != null)
                 .sorted(java.util.Comparator.comparing((com.sellerops.product.Product p) -> p.getName())
                         .thenComparing(p -> p.getId().toString()))
                 .map(com.sellerops.product.Product::getId)
-                .limit(maxCatalogueProducts)
                 .toList();
     }
 

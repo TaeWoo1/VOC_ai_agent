@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -266,29 +267,96 @@ class KnowledgeBootstrapTest {
     }
 
     @Test
-    @DisplayName("the on-sale catalogue without 상세페이지 text is learned too — never ended listings, never learned ones")
-    void onSaleCatalogueDetailIsLearnedBeforeItIsAskedAbout() {
+    @DisplayName("the WHOLE on-sale catalogue on a detail-capable channel is the candidate set — never ended, never another org's")
+    void onSaleCatalogueIsTheWholeCapableCatalogue() {
         UUID org = org("카탈로그 상점");
-        UUID onSale = listed(org, "판매 중 디스펜서", "SALE");
-        UUID ended = listed(org, "판매 종료 디스펜서", "CLOSE");
-        UUID learned = listed(org, "상세 읽은 디스펜서", "SALE");
-        com.sellerops.product.library.ProductKnowledgeSource doc = new com.sellerops.product.library.ProductKnowledgeSource();
-        doc.setOrgId(org);
-        doc.setProductId(learned);
-        doc.setSourceType(com.sellerops.product.library.KnowledgeSourceType.DESCRIPTION);
-        doc.setAuthoredOrigin(com.sellerops.product.library.KnowledgeAuthorship.SELLER_AUTHORED_CHANNEL_CONTENT);
-        doc.setTitle("상품 상세페이지");
-        doc.setBody("본문");
-        productSources.save(doc);
+        UUID onSale = listed(org, "가 판매 중 디스펜서", "SALE");
+        UUID ended = listed(org, "나 판매 종료 디스펜서", "CLOSE");
+        UUID learned = listed(org, "다 상세 읽은 디스펜서", "SALE");
+        UUID cafe24Only = listed(org, "라 카페24 디스펜서", "SALE", cafe24);
         UUID foreign = listed(org("다른 상점"), "다른 판매자 디스펜서", "SALE");
-        KnowledgeBootstrapService bootstrap = service(mock(SyncRunExecutor.class),
-                mock(ProductDetailEnrichmentTrigger.class));
+        ProductDetailEnrichmentTrigger trigger = capableTrigger();
+        KnowledgeBootstrapService bootstrap = service(mock(SyncRunExecutor.class), trigger);
 
-        assertThat(bootstrap.onSaleWithoutDetail(org)).as("off unless configured").isEmpty();
-        bootstrap.setMaxCatalogueProducts(60);
+        assertThat(bootstrap.onSaleCatalogue(org)).containsExactly(onSale, learned)
+                .doesNotContain(ended, cafe24Only, foreign);
+    }
 
-        assertThat(bootstrap.onSaleWithoutDetail(org)).containsExactly(onSale)
-                .doesNotContain(ended, learned, foreign);
+    @Test
+    @DisplayName("detail: never-read listings first, then read ones (the trigger decides if they changed); a ceiling is reported, not hidden")
+    void catalogueDetailIsReadUnreadFirstUnderACeiling() {
+        UUID org = org("천장 상점");
+        UUID a = listed(org, "가 디스펜서", "SALE");
+        UUID b = listed(org, "나 디스펜서", "SALE");
+        UUID c = listed(org, "다 디스펜서", "SALE");
+        ProductDetailEnrichmentTrigger trigger = capableTrigger();
+        when(trigger.lastRead(org, a)).thenReturn(NOW.minusSeconds(3600));
+        List<UUID> asked = new java.util.ArrayList<>();
+        when(trigger.enrichIfNeeded(eq(org), any())).thenAnswer(inv -> {
+            asked.add(inv.getArgument(1));
+            return new ProductDetailEnrichmentTrigger.Result(ProductDetailEnrichmentTrigger.Outcome.NOT_NEEDED, null);
+        });
+        KnowledgeBootstrapService bootstrap = service(mock(SyncRunExecutor.class), trigger);
+        bootstrap.setMaxCatalogueProducts(2);
+
+        KnowledgeBootstrapService.ProductDetail detail = bootstrap.bootstrap(org).productDetail();
+
+        assertThat(asked).as("unread b, c before the read a — and a is past the ceiling").containsExactly(b, c);
+        assertThat(detail.onSaleCatalogue()).isEqualTo(3);
+        assertThat(detail.remaining()).isEqualTo(1);
+        assertThat(detail.covered()).as("only a has ever been read").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("API-first: the channel's product LIST is read before any detail — skipped while a finished read is fresh")
+    void catalogueListIsReadFirstUnlessFresh() {
+        UUID org = org("목록 상점");
+        UUID account = account(org, naver);
+        SyncRunExecutor executor = mock(SyncRunExecutor.class);
+        SyncJob listed = new SyncJob();
+        listed.setStatus("SUCCESS");
+        listed.setSuccessRows(69);
+        when(executor.execute(eq(org), eq(account), eq(DataType.PRODUCT), eq("BOOTSTRAP"))).thenReturn(listed);
+        KnowledgeBootstrapService bootstrap = service(executor, capableTrigger());
+
+        List<KnowledgeBootstrapService.CatalogueRead> first = bootstrap.readCatalogue(org, NOW);
+        assertThat(first).singleElement().satisfies(r -> {
+            assertThat(r.status()).isEqualTo(KnowledgeBootstrapService.CatalogueStatus.READ);
+            assertThat(r.rowsRead()).isEqualTo(69);
+        });
+
+        SyncJob done = finishedRun(org, account, "SUCCESS", 69);
+        done.setDataType(DataType.PRODUCT.name());
+        done.setFinishedAt(NOW.minusSeconds(3600));
+        em.flush();
+        assertThat(bootstrap.readCatalogue(org, NOW)).singleElement()
+                .extracting(KnowledgeBootstrapService.CatalogueRead::status)
+                .isEqualTo(KnowledgeBootstrapService.CatalogueStatus.FRESH);
+        verify(executor, times(1))
+                .execute(eq(org), eq(account), eq(DataType.PRODUCT), eq("BOOTSTRAP"));
+    }
+
+    @Test
+    @DisplayName("with product detail off, the bootstrap reads no catalogue list and no detail")
+    void detailOffReadsNoCatalogue() {
+        UUID org = org("꺼진 상점");
+        account(org, naver);
+        SyncRunExecutor executor = mock(SyncRunExecutor.class);
+        ProductDetailEnrichmentTrigger off = mock(ProductDetailEnrichmentTrigger.class);
+        KnowledgeBootstrapService bootstrap = service(executor, off);
+
+        assertThat(bootstrap.readCatalogue(org, NOW)).isEmpty();
+        verify(executor, never())
+                .execute(any(), any(), eq(DataType.PRODUCT), any());
+    }
+
+    private ProductDetailEnrichmentTrigger capableTrigger() {
+        ProductDetailEnrichmentTrigger trigger = mock(ProductDetailEnrichmentTrigger.class);
+        when(trigger.enabled()).thenReturn(true);
+        when(trigger.channelCodes()).thenReturn(java.util.Set.of("NAVER"));
+        when(trigger.enrichIfNeeded(any(), any())).thenReturn(
+                new ProductDetailEnrichmentTrigger.Result(ProductDetailEnrichmentTrigger.Outcome.NOT_NEEDED, null));
+        return trigger;
     }
 
     @Test
@@ -343,6 +411,10 @@ class KnowledgeBootstrapTest {
     @Autowired com.sellerops.product.ChannelProductRepository listingRows;
 
     private UUID listed(UUID orgId, String name, String status) {
+        return listed(orgId, name, status, naver);
+    }
+
+    private UUID listed(UUID orgId, String name, String status, Channel channel) {
         com.sellerops.product.Product p = new com.sellerops.product.Product();
         p.setOrgId(orgId);
         p.setName(name);
@@ -351,7 +423,7 @@ class KnowledgeBootstrapTest {
         com.sellerops.product.ChannelProduct cp = new com.sellerops.product.ChannelProduct();
         cp.setOrgId(orgId);
         cp.setProductId(id);
-        cp.setChannelId(naver.getId());
+        cp.setChannelId(channel.getId());
         cp.setExternalProductId("ext-" + id);
         cp.setSellingStatus(status);
         listingRows.save(cp);

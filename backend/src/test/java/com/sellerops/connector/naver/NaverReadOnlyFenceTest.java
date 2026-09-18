@@ -32,7 +32,7 @@ class NaverReadOnlyFenceTest {
 
     private static final Path NAVER_MAIN = Paths.get("src/main/java/com/sellerops/connector/naver");
 
-    /** Every NAVER Commerce API path this package may reach. All six are reads. */
+    /** Every NAVER Commerce API path this package may reach. Every one is a read. */
     private static final Set<String> ALLOWED_ENDPOINTS = Set.of(
             "/external/v1/oauth2/token",                                            // credential proof
             "/external/v1/pay-order/seller/product-orders/last-changed-statuses",   // changed orders
@@ -40,7 +40,10 @@ class NaverReadOnlyFenceTest {
             "/external/v1/products/search",                                         // catalogue read
             "/external/v1/contents/qnas",                                           // 상품 문의 (read)
             "/external/v1/pay-user/inquiries",                                      // 고객 문의 (read)
-            "/external/v2/products/channel-products/");                             // 상품 상세 (read)
+            "/external/v2/products/channel-products/",                              // 상품 상세 (read)
+            "/external/v1/product-attributes/attributes",                           // 속성 이름 (catalogue metadata)
+            "/external/v1/product-attributes/attribute-values",                     // 속성값 (catalogue metadata)
+            "/external/v1/product-attributes/attribute-value-units");               // 단위 이름 (catalogue metadata)
 
     /**
      * Anything under these NAVER API groups mutates the seller's store; none may appear.
