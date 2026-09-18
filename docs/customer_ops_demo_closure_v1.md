@@ -314,6 +314,21 @@ What was learned (clone): detail 36/36 applied — **35 IMAGE_ONLY**, 1 TEXT_IND
    where a listing carries attribute ids. The 22 종이컵디스펜서 and 5 몰딩 listings asked for no category, which means their
    projected `productAttributes` were empty. Whether their payloads carry attribute ids anywhere else is **not verified**;
    that needs a raw payload of 1–2 dispenser listings (separate READ approval). The projection is unchanged.
+
+   **Raw payload check (2026-09-19, `apr-2f6ffc4a` / `wt-28614218`, READ_ONLY, HEAD `ad2bdd67`).** The gated probe
+   `NaverDetailPayloadAttributeProbeIT` read the raw detail body of two on-sale 종이컵디스펜서 listings (`…0859`, `…1709`):
+   1 token mint, 2 detail GETs (both 200), 0 attribute-catalogue reads, 0 database writes. It printed key paths only,
+   plus the values of attribute, category and id keys.
+   - **`productAttributes` is absent from both payloads** — the key itself is missing, not an empty array.
+   - None of the 89 distinct key paths carries an attribute seq or value id. The only category datum is
+     `originProduct.leafCategoryId` (both `50004839`).
+   - Every other path containing «attribute» is something else: `detailAttribute` (the container),
+     `deliveryAttributeType`, and an empty `optionDeliveryAttributes`.
+   - `naverShoppingSearchInfo.matchedCatalogId`/`catalogMatchingYn` exist. That is NAVER Shopping's price-comparison
+     catalogue link, not category attributes, and its value was not printed.
+   - So these dispenser listings have no category attributes registered with NAVER, and «no attribute facts» for them is
+     the channel's own state. The projection's path matches the payload; nothing to change. As expected, the 고시
+     `modelName` in both payloads is 「상품상세참조」/「상품상세 참조」, which the new rule already refuses.
 3. **The coverage sentence separates what was read from what was not.** It used to say
    「…상품명·옵션·추가상품·상품 정보를 확인했지만」 over every candidate, although add-ons and 고시 exist only where a
    detail page was read. It now claims names and options for all candidates, and says separately how many detail pages
