@@ -99,3 +99,14 @@ size/name/description keys. No row in the period had `hasComment = true`, and no
 model exposes only the boolean. Implemented: `NAVER_REVIEW_ATTACH_URL_KEY = "attachUrl"`, `I` → IMAGE, anything else
 UNKNOWN. **NAVER past review reply text: UNAVAILABLE from the list surface** (API: none; export: flag and date only;
 list model: flag only). Unobserved: whether an answered row adds a field, and the detail modal (a click, out of scope).
+
+**M3 — PASS, one step substituted.** Activating Customer Ops on a disposable clone opened a run; the scheduled Aside
+read (one page read, no interaction) stored 48 reviews and 24 photo references (all `IMAGE`, `phinf.pstatic.net`).
+Review `9046894c` (★5, 2 photos, 80 characters): 2 fetches, 2 vision inspections (both `INSPECTED`, problem visible
+`NO`: a bag of white molding connectors; an open box with bagged white molding and connectors), 1 investigation citing
+`subject, m1, m2` → agent `AUTO_RESOLVED` / `NO_ACTION` / HIGH. The case screen's read shows both photos as
+「Reviewnary가 사진을 확인했습니다.」 with what was seen, and the photo endpoint served the image (3/3 fetches used).
+Substituted: opening the case (reviews present at a source's first settled read are handed over and never opened by the
+processor). The rule classifies this review MONITORING; the investigation was invoked explicitly for the proof.
+Defects seen, not fixed: the photo tool has no label in 「Reviewnary가 확인한 것」; an agent-closed case keeps the rule's
+「지켜봅니다」 reason sentence.
