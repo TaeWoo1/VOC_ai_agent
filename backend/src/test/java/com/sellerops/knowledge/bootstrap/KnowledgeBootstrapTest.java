@@ -285,6 +285,33 @@ class KnowledgeBootstrapTest {
         assertThat(products.findById(discussed.get(0)).orElseThrow().getName()).isEqualTo("많이 묻는 상품");
     }
 
+    @Test
+    @DisplayName("a demo-seeded product is not something Reviewnary learned about this company")
+    void syntheticProductsNeverReachTheLearnedView() {
+        UUID org = org("합성 섞인 상점");
+        Product real = product(org, "진짜 상품");
+        Product seeded = product(org, "전선몰딩 1호 (합성 샘플)");
+        seeded.setDataOrigin(com.sellerops.common.DataOrigin.DEMO_SEED);
+        products.save(seeded);
+        ProductKnowledgeLibraryService library =
+                new ProductKnowledgeLibraryService(products, productSources, productChunks, variants);
+        library.create(org, real.getId(), new com.sellerops.product.library.dto.KnowledgeSourceRequest(
+                com.sellerops.product.library.KnowledgeSourceType.FAQ, "부착 안내", "벽지에도 붙습니다.", null),
+                UUID.randomUUID(), "판매자");
+        library.create(org, seeded.getId(), new com.sellerops.product.library.dto.KnowledgeSourceRequest(
+                com.sellerops.product.library.KnowledgeSourceType.FAQ, "두께 안내", "두께는 1.2mm입니다.", null),
+                UUID.randomUUID(), "판매자");
+
+        LearnedKnowledgeService.View view =
+                new LearnedKnowledgeService(em, sellerAccounts, channels, products).of(org);
+
+        LearnedKnowledgeService.Source material = view.sources().stream()
+                .filter(src -> "SELLER_MATERIAL".equals(src.key())).findFirst().orElseThrow();
+        assertThat(material.count()).isEqualTo(1);
+        assertThat(material.examples()).extracting(LearnedKnowledgeService.Example::productName)
+                .containsExactly("진짜 상품");
+    }
+
     // ── fixtures ────────────────────────────────────────────────────────────────────────────────────────────────
 
     private KnowledgeBootstrapService service(SyncRunExecutor executor, ProductDetailEnrichmentTrigger detail) {

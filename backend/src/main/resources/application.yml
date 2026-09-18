@@ -326,6 +326,14 @@ sellerops:
   # benchmark's «nothing here answers this» questions with a citation, because a short vector cannot
   # tell «about this product» from «about this question». 1024 is the shipped value.
   knowledge:
+    # Production Knowledge Bootstrap (Customer Ops Product Quality Closure v1): a connected seller's past NAVER
+    # inquiries + published answers over `history-days`, and the detail of up to `max-products` discussed products.
+    # The seller-pressed path needs no switch; the automatic lane for newly connected sellers is OFF by default.
+    bootstrap:
+      history-days: ${SELLEROPS_KNOWLEDGE_BOOTSTRAP_HISTORY_DAYS:90}
+      max-products: ${SELLEROPS_KNOWLEDGE_BOOTSTRAP_MAX_PRODUCTS:30}
+      auto:
+        enabled: ${SELLEROPS_KNOWLEDGE_BOOTSTRAP_AUTO_ENABLED:false}
     embedding:
       enabled: ${SELLEROPS_KNOWLEDGE_EMBEDDING_ENABLED:false}
       enabled-org-ids: ${SELLEROPS_KNOWLEDGE_EMBEDDING_ORG_IDS:}
@@ -816,6 +824,16 @@ sellerops:
       # a later slice that would gate its bean behind this flag.
       provider: ${SELLEROPS_ANALYSIS_ITEM_PROVIDER:rule_based}
   review:
+    # Review-photo vision (Customer Ops Demo Closure v1): one customer photo + that review's rating and words go to a
+    # vision model so an investigation can say what the photo shows. OFF by default and org-scoped — the widest
+    # payload any capability here sends. Its own model, as image-knowledge has.
+    media-vision:
+      enabled: ${SELLEROPS_REVIEW_MEDIA_VISION_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_REVIEW_MEDIA_VISION_ORG_IDS:}
+      model: ${SELLEROPS_REVIEW_MEDIA_VISION_MODEL:gpt-5.6-terra}
+      api-key: ${SELLEROPS_REVIEW_MEDIA_VISION_API_KEY:}
+      max-output-tokens: ${SELLEROPS_REVIEW_MEDIA_VISION_MAX_OUTPUT_TOKENS:600}
+      reasoning-effort: ${SELLEROPS_REVIEW_MEDIA_VISION_REASONING_EFFORT:none}
     publish:
       # The review-reply API lane (Agentic Operating Workspace v2 §A2) — reviewnary posting an APPROVED
       # reply as a Cafe24 board comment. Off by default and absent from every deployment that has not

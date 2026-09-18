@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   teachOperationsCase: vi.fn(),
   editOperationsCaseDraft: vi.fn(),
   correctOperationsCase: vi.fn(),
+  getOperationsCaseMedia: vi.fn(),
 }));
 vi.mock("../../lib/apiClient", () => ({ api, getToken: () => null }));
 
@@ -171,6 +172,41 @@ describe("OperationsCase", () => {
         scope: "PRODUCT",
       }),
     );
+  });
+
+  it("a review's photos show what Reviewnary saw — and a photo it did not look at is never described", async () => {
+    api.getOperationsCase.mockResolvedValue(
+      detail({
+        subjectKind: "REVIEW",
+        rating: 5,
+        title: null,
+        body: "별은 5개인데 모서리가 깨져서 왔어요.",
+        gap: null,
+        media: [
+          {
+            ordinal: 1, kind: "IMAGE", inspected: true, statusKo: "Reviewnary가 사진을 확인했습니다.",
+            depicts: "모서리가 깨진 흰색 몰딩", problemVisible: "YES", problemDescription: "한쪽 모서리가 깨져 있습니다",
+            imagePath: "/api/responsibilities/customer-operations/cases/case-1/media/1",
+          },
+          {
+            ordinal: 2, kind: "IMAGE", inspected: false,
+            statusKo: "사진 확인 기능이 꺼져 있어 사진 내용은 보지 않았습니다.", depicts: null, problemVisible: null,
+            problemDescription: null, imagePath: "/api/responsibilities/customer-operations/cases/case-1/media/2",
+          },
+        ],
+      }),
+    );
+    api.getOperationsCaseMedia.mockResolvedValue("data:image/png;base64,iVBORw0KGgo=");
+
+    const { container } = renderCase();
+
+    expect(await screen.findByText("고객이 올린 사진")).toBeTruthy();
+    expect(await screen.findByAltText("고객이 올린 사진 1")).toBeTruthy();
+    expect(screen.getByText("사진에 보이는 것: 모서리가 깨진 흰색 몰딩")).toBeTruthy();
+    expect(screen.getByText("문제가 보임")).toBeTruthy();
+    expect(screen.getByText("사진 확인 기능이 꺼져 있어 사진 내용은 보지 않았습니다.")).toBeTruthy();
+    expect(screen.getAllByText(/사진에 보이는 것:/)).toHaveLength(1);
+    await expectNoAxeViolations(container);
   });
 
   it("an inquiry with no named product can only be taught company-wide", async () => {

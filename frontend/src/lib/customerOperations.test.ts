@@ -56,6 +56,11 @@ describe("고객 운영 관리 — copy invariants", () => {
     expect(line).toContain("1건을 지켜보고 있습니다");
     expect(line).toContain("아직 보내지 않았습니다");
     expect(line).not.toMatch(/4건|처리했습니다|보냈습니다/);
+    // The denominator leads, and is never the sum of the parts.
+    const withChecked = handledLine({
+      since: null, autoResolved: 2, monitoring: 1, draftsPrepared: 1, verifying: 0, rows: [], checked: 9,
+    });
+    expect(withChecked.startsWith("최근 24시간 동안 9건을 확인했습니다.")).toBe(true);
   });
 
   it("a decided case being read back is said as reading, never as sent", () => {

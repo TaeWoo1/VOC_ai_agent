@@ -79,6 +79,16 @@ export function OperationsCase() {
         <p className="break-keep text-sm text-muted">{detail.reasonNote}</p>
       </Section>
 
+      {detail.media && detail.media.length > 0 ? (
+        <Section title="고객이 올린 사진" count={detail.media.length}>
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {detail.media.map((m) => (
+              <MediaItem key={m.ordinal} caseId={caseId} media={m} />
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+
       <Section title="Reviewnary가 확인한 것">
         {detail.investigated.length > 0 ? (
           <ul className="flex flex-wrap gap-2">
@@ -145,6 +155,51 @@ export function OperationsCase() {
 
       <CorrectionCard caseId={caseId} detail={detail} onApplied={applied} onFailed={failed} />
     </div>
+  );
+}
+
+type MediaProps = { caseId: string; media: NonNullable<OperationsCaseDetail["media"]>[number] };
+
+/**
+ * One photo: the picture itself (fetched with the seller's session), then what Reviewnary saw in it — or, plainly,
+ * that it did not look. A photo that was not inspected never gets a description.
+ */
+function MediaItem({ caseId, media }: MediaProps) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!media.imagePath) return;
+    let alive = true;
+    api
+      .getOperationsCaseMedia(caseId, media.ordinal)
+      .then((url) => alive && setSrc(url))
+      .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [caseId, media.imagePath, media.ordinal]);
+  const visible =
+    media.problemVisible === "YES" ? "문제가 보임" : media.problemVisible === "NO" ? "문제가 보이지 않음" : media.problemVisible === "UNCLEAR" ? "사진만으로 판단 어려움" : null;
+  return (
+    <li className="space-y-2 rounded-xl border border-line bg-surface p-3">
+      {src ? (
+        <img src={src} alt={`고객이 올린 사진 ${media.ordinal}`} className="max-h-64 w-full rounded-lg object-contain" />
+      ) : (
+        <p className="text-sm text-muted">
+          {media.imagePath ? (failed ? "사진을 불러오지 못했습니다." : "사진을 불러오는 중…") : "영상은 여기서 보여 드리지 않습니다."}
+        </p>
+      )}
+      <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
+        <span>{media.statusKo}</span>
+        {media.inspected && visible ? <Status tone={media.problemVisible === "YES" ? "warn" : "neutral"}>{visible}</Status> : null}
+      </p>
+      {media.inspected && media.depicts ? (
+        <p className="break-keep text-sm text-ink">사진에 보이는 것: {media.depicts}</p>
+      ) : null}
+      {media.inspected && media.problemDescription ? (
+        <p className="break-keep text-sm text-ink">{media.problemDescription}</p>
+      ) : null}
+    </li>
   );
 }
 

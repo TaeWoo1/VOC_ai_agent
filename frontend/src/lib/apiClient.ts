@@ -1856,6 +1856,19 @@ export const api = {
     const { data } = await http.get<OperationsCaseDetail>(`/api/responsibilities/customer-operations/cases/${caseId}`);
     return data;
   },
+  // One review photo of a case, as a data: URL — the endpoint needs the bearer token (a plain <img> cannot send it)
+  // and the app's image policy admits data: but not blob:.
+  async getOperationsCaseMedia(caseId: string, ordinal: number): Promise<string> {
+    const response = await http.get<ArrayBuffer>(
+      `/api/responsibilities/customer-operations/cases/${caseId}/media/${ordinal}`,
+      { responseType: "arraybuffer" },
+    );
+    const type = String(response.headers["content-type"] ?? "image/jpeg").split(";")[0];
+    const bytes = new Uint8Array(response.data);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+    return `data:${type};base64,${btoa(binary)}`;
+  },
   async teachOperationsCase(caseId: string, input: { content: string; scope: string }): Promise<OperationsCaseDetail> {
     const { data } = await http.post<OperationsCaseDetail>(
       `/api/responsibilities/customer-operations/cases/${caseId}/teach`,

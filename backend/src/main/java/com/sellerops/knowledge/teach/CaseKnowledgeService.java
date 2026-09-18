@@ -139,7 +139,65 @@ public class CaseKnowledgeService {
                 gap == null ? null : new CaseDetailView.Gap(gap.missingSubject(), gapSentence(gap),
                         namedProduct == null ? "ORG" : gap.suggestedScope()),
                 draft(orgId, c), c.getSubjectKind() == OperationsSubjectKind.INQUIRY
-                        ? "/inquiries/" + c.getSubjectId() : "/reviews/reply/" + c.getSubjectId());
+                        ? "/inquiries/" + c.getSubjectId() : "/reviews/reply/" + c.getSubjectId(),
+                media(orgId, c));
+    }
+
+    /** The review-photo lane. Optional: a context without it shows a case with no photos, as before. */
+    private com.sellerops.review.media.ReviewMediaRepository reviewMedia;
+    private com.sellerops.review.media.ReviewMediaInspector mediaInspector;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setReviewMedia(com.sellerops.review.media.ReviewMediaRepository reviewMedia,
+                        com.sellerops.review.media.ReviewMediaInspector mediaInspector) {
+        this.reviewMedia = reviewMedia;
+        this.mediaInspector = mediaInspector;
+    }
+
+    private List<CaseDetailView.Media> media(UUID orgId, OperationsCase c) {
+        if (reviewMedia == null || c.getSubjectKind() != OperationsSubjectKind.REVIEW) {
+            return List.of();
+        }
+        boolean on = mediaInspector != null && mediaInspector.enabledFor(orgId);
+        return reviewMedia.findByOrgIdAndReviewIdOrderByOrdinalAsc(orgId, c.getSubjectId()).stream()
+                .map(m -> {
+                    boolean inspected = m.getInspectionStatus()
+                            == com.sellerops.review.media.ReviewMedia.InspectionStatus.INSPECTED;
+                    boolean video = m.getMediaKind() == com.sellerops.review.media.ReviewMedia.Kind.VIDEO;
+                    return new CaseDetailView.Media(m.getOrdinal(), m.getMediaKind().name(), inspected,
+                            mediaStatusKo(m.getInspectionStatus(), on), inspected ? m.getDepicts() : null,
+                            inspected && m.getProblemVisible() != null ? m.getProblemVisible().name() : null,
+                            inspected ? m.getProblemDescription() : null,
+                            video ? null : "/api/responsibilities/customer-operations/cases/" + c.getId()
+                                    + "/media/" + m.getOrdinal());
+                }).toList();
+    }
+
+    static String mediaStatusKo(com.sellerops.review.media.ReviewMedia.InspectionStatus status, boolean on) {
+        return switch (status) {
+            case INSPECTED -> "Reviewnary가 사진을 확인했습니다.";
+            case NOT_INSPECTED -> on ? "아직 사진을 확인하지 않았습니다." : "사진 확인 기능이 꺼져 있어 사진 내용은 보지 않았습니다.";
+            case FETCH_FAILED -> "사진을 가져오지 못해 내용은 보지 않았습니다.";
+            case MODEL_FAILED -> "사진을 확인하지 못했습니다.";
+            case NOT_AN_IMAGE -> "사진이 아니어서 내용은 보지 않았습니다.";
+        };
+    }
+
+    /**
+     * One of this case's review photos, fetched for the seller's own screen under the image fetch policy. Empty when
+     * the case is not this organisation's review, the ordinal has no photo, or the fetch was refused.
+     */
+    public java.util.Optional<com.sellerops.product.detail.image.DetailImageFetcher.Loaded> mediaImage(
+            UUID orgId, UUID caseId, int ordinal) {
+        OperationsCase c = requireCase(orgId, caseId);
+        if (reviewMedia == null || mediaInspector == null || c.getSubjectKind() != OperationsSubjectKind.REVIEW) {
+            return java.util.Optional.empty();
+        }
+        return reviewMedia.findByOrgIdAndReviewIdOrderByOrdinalAsc(orgId, c.getSubjectId()).stream()
+                .filter(m -> m.getOrdinal() == ordinal
+                        && m.getMediaKind() != com.sellerops.review.media.ReviewMedia.Kind.VIDEO)
+                .findFirst()
+                .flatMap(mediaInspector::loadForSeller);
     }
 
     // ── teach ───────────────────────────────────────────────────────────────────────────────────────────────────

@@ -45,6 +45,10 @@ public interface OperationsCaseRepository extends JpaRepository<OperationsCase, 
     long countByOrgIdAndResponsibilityIdAndDispositionAndCreatedAtGreaterThanEqual(
             UUID orgId, UUID responsibilityId, CaseDisposition disposition, Instant since);
 
+    /** Everything Reviewnary looked at in a window, whatever it concluded — the 「확인했습니다」 count. */
+    long countByOrgIdAndResponsibilityIdAndCaseKindAndCreatedAtGreaterThanEqual(
+            UUID orgId, UUID responsibilityId, OperationsCaseKind caseKind, Instant since);
+
     long countByOrgIdAndResponsibilityIdAndPreparedActionAndCreatedAtGreaterThanEqual(
             UUID orgId, UUID responsibilityId, CasePreparedAction preparedAction, Instant since);
 

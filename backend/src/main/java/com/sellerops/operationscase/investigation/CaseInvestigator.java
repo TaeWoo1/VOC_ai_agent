@@ -188,6 +188,9 @@ public class CaseInvestigator {
             text.append("[product] 이 건은 상품과 연결되어 있지 않습니다.\n");
             refs.add("product");
         }
+        if (subject.kind() == OperationsSubjectKind.REVIEW) {
+            appendMedia(text, refs, t.getReviewMedia(subjectCase.getSubjectId()));
+        }
         if (subject.kind() == OperationsSubjectKind.INQUIRY && subject.inquiryId() != null) {
             CaseInvestigationTools.OrderContext order = t.getOrderContext(subject.inquiryId());
             refs.add("order");
@@ -265,6 +268,61 @@ public class CaseInvestigator {
                     .append(decision.on() == null ? "" : " (" + decision.on() + ")").append('\n');
         }
         return new Context(text.toString(), refs, knowledge, knowledgeRefs);
+    }
+
+    /**
+     * The review's photos, each line saying whether it was actually looked at. A photo that was only counted or only
+     * addressed is never described: the line says it was not seen, so the model cannot reason from it as if it had
+     * been.
+     */
+    static void appendMedia(StringBuilder text, Set<String> refs, CaseInvestigationTools.ReviewMediaFacts media) {
+        if (media.media().isEmpty()) {
+            if (media.attachCountObserved() && media.attachCount() > 0) {
+                refs.add("media");
+                text.append("[media] 첨부 사진·영상 ").append(media.attachCount())
+                        .append("개가 있다는 것만 확인했고, 사진 자체는 보지 못했습니다.\n");
+            }
+            return;
+        }
+        for (CaseInvestigationTools.MediaFact m : media.media()) {
+            String ref = "m" + m.ordinal();
+            refs.add(ref);
+            text.append('[').append(ref).append("] 첨부 ").append("VIDEO".equals(m.kind()) ? "영상 " : "사진 ")
+                    .append(m.ordinal()).append(": ");
+            if (!m.inspected()) {
+                text.append("보지 못했습니다(").append(notSeenKo(m.notSeenReason())).append(").\n");
+                continue;
+            }
+            text.append("사진에 보이는 것 — ").append(m.depicts()).append(" · 리뷰 글의 문제가 사진에 ")
+                    .append(visibleKo(m.problemVisible()));
+            if (m.problemDescription() != null && !m.problemDescription().isBlank()) {
+                text.append(" — ").append(m.problemDescription());
+            }
+            text.append('\n');
+        }
+    }
+
+    private static String visibleKo(String visible) {
+        if ("YES".equals(visible)) {
+            return "보임";
+        }
+        if ("NO".equals(visible)) {
+            return "보이지 않음";
+        }
+        return "사진만으로는 판단할 수 없음";
+    }
+
+    private static String notSeenKo(String reason) {
+        if (reason == null) {
+            return "이유 알 수 없음";
+        }
+        return switch (reason) {
+            case "CAPABILITY_OFF" -> "사진 확인 기능이 꺼져 있음";
+            case "FETCH_FAILED" -> "사진을 가져오지 못함";
+            case "MODEL_FAILED" -> "사진을 확인하지 못함";
+            case "NOT_AN_IMAGE" -> "이미지가 아님";
+            default -> "아직 확인하지 않음";
+        };
     }
 
     private static void appendKnowledge(StringBuilder text, String ref, CaseInvestigationTools.KnowledgeUse use) {

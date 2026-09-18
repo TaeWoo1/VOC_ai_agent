@@ -17,7 +17,31 @@ public record CaseDetailView(UUID caseId, boolean open, String subjectKind, Stri
                              String body, String reasonNote, String disposition, String decidedBy, String summary,
                              String recommendedActionType, String recommendedAction, List<String> missingInformation,
                              String whyDecisionNeeded, List<Investigated> investigated,
-                             List<KnowledgeUsed> knowledgeUsed, Gap gap, Draft draft, String to) {
+                             List<KnowledgeUsed> knowledgeUsed, Gap gap, Draft draft, String to,
+                             List<Media> media) {
+
+    /** The shape every caller before review photos built. */
+    public CaseDetailView(UUID caseId, boolean open, String subjectKind, String channelNameKo, String productName,
+                          boolean productScopeAvailable, LocalDate receivedOn, Integer rating, String title,
+                          String body, String reasonNote, String disposition, String decidedBy, String summary,
+                          String recommendedActionType, String recommendedAction, List<String> missingInformation,
+                          String whyDecisionNeeded, List<Investigated> investigated,
+                          List<KnowledgeUsed> knowledgeUsed, Gap gap, Draft draft, String to) {
+        this(caseId, open, subjectKind, channelNameKo, productName, productScopeAvailable, receivedOn, rating, title,
+                body, reasonNote, disposition, decidedBy, summary, recommendedActionType, recommendedAction,
+                missingInformation, whyDecisionNeeded, investigated, knowledgeUsed, gap, draft, to, List.of());
+    }
+
+    /**
+     * One photo or video the customer attached to the review, and whether Reviewnary actually looked at it.
+     *
+     * @param inspected    true only when a vision model looked at the photo; {@code depicts} is null otherwise
+     * @param statusKo     the seller's sentence for the state — 「사진을 확인했습니다」, 「사진 확인 기능이 꺼져 있어 보지 않았습니다」…
+     * @param imagePath    the same-origin path that serves the photo to this seller, or null for a video
+     */
+    public record Media(int ordinal, String kind, boolean inspected, String statusKo, String depicts,
+                        String problemVisible, String problemDescription, String imagePath) {
+    }
 
     /** One thing Reviewnary read, in the seller's words, with how much it found. */
     public record Investigated(String label, int results) {

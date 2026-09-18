@@ -114,7 +114,8 @@ public class LearnedKnowledgeService {
         List<AnswerMemory> rows = em.createQuery("""
                         select m from AnswerMemory m where m.orgId = :org order by m.updatedAt desc
                         """, AnswerMemory.class)
-                .setParameter("org", orgId).getResultList();
+                .setParameter("org", orgId).getResultList().stream()
+                .filter(m -> !synthetic(orgId, m.getProductId())).toList();
         List<Example> examples = rows.stream().limit(EXAMPLES)
                 .map(m -> new Example(m.getAnswerTitle(), excerpt(m.getAnswerBody()),
                         m.getStrength() == null ? "문의 답변" : "문의 답변 · " + m.getStrength().labelKo(),
@@ -139,6 +140,7 @@ public class LearnedKnowledgeService {
                 .getResultList().stream()
                 // The Spine's own rule: the approved version only, and never a template.
                 .filter(r -> ReviewReplyAdapter.isAnswer((String) r[2]) && r[3] != null && r[3].equals(r[4]))
+                .filter(r -> !synthetic(orgId, (UUID) r[5]))
                 .toList();
         List<Example> examples = rows.stream().limit(EXAMPLES)
                 .map(r -> new Example(r[6] == null ? "리뷰 답글" : "리뷰 답글 · 별점 " + r[6] + "점",
@@ -158,13 +160,14 @@ public class LearnedKnowledgeService {
                         """, Object[].class)
                 .setParameter("org", orgId)
                 .setParameter("channel", KnowledgeAuthorship.SELLER_AUTHORED_CHANNEL_CONTENT)
-                .getResultList();
+                .getResultList().stream().filter(d -> !synthetic(orgId, (UUID) d[0])).toList();
         List<Object[]> facts = em.createQuery("""
                         select f.productId, max(f.observedAt), count(f) from ProductFact f
                         where f.orgId = :org and f.factValue is not null
                         group by f.productId order by max(f.observedAt) desc
                         """, Object[].class)
-                .setParameter("org", orgId).getResultList();
+                .setParameter("org", orgId).getResultList().stream()
+                .filter(f -> !synthetic(orgId, (UUID) f[0])).toList();
         Set<UUID> productIds = new LinkedHashSet<>();
         documents.forEach(d -> productIds.add((UUID) d[0]));
         facts.forEach(f -> productIds.add((UUID) f[0]));
@@ -211,6 +214,7 @@ public class LearnedKnowledgeService {
                 .setParameter("org", orgId).getResultList()
                 // The fourth column is not a product; an org rule has none.
                 .forEach(r -> rows.add(new Object[] {r[0], r[1], r[2], null}));
+        rows.removeIf(r -> synthetic(orgId, (UUID) r[3]));
         rows.sort((a, b) -> compareDesc((Instant) a[2], (Instant) b[2]));
         List<Example> examples = rows.stream().limit(EXAMPLES)
                 .map(r -> new Example(titleUnlessRepeated((String) r[0], (String) r[1]), excerpt((String) r[1]),
@@ -227,7 +231,8 @@ public class LearnedKnowledgeService {
                         select g.guidance, g.createdAt, g.productId from SellerGuidance g
                         where g.orgId = :org order by g.createdAt desc
                         """, Object[].class)
-                .setParameter("org", orgId).getResultList();
+                .setParameter("org", orgId).getResultList().stream()
+                .filter(r -> !synthetic(orgId, (UUID) r[2])).toList();
         List<Example> examples = rows.stream().limit(EXAMPLES)
                 .map(r -> new Example("다음에도 참고", excerpt((String) r[0]), "판매자가 고친 내용",
                         productName(orgId, (UUID) r[2]), dateOf((Instant) r[1])))
@@ -247,6 +252,19 @@ public class LearnedKnowledgeService {
                 .setParameter("trigger", KnowledgeBootstrapService.TRIGGER)
                 .setMaxResults(1)
                 .getResultList().stream().findFirst().orElse(null);
+    }
+
+    /**
+     * Whether this row stands on a product the demo seeder or a fixture made. Such a product is not the seller's, so
+     * nothing about it is something Reviewnary «learned about this company» — it is neither counted nor shown. A row
+     * with no product is the company's own and is kept. ({@code findById} does not pass the request's real-data
+     * filter, so the origin is read here rather than assumed.)
+     */
+    private boolean synthetic(UUID orgId, UUID productId) {
+        return productId != null && products.findById(productId)
+                .filter(p -> orgId.equals(p.getOrgId()))
+                .map(p -> p.getDataOrigin() != com.sellerops.common.DataOrigin.REAL)
+                .orElse(false);
     }
 
     private String productName(UUID orgId, UUID productId) {

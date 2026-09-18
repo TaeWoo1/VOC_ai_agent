@@ -55,6 +55,8 @@ export interface NaverObservedReview {
   readonly productName: string | null;
   readonly answered: boolean;
   readonly attachCount: number;
+  /** The attachments' own addresses, when the page reader projected them; absent means «not read». */
+  readonly attachments?: readonly { readonly url: string; readonly kind: "IMAGE" | "VIDEO" | "UNKNOWN" }[];
 }
 
 export interface NaverDeliveryRequest {
@@ -124,6 +126,7 @@ export function sanitizeNaverReading(raw: unknown): { ok: true; reviews: NaverOb
     const productName = x["productName"];
     const answered = x["answered"];
     const attachCount = x["attachCount"];
+    const attachments = x["attachments"];
     if (typeof reviewId !== "string" || !REVIEW_ID.test(reviewId) || seen.has(reviewId)) return { ok: false, reason: "ROW_ID" };
     if (typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt))) return { ok: false, reason: "ROW_DATE" };
     if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 5) return { ok: false, reason: "ROW_RATING" };
@@ -133,6 +136,20 @@ export function sanitizeNaverReading(raw: unknown): { ok: true; reviews: NaverOb
     if (typeof answered !== "boolean") return { ok: false, reason: "ROW_ANSWERED" };
     if (typeof attachCount !== "number" || !Number.isInteger(attachCount) || attachCount < 0 || attachCount > 50) {
       return { ok: false, reason: "ROW_ATTACH" };
+    }
+    let projected: { url: string; kind: "IMAGE" | "VIDEO" | "UNKNOWN" }[] | undefined;
+    if (attachments !== null && attachments !== undefined) {
+      if (!Array.isArray(attachments) || attachments.length !== attachCount) return { ok: false, reason: "ROW_ATTACH" };
+      projected = [];
+      for (const a of attachments) {
+        const url = a && typeof a === "object" ? (a as Record<string, unknown>)["url"] : undefined;
+        const kind = a && typeof a === "object" ? (a as Record<string, unknown>)["kind"] : undefined;
+        if (typeof url !== "string" || !url.startsWith("https://") || url.length > 2048) {
+          return { ok: false, reason: "ROW_ATTACH" };
+        }
+        if (kind !== "IMAGE" && kind !== "VIDEO" && kind !== "UNKNOWN") return { ok: false, reason: "ROW_ATTACH" };
+        projected.push({ url, kind });
+      }
     }
     seen.add(reviewId);
     out.push({
@@ -144,6 +161,7 @@ export function sanitizeNaverReading(raw: unknown): { ok: true; reviews: NaverOb
       productName: typeof productName === "string" ? productName.slice(0, 255) : null,
       answered,
       attachCount,
+      ...(projected ? { attachments: projected } : {}),
     });
   }
   return { ok: true, reviews: out };

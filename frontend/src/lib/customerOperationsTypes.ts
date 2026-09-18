@@ -143,6 +143,8 @@ export interface CustomerOperationsHome {
     /** Cases the seller decided whose result is still being read back from the record that owns it. */
     verifying: number;
     rows: CustomerOperationsHandledRow[];
+    /** Every customer item Reviewnary opened a case for in the window — the denominator, not a sum. */
+    checked?: number;
   };
   gaps: { total: number; rows: CustomerOperationsGapRow[] };
 }
@@ -186,6 +188,18 @@ export interface OperationsCaseDetail {
     reusableText: string | null;
   }[];
   gap: { missingSubject: string | null; sentence: string; suggestedScope: string } | null;
+  /** The review's photos, and whether Reviewnary actually looked at each one. */
+  media?: {
+    ordinal: number;
+    kind: string;
+    /** True only when a vision model looked at the photo. */
+    inspected: boolean;
+    statusKo: string;
+    depicts: string | null;
+    problemVisible: "YES" | "NO" | "UNCLEAR" | null;
+    problemDescription: string | null;
+    imagePath: string | null;
+  }[];
   draft: {
     version: number;
     title: string | null;

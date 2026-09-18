@@ -39,6 +39,21 @@ public class CaseKnowledgeController {
     }
 
     /** [정보 알려주기] — save the missing knowledge, then re-investigate and re-draft this case. */
+    /** One review photo of this case, for the seller's own screen. 404 when there is none to show. */
+    @GetMapping("/media/{ordinal}")
+    public org.springframework.http.ResponseEntity<byte[]> media(@AuthenticationPrincipal AuthPrincipal principal,
+                                                                 @PathVariable UUID caseId,
+                                                                 @PathVariable int ordinal) {
+        return service.mediaImage(principal.orgId(), caseId, ordinal)
+                .map(loaded -> org.springframework.http.ResponseEntity.ok()
+                        .contentType(org.springframework.http.MediaType.parseMediaType(
+                                loaded.meta().contentType() == null ? "image/jpeg" : loaded.meta().contentType()))
+                        .header("Cache-Control", "private, max-age=300")
+                        .header("X-Content-Type-Options", "nosniff")
+                        .body(loaded.bytes()))
+                .orElse(org.springframework.http.ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/teach")
     public CaseDetailView teach(@AuthenticationPrincipal AuthPrincipal principal, @PathVariable UUID caseId,
                                 @Valid @RequestBody CaseTeachRequest request) {

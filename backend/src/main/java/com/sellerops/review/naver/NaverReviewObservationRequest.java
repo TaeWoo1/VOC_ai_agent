@@ -24,9 +24,26 @@ public record NaverReviewObservationRequest(List<Review> reviews, Integer window
      * @param createdAt   리뷰등록일 as the page carries it (ISO-8601 with offset)
      * @param answered    the page's own «has a seller comment» flag; never inferred
      * @param attachCount how many photos/videos the row model listed — a reading, so 0 means «none», not «unknown»
+     * @param attachments the attachments' own addresses, when the reader projects them; null means «not read», which
+     *                    is a different statement from an empty list
      */
     @JsonIgnoreProperties(ignoreUnknown = false)
     public record Review(String reviewId, String createdAt, Integer rating, String body, String productNo,
-                         String productName, Boolean answered, Integer attachCount) {
+                         String productName, Boolean answered, Integer attachCount, List<Attachment> attachments) {
+
+        /** The eight-field shape every helper before attachments sends. */
+        public Review(String reviewId, String createdAt, Integer rating, String body, String productNo,
+                      String productName, Boolean answered, Integer attachCount) {
+            this(reviewId, createdAt, rating, body, productNo, productName, answered, attachCount, null);
+        }
+    }
+
+    /**
+     * One attachment's address as the row model held it.
+     *
+     * @param kind {@code IMAGE}, {@code VIDEO} or {@code UNKNOWN}; the reader never guesses past what the page says
+     */
+    @JsonIgnoreProperties(ignoreUnknown = false)
+    public record Attachment(String url, String kind) {
     }
 }

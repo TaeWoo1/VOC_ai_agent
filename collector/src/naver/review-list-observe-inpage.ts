@@ -36,6 +36,17 @@ export type NaverReviewReadReason = (typeof NAVER_REVIEW_READ_REASONS)[number];
 export const NAVER_REVIEW_MAX_ROWS = 500;
 
 /**
+ * The property of one `reviewAttaches` entry that holds the attachment's own address.
+ *
+ * **Null until a READ-ONLY census of the live row model names it** (Customer Ops Demo Closure v1). The 2026-09-17
+ * discovery recorded that `reviewAttaches` is the row's media list and counted it; it never recorded an entry's
+ * shape. A guessed key would store whatever string sat there as if it were the photo, so while this is null the
+ * reader projects no addresses at all — the rows carry the count exactly as before and the backend treats the
+ * addresses as «not read», which is what they are.
+ */
+export const NAVER_REVIEW_ATTACH_URL_KEY: string | null = null;
+
+/**
  * Signed in, on the Seller Center host, with no password field on the page. Host first: a sign-in redirect lands on
  * `nid.naver.com` / `accounts.commerce.naver.com`, and reading that page's words as «signed in» is the defect the
  * reply lane's `IN_PAGE_LOGIN_SIGNAL` was fixed for.
@@ -99,6 +110,20 @@ export function buildNaverReviewListReadScript(): string {
   if (typeof api.paginationGetTotalPages === 'function' && api.paginationGetTotalPages() > 1) {
     return fail('TOO_MANY_ROWS', { modelType: modelType, rowCount: rowCount });
   }
+  var ATTACH_URL_KEY = ${JSON.stringify(NAVER_REVIEW_ATTACH_URL_KEY)};
+  function attachmentsOf(list) {
+    if (!ATTACH_URL_KEY || !Array.isArray(list)) { return null; }
+    var out = [];
+    for (var a = 0; a < list.length; a++) {
+      var entry = list[a];
+      var url = entry && typeof entry[ATTACH_URL_KEY] === 'string' ? entry[ATTACH_URL_KEY] : null;
+      if (!url || url.indexOf('https://') !== 0) { return null; }
+      var path = url.split('?')[0].toLowerCase();
+      var kind = /\.(jpe?g|png|gif|webp)$/.test(path) ? 'IMAGE' : /\.(mp4|mov|m3u8)$/.test(path) ? 'VIDEO' : 'UNKNOWN';
+      out.push({ url: url, kind: kind });
+    }
+    return out;
+  }
   var rows = [];
   var missing = 0;
   var badShape = 0;
@@ -121,7 +146,8 @@ export function buildNaverReviewListReadScript(): string {
       productNo: String(d.productNo),
       productName: typeof d.productName === 'string' ? d.productName : null,
       answered: d.hasComment,
-      attachCount: Array.isArray(d.reviewAttaches) ? d.reviewAttaches.length : 0
+      attachCount: Array.isArray(d.reviewAttaches) ? d.reviewAttaches.length : 0,
+      attachments: attachmentsOf(d.reviewAttaches)
     });
   });
   if (missing > 0 || rows.length + badShape !== rowCount) {

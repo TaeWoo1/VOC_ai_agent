@@ -86,7 +86,11 @@ class AgentDraftBoundaryTest {
             // looking, for a case the rules could not settle. Its own door, because it is the only capability a
             // scheduled run reaches without a seller in the loop.
             new String[] {"CaseInvestigationGenerator", "CaseInvestigationService.java",
-                    "CaseInvestigationGenerator.java"});
+                    "CaseInvestigationGenerator.java"},
+            // The twelfth (Customer Ops Demo Closure v1, 2026-09-18) and the widest exposure: a customer's own review
+            // photo, with that review's rating and words. Its own door, flag, key and model.
+            new String[] {"ReviewMediaVisionGenerator", "ReviewMediaInspector.java",
+                    "ReviewMediaVisionGenerator.java"});
 
     /**
      * The classes allowed to name {@code AgentLlmTransport} beside a {@code .post(} call: the three
@@ -98,7 +102,7 @@ class AgentDraftBoundaryTest {
             "InquirySignalGenerator.java", "ImageFactExtractionGenerator.java",
             "KnowledgeEmbeddingGenerator.java", "KnowledgeQuestionIntentGenerator.java",
             "KnowledgeEligibilityGenerator.java", "AgentReportNarrativeGenerator.java",
-            "AgentConverseGenerator.java", "CaseInvestigationGenerator.java",
+            "AgentConverseGenerator.java", "CaseInvestigationGenerator.java", "ReviewMediaVisionGenerator.java",
             "JdkAgentLlmTransport.java", "AgentLlmConfiguration.java");
 
     @Test
@@ -159,7 +163,8 @@ class AgentDraftBoundaryTest {
                 new String[] {"sellerops.knowledge.intent.", "KnowledgeQuestionIntentProperties.java"},
                 new String[] {"sellerops.knowledge.eligibility.", "KnowledgeEligibilityProperties.java"},
                 new String[] {"sellerops.agent.report.", "AgentReportProperties.java"},
-                new String[] {"sellerops.responsibility.investigation.", "CaseInvestigationProperties.java"});
+                new String[] {"sellerops.responsibility.investigation.", "CaseInvestigationProperties.java"},
+                new String[] {"sellerops.review.media-vision.", "ReviewMediaVisionProperties.java"});
         try (Stream<Path> walk = Files.walk(MAIN)) {
             for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
                 String name = source.getFileName().toString();

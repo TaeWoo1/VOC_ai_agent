@@ -46,8 +46,12 @@ public record CustomerOperationsHomeView(
      *                  settled. They are neither waiting for the seller nor finished — and a case that vanishes
      *                  between those two moments reads as «gone», which is the one thing it is not.
      */
+    /**
+     * @param checked every customer item Reviewnary opened a case for in the window, whatever it concluded — the
+     *                denominator the seller reads the other numbers against. Not a sum of them.
+     */
     public record Handled(Instant since, long autoResolved, long monitoring, long draftsPrepared, long verifying,
-                          List<HandledRow> rows) {
+                          List<HandledRow> rows, long checked) {
     }
 
     /**
@@ -68,6 +72,6 @@ public record CustomerOperationsHomeView(
 
     public static CustomerOperationsHomeView unavailable(int cadenceMinutes) {
         return new CustomerOperationsHomeView(false, false, null, cadenceMinutes, null, null, null, List.of(),
-                new Decisions(0, List.of()), new Handled(null, 0, 0, 0, 0, List.of()), new Gaps(0, List.of()));
+                new Decisions(0, List.of()), new Handled(null, 0, 0, 0, 0, List.of(), 0), new Gaps(0, List.of()));
     }
 }

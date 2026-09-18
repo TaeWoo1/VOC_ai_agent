@@ -32,6 +32,10 @@ class DetailImageFetchBoundaryTest {
             // credential-free arbitrary-URL egress available to every class in this backend, which
             // is precisely what this test exists to prevent. Two named holders, both bounded.
             "ProductDetailImageKnowledge.java",
+            // The review-photo lane (Customer Ops Demo Closure v1, 2026-09-18). Same reasoning: it constructs its
+            // own, and its only input is an address a channel observation stored on a review_media row — which
+            // ReviewMediaWriter accepted only from the channel's image CDN.
+            "ReviewMediaInspector.java",
             "DetailImageFetcher.java");
 
     private static String executable(Path source) throws IOException {

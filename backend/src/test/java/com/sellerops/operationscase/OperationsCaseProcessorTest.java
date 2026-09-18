@@ -127,6 +127,14 @@ class OperationsCaseProcessorTest {
     @Autowired InquiryExecutionRepository executions;
     @Autowired InquiryVerificationRepository verifications;
     @Autowired InquiryApprovalRepository approvals;
+    @Autowired com.sellerops.inquiry.reply.InquiryReplyDraftRepository replyDrafts;
+    @Autowired com.sellerops.inquiry.publish.InquiryActionIntentRepository intents;
+    @Autowired com.sellerops.community.Cafe24CommunityArticleRepository articles;
+    @Autowired com.sellerops.sync.SyncJobRepository syncJobs;
+    @Autowired com.sellerops.reviewimport.ReviewImportSegmentAttemptRepository attempts;
+    @Autowired com.sellerops.reviewimport.ReviewImportSegmentRepository segments;
+    @Autowired com.sellerops.reviewimport.ReviewImportPlanRepository plans;
+    @Autowired org.springframework.transaction.PlatformTransactionManager txManager;
 
     private final CaseInvestigator investigator = mock(CaseInvestigator.class);
     private final CaseInvestigationService investigation = mock(CaseInvestigationService.class);
@@ -459,6 +467,100 @@ class OperationsCaseProcessorTest {
                 .contains("outcome=COMPLETED")
                 .contains("verified=true")
                 .contains("observed=ANSWERED");
+    }
+
+    /**
+     * <b>The whole single-item chain</b> (Customer Ops Demo Closure v1 §4), with nothing hand-inserted between the
+     * steps: a scheduled run opens the case, the investigator concludes NEEDS_DECISION and a draft is prepared; the
+     * seller approves that exact draft through the production publish service (the channel adapter is the only fake —
+     * it stands where the marketplace is); the adapter's publish and its read-back produce the execution and the
+     * verification rows; and the next scheduled run closes the case by quoting that lifecycle. No step writes to a
+     * channel without the seller's approval, and the case never claims the send itself.
+     */
+    @Test
+    void theChain_observedInvestigatedApprovedExecutedVerified_closesTheCaseFromTheAnswerLifecycle() {
+        Inquiry inquiry = inquiry("교환은 며칠 안에 가능한가요?", Instant.now());
+        inquiry.setExternalId("onlineInquiry:777");
+        inquiries.save(inquiry);
+        InquiryWorkItem item = workItem(inquiry);
+        item.setPhase(InquiryWorkItemPhase.PROPOSED);
+        workItems.save(item);
+
+        processor.process(run(Instant.now(), null, null), () -> false);
+        OperationsCase opened = caseFor(inquiry.getId());
+        assertThat(opened.getDisposition()).isEqualTo(CaseDisposition.NEEDS_DECISION);
+        assertThat(opened.getPreparedAction()).isEqualTo(CasePreparedAction.DRAFT_PREPARED);
+
+        // The draft the seller reads and approves — exactly this text and nothing else is what may leave.
+        String title = "[답변] 교환";
+        String body = "수령 후 7일 이내에 교환을 신청하실 수 있습니다.";
+        com.sellerops.inquiry.reply.InquiryReplyDraft draft = new com.sellerops.inquiry.reply.InquiryReplyDraft();
+        draft.setOrgId(org);
+        draft.setWorkItemId(item.getId());
+        draft.setVersion(1);
+        draft.setAnswerStatus(2);
+        draft.setTitle(title);
+        draft.setComments(body);
+        draft.setContentFingerprint(com.sellerops.inquiry.reply.ReplyDraftFingerprint.of(title, body));
+        draft.setFingerprintAlgorithm(com.sellerops.inquiry.reply.EsmAnswerValidation.FINGERPRINT_ALGORITHM);
+        draft.setCreatedBy("SELLER:" + UUID.randomUUID());
+        replyDrafts.save(draft);
+
+        List<String> sent = new java.util.ArrayList<>();
+        com.sellerops.inquiry.publish.ChannelReplyAdapter channel = new com.sellerops.inquiry.publish.ChannelReplyAdapter() {
+            @Override
+            public String channelCode() {
+                return "CAFE24";
+            }
+
+            @Override
+            public com.sellerops.inquiry.publish.ReplyPublishResult publish(
+                    com.sellerops.inquiry.publish.ReplyPublishCommand command) {
+                sent.add(command.body());
+                return com.sellerops.inquiry.publish.ReplyPublishResult.confirmed("ARTICLE-9");
+            }
+
+            @Override
+            public com.sellerops.inquiry.publish.ReplyVerificationResult verify(
+                    com.sellerops.inquiry.publish.ReplyVerificationCommand command) {
+                return com.sellerops.inquiry.publish.ReplyVerificationResult.completed("ANSWERED");
+            }
+        };
+        com.sellerops.inquiry.publish.InquiryPublishService publish = new com.sellerops.inquiry.publish.InquiryPublishService(
+                workItems, replyDrafts, inquiries, approvals, executions, verifications, audits,
+                new com.sellerops.inquiry.publish.InquiryPublishBindingWriter(workItems, approvals, intents, executions,
+                        audits, txManager),
+                new com.sellerops.inquiry.publish.ChannelReplyAdapterRegistry(channels, List.of(channel)),
+                new com.sellerops.inquiry.publish.InquiryTargetStateReader(null, null) {
+                    @Override
+                    public com.sellerops.inquiry.publish.PreSendCheck read(UUID orgId, UUID channelId) {
+                        return com.sellerops.inquiry.publish.PreSendCheck.proven();
+                    }
+                },
+                new com.sellerops.inquiry.publish.InquiryReplyCapabilityRegistry(), channels,
+                new com.sellerops.identity.ExecutableIdentityResolver(accounts, channels, articles, syncJobs,
+                        attempts, segments, plans));
+
+        // Before approval nothing has been sent — the case prepared the answer and stopped.
+        assertThat(sent).isEmpty();
+        com.sellerops.inquiry.publish.dto.PublishStatusView status = publish.confirmAndPublish(org, item.getId(),
+                UUID.randomUUID(), "seller-approves-1", com.sellerops.inquiry.reply.ReplyDraftFingerprint.of(title, body));
+        assertThat(status.executionStatus()).isEqualTo("COMPLETED");
+        assertThat(sent).as("exactly the approved text, once").containsExactly(body);
+
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        OperationsCase closed = caseFor(inquiry.getId());
+        assertThat(closed.getStatus()).isEqualTo(OperationsCaseStatus.ACTED);
+        assertThat(closed.getResolutionReason()).isEqualTo(CaseResolution.SELLER_ACTED);
+        assertThat(inquiries.findById(inquiry.getId()).orElseThrow().getStatus()).isEqualTo("ANSWERED");
+        String provenance = events.findAll().stream()
+                .filter(e -> closed.getId().equals(e.getCaseId()))
+                .map(OperationsCaseEvent::getProvenance)
+                .filter(p -> p != null && p.contains("delivery="))
+                .reduce((a, b) -> b)
+                .orElseThrow();
+        assertThat(provenance).contains("delivery=COMPLETED").contains("verified=true");
     }
 
     @Test

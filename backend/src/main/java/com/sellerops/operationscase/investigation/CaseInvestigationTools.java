@@ -105,6 +105,31 @@ public class CaseInvestigationTools {
         this.cases = cases;
     }
 
+    /** The review-photo lane. Optional: a context without it investigates reviews exactly as before. */
+    private com.sellerops.review.media.ReviewMediaRepository reviewMedia;
+    private com.sellerops.review.media.ReviewMediaInspector mediaInspector;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setReviewMedia(com.sellerops.review.media.ReviewMediaRepository reviewMedia,
+                        com.sellerops.review.media.ReviewMediaInspector mediaInspector) {
+        this.reviewMedia = reviewMedia;
+        this.mediaInspector = mediaInspector;
+    }
+
+    /**
+     * One review attachment as an investigation sees it. {@code inspected} is true only when a vision model looked at
+     * the photo; otherwise {@code depicts} is null and the line sent to the model says the photo was not seen.
+     *
+     * @param notSeenReason why it was not looked at ({@code CAPABILITY_OFF}, {@code FETCH_FAILED}, …), or null
+     */
+    public record MediaFact(int ordinal, String kind, boolean inspected, String depicts, String problemVisible,
+                            String problemDescription, String notSeenReason) {
+    }
+
+    /** What the review's photos are, as far as Reviewnary knows them. */
+    public record ReviewMediaFacts(int attachCount, boolean attachCountObserved, List<MediaFact> media) {
+    }
+
     /** The tools, bound to one organisation. The binding is final and no method can change it. */
     public OrgTools forOrg(UUID orgId) {
         if (orgId == null) {
@@ -207,6 +232,45 @@ public class CaseInvestigationTools {
             };
             record("getSubject", kind + ":" + subjectId, facts.isPresent() ? 1 : 0);
             return facts;
+        }
+
+        /**
+         * The review's attachments. When the photo lane is on for this organisation, photos not yet looked at are
+         * inspected first (at most three, each fetched under the image fetch policy), so the investigation reads what
+         * the photos show. When it is off, or a photo could not be fetched, the fact says the photo was not seen.
+         */
+        public ReviewMediaFacts getReviewMedia(UUID reviewId) {
+            Review review = reviews.findById(reviewId).filter(r -> orgId.equals(r.getOrgId())).orElse(null);
+            if (review == null) {
+                record("getReviewMedia", String.valueOf(reviewId), 0);
+                return new ReviewMediaFacts(0, false, List.of());
+            }
+            boolean on = mediaInspector != null && mediaInspector.enabledFor(orgId);
+            if (on) {
+                try {
+                    mediaInspector.inspect(orgId, reviewId);
+                } catch (RuntimeException e) {
+                    // The investigation continues on what is already known; the rows say what was not seen.
+                }
+            }
+            List<MediaFact> facts = new ArrayList<>();
+            if (reviewMedia != null) {
+                for (com.sellerops.review.media.ReviewMedia m
+                        : reviewMedia.findByOrgIdAndReviewIdOrderByOrdinalAsc(orgId, reviewId)) {
+                    boolean inspected = m.getInspectionStatus()
+                            == com.sellerops.review.media.ReviewMedia.InspectionStatus.INSPECTED;
+                    String reason = inspected ? null
+                            : m.getInspectionStatus()
+                                    == com.sellerops.review.media.ReviewMedia.InspectionStatus.NOT_INSPECTED
+                                    ? (on ? "NOT_YET" : "CAPABILITY_OFF") : m.getInspectionStatus().name();
+                    facts.add(new MediaFact(m.getOrdinal(), m.getMediaKind().name(), inspected,
+                            inspected ? m.getDepicts() : null,
+                            inspected && m.getProblemVisible() != null ? m.getProblemVisible().name() : null,
+                            inspected ? m.getProblemDescription() : null, reason));
+                }
+            }
+            record("getReviewMedia", String.valueOf(reviewId), facts.size());
+            return new ReviewMediaFacts(review.getMediaCount(), review.isMediaCountObserved(), List.copyOf(facts));
         }
 
         public Optional<ProductContext> getProductContext(UUID productId) {

@@ -21,7 +21,11 @@ public final class CaseInvestigationPrompt {
      * the draft writer's own retrieval — carrying authority and provenance, with a [basis] verdict and [x] conflicts.
      * v3 tells the model how to weigh them. The rules of v2 are unchanged.
      */
-    public static final String PROMPT_VERSION = "case-investigation-prompt/v3";
+    /**
+     * v4 (2026-09-18, Customer Ops Demo Closure v1): a review's photos arrive as [m] lines — what a vision model saw,
+     * or that the photo was not seen. One rule added (10); nothing else changed.
+     */
+    public static final String PROMPT_VERSION = "case-investigation-prompt/v4";
     public static final String SCHEMA_VERSION = "case-investigation-schema/v1";
     public static final String TOOL_VERSION = "case-tools/v2";
     public static final String EVIDENCE_VERSION = "case-evidence/v2";
@@ -55,6 +59,7 @@ public final class CaseInvestigationPrompt {
                판매자 판단, 상품 상세·설명서, 과거 판매자 답변입니다. 서로 다르면 높은 쪽을 따릅니다. [x] 지식 충돌이 있으면 NEEDS_DECISION입니다.
                9. [basis]가 「부족합니다」이면 근거 없이 답하라고 권하지 않습니다. 판매자에게 그 안내 기준을 알려 달라고 하고, \
                그 항목을 missingInformation에 적습니다. [g] 판매자 지침은 처리 방향을 알려 주지만 사실의 근거는 아닙니다.
+               10. [m] 줄은 리뷰에 첨부된 사진입니다. 「보지 못했습니다」인 사진은 내용을 추측하지 않습니다. 사진에 문제가                「보임」이면 그 사실을 판단에 쓰고 evidenceRefs에 그 [m]을 적습니다. [media]는 사진이 있다는 사실뿐입니다.
 
                recommendedActionType: NO_ACTION, MONITOR_REPEAT_ISSUE, REPLY_TO_CUSTOMER, CONTACT_CUSTOMER, \
                REFUND_OR_COMPENSATION, CANCEL_OR_EXCHANGE, ADD_KNOWLEDGE, REVIEW_PRODUCT_LISTING 중 하나.

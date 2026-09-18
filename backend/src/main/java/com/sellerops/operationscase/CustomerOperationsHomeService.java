@@ -114,7 +114,7 @@ public class CustomerOperationsHomeService {
         if (found.isEmpty()) {
             return new CustomerOperationsHomeView(true, eligible, null, cadence, null, null, null, List.of(),
                     new CustomerOperationsHomeView.Decisions(0, List.of()),
-                    new CustomerOperationsHomeView.Handled(null, 0, 0, 0, 0, List.of()),
+                    new CustomerOperationsHomeView.Handled(null, 0, 0, 0, 0, List.of(), 0),
                     new CustomerOperationsHomeView.Gaps(0, List.of()));
         }
         Responsibility r = found.get();
@@ -205,8 +205,10 @@ public class CustomerOperationsHomeService {
                             c.getDisposition().name(), c.getDecidedBy() == null ? null : c.getDecidedBy().name(),
                             c.getReasonNote(), c.getSummary(), verifyingIds.contains(c.getId()), linkOf(c));
                 }).toList();
+        long checked = cases.countByOrgIdAndResponsibilityIdAndCaseKindAndCreatedAtGreaterThanEqual(
+                orgId, r.getId(), OperationsCaseKind.CUSTOMER_WORK, since);
         return new CustomerOperationsHomeView.Handled(since, autoResolved, monitoring.size(), drafts,
-                verifying.size(), rows);
+                verifying.size(), rows, checked);
     }
 
     private CustomerOperationsHomeView.Gaps gaps(UUID orgId, Responsibility r, Map<UUID, Channel> channelById) {

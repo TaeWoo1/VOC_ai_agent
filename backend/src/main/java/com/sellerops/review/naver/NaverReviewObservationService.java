@@ -109,6 +109,14 @@ public class NaverReviewObservationService implements AsideMarketplaceTarget {
         this.syncJobs = syncJobs;
     }
 
+    /** Where attachment references go. Optional so a context without the media lane stores reviews as before. */
+    private com.sellerops.review.media.ReviewMediaWriter media;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setMediaWriter(com.sellerops.review.media.ReviewMediaWriter media) {
+        this.media = media;
+    }
+
     @Override
     public Optional<Target> resolve(UUID orgId, AsideRecipe recipe) {
         if (orgId == null || recipe != AsideRecipe.NAVER_REVIEW_OBSERVE_V1 || !access.allows(recipe, orgId)) {
@@ -176,13 +184,15 @@ public class NaverReviewObservationService implements AsideMarketplaceTarget {
         if (record != null) {
             ingestion.stampAcquisition(orgId, outcome.insertedIds(), record.getId());
         }
+        int mediaStored = recordMedia(orgId, channel.getId(), rows, now);
         int inserted = outcome.insertedIds().size();
         job.recordDelivery(inserted, changed);
         jobs.save(job);
         // Counts and closed words only. The rows are in hand here, which is exactly why they are not in this line.
         log.info("naver review observation: job={} identity=MATCH received={} inserted={} changed={} skipped={} "
-                        + "failed={} windowDays={}",
-                jobId, rows.size(), inserted, changed, outcome.skipped(), outcome.failed(), request.windowDays());
+                        + "failed={} windowDays={} media={}",
+                jobId, rows.size(), inserted, changed, outcome.skipped(), outcome.failed(), request.windowDays(),
+                mediaStored);
         return new NaverReviewObservationView(IdentityVerdict.MATCH.name(), rows.size(), inserted, changed,
                 outcome.skipped(), outcome.failed());
     }
@@ -221,9 +231,59 @@ public class NaverReviewObservationService implements AsideMarketplaceTarget {
             if (row.attachCount() == null || row.attachCount() < 0 || row.attachCount() > MAX_ATTACHMENTS) {
                 throw ApiException.badRequest("첨부 수가 올바르지 않습니다.");
             }
+            if (row.attachments() != null) {
+                // The addresses and the count are two readings of one list; disagreeing, the page moved.
+                if (row.attachments().size() != row.attachCount()) {
+                    throw ApiException.badRequest("첨부 목록과 첨부 수가 맞지 않습니다.");
+                }
+                for (NaverReviewObservationRequest.Attachment a : row.attachments()) {
+                    if (a == null || a.url() == null || kindOf(a.kind()) == null) {
+                        throw ApiException.badRequest("첨부 정보가 올바르지 않습니다.");
+                    }
+                }
+            }
             parseCreatedAt(row.createdAt());
         }
         return rows;
+    }
+
+    static com.sellerops.review.media.ReviewMedia.Kind kindOf(String kind) {
+        if (kind == null) {
+            return null;
+        }
+        return switch (kind) {
+            case "IMAGE" -> com.sellerops.review.media.ReviewMedia.Kind.IMAGE;
+            case "VIDEO" -> com.sellerops.review.media.ReviewMedia.Kind.VIDEO;
+            case "UNKNOWN" -> com.sellerops.review.media.ReviewMedia.Kind.UNKNOWN;
+            default -> null;
+        };
+    }
+
+    /**
+     * The attachments' addresses, onto the canonical review they belong to — found by the review's own id, after
+     * ingest, so a review stored by an earlier read or by the export gains its media on this one.
+     */
+    private int recordMedia(UUID orgId, UUID channelId, List<NaverReviewObservationRequest.Review> rows,
+                            Instant at) {
+        if (media == null) {
+            return 0;
+        }
+        int stored = 0;
+        for (NaverReviewObservationRequest.Review row : rows) {
+            if (row.attachments() == null || row.attachments().isEmpty()) {
+                continue;
+            }
+            Optional<Review> review = reviews.findByOrgIdAndChannelIdAndExternalId(orgId, channelId, row.reviewId());
+            if (review.isEmpty()) {
+                continue;
+            }
+            stored += media.record(orgId, review.get().getId(), row.attachments().stream()
+                            .map(a -> new com.sellerops.review.media.ReviewMediaWriter.Attachment(a.url(),
+                                    kindOf(a.kind())))
+                            .toList(),
+                    AsideRecipe.NAVER_REVIEW_OBSERVE_V1.name(), at);
+        }
+        return stored;
     }
 
     /** MATCH only when every product number on the page is this organisation's; see the class comment. */

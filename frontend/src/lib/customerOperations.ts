@@ -177,7 +177,11 @@ export function handledLine(handled: CustomerOperationsHome["handled"]): string 
     // Never «보냈습니다» or «처리했습니다»: the execution record owns that sentence, and it has not said it yet.
     parts.push("승인한 작업의 처리 결과를 확인하고 있습니다");
   }
-  return parts.length === 0 ? "최근 24시간 동안 정리하거나 준비한 일은 없습니다." : `${parts.join(" · ")}.`;
+  const checked = handled.checked ?? 0;
+  const lead = checked > 0 ? `최근 24시간 동안 ${checked.toLocaleString("ko-KR")}건을 확인했습니다. ` : "";
+  return parts.length === 0
+    ? `${lead}최근 24시간 동안 정리하거나 준비한 일은 없습니다.`
+    : `${lead}${parts.join(" · ")}.`;
 }
 
 /**
