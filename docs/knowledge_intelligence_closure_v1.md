@@ -82,6 +82,23 @@ basis·모델 호출 여부·gap 적재·Knowledge Inbox는 한 글자도 바뀌
 - **하지 않은 것**: 검색 범위 확대(리스팅 → 제품군/회사), F5 semantic 활성화, lexical 조정. 그래서 이 변경이 발동하는
   빈도는 여전히 위의 lexical 적중률에 묶여 있다.
 
+**브라우저 증명(`apr-7c3e91d4`, `QA_REPLAY_PROVEN`, 2026-09-19).** Demo Org 복제 DB에서 과거 NAVER 상품 문의 1건(「…투명한 부분과
+아래쪽 보라색 부분은 어떻게 분리하나요?」, 과거 답변 `17dd221a`)을 오늘 도착한 문의로 다시 넣었다. 판정 `NO_ANSWER_BASIS`
+(상품 `ABSENT` · 운영기준 `NO_RELEVANT_EVIDENCE` · 근거는 과거 답변뿐) → Case [정보 입력]이 그 답변으로 채워져 열림 → 판매자가
+고쳐 저장 → `KNOWLEDGE_TAUGHT`(`precedentUnchanged=false`) → 재조사 → **GROUNDED 초안**(근거 상품 정보 1 · 과거 답변 1).
+모델 3 · 마켓플레이스 0 · WRITE 0. 이 증명이 드러낸 것 셋:
+
+- **고쳐 쓴 문장만 GROUNDED에 닿았다.** 사전 점검(모델 0)에서 인사말만 지운 답변을 저장하면 상품 lane은
+  `NO_RELEVANT_EVIDENCE`에 머문다 — 과거 답변은 **저장된 질문 서명**(「제품의 부분과 부분은」) 덕에 잡혔고, Teach로 만든 지식에는
+  그 서명이 없다. 증명은 판매자가 대상(「투명한 부분과 아래쪽 보라색 부분은」)을 넣어 고친 문장으로 했다. **고치지 않고 보고.**
+- **부족한 정보의 명사가 「기존」**이었다(`subjectOf`가 질문의 첫 남은 낱말을 고른다) — 화면·Teach 제목(「기존 안내」)에 그대로
+  나온다. 기존 동작이고 **고치지 않고 보고.**
+- **화면의 Teach 호출이 8초에 포기했다** — 서버는 ~17초에 저장·재조사·재초안을 끝냈는데 화면은 실패를 말했고, 다시 누르면 같은
+  지식이 두 번 저장될 자리였다. `teachOperationsCase`가 `2 × MODEL_TIMEOUT_MS`를 갖게 고쳤고(`apiClient.caseTeach.test.ts`),
+  고친 뒤의 브라우저 재증명은 **새 승인이 필요해 실행하지 않았다.**
+- 미리 채워진 과거 답변은 **이 질문의 원래 답**이다(같은 질문이 다시 온 경우). 상품 지식이 없으면서 **다른** 과거 답변이
+  lexical로 잡히는 역사적 문의는 Demo Org에 없었다.
+
 테스트: `KnowledgeIntelligenceClosureTest`(과거 답변만 → basis 불변·모델 0·두 경로 같은 id · 미리 채움을 고쳐 저장 →
 GROUNDED·근거는 판매자 지식·메모리 불변 · 과거 답변 없음 → null · 현재 근거 있음 → null · 표시 시 펜스 · 옛 JSON 호환),
 `OperationsCase.test.tsx`(미리 채움 표시·고쳐 저장·그대로 한 번에 저장·axe 0). 마켓플레이스 0 · 모델 0 ·

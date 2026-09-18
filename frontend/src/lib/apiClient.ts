@@ -1869,10 +1869,17 @@ export const api = {
     for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
     return `data:${type};base64,${btoa(binary)}`;
   },
+  /**
+   * Saves the seller's knowledge, then re-investigates and re-drafts the case on the server — two model calls in
+   * sequence before the response. Under the ordinary 8s ceiling the save succeeded while the screen said it failed
+   * (Past Answer Prefill browser proof, 2026-09-19: the server answered in ~17s), and a seller who then pressed again
+   * would have saved the same knowledge twice. So it carries two model budgets.
+   */
   async teachOperationsCase(caseId: string, input: { content: string; scope: string }): Promise<OperationsCaseDetail> {
     const { data } = await http.post<OperationsCaseDetail>(
       `/api/responsibilities/customer-operations/cases/${caseId}/teach`,
       input,
+      { timeout: 2 * MODEL_TIMEOUT_MS },
     );
     return data;
   },
