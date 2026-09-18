@@ -164,6 +164,18 @@ class ProductDetailEnrichmentTriggerTest {
     }
 
     @Test
+    @DisplayName("a refusal of THIS CALLER is its own outcome, with its reason — a caller reading many stops on it")
+    void callerRefusalIsTyped() {
+        source.failWith = new ChannelAccessRefused(ChannelAccessRefused.Reason.ENVIRONMENT_NOT_ALLOWED, null);
+
+        ProductDetailEnrichmentTrigger.Result result = trigger().enrichIfNeeded(org, productId);
+
+        assertThat(result.outcome()).isEqualTo(ProductDetailEnrichmentTrigger.Outcome.CHANNEL_REFUSED);
+        assertThat(result.refusal()).isEqualTo(ChannelAccessRefused.Reason.ENVIRONMENT_NOT_ALLOWED);
+        verify(enrichment, never()).apply(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     @DisplayName("a listing the channel no longer has is an absence, never a deletion")
     void notFoundWritesNothing() {
         source.returnNull = true;

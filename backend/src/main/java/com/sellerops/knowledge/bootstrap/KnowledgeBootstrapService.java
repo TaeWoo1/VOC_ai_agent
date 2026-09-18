@@ -95,14 +95,16 @@ public class KnowledgeBootstrapService {
      *
      * @param onSaleCatalogue on-sale products with a listing on a channel whose detail this deployment can read
      * @param covered         of those, how many have had their detail read (now or before)
-     * @param remaining       of those, how many are still unread because this run's ceiling was reached
+     * @param remaining       of those, how many this run did not consider — the ceiling, or a refusal that stopped it
+     * @param stoppedBy       why the pass stopped early: the channel refused this caller (IP / permission / credential);
+     *                        null when it ran to the end
      */
     public record ProductDetail(boolean enabled, int considered, int indexed, int imageOnly, int empty,
                                 int alreadyFresh, int noListing, int failed, int onSaleCatalogue, int covered,
-                                int remaining) {
+                                int remaining, String stoppedBy) {
 
         static ProductDetail off() {
-            return new ProductDetail(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return new ProductDetail(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null);
         }
     }
 
@@ -351,6 +353,7 @@ public class KnowledgeBootstrapService {
         int noListing = 0;
         int failed = 0;
         int considered = 0;
+        String stoppedBy = null;
         for (UUID productId : candidates) {
             ProductDetailEnrichmentTrigger.Result result;
             try {
@@ -363,6 +366,13 @@ public class KnowledgeBootstrapService {
                 return ProductDetail.off();
             }
             considered++;
+            if (result.outcome() == ProductDetailEnrichmentTrigger.Outcome.CHANNEL_REFUSED) {
+                // The channel refused THIS CALLER. Every remaining listing would be refused the same way, and each
+                // attempt is still a request — so the pass stops at the first one and says why.
+                failed++;
+                stoppedBy = result.refusal() == null ? "CHANNEL_REFUSED" : result.refusal().name();
+                break;
+            }
             switch (result.outcome()) {
                 case NOT_NEEDED -> fresh++;
                 case NO_CAPABLE_LISTING, NO_ACCOUNT -> noListing++;
@@ -383,8 +393,11 @@ public class KnowledgeBootstrapService {
             }
         }
         int covered = (int) onSale.stream().filter(id -> detail.lastRead(orgId, id) != null).count();
+        if (stoppedBy != null) {
+            remaining += candidates.size() - considered;
+        }
         return new ProductDetail(true, considered, indexed, imageOnly, empty, fresh, noListing, failed, onSale.size(),
-                covered, remaining);
+                covered, remaining, stoppedBy);
     }
 
     /**

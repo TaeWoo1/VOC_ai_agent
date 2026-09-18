@@ -152,6 +152,15 @@ function ChannelLines({ lines }: { lines: LearnedKnowledgeChannelLine[] }) {
   );
 }
 
+/** Why the product-detail pass stopped early — the channel refused this connection, not any one product. */
+const STOPPED_BY: Record<string, string> = {
+  ENVIRONMENT_NOT_ALLOWED:
+    "채널이 지금 연결 환경을 허용하지 않아 상품 상세를 읽지 못했습니다. 판매자센터 애플리케이션의 'API 호출 IP'를 확인해 주세요.",
+  PERMISSION: "채널 애플리케이션에 상품 API 권한이 없어 상품 상세를 읽지 못했습니다.",
+  CREDENTIAL: "채널 연결 정보가 더 이상 유효하지 않아 상품 상세를 읽지 못했습니다. 채널을 다시 연결해 주세요.",
+  CHANNEL_REFUSED: "채널이 요청을 거절해 상품 상세를 읽지 못했습니다.",
+};
+
 function RunSummary({ run }: { run: KnowledgeBootstrapReport }) {
   const lines: string[] = [];
   for (const history of run.inquiryHistory) {
@@ -183,6 +192,10 @@ function RunSummary({ run }: { run: KnowledgeBootstrapReport }) {
       parts.push(`이미지로만 된 상세페이지 ${run.productDetail.imageOnly}개는 읽지 못했습니다`);
     }
     lines.push(`${parts.join(" · ")}.`);
+  }
+  const stopped = run.productDetail.stoppedBy ? STOPPED_BY[run.productDetail.stoppedBy] : null;
+  if (stopped) {
+    lines.push(stopped);
   }
   if (run.productDetail.enabled && (run.productDetail.onSaleCatalogue ?? 0) > 0) {
     let line = `판매 중인 상품 ${run.productDetail.onSaleCatalogue}개 중 ${run.productDetail.covered}개의 상세·옵션·속성을 알고 있습니다.`;

@@ -2,6 +2,7 @@ package com.sellerops.connector.naver;
 
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.credential.DecryptedCredential;
+import com.sellerops.product.detail.ChannelAccessRefused;
 import com.sellerops.product.detail.ProductDetailSource;
 import java.util.UUID;
 
@@ -60,9 +61,19 @@ public class NaverProductDetailSource implements ProductDetailSource {
             throw new IllegalStateException("네이버 상품 번호 형식이 올바르지 않습니다.");
         }
         DecryptedCredential credential = vault.open(orgId, sellerAccountId);
-        String token = tokens.accessToken(credential.secrets().get("client_id"),
-                credential.secrets().get("client_secret"));
-        NaverProductDetail read = detail.fetch(token, channelProductNo);
+        String token;
+        NaverProductDetail read;
+        try {
+            token = tokens.accessToken(credential.secrets().get("client_id"),
+                    credential.secrets().get("client_secret"));
+            read = detail.fetch(token, channelProductNo);
+        } catch (NaverEnvironmentRefusedException e) {
+            throw new ChannelAccessRefused(ChannelAccessRefused.Reason.ENVIRONMENT_NOT_ALLOWED, e);
+        } catch (NaverProductPermissionException e) {
+            throw new ChannelAccessRefused(ChannelAccessRefused.Reason.PERMISSION, e);
+        } catch (com.sellerops.connector.ConnectorAuthException e) {
+            throw new ChannelAccessRefused(ChannelAccessRefused.Reason.CREDENTIAL, e);
+        }
         if (read == null || attributes == null || read.attributes().isEmpty()) {
             return read;
         }

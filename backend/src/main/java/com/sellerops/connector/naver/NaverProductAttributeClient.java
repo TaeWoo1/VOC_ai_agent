@@ -38,6 +38,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class NaverProductAttributeClient {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(NaverProductAttributeClient.class);
+
     static final String ATTRIBUTES_PATH = "/external/v1/product-attributes/attributes";
     static final String VALUES_PATH = "/external/v1/product-attributes/attribute-values";
     static final String UNITS_PATH = "/external/v1/product-attributes/attribute-value-units";
@@ -79,6 +81,13 @@ public class NaverProductAttributeClient {
             category = category(accessToken, categoryId.strip());
             unitNames = units(accessToken);
         } catch (RuntimeException e) {
+            // Remembered as empty for the TTL: a category the channel refused once is not asked again for every
+            // listing in it — the read budget of a catalogue pass is per category, failure included.
+            categories.putIfAbsent(categoryId.strip(), new Cached<>(new Category(Map.of(), Map.of()),
+                    clock.instant().plus(TTL)));
+            if (units == null) {
+                units = new Cached<>(Map.of(), clock.instant().plus(TTL));
+            }
             return out;
         }
         for (NaverProductDetail.AttributeRef ref : refs) {
@@ -169,6 +178,9 @@ public class NaverProductAttributeClient {
     private Iterable<JsonNode> getArray(String token, String pathAndQuery) {
         reads.incrementAndGet();
         NaverHttpClient.Response response = http.get(URI.create(baseUrl + pathAndQuery), token);
+        // Path only (the category id is catalogue metadata, not seller data) — so a bounded run can count its reads.
+        log.info("naver attribute catalogue read path={} status={}", pathAndQuery.split("\\?")[0],
+                response.statusCode());
         if (response.statusCode() == 429) {
             throw NaverRateLimitedException.fromResponse(response);
         }

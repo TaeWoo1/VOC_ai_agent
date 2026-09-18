@@ -485,6 +485,10 @@ public class CatalogueInvestigator {
             }
             try {
                 ProductDetailEnrichmentTrigger.Result r = detail.enrichIfNeeded(orgId, id);
+                if (r.outcome() == ProductDetailEnrichmentTrigger.Outcome.CHANNEL_REFUSED) {
+                    reads++;
+                    break;  // the channel refused this caller; the next listing would be refused the same way
+                }
                 if (r.outcome() == ProductDetailEnrichmentTrigger.Outcome.APPLIED
                         || r.outcome() == ProductDetailEnrichmentTrigger.Outcome.READ_FAILED
                         || r.outcome() == ProductDetailEnrichmentTrigger.Outcome.NOT_FOUND) {

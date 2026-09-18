@@ -539,8 +539,10 @@ public class InquiryDraftComposer {
             return null;
         }
         try {
-            return detail.enrichIfNeeded(orgId, inquiry.getProductId()).outcome()
-                    == ProductDetailEnrichmentTrigger.Outcome.READ_FAILED ? DETAIL_READ_FAILED : null;
+            ProductDetailEnrichmentTrigger.Outcome outcome = detail.enrichIfNeeded(orgId, inquiry.getProductId()).outcome();
+            // A refusal of this caller did not finish the read either — same sentence, never silence.
+            return outcome == ProductDetailEnrichmentTrigger.Outcome.READ_FAILED
+                    || outcome == ProductDetailEnrichmentTrigger.Outcome.CHANNEL_REFUSED ? DETAIL_READ_FAILED : null;
         } catch (RuntimeException ignored) {
             // Deliberately silent about the CAUSE — the trigger logs its own outcomes and a second
             // line here would say the same thing with less information — but not about the FACT: a

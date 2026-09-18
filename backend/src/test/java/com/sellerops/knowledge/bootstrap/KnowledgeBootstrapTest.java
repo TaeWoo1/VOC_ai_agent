@@ -308,6 +308,28 @@ class KnowledgeBootstrapTest {
     }
 
     @Test
+    @DisplayName("the first refusal of THIS CALLER (IP not allowed) stops the detail pass — no request per remaining listing")
+    void aRefusedCallerStopsTheWholePass() {
+        UUID org = org("거절 상점");
+        listed(org, "가 디스펜서", "SALE");
+        listed(org, "나 디스펜서", "SALE");
+        listed(org, "다 디스펜서", "SALE");
+        ProductDetailEnrichmentTrigger trigger = capableTrigger();
+        when(trigger.enrichIfNeeded(eq(org), any())).thenReturn(new ProductDetailEnrichmentTrigger.Result(
+                ProductDetailEnrichmentTrigger.Outcome.CHANNEL_REFUSED, null,
+                com.sellerops.product.detail.ChannelAccessRefused.Reason.ENVIRONMENT_NOT_ALLOWED));
+
+        KnowledgeBootstrapService bootstrap = service(mock(SyncRunExecutor.class), trigger);
+        bootstrap.setMaxCatalogueProducts(10);
+        KnowledgeBootstrapService.ProductDetail detail = bootstrap.bootstrap(org).productDetail();
+
+        verify(trigger, times(1)).enrichIfNeeded(eq(org), any());
+        assertThat(detail.stoppedBy()).isEqualTo("ENVIRONMENT_NOT_ALLOWED");
+        assertThat(detail.considered()).isEqualTo(1);
+        assertThat(detail.remaining()).as("the two never asked for are reported, not hidden").isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("API-first: the channel's product LIST is read before any detail — skipped while a finished read is fresh")
     void catalogueListIsReadFirstUnlessFresh() {
         UUID org = org("목록 상점");

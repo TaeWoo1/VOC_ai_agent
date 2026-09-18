@@ -1345,6 +1345,7 @@ export interface KnowledgeBootstrapReport {
     onSaleCatalogue: number;
     covered: number;
     remaining: number;
+    stoppedBy?: "ENVIRONMENT_NOT_ALLOWED" | "PERMISSION" | "CREDENTIAL" | "CHANNEL_REFUSED" | null;
   };
   catalogue?: {
     channelNameKo: string | null;

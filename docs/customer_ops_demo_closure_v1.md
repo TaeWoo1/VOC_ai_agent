@@ -263,3 +263,19 @@ and facts only.
 **Limits.** Cafe24 detail is out of scope (no detail source). Attribute values are rendered from the catalogue's
 `minAttributeValue`/`maxAttributeValue` as published — confirmed or refuted by the first live read. Images are still not
 read. Coupang statuses remain `UNKNOWN`.
+
+**§7 live read (2026-09-18, approval «Catalogue KB live read, sellerops_catkb_proof, READ only»).** Ran on the clone with
+the NAVER product lanes only (both inquiry lanes off, discussed-product reads 0, catalogue ceiling 37, draft model and
+schedulers off). **Refused by the gateway: `GW.IP_NOT_ALLOWED`** — this machine's egress is now 121.170.254.188, not
+the address earlier live runs used. Requests: 1 catalogue LIST attempt + 37 detail attempts, every one refused at the
+token endpoint; **product reads 0 · attribute reads 0 · WRITE 0**; knowledge on the clone unchanged (facts 509, variants
+425, documents 12). The inquiry-history step made no request (INQUIRY not advertised with both lanes off). 689162087
+re-investigated afterwards: unchanged — `NO_ANSWER_BASIS`, 「그중 31개는 상세페이지를 아직 읽지 못했습니다」.
+
+**Defect found and fixed.** After the first refusal the bootstrap still asked for all 37 listings, each minting a token the
+gateway refused — a refusal of the CALLER was handled as a failure of one listing. Now: `NaverEnvironmentRefusedException`
+(token endpoint `GW.IP_NOT_ALLOWED`), product-permission and credential failures surface from the detail source as
+`ChannelAccessRefused(reason)`; the trigger returns `CHANNEL_REFUSED`; the bootstrap and the per-question lazy reads stop
+at the first one; the report carries `stoppedBy` and counts the rest as `remaining`; the Learned Knowledge screen says
+why; the draft screen treats it as «detail not finished». Attribute-catalogue failures are cached for the TTL so a refused
+category is not re-asked per listing. Backend 4,375 tests, 0 failures.

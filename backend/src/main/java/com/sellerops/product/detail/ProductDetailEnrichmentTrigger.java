@@ -130,12 +130,22 @@ public class ProductDetailEnrichmentTrigger {
         NOT_FOUND,
         /** The channel refused or could not be reached. The draft continues regardless. */
         READ_FAILED,
+        /**
+         * The channel refused THIS CALLER (IP, permission, credential) — every other listing would be refused the same
+         * way, so a caller reading many stops here. See {@link Result#refusal()}.
+         */
+        CHANNEL_REFUSED,
         /** One request was made and its result applied. */
         APPLIED
     }
 
     /** The result: how it ended, and — when a read happened — what the page turned out to be. */
-    public record Result(Outcome outcome, ProductDetailEnrichment.Result enriched) {
+    public record Result(Outcome outcome, ProductDetailEnrichment.Result enriched,
+                         ChannelAccessRefused.Reason refusal) {
+
+        public Result(Outcome outcome, ProductDetailEnrichment.Result enriched) {
+            this(outcome, enriched, null);
+        }
 
         static Result of(Outcome outcome) {
             return new Result(outcome, null);
@@ -205,6 +215,9 @@ public class ProductDetailEnrichmentTrigger {
         NaverProductDetail detail;
         try {
             detail = found.source().read(orgId, account.get().getId(), found.externalProductId());
+        } catch (ChannelAccessRefused e) {
+            log.info("product-detail trigger org={} outcome=CHANNEL_REFUSED reason={}", orgId, e.reason());
+            return new Result(Outcome.CHANNEL_REFUSED, null, e.reason());
         } catch (RuntimeException e) {
             // The class only. A NAVER failure message can name the calling IP or the listing, and a
             // draft path is not the place either of those surfaces.

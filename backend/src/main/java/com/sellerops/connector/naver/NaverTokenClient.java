@@ -206,7 +206,7 @@ public class NaverTokenClient {
             // RECONNECT_REQUIRED task, and a caller-IP refusal would send the seller to re-enter a
             // credential the gateway never objected to. An ordinary failure keeps the account's
             // connection state and says what the gateway said.
-            throw new IllegalStateException(
+            throw new NaverEnvironmentRefusedException(
                     "네이버 게이트웨이가 이 호출 환경을 허용하지 않습니다 (" + NaverGatewayCode.IP_NOT_ALLOWED
                             + "). 애플리케이션에 등록된 'API 호출 IP'를 확인해 주세요.");
         }
