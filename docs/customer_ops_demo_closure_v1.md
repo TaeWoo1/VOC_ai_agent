@@ -279,3 +279,33 @@ gateway refused — a refusal of the CALLER was handled as a failure of one list
 at the first one; the report carries `stoppedBy` and counts the rest as `remaining`; the Learned Knowledge screen says
 why; the draft screen treats it as «detail not finished». Attribute-catalogue failures are cached for the TTL so a refused
 category is not re-asked per listing. Backend 4,375 tests, 0 failures.
+
+## §8 A–H product-path re-check at HEAD (2026-09-18/19)
+
+**Offline leg — `sellerops_ah_verify`, every connector OFF, marketplace 0, model 0.** A: the auto-resolved review shows under
+「정리한 일 보기」. C: Home list → case → GROUNDED draft (「미발송」) → 「발송 화면으로」 opens the inquiry detail. G: stops at the
+send screen, which (Naver send lane off in that boot) says 「지금은 reviewnary가 답변을 대신 등록하지 않습니다」 and offers
+「초안 복사」; approve → WRITE was not attempted. H: 「재개」 → run with connectors off → Home 「수집 실패」 with no number, Cafe24
+sources 「지원 전 · 집계 제외」. Two defects surfaced and were fixed in `c320d428`: stored `REVIEW_ROUTINE` cases (closed before
+`d6a98b09` narrowed the rule) displayed 「글 없이…」 though they have text — the narrowed rule now has its own code
+`REVIEW_TEXTLESS_HIGH_RATING` and `REVIEW_ROUTINE` keeps its original sentence; and the Home dropped the 24-hour tally when the
+latest run failed — it now keeps it and adds 「마지막 확인 실패 (시각) · 이번 확인분 집계 제외」.
+
+**Live leg — `apr-co-ah-bdef-r1`, `sellerops_ah_live`, `c320d428`.** Scheduled NAVER Aside reads only (review list and product
+inquiry list, one page each per run), investigation ≤3/run, vision ≤3/review, drafts for the Demo Org.
+
+| | Scenario | Result |
+|---|---|---|
+| B | problem review → investigation | **PASS** — 4 new reviews. 3 worded 5★ → rule MONITORING (「별점은 높지만 글이 있어 바로 닫지 않고 지켜봅니다」). 1 5★ whose words mention a past difficulty («구형주택이라 전선 정리가 힘들엏는데 깨끗하게 마무리 했습니다») → extractor asserts a problem → investigated (1 model call, 6.3 s) → Agent `AUTO_RESOLVED` / `NO_ACTION`. Home: 확인 5 · 정리 1 · 관찰 3 |
+| D | missing knowledge → Teach → regenerate | **대상 없음** — no new inquiry in either run |
+| E | later similar case reuses taught context | **대상 없음** — depends on D; no new inquiry |
+| F | image review → vision investigation | **대상 없음** — 3 new reviews carry photos (references stored, `NOT_INSPECTED`), all 5★ praise, so the rule watched them and no investigation (and therefore no vision) ran. By design vision runs only inside an investigation; a photo review that needs one did not arrive |
+
+Run 1 started before the helper was up: the loopback fixture job was queued first and the device's one-job limit refused the
+two NAVER jobs (「이 컴퓨터에서 이미 확인 작업이 진행 중입니다」) — nothing read. Its automatic retry after the helper started did
+the reading. Run 2 read 45 reviews / 8 inquiries, nothing new. Totals: marketplace page reads 4, clicks 0, WRITE 0, CDN fetches 0,
+model calls 1. Dev database unchanged.
+
+Seen, not fixed: the investigated case's fact line 「별점은 높지만 불편을 말하는 내용이 있습니다」 stands beside an Agent summary
+calling it positive, and the model's recommendation text says 「모니터링만 하시면 됩니다」 on a case it closed.
+
