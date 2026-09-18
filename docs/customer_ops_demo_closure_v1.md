@@ -292,7 +292,7 @@ this channel» with both lanes off — no request.
 What was learned (clone): detail 36/36 applied — **35 IMAGE_ONLY**, 1 TEXT_INDEXED; facts 509 → 1,195, variants 425 →
 997; 추가상품 facts 286; 상품정보제공고시 facts 332.
 
-**Follow-up (same day): findings 1 and 3 fixed; finding 2 is waiting on a payload check.**
+**Follow-up (same day): findings 1 and 3 fixed; finding 2 was a counting error.**
 
 1. **고시 pointers are not facts.** 286 of the 332 고시 values were 「상품상세참조」/「상품상세 참조」: the field title was
    projected, but the value says nothing about the product. `NoticePlaceholder` is a closed grammar: optional 상품, then
@@ -305,9 +305,15 @@ What was learned (clone): detail 36/36 applied — **35 IMAGE_ONLY**, 1 TEXT_IND
    Facts stored before the rule are removed on every bootstrap by `dropPlaceholderSpecs` (local, no request), because an
    unchanged listing is not re-read. On the clone the rebootstrap removed **286**, leaving 46 NAVER detail `spec:`
    facts, **0** of them pointers.
-2. **Named category attributes: 0 facts.** Not changed. Seven catalogue reads returned 200, but no listing's attribute
-   ids came out as a named fact. Where the attribute, value and category ids actually sit in the payload must be seen in
-   2–3 real payloads before the projection is touched. That needs its own READ approval.
+2. **Named category attributes — the «0 facts» was my counting error, not a defect.** Named attributes are stored as
+   `spec:<attributeName>` (the naming merges them into the detail read's facts). The first count searched the `attr:`
+   namespace. In the `spec:` namespace, keys that are not 고시 labels come from the attribute catalogue: 형태, 그림속성,
+   용량, 특징, 일회용품재질 (주요 소재 is a 고시 label too, so it is ambiguous). That is **10 facts on 6 listings**, and they
+   come from exactly the three categories whose catalogue was read — 탁상용액자, 퍼즐/그림/사진액자, 종이컵 — e.g.
+   `spec:용량 = 3oz` and `spec:일회용품재질 = 종이` on 종이컵 listings. So `productAttributes` → catalogue → name works
+   where a listing carries attribute ids. The 22 종이컵디스펜서 and 5 몰딩 listings asked for no category, which means their
+   projected `productAttributes` were empty. Whether their payloads carry attribute ids anywhere else is **not verified**;
+   that needs a raw payload of 1–2 dispenser listings (separate READ approval). The projection is unchanged.
 3. **The coverage sentence separates what was read from what was not.** It used to say
    「…상품명·옵션·추가상품·상품 정보를 확인했지만」 over every candidate, although add-ons and 고시 exist only where a
    detail page was read. It now claims names and options for all candidates, and says separately how many detail pages
