@@ -129,11 +129,18 @@ public class AgentDraftService {
     public Optional<AgentDraftResponseParser.ParsedDraft> draft(
             UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
             String orderState, String specScope, String style, String companyContext) {
+        return draft(orgId, title, details, knowledge, orderState, specScope, style, companyContext, null);
+    }
+
+    /** The grounded form, plus the need list the coverage gate settled (Inquiry Decision v2). */
+    public Optional<AgentDraftResponseParser.ParsedDraft> draft(
+            UUID orgId, String title, String details, List<AgentDraftGenerator.Passage> knowledge,
+            String orderState, String specScope, String style, String companyContext, String answerScope) {
         if (!access.allows(properties, orgId)) {
             return Optional.empty();
         }
         AgentDraftGenerator.Result result = generator().generate(new AgentDraftGenerator.Input(
-                title, details, knowledge, orderState, specScope, style, companyContext));
+                title, details, knowledge, orderState, specScope, style, companyContext, answerScope));
         log.info("agent_draft orgId={} drafted={} grounded={} styled={} company={} reason={} {}",
                 orgId, result.draft().isPresent(), knowledge == null ? 0 : knowledge.size(),
                 style != null && !style.isBlank(), companyContext != null && !companyContext.isBlank(),

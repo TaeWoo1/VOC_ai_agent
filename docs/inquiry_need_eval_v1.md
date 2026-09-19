@@ -199,6 +199,12 @@ statement·주문 상태 미기록).
    지식이다(호수표에 높이 칸이 없다 · 발송 기준에 주문 상태가 없다). 미리 채움(REUSABLE precedent 22 need)과 need 단위의 「빠진
    칸」을 묻는 ask가 필요하다. 이미지 lane(상한 −13)과 family relation(−2)은 product-owner 결정으로 남긴다.
 
+## 11-A. 후속 — Inquiry Decision v2
+
+1번 후보(need-level sufficiency gate)는 **`docs/inquiry_decision_v2.md`**로 구현됐다(기본 OFF). oracle 상한에서 S0·S1 모두 PARTIAL_LEAK 0 ·
+WRONG 0 · strict safe precision 1.0 · 불필요한 escalation 0. scorer는 그 과정에서 결함 하나를 고쳤다 — 카탈로그 statement나 관측된 주문
+사실만 인용한 답을 「인용 없음」(WRONG)으로 세고 있었다(옛 run의 수치는 바뀌지 않는다: 그때는 statement가 있으면 grounds도 참이었다).
+
 ## 12. 재현
 
 `tools/inquiry-need-eval/README.md`. 해시: `contracts/inquiry-need-eval/v1/dataset.meta.json`(dataset · snapshot state · observation run).

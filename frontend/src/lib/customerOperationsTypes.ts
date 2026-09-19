@@ -196,6 +196,11 @@ export interface OperationsCaseDetail {
      * answer. Not knowledge until they save it. Absent or null when there was none: the box starts empty.
      */
     prefill?: { text: string; strengthKo: string | null; answeredOn: string | null } | null;
+    /**
+     * Inquiry Decision v2: every need the customer's message carries, and how far the seller's current knowledge covers
+     * it. Absent on gaps decided before it, or for an org it is off for.
+     */
+    needs?: OperationsCaseNeed[] | null;
   } | null;
   /** The review's photos, and whether Reviewnary actually looked at each one. */
   media?: {
@@ -218,4 +223,22 @@ export interface OperationsCaseDetail {
     evidence: { kind: string; scopeLabel: string; title: string | null; snippet: string | null }[];
   } | null;
   to: string;
+}
+
+/** One customer need on a Case (Inquiry Decision v2). */
+export interface OperationsCaseNeed {
+  ask: string;
+  /** FULL · CONDITIONAL_ON_CUSTOMER · PARTIAL · NONE · UNKNOWN */
+  status: string;
+  statusKo: string;
+  /** Nothing more is needed from the seller for this need. */
+  covered: boolean;
+  /** What supports it — labels only. */
+  evidence: string[];
+  missing: string | null;
+  askCustomer: string | null;
+  /** A reusable past answer for this need; never an answer about one order or one moment. */
+  prefill: { text: string; strengthKo: string | null; answeredOn: string | null } | null;
+  /** The listing's detail was never read — Reviewnary reads it, not the seller. */
+  systemWillRead: boolean;
 }

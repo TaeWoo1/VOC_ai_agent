@@ -116,3 +116,14 @@ test('schema enums are the vocabulary, word for word', () => {
   assert.deepEqual(d.snapshot.properties.refs.items.properties.state.enum, V.SOURCE_STATES);
   assert.deepEqual(d.observation.properties.basis.enum, Object.keys(V.SYSTEM_ACTION));
 });
+
+test('an answer grounded on a catalogue statement alone is not an uncited answer', () => {
+  const d = ds();
+  const s = snap();
+  s.refs.push({ ref: 'OPT:aaaa0001#%우드%', product: 'aaaa0001', state: 'PRESENT' });
+  s.refs = s.refs.filter((r) => !(r.ref === 'OPT:aaaa0001#%우드%' && r.state === 'ABSENT_ACQUIRABLE'));
+  const rows = readJsonl(join(FIX, 'observations.jsonl')).map((r) => (r.q !== 'S:q3' ? r : {
+    ...r, basis: 'GROUNDED', catalogue: { grounds: false, statements: [{ product: 'aaaa0001-x', field: 'OPTION', text: '색상: 우드 / 사이즈: 1호 (판매 중)' }] },
+  }));
+  assert.equal(byQ(score(d, s, rows).caseScores)['S:q3'].outcome, 'SAFE_ANSWER');
+});

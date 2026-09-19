@@ -99,7 +99,16 @@ public class AgentDraftGenerator {
      * here whose absence is rendered as nothing at all.
      */
     public record Input(String title, String details, List<Passage> knowledge, String orderState,
-                        String specScope, String style, String companyContext) {
+                        String specScope, String style, String companyContext, String answerScope) {
+
+        /**
+         * Before Inquiry Decision v2. {@code answerScope} is the need list the coverage gate settled — which needs this
+         * reply answers and which it only asks the customer about — written by us from the needs, never evidence.
+         */
+        public Input(String title, String details, List<Passage> knowledge, String orderState,
+                     String specScope, String style, String companyContext) {
+            this(title, details, knowledge, orderState, specScope, style, companyContext, null);
+        }
 
         public Input(String title, String details) {
             this(title, details, List.of(), null, null, null, null);
@@ -299,7 +308,7 @@ public class AgentDraftGenerator {
         ObjectNode user = messages.addObject();
         user.put("role", "user");
         user.put("content", AgentDraftPrompt.user(input.title(), input.details(), input.knowledge(),
-                input.orderState(), input.specScope(), input.style(), input.companyContext()));
+                input.orderState(), input.specScope(), input.style(), input.companyContext(), input.answerScope()));
         if (vendor == Vendor.ANTHROPIC) {
             root.put("max_tokens", maxOutputTokens);
             root.put("system", AgentDraftPrompt.system());

@@ -55,12 +55,20 @@ public class InquiryKnowledgeAssessor {
      */
     public record Assessment(UUID productId, SpecApplicability.Verdict verdict, SpineRetrieval spine,
                              AnswerBasisState basis, KnowledgeTopic asked, Set<KnowledgeTopic> named,
-                             KnowledgeGapView gap, String missingSubject, CatalogueInvestigator.Finding catalogue) {
+                             KnowledgeGapView gap, String missingSubject, CatalogueInvestigator.Finding catalogue,
+                             com.sellerops.inquiry.decision.NeedDecision decision) {
+
+        /** Before Inquiry Decision v2: no need-level decision. */
+        public Assessment(UUID productId, SpecApplicability.Verdict verdict, SpineRetrieval spine,
+                          AnswerBasisState basis, KnowledgeTopic asked, Set<KnowledgeTopic> named,
+                          KnowledgeGapView gap, String missingSubject, CatalogueInvestigator.Finding catalogue) {
+            this(productId, verdict, spine, basis, asked, named, gap, missingSubject, catalogue, null);
+        }
 
         public Assessment(UUID productId, SpecApplicability.Verdict verdict, SpineRetrieval spine,
                           AnswerBasisState basis, KnowledgeTopic asked, Set<KnowledgeTopic> named,
                           KnowledgeGapView gap, String missingSubject) {
-            this(productId, verdict, spine, basis, asked, named, gap, missingSubject, null);
+            this(productId, verdict, spine, basis, asked, named, gap, missingSubject, null, null);
         }
 
         /** Whether the only current basis is another product in the seller's catalogue. */
@@ -81,6 +89,20 @@ public class InquiryKnowledgeAssessor {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setCatalogue(CatalogueInvestigator catalogue) {
         this.catalogue = catalogue;
+    }
+
+    private com.sellerops.inquiry.decision.InquiryDecisionModel decisionModel;
+    private com.sellerops.inquiry.decision.InquiryEvidenceCollector collector;
+
+    /**
+     * Inquiry Decision v2 (need-level coverage). Optional: a context without it — or an org the capability is off for —
+     * assesses exactly as before.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setDecision(com.sellerops.inquiry.decision.InquiryDecisionModel decisionModel,
+                            com.sellerops.inquiry.decision.InquiryEvidenceCollector collector) {
+        this.decisionModel = decisionModel;
+        this.collector = collector;
     }
 
     /**
@@ -125,7 +147,51 @@ public class InquiryKnowledgeAssessor {
         if (basis == AnswerBasisState.NO_ANSWER_BASIS) {
             gap = gap.withPrecedent(precedentOf(found.lanes()));
         }
-        return new Assessment(productId, verdict, found, basis, asked, named, gap, subject, catalogueFinding);
+        if (decisionModel == null || collector == null || !decisionModel.enabledFor(orgId)) {
+            return new Assessment(productId, verdict, found, basis, asked, named, gap, subject, catalogueFinding);
+        }
+        return decide(orgId, inquiry, title, details, productId, verdict, found, asked, named, catalogueFinding);
+    }
+
+    /**
+     * <b>Inquiry Decision v2</b>: the basis is derived from every need the customer's message carries, not from whether
+     * a current passage exists. Relevant evidence for one need no longer completes a Case with three
+     * (docs/inquiry_decision_v2.md). The legacy lanes still run and are still what the draft cites; what changes is who
+     * decides whether there is a basis.
+     */
+    private Assessment decide(UUID orgId, Inquiry inquiry, String title, String details, UUID productId,
+                              SpecApplicability.Verdict verdict, SpineRetrieval found, KnowledgeTopic asked,
+                              Set<KnowledgeTopic> named, CatalogueInvestigator.Finding catalogueFinding) {
+        String question = ((title == null ? "" : title) + "\n" + (details == null ? "" : details)).strip();
+        com.sellerops.inquiry.decision.DetailCapability detail = collector.detail(orgId, productId);
+        com.sellerops.product.library.KnowledgeVariantScope scope =
+                com.sellerops.product.library.KnowledgeVariantScope.of(verdict.variantId());
+        com.sellerops.inquiry.decision.NeedDecision decision = com.sellerops.inquiry.decision.InquiryDecisionEngine
+                .decide(orgId, question, decisionModel,
+                        needs -> collector.collect(orgId, inquiry, productId, found.lanes(), catalogueFinding, scope,
+                                needs), detail);
+        AnswerBasisState basis = decision.basis();
+        List<com.sellerops.inquiry.decision.NeedResult> open = decision.unresolved();
+        String subject = basis != AnswerBasisState.NO_ANSWER_BASIS ? null
+                : !open.isEmpty() ? open.get(0).need().ask()
+                : subjectOf(verdict, title, details, productName(orgId, productId), asked);
+        KnowledgeGapView gap = KnowledgeGapView.of(found.lanes(), verdict, asked, named).asking(subject)
+                .withNeeds(views(decision));
+        if (basis == AnswerBasisState.NO_ANSWER_BASIS) {
+            gap = gap.withPrecedent(open.stream().flatMap(n -> n.precedents().stream())
+                    .map(com.sellerops.inquiry.decision.PrecedentCandidate::memoryId).findFirst().orElse(null));
+        }
+        return new Assessment(productId, verdict, found, basis, asked, named, gap, subject, catalogueFinding, decision);
+    }
+
+    static List<com.sellerops.inquiry.draft.dto.NeedCoverageView> views(
+            com.sellerops.inquiry.decision.NeedDecision decision) {
+        return decision.needs().stream().map(n -> new com.sellerops.inquiry.draft.dto.NeedCoverageView(
+                n.need().id(), n.need().ask(), n.need().type().name(), n.status().name(), n.status().labelKo(),
+                n.evidence().stream().map(e -> e.kind().scopeLabelKo() + " · " + e.label()).distinct().toList(),
+                n.missing(), n.askCustomer(),
+                n.precedents().stream().map(com.sellerops.inquiry.decision.PrecedentCandidate::memoryId).toList(),
+                n.acquirable())).toList();
     }
 
     /**

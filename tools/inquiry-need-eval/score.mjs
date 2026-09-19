@@ -66,7 +66,9 @@ export function scoreCase(c, needTruths, needScores, row, ds) {
     if (row.prefill_shown) prefill = gold.some((g) => row.precedent?.startsWith(g)) ? 'PREFILL_RIGHT' : 'PREFILL_WRONG';
     else prefill = gold.length ? 'PREFILL_MISSED' : 'NO_PREFILL_NEEDED';
   } else {
-    const evidence = cited.length > 0 || row.catalogue?.grounds;
+    // A catalogue statement or an observed order fact the product cites is evidence as much as a knowledge passage.
+    const evidence = cited.length > 0 || row.catalogue?.grounds || (row.catalogue?.statements?.length ?? 0) > 0
+      || (row.order_state ?? '').startsWith('OBSERVED');
     const allCovered = needScores.every((n) => n.covered);
     const anyMatched = needScores.some((n) => n.observedSufficiency !== 'NONE');
     const needsClarify = needScores.some((n) => n.observedSufficiency === 'CONDITIONAL');

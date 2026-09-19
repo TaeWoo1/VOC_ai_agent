@@ -23,7 +23,14 @@ import java.util.UUID;
  *                       starts the seller's answer from it. Never a basis: the gap stays a gap until the seller confirms.
  */
 public record CaseKnowledgeGap(String basis, String missingSubject, String suggestedScope, String topic,
-                               UUID candidateId, String source, UUID precedentMemoryId) {
+                               UUID candidateId, String source, UUID precedentMemoryId,
+                               java.util.List<com.sellerops.inquiry.draft.dto.NeedCoverageView> needs) {
+
+    /** Before Inquiry Decision v2 (and every row stored before it): no need list. */
+    public CaseKnowledgeGap(String basis, String missingSubject, String suggestedScope, String topic,
+                            UUID candidateId, String source, UUID precedentMemoryId) {
+        this(basis, missingSubject, suggestedScope, topic, candidateId, source, precedentMemoryId, null);
+    }
 
     /** A gap with no past-answer precedent — and the shape every case stored before Past Answer Prefill v1 reads as. */
     public CaseKnowledgeGap(String basis, String missingSubject, String suggestedScope, String topic,
@@ -33,7 +40,7 @@ public record CaseKnowledgeGap(String basis, String missingSubject, String sugge
 
     public static CaseKnowledgeGap fromInvestigation(CaseInvestigationTools.KnowledgeAssessment knowledge) {
         return new CaseKnowledgeGap(knowledge.basis(), knowledge.missingSubject(), knowledge.suggestedScope(),
-                knowledge.topic(), null, "INVESTIGATION", knowledge.precedentMemoryId());
+                knowledge.topic(), null, "INVESTIGATION", knowledge.precedentMemoryId(), knowledge.needs());
     }
 
     /** Null unless the draft path refused for lack of an answer basis — a switched-off model is not a knowledge gap. */
@@ -49,6 +56,7 @@ public record CaseKnowledgeGap(String basis, String missingSubject, String sugge
                 : topic != null ? KnowledgeTopic.valueOf(topic).labelKo() : null;
         String scope = gap == null || gap.productId() == null || topic != null ? "ORG" : "PRODUCT";
         return new CaseKnowledgeGap(prepared.answerBasis(), subject, scope, topic,
-                gap == null ? null : gap.candidateId(), "DRAFT", gap == null ? null : gap.precedentMemoryId());
+                gap == null ? null : gap.candidateId(), "DRAFT", gap == null ? null : gap.precedentMemoryId(),
+                gap == null ? null : gap.needs());
     }
 }

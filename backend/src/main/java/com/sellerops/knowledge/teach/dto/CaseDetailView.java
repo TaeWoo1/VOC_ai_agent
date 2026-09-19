@@ -64,11 +64,25 @@ public record CaseDetailView(UUID caseId, boolean open, String subjectKind, Stri
      *
      * @param sentence the one line the screen shows: 「방수」에 대해 고객에게 안내할 기준이 없습니다.
      */
-    public record Gap(String missingSubject, String sentence, String suggestedScope, Prefill prefill) {
+    public record Gap(String missingSubject, String sentence, String suggestedScope, Prefill prefill,
+                      List<NeedLine> needs) {
 
         public Gap(String missingSubject, String sentence, String suggestedScope) {
-            this(missingSubject, sentence, suggestedScope, null);
+            this(missingSubject, sentence, suggestedScope, null, null);
         }
+
+        public Gap(String missingSubject, String sentence, String suggestedScope, Prefill prefill) {
+            this(missingSubject, sentence, suggestedScope, prefill, null);
+        }
+    }
+
+    /**
+     * One customer need, as the seller reads it on the Case (Inquiry Decision v2): what is already confirmed and by
+     * what, and what is still missing. {@code prefill} is a REUSABLE past answer for this need, re-read and re-fenced
+     * now — never an order's or a moment's answer.
+     */
+    public record NeedLine(String ask, String status, String statusKo, boolean covered, List<String> evidence,
+                           String missing, String askCustomer, Prefill prefill, boolean systemWillRead) {
     }
 
     /**

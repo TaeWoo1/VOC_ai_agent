@@ -730,6 +730,22 @@ sellerops:
       # product-update 50,000 calls/hour (notice effective 2025-07-09) — an
       # API family this connector does not implement. Nothing applicable is
       # published; pacing is decided at the first fetch slice.
+  # ── Inquiry Decision v2 (need-level coverage, 2026-09-19) ─────────────────────────────────────────────────
+  #
+  # Splits a customer's inquiry into the independent needs it carries (one call), gathers current evidence for all
+  # of them (no model), and has ONE judge say how far the evidence closes each need (one call). Code then derives
+  # the basis: every need covered → a draft; any need partial, missing or unreadable → the Case goes to the seller.
+  # That is what removes partial-coverage leakage (docs/inquiry_decision_v2.md). Its payload is the customer's
+  # inquiry, the seller's candidate evidence and past answers, by position — so it is its own capability, admitted
+  # only by its own org list. OFF by default; off, the assessment is exactly what it was.
+  inquiry-decision:
+    enabled: ${SELLEROPS_INQUIRY_DECISION_ENABLED:false}
+    enabled-org-ids: ${SELLEROPS_INQUIRY_DECISION_ORG_IDS:}
+    model: ${SELLEROPS_INQUIRY_DECISION_MODEL:gpt-5-2025-08-07}
+    api-key: ${SELLEROPS_INQUIRY_DECISION_API_KEY:}
+    plan-max-output-tokens: ${SELLEROPS_INQUIRY_DECISION_PLAN_MAX_OUTPUT_TOKENS:800}
+    judge-max-output-tokens: ${SELLEROPS_INQUIRY_DECISION_JUDGE_MAX_OUTPUT_TOKENS:1600}
+    reasoning-effort: ${SELLEROPS_INQUIRY_DECISION_REASONING_EFFORT:minimal}
   inquiry-import:
     esm:
       # Manual ESM (G마켓/옥션) inquiry Excel-import bridge. Off by default — with this

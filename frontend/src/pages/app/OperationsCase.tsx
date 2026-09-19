@@ -7,7 +7,7 @@ import { WorkFlowCard } from "../../components/ui/WorkFlowCard";
 import { api } from "../../lib/apiClient";
 import { actionKo, subjectFallback } from "../../lib/customerOperations";
 import { COPY, DRAFT_UNSENT, decisionOf, photoWord, shortDate, sourceLabel, waitLabel } from "../../lib/copy/customerOps";
-import type { OperationsCaseDetail } from "../../lib/customerOperationsTypes";
+import type { OperationsCaseDetail, OperationsCaseNeed } from "../../lib/customerOperationsTypes";
 
 /** The queue the case was opened from, carried in router state by the Home list — never re-read here. */
 export interface CaseQueueState {
@@ -446,6 +446,48 @@ type CardProps = {
 };
 
 /** The Teach loop: the one fact the seller can give so this case — and the next like it — can be answered. */
+/**
+ * Inquiry Decision v2: what is already confirmed, and only what is still missing — the seller is not asked the whole
+ * question again when two of its three parts are already answered.
+ */
+function NeedLists({ needs }: { needs: OperationsCaseNeed[] }) {
+  const covered = needs.filter((n) => n.covered);
+  const open = needs.filter((n) => !n.covered);
+  return (
+    <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink">
+      {covered.length > 0 ? (
+        <section aria-label={COPY.confirmedNeeds}>
+          <h3 className="text-xs font-semibold text-muted">{COPY.confirmedNeeds}</h3>
+          <ul className="mt-1 space-y-1">
+            {covered.map((n) => (
+              <li key={n.ask} className="break-keep">
+                <span className="font-semibold">{n.ask}</span>
+                {n.askCustomer ? <span className="text-muted"> · 고객에게 확인: {n.askCustomer}</span> : null}
+                {n.evidence.length > 0 ? <span className="block text-xs text-muted">{n.evidence.join(" · ")}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {open.length > 0 ? (
+        <section aria-label={COPY.missingNeeds}>
+          <h3 className="text-xs font-semibold text-muted">{COPY.missingNeeds}</h3>
+          <ul className="mt-1 space-y-1">
+            {open.map((n) => (
+              <li key={n.ask} className="break-keep">
+                <span className="font-semibold">{n.ask}</span>
+                <span className="text-muted"> · {n.statusKo}</span>
+                {n.missing ? <span className="block text-xs text-muted">{n.missing}</span> : null}
+                {n.systemWillRead ? <span className="block text-xs text-muted">{COPY.systemWillRead}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
 function TeachCard({
   caseId,
   detail,
@@ -489,6 +531,7 @@ function TeachCard({
     <ActionCard primary ariaLabel={COPY.needInfo}>
       <h2 className="text-base font-extrabold text-ink">{COPY.needInfo}</h2>
       <p className="mt-2 break-keep text-[17px] font-bold leading-snug tracking-tight text-ink">{gap.sentence}</p>
+      {gap.needs && gap.needs.length > 0 ? <NeedLists needs={gap.needs} /> : null}
       {prefill ? (
         <div id="teach-prefill" className="mt-3 rounded-xl bg-[#F4F7FB] px-3.5 py-3 text-sm leading-relaxed text-ink">
           <p className="break-keep">{COPY.prefillNote}</p>
@@ -521,7 +564,7 @@ function TeachCard({
       <Btn className="mt-4 min-h-[46px] w-full" onClick={submit} disabled={busy || content.trim().length === 0}>
         {busy ? "저장 중…" : COPY.saveAndRedraft}
       </Btn>
-      {precedent && !prefill ? (
+      {precedent && !prefill && !gap.needs ? (
         <Btn variant="ghost" size="sm" className="mt-2 w-full" onClick={() => setContent(precedent.reusableText ?? "")}>
           {COPY.loadPastAnswer}
         </Btn>

@@ -57,9 +57,15 @@ class RetrievalRuntimeClosureTest {
      * it measures and never drafts — and pays for that by asking with a query that is not customer-written and an
      * order lookup that is stored-only, so a report over a backlog can neither reach a channel nor charge a
      * per-question model call per row ({@code InquiryKnowledgeCoverageService#measured}).
+     *
+     * <p>Inquiry Decision v2 adds the evidence collector: once the Spine has run the whole-question retrieval, the
+     * collector runs the same lanes once per customer need with the planner's search phrase, so a message with three
+     * questions is three searches. It is reached only from the assessment the Spine already serves (the same work
+     * unit), asks with a query that is not customer-written and a stored-only order lookup, and decides nothing — the
+     * judge and {@code NeedAggregation} do.
      */
     private static final List<String> MAY_RUN_THE_LANES = List.of(
-            "KnowledgeSpineService.java", "InquiryKnowledgeCoverageService.java");
+            "KnowledgeSpineService.java", "InquiryKnowledgeCoverageService.java", "InquiryEvidenceCollector.java");
 
     /**
      * Who may ask the Spine: the unit of work a retrieval belongs to.

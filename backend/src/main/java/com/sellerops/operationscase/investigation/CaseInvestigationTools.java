@@ -169,7 +169,15 @@ public class CaseInvestigationTools {
      */
     public record KnowledgeAssessment(String basis, String missingSubject, String suggestedScope, String topic,
                                       List<KnowledgeUse> evidence, List<KnowledgeUse> context,
-                                      List<KnowledgeConflict> conflicts, UUID precedentMemoryId) {
+                                      List<KnowledgeConflict> conflicts, UUID precedentMemoryId,
+                                      List<com.sellerops.inquiry.draft.dto.NeedCoverageView> needs) {
+
+        /** Before Inquiry Decision v2: no need list. Never part of the model text — the prompt reads named fields. */
+        public KnowledgeAssessment(String basis, String missingSubject, String suggestedScope, String topic,
+                                   List<KnowledgeUse> evidence, List<KnowledgeUse> context,
+                                   List<KnowledgeConflict> conflicts, UUID precedentMemoryId) {
+            this(basis, missingSubject, suggestedScope, topic, evidence, context, conflicts, precedentMemoryId, null);
+        }
 
         /** The assessment without a past-answer precedent — every caller before Past Answer Prefill v1. */
         public KnowledgeAssessment(String basis, String missingSubject, String suggestedScope, String topic,
@@ -330,7 +338,8 @@ public class CaseInvestigationTools {
             return new KnowledgeAssessment(a.basis().name(), subject, scope,
                     a.asked() == null ? null : a.asked().name(), evidence,
                     uses(investigationContext(a.spine())), a.spine().conflicts(),
-                    missing && a.gap() != null ? a.gap().precedentMemoryId() : null);
+                    missing && a.gap() != null ? a.gap().precedentMemoryId() : null,
+                    a.gap() == null ? null : a.gap().needs());
         }
 
         private KnowledgeAssessment assessReview(Review review) {

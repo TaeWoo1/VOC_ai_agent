@@ -233,6 +233,50 @@ describe("OperationsCase", () => {
     expect(await screen.findByRole("status", { name: "저장됨" })).toBeTruthy();
   });
 
+  it("a partly covered inquiry shows what is confirmed and asks only for what is missing (Inquiry Decision v2)", async () => {
+    const past = "연결캡과 엘보캡은 몰딩과 같은 호수로 구매하시면 됩니다.";
+    api.getOperationsCase.mockResolvedValue(
+      detail({
+        gap: {
+          missingSubject: "마감캡 끝이 뚫려 있는지",
+          sentence: "「마감캡 끝이 뚫려 있는지」에 대해 고객에게 안내할 기준이 없습니다.",
+          suggestedScope: "PRODUCT",
+          prefill: { text: past, strengthKo: null, answeredOn: null },
+          needs: [
+            { ask: "마감캡 끝이 뚫려 있는지", status: "UNKNOWN", statusKo: "읽지 못한 자료에 있을 수 있음", covered: false,
+              evidence: [], missing: "마감캡 구조가 등록된 자료에 없습니다.", askCustomer: null, prefill: null,
+              systemWillRead: false },
+            { ask: "8.5mm 케이블에 맞는 호수", status: "FULL", statusKo: "확인됨", covered: true,
+              evidence: ["상품 정보 · 선바로 내경표"], missing: null, askCustomer: null, prefill: null,
+              systemWillRead: false },
+            { ask: "엘보 구간에 쓸 사이즈", status: "NONE", statusKo: "기준 없음", covered: false, evidence: [],
+              missing: null, askCustomer: null, prefill: { text: past, strengthKo: null, answeredOn: null },
+              systemWillRead: true },
+          ],
+        },
+        knowledgeUsed: [
+          { label: "과거 답변", title: "주문 발송", excerpt: "어제 발송되었습니다.", pastAnswer: true,
+            reusableText: "주문하신 상품은 어제 발송되었습니다." },
+        ],
+      } as never),
+    );
+    const { container } = renderCase();
+    const box = (await screen.findByLabelText("안내 내용")) as HTMLTextAreaElement;
+
+    const confirmed = screen.getByRole("region", { name: "이미 확인된 내용" });
+    expect(within(confirmed).getByText("8.5mm 케이블에 맞는 호수")).toBeTruthy();
+    expect(within(confirmed).getByText("상품 정보 · 선바로 내경표")).toBeTruthy();
+    const missing = screen.getByRole("region", { name: "알려 주셔야 하는 내용" });
+    expect(within(missing).getByText("마감캡 끝이 뚫려 있는지")).toBeTruthy();
+    expect(within(missing).getByText("엘보 구간에 쓸 사이즈")).toBeTruthy();
+    expect(within(missing).queryByText("8.5mm 케이블에 맞는 호수")).toBeNull();
+    expect(within(missing).getByText(/Reviewnary가 읽으면/)).toBeTruthy();
+    // Only the judged, reusable precedent starts the answer; an order's past answer is never offered here.
+    expect(box.value).toBe(past);
+    expect(screen.queryByRole("button", { name: "과거 답변 불러오기" })).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
   it("confirming the prefilled past answer unchanged is one press", async () => {
     const past = "제품 표면은 생활 방수가 되어 욕실 벽면에도 부착하실 수 있습니다.";
     api.getOperationsCase.mockResolvedValue(

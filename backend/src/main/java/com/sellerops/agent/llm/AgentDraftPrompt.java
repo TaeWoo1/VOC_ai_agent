@@ -23,7 +23,7 @@ package com.sellerops.agent.llm;
 public final class AgentDraftPrompt {
 
     /** Bump on every wording change. It is stamped into the provenance the run records. */
-    public static final String PROMPT_VERSION = "agent-draft-prompt/v11";
+    public static final String PROMPT_VERSION = "agent-draft-prompt/v12";
 
     /**
      * The closed set of reply categories, in the rule drafter's own order.
@@ -64,6 +64,8 @@ public final class AgentDraftPrompt {
                - 이 초안은 사람이 검토하고 직접 전송합니다. 시스템이 대신 전송하지 않습니다.
                - 확인되지 않은 사실(주문 상태, 재고 수량, 배송 일자, 환불 금액, 정책 조항)을 지어내지 마세요. \
                확인되지 않은 것은 쓰지 말고, 근거가 있는 부분만 답하세요.
+               - 「이번 답변이 다룰 내용」이 주어지면 그 항목만 답하세요. 「고객에게 확인」이 붙은 항목은 답을 \
+               정하지 말고 그것을 고객에게 물으세요. 목록에 없는 내용은 새로 답하지 마세요.
                - 「판매자가 등록한 근거」가 주어지면 그 내용만 근거로 쓰세요. 거기 없는 사양·수치·기간·\
                조건은 쓰지 마세요. 근거가 비어 있으면 그것만으로 답을 만들지 말고, 인사와 감사까지만 쓰세요.
                - 근거에 그렇게 적혀 있지 않는 한 판매자의 후속 약속(「확인 후 안내드리겠습니다」, 「연락드리겠습니다」 \
@@ -217,6 +219,17 @@ public final class AgentDraftPrompt {
     public static String user(String title, String details,
                               java.util.List<AgentDraftGenerator.Passage> knowledge, String orderState,
                               String specScope, String style, String companyContext) {
+        return user(title, details, knowledge, orderState, specScope, style, companyContext, null);
+    }
+
+    /**
+     * The user turn with the need list the coverage gate settled (Inquiry Decision v2): which needs this reply answers
+     * and which it asks the customer about. Written by us from the planner's needs; omitted when there is none, so a
+     * draft without a decision is byte-identical to v11's user turn.
+     */
+    public static String user(String title, String details,
+                              java.util.List<AgentDraftGenerator.Passage> knowledge, String orderState,
+                              String specScope, String style, String companyContext, String answerScope) {
         StringBuilder sb = new StringBuilder();
         sb.append("제목: ").append(title == null ? "" : title)
                 .append("\n본문:\n").append(details == null ? "" : details);
@@ -243,6 +256,9 @@ public final class AgentDraftPrompt {
         // can vary by option reads every retrieved figure as a settled fact about this listing.
         sb.append("\n\n규격 적용 범위:\n")
                 .append(specScope == null || specScope.isBlank() ? "(해당 없음)" : specScope);
+        if (answerScope != null && !answerScope.isBlank()) {
+            sb.append("\n\n이번 답변이 다룰 내용:\n").append(answerScope.strip());
+        }
         // Context, not evidence: who is speaking. Omitted when unset, for the reason the style is.
         if (companyContext != null && !companyContext.isBlank()) {
             sb.append("\n\n").append(COMPANY_SECTION_TITLE).append(":\n").append(companyContext.strip())

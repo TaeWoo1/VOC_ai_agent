@@ -368,7 +368,8 @@ public class InquiryDraftComposer {
             // could not finish filling, and 「답변 기준이 필요합니다」 would send the seller off to
             // write knowledge that may already be sitting on their own listing.
             String operational = detailFailure != null ? detailFailure
-                    : inFlight(orgId, inquiry) ? DETAIL_READ_PENDING : null;
+                    : inFlight(orgId, inquiry) ? DETAIL_READ_PENDING
+                    : decisionUnavailable(assessment.decision());
             // The seller's own approved sentence, verbatim, and only here.
             //
             // It is allowed ONLY when the retrieval actually settled with no usable evidence. If the
@@ -398,9 +399,21 @@ public class InquiryDraftComposer {
         } else {
             QuotaDecision decision = quota.consume(orgId, AgentUsageKind.DRAFT, null);
             if (decision.allowed()) {
-                List<AgentDraftGenerator.Passage> shown =
-                        passagesFor(assessment.catalogue(), retrieved.passages(), context);
-                written = model.draft(orgId, title, details,
+                // Inquiry Decision v2: the drafter sees the evidence of the covered needs and nothing a need did not
+                // cite, and is told which needs to answer and which to ask the customer about.
+                com.sellerops.inquiry.decision.NeedDecision needDecision = assessment.decision();
+                List<AgentDraftGenerator.Passage> shown = needDecision != null ? needDecision.passages()
+                        : passagesFor(assessment.catalogue(), retrieved.passages(), context);
+                // With a decision, the judge already weighed whether the answer moves with the 규격: every need FULL means
+                // it does not need asking, so the rule-based 「규격 미확정」 line would re-introduce the clarification the
+                // judge ruled out. A conditional need carries its own 「고객에게 확인」 in the scope list.
+                SpecApplicability.Applicability specLine = needDecision != null && basis == AnswerBasisState.GROUNDED
+                        ? SpecApplicability.Applicability.NOT_VARIANT_SENSITIVE : applicability;
+                written = needDecision != null ? model.draft(orgId, title, details, shown,
+                        retrieved.order().messageKo(),
+                        specLine.messageKo(retrieved.figuresUnaided(), retrieved.variantSpecific()),
+                        AnswerStyleInstruction.of(style), company, needDecision.answerScope())
+                        : model.draft(orgId, title, details,
                         shown,
                         retrieved.order().messageKo(),
                         applicability.messageKo(retrieved.figuresUnaided(),
@@ -454,6 +467,23 @@ public class InquiryDraftComposer {
                         retrieved.productOutcome(), retrieved.policyOutcome(), assessment.asked(),
                         retrieved.policyDeclares(assessment.asked()), verdict.optionsRegistered()),
                 retrieved.productId(), views, company != null, null, assessment.gap());
+    }
+
+    public static final String DECISION_UNAVAILABLE =
+            "문의를 항목별로 확인하지 못해 자동 초안을 만들지 않았습니다. 잠시 후 다시 준비해 보시거나 직접 작성해 주세요.";
+
+    /**
+     * Inquiry Decision v2 reached no decision (the planner or the judge did not answer): that is an operational fact,
+     * not 「답변 기준이 필요합니다」 — the seller's knowledge may well cover this, we just did not finish looking.
+     */
+    static String decisionUnavailable(com.sellerops.inquiry.decision.NeedDecision decision) {
+        if (decision == null) {
+            return null;
+        }
+        return switch (decision.outcome()) {
+            case PLAN_FAILED, JUDGE_FAILED -> DECISION_UNAVAILABLE;
+            default -> null;
+        };
     }
 
     /**

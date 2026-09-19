@@ -144,7 +144,9 @@ public class CaseKnowledgeService {
                 investigated(orgId, c), knowledgeUsed(orgId, c, namedProduct),
                 gap == null ? null : new CaseDetailView.Gap(gap.missingSubject(), gapSentence(gap),
                         namedProduct == null ? "ORG" : gap.suggestedScope(),
-                        prefillOf(orgId, c, namedProduct, gap)),
+                        gap.needs() == null ? prefillOf(orgId, c, namedProduct, gap)
+                                : combinedPrefill(needLines(orgId, c, namedProduct, gap)),
+                        needLines(orgId, c, namedProduct, gap)),
                 draft(orgId, c), c.getSubjectKind() == OperationsSubjectKind.INQUIRY
                         ? "/inquiries/" + c.getSubjectId() : "/reviews/reply/" + c.getSubjectId(),
                 media(orgId, c));
@@ -224,7 +226,7 @@ public class CaseKnowledgeService {
         }
         UUID namedProduct = retriever.namedProduct(orgId, c.getProductId());
         String scope = "PRODUCT".equals(request.scope()) && namedProduct != null ? "PRODUCT" : "ORG";
-        candidates.teach(orgId, scope, namedProduct, gap.missingSubject(), gap.candidateId(), request.content(),
+        candidates.teach(orgId, scope, namedProduct, teachSubject(gap), gap.candidateId(), request.content(),
                 orgTypeFor(gap.topic()), userId, userName);
         Map<String, Object> taught = new LinkedHashMap<>();
         taught.put("scope", scope);
@@ -366,6 +368,46 @@ public class CaseKnowledgeService {
      * The past answer the retrieval found for this gap, re-read now (Past Answer Prefill v1). Null — the empty box, as
      * before — when there was none, when it is gone, or when it no longer passes the fences it was found under.
      */
+    /** The need list of an Inquiry Decision v2 gap, with each uncovered need's REUSABLE precedent re-read and fenced. */
+    private List<CaseDetailView.NeedLine> needLines(UUID orgId, OperationsCase c, UUID namedProduct,
+                                                    CaseKnowledgeGap gap) {
+        if (gap.needs() == null) {
+            return null;
+        }
+        boolean open = c.isOpen() && c.getSubjectKind() == OperationsSubjectKind.INQUIRY && memories != null;
+        return gap.needs().stream().map(n -> {
+            boolean covered = "FULL".equals(n.status()) || "CONDITIONAL_ON_CUSTOMER".equals(n.status());
+            CaseDetailView.Prefill prefill = covered || !open || n.precedents() == null ? null
+                    : n.precedents().stream().map(memories::findById).flatMap(java.util.Optional::stream)
+                            .map(m -> prefill(orgId, c.getSubjectId(), namedProduct, m))
+                            .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+            return new CaseDetailView.NeedLine(n.ask(), n.status(), n.statusKo(), covered,
+                    n.evidence() == null ? List.of() : n.evidence(), n.missing(), n.askCustomer(), prefill,
+                    n.acquirable());
+        }).toList();
+    }
+
+    /**
+     * The seller's starting text for a partial Teach: the precedents of the uncovered needs — one need, its answer as
+     * it was; several, each under its need so the seller can see which part answers what. Null when there is none.
+     */
+    static CaseDetailView.Prefill combinedPrefill(List<CaseDetailView.NeedLine> needs) {
+        List<CaseDetailView.NeedLine> offered = needs.stream().filter(n -> !n.covered() && n.prefill() != null)
+                .toList();
+        if (offered.isEmpty()) {
+            return null;
+        }
+        if (offered.size() == 1) {
+            return offered.get(0).prefill();
+        }
+        StringBuilder text = new StringBuilder();
+        for (CaseDetailView.NeedLine n : offered) {
+            text.append("[").append(n.ask()).append("]\n").append(n.prefill().text()).append("\n\n");
+        }
+        CaseDetailView.Prefill first = offered.get(0).prefill();
+        return new CaseDetailView.Prefill(text.toString().strip(), first.strengthKo(), first.answeredOn());
+    }
+
     private CaseDetailView.Prefill prefillOf(UUID orgId, OperationsCase c, UUID namedProduct, CaseKnowledgeGap gap) {
         if (!c.isOpen() || c.getSubjectKind() != OperationsSubjectKind.INQUIRY || gap.precedentMemoryId() == null
                 || memories == null) {
@@ -390,6 +432,24 @@ public class CaseKnowledgeService {
         return new CaseDetailView.Prefill(m.getAnswerBody().strip(),
                 m.getStrength() == null ? null : m.getStrength().labelKo(),
                 m.getUpdatedAt() == null ? null : m.getUpdatedAt().atZone(KST).toLocalDate());
+    }
+
+    /**
+     * What the taught knowledge is titled with: the uncovered needs in the seller's words when the gap has a need list
+     * (Inquiry Decision v2) — so the next customer asking the same need finds it under its own name — else the gap's
+     * subject, as before.
+     */
+    static String teachSubject(CaseKnowledgeGap gap) {
+        if (gap.needs() != null) {
+            String asks = gap.needs().stream()
+                    .filter(n -> !"FULL".equals(n.status()) && !"CONDITIONAL_ON_CUSTOMER".equals(n.status()))
+                    .map(com.sellerops.inquiry.draft.dto.NeedCoverageView::ask).distinct()
+                    .collect(java.util.stream.Collectors.joining(" · "));
+            if (!asks.isBlank()) {
+                return asks.length() > 180 ? asks.substring(0, 180) : asks;
+            }
+        }
+        return gap.missingSubject();
     }
 
     static String gapSentence(CaseKnowledgeGap gap) {

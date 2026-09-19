@@ -110,6 +110,14 @@
   "S1-A": {
    "sha256": "8869f72f7628aa79d4259104c14a6fab6ee95070ae8d6d1c12c91f389b79bb9c",
    "description": "offline, all knowledge models OFF — InquiryNeedEvalIT"
+  },
+  "S0-V2O": {
+   "sha256": "ab21b353c6d5d938fdd500e50c7082f0acaee9003f4fc8a7e555a72d4c3efa6c",
+   "description": "Inquiry Decision v2 + current retrieval, ORACLE planner/judge (gold needs and gold evidence sets over the production collector) — offline, no model"
+  },
+  "S1-V2O": {
+   "sha256": "97efe42da6823163dc805608bd1cc957d80c623ce0c924e61053a45598ba7a42",
+   "description": "same, on the catalogue snapshot"
   }
  },
  "harness": "backend/src/test/java/com/sellerops/knowledge/teach/InquiryNeedEvalIT.java"

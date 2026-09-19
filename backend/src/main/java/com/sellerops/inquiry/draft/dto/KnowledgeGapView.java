@@ -50,7 +50,17 @@ public record KnowledgeGapView(UUID productId, String topic, List<String> topics
                                String productOutcome, String policyOutcome, String applicability,
                                UUID variantId, boolean policyDeclaresTopic, UUID candidateId,
                                boolean previouslyAnswered, String askedSubject, String catalogueChecked,
-                               UUID precedentMemoryId) {
+                               UUID precedentMemoryId, List<NeedCoverageView> needs) {
+
+    /** Before Inquiry Decision v2: no need list. */
+    public KnowledgeGapView(UUID productId, String topic, List<String> topics, String missingSubject,
+                            String productOutcome, String policyOutcome, String applicability, UUID variantId,
+                            boolean policyDeclaresTopic, UUID candidateId, boolean previouslyAnswered,
+                            String askedSubject, String catalogueChecked, UUID precedentMemoryId) {
+        this(productId, topic, topics, missingSubject, productOutcome, policyOutcome, applicability, variantId,
+                policyDeclaresTopic, candidateId, previouslyAnswered, askedSubject, catalogueChecked, precedentMemoryId,
+                null);
+    }
 
     public KnowledgeGapView(UUID productId, String topic, List<String> topics, String missingSubject,
                             String productOutcome, String policyOutcome, String applicability, UUID variantId,
@@ -72,7 +82,7 @@ public record KnowledgeGapView(UUID productId, String topic, List<String> topics
     public KnowledgeGapView catalogueChecked(String sentence) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome, policyOutcome,
                 applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, askedSubject, sentence,
-                precedentMemoryId);
+                precedentMemoryId, needs);
     }
 
     /**
@@ -86,28 +96,35 @@ public record KnowledgeGapView(UUID productId, String topic, List<String> topics
     public KnowledgeGapView asking(String subject) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome, policyOutcome,
                 applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, subject, catalogueChecked,
-                precedentMemoryId);
+                precedentMemoryId, needs);
     }
 
     /** The same gap, carrying the seller's own past answer the retrieval found — see {@link #precedentMemoryId()}. */
     public KnowledgeGapView withPrecedent(UUID memoryId) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome, policyOutcome,
                 applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, askedSubject,
-                catalogueChecked, memoryId);
+                catalogueChecked, memoryId, needs);
     }
 
     /** The same gap, now carrying the 확인 필요 row it was filed as. */
     public KnowledgeGapView filedAs(UUID candidateId) {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
                 policyOutcome, applicability, variantId, policyDeclaresTopic, candidateId, false, askedSubject,
-                catalogueChecked, precedentMemoryId);
+                catalogueChecked, precedentMemoryId, needs);
     }
 
     /** The same gap, on a question this seller has already answered once. Nothing is filed for it. */
     public KnowledgeGapView answeredBefore() {
         return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome,
                 policyOutcome, applicability, variantId, policyDeclaresTopic, null, true, askedSubject,
-                catalogueChecked, precedentMemoryId);
+                catalogueChecked, precedentMemoryId, needs);
+    }
+
+    /** The need-level decision's view of this gap (Inquiry Decision v2). */
+    public KnowledgeGapView withNeeds(List<NeedCoverageView> needList) {
+        return new KnowledgeGapView(productId, topic, topics, missingSubject, productOutcome, policyOutcome,
+                applicability, variantId, policyDeclaresTopic, candidateId, previouslyAnswered, askedSubject,
+                catalogueChecked, precedentMemoryId, needList == null ? null : List.copyOf(needList));
     }
 
     public static KnowledgeGapView of(InquiryEvidenceRetriever.InquiryEvidence retrieved,
