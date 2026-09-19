@@ -210,6 +210,14 @@
    "S0-C": {
     "sha256": "e233d309e77d13e1d2087468d0fd89b546661106716202d250597106bce65c1f",
     "status": "INVALID — need ids sent as gold ids (n1); unmatched verdicts scored NONE (apr-80adf54f)"
+   },
+   "S0-A.v2": {
+    "sha256": "77ffc6da4b74dee34f4b2dbf5258c1f32e7a278dc2cd2bc6addb58b88351b0a7",
+    "status": "VALID — apr-8ef649ab, commit 994ecbac, strict json_schema"
+   },
+   "S0-B.v2": {
+    "sha256": "cbd6cec4141a7eab9d56e9550eeed8ff31b1be09c4f1c7b31ee58514de145052",
+    "status": "VALID — apr-8ef649ab, commit 994ecbac, strict json_schema"
    }
   },
   "smoke": {

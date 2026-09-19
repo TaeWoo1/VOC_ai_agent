@@ -279,3 +279,42 @@ arm은 이름이 아니라 「reasoning 토큰 0」으로 맞춘다. 시점은 �
   「CONDITIONAL + 가정 → PARTIAL」이 그것을 PARTIAL로 내렸다. 안전한 쪽의 강등이지만 useful coverage를 깎는다 — 무효 run에서 B의 enforced
   useful coverage가 raw보다 낮았던 것(0.40 → 0.30)과 같은 모양일 수 있다. 규칙은 **바꾸지 않았다**: Stage 1이 raw와 enforced를 따로 재므로,
   이 규칙의 비용은 측정 뒤에 결정한다(후보: 가정 강등을 FULL에만 적용).
+
+## 15. Stage 1 A/B — `apr-8ef649ab` / `wt-430aa2ba` (2026-09-20, 소진) — VALID, winner 없음
+
+S0 얼린 입력(`7feefed8…`) × A(judge v1@minimal) · B(judge v2@minimal), strict json_schema, 모든 arm 토큰 한도 6000. 호출 466(arm당 233) ·
+실패 0 · unmatched 0 · integrity 0 · A↔B parity 통과(지시·schema만 다름). commit `994ecbac`.
+
+| 원본 72 need (run 1) | A: v1 | B: v2 raw | B: v2 enforced |
+|---|---|---|---|
+| judge FULL 수 / 그중 unsafe | 7 / **4** | 7 / **4** | 7 / 4 |
+| FULL precision | 3/7 = 0.429 | 3/7 = 0.429 | 0.429 |
+| gold CONDITIONAL → FULL (need 수준 UNDER_CLARIFY) | **3** | **1** | 1 |
+| gold가 덮지 않는 need를 덮음 (unsafe coverage) | 4/62 | 3/62 | 3/62 |
+| FULL recall | 3/5 | 3/5 | 3/5 |
+| CONDITIONAL precision / recall | 0.40 / 0.40 | 1.00 / 0.60 | 1.00 / 0.40 |
+| useful coverage | 0.50 | **0.60** | 0.50 |
+| PARTIAL/NONE 구별 | 0.966 | 0.831 | 0.831 |
+| run-to-run 일치 | **0.972** | 0.931 | 0.931 |
+| DROP_REQUIRED 위반 (10) | 1 | 0 | — |
+| UNRELATED_ADDED 상승 (67 질문) / 주입 근거 인용 | 4 / 0 | 3 / 22(전부 NONE 판정에서) | — |
+| PRECEDENT_ONLY · OTHER_LISTING 위반 | 0 · 0 | 0 · 0 | — |
+| 과거 답변 제안 정답/오답 · recall | 15/1 · 0.55 | 18/0 · 0.59 | — |
+| p50 / p95 · 입력 / 출력 토큰 | 1.65s / 2.53s · 1,205 / 83 | 2.05s / 3.47s · 1,523 / 119 | — |
+
+**사전 규칙 판정: winner 없음** — (a) unsafe FULL 승격이 A보다 적어야 하는데 4 = 4. (b) NOT_COVERED 계열 위반 B 0 ≤ A 1, (c) useful
+coverage 0.60 ≥ 0.30은 만족. 그래서 Stage 2는 실행하지 않았다.
+
+**unsafe FULL의 모양이 바뀌었다(수는 같다)**:
+- A: gold CONDITIONAL을 FULL로 3(`ae51c7f8` · T6b · T9a — 규격 의존) + 근거 밖 추론 1(`dae8554d` n2). 그 밖에 PARTIAL을 CONDITIONAL로 3.
+- B: 규격 의존 FULL은 1로 줄었고(`ae51c7f8`만 남음 — T6b·T9a는 CONDITIONAL로 옳게), 대신 PARTIAL을 FULL로 2가 새로 생겼다 — `4181864b`
+  (**ORDER_STATE** need를 FULL, 주문 사실 없이) · T6c(근거 밖 추론). `dae8554d` n2는 둘 다 FULL.
+- **B의 unsafe FULL 4건 모두 `assumptions`·`missing`을 비워 두었다** — 「판정이 스스로 가정을 적으면 강등」 invariant는 unsafe FULL을
+  하나도 잡지 못했다. 이 규칙이 실제로 한 일은 하나 — 옳은 CONDITIONAL(T9a)을 PARTIAL로 내린 것(useful coverage 0.60 → 0.50).
+- B는 NONE 판정에도 근거를 인용했다(22건, 주입된 무관 passage 포함) — 상태는 NONE이라 결과에는 영향이 없지만 인용 목록이 「관련 있다」를
+  말하는 데 쓰였다.
+
+**다음 결정 (§13-6 계획대로 C가 조건을 만족한다)**: 둘 다 규칙을 못 넘었으므로 C(v2@low)가 계획상 다음이다. 함께 결정할 것:
+(1) CONDITIONAL + 가정 강등 규칙 — 측정된 이득 0 · 비용 1 ⇒ FULL에만 적용하는 안; (2) ORDER_STATE need의 FULL은 주문 사실(ORDER_FACT)
+인용이 있을 때만 — need 종류와 근거 출처의 관계라 상품 어휘가 아닌 provenance invariant지만 **새 규칙이므로 product-owner 결정**. 둘 다
+이번에 구현하지 않았다. 모든 수치는 gold FULL 5개 위의 DEV 수치다(§1).
