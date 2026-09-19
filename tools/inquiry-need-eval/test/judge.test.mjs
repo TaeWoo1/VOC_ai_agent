@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readJsonl } from '../io.mjs';
-import { scoreJudge, confusion, integrity, parity } from '../judge.mjs';
+import { scoreJudge, confusion, integrity, parity, caseOutcomes } from '../judge.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const rows = () => readJsonl(join(here, '../../../contracts/inquiry-need-eval/v1/synthetic/judge-observations.jsonl'));
@@ -138,4 +138,36 @@ test('A/B may differ in instruction and schema only; anything else — input, mo
   assert.deepEqual(r.problems.sort(), ['INPUT_FP_DIFFERS S:a|ORIGINAL|*|1', 'MAX_TOKENS_DIFFERS S:a|ORIGINAL|*|1']);
   assert.deepEqual(parity(a, [], {}).problems, ['MISSING_CALL S:a|ORIGINAL|*|1']);
   assert.equal(parity([call({})], [call({ effort: 'low' })], { mayDiffer: ['effort'] }).comparable, true);
+});
+
+// ── case projection (v2.2) ──────────────────────────────────────────────────────────────────────────────────────
+
+test('case projection: aggregation of the need statuses against aggregation of the gold, worked by hand', () => {
+  // S:a — gold FULL + PARTIAL → seller. judged FULL + FULL → answers: a need is covered, so PARTIAL_LEAK.
+  //        enforced FULL + PARTIAL → seller: CORRECT_ESCALATION.
+  // S:b — gold CONDITIONAL → ask the customer. judged/enforced FULL → UNDER_CLARIFY.
+  // S:c — gold NONE + PARTIAL → seller. NONE + NONE → CORRECT_ESCALATION.
+  const run1 = rows().filter((r) => r.type === 'need' && r.variant === 'ORIGINAL' && r.run === 1);
+  const j = caseOutcomes(run1, 'judged');
+  assert.deepEqual(j.outcomes, { PARTIAL_LEAK: 1, UNDER_CLARIFY: 1, CORRECT_ESCALATION: 1 });
+  assert.equal(j.no_ask, 2);
+  assert.equal(j.strict_safe_precision, 0);
+  assert.equal(j.unsafe_automation, 2);
+  assert.equal(j.safe_automation_coverage, 0, 'S:b was the only case safe to automate, and it was under-clarified');
+  const e = caseOutcomes(run1, 'enforced');
+  assert.deepEqual(e.outcomes, { CORRECT_ESCALATION: 2, UNDER_CLARIFY: 1 });
+  assert.deepEqual(e.unsafe_cases, ['S:b:UNDER_CLARIFY']);
+});
+
+test('case projection: a failed call escalates; a gold-safe case sent to the seller is an unnecessary escalation', () => {
+  const r = [
+    { q: 'x', need: 'n1', gold: 'FULL', judged: 'FULL', failed: false },
+    { q: 'y', need: 'n1', gold: 'FULL', judged: 'PARTIAL', failed: false },
+    { q: 'z', need: 'n1', gold: 'FULL', judged: null, failed: true },
+    { q: 'w', need: 'n1', gold: 'NONE', judged: 'FULL', failed: false },
+  ];
+  const o = caseOutcomes(r, 'judged');
+  assert.deepEqual(o.outcomes, { SAFE_ANSWER: 1, UNNECESSARY_ESCALATION: 2, WRONG: 1 });
+  assert.equal(o.strict_safe_precision, 1 / 2);
+  assert.equal(o.safe_automation_coverage, 1 / 3);
 });

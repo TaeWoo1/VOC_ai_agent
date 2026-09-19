@@ -318,3 +318,6 @@ coverage 0.60 ≥ 0.30은 만족. 그래서 Stage 2는 실행하지 않았다.
 (1) CONDITIONAL + 가정 강등 규칙 — 측정된 이득 0 · 비용 1 ⇒ FULL에만 적용하는 안; (2) ORDER_STATE need의 FULL은 주문 사실(ORDER_FACT)
 인용이 있을 때만 — need 종류와 근거 출처의 관계라 상품 어휘가 아닌 provenance invariant지만 **새 규칙이므로 product-owner 결정**. 둘 다
 이번에 구현하지 않았다. 모든 수치는 gold FULL 5개 위의 DEV 수치다(§1).
+
+> **후속**: 이 A/B 결과를 보고 만든 aggregation·provenance 변경과 그 projected 수치는 `docs/inquiry_decision_v2_2.md`에 있다. 위의 A/B
+> 결과와 사전 규칙 판정은 바뀌지 않는다.

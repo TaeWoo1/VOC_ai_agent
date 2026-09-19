@@ -40,13 +40,20 @@ public final class InquiryDecisionEngine {
 
     public static NeedDecision decide(UUID orgId, String question, InquiryDecisionModel model,
                                       Function<List<InquiryNeed>, Pool> collect, DetailCapability detail) {
-        return decide(orgId, question, model, collect, detail, null);
+        return decide(orgId, question, model, collect, detail, EvidenceScope.CaseScope.NONE);
     }
 
     /** @param productId the Case's resolved listing — what 「this listing's facts」 means when evidence is enforced */
     public static NeedDecision decide(UUID orgId, String question, InquiryDecisionModel model,
                                       Function<List<InquiryNeed>, Pool> collect, DetailCapability detail,
                                       UUID productId) {
+        return decide(orgId, question, model, collect, detail, new EvidenceScope.CaseScope(productId, null));
+    }
+
+    /** @param caseScope the Case's listing and order — what 「this listing」 and 「this order」 mean when enforcing */
+    public static NeedDecision decide(UUID orgId, String question, InquiryDecisionModel model,
+                                      Function<List<InquiryNeed>, Pool> collect, DetailCapability detail,
+                                      EvidenceScope.CaseScope caseScope) {
         InquiryDecisionModel.Answer<List<InquiryNeed>> planned = model.plan(orgId, question);
         InquiryDecisionModel.CallCost cost = planned.cost();
         List<InquiryNeed> needs = planned.value();
@@ -83,7 +90,7 @@ public final class InquiryDecisionEngine {
             return NeedDecision.failed(NeedDecision.Outcome.JUDGE_FAILED, cost, detail);
         }
         List<NeedResult> results = NeedAggregation.enforce(needs, judged.value(), evidence, precedents, detail,
-                productId);
+                caseScope);
         return new NeedDecision(NeedDecision.Outcome.DECIDED, results, NeedAggregation.basis(results), cost,
                 evidence.size(), precedents.size(), detail);
     }

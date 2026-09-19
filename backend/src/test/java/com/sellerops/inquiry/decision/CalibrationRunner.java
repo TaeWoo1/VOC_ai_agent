@@ -89,6 +89,64 @@ public final class CalibrationRunner {
     public record Result(List<String> rows, int calls) {
     }
 
+    /**
+     * <b>Offline re-enforcement of recorded verdicts</b> (Inquiry Decision v2.2 projection): the raw verdicts an arm
+     * already produced — status, cited ids, and how many reasons it listed — are enforced again by the CURRENT code. No
+     * model call. Each rebuilt request's user turn must hash to the recorded {@code input_fp}; a single mismatch refuses
+     * the replay, so the projection is provably about the same inputs the model saw. Past-answer proposals are not in the
+     * record (only the enforced ones are), so the projection carries none.
+     */
+    public Result replay(String arm, List<CalibrationVariants.Variant> variants, List<JsonNode> recorded)
+            throws Exception {
+        Map<String, JsonNode> calls = new LinkedHashMap<>();
+        Map<String, Map<String, JsonNode>> needRows = new LinkedHashMap<>();
+        for (JsonNode r : recorded) {
+            String k = r.path("q").asText() + "|" + r.path("variant").asText() + "|" + r.path("target").asText() + "|"
+                    + r.path("run").asInt();
+            if ("call".equals(r.path("type").asText())) {
+                calls.put(k, r);
+            } else {
+                needRows.computeIfAbsent(k, x -> new LinkedHashMap<>()).put(r.path("sent_id").asText(), r);
+            }
+        }
+        List<String> out = new ArrayList<>();
+        int callId = 0;
+        for (CalibrationVariants.Variant v : variants) {
+            if (!v.needsModel()) {
+                continue;
+            }
+            String body = generator.judgeBody(v.question(), v.needs(), v.evidence(), v.precedents());
+            for (int run = 1; ; run++) {
+                String k = v.q() + "|" + v.kind() + "|" + goldTarget(v) + "|" + run;
+                JsonNode call = calls.get(k);
+                if (call == null) {
+                    break;
+                }
+                String fp = sha(JSON.readTree(body).path("messages").path(1).path("content").asText());
+                if (!fp.equals(call.path("input_fp").asText())) {
+                    throw new IllegalStateException("replay input differs from the recorded run at " + k);
+                }
+                Map<String, NeedVerdict> verdicts = null;
+                if (call.path("answered").asBoolean()) {
+                    verdicts = new LinkedHashMap<>();
+                    for (JsonNode n : needRows.get(k).values()) {
+                        List<String> cited = new ArrayList<>();
+                        n.path("cited").forEach(c -> cited.add(c.asText()));
+                        verdicts.put(n.path("sent_id").asText(), new NeedVerdict(n.path("sent_id").asText(),
+                                NeedStatus.valueOf(n.path("judged").asText()), cited,
+                                java.util.Collections.nCopies(n.path("missing_n").asInt(), "·"),
+                                java.util.Collections.nCopies(n.path("customer_input_n").asInt(), "·"),
+                                java.util.Collections.nCopies(n.path("assumptions_n").asInt(), "·"), null, List.of()));
+                    }
+                }
+                write(out, arm, run, ++callId, v, body, new InquiryDecisionModel.Answer<>(verdicts,
+                        InquiryDecisionModel.CallCost.NONE, call.path("failure").isNull() ? null
+                                : call.path("failure").asText()), "REPLAY");
+            }
+        }
+        return new Result(out, 0);
+    }
+
     /** One planner call — for a smoke test of the plan schema. Returns closed tokens and counts only. */
     public String planOnce(String syntheticQuestion) {
         InquiryDecisionModel.Answer<List<InquiryNeed>> a = generator.plan(org, generator.planBody(syntheticQuestion));
@@ -135,7 +193,7 @@ public final class CalibrationRunner {
             return;
         }
         for (NeedResult r : NeedAggregation.enforce(v.needs(), verdicts, evidence, precedents, DetailCapability.READABLE,
-                v.product())) {
+                new EvidenceScope.CaseScope(v.product(), v.caseOrder()))) {
             NeedVerdict raw = verdicts.get(r.need().id());
             ObjectNode n = needRow(arm, run, callId, v, r.need());
             n.put("failed", false).put("judged", r.judged() == null ? null : r.judged().name())

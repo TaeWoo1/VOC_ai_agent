@@ -58,12 +58,12 @@ public final class CalibrationVariants {
      */
     public record Row(String q, String question, UUID product, List<InquiryNeed> needs,
                       List<EvidenceCandidate> evidence, List<PrecedentCandidate> precedents,
-                      Map<String, String> goldId) {
+                      Map<String, String> goldId, String caseOrder) {
     }
 
     /** One judge input to send (or, for OTHER_LISTING, to enforce offline) and what it is held to. */
     public record Variant(String q, Kind kind, String target, String question, UUID product, List<InquiryNeed> needs,
-                          Map<String, String> goldId,
+                          Map<String, String> goldId, String caseOrder,
                           List<EvidenceCandidate> evidence, List<PrecedentCandidate> precedents,
                           Map<String, NeedStatus> gold, Map<String, List<String>> goldIds, Expectation expectation,
                           String injected) {
@@ -95,13 +95,19 @@ public final class CalibrationVariants {
                     e.path("label").asText(""), e.path("text").asText(""), uuid(e.get("source")), uuid(e.get("product")),
                     e.hasNonNull("fact_key") ? e.get("fact_key").asText() : null));
         }
+        // v2.2: a captured order fact was read through the question's own order binding (the collector's rule), so it
+        // is attributed to that question's order; the capture holds no order reference, so the key is synthetic.
+        String caseOrder = evidence.stream().anyMatch(e -> e.kind() == EvidenceCandidate.Kind.ORDER_FACT)
+                ? "case-order:" + r.get("q").asText() : null;
+        evidence.replaceAll(e -> e.kind() == EvidenceCandidate.Kind.ORDER_FACT
+                ? e.withScope(EvidenceScope.order(caseOrder)) : e);
         List<PrecedentCandidate> precedents = new ArrayList<>();
         for (JsonNode p : r.get("precedents")) {
             precedents.add(new PrecedentCandidate(p.get("id").asText(), UUID.fromString(p.get("memory").asText()),
                     p.path("text").asText("")));
         }
         return new Row(r.get("q").asText(), r.path("question").asText(""), uuid(r.get("product")), needs, evidence,
-                precedents, Map.copyOf(goldId));
+                precedents, Map.copyOf(goldId), caseOrder);
     }
 
     private static UUID uuid(JsonNode n) {
@@ -195,7 +201,8 @@ public final class CalibrationVariants {
             }
             statuses.put(n.id(), s);
         }
-        return new Variant(row.q(), kind, target, question, row.product(), row.needs(), row.goldId(), numbered,
+        return new Variant(row.q(), kind, target, question, row.product(), row.needs(), row.goldId(), row.caseOrder(),
+                numbered,
                 List.copyOf(p),
                 statuses, ids, expect, injected);
     }
@@ -321,7 +328,8 @@ public final class CalibrationVariants {
                     bestScore = score;
                     // A passage carries no listing id in production (its lane is already product-scoped), so the
                     // injected one carries none either: the enforced status gets no help code would not have.
-                    best = new EvidenceCandidate(null, e.kind(), e.label(), e.text(), e.sourceId(), null, e.factKey());
+                    best = new EvidenceCandidate(null, e.kind(), e.label(), e.text(), e.sourceId(), null, e.factKey(),
+                            EvidenceScope.product(null));
                 }
             }
         }

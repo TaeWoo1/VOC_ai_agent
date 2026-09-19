@@ -227,6 +227,24 @@
     "judge-smoke-needs.jsonl": "7383adfc4dcec009226294c02409c53f3a7375eea8de34d9e8957c2740a0acc5",
     "judge-smoke-precedents.jsonl": "1fbbcabf61616546611d8e8c9c4b0388f5c67acc0d643ccb92fc483eef5b1840"
    }
+  },
+  "projections": {
+   "S0-A@v2.2": {
+    "sha256": "099bd6ecb6a82d49d531b17c0859152ae44dea52bc23ecb6eb96c4229fcc324a",
+    "status": "PROJECTED — recorded raw verdicts (apr-8ef649ab) re-enforced by v2.2 code, 0 calls; not an experiment result"
+   },
+   "S0-B@v2.2": {
+    "sha256": "5e3f36162ad4f107978c96374d6f48f6aa61e31a3560c212f2988171c56f53ed",
+    "status": "PROJECTED — recorded raw verdicts (apr-8ef649ab) re-enforced by v2.2 code, 0 calls; not an experiment result"
+   }
+  },
+  "targeted": {
+   "description": "synthetic targeted calibration set (v2.2 §6): partial table / variant-dependent / related-but-different, with hard negatives, near variants and positive controls",
+   "files": {
+    "judge-targeted-inputs.jsonl": "ddbbd7f90a1a593632f50926fc3ee088c8dd7ad4c4ccfbf173bdee2f278c8757",
+    "judge-targeted-needs.jsonl": "74ee944f528c73c73c7e343c23a9b9d637076b8b7ba361eda58950ca817f2792",
+    "judge-targeted-precedents.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   }
   }
  }
 }

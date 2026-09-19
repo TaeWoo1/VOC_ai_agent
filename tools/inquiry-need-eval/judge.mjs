@@ -57,6 +57,46 @@ export function metricsOf(rows, field) {
   };
 }
 
+/**
+ * <b>Judge-component case projection</b> (v2.2): what the product would do with each question, from the need statuses in
+ * `field`, against what the pool gold says it should do — the same aggregation NeedAggregation applies (any need not
+ * covered → seller; any CONDITIONAL → ask the customer; else answer). Gold needs as the plan and the judge's own pool,
+ * so these are NOT the Eval v1 pipeline numbers and must not be compared with them. A failed call sends the case to
+ * the seller.
+ */
+export function caseOutcomes(rows, field) {
+  const byQ = {};
+  for (const r of rows) (byQ[r.q] ??= []).push(r);
+  const decide = (ss) => (ss.some((x) => !COVERED.has(x)) ? 'ASK_SELLER'
+    : ss.some((x) => x === 'CONDITIONAL_ON_CUSTOMER') ? 'ASK_CUSTOMER' : 'ANSWER');
+  const out = {};
+  const cases = {};
+  for (const [q, needs] of Object.entries(byQ)) {
+    const truth = decide(needs.map((r) => r.gold));
+    const sys = needs.some((r) => r.failed) ? 'ASK_SELLER' : decide(needs.map((r) => r[field] ?? 'NONE'));
+    let o;
+    if (sys === 'ASK_SELLER') o = truth === 'ASK_SELLER' ? 'CORRECT_ESCALATION' : 'UNNECESSARY_ESCALATION';
+    else if (truth === 'ASK_SELLER') o = needs.some((r) => COVERED.has(r.gold)) ? 'PARTIAL_LEAK' : 'WRONG';
+    else if (sys === 'ANSWER' && truth === 'ASK_CUSTOMER') o = 'UNDER_CLARIFY';
+    else if (sys === 'ASK_CUSTOMER' && truth === 'ANSWER') o = 'OVER_CLARIFY';
+    else o = sys === 'ANSWER' ? 'SAFE_ANSWER' : 'SAFE_CLARIFY';
+    out[o] = (out[o] ?? 0) + 1;
+    cases[q] = o;
+  }
+  const noAsk = Object.values(cases).filter((o) => !o.endsWith('ESCALATION')).length;
+  const safe = (out.SAFE_ANSWER ?? 0) + (out.SAFE_CLARIFY ?? 0);
+  const safeTruth = Object.entries(byQ).filter(([, n]) => decide(n.map((r) => r.gold)) !== 'ASK_SELLER').length;
+  return {
+    cases: Object.keys(byQ).length,
+    outcomes: out,
+    no_ask: noAsk,
+    strict_safe_precision: ratio(safe, noAsk),
+    unsafe_automation: (out.PARTIAL_LEAK ?? 0) + (out.WRONG ?? 0) + (out.UNDER_CLARIFY ?? 0),
+    safe_automation_coverage: ratio(safe, safeTruth),
+    unsafe_cases: Object.entries(cases).filter(([, o]) => ['PARTIAL_LEAK', 'WRONG', 'UNDER_CLARIFY'].includes(o)).map(([q, o]) => `${q}:${o}`),
+  };
+}
+
 const pct = (xs, p) => {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);
@@ -223,6 +263,8 @@ export function scoreJudge(rows, { needsGold = [], reusable = new Set() } = {}) 
     not_judged_needs: notJudged,
     judge: metricsOf(run1, 'judged'),
     enforced: metricsOf(run1, 'enforced'),
+    cases_judged: caseOutcomes(run1, 'judged'),
+    cases_enforced: caseOutcomes(run1, 'enforced'),
     confusion_judged: confusion(run1, 'judged'),
     confusion_enforced: confusion(run1, 'enforced'),
     pooled_runs: runs.length > 1 ? metricsOf(orig, 'judged') : null,

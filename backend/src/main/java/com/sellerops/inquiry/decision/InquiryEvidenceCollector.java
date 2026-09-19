@@ -124,8 +124,10 @@ public class InquiryEvidenceCollector {
         addWholeLibraries(orgId, productId, scope, evidence);
         addCatalogue(orgId, productId, catalogue, evidence);
         if (whole != null && whole.order() != null && String.valueOf(whole.order().state()).startsWith("OBSERVED")) {
+            // The stored fact was read through THIS inquiry's own order binding, so it is attributed to that order.
             put(evidence, new EvidenceCandidate(null, EvidenceCandidate.Kind.ORDER_FACT, "주문 상태",
-                    whole.order().messageKo(), null, null, null));
+                    whole.order().messageKo(), null, null, null,
+                    EvidenceScope.order(EvidenceScope.orderKey(PrecedentReuse.OrderKey.of(inquiry)))));
         }
         return new InquiryDecisionEngine.Pool(List.copyOf(evidence.values()),
                 admissible(inquiry, precedents.values()));

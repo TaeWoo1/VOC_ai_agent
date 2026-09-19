@@ -48,14 +48,19 @@ public final class NeedAggregation {
      *   <li>a need the judge did not answer is NONE;</li>
      *   <li>evidence ids that are not candidates are dropped; <b>FULL, CONDITIONAL and PARTIAL with no surviving evidence
      *       become NONE</b> — a verdict of support that cites nothing is not support;</li>
-     *   <li><b>another listing's evidence is not this listing's</b>: for a need about the listing's own facts (spec,
-     *       usage, compatibility), a cited candidate bound to a different product than the Case's is dropped before the
-     *       rule above — product family auto-sharing is a provenance question and code owns it. Availability needs keep
-     *       them: 「do you sell another size」 is answered by another listing existing;</li>
-     *   <li><b>the verdict is held to its own words</b> (CoverageJudge v2): a FULL or CONDITIONAL that names an assumption
-     *       not in the evidence is PARTIAL; a FULL that names missing information is PARTIAL; a FULL that names a value
-     *       only the customer can supply is CONDITIONAL_ON_CUSTOMER. None of this reads the words — only whether the
-     *       judge filled the list. A v1 judge never fills them;</li>
+     *   <li><b>evidence must be about the instance the need is about</b> (v2.2, generalising v2.1's other-listing fence):
+     *       for a need about one listing or one order ({@link NeedType#instanceScope()}), a cited candidate attributed to
+     *       a DIFFERENT instance of that kind ({@link EvidenceScope}) is dropped before the rule above — a fact about
+     *       listing Y is not a fact about listing X, and order Y's state is not order X's. And for an ORDER need a FULL
+     *       requires at least one cited candidate attributed to THIS order: otherwise it is PARTIAL — a company rule says
+     *       what usually happens, never what happened to this order ({@link NeedType#fullRequiresAttributedEvidence()}).
+     *       Availability needs name no instance: 「do you sell another size」 is answered by another listing existing;</li>
+     *   <li><b>the verdict is held to its own words</b> (CoverageJudge v2): a <b>FULL</b> that names an assumption not in
+     *       the evidence is PARTIAL; a FULL that names missing information is PARTIAL; a FULL that names a value only the
+     *       customer can supply is CONDITIONAL_ON_CUSTOMER. <b>A CONDITIONAL is not downgraded for naming an
+     *       assumption</b> (v2.2): the A/B run (apr-8ef649ab) measured that rule at zero unsafe verdicts caught and one
+     *       correct CONDITIONAL lost — a judge describing what it cannot know about the customer is doing its job.
+     *       None of this reads the words — only whether the judge filled the list;</li>
      *   <li>a precedent id cited as EVIDENCE is dropped (a past answer never grounds);</li>
      *   <li>precedents are kept only for uncovered needs and only when they are candidates;</li>
      *   <li>a listing need left PARTIAL/NONE while the listing's detail is unreadable becomes UNKNOWN; while it was never
@@ -65,21 +70,30 @@ public final class NeedAggregation {
     public static List<NeedResult> enforce(List<InquiryNeed> needs, Map<String, NeedVerdict> verdicts,
                                            Map<String, EvidenceCandidate> evidence,
                                            Map<String, PrecedentCandidate> precedents, DetailCapability detail) {
-        return enforce(needs, verdicts, evidence, precedents, detail, null);
+        return enforce(needs, verdicts, evidence, precedents, detail, EvidenceScope.CaseScope.NONE);
     }
 
     public static List<NeedResult> enforce(List<InquiryNeed> needs, Map<String, NeedVerdict> verdicts,
                                            Map<String, EvidenceCandidate> evidence,
                                            Map<String, PrecedentCandidate> precedents, DetailCapability detail,
                                            UUID caseProductId) {
+        return enforce(needs, verdicts, evidence, precedents, detail,
+                new EvidenceScope.CaseScope(caseProductId, null));
+    }
+
+    public static List<NeedResult> enforce(List<InquiryNeed> needs, Map<String, NeedVerdict> verdicts,
+                                           Map<String, EvidenceCandidate> evidence,
+                                           Map<String, PrecedentCandidate> precedents, DetailCapability detail,
+                                           EvidenceScope.CaseScope caseScope) {
+        EvidenceScope.CaseScope scope = caseScope == null ? EvidenceScope.CaseScope.NONE : caseScope;
         List<NeedResult> out = new ArrayList<>(needs.size());
         for (InquiryNeed need : needs) {
             NeedVerdict v = verdicts.get(need.id());
             NeedStatus judged = v == null ? null : v.status();
             NeedStatus status = judged == null ? NeedStatus.NONE : judged;
             NeedResult.Enforcement why = judged == null ? NeedResult.Enforcement.NOT_JUDGED : null;
-            boolean ownFactsOnly = caseProductId != null && need.type() != null && need.type().aboutTheListing()
-                    && need.type() != NeedType.CATALOGUE_AVAILABILITY;
+            EvidenceScope.Kind about = need.type() == null ? null : need.type().instanceScope();
+            String instance = about == null ? null : scope.idOf(about);
             List<EvidenceCandidate> cited = new ArrayList<>();
             boolean foreignDropped = false;
             if (v != null) {
@@ -88,19 +102,25 @@ public final class NeedAggregation {
                     if (c == null || cited.contains(c)) {
                         continue;
                     }
-                    if (ownFactsOnly && c.productId() != null && !caseProductId.equals(c.productId())) {
-                        foreignDropped = true;
+                    if (about != null && instance != null && c.scope() != null && c.scope().kind() == about
+                            && c.scope().id() != null && !instance.equals(c.scope().id())) {
+                        foreignDropped = true; // attributed to another instance of what this need is about
                         continue;
                     }
                     cited.add(c);
                 }
             }
             if (status != NeedStatus.NONE && cited.isEmpty()) {
-                why = why != null ? why : foreignDropped ? NeedResult.Enforcement.OTHER_LISTING_ONLY
+                why = why != null ? why : foreignDropped ? NeedResult.Enforcement.OTHER_INSTANCE_ONLY
                         : NeedResult.Enforcement.NO_CITED_EVIDENCE;
                 status = NeedStatus.NONE;
             }
-            if (v != null && status.covered() && !v.assumptions().isEmpty()) {
+            if (status == NeedStatus.FULL && need.type() != null && need.type().fullRequiresAttributedEvidence()
+                    && cited.stream().noneMatch(c -> c.scope() != null && c.scope().kind() == about
+                            && c.scope().id() != null && c.scope().id().equals(instance))) {
+                status = NeedStatus.PARTIAL;
+                why = NeedResult.Enforcement.SCOPE_UNATTRIBUTED;
+            } else if (v != null && status == NeedStatus.FULL && !v.assumptions().isEmpty()) {
                 status = NeedStatus.PARTIAL;
                 why = NeedResult.Enforcement.DECLARED_ASSUMPTION;
             } else if (v != null && status == NeedStatus.FULL && !v.missingInfo().isEmpty()) {

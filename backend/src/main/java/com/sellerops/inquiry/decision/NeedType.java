@@ -15,6 +15,29 @@ public enum NeedType {
                 || this == CATALOGUE_AVAILABILITY;
     }
 
+    /**
+     * The entity INSTANCE this need is about, when it is about one (Inquiry Decision v2.2): a listing's own facts, or one
+     * customer's order. Availability is about the catalogue, policy about the company, a seller decision about no
+     * evidence at all — none of them names an instance.
+     */
+    public EvidenceScope.Kind instanceScope() {
+        return switch (this) {
+            case PRODUCT_SPEC, PRODUCT_USAGE, PRODUCT_COMPATIBILITY -> EvidenceScope.Kind.PRODUCT;
+            case ORDER_STATE, ORDER_ACTION -> EvidenceScope.Kind.ORDER;
+            default -> null;
+        };
+    }
+
+    /**
+     * Whether a FULL for this need requires at least one candidate attributed to the SAME instance. For an order: yes —
+     * no company rule and no listing fact can say what happened to THIS order. For a listing: no — a company-wide
+     * statement ("every product ships with …") may answer a listing question, so a listing need only refuses ANOTHER
+     * listing's evidence.
+     */
+    public boolean fullRequiresAttributedEvidence() {
+        return instanceScope() == EvidenceScope.Kind.ORDER;
+    }
+
     public static NeedType parse(String s) {
         if (s == null) {
             return null;

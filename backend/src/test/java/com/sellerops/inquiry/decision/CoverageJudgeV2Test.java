@@ -106,11 +106,15 @@ class CoverageJudgeV2Test {
     }
 
     @Test
-    @DisplayName("CONDITIONAL with an assumption is PARTIAL; a clean CONDITIONAL and a clean FULL are left alone")
+    @DisplayName("v2.2: a CONDITIONAL is not downgraded for naming an assumption; a clean CONDITIONAL and FULL stand")
     void cleanVerdictsStand() {
-        assertThat(enforceOne(need("N1", NeedType.PRODUCT_COMPATIBILITY),
+        // v2.1 turned this into PARTIAL. The A/B run (apr-8ef649ab) measured that rule: 0 unsafe verdicts caught, 1
+        // correct CONDITIONAL lost. A judge describing what it cannot know about the customer is doing its job.
+        NeedResult described = enforceOne(need("N1", NeedType.PRODUCT_COMPATIBILITY),
                 v2("N1", NeedStatus.CONDITIONAL_ON_CUSTOMER, List.of("E1"), List.of(), List.of("규격"),
-                        List.of("보통 맞는다")), pool(own("E1"))).status()).isEqualTo(NeedStatus.PARTIAL);
+                        List.of("고객 선반의 폭을 모른다")), pool(own("E1")));
+        assertThat(described.status()).isEqualTo(NeedStatus.CONDITIONAL_ON_CUSTOMER);
+        assertThat(described.enforcement()).isNull();
         NeedResult cond = enforceOne(need("N1", NeedType.PRODUCT_COMPATIBILITY),
                 v2("N1", NeedStatus.CONDITIONAL_ON_CUSTOMER, List.of("E1"), List.of(), List.of("규격"), List.of()),
                 pool(own("E1")));
@@ -142,7 +146,7 @@ class CoverageJudgeV2Test {
             NeedResult r = enforceOne(need("N1", type),
                     v2("N1", NeedStatus.FULL, List.of("E1"), List.of(), List.of(), List.of()), pool(foreign("E1")));
             assertThat(r.status()).as(type.name()).isEqualTo(NeedStatus.NONE);
-            assertThat(r.enforcement()).isEqualTo(NeedResult.Enforcement.OTHER_LISTING_ONLY);
+            assertThat(r.enforcement()).isEqualTo(NeedResult.Enforcement.OTHER_INSTANCE_ONLY);
         }
         NeedResult mixed = enforceOne(need("N1", NeedType.PRODUCT_SPEC),
                 v2("N1", NeedStatus.FULL, List.of("E1", "E2"), List.of(), List.of(), List.of()),
@@ -159,7 +163,7 @@ class CoverageJudgeV2Test {
                 .status()).isEqualTo(NeedStatus.FULL);
         assertThat(NeedAggregation.enforce(List.of(need("N1", NeedType.PRODUCT_SPEC)),
                 Map.of("N1", v2("N1", NeedStatus.FULL, List.of("E1"), List.of(), List.of(), List.of())),
-                pool(foreign("E1")), Map.of(), DetailCapability.READABLE, null).get(0).status())
+                pool(foreign("E1")), Map.of(), DetailCapability.READABLE, (UUID) null).get(0).status())
                 .isEqualTo(NeedStatus.FULL);
     }
 

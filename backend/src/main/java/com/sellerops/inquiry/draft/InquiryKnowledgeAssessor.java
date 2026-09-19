@@ -169,7 +169,9 @@ public class InquiryKnowledgeAssessor {
         com.sellerops.inquiry.decision.NeedDecision decision = com.sellerops.inquiry.decision.InquiryDecisionEngine
                 .decide(orgId, question, decisionModel,
                         needs -> collector.collect(orgId, inquiry, productId, found.lanes(), catalogueFinding, scope,
-                                needs), detail, productId);
+                                needs), detail, new com.sellerops.inquiry.decision.EvidenceScope.CaseScope(productId,
+                        com.sellerops.inquiry.decision.EvidenceScope.orderKey(
+                                com.sellerops.inquiry.decision.PrecedentReuse.OrderKey.of(inquiry))));
         AnswerBasisState basis = decision.basis();
         List<com.sellerops.inquiry.decision.NeedResult> open = decision.unresolved();
         String subject = basis != AnswerBasisState.NO_ANSWER_BASIS ? null

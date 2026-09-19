@@ -13,9 +13,23 @@ import java.util.UUID;
  * @param sourceId  the knowledge source / order row it came from, when there is one (never sent)
  * @param productId the listing it is about, for catalogue kinds (never sent)
  * @param factKey   the fact key, for a single catalogue fact (never sent)
+ * @param scope     the entity instance it is attributed to (never sent) — Inquiry Decision v2.2
  */
 public record EvidenceCandidate(String id, Kind kind, String label, String text, UUID sourceId, UUID productId,
-                                String factKey) {
+                                String factKey, EvidenceScope scope) {
+
+    /**
+     * Scope derived from where the candidate came from: listing kinds to their listing (unattributed when the listing
+     * is not known), company rules to the company, an order fact to an order it names only when told which.
+     */
+    public EvidenceCandidate(String id, Kind kind, String label, String text, UUID sourceId, UUID productId,
+                             String factKey) {
+        this(id, kind, label, text, sourceId, productId, factKey, switch (kind) {
+            case PRODUCT_KNOWLEDGE, PRODUCT_FACTS, OPTIONS, ADDONS -> EvidenceScope.product(productId);
+            case ORG_KNOWLEDGE -> EvidenceScope.ORG;
+            case ORDER_FACT -> EvidenceScope.order(null);
+        });
+    }
 
     public enum Kind {
         PRODUCT_KNOWLEDGE, ORG_KNOWLEDGE, PRODUCT_FACTS, OPTIONS, ADDONS, ORDER_FACT;
@@ -30,7 +44,11 @@ public record EvidenceCandidate(String id, Kind kind, String label, String text,
         }
     }
 
+    public EvidenceCandidate withScope(EvidenceScope newScope) {
+        return new EvidenceCandidate(id, kind, label, text, sourceId, productId, factKey, newScope);
+    }
+
     public EvidenceCandidate withId(String newId) {
-        return new EvidenceCandidate(newId, kind, label, text, sourceId, productId, factKey);
+        return new EvidenceCandidate(newId, kind, label, text, sourceId, productId, factKey, scope);
     }
 }

@@ -32,9 +32,17 @@ public record NeedResult(NeedStatus judged, InquiryNeed need, NeedStatus status,
         NOT_JUDGED,
         /** A verdict of support citing no candidate that exists. */
         NO_CITED_EVIDENCE,
-        /** Every cited candidate was about a different listing; a fact about listing Y is not a fact about listing X. */
-        OTHER_LISTING_ONLY,
-        /** FULL / CONDITIONAL while naming an assumption not in the evidence. */
+        /**
+         * Every cited candidate was about a different instance of what the need is about — another listing, another
+         * order. A fact about listing Y is not a fact about listing X (v2.1, generalised in v2.2).
+         */
+        OTHER_INSTANCE_ONLY,
+        /**
+         * FULL for a need about one instance (an order) with no cited candidate attributed to THAT instance — a company
+         * rule may say what usually happens, never what happened to this order (v2.2). Becomes PARTIAL.
+         */
+        SCOPE_UNATTRIBUTED,
+        /** FULL while naming an assumption not in the evidence (v2.2: FULL only — see NeedAggregation). */
         DECLARED_ASSUMPTION,
         /** FULL while naming information the answer requires and the evidence lacks. */
         DECLARED_MISSING,

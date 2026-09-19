@@ -72,6 +72,12 @@ class CoverageJudgeCalibrationIT {
         }
         List<CalibrationVariants.Variant> variants = CalibrationVariants.build(rows, gold, reusable);
         // CAL_KINDS narrows the run (a smoke test sends ORIGINAL only); absent, every kind is sent.
+        // CAL_QS narrows to named questions of the capture (a targeted re-ask of known failures).
+        String qs = env("CAL_QS", "");
+        if (!qs.isBlank()) {
+            List<String> keepQ = List.of(qs.split(","));
+            variants = variants.stream().filter(v -> keepQ.contains(v.q())).toList();
+        }
         String kinds = env("CAL_KINDS", "");
         if (!kinds.isBlank()) {
             List<String> keep = List.of(kinds.split(","));
@@ -105,6 +111,17 @@ class CoverageJudgeCalibrationIT {
                 maxCalls -= 1;
             }
             result = runner.run(arm, variants, repeats, maxCalls, null);
+        } else if ("replay".equals(mode)) {
+            AgentLlmTransport none = (uri, headers, json) -> {
+                throw new IllegalStateException("replay mode must not reach a transport");
+            };
+            List<JsonNode> recorded = new ArrayList<>();
+            for (String l : Files.readAllLines(Path.of(System.getenv("CAL_REPLAY")))) {
+                if (!l.isBlank()) {
+                    recorded.add(JSON.readTree(l));
+                }
+            }
+            result = new CalibrationRunner(props, none, org).replay(arm, variants, recorded);
         } else if ("offline".equals(mode)) {
             AgentLlmTransport none = (uri, headers, json) -> {
                 throw new IllegalStateException("offline mode must not reach a transport");
