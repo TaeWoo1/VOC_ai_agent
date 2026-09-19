@@ -1,0 +1,7 @@
+{"q":"S:q1","set":"S","cluster":"c:q1","canonical":true,"product":"aaaa0001","text":"호수별 안쪽 폭이 어떻게 되나요?","product_via_memory":"cccc0001"}
+{"q":"S:q2","set":"S","cluster":"c:q2","canonical":true,"product":"aaaa0001","text":"폭이 얼마예요? 마감캡 끝은 막혀 있나요?","product_via_memory":"cccc0001"}
+{"q":"S:q3","set":"S","cluster":"c:q3","canonical":true,"product":"aaaa0001","text":"우드 색상도 있나요?","product_via_memory":"cccc0001"}
+{"q":"S:q4","set":"S","cluster":"c:q4","canonical":true,"product":"aaaa0001","text":"선 한 가닥 넣을 건데 몇 호가 맞나요?","product_via_memory":"cccc0001"}
+{"q":"S:q5","set":"S","cluster":"c:q5","canonical":true,"product":"aaaa0001","text":"대량으로 사면 할인되나요?","product_via_memory":"cccc0001"}
+{"q":"S:q6","set":"S","cluster":"c:q1","canonical":false,"product":"aaaa0001","text":"호수별 안쪽 폭이 어떻게 되나요?","product_via_memory":"cccc0001"}
+{"q":"S:q7","set":"S","cluster":"c:q7","canonical":true,"product":"aaaa0002","text":"2P 묶음도 폭이 같나요?","product_via_memory":"cccc0001"}

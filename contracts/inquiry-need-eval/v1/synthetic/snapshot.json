@@ -1,0 +1,10 @@
+{"snapshot":"SYN","db":"synthetic","org":"00000000-0000-0000-0000-000000000000","dataset_hash":"FILLED_BY_TEST","census":{},
+ "refs":[
+  {"ref":"PK:bbbb0001","product":"aaaa0001","state":"PRESENT"},
+  {"ref":"IMG:aaaa0001","product":"aaaa0001","state":"UNREADABLE"},
+  {"ref":"OPT:aaaa0001#%우드%","product":"aaaa0001","state":"ABSENT_ACQUIRABLE"},
+  {"ref":"PK:bbbb0002","product":"aaaa0001","state":"PRESENT"},
+  {"ref":"OK:dddd0001","product":"aaaa0002","state":"PRESENT"},
+  {"ref":"CAT:aaaa0003","product":"aaaa0002","state":"PRESENT"},
+  {"ref":"PK:bbbb0001","product":"aaaa0002","state":"PRESENT_OTHER_SCOPE"}],
+ "memories":[{"memory":"cccc0001","product":"aaaa0001","origin_inquiry":null},{"memory":"cccc0002","product":"aaaa0001","origin_inquiry":null}]}

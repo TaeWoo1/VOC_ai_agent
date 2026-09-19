@@ -216,6 +216,16 @@ OFF 그대로다.
 모두 승인 상한 이하. 평균 지연 intent 1.8s · eligibility 1.1s(최대 4.9s) · 임베딩 0.2s, 질문당 ≈3.4s. 다른 모델 0 ·
 마켓플레이스 0 · WRITE 0 · clone 쓰기는 판매자 문장 벡터 53행뿐. harness·라벨·채점 스크립트는 저장소 밖(scratchpad)이다.
 
+### 2-E. Inquiry Need Eval v1 (2026-09-19) — §2-D를 need 단위로 다시 채점
+
+§2-D의 Case 단일 라벨은 인용이 맞으면 TP로 셌다. need 단위 평가 체계 **`docs/inquiry_need_eval_v1.md`**(L1 gold · L2 snapshot ·
+L3 관측, schema·validator·scorer는 `tools/inquiry-need-eval/`, 실제 데이터는 저장소 밖)로 다시 재면 F5는 retrieval을 개선했지만
+(매칭 8 → 13/14 · 과거 답변 recall 0.30 → 0.67/0.60 · 무관한 인용 0.20 → 0) 새로 찾은 근거의 대부분이 **일부 need만 덮은 채 묻지
+않는** partial-coverage leakage로 흘렀다(PCL 3 → 7/8, strict safe no-ask precision 0.40 → 0.38/0.36). 원인은 retrieval이 아니라
+assessor의 판정이 need별 충분성을 보지 않는 것이다. Catalogue Bootstrap snapshot(S1)은 source coverage를 0.31 → 0.49로 올리지만
+terminal Seller Touch(0.866)는 거의 줄이지 못하고, 오늘의 runtime은 옵션·추가상품 fact를 카탈로그 질문 밖에서 소비하지 않는다.
+이 절도 production 채택 결정을 내리지 않는다.
+
 ## 3. 판매자 정정 → 기억 (「다음에도 참고」)
 
 - 초안을 **실제로 고쳤을 때**(공백 차이가 아니라 내용이 달라졌을 때)와 추천을 다르게 판단했을 때, 판매자가 명시적으로

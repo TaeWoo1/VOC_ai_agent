@@ -1,0 +1,8 @@
+{"q":"S:q1","need":"n1","ask":"호수별 안쪽 폭","type":"PRODUCT_SPEC","scope":"PRODUCT","sets":[{"refs":["PK:bbbb0001"],"suff":"FULL"}],"family_sets":[],"precedents":["cccc0001"],"family_precedents":[]}
+{"q":"S:q2","need":"n1","ask":"안쪽 폭","type":"PRODUCT_SPEC","scope":"PRODUCT","sets":[{"refs":["PK:bbbb0001"],"suff":"FULL"}],"family_sets":[],"precedents":[],"family_precedents":[]}
+{"q":"S:q2","need":"n2","ask":"마감캡 끝이 막혔는지","type":"PRODUCT_SPEC","scope":"PRODUCT","sets":[{"refs":["IMG:aaaa0001"],"suff":"UNKNOWN"}],"family_sets":[],"precedents":[],"family_precedents":[]}
+{"q":"S:q3","need":"n1","ask":"우드 색상이 있는지","type":"CATALOGUE_AVAILABILITY","scope":"PRODUCT","sets":[{"refs":["OPT:aaaa0001#%우드%"],"suff":"FULL"}],"family_sets":[],"precedents":[],"family_precedents":[]}
+{"q":"S:q4","need":"n1","ask":"한 가닥에 맞는 호수","type":"PRODUCT_COMPATIBILITY","scope":"PRODUCT","sets":[{"refs":["PK:bbbb0002"],"suff":"CONDITIONAL"}],"family_sets":[],"precedents":[],"family_precedents":[]}
+{"q":"S:q5","need":"n1","ask":"대량 구매 할인","type":"SELLER_DECISION","scope":"NONE","sets":[],"family_sets":[],"precedents":["cccc0001","cccc0002"],"family_precedents":[]}
+{"q":"S:q6","need":"n1","ask":"호수별 안쪽 폭","type":"PRODUCT_SPEC","scope":"PRODUCT","sets":[{"refs":["PK:bbbb0001"],"suff":"FULL"}],"family_sets":[],"precedents":[],"family_precedents":[]}
+{"q":"S:q7","need":"n1","ask":"2P 묶음도 폭이 같은지","type":"PRODUCT_SPEC","scope":"PRODUCT","sets":[{"refs":["OK:dddd0001","CAT:aaaa0003"],"suff":"PARTIAL"}],"family_sets":[{"refs":["PK:bbbb0001"],"suff":"FULL"}],"precedents":[],"family_precedents":[]}

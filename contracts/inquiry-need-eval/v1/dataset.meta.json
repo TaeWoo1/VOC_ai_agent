@@ -1,0 +1,116 @@
+{
+ "name": "inquiry-need-eval",
+ "version": "v1",
+ "frozen_at": "2026-09-19",
+ "dataset_hash": "b94626cbf74a6f3dcbc97f9f1423f0329da25065634d9245f3077fbb51b04e23",
+ "files": {
+  "questions.jsonl": "c67c40be877ff23a0ce3c8798fe9c0cce976dd9a03b24a1fd54ab015b771088a",
+  "needs.jsonl": "db92a91312d5b652e89fa96cae887cc1edffdc5bf905ff27011b2038b1315a57",
+  "precedents.jsonl": "6f73b06fd7e4858c2e3ef5be6659b3e6a91e659f527d51059b5e48c584f59898"
+ },
+ "location": "outside the repository (operator scratch) — real inquiry ids and seller-derived labels; never committed",
+ "counts": {
+  "raw_questions": 68,
+  "canonical_cases": 67,
+  "real_questions": 26,
+  "synthetic_questions": 42,
+  "needs": 74,
+  "canonical_needs": 72,
+  "precedents": 23,
+  "precedent_scope": {
+   "REUSABLE": 14,
+   "CASE_ONLY": 4,
+   "ORDER_ONLY": 5
+  },
+  "excluded_before_assessment": 5,
+  "clusters_with_duplicates": 1
+ },
+ "label_policy": {
+  "author": "designer (development set — not a holdout)",
+  "need": "one independent information/action unit without which the request is unresolved; prerequisites are evidence",
+  "unknown": "never folded into NONE",
+  "family": "annotation only, reachable=false",
+  "precedent": "only REUSABLE may prefill another conversation"
+ },
+ "snapshots": {
+  "S0": {
+   "db": "sellerops_f5_eval",
+   "description": "dev DB clone as used by the F5 runs — no Catalogue Bootstrap",
+   "state_hash": "0f8ac00bdbd016cf5a4e109d6a3ef4760704b7737f99fec6f3ccfd6c93c0a436",
+   "census": {
+    "migration": "113",
+    "product_knowledge_sources": {
+     "SELLER_ENTERED_KNOWLEDGE": 10,
+     "SELLER_UPLOADED_DOCUMENT": 2
+    },
+    "product_knowledge_chunks": 12,
+    "org_knowledge_sources": {
+     "SELLER_ENTERED_KNOWLEDGE": 1,
+     "SELLER_UPLOADED_DOCUMENT": 1
+    },
+    "answer_memory": 23,
+    "product_facts_by_source": {
+     "DERIVED:TITLE": 9,
+     "COUPANG:SELLER_PRODUCTS": 188,
+     "NAVER:PRODUCT_API": 157,
+     "CAFE24:PRODUCT_API": 155
+    },
+    "catalogue_detail_facts": 0,
+    "product_variants_by_channel": {
+     "COUPANG": 405,
+     "NAVER": 20
+    }
+   }
+  },
+  "S1": {
+   "db": "sellerops_eval_s1",
+   "description": "clone of the Catalogue Bootstrap proof DB — same seller knowledge and past answers, plus NAVER detail facts and options",
+   "state_hash": "ee2418ea65983b4f545ee38575111a7c31e91f68098c492f267f3977a6e1c9a1",
+   "census": {
+    "migration": "113",
+    "product_knowledge_sources": {
+     "SELLER_ENTERED_KNOWLEDGE": 10,
+     "SELLER_UPLOADED_DOCUMENT": 2,
+     "SELLER_AUTHORED_CHANNEL_CONTENT": 1
+    },
+    "product_knowledge_chunks": 13,
+    "org_knowledge_sources": {
+     "SELLER_ENTERED_KNOWLEDGE": 1,
+     "SELLER_UPLOADED_DOCUMENT": 1
+    },
+    "answer_memory": 23,
+    "product_facts_by_source": {
+     "DERIVED:TITLE": 9,
+     "COUPANG:SELLER_PRODUCTS": 188,
+     "NAVER:PRODUCT_API": 157,
+     "NAVER:PRODUCT_DETAIL_API": 400,
+     "CAFE24:PRODUCT_API": 155
+    },
+    "catalogue_detail_facts": 400,
+    "product_variants_by_channel": {
+     "COUPANG": 405,
+     "NAVER": 592
+    }
+   }
+  }
+ },
+ "observations": {
+  "S0-A": {
+   "sha256": "eaede77d2c510f1f2323f0bb1fb910dda3db206835f38b295487002852509797",
+   "description": "offline, all knowledge models OFF — InquiryNeedEvalIT"
+  },
+  "S0-B1": {
+   "sha256": "a4ebc6fd183bb3fd387ff5d1c27888e5f119314be86f6e5195498673f83a5f39",
+   "description": "F5 ON run 1 (apr-8610b0cc) — legacy arm TSV, prefix ids, no catalogue statements"
+  },
+  "S0-B2": {
+   "sha256": "7bfc85b7c87ffd55ba8d401a78537840149a09398110b8643b1d543c66b0a309",
+   "description": "F5 ON run 2 (apr-8610b0cc) — legacy arm TSV"
+  },
+  "S1-A": {
+   "sha256": "8869f72f7628aa79d4259104c14a6fab6ee95070ae8d6d1c12c91f389b79bb9c",
+   "description": "offline, all knowledge models OFF — InquiryNeedEvalIT"
+  }
+ },
+ "harness": "backend/src/test/java/com/sellerops/knowledge/teach/InquiryNeedEvalIT.java"
+}

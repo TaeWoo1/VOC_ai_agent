@@ -1,0 +1,7 @@
+{"q":"S:q1","basis":"GROUNDED","current":[{"scope":"PRODUCT","source":"bbbb0001-0000-0000-0000-000000000000"}],"memory":[],"precedent":null,"prefill_shown":false,"catalogue":{"grounds":false,"statements":[]},"variant":{},"order_state":null}
+{"q":"S:q2","basis":"GROUNDED","current":[{"scope":"PRODUCT","source":"bbbb0001-0000-0000-0000-000000000000"}],"memory":[],"precedent":null,"prefill_shown":false,"catalogue":{"grounds":false,"statements":[]},"variant":{},"order_state":null}
+{"q":"S:q3","basis":"NO_ANSWER_BASIS","current":[],"memory":[],"precedent":null,"prefill_shown":false,"catalogue":{"grounds":false,"statements":[]},"variant":{},"order_state":null}
+{"q":"S:q4","basis":"NO_ANSWER_BASIS","current":[],"memory":[],"precedent":null,"prefill_shown":false,"catalogue":{"grounds":false,"statements":[]},"variant":{},"order_state":null}
+{"q":"S:q5","basis":"NO_ANSWER_BASIS","current":[],"memory":["cccc0002-0000-0000-0000-000000000000"],"precedent":"cccc0002-0000-0000-0000-000000000000","prefill_shown":true,"catalogue":{"grounds":false,"statements":[]},"variant":{},"order_state":null}
+{"q":"S:q6","basis":"NO_ANSWER_BASIS","current":[],"memory":[],"precedent":null,"prefill_shown":false,"catalogue":{"grounds":false,"statements":[]},"variant":{},"order_state":null}
+{"q":"S:q7","basis":"GROUNDED","current":[{"scope":"ORG_OPERATIONS","source":"dddd0001-0000-0000-0000-000000000000"}],"memory":[],"precedent":null,"prefill_shown":false,"catalogue":{"grounds":false,"statements":[]},"variant":{},"order_state":null}
