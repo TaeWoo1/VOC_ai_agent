@@ -267,3 +267,15 @@ arm은 이름이 아니라 「reasoning 토큰 0」으로 맞춘다. 시점은 �
 3. **C는 조건부** — (i) 둘 다 규칙을 못 넘거나 (ii) B가 안전 조건(a)(b)는 넘고 유용성(c)만 못 넘을 때만, B와 같은 입력으로 233 호출.
    무효 run의 비용 실측(p50 7.5s · p95 21.0s · 출력 568 토큰, reasoning 평균 460)은 유효하다 — 그래서 기본 계획에서 뺐다.
 4. **Stage 2** — 승자 하나로 S0 전체 pipeline(F5 OFF, ≤136). 기준선 S0-V2M은 JSON mode였으므로 형식 변화가 함께 들어간다는 점을 결과에 적는다.
+
+## 14. Smoke — `apr-ece02455` / `wt-ab41cd01` (2026-09-20, 소진) — PASSED
+
+합성 3 case × A(judge v1@minimal) · B(judge v2@minimal), ORIGINAL 1회 + planner schema 1회 = 호출 7(상한 8), commit `75efda7c`.
+
+- strict `json_schema`를 plan · judge v1 · judge v2 모두 받았다(HTTP 400 0) · 실패 0 · unmatched 0 · integrity 0 · A↔B parity 통과.
+- 두 judge 모두 합성 gold 4/4(FULL · NONE · CONDITIONAL · NONE), 과거 답변(REUSABLE) 제안도 맞았다.
+- 지연 1.7–3.6s — 요청마다 schema가 달라도 첫 호출 지연은 관측되지 않았다. 입력 토큰 v1 689–735 · v2 1,007–1,053 · plan 517, reasoning 0.
+- **관찰(설계 결정 대상)**: B는 `SMOKE:2`를 gold대로 CONDITIONAL로 판정하면서 `assumptions`에 한 줄을 적었고, code 규칙
+  「CONDITIONAL + 가정 → PARTIAL」이 그것을 PARTIAL로 내렸다. 안전한 쪽의 강등이지만 useful coverage를 깎는다 — 무효 run에서 B의 enforced
+  useful coverage가 raw보다 낮았던 것(0.40 → 0.30)과 같은 모양일 수 있다. 규칙은 **바꾸지 않았다**: Stage 1이 raw와 enforced를 따로 재므로,
+  이 규칙의 비용은 측정 뒤에 결정한다(후보: 가정 강등을 FULL에만 적용).
