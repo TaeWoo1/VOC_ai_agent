@@ -68,4 +68,14 @@ test('precedent proposals are right only when the gold lists them for that need;
   assert.equal(s.calls.mean_prompt_tokens, 1500);
   assert.equal(s.enforcement.DECLARED_ASSUMPTION, 1);
   assert.equal(s.declared_reasons.assumptions, 1);
+  assert.equal(s.valid, true);
+  assert.equal(s.calls.unmatched_verdicts, 0);
+});
+
+test('a verdict keyed by an id the input never sent makes the arm invalid, instead of passing as NONE', () => {
+  const r = rows();
+  r[0] = { ...r[0], unmatched_verdicts: 2 };
+  const s = scoreJudge(r);
+  assert.equal(s.valid, false);
+  assert.equal(s.calls.unmatched_verdicts, 2);
 });

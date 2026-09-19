@@ -152,8 +152,13 @@ class CoverageJudgeCalibrationIT {
         v.precedents().forEach(p -> precedents.put(p.id(), p));
         ObjectNode call = JSON.createObjectNode();
         call.put("type", "call").put("arm", arm).put("run", run).put("call", callId).put("q", v.q())
-                .put("variant", v.kind().name()).put("target", v.target()).put("answered", verdicts != null)
+                .put("variant", v.kind().name()).put("target", goldTarget(v)).put("answered", verdicts != null)
                 .put("evidence", v.evidence().size()).put("precedents", v.precedents().size());
+        // A verdict keyed by an id the variant never sent is a harness or protocol fault, not a judgement — counted
+        // loudly so it can never again pass as NONE (apr-80adf54f).
+        long unmatched = verdicts == null ? 0 : verdicts.keySet().stream()
+                .filter(k -> v.needs().stream().noneMatch(n -> n.id().equals(k))).count();
+        call.put("unmatched_verdicts", unmatched);
         if (cost != null) {
             call.put("elapsed_ms", cost.elapsedMs()).put("prompt_tokens", cost.promptTokens())
                     .put("completion_tokens", cost.completionTokens());
@@ -165,7 +170,7 @@ class CoverageJudgeCalibrationIT {
             NeedVerdict raw = verdicts == null ? null : verdicts.get(r.need().id());
             ObjectNode n = JSON.createObjectNode();
             n.put("type", "need").put("arm", arm).put("run", run).put("call", callId).put("q", v.q())
-                    .put("variant", v.kind().name()).put("target", v.target()).put("need", r.need().id())
+                    .put("variant", v.kind().name()).put("target", goldTarget(v)).put("need", v.goldId().get(r.need().id()))
                     .put("need_type", r.need().type().name()).put("gold", v.gold().get(r.need().id()).name())
                     .put("expectation", v.expectation().name())
                     .put("judged", r.judged() == null ? null : r.judged().name()).put("enforced", r.status().name())
@@ -182,6 +187,11 @@ class CoverageJudgeCalibrationIT {
             r.precedents().forEach(p -> proposed.add(p.memoryId().toString().substring(0, 8)));
             out.add(JSON.writeValueAsString(n));
         }
+    }
+
+    /** The targeted need as the gold names it ({@code *} for a whole-question variant). */
+    private static String goldTarget(CalibrationVariants.Variant v) {
+        return "*".equals(v.target()) ? "*" : v.goldId().get(v.target());
     }
 
     private static String env(String k, String def) {

@@ -131,6 +131,7 @@ export function scoreJudge(rows, { needsGold = [], reusable = new Set() } = {}) 
     if ((r.precedents ?? []).some((p) => goldPrec[key(r)].some((g) => p.startsWith(g) || g.startsWith(p)))) recalled += 1;
   }
 
+  const notJudged = run1.filter((r) => r.enforcement === 'NOT_JUDGED').length;
   const enforcement = {};
   for (const r of run1) if (r.enforcement) enforcement[r.enforcement] = (enforcement[r.enforcement] ?? 0) + 1;
   const declared = { missing: 0, customer_input: 0, assumptions: 0 };
@@ -141,8 +142,11 @@ export function scoreJudge(rows, { needsGold = [], reusable = new Set() } = {}) 
   }
 
   const timed = calls.filter((c) => c.elapsed_ms != null);
+  const unmatched = calls.reduce((a, c) => a + (c.unmatched_verdicts ?? 0), 0);
   return {
     arm,
+    valid: unmatched === 0,
+    not_judged_needs: notJudged,
     judge: metricsOf(run1, 'judged'),
     enforced: metricsOf(run1, 'enforced'),
     confusion_judged: confusion(run1, 'judged'),
@@ -157,6 +161,8 @@ export function scoreJudge(rows, { needsGold = [], reusable = new Set() } = {}) 
     calls: {
       total: calls.filter((c) => c.variant !== 'OTHER_LISTING').length,
       unanswered: calls.filter((c) => !c.answered).length,
+      // Verdicts keyed by an id the input never sent: a protocol/harness fault. Non-zero makes the arm invalid.
+      unmatched_verdicts: calls.reduce((a, c) => a + (c.unmatched_verdicts ?? 0), 0),
       p50_ms: pct(timed.map((c) => c.elapsed_ms), 50),
       p95_ms: pct(timed.map((c) => c.elapsed_ms), 95),
       mean_prompt_tokens: timed.length ? timed.reduce((a, c) => a + c.prompt_tokens, 0) / timed.length : null,
@@ -172,7 +178,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const reusable = new Set(args.precedents ? readJsonl(args.precedents).filter((p) => p.precedent_scope === 'REUSABLE').map((p) => p.memory) : []);
   const out = scoreJudge(rows, { needsGold, reusable });
   if (args.json) writeFileSync(args.json, JSON.stringify(out, null, 2));
-  console.log(JSON.stringify({ arm: out.arm, judge: out.judge, enforced: out.enforced, stability: out.stability.map(({ changed, ...s }) => s),
+  if (!out.valid) console.error(`INVALID ARM: ${out.calls.unmatched_verdicts} verdicts matched no need that was sent`);
+  console.log(JSON.stringify({ arm: out.arm, valid: out.valid, not_judged_needs: out.not_judged_needs, judge: out.judge, enforced: out.enforced, stability: out.stability.map(({ changed, ...s }) => s),
     counterfactuals: Object.fromEntries(Object.entries(out.counterfactuals).map(([k, v]) => [k, { fixtures: v.fixtures, violations: v.violations, injected_cited: v.injected_cited }])),
     precedents: out.precedents, calls: out.calls }, null, 2));
 }

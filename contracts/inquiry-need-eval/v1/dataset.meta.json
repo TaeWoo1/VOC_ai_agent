@@ -190,12 +190,26 @@
   },
   "offline_observations": {
    "S0-ORACLE": {
-    "sha256": "503e36b24f3970dd9883a949d0425680f6156ff04b9477c85380a45ca8f11158",
-    "description": "gold as judge + worst-case judge for OTHER_LISTING — harness check, 0 calls"
+    "sha256": "f0a1662a08c5760b585c0308c8fe3f46d9bc93d12cf743dbabea3db5b36e7c2e",
+    "description": "gold as judge + worst-case judge for OTHER_LISTING — harness check, 0 calls, production-shaped need ids"
    },
    "S1-ORACLE": {
-    "sha256": "65d0ecabcbe830c5fa73f4f42d03846f5f5aee5343c201f8eddf2dd26aac9e3c",
+    "sha256": "e091d50deacf377d4f6ad6ff24b84253a87f9322d0e553e8185a121d4f609a1c",
     "description": "same, S1"
+   }
+  },
+  "model_observations": {
+   "S0-A": {
+    "sha256": "3235251b18bcebf3c49c03b812f4b8593a3de9f810ca0151a02222da6e908318",
+    "status": "INVALID — need ids sent as gold ids (n1); unmatched verdicts scored NONE (apr-80adf54f)"
+   },
+   "S0-B": {
+    "sha256": "a1844a5004680353480e06c4220c0e9cae0d238d7ed672747548c4da3d025b91",
+    "status": "INVALID — need ids sent as gold ids (n1); unmatched verdicts scored NONE (apr-80adf54f)"
+   },
+   "S0-C": {
+    "sha256": "e233d309e77d13e1d2087468d0fd89b546661106716202d250597106bce65c1f",
+    "status": "INVALID — need ids sent as gold ids (n1); unmatched verdicts scored NONE (apr-80adf54f)"
    }
   }
  }

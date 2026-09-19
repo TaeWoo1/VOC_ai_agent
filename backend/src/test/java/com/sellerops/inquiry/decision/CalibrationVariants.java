@@ -50,13 +50,20 @@ public final class CalibrationVariants {
         NOT_COVERED_ENFORCED
     }
 
-    /** One captured judge input. */
+    /**
+     * One captured judge input. Needs are numbered {@code N1, N2, …} exactly as production's planner numbers them —
+     * the judge echoes these ids back and the engine matches verdicts by them. {@code goldId} maps each back to the Eval v1
+     * need id ({@code n1}, …). The first real run (apr-80adf54f) sent the gold ids verbatim; a judge that answered
+     * {@code N1} for {@code n1} left the verdict unmatched and the need NONE — this map is that fix.
+     */
     public record Row(String q, String question, UUID product, List<InquiryNeed> needs,
-                      List<EvidenceCandidate> evidence, List<PrecedentCandidate> precedents) {
+                      List<EvidenceCandidate> evidence, List<PrecedentCandidate> precedents,
+                      Map<String, String> goldId) {
     }
 
     /** One judge input to send (or, for OTHER_LISTING, to enforce offline) and what it is held to. */
     public record Variant(String q, Kind kind, String target, String question, UUID product, List<InquiryNeed> needs,
+                          Map<String, String> goldId,
                           List<EvidenceCandidate> evidence, List<PrecedentCandidate> precedents,
                           Map<String, NeedStatus> gold, Map<String, List<String>> goldIds, Expectation expectation,
                           String injected) {
@@ -75,9 +82,12 @@ public final class CalibrationVariants {
 
     public static Row row(JsonNode r) {
         List<InquiryNeed> needs = new ArrayList<>();
+        Map<String, String> goldId = new LinkedHashMap<>();
         for (JsonNode n : r.get("needs")) {
-            needs.add(new InquiryNeed(n.get("id").asText(), n.get("ask").asText(),
-                    NeedType.valueOf(n.get("type").asText()), n.get("ask").asText()));
+            String id = "N" + (needs.size() + 1);
+            goldId.put(id, n.get("id").asText());
+            needs.add(new InquiryNeed(id, n.get("ask").asText(), NeedType.valueOf(n.get("type").asText()),
+                    n.get("ask").asText()));
         }
         List<EvidenceCandidate> evidence = new ArrayList<>();
         for (JsonNode e : r.get("evidence")) {
@@ -91,7 +101,7 @@ public final class CalibrationVariants {
                     p.path("text").asText("")));
         }
         return new Row(r.get("q").asText(), r.path("question").asText(""), uuid(r.get("product")), needs, evidence,
-                precedents);
+                precedents, Map.copyOf(goldId));
     }
 
     private static UUID uuid(JsonNode n) {
@@ -157,7 +167,7 @@ public final class CalibrationVariants {
     private static Map<String, JsonNode> goldOf(Row row, Map<String, JsonNode> gold) {
         Map<String, JsonNode> g = new LinkedHashMap<>();
         for (InquiryNeed n : row.needs()) {
-            JsonNode node = gold.get(row.q() + "." + n.id());
+            JsonNode node = gold.get(row.q() + "." + row.goldId().get(n.id()));
             if (node == null) {
                 throw new IllegalStateException("no gold for " + row.q() + "." + n.id());
             }
@@ -185,7 +195,8 @@ public final class CalibrationVariants {
             }
             statuses.put(n.id(), s);
         }
-        return new Variant(row.q(), kind, target, question, row.product(), row.needs(), numbered, List.copyOf(p),
+        return new Variant(row.q(), kind, target, question, row.product(), row.needs(), row.goldId(), numbered,
+                List.copyOf(p),
                 statuses, ids, expect, injected);
     }
 

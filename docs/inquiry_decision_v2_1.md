@@ -173,3 +173,21 @@ throwaway 사본(S1)에 적용 33ms 후 사본 삭제. dev DB `sellerops`(105)·
 
 재현: `EVAL_DECISION=capture EVAL_CAPTURE=<out>`(InquiryNeedEvalIT) → `RUN_COVERAGE_JUDGE_CALIBRATION=true CAL_MODE=offline|model …`
 (CoverageJudgeCalibrationIT) → `node tools/inquiry-need-eval/judge.mjs --obs <arm.jsonl> --needs … --precedents …`.
+
+## 12. Stage 1 실행 — `apr-80adf54f` / `wt-7f728653` (2026-09-19, 소진) — **INVALID**
+
+S0 judge 단독 A·B·C, 호출 699(arm당 233, 무응답 0, 상한 이하) · 다른 모델 0 · 마켓플레이스 0 · WRITE 0 · DB 0. **Stage 2는 실행하지 않았다.**
+
+**결과는 비교 근거가 될 수 없다.** capture가 gold need id(`n1`, 소문자)를 그대로 judge에 보냈고, 프롬프트의 예시와 production planner는
+`N1`을 쓴다. judge가 `N1`로 답한 need는 엔진이 verdict를 찾지 못해 **NOT_JUDGED → NONE**으로 채점됐다 — A 40 · B 25 · C 11 / 72. 모든
+호출이 need 수만큼 verdict를 돌려줬으므로(verdict < need인 호출 0) 모델이 판정을 빼먹은 것이 아니라 **키가 어긋난 것**이다. 치우침이
+NONE 쪽이고 arm마다 크기가 다르므로(A가 가장 크다) FULL precision·유용 커버리지·안정성 모두 arm 간 비교가 성립하지 않는다.
+
+offline 자기검사가 이것을 잡지 못한 이유: gold judge는 받은 id로 그대로 답하므로 id 모양 불일치를 드러낼 수 없다. 수정:
+
+- capture의 need를 production처럼 `N1, N2, …`로 번호 매기고 gold id로 되돌린다(`CalibrationVariants.Row.goldId`, `CalibrationVariantsTest`).
+- 호출마다 **보내지 않은 id로 온 verdict 수**(`unmatched_verdicts`)를 기록하고, 채점기는 0이 아닌 arm을 `valid=false`로 거부한다.
+- 수정 뒤 offline 자기검사: S0·S1 모두 NOT_JUDGED 0, 모든 지표 1.0, counterfactual 위반 0.
+
+production 경로는 영향이 없다(planner가 `N1…`을 쓴다). 관측 파일 해시는 `dataset.meta.json` `calibration.model_observations`에 INVALID로
+남긴다. 재측정은 새 승인이 필요하다.
