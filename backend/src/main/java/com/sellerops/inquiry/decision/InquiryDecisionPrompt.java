@@ -101,6 +101,91 @@ public final class InquiryDecisionPrompt {
                 출력은 {"verdicts":[{"need":"N1","status":"...","evidence":["E1"],"missing":[],"customer_input":[],"assumptions":[],"ask_customer":"...","precedents":["P1"]}]} 형식의 JSON만.""";
     }
 
+    /**
+     * <b>The answer's shape, enforced by the vendor</b> (Structured Outputs, {@code strict: true}) — Inquiry Decision
+     * v2.1 audit. JSON mode only promised valid JSON; this promises THIS JSON: a closed object, every field required,
+     * statuses from the closed list, and <b>need ids from an enum of exactly the ids this request sent</b>, one verdict
+     * per need ({@code minItems = maxItems = needs}). Evidence and precedent ids are enums of the ids sent too, so the
+     * model cannot write an id that does not exist. Code still checks the set ({@code InquiryDecisionGenerator
+     * .parseJudge(String, List)}) — the schema is the first fence, not the only one.
+     */
+    static ObjectNode judgeSchema(String version, List<String> needIds, List<String> evidenceIds,
+                                  List<String> precedentIds) {
+        boolean v2 = !JUDGE_V1.equals(version);
+        ObjectNode item = MAPPER.createObjectNode();
+        item.put("type", "object").put("additionalProperties", false);
+        ObjectNode props = item.putObject("properties");
+        ArrayNode required = item.putArray("required");
+        ObjectNode need = props.putObject("need").put("type", "string");
+        needIds.forEach(need.putArray("enum")::add);
+        ObjectNode status = props.putObject("status").put("type", "string");
+        for (String st : List.of("FULL", "CONDITIONAL_ON_CUSTOMER", "PARTIAL", "NONE")) {
+            status.withArray("enum").add(st);
+        }
+        props.set("evidence", idArray(evidenceIds));
+        if (v2) {
+            for (String list : List.of("missing", "customer_input", "assumptions")) {
+                props.putObject(list).put("type", "array").putObject("items").put("type", "string");
+            }
+        } else {
+            props.putObject("missing").putArray("type").add("string").add("null");
+        }
+        props.putObject("ask_customer").putArray("type").add("string").add("null");
+        props.set("precedents", idArray(precedentIds));
+        props.fieldNames().forEachRemaining(required::add);
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("type", "object").put("additionalProperties", false);
+        root.putArray("required").add("verdicts");
+        ObjectNode verdicts = root.putObject("properties").putObject("verdicts");
+        verdicts.put("type", "array").put("minItems", needIds.size()).put("maxItems", needIds.size());
+        verdicts.set("items", item);
+        return format(v2 ? "coverage_judge_v2" : "coverage_judge_v1", root);
+    }
+
+    /** The planner's shape: ids are renumbered by code, the type is one of the eight. */
+    static ObjectNode planSchema() {
+        ObjectNode item = MAPPER.createObjectNode();
+        item.put("type", "object").put("additionalProperties", false);
+        ObjectNode props = item.putObject("properties");
+        props.putObject("id").put("type", "string");
+        props.putObject("ask").put("type", "string");
+        ObjectNode type = props.putObject("type").put("type", "string");
+        for (NeedType t : NeedType.values()) {
+            type.withArray("enum").add(t.name());
+        }
+        props.putObject("search").put("type", "string");
+        ArrayNode required = item.putArray("required");
+        props.fieldNames().forEachRemaining(required::add);
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("type", "object").put("additionalProperties", false);
+        root.putArray("required").add("needs");
+        ObjectNode needs = root.putObject("properties").putObject("needs");
+        needs.put("type", "array");
+        needs.set("items", item);
+        return format("inquiry_need_plan", root);
+    }
+
+    private static ObjectNode idArray(List<String> ids) {
+        ObjectNode a = MAPPER.createObjectNode();
+        a.put("type", "array");
+        ObjectNode items = a.putObject("items").put("type", "string");
+        if (ids.isEmpty()) {
+            a.put("maxItems", 0);
+        } else {
+            ids.forEach(items.putArray("enum")::add);
+        }
+        return a;
+    }
+
+    private static ObjectNode format(String name, ObjectNode schema) {
+        ObjectNode f = MAPPER.createObjectNode();
+        f.put("type", "json_schema");
+        ObjectNode js = f.putObject("json_schema");
+        js.put("name", name).put("strict", true);
+        js.set("schema", schema);
+        return f;
+    }
+
     /** Needs, evidence and past answers by POSITION — no database id, no organisation, no customer identifier. */
     static String judgeUser(String question, List<InquiryNeed> needs, List<EvidenceCandidate> evidence,
                             List<PrecedentCandidate> precedents) {

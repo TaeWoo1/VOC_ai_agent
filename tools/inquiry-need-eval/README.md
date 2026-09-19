@@ -70,3 +70,16 @@ node tools/inquiry-need-eval/judge.mjs --obs cal-S0-B.jsonl --needs <dataset>/ne
 ```
 
 Every metric is reported twice: `judge` (the model's word) and `enforced` (after `NeedAggregation`).
+
+**Before reading any metric**, the scorer runs `integrity()`: a duplicate row, an unmatched or unjudged verdict, input
+that drifts between runs, or a run whose ORIGINAL needs are not exactly the gold needs makes the arm `valid: false`.
+A failed call (`failed: true`) is counted apart and never scored as NONE. Two arms are comparable only if
+`--parity` passes — identical input, model, format and token limit, differing only where declared:
+
+```bash
+node tools/inquiry-need-eval/judge.mjs --parity cal-S0-A.jsonl,cal-S0-B.jsonl --may-differ system_fp,schema_fp
+node tools/inquiry-need-eval/judge.mjs --parity cal-S0-B.jsonl,cal-S0-C.jsonl --may-differ effort
+```
+
+A model run must pin its frozen input with `CAL_INPUTS_SHA256`; `CAL_KINDS=ORIGINAL` and `CAL_SMOKE_PLAN=<sentence>` narrow
+it to a smoke test on the committed synthetic fixture (`judge-smoke-*.jsonl`).

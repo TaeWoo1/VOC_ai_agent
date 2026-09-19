@@ -71,127 +71,53 @@ class CoverageJudgeCalibrationIT {
             }
         }
         List<CalibrationVariants.Variant> variants = CalibrationVariants.build(rows, gold, reusable);
+        // CAL_KINDS narrows the run (a smoke test sends ORIGINAL only); absent, every kind is sent.
+        String kinds = env("CAL_KINDS", "");
+        if (!kinds.isBlank()) {
+            List<String> keep = List.of(kinds.split(","));
+            variants = variants.stream().filter(v -> keep.contains(v.kind().name())).toList();
+        }
 
-        InquiryDecisionGenerator generator = null;
-        InquiryDecisionProperties props = null;
+        // The frozen input is pinned: an arm run on a different capture is a different experiment.
+        String inputsSha = CalibrationRunner.sha(Files.readAllBytes(Path.of(System.getenv("CAL_INPUTS"))));
+        String pinned = env("CAL_INPUTS_SHA256", "");
+        if ("model".equals(mode) && !inputsSha.equals(pinned)) {
+            throw new IllegalStateException("CAL_INPUTS sha256 does not match CAL_INPUTS_SHA256 — refusing to spend calls");
+        }
+        InquiryDecisionProperties props = new InquiryDecisionProperties(true, org.toString(),
+                env("SELLEROPS_INQUIRY_DECISION_MODEL", "gpt-5-2025-08-07"),
+                env("SELLEROPS_INQUIRY_DECISION_API_KEY", "offline-no-key"), 800,
+                Integer.parseInt(env("SELLEROPS_INQUIRY_DECISION_JUDGE_MAX_OUTPUT_TOKENS", "2400")),
+                env("SELLEROPS_INQUIRY_DECISION_REASONING_EFFORT", "minimal"),
+                env("SELLEROPS_INQUIRY_DECISION_JUDGE_PROMPT", InquiryDecisionPrompt.JUDGE_V2),
+                env("SELLEROPS_INQUIRY_DECISION_JUDGE_REASONING_EFFORT", ""),
+                env("SELLEROPS_INQUIRY_DECISION_OUTPUT_FORMAT", InquiryDecisionProperties.FORMAT_JSON_SCHEMA));
+        CalibrationRunner.Result result;
         if ("model".equals(mode)) {
-            props = new InquiryDecisionProperties(true, org.toString(),
-                    env("SELLEROPS_INQUIRY_DECISION_MODEL", "gpt-5-2025-08-07"),
-                    env("SELLEROPS_INQUIRY_DECISION_API_KEY", ""), 800,
-                    Integer.parseInt(env("SELLEROPS_INQUIRY_DECISION_JUDGE_MAX_OUTPUT_TOKENS", "2400")),
-                    env("SELLEROPS_INQUIRY_DECISION_REASONING_EFFORT", "minimal"),
-                    env("SELLEROPS_INQUIRY_DECISION_JUDGE_PROMPT", InquiryDecisionPrompt.JUDGE_V2),
-                    env("SELLEROPS_INQUIRY_DECISION_JUDGE_REASONING_EFFORT", ""));
-            if (!props.isDeployed()) {
-                throw new IllegalStateException("CAL_MODE=model without SELLEROPS_INQUIRY_DECISION_API_KEY");
+            if (System.getenv("SELLEROPS_INQUIRY_DECISION_API_KEY") == null || maxCalls <= 0) {
+                throw new IllegalStateException("CAL_MODE=model needs the key and CAL_MAX_CALLS — the approved cap");
             }
-            if (maxCalls <= 0) {
-                throw new IllegalStateException("CAL_MODE=model needs CAL_MAX_CALLS — the approved cap");
+            CalibrationRunner runner = new CalibrationRunner(props, new JdkAgentLlmTransport(), org);
+            String smokePlan = env("CAL_SMOKE_PLAN", "");
+            if (!smokePlan.isBlank()) {
+                // One planner call on a synthetic sentence: does the vendor accept the plan schema? Counted in the cap.
+                System.out.println("COVERAGE_JUDGE_SMOKE_PLAN " + runner.planOnce(smokePlan));
+                maxCalls -= 1;
             }
-            AgentLlmTransport transport = new JdkAgentLlmTransport();
-            generator = new InquiryDecisionGenerator(transport, props);
-        } else if (!"offline".equals(mode)) {
+            result = runner.run(arm, variants, repeats, maxCalls, null);
+        } else if ("offline".equals(mode)) {
+            AgentLlmTransport none = (uri, headers, json) -> {
+                throw new IllegalStateException("offline mode must not reach a transport");
+            };
+            result = new CalibrationRunner(props, none, org).run(arm, variants, repeats, 0, CalibrationRunner::oracle);
+        } else {
             throw new IllegalStateException("CAL_MODE is offline or model, not " + mode);
         }
-
-        List<String> out = new ArrayList<>();
-        int calls = 0;
-        int callId = 0;
-        for (CalibrationVariants.Variant v : variants) {
-            if (!v.needsModel()) {
-                // Code-owned: the worst a judge could say — FULL on every need, citing everything — enforced.
-                Map<String, NeedVerdict> worst = new LinkedHashMap<>();
-                List<String> all = v.evidence().stream().map(EvidenceCandidate::id).toList();
-                v.needs().forEach(n -> worst.put(n.id(), new NeedVerdict(n.id(), NeedStatus.FULL, all, List.of(),
-                        List.of(), List.of(), null, List.of())));
-                write(out, arm, 1, ++callId, v, worst, null);
-                continue;
-            }
-            int runs = v.kind() == CalibrationVariants.Kind.ORIGINAL ? repeats : 1;
-            for (int run = 1; run <= runs; run++) {
-                Map<String, NeedVerdict> verdicts;
-                InquiryDecisionModel.CallCost cost = null;
-                if (generator == null) {
-                    verdicts = oracle(v);
-                } else {
-                    if (calls >= maxCalls) {
-                        throw new IllegalStateException("CAL_MAX_CALLS reached: " + calls);
-                    }
-                    String body = generator.judgeBody(v.question(), v.needs(), v.evidence(), v.precedents());
-                    InquiryDecisionModel.Answer<Map<String, NeedVerdict>> a = generator.judge(org, body,
-                            v.needs().size(), v.evidence().size(), v.precedents().size());
-                    calls++;
-                    verdicts = a.value();
-                    cost = a.cost();
-                }
-                write(out, arm, run, ++callId, v, verdicts, cost);
-            }
-        }
-        Files.write(Path.of(System.getenv("CAL_OUT")), out);
+        Files.write(Path.of(System.getenv("CAL_OUT")), result.rows());
         System.out.println("COVERAGE_JUDGE_CALIBRATION arm=" + arm + " mode=" + mode + " variants=" + variants.size()
-                + " counts=" + CalibrationVariants.counts(variants) + " calls=" + calls + " rows=" + out.size()
-                + (props == null ? "" : " prompt=" + props.judgePrompt() + " effort=" + props.judgeReasoningEffort()));
-    }
-
-    /** The gold as a judge: what a perfectly calibrated judge says about this variant. */
-    private static Map<String, NeedVerdict> oracle(CalibrationVariants.Variant v) {
-        Map<String, NeedVerdict> out = new LinkedHashMap<>();
-        for (InquiryNeed n : v.needs()) {
-            NeedStatus s = v.gold().get(n.id());
-            List<String> ids = s == NeedStatus.NONE ? List.of() : v.goldIds().get(n.id());
-            out.put(n.id(), new NeedVerdict(n.id(), s, ids, List.of(), List.of(), List.of(), null, List.of()));
-        }
-        return out;
-    }
-
-    private static void write(List<String> out, String arm, int run, int callId, CalibrationVariants.Variant v,
-                              Map<String, NeedVerdict> verdicts, InquiryDecisionModel.CallCost cost) throws Exception {
-        Map<String, EvidenceCandidate> evidence = new LinkedHashMap<>();
-        v.evidence().forEach(e -> evidence.put(e.id(), e));
-        Map<String, PrecedentCandidate> precedents = new LinkedHashMap<>();
-        v.precedents().forEach(p -> precedents.put(p.id(), p));
-        ObjectNode call = JSON.createObjectNode();
-        call.put("type", "call").put("arm", arm).put("run", run).put("call", callId).put("q", v.q())
-                .put("variant", v.kind().name()).put("target", goldTarget(v)).put("answered", verdicts != null)
-                .put("evidence", v.evidence().size()).put("precedents", v.precedents().size());
-        // A verdict keyed by an id the variant never sent is a harness or protocol fault, not a judgement — counted
-        // loudly so it can never again pass as NONE (apr-80adf54f).
-        long unmatched = verdicts == null ? 0 : verdicts.keySet().stream()
-                .filter(k -> v.needs().stream().noneMatch(n -> n.id().equals(k))).count();
-        call.put("unmatched_verdicts", unmatched);
-        if (cost != null) {
-            call.put("elapsed_ms", cost.elapsedMs()).put("prompt_tokens", cost.promptTokens())
-                    .put("completion_tokens", cost.completionTokens());
-        }
-        out.add(JSON.writeValueAsString(call));
-        List<NeedResult> enforced = NeedAggregation.enforce(v.needs(), verdicts == null ? Map.of() : verdicts,
-                evidence, precedents, DetailCapability.READABLE, v.product());
-        for (NeedResult r : enforced) {
-            NeedVerdict raw = verdicts == null ? null : verdicts.get(r.need().id());
-            ObjectNode n = JSON.createObjectNode();
-            n.put("type", "need").put("arm", arm).put("run", run).put("call", callId).put("q", v.q())
-                    .put("variant", v.kind().name()).put("target", goldTarget(v)).put("need", v.goldId().get(r.need().id()))
-                    .put("need_type", r.need().type().name()).put("gold", v.gold().get(r.need().id()).name())
-                    .put("expectation", v.expectation().name())
-                    .put("judged", r.judged() == null ? null : r.judged().name()).put("enforced", r.status().name())
-                    .put("enforcement", r.enforcement() == null ? null : r.enforcement().name());
-            ArrayNode cited = n.putArray("cited");
-            if (raw != null) {
-                raw.evidence().forEach(cited::add);
-            }
-            n.put("injected_cited", v.injected() != null && raw != null && raw.evidence().contains(v.injected()));
-            n.put("missing_n", raw == null ? 0 : raw.missingInfo().size())
-                    .put("customer_input_n", raw == null ? 0 : raw.customerInput().size())
-                    .put("assumptions_n", raw == null ? 0 : raw.assumptions().size());
-            ArrayNode proposed = n.putArray("precedents");
-            r.precedents().forEach(p -> proposed.add(p.memoryId().toString().substring(0, 8)));
-            out.add(JSON.writeValueAsString(n));
-        }
-    }
-
-    /** The targeted need as the gold names it ({@code *} for a whole-question variant). */
-    private static String goldTarget(CalibrationVariants.Variant v) {
-        return "*".equals(v.target()) ? "*" : v.goldId().get(v.target());
+                + " counts=" + CalibrationVariants.counts(variants) + " calls=" + result.calls() + " rows="
+                + result.rows().size() + " inputs_sha256=" + inputsSha + " prompt=" + props.judgePrompt() + " effort="
+                + props.judgeReasoningEffort() + " format=" + props.outputFormat());
     }
 
     private static String env(String k, String def) {

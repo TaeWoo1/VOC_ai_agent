@@ -31,12 +31,25 @@ public class InquiryDecisionProperties implements AgentCapabilityGate {
     private final String reasoningEffort;
     private final String judgePrompt;
     private final String judgeReasoningEffort;
+    private final String outputFormat;
+
+    /** Structured Outputs, strict schema — the default since the v2.1 audit. */
+    public static final String FORMAT_JSON_SCHEMA = "json_schema";
+    /** JSON mode — the request shape of every run before the v2.1 audit, kept to reproduce them. */
+    public static final String FORMAT_JSON_OBJECT = "json_object";
 
     /** Plan and judge at the same effort, the current judge instruction — what a test or a short config means. */
     public InquiryDecisionProperties(boolean enabled, String enabledOrgIds, String model, String apiKey,
                                      int planMaxOutputTokens, int judgeMaxOutputTokens, String reasoningEffort) {
         this(enabled, enabledOrgIds, model, apiKey, planMaxOutputTokens, judgeMaxOutputTokens, reasoningEffort,
                 InquiryDecisionPrompt.JUDGE_V2, "");
+    }
+
+    public InquiryDecisionProperties(boolean enabled, String enabledOrgIds, String model, String apiKey,
+                                     int planMaxOutputTokens, int judgeMaxOutputTokens, String reasoningEffort,
+                                     String judgePrompt, String judgeReasoningEffort) {
+        this(enabled, enabledOrgIds, model, apiKey, planMaxOutputTokens, judgeMaxOutputTokens, reasoningEffort,
+                judgePrompt, judgeReasoningEffort, FORMAT_JSON_SCHEMA);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -49,7 +62,8 @@ public class InquiryDecisionProperties implements AgentCapabilityGate {
             @Value("${sellerops.inquiry-decision.judge-max-output-tokens:2400}") int judgeMaxOutputTokens,
             @Value("${sellerops.inquiry-decision.reasoning-effort:minimal}") String reasoningEffort,
             @Value("${sellerops.inquiry-decision.judge-prompt:coverage-judge/v2}") String judgePrompt,
-            @Value("${sellerops.inquiry-decision.judge-reasoning-effort:}") String judgeReasoningEffort) {
+            @Value("${sellerops.inquiry-decision.judge-reasoning-effort:}") String judgeReasoningEffort,
+            @Value("${sellerops.inquiry-decision.output-format:json_schema}") String outputFormat) {
         this.enabled = enabled;
         this.allOrgs = enabledOrgIds != null && enabledOrgIds.trim().equals("*");
         this.enabledOrgIds = allOrgs ? List.of() : parseIds(enabledOrgIds);
@@ -69,6 +83,11 @@ public class InquiryDecisionProperties implements AgentCapabilityGate {
         // The judge's effort defaults to the plan's: one knob, unless an evaluation separates them.
         this.judgeReasoningEffort = judgeReasoningEffort == null || judgeReasoningEffort.isBlank()
                 ? this.reasoningEffort : judgeReasoningEffort.trim();
+        String f = outputFormat == null || outputFormat.isBlank() ? FORMAT_JSON_SCHEMA : outputFormat.trim();
+        if (!FORMAT_JSON_SCHEMA.equals(f) && !FORMAT_JSON_OBJECT.equals(f)) {
+            throw new IllegalArgumentException("sellerops.inquiry-decision.output-format: unknown " + outputFormat);
+        }
+        this.outputFormat = f;
     }
 
     private static List<UUID> parseIds(String csv) {
@@ -136,5 +155,9 @@ public class InquiryDecisionProperties implements AgentCapabilityGate {
 
     public String judgeReasoningEffort() {
         return judgeReasoningEffort;
+    }
+
+    public String outputFormat() {
+        return outputFormat;
     }
 }

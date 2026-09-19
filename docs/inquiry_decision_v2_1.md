@@ -191,3 +191,79 @@ offline 자기검사가 이것을 잡지 못한 이유: gold judge는 받은 id�
 
 production 경로는 영향이 없다(planner가 `N1…`을 쓴다). 관측 파일 해시는 `dataset.meta.json` `calibration.model_observations`에 INVALID로
 남긴다. 재측정은 새 승인이 필요하다.
+
+## 13. LLM API integration + eval harness audit (2026-09-20, 모델 호출 0)
+
+`apr-80adf54f`의 직접 원인(n1/N1)만 고치고 재실행하지 않고, 실제 호출 계약과 평가 환경 전체를 먼저 감사했다. production 의미는 바꾸지
+않았다 — 아래 「production 영향」 칸이 전부다.
+
+### 13-1. 실제 호출 경로
+
+| 항목 | 감사 전 | 감사 후 |
+|---|---|---|
+| API | Chat Completions `POST /v1/chat/completions` (`InquiryDecisionGenerator`, `JdkAgentLlmTransport`) | 그대로 |
+| 모델 | `gpt-5-2025-08-07` (`sellerops.inquiry-decision.model`) | 그대로 |
+| reasoning | top-level `reasoning_effort`; plan=`reasoning-effort`, judge=`judge-reasoning-effort`(공란이면 plan 값) | 그대로 |
+| 출력 형식 | **JSON mode** `response_format:{type:json_object}` + 자체 parser | **Structured Outputs `json_schema`, `strict:true`** — plan·judge v1·judge v2 각자의 schema. `output-format: json_object`로 옛 모양 재현 가능 |
+| need id | 자유 문자열 — 모델이 다시 써야 했다 | schema에서 **보낸 id의 enum**, `minItems = maxItems = need 수`; evidence·precedent id도 보낸 것의 enum(없으면 `maxItems:0`) |
+| 메시지 | `system`(고정 지시) + `user`(JSON payload) | 그대로 (reasoning 모델에서 system은 developer 지시로 다뤄진다 — 바꾸지 않음) |
+| 토큰 한도 | `max_completion_tokens`(reasoning 포함) plan 800 · judge 2400 | 그대로. 평가 arm은 **모두 6000**으로 고정(§13-3 H3) |
+| timeout / retry | connect 10s · request 60s · **retry 없음** | 그대로 — 실패는 fail closed(NO_ANSWER_BASIS), 재시도로 같은 표본이 두 번 세어질 길이 없다 |
+| refusal / 잘림 | 구분 없음 — content 파싱 실패로 뭉뚱그려 null | `REFUSAL`(message.refusal) · `TRUNCATED`(finish_reason=length) · `HTTP_<n>` · `TRANSPORT` · `EMPTY` · `UNPARSEABLE` · `VERDICT_SET`을 `Answer.failure`와 로그에 따로 남긴다 |
+| usage | `usage.prompt_tokens / completion_tokens / completion_tokens_details.reasoning_tokens` 메타데이터 로그 | 그대로 + `format`·`failure`·`finish` |
+
+### 13-2. OpenAI 현재 권장과의 차이 (developers.openai.com, 2026-09-20 확인)
+
+1. **Structured Outputs를 JSON mode보다 권장** — 고쳤다(기본값 `json_schema`).
+2. **새 프로젝트는 Responses API 권장, Chat Completions는 계속 지원** — 유지한다. 이유: 기준선(`apr-c8715d20`)과 같은 endpoint에서
+   judge 계약만 바꿔야 원인이 분리된다. 전환은 별도 변경 + 같은 모델·같은 schema의 Chat↔Responses parity 측정으로 한다.
+3. **`gpt-5-2025-08-07`은 deprecated** — 2026-06-11 공지, **2026-12-11 제거**, 권장 대체 `gpt-5.6-sol`. §13-5.
+4. refusal / incomplete를 구분해 다루라는 권장 — 고쳤다(13-1).
+
+### 13-3. 발견한 harness / scorer / 통합 문제
+
+| # | 문제 | 영향 | 조치 · 잡는 테스트 |
+|---|---|---|---|
+| H1 | capture가 gold id(`n1`)를 그대로 보냄 | apr-80adf54f INVALID | production 번호(`N1…`) + gold 매핑 · `CalibrationVariantsTest` |
+| H2 | 실패한 호출(verdict 없음)이 need별 NONE으로 채점될 수 있었다 | 실패가 판단으로 섞임 | 실패 호출의 need는 `failed:true`, 상태 없음, 모든 지표에서 제외 · `CalibrationHarnessIntegrityTest`, scorer 테스트 |
+| H3 | 무효 run에서 C만 `max_completion_tokens` 6000, A/B는 2400 | B/C가 effort 외에도 달랐다 | 모든 arm 6000 고정 · parity 검사 |
+| H4 | 얼린 입력 파일이 run에 묶여 있지 않았다 | 다른 capture로 돈 arm이 섞일 수 있다 | model 모드는 `CAL_INPUTS_SHA256` 불일치 시 호출 전 거부 |
+| H5 | 요청 fingerprint가 없어 arm 간 동일 입력을 증명할 수 없었다 | — | 호출마다 `input_fp`·`system_fp`·`schema_fp`·`request_fp`·model·effort·max_tokens·format · `judge.mjs --parity` |
+| H6 | offline oracle이 자기 id·순서로 답해 통합 버그를 못 봤다 | H1이 통과됐다 | oracle과 가짜 vendor가 **production 모양**(보낸 `N` id, 역순, Chat Completions envelope)으로 답한다 |
+| H7 | **production parser**: 빠진 verdict → NONE, 중복 → 마지막 값(NONE을 FULL이 덮을 수 있다), 모르는 id → 무시 | 중복이면 GROUNDED가 될 수 있었다 | verdict 집합이 보낸 need와 정확히 같지 않으면 호출 실패(`VERDICT_SET`) · `JudgeIntegrationContractTest` |
+| H8 | scorer에 중복 행·gold 매핑·입력 drift·NOT_JUDGED 검사가 없었다 | 오염이 수치로 통과 | `integrity()` — 하나라도 있으면 arm `valid:false` · 무효 run 세 파일이 이제 **스스로** 거부된다(NOT_JUDGED 132/71/45) |
+
+확인만 하고 문제 없던 것: **memo**는 인스턴스 필드이고 키가 요청 전체의 해시라 arm 간 답을 공유할 수 없다(runner는 memo를 거치지도
+않는다) · **retry 없음**(runner는 variant×run을 한 번 보내고 한 번 쓴다, 행 중복 0을 테스트로 고정) · **순서 바뀐 verdict**는 id로 매칭돼
+정상 처리.
+
+**production 영향**: 출력 형식(schema) · 실패 사유 기록 · verdict 집합 엄격화(H7). basis 결과는 실패하면 여전히 NO_ANSWER_BASIS이고,
+달라지는 곳은 중복 verdict가 FULL을 만들던 경우(버그)와 모르는 id가 섞인 응답이 판정 전체를 실패시키는 경우(더 보수적)뿐이다.
+capability는 기본 OFF 그대로.
+
+**mutation 검증**: M1(verdict 집합 검사를 느슨하게) → 3 테스트 실패 · M2(실패 호출을 NONE으로) → 1 · M3(gold id를 그대로 보냄 = 원래 버그)
+→ 3. 전부 되돌린 뒤 초록.
+
+### 13-4. Prompt parity (실제 S0 capture 181 variant, 모델 0)
+
+offline 모드도 production 요청을 그대로 만들므로 arm 설정만 바꿔 세 번 돌리고 fingerprint를 비교했다: **A↔B는 `system_fp`·`schema_fp`만,
+B↔C는 `effort`만 달랐다**; `input_fp`(user turn 바이트)·model·format·max_tokens는 181개 전부 동일. 단위 테스트(`armParity`)가 같은 성질을
+요청 JSON의 경로 단위로 고정한다(A→B: `/messages/0/content`·`/response_format`, B→C: `/reasoning_effort`).
+
+### 13-5. 모델 선택
+
+**이번 calibration은 `gpt-5-2025-08-07`을 유지한다.** v2 기준선과 무효 run의 지연·토큰 실측이 이 snapshot 위에 있고, judge 계약과 모델을
+한 번에 바꾸면 이득의 출처를 가를 수 없다. 다만 이 snapshot은 **2026-12-11에 제거**되므로 여기서 얻은 수치는 production 결정의 근거로
+유효 기한이 있다. 계획: A/B(필요하면 C)에서 judge 계약이 정해진 뒤, **승자 judge × 후속 모델(`gpt-5.6-sol`)**을 별도 arm으로 같은 얼린
+입력에 한 번 돌린다. effort 어휘는 모델마다 다르다(Planner Model Benchmark v1: 후속 모델에서 `minimal`은 400, 의미상 짝은 `none`) — 그
+arm은 이름이 아니라 「reasoning 토큰 0」으로 맞춘다. 시점은 파일럿 holdout 라벨링 전, 그리고 12-11 전.
+
+### 13-6. 재실행 계획 (축소)
+
+1. **Smoke** — 합성 3 case(`contracts/…/synthetic/judge-smoke-*.jsonl`) × A·B, ORIGINAL만 1회 + plan 1회 = **7 호출**. 확인: strict schema가
+   이 모델에서 받아들여지는가(HTTP 400 0) · 실패 0 · unmatched 0 · parity(A↔B) · schema가 요청마다 달라져 생기는 첫 호출 지연.
+2. **Stage 1 (A·B만)** — S0 얼린 입력, arm당 233(원본 67×2 + DROP 10 + UNRELATED 67 + PRECEDENT_ONLY 22). 유효성 관문: `integrity` 0 ·
+   parity 통과 · 실패 호출 ≤ 2%. 승자 규칙은 §8 그대로(A 대비 unsafe FULL 승격 감소 · NOT_COVERED 계열 위반 A 이하 · useful coverage ≥ A − 0.2).
+3. **C는 조건부** — (i) 둘 다 규칙을 못 넘거나 (ii) B가 안전 조건(a)(b)는 넘고 유용성(c)만 못 넘을 때만, B와 같은 입력으로 233 호출.
+   무효 run의 비용 실측(p50 7.5s · p95 21.0s · 출력 568 토큰, reasoning 평균 460)은 유효하다 — 그래서 기본 계획에서 뺐다.
+4. **Stage 2** — 승자 하나로 S0 전체 pipeline(F5 OFF, ≤136). 기준선 S0-V2M은 JSON mode였으므로 형식 변화가 함께 들어간다는 점을 결과에 적는다.

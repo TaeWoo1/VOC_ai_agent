@@ -23,8 +23,16 @@ public interface InquiryDecisionModel {
     Answer<Map<String, NeedVerdict>> judge(UUID orgId, String question, List<InquiryNeed> needs,
                                            List<EvidenceCandidate> evidence, List<PrecedentCandidate> precedents);
 
-    /** A value (or null for no opinion) and what getting it cost — returned, never kept on a shared object. */
-    record Answer<T>(T value, CallCost cost) {
+    /**
+     * A value (or null for no opinion), what getting it cost, and — when there is no value — why, as a closed word
+     * ({@code HTTP_<status>}, {@code TRANSPORT}, {@code REFUSAL}, {@code TRUNCATED}, {@code EMPTY}, {@code UNPARSEABLE},
+     * {@code VERDICT_SET}). Returned, never kept on a shared object.
+     */
+    record Answer<T>(T value, CallCost cost, String failure) {
+        public Answer(T value, CallCost cost) {
+            this(value, cost, null);
+        }
+
         public static <T> Answer<T> none() {
             return new Answer<>(null, CallCost.NONE);
         }

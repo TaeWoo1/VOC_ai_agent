@@ -71,7 +71,8 @@ public class InquiryDecisionService implements InquiryDecisionModel {
             return Answer.none();
         }
         String body = generator.judgeBody(question, needs, evidence, precedents);
-        return remembered(body, () -> generator.judge(orgId, body, needs.size(), evidence.size(), precedents.size()));
+        return remembered(body, () -> generator.judge(orgId, body, needs.stream().map(InquiryNeed::id).toList(),
+                evidence.size(), precedents.size()));
     }
 
     /** A remembered answer costs nothing; a refused one is not remembered, so the next assessment may try again. */

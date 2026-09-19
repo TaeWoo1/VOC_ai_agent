@@ -1,0 +1,4 @@
+{"q":"SMOKE:1","need":"n1","ask":"수납함의 가로 길이","type":"PRODUCT_SPEC","scope":"PRODUCT","sets":[{"refs":["PK:00000000"],"suff":"FULL"}],"family_sets":[],"precedents":[],"family_precedents":[]}
+{"q":"SMOKE:1","need":"n2","ask":"제주도 배송 가능 여부","type":"POLICY","scope":"ORG","sets":[],"family_sets":[],"precedents":[],"family_precedents":[]}
+{"q":"SMOKE:2","need":"n1","ask":"고객의 선반에 맞는 크기인지","type":"PRODUCT_COMPATIBILITY","scope":"PRODUCT","sets":[{"refs":["PK:00000000"],"suff":"CONDITIONAL"}],"family_sets":[],"precedents":[],"family_precedents":[]}
+{"q":"SMOKE:3","need":"n1","ask":"뚜껑 단품 구매 가능 여부","type":"CATALOGUE_AVAILABILITY","scope":"PRODUCT","sets":[],"family_sets":[],"precedents":["00000000"],"family_precedents":[]}

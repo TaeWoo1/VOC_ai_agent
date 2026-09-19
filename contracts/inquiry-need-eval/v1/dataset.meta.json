@@ -211,6 +211,14 @@
     "sha256": "e233d309e77d13e1d2087468d0fd89b546661106716202d250597106bce65c1f",
     "status": "INVALID — need ids sent as gold ids (n1); unmatched verdicts scored NONE (apr-80adf54f)"
    }
+  },
+  "smoke": {
+   "description": "synthetic only — committed; 3 cases (FULL+NONE, CONDITIONAL, NONE with a REUSABLE precedent and no evidence) for a strict-schema smoke of the real API",
+   "files": {
+    "judge-smoke-inputs.jsonl": "33b02759f028daf7b0ffcfa6386bce1a408018474a3e7507280f9fd200358fc9",
+    "judge-smoke-needs.jsonl": "7383adfc4dcec009226294c02409c53f3a7375eea8de34d9e8957c2740a0acc5",
+    "judge-smoke-precedents.jsonl": "1fbbcabf61616546611d8e8c9c4b0388f5c67acc0d643ccb92fc483eef5b1840"
+   }
   }
  }
 }

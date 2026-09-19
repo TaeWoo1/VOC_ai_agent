@@ -47,35 +47,70 @@ public class InquiryDecisionGenerator {
         AgentLlmTransport.Response response = transport.post(ENDPOINT,
                 Map.of("Authorization", "Bearer " + properties.apiKey()), body);
         AgentLlmCallMetrics metrics = AgentLlmCallMetrics.of(response);
-        List<InquiryNeed> needs = response.ok() ? parsePlan(content(response)) : null;
-        log.info("inquiry_decision phase=plan orgId={} answered={} needs={} {}", orgId, response.ok(),
-                needs == null ? -1 : needs.size(), metrics.toLogFields());
-        return new InquiryDecisionModel.Answer<>(needs, cost(metrics));
+        Envelope env = Envelope.of(response);
+        List<InquiryNeed> needs = env.failure() == null ? parsePlan(env.content()) : null;
+        String failure = env.failure() != null ? env.failure() : needs == null ? "UNPARSEABLE" : null;
+        log.info("inquiry_decision phase=plan orgId={} format={} answered={} failure={} finish={} needs={} {}", orgId,
+                properties.outputFormat(), failure == null, failure, env.finish(), needs == null ? -1 : needs.size(),
+                metrics.toLogFields());
+        return new InquiryDecisionModel.Answer<>(needs, cost(metrics), failure);
     }
 
-    InquiryDecisionModel.Answer<Map<String, NeedVerdict>> judge(UUID orgId, String body, int needs, int evidence,
-                                                                int precedents) {
+    /**
+     * @param needIds the ids the request sent, in order — the verdict set must be exactly these ({@link #parseJudge(String,
+     *                List)}): one each, none missing, none duplicated, none invented. Anything else fails the call.
+     */
+    InquiryDecisionModel.Answer<Map<String, NeedVerdict>> judge(UUID orgId, String body, List<String> needIds,
+                                                                int evidence, int precedents) {
         AgentLlmTransport.Response response = transport.post(ENDPOINT,
                 Map.of("Authorization", "Bearer " + properties.apiKey()), body);
         AgentLlmCallMetrics metrics = AgentLlmCallMetrics.of(response);
-        Map<String, NeedVerdict> verdicts = response.ok() ? parseJudge(content(response)) : null;
-        log.info("inquiry_decision phase=judge orgId={} prompt={} effort={} answered={} needs={} evidence={} precedents={}"
-                        + " verdicts={} {}", orgId, properties.judgePrompt(), properties.judgeReasoningEffort(),
-                response.ok(), needs, evidence, precedents, verdicts == null ? -1 : verdicts.size(),
-                metrics.toLogFields());
-        return new InquiryDecisionModel.Answer<>(verdicts, cost(metrics));
+        Envelope env = Envelope.of(response);
+        Judged judged = env.failure() == null ? parseJudge(env.content(), needIds) : new Judged(null, env.failure());
+        log.info("inquiry_decision phase=judge orgId={} prompt={} effort={} format={} answered={} failure={} finish={}"
+                        + " needs={} evidence={} precedents={} verdicts={} {}", orgId, properties.judgePrompt(),
+                properties.judgeReasoningEffort(), properties.outputFormat(), judged.failure() == null,
+                judged.failure(), env.finish(), needIds.size(), evidence, precedents,
+                judged.verdicts() == null ? -1 : judged.verdicts().size(), metrics.toLogFields());
+        return new InquiryDecisionModel.Answer<>(judged.verdicts(), cost(metrics), judged.failure());
+    }
+
+    /**
+     * What came back, before any parsing of the model's content. A refusal, a cut-off answer, an HTTP failure and an
+     * empty message are different facts and are recorded as such — each is still no opinion (fail closed).
+     */
+    record Envelope(String content, String finish, String failure) {
+        static Envelope of(AgentLlmTransport.Response response) {
+            if (response == null) {
+                return new Envelope(null, null, "TRANSPORT");
+            }
+            if (!response.ok()) {
+                return new Envelope(null, null, response.status() == 0 ? "TRANSPORT" : "HTTP_" + response.status());
+            }
+            try {
+                JsonNode choice = MAPPER.readTree(response.body()).path("choices").path(0);
+                String finish = choice.path("finish_reason").asText(null);
+                JsonNode refusal = choice.path("message").path("refusal");
+                if (refusal.isTextual() && !refusal.asText().isBlank()) {
+                    return new Envelope(null, finish, "REFUSAL");
+                }
+                if ("length".equals(finish)) {
+                    return new Envelope(null, finish, "TRUNCATED");
+                }
+                String content = choice.path("message").path("content").asText("");
+                return content.isBlank() ? new Envelope(null, finish, "EMPTY") : new Envelope(content, finish, null);
+            } catch (Exception e) {
+                return new Envelope(null, null, "UNPARSEABLE");
+            }
+        }
+    }
+
+    /** A verdict set, or why there is none. */
+    record Judged(Map<String, NeedVerdict> verdicts, String failure) {
     }
 
     private static InquiryDecisionModel.CallCost cost(AgentLlmCallMetrics m) {
         return new InquiryDecisionModel.CallCost(1, m.elapsedMs(), m.promptTokens(), m.completionTokens());
-    }
-
-    private static String content(AgentLlmTransport.Response response) {
-        try {
-            return MAPPER.readTree(response.body()).path("choices").path(0).path("message").path("content").asText("");
-        } catch (Exception e) {
-            return "";
-        }
     }
 
     /**
@@ -110,6 +145,43 @@ public class InquiryDecisionGenerator {
         }
     }
 
+    /**
+     * <b>The verdict set must be exactly the needs sent</b> (Inquiry Decision v2.1 audit). Verdicts are matched by id,
+     * so their order does not matter; but a missing need, a need judged twice, an id that was never sent or a verdict
+     * that cannot be read FAILS THE CALL ({@code VERDICT_SET}) rather than being skipped. Before this, a missing verdict
+     * silently became NONE, a duplicate silently kept the last word (a NONE could be overwritten by a FULL), and an
+     * unknown id was ignored — the same silent mapping failure that invalidated calibration run apr-80adf54f. The
+     * product outcome of a failed judge is unchanged: NO_ANSWER_BASIS, the Case is the seller's.
+     */
+    static Judged parseJudge(String content, List<String> needIds) {
+        if (content == null || content.isBlank()) {
+            return new Judged(null, "EMPTY");
+        }
+        JsonNode verdicts;
+        try {
+            verdicts = MAPPER.readTree(content).path("verdicts");
+        } catch (Exception e) {
+            return new Judged(null, "UNPARSEABLE");
+        }
+        if (!verdicts.isArray()) {
+            return new Judged(null, "UNPARSEABLE");
+        }
+        Set<String> expected = new HashSet<>(needIds);
+        Set<String> seen = new HashSet<>();
+        for (JsonNode v : verdicts) {
+            String need = v.path("need").asText("");
+            if (!expected.contains(need) || !seen.add(need)
+                    || NeedStatus.parseJudge(v.path("status").asText(null)) == null) {
+                return new Judged(null, "VERDICT_SET");
+            }
+        }
+        if (!seen.equals(expected)) {
+            return new Judged(null, "VERDICT_SET");
+        }
+        return new Judged(parseJudge(content), null);
+    }
+
+    /** Lenient reading of one answer's verdicts, by id — the strict set check is {@link #parseJudge(String, List)}. */
     static Map<String, NeedVerdict> parseJudge(String content) {
         try {
             if (content == null || content.isBlank()) {
@@ -167,24 +239,31 @@ public class InquiryDecisionGenerator {
     /** Package-visible so the payload floor test can assert the exact bytes. */
     String planBody(String question) {
         return body(InquiryDecisionPrompt.planSystem(), InquiryDecisionPrompt.planUser(question),
-                properties.planMaxOutputTokens(), properties.reasoningEffort());
+                properties.planMaxOutputTokens(), properties.reasoningEffort(), InquiryDecisionPrompt.planSchema());
     }
 
     String judgeBody(String question, List<InquiryNeed> needs, List<EvidenceCandidate> evidence,
                      List<PrecedentCandidate> precedents) {
         return body(InquiryDecisionPrompt.judgeSystem(properties.judgePrompt()),
                 InquiryDecisionPrompt.judgeUser(question, needs, evidence, precedents),
-                properties.judgeMaxOutputTokens(), properties.judgeReasoningEffort());
+                properties.judgeMaxOutputTokens(), properties.judgeReasoningEffort(),
+                InquiryDecisionPrompt.judgeSchema(properties.judgePrompt(), needs.stream().map(InquiryNeed::id).toList(),
+                        evidence.stream().map(EvidenceCandidate::id).toList(),
+                        precedents.stream().map(PrecedentCandidate::id).toList()));
     }
 
-    private String body(String system, String user, int maxTokens, String reasoningEffort) {
+    private String body(String system, String user, int maxTokens, String reasoningEffort, ObjectNode schema) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("model", properties.model());
         ArrayNode messages = root.putArray("messages");
         messages.addObject().put("role", "system").put("content", system);
         messages.addObject().put("role", "user").put("content", user);
         root.put("max_completion_tokens", maxTokens);
-        root.putObject("response_format").put("type", "json_object");
+        if (InquiryDecisionProperties.FORMAT_JSON_OBJECT.equals(properties.outputFormat())) {
+            root.putObject("response_format").put("type", "json_object"); // the v2 / apr-c8715d20 request shape
+        } else {
+            root.set("response_format", schema);
+        }
         if (reasoningEffort != null) {
             root.put("reasoning_effort", reasoningEffort);
         }

@@ -3,6 +3,7 @@
 // exact candidates it was shown. Reads the rows CoverageJudgeCalibrationIT writes (ids and closed tokens only).
 //   node tools/inquiry-need-eval/judge.mjs --obs <arm.jsonl> [--needs <needs.jsonl> --precedents <precedents.jsonl>]
 //        [--json <out.json>]
+//   node tools/inquiry-need-eval/judge.mjs --parity <armA.jsonl>,<armB.jsonl> --may-differ system_fp,schema_fp
 // Definitions: docs/inquiry_decision_v2_1.md §5. Pure apart from reading its inputs.
 import { writeFileSync } from 'node:fs';
 import { readJsonl } from './io.mjs';
@@ -67,7 +68,78 @@ const pct = (xs, p) => {
  * @param needsGold   optional Eval v1 needs (for precedent scoring)
  * @param reusable    optional set of REUSABLE memory prefixes
  */
+/**
+ * Why an arm's rows cannot be trusted, before any metric is read. Every entry is a harness or protocol fault, never a
+ * judgement: the arm is INVALID while this list is non-empty (Inquiry Decision v2.1 audit, after apr-80adf54f).
+ */
+export function integrity(rows, { needsGold = [] } = {}) {
+  const problems = [];
+  const needs = rows.filter((r) => r.type === 'need');
+  const calls = rows.filter((r) => r.type === 'call');
+  const seen = new Set();
+  for (const r of needs) {
+    const k = `${r.run}|${r.q}|${r.variant}|${r.target}|${r.need}`;
+    if (seen.has(k)) problems.push(`DUPLICATE_ROW ${k}`);
+    seen.add(k);
+  }
+  const unmatched = calls.reduce((a, c) => a + (c.unmatched_verdicts ?? 0), 0);
+  if (unmatched) problems.push(`UNMATCHED_VERDICTS ${unmatched}`);
+  // A verdict set is all or nothing since the v2.1 audit: a need left unjudged inside an ANSWERED call can only be a
+  // mapping fault — exactly how apr-80adf54f lost 11–40 needs per arm.
+  const notJudged = needs.filter((r) => !r.failed && r.enforcement === 'NOT_JUDGED').length;
+  if (notJudged) problems.push(`NOT_JUDGED ${notJudged}`);
+  // The same variant must have sent the same input on every run of this arm.
+  const fp = {};
+  for (const c of calls) {
+    if (!c.input_fp) continue;
+    const k = `${c.q}|${c.variant}|${c.target}`;
+    if (fp[k] && fp[k] !== c.input_fp) problems.push(`INPUT_DRIFT ${k}`);
+    fp[k] ??= c.input_fp;
+  }
+  // Each ORIGINAL run must hold exactly the gold needs of every question it touched — no more, no fewer.
+  if (needsGold.length) {
+    const goldByQ = {};
+    for (const n of needsGold) (goldByQ[n.q] ??= new Set()).add(n.need);
+    const byRunQ = {};
+    for (const r of needs.filter((x) => x.variant === 'ORIGINAL')) (byRunQ[`${r.run}|${r.q}`] ??= []).push(r.need);
+    for (const [k, got] of Object.entries(byRunQ)) {
+      const want = goldByQ[k.split('|')[1]];
+      const same = want && got.length === want.size && got.every((x) => want.has(x));
+      if (!same) problems.push(`GOLD_MAPPING ${k}`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * Two arms are comparable only if every call sent byte-identical INPUT for the same variant and the same model, format
+ * and token limit; what may differ is declared by the caller (A/B: the instruction and its schema; B/C: the effort).
+ */
+export function parity(armA, armB, { mayDiffer = [] } = {}) {
+  const key = (c) => `${c.q}|${c.variant}|${c.target}|${c.run}`;
+  const callsOf = (rows) => Object.fromEntries(rows.filter((r) => r.type === 'call' && r.judge !== 'WORST_CASE').map((c) => [key(c), c]));
+  const a = callsOf(armA);
+  const b = callsOf(armB);
+  const problems = [];
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const fields = ['input_fp', 'model', 'max_tokens', 'format', 'system_fp', 'schema_fp', 'effort'];
+  const differed = new Set();
+  for (const k of keys) {
+    if (!a[k] || !b[k]) { problems.push(`MISSING_CALL ${k}`); continue; }
+    for (const f of fields) {
+      if (a[k][f] !== b[k][f]) {
+        if (mayDiffer.includes(f)) differed.add(f); else problems.push(`${f.toUpperCase()}_DIFFERS ${k}`);
+      }
+    }
+  }
+  return { comparable: problems.length === 0, problems, differed: [...differed].sort() };
+}
+
 export function scoreJudge(rows, { needsGold = [], reusable = new Set() } = {}) {
+  const problems = integrity(rows, { needsGold });
+  const failedNeeds = rows.filter((r) => r.type === 'need' && r.failed);
+  // A failed call has no verdict; its needs are reported as failures and never enter a quality metric as NONE.
+  rows = rows.filter((r) => !(r.type === 'need' && r.failed));
   const needs = rows.filter((r) => r.type === 'need');
   const calls = rows.filter((r) => r.type === 'call');
   const arm = rows[0]?.arm ?? null;
@@ -142,10 +214,12 @@ export function scoreJudge(rows, { needsGold = [], reusable = new Set() } = {}) 
   }
 
   const timed = calls.filter((c) => c.elapsed_ms != null);
-  const unmatched = calls.reduce((a, c) => a + (c.unmatched_verdicts ?? 0), 0);
   return {
     arm,
-    valid: unmatched === 0,
+    valid: problems.length === 0,
+    problems,
+    failed_needs: failedNeeds.length,
+    failures: failedNeeds.reduce((a, r) => ((a[r.failure] = (a[r.failure] ?? 0) + 1), a), {}),
     not_judged_needs: notJudged,
     judge: metricsOf(run1, 'judged'),
     enforced: metricsOf(run1, 'enforced'),
@@ -173,12 +247,18 @@ export function scoreJudge(rows, { needsGold = [], reusable = new Set() } = {}) 
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = Object.fromEntries(process.argv.slice(2).reduce((a, x, i, all) => (x.startsWith('--') ? [...a, [x.slice(2), all[i + 1]]] : a), []));
+  if (args.parity) {
+    const [x, y] = args.parity.split(',');
+    const res = parity(readJsonl(x), readJsonl(y), { mayDiffer: (args['may-differ'] ?? '').split(',').filter(Boolean) });
+    console.log(JSON.stringify({ ...res, problems: res.problems.slice(0, 20) }, null, 2));
+    process.exit(res.comparable ? 0 : 1);
+  }
   const rows = readJsonl(args.obs);
   const needsGold = args.needs ? readJsonl(args.needs) : [];
   const reusable = new Set(args.precedents ? readJsonl(args.precedents).filter((p) => p.precedent_scope === 'REUSABLE').map((p) => p.memory) : []);
   const out = scoreJudge(rows, { needsGold, reusable });
   if (args.json) writeFileSync(args.json, JSON.stringify(out, null, 2));
-  if (!out.valid) console.error(`INVALID ARM: ${out.calls.unmatched_verdicts} verdicts matched no need that was sent`);
+  if (!out.valid) console.error(`INVALID ARM: ${out.problems.slice(0, 5).join('; ')}`);
   console.log(JSON.stringify({ arm: out.arm, valid: out.valid, not_judged_needs: out.not_judged_needs, judge: out.judge, enforced: out.enforced, stability: out.stability.map(({ changed, ...s }) => s),
     counterfactuals: Object.fromEntries(Object.entries(out.counterfactuals).map(([k, v]) => [k, { fixtures: v.fixtures, violations: v.violations, injected_cited: v.injected_cited }])),
     precedents: out.precedents, calls: out.calls }, null, 2));

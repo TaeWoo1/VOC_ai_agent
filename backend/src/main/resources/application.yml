@@ -750,6 +750,8 @@ sellerops:
     # Separate knobs so a calibration can change the judge and nothing else (docs/inquiry_decision_v2_1.md).
     judge-prompt: ${SELLEROPS_INQUIRY_DECISION_JUDGE_PROMPT:coverage-judge/v2}
     judge-reasoning-effort: ${SELLEROPS_INQUIRY_DECISION_JUDGE_REASONING_EFFORT:}
+    # json_schema = Structured Outputs, strict (need ids an enum of the ids sent); json_object = the pre-audit JSON mode.
+    output-format: ${SELLEROPS_INQUIRY_DECISION_OUTPUT_FORMAT:json_schema}
   inquiry-import:
     esm:
       # Manual ESM (G마켓/옥션) inquiry Excel-import bridge. Off by default — with this
