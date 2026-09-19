@@ -118,6 +118,26 @@
   "S1-V2O": {
    "sha256": "97efe42da6823163dc805608bd1cc957d80c623ce0c924e61053a45598ba7a42",
    "description": "same, on the catalogue snapshot"
+  },
+  "S0-V2M": {
+   "sha256": "8a5f2afce33ab635798ebbbde2bd84a61153a5d288527ba6667a17419b9817de",
+   "description": "Decision v2 real model (apr-c8715d20), current retrieval"
+  },
+  "S0-V2MF5": {
+   "sha256": "26b169e0f1bc87363ff9fdd580ac14a209be62e1b04257a2e4bd06fcb5f59724",
+   "description": "Decision v2 real model + F5, run 1"
+  },
+  "S0-V2MF5b": {
+   "sha256": "50029e6b939dce5c240a07d17a02cefae5850148e5369b7e5b9a487253d8d03a",
+   "description": "Decision v2 real model + F5, run 2 (stability)"
+  },
+  "S1-V2M": {
+   "sha256": "8ad5213e659936c0f0503ba44105b81151fe64316c103198905b482cdbf9fcea",
+   "description": "Decision v2 real model, catalogue snapshot"
+  },
+  "S1-V2MF5": {
+   "sha256": "5e1ffa6308857932fb966a3f07d258331f103c1576d5b1c2bdaa6ddc2a26f356",
+   "description": "Decision v2 real model + F5, catalogue snapshot"
   }
  },
  "harness": "backend/src/test/java/com/sellerops/knowledge/teach/InquiryNeedEvalIT.java"

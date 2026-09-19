@@ -275,7 +275,7 @@ class InquiryDecisionV2Test {
     }
 
     @Test
-    @DisplayName("S X6a shape — fully answered: GROUNDED, and the drafter is not told the 규격 is undetermined")
+    @DisplayName("S X6a shape — fully answered: GROUNDED, and the rule-based 규격 line still reaches the drafter")
     void fullIsNotClarified() {
         seedOption("사이즈: 1호", "SELLING");
         seedOption("사이즈: 3호", "SELLING");
@@ -289,8 +289,12 @@ class InquiryDecisionV2Test {
         GeneratedDraftView view = composer(model).generateAs(org, work.getId(), "SYSTEM:RESPONSIBILITY");
 
         assertThat(view.answerBasis()).isEqualTo("GROUNDED");
-        assertThat(model.sawSpec).isEqualTo(com.sellerops.inquiry.draft.SpecApplicability.Applicability
-                .NOT_VARIANT_SENSITIVE.messageKo(true, false));
+        // A GROUNDED decision does not silence the 규격 caution: the real judge was measured calling spec-dependent
+        // answers FULL (apr-c8715d20), so the drafter is still told when the listing's 규격 is undetermined.
+        assertThat(model.sawSpec).isEqualTo(view.knowledgeGap().applicability() == null ? model.sawSpec
+                : com.sellerops.inquiry.draft.SpecApplicability.Applicability.valueOf(view.knowledgeGap().applicability())
+                        .messageKo(true, false));
+        assertThat(view.knowledgeGap().applicability()).isEqualTo("VARIANT_UNRESOLVED");
     }
 
     @Test

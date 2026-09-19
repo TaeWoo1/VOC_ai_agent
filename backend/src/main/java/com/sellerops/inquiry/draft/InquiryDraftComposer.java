@@ -404,11 +404,11 @@ public class InquiryDraftComposer {
                 com.sellerops.inquiry.decision.NeedDecision needDecision = assessment.decision();
                 List<AgentDraftGenerator.Passage> shown = needDecision != null ? needDecision.passages()
                         : passagesFor(assessment.catalogue(), retrieved.passages(), context);
-                // With a decision, the judge already weighed whether the answer moves with the 규격: every need FULL means
-                // it does not need asking, so the rule-based 「규격 미확정」 line would re-introduce the clarification the
-                // judge ruled out. A conditional need carries its own 「고객에게 확인」 in the scope list.
-                SpecApplicability.Applicability specLine = needDecision != null && basis == AnswerBasisState.GROUNDED
-                        ? SpecApplicability.Applicability.NOT_VARIANT_SENSITIVE : applicability;
+                // The rule-based 규격 line stays even when the decision says GROUNDED. The first real-model run
+                // (apr-c8715d20) found the judge calling spec-dependent answers FULL (「몇 가닥 들어가나요」 against a FAQ
+                // written per product, not per 호) — dropping the line then would let a draft close on a figure the
+                // customer's 규격 decides, the 2026-08-26 incident. Over-asking is the safe side of that trade.
+                SpecApplicability.Applicability specLine = applicability;
                 written = needDecision != null ? model.draft(orgId, title, details, shown,
                         retrieved.order().messageKo(),
                         specLine.messageKo(retrieved.figuresUnaided(), retrieved.variantSpecific()),
