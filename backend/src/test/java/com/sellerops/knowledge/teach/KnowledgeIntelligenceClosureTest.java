@@ -338,6 +338,30 @@ class KnowledgeIntelligenceClosureTest {
     // ── Past Answer Prefill v1 ──────────────────────────────────────────────────────────────────────────────────
 
     @Test
+    @DisplayName("Inquiry Claim Guard: the reproduced draft with an invented photo request and follow-up is not saved")
+    void theReproducedInventedDraftIsRefused() {
+        candidates.teach(org, "PRODUCT", productId, "분리", null,
+                com.sellerops.inquiry.draft.InquiryClaimGuardTest.KNOWLEDGE, OrgKnowledgeType.GENERAL_CS_FAQ, user,
+                "판매자");
+        InquiryWorkItem work = seedInquiry(null, com.sellerops.inquiry.draft.InquiryClaimGuardTest.QUESTION);
+
+        GeneratedDraftView refused = composer(StubModel.writing("분리 방법 안내드립니다",
+                com.sellerops.inquiry.draft.InquiryClaimGuardTest.INVENTED))
+                .generateAs(org, work.getId(), "SYSTEM:RESPONSIBILITY");
+
+        assertThat(refused.answerBasis()).as("the basis is what it was — grounded").isEqualTo("GROUNDED");
+        assertThat(refused.draft()).as("but the invented reply is not saved").isNull();
+        assertThat(refused.unavailableMessage()).startsWith("근거에 없는 약속이나 요청");
+        assertThat(draftService.currentVersion(work.getId())).isZero();
+
+        GeneratedDraftView clean = composer(StubModel.writing("분리 방법 안내드립니다",
+                com.sellerops.inquiry.draft.InquiryClaimGuardTest.CLEAN))
+                .generateAs(org, work.getId(), "SYSTEM:RESPONSIBILITY");
+        assertThat(clean.draft()).as("the clean reply of the same question is saved").isNotNull();
+        assertThat(clean.unavailableMessage()).isNull();
+    }
+
+    @Test
     @DisplayName("a past answer found where no product or policy knowledge was starts the ask — and grounds nothing")
     void aPastAnswerStartsTheAskButGroundsNothing() {
         UUID remembered = rememberAnswer(productId, "방수 되나요",

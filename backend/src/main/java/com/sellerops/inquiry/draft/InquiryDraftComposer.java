@@ -126,6 +126,30 @@ public class InquiryDraftComposer {
      * Deleting the words out of the sentence would leave a reply whose meaning nobody chose, and
      * saving it anyway would make 「사용하지 않을 표현」 a preference rather than a rule.
      */
+    static final String UNSUPPORTED_CLAIM = "근거에 없는 약속이나 요청이 들어가 초안을 저장하지 않았습니다. "
+            + "다시 생성해 보시거나 직접 작성해 주세요.";
+
+    /**
+     * What a model's reply claims that nothing it was shown supports (Inquiry Claim Guard v1). The evidence is the
+     * passage list the model was actually given; the seller's approved sentences may authorize a follow-up or a
+     * request; the customer's question and the order sentence may authorize a number.
+     */
+    static List<InquiryClaimGuard.Violation> unsupportedClaims(String body, List<AgentDraftGenerator.Passage> shown,
+                                                               AnswerStyleProfile style, String title, String details,
+                                                               String orderSentence) {
+        List<String> voice = new ArrayList<>();
+        if (style != null) {
+            voice.addAll(style.requiredPhrases());
+            if (style.hasUnknownFallback()) {
+                voice.add(style.unknownFallback());
+            }
+        }
+        return InquiryClaimGuard.unsupportedClaims(body,
+                shown.stream().map(AgentDraftGenerator.Passage::text).toList(), voice,
+                String.join(" ", title == null ? "" : title, details == null ? "" : details,
+                        orderSentence == null ? "" : orderSentence));
+    }
+
     static final String STYLE_FORBIDDEN_PHRASE = "사용하지 않기로 한 표현이 들어가 초안을 저장하지 "
             + "않았습니다. 다시 생성해 보시거나, 설정에서 그 표현을 확인해 주세요.";
 
@@ -374,8 +398,10 @@ public class InquiryDraftComposer {
         } else {
             QuotaDecision decision = quota.consume(orgId, AgentUsageKind.DRAFT, null);
             if (decision.allowed()) {
+                List<AgentDraftGenerator.Passage> shown =
+                        passagesFor(assessment.catalogue(), retrieved.passages(), context);
                 written = model.draft(orgId, title, details,
-                        passagesFor(assessment.catalogue(), retrieved.passages(), context),
+                        shown,
                         retrieved.order().messageKo(),
                         applicability.messageKo(retrieved.figuresUnaided(),
                                 retrieved.variantSpecific()),
@@ -388,6 +414,12 @@ public class InquiryDraftComposer {
                     // rule the company set is not satisfied by having asked politely.
                     written = Optional.empty();
                     unavailable = STYLE_FORBIDDEN_PHRASE;
+                } else if (!unsupportedClaims(written.get().comments(), shown, style, title, details,
+                        retrieved.order().messageKo()).isEmpty()) {
+                    // The same relationship, with the evidence: the prompt forbids inventing a follow-up, a request of
+                    // the customer, a remedy or a figure; this refuses a reply that did. Refused, never edited.
+                    written = Optional.empty();
+                    unavailable = UNSUPPORTED_CLAIM;
                 }
             } else {
                 unavailable = decision.messageKo();
