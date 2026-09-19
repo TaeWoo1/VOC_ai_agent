@@ -1,0 +1,53 @@
+{
+ "version": "inquiry-authority/v1",
+ "adopted": "product-owner decision 2026-09-20 (docs/inquiry_architecture_v3.md, docs/inquiry_architecture_v3_wp1.md)",
+ "authorities": ["KNOWLEDGE", "ENTITY_STATE", "PROCEDURE", "SELLER"],
+ "capabilities": [
+  {"id": "KNOWLEDGE.PRODUCT", "authority": "KNOWLEDGE"},
+  {"id": "KNOWLEDGE.ORG", "authority": "KNOWLEDGE"},
+  {"id": "KNOWLEDGE.CATALOGUE", "authority": "KNOWLEDGE"},
+  {"id": "ENTITY.ORDER", "authority": "ENTITY_STATE"},
+  {"id": "ENTITY.LISTING", "authority": "ENTITY_STATE"},
+  {"id": "PROCEDURE.ORDER_ACTION", "authority": "PROCEDURE"},
+  {"id": "SELLER", "authority": "SELLER"}
+ ],
+ "capability_statuses": ["AVAILABLE", "DISABLED", "NOT_SUPPORTED", "DECLARED_NO_EXECUTOR"],
+ "entity_fields": [
+  {"id": "ORDER_PAYMENT", "capability": "ENTITY.ORDER"},
+  {"id": "ORDER_CANCELLATION", "capability": "ENTITY.ORDER"},
+  {"id": "ORDER_FULFILLMENT", "capability": "ENTITY.ORDER"},
+  {"id": "ORDER_TRACKING", "capability": "ENTITY.ORDER"},
+  {"id": "LISTING_SALE_STATUS", "capability": "ENTITY.LISTING"},
+  {"id": "LISTING_OPTION_SALE_STATUS", "capability": "ENTITY.LISTING"}
+ ],
+ "resolution_states": ["RESOLVED", "RESOLVED_CONDITIONAL", "NEEDS_CUSTOMER_INPUT", "NEEDS_SELLER", "CAPABILITY_GAP", "FAILED"],
+ "gap_reasons": ["ACQUIRABLE", "DISABLED", "NOT_SUPPORTED", "UNREADABLE_SOURCE", "NOT_EXECUTABLE", "UNBOUND", "STALE", "UNPROVEN", "UNAVAILABLE"],
+ "customer_inputs": [
+  {"id": "OPTION", "kind": "PRODUCT_CONTEXT"},
+  {"id": "SIZE", "kind": "PRODUCT_CONTEXT"},
+  {"id": "MODEL", "kind": "PRODUCT_CONTEXT"},
+  {"id": "QUANTITY", "kind": "PRODUCT_CONTEXT"},
+  {"id": "USE_CONTEXT", "kind": "PRODUCT_CONTEXT"},
+  {"id": "MEASUREMENT", "kind": "PRODUCT_CONTEXT"},
+  {"id": "UNNAMED_PRODUCT_CONTEXT", "kind": "PRODUCT_CONTEXT", "bridge_only": true},
+  {"id": "ORDER_NUMBER", "kind": "IDENTITY"},
+  {"id": "PHONE", "kind": "IDENTITY"},
+  {"id": "ADDRESS", "kind": "IDENTITY"},
+  {"id": "EMAIL", "kind": "IDENTITY"},
+  {"id": "NAME", "kind": "IDENTITY"}
+ ],
+ "possible_gaps": ["ACQUIRABLE", "UNREADABLE_SOURCE"],
+ "askable": {"PRODUCT_CONTEXT": true, "IDENTITY": false},
+ "surfaces": ["PUBLIC_QNA", "ORDER_ATTACHED"],
+ "step_roles": ["CLOSES", "PRECONDITION", "CONTEXT"],
+ "v2_bridge": {
+  "PRODUCT_SPEC": "KNOWLEDGE.PRODUCT",
+  "PRODUCT_USAGE": "KNOWLEDGE.PRODUCT",
+  "PRODUCT_COMPATIBILITY": "KNOWLEDGE.PRODUCT",
+  "CATALOGUE_AVAILABILITY": "KNOWLEDGE.PRODUCT",
+  "POLICY": "KNOWLEDGE.ORG",
+  "ORDER_STATE": "ENTITY.ORDER",
+  "ORDER_ACTION": "PROCEDURE.ORDER_ACTION",
+  "SELLER_DECISION": "SELLER"
+ }
+}

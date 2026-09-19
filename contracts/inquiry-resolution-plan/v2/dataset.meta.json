@@ -1,0 +1,45 @@
+{
+ "name": "inquiry-resolution-plan",
+ "version": "v2",
+ "frozen_at": "2026-09-20",
+ "files": {
+  "plans.jsonl": "c9c03f423dabf0e07be93cc4ad1287e1cee62ecca41bfb78262aeac9ea97fdcb",
+  "build.py": "ac27d427f1cbc3ad1f42c0fafbdd053812f73877605bb1e17b9ac84ae8eb31de"
+ },
+ "counts": {
+  "needs": 72,
+  "frozen": 66,
+  "pending_adjudication": 6
+ },
+ "pending_adjudication": [
+  "R:f81ad84a.n1",
+  "R:8989a9d0.n1",
+  "R:f403e606.n2",
+  "S:T1a.n1",
+  "S:T1b.n1",
+  "S:N6.n1"
+ ],
+ "derived_from": {
+  "inquiry-need-eval/v1": "b94626cbf74a6f3dcbc97f9f1423f0329da25065634d9245f3077fbb51b04e23"
+ },
+ "supersedes": "inquiry-resolution-plan/v1 (withdrawn before use)",
+ "vocabulary": "contracts/inquiry-authority/v1/vocabulary.json",
+ "schema": "v3 schema (v2 rows lack UNREADABLE_SOURCE)",
+ "label_policy": {
+  "author": "designer; vocabulary and frozen rows adopted by the product owner on 2026-09-20 (DEV/CALIBRATION — never a holdout)",
+  "steps": "CLOSES = an authority allowed to close the need; PRECONDITION = must be read before it; CONTEXT = read, never closes. A fallback to the seller is not a step.",
+  "expected_terminal": "where the need ends once every system step the CURRENT registry offers has run on snapshot S0's knowledge — listing detail acquisition included, no image reader, no procedure executor, today's order connectors. Not the immediate next step: a need whose listing detail was never read is 'acquire first' now and ends here after it.",
+  "pending": "PENDING_ADJUDICATION rows carry the proposal and alternatives and are excluded from every score until the product owner decides"
+ },
+ "holds": "real inquiry id prefixes and the designer's plan labels; no customer or seller text",
+ "storage": {
+  "canonical": "eval-store:inquiry-resolution-plan/v2 (withdrawn, kept for the record)",
+  "builder": "build.py (stored beside the gold)"
+ },
+ "status": "WITHDRAWN_BEFORE_USE",
+ "withdrawn": {
+  "date": "2026-09-20",
+  "why": "v2 filed an answer known to sit in the listing's detail pictures under NOT_SUPPORTED — the same word as a field a channel does not provide. The S1 diagnostic showed the layer cannot tell such a possible gap from the seller's knowledge being short, so the vocabulary gained UNREADABLE_SOURCE and the gold had to name it.",
+  "superseded_by": "inquiry-resolution-plan/v3"
+ }
+}

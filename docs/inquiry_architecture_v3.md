@@ -2,8 +2,8 @@
 
 2026-09-20 · 브랜치 `feat/review-decision-workspace-v1` · 기준 커밋 `fbe33ff0`
 
-**상태: DESIGN — product-owner 검토 전. production 코드 변경 0 · 실제 모델 호출 0 · 마켓플레이스 호출 0 · DB 변경 0 · 마이그레이션 0.**
-이 문서는 결정을 내리지 않는다. 제안이고, §17의 첫 Work Package도 승인 전에는 시작하지 않는다.
+**상태: ADOPTED — product-owner 결정 2026-09-20.** 채택 내용: authority 넷(KNOWLEDGE / ENTITY_STATE / PROCEDURE / SELLER), PROCEDURE는 SELLER에 합치지 않는 first-class(실행기 없으면 DECLARED + CAPABILITY_GAP), CUSTOMER_INPUT은 step의 required input, CAPABILITY_GAP·SYSTEM_ACQUIRE는 state, 과거 답변은 precedent, 공개 Q&A는 non-sensitive 상품 맥락만 묻는다, headline 다섯(Wrong Automation은 배포 차단), 72행 gold는 명백한 행만 동결.
+**WP-1(결정론 authority layer + eval 자산 복구) 구현됨 → `docs/inquiry_architecture_v3_wp1.md`.** 아래 본문은 설계 당시 그대로다 — WP-1이 바꾼 것 둘: GapReason에 가능한 gap `UNREADABLE_SOURCE`가 더해졌고(§4-B의 ACQUIRABLE과 같은 「가능한 gap」), 부록 A의 계획 라벨은 plan gold v3로 동결됐다(6행 PENDING_ADJUDICATION).
 
 선행 문서: `inquiry_need_eval_v1.md`(need 단위 gold) · `inquiry_decision_v2.md` · `inquiry_decision_v2_1.md` ·
 `inquiry_decision_v2_2.md`(A/B 466호출 · targeted 45호출).

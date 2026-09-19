@@ -11,10 +11,27 @@ operator scratch. What is committed is the schema (`contracts/inquiry-need-eval/
 synthetic fixture (`contracts/inquiry-need-eval/v1/synthetic/`) and the frozen hashes
 (`contracts/inquiry-need-eval/v1/dataset.meta.json`).
 
+## Where the real data is
+
+`tools/eval-store/README.md` — the canonical files live in the durable private store, never in a repository or a temp
+directory. `node tools/eval-store/store.mjs restore inquiry-need-eval v1` puts a verified copy in the cache; pass that
+directory below.
+
+## Resolution-plan gold (Inquiry v3 WP-1)
+
+```bash
+node tools/inquiry-need-eval/plan.mjs --plans <cache>/inquiry-resolution-plan/v3/plans.jsonl [--pred predicted.jsonl]
+```
+
+Validates the gold against `contracts/inquiry-authority/v1/vocabulary.json`, projects the v2 bridge onto it, and (with
+`--pred`) scores a predicted plan — required-authority recall, ORDER miss (hard fail), unnecessary authority, slots.
+`compareResolutions` compares the authority layer's resolutions to the gold terminal; a possible gap is never a verdict.
+
 ## 0. Check the tooling
 
 ```bash
-node --test tools/inquiry-need-eval/test/eval.test.mjs tools/inquiry-need-eval/test/judge.test.mjs
+node --test tools/inquiry-need-eval/test/eval.test.mjs tools/inquiry-need-eval/test/judge.test.mjs \
+     tools/inquiry-need-eval/test/plan.test.mjs tools/eval-store/test/store.test.mjs
 ```
 
 (Name the files: on Node 23 `node --test <directory>` resolves the directory as a module and fails.)

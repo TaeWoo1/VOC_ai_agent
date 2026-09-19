@@ -1,0 +1,44 @@
+{
+ "name": "inquiry-resolution-plan",
+ "version": "v1",
+ "frozen_at": "2026-09-20",
+ "files": {
+  "plans.jsonl": "b7f638223b6730bc2824c3cb16dfccf53f88672a920b3300b903077fa3a8a4dc",
+  "build.py": "ae20adcd41ac6b71b885124913a6c836c6a2016669b3eeac93290f547fac0450"
+ },
+ "counts": {
+  "needs": 72,
+  "frozen": 66,
+  "pending_adjudication": 6
+ },
+ "pending_adjudication": [
+  "R:f81ad84a.n1",
+  "R:8989a9d0.n1",
+  "R:f403e606.n2",
+  "S:T1a.n1",
+  "S:T1b.n1",
+  "S:N6.n1"
+ ],
+ "derived_from": {
+  "inquiry-need-eval/v1": "b94626cbf74a6f3dcbc97f9f1423f0329da25065634d9245f3077fbb51b04e23"
+ },
+ "vocabulary": "contracts/inquiry-authority/v1/vocabulary.json",
+ "schema": "v1 rows used expected_s0; the v2 schema replaces it",
+ "label_policy": {
+  "author": "designer; the vocabulary and the frozen rows were adopted by the product owner on 2026-09-20 (DEV/CALIBRATION — never a holdout)",
+  "steps": "CLOSES = an authority allowed to close the need; PRECONDITION = must be read before it; CONTEXT = read, never closes. A fallback to the seller is not a step.",
+  "expected_s0": "what the deterministic authority layer should say on snapshot S0 with the gold judgment — the terminal, not the answer",
+  "pending": "PENDING_ADJUDICATION rows carry the proposal and its alternatives and are excluded from every score until the product owner decides"
+ },
+ "holds": "real inquiry id prefixes and the designer's plan labels; no customer or seller text",
+ "storage": {
+  "canonical": "eval-store:inquiry-resolution-plan/v1",
+  "builder": "build.py (stored beside the gold; reads inquiry-need-eval/v1 needs.jsonl + questions.jsonl from the cache)"
+ },
+ "status": "WITHDRAWN_BEFORE_USE",
+ "withdrawn": {
+  "date": "2026-09-20",
+  "why": "expected_s0 mixed two meanings for listings whose detail page was never read — the immediate next step (ACQUIRABLE, for answers known to be in the page's images) and the final terminal (NEEDS_SELLER, for knowledge the seller never wrote). The first diagnostic run (fence on the S0 oracle) exposed it before the gold was used anywhere.",
+  "superseded_by": "inquiry-resolution-plan/v3 (via v2, also withdrawn before use)"
+ }
+}

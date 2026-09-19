@@ -13,14 +13,36 @@ import java.util.List;
  * @param acquirable  the listing's detail was never read and reading it is a system step (SYSTEM_ACQUIRE)
  * @param judged      what the judge said before code enforced anything (null: the judge said nothing for this need)
  * @param enforcement why code moved the status away from {@code judged}, or null when it did not
+ * @param resolution  which authority this need was held to and where it ended (Inquiry v3 WP-1 authority fence); null
+ *                    when the fence is off — then nothing here differs from v2.2
  */
 public record NeedResult(NeedStatus judged, InquiryNeed need, NeedStatus status, List<EvidenceCandidate> evidence,
                          List<PrecedentCandidate> precedents, String missing, String askCustomer, boolean acquirable,
-                         Enforcement enforcement) {
+                         Enforcement enforcement, com.sellerops.inquiry.authority.Resolution resolution) {
+
+    public NeedResult(NeedStatus judged, InquiryNeed need, NeedStatus status, List<EvidenceCandidate> evidence,
+                      List<PrecedentCandidate> precedents, String missing, String askCustomer, boolean acquirable,
+                      Enforcement enforcement) {
+        this(judged, need, status, evidence, precedents, missing, askCustomer, acquirable, enforcement, null);
+    }
 
     public NeedResult(InquiryNeed need, NeedStatus status, List<EvidenceCandidate> evidence,
                       List<PrecedentCandidate> precedents, String missing, String askCustomer, boolean acquirable) {
-        this(status, need, status, evidence, precedents, missing, askCustomer, acquirable, null);
+        this(status, need, status, evidence, precedents, missing, askCustomer, acquirable, null, null);
+    }
+
+    /**
+     * The same need held to its authority: a new status (never more covered than before), why it moved, and the
+     * resolution. A status the fence did not move keeps its earlier enforcement.
+     */
+    public NeedResult withAuthority(NeedStatus newStatus, Enforcement why,
+                                    com.sellerops.inquiry.authority.Resolution newResolution) {
+        if (newStatus.covered() && !status.covered()) {
+            throw new IllegalArgumentException("the authority fence never widens a verdict");
+        }
+        return new NeedResult(judged, need, newStatus, evidence, precedents, missing,
+                newStatus == NeedStatus.CONDITIONAL_ON_CUSTOMER ? askCustomer : null,
+                acquirable, newStatus == status ? enforcement : why, newResolution);
     }
 
     /**
@@ -49,6 +71,13 @@ public record NeedResult(NeedStatus judged, InquiryNeed need, NeedStatus status,
         /** FULL while naming a value only the customer can supply — that is CONDITIONAL_ON_CUSTOMER. */
         DECLARED_CUSTOMER_INPUT,
         /** Short on readable evidence while a source this system cannot read exists — UNKNOWN, set by code. */
-        UNREADABLE_SOURCE
+        UNREADABLE_SOURCE,
+        /**
+         * Support cited from a different authority than the one the need requires — a company rule for this order's
+         * state, a document for a seller's decision, anything for an action (Inquiry v3 WP-1). Downgraded, never replaced.
+         */
+        WRONG_AUTHORITY,
+        /** The right authority was cited and could not close the need here — stale, unbound, or a conditional order. */
+        AUTHORITY_UNRESOLVED
     }
 }

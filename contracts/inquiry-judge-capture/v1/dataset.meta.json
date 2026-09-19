@@ -1,0 +1,25 @@
+{
+ "name": "inquiry-judge-capture",
+ "version": "v1",
+ "files": {
+  "judge-inputs-S0.jsonl": "7feefed8f12ee68f1690e99d7447c214e7f291d7de8e9a146b9e704ae9b7db11",
+  "judge-inputs-S1.jsonl": "795db471a8989128c8aae9b51247571610ed567efd6345c328eb532bd8c16960"
+ },
+ "rows": {
+  "judge-inputs-S0.jsonl": 67,
+  "judge-inputs-S1.jsonl": 67
+ },
+ "holds": "the customer's message, the seller's knowledge texts and past answers exactly as the v2 judge received them (Inquiry Decision v2.1 capture) — real text, store only",
+ "role": "DEV/CALIBRATION — see contracts/inquiry-need-eval/v1/dataset.meta.json role",
+ "provenance": {
+  "original": "captured 2026-09-19 by InquiryNeedEvalIT EVAL_DECISION=capture (no model); original storage LOST in the 2026-09-20 temp-directory deletion",
+  "recovery": "2026-09-20: the same capture re-run (no model, no marketplace) on throwaway copies of the S0 and S1 clones (dropped afterwards) at worktree HEAD fbe33ff0; both files byte-identical to the frozen hashes"
+ },
+ "redaction": {
+  "gate": "tools/eval-store/redaction.mjs",
+  "result": "0 findings with the word-boundary name rule (the first rule matched 「…하세요 고객님」 22 times — all greetings, none a name)"
+ },
+ "storage": {
+  "canonical": "eval-store:inquiry-judge-capture/v1"
+ }
+}

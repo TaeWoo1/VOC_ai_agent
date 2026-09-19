@@ -1,0 +1,39 @@
+{
+ "name": "inquiry-resolution-plan",
+ "version": "v3",
+ "frozen_at": "2026-09-20",
+ "files": {
+  "plans.jsonl": "e87de71f29a75c6ed448bdf95abaf6f8f5d3468ad2571d0306c7d48d1044703e",
+  "build.py": "a2c05a5c75f4f09087f862efc5d30356912ff6c484b0021a8c515095d9cf1488"
+ },
+ "counts": {
+  "needs": 72,
+  "frozen": 66,
+  "pending_adjudication": 6
+ },
+ "pending_adjudication": [
+  "R:f81ad84a.n1",
+  "R:8989a9d0.n1",
+  "R:f403e606.n2",
+  "S:T1a.n1",
+  "S:T1b.n1",
+  "S:N6.n1"
+ ],
+ "derived_from": {
+  "inquiry-need-eval/v1": "b94626cbf74a6f3dcbc97f9f1423f0329da25065634d9245f3077fbb51b04e23"
+ },
+ "supersedes": "inquiry-resolution-plan/v1 and v2 — both withdrawn before use during WP-1 diagnostics (dataset.meta.json of each says why)",
+ "vocabulary": "contracts/inquiry-authority/v1/vocabulary.json",
+ "schema": "contracts/inquiry-resolution-plan/v3/schema.json",
+ "label_policy": {
+  "author": "designer; vocabulary and frozen rows adopted by the product owner on 2026-09-20 (DEV/CALIBRATION — never a holdout)",
+  "steps": "CLOSES = an authority allowed to close the need; PRECONDITION = must be read before it; CONTEXT = read, never closes. A fallback to the seller is not a step.",
+  "expected_terminal": "where the need ends once every system step the CURRENT registry offers has run on snapshot S0's knowledge — listing detail acquisition included, no image reader, no procedure executor, today's order connectors. Not the immediate next step: a need whose listing detail was never read is 'acquire first' now and ends here after it. ACQUIRABLE and UNREADABLE_SOURCE are POSSIBLE gaps (a source exists that was not or cannot be read); the gold uses UNREADABLE_SOURCE only where the designer knows the answer is in that source.",
+  "pending": "PENDING_ADJUDICATION rows carry the proposal and alternatives and are excluded from every score until the product owner decides"
+ },
+ "holds": "real inquiry id prefixes and the designer's plan labels; no customer or seller text",
+ "storage": {
+  "canonical": "eval-store:inquiry-resolution-plan/v3",
+  "builder": "build.py (stored beside the gold)"
+ }
+}

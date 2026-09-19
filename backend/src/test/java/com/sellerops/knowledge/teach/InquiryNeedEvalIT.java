@@ -207,8 +207,18 @@ class InquiryNeedEvalIT {
                 .put("evidence_candidates", d.evidenceCandidates()).put("precedent_candidates", d.precedentCandidates())
                 .put("detail", String.valueOf(d.detail()));
         ArrayNode needs = decision.putArray("needs");
-        d.needs().forEach(n -> needs.addObject().put("id", n.need().id()).put("status", n.status().name())
-                .put("evidence", n.evidence().size()).put("acquirable", n.acquirable()));
+        d.needs().forEach(n -> {
+            ObjectNode o = needs.addObject().put("id", n.need().id()).put("status", n.status().name())
+                    .put("evidence", n.evidence().size()).put("acquirable", n.acquirable());
+            // Inquiry v3 WP-1: present only when the authority fence ran, so a fence-OFF observation is byte-identical.
+            if (n.resolution() != null) {
+                o.put("authority", n.resolution().authority().name())
+                        .put("capability", n.resolution().capability().wire())
+                        .put("resolution", n.resolution().state().name())
+                        .put("gap", n.resolution().gap() == null ? null : n.resolution().gap().name())
+                        .put("enforcement", n.enforcement() == null ? null : n.enforcement().name());
+            }
+        });
     }
 
     /**

@@ -8,7 +8,7 @@
   "needs.jsonl": "db92a91312d5b652e89fa96cae887cc1edffdc5bf905ff27011b2038b1315a57",
   "precedents.jsonl": "6f73b06fd7e4858c2e3ef5be6659b3e6a91e659f527d51059b5e48c584f59898"
  },
- "location": "outside the repository (operator scratch) — real inquiry ids and seller-derived labels; never committed",
+ "location": "durable private eval store (tools/eval-store; $SELLEROPS_EVAL_STORE, default ~/.sellerops/eval-store) — never a repository, never an OS temp directory; this repository holds names, hashes, counts and provenance only",
  "counts": {
   "raw_questions": 68,
   "canonical_cases": 67,
@@ -254,6 +254,44 @@
      "sha256": "5904aa6f688f98400418f46594af456c602a7ea831280cbc62d4e50638a5594f",
      "status": "apr-96b2fa76, 9 calls, S0 capture R:dae8554d · R:ae51c7f8 · S:T6c"
     }
+   }
+  }
+ },
+ "storage": {
+  "canonical": "eval-store:inquiry-need-eval/v1",
+  "cache": "$SELLEROPS_EVAL_CACHE (default ~/.cache/sellerops-eval) — disposable; `node tools/eval-store/store.mjs restore inquiry-need-eval v1` rebuilds it and verifies every hash",
+  "redaction": "tools/eval-store/redaction.mjs — a file enters the store only when the gate finds nothing; frozen files are never edited (an edited file is a new version)",
+  "incident": {
+   "date": "2026-09-20",
+   "what": "the original three files lived in an OS temporary directory (the session scratchpad) and were deleted by the operating system; ORIGINAL STORAGE LOST",
+   "recovered": "all three rebuilt byte-identical from their recorded build steps and verified against the hashes frozen on 2026-09-19 — so they remain v1"
+  },
+  "files": {
+   "questions.jsonl": {
+    "status": "RECOVERED_BYTE_IDENTICAL",
+    "method": "mem/questions.tsv rebuilt from its recorded heredoc (sha256 4dded121… matches the hash recorded at labelling time); each question's product = the product the offline arm-A assessor resolved on a throwaway copy of the S0 clone (no model, no marketplace); freeze step re-run"
+   },
+   "needs.jsonl": {
+    "status": "RECOVERED_BYTE_IDENTICAL",
+    "method": "the recorded needs.v2 draft build + the three recorded freeze edits re-run"
+   },
+   "precedents.jsonl": {
+    "status": "RECOVERED_BYTE_IDENTICAL",
+    "method": "the recorded precedent-scope annotation step re-run"
+   }
+  },
+  "lost": {
+   "status": "LOST — only the hashes above remain; a re-run is a NEW artifact and is never cited as one of these",
+   "paths": [
+    "observations.*",
+    "calibration.offline_observations.*",
+    "calibration.model_observations.*",
+    "calibration.projections.*",
+    "calibration.targeted.observations.*"
+   ],
+   "recovered_elsewhere": {
+    "calibration.inputs.S0": "eval-store:inquiry-judge-capture/v1 (re-captured byte-identical)",
+    "calibration.inputs.S1": "eval-store:inquiry-judge-capture/v1 (re-captured byte-identical)"
    }
   }
  }

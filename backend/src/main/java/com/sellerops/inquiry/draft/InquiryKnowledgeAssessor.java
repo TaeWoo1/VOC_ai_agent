@@ -105,6 +105,20 @@ public class InquiryKnowledgeAssessor {
         this.collector = collector;
     }
 
+    private com.sellerops.inquiry.authority.CapabilityRegistry registry;
+    private com.sellerops.inquiry.authority.AuthorityFenceProperties fence;
+
+    /**
+     * Inquiry v3 WP-1: the deterministic authority layer over the v2 verdicts. Optional and default OFF — without it, or
+     * with the flag off, the decision is v2.2 exactly.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAuthority(com.sellerops.inquiry.authority.CapabilityRegistry registry,
+                             com.sellerops.inquiry.authority.AuthorityFenceProperties fence) {
+        this.registry = registry;
+        this.fence = fence;
+    }
+
     /**
      * The assessment without seller context — the lanes alone, attributed from the passages. For hand-wired callers
      * that have a retriever and no Spring context; production wiring always injects the full spine.
@@ -150,7 +164,7 @@ public class InquiryKnowledgeAssessor {
         if (decisionModel == null || collector == null || !decisionModel.enabledFor(orgId)) {
             return new Assessment(productId, verdict, found, basis, asked, named, gap, subject, catalogueFinding);
         }
-        return decide(orgId, inquiry, title, details, productId, verdict, found, asked, named, catalogueFinding);
+        return decide(orgId, inquiry, title, details, productId, verdict, found, asked, named, catalogueFinding, lookup);
     }
 
     /**
@@ -161,17 +175,24 @@ public class InquiryKnowledgeAssessor {
      */
     private Assessment decide(UUID orgId, Inquiry inquiry, String title, String details, UUID productId,
                               SpecApplicability.Verdict verdict, SpineRetrieval found, KnowledgeTopic asked,
-                              Set<KnowledgeTopic> named, CatalogueInvestigator.Finding catalogueFinding) {
+                              Set<KnowledgeTopic> named, CatalogueInvestigator.Finding catalogueFinding,
+                              OrderFactLookup lookup) {
         String question = ((title == null ? "" : title) + "\n" + (details == null ? "" : details)).strip();
         com.sellerops.inquiry.decision.DetailCapability detail = collector.detail(orgId, productId);
         com.sellerops.product.library.KnowledgeVariantScope scope =
                 com.sellerops.product.library.KnowledgeVariantScope.of(verdict.variantId());
+        String orderKey = com.sellerops.inquiry.decision.EvidenceScope.orderKey(
+                com.sellerops.inquiry.decision.PrecedentReuse.OrderKey.of(inquiry));
+        com.sellerops.inquiry.authority.AuthorityFence.Context authority = registry == null || fence == null
+                || !fence.enabled() ? null
+                : new com.sellerops.inquiry.authority.AuthorityFence.Context(
+                        registry.snapshot(orgId, inquiry, productId, detail, lookup),
+                        found.lanes() == null ? null : found.lanes().order(), orderKey);
         com.sellerops.inquiry.decision.NeedDecision decision = com.sellerops.inquiry.decision.InquiryDecisionEngine
                 .decide(orgId, question, decisionModel,
                         needs -> collector.collect(orgId, inquiry, productId, found.lanes(), catalogueFinding, scope,
                                 needs), detail, new com.sellerops.inquiry.decision.EvidenceScope.CaseScope(productId,
-                        com.sellerops.inquiry.decision.EvidenceScope.orderKey(
-                                com.sellerops.inquiry.decision.PrecedentReuse.OrderKey.of(inquiry))));
+                        orderKey), authority);
         AnswerBasisState basis = decision.basis();
         List<com.sellerops.inquiry.decision.NeedResult> open = decision.unresolved();
         String subject = basis != AnswerBasisState.NO_ANSWER_BASIS ? null

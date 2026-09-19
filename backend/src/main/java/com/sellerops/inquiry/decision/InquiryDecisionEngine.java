@@ -54,6 +54,18 @@ public final class InquiryDecisionEngine {
     public static NeedDecision decide(UUID orgId, String question, InquiryDecisionModel model,
                                       Function<List<InquiryNeed>, Pool> collect, DetailCapability detail,
                                       EvidenceScope.CaseScope caseScope) {
+        return decide(orgId, question, model, collect, detail, caseScope, null);
+    }
+
+    /**
+     * @param authority the deterministic authority layer (Inquiry v3 WP-1), or null — then this is v2.2 exactly. When
+     *                  given, every enforced need is held to its own authority before the basis is derived
+     *                  ({@link com.sellerops.inquiry.authority.AuthorityFence}).
+     */
+    public static NeedDecision decide(UUID orgId, String question, InquiryDecisionModel model,
+                                      Function<List<InquiryNeed>, Pool> collect, DetailCapability detail,
+                                      EvidenceScope.CaseScope caseScope,
+                                      com.sellerops.inquiry.authority.AuthorityFence.Context authority) {
         InquiryDecisionModel.Answer<List<InquiryNeed>> planned = model.plan(orgId, question);
         InquiryDecisionModel.CallCost cost = planned.cost();
         List<InquiryNeed> needs = planned.value();
@@ -91,6 +103,9 @@ public final class InquiryDecisionEngine {
         }
         List<NeedResult> results = NeedAggregation.enforce(needs, judged.value(), evidence, precedents, detail,
                 caseScope);
+        if (authority != null) {
+            results = com.sellerops.inquiry.authority.AuthorityFence.apply(results, authority);
+        }
         return new NeedDecision(NeedDecision.Outcome.DECIDED, results, NeedAggregation.basis(results), cost,
                 evidence.size(), precedents.size(), detail);
     }
