@@ -140,5 +140,63 @@
    "description": "Decision v2 real model + F5, catalogue snapshot"
   }
  },
- "harness": "backend/src/test/java/com/sellerops/knowledge/teach/InquiryNeedEvalIT.java"
+ "harness": "backend/src/test/java/com/sellerops/knowledge/teach/InquiryNeedEvalIT.java",
+ "role": "DEV/CALIBRATION — the designer wrote the labels and every v2/v2.1 choice was made looking at them; it may never be cited as a holdout or as production readiness (docs/inquiry_decision_v2_1.md §1)",
+ "calibration": {
+  "description": "CoverageJudge calibration (Inquiry Decision v2.1): frozen judge inputs = gold needs as the plan + the production collector's candidates, F5 OFF, captured by InquiryNeedEvalIT EVAL_DECISION=capture with no model. The files hold the customer's message and the seller's texts — outside the repository; only hashes here.",
+  "inputs": {
+   "S0": {
+    "sha256": "7feefed8f12ee68f1690e99d7447c214e7f291d7de8e9a146b9e704ae9b7db11",
+    "db": "sellerops_f5_eval (migration 113, untouched)",
+    "rows": 67
+   },
+   "S1": {
+    "sha256": "795db471a8989128c8aae9b51247571610ed567efd6345c328eb532bd8c16960",
+    "db": "throwaway copy of sellerops_eval_s1 (V114 applied to the copy, then dropped; the S1 clone stays at 113)",
+    "rows": 67
+   }
+  },
+  "variants": {
+   "S0": {
+    "ORIGINAL": 67,
+    "DROP_REQUIRED": 10,
+    "CUSTOMER_VARIABLE": 0,
+    "UNRELATED_ADDED": 67,
+    "PRECEDENT_ONLY": 22,
+    "OTHER_LISTING": 15
+   },
+   "S1": {
+    "ORIGINAL": 67,
+    "DROP_REQUIRED": 12,
+    "CUSTOMER_VARIABLE": 1,
+    "UNRELATED_ADDED": 67,
+    "PRECEDENT_ONLY": 22,
+    "OTHER_LISTING": 20
+   }
+  },
+  "pool_gold_on_originals": {
+   "S0": {
+    "FULL": 5,
+    "CONDITIONAL_ON_CUSTOMER": 5,
+    "PARTIAL": 10,
+    "NONE": 52
+   },
+   "S1": {
+    "FULL": 7,
+    "CONDITIONAL_ON_CUSTOMER": 5,
+    "PARTIAL": 21,
+    "NONE": 39
+   }
+  },
+  "offline_observations": {
+   "S0-ORACLE": {
+    "sha256": "503e36b24f3970dd9883a949d0425680f6156ff04b9477c85380a45ca8f11158",
+    "description": "gold as judge + worst-case judge for OTHER_LISTING — harness check, 0 calls"
+   },
+   "S1-ORACLE": {
+    "sha256": "65d0ecabcbe830c5fa73f4f42d03846f5f5aee5343c201f8eddf2dd26aac9e3c",
+    "description": "same, S1"
+   }
+  }
+ }
 }

@@ -72,7 +72,27 @@ class InquiryNeedEvalIT {
         // evidence sets say about the candidates the PRODUCTION collector gathered — an upper bound of the structure
         // with a perfect semantic layer. `model`: whatever InquiryDecisionModel the context holds (the real door).
         String decisionMode = System.getenv().getOrDefault("EVAL_DECISION", "off");
-        if ("oracle".equals(decisionMode)) {
+        // Past-answer provenance (v2.1): the clones' rows predate the column and are all UNKNOWN, so the collector reads
+        // the Eval v1 human annotations instead — evaluation only. A capture records every past answer the lanes found;
+        // the calibration harness applies the same policy to it (CalibrationVariants).
+        if ("capture".equals(decisionMode)) {
+            collector.setScopeSource(m -> com.sellerops.knowledge.memory.AnswerMemoryReuseScope.REUSABLE);
+        } else if (System.getenv("EVAL_PRECEDENTS") != null) {
+            java.util.Map<String, com.sellerops.knowledge.memory.AnswerMemoryReuseScope> annotated =
+                    new java.util.HashMap<>();
+            for (String l : Files.readAllLines(Path.of(System.getenv("EVAL_PRECEDENTS")))) {
+                if (!l.isBlank()) {
+                    JsonNode p = JSON.readTree(l);
+                    annotated.put(p.get("memory").asText(),
+                            com.sellerops.knowledge.memory.AnswerMemoryReuseScope.valueOf(p.get("precedent_scope").asText()));
+                }
+            }
+            collector.setScopeSource(m -> annotated.entrySet().stream()
+                    .filter(e -> m.getId().toString().startsWith(e.getKey())).map(java.util.Map.Entry::getValue)
+                    .findFirst().orElse(com.sellerops.knowledge.memory.AnswerMemoryReuseScope.UNKNOWN));
+        }
+        if ("oracle".equals(decisionMode) || "capture".equals(decisionMode)) {
+            OracleDecision.capture = "capture".equals(decisionMode) ? new ArrayList<>() : null;
             assessor.setDecision(new OracleDecision(Path.of(System.getenv("EVAL_NEEDS")),
                     Path.of(System.getenv("EVAL_PRECEDENTS"))), collector);
         } else if ("off".equals(decisionMode)) {
@@ -85,6 +105,7 @@ class InquiryNeedEvalIT {
             Inquiry inquiry = "R".equals(q.get("set").asText()) ? real(org, q.get("inquiry").asText()) : synthetic(org, q);
             OracleDecision.current = q.get("q").asText();
             InquiryKnowledgeAssessor.Assessment a = assessor.assess(org, inquiry, OrderFactLookup.STORED_ONLY);
+            OracleDecision.products.put(OracleDecision.current, a.productId() == null ? null : a.productId().toString());
             InquiryEvidenceRetriever.InquiryEvidence lanes = a.retrieved();
             ObjectNode row = JSON.createObjectNode();
             row.put("q", q.get("q").asText()).put("arm", arm).put("snapshot", snapshot).put("semantic", semantic);
@@ -124,6 +145,24 @@ class InquiryNeedEvalIT {
             out.add(JSON.writeValueAsString(row));
         }
         Files.write(Path.of(System.getenv("EVAL_OUT")), out);
+        if (OracleDecision.capture != null) {
+            // The calibration set is the CANONICAL questions only — the headline weighting of Eval v1.
+            java.util.Set<String> canonical = new java.util.HashSet<>();
+            for (String line : Files.readAllLines(Path.of(System.getenv("EVAL_QUESTIONS")))) {
+                if (!line.isBlank() && JSON.readTree(line).path("canonical").asBoolean(false)) {
+                    canonical.add(JSON.readTree(line).get("q").asText());
+                }
+            }
+            List<String> rows = new ArrayList<>();
+            for (ObjectNode r : OracleDecision.capture) {
+                if (canonical.contains(r.get("q").asText())) {
+                    r.put("product", OracleDecision.products.get(r.get("q").asText()));
+                    rows.add(JSON.writeValueAsString(r));
+                }
+            }
+            Files.write(Path.of(System.getenv("EVAL_CAPTURE")), rows);
+            System.out.println("INQUIRY_NEED_EVAL capture rows=" + rows.size());
+        }
         System.out.println("INQUIRY_NEED_EVAL arm=" + arm + " snapshot=" + snapshot + " semantic=" + semantic
                 + " rows=" + out.size());
     }
@@ -178,6 +217,7 @@ class InquiryNeedEvalIT {
      */
     static final class OracleDecision implements com.sellerops.inquiry.decision.InquiryDecisionModel {
         static String current;
+        static final java.util.Map<String, String> products = new java.util.HashMap<>();
         private final java.util.Map<String, List<JsonNode>> needsByQ = new java.util.LinkedHashMap<>();
         private final java.util.Set<String> reusable = new java.util.HashSet<>();
 
@@ -223,29 +263,8 @@ class InquiryNeedEvalIT {
             needsByQ.getOrDefault(current, List.of()).forEach(n -> gold.put(n.get("need").asText(), n));
             for (com.sellerops.inquiry.decision.InquiryNeed need : needs) {
                 JsonNode g = gold.get(need.id());
-                String best = null;
-                List<String> ids = List.of();
-                for (JsonNode set : g.get("sets")) {
-                    String suff = set.get("suff").asText();
-                    if ("UNKNOWN".equals(suff)) {
-                        continue;
-                    }
-                    List<String> matched = new ArrayList<>();
-                    boolean all = true;
-                    for (JsonNode ref : set.get("refs")) {
-                        List<String> hit = evidence.stream().filter(e -> matches(ref.asText(), e))
-                                .map(com.sellerops.inquiry.decision.EvidenceCandidate::id).toList();
-                        if (hit.isEmpty()) {
-                            all = false;
-                            break;
-                        }
-                        matched.addAll(hit);
-                    }
-                    if (all && rank(suff) > rank(best)) {
-                        best = suff;
-                        ids = matched;
-                    }
-                }
+                com.sellerops.inquiry.decision.GoldEvidence.Verdict v =
+                        com.sellerops.inquiry.decision.GoldEvidence.judge(g, evidence);
                 List<String> prec = new ArrayList<>();
                 for (JsonNode m : g.get("precedents")) {
                     if (reusable.contains(m.asText())) {
@@ -253,60 +272,40 @@ class InquiryNeedEvalIT {
                                 .forEach(p -> prec.add(p.id()));
                     }
                 }
-                com.sellerops.inquiry.decision.NeedStatus status = best == null
-                        ? com.sellerops.inquiry.decision.NeedStatus.NONE
-                        : switch (best) {
-                            case "FULL" -> com.sellerops.inquiry.decision.NeedStatus.FULL;
-                            case "CONDITIONAL" -> com.sellerops.inquiry.decision.NeedStatus.CONDITIONAL_ON_CUSTOMER;
-                            default -> com.sellerops.inquiry.decision.NeedStatus.PARTIAL;
-                        };
-                out.put(need.id(), new com.sellerops.inquiry.decision.NeedVerdict(need.id(), status, ids, null,
+                com.sellerops.inquiry.decision.NeedStatus status = v.status();
+                out.put(need.id(), com.sellerops.inquiry.decision.NeedVerdict.of(need.id(), status, v.ids(), null,
                         status == com.sellerops.inquiry.decision.NeedStatus.CONDITIONAL_ON_CUSTOMER ? "고객 정보 확인" : null,
                         prec));
+            }
+            if (capture != null) {
+                capture.add(captured(question, needs, evidence, precedents));
             }
             return new Answer<>(out, CallCost.NONE);
         }
 
-        private static int rank(String s) {
-            return s == null ? 0 : switch (s) {
-                case "FULL" -> 3;
-                case "CONDITIONAL" -> 2;
-                case "PARTIAL" -> 1;
-                default -> 0;
-            };
+        /**
+         * One judge input exactly as the production engine would send it — numbered candidates, gold needs — plus the
+         * never-sent keys the calibration harness needs to apply gold refs and provenance. Written to the scratch
+         * directory only: it holds the customer's message and the seller's texts, so it never enters the repository.
+         */
+        static ObjectNode captured(String question, List<com.sellerops.inquiry.decision.InquiryNeed> needs,
+                                   List<com.sellerops.inquiry.decision.EvidenceCandidate> evidence,
+                                   List<com.sellerops.inquiry.decision.PrecedentCandidate> precedents) {
+            ObjectNode row = JSON.createObjectNode();
+            row.put("q", current).put("question", question);
+            ArrayNode n = row.putArray("needs");
+            needs.forEach(x -> n.addObject().put("id", x.id()).put("ask", x.ask()).put("type", x.type().name()));
+            ArrayNode e = row.putArray("evidence");
+            evidence.forEach(x -> e.addObject().put("id", x.id()).put("kind", x.kind().name()).put("label", x.label())
+                    .put("text", x.text()).put("source", x.sourceId() == null ? null : x.sourceId().toString())
+                    .put("product", x.productId() == null ? null : x.productId().toString()).put("fact_key", x.factKey()));
+            ArrayNode p = row.putArray("precedents");
+            precedents.forEach(x -> p.addObject().put("id", x.id()).put("memory", x.memoryId().toString())
+                    .put("text", x.text()));
+            return row;
         }
 
-        static boolean matches(String ref, com.sellerops.inquiry.decision.EvidenceCandidate e) {
-            int colon = ref.indexOf(':');
-            String kind = ref.substring(0, colon);
-            String rest = ref.substring(colon + 1);
-            String id = rest.contains("#") ? rest.substring(0, rest.indexOf('#')) : rest;
-            String pattern = rest.contains("#") ? rest.substring(rest.indexOf('#') + 1) : null;
-            String product = e.productId() == null ? "" : e.productId().toString();
-            String source = e.sourceId() == null ? "" : e.sourceId().toString();
-            return switch (kind) {
-                case "PK" -> e.kind() == com.sellerops.inquiry.decision.EvidenceCandidate.Kind.PRODUCT_KNOWLEDGE
-                        && source.startsWith(id);
-                case "OK" -> e.kind() == com.sellerops.inquiry.decision.EvidenceCandidate.Kind.ORG_KNOWLEDGE
-                        && source.startsWith(id);
-                case "ORDER" -> e.kind() == com.sellerops.inquiry.decision.EvidenceCandidate.Kind.ORDER_FACT;
-                case "CAT" -> product.startsWith(id);
-                case "OPT" -> e.kind() == com.sellerops.inquiry.decision.EvidenceCandidate.Kind.OPTIONS
-                        && product.startsWith(id) && anyLine(e.text(), pattern);
-                case "ADDON" -> e.kind() == com.sellerops.inquiry.decision.EvidenceCandidate.Kind.ADDONS
-                        && product.startsWith(id) && anyLine(e.text(), pattern);
-                case "FACT" -> e.kind() == com.sellerops.inquiry.decision.EvidenceCandidate.Kind.PRODUCT_FACTS
-                        && product.startsWith(id)
-                        && java.util.Arrays.stream(e.text().split("\n")).anyMatch(l -> l.startsWith(pattern));
-                default -> false;
-            };
-        }
-
-        private static boolean anyLine(String text, String like) {
-            java.util.regex.Pattern re = java.util.regex.Pattern.compile("^" + java.util.regex.Pattern.quote(like)
-                    .replace("%", "\\E.*\\Q").replace("_", "\\E.\\Q") + "$", java.util.regex.Pattern.DOTALL);
-            return java.util.Arrays.stream(text.split("\n")).anyMatch(l -> re.matcher(l).matches());
-        }
+        static List<ObjectNode> capture;
     }
 
     private Inquiry real(UUID org, String prefix) {

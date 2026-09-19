@@ -156,9 +156,16 @@ plan 결과가 필요하다). need별 retrieval은 모델이 없으면 수 ms이
 
 ## 9. 남은 한계
 
+> **v2.1 이후** (`docs/inquiry_decision_v2_1.md`): 아래 셋째 항목(precedent scope를 judge가 매번 판단)은 저장된 재사용 범위(V114,
+> `PrecedentReuse`)로 대체됐다. 실측(§7-A)이 추가로 드러낸 한계 — **judge가 근거 밖 추론·규격 의존 답을 FULL로 올린다**, **judge의 precedent
+> 판단이 주문·대화에 묶인 답을 막지 못한다**, 그래서 규격 경고 줄은 GROUNDED에서도 유지한다(§6) — 는 v2.1이 calibration 대상으로 삼는다.
+> 이 문서의 수치는 v2.1의 기준선으로 그대로 둔다.
+
 - **기본 OFF**: capability가 꺼진 org는 legacy basis(누수 포함) 그대로다. 구조적 제거는 켠 org에서만 성립한다.
 - V2O는 oracle 상한이다 — **실제 planner/judge의 정확도는 미측정**(§10 manifest). 비결정성도 미측정.
-- precedent의 REUSABLE 판단은 production에 저장된 scope가 없어 **judge가 매번 한다**.
+- precedent의 REUSABLE 판단은 production에 저장된 scope가 없어 **judge가 매번 한다** — §7-A에서 실제로 실패했다(틀린 미리 채움 1–4건,
+  전부 ORDER_ONLY/CASE_ONLY). v2.1에서 저장된 범위로 대체.
+- 실제 judge가 **근거 밖 추론·규격 의존 답을 FULL로** 판정한다(§7-A) — 규격 경고 줄은 그래서 GROUNDED에서도 남는다(§6).
 - 초안의 **인용 기록**(`inquiry_draft_evidence`)은 legacy lane passage와 카탈로그 finding만 적는다 — decision이 인용한 옵션/추가상품
   후보는 초안에 보이지만 인용 행으로 남지 않는다.
 - Teach는 덮이지 않은 need 전부를 **지식 하나**로 저장한다(need별 저장 아님). investigation 프롬프트는 need 목록을 읽지 않는다(첫 need의
@@ -167,4 +174,4 @@ plan 결과가 필요하다). need별 retrieval은 모델이 없으면 수 ms이
 
 ## 10. 실제 모델 검증
 
-필요한 것은 한 번의 승인이다 — S0/S1 × {Decision v2 + 현재 retrieval, Decision v2 + F5}. manifest는 이 패키지의 최종 보고에 있다.
+(실행됨 — §7-A. 후속 calibration은 `docs/inquiry_decision_v2_1.md`.) 필요한 것은 한 번의 승인이다 — S0/S1 × {Decision v2 + 현재 retrieval, Decision v2 + F5}. manifest는 이 패키지의 최종 보고에 있다.

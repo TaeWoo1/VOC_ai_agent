@@ -11,7 +11,36 @@ import java.util.List;
  * @param missing     what is still missing, for the seller
  * @param askCustomer what to ask the customer, for CONDITIONAL_ON_CUSTOMER
  * @param acquirable  the listing's detail was never read and reading it is a system step (SYSTEM_ACQUIRE)
+ * @param judged      what the judge said before code enforced anything (null: the judge said nothing for this need)
+ * @param enforcement why code moved the status away from {@code judged}, or null when it did not
  */
-public record NeedResult(InquiryNeed need, NeedStatus status, List<EvidenceCandidate> evidence,
-                         List<PrecedentCandidate> precedents, String missing, String askCustomer, boolean acquirable) {
+public record NeedResult(NeedStatus judged, InquiryNeed need, NeedStatus status, List<EvidenceCandidate> evidence,
+                         List<PrecedentCandidate> precedents, String missing, String askCustomer, boolean acquirable,
+                         Enforcement enforcement) {
+
+    public NeedResult(InquiryNeed need, NeedStatus status, List<EvidenceCandidate> evidence,
+                      List<PrecedentCandidate> precedents, String missing, String askCustomer, boolean acquirable) {
+        this(status, need, status, evidence, precedents, missing, askCustomer, acquirable, null);
+    }
+
+    /**
+     * The invariants code holds a verdict to — each one about the verdict's own words or about provenance, none about a
+     * product or a topic ({@link NeedAggregation#enforce}).
+     */
+    public enum Enforcement {
+        /** No verdict for this need came back. */
+        NOT_JUDGED,
+        /** A verdict of support citing no candidate that exists. */
+        NO_CITED_EVIDENCE,
+        /** Every cited candidate was about a different listing; a fact about listing Y is not a fact about listing X. */
+        OTHER_LISTING_ONLY,
+        /** FULL / CONDITIONAL while naming an assumption not in the evidence. */
+        DECLARED_ASSUMPTION,
+        /** FULL while naming information the answer requires and the evidence lacks. */
+        DECLARED_MISSING,
+        /** FULL while naming a value only the customer can supply — that is CONDITIONAL_ON_CUSTOMER. */
+        DECLARED_CUSTOMER_INPUT,
+        /** Short on readable evidence while a source this system cannot read exists — UNKNOWN, set by code. */
+        UNREADABLE_SOURCE
+    }
 }

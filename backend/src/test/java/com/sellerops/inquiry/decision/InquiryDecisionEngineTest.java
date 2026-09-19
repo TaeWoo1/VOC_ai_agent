@@ -64,7 +64,7 @@ class InquiryDecisionEngineTest {
     }
 
     static NeedVerdict verdict(String need, NeedStatus status, String... evidence) {
-        return new NeedVerdict(need, status, List.of(evidence), status == NeedStatus.FULL ? null : "부족한 내용",
+        return NeedVerdict.of(need, status, List.of(evidence), status == NeedStatus.FULL ? null : "부족한 내용",
                 status == NeedStatus.CONDITIONAL_ON_CUSTOMER ? "어떤 규격을 쓰시는지 알려주세요." : null, List.of());
     }
 
@@ -194,9 +194,9 @@ class InquiryDecisionEngineTest {
             ScriptedModel model = new ScriptedModel(
                     List.of(need("N1", "a", NeedType.PRODUCT_SPEC), need("N2", "b", NeedType.POLICY),
                             need("N3", "c", NeedType.POLICY)),
-                    verdicts(new NeedVerdict("N1", NeedStatus.FULL, List.of(), null, null, List.of()),
-                            new NeedVerdict("N2", NeedStatus.FULL, List.of("P1"), null, null, List.of()),
-                            new NeedVerdict("N3", NeedStatus.FULL, List.of("E9"), null, null, List.of())));
+                    verdicts(NeedVerdict.of("N1", NeedStatus.FULL, List.of(), null, null, List.of()),
+                            NeedVerdict.of("N2", NeedStatus.FULL, List.of("P1"), null, null, List.of()),
+                            NeedVerdict.of("N3", NeedStatus.FULL, List.of("E9"), null, null, List.of())));
             NeedDecision d = decide(model, List.of(WIDTH_TABLE), List.of(past), DetailCapability.READABLE);
 
             assertThat(d.needs()).extracting(NeedResult::status).containsOnly(NeedStatus.NONE);
@@ -222,8 +222,8 @@ class InquiryDecisionEngineTest {
             ScriptedModel model = new ScriptedModel(
                     List.of(need("N1", "엘보 호수", NeedType.PRODUCT_COMPATIBILITY),
                             need("N2", "8.5mm 호수", NeedType.PRODUCT_COMPATIBILITY)),
-                    verdicts(new NeedVerdict("N1", NeedStatus.NONE, List.of(), "없음", null, List.of("P1", "P7")),
-                            new NeedVerdict("N2", NeedStatus.FULL, List.of("E1"), null, null, List.of("P1"))));
+                    verdicts(NeedVerdict.of("N1", NeedStatus.NONE, List.of(), "없음", null, List.of("P1", "P7")),
+                            NeedVerdict.of("N2", NeedStatus.FULL, List.of("E1"), null, null, List.of("P1"))));
             NeedDecision d = decide(model, List.of(WIDTH_TABLE), List.of(past), DetailCapability.READABLE);
 
             assertThat(d.needs().get(0).precedents()).extracting(PrecedentCandidate::memoryId)

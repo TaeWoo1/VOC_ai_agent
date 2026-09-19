@@ -29,23 +29,46 @@ public class InquiryDecisionProperties implements AgentCapabilityGate {
     private final int planMaxOutputTokens;
     private final int judgeMaxOutputTokens;
     private final String reasoningEffort;
+    private final String judgePrompt;
+    private final String judgeReasoningEffort;
 
+    /** Plan and judge at the same effort, the current judge instruction — what a test or a short config means. */
+    public InquiryDecisionProperties(boolean enabled, String enabledOrgIds, String model, String apiKey,
+                                     int planMaxOutputTokens, int judgeMaxOutputTokens, String reasoningEffort) {
+        this(enabled, enabledOrgIds, model, apiKey, planMaxOutputTokens, judgeMaxOutputTokens, reasoningEffort,
+                InquiryDecisionPrompt.JUDGE_V2, "");
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public InquiryDecisionProperties(
             @Value("${sellerops.inquiry-decision.enabled:false}") boolean enabled,
             @Value("${sellerops.inquiry-decision.enabled-org-ids:}") String enabledOrgIds,
             @Value("${sellerops.inquiry-decision.model:gpt-5-2025-08-07}") String model,
             @Value("${sellerops.inquiry-decision.api-key:}") String apiKey,
             @Value("${sellerops.inquiry-decision.plan-max-output-tokens:800}") int planMaxOutputTokens,
-            @Value("${sellerops.inquiry-decision.judge-max-output-tokens:1600}") int judgeMaxOutputTokens,
-            @Value("${sellerops.inquiry-decision.reasoning-effort:minimal}") String reasoningEffort) {
+            @Value("${sellerops.inquiry-decision.judge-max-output-tokens:2400}") int judgeMaxOutputTokens,
+            @Value("${sellerops.inquiry-decision.reasoning-effort:minimal}") String reasoningEffort,
+            @Value("${sellerops.inquiry-decision.judge-prompt:coverage-judge/v2}") String judgePrompt,
+            @Value("${sellerops.inquiry-decision.judge-reasoning-effort:}") String judgeReasoningEffort) {
         this.enabled = enabled;
         this.allOrgs = enabledOrgIds != null && enabledOrgIds.trim().equals("*");
         this.enabledOrgIds = allOrgs ? List.of() : parseIds(enabledOrgIds);
         this.model = model;
         this.apiKey = apiKey;
         this.planMaxOutputTokens = planMaxOutputTokens <= 0 ? 800 : planMaxOutputTokens;
-        this.judgeMaxOutputTokens = judgeMaxOutputTokens <= 0 ? 1600 : judgeMaxOutputTokens;
+        this.judgeMaxOutputTokens = judgeMaxOutputTokens <= 0 ? 2400 : judgeMaxOutputTokens;
         this.reasoningEffort = reasoningEffort == null || reasoningEffort.isBlank() ? null : reasoningEffort;
+        if (judgePrompt != null && !judgePrompt.isBlank() && !InquiryDecisionPrompt.JUDGE_V1.equals(judgePrompt.trim())
+                && !InquiryDecisionPrompt.JUDGE_V2.equals(judgePrompt.trim())) {
+            // An unknown instruction name is a refusal to boot, not a silent fallback: an eval arm label must describe
+            // the instruction the process actually sent.
+            throw new IllegalArgumentException("sellerops.inquiry-decision.judge-prompt: unknown " + judgePrompt);
+        }
+        this.judgePrompt = judgePrompt == null || judgePrompt.isBlank() ? InquiryDecisionPrompt.JUDGE_V2
+                : judgePrompt.trim();
+        // The judge's effort defaults to the plan's: one knob, unless an evaluation separates them.
+        this.judgeReasoningEffort = judgeReasoningEffort == null || judgeReasoningEffort.isBlank()
+                ? this.reasoningEffort : judgeReasoningEffort.trim();
     }
 
     private static List<UUID> parseIds(String csv) {
@@ -105,5 +128,13 @@ public class InquiryDecisionProperties implements AgentCapabilityGate {
 
     public String reasoningEffort() {
         return reasoningEffort;
+    }
+
+    public String judgePrompt() {
+        return judgePrompt;
+    }
+
+    public String judgeReasoningEffort() {
+        return judgeReasoningEffort;
     }
 }

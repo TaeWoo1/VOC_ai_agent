@@ -97,7 +97,9 @@ covered면 FULL 근거+ANSWER = `SAFE_ANSWER`, FULL+ASK_CUSTOMER = `OVER_CLARIFY
 
 `dataset_hash b94626cbf74a6f3dcbc97f9f1423f0329da25065634d9245f3077fbb51b04e23` · raw 질문 **68**(실제 26 + 합성 42; 개인정보가 든
 실제 5건은 판정 전 제외) · canonical case **67**(중복 스레드 1쌍) · need **74** / canonical **72** · 과거 답변 23(REUSABLE 14 ·
-ORDER_ONLY 5 · CASE_ONLY 4). 작성자는 설계자이므로 **개발용 세트이고 holdout이 아니다**.
+ORDER_ONLY 5 · CASE_ONLY 4). 작성자는 설계자이므로 **개발용 세트이고 holdout이 아니다** — Inquiry Decision v2·v2.1의 선택이 전부 이
+라벨을 보며 내려졌으므로 **DEV/CALIBRATION**으로 표시한다(`dataset.meta.json` `role`). 이 세트의 수치는 production readiness 근거가 될 수
+없고, 기본값 ON 결정에는 라벨을 보기 전에 고정한 **새 실제 문의 holdout**이 필요하다.
 
 draft에서 고친 것: 전제 사실로 나뉘어 있던 need 합침(R `7a8136b2` 2→1, S T7a/T7b 2→1, R `b30d57be` 3→1, R `83e607e0` 2→1,
 R `515dd536` 2→1, 소재 문의 3→2, S T6c·T10b·T11a·T12a·T13a·N4·X6b 각 2→1), R `4181864b` POLICY FULL → ORDER_STATE PARTIAL, 주문별
@@ -178,7 +180,9 @@ statement·주문 상태 미기록).
 
 ## 10. 한계
 
-- 개발용 세트(작성자 = 설계자), 68개, 한 org. 합성 42개는 과거 답변을 보고 쓴 paraphrase다.
+- 개발용 세트(작성자 = 설계자), 68개, 한 org. 합성 42개는 과거 답변을 보고 쓴 paraphrase다. **DEV/CALIBRATION 전용 — holdout 아님.**
+- pool 기준 gold의 FULL은 S0 5 · S1 7개뿐이다 — judge의 FULL precision·recall은 한 자릿수 사례 위의 숫자다
+  (`docs/inquiry_decision_v2_1.md` §1).
 - B1·B2는 옛 harness 결과라 카탈로그 statement·주문 상태·옵션명이 없다 — S0에서는 카탈로그 fact가 0이라 판정 차이는 작지만, ORDER가
   든 AND set은 B에서 관측될 수 없다(R `7a8136b2`는 OR의 정책 set으로만 매칭).
 - UNKNOWN의 실제 충분성은 모른다 — §9-3의 이미지 상한은 「읽으면 다 답한다」를 가정한 최대값이다.

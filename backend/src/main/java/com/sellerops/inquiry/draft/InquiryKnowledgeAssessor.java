@@ -169,7 +169,7 @@ public class InquiryKnowledgeAssessor {
         com.sellerops.inquiry.decision.NeedDecision decision = com.sellerops.inquiry.decision.InquiryDecisionEngine
                 .decide(orgId, question, decisionModel,
                         needs -> collector.collect(orgId, inquiry, productId, found.lanes(), catalogueFinding, scope,
-                                needs), detail);
+                                needs), detail, productId);
         AnswerBasisState basis = decision.basis();
         List<com.sellerops.inquiry.decision.NeedResult> open = decision.unresolved();
         String subject = basis != AnswerBasisState.NO_ANSWER_BASIS ? null

@@ -88,7 +88,19 @@ public class AnswerMemoryService {
                                   UUID productId, String channelCode, String sourceSubtype,
                                   String topicCategory, UUID originInquiryId, UUID originWorkItemId,
                                   Integer originDraftVersion, UUID authorUserId, String authorName,
-                                  DataOrigin dataOrigin) {
+                                  DataOrigin dataOrigin, AnswerMemoryReuseScope reuseScope) {
+
+        /** Without a declaration: a new row is UNKNOWN, an existing row keeps what a person said. */
+        public RememberCommand(UUID orgId, String originRef, AnswerMemoryStrength strength,
+                               String question, String answerTitle, String answerBody,
+                               UUID productId, String channelCode, String sourceSubtype,
+                               String topicCategory, UUID originInquiryId, UUID originWorkItemId,
+                               Integer originDraftVersion, UUID authorUserId, String authorName,
+                               DataOrigin dataOrigin) {
+            this(orgId, originRef, strength, question, answerTitle, answerBody, productId, channelCode, sourceSubtype,
+                    topicCategory, originInquiryId, originWorkItemId, originDraftVersion, authorUserId, authorName,
+                    dataOrigin, null);
+        }
     }
 
     /**
@@ -111,7 +123,8 @@ public class AnswerMemoryService {
         String body = command.answerBody().strip();
         String signature = TopicSignature.of(command.question(), sellerCorpus(command.orgId()));
         boolean existed = row.getId() != null;
-        if (existed && body.equals(row.getAnswerBody()) && signature.equals(row.getTopicSignature())
+        boolean declares = command.reuseScope() != null && command.reuseScope() != row.getReuseScope();
+        if (existed && !declares && body.equals(row.getAnswerBody()) && signature.equals(row.getTopicSignature())
                 && command.strength().rank() <= row.getStrength().rank()) {
             return java.util.Optional.of(row);
         }
@@ -137,7 +150,40 @@ public class AnswerMemoryService {
         row.setAuthorUserId(command.authorUserId());
         row.setAuthorName(command.authorName());
         row.setDataOrigin(command.dataOrigin() == null ? DataOrigin.REAL : command.dataOrigin());
+        if (command.reuseScope() != null) {
+            // A declaration travels with the act that made it; without one, a re-recorded act keeps what a person said.
+            declare(row, command.reuseScope(), command.authorUserId());
+        } else if (row.getReuseScope() == null) {
+            row.setReuseScope(AnswerMemoryReuseScope.UNKNOWN);
+        }
         return java.util.Optional.of(memories.save(row));
+    }
+
+    /**
+     * A seller says how far one of their past answers may travel (Inquiry Decision v2.1). Not a new memory — the answer
+     * and its strength are untouched; only its provenance is stated. Org-scoped: another org's id is absent.
+     */
+    @Transactional
+    public java.util.Optional<AnswerMemory> declareReuseScope(UUID orgId, UUID memoryId, AnswerMemoryReuseScope scope,
+                                                              UUID userId) {
+        if (scope == null || userId == null) {
+            return java.util.Optional.empty();
+        }
+        return memories.findById(memoryId).filter(m -> orgId.equals(m.getOrgId())).map(m -> {
+            declare(m, scope, userId);
+            return memories.save(m);
+        });
+    }
+
+    private static void declare(AnswerMemory row, AnswerMemoryReuseScope scope, UUID userId) {
+        row.setReuseScope(scope);
+        if (userId != null) {
+            row.setReuseScopeDeclaredBy(userId);
+            row.setReuseScopeDeclaredAt(java.time.Instant.now());
+        } else {
+            row.setReuseScopeDeclaredBy(null);
+            row.setReuseScopeDeclaredAt(null);
+        }
     }
 
     /**

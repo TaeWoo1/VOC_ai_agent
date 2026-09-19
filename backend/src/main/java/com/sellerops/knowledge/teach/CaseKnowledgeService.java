@@ -379,7 +379,7 @@ public class CaseKnowledgeService {
             boolean covered = "FULL".equals(n.status()) || "CONDITIONAL_ON_CUSTOMER".equals(n.status());
             CaseDetailView.Prefill prefill = covered || !open || n.precedents() == null ? null
                     : n.precedents().stream().map(memories::findById).flatMap(java.util.Optional::stream)
-                            .map(m -> prefill(orgId, c.getSubjectId(), namedProduct, m))
+                            .map(m -> prefill(orgId, c.getSubjectId(), namedProduct, m, sameOrder(c.getSubjectId())))
                             .filter(java.util.Objects::nonNull).findFirst().orElse(null);
             return new CaseDetailView.NeedLine(n.ask(), n.status(), n.statusKo(), covered,
                     n.evidence() == null ? List.of() : n.evidence(), n.missing(), n.askCustomer(), prefill,
@@ -414,8 +414,18 @@ public class CaseKnowledgeService {
             return null;
         }
         return memories.findById(gap.precedentMemoryId())
-                .map(m -> prefill(orgId, c.getSubjectId(), namedProduct, m))
+                .map(m -> prefill(orgId, c.getSubjectId(), namedProduct, m, sameOrder(c.getSubjectId())))
                 .orElse(null);
+    }
+
+    /** Whether a past answer's own inquiry was about the same order as this Case's — through the two inquiries. */
+    private java.util.function.Predicate<AnswerMemory> sameOrder(UUID inquiryId) {
+        com.sellerops.inquiry.decision.PrecedentReuse.OrderKey current = inquiryId == null ? null
+                : inquiries.findById(inquiryId).map(com.sellerops.inquiry.decision.PrecedentReuse.OrderKey::of)
+                        .orElse(null);
+        return m -> current != null && m.getOriginInquiryId() != null && current.equals(inquiries
+                .findById(m.getOriginInquiryId()).map(com.sellerops.inquiry.decision.PrecedentReuse.OrderKey::of)
+                .orElse(null));
     }
 
     /**
@@ -424,7 +434,20 @@ public class CaseKnowledgeService {
      * empty. The retrieval applied all of these when it found the answer; the case outlives that retrieval.
      */
     static CaseDetailView.Prefill prefill(UUID orgId, UUID inquiryId, UUID namedProduct, AnswerMemory m) {
-        if (m == null || !orgId.equals(m.getOrgId()) || m.getAnswerBody() == null || m.getAnswerBody().isBlank()
+        return prefill(orgId, inquiryId, namedProduct, m, x -> false);
+    }
+
+    /**
+     * ... and the answer's DECLARED reuse scope (Inquiry Decision v2.1, {@code PrecedentReuse}): REUSABLE crosses
+     * Cases, ORDER_ONLY only when {@code sameOrder} says the two inquiries share an order, CASE_ONLY and UNKNOWN never —
+     * this inquiry's own answer is already excluded above them. Existing rows are UNKNOWN until a seller says otherwise.
+     */
+    static CaseDetailView.Prefill prefill(UUID orgId, UUID inquiryId, UUID namedProduct, AnswerMemory m,
+                                          java.util.function.Predicate<AnswerMemory> sameOrder) {
+        if (m == null || !reuseAdmits(m, inquiryId, sameOrder)) {
+            return null;
+        }
+        if (!orgId.equals(m.getOrgId()) || m.getAnswerBody() == null || m.getAnswerBody().isBlank()
                 || (m.getProductId() != null && !m.getProductId().equals(namedProduct))
                 || (inquiryId != null && inquiryId.equals(m.getOriginInquiryId()))) {
             return null;
@@ -432,6 +455,16 @@ public class CaseKnowledgeService {
         return new CaseDetailView.Prefill(m.getAnswerBody().strip(),
                 m.getStrength() == null ? null : m.getStrength().labelKo(),
                 m.getUpdatedAt() == null ? null : m.getUpdatedAt().atZone(KST).toLocalDate());
+    }
+
+    private static boolean reuseAdmits(AnswerMemory m, UUID inquiryId,
+                                       java.util.function.Predicate<AnswerMemory> sameOrder) {
+        return switch (m.getReuseScope() == null ? com.sellerops.knowledge.memory.AnswerMemoryReuseScope.UNKNOWN
+                : m.getReuseScope()) {
+            case REUSABLE -> true;
+            case ORDER_ONLY -> sameOrder.test(m);
+            case CASE_ONLY, UNKNOWN -> inquiryId != null && inquiryId.equals(m.getOriginInquiryId());
+        };
     }
 
     /**

@@ -49,4 +49,30 @@ public class AnswerMemoryController {
         return memory.search(principal.orgId(), RetrievalQuery.ofText(query), productId, productName,
                 excludeInquiryId, limit);
     }
+
+    /** The seller's declaration of how far a past answer may travel. */
+    public record ReuseScopeRequest(String scope) {
+    }
+
+    public record ReuseScopeView(UUID id, String reuseScope, String reuseScopeKo, java.time.Instant declaredAt) {
+    }
+
+    /**
+     * Declare how far one past answer may travel (Inquiry Decision v2.1). A provenance statement by the seller — it
+     * neither writes a new memory nor changes an answer. 400 for a word outside the four; 404 for another org's row.
+     */
+    @org.springframework.web.bind.annotation.PutMapping("/{memoryId}/reuse-scope")
+    public ReuseScopeView declareReuseScope(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal AuthPrincipal principal,
+            @org.springframework.web.bind.annotation.PathVariable UUID memoryId,
+            @org.springframework.web.bind.annotation.RequestBody ReuseScopeRequest request) {
+        AnswerMemoryReuseScope scope = request == null ? null : AnswerMemoryReuseScope.parse(request.scope());
+        if (scope == null) {
+            throw com.sellerops.common.ApiException.badRequest("재사용 범위는 REUSABLE, ORDER_ONLY, CASE_ONLY, UNKNOWN 중 하나입니다.");
+        }
+        AnswerMemory m = memory.declareReuseScope(principal.orgId(), memoryId, scope, principal.userId())
+                .orElseThrow(() -> com.sellerops.common.ApiException.notFound("과거 답변을 찾을 수 없습니다."));
+        return new ReuseScopeView(m.getId(), m.getReuseScope().name(), m.getReuseScope().labelKo(),
+                m.getReuseScopeDeclaredAt());
+    }
 }

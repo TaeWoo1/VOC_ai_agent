@@ -59,8 +59,9 @@ public class InquiryDecisionGenerator {
                 Map.of("Authorization", "Bearer " + properties.apiKey()), body);
         AgentLlmCallMetrics metrics = AgentLlmCallMetrics.of(response);
         Map<String, NeedVerdict> verdicts = response.ok() ? parseJudge(content(response)) : null;
-        log.info("inquiry_decision phase=judge orgId={} answered={} needs={} evidence={} precedents={} verdicts={} {}",
-                orgId, response.ok(), needs, evidence, precedents, verdicts == null ? -1 : verdicts.size(),
+        log.info("inquiry_decision phase=judge orgId={} prompt={} effort={} answered={} needs={} evidence={} precedents={}"
+                        + " verdicts={} {}", orgId, properties.judgePrompt(), properties.judgeReasoningEffort(),
+                response.ok(), needs, evidence, precedents, verdicts == null ? -1 : verdicts.size(),
                 metrics.toLogFields());
         return new InquiryDecisionModel.Answer<>(verdicts, cost(metrics));
     }
@@ -125,8 +126,9 @@ public class InquiryDecisionGenerator {
                 if (need.isEmpty() || status == null) {
                     continue; // an unparseable verdict is no verdict — the need stays NONE
                 }
-                out.put(need, new NeedVerdict(need, status, strings(v.path("evidence")), text(v, "missing"),
-                        text(v, "ask_customer"), strings(v.path("precedents"))));
+                out.put(need, new NeedVerdict(need, status, strings(v.path("evidence")), phrases(v.path("missing")),
+                        strings(v.path("customer_input")), strings(v.path("assumptions")), text(v, "ask_customer"),
+                        strings(v.path("precedents"))));
             }
             return out;
         } catch (Exception e) {
@@ -148,6 +150,15 @@ public class InquiryDecisionGenerator {
         return List.copyOf(ordered);
     }
 
+    /** v2 writes a list; v1 wrote one sentence. Either is read as the list of what is missing. */
+    private static List<String> phrases(JsonNode node) {
+        if (node.isTextual()) {
+            String s = node.asText("").strip();
+            return s.isEmpty() ? List.of() : List.of(s);
+        }
+        return strings(node);
+    }
+
     private static String text(JsonNode v, String field) {
         String s = v.path(field).asText("").strip();
         return s.isEmpty() ? null : s;
@@ -156,17 +167,17 @@ public class InquiryDecisionGenerator {
     /** Package-visible so the payload floor test can assert the exact bytes. */
     String planBody(String question) {
         return body(InquiryDecisionPrompt.planSystem(), InquiryDecisionPrompt.planUser(question),
-                properties.planMaxOutputTokens());
+                properties.planMaxOutputTokens(), properties.reasoningEffort());
     }
 
     String judgeBody(String question, List<InquiryNeed> needs, List<EvidenceCandidate> evidence,
                      List<PrecedentCandidate> precedents) {
-        return body(InquiryDecisionPrompt.judgeSystem(),
+        return body(InquiryDecisionPrompt.judgeSystem(properties.judgePrompt()),
                 InquiryDecisionPrompt.judgeUser(question, needs, evidence, precedents),
-                properties.judgeMaxOutputTokens());
+                properties.judgeMaxOutputTokens(), properties.judgeReasoningEffort());
     }
 
-    private String body(String system, String user, int maxTokens) {
+    private String body(String system, String user, int maxTokens, String reasoningEffort) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("model", properties.model());
         ArrayNode messages = root.putArray("messages");
@@ -174,8 +185,8 @@ public class InquiryDecisionGenerator {
         messages.addObject().put("role", "user").put("content", user);
         root.put("max_completion_tokens", maxTokens);
         root.putObject("response_format").put("type", "json_object");
-        if (properties.reasoningEffort() != null) {
-            root.put("reasoning_effort", properties.reasoningEffort());
+        if (reasoningEffort != null) {
+            root.put("reasoning_effort", reasoningEffort);
         }
         return root.toString();
     }

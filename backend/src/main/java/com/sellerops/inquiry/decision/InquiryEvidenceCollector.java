@@ -75,13 +75,21 @@ public class InquiryEvidenceCollector {
     private final ProductVariantRepository variants;
     private final ChannelProductRepository listings;
     private final ChannelRepository channels;
+    private final com.sellerops.knowledge.memory.AnswerMemoryRepository memories;
+    private final com.sellerops.inquiry.InquiryRepository inquiries;
+    /** Where a past answer's reuse scope is read from — the stored column; an evaluation may substitute annotations. */
+    private java.util.function.Function<com.sellerops.knowledge.memory.AnswerMemory,
+            com.sellerops.knowledge.memory.AnswerMemoryReuseScope> scopeSource =
+            com.sellerops.knowledge.memory.AnswerMemory::getReuseScope;
 
     public InquiryEvidenceCollector(InquiryEvidenceRetriever retriever,
                                     ProductKnowledgeSourceRepository productSources,
                                     ProductKnowledgeChunkRepository productChunks,
                                     OrgKnowledgeSourceRepository orgSources, OrgKnowledgeChunkRepository orgChunks,
                                     ProductFactRepository facts, ProductVariantRepository variants,
-                                    ChannelProductRepository listings, ChannelRepository channels) {
+                                    ChannelProductRepository listings, ChannelRepository channels,
+                                    com.sellerops.knowledge.memory.AnswerMemoryRepository memories,
+                                    com.sellerops.inquiry.InquiryRepository inquiries) {
         this.retriever = retriever;
         this.productSources = productSources;
         this.productChunks = productChunks;
@@ -91,6 +99,14 @@ public class InquiryEvidenceCollector {
         this.variants = variants;
         this.listings = listings;
         this.channels = channels;
+        this.memories = memories;
+        this.inquiries = inquiries;
+    }
+
+    /** Evaluation only: read reuse scopes from human annotations instead of the column (Eval v1's 23). */
+    public void setScopeSource(java.util.function.Function<com.sellerops.knowledge.memory.AnswerMemory,
+            com.sellerops.knowledge.memory.AnswerMemoryReuseScope> source) {
+        this.scopeSource = source == null ? com.sellerops.knowledge.memory.AnswerMemory::getReuseScope : source;
     }
 
     @Transactional(readOnly = true)
@@ -111,7 +127,39 @@ public class InquiryEvidenceCollector {
             put(evidence, new EvidenceCandidate(null, EvidenceCandidate.Kind.ORDER_FACT, "주문 상태",
                     whole.order().messageKo(), null, null, null));
         }
-        return new InquiryDecisionEngine.Pool(List.copyOf(evidence.values()), List.copyOf(precedents.values()));
+        return new InquiryDecisionEngine.Pool(List.copyOf(evidence.values()),
+                admissible(inquiry, precedents.values()));
+    }
+
+    /**
+     * Only the past answers whose DECLARED reuse scope admits this Case reach the judge ({@link PrecedentReuse}). The
+     * judge is no longer asked to guess whether an answer was about one order: an answer nobody declared general is not
+     * offered as one. Without the memory store there is no provenance to read, and nothing is offered.
+     */
+    public List<PrecedentCandidate> admissible(Inquiry inquiry, java.util.Collection<PrecedentCandidate> offered) {
+        if (offered.isEmpty() || memories == null) {
+            return List.of();
+        }
+        Map<UUID, com.sellerops.knowledge.memory.AnswerMemory> rows = new LinkedHashMap<>();
+        memories.findAllById(offered.stream().map(PrecedentCandidate::memoryId).toList())
+                .forEach(m -> rows.put(m.getId(), m));
+        PrecedentReuse.OrderKey current = PrecedentReuse.OrderKey.of(inquiry);
+        List<PrecedentCandidate> out = new java.util.ArrayList<>();
+        for (PrecedentCandidate p : offered) {
+            com.sellerops.knowledge.memory.AnswerMemory m = rows.get(p.memoryId());
+            if (m == null) {
+                continue;
+            }
+            com.sellerops.knowledge.memory.AnswerMemoryReuseScope scope = scopeSource.apply(m);
+            PrecedentReuse.OrderKey origin = scope == com.sellerops.knowledge.memory.AnswerMemoryReuseScope.ORDER_ONLY
+                    && current != null && inquiries != null && m.getOriginInquiryId() != null
+                    ? inquiries.findById(m.getOriginInquiryId()).map(PrecedentReuse.OrderKey::of).orElse(null) : null;
+            if (PrecedentReuse.admits(scope, m.getOriginInquiryId(), origin, inquiry == null ? null : inquiry.getId(),
+                    current)) {
+                out.add(p);
+            }
+        }
+        return List.copyOf(out);
     }
 
     /** Whether this system can read the listing's 상세페이지 — from stored facts and listing channels only. */

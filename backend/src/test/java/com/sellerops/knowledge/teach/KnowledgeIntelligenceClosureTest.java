@@ -471,6 +471,62 @@ class KnowledgeIntelligenceClosureTest {
     }
 
     @Test
+    @DisplayName("the declared reuse scope decides who may start from a past answer — UNKNOWN never crosses a Case")
+    void theReuseScopeFencesThePrefill() {
+        UUID origin = UUID.randomUUID();
+        UUID other = UUID.randomUUID();
+        java.util.function.Function<com.sellerops.knowledge.memory.AnswerMemoryReuseScope,
+                com.sellerops.knowledge.memory.AnswerMemory> row = scope -> memories.findById(
+                rememberAnswer(productId, "방수 되나요", "생활 방수가 됩니다.", scope, origin)).orElseThrow();
+
+        com.sellerops.knowledge.memory.AnswerMemory reusable = row.apply(
+                com.sellerops.knowledge.memory.AnswerMemoryReuseScope.REUSABLE);
+        assertThat(CaseKnowledgeService.prefill(org, other, productId, reusable)).isNotNull();
+
+        com.sellerops.knowledge.memory.AnswerMemory unknown = row.apply(
+                com.sellerops.knowledge.memory.AnswerMemoryReuseScope.UNKNOWN);
+        assertThat(CaseKnowledgeService.prefill(org, other, productId, unknown))
+                .as("nobody said it is general, so it is not offered as general").isNull();
+
+        com.sellerops.knowledge.memory.AnswerMemory caseOnly = row.apply(
+                com.sellerops.knowledge.memory.AnswerMemoryReuseScope.CASE_ONLY);
+        assertThat(CaseKnowledgeService.prefill(org, other, productId, caseOnly)).isNull();
+
+        com.sellerops.knowledge.memory.AnswerMemory orderOnly = row.apply(
+                com.sellerops.knowledge.memory.AnswerMemoryReuseScope.ORDER_ONLY);
+        assertThat(CaseKnowledgeService.prefill(org, other, productId, orderOnly, m -> false))
+                .as("another order").isNull();
+        assertThat(CaseKnowledgeService.prefill(org, other, productId, orderOnly, m -> true))
+                .as("the same order").isNotNull();
+        assertThat(CaseKnowledgeService.prefill(org, other, productId, orderOnly))
+                .as("without an order comparison, ORDER_ONLY is not offered").isNull();
+    }
+
+    @Test
+    @DisplayName("a new memory is UNKNOWN; a declaration is kept across a re-recorded act and has an author and a time")
+    void aMemoryIsUnknownUntilSomeoneSaysOtherwise() {
+        UUID id = memory.remember(new AnswerMemoryService.RememberCommand(org, "inquiry-answer:x",
+                AnswerMemoryStrength.IMPORTED_SELLER_ANSWER, "방수", null, "생활 방수가 됩니다.", productId, "NAVER",
+                null, null, UUID.randomUUID(), null, null, null, null, null)).orElseThrow().getId();
+        com.sellerops.knowledge.memory.AnswerMemory m = memories.findById(id).orElseThrow();
+        assertThat(m.getReuseScope()).isEqualTo(com.sellerops.knowledge.memory.AnswerMemoryReuseScope.UNKNOWN);
+        assertThat(m.getReuseScopeDeclaredBy()).isNull();
+
+        memory.declareReuseScope(org, id, com.sellerops.knowledge.memory.AnswerMemoryReuseScope.REUSABLE, user);
+        memory.remember(new AnswerMemoryService.RememberCommand(org, "inquiry-answer:x",
+                AnswerMemoryStrength.USER_APPROVED, "방수", null, "생활 방수가 됩니다.", productId, "NAVER",
+                null, null, m.getOriginInquiryId(), null, null, null, null, null));
+        m = memories.findById(id).orElseThrow();
+        assertThat(m.getReuseScope()).as("re-recording the act does not erase what a person declared")
+                .isEqualTo(com.sellerops.knowledge.memory.AnswerMemoryReuseScope.REUSABLE);
+        assertThat(m.getReuseScopeDeclaredBy()).isEqualTo(user);
+        assertThat(m.getReuseScopeDeclaredAt()).isNotNull();
+        assertThat(memory.declareReuseScope(UUID.randomUUID(), id,
+                com.sellerops.knowledge.memory.AnswerMemoryReuseScope.CASE_ONLY, user))
+                .as("another org's row is absent").isEmpty();
+    }
+
+    @Test
     @DisplayName("a case stored before the precedent existed still reads, and a new one round-trips its id")
     void theStoredGapReadsWithAndWithoutAPrecedent() throws Exception {
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
@@ -485,10 +541,20 @@ class KnowledgeIntelligenceClosureTest {
         assertThat(mapper.readValue(mapper.writeValueAsString(now), CaseKnowledgeGap.class)).isEqualTo(now);
     }
 
+    /**
+     * A past answer a seller declared general. Since Inquiry Decision v2.1 an answer nobody declared is UNKNOWN and is
+     * never offered to another Case, so the prefill tests below state the declaration they depend on.
+     */
     private UUID rememberAnswer(UUID boundProduct, String question, String answer) {
+        return rememberAnswer(boundProduct, question, answer,
+                com.sellerops.knowledge.memory.AnswerMemoryReuseScope.REUSABLE, UUID.randomUUID());
+    }
+
+    private UUID rememberAnswer(UUID boundProduct, String question, String answer,
+                                com.sellerops.knowledge.memory.AnswerMemoryReuseScope scope, UUID originInquiry) {
         return memory.remember(new AnswerMemoryService.RememberCommand(org, "inquiry-answer:" + UUID.randomUUID(),
                 AnswerMemoryStrength.IMPORTED_SELLER_ANSWER, question, null, answer, boundProduct, "NAVER", null,
-                null, UUID.randomUUID(), null, null, null, null, null)).orElseThrow().getId();
+                null, originInquiry, null, null, user, null, null, scope)).orElseThrow().getId();
     }
 
     // ── fixtures ────────────────────────────────────────────────────────────────────────────────────────────────

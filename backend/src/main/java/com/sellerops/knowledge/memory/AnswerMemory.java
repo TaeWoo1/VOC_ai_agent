@@ -93,6 +93,20 @@ public class AnswerMemory extends BaseEntity {
     @Column(nullable = false)
     private int version = 1;
 
+    /**
+     * How far this answer may travel (Inquiry Decision v2.1, {@link AnswerMemoryReuseScope}). UNKNOWN until a person
+     * says otherwise — and UNKNOWN never prefills another Case.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reuse_scope", nullable = false, length = 16)
+    private AnswerMemoryReuseScope reuseScope = AnswerMemoryReuseScope.UNKNOWN;
+
+    @Column(name = "reuse_scope_declared_by")
+    private UUID reuseScopeDeclaredBy;
+
+    @Column(name = "reuse_scope_declared_at")
+    private java.time.Instant reuseScopeDeclaredAt;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "data_origin", nullable = false, length = 16)
     private DataOrigin dataOrigin = DataOrigin.REAL;

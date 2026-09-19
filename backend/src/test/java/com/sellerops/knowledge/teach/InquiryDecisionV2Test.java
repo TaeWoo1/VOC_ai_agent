@@ -151,7 +151,7 @@ class InquiryDecisionV2Test {
         KnowledgeSpineService spine = new KnowledgeSpineService(adapters, products, new SourceRefResolver(em), retriever);
         assessor = new InquiryKnowledgeAssessor(retriever, spine, variants, products);
         collector = new com.sellerops.inquiry.decision.InquiryEvidenceCollector(retriever, productSources,
-                productChunks, orgSources, orgChunks, facts, variants, listings, channels);
+                productChunks, orgSources, orgChunks, facts, variants, listings, channels, memories, inquiries);
         candidates = new KnowledgeCandidateService(candidateRows, memories, productSources,
                 new ProductKnowledgeIndexer(productChunks), products, orgSources, policies, variants);
         draftService = new InquiryReplyDraftService(workItems, draftRows);
@@ -218,7 +218,7 @@ class InquiryDecisionV2Test {
                                                                  String word) {
         List<String> ids = e.stream().filter(c -> c.text().contains(word))
                 .map(com.sellerops.inquiry.decision.EvidenceCandidate::id).toList();
-        return new com.sellerops.inquiry.decision.NeedVerdict(n.id(),
+        return com.sellerops.inquiry.decision.NeedVerdict.of(n.id(),
                 ids.isEmpty() ? com.sellerops.inquiry.decision.NeedStatus.NONE
                         : com.sellerops.inquiry.decision.NeedStatus.FULL, ids, ids.isEmpty() ? "없음" : null, null,
                 List.of());
@@ -344,6 +344,44 @@ class InquiryDecisionV2Test {
         assertThat(decision.calls).isZero();
         assertThat(view.knowledgeGap() == null || view.knowledgeGap().needs() == null).isTrue();
         assertThat(model.sawScope).as("the v11-shaped call — no scope list").isNull();
+    }
+
+    @Test
+    @DisplayName("only past answers whose declared scope admits this Case reach the judge — the stored column decides")
+    void theJudgeIsOfferedOnlyAdmissiblePastAnswers() {
+        Inquiry origin = inquiries.findById(seedInquiry(null, "예전 문의").getInquiryId()).orElseThrow();
+        origin.setSourceOrderRef("ORD-1");
+        inquiries.save(origin);
+        Inquiry sameOrder = inquiries.findById(seedInquiry(null, "같은 주문").getInquiryId()).orElseThrow();
+        sameOrder.setChannelId(origin.getChannelId());
+        sameOrder.setSourceOrderRef("ORD-1");
+        inquiries.save(sameOrder);
+        Inquiry stranger = inquiries.findById(seedInquiry(null, "다른 고객").getInquiryId()).orElseThrow();
+        AnswerMemoryService memory = new AnswerMemoryService(memories, orgChunks, productChunks);
+        java.util.function.Function<com.sellerops.knowledge.memory.AnswerMemoryReuseScope, UUID> remember = scope ->
+                memory.remember(new AnswerMemoryService.RememberCommand(org, "inquiry-answer:" + scope,
+                        AnswerMemoryStrength.USER_APPROVED, "질문", null, "답변 " + scope, productId, "NAVER", null,
+                        null, origin.getId(), null, null, scope == null ? null : user, null, null, scope))
+                        .orElseThrow().getId();
+        UUID reusable = remember.apply(com.sellerops.knowledge.memory.AnswerMemoryReuseScope.REUSABLE);
+        UUID orderOnly = remember.apply(com.sellerops.knowledge.memory.AnswerMemoryReuseScope.ORDER_ONLY);
+        UUID caseOnly = remember.apply(com.sellerops.knowledge.memory.AnswerMemoryReuseScope.CASE_ONLY);
+        UUID unknown = remember.apply(null);
+        List<com.sellerops.inquiry.decision.PrecedentCandidate> offered = java.util.stream.Stream.of(reusable,
+                orderOnly, caseOnly, unknown).map(id -> new com.sellerops.inquiry.decision.PrecedentCandidate(null, id,
+                "답변")).toList();
+
+        assertThat(collector.admissible(stranger, offered)).extracting(
+                com.sellerops.inquiry.decision.PrecedentCandidate::memoryId).containsExactly(reusable);
+        assertThat(collector.admissible(sameOrder, offered)).extracting(
+                com.sellerops.inquiry.decision.PrecedentCandidate::memoryId).containsExactly(reusable, orderOnly);
+        assertThat(collector.admissible(origin, offered)).extracting(
+                com.sellerops.inquiry.decision.PrecedentCandidate::memoryId)
+                .as("in its own Case every answer is its own — and its order is its own order")
+                .containsExactly(reusable, orderOnly, caseOnly, unknown);
+        collector.setScopeSource(m -> com.sellerops.knowledge.memory.AnswerMemoryReuseScope.REUSABLE);
+        assertThat(collector.admissible(stranger, offered)).as("an evaluation may substitute annotations").hasSize(4);
+        collector.setScopeSource(null);
     }
 
     private void seedOption(String name, String status) {

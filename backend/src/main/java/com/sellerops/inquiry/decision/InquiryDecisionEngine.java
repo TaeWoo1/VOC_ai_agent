@@ -40,6 +40,13 @@ public final class InquiryDecisionEngine {
 
     public static NeedDecision decide(UUID orgId, String question, InquiryDecisionModel model,
                                       Function<List<InquiryNeed>, Pool> collect, DetailCapability detail) {
+        return decide(orgId, question, model, collect, detail, null);
+    }
+
+    /** @param productId the Case's resolved listing — what 「this listing's facts」 means when evidence is enforced */
+    public static NeedDecision decide(UUID orgId, String question, InquiryDecisionModel model,
+                                      Function<List<InquiryNeed>, Pool> collect, DetailCapability detail,
+                                      UUID productId) {
         InquiryDecisionModel.Answer<List<InquiryNeed>> planned = model.plan(orgId, question);
         InquiryDecisionModel.CallCost cost = planned.cost();
         List<InquiryNeed> needs = planned.value();
@@ -75,7 +82,8 @@ public final class InquiryDecisionEngine {
         if (judged.value() == null) {
             return NeedDecision.failed(NeedDecision.Outcome.JUDGE_FAILED, cost, detail);
         }
-        List<NeedResult> results = NeedAggregation.enforce(needs, judged.value(), evidence, precedents, detail);
+        List<NeedResult> results = NeedAggregation.enforce(needs, judged.value(), evidence, precedents, detail,
+                productId);
         return new NeedDecision(NeedDecision.Outcome.DECIDED, results, NeedAggregation.basis(results), cost,
                 evidence.size(), precedents.size(), detail);
     }
