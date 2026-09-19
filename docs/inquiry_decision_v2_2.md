@@ -101,3 +101,42 @@ FULL만 대상 · listing은 v2.1 그대로 · 출처로 scope 기록) · `Cover
 더해서 실제 3건(`ae51c7f8` · T6c · `dae8554d`)을 얼린 입력 그대로 재질문한다. 각 3회 반복으로 **판정이 흔들리는지 / 늘 같게 틀리는지**를
 가른다. 결과로 정할 것: 모양별로 체계적이면 judge 계약(프롬프트 v3)의 **별도** 패키지, 흔들리면 반복 판정/합의, positive control이 무너지면
 과잉 교정. offline 자기검사 통과(합성 12 · gold FULL 6 · CONDITIONAL 1 · PARTIAL 4 · NONE 1).
+
+## 7. Targeted calibration — `apr-96b2fa76` / `wt-5f2df5b5` (2026-09-20, 소진)
+
+judge v2@minimal(B와 같은 설정) · 합성 12 case × 3회 + 실제 3건 × 3회 = 호출 45, 실패 0 · unmatched 0 · p50 1.9s(합성) / 1.4s(실제).
+
+| case | gold | 3회 판정 | 정답 |
+|---|---|---|---|
+| P1 · P4 부분 표 hard-negative | PARTIAL | PARTIAL ×3 · PARTIAL ×3 | 3/3 · 3/3 |
+| P2 · P3 positive / near | FULL | FULL ×3 · FULL ×3 | 3/3 · 3/3 |
+| V1 상품 단위 FAQ + 규격별 표, 고객 규격 없음 | CONDITIONAL | CONDITIONAL ×3 | 3/3 |
+| V2 · V4 positive | FULL | FULL ×3 · FULL ×3 | 3/3 · 3/3 |
+| **V3 규격 셋 + 규격 없는 한 문장** | PARTIAL | CONDITIONAL · **FULL** · PARTIAL | **1/3 — 흔들림** |
+| R1 수용량 규칙만, 연결을 물음 | NONE | CONDITIONAL · PARTIAL · CONDITIONAL | 0/3 (FULL은 0) |
+| R2 연결 방법이 적힘 (positive) | FULL | CONDITIONAL · CONDITIONAL · PARTIAL | 0/3 — 보수 쪽 오답 |
+| R3 · R4 | FULL · PARTIAL | FULL ×3 · PARTIAL ×3 | 3/3 · 3/3 |
+| **실제 `ae51c7f8`** | CONDITIONAL | **FULL ×3** | 0/3 — 일관된 오답 |
+| **실제 `dae8554d` n2** | NONE | **FULL ×3** | 0/3 — 일관된 오답 |
+| 실제 `dae8554d` n1 | FULL | FULL ×3 | 3/3 |
+| **실제 T6c** | PARTIAL | FULL · PARTIAL · FULL | 1/3 — 흔들림 |
+
+**읽는 법**
+
+- **깨끗한 모양은 judge v2가 안다.** 부분 표(P)는 12/12, 상품 단위 FAQ와 규격별 표가 함께 있는 V1은 3/3 CONDITIONAL, positive control
+  FULL 6개 중 5개가 3/3 유지(과잉 교정 없음 — 예외 R2).
+- **실패는 두 조건이 겹칠 때다**: 규격(옵션)은 있는데 **규격별 수치는 없고 상품 단위 한 문장만** 있을 때(V3 흔들림, `ae51c7f8` 일관 FULL), 그리고
+  실제 문서의 부분 표(T6c — 합성 P1은 맞히지만 실제는 흔들림: 표가 긴 권장 문단 안에 있다).
+- **`dae8554d` n2 · `ae51c7f8`은 반복해도 같은 답**이다 — 다수결·반복 판정으로는 고쳐지지 않는다. T6c·V3만 흔들림이 원인이다.
+- **R 모양은 이 판정으로 결론을 낼 수 없다**: R1은 한 번도 FULL이 아니었고(안전 쪽), R2의 positive control은 「깔끔하게」라는 고객 기준이
+  섞여 judge가 되묻는 편을 택했다 — 합성 라벨 자체가 다툴 만하다. 이 모양은 라벨을 다시 설계해야 잴 수 있다.
+
+**다음 결정(product-owner, 이번에 구현하지 않음)**: 남은 일관된 오답은 「이 listing이 여러 규격으로 팔린다」와 「이 수치는 규격을 가리지 않는다」를
+judge가 연결하지 못하는 데서 나온다. 선택지 — (a) judge 입력에 **listing의 규격 수를 구조화된 사실로** 한 줄 넣는다(provenance에서 온 사실,
+의미 규칙 아님; payload 변경), (b) judge 계약 v3(프롬프트)를 별도 패키지로, (c) 모델 arm. 셋 다 새 실험과 새 승인이 필요하다. 규격 경고 줄은
+계속 초안에 들어가므로 `ae51c7f8` 모양은 고객 문장에서는 되묻는다.
+
+**운영 실수**: `calibrate.sh`가 출력 파일을 `cal-<snapshot>-<arm>.v2.jsonl`로 정해, 실제 3건 실행(S0 · B)이 **Stage 1 B 관측 파일과 로그를
+덮어썼다**. 남은 것: 254개 need 행의 raw 판정(판정 · 인용 · 사유 수)은 v2.2 replay 파일에, v2.1로 집계한 B 지표 전부는 채점 출력에 있다.
+잃은 것: B의 호출별 지연·토큰 행(요약은 §15 표와 evidence 행에 남아 있다)과 행별 과거 답변 제안. 스크립트는 이제 실행마다 고유한 이름을 쓰고
+기존 파일이 있으면 거부하며, 기록된 관측 파일은 읽기 전용으로 바꿨다.

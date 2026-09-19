@@ -217,7 +217,7 @@
    },
    "S0-B.v2": {
     "sha256": "cbd6cec4141a7eab9d56e9550eeed8ff31b1be09c4f1c7b31ee58514de145052",
-    "status": "VALID — apr-8ef649ab, commit 994ecbac, strict json_schema"
+    "status": "VALID — apr-8ef649ab, commit 994ecbac, strict json_schema — FILE LOST 2026-09-20: overwritten by the targeted run's output path (apr-96b2fa76). Raw verdicts survive in projections['S0-B@v2.2'] (judged, cited, reason counts for all 254 need rows); recorded v2.1 metrics survive in the scorer output; per-call timing rows do not."
    }
   },
   "smoke": {
@@ -244,6 +244,16 @@
     "judge-targeted-inputs.jsonl": "ddbbd7f90a1a593632f50926fc3ee088c8dd7ad4c4ccfbf173bdee2f278c8757",
     "judge-targeted-needs.jsonl": "74ee944f528c73c73c7e343c23a9b9d637076b8b7ba361eda58950ca817f2792",
     "judge-targeted-precedents.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   "observations": {
+    "synthetic-B": {
+     "sha256": "a4f4c9251e8ec9dab0f7af901bbf36737e2787d88b1d844d3205dc80bfbfec73",
+     "status": "apr-96b2fa76, 36 calls"
+    },
+    "real3-B": {
+     "sha256": "5904aa6f688f98400418f46594af456c602a7ea831280cbc62d4e50638a5594f",
+     "status": "apr-96b2fa76, 9 calls, S0 capture R:dae8554d · R:ae51c7f8 · S:T6c"
+    }
    }
   }
  }
