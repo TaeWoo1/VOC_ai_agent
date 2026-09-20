@@ -142,6 +142,23 @@ public final class CustomerGoalPrompt {
         return root;
     }
 
+    /**
+     * The vendor's Structured Outputs envelope around {@link #schema()}.
+     *
+     * <p>Kept <b>separate</b> from the schema itself, which the planner did not do. {@link #schema()} is the
+     * contract — what the model may say — and {@link #fingerprint()} is a fingerprint of that, so it identifies the
+     * contract rather than a vendor's wrapper around it. A vendor renaming its envelope would otherwise look like
+     * the contract changing, and every recorded run would appear to be a run of something else.
+     */
+    public static ObjectNode responseFormat() {
+        ObjectNode format = MAPPER.createObjectNode();
+        format.put("type", "json_schema");
+        ObjectNode js = format.putObject("json_schema");
+        js.put("name", "customer_goal_set").put("strict", true);
+        js.set("schema", schema());
+        return format;
+    }
+
     /** What a run recorded against this prompt is a run OF. Both halves, so neither can move unnoticed. */
     public static String fingerprint() {
         return VERSION + " system=" + sha256(system()) + " schema=" + sha256(schema().toString());

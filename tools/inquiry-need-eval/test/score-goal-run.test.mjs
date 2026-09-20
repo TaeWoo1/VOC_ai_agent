@@ -1,0 +1,83 @@
+// node --test tools/inquiry-need-eval/test/score-goal-run.test.mjs
+// Inquiry v3.5 — scoring a recorded run. The scorer reads rows the runner WROTE; nothing here contacts anything.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { predictionsOf, provenanceOf, scoreRun } from '../score-goal-run.mjs';
+
+const row = (id, extra = {}) => ({
+  run_id: 'r1', mode: 'RUN', id, runner: 'customer-goal-runner/v1',
+  prompt_version: 'customer-goal-interpreter/v1', model: 'gpt-5-2025-08-07', reasoning_effort: 'minimal',
+  system_fp: 'aaa', schema_fp: 'bbb', input_fp: 'ccc', request_fp: `fp-${id}`,
+  finish: 'stop', raw: '{}', said: '{}', failure: null, goals: [], relations: [], valid: true, ...extra,
+});
+
+const goal = (id, outcome, subject) => ({
+  id, explicit_request: '요청', requested_outcome: outcome, subject, basis: 'STATED', explicit_constraints: [],
+});
+
+const gold = [
+  { q: 'G01', goal: 'n1', gid: 'n1', requested_outcome: 'INFORMATION', referent: 'CURRENT_LISTING',
+    basis: 'STATED', explicit_constraints: 0 },
+  { q: 'G16', goal: 'n1', gid: 'n1', requested_outcome: 'ACTION', referent: 'ORGANIZATION', basis: 'STATED',
+    explicit_constraints: 0, legacy_conflict: 'NO_CAPABILITY' },
+];
+
+test('a recorded answer is scored through the same contract mirror the fixtures use', () => {
+  const rows = [
+    row('G01', { goals: [goal('g1', 'INFORMATION', 'CURRENT_LISTING')] }),
+    row('G16', { goals: [goal('g1', 'ACTION', 'ORGANIZATION')] }),
+  ];
+  const scored = scoreRun(rows, gold);
+  assert.equal(scored.explicit_goal_recall, 1);
+  assert.equal(scored.outcome_accuracy, 1);
+  assert.equal(scored.invented_goal_rate, 0);
+  assert.equal(scored.safety_blockers.capability_changed_semantics, 0);
+  assert.deepEqual(scored.refusals, {});
+});
+
+test('a refused row is counted, not dropped — a model that says nothing is not a careful one', () => {
+  const rows = [
+    row('G01', { failure: 'TRUNCATED', raw: null, goals: null, valid: false }),
+    row('G16', { goals: [goal('g1', 'ACTION', 'ORGANIZATION')] }),
+  ];
+  const { predicted, refusals } = predictionsOf(rows);
+  assert.deepEqual(predicted.G01, { goals: [], relations: [] });
+  assert.equal(refusals.TRUNCATED, 1);
+  const scored = scoreRun(rows, gold);
+  assert.equal(scored.cases, 2, 'the refused case stays in the denominator');
+  assert.equal(scored.explicit_goal_recall, 0.5);
+});
+
+test('a goal the wire contract refuses is a refusal, and does not become a prediction', () => {
+  const rows = [row('G01', { goals: [{ ...goal('g1', 'INFORMATION', 'CURRENT_LISTING'), procedure: 'EXCHANGE' }] })];
+  const { predicted, refusals } = predictionsOf(rows);
+  assert.equal(refusals.GOAL_PLAN, 1);
+  assert.deepEqual(predicted.G01.goals, []);
+});
+
+test('a relation with no quoted condition is refused at scoring time too', () => {
+  const rows = [row('F', { goals: [goal('a', 'ACTION', 'CURRENT_ORDER'), goal('b', 'ACTION', 'CURRENT_ORDER')],
+    relations: [{ kind: 'FALLBACK', primary_goal_id: 'a', fallback_goal_id: 'b', stated_condition: '' }] })];
+  const { predicted, refusals } = predictionsOf(rows);
+  assert.equal(refusals.RELATION_SHAPE, 1);
+  assert.deepEqual(predicted.F.relations, []);
+});
+
+test('the score carries the run identity, so a number is attributable to the bytes that produced it', () => {
+  const p = provenanceOf([row('G01'), row('G16')]);
+  assert.deepEqual(p.system_fp, ['aaa']);
+  assert.deepEqual(p.model, ['gpt-5-2025-08-07']);
+  assert.deepEqual(p.request_fps, ['fp-G01', 'fp-G16']);
+  assert.equal(p.rows, 2);
+  // Two different prompts in one file is a mixed run, and it shows rather than averaging away.
+  const mixed = provenanceOf([row('G01'), row('G16', { system_fp: 'zzz' })]);
+  assert.deepEqual(mixed.system_fp.sort(), ['aaa', 'zzz']);
+});
+
+test('PREPARE rows score to nothing and say why — a dry build is not a result', () => {
+  const rows = [row('G01', { mode: 'PREPARE', failure: 'NOT_SENT', raw: null, goals: null, valid: false })];
+  const scored = scoreRun(rows, gold);
+  assert.equal(scored.refusals.NOT_SENT, 1);
+  assert.deepEqual(scored.provenance.mode, ['PREPARE']);
+  assert.equal(scored.recalled, 0);
+});
