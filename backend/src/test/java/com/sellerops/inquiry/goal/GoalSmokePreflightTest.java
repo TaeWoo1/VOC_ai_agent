@@ -73,6 +73,20 @@ class GoalSmokePreflightTest {
     }
 
     @Test
+    @DisplayName("the current preflight result is written down, so the verdict is an artifact and not a memory")
+    void theCurrentPreflightIsRecorded() throws Exception {
+        // Deliberately reads the real process environment: what this asserts is what an operator would see if they
+        // ran it right now, including whether their own shell is carrying the variables a run would need.
+        var outcome = GoalInterpreterPreflight.prepare(Path.of(".."), System.getenv());
+        Path out = Path.of("build", "goal-preflight.json");
+        java.nio.file.Files.createDirectories(out.getParent());
+        java.nio.file.Files.writeString(out, outcome.report().toPrettyString() + "\n");
+        assertThat(outcome.report().get("verdict").asText()).isIn("BLOCKED", "READY_FOR_APPROVAL");
+        // Whatever the environment says, the corpus gap is a property of the repository and is always present.
+        assertThat(outcome.blockers()).anySatisfy(b -> assertThat(b).contains("G23"));
+    }
+
+    @Test
     @DisplayName("building every usable request contacts nobody, and the fingerprints are stable across runs")
     void preparingTheUsableSetSpendsNothing() throws Exception {
         GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE);
