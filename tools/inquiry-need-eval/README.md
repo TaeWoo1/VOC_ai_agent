@@ -34,14 +34,17 @@ Validates the gold against `contracts/inquiry-authority/v1/vocabulary.json`, pro
 
 | file | what it owns |
 |---|---|
-| `contract.mjs` | the WP-3 step shapes, the parser (`PLAN_SET` = unknown word · `PLAN_SHAPE` = known words, impossible object), the validator rules a shape cannot carry, and `project` (a v2-shaped plan rewritten into the new shapes) |
-| `goals.mjs` | split-tolerant scoring: many predicted needs may serve one resolution goal, and no need serves two |
+| `contract.mjs` | the step shapes, the declared `closing_authority`, the parser (`PLAN_SET` = unknown word · `PLAN_SHAPE` = known words, impossible object — now including a retired `role`), the validator rules a shape cannot carry, and `project` (an older plan rewritten into the current shapes; it refuses to choose when the recorded plan named two endings) |
+| `goals.mjs` | split-tolerant scoring: many predicted needs may serve one resolution goal, and no need serves two. Reports `correct_closer` beside the older `required_authority_recall`, because presence and closing are different claims |
+| `availability.mjs` | WP-3.1 §2: every entity read classified against what the goal required, and the three availability semantics priced on the same rows. Changes nothing |
+| `closers.mjs` | WP-3.1 §3: the closing-authority taxonomy — a genuine seller judgment, a seller appended behind knowledge, a seller standing where a capability cannot act |
 | `wp3-replay.mjs` | both scorers over one recorded run, so the difference is shown rather than asserted |
 
 `contract.mjs` is a **mirror** of the Java (`ResolutionPlan` / `ResolutionPlanParser` / `ResolutionPlanValidator`). It is
 pinned to it by `test/goals.test.mjs`, which reads the very file the Java scenario tests read
-(`contracts/inquiry-planner/v2/synthetic/planner-scenarios.jsonl`) and must reach the same verdict on all 30 rows —
-including which 8 cannot be parsed at all. `test/mutations.test.mjs` breaks one rule at a time at the source level and
+(`contracts/inquiry-planner/v3/synthetic/planner-scenarios.jsonl`) and must reach the same verdict on all 43 rows —
+including which 13 cannot be parsed at all. The `v2` fixture beside it is frozen: it is what the WP-3 contract was
+measured against, and under WP-3.1's parser every row of it carries a retired slot. `test/mutations.test.mjs` breaks one rule at a time at the source level and
 asserts a named property stops holding, so a rule nothing checks shows up as a surviving mutation.
 
 ```bash

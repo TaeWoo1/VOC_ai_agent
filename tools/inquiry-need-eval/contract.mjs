@@ -2,7 +2,7 @@
 // The plan contract, offline (Inquiry v3 WP-3 step shapes; WP-3.1 declared ending): the step shapes, the declared
 // closing authority, the projection of an older plan into them, and the validator rules that survive. This is a MIRROR of the Java (ResolutionPlan / ResolutionPlanParser /
 // ResolutionPlanValidator) and is pinned to it by test/plan.test.mjs, which runs it over the very same fixture file the
-// Java scenario tests read (contracts/inquiry-planner/v2/synthetic/planner-scenarios.jsonl). A mirror nobody checks is a
+// Java scenario tests read (contracts/inquiry-planner/v3/synthetic/planner-scenarios.jsonl). A mirror nobody checks is a
 // second opinion; a mirror checked against the original on the shared fixtures is a way to score recorded runs without a
 // JVM.
 import { readFileSync } from 'node:fs';
