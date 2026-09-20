@@ -471,3 +471,17 @@ test('a procedure planned as a follow-up is refused; the same follow-up split in
   assert.equal(d.planner_only_extra_needs, 1);
   assert.deepEqual(d.procedure_for_read, []);
 });
+
+test('a plan naming one capability about two instances is judged on the one the goal asked for', () => {
+  // the shape the v5 smoke produced for C7: this listing in one need, the seller's range in another
+  const wide = [goldGoal('C', 'KNOWLEDGE', [{ capability: 'KNOWLEDGE.CATALOGUE', scope: 'SELLER_CATALOGUE' }])];
+  const both = { q: 'C', needs: [
+    { id: 'N1', ask: 'a', closing_authority: 'KNOWLEDGE', customer_inputs: [],
+      steps: [{ capability: 'KNOWLEDGE.CATALOGUE', scope: 'THIS_LISTING' }] },
+    { id: 'N2', ask: 'b', closing_authority: 'KNOWLEDGE', customer_inputs: [],
+      steps: [{ capability: 'KNOWLEDGE.CATALOGUE', scope: 'SELLER_CATALOGUE' }] }] };
+  const r = scoreGoals([both], wide);
+  assert.equal(r.scope.scope_correct, 1, 'the plan contains the instance the goal asked about');
+  assert.equal(r.scope.scope_wrong, 0, 'and is not judged on whichever step happened to come first');
+  assert.equal(r.scope.capability_extra, 1, 'the other instance is still an extra read, and is counted');
+});

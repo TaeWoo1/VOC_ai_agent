@@ -1,7 +1,7 @@
 # Inquiry Architecture v3 — WP-3.2: Planner Boundary & Scope Hardening
 
 > **Status: three residuals given owners · one new invariant (audited first) · scope is now a first-class metric ·
-> the vendor request CHANGED, so a new 8-call smoke is required before 67×1.**
+> 8-call smoke RUN and FAILED on the one item this package existed to fix (§10).**
 > **Model calls 0.** Marketplace 0 · DB writes 0 · migrations 0 · production Cases 0. 67×1 not run.
 > Planner still **NOT frozen**.
 
@@ -270,3 +270,88 @@ automatic prompt tweak, no retry.
 **If it passes:** propose 67 × 1 as a separate manifest. **Not 67 × 3.**
 
 **The planner is not frozen and WP-4 E2E is not proposed.**
+
+---
+
+## 10. The smoke — **FAILED**
+
+Approved in turn ("Seated and ready. for the 8-call resolution-planner/v5 smoke at commit `836fb149`"), single use.
+**8 calls / cap 8, executed at `836fb149` with a clean tree.** Inputs regenerated and compared byte for byte with the
+approved manifest before sending: identical (`f675f3c5…`). Marketplace 0 · DB writes 0 · external writes 0 ·
+production Cases 0 · judge 0 · draft 0 · migrations 0. Raw stored before scoring (`eval-store:runs/wp32-smoke`,
+`run-verify → ok`). 12,278 prompt / 788 completion / **0 reasoning** tokens, mean 2,321 ms, all eight `finish=stop`.
+
+| # | condition | result |
+|---|---|---|
+| 1 | 8/8 answered · envelope 0 · parse 0 · contract violations 0 | PASS |
+| 2 | correct `closing_authority` 8/8 | PASS — **8/8** |
+| 3 | **`C6`: SELLER resolves it and no PROCEDURE anywhere · `procedure_for_read` = 0** | **FAIL — `procedure_for_read = [C6.n1]`** |
+| 4 | `C5`: PROCEDURE resolves it and the order is read | PASS |
+| 5 | `C7` → `SELLER_CATALOGUE` and `C13` → `THIS_LISTING` | PASS — both, though aggregate scope is **2/3** (`C3` wrong) |
+| 6 | `C8`: keeps KNOWLEDGE, records the gap, substitution 0 | PASS |
+| 7 | `C3`: KNOWLEDGE naming both knowledge capabilities | PASS |
+| 8 | forbidden identity input 0 | PASS |
+
+**Seven of eight. The one that failed is the one this package was written for.**
+
+### 10.1 A scorer defect found while reading the result, and fixed before judging
+
+`C7` answered in two needs: `KNOWLEDGE.CATALOGUE/THIS_LISTING` in one, `KNOWLEDGE.CATALOGUE/SELLER_CATALOGUE` in the
+other. The scope comparison took the **first** step matching the capability and reported a wrong scope for a plan
+that contained the right one. That is the scorer being arbitrary, not the planner being wrong. Fixed — an exact
+(capability + instance) match is preferred, and the extra read is still counted by `capability_extra` — with a test
+pinning the shape. **Scope went 1/3 → 2/3 on the same recorded answers**, and the remaining miss, `C3`, is real.
+
+This is why the fix came before the verdict: judging item 5 on the unfixed scorer would have failed the planner for
+the scorer's arbitrariness.
+
+### 10.2 What the instruction actually did — v4 vs v5, same user turn in all seven shared cases
+
+| case | v4 | v5 | |
+|---|---|---|---|
+| `C6` | SELLER[ORG, ORDER×4f, SELLER] + **PROCEDURE need** | SELLER[ORG, SELLER] + **PROCEDURE need** | tighter need, **follow-up survives** |
+| `C8` | PRODUCT + CATALOGUE | PRODUCT | **tighter** |
+| `C3` | PRODUCT + CATALOGUE/THIS_LISTING | unchanged | still the wrong instance |
+| `C4` | ORDER[FULFILLMENT, TRACKING] | unchanged | still the over-read |
+| `C1` | PRODUCT | PRODUCT + **CATALOGUE** | **looser** |
+| `C5` | ORDER + PROCEDURE | ORDER + **ORG** + PROCEDURE | **looser** |
+| `C7` | one need | **two needs** | looser, but bought the right scope |
+| | **needs 8 · steps 11** | **needs 9 · steps 13** | |
+
+**The boundary sentence did not reduce reach; it redistributed it.** Two cases tightened, three loosened, two
+unchanged, and the total grew. On `C6` it removed the unnecessary four-field order read from the judgment need —
+a real improvement — and left the invented PROCEDURE need exactly where it was.
+
+**One sample per arm.** These are seven paired observations on identical user turns, not a trend. Nothing here
+says v5 is worse than v4 in general, and nothing is claimed about a difference except on `C6`, where the target
+behaviour is unchanged and that is the whole point of the case.
+
+### 10.3 Classification, and what is not being done
+
+**Boundary.** Not schema (0 violations, `schema_fp` unchanged), not closing semantics (8/8 endings correct, and the
+`R:8989a9d0` shape stayed clean), not scope-as-contract (the scope misses are the planner choosing an instance, and
+the metric now sees them).
+
+Per the bar and the brief: **the 67 cases are not run. There is no automatic prompt tweak and no retry.** A second
+instruction attempt is exactly what "무조건 prompt를 또 튜닝하지 마" rules out, and the first attempt is now evidence
+that this defect does not yield to a sentence.
+
+### 10.4 What is left, stated as a decision rather than a fix
+
+The structural options are exhausted and the record says so:
+
+- **per-need rule** — added (`PROCEDURE_NOT_CLOSING`), and §1.3 showed it cannot see a follow-up split into a need;
+- **plan-level rule** — would forbid a customer asking two real things at once, so it is wrong;
+- **instruction** — tried once, measured, did not work.
+
+What remains is a **product question, and it is the one WP-4 E2E exists to answer**: when a planner adds a need to
+carry out the action a judgment might lead to, what does the customer receive? Today `PROCEDURE.ORDER_ACTION` is
+`DECLARED_NO_EXECUTOR` everywhere, so the invented need becomes a recorded `CAPABILITY_GAP` and **cannot cause a
+wrong action**. It can still cause a wrong *sentence* — a promise to process something nobody approved — and that is
+precisely the "Wrong Automation" headline. **The planner cannot settle this alone; an end-to-end outcome can.**
+
+So the honest position: this is the first residual whose next measurement is downstream of the planner, and the
+freeze gate keeps `procedure_for_read = 0` as a safety item until then. **It is a product-owner decision whether the
+67-run proceeds with this known residual reported as a diagnostic, or whether the residual blocks it.**
+
+**The planner is not frozen. 67 × 1 is not proposed. WP-4 E2E is not proposed.**

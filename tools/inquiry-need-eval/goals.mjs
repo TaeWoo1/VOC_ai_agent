@@ -340,7 +340,14 @@ function scope(acc, goal, needs, vocab, registry) {
   const used = new Set();
   for (const want of goal.steps) {
     acc.steps_compared++;
-    const i = predicted.findIndex((p, k) => !used.has(k) && p.capability === want.capability);
+    // Prefer a step that matches capability AND instance before one that matches only the capability. A plan may
+    // name the same capability about two instances (the C7 answer did: this listing in one need, the seller's range
+    // in another), and comparing against whichever came first would report a wrong scope for a plan that contains
+    // the right one. The extra read is still counted, by capability_extra.
+    const exact = predicted.findIndex((p, k) => !used.has(k) && p.capability === want.capability
+      && p.scope === want.scope);
+    const i = exact >= 0 ? exact
+      : predicted.findIndex((p, k) => !used.has(k) && p.capability === want.capability);
     if (i < 0) {
       acc.capability_missing++;
       continue;
