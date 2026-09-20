@@ -284,3 +284,58 @@ APPROVAL MANIFEST — Inquiry v3 WP-2 planner smoke #2
 
 Only after it passes does the 67 × 3 shadow run get its own manifest (≈201 calls, plan gold v3.1 as the scorer's
 reference, no production Case touched).
+
+## 12. Smoke #2 — `apr-2c84f7b0` / `wt-91e5d63a` (2026-09-20, consumed) — **PASS**
+
+Same three synthetic questions, prompt `resolution-planner/v2`, `gpt-5-2025-08-07` @ `minimal`, strict `json_schema`, cap 3.
+Marketplace 0 · DB writes 0 · customer text 0. Raw answers stored before scoring: `eval-store:runs/wp2-smoke-2/`.
+
+| | P01 read-only order status | P03 address change | P07 variant-dependent fact |
+|---|---|---|---|
+| answered · envelope · parse | yes · ok · ok | yes · ok · ok | yes · ok · ok |
+| contract | **valid** | **valid** | **valid** |
+| closing authority | `ENTITY.ORDER` ✔ | `PROCEDURE.ORDER_ACTION` ✔ | `KNOWLEDGE.PRODUCT` ✔ |
+| plan | fields `FULFILLMENT`+`TRACKING` | order read (fields `FULFILLMENT`) → procedure, **fields empty, `depends_on: 0`** | knowledge, asks SIZE · MODEL · MEASUREMENT |
+| availability recorded | `NOT_SUPPORTED` (no tracking source) | precondition ok · procedure `NOT_EXECUTABLE` | ok |
+| ms · in · out | 2,452 · 1,331 · 90 | 1,926 · 1,326 · 116 | 1,729 · 1,328 · 93 |
+
+**Pass on every pre-registered criterion**: 3 answers, 0 envelope failures, 0 parse failures, **0 contract violations**, each
+closing authority as the scenario expects. The two clerical faults of smoke #1 are gone — the instruction was what was
+missing, and saying it fixed it.
+
+**Two observations worth recording, neither a failure.**
+
+1. **P03 called the address change `BOUNDED_WORKFLOW`; the gold says `EXTERNAL_STATE_CHANGE`.** Both satisfy the contract
+   (a procedure declares a non-NONE effect) and both resolve identically today — there is no executor either way. The
+   scorer does **not** compare `effect`, so this would not show up in a shadow score. Added to the shadow run as a
+   diagnostic to report, not as a pass criterion: if the two values never separate in practice, the honest move later is
+   one value, not two.
+2. **P01 asks for tracking as well as fulfilment**, which the registry answers with `NOT_SUPPORTED`. That is the design
+   working: the plan states what the need requires, and the gap is recorded rather than the plan being trimmed to what this
+   deployment happens to have.
+
+**Measured with the v2 instruction**: input **1,326–1,331** tokens (v1 was 1,216–1,221; the two added rules cost ~110
+tokens), output 90–116, latency **1.73–2.45s**.
+
+## 13. Next — the shadow run
+
+```
+APPROVAL MANIFEST — Inquiry v3 WP-2 planner shadow (67 × 3)
+  approvalId        apr-e7d1b459
+  runId             wt-5a0c82f1
+  capability        sellerops.inquiry-decision (v2 door; prompt resolution-planner/v2)
+  model             gpt-5-2025-08-07 · reasoning_effort minimal · response_format json_schema (strict)
+  operation         201 planner calls — the 67 canonical questions of inquiry-planner-capture/v1, 3 repetitions each
+  inputs            eval-store:inquiry-planner-capture/v1 (pinned by PLAN_INPUTS_SHA256)
+  cap               PLAN_MAX_CALLS=201 — the harness throws on the 202nd
+  marketplace       none · DB writes none · external writes none · no production Case touched
+  output            eval-store:runs/wp2-shadow/ (append-only, raw answers irreproducible), raw stored before scoring
+  expected spend    ≈267k input / ≈25k output tokens · ≈7 minutes wall clock
+  scored against    plan gold v3.1 (all 72 rows frozen) — authority recall, missing/unnecessary authority, order miss,
+                    procedure-for-read, entity+scope, customer inputs, sequence, invalid capability, need-count match,
+                    run-to-run agreement across the 3 repetitions, and the `effect` diagnostic above
+  revoked by        any code, branch, model, prompt or schema change
+```
+
+This is the measurement WP-2 exists for: the first evidence of whether the planner chooses the right authority on real
+customer messages. It changes no production Case — the planner runs beside v2 on captures only.
