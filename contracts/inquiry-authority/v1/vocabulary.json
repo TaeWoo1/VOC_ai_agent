@@ -269,9 +269,9 @@
    ],
    "UNRESOLVED": []
   },
-  "vocabulary_verdict": "four requested_outcome values, measured not assumed: all 72 frozen resolution goals map, 60 settle without judgment and 12 are ambiguous about WHICH of the four they are. ZERO need a fifth value and ZERO are unmappable (contracts/inquiry-customer-goal/v1).",
+  "vocabulary_verdict": "four requested_outcome values, measured not assumed. v1: all 72 frozen resolution goals map, 60 settle without judgment, 12 ambiguous about WHICH of the four, ZERO need a fifth value and ZERO are unmappable. v2 (classes A/B/C adjudicated by the product owner 2026-09-20): 68 goals emitted, 1 ruled NO_GOAL, 3 still open (D/E/F). Still zero new values.",
   "procedure_rule": "only an ACTION may reach a procedure. A DECISION asks to be told a judgment and does not authorise a side effect, which is the C6 defect stated as a structure rather than as a sentence in a prompt.",
-  "decision_rule": "a DECISION goes to KNOWLEDGE first and reaches SELLER only from an OBSERVED absence. A written policy that decides the exception decides it here too; the seller is a required judgment, never a fallback router.",
+  "decision_rule": "a DECISION goes to KNOWLEDGE first — the decision RULE is knowledge — and reaches SELLER only from an OBSERVED absence. AUDITED 2026-09-20 against the frozen gold: 3 of 5 DECISION goals require observed ENTITY_STATE before a judgment can be produced (S:T7a and S:T7b carry ENTITY.LISTING in the gold itself; S:T12a carries ENTITY.ORDER). The dispatch table is unchanged — the rule declares its own prerequisites — but the loop must be able to RESUME the resolver that named one. See resume_rule.",
   "substitution_rule": "capability availability never changes a goal. A resolver that COULD NOT RUN settles at CAPABILITY_GAP with the registry's reason; a resolver that RAN AND FOUND NOTHING settles at NEEDS_SELLER. Reporting a seller judgment for an unreadable source would be asserting that no policy exists.",
   "no_new_terminal_states": "the loop's end states are the existing resolution_states above, unchanged. Of the seven candidates the brief offered, six already existed and the seventh ('the system can go acquire this') is already gap_reasons.ACQUIRABLE. ACTION_REQUIRES_APPROVAL was deliberately NOT created: every procedure here is DECLARED_NO_EXECUTOR, so it has no producer, and approval belongs to the execution lane that already owns it.",
   "what_a_goal_never_carries": [
@@ -310,7 +310,10 @@
     "optional": []
    },
    "why": "all-or-nothing made a harmless over-read fatal (P01, C4); field-level let a spare readable field hide a genuinely missing one (R:7a8136b2). Required dimensions pass both, and 'any readable field resolves it' stays refused."
-  }
+  },
+  "resume_rule": "a resolver that named a prerequisite is WAITING, and the prerequisite's result is not the goal's answer. When the prerequisite has run and the waiter has not been heard from since, the waiter is re-dispatched. Without this the loop settled on whatever the prerequisite returned: measured, a DECISION whose policy needed the order's fulfilment state reported RESOLVED having evaluated no decision. A GAPPED prerequisite still ends the goal and is checked before the resume. Nothing looks ahead: the prerequisite was named by a resolver AFTER running.",
+  "no_goal": "a message may carry no customer resolution goal. That is NOT 'ignore' — the case still exists and may raise VOC / complaint / issue signals elsewhere. The Layer-A scorer treats a NO_GOAL row as unassignable, so any goal emitted on one is invented by definition.",
+  "legacy_gold_conflicts": "adjudication moved 5 rows out of agreement with the frozen resolution gold (GOAL_OBSOLETE 1 - CLOSER_MOVES 2 - PLAN_OBSOLETE 1 - NO_CAPABILITY 1). They are DECLARED in inquiry-customer-goal/v2 and deliberately NOT re-derived: the build asserts that every disagreement is written down, not that none exists. S:N2 names a capability this registry cannot express even as a gap reason - there is no tax-invoice procedure to be DECLARED_NO_EXECUTOR."
  },
  "planner_status": "EXPERIMENTAL / NOT_ADOPTED_FOR_PRODUCTION (2026-09-20). step_roles, step_roles_retired, closing_authorities, closing_rule, sequence_rule and procedure_rule above describe the Resolution Planner contract, which is KEPT as a comparison and replay asset so the WP-1..WP-3.2 evidence stays readable, and which has never had a production caller. The authority vocabulary itself — authorities, capabilities, entity_fields, resolution_states, gap_reasons, customer_inputs, scopes, effects — is NOT deprecated: it is carried into inquiry-goal/v1 unchanged and is what customer_goal above is built on."
 }

@@ -52,7 +52,7 @@ class GoalScenarioTest {
                 rows.add(JSON.readTree(line));
             }
         }
-        assertThat(rows).as("the fixture is the contract; an empty one proves nothing").hasSize(12);
+        assertThat(rows).as("the fixture is the contract; an empty one proves nothing").hasSize(14);
         return rows.stream();
     }
 

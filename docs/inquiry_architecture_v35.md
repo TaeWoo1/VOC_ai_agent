@@ -125,6 +125,10 @@ already allows and the frozen gold already contains four examples of.
 ## 4. The 72 frozen goals, remapped offline
 
 `contracts/inquiry-customer-goal/v1` · canonical rows in `eval-store:inquiry-customer-goal/v1` · **model call 0**.
+
+> **Superseded by v2 (§21).** Classes A, B and C were adjudicated by the product owner on 2026-09-20. v1 stays
+> frozen and readable — it is the version this contract was designed against, and §4 below is the state at design
+> time. The adjudicated counts, the five legacy-gold conflicts and the DECISION prerequisite audit are in **§21**.
 Labelled by a designer reading the 67 recorded messages beside the frozen goals. A model may not produce these
 labels: a model labelling the set a Goal Interpreter will be scored against is the set measuring itself.
 
@@ -607,3 +611,181 @@ wrong *sentence* does not. That is unchanged by this package and is still what W
 - **The 12 adjudication rows are product-owner decisions** and are not resolved here.
 - **Class F may need a contract field.** `CustomerGoal` cannot express a customer-stated alternative
   ("A, else B"). One row needs it; adding a field for one row is a decision, not a fix.
+
+---
+
+## 21. Adjudication of classes A · B · C, and what it broke
+
+Product-owner ruling 2026-09-20. **Model calls 0 · production behaviour unchanged · nothing pushed.**
+Gold **v2** (`contracts/inquiry-customer-goal/v2`, `eval-store:inquiry-customer-goal/v2`). v1 stays frozen.
+
+### 21.1 Final A/B/C gold
+
+| row | class | → | note |
+|---|---|---|---|
+| `R:0c582144` n1 | A | **NO_GOAL** | already resolved it themselves; no request made |
+| `R:4181864b` n1 | A | **ACTION** | directly implied expedite. **Not** `STATE_READ` merely because order-state reading is what this system can do |
+| `R:83e607e0` n1 | A | **ACTION** | |
+| `S:T10b` n1 | A | **INFORMATION** | referent moved `CURRENT_ORDER → CURRENT_LISTING`; establish the listing quantity before any remedy |
+| `S:T1a` n1 | B | **INFORMATION** | |
+| `S:T1b` n1 | B | **INFORMATION** | |
+| `R:8989a9d0` n1 | B | **INFORMATION** | later seller input does not turn the request into `DECISION` |
+| `S:T12a` n1 | B | **DECISION** | asks whether the address *can* change; does not yet request the change |
+| `S:N2` n1 | C | **ACTION** | executor availability must not alter customer-goal semantics |
+
+**`NO_GOAL` is not "ignore".** The case still exists and may raise VOC / complaint / issue signals elsewhere in
+Reviewnary. What it does not carry is a goal for *this loop* to resolve — and the scorer now enforces that
+(§21.6).
+
+### 21.2 Counts
+
+| | v1 | **v2** |
+|---|---|---|
+| gold rows · cases | 72 · 67 | 72 · 67 |
+| **goals emitted** | 60 settled | **68** |
+| decided `NO_GOAL` | — | **1** |
+| still open (D/E/F) | 12 | **3** |
+
+| outcome | v1 | v2 | | referent | v2 | | basis | v2 |
+|---|---|---|---|---|---|---|---|---|
+| `INFORMATION` | 51 | **55** | | `CURRENT_LISTING` | 47 | | `STATED` | 64 |
+| `STATE_READ` | 3 | 3 | | `SELLER_CATALOGUE` | 9 | | `DIRECTLY_IMPLIED` | **4** |
+| `DECISION` | 4 | **5** | | `CURRENT_ORDER` | 7 | | | |
+| `ACTION` | 2 | **5** | | `ORGANIZATION` | 5 | | | |
+
+Three cases now emit no goal: `R:0c582144` (ruled `NO_GOAL`) and `R:515dd536` · `R:f81ad84a` (single-goal cases
+**still open**, not zero). Those are different states and the build keeps them apart.
+
+### 21.3 Legacy resolution-gold rows that no longer follow — 5, identified and **not** re-derived
+
+The ruling was explicit that the old closing-authority gold must not be silently forced to remain valid. So
+`build.py` **stopped asserting agreement** and now asserts that **every disagreement is declared**
+(`undeclared_conflicts = 0`). A new disagreement nobody wrote down still fails the build.
+
+| row | kind | frozen gold | what no longer follows |
+|---|---|---|---|
+| `R:0c582144` n1 | `GOAL_OBSOLETE` | PROCEDURE · order read + procedure + org policy | no goal is emitted, so the resolution goal has no subject — the row describes work nobody requested |
+| `R:4181864b` n1 | `CLOSER_MOVES` | ENTITY_STATE · order read | `ACTION` requires PROCEDURE; the order read becomes a **prerequisite**, not the closer |
+| `S:T10b` n1 | `PLAN_OBSOLETE` | PROCEDURE · order read + procedure + org policy | `INFORMATION` requires listing knowledge — **none of the three steps belongs to an information question**, so the whole step list is obsolete, not just the closer |
+| `S:T12a` n1 | `CLOSER_MOVES` | PROCEDURE · order read + procedure | `DECISION` requires KNOWLEDGE (or SELLER on an observed absence). **The order read survives** as the decision rule's prerequisite; the procedure step is obsolete |
+| `S:N2` n1 | `NO_CAPABILITY` | KNOWLEDGE.ORG | `ACTION` requires a procedure **this registry does not have at all** — `PROCEDURE.ORDER_ACTION` is order-scoped. This row cannot close on any registered authority, and that is the honest reading |
+
+**`S:N2` is worth naming separately:** it is the first row in the corpus that names a capability gap the registry
+cannot even express as a gap *reason* — there is no tax-invoice procedure to be `DECLARED_NO_EXECUTOR`. Under the
+policy it settles `CAPABILITY_GAP / NOT_SUPPORTED` via `ReferentRegistry`, which is correct, but the registry has
+no row for the thing that is missing.
+
+Re-deriving these five is a **separate decision** with its own evidence, and none of it was done here.
+
+### 21.4 DECISION prerequisite audit — the assumption does not hold
+
+Measured from the **frozen gold's recorded steps**, not from an opinion about what a decision needs: for each
+`DECISION` goal, which required capabilities are neither KNOWLEDGE nor SELLER.
+
+| goal | frozen steps | needs observed state |
+|---|---|---|
+| `S:T7a` n1 | **`ENTITY.LISTING`** + SELLER | **yes** |
+| `S:T7b` n1 | **`ENTITY.LISTING`** + SELLER | **yes** |
+| `S:T12a` n1 | **`ENTITY.ORDER`** + PROCEDURE | **yes** |
+| `R:ae41a418` n2 | SELLER | no |
+| `S:N6` n1 | KNOWLEDGE.PRODUCT | no |
+
+**3 of 5. And this was already true before `S:T12a` was reclassified** — `T7a` and `T7b` carry the entity read in
+the frozen gold itself. The fixed sequence `DECISION → KNOWLEDGE → SELLER` is insufficient.
+
+### 21.5 The defect this audit found, and the smallest fix
+
+Testing the assumption exposed a **latent defect in the loop, not a shortfall in the dispatch table.**
+
+> A resolver named a prerequisite. The prerequisite ran **and succeeded**. The loop settled on *the prerequisite's*
+> result and never returned to the resolver that asked.
+
+Probed directly: a `DECISION` whose policy needed the order's fulfilment state reported **`RESOLVED`** having
+evaluated no decision at all. `G12` never caught it because **its prerequisite fails**, and a failed prerequisite
+settles correctly.
+
+**The dispatch table needed no change.** `DECISION → KNOWLEDGE` first is right: the decision *rule* is knowledge,
+and a rule declares its own prerequisites. What was missing was the way back. One rule added to
+`ResolutionPolicy`:
+
+> A resolver that named a prerequisite is **waiting**, and the prerequisite's result is not the goal's answer. When
+> the prerequisite has run and the waiter has not been heard from since, re-dispatch the waiter.
+
+This is the product-owner sketch exactly — *determine prerequisites from the registered decision rule → observe →
+evaluate → RESOLVED or NEEDS_SELLER* — and it is **not a planner**: the prerequisite is still named by a resolver
+*after running*, and resuming is the mechanical consequence. Nothing looks ahead, `Dispatch` is still sealed to
+`Run | Settle`, and a gapped prerequisite still ends the goal (checked before the resume).
+
+Termination is unchanged: each resume appends an outcome for that capability after its prerequisite, so the same
+wait cannot fire twice, and `MAX_STEPS` still bounds the loop.
+
+Two fixtures, and **both were confirmed red against the unfixed policy**:
+
+| | |
+|---|---|
+| `G13` | `S:T12a` — knowledge needs the order state, the read **succeeds**, knowledge is resumed and decides → `RESOLVED`. Dispatch `KNOWLEDGE → ENTITY_STATE → KNOWLEDGE` |
+| `G14` | same with no registered policy → resumed knowledge still finds nothing → **only then** the seller → `NEEDS_SELLER`. Dispatch `KNOWLEDGE → ENTITY_STATE → KNOWLEDGE → SELLER` |
+
+**`S:T10b` needs no policy change.** `INFORMATION → KNOWLEDGE` answers "is this listing a bundle"; the procedure
+registry is unreachable from a non-`ACTION` goal, so no remedy can be invented. If the evidence later shows a real
+fulfilment shortfall, that operational issue arises from observed runtime state downstream — **not** from the
+Goal Interpreter, which cannot emit an `ACTION` here by construction.
+
+### 21.6 Tests and mutations
+
+| | before | after |
+|---|---|---|
+| backend | 4,533 / 0 | **4,537 / 0** (54 skipped) |
+| tools | 109 / 0 | **111 / 0** |
+| mutations | 27 / 27 | **28 / 28 caught** |
+
+New: fixtures `G13`/`G14` (verified red without the fix) · `aWaitingResolverIsResumed` ·
+`aFailedPrerequisiteIsNotResumedPast` · `NO_GOAL` scoring test + mutation.
+
+**A hole the ruling exposed in the scorer, now closed:** a goal emitted on a `NO_GOAL` row was *pairing* with that
+row and escaping the invented count. A `NO_GOAL` row is no longer assignable — every prediction on it is invented
+by definition and also counted as `no_goal_violations`. A row still *open* is different and keeps the old
+treatment (not scored for correctness; extra predictions still counted).
+
+**One existing safety invariant refused two of my test fixtures** — `Resolution`'s "entity state closes a goal only
+on fresh observations". Both times the fixture was corrected, never the rule.
+
+### 21.7 Can D · E · F be adjudicated without expanding the contract?
+
+| class | expansion needed | why |
+|---|---|---|
+| **D** `R:f81ad84a` | **no** | `STATE_READ` and `ACTION` both exist. The A/B/C rulings give precedent in both directions — `S:N2` says don't label by capability (the frozen label is capability-shaped, with an `ORDER_TRACKING` over-read no channel can serve), and `R:4181864b` says an implied request to the seller is `ACTION`. |
+| **E** `R:f403e606` n2 | **no** | `INFORMATION` / `DECISION` both exist, `UNRESOLVED` already in the referent vocabulary, and `R:8989a9d0` is direct precedent: later seller input does not turn a product question into a decision. |
+| **F** `R:515dd536` | **only if** two independent `ACTION` goals are acceptable | The contract can already carry two goals. What it **cannot** carry is the customer's stated *preference order* ("refund only if the nozzle is impossible"), so the resolver would not know the refund is the fallback. Expressing that needs a new field. |
+
+So **D and E can be decided on the existing contract**; **F is a contract decision, not just a label decision.**
+
+### 21.8 Revised smoke manifest — still not approved, still not run
+
+Changes from §20: **14 calls** (was 12) for the two new fixtures, and the bar gains two items.
+
+| | |
+|---|---|
+| inputs | the **14** synthetic fixtures, goals only |
+| **hard cap** | **14 calls.** One per fixture, no retry, no re-prompt |
+| model | `gpt-5-2025-08-07`, unchanged |
+| marketplace / DB / migration / production Case | **0** |
+| storage | raw stored before scoring in `eval-store:runs/v35-goal-smoke`, `run-verify` before any number is read |
+| derived cost | ≈600–900 prompt · ≈60–120 completion per call — **extrapolated from the v5 planner baseline, not measured** |
+
+**Bar — 10 of 10, items 2, 3 and 9 not tradeable:**
+
+1. 14/14 answered · envelope / parse / contract violations 0
+2. **invented goal rate = 0**
+3. `G05` · `G06` each produce exactly one `DECISION`, no `ACTION`
+4. `G07` produces two goals, `DECISION` + `ACTION`
+5. `requested_outcome` accuracy 14/14
+6. referent accuracy 14/14, including `G11` → `UNRESOLVED`
+7. zero `GOAL_PLAN` refusals
+8. constraint fidelity: no constraint the customer did not say
+9. **`G13`/`G14` produce one `DECISION` goal each — the interpreter must not emit the prerequisite as a second goal** (principle 7 on the wire)
+10. `G12` produces one `ACTION`, not an `ACTION` plus a `STATE_READ`
+
+**Blocking still:** D and E are decidable on the existing contract and should be decided first so the corpus label
+is stable; **F is a contract decision and blocks any change to `CustomerGoal`'s shape.** Failure classification and
+the no-retry rule are unchanged from §20.

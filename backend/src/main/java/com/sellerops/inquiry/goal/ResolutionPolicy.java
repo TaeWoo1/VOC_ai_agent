@@ -103,14 +103,25 @@ public final class ResolutionPolicy {
         }
 
         ResolutionState state = last.state();
-        if (state.closesTheNeed() || state == ResolutionState.NEEDS_CUSTOMER_INPUT || state == ResolutionState.FAILED) {
-            return new Settle(state, null);
-        }
         if (state == ResolutionState.CAPABILITY_GAP) {
-            // A capability that could not run does not hand its question to a different authority.
+            // A capability that could not run does not hand its question to a different authority — and a resolver
+            // waiting on it cannot continue either, so this is checked before the resume below.
             return new Settle(ResolutionState.CAPABILITY_GAP, last.resolution().gap());
         }
 
+        // A resolver that named a prerequisite is WAITING, and the prerequisite's own result is not the goal's answer.
+        // Without this the loop settles on whatever the prerequisite returned and the resolver that asked is never
+        // heard from again — measured: a DECISION whose policy needed the order's fulfilment state reported RESOLVED
+        // having evaluated no decision at all, because the order read succeeded. Nothing is planned here: the waiter
+        // was named by a resolver after running, and resuming it is the mechanical consequence of that.
+        CapabilityId waiting = resumable(observed);
+        if (waiting != null) {
+            return new Run(waiting.authority(), waiting);
+        }
+
+        if (state.closesTheNeed() || state == ResolutionState.NEEDS_CUSTOMER_INPUT || state == ResolutionState.FAILED) {
+            return new Settle(state, null);
+        }
         // NEEDS_SELLER: the resolver ran and found nothing written down.
         if (goal.requestedOutcome() == RequestedOutcome.DECISION
                 && last.resolution().authority() == Authority.KNOWLEDGE
@@ -131,6 +142,44 @@ public final class ResolutionPolicy {
             throw new IllegalStateException("only an ACTION reaches a procedure");
         }
         return new Run(resolver, null);
+    }
+
+    /**
+     * The resolver that is still waiting, if any: one that named a prerequisite, whose prerequisite has since run,
+     * and which has not been heard from since. Walked newest-first so a nested wait resumes innermost-first.
+     *
+     * <p>Each resume appends an outcome for that capability after its prerequisite, so the same wait cannot fire
+     * twice and the loop still terminates on {@link GoalResolution#MAX_STEPS}.
+     */
+    private static CapabilityId resumable(List<ResolverOutcome> observed) {
+        for (int i = observed.size() - 1; i >= 0; i--) {
+            ResolverOutcome waiter = observed.get(i);
+            if (waiter.prerequisite() == null) {
+                continue;
+            }
+            CapabilityId who = waiter.resolution().capability();
+            int ranAt = -1;
+            for (int j = i + 1; j < observed.size(); j++) {
+                if (observed.get(j).resolution().capability() == waiter.prerequisite()) {
+                    ranAt = j;
+                    break;
+                }
+            }
+            if (ranAt < 0) {
+                continue; // the prerequisite has not run yet
+            }
+            boolean heardSince = false;
+            for (int j = ranAt + 1; j < observed.size(); j++) {
+                if (observed.get(j).resolution().capability() == who) {
+                    heardSince = true;
+                    break;
+                }
+            }
+            if (!heardSince) {
+                return who;
+            }
+        }
+        return null;
     }
 
     private static boolean alreadyRan(List<ResolverOutcome> observed, CapabilityId capability) {

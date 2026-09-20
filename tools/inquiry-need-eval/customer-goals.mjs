@@ -82,7 +82,8 @@ function* permutations(a) {
 /**
  * Layer A metrics. `gold` is contracts/inquiry-customer-goal/v1 rows; `predicted` is { q: [goal, ...] }.
  *
- * Rows the gold has NOT settled are excluded from accuracy and recall — scoring a prediction against a label that is
+ * A row ruled NO_GOAL is removed from the assignable set entirely, so any prediction on it lands in `invented` and
+ * in `no_goal_violations`. Rows the gold has NOT settled are excluded from accuracy and recall — scoring a prediction against a label that is
  * itself under adjudication measures the adjudication, not the model — but predictions made on those cases still
  * count for the invented-goal denominator, because an extra goal is wrong whatever the right answer turns out to be.
  */
@@ -96,11 +97,20 @@ export function scoreLayerA(gold, predicted) {
     cases: 0, gold_goals: 0, scored_goals: 0, predicted_goals: 0,
     recalled: 0, invented: 0, outcome_correct: 0, referent_correct: 0, constraints_correct: 0,
     goal_count_correct: 0, multi_goal_cases: 0, multi_goal_correct: 0,
-    unsettled_cases_predicted_on: 0, refusals: {}, wrong: [],
+    unsettled_cases_predicted_on: 0, no_goal_rows: 0, no_goal_violations: 0, refusals: {}, wrong: [],
   };
-  for (const [q, goals] of byCase) {
+  for (const [q, allRows] of byCase) {
     const pred = predicted[q];
     if (pred === undefined) continue;
+    // A row the product owner ruled NO_GOAL is not assignable: there is no goal for a prediction to be. Every goal
+    // emitted on one is invented BY DEFINITION, so it must not be allowed to pair with the row and escape the count.
+    // (A row still under adjudication is different — it has a goal, we just do not yet know which of the four.)
+    const noGoal = allRows.filter((g) => g.no_goal_reason);
+    const goals = allRows.filter((g) => !g.no_goal_reason);
+    if (noGoal.length > 0) {
+      m.no_goal_rows += noGoal.length;
+      if (goals.length === 0 && pred.length > 0) m.no_goal_violations += pred.length;
+    }
     m.cases += 1;
     m.gold_goals += goals.length;
     m.predicted_goals += pred.length;

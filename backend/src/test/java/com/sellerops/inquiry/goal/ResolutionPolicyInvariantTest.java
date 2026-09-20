@@ -3,10 +3,15 @@ package com.sellerops.inquiry.goal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.sellerops.inquiry.authority.Authority;
+import com.sellerops.inquiry.authority.AuthorityProvenance;
+import com.sellerops.inquiry.authority.EntityField;
+import com.sellerops.inquiry.authority.ObservedField;
+import com.sellerops.inquiry.decision.EvidenceScope;
 import com.sellerops.inquiry.authority.CapabilityId;
 import com.sellerops.inquiry.authority.GapReason;
 import com.sellerops.inquiry.authority.Resolution;
 import com.sellerops.inquiry.authority.ResolutionState;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -28,6 +33,18 @@ class ResolutionPolicyInvariantTest {
 
     private static ResolverOutcome ran(CapabilityId capability, ResolutionState state, GapReason gap) {
         return ResolverOutcome.of(new Resolution(capability, state, gap, null, null, null, null));
+    }
+
+    /**
+     * An order read that actually observed something. {@code Resolution} refuses to let entity state close a goal
+     * without a fresh observation, and that rule predates this package and is not relaxed for a test.
+     */
+    private static ResolverOutcome readOrder() {
+        AuthorityProvenance provenance = new AuthorityProvenance(CapabilityId.ENTITY_ORDER,
+                EvidenceScope.order("ORDER-1"), AuthorityProvenance.Source.ORDER_EXACT_READ, Instant.EPOCH,
+                AuthorityProvenance.Freshness.FRESH);
+        return ResolverOutcome.of(new Resolution(CapabilityId.ENTITY_ORDER, ResolutionState.RESOLVED, null, null,
+                null, List.of(new ObservedField(EntityField.ORDER_FULFILLMENT, "PREPARING", provenance)), null));
     }
 
     @Test
@@ -115,6 +132,42 @@ class ResolutionPolicyInvariantTest {
                                 null, null, null), CapabilityId.ENTITY_ORDER));
         assertThat(trace.state()).isEqualTo(ResolutionState.FAILED);
         assertThat(trace.steps()).isLessThanOrEqualTo(GoalResolution.MAX_STEPS);
+    }
+
+    @Test
+    @DisplayName("a resolver whose prerequisite SUCCEEDED is heard from again — the prerequisite's result is not the answer")
+    void aWaitingResolverIsResumed() {
+        // Measured defect, 2026-09-20: a DECISION whose policy needed the order's fulfilment state settled RESOLVED
+        // on the order read. The decision was never evaluated and the goal reported an answer to a question nobody
+        // asked. G12 did not catch it because ITS prerequisite fails, and a failed prerequisite settles correctly.
+        List<ResolverOutcome> observed = new ArrayList<>();
+        observed.add(ResolverOutcome.needs(new Resolution(CapabilityId.KNOWLEDGE_ORG, ResolutionState.NEEDS_SELLER,
+                null, null, null, null, null), CapabilityId.ENTITY_ORDER));
+        var toPrerequisite = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+        assertThat(((ResolutionPolicy.Run) toPrerequisite).capability()).isEqualTo(CapabilityId.ENTITY_ORDER);
+
+        observed.add(readOrder());
+        var back = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+        assertThat(back).as("the loop settled on the prerequisite instead of returning to the decision")
+                .isInstanceOf(ResolutionPolicy.Run.class);
+        assertThat(((ResolutionPolicy.Run) back).capability()).isEqualTo(CapabilityId.KNOWLEDGE_ORG);
+
+        // ...and once the waiter has spoken it is not resumed again: the same wait cannot fire twice.
+        observed.add(ran(CapabilityId.KNOWLEDGE_ORG, ResolutionState.NEEDS_SELLER, null));
+        var after = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+        assertThat(((ResolutionPolicy.Run) after).resolver()).isEqualTo(Authority.SELLER);
+    }
+
+    @Test
+    @DisplayName("a prerequisite that GAPPED ends the goal — the waiter cannot proceed and is not resumed")
+    void aFailedPrerequisiteIsNotResumedPast() {
+        List<ResolverOutcome> observed = new ArrayList<>();
+        observed.add(ResolverOutcome.needs(new Resolution(CapabilityId.PROCEDURE_ORDER_ACTION,
+                ResolutionState.NEEDS_SELLER, null, null, null, null, null), CapabilityId.ENTITY_ORDER));
+        observed.add(ran(CapabilityId.ENTITY_ORDER, ResolutionState.CAPABILITY_GAP, GapReason.UNBOUND));
+        var next = ResolutionPolicy.next(goal(RequestedOutcome.ACTION, Referent.CURRENT_ORDER), observed);
+        assertThat(next).isInstanceOf(ResolutionPolicy.Settle.class);
+        assertThat(((ResolutionPolicy.Settle) next).gap()).isEqualTo(GapReason.UNBOUND);
     }
 
     @Test

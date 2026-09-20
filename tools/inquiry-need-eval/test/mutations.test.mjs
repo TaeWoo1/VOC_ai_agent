@@ -318,6 +318,18 @@ const MUTATIONS = [
     real: 0.5, mutated: 0,
   },
   {
+    name: 'a goal emitted on a NO_GOAL row pairs with it instead of being counted as invented',
+    file: 'customer-goals.mjs',
+    from: '    const goals = allRows.filter((g) => !g.no_goal_reason);',
+    to: '    const goals = allRows;',
+    witness: async (M) => M.scoreLayerA(
+      [{ q: 'X', goal: 'n1', requested_outcome: null, referent: 'CURRENT_ORDER', basis: null,
+        explicit_constraints: 0, no_goal_reason: 'no request was made' }],
+      { X: [{ id: 'g1', request: 'r', outcome: 'ACTION', subject: 'CURRENT_ORDER', basis: 'STATED', constraints: [] }] },
+    ).invented,
+    real: 1, mutated: 0,
+  },
+  {
     name: 'a label still under adjudication is scored as if it were settled',
     file: 'customer-goals.mjs',
     from: '      if (g.requested_outcome === null) continue; // adjudication row: not scored for correctness',

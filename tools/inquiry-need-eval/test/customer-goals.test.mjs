@@ -16,7 +16,7 @@ const wire = (g) => ({
 });
 
 test('every fixture goal parses — the mirror and the Java agree on all 12 rows', () => {
-  assert.equal(rows.length, 12);
+  assert.equal(rows.length, 14);
   for (const row of rows) {
     for (const g of row.goals) {
       const r = parseGoal(wire(g));
@@ -118,4 +118,18 @@ test('assignment prefers the referent, so outcome accuracy is not measuring itse
   const m = scoreLayerA(g, { X: p });
   assert.equal(m.referent_accuracy, 1);
   assert.equal(m.outcome_accuracy, 0);
+});
+
+test('a goal emitted on a NO_GOAL row is invented by definition and cannot pair its way out', () => {
+  const ruled = [{ q: 'R:0c582144', goal: 'n1', requested_outcome: null, referent: 'CURRENT_ORDER', basis: null,
+    explicit_constraints: 0, no_goal_reason: 'the customer makes no request' }];
+  const m = scoreLayerA(ruled, { 'R:0c582144': [invented] });
+  assert.equal(m.no_goal_rows, 1);
+  assert.equal(m.no_goal_violations, 1);
+  assert.equal(m.invented, 1, 'it must not pair with the row and escape the count');
+  assert.equal(m.invented_goal_rate, 1);
+  // and predicting nothing on it is exactly right
+  const clean = scoreLayerA(ruled, { 'R:0c582144': [] });
+  assert.equal(clean.no_goal_violations, 0);
+  assert.equal(clean.invented, 0);
 });
