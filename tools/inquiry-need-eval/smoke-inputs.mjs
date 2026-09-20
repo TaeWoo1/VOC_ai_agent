@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const file = join(here, '../../contracts/inquiry-planner/v1/synthetic/planner-scenarios.jsonl');
+const file = join(here, '../../contracts/inquiry-planner/v2/synthetic/planner-scenarios.jsonl');
 const rows = readFileSync(file, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l))
   .filter((s) => s.smoke)
   .map((s) => ({ q: s.id, question: s.question, registry: s.registry }));
