@@ -1,0 +1,35 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "inquiry-customer-goal/v1",
+ "description": "One CustomerGoal per frozen resolution goal. Every field a resolution PLAN carried and this does not is deliberate: entity fields, customer inputs, capability sequence, procedure, fallback, handoff, closing authority, availability and execution effect all belong to a resolver or the registry, and each was a measured failure when a model owned it.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": ["q", "goal", "requested_outcome", "referent", "basis", "explicit_constraints",
+              "gold_closing_authority", "gold_v2_type", "gold_terminal", "adjudication"],
+ "properties": {
+  "q": {"type": "string", "description": "the case id, as the resolution gold names it"},
+  "goal": {"type": "string", "description": "the goal id within the case, as the resolution gold names it"},
+  "requested_outcome": {
+   "description": "null means NOT LABELLED — the row is ambiguous between two of the four and is adjudicated, never guessed",
+   "enum": ["INFORMATION", "STATE_READ", "DECISION", "ACTION", null]
+  },
+  "referent": {
+   "description": "what the goal is about, bound to a registry entry. UNRESOLVED is a real answer, not a parse failure.",
+   "enum": ["CURRENT_LISTING", "SELLER_CATALOGUE", "CURRENT_ORDER", "ORGANIZATION", "UNRESOLVED"]
+  },
+  "basis": {
+   "description": "on what evidence the goal is attributed to the customer. There is no UNSTATED: a goal with no stated or directly implied outcome is not emitted, and absence is the observable.",
+   "enum": ["STATED", "DIRECTLY_IMPLIED", null]
+  },
+  "explicit_constraints": {
+   "type": "integer", "minimum": 0,
+   "description": "how many values the customer actually said. A COUNT: the words themselves stay in the capture."
+  },
+  "gold_closing_authority": {"enum": ["KNOWLEDGE", "ENTITY_STATE", "PROCEDURE", "SELLER"],
+   "description": "carried from the frozen plan gold so the two representations can be compared row by row"},
+  "gold_v2_type": {"type": ["string", "null"]},
+  "gold_terminal": {"type": "object", "description": "the frozen expected terminal, carried unchanged"},
+  "adjudication": {"type": ["string", "null"],
+   "description": "the ambiguity class, when this row is not settled. Non-null exactly when requested_outcome is null."}
+ }
+}

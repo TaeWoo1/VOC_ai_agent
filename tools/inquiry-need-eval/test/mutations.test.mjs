@@ -278,6 +278,56 @@ const MUTATIONS = [
       [goal('C1', 'n1', [K('KNOWLEDGE.PRODUCT', 'CLOSES')])]).scope.scope_decidable,
     real: 0, mutated: 1,
   },
+  // --- Inquiry v3.5: the CustomerGoal contract and the Layer-A headline --------------------------------------
+  {
+    name: 'a plan may arrive wearing a goal name',
+    file: 'customer-goals.mjs',
+    from: "  for (const k of RETIRED) if (k in raw) return { failure: 'GOAL_PLAN', at: k };",
+    to: '  ;',
+    witness: async (M) => M.parseGoal({ id: 'g1', explicit_request: 'r', requested_outcome: 'DECISION',
+      subject: 'CURRENT_ORDER', basis: 'STATED', explicit_constraints: [], procedure: 'EXCHANGE' }).failure ?? 'ACCEPTED',
+    real: 'GOAL_PLAN', mutated: 'GOAL_SET',
+  },
+  {
+    name: 'a decision is allowed to reach a procedure',
+    file: 'customer-goals.mjs',
+    from: "export const mayReachProcedure = (outcome) => outcome === 'ACTION';",
+    to: 'export const mayReachProcedure = () => true;',
+    witness: async (M) => M.OUTCOMES.filter((o) => M.mayReachProcedure(o)),
+    real: ['ACTION'], mutated: ['INFORMATION', 'STATE_READ', 'DECISION', 'ACTION'],
+  },
+  {
+    name: 'a decision is routed straight to the seller instead of asking knowledge first',
+    file: 'customer-goals.mjs',
+    from: "DECISION: 'KNOWLEDGE', ACTION: 'PROCEDURE',",
+    to: "DECISION: 'SELLER', ACTION: 'PROCEDURE',",
+    witness: async (M) => M.FIRST_RESOLVER.DECISION,
+    real: 'KNOWLEDGE', mutated: 'SELLER',
+  },
+  {
+    name: 'an extra goal nobody asked for stops being counted',
+    file: 'customer-goals.mjs',
+    from: '    m.invented += extra.length;',
+    to: '    m.invented += 0;',
+    witness: async (M) => M.scoreLayerA(
+      [{ q: 'C6', goal: 'n1', requested_outcome: 'DECISION', referent: 'CURRENT_ORDER', basis: 'STATED',
+        explicit_constraints: 0 }],
+      { C6: [{ id: 'g1', request: 'r', outcome: 'DECISION', subject: 'CURRENT_ORDER', basis: 'STATED', constraints: [] },
+        { id: 'g2', request: 'r', outcome: 'ACTION', subject: 'CURRENT_ORDER', basis: 'STATED', constraints: [] }] },
+    ).invented_goal_rate,
+    real: 0.5, mutated: 0,
+  },
+  {
+    name: 'a label still under adjudication is scored as if it were settled',
+    file: 'customer-goals.mjs',
+    from: '      if (g.requested_outcome === null) continue; // adjudication row: not scored for correctness',
+    to: '      ;',
+    witness: async (M) => M.scoreLayerA(
+      [{ q: 'X', goal: 'n1', requested_outcome: null, referent: 'CURRENT_ORDER', basis: null, explicit_constraints: 0 }],
+      { X: [{ id: 'g1', request: 'r', outcome: 'ACTION', subject: 'CURRENT_ORDER', basis: 'STATED', constraints: [] }] },
+    ).scored_goals,
+    real: 0, mutated: 1,
+  },
 ];
 
 for (const m of MUTATIONS) {

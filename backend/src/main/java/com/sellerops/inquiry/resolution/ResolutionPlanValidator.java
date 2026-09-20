@@ -13,6 +13,25 @@ import java.util.List;
 import java.util.Set;
 
 /**
+ * <b>STATUS: EXPERIMENTAL — NOT_ADOPTED_FOR_PRODUCTION</b> (Inquiry v3.5, 2026-09-20).
+ *
+ * <p>This type belongs to the Resolution Planner, which is <b>kept as a comparison and replay asset and is not the
+ * runtime abstraction</b>. It has never had a production caller and still has none; the recorded runs scored against
+ * it stay readable and are not withdrawn.
+ *
+ * <p><b>Why it was not adopted — and what it is NOT.</b> It is not a failure of separating KNOWLEDGE / ENTITY_STATE /
+ * PROCEDURE / SELLER; that separation was right and is carried forward unchanged. It is a failure of scope: one model
+ * call was asked to interpret what the customer means <i>and</i> to compose the entire future workflow that would
+ * satisfy it — atomic needs, authority sequence, entity fields, customer inputs, search scope, a future procedure and
+ * a closing authority. Five differently-shaped defects turned out to be one defect wearing five coats, and the last
+ * of them (a decision request producing an execution goal nobody asked for) survived an explicit instruction against
+ * it across two prompt versions on byte-identical inputs.
+ *
+ * <p>The replacement interprets the request and stops there: {@link com.sellerops.inquiry.goal.CustomerGoal}, with
+ * {@link com.sellerops.inquiry.goal.ResolutionPolicy} dispatching one resolver at a time and looking at the result
+ * before choosing the next. See {@code docs/inquiry_architecture_v35.md}.
+ */
+/**
  * <b>The Plan Validator</b> (Inquiry v3 WP-2, narrowed in WP-3, closing semantics made explicit in WP-3.1) — code, not
  * model. Two jobs, kept apart:
  *

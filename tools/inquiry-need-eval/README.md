@@ -27,6 +27,17 @@ Validates the gold against `contracts/inquiry-authority/v1/vocabulary.json`, pro
 `--pred`) scores a predicted plan — required-authority recall, ORDER miss (hard fail), unnecessary authority, slots.
 `compareResolutions` compares the authority layer's resolutions to the gold terminal; a possible gap is never a verdict.
 
+### Customer-goal gold (Inquiry v3.5)
+
+```bash
+node tools/eval-store/store.mjs restore inquiry-customer-goal v1
+python3 contracts/inquiry-customer-goal/v1/build.py /tmp/goals.jsonl
+```
+
+Rebuilds the 72-goal CustomerGoal mapping and asserts it is consistent with the frozen `closing_authority`
+(`inquiry-resolution-plan/v3.3`) under the deterministic dispatch table. **The labels are real eval data and live in
+the store, not here** — the builder refuses to run without them rather than inventing a default.
+
 ### `contract.mjs` · `goals.mjs` · `wp3-replay.mjs` (WP-3)
 
 `plan.mjs` above stays as the WP-2 baseline: the v2 step shape and the POSITIONAL scorer that produced the published
@@ -39,6 +50,7 @@ Validates the gold against `contracts/inquiry-authority/v1/vocabulary.json`, pro
 | `availability.mjs` | WP-3.1 §2: every entity read classified against what the goal required, and the three availability semantics priced on the same rows. Changes nothing |
 | `closers.mjs` | WP-3.1 §3: the closing-authority taxonomy — a genuine seller judgment, a seller appended behind knowledge, a seller standing where a capability cannot act |
 | `wp3-replay.mjs` | both scorers over one recorded run, so the difference is shown rather than asserted |
+| `customer-goals.mjs` | **Inquiry v3.5 Layer A.** The `CustomerGoal` contract mirror (`GOAL_SET` = unknown word · `GOAL_SHAPE` = known words, impossible object · **`GOAL_PLAN`** = a retired plan slot arriving under a goal's name) and the Layer-A scorer. Headline metric **`invented_goal_rate`**: on a C6-shaped case a prediction that is perfect *plus one extra goal* scores recall 1.0 and outcome accuracy 1.0, so the plan-era metrics cannot see the defect that ended the planner. Pinned to the Java by `test/customer-goals.test.mjs`, which reads the same fixture the Java scenario test reads (`contracts/inquiry-goal/v1/synthetic/goal-scenarios.jsonl`, 12 rows) |
 
 `contract.mjs` is a **mirror** of the Java (`ResolutionPlan` / `ResolutionPlanParser` / `ResolutionPlanValidator`). It is
 pinned to it by `test/goals.test.mjs`, which reads the very file the Java scenario tests read

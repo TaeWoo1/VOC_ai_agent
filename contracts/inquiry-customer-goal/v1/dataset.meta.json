@@ -1,0 +1,39 @@
+{
+ "name": "inquiry-customer-goal",
+ "version": "v1",
+ "frozen_at": "2026-09-20",
+ "files": {
+  "goals.jsonl": "aec2e6efd1ed70b4a0b3a4b08600090557181455be7d45f31a5bfdd9bb290845",
+  "labels.py": "e4623b11a52a0d6e069ad66fd506bd9d74f55d4b98f53666343e7d061f0376f7"
+ },
+ "counts": {
+  "goals": 72,
+  "cases": 67,
+  "settled": 60,
+  "pending_adjudication": 12,
+  "unmappable": 0,
+  "new_enum_values_required": 0
+ },
+ "what_this_is": "the frozen 72 resolution goals re-expressed as CustomerGoals (Inquiry v3.5 §4). It is NOT a new labelling of the corpus: the unit, the case set and the goal ids are the resolution gold's, and every row carries the frozen closing_authority it came from so the two can be compared row by row.",
+ "how_it_was_built": "by a designer reading the 67 recorded customer messages (inquiry-planner-capture/v1) beside the frozen goals. NO MODEL CALL was made and none may be — a model labelling the set a Goal Interpreter will be scored against is the set measuring itself.",
+ "the_check": "build.py asserts the new vocabulary is CONSISTENT with the frozen closing_authority under the deterministic ResolutionPolicy, reading its dispatch table backwards: INFORMATION->KNOWLEDGE, STATE_READ->ENTITY_STATE, ACTION->PROCEDURE, DECISION->KNOWLEDGE or SELLER. All 60 settled rows satisfy it and the build fails if any does not. This is falsifiable: a row labelled INFORMATION that closes on PROCEDURE means the label or the policy is wrong.",
+ "vocabulary_verdict": "FOUR VALUES ARE ENOUGH. Zero of 72 goals need a fifth requested_outcome, and zero are unmappable. The 12 unsettled rows are not missing values: each is ambiguous about WHICH of the four it is, and those are product-owner decisions listed as six classes in labels.py ADJUDICATION and in docs/inquiry_architecture_v35.md §4.",
+ "the_finding_that_matters": "5 of the 7 PROCEDURE-closing goals in the whole frozen gold are adjudication rows. The DECISION/ACTION boundary the Resolution Planner kept crossing is a boundary this corpus never pinned down either, which is why no amount of prompt tuning closed it.",
+ "corpus_limitation": "heavily INFORMATION (51 of 60 settled). STATE_READ has 3 settled rows and ACTION has 2. Layer A metrics computed on this set say almost nothing about STATE_READ or ACTION accuracy, and a targeted synthetic set carries that weight instead (contracts/inquiry-goal/v1/synthetic).",
+ "constraints_policy": "explicit_constraints is stored as a COUNT in this dataset. The customer's actual words are not copied here and are not needed for any metric this dataset supports; constraint fidelity is scored against the recorded message in the capture, which never leaves the store.",
+ "label_policy": {
+  "author": "designer, 2026-09-20 (DEV/CALIBRATION — never a holdout)",
+  "unit": "one CustomerGoal per frozen resolution goal. The mapping is 1:1 BY CONSTRUCTION, which is itself a claim being tested: it asserts the smaller contract loses no goal the plan representation held.",
+  "basis": "STATED or DIRECTLY_IMPLIED. Exactly one row is DIRECTLY_IMPLIED (S:N8) and the line is drawn where an inference would authorise a side effect: inferring a QUESTION is cheap, inferring an ACTION is not — the four rows where the implied outcome is an action are adjudication class A, not settled."
+ },
+ "derived_from": {
+  "inquiry-resolution-plan/v3.3": "abe11530c5484cbefaebf688f3793d0bad6ca10341a6bbe9a78aca4f320b4efc",
+  "inquiry-planner-capture/v1": "the 67 recorded customer messages at snapshot S0"
+ },
+ "schema": "contracts/inquiry-customer-goal/v1/schema.json",
+ "holds": "real inquiry id prefixes, designer labels and constraint COUNTS; no customer or seller text",
+ "storage": {
+  "canonical": "eval-store:inquiry-customer-goal/v1",
+  "builder": "contracts/inquiry-customer-goal/v1/build.py (committed; the labels it reads are not)"
+ }
+}

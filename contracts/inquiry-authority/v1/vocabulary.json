@@ -219,5 +219,98 @@
   "SELLER_DECISION": "SELLER"
  },
  "closing_rule": "WP-3.1: a need DECLARES the single authority that resolves it (closing_authority). The plan must require at least one capability of that authority; several capabilities of the SAME authority may resolve it together, which the frozen gold does 4 times. Step order is execution order and carries no closing meaning — reordering a need's steps cannot change what resolves it. A fallback to the seller is not an authority: it is a resolution outcome (NEEDS_SELLER / CAPABILITY_GAP) the runtime records after the plan has run. Superseded: the WP-3 rule, where exactly one authority CLOSED and a genuine multi-authority need was written PRECONDITION then CLOSES.",
- "sequence_rule": "WP-3: step order is the dependency. The explicit depends_on index left the wire — it was used on exactly the 7 procedure steps of the gold and every one pointed at the ENTITY.ORDER read the registry already requires, so it carried no information a reader did not have. WP-3.1: order still means execution order and nothing else; it no longer identifies the closer."
+ "sequence_rule": "WP-3: step order is the dependency. The explicit depends_on index left the wire — it was used on exactly the 7 procedure steps of the gold and every one pointed at the ENTITY.ORDER read the registry already requires, so it carried no information a reader did not have. WP-3.1: order still means execution order and nothing else; it no longer identifies the closer.",
+ "customer_goal": {
+  "version": "inquiry-goal/v1",
+  "adopted": "Inquiry v3.5, 2026-09-20 — the Resolution Planner is EXPERIMENTAL / NOT_ADOPTED_FOR_PRODUCTION and the vocabulary below replaces it as the only thing an LLM produces in this path.",
+  "requested_outcomes": [
+   "INFORMATION",
+   "STATE_READ",
+   "DECISION",
+   "ACTION"
+  ],
+  "first_resolver": {
+   "INFORMATION": "KNOWLEDGE",
+   "STATE_READ": "ENTITY_STATE",
+   "DECISION": "KNOWLEDGE",
+   "ACTION": "PROCEDURE"
+  },
+  "request_basis": [
+   "STATED",
+   "DIRECTLY_IMPLIED"
+  ],
+  "referents": [
+   "CURRENT_LISTING",
+   "SELLER_CATALOGUE",
+   "CURRENT_ORDER",
+   "ORGANIZATION",
+   "UNRESOLVED"
+  ],
+  "referent_by_capability": {
+   "CURRENT_LISTING": [
+    "KNOWLEDGE.PRODUCT",
+    "KNOWLEDGE.CATALOGUE",
+    "ENTITY.LISTING",
+    "SELLER"
+   ],
+   "SELLER_CATALOGUE": [
+    "KNOWLEDGE.CATALOGUE",
+    "SELLER"
+   ],
+   "CURRENT_ORDER": [
+    "ENTITY.ORDER",
+    "PROCEDURE.ORDER_ACTION",
+    "KNOWLEDGE.ORG",
+    "SELLER"
+   ],
+   "ORGANIZATION": [
+    "KNOWLEDGE.ORG",
+    "SELLER"
+   ],
+   "UNRESOLVED": []
+  },
+  "vocabulary_verdict": "four requested_outcome values, measured not assumed: all 72 frozen resolution goals map, 60 settle without judgment and 12 are ambiguous about WHICH of the four they are. ZERO need a fifth value and ZERO are unmappable (contracts/inquiry-customer-goal/v1).",
+  "procedure_rule": "only an ACTION may reach a procedure. A DECISION asks to be told a judgment and does not authorise a side effect, which is the C6 defect stated as a structure rather than as a sentence in a prompt.",
+  "decision_rule": "a DECISION goes to KNOWLEDGE first and reaches SELLER only from an OBSERVED absence. A written policy that decides the exception decides it here too; the seller is a required judgment, never a fallback router.",
+  "substitution_rule": "capability availability never changes a goal. A resolver that COULD NOT RUN settles at CAPABILITY_GAP with the registry's reason; a resolver that RAN AND FOUND NOTHING settles at NEEDS_SELLER. Reporting a seller judgment for an unreadable source would be asserting that no policy exists.",
+  "no_new_terminal_states": "the loop's end states are the existing resolution_states above, unchanged. Of the seven candidates the brief offered, six already existed and the seventh ('the system can go acquire this') is already gap_reasons.ACQUIRABLE. ACTION_REQUIRES_APPROVAL was deliberately NOT created: every procedure here is DECLARED_NO_EXECUTOR, so it has no producer, and approval belongs to the execution lane that already owns it.",
+  "what_a_goal_never_carries": [
+   "entity fields",
+   "customer inputs to ask",
+   "capability sequence",
+   "procedure",
+   "fallback",
+   "handoff",
+   "closing authority",
+   "availability",
+   "execution effect",
+   "future possible action"
+  ],
+  "entity_state_requirement": {
+   "rule": "a required DIMENSION is satisfied by any one of its fields; a goal is answerable when every required dimension is satisfied. Optional fields are recorded when readable and are never fatal.",
+   "ENTITY.ORDER": {
+    "required": [
+     [
+      "ORDER_FULFILLMENT"
+     ]
+    ],
+    "optional": [
+     "ORDER_PAYMENT",
+     "ORDER_CANCELLATION",
+     "ORDER_TRACKING"
+    ]
+   },
+   "ENTITY.LISTING": {
+    "required": [
+     [
+      "LISTING_OPTION_SALE_STATUS",
+      "LISTING_SALE_STATUS"
+     ]
+    ],
+    "optional": []
+   },
+   "why": "all-or-nothing made a harmless over-read fatal (P01, C4); field-level let a spare readable field hide a genuinely missing one (R:7a8136b2). Required dimensions pass both, and 'any readable field resolves it' stays refused."
+  }
+ },
+ "planner_status": "EXPERIMENTAL / NOT_ADOPTED_FOR_PRODUCTION (2026-09-20). step_roles, step_roles_retired, closing_authorities, closing_rule, sequence_rule and procedure_rule above describe the Resolution Planner contract, which is KEPT as a comparison and replay asset so the WP-1..WP-3.2 evidence stays readable, and which has never had a production caller. The authority vocabulary itself — authorities, capabilities, entity_fields, resolution_states, gap_reasons, customer_inputs, scopes, effects — is NOT deprecated: it is carried into inquiry-goal/v1 unchanged and is what customer_goal above is built on."
 }
