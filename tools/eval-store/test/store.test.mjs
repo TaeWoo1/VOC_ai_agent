@@ -112,6 +112,9 @@ test('redaction rules: identity is found, product vocabulary is not', () => {
     assert.deepEqual(found(clean), [], clean);
   }
   assert.equal(redact('연락 010-2222-3333'), '연락 [KR_PHONE]');
+  // a sha256 is not a phone number, an order number or an address
+  assert.deepEqual(found('7feefed8f12ee68f1690e99d7447c214e7f291d7de8e9a146b9e704ae9b7db11'), []);
+  assert.deepEqual(found('registry_fp 1c9cbfc305c18c944e9d3d8e3d20a8e2c361e33baafb14911c94d0aa02133021'), []);
 });
 
 test('the canonical store may not live in a temp directory or overlap a repository', () => {
@@ -122,6 +125,46 @@ test('the canonical store may not live in a temp directory or overlap a reposito
   assert.throws(() => openStore({ store: join(tmpdir(), 's'), cache: join(tmpdir(), 'c') }), /temporary directory/);
   const env = defaultRoots({});
   assert.equal(refusalFor(env.store), null, 'the default canonical root is durable');
+});
+
+test('run artifacts are append-only: added once, never replaced, and verified', () => {
+  const w = world();
+  try {
+    const run = join(w.base, 'run');
+    mkdirSync(run, { recursive: true });
+    writeFileSync(join(run, 'observations.jsonl'), '{"q":"S:p1","raw":"..."}\n');
+    const first = w.s.runPut('wp2-smoke', run, { irreproducible: true, meta: { note: 'model answers' } });
+    assert.deepEqual(first.added, ['observations.jsonl']);
+    assert.deepEqual(w.s.runVerify('wp2-smoke'), []);
+    // the same bytes again add nothing
+    assert.deepEqual(w.s.runPut('wp2-smoke', run).added, []);
+    // a second artifact may join the same run
+    writeFileSync(join(run, 'score.json'), '{"ok":true}\n');
+    assert.deepEqual(w.s.runPut('wp2-smoke', run).added, ['score.json']);
+    // a changed artifact is refused — a raw model answer cannot be re-derived, so it is never replaced
+    writeFileSync(join(run, 'observations.jsonl'), '{"q":"S:p1","raw":"edited"}\n');
+    assert.throws(() => w.s.runPut('wp2-smoke', run), /append-only/);
+    const manifest = JSON.parse(readFileSync(join(w.base, 'store', 'runs', 'wp2-smoke', 'RUN.json'), 'utf8'));
+    assert.equal(manifest.files['observations.jsonl'].irreproducible, true);
+    assert.equal(manifest.meta.note, 'model answers');
+    assert.deepEqual(w.s.runs(), ['wp2-smoke']);
+    // and a stored artifact that changes on disk fails verification
+    chmodSync(join(w.base, 'store', 'runs', 'wp2-smoke', 'score.json'), 0o644);
+    writeFileSync(join(w.base, 'store', 'runs', 'wp2-smoke', 'score.json'), '{"ok":false}\n');
+    assert.match(w.s.runVerify('wp2-smoke').join('\n'), /score\.json: sha256 moved/);
+  } finally {
+    w.done();
+  }
+});
+
+test('a run id is a plain name', () => {
+  const w = world();
+  try {
+    assert.throws(() => w.s.runPut('../escape', w.src), /bad run id/);
+    assert.throws(() => w.s.runPut('a', w.src), /bad run id/);
+  } finally {
+    w.done();
+  }
 });
 
 test('the committed Eval v1 manifest agrees with its own dataset hash rule', () => {

@@ -40,6 +40,18 @@
  "askable": {"PRODUCT_CONTEXT": true, "IDENTITY": false},
  "surfaces": ["PUBLIC_QNA", "ORDER_ATTACHED"],
  "step_roles": ["CLOSES", "PRECONDITION", "CONTEXT"],
+ "step_scopes": ["THIS_LISTING", "SELLER_CATALOGUE", "THIS_ORDER", "COMPANY", "NONE"],
+ "scope_by_capability": {
+  "KNOWLEDGE.PRODUCT": ["THIS_LISTING"],
+  "KNOWLEDGE.CATALOGUE": ["THIS_LISTING", "SELLER_CATALOGUE"],
+  "KNOWLEDGE.ORG": ["COMPANY"],
+  "ENTITY.ORDER": ["THIS_ORDER"],
+  "ENTITY.LISTING": ["THIS_LISTING"],
+  "PROCEDURE.ORDER_ACTION": ["THIS_ORDER"],
+  "SELLER": ["NONE"]
+ },
+ "step_effects": ["NONE", "EXTERNAL_STATE_CHANGE", "BOUNDED_WORKFLOW"],
+ "procedure_rule": "PROCEDURE only for an external state change or a bounded business workflow (effect != NONE); when reading entity state resolves the request, the plan ends at ENTITY_STATE (product-owner decision 2026-09-20)",
  "v2_bridge": {
   "PRODUCT_SPEC": "KNOWLEDGE.PRODUCT",
   "PRODUCT_USAGE": "KNOWLEDGE.PRODUCT",

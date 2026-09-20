@@ -37,6 +37,41 @@ product-order numbers), road addresses, a name addressed as 「… 고객님」.
 value. It cannot find a name written without an honorific: a new dataset that carries free text also needs a human
 read before `put`. `redact()` masks for the step BEFORE a new version is frozen.
 
+## Run artifacts (`runs/<run-id>/`)
+
+A run's observations are stored **append-only**: a file may be added, a file that exists is never replaced, and no entry in
+`RUN.json` is rewritten. Raw model answers are marked `irreproducible` — a re-run produces a different artifact, never that
+one.
+
+```bash
+node tools/eval-store/store.mjs run-put <run-id> <dir> [--irreproducible] [--note "..."]
+node tools/eval-store/store.mjs run-verify <run-id>
+node tools/eval-store/store.mjs runs
+```
+
+Put the raw answers in **before** scoring them: a score can be recomputed, an answer cannot.
+
+## Off-machine backup (private)
+
+The store holds real customer-derived text; a backup leaves this machine encrypted, never in a repository and never in a
+shared drive folder that syncs by itself.
+
+```bash
+# 1. a single archive of the whole store, with a hash list to check later
+tar -C "$HOME/.sellerops" -czf /tmp/eval-store.tgz eval-store
+shasum -a 256 /tmp/eval-store.tgz > /tmp/eval-store.tgz.sha256
+
+# 2. encrypt it — age (preferred) or gpg; the passphrase lives in the operator's password manager, not here
+age -p -o /tmp/eval-store.tgz.age /tmp/eval-store.tgz    # or: gpg --symmetric --cipher-algo AES256 /tmp/eval-store.tgz
+rm -f /tmp/eval-store.tgz                                 # the plaintext archive never persists
+
+# 3. copy the encrypted file and its .sha256 to the private off-machine location, then verify a restore:
+#    age -d -o restore.tgz <file>.age && tar -tzf restore.tgz | head
+```
+
+Restore = decrypt, extract to `$SELLEROPS_EVAL_STORE`, then `verify` every dataset and `run-verify` every run. A backup
+nobody has restored is a claim, not a backup.
+
 ## Recovery drill (run it after any machine change)
 
 ```bash
@@ -55,6 +90,8 @@ node --test tools/eval-store/test/store.test.mjs                                
 | `inquiry-judge-capture/v1` | judge-inputs-S0 · judge-inputs-S1 | RECOVERED_BYTE_IDENTICAL (re-captured, no model) |
 | `inquiry-resolution-plan/v1` | plans.jsonl · build.py | WITHDRAWN_BEFORE_USE (label semantics mixed; kept for the record) |
 | `inquiry-resolution-plan/v2` | plans.jsonl · build.py | WITHDRAWN_BEFORE_USE (no name for a possible gap; kept for the record) |
-| `inquiry-resolution-plan/v3` | plans.jsonl · build.py | frozen 2026-09-20 (WP-1): 66 frozen, 6 PENDING_ADJUDICATION |
+| `inquiry-resolution-plan/v3` | plans.jsonl · build.py | SUPERSEDED by v3.1 (used by the WP-1 diagnostic; kept) |
+| `inquiry-resolution-plan/v3.1` | plans.jsonl · build.py | **frozen 2026-09-20 (WP-2): all 72 rows FROZEN** after the product owner's adjudication |
+| `inquiry-planner-capture/v1` | capture-S0.jsonl | the planner's inputs: the customer's message + the registry facts (real text — store only) |
 
 Back the store up like any other private data; it is not in git by design.

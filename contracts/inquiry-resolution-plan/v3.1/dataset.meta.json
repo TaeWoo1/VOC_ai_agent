@@ -1,0 +1,40 @@
+{
+ "name": "inquiry-resolution-plan",
+ "version": "v3.1",
+ "frozen_at": "2026-09-20",
+ "files": {
+  "plans.jsonl": "e8e2370ccfe604e3c89cf7e067765050043f5f792898f79e8d1da594fbaf97b4",
+  "build.py": "9fcfd537dad0ed0db1295da21baddad83e13f2de310077c9e74f02eca58ace93"
+ },
+ "counts": {
+  "needs": 72,
+  "frozen": 72,
+  "pending_adjudication": 0
+ },
+ "pending_adjudication": [],
+ "derived_from": {
+  "inquiry-need-eval/v1": "b94626cbf74a6f3dcbc97f9f1423f0329da25065634d9245f3077fbb51b04e23"
+ },
+ "supersedes": "inquiry-resolution-plan/v3 (used by the WP-1 diagnostic); v1 and v2 were withdrawn before use",
+ "vocabulary": "contracts/inquiry-authority/v1/vocabulary.json",
+ "schema": "contracts/inquiry-resolution-plan/v3.1/schema.json",
+ "label_policy": {
+  "author": "designer; vocabulary and frozen rows adopted by the product owner on 2026-09-20 (DEV/CALIBRATION — never a holdout)",
+  "steps": "CLOSES = an authority allowed to close the need; PRECONDITION = must be read before it; CONTEXT = read, never closes. Each step also names the instance it is about (scope) and, for a procedure, the change it makes (effect). A fallback to the seller is not a step.",
+  "expected_terminal": "where the need ends once every system step the CURRENT registry offers has run on snapshot S0's knowledge — listing detail acquisition included, no image reader, no procedure executor, today's order connectors. Not the immediate next step: a need whose listing detail was never read is 'acquire first' now and ends here after it. ACQUIRABLE and UNREADABLE_SOURCE are POSSIBLE gaps (a source exists that was not or cannot be read); the gold uses UNREADABLE_SOURCE only where the designer knows the answer is in that source.",
+  "pending": "PENDING_ADJUDICATION rows carry the proposal and alternatives and are excluded from every score until the product owner decides"
+ },
+ "holds": "real inquiry id prefixes and the designer's plan labels; no customer or seller text",
+ "storage": {
+  "canonical": "eval-store:inquiry-resolution-plan/v3.1",
+  "builder": "build.py (stored beside the gold)"
+ },
+ "adjudication": {
+  "decided_by": "product owner, 2026-09-20",
+  "R:f81ad84a.n1": "ENTITY_STATE only — a tracking/fulfilment lookup is a read, not a procedure; with no linked order it is a capability gap and then a seller handoff",
+  "R:8989a9d0.n1 · S:T1a.n1 · S:T1b.n1": "KNOWLEDGE",
+  "R:f403e606.n2": "KNOWLEDGE",
+  "S:N6.n1": "KNOWLEDGE (company policy) — with no such knowledge the runtime goes to the seller, and the gold stays KNOWLEDGE so that a policy taught once is reused",
+  "invariant": "PROCEDURE is never used for a plain read/answer: when reading entity state resolves the request the plan ends at ENTITY_STATE; a procedure is required only for an external state change or a bounded business workflow"
+ }
+}

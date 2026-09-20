@@ -35,5 +35,11 @@
  "storage": {
   "canonical": "eval-store:inquiry-resolution-plan/v3",
   "builder": "build.py (stored beside the gold)"
+ },
+ "status": "SUPERSEDED",
+ "superseded": {
+  "date": "2026-09-20",
+  "by": "inquiry-resolution-plan/v3.1",
+  "why": "the product owner adjudicated the six pending rows and the planner contract gained two step fields (scope, effect). v3 was used — the WP-1 authority diagnostic scored against it — so it is kept, not withdrawn."
  }
 }

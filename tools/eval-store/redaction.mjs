@@ -38,12 +38,20 @@ function* leaves(value, path = '$') {
   }
 }
 
+/**
+ * A hex digest is not data. A sha256 contains digit runs that read as a phone number or an order number, so digests are
+ * masked before the rules run — measured on the planner capture, where 54 of 67 fingerprints matched KR_PHONE.
+ */
+const DIGEST = /\b[0-9a-f]{32,}\b/gi;
+export const withoutDigests = (text) => text.replace(DIGEST, (m) => 'H'.repeat(m.length));
+
 /** Rules that fire on one string. */
 export function matchRules(text) {
+  const masked = withoutDigests(text);
   const hits = [];
   for (const r of RULES) {
     r.re.lastIndex = 0;
-    if (r.re.test(text)) hits.push(r.id);
+    if (r.re.test(masked)) hits.push(r.id);
   }
   return hits;
 }

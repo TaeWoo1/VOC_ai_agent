@@ -5,6 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sellerops.agent.llm.AgentLlmCallMetrics;
+import com.sellerops.inquiry.authority.CapabilitySnapshot;
+import com.sellerops.inquiry.resolution.ResolutionPlan;
+import com.sellerops.inquiry.resolution.ResolutionPlanParser;
+import com.sellerops.inquiry.resolution.ResolutionPlannerPrompt;
 import com.sellerops.agent.llm.AgentLlmTransport;
 import java.net.URI;
 import java.util.ArrayList;
@@ -73,6 +77,36 @@ public class InquiryDecisionGenerator {
                 judged.failure(), env.finish(), needIds.size(), evidence, precedents,
                 judged.verdicts() == null ? -1 : judged.verdicts().size(), metrics.toLogFields());
         return new InquiryDecisionModel.Answer<>(judged.verdicts(), cost(metrics), judged.failure());
+    }
+
+    /**
+     * <b>The Resolution Planner call</b> (Inquiry v3 WP-2) — the same capability, key and transport as the v2 planner, and
+     * a different instruction, schema and parser. The raw content is returned beside the plan: a shadow run records what
+     * the model actually said, and an observation nobody can re-derive is the one thing a re-run cannot replace.
+     */
+    ResolutionPlanCall resolutionPlan(UUID orgId, String body) {
+        AgentLlmTransport.Response response = transport.post(ENDPOINT,
+                Map.of("Authorization", "Bearer " + properties.apiKey()), body);
+        AgentLlmCallMetrics metrics = AgentLlmCallMetrics.of(response);
+        Envelope env = Envelope.of(response);
+        ResolutionPlanParser.Parsed parsed = env.failure() == null ? ResolutionPlanParser.parse(env.content())
+                : ResolutionPlanParser.failed(env.failure());
+        log.info("inquiry_decision phase=resolution_plan orgId={} prompt={} format={} answered={} failure={} finish={}"
+                        + " needs={} {}", orgId, ResolutionPlannerPrompt.VERSION, properties.outputFormat(),
+                parsed.failure() == null, parsed.failure(), env.finish(),
+                parsed.plan() == null ? -1 : parsed.plan().needs().size(), metrics.toLogFields());
+        return new ResolutionPlanCall(env.content(), env.finish(), parsed.plan(), parsed.failure(), cost(metrics));
+    }
+
+    /** What one planner call produced: the raw answer, the plan when it could be read, and what it cost. */
+    record ResolutionPlanCall(String content, String finish, ResolutionPlan plan, String failure,
+                              InquiryDecisionModel.CallCost cost) {
+    }
+
+    String resolutionPlanBody(String question, CapabilitySnapshot snapshot) {
+        return body(ResolutionPlannerPrompt.system(), ResolutionPlannerPrompt.user(question, snapshot),
+                ResolutionPlannerPrompt.MAX_OUTPUT_TOKENS, properties.reasoningEffort(),
+                ResolutionPlannerPrompt.schema(snapshot));
     }
 
     /**

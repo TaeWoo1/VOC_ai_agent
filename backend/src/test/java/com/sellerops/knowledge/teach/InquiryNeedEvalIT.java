@@ -49,6 +49,7 @@ class InquiryNeedEvalIT {
     @Autowired AnswerMemoryRepository memories;
     @Autowired ProductVariantRepository variants;
     @Autowired com.sellerops.inquiry.decision.InquiryEvidenceCollector collector;
+    @Autowired(required = false) com.sellerops.inquiry.authority.CapabilityRegistry registry;
     @Autowired JdbcTemplate jdbc;
     @Autowired Environment env;
 
@@ -99,6 +100,7 @@ class InquiryNeedEvalIT {
             assessor.setDecision(null, null);
         }
         List<String> out = new ArrayList<>();
+        List<String> plannerCapture = System.getenv("EVAL_PLANNER_CAPTURE") == null ? null : new ArrayList<>();
         for (String line : Files.readAllLines(Path.of(System.getenv("EVAL_QUESTIONS")))) {
             if (line.isBlank()) continue;
             JsonNode q = JSON.readTree(line);
@@ -139,12 +141,48 @@ class InquiryNeedEvalIT {
             variant.put("variant_id", v == null ? null : v.toString());
             variant.put("option_name", v == null ? null : variants.findById(v).map(x -> x.getOptionName()).orElse(null));
             row.put("order_state", lanes.order() == null ? null : String.valueOf(lanes.order().state()));
+            if (plannerCapture != null) {
+                // Inquiry v3 WP-2 planner capture (no model): the customer's message and the registry facts the planner
+                // request is built from. The snapshot's own fingerprint travels with it, so a later run proves it asked
+                // about the same situation.
+                String subtype = inquiry.getSourceSubtype();
+                com.sellerops.inquiry.authority.CapabilitySnapshot snap = registry.snapshot(org, inquiry, a.productId(),
+                        collector.detail(org, a.productId()), OrderFactLookup.EXACT_ALLOWED);
+                ObjectNode cap = JSON.createObjectNode();
+                cap.put("q", q.get("q").asText()).put("question", plannerQuestion(inquiry));
+                ObjectNode reg = cap.putObject("registry");
+                reg.put("channel", snap.channelCode()).put("subtype", subtype)
+                        .put("orderBound", snap.orderBound()).put("lookup", snap.lookup().name())
+                        .put("product", a.productId() != null).put("detail", snap.detail().name())
+                        .put("listingRow", snap.status(com.sellerops.inquiry.authority.EntityField.LISTING_SALE_STATUS)
+                                == com.sellerops.inquiry.authority.CapabilityStatus.AVAILABLE)
+                        .put("variantCount", snap.variantCount());
+                cap.put("registry_fp", snap.fingerprint());
+                plannerCapture.add(JSON.writeValueAsString(cap));
+            }
             if (a.decision() != null) {
                 observeDecision(row, a.decision());
             }
             out.add(JSON.writeValueAsString(row));
         }
         Files.write(Path.of(System.getenv("EVAL_OUT")), out);
+        if (plannerCapture != null) {
+            java.util.Set<String> canonicalQ = new java.util.HashSet<>();
+            for (String line : Files.readAllLines(Path.of(System.getenv("EVAL_QUESTIONS")))) {
+                if (!line.isBlank() && JSON.readTree(line).path("canonical").asBoolean(true)) {
+                    canonicalQ.add(JSON.readTree(line).get("q").asText());
+                }
+            }
+            List<String> rows = new ArrayList<>();
+            for (String r : plannerCapture) {
+                if (canonicalQ.contains(JSON.readTree(r).get("q").asText())) {
+                    rows.add(r);
+                }
+            }
+            Files.write(Path.of(System.getenv("EVAL_PLANNER_CAPTURE")), rows,
+                    java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE);
+            System.out.println("INQUIRY_NEED_EVAL planner_capture rows=" + rows.size());
+        }
         if (OracleDecision.capture != null) {
             // The calibration set is the CANONICAL questions only — the headline weighting of Eval v1.
             java.util.Set<String> canonical = new java.util.HashSet<>();
@@ -316,6 +354,13 @@ class InquiryNeedEvalIT {
         }
 
         static List<ObjectNode> capture;
+    }
+
+    /** The customer's message as the planner receives it — the same plain text the assessor reads. */
+    private static String plannerQuestion(Inquiry inquiry) {
+        String title = com.sellerops.common.MarkupText.toPlainText(inquiry.getTitle());
+        String body = com.sellerops.common.MarkupText.toPlainText(inquiry.getBody());
+        return ((title == null ? "" : title) + "\n" + (body == null ? "" : body)).strip();
     }
 
     private Inquiry real(UUID org, String prefix) {

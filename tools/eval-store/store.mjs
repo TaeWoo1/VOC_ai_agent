@@ -14,6 +14,9 @@
 //   node tools/eval-store/store.mjs put     <dataset> <version> --from <dir>
 //   node tools/eval-store/store.mjs verify  <dataset> <version>
 //   node tools/eval-store/store.mjs restore <dataset> <version>        # prints the cache directory
+//   node tools/eval-store/store.mjs run-put <run-id> <dir> [--irreproducible] [--note "..."]
+//   node tools/eval-store/store.mjs run-verify <run-id>
+//   node tools/eval-store/store.mjs runs
 //   node tools/eval-store/store.mjs where
 import { createHash } from 'node:crypto';
 import {
@@ -160,6 +163,59 @@ export function openStore({ store, cache, repo = REPO, allowEphemeral = false })
       if (after.length) throw new Error(`restore failed verification:\n  ${after.join('\n  ')}`);
       return dest;
     },
+    /**
+     * Put run artifacts under {@code runs/<run-id>/} — APPEND-ONLY. A file may be added; a file that exists is never
+     * replaced, and no entry in RUN.json is ever rewritten. Raw model observations are irreproducible: a re-run produces a
+     * different artifact, never this one.
+     */
+    runPut(runId, fromDir, { irreproducible = false, meta = {} } = {}) {
+      if (!/^[A-Za-z0-9._-]{3,64}$/.test(runId)) throw new Error(`bad run id: ${runId}`);
+      const dest = join(store, 'runs', runId);
+      mkdirSync(store, { recursive: true, mode: 0o700 });
+      chmodSync(store, 0o700);
+      mkdirSync(dest, { recursive: true, mode: 0o700 });
+      const manifestPath = join(dest, 'RUN.json');
+      const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8'))
+        : { run_id: runId, created_at: new Date().toISOString(), files: {}, meta };
+      const added = [];
+      for (const f of readdirSync(fromDir)) {
+        if (f === 'RUN.json') continue;
+        const target = join(dest, f);
+        const digest = sha256(readFileSync(join(fromDir, f)));
+        if (existsSync(target)) {
+          if (sha256(readFileSync(target)) === digest) continue;
+          throw new Error(`run-put refused — ${runId}/${f} exists with different bytes; a run artifact is append-only`);
+        }
+        if (manifest.files[f]) throw new Error(`run-put refused — ${runId}/${f} is already recorded`);
+        copyFileSync(join(fromDir, f), target);
+        chmodSync(target, 0o444);
+        manifest.files[f] = { sha256: digest, added_at: new Date().toISOString(), irreproducible };
+        added.push(f);
+      }
+      manifest.meta = { ...meta, ...manifest.meta };
+      if (existsSync(manifestPath)) chmodSync(manifestPath, 0o644);
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 1) + '\n');
+      chmodSync(manifestPath, 0o444);
+      return { dir: dest, added };
+    },
+    /** Every recorded run artifact against RUN.json. */
+    runVerify(runId) {
+      const dir = join(store, 'runs', runId);
+      const manifestPath = join(dir, 'RUN.json');
+      if (!existsSync(manifestPath)) return [`no run ${runId}`];
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      const problems = [];
+      for (const [f, rec] of Object.entries(manifest.files)) {
+        const p = join(dir, f);
+        if (!existsSync(p)) problems.push(`${f}: missing`);
+        else if (sha256(readFileSync(p)) !== rec.sha256) problems.push(`${f}: sha256 moved`);
+      }
+      return problems;
+    },
+    runs() {
+      const dir = join(store, 'runs');
+      return existsSync(dir) ? readdirSync(dir) : [];
+    },
     list() {
       if (!existsSync(store)) return [];
       return readdirSync(store).flatMap((d) => readdirSync(join(store, d)).map((v) => `${d}/${v}`));
@@ -175,7 +231,14 @@ function main(argv) {
     return 0;
   }
   const s = openStore(roots);
-  if (!dataset || !version) throw new Error('usage: store.mjs <put|verify|restore> <dataset> <version> [--from <dir>]');
+  if (cmd === 'runs') {
+    console.log(s.runs().join('\n'));
+    return 0;
+  }
+  if (!dataset || (!version && cmd !== 'run-verify')) {
+    throw new Error('usage: store.mjs <put|verify|restore> <dataset> <version> [--from <dir>]'
+      + ' | run-put <run-id> <dir> [--irreproducible] [--note "..."] | run-verify <run-id> | runs | where');
+  }
   if (cmd === 'put') {
     const i = rest.indexOf('--from');
     if (i < 0 || !rest[i + 1]) throw new Error('put needs --from <dir>');
@@ -186,13 +249,32 @@ function main(argv) {
     return problems.length ? 1 : 0;
   } else if (cmd === 'restore') {
     console.log(s.restore(dataset, version));
+  } else if (cmd === 'run-put') {
+    // store.mjs run-put <run-id> <from-dir> [--irreproducible] [--note "..."]
+    const runId = dataset;
+    const from = version;
+    const note = rest.indexOf('--note') >= 0 ? rest[rest.indexOf('--note') + 1] : undefined;
+    const out = s.runPut(runId, from, { irreproducible: rest.includes('--irreproducible'), meta: note ? { note } : {} });
+    console.log(JSON.stringify(out));
+  } else if (cmd === 'run-verify') {
+    const problems = s.runVerify(dataset);
+    console.log(problems.length ? problems.join('\n') : `ok runs/${dataset}`);
+    return problems.length ? 1 : 0;
   } else {
     throw new Error(`unknown command ${cmd}`);
   }
   return 0;
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+const invokedDirectly = () => {
+  try {
+    return process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+};
+
+if (invokedDirectly()) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (e) {

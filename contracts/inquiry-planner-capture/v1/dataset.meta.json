@@ -1,0 +1,18 @@
+{
+ "name": "inquiry-planner-capture",
+ "version": "v1",
+ "frozen_at": "2026-09-20",
+ "files": {
+  "capture-S0.jsonl": "5850421be15897d15fc169de22daacf625d63892b12a725ffef1471f48470f8d"
+ },
+ "counts": {
+  "questions": 67
+ },
+ "holds": "the customer's message exactly as the Resolution Planner would receive it, plus the registry facts the request is built from (channel, surface, binding, lookup, detail capability, listing row, option count) and the snapshot fingerprint — real text, store only",
+ "produced_by": "backend/src/test/java/com/sellerops/knowledge/teach/InquiryNeedEvalIT.java with EVAL_PLANNER_CAPTURE (no model, no marketplace) on a throwaway copy of the S0 clone",
+ "snapshot": "S0 — sellerops_f5_eval (no Catalogue Bootstrap); the copy was dropped after the run",
+ "role": "DEV/CALIBRATION — the same 67 canonical cases as inquiry-need-eval/v1; never a holdout",
+ "storage": {
+  "canonical": "eval-store:inquiry-planner-capture/v1"
+ }
+}

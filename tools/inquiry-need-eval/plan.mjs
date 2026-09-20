@@ -21,6 +21,9 @@ function index(vocab) {
     field: new Map(vocab.entity_fields.map((f) => [f.id, f.capability])),
     input: new Map(vocab.customer_inputs.map((i) => [i.id, i.kind])),
     bridgeOnly: new Set(vocab.customer_inputs.filter((i) => i.bridge_only).map((i) => i.id)),
+    scope: new Map(Object.entries(vocab.scope_by_capability)),
+    effects: new Set(vocab.step_effects),
+    scopes: new Set(vocab.step_scopes),
     states: new Set(vocab.resolution_states),
     gaps: new Set(vocab.gap_reasons),
     roles: new Set(vocab.step_roles),
@@ -42,6 +45,23 @@ function checkSteps(steps, ix, where, errors) {
       for (const f of s.fields) {
         if (ix.field.get(f) !== s.capability) errors.push(`${where}.steps[${i}]: field ${f} is not ${s.capability}'s`);
       }
+    } else if (authority === 'ENTITY_STATE') {
+      errors.push(`${where}.steps[${i}]: an entity step names the fields it reads`);
+    }
+    if (!ix.scopes.has(s.scope)) errors.push(`${where}.steps[${i}]: unknown scope ${s.scope}`);
+    else if (authority && !(ix.scope.get(s.capability) ?? []).includes(s.scope)) {
+      errors.push(`${where}.steps[${i}]: ${s.capability} is never about ${s.scope}`);
+    }
+    if (!ix.effects.has(s.effect)) errors.push(`${where}.steps[${i}]: unknown effect ${s.effect}`);
+    else if (authority === 'PROCEDURE' && s.effect === 'NONE') {
+      // the product owner's invariant: reading entity state is never a procedure
+      errors.push(`${where}.steps[${i}]: a procedure states the change it makes`);
+    } else if (authority !== 'PROCEDURE' && s.effect !== 'NONE') {
+      errors.push(`${where}.steps[${i}]: only a procedure has an effect`);
+    }
+    if (authority === 'PROCEDURE' && s.role === 'CLOSES'
+        && !steps.some((p) => p.capability === 'ENTITY.ORDER' && p.role === 'PRECONDITION')) {
+      errors.push(`${where}.steps[${i}]: a procedure reads the order it changes first`);
     }
     if (s.depends_on !== undefined && !(Number.isInteger(s.depends_on) && s.depends_on >= 0 && s.depends_on < i)) {
       errors.push(`${where}.steps[${i}]: depends_on must name an earlier step`);
@@ -127,7 +147,11 @@ export function scoreBridge(rows, vocab = loadVocabulary()) {
 export function scorePlans(pred, gold, vocab = loadVocabulary()) {
   const ix = index(vocab);
   const p = new Map(pred.map((r) => [key(r), r]));
-  const out = { needs: 0, missing_prediction: 0, required_authority_recall: 0, order_misses: [], unnecessary: 0, slot_exact: 0 };
+  const out = {
+    needs: 0, missing_prediction: 0, authority_recall: 0, missing_required_authority: [], unnecessary_authority: 0,
+    entity_scope_accuracy: 0, entity_scope_compared: 0, customer_input_correct: 0, sequence_correct: 0,
+    sequence_compared: 0, invalid_capability_selection: 0, procedure_for_read: [], order_misses: [],
+  };
   for (const g of gold.filter((r) => r.status === 'FROZEN')) {
     out.needs++;
     const r = p.get(key(g));
@@ -135,19 +159,72 @@ export function scorePlans(pred, gold, vocab = loadVocabulary()) {
       out.missing_prediction++;
       continue;
     }
+    const steps = r.steps ?? [];
+    if (steps.some((s) => !ix.capability.has(s.capability))) out.invalid_capability_selection++;
     const need = closingAuthorities(g.steps, ix);
-    const got = new Set((r.steps ?? []).map((s) => ix.capability.get(s.capability)));
-    if ([...need].every((a) => got.has(a))) out.required_authority_recall++;
-    const goldOrder = g.steps.some((s) => s.capability === 'ENTITY.ORDER');
-    if (goldOrder && !(r.steps ?? []).some((s) => s.capability === 'ENTITY.ORDER')) out.order_misses.push(key(g));
+    const got = new Set(steps.map((s) => ix.capability.get(s.capability)));
+    if ([...need].every((a) => got.has(a))) out.authority_recall++;
+    else out.missing_required_authority.push({ need: key(g), expected: [...need], got: [...got] });
     const goldAny = new Set(g.steps.map((s) => ix.capability.get(s.capability)));
-    if ([...got].some((a) => !goldAny.has(a))) out.unnecessary++;
+    if ([...got].some((a) => a && !goldAny.has(a))) out.unnecessary_authority++;
+    if (!goldAny.has('PROCEDURE') && got.has('PROCEDURE')) out.procedure_for_read.push(key(g));
+    if (g.steps.some((s) => s.capability === 'ENTITY.ORDER') && !steps.some((s) => s.capability === 'ENTITY.ORDER')) {
+      out.order_misses.push(key(g));
+    }
+    // entity/scope: for every gold step the prediction also names, is it about the same instance?
+    for (const gs of g.steps) {
+      const ps = steps.find((s) => s.capability === gs.capability);
+      if (!ps) continue;
+      out.entity_scope_compared++;
+      const sameFields = (gs.fields ?? []).slice().sort().join(',') === (ps.fields ?? []).slice().sort().join(',');
+      if (ps.scope === gs.scope && sameFields) out.entity_scope_accuracy++;
+    }
     const a = [...(g.customer_inputs ?? [])].sort().join(',');
     const b = [...(r.customer_inputs ?? [])].sort().join(',');
-    if (a === b) out.slot_exact++;
+    if (a === b) out.customer_input_correct++;
+    // sequence: only where the gold has more than one acting step
+    const acting = (xs) => xs.filter((s) => s.role !== 'CONTEXT');
+    if (acting(g.steps).length > 1) {
+      out.sequence_compared++;
+      const seq = (xs) => acting(xs).map((s) => `${s.capability}/${s.role}`).join('>');
+      const deps = (xs) => acting(xs).map((s) => (s.depends_on ?? null)).join(',');
+      if (seq(g.steps) === seq(steps) && deps(g.steps) === deps(steps)) out.sequence_correct++;
+    }
   }
   const n = out.needs - out.missing_prediction;
-  return { ...out, required_authority_recall: n ? out.required_authority_recall / n : null, slot_exact: n ? out.slot_exact / n : null };
+  const rate = (x, d) => (d ? x / d : null);
+  return {
+    ...out,
+    authority_recall: rate(out.authority_recall, n),
+    entity_scope_accuracy: rate(out.entity_scope_accuracy, out.entity_scope_compared),
+    customer_input_correct: rate(out.customer_input_correct, n),
+    sequence_correct: rate(out.sequence_correct, out.sequence_compared),
+  };
+}
+
+/**
+ * Plan rows as the harness records them (`plan` is the parsed wire shape) → one row per NEED, aligned to the gold by
+ * position within the case. Need decomposition itself is reported apart: a plan that splits a message differently is not
+ * scored as if its second need were the gold's second need.
+ */
+export function plansFromObservation(rows, gold) {
+  const goldNeeds = new Map();
+  for (const g of gold) goldNeeds.set(g.q, [...(goldNeeds.get(g.q) ?? []), g]);
+  const out = [];
+  const counts = { cases: 0, need_count_match: 0, unusable: 0 };
+  for (const row of rows) {
+    const want = goldNeeds.get(row.q);
+    if (!want) continue;
+    counts.cases++;
+    const needs = row.plan?.needs ?? [];
+    if (!needs.length) { counts.unusable++; continue; }
+    if (needs.length === want.length) counts.need_count_match++;
+    want.forEach((g, i) => {
+      const n = needs[i];
+      if (n) out.push({ q: g.q, need: g.need, steps: n.steps, customer_inputs: n.customer_inputs });
+    });
+  }
+  return { rows: out, counts };
 }
 
 /**
