@@ -35,7 +35,7 @@ class ResolutionPlanValidatorScenarioTest {
                     .as(id + " availability").isEqualTo(want);
             checked++;
         }
-        assertThat(checked).isEqualTo(20);
+        assertThat(checked).isEqualTo(25);
     }
 
     @Test
@@ -57,7 +57,7 @@ class ResolutionPlanValidatorScenarioTest {
             assertThat(r.availability()).as(id + ": an invalid plan is not measured against the registry").isEmpty();
             checked++;
         }
-        assertThat(checked).isEqualTo(8);
+        assertThat(checked).isEqualTo(5);
     }
 
     /**
@@ -80,7 +80,7 @@ class ResolutionPlanValidatorScenarioTest {
                     .as(id + ": an X row records the v2 code it replaces").isNotBlank();
             checked++;
         }
-        assertThat(checked).isEqualTo(8);
+        assertThat(checked).isEqualTo(13);
     }
 
     @Test
@@ -92,7 +92,8 @@ class ResolutionPlanValidatorScenarioTest {
         ResolutionPlanValidator.Result r = ResolutionPlanValidator.validate(plan, PlannerScenarios.snapshot(s));
         assertThat(r.availability().get(0).gap()).isEqualTo(GapReason.UNBOUND);
         assertThat(plan.needs().get(0).steps().get(0).capability().wire()).isEqualTo("ENTITY.ORDER");
-        assertThat(plan.needs().get(0).steps().stream().filter(x -> x.role() == ResolutionPlan.Role.CLOSES).count())
-                .as("the closer is still the order, not the company rule beside it").isEqualTo(1);
+        assertThat(plan.needs().get(0).closingAuthority())
+                .as("the declared resolution is unchanged by the gap: still the order, not the company rule beside it")
+                .isEqualTo(com.sellerops.inquiry.authority.Authority.ENTITY_STATE);
     }
 }

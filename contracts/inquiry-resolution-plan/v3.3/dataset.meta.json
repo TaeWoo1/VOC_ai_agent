@@ -1,0 +1,53 @@
+{
+ "name": "inquiry-resolution-plan",
+ "version": "v3.3",
+ "frozen_at": "2026-09-20",
+ "files": {
+  "plans.jsonl": "abe11530c5484cbefaebf688f3793d0bad6ca10341a6bbe9a78aca4f320b4efc",
+  "build.py": "50dbb26c310e7ccb78455d58fa25242661d2acc0e9266cee456f3c9efeb54a24"
+ },
+ "counts": {
+  "goals": 72,
+  "frozen": 72,
+  "pending_adjudication": 0,
+  "cases": 67
+ },
+ "pending_adjudication": [],
+ "derived_from": {
+  "inquiry-resolution-plan/v3.2": "ff20922e3f05307e6ca6cbfe8aa94737029a93e453e6a8398a6a4476f4ed0bb9"
+ },
+ "supersedes": "inquiry-resolution-plan/v3.2, which stays frozen and readable. v3.2 is NOT withdrawn: it is the gold the wp4-shadow run and the whole WP-3.1 diagnosis were scored against, and a superseded version an evidence row still points at must remain.",
+ "change_from_v3_2": "SHAPE ONLY — no row was re-labelled and no adjudication was needed. A goal now DECLARES closing_authority and a step carries no role. build.py asserts the change is lossless in BOTH directions: forward, closing_authority is the single authority among the v3.2 CLOSES steps (v3.2's own build already asserted there is exactly one); backward, the CLOSES set is recomputed as 'every step whose capability belongs to closing_authority' and compared index by index with v3.2's — 72 of 72 match, so no fact is lost. What role carried beyond the ending was PRECONDITION vs CONTEXT, and no contract rule reads that distinction once the closer is named: the procedure rule asks whether the ENTITY.ORDER read is PRESENT, not where it stands. Capability, scope, fields, customer inputs, v2_type, status and expected_terminal are carried through untouched and asserted equal.",
+ "why": "WP-3.1. Under v3 the closer was derived from step roles and step order, which made the last step written the closer; the 67-call shadow's five wrong-closer goals all have the required authority present and demoted. The gold always knew who closes — every one of these 72 rows has exactly one closing authority — so this version changes where that fact is written, not what it says. See docs/inquiry_architecture_v3_wp31.md §5 and §6.",
+ "vocabulary": "contracts/inquiry-authority/v1/vocabulary.json",
+ "schema": "contracts/inquiry-resolution-plan/v3.3/schema.json",
+ "label_policy": {
+  "author": "designer; v3.1's rows and adjudications, adopted by the product owner on 2026-09-20 (DEV/CALIBRATION — never a holdout)",
+  "unit": "a RESOLUTION GOAL is one thing the customer needs resolved. The evaluation question is whether every goal was planned and RESOLVED BY THE RIGHT AUTHORITY, not whether the message was cut into the same pieces: a planner may split one goal into several atomic needs (tools/inquiry-need-eval/goals.mjs scores many-to-one), and may not merge two goals into one need.",
+  "closing_authority": "the one authority that resolves the goal. Several capabilities of that SAME authority may resolve it together, which 4 of these 72 rows do (KNOWLEDGE.CATALOGUE with KNOWLEDGE.PRODUCT). A fallback to the seller is not an authority — it is a resolution outcome the runtime records.",
+  "steps": "the capabilities the resolution requires, in execution order. Order expresses execution order and nothing else: reordering a goal's steps cannot change what resolves it.",
+  "expected_terminal": "where the goal ends once every system step the CURRENT registry offers has run on snapshot S0's knowledge — unchanged from v3.1."
+ },
+ "distribution": {
+  "closing_authority": {
+   "KNOWLEDGE": 57,
+   "PROCEDURE": 7,
+   "ENTITY_STATE": 5,
+   "SELLER": 3
+  },
+  "goals_resolved_by_two_capabilities_of_one_authority": 4
+ },
+ "scorer_limitation": {
+  "goals_indistinguishable": 4,
+  "cases": [
+   "R:77a91fab (n1, n2)",
+   "R:f403e606 (n1, n2)"
+  ],
+  "why": "these goals name the same capabilities and ask for the same customer inputs, so a scorer that reads only a plan cannot tell which predicted need answers which. Coverage across them is a claim about COUNT, not identity. Carried forward from v3.2 unchanged and still not adjudicated."
+ },
+ "holds": "real inquiry id prefixes and the designer's plan labels; no customer or seller text",
+ "storage": {
+  "canonical": "eval-store:inquiry-resolution-plan/v3.3",
+  "builder": "build.py (stored beside the gold)"
+ }
+}

@@ -36,15 +36,37 @@ const byCase = (rows, k = 'q') => rows.reduce((m, r) => m.set(r[k], [...(m.get(r
 const set = (xs) => new Set(xs.filter((x) => x !== undefined && x !== null));
 const sorted = (s) => [...s].sort();
 
+/**
+ * Who resolves this need, and how we know.
+ *
+ * WP-3.1 onwards a need DECLARES `closing_authority`, so there is one answer and it cannot be two. Older gold and
+ * older recorded runs said it with step roles, and this scorer still reads them — the WP-2 comparison in
+ * docs/inquiry_architecture_v3_wp31.md §6 depends on scoring both representations with one scorer. `declared` says
+ * which representation was read, and `ambiguous` can only ever be true of the older one: a plan that marked two
+ * different authorities CLOSES offered two endings and said nothing about which was the answer.
+ */
+function closingOf(row, ix) {
+  if (row.closing_authority) {
+    return { closingAuthorities: new Set([row.closing_authority]), declared: true, ambiguous: false };
+  }
+  const closers = set((row.steps ?? []).filter((s) => s.role === 'CLOSES').map((s) => ix.get(s.capability)));
+  return { closingAuthorities: closers, declared: false, ambiguous: closers.size > 1 };
+}
+
 /** Everything about one side of the comparison that the matcher is allowed to look at. */
-export function facts(steps, ix) {
-  const acting = steps.filter((s) => s.role !== 'CONTEXT');
+export function facts(row, ix) {
+  const steps = row.steps ?? [];
+  const { closingAuthorities, declared, ambiguous } = closingOf(row, ix);
   return {
     capabilities: set(steps.map((s) => s.capability)),
-    closingCapabilities: set(steps.filter((s) => s.role === 'CLOSES').map((s) => s.capability)),
-    closingAuthorities: set(steps.filter((s) => s.role === 'CLOSES').map((s) => ix.get(s.capability))),
+    closingCapabilities: set(steps.filter((s) => closingAuthorities.has(ix.get(s.capability)))
+      .map((s) => s.capability)),
+    closingAuthorities,
+    declared,
+    ambiguous,
     authorities: set(steps.map((s) => ix.get(s.capability))),
-    sequence: acting.map((s) => `${s.capability}/${s.role}`).join('>'),
+    // execution order. Under WP-3.1 a step has no role, so the sequence is the capabilities in the order written.
+    sequence: steps.map((s) => (s.role ? `${s.capability}/${s.role}` : s.capability)).join('>'),
     entitySteps: steps.filter((s) => Array.isArray(s.fields)),
   };
 }
@@ -139,7 +161,7 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
   for (const [q, rows] of goldByCase) {
     out.cases++;
     out.goals += rows.length;
-    const goals = rows.map((r) => ({ ...facts(r.steps, ix), row: r }));
+    const goals = rows.map((r) => ({ ...facts(r, ix), row: r }));
     // goals this scorer provably cannot tell apart: same capability multiset, same asked inputs
     const signature = (g) => sorted(g.capabilities).join('+') + '|' + sorted(new Set(g.row.customer_inputs ?? [])).join('+');
     const seen = new Map();
@@ -158,7 +180,7 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
       continue;
     }
     out.answered_cases++;
-    const needs = pred.needs.map((n) => ({ ...facts(n.steps ?? [], ix), inputs: set(n.customer_inputs ?? []), raw: n }));
+    const needs = pred.needs.map((n) => ({ ...facts(n, ix), inputs: set(n.customer_inputs ?? []), raw: n }));
     const { assignment, buckets } = assign(needs, goals);
     out.planner_only_extra_needs += assignment.filter((a) => a === -1).length;
     // A need the assignment could not place, whose ending is the seller. It cannot show up as a demoted authority
@@ -185,7 +207,7 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
         // about which is the answer; a goal SPLIT across needs legitimately has a different ending in each, which is
         // what split-tolerance means. The v3 contract makes the first inexpressible — so this counter is 0 on any v3
         // run by construction, and it is kept because it is the whole of the WP-2 overestimate (WP-3.1 §6).
-        const ambiguous = mine.some((n) => n.closingAuthorities.size > 1);
+        const ambiguous = mine.some((n) => n.ambiguous);
         const closedBy = sorted(new Set(mine.flatMap((n) => [...n.closingAuthorities])));
         const demoted = [...g.closingAuthorities].every((a) => anywhere.has(a));
         if (ambiguous) {

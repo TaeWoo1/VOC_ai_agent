@@ -12,22 +12,31 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Reads a planner answer strictly (Inquiry v3 WP-2, per-capability shapes in WP-3). <b>One unknown token fails the whole
- * plan</b> — never a dropped step or a dropped need: a silently dropped step is an authority the runtime then never asks
- * for, which is the class of failure the v2.1 audit found in the judge's verdict set.
+ * Reads a planner answer strictly (Inquiry v3 WP-2; per-capability shapes in WP-3; the declared ending in WP-3.1).
+ * <b>One unknown token fails the whole plan</b> — never a dropped step or a dropped need: a silently dropped step is an
+ * authority the runtime then never asks for, which is the class of failure the v2.1 audit found in the judge's verdict
+ * set.
  *
  * <p>Failures use the same closed words as the rest of this capability:
  *
  * <ul>
  *   <li>{@code EMPTY} / {@code UNPARSEABLE} — nothing came back, or it was not the shape of a plan at all.</li>
- *   <li>{@code PLAN_SET} — a token this system does not know (a capability, field, role, scope or input outside the
- *       registry vocabulary).</li>
+ *   <li>{@code PLAN_SET} — a token this system does not know (a capability, field, scope, closing authority or input
+ *       outside the registry vocabulary).</li>
  *   <li>{@code PLAN_SHAPE} — <b>known tokens in a combination that cannot exist</b>: fields on a knowledge step, an
- *       entity step that reads nothing, a catalogue scope on an org step. Under the WP-3 strict schema a conforming
- *       vendor cannot produce one, so this word is how a non-conforming answer names itself instead of arriving as a
- *       vaguer {@code UNPARSEABLE}. It is kept separate precisely so that "the schema did not hold" is legible in a run
- *       artifact rather than inferred.</li>
+ *       entity step that reads nothing, a catalogue scope on an org step, <b>a step carrying a {@code role}</b>. Under
+ *       the strict schema a conforming vendor cannot produce one, so this word is how a non-conforming answer names
+ *       itself instead of arriving as a vaguer {@code UNPARSEABLE}. It is kept separate precisely so that "the schema
+ *       did not hold" is legible in a run artifact rather than inferred.</li>
  * </ul>
+ *
+ * <p><b>WP-3.1: {@code role} is a retired slot.</b> An answer still carrying one was written against the v3 contract,
+ * where a step's role decided which authority ended the need. Reading it as a WP-3.1 plan would mean silently
+ * discarding the model's own statement about the ending while accepting the rest — so it is refused, exactly as
+ * {@code effect} and {@code depends_on} were when they left in WP-3.
+ *
+ * <p><b>A need with no {@code closing_authority} is UNPARSEABLE</b>, not a plan with a missing field. The ending is the
+ * one thing this contract exists to have stated; a plan that omits it is a plan about nothing in particular.
  */
 public final class ResolutionPlanParser {
 
@@ -68,6 +77,14 @@ public final class ResolutionPlanParser {
             if (id.isEmpty() || ask.isEmpty()) {
                 return Parsed.failed("UNPARSEABLE");
             }
+            // WP-3.1: the ending is read, never inferred. A plan that does not state one is not a plan.
+            if (!n.has("closing_authority")) {
+                return Parsed.failed("UNPARSEABLE");
+            }
+            Authority closingAuthority = enumOf(Authority.class, n.path("closing_authority").asText(null));
+            if (closingAuthority == null) {
+                return Parsed.failed("PLAN_SET");
+            }
             if (ask.length() > ResolutionPlannerPrompt.MAX_ASK) {
                 ask = ask.substring(0, ResolutionPlannerPrompt.MAX_ASK);
             }
@@ -91,7 +108,7 @@ public final class ResolutionPlanParser {
                 }
                 inputs.add(input);
             }
-            out.add(new ResolutionPlan.Need(id, ask, parsedSteps, inputs));
+            out.add(new ResolutionPlan.Need(id, ask, closingAuthority, parsedSteps, inputs));
         }
         return new Parsed(new ResolutionPlan(out), null);
     }
@@ -99,8 +116,7 @@ public final class ResolutionPlanParser {
     /** @return a {@link ResolutionPlan.Step}, or a failure word as a String. */
     private static Object step(JsonNode s) {
         CapabilityId capability = CapabilityId.ofWire(s.path("capability").asText(null));
-        ResolutionPlan.Role role = enumOf(ResolutionPlan.Role.class, s.path("role").asText(null));
-        if (capability == null || role == null) {
+        if (capability == null) {
             return "PLAN_SET";
         }
         boolean entity = capability.authority() == Authority.ENTITY_STATE;
@@ -115,7 +131,7 @@ public final class ResolutionPlanParser {
         // Retired in WP-3: effect belongs to the registry, and step order is the dependency. An answer still carrying
         // one of these was written against the v2 contract, and reading it as a v3 plan would silently accept a claim
         // this schema no longer makes.
-        if (s.has("effect") || s.has("depends_on")) {
+        if (s.has("effect") || s.has("depends_on") || s.has("role")) {
             return "PLAN_SHAPE";
         }
         try {
@@ -128,17 +144,17 @@ public final class ResolutionPlanParser {
                     }
                     fields.add(field);
                 }
-                return new ResolutionPlan.Entity(capability, role, fields);
+                return new ResolutionPlan.Entity(capability, fields);
             }
             return switch (capability.authority()) {
                 case KNOWLEDGE -> {
                     ResolutionPlan.Scope scope = choosesScope
                             ? enumOf(ResolutionPlan.Scope.class, s.path("scope").asText(null))
                             : ResolutionPlan.only(capability);
-                    yield scope == null ? "PLAN_SET" : new ResolutionPlan.Knowledge(capability, role, scope);
+                    yield scope == null ? "PLAN_SET" : new ResolutionPlan.Knowledge(capability, scope);
                 }
-                case PROCEDURE -> new ResolutionPlan.Procedure(role);
-                case SELLER -> new ResolutionPlan.Seller(role);
+                case PROCEDURE -> new ResolutionPlan.Procedure();
+                case SELLER -> new ResolutionPlan.Seller();
                 default -> "PLAN_SET";
             };
         } catch (IllegalArgumentException e) {
@@ -153,11 +169,13 @@ public final class ResolutionPlanParser {
         ArrayNode needs = root.putArray("needs");
         for (ResolutionPlan.Need n : plan.needs()) {
             ObjectNode need = needs.addObject();
-            need.put("id", n.id()).put("ask", n.ask());
+            // closing_authority stands before steps, in the plan and in the schema: the ending is the first thing
+            // the need states, not the last thing it arrives at.
+            need.put("id", n.id()).put("ask", n.ask()).put("closing_authority", n.closingAuthority().name());
             ArrayNode steps = need.putArray("steps");
             for (ResolutionPlan.Step s : n.steps()) {
                 ObjectNode step = steps.addObject();
-                step.put("capability", s.capability().wire()).put("role", s.role().name());
+                step.put("capability", s.capability().wire());
                 if (ResolutionPlan.SCOPES.get(s.capability()).size() > 1) {
                     step.put("scope", s.scope().name());
                 }

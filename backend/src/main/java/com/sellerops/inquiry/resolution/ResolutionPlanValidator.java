@@ -9,12 +9,12 @@ import com.sellerops.inquiry.authority.EntityField;
 import com.sellerops.inquiry.authority.GapReason;
 import java.util.ArrayList;
 import java.util.EnumSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * <b>The Plan Validator</b> (Inquiry v3 WP-2, narrowed in WP-3) — code, not model. Two jobs, kept apart:
+ * <b>The Plan Validator</b> (Inquiry v3 WP-2, narrowed in WP-3, closing semantics made explicit in WP-3.1) — code, not
+ * model. Two jobs, kept apart:
  *
  * <ol>
  *   <li><b>Reject a plan that breaks the contract</b> ({@link Violation}). Any violation makes the whole plan invalid —
@@ -22,17 +22,22 @@ import java.util.Set;
  *   <li><b>Record what cannot act here</b> ({@link StepAvailability}) — for every step of a valid plan, against the
  *       registry snapshot. <b>It never changes the plan</b>: a step the need semantically requires stays in it even when
  *       its capability is not available; it becomes a capability gap with a reason, and no other authority is put in its
- *       place.</li>
+ *       place. In particular {@link ResolutionPlan.Need#closingAuthority()} is never rewritten — an unresolvable
+ *       resolution is recorded as unresolvable, never as a different resolution.</li>
  * </ol>
  *
- * <p><b>WP-3 removed seven codes and added two.</b> The seven — fields on a non-entity step, an entity step without
- * fields, a field of another capability, a scope the capability is never about, a procedure without an effect, an effect
- * on a non-procedure, a dependency pointing at itself — are gone because {@link ResolutionPlan.Step} is now a sealed
- * union whose constructors cannot build them. A rule that describes an object that cannot exist is not a guard; it is a
- * comment that runs.
+ * <p><b>WP-3 removed seven codes</b> — fields on a non-entity step, an entity step without fields, a field of another
+ * capability, a scope the capability is never about, a procedure without an effect, an effect on a non-procedure, a
+ * dependency pointing at itself — because {@link ResolutionPlan.Step} became a sealed union whose constructors cannot
+ * build them. A rule that describes an object that cannot exist is not a guard; it is a comment that runs.
  *
- * <p>The two added are the ones no shape can express, because they are about the relationship <i>between</i> steps:
- * {@link Code#MULTIPLE_CLOSING_AUTHORITIES} and {@link Code#PRECONDITION_AFTER_CLOSER}.
+ * <p><b>WP-3.1 removed three more, for the same reason.</b> {@code NO_CLOSING_STEP},
+ * {@code MULTIPLE_CLOSING_AUTHORITIES} and {@code PRECONDITION_AFTER_CLOSER} were all consequences of the closer being
+ * something a reader worked out from step roles and step order. With {@link ResolutionPlan.Need#closingAuthority()}
+ * declared as a single enum value, "no ending" and "two endings" are not writable at all, and "a precondition after its
+ * closer" is not a statement the shape can make. What replaces them is one rule that could not exist before:
+ * {@link Code#CLOSING_AUTHORITY_UNSUPPORTED} — a need must require at least one capability of the authority it says
+ * resolves it.
  *
  * <p>Nothing here reads a sentence.
  */
@@ -46,35 +51,24 @@ public final class ResolutionPlanValidator {
 
     public enum Code {
         NO_NEEDS, TOO_MANY_NEEDS, NEED_ID_ORDER, EMPTY_ASK,
-        NO_STEPS, TOO_MANY_STEPS, NO_CLOSING_STEP, DUPLICATE_STEP,
+        NO_STEPS, TOO_MANY_STEPS, DUPLICATE_STEP,
         /**
-         * Two <b>different authorities</b> both said to close one need — "knowledge will answer, and if not, the seller".
+         * The need says an authority resolves it and requires no capability of that authority (WP-3.1).
          *
-         * <p>This is the WP-3 separation of <b>seller authority</b> from <b>operational handoff</b>, and it is a rule
-         * about closers rather than a ban on any pair of capabilities. A need is one question; if two kinds of answer
-         * could each end it then nothing in the plan says which one IS the answer, and at runtime whichever resolves
-         * first wins — which is the {@code 4181864b} shape (a company shipping policy standing in for an order's state)
-         * with a different pair of authorities.
-         *
-         * <p><b>A genuine multi-authority plan is still expressible</b>, because it does not have two closers: read the
-         * policy as a PRECONDITION, then let the SELLER decide the exception that closes the need. What is refused is the
-         * plan that offers two endings.
-         *
-         * <p>Fallbacks — no knowledge, no capability, low model confidence, "hand it to the seller" — are not
-         * authorities and do not belong in a plan at all: they are resolution outcomes
-         * ({@link com.sellerops.inquiry.authority.ResolutionState#NEEDS_SELLER},
-         * {@link com.sellerops.inquiry.authority.ResolutionState#CAPABILITY_GAP}) that the runtime records after the plan
-         * has run. Two steps of the SAME authority may both close: the frozen gold does this four times, where a
-         * listing's options and the product's spec together answer one question.
+         * <p>This is the one relationship {@code closing_authority} does not make structural on its own: the field is
+         * a closed enum, so it cannot name an authority that does not exist, but nothing in the shape forces the step
+         * list to contain the thing that would do the resolving. "The seller's judgment resolves this" with no
+         * {@code SELLER} step, or "a procedure resolves this" with nothing to run, is a plan naming an ending it never
+         * asked for.
          */
-        MULTIPLE_CLOSING_AUTHORITIES,
+        CLOSING_AUTHORITY_UNSUPPORTED,
         /**
-         * Order is the dependency in v3: a step that must be read before a closer is written before it. A PRECONDITION
-         * standing after the step it enables contradicts the sequence the list itself states.
+         * A procedure resolves the need and the plan does not read the order it acts on (WP-3.1 restatement of
+         * {@code PROCEDURE_WITHOUT_ORDER_PRECONDITION}). The rule is unchanged; only the word "precondition" left,
+         * because roles did. Order still expresses order — the read is written before the procedure — but what makes
+         * this a violation is the read's <b>absence</b>, never its position.
          */
-        PRECONDITION_AFTER_CLOSER,
-        /** A procedure that acts on an order must read that order first. */
-        PROCEDURE_WITHOUT_ORDER_PRECONDITION,
+        PROCEDURE_WITHOUT_ORDER_READ,
         /** Identity asked of the customer — refused on every surface in v3.0 (public Q&A by product-owner decision). */
         IDENTITY_INPUT,
         /** The v2 bridge's placeholder; a plan names the input. */
@@ -136,45 +130,34 @@ public final class ResolutionPlanValidator {
         if (steps.size() > MAX_STEPS) {
             v.add(new Violation(id, null, Code.TOO_MANY_STEPS));
         }
-        Set<Authority> closing = closingAuthorities(need);
-        if (closing.isEmpty()) {
-            v.add(new Violation(id, null, Code.NO_CLOSING_STEP));
+        // the declared resolution must be one the plan actually asked for
+        if (need.closingSteps().isEmpty()) {
+            v.add(new Violation(id, null, Code.CLOSING_AUTHORITY_UNSUPPORTED));
         }
-        if (closing.size() > 1) {
-            v.add(new Violation(id, null, Code.MULTIPLE_CLOSING_AUTHORITIES));
-        }
-        int lastCloser = -1;
-        for (int k = 0; k < steps.size(); k++) {
-            if (steps.get(k).role() == ResolutionPlan.Role.CLOSES) {
-                lastCloser = k;
-            }
+        // a procedure that acts on an order must read that order — an absence rule, not a position rule
+        if (need.closingAuthority() == Authority.PROCEDURE
+                && steps.stream().noneMatch(s -> s.capability() == CapabilityId.ENTITY_ORDER)) {
+            v.add(new Violation(id, null, Code.PROCEDURE_WITHOUT_ORDER_READ));
         }
         List<String> seen = new ArrayList<>();
         for (int k = 0; k < steps.size(); k++) {
             ResolutionPlan.Step s = steps.get(k);
-            String sig = s.capability() + "/" + s.scope() + "/" + s.role();
+            String sig = s.capability() + "/" + s.scope();
             if (seen.contains(sig)) {
                 v.add(new Violation(id, k, Code.DUPLICATE_STEP));
             }
             seen.add(sig);
-            if (s.role() == ResolutionPlan.Role.PRECONDITION && lastCloser >= 0 && k > lastCloser) {
-                v.add(new Violation(id, k, Code.PRECONDITION_AFTER_CLOSER));
-            }
-            if (s.capability().authority() == Authority.PROCEDURE && s.role() == ResolutionPlan.Role.CLOSES
-                    && steps.stream().noneMatch(p -> p.capability() == CapabilityId.ENTITY_ORDER
-                    && p.role() == ResolutionPlan.Role.PRECONDITION)) {
-                v.add(new Violation(id, k, Code.PROCEDURE_WITHOUT_ORDER_PRECONDITION));
-            }
         }
     }
 
-    /** The distinct authorities a need says may end it. */
-    public static Set<Authority> closingAuthorities(ResolutionPlan.Need need) {
-        Set<Authority> out = new LinkedHashSet<>();
+    /**
+     * The distinct authorities a need requires. <b>Not "who closes"</b> — that is
+     * {@link ResolutionPlan.Need#closingAuthority()}, which is declared and never derived.
+     */
+    public static Set<Authority> requiredAuthorities(ResolutionPlan.Need need) {
+        Set<Authority> out = EnumSet.noneOf(Authority.class);
         for (ResolutionPlan.Step s : need.steps()) {
-            if (s.role() == ResolutionPlan.Role.CLOSES) {
-                out.add(s.capability().authority());
-            }
+            out.add(s.capability().authority());
         }
         return out;
     }
@@ -208,6 +191,12 @@ public final class ResolutionPlanValidator {
         return List.copyOf(out);
     }
 
+    /**
+     * <b>Unchanged in WP-3.1, deliberately.</b> The all-or-nothing last clause — one unreadable field marks the whole
+     * step a gap — was measured in WP-3.1 §2, and the recommendation there is that the resolver, not the plan's field
+     * list, should decide the minimum a need requires. That is a resolver change and it is not made here: this package
+     * moves closing semantics and nothing else, so availability figures stay comparable across it.
+     */
     static GapReason gapOf(ResolutionPlan.Step s, CapabilitySnapshot snapshot) {
         if (snapshot == null) {
             return GapReason.UNAVAILABLE;

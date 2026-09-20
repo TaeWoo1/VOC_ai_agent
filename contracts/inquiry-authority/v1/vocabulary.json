@@ -163,6 +163,13 @@
   "PRECONDITION",
   "CONTEXT"
  ],
+ "step_roles_retired": "WP-3.1: a step no longer carries a role. The closer was something a reader worked out from roles and order, which made the last step written the closer; a need now declares closing_authority. step_roles is kept because plan gold v3, v3.1 and v3.2 are frozen in the shape that uses it, and a superseded dataset must keep a vocabulary that defines its tokens. No code reads it.",
+ "closing_authorities": [
+  "KNOWLEDGE",
+  "ENTITY_STATE",
+  "PROCEDURE",
+  "SELLER"
+ ],
  "step_scopes": [
   "THIS_LISTING",
   "SELLER_CATALOGUE",
@@ -200,7 +207,7 @@
   "BOUNDED_WORKFLOW"
  ],
  "effect_ownership": "WP-3: what acting on a capability does to the world outside this system is REGISTRY metadata, declared once per capability ('effect' above), and is not a property of a planned step. Measured reason: in the 201-call shadow the planner wrote BOUNDED_WORKFLOW 38 times against EXTERNAL_STATE_CHANGE 4, while all 7 procedure steps of the frozen gold say EXTERNAL_STATE_CHANGE and nothing downstream separated the two. BOUNDED_WORKFLOW has no declaring capability in v3.0 and AuthorityVocabularyContractTest pins that count at zero.",
- "procedure_rule": "PROCEDURE only for an external state change or a bounded business workflow; when reading entity state resolves the request, the plan ends at ENTITY_STATE (product-owner decision 2026-09-20). Upheld in WP-3 by the capability's own declared effect plus PROCEDURE_WITHOUT_ORDER_PRECONDITION, not by a planner-supplied token.",
+ "procedure_rule": "PROCEDURE only for an external state change or a bounded business workflow; when reading entity state resolves the request, the plan ends at ENTITY_STATE (product-owner decision 2026-09-20). Upheld in WP-3 by the capability's own declared effect plus PROCEDURE_WITHOUT_ORDER_PRECONDITION; in WP-3.1 the same rule is PROCEDURE_WITHOUT_ORDER_READ — a procedure resolution must REQUIRE the ENTITY.ORDER read, which is an absence rule rather than a position rule.",
  "v2_bridge": {
   "PRODUCT_SPEC": "KNOWLEDGE.PRODUCT",
   "PRODUCT_USAGE": "KNOWLEDGE.PRODUCT",
@@ -211,6 +218,6 @@
   "ORDER_ACTION": "PROCEDURE.ORDER_ACTION",
   "SELLER_DECISION": "SELLER"
  },
- "closing_rule": "WP-3: exactly ONE authority closes a need. Two steps of the same authority may both CLOSE (the frozen gold does this 4 times); two different authorities closing means the plan states two endings and lets the runtime pick — the 4181864b shape. A genuine multi-authority need is written as PRECONDITION then CLOSES. A fallback to the seller is not an authority: it is a resolution outcome (NEEDS_SELLER / CAPABILITY_GAP).",
- "sequence_rule": "WP-3: step order is the dependency. The explicit depends_on index left the wire — it was used on exactly the 7 procedure steps of the gold and every one pointed at the ENTITY.ORDER read the registry already requires, so it carried no information a reader did not have."
+ "closing_rule": "WP-3.1: a need DECLARES the single authority that resolves it (closing_authority). The plan must require at least one capability of that authority; several capabilities of the SAME authority may resolve it together, which the frozen gold does 4 times. Step order is execution order and carries no closing meaning — reordering a need's steps cannot change what resolves it. A fallback to the seller is not an authority: it is a resolution outcome (NEEDS_SELLER / CAPABILITY_GAP) the runtime records after the plan has run. Superseded: the WP-3 rule, where exactly one authority CLOSED and a genuine multi-authority need was written PRECONDITION then CLOSES.",
+ "sequence_rule": "WP-3: step order is the dependency. The explicit depends_on index left the wire — it was used on exactly the 7 procedure steps of the gold and every one pointed at the ENTITY.ORDER read the registry already requires, so it carried no information a reader did not have. WP-3.1: order still means execution order and nothing else; it no longer identifies the closer."
 }

@@ -1,6 +1,7 @@
 # Inquiry Architecture v3 — WP-3.1: Closing Authority Semantics & Replay Diagnostics
 
-> **Status: diagnosis complete · contract candidate chosen (C) · not yet built · planner still NOT frozen.**
+> **Status: diagnosis complete · Candidate C BUILT and offline-validated · no model has seen it · planner still NOT
+> frozen.**
 > **Model calls 0.** Marketplace 0 · DB writes 0 · migrations 0 · production Cases 0 · external writes 0.
 > Everything below comes from the raw answers WP-2 and WP-4 already bought, re-read offline.
 >
@@ -10,6 +11,9 @@
 
 Predecessors: [WP-1/2](inquiry_architecture_v3_wp2.md) · [WP-3](inquiry_architecture_v3_wp3.md) ·
 [WP-4](inquiry_architecture_v3_wp4.md).
+
+§0–§11 are the diagnosis, written before anything was changed. **§12 onwards is Candidate C as built** — the contract,
+what it makes impossible, what it does not, and the 8-call smoke that has not been run.
 
 ---
 
@@ -578,3 +582,221 @@ regression, and a bar — instead of a prompt edit with a hope.
 
 67 × 3 · prompt micro-tuning · a model change · a reasoning-effort change · a new gold version · any change
 to `gapOf` inside this package · customer-input tuning · WP-4 E2E.
+
+---
+---
+
+# Part II — Candidate C, built
+
+> **Model calls 0 in this part too.** Marketplace 0 · DB writes 0 · migrations 0 · production Cases 0.
+> Contract, validator, schema, gold, scorer, fixtures and tests. No model has been shown `resolution-planner/v4`.
+
+## 12. The contract
+
+```
+need := { id, ask, closing_authority, steps[], customer_inputs[] }
+step := { capability, scope?, fields? }          // no role
+closing_authority ∈ { KNOWLEDGE, ENTITY_STATE, PROCEDURE, SELLER }
+```
+
+`ResolutionPlan.Need.closingAuthority()` is the **single source of truth** for who resolves a goal. The step-level
+`CLOSES` / `PRECONDITION` / `CONTEXT` role is **gone** — not deprecated, not tolerated: `ResolutionPlan.Role` does not
+exist, so nothing can read one, and the parser refuses an answer that carries one (`PLAN_SHAPE`, the same word
+`effect` and `depends_on` earned when they left in WP-3).
+
+**There is deliberately no second place the ending is written.** A goal-level declaration beside a step-level one is
+two truths that can disagree, and the disagreement would have to be settled by a rule — which is precisely how
+position became meaning the first time.
+
+**Which steps close is derived, and cannot be reordered into a different answer.** `Need.closingSteps()` returns the
+steps whose capability belongs to the declared authority. Several may qualify, and that is the point: §3.2 found that
+3 of the 4 gold goals needing **two knowledge capabilities together** were WP-4 failures, and there was no way to say
+"both of these answer it". Now there is, in one field.
+
+**Order still expresses order.** A step's place is its place in the execution sequence — an order read stands before
+the procedure that changes that order. It expresses nothing else.
+
+**`closing_authority` is declared before `steps`**, in the record, in the serialiser and in the vendor schema. Strict
+Structured Outputs generates properties in declaration order, so a left-to-right decoder commits to the ending before
+it writes what the ending requires — the opposite of the order that let the last step written become the closer. That
+ordering is a **design hypothesis the smoke tests**; the structural part (position carries no meaning) holds either way
+and is proven by test, not by argument.
+
+### 12.1 What the model is now told
+
+`resolution-planner/v4`. Two v3 sentences left — "exactly one authority closes a need" and "a PRECONDITION comes
+before the CLOSES step it enables", the pair that made the last step the closer — and four arrived:
+
+- decide `closing_authority` **first**; which step closes is not the order or the position of the steps;
+- name at least one capability of that authority, and **name both when two capabilities of one authority together make
+  the answer**;
+- `SELLER` is the ending only when a new seller judgment **is itself the answer** — not when knowledge is thin, a
+  connector is missing, or the model is unsure, because those are recorded by the system afterwards;
+- steps are in execution order, and that is all order means.
+
+The payload floor is **unchanged to the byte**: `user()` is untouched, and `ResolutionPlannerContractTest.payloadFloor`
+still asserts that the same message under a deployment that can do none of it produces the identical payload.
+
+## 13. Validator invariants
+
+| | |
+|---|---|
+| **removed** | `NO_CLOSING_STEP`, `MULTIPLE_CLOSING_AUTHORITIES`, `PRECONDITION_AFTER_CLOSER` |
+| **added** | `CLOSING_AUTHORITY_UNSUPPORTED` — a need must require at least one capability of the authority it says resolves it |
+| **restated** | `PROCEDURE_WITHOUT_ORDER_PRECONDITION` → `PROCEDURE_WITHOUT_ORDER_READ`. Same rule; the word "precondition" left because roles did. What makes it a violation is the read's **absence**, never its position — so the two steps in either order are both valid, and a test asserts exactly that |
+| **unchanged** | `NO_NEEDS`, `TOO_MANY_NEEDS`, `NEED_ID_ORDER`, `EMPTY_ASK`, `NO_STEPS`, `TOO_MANY_STEPS`, `DUPLICATE_STEP`, `IDENTITY_INPUT`, `UNNAMED_INPUT`, `DUPLICATE_INPUT` |
+
+The three removals are removals for the WP-3 reason: **a rule describing an object that cannot exist is not a guard.**
+`closing_authority` is one enum value, so "no ending" and "two endings" are not writable, and "a precondition after its
+closer" is not a sentence the shape can form.
+
+**Availability is untouched.** An unavailable capability does not change `closing_authority`; it becomes a recorded gap
+and no other authority is put in its place. `gapOf` — including the all-or-nothing field clause §2 recommends
+changing — is **byte-identical**, so availability figures stay comparable across this package. That is a resolver
+decision and this package moves closing semantics and nothing else.
+
+**Registry-bound, and nothing domain-specific.** `closing_authority` is `Authority`, the four values the registry has
+had since WP-1. No shipping rule, no refund rule, no product rule entered the contract.
+
+## 14. Gold v3.3 — a re-expression, not a re-labelling
+
+`eval-store:inquiry-resolution-plan/v3.3`, `verify → ok`. The same 72 goals. `build.py` derives it from frozen v3.2 and
+asserts the change is **lossless in both directions**:
+
+- **forward** — `closing_authority` is the single authority among v3.2's `CLOSES` steps (v3.2's own build already
+  asserted there is exactly one, and this asserts it again rather than trusting it);
+- **backward** — the `CLOSES` set is recomputed as "every step whose capability belongs to `closing_authority`" and
+  compared index by index with v3.2's. **72 of 72 match.** No fact is lost.
+
+Capability, scope, fields, customer inputs, `v2_type`, `status` and `expected_terminal` are carried through and
+asserted equal. Role is dropped, and what it carried beyond the ending — `PRECONDITION` vs `CONTEXT` — is read by no
+contract rule once the closer is named.
+
+```
+KNOWLEDGE 57 · PROCEDURE 7 · ENTITY_STATE 5 · SELLER 3        (72, one ending each)
+goals resolved by two capabilities of one authority: 4
+```
+
+v3.2 stays frozen and readable: it is the gold the `wp4-shadow` run and the whole of Part I were scored against.
+**Evidence for the re-expression being lossless in practice as well as in the builder:** every figure in §2.3 and §2.5
+reproduces byte-identically when the same recorded run is scored against v3.3 instead of v3.2.
+
+## 15. Offline replay — what Candidate C would and would not have changed
+
+**Candidate C changes no old model answer, and nothing here pretends otherwise.** The WP-2 and WP-4 raw answers were
+written against older contracts; they are read through `contract.mjs`'s projection, which derives the ending from the
+roles the model actually wrote and **refuses to choose when the model wrote two** (`closing_authority: null`, and the
+result does not parse as a WP-3.1 plan — a test pins this, because a projection that picked one would be inventing a
+decision the model never made).
+
+**Made structurally impossible.** Counted on the recorded runs:
+
+| shape | occurrences | under Candidate C |
+|---|---|---|
+| a need naming **two endings** | **61 of 361** WP-2 needs (16.9%) | unwritable — one enum value |
+| a need naming **no ending** | **2** WP-4 needs (`NO_CLOSING_STEP`) | unwritable — the field is required |
+| a precondition after its closer | **1** WP-4 need | unsayable — there are no roles to order |
+
+So **3 of the 5 contract violations in the 67-call shadow become inexpressible.** The other two —
+`PROCEDURE_WITHOUT_ORDER_READ` and `DUPLICATE_STEP` — remain rules, because they are about what a plan contains rather
+than about shape.
+
+**Still the model's choice — all five wrong closers.** Projected into the WP-3.1 representation, the taxonomy is
+identical to §3: `CORRECT_CLOSER` 40 · `CORRECT_CLOSER_VIA_SPLIT` 20 · `A_GENUINE_MULTI_AUTHORITY` 3 ·
+`B_OPERATIONAL_FALLBACK` 3 · `WRONG_CLOSER_NON_SELLER` 2 · `NO_PLAN` 4 — **correct closer 63 of 72, unchanged.**
+
+That is the honest ceiling of this contract. Every one of the five is "the authority the gold requires is present and
+something else resolves the need", and under Candidate C that sentence becomes *"the model declared the wrong
+`closing_authority`"*. It is now **a single stated decision** instead of an accident of ordering — visible, scorable,
+and still the model's to get right. **Whether it does is exactly what the smoke buys, and nothing before the smoke may
+claim it.**
+
+**Positional interpretation is gone from the code, and a test says so.** `ResolutionPlan.Role` does not exist, so the
+Java side is compile-enforced. On the scoring side a structural test pins the count of every runtime read of the
+retired token: `goals.mjs` 1 (the legacy fallback that scores runs recorded before WP-3.1), `contract.mjs` 1 (the
+projection), `closers.mjs` 0, `availability.mjs` 0 — and the one remaining read of "the last step" is
+`seller_last_written`, the measurement that proved the mechanism (49/49, then 6/6). **A measurement of the habit is the
+opposite of obeying it**, and the count is pinned so a second read cannot appear without someone saying why.
+
+## 16. Tests
+
+| | |
+|---|---|
+| `ResolutionPlannerContractTest` | the need's properties are `id, ask, closing_authority, steps, customer_inputs` **in that order**; no branch has a `role`; the `SELLER` branch is `capability` alone; a retired `role` is `PLAN_SHAPE`; a missing ending is `UNPARSEABLE`; the vocabulary's `closing_authorities` is the `Authority` enum |
+| — **new** | `positionCarriesNoClosingMeaning`: three steps, **all six permutations**, one answer for `closingSteps()` and one validation verdict in every one of them |
+| `ResolutionPlanValidatorScenarioTest` | 25 valid · 5 refused · 13 inexpressible; `neverSubstitutes` now asserts the **declared** resolution is unchanged by a gap |
+| `goals.test.mjs` | two endings are no longer refused but **unwritable**; two capabilities of one authority resolve together; a projection **cannot choose** between two recorded endings; the v3.3 synthetic gold is a set of legal plans |
+| `wp31.test.mjs` | any order gives the same verdict through both scorers; an unavailable capability does not change the declared resolution; **the structural guard** on positional reads |
+| `mutations.test.mjs` | 19 mutations, all caught, including **"POSITION DECIDES AGAIN"** — take the closer from the last step written and the R:8989a9d0 shape starts scoring correct |
+
+The notation in the tool tests is worth stating plainly: a test still writes which step closes, because that is what
+the test means; the helpers read that, derive the declared ending, and emit roleless steps. **Every existing call site
+says what it always said, and what reaches the scorer is the shape the contract now has.**
+
+**Suites: backend 4,504 / 0 failures · tools 98 / 0.**
+
+**Tests rewritten because the contract changed**, all in the same direction — from "the role says who closes" to "the
+need says who closes". No safety assertion was weakened: identity refusal, payload floor, availability-never-substitutes
+and fail-closed parsing are asserted exactly as before, and the suite gained the permutation property and the
+structural guard. Fixture counts moved because the fixture grew (v3: 43 rows).
+
+**The v2 planner fixture is frozen, not edited.** `contracts/inquiry-planner/v3/synthetic/` is the new one; under
+WP-3.1's parser every row of v2 carries a retired slot, which is what a superseded fixture should look like. The
+retired shapes are all carried forward as X rows so nothing stopped being tested.
+
+## 17. Deferred, deliberately
+
+| | |
+|---|---|
+| **over-read / availability** | `gapOf` unchanged. §2's recommendation (resolver-owned need-minimum fields) stands and belongs to the resolver package. The finding that must not be lost: **field-level availability lets an extra readable field hide a genuinely unavailable required one** — measured on `R:7a8136b2`, pinned by a test |
+| **truncation** | the WP-3.1 fix stands: `said` retained, fail closed, never repaired, excluded from quality scoring. The four historical truncations remain permanently unexplained and no speculation is offered |
+| **customer inputs** | untouched. Metrics kept; the `OPTION` inversion (over-asked 4 times, under-asked on 3 of the 4 goals that need it) stays backlog. The reminder from §7 stands: `required_input_recall` has a denominator of **5** |
+| **the seller fallback** | still writable (`C11`). No contract can forbid it, because the legitimate and illegitimate plans are the same shape. The scorer refuses it; the smoke measures it |
+
+## 18. The 8-call targeted smoke — proposed, not run
+
+**No model call has been made and no approval is held.** The manifest below is what will be presented for a single-use
+approval in its own turn; its request fingerprints are derived offline at the pinned commit and shown with the request.
+
+| | |
+|---|---|
+| calls | **8**, hard cap 8, one per case |
+| cases | `C1` product knowledge · `C2` company policy · `C3` **two knowledge capabilities together** · `C4` entity state · `C5` entity read → procedure · `C6` policy → true seller judgment · `C7` catalogue-answerable (the R:8989a9d0 shape) · `C8` unavailable capability |
+| inputs | **synthetic only**, from `contracts/inquiry-planner/v3/synthetic/planner-scenarios.jsonl` — no customer text |
+| model | `gpt-5-2025-08-07` @ `reasoning_effort=minimal`, strict `json_schema` — **unchanged, for a controlled comparison** |
+| prompt | `resolution-planner/v4` |
+| marketplace · DB writes · external writes · production Cases · judge · draft · retrieval · migrations | **0** |
+| output | new append-only run id; raw answers stored **before** scoring |
+
+**Pass bar — all of it, or the smoke fails:**
+
+1. 8/8 answered · envelope failures 0 · parse failures 0 · contract violations 0
+2. correct `closing_authority` **8/8**
+3. `C3` resolves as `KNOWLEDGE` **naming both knowledge capabilities** — the shape 3 of 4 gold instances failed on
+4. `C5` resolves as `PROCEDURE`, not `ENTITY_STATE`, and reads the order
+5. `C6` resolves as `SELLER` — a genuine judgment is not scored as a fallback
+6. `C7` **seller fallback insertion = 0**
+7. `C8` keeps `KNOWLEDGE` and records the gap — **seller substitution = 0**
+8. forbidden identity input = 0
+
+**If it fails:** the 67 cases are not run. The failure is classified as **schema/contract** vs **closing semantics** vs
+**capability planning**, and there is no automatic prompt tweak and no retry.
+
+**If it passes:** a 67 × 1 final planner validation is proposed, as a separate manifest. **Not 67 × 3.**
+
+### 18.1 The freeze gate after the smoke
+
+Unchanged from WP-4's seven conditions, with items 1 and 7 restated on the metric that replaced authority recall:
+
+1. wrong closing authority = 0 — *replaces "wrong authority substitution", and is strictly stronger*
+2. ORDER required-authority miss = 0
+3. `procedure_for_read` = 0
+4. forbidden identity input = 0
+5. unresolved required goal = 0, or explainable as a clear annotation defect
+6. contract / schema failure = 0
+7. **correct closer ≥ 0.875** — the v3 figure; a contract that moves the ending into a declared field may not score
+   worse on the ending than the contract that inferred it
+
+**The planner is not frozen and WP-4 E2E is not proposed.** What changed in Part II is that the contract no longer
+decides the ending by accident. Whether the model decides it correctly is unmeasured, and will stay unmeasured until
+the smoke runs.

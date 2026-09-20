@@ -50,8 +50,10 @@ function roles(needs, ix) {
   const closes = new Set();
   const reads = new Set();
   for (const n of needs) {
+    n.closingAuthorities.forEach((a) => closes.add(a));
     for (const s of n.raw.steps ?? []) {
-      (s.role === 'CLOSES' ? closes : reads).add(ix.get(s.capability));
+      const a = ix.get(s.capability);
+      if (!n.closingAuthorities.has(a)) reads.add(a);
     }
   }
   return { closes, reads };
@@ -64,7 +66,7 @@ function roles(needs, ix) {
  */
 function goldAuthorityCanAct(goal, registry) {
   if (!registry) return null;
-  const caps = (goal.row.steps ?? []).filter((s) => s.role === 'CLOSES').map((s) => s.capability);
+  const caps = [...goal.closingCapabilities];
   if (!caps.length) return null;
   return caps.every((c) => registry.capabilities[c] === 'AVAILABLE');
 }
@@ -86,7 +88,7 @@ export function classify(rows, gold, { rep = 1, projected = false } = {}) {
 
   for (const [q, goalRows] of goldByCase) {
     const row = byCase.get(q);
-    const goals = goalRows.map((r) => ({ ...facts(r.steps, ix), row: r }));
+    const goals = goalRows.map((r) => ({ ...facts(r, ix), row: r }));
     out.goals += goals.length;
     let plan = row?.plan;
     if (plan && projected) plan = project(plan, cIx).plan;
@@ -97,7 +99,7 @@ export function classify(rows, gold, { rep = 1, projected = false } = {}) {
       });
       continue;
     }
-    const needs = plan.needs.map((n) => ({ ...facts(n.steps ?? [], ix), raw: n }));
+    const needs = plan.needs.map((n) => ({ ...facts(n, ix), raw: n }));
     const { assignment } = assign(needs, goals);
     // Needs the assignment could not place. A need whose only authority is SELLER shares nothing with a knowledge or
     // entity goal, so it can never be assigned to one — which means "the seller was put in the missing authority's
@@ -149,8 +151,7 @@ export function classify(rows, gold, { rep = 1, projected = false } = {}) {
 
       // Two closers ACROSS needs is a split, which this scorer tolerates by design; two closers INSIDE one need is the
       // v2 shape that names two endings, and it is what the v3 contract made inexpressible.
-      const ambiguous = mine.some((n) => new Set((n.raw.steps ?? []).filter((s) => s.role === 'CLOSES')
-        .map((s) => ix.get(s.capability))).size > 1);
+      const ambiguous = mine.some((n) => n.ambiguous);
 
       let kind;
       if (ambiguous) {

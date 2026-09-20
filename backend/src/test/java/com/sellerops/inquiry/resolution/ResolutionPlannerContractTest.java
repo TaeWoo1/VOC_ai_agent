@@ -28,6 +28,10 @@ import org.junit.jupiter.api.Test;
  * <p><b>WP-3:</b> the step schema is a union of one branch per capability, so most of what this test used to assert
  * about a universal step is now asserted about <i>absence</i> — the branch for a capability with one instance has no
  * {@code scope} property to get wrong, and only the two entity branches have {@code fields}.
+ *
+ * <p><b>WP-3.1:</b> the ending is a property of the need and no longer a role on a step, so the assertions about
+ * {@code role} become assertions that no branch has one, and a new assertion covers the property that replaced it:
+ * <b>the same steps in any order resolve the same way</b>.
  */
 class ResolutionPlannerContractTest {
 
@@ -98,10 +102,13 @@ class ResolutionPlannerContractTest {
         assertThat(item.path("steps").path("items").path("anyOf")).as("one branch per capability")
                 .hasSize(CapabilityId.values().length);
         for (CapabilityId capability : CapabilityId.values()) {
-            JsonNode b = branch(format, capability);
-            assertThat(enumAt(b.path("properties"), "role")).as(capability.wire())
-                    .isEqualTo(names(ResolutionPlan.Role.values()));
+            assertThat(propertiesOf(branch(format, capability))).as(capability.wire() + " has no role to carry")
+                    .doesNotContain("role");
         }
+        assertThat(enumAt(item, "closing_authority")).as("the ending is a closed registry enum on the NEED")
+                .isEqualTo(names(com.sellerops.inquiry.authority.Authority.values()));
+        assertThat(propertiesOf(need(format))).as("and it is declared before the steps it requires")
+                .containsExactly("id", "ask", "closing_authority", "steps", "customer_inputs");
         assertThat(enumAt(item, "id")).containsExactly("N1", "N2", "N3", "N4", "N5", "N6");
         // this snapshot has no order bound and no executor for a procedure — both are still in the planner's vocabulary
         assertThat(need(format).path("properties").path("steps").path("items").path("anyOf").toString())
@@ -122,6 +129,8 @@ class ResolutionPlannerContractTest {
             assertThat(props).as(capability.wire() + " never declares an effect").doesNotContain("effect");
             assertThat(props).as(capability.wire() + " never declares a dependency index")
                     .doesNotContain("depends_on");
+            assertThat(props).as(capability.wire() + " never declares a role — the need declares the ending")
+                    .doesNotContain("role");
             boolean entity = capability.authority() == com.sellerops.inquiry.authority.Authority.ENTITY_STATE;
             if (entity) {
                 assertThat(props).as(capability.wire()).contains("fields");
@@ -143,26 +152,71 @@ class ResolutionPlannerContractTest {
         }
         // the dominant shadow failure and the SELLER scope failure, checked by name
         assertThat(propertiesOf(branch(format, CapabilityId.KNOWLEDGE_CATALOGUE))).doesNotContain("fields");
-        assertThat(propertiesOf(branch(format, CapabilityId.SELLER))).containsExactly("capability", "role");
+        assertThat(propertiesOf(branch(format, CapabilityId.SELLER))).containsExactly("capability");
     }
 
     /** The same rule in the domain: the object cannot be built, which is why the validator has no code for it. */
     @Test
     @DisplayName("a wrong-shaped step cannot be constructed either")
     void shapeInTheRecord() {
-        assertThatThrownBy(() -> new ResolutionPlan.Knowledge(CapabilityId.KNOWLEDGE_ORG, ResolutionPlan.Role.CLOSES,
+        assertThatThrownBy(() -> new ResolutionPlan.Knowledge(CapabilityId.KNOWLEDGE_ORG,
                 ResolutionPlan.Scope.THIS_ORDER)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new ResolutionPlan.Entity(CapabilityId.ENTITY_ORDER, ResolutionPlan.Role.CLOSES,
-                List.of())).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new ResolutionPlan.Entity(CapabilityId.ENTITY_ORDER, ResolutionPlan.Role.CLOSES,
+        assertThatThrownBy(() -> new ResolutionPlan.Entity(CapabilityId.ENTITY_ORDER, List.of()))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ResolutionPlan.Entity(CapabilityId.ENTITY_ORDER,
                 List.of(EntityField.LISTING_SALE_STATUS))).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new ResolutionPlan.Knowledge(CapabilityId.SELLER, ResolutionPlan.Role.CLOSES,
-                ResolutionPlan.Scope.NONE)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ResolutionPlan.Knowledge(CapabilityId.SELLER, ResolutionPlan.Scope.NONE))
+                .isInstanceOf(IllegalArgumentException.class);
         // and what a plan may say, it says: a seller step is always about nothing, a procedure always about this order
-        assertThat(new ResolutionPlan.Seller(ResolutionPlan.Role.CLOSES).scope()).isEqualTo(ResolutionPlan.Scope.NONE);
-        assertThat(new ResolutionPlan.Procedure(ResolutionPlan.Role.CLOSES).scope())
-                .isEqualTo(ResolutionPlan.Scope.THIS_ORDER);
-        assertThat(new ResolutionPlan.Seller(ResolutionPlan.Role.CLOSES).fields()).isEmpty();
+        assertThat(new ResolutionPlan.Seller().scope()).isEqualTo(ResolutionPlan.Scope.NONE);
+        assertThat(new ResolutionPlan.Procedure().scope()).isEqualTo(ResolutionPlan.Scope.THIS_ORDER);
+        assertThat(new ResolutionPlan.Seller().fields()).isEmpty();
+        // a need without an ending is not a need
+        assertThatThrownBy(() -> new ResolutionPlan.Need("N1", "a", null,
+                List.of(new ResolutionPlan.Seller()), List.of())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /**
+     * <b>The WP-3.1 property, stated as a property.</b> Five goals in the 67-call shadow were resolved by whichever
+     * authority the model happened to write last. Here the same steps are shuffled into every order there is, and the
+     * question "what resolves this need" has one answer in all of them.
+     */
+    @Test
+    @DisplayName("reordering a need's steps cannot change what resolves it")
+    void positionCarriesNoClosingMeaning() {
+        List<ResolutionPlan.Step> steps = List.of(
+                new ResolutionPlan.Knowledge(CapabilityId.KNOWLEDGE_ORG, ResolutionPlan.Scope.COMPANY),
+                new ResolutionPlan.Entity(CapabilityId.ENTITY_ORDER, List.of(EntityField.ORDER_FULFILLMENT)),
+                new ResolutionPlan.Seller());
+        CapabilitySnapshot snapshot = snapshot("CAFE24", null, true, OrderFactLookup.EXACT_ALLOWED);
+        for (List<ResolutionPlan.Step> order : permutations(steps)) {
+            ResolutionPlan.Need need = new ResolutionPlan.Need("N1", "예외 교환 가능 여부",
+                    com.sellerops.inquiry.authority.Authority.SELLER, order, List.of());
+            assertThat(need.closingSteps()).as(order.toString())
+                    .containsExactly(new ResolutionPlan.Seller());
+            assertThat(ResolutionPlanValidator.validate(new ResolutionPlan(List.of(need)), snapshot).valid())
+                    .as(order.toString()).isTrue();
+        }
+        // and the last step written is not the answer in five of the six orders, which is the whole point
+        assertThat(permutations(steps)).hasSize(6);
+    }
+
+    static <T> List<List<T>> permutations(List<T> items) {
+        if (items.size() <= 1) {
+            return List.of(items);
+        }
+        List<List<T>> out = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            List<T> rest = new ArrayList<>(items);
+            T head = rest.remove(i);
+            for (List<T> tail : permutations(rest)) {
+                List<T> one = new ArrayList<>();
+                one.add(head);
+                one.addAll(tail);
+                out.add(List.copyOf(one));
+            }
+        }
+        return List.copyOf(out);
     }
 
     @Test
@@ -214,32 +268,39 @@ class ResolutionPlannerContractTest {
         assertThat(system).contains("신원 정보는 어떤 경우에도 묻지 않습니다");
         assertThat(system).contains("SELLER가 아니라 KNOWLEDGE입니다");
         assertThat(system).contains("이 배포가 지금 그 권한을 쓸 수 있는지는 고려하지 않습니다");
-        // WP-3: the one rule added — exactly one authority ends a need (MULTIPLE_CLOSING_AUTHORITIES)
-        assertThat(system).contains("need를 닫는 권한은 **정확히 하나**입니다");
+        // WP-3.1: the ending is asked for directly, and position is told it means nothing
+        assertThat(system).contains("이 need를 최종적으로 해결하는 권한 하나");
+        assertThat(system).contains("steps의 순서나 위치가 아니라");
         assertThat(system).contains("혹시 몰라 SELLER를 덧붙이지 않습니다");
+        assertThat(system).as("the multi-capability case the gold needs and the shadow failed 3 of 4 times")
+                .contains("같은 권한의 capability 둘이");
         // WP-3: order is the dependency, restated where the depends_on rule used to be
         assertThat(system).contains("step은 **실행 순서대로** 적습니다");
+        // WP-3.1: the retired vocabulary is gone from the instruction too, not only from the schema
+        assertThat(system).as("no role vocabulary survives").doesNotContain("PRECONDITION").doesNotContain("CONTEXT(");
         // WP-3: what the shape now enforces, the instruction stops explaining
         assertThat(system).as("no prose about leaving fields empty").doesNotContain("빈 배열");
         assertThat(system).doesNotContain("depends_on");
         assertThat(system).as("effect is the registry's word now").doesNotContain("effect=");
         assertThat(system).doesNotContain("BOUNDED_WORKFLOW").doesNotContain("EXTERNAL_STATE_CHANGE");
-        assertThat(ResolutionPlannerPrompt.VERSION).isEqualTo("resolution-planner/v3");
+        assertThat(ResolutionPlannerPrompt.VERSION).isEqualTo("resolution-planner/v4");
     }
 
     @Test
     @DisplayName("the parser refuses a word it does not know, and a shape that cannot exist, and round-trips the rest")
     void parser() {
         String good = """
-                {"needs":[{"id":"N1","ask":"이 주문의 발송 시점","steps":[{"capability":"ENTITY.ORDER","role":"CLOSES",
-                "fields":["ORDER_FULFILLMENT"]}],"customer_inputs":["OPTION"]}]}""";
+                {"needs":[{"id":"N1","ask":"이 주문의 발송 시점","closing_authority":"ENTITY_STATE",
+                "steps":[{"capability":"ENTITY.ORDER","fields":["ORDER_FULFILLMENT"]}],
+                "customer_inputs":["OPTION"]}]}""";
         ResolutionPlan plan = ResolutionPlanParser.parse(good).plan();
         assertThat(plan).isNotNull();
         assertThat(ResolutionPlanParser.parse(ResolutionPlanParser.write(plan)).plan()).isEqualTo(plan);
         // unknown words
         assertThat(ResolutionPlanParser.parse(good.replace("ENTITY.ORDER", "ENTITY.SHIPMENT")).failure())
                 .isEqualTo("PLAN_SET");
-        assertThat(ResolutionPlanParser.parse(good.replace("\"CLOSES\"", "\"ANSWERS\"")).failure()).isEqualTo("PLAN_SET");
+        assertThat(ResolutionPlanParser.parse(good.replace("\"ENTITY_STATE\"", "\"CONNECTOR\"")).failure())
+                .isEqualTo("PLAN_SET");
         assertThat(ResolutionPlanParser.parse(good.replace("ORDER_FULFILLMENT", "ORDER_ETA")).failure())
                 .isEqualTo("PLAN_SET");
         // known words, impossible object — reported apart so a run artifact says which kind of failure it was
@@ -253,6 +314,13 @@ class ResolutionPlannerContractTest {
                 "\"fields\":[\"ORDER_FULFILLMENT\"],\"depends_on\":0")).failure()).isEqualTo("PLAN_SHAPE");
         assertThat(ResolutionPlanParser.parse(good.replace("\"fields\":[\"ORDER_FULFILLMENT\"]",
                 "\"fields\":[\"ORDER_FULFILLMENT\"],\"scope\":\"THIS_ORDER\"")).failure()).isEqualTo("PLAN_SHAPE");
+        // WP-3.1: a role is a retired slot. An answer written against v3 is refused rather than half-read — reading it
+        // would mean discarding the model's own statement about the ending and keeping everything else.
+        assertThat(ResolutionPlanParser.parse(good.replace("\"fields\":[\"ORDER_FULFILLMENT\"]",
+                "\"fields\":[\"ORDER_FULFILLMENT\"],\"role\":\"CLOSES\"")).failure()).isEqualTo("PLAN_SHAPE");
+        // and a need that states no ending is not a plan at all
+        assertThat(ResolutionPlanParser.parse(good.replace("\"closing_authority\":\"ENTITY_STATE\",", "")).failure())
+                .isEqualTo("UNPARSEABLE");
         // a token the schema forbids but the vocabulary knows still parses — the validator is what refuses it
         assertThat(ResolutionPlanParser.parse(good.replace("\"OPTION\"", "\"ORDER_NUMBER\"")).plan()).isNotNull();
         assertThat(ResolutionPlanParser.parse("{\"needs\":[]}").failure()).isEqualTo("UNPARSEABLE");
@@ -268,7 +336,11 @@ class ResolutionPlannerContractTest {
     @DisplayName("the vocabulary file and the plan enums are one list")
     void vocabulary() throws Exception {
         JsonNode v = JSON.readTree(Path.of("..", "contracts", "inquiry-authority", "v1", "vocabulary.json").toFile());
-        assertThat(strings(v.get("step_roles"))).isEqualTo(names(ResolutionPlan.Role.values()));
+        assertThat(strings(v.get("closing_authorities")))
+                .isEqualTo(names(com.sellerops.inquiry.authority.Authority.values()));
+        // step_roles is kept and marked retired: plan gold v3, v3.1 and v3.2 are frozen in the shape that uses it, and
+        // a superseded dataset must keep a vocabulary that defines its tokens. Nothing reads it.
+        assertThat(v.get("step_roles_retired").asText()).contains("WP-3.1").contains("closing_authority");
         assertThat(strings(v.get("step_scopes"))).isEqualTo(names(ResolutionPlan.Scope.values()));
         assertThat(strings(v.get("execution_effects")))
                 .isEqualTo(names(com.sellerops.inquiry.authority.ExecutionEffect.values()));

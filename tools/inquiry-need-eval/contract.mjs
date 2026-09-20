@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The WP-3 plan contract, offline (Inquiry v3 WP-3): the step shapes, the projection of a v2-shaped plan into them, and
-// the validator rules that survive. This is a MIRROR of the Java (ResolutionPlan / ResolutionPlanParser /
+// The plan contract, offline (Inquiry v3 WP-3 step shapes; WP-3.1 declared ending): the step shapes, the declared
+// closing authority, the projection of an older plan into them, and the validator rules that survive. This is a MIRROR of the Java (ResolutionPlan / ResolutionPlanParser /
 // ResolutionPlanValidator) and is pinned to it by test/plan.test.mjs, which runs it over the very same fixture file the
 // Java scenario tests read (contracts/inquiry-planner/v2/synthetic/planner-scenarios.jsonl). A mirror nobody checks is a
 // second opinion; a mirror checked against the original on the shared fixtures is a way to score recorded runs without a
@@ -22,6 +22,8 @@ export const index = (vocab) => ({
   bridgeOnly: new Set(vocab.customer_inputs.filter((i) => i.bridge_only).map((i) => i.id)),
 });
 
+export const AUTHORITIES = ['KNOWLEDGE', 'ENTITY_STATE', 'PROCEDURE', 'SELLER'];
+
 const only = (ix, capability) => (ix.scope.get(capability) ?? [])[0];
 const chooses = (ix, capability) => (ix.scope.get(capability) ?? []).length > 1;
 const isEntity = (ix, capability) => ix.authority.get(capability) === 'ENTITY_STATE';
@@ -29,26 +31,30 @@ const isEntity = (ix, capability) => ix.authority.get(capability) === 'ENTITY_ST
 /**
  * The parser's job: turn a wire step into one of the four shapes, or say which kind of refusal it is.
  * `PLAN_SET` = a word this system does not know. `PLAN_SHAPE` = known words, impossible object.
+ *
+ * WP-3.1: `role` joins `effect` and `depends_on` as a retired slot. An answer still carrying one was written against
+ * the v3 contract, where the role decided the ending; reading it as a WP-3.1 plan would discard the model's own
+ * statement about the ending and keep the rest.
  */
 export function parseStep(s, ix) {
   const authority = ix.authority.get(s.capability);
-  if (!authority || !['CLOSES', 'PRECONDITION', 'CONTEXT'].includes(s.role)) return { failure: 'PLAN_SET' };
+  if (!authority) return { failure: 'PLAN_SET' };
   const entity = isEntity(ix, s.capability);
   if (!entity && s.fields !== undefined) return { failure: 'PLAN_SHAPE' };
   if (!chooses(ix, s.capability) && s.scope !== undefined) return { failure: 'PLAN_SHAPE' };
-  if (s.effect !== undefined || s.depends_on !== undefined) return { failure: 'PLAN_SHAPE' };
+  if (s.effect !== undefined || s.depends_on !== undefined || s.role !== undefined) return { failure: 'PLAN_SHAPE' };
   if (entity) {
     const fields = s.fields ?? [];
     if (fields.some((f) => !ix.field.has(f))) return { failure: 'PLAN_SET' };
     if (!fields.length || fields.some((f) => ix.field.get(f) !== s.capability)) return { failure: 'PLAN_SHAPE' };
-    return { step: { capability: s.capability, role: s.role, scope: only(ix, s.capability), fields } };
+    return { step: { capability: s.capability, scope: only(ix, s.capability), fields } };
   }
   const scope = chooses(ix, s.capability) ? s.scope : only(ix, s.capability);
   if (scope === undefined || scope === null) return { failure: 'PLAN_SET' };
   if (!(ix.scope.get(s.capability) ?? []).includes(scope)) {
     return { failure: chooses(ix, s.capability) ? 'PLAN_SET' : 'PLAN_SHAPE' };
   }
-  return { step: { capability: s.capability, role: s.role, scope } };
+  return { step: { capability: s.capability, scope } };
 }
 
 /** A whole plan through the parser. Returns `{plan}` or `{failure}` — one bad step fails the plan, never a dropped step. */
@@ -56,13 +62,17 @@ export function parsePlan(plan, ix) {
   const needs = [];
   for (const n of plan?.needs ?? []) {
     if (!n.id || !n.ask || !(n.steps ?? []).length) return { failure: 'UNPARSEABLE' };
+    // the ending is read, never inferred: a need that does not state one is not a plan
+    if (n.closing_authority === undefined || n.closing_authority === null) return { failure: 'UNPARSEABLE' };
+    if (!AUTHORITIES.includes(n.closing_authority)) return { failure: 'PLAN_SET' };
     const steps = [];
     for (const s of n.steps) {
       const r = parseStep(s, ix);
       if (r.failure) return { failure: r.failure };
       steps.push(r.step);
     }
-    needs.push({ id: n.id, ask: n.ask, steps, customer_inputs: n.customer_inputs ?? [] });
+    needs.push({ id: n.id, ask: n.ask, closing_authority: n.closing_authority, steps,
+      customer_inputs: n.customer_inputs ?? [] });
   }
   return needs.length ? { plan: { needs } } : { failure: 'UNPARSEABLE' };
 }
@@ -83,23 +93,20 @@ export function validate(plan, ix) {
     const steps = need.steps ?? [];
     if (!steps.length) { v.push({ need: id, step: null, code: 'NO_STEPS' }); return; }
     if (steps.length > MAX_STEPS) v.push({ need: id, step: null, code: 'TOO_MANY_STEPS' });
-    const closing = [...new Set(steps.filter((s) => s.role === 'CLOSES').map((s) => ix.authority.get(s.capability)))];
-    if (!closing.length) v.push({ need: id, step: null, code: 'NO_CLOSING_STEP' });
-    if (closing.length > 1) v.push({ need: id, step: null, code: 'MULTIPLE_CLOSING_AUTHORITIES' });
-    let lastCloser = -1;
-    steps.forEach((s, k) => { if (s.role === 'CLOSES') lastCloser = k; });
+    // WP-3.1: the declared resolution must be one the plan actually asked for. `NO_CLOSING_STEP` and
+    // `MULTIPLE_CLOSING_AUTHORITIES` are gone — a single enum cannot say "none" or "two".
+    if (!steps.some((s) => ix.authority.get(s.capability) === need.closing_authority)) {
+      v.push({ need: id, step: null, code: 'CLOSING_AUTHORITY_UNSUPPORTED' });
+    }
+    // a procedure that acts on an order must read that order — an absence rule, not a position rule
+    if (need.closing_authority === 'PROCEDURE' && !steps.some((s) => s.capability === 'ENTITY.ORDER')) {
+      v.push({ need: id, step: null, code: 'PROCEDURE_WITHOUT_ORDER_READ' });
+    }
     const seen = [];
     steps.forEach((s, k) => {
-      const sig = `${s.capability}/${s.scope}/${s.role}`;
+      const sig = `${s.capability}/${s.scope}`;
       if (seen.includes(sig)) v.push({ need: id, step: k, code: 'DUPLICATE_STEP' });
       seen.push(sig);
-      if (s.role === 'PRECONDITION' && lastCloser >= 0 && k > lastCloser) {
-        v.push({ need: id, step: k, code: 'PRECONDITION_AFTER_CLOSER' });
-      }
-      if (ix.authority.get(s.capability) === 'PROCEDURE' && s.role === 'CLOSES'
-          && !steps.some((p) => p.capability === 'ENTITY.ORDER' && p.role === 'PRECONDITION')) {
-        v.push({ need: id, step: k, code: 'PROCEDURE_WITHOUT_ORDER_PRECONDITION' });
-      }
     });
     const inputSeen = new Set();
     for (const i of need.customer_inputs ?? []) {
@@ -124,13 +131,26 @@ export function validate(plan, ix) {
  * can never do is guess a step the model did not write.
  */
 export function project(plan, ix) {
-  const changes = { dropped_effect: 0, dropped_depends_on: 0, dropped_fields: 0, corrected_scope: 0 };
-  const needs = (plan?.needs ?? []).map((n) => ({
+  const changes = { dropped_effect: 0, dropped_depends_on: 0, dropped_fields: 0, corrected_scope: 0,
+    dropped_role: 0, closing_authority_from_roles: 0 };
+  const needs = (plan?.needs ?? []).map((n) => {
+    // WP-3.1: where the older plan said the ending with roles, read it off the roles. Where it said two endings, the
+    // projection CANNOT choose one — it reports null and the caller must not pretend otherwise.
+    let closing = n.closing_authority ?? null;
+    if (closing === null) {
+      const closers = [...new Set((n.steps ?? []).filter((s) => s.role === 'CLOSES')
+        .map((s) => ix.authority.get(s.capability)))];
+      closing = closers.length === 1 ? closers[0] : null;
+      if (closing !== null) changes.closing_authority_from_roles++;
+    }
+    return {
     id: n.id,
     ask: n.ask,
+    closing_authority: closing,
     customer_inputs: n.customer_inputs ?? [],
     steps: (n.steps ?? []).map((s) => {
-      const out = { capability: s.capability, role: s.role };
+      const out = { capability: s.capability };
+      if (s.role !== undefined) changes.dropped_role++;
       if (s.effect !== undefined) changes.dropped_effect++;
       if (s.depends_on !== undefined && s.depends_on !== null) changes.dropped_depends_on++;
       if (isEntity(ix, s.capability)) {
@@ -146,6 +166,7 @@ export function project(plan, ix) {
       }
       return out;
     }),
-  }));
+    };
+  });
   return { plan: { needs }, changes };
 }

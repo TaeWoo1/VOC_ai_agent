@@ -28,71 +28,115 @@ async function mutant(file, from, to) {
   }
 }
 
+// Same notation as goals.test.mjs: a test says which step closes, and the helpers emit the WP-3.1 shape — roleless
+// steps under a declared closing_authority.
+const AUTH = { 'KNOWLEDGE.PRODUCT': 'KNOWLEDGE', 'KNOWLEDGE.CATALOGUE': 'KNOWLEDGE', 'KNOWLEDGE.ORG': 'KNOWLEDGE',
+  'ENTITY.ORDER': 'ENTITY_STATE', 'ENTITY.LISTING': 'ENTITY_STATE', 'PROCEDURE.ORDER_ACTION': 'PROCEDURE',
+  SELLER: 'SELLER' };
 const K = (capability, role, scope) => (scope ? { capability, role, scope } : { capability, role });
 const E = (capability, role, fields) => ({ capability, role, fields });
-const need = (steps, customer_inputs = []) => ({ steps, customer_inputs });
-const goal = (q, g, steps, customer_inputs = []) => ({ q, goal: g, need: g, status: 'FROZEN', steps, customer_inputs });
+const roleless = (steps) => steps.map(({ role, ...rest }) => rest);
+const closingOf = (steps) => [...new Set(steps.filter((s) => s.role === 'CLOSES').map((s) => AUTH[s.capability]))][0];
+const need = (steps, customer_inputs = []) => ({ closing_authority: closingOf(steps), steps: roleless(steps),
+  customer_inputs });
+const goal = (q, g, steps, customer_inputs = []) => ({ q, goal: g, status: 'FROZEN',
+  closing_authority: closingOf(steps), steps: roleless(steps), customer_inputs });
+const plan = (closing, steps, customer_inputs = []) => ({ needs: [{ id: 'N1', ask: 'a', closing_authority: closing,
+  steps: roleless(steps), customer_inputs }] });
 
 const MUTATIONS = [
   {
-    name: 'the closing-authority rule is weakened to allow two endings',
-    file: 'contract.mjs', from: 'if (closing.length > 1)', to: 'if (closing.length > 2)',
+    name: 'a need may declare a resolution it never asked for',
+    file: 'contract.mjs',
+    from: "    if (!steps.some((s) => ix.authority.get(s.capability) === need.closing_authority)) {",
+    to: '    if (false) {',
     witness: async (M) => {
       const ix = M.index(M.loadVocabulary());
-      return M.validate({ needs: [{ id: 'N1', ask: 'a', customer_inputs: [],
-        steps: [K('KNOWLEDGE.PRODUCT', 'CLOSES'), K('SELLER', 'CLOSES')] }] }, ix).length;
+      return M.validate(plan('SELLER', [K('KNOWLEDGE.PRODUCT', 'CLOSES')]), ix)
+        .map((v) => v.code).includes('CLOSING_AUTHORITY_UNSUPPORTED');
     },
-    real: 1, mutated: 0,
+    real: true, mutated: false,
+  },
+  {
+    name: 'a plan that states no ending stops being reported as no plan',
+    file: 'contract.mjs',
+    from: "    if (n.closing_authority === undefined || n.closing_authority === null) return { failure: 'UNPARSEABLE' };",
+    to: '',
+    witness: async (M) => {
+      const ix = M.index(M.loadVocabulary());
+      return M.parsePlan({ needs: [{ id: 'N1', ask: 'a', customer_inputs: [],
+        steps: [{ capability: 'KNOWLEDGE.ORG' }] }] }, ix).failure ?? 'PARSED';
+    },
+    // Still refused — the enum check below catches it — but with the WRONG WORD. "this was not a plan" and "this
+    // used a token I do not know" are different facts about a run, and a run artifact that confuses them sends the
+    // next diagnosis at the vendor's vocabulary instead of at a missing field.
+    real: 'UNPARSEABLE', mutated: 'PLAN_SET',
   },
   {
     name: 'a knowledge step is allowed to carry entity fields again',
     file: 'contract.mjs', from: "if (!entity && s.fields !== undefined) return { failure: 'PLAN_SHAPE' };", to: '',
     witness: async (M) => {
       const ix = M.index(M.loadVocabulary());
-      return M.parseStep({ capability: 'KNOWLEDGE.CATALOGUE', role: 'CLOSES', scope: 'THIS_LISTING',
+      return M.parseStep({ capability: 'KNOWLEDGE.CATALOGUE', scope: 'THIS_LISTING',
         fields: ['LISTING_OPTION_SALE_STATUS'] }, ix).failure ?? 'PARSED';
     },
     real: 'PLAN_SHAPE', mutated: 'PARSED',
   },
   {
     name: 'a retired slot (effect / depends_on) is quietly accepted',
-    file: 'contract.mjs', from: "if (s.effect !== undefined || s.depends_on !== undefined) return { failure: 'PLAN_SHAPE' };", to: '',
+    file: 'contract.mjs',
+    from: "if (s.effect !== undefined || s.depends_on !== undefined || s.role !== undefined) return { failure: 'PLAN_SHAPE' };",
+    to: "if (s.depends_on !== undefined || s.role !== undefined) return { failure: 'PLAN_SHAPE' };",
     witness: async (M) => {
       const ix = M.index(M.loadVocabulary());
-      return M.parseStep({ capability: 'KNOWLEDGE.ORG', role: 'CLOSES', effect: 'BOUNDED_WORKFLOW' }, ix).failure ?? 'PARSED';
+      return M.parseStep({ capability: 'KNOWLEDGE.ORG', effect: 'BOUNDED_WORKFLOW' }, ix).failure ?? 'PARSED';
     },
     real: 'PLAN_SHAPE', mutated: 'PARSED',
   },
   {
-    name: 'a precondition standing after its closer stops being noticed',
-    file: 'contract.mjs', from: 'if (s.role === \'PRECONDITION\' && lastCloser >= 0 && k > lastCloser)',
-    to: 'if (s.role === \'PRECONDITION\' && lastCloser >= 0 && k > lastCloser + 1)',
+    name: 'a retired role is quietly accepted, so a v3 answer is read as if it had said nothing about the ending',
+    file: 'contract.mjs',
+    from: "  if (s.effect !== undefined || s.depends_on !== undefined || s.role !== undefined) return { failure: 'PLAN_SHAPE' };",
+    to: "  if (s.effect !== undefined || s.depends_on !== undefined) return { failure: 'PLAN_SHAPE' };",
     witness: async (M) => {
       const ix = M.index(M.loadVocabulary());
-      return M.validate({ needs: [{ id: 'N1', ask: 'a', customer_inputs: [],
-        steps: [K('PROCEDURE.ORDER_ACTION', 'CLOSES'), E('ENTITY.ORDER', 'PRECONDITION', ['ORDER_CANCELLATION'])] }] }, ix)
-        .map((v) => v.code).includes('PRECONDITION_AFTER_CLOSER');
+      return M.parseStep({ capability: 'KNOWLEDGE.ORG', role: 'CLOSES' }, ix).failure ?? 'PARSED';
+    },
+    real: 'PLAN_SHAPE', mutated: 'PARSED',
+  },
+  {
+    name: 'a procedure no longer has to read the order it changes',
+    file: 'contract.mjs',
+    from: "    if (need.closing_authority === 'PROCEDURE' && !steps.some((s) => s.capability === 'ENTITY.ORDER')) {",
+    to: '    if (false) {',
+    witness: async (M) => {
+      const ix = M.index(M.loadVocabulary());
+      return M.validate(plan('PROCEDURE', [K('PROCEDURE.ORDER_ACTION', 'CLOSES')]), ix)
+        .map((v) => v.code).includes('PROCEDURE_WITHOUT_ORDER_READ');
     },
     real: true, mutated: false,
   },
   {
-    name: 'a procedure no longer has to read the order it changes',
-    file: 'contract.mjs', from: "p.capability === 'ENTITY.ORDER' && p.role === 'PRECONDITION'",
-    to: "p.capability === 'ENTITY.ORDER'",
+    name: 'POSITION DECIDES AGAIN: the closer is taken from the last step written',
+    file: 'goals.mjs',
+    from: '    return { closingAuthorities: new Set([row.closing_authority]), declared: true, ambiguous: false };',
+    to: '    const last = (row.steps ?? [])[(row.steps ?? []).length - 1];\n'
+      + '    return { closingAuthorities: new Set([ix.get(last.capability)]), declared: true, ambiguous: false };',
     witness: async (M) => {
-      const ix = M.index(M.loadVocabulary());
-      return M.validate({ needs: [{ id: 'N1', ask: 'a', customer_inputs: [],
-        steps: [E('ENTITY.ORDER', 'CONTEXT', ['ORDER_FULFILLMENT']), K('PROCEDURE.ORDER_ACTION', 'CLOSES')] }] }, ix)
-        .map((v) => v.code).includes('PROCEDURE_WITHOUT_ORDER_PRECONDITION');
+      // the R:8989a9d0 shape, written correctly: knowledge resolves it and the seller judgment is beside it
+      const goals = [goal('C1', 'n1', [K('KNOWLEDGE.CATALOGUE', 'CLOSES', 'SELLER_CATALOGUE')])];
+      return M.scoreGoals([{ q: 'C1', needs: [{ closing_authority: 'KNOWLEDGE', customer_inputs: [],
+        steps: [{ capability: 'KNOWLEDGE.CATALOGUE', scope: 'SELLER_CATALOGUE' }, { capability: 'SELLER' }] }] }],
+      goals).correct_closer;
     },
-    real: true, mutated: false,
+    real: 1, mutated: 0,
   },
   {
     name: 'an entity step may read another capability\'s field',
     file: 'contract.mjs', from: 'fields.some((f) => ix.field.get(f) !== s.capability)', to: 'false',
     witness: async (M) => {
       const ix = M.index(M.loadVocabulary());
-      return M.parseStep({ capability: 'ENTITY.ORDER', role: 'CLOSES', fields: ['LISTING_SALE_STATUS'] }, ix).failure ?? 'PARSED';
+      return M.parseStep({ capability: 'ENTITY.ORDER', fields: ['LISTING_SALE_STATUS'] }, ix).failure ?? 'PARSED';
     },
     real: 'PLAN_SHAPE', mutated: 'PARSED',
   },
@@ -161,11 +205,13 @@ const MUTATIONS = [
   },
   // ── WP-3.1: the closer rules ────────────────────────────────────────────────────────────────────────────────────
   {
-    name: 'a demoted authority counts as a correct close again — the WP-2 overestimate, restored',
-    file: 'goals.mjs', from: 'const ambiguous = mine.some((n) => n.closingAuthorities.size > 1);',
-    to: 'const ambiguous = false;',
+    name: 'a recorded two-ending plan counts as a correct close again — the WP-2 overestimate, restored',
+    file: 'goals.mjs', from: '        const ambiguous = mine.some((n) => n.ambiguous);',
+    to: '        const ambiguous = false;',
     witness: async (M) => {
-      const both = need([K('KNOWLEDGE.CATALOGUE', 'CLOSES', 'SELLER_CATALOGUE'), K('SELLER', 'CLOSES')]);
+      // the shape RECORDED before WP-3.1: two endings in one need, which is how recall reached 1.000
+      const both = { steps: [{ capability: 'KNOWLEDGE.CATALOGUE', role: 'CLOSES', scope: 'SELLER_CATALOGUE' },
+        { capability: 'SELLER', role: 'CLOSES' }], customer_inputs: [] };
       return M.scoreGoals([{ q: 'C1', needs: [both] }],
         [goal('C1', 'n1', [K('KNOWLEDGE.CATALOGUE', 'CLOSES', 'SELLER_CATALOGUE')])]).correct_closer;
     },

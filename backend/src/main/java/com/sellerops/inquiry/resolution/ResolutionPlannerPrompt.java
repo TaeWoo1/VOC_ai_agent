@@ -12,8 +12,8 @@ import com.sellerops.inquiry.authority.InquirySurface;
 import java.util.List;
 
 /**
- * <b>The Resolution Planner's instruction, payload and strict schema</b> (Inquiry v3 WP-2; per-capability step shapes in
- * WP-3).
+ * <b>The Resolution Planner's instruction, payload and strict schema</b> (Inquiry v3 WP-2; per-capability step shapes
+ * in WP-3; the declared closing authority in WP-3.1).
  *
  * <p><b>The payload floor.</b> What leaves for the model is the customer's message and four facts about the situation —
  * the surface (public Q&A or a message attached to an order), whether a listing is resolved, how many options that listing
@@ -32,6 +32,15 @@ import java.util.List;
  * from {@link ResolutionPlan#SCOPES} and {@link EntityField#capability()}, the same declarations the domain record and
  * the validator read, so schema and contract cannot drift.
  *
+ * <p><b>What changed in WP-3.1.</b> The step no longer carries a {@code role}, and the need carries
+ * {@code closing_authority}. Under v3 the instruction had to say "exactly one authority closes a need" and "a
+ * PRECONDITION comes before the CLOSES step it enables" — two rules which together meant the last step written was the
+ * closer, and the 67-call shadow showed the model's ordering habit deciding the ending in five goals. Asking for the
+ * ending directly removes the inference: <b>a plan that reorders its steps cannot change what resolves the need</b>,
+ * because nothing derives the closer from position. The field is declared before {@code steps} on the same reasoning —
+ * a left-to-right decoder states the ending before it lists what the ending requires. That ordering is a design
+ * hypothesis the targeted smoke tests; the structural part (position carries no meaning) holds either way.
+ *
  * <p><b>What the instruction lost in WP-3, and why.</b> Three sentences described rules the shape now enforces (fields
  * belong to entity steps, fields belong to their own capability, a scope must be one the capability allows) and two
  * parentheticals named the {@code effect} tokens, which left the wire for the registry
@@ -44,7 +53,7 @@ import java.util.List;
  */
 public final class ResolutionPlannerPrompt {
 
-    public static final String VERSION = "resolution-planner/v3";
+    public static final String VERSION = "resolution-planner/v4";
     /** Six needs × three steps of closed tokens, plus the asks. Measured shapes sit far below this. */
     public static final int MAX_OUTPUT_TOKENS = 1600;
     static final int MAX_ASK = 120;
@@ -57,7 +66,8 @@ public final class ResolutionPlannerPrompt {
     public static String system() {
         return """
                 당신은 고객이 판매자에게 보낸 문의 하나를 읽고, (1) 답변에 포함되지 않으면 요청이 해결되지 않는 독립적인 need로 나누고,
-                (2) need마다 그 답을 **누가 가지고 있어야 하는지**를 순서대로 적습니다. 답을 쓰지 않고, 무엇이 필요한지만 계획합니다.
+                (2) need마다 **누가 그것을 최종적으로 해결하는지**를 먼저 정하고, 그 해결에 필요한 권한을 순서대로 적습니다.
+                답을 쓰지 않고, 무엇이 필요한지만 계획합니다.
                 need 나누기:
                 - 고객이 실제로 묻거나 요청한 것만 need입니다. 답에 필요한 배경·전제는 need가 아니라 step입니다.
                 - 같은 것을 다른 말로 반복한 것은 하나의 need입니다. 인사·감사·감정 표현은 need가 아닙니다.
@@ -74,13 +84,18 @@ public final class ResolutionPlannerPrompt {
                 규칙:
                 - **읽어서 답이 되면 PROCEDURE가 아닙니다.** 주문 상태나 송장 번호를 알려 달라는 요청은 ENTITY.ORDER로 끝냅니다.
                   PROCEDURE는 외부 상태 변경이나 정해진 업무 절차가 필요할 때만 씁니다.
-                  PROCEDURE를 쓰면 그 주문을 먼저 읽는 ENTITY.ORDER PRECONDITION step을 함께 적습니다.
+                  closing_authority가 PROCEDURE이면 그 주문을 읽는 ENTITY.ORDER step을 함께 적습니다.
                 - **판매자가 한 번 정해서 알려 주면 다음 고객에게도 쓸 수 있는 답**(운영 기준·상품 사실·상품 비교)은 SELLER가 아니라 KNOWLEDGE입니다.
                   SELLER는 이 주문·이 시점에만 해당하는 판단(예외 처리, 재입고 시점)일 때만 씁니다.
-                - role: CLOSES(이 권한이 need를 닫을 수 있다) · PRECONDITION(닫기 전에 먼저 읽어야 한다) · CONTEXT(참고만, 닫지 못한다).
-                  need를 닫는 권한은 **정확히 하나**입니다. 혹시 몰라 SELLER를 덧붙이지 않습니다. 확인한 뒤 판매자의 예외 판단이 필요하면
-                  앞 권한을 PRECONDITION으로 적고 SELLER가 닫습니다. 판매자에게 넘기는 것은 step이 아닙니다.
-                - step은 **실행 순서대로** 적습니다. PRECONDITION은 그것이 필요한 CLOSES step보다 앞에 옵니다.
+                - closing_authority: **이 need를 최종적으로 해결하는 권한 하나**를 먼저 정해서 적습니다(KNOWLEDGE · ENTITY_STATE · PROCEDURE · SELLER).
+                  steps에는 그 해결에 **필요한 capability**를 적습니다. 어떤 step이 need를 닫는지는 steps의 순서나 위치가 아니라
+                  closing_authority가 정합니다.
+                - closing_authority와 같은 권한의 capability를 steps에 **반드시 하나 이상** 적습니다. 같은 권한의 capability 둘이
+                  함께 답을 만들어야 하면 둘 다 적습니다(예: 이 상품의 스펙과 판매자 카탈로그를 같이 봐야 답이 되는 질문).
+                - SELLER는 **판매자가 새로 판단해야 해서** 그 판단 자체가 답일 때만 closing_authority가 됩니다. 아는 것이 없거나,
+                  연동이 없거나, 확신이 없어서 판매자에게 넘기는 것은 closing_authority가 아닙니다 — 그것은 시스템이 나중에 기록합니다.
+                  혹시 몰라 SELLER를 덧붙이지 않습니다.
+                - step은 **실행 순서대로** 적습니다(주문을 바꾸기 전에 그 주문을 먼저 읽습니다). 순서는 실행 순서일 뿐입니다.
                 - ENTITY step은 읽을 필드를 하나 이상 적습니다.
                 - customer_inputs: 고객이 아직 밝히지 않아 답이 달라지는 **상품 맥락 값**만 적습니다(규격·크기·모델·수량·사용 환경·치수).
                   이름·주문번호·연락처·주소 같은 신원 정보는 어떤 경우에도 묻지 않습니다.
@@ -137,6 +152,10 @@ public final class ResolutionPlannerPrompt {
         ObjectNode needProps = need.putObject("properties");
         enumOf(needProps.putObject("id"), ids(ResolutionPlanValidator.MAX_NEEDS));
         needProps.putObject("ask").put("type", "string").put("maxLength", MAX_ASK);
+        // WP-3.1: the ending is a property, and it stands BEFORE the steps. Strict Structured Outputs generates
+        // properties in declaration order, so the model commits to who resolves the need before it writes what the
+        // resolution requires — the opposite of the order that let the last step written become the closer.
+        enumOf(needProps.putObject("closing_authority"), names(Authority.values()));
         ObjectNode steps = needProps.putObject("steps").put("type", "array")
                 .put("minItems", 1).put("maxItems", ResolutionPlanValidator.MAX_STEPS);
         steps.set("items", step);
@@ -167,7 +186,6 @@ public final class ResolutionPlannerPrompt {
         ObjectNode branch = object();
         ObjectNode props = branch.putObject("properties");
         enumOf(props.putObject("capability"), List.of(capability.wire()));
-        enumOf(props.putObject("role"), names(ResolutionPlan.Role.values()));
         List<String> scopes = ResolutionPlan.SCOPES.get(capability).stream().map(Enum::name).sorted().toList();
         if (scopes.size() > 1) {
             enumOf(props.putObject("scope"), scopes);

@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { analyse, goldEntityReads } from '../availability.mjs';
 import { classify } from '../closers.mjs';
+import { readFileSync } from 'node:fs';
 
 const K = (capability, role, scope) => (scope ? { capability, role, scope } : { capability, role });
 const E = (capability, role, fields) => ({ capability, role, fields });
@@ -145,4 +146,74 @@ test('a goal split across needs keeps its correct ending — split-tolerance is 
   const r = classify([split], gold);
   assert.deepEqual(r.taxonomy, { CORRECT_CLOSER_VIA_SPLIT: 1 });
   assert.equal(r.closer.correct, 1);
+});
+
+// ── Candidate C: the ending is declared, and position means nothing ────────────────────────────────────────────────
+
+const declared = (q, closing, steps, registry = ORDER_READABLE) => ({
+  q, rep: 1, registry, failure: null, availability: [],
+  plan: { needs: [{ id: 'N1', ask: 'a', closing_authority: closing, customer_inputs: [], steps }] },
+});
+const declaredGoal = (q, closing, steps) => ({ q, goal: 'n1', status: 'FROZEN', closing_authority: closing, steps,
+  customer_inputs: [] });
+
+test('the same steps in any order resolve the same way — the WP-3.1 property, through the scorers', () => {
+  const gold = [declaredGoal('C', 'KNOWLEDGE', [{ capability: 'KNOWLEDGE.CATALOGUE', scope: 'SELLER_CATALOGUE' }])];
+  const steps = [{ capability: 'KNOWLEDGE.CATALOGUE', scope: 'SELLER_CATALOGUE' }, { capability: 'SELLER' }];
+  for (const order of [steps, [...steps].reverse()]) {
+    const r = classify([declared('C', 'KNOWLEDGE', order)], gold);
+    assert.deepEqual(r.taxonomy, { CORRECT_CLOSER: 1 }, JSON.stringify(order));
+    assert.equal(r.closer.correct, 1);
+  }
+  // …and the same two steps with the OTHER ending declared are wrong in both orders, for the same reason
+  for (const order of [steps, [...steps].reverse()]) {
+    const r = classify([declared('C', 'SELLER', order)], gold);
+    assert.deepEqual(r.taxonomy, { B_OPERATIONAL_FALLBACK: 1 }, JSON.stringify(order));
+  }
+});
+
+test('two knowledge capabilities resolving together are both closers, which is what the gold needs', () => {
+  const gold = [declaredGoal('C', 'KNOWLEDGE', [{ capability: 'KNOWLEDGE.CATALOGUE', scope: 'SELLER_CATALOGUE' },
+    { capability: 'KNOWLEDGE.PRODUCT' }])];
+  const r = classify([declared('C', 'KNOWLEDGE', [{ capability: 'KNOWLEDGE.CATALOGUE', scope: 'SELLER_CATALOGUE' },
+    { capability: 'KNOWLEDGE.PRODUCT' }])], gold);
+  assert.deepEqual(r.taxonomy, { CORRECT_CLOSER: 1 });
+  assert.equal(r.detail[0].predicted_closes.length, 1, 'one authority…');
+  // 3 of the 4 gold goals with this shape were WP-4 failures; the shape is now sayable in one field
+});
+
+test('an unavailable capability does not change the declared resolution', () => {
+  const noKnowledge = { ...ORDER_READABLE,
+    capabilities: { ...ORDER_READABLE.capabilities, 'KNOWLEDGE.PRODUCT': 'NOT_SUPPORTED' } };
+  const gold = [declaredGoal('C', 'KNOWLEDGE', [{ capability: 'KNOWLEDGE.PRODUCT' }])];
+  const r = classify([declared('C', 'KNOWLEDGE', [{ capability: 'KNOWLEDGE.PRODUCT' }], noKnowledge)], gold);
+  assert.deepEqual(r.taxonomy, { CORRECT_CLOSER: 1 },
+    'keeping the authority the need requires is the right plan even where it cannot act');
+  assert.equal(r.detail[0].gold_authority_can_act, false, 'and the gap is recorded rather than routed around');
+});
+
+/**
+ * The structural half of Candidate C: nothing in the scoring path may work out a closer from where a step stands.
+ * The only runtime reads of the retired role token are the two places that exist to understand RECORDED runs — the
+ * scorer's legacy fallback and the projection — and this test pins their number so a third cannot appear quietly.
+ */
+test('no closing authority is derived from position anywhere in the scoring path', () => {
+  const src = (f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
+    .split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
+  const closes = (f) => (src(f).match(/'CLOSES'/g) ?? []).length;
+  assert.equal(closes('goals.mjs'), 1, 'only closingOf(), reading a run recorded before WP-3.1');
+  assert.equal(closes('closers.mjs'), 0);
+  assert.equal(closes('availability.mjs'), 0);
+  assert.equal(closes('contract.mjs'), 1, 'only project(), reading a plan recorded before WP-3.1');
+  // And no scorer TAKES the last step as the answer. closers.mjs reads it exactly once and does not decide with it:
+  // `seller_last_written` is the measurement that proved the mechanism (49 of 49 in WP-2, 6 of 6 in WP-4), and a
+  // measurement of the habit is the opposite of obeying it. The count is pinned so a second read cannot appear here
+  // without someone saying why.
+  const lastStep = (f) => (src(f).match(/steps\.length\s*-\s*1/g) ?? []).length;
+  assert.equal(lastStep('goals.mjs'), 0);
+  assert.equal(lastStep('availability.mjs'), 0);
+  assert.equal(lastStep('closers.mjs'), 1, 'only seller_last_written, which reports the habit and obeys nothing');
+  assert.ok(/seller_last_written/.test(src('closers.mjs')));
+  // the verdict itself is read from the declared field
+  assert.ok(/closes\.has\(goldCloser\)/.test(src('closers.mjs')));
 });

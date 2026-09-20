@@ -27,7 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
 class ResolutionPlannerHarnessIntegrityTest {
 
     static final ObjectMapper JSON = new ObjectMapper();
-    static final Path SCENARIOS = Path.of("..", "contracts", "inquiry-planner", "v2", "synthetic",
+    static final Path SCENARIOS = Path.of("..", "contracts", "inquiry-planner", "v3", "synthetic",
             "planner-scenarios.jsonl");
     static final AgentLlmTransport REFUSES = (uri, headers, json) -> {
         throw new IllegalStateException("this mode must not reach a transport");

@@ -14,16 +14,19 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Reads {@code contracts/inquiry-planner/v2/synthetic/planner-scenarios.jsonl} (test support).
+ * Reads {@code contracts/inquiry-planner/v3/synthetic/planner-scenarios.jsonl} (test support).
  *
- * <p>The v2 fixtures have three kinds of row, and the third is the point of WP-3: <b>P</b> a plan the validator accepts,
- * <b>V</b> a plan it refuses, and <b>X</b> a plan that <b>cannot be expressed at all</b> — the parser refuses it and no
- * {@link ResolutionPlan} object exists to validate. Each X row records the v2 violation code it used to need
- * ({@code retired_code}), so the file itself is the before/after of the shape change.
+ * <p>Four kinds of row: <b>P</b> a plan the validator accepts, <b>V</b> a plan it refuses, <b>X</b> a plan that
+ * <b>cannot be expressed at all</b> — the parser refuses it and no {@link ResolutionPlan} object exists to validate —
+ * and <b>C</b> the closing-authority series WP-3.1 added. Each X row records the violation code it used to need
+ * ({@code retired_code}), so the file itself is the before/after of every shape change.
+ *
+ * <p>The v2 file stays frozen beside this one: it is the fixture the WP-3 contract was measured against, and under
+ * WP-3.1's parser every row of it carries a retired slot. A superseded fixture is kept, never edited.
  */
 final class PlannerScenarios {
 
-    static final Path FILE = Path.of("..", "contracts", "inquiry-planner", "v2", "synthetic",
+    static final Path FILE = Path.of("..", "contracts", "inquiry-planner", "v3", "synthetic",
             "planner-scenarios.jsonl");
     static final ObjectMapper JSON = new ObjectMapper();
     static final UUID PRODUCT = UUID.fromString("00000000-0000-0000-0000-00000000b001");

@@ -31,7 +31,8 @@ class ResolutionPlannerEnvelopeTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private static final String PLAN = "{\"needs\":[{\"id\":\"N1\",\"ask\":\"이 주문의 현재 배송 상태\","
-            + "\"steps\":[{\"capability\":\"ENTITY.ORDER\",\"role\":\"CLOSES\",\"fields\":[\"ORDER_FULFILLMENT\"]}],"
+            + "\"closing_authority\":\"ENTITY_STATE\","
+            + "\"steps\":[{\"capability\":\"ENTITY.ORDER\",\"fields\":[\"ORDER_FULFILLMENT\"]}],"
             + "\"customer_inputs\":[]}]}";
 
     /** The vendor's envelope, built the way the vendor builds it. */
@@ -176,9 +177,9 @@ class ResolutionPlannerEnvelopeTest {
     @Test
     @DisplayName("an over-read entity step records WHICH field made it a gap, not only that it is one")
     void unavailableFieldsAreNamed() throws Exception {
-        String overRead = "{\"needs\":[{\"id\":\"N1\",\"ask\":\"이 주문의 현재 배송 상태\",\"steps\":[{\"capability\""
-                + ":\"ENTITY.ORDER\",\"role\":\"CLOSES\",\"fields\":[\"ORDER_FULFILLMENT\",\"ORDER_TRACKING\"]}],"
-                + "\"customer_inputs\":[]}]}";
+        String overRead = "{\"needs\":[{\"id\":\"N1\",\"ask\":\"이 주문의 현재 배송 상태\","
+                + "\"closing_authority\":\"ENTITY_STATE\",\"steps\":[{\"capability\":\"ENTITY.ORDER\","
+                + "\"fields\":[\"ORDER_FULFILLMENT\",\"ORDER_TRACKING\"]}],\"customer_inputs\":[]}]}";
         JsonNode step = rowFor(200, vendor("stop", overRead, null)).get("availability").get(0);
         assertThat(step.get("gap").asText()).isEqualTo("NOT_SUPPORTED");
         assertThat(step.get("unavailable_fields")).singleElement()
