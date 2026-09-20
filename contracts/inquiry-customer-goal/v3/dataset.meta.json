@@ -1,0 +1,75 @@
+{
+ "name": "inquiry-customer-goal",
+ "version": "v3",
+ "frozen_at": "2026-09-20",
+ "files": {
+  "goals.jsonl": "045b670bc9c05d7808e000708baa7a6cbb483af0d46c73d798d291fd0a506bd4",
+  "labels.py": "dc80de95b9d4f858cbe7a7d350dca6a1b3cc3c4e70f24234f8d263f47047abe2"
+ },
+ "counts": {
+  "gold_rows": 72,
+  "cases": 67,
+  "goals_emitted": 72,
+  "no_goal_rows": 1,
+  "still_open": 0,
+  "multi_goal_rows": 1,
+  "explicit_fallback_relations": 1,
+  "INFORMATION": 56,
+  "STATE_READ": 4,
+  "DECISION": 5,
+  "ACTION": 7,
+  "legacy_conflicts": 7,
+  "undeclared_conflicts": 0
+ },
+ "change_from_v2": "LABELS AND UNIT. Classes D, E and F were adjudicated, so no row is open and the acceptance target — unresolved semantic annotation = 0 — is measured rather than claimed. The unit changed for one row: a message can carry more than one goal, and R:515dd536 ranks its two requests, so a row's label is a LIST of goals and the ranking lives in RELATIONS. v1 and v2 stay frozen and readable.",
+ "adjudications": {
+  "D — R:f81ad84a n1": "STATE_READ / CURRENT_ORDER / STATED. 'Please send me the tracking numbers of every box.' Two frozen rows already settle the shape it was open on: R:7a8136b2 and S:T13a both ask about a shipment that has not happened yet and are both STATE_READ. What is left over is the DELIVERY of the answer ('send it to me when it happens'), and CustomerGoal has no slot for when or how an answer reaches the customer — for any row. The discriminator that separates this from the adjudicated ACTIONs is whether the requested outcome CHANGES THE ORDER or TRANSFERS OBSERVED FACTS: R:4181864b (arrive sooner), R:83e607e0 (missing goods sent) and S:N2 (an invoice issued) change it; this one does not. Corroborated independently: the frozen resolution gold closes this row on ENTITY_STATE with a single ENTITY.ORDER step.",
+  "E — R:f403e606 n2": "INFORMATION / SELLER_CATALOGUE / STATED / 1 constraint. 'Isn't glass better?', comparing this listing's film with another product the customer names. Precedent for the outcome is direct and doubled: S:T10a ('what is the difference between the package and the bulk?') is INFORMATION about SELLER_CATALOGUE, and R:77a91fab n3 ('please recommend a size') is INFORMATION — a recommendation between products is answered from product knowledge. It is NOT DECISION: every DECISION row in the gold asks the seller to decide about the SELLER'S OWN CONDUCT (restock, discount, approve an exception, allow an address change), and this asks about two products.",
+  "E — referent, the weaker half": "MEDIUM confidence, recorded rather than smoothed over. The customer names a product ('러브 10P') and the text does not say whose it is. SELLER_CATALOGUE is the faithful reading — a customer writing to this seller comparing 'the identical product' is comparing within the seller's line, which is the same assumption S:T10a already rests on — and it is also the fail-soft one: the catalogue resolver looks, and finding nothing is an outcome of looking. UNRESOLVED would assert that nothing can be identified and would stop us from looking at all. Alternative reading: if the named product is a competitor's, UNRESOLVED is right and the goal ends at a gap.",
+  "F — R:515dd536 n1": "TWO ACTION goals with a customer-stated FALLBACK. 'I'd like just the nozzle sent separately. Returns and exchanges are a hassle. If sending only the nozzle is impossible, please process a refund.' n1 = send the nozzle (1 constraint), n1b = refund (0), and n1b is the fallback of n1. Held as two equal goals this message is a refund waiting to be issued by accident."
+ },
+ "fallback_semantics": {
+  "what_it_is": "a relationship the CUSTOMER stated between two goals of one message, and nothing else. One kind, FALLBACK, because that is a thing customers say. There is no SEQUENCE, no DEPENDS_ON and no THEN — an execution order between goals is not expressible.",
+  "why_it_is_not_a_planner": "a relation can only be constructed with the customer's own conditional clause in it, so two action goals from a message with no conditional clause cannot be related; it names goals and never capabilities, authorities, steps or gap reasons; and ResolutionPolicy has no parameter that could carry one, asserted by a structural test.",
+  "activation": "NONE, and not as a deferral. Activating the fallback requires knowing the primary WILL NOT HAPPEN, and no terminal state in this runtime asserts that: RESOLVED is an answer, NEEDS_SELLER is the opposite of knowing, NEEDS_CUSTOMER_INPUT is waiting, FAILED is a break, and CAPABILITY_GAP says what WE could not attempt. The last is the trap — every procedure in this registry is DECLARED_NO_EXECUTOR, so every ACTION goal ends at CAPABILITY_GAP, and a runtime reading a gap as impossibility would refund every customer who ever wrote a conditional sentence. GoalSetResolution therefore withholds the fallback for every terminal state and every gap reason, asserted exhaustively.",
+  "runtime_disposition": "WITHHELD_FOR_CUSTOMER_STATED_CONDITION. No resolver is asked for it at all; it is handed to the seller with the customer's condition attached."
+ },
+ "no_goal_is_not_ignore": "R:0c582144 emits no customer resolution goal. The case still exists and may raise VOC / complaint / issue signals elsewhere in Reviewnary; what it does not carry is a goal for this loop to resolve. The row stays in the corpus so that a goal predicted on it is countable as invented.",
+ "the_check": "build.py does not assert that the adjudicated goals agree with the frozen gold — the ruling was explicit that the old gold must not be forced to remain valid. It asserts that every DISAGREEMENT IS DECLARED, and v3 checks two kinds where v2 checked one: the CLOSER (a different authority ends the goal) and the INSTANCE (a frozen step reads something the adjudicated referent is not about). A declaration that is not a real disagreement also fails, so the list cannot be padded.",
+ "legacy_conflicts": {
+  "what_they_are": "7 resolution-gold rows (inquiry-resolution-plan/v3.3) that no longer follow from the adjudicated customer goals. IDENTIFIED here and deliberately NOT re-derived: re-labelling the frozen resolution gold is a separate decision with its own evidence rows.",
+  "R:0c582144 n1": "GOAL_OBSOLETE — no goal is emitted, so the resolution goal has no subject.",
+  "R:4181864b n1": "CLOSER_MOVES — ENTITY_STATE -> PROCEDURE; the order read becomes a procedure prerequisite.",
+  "S:T10b n1": "PLAN_OBSOLETE — the whole step list (order read + procedure + org policy) belongs to a remedy, not to an information question.",
+  "S:T12a n1": "CLOSER_MOVES — PROCEDURE -> KNOWLEDGE/SELLER; the ENTITY.ORDER read survives as the decision rule's prerequisite.",
+  "S:N2 n1": "NO_CAPABILITY — ACTION requires a procedure this registry does not have at all.",
+  "R:f403e606 n2": "SCOPE_MOVES (new in v3) — the closer is unchanged but the instance moves: the frozen step is KNOWLEDGE.PRODUCT, about this listing, and the adjudicated referent is SELLER_CATALOGUE. The only row in 72 where the frozen steps read an instance the referent is not about.",
+  "R:515dd536 n1": "GOAL_SPLITS (new in v3) — one frozen row, two customer goals. The frozen row describes the first request alone; the refund has no row at all, and the ranking between them has nowhere in the old gold to live."
+ },
+ "decision_prerequisite_audit": {
+  "question": "does DECISION -> KNOWLEDGE -> SELLER hold, or does a decision sometimes need observed entity state first?",
+  "method": "read from the FROZEN gold's recorded steps, not from an opinion: for every DECISION goal, which required capabilities are neither KNOWLEDGE nor SELLER.",
+  "decision_goals": 5,
+  "needing_observed_state": 3,
+  "rows": {
+   "S:T7a n1": "ENTITY.LISTING — already written in the frozen gold",
+   "S:T7b n1": "ENTITY.LISTING — already written in the frozen gold",
+   "S:T12a n1": "ENTITY.ORDER (and the obsolete PROCEDURE step, declared)",
+   "R:ae41a418 n2": "none",
+   "S:N6 n1": "none"
+  },
+  "finding": "the fixed sequence DECISION -> KNOWLEDGE -> SELLER is insufficient, and this was TRUE BEFORE S:T12a was reclassified: two of the three rows carry the entity read in the frozen gold itself. The dispatch table is still right — knowledge is asked first because the decision RULE is knowledge and the rule declares its own prerequisites — but the loop had to be able to come back, and to refuse to come back when the prerequisite produced nothing."
+ },
+ "label_policy": {
+  "author": "designer packet 2026-09-20; classes A/B/C adjudicated by the product owner the same day, D/E/F adjudicated against the originals and direct precedent in this package (DEV/CALIBRATION — never a holdout)",
+  "unit": "one row per CUSTOMER GOAL. Equal to one per frozen resolution goal except for the one row that splits.",
+  "principles": "1 goals express what the customer requested, not what the system can do; 2-5 the four outcome definitions; 6 surface grammar alone does not classify a 'can you...?'; 7 resolver prerequisites are not separate customer goals; 8 capability availability does not enter the label; 9 no future follow-up work is added as a goal; 10 (new) a relationship between goals exists only where the customer stated the condition."
+ },
+ "derived_from": {
+  "inquiry-customer-goal/v2": "b845f84c7637dedd8a90746f3bd0c5b00c38a7b0ca1f62dbe8d0954980fa09d0 (goals.jsonl)",
+  "inquiry-resolution-plan/v3.3": "abe11530c5484cbefaebf688f3793d0bad6ca10341a6bbe9a78aca4f320b4efc"
+ },
+ "schema": "contracts/inquiry-customer-goal/v3/schema.json",
+ "holds": "real inquiry id prefixes, designer labels and constraint COUNTS; no customer or seller text, and not the words of the stated fallback condition",
+ "storage": {"canonical": "eval-store:inquiry-customer-goal/v3", "builder": "build.py (committed; the labels it reads are not)"}
+}

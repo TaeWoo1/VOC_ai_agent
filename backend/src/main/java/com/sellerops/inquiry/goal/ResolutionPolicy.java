@@ -26,6 +26,43 @@ import java.util.List;
  * because it contains the word decide; it is a seller question only when no written policy decides it. So knowledge is
  * asked first, and the seller is reached from an <b>observed absence</b>, never from the outcome kind alone.
  *
+ * <h2>What a DECISION resolver actually does (§6)</h2>
+ *
+ * <p>"Knowledge, and the seller if there is none" was too small a description, and the audit of 2026-09-20 measured
+ * how much: of the five DECISION goals in the frozen gold, <b>three require observed entity state</b>, and two of
+ * those carried the entity read in the gold before any of them were re-adjudicated. The corrected account:
+ *
+ * <p>A DECISION resolver looks for the <b>rule that decides this goal</b>. Knowledge is asked first because a rule is
+ * a thing the seller wrote down. Having found the rule, the resolver may discover that applying it needs a fact — an
+ * address change depends on whether the order has shipped — and it then names <b>that one capability</b> as a
+ * prerequisite. The order read runs, the rule is resumed, and the decision is produced or is found to need the seller.
+ *
+ * <pre>
+ *   DECISION → KNOWLEDGE (find the rule) → [rule names a prerequisite] → ENTITY_STATE → KNOWLEDGE (apply it)
+ *            → RESOLVED, or SELLER on an observed absence
+ * </pre>
+ *
+ * <p>Two things this is not. It is not the Customer Goal Interpreter deciding what a decision needs — the interpreter
+ * never sees a capability. And it is not a planner: the prerequisite is named by a resolver <b>after it has run</b>,
+ * one at a time, with nothing written down about what comes after it.
+ *
+ * <h2>The waiter/resume state machine</h2>
+ *
+ * <p>Nine properties, each asserted by {@code ResolutionPolicyInvariantTest} and exercised by a fixture:
+ *
+ * <ol type="A">
+ *   <li>a resolver that names a prerequisite is <b>waiting</b>;</li>
+ *   <li>when the prerequisite produces an observation, the waiter is dispatched again;</li>
+ *   <li>when the prerequisite gaps, fails, finds nothing or asks the customer something, the waiter is
+ *       <b>not</b> resumed and the goal settles in the prerequisite's own state;</li>
+ *   <li>a prerequisite succeeding is <b>never</b> the goal being resolved;</li>
+ *   <li>the same prerequisite cannot be asked for twice;</li>
+ *   <li>a cycle — R1 waits on R2 waits on R1 — ends closed;</li>
+ *   <li>the chain is bounded by {@link #MAX_WAIT_DEPTH}, which is the registry's size and not a chosen number;</li>
+ *   <li>the resolver resumed is <b>the exact capability that asked</b>, not another of the same authority;</li>
+ *   <li>the prerequisite's observation, with its provenance, stays in the trace for the resumed resolver to read.</li>
+ * </ol>
+ *
  * <h2>Two things this will not do</h2>
  *
  * <p><b>1. It never substitutes an authority for an unavailable one.</b> If the resolver could not run — source
@@ -44,6 +81,20 @@ import java.util.List;
  * consulted. That is the C6 defect expressed as a structure instead of a sentence in a prompt.
  */
 public final class ResolutionPolicy {
+
+    /**
+     * <b>How deep a chain of waits may go</b> — derived, not chosen.
+     *
+     * <p>A resolver does not wait on itself ({@link ResolverOutcome}), and a prerequisite that has already run is
+     * refused above, so every capability appears in a wait chain at most once. The registry's own size is therefore
+     * the only bound the architecture can justify, and it is written as that expression rather than as a number so
+     * that registering a capability moves it and nobody has to remember to.
+     *
+     * <p>It is a second fence rather than the only one: {@link GoalResolution#MAX_STEPS} already stops the loop, and
+     * this exists so that an over-deep chain ends by <b>saying which invariant it broke</b> instead of running out of
+     * steps and looking like an ordinary timeout.
+     */
+    public static final int MAX_WAIT_DEPTH = CapabilityId.values().length - 1;
 
     private ResolutionPolicy() {
     }
@@ -93,30 +144,44 @@ public final class ResolutionPolicy {
         }
         ResolverOutcome last = observed.get(observed.size() - 1);
 
-        // The only chaining there is: the resolver that just ran named what must run before it can continue.
+        // (A) The only chaining there is: the resolver that just ran named what must run before it can continue.
         if (last.prerequisite() != null) {
+            // (E, F) A request for something already served is a repeat; a request for something already in the chain
+            // closes a cycle. Both reduce to the same observation — this capability has run — so R1 waiting on R2
+            // waiting on R1 ends on the second request instead of spinning.
             if (alreadyRan(observed, last.prerequisite())) {
-                // Asking twice for the same thing is a loop, not progress.
+                return new Settle(ResolutionState.FAILED, null);
+            }
+            // (G) Bounded by the registry rather than by a number anyone chose.
+            if (openWaits(observed) > MAX_WAIT_DEPTH) {
                 return new Settle(ResolutionState.FAILED, null);
             }
             return new Run(last.prerequisite().authority(), last.prerequisite());
         }
 
-        ResolutionState state = last.state();
-        if (state == ResolutionState.CAPABILITY_GAP) {
-            // A capability that could not run does not hand its question to a different authority — and a resolver
-            // waiting on it cannot continue either, so this is checked before the resume below.
-            return new Settle(ResolutionState.CAPABILITY_GAP, last.resolution().gap());
+        // (B, C, D, H) A resolver that named a prerequisite is WAITING, and the prerequisite's own result is not the
+        // goal's answer. Without this the loop settles on whatever the prerequisite returned and the resolver that
+        // asked is never heard from again — measured 2026-09-20: a DECISION whose policy needed the order's fulfilment
+        // state reported RESOLVED having evaluated no decision at all, because the order read succeeded. Nothing is
+        // planned here: the waiter was named by a resolver after running, and returning to it is the mechanical
+        // consequence of that.
+        Wait wait = pending(observed);
+        if (wait != null) {
+            ResolutionState got = wait.result().state();
+            if (!got.closesTheNeed()) {
+                // (C) The waiter asked for an observation and did not get one. A prerequisite that gapped, failed,
+                // found nothing written down, or turned into a question for the customer blocks everyone behind it;
+                // resuming on any of those would be resuming as though it had succeeded. The prerequisite's own state
+                // becomes the goal's, because it is the honest account of where this stopped.
+                return new Settle(got, got == ResolutionState.CAPABILITY_GAP ? wait.result().resolution().gap() : null);
+            }
+            return new Run(wait.waiter().authority(), wait.waiter());
         }
 
-        // A resolver that named a prerequisite is WAITING, and the prerequisite's own result is not the goal's answer.
-        // Without this the loop settles on whatever the prerequisite returned and the resolver that asked is never
-        // heard from again — measured: a DECISION whose policy needed the order's fulfilment state reported RESOLVED
-        // having evaluated no decision at all, because the order read succeeded. Nothing is planned here: the waiter
-        // was named by a resolver after running, and resuming it is the mechanical consequence of that.
-        CapabilityId waiting = resumable(observed);
-        if (waiting != null) {
-            return new Run(waiting.authority(), waiting);
+        ResolutionState state = last.state();
+        if (state == ResolutionState.CAPABILITY_GAP) {
+            // A capability that could not run does not hand its question to a different authority.
+            return new Settle(ResolutionState.CAPABILITY_GAP, last.resolution().gap());
         }
 
         if (state.closesTheNeed() || state == ResolutionState.NEEDS_CUSTOMER_INPUT || state == ResolutionState.FAILED) {
@@ -145,21 +210,33 @@ public final class ResolutionPolicy {
     }
 
     /**
-     * The resolver that is still waiting, if any: one that named a prerequisite, whose prerequisite has since run,
-     * and which has not been heard from since. Walked newest-first so a nested wait resumes innermost-first.
+     * A resolver that is waiting, and the result its prerequisite produced.
+     *
+     * @param waiter the capability that asked — <b>the exact one</b>, never merely one of the same authority
+     * @param result what its prerequisite observed, which is what decides whether the waiter may continue
+     */
+    private record Wait(CapabilityId waiter, ResolverOutcome result) {
+    }
+
+    /**
+     * The innermost outstanding wait: a resolver that named a prerequisite, whose prerequisite has since run, and
+     * which has not been heard from since. Walked newest-first, so a nested chain comes back innermost-first — the
+     * resolver that asked most recently is the one whose question was just answered.
      *
      * <p>Each resume appends an outcome for that capability after its prerequisite, so the same wait cannot fire
      * twice and the loop still terminates on {@link GoalResolution#MAX_STEPS}.
      */
-    private static CapabilityId resumable(List<ResolverOutcome> observed) {
+    private static Wait pending(List<ResolverOutcome> observed) {
         for (int i = observed.size() - 1; i >= 0; i--) {
             ResolverOutcome waiter = observed.get(i);
             if (waiter.prerequisite() == null) {
                 continue;
             }
             CapabilityId who = waiter.resolution().capability();
+            // The LAST word from the prerequisite, not its first. A prerequisite may itself have waited on something
+            // and spoken twice; the outcome that decides whether this waiter may continue is the one it ended on.
             int ranAt = -1;
-            for (int j = i + 1; j < observed.size(); j++) {
+            for (int j = observed.size() - 1; j > i; j--) {
                 if (observed.get(j).resolution().capability() == waiter.prerequisite()) {
                     ranAt = j;
                     break;
@@ -176,10 +253,33 @@ public final class ResolutionPolicy {
                 }
             }
             if (!heardSince) {
-                return who;
+                return new Wait(who, observed.get(ranAt));
             }
         }
         return null;
+    }
+
+    /** How many resolvers have asked for something and not yet been heard from again. */
+    private static int openWaits(List<ResolverOutcome> observed) {
+        int open = 0;
+        for (int i = 0; i < observed.size(); i++) {
+            ResolverOutcome waiter = observed.get(i);
+            if (waiter.prerequisite() == null) {
+                continue;
+            }
+            CapabilityId who = waiter.resolution().capability();
+            boolean heardSince = false;
+            for (int j = i + 1; j < observed.size(); j++) {
+                if (observed.get(j).resolution().capability() == who) {
+                    heardSince = true;
+                    break;
+                }
+            }
+            if (!heardSince) {
+                open++;
+            }
+        }
+        return open;
     }
 
     private static boolean alreadyRan(List<ResolverOutcome> observed, CapabilityId capability) {

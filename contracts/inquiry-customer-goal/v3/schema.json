@@ -1,0 +1,143 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "inquiry-customer-goal/v3",
+ "description": "One row per CUSTOMER GOAL, not per frozen resolution goal — the unit changed for one row and one reason. A message can carry more than one goal, and one of the 72 ranks its two requests ('send just the nozzle; if that is impossible, refund me'), so that frozen row emits two goals joined by a customer-stated FALLBACK. Every class is adjudicated: no row is open. Rows whose adjudicated goals no longer follow from the frozen row carry a declared legacy_conflict; the frozen resolution gold is NOT re-derived here.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "q",
+  "goal",
+  "gid",
+  "emits_goal",
+  "requested_outcome",
+  "referent",
+  "basis",
+  "explicit_constraints",
+  "no_goal_reason",
+  "fallback_of",
+  "has_fallback",
+  "gold_closing_authority",
+  "gold_v2_type",
+  "gold_steps",
+  "gold_terminal",
+  "legacy_conflict",
+  "legacy_conflict_why"
+ ],
+ "properties": {
+  "q": {
+   "type": "string",
+   "description": "the case id, as the resolution gold names it"
+  },
+  "goal": {
+   "type": "string",
+   "description": "the FROZEN resolution goal id this row came from. Two customer goals may share one."
+  },
+  "gid": {
+   "type": "string",
+   "description": "this customer goal's own id within the case. Equal to `goal` except where one frozen row split; the second goal of the split row carries a suffixed id."
+  },
+  "emits_goal": {
+   "type": "boolean",
+   "description": "false only for the one row the product owner ruled NO_GOAL. The row stays in the corpus so that a goal predicted on it is countable as invented."
+  },
+  "requested_outcome": {
+   "description": "null exactly when emits_goal is false. There is no 'unlabelled' value in v3: every row is decided.",
+   "enum": [
+    "INFORMATION",
+    "STATE_READ",
+    "DECISION",
+    "ACTION",
+    null
+   ]
+  },
+  "referent": {
+   "description": "what the goal is about, bound to a registry entry. UNRESOLVED is a real answer and not a parse failure; no row in v3 carries it.",
+   "enum": [
+    "CURRENT_LISTING",
+    "SELLER_CATALOGUE",
+    "CURRENT_ORDER",
+    "ORGANIZATION",
+    "UNRESOLVED",
+    null
+   ]
+  },
+  "basis": {
+   "description": "on what evidence the goal is attributed to the customer. There is no UNSTATED: a goal with no stated or directly implied outcome is not emitted, and absence is the observable.",
+   "enum": [
+    "STATED",
+    "DIRECTLY_IMPLIED",
+    null
+   ]
+  },
+  "explicit_constraints": {
+   "type": "integer",
+   "minimum": 0,
+   "description": "how many values the customer actually said. A COUNT: the words themselves stay in the capture."
+  },
+  "no_goal_reason": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "description": "set exactly when the product owner ruled NO_GOAL. NOT \"ignore\" — the case may still raise VOC/complaint signals elsewhere in Reviewnary."
+  },
+  "fallback_of": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "description": "the gid this goal is the customer-stated fallback of. A goal with this set was asked for ONLY IF that one cannot happen, and no observation in this runtime establishes that — so it is never attempted. The condition's own words are customer text and stay in the capture."
+  },
+  "has_fallback": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "description": "the gid the customer named as this goal's fallback, if any"
+  },
+  "gold_closing_authority": {
+   "enum": [
+    "KNOWLEDGE",
+    "ENTITY_STATE",
+    "PROCEDURE",
+    "SELLER"
+   ],
+   "description": "carried from the frozen plan gold so the two representations can be compared row by row"
+  },
+  "gold_v2_type": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "gold_steps": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "description": "the frozen required capabilities, carried so the conflict is checkable and so the DECISION prerequisite audit can be recomputed"
+  },
+  "gold_terminal": {
+   "type": "object",
+   "description": "the frozen expected terminal, carried unchanged"
+  },
+  "legacy_conflict": {
+   "enum": [
+    "GOAL_OBSOLETE",
+    "CLOSER_MOVES",
+    "SCOPE_MOVES",
+    "PLAN_OBSOLETE",
+    "NO_CAPABILITY",
+    "GOAL_SPLITS",
+    null
+   ],
+   "description": "how the frozen resolution-gold row stopped following from the adjudicated goals. CLOSER_MOVES: a different authority ends it. SCOPE_MOVES: the same authority, a different instance. GOAL_SPLITS: one frozen row, two customer goals. Declared, never suppressed, and never silently re-derived."
+  },
+  "legacy_conflict_why": {
+   "type": [
+    "string",
+    "null"
+   ]
+  }
+ }
+}

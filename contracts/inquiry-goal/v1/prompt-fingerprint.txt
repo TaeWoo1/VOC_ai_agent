@@ -1,0 +1,8 @@
+# Customer Goal Interpreter — what a recorded run is a run OF (Inquiry v3.5).
+#
+# Both halves, because either one moving changes what the numbers mean: a prompt edit that leaves the schema alone
+# still changes the answers, and a schema edit that leaves the prompt alone still changes what can be said. A smoke
+# manifest quotes this file, and a run whose fingerprint does not match it is a different experiment.
+#
+# Asserted by CustomerGoalPromptTest; regenerate only when the change is intended.
+customer-goal-interpreter/v1 system=984fbb8a96857439abd1c17194599c7cf2ffdfcebc929b5922315627fbf4806b schema=47989c9e37dba63d4f4ae00b8001c04a32655dc21f5325a866024a5e84d5f3cb

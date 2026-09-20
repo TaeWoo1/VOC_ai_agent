@@ -532,6 +532,12 @@ closes a goal only on fresh observations — refused it. The fixture gained an o
 
 ## 20. Next step — the smallest Goal Interpreter smoke
 
+> **STALE — superseded twice.** Revised to 14 calls in §21.8, and superseded again in **§22.11**: the contract
+> changed (a message is now a goal SET and may carry a customer-stated fallback), and the prompt and schema that a
+> run would be a run *of* did not exist when this was written. The manifest below is kept as lineage and **must not
+> be executed**; its request fingerprints would not match anything.
+
+
 **Not approved and not run. No model call was made in this package.** This is the manifest to approve or refuse.
 
 ### Blocking first: the 12 adjudication rows
@@ -762,6 +768,11 @@ So **D and E can be decided on the existing contract**; **F is a contract decisi
 
 ### 21.8 Revised smoke manifest — still not approved, still not run
 
+> **STALE as of §22.** The F adjudication changed the contract — the wire now carries `{goals, relations}` — so the
+> 14 fixtures this manifest names are no longer the whole corpus and the bar no longer covers what can go wrong.
+> Regenerated in **§22.11**, against a prompt and schema that now exist and are fingerprinted.
+
+
 Changes from §20: **14 calls** (was 12) for the two new fixtures, and the bar gains two items.
 
 | | |
@@ -789,3 +800,294 @@ Changes from §20: **14 calls** (was 12) for the two new fixtures, and the bar g
 **Blocking still:** D and E are decidable on the existing contract and should be decided first so the corpus label
 is stable; **F is a contract decision and blocks any change to `CustomerGoal`'s shape.** Failure classification and
 the no-retry rule are unchanged from §20.
+
+---
+
+## 22. Goal semantics completion and resolution-loop hardening (2026-09-20)
+
+Classes **D, E and F** are adjudicated, so **no row of the 72 is open** and the acceptance target — unresolved
+semantic annotation = 0 — is a measured number. F turned out not to be a labelling question at all, and closing it
+needed the one contract change in this package. Testing the waiter rule that §21 introduced found a **second live
+defect in the same rule**.
+
+No model call, no marketplace call, no DB write, no migration, no production behaviour. Nothing pushed.
+
+### 22.1 D and E — adjudicated against the originals and direct precedent
+
+| | **D** `R:f81ad84a n1` | **E** `R:f403e606 n2` |
+|---|---|---|
+| shape | asks to be **told** something later | asks which of two products is better |
+| candidates | `STATE_READ` · `ACTION` | `INFORMATION` · `DECISION` |
+| **ruling** | **`STATE_READ` · `CURRENT_ORDER` · `STATED` · 0** | **`INFORMATION` · `SELLER_CATALOGUE` · `STATED` · 1** |
+| confidence | **HIGH** on the outcome | **HIGH** on the outcome, **MEDIUM** on the referent |
+
+**D.** Two frozen rows already settle the thing it was open on. `R:7a8136b2` ("when will you ship?") and `S:T13a`
+("when does it leave?") both ask about a shipment **that has not happened yet**, and both are `STATE_READ`. What is
+left over is the *delivery* of the answer — "send it to me when it happens" — and `CustomerGoal` has no slot for when
+or how an answer reaches the customer, **for any row**. That delta is unrepresentable rather than a difference in
+requested outcome, and unlike F it carries no Wrong Automation risk: answering now under-serves, it does not act.
+
+The discriminator that separates D from the adjudicated `ACTION`s is one question, and it already explains every row
+the product owner ruled: **does the requested outcome change the order, or transfer observed facts to the customer?**
+`R:4181864b` (arrive sooner), `R:83e607e0` (missing goods sent) and `S:N2` (an invoice issued) change it. D does not.
+
+Corroboration nobody arranged: the frozen resolution gold closes D on `ENTITY_STATE` with a single `ENTITY.ORDER`
+step. The two representations agree without being made to.
+
+**E.** Precedent for the outcome is direct and doubled. `S:T10a` ("what is the difference between the package and the
+bulk?") is `INFORMATION` about `SELLER_CATALOGUE`; `R:77a91fab n3` ("please recommend a size") is `INFORMATION`. A
+recommendation between products is answered from product knowledge. It is **not** `DECISION`: every `DECISION` row in
+the gold asks the seller to decide about **the seller's own conduct** — restock, discount, approve an exception, allow
+an address change — and this asks about two products.
+
+**The referent is the weaker half and is recorded as such.** The customer names a product and the text does not say
+whose it is. `SELLER_CATALOGUE` is the faithful reading — a customer writing to this seller comparing "the identical
+product" is comparing within the seller's line, the same assumption `S:T10a` already rests on — and it is also the
+fail-soft one: the catalogue resolver looks, and finding nothing is an outcome of looking. `UNRESOLVED` would assert
+that nothing can be identified and would stop us looking at all. **If the named product is a competitor's,
+`UNRESOLVED` is right and the goal ends at a gap.**
+
+**A fixture had to move because of this, and it is reported rather than quietly fixed.** `G11` — the scenario that
+demonstrates an unbound subject — used *this row's own sentence*. Leaving it would have taught the smoke corpus the
+opposite of the gold, so `G11` now asks about an item bought somewhere else, which nothing in this deployment can be
+about. The note is in the fixture.
+
+### 22.2 F — the exact original, and what it became
+
+> 논슬림 파워 분무기를 주문했는데, 분무기 손잡이랑 노즐부분이 파손돼서 왔어요.
+> **노즐 부분만 따로 배송해주셨으면 해서요.** 반품 교환 받기는 번거롭구요. **노즐만 배송이 불가능하면 환불처리 해주셨으면 해요.**
+
+| | |
+|---|---|
+| `n1` | `ACTION` · `CURRENT_ORDER` · `STATED` · 1 constraint — send the nozzle |
+| `n1b` | `ACTION` · `CURRENT_ORDER` · `STATED` · 0 — refund |
+| relation | `FALLBACK`, primary `n1`, fallback `n1b`, stated condition **「노즐만 배송이 불가능하면」** |
+
+Two independent action goals lose the only thing that makes this message safe to act on. A runtime holding two equal
+action goals may reasonably do either, and **doing the second one first is Wrong Automation performed on the
+customer's own words.**
+
+### 22.3 The FALLBACK contract, and why it is not the planner coming back
+
+```
+relation := { FALLBACK, primaryGoalId, fallbackGoalId, statedCondition }
+```
+
+Four structural reasons, none of them a sentence in a prompt:
+
+1. **There is one kind**, and it is a thing customers say. Every candidate beside it — SEQUENCE, DEPENDS_ON, THEN,
+   PREREQUISITE — describes how work should be carried out, which is the question the withdrawn planner answered
+   wrongly and which no customer sentence answers. **An execution order between goals is not expressible.**
+2. **`statedCondition` is mandatory and is the customer's own words.** A model that wants to relate two goals must
+   quote the clause that relates them. Two action goals from a message with no conditional clause **cannot** be
+   related, because blank is refused — by the record's constructor and by the wire schema.
+3. **It relates goals, never capabilities.** No slot for a resolver, an authority, a capability, a gap reason or a
+   step, so the one legal form of chaining — a prerequisite named by a resolver *after* running — cannot be smuggled
+   in as a customer-stated relation.
+4. **Nothing in the loop reads it.** `ResolutionPolicy` takes a goal and observations; it has no parameter that could
+   carry a relation, and a structural test enumerates its methods to say so.
+
+The set is a **forest of chains, never a graph**: at most one fallback per goal, at most one incoming per goal, no
+cycles. A second edge out of one goal is a ranking nobody wrote.
+
+### 22.4 CAPABILITY_GAP is not semantic impossibility
+
+Activating "refund me" requires knowing that "send just the nozzle" **will not happen**. Enumerate what this runtime
+can actually end a goal with:
+
+| terminal | what it asserts | a refusal? |
+|---|---|---|
+| `RESOLVED` / `RESOLVED_CONDITIONAL` | an answer was produced | no |
+| `NEEDS_CUSTOMER_INPUT` | we are waiting on the customer | no |
+| `NEEDS_SELLER` | nobody has written down whether it is possible | **the opposite of knowing** |
+| `CAPABILITY_GAP` | **this deployment could not attempt it** | no — and this is the trap |
+| `FAILED` | something upstream broke | no |
+
+**There is no producer of "the seller considered this and refused" in this system**, so there is no condition under
+which a fallback may fire. The fourth row is the dangerous one: every procedure in this registry is
+`DECLARED_NO_EXECUTOR`, so **every** action goal ends at `CAPABILITY_GAP`, and a runtime reading a gap as
+impossibility would refund every customer who ever wrote a conditional sentence — on the strength of a missing
+integration.
+
+So the disposition is not "activate later, once we are cleverer". `GoalSetResolution` returns
+**`WITHHELD_FOR_CUSTOMER_STATED_CONDITION`**: the goal is **not attempted at all** — no resolver is asked for it —
+and it is handed over with the customer's clause attached. `GoalRelationTest.aGapIsNotARefusal` asserts this for
+every reachable terminal and **every gap reason there is**, not for a sample.
+
+### 22.5 The waiter/resume state machine — and the second defect
+
+Testing §21's own rule found that it was half a rule. The 09f34a28 fix stopped the resume for `CAPABILITY_GAP`
+**only**. Everything else fell through to the resume:
+
+> A decision rule asked for the order state. The order resolver **ran and found nothing** — `NEEDS_SELLER`, not a gap.
+> The loop resumed the decision rule **as though its question had been answered.**
+
+Same for `NEEDS_CUSTOMER_INPUT` and `FAILED`. A resolver that asked for an observation and did not get one cannot
+continue, whatever the reason, and the honest terminal is the prerequisite's own state. `G19` and
+`aBlockedPrerequisiteIsNeverResumedPast` were **confirmed red against `09f34a28`** before the fix landed.
+
+A second, quieter bug came out of the nesting fixture: the resume read the prerequisite's **first** word rather than
+its **last**. A prerequisite that had itself waited spoke twice, and the blocking check would have read its earlier
+"I am waiting" instead of its later result. Fixed to the last outcome; `G20` pins it.
+
+Nine properties, each with a test and a fixture:
+
+| | property | fixture |
+|---|---|---|
+| **A** | a resolver that names a prerequisite is *waiting* | G12 · G13 |
+| **B** | the prerequisite produces an observation → the waiter is dispatched again | G13 · G17 |
+| **C** | the prerequisite gaps, fails, finds nothing or asks the customer → **not resumed** | G18 · **G19** |
+| **D** | a prerequisite succeeding is never the goal being resolved | G13 · G14 |
+| **E** | the same prerequisite cannot be asked for twice | G21 |
+| **F** | a cycle ends closed, on the second request | G22 |
+| **G** | bounded by `MAX_WAIT_DEPTH` | — |
+| **H** | the **exact** waiter is resumed, not another of the same authority | G20 |
+| **I** | the observation's provenance survives into the resumed step | G13 · G20 |
+
+**G is derived, not chosen.** A resolver does not wait on itself and a repeat is refused, so a chain visits distinct
+capabilities and the registry's own size is the only bound the architecture can justify:
+`MAX_WAIT_DEPTH = CapabilityId.values().length - 1`, written as that expression so registering a capability moves it
+and nobody has to remember to. It is a second fence — `MAX_STEPS` already stops the loop — and it exists so an
+over-deep chain **says which invariant it broke** instead of looking like an ordinary timeout.
+
+### 22.6 What a DECISION resolver actually does
+
+"Knowledge, and the seller if there is none" was too small a description, and §21 measured how much: **3 of the 5**
+DECISION goals require observed entity state, and **two of those carried the entity read in the frozen gold before
+any of them were re-adjudicated.**
+
+```
+DECISION → KNOWLEDGE (find the rule) → [the rule names a prerequisite] → ENTITY_STATE → KNOWLEDGE (apply it)
+         → RESOLVED, or SELLER on an observed absence
+```
+
+Knowledge is asked first because **a rule is a thing the seller wrote down**. Having found the rule, the resolver may
+discover that applying it needs a fact, and names **that one capability**. Two things this is not: the Customer Goal
+Interpreter deciding what a decision needs — the interpreter never sees a capability — and a planner, because the
+prerequisite is named by a resolver *after it has run*, one at a time, with nothing written down about what follows.
+
+### 22.7 The three regressions, end to end and offline
+
+| | fixture | what is pinned |
+|---|---|---|
+| **S:T12a** 「주문했는데 받는 곳 주소를 바꿀 수 있나요?」 | `G13` · `G14` · `G18` · `G21` | `DECISION`, **not** `ACTION`. The decision rule may require `ENTITY.ORDER`; that entity read is a **resolver prerequisite and not a customer goal**. No procedure is generated — `forbidden_dispatch` includes it — because the customer has not asked for the change. |
+| **S:T10b** 「묶음 상품인 줄 알고 샀는데 한 개만 왔어요」 | `G15` | one `INFORMATION` goal about `CURRENT_LISTING`. No resend, refund, compensation or order action is invented; `PROCEDURE` is unreachable by construction. If evidence later shows a real fulfilment defect, that is a **new Case raised from observed operational state**, not a future action this interpreter manufactured from a complaint. |
+| **S:N2** 「세금계산서 발행해 주세요」 | `G16` | `ACTION`, and the loop settles at `CAPABILITY_GAP / NOT_SUPPORTED` **having asked nobody**. It does not become `INFORMATION` answered from `KNOWLEDGE.ORG`, which would answer a different question. |
+
+**A generic gap reason was considered for S:N2 and is not needed.** `NOT_SUPPORTED` is already documented as "this
+channel, surface or listing does not provide the field or the capability — a definite limit", which is exactly the
+claim: the registry has no procedure about an organization at all. No tax-invoice capability was created.
+
+### 22.8 CustomerGoal gold v3
+
+`eval-store:inquiry-customer-goal/v3` — goals.jsonl `045b670b…`, labels.py `dc80de95…`, `verify → ok`.
+
+| | |
+|---|---|
+| gold rows | **72** (67 cases) |
+| goals emitted | **72** |
+| NO_GOAL rows | **1** |
+| INFORMATION · STATE_READ · DECISION · ACTION | **56 · 4 · 5 · 7** |
+| multi-goal rows | **1** |
+| explicit FALLBACK relations | **1** |
+| **unresolved rows** | **0** |
+| legacy conflicts | **7**, all declared · **undeclared 0** |
+
+v1 and v2 stay frozen and readable. The build's check got **stronger**, not weaker: it still refuses to assert that
+the old gold agrees, and it now checks two ways of disagreeing — the **closer** (a different authority ends the goal)
+and the **instance** (a frozen step reads something the adjudicated referent is not about). A declaration that is not
+a real disagreement also fails, so the list cannot be padded.
+
+Two conflict kinds are new and both come from this package: **`SCOPE_MOVES`** (`R:f403e606 n2` — same closing
+authority, different instance; the only row in 72 where that happens) and **`GOAL_SPLITS`** (`R:515dd536 n1` — one
+frozen row, two customer goals, and the refund has no row in the old gold at all). As before, **none of the seven is
+re-derived here.**
+
+### 22.9 Eval — what Layer A now reports
+
+Added: **relation fidelity**, **invented relation rate**, and five **safety blockers** reported as their own block
+rather than folded into a rate:
+
+| blocker | why it is not tradeable |
+|---|---|
+| invented `ACTION` | the planner's actual defect, and the one invented goal that could *do* something to an order |
+| invented `FALLBACK` | the model deciding what happens next, wearing a customer's voice |
+| **lost stated `FALLBACK`** | the customer's own ranking dropped — how a refund reaches someone who asked for a nozzle |
+| capability changed semantics | the registry editing what the customer asked for |
+| goal on a `NO_GOAL` row | a request that was never made |
+
+The third is the one that needed a metric: a prediction with **both goals right, both outcomes right, both referents
+right** scores 1.0 on recall, outcome accuracy and referent accuracy while silently discarding the ranking. That test
+is in the suite.
+
+### 22.10 Tests and mutations
+
+backend **4,564 / 0** (578 classes, 54 skipped) · tools **124 / 0** · mutations **33 / 33 caught** · fixtures **14 → 23**.
+
+Five new mutations cover the new rules; the two that matter most break the `statedCondition` fence and drop the
+customer's ranking, and both are caught. **G19 and `aBlockedPrerequisiteIsNeverResumedPast` were verified red against
+`09f34a28`** before the fix — the only evidence that a new test is testing anything.
+
+### 22.11 The prompt, the schema and the smallest smoke — not approved, not run
+
+The gold is frozen at 72/72 with relation semantics settled, so the interpreter's instruction and schema now exist:
+
+```
+customer-goal-interpreter/v1
+system=984fbb8a96857439abd1c17194599c7cf2ffdfcebc929b5922315627fbf4806b
+schema=47989c9e37dba63d4f4ae00b8001c04a32655dc21f5325a866024a5e84d5f3cb
+```
+
+Pinned in `contracts/inquiry-goal/v1/prompt-fingerprint.txt` and asserted by `CustomerGoalPromptTest`, because a run
+recorded against a prompt that has since moved is a run of nothing.
+
+**The payload floor got narrower.** The planner sent the message and four facts; this sends the message and **two**
+(surface, `listing_resolved`). A goal never names an option and never asks for anything — the resolvers own both — so
+the option count and the askable inputs left the wire. Availability stays out for the reason it was always out: told
+what this deployment can do, a model rewrites what the customer asked for, and `S:N2` is where that is most tempting.
+
+| | |
+|---|---|
+| inputs | the **23** synthetic fixtures, goals and relations only |
+| **hard cap** | **14 calls** — a chosen subset, one per fixture, **no retry, no re-prompt** |
+| model | `gpt-5-2025-08-07`, unchanged |
+| prompt / schema | the fingerprint above; a mismatch invalidates the run |
+| marketplace / DB / migration / production Case | **0** |
+| storage | raw stored before scoring in `eval-store:runs/v35-goal-smoke`, `run-verify` before any number is read |
+| derived cost | ≈500–800 prompt · ≈50–110 completion per call — **extrapolated from the v5 planner baseline, not measured** |
+
+**The 14 chosen**, each for a distinct thing that can go wrong: `G01` INFORMATION · `G03` STATE_READ · `G05` DECISION
+· `G04` ACTION · `G06` and `G07` the DECISION/ACTION boundary on one sentence apart · `G15` no invented remedy ·
+`G16` capability-unavailable ACTION semantics · `G13` no prerequisite emitted as a second goal · `G11` UNRESOLVED ·
+`G02` SELLER_CATALOGUE · `G08` no constraint the customer did not say · **`G23` the explicit fallback** · and one
+NO_GOAL case from the corpus (`R:0c582144`).
+
+**Bar — 12 of 12. Items 2, 3, 9, 11 and 12 are not tradeable:**
+
+1. 14/14 answered · envelope / parse / contract violations 0
+2. **invented goal rate = 0**
+3. **invented `ACTION` = 0**
+4. `G05` · `G06` each produce exactly one `DECISION`, no `ACTION`
+5. `G07` produces two goals, `DECISION` + `ACTION`
+6. `requested_outcome` accuracy 14/14
+7. referent accuracy 14/14, including `G11` → `UNRESOLVED`
+8. zero `GOAL_PLAN` / `RELATION_PLAN` refusals
+9. **`G13` produces one `DECISION` goal — the prerequisite is never a second goal**
+10. constraint fidelity: no constraint the customer did not say
+11. **`G23` produces two `ACTION` goals and one `FALLBACK` carrying the customer's clause — lost stated fallback = 0**
+12. **invented relation rate = 0** — no fixture without a conditional clause gets a relation
+
+**Nothing blocks this now.** D, E and F are decided, the gold is frozen, the contract carries the relation and the
+prompt is fingerprinted. What is missing is the one thing this package cannot supply: **approval to spend 14 model
+calls.**
+
+### Still not done, and named
+
+- **The seven legacy resolution-gold rows are not re-derived.** They are identified with reasons; re-labelling the
+  frozen resolution gold is a separate decision with its own evidence rows.
+- **`R:f403e606`'s referent is MEDIUM confidence.** If the product the customer names is a competitor's,
+  `UNRESOLVED` is right. The text does not say, and nothing here guesses further.
+- **No producer of an authoritative refusal exists**, so no fallback can ever fire today. When one is built it will
+  be a new observation with its own evidence, and `GoalSetResolution` is the single place that would change.
+- **`GoalSetResolution` has no production caller**, exactly like the loop it wraps. Everything in this package is
+  reachable only from tests.

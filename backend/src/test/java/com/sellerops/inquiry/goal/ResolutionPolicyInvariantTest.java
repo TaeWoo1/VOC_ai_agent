@@ -171,6 +171,90 @@ class ResolutionPolicyInvariantTest {
     }
 
     @Test
+    @DisplayName("C: a prerequisite that produced no observation blocks the waiter, whatever the reason")
+    void aBlockedPrerequisiteIsNeverResumedPast() {
+        // The 09f34a28 fix stopped the resume for CAPABILITY_GAP only. Everything else — the resolver ran and found
+        // nothing, it turned into a question for the customer, it broke — fell through to the resume, and the waiter
+        // was dispatched as though its question had been answered. A resolver that asked for an observation and did
+        // not get one cannot continue, and the honest terminal is the prerequisite's own state.
+        for (ResolutionState blocking : List.of(ResolutionState.NEEDS_SELLER, ResolutionState.NEEDS_CUSTOMER_INPUT,
+                ResolutionState.FAILED)) {
+            List<ResolverOutcome> observed = new ArrayList<>();
+            observed.add(ResolverOutcome.needs(new Resolution(CapabilityId.KNOWLEDGE_ORG,
+                    ResolutionState.NEEDS_SELLER, null, null, null, null, null), CapabilityId.ENTITY_ORDER));
+            observed.add(ResolverOutcome.of(new Resolution(CapabilityId.ENTITY_ORDER, blocking, null, null,
+                    blocking == ResolutionState.NEEDS_CUSTOMER_INPUT
+                            ? List.of(com.sellerops.inquiry.authority.CustomerInput.OPTION) : null, null, null)));
+            var next = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+            assertThat(next).as("%s resumed the waiter", blocking).isInstanceOf(ResolutionPolicy.Settle.class);
+            assertThat(((ResolutionPolicy.Settle) next).state()).isEqualTo(blocking);
+        }
+    }
+
+    @Test
+    @DisplayName("D: a prerequisite succeeding is never the goal being resolved")
+    void aPrerequisiteIsNotTheAnswer() {
+        List<ResolverOutcome> observed = new ArrayList<>();
+        observed.add(ResolverOutcome.needs(new Resolution(CapabilityId.KNOWLEDGE_ORG, ResolutionState.NEEDS_SELLER,
+                null, null, null, null, null), CapabilityId.ENTITY_ORDER));
+        observed.add(readOrder());
+        // The order read RESOLVED. If that were allowed to settle the goal, a decision would report an answer having
+        // evaluated nothing — the defect measured on 2026-09-20.
+        var next = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+        assertThat(next).isInstanceOf(ResolutionPolicy.Run.class);
+        assertThat(((ResolutionPolicy.Run) next).capability()).isEqualTo(CapabilityId.KNOWLEDGE_ORG);
+    }
+
+    @Test
+    @DisplayName("F: a cycle ends closed — R1 waits on R2 waits on R1 never completes a lap")
+    void aCycleFailsClosed() {
+        var trace = GoalResolution.run(goal(RequestedOutcome.ACTION, Referent.CURRENT_ORDER), run ->
+                switch (run.resolver()) {
+                    case PROCEDURE -> ResolverOutcome.needs(new Resolution(CapabilityId.PROCEDURE_ORDER_ACTION,
+                            ResolutionState.NEEDS_SELLER, null, null, null, null, null), CapabilityId.KNOWLEDGE_ORG);
+                    case KNOWLEDGE -> ResolverOutcome.needs(new Resolution(CapabilityId.KNOWLEDGE_ORG,
+                            ResolutionState.NEEDS_SELLER, null, null, null, null, null),
+                            CapabilityId.PROCEDURE_ORDER_ACTION);
+                    default -> throw new IllegalStateException("the cycle reached a third resolver");
+                });
+        assertThat(trace.state()).isEqualTo(ResolutionState.FAILED);
+        assertThat(trace.steps()).as("detected on the second request, not by running out of steps").isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("G: the wait bound is the registry's size — a number nobody chose, and the loop stops under it")
+    void theDepthBoundIsDerived() {
+        assertThat(ResolutionPolicy.MAX_WAIT_DEPTH).isEqualTo(CapabilityId.values().length - 1);
+        // A wait chain visits distinct capabilities (a repeat is refused above), so the registry bounds it from
+        // above, and MAX_STEPS stops the loop before it could even use every capability once.
+        assertThat(GoalResolution.MAX_STEPS).isLessThanOrEqualTo(CapabilityId.values().length);
+    }
+
+    @Test
+    @DisplayName("H and I: the exact waiter is resumed, and the prerequisite's observation is still there to read")
+    void theWaiterResumedIsTheOneThatAsked() {
+        // Two knowledge capabilities are in play; only the one that asked may come back.
+        List<ResolverOutcome> observed = new ArrayList<>();
+        observed.add(ResolverOutcome.of(new Resolution(CapabilityId.KNOWLEDGE_PRODUCT, ResolutionState.NEEDS_SELLER,
+                null, null, null, null, null)));
+        observed.add(ResolverOutcome.needs(new Resolution(CapabilityId.KNOWLEDGE_ORG, ResolutionState.NEEDS_SELLER,
+                null, null, null, null, null), CapabilityId.ENTITY_ORDER));
+        observed.add(readOrder());
+        var next = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+        assertThat(((ResolutionPolicy.Run) next).capability())
+                .as("a different capability of the same authority is a different resolver")
+                .isEqualTo(CapabilityId.KNOWLEDGE_ORG);
+
+        // (I) What the prerequisite saw, with its provenance, is in the trace the resumed resolver reads. An
+        // observation whose source and freshness were dropped on the way back is not an observation any more.
+        assertThat(observed.get(2).resolution().observed()).singleElement().satisfies(o -> {
+            assertThat(o.field()).isEqualTo(EntityField.ORDER_FULFILLMENT);
+            assertThat(o.provenance().capability()).isEqualTo(CapabilityId.ENTITY_ORDER);
+            assertThat(o.provenance().freshness()).isEqualTo(AuthorityProvenance.Freshness.FRESH);
+        });
+    }
+
+    @Test
     @DisplayName("every bound referent has capabilities, and every capability scope has a referent")
     void referentsAndCapabilitiesCorrespond() {
         var covered = EnumSet.noneOf(CapabilityId.class);

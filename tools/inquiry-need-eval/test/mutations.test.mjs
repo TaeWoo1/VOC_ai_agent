@@ -340,6 +340,69 @@ const MUTATIONS = [
     ).scored_goals,
     real: 0, mutated: 1,
   },
+  // --- Inquiry v3.5 §F: the customer-stated fallback ---------------------------------------------------------
+  {
+    name: 'a fallback may be asserted with no clause behind it',
+    file: 'customer-goals.mjs',
+    from: "  if (typeof condition !== 'string' || !condition.trim()) return { failure: 'RELATION_SHAPE', at: 'stated_condition' };\n  if (condition.length > MAX_CONDITION) return { failure: 'RELATION_SHAPE', at: 'stated_condition' };",
+    to: '  ;',
+    witness: async (M) => M.parseRelation({ kind: 'FALLBACK', primary_goal_id: 'a', fallback_goal_id: 'b' })
+      .failure ?? 'ACCEPTED',
+    real: 'RELATION_SHAPE', mutated: 'ACCEPTED',
+  },
+  {
+    name: 'a plan edge may arrive wearing a relation name',
+    file: 'customer-goals.mjs',
+    from: "  for (const k of RELATION_RETIRED) if (k in raw) return { failure: 'RELATION_PLAN', at: k };",
+    to: '  ;',
+    witness: async (M) => M.parseRelation({ kind: 'FALLBACK', primary_goal_id: 'a', fallback_goal_id: 'b',
+      stated_condition: 'x', prerequisite: 'ENTITY.ORDER' }).failure ?? 'ACCEPTED',
+    real: 'RELATION_PLAN', mutated: 'RELATION_SET',
+  },
+  {
+    name: "the customer's own ranking may be dropped without anyone noticing",
+    file: 'customer-goals.mjs',
+    from: "      else { m.relations_lost += 1; m.wrong.push([q, want.primary, `LOST FALLBACK ->${want.fallback}`]); }",
+    to: '      else { m.relations_correct += 1; }',
+    witness: async (M) => M.scoreLayerA(
+      [{ q: 'F', goal: 'n1', gid: 'n1', requested_outcome: 'ACTION', referent: 'CURRENT_ORDER', basis: 'STATED',
+        explicit_constraints: 0, has_fallback: 'n1b' },
+       { q: 'F', goal: 'n1', gid: 'n1b', requested_outcome: 'ACTION', referent: 'CURRENT_ORDER', basis: 'STATED',
+        explicit_constraints: 0, fallback_of: 'n1' }],
+      { F: [{ id: 'a', request: 'r', outcome: 'ACTION', subject: 'CURRENT_ORDER', basis: 'STATED', constraints: [] },
+        { id: 'b', request: 'r', outcome: 'ACTION', subject: 'CURRENT_ORDER', basis: 'STATED', constraints: [] }] },
+    ).safety_blockers.lost_stated_fallback,
+    real: 1, mutated: 0,
+  },
+  {
+    name: 'a ranking nobody stated is counted as if it were real',
+    file: 'customer-goals.mjs',
+    from: "      if (!real) { m.relations_invented += 1; m.wrong.push([q, got.primary ?? '?', 'INVENTED FALLBACK']); }",
+    to: '      if (false) { m.relations_invented += 1; }',
+    witness: async (M) => M.scoreLayerA(
+      [{ q: 'M', goal: 'n1', gid: 'n1', requested_outcome: 'ACTION', referent: 'CURRENT_ORDER', basis: 'STATED',
+        explicit_constraints: 0 },
+       { q: 'M', goal: 'n2', gid: 'n2', requested_outcome: 'ACTION', referent: 'CURRENT_ORDER', basis: 'STATED',
+        explicit_constraints: 0 }],
+      { M: { goals: [{ id: 'a', request: 'r', outcome: 'ACTION', subject: 'CURRENT_ORDER', basis: 'STATED',
+        constraints: [] }, { id: 'b', request: 'r', outcome: 'ACTION', subject: 'CURRENT_ORDER', basis: 'STATED',
+        constraints: [] }], relations: [{ kind: 'FALLBACK', primary: 'a', fallback: 'b', condition: 'c' }] } },
+    ).safety_blockers.invented_fallback,
+    real: 1, mutated: 0,
+  },
+  {
+    name: 'an invented goal that asks the world to change is not told apart from any other',
+    file: 'customer-goals.mjs',
+    from: "    m.invented_actions += extra.filter((p) => p.outcome === 'ACTION').length;",
+    to: '    m.invented_actions += 0;',
+    witness: async (M) => M.scoreLayerA(
+      [{ q: 'C6', goal: 'n1', gid: 'n1', requested_outcome: 'DECISION', referent: 'CURRENT_ORDER', basis: 'STATED',
+        explicit_constraints: 0 }],
+      { C6: [{ id: 'g1', request: 'r', outcome: 'DECISION', subject: 'CURRENT_ORDER', basis: 'STATED', constraints: [] },
+        { id: 'g2', request: 'r', outcome: 'ACTION', subject: 'CURRENT_ORDER', basis: 'STATED', constraints: [] }] },
+    ).safety_blockers.invented_action,
+    real: 1, mutated: 0,
+  },
 ];
 
 for (const m of MUTATIONS) {

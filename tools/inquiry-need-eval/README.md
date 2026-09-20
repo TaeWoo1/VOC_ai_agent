@@ -30,13 +30,21 @@ Validates the gold against `contracts/inquiry-authority/v1/vocabulary.json`, pro
 ### Customer-goal gold (Inquiry v3.5)
 
 ```bash
-node tools/eval-store/store.mjs restore inquiry-customer-goal v1
-python3 contracts/inquiry-customer-goal/v1/build.py /tmp/goals.jsonl
+node tools/eval-store/store.mjs restore inquiry-customer-goal v3
+python3 contracts/inquiry-customer-goal/v3/build.py /tmp/goals.jsonl
 ```
 
-Rebuilds the 72-goal CustomerGoal mapping and asserts it is consistent with the frozen `closing_authority`
-(`inquiry-resolution-plan/v3.3`) under the deterministic dispatch table. **The labels are real eval data and live in
-the store, not here** — the builder refuses to run without them rather than inventing a default.
+Rebuilds the CustomerGoal gold. **v3 is current**; v1 and v2 stay frozen and readable, and the builders sit beside
+each other. **The labels are real eval data and live in the store, not here** — the builder refuses to run without
+them rather than inventing a default.
+
+v3 closes every adjudication class, so **no row is open** and the corpus emits **72 goals over 72 rows** — one row
+carries none (`NO_GOAL`) and one carries two joined by a customer-stated `FALLBACK`. The build does **not** assert
+that the adjudicated goals agree with the frozen resolution gold; it asserts that every **disagreement is declared**,
+in two ways — the *closer* (a different authority ends the goal) and the *instance* (a frozen step reads something
+the adjudicated referent is not about) — and a declaration that is not a real disagreement fails too, so the list
+cannot be padded. It also runs the DECISION prerequisite audit from the frozen steps: **3 of 5** DECISION goals
+require observed entity state.
 
 ### `contract.mjs` · `goals.mjs` · `wp3-replay.mjs` (WP-3)
 
@@ -50,7 +58,7 @@ the store, not here** — the builder refuses to run without them rather than in
 | `availability.mjs` | WP-3.1 §2: every entity read classified against what the goal required, and the three availability semantics priced on the same rows. Changes nothing |
 | `closers.mjs` | WP-3.1 §3: the closing-authority taxonomy — a genuine seller judgment, a seller appended behind knowledge, a seller standing where a capability cannot act |
 | `wp3-replay.mjs` | both scorers over one recorded run, so the difference is shown rather than asserted |
-| `customer-goals.mjs` | **Inquiry v3.5 Layer A.** The `CustomerGoal` contract mirror (`GOAL_SET` = unknown word · `GOAL_SHAPE` = known words, impossible object · **`GOAL_PLAN`** = a retired plan slot arriving under a goal's name) and the Layer-A scorer. Headline metric **`invented_goal_rate`**: on a C6-shaped case a prediction that is perfect *plus one extra goal* scores recall 1.0 and outcome accuracy 1.0, so the plan-era metrics cannot see the defect that ended the planner. Pinned to the Java by `test/customer-goals.test.mjs`, which reads the same fixture the Java scenario test reads (`contracts/inquiry-goal/v1/synthetic/goal-scenarios.jsonl`, 12 rows) |
+| `customer-goals.mjs` | **Inquiry v3.5 Layer A.** The `CustomerGoal` contract mirror (`GOAL_SET` = unknown word · `GOAL_SHAPE` = known words, impossible object · **`GOAL_PLAN`** = a retired plan slot arriving under a goal's name) and the Layer-A scorer. Headline metric **`invented_goal_rate`**: on a C6-shaped case a prediction that is perfect *plus one extra goal* scores recall 1.0 and outcome accuracy 1.0, so the plan-era metrics cannot see the defect that ended the planner. Pinned to the Java by `test/customer-goals.test.mjs`, which reads the same fixture the Java scenario test reads (`contracts/inquiry-goal/v1/synthetic/goal-scenarios.jsonl`, 23 rows). Also mirrors the **customer-stated relation** (`RELATION_PLAN` = a plan edge wearing a relation's name; a relation with no quoted condition is refused) and reports **relation fidelity**, **invented relation rate** and five **safety blockers** — the load-bearing one being `lost_stated_fallback`, because a prediction with both goals, both outcomes and both referents right scores 1.0 everywhere else while discarding the customer's own ranking |
 
 `contract.mjs` is a **mirror** of the Java (`ResolutionPlan` / `ResolutionPlanParser` / `ResolutionPlanValidator`). It is
 pinned to it by `test/goals.test.mjs`, which reads the very file the Java scenario tests read

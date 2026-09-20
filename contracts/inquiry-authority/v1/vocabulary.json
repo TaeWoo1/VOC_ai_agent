@@ -221,7 +221,7 @@
  "closing_rule": "WP-3.1: a need DECLARES the single authority that resolves it (closing_authority). The plan must require at least one capability of that authority; several capabilities of the SAME authority may resolve it together, which the frozen gold does 4 times. Step order is execution order and carries no closing meaning — reordering a need's steps cannot change what resolves it. A fallback to the seller is not an authority: it is a resolution outcome (NEEDS_SELLER / CAPABILITY_GAP) the runtime records after the plan has run. Superseded: the WP-3 rule, where exactly one authority CLOSED and a genuine multi-authority need was written PRECONDITION then CLOSES.",
  "sequence_rule": "WP-3: step order is the dependency. The explicit depends_on index left the wire — it was used on exactly the 7 procedure steps of the gold and every one pointed at the ENTITY.ORDER read the registry already requires, so it carried no information a reader did not have. WP-3.1: order still means execution order and nothing else; it no longer identifies the closer.",
  "customer_goal": {
-  "version": "inquiry-goal/v1",
+  "version": "v3.5-goal-semantics-completion",
   "adopted": "Inquiry v3.5, 2026-09-20 — the Resolution Planner is EXPERIMENTAL / NOT_ADOPTED_FOR_PRODUCTION and the vocabulary below replaces it as the only thing an LLM produces in this path.",
   "requested_outcomes": [
    "INFORMATION",
@@ -313,7 +313,71 @@
   },
   "resume_rule": "a resolver that named a prerequisite is WAITING, and the prerequisite's result is not the goal's answer. When the prerequisite has run and the waiter has not been heard from since, the waiter is re-dispatched. Without this the loop settled on whatever the prerequisite returned: measured, a DECISION whose policy needed the order's fulfilment state reported RESOLVED having evaluated no decision. A GAPPED prerequisite still ends the goal and is checked before the resume. Nothing looks ahead: the prerequisite was named by a resolver AFTER running.",
   "no_goal": "a message may carry no customer resolution goal. That is NOT 'ignore' — the case still exists and may raise VOC / complaint / issue signals elsewhere. The Layer-A scorer treats a NO_GOAL row as unassignable, so any goal emitted on one is invented by definition.",
-  "legacy_gold_conflicts": "adjudication moved 5 rows out of agreement with the frozen resolution gold (GOAL_OBSOLETE 1 - CLOSER_MOVES 2 - PLAN_OBSOLETE 1 - NO_CAPABILITY 1). They are DECLARED in inquiry-customer-goal/v2 and deliberately NOT re-derived: the build asserts that every disagreement is written down, not that none exists. S:N2 names a capability this registry cannot express even as a gap reason - there is no tax-invoice procedure to be DECLARED_NO_EXECUTOR."
+  "legacy_gold_conflicts": {
+   "kinds": [
+    "GOAL_OBSOLETE",
+    "CLOSER_MOVES",
+    "SCOPE_MOVES",
+    "PLAN_OBSOLETE",
+    "NO_CAPABILITY",
+    "GOAL_SPLITS"
+   ],
+   "count": 7,
+   "new_in_v3": {
+    "SCOPE_MOVES": "same closing authority, different instance — the frozen step reads something the adjudicated referent is not about",
+    "GOAL_SPLITS": "one frozen row, two customer goals"
+   },
+   "rule": "declared, never suppressed, and deliberately NOT re-derived: re-labelling the frozen resolution gold is a separate decision with its own evidence rows."
+  },
+  "goal_relations": {
+   "kinds": [
+    "FALLBACK"
+   ],
+   "what_it_is": "a relationship between two goals of ONE message that the CUSTOMER stated: 'send just the nozzle; if that is impossible, refund me.' One row of the frozen 72 carries one.",
+   "fields": [
+    "kind",
+    "primary_goal_id",
+    "fallback_goal_id",
+    "stated_condition"
+   ],
+   "stated_condition": "MANDATORY and the customer's own words. Without the clause there is no evidence a relationship was stated, so two goals from a message with no conditional clause CANNOT be related — blank is refused by the constructor and by the wire schema.",
+   "why_it_is_not_a_planner": "one kind, and it is a thing customers say. There is no SEQUENCE, no DEPENDS_ON, no THEN and no PREREQUISITE, so an execution order between goals is not expressible. It relates GOALS and never capabilities, authorities, steps or gap reasons. ResolutionPolicy has no parameter that could carry one.",
+   "shape": "a forest of chains: at most one fallback per goal, at most one incoming per goal, no cycles. Never a graph."
+  },
+  "fallback_activation": {
+   "activates_on": "NOTHING. There is no producer in this runtime of the fact the condition needs.",
+   "the_line": "CAPABILITY_GAP is NOT semantic impossibility. It says what THIS DEPLOYMENT could not attempt and says nothing about what the seller will do. Every procedure in this registry is DECLARED_NO_EXECUTOR, so every ACTION goal ends at CAPABILITY_GAP — a runtime reading a gap as a refusal would refund every customer who ever wrote a conditional sentence.",
+   "also_not_a_refusal": [
+    "NEEDS_SELLER — nobody has written down whether it is possible, which is the opposite of knowing",
+    "NEEDS_CUSTOMER_INPUT — waiting on the customer",
+    "FAILED — something upstream broke",
+    "RESOLVED / RESOLVED_CONDITIONAL — an answer was produced"
+   ],
+   "runtime_disposition": "WITHHELD_FOR_CUSTOMER_STATED_CONDITION — no resolver is asked for the goal at all, and it is handed to the seller with the clause attached."
+  },
+  "waiter_resume_state_machine": {
+   "A": "a resolver that names a prerequisite is WAITING",
+   "B": "when the prerequisite produces an observation, the waiter is dispatched again",
+   "C": "when the prerequisite gaps, fails, finds nothing or asks the customer something, the waiter is NOT resumed and the goal settles in the prerequisite OWN state",
+   "D": "a prerequisite succeeding is never the goal being resolved",
+   "E": "the same prerequisite cannot be asked for twice",
+   "F": "a cycle R1 -> R2 -> R1 ends closed, detected by the same observation that catches a duplicate",
+   "G": "bounded by MAX_WAIT_DEPTH = CapabilityId.values().length - 1 — the registry size, derived and not chosen, because a chain visits distinct capabilities",
+   "H": "the resolver resumed is the EXACT capability that asked, not another of the same authority",
+   "I": "the prerequisite's observation, with its provenance, stays in the trace for the resumed resolver to read"
+  },
+  "decision_resolver": {
+   "not": "'knowledge, and the seller if there is none' — measured insufficient: 3 of the 5 DECISION goals in the frozen gold require observed entity state, and 2 of those carried the entity read in the gold before any re-adjudication.",
+   "is": "a DECISION resolver looks for the RULE that decides this goal. Knowledge is asked first because a rule is a thing the seller wrote down. Having found the rule, the resolver may find that applying it needs a fact and names THAT ONE capability as a prerequisite; the fact is read, the rule is resumed, and the decision is produced or is found to need the seller.",
+   "who_decides_the_prerequisite": "the resolver, after running. Never the Customer Goal Interpreter, which sees no capability at all."
+  },
+  "prompt": {
+   "version": "customer-goal-interpreter/v1",
+   "fingerprint_file": "contracts/inquiry-goal/v1/prompt-fingerprint.txt",
+   "payload_floor": "the customer's message and two facts (surface, listing_resolved). Narrower than the planner's four: a goal never names an option and never asks for anything, so the option count and the askable inputs left the wire.",
+   "availability": "NOT in the payload. Told what this deployment can do, a model rewrites what the customer asked for."
+  },
+  "gold": "eval-store:inquiry-customer-goal/v3 — 72 goals, 1 NO_GOAL row, 1 multi-goal row, 1 explicit FALLBACK, 0 open."
  },
  "planner_status": "EXPERIMENTAL / NOT_ADOPTED_FOR_PRODUCTION (2026-09-20). step_roles, step_roles_retired, closing_authorities, closing_rule, sequence_rule and procedure_rule above describe the Resolution Planner contract, which is KEPT as a comparison and replay asset so the WP-1..WP-3.2 evidence stays readable, and which has never had a production caller. The authority vocabulary itself — authorities, capabilities, entity_fields, resolution_states, gap_reasons, customer_inputs, scopes, effects — is NOT deprecated: it is carried into inquiry-goal/v1 unchanged and is what customer_goal above is built on."
 }

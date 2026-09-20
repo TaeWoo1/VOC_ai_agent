@@ -52,7 +52,7 @@ class GoalScenarioTest {
                 rows.add(JSON.readTree(line));
             }
         }
-        assertThat(rows).as("the fixture is the contract; an empty one proves nothing").hasSize(14);
+        assertThat(rows).as("the fixture is the contract; an empty one proves nothing").hasSize(23);
         return rows.stream();
     }
 
@@ -63,20 +63,35 @@ class GoalScenarioTest {
         row.get("script").forEach(script::add);
         List<Authority> asked = new ArrayList<>();
 
+        java.util.function.Function<ResolutionPolicy.Run, ResolverOutcome> resolver = run -> {
+            asked.add(run.resolver());
+            JsonNode step = script.poll();
+            assertThat(step).as("%s: a resolver was asked and the fixture scripts no answer", row.get("id")).isNotNull();
+            assertThat(run.resolver().name())
+                    .as("%s: the loop asked a different resolver than the fixture scripts", row.get("id"))
+                    .isEqualTo(step.get("authority").asText());
+            return outcome(step);
+        };
+
+        // Every message is a set. Most carry no relations, and for those this is the same loop it always was; the one
+        // that does carries a fallback the customer stated, and no resolver may be asked for it.
+        String id = row.get("id").asText();
+        GoalSetResolution.Outcome resolved = GoalSetResolution.run(set(row), resolver);
         GoalResolution.Trace last = null;
-        for (JsonNode g : row.get("goals")) {
-            last = GoalResolution.run(goal(g), run -> {
-                asked.add(run.resolver());
-                JsonNode step = script.poll();
-                assertThat(step).as("%s: a resolver was asked and the fixture scripts no answer", row.get("id")).isNotNull();
-                assertThat(run.resolver().name())
-                        .as("%s: the loop asked a different resolver than the fixture scripts", row.get("id"))
-                        .isEqualTo(step.get("authority").asText());
-                return outcome(step);
-            });
+        for (GoalSetResolution.Entry e : resolved.entries()) {
+            if (e.trace() != null) {
+                last = e.trace();
+            }
         }
 
-        String id = row.get("id").asText();
+        List<String> withheld = new ArrayList<>();
+        JsonNode expectWithheld = row.get("expect").get("withheld");
+        if (expectWithheld != null) {
+            expectWithheld.forEach(w -> withheld.add(w.asText()));
+        }
+        assertThat(resolved.withheld()).as("%s: goals not attempted, because the customer made them conditional", id)
+                .extracting(GoalSetResolution.Entry::goalId).isEqualTo(withheld);
+
         List<String> dispatched = asked.stream().map(Enum::name).toList();
         List<String> expected = new ArrayList<>();
         row.get("expect").get("dispatch").forEach(n -> expected.add(n.asText()));
@@ -141,6 +156,19 @@ class GoalScenarioTest {
         assertThatThrownBy(() -> new CustomerGoal("g1", "소재가 뭔가요?", RequestedOutcome.INFORMATION,
                 Referent.CURRENT_LISTING, RequestBasis.STATED, List.of("x".repeat(CustomerGoal.MAX_CONSTRAINT + 1))))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private static CustomerGoalSet set(JsonNode row) {
+        List<CustomerGoal> goals = new ArrayList<>();
+        row.get("goals").forEach(g -> goals.add(goal(g)));
+        List<GoalRelation> relations = new ArrayList<>();
+        JsonNode declared = row.get("relations");
+        if (declared != null) {
+            declared.forEach(r -> relations.add(new GoalRelation(GoalRelation.Kind.valueOf(r.get("kind").asText()),
+                    r.get("primary_goal_id").asText(), r.get("fallback_goal_id").asText(),
+                    r.get("stated_condition").asText())));
+        }
+        return new CustomerGoalSet(goals, relations);
     }
 
     private static CustomerGoal goal(JsonNode g) {
