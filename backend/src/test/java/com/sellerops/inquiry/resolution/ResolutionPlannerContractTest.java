@@ -283,7 +283,13 @@ class ResolutionPlannerContractTest {
         assertThat(system).doesNotContain("depends_on");
         assertThat(system).as("effect is the registry's word now").doesNotContain("effect=");
         assertThat(system).doesNotContain("BOUNDED_WORKFLOW").doesNotContain("EXTERNAL_STATE_CHANGE");
-        assertThat(ResolutionPlannerPrompt.VERSION).isEqualTo("resolution-planner/v4");
+        // WP-3.2: the boundary sentence, domain-neutral — no category is named, or the model learns the category
+        assertThat(system).contains("지금 요청한 것을 해결하는 데 필요한 것만 계획합니다");
+        assertThat(system).contains("바꾸는 일 자체가 고객이 지금 요청한 결과일 때만");
+        for (String domain : new String[]{"교환하려면", "환불하려면", "반품하려면", "배송을 바꾸려면"}) {
+            assertThat(system).as("no worked domain example: " + domain).doesNotContain(domain);
+        }
+        assertThat(ResolutionPlannerPrompt.VERSION).isEqualTo("resolution-planner/v5");
     }
 
     @Test

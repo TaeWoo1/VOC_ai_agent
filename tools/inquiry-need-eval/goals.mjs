@@ -32,6 +32,8 @@ export const VOCAB_PATH = join(here, '../../contracts/inquiry-authority/v1/vocab
 export const loadVocabulary = (p = VOCAB_PATH) => JSON.parse(readFileSync(p, 'utf8'));
 
 export const authorityOf = (vocab) => new Map(vocab.capabilities.map((c) => [c.id, c.authority]));
+/** Capabilities that are about more than one kind of instance — the only ones whose scope a plan can get wrong. */
+const scopeChoices = (vocab) => new Map(Object.entries(vocab.scope_by_capability).map(([c, v]) => [c, v.length]));
 const byCase = (rows, k = 'q') => rows.reduce((m, r) => m.set(r[k], [...(m.get(r[k]) ?? []), r]), new Map());
 const set = (xs) => new Set(xs.filter((x) => x !== undefined && x !== null));
 const sorted = (s) => [...s].sort();
@@ -68,6 +70,8 @@ export function facts(row, ix) {
     // execution order. Under WP-3.1 a step has no role, so the sequence is the capabilities in the order written.
     sequence: steps.map((s) => (s.role ? `${s.capability}/${s.role}` : s.capability)).join('>'),
     entitySteps: steps.filter((s) => Array.isArray(s.fields)),
+    // every required step, kept whole — capability AND the instance it is about
+    steps: steps.map((s) => ({ capability: s.capability, scope: s.scope ?? null })),
   };
 }
 
@@ -156,6 +160,21 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
       unnecessary_total: 0, forbidden: 0, over_by_type: {}, under_by_type: {},
     },
     goals_indistinguishable: 0,
+    /**
+     * WP-3.2. The capability comparison above answers "did the plan reach for the right KIND of answer". It does not
+     * answer "about which instance", and the Candidate C smoke showed why that matters: C3 and C7 both chose
+     * KNOWLEDGE.CATALOGUE/THIS_LISTING where the gold says SELLER_CATALOGUE — the seller's whole range asked of one
+     * listing. `capability_mismatch` reported 0, correctly and uselessly.
+     *
+     * `scope_decidable` is the honest denominator: only a capability that is about more than one kind of instance can
+     * have its scope got wrong, and in this vocabulary that is KNOWLEDGE.CATALOGUE alone. A scope rate quoted over
+     * every step would be mostly made of steps that had no choice to make.
+     */
+    scope: {
+      steps_compared: 0, capability_present: 0, capability_missing: 0, capability_extra: 0,
+      scope_decidable: 0, scope_correct: 0, scope_wrong: 0, wrong_scope_detail: [],
+      unavailable_but_correct: 0,
+    },
   };
   const id = (r) => `${r.q}.${r.goal ?? r.need}`;
   for (const [q, rows] of goldByCase) {
@@ -271,6 +290,7 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
         if (missing.length) out.entity_under_read++;
         for (const f of extra) out.over_read_fields[f] = (out.over_read_fields[f] ?? 0) + 1;
       }
+      if (mine.length) scope(out.scope, g, mine, vocab, pred.registry);
       if (mine.length) inputs(out.inputs, new Set(g.row.customer_inputs ?? []),
         new Set(mine.flatMap((n) => [...n.inputs])), forbidden);
     });
@@ -292,6 +312,11 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
       out.correct_closer + out.wrong_closer.length + out.ambiguous_closer.length),
     sequence_correct_rate: rate(out.sequence_correct, out.sequence_compared),
     entity_scope_accuracy: rate(out.entity_correct, out.entity_compared),
+    scope: {
+      ...out.scope,
+      capability_accuracy: rate(out.scope.capability_present, out.scope.steps_compared),
+      scope_accuracy: rate(out.scope.scope_correct, out.scope.scope_decidable),
+    },
     inputs: {
       ...out.inputs,
       exact_rate: rate(out.inputs.exact, out.inputs.goals_compared),
@@ -302,6 +327,43 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
       forbidden_rate: rate(out.inputs.forbidden, out.inputs.goals_compared),
     },
   };
+}
+
+/**
+ * Capability AND instance, compared step by step (WP-3.2 §3). A predicted step matches a gold step when the capability
+ * is the same; the scope is then a separate verdict, so "right capability, wrong instance" is its own number rather
+ * than a silent pass.
+ */
+function scope(acc, goal, needs, vocab, registry) {
+  const choices = scopeChoices(vocab);
+  const predicted = needs.flatMap((n) => n.steps);
+  const used = new Set();
+  for (const want of goal.steps) {
+    acc.steps_compared++;
+    const i = predicted.findIndex((p, k) => !used.has(k) && p.capability === want.capability);
+    if (i < 0) {
+      acc.capability_missing++;
+      continue;
+    }
+    used.add(i);
+    acc.capability_present++;
+    // the plan reached for exactly the right thing and this deployment cannot act on it — a gap, not a planning error
+    if (registry && predicted[i].scope === want.scope
+        && registry.capabilities?.[want.capability] !== 'AVAILABLE') {
+      acc.unavailable_but_correct++;
+    }
+    if ((choices.get(want.capability) ?? 1) > 1) {
+      acc.scope_decidable++;
+      if (predicted[i].scope === want.scope) {
+        acc.scope_correct++;
+      } else {
+        acc.scope_wrong++;
+        acc.wrong_scope_detail.push({ goal: `${goal.row.q}.${goal.row.goal ?? goal.row.need}`,
+          capability: want.capability, expected: want.scope, got: predicted[i].scope });
+      }
+    }
+  }
+  acc.capability_extra += predicted.length - used.size;
 }
 
 /**
@@ -333,8 +395,8 @@ export function plansFromObservation(rows, rep = 1) {
   // enters a quality metric as one (WP-3.1 §1) — but dropping the row entirely made it indistinguishable from a case
   // the planner simply did not cover, so the failure travels with it.
   return rows.filter((r) => r.rep === rep)
-    .map((r) => (r.plan?.needs?.length ? { q: r.q, needs: r.plan.needs }
-      : { q: r.q, needs: [], failure: r.failure ?? 'NO_PLAN' }));
+    .map((r) => (r.plan?.needs?.length ? { q: r.q, needs: r.plan.needs, registry: r.registry ?? null }
+      : { q: r.q, needs: [], failure: r.failure ?? 'NO_PLAN', registry: r.registry ?? null }));
 }
 
 function main(argv) {

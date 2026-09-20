@@ -32,6 +32,15 @@ import java.util.List;
  * from {@link ResolutionPlan#SCOPES} and {@link EntityField#capability()}, the same declarations the domain record and
  * the validator read, so schema and contract cannot drift.
  *
+ * <p><b>What changed in WP-3.2.</b> One boundary sentence, and a stricter reading of the procedure rule. The
+ * Candidate C smoke resolved all eight endings correctly and still planned, for a question asking whether an
+ * exception could be approved, a second need that would <i>carry the exception out</i> — an external state change
+ * nobody had asked for yet. That is not a wrong ending; it is a plan reaching past the request. The instruction now
+ * says what the 72-goal audit found the gold already does ({@link ResolutionPlanValidator.Code#PROCEDURE_NOT_CLOSING}:
+ * 7 procedure goals, 7 resolved by PROCEDURE, no counterexample) and adds the general form of it — plan what the
+ * current request needs, not what might follow it. <b>No domain example is given</b>: the sentence is about the
+ * relationship between a request and an action, and naming a category here would teach the category instead.
+ *
  * <p><b>What changed in WP-3.1.</b> The step no longer carries a {@code role}, and the need carries
  * {@code closing_authority}. Under v3 the instruction had to say "exactly one authority closes a need" and "a
  * PRECONDITION comes before the CLOSES step it enables" — two rules which together meant the last step written was the
@@ -53,7 +62,7 @@ import java.util.List;
  */
 public final class ResolutionPlannerPrompt {
 
-    public static final String VERSION = "resolution-planner/v4";
+    public static final String VERSION = "resolution-planner/v5";
     /** Six needs × three steps of closed tokens, plus the asks. Measured shapes sit far below this. */
     public static final int MAX_OUTPUT_TOKENS = 1600;
     static final int MAX_ASK = 120;
@@ -83,8 +92,10 @@ public final class ResolutionPlannerPrompt {
                 - SELLER: 위 어디에도 없고 판매자가 **새로 판단**해야 하는 것.
                 규칙:
                 - **읽어서 답이 되면 PROCEDURE가 아닙니다.** 주문 상태나 송장 번호를 알려 달라는 요청은 ENTITY.ORDER로 끝냅니다.
-                  PROCEDURE는 외부 상태 변경이나 정해진 업무 절차가 필요할 때만 씁니다.
-                  closing_authority가 PROCEDURE이면 그 주문을 읽는 ENTITY.ORDER step을 함께 적습니다.
+                  PROCEDURE는 외부 상태를 **바꾸는 일 자체가 고객이 지금 요청한 결과일 때만** 씁니다. 그때 closing_authority는
+                  PROCEDURE이고, 그 대상을 읽는 ENTITY.ORDER step을 함께 적습니다.
+                - **지금 요청한 것을 해결하는 데 필요한 것만 계획합니다.** 안내나 판단 뒤에 이어질 수 있는 실행은 지금의 요청이
+                  아니므로 step으로도 need로도 만들지 않습니다.
                 - **판매자가 한 번 정해서 알려 주면 다음 고객에게도 쓸 수 있는 답**(운영 기준·상품 사실·상품 비교)은 SELLER가 아니라 KNOWLEDGE입니다.
                   SELLER는 이 주문·이 시점에만 해당하는 판단(예외 처리, 재입고 시점)일 때만 씁니다.
                 - closing_authority: **이 need를 최종적으로 해결하는 권한 하나**를 먼저 정해서 적습니다(KNOWLEDGE · ENTITY_STATE · PROCEDURE · SELLER).

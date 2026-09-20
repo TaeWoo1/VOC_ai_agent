@@ -39,6 +39,11 @@ import java.util.Set;
  * {@link Code#CLOSING_AUTHORITY_UNSUPPORTED} — a need must require at least one capability of the authority it says
  * resolves it.
  *
+ * <p><b>WP-3.2 added one more, after auditing the gold rather than before:</b>
+ * {@link Code#PROCEDURE_NOT_CLOSING}. All 7 frozen goals that require a procedure are resolved by PROCEDURE, with no
+ * counterexample, so "a procedure carried as another authority's optional follow-up" describes nothing the gold says
+ * and something the v2 shadow wrote 8 times.
+ *
  * <p>Nothing here reads a sentence.
  */
 public final class ResolutionPlanValidator {
@@ -69,6 +74,26 @@ public final class ResolutionPlanValidator {
          * this a violation is the read's <b>absence</b>, never its position.
          */
         PROCEDURE_WITHOUT_ORDER_READ,
+        /**
+         * A plan requires a procedure and says something else resolves the need (WP-3.2).
+         *
+         * <p><b>Audited before it was written.</b> All 72 frozen gold goals were read: 7 contain a
+         * {@code PROCEDURE.ORDER_ACTION} step and <b>all 7 are resolved by PROCEDURE</b> — zero counterexamples, in
+         * either direction. So this is not a new opinion about what a plan may say; it is a property the gold already
+         * has, made checkable.
+         *
+         * <p>What it forbids is a procedure carried as somebody else's <i>optional follow-up</i> — "the policy says
+         * no, and then we would cancel it". An external state change is not a footnote to an answer: either
+         * performing it is what the customer is asking for, in which case it resolves the need, or it is a thing that
+         * might happen afterwards, in which case it is not this plan's business. The v2 shadow wrote that shape 8
+         * times in 361 needs, when two authorities could still both close.
+         *
+         * <p><b>What it does NOT catch, stated so it is not mistaken for a fix:</b> a planner that invents a SECOND
+         * NEED for the follow-up. Each need then satisfies this rule on its own. That is the {@code C6} residual of
+         * the Candidate C smoke, it is over-splitting rather than a mis-shaped need, and no per-need rule can see it —
+         * see docs/inquiry_architecture_v3_wp32.md §1.3.
+         */
+        PROCEDURE_NOT_CLOSING,
         /** Identity asked of the customer — refused on every surface in v3.0 (public Q&A by product-owner decision). */
         IDENTITY_INPUT,
         /** The v2 bridge's placeholder; a plan names the input. */
@@ -138,6 +163,11 @@ public final class ResolutionPlanValidator {
         if (need.closingAuthority() == Authority.PROCEDURE
                 && steps.stream().noneMatch(s -> s.capability() == CapabilityId.ENTITY_ORDER)) {
             v.add(new Violation(id, null, Code.PROCEDURE_WITHOUT_ORDER_READ));
+        }
+        // …and a procedure is never somebody else's follow-up: requiring one means it is what resolves the need
+        if (need.closingAuthority() != Authority.PROCEDURE
+                && steps.stream().anyMatch(s -> s.capability().authority() == Authority.PROCEDURE)) {
+            v.add(new Violation(id, null, Code.PROCEDURE_NOT_CLOSING));
         }
         List<String> seen = new ArrayList<>();
         for (int k = 0; k < steps.size(); k++) {

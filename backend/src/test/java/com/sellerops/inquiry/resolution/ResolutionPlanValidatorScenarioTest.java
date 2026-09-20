@@ -35,7 +35,7 @@ class ResolutionPlanValidatorScenarioTest {
                     .as(id + " availability").isEqualTo(want);
             checked++;
         }
-        assertThat(checked).isEqualTo(25);
+        assertThat(checked).isEqualTo(26);
     }
 
     @Test
@@ -57,7 +57,7 @@ class ResolutionPlanValidatorScenarioTest {
             assertThat(r.availability()).as(id + ": an invalid plan is not measured against the registry").isEmpty();
             checked++;
         }
-        assertThat(checked).isEqualTo(5);
+        assertThat(checked).isEqualTo(6);
     }
 
     /**

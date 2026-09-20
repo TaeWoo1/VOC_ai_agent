@@ -250,6 +250,34 @@ const MUTATIONS = [
     [goal('C1', 'n1', [K('KNOWLEDGE.CATALOGUE', 'CLOSES', 'SELLER_CATALOGUE')])]).required_authority_present,
     real: 1, mutated: 0,
   },
+  // ── WP-3.2 ────────────────────────────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'a procedure may be carried as another authority\'s optional follow-up again',
+    file: 'contract.mjs',
+    from: "    if (need.closing_authority !== 'PROCEDURE'\n        && steps.some((s) => ix.authority.get(s.capability) === 'PROCEDURE')) {",
+    to: '    if (false) {',
+    witness: async (M) => {
+      const ix = M.index(M.loadVocabulary());
+      return M.validate(plan('SELLER', [K('SELLER', 'CLOSES'), K('PROCEDURE.ORDER_ACTION', 'CONTEXT')]), ix)
+        .map((v) => v.code).includes('PROCEDURE_NOT_CLOSING');
+    },
+    real: true, mutated: false,
+  },
+  {
+    name: 'the wrong instance stops being distinguished from the right one',
+    file: 'goals.mjs', from: '      if (predicted[i].scope === want.scope) {', to: '      if (true) {',
+    witness: async (M) => M.scoreGoals(
+      [{ q: 'C1', needs: [need([K('KNOWLEDGE.CATALOGUE', 'CLOSES', 'THIS_LISTING')])] }],
+      [goal('C1', 'n1', [K('KNOWLEDGE.CATALOGUE', 'CLOSES', 'SELLER_CATALOGUE')])]).scope.scope_wrong,
+    real: 1, mutated: 0,
+  },
+  {
+    name: 'scope is scored over steps that never had a choice, diluting it',
+    file: 'goals.mjs', from: "    if ((choices.get(want.capability) ?? 1) > 1) {", to: '    if (true) {',
+    witness: async (M) => M.scoreGoals([{ q: 'C1', needs: [need([K('KNOWLEDGE.PRODUCT', 'CLOSES')])] }],
+      [goal('C1', 'n1', [K('KNOWLEDGE.PRODUCT', 'CLOSES')])]).scope.scope_decidable,
+    real: 0, mutated: 1,
+  },
 ];
 
 for (const m of MUTATIONS) {

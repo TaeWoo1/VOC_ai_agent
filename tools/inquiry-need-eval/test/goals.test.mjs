@@ -56,7 +56,7 @@ test('the contract mirror agrees with the Java fixtures on every scenario row', 
     assert.deepEqual(got, (s.expect.valid ? [] : s.expect.violations).slice().sort(), `${s.id} violations`);
     parsed++;
   }
-  assert.equal(parsed, 30);   // 25 valid + 5 refused by the validator
+  assert.equal(parsed, 32);   // 26 valid + 6 refused by the validator
   assert.equal(refused, 13);  // shapes that cannot be written at all
 });
 
@@ -392,4 +392,82 @@ test('an answer that never arrived is not a planning miss', () => {
   // a truncated row contributes no closer verdict at all — it is not counted as a wrong one
   assert.equal(r.wrong_closer.length, 0);
   assert.equal(r.correct_closer, 0);
+});
+
+// ── WP-3.2: scope, and the residuals no shape rule can catch ──────────────────────────────────────────────────────
+
+test('right capability, wrong instance is its own verdict — it used to pass silently', () => {
+  const wide = [goldGoal('C', 'KNOWLEDGE', [{ capability: 'KNOWLEDGE.CATALOGUE', scope: 'SELLER_CATALOGUE' }])];
+  const narrow = scoreGoals([scenarioPlan('C13')], wide);   // THIS_LISTING answered where the range was asked
+  assert.equal(narrow.scope.capability_present, 1, 'the capability is right…');
+  assert.equal(narrow.capability_mismatch.length, 0, '…so the capability comparison is happy, and useless here');
+  assert.equal(narrow.scope.scope_wrong, 1, 'and the scope comparison is not');
+  assert.deepEqual(narrow.scope.wrong_scope_detail[0],
+    { goal: 'C.n1', capability: 'KNOWLEDGE.CATALOGUE', expected: 'SELLER_CATALOGUE', got: 'THIS_LISTING' });
+  assert.equal(narrow.scope.scope_accuracy, 0);
+
+  // the same fixture against the gold it actually answers scores clean — the metric is not simply preferring one value
+  const listing = [goldGoal('C', 'KNOWLEDGE', [{ capability: 'KNOWLEDGE.CATALOGUE', scope: 'THIS_LISTING' }])];
+  const right = scoreGoals([scenarioPlan('C13')], listing);
+  assert.equal(right.scope.scope_correct, 1);
+  assert.equal(right.scope.scope_wrong, 0);
+  assert.equal(right.scope.scope_accuracy, 1);
+});
+
+test('scope is only counted where the capability had a choice to make', () => {
+  // KNOWLEDGE.PRODUCT is about one instance, so its scope cannot be wrong and is not in the denominator
+  const gold = [goldGoal('C', 'KNOWLEDGE', [{ capability: 'KNOWLEDGE.PRODUCT' }])];
+  const r = scoreGoals([scenarioPlan('C1')], gold);
+  assert.equal(r.scope.steps_compared, 1);
+  assert.equal(r.scope.scope_decidable, 0, 'nothing to get wrong, so nothing to score');
+  assert.equal(r.scope.scope_accuracy, null);
+});
+
+test('a capability that cannot act here, planned exactly right, is counted as such and not as an error', () => {
+  const gold = [goldGoal('C', 'KNOWLEDGE', [{ capability: 'KNOWLEDGE.PRODUCT' }])];
+  const noProduct = { capabilities: { 'KNOWLEDGE.PRODUCT': 'NOT_SUPPORTED' } };
+  const rows = [{ q: 'C', rep: 1, registry: noProduct, failure: null,
+    plan: { needs: [{ id: 'N1', ask: 'a', closing_authority: 'KNOWLEDGE', customer_inputs: [],
+      steps: [{ capability: 'KNOWLEDGE.PRODUCT' }] }] } }];
+  const r = scoreGoals(plansFromObservation(rows), gold);
+  assert.equal(r.correct_closer, 1);
+  assert.equal(r.scope.unavailable_but_correct, 1);
+  assert.equal(r.scope.capability_missing, 0);
+});
+
+test('a procedure planned as a follow-up is refused; the same follow-up split into a need is NOT — and is measured', () => {
+  // (a) inside the need: the shape rule catches it
+  assert.deepEqual(C.validate(C.parsePlan(scenarios().find((s) => s.id === 'C12').plan, ix).plan, ix)
+    .map((v) => v.code), ['PROCEDURE_NOT_CLOSING']);
+
+  // (b) split into a second need: every need satisfies the rule on its own, so nothing structural sees it.
+  // This is the C6 residual of the Candidate C smoke. What catches it is procedure_for_read on a goal whose
+  // answer is a judgment — a measurement, and the honest answer to "can a contract forbid this": not per need.
+  const judgment = [goldGoal('C', 'SELLER', [{ capability: 'KNOWLEDGE.ORG' }, { capability: 'SELLER' }])];
+  const split = { q: 'C', needs: [
+    { id: 'N1', ask: 'a', closing_authority: 'SELLER', customer_inputs: [],
+      steps: [{ capability: 'KNOWLEDGE.ORG' }, { capability: 'SELLER' }] },
+    // the shape the model actually wrote for C6: the follow-up need re-reads the policy, so it shares an authority
+    // with the goal and the assignment places it there
+    { id: 'N2', ask: 'b', closing_authority: 'PROCEDURE', customer_inputs: [],
+      steps: [{ capability: 'ENTITY.ORDER', fields: ['ORDER_FULFILLMENT'] },
+        { capability: 'KNOWLEDGE.ORG' }, { capability: 'PROCEDURE.ORDER_ACTION' }] }] };
+  for (const n of split.needs) {
+    assert.deepEqual(C.validate({ needs: [{ ...n, id: 'N1' }] }, ix), [], `${n.id} is a legal need on its own`);
+  }
+  const r = scoreGoals([split], judgment);
+  assert.equal(r.correct_closer, 1, 'the ending is still right');
+  assert.deepEqual(r.procedure_for_read, ['C.n1'], 'and a state-changing authority arrived on a judgment goal');
+  assert.equal(r.unnecessary_authority_goals, 1);
+
+  // and when the invented need shares no authority with the goal at all, it is still counted — as a need that
+  // serves nothing. Either way the over-split is a number; neither way is it a contract violation.
+  const disjoint = { q: 'C', needs: [split.needs[0],
+    { id: 'N2', ask: 'b', closing_authority: 'PROCEDURE', customer_inputs: [],
+      steps: [{ capability: 'ENTITY.ORDER', fields: ['ORDER_FULFILLMENT'] },
+        { capability: 'PROCEDURE.ORDER_ACTION' }] }] };
+  const d = scoreGoals([disjoint], judgment);
+  assert.equal(d.correct_closer, 1);
+  assert.equal(d.planner_only_extra_needs, 1);
+  assert.deepEqual(d.procedure_for_read, []);
 });

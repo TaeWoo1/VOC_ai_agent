@@ -102,6 +102,13 @@ export function validate(plan, ix) {
     if (need.closing_authority === 'PROCEDURE' && !steps.some((s) => s.capability === 'ENTITY.ORDER')) {
       v.push({ need: id, step: null, code: 'PROCEDURE_WITHOUT_ORDER_READ' });
     }
+    // WP-3.2: a procedure is never another authority's optional follow-up. Audited on all 72 gold goals first — the 7
+    // that require a procedure are all resolved by it, zero counterexamples. Does NOT catch a follow-up split into a
+    // second need (the C6 residual); no per-need rule can.
+    if (need.closing_authority !== 'PROCEDURE'
+        && steps.some((s) => ix.authority.get(s.capability) === 'PROCEDURE')) {
+      v.push({ need: id, step: null, code: 'PROCEDURE_NOT_CLOSING' });
+    }
     const seen = [];
     steps.forEach((s, k) => {
       const sig = `${s.capability}/${s.scope}`;
