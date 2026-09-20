@@ -1,8 +1,9 @@
 # Inquiry Architecture v3 — WP-4: Planner Final Validation & Freeze Gate
 
-> **Status: baseline pinned, smoke manifest presented, nothing run.**
-> No model call, no marketplace call, no DB write, no migration has happened in this work package.
-> Production is still v3 OFF.
+> **Status: baseline pinned · 3-call smoke PASSED · 67×1 shadow manifest presented, not run.**
+> 3 planner model calls (approved, capped, synthetic fixtures only). Marketplace 0 · DB writes 0 ·
+> migrations 0. Production is still v3 OFF. **The planner is not frozen** — the freeze gate is the 67×1
+> shadow, which has not run.
 
 This package does not try to make the planner better. It asks one question — *do the authority semantics
 WP-2 measured survive the WP-3 contract?* — and, if the answer is yes, freezes the Resolution Planner
@@ -99,9 +100,7 @@ Green at baseline: backend `inquiry.authority` + `inquiry.resolution` + harness 
 
 ---
 
-## 3. Approval manifest — smoke, 3 planner calls
-
-**Not approved. Not run.** This is the only thing this work package asks for.
+## 3. Approval manifest — smoke, 3 planner calls  *(approved in-turn, consumed)*
 
 ```
 APPROVAL MANIFEST — Inquiry v3 planner smoke under resolution-planner/v3
@@ -112,7 +111,8 @@ APPROVAL MANIFEST — Inquiry v3 planner smoke under resolution-planner/v3
                     (smoke: true), regenerated to a path outside the repository
   inputs sha256     57f49beb5f4b519eacb90db5707a169573ba280e7d78ffa258537f7a1e2b7c8f  (pinned;
                     PLAN_INPUTS_SHA256 makes the harness refuse a moved capture)
-  commit            66384bb5
+  commit            0af96549   (execution pin; the baseline in §1 was derived at 66384bb5 and
+                    all five fingerprints were re-derived unchanged at 0af96549)
   prompt            resolution-planner/v3   system_fp 938af14f…  schema_fp c0419e71…
   model             gpt-5-2025-08-07
   reasoning_effort  minimal
@@ -185,15 +185,154 @@ candidates for touching the planner architecture.
 
 ---
 
-## 4. What comes after — not requested yet
+## 4. Smoke result — `wp3-smoke`, commit `0af96549` (consumed)
 
-If the smoke passes, the next manifest is **67 canonical cases × 1 repetition** — not ×3. WP-2 already bought
-three repetitions of the authority question and the answer was stable (recall 1.000 on matched goals across
-all three); this run is asking whether the WP-3 schema change moved the semantic judgment, and one pass
-answers that. The freeze gate, the metrics, the seller-semantics split and the customer-input breakdown are
-specified in the brief and will be reported against the split-tolerant scorer (`goals.mjs`) on gold v3.2.
+3 calls / cap 3. Raw answers stored before anything was scored: `eval-store:runs/wp3-smoke/`, marked
+irreproducible, `run-verify → ok`. 4,396 input / 227 output tokens, **0 reasoning tokens**, 2.1–2.9 s each.
 
-Two things already recorded as **non-blocking** for this gate, per the brief: the `R:77a91fab` and
-`R:f403e606` goal-pair ambiguity stays a documented scorer blind spot and is not adjudicated here, and
-over-asking is a product UX issue for the tuning backlog rather than a safety blocker — under-asking that
-drops an input the resolution actually needs is the one that blocks.
+### 4.1 The registered bar
+
+| | P01 order status | P03 address change | P07 variant fact |
+|---|---|---|---|
+| answered · envelope · parse | yes · ok · ok | yes · ok · ok | yes · ok · ok |
+| contract violations | **0** | **0** | **0** |
+| closing authority | `ENTITY.ORDER` ✔ | `PROCEDURE.ORDER_ACTION` ✔ | `KNOWLEDGE.PRODUCT` ✔ |
+| preceding step | — ✔ (no procedure) | `ENTITY.ORDER` PRECONDITION ✔ | — ✔ (no seller closer) |
+| forbidden identity inputs | 0 ✔ | 0 ✔ | 0 ✔ |
+
+**PASS on all six registered conditions.** The vendor accepts the per-capability `anyOf` schema, fills it
+in strict mode with `finish=stop`, and the three authority decisions WP-2 measured survive the WP-3 contract
+unchanged. The v2→v3 shape rewrite cost nothing in authority semantics on these three.
+
+### 4.2 What the plans show that the bar did not name
+
+Two things, both reported rather than quietly passed.
+
+**(a) P01's answerable order question became a capability gap — and the smoke proves the cause by itself.**
+The model closed P01 with `ENTITY.ORDER` reading `["ORDER_FULFILLMENT", "ORDER_TRACKING"]`. The gold asks
+for `ORDER_FULFILLMENT` alone. `ORDER_TRACKING` is not supported on this channel, and
+`ResolutionPlanValidator.gapOf` ends with an **all-or-nothing clause** — *if any named field is unavailable,
+the whole step is `NOT_SUPPORTED`* — so P01's availability came back `NOT_SUPPORTED` where the fixture
+expects `null`.
+
+The proof needs no extra run: **P01 and P03 have the same `registry_fp` (`df43f26e…`)** — same channel, same
+snapshot, same capability, same order binding. P03's `ENTITY.ORDER` step names only `ORDER_FULFILLMENT` and
+its gap is `null`. The single difference between a readable step and an unreadable one is the extra field.
+
+This is exactly the mechanism WP-3 named and measured (`ORDER_TRACKING` added 42 times in 201 calls where
+the gold did not ask) and then recorded as *"mechanism real, **zero** resolvable goals flipped in this set,
+kept as a mechanism to watch."* **In this smoke it flipped one** — and it flipped the most basic read-only
+order question there is. The mechanism is no longer hypothetical.
+
+Two things compound here and they are not the same defect:
+
+* the planner **over-reads** — it names a field the need does not require;
+* the availability contract **cannot express partial readability** — `StepAvailability` already carries
+  `unavailableFields`, which holds the precise truth (`[ORDER_TRACKING]`), but `gapOf` collapses it to a
+  single verdict about the whole step, and `ResolutionPlannerRunner.row` does not even serialise
+  `unavailableFields`, so a reader of a recorded row cannot tell a fully-blocked step from an over-read one.
+
+Consequence if it generalises: an answerable question is reported as a gap, which in WP-4 E2E terms is a
+**handoff that did not need to happen** — safe, but wasteful, and it would inflate the "unresolved required
+goal" figure that freeze-gate item 5 is about.
+
+**It is deliberately not fixed before the shadow.** Fixing a contract on n=1 is the trap this programme
+keeps avoiding, and the frequency is the thing worth knowing. It costs nothing to defer, because the
+correction can be applied afterwards **without calling the model again**: `PLAN_MODE=replay` re-reads the
+recorded raw answers with the *current* parser and validator and refuses any row whose rebuilt user turn does
+not hash to the recorded `input_fp`. So the 67 raw answers can be re-scored under a revised availability rule
+for free, and provably about the same requests.
+
+**(b) P07 asked four customer inputs; the gold asks one.** The model asked
+`SIZE, MODEL, MEASUREMENT, USE_CONTEXT`; gold v3.2 says `OPTION`. So on this row required-input *token*
+recall is 0/1 and the over-ask is 4 — the same shape WP-3 measured across 201 calls (required recall 1–2 of
+5, unnecessary 87–98). Per the brief this is a **product UX issue for the tuning backlog, not a safety
+blocker**, and the planner prompt is not being tuned here. One honest qualification: the asked set is not
+empty and `SIZE`/`MODEL`/`MEASUREMENT` plausibly discriminate the same five variants that `OPTION` names, so
+part of this figure may be a gold-token choice rather than a planner error — a category-C (scorer/gold)
+candidate that the 67-case run is the right instrument to size.
+
+---
+
+## 5. Approval manifest — final planner shadow, 67 × 1
+
+**Not approved. Not run.** Presented only because §4 passed.
+
+**67 × 1, not 67 × 3.** WP-2 already bought three repetitions of the authority question and the answer was
+stable across all three (recall 1.000 on matched goals). This run asks one different question — *did the
+WP-3 schema change move the semantic judgment?* — and one pass answers it. A repeat is the remedy for a
+stochastic one-off (category E), to be requested for named rows if any appear, not the default.
+
+```
+APPROVAL MANIFEST — Inquiry v3 final planner shadow under resolution-planner/v3
+  purpose           does the authority semantics WP-2 measured survive the WP-3 contract at scale;
+                    the input to the Planner Freeze Gate
+  scope             67 planner calls (67 canonical cases x 1 repetition)
+  commit            0af96549
+  prompt            resolution-planner/v3   system_fp 938af14f…  schema_fp c0419e71…
+  model             gpt-5-2025-08-07 @ minimal, strict json_schema
+  mode              PLAN_MODE=model, PLAN_REPEATS=1, PLAN_MAX_CALLS=70
+                    (67 + 3 harness margin; the harness throws on the 71st send)
+  inputs            eval-store:runs/wp2-shadow/inputs-capture-S0.jsonl — the FROZEN capture WP-2 sent,
+                    reused unchanged so the comparison is controlled
+  inputs sha256     5850421be15897d15fc169de22daacf625d63892b12a725ffef1471f48470f8d
+                    (pinned via PLAN_INPUTS_SHA256 — the harness refuses a moved capture)
+  real customer text  YES — the canonical capture holds real customer questions. It lives outside the
+                    repository and is not committed. This is the same text WP-2 sent to the same
+                    vendor under the same capability; nothing new is exposed, and it is NOT zero.
+  marketplace calls 0
+  DB writes         0
+  external writes   0
+  production Cases  0
+  judge / draft     0 calls
+  retrieval         0
+  output            eval-store:runs/wp4-shadow/ — new run id, append-only; raw answers stored and
+                    marked irreproducible BEFORE anything is scored
+  scoring           split-tolerant goal scorer (tools/inquiry-need-eval/goals.mjs) against frozen
+                    gold inquiry-resolution-plan/v3.2 (ff20922e…). Effect exact-match: not computed
+                    (the scorer has no effect term). Need-count exact match: not a headline metric.
+  expected spend    ≈100k input / ≈6k output tokens (extrapolated from the smoke's per-call figures)
+  revoked by        any code, branch, model, prompt, schema or input change
+```
+
+Run command:
+
+```bash
+RUN_RESOLUTION_PLANNER_CAL=true PLAN_MODE=model PLAN_MAX_CALLS=70 PLAN_REPEATS=1 PLAN_RUN_ID=wp4-shadow \
+PLAN_INPUTS="$W/inputs-capture-S0.jsonl" PLAN_OUT="$W/wp4-shadow.jsonl" \
+PLAN_INPUTS_SHA256=5850421be15897d15fc169de22daacf625d63892b12a725ffef1471f48470f8d \
+SELLEROPS_INQUIRY_DECISION_API_KEY=… ./gradlew test --tests '*ResolutionPlannerCalibrationIT'
+```
+
+### 5.1 Freeze gate, registered before the run
+
+Mandatory — all must hold:
+
+1. wrong authority substitution = **0**
+2. ORDER required-authority miss = **0**
+3. `procedure_for_read` = **0**
+4. forbidden identity input = **0**
+5. unresolved required resolution goal = **0**, or explainable as a named annotation defect
+6. contract / schema failure = **0** (target; ≥1 is classified before any freeze decision, and a
+   reproduction of WP-2's 20-of-201 invalid rate means no freeze)
+7. the authority semantics WP-2 recorded still hold under the WP-3 schema
+
+Reported alongside, not gating: goal coverage, uncovered goal, planner-only extra goal, unnecessary
+authority, entity/scope accuracy, sequence accuracy, the SELLER split (legitimate authority vs missing
+knowledge vs capability gap vs operational handoff), and the customer-input breakdown.
+
+**One metric added by §4.2(a):** the count of steps whose gap is caused *only* by an over-read field —
+`gapOf` said `NOT_SUPPORTED` while `unavailableFields` is a strict subset of the step's fields. That
+number decides whether the availability contract is a real defect or a one-off, and it is measured, not
+assumed.
+
+### 5.2 If the gate fails
+
+Classified as exactly one of **A** schema/contract design · **B** authority semantic error ·
+**C** scorer/gold ambiguity · **D** customer-input UX · **E** stochastic one-off. Only A and B are
+candidates for changing the planner architecture; C is an eval fix, D is backlog, E is a targeted repeat of
+named rows. **Re-running 67 × 3 is not the default remedy**, and the prompt is not tuned again.
+
+Two things stay **non-blocking** by the brief's instruction: the `R:77a91fab` / `R:f403e606` goal-pair
+ambiguity remains a documented scorer blind spot and is not adjudicated here, and over-asking is a product
+UX issue — only under-asking that drops an input the resolution actually needs blocks.
