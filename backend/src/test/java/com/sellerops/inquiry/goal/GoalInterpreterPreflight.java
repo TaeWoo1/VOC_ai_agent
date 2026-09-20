@@ -41,6 +41,18 @@ public final class GoalInterpreterPreflight {
     public static final List<String> REQUIRED_ENV = List.of("SELLEROPS_INQUIRY_GOAL_API_KEY",
             "SELLEROPS_INQUIRY_GOAL_ENDPOINT");
 
+    /**
+     * What this mode needs from the shell.
+     *
+     * <p>A rehearsal does not need an endpoint, because it does not have one to configure: {@link GoalTransport}
+     * uses a constant no client will dial, and demanding a URL that is then ignored would invite an operator to
+     * supply the vendor's and believe it mattered. The <b>credential is still required</b> in both modes — proving
+     * that a value put on the command line reaches the transport is most of what a rehearsal is for.
+     */
+    public static List<String> requiredEnv(GoalTransport.Mode mode) {
+        return mode == GoalTransport.Mode.FAKE ? List.of("SELLEROPS_INQUIRY_GOAL_API_KEY") : REQUIRED_ENV;
+    }
+
     /** The durable eval store. Read at runtime for the one real message; never copied into the repository. */
     public static Path storeRoot(Map<String, String> env) {
         String configured = env.get("SELLEROPS_EVAL_CACHE");
@@ -129,8 +141,14 @@ public final class GoalInterpreterPreflight {
         String inputSetFp = CustomerGoalRunner.inputSetFp(usable);
         String requestFpSet = CustomerGoalRunner.requestFpSet(requests);
 
+        // Which tool this manifest would be spent on. A rehearsal manifest and a real one are different approvals
+        // and the guard refuses to cross them; recorded here so the operator reading the manifest sees which they
+        // are granting rather than inferring it from the surrounding conversation.
+        GoalTransport.Mode transport = GoalTransport.mode(env);
+        report.put("transport", transport.name());
+
         Map<String, String> environment = new LinkedHashMap<>();
-        for (String name : REQUIRED_ENV) {
+        for (String name : requiredEnv(transport)) {
             String value = env.get(name);
             boolean present = value != null && !value.isBlank();
             environment.put(name, present ? "PRESENT" : "MISSING");
@@ -156,17 +174,23 @@ public final class GoalInterpreterPreflight {
                 CustomerGoalPrompt.sha256(CustomerGoalPrompt.system()),
                 CustomerGoalPrompt.sha256(CustomerGoalPrompt.schema().toString()),
                 inputSetFp, requestFpSet, MODEL, REASONING_EFFORT, requests.size(), requests.size(),
-                ApprovalManifest.NO_RETRY, SCOPE, set.realCustomerText(),
+                ApprovalManifest.NO_RETRY, SCOPE, transport.name(), set.realCustomerText(),
                 requests.stream().map(CustomerGoalRunner.Request::id).toList(),
                 requests.stream().map(CustomerGoalRunner.Request::requestFp).toList(),
-                environment, "eval-store:runs/" + runId, estimate(requests), notes(set));
+                environment, "eval-store:runs/" + runId, estimate(requests), notes(set, transport));
         report.set("manifest", manifest.toJson());
         return new Outcome(manifest, List.of(), report);
     }
 
     /** What a reader of this manifest has to know and could not work out from the numbers. */
-    private static List<String> notes(GoalSmokeInputs.Set set) {
+    private static List<String> notes(GoalSmokeInputs.Set set, GoalTransport.Mode transport) {
         List<String> notes = new ArrayList<>();
+        if (transport == GoalTransport.Mode.FAKE) {
+            notes.add("REHEARSAL MANIFEST — transport=FAKE. This approval authorizes an EXECUTION REHEARSAL against "
+                    + "a deterministic in-process fake that cannot reach a network, and it CANNOT be spent on a "
+                    + "vendor: transport is a bound field, so a real run reading this manifest is refused. Any "
+                    + "metric produced under it describes the harness and NOT a model.");
+        }
         notes.add("Environment presence was established from the invoking shell at preflight time. The preflight "
                 + "NEVER READS THE VALUES — it answers 'would transport be configured', never 'is this credential "
                 + "good'. A wrong value fails at transport on the first call, with nothing billed.");

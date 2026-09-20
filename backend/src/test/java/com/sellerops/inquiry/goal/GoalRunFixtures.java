@@ -59,6 +59,32 @@ final class GoalRunFixtures {
                 .map(i -> new CustomerGoalRunner.Input(i.id(), i.message())).toList());
     }
 
+    /**
+     * A <b>rehearsal</b> manifest, prepared by the same preflight with the environment asking for the fake.
+     *
+     * <p>Not a real manifest with a field edited: the rehearsal approval has to come out of the path an operator
+     * would use, or the thing under test is a shape rather than the artifact. Its bound {@code transport} is
+     * {@code FAKE}, so it refuses a vendor as firmly as a moved commit would.
+     */
+    static Approved approvedFake(Path root) throws Exception {
+        Path fixture = root.resolve("contracts/inquiry-goal/v1/synthetic");
+        Files.createDirectories(fixture);
+        Files.copy(Path.of("..", "contracts", "inquiry-goal", "v1", "synthetic", "goal-scenarios.jsonl"),
+                fixture.resolve("goal-scenarios.jsonl"));
+        commit(root);
+        Map<String, String> env = new LinkedHashMap<>(fixtureEnv(root));
+        env.put(GoalTransport.MODE_ENV, "FAKE");
+        env.remove("SELLEROPS_INQUIRY_GOAL_ENDPOINT"); // a rehearsal has no endpoint to configure
+        var outcome = GoalInterpreterPreflight.prepare(root, env, null);
+        if (outcome.manifest() == null) {
+            throw new IllegalStateException("the rehearsal preflight was blocked: " + outcome.blockers());
+        }
+        var set = GoalSmokeInputs.assemble(fixture.resolve("goal-scenarios.jsonl"),
+                GoalInterpreterPreflight.storeRoot(env));
+        return new Approved(root, outcome.manifest(), set.usable().stream()
+                .map(i -> new CustomerGoalRunner.Input(i.id(), i.message())).toList());
+    }
+
     /** The environment a launcher test runs with: a temp store, a fake credential, a nowhere endpoint. */
     static Map<String, String> fixtureEnv(Path root) throws Exception {
         Path store = root.getParent().resolve("store").resolve("inquiry-planner-capture/v1");
@@ -70,6 +96,12 @@ final class GoalRunFixtures {
         }
         Map<String, String> env = new LinkedHashMap<>();
         env.put("SELLEROPS_EVAL_CACHE", root.getParent().resolve("store").toString());
+        // A unit test must never reach the operator's durable store, so it is pointed at a temporary directory —
+        // which the store tool REFUSES by its own rule ("never in tmp"). That refusal is not an obstacle here, it
+        // is the scenario: it makes every unit-level finalization take the failing branch, which is exactly where
+        // the property worth asserting lives — a store that will not take the run leaves the run's raw untouched.
+        // A finalization that SUCCEEDS is proven at Gradle-subprocess level by GoalSmokeRehearsalTest instead.
+        env.put("SELLEROPS_EVAL_STORE", root.getParent().resolve("refused-store").toString());
         env.put("SELLEROPS_INQUIRY_GOAL_API_KEY", "FAKE-TEST-CREDENTIAL");
         env.put("SELLEROPS_INQUIRY_GOAL_ENDPOINT", "https://vendor.invalid/v1");
         return env;
@@ -129,6 +161,7 @@ final class GoalRunFixtures {
                 "hard_cap".equals(field) ? Integer.parseInt(value) : m.hardCap(),
                 "retry_policy".equals(field) ? value : m.retryPolicy(),
                 "scope".equals(field) ? value : m.scope(),
+                "transport".equals(field) ? value : m.transport(),
                 m.realCustomerText(), m.inputIds(), m.requestFps(), m.environment(), m.outputLocation(),
                 Map.of(), List.of());
     }

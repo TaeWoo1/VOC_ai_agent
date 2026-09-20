@@ -126,6 +126,9 @@ class GoalRunLauncherTest {
         moves.put("hard_cap", "99");
         moves.put("retry_policy", "retry three times");
         moves.put("scope", "something else entirely");
+        // A manifest prepared for a rehearsal, handed to a run holding a real transport. This is the crossing the
+        // fifteenth field exists to stop, and it refuses like any other moved field rather than by a special case.
+        moves.put("transport", GoalTransport.Mode.FAKE.name());
         assertThat(moves.keySet()).as("a bound field with no test is a rule nobody checks")
                 .containsExactlyElementsOf(GoalRunGuard.BOUND);
         for (var move : moves.entrySet()) {
@@ -261,9 +264,12 @@ class GoalRunLauncherTest {
         var transport = new GoalRunFixtures.Counting(GoalRunFixtures.GOOD_ANSWER);
         Map<String, String> env = GoalRunFixtures.fixtureEnv(approved.repoRoot());
 
-        int calls = GoalRunLauncher.launch(args, env, transport);
+        var report = GoalRunLauncher.launch(args, env, transport);
+        int calls = report.get("calls_attempted").asInt();
         assertThat(calls).isEqualTo(approved.manifest().calls());
         assertThat(transport.sends.get()).isEqualTo(calls);
+        assertThat(report.get("status").asText()).isEqualTo("COMPLETE");
+        assertThat(report.get("run_incomplete").asBoolean()).isFalse();
 
         // Rows are on disk, raw beside them, and the credential is in neither.
         List<String> raw = Files.readAllLines(args.out().resolve("raw.jsonl"));
@@ -273,6 +279,17 @@ class GoalRunLauncherTest {
         assertThat(String.join("\n", raw) + String.join("\n", rows))
                 .doesNotContain("FAKE-TEST-CREDENTIAL").doesNotContain("Bearer");
         assertThat(raw.get(0)).contains("\"raw\"");
+
+        // Both run-state markers, in the order that makes an interrupted run distinguishable from a finished one.
+        assertThat(args.out().resolve(GoalRunLauncher.STARTED)).exists();
+        assertThat(args.out().resolve(GoalRunLauncher.COMPLETE)).exists();
+        assertThat(Files.readString(args.out().resolve(GoalRunLauncher.STARTED))).contains("CONSUMED");
+
+        // The store refused the temporary root, and the observation did not care. That is the property under test,
+        // not a gap in it: a finalization that fails leaves the vendor's answers exactly where they landed.
+        assertThat(report.get("finalization").get("run-put").asText()).startsWith("FAILED");
+        assertThat(Files.readAllLines(args.out().resolve("raw.jsonl"))).hasSize(calls);
+        assertThat(report.toString()).doesNotContain("FAKE-TEST-CREDENTIAL");
     }
 
     @Test

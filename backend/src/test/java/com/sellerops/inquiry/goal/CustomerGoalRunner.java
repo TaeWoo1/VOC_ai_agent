@@ -224,6 +224,10 @@ public final class CustomerGoalRunner {
         m.put("hard_cap", String.valueOf(inputs.size()));
         m.put("retry_policy", ApprovalManifest.NO_RETRY);
         m.put("scope", SCOPE);
+        // Asked of the transport this run is holding, not of a field describing it. An approval for a rehearsal
+        // cannot drive a vendor and an approval for a vendor cannot be spent on a rehearsal, because the tool is
+        // part of the manifest (live approval contract §4).
+        m.put("transport", GoalTransport.modeOf(transport));
         return m;
     }
 
@@ -320,6 +324,9 @@ public final class CustomerGoalRunner {
         row.put("run_id", runId).put("mode", mode.name()).put("id", request.id());
         row.put("runner", VERSION).put("prompt_version", CustomerGoalPrompt.VERSION)
                 .put("model", model).put("reasoning_effort", reasoningEffort);
+        // Which tool answered. On every row, so a rehearsal artifact can never be read as a model result later —
+        // including by a reader who has only the rows and not the manifest that authorized them.
+        row.put("transport", GoalTransport.modeOf(transport));
         row.put("system_fp", CustomerGoalPrompt.sha256(CustomerGoalPrompt.system()))
                 .put("schema_fp", CustomerGoalPrompt.sha256(CustomerGoalPrompt.schema().toString()))
                 .put("input_fp", sha(request.user())).put("request_fp", request.requestFp());

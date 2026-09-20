@@ -30,13 +30,21 @@ public final class GoalRunGuard {
     /**
      * Every field an approval is bound to. A change to any one of them revokes it.
      *
-     * <p>The list is the revocation policy, written once. Three groups: <b>what code would run</b> (commit, tree,
+     * <p>The list is the revocation policy, written once. Four groups: <b>what code would run</b> (commit, tree,
      * runner), <b>what would be sent</b> (prompt version, the two prompt fingerprints, the input set, the exact
-     * request bytes, model, reasoning effort) and <b>how much</b> (calls, hard cap, retry policy, scope).
+     * request bytes, model, reasoning effort), <b>how much</b> (calls, hard cap, retry policy, scope) and
+     * <b>by what tool</b> (transport).
+     *
+     * <p>{@code transport} is here because the live approval contract §4 puts it here: <i>"a change of the execution
+     * TOOL (CLI/driver) ⇒ the existing manifest is immediately REVOKED. The tool is part of the manifest; you cannot
+     * approve one tool and run another."</i> A rehearsal against a deterministic fake and a run against a vendor are
+     * different tools, so an approval for one refuses the other — rather than a rehearsal being a real approval with
+     * a note beside it, which is the shape this harness has twice established cannot authorize anything.
      */
     public static final List<String> BOUND = List.of(
             "commit", "tree_clean", "runner", "prompt_version", "system_fp", "schema_fp", "input_set_fp",
-            "request_fp_set", "model", "reasoning_effort", "calls", "hard_cap", "retry_policy", "scope");
+            "request_fp_set", "model", "reasoning_effort", "calls", "hard_cap", "retry_policy", "scope",
+            "transport");
 
     private GoalRunGuard() {
     }

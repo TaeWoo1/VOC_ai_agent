@@ -12,12 +12,12 @@ import java.util.List;
  * copies of "what counts as a clean tree" is two answers to the question an approval is bound to, and the one that
  * matters is whichever happens to run at send time.
  */
-final class RepoState {
+public final class RepoState {
 
     private RepoState() {
     }
 
-    static String commit(Path repoRoot) {
+    public static String commit(Path repoRoot) {
         return git(repoRoot, "rev-parse", "HEAD");
     }
 
@@ -26,7 +26,7 @@ final class RepoState {
      * in this worktree and is not source; everything else counts, including untracked files — a run whose harness is
      * half-written is not attributable to the commit it claims.
      */
-    static boolean clean(Path repoRoot) {
+    public static boolean clean(Path repoRoot) {
         return git(repoRoot, "status", "--porcelain").lines()
                 .filter(line -> !line.isBlank())
                 .noneMatch(line -> !line.contains("node_modules"));

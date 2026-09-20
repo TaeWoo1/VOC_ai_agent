@@ -42,6 +42,7 @@ class GoalApprovalTest {
         m.put("hard_cap", "13");
         m.put("retry_policy", ApprovalManifest.NO_RETRY);
         m.put("scope", "offline synthetic smoke");
+        m.put("transport", "REAL");
         return m;
     }
 
@@ -63,7 +64,7 @@ class GoalApprovalTest {
     }
 
     @Test
-    @DisplayName("every bound field revokes the approval when it moves — all fourteen, not a chosen few")
+    @DisplayName("every bound field revokes the approval when it moves — all fifteen, not a chosen few")
     void anyChangeRevokes() {
         for (String field : GoalRunGuard.BOUND) {
             Map<String, String> moved = approvedFields();
@@ -77,7 +78,7 @@ class GoalApprovalTest {
         }
         // Named explicitly, because these are the ones an operator would assume are covered.
         assertThat(GoalRunGuard.BOUND).contains("commit", "system_fp", "schema_fp", "input_set_fp",
-                "request_fp_set", "model", "reasoning_effort", "hard_cap", "retry_policy", "scope");
+                "request_fp_set", "model", "reasoning_effort", "hard_cap", "retry_policy", "scope", "transport");
     }
 
     @Test

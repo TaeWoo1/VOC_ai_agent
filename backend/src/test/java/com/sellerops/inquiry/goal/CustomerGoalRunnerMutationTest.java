@@ -9,6 +9,7 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -101,9 +102,71 @@ class CustomerGoalRunnerMutationTest {
         assertThat(mutated.sends.get()).isPositive();
     }
 
+    @Test
+    @DisplayName("mutation is caught: raw stops being written before what is derived from it")
+    void reversingTheRawBeforeDerivedOrderIsCaught(@TempDir Path dir) throws Exception {
+        var approved = GoalRunFixtures.approved(dir.resolve("repo"));
+
+        // The real runner: the observation reaches the sink before the reading of it, every time.
+        var honest = new GoalRunFixtures.Recording();
+        GoalRunFixtures.runner(new GoalRunFixtures.Counting(GoalRunFixtures.GOOD_ANSWER),
+                        GoalRunFixtures.credential())
+                .send(approved.manifest(), approved.world(dir.resolve("rows.jsonl")), approved.inputs(), honest);
+        assertThat(honest.order).containsExactly("raw", "row", "raw", "row");
+
+        // The same run with the two calls swapped, so a derivation that throws could take the answer with it.
+        Class<?> broken = mutant(THE_ORDER, """
+                            String row = row(runId, mode, request, content, said, failure, finish, elapsed);
+                            sink.row(row);
+                            sink.raw(raw(runId, mode, request, content, said, failure, finish, elapsed));"""
+                .stripIndent().indent(12).stripTrailing());
+        List<String> order = new ArrayList<>();
+        sendVia(broken, new GoalRunFixtures.Counting(GoalRunFixtures.GOOD_ANSWER), approved.manifest(), approved,
+                dir.resolve("mutant.jsonl"), order);
+        assertThat(order).as("the mutant derives first, which is the failure mode this ordering exists to stop")
+                .startsWith("row", "raw");
+    }
+
+    @Test
+    @DisplayName("mutation is caught: the tool stops being re-read, and a rehearsal approval drives a vendor")
+    void droppingTheTransportBindingIsCaught(@TempDir Path dir) throws Exception {
+        var approved = GoalRunFixtures.approved(dir.resolve("repo"));
+        // A manifest approved for a REHEARSAL. A real-shaped transport must not be able to spend it.
+        var rehearsal = GoalRunFixtures.moved(approved.manifest(), "transport", "FAKE");
+        var world = new CustomerGoalRunner.World(approved.repoRoot(), rehearsal.approvalId(), rehearsal.runId(),
+                dir.resolve("rows.jsonl"));
+
+        var real = new GoalRunFixtures.Counting(GoalRunFixtures.GOOD_ANSWER);
+        assertThatThrownBy(() -> GoalRunFixtures.runner(real, GoalRunFixtures.credential())
+                .send(rehearsal, world, approved.inputs(), new GoalRunFixtures.Recording()))
+                .isInstanceOf(CustomerGoalRunner.Refused.class);
+        assertThat(real.sends.get()).as("the real runner holds the property").isZero();
+
+        // Deleting the line outright is NOT the mutation worth testing: the guard already refuses a field the
+        // world cannot answer for, so the run stops anyway. The dangerous edit is the one where the tool is still
+        // reported and stops being READ — a constant in place of a question put to the transport in hand.
+        Class<?> broken = mutant("m.put(\"transport\", GoalTransport.modeOf(transport));",
+                "m.put(\"transport\", \"FAKE\");");
+        var mutated = new GoalRunFixtures.Counting(GoalRunFixtures.GOOD_ANSWER);
+        int sent = sendVia(broken, mutated, rehearsal, approved, dir.resolve("mutant.jsonl"), new ArrayList<>());
+        assertThat(sent).as("a rehearsal approval was spent on a run that was not a rehearsal")
+                .isEqualTo(approved.inputs().size()).isPositive();
+    }
+
+    /** The raw-before-derived pair, as it stands in the loop. */
+    private static final String THE_ORDER = """
+                        sink.raw(raw(runId, mode, request, content, said, failure, finish, elapsed));
+                        String row = row(runId, mode, request, content, said, failure, finish, elapsed);
+                        sink.row(row);""".stripIndent().indent(12).stripTrailing();
+
     /** Drive the mutated class reflectively: its {@code World} and {@code Sink} are its own types, not ours. */
     private static int sendVia(Class<?> runnerClass, GoalRunFixtures.Counting transport, ApprovalManifest approval,
                                GoalRunFixtures.Approved approved, Path out) throws Exception {
+        return sendVia(runnerClass, transport, approval, approved, out, new ArrayList<>());
+    }
+
+    private static int sendVia(Class<?> runnerClass, GoalRunFixtures.Counting transport, ApprovalManifest approval,
+                               GoalRunFixtures.Approved approved, Path out, List<String> order) throws Exception {
         Class<?> worldClass = Class.forName(CLASS + "$World", true, runnerClass.getClassLoader());
         Class<?> sinkClass = Class.forName(CLASS + "$Sink", true, runnerClass.getClassLoader());
         Class<?> inputClass = Class.forName(CLASS + "$Input", true, runnerClass.getClassLoader());
@@ -115,7 +178,10 @@ class CustomerGoalRunnerMutationTest {
         Object world = worldClass.getConstructor(Path.class, String.class, String.class, Path.class)
                 .newInstance(approved.repoRoot(), approval.approvalId(), approval.runId(), out);
         Object sink = java.lang.reflect.Proxy.newProxyInstance(runnerClass.getClassLoader(),
-                new Class<?>[] {sinkClass}, (proxy, method, methodArgs) -> null);
+                new Class<?>[] {sinkClass}, (proxy, method, methodArgs) -> {
+                    order.add(method.getName());
+                    return null;
+                });
 
         List<Object> inputs = approved.inputs().stream().map(i -> {
             try {

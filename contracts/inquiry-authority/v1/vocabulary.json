@@ -377,7 +377,37 @@
    "payload_floor": "the customer's message and two facts (surface, listing_resolved). Narrower than the planner's four: a goal never names an option and never asks for anything, so the option count and the askable inputs left the wire.",
    "availability": "NOT in the payload. Told what this deployment can do, a model rewrites what the customer asked for."
   },
-  "gold": "eval-store:inquiry-customer-goal/v3 — 72 goals, 1 NO_GOAL row, 1 multi-goal row, 1 explicit FALLBACK, 0 open."
+  "gold": "eval-store:inquiry-customer-goal/v3 — 72 goals, 1 NO_GOAL row, 1 multi-goal row, 1 explicit FALLBACK, 0 open.",
+  "execution": {
+   "status": "EXECUTION_INFRA_FROZEN (2026-09-21) — the harness is finished and does not change again until a real smoke has produced results.",
+   "command": "cd backend && SELLEROPS_INQUIRY_GOAL_API_KEY=… SELLEROPS_INQUIRY_GOAL_ENDPOINT=… ./gradlew --no-daemon -q --offline runGoalSmoke --args='--approval <manifest> --granted-approval apr-… --granted-run <run-id> --out <dir>'",
+   "one_command_covers": "environment read · manifest load · frozen input assembly · every bound field recomputed from the world · GoalRunGuard.refusals · credential and output-collision checks · transport · raw streaming · derived rows · scoring · run-put · run-verify · report. Nothing is left for the operator to run afterwards.",
+   "classpath": "the TEST runtime classpath. The interpreter has no production caller and a task pointed at a main-tree entrypoint would quietly make that untrue.",
+   "bound_fields": 15,
+   "transport_is_bound": "The live approval contract §4 already says the execution TOOL is part of the manifest, so `transport` is a bound field and a rehearsal approval refuses a vendor — in both directions, by the same comparison that refuses a moved commit. Without it a rehearsal manifest is a real manifest with a note on it.",
+   "transport_default": "REAL. Only the exact token FAKE selects the fake; unset, blank and misspelled all mean REAL.",
+   "fake_cannot_reach_a_network": "its endpoint is the constant fake://goal-smoke-rehearsal/no-network and it throws if handed any other; the real endpoint variable is not read in that mode.",
+   "mode_is_read_off_the_object": "GoalTransport.modeOf(transport) — a field claiming 'this is a real run' can disagree with the thing doing the sending, and the disagreement would favour the rehearsal.",
+   "run_state": "RUN_STARTED.json is written on the first row, after every check that could refuse — that instant is CONSUMED. RUN_COMPLETE.json is written only when the send loop returned and every observation is durable; its ABSENCE is what makes an interrupted run distinguishable from a finished one. A refused run leaves the directory empty.",
+   "raw_is_primary_truth": "finalization steps only ADD files; none writes raw.jsonl or rows.jsonl, none deletes, and a failing step is recorded and carried rather than thrown. The credential is REMOVED from the finalizer's subprocess environment — neither the scorer nor the store has any use for it.",
+   "http_auth_failure_semantics": "A — one request per input, so a bad credential records one HTTP_401 row per input and fourteen sends, not one send and a stop. This is ApprovalManifest.NO_RETRY's written contract ('one request per input; a failed call is a recorded failure') and is now pinned by a test. Short-circuiting on a fatal auth failure is PRODUCT_DECISION_NEEDED: a rejected request is not billed, so the cost is time rather than money, and stopping early leaves a corpus incomplete in a way nothing distinguishes from a crash.",
+   "rehearsal_proof": "GoalSmokeRehearsalTest starts the launcher in a separate JVM with a CLEARED environment: 14 fake sends, ordered rows, score/run-put/run-verify ok, no form of the credential anywhere. Six negatives (no credential · wrong identity · moved corpus · output collision · dirty tree then moved commit · killed after 5 of 14) all reach 0 sends or leave partial raw durable. Network 0 throughout.",
+   "frozen_until_results": [
+    "GoalRunLauncher",
+    "CustomerGoalRunner send path",
+    "GoalRunGuard",
+    "ApprovalManifest binding",
+    "environment policy",
+    "storage ordering",
+    "scorer integration",
+    "the run command",
+    "retry semantics",
+    "prompt",
+    "schema",
+    "input corpus",
+    "gold"
+   ]
+  }
  },
  "planner_status": "EXPERIMENTAL / NOT_ADOPTED_FOR_PRODUCTION (2026-09-20). step_roles, step_roles_retired, closing_authorities, closing_rule, sequence_rule and procedure_rule above describe the Resolution Planner contract, which is KEPT as a comparison and replay asset so the WP-1..WP-3.2 evidence stays readable, and which has never had a production caller. The authority vocabulary itself — authorities, capabilities, entity_fields, resolution_states, gap_reasons, customer_inputs, scopes, effects — is NOT deprecated: it is carried into inquiry-goal/v1 unchanged and is what customer_goal above is built on."
 }

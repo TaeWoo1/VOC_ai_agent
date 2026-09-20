@@ -88,3 +88,28 @@ springBoot {
         }
     }
 }
+
+// Inquiry v3.5 §23.10 — the Customer Goal Interpreter smoke, as ONE operator command.
+//
+//   SELLEROPS_INQUIRY_GOAL_API_KEY='...' SELLEROPS_INQUIRY_GOAL_ENDPOINT='https://...' \
+//     ./gradlew -p backend runGoalSmoke --args='--approval <manifest> \
+//       --granted-approval apr-... --granted-run <run-id> --out <a new directory>'
+//
+// It runs on the TEST runtime classpath deliberately: the interpreter has no production caller, and a task pointed
+// at a main-tree entrypoint would quietly make that untrue. The task implements no approval semantics of its own —
+// it starts a JVM and hands it the process environment. Every authorization decision belongs to CustomerGoalRunner
+// and GoalRunGuard, so there is exactly one place to get it wrong.
+//
+// `--no-daemon` is in the documented command because a reused daemon can answer System.getenv() with the
+// environment it was STARTED with, and a credential that silently does not arrive looks identical to one that is
+// wrong. GoalSmokeRehearsalTest measures this rather than trusting it.
+tasks.register('runGoalSmoke', JavaExec) {
+    group = 'verification'
+    description = 'Run the Inquiry v3.5 Customer Goal Interpreter smoke against an approved manifest.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.sellerops.inquiry.goal.GoalRunLauncher'
+    // The launcher resolves the repository root relative to this directory, so a run is attributable to this
+    // worktree's git and not to whatever directory the operator happened to be standing in.
+    workingDir = projectDir
+}

@@ -189,6 +189,37 @@ class CustomerGoalRunnerTest {
     }
 
     @Test
+    @DisplayName("an auth failure is recorded once per input and does not stop the run — semantics A, pinned")
+    void everyRequestIsSentIndependentlyEvenAfterAnAuthFailure(@TempDir Path dir) throws Exception {
+        var approved = GoalRunFixtures.approved(dir.resolve("repo"));
+        java.util.concurrent.atomic.AtomicInteger sends = new java.util.concurrent.atomic.AtomicInteger();
+        AgentLlmTransport rejecting = (u, h, b) -> {
+            sends.incrementAndGet();
+            return new AgentLlmTransport.Response(401, "{\"error\":\"invalid_api_key\"}", 1L);
+        };
+
+        var result = GoalRunFixtures.runner(rejecting, GoalRunFixtures.credential())
+                .send(approved.manifest(), approved.world(dir.resolve("rows.jsonl")), approved.inputs(),
+                        new GoalRunFixtures.Recording());
+
+        // This is the CURRENT and WRITTEN contract, not an accident: ApprovalManifest.NO_RETRY says "one request
+        // per input; a failed call is a recorded failure". A bad credential therefore produces one HTTP_401 row
+        // per input rather than one row and a stop. Nothing here is billed — a rejected request is not a
+        // completion — so the cost of the remaining calls is time, not money.
+        //
+        // Whether a fatal auth failure SHOULD short-circuit the rest is a change to that written contract and is
+        // raised as a product decision rather than made here. This test exists so that the behaviour is pinned
+        // either way, and so that changing it is a decision somebody takes rather than a diff nobody notices.
+        assertThat(sends.get()).isEqualTo(approved.inputs().size());
+        assertThat(result.calls()).isEqualTo(approved.inputs().size());
+        assertThat(rowsOf(result.rows())).allSatisfy(row -> {
+            assertThat(row.get("failure").asText()).isEqualTo("HTTP_401");
+            assertThat(row.get("raw").isNull()).isTrue();
+            assertThat(row.get("valid").asBoolean()).isFalse();
+        });
+    }
+
+    @Test
     @DisplayName("a recorded run is never overwritten")
     void outputIsCreateOrFail(@TempDir Path dir) throws Exception {
         Path out = dir.resolve("rows.jsonl");

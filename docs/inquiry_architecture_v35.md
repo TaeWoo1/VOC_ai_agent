@@ -1110,7 +1110,8 @@ differ from the paragraph in every particular and nobody finds out. So the manif
 and the grant binds to that.
 
 `GoalRunGuard` holds the whole of it, and holds nothing else — its only imports are `java.util`, which is what makes
-it compilable inside a mutation test. Fourteen bound fields, in three groups:
+it compilable inside a mutation test. Fourteen bound fields, in three groups (**a fifteenth, `transport`, was added
+in §24.2**; the table below is this package's, and §24.2 says why the tool belongs in it):
 
 | group | fields |
 |---|---|
@@ -1299,3 +1300,161 @@ node tools/eval-store/store.mjs run-verify <run-id>
 ```
 
 **Still not run.** A bindable manifest exists; what does not exist is a grant bound to its two ids.
+
+---
+
+## 24. Execution infrastructure, finished and frozen (2026-09-21)
+
+§23 ended with a bindable manifest, a guard the send path actually consults, and a launcher. What it did not have
+was a **command**. Running the smoke meant assembling a `java -cp` line by hand from a doc comment, and then — after
+the vendor had answered and the answers could never be obtained again — reading the last line of the log and
+remembering to run two more tools. This package closes that, and then stops.
+
+**Model calls 0 · marketplace 0 · DB writes 0 · migrations 0 · production callers 0.** Nothing pushed.
+
+### 24.1 One command, and it is the real one
+
+```
+cd backend
+SELLEROPS_INQUIRY_GOAL_API_KEY='…' \
+SELLEROPS_INQUIRY_GOAL_ENDPOINT='https://…' \
+./gradlew --no-daemon -q --offline runGoalSmoke \
+  --args='--approval <manifest> --granted-approval apr-… --granted-run <run-id> --out <a new directory>'
+```
+
+That single invocation covers the whole path: environment read → manifest load → frozen input assembly → **every
+bound field recomputed from the world** → `GoalRunGuard.refusals` → credential and output-collision checks →
+transport → raw streamed to disk → derived rows → scoring → `run-put` → `run-verify` → a report. **Nothing is left
+for an operator to remember**, because the moment at which a human is least able to recover from a forgotten step is
+exactly the moment the previous design asked them to take one.
+
+The task runs on the **test runtime classpath**. That is not a convenience: the interpreter still has no production
+caller, and a task pointed at a main-tree entrypoint would quietly make that untrue. The task itself implements no
+approval semantics at all — it starts a JVM and hands it the process environment. Every authorization decision stays
+in `CustomerGoalRunner` and `GoalRunGuard`, so there is exactly one place to get it wrong.
+
+`--no-daemon` is in the command because a reused Gradle daemon can answer `System.getenv()` with the environment it
+was *started* with, and **a credential that silently fails to arrive is indistinguishable from one that is wrong**.
+
+### 24.2 The tool is part of the manifest — a fifteenth bound field
+
+A rehearsal needs a fake vendor. The question is what stops a rehearsal approval from being spent on a real one, and
+the answer was already written down: the live approval contract §4 says *"a change of the execution TOOL (CLI/driver)
+⇒ the existing manifest is immediately REVOKED. The tool is part of the manifest; you cannot approve one tool and
+run another."*
+
+So `transport` is a **bound field**, not a flag beside the approval, and the crossing is refused in both directions
+by the same comparison that refuses a moved commit. Without it, a rehearsal manifest would be a real manifest with a
+note attached — and a note is precisely the thing §23.1 established cannot authorize anything.
+
+Three further properties make the mode hard to get wrong:
+
+- **`REAL` is the default.** An unset, blank or misspelled variable selects the real transport; only the exact token
+  `FAKE` selects the other one.
+- **The fake has no network address.** Its endpoint is the constant `fake://goal-smoke-rehearsal/no-network`, and it
+  throws if handed any other. A rehearsal cannot be aimed at a vendor by a variable left over in a shell, and the
+  real endpoint variable is **not read at all** in that mode.
+- **The mode is read off the transport in hand**, not from a parameter describing it — a field claiming "this is a
+  real run" can disagree with the object doing the sending, and the disagreement would favour the rehearsal.
+
+Every row carries `transport`, so a rehearsal artifact cannot be read as a model result later even by someone
+holding only the rows. The manifest says so in its notes, and the run report says
+`EXECUTION REHEARSAL ONLY — … says NOTHING about a model`.
+
+### 24.3 Consumed, and incomplete, are now facts on disk
+
+The approval lifecycle says `CONSUMED` is "the first permitted live action ran". That instant now writes
+`RUN_STARTED.json`, on the first row and after every check that could refuse — so:
+
+| what happened | what the directory holds |
+|---|---|
+| refused (guard, credential, collision, environment) | **nothing at all** — the writers open on the first row |
+| killed mid-run | `RUN_STARTED.json` + the answers already received |
+| finished | both markers, rows, raw, `score.json` |
+
+`RUN_COMPLETE.json` is written only when the send loop returned and every observation is durable. **Its absence is
+what makes an interrupted run distinguishable from a finished one**, rather than a file count somebody interprets.
+
+### 24.4 Raw is primary truth, and the finalizer may not touch it
+
+Scoring, storage and verification are now part of the command, which raises the obvious risk: a step that runs after
+the vendor answered must never be able to take the answer with it. So every finalization step **adds** files and
+reads others; none writes to `raw.jsonl` or `rows.jsonl`, none deletes anything, and **a failure in any step is
+recorded and carried rather than thrown**. A scorer that cannot find its gold, a store that refuses the run, a
+missing `node` — all of them leave the observations exactly where they landed and say so in the report.
+
+The scorer is invoked as the committed script rather than reimplemented, because a second copy of a metric is right
+until the day it is not. The finalizer's subprocesses have the **credential removed from their environment**: neither
+the scorer nor the store has any use for it, and both would otherwise inherit it merely by being children.
+
+**A defect the rehearsal found.** Node decides whether a module is being run directly by comparing
+`import.meta.url` with `process.argv[1]`, resolving the first through symlinks and the second not at all. Invoking
+the scorer through a path containing a link therefore started a script that **did nothing and exited zero** — a run
+reported as scored with an empty file beside it. Fixed by resolving scripts to their real path, and a zero exit with
+empty output is now itself a recorded failure.
+
+### 24.5 The dress rehearsal, and the six negatives
+
+`GoalSmokeRehearsalTest` starts the launcher in a **separate JVM with a cleared environment** — the same entrypoint
+the Gradle task starts — and reads the exit code, the report and the files. A unit test can prove a guard refuses;
+only a subprocess can prove that *the command an operator types* refuses.
+
+Positive: **14 fake sends**, 14 raw rows and 14 derived rows in the same order as the manifest's input ids, every
+answer through the real parser and the real contract, `score → ok`, `run-put → ok`, `run-verify → ok`, both markers,
+and no form of the credential — whole, either end, or SHA-256 — anywhere it wrote or said.
+
+| | scenario | result |
+|---|---|---|
+| A | no credential | refused, **0 sends**, nothing written |
+| B | wrong granted approval id / run id | refused on identity alone, **0 sends** |
+| C | corpus fingerprint moved | refused, **0 sends** |
+| D | output already exists | refused, the earlier run untouched |
+| E | dirty tree, then a moved commit | refused twice, **0 sends** |
+| F | killed after 5 of 14 | 5 answers durable, `STARTED` present, `COMPLETE` **absent**, re-run refuses `OUTPUT_EXISTS` |
+| — | rehearsal approval, real transport asked for | refused on `transport` |
+
+Network in all of them: **0**.
+
+The dotenv case is worth its own line. A `.env` and a `.env.local` carrying a working value sit in the repository
+beside the run, git-ignored so the world has not moved and the approval is still live — and the run refuses with
+`CREDENTIAL_MISSING`. Put the variable back, same files, and it runs. **The difference between refusing and running
+is the process environment and nothing else on disk.**
+
+### 24.6 HTTP auth failure: semantics A, and it is already written down
+
+A bad credential produces **one `HTTP_401` row per input, fourteen sends**, not one send and a stop. This is not an
+accident of the loop: `ApprovalManifest.NO_RETRY` says *"one request per input; a failed call is a recorded
+failure"*, which is a statement about the whole run and not only about retries. It is now pinned by a test so that
+changing it is a decision somebody takes rather than a diff nobody notices.
+
+**Raised, not decided.** Short-circuiting the remaining thirteen on a fatal auth failure is a change to that written
+contract. The case for it is that a 401 is a fact about the credential and not about the request, so the other
+thirteen learn nothing. The case against is that a rejected request **is not billed** — the cost is time, not money
+— and that stopping early produces a run whose corpus is incomplete in a way nothing distinguishes from a crash.
+**PRODUCT_DECISION_NEEDED**; this package did not change it.
+
+### 24.7 Tests and mutations
+
+New: `GoalTransportTest` (8) · `GoalSmokeRehearsalTest` (9, all subprocess) · `GoalSmokeGradleTaskTest` (2, the
+second gated behind `SELLEROPS_GOAL_SMOKE_GRADLE_PROOF=1` because Gradle inside Gradle is not a CI-shaped thing).
+
+Two mutations added to the send path, both load-bearing:
+
+- **the raw-before-derived order reversed** — caught.
+- **the tool stops being read** — and the interesting part is which edit is dangerous. *Deleting* the line is caught
+  by the guard anyway, because a field the world cannot answer for is already a refusal. The edit worth a test is
+  the one where the tool is still reported and stops being **asked**: a constant in place of a question put to the
+  transport in hand. Caught.
+
+Cap bypass and "RUN cannot be entered without a manifest" were already covered by `GoalRunGuardMutationTest` and
+`GoalRunLauncherTest` and were not duplicated.
+
+### 24.8 EXECUTION_INFRA_FROZEN
+
+Every gate passed. From here, until a real Goal Interpreter smoke has produced results, these do not change:
+`GoalRunLauncher` · `CustomerGoalRunner` send path · `GoalRunGuard` · `ApprovalManifest` binding · environment
+policy · storage ordering · scorer integration · the run command · retry semantics · prompt · schema · input corpus ·
+gold.
+
+**No further safety work without a real blocker.** The harness is finished; polishing it is now the thing that stops
+the smoke from happening.

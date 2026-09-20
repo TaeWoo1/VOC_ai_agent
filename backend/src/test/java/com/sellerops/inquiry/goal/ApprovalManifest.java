@@ -29,7 +29,7 @@ import java.util.Map;
 public record ApprovalManifest(String approvalId, String runId, String preparedAt, String commit, boolean treeClean,
                                String runner, String promptVersion, String systemFp, String schemaFp,
                                String inputSetFp, String requestFpSet, String model, String reasoningEffort,
-                               int calls, int hardCap, String retryPolicy, String scope,
+                               int calls, int hardCap, String retryPolicy, String scope, String transport,
                                boolean realCustomerText, List<String> inputIds, List<String> requestFps,
                                Map<String, String> environment, String outputLocation,
                                Map<String, Object> estimate, List<String> notes) {
@@ -75,6 +75,7 @@ public record ApprovalManifest(String approvalId, String runId, String preparedA
         m.put("hard_cap", String.valueOf(hardCap));
         m.put("retry_policy", retryPolicy);
         m.put("scope", scope);
+        m.put("transport", transport);
         return GoalRunGuard.view(m);
     }
 
@@ -126,7 +127,8 @@ public record ApprovalManifest(String approvalId, String runId, String preparedA
                 b.get("input_set_fp").asText(), b.get("request_fp_set").asText(), b.get("model").asText(),
                 b.get("reasoning_effort").asText(), Integer.parseInt(b.get("calls").asText()),
                 Integer.parseInt(b.get("hard_cap").asText()), b.get("retry_policy").asText(),
-                b.get("scope").asText(), root.get("real_customer_text").asBoolean(), ids, fps, env,
+                b.get("scope").asText(), b.get("transport").asText(),
+                root.get("real_customer_text").asBoolean(), ids, fps, env,
                 root.get("output_location").asText(), Map.of(), List.of());
     }
 }
