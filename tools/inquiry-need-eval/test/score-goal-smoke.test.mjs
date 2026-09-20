@@ -25,8 +25,11 @@ const row = (id, goals, relations = [], fp = 'fp-' + id) => ({
   failure: null, raw: '{}', said: '{}', goals, relations, valid: true,
 });
 
+// `evidence` is the goal id here: these rows exercise the SCORER, which compares outcomes and referents and has
+// no customer message to check a quote against. Distinct per goal, which is all the mirror asks of it.
 const goal = (id, outcome, subject, basis = 'STATED', constraints = []) => ({
   id, explicit_request: 'r', requested_outcome: outcome, subject, basis, explicit_constraints: constraints,
+  evidence: id,
 });
 
 const manifestFor = (rows) => ({

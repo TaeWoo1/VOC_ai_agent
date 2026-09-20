@@ -1,5 +1,7 @@
 package com.sellerops.inquiry.goal;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.agent.llm.AgentLlmTransport;
 import com.sellerops.agent.llm.JdkAgentLlmTransport;
 import java.net.URI;
@@ -45,16 +47,41 @@ public final class GoalTransport {
     public static final URI FAKE_ENDPOINT = URI.create("fake://goal-smoke-rehearsal/no-network");
 
     /**
-     * One deterministic, schema-legal answer, returned to every request.
+     * One deterministic, schema-legal answer, a pure function of the message it answers.
      *
      * <p>It is <b>not</b> an imitation of a model and not drawn from the gold: a rehearsal that fed the scorer the
      * right answers would be measuring the fixture. What the fake has to exercise is the path — parse, contract
      * construction, row derivation, scoring, storage — and the smallest valid goal set does all of it.
+     *
+     * <p><b>Why this stopped being a constant at v2.</b> {@link CustomerGoal#evidence} must be a span of the
+     * customer's message, so one fixed string cannot be a legal answer to two different messages. The fake quotes the
+     * message back: the one span guaranteed to be present, still a function of the input alone, and still telling the
+     * scorer nothing it did not already have. Letting the fake omit the field instead would have made the rehearsal
+     * exercise a path the real run does not take — which is the one thing a rehearsal may not do.
      */
-    public static final String FAKE_ANSWER =
-            "{\"goals\":[{\"id\":\"g1\",\"explicit_request\":\"REHEARSAL — deterministic fake transport\","
-                    + "\"requested_outcome\":\"INFORMATION\",\"subject\":\"CURRENT_LISTING\",\"basis\":\"STATED\","
-                    + "\"explicit_constraints\":[]}],\"relations\":[]}";
+    public static String fakeAnswer(String customerMessage) {
+        String quote = customerMessage == null || customerMessage.isBlank() ? "REHEARSAL" : customerMessage.strip();
+        if (quote.length() > CustomerGoal.MAX_REQUEST) {
+            quote = quote.substring(0, CustomerGoal.MAX_REQUEST);
+        }
+        return "{\"goals\":[{\"id\":\"g1\",\"explicit_request\":\"REHEARSAL — deterministic fake transport\","
+                + "\"requested_outcome\":\"INFORMATION\",\"subject\":\"CURRENT_LISTING\",\"basis\":\"STATED\","
+                + "\"explicit_constraints\":[],\"evidence\":" + quote(quote) + "}],\"relations\":[]}";
+    }
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    /** Minimal JSON string escaping: this file builds wire bytes by hand so the fake has no library-shaped magic. */
+    private static String quote(String s) {
+        StringBuilder out = new StringBuilder("\"");
+        for (char c : s.toCharArray()) {
+            if (c == '"' || c == '\\') {
+                out.append('\\');
+            }
+            out.append(c);
+        }
+        return out.append('"').toString();
+    }
 
     public enum Mode { REAL, FAKE }
 
@@ -138,23 +165,28 @@ public final class GoalTransport {
                 // A kill, not a throw: no unwinding, no finally, no flush. What is on disk is what a crash leaves.
                 Runtime.getRuntime().halt(137);
             }
-            return new Response(200, envelope(), 1L);
+            return new Response(200, envelope(customerOf(body)), 1L);
         }
 
-        private static String envelope() {
-            return "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":"
-                    + quote(FAKE_ANSWER) + "}}]}";
-        }
-
-        private static String quote(String s) {
-            StringBuilder out = new StringBuilder("\"");
-            for (char c : s.toCharArray()) {
-                if (c == '"' || c == '\\') {
-                    out.append('\\');
-                }
-                out.append(c);
+        /**
+         * The customer's message, read out of the request the runner actually built — the same bytes the real
+         * transport would have sent. Read rather than passed in, so the fake cannot be handed a message that differs
+         * from the payload and quote something the run never showed anyone.
+         */
+        private static String customerOf(String body) {
+            try {
+                JsonNode messages = JSON.readTree(body).path("messages");
+                return JSON.readTree(messages.get(messages.size() - 1).path("content").asText())
+                        .path("customer").asText(null);
+            } catch (Exception e) {
+                return null;
             }
-            return out.append('"').toString();
         }
+
+        private static String envelope(String customerMessage) {
+            return "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":"
+                    + quote(fakeAnswer(customerMessage)) + "}}]}";
+        }
+
     }
 }

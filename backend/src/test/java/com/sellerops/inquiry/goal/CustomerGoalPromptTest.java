@@ -58,7 +58,12 @@ class CustomerGoalPromptTest {
         }
         JsonNode goal = CustomerGoalPrompt.schema().get("properties").get("goals").get("items");
         assertThat(fieldNames(goal.get("properties"))).containsExactlyInAnyOrder("id", "explicit_request",
-                "requested_outcome", "subject", "basis", "explicit_constraints");
+                "requested_outcome", "subject", "basis", "explicit_constraints", "evidence");
+        // v2. Required, not optional: a goal the model declined to quote must fail on the wire, not arrive
+        // carrying a silent null the way basis used to carry an unbacked assertion.
+        List<String> required = new ArrayList<>();
+        goal.get("required").forEach(r -> required.add(r.asText()));
+        assertThat(required).contains("evidence");
         assertThat(goal.get("additionalProperties").asBoolean()).isFalse();
     }
 

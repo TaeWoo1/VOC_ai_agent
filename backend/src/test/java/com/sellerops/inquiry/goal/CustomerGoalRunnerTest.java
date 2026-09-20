@@ -159,10 +159,13 @@ class CustomerGoalRunnerTest {
         assertThat(row.get("relations")).isEmpty();
 
         // A relation with no quoted condition is refused by GoalRelation's own constructor, reached from here.
+        // Both goals quote distinct real spans of G01's message, so the ONLY thing wrong here is the empty clause.
         String noClause = "{\"goals\":[{\"id\":\"a\",\"explicit_request\":\"r\",\"requested_outcome\":\"ACTION\","
-                + "\"subject\":\"CURRENT_ORDER\",\"basis\":\"STATED\",\"explicit_constraints\":[]},"
+                + "\"subject\":\"CURRENT_ORDER\",\"basis\":\"STATED\",\"explicit_constraints\":[],"
+                + "\"evidence\":\"제품 소재가\"},"
                 + "{\"id\":\"b\",\"explicit_request\":\"r2\",\"requested_outcome\":\"ACTION\","
-                + "\"subject\":\"CURRENT_ORDER\",\"basis\":\"STATED\",\"explicit_constraints\":[]}],"
+                + "\"subject\":\"CURRENT_ORDER\",\"basis\":\"STATED\",\"explicit_constraints\":[],"
+                + "\"evidence\":\"뭔가요?\"}],"
                 + "\"relations\":[{\"kind\":\"FALLBACK\",\"primary_goal_id\":\"a\",\"fallback_goal_id\":\"b\","
                 + "\"stated_condition\":\"\"}]}";
         JsonNode invented = answered(dir.resolve("noclause"),

@@ -29,7 +29,31 @@ import java.util.Set;
  *       runtime that never settles.</li>
  *   <li><b>Every relation names goals that are in this set.</b> A relation reaching outside the message is a relation
  *       about work that is not in front of us.</li>
+ *   <li><b>No two goals quote the same clause</b>, and no quote contains another. A clause has one direct reading;
+ *       two goals resting on one clause means the reader read it twice and called the second reading a request.</li>
+ *   <li><b>At most one goal is {@link RequestBasis#DIRECTLY_IMPLIED}.</b> See below.</li>
  * </ul>
+ *
+ * <h2>One inference per message</h2>
+ *
+ * <p>This cap is what makes the invented-ACTION failure structurally unreachable rather than merely visible. A
+ * message that names no outcome directly implies the resolution of the <i>situation it describes</i> — one situation
+ * report, one inferred goal. A second inferred goal is the reader choosing a remedy, which is exactly what happened
+ * on the fixture message "묶음 상품인 줄 알고 샀는데 한 개만 왔어요": two goals, both {@code DIRECTLY_IMPLIED}, the
+ * second an {@link RequestedOutcome#ACTION} nobody asked for.
+ *
+ * <p><b>It was measured before it was written, not after.</b> Against the frozen real-corpus gold: 72 goals across 66
+ * messages, of which 4 are {@code DIRECTLY_IMPLIED} — and each of those 4 is the only goal of its message, so the cap
+ * costs <b>0 of 72</b>. All 5 multi-goal gold messages are entirely {@code STATED}. Against the committed synthetic
+ * fixture: 0 of 23 rows violate it. Against the recorded 14-call run {@code v35-goal-smoke-07530e82-b3b0a9c5}: it
+ * refuses <b>exactly one row, G15</b>, and leaves the other 13 untouched.
+ *
+ * <p><b>Why {@link RequestBasis#DIRECTLY_IMPLIED} survives at all.</b> Deleting it was the other candidate and the
+ * gold refuses it: 4 gold goals exist only by inference and 2 of those are {@code ACTION} ("배송을 빨리 받고싶습니다"
+ * names a wanted outcome without an imperative). A contract that could not express them would lose real goals — the
+ * over-blocking this cap is bounded to avoid. What distinguishes those 2 from G15's ACTION is that the customer's own
+ * words name a wanted outcome; that is a judgement, and {@link CustomerGoal#evidence} is where the model must now
+ * commit to it in the customer's words instead of asserting it in a label.
  *
  * <p>None of this makes the set an execution plan, because there is no edge type that means "next". See
  * {@link GoalRelation} for why, and {@link GoalSetResolution} for what the runtime is allowed to do with an edge —
@@ -42,6 +66,23 @@ public record CustomerGoalSet(List<CustomerGoal> goals, List<GoalRelation> relat
         relations = relations == null ? List.of() : List.copyOf(relations);
         if (goals.isEmpty() && !relations.isEmpty()) {
             throw new IllegalArgumentException("a relation without goals relates nothing");
+        }
+        int inferred = 0;
+        for (CustomerGoal g : goals) {
+            if (g.basis() == RequestBasis.DIRECTLY_IMPLIED && ++inferred > 1) {
+                throw new IllegalArgumentException(
+                        "a message directly implies one goal; a second inference is the reader choosing a remedy");
+            }
+        }
+        for (int i = 0; i < goals.size(); i++) {
+            String a = normalize(goals.get(i).evidence());
+            for (int j = i + 1; j < goals.size(); j++) {
+                String b = normalize(goals.get(j).evidence());
+                if (a.contains(b) || b.contains(a)) {
+                    throw new IllegalArgumentException("two goals quote the same clause: " + goals.get(i).id()
+                            + " and " + goals.get(j).id());
+                }
+            }
         }
         Map<String, CustomerGoal> byId = new LinkedHashMap<>();
         for (CustomerGoal g : goals) {
@@ -81,6 +122,39 @@ public record CustomerGoalSet(List<CustomerGoal> goals, List<GoalRelation> relat
                 at = next;
             }
         }
+    }
+
+    /**
+     * The goals whose {@link CustomerGoal#evidence} is <b>not</b> a span of the message the customer actually sent —
+     * empty when every goal quotes, which is the only accepted state.
+     *
+     * <p>This is the half of the fence the record constructors cannot hold, and it is <b>stronger than the relation
+     * fence</b>: {@link GoalRelation} can only refuse a blank condition, because nothing that builds one has the
+     * message in hand. Whatever parses a model's answer does, so a goal's quote is checked to be a quote.
+     *
+     * <p><b>It is what closes the relabelling dodge.</b> With only the inference cap, a model that wanted a second
+     * inferred goal could call it {@code STATED} and pass — {@code basis} being an assertion nobody could check. It
+     * is checkable now: a {@code STATED} goal must point at the words the customer stated it in, and they must be
+     * there.
+     *
+     * <p>Comparison collapses runs of whitespace and nothing else. Line wrapping is not a claim about what the
+     * customer said; punctuation is, so a quote that drops or adds it is not the customer's clause.
+     *
+     * @param customerMessage the message as sent. A null or blank message can evidence nothing, so every goal fails.
+     */
+    public List<String> unquoted(String customerMessage) {
+        String haystack = normalize(customerMessage);
+        List<String> out = new ArrayList<>();
+        for (CustomerGoal g : goals) {
+            if (haystack.isEmpty() || !haystack.contains(normalize(g.evidence()))) {
+                out.add(g.id());
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    private static String normalize(String s) {
+        return s == null ? "" : s.strip().replaceAll("\\s+", " ");
     }
 
     /** One goal, no relations — the shape all but one row of the frozen gold has. */

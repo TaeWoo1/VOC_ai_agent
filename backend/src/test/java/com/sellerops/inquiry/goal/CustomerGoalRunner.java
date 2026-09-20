@@ -351,7 +351,7 @@ public final class CustomerGoalRunner {
             row.put("valid", false);
             return row.toString();
         }
-        Parsed parsed = parse(content);
+        Parsed parsed = parse(content, customerOf(request));
         row.put("failure", parsed.failure());
         if (parsed.failure() != null) {
             row.putNull("goals");
@@ -366,12 +366,33 @@ public final class CustomerGoalRunner {
     }
 
     /**
-     * Content that arrived and may be read. Two ways it can still be refused: it is not JSON of the declared shape
-     * ({@code GOAL_UNPARSEABLE}), or it is JSON that the contract will not construct ({@code GOAL_CONTRACT}) —
-     * an outcome outside the four, a request longer than a request, a relation with no clause behind it. The second
-     * is checked by <b>building the real records</b> rather than by a second copy of their rules.
+     * The customer's message, read back out of the request that was actually sent.
+     *
+     * <p>Taken from {@link Request#user()} rather than threaded in beside it, so the text a quote is checked against
+     * is <b>the text the model was shown</b>, byte for byte. A second copy carried alongside could disagree with the
+     * payload, and then a failed quote check would be evidence about our plumbing rather than about the answer.
      */
-    private static Parsed parse(String content) {
+    private static String customerOf(Request request) {
+        try {
+            return JSON.readTree(request.user()).path("customer").asText(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Content that arrived and may be read. Three ways it can still be refused: it is not JSON of the declared shape
+     * ({@code GOAL_UNPARSEABLE}); it is JSON that the contract will not construct ({@code GOAL_CONTRACT}) — an
+     * outcome outside the four, a request longer than a request, a relation with no clause behind it, a goal with no
+     * quote, two goals quoting one clause, a second inference; or every record builds and a goal's quote turns out
+     * not to be in the customer's message ({@code GOAL_EVIDENCE}).
+     *
+     * <p>The first two are checked by <b>building the real records</b> rather than by a second copy of their rules.
+     * The third is separate because it is the one rule the records cannot hold: only here is the message in hand.
+     * It is also worth its own name — a model that quotes something the customer never wrote has failed differently
+     * from one that returned a malformed object, and a single {@code GOAL_CONTRACT} bucket would hide that.
+     */
+    private static Parsed parse(String content, String customerMessage) {
         JsonNode root;
         try {
             root = JSON.readTree(content);
@@ -389,7 +410,8 @@ public final class CustomerGoalRunner {
                 goals.add(new CustomerGoal(g.path("id").asText(), g.path("explicit_request").asText(),
                         RequestedOutcome.valueOf(g.path("requested_outcome").asText()),
                         Referent.valueOf(g.path("subject").asText()),
-                        RequestBasis.valueOf(g.path("basis").asText()), constraints));
+                        RequestBasis.valueOf(g.path("basis").asText()), constraints,
+                        g.path("evidence").asText(null)));
             }
             List<GoalRelation> relations = new ArrayList<>();
             if (root.has("relations")) {
@@ -399,7 +421,11 @@ public final class CustomerGoalRunner {
                             r.path("stated_condition").asText()));
                 }
             }
-            new CustomerGoalSet(goals, relations); // the set's own rules: ids, one fallback each, no cycles
+            // The set's own rules: ids, one fallback each, no cycles, one clause per goal, one inference per message.
+            CustomerGoalSet set = new CustomerGoalSet(goals, relations);
+            if (!set.unquoted(customerMessage).isEmpty()) {
+                return new Parsed(null, null, "GOAL_EVIDENCE");
+            }
             return new Parsed(root.get("goals"), root.has("relations") ? root.get("relations")
                     : JSON.createArrayNode(), null);
         } catch (IllegalArgumentException | NullPointerException e) {

@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Test;
 class ResolutionPolicyInvariantTest {
 
     private static CustomerGoal goal(RequestedOutcome outcome, Referent subject) {
-        return new CustomerGoal("g1", "요청", outcome, subject, RequestBasis.STATED, List.of());
+        return new CustomerGoal("g1", "요청", outcome, subject, RequestBasis.STATED, List.of(), "요청");
     }
 
     private static ResolverOutcome ran(CapabilityId capability, ResolutionState state, GapReason gap) {

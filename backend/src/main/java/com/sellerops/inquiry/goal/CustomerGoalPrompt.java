@@ -39,13 +39,32 @@ import java.util.HexFormat;
  * The instruction says that such a relationship may be emitted <b>only by quoting the clause that states it</b>, and
  * the schema requires that quote, so a fallback with no sentence behind it cannot be produced. See
  * {@link GoalRelation}.
+ *
+ * <h2>What v2 added, and why the instruction is not the fence</h2>
+ *
+ * <p>Every goal now carries {@code evidence}: the clause of the customer's message it rests on, required by the
+ * schema exactly as {@code stated_condition} is. The three sentences added to the instruction <b>describe the field
+ * rather than police it</b> — the refusals live in {@link CustomerGoal}, {@link CustomerGoalSet} and the quote check
+ * {@link CustomerGoalSet#unquoted}, which is the same division of labour as everywhere else here: a model told to be
+ * careful is not a fence, and a payload with no slot for a lie is.
+ *
+ * <p>Note what is <b>not</b> in the instruction: no list of words that mark a request, no rule about which situations
+ * deserve which outcome, no example. Those would be the domain tuning this component was built to do without, and
+ * they would also be untestable — the added text says what {@code evidence} is and what the set refuses, both of
+ * which a test can check independently of any model.
  */
 public final class CustomerGoalPrompt {
 
-    public static final String VERSION = "customer-goal-interpreter/v1";
+    /**
+     * <b>v2 adds {@code evidence} to every goal.</b> The version moves because the contract moved, and moving it is
+     * how the approval machinery finds out: {@link #fingerprint()} covers both halves and {@code GoalRunGuard} binds
+     * the prompt and schema fingerprints, so every manifest granted against v1 is revoked by arithmetic rather than
+     * by anyone remembering to. A run recorded against v1 stays a run of v1.
+     */
+    public static final String VERSION = "customer-goal-interpreter/v2";
 
-    /** Three goals of short closed tokens, plus the requests. Measured shapes sit far below this. */
-    public static final int MAX_OUTPUT_TOKENS = 700;
+    /** Three goals of short closed tokens, plus the requests and their quotes. Measured shapes sit far below this. */
+    public static final int MAX_OUTPUT_TOKENS = 900;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -77,6 +96,12 @@ public final class CustomerGoalPrompt {
                   CURRENT_ORDER(이 고객의 주문) · ORGANIZATION(회사 운영 전반) · UNRESOLVED(이 중 어느 것도 아님).
                 - basis: 고객이 말로 요청했으면 STATED, 말하지는 않았지만 그 문장이 곧 그 요청이면 DIRECTLY_IMPLIED입니다.
                   추측해야 알 수 있는 것은 goal이 아닙니다.
+                - **basis가 DIRECTLY_IMPLIED인 goal은 한 메시지에 하나까지입니다.** 상황만 말한 문장에서는 그 상황이
+                  곧바로 가리키는 요청 하나만 적습니다. 그 상황을 어떻게 해결해 주어야 할지는 고객이 말하지 않았다면
+                  적지 않습니다.
+                - evidence: 이 goal의 근거가 된 **고객 문장의 일부를 그대로** 옮깁니다(고객이 쓰지 않은 글자는 넣지
+                  않습니다). explicit_request가 고객의 표현을 다듬은 것이라면 evidence는 다듬지 않은 원문입니다.
+                  goal마다 서로 다른 구절을 옮기고, 한 구절을 근거로 goal 둘을 만들지 않습니다.
                 - explicit_constraints: **고객이 실제로 말한 값**만 적습니다(규격·색상·수량 등, 각 40자 이하).
                   고객이 말하지 않은 값은 적지 않습니다. 없으면 빈 배열입니다.
                 - relations: 고객이 **「A가 안 되면 B」처럼 두 요청 사이의 조건을 직접 말했을 때만** 적습니다.
@@ -122,7 +147,9 @@ public final class CustomerGoalPrompt {
         ObjectNode constraints = gp.putObject("explicit_constraints");
         constraints.put("type", "array").putObject("items").put("type", "string")
                 .put("maxLength", CustomerGoal.MAX_CONSTRAINT);
-        required(goal, "id", "explicit_request", "requested_outcome", "subject", "basis", "explicit_constraints");
+        gp.putObject("evidence").put("type", "string").put("maxLength", CustomerGoal.MAX_REQUEST);
+        required(goal, "id", "explicit_request", "requested_outcome", "subject", "basis", "explicit_constraints",
+                "evidence");
 
         ObjectNode relation = MAPPER.createObjectNode();
         relation.put("type", "object").put("additionalProperties", false);

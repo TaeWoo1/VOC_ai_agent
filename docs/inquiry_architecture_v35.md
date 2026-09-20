@@ -1512,3 +1512,79 @@ looks bindable and cannot be spent.
 The operator's command for it is in §24.1, minus `SELLEROPS_INQUIRY_GOAL_TRANSPORT` — its absence is what selects
 the real transport. **A commit made after that PREPARE revokes its manifest**, so it should be the last thing done
 before the grant.
+
+---
+
+## 25. Goal provenance — closing the asymmetry the smoke exposed (2026-09-21)
+
+The first real run (`v35-goal-smoke-07530e82-b3b0a9c5`, §24) scored **FAIL** on one non-tradeable blocker:
+`invented_ACTION = 1`, on `G15`. This section is the fix, and it is a contract change, not a prompt edit.
+
+### 25.1 What the diagnosis actually found
+
+Customer message, in full: `묶음 상품인 줄 알고 샀는데 한 개만 왔어요`. The interpreter returned two goals:
+
+| | outcome | basis | constraints | relation |
+|---|---|---|---|---|
+| `g1` "한 개만 온 이유를 알려 주세요" | `INFORMATION` | `DIRECTLY_IMPLIED` | 0 | — |
+| `g2` "부족한 수량을 처리해 주세요" | **`ACTION`** | `DIRECTLY_IMPLIED` | 0 | — |
+
+`g2` is a remedy nobody requested. **Nothing on the wire was false, because the wire had no field in which a false
+claim could be made.** That is the asymmetry: an invented `GoalRelation` is unconstructible — `stated_condition`
+demands the customer's clause and a message with no conditional sentence has nothing to put there — while a goal had
+no equivalent field, so `basis` was an unbacked assertion. `DIRECTLY_IMPLIED` is, by definition, the one value whose
+meaning excuses the absence of a quote.
+
+### 25.2 The measurements that chose the rule, made before it was written
+
+Two candidate rules were considered and one was **rejected by the gold**:
+
+| candidate | measured against the frozen gold | verdict |
+|---|---|---|
+| an `ACTION` must be `STATED` | the gold carries **2 `DIRECTLY_IMPLIED` ACTION** goals (e.g. `4181864b`, "배송을 빨리 받고싶습니다" — a wanted outcome named without an imperative) | **rejected**: it deletes real goals |
+| at most one `DIRECTLY_IMPLIED` goal per message | 72 goals / 66 messages; 4 are inferred and **each is the only goal of its message**; all 5 multi-goal messages are entirely `STATED` | **0 of 72 lost** |
+
+The second was then measured against the committed fixture (**0 of 23 rows**) and against the 14 recorded run rows:
+it refuses **exactly `G15`** and leaves the other 13 untouched. `DIRECTLY_IMPLIED` therefore **stays** — removing it
+was the other candidate and the gold refuses that too.
+
+### 25.3 The change — `customer-goal-interpreter/v2`
+
+`CustomerGoal` gains **`evidence`**: the customer's own words the goal rests on, mandatory in the record and
+required by the schema, exactly as `stated_condition` is. It is **separate from `explicitRequest`** because the
+request is a restatement in the customer's terms and frequently is not a span of the message — fixture row `G07`
+restates a question as "기한이 지났는데 승인 가능하면 승인해 주시고". Making `explicitRequest` itself the quote was
+tried and refused: it breaks every multi-goal row.
+
+Three rules, each holding what the previous one cannot:
+
+1. **Every goal quotes** — `CustomerGoal`; blank is refused, as a blank clause is on a relation.
+2. **Every quote is verbatim** — `CustomerGoalSet.unquoted(message)`, run by whatever parses a model's answer.
+   **Stronger than the relation fence**, which can only refuse blank because nothing constructing one holds the
+   message. This is what closes the relabelling dodge: `basis` used to be uncheckable, so a model wanting a second
+   inference could simply call it `STATED`.
+3. **Spans are distinct, and at most one goal is inferred** — `CustomerGoalSet`. A clause has one direct reading.
+
+The instruction gained three sentences that **describe** these; the refusals live in the records. No list of Korean
+request endings, no rule about which situations deserve which outcome, no example — that would be the domain tuning
+this component exists to do without, and no test could check it independently of a model.
+
+### 25.4 What this does not claim
+
+A model that labels the extra goal `STATED` and quotes a *different real clause* of the same message satisfies all
+three rules. That residual is **left deliberately** — closing it needs a rule about which clauses can carry a
+request, which is the domain lexicon just ruled out. What changed is that the claim is now on the wire in the
+customer's own words and is countable; the recorded failure asserted nothing at all.
+`GoalEvidenceFenceTest.theFenceDoesNotCatchEverything` holds this as a test, so a later package that closes it has
+to change that test deliberately.
+
+### 25.5 Reading a v1 run
+
+Prompt version, schema and fingerprint all moved, so **every manifest granted against v1 is revoked by arithmetic**
+(`GoalRunGuard` binds both fingerprints) — which is the correct behaviour and needs no change to the execution
+infrastructure. A recorded v1 run stays **scoreable**: the scorer reads each row under the contract its own
+`prompt_version` names, because refusing our own recorded evidence would be a worse failure than reading it. Only
+that one version is exempt, and an absent or unknown version is held to the current contract.
+
+The retired v1 fingerprint is kept, commented, in `contracts/inquiry-goal/v1/prompt-fingerprint.txt`: a fingerprint
+nobody can look up is a run nobody can identify.

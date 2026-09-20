@@ -5,4 +5,10 @@
 # manifest quotes this file, and a run whose fingerprint does not match it is a different experiment.
 #
 # Asserted by CustomerGoalPromptTest; regenerate only when the change is intended.
-customer-goal-interpreter/v1 system=984fbb8a96857439abd1c17194599c7cf2ffdfcebc929b5922315627fbf4806b schema=47989c9e37dba63d4f4ae00b8001c04a32655dc21f5325a866024a5e84d5f3cb
+# v1 (retired 2026-09-21). Kept because every recorded run before that date is a run OF it, and a fingerprint
+# nobody can look up is a run nobody can identify. Runs: v35-goal-smoke-07530e82-b3b0a9c5.
+# customer-goal-interpreter/v1 system=984fbb8a96857439abd1c17194599c7cf2ffdfcebc929b5922315627fbf4806b schema=47989c9e37dba63d4f4ae00b8001c04a32655dc21f5325a866024a5e84d5f3cb
+#
+# v2 adds the mandatory goal-level `evidence` quote. Both halves moved: the schema gained a required property and
+# the instruction gained the three sentences that describe it.
+customer-goal-interpreter/v2 system=553d8ebb845e4fde937832878b380f4792b7371f8730ca8a9743c8dc459b7e80 schema=42d8495fa86d3127fa1dd43bcff64cc5496724ee1b93b567de05e89acdd2bae7

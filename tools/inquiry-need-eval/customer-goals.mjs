@@ -23,14 +23,24 @@ export const RETIRED = ['fields', 'customer_inputs', 'customerInputs', 'steps', 
   'procedure', 'fallback', 'handoff', 'closing_authority', 'closingAuthority', 'availability', 'effect', 'scope',
   'role', 'depends_on'];
 
-const KEYS = ['id', 'explicit_request', 'requested_outcome', 'subject', 'basis', 'explicit_constraints'];
+const KEYS = ['id', 'explicit_request', 'requested_outcome', 'subject', 'basis', 'explicit_constraints', 'evidence'];
+
+/**
+ * The prompt version before which goals carried no `evidence`. A run recorded against v1 is history and must stay
+ * readable — refusing it would mean we could no longer score our own evidence — so it is read under the contract it
+ * was actually produced under, and nothing else is.
+ */
+export const PRE_EVIDENCE_PROMPT = 'customer-goal-interpreter/v1';
+
+/** Fail closed: only the one version that predates the field is exempt, and an absent version is not it. */
+export const requiresEvidence = (promptVersion) => promptVersion !== PRE_EVIDENCE_PROMPT;
 
 /** GOAL_SET = unknown word · GOAL_SHAPE = known words, impossible object · GOAL_PLAN = a plan wearing a goal's name. */
-export function parseGoal(raw) {
+export function parseGoal(raw, { evidence: evidenceRequired = true } = {}) {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { failure: 'GOAL_SHAPE' };
   for (const k of RETIRED) if (k in raw) return { failure: 'GOAL_PLAN', at: k };
   for (const k of Object.keys(raw)) if (!KEYS.includes(k)) return { failure: 'GOAL_SET', at: k };
-  const { id, explicit_request: req, requested_outcome: outcome, subject, basis } = raw;
+  const { id, explicit_request: req, requested_outcome: outcome, subject, basis, evidence } = raw;
   const constraints = raw.explicit_constraints ?? [];
   if (typeof id !== 'string' || !id.trim()) return { failure: 'GOAL_SHAPE', at: 'id' };
   if (typeof req !== 'string' || !req.trim()) return { failure: 'GOAL_SHAPE', at: 'explicit_request' };
@@ -43,7 +53,47 @@ export function parseGoal(raw) {
     if (typeof c !== 'string' || !c.trim()) return { failure: 'GOAL_SHAPE', at: 'explicit_constraints' };
     if (c.length > MAX_CONSTRAINT) return { failure: 'GOAL_SHAPE', at: 'explicit_constraints' };
   }
-  return { goal: { id, request: req, outcome, subject, basis, constraints } };
+  // The goal-side half of the fence the relation has had since §F. Without the customer's own words there is no
+  // evidence this outcome was requested, and an unevidenced goal is the invented goal this contract exists to make
+  // impossible. Blank is refused here; that the words are really theirs is unquoted()'s question.
+  if (evidenceRequired || evidence !== undefined) {
+    if (typeof evidence !== 'string' || !evidence.trim()) return { failure: 'GOAL_SHAPE', at: 'evidence' };
+    if (evidence.length > MAX_REQUEST) return { failure: 'GOAL_SHAPE', at: 'evidence' };
+  }
+  return { goal: { id, request: req, outcome, subject, basis, constraints, evidence } };
+}
+
+/** Collapse runs of whitespace, and nothing else — punctuation is part of what the customer wrote. */
+const norm = (s) => (typeof s === 'string' ? s.trim().replace(/\s+/g, ' ') : '');
+
+/**
+ * The set-level evidence rules, mirroring CustomerGoalSet. Returns a refusal `{ failure, at }` or null.
+ *
+ * `message` is optional: given it, every quote must be a span of it (GOAL_EVIDENCE) — the check the Java record
+ * constructors cannot make and the parser can. Without it only the structural rules run, which is the right answer
+ * for a caller scoring stored rows whose input text it does not hold.
+ */
+export function evidenceRefusal(goals, message = null) {
+  let inferred = 0;
+  for (const g of goals) {
+    // One situation report, one inferred goal. A second inference is the reader choosing a remedy — measured at
+    // 0 violations across the frozen gold's 72 goals and the fixture's 23 rows, and it refuses exactly G15.
+    if (g.basis === 'DIRECTLY_IMPLIED' && ++inferred > 1) return { failure: 'GOAL_SET', at: 'basis' };
+  }
+  for (let i = 0; i < goals.length; i += 1) {
+    const a = norm(goals[i].evidence);
+    for (let j = i + 1; j < goals.length; j += 1) {
+      const b = norm(goals[j].evidence);
+      if (a.includes(b) || b.includes(a)) return { failure: 'GOAL_SET', at: 'evidence' };
+    }
+  }
+  if (message !== null) {
+    const hay = norm(message);
+    for (const g of goals) {
+      if (!hay || !hay.includes(norm(g.evidence))) return { failure: 'GOAL_EVIDENCE', at: g.id };
+    }
+  }
+  return null;
 }
 
 /** Only an ACTION may reach a procedure — the mirror of RequestedOutcome.mayReachProcedure. */

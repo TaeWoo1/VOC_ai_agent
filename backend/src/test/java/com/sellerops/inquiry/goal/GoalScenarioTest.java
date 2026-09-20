@@ -141,7 +141,8 @@ class GoalScenarioTest {
         List<String> components = Stream.of(CustomerGoal.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName).toList();
         assertThat(components)
-                .containsExactly("id", "explicitRequest", "requestedOutcome", "subject", "basis", "explicitConstraints");
+                .containsExactly("id", "explicitRequest", "requestedOutcome", "subject", "basis",
+                        "explicitConstraints", "evidence");
         // Each of these was a measured failure when the model owned it. None of them has anywhere to go.
         assertThat(components).doesNotContain("fields", "customerInputs", "steps", "capabilities", "procedure",
                 "fallback", "handoff", "closingAuthority", "availability", "effect", "scope");
@@ -151,11 +152,11 @@ class GoalScenarioTest {
     @DisplayName("an explicit request is a request; a plan does not fit in one")
     void requestIsBounded() {
         assertThatThrownBy(() -> new CustomerGoal("g1", "x".repeat(CustomerGoal.MAX_REQUEST + 1),
-                RequestedOutcome.INFORMATION, Referent.CURRENT_LISTING, RequestBasis.STATED, List.of()))
+                RequestedOutcome.INFORMATION, Referent.CURRENT_LISTING, RequestBasis.STATED, List.of(), "소재"))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new CustomerGoal("g1", "소재가 뭔가요?", RequestedOutcome.INFORMATION,
-                Referent.CURRENT_LISTING, RequestBasis.STATED, List.of("x".repeat(CustomerGoal.MAX_CONSTRAINT + 1))))
-                .isInstanceOf(IllegalArgumentException.class);
+                Referent.CURRENT_LISTING, RequestBasis.STATED, List.of("x".repeat(CustomerGoal.MAX_CONSTRAINT + 1)),
+                "소재가 뭔가요?")).isInstanceOf(IllegalArgumentException.class);
     }
 
     private static CustomerGoalSet set(JsonNode row) {
@@ -177,7 +178,7 @@ class GoalScenarioTest {
         return new CustomerGoal(g.get("id").asText(), g.get("explicit_request").asText(),
                 RequestedOutcome.valueOf(g.get("requested_outcome").asText()),
                 Referent.valueOf(g.get("subject").asText()), RequestBasis.valueOf(g.get("basis").asText()),
-                constraints);
+                constraints, g.get("evidence").asText());
     }
 
     private static ResolverOutcome outcome(JsonNode step) {

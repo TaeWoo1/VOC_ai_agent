@@ -26,8 +26,9 @@ import org.junit.jupiter.api.Test;
 class GoalRelationTest {
 
     private static CustomerGoal action(String id, String request) {
+        // The quote is the request itself: these fixtures stand in for goals a customer stated outright.
         return new CustomerGoal(id, request, RequestedOutcome.ACTION, Referent.CURRENT_ORDER, RequestBasis.STATED,
-                List.of());
+                List.of(), request);
     }
 
     private static final CustomerGoal NOZZLE = action("g1", "노즐 부분만 따로 배송해 주세요");

@@ -5,14 +5,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseGoal, parseRelation, scoreLayerA, assign, mayReachProcedure, asSet, OUTCOMES, REFERENTS, RETIRED,
-  RELATION_RETIRED, RELATION_KINDS, FIRST_RESOLVER, MAX_CONDITION } from '../customer-goals.mjs';
+  RELATION_RETIRED, RELATION_KINDS, FIRST_RESOLVER, MAX_CONDITION, evidenceRefusal, requiresEvidence,
+  PRE_EVIDENCE_PROMPT } from '../customer-goals.mjs';
 
 const FIXTURE = 'contracts/inquiry-goal/v1/synthetic/goal-scenarios.jsonl';
 const rows = readFileSync(FIXTURE, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 
 const wire = (g) => ({
   id: g.id, explicit_request: g.explicit_request, requested_outcome: g.requested_outcome,
-  subject: g.subject, basis: g.basis, explicit_constraints: g.explicit_constraints,
+  subject: g.subject, basis: g.basis, explicit_constraints: g.explicit_constraints, evidence: g.evidence,
 });
 
 test('every fixture goal parses — the mirror and the Java agree on all 23 rows', () => {
@@ -245,4 +246,77 @@ test('a message with no ranking behaves exactly as it did before relations exist
   const m = scoreLayerA([{ ...nozzleGold[0], has_fallback: undefined }], { F: [nozzle] });
   assert.equal(m.relation_fidelity, null); // no gold relations: the rate is undefined, not zero
   assert.equal(m.invented_relation_rate, null);
+});
+
+// --- v2 goal provenance: the mirror of CustomerGoal.evidence and CustomerGoalSet's two set rules ------------------
+// The Java half of these lives in GoalEvidenceFenceTest. A mirror nobody checks is a second truth, so both sides
+// assert the same three rules against the same G15 message.
+
+const G15 = '묶음 상품인 줄 알고 샀는데 한 개만 왔어요';
+const g = (id, outcome, basis, evidence) => ({
+  id, explicit_request: 'r', requested_outcome: outcome, subject: 'CURRENT_ORDER', basis,
+  explicit_constraints: [], evidence,
+});
+
+test('a goal with no quote is refused, exactly as a relation with no clause is', () => {
+  for (const nothing of [undefined, null, '', '   ', 123]) {
+    const r = parseGoal({ ...g('g1', 'ACTION', 'STATED', 'x'), evidence: nothing });
+    assert.equal(r.failure, 'GOAL_SHAPE', `evidence=${JSON.stringify(nothing)}`);
+    assert.equal(r.at, 'evidence');
+  }
+  assert.ok(parseGoal(g('g1', 'ACTION', 'STATED', '환불해 주세요')).goal);
+});
+
+test('a recorded pre-evidence run stays readable, and only that one version is exempt', () => {
+  const old = { id: 'g1', explicit_request: 'r', requested_outcome: 'ACTION', subject: 'CURRENT_ORDER',
+    basis: 'STATED', explicit_constraints: [] };
+  assert.equal(requiresEvidence(PRE_EVIDENCE_PROMPT), false);
+  assert.ok(parseGoal(old, { evidence: false }).goal, 'a v1 run must stay scoreable — it is our own evidence');
+  assert.equal(parseGoal(old).failure, 'GOAL_SHAPE');
+  // Fail closed: an absent or unknown version is not the exempt one.
+  for (const v of [undefined, null, '', 'customer-goal-interpreter/v2', 'something-else']) {
+    assert.equal(requiresEvidence(v), true, `prompt_version=${JSON.stringify(v)}`);
+  }
+  // A v1 row that DOES carry the field is still held to it: exemption is for absence, not for garbage.
+  assert.equal(parseGoal({ ...old, evidence: '' }, { evidence: false }).failure, 'GOAL_SHAPE');
+});
+
+test('two goals may not rest on one clause, and containment counts', () => {
+  assert.equal(evidenceRefusal([g('g1', 'ACTION', 'STATED', '환불해 주세요'),
+    g('g2', 'ACTION', 'STATED', '환불해 주세요')]).at, 'evidence');
+  assert.equal(evidenceRefusal([g('g1', 'ACTION', 'STATED', '노즐만 따로 배송해 주세요'),
+    g('g2', 'ACTION', 'STATED', '배송해 주세요')]).at, 'evidence');
+  assert.equal(evidenceRefusal([g('g1', 'ACTION', 'STATED', '노즐만 따로 배송해 주세요'),
+    g('g2', 'ACTION', 'STATED', '환불처리 해주세요')]), null);
+});
+
+test('one message, one inference — the rule that refuses the recorded G15 answer', () => {
+  const recorded = [g('g1', 'INFORMATION', 'DIRECTLY_IMPLIED', '한 개만 왔어요'),
+    g('g2', 'ACTION', 'DIRECTLY_IMPLIED', '묶음 상품인 줄 알고 샀는데')];
+  assert.equal(evidenceRefusal(recorded, G15).at, 'basis');
+  // Several STATED goals stay ordinary: all five multi-goal messages in the frozen gold are entirely STATED.
+  assert.equal(evidenceRefusal([g('g1', 'DECISION', 'STATED', '승인해 주실 수 있나요'),
+    g('g2', 'ACTION', 'STATED', '교환 처리도 부탁드립니다')]), null);
+});
+
+test('a quote the customer never wrote is caught when the message is in hand', () => {
+  assert.equal(evidenceRefusal([g('g1', 'ACTION', 'STATED', '부족한 수량을 처리해 주세요')], G15).failure,
+    'GOAL_EVIDENCE');
+  assert.equal(evidenceRefusal([g('g1', 'INFORMATION', 'DIRECTLY_IMPLIED', '한 개만 왔어요')], G15), null);
+  // Whitespace is not a claim about what the customer said; punctuation is.
+  assert.equal(evidenceRefusal([g('g1', 'INFORMATION', 'STATED', '한 개만   왔어요')], G15), null);
+  assert.equal(evidenceRefusal([g('g1', 'INFORMATION', 'STATED', '한 개만 왔어요!')], G15).failure, 'GOAL_EVIDENCE');
+  // No message means nothing is evidenced, so it fails closed rather than passing vacuously.
+  assert.equal(evidenceRefusal([g('g1', 'INFORMATION', 'STATED', '한 개만 왔어요')], '').failure, 'GOAL_EVIDENCE');
+  // And with no message ARGUMENT at all only the structural rules run — the right answer for a caller scoring
+  // stored rows whose input text it does not hold.
+  assert.equal(evidenceRefusal([g('g1', 'ACTION', 'STATED', '부족한 수량을 처리해 주세요')]), null);
+});
+
+test('every fixture goal quotes its own message — the fence costs the committed corpus nothing', () => {
+  for (const row of rows) {
+    const message = row.customer_message ?? (row.goals.length === 1 ? row.goals[0].explicit_request : null);
+    assert.ok(message, `${row.id} has several goals and no committed message`);
+    assert.equal(evidenceRefusal(row.goals, message), null, `${row.id}`);
+  }
 });
