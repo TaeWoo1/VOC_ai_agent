@@ -220,3 +220,67 @@ node tools/eval-store/store.mjs run-put wp2-smoke "$WORK" --irreproducible --not
 **Pass** = 3 answers, 0 envelope failures, 0 parse failures, 0 contract violations, and each plan's closing authority is the
 one the scenario expects. **Fail** = the schema or the instruction is revised and the smoke is repeated; the 67 × 3 shadow
 run does not start until the smoke passes, and it needs its own manifest.
+
+---
+
+## 10. Smoke run — `apr-6f0b3c21` / `wt-3d9ac47e` (2026-09-20, consumed)
+
+3 planner calls, synthetic questions only (P01 · P03 · P07), `gpt-5-2025-08-07` @ `minimal`, strict `json_schema`,
+prompt `resolution-planner/v1`, cap 3. Marketplace 0 · DB writes 0 · customer text 0. Raw answers stored **before** they
+were scored: `eval-store:runs/wp2-smoke/` (marked irreproducible).
+
+| | P01 read-only order status | P03 address change | P07 variant-dependent fact |
+|---|---|---|---|
+| answered · envelope · parse | yes · ok · ok | yes · ok · ok | yes · ok · ok |
+| closing authority | `ENTITY.ORDER` ✔ | `PROCEDURE.ORDER_ACTION` ✔ | `KNOWLEDGE.PRODUCT` ✔ |
+| contract | **valid** | **refused** — 3 violations | **valid** |
+| plan | `ENTITY.ORDER/CLOSES` fields `FULFILLMENT`+`TRACKING` | order read → procedure → policy as context | knowledge, asking SIZE · MODEL · MEASUREMENT |
+| ms · in · out | 2,631 · 1,221 · 89 | 1,925 · 1,216 · 156 | 1,782 · 1,218 · 93 |
+
+**Verdict: the pre-registered bar was not met** — it required zero contract violations and one plan had three.
+
+**What the smoke actually proved.** The vendor accepts the strict registry-bound schema; the parser read every answer; the
+three plans chose the **right authorities**, including the invariant this package exists for — the read-only status
+question ended at `ENTITY.ORDER`, and only the address change became a `PROCEDURE` (with its order precondition and the
+policy as context, unprompted).
+
+**Why P03 was refused — the instruction, not the model.** Its three violations are clerical, and both causes are rules the
+v1 instruction never stated:
+
+1. it copied `fields: [ORDER_FULFILLMENT]` onto the `PROCEDURE` step (`FIELDS_ON_NON_ENTITY`, `FIELD_OF_OTHER_CAPABILITY`);
+2. it set `depends_on: 1` on step index 1 — "depends on step 1" in 1-based counting, where the contract means the 0-based
+   index of an **earlier** step (`BAD_DEPENDENCY`).
+
+**Closed without another call.** The instruction is now `resolution-planner/v2`, with the two rules said out loud
+(non-entity steps carry an empty `fields`; `depends_on` is the 0-based index of an earlier step, first step `null`, never
+itself or a later one). The validator was **not** loosened: a step whose meaning is fine but whose shape breaks the
+contract still invalidates the plan, fail-closed. The smoke's exact answer is pinned as scenario **V09**, so this shape can
+never pass silently again.
+
+**Measured, against the estimates in §7**: input **1,216–1,221** tokens per call (estimate was 950–1,050 — the estimate was
+low by ~17%; Korean instruction + JSON schema tokenise worse than the v2 ratio suggested), output 89–156 (estimate
+120–250, right), latency **1.78–2.63s** (estimate p50 2.0–2.6s, right). For the 67 × 3 shadow run this means ≈201 calls,
+≈245k input / ≈25k output tokens.
+
+## 11. Next — smoke #2, then the shadow run
+
+The prompt changed, so the previous approval is revoked by its own terms. Smoke #2 is the same shape with the corrected
+instruction:
+
+```
+APPROVAL MANIFEST — Inquiry v3 WP-2 planner smoke #2
+  approvalId        apr-2c84f7b0
+  runId             wt-91e5d63a
+  capability        sellerops.inquiry-decision (v2 door; prompt resolution-planner/v2)
+  model             gpt-5-2025-08-07 · reasoning_effort minimal · response_format json_schema (strict)
+  operation         3 planner calls — the same synthetic scenarios P01, P03, P07
+  cap               PLAN_MAX_CALLS=3
+  marketplace       none · DB writes none · external writes none · customer text none
+  output            eval-store:runs/wp2-smoke-2/ (append-only, raw answers irreproducible)
+  expected spend    ≈3.7k input / ≈0.5k output tokens
+  pass              3 answers · 0 envelope/parse failures · 0 contract violations · each closing authority as expected
+  revoked by        any code, branch, model, prompt or schema change
+```
+
+Only after it passes does the 67 × 3 shadow run get its own manifest (≈201 calls, plan gold v3.1 as the scorer's
+reference, no production Case touched).

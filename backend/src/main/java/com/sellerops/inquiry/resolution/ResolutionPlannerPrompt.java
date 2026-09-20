@@ -29,7 +29,7 @@ import java.util.List;
  */
 public final class ResolutionPlannerPrompt {
 
-    public static final String VERSION = "resolution-planner/v1";
+    public static final String VERSION = "resolution-planner/v2";
     /** Six needs × three steps of closed tokens, plus the asks. Measured shapes sit far below this. */
     public static final int MAX_OUTPUT_TOKENS = 1600;
     static final int MAX_ASK = 120;
@@ -64,7 +64,10 @@ public final class ResolutionPlannerPrompt {
                   SELLER는 이 주문·이 시점에만 해당하는 판단(예외 처리, 재입고 시점)일 때만 씁니다.
                 - role: CLOSES(이 권한이 need를 닫을 수 있다) · PRECONDITION(닫기 전에 먼저 읽어야 한다) · CONTEXT(참고만, 닫지 못한다).
                   need마다 CLOSES가 하나 이상 있어야 합니다. 판매자에게 넘기는 것은 step이 아닙니다.
-                - fields는 ENTITY step에만, 그 권한의 필드만 적습니다. scope는 그 권한이 허용하는 값만 씁니다.
+                - fields는 **ENTITY step에만** 적습니다. KNOWLEDGE·PROCEDURE·SELLER step의 fields는 반드시 빈 배열([])입니다.
+                  ENTITY step은 읽을 필드를 하나 이상 적고, 그 권한의 필드만 씁니다. scope는 그 권한이 허용하는 값만 씁니다.
+                - depends_on은 **같은 need 안에서 앞에 적은 step의 번호(0부터)**입니다. 첫 step은 null이고, 자기 자신이나 뒤의 step을
+                  가리킬 수 없습니다. 예: step 0에서 주문을 읽고 step 1에서 처리하면 step 1의 depends_on은 0입니다.
                 - customer_inputs: 고객이 아직 밝히지 않아 답이 달라지는 **상품 맥락 값**만 적습니다(규격·크기·모델·수량·사용 환경·치수).
                   이름·주문번호·연락처·주소 같은 신원 정보는 어떤 경우에도 묻지 않습니다.
                 - 과거에 판매자가 쓴 답변은 근거가 아니므로 step이 되지 않습니다.

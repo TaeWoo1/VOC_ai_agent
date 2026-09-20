@@ -57,7 +57,7 @@ class ResolutionPlanValidatorScenarioTest {
             assertThat(r.availability()).as(id + ": an invalid plan is not measured against the registry").isEmpty();
             checked++;
         }
-        assertThat(checked).isEqualTo(8);
+        assertThat(checked).isEqualTo(9);
     }
 
     @Test

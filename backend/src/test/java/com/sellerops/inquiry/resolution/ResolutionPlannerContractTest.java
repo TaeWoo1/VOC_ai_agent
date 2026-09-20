@@ -134,7 +134,10 @@ class ResolutionPlannerContractTest {
         assertThat(system).contains("신원 정보는 어떤 경우에도 묻지 않습니다");
         assertThat(system).contains("SELLER가 아니라 KNOWLEDGE입니다");
         assertThat(system).contains("이 배포가 지금 그 권한을 쓸 수 있는지는 고려하지 않습니다");
-        assertThat(ResolutionPlannerPrompt.VERSION).isEqualTo("resolution-planner/v1");
+        // v2, after the smoke (apr-6f0b3c21): the two clerical rules the first instruction left unsaid
+        assertThat(system).contains("KNOWLEDGE·PROCEDURE·SELLER step의 fields는 반드시 빈 배열([])입니다");
+        assertThat(system).contains("앞에 적은 step의 번호(0부터)");
+        assertThat(ResolutionPlannerPrompt.VERSION).isEqualTo("resolution-planner/v2");
     }
 
     @Test
