@@ -35,7 +35,7 @@ class ResolutionPlanValidatorScenarioTest {
                     .as(id + " availability").isEqualTo(want);
             checked++;
         }
-        assertThat(checked).isEqualTo(14);
+        assertThat(checked).isEqualTo(20);
     }
 
     @Test

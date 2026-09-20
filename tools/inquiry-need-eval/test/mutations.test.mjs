@@ -159,6 +159,51 @@ const MUTATIONS = [
     },
     real: 2, mutated: 0,
   },
+  // ── WP-3.1: the closer rules ────────────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'a demoted authority counts as a correct close again — the WP-2 overestimate, restored',
+    file: 'goals.mjs', from: 'const ambiguous = mine.some((n) => n.closingAuthorities.size > 1);',
+    to: 'const ambiguous = false;',
+    witness: async (M) => {
+      const both = need([K('KNOWLEDGE.CATALOGUE', 'CLOSES', 'SELLER_CATALOGUE'), K('SELLER', 'CLOSES')]);
+      return M.scoreGoals([{ q: 'C1', needs: [both] }],
+        [goal('C1', 'n1', [K('KNOWLEDGE.CATALOGUE', 'CLOSES', 'SELLER_CATALOGUE')])]).correct_closer;
+    },
+    real: 0, mutated: 1,
+  },
+  {
+    name: 'a seller ending on a goal the seller does not close stops being named a fallback',
+    file: 'goals.mjs', from: "          out.fallback_authority_inserted.push(id);", to: '',
+    witness: async (M) => M.scoreGoals([{ q: 'C1', needs: [need([
+      K('KNOWLEDGE.CATALOGUE', 'PRECONDITION', 'SELLER_CATALOGUE'), K('SELLER', 'CLOSES')])] }],
+    [goal('C1', 'n1', [K('KNOWLEDGE.CATALOGUE', 'CLOSES', 'SELLER_CATALOGUE')])]).fallback_authority_inserted.length,
+    real: 1, mutated: 0,
+  },
+  {
+    name: 'the seller put in a missing capability\'s place stops being counted at all',
+    file: 'goals.mjs', from: "      .filter((a, ni) => a === -1 && needs[ni].closingAuthorities.has('SELLER')).length;",
+    to: '      .filter(() => false).length;',
+    witness: async (M) => M.scoreGoals([{ q: 'C1', needs: [need([K('SELLER', 'CLOSES')])] }],
+      [goal('C1', 'n1', [K('KNOWLEDGE.PRODUCT', 'CLOSES')])]).seller_only_extra_needs,
+    real: 1, mutated: 0,
+  },
+  {
+    name: 'an answer that never arrived is folded back into planning misses',
+    file: 'goals.mjs', from: "      const why = pred?.failure ? `NO_ANSWER:${pred.failure}` : 'NO_PLAN';",
+    to: "      const why = 'NO_PLAN';",
+    witness: async (M) => M.scoreGoals(M.plansFromObservation([{ q: 'C1', rep: 1, plan: null, failure: 'TRUNCATED' }]),
+      [goal('C1', 'n1', [K('KNOWLEDGE.PRODUCT', 'CLOSES')])]).uncovered[0].why,
+    real: 'NO_ANSWER:TRUNCATED', mutated: 'NO_PLAN',
+  },
+  {
+    name: 'the presence claim and the closing claim become the same number again',
+    file: 'goals.mjs', from: 'if ([...g.closingAuthorities].every((a) => anywhere.has(a))) out.required_authority_present++;',
+    to: 'if (b.missing.length === 0) out.required_authority_present++;',
+    witness: async (M) => M.scoreGoals([{ q: 'C1', needs: [need([
+      K('KNOWLEDGE.CATALOGUE', 'PRECONDITION', 'SELLER_CATALOGUE'), K('SELLER', 'CLOSES')])] }],
+    [goal('C1', 'n1', [K('KNOWLEDGE.CATALOGUE', 'CLOSES', 'SELLER_CATALOGUE')])]).required_authority_present,
+    real: 1, mutated: 0,
+  },
 ];
 
 for (const m of MUTATIONS) {

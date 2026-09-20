@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import * as C from '../contract.mjs';
-import { assign, scoreGoals } from '../goals.mjs';
+import { assign, plansFromObservation, scoreGoals } from '../goals.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vocab = C.loadVocabulary();
@@ -42,7 +42,7 @@ test('the contract mirror agrees with the Java fixtures on every scenario row', 
     assert.deepEqual(got, (s.expect.valid ? [] : s.expect.violations).slice().sort(), `${s.id} violations`);
     parsed++;
   }
-  assert.equal(parsed, 22);   // 14 valid + 8 refused by the validator
+  assert.equal(parsed, 28);   // 20 valid + 8 refused by the validator
   assert.equal(refused, 8);   // shapes that cannot be written at all
 });
 
@@ -283,4 +283,81 @@ test('the v3.2 synthetic gold is itself a set of legal WP-3 plans', () => {
     assert.equal(parsed.failure, undefined, `${r.q}.${r.goal} parses`);
     assert.deepEqual(C.validate(parsed.plan, ix), [], `${r.q}.${r.goal} holds the contract`);
   }
+});
+
+// ── WP-3.1: who closes ────────────────────────────────────────────────────────────────────────────────────────────
+//
+// The five refusals above are about shapes that cannot be written. These are about a shape that CAN be written and is
+// wrong anyway — the defect the 67-call shadow of 2026-09-20 found. C03 in the shared fixture is contract-valid: it
+// names the same authorities as C01 and differs only in which of them is allowed to end the goal. Nothing in the
+// parser or the validator can refuse it, so the scorer must, and these tests are where that is pinned.
+
+const goldGoal = (q, steps, inputs = []) => ({ q, goal: 'n1', status: 'FROZEN', steps, customer_inputs: inputs });
+const CATALOGUE_CLOSES = goldGoal('C', [{ capability: 'KNOWLEDGE.CATALOGUE', role: 'CLOSES', scope: 'SELLER_CATALOGUE' }]);
+const scenarioPlan = (id) => ({ q: 'C', needs: scenarios().find((s) => s.id === id).plan.needs });
+
+test('a demoted authority is not a covered goal: knowledge answers it, the seller may not take the ending', () => {
+  const right = scoreGoals([scenarioPlan('C01')], [CATALOGUE_CLOSES]);
+  assert.equal(right.correct_closer, 1);
+  assert.equal(right.wrong_closer.length, 0);
+  assert.equal(right.fallback_authority_inserted.length, 0);
+  assert.equal(right.goal_coverage, 1);
+
+  const demoted = scoreGoals([scenarioPlan('C03')], [CATALOGUE_CLOSES]);
+  assert.equal(demoted.correct_closer, 0, 'the goal is not correctly closed');
+  assert.deepEqual(demoted.wrong_closer.map((w) => w.closed_by), [['SELLER']]);
+  assert.deepEqual(demoted.fallback_authority_inserted, ['C.n1']);
+  assert.equal(demoted.goal_coverage, 0);
+  // and the distance between the two claims is exactly what the old headline reported as success
+  assert.equal(demoted.required_authority_present, 1, 'the right authority IS in the plan — it just does not close');
+  assert.equal(demoted.wrong_closer[0].demoted, true);
+});
+
+test('a capability gap is not a seller authority: substituting one is scored, not silently covered', () => {
+  const gold = [goldGoal('C', [{ capability: 'KNOWLEDGE.PRODUCT', role: 'CLOSES' }])];
+  const kept = scoreGoals([scenarioPlan('C04')], gold);
+  assert.equal(kept.correct_closer, 1, 'keeping the unavailable authority is the correct plan');
+  assert.equal(kept.fallback_authority_inserted.length, 0);
+
+  const substituted = scoreGoals([scenarioPlan('C05')], gold);
+  assert.equal(substituted.correct_closer, 0);
+  assert.equal(substituted.required_authority_present, 0, 'here the authority is not merely demoted, it is gone');
+  // A seller-only need shares no authority with a knowledge goal, so the assignment cannot place it and the goal is
+  // reported unplanned. That is right, and on its own it is not enough: "nobody planned this" reads the same whether
+  // the planner said nothing or put the seller in the missing capability's place. The second is counted by name.
+  assert.deepEqual(substituted.uncovered, [{ goal: 'C.n1', why: 'NOT_PLANNED' }]);
+  assert.equal(substituted.seller_only_extra_needs, 1);
+  assert.equal(kept.seller_only_extra_needs, 0);
+});
+
+test('a genuine two-authority resolution still scores as correct — the rule is about endings, not about pairs', () => {
+  const gold = [goldGoal('C', [{ capability: 'KNOWLEDGE.ORG', role: 'PRECONDITION' },
+    { capability: 'SELLER', role: 'CLOSES' }])];
+  const r = scoreGoals([scenarioPlan('C02')], gold);
+  assert.equal(r.correct_closer, 1);
+  assert.equal(r.fallback_authority_inserted.length, 0, 'the seller closing what the gold says it closes is not a fallback');
+  assert.equal(r.goal_coverage, 1);
+});
+
+test('two endings in one need is never a correct close, however right one of them is', () => {
+  const both = { q: 'C', needs: [{ id: 'N1', ask: '더 큰 규격 판매 여부', customer_inputs: [],
+    steps: [{ capability: 'KNOWLEDGE.CATALOGUE', role: 'CLOSES', scope: 'SELLER_CATALOGUE' },
+      { capability: 'SELLER', role: 'CLOSES' }] }] };
+  const r = scoreGoals([both], [CATALOGUE_CLOSES]);
+  assert.equal(r.ambiguous_closer.length, 1);
+  assert.equal(r.correct_closer, 0, 'this is the shape the WP-2 headline of 1.000 counted as success');
+  // the legacy metric still credits it, and that is exactly why both are reported
+  assert.equal(r.required_authority_recall, 1);
+  assert.equal(r.required_authority_present, 1);
+});
+
+test('an answer that never arrived is not a planning miss', () => {
+  const rows = [{ q: 'C', rep: 1, plan: null, failure: 'TRUNCATED' }];
+  const r = scoreGoals(plansFromObservation(rows), [CATALOGUE_CLOSES]);
+  assert.deepEqual(r.envelope_failures, { TRUNCATED: 1 });
+  assert.deepEqual(r.uncovered, [{ goal: 'C.n1', why: 'NO_ANSWER:TRUNCATED' }]);
+  assert.equal(r.answered_cases, 0);
+  // a truncated row contributes no closer verdict at all — it is not counted as a wrong one
+  assert.equal(r.wrong_closer.length, 0);
+  assert.equal(r.correct_closer, 0);
 });

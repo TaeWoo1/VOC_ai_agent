@@ -31,13 +31,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const VOCAB_PATH = join(here, '../../contracts/inquiry-authority/v1/vocabulary.json');
 export const loadVocabulary = (p = VOCAB_PATH) => JSON.parse(readFileSync(p, 'utf8'));
 
-const authorityOf = (vocab) => new Map(vocab.capabilities.map((c) => [c.id, c.authority]));
+export const authorityOf = (vocab) => new Map(vocab.capabilities.map((c) => [c.id, c.authority]));
 const byCase = (rows, k = 'q') => rows.reduce((m, r) => m.set(r[k], [...(m.get(r[k]) ?? []), r]), new Map());
 const set = (xs) => new Set(xs.filter((x) => x !== undefined && x !== null));
 const sorted = (s) => [...s].sort();
 
 /** Everything about one side of the comparison that the matcher is allowed to look at. */
-function facts(steps, ix) {
+export function facts(steps, ix) {
   const acting = steps.filter((s) => s.role !== 'CONTEXT');
   return {
     capabilities: set(steps.map((s) => s.capability)),
@@ -122,6 +122,10 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
     cases: 0, goals: 0, unplanned_case: 0,
     goal_covered: 0, uncovered: [], uncovered_due_to_merge: 0, wrong_authority: [], capability_mismatch: [],
     required_authority_recall: 0, unnecessary_authority_goals: 0, order_misses: [], procedure_for_read: [],
+    // WP-3.1 headline: presence and closing are different claims, and only the second is what the customer gets.
+    required_authority_present: 0, correct_closer: 0, wrong_closer: [], ambiguous_closer: [],
+    fallback_authority_inserted: [], seller_only_extra_needs: 0,
+    envelope_failures: {}, answered_cases: 0,
     planner_only_extra_needs: 0, goals_split: 0, split_histogram: {},
     sequence_compared: 0, sequence_correct: 0, sequence_incomparable: 0,
     entity_compared: 0, entity_correct: 0, entity_over_read: 0, entity_under_read: 0, over_read_fields: {},
@@ -131,6 +135,7 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
     },
     goals_indistinguishable: 0,
   };
+  const id = (r) => `${r.q}.${r.goal ?? r.need}`;
   for (const [q, rows] of goldByCase) {
     out.cases++;
     out.goals += rows.length;
@@ -144,19 +149,58 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
     const pred = predByCase.get(q);
     if (!pred || !pred.needs?.length) {
       out.unplanned_case++;
-      rows.forEach((r) => out.uncovered.push({ goal: `${r.q}.${r.need}`, why: 'NO_PLAN' }));
+      // An envelope that never produced an answer and a planner that planned the wrong thing are different failures.
+      // Folding them together reads a truncation as a semantic miss, which is how four cut-off answers arrived in the
+      // WP-4 report inside `goal_coverage` (WP-3.1 §1).
+      const why = pred?.failure ? `NO_ANSWER:${pred.failure}` : 'NO_PLAN';
+      if (pred?.failure) out.envelope_failures[pred.failure] = (out.envelope_failures[pred.failure] ?? 0) + 1;
+      rows.forEach((r) => out.uncovered.push({ goal: id(r), why }));
       continue;
     }
+    out.answered_cases++;
     const needs = pred.needs.map((n) => ({ ...facts(n.steps ?? [], ix), inputs: set(n.customer_inputs ?? []), raw: n }));
     const { assignment, buckets } = assign(needs, goals);
     out.planner_only_extra_needs += assignment.filter((a) => a === -1).length;
+    // A need the assignment could not place, whose ending is the seller. It cannot show up as a demoted authority
+    // because it shares no authority with any goal — it did not take the ending from the right authority, it stands
+    // where that authority is absent. Counted here so that substituting the seller for a capability the snapshot
+    // cannot offer is visible as something, rather than only as a goal nobody planned (WP-3.1 §4).
+    out.seller_only_extra_needs += assignment
+      .filter((a, ni) => a === -1 && needs[ni].closingAuthorities.has('SELLER')).length;
 
     goals.forEach((g, gi) => {
       const b = buckets[gi];
-      const id = `${g.row.q}.${g.row.need}`;
+      const id = `${g.row.q}.${g.row.goal ?? g.row.need}`;
       const mine = assignment.map((a, ni) => (a === gi ? needs[ni] : null)).filter(Boolean);
       if (b.covered) out.goal_covered++;
       if (b.missing.length === 0 && mine.length) out.required_authority_recall++;
+      if (mine.length) {
+        // PRESENCE: the gold's closing authority appears somewhere in the plan, in any role. This is the claim the
+        // WP-2 headline of 1.000 actually made — a plan naming KNOWLEDGE(CLOSES) and SELLER(CLOSES) satisfied it, and
+        // so does a plan that demotes KNOWLEDGE to PRECONDITION and lets SELLER close. It is reported so the gap
+        // between it and `correct_closer` is visible instead of being the difference between two reports.
+        const anywhere = new Set(mine.flatMap((n) => [...n.authorities]));
+        if ([...g.closingAuthorities].every((a) => anywhere.has(a))) out.required_authority_present++;
+        // AMBIGUITY IS WITHIN A NEED. One need naming two closing authorities offers two endings and says nothing
+        // about which is the answer; a goal SPLIT across needs legitimately has a different ending in each, which is
+        // what split-tolerance means. The v3 contract makes the first inexpressible — so this counter is 0 on any v3
+        // run by construction, and it is kept because it is the whole of the WP-2 overestimate (WP-3.1 §6).
+        const ambiguous = mine.some((n) => n.closingAuthorities.size > 1);
+        const closedBy = sorted(new Set(mine.flatMap((n) => [...n.closingAuthorities])));
+        const demoted = [...g.closingAuthorities].every((a) => anywhere.has(a));
+        if (ambiguous) {
+          out.ambiguous_closer.push({ goal: id, expected: [...g.closingAuthorities], closed_by: closedBy });
+        } else if (b.missing.length === 0) {
+          out.correct_closer++;
+        } else {
+          out.wrong_closer.push({ goal: id, expected: [...g.closingAuthorities], closed_by: closedBy, demoted });
+        }
+        // A seller ending on a goal the gold does not end with the seller: the fallback this contract must not express.
+        if (!g.closingAuthorities.has('SELLER')
+            && mine.some((n) => n.closingAuthorities.has('SELLER'))) {
+          out.fallback_authority_inserted.push(id);
+        }
+      }
       else if (!mine.length) {
         // was there a compatible need that another goal took? then a merge cost us this goal
         const taken = needs.some((n) => compatible(n, g));
@@ -215,6 +259,15 @@ export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
     ...out,
     goal_coverage: rate(out.goal_covered, scored),
     required_authority_recall_rate: rate(out.required_authority_recall, scored),
+    // WP-3.1 headline (docs/inquiry_architecture_v3_wp31.md §6). `authority_presence_rate` is deliberately reported
+    // beside `correct_closer_rate`: the first is the old claim, the second is the one the customer experiences, and
+    // the distance between them is the size of the overestimate.
+    authority_presence_rate: rate(out.required_authority_present, scored),
+    correct_closer_rate: rate(out.correct_closer, scored),
+    wrong_closer_rate: rate(out.wrong_closer.length, scored),
+    ambiguous_closer_rate: rate(out.ambiguous_closer.length, scored),
+    correct_closer_rate_of_answered: rate(out.correct_closer,
+      out.correct_closer + out.wrong_closer.length + out.ambiguous_closer.length),
     sequence_correct_rate: rate(out.sequence_correct, out.sequence_compared),
     entity_scope_accuracy: rate(out.entity_correct, out.entity_compared),
     inputs: {
@@ -254,8 +307,12 @@ function inputs(acc, want, got, forbidden) {
 
 /** Observation rows (the harness's `plan` column) → one predicted plan per case, for a chosen repetition. */
 export function plansFromObservation(rows, rep = 1) {
-  return rows.filter((r) => r.rep === rep && r.plan?.needs?.length)
-    .map((r) => ({ q: r.q, needs: r.plan.needs }));
+  // A row that failed is kept, carrying its failure word and no needs. A truncated answer is not a plan and never
+  // enters a quality metric as one (WP-3.1 §1) — but dropping the row entirely made it indistinguishable from a case
+  // the planner simply did not cover, so the failure travels with it.
+  return rows.filter((r) => r.rep === rep)
+    .map((r) => (r.plan?.needs?.length ? { q: r.q, needs: r.plan.needs }
+      : { q: r.q, needs: [], failure: r.failure ?? 'NO_PLAN' }));
 }
 
 function main(argv) {

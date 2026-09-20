@@ -95,12 +95,14 @@ public final class ResolutionPlannerRunner {
             String body = generator.resolutionPlanBody(in.question(), snapshot);
             for (int rep = 1; rep <= repeats; rep++) {
                 String content;
+                String said;
                 String failure;
                 InquiryDecisionModel.CallCost cost = InquiryDecisionModel.CallCost.NONE;
                 String finish = null;
                 switch (mode) {
                     case ORACLE -> {
                         content = oracle.get(in.q());
+                        said = content;
                         failure = content == null ? "NO_ORACLE_PLAN" : null;
                     }
                     case REPLAY -> {
@@ -113,6 +115,9 @@ public final class ResolutionPlannerRunner {
                                     + " — the replay is not about the same request");
                         }
                         content = row.path("raw").isNull() ? null : row.path("raw").asText();
+                        // a replay of a run recorded before WP-3.1 has no `said`; the recorded `raw` is all there is
+                        said = row.path("said").isNull() || row.path("said").isMissingNode()
+                                ? content : row.path("said").asText();
                         failure = row.path("failure").isNull() ? null : row.path("failure").asText();
                         finish = row.path("finish").isNull() ? null : row.path("finish").asText();
                     }
@@ -123,19 +128,26 @@ public final class ResolutionPlannerRunner {
                         InquiryDecisionGenerator.ResolutionPlanCall call = generator.resolutionPlan(org, body);
                         calls++;
                         content = call.content();
+                        said = call.said();
                         failure = call.failure();
                         finish = call.finish();
                         cost = call.cost();
                     }
                 }
-                out.add(row(runId, mode, in, snapshot, user, body, rep, content, failure, finish, cost));
+                out.add(row(runId, mode, in, snapshot, user, body, rep, content, said, failure, finish, cost));
             }
         }
         return new Result(out, calls);
     }
 
+    /**
+     * One row. {@code raw} is the answer that was read as a plan and {@code said} is what the vendor sent — they are
+     * the same string on a successful call and differ exactly where a call failed with something in hand (WP-3.1).
+     * {@code said} never reaches the parser: {@code content} does, and {@code content} is null whenever {@code failure}
+     * is not.
+     */
     private String row(String runId, Mode mode, Input in, CapabilitySnapshot snapshot, String user, String body,
-                       int rep, String content, String failure, String finish,
+                       int rep, String content, String said, String failure, String finish,
                        InquiryDecisionModel.CallCost cost) {
         ResolutionPlanParser.Parsed parsed = failure != null ? ResolutionPlanParser.failed(failure)
                 : ResolutionPlanParser.parse(content);
@@ -151,7 +163,9 @@ public final class ResolutionPlannerRunner {
                 .put("completion_tokens", cost.completionTokens());
         row.put("finish", finish);
         row.put("raw", content);
+        row.put("said", said);
         row.put("failure", parsed.failure());
+        row.set("registry", registry(snapshot));
         if (parsed.plan() != null) {
             ResolutionPlanValidator.Result validation = ResolutionPlanValidator.validate(parsed.plan(), snapshot);
             row.set("plan", plan(parsed.plan()));
@@ -159,9 +173,15 @@ public final class ResolutionPlannerRunner {
             validation.violations().forEach(v -> violations.addObject().put("need", v.need())
                     .put("step", v.step() == null ? null : String.valueOf(v.step())).put("code", v.code().name()));
             ArrayNode availability = row.putArray("availability");
-            validation.availability().forEach(a -> availability.addObject().put("need", a.need()).put("step", a.step())
-                    .put("capability", a.capability().wire())
-                    .put("gap", a.gap() == null ? null : a.gap().name()));
+            validation.availability().forEach(a -> {
+                ObjectNode node = availability.addObject().put("need", a.need()).put("step", a.step())
+                        .put("capability", a.capability().wire())
+                        .put("gap", a.gap() == null ? null : a.gap().name());
+                // WP-3.1: the precise truth behind an all-or-nothing NOT_SUPPORTED. StepAvailability has carried it
+                // since WP-2 and no row wrote it down, so "which field made this step a gap" was unanswerable offline.
+                ArrayNode unavailable = node.putArray("unavailable_fields");
+                a.unavailableFields().forEach(f -> unavailable.add(f.name()));
+            });
             row.put("valid", validation.valid());
         } else {
             row.putNull("plan");
@@ -170,6 +190,26 @@ public final class ResolutionPlannerRunner {
             row.put("valid", false);
         }
         return row.toString();
+    }
+
+    /**
+     * The snapshot the request was built from, written out (WP-3.1). {@code registry_fp} identifies it and nothing
+     * could read it: every offline question of the form "would this step have been available had the plan asked for
+     * less" needed the statuses, and the only alternatives were a second copy of {@link CapabilityRegistry#derive} in
+     * the scoring tools or a JVM. This is the snapshot's own answer, so there is no second copy of the policy.
+     */
+    private static JsonNode registry(CapabilitySnapshot snapshot) {
+        ObjectNode out = JSON.createObjectNode();
+        out.put("version", snapshot.version()).put("channel", snapshot.channelCode())
+                .put("surface", snapshot.surface() == null ? null : snapshot.surface().name())
+                .put("order_bound", snapshot.orderBound())
+                .put("lookup", snapshot.lookup() == null ? null : snapshot.lookup().name())
+                .put("variants", snapshot.variantCount());
+        ObjectNode capabilities = out.putObject("capabilities");
+        snapshot.capabilities().forEach((k, v) -> capabilities.put(k.wire(), v.name()));
+        ObjectNode fields = out.putObject("fields");
+        snapshot.fields().forEach((k, v) -> fields.put(k.name(), v.name()));
+        return out;
     }
 
     /** The plan as the scorer reads it — the same wire shape the model produced, normalised by the parser. */

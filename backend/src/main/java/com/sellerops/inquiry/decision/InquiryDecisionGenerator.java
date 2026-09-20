@@ -95,11 +95,16 @@ public class InquiryDecisionGenerator {
                         + " needs={} {}", orgId, ResolutionPlannerPrompt.VERSION, properties.outputFormat(),
                 parsed.failure() == null, parsed.failure(), env.finish(),
                 parsed.plan() == null ? -1 : parsed.plan().needs().size(), metrics.toLogFields());
-        return new ResolutionPlanCall(env.content(), env.finish(), parsed.plan(), parsed.failure(), cost(metrics));
+        return new ResolutionPlanCall(env.content(), env.said(), env.finish(), parsed.plan(), parsed.failure(),
+                cost(metrics));
     }
 
-    /** What one planner call produced: the raw answer, the plan when it could be read, and what it cost. */
-    record ResolutionPlanCall(String content, String finish, ResolutionPlan plan, String failure,
+    /**
+     * What one planner call produced: the answer that may be read as a plan ({@code content}, null unless the call
+     * succeeded), what the vendor actually sent ({@code said}, kept even when it may not be read — see
+     * {@link Envelope}), the plan when there was one, and what it cost.
+     */
+    record ResolutionPlanCall(String content, String said, String finish, ResolutionPlan plan, String failure,
                               InquiryDecisionModel.CallCost cost) {
     }
 
@@ -112,30 +117,53 @@ public class InquiryDecisionGenerator {
     /**
      * What came back, before any parsing of the model's content. A refusal, a cut-off answer, an HTTP failure and an
      * empty message are different facts and are recorded as such — each is still no opinion (fail closed).
+     *
+     * <p><b>Two content fields, because there are two questions</b> (Inquiry v3 WP-3.1). {@code content} answers "may
+     * this be read as a plan": it is non-null only when {@code failure} is null, so every fail-closed caller above is
+     * unchanged by construction. {@code said} answers "what did the vendor actually send", and is filled in
+     * <i>every</i> case where something came back at all — the truncated prefix, the refusal sentence, the unreadable
+     * envelope's own body.
+     *
+     * <p>Until WP-3.1 the second question had no field and therefore no answer. The 67-call shadow of 2026-09-20 hit
+     * {@code finish=length} four times, each returning exactly 1,600 output tokens where the same four questions had
+     * produced 153–347 under v2 — and the partial content, the only evidence of why, was discarded one line after it
+     * was read. <b>Those four are not recoverable and this field does not claim to recover them</b>; it makes the next
+     * one observable.
+     *
+     * <p><b>{@code said} is evidence and never an input to a plan.</b> Nothing repairs, completes or parses it. A
+     * truncated JSON object mended into a plan would be a plan the model never finished writing, and the authority set
+     * of a half-written plan is not a smaller version of the right answer — it is an unknown one.
      */
-    record Envelope(String content, String finish, String failure) {
+    record Envelope(String content, String said, String finish, String failure) {
         static Envelope of(AgentLlmTransport.Response response) {
             if (response == null) {
-                return new Envelope(null, null, "TRANSPORT");
+                return new Envelope(null, null, null, "TRANSPORT");
             }
             if (!response.ok()) {
-                return new Envelope(null, null, response.status() == 0 ? "TRANSPORT" : "HTTP_" + response.status());
+                // the vendor's own error body is the only evidence of an HTTP failure, so that is what `said` carries
+                return new Envelope(null, blankToNull(response.body()), null,
+                        response.status() == 0 ? "TRANSPORT" : "HTTP_" + response.status());
             }
             try {
                 JsonNode choice = MAPPER.readTree(response.body()).path("choices").path(0);
                 String finish = choice.path("finish_reason").asText(null);
+                String said = choice.path("message").path("content").asText("");
                 JsonNode refusal = choice.path("message").path("refusal");
                 if (refusal.isTextual() && !refusal.asText().isBlank()) {
-                    return new Envelope(null, finish, "REFUSAL");
+                    return new Envelope(null, refusal.asText(), finish, "REFUSAL");
                 }
                 if ("length".equals(finish)) {
-                    return new Envelope(null, finish, "TRUNCATED");
+                    return new Envelope(null, blankToNull(said), finish, "TRUNCATED");
                 }
-                String content = choice.path("message").path("content").asText("");
-                return content.isBlank() ? new Envelope(null, finish, "EMPTY") : new Envelope(content, finish, null);
+                return said.isBlank() ? new Envelope(null, null, finish, "EMPTY")
+                        : new Envelope(said, said, finish, null);
             } catch (Exception e) {
-                return new Envelope(null, null, "UNPARSEABLE");
+                return new Envelope(null, blankToNull(response.body()), null, "UNPARSEABLE");
             }
+        }
+
+        private static String blankToNull(String s) {
+            return s == null || s.isBlank() ? null : s;
         }
     }
 
