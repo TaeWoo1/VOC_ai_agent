@@ -339,3 +339,76 @@ APPROVAL MANIFEST — Inquiry v3 WP-2 planner shadow (67 × 3)
 
 This is the measurement WP-2 exists for: the first evidence of whether the planner chooses the right authority on real
 customer messages. It changes no production Case — the planner runs beside v2 on captures only.
+
+## 14. Shadow run — `apr-e7d1b459` / `wt-5a0c82f1` (2026-09-20, consumed) — the first measurement
+
+67 canonical questions × 3 repetitions = **201 calls**, prompt `resolution-planner/v2`, `gpt-5-2025-08-07` @ `minimal`,
+strict `json_schema`, inputs pinned to `inquiry-planner-capture/v1` (`5850421b…`). No production Case was touched;
+marketplace 0 · DB writes 0. Raw answers stored before scoring: `eval-store:runs/wp2-shadow/`.
+
+**Cost**: 270,069 input / 36,076 output tokens · p50 **1,725ms** · p95 3,937ms · max 12,478ms · **7m25s** wall clock.
+(§7 estimated ≈267k input — right; ≈25k output — low by a third.)
+
+### 14-A. The authority decision is strong
+
+| | rep 1 | rep 2 | rep 3 |
+|---|---|---|---|
+| **authority recall** (cases where the planner split the message the same way the gold does) | **1.000** | **1.000** | **1.000** |
+| order misses, those cases | **0** | **0** | **0** |
+| `procedure_for_read` — the product owner's invariant, all 201 plans | **0** | **0** | **0** |
+| entity + scope accuracy, matched cases | 0.927 | 0.818 | 0.974 |
+
+Read against the whole set with positional alignment the same numbers are 0.958 / 0.972 / 0.931 with 1–2 order misses —
+**those misses are alignment artefacts**, not decisions: they appear only where the planner split the message into more
+needs than the gold, so the gold's need *i* is compared with a different question. The matched-case column is the honest
+one, and the scorer's positional alignment is now the measurement's binding limit (§14-D).
+
+The confusion matrix on matched cases (rep 1) shows what it actually did: KNOWLEDGE → KNOWLEDGE 28 · SELLER → SELLER 3 ·
+ENTITY_STATE → ENTITY_STATE 2 · PROCEDURE → KNOWLEDGE+PROCEDURE 1 · **KNOWLEDGE → KNOWLEDGE+SELLER 8** ·
+KNOWLEDGE → ENTITY_STATE+KNOWLEDGE+SELLER 1. It never substituted a policy for an order's state, and never made a read
+into a procedure.
+
+### 14-B. Plan shape is where it is weak — four named causes
+
+| what | count | cause |
+|---|---|---|
+| **contract-invalid plans** | **20 / 201 (10%)** | below |
+| `FIELDS_ON_NON_ENTITY` + `FIELD_OF_OTHER_CAPABILITY` | 15 + 15 | **all on `KNOWLEDGE.CATALOGUE` steps.** Strict Structured Outputs requires every property on every step, so `fields` must be emitted even where it is meaningless, and the model sometimes fills it. This is a **schema shape** problem, not an instruction one: the fix is one step shape per capability class (`anyOf`), so a knowledge step has no `fields` property to fill |
+| `PROCEDURE_WITHOUT_ORDER_PRECONDITION` | 4 | a procedure planned without reading its order first |
+| `SCOPE_MISMATCH` | 4 | **all `SELLER → COMPANY`** — the seller's own judgment labelled as a company-wide scope |
+| `BAD_DEPENDENCY` | 1 | down from smoke #1's shape, but not gone |
+| **a SELLER closer added beside KNOWLEDGE** | 8 / 43 matched needs | the instruction says handing to the seller is not a step; the model still plans it as one. It is the main driver of `unnecessary_authority` (10–14 per rep) |
+| **over-asking the customer** | 36 over-asked · **0 under-asked** · 31 exact | the planner asks for product context the gold does not need. Direction matters: it never fails to ask, it asks too often |
+| **over-splitting needs** | 27 / 67 more needs than gold · **0 fewer** | never merges two questions into one; sometimes splits one into two |
+
+### 14-C. Run-to-run agreement at three levels
+
+| identical across all three repetitions | |
+|---|---|
+| need count | **41 / 67** |
+| closing authorities (multiset) | **27 / 67** |
+| the whole plan, token for token | **12 / 67** |
+
+The decision is far stabler than its shape. For a planner whose output feeds deterministic resolvers this is the right way
+round, but 27/67 on the authority multiset is still low, and it is inflated by the SELLER-beside-KNOWLEDGE habit above.
+
+### 14-D. The `effect` diagnostic, as promised in §12
+
+Across 201 plans the model wrote `BOUNDED_WORKFLOW` **38** times and `EXTERNAL_STATE_CHANGE` **4**. The gold uses
+`EXTERNAL_STATE_CHANGE` for every procedure. Nothing downstream separates them — there is no executor either way — and the
+model clearly does not read them as the gold does. **Recommendation: collapse `effect` to one value** (`PROCEDURE` means a
+change or a workflow, full stop) and keep the rule that a procedure must declare it. A distinction nobody acts on and
+nobody agrees about is a distinction that will be scored one day and mean nothing.
+
+### 14-E. What this changes for WP-3
+
+1. **Schema by capability class** (`anyOf`) — removes 30 of the 34 violations at the root, without loosening the validator.
+2. **A semantic need alignment** in the scorer (or a gold that accepts a split), so the headline is not hostage to
+   positional matching. Today only 43 of 67 cases can be scored cleanly.
+3. **The seller is not a step** — restate in the instruction and add a validator code for a SELLER step planned beside a
+   closing KNOWLEDGE step, so the habit is refused rather than merely scored.
+4. **Over-asking** deserves its own metric before it becomes a product behaviour: asking a customer for a size they did not
+   need to give is a real cost, and it is invisible in `customer_input_correct`'s single rate.
+5. Collapse `effect` (§14-D).
+
+None of these needs a model call to build; the next run measures whether they worked.
