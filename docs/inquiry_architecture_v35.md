@@ -1241,3 +1241,51 @@ The order, once the corpus decision is made:
 
 **Still not approved and still not run.** What this package changed is that there is now something an approval could
 be bound to, and a preflight that says plainly why there is not one yet.
+
+### 23.8 The corpus gap, closed — and the manifest that now exists (2026-09-20)
+
+§23.5 raised two decisions and both are taken.
+
+**The multi-goal inputs are written, not assembled.** `G07` and `G23` carry a committed `customer_message`, and the
+field exists because the alternative was deriving an input from its own answer key. Two properties are pinned by
+test: the message is **not** the join of the row's goals, and for `G23` the clause **「노즐만 배송이 불가능하면」**
+appears in it **verbatim** — the same string the relation carries as `stated_condition`. The relationship is
+therefore discoverable from what the model is given, rather than only from the answer key. The naive join is shown,
+in the same test, to drop that clause entirely.
+
+`G07` deliberately joins its two requests with 그리고, a plain conjunction. A conditional there would tempt a
+`FALLBACK` relation that this row's gold does not carry, and the row is meant to test the DECISION/ACTION boundary,
+not the relation.
+
+**The NO_GOAL case stays out of git.** `R:0c582144` is read from the durable eval store **at runtime**. Its whole
+value is that it is a real message — the row where a model is most tempted to invent a goal nobody asked for — and a
+synthetic stand-in would be one somebody designed to be easy. The repository carries its id; the manifest carries its
+id and the fingerprint of the request built from it, and **nowhere carries the message**. A set containing it
+declares `real_customer_text`, and the store being absent (as in CI) is reported, never filled in.
+
+**The 14-vs-13 reconciliation: nothing merged, nothing disappeared.** Thirteen git fixtures plus one store-resident
+message is §22.11's fourteen, unchanged. The earlier "13" was a field named `chosen` counting only the fixture half —
+a name doing the wrong job. The report now prints `planned 14 = from_committed_fixture 13 + from_durable_store 1`.
+
+**Preflight, run with the environment supplied externally at invocation:**
+
+```
+verdict READY_FOR_APPROVAL · commit ca98a18d · tree_clean true
+planned 14 · usable 14 · real_customer_text true · blockers 0
+approval_id apr-0210f907-6c25-4e28-bab0-1dcf16accb53
+run_id     v35-goal-smoke-ca98a18d-30a222e9
+input_set_fp   e49edc82…   request_fp_set  e7c9184c…
+14 request fingerprints, 14 distinct
+```
+
+Stored append-only at `eval-store:runs/v35-goal-smoke-ca98a18d-30a222e9` (`run-verify → ok`), because a manifest in a
+build directory is not something an approval can bind to next week.
+
+**Two things the manifest says about itself, in its own notes.** Environment presence was established from the
+invoking shell; the preflight **never reads the values** and answers "would transport be configured", never "is this
+credential good" — a wrong value fails at the first call with nothing billed. And the input set carries real customer
+text, declared rather than discovered later.
+
+**Model calls 0.** `PREPARE` built all fourteen requests holding a transport that throws on contact.
+
+**Still not run.** The manifest exists and is bindable; what does not exist is a grant bound to those two ids.
