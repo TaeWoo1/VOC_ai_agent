@@ -50,7 +50,8 @@ public final class GoalInterpreterPreflight {
 
     public static final String MODEL = "gpt-5-2025-08-07";
     public static final String REASONING_EFFORT = "minimal";
-    public static final String SCOPE = "offline synthetic smoke — Customer Goal Interpreter, no seller and no channel";
+    /** The runner defines what it does; the preflight quotes it, so the two cannot describe different runs. */
+    public static final String SCOPE = CustomerGoalRunner.SCOPE;
 
     private GoalInterpreterPreflight() {
     }
@@ -80,10 +81,8 @@ public final class GoalInterpreterPreflight {
         ObjectNode report = JSON.createObjectNode();
         report.put("kind", "GOAL_INTERPRETER_PREFLIGHT").put("prepared_at", Instant.now().toString());
 
-        String commit = git(repoRoot, "rev-parse", "HEAD");
-        String dirty = git(repoRoot, "status", "--porcelain");
-        boolean clean = dirty.lines().filter(l -> !l.isBlank())
-                .noneMatch(l -> !l.contains("node_modules"));
+        String commit = RepoState.commit(repoRoot);
+        boolean clean = RepoState.clean(repoRoot);
         report.put("commit", commit).put("tree_clean", clean);
         if (!clean) {
             blockers.add("TREE_NOT_CLEAN — a run must be attributable to a commit");
@@ -125,10 +124,10 @@ public final class GoalInterpreterPreflight {
         List<CustomerGoalRunner.Input> usable = set.usable().stream()
                 .map(i -> new CustomerGoalRunner.Input(i.id(), i.message())).toList();
         List<CustomerGoalRunner.Request> requests = runner.prepare(usable);
-        String inputSetFp = CustomerGoalRunner.sha(String.join("\n",
-                usable.stream().map(i -> i.id() + "\u0000" + i.message()).toList()));
-        String requestFpSet = CustomerGoalRunner.sha(String.join("\n",
-                requests.stream().map(CustomerGoalRunner.Request::requestFp).toList()));
+        // The same two formulas the runner re-computes at send time. One definition, or a manifest agrees with a
+        // fingerprint nobody else would have produced.
+        String inputSetFp = CustomerGoalRunner.inputSetFp(usable);
+        String requestFpSet = CustomerGoalRunner.requestFpSet(requests);
 
         Map<String, String> environment = new LinkedHashMap<>();
         for (String name : REQUIRED_ENV) {
@@ -197,13 +196,4 @@ public final class GoalInterpreterPreflight {
         };
     }
 
-    private static String git(Path repoRoot, String... args) throws Exception {
-        List<String> command = new ArrayList<>(List.of("git"));
-        command.addAll(List.of(args));
-        Process process = new ProcessBuilder(command).directory(repoRoot.toFile())
-                .redirectErrorStream(true).start();
-        String out = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        process.waitFor();
-        return out.trim();
-    }
 }

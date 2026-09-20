@@ -49,18 +49,68 @@ public final class CustomerGoalRunner {
 
     public static final String VERSION = "customer-goal-runner/v1";
 
+    /** What this runner does, in the words an approval is bound to. The runner defines its own scope. */
+    public static final String SCOPE =
+            "offline synthetic smoke — Customer Goal Interpreter, no seller and no channel";
+
+    /** The one header that carries a credential. Its VALUE is never read by anything here except the transport. */
+    public static final String AUTHORIZATION = "Authorization";
+
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final String model;
     private final String reasoningEffort;
     private final AgentLlmTransport transport;
     private final URI endpoint;
+    private final Map<String, String> headers;
 
     public CustomerGoalRunner(String model, String reasoningEffort, AgentLlmTransport transport, URI endpoint) {
+        this(model, reasoningEffort, transport, endpoint, Map.of());
+    }
+
+    /**
+     * @param headers what goes out with the request. The credential lives here, comes from the process environment,
+     *                and is never read, logged, hashed or persisted by this class — only handed to the transport.
+     */
+    public CustomerGoalRunner(String model, String reasoningEffort, AgentLlmTransport transport, URI endpoint,
+                              Map<String, String> headers) {
         this.model = model;
         this.reasoningEffort = reasoningEffort;
         this.transport = transport;
         this.endpoint = endpoint;
+        this.headers = headers == null ? Map.of() : Map.copyOf(headers);
+    }
+
+    /** Why a run was refused. Carries reasons and never a value that could be a secret. */
+    public static final class Refused extends RuntimeException {
+        private final transient List<String> reasons;
+
+        Refused(List<String> reasons) {
+            super("RUN refused: " + String.join(", ", reasons));
+            this.reasons = List.copyOf(reasons);
+        }
+
+        public List<String> reasons() {
+            return reasons;
+        }
+    }
+
+    /**
+     * Where a run would happen and what the operator said when granting it.
+     *
+     * @param grantedApprovalId the id the OPERATOR named, not the one the file claims — comparing a file to itself
+     *                          proves nothing, and the point is to catch a launcher aimed at a different manifest
+     */
+    public record World(Path repoRoot, String grantedApprovalId, String grantedRunId, Path out) {
+    }
+
+    /** Two moments, so raw can be durable before anything is derived from it. */
+    public interface Sink {
+        /** The observation, before any parse. Called first, every time. */
+        void raw(String row);
+
+        /** The same row with what could be read from it. Called after. */
+        void row(String row);
     }
 
     public enum Mode { PREPARE, RUN, REPLAY }
@@ -90,16 +140,108 @@ public final class CustomerGoalRunner {
         return List.copyOf(out);
     }
 
+    /** Build every request and record it, sending nothing. No manifest, because nothing leaves. */
+    public Result dryRun(String runId, List<Input> inputs, Sink sink) {
+        return loop(runId, Mode.PREPARE, inputs, 0, Map.of(), sink, null);
+    }
+
+    /** Re-score recorded answers. No manifest, because nothing leaves. */
+    public Result replay(String runId, List<Input> inputs, Map<String, JsonNode> recorded, Sink sink) {
+        return loop(runId, Mode.REPLAY, inputs, 0, recorded, sink, null);
+    }
+
     /**
-     * @param maxCalls  the approved hard cap, checked before every send
-     * @param recorded  {@code id → row}, for {@link Mode#REPLAY}
-     * @param sink      called with each row's bytes the moment they exist and BEFORE anything is derived from them
+     * <b>The only path that contacts a vendor</b>, and it cannot be entered without the manifest the operator
+     * approved. There is no overload that takes ids as loose strings, none that builds an approval internally, and
+     * none that sends with no approval at all: {@code transport.post} appears exactly once in this file, inside the
+     * loop below, and this is the only method that reaches it with {@link Mode#RUN}.
+     *
+     * <p><b>The order is the contract</b> (§23.9):
+     *
+     * <ol>
+     *   <li>recompute every bound field <b>from the world</b> — git, the live prompt, the live schema, the inputs in
+     *       hand — and never from anything PREPARE cached;</li>
+     *   <li>ask {@link GoalRunGuard#refusals};</li>
+     *   <li>refuse, or continue;</li>
+     *   <li>refuse if the credential is absent;</li>
+     *   <li>refuse if the output already exists;</li>
+     *   <li>only then, the first send.</li>
+     * </ol>
+     *
+     * <p>Any refusal leaves the send count at <b>exactly zero</b>. Nothing partial starts, because nothing has
+     * started: the checks are all above the loop.
+     *
+     * @throws Refused with the reasons, which never include a value that could be a secret
      */
-    public Result run(String runId, Mode mode, List<Input> inputs, int maxCalls, Map<String, JsonNode> recorded,
-                      java.util.function.Consumer<String> sink) {
+    public Result send(ApprovalManifest approval, World world, List<Input> inputs, Sink sink) {
+        if (approval == null) {
+            throw new IllegalArgumentException("RUN requires the approved manifest");
+        }
+        if (world == null || sink == null || inputs == null) {
+            throw new IllegalArgumentException("RUN names where it runs, what it sends and where rows go");
+        }
+        List<Request> requests = prepare(inputs);
+        List<String> refusals = GoalRunGuard.refusals(approval.approvalId(), approval.runId(), approval.bound(),
+                world.grantedApprovalId(), world.grantedRunId(), current(world.repoRoot(), inputs, requests));
+        if (!refusals.isEmpty()) {
+            throw new Refused(refusals);
+        }
+        String credential = headers.get(AUTHORIZATION);
+        if (credential == null || credential.isBlank()) {
+            // Presence only. This never asks whether the credential is GOOD — that is the vendor's answer, and it
+            // costs a call to get, which is exactly what an unapproved or misconfigured run must not spend.
+            throw new Refused(List.of("CREDENTIAL_MISSING:" + AUTHORIZATION));
+        }
+        if (world.out() != null && Files.exists(world.out())) {
+            throw new Refused(List.of("OUTPUT_EXISTS:" + world.out().getFileName()));
+        }
+        return loop(approval.runId(), Mode.RUN, inputs, approval.hardCap(), Map.of(), sink, requests);
+    }
+
+    /**
+     * Every bound field, read from the world at this moment.
+     *
+     * <p><b>Nothing here is carried over from PREPARE.</b> The commit and the tree come from git now; the prompt and
+     * schema fingerprints are computed from the live classes now; the input-set and request fingerprints are computed
+     * from the inputs actually in hand now. A manifest that agreed with a cached copy of itself would agree with
+     * anything.
+     */
+    private Map<String, String> current(Path repoRoot, List<Input> inputs, List<Request> requests) {
+        Map<String, String> m = new java.util.LinkedHashMap<>();
+        m.put("commit", RepoState.commit(repoRoot));
+        m.put("tree_clean", String.valueOf(RepoState.clean(repoRoot)));
+        m.put("runner", VERSION);
+        m.put("prompt_version", CustomerGoalPrompt.VERSION);
+        m.put("system_fp", CustomerGoalPrompt.sha256(CustomerGoalPrompt.system()));
+        m.put("schema_fp", CustomerGoalPrompt.sha256(CustomerGoalPrompt.schema().toString()));
+        m.put("input_set_fp", inputSetFp(inputs));
+        m.put("request_fp_set", requestFpSet(requests));
+        m.put("model", model);
+        m.put("reasoning_effort", reasoningEffort);
+        // One request per input, so the number of inputs IS the number of calls this run can make and the ceiling
+        // it can reach. Handing the runner more inputs than were approved moves both and is refused.
+        m.put("calls", String.valueOf(inputs.size()));
+        m.put("hard_cap", String.valueOf(inputs.size()));
+        m.put("retry_policy", ApprovalManifest.NO_RETRY);
+        m.put("scope", SCOPE);
+        return m;
+    }
+
+    /** The one formula for "these inputs", shared with the preflight so the two cannot drift. */
+    public static String inputSetFp(List<Input> inputs) {
+        return sha(String.join("\n", inputs.stream().map(i -> i.id() + "\u0000" + i.message()).toList()));
+    }
+
+    /** The one formula for "these requests". */
+    public static String requestFpSet(List<Request> requests) {
+        return sha(String.join("\n", requests.stream().map(Request::requestFp).toList()));
+    }
+
+    private Result loop(String runId, Mode mode, List<Input> inputs, int maxCalls, Map<String, JsonNode> recorded,
+                        Sink sink, List<Request> prepared) {
         List<String> out = new ArrayList<>();
         int calls = 0;
-        for (Request request : prepare(inputs)) {
+        for (Request request : prepared == null ? prepare(inputs) : prepared) {
             String content;
             String said;
             String failure;
@@ -127,9 +269,9 @@ public final class CustomerGoalRunner {
                     finish = row.path("finish").isNull() ? null : row.path("finish").asText();
                 }
                 default -> {
+                    // Defence in depth: the guard already agreed the count, and the cap is still checked per send.
                     GoalRunGuard.checkCap(calls, maxCalls);
-                    AgentLlmTransport.Response response = transport.post(endpoint,
-                            Map.of("Content-Type", "application/json"), request.body());
+                    AgentLlmTransport.Response response = transport.post(endpoint, headers, request.body());
                     calls++;
                     Envelope envelope = Envelope.of(response);
                     content = envelope.content();
@@ -139,10 +281,11 @@ public final class CustomerGoalRunner {
                     elapsed = response == null ? 0 : response.elapsedMs();
                 }
             }
+            // Raw first, and durable first. Everything after this line is derived, and a derivation that throws
+            // must not be able to take the observation with it — a recorded answer cannot be produced a second time.
+            sink.raw(raw(runId, mode, request, content, said, failure, finish, elapsed));
             String row = row(runId, mode, request, content, said, failure, finish, elapsed);
-            // Raw first. Everything after this line is derived, and a derivation that throws must not be able to
-            // take the observation with it — a recorded answer cannot be produced a second time.
-            sink.accept(row);
+            sink.row(row);
             out.add(row);
         }
         return new Result(List.copyOf(out), calls);
@@ -163,11 +306,16 @@ public final class CustomerGoalRunner {
     }
 
     /**
-     * One row. {@code raw} is the answer that may be read as a goal set and {@code said} is what the vendor sent —
-     * the same string on success, and different exactly where a call failed with something in hand.
+     * The observation, with <b>nothing derived from it</b>: identity, fingerprints, what came back and how it ended.
+     * This is what reaches durable storage first, so a parser that throws cannot take an answer down with it.
      */
-    private String row(String runId, Mode mode, Request request, String content, String said, String failure,
+    private String raw(String runId, Mode mode, Request request, String content, String said, String failure,
                        String finish, long elapsedMs) {
+        return head(runId, mode, request, content, said, failure, finish, elapsedMs).toString();
+    }
+
+    private ObjectNode head(String runId, Mode mode, Request request, String content, String said, String failure,
+                            String finish, long elapsedMs) {
         ObjectNode row = JSON.createObjectNode();
         row.put("run_id", runId).put("mode", mode.name()).put("id", request.id());
         row.put("runner", VERSION).put("prompt_version", CustomerGoalPrompt.VERSION)
@@ -179,9 +327,18 @@ public final class CustomerGoalRunner {
         row.put("finish", finish);
         row.put("raw", content);
         row.put("said", said);
+        row.put("failure", failure);
+        return row;
+    }
 
+    /**
+     * One row. {@code raw} is the answer that may be read as a goal set and {@code said} is what the vendor sent —
+     * the same string on success, and different exactly where a call failed with something in hand.
+     */
+    private String row(String runId, Mode mode, Request request, String content, String said, String failure,
+                       String finish, long elapsedMs) {
+        ObjectNode row = head(runId, mode, request, content, said, failure, finish, elapsedMs);
         if (content == null) {
-            row.put("failure", failure);
             row.putNull("goals");
             row.putArray("relations");
             row.put("valid", false);
