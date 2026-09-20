@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 // Resolution-plan gold (Inquiry v3 WP-1): validate the gold, project the v2 bridge onto it, and score a predicted plan
-// against it. Offline; no model. The vocabulary is contracts/inquiry-authority/v1/vocabulary.json — the same file a Java
+// against it. Offline; no model.
+//
+// WP-3 NOTE. This file is the WP-2 contract and the POSITIONAL scorer — gold need i compared with predicted need i — and
+// it is kept unchanged on purpose, because the wp2-shadow run's published figures were produced by it and a baseline you
+// edit is not a baseline. New work uses contract.mjs (the WP-3 step shapes) and goals.mjs (split-tolerant scoring);
+// wp3-replay.mjs runs both over the same rows so the difference between them is shown rather than asserted. The only
+// edit here is the vocabulary key `step_effects` -> `execution_effects`, which followed the effect moving to the
+// registry; the v3.1 gold it reads still carries `effect` on every step and still validates. The vocabulary is contracts/inquiry-authority/v1/vocabulary.json — the same file a Java
 // test pins the production enums to.
 //
 //   node tools/inquiry-need-eval/plan.mjs --plans <plans.jsonl> [--pred <predicted.jsonl>] [--json out.json]
@@ -22,7 +29,7 @@ function index(vocab) {
     input: new Map(vocab.customer_inputs.map((i) => [i.id, i.kind])),
     bridgeOnly: new Set(vocab.customer_inputs.filter((i) => i.bridge_only).map((i) => i.id)),
     scope: new Map(Object.entries(vocab.scope_by_capability)),
-    effects: new Set(vocab.step_effects),
+    effects: new Set(vocab.execution_effects),
     scopes: new Set(vocab.step_scopes),
     states: new Set(vocab.resolution_states),
     gaps: new Set(vocab.gap_reasons),

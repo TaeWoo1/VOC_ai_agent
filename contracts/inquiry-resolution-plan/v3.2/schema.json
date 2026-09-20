@@ -1,0 +1,263 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "inquiry-resolution-plan/v3.2/goal-row",
+ "title": "One RESOLUTION GOAL's plan (gold or predicted). v3.2 is v3.1 re-expressed in the WP-3 step shapes: the same 72 rows, no re-labelling, and the unit renamed from 'need' to 'goal' because that is what the split-tolerant scorer evaluates. Vocabulary: contracts/inquiry-authority/v1/vocabulary.json. Cross-field rules are enforced by tools/inquiry-need-eval/contract.mjs and by ResolutionPlan / ResolutionPlanValidator, which the Java and Node scenario tests hold to the same fixture file.",
+ "type": "object",
+ "required": [
+  "q",
+  "goal",
+  "v2_type",
+  "status",
+  "steps",
+  "customer_inputs",
+  "expected_terminal"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "q": {
+   "type": "string",
+   "pattern": "^[RS]:[A-Za-z0-9-]+$"
+  },
+  "goal": {
+   "type": "string",
+   "pattern": "^n[0-9]+$",
+   "description": "one thing the customer needs resolved. A planner may split it into several atomic needs; it may not merge two of them into one."
+  },
+  "v2_type": {
+   "enum": [
+    "PRODUCT_SPEC",
+    "PRODUCT_USAGE",
+    "PRODUCT_COMPATIBILITY",
+    "CATALOGUE_AVAILABILITY",
+    "POLICY",
+    "ORDER_STATE",
+    "ORDER_ACTION",
+    "SELLER_DECISION"
+   ]
+  },
+  "status": {
+   "enum": [
+    "FROZEN",
+    "PENDING_ADJUDICATION"
+   ]
+  },
+  "pending_reason": {
+   "type": "string"
+  },
+  "steps": {
+   "type": "array",
+   "minItems": 1,
+   "maxItems": 3,
+   "description": "in execution order; a PRECONDITION precedes the closer it enables. Exactly one AUTHORITY closes.",
+   "items": {
+    "anyOf": [
+     {
+      "$ref": "#/$defs/knowledge"
+     },
+     {
+      "$ref": "#/$defs/catalogue"
+     },
+     {
+      "$ref": "#/$defs/order"
+     },
+     {
+      "$ref": "#/$defs/listing"
+     },
+     {
+      "$ref": "#/$defs/procedure"
+     },
+     {
+      "$ref": "#/$defs/seller"
+     }
+    ]
+   }
+  },
+  "customer_inputs": {
+   "type": "array",
+   "items": {
+    "enum": [
+     "OPTION",
+     "SIZE",
+     "MODEL",
+     "QUANTITY",
+     "USE_CONTEXT",
+     "MEASUREMENT"
+    ]
+   }
+  },
+  "expected_terminal": {
+   "$ref": "#/$defs/expected"
+  }
+ },
+ "$defs": {
+  "role": {
+   "enum": [
+    "CLOSES",
+    "PRECONDITION",
+    "CONTEXT"
+   ]
+  },
+  "knowledge": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "capability",
+    "role"
+   ],
+   "properties": {
+    "capability": {
+     "enum": [
+      "KNOWLEDGE.PRODUCT",
+      "KNOWLEDGE.ORG"
+     ]
+    },
+    "role": {
+     "$ref": "#/$defs/role"
+    }
+   }
+  },
+  "catalogue": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "capability",
+    "role",
+    "scope"
+   ],
+   "properties": {
+    "capability": {
+     "const": "KNOWLEDGE.CATALOGUE"
+    },
+    "role": {
+     "$ref": "#/$defs/role"
+    },
+    "scope": {
+     "enum": [
+      "THIS_LISTING",
+      "SELLER_CATALOGUE"
+     ]
+    }
+   }
+  },
+  "order": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "capability",
+    "role",
+    "fields"
+   ],
+   "properties": {
+    "capability": {
+     "const": "ENTITY.ORDER"
+    },
+    "role": {
+     "$ref": "#/$defs/role"
+    },
+    "fields": {
+     "type": "array",
+     "minItems": 1,
+     "items": {
+      "enum": [
+       "ORDER_PAYMENT",
+       "ORDER_CANCELLATION",
+       "ORDER_FULFILLMENT",
+       "ORDER_TRACKING"
+      ]
+     }
+    }
+   }
+  },
+  "listing": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "capability",
+    "role",
+    "fields"
+   ],
+   "properties": {
+    "capability": {
+     "const": "ENTITY.LISTING"
+    },
+    "role": {
+     "$ref": "#/$defs/role"
+    },
+    "fields": {
+     "type": "array",
+     "minItems": 1,
+     "items": {
+      "enum": [
+       "LISTING_SALE_STATUS",
+       "LISTING_OPTION_SALE_STATUS"
+      ]
+     }
+    }
+   }
+  },
+  "procedure": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "capability",
+    "role"
+   ],
+   "properties": {
+    "capability": {
+     "const": "PROCEDURE.ORDER_ACTION"
+    },
+    "role": {
+     "$ref": "#/$defs/role"
+    }
+   }
+  },
+  "seller": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "capability",
+    "role"
+   ],
+   "properties": {
+    "capability": {
+     "const": "SELLER"
+    },
+    "role": {
+     "$ref": "#/$defs/role"
+    }
+   }
+  },
+  "expected": {
+   "type": "object",
+   "required": [
+    "state"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "state": {
+     "enum": [
+      "RESOLVED",
+      "RESOLVED_CONDITIONAL",
+      "NEEDS_CUSTOMER_INPUT",
+      "NEEDS_SELLER",
+      "CAPABILITY_GAP",
+      "FAILED"
+     ]
+    },
+    "gap": {
+     "enum": [
+      "ACQUIRABLE",
+      "DISABLED",
+      "NOT_SUPPORTED",
+      "UNREADABLE_SOURCE",
+      "NOT_EXECUTABLE",
+      "UNBOUND",
+      "STALE",
+      "UNPROVEN",
+      "UNAVAILABLE"
+     ]
+    }
+   }
+  }
+ }
+}

@@ -402,6 +402,13 @@ nobody agrees about is a distinction that will be scored one day and mean nothin
 
 ### 14-E. What this changes for WP-3
 
+> **Done in `docs/inquiry_architecture_v3_wp3.md` (2026-09-20, no model call).** All five items below were taken up.
+> That package also corrects three figures on this page, from the same frozen observations: the contract-violation
+> total is **39 across 20 rows**, not 34; seller-closing needs are **31 distinct (case, need) pairs**, not 8 of 43
+> (which was rep 1, matched needs only); and `procedure_for_read` is **not 0** — `R:4181864b.n1` fails it in all
+> three repetitions, visible only once goals rather than positions are compared. Under-asking is likewise not 0.
+
+
 1. **Schema by capability class** (`anyOf`) — removes 30 of the 34 violations at the root, without loosening the validator.
 2. **A semantic need alignment** in the scorer (or a gold that accepts a split), so the headline is not hostage to
    positional matching. Today only 43 of 67 cases can be scored cleanly.

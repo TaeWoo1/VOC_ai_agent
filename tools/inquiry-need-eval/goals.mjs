@@ -1,0 +1,279 @@
+#!/usr/bin/env node
+// Split-tolerant resolution-goal scoring (Inquiry v3 WP-3). Offline; no model; no LLM judge.
+//
+// WHY THIS EXISTS. The WP-2 scorer lined a predicted plan up with the gold BY POSITION: gold need i was compared with
+// predicted need i. That is only meaningful when both split the customer's message the same way, and the 201-call shadow
+// split it differently in 27 of 67 cases — always by splitting further, never by merging. So its headline numbers were
+// read off 43 cases and quietly mis-aligned the rest, and the honest part of that report was the caveat rather than the
+// figure.
+//
+// WHAT REPLACES IT. The unit of evaluation is a RESOLUTION GOAL — one thing the customer needs resolved — and the
+// question is "was every goal planned", not "was the message cut into the same pieces". A planner that splits one gold
+// goal into two atomic needs has not made a mistake, so many predicted needs may serve one goal.
+//
+// WHAT KEEPS THAT FROM BEING FREE. Each predicted need is assigned to AT MOST ONE goal. Merging is therefore not
+// tolerated: a planner that answers two distinct gold goals with a single need can have that need counted for only one
+// of them, and the other is reported as uncovered. Assignment is an exhaustive search over a tiny space (≤6 needs, ≤3
+// goals) resolved by a fixed lexicographic objective, so it is deterministic — no judge, no embedding, no text.
+//
+// WHAT IT CANNOT DO, STATED. Compatibility is judged on capabilities, which is all a plan carries. Where one case has
+// two goals whose gold plans name the same capabilities, this scorer cannot tell them apart, and coverage there is a
+// claim about COUNT and not about identity. `goals_indistinguishable` reports exactly how many goals are in that
+// position (4 of 72 in v3.1, in 2 of 67 cases) so the figure is never read as more than it is.
+//
+//   node tools/inquiry-need-eval/goals.mjs --gold <plans.jsonl> --obs <run.jsonl> [--json out.json]
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { readJsonl } from './io.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
+export const VOCAB_PATH = join(here, '../../contracts/inquiry-authority/v1/vocabulary.json');
+export const loadVocabulary = (p = VOCAB_PATH) => JSON.parse(readFileSync(p, 'utf8'));
+
+const authorityOf = (vocab) => new Map(vocab.capabilities.map((c) => [c.id, c.authority]));
+const byCase = (rows, k = 'q') => rows.reduce((m, r) => m.set(r[k], [...(m.get(r[k]) ?? []), r]), new Map());
+const set = (xs) => new Set(xs.filter((x) => x !== undefined && x !== null));
+const sorted = (s) => [...s].sort();
+
+/** Everything about one side of the comparison that the matcher is allowed to look at. */
+function facts(steps, ix) {
+  const acting = steps.filter((s) => s.role !== 'CONTEXT');
+  return {
+    capabilities: set(steps.map((s) => s.capability)),
+    closingCapabilities: set(steps.filter((s) => s.role === 'CLOSES').map((s) => s.capability)),
+    closingAuthorities: set(steps.filter((s) => s.role === 'CLOSES').map((s) => ix.get(s.capability))),
+    authorities: set(steps.map((s) => ix.get(s.capability))),
+    sequence: acting.map((s) => `${s.capability}/${s.role}`).join('>'),
+    entitySteps: steps.filter((s) => Array.isArray(s.fields)),
+  };
+}
+
+/**
+ * A predicted need may serve a goal only if it names at least one of the goal's AUTHORITIES. Authority is the unit this
+ * architecture is about, so a need that answers a catalogue question with the product's spec has still reached for the
+ * right kind of answer and is scored as a capability mismatch inside a covered goal — not as if the goal had gone
+ * unplanned. What compatibility does rule out is parking a knowledge need on an order goal to keep it out of the
+ * "extra" column: the authorities must actually meet.
+ */
+const compatible = (need, goal) => [...need.authorities].some((a) => goal.authorities.has(a));
+
+/** How much of the goal's own capability list a need names — the tie-break that keeps two same-authority goals apart. */
+const overlap = (need, goal) => [...need.capabilities].filter((c) => goal.capabilities.has(c)).length;
+
+function coverage(goal, assigned) {
+  const closing = new Set();
+  const all = new Set();
+  for (const n of assigned) {
+    n.closingAuthorities.forEach((a) => closing.add(a));
+    n.authorities.forEach((a) => all.add(a));
+  }
+  const missing = [...goal.closingAuthorities].filter((a) => !closing.has(a));
+  const unnecessary = [...all].filter((a) => !goal.authorities.has(a));
+  return { covered: assigned.length > 0 && missing.length === 0, missing, unnecessary, assigned };
+}
+
+/**
+ * The assignment: every predicted need goes to one compatible goal or to nothing. Chosen by a fixed lexicographic
+ * objective — most goals covered, then fewest needs left over, then fewest unnecessary authorities, then the
+ * lexicographically smallest assignment so two equally good answers always resolve the same way.
+ */
+export function assign(needs, goals) {
+  const options = needs.map((n) => [...goals.keys()].filter((g) => compatible(n, goals[g])).concat([-1]));
+  let best = null;
+  const pick = (i, acc) => {
+    if (i === needs.length) {
+      const buckets = goals.map((g, gi) => coverage(g, acc.map((a, ni) => (a === gi ? needs[ni] : null))
+        .filter(Boolean)));
+      const score = [
+        -buckets.filter((b) => b.covered).length,
+        -acc.reduce((s, a, ni) => s + (a >= 0 ? overlap(needs[ni], goals[a]) : 0), 0),
+        acc.filter((a) => a === -1).length,
+        buckets.reduce((s, b) => s + b.unnecessary.length, 0),
+        acc.join(','),
+      ];
+      if (!best || cmp(score, best.score) < 0) best = { score, assignment: [...acc], buckets };
+      return;
+    }
+    for (const g of options[i]) pick(i + 1, [...acc, g]);
+  };
+  pick(0, []);
+  return best ?? { score: [0, 0, 0, 0, ''], assignment: [], buckets: goals.map((g) => coverage(g, [])) };
+}
+
+function cmp(a, b) {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) return 1;
+  }
+  return 0;
+}
+
+/**
+ * Score predicted plans (one per case: `{q, needs:[{steps, customer_inputs}]}`) against the frozen goal gold.
+ * `forbiddenInputs` is the identity set — asking for one is a safety failure, counted on its own and never averaged in.
+ */
+export function scoreGoals(plans, gold, vocab = loadVocabulary()) {
+  const ix = authorityOf(vocab);
+  const goldByCase = byCase(gold.filter((r) => r.status === 'FROZEN'));
+  const predByCase = new Map(plans.map((p) => [p.q, p]));
+  const forbidden = new Set(vocab.customer_inputs.filter((i) => i.kind === 'IDENTITY').map((i) => i.id));
+  const out = {
+    cases: 0, goals: 0, unplanned_case: 0,
+    goal_covered: 0, uncovered: [], uncovered_due_to_merge: 0, wrong_authority: [], capability_mismatch: [],
+    required_authority_recall: 0, unnecessary_authority_goals: 0, order_misses: [], procedure_for_read: [],
+    planner_only_extra_needs: 0, goals_split: 0, split_histogram: {},
+    sequence_compared: 0, sequence_correct: 0, sequence_incomparable: 0,
+    entity_compared: 0, entity_correct: 0, entity_over_read: 0, entity_under_read: 0, over_read_fields: {},
+    inputs: {
+      goals_compared: 0, exact: 0, over: 0, under: 0, required_recall: 0, required_total: 0,
+      unnecessary_total: 0, forbidden: 0, over_by_type: {}, under_by_type: {},
+    },
+    goals_indistinguishable: 0,
+  };
+  for (const [q, rows] of goldByCase) {
+    out.cases++;
+    out.goals += rows.length;
+    const goals = rows.map((r) => ({ ...facts(r.steps, ix), row: r }));
+    // goals this scorer provably cannot tell apart: same capability multiset, same asked inputs
+    const signature = (g) => sorted(g.capabilities).join('+') + '|' + sorted(new Set(g.row.customer_inputs ?? [])).join('+');
+    const seen = new Map();
+    goals.forEach((g) => seen.set(signature(g), (seen.get(signature(g)) ?? 0) + 1));
+    out.goals_indistinguishable += goals.filter((g) => seen.get(signature(g)) > 1).length;
+
+    const pred = predByCase.get(q);
+    if (!pred || !pred.needs?.length) {
+      out.unplanned_case++;
+      rows.forEach((r) => out.uncovered.push({ goal: `${r.q}.${r.need}`, why: 'NO_PLAN' }));
+      continue;
+    }
+    const needs = pred.needs.map((n) => ({ ...facts(n.steps ?? [], ix), inputs: set(n.customer_inputs ?? []), raw: n }));
+    const { assignment, buckets } = assign(needs, goals);
+    out.planner_only_extra_needs += assignment.filter((a) => a === -1).length;
+
+    goals.forEach((g, gi) => {
+      const b = buckets[gi];
+      const id = `${g.row.q}.${g.row.need}`;
+      const mine = assignment.map((a, ni) => (a === gi ? needs[ni] : null)).filter(Boolean);
+      if (b.covered) out.goal_covered++;
+      if (b.missing.length === 0 && mine.length) out.required_authority_recall++;
+      else if (!mine.length) {
+        // was there a compatible need that another goal took? then a merge cost us this goal
+        const taken = needs.some((n) => compatible(n, g));
+        if (taken) out.uncovered_due_to_merge++;
+        out.uncovered.push({ goal: id, why: taken ? 'MERGED_INTO_ANOTHER_GOAL' : 'NOT_PLANNED' });
+      } else {
+        out.wrong_authority.push({ goal: id, missing: b.missing, got: sorted(new Set(mine.flatMap((n) => [...n.closingAuthorities]))) });
+      }
+      if (b.unnecessary.length) out.unnecessary_authority_goals++;
+      if (mine.length) {
+        const got = new Set(mine.flatMap((n) => [...n.closingCapabilities]));
+        const missing = [...g.closingCapabilities].filter((c) => !got.has(c));
+        if (missing.length) out.capability_mismatch.push({ goal: id, expected: missing, got: sorted(got) });
+      }
+      if (g.capabilities.has('ENTITY.ORDER') && !mine.some((n) => n.capabilities.has('ENTITY.ORDER'))) {
+        out.order_misses.push(id);
+      }
+      if (!g.authorities.has('PROCEDURE') && mine.some((n) => n.authorities.has('PROCEDURE'))) {
+        out.procedure_for_read.push(id);
+      }
+      if (mine.length > 1) {
+        out.goals_split++;
+        out.split_histogram[mine.length] = (out.split_histogram[mine.length] ?? 0) + 1;
+      }
+      // sequence: only where the gold's goal takes more than one acting step
+      if (g.sequence.includes('>')) {
+        if (mine.length === 1) {
+          out.sequence_compared++;
+          if (mine[0].sequence === g.sequence) out.sequence_correct++;
+        } else {
+          // a multi-step goal the planner split across needs has no single sequence to compare
+          out.sequence_incomparable++;
+        }
+      }
+      // entity + scope: for each gold entity step, the assigned need's step on the same capability
+      for (const gs of g.entitySteps) {
+        const ps = mine.flatMap((n) => n.entitySteps).find((s) => s.capability === gs.capability);
+        if (!ps) continue;
+        out.entity_compared++;
+        const want = new Set(gs.fields ?? []);
+        const got = new Set(ps.fields ?? []);
+        const extra = [...got].filter((f) => !want.has(f));
+        const missing = [...want].filter((f) => !got.has(f));
+        if (!extra.length && !missing.length) out.entity_correct++;
+        if (extra.length) out.entity_over_read++;
+        if (missing.length) out.entity_under_read++;
+        for (const f of extra) out.over_read_fields[f] = (out.over_read_fields[f] ?? 0) + 1;
+      }
+      if (mine.length) inputs(out.inputs, new Set(g.row.customer_inputs ?? []),
+        new Set(mine.flatMap((n) => [...n.inputs])), forbidden);
+    });
+  }
+  const rate = (x, d) => (d ? x / d : null);
+  const scored = out.goals;
+  return {
+    ...out,
+    goal_coverage: rate(out.goal_covered, scored),
+    required_authority_recall_rate: rate(out.required_authority_recall, scored),
+    sequence_correct_rate: rate(out.sequence_correct, out.sequence_compared),
+    entity_scope_accuracy: rate(out.entity_correct, out.entity_compared),
+    inputs: {
+      ...out.inputs,
+      exact_rate: rate(out.inputs.exact, out.inputs.goals_compared),
+      over_rate: rate(out.inputs.over, out.inputs.goals_compared),
+      under_rate: rate(out.inputs.under, out.inputs.goals_compared),
+      required_recall_rate: rate(out.inputs.required_recall, out.inputs.required_total),
+      unnecessary_rate: rate(out.inputs.unnecessary_total, out.inputs.goals_compared),
+      forbidden_rate: rate(out.inputs.forbidden, out.inputs.goals_compared),
+    },
+  };
+}
+
+/**
+ * Customer-input quality for one goal (WP-3 §5). Four independent questions, deliberately not averaged into one score:
+ * did the plan ask for everything the answer depends on (recall), did it ask for anything it did not need, did it match
+ * exactly, and did it ask for identity — which is a safety failure and not a quality one.
+ */
+function inputs(acc, want, got, forbidden) {
+  acc.goals_compared++;
+  acc.required_total += want.size;
+  for (const w of want) if (got.has(w)) acc.required_recall++;
+  const extra = [...got].filter((g) => !want.has(g));
+  const missing = [...want].filter((w) => !got.has(w));
+  acc.unnecessary_total += extra.length;
+  for (const e of extra) {
+    acc.over_by_type[e] = (acc.over_by_type[e] ?? 0) + 1;
+    if (forbidden.has(e)) acc.forbidden++;
+  }
+  for (const m of missing) acc.under_by_type[m] = (acc.under_by_type[m] ?? 0) + 1;
+  if (!extra.length && !missing.length) acc.exact++;
+  else if (extra.length && !missing.length) acc.over++;
+  else if (!extra.length && missing.length) acc.under++;
+  else { acc.over++; acc.under++; }
+}
+
+/** Observation rows (the harness's `plan` column) → one predicted plan per case, for a chosen repetition. */
+export function plansFromObservation(rows, rep = 1) {
+  return rows.filter((r) => r.rep === rep && r.plan?.needs?.length)
+    .map((r) => ({ q: r.q, needs: r.plan.needs }));
+}
+
+function main(argv) {
+  const arg = (n) => (argv.indexOf(n) >= 0 ? argv[argv.indexOf(n) + 1] : null);
+  const gold = readJsonl(arg('--gold'));
+  const vocab = loadVocabulary();
+  const obs = arg('--obs') ? readJsonl(arg('--obs')) : [];
+  const reps = [...new Set(obs.map((r) => r.rep))].sort();
+  const report = {
+    gold: gold.length,
+    per_rep: Object.fromEntries(reps.map((rep) => [rep, scoreGoals(plansFromObservation(obs, rep), gold, vocab)])),
+  };
+  const text = JSON.stringify(report, null, 1);
+  if (arg('--json')) writeFileSync(arg('--json'), text + '\n');
+  console.log(text);
+  return 0;
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = main(process.argv.slice(2));
+}

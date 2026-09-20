@@ -27,7 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
 class ResolutionPlannerHarnessIntegrityTest {
 
     static final ObjectMapper JSON = new ObjectMapper();
-    static final Path SCENARIOS = Path.of("..", "contracts", "inquiry-planner", "v1", "synthetic",
+    static final Path SCENARIOS = Path.of("..", "contracts", "inquiry-planner", "v2", "synthetic",
             "planner-scenarios.jsonl");
     static final AgentLlmTransport REFUSES = (uri, headers, json) -> {
         throw new IllegalStateException("this mode must not reach a transport");
@@ -42,7 +42,11 @@ class ResolutionPlannerHarnessIntegrityTest {
     static List<JsonNode> valid() throws Exception {
         List<JsonNode> out = new ArrayList<>();
         for (String l : Files.readAllLines(SCENARIOS)) {
-            if (!l.isBlank() && JSON.readTree(l).get("expect").get("valid").asBoolean()) {
+            if (l.isBlank()) {
+                continue;
+            }
+            JsonNode expect = JSON.readTree(l).get("expect");
+            if (expect.path("expressible").asBoolean(true) && expect.path("valid").asBoolean(false)) {
                 out.add(JSON.readTree(l));
             }
         }

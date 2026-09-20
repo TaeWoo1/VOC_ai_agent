@@ -27,11 +27,36 @@ Validates the gold against `contracts/inquiry-authority/v1/vocabulary.json`, pro
 `--pred`) scores a predicted plan — required-authority recall, ORDER miss (hard fail), unnecessary authority, slots.
 `compareResolutions` compares the authority layer's resolutions to the gold terminal; a possible gap is never a verdict.
 
+### `contract.mjs` · `goals.mjs` · `wp3-replay.mjs` (WP-3)
+
+`plan.mjs` above stays as the WP-2 baseline: the v2 step shape and the POSITIONAL scorer that produced the published
+`wp2-shadow` figures. A baseline you edit is not a baseline, so the WP-3 work lives beside it.
+
+| file | what it owns |
+|---|---|
+| `contract.mjs` | the WP-3 step shapes, the parser (`PLAN_SET` = unknown word · `PLAN_SHAPE` = known words, impossible object), the validator rules a shape cannot carry, and `project` (a v2-shaped plan rewritten into the new shapes) |
+| `goals.mjs` | split-tolerant scoring: many predicted needs may serve one resolution goal, and no need serves two |
+| `wp3-replay.mjs` | both scorers over one recorded run, so the difference is shown rather than asserted |
+
+`contract.mjs` is a **mirror** of the Java (`ResolutionPlan` / `ResolutionPlanParser` / `ResolutionPlanValidator`). It is
+pinned to it by `test/goals.test.mjs`, which reads the very file the Java scenario tests read
+(`contracts/inquiry-planner/v2/synthetic/planner-scenarios.jsonl`) and must reach the same verdict on all 30 rows —
+including which 8 cannot be parsed at all. `test/mutations.test.mjs` breaks one rule at a time at the source level and
+asserts a named property stops holding, so a rule nothing checks shows up as a surviving mutation.
+
+```bash
+node tools/inquiry-need-eval/wp3-replay.mjs --obs <run>.jsonl --gold <v3.2 plans>.jsonl --json out.json
+```
+
+The report marks every block `MEASURED_SCORER_CHANGE` (the model's own plans, compared differently) or `ESTIMATED` (the
+plans projected into shapes the model was never asked for). Do not read the second as the first.
+
 ## 0. Check the tooling
 
 ```bash
 node --test tools/inquiry-need-eval/test/eval.test.mjs tools/inquiry-need-eval/test/judge.test.mjs \
-     tools/inquiry-need-eval/test/plan.test.mjs tools/eval-store/test/store.test.mjs
+     tools/inquiry-need-eval/test/plan.test.mjs tools/inquiry-need-eval/test/goals.test.mjs \
+     tools/inquiry-need-eval/test/mutations.test.mjs tools/eval-store/test/store.test.mjs
 ```
 
 (Name the files: on Node 23 `node --test <directory>` resolves the directory as a module and fails.)

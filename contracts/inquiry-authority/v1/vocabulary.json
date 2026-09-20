@@ -1,57 +1,206 @@
 {
  "version": "inquiry-authority/v1",
  "adopted": "product-owner decision 2026-09-20 (docs/inquiry_architecture_v3.md, docs/inquiry_architecture_v3_wp1.md)",
- "authorities": ["KNOWLEDGE", "ENTITY_STATE", "PROCEDURE", "SELLER"],
+ "authorities": [
+  "KNOWLEDGE",
+  "ENTITY_STATE",
+  "PROCEDURE",
+  "SELLER"
+ ],
  "capabilities": [
-  {"id": "KNOWLEDGE.PRODUCT", "authority": "KNOWLEDGE"},
-  {"id": "KNOWLEDGE.ORG", "authority": "KNOWLEDGE"},
-  {"id": "KNOWLEDGE.CATALOGUE", "authority": "KNOWLEDGE"},
-  {"id": "ENTITY.ORDER", "authority": "ENTITY_STATE"},
-  {"id": "ENTITY.LISTING", "authority": "ENTITY_STATE"},
-  {"id": "PROCEDURE.ORDER_ACTION", "authority": "PROCEDURE"},
-  {"id": "SELLER", "authority": "SELLER"}
+  {
+   "id": "KNOWLEDGE.PRODUCT",
+   "authority": "KNOWLEDGE",
+   "effect": "NONE"
+  },
+  {
+   "id": "KNOWLEDGE.ORG",
+   "authority": "KNOWLEDGE",
+   "effect": "NONE"
+  },
+  {
+   "id": "KNOWLEDGE.CATALOGUE",
+   "authority": "KNOWLEDGE",
+   "effect": "NONE"
+  },
+  {
+   "id": "ENTITY.ORDER",
+   "authority": "ENTITY_STATE",
+   "effect": "NONE"
+  },
+  {
+   "id": "ENTITY.LISTING",
+   "authority": "ENTITY_STATE",
+   "effect": "NONE"
+  },
+  {
+   "id": "PROCEDURE.ORDER_ACTION",
+   "authority": "PROCEDURE",
+   "effect": "EXTERNAL_STATE_CHANGE"
+  },
+  {
+   "id": "SELLER",
+   "authority": "SELLER",
+   "effect": "NONE"
+  }
  ],
- "capability_statuses": ["AVAILABLE", "DISABLED", "NOT_SUPPORTED", "DECLARED_NO_EXECUTOR"],
+ "capability_statuses": [
+  "AVAILABLE",
+  "DISABLED",
+  "NOT_SUPPORTED",
+  "DECLARED_NO_EXECUTOR"
+ ],
  "entity_fields": [
-  {"id": "ORDER_PAYMENT", "capability": "ENTITY.ORDER"},
-  {"id": "ORDER_CANCELLATION", "capability": "ENTITY.ORDER"},
-  {"id": "ORDER_FULFILLMENT", "capability": "ENTITY.ORDER"},
-  {"id": "ORDER_TRACKING", "capability": "ENTITY.ORDER"},
-  {"id": "LISTING_SALE_STATUS", "capability": "ENTITY.LISTING"},
-  {"id": "LISTING_OPTION_SALE_STATUS", "capability": "ENTITY.LISTING"}
+  {
+   "id": "ORDER_PAYMENT",
+   "capability": "ENTITY.ORDER"
+  },
+  {
+   "id": "ORDER_CANCELLATION",
+   "capability": "ENTITY.ORDER"
+  },
+  {
+   "id": "ORDER_FULFILLMENT",
+   "capability": "ENTITY.ORDER"
+  },
+  {
+   "id": "ORDER_TRACKING",
+   "capability": "ENTITY.ORDER"
+  },
+  {
+   "id": "LISTING_SALE_STATUS",
+   "capability": "ENTITY.LISTING"
+  },
+  {
+   "id": "LISTING_OPTION_SALE_STATUS",
+   "capability": "ENTITY.LISTING"
+  }
  ],
- "resolution_states": ["RESOLVED", "RESOLVED_CONDITIONAL", "NEEDS_CUSTOMER_INPUT", "NEEDS_SELLER", "CAPABILITY_GAP", "FAILED"],
- "gap_reasons": ["ACQUIRABLE", "DISABLED", "NOT_SUPPORTED", "UNREADABLE_SOURCE", "NOT_EXECUTABLE", "UNBOUND", "STALE", "UNPROVEN", "UNAVAILABLE"],
+ "resolution_states": [
+  "RESOLVED",
+  "RESOLVED_CONDITIONAL",
+  "NEEDS_CUSTOMER_INPUT",
+  "NEEDS_SELLER",
+  "CAPABILITY_GAP",
+  "FAILED"
+ ],
+ "gap_reasons": [
+  "ACQUIRABLE",
+  "DISABLED",
+  "NOT_SUPPORTED",
+  "UNREADABLE_SOURCE",
+  "NOT_EXECUTABLE",
+  "UNBOUND",
+  "STALE",
+  "UNPROVEN",
+  "UNAVAILABLE"
+ ],
  "customer_inputs": [
-  {"id": "OPTION", "kind": "PRODUCT_CONTEXT"},
-  {"id": "SIZE", "kind": "PRODUCT_CONTEXT"},
-  {"id": "MODEL", "kind": "PRODUCT_CONTEXT"},
-  {"id": "QUANTITY", "kind": "PRODUCT_CONTEXT"},
-  {"id": "USE_CONTEXT", "kind": "PRODUCT_CONTEXT"},
-  {"id": "MEASUREMENT", "kind": "PRODUCT_CONTEXT"},
-  {"id": "UNNAMED_PRODUCT_CONTEXT", "kind": "PRODUCT_CONTEXT", "bridge_only": true},
-  {"id": "ORDER_NUMBER", "kind": "IDENTITY"},
-  {"id": "PHONE", "kind": "IDENTITY"},
-  {"id": "ADDRESS", "kind": "IDENTITY"},
-  {"id": "EMAIL", "kind": "IDENTITY"},
-  {"id": "NAME", "kind": "IDENTITY"}
+  {
+   "id": "OPTION",
+   "kind": "PRODUCT_CONTEXT"
+  },
+  {
+   "id": "SIZE",
+   "kind": "PRODUCT_CONTEXT"
+  },
+  {
+   "id": "MODEL",
+   "kind": "PRODUCT_CONTEXT"
+  },
+  {
+   "id": "QUANTITY",
+   "kind": "PRODUCT_CONTEXT"
+  },
+  {
+   "id": "USE_CONTEXT",
+   "kind": "PRODUCT_CONTEXT"
+  },
+  {
+   "id": "MEASUREMENT",
+   "kind": "PRODUCT_CONTEXT"
+  },
+  {
+   "id": "UNNAMED_PRODUCT_CONTEXT",
+   "kind": "PRODUCT_CONTEXT",
+   "bridge_only": true
+  },
+  {
+   "id": "ORDER_NUMBER",
+   "kind": "IDENTITY"
+  },
+  {
+   "id": "PHONE",
+   "kind": "IDENTITY"
+  },
+  {
+   "id": "ADDRESS",
+   "kind": "IDENTITY"
+  },
+  {
+   "id": "EMAIL",
+   "kind": "IDENTITY"
+  },
+  {
+   "id": "NAME",
+   "kind": "IDENTITY"
+  }
  ],
- "possible_gaps": ["ACQUIRABLE", "UNREADABLE_SOURCE"],
- "askable": {"PRODUCT_CONTEXT": true, "IDENTITY": false},
- "surfaces": ["PUBLIC_QNA", "ORDER_ATTACHED"],
- "step_roles": ["CLOSES", "PRECONDITION", "CONTEXT"],
- "step_scopes": ["THIS_LISTING", "SELLER_CATALOGUE", "THIS_ORDER", "COMPANY", "NONE"],
- "scope_by_capability": {
-  "KNOWLEDGE.PRODUCT": ["THIS_LISTING"],
-  "KNOWLEDGE.CATALOGUE": ["THIS_LISTING", "SELLER_CATALOGUE"],
-  "KNOWLEDGE.ORG": ["COMPANY"],
-  "ENTITY.ORDER": ["THIS_ORDER"],
-  "ENTITY.LISTING": ["THIS_LISTING"],
-  "PROCEDURE.ORDER_ACTION": ["THIS_ORDER"],
-  "SELLER": ["NONE"]
+ "possible_gaps": [
+  "ACQUIRABLE",
+  "UNREADABLE_SOURCE"
+ ],
+ "askable": {
+  "PRODUCT_CONTEXT": true,
+  "IDENTITY": false
  },
- "step_effects": ["NONE", "EXTERNAL_STATE_CHANGE", "BOUNDED_WORKFLOW"],
- "procedure_rule": "PROCEDURE only for an external state change or a bounded business workflow (effect != NONE); when reading entity state resolves the request, the plan ends at ENTITY_STATE (product-owner decision 2026-09-20)",
+ "surfaces": [
+  "PUBLIC_QNA",
+  "ORDER_ATTACHED"
+ ],
+ "step_roles": [
+  "CLOSES",
+  "PRECONDITION",
+  "CONTEXT"
+ ],
+ "step_scopes": [
+  "THIS_LISTING",
+  "SELLER_CATALOGUE",
+  "THIS_ORDER",
+  "COMPANY",
+  "NONE"
+ ],
+ "scope_by_capability": {
+  "KNOWLEDGE.PRODUCT": [
+   "THIS_LISTING"
+  ],
+  "KNOWLEDGE.CATALOGUE": [
+   "THIS_LISTING",
+   "SELLER_CATALOGUE"
+  ],
+  "KNOWLEDGE.ORG": [
+   "COMPANY"
+  ],
+  "ENTITY.ORDER": [
+   "THIS_ORDER"
+  ],
+  "ENTITY.LISTING": [
+   "THIS_LISTING"
+  ],
+  "PROCEDURE.ORDER_ACTION": [
+   "THIS_ORDER"
+  ],
+  "SELLER": [
+   "NONE"
+  ]
+ },
+ "execution_effects": [
+  "NONE",
+  "EXTERNAL_STATE_CHANGE",
+  "BOUNDED_WORKFLOW"
+ ],
+ "effect_ownership": "WP-3: what acting on a capability does to the world outside this system is REGISTRY metadata, declared once per capability ('effect' above), and is not a property of a planned step. Measured reason: in the 201-call shadow the planner wrote BOUNDED_WORKFLOW 38 times against EXTERNAL_STATE_CHANGE 4, while all 7 procedure steps of the frozen gold say EXTERNAL_STATE_CHANGE and nothing downstream separated the two. BOUNDED_WORKFLOW has no declaring capability in v3.0 and AuthorityVocabularyContractTest pins that count at zero.",
+ "procedure_rule": "PROCEDURE only for an external state change or a bounded business workflow; when reading entity state resolves the request, the plan ends at ENTITY_STATE (product-owner decision 2026-09-20). Upheld in WP-3 by the capability's own declared effect plus PROCEDURE_WITHOUT_ORDER_PRECONDITION, not by a planner-supplied token.",
  "v2_bridge": {
   "PRODUCT_SPEC": "KNOWLEDGE.PRODUCT",
   "PRODUCT_USAGE": "KNOWLEDGE.PRODUCT",
@@ -61,5 +210,7 @@
   "ORDER_STATE": "ENTITY.ORDER",
   "ORDER_ACTION": "PROCEDURE.ORDER_ACTION",
   "SELLER_DECISION": "SELLER"
- }
+ },
+ "closing_rule": "WP-3: exactly ONE authority closes a need. Two steps of the same authority may both CLOSE (the frozen gold does this 4 times); two different authorities closing means the plan states two endings and lets the runtime pick — the 4181864b shape. A genuine multi-authority need is written as PRECONDITION then CLOSES. A fallback to the seller is not an authority: it is a resolution outcome (NEEDS_SELLER / CAPABILITY_GAP).",
+ "sequence_rule": "WP-3: step order is the dependency. The explicit depends_on index left the wire — it was used on exactly the 7 procedure steps of the gold and every one pointed at the ENTITY.ORDER read the registry already requires, so it carried no information a reader did not have."
 }

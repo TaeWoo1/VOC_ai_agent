@@ -3,6 +3,7 @@ package com.sellerops.inquiry.resolution;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sellerops.inquiry.authority.Authority;
 import com.sellerops.inquiry.authority.CapabilityId;
 import com.sellerops.inquiry.authority.CapabilitySnapshot;
 import com.sellerops.inquiry.authority.CustomerInput;
@@ -11,25 +12,39 @@ import com.sellerops.inquiry.authority.InquirySurface;
 import java.util.List;
 
 /**
- * <b>The Resolution Planner's instruction, payload and strict schema</b> (Inquiry v3 WP-2).
+ * <b>The Resolution Planner's instruction, payload and strict schema</b> (Inquiry v3 WP-2; per-capability step shapes in
+ * WP-3).
  *
  * <p><b>The payload floor.</b> What leaves for the model is the customer's message and four facts about the situation —
  * the surface (public Q&A or a message attached to an order), whether a listing is resolved, how many options that listing
  * is sold in, and which product-context values may be asked for here. No identifier of any kind: no order, product,
  * organisation, source or customer id; no seller text; no past answer. {@code ResolutionPlannerPayloadFloorTest} asserts
- * the bytes.
+ * the bytes. <b>WP-3 did not widen it</b> — {@link #user} is unchanged to the byte.
  *
  * <p><b>Availability is not in the payload</b>, deliberately. A plan states what the need REQUIRES; if the planner were
  * told what this deployment can do, an order question would quietly become a policy question whenever the connector is
- * missing — the {@code 4181864b} failure. The validator records the gap afterwards
- * ({@link ResolutionPlanValidator}).
+ * missing — the {@code 4181864b} failure. The validator records the gap afterwards ({@link ResolutionPlanValidator}).
  *
- * <p><b>The model cannot invent a capability.</b> Every capability, field, scope, role, effect and customer input in the
- * schema is an enum built from the registry vocabulary, and the response format is strict Structured Outputs.
+ * <p><b>The model cannot invent a capability, and now cannot mis-shape a step either.</b> {@link #schema} emits one
+ * closed object per capability — the branch for {@code KNOWLEDGE.ORG} has no {@code fields} property to fill and no
+ * {@code scope} to get wrong, because that capability has exactly one instance — so the combinations that produced 35 of
+ * the 201-call shadow's 39 contract violations are not expressible rather than merely refused. Each branch is generated
+ * from {@link ResolutionPlan#SCOPES} and {@link EntityField#capability()}, the same declarations the domain record and
+ * the validator read, so schema and contract cannot drift.
+ *
+ * <p><b>What the instruction lost in WP-3, and why.</b> Three sentences described rules the shape now enforces (fields
+ * belong to entity steps, fields belong to their own capability, a scope must be one the capability allows) and two
+ * parentheticals named the {@code effect} tokens, which left the wire for the registry
+ * ({@link com.sellerops.inquiry.authority.ExecutionEffect}); all five are gone. One sentence was <b>replaced, not
+ * removed</b>: the {@code depends_on} index is now step order, so the rule it carried is restated as order. One sentence
+ * was <b>added</b>, and it is the only new instruction in this package — the WP-3 contract that exactly one authority
+ * closes a need ({@link ResolutionPlanValidator.Code#MULTIPLE_CLOSING_AUTHORITIES}), which the model cannot follow
+ * without being told. Nothing about splitting a message into needs, and nothing about customer inputs, was touched — the
+ * two behaviours WP-3's new scorer measures against the frozen shadow.
  */
 public final class ResolutionPlannerPrompt {
 
-    public static final String VERSION = "resolution-planner/v2";
+    public static final String VERSION = "resolution-planner/v3";
     /** Six needs × three steps of closed tokens, plus the asks. Measured shapes sit far below this. */
     public static final int MAX_OUTPUT_TOKENS = 1600;
     static final int MAX_ASK = 120;
@@ -58,16 +73,15 @@ public final class ResolutionPlannerPrompt {
                 - SELLER: 위 어디에도 없고 판매자가 **새로 판단**해야 하는 것.
                 규칙:
                 - **읽어서 답이 되면 PROCEDURE가 아닙니다.** 주문 상태나 송장 번호를 알려 달라는 요청은 ENTITY.ORDER로 끝냅니다.
-                  PROCEDURE는 외부 상태 변경(effect=EXTERNAL_STATE_CHANGE)이나 정해진 업무 절차(BOUNDED_WORKFLOW)가 필요할 때만 씁니다.
+                  PROCEDURE는 외부 상태 변경이나 정해진 업무 절차가 필요할 때만 씁니다.
                   PROCEDURE를 쓰면 그 주문을 먼저 읽는 ENTITY.ORDER PRECONDITION step을 함께 적습니다.
                 - **판매자가 한 번 정해서 알려 주면 다음 고객에게도 쓸 수 있는 답**(운영 기준·상품 사실·상품 비교)은 SELLER가 아니라 KNOWLEDGE입니다.
                   SELLER는 이 주문·이 시점에만 해당하는 판단(예외 처리, 재입고 시점)일 때만 씁니다.
                 - role: CLOSES(이 권한이 need를 닫을 수 있다) · PRECONDITION(닫기 전에 먼저 읽어야 한다) · CONTEXT(참고만, 닫지 못한다).
-                  need마다 CLOSES가 하나 이상 있어야 합니다. 판매자에게 넘기는 것은 step이 아닙니다.
-                - fields는 **ENTITY step에만** 적습니다. KNOWLEDGE·PROCEDURE·SELLER step의 fields는 반드시 빈 배열([])입니다.
-                  ENTITY step은 읽을 필드를 하나 이상 적고, 그 권한의 필드만 씁니다. scope는 그 권한이 허용하는 값만 씁니다.
-                - depends_on은 **같은 need 안에서 앞에 적은 step의 번호(0부터)**입니다. 첫 step은 null이고, 자기 자신이나 뒤의 step을
-                  가리킬 수 없습니다. 예: step 0에서 주문을 읽고 step 1에서 처리하면 step 1의 depends_on은 0입니다.
+                  need를 닫는 권한은 **정확히 하나**입니다. 혹시 몰라 SELLER를 덧붙이지 않습니다. 확인한 뒤 판매자의 예외 판단이 필요하면
+                  앞 권한을 PRECONDITION으로 적고 SELLER가 닫습니다. 판매자에게 넘기는 것은 step이 아닙니다.
+                - step은 **실행 순서대로** 적습니다. PRECONDITION은 그것이 필요한 CLOSES step보다 앞에 옵니다.
+                - ENTITY step은 읽을 필드를 하나 이상 적습니다.
                 - customer_inputs: 고객이 아직 밝히지 않아 답이 달라지는 **상품 맥락 값**만 적습니다(규격·크기·모델·수량·사용 환경·치수).
                   이름·주문번호·연락처·주소 같은 신원 정보는 어떤 경우에도 묻지 않습니다.
                 - 과거에 판매자가 쓴 답변은 근거가 아니므로 step이 되지 않습니다.
@@ -75,7 +89,7 @@ public final class ResolutionPlannerPrompt {
                 출력은 스키마에 맞는 JSON만.""";
     }
 
-    /** The customer's message and the four situation facts — nothing else. */
+    /** The customer's message and the four situation facts — nothing else. Unchanged since WP-2. */
     public static String user(String question, CapabilitySnapshot snapshot) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("customer", question);
@@ -99,21 +113,25 @@ public final class ResolutionPlannerPrompt {
                 .filter(i -> i != CustomerInput.UNNAMED_PRODUCT_CONTEXT && i.askableOn(surface)).toList();
     }
 
-    /** Strict Structured Outputs: every object closed, every property required, every token an enum. */
+    /**
+     * Strict Structured Outputs: every object closed, every property required, every token an enum — and one branch per
+     * capability, so a step can only carry what its own capability has a choice about.
+     *
+     * <p><b>What this schema guarantees and what it does not.</b> Strict mode honours {@code enum},
+     * {@code additionalProperties: false} and {@code required}; it is documented as ignoring {@code minItems},
+     * {@code maxItems} and {@code maxLength}. So "a knowledge step has no fields" and "an org step is never about a
+     * listing" are structural, while "an entity step reads at least one field" and "an ask is at most 120 characters"
+     * are declared here for a reader's benefit and actually enforced by {@link ResolutionPlan.Entity}'s constructor and
+     * the parser's truncation. The counts are stated rather than assumed because this difference is exactly what
+     * decides whether a contract failure is impossible or merely unlikely.
+     */
     public static ObjectNode schema(CapabilitySnapshot snapshot) {
-        ObjectNode step = object();
-        ObjectNode stepProps = step.putObject("properties");
-        enumOf(stepProps.putObject("capability"), java.util.Arrays.stream(CapabilityId.values())
-                .map(CapabilityId::wire).toList());
-        enumOf(stepProps.putObject("role"), names(ResolutionPlan.Role.values()));
-        enumOf(stepProps.putObject("scope"), names(ResolutionPlan.Scope.values()));
-        ObjectNode fields = stepProps.putObject("fields").put("type", "array");
-        enumOf(fields.putObject("items"), names(EntityField.values()));
-        enumOf(stepProps.putObject("effect"), names(ResolutionPlan.Effect.values()));
-        ObjectNode dependsOn = stepProps.putObject("depends_on");
-        dependsOn.putArray("type").add("integer").add("null");
-        dependsOn.put("minimum", 0).put("maximum", ResolutionPlanValidator.MAX_STEPS - 1);
-        require(step);
+        ArrayNode branches = MAPPER.createArrayNode();
+        for (CapabilityId capability : CapabilityId.values()) {
+            branches.add(branch(capability));
+        }
+        ObjectNode step = MAPPER.createObjectNode();
+        step.set("anyOf", branches);
 
         ObjectNode need = object();
         ObjectNode needProps = need.putObject("properties");
@@ -138,6 +156,29 @@ public final class ResolutionPlannerPrompt {
         js.put("name", "resolution_plan").put("strict", true);
         js.set("schema", root);
         return format;
+    }
+
+    /**
+     * One capability's step shape. {@code capability} is a one-value enum, which is what discriminates the branch;
+     * {@code scope} appears only where the capability is about more than one kind of instance; {@code fields} only where
+     * there is state to read, and then only that capability's own fields.
+     */
+    private static ObjectNode branch(CapabilityId capability) {
+        ObjectNode branch = object();
+        ObjectNode props = branch.putObject("properties");
+        enumOf(props.putObject("capability"), List.of(capability.wire()));
+        enumOf(props.putObject("role"), names(ResolutionPlan.Role.values()));
+        List<String> scopes = ResolutionPlan.SCOPES.get(capability).stream().map(Enum::name).sorted().toList();
+        if (scopes.size() > 1) {
+            enumOf(props.putObject("scope"), scopes);
+        }
+        if (capability.authority() == Authority.ENTITY_STATE) {
+            ObjectNode fields = props.putObject("fields").put("type", "array").put("minItems", 1);
+            enumOf(fields.putObject("items"), java.util.Arrays.stream(EntityField.values())
+                    .filter(f -> f.capability() == capability).map(Enum::name).toList());
+        }
+        require(branch);
+        return branch;
     }
 
     private static ObjectNode object() {

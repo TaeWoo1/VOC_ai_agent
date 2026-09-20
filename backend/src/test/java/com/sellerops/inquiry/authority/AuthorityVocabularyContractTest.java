@@ -52,6 +52,27 @@ class AuthorityVocabularyContractTest {
         assertThat(strings(V.get("surfaces"))).isEqualTo(names(InquirySurface.values()));
     }
 
+    /**
+     * WP-3 moved {@code effect} off the planned step and onto the capability. Two things are pinned here: the registry
+     * and the contract file agree on every capability's effect, and {@link ExecutionEffect#BOUNDED_WORKFLOW} has
+     * <b>no declaring capability</b> — the shadow measured the planner reaching for that word 38 times while the gold
+     * never uses it, so the token stays in the vocabulary but nothing produces it. This assertion is the switch: a
+     * capability that starts declaring a bounded workflow has to turn it off deliberately.
+     */
+    @Test
+    @DisplayName("the registry declares each capability's effect, and BOUNDED_WORKFLOW has no producer")
+    void effectIsTheRegistrys() {
+        V.get("capabilities").forEach(c -> assertThat(CapabilityId.ofWire(c.get("id").asText()).effect().name())
+                .as(c.get("id").asText()).isEqualTo(c.get("effect").asText()));
+        assertThat(java.util.Arrays.stream(CapabilityId.values())
+                .filter(c -> c.effect() == ExecutionEffect.BOUNDED_WORKFLOW).toList())
+                .as("no capability declares a bounded workflow in v3.0").isEmpty();
+        assertThat(java.util.Arrays.stream(CapabilityId.values())
+                .filter(c -> c.effect() != ExecutionEffect.NONE).toList())
+                .as("only a procedure changes the world outside this system")
+                .containsExactly(CapabilityId.PROCEDURE_ORDER_ACTION);
+    }
+
     @Test
     @DisplayName("capabilities carry the same wire id and authority; fields the same owning capability")
     void capabilitiesAndFields() {

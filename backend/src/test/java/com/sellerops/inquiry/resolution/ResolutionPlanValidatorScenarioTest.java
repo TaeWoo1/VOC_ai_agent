@@ -11,9 +11,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Plan Validator on every synthetic planner scenario: the twelve plans a planner should be able to produce, and the
- * eight a plan may never make. The availability column is what the registry says about a VALID plan — recorded, never
- * acted on.
+ * The Plan Validator on every synthetic planner scenario: the fourteen plans a planner should be able to produce, the
+ * eight a plan may never make, and — new in WP-3 — the eight that <b>cannot be written down at all</b>. The availability
+ * column is what the registry says about a VALID plan — recorded, never acted on.
  */
 class ResolutionPlanValidatorScenarioTest {
 
@@ -22,7 +22,7 @@ class ResolutionPlanValidatorScenarioTest {
     void validPlans() throws Exception {
         int checked = 0;
         for (JsonNode s : PlannerScenarios.all()) {
-            if (!s.get("expect").get("valid").asBoolean()) {
+            if (!PlannerScenarios.expressible(s) || !s.get("expect").get("valid").asBoolean()) {
                 continue;
             }
             String id = s.get("id").asText() + " — " + s.get("shape").asText();
@@ -35,7 +35,7 @@ class ResolutionPlanValidatorScenarioTest {
                     .as(id + " availability").isEqualTo(want);
             checked++;
         }
-        assertThat(checked).isEqualTo(12);
+        assertThat(checked).isEqualTo(14);
     }
 
     @Test
@@ -43,7 +43,7 @@ class ResolutionPlanValidatorScenarioTest {
     void invalidPlans() throws Exception {
         int checked = 0;
         for (JsonNode s : PlannerScenarios.all()) {
-            if (s.get("expect").get("valid").asBoolean()) {
+            if (!PlannerScenarios.expressible(s) || s.get("expect").get("valid").asBoolean()) {
                 continue;
             }
             String id = s.get("id").asText() + " — " + s.get("shape").asText();
@@ -57,7 +57,30 @@ class ResolutionPlanValidatorScenarioTest {
             assertThat(r.availability()).as(id + ": an invalid plan is not measured against the registry").isEmpty();
             checked++;
         }
-        assertThat(checked).isEqualTo(9);
+        assertThat(checked).isEqualTo(8);
+    }
+
+    /**
+     * The WP-3 claim, stated as a test: every shape that the 201-call shadow produced wrongly now fails to be a plan at
+     * all. These rows do not reach the validator, and each names the violation code it used to need.
+     */
+    @Test
+    @DisplayName("a wrong-shaped step is not refused — it cannot be written: the parser has no object to build")
+    void inexpressiblePlans() throws Exception {
+        int checked = 0;
+        for (JsonNode s : PlannerScenarios.all()) {
+            if (PlannerScenarios.expressible(s)) {
+                continue;
+            }
+            String id = s.get("id").asText() + " — " + s.get("shape").asText();
+            ResolutionPlanParser.Parsed parsed = PlannerScenarios.parse(s);
+            assertThat(parsed.plan()).as(id + ": no plan object exists for this shape").isNull();
+            assertThat(parsed.failure()).as(id).isEqualTo(s.get("expect").get("failure").asText());
+            assertThat(s.get("expect").get("retired_code").asText())
+                    .as(id + ": an X row records the v2 code it replaces").isNotBlank();
+            checked++;
+        }
+        assertThat(checked).isEqualTo(8);
     }
 
     @Test

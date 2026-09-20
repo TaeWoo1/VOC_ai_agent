@@ -1,0 +1,42 @@
+{
+ "name": "inquiry-resolution-plan",
+ "version": "v3.2",
+ "frozen_at": "2026-09-20",
+ "files": {
+  "plans.jsonl": "ff20922e3f05307e6ca6cbfe8aa94737029a93e453e6a8398a6a4476f4ed0bb9",
+  "build.py": "54f5065d1c0af724e5ff631196c2d26e3e3d7bb9e78fbf80877dd0dd0e95ee1e"
+ },
+ "counts": {
+  "goals": 72,
+  "frozen": 72,
+  "pending_adjudication": 0,
+  "cases": 67
+ },
+ "pending_adjudication": [],
+ "derived_from": {
+  "inquiry-resolution-plan/v3.1": "e8e2370ccfe604e3c89cf7e067765050043f5f792898f79e8d1da594fbaf97b4"
+ },
+ "supersedes": "inquiry-resolution-plan/v3.1, which stays frozen and readable. v3.1 is NOT withdrawn: it is the gold the wp2-shadow run was scored against, and a superseded version that an evidence row still points at must remain.",
+ "change_from_v3_1": "SHAPE ONLY — no row was re-labelled and no adjudication was needed. build.py asserts that every capability, role, scope, field, customer input and expected terminal survives unchanged, and additionally that all 72 rows already satisfy the two rules WP-3 added (exactly one closing authority; no precondition after its closer). They did, which is why this is a re-expression and not a re-labelling. What changed: 'need' -> 'goal'; 'effect' dropped (it is the capability's, declared in the vocabulary); 'depends_on' dropped (step order is the dependency — it was used on exactly the 7 procedure steps and every one pointed at the ENTITY.ORDER read the registry already requires); 'scope' kept only for KNOWLEDGE.CATALOGUE, the one capability that is about more than one instance.",
+ "vocabulary": "contracts/inquiry-authority/v1/vocabulary.json",
+ "schema": "contracts/inquiry-resolution-plan/v3.2/schema.json",
+ "label_policy": {
+  "author": "designer; v3.1's rows and adjudications, adopted by the product owner on 2026-09-20 (DEV/CALIBRATION — never a holdout)",
+  "unit": "a RESOLUTION GOAL is one thing the customer needs resolved. The evaluation question is whether every goal was planned, not whether the message was cut into the same pieces: a planner may split one goal into several atomic needs (tools/inquiry-need-eval/goals.mjs scores many-to-one), and may not merge two goals into one need.",
+  "steps": "CLOSES = an authority allowed to close the goal; PRECONDITION = must be read before it; CONTEXT = read, never closes. Exactly one AUTHORITY closes a goal; two capabilities of the same authority may close together, which 4 of these 72 rows do. A fallback to the seller is not a step — it is a resolution outcome.",
+  "expected_terminal": "where the goal ends once every system step the CURRENT registry offers has run on snapshot S0's knowledge — unchanged from v3.1."
+ },
+ "scorer_limitation": {
+  "goals_indistinguishable": 4,
+  "cases": [
+   "R:77a91fab (n1, n2)",
+   "R:f403e606 (n1, n2)"
+  ],
+  "why": "these goals name the same capabilities and ask for the same customer inputs, so a scorer that reads only a plan cannot tell which predicted need answers which. Coverage across them is a claim about COUNT, not identity. scoreGoals reports the number on every run so the figure is never read as more than it is."
+ },
+ "holds": "real inquiry id prefixes and the designer's plan labels; no customer or seller text",
+ "storage": {
+  "canonical": "eval-store:inquiry-resolution-plan/v3.2",
+  "builder": "build.py (stored beside the gold)"
+ }
+}
