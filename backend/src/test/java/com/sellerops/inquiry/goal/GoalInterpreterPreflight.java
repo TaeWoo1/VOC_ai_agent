@@ -253,10 +253,19 @@ public final class GoalInterpreterPreflight {
         notes.add("Environment presence was established from the invoking shell at preflight time. The preflight "
                 + "NEVER READS THE VALUES — it answers 'would transport be configured', never 'is this credential "
                 + "good'. A wrong value fails at transport on the first call, with nothing billed.");
-        if (set.realCustomerText()) {
-            notes.add("This input set carries REAL CUSTOMER TEXT: " + GoalSmokeInputs.NO_GOAL_CASE + " is read from "
-                    + "the durable eval store at runtime and is not in git. The manifest carries its id and the "
-                    + "fingerprints of the request built from it, and nowhere carries the message itself.");
+        // Named from the SET rather than from a constant. While there was one real message the constant said the
+        // same thing; with two it became a manifest that under-reports whose words a run touches, which is the one
+        // sentence in here that most has to be exhaustive.
+        List<String> realText = set.usable().stream().filter(GoalSmokeInputs.Input::realCustomerText)
+                .map(GoalSmokeInputs.Input::id).toList();
+        if (!realText.isEmpty()) {
+            boolean one = realText.size() == 1;
+            notes.add("This input set carries REAL CUSTOMER TEXT: " + String.join(", ", realText)
+                    + (one ? " is" : " are") + " read from the durable eval store at runtime and "
+                    + (one ? "is" : "are") + " not in git. The manifest carries " + (one ? "its id" : "their ids")
+                    + " and the fingerprints of the requests built from "
+                    + (one ? "it" : "them") + ", and nowhere carries the "
+                    + (one ? "message itself." : "messages themselves."));
         }
         return List.copyOf(notes);
     }
