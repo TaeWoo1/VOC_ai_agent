@@ -768,7 +768,8 @@ So **D and E can be decided on the existing contract**; **F is a contract decisi
 
 ### 21.8 Revised smoke manifest — still not approved, still not run
 
-> **STALE as of §22.** The F adjudication changed the contract — the wire now carries `{goals, relations}` — so the
+> **STALE as of §22, and superseded again by §23** — it names inputs the repository does not carry.
+> The F adjudication changed the contract — the wire now carries `{goals, relations}` — so the
 > 14 fixtures this manifest names are no longer the whole corpus and the bar no longer covers what can go wrong.
 > Regenerated in **§22.11**, against a prompt and schema that now exist and are fingerprinted.
 
@@ -1091,3 +1092,152 @@ calls.**
   be a new observation with its own evidence, and `GoalSetResolution` is the single place that would change.
 - **`GoalSetResolution` has no production caller**, exactly like the loop it wraps. Everything in this package is
   reachable only from tests.
+
+---
+
+## 23. The execution path, and why the smoke still cannot run (2026-09-20)
+
+§22.11 ended with a manifest in a document and the sentence "nothing blocks this now except approval". That was
+wrong in two ways, and building the path found both.
+
+**No model call, no marketplace call, no DB write, no migration.** Nothing pushed.
+
+### 23.1 A document cannot authorize a run
+
+The live approval contract's one-line grant binds to a manifest's `approvalId`, `runId` and scope. §22.11 had none
+of them, because a document **describes** a run rather than **fixing** one: the run that eventually happens can
+differ from the paragraph in every particular and nobody finds out. So the manifest is now produced by a preflight,
+and the grant binds to that.
+
+`GoalRunGuard` holds the whole of it, and holds nothing else — its only imports are `java.util`, which is what makes
+it compilable inside a mutation test. Fourteen bound fields, in three groups:
+
+| group | fields |
+|---|---|
+| what code would run | `commit` · `tree_clean` · `runner` |
+| what would be sent | `prompt_version` · `system_fp` · `schema_fp` · `input_set_fp` · `request_fp_set` · `model` · `reasoning_effort` |
+| how much | `calls` · `hard_cap` · `retry_policy` · `scope` |
+
+**Any one of them moving revokes the approval.** A manifest that does not carry all fourteen cannot be bound to at
+all — `missing()` refuses it before any comparison is attempted, so "approved" can never quietly mean "approved as
+far as we bothered to check". Identity is checked first and alone: a run carrying the wrong `approvalId` is not this
+approval, whatever else is true of it.
+
+### 23.2 There was no code that could send
+
+The second thing §22.11 got wrong is simpler: `CustomerGoalPrompt`'s only caller was its own test. The planner had a
+runner; the interpreter had a prompt, a schema, and nothing that sends them. Approving would have authorized a run
+with no executor.
+
+`CustomerGoalRunner` now exists, **in the test tree** like the planner's harness and for the same reason — the
+interpreter still has no production caller, and putting a sender in `main` would quietly make that untrue.
+
+| mode | sends | what it is for |
+|---|---|---|
+| `PREPARE` | **0** | build every request, fingerprint it, stop |
+| `RUN` | ≤ cap | the real call, against a bound approval |
+| `REPLAY` | **0** | re-score recorded answers; each rebuilt request must hash to the recorded `request_fp` |
+
+"Zero vendor calls" is not asserted by reading the code. Both non-sending modes are tested **holding a transport that
+throws on contact**, and the preflight builds its fingerprints with that same transport in hand.
+
+**Raw is written before anything derived from it exists.** The sink is called with the row's bytes and only then does
+scoring happen — tested by making the derivation throw and checking the observation survived it. A vendor answer
+cannot be produced a second time, and the one operational mistake of the v2.2 run was a script that overwrote them.
+
+**Nothing is repaired.** Eight distinct recorded failures — `HTTP_*`, `TRANSPORT`, `REFUSAL`, `TRUNCATED`, `EMPTY`,
+`UNPARSEABLE`, `GOAL_UNPARSEABLE`, `GOAL_CONTRACT` — and in every one of them `raw` is null, `valid` is false and
+`said` keeps whatever arrived. A truncated JSON object is never mended: the goal set of a half-written answer is not
+a smaller version of the right one, it is an unknown one.
+
+`GOAL_CONTRACT` is the interesting one. Content that parses but that the contract will not construct — an outcome
+outside the four, a relation with no quoted clause — is refused by **building the real records**, not by a second
+copy of their rules in the harness.
+
+### 23.3 Environment: names only
+
+Configuration comes from the **process environment and nowhere else**. Not `.env.local` in this or any worktree, not
+a sibling checkout, not anything repo-relative: a harness that goes looking for secrets can find the wrong ones, and
+the operator's own shell is the only place they can mean to put them.
+
+The manifest records the variable **name** and `PRESENT` or `MISSING`. Never a value, a prefix, a length or a hash —
+**a hash of a short secret is a secret with one extra step**, and a test asserts all three forms are absent from the
+report after running it with a real-looking key in the environment.
+
+### 23.4 The preflight, run
+
+```
+commit b7db2bc3  ·  tree_clean true  ·  verdict BLOCKED
+usable inputs 11 of 13  ·  manifest: none
+```
+
+**No manifest was produced, and that is the design.** Either the preflight emits one carrying every bound field, or
+it emits a blocked report naming exactly what is missing. There is no third outcome where a manifest is produced with
+a hole in it, because that is how an approval comes to mean less than the operator thought.
+
+Nine blockers, in three kinds:
+
+| kind | what |
+|---|---|
+| **corpus (3)** | `G07` and `G23` carry several goals and therefore **no customer message**; `R:0c582144` is a real customer message that lives in the eval store, not in committed source |
+| **coverage (4)** | `no_goal`, `multi_goal`, `explicit_fallback` and `can_you_boundary` are unreachable without those three |
+| **environment (2)** | neither required variable is set in this shell |
+
+### 23.5 The finding: the fixture is a fixture of expected output
+
+This is the part §22.11 could not have known, and it is a committed-source/document disagreement rather than a bug.
+
+`goal-scenarios.jsonl` carries **goals and relations** — what the interpreter should *produce*. For a row with a
+single goal, `explicit_request` is by its own contract "what this customer asked for, in the customer's terms", so it
+is also the input, exactly, with nothing derived. **Eleven of the thirteen are like that.**
+
+For a row with several goals there is no committed customer message, and concatenating the goals would be writing the
+input rather than reading it. For `G23` it would be actively wrong: **the stated condition lives in the relation**, so
+a naive join produces an input with the conditional clause missing — a test that asks the model to find a fallback
+nobody wrote, on the one fixture that exists to check exactly that.
+
+So the runner does not invent it. The gap is reported, and `GoalSmokePreflightTest` pins it open: if somebody later
+closes it by writing input text the numbers move and the change has to be deliberate.
+
+**This is a product-owner decision, and it has two halves:**
+
+1. **The multi-goal inputs** (`G07`, `G23`). Somebody has to write two customer messages, and for `G23` where the
+   clause sits in the sentence is a fixture-authoring choice that changes what the test measures.
+2. **The NO_GOAL case.** `R:0c582144` is the row where a model is most tempted to invent a goal, and its value comes
+   from being a *real* message. A synthetic stand-in is one I designed to be easy. Using the real one means the smoke
+   corpus carries real customer text — a payload decision, not a harness one.
+
+### 23.6 Tests and mutations
+
+backend **4,590 / 0** (582 classes, 54 skipped) · tools **130 / 0** · scorer mutations **33 / 33** · **guard
+mutations 5 / 5**.
+
+The guard mutations are new and are the reason `GoalRunGuard` has no dependencies: each compiles a copy of the class
+with one rule broken, loads it in place of the real one, and asserts the property flips.
+
+| mutation | what it lets through |
+|---|---|
+| field comparison always passes | a changed prompt runs against an old approval |
+| `missing()` always empty | a manifest with a hole in it binds |
+| `calls >= cap` → `calls > cap` | exactly one call over the cap, every time |
+| identity check removed | another approval's id authorizes this run |
+| a field leaves `BOUND` | the input corpus changes and the approval survives it |
+
+### 23.7 What RUN would be, after an approval exists
+
+Scoring is wired but deliberately **separate from transport** (`tools/inquiry-need-eval/score-goal-run.mjs`): it reads
+rows the runner *wrote*, so a scorer that fails cannot take an observation down with it. A refused row stays in the
+denominator — a model that says nothing is not a careful one — and the score carries the run's own fingerprints, so a
+number is attributable to the bytes that produced it.
+
+The order, once the corpus decision is made:
+
+1. close the corpus gap (§23.5) — a fixture change, reviewed on its own terms
+2. run the preflight; it emits `APPROVAL.json` with an `approvalId`, a `runId` and the request fingerprints
+3. the operator reads that file and grants against **those ids**
+4. `RUN` with the approval; the guard re-reads every bound field at send time and refuses on any difference
+5. `store.mjs run-put <run-id>` — append-only, raw already written
+6. `score-goal-run.mjs <rows> <gold>`
+
+**Still not approved and still not run.** What this package changed is that there is now something an approval could
+be bound to, and a preflight that says plainly why there is not one yet.
