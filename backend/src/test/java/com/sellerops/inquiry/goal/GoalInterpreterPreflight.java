@@ -41,6 +41,13 @@ public final class GoalInterpreterPreflight {
     public static final List<String> REQUIRED_ENV = List.of("SELLEROPS_INQUIRY_GOAL_API_KEY",
             "SELLEROPS_INQUIRY_GOAL_ENDPOINT");
 
+    /** The durable eval store. Read at runtime for the one real message; never copied into the repository. */
+    public static Path storeRoot(Map<String, String> env) {
+        String configured = env.get("SELLEROPS_EVAL_CACHE");
+        return configured != null && !configured.isBlank() ? Path.of(configured)
+                : Path.of(System.getProperty("user.home"), ".cache", "sellerops-eval");
+    }
+
     public static final String MODEL = "gpt-5-2025-08-07";
     public static final String REASONING_EFFORT = "minimal";
     public static final String SCOPE = "offline synthetic smoke — Customer Goal Interpreter, no seller and no channel";
@@ -83,12 +90,19 @@ public final class GoalInterpreterPreflight {
         }
 
         Path fixture = repoRoot.resolve("contracts/inquiry-goal/v1/synthetic/goal-scenarios.jsonl");
-        GoalSmokeInputs.Set set = supplied == null ? GoalSmokeInputs.assemble(fixture) : supplied;
+        GoalSmokeInputs.Set set = supplied == null
+                ? GoalSmokeInputs.assemble(fixture, storeRoot(env)) : supplied;
         ObjectNode inputs = report.putObject("inputs");
         inputs.put("fixture", "contracts/inquiry-goal/v1/synthetic/goal-scenarios.jsonl");
         inputs.put("fixture_sha256", CustomerGoalRunner.sha(Files.readString(fixture)));
-        inputs.put("chosen", GoalSmokeInputs.CHOSEN.size());
+        // Thirteen git fixtures plus the one real message from the store: the fourteen of §22.11, with nothing
+        // merged and nothing lost. Counted as one number so the two halves cannot read as a shortfall again.
+        inputs.put("planned", GoalSmokeInputs.CHOSEN.size() + 1);
+        inputs.put("from_committed_fixture", GoalSmokeInputs.CHOSEN.size());
+        inputs.put("from_durable_store", 1);
         inputs.put("usable", set.usable().size());
+        inputs.put("real_customer_text", set.realCustomerText());
+        inputs.put("store_root_configured", env.containsKey("SELLEROPS_EVAL_CACHE"));
         ArrayNode notDerivable = inputs.putArray("not_derivable");
         set.inputs().stream().filter(i -> !i.derivable())
                 .forEach(i -> notDerivable.addObject().put("id", i.id()).put("why", i.why()));
@@ -143,12 +157,26 @@ public final class GoalInterpreterPreflight {
                 CustomerGoalPrompt.sha256(CustomerGoalPrompt.system()),
                 CustomerGoalPrompt.sha256(CustomerGoalPrompt.schema().toString()),
                 inputSetFp, requestFpSet, MODEL, REASONING_EFFORT, requests.size(), requests.size(),
-                ApprovalManifest.NO_RETRY, SCOPE, false,
+                ApprovalManifest.NO_RETRY, SCOPE, set.realCustomerText(),
                 requests.stream().map(CustomerGoalRunner.Request::id).toList(),
                 requests.stream().map(CustomerGoalRunner.Request::requestFp).toList(),
-                environment, "eval-store:runs/" + runId, estimate(requests), List.of());
+                environment, "eval-store:runs/" + runId, estimate(requests), notes(set));
         report.set("manifest", manifest.toJson());
         return new Outcome(manifest, List.of(), report);
+    }
+
+    /** What a reader of this manifest has to know and could not work out from the numbers. */
+    private static List<String> notes(GoalSmokeInputs.Set set) {
+        List<String> notes = new ArrayList<>();
+        notes.add("Environment presence was established from the invoking shell at preflight time. The preflight "
+                + "NEVER READS THE VALUES — it answers 'would transport be configured', never 'is this credential "
+                + "good'. A wrong value fails at transport on the first call, with nothing billed.");
+        if (set.realCustomerText()) {
+            notes.add("This input set carries REAL CUSTOMER TEXT: " + GoalSmokeInputs.NO_GOAL_CASE + " is read from "
+                    + "the durable eval store at runtime and is not in git. The manifest carries its id and the "
+                    + "fingerprints of the request built from it, and nowhere carries the message itself.");
+        }
+        return List.copyOf(notes);
     }
 
     /** Extrapolated from the v5 planner baseline and labelled as such wherever it is printed. */

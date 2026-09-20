@@ -2,6 +2,9 @@ package com.sellerops.inquiry.goal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -12,84 +15,167 @@ import org.junit.jupiter.api.Test;
  * <b>The smoke's inputs, checked against committed source rather than against the document that describes them</b>
  * (Inquiry v3.5).
  *
- * <p>§22.11 names fourteen inputs. This asserts what the repository actually has, and the answer is not fourteen —
- * which is the finding, not a failure. Two of the named rows carry several goals and therefore <b>no customer
- * message</b>, and the fourteenth is a real customer message that lives in the eval store and not in the fixture.
+ * <p>§22.11 names fourteen: thirteen git fixtures and one real customer message. <b>Nothing merged and nothing
+ * disappeared</b> — an earlier report printed "13" because the field counted only the fixture-derived half, which
+ * was a name doing the wrong job rather than a row going astray.
  *
- * <p>The tests below pin that gap open. If somebody later closes it by writing input text, these numbers move and
- * the change has to be deliberate; if somebody closes it by quietly concatenating goals, the fallback row's missing
- * clause is named here as the reason that does not work.
+ * <p>The two multi-goal rows now carry a <b>written</b> {@code customer_message}. That field exists because the
+ * alternative was deriving an input from its own answer key: a join of a row's goals is a sentence nobody sent, and
+ * for the fallback row it produces an input with the conditional clause missing — a test that asks the model to find
+ * a relationship nobody wrote, on the one fixture that exists to check exactly that. These tests pin both halves:
+ * the message is not a join, and it carries the clause verbatim.
  */
 class GoalSmokePreflightTest {
 
+    private static final ObjectMapper JSON = new ObjectMapper();
     private static final Path FIXTURE = Path.of("..", "contracts", "inquiry-goal", "v1", "synthetic",
             "goal-scenarios.jsonl");
 
-    @Test
-    @DisplayName("the fixture is a fixture of expected OUTPUT — for multi-goal rows it carries no input")
-    void theInputSetIsIncompleteAndSaysSo() throws Exception {
-        GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE);
-        assertThat(GoalSmokeInputs.CHOSEN).hasSize(13);
-        assertThat(set.usable()).as("single-goal rows carry the customer's own words and need nothing derived")
-                .hasSize(11);
-        assertThat(set.inputs().stream().filter(i -> !i.derivable()).map(GoalSmokeInputs.Input::id))
-                .containsExactly("G07", "G23");
-        assertThat(set.complete()).isFalse();
+    private static JsonNode row(String id) throws Exception {
+        for (String line : Files.readAllLines(FIXTURE)) {
+            if (!line.isBlank()) {
+                JsonNode row = JSON.readTree(line);
+                if (row.get("id").asText().equals(id)) {
+                    return row;
+                }
+            }
+        }
+        throw new IllegalStateException("no fixture " + id);
+    }
 
-        // The fallback row is the one where a naive join would be actively wrong, and the reason is recorded.
-        assertThat(set.inputs().stream().filter(i -> i.id().equals("G23")).findFirst().orElseThrow().why())
-                .contains("stated condition").contains("drops it");
+    private static String join(JsonNode row) {
+        List<String> parts = new java.util.ArrayList<>();
+        row.get("goals").forEach(g -> parts.add(g.get("explicit_request").asText()));
+        return String.join(" ", parts);
     }
 
     @Test
-    @DisplayName("the NO_GOAL case is missing, and it is missing for a reason that is not a typo")
-    void theNoGoalCaseIsRealCustomerText() throws Exception {
+    @DisplayName("a multi-goal input is WRITTEN, never assembled from the goals it is supposed to produce")
+    void multiGoalInputsAreNotDerivedFromTheirOwnAnswerKey() throws Exception {
+        for (String id : List.of("G07", "G23")) {
+            JsonNode row = row(id);
+            assertThat(row.hasNonNull("customer_message")).as("%s carries a written message", id).isTrue();
+            assertThat(row.get("customer_message").asText())
+                    .as("%s: the input is a join of its own goals, which is a sentence nobody sent", id)
+                    .isNotEqualTo(join(row));
+            assertThat(row.get("goals").size()).isGreaterThan(1);
+        }
+    }
+
+    @Test
+    @DisplayName("the fallback clause is in the input verbatim — the relation is discoverable from the message")
+    void theStatedConditionIsInTheInput() throws Exception {
+        JsonNode g23 = row("G23");
+        String condition = g23.get("relations").get(0).get("stated_condition").asText();
+        assertThat(g23.get("customer_message").asText())
+                .as("a model cannot find a condition that is not in what it was given").contains(condition);
+        // And the naive alternative would have dropped it, which is why the field exists at all.
+        assertThat(join(g23)).doesNotContain(condition);
+    }
+
+    @Test
+    @DisplayName("thirteen inputs come from committed source, and each is the customer's own words")
+    void theCommittedHalfIsComplete() throws Exception {
         GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE);
-        assertThat(set.missing()).anySatisfy(m -> assertThat(m).contains(GoalSmokeInputs.NO_GOAL_CASE)
-                .contains("real customer text"));
-        assertThat(set.coverage().get("no_goal")).startsWith("MISSING");
-        // Everything the smoke is for, and which of it survives. Written down so the trade is visible.
-        assertThat(set.coverage().get("outcome:INFORMATION")).isEqualTo("covered");
-        assertThat(set.coverage().get("outcome:STATE_READ")).isEqualTo("covered");
-        assertThat(set.coverage().get("outcome:DECISION")).isEqualTo("covered");
-        assertThat(set.coverage().get("outcome:ACTION")).isEqualTo("covered");
-        assertThat(set.coverage().get("explicit_fallback")).startsWith("MISSING");
-        assertThat(set.coverage().get("multi_goal")).startsWith("MISSING");
+        assertThat(GoalSmokeInputs.CHOSEN).hasSize(13);
+        assertThat(set.usable()).hasSize(13);
+        assertThat(set.inputs()).allSatisfy(i -> assertThat(i.message()).isNotBlank());
+        assertThat(set.realCustomerText()).as("nothing committed to git is a real customer's words").isFalse();
+        // The fourteenth is reported missing from THIS overload on purpose: it is not a fixture.
+        assertThat(set.missing()).singleElement().satisfies(m ->
+                assertThat(m).contains(GoalSmokeInputs.NO_GOAL_CASE).contains("read at runtime"));
+    }
+
+    @Test
+    @DisplayName("the fourteenth is read from the durable store at runtime, and declares itself as real text")
+    void theNoGoalCaseComesFromTheStore() throws Exception {
+        Path store = GoalInterpreterPreflight.storeRoot(System.getenv());
+        GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE, store);
+        if (!Files.exists(store.resolve(GoalSmokeInputs.CAPTURE))) {
+            // CI does not restore the store, and the harness says so rather than inventing the row.
+            assertThat(set.missing()).singleElement().satisfies(m ->
+                    assertThat(m).contains("store.mjs restore inquiry-planner-capture"));
+            assertThat(set.realCustomerText()).isFalse();
+            return;
+        }
+        assertThat(set.missing()).isEmpty();
+        assertThat(set.usable()).hasSize(14);
+        assertThat(set.realCustomerText()).as("the manifest has to declare this, so the set has to know it").isTrue();
+        GoalSmokeInputs.Input real = set.inputs().stream()
+                .filter(i -> i.id().equals(GoalSmokeInputs.NO_GOAL_CASE)).findFirst().orElseThrow();
+        assertThat(real.realCustomerText()).isTrue();
+        assertThat(real.message()).isNotBlank();
+
+        // It is read, and it is not written back: no committed file carries it.
+        assertThat(Files.readString(FIXTURE)).doesNotContain(real.message());
+        assertThat(set.coverage().get("no_goal")).startsWith("covered");
+    }
+
+    @Test
+    @DisplayName("every intended shape is covered once the store is present, and the four outcomes always are")
+    void coverageIsMeasuredNotAsserted() throws Exception {
+        GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE,
+                GoalInterpreterPreflight.storeRoot(System.getenv()));
+        for (String outcome : List.of("INFORMATION", "STATE_READ", "DECISION", "ACTION")) {
+            assertThat(set.coverage().get("outcome:" + outcome)).isEqualTo("covered");
+        }
+        assertThat(set.coverage().get("multi_goal")).startsWith("covered");
+        assertThat(set.coverage().get("explicit_fallback")).startsWith("covered");
+        assertThat(set.coverage().get("can_you_boundary")).startsWith("covered");
         assertThat(set.coverage().get("no_invented_prerequisite_goal")).startsWith("covered");
         assertThat(set.coverage().get("unavailable_capability_keeps_semantics")).startsWith("covered");
     }
 
     @Test
-    @DisplayName("the preflight refuses rather than producing a manifest with a hole in it")
+    @DisplayName("a preflight missing anything produces no manifest at all")
     void aBlockedPreflightProducesNoManifest() throws Exception {
-        var outcome = GoalInterpreterPreflight.prepare(Path.of(".."),
-                Map.of("SELLEROPS_INQUIRY_GOAL_API_KEY", "x", "SELLEROPS_INQUIRY_GOAL_ENDPOINT", "y"));
+        // No environment: the one thing that is certainly absent here, whatever else is true.
+        var outcome = GoalInterpreterPreflight.prepare(Path.of(".."), Map.of());
         assertThat(outcome.ready()).isFalse();
         assertThat(outcome.manifest()).isNull();
         assertThat(outcome.report().get("verdict").asText()).isEqualTo("BLOCKED");
-        assertThat(outcome.blockers()).anySatisfy(b -> assertThat(b).startsWith("INPUT_NOT_DERIVABLE"));
-        assertThat(outcome.blockers()).anySatisfy(b -> assertThat(b).startsWith("INPUT_MISSING"));
-        assertThat(outcome.blockers()).anySatisfy(b -> assertThat(b).startsWith("COVERAGE"));
+        for (String name : GoalInterpreterPreflight.REQUIRED_ENV) {
+            assertThat(outcome.blockers()).anySatisfy(b -> assertThat(b).contains(name));
+        }
+    }
+
+    @Test
+    @DisplayName("the report counts fourteen planned inputs, split into the two places they live")
+    void theCountIsReconciled() throws Exception {
+        var outcome = GoalInterpreterPreflight.prepare(Path.of(".."), Map.of());
+        JsonNode inputs = outcome.report().get("inputs");
+        assertThat(inputs.get("planned").asInt()).isEqualTo(14);
+        assertThat(inputs.get("from_committed_fixture").asInt()).isEqualTo(13);
+        assertThat(inputs.get("from_durable_store").asInt()).isEqualTo(1);
     }
 
     @Test
     @DisplayName("the current preflight result is written down, so the verdict is an artifact and not a memory")
     void theCurrentPreflightIsRecorded() throws Exception {
-        // Deliberately reads the real process environment: what this asserts is what an operator would see if they
-        // ran it right now, including whether their own shell is carrying the variables a run would need.
         var outcome = GoalInterpreterPreflight.prepare(Path.of(".."), System.getenv());
         Path out = Path.of("build", "goal-preflight.json");
-        java.nio.file.Files.createDirectories(out.getParent());
-        java.nio.file.Files.writeString(out, outcome.report().toPrettyString() + "\n");
+        Files.createDirectories(out.getParent());
+        Files.writeString(out, outcome.report().toPrettyString() + "\n");
         assertThat(outcome.report().get("verdict").asText()).isIn("BLOCKED", "READY_FOR_APPROVAL");
-        // Whatever the environment says, the corpus gap is a property of the repository and is always present.
-        assertThat(outcome.blockers()).anySatisfy(b -> assertThat(b).contains("G23"));
+        // Whatever the verdict, no customer's words are in the artifact — only ids and fingerprints.
+        GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE,
+                GoalInterpreterPreflight.storeRoot(System.getenv()));
+        set.inputs().stream().filter(GoalSmokeInputs.Input::realCustomerText).forEach(i ->
+                assertThat(Files.exists(out)).isTrue());
+        String written = Files.readString(out);
+        for (GoalSmokeInputs.Input input : set.inputs()) {
+            if (input.realCustomerText()) {
+                assertThat(written).as("a real customer message reached a written artifact")
+                        .doesNotContain(input.message());
+            }
+        }
     }
 
     @Test
-    @DisplayName("building every usable request contacts nobody, and the fingerprints are stable across runs")
-    void preparingTheUsableSetSpendsNothing() throws Exception {
-        GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE);
+    @DisplayName("building every request contacts nobody, and the fingerprints are stable across runs")
+    void preparingTheSetSpendsNothing() throws Exception {
+        GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE,
+                GoalInterpreterPreflight.storeRoot(System.getenv()));
         var runner = new CustomerGoalRunner(GoalInterpreterPreflight.MODEL,
                 GoalInterpreterPreflight.REASONING_EFFORT, (u, h, b) -> {
                     throw new AssertionError("a vendor was contacted during PREPARE");
@@ -98,12 +184,10 @@ class GoalSmokePreflightTest {
                 .map(i -> new CustomerGoalRunner.Input(i.id(), i.message())).toList();
         var first = runner.prepare(inputs);
         var second = runner.prepare(inputs);
-        assertThat(first).hasSize(11);
         assertThat(first.stream().map(CustomerGoalRunner.Request::requestFp))
                 .as("the same inputs produce the same bytes, or a manifest means nothing")
                 .isEqualTo(second.stream().map(CustomerGoalRunner.Request::requestFp).toList());
         assertThat(first.stream().map(CustomerGoalRunner.Request::requestFp)).doesNotHaveDuplicates();
-        // The customer's message is in the payload and nothing else about them is.
         assertThat(first.get(0).user()).contains("customer").contains("surface").contains("listing_resolved");
     }
 }

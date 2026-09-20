@@ -37,11 +37,17 @@ public final class GoalSmokeInputs {
             "G13", "G11", "G02", "G08", "G23");
 
     /**
-     * The fourteenth input §22.11 names: a NO_GOAL case from the frozen corpus. It is <b>not in committed source</b>
-     * — it is a real customer message in the eval store — so it cannot be rebuilt here, and whether the smoke may
-     * carry real customer text is a payload decision rather than a harness one.
+     * The fourteenth input §22.11 names: a NO_GOAL case from the frozen corpus.
+     *
+     * <p>It is <b>deliberately not a git fixture</b>. Its whole value is that it is a real message — the row where a
+     * model is most tempted to invent a goal nobody asked for — and a synthetic stand-in would be one somebody
+     * designed to be easy. So it is read from the durable eval store <b>at runtime</b> and never copied into this
+     * repository: what is committed is its id, and a manifest built with it declares {@code real_customer_text}.
      */
     public static final String NO_GOAL_CASE = "R:0c582144";
+
+    /** Where the real message lives. Never in git, and never written back out of the store by this harness. */
+    public static final String CAPTURE = "inquiry-planner-capture/v1/capture-S0.jsonl";
 
     /** What the smoke is supposed to exercise. Coverage is asserted against the assembled set, never assumed. */
     public static final Map<String, String> INTENDED = intended();
@@ -53,7 +59,10 @@ public final class GoalSmokeInputs {
      * @param message    the customer's message, exactly as committed, or null when the fixture does not carry one
      * @param derivable  whether an input could be rebuilt from committed bytes without anybody writing text
      */
-    public record Input(String id, String message, boolean derivable, String why) {
+    public record Input(String id, String message, boolean derivable, String why, boolean realCustomerText) {
+        public Input(String id, String message, boolean derivable, String why) {
+            this(id, message, derivable, why, false);
+        }
     }
 
     public record Set(List<Input> inputs, List<String> missing, Map<String, String> coverage) {
@@ -66,16 +75,53 @@ public final class GoalSmokeInputs {
             return missing.isEmpty() && inputs.stream().allMatch(Input::derivable)
                     && coverage.values().stream().noneMatch(v -> v.startsWith("MISSING"));
         }
+
+        /** Whether any input is a real customer's words. The manifest declares it; it is never inferred later. */
+        public boolean realCustomerText() {
+            return inputs.stream().anyMatch(Input::realCustomerText);
+        }
+    }
+
+    /**
+     * The whole set: thirteen from committed source and one from the durable store.
+     *
+     * <p><b>Nothing merged and nothing disappeared</b> between §22.11's fourteen and this. {@link #CHOSEN} is the
+     * thirteen that are git fixtures; {@link #NO_GOAL_CASE} is the fourteenth and lives in the store on purpose.
+     * An earlier report printed "13" because the field counted only the fixture-derived rows, which was a name doing
+     * the wrong job rather than a row going astray.
+     */
+    public static Set assemble(Path fixture, Path storeRoot) throws Exception {
+        Set fromGit = assemble(fixture);
+        List<Input> inputs = new ArrayList<>(fromGit.inputs());
+        List<String> missing = new ArrayList<>(fromGit.missing().stream()
+                .filter(m -> !m.startsWith(NO_GOAL_CASE)).toList());
+        Path capture = storeRoot == null ? null : storeRoot.resolve(CAPTURE);
+        if (capture == null || !Files.exists(capture)) {
+            missing.add(NO_GOAL_CASE + " — the durable eval store is not restored here; run "
+                    + "`node tools/eval-store/store.mjs restore inquiry-planner-capture v1`");
+        } else {
+            String message = null;
+            for (String line : Files.readAllLines(capture)) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                JsonNode row = JSON.readTree(line);
+                if (NO_GOAL_CASE.equals(row.path("q").asText())) {
+                    message = row.path("question").asText();
+                    break;
+                }
+            }
+            if (message == null || message.isBlank()) {
+                missing.add(NO_GOAL_CASE + " — the store is present and does not carry this case");
+            } else {
+                inputs.add(new Input(NO_GOAL_CASE, message, true, null, true));
+            }
+        }
+        return new Set(List.copyOf(inputs), List.copyOf(missing), coverage(rows(fixture), inputs));
     }
 
     public static Set assemble(Path fixture) throws Exception {
-        Map<String, JsonNode> rows = new LinkedHashMap<>();
-        for (String line : Files.readAllLines(fixture)) {
-            if (!line.isBlank()) {
-                JsonNode row = JSON.readTree(line);
-                rows.put(row.get("id").asText(), row);
-            }
-        }
+        Map<String, JsonNode> rows = rows(fixture);
         List<Input> inputs = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         for (String id : CHOSEN) {
@@ -85,7 +131,13 @@ public final class GoalSmokeInputs {
                 continue;
             }
             JsonNode goals = row.get("goals");
-            if (goals.size() == 1) {
+            if (row.hasNonNull("customer_message")) {
+                // Written, not assembled. A multi-goal row's input cannot be derived from its own answer key: a
+                // join of the goals is a sentence nobody sent, and for the fallback row it drops the very clause
+                // the row exists to test.
+                inputs.add(new Input(id, row.get("customer_message").asText(), true, null));
+            } else if (goals.size() == 1) {
+                // explicit_request is, by its own contract, "what this customer asked for, in the customer's terms".
                 inputs.add(new Input(id, goals.get(0).get("explicit_request").asText(), true, null));
             } else {
                 inputs.add(new Input(id, null, false, "the fixture carries " + goals.size()
@@ -94,11 +146,20 @@ public final class GoalSmokeInputs {
                         ? " — and the stated condition lives in the relation, so a naive join drops it" : "")));
             }
         }
-        if (!rows.containsKey(NO_GOAL_CASE)) {
-            missing.add(NO_GOAL_CASE + " — the NO_GOAL case is a real customer message in the eval store, not a "
-                    + "committed fixture; including it makes the input set carry real customer text");
-        }
+        missing.add(NO_GOAL_CASE + " — the NO_GOAL case is a real customer message in the eval store and is read at "
+                + "runtime, not from git; use assemble(fixture, storeRoot)");
         return new Set(List.copyOf(inputs), List.copyOf(missing), coverage(rows, inputs));
+    }
+
+    private static Map<String, JsonNode> rows(Path fixture) throws Exception {
+        Map<String, JsonNode> rows = new LinkedHashMap<>();
+        for (String line : Files.readAllLines(fixture)) {
+            if (!line.isBlank()) {
+                JsonNode row = JSON.readTree(line);
+                rows.put(row.get("id").asText(), row);
+            }
+        }
+        return rows;
     }
 
     /** Which intended shapes the assembled set actually reaches, read from the fixture rather than asserted. */
@@ -114,7 +175,8 @@ public final class GoalSmokeInputs {
         }
         // The four outcome tokens are checked against the fixture's own labels, not against a list written here.
         for (String outcome : List.of("INFORMATION", "STATE_READ", "DECISION", "ACTION")) {
-            boolean seen = usable.stream().anyMatch(id -> {
+            boolean seen = usable.stream().filter(rows::containsKey).anyMatch(id -> {
+                // The NO_GOAL input has no fixture row and asks for no outcome, which is the point of it.
                 for (JsonNode g : rows.get(id).get("goals")) {
                     if (g.get("requested_outcome").asText().equals(outcome)) {
                         return true;
