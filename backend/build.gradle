@@ -113,3 +113,19 @@ tasks.register('runGoalSmoke', JavaExec) {
     // worktree's git and not to whatever directory the operator happened to be standing in.
     workingDir = projectDir
 }
+
+// Inquiry v3.5 §24.1 — the PREPARE half of the same command pair. Writes PREFLIGHT.json always and APPROVAL.json
+// only when the verdict is ready, so a blocked preflight never leaves something that looks bindable beside it.
+//
+//   SELLEROPS_INQUIRY_GOAL_API_KEY='...' SELLEROPS_INQUIRY_GOAL_ENDPOINT='https://...' \
+//     ./gradlew --no-daemon -q --offline prepareGoalSmoke --args='--out <a new directory>'
+//
+// Zero vendor calls: this is what decides whether transport WOULD work, without doing any.
+tasks.register('prepareGoalSmoke', JavaExec) {
+    group = 'verification'
+    description = 'Prepare (and write) an Approval Manifest for the Inquiry v3.5 Customer Goal Interpreter smoke.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.sellerops.inquiry.goal.GoalInterpreterPreflight'
+    workingDir = projectDir
+}

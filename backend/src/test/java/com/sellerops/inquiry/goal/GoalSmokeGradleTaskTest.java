@@ -52,6 +52,12 @@ class GoalSmokeGradleTaskTest {
         assertThat(build).doesNotContain("sourceSets.main.runtimeClasspath");
         assertThat(build).contains("dependsOn tasks.named('testClasses')");
 
+        // The other half of the pair. Before it existed, the manifest an operator granted against was lifted out
+        // of a test artifact — which works, and quietly makes the approval a by-product of running the suite.
+        assertThat(build).contains("tasks.register('prepareGoalSmoke', JavaExec)");
+        assertThat(build).contains("mainClass = 'com.sellerops.inquiry.goal.GoalInterpreterPreflight'");
+        assertThat(GoalInterpreterPreflight.class.getMethod("main", String[].class)).isNotNull();
+
         // The entrypoint the task names exists, is the launcher's, and takes the arguments the command passes.
         assertThat(GoalRunLauncher.class.getName()).isEqualTo("com.sellerops.inquiry.goal.GoalRunLauncher");
         assertThat(GoalRunLauncher.class.getMethod("main", String[].class)).isNotNull();

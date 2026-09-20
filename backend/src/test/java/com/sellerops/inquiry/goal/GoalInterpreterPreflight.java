@@ -68,6 +68,48 @@ public final class GoalInterpreterPreflight {
     private GoalInterpreterPreflight() {
     }
 
+    /**
+     * <b>The operator's PREPARE command</b> (Inquiry v3.5 §24.1), invoked by the {@code prepareGoalSmoke} Gradle
+     * task on the test runtime classpath.
+     *
+     * <p>It exists because the manifests before it were lifted out of a <i>test artifact</i> — which works, and
+     * quietly makes the approval an operator grants against a by-product of running the suite. A decision point
+     * deserves a command of its own, and a file it can be pointed at.
+     *
+     * <p>Writes {@code PREFLIGHT.json} always and {@code APPROVAL.json} only when the verdict is ready: there is no
+     * outcome in which a blocked preflight leaves something that looks bindable lying next to it. Both are
+     * {@code CREATE_NEW}. Exit {@code 0} ready, {@code 2} blocked.
+     *
+     * <p><b>Zero vendor calls</b> — this is the path that decides whether transport would work, without doing any.
+     */
+    public static void main(String[] argv) throws Exception {
+        Map<String, String> named = new LinkedHashMap<>();
+        for (int i = 0; i + 1 < argv.length; i += 2) {
+            named.put(argv[i].replaceFirst("^--", ""), argv[i + 1]);
+        }
+        Path repoRoot = Path.of(named.getOrDefault("repo", ".."));
+        Path out = Path.of(named.getOrDefault("out", "build/goal-smoke"));
+        Files.createDirectories(out);
+
+        Outcome outcome = prepare(repoRoot, System.getenv());
+        Files.writeString(out.resolve("PREFLIGHT.json"), outcome.report().toPrettyString() + "\n",
+                java.nio.file.StandardOpenOption.CREATE_NEW);
+        if (!outcome.ready()) {
+            System.out.println(outcome.report().toPrettyString());
+            System.out.println("\nBLOCKED — no manifest was written. Nothing here can be approved.");
+            System.exit(2);
+        }
+        Path manifest = out.resolve("APPROVAL.json");
+        outcome.manifest().write(manifest);
+        System.out.println(outcome.report().toPrettyString());
+        System.out.println("\nREADY_FOR_APPROVAL — manifest written to " + manifest.toAbsolutePath());
+        System.out.println("approval_id " + outcome.manifest().approvalId());
+        System.out.println("run_id      " + outcome.manifest().runId());
+        System.out.println("transport   " + outcome.manifest().transport());
+        System.out.println("\nThis is NOT an approval. A grant binds to those two ids, and ANY commit made after "
+                + "this moment revokes it.");
+    }
+
     public record Outcome(ApprovalManifest manifest, List<String> blockers, ObjectNode report) {
         public boolean ready() {
             return manifest != null && blockers.isEmpty();
