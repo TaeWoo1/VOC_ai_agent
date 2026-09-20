@@ -1,9 +1,10 @@
 # Inquiry Architecture v3 — WP-4: Planner Final Validation & Freeze Gate
 
-> **Status: baseline pinned · 3-call smoke PASSED · 67×1 shadow manifest presented, not run.**
-> 3 planner model calls (approved, capped, synthetic fixtures only). Marketplace 0 · DB writes 0 ·
-> migrations 0. Production is still v3 OFF. **The planner is not frozen** — the freeze gate is the 67×1
-> shadow, which has not run.
+> **Status: smoke PASSED · 67×1 shadow RUN · freeze gate FAILED · planner NOT frozen.**
+> 70 planner model calls total (3 + 67), both approved and capped. Marketplace 0 · DB writes 0 ·
+> external writes 0 · migrations 0. Production is still v3 OFF.
+> **The Resolution Planner is not frozen, and WP-4 E2E is not proposed.** The gate found a contract
+> defect that the smoke could not see: §6.
 
 This package does not try to make the planner better. It asks one question — *do the authority semantics
 WP-2 measured survive the WP-3 contract?* — and, if the answer is yes, freezes the Resolution Planner
@@ -254,85 +255,183 @@ candidate that the 67-case run is the right instrument to size.
 
 ---
 
-## 5. Approval manifest — final planner shadow, 67 × 1
+## 5. Final planner shadow — `wp4-shadow`, 67 × 1 (consumed)
 
-**Not approved. Not run.** Presented only because §4 passed.
+Approved in-turn, pinned to `0af96549`, **executed at `6cb71f47`**: the delta between them is one markdown
+file, and before running, all five request fingerprints were re-derived at HEAD and compared — **15/15
+identical** — so the bytes sent are the approved bytes by construction. 67 calls / cap 70. Inputs: the
+frozen WP-2 capture (`5850421b…`), read in place so no second copy of customer text was made. Raw stored
+before scoring: `runs/wp4-shadow`, irreproducible, `run-verify → ok`. 99,202 in / 14,534 out, mean 3.0 s.
 
-**67 × 1, not 67 × 3.** WP-2 already bought three repetitions of the authority question and the answer was
-stable across all three (recall 1.000 on matched goals). This run asks one different question — *did the
-WP-3 schema change move the semantic judgment?* — and one pass answers it. A repeat is the remedy for a
-stochastic one-off (category E), to be requested for named rows if any appear, not the default.
+Scored with the split-tolerant scorer against frozen gold v3.2. The comparison column is **WP-2 rep 1
+projected into v3 shapes and scored with the same scorer** (`runs/wp3-offline`) — the only like-for-like
+baseline that exists.
+
+### 5.1 Before / after
+
+| | WP-2 rep 1 (v2, projected) | WP-4 (v3, actual) | |
+|---|---|---|---|
+| goal coverage | 72/72 · **1.000** | 63/72 · **0.875** | ▼ |
+| required authority recall | **1.000** | **0.875** | ▼ |
+| **wrong authority substitution** | **0** | **5** | ▼ |
+| uncovered goals | 0 | 9 (4 no plan + 5 wrong authority) | ▼ |
+| ORDER required-authority miss | 0 | **0** | = |
+| forbidden identity input | 0 | **0** | = |
+| `procedure_for_read` | 3 | **1** | ▲ |
+| unnecessary authority goals | 22 | **9** | ▲ |
+| needs with >1 closing authority | **23** | **0** | ▲ |
+| needs where SELLER closes | 21 | **9** | ▲ |
+| goals split | 26 | 22 | ≈ |
+| planner-only extra needs | 7 | 4 | ▲ |
+| entity exact / over-read | 6 / 8 | 2 / 7 | ▼ |
+| inputs exact / over / under | 28 / 44 / 4 | 25 / 43 / 3 | ≈ |
+| required input recall | 1 of 5 | 2 of 5 | ▲ |
+| unnecessary inputs | 98 | 88 | ▲ |
+| invalid rows | 8/67 (11.9%) | **8/67 (11.9%)** | = |
+| envelope failures | **0** | **4 (TRUNCATED)** | ▼ |
+| violations | 13, all shape-class | 5, all relational | ▲ |
+
+**WP-3's structural claims are confirmed.** Every violation class the new shapes were built to make
+inexpressible is gone: `FIELDS_ON_NON_ENTITY` 15→0, `FIELD_OF_OTHER_CAPABILITY` 15→0, `SCOPE_MISMATCH`
+4→0, `BAD_DEPENDENCY` 1→0. What remains is relational and no schema could have prevented it:
+`NO_CLOSING_STEP` 2, `PRECONDITION_AFTER_CLOSER` 1, `PROCEDURE_WITHOUT_ORDER_PRECONDITION` 1,
+`DUPLICATE_STEP` 1, over 4 rows. Multi-closer needs went **23 → 0**: the new rule is obeyed without
+exception.
+
+**And the invalid rate did not move.** 11.9% before, 11.9% after — the composition changed completely and
+the total did not, because two new failure modes arrived to replace the ones that were removed.
+
+### 5.2 The finding: the contract chose the closer by position
+
+Three cases (`R:8989a9d0`, `S:T1a`, `S:T1b`) close a gold-KNOWLEDGE goal with `SELLER`. The before/after is
+the whole story:
 
 ```
-APPROVAL MANIFEST — Inquiry v3 final planner shadow under resolution-planner/v3
-  purpose           does the authority semantics WP-2 measured survive the WP-3 contract at scale;
-                    the input to the Planner Freeze Gate
-  scope             67 planner calls (67 canonical cases x 1 repetition)
-  commit            0af96549
-  prompt            resolution-planner/v3   system_fp 938af14f…  schema_fp c0419e71…
-  model             gpt-5-2025-08-07 @ minimal, strict json_schema
-  mode              PLAN_MODE=model, PLAN_REPEATS=1, PLAN_MAX_CALLS=70
-                    (67 + 3 harness margin; the harness throws on the 71st send)
-  inputs            eval-store:runs/wp2-shadow/inputs-capture-S0.jsonl — the FROZEN capture WP-2 sent,
-                    reused unchanged so the comparison is controlled
-  inputs sha256     5850421be15897d15fc169de22daacf625d63892b12a725ffef1471f48470f8d
-                    (pinned via PLAN_INPUTS_SHA256 — the harness refuses a moved capture)
-  real customer text  YES — the canonical capture holds real customer questions. It lives outside the
-                    repository and is not committed. This is the same text WP-2 sent to the same
-                    vendor under the same capability; nothing new is exposed, and it is NOT zero.
-  marketplace calls 0
-  DB writes         0
-  external writes   0
-  production Cases  0
-  judge / draft     0 calls
-  retrieval         0
-  output            eval-store:runs/wp4-shadow/ — new run id, append-only; raw answers stored and
-                    marked irreproducible BEFORE anything is scored
-  scoring           split-tolerant goal scorer (tools/inquiry-need-eval/goals.mjs) against frozen
-                    gold inquiry-resolution-plan/v3.2 (ff20922e…). Effect exact-match: not computed
-                    (the scorer has no effect term). Need-count exact match: not a headline metric.
-  expected spend    ≈100k input / ≈6k output tokens (extrapolated from the smoke's per-call figures)
-  revoked by        any code, branch, model, prompt, schema or input change
+R:8989a9d0   WP-2:  KNOWLEDGE.CATALOGUE(CLOSES) + SELLER(CLOSES)
+             WP-4:  KNOWLEDGE.CATALOGUE(PRECONDITION) + SELLER(CLOSES)
 ```
 
-Run command:
+The model did not learn a new opinion. It **kept the same two steps in the same order** and, told that
+exactly one authority may close and that preconditions come first, demoted the first step and let the
+second close. That plan is fully contract-valid — it is, precisely, the shape WP-3's own instruction
+offers as the *legitimate* multi-authority plan ("확인한 뒤 판매자의 예외 판단이 필요하면 앞 권한을
+PRECONDITION으로 적고 SELLER가 닫습니다"). The escape clause became the default: needs carrying a
+**KNOWLEDGE precondition went 0 → 18**, and total PRECONDITION roles 13 → 33.
 
-```bash
-RUN_RESOLUTION_PLANNER_CAL=true PLAN_MODE=model PLAN_MAX_CALLS=70 PLAN_REPEATS=1 PLAN_RUN_ID=wp4-shadow \
-PLAN_INPUTS="$W/inputs-capture-S0.jsonl" PLAN_OUT="$W/wp4-shadow.jsonl" \
-PLAN_INPUTS_SHA256=5850421be15897d15fc169de22daacf625d63892b12a725ffef1471f48470f8d \
-SELLEROPS_INQUIRY_DECISION_API_KEY=… ./gradlew test --tests '*ResolutionPlannerCalibrationIT'
-```
+The mechanism is measured, not inferred. **In WP-2, across all 201 calls, every single time SELLER closed
+alongside another authority — 49 of 49, 100% — SELLER was the last step written.** The model has a stable
+habit of appending SELLER last. Under v2 that was cosmetic, because every step could close and the right
+authority was among the closers. WP-3's two rules — *exactly one closer* and *preconditions precede their
+closer* — together make **the last-written step the closer**. A positional habit became a semantic decision.
 
-### 5.1 Freeze gate, registered before the run
+So the contract says *how many* authorities may close and *in what order* steps appear, and never says
+*which* authority should close. The model answered that question with position, and its position habit is
+SELLER-last.
 
-Mandatory — all must hold:
+**This also corrects a WP-2/WP-3 headline.** The recall of 1.000 was read off plans that named the right
+authority *and* SELLER as co-closers — 16 such needs in rep 1 alone — and WP-3's own seller analysis had
+already classified all 31 distinct seller-closer pairs as **invalid fallbacks, 0 legitimate**. The scorer
+credited those goals because the right authority appeared among the closers. It was never wrong to do so
+on the data it had; but it means **1.000 was partly the ambiguity, not the competence.** Forced to name one
+closer, the planner named the wrong one five times. The defect did not arrive with v3; v3 stopped
+concealing it, and made it countable.
 
-1. wrong authority substitution = **0**
-2. ORDER required-authority miss = **0**
-3. `procedure_for_read` = **0**
-4. forbidden identity input = **0**
-5. unresolved required resolution goal = **0**, or explainable as a named annotation defect
-6. contract / schema failure = **0** (target; ≥1 is classified before any freeze decision, and a
-   reproduction of WP-2's 20-of-201 invalid rate means no freeze)
-7. the authority semantics WP-2 recorded still hold under the WP-3 schema
+### 5.3 The second finding: four answers ran past the ceiling
 
-Reported alongside, not gating: goal coverage, uncovered goal, planner-only extra goal, unnecessary
-authority, entity/scope accuracy, sequence accuracy, the SELLER split (legitimate authority vs missing
-knowledge vs capability gap vs operational handoff), and the customer-input breakdown.
+`R:0c582144`, `R:83e607e0`, `R:9b8cc5a5`, `S:T12a` all hit exactly 1,600 output tokens and came back
+`finish=length` → `TRUNCATED`. **The cap is 1,600 in v2 and v3 alike — it did not change.** The same four
+questions, asked three times each under v2, produced 153–347 output tokens and `finish=stop` every time;
+the largest answer in all 201 WP-2 calls was 647. Whatever these four did, they did not do it before.
 
-**One metric added by §4.2(a):** the count of steps whose gap is caused *only* by an over-read field —
-`gapOf` said `NOT_SUPPORTED` while `unavailableFields` is a strict subset of the step's fields. That
-number decides whether the availability contract is a real defect or a one-off, and it is measured, not
-assumed.
+**The cause is not observable from this run, and that is a harness defect worth naming:**
+`InquiryDecisionGenerator` returns `new Envelope(null, finish, "TRUNCATED")` — the partial content, which
+is the only evidence of *what* the model was emitting when it ran out, is discarded. Four rows say a limit
+was hit and none of them can say why.
 
-### 5.2 If the gate fails
+### 5.4 Availability: the over-read mechanism, measured
 
-Classified as exactly one of **A** schema/contract design · **B** authority semantic error ·
-**C** scorer/gold ambiguity · **D** customer-input UX · **E** stochastic one-off. Only A and B are
-candidates for changing the planner architecture; C is an eval fix, D is backlog, E is a targeted repeat of
-named rows. **Re-running 67 × 3 is not the default remedy**, and the prompt is not tuned again.
+The §4.2(a) smoke finding generalises. `entity_over_read` 7 of 10 compared, and the over-read fields are
+`ORDER_TRACKING` 6, `ORDER_PAYMENT` 3, `ORDER_CANCELLATION` 3, `LISTING_SALE_STATUS` 1. With `gapOf`'s
+all-or-nothing clause, each unsupported field marks its whole step a gap even when the field the need
+actually requires is available. This one **can** be re-measured for free: `PLAN_MODE=replay` re-reads the
+67 recorded answers with the current validator and refuses any row whose rebuilt user turn does not hash
+to the recorded `input_fp`, so a revised availability rule can be scored against these same plans with
+zero model calls.
 
-Two things stay **non-blocking** by the brief's instruction: the `R:77a91fab` / `R:f403e606` goal-pair
-ambiguity remains a documented scorer blind spot and is not adjudicated here, and over-asking is a product
-UX issue — only under-asking that drops an input the resolution actually needs blocks.
+### 5.5 Customer input
+
+Non-blocking by the brief, reported as a component metric: exact 25 / over 43 / under 3 of 68 goals
+compared; required-input recall **2 of 5**; unnecessary inputs 88; **forbidden identity inputs 0**.
+Over-ask by type: `MODEL` 19, `MEASUREMENT` 18, `SIZE` 17, `USE_CONTEXT` 17, `QUANTITY` 13, `OPTION` 4.
+All 3 under-asks are the same token, `OPTION` — the one the gold uses for variant discrimination, while
+the planner reaches for `SIZE`/`MODEL`/`MEASUREMENT` instead. Whether that is a planner error or a
+gold-token choice is a category-C question and is **not** treated here as under-asking that costs a
+resolution.
+
+---
+
+## 6. Freeze gate — **NOT PASSED. The planner is not frozen.**
+
+| # | condition | result |
+|---|---|---|
+| 1 | wrong authority substitution = 0 | **FAIL — 5** |
+| 2 | ORDER required-authority miss = 0 | PASS — 0 |
+| 3 | `procedure_for_read` = 0 | **FAIL — 1** (`R:4181864b`) |
+| 4 | forbidden identity input = 0 | PASS — 0 |
+| 5 | unresolved required goal = 0 | **FAIL — 9** |
+| 6 | contract / schema failure = 0 | **FAIL — 8/67 (11.9%), WP-2's rate reproduced** |
+| 7 | WP-2 authority semantics hold under v3 | **FAIL — recall 1.000 → 0.875** |
+
+Two of seven hold. Item 6 alone is disqualifying by the brief's own wording — *"기존 shadow의 20/201
+invalid 수준이 재현되면 freeze하지 않는다"* — and 11.9% is exactly that level.
+
+### 6.1 Classification
+
+**A — schema/contract design.** The primary defect. The closing contract specifies a *count* and an
+*order* but not a *choice*, so the closer is decided by position, and the planner's position habit is
+SELLER-last (49/49). Also A: the four truncations, unexplained because the harness discards truncated
+content; and `gapOf`'s all-or-nothing availability verdict.
+
+**B — authority semantic error.** The SELLER-over-KNOWLEDGE preference is real and WP-3 had already judged
+every instance of it invalid. But it is **downstream of A** in this run: the plans show the same steps in
+the same order as v2, with only the roles reassigned. Fixing B by prompt-tuning before fixing A would tune
+against an artifact.
+
+**C — scorer/gold.** 12 capability mismatches, 7 of them `KNOWLEDGE.CATALOGUE` expected vs
+`KNOWLEDGE.PRODUCT` planned — the same authority, so authority recall is unaffected — plus the `OPTION`
+token question in §5.5. Eval-side; not a planner change.
+
+**D — customer-input UX.** §5.5. Backlog, as instructed.
+
+**E — stochastic one-off.** **Not invoked.** 49/49 is not chance, and nothing here is attributed to
+variance without evidence. No repeat run is requested on that basis.
+
+### 6.2 What is not proposed
+
+**WP-4 E2E is not proposed.** It would run a resolver against a planner that hands an answerable knowledge
+question to the seller in 5 of 72 goals, and the headline it is built to report — Wrong Automation, Safe
+Resolution, Correct Handoff — would measure this defect rather than the resolver.
+
+**A 67 × 3 re-run is not proposed**, per the brief. **The prompt is not micro-tuned**, per the brief: the
+defect is in what the contract leaves unsaid, not in how a sentence is phrased.
+
+### 6.3 Proposed next package — WP-3.1: closing-authority selection
+
+Smallest change that addresses A, stated as a contract question rather than a prompt edit: **the contract
+must say which authority closes, not only how many.** The candidate rule — *the authority that can
+actually produce the answer closes; `SELLER` closes only when a new seller judgment is itself the answer* —
+is already the architecture's stated semantics (`ResolutionPlan.Seller`: "This is an authority, not a
+fallback"); it is simply not expressible or checkable today, since a `SELLER`-closed need with a
+`KNOWLEDGE` precondition is indistinguishable, in shape, from the legitimate policy-then-exception plan.
+
+Three sub-questions, in order:
+
+1. can the distinction be made **structural** (a seller step declaring what judgment it makes, so
+   "fallback" has no valid shape), or must it stay a validator rule?
+2. the four truncations: retain truncated content in the harness first — it is one field — then look,
+   because the cause is currently unobservable.
+3. the availability rule: re-score by replay, **zero model calls**, and decide whether a step whose
+   required fields are available should be reported as a gap.
+
+Only (2) and (3) can be answered without a new model call; (1) changes the request and needs its own
+manifest.
