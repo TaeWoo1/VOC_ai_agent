@@ -1,7 +1,6 @@
 # Inquiry Architecture v3 — WP-3.1: Closing Authority Semantics & Replay Diagnostics
 
-> **Status: diagnosis complete · Candidate C BUILT and offline-validated · no model has seen it · planner still NOT
-> frozen.**
+> **Status: diagnosis complete · Candidate C BUILT · 8-call smoke RUN and PASSED · planner still NOT frozen.**
 > **Model calls 0.** Marketplace 0 · DB writes 0 · migrations 0 · production Cases 0 · external writes 0.
 > Everything below comes from the raw answers WP-2 and WP-4 already bought, re-read offline.
 >
@@ -12,8 +11,9 @@
 Predecessors: [WP-1/2](inquiry_architecture_v3_wp2.md) · [WP-3](inquiry_architecture_v3_wp3.md) ·
 [WP-4](inquiry_architecture_v3_wp4.md).
 
-§0–§11 are the diagnosis, written before anything was changed. **§12 onwards is Candidate C as built** — the contract,
-what it makes impossible, what it does not, and the 8-call smoke that has not been run.
+§0–§11 are the diagnosis, written before anything was changed. **§12–§18 is Candidate C as built** — the contract,
+what it makes impossible and what it does not. **§19 is the 8-call smoke**, which passed its whole bar and found two
+things the bar did not name.
 
 ---
 
@@ -800,3 +800,91 @@ Unchanged from WP-4's seven conditions, with items 1 and 7 restated on the metri
 **The planner is not frozen and WP-4 E2E is not proposed.** What changed in Part II is that the contract no longer
 decides the ending by accident. Whether the model decides it correctly is unmeasured, and will stay unmeasured until
 the smoke runs.
+
+---
+
+## 19. The smoke — **PASSED**, and two findings the bar did not name
+
+Approved in turn ("Seated and ready. for the 8-call Candidate C smoke at commit `3397cc6d`"), single use.
+**8 calls / cap 8, executed at `3397cc6d` with a clean tree.** Inputs regenerated from the committed fixture and
+compared byte for byte with the approved manifest before sending: identical (`8fa9ae77…`), and all five request
+fingerprints had already been re-derived at this HEAD — 40/40. Marketplace 0 · DB writes 0 · external writes 0 ·
+production Cases 0 · judge 0 · draft 0 · migrations 0. Raw answers stored before scoring
+(`eval-store:runs/wp31c-smoke`, `run-verify → ok`).
+
+11,840 prompt tokens / 736 completion / **0 reasoning tokens**, mean 2,270 ms, all eight `finish=stop`.
+
+### 19.1 The bar
+
+| # | condition | result |
+|---|---|---|
+| 1 | 8/8 answered · envelope 0 · parse 0 · contract violations 0 | **PASS** — 8/8, no failure word anywhere, every plan valid |
+| 2 | correct `closing_authority` 8/8 | **PASS — 8/8** |
+| 3 | `C3` resolves KNOWLEDGE naming **both** knowledge capabilities | **PASS** — `KNOWLEDGE.PRODUCT > KNOWLEDGE.CATALOGUE` |
+| 4 | `C5` resolves PROCEDURE and reads the order | **PASS** — `ENTITY.ORDER[ORDER_FULFILLMENT] > PROCEDURE.ORDER_ACTION` |
+| 5 | `C6` resolves SELLER | **PASS** |
+| 6 | `C7` seller fallback insertion = 0 | **PASS** — resolves KNOWLEDGE; no `SELLER` in the plan |
+| 7 | `C8` keeps KNOWLEDGE and records the gap, seller substitution 0 | **PASS** — `closing_authority: KNOWLEDGE` with `KNOWLEDGE.PRODUCT → NOT_SUPPORTED` recorded, and no seller anywhere |
+| 8 | forbidden identity input = 0 | **PASS** — 0 |
+
+Scorer, independently: goal coverage **1.000** · correct closer **8/8** · wrong closer **0** · ambiguous closer **0** ·
+seller fallback inserted **0** · seller-only extra needs **0** · capability mismatch **0** · order misses **0**.
+
+**The two hardest cases are the ones that matter.** `C7` is the `R:8989a9d0` shape — the question that produced three
+of WP-4's five failures — and under v4 the catalogue resolves it with no seller appended. `C8` is a capability that
+cannot act here, and the plan kept it and let the gap be recorded rather than routing around it. `C3` named two
+knowledge capabilities for one ending, the shape that had no expression at all before this package.
+
+**This is 8 calls on synthetic questions.** It says the contract can be followed, not that it will be at scale.
+
+### 19.2 What the bar did not name
+
+**(a) A harmful over-read, live, on `C4`.** The gold needs `ORDER_FULFILLMENT`; the model also asked for
+`ORDER_TRACKING`, which no source in this repository reads on any channel, and the all-or-nothing clause in `gapOf`
+turned the whole step into `NOT_SUPPORTED`:
+
+```
+C4  gold  ENTITY.ORDER[ORDER_FULFILLMENT]
+    model ENTITY.ORDER[ORDER_FULFILLMENT, ORDER_TRACKING]   → NOT_SUPPORTED, unavailable_fields [ORDER_TRACKING]
+```
+
+**One of the eight goals went from resolvable to a capability gap because the plan asked for one field more than it
+needed.** This is exactly §2's defect — the P01 finding, reproduced under v4 on a different case — and it is
+**unchanged by design**: `gapOf` is byte-identical in this package because the fix belongs to the resolver. The smoke
+turns a diagnosis at n=1 into a second live instance. `goal_terminal` under the three semantics: ALL_OR_NOTHING 4
+resolvable / 4 blocked · FIELD_LEVEL and NEED_MINIMUM 5 / 3, and the single goal that separates them is `C4`.
+
+**(b) `C6` invented a need the customer did not ask for, and it carries a state-changing authority.** The question is
+"can you approve an exchange past the deadline?" The model planned it as two needs:
+
+```
+N1  SELLER     KNOWLEDGE.ORG > ENTITY.ORDER[4 fields] > SELLER        ← correct, and the bar's condition 5
+N2  PROCEDURE  ENTITY.ORDER[2 fields] > KNOWLEDGE.ORG > PROCEDURE     ← nobody asked for this
+```
+
+Split-tolerant scoring places both on the one gold goal, so coverage and the closer are right — and the plan now
+carries `PROCEDURE` on a goal whose answer is a judgment. That registers as **`procedure_for_read = 1`** and
+`unnecessary_authority_goals = 2`. **`procedure_for_read = 0` is freeze-gate item 3**, so this signal would fail the
+gate if it recurred at scale. WP-4's brief said over-splitting is not a blocker *unless it distorts the goal or the
+authority* — here it distorts the authority, and that is the first residual to watch in the 67-run.
+
+**(c) Smaller, reported not fixed.** `C3` and `C7` both chose `KNOWLEDGE.CATALOGUE/THIS_LISTING` where the gold says
+`SELLER_CATALOGUE` — the right capability about the wrong instance. The scorer's `capability_mismatch` compares
+capabilities and not scopes, so it reports 0; the difference is real and is recorded here rather than in a number.
+`C7` also added an `ENTITY.LISTING` read and `C8` an extra `KNOWLEDGE.CATALOGUE`; neither changes the ending.
+`C6` asked for five customer inputs where the gold asks none (6 unnecessary inputs across the run, 0 forbidden).
+
+### 19.3 What follows
+
+**The smoke passed, so a 67 × 1 final planner validation is what comes next** — a separate manifest, a separate
+approval, and **not 67 × 3**. Nothing about the 67 cases is claimed here.
+
+Two things go into that run's reading in advance, so they are not discovered as surprises:
+
+- `procedure_for_read` and `unnecessary_authority_goals` are the residuals this smoke exposed. Item 3 of the freeze
+  gate is already touched at n=8.
+- the availability defect is **still deferred and still real**. If the 67-run shows goals blocked by over-read, that
+  is §2's `gapOf` decision presenting its bill, not a closing-semantics failure, and the two must not be conflated in
+  the verdict.
+
+**The planner is not frozen. WP-4 E2E is not proposed.**
