@@ -1458,3 +1458,57 @@ gold.
 
 **No further safety work without a real blocker.** The harness is finished; polishing it is now the thing that stops
 the smoke from happening.
+
+### 24.9 The dress rehearsal, actually run (2026-09-21)
+
+Not a test of the command — **the command**, typed as an operator would type it, at commit `9b5ef41c` with a clean
+tree. Two invocations, because PREPARE is a decision point and deserves to be one:
+
+```
+cd backend
+SELLEROPS_INQUIRY_GOAL_API_KEY='…' SELLEROPS_INQUIRY_GOAL_TRANSPORT=FAKE \
+  ./gradlew --no-daemon -q --offline prepareGoalSmoke --args='--out <dir>/prepare'
+→ READY_FOR_APPROVAL · 14 calls · transport FAKE
+  apr-9cdd75ff-a2ca-4708-9c3f-866f42a7b1f6 / v35-goal-smoke-9b5ef41c-3e5ac1d6
+
+SELLEROPS_INQUIRY_GOAL_API_KEY='…' SELLEROPS_INQUIRY_GOAL_TRANSPORT=FAKE \
+  ./gradlew --no-daemon -q --offline runGoalSmoke \
+    --args='--approval <dir>/prepare/APPROVAL.json --granted-approval apr-9cdd75ff-… \
+            --granted-run v35-goal-smoke-9b5ef41c-3e5ac1d6 --out <dir>/run'
+```
+
+Result, from the report the command printed:
+
+```
+status COMPLETE · transport FAKE · calls_attempted 14 · calls_completed 14
+vendor_failures 0 · parse_or_contract_failures 0 · run_incomplete false
+score      ok    run-put  ok (5 files)    run-verify  ok
+metrics_meaning  EXECUTION REHEARSAL ONLY — … says NOTHING about a model
+```
+
+Stored append-only at `eval-store:runs/v35-goal-smoke-9b5ef41c-3e5ac1d6`: `raw.jsonl` 14 · `rows.jsonl` 14 ·
+`RUN_STARTED.json` · `RUN_COMPLETE.json` · `score.json`. Every row of both files carries `"transport":"FAKE"`.
+
+**Leak checks on the stored run.** No credential value, no `Bearer`, no `Authorization` in any artifact. And the
+real NO_GOAL customer message — which this run genuinely sent, read from the durable store at runtime — appears in
+**no stored artifact and no git-tracked file**; what travels is its id and the fingerprints of the request built
+from it.
+
+**Environment propagation is measured, not assumed.** Both commands received their variables through
+`--no-daemon ./gradlew` and acted on them: the preflight reported the credential `PRESENT` and selected `FAKE`, and
+the run reached the transport. That is the claim §24.1 makes about the documented command, made good.
+
+**External network: 0.** The fake's endpoint is `fake://…` and the real endpoint variable was never set in either
+command.
+
+### 24.10 What is still not done
+
+A **real** PREPARE was not produced, and deliberately. This environment carries no
+`SELLEROPS_INQUIRY_GOAL_API_KEY` and no `SELLEROPS_INQUIRY_GOAL_ENDPOINT`, and a preflight run here would be
+`BLOCKED` on both — which is the honest answer, not an obstacle to work around. Forcing a `READY` manifest without
+a credential behind it would produce exactly the artifact this whole sub-package exists to make impossible: one that
+looks bindable and cannot be spent.
+
+The operator's command for it is in §24.1, minus `SELLEROPS_INQUIRY_GOAL_TRANSPORT` — its absence is what selects
+the real transport. **A commit made after that PREPARE revokes its manifest**, so it should be the last thing done
+before the grant.
