@@ -1288,4 +1288,14 @@ text, declared rather than discovered later.
 
 **Model calls 0.** `PREPARE` built all fourteen requests holding a transport that throws on contact.
 
-**Still not run.** The manifest exists and is bindable; what does not exist is a grant bound to those two ids.
+**The ids above went stale the moment this section was committed, and that is the guard working.** `commit` is a
+bound field, so recording the run in the repository revoked the approval for it. A preflight was re-run at the
+commit that carries this paragraph and its manifest is the live one; **the run store is authoritative, not this
+document**, which is the whole reason a prose manifest cannot authorize anything:
+
+```
+node tools/eval-store/store.mjs runs          # the run ids
+node tools/eval-store/store.mjs run-verify <run-id>
+```
+
+**Still not run.** A bindable manifest exists; what does not exist is a grant bound to its two ids.
