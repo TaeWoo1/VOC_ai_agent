@@ -52,6 +52,65 @@ public final class GoalSmokeInputs {
     /** What the smoke is supposed to exercise. Coverage is asserted against the assembled set, never assumed. */
     public static final Map<String, String> INTENDED = intended();
 
+    /**
+     * <b>What a run is a run of</b> — which inputs, which shapes it claims to cover, and which outcome tokens it
+     * needs to reach.
+     *
+     * <p>All three used to be constants read straight out of this class, which is right while there is one smoke and
+     * wrong the moment there are two: a six-case run held to the fourteen-case run's coverage list is {@code BLOCKED}
+     * on coverage it never intended to have. Making the claim part of the plan is what stops "covered" from quietly
+     * meaning "covered by whatever the other smoke wanted".
+     *
+     * <p><b>{@code requiredOutcomes} is deliberately not always all four.</b> A targeted plan that does not exercise
+     * {@link RequestedOutcome#STATE_READ} should say so rather than fail a check it never meant to pass — and should
+     * equally not be able to drop a token it <i>is</i> relying on without editing this list.
+     */
+    public record Plan(String name, String why, List<String> fixtureIds, List<String> storeIds,
+                       List<String> requiredOutcomes, Map<String, String> intended) {
+
+        /** Every input this plan names, store rows included: the number of calls an operator is approving. */
+        public int planned() {
+            return fixtureIds.size() + storeIds.size();
+        }
+    }
+
+    /** The full contract smoke of §22.11: thirteen committed fixtures and the one real NO_GOAL message. */
+    public static final Plan CONTRACT_SMOKE = new Plan("contract-smoke-v1",
+            "the fourteen shapes of §22.11 — the broad contract check",
+            CHOSEN, List.of(NO_GOAL_CASE),
+            List.of("INFORMATION", "STATE_READ", "DECISION", "ACTION"), intended());
+
+    /**
+     * <b>The v2 goal-provenance smoke</b> (§25): six cases, chosen to be able to fail in both directions.
+     *
+     * <p>A fence is only worth measuring on what it catches <i>and</i> on what it must not break, so four of these
+     * six exist to catch a regression rather than the defect:
+     *
+     * <ul>
+     *   <li>{@code G15} — the recorded failure. A problem report with no request; an {@code ACTION} here is
+     *       invented.</li>
+     *   <li>{@code R:4181864b} — <b>the one that matters most.</b> A real message whose gold goal is a legitimate
+     *       {@code DIRECTLY_IMPLIED} {@code ACTION}. If the fence is over-tight, this is where it shows, and it is a
+     *       real customer's words rather than a synthetic stand-in somebody designed to pass.</li>
+     *   <li>{@code G23} — a customer-stated {@code FALLBACK} with a verbatim condition: the relation fence must come
+     *       through the goal fence untouched.</li>
+     *   <li>{@code R:0c582144} — NO_GOAL, the row where inventing is most tempting.</li>
+     *   <li>{@code G07} — two {@code STATED} goals in one message: the one-inference cap must not touch it.</li>
+     *   <li>{@code G01} — the plainest {@code STATED} {@code INFORMATION} there is.</li>
+     * </ul>
+     *
+     * <p>No {@code STATE_READ} case, and that is a decision rather than an oversight: none of the six shapes needs
+     * one, and padding the set to satisfy a coverage list would be buying a model call to make a report look round.
+     */
+    public static final Plan PROVENANCE_SMOKE = new Plan("provenance-smoke-v2",
+            "does the v2 evidence fence refuse the invented ACTION while keeping the legitimate implied one",
+            List.of("G15", "G23", "G07", "G01"), List.of("R:4181864b", NO_GOAL_CASE),
+            List.of("INFORMATION", "DECISION", "ACTION"), provenanceIntended());
+
+    /** By name, so the operator's command selects a plan rather than edits one. */
+    public static final Map<String, Plan> PLANS =
+            Map.of(CONTRACT_SMOKE.name(), CONTRACT_SMOKE, PROVENANCE_SMOKE.name(), PROVENANCE_SMOKE);
+
     private GoalSmokeInputs() {
     }
 
@@ -91,64 +150,131 @@ public final class GoalSmokeInputs {
      * the wrong job rather than a row going astray.
      */
     public static Set assemble(Path fixture, Path storeRoot) throws Exception {
-        Set fromGit = assemble(fixture);
+        return assemble(fixture, storeRoot, CONTRACT_SMOKE);
+    }
+
+    /** The same assembly for any {@link Plan}: its committed fixtures, then the real messages it names. */
+    public static Set assemble(Path fixture, Path storeRoot, Plan plan) throws Exception {
+        Set fromGit = assemble(fixture, plan);
         List<Input> inputs = new ArrayList<>(fromGit.inputs());
         List<String> missing = new ArrayList<>(fromGit.missing().stream()
-                .filter(m -> !m.startsWith(NO_GOAL_CASE)).toList());
+                .filter(m -> plan.storeIds().stream().noneMatch(m::startsWith)).toList());
         Path capture = storeRoot == null ? null : storeRoot.resolve(CAPTURE);
         if (capture == null || !Files.exists(capture)) {
-            missing.add(NO_GOAL_CASE + " — the durable eval store is not restored here; run "
-                    + "`node tools/eval-store/store.mjs restore inquiry-planner-capture v1`");
+            plan.storeIds().forEach(id -> missing.add(id + " — the durable eval store is not restored here; run "
+                    + "`node tools/eval-store/store.mjs restore inquiry-planner-capture v1`"));
         } else {
-            String message = null;
-            for (String line : Files.readAllLines(capture)) {
-                if (line.isBlank()) {
-                    continue;
+            for (String id : plan.storeIds()) {
+                String message = null;
+                for (String line : Files.readAllLines(capture)) {
+                    if (line.isBlank()) {
+                        continue;
+                    }
+                    JsonNode row = JSON.readTree(line);
+                    if (id.equals(row.path("q").asText())) {
+                        message = row.path("question").asText();
+                        break;
+                    }
                 }
-                JsonNode row = JSON.readTree(line);
-                if (NO_GOAL_CASE.equals(row.path("q").asText())) {
-                    message = row.path("question").asText();
-                    break;
+                if (message == null || message.isBlank()) {
+                    missing.add(id + " — the store is present and does not carry this case");
+                } else {
+                    inputs.add(new Input(id, message, true, null, true));
                 }
-            }
-            if (message == null || message.isBlank()) {
-                missing.add(NO_GOAL_CASE + " — the store is present and does not carry this case");
-            } else {
-                inputs.add(new Input(NO_GOAL_CASE, message, true, null, true));
             }
         }
-        return new Set(List.copyOf(inputs), List.copyOf(missing), coverage(rows(fixture), inputs));
+        return new Set(List.copyOf(inputs), List.copyOf(missing), coverage(rows(fixture), inputs, plan));
     }
 
     public static Set assemble(Path fixture) throws Exception {
+        return assemble(fixture, CONTRACT_SMOKE);
+    }
+
+    public static Set assemble(Path fixture, Plan plan) throws Exception {
         Map<String, JsonNode> rows = rows(fixture);
         List<Input> inputs = new ArrayList<>();
         List<String> missing = new ArrayList<>();
-        for (String id : CHOSEN) {
+        for (String id : plan.fixtureIds()) {
             JsonNode row = rows.get(id);
             if (row == null) {
                 missing.add(id + " — named by the manifest, absent from the committed fixture");
                 continue;
             }
-            JsonNode goals = row.get("goals");
-            if (row.hasNonNull("customer_message")) {
-                // Written, not assembled. A multi-goal row's input cannot be derived from its own answer key: a
-                // join of the goals is a sentence nobody sent, and for the fallback row it drops the very clause
-                // the row exists to test.
-                inputs.add(new Input(id, row.get("customer_message").asText(), true, null));
-            } else if (goals.size() == 1) {
-                // explicit_request is, by its own contract, "what this customer asked for, in the customer's terms".
-                inputs.add(new Input(id, goals.get(0).get("explicit_request").asText(), true, null));
+            inputs.add(fromFixture(id, row));
+        }
+        plan.storeIds().forEach(id -> missing.add(id + " — a real customer message in the eval store, read at "
+                + "runtime and not from git; use assemble(fixture, storeRoot, plan)"));
+        return new Set(List.copyOf(inputs), List.copyOf(missing), coverage(rows, inputs, plan));
+    }
+
+    /** One committed row's input. The single definition both assembly paths read, so they cannot drift. */
+    private static Input fromFixture(String id, JsonNode row) {
+        JsonNode goals = row.get("goals");
+        if (row.hasNonNull("customer_message")) {
+            // Written, not assembled. A multi-goal row's input cannot be derived from its own answer key: a join of
+            // the goals is a sentence nobody sent, and for the fallback row it drops the very clause it exists to
+            // test.
+            return new Input(id, row.get("customer_message").asText(), true, null);
+        }
+        if (goals.size() == 1) {
+            // explicit_request is, by its own contract, "what this customer asked for, in the customer's terms".
+            return new Input(id, goals.get(0).get("explicit_request").asText(), true, null);
+        }
+        return new Input(id, null, false, "the fixture carries " + goals.size()
+                + " goals and no customer message; assembling one would be writing the input"
+                + (row.has("relations")
+                ? " — and the stated condition lives in the relation, so a naive join drops it" : ""));
+    }
+
+    /**
+     * <b>The inputs an approved manifest names</b>, in the order it names them.
+     *
+     * <p>The launcher used to re-assemble the default plan and hope it matched. It could never send the WRONG set
+     * — {@code input_set_fp} and {@code request_fp_set} are bound, so a mismatch is a refusal — but it equally could
+     * not send a DIFFERENT one, which made every plan but the default unspendable. Reading the ids off the manifest
+     * makes the approved document decide what goes out, and leaves the fingerprints as the check on that rather
+     * than as the only expression of it.
+     *
+     * <p><b>No new manifest field</b>: {@code input_ids} has been in there since the first manifest. A plan name
+     * would have been a second, weaker statement of the same fact, and two statements can disagree.
+     */
+    public static Set forIds(Path fixture, Path storeRoot, List<String> ids) throws Exception {
+        Map<String, JsonNode> rows = rows(fixture);
+        Map<String, String> fromStore = storeMessages(storeRoot);
+        List<Input> inputs = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+        for (String id : ids) {
+            if (rows.containsKey(id)) {
+                inputs.add(fromFixture(id, rows.get(id)));
+            } else if (fromStore.containsKey(id)) {
+                inputs.add(new Input(id, fromStore.get(id), true, null, true));
             } else {
-                inputs.add(new Input(id, null, false, "the fixture carries " + goals.size()
-                        + " goals and no customer message; assembling one would be writing the input"
-                        + (row.has("relations")
-                        ? " — and the stated condition lives in the relation, so a naive join drops it" : "")));
+                missing.add(id + " — named by the manifest, and neither a committed fixture nor in the store");
             }
         }
-        missing.add(NO_GOAL_CASE + " — the NO_GOAL case is a real customer message in the eval store and is read at "
-                + "runtime, not from git; use assemble(fixture, storeRoot)");
-        return new Set(List.copyOf(inputs), List.copyOf(missing), coverage(rows, inputs));
+        // Coverage is a claim a PLAN makes about shapes; a manifest's ids are already a decided set, so there is
+        // nothing here to be short of. An empty map is the honest answer, not a missing check.
+        return new Set(List.copyOf(inputs), List.copyOf(missing), Map.of());
+    }
+
+    /** Every real message the durable store carries, by case id. Empty when the store is not restored here. */
+    private static Map<String, String> storeMessages(Path storeRoot) throws Exception {
+        Map<String, String> out = new LinkedHashMap<>();
+        Path capture = storeRoot == null ? null : storeRoot.resolve(CAPTURE);
+        if (capture == null || !Files.exists(capture)) {
+            return out;
+        }
+        for (String line : Files.readAllLines(capture)) {
+            if (line.isBlank()) {
+                continue;
+            }
+            JsonNode row = JSON.readTree(line);
+            String message = row.path("question").asText();
+            if (!message.isBlank()) {
+                out.put(row.path("q").asText(), message);
+            }
+        }
+        return out;
     }
 
     private static Map<String, JsonNode> rows(Path fixture) throws Exception {
@@ -163,18 +289,19 @@ public final class GoalSmokeInputs {
     }
 
     /** Which intended shapes the assembled set actually reaches, read from the fixture rather than asserted. */
-    private static Map<String, String> coverage(Map<String, JsonNode> rows, List<Input> inputs) {
+    private static Map<String, String> coverage(Map<String, JsonNode> rows, List<Input> inputs, Plan plan) {
         java.util.Set<String> usable = new java.util.HashSet<>();
         inputs.stream().filter(Input::derivable).forEach(i -> usable.add(i.id()));
         Map<String, String> out = new LinkedHashMap<>();
-        for (Map.Entry<String, String> want : INTENDED.entrySet()) {
+        for (Map.Entry<String, String> want : plan.intended().entrySet()) {
             String by = want.getValue();
             boolean reached = java.util.Arrays.stream(by.split("\\+")).allMatch(usable::contains);
             out.put(want.getKey(), reached ? "covered by " + by
                     : "MISSING — would be covered by " + by + ", which is not in the usable set");
         }
-        // The four outcome tokens are checked against the fixture's own labels, not against a list written here.
-        for (String outcome : List.of("INFORMATION", "STATE_READ", "DECISION", "ACTION")) {
+        // The outcome tokens are checked against the fixture's OWN labels; which tokens a plan owes is the plan's
+        // claim, so a targeted plan cannot be failed for a shape it never said it covered — nor drop one it did.
+        for (String outcome : plan.requiredOutcomes()) {
             boolean seen = usable.stream().filter(rows::containsKey).anyMatch(id -> {
                 // The NO_GOAL input has no fixture row and asks for no outcome, which is the point of it.
                 for (JsonNode g : rows.get(id).get("goals")) {
@@ -187,6 +314,24 @@ public final class GoalSmokeInputs {
             out.put("outcome:" + outcome, seen ? "covered" : "MISSING — no usable input asks for it");
         }
         return out;
+    }
+
+    /**
+     * What the six-case provenance smoke claims to exercise. Each line is one question the run can answer wrongly;
+     * a shape with no input to reach it is a {@code MISSING} the preflight refuses to prepare around.
+     */
+    private static Map<String, String> provenanceIntended() {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("no_invented_remedy", "G15");
+        m.put("legitimate_implied_action_survives", "R:4181864b");
+        m.put("explicit_fallback", "G23");
+        m.put("no_goal", "R:0c582144");
+        m.put("multi_goal", "G07");
+        m.put("plain_stated_information", "G01");
+        // Both directions in one line: the cap must refuse G15 and leave R:4181864b alone, and a run that reaches
+        // only one of them has measured only half of the fence.
+        m.put("fence_measured_in_both_directions", "G15+R:4181864b");
+        return m;
     }
 
     private static Map<String, String> intended() {

@@ -121,9 +121,18 @@ public final class GoalRunLauncher {
             headers.put(CustomerGoalRunner.AUTHORIZATION, "Bearer " + credential);
         }
 
-        GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(
+        // The inputs the APPROVED manifest names, in its order. Not a re-assembly of whichever plan this class
+        // happens to default to: the guard binds input_set_fp and request_fp_set, so a re-assembly could never send
+        // the WRONG set — but it could only ever send the default one, which made every other approved plan
+        // unspendable. The manifest is the document the operator read, so the manifest decides.
+        GoalSmokeInputs.Set set = GoalSmokeInputs.forIds(
                 args.repoRoot().resolve("contracts/inquiry-goal/v1/synthetic/goal-scenarios.jsonl"),
-                GoalInterpreterPreflight.storeRoot(env));
+                GoalInterpreterPreflight.storeRoot(env), approval.inputIds());
+        if (!set.complete()) {
+            // Refused before anything is constructed. An input this machine cannot rebuild does not make a smaller
+            // run, it makes a different one — and the fingerprints would say so a moment later anyway.
+            throw new CustomerGoalRunner.Refused(set.missing().stream().map(m -> "INPUT_MISSING:" + m).toList());
+        }
         List<CustomerGoalRunner.Input> inputs = set.usable().stream()
                 .map(i -> new CustomerGoalRunner.Input(i.id(), i.message())).toList();
 

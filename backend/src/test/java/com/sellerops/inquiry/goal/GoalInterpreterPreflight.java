@@ -91,7 +91,14 @@ public final class GoalInterpreterPreflight {
         Path out = Path.of(named.getOrDefault("out", "build/goal-smoke"));
         Files.createDirectories(out);
 
-        Outcome outcome = prepare(repoRoot, System.getenv());
+        String planName = named.getOrDefault("plan", GoalSmokeInputs.CONTRACT_SMOKE.name());
+        GoalSmokeInputs.Plan plan = GoalSmokeInputs.PLANS.get(planName);
+        if (plan == null) {
+            System.out.println("UNKNOWN PLAN " + planName + " \u2014 known plans: "
+                    + new java.util.TreeSet<>(GoalSmokeInputs.PLANS.keySet()));
+            System.exit(2);
+        }
+        Outcome outcome = prepare(repoRoot, System.getenv(), null, plan);
         Files.writeString(out.resolve("PREFLIGHT.json"), outcome.report().toPrettyString() + "\n",
                 java.nio.file.StandardOpenOption.CREATE_NEW);
         if (!outcome.ready()) {
@@ -121,8 +128,9 @@ public final class GoalInterpreterPreflight {
      * @param env      the process environment, passed in so a test can supply one without setting any
      */
     public static Outcome prepare(Path repoRoot, Map<String, String> env) throws Exception {
-        return prepare(repoRoot, env, null);
+        return prepare(repoRoot, env, null, GoalSmokeInputs.CONTRACT_SMOKE);
     }
+
 
     /**
      * @param supplied an input set to use instead of the committed one. Tests pass a complete set so that the
@@ -131,6 +139,12 @@ public final class GoalInterpreterPreflight {
      */
     public static Outcome prepare(Path repoRoot, Map<String, String> env, GoalSmokeInputs.Set supplied)
             throws Exception {
+        return prepare(repoRoot, env, supplied, GoalSmokeInputs.CONTRACT_SMOKE);
+    }
+
+
+    public static Outcome prepare(Path repoRoot, Map<String, String> env, GoalSmokeInputs.Set supplied,
+                                  GoalSmokeInputs.Plan plan) throws Exception {
         List<String> blockers = new ArrayList<>();
         ObjectNode report = JSON.createObjectNode();
         report.put("kind", "GOAL_INTERPRETER_PREFLIGHT").put("prepared_at", Instant.now().toString());
@@ -144,15 +158,18 @@ public final class GoalInterpreterPreflight {
 
         Path fixture = repoRoot.resolve("contracts/inquiry-goal/v1/synthetic/goal-scenarios.jsonl");
         GoalSmokeInputs.Set set = supplied == null
-                ? GoalSmokeInputs.assemble(fixture, storeRoot(env)) : supplied;
+                ? GoalSmokeInputs.assemble(fixture, storeRoot(env), plan) : supplied;
         ObjectNode inputs = report.putObject("inputs");
+        inputs.put("plan", plan.name());
+        inputs.put("plan_why", plan.why());
         inputs.put("fixture", "contracts/inquiry-goal/v1/synthetic/goal-scenarios.jsonl");
         inputs.put("fixture_sha256", CustomerGoalRunner.sha(Files.readString(fixture)));
-        // Thirteen git fixtures plus the one real message from the store: the fourteen of §22.11, with nothing
-        // merged and nothing lost. Counted as one number so the two halves cannot read as a shortfall again.
-        inputs.put("planned", GoalSmokeInputs.CHOSEN.size() + 1);
-        inputs.put("from_committed_fixture", GoalSmokeInputs.CHOSEN.size());
-        inputs.put("from_durable_store", 1);
+        // Git fixtures plus the real messages from the store, counted as ONE number so the two halves cannot read
+        // as a shortfall the way an earlier report's "13" did. It comes from the plan, never from a constant here:
+        // a manifest that says "14" while six calls go out is the shape this field exists to make impossible.
+        inputs.put("planned", plan.planned());
+        inputs.put("from_committed_fixture", plan.fixtureIds().size());
+        inputs.put("from_durable_store", plan.storeIds().size());
         inputs.put("usable", set.usable().size());
         inputs.put("real_customer_text", set.realCustomerText());
         inputs.put("store_root_configured", env.containsKey("SELLEROPS_EVAL_CACHE"));
