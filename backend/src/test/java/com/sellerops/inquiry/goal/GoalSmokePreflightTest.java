@@ -111,6 +111,64 @@ class GoalSmokePreflightTest {
         assertThat(set.coverage().get("no_goal")).startsWith("covered");
     }
 
+
+    /**
+     * <b>The paired holdout run: one input set, two contracts</b> (§25.13, §26.7).
+     *
+     * <p>A paired comparison is only paired if the two arms were asked the same thing. Here that is not argued — it
+     * is the {@code input_set_fp}, which is the one formula the runner re-computes at send time and the manifest is
+     * bound to, so the two approvals agree on it or the run stops.
+     *
+     * <p>Everything that identifies a CONTRACT must differ, and it must differ everywhere at once: the version, both
+     * prompt fingerprints, and the request bytes — the system prompt is inside the body, so a shared
+     * {@code request_fp_set} would mean one of the arms is not the contract it claims to be.
+     */
+    @Test
+    @DisplayName("the two holdout arms share their inputs byte for byte and share nothing that names a contract")
+    void thePairedArmsAskTheSameQuestionOfTwoContracts() throws Exception {
+        Path store = GoalInterpreterPreflight.storeRoot(System.getenv());
+        if (!Files.exists(store.resolve(GoalSmokeInputs.HOLDOUT))) {
+            return;   // the holdout lives in the durable store and is never copied into this repository
+        }
+        GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE, store, GoalSmokeInputs.HOLDOUT_V1);
+        assertThat(set.missing()).isEmpty();
+        List<CustomerGoalRunner.Input> inputs = set.usable().stream()
+                .map(i -> new CustomerGoalRunner.Input(i.id(), i.message())).toList();
+        assertThat(inputs).hasSize(75);
+
+        Map<CustomerGoalPrompt.Arm, List<CustomerGoalRunner.Request>> byArm = new java.util.LinkedHashMap<>();
+        for (CustomerGoalPrompt.Arm arm : List.of(CustomerGoalPrompt.Arm.V2, CustomerGoalPrompt.Arm.V3)) {
+            byArm.put(arm, new CustomerGoalRunner(GoalInterpreterPreflight.MODEL,
+                    GoalInterpreterPreflight.REASONING_EFFORT, null, null, Map.of(), arm).prepare(inputs));
+        }
+        List<CustomerGoalRunner.Request> v2 = byArm.get(CustomerGoalPrompt.Arm.V2);
+        List<CustomerGoalRunner.Request> v3 = byArm.get(CustomerGoalPrompt.Arm.V3);
+        assertThat(v2).hasSize(75);
+        assertThat(v3).hasSize(75);
+        assertThat(v2.size() + v3.size()).as("the sitting an operator is approving").isEqualTo(150);
+
+        // Same question, in the same order. `user` is the whole of what the customer contributes to a request, so
+        // comparing it is comparing the inputs rather than a summary of them.
+        for (int i = 0; i < v2.size(); i++) {
+            assertThat(v2.get(i).id()).isEqualTo(v3.get(i).id());
+            assertThat(v2.get(i).user()).as("%s reached the two arms differently", v2.get(i).id())
+                    .isEqualTo(v3.get(i).user());
+        }
+        assertThat(CustomerGoalRunner.inputSetFp(inputs)).isNotBlank();
+
+        // Two contracts, differing in every field that says which contract a run is a run of.
+        assertThat(CustomerGoalPrompt.Arm.V2.version()).isNotEqualTo(CustomerGoalPrompt.Arm.V3.version());
+        assertThat(CustomerGoalPrompt.sha256(CustomerGoalPrompt.Arm.V2.system()))
+                .isNotEqualTo(CustomerGoalPrompt.sha256(CustomerGoalPrompt.Arm.V3.system()));
+        assertThat(CustomerGoalPrompt.sha256(CustomerGoalPrompt.Arm.V2.schema().toString()))
+                .isNotEqualTo(CustomerGoalPrompt.sha256(CustomerGoalPrompt.Arm.V3.schema().toString()));
+        assertThat(CustomerGoalRunner.requestFpSet(v2)).as("the arms would send identical bytes")
+                .isNotEqualTo(CustomerGoalRunner.requestFpSet(v3));
+        for (int i = 0; i < v2.size(); i++) {
+            assertThat(v2.get(i).requestFp()).isNotEqualTo(v3.get(i).requestFp());
+        }
+    }
+
     @Test
     @DisplayName("every intended shape is covered once the store is present, and the four outcomes always are")
     void coverageIsMeasuredNotAsserted() throws Exception {

@@ -98,7 +98,15 @@ public final class GoalInterpreterPreflight {
                     + new java.util.TreeSet<>(GoalSmokeInputs.PLANS.keySet()));
             System.exit(2);
         }
-        Outcome outcome = prepare(repoRoot, System.getenv(), null, plan);
+        CustomerGoalPrompt.Arm arm;
+        try {
+            arm = CustomerGoalPrompt.Arm.of(named.getOrDefault("arm", CustomerGoalPrompt.VERSION));
+        } catch (IllegalArgumentException e) {
+            System.out.println(e.getMessage());
+            System.exit(2);
+            return;
+        }
+        Outcome outcome = prepare(repoRoot, System.getenv(), null, plan, arm);
         Files.writeString(out.resolve("PREFLIGHT.json"), outcome.report().toPrettyString() + "\n",
                 java.nio.file.StandardOpenOption.CREATE_NEW);
         if (!outcome.ready()) {
@@ -145,6 +153,18 @@ public final class GoalInterpreterPreflight {
 
     public static Outcome prepare(Path repoRoot, Map<String, String> env, GoalSmokeInputs.Set supplied,
                                   GoalSmokeInputs.Plan plan) throws Exception {
+        return prepare(repoRoot, env, supplied, plan, CustomerGoalPrompt.Arm.current());
+    }
+
+    /**
+     * @param arm which contract this manifest would be spent on. A comparison arm (§25.13) produces its own
+     *            manifest with its own {@code prompt_version}, {@code system_fp} and {@code schema_fp}, so an
+     *            approval for one arm is refused for the other by the ordinary guard rather than by a special case.
+     *            The two manifests of a paired run must agree on {@code input_set_fp} and on nothing else that
+     *            identifies a contract — {@code GoalSmokePreflightTest} is what asserts that.
+     */
+    public static Outcome prepare(Path repoRoot, Map<String, String> env, GoalSmokeInputs.Set supplied,
+                                  GoalSmokeInputs.Plan plan, CustomerGoalPrompt.Arm arm) throws Exception {
         List<String> blockers = new ArrayList<>();
         ObjectNode report = JSON.createObjectNode();
         report.put("kind", "GOAL_INTERPRETER_PREFLIGHT").put("prepared_at", Instant.now().toString());
@@ -191,7 +211,8 @@ public final class GoalInterpreterPreflight {
         });
 
         // Fingerprints are of the bytes that would actually be sent, built by the runner's own prepare path.
-        CustomerGoalRunner runner = new CustomerGoalRunner(MODEL, REASONING_EFFORT, refusing(), null);
+        CustomerGoalRunner runner = new CustomerGoalRunner(MODEL, REASONING_EFFORT, refusing(), null,
+                Map.of(), arm);
         List<CustomerGoalRunner.Input> usable = set.usable().stream()
                 .map(i -> new CustomerGoalRunner.Input(i.id(), i.message())).toList();
         List<CustomerGoalRunner.Request> requests = runner.prepare(usable);
@@ -205,6 +226,8 @@ public final class GoalInterpreterPreflight {
         // are granting rather than inferring it from the surrounding conversation.
         GoalTransport.Mode transport = GoalTransport.mode(env);
         report.put("transport", transport.name());
+        report.put("arm", arm.version());
+        report.put("arm_is_current_contract", arm == CustomerGoalPrompt.Arm.current());
 
         Map<String, String> environment = new LinkedHashMap<>();
         for (String name : requiredEnv(transport)) {
@@ -229,9 +252,9 @@ public final class GoalInterpreterPreflight {
                 + UUID.randomUUID().toString().substring(0, 8);
         ApprovalManifest manifest = new ApprovalManifest(
                 "apr-" + UUID.randomUUID(), runId, Instant.now().toString(), commit, clean,
-                CustomerGoalRunner.VERSION, CustomerGoalPrompt.VERSION,
-                CustomerGoalPrompt.sha256(CustomerGoalPrompt.system()),
-                CustomerGoalPrompt.sha256(CustomerGoalPrompt.schema().toString()),
+                CustomerGoalRunner.VERSION, arm.version(),
+                CustomerGoalPrompt.sha256(arm.system()),
+                CustomerGoalPrompt.sha256(arm.schema().toString()),
                 inputSetFp, requestFpSet, MODEL, REASONING_EFFORT, requests.size(), requests.size(),
                 ApprovalManifest.NO_RETRY, SCOPE, transport.name(), set.realCustomerText(),
                 requests.stream().map(CustomerGoalRunner.Request::id).toList(),

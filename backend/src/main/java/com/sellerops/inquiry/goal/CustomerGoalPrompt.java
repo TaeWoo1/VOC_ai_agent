@@ -63,6 +63,133 @@ import java.util.HexFormat;
  * which a test can check independently of any model.
  */
 public final class CustomerGoalPrompt {
+    private static final String V2_VERSION = "customer-goal-interpreter/v2";
+    private static final String V3_VERSION = "customer-goal-interpreter/v3";
+
+    /**
+     * <b>The v2 instruction, byte for byte</b> — kept so the holdout's comparison arm is the shipped contract rather
+     * than a reconstruction of it (§25.13, §26.7).
+     *
+     * <p>This is the one place in the repository where a retired prompt is held as text rather than as a hash, and
+     * it earns that by being checkable: {@code CustomerGoalPromptTest} asserts it hashes to the <b>pinned</b> v2
+     * value in {@code contracts/inquiry-goal/v1/prompt-fingerprint.txt} — the same line that identifies every run
+     * already recorded against v2. One character of drift and the arm stops being v2, loudly, before a call is made.
+     *
+     * <p>It is never the current contract. {@link #system()} answers for {@link Arm#current()} and nothing reads
+     * this except an {@link Arm#V2} run, which exists only to be compared against.
+     */
+    private static final String V2_SYSTEM = """
+                    당신은 고객이 판매자에게 보낸 문의 하나를 읽고, **고객이 이 메시지로 무엇을 얻고자 했는지**만 적습니다.
+                    어떻게 처리할지, 무엇을 먼저 확인할지, 누가 답할지는 적지 않습니다. 답을 쓰지도 않습니다.
+                    goal 나누기:
+                    - 고객이 **실제로 묻거나 요청한 것**만 goal입니다. 답을 만들기 위해 먼저 확인해야 하는 것은 goal이 아닙니다.
+                    - 같은 것을 다른 말로 반복한 것은 하나의 goal입니다. 인사·감사·감정 표현은 goal이 아닙니다.
+                    - 요청이 하나도 없으면 goals를 빈 배열로 둡니다. 없는 요청을 만들지 않습니다.
+                    - explicit_request는 고객의 표현을 그대로 짧게 옮긴 한국어 문장(140자 이하)입니다. 이름·주소·전화번호·주문번호를 넣지 않습니다.
+                    requested_outcome — 이 네 값만 씁니다:
+                    - INFORMATION: 사실을 알려 달라(치수·재질·구성·사용법·호환·차이·추천).
+                    - STATE_READ: 이 주문이나 이 상품의 **지금 상태**를 알려 달라(어디까지 왔는지·발송했는지·품절인지).
+                    - DECISION: 해 줄 수 있는지 **판단해 달라**(가능한가요·해 주실 수 있나요·다시 들어오나요·할인되나요).
+                    - ACTION: 실제로 **해 달라**(취소해 주세요·환불해 주세요·다시 보내 주세요·변경해 주세요).
+                    규칙:
+                    - **DECISION과 ACTION은 문장 형태가 아니라 고객이 원한 결과로 가릅니다.** 「~할 수 있나요?」가 판단을 묻는
+                      것이면 DECISION이고, 실제 수행을 요청하는 것이면 ACTION입니다. 둘 다 요청했으면 goal 둘을 적습니다.
+                    - **판단을 요청했다고 해서 그 뒤의 실행을 goal로 만들지 않습니다.** 승인해 줄 수 있는지 물은 고객은 승인을
+                      요청한 것이고, 승인 뒤의 처리는 이 메시지의 요청이 아닙니다.
+                    - **지금 이 시스템이 그것을 할 수 있는지는 고려하지 않습니다.** 고객이 요청한 그대로 적습니다.
+                    - subject: 이 요청이 무엇에 대한 것인지 하나 고릅니다.
+                      CURRENT_LISTING(이 상품) · SELLER_CATALOGUE(판매자가 파는 다른 상품이나 상품들) ·
+                      CURRENT_ORDER(이 고객의 주문) · ORGANIZATION(회사 운영 전반) · UNRESOLVED(이 중 어느 것도 아님).
+                    - basis: 고객이 말로 요청했으면 STATED, 말하지는 않았지만 그 문장이 곧 그 요청이면 DIRECTLY_IMPLIED입니다.
+                      추측해야 알 수 있는 것은 goal이 아닙니다.
+                    - **basis가 DIRECTLY_IMPLIED인 goal은 한 메시지에 하나까지입니다.** 상황만 말한 문장에서는 그 상황이
+                      곧바로 가리키는 요청 하나만 적습니다. 그 상황을 어떻게 해결해 주어야 할지는 고객이 말하지 않았다면
+                      적지 않습니다.
+                    - evidence: 이 goal의 근거가 된 **고객 문장의 일부를 그대로** 옮깁니다(고객이 쓰지 않은 글자는 넣지
+                      않습니다). explicit_request가 고객의 표현을 다듬은 것이라면 evidence는 다듬지 않은 원문입니다.
+                      goal마다 서로 다른 구절을 옮기고, 한 구절을 근거로 goal 둘을 만들지 않습니다.
+                    - explicit_constraints: **고객이 실제로 말한 값**만 적습니다(규격·색상·수량 등, 각 40자 이하).
+                      고객이 말하지 않은 값은 적지 않습니다. 없으면 빈 배열입니다.
+                    - relations: 고객이 **「A가 안 되면 B」처럼 두 요청 사이의 조건을 직접 말했을 때만** 적습니다.
+                      stated_condition에는 그 조건을 말한 **고객의 표현을 그대로** 옮깁니다(60자 이하). 고객이 조건을 말하지
+                      않았으면 relations는 빈 배열입니다. 순서·절차·선후 관계를 나타내는 용도가 아닙니다.
+                    출력은 스키마에 맞는 JSON만.""";
+
+    /**
+     * <b>Which contract a run is a run of.</b>
+     *
+     * <p>One arm is the shipped contract; the others exist only so a frozen holdout can be put to two contracts at
+     * once (§25.13). The comparative question — does merging {@code DECISION} into {@code ANSWER} raise the rate at
+     * which an answering request leaks to {@code ACTION}? — cannot be answered by one arm, and the DEV numbers
+     * cannot stand in for the missing one because that corpus has roughly a tenth of the holdout's ambiguity
+     * density. So the retired instruction is held here, and {@link CustomerGoalPromptTest} proves it is the shipped
+     * bytes by hashing it against the pinned fingerprint rather than against a copy of itself.
+     *
+     * <p><b>An arm is not a feature flag.</b> Nothing in production reads one: {@link #system()} and
+     * {@link #schema()} answer for {@link #current()}, which is the contract this commit ships, and a run that
+     * wants anything else has to say so and is then recorded as a run of that thing — the manifest's
+     * {@code prompt_version}, {@code system_fp} and {@code schema_fp} all move with it, so an approval for one arm
+     * cannot be spent on the other.
+     */
+    public enum Arm {
+
+        /** The retired four-token contract, kept as a comparison baseline and for nothing else. */
+        V2(V2_VERSION, new String[] {"INFORMATION", "STATE_READ", "DECISION", "ACTION"}),
+
+        /** The contract this commit ships. */
+        V3(V3_VERSION, null);
+
+        private final String version;
+        private final String[] outcomes;
+
+        Arm(String version, String[] outcomes) {
+            this.version = version;
+            this.outcomes = outcomes;
+        }
+
+        public String version() {
+            return version;
+        }
+
+        /** The instruction this arm sends. v3's is the live one; v2's is the frozen text above. */
+        public String system() {
+            return this == V2 ? V2_SYSTEM : liveSystem();
+        }
+
+        /**
+         * The schema this arm sends. The arms differ in exactly one place — the outcome enum — and v3's is generated
+         * from {@link RequestedOutcome} as it always was, so the live contract still cannot drift from its own
+         * declaration by way of this list.
+         */
+        public ObjectNode schema() {
+            return schemaWith(outcomes == null ? names(RequestedOutcome.values()) : outcomes);
+        }
+
+        public ObjectNode responseFormat() {
+            return responseFormatOf(schema());
+        }
+
+        /** What a run recorded against this arm is a run OF. Both halves, so neither can move unnoticed. */
+        public String fingerprint() {
+            return version + " system=" + sha256(system()) + " schema=" + sha256(schema().toString());
+        }
+
+        /** The contract this commit ships. Everything unqualified means this one. */
+        public static Arm current() {
+            return V3;
+        }
+
+        /** By the version string an operator types, or the manifest records. Unknown is refused, never defaulted. */
+        public static Arm of(String version) {
+            for (Arm a : values()) {
+                if (a.version.equals(version) || a.name().equalsIgnoreCase(version)) {
+                    return a;
+                }
+            }
+            throw new IllegalArgumentException("unknown prompt arm: " + version + " — known: "
+                    + java.util.Arrays.stream(values()).map(Arm::version).toList());
+        }
+    }
 
     /**
      * <b>v2 added {@code evidence} to every goal; v3 merges {@code INFORMATION} and {@code DECISION} into
@@ -71,7 +198,7 @@ public final class CustomerGoalPrompt {
      * fingerprints, so every manifest granted against an earlier version is revoked by arithmetic rather than by
      * anyone remembering to. A run recorded against v2 stays a run of v2.
      */
-    public static final String VERSION = "customer-goal-interpreter/v3";
+    public static final String VERSION = V3_VERSION;
 
     /**
      * <b>Every contract this file has shipped</b>, so a recorded run can be read under the one it was produced
@@ -80,7 +207,7 @@ public final class CustomerGoalPrompt {
     public static final String V1 = "customer-goal-interpreter/v1";
 
     /** v2 added {@code evidence}; v1 rows carry no such field and are scored without it. */
-    public static final String V2 = "customer-goal-interpreter/v2";
+    public static final String V2 = V2_VERSION;
 
     /** Three goals of short closed tokens, plus the requests and their quotes. Measured shapes sit far below this. */
     public static final int MAX_OUTPUT_TOKENS = 900;
@@ -90,7 +217,12 @@ public final class CustomerGoalPrompt {
     private CustomerGoalPrompt() {
     }
 
+    /** The instruction the shipped contract sends. Unqualified, because production has one contract. */
     public static String system() {
+        return Arm.current().system();
+    }
+
+    private static String liveSystem() {
         return """
                 당신은 고객이 판매자에게 보낸 문의 하나를 읽고, **고객이 이 메시지로 무엇을 얻고자 했는지**만 적습니다.
                 어떻게 처리할지, 무엇을 먼저 확인할지, 누가 답할지는 적지 않습니다. 답을 쓰지도 않습니다.
@@ -155,12 +287,16 @@ public final class CustomerGoalPrompt {
      * impossible or merely unlikely.
      */
     public static ObjectNode schema() {
+        return Arm.current().schema();
+    }
+
+    private static ObjectNode schemaWith(String[] outcomes) {
         ObjectNode goal = MAPPER.createObjectNode();
         goal.put("type", "object").put("additionalProperties", false);
         ObjectNode gp = goal.putObject("properties");
         gp.putObject("id").put("type", "string");
         gp.putObject("explicit_request").put("type", "string").put("maxLength", CustomerGoal.MAX_REQUEST);
-        enumOf(gp.putObject("requested_outcome"), names(RequestedOutcome.values()));
+        enumOf(gp.putObject("requested_outcome"), outcomes);
         enumOf(gp.putObject("subject"), names(Referent.values()));
         enumOf(gp.putObject("basis"), names(RequestBasis.values()));
         ObjectNode constraints = gp.putObject("explicit_constraints");
@@ -197,17 +333,21 @@ public final class CustomerGoalPrompt {
      * the contract changing, and every recorded run would appear to be a run of something else.
      */
     public static ObjectNode responseFormat() {
+        return Arm.current().responseFormat();
+    }
+
+    private static ObjectNode responseFormatOf(ObjectNode schema) {
         ObjectNode format = MAPPER.createObjectNode();
         format.put("type", "json_schema");
         ObjectNode js = format.putObject("json_schema");
         js.put("name", "customer_goal_set").put("strict", true);
-        js.set("schema", schema());
+        js.set("schema", schema);
         return format;
     }
 
     /** What a run recorded against this prompt is a run OF. Both halves, so neither can move unnoticed. */
     public static String fingerprint() {
-        return VERSION + " system=" + sha256(system()) + " schema=" + sha256(schema().toString());
+        return Arm.current().fingerprint();
     }
 
     public static String sha256(String s) {

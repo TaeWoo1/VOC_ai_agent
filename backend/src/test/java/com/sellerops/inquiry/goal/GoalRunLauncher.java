@@ -139,8 +139,12 @@ public final class GoalRunLauncher {
         Files.createDirectories(args.out());
         Path rawFile = args.out().resolve("raw.jsonl");
         Path rowFile = args.out().resolve("rows.jsonl");
+        // The arm comes from the MANIFEST, like the model and the effort beside it — never from what this commit
+        // happens to ship. A launcher that sent the current contract while the approval named another would fail
+        // the guard, but it would fail it after building requests nobody approved; reading it here means the
+        // requests are the approved ones by construction. An unknown version throws before anything is sent.
         CustomerGoalRunner runner = new CustomerGoalRunner(approval.model(), approval.reasoningEffort(),
-                wire, endpoint, headers);
+                wire, endpoint, headers, CustomerGoalPrompt.Arm.of(approval.promptVersion()));
 
         CustomerGoalRunner.Result result;
         try (Streaming sink = new Streaming(rawFile, rowFile,

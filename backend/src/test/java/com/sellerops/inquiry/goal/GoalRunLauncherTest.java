@@ -54,10 +54,18 @@ class GoalRunLauncherTest {
                 continue;
             }
             boolean takesManifest = List.of(method.getParameterTypes()).contains(ApprovalManifest.class);
+            // The allow-list is every public method that CANNOT reach the transport. `arm` joined it when the
+            // holdout's comparison arm did (§25.13): it is a no-argument accessor returning an enum constant, so
+            // it cannot send, and a caller that wants to know which contract a runner holds should not have to
+            // reconstruct it. Nothing may be added here that takes an input or a sink.
             assertThat(method.getName()).as("%s can send and takes no manifest", method.getName())
                     .satisfiesAnyOf(name -> assertThat(takesManifest).isTrue(),
                             name -> assertThat(name).isIn("prepare", "dryRun", "replay", "inputSetFp",
-                                    "requestFpSet", "write", "sha"));
+                                    "requestFpSet", "write", "sha", "arm"));
+            if (method.getName().equals("arm")) {
+                assertThat(method.getParameterCount()).isZero();
+                assertThat(method.getReturnType()).isEqualTo(CustomerGoalPrompt.Arm.class);
+            }
         }
         // By source: the transport is touched in exactly one place, and the guard is asked above it.
         String source = Files.readString(Path.of("src", "test", "java", "com", "sellerops", "inquiry", "goal",

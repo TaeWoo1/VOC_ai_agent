@@ -64,6 +64,16 @@ public final class CustomerGoalRunner {
     private final URI endpoint;
     private final Map<String, String> headers;
 
+    /**
+     * <b>Which contract this runner is a runner of.</b>
+     *
+     * <p>Default {@link CustomerGoalPrompt.Arm#current()}, so every existing call site sends the same bytes it sent
+     * before this field existed. It is a field rather than a parameter of {@code body()} because it is a property of
+     * the RUN: an arm that could change between calls would produce a rows file whose fingerprints describe no
+     * single thing, and the manifest binds exactly those fingerprints.
+     */
+    private final CustomerGoalPrompt.Arm arm;
+
     public CustomerGoalRunner(String model, String reasoningEffort, AgentLlmTransport transport, URI endpoint) {
         this(model, reasoningEffort, transport, endpoint, Map.of());
     }
@@ -74,11 +84,24 @@ public final class CustomerGoalRunner {
      */
     public CustomerGoalRunner(String model, String reasoningEffort, AgentLlmTransport transport, URI endpoint,
                               Map<String, String> headers) {
+        this(model, reasoningEffort, transport, endpoint, headers, CustomerGoalPrompt.Arm.current());
+    }
+
+    /** @param arm the contract to send. Anything other than {@link CustomerGoalPrompt.Arm#current()} is a
+     *             comparison run and records itself as one on every row and in every bound field. */
+    public CustomerGoalRunner(String model, String reasoningEffort, AgentLlmTransport transport, URI endpoint,
+                              Map<String, String> headers, CustomerGoalPrompt.Arm arm) {
         this.model = model;
         this.reasoningEffort = reasoningEffort;
         this.transport = transport;
         this.endpoint = endpoint;
         this.headers = headers == null ? Map.of() : Map.copyOf(headers);
+        this.arm = arm == null ? CustomerGoalPrompt.Arm.current() : arm;
+    }
+
+    /** The contract this runner sends, for a caller that has to record or compare it. */
+    public CustomerGoalPrompt.Arm arm() {
+        return arm;
     }
 
     /** Why a run was refused. Carries reasons and never a value that could be a secret. */
@@ -211,9 +234,9 @@ public final class CustomerGoalRunner {
         m.put("commit", RepoState.commit(repoRoot));
         m.put("tree_clean", String.valueOf(RepoState.clean(repoRoot)));
         m.put("runner", VERSION);
-        m.put("prompt_version", CustomerGoalPrompt.VERSION);
-        m.put("system_fp", CustomerGoalPrompt.sha256(CustomerGoalPrompt.system()));
-        m.put("schema_fp", CustomerGoalPrompt.sha256(CustomerGoalPrompt.schema().toString()));
+        m.put("prompt_version", arm.version());
+        m.put("system_fp", CustomerGoalPrompt.sha256(arm.system()));
+        m.put("schema_fp", CustomerGoalPrompt.sha256(arm.schema().toString()));
         m.put("input_set_fp", inputSetFp(inputs));
         m.put("request_fp_set", requestFpSet(requests));
         m.put("model", model);
@@ -299,10 +322,10 @@ public final class CustomerGoalRunner {
         ObjectNode root = JSON.createObjectNode();
         root.put("model", model);
         ArrayNode messages = root.putArray("messages");
-        messages.addObject().put("role", "system").put("content", CustomerGoalPrompt.system());
+        messages.addObject().put("role", "system").put("content", arm.system());
         messages.addObject().put("role", "user").put("content", user);
         root.put("max_completion_tokens", CustomerGoalPrompt.MAX_OUTPUT_TOKENS);
-        root.set("response_format", CustomerGoalPrompt.responseFormat());
+        root.set("response_format", arm.responseFormat());
         if (reasoningEffort != null && !reasoningEffort.isBlank()) {
             root.put("reasoning_effort", reasoningEffort);
         }
@@ -322,13 +345,13 @@ public final class CustomerGoalRunner {
                             String finish, long elapsedMs) {
         ObjectNode row = JSON.createObjectNode();
         row.put("run_id", runId).put("mode", mode.name()).put("id", request.id());
-        row.put("runner", VERSION).put("prompt_version", CustomerGoalPrompt.VERSION)
+        row.put("runner", VERSION).put("prompt_version", arm.version())
                 .put("model", model).put("reasoning_effort", reasoningEffort);
         // Which tool answered. On every row, so a rehearsal artifact can never be read as a model result later —
         // including by a reader who has only the rows and not the manifest that authorized them.
         row.put("transport", GoalTransport.modeOf(transport));
-        row.put("system_fp", CustomerGoalPrompt.sha256(CustomerGoalPrompt.system()))
-                .put("schema_fp", CustomerGoalPrompt.sha256(CustomerGoalPrompt.schema().toString()))
+        row.put("system_fp", CustomerGoalPrompt.sha256(arm.system()))
+                .put("schema_fp", CustomerGoalPrompt.sha256(arm.schema().toString()))
                 .put("input_fp", sha(request.user())).put("request_fp", request.requestFp());
         row.put("elapsed_ms", elapsedMs);
         row.put("finish", finish);

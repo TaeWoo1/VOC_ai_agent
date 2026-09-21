@@ -120,6 +120,57 @@ class CustomerGoalPromptTest {
         assertThat(system).doesNotContain("INFORMATION").doesNotContain("DECISION");
     }
 
+    /**
+     * <b>The comparison arm is the shipped v2, and this is what says so.</b>
+     *
+     * <p>The holdout of §25.13 asks whether v3 leaks more than v2, which needs both contracts put to the same
+     * cases. An arm reconstructed from memory would answer a question about the reconstruction — so the v2
+     * instruction and schema are rendered here and hashed against the line in
+     * {@code contracts/inquiry-goal/v1/prompt-fingerprint.txt} that <b>already identifies two recorded runs</b>
+     * ({@code v35-goal-smoke-35baa4c2-44fc582a} and {@code …-097a53cc-7fdad6fb}).
+     *
+     * <p>That is the strongest form this check can take: the value it compares against was written down before the
+     * merge, for a different purpose, and cannot be adjusted to make this pass without also disowning those runs.
+     */
+    @Test
+    @DisplayName("rendering the v2 arm reproduces the PINNED v2 fingerprint, byte for byte")
+    void theComparisonArmIsTheShippedContract() throws Exception {
+        String pinned = pinnedFingerprint("customer-goal-interpreter/v2");
+        assertThat(CustomerGoalPrompt.Arm.V2.fingerprint())
+                .as("the v2 arm no longer renders the contract those runs were runs of")
+                .isEqualTo(pinned);
+
+        // And the arms are genuinely different runs, not one contract with two names.
+        assertThat(CustomerGoalPrompt.Arm.V3.fingerprint()).isNotEqualTo(pinned);
+        assertThat(CustomerGoalPrompt.Arm.V2.system()).isNotEqualTo(CustomerGoalPrompt.Arm.V3.system());
+        assertThat(tokens(CustomerGoalPrompt.Arm.V2.schema().get("properties").get("goals").get("items")
+                .get("properties").get("requested_outcome")))
+                .containsExactly("INFORMATION", "STATE_READ", "DECISION", "ACTION");
+
+        // The current contract is v3 and nothing about adding an arm moved it: the unqualified statics still answer
+        // for the shipped one, which is what every production and manifest call site reads.
+        assertThat(CustomerGoalPrompt.Arm.current()).isEqualTo(CustomerGoalPrompt.Arm.V3);
+        assertThat(CustomerGoalPrompt.system()).isEqualTo(CustomerGoalPrompt.Arm.V3.system());
+        assertThat(CustomerGoalPrompt.schema().toString()).isEqualTo(CustomerGoalPrompt.Arm.V3.schema().toString());
+        assertThat(CustomerGoalPrompt.fingerprint()).isEqualTo(CustomerGoalPrompt.Arm.V3.fingerprint());
+        assertThat(CustomerGoalPrompt.VERSION).isEqualTo("customer-goal-interpreter/v3");
+
+        // An arm nobody named is not defaulted into.
+        assertThat(CustomerGoalPrompt.Arm.of("customer-goal-interpreter/v2")).isEqualTo(CustomerGoalPrompt.Arm.V2);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> CustomerGoalPrompt.Arm.of("v9"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("unknown prompt arm");
+    }
+
+    /** A fingerprint line from the committed file, by version. Comments are the file's own history, not data. */
+    private static String pinnedFingerprint(String version) throws Exception {
+        return java.nio.file.Files.readAllLines(java.nio.file.Path.of("..", "contracts", "inquiry-goal", "v1",
+                        "prompt-fingerprint.txt")).stream()
+                .map(String::trim)
+                .map(l -> l.startsWith("#") ? l.substring(1).trim() : l)
+                .filter(l -> l.startsWith(version + " "))
+                .findFirst().orElseThrow(() -> new AssertionError("no pinned fingerprint for " + version));
+    }
+
     @Test
     @DisplayName("the fingerprint covers both halves, and matches the one the smoke manifest quotes")
     void fingerprintCoversBoth() throws Exception {
