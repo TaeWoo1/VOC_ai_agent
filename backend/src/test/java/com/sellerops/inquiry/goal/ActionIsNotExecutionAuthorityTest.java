@@ -169,6 +169,52 @@ class ActionIsNotExecutionAuthorityTest {
      * existing mentions are {@code {@link com.sellerops.inquiry.goal.ResolutionPolicy}} references, and what is
      * searched for here is a call.
      */
+    /**
+     * The entry points a production caller would have to use to drive the loop.
+     *
+     * <p>Named once, because it was wrong: this list said {@code GoalSetResolution.resolve(} and the method is
+     * {@code run}. The only occurrence of that string in the repository was this guard's own literal, so a
+     * production class calling {@code GoalSetResolution.run(set, resolver)} would have tripped <b>nothing</b> —
+     * the inner {@code GoalResolution.run(} call is inside the goal package, which the scan deliberately skips.
+     * A source-scan guard that names a symbol which does not exist passes vacuously forever, and it passes
+     * loudest on the day it was supposed to fire. {@link #theGuardedNamesExist()} is what stops that recurring.
+     */
+    private static final List<String> GUARDED_ENTRY_POINTS = List.of(
+            "ResolutionPolicy.next(", "GoalResolution.run(", "GoalSetResolution.run(", "new CustomerGoalSet(");
+
+    /**
+     * <b>Every name the tripwire greps for must be a real symbol.</b>
+     *
+     * <p>This is the test the previous version needed and did not have. It does not read the source tree; it asks
+     * the classes themselves, so a rename that empties the guard fails here rather than silently turning the guard
+     * into a comment.
+     */
+    @Test
+    @DisplayName("TRIPWIRE INTEGRITY: every guarded call names a method that actually exists")
+    void theGuardedNamesExist() throws Exception {
+        assertThat(ResolutionPolicy.class.getMethod("next", CustomerGoal.class, List.class)).isNotNull();
+        assertThat(GoalResolution.class.getMethod("run", CustomerGoal.class, java.util.function.Function.class))
+                .isNotNull();
+        assertThat(GoalSetResolution.class.getMethod("run", CustomerGoalSet.class, java.util.function.Function.class))
+                .isNotNull();
+        assertThat(CustomerGoalSet.class.getConstructors()).isNotEmpty();
+
+        // And the guard actually covers the public surface: every public static entry point on the two resolution
+        // classes is named in the list, so adding a second way in cannot leave the window unguarded.
+        for (Class<?> c : List.of(GoalResolution.class, GoalSetResolution.class, ResolutionPolicy.class)) {
+            for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
+                if (!java.lang.reflect.Modifier.isPublic(m.getModifiers())
+                        || !java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                    continue;
+                }
+                assertThat(GUARDED_ENTRY_POINTS)
+                        .as("%s.%s is a public way into the loop and the tripwire does not watch it",
+                                c.getSimpleName(), m.getName())
+                        .contains(c.getSimpleName() + "." + m.getName() + "(");
+            }
+        }
+    }
+
     @Test
     @DisplayName("TRIPWIRE: nothing in src/main drives the resolution loop — the window stays unreachable")
     void theLoopHasNoProductionCaller() throws Exception {
@@ -181,8 +227,7 @@ class ActionIsNotExecutionAuthorityTest {
                     continue;   // the package may call itself
                 }
                 String body = java.nio.file.Files.readString(p);
-                for (String call : List.of("ResolutionPolicy.next(", "GoalResolution.run(",
-                        "GoalSetResolution.resolve(", "new CustomerGoalSet(")) {
+                for (String call : GUARDED_ENTRY_POINTS) {
                     if (body.contains(call)) {
                         callers.add(p.getFileName() + " → " + call);
                     }

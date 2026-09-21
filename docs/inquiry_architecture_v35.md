@@ -2248,3 +2248,37 @@ change: these 75 cases are spent, and the next contract question needs its own c
 It also does not say the leak rate is zero in production. The critical stratum here is enriched roughly tenfold
 over its natural rate, the design detects a tripling rather than a doubling, and the honest reading of `0` vs `0`
 is **"no detectable increase at this size"**, never "no effect".
+
+---
+
+## 28. Customer Goal Interpreter — FROZEN (2026-09-21)
+
+`customer-goal-interpreter/v3` is frozen. The component is closed; work moves to the resolver.
+
+**What is frozen, and what already holds it:**
+
+| | pinned by |
+|---|---|
+| three outcomes — `ANSWER` · `STATE_READ` · `ACTION` | `CustomerGoalPromptTest` (schema enum, generated from `RequestedOutcome`) |
+| the instruction and the schema, byte for byte | `contracts/inquiry-goal/v1/prompt-fingerprint.txt` + fingerprint test |
+| the ACTION-boundary sentence | asserted verbatim |
+| the evidence contract (quote · verbatim · one clause one goal · ≤1 inference) | `GoalEvidenceFenceTest`, `CustomerGoalSet` |
+| `ACTION` is not execution authority | `ActionIsNotExecutionAuthorityTest` + two tripwires |
+| the v2 comparison arm | hashed against the pinned v2 line |
+
+**No further prompt work on this component**, and **the holdout is not reused** — §27.5. A future contract question
+needs a new corpus; this one is spent and saying so is the only thing that keeps §27's number meaning what it says.
+
+### 28.1 A dead safety guard, found while mapping the resolver paths
+
+`ActionIsNotExecutionAuthorityTest`'s source scan greps for the entry points a production caller would have to use.
+One of the four was **`GoalSetResolution.resolve(`** — and that string occurs nowhere in the repository except the
+guard's own literal. The method is `run`. So a production class calling `GoalSetResolution.run(set, resolver)` would
+have tripped **nothing**: the inner `GoalResolution.run(` call is inside the goal package, which the scan skips on
+purpose.
+
+A source-scan guard that names a symbol which does not exist passes vacuously forever, and it passes loudest on the
+day it was meant to fire. Fixed, and the class of defect is closed rather than the instance: `theGuardedNamesExist`
+asks the **classes** — not the source text — that every guarded name resolves to a real method, and that every
+public static entry point on the three resolution classes is in the list. Reintroducing the old string turns it red.
+
