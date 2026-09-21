@@ -11,6 +11,10 @@ import com.sellerops.operationscase.investigation.CaseDraftPreparer;
 import com.sellerops.operationscase.investigation.CaseInvestigationOutput;
 import com.sellerops.operationscase.investigation.CaseInvestigationService;
 import com.sellerops.operationscase.investigation.CaseInvestigator;
+import com.sellerops.proactive.ProactiveCaseRepository;
+import com.sellerops.proactive.ProactiveCaseStatus;
+import com.sellerops.proactive.ProactiveCloseReason;
+import com.sellerops.proactive.ProactiveSubjectKind;
 import com.sellerops.responsibility.Responsibility;
 import com.sellerops.responsibility.ResponsibilityRepository;
 import com.sellerops.responsibility.ResponsibilityRollout;
@@ -20,6 +24,7 @@ import com.sellerops.responsibility.ResponsibilityRunRepository;
 import com.sellerops.responsibility.ResponsibilityRunSource;
 import com.sellerops.responsibility.ResponsibilityRunSourceRepository;
 import com.sellerops.responsibility.ResponsibilitySources;
+import com.sellerops.responsibility.ResponsibilityTemplate;
 import com.sellerops.responsibility.SourceFailureReason;
 import com.sellerops.review.Review;
 import java.time.Clock;
@@ -100,6 +105,24 @@ public class OperationsCaseProcessor {
     private CaseResolutionReader resolutions;
 
     private com.sellerops.proactive.ProactiveReviewInvestigator reviewInvestigator;
+
+    private ProactiveCaseRepository legacyCases;
+
+    /**
+     * The legacy proactive lane's own cases — <b>and only those.</b>
+     *
+     * <p>Same table as {@link OperationsCaseRepository}; what separates them is the entity's
+     * {@code @SQLRestriction("responsibility_id is null")}, so this repository is structurally unable to see, let
+     * alone touch, an operations case. That is what makes it safe to hold here: the takeover can close a legacy
+     * card and cannot reach anything else.
+     *
+     * <p>Optional like the collaborators below, and for the same reason — wiring that predates it behaves exactly
+     * as it did, which for a starving subject means it keeps starving until this bean is present.
+     */
+    @Autowired(required = false)
+    public void setLegacyCases(ProactiveCaseRepository legacyCases) {
+        this.legacyCases = legacyCases;
+    }
 
     /**
      * What is already known about a 확인 필요 review, <b>before any model runs</b>.
@@ -196,6 +219,8 @@ public class OperationsCaseProcessor {
         int gapsRepeated;
         int gapsRecovered;
         int blocked;
+        /** Legacy proactive cards closed because this responsibility took their subject over. */
+        int handedOff;
         int investigationsStarted;
 
         Report report() {
@@ -222,11 +247,11 @@ public class OperationsCaseProcessor {
         discover(run, responsibility, stop, k);
         Report report = k.report();
         log.info("responsibility cases run={} 재확인(판매자조치/종료)={}/{} 변화없음={} 새Case={} 갱신={} 규칙={} 조사={} "
-                        + "조사실패={} 조사생략={} 다음run으로={} 초안={} 장애열림={} 장애반복={} 장애복구={}",
+                        + "조사실패={} 조사생략={} 다음run으로={} 초안={} 장애열림={} 장애반복={} 장애복구={} 인계받음={}",
                 runId, report.reconciledActed(), report.reconciledClosed(), report.unchanged(), report.opened(),
                 report.updated(), report.ruleDecided(), report.investigated(), report.investigationFailed(),
                 report.investigationSkipped(), report.deferred(), report.draftsPrepared(), report.gapsOpened(),
-                report.gapsRepeated(), report.gapsRecovered());
+                report.gapsRepeated(), report.gapsRecovered(), k.handedOff);
         return report;
     }
 
@@ -433,13 +458,20 @@ public class OperationsCaseProcessor {
         String signature = OperationsSignal.signature(orgId, kind, subjectId, state, null);
         if (cases.findByOrgIdAndSubjectKindAndSubjectIdAndSignature(orgId, kind, subjectId, signature).isPresent()) {
             k.unchanged++;
+            // Nothing to write — but this responsibility has already decided this subject, so a legacy card still
+            // pointing at it is a second answer about work that is not the legacy lane's any more. Yielded here too
+            // because a subject whose source state never changes again would otherwise never reach the line below.
+            takeOverLegacyCase(orgId, responsibility, kind, subjectId, k);
             return;
         }
         boolean investigate = conclusion.needsInvestigation() && investigation.isEnabledFor(orgId);
         if (investigate && k.investigationsStarted >= investigation.maxPerRun()) {
+            // Deliberately NOT a handover point. This subject is coming back next run; closing the legacy card now
+            // would take the seller's only annotation away and put nothing in its place.
             k.deferred++;
             return;
         }
+        takeOverLegacyCase(orgId, responsibility, kind, subjectId, k);
         Optional<OperationsCase> open = cases.findByOrgIdAndSubjectKindAndSubjectIdAndStatus(orgId, kind, subjectId,
                 OperationsCaseStatus.PREPARED);
         boolean changed = open.isPresent();
@@ -484,7 +516,11 @@ public class OperationsCaseProcessor {
         try {
             saved = cases.saveAndFlush(c);
         } catch (DataIntegrityViolationException race) {
-            // Another writer holds this subject's open card (a race, or a proactive card opened before delegation).
+            // Another writer holds this subject's open card. That used to include a legacy proactive card opened
+            // before this organisation was delegated — which no loop could ever close, so the subject starved here
+            // permanently; takeOverLegacyCase now stands those down before this insert. What is left is a genuine
+            // race, which is what this catch was written for. A fence that stopped being reachable is not one to
+            // remove: the constraint it guards is still there, and so is concurrency.
             k.blocked++;
             return;
         }
@@ -663,6 +699,64 @@ public class OperationsCaseProcessor {
         c.setRecommendedAction(found.recommendation());
         c.setEvidenceCount(found.repeatIssue() == null ? 0 : 1);
         c.setPreparedAction(CasePreparedAction.RECOMMENDATION_ONLY);
+    }
+
+    /**
+     * <b>Take a subject over from the legacy proactive lane — one open card per subject, and this one is ours.</b>
+     *
+     * <p>Both producers write {@code proactive_case} and {@code uq_proactive_case_open_subject} spans both of them:
+     * one {@code PREPARED} row per {@code (org, subject_kind, subject_id)}, whichever lane wrote it. The two are
+     * blind to each other by construction — {@code @SQLRestriction} shows each only its own rows, and the signature
+     * namespaces are disjoint (the operations lane prefixes {@code rr:}) — so each looks for a stale open card,
+     * finds nothing, and they meet at the database instead.
+     *
+     * <p>That collision used to be swallowed as {@code blocked} and the operations case was simply never written.
+     * It could not resolve itself: {@code ProactiveScheduler} drops a delegated organisation from its tick
+     * entirely, so no loop could ever close the squatter. <b>A single stale legacy card starved its subject
+     * forever</b>, and the subject that lost was always the one a responsibility had been made responsible for.
+     *
+     * <p>So ownership is stated rather than raced for. Where a {@code CUSTOMER_OPERATIONS_V1} responsibility is
+     * the one deciding this subject, its case is canonical and the legacy annotation stands down.
+     *
+     * <ul>
+     *   <li><b>Closed, never deleted.</b> The row keeps its reason, its investigation and its dates and gains
+     *       {@link ProactiveCloseReason#DELEGATED_TO_RESPONSIBILITY} — the enum's own rule is that a card which
+     *       vanished has to be able to say why. Nothing is rewritten and no history is dropped.</li>
+     *   <li><b>Per subject, not per organisation.</b> Only a subject this lane is deciding right now changes
+     *       hands. Legacy cards for subjects outside this responsibility's reach keep standing, because closing
+     *       them would take a card away and put nothing in its place — the brief is that the operations case is
+     *       canonical for the subjects it manages, not that the legacy lane is over.</li>
+     *   <li><b>That is also what keeps one subject in one list.</b> After the handover the subject has exactly one
+     *       live annotation; before it, exactly one. There is no moment where both lanes describe it.</li>
+     *   <li><b>{@code saveAndFlush}</b>, because the insert below needs the index slot actually free, not merely
+     *       free in the persistence context.</li>
+     * </ul>
+     *
+     * <p>The catch around that insert stays where it is. It was written for a genuine race and that is now all it
+     * can be — but a fence that has stopped being reachable is not one to remove.
+     */
+    private void takeOverLegacyCase(UUID orgId, Responsibility responsibility, OperationsSubjectKind kind,
+                                    UUID subjectId, Counters k) {
+        if (legacyCases == null || responsibility.getTemplateCode() != ResponsibilityTemplate.CUSTOMER_OPERATIONS_V1) {
+            return;
+        }
+        ProactiveSubjectKind legacyKind = switch (kind) {
+            case INQUIRY -> ProactiveSubjectKind.INQUIRY;
+            case REVIEW -> ProactiveSubjectKind.REVIEW;
+            // The legacy lane has no SOURCE subject, so an observation gap can collide with nothing.
+            case SOURCE -> null;
+        };
+        if (legacyKind == null) {
+            return;
+        }
+        legacyCases.findByOrgIdAndSubjectKindAndSubjectIdAndStatus(orgId, legacyKind, subjectId,
+                ProactiveCaseStatus.PREPARED).ifPresent(stale -> {
+                    stale.setStatus(ProactiveCaseStatus.CLOSED);
+                    stale.setClosedAt(clock.instant());
+                    stale.setCloseReason(ProactiveCloseReason.DELEGATED_TO_RESPONSIBILITY);
+                    legacyCases.saveAndFlush(stale);
+                    k.handedOff++;
+                });
     }
 
     private void prepareDraftIfAsked(ResponsibilityRun run, OperationsCase c, CaseInvestigationOutput output,

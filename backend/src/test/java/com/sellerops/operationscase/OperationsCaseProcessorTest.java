@@ -45,6 +45,7 @@ import com.sellerops.operationscase.investigation.CaseInvestigator;
 import com.sellerops.proactive.ProactiveCase;
 import com.sellerops.proactive.ProactiveCaseRepository;
 import com.sellerops.proactive.ProactiveCaseStatus;
+import com.sellerops.proactive.ProactiveCloseReason;
 import com.sellerops.proactive.ProactivePreparedAction;
 import com.sellerops.proactive.ProactivePriority;
 import com.sellerops.proactive.ProactiveReason;
@@ -721,6 +722,99 @@ class OperationsCaseProcessorTest {
         assertThat(casesOf()).extracting(OperationsCase::getId).containsExactly(operationsCaseId);
     }
 
+    /**
+     * <b>A legacy card on this subject hands over; it does not hold the subject hostage.</b>
+     *
+     * <p>One open card per {@code (org, subject_kind, subject_id)} is a database constraint spanning BOTH
+     * producers, and the two lanes are blind to each other — so a legacy card opened before this organisation was
+     * delegated used to sit in that slot and the operations case was never written. Nor could it ever be: the
+     * proactive loop drops a delegated organisation from its tick, so nothing was left that could close the
+     * squatter. The subject starved, and it was always a subject a responsibility had been made responsible for.
+     */
+    @Test
+    void aLegacyCardOnThisSubjectHandsOver_soTheResponsibilityIsNeverStarved() {
+        Inquiry inquiry = inquiry("배송은 언제 되나요?", Instant.now());
+        workItem(inquiry);
+        ProactiveCase squatter = legacyCard(ProactiveSubjectKind.INQUIRY, inquiry.getId());
+
+        OperationsCaseProcessor.Report report = processor.process(run(Instant.now(), null, null), () -> false);
+
+        // The case the responsibility owes the seller exists — this is the whole defect, in one assertion.
+        assertThat(report.opened()).isEqualTo(1);
+        OperationsCase c = only();
+        assertThat(c.getSubjectId()).isEqualTo(inquiry.getId());
+        assertThat(c.getStatus()).isEqualTo(OperationsCaseStatus.PREPARED);
+
+        // Closed, never deleted: the row keeps its reason and its investigation, and says why it stood down.
+        ProactiveCase after = proactive.findById(squatter.getId()).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(ProactiveCaseStatus.CLOSED);
+        assertThat(after.getCloseReason()).isEqualTo(ProactiveCloseReason.DELEGATED_TO_RESPONSIBILITY);
+        assertThat(after.getClosedAt()).isNotNull();
+        assertThat(after.getReason()).isEqualTo(ProactiveReason.UNANSWERED_INQUIRY);
+        assertThat(after.getReasonNote()).isEqualTo("답변을 기다리는 문의");
+
+        // And the seller sees this subject once, from the lane that owns it. The legacy read asks for PREPARED,
+        // so a handed-over card leaves that list by the same door every closed card does.
+        assertThat(proactive.countByOrgIdAndStatus(org, ProactiveCaseStatus.PREPARED)).isZero();
+    }
+
+    /**
+     * The other half of «one subject, one list»: a subject this responsibility is NOT deciding keeps its card.
+     * Closing it would take the seller's only annotation away and put nothing in its place — the operations case
+     * is canonical for the subjects it manages, which is not the same as the legacy lane being over.
+     */
+    @Test
+    void aLegacyCardOnASubjectThisRunDoesNotDecideIsLeftStanding() {
+        workItem(inquiry("배송은 언제 되나요?", Instant.now()));
+        ProactiveCase elsewhere = legacyCard(ProactiveSubjectKind.REVIEW, UUID.randomUUID());
+
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        ProactiveCase after = proactive.findById(elsewhere.getId()).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(ProactiveCaseStatus.PREPARED);
+        assertThat(after.getCloseReason()).isNull();
+    }
+
+    /**
+     * A subject whose source state never changes again still hands over. The run after the first writes nothing —
+     * the signature matches and it returns early — so if the takeover only happened on the writing path, a pair
+     * that was already (operations case, legacy card) before this existed would stay that way for good.
+     */
+    @Test
+    void aSubjectAlreadyDecidedHandsOverOnTheNextRun_eventhoughNothingIsWritten() {
+        Inquiry inquiry = inquiry("배송은 언제 되나요?", Instant.now());
+        workItem(inquiry);
+        processor.process(run(Instant.now(), null, null), () -> false);
+        // The pair this fix inherits: the operations lane had already settled this subject, and a legacy card for
+        // it survived. It cannot be created through the index while the case is PREPARED, so it is planted here.
+        cases.findById(only().getId()).ifPresent(c -> {
+            c.setStatus(OperationsCaseStatus.CLOSED);
+            cases.saveAndFlush(c);
+        });
+        ProactiveCase leftover = legacyCard(ProactiveSubjectKind.INQUIRY, inquiry.getId());
+
+        OperationsCaseProcessor.Report rerun = processor.process(run(Instant.now(), null, null), () -> false);
+
+        assertThat(rerun.unchanged()).isEqualTo(1);
+        assertThat(proactive.findById(leftover.getId()).orElseThrow().getCloseReason())
+                .isEqualTo(ProactiveCloseReason.DELEGATED_TO_RESPONSIBILITY);
+    }
+
+    private ProactiveCase legacyCard(ProactiveSubjectKind kind, UUID subjectId) {
+        ProactiveCase card = new ProactiveCase();
+        card.setOrgId(org);
+        card.setSubjectKind(kind);
+        card.setSubjectId(subjectId);
+        card.setSignature(UUID.randomUUID().toString().repeat(2).substring(0, 64));
+        card.setSourceState("status=UNANSWERED");
+        card.setStatus(ProactiveCaseStatus.PREPARED);
+        card.setPriority(ProactivePriority.HIGH);
+        card.setReason(ProactiveReason.UNANSWERED_INQUIRY);
+        card.setReasonNote("답변을 기다리는 문의");
+        card.setPreparedAction(ProactivePreparedAction.RECOMMENDATION_ONLY);
+        return proactive.save(card);
+    }
+
     @Test
     void theInvestigatorsToolsReadOnlyTheBoundOrganisation() {
         UUID other = UUID.randomUUID();
@@ -1042,11 +1136,15 @@ class OperationsCaseProcessorTest {
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────
 
     private OperationsCaseProcessor processor(ResponsibilityRollout rollout) {
-        return new OperationsCaseProcessor(runs, responsibilities, sourceRows,
+        OperationsCaseProcessor built = new OperationsCaseProcessor(runs, responsibilities, sourceRows,
                 new ResponsibilitySources(accounts, channels), rollout, cases, events,
                 new OperationsCaseReconciler(cases, events, inquiries, workItems, reviews, accounts,
                         new AnswerDeliveryTruthReader(executions, verifications), Clock.systemUTC()),
                 investigator, investigation, drafts, workItems, channels, Clock.systemUTC());
+        // What the container injects. Both are optional setters, so leaving them out here would test a wiring no
+        // deployment runs — and the takeover below is precisely a collaboration between the two lanes.
+        built.setLegacyCases(proactive);
+        return built;
     }
 
     private static CaseInvestigator.Outcome concluded(CaseDisposition disposition, RecommendedActionType action,

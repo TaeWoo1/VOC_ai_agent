@@ -36,6 +36,17 @@ class ReviewCaseRecommendationTest {
         return Files.readString(path).replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("(?m)//.*$", "");
     }
 
+    /**
+     * The body of one method, ending where the next one starts — <b>not</b> at a named neighbour. Slicing to a
+     * neighbour made this test depend on file order, and it broke the day an unrelated method was inserted between
+     * the two. What these assertions are about is one method's contents, so that is what the slice has to be.
+     */
+    private static String bodyOf(String source, String signature) {
+        String from = source.substring(source.indexOf(signature));
+        int next = from.indexOf("\n    private ", signature.length());
+        return next < 0 ? from : from.substring(0, next);
+    }
+
     private static int count(String haystack, String needle) {
         int n = 0;
         for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
@@ -64,8 +75,7 @@ class ReviewCaseRecommendationTest {
     @DisplayName("nothing about a review is judged here — no rating rule, no repeat rule, no new sentence")
     void noSecondReviewBrain() throws IOException {
         String processor = code(PROCESSOR);
-        String block = processor.substring(processor.indexOf("private void prepareReviewRecommendation("));
-        String body = block.substring(0, block.indexOf("private void prepareDraftIfAsked("));
+        String body = bodyOf(processor, "private void prepareReviewRecommendation(");
 
         assertThat(body)
                 .as("no threshold, no rating arithmetic and no Korean prose: this method decides nothing, it asks")
@@ -82,8 +92,7 @@ class ReviewCaseRecommendationTest {
     void freeByConstruction() throws IOException {
         String investigator = code(INVESTIGATOR);
         String processor = code(PROCESSOR);
-        String block = processor.substring(processor.indexOf("private void prepareReviewRecommendation("));
-        String body = block.substring(0, block.indexOf("private void prepareDraftIfAsked("));
+        String body = bodyOf(processor, "private void prepareReviewRecommendation(");
 
         assertThat(investigator)
                 .as("the investigator reads the issue memory; it holds no model, transport or channel client")
@@ -98,8 +107,7 @@ class ReviewCaseRecommendationTest {
     @DisplayName("preparation stops at RECOMMENDATION_ONLY — a review still has nothing to send")
     void ceilingHolds() throws IOException {
         String processor = code(PROCESSOR);
-        String block = processor.substring(processor.indexOf("private void prepareReviewRecommendation("));
-        String body = block.substring(0, block.indexOf("private void prepareDraftIfAsked("));
+        String body = bodyOf(processor, "private void prepareReviewRecommendation(");
 
         assertThat(body)
                 .as("the ceiling for a review, and the honest name for what now exists: something to read")
@@ -114,8 +122,7 @@ class ReviewCaseRecommendationTest {
     @DisplayName("an investigation still outranks the row count, and a settled review is prepared nothing")
     void ruleLaneIsTheFloorNotTheAnswer() throws IOException {
         String processor = code(PROCESSOR);
-        String block = processor.substring(processor.indexOf("private void prepareReviewRecommendation("));
-        String body = block.substring(0, block.indexOf("private void prepareDraftIfAsked("));
+        String body = bodyOf(processor, "private void prepareReviewRecommendation(");
 
         assertThat(body)
                 .as("only a review the rules handed to a decision is prepared — not one they closed or put under watch")
