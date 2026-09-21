@@ -1876,3 +1876,93 @@ nothing. Predicted basis was `STATED` 76 / `DIRECTLY_IMPLIED` 9, against a gold 
 It says the safety properties hold (NO_GOAL, FALLBACK, no lost goals) and that outcome accuracy is dominated by one
 semantic boundary. It does **not** say the contract should change: no edit is made here, and the numbers above are
 the measurement this section exists to record.
+
+### 25.12 Would `INFORMATION + DECISION → ANSWER` hold? — offline recomputation, no change made
+
+Recomputed from the stored run `v35-goal-smoke-097a53cc-7fdad6fb` and the frozen gold. **Zero model calls, no
+contract change, no prompt experiment.** `STATE_READ` and `ACTION` are untouched throughout, as are the ACTION
+safety gate (§25.10) and the evidence contract (§25.3).
+
+#### The recomputation, with the assignment re-run
+
+The pairing is redone rather than folding the confusion matrix, because outcome is a tie-break in
+`assign` and a merge could have reshuffled it. It did not — referent and constraint accuracy are byte-identical
+across both, which is the check that the two columns are comparable.
+
+| | 4-way (as shipped) | 3-way (ANSWER merge) |
+|---|---|---|
+| **outcome** | 65.3% (47/72) | **95.8% (69/72)** |
+| referent | 90.3% (65/72) | 90.3% (65/72) — unchanged |
+| explicit constraints | 73.6% (53/72) | 73.6% (53/72) — unchanged |
+| cases exactly clean | 34.3% (23/67) | **55.2% (37/67)** |
+| `invented_goal` / `missing_goal` | 13 / 0 | 13 / 0 — unchanged |
+| `invented_ACTION` / `substituted_ACTION` | 2 / 3 | 2 / 3 — **unchanged** |
+
+**Every remaining outcome error is ACTION over-reach**: `ANSWER→ACTION` ×2, `STATE_READ→ACTION` ×1. Three errors,
+one shape. The merge removes 22 errors (21 `INFORMATION→DECISION` + 1 `DECISION→INFORMATION`) and creates none.
+
+Crucially **no safety counter moves**. The merge does not hide the ACTION problem; it isolates it.
+
+#### The 5 DECISION cases at the resolver
+
+The only place `DECISION` behaves differently from `INFORMATION` in the whole runtime is one branch of
+`ResolutionPolicy.next`: on a knowledge `NEEDS_SELLER`, a `DECISION` dispatches `SELLER` while an `INFORMATION`
+settles. Everything else — `firstResolver()` is `KNOWLEDGE` for both, `mayReachProcedure()` false for both,
+referent registry identical — is already the same.
+
+| case | gold closing authority | gold steps | terminal |
+|---|---|---|---|
+| `R:ae41a418` n2 | SELLER | `SELLER` | `NEEDS_SELLER` |
+| `S:T7a` | SELLER | `ENTITY.LISTING → SELLER` | `NEEDS_SELLER` |
+| `S:T7b` | SELLER | `ENTITY.LISTING → SELLER` | `NEEDS_SELLER` |
+| `S:N6` | KNOWLEDGE | `KNOWLEDGE.PRODUCT` | `NEEDS_SELLER` |
+| `S:T12a` | PROCEDURE | `ENTITY.ORDER → PROCEDURE.ORDER_ACTION` | `CAPABILITY_GAP / NOT_EXECUTABLE` (flagged `CLOSER_MOVES`) |
+
+#### Does `KNOWLEDGE → NEEDS_SELLER_JUDGMENT` lose meaning? No — and two measurements say so
+
+1. **No goal in the gold closes via SELLER. Zero of 72.** The seller resolver never returns `RESOLVED`; every goal
+   whose closing authority is `SELLER` still terminates `NEEDS_SELLER`.
+2. **30 of 56 `INFORMATION` goals already terminate `NEEDS_SELLER`**, every one of them closing on `KNOWLEDGE` with
+   knowledge-only steps. So "knowledge was asked and found nothing → the seller must judge" is already the majority
+   shape of the `INFORMATION` corpus, reached without any `SELLER` dispatch.
+
+An `INFORMATION` goal with a knowledge absence and a `DECISION` goal with a knowledge absence **already terminate in
+the same state**. The only difference is a `SELLER` step in the trace that closes nothing. The sentence a seller
+reads — `NEEDS_SELLER`, "a new judgment is genuinely required" — is identical either way.
+
+#### Minimal migration, if this is taken
+
+**Key the seller dispatch on the observed absence instead of the outcome token.** This is what
+`ResolutionPolicy`'s own class comment already claims — *"the seller is reached from an observed absence, never from
+the outcome kind alone"* — and which the code contradicts today by additionally requiring `outcome == DECISION`.
+Deleting that one conjunct is the entire resolver change, and it makes the merge behaviour-preserving for the five
+DECISION cases rather than a trade.
+
+Its measured cost is 30 additional `SELLER` dispatches (the `INFORMATION`-with-absence goals) whose terminal state
+does not change, since SELLER closes nothing. The alternative — dropping the dispatch so `ANSWER` always settles —
+is a smaller diff but deletes §10's mechanism outright, and is not recommended.
+
+Surface, in full:
+
+| what | size |
+|---|---|
+| `RequestedOutcome` | `INFORMATION`, `DECISION` → `ANSWER`; `firstResolver` `KNOWLEDGE`; 4 tokens → 3 |
+| `ResolutionPolicy` | remove one conjunct from the seller branch |
+| `CustomerGoalPrompt` | three enum lines become one; **prompt version → v3**, fingerprints move, manifests revoke by arithmetic |
+| `CustomerGoal` javadoc | the `DECISION`/`ACTION` invariant is restated as `ANSWER`/`ACTION` |
+| committed fixture | 9 of 23 rows carry a `DECISION` goal |
+| JS mirror + scorer | `OUTCOMES`, `FIRST_RESOLVER` |
+| **frozen gold** | **not rewritten** — folded at scoring time, exactly as a v1 run is read under v1's contract |
+
+#### What this does not establish
+
+**95.8% is a re-labelling, not a measurement of a 3-way contract.** The model answered a 4-way schema; folding the
+labels afterwards removes the distinction it was getting wrong *by construction*. A real 3-way prompt could behave
+differently elsewhere — most plausibly by reaching for `ACTION` more often once `DECISION` is gone, which is the one
+error class that survives the fold and the one that matters for safety. **That question cannot be answered on this
+DEV set**, which is spent: measuring a new prompt against the corpus that motivated it makes the corpus training
+data.
+
+So the next step is not another DEV run. It is a **fresh holdout** — cases never used to choose the contract, labelled
+before the run — to answer one question: does a 3-way contract raise the ACTION error rate? Followed by E2E on the
+existing execution path, unchanged. No prompt experiment against these 67.
