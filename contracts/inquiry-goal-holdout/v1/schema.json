@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CustomerGoal holdout case (Inquiry v3.5 §25.13)",
+  "description": "One frozen holdout case. The gold is written in the v3 three-token space; a v2 comparison arm is read into it by folding INFORMATION and DECISION to ANSWER, never the other way. Instances live only in the durable eval store.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["q", "source", "text", "s", "goals", "conf"],
+  "properties": {
+    "q": {"type": "string", "pattern": "^H:", "description": "case id. H:<8 hex> is a real inquiry; H:Snn is synthetic."},
+    "source": {"enum": ["REAL", "SYNTHETIC"]},
+    "text": {"type": "string", "minLength": 1, "description": "the customer's message. Never committed to the repository."},
+    "s": {"enum": ["C", "A", "T", "S", "N", "R"], "description": "C ambiguous ANSWER · A plain ANSWER · T true ACTION · S STATE_READ · N no goal · R relation or single inference"},
+    "conf": {"enum": ["HIGH", "MEDIUM"], "description": "HIGH: a careful reader lands here without argument. Only HIGH enters the primary metric."},
+    "goals": {
+      "type": "array",
+      "description": "the gold goals, in the order the message states them. Empty means the message requests nothing.",
+      "items": {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "prefixItems": [
+          {"enum": ["ANSWER", "STATE_READ", "ACTION"]},
+          {"enum": ["CURRENT_LISTING", "SELLER_CATALOGUE", "CURRENT_ORDER", "ORGANIZATION", "UNRESOLVED"]},
+          {"enum": ["STATED", "DIRECTLY_IMPLIED"]},
+          {"type": "integer", "minimum": 0, "description": "expected explicit_constraints COUNT, as in the frozen gold"}
+        ]
+      }
+    },
+    "relation": {
+      "type": ["array", "null"],
+      "description": "a customer-stated fallback: [primary index, fallback index, the clause that states it]. The clause must appear in `text`; build.py refuses it otherwise.",
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "pair": {"type": "string", "description": "a minimal pair name. Every pair must appear on BOTH sides of the gold, so the ambiguity marker cannot predict the label."},
+    "why": {"type": "string", "description": "why this label and not the nearest other one. Written before the run."}
+  }
+}

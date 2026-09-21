@@ -1,0 +1,71 @@
+{
+ "name": "inquiry-goal-holdout",
+ "version": "v1",
+ "frozen_at": "2026-09-21",
+ "contract": "customer-goal-interpreter/v3",
+ "role": "HOLDOUT — labelled before any v3 model call, evaluated ONCE. It is not a DEV set and must never be used to choose a prompt, a threshold or a contract. After its one sitting it is spent, exactly as the 67-case DEV set is.",
+ "question": "Does merging DECISION into ANSWER raise the rate at which an ambiguous ANSWER request leaks to ACTION?",
+ "location": "durable private eval store (~/.cache/sellerops-eval/inquiry-goal-holdout/v1) — messages and labels are never committed; this repository holds the build/check script, the schema, hashes and counts",
+ "files": {
+  "holdout.py": "5437d0f1cbf17883a689c13233889d0613b6e617df2728812899e11423807ba9",
+  "cases.jsonl": "6e02eac48857e19d53bdb4233c8d2e99ef68cb6f07ca8bcad1d8aba6151bf7e3"
+ },
+ "counts": {
+  "cases": 75,
+  "real": 51,
+  "synthetic": 24,
+  "strata": {"C_ambiguous_answer": 28, "T_true_action": 20, "A_plain_answer": 10, "N_no_goal": 9, "S_state_read": 6, "R_relation_or_inference": 2},
+  "confidence": {"HIGH": 57, "MEDIUM": 18},
+  "gold_goals": {"ANSWER": 39, "ACTION": 24, "STATE_READ": 6},
+  "cases_with_no_goal": 9,
+  "minimal_pairs": 8,
+  "primary_denominator_HIGH_answer_gold_cases": 26
+ },
+ "sampling": {
+  "snapshot": "sellerops_f5_eval (the same clone the DEV corpus was drawn from)",
+  "population": "3,535 inquiries with data_origin='REAL'",
+  "after_seller_disposition": "291 ACTIVE (the seller has already marked 3,199 EXCLUDED_SPAM and 45 EXCLUDED_THREAD_REPLY)",
+  "after_contamination_rules": "190 distinct unused messages, then 89 after refusing placeholder bodies, quoted threads, seller-authored replies, operator connectivity tests and bench fixtures",
+  "dev_overlap": 0,
+  "selected_real": 51,
+  "note": "Judgment-shaped messages are 7 of the 89 clean real candidates. The critical stratum is therefore ENRICHED roughly tenfold, on purpose: the absolute leak rate this set produces is NOT a production rate, and only the v2-vs-v3 difference is reported as a finding."
+ },
+ "contamination_found": {
+  "bench_fixtures_stored_as_REAL": {
+   "count": 15,
+   "shape": "uuid b3000000-0000-4000-8000-0000000000NN, external_id bench-00NN, received 2026-07-23..2026-09-01",
+   "why_it_matters": "data_origin='REAL' does not distinguish them, and they are the cleanest judgment-shaped Korean in the pool — precisely the rows a holdout for this question would have reached for first. Refused by rule in build.py; not modified in the snapshot."
+  },
+  "placeholder_bodies": 46,
+  "quoted_thread_or_seller_authored": 39,
+  "operator_connectivity_tests": 2
+ },
+ "label_policy": {
+  "author": "designer, before any v3 model call",
+  "space": "the v3 three-token contract (ANSWER / STATE_READ / ACTION). A v2 arm is read into this space by folding its predictions; the gold is never folded the other way.",
+  "HIGH": "a careful reader lands on this label without argument",
+  "MEDIUM": "the label is defensible and the other reading is not absurd",
+  "primary_metric_uses": "HIGH only. MEDIUM is reported beside it and never folded in.",
+  "minimal_pairs": "every `pair` appears on BOTH sides of the gold, so a contract cannot score well by mapping the ambiguity marker to a token"
+ },
+ "evaluation": {
+  "design": "two arms, same 75 cases, one sitting: customer-goal-interpreter/v2 (four tokens) and /v3 (three). Paired, because the question is comparative and the DEV set can no longer answer it.",
+  "primary": "ACTION leakage on ANSWER-gold cases: predicted outcome ACTION where gold is ANSWER, over HIGH-confidence ANSWER-gold cases (n=26). The v2 arm's INFORMATION and DECISION fold to ANSWER before comparison.",
+  "test": "McNemar exact on the paired per-case leak indicator. b = v2 clean and v3 leaked; c = v2 leaked and v3 clean.",
+  "decision_rule": {
+   "no_increase": "b <= c — the merge ships",
+   "inconclusive": "b > c and exact p >= 0.05 — reported as not distinguishable at this size; the merge ships only if b - c <= 2, otherwise HOLD",
+   "increase": "b > c and exact p < 0.05 — the merge does not ship as it stands"
+  },
+  "power": "with 26 HIGH ANSWER-gold cases this set can detect roughly a tripling of the leak rate, not a doubling. Stated before the run so the result cannot be read as more than it is.",
+  "guards_that_must_not_regress": [
+   "reverse leakage: ACTION-gold predicted ANSWER (stratum T, n=20 cases)",
+   "invented_ACTION and substituted_ACTION (disjoint safety blockers)",
+   "NO_GOAL violations on the 9 no-goal cases",
+   "evidence verbatim failures = 0 — a parse failure is a run failure, not a score",
+   "referent and constraint accuracy, which should be arm-invariant; movement there means something other than the token changed"
+  ],
+  "not_a_metric": "overall outcome accuracy. The two arms have different label spaces, and the question is not accuracy."
+ },
+ "spent_after": "one sitting. A second use makes this a selection set, and the number it produced stops meaning what it said."
+}

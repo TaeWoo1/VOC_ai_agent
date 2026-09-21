@@ -56,7 +56,7 @@ class GoalProvenanceSmokePlanTest {
         assertThat(plan.requiredOutcomes()).containsExactly("ANSWER", "STATE_READ", "ACTION");
         assertThat(plan.intended()).isEqualTo(GoalSmokeInputs.INTENDED);
         // Every plan is reachable by the name the operator types, and no plan is registered under another's name.
-        assertThat(GoalSmokeInputs.PLANS).hasSize(3);
+        assertThat(GoalSmokeInputs.PLANS).hasSize(4);
         GoalSmokeInputs.PLANS.forEach((name, p) -> assertThat(p.name()).isEqualTo(name));
     }
 
@@ -130,6 +130,49 @@ class GoalProvenanceSmokePlanTest {
      * the corpus. This is what shows it: a case added to or removed from the frozen gold makes the committed list
      * wrong, loudly, instead of silently turning a baseline into a selection.
      */
+    /**
+     * <b>The holdout resolves, is disjoint from the spent DEV set, and is not a fixture.</b>
+     *
+     * <p>The ids are committed and the 75 messages are not, so nothing in git can show the list still matches the
+     * frozen corpus — this is what shows it. The disjointness check is here as well as in the build script because
+     * the two are asked at different moments: the script answers it when the holdout is built, and this answers it
+     * on every commit afterwards, when somebody edits one list and not the other.
+     */
+    @Test
+    @DisplayName("the 75-case holdout resolves from its own durable source, and shares nothing with the DEV set")
+    void theHoldoutIsWhatItSaysItIs() throws Exception {
+        GoalSmokeInputs.Plan plan = GoalSmokeInputs.HOLDOUT_V1;
+        assertThat(plan.planned()).isEqualTo(75);
+        assertThat(plan.fixtureIds()).isEmpty();
+        assertThat(plan.storeIds()).hasSize(75).doesNotHaveDuplicates().isEqualTo(GoalSmokeInputs.HOLDOUT_CASES);
+        assertThat(plan.storeIds()).allMatch(id -> id.startsWith("H:"));
+        assertThat(plan.intended()).isEmpty();
+        assertThat(plan.requiredOutcomes()).isEmpty();
+        assertThat(GoalSmokeInputs.PLANS).containsEntry(plan.name(), plan);
+
+        // Disjoint from the corpus that chose this contract. Not "mostly": a holdout sharing one case with the set
+        // that selected the thing being measured is a holdout for every case except the one that matters.
+        assertThat(plan.storeIds()).doesNotContainAnyElementsOf(GoalSmokeInputs.DEV_CASES);
+        assertThat(GoalSmokeInputs.DEV_CASES).noneMatch(d -> plan.storeIds().contains("H:" + d.substring(2)));
+
+        Path store = storeRoot();
+        if (store == null || !Files.exists(store.resolve(GoalSmokeInputs.HOLDOUT))) {
+            return;   // the holdout lives in the durable store and is never copied into this repository
+        }
+        GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE, store, plan);
+        assertThat(set.missing()).isEmpty();
+        assertThat(set.usable()).hasSize(75);
+        assertThat(set.complete()).isTrue();
+        assertThat(set.realCustomerText()).isTrue();
+
+        // The DEV capture and the holdout are different files, and an id from one must not resolve out of the
+        // other: that is the whole value of the namespace, and a shared file would make it a convention.
+        GoalSmokeInputs.Set devIds = GoalSmokeInputs.forIds(FIXTURE, store,
+                List.of(GoalSmokeInputs.DEV_CASES.get(0), plan.storeIds().get(0)));
+        assertThat(devIds.missing()).isEmpty();
+        assertThat(devIds.usable()).hasSize(2);
+    }
+
     @Test
     @DisplayName("the 67-case DEV plan is every case the frozen gold carries — and every one resolves to a message")
     void theDevPlanIsTheWholeCorpus() throws Exception {

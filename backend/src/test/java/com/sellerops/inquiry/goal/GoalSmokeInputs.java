@@ -49,6 +49,20 @@ public final class GoalSmokeInputs {
     /** Where the real message lives. Never in git, and never written back out of the store by this harness. */
     public static final String CAPTURE = "inquiry-planner-capture/v1/capture-S0.jsonl";
 
+    /**
+     * The frozen holdout (§25.13), which is a <b>second</b> durable source rather than more rows in the first.
+     *
+     * <p>Keeping it separate is the point: the DEV capture is spent, and a holdout that lived in the same file
+     * could be reached by a plan that meant to name DEV cases. The id namespace carries the same division — a
+     * {@code H:} case is resolved here and nowhere else, so a plan cannot mix the two by accident.
+     */
+    public static final String HOLDOUT = "inquiry-goal-holdout/v1/cases.jsonl";
+
+    /** Which durable file answers for an id, and under which key its text is written. Namespaced, not guessed. */
+    private static String[] sourceOf(String id) {
+        return id.startsWith("H:") ? new String[] {HOLDOUT, "text"} : new String[] {CAPTURE, "question"};
+    }
+
     /** What the smoke is supposed to exercise. Coverage is asserted against the assembled set, never assumed. */
     public static final Map<String, String> INTENDED = intended();
 
@@ -144,10 +158,48 @@ public final class GoalSmokeInputs {
             "one measurement of the frozen v2 contract against the whole frozen gold — baseline, not tuning",
             List.of(), DEV_CASES, List.of(), Map.of());
 
+    /**
+     * <b>The frozen holdout's own case ids, all 75</b> (§25.13). Ids only, as everywhere else: 51 are a real
+     * customer's words and 24 are written to that register, and neither belongs in this repository.
+     *
+     * <p>None of them is a DEV case, and {@code contracts/inquiry-goal-holdout/v1/build.py} is what says so — it
+     * checks the id AND the cluster the DEV corpus drew from, because a near-duplicate of a spent case is a spent
+     * case. It also refuses, by rule rather than by list, the four kinds of row this snapshot carries that no
+     * customer wrote: placeholder bodies, quoted threads, the seller's own replies, and 15 {@code bench-00NN}
+     * fixtures stored with {@code data_origin='REAL'}.
+     */
+    public static final List<String> HOLDOUT_CASES = List.of(
+            "H:017d3aa2", "H:02ba029d", "H:0410ef81", "H:053e4632", "H:05457756", "H:0587051a", "H:0880020e",
+            "H:0ae73053", "H:0bce59c4", "H:0c0825a7", "H:14f08d1f", "H:19a04430", "H:1dd0e94d", "H:1ed50543",
+            "H:2b85ed6c", "H:34fbc4d0", "H:3a2b5e84", "H:3a64c06b", "H:3c4ede70", "H:3e1ce9a4", "H:415544f6",
+            "H:430a095b", "H:4856ae68", "H:4b8dcf85", "H:521d200c", "H:52e14663", "H:5914a395", "H:634cafb9",
+            "H:691a9fab", "H:69836ea8", "H:6cc24ae2", "H:752aafcf", "H:75a88224", "H:77faa1ce", "H:7f4e0c67",
+            "H:8292368c", "H:889e4ff2", "H:8b1fa319", "H:8ca71fad", "H:93e522a3", "H:9a506382", "H:9f4d4ddf",
+            "H:S01", "H:S02", "H:S03", "H:S04", "H:S05", "H:S06", "H:S07", "H:S08", "H:S09", "H:S10", "H:S11",
+            "H:S12", "H:S13", "H:S14", "H:S15", "H:S16", "H:S17", "H:S18", "H:S19", "H:S20", "H:S21", "H:S22",
+            "H:S23", "H:S24", "H:a172013a", "H:a620d598", "H:a93fd23b", "H:b09dccc3", "H:b2097817", "H:c1db93a7",
+            "H:c90d3234", "H:d411a70e", "H:e4dda455");
+
+    /**
+     * <b>The holdout, measured once</b> (§25.13).
+     *
+     * <p>The question it exists for is comparative — does merging {@code DECISION} into {@code ANSWER} raise the
+     * rate at which an ambiguous answering request leaks to {@code ACTION}? — so a single arm cannot finish it. A
+     * run of this plan under one prompt version reports that version's leak rate and nothing about the direction
+     * of change; the DEV numbers cannot stand in, because that corpus has roughly a tenth of this one's ambiguity
+     * density and the comparison would be between two different questions.
+     *
+     * <p>No {@code intended} shapes and no {@code requiredOutcomes}, for the reason {@link #DEV_DIAGNOSTIC} gives:
+     * none of these is a fixture row, and their labels live outside git.
+     */
+    public static final Plan HOLDOUT_V1 = new Plan("goal-holdout-v1",
+            "the fresh holdout — one measurement, on text no contract here was designed against",
+            List.of(), HOLDOUT_CASES, List.of(), Map.of());
+
     /** By name, so the operator's command selects a plan rather than edits one. */
     public static final Map<String, Plan> PLANS =
             Map.of(CONTRACT_SMOKE.name(), CONTRACT_SMOKE, PROVENANCE_SMOKE.name(), PROVENANCE_SMOKE,
-                    DEV_DIAGNOSTIC.name(), DEV_DIAGNOSTIC);
+                    DEV_DIAGNOSTIC.name(), DEV_DIAGNOSTIC, HOLDOUT_V1.name(), HOLDOUT_V1);
 
     private GoalSmokeInputs() {
     }
@@ -197,28 +249,16 @@ public final class GoalSmokeInputs {
         List<Input> inputs = new ArrayList<>(fromGit.inputs());
         List<String> missing = new ArrayList<>(fromGit.missing().stream()
                 .filter(m -> plan.storeIds().stream().noneMatch(m::startsWith)).toList());
-        Path capture = storeRoot == null ? null : storeRoot.resolve(CAPTURE);
-        if (capture == null || !Files.exists(capture)) {
-            plan.storeIds().forEach(id -> missing.add(id + " — the durable eval store is not restored here; run "
-                    + "`node tools/eval-store/store.mjs restore inquiry-planner-capture v1`"));
-        } else {
-            for (String id : plan.storeIds()) {
-                String message = null;
-                for (String line : Files.readAllLines(capture)) {
-                    if (line.isBlank()) {
-                        continue;
-                    }
-                    JsonNode row = JSON.readTree(line);
-                    if (id.equals(row.path("q").asText())) {
-                        message = row.path("question").asText();
-                        break;
-                    }
-                }
-                if (message == null || message.isBlank()) {
-                    missing.add(id + " — the store is present and does not carry this case");
-                } else {
-                    inputs.add(new Input(id, message, true, null, true));
-                }
+        Map<String, String> store = storeMessages(storeRoot);
+        for (String id : plan.storeIds()) {
+            String message = store.get(id);
+            if (message == null || message.isBlank()) {
+                Path file = storeRoot == null ? null : storeRoot.resolve(sourceOf(id)[0]);
+                missing.add(file != null && Files.exists(file)
+                        ? id + " — the store is present and does not carry this case"
+                        : id + " — the durable eval store is not restored here; " + sourceOf(id)[0] + " is absent");
+            } else {
+                inputs.add(new Input(id, message, true, null, true));
             }
         }
         return new Set(List.copyOf(inputs), List.copyOf(missing), coverage(rows(fixture), inputs, plan));
@@ -295,21 +335,30 @@ public final class GoalSmokeInputs {
         return new Set(List.copyOf(inputs), List.copyOf(missing), Map.of());
     }
 
-    /** Every real message the durable store carries, by case id. Empty when the store is not restored here. */
+    /**
+     * Every real message the durable store carries, by case id, across <b>both</b> sources. Empty when neither is
+     * restored here; short when one is, which is what lets {@code missing} name the file an operator has to fetch
+     * rather than reporting a case that does not exist.
+     */
     private static Map<String, String> storeMessages(Path storeRoot) throws Exception {
         Map<String, String> out = new LinkedHashMap<>();
-        Path capture = storeRoot == null ? null : storeRoot.resolve(CAPTURE);
-        if (capture == null || !Files.exists(capture)) {
+        if (storeRoot == null) {
             return out;
         }
-        for (String line : Files.readAllLines(capture)) {
-            if (line.isBlank()) {
+        for (String[] source : new String[][] {{CAPTURE, "question"}, {HOLDOUT, "text"}}) {
+            Path file = storeRoot.resolve(source[0]);
+            if (!Files.exists(file)) {
                 continue;
             }
-            JsonNode row = JSON.readTree(line);
-            String message = row.path("question").asText();
-            if (!message.isBlank()) {
-                out.put(row.path("q").asText(), message);
+            for (String line : Files.readAllLines(file)) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                JsonNode row = JSON.readTree(line);
+                String message = row.path(source[1]).asText();
+                if (!message.isBlank()) {
+                    out.put(row.path("q").asText(), message);
+                }
             }
         }
         return out;

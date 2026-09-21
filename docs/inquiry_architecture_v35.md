@@ -1966,3 +1966,175 @@ data.
 So the next step is not another DEV run. It is a **fresh holdout** — cases never used to choose the contract, labelled
 before the run — to answer one question: does a 3-way contract raise the ACTION error rate? Followed by E2E on the
 existing execution path, unchanged. No prompt experiment against these 67.
+
+---
+
+## 26. ANSWER — the three-token contract, and the holdout that has to referee it (2026-09-21)
+
+`customer-goal-interpreter/v3`. `INFORMATION` + `DECISION` → **`ANSWER`**. `STATE_READ` and `ACTION` are untouched,
+and so are the ACTION safety gate (§25.10) and the evidence contract (§25).
+
+### 26.1 What made this a contract change rather than a re-labelling
+
+§25.12 folded the stored 67-case run and got 65.3% → 95.8%. That number alone proves nothing: the model answered a
+four-token schema, so folding removes the failing distinction by construction. What decided it was a second
+measurement, on the frozen gold rather than on a run.
+
+The only place in the runtime where `INFORMATION` and `DECISION` differed was one conjunct in `ResolutionPolicy`,
+which dispatched `CapabilityId.SELLER` for a `DECISION` whose knowledge resolver found nothing. The gold says what
+that dispatch is worth:
+
+| | |
+|---|---|
+| goals terminating `NEEDS_SELLER` | **35 of 72** |
+| …of those, reaching it with **no** `SELLER` step | **32** |
+| goals the seller resolver closes | **0 of 72** |
+
+So the fourth token was not separating kinds of outcome. It was appending a step to three traces before they ended
+in the state they would have ended in anyway.
+
+### 26.2 The seller is a state, not a step
+
+The brief was explicit: do not buy the merge by creating 30 new `SELLER` dispatches. Keying the same dispatch on the
+observed absence instead of the token — which `ResolutionPolicy`'s own class comment already claimed it did — would
+have done exactly that, and closed none of them.
+
+The measurement pointed the other way, and the change is a **deletion**: the branch goes, and the fall-through that
+was already there settles at `NEEDS_SELLER`. Seller dispatches in the fixture corpus go **3 → 0** (G06, G10, G14),
+and all three keep their terminal. G19 already demonstrated the property before the merge: a judgment goal that ends
+`NEEDS_SELLER` with `SELLER` in its `forbidden_dispatch`.
+
+`CapabilityId.SELLER` stays in the registry — `ReferentRegistry` and the older planner layer read it. It is simply
+not something this loop asks for.
+
+The prerequisite/resume state machine (A–I) is unchanged; §22's nine invariants still hold, and the ANSWER path is
+the DECISION path with one fewer step at the end:
+
+```
+ANSWER → KNOWLEDGE (find the rule) → [rule names a prerequisite] → ENTITY_STATE → KNOWLEDGE (apply it)
+       → RESOLVED, or NEEDS_SELLER on an observed absence
+```
+
+### 26.3 The prompt moved as little as it could, and the diff is the evidence
+
+Instruction: **35 lines, 30 byte-identical, 5 changed, −5 characters** with whitespace removed. No rule was added and
+none removed — the judgment examples that sat on the `DECISION` line sit in `ANSWER`'s parenthesis unchanged, and the
+sentence that stops a judgment request from also emitting the execution behind it is **byte-identical**. That sentence
+is the whole safety content of the section, and the merge is precisely what puts more weight on it, so
+`CustomerGoalPromptTest` pins it verbatim rather than describing it.
+
+### 26.4 A recorded run keeps the vocabulary it spoke
+
+`outcomesFor(promptVersion)` reads v1/v2 rows in the four-token space and v3 rows in the three. The fold to `ANSWER`
+is applied to **predictions only, and only when the gold itself is three-token** — so a four-token gold still scores
+the distinction it was recording, and the stored DEV run does not silently restate itself. Measured at this commit:
+re-scoring `v35-goal-smoke-097a53cc-7fdad6fb` gives outcome **0.6528**, referent **0.9028**, invented **13**,
+refusals **0** — identical to its stored `score.json`.
+
+That rule is also what makes a two-arm comparison possible: one gold, two vocabularies.
+
+### 26.5 The holdout (`contracts/inquiry-goal-holdout/v1`)
+
+The 67 DEV cases chose this contract and can no longer measure it. The holdout answers one question, fixed before it
+was built: **does merging `DECISION` into `ANSWER` raise the rate at which an ambiguous answering request leaks to
+`ACTION`?**
+
+**Where the real cases came from.** The same snapshot the DEV corpus was drawn from. 3,535 rows carry
+`data_origin='REAL'`; the seller has already dispositioned 3,199 as spam and 45 as thread replies, leaving 291
+`ACTIVE`. Of those, 190 are distinct messages the DEV set did not use, and **89** survive the contamination rules.
+51 were selected.
+
+**What `data_origin='REAL'` did not exclude**, found while building this and refused by rule in `build.py`:
+
+| | |
+|---|---|
+| `bench-00NN` fixtures stored as REAL (`b3000000-0000-4000-8000-0000000000NN`) | **15** |
+| placeholder bodies (`NAVER 문의 본문 33`) | 46 |
+| quoted threads / the seller's own replies | 39 |
+| operator connectivity test posts | 2 |
+
+The 15 bench rows matter most: they are the cleanest judgment-shaped Korean in the pool — exactly the rows a holdout
+for *this* question would have reached for first. They are refused, not modified.
+
+**Composition — 75 cases, 51 real and 24 synthetic.**
+
+| stratum | n | what it is |
+|---|---|---|
+| **C** | 28 | ambiguous ANSWER: a judgment or possibility asked, no command given. The measurement. |
+| **T** | 20 | true ACTION. The opposite failure — over-correcting until real requests stop being requests. |
+| **A** | 10 | plain ANSWER. Leakage here would be alarming rather than interesting. |
+| **N** | 9 | no goal. The invention probes. |
+| **S** | 6 | STATE_READ. |
+| **R** | 2 | a legitimate single inference, and a real customer-stated fallback. |
+
+Gold goals: `ANSWER` 39 · `ACTION` 24 · `STATE_READ` 6, across 66 cases; 9 request nothing.
+
+**Judgment-shaped messages are 7 of the 89 clean real candidates.** The critical stratum is therefore enriched
+roughly tenfold, deliberately — which means the absolute leak rate this set produces is **not a production rate**,
+and only the v2-vs-v3 difference is a finding.
+
+**Why it cannot be gamed by the marker.** If every ambiguous-marker case carried gold `ANSWER`, a prompt that
+mapped the marker to the token would score well without reading anything. So the critical stratum is built from
+**8 minimal pairs**: the same surface marker on both sides of the gold, separated only by whether the customer asked
+for the world to change. `build.py` fails if a pair is one-sided. The sharpest pair is real and needed no synthetic
+help — two messages about issuing the same document, both using the same permission-shaped ending, one asking
+whether it is possible and one asking for it to be done.
+
+**Register.** The DEV set's synthetic half is textbook-clean Korean. These 24 were written to the real inbox's
+register — missing spaces, misspellings, trailing `ㅠ` and `~~`, bare fragments with no sentence around them —
+because a holdout made of textbook Korean measures a corpus nobody sends.
+
+**No case text appears in this repository**, here or anywhere else. The examples above are described rather than
+quoted for two reasons that both apply: they are a real customer's words, and a holdout whose text is committed is
+one anybody can tune against.
+
+**Confidence.** `HIGH` (57) means a careful reader lands on the label without argument; `MEDIUM` (18) means the label
+is defensible and the other reading is not absurd. **The primary metric uses HIGH only**; MEDIUM is reported beside
+it and never folded in. A holdout whose own gold is arguable cannot referee a contract.
+
+Messages and labels stay in the durable store. The repository holds the build/check script, the schema, and the
+hashes — `labels.sha256 5437d0f1…`, `cases.sha256 6e02eac4…` — which the manifest quotes, so a label edited after a
+model call stops the run from being a run of this holdout.
+
+### 26.6 The evaluation, pre-registered
+
+**Primary metric** — ACTION leakage on ANSWER-gold cases: predicted outcome `ACTION` where gold is `ANSWER`, over
+the **26 HIGH-confidence ANSWER-gold cases**. The v2 arm's `INFORMATION`/`DECISION` fold to `ANSWER` first, so both
+arms are scored against one gold in one space.
+
+**Test** — McNemar exact on the paired per-case leak indicator. `b` = v2 clean and v3 leaked; `c` = v2 leaked and v3
+clean. Paired, because the arms see identical cases and a two-proportion test would throw that away.
+
+**Decision rule, fixed now:**
+
+| | |
+|---|---|
+| `b ≤ c` | no increase — the merge ships |
+| `b > c`, exact *p* ≥ 0.05 | not distinguishable at this size. Ships only if `b − c ≤ 2`, else **HOLD** |
+| `b > c`, exact *p* < 0.05 | increase confirmed — **the merge does not ship as it stands** |
+
+**Power, stated before the run:** with 26 cases this set can detect roughly a **tripling** of the leak rate, not a
+doubling. A null result is "not distinguishable here", never "no effect".
+
+**Guards that must not regress:** reverse leakage (ACTION-gold predicted ANSWER, 20 cases) · `invented_ACTION` and
+`substituted_ACTION` · NO_GOAL violations on the 9 no-goal cases · evidence verbatim failures = 0 (a parse failure is
+a run failure, not a score) · referent and constraint accuracy, which should be arm-invariant.
+
+**Not a metric:** overall outcome accuracy. The arms have different label spaces and the question is not accuracy.
+
+### 26.7 The open question this package does not decide
+
+**A single arm cannot answer a comparative question.** Running only v3 reports v3's leak rate and says nothing about
+the direction of change, and the DEV numbers cannot stand in — that corpus has roughly a tenth of this one's
+ambiguity density, so the comparison would be between two different questions.
+
+So the sitting is **two arms on the same 75 cases, 150 calls**, or the question changes to "what is v3's leak rate",
+which is worth measuring but is not what was asked. That is a cost decision and it is the product owner's.
+
+Running a v2 arm at this commit also needs one piece of machinery that does not exist yet: the prompt is v3 here, and
+`GoalRunGuard` binds the prompt fingerprint. The arm has to be selectable in-tree, with a test asserting that
+rendering v2 reproduces the **pinned v2 hash** — which would prove the comparison arm is the shipped v2 rather than a
+reconstruction of it. Not built, because whether there is a second arm is not settled.
+
+**After the sitting the holdout is spent.** A second use makes it a selection set, and the number it produced stops
+meaning what it said.
