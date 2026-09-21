@@ -163,10 +163,13 @@ function DecisionItem({ row }: { row: CustomerOperationsDecisionRow }) {
         </p>
         <p className="mt-1 break-keep font-semibold text-ink">{row.title ?? subjectFallback(row.subjectKind)}</p>
         <p className="mt-1 break-keep text-sm leading-relaxed text-ink">{row.summary ?? row.reasonNote}</p>
-        {action ? (
+        {/* A prepared next step is shown whether or not it also fits one of the eight action types. The review lane
+            names its step in the seller's own words and picks no type, and hiding the sentence because the label
+            above it is missing would drop the more useful half. */}
+        {action || row.recommendedAction ? (
           <p className="mt-1 break-keep text-sm text-muted">
-            제안: {action}
-            {row.recommendedAction ? ` — ${row.recommendedAction}` : ""}
+            제안: {action ?? row.recommendedAction}
+            {action && row.recommendedAction ? ` — ${row.recommendedAction}` : ""}
           </p>
         ) : null}
         {row.missingInformation.length > 0 ? (

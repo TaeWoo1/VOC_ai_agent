@@ -116,8 +116,18 @@ export const REASON = {
  * Why a case came to the seller, from the action Reviewnary recommended — nothing new is classified here.
  * Money is money; a missing fact is a missing fact (also when the case lists what it is missing and names no
  * action); every other recommendation is a judgement Reviewnary did not take on itself.
+ *
+ * <p><b>「판단 보류」 is a claim, and for a review it was the wrong one.</b> A review case names no
+ * `recommendedActionType` because the review lane's preparation speaks in the seller's own words rather than
+ * choosing from this vocabulary of eight — not because nothing was decided. Saying 「판단 보류」 over a row that
+ * carries 「이 상품에서 「…」 문제가 3건 확인됐습니다」 describes the row as emptier than it is. So a review with
+ * no action type is tagged for what it is; `subjectKind` is a stored fact, not a new classification.
  */
-export function reasonOfCase(actionType: string | null, missingInformation: string[] = []): Reason {
+export function reasonOfCase(
+  actionType: string | null,
+  missingInformation: string[] = [],
+  subjectKind?: "INQUIRY" | "REVIEW",
+): Reason {
   switch (actionType) {
     case "REFUND_OR_COMPENSATION":
     case "CANCEL_OR_EXCHANGE":
@@ -125,7 +135,8 @@ export function reasonOfCase(actionType: string | null, missingInformation: stri
     case "ADD_KNOWLEDGE":
       return REASON.info;
     case null:
-      return missingInformation.length > 0 ? REASON.info : REASON.withheld;
+      if (missingInformation.length > 0) return REASON.info;
+      return subjectKind === "REVIEW" ? REASON.review : REASON.withheld;
     default:
       return REASON.withheld;
   }

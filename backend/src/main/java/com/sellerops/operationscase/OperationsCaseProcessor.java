@@ -99,6 +99,27 @@ public class OperationsCaseProcessor {
 
     private CaseResolutionReader resolutions;
 
+    private com.sellerops.proactive.ProactiveReviewInvestigator reviewInvestigator;
+
+    /**
+     * What is already known about a 확인 필요 review, <b>before any model runs</b>.
+     *
+     * <p>This is not a second review brain. It is the one the proactive lane has used since it shipped: it reads the
+     * issue memory ({@code review_issue} / {@code review_issue_evidence}) that the extraction after every ingest
+     * already wrote, and says whether this product has heard this complaint before and what the seller can do next.
+     * Nothing is inferred from this one review's text — 「이건 반복 문제 같다」 would be an invention; counting the
+     * evidence rows another pipeline recorded is an observation.
+     *
+     * <p><b>Reused rather than reimplemented on purpose.</b> A review case that reached its own conclusion about
+     * repetition would give the seller two answers to 「같은 문제가 몇 번 있었나」, and the two would drift.
+     *
+     * <p>Optional like the reader below: absent, a review case is prepared exactly as it was before.
+     */
+    @Autowired(required = false)
+    public void setReviewInvestigator(com.sellerops.proactive.ProactiveReviewInvestigator reviewInvestigator) {
+        this.reviewInvestigator = reviewInvestigator;
+    }
+
     /**
      * The Customer Goal resolution, when something can read this message into goals.
      *
@@ -395,18 +416,18 @@ public class OperationsCaseProcessor {
                 OperationsSignal.inquiryState(inquiry),
                 OperationsCaseRules.forInquiry(inquiry.getStatus(), inquiry.getOperationalState(),
                         inquiry.getThreadRole()),
-                inquiry.getChannelId(), inquiry.getProductId(), workItemId, k);
+                inquiry.getChannelId(), inquiry.getProductId(), workItemId, null, k);
     }
 
     private void handleReview(ResponsibilityRun run, Responsibility responsibility, Review review, Counters k) {
         handle(run, responsibility, OperationsSubjectKind.REVIEW, review.getId(), OperationsSignal.reviewState(review),
                 OperationsCaseRules.forReview(review.getRating(), review.getBody(), review.getReplyState()),
-                review.getChannelId(), review.getProductId(), null, k);
+                review.getChannelId(), review.getProductId(), null, review, k);
     }
 
     private void handle(ResponsibilityRun run, Responsibility responsibility, OperationsSubjectKind kind,
                         UUID subjectId, String rawState, OperationsCaseRules.Conclusion conclusion, UUID channelId,
-                        UUID productId, UUID workItemId, Counters k) {
+                        UUID productId, UUID workItemId, Review review, Counters k) {
         UUID orgId = run.getOrgId();
         String state = OperationsSignal.truncate(rawState);
         String signature = OperationsSignal.signature(orgId, kind, subjectId, state, null);
@@ -439,6 +460,7 @@ public class OperationsCaseProcessor {
         c.setMissingInformation(null);
         c.setConfidence(null);
         c.setDecidedBy(CaseDecider.RULE);
+        prepareReviewRecommendation(c, kind, conclusion, review, orgId);
         // What the customer actually asked for, resolved against THIS inquiry's order and listing. Null unless
         // something read the message into goals, which nothing does today — see CaseResolutionReader.
         CaseResolutionReader.Reading reading =
@@ -595,6 +617,52 @@ public class OperationsCaseProcessor {
             markClosed(c, CaseResolution.AGENT_NO_ACTION);
         }
         return cases.saveAndFlush(c);
+    }
+
+    /**
+     * <b>What a 확인 필요 review already knows, before any model runs.</b>
+     *
+     * <p>Until this, a review reached 「내 결정 필요」 with {@code recommendedAction} null and stood in the queue
+     * beside an inquiry that said 「제안: 답변 확인 후 발송 · 초안 있음」, carrying nothing but the line that says it is
+     * a low-rated review. That was not a missing capability — the investigation is default-OFF and INQUIRY-shaped,
+     * but the <em>deterministic</em> review preparation has existed and shipped in the proactive lane all along.
+     * So the case reuses it rather than reaching its own conclusion: see {@link #setReviewInvestigator}.
+     *
+     * <p><b>Costs no model call and no marketplace call</b> — it counts rows in the issue memory. That is the whole
+     * reason it may run for every review that needs a decision: there is no per-review spend to ration, so no review
+     * has to be chosen over another, and nothing is bought for a review the rules already closed or put under watch.
+     *
+     * <p>Three fields, each earned by a fact this lane holds:
+     * <ul>
+     *   <li>{@code recommendedAction} — the investigator's own sentence, carried whole. It already leads with the
+     *       repetition it found ({@code 「…」 문제가 N건 확인됐습니다}), so the evidence and the suggestion are one
+     *       statement rather than two that could disagree.</li>
+     *   <li>{@code evidenceCount} — 1 when the issue memory answered, 0 when it had nothing. A product with no issue
+     *       memory yields no repeat claim rather than a hedged one.</li>
+     *   <li>{@code preparedAction} — {@code RECOMMENDATION_ONLY}, which is the ceiling for a review and the honest
+     *       name for what now exists: something to read, and nothing to send.</li>
+     * </ul>
+     *
+     * <p><b>{@code recommendedActionType} is deliberately left null.</b> The investigator names a next step in the
+     * seller's language; it does not choose from this repository's eight-value action vocabulary, and picking one
+     * here would be this method inventing the judgement the brief said to reuse. A later investigation may fill it —
+     * {@code applyInvestigation} overwrites all of this, as it should: a model that actually read the review outranks
+     * a row count.
+     *
+     * <p>{@code summary} is left alone for the same reason. It is where the investigation puts what it concluded,
+     * and duplicating the recommendation's first clause into it would show the seller one fact twice.
+     */
+    private void prepareReviewRecommendation(OperationsCase c, OperationsSubjectKind kind,
+                                             OperationsCaseRules.Conclusion conclusion, Review review, UUID orgId) {
+        if (kind != OperationsSubjectKind.REVIEW || review == null || reviewInvestigator == null
+                || !conclusion.needsInvestigation()) {
+            return;
+        }
+        com.sellerops.proactive.ProactiveReviewInvestigator.Investigation found =
+                reviewInvestigator.investigate(orgId, review);
+        c.setRecommendedAction(found.recommendation());
+        c.setEvidenceCount(found.repeatIssue() == null ? 0 : 1);
+        c.setPreparedAction(CasePreparedAction.RECOMMENDATION_ONLY);
     }
 
     private void prepareDraftIfAsked(ResponsibilityRun run, OperationsCase c, CaseInvestigationOutput output,

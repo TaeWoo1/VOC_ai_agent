@@ -42,12 +42,22 @@ export interface HomeWork {
  * through; a second mapping would be a second opinion about what this case is.
  *
  * <p>An inquiry and a review are not branched on here. What the row says comes from the decision the case carries
- * (recommended action, what is missing, whether a draft stands) — `subjectKind` only chooses the noun in `source`.
+ * (recommended action, what is missing, whether a draft stands) — `subjectKind` only chooses the noun in `source`,
+ * and the tag it gives a case that named no action type (see `reasonOfCase`).
+ *
+ * <p>The one line falls through what the case actually knows, most specific first: what it is missing, what an
+ * investigation concluded, <b>what the review lane prepared</b>, and — last — the rule's line about why the subject
+ * is here at all. `recommendedAction` sits above `reasonNote` because 「이 상품에서 「…」 문제가 3건 확인됐습니다」
+ * tells the seller something 「낮은 별점에 내용이 있는 새 리뷰입니다」 does not; below `summary` because a summary is
+ * a conclusion and a recommendation is what to do about one.
  */
 export function caseWorkRow(row: CustomerOperationsDecisionRow): HomeWorkRow {
-  const reason = reasonOfCase(row.recommendedActionType, row.missingInformation);
+  const reason = reasonOfCase(row.recommendedActionType, row.missingInformation, row.subjectKind);
   const missing = row.missingInformation.length > 0 ? `${row.missingInformation.join(", ")} 필요` : null;
-  const line = [row.draftPrepared ? `초안 있음 · ${DRAFT_UNSENT}` : null, missing ?? row.summary ?? row.reasonNote]
+  const line = [
+    row.draftPrepared ? `초안 있음 · ${DRAFT_UNSENT}` : null,
+    missing ?? row.summary ?? row.recommendedAction ?? row.reasonNote,
+  ]
     .filter(Boolean)
     .join(" · ");
   return {

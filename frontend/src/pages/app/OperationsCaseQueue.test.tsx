@@ -114,6 +114,39 @@ describe("OperationsCaseQueue", () => {
     expect(note.textContent).not.toMatch(/문의|리뷰 화면/);
   });
 
+  it("리뷰 행도 무엇을 하면 되는지 말한다 — 「판단 보류」로 비워 두지 않는다", async () => {
+    // The review lane prepares this sentence with no model call, from the issue memory another pipeline already
+    // wrote. Before it reached the row, a review stood here carrying only 「확인이 필요한 리뷰입니다」 beside an
+    // inquiry that said what was ready to send — and was tagged 「판단 보류」, which described the row as emptier
+    // than it was.
+    api.getCustomerOperationsDecisions.mockResolvedValue({
+      total: 1,
+      rows: [
+        {
+          ...REVIEW,
+          recommendedAction:
+            "이 상품에서 「포장 파손」 문제가 3건 확인됐습니다. 개별 응대보다 상품 설명이나 운영 기준을 함께 손보는 편이 빠릅니다.",
+        },
+      ],
+    });
+    draw();
+
+    const list = await screen.findByRole("list", { name: "확인 필요" });
+    expect(list).toHaveTextContent(/「포장 파손」 문제가 3건 확인됐습니다/);
+    expect(list).toHaveTextContent("리뷰");
+    expect(list).not.toHaveTextContent("판단 보류");
+  });
+
+  it("준비된 것이 없는 리뷰는 없는 추천을 지어내지 않는다", async () => {
+    api.getCustomerOperationsDecisions.mockResolvedValue({ total: 1, rows: [REVIEW] });
+    draw();
+
+    const list = await screen.findByRole("list", { name: "확인 필요" });
+    // Falls back to the rule's own line. A product with no issue memory yields no repeat claim rather than a
+    // hedged one, and the row says only what is true.
+    expect(list).toHaveTextContent("확인이 필요한 리뷰입니다");
+  });
+
   it("이 화면에는 결정하는 컨트롤이 없다", async () => {
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 2, rows: [row(), REVIEW] });
     draw();

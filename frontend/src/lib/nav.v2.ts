@@ -15,9 +15,17 @@
 // has served `/api/products` throughout and no screen ever reached it
 // (`docs/frontend_ux_audit_v1.md` §1).
 //
+// 확인할 일 joined 운영 with the unified case queue. It is the today-inbox this file has been parking since
+// Demo Core Experience v1, and it answers 운영's own question — "오늘 내가 확인하거나 조치할 일은 무엇인가?" —
+// more directly than any screen below it: one list over 문의 and 리뷰 together, ordered by how long the customer
+// has waited. It sits under 홈 because the Home briefs its first rows; the entries below it stay as the places a
+// seller goes when they already know WHICH object they want. Until now the queue was reachable only from two
+// overflow links inside 고객 운영 관리 — a screen the seller is meant to open every morning cannot be something
+// they can only fall into.
+//
 // Deliberately absent from the menu: `/agent` (an action offered inside the operations screens,
 // not a destination), `/memory` and `/reports` (kept as routes, reached from 홈 and 설정, out of the
-// primary IA until the home/today-inbox unit decides their place), and every per-channel page
+// primary IA — the today-inbox question above is now answered, theirs is not), and every per-channel page
 // (`/connect/channels/:accountId`, the connect wizards) — those are reached from 채널 연결.
 
 export interface NavItem {
@@ -41,6 +49,7 @@ export const NAV_GROUPS: NavGroup[] = [
     heading: "운영",
     items: [
       { to: "/", label: "홈", short: "홈", icon: "home", end: true },
+      { to: "/customer-operations/cases", label: "확인할 일", short: "확인", icon: "inbox" },
       { to: "/products", label: "상품", short: "상품", icon: "product" },
       { to: "/reviews", label: "리뷰", short: "리뷰", icon: "review" },
       { to: "/inquiries", label: "문의", short: "문의", icon: "mail" },
