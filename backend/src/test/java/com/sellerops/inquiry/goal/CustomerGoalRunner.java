@@ -438,44 +438,10 @@ public final class CustomerGoalRunner {
      * from one that returned a malformed object, and a single {@code GOAL_CONTRACT} bucket would hide that.
      */
     private static Parsed parse(String content, String customerMessage) {
-        JsonNode root;
-        try {
-            root = JSON.readTree(content);
-        } catch (Exception e) {
-            return new Parsed(null, null, "GOAL_UNPARSEABLE");
-        }
-        if (root == null || !root.isObject() || !root.has("goals")) {
-            return new Parsed(null, null, "GOAL_UNPARSEABLE");
-        }
-        try {
-            List<CustomerGoal> goals = new ArrayList<>();
-            for (JsonNode g : root.get("goals")) {
-                List<String> constraints = new ArrayList<>();
-                g.path("explicit_constraints").forEach(c -> constraints.add(c.asText()));
-                goals.add(new CustomerGoal(g.path("id").asText(), g.path("explicit_request").asText(),
-                        RequestedOutcome.valueOf(g.path("requested_outcome").asText()),
-                        Referent.valueOf(g.path("subject").asText()),
-                        RequestBasis.valueOf(g.path("basis").asText()), constraints,
-                        g.path("evidence").asText(null)));
-            }
-            List<GoalRelation> relations = new ArrayList<>();
-            if (root.has("relations")) {
-                for (JsonNode r : root.get("relations")) {
-                    relations.add(new GoalRelation(GoalRelation.Kind.valueOf(r.path("kind").asText()),
-                            r.path("primary_goal_id").asText(), r.path("fallback_goal_id").asText(),
-                            r.path("stated_condition").asText()));
-                }
-            }
-            // The set's own rules: ids, one fallback each, no cycles, one clause per goal, one inference per message.
-            CustomerGoalSet set = new CustomerGoalSet(goals, relations);
-            if (!set.unquoted(customerMessage).isEmpty()) {
-                return new Parsed(null, null, "GOAL_EVIDENCE");
-            }
-            return new Parsed(root.get("goals"), root.has("relations") ? root.get("relations")
-                    : JSON.createArrayNode(), null);
-        } catch (IllegalArgumentException | NullPointerException e) {
-            return new Parsed(null, null, "GOAL_CONTRACT");
-        }
+        // One parser, in src/main: the contract's rules are the production capability's rules. This wrapper keeps
+        // the runner's recorded shape (the vendor's own nodes, and null goals on a refusal) byte-identical.
+        CustomerGoalResponseParser.Parsed read = CustomerGoalResponseParser.parse(content, customerMessage);
+        return new Parsed(read.goals(), read.relations(), read.failure());
     }
 
     private record Parsed(JsonNode goals, JsonNode relations, String failure) {

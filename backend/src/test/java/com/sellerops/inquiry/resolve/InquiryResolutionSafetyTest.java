@@ -296,16 +296,17 @@ class InquiryResolutionSafetyTest {
     }
 
     /**
-     * <b>Nothing in production reads a sentence into goals, and that has to stay visible.</b>
+     * <b>Exactly one thing reads a sentence into goals, and it is the audited one.</b>
      *
-     * <p>Every workflow downstream of {@link com.sellerops.inquiry.resolve.CustomerGoalInterpretation} is written
-     * and tested, so the day an implementation appears the loop starts deciding real sellers' cases. That is a
-     * product decision — a goal is a model's reading of a customer's sentence — and it must not arrive as a quiet
-     * bean. This fails when one does, which is the moment to make the decision rather than discover it later.
+     * <p>This guard used to assert <i>zero</i> implementations, and that was true until the interpreter shipped.
+     * It was never the property worth keeping — the property is that reading a customer's sentence into goals is
+     * a <b>metered, keyed, named-organisations-only capability</b>, not something a class can start doing. So the
+     * count is narrowed to one rather than dropped: a second implementation is a second way into the resolution
+     * loop, and it inherits none of the store, the quota or the access gate that the first one goes through.
      */
     @Test
-    @DisplayName("GUARD: the goal interpretation seam has no production implementation")
-    void nothingReadsASentenceIntoGoalsYet() throws Exception {
+    @DisplayName("GUARD: exactly one production class reads a sentence into goals, and it is off by default")
+    void oneAuditedReaderOfSentences() throws Exception {
         List<String> implementations = new ArrayList<>();
         try (var paths = Files.walk(MAIN)) {
             for (Path p : paths.filter(Files::isRegularFile)
@@ -313,18 +314,51 @@ class InquiryResolutionSafetyTest {
                 if (p.getFileName().toString().equals("CustomerGoalInterpretation.java")) {
                     continue;
                 }
-                String code = withoutComments(Files.readString(p));
-                if (code.contains("implements CustomerGoalInterpretation")
-                        || code.contains("CustomerGoalInterpretation()")) {
+                if (withoutComments(Files.readString(p)).contains("implements CustomerGoalInterpretation")) {
                     implementations.add(p.getFileName().toString());
                 }
             }
         }
         assertThat(implementations)
-                .as("something now turns a customer's sentence into goals in production. The resolution loop then "
-                        + "decides real cases from a model's reading — see the interface's own javadoc and "
-                        + "docs/inquiry_architecture_v35.md §25.10 before this ships.")
-                .isEmpty();
+                .as("a second class turns customers' sentences into goals. The audited one is metered, keyed, "
+                        + "stored once per message and admitted only for named organisations; a new one inherits "
+                        + "none of that. Route it through StoredCustomerGoalInterpretation, or give it the same "
+                        + "gates FIRST — see the interface's javadoc.")
+                .containsExactly("StoredCustomerGoalInterpretation.java");
+
+        // And it is off unless a deployment says otherwise, in the file that owns the switch.
+        String yml = Files.readString(Path.of("src", "main", "resources", "application.yml"));
+        assertThat(yml).contains("enabled: ${SELLEROPS_INQUIRY_GOAL_ENABLED:false}");
+        assertThat(yml).contains("enabled-org-ids: ${SELLEROPS_INQUIRY_GOAL_ORG_IDS:}");
+        assertThat(yml).contains("api-key: ${SELLEROPS_INQUIRY_GOAL_API_KEY:}");
+    }
+
+    /**
+     * <b>The reader is reached from the case runtime, and from nothing a seller's screen calls.</b>
+     *
+     * <p>«Ask once» is a property of the store, but «a read never asks» has to be a property of the call graph:
+     * a Home page that interpreted on render would spend a seller's budget on scrolling, and could change a
+     * conclusion between two looks at the same case.
+     */
+    @Test
+    @DisplayName("GUARD: no read surface can reach the interpretation")
+    void readSurfacesDoNotInterpret() throws Exception {
+        List<String> readers = List.of("CustomerOperationsHomeService.java", "CustomerOperationsHomeController.java",
+                "InquiryProposalService.java", "ProactiveCaseService.java");
+        List<String> offenders = new ArrayList<>();
+        try (var paths = Files.walk(MAIN)) {
+            for (Path p : paths.filter(Files::isRegularFile).toList()) {
+                if (!readers.contains(p.getFileName().toString())) {
+                    continue;
+                }
+                String code = withoutComments(Files.readString(p));
+                if (code.contains("CustomerGoalInterpretation") || code.contains("CaseResolutionReader")
+                        || code.contains("InquiryGoalService")) {
+                    offenders.add(p.getFileName().toString());
+                }
+            }
+        }
+        assertThat(offenders).as("a seller's read now reaches the goal interpreter").isEmpty();
     }
 
     @Test

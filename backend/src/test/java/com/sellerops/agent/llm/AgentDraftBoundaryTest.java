@@ -96,7 +96,11 @@ class AgentDraftBoundaryTest {
             // key and org list, because it is the only capability whose output decides whether a Case may be
             // completed at all.
             new String[] {"InquiryDecisionGenerator", "InquiryDecisionService.java",
-                    "InquiryDecisionGenerator.java"});
+                    "InquiryDecisionGenerator.java"},
+            // The FOURTEENTH: the Customer Goal interpreter (Inquiry v3.5 §29). Its payload is one customer
+            // sentence and two constants — no order, no product, no knowledge, no resolution state — and its
+            // answer is a closed goal vocabulary the vendor enforces as strict Structured Outputs.
+            new String[] {"InquiryGoalGenerator", "InquiryGoalService.java", "InquiryGoalGenerator.java"});
 
     /**
      * The classes allowed to name {@code AgentLlmTransport} beside a {@code .post(} call: the three
@@ -110,6 +114,7 @@ class AgentDraftBoundaryTest {
             "KnowledgeEligibilityGenerator.java", "AgentReportNarrativeGenerator.java",
             "AgentConverseGenerator.java", "CaseInvestigationGenerator.java", "ReviewMediaVisionGenerator.java",
             "InquiryDecisionGenerator.java",
+            "InquiryGoalGenerator.java",
             "JdkAgentLlmTransport.java", "AgentLlmConfiguration.java");
 
     @Test
@@ -172,7 +177,8 @@ class AgentDraftBoundaryTest {
                 new String[] {"sellerops.agent.report.", "AgentReportProperties.java"},
                 new String[] {"sellerops.responsibility.investigation.", "CaseInvestigationProperties.java"},
                 new String[] {"sellerops.review.media-vision.", "ReviewMediaVisionProperties.java"},
-                new String[] {"sellerops.inquiry-decision.", "InquiryDecisionProperties.java"});
+                new String[] {"sellerops.inquiry-decision.", "InquiryDecisionProperties.java"},
+                new String[] {"sellerops.inquiry-goal.", "InquiryGoalProperties.java"});
         try (Stream<Path> walk = Files.walk(MAIN)) {
             for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
                 String name = source.getFileName().toString();

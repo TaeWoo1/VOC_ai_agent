@@ -284,6 +284,29 @@ sellerops:
       reasoning-effort: ${SELLEROPS_INQUIRY_SIGNATURE_REASONING_EFFORT:low}
       max-text-chars: ${SELLEROPS_INQUIRY_SIGNATURE_MAX_TEXT_CHARS:2000}
       max-batch-per-call: ${SELLEROPS_INQUIRY_SIGNATURE_MAX_BATCH:200}
+  # ── Customer Goal Interpretation (Inquiry v3.5 §29): the FOURTEENTH LLM capability ────────
+  #
+  # It reads one customer message into what that customer asked for — customer-goal-interpreter/v3,
+  # frozen and evaluated on a paired holdout. Its payload is the customer's own sentence and NOTHING
+  # else: no order, no product, no knowledge, no resolution state. A goal is what was asked, and the
+  # seller's situation cannot change what was asked, so the narrowest payload is also the correct one.
+  #
+  # The defaults below are the arm the holdout measured. Changing the model, the output budget or the
+  # reasoning effort makes this a different arm than the one that produced the evidence.
+  #
+  # Off three ways, and it declines the access policy's widening: connecting a channel is a request to
+  # collect, not a request to send customers' sentences to a vendor. Named organisations only.
+  #
+  # One reading per (inquiry, exact message, contract) is stored, so every later path reads the row
+  # rather than asking again — see V115__inquiry_goal_interpretation.sql.
+  inquiry-goal:
+    enabled: ${SELLEROPS_INQUIRY_GOAL_ENABLED:false}
+    enabled-org-ids: ${SELLEROPS_INQUIRY_GOAL_ORG_IDS:}
+    vendor: ${SELLEROPS_INQUIRY_GOAL_VENDOR:OPENAI}
+    model: ${SELLEROPS_INQUIRY_GOAL_MODEL:gpt-5-2025-08-07}
+    api-key: ${SELLEROPS_INQUIRY_GOAL_API_KEY:}
+    max-output-tokens: ${SELLEROPS_INQUIRY_GOAL_MAX_OUTPUT_TOKENS:900}
+    reasoning-effort: ${SELLEROPS_INQUIRY_GOAL_REASONING_EFFORT:minimal}
   # ── Image Product Knowledge v1 (2026-08-27): the SIXTH LLM capability ────────────────────────
   #
   # Its own switch, its own key and — uniquely — its own MODEL. Every other capability here defaults

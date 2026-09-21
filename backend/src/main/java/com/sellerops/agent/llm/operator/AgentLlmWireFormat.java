@@ -58,6 +58,19 @@ public final class AgentLlmWireFormat {
      */
     public static String body(Vendor vendor, String modelId, String system, String user,
                               int maxOutputTokens, String reasoningEffort) {
+        return body(vendor, modelId, system, user, maxOutputTokens, reasoningEffort, null);
+    }
+
+    /**
+     * The same body, with the caller's own response format.
+     *
+     * <p>Most capabilities ask for {@code json_object} and read the answer strictly themselves. One asks for
+     * <b>strict Structured Outputs</b> — a json_schema the vendor enforces — because its contract is a closed
+     * vocabulary and «the model may not say PROCEDURE» is worth making structural rather than checking afterwards.
+     * A null format keeps the historical bytes exactly, so nothing that did not ask for this changed.
+     */
+    public static String body(Vendor vendor, String modelId, String system, String user,
+                              int maxOutputTokens, String reasoningEffort, ObjectNode responseFormat) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("model", modelId);
         ArrayNode messages = root.putArray("messages");
@@ -69,7 +82,11 @@ public final class AgentLlmWireFormat {
             root.put("system", system);
         } else {
             root.put("max_completion_tokens", maxOutputTokens);
-            root.putObject("response_format").put("type", "json_object");
+            if (responseFormat == null) {
+                root.putObject("response_format").put("type", "json_object");
+            } else {
+                root.set("response_format", responseFormat);
+            }
             if (reasoningEffort != null) {
                 root.put("reasoning_effort", reasoningEffort);
             }
