@@ -107,6 +107,43 @@ public final class GoalSmokeInputs {
             List.of("G15", "G23", "G07", "G01"), List.of("R:4181864b", NO_GOAL_CASE),
             List.of("INFORMATION", "DECISION", "ACTION"), provenanceIntended());
 
+    /**
+     * The frozen gold's own case ids, all 67. <b>Ids only</b>: every message behind them is a real customer's words
+     * and is read from the durable eval store at runtime, never copied into this repository.
+     */
+    public static final List<String> DEV_CASES = List.of(
+            "R:0c582144", "R:2673edfb", "R:320d1157", "R:4181864b", "R:515dd536", "R:77a91fab", "R:7a8136b2",
+            "R:83e607e0", "R:8989a9d0", "R:9a91964c", "R:9b8cc5a5", "R:ae41a418", "R:ae51c7f8", "R:b30d57be",
+            "R:c491451a", "R:c626515c", "R:d28c23f9", "R:dae8554d", "R:e66f3a57", "R:e9030ab6", "R:e9555ebc",
+            "R:f2ff4a0b", "R:f403e606", "R:f81ad84a", "R:ffc2cc44", "S:N1", "S:N10", "S:N11", "S:N12", "S:N2",
+            "S:N3", "S:N4", "S:N5", "S:N6", "S:N7", "S:N8", "S:N9", "S:T10a", "S:T10b", "S:T11a", "S:T12a", "S:T13a",
+            "S:T1a", "S:T1b", "S:T2a", "S:T2b", "S:T2c", "S:T3a", "S:T3b", "S:T4a", "S:T4b", "S:T5a", "S:T5b",
+            "S:T6a", "S:T6b", "S:T6c", "S:T7a", "S:T7b", "S:T8a", "S:T8b", "S:T9a", "S:T9b", "S:X2a", "S:X3a",
+            "S:X6a", "S:X6b", "S:X9a");
+
+    /**
+     * <b>The 67-case DEV diagnostic</b> (§25.11): every case the frozen gold carries, measured once against the
+     * frozen v2 contract.
+     *
+     * <p>It is a <b>baseline, not an improvement loop</b>. The result is not a reason to edit the prompt, and this
+     * set does not become a tuning corpus afterwards — a DEV set measured once and then optimised against has
+     * been converted into training data, and the number it produced stops meaning what it said.
+     *
+     * <p>Every input is a real customer message read from the durable store, so the ids are committed here and the
+     * messages are not — the same division the NO_GOAL case has always had. The list is the gold's own case set:
+     * {@code GoalProvenanceSmokePlanTest} asserts it equals what the store carries, so it cannot drift into being a
+     * hand-picked subset.
+     *
+     * <p><b>No {@code intended} shapes and no {@code requiredOutcomes}, deliberately.</b> Coverage here is a claim
+     * about the committed fixture's own labels, and none of these 67 is a fixture row; their labels live in the
+     * frozen gold, outside git. Asserting shapes from an uncommitted file would make the manifest depend on a
+     * document nobody can diff. What has to hold instead — that all 67 were assembled — is already the
+     * difference between {@code planned} and {@code usable}, and a store that is short reports it as {@code missing}.
+     */
+    public static final Plan DEV_DIAGNOSTIC = new Plan("dev-diagnostic-v2",
+            "one measurement of the frozen v2 contract against the whole frozen gold — baseline, not tuning",
+            List.of(), DEV_CASES, List.of(), Map.of());
+
     /** By name, so the operator's command selects a plan rather than edits one. */
     public static final Map<String, Plan> PLANS =
             Map.of(CONTRACT_SMOKE.name(), CONTRACT_SMOKE, PROVENANCE_SMOKE.name(), PROVENANCE_SMOKE);

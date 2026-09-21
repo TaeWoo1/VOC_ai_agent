@@ -119,4 +119,53 @@ class GoalProvenanceSmokePlanTest {
         assertThat(gap.complete()).isFalse();
         assertThat(gap.missing()).singleElement().asString().contains("R:nope");
     }
+
+    /**
+     * <b>The DEV plan is the gold's whole case set, not a hand-picked subset.</b>
+     *
+     * <p>The 67 ids are committed and the 67 messages are not, so nothing in git can show that the list still matches
+     * the corpus. This is what shows it: a case added to or removed from the frozen gold makes the committed list
+     * wrong, loudly, instead of silently turning a baseline into a selection.
+     */
+    @Test
+    @DisplayName("the 67-case DEV plan is every case the frozen gold carries — and every one resolves to a message")
+    void theDevPlanIsTheWholeCorpus() throws Exception {
+        GoalSmokeInputs.Plan plan = GoalSmokeInputs.DEV_DIAGNOSTIC;
+        assertThat(plan.planned()).isEqualTo(67);
+        assertThat(plan.fixtureIds()).isEmpty();
+        assertThat(plan.storeIds()).hasSize(67).doesNotHaveDuplicates()
+                .isEqualTo(GoalSmokeInputs.DEV_CASES);
+        // A baseline owes no fixture shapes: none of these is a fixture row, and their labels live outside git.
+        assertThat(plan.intended()).isEmpty();
+        assertThat(plan.requiredOutcomes()).isEmpty();
+        // The case this corpus is most about is in it.
+        assertThat(plan.storeIds()).contains(GoalSmokeInputs.NO_GOAL_CASE, "R:4181864b");
+
+        Path store = storeRoot();
+        if (store == null) {
+            return;   // the gold and the messages both live in the durable store
+        }
+        Path goldFile = Path.of(System.getProperty("user.home"), ".cache", "sellerops-eval",
+                "inquiry-customer-goal", "v3", "goals.jsonl");
+        if (!Files.exists(goldFile)) {
+            return;
+        }
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+        java.util.SortedSet<String> inGold = new java.util.TreeSet<>();
+        for (String line : Files.readAllLines(goldFile)) {
+            if (!line.isBlank()) {
+                inGold.add(json.readTree(line).get("q").asText());
+            }
+        }
+        assertThat(plan.storeIds()).as("the committed DEV list and the frozen gold have diverged")
+                .containsExactlyElementsOf(inGold);
+
+        // And every one of them rebuilds into an input, so a 67-call manifest is a 67-call manifest.
+        GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE, store, plan);
+        assertThat(set.missing()).isEmpty();
+        assertThat(set.usable()).hasSize(67);
+        assertThat(set.complete()).isTrue();
+        assertThat(set.realCustomerText()).isTrue();
+        assertThat(set.usable().stream().filter(GoalSmokeInputs.Input::realCustomerText).count()).isEqualTo(67);
+    }
 }
