@@ -2171,3 +2171,80 @@ unchanged execution path; a fail reopens the **merge**, not the wording.
 
 **After the sitting the holdout is spent.** A second use makes it a selection set, and the number it produced stops
 meaning what it said.
+
+---
+
+## 27. The paired holdout, run once (2026-09-21)
+
+Two arms, 75 cases each, 150 vendor calls, no retry. The holdout is now **spent**.
+
+| | v2 arm | v3 arm |
+|---|---|---|
+| approval | `apr-90da0828-…` | `apr-c9cd1000-…` |
+| run | `v35-goal-smoke-f64486d7-17c5852b` | `v35-goal-smoke-6b098247-5001264d` |
+| commit | `f64486d7` | `6b098247` |
+| calls | 75/75, **0 vendor failures** | 75/75, **0 vendor failures** |
+| `input_set_fp` | `7c6d8907…` | `7c6d8907…` — **identical** |
+
+### 27.1 The answer
+
+**Primary: ACTION leakage on the 26 HIGH-confidence ANSWER-gold cases — `0/26` under v2, `0/26` under v3.**
+McNemar `b = 0`, `c = 0`, `n = 0`, `p = 1.0`. Registered verdict: **`NO_INCREASE` — the merge ships.**
+
+A zero-zero result has to be shown to be capable of firing, so three checks:
+
+* **every primary case produced a prediction in both arms** — 0 cases where an arm was silent, so the metric was
+  never quietly unable to fire;
+* **outcome accuracy on HIGH cases is 51/51 (v2) and 52/52 (v3)** — the leak is a subset of outcome error, and
+  there was no outcome error to be a subset of;
+* **sensitivity**: rescoring v3 as if its three refusals had been let through leaves the primary at `0/26` vs
+  `0/26`. No leak is hiding behind a refusal.
+
+The one leak anywhere in the sitting, at any confidence, is **v2's**: on a MEDIUM case it produced an inferred
+`ACTION` beside the correct answering goal. v3 refused that same answer at the fence.
+
+### 27.2 The minimal pairs, which are what the question actually rides on
+
+All eight held on the answering side in both arms — no arm resolved the ambiguity marker by mapping it to a token.
+The sharpest pair is the real one: two inbox messages about issuing the same document, both ending in the same
+permission-shaped form, one asking whether it is possible and one asking for it to be done. **v2 read the second as
+an answer request; v3 read it correctly as an ACTION.** One pair went the other way — a message whose gold is
+`ACTION` was read by v3 as a state read plus an answer, where v2 had it right.
+
+### 27.3 Secondary, reported because it was registered
+
+| | v2 | v3 |
+|---|---|---|
+| outcome (all) | 60/66 | 60/65 |
+| referent | 51/66 | 50/65 |
+| constraints | 58/66 | 56/65 |
+| invented goal | 18 | **14** |
+| `invented_ACTION` | 3 | **2** |
+| `substituted_ACTION` | 1 | **0** |
+| NO_GOAL violation | 2 | **1** |
+| reverse leak (ACTION-gold → ANSWER) | 2 | **1** |
+
+Every safety counter is equal or better under v3. None of this is the finding — the primary is — but a merge that
+improved the headline while worsening a blocker would have been caught here, and it was not.
+
+### 27.4 The registered guard that was NOT met, stated plainly
+
+§26.6 registered "evidence verbatim failures = 0". **v3 had three**, and they are worth more than the guard was:
+
+* two are the **`CustomerGoalSet` rule firing on an invented ACTION** — the model produced the correct answering
+  goal and then a second `DIRECTLY_IMPLIED` `ACTION` whose evidence quoted a clause the first goal had already
+  used. That is the G15 shape (§25), on unseen text, caught **structurally** rather than by any outcome metric;
+* one is a quote stitched from two non-adjacent sentences, refused for not being a span.
+
+So the guard reads as a failure and the behaviour is the fence doing exactly the job it was built for. All three
+are MEDIUM-confidence cases and none is in the primary denominator. **The guard was written as if a refusal were
+always a defect; on this evidence it is not, and the wording is what was wrong.**
+
+### 27.5 What this result does and does not license
+
+It licenses **freezing v3 and moving to E2E on the unchanged execution path**. It does not license a prompt
+change: these 75 cases are spent, and the next contract question needs its own corpus.
+
+It also does not say the leak rate is zero in production. The critical stratum here is enriched roughly tenfold
+over its natural rate, the design detects a tripling rather than a doubling, and the honest reading of `0` vs `0`
+is **"no detectable increase at this size"**, never "no effect".
