@@ -2282,3 +2282,68 @@ day it was meant to fire. Fixed, and the class of defect is closed rather than t
 asks the **classes** — not the source text — that every guarded name resolves to a real method, and that every
 public static entry point on the three resolution classes is in the list. Reintroducing the old string turns it red.
 
+
+## 29. The loop closed live — one real question, one model call, one decision (2026-09-21)
+
+A customer question typed into a real Cafe24 product page reached a decision on the seller's home screen,
+through the production path. Commit `a49c155b`. Evidence rows: `docs/evidence/INDEX.md`, three 2026-09-21 rows
+(`inquiry-goal-demo-smoke/1`, `resp-run2a-collect/2`, `resp-run2b-discover/1`); the operating knowledge for
+re-running any of it is `docs/cafe24_live_e2e_runbook.md`.
+
+### 29.1 The chain, as observed
+
+```
+상품 Q&A(board 6) 게시    cafe24:b6:a3676  「교환 신청은 언제까지 가능한가요?」
+  → collection            board=6 수신=1 저장=1, ROOT · UNANSWERED · REAL · 상품 결합
+  → discovery             created_at > baseline(21:44:14 KST), 후보 1건
+  → customer-goal-interpreter/v3   goal 1건, ANSWER / ORGANIZATION / STATED, 벤더 1회
+  → resolution            NEEDS_SELLER   consulted:[KNOWLEDGE.ORG]  observed:[]  gap:null
+  → OperationsCase        PREPARED · NEEDS_DECISION · HUMAN · ADD_KNOWLEDGE · decided_by=RULE
+  → Home DecisionRow      decisions.total = 1
+```
+
+The interpretation that decided everything is `subject: ORGANIZATION`. An exchange **window** is a company
+policy, not a fact about this order — so the walk never entered the order lane, and the `STORED_ONLY` ceiling
+(§25) was never the binding constraint. The earlier NAVER smoke, whose goal was `CURRENT_ORDER`, hit that
+ceiling instead. Same resolver, two different terminals, each for the right reason.
+
+### 29.2 What the run cost, and what held it there
+
+One vendor call: 2,802 ms, in 1,189 / out 77 / reasoning 0. Nothing else.
+
+Two model seams sit inside `OperationsCaseProcessor` besides the interpreter — `CaseInvestigator` and
+`CaseDraftPreparer`. They are held off by `sellerops.responsibility.investigation.enabled`, which defaults
+**false**; the history carries `INVESTIGATION_SKIPPED {"outcome":"CAPABILITY_OFF"}`, so they were reached and
+refused rather than merely absent. That distinction is the whole value of the event.
+
+### 29.3 Resume materializes; the scheduler executes
+
+`ResponsibilityService.startWorking` does **not** run anything — it writes a `ResponsibilityRun` for the current
+window and sets `next_run_at`. So "trigger by RESUME instead of by the scheduler" is not a choice between two
+triggers; the scheduler is the only executor, and the choice is about what it finds. A run is therefore staged in
+two boots: pause first (no connector, no credentials, no model key), then boot with the scheduler on and confirm
+**zero ticks executed** across two poll intervals, and only then `resume`. Without the pause, an ACTIVE
+responsibility whose `next_run_at` is already past fires within ~30 s of boot — before the operator can type,
+and with the model key necessarily already in the environment.
+
+### 29.4 Idempotence has two layers, and only one was observed
+
+A second `pause`/`resume` in the same window produced **no second run**: `startWorking` finds the window's run
+already `SUCCESS` and does nothing. So `OperationsCaseProcessor` could not be re-driven over this inquiry, and
+manufacturing a way to do it was refused. Recorded rather than rounded up.
+
+What the code says about the two layers:
+
+- **signature** — `handle` short-circuits on an unchanged `signature` (`:413`) and returns `unchanged`. The
+  resolution read sits *after* it (`:446`), so an unchanged subject never reaches the interpreter at all.
+- **fingerprint** — if the content did change, the new signature admits the read, and
+  `StoredCustomerGoalInterpretation` reuses on `(org, inquiry, source_fingerprint, prompt_version)`. A changed
+  message is a different fingerprint, i.e. a genuinely different question, correctly re-asked.
+
+The second layer was proven live by the goal smoke's pass 2 (+0 calls); the first was not re-observed here.
+
+### 29.5 What is still unproven
+
+`ADD_KNOWLEDGE` is a recommendation with no seller-facing continuation yet: the lane past the decision —
+investigation, the prepared draft, and the seller acting on the recommendation so the same inquiry becomes
+answerable — is deliberately off and unbuilt. That is the next package, not a gap in this one.
