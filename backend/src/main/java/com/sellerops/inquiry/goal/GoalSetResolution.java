@@ -104,6 +104,27 @@ public final class GoalSetResolution {
      * that no resolver is asked, not that its answer is discarded.
      */
     public static Outcome run(CustomerGoalSet set, Function<ResolutionPolicy.Run, ResolverOutcome> resolver) {
+        if (resolver == null) {
+            throw new IllegalArgumentException("a set and a resolver");
+        }
+        return run(set, (goal, run) -> resolver.apply(run));
+    }
+
+    /**
+     * The same walk, for a resolver that needs to know <b>which goal</b> it is answering about.
+     *
+     * <p>A {@link ResolutionPolicy.Run} names an authority and a capability and deliberately carries no goal:
+     * dispatch is a function of the outcome kind alone, and that is the property §25 relies on. A resolver reading
+     * real objects needs more than that — the subject is what decides which listing is being asked about. Rather
+     * than let a caller capture one goal in a closure and then hand that same closure to every goal in the set,
+     * which is a defect waiting for the second goal, the goal is passed in.
+     *
+     * <p>{@link #run(CustomerGoalSet, Function)} delegates here, so there is one walk and one rule about what a
+     * withheld goal means.
+     */
+    public static Outcome run(CustomerGoalSet set,
+                              java.util.function.BiFunction<CustomerGoal, ResolutionPolicy.Run, ResolverOutcome>
+                                      resolver) {
         if (set == null || resolver == null) {
             throw new IllegalArgumentException("a set and a resolver");
         }
@@ -115,7 +136,7 @@ public final class GoalSetResolution {
                 continue;
             }
             entries.add(new Entry(goal.id(), Disposition.RESOLVED_INDEPENDENTLY,
-                    GoalResolution.run(goal, resolver), null));
+                    GoalResolution.run(goal, run -> resolver.apply(goal, run)), null));
         }
         return new Outcome(set, List.copyOf(entries));
     }

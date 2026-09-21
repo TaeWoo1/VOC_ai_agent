@@ -215,9 +215,23 @@ class ActionIsNotExecutionAuthorityTest {
         }
     }
 
+    /**
+     * <b>The production driver, named — this is what "no production caller" became.</b>
+     *
+     * <p>The original assertion was {@code isEmpty()}, and it fired the day the loop was wired to real inquiries.
+     * It was doing its job, but it was never the property worth keeping: "nobody drives the loop" is a fact about
+     * today's callers, while {@link #theWindowThatIsStillOpen} names the fact about the <i>code</i> — that a
+     * resolver is an arbitrary function, so it could act before it reports.
+     *
+     * <p>So the scan is narrowed rather than deleted, and the property it used to stand in for is asserted
+     * directly, beside the driver, by {@code InquiryResolutionSafetyTest}: production supplies no resolver, the
+     * resolver it does construct holds no collaborator it could call, and the effectful capability answers with one
+     * constant across an exhaustive sweep. <b>A second driver still trips this</b>, because a second driver
+     * inherits none of those guards.
+     */
     @Test
-    @DisplayName("TRIPWIRE: nothing in src/main drives the resolution loop — the window stays unreachable")
-    void theLoopHasNoProductionCaller() throws Exception {
+    @DisplayName("TRIPWIRE: exactly one file in src/main drives the resolution loop, and it is the audited one")
+    void theLoopHasOneAuditedProductionCaller() throws Exception {
         java.nio.file.Path main = java.nio.file.Path.of("src", "main", "java");
         List<String> callers = new ArrayList<>();
         try (var paths = java.nio.file.Files.walk(main)) {
@@ -228,17 +242,40 @@ class ActionIsNotExecutionAuthorityTest {
                 }
                 String body = java.nio.file.Files.readString(p);
                 for (String call : GUARDED_ENTRY_POINTS) {
-                    if (body.contains(call)) {
-                        callers.add(p.getFileName() + " → " + call);
+                    if (body.contains(call) && !callers.contains(p.getFileName().toString())) {
+                        callers.add(p.getFileName().toString());
                     }
                 }
             }
         }
         assertThat(callers)
-                .as("the Customer Goal resolution loop is now driven from production. Before that ships, an ACTION "
-                        + "goal must not be able to reach an effectful capability without an execution approval "
-                        + "bound to the specific object — see docs/inquiry_architecture_v35.md §25.10 and the "
-                        + "migration option C recorded there.")
-                .isEmpty();
+                .as("a file other than the audited driver reaches the Customer Goal resolution loop. That driver "
+                        + "supplies no resolver and constructs one that cannot act — a new caller inherits neither. "
+                        + "Route it through InquiryGoalResolutionService, or give it the same guards FIRST: an "
+                        + "ACTION goal is a model's reading of a sentence and is not authorization to act on an "
+                        + "object. See docs/inquiry_architecture_v35.md §25.10 and InquiryResolutionSafetyTest.")
+                .containsExactly("InquiryGoalResolutionService.java");
+    }
+
+    /**
+     * <b>The replacement exists.</b>
+     *
+     * <p>Narrowing a guard is only safe if the thing it stopped standing in for is asserted somewhere else. This
+     * reads for that somewhere else by name, so deleting it cannot quietly leave the window unwatched — the same
+     * defect class {@link #theGuardedNamesExist()} closed for the scan's own literals.
+     */
+    @Test
+    @DisplayName("TRIPWIRE INTEGRITY: the guard that replaced «no production caller» is present and asserts it")
+    void theReplacementGuardExists() throws Exception {
+        java.nio.file.Path guard = java.nio.file.Path.of("src", "test", "java",
+                "com/sellerops/inquiry/resolve/InquiryResolutionSafetyTest.java");
+        assertThat(java.nio.file.Files.exists(guard))
+                .as("%s is the narrowing's other half. Without it, this file's scan permits a production driver "
+                        + "and nothing checks what that driver does.", guard)
+                .isTrue();
+        String body = java.nio.file.Files.readString(guard);
+        assertThat(body).contains("theDriverTakesObjectsNotFunctions");
+        assertThat(body).contains("theResolverIsPure");
+        assertThat(body).contains("theEffectfulCapabilityIsAConstant");
     }
 }
