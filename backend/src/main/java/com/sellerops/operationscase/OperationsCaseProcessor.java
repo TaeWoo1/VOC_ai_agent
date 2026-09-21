@@ -484,11 +484,13 @@ public class OperationsCaseProcessor {
         }
         if (!conclusion.needsInvestigation()) {
             k.ruleDecided++;
+            prepareResolvedReply(run, saved, resolved, k);
             return;
         }
         if (resolved != null && !resolved.createsCustomerWork()) {
             // The message asked for nothing a resolver can act on. Keeping the observation is the answer, and
-            // spending a model call to re-read a question that is not there is not.
+            // spending a model call to re-read a question that is not there is not. No draft either, for the
+            // same reason: this reading is MONITORING, and only NEEDS_DECISION can recommend a reply.
             event(saved, run.getId(), CaseEventActor.SYSTEM, CaseEventKind.INVESTIGATION_SKIPPED,
                     Map.of("outcome", "NO_CUSTOMER_GOAL"));
             k.ruleDecided++;
@@ -498,6 +500,7 @@ public class OperationsCaseProcessor {
             event(saved, run.getId(), CaseEventActor.SYSTEM, CaseEventKind.INVESTIGATION_SKIPPED,
                     Map.of("outcome", "CAPABILITY_OFF"));
             k.skipped++;
+            prepareResolvedReply(run, saved, resolved, k);
             return;
         }
         k.investigationsStarted++;
@@ -599,6 +602,44 @@ public class OperationsCaseProcessor {
         if (c.getSubjectKind() != OperationsSubjectKind.INQUIRY || c.getWorkItemId() == null
                 || c.getDisposition() != CaseDisposition.NEEDS_DECISION
                 || output.recommendedActionType() != RecommendedActionType.REPLY_TO_CUSTOMER) {
+            return;
+        }
+        if (recordPrepared(c, run.getId(), drafts.prepare(c.getOrgId(), c.getWorkItemId()))) {
+            k.drafts++;
+        }
+    }
+
+    /**
+     * <b>The deterministic resolution settled this as 「답변」, so the reply is drafted — investigation or not.</b>
+     *
+     * <p>Until this existed the only road to a prepared draft ran through a <b>concluded investigation</b>
+     * ({@link #prepareDraftIfAsked}), and that capability is off by default. So a case the rules and the resolvers
+     * had fully settled — the company's own knowledge answers this question — reached the seller with the summary
+     * 「등록된 지식으로 답변할 수 있는 문의입니다」 and an empty draft area. The one path that did prepare it was the
+     * Teach loop, which meant a seller got a draft only for the questions their library could <b>not</b> answer.
+     *
+     * <p>It is the same seam, called with the same argument: {@link CaseDraftPreparer}, the production proposal
+     * transition, {@link com.sellerops.inquiry.draft.InquiryDraftComposer}, and {@link #recordPrepared} deciding
+     * what the outcome means for the case. No second draft path, and nothing new to keep in step.
+     *
+     * <h2>Why the capability is asked BEFORE the preparer</h2>
+     *
+     * <p>Because a deployment with drafting off must pay exactly what it paid before, and
+     * {@link CaseDraftPreparer#prepare} is not free on the way to being declined: it proposes — a row, an audit and
+     * an OPEN → PROPOSED transition — and then runs a full retrieval, only for the composer to report the switch is
+     * off. Asking first keeps a switched-off deployment byte-identical to the one before this method existed.
+     *
+     * <p>{@code REPLY_TO_CUSTOMER} is the whole resolution test. It is reachable from exactly the two terminals
+     * that mean the question is answerable — {@code RESOLVED} and {@code RESOLVED_CONDITIONAL}
+     * ({@link CaseFromResolution}) — and only ever alongside {@code NEEDS_DECISION}, so no separate state check
+     * says anything the action does not already say.
+     */
+    private void prepareResolvedReply(ResponsibilityRun run, OperationsCase c, CaseFromResolution resolved,
+                                      Counters k) {
+        if (resolved == null || c.getSubjectKind() != OperationsSubjectKind.INQUIRY || c.getWorkItemId() == null
+                || c.getDisposition() != CaseDisposition.NEEDS_DECISION
+                || c.getRecommendedActionType() != RecommendedActionType.REPLY_TO_CUSTOMER
+                || !drafts.enabledFor(c.getOrgId())) {
             return;
         }
         if (recordPrepared(c, run.getId(), drafts.prepare(c.getOrgId(), c.getWorkItemId()))) {

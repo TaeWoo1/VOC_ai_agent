@@ -1,5 +1,6 @@
 package com.sellerops.inquiry.draft;
 
+import com.sellerops.knowledge.KnowledgeTopic;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -30,6 +31,12 @@ import java.util.UUID;
  * text is blunt, and it is used here only to decide whether to add a caution — never to decide what
  * the answer is, and never to drop evidence. A false positive costs one hedged sentence; a false
  * negative leaves today's behaviour. That asymmetry is why the word list leans inclusive.
+ *
+ * <p><b>Inclusive is not unbounded.</b> A word so common that it matches questions about operations
+ * rather than items buys no caution and spends the seller's trust — the hedged sentence asks a
+ * customer about 규격 in the middle of answering them about 교환, and the seller reads a reply that
+ * is careful about nothing they asked. {@link #FIT_PHRASINGS} records the one word removed on those
+ * grounds and the gate the rest are read under.
  */
 public enum SpecApplicability {
     ;
@@ -156,10 +163,36 @@ public enum SpecApplicability {
      * what decides {@link Applicability}. The partition exists because a seller being told what to
      * write needs the NOUN — 「'가닥' 관련 내용이 없습니다」 — and 「'맞나요' 관련 내용이 없습니다」 is
      * not a sentence anyone can act on. Reporting is the only thing that reads the two halves apart.
+     *
+     * <p>A question asking outright for a measurement or a count is about the item whatever else the
+     * sentence says, exactly as a {@link #TOPIC_WORDS} noun is. {@link #FIT_PHRASINGS} are not, and
+     * that is the whole reason this list is now two.
      */
-    private static final String[] PHRASING_WORDS = {
+    private static final String[] MEASURED_PHRASINGS = {
         "몇 가닥", "몇 개", "몇개", "몇 mm", "몇mm", "몇 cm", "몇cm", "몇 미터", "몇m",
-        "맞나요", "들어가나요", "들어갑니까", "가능한가요",
+    };
+
+    /**
+     * Phrasings asking whether a thing FITS — about the item only when the question is.
+     *
+     * <p><b>「가능한가요」 was in this list and is not a member of it</b> (2026-09-21). The three that
+     * remain take an OBJECT as their subject — 「3구 멀티탭이 들어가나요」, 「이 치수가 맞나요」 — and an
+     * object's answer can move with the 규격 chosen. 「가능한가요」 takes an ACTION: 「교환 신청은
+     * 언제까지 가능한가요」, 「당일 발송 가능한가요」, 「부분 취소 가능한가요」. Whether an operation is
+     * permitted does not vary by option, so the word carried no signal about 규격 at all — it only
+     * matched the five syllables that end a very large share of Korean questions.
+     *
+     * <p>Observed on 「교환 신청은 언제까지 가능한가요?」: a policy question, answered from a policy the
+     * seller had registered, whose draft asked the customer which 규격 they had bought. The reply was
+     * correct about nothing it was asked and the seller had no way to see why.
+     *
+     * <p>The three that remain are still blunt, so they are read only when the question names no
+     * operating topic — see {@link #aboutAnOperation}. {@link #TOPIC_WORDS} and
+     * {@link #MEASURED_PHRASINGS} are untouched by that gate: a question that names a property is
+     * about the item even while it also mentions 배송.
+     */
+    private static final String[] FIT_PHRASINGS = {
+        "맞나요", "들어가나요", "들어갑니까",
     };
 
     /** Option names shorter than this match too much of any sentence to be evidence of anything. */
@@ -213,7 +246,7 @@ public enum SpecApplicability {
         String topic = firstPresent(text, TOPIC_WORDS);
         boolean registered = options != null && options.stream()
                 .anyMatch(o -> o != null && o.name() != null && !o.name().isBlank());
-        if (topic == null && !containsAny(text, PHRASING_WORDS)) {
+        if (topic == null && !phrasedAboutTheItem(text)) {
             return new Verdict(Applicability.NOT_VARIANT_SENSITIVE, null, null, registered);
         }
         Option named = namedOption(text, options);
@@ -255,6 +288,29 @@ public enum SpecApplicability {
             }
         }
         return null;
+    }
+
+    /**
+     * Does a question that names no property noun still ask about the item?
+     *
+     * <p>Two ways, and only two: it asks outright for a measurement, or it asks whether something
+     * fits and names no operating topic that would make it a question about an operation instead.
+     */
+    private static boolean phrasedAboutTheItem(String normalizedText) {
+        return containsAny(normalizedText, MEASURED_PHRASINGS)
+                || (containsAny(normalizedText, FIT_PHRASINGS) && !aboutAnOperation(normalizedText));
+    }
+
+    /**
+     * Whether the question names one of the closed operating topics — 배송·교환·반품·취소·결제·증빙.
+     *
+     * <p>Read from {@link KnowledgeTopic}, the table the retrieval applicability gate and both
+     * knowledge services already share, so 「배송」 means one thing across the backend. No word is
+     * added here, and this decides nothing on its own: it can only withhold the benefit of the
+     * doubt from a bare {@link #FIT_PHRASINGS} match, never overturn a named property.
+     */
+    private static boolean aboutAnOperation(String normalizedText) {
+        return !KnowledgeTopic.of(normalizedText).isEmpty();
     }
 
     private static String normalize(String text) {

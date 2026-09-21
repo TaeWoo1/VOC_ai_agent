@@ -242,6 +242,22 @@ public class InquiryDraftComposer {
     }
 
     /**
+     * Whether this organisation's drafts can be written at all — the capability's own flag, key and org policy.
+     *
+     * <p>{@link #compose} asks the same question again, and has to: it is read there <b>after</b> the basis
+     * verdict, so that a switched-off capability is never mistaken for a missing answer basis. This exists for
+     * the callers that must not <b>start</b> when the answer is no — starting costs a proposal row, a phase
+     * transition and a whole retrieval, none of which a deployment that turned the capability off asked to pay
+     * for.
+     *
+     * <p>It reports the capability, never the budget. A seller who is out of quota today still has the
+     * capability, and {@link #compose} remains the one place that decides what an exhausted one means.
+     */
+    public boolean enabledFor(UUID orgId) {
+        return model.isEnabledFor(orgId);
+    }
+
+    /**
      * Compose, then file what could not be answered in 확인 필요.
      *
      * <p>(Knowledge Setup &amp; Inbox UX v1 §3) The review lane has filed its gaps since Grounded

@@ -2,6 +2,7 @@ package com.sellerops.operationscase;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -246,6 +247,63 @@ class StoredInquiryCaseFlowTest {
         assertThat(row.summary()).isEqualTo("등록된 지식으로 답변할 수 있는 문의입니다.");
         assertThat(row.recommendedActionType()).isEqualTo("REPLY_TO_CUSTOMER");
         assertThat(row.decidedBy()).isEqualTo("RULE");
+    }
+
+    @Test
+    @DisplayName("답변할 수 있는 문의는 조사 없이도 초안까지 준비된다 — 초안 capability가 켜진 조직에서")
+    void aResolvedReplyIsDraftedWithoutAnInvestigation() {
+        when(drafts.enabledFor(org)).thenReturn(true);
+        when(drafts.prepare(eq(org), any()))
+                .thenReturn(new CaseDraftPreparer.Prepared(true, 1, "GROUNDED", 2, null));
+        orgKnowledge.create(org, new OrgKnowledgeRequest(OrgKnowledgeType.EXCHANGE_REFUND_POLICY,
+                        "교환 및 반품 안내", "교환은 수령 후 7일 이내에 신청하실 수 있습니다.", null),
+                UUID.randomUUID(), "데모 운영자");
+        Inquiry inquiry = storedInquiry("교환 신청 기간이 어떻게 되나요?", null, null);
+        workItem(inquiry);
+        interpreted.set(set(goal("g1", RequestedOutcome.ANSWER, Referent.ORGANIZATION,
+                "교환 신청 기간이 어떻게 되나요?")));
+
+        processor.process(run(Instant.now()), () -> false);
+
+        OperationsCase c = only();
+        assertThat(c.getRecommendedActionType()).isEqualTo(RecommendedActionType.REPLY_TO_CUSTOMER);
+        assertThat(c.getPreparedAction())
+                .as("the company's own knowledge answers this, so the reply is written — the investigation is a "
+                        + "second opinion about the decision, never a precondition of the draft")
+                .isEqualTo(CasePreparedAction.DRAFT_PREPARED);
+        assertThat(c.getDraftVersion()).isEqualTo(1);
+        verify(investigator, never()).investigate(any(), any());
+        verify(drafts).prepare(eq(org), any());
+
+        assertThat(decisionRow().draftPrepared()).isTrue();
+    }
+
+    @Test
+    @DisplayName("초안 capability가 꺼져 있으면 제안도 검색도 시작하지 않는다 — 이전과 같은 비용")
+    void aDeploymentWithDraftingOffPaysExactlyWhatItPaidBefore() {
+        // enabledFor is the default false. The preparer is not free on the way to being declined: it proposes a
+        // row, flips OPEN → PROPOSED and runs a whole retrieval before the composer reports the switch is off.
+        orgKnowledge.create(org, new OrgKnowledgeRequest(OrgKnowledgeType.EXCHANGE_REFUND_POLICY,
+                        "교환 및 반품 안내", "교환은 수령 후 7일 이내에 신청하실 수 있습니다.", null),
+                UUID.randomUUID(), "데모 운영자");
+        Inquiry inquiry = storedInquiry("교환 신청 기간이 어떻게 되나요?", null, null);
+        workItem(inquiry);
+        interpreted.set(set(goal("g1", RequestedOutcome.ANSWER, Referent.ORGANIZATION,
+                "교환 신청 기간이 어떻게 되나요?")));
+
+        processor.process(run(Instant.now()), () -> false);
+
+        OperationsCase c = only();
+        assertThat(c.getRecommendedActionType()).as("the decision itself is unchanged")
+                .isEqualTo(RecommendedActionType.REPLY_TO_CUSTOMER);
+        assertThat(c.getPreparedAction()).isEqualTo(CasePreparedAction.NONE);
+        assertThat(c.getDraftVersion()).isNull();
+        verify(drafts, never()).prepare(any(), any());
+        assertThat(workItems.findAll().stream().filter(w -> org.equals(w.getOrgId())).toList())
+                .singleElement().extracting(InquiryWorkItem::getPhase)
+                .as("nothing proposed: the work item is where the collection left it")
+                .isEqualTo(InquiryWorkItemPhase.OPEN);
+        assertThat(decisionRow().draftPrepared()).isFalse();
     }
 
     @Test

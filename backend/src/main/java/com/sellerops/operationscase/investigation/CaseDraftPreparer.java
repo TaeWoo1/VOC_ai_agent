@@ -45,6 +45,18 @@ public class CaseDraftPreparer {
         }
     }
 
+    /**
+     * Whether a draft can be prepared for this organisation at all — asked <b>before</b> anything is written.
+     *
+     * <p>The same flag, key and org policy {@link InquiryDraftComposer} reads; this class adds no gate of its own
+     * and holds no second answer. A caller that skips on {@code false} costs a deployment with the capability off
+     * exactly what it cost before: nothing. A caller that does not ask still behaves correctly — the composer
+     * declines — but it will have spent a proposal and a retrieval to be told so.
+     */
+    public boolean enabledFor(UUID orgId) {
+        return drafts.enabledFor(orgId);
+    }
+
     public Prepared prepare(UUID orgId, UUID workItemId) {
         try {
             proposals.proposeAs(orgId, workItemId, ACTOR);

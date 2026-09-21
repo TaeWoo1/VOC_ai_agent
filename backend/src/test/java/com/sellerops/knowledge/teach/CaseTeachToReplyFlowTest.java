@@ -56,8 +56,10 @@ import com.sellerops.knowledge.memory.AnswerMemoryRepository;
 import com.sellerops.knowledge.memory.AnswerMemoryService;
 import com.sellerops.knowledge.org.OrgKnowledgeChunkRepository;
 import com.sellerops.knowledge.org.OrgKnowledgeSource;
+import com.sellerops.knowledge.org.OrgKnowledgeType;
 import com.sellerops.knowledge.org.OrgKnowledgeSourceRepository;
 import com.sellerops.knowledge.org.SellerOperationsKnowledgeService;
+import com.sellerops.knowledge.org.dto.OrgKnowledgeRequest;
 import com.sellerops.knowledge.spine.KnowledgeSpineService;
 import com.sellerops.knowledge.spine.SourceRefResolver;
 import com.sellerops.knowledge.spine.adapter.InquiryAnswerAdapter;
@@ -234,6 +236,7 @@ class CaseTeachToReplyFlowTest {
     private OperationsCaseProcessor processor;
     private CustomerOperationsHomeService home;
     private CaseKnowledgeService service;
+    private SellerOperationsKnowledgeService orgKnowledge;
     private MockMvc mvc;
 
     @BeforeEach
@@ -261,7 +264,7 @@ class CaseTeachToReplyFlowTest {
 
         ProductKnowledgeLibraryService productKnowledge =
                 new ProductKnowledgeLibraryService(products, productSources, productChunks, variants);
-        SellerOperationsKnowledgeService orgKnowledge = new SellerOperationsKnowledgeService(orgSources, orgChunks);
+        orgKnowledge = new SellerOperationsKnowledgeService(orgSources, orgChunks);
         AnswerMemoryService memory = new AnswerMemoryService(memories, orgChunks, productChunks);
         InquiryEvidenceRetriever retriever = new InquiryEvidenceRetriever(products, productKnowledge, orgKnowledge,
                 memory, StoredOnlyOrderFacts.reader(orders, channels, FRESH));
@@ -444,6 +447,40 @@ class CaseTeachToReplyFlowTest {
         assertThat(model.calls).isZero();
     }
 
+    @Test
+    @DisplayName("예약 실행에서도 답할 수 있는 문의는 초안까지 준비된다 — 같은 seam, 판매자 동작 0")
+    void aScheduledRunPreparesTheDraftForAResolvedReply() {
+        // The library already answers this one, so no Teach happens and nobody presses anything. Before this,
+        // the only road to a prepared draft ran through a concluded investigation — which is off by default —
+        // so a case the resolvers had fully settled reached the seller saying 「답변할 수 있는 문의입니다」 above
+        // an empty draft area.
+        orgKnowledge.create(org, new OrgKnowledgeRequest(OrgKnowledgeType.EXCHANGE_REFUND_POLICY,
+                "교환 및 반품 안내", TAUGHT, null), userId, "데모 운영자");
+        Inquiry inquiry = storedInquiry("교환 신청 기간이 어떻게 되나요?");
+        workItem(inquiry);
+        interpreted.set(new CustomerGoalSet(List.of(new CustomerGoal("g1", "교환 신청 기간이 어떻게 되나요?",
+                RequestedOutcome.ANSWER, Referent.ORGANIZATION, RequestBasis.STATED, List.of(),
+                "교환 신청 기간이 어떻게 되나요?")), List.of()));
+
+        processor.process(run(Instant.now()), () -> false);
+
+        OperationsCase c = only();
+        assertThat(c.getRecommendedActionType()).isEqualTo(RecommendedActionType.REPLY_TO_CUSTOMER);
+        assertThat(c.getPreparedAction()).isEqualTo(CasePreparedAction.DRAFT_PREPARED);
+        assertThat(c.getDraftVersion()).isEqualTo(1);
+        assertThat(c.getKnowledgeGap()).as("nothing is missing, so nothing is asked for").isNull();
+        assertThat(draftRows.findAll().stream().filter(d -> org.equals(d.getOrgId())).toList())
+                .singleElement().satisfies(d -> assertThat(d.getAnswerBasis()).isEqualTo("GROUNDED"));
+        assertThat(decisionRow().draftPrepared()).isTrue();
+
+        // The same boundary the Teach loop stops at: prepared, never executed.
+        assertThat(workItems.findById(c.getWorkItemId()).orElseThrow().getPhase())
+                .isEqualTo(InquiryWorkItemPhase.PROPOSED);
+        assertThat(executions.findAll()).isEmpty();
+        assertThat(model.calls).as("one draft, one call").isEqualTo(1);
+        verifyNoInteractions(investigationTools);
+    }
+
     // --- fixtures --------------------------------------------------------------------------------------------
 
     /** One collected inquiry nothing in the library can answer, walked into a persisted ADD_KNOWLEDGE case. */
@@ -455,7 +492,10 @@ class CaseTeachToReplyFlowTest {
                 "교환 신청 기간이 어떻게 되나요?")), List.of()));
 
         processor.process(run(Instant.now()), () -> false);
+        return only();
+    }
 
+    private OperationsCase only() {
         List<OperationsCase> rows = cases.findAll().stream().filter(c -> org.equals(c.getOrgId())).toList();
         assertThat(rows).hasSize(1);
         return rows.get(0);
