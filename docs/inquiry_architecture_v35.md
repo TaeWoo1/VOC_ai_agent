@@ -1684,3 +1684,68 @@ and that asymmetry is the decision.
 
 The existing distinctness rule already forces proper sub-spans on 11 goals across the 5 multi-goal messages, so any
 new policy only adds reach on single-goal messages. **No contract change was made.**
+
+### 25.9 Is an ACTION verdict execution authority? — audit, no contract change
+
+`§25.8` closed the evidence question: P0 stays. This section asks the one that matters more — **when the
+interpreter is wrong about ACTION, what does the runtime do with it?** Offline audit, zero model calls, and the
+proposed gate is *not* implemented: the measurement below is why.
+
+#### The three cases are the same object
+
+| case | outcome | referent | basis | dispatch |
+|---|---|---|---|---|
+| `G15` as the v2 run returned it (invented/substituted) | `ACTION` | `CURRENT_ORDER` | `DIRECTLY_IMPLIED` | `Run(PROCEDURE)` |
+| `G04` "주문 취소해 주세요" (explicit) | `ACTION` | `CURRENT_ORDER` | `STATED` | `Run(PROCEDURE)` |
+| `R:4181864b` (legitimate inferred) | `ACTION` | `CURRENT_ORDER` | `DIRECTLY_IMPLIED` | `Run(PROCEDURE)` |
+
+Byte-identical dispatches. `RequestBasis` is read **0 times** by `ResolutionPolicy`, `GoalResolution` and
+`GoalSetResolution`. **So the gate cannot be "detect the invented one"** — downstream there is nothing to detect.
+It has to be that no ACTION verdict is execution authority. `ActionIsNotExecutionAuthorityTest` pins all of this.
+
+#### What holds today — and the window it leaves
+
+Three fences exist and all three constrain what a resolver may **report**:
+
+1. `Resolution` refuses `RESOLVED`/`RESOLVED_CONDITIONAL` for any `PROCEDURE` capability — "a procedure never
+   closes a need without an executor";
+2. `CapabilityRegistry` declares `PROCEDURE_ORDER_ACTION` as `DECLARED_NO_EXECUTOR`, and it is the **only**
+   capability in the registry whose `ExecutionEffect` is not `NONE`;
+3. `Resolution` has no field in which "I performed an effect" could be recorded — observations only.
+
+**The window:** `GoalResolution.run(goal, Function<Run, ResolverOutcome>)` takes a caller-supplied resolver. A
+future production resolver could perform the external change and then report `CAPABILITY_GAP`; every fence above is
+still satisfied, and the damage is done **before** anything is reported. Nothing in this package can stop a lambda
+from doing IO. Today the window is unreachable — **the resolution loop has no production caller at all** — so this
+is a gate to install before an executor is wired, not a live defect.
+
+#### The proposed gate, and the measured reason it is a decision
+
+> **The loop observes; it never dispatches a capability whose `ExecutionEffect` is not `NONE`** — not from `first`,
+> and not as a prerequisite, which is the second door into a dispatch. An `ACTION` goal settles at
+> `CAPABILITY_GAP / NOT_EXECUTABLE`. Execution is relocated, not forbidden: reached through an approval bound to the
+> specific object and an executor outside this loop, exactly as every other write in this product is.
+
+It is generic (it reads a declared effect, no domain words), reuses `ExecutionEffect` + `GapReason.NOT_EXECUTABLE`,
+and is about ten lines. **It was implemented, measured and reverted**, because the cost is not a refactor:
+
+- **10 tests fail, across 7 committed scenario fixtures** — `G04 G07 G12 G17 G20 G22 G23` — plus
+  `GoalRelationTest` and two `ResolutionPolicyInvariantTest` cases.
+- Worse than the count: **in `G12`, `G17`, `G20` and `G22` the procedure resolver is what NAMES the read
+  prerequisite** (`ENTITY.ORDER`, `KNOWLEDGE.ORG`). The procedure capability is load-bearing for *reading*, not only
+  for acting, and those four are the only exercise the waiter/resume state machine (properties A–I) has. Blocking
+  the dispatch does not just change seven expectations; it removes the only modelled multi-step chain.
+- `onlyAnActionCanReachAProcedure` would not fail — it would pass **vacuously**, since the loop settles before the
+  assertion is reached. A safety test that goes quiet is the worst outcome of the three.
+
+So the fork is a product decision:
+
+| option | cost | what it buys |
+|---|---|---|
+| **A** gate the dispatch (above) | 7 fixtures re-adjudicated; the A–I state machine needs a new, read-led exercise | an invented ACTION cannot reach an effectful capability at all |
+| **B** leave the loop, gate at the executor seam | none today | nothing until an executor exists; the window reopens exactly when it is wired |
+| **C** split `PROCEDURE` into a read capability (names prerequisites, plans nothing) and an effectful one | largest; touches the registry and the four chain fixtures | keeps A–I exercised *and* makes the effectful half undispatchable |
+
+**C is the one this audit would recommend if the executor were imminent** — it is the only option that keeps both
+properties — but it is a registry change and not a small one. Nothing was changed here beyond adding the test that
+records the comparison and the window.
