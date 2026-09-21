@@ -97,6 +97,21 @@ public class OperationsCaseProcessor {
      */
     private com.sellerops.responsibility.aside.AsideMarketplaceTarget marketplaceTargets;
 
+    private CaseResolutionReader resolutions;
+
+    /**
+     * The Customer Goal resolution, when something can read this message into goals.
+     *
+     * <p>Optional by construction, not by configuration: {@code CustomerGoalInterpretation} has no production
+     * implementation, so the reader answers null and every case is decided exactly as it was before. When one
+     * arrives, what the customer asked for — and what this seller's own objects say about it — decides the case
+     * instead of a blank 「판매자 확인 필요」.
+     */
+    @Autowired(required = false)
+    void setResolutions(CaseResolutionReader resolutions) {
+        this.resolutions = resolutions;
+    }
+
     @Autowired(required = false)
     void setMarketplaceTargets(List<com.sellerops.responsibility.aside.AsideMarketplaceTarget> resolvers) {
         this.marketplaceTargets = com.sellerops.responsibility.aside.AsideMarketplaceTarget.firstOf(resolvers);
@@ -424,6 +439,12 @@ public class OperationsCaseProcessor {
         c.setMissingInformation(null);
         c.setConfidence(null);
         c.setDecidedBy(CaseDecider.RULE);
+        // What the customer actually asked for, resolved against THIS inquiry's order and listing. Null unless
+        // something read the message into goals, which nothing does today — see CaseResolutionReader.
+        com.sellerops.inquiry.resolve.InquiryResolutionView walk =
+                kind != OperationsSubjectKind.INQUIRY || resolutions == null
+                        ? null : resolutions.read(orgId, subjectId);
+        CaseFromResolution resolved = CaseFromResolution.of(walk);
         if (conclusion.needsInvestigation()) {
             // Written first as the seller's decision, so a crash or a failed investigation leaves the case where a
             // person will see it, never silently resolved.
@@ -436,6 +457,17 @@ public class OperationsCaseProcessor {
                 markClosed(c, conclusion.resolution());
             }
         }
+        if (resolved != null) {
+            // The resolution is deterministic and it read this seller's own objects, so it speaks after the rule
+            // and before any model. It never closes a case: CaseFromResolution cannot produce AUTO_RESOLVED.
+            c.setDisposition(resolved.disposition());
+            c.setRequiredAuthority(resolved.authority());
+            c.setRecommendedActionType(resolved.recommendedAction());
+            c.setSummary(resolved.summaryKo());
+            if (!resolved.missingInformation().isEmpty()) {
+                c.setMissingInformation(json(resolved.missingInformation()));
+            }
+        }
         OperationsCase saved;
         try {
             saved = cases.saveAndFlush(c);
@@ -444,15 +476,31 @@ public class OperationsCaseProcessor {
             k.blocked++;
             return;
         }
+        Map<String, Object> opened = new LinkedHashMap<>();
+        opened.put("decidedBy", "RULE");
+        opened.put("reason", conclusion.reason().name());
+        opened.put("disposition", String.valueOf(saved.getDisposition()));
+        if (resolved != null) {
+            // The whole walk, on the case's own history: which goals the message carried, what each one settled as,
+            // and which capability answered it. The passages stay where the gather wrote them.
+            opened.put("resolution", walk);
+        }
         event(saved, run.getId(), CaseEventActor.SYSTEM, changed ? CaseEventKind.CONTEXT_UPDATED : CaseEventKind.OPENED,
-                Map.of("decidedBy", "RULE", "reason", conclusion.reason().name(),
-                        "disposition", String.valueOf(saved.getDisposition())));
+                opened);
         if (changed) {
             k.updated++;
         } else {
             k.opened++;
         }
         if (!conclusion.needsInvestigation()) {
+            k.ruleDecided++;
+            return;
+        }
+        if (resolved != null && !resolved.createsCustomerWork()) {
+            // The message asked for nothing a resolver can act on. Keeping the observation is the answer, and
+            // spending a model call to re-read a question that is not there is not.
+            event(saved, run.getId(), CaseEventActor.SYSTEM, CaseEventKind.INVESTIGATION_SKIPPED,
+                    Map.of("outcome", "NO_CUSTOMER_GOAL"));
             k.ruleDecided++;
             return;
         }

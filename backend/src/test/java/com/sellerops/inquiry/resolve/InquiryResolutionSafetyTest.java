@@ -295,6 +295,56 @@ class InquiryResolutionSafetyTest {
         return source.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("(?m)^\\s*//.*$", "");
     }
 
+    /**
+     * <b>Nothing in production reads a sentence into goals, and that has to stay visible.</b>
+     *
+     * <p>Every workflow downstream of {@link com.sellerops.inquiry.resolve.CustomerGoalInterpretation} is written
+     * and tested, so the day an implementation appears the loop starts deciding real sellers' cases. That is a
+     * product decision — a goal is a model's reading of a customer's sentence — and it must not arrive as a quiet
+     * bean. This fails when one does, which is the moment to make the decision rather than discover it later.
+     */
+    @Test
+    @DisplayName("GUARD: the goal interpretation seam has no production implementation")
+    void nothingReadsASentenceIntoGoalsYet() throws Exception {
+        List<String> implementations = new ArrayList<>();
+        try (var paths = Files.walk(MAIN)) {
+            for (Path p : paths.filter(Files::isRegularFile)
+                    .filter(f -> f.toString().endsWith(".java")).toList()) {
+                if (p.getFileName().toString().equals("CustomerGoalInterpretation.java")) {
+                    continue;
+                }
+                String code = withoutComments(Files.readString(p));
+                if (code.contains("implements CustomerGoalInterpretation")
+                        || code.contains("CustomerGoalInterpretation()")) {
+                    implementations.add(p.getFileName().toString());
+                }
+            }
+        }
+        assertThat(implementations)
+                .as("something now turns a customer's sentence into goals in production. The resolution loop then "
+                        + "decides real cases from a model's reading — see the interface's own javadoc and "
+                        + "docs/inquiry_architecture_v35.md §25.10 before this ships.")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("GUARD: a resolution can never auto-resolve a customer's question")
+    void aResolutionNeverClosesACaseByItself() {
+        for (InquiryResolutionContext ctx : contexts()) {
+            for (CustomerGoal goal : goals()) {
+                var outcome = InquiryGoalResolutionService.resolve(
+                        new CustomerGoalSet(List.of(goal), List.of()), ctx);
+                var reading = com.sellerops.operationscase.CaseFromResolution.of(
+                        com.sellerops.inquiry.resolve.InquiryResolutionView.of(outcome));
+                assertThat(reading).isNotNull();
+                assertThat(reading.disposition())
+                        .as("a goal the company's knowledge answers is not a customer who has been answered; the "
+                                + "reply still has to be written, approved and sent")
+                        .isNotEqualTo(com.sellerops.operationscase.CaseDisposition.AUTO_RESOLVED);
+            }
+        }
+    }
+
     @Test
     @DisplayName("the set-level driver refuses a null context rather than resolving about nothing")
     void aContextlessSetIsRefused() {
