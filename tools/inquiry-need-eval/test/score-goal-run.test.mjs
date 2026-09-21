@@ -110,3 +110,44 @@ test('a v1/v2 row keeps its four tokens, and a v3 row keeps its three', () => {
     goals: [{ ...goal('g1', 'DECISION', 'CURRENT_LISTING'), evidence: '소재가' }] };
   assert.equal(predictionsOf([retired]).refusals.GOAL_SET, 1);
 });
+
+test('a foreign-arm row is read from raw in BOTH shapes, and a real refusal still stands', () => {
+  const answer = JSON.stringify({ goals: [{ id: 'g1', explicit_request: '요청', requested_outcome: 'DECISION',
+    subject: 'CURRENT_ORDER', basis: 'STATED', explicit_constraints: [], evidence: '가능한가요' }], relations: [] });
+
+  // Shape 1 — the defect: a runner judged a v2 answer with v3's records and wrote GOAL_CONTRACT.
+  const buggy = { ...row('G01'), prompt_version: 'customer-goal-interpreter/v2',
+    failure: 'GOAL_CONTRACT', goals: null, raw: answer };
+  const a = predictionsOf([buggy]);
+  assert.equal(a.readjudicated, 1);
+  assert.deepEqual(a.refusals, {});
+  assert.equal(a.predicted.G01.goals[0].outcome, 'DECISION');
+
+  // Shape 2 — after the fix: the runner declines to judge and says so.
+  const fixed = { ...row('G01'), prompt_version: 'customer-goal-interpreter/v2',
+    failure: null, goals: null, parsed_by_this_commit: false, raw: answer };
+  const b = predictionsOf([fixed]);
+  assert.equal(b.readjudicated, 1);
+  assert.equal(b.predicted.G01.goals[0].outcome, 'DECISION');
+
+  // A genuine contract failure is NOT laundered: the mirror has to accept the whole answer independently.
+  const badEvidence = JSON.stringify({ goals: [{ id: 'g1', explicit_request: '요청',
+    requested_outcome: 'DECISION', subject: 'CURRENT_ORDER', basis: 'STATED', explicit_constraints: [],
+    evidence: '' }], relations: [] });
+  const stands = predictionsOf([{ ...row('G01'), prompt_version: 'customer-goal-interpreter/v2',
+    failure: 'GOAL_CONTRACT', goals: null, raw: badEvidence }]);
+  assert.equal(stands.readjudicated, 0);
+  assert.equal(stands.refusals.GOAL_CONTRACT, 1);
+
+  // And a truncated answer is a fact about the CALL — no contract disagrees, so it is never revisited.
+  const truncated = predictionsOf([{ ...row('G01'), prompt_version: 'customer-goal-interpreter/v2',
+    failure: 'TRUNCATED', goals: null, raw: answer.slice(0, 30) }]);
+  assert.equal(truncated.readjudicated, 0);
+  assert.equal(truncated.refusals.TRUNCATED, 1);
+
+  // A CURRENT-arm row is never re-adjudicated: its runner had the right records and its verdict is authoritative.
+  const current = predictionsOf([{ ...row('G01'), prompt_version: 'customer-goal-interpreter/v3',
+    failure: 'GOAL_CONTRACT', goals: null, raw: answer }]);
+  assert.equal(current.readjudicated, 0);
+  assert.equal(current.refusals.GOAL_CONTRACT, 1);
+});

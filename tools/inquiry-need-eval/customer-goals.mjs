@@ -24,6 +24,13 @@ export const OUTCOMES_V2 = ['INFORMATION', 'STATE_READ', 'DECISION', 'ACTION'];
 export const MERGED_INTO_ANSWER = ['INFORMATION', 'DECISION'];
 export const PRE_ANSWER_PROMPTS = ['customer-goal-interpreter/v1', 'customer-goal-interpreter/v2'];
 
+/**
+ * A row produced by a contract OTHER than the one this mirror ships. Its runner-assigned failure verdict is not
+ * authoritative — see `predictionsOf` — because the Java runner builds records from its own commit's contract.
+ * Fail closed: an absent or unknown version is NOT foreign, so nothing is re-adjudicated by accident.
+ */
+export const foreignArm = (promptVersion) => PRE_ANSWER_PROMPTS.includes(promptVersion);
+
 /** Which token set a row may legally use. Fail closed: an absent or unknown version is read as the current one. */
 export const outcomesFor = (promptVersion) =>
   (PRE_ANSWER_PROMPTS.includes(promptVersion) ? OUTCOMES_V2 : OUTCOMES);

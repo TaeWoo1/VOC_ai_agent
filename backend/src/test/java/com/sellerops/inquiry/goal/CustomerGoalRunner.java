@@ -374,6 +374,28 @@ public final class CustomerGoalRunner {
             row.put("valid", false);
             return row.toString();
         }
+        // A COMPARISON ARM IS NOT JUDGED BY THIS COMMIT'S RECORDS.
+        //
+        // `parse` builds CustomerGoal objects, and those express the contract this commit ships. Run against a
+        // retired arm (§26.7) it calls a perfectly good answer a contract failure for using a word the retired
+        // contract required: measured on the v2 holdout arm, 39 of 75 rows, the correspondence with "contains a
+        // retired outcome token" exact in both directions, with the vendor having answered all 75 at finish=stop.
+        //
+        // So the runner records the answer and says plainly that it did not read it. That is the honest shape —
+        // this commit HAS no records for v2 — and the JS mirror, which carries both vocabularies, scores it from
+        // `raw` under the arm's own contract. What must never happen again is a valid answer being written down
+        // as a contract failure, because that number reads as a model defect and is a harness defect.
+        if (arm != CustomerGoalPrompt.Arm.current()) {
+            row.putNull("goals");
+            row.putArray("relations");
+            row.put("valid", false);
+            row.put("parsed_by_this_commit", false);
+            row.put("not_parsed_reason", "FOREIGN_ARM — this commit's records express "
+                    + CustomerGoalPrompt.Arm.current().version() + "; this row is " + arm.version()
+                    + " and is scored from `raw` under its own contract");
+            return row.toString();
+        }
+        row.put("parsed_by_this_commit", true);
         Parsed parsed = parse(content, customerOf(request));
         row.put("failure", parsed.failure());
         if (parsed.failure() != null) {

@@ -147,6 +147,71 @@ class CustomerGoalRunnerTest {
         assertThat(refused.get("said").asText()).isEqualTo("no");
     }
 
+    /**
+     * <b>The defect the v2 holdout arm found, fixed and pinned</b> (§26.7).
+     *
+     * <p>{@code parse} builds {@link CustomerGoal} objects, which express the contract this commit ships. Pointed
+     * at a comparison arm it called a valid v2 answer {@code GOAL_CONTRACT} for using a word v2 REQUIRED — 39 of 75
+     * rows on the first paired run, with the vendor answering all 75 at {@code finish=stop}. The number read as a
+     * model defect and was a harness defect, which is the direction that matters: a comparison arm scoring badly
+     * for a reason that is nothing to do with the model would have argued against the merge on false evidence.
+     */
+    @Test
+    @DisplayName("a comparison arm is recorded, not judged — this commit's records do not referee a retired one")
+    void aForeignArmIsNotJudgedByThisCommitsRecords() throws Exception {
+        // A v2 answer: valid under v2, and using a token v3 has no record for.
+        String v2Answer = "{\"goals\":[{\"id\":\"g1\",\"explicit_request\":\"제품 소재가 뭔가요?\","
+                + "\"requested_outcome\":\"INFORMATION\",\"subject\":\"CURRENT_LISTING\",\"basis\":\"STATED\","
+                + "\"explicit_constraints\":[],\"evidence\":\"제품 소재가 뭔가요?\"}],\"relations\":[]}";
+
+        CustomerGoalRunner v2 = new CustomerGoalRunner(GoalInterpreterPreflight.MODEL,
+                GoalInterpreterPreflight.REASONING_EFFORT, refusing(), null,
+                java.util.Map.of(), CustomerGoalPrompt.Arm.V2);
+        JsonNode row = replayedRow(v2, v2Answer);
+
+        assertThat(row.get("prompt_version").asText()).isEqualTo("customer-goal-interpreter/v2");
+        assertThat(row.get("failure").isNull()).as("a valid v2 answer is NOT a contract failure").isTrue();
+        assertThat(row.get("parsed_by_this_commit").asBoolean()).isFalse();
+        assertThat(row.get("not_parsed_reason").asText()).contains("FOREIGN_ARM");
+        // The observation survives in full — that is what the JS mirror scores from.
+        assertThat(row.get("raw").asText()).isEqualTo(v2Answer);
+        assertThat(row.get("goals").isNull()).as("this commit has no records for v2; it does not invent any")
+                .isTrue();
+
+        // The current arm is unchanged: it is still read into the real records, and still refuses a bad answer.
+        CustomerGoalRunner v3 = GoalRunFixtures.runner(refusing(), java.util.Map.of());
+        JsonNode good = replayedRow(v3, GoalRunFixtures.GOOD_ANSWER);
+        assertThat(good.get("parsed_by_this_commit").asBoolean()).isTrue();
+        assertThat(good.get("failure").isNull()).isTrue();
+        assertThat(good.get("goals")).hasSize(1);
+
+        CustomerGoalRunner v3bad = GoalRunFixtures.runner(refusing(), java.util.Map.of());
+        JsonNode refused = replayedRow(v3bad, v2Answer);
+        assertThat(refused.get("failure").asText())
+                .as("under the CURRENT contract, a retired token is still a contract failure")
+                .isEqualTo("GOAL_CONTRACT");
+        assertThat(refused.get("parsed_by_this_commit").asBoolean()).isTrue();
+    }
+
+    /**
+     * Replay one recorded answer through the given runner and return the row it writes.
+     *
+     * <p>REPLAY rather than a send, and that is not a convenience: this is about how an answer is READ, and a send
+     * would first have to satisfy the guard — which correctly refuses a v2 runner holding a manifest built for the
+     * current arm, on {@code prompt_version}, both prompt fingerprints and {@code request_fp_set}. Proving that is
+     * {@code GoalSmokePreflightTest}'s job; proving the reading is this one's.
+     */
+    private JsonNode replayedRow(CustomerGoalRunner runner, String answer) throws Exception {
+        var input = new CustomerGoalRunner.Input("G01", "제품 소재가 뭔가요?");
+        var request = runner.prepare(java.util.List.of(input)).get(0);
+        var recorded = JSON.createObjectNode();
+        recorded.put("request_fp", request.requestFp()).put("raw", answer).put("said", answer)
+                .putNull("failure").put("finish", "stop").put("elapsed_ms", 1);
+        var result = runner.replay("r", java.util.List.of(input),
+                java.util.Map.of("G01", recorded), new GoalRunFixtures.Recording());
+        return rowsOf(result.rows()).get(0);
+    }
+
     @Test
     @DisplayName("a good answer is read into the real records, so the wire cannot be laxer than the contract")
     void aGoodAnswerIsReadByTheContractItself(@TempDir Path dir) throws Exception {
