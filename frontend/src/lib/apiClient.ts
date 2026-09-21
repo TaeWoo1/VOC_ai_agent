@@ -166,7 +166,12 @@ import {
   mockVocItemTriage,
 } from "./mocks";
 import { visibleChannels } from "./productChannels";
-import type { CustomerOperationsHome, OperationsCaseDetail, ResponsibilityView } from "./customerOperationsTypes";
+import type {
+  CustomerOperationsDecisions,
+  CustomerOperationsHome,
+  OperationsCaseDetail,
+  ResponsibilityView,
+} from "./customerOperationsTypes";
 import { captureApiError } from "./telemetry/sentry";
 
 // Default to a SAME-ORIGIN relative base ("") so `/api/*` requests go through the Vite dev proxy (see
@@ -1907,6 +1912,18 @@ export const api = {
   /** The Home's three exception areas. A failed read draws nothing — never a clear morning. */
   async getCustomerOperationsHome(): Promise<CustomerOperationsHome> {
     const { data } = await http.get<CustomerOperationsHome>("/api/responsibilities/customer-operations/home");
+    return data;
+  },
+
+  /**
+   * The whole 「내 결정 필요」 list — the same population the Home briefs, past its five-row cut. `total` is counted
+   * over the same read as the rows, so a shortfall means 「한 번에 읽는 깊이보다 많다」, not 「그만큼만 있다」.
+   */
+  async getCustomerOperationsDecisions(size = 50): Promise<CustomerOperationsDecisions> {
+    const { data } = await http.get<CustomerOperationsDecisions>(
+      "/api/responsibilities/customer-operations/decisions",
+      { params: { size } },
+    );
     return data;
   },
 

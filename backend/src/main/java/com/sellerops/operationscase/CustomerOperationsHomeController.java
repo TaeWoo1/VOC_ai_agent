@@ -4,6 +4,7 @@ import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.operationscase.dto.CustomerOperationsHomeView;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -22,5 +23,17 @@ public class CustomerOperationsHomeController {
     @GetMapping("/api/responsibilities/customer-operations/home")
     public CustomerOperationsHomeView home(@AuthenticationPrincipal AuthPrincipal principal) {
         return service.home(principal.orgId());
+    }
+
+    /**
+     * The same 「내 결정 필요」 population the Home briefs, without the briefing's five-row cut — the list the seller
+     * works through. Still GET only, and still one list over both kinds: an inquiry and a review that both need a
+     * decision are the same kind of thing to a person holding one morning.
+     */
+    @GetMapping("/api/responsibilities/customer-operations/decisions")
+    public CustomerOperationsHomeView.Decisions decisions(@AuthenticationPrincipal AuthPrincipal principal,
+                                                          @RequestParam(defaultValue = "50") int size) {
+        return service.decisions(principal.orgId(),
+                Math.min(Math.max(size, 1), CustomerOperationsHomeService.MAX_QUEUE_ROWS));
     }
 }

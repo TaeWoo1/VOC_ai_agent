@@ -56,9 +56,16 @@ export function CustomerOperationsExceptions({
             ))}
           </ul>
         ) : null}
+        {/* The rest of this list is the rest of THIS list — not two other screens. Sending the seller to 문의 and
+            리뷰 to find it was the split this area exists to remove. */}
         {home.decisions.total > home.decisions.rows.length ? (
-          <p className="mt-2 text-sm text-muted">
-            나머지 {(home.decisions.total - home.decisions.rows.length).toLocaleString("ko-KR")}건은 문의·리뷰 화면에 있습니다.
+          <p className="mt-2 text-sm">
+            <Link
+              to="/customer-operations/cases"
+              className="font-medium text-brand-700 underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              나머지 {(home.decisions.total - home.decisions.rows.length).toLocaleString("ko-KR")}건 보기
+            </Link>
           </p>
         ) : null}
       </Area>

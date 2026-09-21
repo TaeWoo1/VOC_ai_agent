@@ -94,6 +94,15 @@ export interface CustomerOperationsDecisionRow {
   to: string;
 }
 
+/**
+ * The 「내 결정 필요」 population. The Home carries it as a five-row briefing and the queue screen asks for the whole
+ * list; both are this shape from one backend read, so neither can name a different set of waiting work.
+ */
+export interface CustomerOperationsDecisions {
+  total: number;
+  rows: CustomerOperationsDecisionRow[];
+}
+
 export interface CustomerOperationsHandledRow {
   caseId: string;
   subjectKind: "INQUIRY" | "REVIEW";

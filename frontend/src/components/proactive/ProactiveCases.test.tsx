@@ -137,7 +137,10 @@ describe("ProactiveCases", () => {
     expect(
       screen.getByText(/같은 문제가 이 상품에서 반복되고 있습니다.*포장 파손/),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "확인하기" })).toHaveAttribute("href", "/reviews");
+    // [확인하기] opens THIS review's decision screen. It used to open the bare list, so a card that named one
+    // review handed back a page of every review — the seller still had to find it. Opening the review's own screen
+    // adds no ability to answer: that screen stops at the clipboard too, which the next line holds.
+    expect(screen.getByRole("link", { name: "확인하기" })).toHaveAttribute("href", "/reviews/reply/rev-1");
     expect(screen.queryByRole("button", { name: /전송|보내기|답변 보내기/ })).toBeNull();
   });
 

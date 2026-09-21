@@ -1,6 +1,6 @@
 import { REASON, reasonOfCase, sourceLabel, waitSince, DRAFT_UNSENT, type Reason } from "./copy/customerOps";
 import { subjectFallback } from "./customerOperations";
-import type { CustomerOperationsHome } from "./customerOperationsTypes";
+import type { CustomerOperationsDecisionRow, CustomerOperationsHome } from "./customerOperationsTypes";
 import type { InquiryQueueResponse, OperationsHome } from "./types";
 
 /**
@@ -36,6 +36,33 @@ export interface HomeWork {
   truncated: boolean;
 }
 
+/**
+ * One case, as a row of waiting work — <b>the only place a case becomes a row.</b> The Home's briefing and the queue
+ * screen both call this, so a case reads the same way in the list the seller is briefed with and the list they work
+ * through; a second mapping would be a second opinion about what this case is.
+ *
+ * <p>An inquiry and a review are not branched on here. What the row says comes from the decision the case carries
+ * (recommended action, what is missing, whether a draft stands) — `subjectKind` only chooses the noun in `source`.
+ */
+export function caseWorkRow(row: CustomerOperationsDecisionRow): HomeWorkRow {
+  const reason = reasonOfCase(row.recommendedActionType, row.missingInformation);
+  const missing = row.missingInformation.length > 0 ? `${row.missingInformation.join(", ")} 필요` : null;
+  const line = [row.draftPrepared ? `초안 있음 · ${DRAFT_UNSENT}` : null, missing ?? row.summary ?? row.reasonNote]
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    key: `case:${row.caseId}`,
+    reason,
+    source: sourceLabel(row.channelNameKo, row.subjectKind, row.rating),
+    title: row.title?.trim() || row.summary || subjectFallback(row.subjectKind),
+    line: line || null,
+    since: row.openedAt,
+    to: `/customer-operations/cases/${row.caseId}`,
+    caseId: row.caseId,
+    verb: reason === REASON.info ? "정보 입력" : "검토",
+  };
+}
+
 export function mergeHomeWork(
   co: CustomerOperationsHome | null | undefined,
   ops: OperationsHome | null | undefined,
@@ -46,22 +73,7 @@ export function mergeHomeWork(
   let truncated = false;
 
   for (const row of co?.decisions.rows ?? []) {
-    const reason = reasonOfCase(row.recommendedActionType, row.missingInformation);
-    const missing = row.missingInformation.length > 0 ? `${row.missingInformation.join(", ")} 필요` : null;
-    const line = [row.draftPrepared ? `초안 있음 · ${DRAFT_UNSENT}` : null, missing ?? row.summary ?? row.reasonNote]
-      .filter(Boolean)
-      .join(" · ");
-    byOwner.set(row.to, {
-      key: `case:${row.caseId}`,
-      reason,
-      source: sourceLabel(row.channelNameKo, row.subjectKind, row.rating),
-      title: row.title?.trim() || row.summary || subjectFallback(row.subjectKind),
-      line: line || null,
-      since: row.openedAt,
-      to: `/customer-operations/cases/${row.caseId}`,
-      caseId: row.caseId,
-      verb: reason === REASON.info ? "정보 입력" : "검토",
-    });
+    byOwner.set(row.to, caseWorkRow(row));
   }
   if (co && co.decisions.total > co.decisions.rows.length) truncated = true;
 

@@ -35,6 +35,7 @@ import { SettingsHome } from "./pages/app/SettingsHome";
 import { HelperDevices } from "./pages/app/HelperDevices";
 import { CustomerOperations } from "./pages/app/CustomerOperations";
 import { OperationsCase } from "./pages/app/OperationsCase";
+import { OperationsCaseQueue } from "./pages/app/OperationsCaseQueue";
 
 // Carried-over working surfaces. These keep their behaviour in Slice 3 and are re-homed under the
 // new IA; the ones scheduled for replacement are rebuilt in Slices 4-6.
@@ -185,6 +186,7 @@ export function App() {
         <Route path="/settings/company" element={<CompanyProfile />} />
         <Route path="/settings/devices" element={<HelperDevices />} />
         <Route path="/customer-operations" element={<CustomerOperations />} />
+        <Route path="/customer-operations/cases" element={<OperationsCaseQueue />} />
         <Route path="/customer-operations/cases/:caseId" element={<OperationsCase />} />
 
         {/* Operations agent — reachable, but not a navigation destination. It becomes an action

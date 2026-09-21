@@ -58,6 +58,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class CustomerOperationsHomeService {
 
     static final int MAX_ROWS = 5;
+    /**
+     * How deep a single read looks. The canonical-record filter runs in Java, so this is the page the database is
+     * asked for — not a cap on what the seller may see. It is deliberately the same number for the briefing and the
+     * queue: a `total` counted over a different depth than the rows is a total about a different question.
+     */
+    static final int SCAN = 200;
+    static final int MAX_QUEUE_ROWS = SCAN;
     static final Duration HANDLED_PERIOD = Duration.ofHours(24);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -147,16 +154,50 @@ public class CustomerOperationsHomeService {
                 decisions(orgId, r, channelById), handled(orgId, r, channelById), gaps(orgId, r, channelById));
     }
 
+    /**
+     * <b>The whole queue, in one place.</b> The Home shows the first {@link #MAX_ROWS} of exactly this list as a
+     * briefing; the queue screen asks for the rest. Both call {@link #waiting} and {@link #rowsOf}, so the two
+     * surfaces cannot disagree about which cases are waiting, in what order, or in what words — the brief they open
+     * from and the list they are worked through are the same population, not two answers to the same question.
+     *
+     * <p>Review and inquiry are not two queues here. A case is a case; its {@code subjectKind} is a fact the row
+     * carries, not a list it belongs to.
+     */
+    @Transactional(readOnly = true)
+    public CustomerOperationsHomeView.Decisions decisions(UUID orgId, int size) {
+        if (!rollout.allows(orgId)) {
+            return new CustomerOperationsHomeView.Decisions(0, List.of());
+        }
+        Optional<Responsibility> found = responsibilities.findByOrgIdAndTemplateCode(
+                orgId, ResponsibilityTemplate.CUSTOMER_OPERATIONS_V1);
+        if (found.isEmpty()) {
+            return new CustomerOperationsHomeView.Decisions(0, List.of());
+        }
+        Map<UUID, Channel> channelById = channels.findAll().stream()
+                .collect(Collectors.toMap(Channel::getId, c -> c, (a, b) -> a));
+        List<OperationsCase> waiting = waiting(orgId, found.get());
+        return new CustomerOperationsHomeView.Decisions(waiting.size(), rowsOf(waiting, size, channelById));
+    }
+
     private CustomerOperationsHomeView.Decisions decisions(UUID orgId, Responsibility r, Map<UUID, Channel> channelById) {
-        List<OperationsCase> waiting = cases.findByOrgIdAndResponsibilityIdAndCaseKindAndStatusOrderByCreatedAtDesc(
+        List<OperationsCase> waiting = waiting(orgId, r);
+        return new CustomerOperationsHomeView.Decisions(waiting.size(), rowsOf(waiting, MAX_ROWS, channelById));
+    }
+
+    private List<OperationsCase> waiting(UUID orgId, Responsibility r) {
+        return cases.findByOrgIdAndResponsibilityIdAndCaseKindAndStatusOrderByCreatedAtDesc(
                         orgId, r.getId(), OperationsCaseKind.CUSTOMER_WORK, OperationsCaseStatus.PREPARED,
-                        PageRequest.of(0, 200)).stream()
+                        PageRequest.of(0, SCAN)).stream()
                 .filter(c -> c.getDisposition() == CaseDisposition.NEEDS_DECISION)
                 .filter(this::stillWaitingOnCanonicalRecord)
                 .sorted(Comparator.comparing((OperationsCase c) -> c.getPriority() == CasePriority.HIGH ? 0 : 1)
                         .thenComparing(OperationsCase::getCreatedAt, Comparator.reverseOrder()))
                 .toList();
-        List<CustomerOperationsHomeView.DecisionRow> rows = waiting.stream().limit(MAX_ROWS).map(c -> {
+    }
+
+    private List<CustomerOperationsHomeView.DecisionRow> rowsOf(List<OperationsCase> waiting, int size,
+                                                                Map<UUID, Channel> channelById) {
+        return waiting.stream().limit(size).map(c -> {
             Subject subject = subject(c);
             return new CustomerOperationsHomeView.DecisionRow(c.getId(), c.getSubjectKind().name(),
                     channelName(channelById, c.getChannelId()), subject.title(), subject.rating(), CaseReason.noteFor(c),
@@ -166,7 +207,6 @@ public class CustomerOperationsHomeService {
                     c.getPreparedAction() == CasePreparedAction.DRAFT_PREPARED,
                     c.getDecidedBy() == null ? null : c.getDecidedBy().name(), c.getCreatedAt(), linkOf(c));
         }).toList();
-        return new CustomerOperationsHomeView.Decisions(waiting.size(), rows);
     }
 
     private CustomerOperationsHomeView.Handled handled(UUID orgId, Responsibility r, Map<UUID, Channel> channelById) {

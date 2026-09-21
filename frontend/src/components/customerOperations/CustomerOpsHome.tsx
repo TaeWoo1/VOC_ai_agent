@@ -184,6 +184,18 @@ export function CustomerOpsHome({
               +{hidden.toLocaleString("ko-KR")}
             </button>
           ) : null}
+          {/* The Home is a briefing, so it is read short on purpose — but 「더 있다」 with nowhere to go is the one
+              thing it must not say. The queue is the same list, unbriefed. */}
+          {work.truncated && hidden === 0 ? (
+            <p className="mt-2 text-sm">
+              <Link
+                to="/customer-operations/cases"
+                className="font-medium text-brand-700 underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                전체 목록 보기
+              </Link>
+            </p>
+          ) : null}
         </section>
       ) : null}
 

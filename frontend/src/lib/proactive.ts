@@ -31,15 +31,18 @@ export function preparedBadge(view: ProactiveCaseView): { label: string; tone: "
 /**
  * Where [확인하기] goes — always an EXISTING screen.
  *
- * An inquiry opens the response flow it already has; a review opens the review list. There is no
- * proactive-only detail page, on purpose: a second place to read the same inquiry is a second place
+ * An inquiry opens the response flow it already has; a review opens <b>that review's</b> decision screen — the
+ * canonical mutation surface for a review (Review Decision Workspace v1). It used to open the bare list, so a card
+ * that named one review handed back a page of every review and left the seller to find it again.
+ *
+ * There is no proactive-only detail page, on purpose: a second place to read the same inquiry is a second place
  * for the seller to lose track of what they have already answered.
  */
 export function caseTarget(view: ProactiveCaseView): string {
   if (view.subjectKind === "INQUIRY") {
     return `/inquiries/${view.subjectId}`;
   }
-  return "/reviews";
+  return `/reviews/reply/${view.subjectId}`;
 }
 
 /** `inquiry` / `review` — the only prop the analytics event carries. Never the subject's content. */
