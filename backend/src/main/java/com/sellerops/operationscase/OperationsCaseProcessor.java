@@ -108,7 +108,7 @@ public class OperationsCaseProcessor {
      * instead of a blank 「판매자 확인 필요」.
      */
     @Autowired(required = false)
-    void setResolutions(CaseResolutionReader resolutions) {
+    public void setResolutions(CaseResolutionReader resolutions) {
         this.resolutions = resolutions;
     }
 
