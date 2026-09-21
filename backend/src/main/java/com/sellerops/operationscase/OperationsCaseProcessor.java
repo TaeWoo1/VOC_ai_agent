@@ -441,10 +441,10 @@ public class OperationsCaseProcessor {
         c.setDecidedBy(CaseDecider.RULE);
         // What the customer actually asked for, resolved against THIS inquiry's order and listing. Null unless
         // something read the message into goals, which nothing does today — see CaseResolutionReader.
-        com.sellerops.inquiry.resolve.InquiryResolutionView walk =
+        CaseResolutionReader.Reading reading =
                 kind != OperationsSubjectKind.INQUIRY || resolutions == null
                         ? null : resolutions.read(orgId, subjectId);
-        CaseFromResolution resolved = CaseFromResolution.of(walk);
+        com.sellerops.inquiry.resolve.InquiryResolutionView walk = reading == null ? null : reading.view();
         if (conclusion.needsInvestigation()) {
             // Written first as the seller's decision, so a crash or a failed investigation leaves the case where a
             // person will see it, never silently resolved.
@@ -457,17 +457,7 @@ public class OperationsCaseProcessor {
                 markClosed(c, conclusion.resolution());
             }
         }
-        if (resolved != null) {
-            // The resolution is deterministic and it read this seller's own objects, so it speaks after the rule
-            // and before any model. It never closes a case: CaseFromResolution cannot produce AUTO_RESOLVED.
-            c.setDisposition(resolved.disposition());
-            c.setRequiredAuthority(resolved.authority());
-            c.setRecommendedActionType(resolved.recommendedAction());
-            c.setSummary(resolved.summaryKo());
-            if (!resolved.missingInformation().isEmpty()) {
-                c.setMissingInformation(json(resolved.missingInformation()));
-            }
-        }
+        CaseFromResolution resolved = recordResolution(c, reading);
         OperationsCase saved;
         try {
             saved = cases.saveAndFlush(c);
@@ -521,6 +511,39 @@ public class OperationsCaseProcessor {
                 prepareDraftIfAsked(run, concluded, outcome.output(), k);
             }
         }
+    }
+
+    /**
+     * <b>Write one resolution onto its case.</b> Shared with the Teach loop, which re-resolves after the seller
+     * supplies the missing knowledge — so a re-resolution means exactly what a first one does.
+     *
+     * <p>The resolution is deterministic and it read this seller's own objects, so it speaks after the rule and
+     * before any model. It never closes a case: {@link CaseFromResolution} cannot produce {@code AUTO_RESOLVED}.
+     *
+     * <p>The knowledge gap is written <b>only while the resolution is still asking for knowledge</b>. A question the
+     * seller has since answered no longer has a gap, and a stale one left standing would go on asking for something
+     * already supplied — which is the one thing a seller reads as «my work did not happen».
+     *
+     * @param reading the walk and the gap behind it, or null when nothing read the message
+     * @return what the walk concluded, or null when there was none — the case is then left where the rules put it
+     */
+    public CaseFromResolution recordResolution(OperationsCase c, CaseResolutionReader.Reading reading) {
+        CaseFromResolution resolved = CaseFromResolution.of(reading == null ? null : reading.view());
+        if (resolved == null) {
+            return null;
+        }
+        c.setDisposition(resolved.disposition());
+        c.setRequiredAuthority(resolved.authority());
+        c.setRecommendedActionType(resolved.recommendedAction());
+        c.setSummary(resolved.summaryKo());
+        c.setMissingInformation(resolved.missingInformation().isEmpty() ? null
+                : json(resolved.missingInformation()));
+        if (resolved.recommendedAction() == RecommendedActionType.ADD_KNOWLEDGE) {
+            c.setKnowledgeGap(reading.gap() == null ? null : json(reading.gap()));
+        } else {
+            c.setKnowledgeGap(null);
+        }
+        return resolved;
     }
 
     /**

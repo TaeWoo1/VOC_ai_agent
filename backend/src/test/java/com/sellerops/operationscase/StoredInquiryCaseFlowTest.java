@@ -162,6 +162,7 @@ class StoredInquiryCaseFlowTest {
     private int windows;
     private OperationsCaseProcessor processor;
     private CustomerOperationsHomeService home;
+    private CaseResolutionReader resolutions;
     private ProductKnowledgeLibraryService productKnowledge;
     private SellerOperationsKnowledgeService orgKnowledge;
 
@@ -202,9 +203,10 @@ class StoredInquiryCaseFlowTest {
                         new com.sellerops.inquiry.publish.AnswerDeliveryTruthReader(executions, verifications),
                         Clock.systemUTC()),
                 investigator, investigation, drafts, workItems, channels, Clock.systemUTC());
-        processor.setResolutions(new CaseResolutionReader(() -> new Supplied(interpreted), inquiries, assessor,
+        resolutions = new CaseResolutionReader(() -> new Supplied(interpreted), inquiries, assessor,
                 new InquiryGoalResolutionService(new CapabilityRegistry(channels, listings, variants)),
-                Clock.systemUTC()));
+                Clock.systemUTC());
+        processor.setResolutions(resolutions);
         home = new CustomerOperationsHomeService(responsibilities, runs, sourceRows,
                 new ResponsibilitySources(accounts, channels), rollout, cases, inquiries, workItems, reviews,
                 channels, Clock.systemUTC());
@@ -260,6 +262,51 @@ class StoredInquiryCaseFlowTest {
         assertThat(c.getDisposition()).isEqualTo(CaseDisposition.NEEDS_DECISION);
         assertThat(c.getRecommendedActionType()).isEqualTo(RecommendedActionType.ADD_KNOWLEDGE);
         assertThat(c.getSummary()).contains("판매자님의 판단이 필요합니다");
+        assertThat(c.getKnowledgeGap())
+                .as("a case that asks for knowledge must carry WHAT is missing — every control that asks the "
+                        + "seller reads the gap, so a recommendation without one has nowhere to go")
+                .isNotNull();
+    }
+
+    @Test
+    @DisplayName("the seller writes the missing rule down → the same inquiry becomes a reply, and the gap is gone")
+    void teachingTheGapTurnsTheSameInquiryIntoAReply() {
+        Inquiry inquiry = storedInquiry("교환 신청은 언제까지 가능한가요?", null, null);
+        workItem(inquiry);
+        interpreted.set(set(goal("g1", RequestedOutcome.ANSWER, Referent.ORGANIZATION,
+                "교환 신청은 언제까지 가능한가요?")));
+
+        processor.process(run(Instant.now()), () -> false);
+
+        OperationsCase asked = only();
+        assertThat(asked.getRecommendedActionType()).isEqualTo(RecommendedActionType.ADD_KNOWLEDGE);
+        assertThat(asked.getKnowledgeGap()).isNotNull();
+
+        // The seller answers it — through the ordinary knowledge writer, not through anything this loop owns.
+        orgKnowledge.create(org, new OrgKnowledgeRequest(OrgKnowledgeType.EXCHANGE_REFUND_POLICY,
+                        "교환 및 반품 안내", "교환은 수령 후 7일 이내에 신청하실 수 있습니다.", null),
+                UUID.randomUUID(), "데모 운영자");
+
+        // ...and the case is re-resolved, which is exactly the first step CaseKnowledgeService.rerun takes.
+        CaseFromResolution after = processor.recordResolution(asked, resolutions.read(org, inquiry.getId()));
+
+        assertThat(after).isNotNull();
+        assertThat(after.recommendedAction())
+                .as("the lanes that answered NEEDS_SELLER now find the seller's own rule")
+                .isEqualTo(RecommendedActionType.REPLY_TO_CUSTOMER);
+        assertThat(asked.getRecommendedActionType()).isEqualTo(RecommendedActionType.REPLY_TO_CUSTOMER);
+        assertThat(asked.getSummary()).isEqualTo("등록된 지식으로 답변할 수 있는 문의입니다.");
+        assertThat(asked.getKnowledgeGap())
+                .as("a question the seller has answered no longer has a gap; leaving one standing would keep "
+                        + "asking for what they already supplied")
+                .isNull();
+        verify(investigator, never()).investigate(any(), any());
+
+        // 조회: the seller's own read now offers the reply, on the same case.
+        cases.saveAndFlush(asked);
+        CustomerOperationsHomeView.DecisionRow row = decisionRow();
+        assertThat(row.caseId()).isEqualTo(asked.getId());
+        assertThat(row.recommendedActionType()).isEqualTo("REPLY_TO_CUSTOMER");
     }
 
     @Test

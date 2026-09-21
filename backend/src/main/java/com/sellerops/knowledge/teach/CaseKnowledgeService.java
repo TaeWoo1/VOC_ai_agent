@@ -33,6 +33,7 @@ import com.sellerops.operationscase.CaseDisposition;
 import com.sellerops.operationscase.CaseEventActor;
 import com.sellerops.operationscase.CaseEventKind;
 import com.sellerops.operationscase.CaseKnowledgeGap;
+import com.sellerops.operationscase.CaseResolutionReader;
 import com.sellerops.operationscase.OperationsCase;
 import com.sellerops.operationscase.OperationsCaseEvent;
 import com.sellerops.operationscase.OperationsCaseEventRepository;
@@ -96,6 +97,7 @@ public class CaseKnowledgeService {
     private final InquiryReplyDraftService drafts;
     private final InquiryDraftComposer composer;
     private final AnswerMemoryRepository memories;
+    private CaseResolutionReader resolutions;
 
     public CaseKnowledgeService(OperationsCaseRepository cases, OperationsCaseEventRepository events,
                                 OperationsCaseProcessor processor, CaseInvestigator investigator,
@@ -121,6 +123,16 @@ public class CaseKnowledgeService {
         this.drafts = drafts;
         this.composer = composer;
         this.memories = memories;
+    }
+
+    /**
+     * The Customer Goal loop's door, when this deployment has one. Optional for the same reason the processor's is:
+     * with nothing reading messages into goals there is no resolution to re-run, and teach behaves exactly as it did
+     * before — knowledge is saved, the case is re-investigated and re-drafted.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setResolutions(CaseResolutionReader resolutions) {
+        this.resolutions = resolutions;
     }
 
     // ── read ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -245,9 +257,33 @@ public class CaseKnowledgeService {
         return detail(orgId, caseId);
     }
 
-    /** Re-investigate (when the organisation has the capability), then re-draft when the case is a reply. */
+    /**
+     * Re-resolve, then re-investigate (when the organisation has the capability), then re-draft when the case is a
+     * reply.
+     *
+     * <p><b>The resolution runs first, and it is the step that knows what just changed.</b> The seller has altered
+     * what this organisation knows, and the deterministic resolvers are the only thing here that reads that: the
+     * knowledge lanes answered {@code NEEDS_SELLER} because they searched and found nothing, and now they may find
+     * something. Without this the case kept recommending {@code ADD_KNOWLEDGE} after the seller had added exactly
+     * the knowledge it asked for.
+     *
+     * <p>It costs <b>no vendor call</b>. The interpretation is keyed on the customer's text, which did not change,
+     * so the stored reading is reused; only the context around it is rebuilt.
+     */
     private void rerun(UUID orgId, OperationsCase c) {
         OperationsCase current = c;
+        if (resolutions != null && current.getSubjectKind() == OperationsSubjectKind.INQUIRY) {
+            CaseResolutionReader.Reading reading = resolutions.read(orgId, current.getSubjectId());
+            if (processor.recordResolution(current, reading) != null) {
+                current = cases.saveAndFlush(current);
+                Map<String, Object> reread = new LinkedHashMap<>();
+                reread.put("decidedBy", "RULE");
+                reread.put("disposition", String.valueOf(current.getDisposition()));
+                reread.put("resolution", reading.view());
+                events.save(OperationsCaseEvent.of(current, current.getLastRunId(), CaseEventActor.SYSTEM,
+                        CaseEventKind.CONTEXT_UPDATED, json(reread)));
+            }
+        }
         CaseInvestigator.Outcome outcome = investigator.investigate(current, current.getLastRunId());
         current = processor.recordInvestigation(current, current.getLastRunId(), outcome);
         boolean reply = outcome.kind() != CaseInvestigator.Kind.CONCLUDED

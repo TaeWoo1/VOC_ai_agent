@@ -108,7 +108,8 @@ class InquiryGoalDemoOrgSmokeIT {
                 .isEmpty();
 
         // ── pass 1: the one model call ──────────────────────────────────────────────────────────────────────
-        InquiryResolutionView first = resolutions.read(org, inquiryId);
+        CaseResolutionReader.Reading firstRead = resolutions.read(org, inquiryId);
+        InquiryResolutionView first = firstRead == null ? null : firstRead.view();
         int callsAfterFirst = CountingTransport.CALLS.get() - callsBefore;
 
         assertThat(callsAfterFirst).as("exactly one vendor call, as the manifest said").isEqualTo(1);
@@ -120,7 +121,8 @@ class InquiryGoalDemoOrgSmokeIT {
                 .isEqualTo(readingsBefore + 1);
 
         // ── pass 2: the reuse ───────────────────────────────────────────────────────────────────────────────
-        InquiryResolutionView second = resolutions.read(org, inquiryId);
+        CaseResolutionReader.Reading secondRead = resolutions.read(org, inquiryId);
+        InquiryResolutionView second = secondRead == null ? null : secondRead.view();
         assertThat(CountingTransport.CALLS.get() - callsBefore)
                 .as("the same sentence under the same contract is never bought twice").isEqualTo(1);
         assertThat(readings.count()).isEqualTo(readingsBefore + 1);

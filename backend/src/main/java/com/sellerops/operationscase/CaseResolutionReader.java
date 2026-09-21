@@ -71,12 +71,23 @@ public class CaseResolutionReader {
     }
 
     /**
+     * One read of the Customer Goal loop: the terminal walk, and the knowledge the assessment behind it could not
+     * find.
+     *
+     * <p>The gap is <b>reported, not decided on</b> — it is what the assessment established, handed on so the case
+     * can ask the seller for exactly it. Whether it is worth storing depends on what the walk concluded, and that
+     * is {@link OperationsCaseProcessor}'s call rather than the reader's.
+     */
+    public record Reading(InquiryResolutionView view, CaseKnowledgeGap gap) {
+    }
+
+    /**
      * The terminal reading for one inquiry, or null when nothing read it.
      *
      * <p>Never throws. A case in the middle of a run cannot fail because a resolution was unavailable, and an
      * unavailable resolution is an absence like any other — the case stays exactly where the rules put it.
      */
-    public InquiryResolutionView read(UUID orgId, UUID inquiryId) {
+    public Reading read(UUID orgId, UUID inquiryId) {
         CustomerGoalInterpretation reader = interpretation.get();
         if (reader == null || orgId == null || inquiryId == null) {
             return null;
@@ -97,7 +108,12 @@ public class CaseResolutionReader {
                     assessor.assess(orgId, inquiry, OrderFactLookup.STORED_ONLY);
             InquiryResolutionContext context = resolution.contextFor(orgId, inquiry, assessment.retrieved(),
                     OrderFactLookup.STORED_ONLY, clock.instant());
-            return InquiryResolutionView.of(InquiryGoalResolutionService.resolve(goals.get(), context));
+            InquiryResolutionView view =
+                    InquiryResolutionView.of(InquiryGoalResolutionService.resolve(goals.get(), context));
+            // The same assessment, read twice for two different questions: what the resolvers could settle, and
+            // what the seller would have to write down for them to settle more. One retrieval, one answer.
+            return new Reading(view, CaseKnowledgeGap.fromResolution(assessment.basis(), assessment.gap(),
+                    assessment.missingSubject()));
         } catch (RuntimeException unreadable) {
             log.info("case: 목표 해석을 읽지 못해 규칙 판단을 유지합니다 org={} 사유={}", orgId,
                     unreadable.getClass().getSimpleName());

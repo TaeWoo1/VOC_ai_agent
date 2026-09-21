@@ -48,15 +48,37 @@ public record CaseKnowledgeGap(String basis, String missingSubject, String sugge
         if (!AnswerBasisState.NO_ANSWER_BASIS.name().equals(prepared.answerBasis())) {
             return null;
         }
-        KnowledgeGapView gap = prepared.gap();
+        return of(prepared.answerBasis(), prepared.gap(), null, "DRAFT");
+    }
+
+    /**
+     * The gap the <b>deterministic resolution</b> established, read off the assessment it already made.
+     *
+     * <p>The resolution reaches {@code NEEDS_SELLER} exactly when the knowledge lanes searched and found nothing
+     * ({@code InquiryGoalResolvers.knowledge}) — the same fact the draft path reports as {@code NO_ANSWER_BASIS},
+     * and taken from the <b>same</b> {@code InquiryKnowledgeAssessor.Assessment}. So the two sources cannot
+     * disagree about what is missing; they differ only in which of them got there first.
+     *
+     * <p>This has to exist because a rule-decided case runs neither the investigation nor the draft. Before it, a
+     * case could recommend {@code ADD_KNOWLEDGE} on screen while carrying no gap — and every control that asks the
+     * seller for knowledge keys off the gap, so the recommendation had nowhere to go.
+     */
+    public static CaseKnowledgeGap fromResolution(AnswerBasisState basis, KnowledgeGapView gap,
+                                                  String missingSubject) {
+        return of(basis == null ? null : basis.name(), gap, missingSubject, "RESOLUTION");
+    }
+
+    /** One shape, whoever found it — so the case says one thing about what it is missing. */
+    private static CaseKnowledgeGap of(String basis, KnowledgeGapView gap, String missingSubject, String source) {
         String topic = gap == null ? null : gap.topic();
-        String subject = gap == null ? null
+        String subject = gap == null ? missingSubject
                 : gap.askedSubject() != null ? gap.askedSubject()
                 : gap.missingSubject() != null ? gap.missingSubject()
+                : missingSubject != null ? missingSubject
                 : topic != null ? KnowledgeTopic.valueOf(topic).labelKo() : null;
         String scope = gap == null || gap.productId() == null || topic != null ? "ORG" : "PRODUCT";
-        return new CaseKnowledgeGap(prepared.answerBasis(), subject, scope, topic,
-                gap == null ? null : gap.candidateId(), "DRAFT", gap == null ? null : gap.precedentMemoryId(),
+        return new CaseKnowledgeGap(basis, subject, scope, topic,
+                gap == null ? null : gap.candidateId(), source, gap == null ? null : gap.precedentMemoryId(),
                 gap == null ? null : gap.needs());
     }
 }
