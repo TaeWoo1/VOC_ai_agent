@@ -1588,3 +1588,40 @@ that one version is exempt, and an absent or unknown version is held to the curr
 
 The retired v1 fingerprint is kept, commented, in `contracts/inquiry-goal/v1/prompt-fingerprint.txt`: a fingerprint
 nobody can look up is a run nobody can identify.
+
+### 25.6 The v2 provenance smoke — six cases, prepared and not run
+
+`§25`'s fence is measured by a **second, smaller plan**: `provenance-smoke-v2`, six calls. The point is that it can
+fail in both directions, so four of the six exist to catch a regression rather than the defect.
+
+| case | source | what it answers |
+|---|---|---|
+| `G15` | committed fixture | the recorded failure — a problem report with no request. An `ACTION` here is invented. |
+| `R:4181864b` | **real message, durable store** | the gold's own legitimate `DIRECTLY_IMPLIED` `ACTION`. **If the fence is over-tight, this is where it shows.** |
+| `G23` | committed fixture | customer-stated `FALLBACK` with a verbatim condition — the relation fence must be untouched |
+| `R:0c582144` | **real message, durable store** | NO_GOAL, the row where inventing is most tempting |
+| `G07` | committed fixture | two `STATED` goals in one message — the one-inference cap must not touch it |
+| `G01` | committed fixture | the plainest `STATED` `INFORMATION` there is |
+
+No `STATE_READ` case: none of the six shapes needs one, and padding the set to satisfy a coverage list would be
+buying a model call to make a report look round. The plan declares the three outcome tokens it does owe.
+
+**What had to change to make a second smoke possible.** Inputs, the coverage claim and the required outcomes were
+all constants on `GoalSmokeInputs`, which is right with one smoke and wrong with two — a six-case run was `BLOCKED`
+on the fourteen-case run's coverage. They are now a `Plan`, and `contract-smoke-v1` is pinned unchanged by test.
+Separately, `GoalRunLauncher` re-assembled the default plan instead of reading the approved manifest: it could never
+send the *wrong* set (`input_set_fp` is bound) but it could only send the *default* one, which made every other
+approved plan unspendable. It now builds from `input_ids`, which every manifest has carried since the first one —
+**no new manifest field, and `GoalRunGuard.BOUND` is still the same fifteen.**
+
+**Dress rehearsal, `transport=FAKE`, zero vendor calls** — and it earned its keep. The first run returned
+`UNPARSEABLE` on exactly the two store-sourced rows: the fake now quotes the customer's message back (a constant
+cannot be a legal answer to two different messages once `evidence` must be a span), its hand-rolled escaper had only
+ever met strings somebody checked by eye, and **real customer messages contain newlines**. The defect was ours, in
+the fake, and the rehearsal is what said so. After the fix: 6 calls · 6 rows · `vendor_failures 0` ·
+`parse_or_contract_failures 0` · score `ok` · run-verify `ok` · every goal's `evidence` a verbatim span of its own
+message · `prompt_version customer-goal-interpreter/v2`.
+
+**Not run against a model.** A REAL preflight here is `BLOCKED` on `ENV_MISSING` for the key and the endpoint, and
+writes no manifest — which is the honest outcome, not an obstacle. The credential authorisations of the previous
+package were single-use and are spent; a real PREPARE needs a fresh one.
