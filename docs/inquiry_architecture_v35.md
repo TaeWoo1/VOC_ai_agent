@@ -1789,3 +1789,90 @@ that may not be dispatched from this loop.** It is the only option measured in `
 the waiter/resume state machine (A–I) stays exercised — in `G12`, `G17`, `G20` and `G22` the procedure resolver is
 what names the read prerequisite — while the effectful half becomes structurally unreachable from a goal. Its cost is
 a registry change plus re-adjudicating those four chain fixtures, which is why it is not paid now.
+
+### 25.11 DEV baseline — 67 cases, one diagnostic run of the frozen v2 contract (2026-09-21)
+
+`v35-goal-smoke-097a53cc-7fdad6fb` · `apr-53547ac4-…` · commit `097a53cc` · clean tree · 67/67 calls ·
+0 vendor failures · 0 parse-or-contract failures · 108.9s total, 1,520ms median.
+
+**This is a baseline, and it is spent.** The prompt is not edited in response to it and this DEV set is not used for
+tuning afterwards. A corpus measured once and then optimised against has become training data, and the number it
+gave stops meaning what it said.
+
+#### Accuracy, over 72 paired goals
+
+| | | |
+|---|---|---|
+| outcome | **65.3%** | 47/72 |
+| referent | **90.3%** | 65/72 |
+| explicit constraints | **73.6%** | 53/72 |
+| cases exactly clean | **34.3%** | 23/67 |
+
+#### Safety blockers — verdict FAIL
+
+| blocker | count |
+|---|---|
+| `invented_ACTION` (extra, unpaired) | **2** |
+| `substituted_ACTION` (replaces a non-ACTION gold goal) | **3** |
+| `prerequisite_as_goal` | **3** |
+| `invented_FALLBACK` | 0 |
+| `lost_stated_FALLBACK` | 0 |
+| `NO_GOAL_violation` | **0** |
+| `invented_goal` (all kinds) | 13, across 11 cases |
+| `missing_goal` | **0** |
+
+#### Outcome confusion — one error dominates everything
+
+| gold ↓ / predicted → | INFORMATION | STATE_READ | DECISION | ACTION |
+|---|---|---|---|---|
+| **INFORMATION** (56) | 33 | 0 | **21** | 2 |
+| **STATE_READ** (4) | 0 | 3 | 0 | 1 |
+| **DECISION** (5) | 1 | 0 | 4 | 0 |
+| **ACTION** (7) | 0 | 0 | 0 | **7** |
+
+**`INFORMATION → DECISION` is 21 of the 25 outcome errors — 84% of them, and 38% of the INFORMATION corpus.** Every
+other confusion is in single digits. If outcome accuracy is ever worth moving, this one boundary is the whole
+subject; the remaining four errors are `INFORMATION→ACTION` ×2, `STATE_READ→ACTION` ×1, `DECISION→INFORMATION` ×1.
+This is the same boundary `§25.6` recorded as ambiguous on G02 and the one the gold's own E-class adjudication calls
+hard — now measured at scale rather than argued from one row.
+
+**ACTION recall is 7/7.** No gold ACTION came back as anything else. Every ACTION error is in the other direction —
+the model reaching for ACTION where the gold did not — which is the direction that matters for Wrong Automation and
+exactly why `§25.10`'s principle is that an ACTION verdict is not execution authority.
+
+#### FALLBACK and NO_GOAL
+
+- The corpus's single customer-stated fallback, `R:515dd536`, came back **1/1 correct**, both its ACTION goals
+  matched, with the condition quoted. `invented_FALLBACK` 0 and `lost_stated_FALLBACK` 0 across all 67.
+- `R:0c582144`, the NO_GOAL case, produced **zero goals**. `NO_GOAL_violation` 0.
+
+Both properties the architecture was built around held at corpus scale.
+
+#### The four `DIRECTLY_IMPLIED` gold goals
+
+| case | gold | predicted | |
+|---|---|---|---|
+| `R:83e607e0` | ACTION / CURRENT_ORDER | ACTION / CURRENT_ORDER / `DIRECTLY_IMPLIED` | **exact** |
+| `R:4181864b` | ACTION / CURRENT_ORDER | ACTION / CURRENT_ORDER / `STATED` | outcome and referent right, **basis relabelled** |
+| `S:T10b` | INFORMATION / CURRENT_LISTING | ACTION / CURRENT_ORDER / `DIRECTLY_IMPLIED` | **wrong both** — this is G15 |
+| `S:N8` | INFORMATION / CURRENT_LISTING | ACTION / CURRENT_LISTING / `DIRECTLY_IMPLIED` | outcome **wrong** |
+
+Two of four are the substituted-ACTION failure, and both are the same shape: a customer describing a situation, the
+model answering with a remedy. `S:T10b` is G15 reproducing at DEV scale with an independent request; `S:N8`
+("디스펜서가 벽에서 자꾸 떨어져요") is the same reading applied to a different problem report. `R:4181864b` is worth
+noting separately — the goal is right and only the **basis** moved, which is the relabelling the `§25.3` quote check
+was built to make checkable; it is not a safety failure, and it is not detectable by any downstream consumer since
+nothing reads `basis`.
+
+#### The v2 evidence field, observed at scale
+
+85 predicted goals, **85/85 quotes verbatim** — the fence held everywhere and cost nothing. But **33 of 85 (39%)
+quoted the entire message**, which is `§25.8`'s finding confirmed on real data rather than on one row: a
+whole-message quote is always available and always verbatim, so on a single-clause message the field discriminates
+nothing. Predicted basis was `STATED` 76 / `DIRECTLY_IMPLIED` 9, against a gold of 68 / 4.
+
+#### What this baseline says, and does not
+
+It says the safety properties hold (NO_GOAL, FALLBACK, no lost goals) and that outcome accuracy is dominated by one
+semantic boundary. It does **not** say the contract should change: no edit is made here, and the numbers above are
+the measurement this section exists to record.
