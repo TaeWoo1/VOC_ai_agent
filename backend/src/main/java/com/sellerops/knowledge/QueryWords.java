@@ -77,6 +77,12 @@ final class QueryWords {
      */
     private static final List<String> ENDINGS = List.of(
             "습니다", "습니까", "합니다", "합니까", "됩니다", "입니다", "이에요", "예요",
+            // The ㄴ/은 interrogative, whose ㄴ is written INSIDE the stem's last syllable: 가능+한가요,
+            // 좋+은가요, 가능+한지. Its siblings 인가 · 런가 were already here and these were not, so a
+            // 하-verb question could not reach the same verb's 합니다 — 「가능한가요」 met 「가능합니다」
+            // nowhere, though 「가능하나요」 met it through 나요 below. Observed 2026-09-22 on a live
+            // Cafe24 inquiry (see #functionWithParticle for the rest of that measurement).
+            "한가요", "은가요", "한지",
             "니다", "니까", "나요", "가요", "까요", "세요", "어요", "아요", "네요",
             "는지", "은지", "인지", "인가", "런가");
 
@@ -91,7 +97,7 @@ final class QueryWords {
         if (word.isEmpty()) {
             return true;
         }
-        if (FUNCTION.contains(word)) {
+        if (FUNCTION.contains(word) || functionWithParticle(word)) {
             return true;
         }
         for (String ending : ENDINGS) {
@@ -99,6 +105,44 @@ final class QueryWords {
                 return word.length() - ending.length() <= 1;
             }
             if (word.equals(ending)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The shortest {@link #FUNCTION} entry that may be recognised with a particle attached.
+     *
+     * <p>Two syllables, and the bound is the whole safety of the rule. Composing the one-syllable
+     * entries with the particle list manufactures real words — 수+도 is 수도, 거+리 is 거리, 이+란 is
+     * 이란 — and dropping those would be a worse defect than the one this fixes. At two syllables the
+     * entries are interrogatives and generic subject nouns (언제 · 어디 · 얼마 · 상품 · 제품), and no
+     * particle turns one of those into something a seller writes a note about.
+     */
+    private static final int MIN_FUNCTION_STEM = 2;
+
+    /**
+     * A function word with a particle stuck to it — 언제+까지, 상품+은, 어디+에서.
+     *
+     * <p><b>Both halves were already declared grammar and nothing composed them.</b> 언제 is in
+     * {@link #FUNCTION} and 까지 is in {@link #PARTICLE_TAILS}, yet 「언제까지」 was a content word,
+     * because membership was tested on the raw token while every other rule in this file knows Korean
+     * attaches particles ({@link KnowledgeText#prefixMatch} exists for exactly that reason).
+     *
+     * <p><b>What it cost, measured on a live row (2026-09-22).</b> 「교환 신청은 언제까지 가능한가요?」
+     * against a demo org that holds 「교환·반품 기준 / 수령 후 7일 이내 … 교환과 반품이 가능합니다」:
+     * the content words were 교환 · 신청은 · 언제까지 · 가능한가요, of which only 교환 was reachable, so
+     * the absence gate read 2/14 = 0.14 and declared the library silent about a question its own policy
+     * answers. Two of the three unreachable words were grammar. The passage's own ranking was
+     * <b>1.000</b> — nothing was wrong with which passage won; the question never got to be asked.
+     *
+     * <p>Dropping an interrogative cannot admit a passage: it leaves the numerator alone unless the
+     * corpus happened to contain the interrogative too, and it never adds a term a passage can match.
+     */
+    private static boolean functionWithParticle(String word) {
+        for (int length = word.length() - 1; length >= MIN_FUNCTION_STEM; length--) {
+            if (FUNCTION.contains(word.substring(0, length)) && isParticleTail(word.substring(length))) {
                 return true;
             }
         }
