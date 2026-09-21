@@ -1625,3 +1625,62 @@ message · `prompt_version customer-goal-interpreter/v2`.
 **Not run against a model.** A REAL preflight here is `BLOCKED` on `ENV_MISSING` for the key and the endpoint, and
 writes no manifest — which is the honest outcome, not an obstacle. The credential authorisations of the previous
 package were single-use and are spent; a real PREPARE needs a fresh one.
+
+### 25.7 The blocker could not see a substituted ACTION (2026-09-21)
+
+The six-case v2 run (`v35-goal-smoke-35baa4c2-44fc582a`, 6 calls, 0 vendor failures, 0 parse failures) scored
+**PASS** with `invented_ACTION: 0`. It should not have.
+
+`invented_ACTION` counts goals left in `extra` — predictions **unpaired** after assignment. On `G15` the model
+returned *one* goal, an `ACTION`, in place of the one `INFORMATION` goal the gold expects. One predicted and one
+gold, so they pair, so `extra` is empty. The invented action scored as an outcome mismatch and a referent mismatch,
+and the headline blocker read zero while the model was still acting on a message that requested nothing.
+
+**This is the blind spot the headline metric exists to close, running in the opposite direction.** `INVENTED GOAL
+RATE` was introduced because recall and accuracy cannot see a goal too *many*; it turns out it cannot see the right
+goal *replaced*.
+
+`substituted_ACTION` is now a sixth registered blocker: a predicted `ACTION` paired with a settled gold goal whose
+outcome is not `ACTION`. It is deliberately **separate** from `invented_ACTION` — they are different failures, and
+widening the old counter would silently reinterpret every number already recorded against it. Adjudication rows are
+excluded, because a gold outcome of `null` does not disagree with anything.
+
+**Replay of both stored runs, zero model calls:**
+
+| run | prompt | `invented_ACTION` | `substituted_ACTION` | verdict |
+|---|---|---|---|---|
+| `…07530e82-b3b0a9c5` (14 cases) | v1 | 1 (`G15`) | 0 | FAIL — **unchanged** |
+| `…35baa4c2-44fc582a` (6 cases) | v2 | 0 | **1** (`G15`) | PASS → **FAIL** |
+
+So the v1 number was **not** undercounted: the substitution shape did not occur under v1, where the invented action
+arrived *beside* the correct goal. The undercount was specific to the v2 run, and to the shape the cap produced.
+
+### 25.8 Should `evidence` be allowed to be the whole message? — measured, not decided
+
+On `G15` the model quoted the **entire message**, which is always verbatim and always available, so the quote
+requirement did no discriminating work. Four candidate policies, measured against the 66 gold messages / 72 goals
+(all 66 join to a stored message). "Forces an arbitrary quote" = the policy demands a proper sub-span of a message
+that offers no boundary to pick one at, which would make `evidence` lie about where the goal came from.
+
+| policy | applies to | forces an arbitrary quote | bites `G15`? |
+|---|---|---|---|
+| **P0** whole message allowed (today) | 0 goals | 0 | no |
+| **P1** always a proper sub-span | 72 goals | **35 / 72 (49%)** | yes |
+| **P2p** sub-span if >1 **sentence** (punctuation only, language-neutral) | 29 goals | **0** | **no** — `G15` is one sentence |
+| **P2c** sub-span if >1 **clause** (closed list of Korean connective endings) | 37 goals | **0** | yes |
+| **P5** sub-span when `basis = DIRECTLY_IMPLIED` | 4 goals | **2 / 4 implied goals** | yes |
+
+**The trade-off is a fork, not a slider.** The language-neutral rule (P2p) costs nothing and does not reach `G15`,
+because that message is a single sentence containing two clauses. The rule that reaches `G15` (P2c) also costs
+nothing on the gold — but it puts a **Korean morphology lexicon inside the contract**, which is the domain tuning
+this component was built to do without and which no test can check independently of a model. P5 targets the risky
+basis and damages the smallest, most important population: 2 of the 4 inferred gold goals.
+
+**And none of them makes the substitution impossible.** Under P2c the model must quote a clause; quoting
+"한 개만 왔어요" for an `ACTION` goal still passes every rule. What a sub-span policy buys is that the
+whole-message dodge becomes a refusal and the surviving claim is narrower — a benefit that **cannot be measured
+here**, because measuring it means asking a model. The cost column above is measured; the benefit column is not,
+and that asymmetry is the decision.
+
+The existing distinctness rule already forces proper sub-spans on 11 goals across the 5 multi-goal messages, so any
+new policy only adds reach on single-goal messages. **No contract change was made.**

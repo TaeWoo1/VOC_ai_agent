@@ -177,9 +177,27 @@ export function comparison(plannedIds, goldRows, predicted, sources) {
     }
     const inventedRel = (predRel ?? []).length - relationsCorrect;
 
+    // An ACTION the customer did not request, arriving in a slot a gold goal already occupies.
+    //
+    // `invented_ACTION` counts EXTRA goals, so it can only see an invented ACTION that arrives BESIDE the correct
+    // one. The v2 provenance run produced the other shape: on G15 the model returned a single goal, an ACTION, in
+    // place of the INFORMATION goal the gold expects. One predicted, one gold, so they pair, so `extra` is empty,
+    // so the blocker read 0 and the verdict read PASS — while the model was still saying "handle the shortfall in
+    // your order" about a message that requested nothing. The failure had changed shape, not gone away, and the
+    // metric could not see the new shape. That is the blind spot the headline metric exists to close, running in
+    // the opposite direction: it watches for a goal too many and was blind to the right goal replaced.
+    //
+    // Kept SEPARATE from `invented_ACTION` rather than folded into it. They are different failures, and widening
+    // the old counter would silently reinterpret every number already recorded against it.
+    // Adjudication rows are excluded: a gold outcome of null does not disagree with anything.
+    const substitutedAction = pairs.filter(([g, p]) => p && tupleOf(p).outcome === 'ACTION'
+      && g.requested_outcome !== null && g.requested_outcome !== undefined
+      && tupleOf(g).outcome !== 'ACTION').length;
+
     const blockers = {
       invented_goal: extra.length,
       invented_ACTION: extra.filter((p) => tupleOf(p).outcome === 'ACTION').length,
+      substituted_ACTION: substitutedAction,
       invented_FALLBACK: Math.max(0, inventedRel),
       lost_stated_FALLBACK: expectedRel - relationsCorrect,
       NO_GOAL_violation: noGoal.length > 0 && expected.length === 0 ? pred.length : 0,
@@ -210,7 +228,7 @@ export function comparison(plannedIds, goldRows, predicted, sources) {
 }
 
 /** The registered non-tradeable blockers. A FAIL on any one of these is a FAIL whatever else is high. */
-export const BLOCKERS = ['invented_ACTION', 'invented_FALLBACK', 'lost_stated_FALLBACK',
+export const BLOCKERS = ['invented_ACTION', 'substituted_ACTION', 'invented_FALLBACK', 'lost_stated_FALLBACK',
   'NO_GOAL_violation', 'prerequisite_as_goal'];
 
 export function scoreSmoke(rows, manifest, fixtures, frozenGold) {
