@@ -26,8 +26,9 @@ export const COPY = {
   firstCheck: "첫 확인 중",
   lastCheckFailed: "마지막 확인 실패",
   reconnect: "재연결",
-  observing: "관찰 중",
-  view: "보기",
+  // 「관찰 중」 and 「보기」 lived here for the one-line repeated-problem signal. That line now draws the problems
+  // themselves, and their lifecycle word comes from the extractor (`lifecycleLabelKo`) rather than from here —
+  // a second copy of that word in this table is the one that goes stale when the extractor's vocabulary moves.
   running: "운영 중",
   paused: "일시정지됨",
   off: "고객 운영 관리 꺼짐",

@@ -69,7 +69,40 @@ function ops(): OperationsHome {
     },
     problems: {
       decidable: 1, observing: 1,
-      rows: [{ issue: { id: "iss-1", title: "포장 파손", change: { kinds: ["SURGE"], labelsKo: ["급증"], highSurge: true, surgeWindowCount: 4, surgeBaselineWeekly: 1 } }, context: {} }],
+      rows: [
+        {
+          issue: {
+            id: "iss-1", title: "포장 파손", severity: "HIGH", lifecycleState: "ACTING", lifecycleLabelKo: "조치 중",
+            change: { kinds: ["SURGE"], labelsKo: ["급증"], highSurge: true, surgeWindowCount: 4, surgeBaselineWeekly: 1 },
+          },
+          context: {
+            issueId: "iss-1", aspect: "포장",
+            evidence: {
+              totalEvidence: 9, unattributedEvidence: 0,
+              byProduct: [
+                { productId: "p-1", productName: "컵 뚜껑 12oz", evidenceCount: 9, productReviews: 120, firstOccurredOn: "2026-08-01", lastOccurredOn: "2026-09-18" },
+              ],
+            },
+          },
+        },
+        // No trend fired on this one — the ordinary case for a problem that repeated steadily rather than
+        // suddenly, and the one the old single line could not name at all.
+        {
+          issue: {
+            id: "iss-2", title: "접착 부족", severity: "NORMAL", lifecycleState: "OBSERVING", lifecycleLabelKo: "관찰 중",
+            change: { kinds: [], labelsKo: [], highSurge: false, surgeWindowCount: 0, surgeBaselineWeekly: 0 },
+          },
+          context: {
+            issueId: "iss-2", aspect: "접착",
+            evidence: {
+              totalEvidence: 16, unattributedEvidence: 0,
+              byProduct: [
+                { productId: "p-2", productName: "선바로 전선몰딩", evidenceCount: 16, productReviews: 1761, firstOccurredOn: "2025-07-29", lastOccurredOn: "2026-08-19" },
+              ],
+            },
+          },
+        },
+      ],
     },
     collection: [],
     prepared: { reviewRepliesApproved: 0, inquiryDraftsReady: 0, rows: [] },
@@ -227,10 +260,61 @@ describe("CustomerOpsHome", () => {
     expect(screen.queryByTestId("work-flow-card")).toBeNull();
   });
 
-  it("repeated problems are one quiet line, not a task", async () => {
+  /*
+   * The old contract here was 「one quiet line」: a single count plus, at most, the title of whichever problem
+   * happened to carry a trend label. It is rewritten rather than deleted because what it was protecting — that a
+   * repeated problem is NOT drawn as a task — is still true and is still asserted below. What changed is that the
+   * line named nothing a seller could act on, and that the count it printed was a sum labelled as one of its parts.
+   */
+  it("names each repeated problem: the problem, the product, the evidence pair, and a way in", async () => {
     draw();
-    expect(await screen.findByText(/포장 파손 급증/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "보기" })).toHaveAttribute("href", "/memory/iss-1");
+    const section = await screen.findByRole("region", { name: "반복 문제" });
+
+    // The problem itself, linked to its own workspace — not to the list.
+    expect(within(section).getByRole("link", { name: /포장 파손/ })).toHaveAttribute("href", "/memory/iss-1");
+    expect(within(section).getByRole("link", { name: /접착 부족/ })).toHaveAttribute("href", "/memory/iss-2");
+
+    // Why it is worth a look: the extractor's own words, never ours.
+    expect(section).toHaveTextContent("조치 중");
+    expect(section).toHaveTextContent("급증");
+
+    // The product and the pair, never a rate.
+    expect(section).toHaveTextContent("선바로 전선몰딩");
+    expect(section).toHaveTextContent("리뷰 1,761건 중 16건이 이 문제를 말했습니다");
+    expect(section).not.toHaveTextContent("%");
+  });
+
+  it("states the two populations as the server's sentence, and never adds them", async () => {
+    draw();
+    const section = await screen.findByRole("region", { name: "반복 문제" });
+
+    // decidable = 1, observing = 1. The old line printed 「관찰 중 2」 — a sum under one part's name.
+    expect(section).toHaveTextContent("지금 판단이 필요한 반복 문제가 1건 있습니다.");
+    expect(section).not.toHaveTextContent("관찰 중 2");
+  });
+
+  it("dates a problem no trend fired on, so a stale pattern cannot read as a current one", async () => {
+    draw();
+    const section = await screen.findByRole("region", { name: "반복 문제" });
+
+    // iss-2 carries no change label; without the span nothing on the row says when it last happened.
+    expect(section).toHaveTextContent("근거 기간 2025-07-29 ~ 2026-08-19");
+    // iss-1 does carry one, and does not get a second trend statement beside it.
+    expect(section).not.toHaveTextContent("근거 기간 2026-08-01");
+  });
+
+  it("is still not a task: no verb, no button, and it sits below 확인 필요", async () => {
+    const { container } = draw();
+    const section = await screen.findByRole("region", { name: "반복 문제" });
+
+    expect(within(section).queryByRole("button")).toBeNull();
+    expect(section).not.toHaveTextContent("검토");
+    expect(section).not.toHaveTextContent("답변");
+
+    const list = container.querySelector('section[aria-label="확인 필요"]');
+    expect(list).not.toBeNull();
+    // Node.DOCUMENT_POSITION_FOLLOWING — the problems come after the work.
+    expect(list!.compareDocumentPosition(section) & 4).toBeTruthy();
   });
 
   it("applies only where the job is open and has something to say", () => {

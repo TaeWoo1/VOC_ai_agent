@@ -3,7 +3,9 @@ import { Link } from "react-router-dom";
 import { Btn } from "../ui/Btn";
 import { DecisionList, DecisionRow } from "../ui/DecisionRow";
 import { WorkFlowCard } from "../ui/WorkFlowCard";
+import { RepeatedProblemList } from "../home/RepeatedProblemList";
 import { api } from "../../lib/apiClient";
+import { problemLine } from "../../lib/operationsHome";
 import { dataTypeKo, kstClock } from "../../lib/customerOperations";
 import { COPY, DRAFT_UNSENT, channelShort, failureShort, kstLongDate, waitLabel } from "../../lib/copy/customerOps";
 import { mergeHomeWork, reasonCounts } from "../../lib/homeWork";
@@ -21,11 +23,13 @@ export function coHomeApplies(co: CustomerOperationsHome | null | undefined): co
 }
 
 /**
- * <b>Home (Customer Operations v3.1)</b>: a title line, 「자동 확인 → 내 확인 필요」, the one 「확인 필요」 list, and one
- * quiet line about repeated problems. Nothing here decides, sends or resolves — every row opens the screen that does.
+ * <b>Home (Customer Operations v3.1)</b>: a title line, 「자동 확인 → 내 확인 필요」, the one 「확인 필요」 list, and
+ * 「반복 문제」 — the patterns, stated below the work and never added to it. Nothing here decides, sends or resolves;
+ * every row opens the screen that does.
  *
- * `ops` is the Operations Home read AgentHome already made; the queue is read here because the list needs more rows
- * than the conversation's brief ever did.
+ * `ops` is the Operations Home read AgentHome already made — it carries the repeated problems too, which is why this
+ * Home can name them without a read of its own. The queue is read here because the list needs more rows than the
+ * conversation's brief ever did.
  */
 export function CustomerOpsHome({
   co,
@@ -199,7 +203,7 @@ export function CustomerOpsHome({
         </section>
       ) : null}
 
-      <ObservingLine ops={ops} />
+      <RepeatedProblems ops={ops} />
     </div>
   );
 }
@@ -305,23 +309,50 @@ function warningLines(co: CustomerOperationsHome, now: Date): React.ReactNode[] 
   return lines;
 }
 
-/** 「관찰 중 2 · 포장 파손 급증」 — repeated problems are not tasks, so they get one line and no button. */
-function ObservingLine({ ops }: { ops: OperationsHome | null | undefined }) {
+/**
+ * <b>반복 문제 — what repeated, on which product, how often, and why it is worth a look.</b>
+ *
+ * <p>This used to be one grey line: 「관찰 중 {decidable + observing}」 plus, if any problem happened to have a trend
+ * label, that one problem's title. Three things were wrong with it, and only the third is about layout.
+ *
+ * <ul>
+ *   <li><b>It printed a sum under one of its parts' names.</b> {@code decidable} and {@code observing} are two
+ *       populations the server returns separately and documents as un-addable; adding them and labelling the total
+ *       「관찰 중」 told a seller with one problem 조치 중 and nineteen 관찰 중 that twenty were 관찰 중.</li>
+ *   <li><b>Its link went to the list, not to the problem</b>, whenever no trend fired — which is the ordinary case
+ *       for a problem that repeated steadily rather than suddenly.</li>
+ *   <li><b>It named no product, no evidence and no count.</b> On the org this was measured against, eighteen pieces
+ *       of evidence for one problem on one product rendered as 「관찰 중 20 · 보기」.</li>
+ * </ul>
+ *
+ * <p>The rows were already on the wire — {@code ops.problems} is the Operations Home read AgentHome makes anyway,
+ * already bounded to three, already ordered decidable-first by the server, already carrying each problem's
+ * per-product evidence. Nothing new is read, derived or judged here; the same rows the other Home draws are drawn
+ * here, by the same component.
+ *
+ * <p><b>Still not a task.</b> It sits below 「확인 필요」, has no verb and no button, and states its two counts as the
+ * server's own sentence ({@code problemLine}) rather than as a workload. A repeated problem is a pattern over many
+ * reviews, not another customer waiting — that separation is the reason one row can stand for eighteen of them
+ * without the Home saying the same thing twice.
+ */
+function RepeatedProblems({ ops }: { ops: OperationsHome | null | undefined }) {
   const problems = ops?.problems;
   if (!problems || problems.rows.length === 0) return null;
-  const total = problems.decidable + problems.observing;
-  const moving = problems.rows.find((row) => row.issue.change.labelsKo.length > 0);
-  const to = moving ? `/memory/${moving.issue.id}` : "/memory";
   return (
-    <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-1 pt-1 text-sm text-muted">
-      <span aria-hidden="true" className="h-[7px] w-[7px] shrink-0 rounded-full bg-[#D97706]" />
-      <span className="break-keep">
-        {COPY.observing} <b className="font-semibold text-ink">{total.toLocaleString("ko-KR")}</b>
-        {moving ? ` · ${moving.issue.title} ${moving.issue.change.labelsKo[0]}` : ""}
-      </span>
-      <Link to={to} className="ml-auto rounded font-semibold text-muted hover:text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
-        {COPY.view}
-      </Link>
-    </p>
+    <section aria-label="반복 문제">
+      <div className="mb-3 mt-8 flex items-center gap-2">
+        <h2 className="text-[17px] font-bold tracking-tight text-ink">반복 문제</h2>
+      </div>
+      <p className="break-keep px-1 leading-relaxed text-ink">{problemLine(problems)}</p>
+      <RepeatedProblemList rows={problems.rows} />
+      <p className="mt-2 px-1 text-sm">
+        <Link
+          to="/memory"
+          className="font-medium text-brand-700 underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+        >
+          반복 문제 전체 보기
+        </Link>
+      </p>
+    </section>
   );
 }

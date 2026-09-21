@@ -6,10 +6,9 @@ import {
   reviewWorkLine,
   watchLine,
 } from "../../lib/operationsHome";
-import { repeatLine } from "../../lib/repeatedIssue";
-import { SEVERITY_LABEL_KO, changeBadges } from "../../lib/reviewIssuesView";
+import { RepeatedProblemList } from "./RepeatedProblemList";
 import { ratingLabel } from "../../lib/reviewRecord";
-import type { IssueSeverity, OperationsHome } from "../../lib/types";
+import type { OperationsHome } from "../../lib/types";
 
 /**
  * <b>Operations Home — the four things a seller should see before they ask anything.</b>
@@ -76,44 +75,8 @@ export function OperationsAreas({ home }: { home: OperationsHome }) {
       {/* 2 — 반복 문제 */}
       <Area title="반복 문제" to="/memory" linkLabel="고객운영 메모리 열기">
         <p className="break-keep leading-relaxed text-ink">{problemLine(problems)}</p>
-        {problems.rows.length > 0 ? (
-          <ul className="mt-3 divide-y divide-line rounded-xl border border-line">
-            {problems.rows.map(({ issue, context }) => {
-              const badges = changeBadges(issue.change);
-              const top = context.evidence.byProduct[0];
-              const severity =
-                issue.severity in SEVERITY_LABEL_KO
-                  ? SEVERITY_LABEL_KO[issue.severity as IssueSeverity]
-                  : null;
-              return (
-                <li key={issue.id} className="space-y-1 p-3">
-                  <Link
-                    to={`/memory/${issue.id}`}
-                    className="break-keep font-semibold text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-                  >
-                    {issue.title}
-                    <span className="ml-1 text-brand-700" aria-hidden="true">›</span>
-                  </Link>
-                  <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted">
-                    <span>{issue.lifecycleLabelKo}</span>
-                    {severity ? <span>심각도 {severity}</span> : null}
-                    {/* The trend judgement is the extractor's; the Home prints its word, not its own. */}
-                    {badges.map((badge) => (
-                      <span key={badge.kind}>{badge.labelKo}</span>
-                    ))}
-                  </p>
-                  {/* The denominator travels with its numerator, exactly as on the problem's own
-                      screen — and as a pair, never a rate. */}
-                  {top ? (
-                    <p className="break-keep text-sm tabular-nums text-muted">
-                      {top.productName ?? "이름이 확인되지 않은 상품"} · {repeatLine(top)}
-                    </p>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        ) : null}
+        {/* The rows are shared with 고객 운영 관리's Home — see RepeatedProblemList for why there is one renderer. */}
+        <RepeatedProblemList rows={problems.rows} />
       </Area>
 
       {/*
